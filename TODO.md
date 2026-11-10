@@ -1467,20 +1467,6 @@ it; git history is the record of completed work.
   shares, and which drops and counts each one no connection expects (design-system.md "What
   a domain sends the domain service"). A count is one integer per domain, but the time
   each message costs the pid and the service is not bounded. Bound what a domain can make the pid and the service spend.
-* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`ended/3`,
-  `restart/2`, `liberx/system/dom_life.c` `erx_dom_retire_record`): a configured domain
-  restarts as its end arrives, while the ended domain's record still holds a slot of the
-  library's view and counts against its principal's `domains` and memory (`carved`), all
-  freed only at the retire, which waits for every peer to answer `connection_down`. So a
-  configured domain with restarts left that had an introduced connection is refused its
-  restart (`dom_core.c` `dom_check_room`) unless the library's view has a second free
-  domain slot and connection row and its principal room for two domains' count and memory,
-  and nothing tries again. Restarting at the retire instead would let any peer that never
-  answers postpone the restart for good, against a domain depending on nothing outside
-  itself but the kernel; the "domains, retirement" item below is the same survivor
-  holding the record. Decide what an ended record holds against its principal before its
-  retire (D16 keeps only each connection's child budget alive for the peers), and restart
-  against that.
 * [Low] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: configured domains
   always get the default 10 s boot timeout; the manifest has no field for it.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names
@@ -1550,25 +1536,12 @@ it; git history is the record of completed work.
   checkpoint covers only the shape refusals that come before the library. Add them to the
   end-to-end create, start, stop, `domain_ended` and retire cell once the library's boot
   view exists (DL2d).
-* [Medium] domain library, `liberx/system/dom_core.c` (`erx_dom_plan_record`): the flat
-  `service_grants` list has no inverse, since `erx_dom_t` keeps no grant, so a retire or
-  restart of a configured domain cannot take its grant back, and a restarted configured
-  domain would count its grant twice. A principal's `domains` and `carved` are given back
-  by `erx_dom_retire_record` from the record's `carved`; derive the grants from the records
-  too (store the grant in the record), which deletes `service_grants` and its capacity check. Also: the record fills only the plan-made fields and leaves
-  the capability fields of a reused slot for the applier, so one function should write
-  the whole record from the plan and the apply's made objects; dropping `const` on the
-  view's tables lets every planner write them, so give the record functions their own
-  writable tables and keep the planners' view const; and a stale partial-boot plan (no
-  connection number) passes record's re-checks, which a view generation stamped into
-  each plan would refuse whole. The host planner records each plan at once and meets
-  none of these. Found by MF1b's review.
-  `apply_install` takes its rights from an `erx_dom_grants` row but is neither so named nor
-  checked by a rule.
 * [Medium] domain library, `test/guest/native_domain`: no case fails a step after it made its
   object (a bell's bind, a group's configure), and none checks that the root's handle table
   returns to its starting occupancy after a retire or an undo, which would catch a handle the
   library forgot to close.
+* [Low] domain library, `liberx/system/dom_apply.c` (`apply_install`): it takes its rights
+  from an `erx_dom_grants` row but is neither so named nor checked by a rule.
 * [Medium] domain library, `liberx/system/dom_core.c` (`erx_dom_plan_record`): the record
   fills only the plan-made fields and leaves the capability fields of a reused slot for
   the applier, so one function should write the whole record from the plan and the
@@ -2567,12 +2540,12 @@ it; git history is the record of completed work.
   (`MediumBoot::MACHINE`, 768 MiB, room for two), and init sends its report before any `-eval`
   (edit 65), so nothing delays it. Grow the machine or shrink the domains, give the suite an
   `erx_domain:create/1` of a third domain, and give the delayed case a way to hold the report.
-* [Low] Domain service, `erx_domain_srv.erl` `retire_ended/1` and `act/2`: an ended domain
-  is retired only when `Lib:retire/1` answers ok, and a connection is disconnected only when
-  `Lib:disconnect/1` does; a refusal of either but retire's `ebusy` is only retried at the next event,
-  so a create of that domain waiting for its retire (A4) never answers. `retire/1` documents
-  `ebusy` alone, before the connections are disconnected; decide whether another refusal ends the
-  service, as `close_side/4` does on `noproc`, or answers the create.
+* [Low] Domain service, `erx_domain_srv.erl` `retire/2` and `act/2`: a refusal of
+  `Lib:retire/1` (a system connection whose disconnect was refused, or counts that do not
+  hold the domain, each a bug) is only logged, leaving the record in the library, and a
+  refusal of `Lib:disconnect/1` is only logged, leaving the connection's objects and any
+  remains; nothing tries again. Decide whether either ends the service, as `close_side/4`
+  does on `noproc`.
 * [Medium] Runtime, `erx_connections.erl` `records/3`: the agent serves every record in
   turn and waits inside a finish, which may pause on a process of the domain at its queue
   quota (design-runtime, "Closing"), the agent itself included when a peer handed its pid
@@ -3743,6 +3716,21 @@ to the corpus and follow rc
   also hold edit 66 for every operation by construction. Related: a pid with a creation
   newer than a connected entry's, a later domain while the asker has not yet taken the
   ended one's `connection_down`, gets `noproc` where stock would give `noconnection`.
+* [High] domains, the funnel's sender rule (`liberx/erx_funnel.c` `sender_rule`,
+  docs/design-domains.md "The funnel", step 4): a link or monitor of a pid of an ended
+  domain, sent once a later domain of its name is connected, ends the connection. The later
+  domain's funnel finds the target dead and has ERTS answer noproc, and ERTS's answer
+  (`PAYLOAD_EXIT`, or `PAYLOAD_MONITOR_P_EXIT` from `erts_dsig_send_m_exit`) names the dead
+  pid as its sender, as stock ERTS does; that pid carries the ended domain's id, so the
+  asker's sender rule finds a sending pid of another creation and refuses the frame as
+  malformed. A client that keeps a monitor on a service domain's process and monitors it
+  again after the service's domain was replaced is enough. Seen in the system_domain
+  suite's later-domain step with a monitor in place of its message. Two fixes: the asking
+  runtime answers a link or monitor of a pid whose creation is not its connected entry's
+  itself, with noproc and no frame, as stock ERTS does for its own node's earlier runs
+  (recommended: no rule changes, and nothing a stock test sees); or the sender rule admits,
+  in those two answers alone, a pid of the lane's node name with an earlier id, which lets a
+  later domain report deaths of its name's ended domains. The user decides.
 * [Low] kernel ABI generator, `tools/lib/erx/abi_model.rb`: a private
   layout stays out of every public declaration by three separate
   refusals (embedding as a field, as a tail, and projection), so a new

@@ -27,7 +27,9 @@
  * domain's drain answers with DOWN noproc, then floods it with LINKs to that
  * pid without reading their answers, which ends the domain's port. After each end the domain
  * is disconnected and retired, and the pool and the root's handle table hold
- * what they held before. Two running domains are connected and disconnected.
+ * what they held before. Two running domains are connected and disconnected,
+ * then end and are retired while connected, which leaves their outer
+ * budgets as remains until the disconnect destroys them.
  * Then a connect, and a create, fails at each step in turn, before the step
  * and once it has made its object, and is undone, leaving the pool, the
  * handles and the view as they were. Each case says one line, which
@@ -82,6 +84,8 @@ static erx_dom_principal_t principals[1];
 static erx_dom_principal_held_t principals_held[1];
 static erx_dom_handles_t handles[DOMAINS];
 static erx_dom_link_handles_t links[CONNECTIONS];
+static erx_dom_remains_t remains[2 * CONNECTIONS];
+static uint64_t remains_held[2 * CONNECTIONS];
 static erx_dom_file_t files[ERX_PACK_ENTRIES_MAX];
 static erx_dom_lib_t lib;
 static erx_dom_spec_t request;
@@ -199,12 +203,16 @@ library_up(void)
 	principals[0] = (erx_dom_principal_t){ .number = PRINCIPAL, .memory = LIBRARY_MEMORY, .domains_max = DOMAINS,
 	    .share = share, .default_limits = limits_default(), .ceiling_limits = limits_default() };
 	lib.view = (erx_dom_view_t){ .domains = domains, .max_domains = DOMAINS, .connections = connections,
-	    .max_connections = CONNECTIONS, .principals = principals, .nprincipals = 1, .files = files,
+	    .max_connections = CONNECTIONS, .remains = remains, .max_remains = 2 * CONNECTIONS,
+	    .principals = principals, .nprincipals = 1, .files = files,
 	    .nfiles = ERX_PACK_ENTRIES_MAX, .native_limits = limits_default(), .system_grant = share,
 	    .system_lane = ERX_LANE_MIN, .next_connection = 1,
 	    .system_space = ERX_FIASCO_TASK_ROOT };
 	lib.handles = handles;
 	lib.links = links;
+	lib.remains_held = remains_held;
+	for (uint32_t row = 0; row < 2 * CONNECTIONS; row++)
+		remains_held[row] = ERX_CAP_NULL;
 	lib.host = "erxos";
 	lib.host_len = 5;
 	lib.cap_limit = 64;
@@ -1900,6 +1908,17 @@ rows_used(void)
 	return (used);
 }
 
+/* The remains rows the view holds: retired domains a connection still names. */
+static uint32_t
+remains_used(void)
+{
+	uint32_t used = 0;
+
+	for (uint32_t row = 0; row < 2 * CONNECTIONS; row++)
+		used += remains[row].id != 0;
+	return (used);
+}
+
 /* One case: its domain's run, with the pool as it was before. */
 static void
 case_end(const char *name, const erx_dom_spec_t *spec, run_action_t action, erx_dom_end_kind_t kind,
@@ -2009,7 +2028,16 @@ case_link(uint32_t program)
 	say_count("link_undo_steps", steps);
 	say_case("link_undo", passed && steps == 2 * ERX_DOM_LINK_STEPS);
 
-	passed = waiters_end(ids, system);
+	/*
+	 * Both end and are retired while their connection stands: each outer
+	 * budget stays as remains, and the disconnect destroys both with it.
+	 */
+	passed = erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, &linked) == ERX_OK &&
+	    passed;
+	passed = waiters_end(ids, system) && passed;
+	say_count("link_remains", remains_used());
+	passed = passed && remains_used() == 2 && erx_dom_lib_disconnect(&lib, linked.number) == ERX_OK &&
+	    remains_used() == 0;
 	say_count("link_ended", passed);
 	say_count("free_pages_lost", before - erx_fiasco_vm_free_pages());
 	say_count("handles_left", handles_used() - held);

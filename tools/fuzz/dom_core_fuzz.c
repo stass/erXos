@@ -125,6 +125,7 @@ typedef struct fuzz_input {
 	/* The entries after creation: their records, rows and arguments. */
 	erx_dom_t		doms[3];
 	erx_dom_connection_t	conns[3];
+	erx_dom_remains_t	remains[6];
 	uint32_t		a, b, a_reads, b_reads, number, next;
 	uint64_t		label;
 	erx_fault_t		record;
@@ -143,7 +144,9 @@ typedef struct fuzz_input {
  * is its two carves, last first. A device's give names a living holder
  * and a device no living domain holds, passes its check, sizes each window
  * by its range, and undoes every object it made; a principal's record
- * starts with no counts.
+ * starts with no counts. A retire destroys the outer budget only when no
+ * row names the domain and otherwise lists a free remains row, and a
+ * disconnect destroys remains only with the last row naming their id.
  */
 /*
  * The configured row as the boot view holds it: its name, arguments and
@@ -169,15 +172,30 @@ fuzz_row_strings(fuzz_input_t *in)
 	row->env = in->strings + row->args_len;
 }
 
+/* The rows of the three that name id. */
+static uint32_t
+fuzz_naming(const erx_dom_connection_t *conns, uint32_t id)
+{
+	uint32_t count = 0;
+
+	for (uint32_t index = 0; index < 3; index++)
+		if (conns[index].number != 0 && (conns[index].a == id || conns[index].b == id))
+			count++;
+	return (count);
+}
+
 static void
 fuzz_life(const fuzz_input_t *in, bool connect)
 {
-	erx_dom_principal_t held = { .number = 1 };
+	/* Holds every record's and remains' bytes, so retires and disconnects can succeed. */
+	erx_dom_principal_t held = { .number = 1, .domains = 3, .carved = 64 * FUZZ_MIB };
 	erx_dom_t doms[3];
 	erx_dom_connection_t conns[3];
+	erx_dom_remains_t remains[6];
 	erx_dom_device_entry_t devs[2];
 	erx_dom_view_t view = { .domains = doms, .max_domains = 3,
 	    .connections = conns, .max_connections = 3,
+	    .remains = remains, .max_remains = 6,
 	    .next_connection = in->next, .system_space = 4000,
 	    .devices = devs, .device_records = in->dev_records,
 	    .ndevices = 2, .principals = &held, .nprincipals = 1 };
@@ -194,6 +212,7 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 	/* The library writes its own records, so a flag is always a bool. */
 	memcpy(doms, in->doms, sizeof(doms));
 	memcpy(conns, in->conns, sizeof(conns));
+	memcpy(remains, in->remains, sizeof(remains));
 	for (uint32_t index = 0; index < 3; index++) {
 		memcpy(&raw, &conns[index].closing, 1);
 		conns[index].closing = (raw & 1) != 0;
@@ -240,19 +259,33 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 			abort();
 		return;
 	}
-	if (erx_dom_plan_disconnect(&view, in->number, &teardown) == ERX_OK &&
-	    (teardown.index >= 3 || in->number == 0 ||
-	    conns[teardown.index].number != in->number ||
-	    teardown.ndestroy == 0 || teardown.ndestroy > 2))
-		abort();
+	if (erx_dom_plan_disconnect(&view, in->number, &teardown) == ERX_OK) {
+		if (teardown.index >= 3 || in->number == 0 ||
+		    conns[teardown.index].number != in->number ||
+		    teardown.ndestroy == 0 || teardown.ndestroy > 2 ||
+		    teardown.nremains > 2)
+			abort();
+		/* Remains go only with the last row naming their id. */
+		for (uint32_t index = 0; index < teardown.nremains; index++)
+			if (teardown.remains[index] >= 6 ||
+			    fuzz_naming(conns, remains[teardown.remains[index]].id) != 1 ||
+			    (conns[teardown.index].a != remains[teardown.remains[index]].id &&
+			    conns[teardown.index].b != remains[teardown.remains[index]].id))
+				abort();
+	}
 	if (erx_dom_plan_retire(&view, in->a, &teardown) == ERX_OK) {
 		if (teardown.index >= 3 ||
 		    doms[teardown.index].state != ERX_DOM_ENDED)
 			abort();
+		/* The outer budget is destroyed only when no row holds a child of it. */
+		if (teardown.nremains == 0 ? fuzz_naming(conns, in->a) != 0 :
+		    teardown.nremains != 1 || teardown.remains[0] >= 6 ||
+		    remains[teardown.remains[0]].id != 0 ||
+		    fuzz_naming(conns, in->a) == 0)
+			abort();
 		for (uint32_t index = 0; index < 3; index++)
-			if (conns[index].number != 0 &&
-			    (conns[index].a == in->a ||
-			    conns[index].b == in->a))
+			if (conns[index].number != 0 && conns[index].a == ERX_DOM_SYSTEM_ID &&
+			    conns[index].b == in->a)
 				abort();
 	}
 	if (erx_dom_plan_stop(&view, in->b, in->record.status, &action) ==
@@ -402,13 +435,16 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		    .grant = fuzz_grant(UINT64_C(1000000), 0x1) },
 		.doms = { { .id = 5, .state = ERX_DOM_RUNNING, .budget = { 51 },
 		    .outer = { 52 }, .connections = 2, .labels = 1 },
-		    { .id = 6, .state = ERX_DOM_ENDED, .budget = { 61 },
+		    { .id = 6, .principal = 1, .state = ERX_DOM_ENDED, .budget = { 61 },
 		    .outer = { 62 }, .connections = 2, .labels = 1 },
 		    { .id = 7, .state = ERX_DOM_BUILT, .budget = { 71 },
 		    .outer = { 72 }, .connections = 1, .labels = 1 } },
 		.conns = { { .number = 1, .a = ERX_DOM_SYSTEM_ID, .b = 5,
 		    .budget_b = { 53 } }, { .number = 2, .a = 5, .b = 6,
-		    .budget_a = { 54 }, .budget_b = { 63 }, .closing = true } },
+		    .budget_a = { 54 }, .budget_b = { 63 }, .closing = true },
+		    { .number = 3, .a = 9, .b = 5, .budget_a = { 93 },
+		    .budget_b = { 55 }, .closing = true } },
+		.remains = { { .id = 9, .principal = 1, .outer = { 92 }, .bytes = 4096 } },
 		.a = 5, .b = 7, .a_reads = 65536, .b_reads = 16384, .number = 2,
 		.next = 3, .label = 5, .record = { .kind = ERX_FAULT_EXIT },
 		.devs = { { .nranges = 1, .nlines = 1,

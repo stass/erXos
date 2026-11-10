@@ -19,8 +19,9 @@
 %% sends domain_down, has sent the report. Principal 1 has a session template, which
 %% the boot never starts. A domain named lost has a side that has
 %% ended by the time open_side answers, so its pid has no port to write a record
-%% into. As the library does, retire refuses with ebusy while a connection of the
-%% domain stands, connect refuses with einval a domain named ending, as the library
+%% into. Retire, as the library's, releases the domain whatever connections to other
+%% domains stand, but refuses with ebusy while its system connection stands, and a configured row has room for one domain until the retire of the
+%% last, as a principal with room for one does; connect refuses with einval a domain named ending, as the library
 %% does a domain whose end the service has not heard of yet, and each domain reads
 %% rings of a size of its own. The service makes every call here in its own process,
 %% so the process dictionary keeps each domain's pid and node and each connection.
@@ -54,13 +55,19 @@ configured() ->
            domains => [#{row => 0, place => 1, name => <<"b">>, principal => 1, kind => service,
                          restarts => 1, restart_period_s => 60},
                        #{row => 1, place => 0, name => <<"a">>, principal => 1, kind => service,
-                         restarts => 0, restart_period_s => 60}]}}.
+                         restarts => 1, restart_period_s => 60}]}}.
 templates() -> {ok, [#{template => 0, principal => 1}]}.
 configured(Id, Row, DomainPid) when is_pid(DomainPid) ->
     {ok, #{domains := Rows}} = configured(),
     [Name] = [Name || #{row := R, name := Name} <- Rows, R =:= Row],
-    put({domain, Id}, {DomainPid, Name}),
-    log({configured, Id, Row}), {ok, created(Id, 4)}.
+    case get({row, Row}) of
+        undefined ->
+            put({domain, Id}, {DomainPid, Name}),
+            put({row, Row}, Id),
+            log({configured, Id, Row}), {ok, created(Id, 4)};
+        _Held ->
+            log({configured, Id, Row, elimit}), {error, elimit}
+    end.
 create(#{memory := 1, domain_pid := DomainPid}) -> log({refused, DomainPid}), {error, enomem};
 create(#{id := Id, name := Name, domain_pid := DomainPid} = Spec) ->
     put({domain, Id}, {DomainPid, Name}),
@@ -82,22 +89,24 @@ stop(Id, _Status) ->
         _ -> erx_domain_srv ! End, ok
     end.
 retire(Id) ->
-    case [Number || {{connection, Number}, {A, B}} <- get(), A =:= Id orelse B =:= Id] of
-        [] ->
-            case get({domain, Id}) of
-                {DomainPid, <<"behind">> = Name} ->
-                    DomainPid ! report(Name, Id),
-                    true = erlang:resume_process(DomainPid);
-                _ ->
-                    ok
-            end,
-            log({retire, Id});
-        [_ | _] ->
-            log({retire, Id, ebusy}),
-            {error, ebusy}
+    case get({system, Id * 10}) of
+        undefined -> retired(Id);
+        Id -> log({retire, Id, ebusy}), {error, ebusy}
     end.
+
+%% As the library's retire once the system connection is gone.
+retired(Id) ->
+    case get({domain, Id}) of
+        {DomainPid, <<"behind">> = Name} ->
+            DomainPid ! report(Name, Id),
+            true = erlang:resume_process(DomainPid);
+        _ ->
+            ok
+    end,
+    _ = [erase({row, Row}) || {{row, Row}, Held} <- get(), Held =:= Id],
+    log({retire, Id}).
 crash(Id) -> log({crash, Id}), {ok, <<"boom">>, <<"=erl_crash_dump">>, false}.
-disconnect(Number) -> erase({connection, Number}), log({disconnect, Number}).
+disconnect(Number) -> erase({connection, Number}), erase({system, Number}), log({disconnect, Number}).
 %% Each party's values as the library's connect returns them, in its own table.
 connect(A, B, AReads, BReads) ->
     log({connect, A, B, AReads, BReads}),
@@ -112,8 +121,9 @@ connect(A, B, AReads, BReads) ->
     end.
 
 %% A created domain whose control table has Slots slots, one per connection, and whose
-%% rings it reads have reader(Id) bytes of data.
-created(Id, Slots) -> #{id => Id, connection => Id * 10, ctl_slots => Slots, reader => reader(Id)}.
+%% rings it reads have reader(Id) bytes of data; its system connection, Id * 10, stands
+%% until its disconnect, and a retire before that is refused, as the library refuses it.
+created(Id, Slots) -> put({system, Id * 10}, Id), #{id => Id, connection => Id * 10, ctl_slots => Slots, reader => reader(Id)}.
 
 %% The data size of the rings domain Id reads, each domain's its own.
 reader(Id) -> 1024 * Id.

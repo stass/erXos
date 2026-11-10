@@ -89,6 +89,8 @@ typedef struct erx_dom_lib {
 	erx_dom_view_t	 view;		/* the core's view; its tables are the caller's */
 	erx_dom_handles_t *handles;	/* view.max_domains, record for record */
 	erx_dom_link_handles_t *links;	/* view.max_connections, row for row */
+	uint64_t	*remains_held;	/* view.max_remains: each remains row's outer
+					 * budget handle, ERX_CAP_NULL for none */
 	erx_dom_held_t	 held;
 	const char	*host;		/* the host part of a domain's node name */
 	size_t		 host_len;	/* at most ERX_DOM_HOST_MAX */
@@ -243,6 +245,8 @@ typedef struct erx_dom_boot_tables {
 	erx_dom_handles_t	*handles;	/* max_domains */
 	erx_dom_connection_t	*connections;	/* max_connections */
 	erx_dom_link_handles_t	*links;		/* max_connections */
+	erx_dom_remains_t	*remains;	/* 2 * max_connections */
+	uint64_t		*remains_held;	/* 2 * max_connections */
 	erx_dom_principal_t	*principals;	/* nprincipals */
 	erx_dom_principal_held_t *held;		/* nprincipals */
 	erx_dom_configured_t	*configured;	/* nconfigured */

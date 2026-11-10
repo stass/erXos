@@ -32,6 +32,7 @@
 
 static erx_dom_t domains[NDOMAINS];
 static erx_dom_connection_t connections[NCONNECTIONS];
+static erx_dom_remains_t remains[2 * NCONNECTIONS];
 static erx_dom_principal_t principal;
 static erx_dom_configured_t configured;
 static erx_dom_partial_t partial;
@@ -103,6 +104,7 @@ reset_view(void)
 {
 	memset(domains, 0, sizeof(domains));
 	memset(connections, 0, sizeof(connections));
+	memset(remains, 0, sizeof(remains));
 	principal = (erx_dom_principal_t){ .number = 1, .memory = 64 * MIB,
 	    .domains_max = 3, .share = grant(UINT64_C(20000000), 0xf, 40),
 	    .default_limits = limits(1), .ceiling_limits = limits(2) };
@@ -117,6 +119,7 @@ reset_view(void)
 	    .outer = 64 * 1024, .grant = grant(UINT64_C(1000000), 0x1, 10) };
 	view = (erx_dom_view_t){ .domains = domains, .max_domains = NDOMAINS,
 	    .connections = connections, .max_connections = NCONNECTIONS,
+	    .remains = remains, .max_remains = 2 * NCONNECTIONS,
 	    .principals = &principal, .nprincipals = 1, .files = files,
 	    .nfiles = sizeof(files) / sizeof(files[0]),
 	    .configured = &configured, .nconfigured = 1, .partial = &partial,
@@ -752,6 +755,7 @@ restarts(void)
 	erx_dom_teardown_t teardown;
 	erx_dom_plan_t plan, again;
 	erx_dom_t *dom;
+	erx_status_t retired;
 
 	reset_view();
 	configured.grant = grant(ERX_QUOTA_NONE, 0x3, 50);
@@ -779,6 +783,34 @@ restarts(void)
 	printf("record restart_retired %d id=%u principal=%u,%llu\n",
 	    (int)erx_dom_plan_configured(&view, 7, 0, ERX_DOM_PID_NONE, &again), dom->id,
 	    principal.domains, (unsigned long long)principal.carved);
+
+	/*
+	 * A principal with room for one domain, whose configured domain ends
+	 * while a survivor, domain 9, still holds their connection: the retire
+	 * releases the domain at once and keeps only its outer budget, so the
+	 * restart fits while the remains stay carved from the principal.
+	 */
+	reset_view();
+	principal.domains_max = 1;
+	if (erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan) != ERX_OK ||
+	    erx_dom_plan_record(&view, &plan) != ERX_OK) {
+		failures++;
+		return;
+	}
+	domains[plan.slot].state = ERX_DOM_ENDED;
+	connections[plan.connection_row] = (erx_dom_connection_t){ 0 };
+	connections[NCONNECTIONS - 1] = (erx_dom_connection_t){ .number = 50,
+	    .a = 6, .b = 9, .closing = true };
+	retired = erx_dom_plan_retire(&view, 6, &teardown);
+	printf("record restart_held_retire %d\n", (int)retired);
+	if (retired == ERX_OK)
+		erx_dom_retire_record(&view, &teardown);
+	printf("record restart_held %d principal=%u,%llu\n",
+	    (int)erx_dom_plan_configured(&view, 7, 0, ERX_DOM_PID_NONE, &again),
+	    principal.domains, (unsigned long long)principal.carved);
+	/* The connection rows still name 6, so no new domain takes the id. */
+	printf("record restart_held_same_id %d\n",
+	    (int)erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &again));
 
 	reset_view();
 	configured.grant = grant(ERX_QUOTA_NONE, 0x3, 50);

@@ -70,7 +70,9 @@ Decisions every reader of this document needs:
   uses is charged there, so nothing waits before the destroy. Each
   connection's pages sit on a child budget of the outer budget, carved
   for that connection and destroyed once both parties have let go; the
-  outer budget goes once no child remains.
+  domain itself is released at its retire, right after its end, and its
+  outer budget goes then, or, while a survivor still maps a connection's
+  pages, with the last such connection.
 * **A domain is built whole or not at all.** The domain library validates
   a creation into a plan before it creates any object, and undoes what it
   applied if a later step fails, by destroying the domain's two budgets.
@@ -233,8 +235,8 @@ then the domain's outer budget.
 | **A1.** Only a space's creator installs capabilities into its table: the system domain into domains, a domain into its sub-spaces; and no capability passes between two domains | `erx_cap_pass` installs into a space only with `CAPS` on it, and `CAPS` on a space comes only with its creation: the creating call puts the space's root capability into the creator's table, and a space's capability passes on with `INSPECT` alone, whoever passes it (K17, K24); the system domain creates every domain and passes no capability with `CAPS` on a domain's space to anyone, so `CAPS` on a space never leaves its creator's table, the system domain's for a domain and a domain's for its sub-spaces; a rendezvous needs a gate both parties hold, and no introduction carries a gate, so no domain holds a gate another domain serves ([design-kernel.md](design-kernel.md#invariants), K17, K24) | a space's capability passed with more than `INSPECT`; a capability with `CAPS` on a domain's space passed to anyone; an introduction that makes a gate between two domains | the domain library's grant table checked by a host test (A7); the kernel's test that a space's capability passed on carries `INSPECT` alone; domain tests that a domain's `erx_cap_pass` into another domain's space fails with `ERX_ERIGHTS`, that `erx_space_create` without `SPACES` fails with `ERX_ERIGHTS`, and that no pass moves a sub-space's capability with more than `INSPECT`; a source check that `erx_dom_connect` creates no gate, with a seeded violation |
 | **A2.** The system domain sees every domain's end | a space's fault gate is an argument of `erx_space_create` and never changes (K28); the kernel posts an exit record for every stop, and for a space whose last thread ends, however it ends, once no thread of it can return to user mode (K18), and a fault record for every fault; the domain library names its one fault gate for every domain it creates | a call that changes a fault gate; an exit record posted while a thread can still run; a space left with no thread and no record; a plan that names another gate | the call table has no such call; a host test that every plan names the library's fault gate; a test that a domain faulting in its first instruction is reported; a test that a domain's threads on every CPU, and threads it creates while stopping, are stopped before its exit record arrives; a native domain whose threads all exit |
 | **A3.** The domain library never waits on a domain | every entry does bounded work under the library's one lock and makes no kernel call that waits; the fault thread, an ERTS thread that the NIF module `erx_domain_lib` starts at load, waits only in its open wait on the fault gate, with a timeout from which it also checks the ending record's deadline; a domain's end is one destroy of its own budget, which waits on no party; a connection's child budgets are destroyed only when the domain service asks, once each party has unmapped the connection's objects or ended, never on a timer while a party lives, and the outer budget only once none of its children remains, so no entry waits for an answer: a survivor that never answers `connection_down` keeps that one connection's child budget, and with it the dead domain's outer budget, and the connection counts against its own `connections` quota until it unmaps or ends | an entry that calls a gate a domain serves; a creation step that waits for a runtime; a destroy that waits for a holder to let go; a connection deleted on a timer while a party still maps it | hostile-domain tests: a domain that never reads its lane from the system domain, never answers `connection_down`, or floods it; a runtime that stops reading its lanes; every library entry timed with the manifest's `max_domains` domains alive |
-| **A4.** A domain is built whole or not at all | a creation is validated into a plan by a pure function before any effect; step 1 carves the domain's two budgets, each a wall, and every later object of the domain is charged to one of them, so the undo of a failure is destroying both; a domain whose runtime does not report ready is stopped and ended by the domain service, so `erx_domain:create/1` returns an error only when nothing of the domain remains | an effect before validation; an object of the domain charged to a budget other than its two | an exhaustive host test that injects a failure at every step of a creation and checks that every object is destroyed when the undo returns, and that the principal's budget is back at its baseline once the destroyed records' grace period has passed and the reaper has run, which the test drives, since a destroyed record's cache page stays charged until the reaper frees it ([design-kernel.md](design-kernel.md#budgets)); a QEMU test that injects one at each step through a test-build hook; a domain whose init process never reports ready, after which nothing of it remains |
-| **A5.** Ending a domain deletes everything only it used at once, and nothing another party still uses goes with it | every domain has an own budget and an outer budget, carved side by side from its principal's; the domain library charges to the own budget only what the domain alone maps or uses, and to the outer budget everything another party maps or reads after the domain is gone: on a child budget of it carved for each connection, the side of that connection the domain reads and the bell it waits on, or for its connection to the system domain both sides and both bells; and on the outer budget directly, its crash area, which no other party maps; the library has no entry that maps one domain's memory into another but `erx_dom_connect`, so an outer budget holds exactly its connections' child budgets and its crash area; only the system domain creates a mapping that crosses domains, and every one is a connection's, charged to the child budget of an outer budget for that connection, so the rule holds by construction; destroying a budget deletes every object charged to it and to the budgets carved from it ([design-kernel.md](design-kernel.md#budgets), K25, K26); the fault thread destroys the own budget at the exit record, through `erx_dom_destroy`; the system domain destroys a connection's child budgets through `erx_dom_disconnect` once each party has let go, and the outer budget through `erx_dom_retire` once no child remains and the crash area is read; the domain holds no capability to its outer budget or to any child of it; the system domain charges nothing of a domain's to its own budget, and maps nothing charged to a domain's own budget | a cross-domain mapping, or memory a device may address, charged to a domain's own budget; a library entry other than `erx_dom_connect` that maps one domain's memory into another; a domain holding its outer budget or a child of it; a second path that destroys a domain's budgets | a source check that the domain library destroys a budget only in `erx_dom_destroy`, `erx_dom_disconnect` and `erx_dom_retire`, and that `erx_dom_connect` is the one entry that creates an object another domain maps, and creates it from a child budget of an outer budget, each with a seeded violation; a host test that drives the library over the hosted kernel interface through random creations, introductions, device gives and ends, and checks after each destroy that no object a living party maps was deleted, and after each retire that the principal's budget is back at its baseline once the reaper has run, less any page a failed IOMMU pinned, which the test never provokes; a test that ends a domain while its peer still writes the side the dead domain read and reads the side it wrote, and finds the peer running until it answers `connection_down`; a test whose peer never answers, after which only that connection's child budget stays, with the dead domain's outer budget it is carved from, every other child of that outer budget is gone, and the connection counts against the peer's `connections`; a test that creates and ends domains under load, some with sub-spaces nested three deep, and checks that the principal's budget returns to its baseline once the reaper has run |
+| **A4.** A domain is built whole or not at all | a creation is validated into a plan by a pure function before any effect; step 1 carves the domain's two budgets, each a wall, and every later object of the domain is charged to one of them, so the undo of a failure is destroying both; a domain whose runtime does not report ready is stopped and ended by the domain service, so `erx_domain:create/1` returns an error only once the domain has ended and been retired, when nothing of it is charged but the remains a survivor still maps, which belong to the principal and the survivor, not to the domain; a retire the library refuses, which only a bug of the service or the library causes, is logged and leaves the record charged | an effect before validation; an object of the domain charged to a budget other than its two | an exhaustive host test that injects a failure at every step of a creation and checks that every object is destroyed when the undo returns, and that the principal's budget is back at its baseline once the destroyed records' grace period has passed and the reaper has run, which the test drives, since a destroyed record's cache page stays charged until the reaper frees it ([design-kernel.md](design-kernel.md#budgets)); a QEMU test that injects one at each step through a test-build hook; a domain whose init process never reports ready, after which nothing of it is charged |
+| **A5.** Ending a domain deletes everything only it used at once, and nothing another party still uses goes with it | every domain has an own budget and an outer budget, carved side by side from its principal's; the domain library charges to the own budget only what the domain alone maps or uses, and to the outer budget everything another party maps or reads after the domain is gone: on a child budget of it carved for each connection, the side of that connection the domain reads and the bell it waits on, or for its connection to the system domain both sides and both bells; and on the outer budget directly, its crash area, which no other party maps; the library has no entry that maps one domain's memory into another but `erx_dom_connect`, so an outer budget holds exactly its connections' child budgets and its crash area; only the system domain creates a mapping that crosses domains, and every one is a connection's, charged to the child budget of an outer budget for that connection, so the rule holds by construction; destroying a budget deletes every object charged to it and to the budgets carved from it ([design-kernel.md](design-kernel.md#budgets), K25, K26); the fault thread destroys the own budget at the exit record, through `erx_dom_destroy`; the system domain destroys a connection's child budgets through `erx_dom_disconnect` once each party has let go, and the outer budget through `erx_dom_retire` once the crash area is read when no connection names the domain, or else, as its remains, through the `erx_dom_disconnect` of the last connection that does; the domain holds no capability to its outer budget or to any child of it; the system domain charges nothing of a domain's to its own budget, and maps nothing charged to a domain's own budget | a cross-domain mapping, or memory a device may address, charged to a domain's own budget; a library entry other than `erx_dom_connect` that maps one domain's memory into another; a domain holding its outer budget or a child of it; a second path that destroys a domain's budgets | a source check that the domain library destroys a budget only in `erx_dom_destroy`, `erx_dom_disconnect` and `erx_dom_retire`, and that `erx_dom_connect` is the one entry that creates an object another domain maps, and creates it from a child budget of an outer budget, each with a seeded violation; a host test that drives the library over the hosted kernel interface through random creations, introductions, device gives and ends, and checks after each destroy that no object a living party maps was deleted, and after each retire and disconnect that the principal's budget is back at its baseline less the remains a connection still names, once the reaper has run, less any page a failed IOMMU pinned, which the test never provokes; a test that ends a domain while its peer still writes the side the dead domain read and reads the side it wrote, and finds the peer running until it answers `connection_down`; a test whose peer never answers, after which only that connection's child budget stays, with the dead domain's outer budget it is carved from as the remains, every other child of that outer budget is gone, the connection counts against the peer's `connections`, a configured domain restarts at once, and the principal's budget is back at its baseline once the peer unmaps; a test that creates and ends domains under load, some with sub-spaces nested three deep, and checks that the principal's budget returns to its baseline once the reaper has run |
 | **A6.** No domain outlives the system domain, and a system domain that cannot serve ends the machine | every domain's space is a child of the system domain's space, which the plan names as every domain's parent (K27); the first space has no fault gate, so a fault in it, a stop of it outside an ordered end, or a watchdog deadline missed goes to the kernel's end path, which writes the crash record and ends the machine by `erx.panic`; the watchdog process pets only after every service it lists has answered a liveness call within the period, so a system domain whose runtime runs but whose device service stops answering, even after its supervisor restarted it, misses the deadline too; the domain service is the system release's significant child, so its end, the watchdog's kill of it included, ends the system domain outside an ordered end; no party outside the kernel and the system domain keeps a record of any domain, so there is nothing to reconcile and no protocol that could be wrong | a domain created under another parent; a system-domain fault handled by anything but the kernel's end path; a watchdog pet from anything but the system domain's runtime; a pet that does not wait for the listed services' answers | a host test that every plan names the system domain's space as parent; a QEMU test that kills the system domain under load and finds the machine ended with the crash record on the console and no domain running; a test that stops the pet and sees the machine end at the deadline; a test that deadlocks the device service and sees it killed and restarted with the pets going on, and one that keeps it from answering after each restart and sees the machine end at the deadline; a test that deadlocks the domain service and sees the machine end at its kill; a test that a domain's `erx_watchdog_pet` fails with `ERX_ERIGHTS` |
 | **A7.** The system domain installs only what its grant table allows | every `erx_cap_pass` the domain library makes goes through one function, `erx_dom_install`, which takes a row of `erx_dom_grants`, the constant table of installs that [Authority](#authority) describes, and the recipient the validated plan names for the row's role; each install copies one of the library's own capabilities from the system domain's table, never from another domain's, and each mask lies within its recipient's row in the authority table | a pass outside `erx_dom_install`; a pass from another domain's table; a row that grants more than its recipient's row in [Authority](#authority); a recipient the plan did not check | a source check that `erx_cap_pass` is referenced only from `erx_dom_install`, and that its source table is always the system domain's own, with a seeded violation of each; host tests that every row of `erx_dom_grants` lies within the rights the authority table lists for its recipient, transcribed into the test; domain tests that a device's objects reach their domain without `GIVE`, and that a side of a connection reaches its reader with `READ` and `MAP` alone |
 | **A8.** A space never outlives its parent: no domain outlives the system domain, no sub-space its creator, and no program its session | every space has a parent, fixed when it is created, and stops when its parent stops ([design-kernel.md](design-kernel.md#creating-spaces)); the domain library names its own space as every domain's parent; a sub-space's parent is its creator's space or one of that space's sub-spaces, and a session's programs are its sub-spaces ([design-programs.md](design-programs.md#a-program-is-a-port)); a stopped space takes no children, and `erx_thread_start` refuses a stopped space; a parent exists before its child, so the relation is a tree, and the kernel stops it from its root down without anyone keeping a list | a space created anywhere but under its creator's own space or one below it; a creation under a stopped parent; a thread started in a stopped space | the host test of A6; the kernel's host test of stopping over random trees, with creations racing each stop; a domain test that ends a session holding programs three generations deep, each with a sub-space, and sees every one's exit record before the session's |
@@ -530,12 +532,29 @@ crash area and alone receives the sealing page.
 
 ### The domain library's records
 
-The library keeps three tables, allocated at boot from the root budget:
+The library keeps four tables, allocated at boot from the root budget:
 the manifest's `max_domains` domain records (1,024 in the default
-manifests), its `max_connections` connection rows (4,096), and one device
-record per entry of the root resource's device list. One lock guards the
-three; every entry holds it for bounded work, and the fault thread's open
-wait is outside it.
+manifests), its `max_connections` connection rows (4,096), twice
+`max_connections` remains rows, and one device record per entry of the
+root resource's device list. One lock guards the four; every entry holds
+it for bounded work, and the fault thread's open wait is outside it.
+
+A domain record lives from the plan's apply to the domain's retire,
+which follows its end without waiting for any peer. A **remains** row is
+what outlives a retired domain whose connection a survivor still holds:
+the outer budget those connections' child budgets are carved from, with
+the id the connection rows name and the principal whose memory the outer
+budget stays carved from. It is no domain record: it takes no record, no
+place in its principal's `domains` and none of its own budget's bytes,
+so a new domain, the same configured row's restart among them, never
+waits for it for a record or a place in `domains`. The remains do keep
+the whole outer budget's size carved from the principal's memory, so a
+principal whose memory cannot hold them beside the new domain's two
+budgets is refused the new domain until the survivor lets go. A retire makes a remains row only for an id a connection
+row names, and the disconnect of the last row naming the id destroys it
+with that row, so every remains row is named by a connection row, and
+the rows, which each name two ids, bound the remains at twice
+`max_connections`: a retire always finds a free one.
 
 ```c
 typedef struct erx_dom_origin {
@@ -549,9 +568,9 @@ typedef enum erx_dom_state {
 	ERX_DOM_BUILDING,	/* plan being applied */
 	ERX_DOM_BUILT,		/* built; first thread waiting for erx_dom_start */
 	ERX_DOM_RUNNING,
-	ERX_DOM_ENDED,		/* stopped; own budget destroyed; reported;
-				 * outer budget kept */
-	ERX_DOM_RETIRED		/* outer budget destroyed; record reusable */
+	ERX_DOM_ENDED		/* stopped; own budget destroyed; reported;
+				 * outer budget and crash area kept until
+				 * the retire, which frees the record */
 } erx_dom_state_t;
 
 typedef struct erx_dom {
@@ -585,6 +604,19 @@ typedef struct erx_dom {
 	erx_dom_end_t	end;		/* classified end, once ERX_DOM_ENDED */
 	erx_fault_t	record;		/* the record that ended it */
 } erx_dom_t;
+
+typedef struct erx_dom_remains {
+	uint32_t	id;		/* the retired domain's id, which a
+					 * connection row names; 0 for a free row */
+	uint32_t	principal;	/* whose memory the outer budget stays
+					 * carved from */
+	erx_cap_t	outer;		/* the retired domain's outer budget: the
+					 * parent of the child budgets of the
+					 * connections that name id, and of
+					 * nothing else */
+	uint64_t	bytes;		/* its size, which its destroy gives back
+					 * to the principal */
+} erx_dom_remains_t;
 
 typedef struct erx_dom_connection {
 	uint32_t	number;		/* 0 for a free row */
@@ -943,9 +975,9 @@ NIFs, since none of them waits:
 | `erx_dom_stop(id, status)` | stops the domain's space, and with it every sub-space below it | `ERX_OK`; `ERX_EINVAL` for an unknown or ended id |
 | `erx_dom_resize(id, memory)` | resizes a running domain's own budget with `erx_budget_resize`, guarantee and cap together, within its principal's budget ([Resource policy](#resource-policy)); refuses a configured domain, whose sizes are the manifest's (A10) | `ERX_OK`; `ERX_EINVAL` for an unknown, ended or configured id; `ERX_ENOMEM` when the principal's budget cannot cover the growth, after which nothing changes |
 | `erx_dom_destroy(id)` | destroys the stopped domain's own budget, which deletes at once every object charged to it and to every budget carved from it; the fault thread calls it at the exit record | `ERX_OK`; `ERX_EINVAL` unless the domain has stopped |
-| `erx_dom_retire(id)` | destroys the ended domain's outer budget, with its crash area, and frees its record; the domain service calls it once no child budget of the outer budget remains, every connection of the domain disconnected, and the crash area read | `ERX_OK`; `ERX_EINVAL` unless the domain has ended; `ERX_EBUSY` while any child budget of the domain's outer budget remains |
+| `erx_dom_retire(id)` | releases an ended domain: destroys its crash area, frees its record and gives its principal back the domain and its own budget's bytes; destroys its outer budget when no connection names the domain, and otherwise keeps the outer budget as the domain's remains, which the disconnect of its last connection destroys; the domain service calls it once the crash area is read and the system connection disconnected, without waiting for any other connection | `ERX_OK`; `ERX_EINVAL` unless the domain has ended; `ERX_EBUSY` while its system connection stands |
 | `erx_dom_connect(a, b, a_reads, b_reads)` | creates a connection between two built or running domains: carves from each domain's outer budget a child budget for the connection; creates two sides, `b`'s sized `a_reads` and charged to `a`'s child, since `a` reads it, and `a`'s sized `b_reads` and charged to `b`'s child; and two bells, each charged to the child of the domain whose group it is bound to; gives each domain its share ([Authority](#authority)) | the connection's number and each domain's values; `ERX_ENOMEM` when a reader's outer budget cannot cover its child; `ERX_ELIMIT` for a full table; `ERX_EINVAL` for a domain outside built or running, or for `a == b` |
-| `erx_dom_disconnect(number)` | destroys the connection's child budgets, which deletes its sides and bells at once; the domain service asks it only once each party has unmapped them or ended; a capability to them fails with `ERX_ESTALE` from then on | `ERX_OK`; `ERX_EINVAL` for an unknown number |
+| `erx_dom_disconnect(number)` | destroys the connection's child budgets, which deletes its sides and bells at once, and the remains of each retired party that no other connection names; the domain service asks it only once each party has unmapped them or ended; a capability to them fails with `ERX_ESTALE` from then on | `ERX_OK`; `ERX_EINVAL` for an unknown number |
 | `erx_dom_device_give(id, index)` | carves the device's resource and creates its register windows, IRQ objects and, for a confined device, its DMA window, from the domain's own budget; for an unconfined device creates its contiguous memory from the system domain's budget at its first give and keeps it for the boot; gives the domain its capabilities ([Devices](#devices)) | the values in the domain's table; `ERX_EBUSY` for a device another living domain holds; `ERX_ENOMEM`; `ERX_EINVAL` |
 | `erx_dom_code_object(session, size)` | creates a paged object with an execute ceiling from the session's budget through the system domain's own capability to it, which carries `CODE`, and gives the session a copy with `SUPPLY`, `READ`, `MAP`, `CHILD`, `DUP`, `GIVE` and `EXEC`; the kernel refuses an executable mapping of it until it is sealed (K8) | the object's number and the session's value; `ERX_ENOMEM`; `ERX_ELIMIT` beyond `file_objects` for the session |
 | `erx_dom_code_drop(session, number)` | deletes a session's code object, after which every mapping of it faults | `ERX_OK`; `ERX_EINVAL` |
@@ -1321,10 +1353,11 @@ asks `erx_dom_disconnect`, which destroys the connection's child budgets,
 once each party has unmapped the objects or ended, and never on a timer
 while a party lives. A survivor that never answers keeps that connection's
 child budget of the dead domain's outer budget, and so the outer budget
-itself, whose limit stays carved from its principal's until the retire;
-every other child of that outer budget goes as its own parties let go, so
-what the survivor keeps of the dead domain's memory is one connection's
-pages and the crash area. The connection counts against the survivor's
+itself as the dead domain's remains, whose limit stays carved from its
+principal's until the last connection naming the domain is disconnected;
+every other child of that outer budget goes as its own parties let go,
+and the crash area went at the retire, so what the survivor keeps of the
+dead domain's memory is one connection's pages. The connection counts against the survivor's
 own
 `connections` quota until it unmaps or ends, so what it can keep of
 others' memory is bounded by that quota, and the inspector shows each such
@@ -1395,12 +1428,20 @@ it, and to every budget carved from it, is deleted at once, every
 capability to them fails the one lookup and every mapping of them faults
 ([design-kernel.md](design-kernel.md#budgets), K25, K26), and since
 nothing another party maps is among them, nothing waits for anyone first.
-The rest goes later, by the system domain: each connection's child
-budget at `erx_dom_disconnect`, once both parties have let go of the
-connection,
-and the outer budget at `erx_dom_retire`, once no child remains and the
-domain service has read the crash area. The system domain charges nothing
-of a domain's to its own budget.
+The rest goes later, by the system domain. At `erx_dom_retire`, as soon
+as the domain service has read the crash area, the domain is released:
+its record is freed, its principal gets back its place in `domains` and
+its own budget's bytes, its crash area is destroyed, and so is its outer
+budget when no connection names the domain. Otherwise the outer budget
+outlives the domain as its remains ([The domain library's
+records](#the-domain-librarys-records)), which hold only what a survivor
+still maps. Each connection's child budget goes at `erx_dom_disconnect`,
+once both parties have let go of the connection, and the disconnect of
+the last connection that names a retired domain destroys its remains
+with it. So a domain's end releases the domain whatever its peers do,
+and only memory a peer still maps outlives it, charged to the principal
+that paid for it. The system domain charges nothing of a domain's to its
+own budget.
 
 Records arrive on the fault gate at the library's fault thread, labelled
 with the domain's id:
@@ -1478,16 +1519,22 @@ The domain service, on `{domain_ended, Id, End, Record}`:
    crash area into an object of its own with `erx_mem_copy`, never through
    a mapping, so a deleted source fails with `ERX_ESTALE` and never
    faults.
-4. **Frees the domain's name**, and for a configured domain starts the
+4. **Retires the domain** with `erx_dom_retire` once the crash area is
+   read and the system connection disconnected, without waiting for any
+   other connection: the library frees the record, gives the principal
+   back the domain and its own budget's bytes, destroys the crash area,
+   and destroys the outer budget too unless a connection still names the
+   domain, in which case the outer budget stays as the domain's remains
+   until the last such connection is disconnected. A survivor that never
+   answers `connection_down` keeps that connection's child budget, and
+   with it the remains, until it unmaps or ends, within its own
+   `connections` quota, and holds back nothing else: not the domain's
+   record, its name, its place in its principal's quota, nor its restart,
+   unless its principal's memory cannot hold the remains beside the
+   restarted domain ([The domain library's
+   records](#the-domain-librarys-records)).
+5. **Frees the domain's name**, and for a configured domain starts the
    domain again within its restart intensity ([Boot](#boot)).
-5. **Retires the domain** with `erx_dom_retire` once the crash area is
-   read and no child budget of the domain's outer budget remains, which,
-   since every child is a connection's, is once every connection of the
-   domain has been disconnected: the library destroys the outer budget
-   and frees the record. A survivor that never answers `connection_down`
-   keeps that connection's child budget, and with it the outer budget and
-   the record, until it unmaps or ends, within its own `connections`
-   quota.
 
 **A lost system connection ends the domain.** A domain has no services,
 facets or connections without its connection to the system domain, so
@@ -1531,7 +1578,8 @@ one destroy and nothing anyone still uses goes with it (A5):
 | a device's resource, register windows, IRQ objects and DMA window | its holder's own budget | at the holder's destroy, which frees the device for its next holder |
 | the side of each connection the domain reads, and the bell it waits on | the domain's child budget for that connection, carved from its outer budget | at `erx_dom_disconnect`, which destroys the child, once each party has unmapped it or ended |
 | the domain's connection to the system domain, both sides and both bells | the domain's child budget for that connection, carved from its outer budget | at `erx_dom_disconnect`, once the system domain has unmapped it, before the retire |
-| the domain's crash area, the one object no other party maps | the domain's outer budget, directly | at its retire, once the domain service has read it and no child of the outer budget remains |
+| the domain's crash area, the one object no other party maps | the domain's outer budget, directly | at its retire, once the domain service has read it |
+| the domain's outer budget itself, once the domain is retired | the domain's principal, as the domain's remains | at its retire when no connection names the domain; otherwise at the `erx_dom_disconnect` of the last connection that does |
 | an unconfined device's contiguous memory | the system domain's budget | never while the machine runs: the device's for the boot, given to each of its holders in turn ([Devices](#devices)) |
 | the sealing page | the root budget | never: the machine's |
 | what the system domain's runtime holds for a domain: its frames, signals, links, monitors and facets | the system domain's runtime, in its heap, within what the domain's admission reserved ([Resource policy](#resource-policy)) | when the connection closes, at the domain's end |
@@ -3051,8 +3099,8 @@ partition, as a fresh installation does.
 | A malformed creation specification | the planning entries | nothing | none needed | the status code in the domain service; a counter |
 | A creation step fails | the step's status | nothing: the applied steps undone by destroying the domain's two budgets (A4) | the domain library | `erx_domain:create/1` returns the mapped error |
 | A domain's runtime never reports ready | the spec's boot timeout | the built domain | the domain service stops it, and it ends as any domain does | `{error, timeout}`; a log line |
-| A domain ends | the fault gate | nothing of its own budget, which the fault thread destroyed at once, its devices' objects with it; each connection's child budget of its outer budget until both parties have let go of that connection; its outer budget, with its crash area, until no child remains and the crash area is read | the library, the domain service | `{domain_down, D, Info}` in linked processes; `noconnection` across every connection of the domain; the death record in the inspector |
-| A peer never answers `connection_down` | the domain service's record, which shows the connection closing | that connection's child budget, its sides and bells, and with it the dead domain's outer budget, whose other children go as their parties let go; within the survivor's own `connections` quota | the survivor, when it unmaps or ends; then the domain service asks `erx_dom_disconnect` and retires the dead domain | the inspector shows the connection closing, with the party that holds it |
+| A domain ends | the fault gate | nothing of its own budget, which the fault thread destroyed at once, its devices' objects with it; each connection's child budget of its outer budget until both parties have let go of that connection; its crash area until the domain service reads it at the retire; its outer budget, as its remains, until no connection names it | the library, the domain service | `{domain_down, D, Info}` in linked processes; `noconnection` across every connection of the domain; the death record in the inspector |
+| A peer never answers `connection_down` | the domain service's record, which shows the connection closing | that connection's child budget, its sides and bells, and with it the dead domain's outer budget as its remains, whose other children go as their parties let go; within the survivor's own `connections` quota; the dead domain itself is retired at its end, and a configured one restarts | the survivor, when it unmaps or ends; then the domain service asks `erx_dom_disconnect`, which destroys the remains with the last connection | the inspector shows the connection closing, with the party that holds it |
 | A domain sends the domain service a malformed message, or one about a connection it is not a party to | the generated admission and the connection's state | nothing | none needed: the message is dropped | a counter on the sending domain |
 | The device service stops answering | the watchdog process's liveness call | the devices, each with its holder ([Devices](#devices)) | its supervisor restarts it, and the pets resume at its first answer; a service that never answers again ends the machine at the watchdog's deadline | a log line; at worst the crash record naming the watchdog |
 | The domain service stops answering, or ends | the watchdog process's liveness call, which kills it; its supervisor, at its end | the machine | none: its end ends the system domain, and the kernel writes the crash record and ends the machine by `erx.panic` | the report on the console; the crash record at the next boot |
@@ -3361,8 +3409,11 @@ under test ran.
   unmaps, and a hook that charges that side to the reader's own budget,
   after which the same test faults the peer; a peer that never answers,
   which keeps that connection's child budget, and with it the dead
-  domain's outer budget, within its own `connections` quota, and is shown
-  closing in the inspector, the outer budget never destroyed on a timer,
+  domain's outer budget as its remains, within its own `connections`
+  quota, and is shown closing in the inspector, while the dead domain, a
+  configured one, restarts at once, the outer budget never destroyed on a
+  timer and the principal's budget back at its baseline once the peer
+  unmaps,
   while the dead domain's other connections' children are destroyed as
   their parties let go, and a hook that charges every connection's sides
   to the outer budget directly, after which the test finds the other
@@ -3376,8 +3427,8 @@ under test ran.
   refused with `ERX_EINVAL`, and beyond `max_connections`, refused with
   `ERX_ELIMIT`.
 * **Ending:** 10,000 short domains created and ended one after another,
-  each destroyed at its exit record and retired once its connections are
-  gone and its crash area read, after which the principal's and the
+  each destroyed at its exit record and retired once its crash area is
+  read and its system connection gone, after which the principal's and the
   system domain's budgets are back at their baselines; a domain that
   crashes with a dump, whose own budget is destroyed before the domain
   service reads the crash area, and whose dump is still read whole, and
@@ -3778,7 +3829,7 @@ Fiasco's kernel, `bootstrap` and `sigma0`
 | The interpreter makes the system domain's control paths slow enough to show in boot or domain creation | medium | slower boot and creation | the system domain does bounded control only; `tools/erx bench boot` and the domain-creation benchmark measure it against their budgets; the per-byte work it does is C |
 | A machine's fabric confines less than its manifest marks, or splits a unit differently | low | the device runs nowhere until the manifest is corrected | the device service checks each mark and unit at boot and places nothing it cannot confirm, with a diagnostic; the platform's DMA contract is the manifest's source |
 | A principal binds many names, or names others want | low | other principals cannot use those names for the boot | the `names` quota bounds each principal; the configured domains' names are the system principal's from boot; a name is no authority, since introductions are the system domain's |
-| A peer that never answers `connection_down` keeps one connection's child budget of a dead domain's outer budget, and with it the outer budget and its record in the domain library, alive | low | that connection's pages, the crash area, the outer budget's limit carved from its principal's, and one record, held until the peer unmaps or ends | every other connection's child goes as its parties let go; the connection counts against the peer's own `connections` quota, so what it keeps is bounded by its own limits; the inspector shows the connection closing, with the party that holds it |
+| A peer that never answers `connection_down` keeps one connection's child budget of a dead domain's outer budget, and with it the outer budget, as the dead domain's remains, alive | low | that connection's pages and the outer budget's limit carved from the dead domain's principal's, held until the peer unmaps or ends, so a principal at its memory ceiling cannot restart the domain until the peer lets go; nothing else of the domain, whose record, name and place in `domains` go at its retire | every other connection's child goes as its parties let go; the connection counts against the peer's own `connections` quota, so what it keeps is bounded by its own limits; the inspector shows the connection closing, with the party that holds it |
 | A deterministic fault early in every boot keeps the machine in rescue | low | the machine serves no user domain until an operator acts | the rescue configuration has the console and a login, so the operator can inspect the crash record and install a fixed release; an end before the slot writer advances the count is not counted |
 | A protocol's signing input changes shape, so the vault's purpose check refuses valid requests | low | authentication fails until the check is extended | the checks follow the RFCs' fixed layouts and the vault's tests run against stock OTP peers |
 | Argon2id at 64 MiB and three passes misses the login budget on the Raspberry Pi 4 | medium | logins slower than a second | the parameters live in each slot; RFC 9106's procedure lowers the passes, then the memory, and slots follow at their next login |

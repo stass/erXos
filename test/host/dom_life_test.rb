@@ -55,7 +55,18 @@ class DomLifeTest < Minitest::Test
     'disconnect_zero' => EINVAL, 'disconnect_unknown' => EINVAL,
     'retire_ok' => '0 kind=3 index=2 destroy=702',
     'retire_running' => EINVAL, 'retire_unknown' => EINVAL, 'retire_zero' => EINVAL,
-    'retire_busy' => EBUSY, 'retire_busy_system' => EBUSY
+    'retire_busy_system' => EBUSY,
+    # A survivor holds row 9 with 7: the retire destroys the crash area and
+    # moves the outer budget to remains row 0, which the last row's disconnect
+    # destroys with it.
+    'retire_held' => '0 kind=3 index=2 destroy=703 remains=0',
+    'retire_held_record' => 'principal=0,8192 remains=7,702,8192;0,0,0 record7=0 row9=9',
+    'disconnect_last' => '0 kind=1 index=2 destroy=521,721 remains=0',
+    'disconnect_last_record' => 'principal=0,0 remains=0,0,0;0,0,0 record7=0 row9=0',
+    'disconnect_named' => '0 kind=1 index=2 destroy=521,721', 'disconnect_unheld' => EINVAL,
+    'disconnect_both' => '0 kind=1 index=2 destroy=721,1121 remains=0,3',
+    'disconnect_both_record' => 'principal=1,0 remains=0,0,0;0,0,0 record7=0 row9=0',
+    'retire_remains_full' => EINVAL
   }.freeze
 
   ACTS = {
@@ -116,9 +127,16 @@ DEVICES = {
     'side charged to the writer' =>
       ['.budget = ERX_DOM_OBJ_LINK_BUDGET_A, .size = side_b };',
        '.budget = ERX_DOM_OBJ_LINK_BUDGET_B, .size = side_b };', 'case connect_ok '],
-    'retire ignores connections' =>
-      ["(row->a == id || row->b == id))\n\t\t\treturn (ERX_EBUSY);", "(row->a == id || row->b == id))\n\t\t\tcontinue;",
-       'case retire_busy '],
+    'retire ignores the system connection' =>
+      ['row->a == ERX_DOM_SYSTEM_ID && row->b == id)', 'row->a == ERX_DOM_SYSTEM_ID && row->b == 0)',
+       'case retire_busy_system '],
+    'retire destroys the outer budget a survivor maps' =>
+      ['if (life_rows_naming(view, id) == 0) {', 'if (life_rows_naming(view, id) <= 1) {', 'case retire_held '],
+    'remains outlive their last connection' =>
+      ['life_rows_naming(view, id) != 1)', 'life_rows_naming(view, id) != 0)', 'case disconnect_last '],
+    'a retire gives back the bytes its remains keep' =>
+      ['principal->carved -= dom->own_bytes;', 'principal->carved -= dom->own_bytes + dom->outer_bytes;',
+       'case retire_held_record '],
     'disconnect destroys a system connection\'s null child' =>
       ["if (row->a != ERX_DOM_SYSTEM_ID)\n\t\t\tdraft.destroy", "draft.destroy", 'case disconnect_system '],
     'classify trusts a stop the library did not make' =>

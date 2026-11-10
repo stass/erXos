@@ -90,6 +90,8 @@ erx_dom_boot_layout(const erx_dom_boot_sizes_t *sizes, uintptr_t base, erx_dom_b
 	    !BOOT_PLACE(handles, sizes->max_domains) ||
 	    !BOOT_PLACE(connections, sizes->max_connections) ||
 	    !BOOT_PLACE(links, sizes->max_connections) ||
+	    !BOOT_PLACE(remains, (size_t)sizes->max_connections * 2) ||
+	    !BOOT_PLACE(remains_held, (size_t)sizes->max_connections * 2) ||
 	    !BOOT_PLACE(principals, sizes->nprincipals) ||
 	    !BOOT_PLACE(held, sizes->nprincipals) ||
 	    !BOOT_PLACE(configured, sizes->nconfigured) ||
@@ -286,12 +288,20 @@ erx_dom_view_build(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, uint
 	const char *reason;
 
 	memset(lib, 0, sizeof(*lib));
+	/* Remains rows are twice the connection rows, counted in a uint32_t. */
+	if (header->max_connections > UINT32_MAX / 2)
+		return ("max_connections is too large");
 	lib->view.domains = tables->domains;
 	lib->view.max_domains = header->max_domains;
 	lib->view.connections = tables->connections;
 	lib->view.max_connections = header->max_connections;
+	lib->view.remains = tables->remains;
+	lib->view.max_remains = header->max_connections * 2;
 	memset(tables->domains, 0, sizeof(*tables->domains) * header->max_domains);
 	memset(tables->connections, 0, sizeof(*tables->connections) * header->max_connections);
+	memset(tables->remains, 0, sizeof(*tables->remains) * lib->view.max_remains);
+	for (uint32_t index = 0; index < lib->view.max_remains; index++)
+		tables->remains_held[index] = ERX_CAP_NULL;
 	for (uint32_t index = 0; index < header->max_domains; index++)
 		for (uint32_t obj = 0; obj < ERX_DOM_OBJ_MADE_COUNT; obj++)
 			tables->handles[index].made[obj] = ERX_CAP_NULL;
@@ -300,6 +310,7 @@ erx_dom_view_build(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, uint
 			tables->links[index].made[obj] = ERX_CAP_NULL;
 	lib->handles = tables->handles;
 	lib->links = tables->links;
+	lib->remains_held = tables->remains_held;
 	lib->held.principals = tables->held;
 	if ((reason = boot_principals(lib, manifest, tables)) != NULL ||
 	    (reason = boot_configured(&lib->view, manifest, tables->configured)) != NULL ||

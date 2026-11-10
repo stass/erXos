@@ -89,9 +89,9 @@ typedef enum erx_dom_state {
 	ERX_DOM_BUILDING,	/* plan being applied */
 	ERX_DOM_BUILT,		/* built; first thread waiting for erx_dom_start */
 	ERX_DOM_RUNNING,
-	ERX_DOM_ENDED,		/* stopped; own budget destroyed; reported;
-				 * outer budget kept */
-	ERX_DOM_RETIRED		/* outer budget destroyed; record reusable */
+	ERX_DOM_ENDED		/* stopped; own budget destroyed; reported;
+				 * outer budget and crash area kept until
+				 * erx_dom_retire frees the record */
 } erx_dom_state_t;
 
 typedef enum erx_dom_end_kind {
@@ -128,8 +128,10 @@ typedef struct erx_dom {
 	erx_grant_t	grant;		/* its group's grant, the spec's: a living
 					 * configured domain's counts against
 					 * system's reserve */
-	uint64_t	carved;		/* bytes its two budgets took of its principal's,
+	uint64_t	own_bytes;	/* bytes its own budget took of its principal's,
 					 * which its retire gives back */
+	uint64_t	outer_bytes;	/* bytes its outer budget took, which go back
+					 * with the outer budget's destroy */
 	uint32_t	labels;		/* bell labels its event table has taken: the
 					 * system connection's is 1, and each
 					 * connection's bell takes the next */
@@ -139,6 +141,21 @@ typedef struct erx_dom {
 	erx_dom_end_t	end;		/* classified end, once ERX_DOM_ENDED */
 	erx_fault_t	record;		/* the record that ended it */
 } erx_dom_t;
+
+/*
+ * The remains of a retired domain whose connection a survivor still holds
+ * (docs/design-system.md, "The domain library's records"): its outer
+ * budget, the parent of the child budgets of the connection rows naming
+ * id and of nothing else, still carved from its principal's. It is no
+ * domain record and counts against no record, domain quota or own
+ * budget; the disconnect of the last row naming id destroys it.
+ */
+typedef struct erx_dom_remains {
+	uint32_t	id;		/* the retired domain's; 0 for a free row */
+	uint32_t	principal;
+	erx_cap_t	outer;
+	uint64_t	bytes;		/* the outer budget's, given back at its destroy */
+} erx_dom_remains_t;
 
 /* One connection row; a is ERX_DOM_SYSTEM_ID for a system connection. */
 typedef struct erx_dom_connection {
@@ -307,15 +324,20 @@ typedef struct erx_dom_partial {
  * under system, are no table of their own: the system-reserve check
  * derives them from the records' grants, so a retired or ended domain
  * drops out with nothing to take back. The planners read the view
- * through a const pointer; erx_dom_plan_record and erx_dom_link_record
- * write the domain records, the connection rows, the principals' counts
- * and next_connection, so those tables are not const.
+ * through a const pointer; erx_dom_plan_record, erx_dom_link_record,
+ * erx_dom_retire_record and erx_dom_disconnect_record write the domain
+ * records, the connection rows, the remains, the principals' counts and
+ * next_connection, so those tables are not const.
  */
 typedef struct erx_dom_view {
 	erx_dom_t		*domains;	/* max_domains records */
 	uint32_t		 max_domains;
 	erx_dom_connection_t	*connections;	/* max_connections rows */
 	uint32_t		 max_connections;
+	/* Twice max_connections rows: each names an id a connection row
+	 * names, and a row names two, so a retire always finds one free. */
+	erx_dom_remains_t	*remains;
+	uint32_t		 max_remains;
 	erx_dom_principal_t	*principals;
 	uint32_t		 nprincipals;
 	const erx_dom_device_entry_t *devices;	/* the catalogue: ndevices entries */
@@ -659,10 +681,12 @@ erx_status_t	erx_dom_link_record(erx_dom_view_t *,
 
 /*
  * What a disconnect, the destroy at an exit record or a retire does: it
- * destroys the capabilities in order, then frees the row or record, or
- * for a destroy leaves the record for the report to mark ended. A destroy
- * cannot be undone, and none of these can fail on a capability the
- * library holds.
+ * destroys the capabilities in order, then, for a disconnect, the outer
+ * budgets of the remains rows it lists, and frees the row or record, or
+ * for a destroy leaves the record for the report to mark ended. A retire
+ * that lists a remains row moves the record's outer budget into it
+ * instead of destroying it. A destroy cannot be undone, and none of these
+ * can fail on a capability the library holds.
  */
 typedef enum erx_dom_teardown_kind {
 	ERX_DOM_DISCONNECT = 1,	/* index: the connection row it frees */
@@ -676,26 +700,40 @@ typedef struct erx_dom_teardown {
 	uint32_t	index;
 	uint32_t	ndestroy;
 	erx_cap_t	destroy[2];
+	uint32_t	nremains;
+	uint32_t	remains[2];	/* DISCONNECT: the remains rows whose last
+					 * connection this is; RETIRE: the free row
+					 * that takes the outer budget */
 } erx_dom_teardown_t;
 
 /*
  * erx_dom_disconnect(number): destroys the connection's child budgets,
- * one when a is the system domain. ERX_OK, or ERX_EINVAL for an unknown
- * number. The domain service asks only once each party has unmapped the
- * connection's objects or ended.
+ * one when a is the system domain, and the outer budget of each retired
+ * party that no other row names, its remains. ERX_OK, or ERX_EINVAL for an
+ * unknown number or remains whose principal does not hold their bytes.
+ * The domain service asks only once each party has unmapped the
+ * connection's objects or ended. Once the teardown is applied,
+ * erx_dom_disconnect_record frees the row and the remains it lists and
+ * gives each remains' principal back its bytes.
  */
 erx_status_t	erx_dom_plan_disconnect(const erx_dom_view_t *,
 		    uint32_t number, erx_dom_teardown_t *);
+void		erx_dom_disconnect_record(erx_dom_view_t *,
+		    const erx_dom_teardown_t *);
 
 /*
- * erx_dom_retire(id): destroys the ended domain's outer budget, with its
- * crash area, and frees its record. ERX_OK; ERX_EINVAL unless the domain
- * has ended, or when its principal's counts do not hold it; ERX_EBUSY
- * while a connection row names it, since each such row holds a child of
- * its outer budget. Once the teardown is applied, erx_dom_retire_record
- * gives the principal back the domain and the bytes its two budgets took,
- * and frees the record; it cannot fail on the teardown erx_dom_plan_retire
- * wrote for the same view.
+ * erx_dom_retire(id): releases an ended domain whatever its peers do.
+ * When no connection row names it, the teardown destroys its outer
+ * budget, with its crash area; otherwise it destroys the crash area alone
+ * and lists a free remains row, which takes the outer budget, since each
+ * row naming the domain holds a child of it. ERX_OK; ERX_EINVAL unless the
+ * domain has ended, or when its principal's counts do not hold it, or
+ * when no remains row is free, which the table's size rules out; ERX_EBUSY
+ * while its system connection stands. Once the teardown is applied,
+ * erx_dom_retire_record gives the principal back the domain and its own
+ * budget's bytes, and the outer budget's unless remains keep it, fills
+ * the remains row, and frees the record; it cannot fail on the teardown
+ * erx_dom_plan_retire wrote for the same view.
  */
 erx_status_t	erx_dom_plan_retire(const erx_dom_view_t *, uint32_t id,
 		    erx_dom_teardown_t *);

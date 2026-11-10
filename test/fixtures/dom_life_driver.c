@@ -29,7 +29,9 @@
 
 static erx_dom_t domains[NDOMAINS];
 static erx_dom_connection_t connections[NCONNECTIONS];
-/* The one principal, which counts domain 7, the one a retire may take. */
+/* The retired domains' remains, twice the rows, as the library sizes them. */
+static erx_dom_remains_t remains[2 * NCONNECTIONS];
+/* The one principal, which counts domain 7, the one a retire may take, and its bytes. */
 static erx_dom_principal_t principals[1];
 /* The system domain's space, as records name it; 77 is a domain's own. */
 #define SYSTEM_SPACE	UINT64_C(4000)
@@ -59,14 +61,16 @@ reset_view(void)
 {
 	memset(domains, 0, sizeof(domains));
 	memset(connections, 0, sizeof(connections));
+	memset(remains, 0, sizeof(remains));
 	domains[0] = (erx_dom_t){ .id = 5, .state = ERX_DOM_RUNNING,
 	    .budget = { 501 }, .outer = { 502 }, .connections = 2,
 	    .labels = ERX_DOM_SYSTEM_LABEL };
 	domains[1] = (erx_dom_t){ .id = 6, .state = ERX_DOM_BUILT,
 	    .budget = { 601 }, .outer = { 602 }, .connections = 1, .labels = 3 };
-	principals[0] = (erx_dom_principal_t){ .number = 1, .domains = 1 };
+	principals[0] = (erx_dom_principal_t){ .number = 1, .domains = 1, .carved = 12288 };
 	domains[2] = (erx_dom_t){ .id = 7, .principal = 1, .state = ERX_DOM_ENDED,
-	    .budget = { 701 }, .outer = { 702 }, .connections = 1, .labels = 1 };
+	    .budget = { 701 }, .outer = { 702 }, .crash = { 703 }, .connections = 1,
+	    .labels = 1, .own_bytes = 4096, .outer_bytes = 8192 };
 	domains[3] = (erx_dom_t){ .id = 8, .state = ERX_DOM_BUILDING,
 	    .budget = { 801 }, .outer = { 802 }, .connections = 1, .labels = 1 };
 	connections[0] = (erx_dom_connection_t){ .number = 1,
@@ -75,6 +79,7 @@ reset_view(void)
 	    .a = ERX_DOM_SYSTEM_ID, .b = 6, .budget_b = { 611 } };
 	view = (erx_dom_view_t){ .domains = domains, .max_domains = NDOMAINS,
 	    .connections = connections, .max_connections = NCONNECTIONS,
+	    .remains = remains, .max_remains = 2 * NCONNECTIONS,
 	    .principals = principals, .nprincipals = 1, .next_connection = 20, .system_space = SYSTEM_SPACE,
 	    .devices = devices, .device_records = device_records,
 	    .ndevices = 2 };
@@ -311,7 +316,80 @@ teardown_case(const char *name, erx_status_t status,
 	for (uint32_t index = 0; index < teardown->ndestroy; index++)
 		printf("%s%llu", index == 0 ? "" : ",",
 		    (unsigned long long)teardown->destroy[index].raw);
+	for (uint32_t index = 0; index < teardown->nremains; index++)
+		printf("%s%u", index == 0 ? " remains=" : ",", teardown->remains[index]);
 	printf("\n");
+}
+
+/* The principal's counts and the first two remains rows, after a record step. */
+static void
+remains_line(const char *name)
+{
+	printf("case %s principal=%u,%llu remains=%u,%llu,%llu;%u,%llu,%llu record7=%u row9=%u\n", name,
+	    principals[0].domains, (unsigned long long)principals[0].carved,
+	    remains[0].id, (unsigned long long)remains[0].outer.raw,
+	    (unsigned long long)remains[0].bytes, remains[1].id,
+	    (unsigned long long)remains[1].outer.raw, (unsigned long long)remains[1].bytes,
+	    domains[2].id, connections[2].number);
+}
+
+/*
+ * A retire while a survivor, 5, holds connection 9 with domain 7, then the
+ * disconnects that end the remains: the last row naming 7 destroys them,
+ * an earlier one does not, and one whose two parties are both retired
+ * destroys both.
+ */
+static void
+remains_cases(void)
+{
+	erx_dom_teardown_t teardown;
+	erx_status_t status;
+
+	reset_view();
+	connections[2] = (erx_dom_connection_t){ .number = 9, .a = 5, .b = 7,
+	    .budget_a = { 521 }, .budget_b = { 721 }, .closing = true };
+	status = erx_dom_plan_retire(&view, 7, &teardown);
+	teardown_case("retire_held", status, &teardown);
+	if (status == ERX_OK)
+		erx_dom_retire_record(&view, &teardown);
+	remains_line("retire_held_record");
+	status = erx_dom_plan_disconnect(&view, 9, &teardown);
+	teardown_case("disconnect_last", status, &teardown);
+	if (status == ERX_OK)
+		erx_dom_disconnect_record(&view, &teardown);
+	remains_line("disconnect_last_record");
+
+	reset_view();
+	connections[2] = (erx_dom_connection_t){ .number = 9, .a = 5, .b = 7,
+	    .budget_a = { 521 }, .budget_b = { 721 }, .closing = true };
+	connections[3] = (erx_dom_connection_t){ .number = 10, .a = 7, .b = 6,
+	    .budget_a = { 722 }, .budget_b = { 621 }, .closing = true };
+	if (erx_dom_plan_retire(&view, 7, &teardown) == ERX_OK)
+		erx_dom_retire_record(&view, &teardown);
+	teardown_case("disconnect_named", erx_dom_plan_disconnect(&view, 9, &teardown), &teardown);
+	/* With row 9 gone, row 10 is the last naming 7, whose bytes the principal no longer holds. */
+	connections[2] = (erx_dom_connection_t){ .number = 0 };
+	principals[0].carved = 4096;
+	teardown_case("disconnect_unheld", erx_dom_plan_disconnect(&view, 10, &teardown), &teardown);
+
+	reset_view();
+	principals[0].carved = 16384;
+	remains[0] = (erx_dom_remains_t){ .id = 7, .principal = 1, .outer = { 702 }, .bytes = 8192 };
+	remains[3] = (erx_dom_remains_t){ .id = 11, .principal = 1, .outer = { 1102 }, .bytes = 8192 };
+	domains[2] = (erx_dom_t){ .id = 0 };
+	connections[2] = (erx_dom_connection_t){ .number = 14, .a = 7, .b = 11,
+	    .budget_a = { 721 }, .budget_b = { 1121 }, .closing = true };
+	status = erx_dom_plan_disconnect(&view, 14, &teardown);
+	teardown_case("disconnect_both", status, &teardown);
+	if (status == ERX_OK)
+		erx_dom_disconnect_record(&view, &teardown);
+	remains_line("disconnect_both_record");
+
+	reset_view();
+	connections[2] = (erx_dom_connection_t){ .number = 9, .a = 5, .b = 7 };
+	for (uint32_t index = 0; index < 2 * NCONNECTIONS; index++)
+		remains[index].id = 100 + index;
+	teardown_case("retire_remains_full", erx_dom_plan_retire(&view, 7, &teardown), &teardown);
 }
 
 static void
@@ -415,14 +493,11 @@ teardown_cases(void)
 	    erx_dom_plan_retire(&view, 9, &teardown), &teardown);
 	teardown_case("retire_zero", erx_dom_plan_retire(&view, 0, &teardown),
 	    &teardown);
-	connections[2] = (erx_dom_connection_t){ .number = 9, .a = 5, .b = 7,
-	    .closing = true };
-	teardown_case("retire_busy", erx_dom_plan_retire(&view, 7, &teardown),
-	    &teardown);
 	connections[2] = (erx_dom_connection_t){ .number = 9,
 	    .a = ERX_DOM_SYSTEM_ID, .b = 7 };
 	teardown_case("retire_busy_system",
 	    erx_dom_plan_retire(&view, 7, &teardown), &teardown);
+	remains_cases();
 }
 
 static void

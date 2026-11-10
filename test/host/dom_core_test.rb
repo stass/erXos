@@ -156,6 +156,9 @@ class DomCoreTest < Minitest::Test
     'restart_running' => EINVAL.to_s,
     'restart_ended' => '0',
     'restart_retired' => '0 id=0 principal=0,0',
+    'restart_held_retire' => '0',
+    'restart_held' => '0 principal=0,1048576',
+    'restart_held_same_id' => EINVAL.to_s,
     'restart_stale' => EINVAL.to_s,
     'restart_stale_fits' => '0'
   }.freeze

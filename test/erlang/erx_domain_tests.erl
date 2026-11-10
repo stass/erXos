@@ -63,12 +63,12 @@ admit(Name, Principal, Origin, Core) ->
     {ok, Domain, Next} = erx_domain_core:admit(ident(Name), Principal, Origin, Core),
     {Domain, Next}.
 
-%% Runs a domain through its life to retired.
+%% Runs a domain through its life to its end, which drops its record.
 live(Name, Core0) ->
     {#{id := Id} = Domain, Core1} = admit(Name, 1, request, Core0),
     Core2 = erx_domain_core:running(Id, erx_domain_core:built(Id, #{connection => 7, ctl_slots => 0, reader => 4096}, self(), make_ref(), Core1)),
     {stopped, _, Core3} = erx_domain_core:ended(Id, {stopped, 0}, none, 0, Core2),
-    {Domain, erx_domain_core:retired(Id, Core3)}.
+    {Domain, Core3}.
 
 %% D1: ids start above the system domain's 4, increase, and are never reused,
 %% whether a creation succeeded or was refused.
@@ -189,6 +189,7 @@ service_test_() ->
                           fun report_overtaken/0, fun introduce/0, {timeout, 30, fun connection_down/0},
                           fun retire_answers_create/0, fun lost_side/0, fun ended_in_library/0,
                           fun forged_answer/0, fun refused_stop/0, fun facets/0,
+                          fun configured_restart_held/0,
                           fun service_end_ends_domain_pids/0]} end}.
 
 next_call() ->
@@ -278,6 +279,38 @@ configured_restart() ->
     ?assertEqual({open_side, 11, 'after@erxos', 110}, next_call()),
     ?assertEqual({export, 11, [send]}, next_call()),
     ?assertEqual({start, 11}, next_call()).
+
+configured_restart_held() ->
+    %% Row 1 (a, id 5) has room for one domain: the stand-in refuses a second domain of
+    %% a row while the library holds the first, as a principal with room for one does.
+    %% It ends while a survivor still holds their connection, and the library retires
+    %% it at once, keeping only the outer budget the connection is carved from, so the
+    %% row restarts before the survivor lets go.
+    Self = self(),
+    #{core := Core} = sys:get_state(erx_domain_srv),
+    {ok, #{pid := APid}} = erx_domain_core:fetch(5, Core),
+    {ok, Peer} = erx_domain:create(#{name => <<"holder">>, memory => 4096}),
+    _ = [next_call() || _ <- lists:seq(1, 4)],
+    {PeerId, PeerPid} = {erx_domain:id(Peer), erx_domain:pid(Peer)},
+    spawn_link(fun() -> Self ! {introduced, erx_domain:introduce({erx_domain, 5, 'a@erxos', APid}, Peer)} end),
+    Reader = fun erx_domain_fake_lib:reader/1,
+    ?assertEqual({connect, 5, PeerId, Reader(5), Reader(PeerId)}, next_call()),
+    APid ! {erx_origin, 5, {erx_connection_mapped, PeerId}},
+    PeerPid ! {erx_origin, PeerId, {erx_connection_mapped, 5}},
+    ?assertEqual({introduced, ok}, receive {introduced, _} = Introduced -> Introduced after 5000 -> none end),
+    erx_domain_srv ! {domain_ended, 5, {halt, 1}, #{}},
+    ?assertMatch({close_side, 5, {domain_down, 5, _}}, next_call()),
+    ?assertEqual({disconnect, 50}, next_call()),
+    ?assertEqual({retire, 5}, next_call()),
+    ?assertMatch({configured, _, 1}, next_call()),
+    _ = [next_call() || _ <- lists:seq(1, 3)],
+    %% The survivor lets go: the connection goes, and the library's remains with it.
+    PeerPid ! {erx_origin, PeerId, {erx_connection_unmapped, 5}},
+    ?assertEqual({disconnect, 500 + PeerId}, next_call()),
+    ok = erx_domain:stop(Peer, shutdown),
+    ?assertEqual({stop, PeerId}, next_call()),
+    _ = [next_call() || _ <- lists:seq(1, 3)],
+    ok.
 
 refused_side() ->
     %% A side the agent refuses fails the create, and the domain the library
@@ -422,8 +455,8 @@ introduce() ->
     %% joined. A domain at its connections limit gets system_limit without the library
     %% being asked, and a pair of one domain, or with an unknown one, badarg. A domain's
     %% end tells each survivor connection_down with {domain_down, Id, Info}; each
-    %% connection's objects go once its survivor has answered connection_unmapped, and
-    %% the library retires the domain once the last of them is gone.
+    %% connection's objects go once its survivor has answered connection_unmapped, while
+    %% the library retires the domain at its end, whatever the survivors still map.
     Self = self(),
     Reader = fun erx_domain_fake_lib:reader/1,
     {ok, Early} = erx_domain:create(#{name => <<"early">>, memory => 4096}),
@@ -478,15 +511,13 @@ introduce() ->
     ok = erx_domain:stop(Early, shutdown),
     ?assertEqual({stop, EarlyId}, next_call()),
     _ = [next_call() || _ <- lists:seq(1, 2)],
-    ?assertEqual({retire, EarlyId, ebusy}, next_call()),
+    ?assertEqual({retire, EarlyId}, next_call()),
     ?assertEqual({0, {erx_connection_down, EarlyId, {domain_down, EarlyId, stopped}}}, Record(LatePid)),
     ?assertEqual({0, {erx_connection_down, EarlyId, {domain_down, EarlyId, stopped}}}, Record(ThirdPid)),
     LatePid ! {erx_origin, LateId, {erx_connection_unmapped, EarlyId}},
     ?assertEqual({disconnect, EarlyId * 100 + LateId}, next_call()),
-    ?assertEqual({retire, EarlyId, ebusy}, next_call()),
     ThirdPid ! {erx_origin, ThirdId, {erx_connection_unmapped, EarlyId}},
     ?assertEqual({disconnect, EarlyId * 100 + ThirdId}, next_call()),
-    ?assertEqual({retire, EarlyId}, next_call()),
     _ = [erlang:trace(Pid, false, ['receive']) || Pid <- [LatePid, ThirdPid]],
     [begin
          ok = erx_domain:stop(Domain, shutdown),
@@ -557,20 +588,18 @@ connection_down() ->
     ok = erx_domain:stop(X, shutdown),
     ?assertEqual({stop, XId}, next_call()),
     _ = [next_call() || _ <- lists:seq(1, 2)],
-    ?assertEqual({retire, XId, ebusy}, next_call()),
+    ?assertEqual({retire, XId}, next_call()),
     YPid ! {erx_origin, YId, {erx_connection_unmapped, XId}},
     ?assertEqual({disconnect, Number}, next_call()),
-    ?assertEqual({retire, XId}, next_call()),
     ok = erx_domain:stop(Y, shutdown),
     ?assertEqual({stop, YId}, next_call()),
     _ = [next_call() || _ <- lists:seq(1, 3)].
 
 retire_answers_create() ->
-    %% A create whose domain ends before it reports is answered once nothing of the
-    %% domain remains (A4 of docs/design-system.md): a connection a survivor still
-    %% holds keeps the domain, which the library retires only once the survivor has
-    %% unmapped and the connection's objects are gone, so the create's timeout comes
-    %% after the retire, not at the domain pid's end.
+    %% A create whose domain ends before it reports is answered once the domain has
+    %% ended and been retired and its domain pid has ended (A4 of docs/design-system.md):
+    %% a connection a survivor still holds keeps only the outer budget it is carved from,
+    %% so the create's timeout comes at the domain's end, before the survivor unmaps.
     Self = self(),
     {ok, Survivor} = erx_domain:create(#{name => <<"survivor">>, memory => 4096}),
     _ = [next_call() || _ <- lists:seq(1, 4)],
@@ -590,14 +619,12 @@ retire_answers_create() ->
     SurvivorPid ! {erx_origin, SurvivorId, {erx_connection_mapped, SilentId}},
     ?assertEqual({stop, SilentId}, next_call()),
     _ = [next_call() || _ <- lists:seq(1, 2)],
-    ?assertEqual({retire, SilentId, ebusy}, next_call()),
+    ?assertEqual({retire, SilentId}, next_call()),
     ?assertEqual({0, {erx_connection_down, SilentId, {domain_down, SilentId, stopped}}}, Record()),
     ?assertEqual({introduced, {error, noconnection}}, receive {introduced, _} = In -> In after 5000 -> none end),
-    ?assertEqual(none, receive {created, _} = Early -> Early after 300 -> none end),
+    ?assertEqual({created, {error, timeout}}, receive {created, _} = Created -> Created after 5000 -> none end),
     SurvivorPid ! {erx_origin, SurvivorId, {erx_connection_unmapped, SilentId}},
     ?assertEqual({disconnect, SurvivorId * 100 + SilentId}, next_call()),
-    ?assertEqual({retire, SilentId}, next_call()),
-    ?assertEqual({created, {error, timeout}}, receive {created, _} = Created -> Created after 5000 -> none end),
     _ = erlang:trace(SurvivorPid, false, ['receive']),
     ok = erx_domain:stop(Survivor, shutdown),
     ?assertEqual({stop, SurvivorId}, next_call()),
@@ -608,7 +635,8 @@ lost_side() ->
     %% the domain pid drops it rather than crash, and the domain ends as the agent's
     %% report of the side's end has it stopped, its pid ending with
     %% {domain_down, Id, Info}. The peer, told connection_down once it has answered its
-    %% connection_up, unmaps, and the domain is retired then.
+    %% connection_up, unmaps, and the connection goes then; the domain was retired at
+    %% its end.
     Self = self(),
     {ok, Lost} = erx_domain:create(#{name => <<"lost">>, memory => 4096}),
     _ = [next_call() || _ <- lists:seq(1, 4)],
@@ -627,7 +655,7 @@ lost_side() ->
     erx_domain_srv ! {system_side_ended, LostId},
     ?assertEqual({stop, LostId}, next_call()),
     _ = [next_call() || _ <- lists:seq(1, 2)],
-    ?assertEqual({retire, LostId, ebusy}, next_call()),
+    ?assertEqual({retire, LostId}, next_call()),
     ?assertEqual({domain_down, LostId, stopped},
                  receive {'DOWN', Watch, process, LostPid, Down} -> Down after 5000 -> timeout end),
     MatePid ! {erx_origin, MateId, {erx_connection_mapped, LostId}},
@@ -635,7 +663,6 @@ lost_side() ->
     ?assertEqual({introduced, {error, noconnection}}, receive {introduced, _} = In -> In after 5000 -> none end),
     MatePid ! {erx_origin, MateId, {erx_connection_unmapped, LostId}},
     ?assertEqual({disconnect, LostId * 100 + MateId}, next_call()),
-    ?assertEqual({retire, LostId}, next_call()),
     _ = erlang:trace(MatePid, false, ['receive']),
     ok = erx_domain:stop(Mate, shutdown),
     ?assertEqual({stop, MateId}, next_call()),
@@ -681,10 +708,9 @@ forged_answer() ->
     ok = erx_domain:stop(X, shutdown),
     ?assertEqual({stop, XId}, next_call()),
     _ = [next_call() || _ <- lists:seq(1, 2)],
-    ?assertEqual({retire, XId, ebusy}, next_call()),
+    ?assertEqual({retire, XId}, next_call()),
     YPid ! {erx_origin, YId, {erx_connection_unmapped, XId}},
     ?assertEqual({disconnect, XId * 100 + YId}, next_call()),
-    ?assertEqual({retire, XId}, next_call()),
     ok = erx_domain:stop(Y, shutdown),
     ?assertEqual({stop, YId}, next_call()),
     _ = [next_call() || _ <- lists:seq(1, 3)].

@@ -13,9 +13,9 @@ create once the domain's init reports ready through its domain pid, stops a
 domain that does not report within its boot timeout or whose side the agent
 reports ended, and on each
 {domain_ended, Id, End, Record} has the agent close that side, disconnects
-the connection, ends its domain pid with {domain_down, Id, Info}, retires it
-and restarts a configured domain within its restart intensity. It keeps the
-manifest's session templates by principal, from which each session of that
+the connection, ends its domain pid with {domain_down, Id, Info}, has the library
+retire it at once, whatever its peers still map, and restarts a configured
+domain within its restart intensity. It keeps the manifest's session templates by principal, from which each session of that
 principal is made; a template is no configured domain, so the boot never
 starts one and nothing restarts one.
 
@@ -188,7 +188,7 @@ handle_info({system_side_ended, Id}, #{core := Core} = State) ->
     %% closed it: this runtime ended the connection, for a malformed frame, a peer bound
     %% passed or its owner's end, so the domain goes (docs/design-system.md, "A lost
     %% system connection ends the domain"). Ids are never reused, so a late report for an
-    %% ended domain finds it ended or retired.
+    %% ended domain finds no record.
     case erx_domain_core:fetch(Id, Core) of
         {ok, #{state := Life}} when ?IS_LIVE(Life) ->
             logger:notice("erx_domain: domain ~b's system side ended; stopping the domain", [Id]),
@@ -293,8 +293,8 @@ start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := L
 %% system connection is open and the pid is exported to the domain. A refused plan ends
 %% the pid, unlinked first, so no domain is stopped for it; a domain the library made
 %% whose side, export or start is refused is stopped, its end retires it as any end
-%% does, and its create is refused once it is retired. A started domain is waiting for
-%% its init's ready report, which Timeout bounds, unless it has no system connection,
+%% does, and its create is refused once it has ended and been retired. A started domain
+%% is waiting for its init's ready report, which Timeout bounds, unless it has no system connection,
 %% the one path a report could take: then it is ready at its start. Facets are the
 %% processes the domain gets a facet in front of when it reports ready; a domain with no
 %% system connection never reports, so it gets none.
@@ -459,17 +459,16 @@ pid_ended(Pid, #{waiting := Waiting} = State) ->
     end.
 
 %% Answers the create of domain Id, which ended in life Life before it reported ready,
-%% once nothing of the domain remains (A4 of docs/design-system.md): it has ended, the
-%% library has retired it, which it does only once every connection of the domain is
-%% disconnected, so a survivor that still holds one keeps the answer waiting, and its
-%% domain pid has ended. ended/3, pid_ended/2 and retire_ended/1 each call this, so
-%% whichever of the three comes last answers.
-settle(Id, #{waiting := Waiting, core := Core} = State) ->
-    case {Waiting, erx_domain_core:fetch(Id, Core)} of
-        {#{Id := #{from := From, pid := gone, ended := {Life, Info}, refusal := Refusal}}, none} ->
+%% once nothing of the domain is charged but what a survivor still maps (A4 of
+%% docs/design-system.md): it has ended, which ended/3 notes only after it asked the
+%% library to retire it (a refusal is logged by retire/2), and its domain pid has ended. ended/3 and pid_ended/2 each call this, so
+%% whichever of the two comes last answers.
+settle(Id, #{waiting := Waiting} = State) ->
+    case Waiting of
+        #{Id := #{from := From, pid := gone, ended := {Life, Info}, refusal := Refusal}} ->
             gen_server:reply(From, create_error(Refusal, Life, Info)),
             State#{waiting := maps:remove(Id, Waiting)};
-        {#{}, _} ->
+        #{} ->
             State
     end.
 
@@ -600,8 +599,8 @@ answer_callers(Callers, Reply) ->
 %% Performs erx_domain_links's actions in order: each record goes to its party's domain
 %% pid, tagged with the secret the two share and the slot the core gave it, and the pid
 %% writes it into that slot of the domain's control table at once (erx_domain_pid); a
-%% disconnect destroys the connection's children, with its objects, after which an ended
-%% domain whose last connection that was can be retired.
+%% disconnect destroys the connection's children, with its objects, and the remains of a
+%% retired party whose last connection that was.
 perform(Actions, State) ->
     settle_introductions(lists:foldl(fun act/2, State, Actions)).
 
@@ -612,7 +611,7 @@ act({send, P, Slot, Record}, #{core := Core} = State) ->
     State;
 act({disconnect, Number}, #{lib := Lib} = State) ->
     case Lib:disconnect(Number) of
-        ok -> retire_ended(State);
+        ok -> State;
         {error, Reason} ->
             logger:error("erx_domain: the library refused to disconnect connection ~b: ~0p", [Number, Reason]),
             State
@@ -625,19 +624,19 @@ wire({connection_up, Peer, PeerNode, {Side, PeerSide, PeerBell, Label, OutSize, 
 wire({connection_down, Peer, Reason}) ->
     {erx_connection_down, Peer, Reason}.
 
-%% Retires every ended domain the library now lets go, its connections all disconnected
-%% (ebusy before), and answers the create of each that still waits.
-retire_ended(#{lib := Lib, core := Core} = State) ->
-    Ended = [Id || #{id := Id, state := ended} <- erx_domain_core:domains(Core)],
-    Retired = lists:filter(fun(Id) -> retire(Lib, Id) end, Ended),
-    Next = State#{core := lists:foldl(fun erx_domain_core:retired/2, Core, Retired)},
-    lists:foldl(fun settle/2, Next, Retired).
-
-%% Asks the library to retire ended domain Id: true once it has.
+%% Asks the library to retire ended domain Id, its crash area read and its system
+%% connection disconnected: the library frees the domain's record and gives its principal
+%% back the domain, keeping only the outer budget a survivor's connection still holds a
+%% child of. A refusal, which only a bug of the service or the library makes (a system
+%% connection whose disconnect was refused, say), leaves the record charged in the library,
+%% and is logged; the create of the domain is answered all the same (TODO.md).
 retire(Lib, Id) ->
     case Lib:retire(Id) of
-        ok -> true;
-        {error, _} -> false
+        ok ->
+            ok;
+        {error, Reason} ->
+            logger:error("erx_domain: the library refused to retire domain ~b: ~0p", [Id, Reason]),
+            refused
     end.
 
 %% An answer domain Id's pid passed on with Ref, applied by the protocol's core only when
@@ -673,9 +672,9 @@ stop(Id, #{lib := Lib}) ->
 %% destroyed and before its domain pid ends, so no driver callback touches them once they
 %% are gone (the unmap itself may still trail the port's end: TODO.md). Every peer that
 %% knows of a connection with it is told connection_down with {domain_down, Id, Info};
-%% such a connection's objects go once the peer has answered, and the domain is retired
-%% then (retire_ended/1), since the library keeps an ended domain while a connection of
-%% it stands.
+%% such a connection's objects go once the peer has answered. The domain is retired at
+%% once, before its restart, and only the outer budget such a connection's child is
+%% carved from outlives it, as the library's remains, until that disconnect.
 ended(Id, End, #{lib := Lib, core := Core, links := Links} = State) ->
     case erx_domain_core:ended(Id, End, slogan(Lib, Id, End), erlang:system_time(second), Core) of
         none ->
@@ -686,8 +685,8 @@ ended(Id, End, #{lib := Lib, core := Core, links := Links} = State) ->
             Pid ! {Ref, domain_down, Info},
             {Actions, Unlinked} = erx_domain_links:ended(Id, Info, Links),
             Told = perform(Actions, State#{core := Ended, links := Unlinked}),
-            Retired = retire_ended(Told),
-            restart(Origin, waiter_ended(Id, Life, Info, Retired))
+            _ = retire(Lib, Id),
+            restart(Origin, waiter_ended(Id, Life, Info, Told))
     end.
 
 %% A crash's slogan, from its crash area, which goes at the retire after it.
@@ -714,7 +713,12 @@ close_side(Id, _Connection, Reason, #{agent := Agent, node := Node}) ->
     end.
 
 disconnect(_Lib, 0) -> ok;
-disconnect(Lib, Connection) -> Lib:disconnect(Connection).
+disconnect(Lib, Connection) ->
+    case Lib:disconnect(Connection) of
+        ok -> ok;
+        {error, Reason} ->
+            logger:error("erx_domain: the library refused to disconnect connection ~b: ~0p", [Connection, Reason])
+    end.
 
 restart(request, State) ->
     State;

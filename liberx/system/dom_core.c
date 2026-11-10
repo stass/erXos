@@ -116,6 +116,7 @@ static erx_status_t dom_check_sizes(const erx_dom_spec_t *,
 		    const erx_dom_view_t *, uint64_t *, uint64_t *);
 static erx_status_t dom_check_grants(const erx_dom_spec_t *,
 		    const erx_dom_view_t *, const erx_dom_principal_t *);
+static bool	dom_remains_hold(const erx_dom_view_t *, uint32_t);
 static erx_status_t dom_check_room(const erx_dom_spec_t *,
 		    const erx_dom_view_t *, const erx_dom_principal_t *,
 		    erx_dom_plan_t *);
@@ -216,8 +217,8 @@ dom_grant_fits(const erx_grant_t *child, const erx_grant_t *parent)
  * from the plan's apply until the domain ends. BUILDING counts, so a
  * group that may already exist is never left out; whatever marks a
  * record BUILDING writes its grant with it. An ended domain's group went
- * with its own budget, and a retired record is free, so neither counts
- * and nothing has to be taken back.
+ * with its own budget, and a retired domain has no record, so neither
+ * counts and nothing has to be taken back.
  */
 static bool
 dom_service_grant(const erx_dom_t *dom)
@@ -231,7 +232,6 @@ dom_service_grant(const erx_dom_t *dom)
 		return (true);
 	case ERX_DOM_FREE:
 	case ERX_DOM_ENDED:
-	case ERX_DOM_RETIRED:
 		return (false);
 	}
 	return (false);
@@ -475,7 +475,21 @@ dom_check_grants(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 }
 
 /*
- * Room for the domain: a free record, the principal's quota, its budget,
+ * Whether a retired domain's remains hold id, which the connection rows
+ * naming it still mean, so no new domain may take it.
+ */
+static bool
+dom_remains_hold(const erx_dom_view_t *view, uint32_t id)
+{
+	for (uint32_t index = 0; id != 0 && index < view->max_remains; index++)
+		if (view->remains[index].id == id)
+			return (true);
+	return (false);
+}
+
+/*
+ * Room for the domain: a free record, an id neither a record nor remains
+ * hold, the principal's quota, its budget,
  * and a free connection row for the system connection. Fills the plan's
  * slot and connection.
  */
@@ -486,6 +500,8 @@ dom_check_room(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 	uint64_t carved;
 
 	plan->slot = view->max_domains;
+	if (dom_remains_hold(view, spec->id))
+		return (ERX_EINVAL);
 	for (uint32_t index = 0; index < view->max_domains; index++) {
 		if (view->domains[index].id == spec->id)
 			return (ERX_EINVAL);
@@ -940,6 +956,8 @@ erx_dom_plan_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 	for (uint32_t index = 0; index < view->max_domains; index++)
 		if (view->domains[index].id == spec->id)
 			return (ERX_EINVAL);
+	if (dom_remains_hold(view, spec->id))
+		return (ERX_EINVAL);
 	/* The system connection, when there is one, takes the next number. */
 	if (!connected && plan->connection != 0)
 		return (ERX_EINVAL);
@@ -962,7 +980,8 @@ erx_dom_plan_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 	dom->end = (erx_dom_end_t){ .kind = ERX_DOM_END_NONE };
 	memset(&dom->record, 0, sizeof(dom->record));
 	/* The sum above was checked, so its two terms cannot wrap. */
-	dom->carved = spec->memory + spec->outer;
+	dom->own_bytes = spec->memory;
+	dom->outer_bytes = spec->outer;
 	principal->domains++;
 	principal->carved = carved;
 	if (connected) {

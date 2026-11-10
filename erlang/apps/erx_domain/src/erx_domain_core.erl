@@ -26,15 +26,15 @@ bounds them.
 
 A domain's life: building (admitted, the library not yet asked) -> built
 (the library made it) -> running (its first thread started) -> ready (its
-init reported ready) -> ended (its end arrived) -> retired (its record is
-gone). A running domain whose boot timeout passed is stopping instead of
+init reported ready), and at its end the domain leaves the table, as the
+library retires it then. A running domain whose boot timeout passed is stopping instead of
 ready, so no late report makes it ready; a domain may end from built,
 running, ready or stopping. A creation the library refuses
 goes from building to nothing, freeing its name. A transition from any other
 state is a bug of the caller and fails with a badmatch.
 """.
 
--export([new/1, host/1, admit/4, built/5, running/2, ready/2, stopping/2, failed/2, ended/5, retired/2,
+-export([new/1, host/1, admit/4, built/5, running/2, ready/2, stopping/2, failed/2, ended/5,
          restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1]).
 -export_type([state/0, domain/0, origin/0, info/0, slogan/0]).
 
@@ -44,12 +44,12 @@ state is a bug of the caller and fails with a badmatch.
 -define(DEATHS_KEPT, 16).
 
 -type origin() :: request | {configured, Row :: non_neg_integer()}.
--type life() :: building | built | running | ready | stopping | ended.
+-type life() :: building | built | running | ready | stopping.
 -type info() :: {halt, integer()} | crash | {fault, integer()} | stopped.
 -type domain() :: #{id := pos_integer(), name := erx_ident:t(), node := node(),
                     principal := pos_integer(), origin := origin(), state := life(),
                     pid := pid() | undefined, ref := reference() | undefined,
-                    connection := non_neg_integer(), ended := undefined | {info(), integer()},
+                    connection := non_neg_integer(),
                     ctl_slots := non_neg_integer(), reader := non_neg_integer(),
                     facets := #{atom() => {pid(), map()}}}.
 -type binding() :: #{principal := pos_integer(), node := node(), holder := none | pos_integer()}.
@@ -101,7 +101,7 @@ admit(Name, Principal, Origin, #{names := Names, bound := Bound} = State) ->
 take(Name, #{node := Node} = Binding, Principal, Origin,
      #{next_id := Id, names := Names, domains := Domains} = State) ->
     Domain = #{id => Id, name => Name, node => Node, principal => Principal, origin => Origin,
-               state => building, pid => undefined, ref => undefined, connection => 0, ended => undefined,
+               state => building, pid => undefined, ref => undefined, connection => 0,
                ctl_slots => 0, reader => 0, facets => #{}},
     Next = State#{next_id := Id + 1, names := Names#{erx_ident:to_binary(Name) => Binding#{holder := Id}},
                   domains := Domains#{Id => Domain}},
@@ -144,8 +144,8 @@ failed(Id, #{domains := Domains} = State) ->
 
 -doc """
 Domain Id ended with End, the library's {Kind, Status}, at Now: the domain's
-Info for {domain_down, Id, Info}, the domain as it was, and the state with the
-domain ended, its name free and its death recorded, the last ?DEATHS_KEPT per
+Info for {domain_down, Id, Info}, the domain as it was, and the state without
+the domain, its name free and its death recorded, the last ?DEATHS_KEPT per
 principal. Slogan is what the domain service read from a crash's crash
 area, which the crash's death record keeps; none for any other end. The end
 of an unknown id, or of a domain neither built, running, ready nor stopping,
@@ -160,18 +160,12 @@ ended(Id, End, Slogan, Now, #{domains := Domains, deaths := Deaths} = State) ->
             Info = info(End),
             Death = death(#{id => Id, name => Name, info => Info, at => Now}, Slogan),
             Kept = lists:sublist([Death | maps:get(Principal, Deaths, [])], ?DEATHS_KEPT),
-            Next = State#{domains := Domains#{Id := Domain#{state := ended, ended := {Info, Now}}},
+            Next = State#{domains := maps:remove(Id, Domains),
                           deaths := Deaths#{Principal => Kept}},
             {Info, Domain, free_name(Domain, Next)};
         #{} ->
             none
     end.
-
--doc "The library retired ended domain Id: its record goes.".
--spec retired(pos_integer(), state()) -> state().
-retired(Id, #{domains := Domains} = State) ->
-    #{Id := #{state := ended}} = Domains,
-    State#{domains := maps:remove(Id, Domains)}.
 
 -doc """
 Whether configured row Row restarts at Now, in seconds: yes while fewer than

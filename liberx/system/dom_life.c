@@ -15,7 +15,10 @@
  * A domain's end runs through its record's states: built or running; then,
  * once the library stops it, stopping with the reason noted; then, at its
  * exit record, ended, with its own budget destroyed and its end
- * classified; then retired, once no connection names it.
+ * classified; then retired as soon as the domain service has read its
+ * crash area: the record is freed, and the outer budget is destroyed or,
+ * while connection rows still name the domain, kept as its remains, which
+ * the disconnect of the last such row destroys.
  */
 
 #include <stdbool.h>
@@ -31,6 +34,11 @@ static erx_dom_principal_t *life_principal(const erx_dom_view_t *, uint32_t);
 static bool	life_gives_back(const erx_dom_view_t *, const erx_dom_t *);
 static uint32_t	life_slot(const erx_dom_view_t *, uint64_t);
 static uint32_t	life_connections(const erx_dom_view_t *, uint32_t);
+static uint32_t	life_rows_naming(const erx_dom_view_t *, uint32_t);
+static uint32_t	life_remains(const erx_dom_view_t *, uint32_t);
+static uint32_t	life_remains_free(const erx_dom_view_t *);
+static uint32_t	life_remains_last(const erx_dom_view_t *, uint32_t);
+static bool	life_remains_held(const erx_dom_view_t *, const erx_dom_teardown_t *);
 static bool	life_room(const erx_dom_view_t *, const erx_dom_t *);
 static bool	life_granted(const erx_dom_step_t *);
 static bool	life_step_ok(const erx_dom_step_t *, const bool *);
@@ -67,15 +75,17 @@ life_principal(const erx_dom_view_t *view, uint32_t number)
 
 /*
  * Whether dom's principal counts it, so its retire can give the domain
- * and its carved bytes back without wrapping either count.
+ * and the bytes of both its budgets back without wrapping either count.
  */
 static bool
 life_gives_back(const erx_dom_view_t *view, const erx_dom_t *dom)
 {
 	const erx_dom_principal_t *principal = life_principal(view, dom->principal);
+	uint64_t bytes;
 
 	return (principal != NULL && principal->domains != 0 &&
-	    principal->carved >= dom->carved);
+	    life_add(dom->own_bytes, dom->outer_bytes, &bytes) &&
+	    principal->carved >= bytes);
 }
 
 /*
@@ -111,6 +121,84 @@ life_connections(const erx_dom_view_t *view, uint32_t id)
 			count++;
 	}
 	return (count);
+}
+
+/*
+ * The rows naming id, its system connection included; life_connections
+ * counts the same rows less the system connection, for the quota.
+ */
+static uint32_t
+life_rows_naming(const erx_dom_view_t *view, uint32_t id)
+{
+	const erx_dom_connection_t *row;
+	uint32_t count = 0;
+
+	for (uint32_t index = 0; index < view->max_connections; index++) {
+		row = &view->connections[index];
+		if (row->number != 0 && (row->a == id || row->b == id))
+			count++;
+	}
+	return (count);
+}
+
+/* The remains row of retired domain id, or max_remains for none; 0 names none. */
+static uint32_t
+life_remains(const erx_dom_view_t *view, uint32_t id)
+{
+	for (uint32_t index = 0; id != 0 && index < view->max_remains; index++)
+		if (view->remains[index].id == id)
+			return (index);
+	return (view->max_remains);
+}
+
+/* A free remains row, or max_remains for none. */
+static uint32_t
+life_remains_free(const erx_dom_view_t *view)
+{
+	for (uint32_t index = 0; index < view->max_remains; index++)
+		if (view->remains[index].id == 0)
+			return (index);
+	return (view->max_remains);
+}
+
+/*
+ * The remains row that a disconnect of a row naming id destroys: id's,
+ * when the row is the last naming it; max_remains when id has none or
+ * another row still names it.
+ */
+static uint32_t
+life_remains_last(const erx_dom_view_t *view, uint32_t id)
+{
+	const uint32_t index = life_remains(view, id);
+
+	if (index == view->max_remains || life_rows_naming(view, id) != 1)
+		return (view->max_remains);
+	return (index);
+}
+
+/*
+ * Whether each principal of the remains a disconnect destroys holds
+ * their bytes, summed per principal, so the record cannot wrap a count.
+ */
+static bool
+life_remains_held(const erx_dom_view_t *view, const erx_dom_teardown_t *teardown)
+{
+	const erx_dom_remains_t *remains;
+	const erx_dom_principal_t *principal;
+	uint64_t bytes;
+
+	for (uint32_t index = 0; index < teardown->nremains; index++) {
+		remains = &view->remains[teardown->remains[index]];
+		principal = life_principal(view, remains->principal);
+		bytes = 0;
+		for (uint32_t other = 0; other < teardown->nremains; other++)
+			if (view->remains[teardown->remains[other]].principal == remains->principal &&
+			    !life_add(bytes, view->remains[teardown->remains[other]].bytes, &bytes))
+				return (false);
+		if (principal == NULL || principal->carved < bytes)
+			return (false);
+	}
+	return (true);
 }
 
 /* Room for one more connection: its quota and a bell label below the split. */
@@ -346,6 +434,7 @@ erx_dom_plan_disconnect(const erx_dom_view_t *view, uint32_t number,
 {
 	const erx_dom_connection_t *row;
 	erx_dom_teardown_t draft = { .kind = ERX_DOM_DISCONNECT };
+	uint32_t remains;
 
 	if (number == 0)
 		return (ERX_EINVAL);
@@ -358,32 +447,71 @@ erx_dom_plan_disconnect(const erx_dom_view_t *view, uint32_t number,
 		if (row->a != ERX_DOM_SYSTEM_ID)
 			draft.destroy[draft.ndestroy++] = row->budget_a;
 		draft.destroy[draft.ndestroy++] = row->budget_b;
+		/*
+		 * A retired party's remains go with the last row naming it. A
+		 * system connection never names one: a retire waits for it.
+		 */
+		for (uint32_t party = 0; party < 2 && row->a != ERX_DOM_SYSTEM_ID; party++) {
+			remains = life_remains_last(view, party == 0 ? row->a : row->b);
+			if (remains != view->max_remains)
+				draft.remains[draft.nremains++] = remains;
+		}
+		if (!life_remains_held(view, &draft))
+			return (ERX_EINVAL);
 		*teardown = draft;
 		return (ERX_OK);
 	}
 	return (ERX_EINVAL);
 }
 
+void
+erx_dom_disconnect_record(erx_dom_view_t *view,
+    const erx_dom_teardown_t *teardown)
+{
+	erx_dom_remains_t *remains;
+
+	/* erx_dom_plan_disconnect checked that each principal holds the bytes. */
+	for (uint32_t index = 0; index < teardown->nremains; index++) {
+		remains = &view->remains[teardown->remains[index]];
+		life_principal(view, remains->principal)->carved -= remains->bytes;
+		*remains = (erx_dom_remains_t){ .id = 0 };
+	}
+	view->connections[teardown->index] = (erx_dom_connection_t){ .number = 0 };
+}
+
 erx_status_t
 erx_dom_plan_retire(const erx_dom_view_t *view, uint32_t id,
     erx_dom_teardown_t *teardown)
 {
-	uint32_t slot = life_slot(view, id);
+	const uint32_t slot = life_slot(view, id);
 	const erx_dom_connection_t *row;
+	const erx_dom_t *dom;
+	uint32_t free;
 
 	if (slot == view->max_domains ||
 	    view->domains[slot].state != ERX_DOM_ENDED ||
 	    !life_gives_back(view, &view->domains[slot]))
 		return (ERX_EINVAL);
-	/* Every child of an outer budget is a connection's (A5). */
+	dom = &view->domains[slot];
+	/* The system connection's child holds both its sides, which the system domain unmaps first. */
 	for (uint32_t index = 0; index < view->max_connections; index++) {
 		row = &view->connections[index];
-		if (row->number != 0 && (row->a == id || row->b == id))
+		if (row->number != 0 && row->a == ERX_DOM_SYSTEM_ID && row->b == id)
 			return (ERX_EBUSY);
 	}
+	/* Every other child of an outer budget is a connection's (A5). */
+	if (life_rows_naming(view, id) == 0) {
+		*teardown = (erx_dom_teardown_t){ .kind = ERX_DOM_RETIRE,
+		    .index = slot, .ndestroy = 1, .destroy = { dom->outer } };
+		return (ERX_OK);
+	}
+	free = life_remains_free(view);
+	if (free == view->max_remains)
+		return (ERX_EINVAL);
+	/* The crash area is read; only what a survivor maps outlives the domain. */
 	*teardown = (erx_dom_teardown_t){ .kind = ERX_DOM_RETIRE,
-	    .index = slot, .ndestroy = 1,
-	    .destroy = { view->domains[slot].outer } };
+	    .index = slot, .ndestroy = dom->crash.raw != ERX_CAP_NULL ? 1 : 0,
+	    .destroy = { dom->crash }, .nremains = 1, .remains = { free } };
 	return (ERX_OK);
 }
 
@@ -396,7 +524,13 @@ erx_dom_retire_record(erx_dom_view_t *view,
 
 	/* erx_dom_plan_retire checked that the counts hold the domain. */
 	principal->domains--;
-	principal->carved -= dom->carved;
+	principal->carved -= dom->own_bytes;
+	if (teardown->nremains == 0)
+		principal->carved -= dom->outer_bytes;
+	else
+		view->remains[teardown->remains[0]] = (erx_dom_remains_t){
+		    .id = dom->id, .principal = dom->principal,
+		    .outer = dom->outer, .bytes = dom->outer_bytes };
 	*dom = (erx_dom_t){ .id = 0 };
 }
 

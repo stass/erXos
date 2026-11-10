@@ -57,10 +57,11 @@ open: noproc where the system domain is no node),
 timeout (init did not report ready within boot_timeout, and the service
 stopped the domain), {boot, Info} (the domain ended before it reported,
 Info as in {domain_down, Id, Info}), or the domain library's own refusal.
-On every error nothing of the domain remains but its id, which is never
-reused: the error comes once the domain is retired, so a domain introduced
-before it reported ready answers only once each peer has unmapped their
-connection.
+On every error nothing of the domain is charged but what a peer still
+maps, and its id is never reused: the error comes once the domain has
+ended and been retired, at its end, and a domain introduced before it
+reported ready leaves only the outer budget its peers' connections are
+carved from, its principal's until each peer has unmapped.
 """.
 -spec create(spec()) -> {ok, domain()} | {error, term()}.
 create(Spec) ->

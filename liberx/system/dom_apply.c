@@ -695,11 +695,76 @@ teardown_set(erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown, handle_set_
 }
 
 /*
+ * Whether a disconnect's remains rows are ones the library holds for
+ * this row's parties: distinct, each holding the outer budget the view
+ * names, of a party the row names.
+ */
+static bool
+teardown_remains_taken(const erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown)
+{
+	const erx_dom_connection_t *conn = &lib->view.connections[teardown->index];
+	const erx_dom_remains_t *remains;
+	uint32_t row;
+
+	if (teardown->nremains > 2 || (teardown->nremains == 2 &&
+	    teardown->remains[0] == teardown->remains[1]))
+		return (false);
+	for (uint32_t index = 0; index < teardown->nremains; index++) {
+		row = teardown->remains[index];
+		if (row >= lib->view.max_remains)
+			return (false);
+		remains = &lib->view.remains[row];
+		if (lib->remains_held[row] == ERX_CAP_NULL ||
+		    lib->remains_held[row] != remains->outer.raw ||
+		    (remains->id != conn->a && remains->id != conn->b))
+			return (false);
+	}
+	return (true);
+}
+
+/*
+ * Whether a retire that keeps remains moves what it should: a free row,
+ * and the record's outer budget handle, which the view's record names.
+ */
+static bool
+teardown_remains_free(const erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown)
+{
+	const uint32_t row = teardown->remains[0];
+	const uint64_t outer = lib->handles[teardown->index].made[ERX_DOM_OBJ_OUTER];
+
+	return (teardown->nremains == 1 && row < lib->view.max_remains &&
+	    lib->remains_held[row] == ERX_CAP_NULL && outer != ERX_CAP_NULL &&
+	    outer == lib->view.domains[teardown->index].outer.raw);
+}
+
+/* Whether the teardown's remains rows, if any, are what the library holds. */
+static bool
+teardown_remains_ok(const erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown)
+{
+	if (teardown->nremains == 0)
+		return (true);
+	switch (teardown->kind) {
+	case ERX_DOM_DISCONNECT:
+		return (teardown->index < lib->view.max_connections &&
+		    teardown_remains_taken(lib, teardown));
+	case ERX_DOM_RETIRE:
+		return (teardown->index < lib->view.max_domains &&
+		    teardown_remains_free(lib, teardown));
+	case ERX_DOM_DESTROY:
+	default:
+		return (false);
+	}
+}
+
+/*
  * Destroys the budgets the teardown names, each found among the handles
  * that hold it before any is destroyed, then closes the handles to what
- * went and copies the record's capabilities again. ERX_EINVAL, destroying
- * nothing, when a capability is not among those handles: a value that
- * matched elsewhere could name another domain's object.
+ * went and copies the record's capabilities again. A disconnect then
+ * destroys the remains it lists, each outer budget the last child of which
+ * just went; a retire that keeps remains moves the record's outer budget
+ * handle into its row instead of destroying it. ERX_EINVAL,
+ * destroying nothing, when a capability is not among those handles: a
+ * value that matched elsewhere could name another domain's object.
  */
 static erx_status_t
 teardown_apply(erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown)
@@ -707,9 +772,11 @@ teardown_apply(erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown)
 	erx_dom_obj_t obj[2];
 	handle_set_t set;
 	uint32_t slot;
+	uint64_t *outer;
 	const uint32_t count = teardown->ndestroy;
 
-	if (count > 2 || !teardown_set(lib, teardown, &set, &slot))
+	if (count > 2 || !teardown_remains_ok(lib, teardown) ||
+	    !teardown_set(lib, teardown, &set, &slot))
 		return (ERX_EINVAL);
 	for (uint32_t index = 0; index < count; index++) {
 		obj[index] = set_find(&set, teardown->destroy[index].raw);
@@ -722,6 +789,17 @@ teardown_apply(erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown)
 	}
 	if (slot < lib->view.max_domains)
 		lib_view_caps(lib, slot);
+	if (teardown->kind == ERX_DOM_RETIRE && teardown->nremains == 1) {
+		lib->remains_held[teardown->remains[0]] = lib->handles[slot].made[ERX_DOM_OBJ_OUTER];
+		lib->handles[slot].made[ERX_DOM_OBJ_OUTER] = ERX_CAP_NULL;
+		return (ERX_OK);
+	}
+	for (uint32_t index = 0; index < teardown->nremains; index++) {
+		outer = &lib->remains_held[teardown->remains[index]];
+		(void)erx_object_destroy(*outer);
+		(void)erx_cap_close(*outer);
+		*outer = ERX_CAP_NULL;
+	}
 	return (ERX_OK);
 }
 
@@ -860,7 +938,7 @@ erx_dom_lib_disconnect(erx_dom_lib_t *lib, uint32_t number)
 		status = teardown_apply(lib, &teardown);
 	if (status != ERX_OK)
 		return (status);
-	memset(&lib->view.connections[teardown.index], 0, sizeof(lib->view.connections[0]));
+	erx_dom_disconnect_record(&lib->view, &teardown);
 	memset(&lib->links[teardown.index], 0, sizeof(lib->links[0]));
 	return (ERX_OK);
 }
