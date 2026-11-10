@@ -1276,7 +1276,12 @@ position is final, so the frames it published before it ended are
 delivered, and a live peer's frames after that position are lost with the
 connection. While it finishes, the port writes nothing more into the
 other lane, so the bound on unsent answers does not stop the input task,
-since what remains is at most one data area; a process at its queue
+since what remains is at most one data area, and a frame whose only
+effect would be an answer (a noproc exit or `DOWN`, a spawn's error
+reply, a conditional `LINK` the target does not keep) is dropped and
+counted, so what the finish queues is bounded by
+what it takes; a port that controls no entry yet takes every whole
+record before the position and drops and counts each; a process at its queue
 quota pauses it as at any time, which waits on a process of this domain
 and never on the peer; a record that the position cuts short is
 dropped and counted, and a
@@ -3535,7 +3540,13 @@ own domain, so a runtime that lies harms only itself.
   the cut record counted as dropped; seeded failures: a finish that takes
   the cut record as malformed, and one that keeps the answers bound, each
   of which ends the port with the driver's reason and fires
-  `noconnection`. A domain that a test hook in the system domain hands
+  `noconnection`. The port's decisions in its finish are one pure
+  function (`erx_lane_core.c`), tested on the host over every state,
+  event and fact it reads against a model of this section, with the
+  cut record, the full answers bound, a second finish, a malformed frame
+  during the finish and a finish with no entry walked as the driver
+  applies them; seeded failures: the two above, and a finish that acts
+  on an answer-only frame. A domain that a test hook in the system domain hands
   `net_kernel`'s pid sends it a `gen_server` call of `{spawn, M, F, A,
   Gleader}` and one of `{disconnect, Node}` for another domain's node:
   nothing is spawned in the system domain, no connection ends, and

@@ -1278,24 +1278,19 @@ it; git history is the record of completed work.
   included, whatever it names (design-runtime.md, "BeamAsm"), once the boot's mode reaches the
   system domain. Until then a create names the BeamAsm image by its index and gets it in any boot mode.
 * [Medium] lane driver's finish, `otp/erts/emulator/sys/erxos/erx_lane_drv.c` and the
-  system_domain QEMU suite: three of the finish's tests in design-runtime.md's list are not
-  written. A peer that halts with half of a long record published, and a finish whose
-  outbound lane is full with the bound on unsent answers reached, each ending with
-  `{domain_down, D, Info}` and the cut record counted as dropped, with their seeded
-  failures (a finish that takes the cut record as malformed, one that keeps the answers
-  bound); neither state can be reached on purpose from the shell, and a port's counts are
-  gone once it ends, so each needs a test hook that holds the system side's input task. The
-  burst cell's seeded failure (an agent that ends the port without the finish) does not
-  fail either: the domain service is suspended while erts halts, so the system side has
-  read the whole burst before the side ends; the same hook would hold the input task until
-  the service ends the side. The host test of the stopped reader (`test/host/lane_test.rb`,
-  `limits`) covers the cut record's detection. Better still, the finish's transitions
-  (finish state and step result to the next action) become a pure function tested on the
-  host. The same hook proves that `close_side` no longer loses a ready report still in the
-  lane when a domain reports and ends at once (medium_boot's halting domains), which the
-  finish closes but no test shows failing before it. While finishing, answerable frames
-  still queue their noproc and spawn answers, which are never sent; dropping and counting
-  them there would make the one-data-area bound hold by construction.
+  system_domain QEMU suite: the finish's decisions are tested on the host
+  (`test/host/erx_lane_core_test.rb`, with the cut record, the full answers bound and their
+  seeded failures), but no QEMU test runs the driver through them end to end. A peer that
+  halts with half of a long record published, and a finish whose outbound lane is full with
+  the bound on unsent answers reached, each ending with `{domain_down, D, Info}` and the cut
+  record counted as dropped, cannot be reached on purpose from the shell, and a port's counts
+  are gone once it ends, so each needs a test hook that holds the system side's input task.
+  The burst cell's seeded failure (an agent that ends the port without the finish) does not
+  fail either: the domain service is suspended while erts halts, so the system side has read
+  the whole burst before the side ends; the same hook would hold the input task until the
+  service ends the side. The same hook would show that `close_side` keeps a ready report
+  still in the lane when a domain reports and ends at once (medium_boot's halting
+  domains), which only the finish guarantees.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_pid.erl`: a domain can
   fill its domain pid's mailbox as fast as its lane delivers, and the pid passes each
   answer-shaped message after the ready report on to the domain service, which every domain

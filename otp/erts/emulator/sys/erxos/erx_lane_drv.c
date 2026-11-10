@@ -26,9 +26,11 @@
  * The finish (port_control 2), which the agent asks for before it ends the port with the
  * reason the connection went down with: the reader fixes the lane's write position once,
  * and the input task takes every whole record before it, while the port writes nothing more
- * into the other lane, so the answers bound does not apply; then it sends the agent
- * {Port, erx_lane_finished}. This file is the one caller of erts_net_message
- * (tools/lib/erx/chokepoint_rules/funnel.rb).
+ * into the other lane, so the answers bound does not apply and a frame whose only effect is
+ * an answer is dropped and counted; then it sends the agent {Port, erx_lane_finished}. Where
+ * the port is in its finish, and what it does for each event, is erx_lane_core.c's pure
+ * decision; the callbacks here gather an event's facts and apply that decision. This file
+ * is the one caller of erts_net_message (tools/lib/erx/chokepoint_rules/funnel.rb).
  */
 
 #ifdef HAVE_CONFIG_H
@@ -51,6 +53,7 @@
 #include "liberx/backend/api.h"
 #include "erx_event.h"
 #include "erx_exports.h"
+#include "erx_lane_core.h"
 #include "erx_lane_drv.h"
 
 /* The pass-through tag ERTS writes before a frame and reads before one (external.c). */
@@ -66,13 +69,6 @@
 #define CONTROL_FINISH		2
 /* Room for an over-limit exit's reason behind the held control term (input_too_large). */
 #define TOO_LARGE_REASON_MAX	(ERX_FUNNEL_ASM_FIRST - ERX_FUNNEL_ASM_KEEP)
-
-/* Where the port is in its finish; a port that never finishes stays LANE_RUNNING. */
-typedef enum {
-	LANE_RUNNING = 0,	/* both lanes carry frames */
-	LANE_FINISHING,		/* the reader is stopped; input takes what is before the stop */
-	LANE_FINISHED		/* erx_lane_finished is sent; nothing more is taken */
-} lane_finish_t;
 
 /* The allowance of one run of the input task, -erx lane_batch. */
 uint32_t erx_lane_batch = ERX_LANE_BATCH_DEFAULT;
@@ -105,8 +101,8 @@ typedef struct lane_conn {
 	uint8_t			*scratch;
 	size_t			 scratch_len;
 
-	/* The finish, and the process that asked for it, which is told when it is done. */
-	lane_finish_t		 finish;
+	/* Where the port is in its finish, and the process that asked for it, told when done. */
+	erx_lane_port_state_t	 state;
 	ErlDrvTermData		 finisher;
 
 	/* What the port did, for erlang:port_control/3 and the tests. */
@@ -117,6 +113,22 @@ static void
 count(lane_conn_t *conn, erx_lane_count_t which)
 {
 	conn->counts[which]++;
+}
+
+/*
+ * The one way the driver asks erx_lane_core.c and applies its answer: the port moves to the
+ * next state, and the event's frame or record, when dropped, is counted as dropped_as.
+ * Returns the one action left for the caller to do.
+ */
+static erx_lane_port_do_t
+port_decide(lane_conn_t *conn, const erx_lane_port_input_t *input, erx_lane_count_t dropped_as)
+{
+	const erx_lane_port_next_t next = erx_lane_port_decide(conn->state, input);
+
+	conn->state = next.state;
+	if (next.drop)
+		count(conn, dropped_as);
+	return (next.what);
 }
 
 /* Rings the peer's bell; a failed trigger leaves the peer to its next look. */
@@ -280,7 +292,7 @@ output_frame(lane_conn_t *conn, ErlIOVec *ev)
 /*
  * ERTS's output. Once the finish starts the port writes nothing more into the lane: a frame
  * is dropped and counted, lost with the connection as the frames still in the entry's queue
- * are.
+ * are (erx_lane_core.c, decide_output).
  */
 static void
 lane_outputv(ErlDrvData data, ErlIOVec *ev)
@@ -288,10 +300,9 @@ lane_outputv(ErlDrvData data, ErlIOVec *ev)
 	lane_conn_t *const conn = (lane_conn_t *)data;
 	const char *failed;
 
-	if (conn->finish != LANE_RUNNING) {
-		count(conn, ERX_LANE_COUNT_OUT_DROPPED);
+	if (port_decide(conn, &(erx_lane_port_input_t){ .event = ERX_LANE_PORT_OUTPUT },
+	    ERX_LANE_COUNT_OUT_DROPPED) != ERX_LANE_DO_WRITE)
 		return;
-	}
 	failed = output_frame(conn, ev);
 	if (failed != NULL)
 		driver_failure_atom(conn->port, (char *)failed);	/* last: it may free conn */
@@ -304,7 +315,10 @@ lane_outputv(ErlDrvData data, ErlIOVec *ev)
 static const char *
 output_resume(lane_conn_t *conn)
 {
-	if (conn->out == NULL || conn->finish != LANE_RUNNING)
+	if (conn->out == NULL)
+		return (NULL);
+	if (port_decide(conn, &(erx_lane_port_input_t){ .event = ERX_LANE_PORT_KEPT },
+	    ERX_LANE_COUNT_OUT_DROPPED) != ERX_LANE_DO_RESUME)
 		return (NULL);
 	switch (output_kept(conn)) {
 	case OUT_DONE:
@@ -433,18 +447,6 @@ typedef enum {
 } step_t;
 
 /*
- * Whether a frame of op can make this domain answer the peer with a send that has no
- * sending process: an exit or DOWN noproc, an unlink ack, or a spawn reply. Such sends
- * ignore the busy limit (dist.c, erts_dsig_prepare), so these are the frames bounded.
- */
-static bool
-op_answered(erx_funnel_op_t op)
-{
-	return (op == ERX_FUNNEL_LINK || op == ERX_FUNNEL_MONITOR_P || op == ERX_FUNNEL_UNLINK_ID ||
-	    op == ERX_FUNNEL_SPAWN_REQUEST);
-}
-
-/*
  * The bytes the entry's queue holds beyond what the busy limit counts: the answers it has
  * not sent, and any send of this domain's own with no process or from an async_dist one
  * (TODO.md, lane driver residuals). Read under the queue's lock, so the two sizes agree.
@@ -488,14 +490,20 @@ input_take(lane_conn_t *conn, const erx_funnel_asm_plan_t *plan, erx_lane_part_t
 	return (status);
 }
 
-/* One funnel step: the rest of the open record, or the next one, judged once whole. */
+/*
+ * One funnel step: the rest of the open record, or the next one, judged once whole and
+ * then acted on, dropped or ending the port as erx_lane_core.c decides. dep is NULL while
+ * the port controls no entry, and the core acts on no frame then. The answers' queue is read
+ * only for a frame that can be answered, as it costs the queue's lock.
+ */
 static step_t
 input_step(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id)
 {
 	erx_funnel_asm_plan_t plan;
 	erx_funnel_verdict_t verdict;
 	erx_lane_part_t part;
-	bool acted;
+	erx_lane_port_do_t what;
+	bool answerable;
 
 	for (;;) {
 		erx_funnel_asm_plan(&conn->assembly, conn->in_cap, &plan);
@@ -525,26 +533,25 @@ input_step(lane_conn_t *conn, DistEntry *dep, Uint32 conn_id)
 	}
 	erx_funnel_check(conn->in, conn->assembly.frame, conn->assembly.held, &conn->lane, &conn->limits,
 	    conn->scratch, conn->scratch_len, &verdict);
-	/*
-	 * A finishing port sends nothing more, so its answers are discarded with it and what it
-	 * takes is bounded by the stop: at most one data area.
-	 */
-	if (conn->finish == LANE_RUNNING && verdict.action != ERX_FUNNEL_MALFORMED &&
-	    verdict.action != ERX_FUNNEL_DROP && op_answered(verdict.control.op) &&
-	    answers_unsent(dep) >= ERX_LANE_ANSWERS_MAX)
+	answerable = dep != NULL && verdict.action != ERX_FUNNEL_MALFORMED &&
+	    erx_lane_port_answered(verdict.control.op);
+	what = port_decide(conn, &(erx_lane_port_input_t){
+	    .event = ERX_LANE_PORT_FRAME, .entry = dep != NULL, .action = verdict.action,
+	    .op = verdict.control.op,
+	    .answers_full = answerable && answers_unsent(dep) >= ERX_LANE_ANSWERS_MAX }, ERX_LANE_COUNT_DROPPED);
+	if (what == ERX_LANE_DO_END_MALFORMED)
+		return (STEP_BROKEN);
+	if (what == ERX_LANE_DO_END_ANSWERS)
 		return (STEP_ANSWERS_UNREAD);
-	acted = input_act(conn, dep, conn_id, &verdict);
+	if (what == ERX_LANE_DO_ACT && !input_act(conn, dep, conn_id, &verdict))
+		return (STEP_BROKEN);
 	erx_funnel_asm_next(&conn->assembly);
-	return (acted ? STEP_TOOK : STEP_BROKEN);
+	return (STEP_TOOK);
 }
 
-/*
- * The finish's end, once every whole record before the stop is taken: a record the stop cut
- * short is dropped and counted, and the agent is told. A port that controls no entry has
- * nothing to deliver to, so its finish ends at once.
- */
+/* The finish's end, once every whole record before the stop is taken: the agent is told. */
 static void
-finish_done(lane_conn_t *conn)
+finish_tell(lane_conn_t *conn)
 {
 	ErlDrvTermData message[] = {
 		ERL_DRV_PORT, driver_mk_port(conn->port),
@@ -552,9 +559,6 @@ finish_done(lane_conn_t *conn)
 		ERL_DRV_TUPLE, 2
 	};
 
-	if (conn->reader.phase == ERX_LANE_IN_BODY)
-		count(conn, ERX_LANE_COUNT_DROPPED);
-	conn->finish = LANE_FINISHED;
 	/* A finisher that has ended is told nothing: the agent's end halts the runtime. */
 	(void)erl_drv_send_term(driver_mk_port(conn->port), conn->finisher, message,
 	    (int)(sizeof(message) / sizeof(message[0])));
@@ -564,32 +568,29 @@ finish_done(lane_conn_t *conn)
  * The input task's frames, up to the allowance, whether or not the entry is busy: input
  * never waits on output, so two domains streaming to each other never hold each other's
  * lanes. Before the port controls an entry it takes nothing, and erx_dist runs it again
- * after setnode/3. A stopped reader is empty only once it has taken every byte before its
- * stop, so a finishing port's STEP_EMPTY is its finish's end. NULL, or the reason the port
- * must end.
+ * after setnode/3; a finishing one takes what is before the stop, entry or not. A finishing
+ * port's empty take is its finish's end (erx_lane_core.c, decide_empty), and the record the
+ * stop cut short, which the reader holds open, is counted as dropped. NULL, or the reason
+ * the port must end.
  */
 static const char *
 input_run(lane_conn_t *conn)
 {
 	const uint32_t allowance = erx_lane_batch != 0 ? erx_lane_batch : 1;
-	DistEntry *dep;
 	Uint32 conn_id = 0;
+	DistEntry *const dep = conn_entry(conn, &conn_id);
 
-	if (conn->finish == LANE_FINISHED)
+	if (port_decide(conn, &(erx_lane_port_input_t){ .event = ERX_LANE_PORT_RUN, .entry = dep != NULL },
+	    ERX_LANE_COUNT_DROPPED) != ERX_LANE_DO_TAKE)
 		return (NULL);
-	dep = conn_entry(conn, &conn_id);
-	if (dep == NULL) {
-		if (conn->finish == LANE_FINISHING)
-			finish_done(conn);
-		return (NULL);
-	}
 	for (uint32_t steps = 0; steps < allowance; steps++) {
 		switch (input_step(conn, dep, conn_id)) {
 		case STEP_TOOK:
 			break;
 		case STEP_EMPTY:
-			if (conn->finish == LANE_FINISHING)
-				finish_done(conn);
+			if (port_decide(conn, &(erx_lane_port_input_t){ .event = ERX_LANE_PORT_EMPTY,
+			    .cut = conn->reader.phase == ERX_LANE_IN_BODY }, ERX_LANE_COUNT_DROPPED) == ERX_LANE_DO_TELL)
+				finish_tell(conn);
 			return (NULL);
 		case STEP_BROKEN:
 			count(conn, ERX_LANE_COUNT_MALFORMED);
@@ -815,7 +816,7 @@ lane_stop(ErlDrvData data)
  * port_control(Port, 2, []): the finish, once; badarg after the first. The reader's one
  * load of the write position is checked as every take's is, and a refusal ends the port
  * at the input task's first take, as a malformed lane always does; a port that controls no
- * entry yet takes nothing and finishes at once.
+ * entry yet takes every whole record before the stop and drops and counts it.
  */
 static ErlDrvSSizeT
 lane_control(ErlDrvData data, unsigned int command, char *buf, ErlDrvSizeT len, char **rbuf, ErlDrvSizeT rlen)
@@ -830,9 +831,9 @@ lane_control(ErlDrvData data, unsigned int command, char *buf, ErlDrvSizeT len, 
 		return (0);
 	}
 	if (command == CONTROL_FINISH) {
-		if (conn->finish != LANE_RUNNING)
+		if (port_decide(conn, &(erx_lane_port_input_t){ .event = ERX_LANE_PORT_FINISH },
+		    ERX_LANE_COUNT_DROPPED) != ERX_LANE_DO_STOP)
 			return (-1);
-		conn->finish = LANE_FINISHING;
 		conn->finisher = driver_caller(conn->port);
 		(void)erx_lane_reader_stop(&conn->reader);
 		input_schedule(conn);
