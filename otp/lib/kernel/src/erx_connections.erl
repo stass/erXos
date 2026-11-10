@@ -20,9 +20,7 @@ init(_Kernel, none) ->
     loop();
 init(Kernel, {PeerId, PeerNode}) ->
     %% Any peer handed this pid can reach it; what arrives from another domain comes as
-    %% {erx_origin, D, Record}, so only the system connection's (D the system domain's
-    %% id) can steer it (edit 16).
-    erx_dist:origins(true),
+    %% {erx_origin, D, Msg} (edit 16), and loop/0 acts on no message, so no peer steers it.
     try
         Port = open_port({spawn_driver, "erx_lane system"}, [binary]),
         hand_over(Kernel, #{port => Port, node => PeerNode, id => PeerId, system => true})

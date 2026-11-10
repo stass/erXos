@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: a call's reply is also taken in the envelope of a message from
+%% another domain, {erx_origin, D, {Tag, Reply}} (edit 58).
+%%
 %% %CopyrightEnd%
 %%
 -module(gen).
@@ -228,6 +231,12 @@ call(Process, Label, Request, Timeout)
 
 -dialyzer({no_improper_lists, do_call/4}).
 
+%% erXos, edit 58: a reply from another domain arrives as {erx_origin, D, {Tag, Reply}}
+%% (edit 16), and every receive of a reply below takes it in that form as well as bare. Tag holds
+%% the call's own monitor reference, handed only to the callee, and since references are
+%% unguessable (edit 17) no other domain can name it, so the reply's domain D needs no
+%% check (docs/design-domains.md, "The peer").
+
 do_call(Process, _Label, _Request, _Timeout) when Process =:= self() ->
     exit(calling_self);
 do_call(Process, Label, Request, infinity)
@@ -243,6 +252,9 @@ do_call(Process, Label, Request, infinity)
     Process ! {Label, {self(), Mref}, Request},
     receive
         {Mref, Reply} ->
+            erlang:demonitor(Mref, [flush]),
+            {ok, Reply};
+        {erx_origin, _, {Mref, Reply}} ->
             erlang:demonitor(Mref, [flush]),
             {ok, Reply};
         {'DOWN', Mref, _, _, Reason} ->
@@ -265,6 +277,9 @@ do_call(Process, Label, Request, Timeout) when is_atom(Process) =:= false ->
         {[alias | Mref], Reply} ->
             erlang:demonitor(Mref, [flush]),
             {ok, Reply};
+        {erx_origin, _, {[alias | Mref], Reply}} ->
+            erlang:demonitor(Mref, [flush]),
+            {ok, Reply};
         {'DOWN', Mref, _, _, noconnection} ->
             Node = get_node(Process),
             exit({nodedown, Node});
@@ -274,6 +289,8 @@ do_call(Process, Label, Request, Timeout) when is_atom(Process) =:= false ->
             erlang:demonitor(Mref, [flush]),
             receive
                 {[alias | Mref], Reply} ->
+                    {ok, Reply};
+                {erx_origin, _, {[alias | Mref], Reply}} ->
                     {ok, Reply}
             after 0 ->
                     exit(timeout)
@@ -346,6 +363,9 @@ wait_response(ReqId, Timeout) ->
         {[alias|ReqId], Reply} ->
             erlang:demonitor(ReqId, [flush]),
             {reply, Reply};
+        {erx_origin, _, {[alias|ReqId], Reply}} ->
+            erlang:demonitor(ReqId, [flush]),
+            {reply, Reply};
         {'DOWN', ReqId, _, Object, Reason} ->
             {error, {Reason, Object}}
     after TMO ->
@@ -370,6 +390,8 @@ wait_response(ReqIdCol, Timeout, Delete) when is_map(ReqIdCol),
     receive
         {[alias|ReqId], _} = Msg when is_map_key(ReqId, ReqIdCol) ->
             collection_result(Msg, ReqIdCol, Delete);
+        {erx_origin, _, {[alias|ReqId], _}} = Msg when is_map_key(ReqId, ReqIdCol) ->
+            collection_result(Msg, ReqIdCol, Delete);
         {'DOWN', ReqId, _, _, _} = Msg when is_map_key(ReqId, ReqIdCol) ->
             collection_result(Msg, ReqIdCol, Delete)
     after TMO ->
@@ -388,12 +410,17 @@ receive_response(ReqId, Timeout) ->
         {[alias|ReqId], Reply} ->
             erlang:demonitor(ReqId, [flush]),
             {reply, Reply};
+        {erx_origin, _, {[alias|ReqId], Reply}} ->
+            erlang:demonitor(ReqId, [flush]),
+            {reply, Reply};
         {'DOWN', ReqId, _, Object, Reason} ->
             {error, {Reason, Object}}
     after TMO ->
             erlang:demonitor(ReqId, [flush]),
             receive
                 {[alias|ReqId], Reply} ->
+                    {reply, Reply};
+                {erx_origin, _, {[alias|ReqId], Reply}} ->
                     {reply, Reply}
             after 0 ->
                     timeout
@@ -417,6 +444,8 @@ receive_response(ReqIdCol, Timeout, Delete) when is_map(ReqIdCol),
     TMO = timeout_value(Timeout),
     receive
         {[alias|ReqId], _} = Msg when is_map_key(ReqId, ReqIdCol) ->
+            collection_result(Msg, ReqIdCol, Delete);
+        {erx_origin, _, {[alias|ReqId], _}} = Msg when is_map_key(ReqId, ReqIdCol) ->
             collection_result(Msg, ReqIdCol, Delete);
         {'DOWN', Mref, _, _, _} = Msg when is_map_key(Mref, ReqIdCol) ->
             collection_result(Msg, ReqIdCol, Delete)
@@ -443,6 +472,9 @@ check_response(Msg, ReqId) when is_reference(ReqId) ->
         {[alias|ReqId], Reply} ->
             erlang:demonitor(ReqId, [flush]),
             {reply, Reply};
+        {erx_origin, _, {[alias|ReqId], Reply}} ->
+            erlang:demonitor(ReqId, [flush]),
+            {reply, Reply};
         {'DOWN', ReqId, _, Object, Reason} ->
             {error, {Reason, Object}};
         _ ->
@@ -467,12 +499,16 @@ check_response(Msg, ReqIdCol, Delete) when is_map(ReqIdCol),
     case Msg of
         {[alias|ReqId], _} = Msg when is_map_key(ReqId, ReqIdCol) ->
             collection_result(Msg, ReqIdCol, Delete);
+        {erx_origin, _, {[alias|ReqId], _}} = Msg when is_map_key(ReqId, ReqIdCol) ->
+            collection_result(Msg, ReqIdCol, Delete);
         {'DOWN', Mref, _, _, _} = Msg when is_map_key(Mref, ReqIdCol) ->
             collection_result(Msg, ReqIdCol, Delete);
         _ ->
             no_reply
     end.
 
+collection_result({erx_origin, _, {[alias|_], _} = Msg}, ReqIdCol, Delete) ->
+    collection_result(Msg, ReqIdCol, Delete);
 collection_result({[alias|ReqId], Reply}, ReqIdCol, Delete) ->
     _ = erlang:demonitor(ReqId, [flush]),
     collection_result({reply, Reply}, ReqId, ReqIdCol, Delete);
@@ -488,6 +524,8 @@ collection_result(Resp, ReqId, ReqIdCol, true) ->
 flush_responses(ReqIdCol) ->
     receive
         {[alias|Mref], _Reply} when is_map_key(Mref, ReqIdCol) ->
+            flush_responses(ReqIdCol);
+        {erx_origin, _, {[alias|Mref], _Reply}} when is_map_key(Mref, ReqIdCol) ->
             flush_responses(ReqIdCol)
     after 0 ->
             ok

@@ -126,6 +126,7 @@ typedef enum run_action {
 	RUN_LANE,	/* starts it, then plays the system party on its connection */
 	RUN_EXPORTS,	/* starts it, then plays the system party of the exports case */
 	RUN_REFS,	/* starts it, then plays the system party of the refs case */
+	RUN_ORIGINS,	/* starts it, then plays the system party of the origins case */
 	RUN_CRASH	/* starts it, waits, then reads its crash area (crash_read) */
 } run_action_t;
 static uint32_t next_id = ERX_DOM_SYSTEM_ID + 1;
@@ -483,47 +484,107 @@ static const char connection_eval[] =
     "receive after infinity->ok end";
 
 /*
- * The exports case's domain (R7, edits 8, 13 and 16), in lockstep with exports_party,
- * halting with the step's number at the first failure and with 0 when every step passed.
- * Once the system node is up: a pid handed out as a control term's sender gives the
- * system domain send alone (3), so the party's EXIT2 of kill is dropped, its LINK makes
- * no link (5) and its m1 arrives (4); a spawn by the party gives it send, link and exit on
- * the child (6, 7); with origins asked for, m3 arrives as {erx_origin, 4, m3} (8); net_kernel,
- * handed out, takes the party's spawn call without spawning, so the domain does not halt
- * with 77, once m5 (15) and a call of net_kernel's own say the call was read; an
- * explicit export of link alone survives handing the pid out again (9), so m2 is dropped
- * (11) and the party's LINK makes the link its exit of r7 crosses (10); a pid handed out
- * and then exited is the party's to monitor (12). Last, a process fills the export table
- * until system_limit (13), its peers numbered from 1000, past every domain id the cases
- * make; while it holds them, a gen_server:call to the party hands out an alias the table
- * has no room for, so the party's answer reaches no one, the call times out and the
- * refusals are counted (16); and its exit (17) frees what it held, so an export succeeds (14).
+ * The exports case's domain (R7, edits 8, 13 and 16), in lockstep with exports_party.
+ * Its steps are numbered in run order. A step the eval cannot go past halts the domain
+ * with its number at once (H, W, and E when nothing comes in 10 s); a step it can go
+ * past records its number failed (Fail, and E when the message arrives bare) and the
+ * eval runs on, halting at the end with the lowest number recorded, or 0. Every message
+ * the party sends arrives in its envelope {erx_origin, 4, Msg} (edit 16), so a seeded
+ * raw delivery shows every step E checks.
+ *
+ *  2 (halts) The system node comes up.
+ *  3 (halts) A pid handed out as a control term's sender gives the system domain send
+ *            alone,
+ *  4         so the party's m1 arrives,
+ *  5 (halts) and its EXIT2 of kill is dropped and its LINK makes no link.
+ *  6         A spawn by the party arrives, and the party's m4 after it,
+ *  7 (halts) giving the system domain send, link and exit on the child.
+ *  8         A tuple the party shapes as the envelope arrives wrapped once more.
+ *  9         net_kernel, handed out, gets the party's spawn call, which m5 and a call of
+ *            net_kernel's own say it read,
+ * 10         and spawns nothing for it, so nk_spawned never comes.
+ * 11 (halts) An explicit export of link alone survives handing the pid out again,
+ * 12 (halts) so the party's LINK makes the link its exit of r7 crosses,
+ * 13 (halts) and its m2 is dropped.
+ * 14 (halts) A pid handed out and then exited
+ * 15         is the party's to monitor: with send exported again, the party's m6 says
+ *            its monitor was answered DOWN.
+ * 16 (halts) A process fills the export table until system_limit, its peers numbered
+ *            from 1000, past every domain id the cases make.
+ * 17 (halts) While it holds them, a gen_server:call to the party hands out an alias the
+ *            table has no room for, so the party's answer reaches no one, the call times
+ *            out and the refusal is counted.
+ * 18 (halts) The process's exit frees what it held,
+ * 19 (halts) so an export succeeds.
  */
 static const char exports_eval[] =
     "S='" SYSTEM_NODE "',"
     "Up=fun U(0)->false;U(T)->lists:member(S,nodes()) orelse receive after 50->U(T-1) end end,"
     "H=fun(C,N)->C orelse halt(N) end,"
     "W=fun(M,N)->receive M->ok after 10000->halt(N) end end,"
+    "put(failed,[]),"
+    "Fail=fun(N)->erlang:display({exports_failed,N}),put(failed,[N|get(failed)]) end,"
+    "E=fun(M,N)->receive {erx_origin,4,M}->ok;M->Fail(N) after 10000->halt(N) end end,"
     "H(Up(600),2),"
     "P=binary_to_term(<<131,88,119,12,\"" SYSTEM_NODE "\",1:32,0:32,4:32>>),"
     "Me=self(),G=fun(Q)->erx_dist:exports(Q) end,"
     "process_flag(trap_exit,true),"
-    "P!a,H(G(Me)==[{4,[send]}],3),W(m1,4),{links,L}=process_info(Me,links),H(not lists:member(P,L),5),"
-    "W(m4,6),H(lists:member([{4,[send,link,exit]}],[catch G(C)||C<-processes()]),7),"
-    "ok=erx_dist:origins(true),P!d,W({erx_origin,4,m3},8),ok=erx_dist:origins(false),"
-    "P!{n,whereis(net_kernel)},W(m5,15),sys:get_state(net_kernel),receive after 500->ok end,"
-    "ok=erx_dist:export(Me,[link],4),P!b,H(G(Me)==[{4,[link]}],9),"
-    "W({'EXIT',P,r7},10),receive m2->halt(11) after 0->ok end,"
+    "P!a,H(G(Me)==[{4,[send]}],3),E(m1,4),{links,L}=process_info(Me,links),H(not lists:member(P,L),5),"
+    "E(m4,6),H(lists:member([{4,[send,link,exit]}],[catch G(C)||C<-processes()]),7),"
+    "P!d,receive {erx_origin,4,{erx_origin,_,m3}}->ok;{erx_origin,_,m3}->Fail(8) after 10000->halt(8) end,"
+    "P!{n,whereis(net_kernel)},E(m5,9),sys:get_state(net_kernel),receive after 500->ok end,"
+    "receive nk_spawned->Fail(10) after 0->ok end,"
+    "ok=erx_dist:export(Me,[link],4),P!b,H(G(Me)==[{4,[link]}],11),"
+    "W({'EXIT',P,r7},12),receive {erx_origin,4,m2}->halt(13);m2->halt(13) after 0->ok end,"
     "Q=spawn(fun()->receive go->ok end end),P!{c,Q},R=monitor(process,Q),Q!go,"
-    "W({'DOWN',R,process,Q,normal},12),P!c2,"
+    "W({'DOWN',R,process,Q,normal},14),ok=erx_dist:export(Me,[send],4),P!c2,E(m6,15),"
     "F=fun F(N)->case erx_dist:export(self(),[send],N) of ok->F(N+1);{error,system_limit}->N end end,"
     "{Fp,Rf}=spawn_monitor(fun()->Me!{k,F(1000)},receive go->ok end end),"
-    "receive {k,K}->erlang:display({exports_filled,K-1000}),H(K>16000,13) end,"
+    "receive {k,K}->erlang:display({exports_filled,K-1000}),H(K>16000,16) end,"
     "D=erx_dist:exports_refused(),"
-    "H(case catch gen_server:call(P,ping,3000) of {'EXIT',{timeout,_}}->erx_dist:exports_refused()>D;_->false end,16),"
-    "Fp!go,W({'DOWN',Rf,process,Fp,normal},17),"
-    "H(erx_dist:export(Me,[send],5)==ok,14),"
-    "halt(0)";
+    "H(case catch gen_server:call(P,ping,3000) of {'EXIT',{timeout,_}}->erx_dist:exports_refused()>D;_->false end,17),"
+    "Fp!go,W({'DOWN',Rf,process,Fp,normal},18),"
+    "H(erx_dist:export(Me,[send],5)==ok,19),"
+    "case get(failed) of []->halt(0);Fs->halt(lists:min(Fs)) end";
+
+/*
+ * The origins case's domain (edits 16 and 58; design-domains' Origins), in lockstep with
+ * origins_party, its steps numbered, halting and recording as the exports case's do.
+ * Under stock OTP each message the party sends here would be acted on; in its envelope
+ * only gen takes its own reply apart.
+ *
+ *  2 (halts) The system node comes up.
+ *  3         A gen_server:call to the party gets the reply the party sends to the call's
+ *            alias, through gen's unwrap.
+ *  4         inet_db, a gen_server, is handed out, and the party's m1 arrives once it has
+ *            sent inet_db the system message of sys:terminate, {system, From,
+ *            {terminate, r}};
+ *  5         inet_db took that message as an unknown one and runs on.
+ *  6         net_kernel and the system connection's owner are handed out, and the party's
+ *            m2 arrives once it has called net_kernel with {disconnect, System} and sent
+ *            the owner {NK, disconnect};
+ *  7         neither acted on it: the system node is still connected.
+ *  8         m1 arrived with D 4, the system domain's id, which erx_dist:owner/1 gives the
+ *            party's pid, and owner/1 gives the domain's own pid and references its id.
+ */
+static const char origins_eval[] =
+    "S='" SYSTEM_NODE "',"
+    "Up=fun U(0)->false;U(T)->lists:member(S,nodes()) orelse receive after 50->U(T-1) end end,"
+    "put(failed,[]),"
+    "Fail=fun(N)->erlang:display({origins_failed,N}),put(failed,[N|get(failed)]) end,"
+    "E=fun(M,N)->receive {erx_origin,D,M}->D;M->Fail(N),bare after 10000->halt(N) end end,"
+    "Up(600) orelse halt(2),"
+    "P=binary_to_term(<<131,88,119,12,\"" SYSTEM_NODE "\",1:32,0:32,4:32>>),"
+    "case catch gen_server:call(P,ping,5000) of pong->ok;_->Fail(3) end,"
+    "Idb=whereis(inet_db),P!{s,Idb},Dm=E(m1,4),"
+    "case catch sys:get_state(Idb,5000) of {'EXIT',_}->Fail(5);_->ok end,"
+    "whereis(inet_db)==Idb orelse Fail(5),"
+    "{_,Dc}=lists:keyfind(S,1,erlang:system_info(dist_ctrl)),{connected,O}=erlang:port_info(Dc,connected),"
+    "P!{n,whereis(net_kernel)},P!{k,O},E(m2,6),sys:get_state(net_kernel),receive after 500->ok end,"
+    "lists:member(S,nodes()) orelse Fail(7),"
+    "{Id,_}=erx_dist:boot(),"
+    "(Dm==4 andalso erx_dist:owner(P)==Dm andalso erx_dist:owner(self())==Id andalso erx_dist:owner(make_ref())==Id) orelse Fail(8),"
+    "case get(failed) of []->halt(0);Fs->halt(lists:min(Fs)) end";
 
 /*
  * The refs case's domain (edits 17 and 14), in lockstep with refs_party, halting with the
@@ -537,11 +598,14 @@ static const char exports_eval[] =
  * by a guessed one (8); ETS finds a table by its id through binary_to_term (10) and by no
  * neighbour (11). A thousand local calls (12), a thousand aliases unaliased and a
  * thousand that end with their owner leave the registry as it was (13). Two hundred
- * calls to the party take its answers through their aliases (14), not its answers to a
- * neighbour of each (15), and the registry comes back (16). The words of an alias never
- * handed out name nothing the party may send to (17); the table's id, round trip through
- * the party, is no table (18). Then z, and the party's reference of three words ends the
- * connection, so erx_dist halts the domain with DIST_LOST_STATUS.
+ * calls to the party take its answers through their aliases (14), and the registry comes
+ * back (15). Once the party's mw has come, nothing else has (16): neither its answers to
+ * a neighbour of each call's alias nor its w to the words of an alias never handed out.
+ * The table's id, round trip through the party, is no table (17). The party's messages
+ * arrive in their envelope {erx_origin, 4, Msg} (edit 16). Then z, and the party's
+ * reference of three words ends the connection, so erx_dist halts the domain with
+ * DIST_LOST_STATUS. The eval is near its bound: ERTS_DIST_BOOT, the eval and the two
+ * node names share boot_strings_max, and past it the domain is not created.
  */
 static const char refs_eval[] =
     "S='" SYSTEM_NODE "',"
@@ -567,9 +631,9 @@ static const char refs_eval[] =
     "Sq=lists:seq(1,1000),Q=fun(G,K)->lists:all(fun(_)->gen_server:call(G,ping)==pong end,lists:sublist(Sq,K)) end,"
     "Sv=spawn(fun L()->receive {_,Fr,ping}->gen_server:reply(Fr,pong),L() end end),H(Q(Sv,1000),12),"
     "[unalias(alias())||_<-Sq],spawn(fun()->[alias()||_<-Sq] end),H(Z(100),13),"
-    "H(Q(P,200),14),receive {_,forged}->halt(15) after 0->ok end,H(Z(100),16),"
-    "A2=alias(),P!{w,Ws(A2)},receive mw->ok end,receive {_,w}->halt(17) after 0->ok end,"
-    "P!{e,Tb},receive {e,T2}->H(T2==Tb andalso E(T2),18) end,P!z,"
+    "H(Q(P,200),14),H(Z(100),15),"
+    "A2=alias(),P!{w,Ws(A2)},receive {erx_origin,4,mw}->ok end,H(process_info(self(),messages)=={messages,[]},16),"
+    "P!{e,Tb},receive {erx_origin,4,{e,T2}}->H(T2==Tb andalso E(T2),17) end,P!z,"
     "receive after infinity->ok end";
 
 /* How long the party waits for the domain's first frame, and for each later one. */
@@ -642,8 +706,11 @@ connection_request(uint32_t runtime, const char *eval)
 
 	(void)erts_request(runtime);
 	memcpy(request.strings, ERTS_DIST_BOOT, at);
-	if (!args_put(request.strings, sizeof(request.strings) - 1, &at, eval, request.id))
+	if (!args_put(request.strings, sizeof(request.strings) - 1, &at, eval, request.id)) {
+		/* the boot words and the eval past boot_strings_max: the case fails with no domain */
+		say("erx: domain: eval_too_long\n");
 		return (NULL);
+	}
 	request.strings[at++] = '\0';
 	request.args_len = (uint32_t)at;
 	return (&request);
@@ -1094,43 +1161,139 @@ party_exit_noproc(const uint8_t *record, size_t len)
 	    frame.payload_len == sizeof(reason) && memcmp(frame.payload, reason, sizeof(reason)) == 0);
 }
 
-/*
- * Sends net_kernel, the domain's pid nk, the gen_server call stock net_kernel answers by
- * spawning for any caller: {spawn, erlang, halt, [77], Gleader}. net_kernel takes a
- * message from another domain only as {erx_origin, D, Msg} (erx_dist:listen/2), which no
- * clause of its handle_call matches, so the domain must not halt with 77.
- */
+/* Writes a SEND_SENDER {22, From, to} from a system process, with payload, an encoded term. */
 static bool
-party_nk_spawn(lane_party_t *party, const erx_etf_pid_t *nk)
+party_send(lane_party_t *party, const erx_etf_pid_t *to, const uint8_t *payload, size_t payload_len)
 {
-	const erx_etf_ref_t ref = { .node = (const uint8_t *)SYSTEM_NODE, .node_len = sizeof(SYSTEM_NODE) - 1,
-	    .creation = party->peer, .words = { 10, 11, 12, 0 } };
-	uint8_t ctl[160], payload[160];
-	size_t ctl_len, payload_len;
+	uint8_t ctl[160];
+	size_t ctl_len;
 	erx_etf_writer_t writer;
 
 	erx_etf_writer_init(&writer, ctl, sizeof(ctl));
 	erx_etf_put_tuple(&writer, 3);
 	erx_etf_put_integer(&writer, DOP_SEND_SENDER);
 	party_pid(&writer, SYSTEM_NODE, 1, party->peer);
-	erx_etf_put_pid(&writer, nk);
-	if (!erx_etf_writer_done(&writer, &ctl_len))
-		return (false);
+	erx_etf_put_pid(&writer, to);
+	return (erx_etf_writer_done(&writer, &ctl_len) && party_put(party, ctl, ctl_len, payload, payload_len, NEXT_NS));
+}
+
+/*
+ * Sends to the message {Label, {From, Ref}, Req} that a call from a system process
+ * makes: label "$gen_call" for gen_server's call, "system" for sys's system message.
+ * From is the system process and Ref a reference of the system node; request is Req as
+ * a writer encodes it, version byte first, which this drops.
+ */
+static bool
+party_call(lane_party_t *party, const erx_etf_pid_t *to, const char *label, const uint8_t *request,
+    size_t request_len)
+{
+	const erx_etf_ref_t ref = { .node = (const uint8_t *)SYSTEM_NODE, .node_len = sizeof(SYSTEM_NODE) - 1,
+	    .creation = party->peer, .words = { 10, 11, 12, 0 } };
+	uint8_t payload[256];
+	size_t head_len;
+	erx_etf_writer_t writer;
+
 	erx_etf_writer_init(&writer, payload, sizeof(payload));
 	erx_etf_put_tuple(&writer, 3);
-	erx_etf_put_atom(&writer, "$gen_call", 9);
+	erx_etf_put_atom(&writer, label, strlen(label));
 	erx_etf_put_tuple(&writer, 2);
 	party_pid(&writer, SYSTEM_NODE, 1, party->peer);
 	erx_etf_put_ref(&writer, &ref);
+	if (!erx_etf_writer_done(&writer, &head_len) || request_len < 2 || request_len - 1 > sizeof(payload) - head_len)
+		return (false);
+	memcpy(payload + head_len, request + 1, request_len - 1);
+	return (party_send(party, to, payload, head_len + request_len - 1));
+}
+
+/*
+ * Sends net_kernel, the domain's pid nk, the gen_server call stock net_kernel answers by
+ * spawning for any caller: {spawn, erlang, send, [Eval, nk_spawned], Gleader}. It arrives
+ * as {erx_origin, D, Msg} (edit 16), which no clause of net_kernel's handle_call
+ * matches, so eval never receives nk_spawned.
+ */
+static bool
+party_nk_spawn(lane_party_t *party, const erx_etf_pid_t *nk, const erx_etf_pid_t *eval)
+{
+	uint8_t request[160];
+	size_t request_len;
+	erx_etf_writer_t writer;
+
+	erx_etf_writer_init(&writer, request, sizeof(request));
 	erx_etf_put_tuple(&writer, 5);
 	erx_etf_put_atom(&writer, "spawn", 5);
 	erx_etf_put_atom(&writer, "erlang", 6);
-	erx_etf_put_atom(&writer, "halt", 4);
-	erx_etf_put_list(&writer, 1);
-	erx_etf_put_integer(&writer, 77);
+	erx_etf_put_atom(&writer, "send", 4);
+	erx_etf_put_list(&writer, 2);
+	erx_etf_put_pid(&writer, eval);
+	erx_etf_put_atom(&writer, "nk_spawned", 10);
 	erx_etf_put_nil(&writer);
 	party_pid(&writer, SYSTEM_NODE, 1, party->peer);
-	return (erx_etf_writer_done(&writer, &payload_len) && party_put(party, ctl, ctl_len, payload, payload_len, NEXT_NS));
+	return (erx_etf_writer_done(&writer, &request_len) &&
+	    party_call(party, nk, "$gen_call", request, request_len));
+}
+
+/*
+ * Sends the domain's gen_server at to the system message sys:terminate(To, r) sends,
+ * {system, {From, Ref}, {terminate, r}}. It arrives in its envelope, which the server's
+ * sys handling does not match, so the server's handle_info takes it as an unknown
+ * message and the server runs on.
+ */
+static bool
+party_sys_terminate(lane_party_t *party, const erx_etf_pid_t *to)
+{
+	uint8_t request[32];
+	size_t request_len;
+	erx_etf_writer_t writer;
+
+	erx_etf_writer_init(&writer, request, sizeof(request));
+	erx_etf_put_tuple(&writer, 2);
+	erx_etf_put_atom(&writer, "terminate", 9);
+	erx_etf_put_atom(&writer, "r", 1);
+	return (erx_etf_writer_done(&writer, &request_len) && party_call(party, to, "system", request, request_len));
+}
+
+/*
+ * Asks the domain to drop its system connection two ways that stock answers for any
+ * sender: net_kernel, the domain's pid nk, gets the call {disconnect, System}, and the
+ * connection's owner gets {NK, disconnect}. Each arrives in its envelope and is ignored.
+ */
+static bool
+party_disconnects(lane_party_t *party, const erx_etf_pid_t *nk, const erx_etf_pid_t *owner)
+{
+	uint8_t request[64], message[64];
+	size_t request_len, message_len;
+	erx_etf_writer_t writer;
+
+	erx_etf_writer_init(&writer, request, sizeof(request));
+	erx_etf_put_tuple(&writer, 2);
+	erx_etf_put_atom(&writer, "disconnect", 10);
+	erx_etf_put_atom(&writer, SYSTEM_NODE, sizeof(SYSTEM_NODE) - 1);
+	if (!erx_etf_writer_done(&writer, &request_len) || !party_call(party, nk, "$gen_call", request, request_len))
+		return (false);
+	erx_etf_writer_init(&writer, message, sizeof(message));
+	erx_etf_put_tuple(&writer, 2);
+	erx_etf_put_pid(&writer, nk);
+	erx_etf_put_atom(&writer, "disconnect", 10);
+	return (erx_etf_writer_done(&writer, &message_len) && party_send(party, owner, message, message_len));
+}
+
+/*
+ * Sends the domain's eval {erx_origin, D, m3}, a tuple shaped as the envelope, D the
+ * domain's own id: it arrives wrapped once more, as {erx_origin, 4, {erx_origin, D, m3}}.
+ */
+static bool
+party_forged(lane_party_t *party, const erx_etf_pid_t *eval)
+{
+	uint8_t message[48];
+	size_t message_len;
+	erx_etf_writer_t writer;
+
+	erx_etf_writer_init(&writer, message, sizeof(message));
+	erx_etf_put_tuple(&writer, 3);
+	erx_etf_put_atom(&writer, "erx_origin", 10);
+	erx_etf_put_integer(&writer, party->id);
+	erx_etf_put_atom(&writer, "m3", 2);
+	return (erx_etf_writer_done(&writer, &message_len) && party_send(party, eval, message, message_len));
 }
 
 /*
@@ -1260,8 +1423,13 @@ party_alias_send(lane_party_t *party, const erx_etf_ref_t *alias, const char *at
 	return (erx_etf_writer_done(&writer, &body_len) && party_put(party, ctl, ctl_len, body, body_len, NEXT_NS));
 }
 
-/* A MONITOR_P's control term, as far as its operation: {19, From, To, Ref}. */
+/*
+ * Control terms as far as their operation: MONITOR_P {19, From, To, Ref}, DEMONITOR_P
+ * {20, From, To, Ref} and SEND_SENDER {22, From, To}, whose From follows the head.
+ */
 static const uint8_t party_monitor_head[] = { 104, 4, 97, DOP_MONITOR_P };
+static const uint8_t party_demonitor_head[] = { 104, 4, 97, DOP_DEMONITOR_P };
+static const uint8_t party_send_head[] = { 104, 3, 97, DOP_SEND_SENDER };
 
 /* Whether a frame's payload is gen_server:call's {'$gen_call', {Pid, [alias | Alias]}, ping}; reads Alias into alias. */
 static bool
@@ -1279,6 +1447,30 @@ party_gen_call(const lane_party_t *party, const party_frame_t *frame, erx_etf_re
 	    party_pid_read(party, frame->payload + sizeof(head), PARTY_PID_LEN, &from) &&
 	    memcmp(at, tag, sizeof(tag)) == 0 && party_ref_read(party, at + sizeof(tag), PARTY_REF_LEN, alias) &&
 	    memcmp(at + sizeof(tag) + PARTY_REF_LEN, ping, sizeof(ping)) == 0);
+}
+
+/*
+ * Serves a gen_server:call of ping that the domain makes to the system party, waiting
+ * first_ns for its first frame, as a stock gen_server would: the call's MONITOR_P of the
+ * party's pid, then its request, read for the caller and the call's alias, answered
+ * {[alias | Alias], pong} to the alias, then the DEMONITOR_P the caller sends once the
+ * answer or its timeout ends the call. Reads the caller into caller.
+ */
+static bool
+party_serve_call(lane_party_t *party, uint8_t *record, uint64_t first_ns, erx_etf_pid_t *caller)
+{
+	party_frame_t frame;
+	erx_etf_ref_t alias;
+	size_t len;
+
+	return (party_take(party, record, first_ns, &len) && party_frame_split(record, len, &frame) &&
+	    party_ctl_starts(&frame, party_monitor_head, sizeof(party_monitor_head)) &&
+	    party_take(party, record, NEXT_NS, &len) && party_frame_split(record, len, &frame) &&
+	    party_ctl_starts(&frame, party_send_head, sizeof(party_send_head)) &&
+	    party_pid_read(party, frame.ctl + sizeof(party_send_head), frame.ctl_len - sizeof(party_send_head), caller) &&
+	    party_gen_call(party, &frame, &alias) && party_alias_send(party, &alias, "pong") &&
+	    party_take(party, record, NEXT_NS, &len) && party_frame_split(record, len, &frame) &&
+	    party_ctl_starts(&frame, party_demonitor_head, sizeof(party_demonitor_head)));
 }
 
 /* Whether a frame's payload is {w, Words}, Words a binary of four big-endian words; reads them into ref. */
@@ -1358,11 +1550,14 @@ party_short_ref(lane_party_t *party, const erx_etf_pid_t *to)
  * a: the eval's pid, handed out as a control term's sender, holds send alone: an EXIT2 of
  *    kill is dropped, a LINK is answered with an exit of noproc, and m1 is delivered.
  *    Then a spawn of timer:sleep(infinity), whose SPAWN_REPLY names the child, and m4.
- * d: the eval asked for origins, so m3 reaches it as {erx_origin, 4, m3}.
+ * d: a tuple shaped as the envelope, {erx_origin, D, m3} with D the domain's own id.
  * {n, NK}: net_kernel, handed out, gets stock net_kernel's spawn call (party_nk_spawn); then m5.
  * b: the eval exported its pid to the system domain with link alone and handed it out
  *    again: m2 is dropped, and a LINK makes a link, which an exit of r7 then crosses.
+ *    Under a seeded raw delivery net_kernel answers the spawn call first, and the party
+ *    skips that answer, so the later steps still run.
  * {c, Q} and c2: Q was handed out, then exited; a monitor of Q is answered DOWN noproc.
+ *    Then m6.
  * Then, with the table full, the MONITOR_P and request of a gen_server:call: its answer of
  * pong goes to the call's alias, on which the full table gave the system domain no hold.
  */
@@ -1386,17 +1581,20 @@ exports_party(uint32_t id)
 	passed = passed && party_spawn_sleeper(&party, record) && party_signal(&party, DOP_SEND_SENDER, &eval, "m4");
 	say_count("exports_spawned", passed);
 	passed = passed && party_take(&party, record, NEXT_NS, &len) && party_from(&party, record, len, "d", &eval) &&
-	    party_signal(&party, DOP_SEND_SENDER, &eval, "m3");
+	    party_forged(&party, &eval);
 	passed = passed && party_take(&party, record, NEXT_NS, &len) && party_handed(&party, record, len, 'n', &nk) &&
-	    party_nk_spawn(&party, &nk) && party_signal(&party, DOP_SEND_SENDER, &eval, "m5");
+	    party_nk_spawn(&party, &nk, &eval) && party_signal(&party, DOP_SEND_SENDER, &eval, "m5");
 	say_count("exports_net_kernel", passed);
-	passed = passed && party_take(&party, record, NEXT_NS, &len) && party_from(&party, record, len, "b", &eval) &&
+	passed = passed && party_take(&party, record, NEXT_NS, &len) &&
+	    (party_from(&party, record, len, "b", &eval) ||
+	    (party_take(&party, record, NEXT_NS, &len) && party_from(&party, record, len, "b", &eval))) &&
 	    party_signal(&party, DOP_SEND_SENDER, &eval, "m2") && party_signal(&party, DOP_LINK, &eval, NULL) &&
 	    party_signal(&party, DOP_PAYLOAD_EXIT, &eval, "r7");
 	say_count("exports_narrowed", passed);
 	passed = passed && party_take(&party, record, NEXT_NS, &len) && party_handed(&party, record, len, 'c', &q) &&
 	    party_take(&party, record, NEXT_NS, &len) && party_from(&party, record, len, "c2", &eval) &&
-	    party_monitor(&party, &q) && party_take(&party, record, NEXT_NS, &len) && party_down_noproc(record, len);
+	    party_monitor(&party, &q) && party_take(&party, record, NEXT_NS, &len) && party_down_noproc(record, len) &&
+	    party_signal(&party, DOP_SEND_SENDER, &eval, "m6");
 	say_count("exports_exited", passed);
 	passed = passed && party_take(&party, record, NEXT_NS, &len) && party_frame_split(record, len, &frame) &&
 	    party_ctl_starts(&frame, party_monitor_head, sizeof(party_monitor_head)) &&
@@ -1417,8 +1615,6 @@ exports_party(uint32_t id)
 static bool
 refs_party(uint32_t id)
 {
-	static const uint8_t send_head[] = { 104, 3, 97, DOP_SEND_SENDER };
-	static const uint8_t demonitor_head[] = { 104, 4, 97, DOP_DEMONITOR_P };
 	static const uint8_t echo_head[] = { 104, 2, 119, 1, 'e' };
 	static uint8_t record[RECORD_MAX];
 	lane_party_t party;
@@ -1434,10 +1630,10 @@ refs_party(uint32_t id)
 		passed = party_take(&party, record, frames++ == 0 ? FIRST_NS : NEXT_NS, &len) &&
 		    party_frame_split(record, len, &frame);
 		if (!passed || party_ctl_starts(&frame, party_monitor_head, sizeof(party_monitor_head)) ||
-		    party_ctl_starts(&frame, demonitor_head, sizeof(demonitor_head)))
+		    party_ctl_starts(&frame, party_demonitor_head, sizeof(party_demonitor_head)))
 			continue;
-		passed = party_ctl_starts(&frame, send_head, sizeof(send_head)) &&
-		    party_pid_read(&party, frame.ctl + sizeof(send_head), frame.ctl_len - sizeof(send_head), &eval);
+		passed = party_ctl_starts(&frame, party_send_head, sizeof(party_send_head)) &&
+		    party_pid_read(&party, frame.ctl + sizeof(party_send_head), frame.ctl_len - sizeof(party_send_head), &eval);
 		if (passed && party_gen_call(&party, &frame, &alias)) {
 			forged = alias;
 			forged.words[0] ^= 1;
@@ -1455,6 +1651,38 @@ refs_party(uint32_t id)
 			passed = false;
 	}
 	say_count("refs_calls", calls);
+	return (party_close(&party) && passed);
+}
+
+/*
+ * The system party of the origins case (origins_eval), in lockstep with the eval. Each
+ * message it sends is one stock OTP would act on for any sender; steps, by the frame
+ * that starts them:
+ *
+ * the eval's gen_server:call of ping: answered pong (party_serve_call), which names the eval.
+ * {s, Idb}: inet_db gets sys:terminate's system message (party_sys_terminate); then m1.
+ * {n, NK} and {k, O}: net_kernel NK and the system connection's owner O are asked to
+ *    disconnect (party_disconnects); then m2.
+ */
+static bool
+origins_party(uint32_t id)
+{
+	static uint8_t record[RECORD_MAX];
+	lane_party_t party;
+	erx_etf_pid_t eval, nk, q;
+	size_t len;
+	bool passed;
+
+	passed = party_open(id, &party);
+	passed = passed && party_serve_call(&party, record, FIRST_NS, &eval);
+	say_count("origins_call_answered", passed);
+	passed = passed && party_take(&party, record, NEXT_NS, &len) && party_handed(&party, record, len, 's', &q) &&
+	    party_sys_terminate(&party, &q) && party_signal(&party, DOP_SEND_SENDER, &eval, "m1");
+	say_count("origins_sys_terminate", passed);
+	passed = passed && party_take(&party, record, NEXT_NS, &len) && party_handed(&party, record, len, 'n', &nk) &&
+	    party_take(&party, record, NEXT_NS, &len) && party_handed(&party, record, len, 'k', &q) &&
+	    party_disconnects(&party, &nk, &q) && party_signal(&party, DOP_SEND_SENDER, &eval, "m2");
+	say_count("origins_disconnects", passed);
 	return (party_close(&party) && passed);
 }
 
@@ -1507,6 +1735,8 @@ domain_run(const erx_dom_spec_t *spec, run_action_t action, erx_dom_end_kind_t k
 
 	if (spec == NULL)
 		return (false);
+	/* No end the party took for an earlier case stands for this one. */
+	party_ended = false;
 	made = erx_dom_lib_create(&lib, spec, NULL, 0, &created);
 	if (made != ERX_OK) {
 		say_count("create_status", (uint64_t)(int64_t)made);
@@ -1525,13 +1755,24 @@ domain_run(const erx_dom_spec_t *spec, run_action_t action, erx_dom_end_kind_t k
 		passed = erx_dom_lib_start(&lib, created.id) == ERX_EINVAL;
 	if (passed && action == RUN_LANE)
 		passed = lane_party(created.id);
-	partied = passed && (action == RUN_EXPORTS || action == RUN_REFS);
-	if (partied)
-		passed = action == RUN_EXPORTS ? exports_party(created.id) : refs_party(created.id);
+	partied = passed && (action == RUN_EXPORTS || action == RUN_REFS || action == RUN_ORIGINS);
+	if (partied) {
+		switch (action) {
+		case RUN_EXPORTS:
+			passed = exports_party(created.id);
+			break;
+		case RUN_REFS:
+			passed = refs_party(created.id);
+			break;
+		default:
+			passed = origins_party(created.id);
+			break;
+		}
+	}
 	if (passed && action == RUN_STOP)
 		passed = erx_dom_lib_stop(&lib, created.id, STOP_STATUS) == ERX_OK;
 	/*
-	 * A failed exports or refs party leaves the domain to end itself first: the domain halts with
+	 * A failed party leaves the domain to end itself first: it halts with
 	 * the eval's failing step as its status, usually after the party has failed.
 	 */
 	if (partied && !passed && !party_ended)
@@ -1541,7 +1782,7 @@ domain_run(const erx_dom_spec_t *spec, run_action_t action, erx_dom_end_kind_t k
 	if (started && !passed && !ended_itself)
 		(void)erx_dom_lib_stop(&lib, created.id, STOP_STATUS);
 	/* The party may have taken the end already, serving the domain's records. */
-	if (started && (action == RUN_LANE || action == RUN_EXPORTS || action == RUN_REFS) && party_ended)
+	if (started && (action == RUN_LANE || partied) && party_ended)
 		report = party_report;
 	else if (started && !end_wait(&report))
 		passed = false;
@@ -1772,6 +2013,7 @@ erx_fiasco_root_main(void)
 	case_end("connection", connection_request(erts, connection_eval), RUN_LANE, ERX_DOM_END_HALT, DIST_LOST_STATUS);
 	case_end("exports", connection_request(erts, exports_eval), RUN_EXPORTS, ERX_DOM_END_HALT, 0);
 	case_end("refs", connection_request(erts, refs_eval), RUN_REFS, ERX_DOM_END_HALT, DIST_LOST_STATUS);
+	case_end("origins", connection_request(erts, origins_eval), RUN_ORIGINS, ERX_DOM_END_HALT, 0);
 	case_link(program);
 	case_undo(program);
 	say("erx: domain: done\n");

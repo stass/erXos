@@ -719,6 +719,14 @@ it; git history is the record of completed work.
   per byte, a few MiB per connection, where FreeBSD bounds the same with
   the mbuf limit `sb_mbmax`. Count the overhead against the receive buffer,
   or join small payloads as they are queued.
+* [Low] Runtime, the envelope (edit 16; `erl_message.c`, `erts_msg_attached_data_size_aux`):
+  the size estimate of an undecoded message from another domain leaves out the envelope's
+  4 words, so the GC's heap need, `process_info`'s total heap size and the crash dump's
+  sizes count each such message 4 words short; the decode itself reserves them.
+* [Low] Runtime, the envelope (edit 16; `erts_proc_sig_decode_dist`):
+  `make_small(edep->erx_origin)` takes a 32-bit domain id for a small integer, which holds
+  only on a 64-bit build; a 32-bit port needs ids bounded below its small range.
+
 * [Low] network, docs/design-network-stack.md ("Framing", step 3 of the output pass): "past
   SYN-RECEIVED" should read "once a SYN has been received" (`TCPS_HAVERCVDSYN`), as the code
   does; FreeBSD's connect also returns the first EHOSTUNREACH (`tcp_usrreq.c:540`), which
@@ -3714,27 +3722,36 @@ to the corpus and follow rc
 
 ## Security residuals
 
-* [High] Runtime, origins (edits 16 and 58-61 of design-runtime, design-domains D18): the
-  code wraps a message from another domain only for a process that set the flag
-  `erx_dist:origins/1` (net_kernel, the connection agent, `erx_dist`'s connection owner),
-  so a peer that holds only `send` on any other OTP behaviour process can send it
-  `{system, From, Req}` and terminate it, suspend it, read its whole state (which hands
-  the peer every pid in it) or replace its state with an exported function; a pid gets
-  `send` toward every peer it is encoded for, so any process that calls or messages
-  another domain is exposed. What remains, in order:
-  1. edit 16 wraps every message, with `F_ERX_ORIGINS`, `erx_dist:origins/1`,
-     `erx:origins/1` and their calls in `erx_dist.erl` and `erx_connections.erl` deleted,
-     landing together with the reply unwraps of `gen.erl` and `io.erl` (edits 58 and 60),
-     without which cross-domain calls and io break; the guest step that sets and clears
-     the flag (`test/guest/native_domain/guest.c`, step 8) checks the universal envelope
-     instead. This closes the `sys` exposure and lands before SV2 hands out a domain pid;
-  2. the io servers' request unwraps (edit 61), without which io from a process spawned
+* [High] Runtime, origins (edits 58-61 of design-runtime, design-domains D18): edit 16
+  wraps every message from another domain, and `gen` and `io` take call and io replies
+  in their envelopes, but nothing serves a request from another domain yet. `gen` and
+  `io` take a reply with no check of its domain, since the call's reference, four
+  unguessable words (edit 17), was handed only to the callee. What remains, in order:
+  1. the io servers' request unwraps (edit 61), without which io from a process spawned
      into another domain waits forever;
-  3. `{erx_serve, any}` (edit 59) and `erx:owner/1`, without which no `gen_server` or
-     `gen_statem` serves another domain;
-  4. the source check on OTP's modules (design.md, "Chokepoint checks") with its seeded
-     extra site, the tests of design-domains' "Origins" and hostile-runtime cases, and the
-     oracle's differing cases recorded per case.
+  2. `file`'s `file_request` and `file_reply`, which neither edit 60 nor edit 61 covers:
+     a positioned operation (`file:pread/3`, `pwrite/3`, `position/2`) on a file server
+     of another domain waits forever for its reply, which arrives in its envelope. The
+     design needs an edit for it;
+  3. `{erx_serve, any}` (edit 59), with `erx:owner/1` to check a request's domain,
+     without which no `gen_server` or `gen_statem` serves another domain;
+  4. the tests of design-domains' "Origins" and hostile-runtime cases between two ERTS
+     domains (a message to an alias arrives wrapped, which waits on aliases holding their
+     exports; the served calls; `sys` on a `gen_statem`, a `gen_event` and a plain `sys`
+     loop), and the oracle's differing cases recorded per case;
+  5. the other stock protocols one ERTS domain speaks to another, which arrive wrapped
+     and so go unanswered: net_kernel's `is_auth` call of `net_adm:ping/1` (it lands in
+     `handle_info`, and the caller waits forever), `global`'s connect, lock and sync
+     messages (`global:sync/0` and `register_name/2` stall on another domain's node),
+     `peer`'s own `io_reply` receive and `proc_lib`'s start acks. Each needs its owner's
+     unwrap, or a design note that it does not cross domains.
+* [Low] Runtime, origins (`gen.erl` and `io.erl`, edits 58 and 60): a reply needs no
+  check of its domain only while the call's reference reaches no third domain. A call
+  with timeout `infinity` replies to the caller's pid with a plain monitor reference;
+  a callee that logs or prints its `From` in full (a crash report, a log record) shows
+  the four words to whoever reads that log, and a domain that holds `send` on the caller
+  can then forge the reply. Print references short in records another domain reads, or
+  check the reply's `D` against `erx:owner/1` of the callee.
 * [Medium] Runtime, local decode of an echoed reference, `external.c` `dec_term` with no
   connection: a local `binary_to_term/1` promotes the words of a table or resource
   reference to the live table or resource, as stock does (design-runtime, "Representation
@@ -3743,20 +3760,6 @@ to the corpus and follow rc
   acts on the live table on the peer's behalf, a confused deputy. A service must not
   `binary_to_term/1` a binary another domain sent and then use a reference in it as a
   table or resource; nothing enforces that.
-* [High] Runtime, export table and OTP's `sys` protocol (`gen_server.erl`, `gen_statem.erl`,
-  `gen_event.erl`, `proc_lib`): a peer that holds only `send` on an OTP behaviour process
-  can send it `{system, From, Req}` and terminate it, suspend it, read its whole state
-  (which hands the peer every pid in it) or replace its state with an exported function.
-  A pid gets `send` toward every peer it is encoded for, the sender of each control term
-  included, so any process that calls or messages another domain is exposed.
-  design-domains says `send` cannot kill a process; nothing covers `sys`. Edit 16's
-  origins protect only the processes that set them (net_kernel, the connection agent,
-  `erx_dist`'s connection owner), a list that has to be remembered; the domain pids set
-  none, since no domain is handed one before SV2. The owner chose the fix: every message
-  from another domain arrives as `{erx_origin, D, Msg}`, with no per-process flag, and only
-  each protocol's owner unwraps its own shapes (`gen` and `io` replies, io-server
-  requests, servers started to serve other domains); `sys` never unwraps. It lands
-  before SV2 hands out a domain pid.
 
 * [Medium] `tools/erx web --open`, [The host tool's front end](docs/design-web.md#the-host-tools-front-end): not
   built, because handing the URL to the host's opener (`open`, `xdg-open`) puts the token in an argument vector,

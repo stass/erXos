@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: dist_spawn_init/1 takes the argument list out of the envelope
+%% {erx_origin, D, Args} of a message from another domain (edit 16).
+%%
 %% %CopyrightEnd%
 %%
 
@@ -1051,9 +1054,12 @@ dist_spawn_init(MFA) ->
     %% 'dist_spawn_init' message makes it possible to detect decode failures
     %% of the argument list.
     %%
+    %% erXos: the argument list comes from another domain, so edit 16 delivers it in its
+    %% envelope; it is the first message, queued by ERTS with the process, so no sender
+    %% can stand a list of its own in front of it.
     {M, F, _NoA} = MFA,
     receive
-        A when A =/= dist_spawn_init ->
+        {erx_origin, _, A} ->
             receive dist_spawn_init -> ok end,
             erlang:apply(M, F, A);
         dist_spawn_init ->

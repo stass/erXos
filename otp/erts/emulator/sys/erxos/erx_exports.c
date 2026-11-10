@@ -21,6 +21,7 @@
 #include "erl_process.h"
 #include "dist.h"
 #include "bif.h"
+#include "big.h"
 
 #include "erx/abi.h"
 #include "erx_alias.h"
@@ -457,18 +458,18 @@ erx_dist_exports_refused_0(BIF_ALIST_0)
 }
 
 /*
- * erx_dist:origins(Bool): edit 16. While set, a message from another domain reaches the
- * caller as {erx_origin, D, Msg}, D the domain id of the connection it arrived on
- * (erts_proc_sig_decode_dist); false turns it off. ok.
+ * erx_dist:owner(Name): edit 16. The domain id a pid, reference or port claims, the
+ * creation of its node: this domain's own for a local name, and for a name from another
+ * domain the creation its sender encoded, which nothing checks. A process compares it
+ * with the D of {erx_origin, D, Msg}, which the connection sets, to tell whether a
+ * message came from the domain a name it holds claims. badarg for any other term.
  */
 BIF_RETTYPE
-erx_dist_origins_1(BIF_ALIST_1)
+erx_dist_owner_1(BIF_ALIST_1)
 {
-	if (BIF_ARG_1 == am_true)
-		BIF_P->flags |= F_ERX_ORIGINS;
-	else if (BIF_ARG_1 == am_false)
-		BIF_P->flags &= ~F_ERX_ORIGINS;
-	else
+	const Eterm name = BIF_ARG_1;
+
+	if (!is_pid(name) && !is_ref(name) && !is_port(name))
 		BIF_ERROR(BIF_P, BADARG);
-	BIF_RET(am_ok);
+	BIF_RET(erts_make_integer(node_container_channel_no(name), BIF_P));
 }

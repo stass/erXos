@@ -8,10 +8,10 @@ erXos's images.
 
 The stack runs in the system domain in Phase 1, the stopgap placement of the network
 domain, and no socket of it is exported to another domain: every request comes from the
-system domain's own processes, so `serve/1` has no envelope to ask for and no lane to
-limit, as for the portable runtime. The network domain's runtime, with `erx:origins/1`,
-its ERTS's request limit and `erx_facet` to run a grant, replaces this once that domain
-exists.
+system domain's own processes, so `serve/1` has no envelope to take off and no lane to
+limit, as for the portable runtime. The network domain's runtime replaces this once that
+domain exists: it takes requests out of their envelope, `{erx_origin, D, Request}`, and
+runs each grant under its ERTS's request limit and `erx_facet`.
 """.
 
 -behaviour(erx_net_runtime).

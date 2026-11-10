@@ -49,7 +49,7 @@ module Erx
     ROOT_FLAGS = %w[-DERX_DOM_TEST_HOOKS].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_domain/program.c'].freeze
     CASES = %w[library warm halt fault stop lanes erts logger erts_refused crash jit_reload jit_write_rx jit_run_rw connection
-                 exports refs link_warm link link_undo link_end undo].freeze
+                 exports refs origins link_warm link link_undo link_end undo].freeze
     RECORD = NativeRoot::DOMAIN_RECORD
     # What a case's domain prints before its case line, each a record of its space and in
     # order: init ran the ERTS domain's release; the logger case's two log records, which

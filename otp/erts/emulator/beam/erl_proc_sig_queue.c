@@ -17,9 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: a message from another domain to a process with F_ERX_ORIGINS
- * set is delivered as {erx_origin, D, Msg} (edit 16); the dirty signal handler has no
- * select to clean up,
+ * Modified by erXos: every message from another domain is delivered as
+ * {erx_origin, D, Msg} (edit 16); the dirty signal handler has no select to clean up,
  * and a copy literal area request that gives an on-heap message its first
  * fragment copies the message's other references (its seq_trace token)
  * into that fragment too. A reference compares four words (edit 17 of
@@ -5541,7 +5540,7 @@ erts_proc_sig_decode_dist(Process *proc, ErtsProcLocks proc_locks,
             break;
         }
     }
-    else if (proc->flags & F_ERX_ORIGINS)
+    else
         need += 4; /* erXos: {erx_origin, D, Msg} (edit 16) */
 
     hfrag = new_message_buffer(need);
@@ -5557,12 +5556,14 @@ erts_proc_sig_decode_dist(Process *proc, ErtsProcLocks proc_locks,
     }
 
     if (ERTS_SIG_IS_MSG(msgp)) {
-        if (proc->flags & F_ERX_ORIGINS) {
-            /* erXos: edit 16, the domain id of the connection it arrived on. */
-            erts_reserve_heap(&factory, 4);
-            msg = TUPLE3(factory.hp, am_erx_origin, make_small(edep->erx_origin), msg);
-            factory.hp += 4;
-        }
+        /*
+         * erXos: edit 16. Every message from another domain, to a pid or to an alias,
+         * arrives in its envelope, D the creation of the entry it arrived on, so no
+         * message of another domain has the shape of one from this domain's processes.
+         */
+        erts_reserve_heap(&factory, 4);
+        msg = TUPLE3(factory.hp, am_erx_origin, make_small(edep->erx_origin), msg);
+        factory.hp += 4;
         ERL_MESSAGE_TERM(msgp) = msg;
         if (msgp->data.heap_frag == &msgp->hfrag)
             msgp->data.heap_frag = ERTS_MSG_COMBINED_HFRAG;

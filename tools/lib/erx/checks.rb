@@ -12,6 +12,7 @@ require_relative 'erofs_reads'
 require_relative 'generated'
 require_relative 'net_checks'
 require_relative 'ns_writers'
+require_relative 'origin_unwraps'
 require_relative 'attach_fields'
 require_relative 'origin'
 require_relative 'runner'
@@ -154,6 +155,7 @@ module Erx
       check_erofs_reads(listed)
       check_net(listed)
       check_ns_writers(listed)
+      check_origin_unwraps(listed)
       check_attach_fields(listed)
       # The chokepoint rules read the same listing, imports included, since
       # the glue lives inside the stopgap kernel's imported tree; an import
@@ -287,6 +289,14 @@ module Erx
     def check_ns_writers(listed)
       sources = listed.select { |relative| NsWriters.covers?(relative) && File.file?(File.join(@root, relative)) }
       violations = NsWriters.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    # Imports included: OTP is imported, and a stock module edited to take the envelope
+    # apart is the violation the check exists for.
+    def check_origin_unwraps(listed)
+      sources = listed.select { |relative| OriginUnwraps.covers?(relative) && File.file?(File.join(@root, relative)) }
+      violations = OriginUnwraps.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 

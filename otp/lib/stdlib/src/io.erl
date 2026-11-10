@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: an io reply is also taken in the envelope of a message from
+%% another domain, {erx_origin, D, {io_reply, Mref, Reply}} (edit 60).
+%%
 %% %CopyrightEnd%
 %%
 -module(io).
@@ -1667,21 +1670,29 @@ execute_request(Pid, {Convert,Converted}, ErrorTag) ->
     Mref = erlang:monitor(process, Pid),
     Pid ! {io_request,self(),Mref,Converted},
 
+    %% erXos, edit 60: an io server of another domain replies in the envelope of edit 16;
+    %% Mref was handed only to the server, and references are unguessable (edit 17), so
+    %% the reply's domain needs no check.
     receive
 	{io_reply, Mref, Reply} ->
-	    erlang:demonitor(Mref, [flush]),
-	    if
-		Convert ->
-		    convert_binaries(Reply);
-		true ->
-		    Reply
-	    end;
+	    io_reply(Mref, Convert, Reply);
+	{erx_origin, _, {io_reply, Mref, Reply}} ->
+	    io_reply(Mref, Convert, Reply);
 	{'DOWN', Mref, _, _, _} ->
 	    receive
 		{'EXIT', Pid, _What} -> true
 	    after 0 -> true
 	    end,
 	    {ErrorTag,terminated}
+    end.
+
+io_reply(Mref, Convert, Reply) ->
+    erlang:demonitor(Mref, [flush]),
+    if
+	Convert ->
+	    convert_binaries(Reply);
+	true ->
+	    Reply
     end.
 
 -doc false.

@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say; polling is removed; F_ERX_UNTRACED and SPO_ERX_UNTRACED carry the spawn option {erx_untraced, true}; a process carries its export holders (edit 13) and F_ERX_ORIGINS (edit 16). A scheduler keeps no reference counter: its thread id picks its reference source (edit 17 of docs/design-runtime.md).
+ * Modified by erXos: a scheduler that holds an executor slot sleeps in erx_park, which ERTS_SSI_FLG_PARK_SLEEPING and its park_slot say; polling is removed; F_ERX_UNTRACED and SPO_ERX_UNTRACED carry the spawn option {erx_untraced, true}; a process carries its export holders (edit 13). A scheduler keeps no reference counter: its thread id picks its reference source (edit 17 of docs/design-runtime.md).
  *
  * %CopyrightEnd%
  */
@@ -1655,8 +1655,6 @@ extern int erts_system_profile_ts_type;
 #define F_DBG_FORCED_TRAP    (1 << 24) /* DEBUG: Last BIF call was a forced trap */
 #define F_DIRTY_CHECK_CLA    (1 << 25) /* Check if copy literal area GC scheduled */
 #define F_ASYNC_DIST         (1 << 26) /* Truly asynchronous distribution */
-#define F_ERX_ORIGINS        (1 << 27) /* erXos: messages from other domains arrive as
-                                        {erx_origin, D, Msg} (edit 16) */
 
 /* Signal queue flags */
 #define FS_OFF_HEAP_MSGQ       (1 << 0) /* Off heap msg queue */
