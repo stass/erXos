@@ -1395,6 +1395,23 @@ it; git history is the record of completed work.
   facets from a configured or session template row, since the stopgap manifest check refuses
   manifest facet rows; a spec's `facets` is the one source of a domain's facets. Init waits
   at most 5 s for the answer and then runs with none.
+  shares, and which drops and counts each one no connection expects (design-system.md "What
+  a domain sends the domain service"). A count is one integer per domain, but the time
+  each message costs the pid and the service is not bounded. Bound what a domain can make the pid and the service spend.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`ended/3`,
+  `restart/2`, `liberx/system/dom_life.c` `erx_dom_retire_record`): a configured domain
+  restarts as its end arrives, while the ended domain's record still holds a slot of the
+  library's view and counts against its principal's `domains` and memory (`carved`), all
+  freed only at the retire, which waits for every peer to answer `connection_down`. So a
+  configured domain with restarts left that had an introduced connection is refused its
+  restart (`dom_core.c` `dom_check_room`) unless the library's view has a second free
+  domain slot and connection row and its principal room for two domains' count and memory,
+  and nothing tries again. Restarting at the retire instead would let any peer that never
+  answers postpone the restart for good, against a domain depending on nothing outside
+  itself but the kernel; the "domains, retirement" item below is the same survivor
+  holding the record. Decide what an ended record holds against its principal before its
+  retire (D16 keeps only each connection's child budget alive for the peers), and restart
+  against that.
 * [Low] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: configured domains
   always get the default 10 s boot timeout; the manifest has no field for it.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names
@@ -3636,6 +3653,21 @@ to the corpus and follow rc
   `connections` quota. Leave headroom in `max_domains` for such records,
   and state how much
   ([design-system.md](docs/design-system.md#risks-and-open-questions)).
+* [High] domains, the funnel's sender rule (`liberx/erx_funnel.c` `sender_rule`,
+  docs/design-domains.md "The funnel", step 4): a link or monitor of a pid of an ended
+  domain, sent once a later domain of its name is connected, ends the connection. The later
+  domain's funnel finds the target dead and has ERTS answer noproc, and ERTS's answer
+  (`PAYLOAD_EXIT`, or `PAYLOAD_MONITOR_P_EXIT` from `erts_dsig_send_m_exit`) names the dead
+  pid as its sender, as stock ERTS does; that pid carries the ended domain's id, so the
+  asker's sender rule finds a sending pid of another creation and refuses the frame as
+  malformed. A client that keeps a monitor on a service domain's process and monitors it
+  again after the service's domain was replaced is enough. Seen in the system_domain
+  suite's later-domain step with a monitor in place of its message. Two fixes: the asking
+  runtime answers a link or monitor of a pid whose creation is not its connected entry's
+  itself, with noproc and no frame, as stock ERTS does for its own node's earlier runs
+  (recommended: no rule changes, and nothing a stock test sees); or the sender rule admits,
+  in those two answers alone, a pid of the lane's node name with an earlier id, which lets a
+  later domain report deaths of its name's ended domains. The user decides.
 * [Low] kernel ABI generator, `tools/lib/erx/abi_model.rb`: a private
   layout stays out of every public declaration by three separate
   refusals (embedding as a field, as a tail, and projection), so a new

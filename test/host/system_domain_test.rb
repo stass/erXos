@@ -42,14 +42,19 @@ class SystemDomainTest < Minitest::Test
   # must end with the slogan of erx_domain's end, not another.
   def test_the_kill_waits_for_the_running_domains_and_must_see_the_applications_end
     shell = { name: 'release-shell', pattern: /x/n, seconds: 60 }.freeze
-    points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell])
+    domain = Erx::MediumBoot::Domain.new(runtime: 11, jit: 12, release: 13, release_files: 14)
+    points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell], domain: domain)
+    line = Suite.service_kill_line(domain)
     assert_equal %w[image-identity release-shell erlang-shell domain-running control-table introduced hostile connection-down
-                    domain-ends system-domain-ended],
+                    ignored-down later-domain domain-ends system-domain-ended],
                  points.map { |point| point.fetch(:name) }
     assert_equal Erx::ProductionImage::Run::ERL_LINE, points[1].fetch(:type)
-    assert_equal "#{Suite::SERVICE_KILL_EXPRESSION}\r", points[2].fetch(:type)
-    running, table, _introduced, _hostile, _down, ends, ended = points.last(7)
-    refute_match running.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
+    assert_equal "#{line}\r", points[2].fetch(:type)
+    # The later domain's request names the image's runtime and release, and one connection.
+    assert line.start_with?('SdSpec=#{name=><<"peer">>,runtime=>11,release=>13,release_files=>14,')
+    assert_includes line, ',connections=>1},SdLives='
+    running, table, _introduced, _hostile, _down, ignored, later, ends, ended = points.last(9)
+    refute_match running.fetch(:pattern), "1> #{line}\r\n"
     good = '{service_kill,[{5,erts@erxos,ready},{6,peer@erxos,ready}],system@erxos,4,' \
            '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}],{2,erts@erxos}}'
     running.fetch(:verify).call("1> #{good}\r\n")
@@ -62,7 +67,7 @@ class SystemDomainTest < Minitest::Test
     # side, the stray command 3 refused. A record that waited behind the paused port (a
     # domain pid that sends it as a message), a stray call that wrote a slot (no caller
     # check), or a lane never filled each fails.
-    refute_match table.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
+    refute_match table.fetch(:pattern), "1> #{line}\r\n"
     good_table = '{control_table,ok,full,true,badarg,ok,{ok,1,0}}'
     table.fetch(:verify).call("#{good_table}\r\n")
     [good_table.sub('badarg,ok', 'badarg,timeout').sub('{ok,1,0}', '{timeout,0,0}'),
@@ -82,18 +87,21 @@ class SystemDomainTest < Minitest::Test
     # The forged records: one the agent or the domain pid acted on (no origin check), so
     # nothing more is counted, the call fails or the pair is no longer up, each fails.
     hostile = points.find { |point| point.fetch(:name) == 'hostile' }
-    refute_match hostile.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
+    refute_match hostile.fetch(:pattern), "1> #{line}\r\n"
     hostile.fetch(:verify).call("#{Suite::HOSTILE_ANSWER}\r\n")
     [Suite::HOSTILE_ANSWER.sub(',ok,1,1,', ',ok,timeout,1,'), Suite::HOSTILE_ANSWER.sub(',1,1,', ',1,0,'),
      Suite::HOSTILE_ANSWER.sub('{pong,5,ping}', '{error,{erpc,noconnection}}'),
-     Suite::HOSTILE_ANSWER.sub(/up\}\z/, 'closing}')].each do |line|
-      assert_raises(Erx::Error) { hostile.fetch(:verify).call("#{line}\r\n") }
+     Suite::HOSTILE_ANSWER.sub(/up\}\z/, 'closing}'),
+     # a domain pid that passes malformed answers on, a core that does not count an
+     # answer for a connection that does not exist
+     Suite::HOSTILE_ANSWER.sub('{5,3}', '{8,0}'), Suite::HOSTILE_ANSWER.sub('{5,3}', '{2,3}')].each do |answer|
+      assert_raises(Erx::Error) { hostile.fetch(:verify).call("#{answer}\r\n") }
     end
     # The down path: a burst's tail lost (an agent without the finish), a side never told
     # (no connection_lost from a port that ended by itself), objects never deleted or a
     # quota never freed each fails.
     down = points.find { |point| point.fetch(:name) == 'connection-down' }
-    refute_match down.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
+    refute_match down.fetch(:pattern), "1> #{line}\r\n"
     down.fetch(:verify).call("#{Suite::CONNECTION_DOWN_ANSWER}\r\n")
     [Suite::CONNECTION_DOWN_ANSWER.sub('{20,true,noconnection}', '{0,true,timeout}'),
      Suite::CONNECTION_DOWN_ANSWER.sub('{ok,noconnection}', '{ok,timeout}'),
@@ -103,7 +111,24 @@ class SystemDomainTest < Minitest::Test
      Suite::CONNECTION_DOWN_ANSWER.sub('{ok,pong,false,timeout,ok,pong}', '{ok,pong,true,pong,ok,pong}')].each do |line|
       assert_raises(Erx::Error) { down.fetch(:verify).call("#{line}\r\n") }
     end
-    refute_match ends.fetch(:pattern), "1> #{Suite::SERVICE_KILL_EXPRESSION}\r\n"
+    # The ignored connection_down: a core that lets the connection go, or frees erts's
+    # quota, while erts never answered, or an agent that answered anyway, each fails.
+    refute_match ignored.fetch(:pattern), "1> #{line}\r\n"
+    ignored.fetch(:verify).call("#{Suite::IGNORED_DOWN_ANSWER}\r\n")
+    [Suite::IGNORED_DOWN_ANSWER.sub('{closing,1,0,', '{gone,0,0,'), Suite::IGNORED_DOWN_ANSWER.sub('{closing,1,0,', '{closing,0,0,'),
+     Suite::IGNORED_DOWN_ANSWER.sub('{error,closing}', 'ok'), Suite::IGNORED_DOWN_ANSWER.sub('false,true', 'true,true'), Suite::IGNORED_DOWN_ANSWER.sub(',ok,none,ok}', ',ok,closing,{error,closing}}')]
+      .each { |answer| assert_raises(Erx::Error) { ignored.fetch(:verify).call("#{answer}\r\n") } }
+    # The later domain of peer: one that reused the ended domain's id, a nodeup before
+    # the nodedown, or a message to the ended domain's pid that ended the connection (a
+    # target rule that requires the receiver's creation), or a stale pid taken for the
+    # later domain's process of the same number and serial, each fails.
+    refute_match later.fetch(:pattern), "1> #{line}\r\n"
+    later.fetch(:verify).call("#{Suite::LATER_DOMAIN_ANSWER}\r\n")
+    [Suite::LATER_DOMAIN_ANSWER.sub('{7,ok}', '{6,ok}'), Suite::LATER_DOMAIN_ANSWER.sub('[nodedown,nodeup]', '[nodeup,nodedown]'),
+     Suite::LATER_DOMAIN_ANSWER.sub('nodeup],up}', 'nodeup],down}'), Suite::LATER_DOMAIN_ANSWER.sub('{7,ok}', '{error,name_taken}'),
+     Suite::LATER_DOMAIN_ANSWER.sub('sd_new', 'sd_old')]
+      .each { |answer| assert_raises(Erx::Error) { later.fetch(:verify).call("#{answer}\r\n") } }
+    refute_match ends.fetch(:pattern), "1> #{line}\r\n"
     down = '{domain_down,5,{halt,69}}'
     good_ends = '{domain_ends,[{6,stopped}],[{5,erts@erxos,ready}],[noconnection,noconnection],gone,' \
                 "[{5,{halt,69}},{6,stopped}],[#{down},#{down},{error,#{down}}]," \
@@ -134,6 +159,6 @@ class SystemDomainTest < Minitest::Test
     ['("{application_terminated,erx_net,shutdown}")', '({application_terminated,erx_domain,shutdown})'].each do |reason|
       assert_raises(Erx::Error) { ended.fetch(:verify).call("Kernel pid terminated (application_controller) #{reason}\r\n") }
     end
-    assert_raises(Erx::Error) { Suite.service_kill_checkpoints([shell, points[0]]) }
+    assert_raises(Erx::Error) { Suite.service_kill_checkpoints([shell, points[0]], domain: domain) }
   end
 end

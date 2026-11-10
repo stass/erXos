@@ -3287,6 +3287,11 @@ for the same reason.
   * opens a record of the receiver's `max_frame` and trickles its bytes, on
     many connections at once: the receiver holds what has arrived and no
     more;
+  * answers `connection_mapped`, `connection_unmapped` and
+    `connection_lost` for connections it is not a party to and out of
+    turn for its own, and sends malformed answers: its domain pid drops
+    and counts the malformed ones, the domain service the others, each
+    against the hostile domain, and nothing else changes;
   * ignores `connection_down`: the connection stays closing and counted
     against the hostile domain's `connections` until it ends, and nothing
     else changes; one that answers `connection_unmapped` and keeps its

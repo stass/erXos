@@ -150,13 +150,14 @@ module Erx
     # The burst (D17 of docs/design-runtime.md, the finish): SdBurst runs in erts and, told
     # {sd_go, R, Agent}, which arrives as every message from another domain does, in
     # {erx_origin, D, Msg} (edit 16 of docs/design-runtime.md), sends BURST messages
-    # {sd_burst, I} to R in order, then PADDING of sd_pad, which R gets enveloped too, waits until its system side's port counts them all sent into the lane (the
-    # counts' first word, erx_lane_drv.h), so the burst is published, and kills Agent, which
-    # halts erts; it waits on, so its end is erts's. SdCollect: a system-domain process that traps exits, links to the burst's
-    # process P and gathers what arrives until P's 'EXIT'; it answers
-    # {sd_collected, R, {Count, InOrder, Exit}}. The domain service ends erts's side only
-    # after the finish has delivered every published frame, so the whole burst comes before
-    # the exit.
+    # {sd_burst, I} to R in order, then PADDING of sd_pad, which R gets enveloped too, waits
+    # until its system side's port counts them all sent into the lane (the counts' first
+    # word, erx_lane_drv.h), so the burst is published, and kills Agent, which halts erts;
+    # it waits on, so its end is erts's. SdCollect: a system-domain process that traps
+    # exits, links to the burst's process P and gathers what arrives until P's 'EXIT'; it
+    # answers {sd_collected, R, {Count, InOrder, Exit}}. The domain service ends erts's side
+    # only after the finish has delivered every published frame, so the whole burst comes
+    # before the exit.
     BURST = 500
     PADDING = 16
     SERVICE_KILL_BURST = "SdBurst=fun()->receive {erx_origin,_,{sd_go,SdTr,SdTa}}->ok end,SdTpt=hd([SdTq||SdTq<-erlang:ports()," \
@@ -226,18 +227,36 @@ module Erx
                               "receive {erx_origin,SdSd,{'$gen_call',SdSf,SdSq}}->gen:reply(SdSf,{pong,SdSd,SdSq}) after 60000->ok end end)," \
                               'SdServing=receive {erx_origin,_,{sd_serving,SdSv}}->ok after 10000->timeout end,' \
                               'SdPong=try erpc:call(erts@erxos,gen_server,call,[SdSv,ping,10000],15000) catch SdPc:SdPr->{SdPc,SdPr} end'
-    # Forged records on the introduced pair (docs/design-domains.md, "Verification and testing"): SdZf runs
-    # in peer, exports itself to erts and waits for erts's agent, which a process of erts
-    # hands it, so peer holds send on the agent (edit 8 of docs/design-runtime.md); it then
-    # sends the agent {erx_connection_down, Peer, noconnection} and erts's domain pid, which
-    # its fun carries from the system domain, {erx_connection_lost, Peer, disconnect}, a
-    # record and an answer only the system domain and erts may give. Each arrives in peer's
-    # envelope, {erx_origin, Peer, Msg}, so the agent and the domain pid drop and count it:
-    # SdZpoll waits until erts's agent counts one more dropped (erx_connections:dropped/0),
-    # SdZi reads the domain pid's count (erx_domain:info/1). Then a gen_server call from erts
-    # to a fresh process of peer comes back, and the pair's phase in the domain service's
-    # core is still up. An agent or a domain pid without its origin check takes the
-    # connection down, and the call fails or the phase is closing.
+    # Forged records on the introduced pair (docs/design-domains.md, "Verification and
+    # testing"): SdZf runs in peer, exports itself to erts and waits for erts's agent, which
+    # a process of erts hands it, so peer holds send on the agent (edit 8 of
+    # docs/design-runtime.md); it then sends the agent {erx_connection_down, Peer,
+    # noconnection} and erts's domain pid, which its fun carries from the system domain,
+    # {erx_connection_lost, Peer, disconnect}, a record and an answer only the system domain
+    # and erts may give. Each arrives in peer's envelope, {erx_origin, Peer, Msg}, so the
+    # agent and the domain pid drop and count it: SdZpoll waits until erts's agent counts
+    # one more dropped (erx_connections:dropped/0), SdZi reads the domain pid's count
+    # (erx_domain:info/1).
+    #
+    # Then answers from erts itself that no connection expects (docs/design-system.md, "What
+    # a domain sends the domain service"): a process of erts sends erts's domain pid, in
+    # erts's own envelope, so the origin check passes them, three answers about introduced
+    # connections erts does not have (with peer 999, an id no domain has, and with the system
+    # domain, SYSTEM_CREATION, whose connection to erts is erts's system connection, not an
+    # introduced one), connection_mapped and connection_unmapped for the pair, whose side is
+    # mapped, so neither is the answer it waits for, and three malformed ones: a peer that is
+    # no id, a connection_lost without its reason, and no answer at all. The domain pid drops
+    # and counts the malformed three and passes the other five on; the domain service's
+    # connection core (erx_domain_links:dropped/1) drops and counts those against erts. SdZx
+    # is how much each count grew, {Core, DomainPid}, polled until both reach their number.
+    #
+    # Last, a gen_server call from erts to a fresh process of peer comes back, and the
+    # pair's phase in the domain service's core is still up. An agent or a domain pid
+    # without its origin check takes the connection down, and the call fails or the phase
+    # is closing; a domain pid that passes malformed answers on moves their count to the
+    # core, a core that does not count an answer for a connection that does not exist
+    # counts fewer, and one that acts on an answer its side does not wait for closes the
+    # pair or ends the service.
     SERVICE_KILL_HOSTILE = "SdZpeer=#{DOMAINS.fetch('peer')},SdZs=self(),SdZdp=element(4,SdDom(SdTid))," \
                            'SdZask=fun()->try erpc:call(erts@erxos,erx_connections,dropped,[],10000) catch _:_->error end end,' \
                            'SdZi=fun()->case erx_domain:info(SdDom(SdTid)) of {ok,#{dropped:=SdZn}}->SdZn;SdZe->SdZe end end,' \
@@ -251,13 +270,22 @@ module Erx
                            'SdZpoll=fun SdZpf(0)->timeout;SdZpf(SdZk)->case SdZask() of SdZn when is_integer(SdZn),SdZn>SdZa0->' \
                            'SdZn-SdZa0;_->timer:sleep(100),SdZpf(SdZk-1) end end,SdZad=SdZpoll(50),' \
                            'SdZdd=case SdZi() of SdZd1 when is_integer(SdZd1)->SdZd1-SdZd0;SdZd1->SdZd1 end,' \
+                           'SdZl=fun()->maps:get(SdTid,erx_domain_links:dropped(maps:get(links,sys:get_state(erx_domain_srv)))) end,' \
+                           'SdZn0={SdZl(),SdZi()},spawn(erts@erxos,fun()->[SdZdp!SdZm||SdZm<-[{erx_connection_mapped,999},' \
+                           "{erx_connection_unmapped,#{SYSTEM_CREATION}},{erx_connection_lost,999,disconnect}," \
+                           '{erx_connection_mapped,SdZpeer},{erx_connection_unmapped,SdZpeer},' \
+                           '{erx_connection_mapped,x},{erx_connection_lost,SdZpeer},junk]] end),' \
+                           'SdZnd=fun()->{SdZl()-element(1,SdZn0),SdZi()-element(2,SdZn0)} end,' \
+                           'SdZx=(fun SdZxf(0)->SdZnd();SdZxf(SdZk)->case SdZnd() of {SdZx1,SdZx2} when SdZx1>=5,SdZx2>=3->SdZnd();' \
+                           '_->timer:sleep(100),SdZxf(SdZk-1) end end)(50),' \
                            'SdZv=spawn(peer@erxos,fun()->ok=erx_dist:export(self(),[send],SdTid),SdZs!{sd_zserving,self()},' \
                            "receive {erx_origin,SdZo,{'$gen_call',SdZc,SdZq}}->gen:reply(SdZc,{pong,SdZo,SdZq}) after 60000->ok end end)," \
                            'SdZvs=receive {erx_origin,_,{sd_zserving,SdZv}}->ok after 10000->timeout end,' \
                            'SdZpong=try erpc:call(erts@erxos,gen_server,call,[SdZv,ping,10000],15000) catch SdZpc:SdZpr->{SdZpc,SdZpr} end,' \
                            'SdZph=erx_domain_links:phase(SdTid,SdZpeer,maps:get(links,sys:get_state(erx_domain_srv)))'
-    # Each forgery dropped and counted once, the call answered from erts, the pair up.
-    HOSTILE_ANSWER = "{hostile,ok,ok,1,1,ok,{pong,#{DOMAINS.fetch('erts')},ping},up}"
+    # Each forgery dropped and counted once, erts's stray answers counted five by the core
+    # and three by the domain pid, the call answered from erts, the pair up.
+    HOSTILE_ANSWER = "{hostile,ok,ok,1,1,{5,3},ok,{pong,#{DOMAINS.fetch('erts')},ping},up}"
     HOSTILE_START = /\A\{hostile,/n
     # The connection's down path (docs/design-domains.md, "Introduction and connection
     # down"), from one side each time, on the introduced pair. SdPhase is the pair's phase
@@ -269,21 +297,21 @@ module Erx
     # peer, exports itself to erts with send and link, holds its port's ring for erts
     # (port_control 4, allowed by DOMAIN_ARGS's -erx test_lane_hold) and gathers what
     # arrives until an 'EXIT', answering {sd_kdone, C, {Count, InOrder, Exit}}; SdKb runs in
-    # erts, links to the collector, sends it DOWN_BURST messages {sd_kb, I}, waits until
-    # its port counts them sent into the lane, so they are published, and disconnects peer,
+    # erts, links to the collector, sends it DOWN_BURST messages {sd_kb, I}, waits until its
+    # port counts them sent into the lane, so they are published, and disconnects peer,
     # answering {sd_kbdone, B, Sent, Exit}. erts's port ends, its agent answers
     # connection_lost, the service tells peer connection_down, and peer's agent has the port
-    # finish, which releases the hold and takes the link and the whole burst before the
-    # port ends with noconnection. Then a malformed frame from erts: SdMw runs in peer,
-    # exports itself to erts and answers its 'EXIT'; SdMf runs in erts, links to it, waits
-    # until its port counts the link sent, so peer takes it first, and writes a frame whose
-    # control term is no operation onto its port, which peer's funnel refuses as
-    # malformed; it answers what port_command returned and its own 'EXIT'.
-    # Before both, SdSt runs in peer, exports itself to erts with send and answers each
-    # {sd_sp, From} with sd_spong; SdPing pings it from a fresh process of erts. After the
-    # second reintroduction SdSt's holder of the first connection holds nothing
-    # (docs/design-runtime.md, "Connections in ERTS"): erx_dist:exports/1 lists none for erts and the
-    # ping is unheld, so it reaches no one; an export on the new connection lets it through.
+    # finish, which releases the hold and takes the link and the whole burst before the port
+    # ends with noconnection. Then a malformed frame from erts: SdMw runs in peer, exports
+    # itself to erts and answers its 'EXIT'; SdMf runs in erts, links to it, waits until its
+    # port counts the link sent, so peer takes it first, and writes a frame whose control
+    # term is no operation onto its port, which peer's funnel refuses as malformed; it
+    # answers what port_command returned and its own 'EXIT'. Before both, SdSt runs in peer,
+    # exports itself to erts with send and answers each {sd_sp, From} with sd_spong; SdPing
+    # pings it from a fresh process of erts. After the second reintroduction SdSt's holder
+    # of the first connection holds nothing (docs/design-runtime.md, "Connections in ERTS"):
+    # erx_dist:exports/1 lists none for erts and the ping is unheld, so it reaches no one;
+    # an export on the new connection lets it through.
     DOWN_BURST = 20
     SERVICE_KILL_DOWN = "SdPid2=#{DOMAINS.fetch('peer')}," \
                         'SdPhase=fun()->erx_domain_links:phase(SdTid,SdPid2,maps:get(links,sys:get_state(erx_domain_srv))) end,' \
@@ -331,30 +359,111 @@ module Erx
     CONNECTION_DOWN_ANSWER = "{connection_down,ok,{ok,noconnection},{#{DOWN_BURST},true,noconnection},none,ok," \
                              'ok,{ok,true,noconnection},noconnection,none,ok,{ok,pong,false,timeout,ok,pong}}'
     CONNECTION_DOWN_START = /\A\{connection_down,/n
-    # A watcher of a process of peer, then peer's system side's port, found by its open
-    # command, whose last word is the domain's node (erx_connections:open/3), ended with
-    # {domain_down, D2, x}, D2 erts's id and not peer's: the watcher's link and monitor
-    # fire noconnection (edit 56 of docs/design-runtime.md), and peer stops, its system
-    # side lost (docs/design-system.md, "A lost system connection ends the domain"). Then a
-    # watcher of a process of erts, and erts made to kill its own agent, its pid asked of
-    # erts first, since the system domain may only send to it, by SdBurst behind its burst,
-    # with the domain service suspended until erts no longer answers and the watcher's spawn_request into it is
-    # made, so the request is pending as the side ends, as are the library calls of
-    # SERVICE_KILL_PENDING; SERVICE_KILL_RPC's call runs in erts as it halts. erts halts
-    # with status 69, and the link, the monitor and the spawn all fire
-    # {domain_down, Erts, {halt, 69}}, the reason the service ends the side's port with.
-    # SdE1 and SdE2 are the deaths after each, SdL1 the domains still alive after the
-    # first, SdV1 and SdV2 what the watchers saw, SdG2 the probe's verdict, SdB1 and SdB2 whether each
-    # library call was blocked in its request before erts's side ended, SdV3 what the
-    # library calls returned, SdV4 what the burst's collector gathered.
+    # A survivor that ignores connection_down (docs/design-domains.md, "Verification and
+    # testing", the hostile domain): SdYs runs in erts and suspends erts's agent, which
+    # therefore never reads the record, until the shell tells it to resume the agent, or two minutes
+    # pass, so a shell that fails on the way does not leave the agent suspended. peer ends
+    # the connection (erlang:disconnect_node/1), its agent answers connection_lost, and the
+    # service tells erts connection_down. SdYv is read once the pair is closing (SdYclosing
+    # polls SdPhase) and a second more has passed: {Phase, Held(erts), Held(peer),
+    # Room(erts), Room(peer), Introduce, ErtsNode}, from the service's core (held/2 and
+    # room/2) and the API. The pair stays closing, the connection is counted against erts's
+    # one connection and not peer's, so erts has no room for another and peer has, the
+    # pair's introduction is refused as closing, and erts still answers over its system
+    # connection. Once the agent runs again it answers, the connection's objects go
+    # (SdNone) and the pair is introduced again, as SERVICE_KILL_ENDS expects it.
+    SERVICE_KILL_IGNORED = "SdYs=spawn(erts@erxos,fun()->SdYa=whereis(erx_connections),true=erlang:suspend_process(SdYa)," \
+                           'SdDs!{sd_isus,self()},receive {erx_origin,_,sd_ires}->ok after 120000->ok end,' \
+                           'true=erlang:resume_process(SdYa),' \
+                           'SdDs!{sd_ires,self()} end),SdYh=receive {erx_origin,_,{sd_isus,SdYs}}->ok after 10000->timeout end,' \
+                           'SdYc=SdAsk(peer@erxos,disconnect_node,[erts@erxos]),' \
+                           'SdYclosing=fun SdYf(0)->SdPhase();SdYf(SdYk)->case SdPhase() of closing->closing;' \
+                           '_->timer:sleep(100),SdYf(SdYk-1) end end,SdYp=SdYclosing(100),timer:sleep(1000),' \
+                           'SdYl=maps:get(links,sys:get_state(erx_domain_srv)),' \
+                           'SdYv={SdPhase(),erx_domain_links:held(SdTid,SdYl),erx_domain_links:held(SdPid2,SdYl),' \
+                           'erx_domain_links:room(SdTid,SdYl),erx_domain_links:room(SdPid2,SdYl),' \
+                           'SdIntroAgain(),SdAsk(erts@erxos,node,[])},' \
+                           'SdYs!sd_ires,SdYr=receive {erx_origin,_,{sd_ires,SdYs}}->ok after 10000->timeout end,' \
+                           'SdYn=SdNone(600),SdYi=SdIntroAgain()'
+    # The printed tuple: SdYs suspended the agent (ok), peer's disconnect_node/1 answered
+    # true, the pair went closing, SdYv as above, the agent resumed (ok), the pair's
+    # objects went (none) and it was introduced again (ok).
+    IGNORED_DOWN_ANSWER = '{ignored_down,ok,true,closing,{closing,1,0,false,true,{error,closing},erts@erxos},ok,none,ok}'
+    IGNORED_DOWN_START = /\A\{ignored_down,/n
+    # The ends of both domains, with a later domain of peer's name between them, in three
+    # parts: SERVICE_KILL_ENDS ends peer, SERVICE_KILL_LATER makes and checks the later
+    # peer, SERVICE_KILL_HALT halts erts; SdE1, SdL1 and SdV1 of the first are printed with
+    # the last's answers, and SdNh of the first with the second's.
+    #
+    # SERVICE_KILL_ENDS: a watcher of a process of peer, then peer's system side's port,
+    # found by its open command, whose last word is the domain's node
+    # (erx_connections:open/3), ended with {domain_down, D2, x}, D2 erts's id and not
+    # peer's: the watcher's link and monitor fire noconnection (edit 56 of
+    # docs/design-runtime.md), and peer stops, its system side lost (docs/design-system.md,
+    # "A lost system connection ends the domain"). SdE1 is the deaths after it, SdL1 the
+    # domains still alive once the ended peer is retired, erts having answered its
+    # connection_down, and SdV1 what the watcher saw. Before peer ends, SdNw runs in erts,
+    # the survivor: it watches nodes (net_kernel's monitor_nodes/1) and takes the first two
+    # events about peer@erxos; told sd_nwgo, once the later peer is introduced, it sends
+    # SdPp, the process of the ended peer, a message and waits three seconds for a nodedown.
     SERVICE_KILL_ENDS = 'SdPp=spawn(peer@erxos,timer,sleep,[infinity]),SdW1=SdWatch(SdPp),SdW1!sd_go,' \
+                        'SdNw=spawn(erts@erxos,fun()->ok=net_kernel:monitor_nodes(true),SdDs!{sd_nwatching,self()},' \
+                        'SdNe=[receive {SdNk,peer@erxos}->SdNk after 180000->timeout end||_<-[1,2]],' \
+                        'receive {erx_origin,_,sd_nwgo}->ok after 60000->ok end,SdPp!sd_stale,' \
+                        'SdNu=receive {nodedown,peer@erxos}->down after 3000->up end,SdDs!{sd_nw,self(),{SdNe,SdNu}} end),' \
+                        'SdNh=receive {erx_origin,_,{sd_nwatching,SdNw}}->ok after 10000->timeout end,' \
                         'SdPort=hd([SdPt||SdPt<-erlang:ports(),{name,SdNm}<-[erlang:port_info(SdPt,name)],' \
                         'lists:suffix(" peer@erxos",SdNm)]),' \
                         "exit(SdPort,{domain_down,#{DOMAINS.fetch('erts')},x}),SdE1=SdUntil(1,600)," \
                         'SdLeft=fun SdLf(0)->SdLives();SdLf(SdLk)->case SdLives() of [_]=SdLl->SdLl;_->timer:sleep(100),SdLf(SdLk-1) end end,' \
                         'SdL1=SdLeft(600),' \
-                        'SdV1=receive {sd_watched,SdW1,SdV1w}->SdV1w after 60000->timeout end,' \
-                        "SdPe=spawn(erts@erxos,timer,sleep,[infinity]),SdW2=SdWatch(SdPe),#{SERVICE_KILL_RPC}," \
+                        'SdV1=receive {sd_watched,SdW1,SdV1w}->SdV1w after 60000->timeout end'
+    # SERVICE_KILL_LATER, a later domain of the ended name (docs/design-domains.md, "Domain
+    # identity"): the shell creates peer again from SdSpec, which service_kill_checkpoints
+    # binds (later_spec), and introduces it to erts. It has the next id, its node's
+    # creation, and erts saw nodedown and then nodeup for peer@erxos. SdNw's message to the
+    # ended peer's process is dropped, and no nodedown follows: a frame to a pid of another
+    # creation of the connected node is one to a process that does not exist (the funnel's
+    # target rule, liberx/erx_funnel.c). Then the same for a pid the later peer's lookup
+    # would find: SdLq runs in the later peer, exports itself to erts and reports to the
+    # shell the first message it gets; SdLqo is SdLq's pid with the ended peer's id for its
+    # creation (the last word of its NEW_PID_EXT encoding), and a process of erts sends
+    # sd_old to SdLqo and then sd_new to SdLq, so SdLq gets sd_new first: the export table's
+    # lookup goes by number and serial alone, but the funnel finds SdLqo dead before it
+    # asks, and ERTS behind it takes a pid of its own node name with another creation for
+    # one of an earlier run, as stock ERTS does, so neither hands sd_old on; the probe
+    # checks both together, and erx_funnel_check_test the funnel's rule alone. Since both
+    # messages come from one process over one lane, a frame that ended the connection leaves
+    # SdLq without sd_new, whatever the three seconds of SdNw saw. A link or monitor of a
+    # pid of the ended peer is not tested: TODO.md, the funnel's sender rule.
+    SERVICE_KILL_LATER = 'SdLc=erx_domain:create(SdSpec),SdLi=case SdLc of {ok,SdLd}->' \
+                         '{erx_domain:id(SdLd),erx_domain:introduce(SdDom(SdTid),SdLd)};SdLe->SdLe end,SdNw!sd_nwgo,' \
+                         'SdLv=receive {erx_origin,_,{sd_nw,SdNw,SdLv0}}->SdLv0 after 60000->timeout end,' \
+                         'SdLq=spawn(peer@erxos,fun()->ok=erx_dist:export(self(),[send],SdTid),SdDs!{sd_lqready,self()},' \
+                         'SdDs!{sd_lq,self(),receive {erx_origin,_,SdLqm}->SdLqm after 10000->timeout end} end),' \
+                         'SdLqr=receive {erx_origin,_,{sd_lqready,SdLq}}->ok after 10000->timeout end,' \
+                         'SdLqb=term_to_binary(SdLq),' \
+                         'SdLqo=binary_to_term(<<(binary:part(SdLqb,0,byte_size(SdLqb)-4))/binary,SdPid2:32>>),' \
+                         'spawn(erts@erxos,fun()->SdLqo!sd_old,SdLq!sd_new end),' \
+                         'SdLqv=receive {erx_origin,_,{sd_lq,SdLq,SdLqv0}}->SdLqv0 after 20000->timeout end,' \
+                         'SdLn=SdAsk(peer@erxos,system_info,[creation])'
+    # The domain service never reuses an id: the two configured domains took the first two,
+    # and the later peer is the first domain created after them.
+    LATER_ID = DOMAINS.values.max + 1
+    LATER_DOMAIN_ANSWER = "{later_domain,ok,{#{LATER_ID},ok},{[nodedown,nodeup],up},ok,sd_new,#{LATER_ID}}"
+    LATER_DOMAIN_START = /\A\{later_domain,/n
+    # SERVICE_KILL_HALT: a watcher of a process of erts, and erts made to kill its own
+    # agent, its pid asked of erts first, since the system domain may only send to it, by
+    # SdBurst behind its burst, with the domain service suspended until erts no longer
+    # answers and the watcher's spawn_request into it is made, so the request is pending as
+    # the side ends, as are the library calls of SERVICE_KILL_PENDING; SERVICE_KILL_RPC's
+    # call runs in erts as it halts. erts halts with status 69, and the link, the monitor
+    # and the spawn all fire {domain_down, Erts, {halt, 69}}, the reason the service ends
+    # the side's port with. SdE2 is the deaths after it, SdV2 what the watcher saw, SdG2 SdGone's
+    # verdict on erts, SdB1 and SdB2 whether each library call was blocked in its request
+    # before erts's side ended, SdV3 what the library calls returned, SdV4 what the burst's
+    # collector gathered. The later peer is still running when the service is killed.
+    SERVICE_KILL_HALT = "SdPe=spawn(erts@erxos,timer,sleep,[infinity]),SdW2=SdWatch(SdPe),#{SERVICE_KILL_RPC}," \
                         'SdAgent=erpc:call(erts@erxos,erlang,whereis,[erx_connections],10000),' \
                         'sys:suspend(erx_domain_srv),SdTp=spawn(erts@erxos,SdBurst),SdTr=SdCollect(SdTp),SdTp!{sd_go,SdTr,SdAgent},' \
                         'SdG2=SdGone(erts@erxos,100),SdW2!{sd_spawn,erts@erxos},' \
@@ -363,18 +472,20 @@ module Erx
                         'SdE2=SdUntil(2,600),SdV2=receive {sd_watched,SdW2,SdV2w}->SdV2w after 60000->timeout end,' \
                         'SdV3=[receive {sd_called,SdCk,SdCv}->SdCv after 60000->timeout end||SdCk<-[SdC1,SdC2,SdC3,SdC4,SdC5]],' \
                         'SdV4=receive {sd_collected,SdTr,SdTv}->SdTv after 60000->timeout end'
-    # Prints the answer, ends the two domains, prints how they ended, then kills the
-    # service. The line starts with a binding, so the shell's echo of it starts neither
-    # {service_kill nor {domain_ends, and only the printed answers match.
+    # Prints each step's answer, ends the two configured domains, prints how they ended,
+    # then kills the service. The line starts with a binding, so the shell's echo of it
+    # starts neither {service_kill nor {domain_ends, and only the printed answers match.
     SERVICE_KILL_EXPRESSION = "#{SERVICE_KILL_LIVES},#{SERVICE_KILL_WAIT},#{SERVICE_KILL_ASK},#{SERVICE_KILL_DEATHS}," \
                               "#{SERVICE_KILL_FORGED},#{SERVICE_KILL_WATCH},#{SERVICE_KILL_CALL},#{SERVICE_KILL_BURST}," \
                               'SdL=SdWait(600),' \
                               "io:format(\"~0p~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL),SdForged(#{DOMAINS.fetch('erts')},erts@erxos)}])," \
                               "#{SERVICE_KILL_TABLE},io:format(\"~0p~n\",[{control_table,SdHolding,SdFull,SdPaused()>SdP0,SdStray,SdIntro,SdHeld}])," \
                               "#{SERVICE_KILL_INTRODUCED},io:format(\"~0p~n\",[{introduced,SdUps,SdNodes,SdServing,SdPong}])," \
-                              "#{SERVICE_KILL_HOSTILE},io:format(\"~0p~n\",[{hostile,SdZr,SdZw,SdZad,SdZdd,SdZvs,SdZpong,SdZph}])," \
+                              "#{SERVICE_KILL_HOSTILE},io:format(\"~0p~n\",[{hostile,SdZr,SdZw,SdZad,SdZdd,SdZx,SdZvs,SdZpong,SdZph}])," \
                               "#{SERVICE_KILL_DOWN},io:format(\"~0p~n\",[{connection_down,SdKh,SdKbv,SdKcv,SdN1,SdR1,SdMh,SdMfv,SdMwv,SdN2,SdR2,SdStale}])," \
-                              "#{SERVICE_KILL_ENDS},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3,SdV4}])," \
+                              "#{SERVICE_KILL_IGNORED},io:format(\"~0p~n\",[{ignored_down,SdYh,SdYc,SdYp,SdYv,SdYr,SdYn,SdYi}])," \
+                              "#{SERVICE_KILL_ENDS},#{SERVICE_KILL_LATER},io:format(\"~0p~n\",[{later_domain,SdNh,SdLi,SdLv,SdLqr,SdLqv,SdLn}])," \
+                              "#{SERVICE_KILL_HALT},io:format(\"~0p~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3,SdV4}])," \
                               'exit(whereis(erx_domain_srv),kill).'
     SERVICE_KILL_ANSWER = begin
       lives = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,ready}" }.join(',')
@@ -418,9 +529,27 @@ module Erx
     # The manifest: MediumBoot's, room for two domains, with DOMAIN_ROW and PEER_ROW for its rows.
     def manifest(source) = MediumBoot.manifest(source, row: DOMAIN_ROW + PEER_ROW)
 
+    # The request erx_domain:create/1 takes for SERVICE_KILL_LATER's later domain of peer:
+    # the configured rows' runtime image and release, at domain's indexes in the image's
+    # archive (MediumBoot.domain_in), their budgets, lane and arguments, MediumBoot's grant
+    # for the domains its shell creates, and one connection, so it can be introduced. Its
+    # runtime limits are the system principal's defaults, the same profile as the rows'.
+    def later_spec(domain)
+      MediumBoot.erlang_map(name: '<<"peer">>', runtime: domain.runtime, release: domain.release,
+                            release_files: domain.release_files, memory: MediumBoot::DOMAIN_MEMORY,
+                            outer: MediumBoot::DOMAIN_OUTER,
+                            grant: MediumBoot.erlang_map(quota_ns: (1 << 64) - 1, cpuset: 1, capacity_mcpu: 1000),
+                            lane: 4096, args: MediumBoot.binary_args(DOMAIN_ARGS), env: '<<>>', connections: 1)
+    end
+
+    # The line typed at the Erlang shell: SdSpec bound to later_spec(domain), then
+    # SERVICE_KILL_EXPRESSION.
+    def service_kill_line(domain) = "SdSpec=#{later_spec(domain)},#{SERVICE_KILL_EXPRESSION}"
+
     # The production checkpoints to the command shell, then the Erlang shell, the kill and
-    # the runtime's end. points must end at the command shell.
-    def service_kill_checkpoints(points)
+    # the runtime's end. points must end at the command shell; domain is where the image's
+    # archive carries the configured rows' runtime and release.
+    def service_kill_checkpoints(points, domain:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
       answer = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(SERVICE_KILL_ANSWER)}\r*\n\z/n
@@ -429,8 +558,10 @@ module Erx
       introduced = /\A#{Regexp.escape(INTRODUCED_ANSWER)}\r*\n\z/n
       hostile = /\A#{Regexp.escape(HOSTILE_ANSWER)}\r*\n\z/n
       down = /\A#{Regexp.escape(CONNECTION_DOWN_ANSWER)}\r*\n\z/n
+      ignored = /\A#{Regexp.escape(IGNORED_DOWN_ANSWER)}\r*\n\z/n
+      later = /\A#{Regexp.escape(LATER_DOMAIN_ANSWER)}\r*\n\z/n
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
-       ProductionImage::Run::ERLANG_SHELL.merge(type: "#{SERVICE_KILL_EXPRESSION}\r").freeze,
+       ProductionImage::Run::ERLANG_SHELL.merge(type: "#{service_kill_line(domain)}\r").freeze,
        { name: 'domain-running', pattern: SERVICE_KILL_START, seconds: 180,
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} before the kill" unless answer.match?(text) } }.freeze,
        { name: 'control-table', pattern: CONTROL_TABLE_START, seconds: 180,
@@ -441,6 +572,10 @@ module Erx
          verify: ->(text) { raise Error, "the forged records gave #{text.inspect}" unless hostile.match?(text) } }.freeze,
        { name: 'connection-down', pattern: CONNECTION_DOWN_START, seconds: 180,
          verify: ->(text) { raise Error, "the connection went down as #{text.inspect}" unless down.match?(text) } }.freeze,
+       { name: 'ignored-down', pattern: IGNORED_DOWN_START, seconds: 180,
+         verify: ->(text) { raise Error, "the ignored connection_down gave #{text.inspect}" unless ignored.match?(text) } }.freeze,
+       { name: 'later-domain', pattern: LATER_DOMAIN_START, seconds: 600,
+         verify: ->(text) { raise Error, "the later domain of peer gave #{text.inspect}" unless later.match?(text) } }.freeze,
        { name: 'domain-ends', pattern: DOMAIN_ENDS_START, seconds: 180,
          verify: ->(text) { raise Error, "the domains ended as #{text.inspect}" unless ends.match?(text) } }.freeze,
        { name: 'system-domain-ended', pattern: SLOGAN_PATTERN, seconds: 60,
@@ -470,19 +605,20 @@ module Erx
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/system-domain/image'))
         built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
                                 .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest)
+        domain = MediumBoot.domain_in(built.archive, codec: ABI::Codec.new(ABI::Generator.plan(root: @root).schema))
         placement.each(accels: [QemuCells::LOCAL_ACCELERATOR], cpus: cpus) do |accel, count, remote|
-          ["#{accel}-#{count}cpu", service_kill(accel, count, remote, built)]
+          ["#{accel}-#{count}cpu", service_kill(accel, count, remote, built, domain)]
         end
       end
 
       private
 
-      def service_kill(accel, count, remote, built)
+      def service_kill(accel, count, remote, built, domain)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
                                                          manifest_source: @manifest, memory_mib: MACHINE.memory_mib)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
             .run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MACHINE.memory_mib, machine_end: true,
-                 checkpoints: SystemDomain.service_kill_checkpoints(points))
+                 checkpoints: SystemDomain.service_kill_checkpoints(points, domain: domain))
         'passed'
       end
     end
