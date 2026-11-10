@@ -210,9 +210,10 @@ reports_and_refusals_test_() ->
     {timeout, 30,
      fun() ->
              Shown = session([{line, <<"{ true } &\n">>},
-                              {check, fun() -> timer:sleep(200) end, {line, <<"true\n">>}},
+                              {check, fun() -> jobs_ended() end, {line, <<"true\n">>}},
                               {line, <<"fg %3; kill %x; jobs extra; bg\n">>},
                               eof]),
+             ?assertEqual([ended], [C || {checked, C} <- Shown]),
              ?assertEqual(<<"[1]\n[1] + Done                    { true } &\n",
                             "fg: no such job\nkill: %x: no such job\nusage: jobs\n",
                             "bg: no current job\n">>,
@@ -235,8 +236,20 @@ started(Names) ->
 statuses(Names) ->
     [element(2, process_info(whereis(N), status)) || N <- Names].
 
-%% Waits until none of the named processes is left.
-gone(Names) -> gone(Names, 100).
+%% Waits until the shell monitors no process: every job it started has ended and its end
+%% has reached the shell, which reports it before the next prompt. The tries, 20 s at the
+%% least, are only a hang guard.
+jobs_ended() -> jobs_ended(1000).
+
+jobs_ended(0) -> {hung, process_info(get(shell), monitors)};
+jobs_ended(Tries) ->
+    case process_info(get(shell), monitors) of
+        {monitors, []} -> ended;
+        _ -> timer:sleep(20), jobs_ended(Tries - 1)
+    end.
+
+%% Waits until none of the named processes is left; the tries are only a hang guard.
+gone(Names) -> gone(Names, 1000).
 
 gone(Names, 0) -> {left, [N || N <- Names, whereis(N) =/= undefined]};
 gone(Names, Tries) ->

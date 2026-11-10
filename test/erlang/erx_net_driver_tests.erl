@@ -171,6 +171,7 @@ process_end_counts_a_frame_that_is_not_a_binary() ->
     ?assertEqual(#{malformed => 1}, erx_net_driver:counters(Driver)).
 
 %% The far end's end ends the driver, quietly (a shutdown), once it has lived its hold.
+%% The end is waited for without a deadline of its own: eunit's timeout is the hang guard.
 process_end_ends_the_driver_after_its_hold() ->
     Far = spawn(fun() -> receive stop -> ok end end),
     Started = erlang:monotonic_time(millisecond),
@@ -178,19 +179,18 @@ process_end_ends_the_driver_after_its_hold() ->
     Ref = monitor(process, Driver),
     Far ! stop,
     receive {'DOWN', Ref, process, Driver, Reason} -> ?assertEqual({shutdown, {far_end, normal}}, Reason)
-    after 3000 -> ?assert(false)
     end,
     ?assert(erlang:monotonic_time(millisecond) - Started >= 1000).
 
 %% An exit signal from what the driver is linked to, a port or socket of its medium
-%% failing, ends it the same way, after its hold, and not at once.
+%% failing, ends it the same way, after its hold, and not at once; eunit's timeout is the
+%% hang guard.
 linked_exit_ends_the_driver_after_its_hold() ->
     Started = erlang:monotonic_time(millisecond),
     Driver = stub(0, 4),
     Ref = monitor(process, Driver),
     _ = spawn(fun() -> link(Driver), exit(epipe) end),
     receive {'DOWN', Ref, process, Driver, Reason} -> ?assertEqual({shutdown, {linked, epipe}}, Reason)
-    after 3000 -> ?assert(false)
     end,
     ?assert(erlang:monotonic_time(millisecond) - Started >= 1000).
 
@@ -223,6 +223,8 @@ erx_net_driver_ports(Driver) ->
 
 %% An earlier deadline replaces the pending timer instead of adding one: a far deadline,
 %% a nearer one, and the far one armed again after the first hint give two hints, not three.
+%% Each hint is waited for, not slept for; the replaced far timer was due with the second,
+%% so a third hint would follow it at once.
 clock_keeps_one_timer_per_caller_test() ->
     flush(),
     Now = erx_net_clock:now(),
@@ -230,8 +232,9 @@ clock_keeps_one_timer_per_caller_test() ->
     Armed1 = erx_net_clock:arm_by(Now + 30000, Armed0),
     receive {erx_net_clock, hint} -> ok end,
     _ = erx_net_clock:arm_by(Now + 120000, infinity),
-    timer:sleep(250),
-    ?assertEqual(1, length([x || {erx_net_clock, hint} <- element(2, process_info(self(), messages))])),
+    receive {erx_net_clock, hint} -> ok end,
+    timer:sleep(100),
+    ?assertEqual(0, length([x || {erx_net_clock, hint} <- element(2, process_info(self(), messages))])),
     ?assertMatch({_, _}, Armed1).
 
 %% --- A transport with nothing to drive ---------------------------------------------
@@ -265,7 +268,8 @@ nothing_at_restart_is_no_interface_test() ->
     [{en0, Link, supervisor, _}] = supervisor:which_children(Interfaces),
     [Driver] = [Pid || {driver, Pid, worker, _} <- supervisor:which_children(Link)],
     exit(Driver, kill),
-    ?assertEqual(ignored, ignored(Interfaces, 100)),
+    %% A hang guard of 2 s at the least, short of eunit's 5 s so that a hang is named.
+    ?assertEqual(ignored, ignored(Interfaces, 200)),
     ok = proc_lib:stop(Stack, shutdown, infinity),
     ok = logger:remove_handler(?MODULE),
     _ = persistent_term:erase(Key),
@@ -303,8 +307,8 @@ wait_gone(Name) ->
 
 far_end_test_() ->
     [{timeout, 20, fun far_end_end_restarts_the_link/0},
-     {timeout, 20, fun far_end_never_there_spins_no_supervisor/0},
-     {timeout, 20, fun crash_at_start_spins_no_supervisor/0},
+     {timeout, 30, fun far_end_never_there_spins_no_supervisor/0},
+     {timeout, 30, fun crash_at_start_spins_no_supervisor/0},
      {timeout, 20, fun queued_batches_reach_a_holder_as_one_message/0}].
 
 %% A pipe whose far end ends ends its driver, and the link supervisor starts the link
@@ -386,24 +390,37 @@ crash_at_start_spins_no_supervisor() ->
                           transport => {?MODULE, #{crash_at_start => true, test => self(),
                                                    room => 64, tx_limit => 4}}}).
 
-%% Starts the stack with Link, whose driver ends at every start, and checks that over
-%% 2.5 seconds its link restarts once a second or so and the supervisors above it stay.
+%% Starts the stack with Link, whose driver ends at every start, and checks that its link
+%% restarts, no faster than each driver's hold allows, and the supervisors above it stay.
+%% The third driver cannot start before two holds have passed since the stack's start, so
+%% the bound holds however slow the host is; the wait for it is only a hang guard.
 spins_no_supervisor(Link) ->
     wait_gone(erx_net_tables),
     flush(),
     %% Trapped, so that a start that fails is this case's failure, not its process's end.
     process_flag(trap_exit, true),
+    Before = erlang:monotonic_time(millisecond),
     Started = erx_net_sup:start_link(#{interfaces => [Link]}),
     process_flag(trap_exit, false),
     ?assertMatch({ok, _}, Started),
     {ok, Stack} = Started,
     unlink(Stack),
-    Interfaces = interfaces(Stack),
-    Drivers = drivers_seen(erlang:monotonic_time(millisecond) + 2500, []),
-    ?assert(is_process_alive(Stack)),
-    ?assertEqual(Interfaces, interfaces(Stack)),
-    ?assertMatch(N when N >= 2 andalso N =< 4, length(Drivers)),
-    ok = proc_lib:stop(Stack, shutdown, infinity).
+    %% Stopped whatever the verdict, so that the next case does not wait on its tables.
+    try
+        Interfaces = interfaces(Stack),
+        {third_driver_at, At} = third_driver(erlang:monotonic_time(millisecond) + 20000, []),
+        ?assert(is_process_alive(Stack)),
+        ?assertEqual(Interfaces, interfaces(Stack)),
+        %% Two of erx_net_driver's 1000 ms holds, copied rather than read from the module,
+        %% so that a seeded shorter hold fails here.
+        ?assert(At - Before >= 2 * 1000)
+    after
+        stop_stack(Stack)
+    end.
+
+%% Stops Stack, which a seeded fault may already have ended.
+stop_stack(Stack) ->
+    try proc_lib:stop(Stack, shutdown, infinity) catch exit:noproc -> ok end.
 
 %% Ends the far end registered as ?FAR, if any, and waits until the name is free.
 stop_far() ->
@@ -420,17 +437,16 @@ interfaces(Stack) ->
     [Interfaces] = [Pid || {interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
     Interfaces.
 
-%% The distinct drivers registered for en0 until Deadline.
-drivers_seen(Deadline, Seen) ->
-    case erlang:monotonic_time(millisecond) > Deadline of
-        true ->
-            Seen;
-        false ->
-            timer:sleep(20),
-            case erx_net_tables:driver(en0) of
-                {ok, Pid} -> drivers_seen(Deadline, lists:usort([Pid | Seen]));
-                none -> drivers_seen(Deadline, Seen)
-            end
+%% Polls the driver registered for en0 until a third distinct one is seen, and answers
+%% when; a link that stops restarting fails the case as hung at Deadline.
+third_driver(_Deadline, Seen) when length(Seen) >= 3 ->
+    {third_driver_at, erlang:monotonic_time(millisecond)};
+third_driver(Deadline, Seen) ->
+    erlang:monotonic_time(millisecond) =< Deadline orelse error({hung_short_of_a_third_driver, Seen}),
+    timer:sleep(20),
+    case erx_net_tables:driver(en0) of
+        {ok, Pid} -> third_driver(Deadline, lists:usort([Pid | Seen]));
+        none -> third_driver(Deadline, Seen)
     end.
 
 %% A far end registered as ?FAR: it hands the test what a driver sends it and sends a

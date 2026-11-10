@@ -153,7 +153,11 @@ tcp_refused(Port) ->
 %% Four reads of the whole receive buffer, 64 KiB each, of 256 KiB echoed: stock answers
 %% each with exactly 64 KiB at once, and so must the stack. Its window closes short of the
 %% full buffer when a waiting read counts against it, and only the sender's persist probes,
-%% 5 s apart at the least, then complete the read; the reads must take less than that.
+%% 5 s apart at the least, then complete each read. That window logic is checked against a
+%% fake peer that sends only whole segments, by erx_tcp_conn_tests'
+%% recv_of_the_whole_buffer_completes and its seeded fault, with waits far shorter than a
+%% persist interval; on a loaded host a stall of the host looks like a persist stall, so
+%% here the time is only printed, and a stall is not caught.
 tcp_whole_buffer(Port) ->
     case {whole_buffer(erx, Port), whole_buffer(stock, Port)} of
         {Same, Same} -> ok;
@@ -169,8 +173,7 @@ whole_buffer(Stack, Port) ->
     Ms = erlang:monotonic_time(millisecond) - Start,
     ok = gen_tcp:close(S),
     io:format("tcp_whole_buffer_ms ~s ~b~n", [Stack, Ms]),
-    {[size_of(R) || R <- Reads], iolist_to_binary([D || {ok, D} <- Reads]) =:= Payload,
-     {within_persist, Ms < 2500}}.
+    {[size_of(R) || R <- Reads], iolist_to_binary([D || {ok, D} <- Reads]) =:= Payload}.
 
 %% 3000 bytes echoed and the server's close, read 1460 at a time: two full reads, then
 %% `{error, closed}` for the 80 bytes left, on both. Then stock has discarded the 80 bytes

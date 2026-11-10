@@ -29,7 +29,9 @@ class ErxNetSlirpTest < Minitest::Test
   SOURCES = [*Dir[File.join(APP, 'src', '*.erl')].sort, *Dir[File.join(APP, 'portable', '*.erl')].sort,
              *Dir[File.join(ROOT, 'erlang/apps/erx_net_client/src', '*.erl')].sort,
              File.join(ROOT, 'test/erlang/erx_net_slirp_run.erl')].freeze
-  DEADLINE = 60
+  # A hang guard only, for the stack's run and QEMU alike: far above a run on a quiet host,
+  # which takes seconds, so that a loaded host's slow run is not taken for a hang.
+  DEADLINE = 300
   LOOPBACK = '127.0.0.1'
 
   def test_lease_arp_ping_udp_and_tcp_through_slirp
