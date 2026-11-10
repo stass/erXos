@@ -487,14 +487,16 @@ class RuntimeConsoleTest < Minitest::Test
   end
 
   # Differences from stock, each a decision of docs/design-live.md.
-  # Ctrl-G belongs to the console's menu, which lists sessions; with none there is a bell.
-  def test_ctrl_g_rings_the_bell_and_reaches_no_group
+  # Ctrl-G opens the console's menu, which reaches no group; Esc gives the line back to
+  # the shell, which draws its line again and reads on.
+  def test_ctrl_g_opens_the_menu_and_reaches_no_group
     with_erxos do |session|
       session.type("12#{CTRL_G}")
-      session.wait_for(/^1> 12\z/)
+      session.wait_for(/s\* system shell\n  n  start a session\nEsc returns\. \z/)
+      session.type("\e")
+      session.wait_for(/1> 12\z/)
       session.type("3.\r")
-      session.wait_for(/^123\n2> \z/)
-      assert_includes session.screen.raw, "\a"
+      session.wait_for(/^123\n\S*2> \z/)
     end
   end
 

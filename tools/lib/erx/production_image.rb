@@ -404,6 +404,12 @@ module Erx
       # What the person types at the command shell for the Erlang shell, whose banner starts
       # with Eshell V and whose prompt, `1> `, ends no line.
       ERL_LINE = "erl\r"
+      # Ctrl-G opens erx_console's menu, whose first line is its title; Esc, typed alone,
+      # leaves it, and the console ends the menu's last line, which has no newline of its own.
+      CTRL_G = "\a"
+      ESC = "\e"
+      CTRL_G_MENU = /\Aerx_console: Ctrl-G menu\r*\n\z/n
+      MENU_LEFT = /Esc returns\. \e\\\e\[0m\r*\n\z/n
       ERLANG_SHELL = { name: 'erlang-shell', pattern: /\AEshell V/n, seconds: 60 }.freeze
       # kernel_sup's children in the system release, a node over the erx carrier (net_sup
       # holds net_kernel and the connection agent), in which_children's order: the last
@@ -633,7 +639,8 @@ module Erx
       # warning, before the driver starts, so the FIFO holds it when the driver takes the UART,
       # and the command shell reads it at its first prompt and starts the Erlang shell. At the
       # Erlang shell's banner the person types a sum, and each answer then types the next
-      # line: a line with a mistake rubbed out, under which the sum is 4 where the mistake is
+      # line: Ctrl-G, whose menu Esc leaves for the Erlang shell again, a line with a mistake
+      # rubbed out, under which the sum is 4 where the mistake is
       # a syntax error, an output longer than any FIFO, a debug log record, what
       # erlang:processes() lists, and a module compiled and a tracer started with compiler
       # and runtime_tools loaded and neither started, and an rc line the command shell's
@@ -652,7 +659,9 @@ module Erx
          console_point('release-shell', RELEASE_SHELL.fetch(:pattern)),
          console_point('shell', ERLANG_SHELL.fetch(:pattern), type: "1+1.\r"),
          console_point('sum-echo', /1\+1\.\r*\n\z/n),
-         console_point('sum-answer', /\A2\r*\n\z/n, type: "1+2\x7f3.\r"),
+         console_point('sum-answer', /\A2\r*\n\z/n, type: CTRL_G),
+         console_point('ctrl-g-menu', CTRL_G_MENU, type: ESC),
+         console_point('menu-left', MENU_LEFT, type: "1+2\x7f3.\r"),
          console_point('edit-answer', /\A4\r*\n\z/n, type: "io:put_chars(lists:duplicate(#{CONSOLE_LONG_BYTES},$x)),io:nl().\r"),
          console_point('long-output', /x{#{CONSOLE_LONG_BYTES}}/n),
          console_point('long-answer', /\Aok\r*\n\z/n, type: LOG_AFTER_HANDOFF),

@@ -12,10 +12,12 @@ peer delivers them. This module stands in for the export table.
 
 The line takes a session's output only while the session is connected, and
 answers {tty_taken, N} only once it has written it; typed input goes to the
-connected session as {tty_input, Bytes}, except Ctrl-G, which never reaches a
-session and returns the line to the system shell; a wrong number detaches the
+connected session as {tty_input, Bytes}, a terminal's OSC reply whole, except a
+typed Ctrl-G, which never reaches a session and opens the Ctrl-G menu; the menu
+lists only the line principal's live sessions, by their escaped names, and
+connects one or gives the line to the system shell; a wrong number detaches the
 tty for good; a 5 KiB message never reaches the console; and a session whose
-facet ends gives the line back.
+domain pid or facet ends gives the line back.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -24,6 +26,7 @@ facet ends gives the line back.
 
 -define(WAIT_MS, 3000).
 -define(QUIET_MS, 300).
+-define(ESC, 16#1B).
 
 export(_Pid, _Rights, _Peer) -> ok.
 
@@ -64,21 +67,24 @@ master_test_() ->
 
 master() ->
     process_flag(trap_exit, true),
-    {ok, Console} = erx_console:start_link(#{role => session, name => erx_console,
+    {ok, Console} = erx_console:start_link(#{role => session, name => erx_console, menu => true,
                                              driver => driver(self()),
                                              first_shell => {?MODULE, shell, []}}),
     type(<<"a\r">>),
     {ok, _} = await(<<"sys:a">>),
+    the_system_shell_has_the_menu_too(),
     Domain = spawn(fun() -> receive after infinity -> ok end end),
     Facet = facet(7, Domain, Console),
-    ok = erx_console:add_session(7, self()),
+    ok = erx_console:add_session(7, session(<<"root_1">>, 1, Domain)),
     a_grantees_calls_reach_nothing(Facet),
     held_until_connected(Facet),
     input_goes_to_the_session(),
     output_and_repeats(Facet),
-    ctrl_g_returns_the_line(Facet),
+    a_terminal_reply_stays_with_the_session(),
+    ctrl_g_opens_the_menu(Facet),
     a_wrong_number_detaches(Facet),
     the_facet_bounds_messages(Console),
+    the_menu_lists_the_principals_live_sessions(),
     a_session_that_ends_gives_the_line_back(Console),
     the_facets_end_with_the_console(Console, Facet).
 
@@ -119,18 +125,89 @@ output_and_repeats(Facet) ->
     ?assertEqual({tty_taken, 1}, from_console()),
     ?assertEqual({tty_size, 24, 80}, from_console()).
 
-%% Ctrl-G never reaches the session: the bytes before it do, and the line goes back to
-%% the system shell, which gets the bytes after it. The session is stopped again.
-ctrl_g_returns_the_line(Facet) ->
+%% The BEL that ends a terminal's OSC reply is no Ctrl-G: the whole reply goes to the
+%% session that asked for it, which keeps the line, and so does what is typed next.
+a_terminal_reply_stays_with_the_session() ->
+    Reply = <<"\e]11;rgb:0000/0000/0000", $\^G>>,
+    type(Reply),
+    ?assertEqual({tty_input, Reply}, from_console()),
+    type(<<"q\r">>),
+    ?assertEqual({tty_input, <<"q\r">>}, from_console()),
+    nothing_on_the_line().
+
+%% Ctrl-G at the system shell opens the menu too, which lists no session yet, and Esc
+%% gives the line back to the system shell, which reads on.
+the_system_shell_has_the_menu_too() ->
+    type(<<$\^G>>),
+    {ok, Menu} = await(<<"Esc returns. ">>),
+    ?assertMatch({_, _}, binary:match(Menu, <<"  s* system shell\r\n  n  start a session\r\n">>)),
+    type(<<?ESC>>),
+    type(<<"e\r">>),
+    {ok, _} = await(<<"sys:e">>).
+
+%% Ctrl-G never reaches the session: the bytes before it do, the menu takes the line, and
+%% the rest of the read that carried it is dropped. The session is stopped while the menu
+%% or the system shell has the line, and its key connects it again.
+ctrl_g_opens_the_menu(Facet) ->
     type(<<"x", $\^G, "b\r">>),
     ?assertEqual({tty_input, <<"x">>}, from_console()),
-    {ok, _} = await(<<"sys:b">>),
+    {ok, Menu} = await(<<"Esc returns. ">>),
+    ?assertMatch({_, _}, binary:match(Menu, <<"  s  system shell\r\n  1* root_1 (domain 7)\r\n">>)),
     nothing_from_the_console(),
+    nothing_on_the_line(),
     tty_output(Facet, 2, <<"S2">>),
     nothing_from_the_console(),
-    ok = erx_console:connect(7),
+    type(<<"s">>),
+    type(<<"b\r">>),
+    {ok, _} = await(<<"sys:b">>),
+    nothing_from_the_console(),
+    type(<<$\^G>>),
+    {ok, _} = await(<<"Esc returns. ">>),
+    type(<<"1">>),
     {ok, _} = await(<<"S2">>),
     ?assertEqual({tty_taken, 2}, from_console()).
+
+%% The menu lists only the live sessions of the line's principal, each name through the
+%% line escape: not another principal's, not one refused, and not one whose domain pid is
+%% down, which connect/1 refuses too. A read of more than one byte is no key, and only
+%% rings the bell; "start a session" is refused; Esc returns the line to the session that
+%% had it.
+the_menu_lists_the_principals_live_sessions() ->
+    Up = fun() -> spawn(fun() -> receive after infinity -> ok end end) end,
+    Theirs = Up(),
+    ok = erx_console:add_session(10, session(<<"theirs">>, 2, Theirs)),
+    ok = erx_console:add_session(11, session(<<"x\e]0;owned", $\^G, "\e[2J">>, 1, Up())),
+    Down = Up(),
+    ok = erx_console:add_session(12, session(<<"gone">>, 1, Down)),
+    exit(Down, kill),
+    ?assertEqual({error, unknown}, erx_console:connect(12)),
+    type(<<$\^G>>),
+    {ok, Menu} = await(<<"Esc returns. ">>),
+    ?assertMatch({_, _}, binary:match(Menu, <<"  1* root_2 (domain 8)\r\n  2  x">>)),
+    [?assertEqual({Absent, nomatch}, {Absent, binary:match(Menu, Absent)})
+     || Absent <- [<<"theirs">>, <<"gone">>, <<"root_1">>, <<"\e]0;owned">>, <<$\^G>>, <<"\e[2J">>]],
+    type(<<"12">>),
+    {ok, _} = await(<<$\^G>>),
+    type(<<"n">>),
+    {ok, _} = await(<<"cannot start a session: enotsup">>),
+    {ok, _} = await(<<"Esc returns. ">>),
+    %% Another principal's session ends: this line's menu does not name it.
+    exit(Theirs, kill),
+    nothing_on_the_line(),
+    %% A byte of a terminal's reply read alone is no key, and Esc then returns: a
+    %% device report's digit and final byte, and a string's byte.
+    type(<<"\e[?6">>),
+    type(<<"1">>),
+    type(<<"c">>),
+    type(<<"\e]11;">>),
+    type(<<"s">>),
+    type(<<$\^G>>),
+    {ok, _} = await(<<$\^G>>),
+    nothing_from_the_console(),
+    type(<<?ESC>>),
+    type(<<"z">>),
+    ?assertEqual({tty_input, <<"z">>}, from_console()).
+
 
 %% A number that is neither the next nor a repeat detaches the tty: nothing of it is
 %% written or answered, the line goes back to the system shell, and the session can
@@ -149,7 +226,7 @@ a_wrong_number_detaches(Facet) ->
 %% and drops a 5 KiB one before the console sees it.
 the_facet_bounds_messages(Console) ->
     Facet = facet(8, spawn(fun() -> receive after infinity -> ok end end), Console),
-    ok = erx_console:add_session(8, self()),
+    ok = erx_console:add_session(8, session(<<"root_2">>, 1, spawn(fun() -> receive after infinity -> ok end end))),
     Facet ! {erx_origin, 8, {tty_output, 0, binary:copy(<<$y>>, 5120)}},
     Full = binary:copy(<<$z>>, 4096),
     Facet ! {erx_origin, 8, {tty_output, 0, Full}},
@@ -165,7 +242,7 @@ the_facet_bounds_messages(Console) ->
 a_session_that_ends_gives_the_line_back(Console) ->
     Domain = spawn(fun() -> receive after infinity -> ok end end),
     Facet = facet(9, Domain, Console),
-    ok = erx_console:add_session(9, self()),
+    ok = erx_console:add_session(9, session(<<"root_3">>, 1, Domain)),
     tty_output(Facet, 0, <<"S9">>),
     ok = erx_console:connect(9),
     ?assertEqual({tty_size, 24, 80}, from_console()),
@@ -186,6 +263,10 @@ the_facets_end_with_the_console(Console, Facet) ->
     ?assertEqual(normal, receive {'DOWN', Monitor, process, _, R} -> R after ?WAIT_MS -> runs_on end).
 
 %%% Helpers
+
+%% What add_session/2 names of a session whose tty is the test.
+session(Name, Principal, DomainPid) ->
+    #{tty => self(), name => Name, principal => Principal, domain_pid => DomainPid}.
 
 %% A console facet for Grantee, minted as the domain service mints one from a spec's
 %% `console => erx_console:facet()`, ending with Domain or the process behind it.

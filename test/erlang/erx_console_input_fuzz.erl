@@ -55,7 +55,6 @@ said(Events, Left) ->
 %% event, a character is itself, and any other byte reads as latin-1.
 reference(<<>>) -> [];
 reference(<<3, Rest/binary>>) -> [interrupt | reference(Rest)];
-reference(<<7, Rest/binary>>) -> [menu | reference(Rest)];
 reference(<<26, Rest/binary>>) -> [suspend | reference(Rest)];
 reference(<<Char/utf8, Rest/binary>>) -> [Char | reference(Rest)];
 reference(<<Byte, Rest/binary>>) -> [Byte | reference(Rest)].

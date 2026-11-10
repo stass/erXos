@@ -63,15 +63,21 @@
 %% call of the grantee's can take. The endpoint refuses every call, so a session reaches
 %% none of the console's own calls through its facet. The console keeps, for
 %% each session by domain id, the master's state (erx_tty_master, which checks every
-%% message), the tty, which add_session/2 names, and a monitor of the facet, whose end is
-%% the session's. The line belongs to the console's own groups or to one connected
-%% session (connect/1): a connected session's output is copied to the line as bytes, as a
-%% tty's master copies them, each answered only once the driver has written it, and the
-%% bytes typed go to its tty, except Ctrl-G, which never reaches a session and gives the
-%% line back to the console's groups. While the line is theirs, every session's tty is
-%% stopped. A tty that fails a check is detached for good, with a log line naming its
-%% domain; the console's own notices naming a domain go to the line through the line
-%% escape.
+%% message); the tty, name, principal and domain pid that add_session/2 names, whose
+%% domain pid it monitors; and a monitor of the facet. Either end is the session's.
+%%
+%% The line belongs to the console's own groups, to one connected session (connect/1), or
+%% to the Ctrl-G menu (erx_console_menu). A connected session's output is copied to the
+%% line as bytes, as a tty's master copies them, each answered only once the driver has
+%% written it, and the bytes typed go to its tty. A typed Ctrl-G never reaches a session or
+%% a group: it opens the menu, which lists the system shell and the line principal's live
+%% sessions and connects one or gives the line to the groups, and the rest of the read
+%% that carried it is dropped. erx_console_keys tells a typed Ctrl-G from the BEL that ends
+%% a terminal's string reply, which stays in the input. While the menu or the groups
+%% have the line, every session's tty is stopped, and when the groups get it back their
+%% line is drawn again. A tty that fails a check is detached for good, with a log line
+%% naming its domain; the console's own notices naming a domain or a session go to the
+%% line through the line escape.
 
 -module(erx_console).
 -behaviour(gen_server).
@@ -83,7 +89,7 @@
 
 -export_type([input_event/0, first_shell/0, after_first_shell/0, shell/0, config/0, terminal/0]).
 
--type input_event() :: {data, unicode:unicode_binary()} | interrupt | suspend | menu.
+-type input_event() :: {data, unicode:unicode_binary()} | interrupt | suspend.
 %% The shell the console starts on its first group: the command shell, or none when
 %% init was told -noshell or -noinput, and `user` then gets the input.
 -type first_shell() :: {erx_shell, console, []} | none.
@@ -101,7 +107,10 @@
 %% tty relay (erx_session_tty): none of that; it starts its first shell again whenever it
 %% ends, and ends every shell and stops when its line hangs up or ends. Name is the name
 %% it registers.
+%% `menu` says whether a typed Ctrl-G opens the Ctrl-G menu, by default for the system
+%% console only: a session's relay reads every BEL as a byte, as a raw tty does.
 -type config() :: #{role := system | session,
+                    menu => boolean(),
                     name := atom(),
                     driver := fun((Console :: pid()) -> {ok, pid(), Terminal :: boolean()}),
                     first_shell := first_shell() | shell()}.
@@ -111,6 +120,7 @@
 -define(LOG_POLL_MS, 100).
 %% The system principal, number 1, whose domain the system domain is (include/erx/dom.h).
 -define(SYSTEM_PRINCIPAL, 1).
+-define(ESC, 16#1B).
 
 -record(state, {role :: system | session,
                 name :: atom(),
@@ -135,17 +145,32 @@
                 log_records = erx_console_log:new() :: erx_console_log:state(),
                 %% The start of a character whose other bytes have not been read yet.
                 pending = <<>> :: binary(),
-                %% Who has the line: the console's own groups, or a domain's session.
-                line = system :: system | {session, pos_integer()},
+                %% The input's escape state, which tells a typed Ctrl-G from the BEL that ends
+                %% a terminal's string reply.
+                keys = erx_console_keys:new() :: erx_console_keys:state(),
+                %% Who has the line: the console's own groups, a domain's session, or the
+                %% Ctrl-G menu, which knows who had the line before it.
+                line = system :: erx_console_menu:owner() | {menu, erx_console_menu:menu()},
+                %% The line's principal, whose sessions its menu lists: in a development
+                %% build root, who is the system principal (docs/design-domains.md).
+                principal = ?SYSTEM_PRINCIPAL :: pos_integer(),
+                %% Whether a typed Ctrl-G opens the menu (config()).
+                menu :: boolean(),
                 %% The sessions whose tty the console is the master of, by domain id.
                 sessions = #{} :: #{pos_integer() => session()},
                 %% The process behind every session's console facet (facet_endpoint/1).
                 endpoint :: pid()}).
 
-%% A session: its tty, once add_session/2 names it; the monitor of its console facet, once
-%% the facet has forwarded a message; and the master's side of its tty.
--type session() :: #{tty := pid() | none, facet := reference() | none,
+%% A session: its tty, name, principal and domain pid with the pid's monitor, once
+%% add_session/2 names them; the monitor of its console facet, once the facet has
+%% forwarded a message; and the master's side of its tty.
+-type session() :: #{tty := pid() | none, name := binary() | none, principal := pos_integer() | none,
+                     domain := {pid(), reference()} | none, facet := reference() | none,
                      master := erx_tty_master:master()}.
+%% What add_session/2 names of a session: its tty (the `tty` agent of its domain's ready
+%% report), its name, its principal and its domain pid (erx_domain:pid/1).
+-type session_spec() :: #{tty := pid(), name := binary(), principal := pos_integer(),
+                          domain_pid := pid()}.
 
 %% user_sup calls this, and waits for the `user` group to register.
 -spec start() -> {ok, pid()} | {error, term()}.
@@ -222,19 +247,23 @@ facet() ->
     gen_server:call(?MODULE, facet).
 
 -doc """
-Names Tty, the `tty` agent of domain Domain's ready report, as the tty of that domain's
-session: the console sends it the session's input, size and answers.
+Names the session of domain Domain as Spec says: the console sends its tty the session's
+input, size and answers, lists it by its name in the Ctrl-G menu of a line whose
+principal is its principal, and ends it when its domain pid ends.
 """.
--spec add_session(pos_integer(), pid()) -> ok.
-add_session(Domain, Tty) when is_integer(Domain), Domain > 0, is_pid(Tty) ->
-    gen_server:call(?MODULE, {add_session, Domain, Tty}).
+-spec add_session(pos_integer(), session_spec()) -> ok.
+add_session(Domain, Spec = #{tty := Tty, name := Name, principal := Principal, domain_pid := DomainPid})
+  when is_integer(Domain), Domain > 0, is_pid(Tty), is_binary(Name), is_integer(Principal), Principal > 0,
+       is_pid(DomainPid) ->
+    gen_server:call(?MODULE, {add_session, Domain, maps:with([tty, name, principal, domain_pid], Spec)}).
 
 -doc """
 Gives the line to domain Domain's session, taking it from whoever had it: the session's
 held output is written, and the bytes typed go to its tty until Ctrl-G or detach/0
-gives the line back to the console's own groups, or the session ends or fails a check.
-{error, unknown} for a domain with no session, {error, no_tty} for a session whose tty
-add_session/2 has not named, and {error, refused} for one detached for a failed check.
+gives the line to the menu or the console's own groups, or the session ends or fails a
+check. {error, unknown} for a domain with no session or whose domain pid is down,
+{error, no_tty} for a session that add_session/2 has not named, and {error, refused} for
+one detached for a failed check.
 """.
 -spec connect(pos_integer()) -> ok | {error, unknown | no_tty | refused}.
 connect(Domain) ->
@@ -246,7 +275,7 @@ detach() ->
     gen_server:call(?MODULE, detach).
 
 -spec init(config()) -> {ok, #state{}}.
-init(#{role := Role, name := Name, driver := Start, first_shell := FirstShell}) ->
+init(Config = #{role := Role, name := Name, driver := Start, first_shell := FirstShell}) ->
     process_flag(trap_exit, true),
     %% A domain has one line, which terminal/0 names.
     persistent_term:put({?MODULE, line}, Name),
@@ -273,6 +302,7 @@ init(#{role := Role, name := Name, driver := Start, first_shell := FirstShell}) 
                            tty = TTY,
                            size = ?DEFAULT_SIZE,
                            terminal = Terminal,
+                           menu = maps:get(menu, Config, Role =:= system),
                            endpoint = spawn(fun() -> facet_endpoint(Console) end)})}.
 
 %% What user_drv writes before it starts a shell, ahead of anything the groups write.
@@ -362,8 +392,14 @@ handle_call({write, Bytes}, From, State = #state{driver = Driver}) ->
     {noreply, State};
 handle_call(facet, _From, State = #state{endpoint = Endpoint}) ->
     {reply, {Endpoint, #{max_request => erx_tty_master:max_message()}}, State};
-handle_call({add_session, Domain, Tty}, _From, State) ->
-    {reply, ok, with_session(Domain, fun(Session) -> Session#{tty := Tty} end, State)};
+handle_call({add_session, Domain, #{tty := Tty, name := Name, principal := Principal, domain_pid := Pid}},
+            _From, State) ->
+    Named = fun(Session = #{domain := Old}) ->
+                    [demonitor(Monitor, [flush]) || {_Pid, Monitor} <- [Old]],
+                    Session#{tty := Tty, name := Name, principal := Principal,
+                             domain := {Pid, monitor(process, Pid)}}
+            end,
+    {reply, ok, with_session(Domain, Named, State)};
 handle_call({connect, Domain}, _From, State) ->
     {Reply, Next} = connect_session(Domain, State),
     {reply, Reply, Next};
@@ -377,20 +413,15 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 -spec handle_info(term(), #state{}) -> {noreply, #state{}} | {stop, term(), #state{}}.
-handle_info({erx_console_input, Bytes}, State = #state{line = {session, Domain}}) ->
-    %% Ctrl-G belongs to the console and never reaches a session: the bytes before it go
-    %% to the session's tty, and the line goes back to the console's groups, which get the
-    %% bytes after it.
-    case binary:split(Bytes, <<$\^G>>) of
-        [ToSession] ->
-            {noreply, to_session(Domain, ToSession, State)};
-        [ToSession, Rest] ->
-            handle_info({erx_console_input, Rest}, to_groups(none, to_session(Domain, ToSession, State)))
-    end;
-handle_info({erx_console_input, Bytes}, State = #state{pending = Pending}) ->
-    {Events, Left} = input(Pending, Bytes),
-    lists:foreach(fun(Event) -> deliver(Event, State) end, Events),
-    {noreply, State#state{pending = Left}};
+handle_info({erx_console_input, Bytes}, State = #state{keys = Keys, line = {menu, Menu}}) when is_binary(Bytes) ->
+    {Action, Next} = erx_console_menu:key(Bytes, Keys, Menu),
+    {noreply, menu_action(Action, Menu, State#state{keys = Next})};
+handle_info({erx_console_input, Bytes}, State = #state{menu = true, keys = Keys}) when is_binary(Bytes) ->
+    {Pieces, Next} = erx_console_keys:split(Bytes, Keys),
+    {noreply, read(Pieces, State#state{keys = Next})};
+handle_info({erx_console_input, Bytes}, State) when is_binary(Bytes) ->
+    %% A console with no menu, a session's relay, reads a BEL as a raw tty does: as a byte.
+    {noreply, read([Bytes], State)};
 handle_info(erx_console_eof, State = #state{role = session, base = Base, shells = Shells}) ->
     %% A session's line has hung up: every shell on it ends, and the console with them,
     %% as a UNIX session ends at its terminal's hangup. No group is told of the end of
@@ -451,9 +482,10 @@ handle_info({erx_tty_message, {Facet, _Tag} = From, Domain, Message}, State) ->
     Next = from_tty(Domain, Facet, Message, State),
     gen:reply(From, ok),
     {noreply, Next};
-handle_info({'DOWN', Monitor, process, _Facet, _Reason}, State = #state{sessions = Sessions}) ->
-    %% A console facet ends with its domain: the session has ended.
-    case [Domain || Domain := #{facet := Facet} <- Sessions, Facet =:= Monitor] of
+handle_info({'DOWN', Monitor, process, _Pid, _Reason}, State = #state{sessions = Sessions}) ->
+    %% A session's domain pid or its console facet, which ends with its domain, has ended:
+    %% so has the session.
+    case [Domain || Domain := Session <- Sessions, lists:member(Monitor, monitors(Session))] of
         [Domain] -> {noreply, session_ended(Domain, State)};
         [] -> {noreply, State}
     end;
@@ -592,8 +624,20 @@ encoding(false) -> latin1.
 %% Domain's session after Update, made first if the console knows none of Domain's: a
 %% session begins at its tty's first message or at add_session/2, whichever comes first.
 with_session(Domain, Update, State = #state{sessions = Sessions}) ->
-    Session = maps:get(Domain, Sessions, #{tty => none, facet => none, master => erx_tty_master:new()}),
-    State#state{sessions = Sessions#{Domain => Update(Session)}}.
+    New = #{tty => none, name => none, principal => none, domain => none, facet => none,
+            master => erx_tty_master:new()},
+    State#state{sessions = Sessions#{Domain => Update(maps:get(Domain, Sessions, New))}}.
+
+%% The monitors whose 'DOWN' ends Session: its console facet's and its domain pid's.
+monitors(#{facet := Facet, domain := Domain}) ->
+    [Facet || Facet =/= none] ++ [Monitor || {_Pid, Monitor} <- [Domain]].
+
+%% Whether Session can be connected: add_session/2 has named it, its domain pid is up,
+%% and its tty has passed every check.
+is_live(#{tty := Tty, domain := {Pid, _Monitor}, master := Master}) when is_pid(Tty) ->
+    is_process_alive(Pid) andalso not erx_tty_master:is_refused(Master);
+is_live(#{}) ->
+    false.
 
 %% A message of Domain's tty, through Facet, whose end the console watches from the
 %% first one on.
@@ -616,18 +660,23 @@ session_size(State = #state{line = {session, Domain}, size = {Columns, Rows}, se
 session_size(State) ->
     State.
 
-%% Domain's session takes the line from whoever had it, unless its tty is unnamed or
+%% Domain's session takes the line from whoever had it, unless it is unnamed, down or
 %% refused.
 connect_session(Domain, State0 = #state{sessions = Sessions}) ->
     case Sessions of
         #{Domain := #{tty := none}} ->
             {{error, no_tty}, State0};
-        #{Domain := #{master := Master}} ->
-            case erx_tty_master:is_refused(Master) of
-                true ->
+        #{Domain := Session = #{master := Master}} ->
+            case {erx_tty_master:is_refused(Master), is_live(Session)} of
+                {true, _} ->
                     {{error, refused}, State0};
-                false ->
-                    State = (to_groups(none, State0))#state{line = {session, Domain}},
+                {false, false} ->
+                    {{error, unknown}, State0};
+                {false, true} ->
+                    %% Whatever the line's last holder left, a string open or its text
+                    %% hidden, ends before the session's held output.
+                    ok = reset_line(State0),
+                    State = (release(State0))#state{line = {session, Domain}},
                     #state{size = {Columns, Rows}, sessions = #{Domain := #{master := Disconnected}}} = State,
                     {ok, carry_out(Domain, erx_tty_master:connect({Rows, Columns}, Disconnected), State)}
             end;
@@ -635,31 +684,132 @@ connect_session(Domain, State0 = #state{sessions = Sessions}) ->
             {{error, unknown}, State0}
     end.
 
+%% State with the line taken from the session that has it, if one does: the session is no
+%% longer connected, and its tty is stopped. Who has the line next is the caller's to set.
+release(State = #state{line = {session, Domain}, sessions = Sessions}) ->
+    case Sessions of
+        #{Domain := Session = #{master := Master}} ->
+            State#state{sessions = Sessions#{Domain := Session#{master := erx_tty_master:disconnect(Master)}}};
+        #{} ->
+            State
+    end;
+release(State) ->
+    State.
+
 %% The line back to the console's own groups, after Notice, the console's own text, if
-%% there is one; the session that had it is no longer connected, and its tty is stopped.
+%% there is one. The session that had it is no longer connected, and its tty is stopped;
+%% the current group draws its line again, since what it wrote while hidden was dropped.
 to_groups(_Notice, State = #state{line = system}) ->
     State;
-to_groups(Notice, State = #state{line = {session, Domain}, sessions = Sessions, driver = Driver}) ->
-    %% A session may have left a string open or its text hidden: both end first.
-    [Driver ! {erx_console_output, none, [<<"\e\\\e[0m\r\n">>, erx_text:escape_line(Notice), <<"\r\n">>]}
-     || Notice =/= none],
-    Disconnected = case Sessions of
-                       #{Domain := Session = #{master := Master}} ->
-                           Sessions#{Domain := Session#{master := erx_tty_master:disconnect(Master)}};
-                       #{} ->
-                           Sessions
-                   end,
-    State#state{line = system, sessions = Disconnected}.
+to_groups(Notice, State0) ->
+    State = (release(State0))#state{line = system},
+    ok = new_line(Notice, State),
+    current(State) ! {self(), activate},
+    State.
 
-%% Domain's console facet has ended, and its session with it.
-session_ended(Domain, State = #state{line = Line}) ->
-    Back = case Line of
-               {session, Domain} ->
-                   to_groups(io_lib:format("erx_console: the session of domain ~b has ended", [Domain]), State);
-               _ ->
-                   State
-           end,
-    Back#state{sessions = maps:remove(Domain, Back#state.sessions)}.
+%% Ends what the line's last holder left on it before another takes it, unless the
+%% console's own groups had it.
+reset_line(#state{line = system}) -> ok;
+reset_line(State) -> new_line(none, State).
+
+%% Ends whatever a session or a command left on the line, a string open or its text
+%% hidden, and starts a new line, with Notice on it if there is one.
+new_line(Notice, #state{driver = Driver}) ->
+    Line = [[erx_text:escape_line(Notice), <<"\r\n">>] || Notice =/= none],
+    Driver ! {erx_console_output, none, [<<"\e\\\e[0m\r\n">>, Line]},
+    ok.
+
+%% Domain's session has ended: its domain pid or its console facet has. If it had the
+%% line, the line goes back to the groups, and if the menu has the line and shows it, the
+%% menu is drawn again without it; a session the menu does not show, another principal's,
+%% is not named on this line.
+session_ended(Domain, State0 = #state{line = Line, sessions = Sessions}) ->
+    Principal = maps:get(principal, maps:get(Domain, Sessions)),
+    State = State0#state{sessions = maps:remove(Domain, Sessions)},
+    Notice = [<<"erx_console: ">>, session_label(Domain, maps:get(Domain, Sessions)), <<" has ended">>],
+    case Line of
+        {session, Domain} -> to_groups(Notice, State);
+        {menu, Menu} ->
+            %% A session of the line's principal may be one the menu only counts.
+            case erx_console_menu:shows(Domain, Menu) orelse Principal =:= State#state.principal of
+                true -> open_menu(Notice, erx_console_menu:back(Menu), State);
+                false -> State
+            end;
+        _ -> State
+    end.
+
+%% How a notice names Domain's session: by the name add_session/2 gave it, attributed text
+%% that the line escape later makes safe to show, and its domain id.
+session_label(Domain, #{name := none}) ->
+    [<<"the session of domain ">>, integer_to_binary(Domain)];
+session_label(Domain, #{name := Name}) ->
+    [<<"session ">>, Name, <<" (domain ">>, integer_to_binary(Domain), <<")">>].
+
+%% -- The Ctrl-G menu ------------------------------------------------------------------
+
+%% A read of the line's input, as erx_console_keys split it, while the groups or a session
+%% have the line. A typed Ctrl-G reaches neither: it opens the menu, and the rest of the
+%% read is dropped, since a person's next key comes in a read of its own and what a
+%% terminal writes in one burst must not choose in the menu.
+read([], State) ->
+    State;
+read([ctrl_g | _Dropped], State = #state{line = Back}) ->
+    open_menu(none, Back, State);
+read([Bytes | Rest], State = #state{line = {session, Domain}}) ->
+    read(Rest, to_session(Domain, Bytes, State));
+read([Bytes | Rest], State = #state{pending = Pending}) ->
+    {Events, Left} = input(Pending, Bytes),
+    lists:foreach(fun(Event) -> deliver(Event, State) end, Events),
+    read(Rest, State#state{pending = Left}).
+
+%% The menu takes the line, drawn after Notice if there is one, with Back as the entry
+%% Esc returns to; the session that had the line, if one did, is stopped.
+open_menu(Notice, Back, State0 = #state{driver = Driver, principal = Principal, sessions = Sessions}) ->
+    State = release(State0),
+    Listed = [#{domain => Domain, name => Name, principal => P, live => is_live(Session)}
+              || Domain := Session = #{name := Name, principal := P} <- Sessions, is_binary(Name)],
+    Menu = erx_console_menu:open(Principal, Listed, Back),
+    ok = new_line(Notice, State),
+    Driver ! {erx_console_output, none, erx_console_menu:text(Menu)},
+    State#state{line = {menu, Menu}}.
+
+%% The menu's Action, which a read while the menu had the line asked for, carried out.
+menu_action(bell, _Menu, State) ->
+    ok = bell(State),
+    State;
+menu_action(system, _Menu, State) ->
+    to_groups(none, State);
+menu_action({connect, Domain}, Menu, State = #state{principal = Principal, sessions = Sessions}) ->
+    %% The menu lists only the line principal's sessions, but add_session/2 may have named
+    %% the domain's session again, under another principal, since the menu was drawn.
+    Connected = case Sessions of
+                    #{Domain := #{principal := Principal}} -> connect_session(Domain, State);
+                    #{} -> {{error, unknown}, State}
+                end,
+    case Connected of
+        {ok, Next} ->
+            Next;
+        {{error, Reason}, Refused} ->
+            Notice = io_lib:format("erx_console: cannot connect domain ~b: ~p", [Domain, Reason]),
+            open_menu(Notice, erx_console_menu:back(Menu), Refused)
+    end;
+menu_action(start, Menu, State = #state{principal = Principal}) ->
+    {error, Reason} = start_session(Principal),
+    Notice = io_lib:format("erx_console: cannot start a session: ~p", [Reason]),
+    open_menu(Notice, erx_console_menu:back(Menu), State).
+
+
+%% Starts a session of Principal at this line, for the menu's "start a session": the
+%% domain service's call that makes one from the principal's session template does not
+%% exist yet, so every start is refused.
+-spec start_session(pos_integer()) -> {error, enotsup}.
+start_session(_Principal) ->
+    {error, enotsup}.
+
+bell(#state{driver = Driver, tty = TTY}) ->
+    {Bytes, _} = prim_tty:handle_request(TTY, beep),
+    Driver ! {erx_console_output, none, Bytes},
+    ok.
 
 %% Domain's master after Actions, which it carries out in order: a write goes to the driver,
 %% which says when it is written; a message goes to the session's tty; and a detach, for
@@ -710,7 +860,8 @@ facet_endpoint(Console, Monitor) ->
 %% -- Input ----------------------------------------------------------------------------
 
 %% A pure decision: what the bytes read so far mean, and what must wait for more.
-%% Ctrl-C, Ctrl-Z and Ctrl-G are single bytes that no UTF-8 sequence contains. Text reaches the
+%% Ctrl-C and Ctrl-Z are single bytes that no UTF-8 sequence contains; Ctrl-G never gets
+%% here (read/2). Text reaches the
 %% group as UTF-8, and a byte that is not part of a character reads as latin-1, as
 %% prim_tty's reader does for stock's terminal.
 -spec input(Pending :: binary(), Bytes :: binary()) -> {[input_event()], Left :: binary()}.
@@ -718,7 +869,7 @@ input(Pending, Bytes) ->
     events(<<Pending/binary, Bytes/binary>>).
 
 events(Bin) ->
-    case binary:match(Bin, [<<$\^C>>, <<$\^Z>>, <<$\^G>>]) of
+    case binary:match(Bin, [<<$\^C>>, <<$\^Z>>]) of
         nomatch ->
             text(Bin);
         {At, 1} ->
@@ -745,8 +896,7 @@ data(Utf8) -> [{data, Utf8}].
 latin1(Bin) -> unicode:characters_to_binary(Bin, latin1).
 
 control($\^C) -> interrupt;
-control($\^Z) -> suspend;
-control($\^G) -> menu.
+control($\^Z) -> suspend.
 
 deliver({data, Utf8}, State) ->
     current(State) ! {self(), {data, Utf8}};
@@ -759,12 +909,7 @@ deliver(suspend, State = #state{shells = Shells}) ->
     case Shells of
         [{_Group, _Caller, {shell, start, _}} | _] -> ok;
         _ -> current(State) ! {self(), suspend}
-    end;
-deliver(menu, #state{driver = Driver, tty = TTY}) ->
-    %% Ctrl-G belongs to the console's menu and no session reads it. With no sessions to
-    %% list, the menu is a bell.
-    {Bytes, _} = prim_tty:handle_request(TTY, beep),
-    Driver ! {erx_console_output, none, Bytes}.
+    end.
 
 %% -- Output ---------------------------------------------------------------------------
 

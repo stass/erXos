@@ -194,6 +194,10 @@ class ProductionImageTest < Minitest::Test
     assert_equal [%w[release-shell shell], nil, "1+1.\r"], [[release, shell].map { |point| point.fetch(:name) }, release[:type], shell[:type]]
     assert_match release.fetch(:pattern), rc
     assert_match shell.fetch(:pattern), eshell
+    menu, left = %w[ctrl-g-menu menu-left].map { |name| console.find { |point| point.fetch(:name) == name } }
+    assert_equal [run::ESC, "1+2\x7f3.\r"], [menu, left].map { |point| point.fetch(:type) }
+    assert_match menu.fetch(:pattern), "erx_console: Ctrl-G menu\r\n"
+    assert_match left.fetch(:pattern), "Esc returns. \e\\\e[0m\r\n"
 
     release, erlang = shells.call(run.idle_checkpoints(cpus: 1, root: ROOT))
     assert_equal ["erl\r", run::BUSY_EXPRESSION], [release, erlang].map { |point| point.fetch(:type) }

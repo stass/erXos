@@ -2150,14 +2150,16 @@ It assumes 80 by 24 until a driver reports a size, and a UART driver reports non
 names the driver, and the last naming wins: the manifest names the console UART's driver,
 `erx_pl011`, and the hosted entry adds `erx_stdio` after it.
 
-**Which input bytes mean something.** `erx_console` takes two bytes out of the
+**Which input bytes mean something.** `erx_console` takes three bytes out of the
 stream, which no UTF-8 sequence contains: `Ctrl-C` becomes `exit(Group, interrupt)`,
-and `Ctrl-G` opens the console's menu ([design-live.md](design-live.md#the-console)).
+`Ctrl-Z` goes to a command shell's group as `suspend`, and a typed `Ctrl-G` opens the
+console's menu, where `erx_console_keys` tells a typed `Ctrl-G` from the BEL that
+ends a terminal's string reply ([design-live.md](design-live.md#the-console)).
 The rest goes to the shell's group as UTF-8, with a character cut across two reads
 held until its end arrives and a byte that belongs to no character read as latin-1,
 as `prim_tty`'s reader does. `erx_console:input/2` is that decision, a pure function
-with a fuzz target. `Ctrl-Z` and `Ctrl-\` are ordinary bytes on this path, as on any
-raw terminal.
+with a fuzz target. `Ctrl-\` is an ordinary byte on this path, as on any raw
+terminal.
 
 `erx_stdio` is an Erlang process in `kernel` over `erx_stdio_nif`. A worker
 thread of the NIF, blocked in `poll`, reads standard input into a buffer and

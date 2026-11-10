@@ -782,6 +782,29 @@ reads them with `erx_log_read` and writes each as a log line
   no terminal is connected there: the tty last connected at that line is
   stopped, and its programs read nothing typed there and write nothing
   there.
+* **Ctrl-G and a terminal's replies.** `Ctrl-G` is BEL, 0x07, and a
+  terminal also ends an OSC reply with BEL when the query did, so a
+  session that asks the operator's terminal for, say, its colours would
+  otherwise have the reply open the menu. `erx_console_keys` tells them
+  apart with ECMA-48's escape parser run over the input: `ESC` followed by
+  `]`, `P`, `_`, `^` or `X` opens a string control, and so does the 8-bit
+  form of each written as UTF-8 (U+009D and the rest), which a terminal
+  told to answer in 8-bit controls sends in UTF-8 mode; a BEL inside an
+  open string ends it and stays in the input, as ST does, `ESC [` opens a
+  control sequence, such as a cursor report, that its final byte ends,
+  `ESC` begins an escape and `CAN` or `SUB` cancels a string or a sequence, and every other BEL is a
+  typed `Ctrl-G`, `ESC BEL` (Meta-`Ctrl-G`) included. A raw 8-bit control
+  byte is not recognized: the line is UTF-8, in which such a byte is a
+  continuation byte. The escape state carries from one read to the next,
+  so while a session or the shell has the line no reply makes a `Ctrl-G`
+  however its reads are cut. A person who types `Alt-]`, which sends
+  `ESC ]`, opens a string, and the next `Ctrl-G` only closes it; the one
+  after opens the menu. Two things no rule over the bytes can catch are
+  security residuals ([TODO.md](../TODO.md)): a terminal that reports text
+  a session chose, as xterm's title report does where it is allowed, lets
+  the session type anything at the line, and a session that switches the
+  terminal's keyboard mode can make `Ctrl-G` arrive as an escape sequence;
+  the menu's rules below keep a burst of reported text from choosing in it.
 * **Job control.** OTP keeps job control in `user_drv`'s `switch_loop`
   ([research](research-erts-host.md#corrections-and-additions)), which the
   console does not use, so `erx_console` implements it: `Ctrl-G` opens a
@@ -797,6 +820,39 @@ reads them with `erx_log_read` and writes each as a log line
   * **Log out** ends every session the principal started at that line, as
     a hang-up ends a UNIX login's jobs, and shows the login prompt. A
     session started at another line runs on.
+
+  The menu is text the console writes on the line, one entry a line, each
+  with its key, as `screen`'s window list is: `s` the system shell, `1` to
+  `9` and then the letters but `n` and `s` the principal's live sessions
+  by domain id, each by its name and domain id, and `n` "start a session".
+  A session is live when its domain pid is up and its tty is named and has
+  passed every check; a principal with more sessions than keys is told
+  how many are not listed. Esc or `Ctrl-G` returns the line to the session
+  that had it while the menu lists it, and otherwise to the system shell,
+  and that entry is marked `*`. A session's name is attributed text and
+  reaches the menu only through the line escape (V9). Its pure core,
+  `erx_console_menu`, decides what the menu lists and what each read
+  means, and `erx_console` owns the line and carries the choice out. Three
+  rules keep text a terminal writes from choosing in the menu, since a
+  person's keys arrive one read at a time: the rest of the read that
+  carried the `Ctrl-G` is dropped; a read of more than one byte while the
+  menu has the line, such as an arrow key, a paste or a reply, is no key;
+  and a byte read while the input is inside a string, escape or control
+  sequence the terminal is sending is no key either, but Esc after an
+  escape, which no terminal sends; each only rings the bell. Esc leaves
+  the input in an escape, so a reply whose `ESC` was read alone, and taken
+  for the key, keeps its BEL; a person who types `]`, `P`, `_`, `^` or `X`
+  right after it opens a string, and the next `Ctrl-G` only closes it.
+  Connecting a session or leaving the menu first ends whatever the line's
+  last holder left, a string open or its text hidden, and the system
+  shell, when it gets the line back at a terminal, draws its line again,
+  since what it wrote while hidden was dropped. A session the menu shows
+  that ends while the menu has the line leaves it, and the menu is drawn
+  again under a line naming it; the end of a session the menu does not
+  show is not shown at that line unless it is the line principal's, which
+  the menu may only count. Only the console
+  of a line has the menu: a session's tty relay reads a BEL as a raw tty
+  does.
 
   A session's programs stop and continue under the command shell's job
   control, which pauses and resumes their groups
