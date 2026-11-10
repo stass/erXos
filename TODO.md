@@ -4005,6 +4005,9 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] Session tty input (erx_session_tty, erx_tty_link): each `{tty_input, Bytes}` is checked at 4 KiB, but what waits unread in the shell's group has no bound; a master that types faster than the session reads grows the session's heap. erx_tty's `input/2` bound (docs/design-live.md, "Between domains") closes it when the line discipline lands.
+* [Low] erx_console:terminal/0 (erx_console.erl): the domain's line is a persistent_term each console writes at start, so two consoles in one runtime see the last one, and a stopped session relay leaves its name behind. Deriving the terminal from the caller's group leader would remove the shared state.
+
 * [High] Runtime, origins (edits 58-61 of design-runtime, design-domains D18): edit 16
   wraps every message from another domain, and `gen` and `io` take call and io replies
   in their envelopes, but nothing serves a request from another domain yet. `gen` and

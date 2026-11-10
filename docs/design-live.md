@@ -639,6 +639,14 @@ count reports it. A master in the tty's own domain, `erx_term` or a
 pseudo-terminal's, sends the same messages as plain Erlang messages, which
 are not dropped.
 
+The tty learns its master from `erx:cap(console)`, and the console learns
+the tty from the `tty` agent of the session domain's ready report. A master
+in another domain is heard only through the envelope of its own domain
+(D18). Once `tty_hangup` holds, the tty drops what it holds and takes every
+later write at once with nothing sent, and the relay ends every shell on
+the tty and then itself, as a UNIX session ends with its terminal's
+hangup.
+
 **Many writers.** Every open may write, in any job and at any time. The owner
 serves writes in arrival order, and each writer's bytes stay in order. A write
 can be split, since it takes only what room there is, and another writer's bytes

@@ -54,12 +54,15 @@ runner needs no rule of its own for this, and its state from the line is
 dropped with the line's process; a line that was stopped finishes as a
 job, and what it changed is dropped with it.
 
-In Phase 1 the shell is the first shell of the system domain's console:
-erx_console starts console/0 on its first group at boot, and starts it
-again whenever it ends while input may still come. Its `erl` runs the
-Erlang shell above it until that shell ends (erx_cmd_erl), and start/0,
-typed at an Erlang shell, has erx_console run another command shell on a
-group of its own until it ends, and the Erlang shell then reads on.
+The shell is the first shell of the system domain's console, which
+starts console/0 on its first group at boot and again whenever it ends
+while input may still come, and of a session's tty (erx_session_tty),
+which starts server/1 on the session's terminal in the same way. Its
+terminal is a value (terminal()), whose run_shell runs another shell on a
+group of its own above it: `erl` runs the Erlang shell until that shell
+ends (erx_cmd_erl), and start/0, typed at an Erlang shell, runs another
+command shell on the terminal of the domain's line until it ends, and the
+Erlang shell then reads on.
 
 Everything outside the language is the runner's (erx_shell_eval's
 `runner()`), which the shell builds at its start from a module with
@@ -80,7 +83,9 @@ erx_shell_runner, the runner of the session's domain, is the default.
 %% How start/1 sets the shell up: the runner's module, and the terminal.
 -type options() :: #{runner => module(), terminal => terminal()}.
 %% The terminal a runner writes a unit's output to.
--type terminal() :: #{write := fun((iodata()) -> ok), job_control => job_control()}.
+-type terminal() :: #{write := fun((iodata()) -> ok),
+                      run_shell => fun((erx_console:shell()) -> ok | {error, term()}),
+                      job_control => job_control()}.
 %% How a runner reaches the shell's job table: the shell's process.
 -opaque job_control() :: pid().
 
@@ -132,7 +137,7 @@ erx_shell_runner, the runner of the session's domain, is the default.
 
 %%% Starting the shell
 
--doc "start/1 with the default runner and the console's terminal.".
+-doc "start/1 with the default runner and the terminal of the domain's line.".
 -spec start() -> ok | {error, term()}.
 start() ->
     start(#{}).
@@ -140,7 +145,8 @@ start() ->
 -doc """
 Runs the shell on the console until it ends, in place of the shell that
 calls this, and returns `ok`, or `{error, Reason}` with the reason its
-process ended if it did not end normally (erx_console:run_shell/1).
+process ended if it did not end normally (erx_console:run_shell/1), on the
+terminal's own run_shell.
 Input reaches the shell's own group while
 it runs: its history is its own while `kernel`'s `shell_history` is off,
 as it is by default, and `Ctrl-C` reaches it, not the caller.
@@ -148,8 +154,8 @@ as it is by default, and `Ctrl-C` reaches it, not the caller.
 -spec start(options()) -> ok | {error, term()}.
 start(Options) when is_map(Options) ->
     Runner = maps:get(runner, Options, erx_shell_runner),
-    Terminal = maps:get(terminal, Options, #{write => fun erx_console:write/1}),
-    erx_console:run_shell({?MODULE, server, [{Runner, Terminal}]}).
+    Terminal = #{run_shell := RunShell} = maps:get(terminal, Options, erx_console:terminal()),
+    RunShell({?MODULE, server, [{Runner, Terminal}]}).
 
 -doc """
 Starts the shell's process for a group, which calls this as it calls a
@@ -167,7 +173,7 @@ on its first group at boot, and again whenever that shell ends.
 """.
 -spec console() -> pid().
 console() ->
-    Terminal = #{write => fun erx_console:write/1},
+    Terminal = erx_console:terminal(),
     proc_lib:spawn(fun() -> ok = booted(), init(erx_shell_runner, Terminal, ?CONSOLE_BANNER) end).
 
 %% As stock's first shell does, the console's reads nothing until init has started

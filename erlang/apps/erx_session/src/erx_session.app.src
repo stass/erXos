@@ -1,15 +1,14 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% A session domain's own processes (docs/design-domains.md, "Principals, sessions
-%% and quotas"): the session release, which a principal's session domain boots, ships
-%% it beside erx_shell, and erx_session_app starts erx_session_sup, which holds what
-%% the domain runs beside its shells.
+%% A session's domain (docs/design-live.md, "Sessions"): the session's tty relay,
+%% erx_session_tty, on which the command shell runs, and the pure core of the tty's
+%% side of the messages to its master, erx_tty_link.
 {application, erx_session,
- [{description, "erXos session domain"},
+ [{description, "erXos session"},
   {vsn, "1"},
-  {modules, [erx_session_app, erx_session_sup]},
-  {registered, [erx_session_sup]},
-  {applications, [kernel, stdlib, erx]},
+  {modules, [erx_session_app, erx_session_sup, erx_session_tty, erx_tty_link]},
+  {registered, [erx_session_sup, erx_session_tty, erx_session_shell]},
+  {applications, [kernel, stdlib, erx, erx_shell]},
   {mod, {erx_session_app, []}},
   {env, []}]}.

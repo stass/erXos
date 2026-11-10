@@ -1,7 +1,7 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% The system domain's console service (docs/design-runtime.md, "The console and
+%% The system domain's console service, and a session's (docs/design-runtime.md, "The console and
 %% standard I/O"; docs/design-live.md, "The console"): a program with its own line
 %% editor on a raw terminal, as on Unix. It sits between its groups and the console's
 %% driver, as user_drv does: the current group, which gets the input and is shown, and
@@ -24,7 +24,14 @@
 %% goes to the line through write/1, past prim_tty, with only a cooked tty's newline
 %% processing.
 %%
-%% The driver is the module `-erx console_driver Module` names. It implements
+%% A session's tty relay is a console too, of the `session` role (start_link/1, config()):
+%% the same groups on the session's raw tty, registered under a name of its own, with the
+%% tty as its driver (erx_session_tty). It has no `user` group, writes no kernel log, starts
+%% its first shell again whenever it ends, and at its line's hangup or end it ends every
+%% shell and stops, never halting the runtime. A shell holds its console as a terminal (terminal/1),
+%% so neither the shell nor its commands name the console they run on.
+%%
+%% The system console's driver is the module `-erx console_driver Module` names. It implements
 %% `Module:start_link(Console) -> {ok, pid(), Terminal}`, where Terminal says whether a
 %% person's terminal is on the line, and exchanges these messages:
 %%
@@ -51,11 +58,11 @@
 -module(erx_console).
 -behaviour(gen_server).
 
--export([start/0, run_shell/1, write/1]).
+-export([start/0, start_link/1, run_shell/1, run_shell/2, write/1, write/2, terminal/0, terminal/1]).
 -export([input/2, first_shell/1, after_first_shell/2, erlang_shell_group/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
--export_type([input_event/0, first_shell/0, after_first_shell/0, shell/0]).
+-export_type([input_event/0, first_shell/0, after_first_shell/0, shell/0, config/0, terminal/0]).
 
 -type input_event() :: {data, unicode:unicode_binary()} | interrupt | suspend | menu.
 %% The shell the console starts on its first group: the command shell, or none when
@@ -66,6 +73,19 @@
 -type after_first_shell() :: restart | {halt, 0 | 1}.
 %% A shell's start function, as group:start/3 takes it.
 -type shell() :: {module(), atom(), [term()]}.
+%% A terminal as a shell holds it: its write/1 and its run_shell/1.
+-type terminal() :: #{write := fun((iodata()) -> ok),
+                      run_shell := fun((shell()) -> ok | {error, term()})}.
+%% What a console is started as (start_link/1). `system` is the system domain's console:
+%% it starts `user`, writes the kernel log and the system domain's log records, shows the
+%% slogan and ends the runtime when its line or its input ends. `session` is a session's
+%% tty relay (erx_session_tty): none of that; it starts its first shell again whenever it
+%% ends, and ends every shell and stops when its line hangs up or ends. Name is the name
+%% it registers.
+-type config() :: #{role := system | session,
+                    name := atom(),
+                    driver := fun((Console :: pid()) -> {ok, pid(), Terminal :: boolean()}),
+                    first_shell := first_shell() | shell()}.
 
 -define(DEFAULT_SIZE, {80, 24}).
 -define(MAX_SIDE, 65535).
@@ -73,11 +93,15 @@
 %% The system principal, number 1, whose domain the system domain is (include/erx/dom.h).
 -define(SYSTEM_PRINCIPAL, 1).
 
--record(state, {driver :: pid(),
+-record(state, {role :: system | session,
+                name :: atom(),
+                first_shell :: first_shell() | shell(),
+                driver :: pid(),
                 %% The group the console started with, which the others return the input to:
                 %% the command shell's, or `user` with no shell.
                 base :: pid(),
-                user :: pid(),
+                %% The `user` group, which only the system console has.
+                user :: pid() | none,
                 tty :: prim_tty:state(),
                 size :: {pos_integer(), pos_integer()},
                 terminal :: boolean(),
@@ -96,7 +120,18 @@
 %% user_sup calls this, and waits for the `user` group to register.
 -spec start() -> {ok, pid()} | {error, term()}.
 start() ->
-    gen_server:start({local, ?MODULE}, ?MODULE, [], []).
+    gen_server:start({local, ?MODULE}, ?MODULE,
+                     #{role => system, name => ?MODULE,
+                       driver => fun(Console) -> (driver_module()):start_link(Console) end,
+                       first_shell => first_shell(shell_arguments())}, []).
+
+-doc """
+Starts a console as Config says, linked to the caller and registered under Config's
+name: a session's tty relay starts its own this way (erx_session_tty).
+""".
+-spec start_link(config()) -> {ok, pid()} | {error, term()}.
+start_link(Config = #{name := Name, first_shell := {_, _, _}}) ->
+    gen_server:start_link({local, Name}, ?MODULE, Config, []).
 
 -doc """
 Runs Shell, a shell's start function as group:start/3 takes it, on a group of its
@@ -110,9 +145,14 @@ erx_shell:start/0. The Erlang shell's group completes Erlang, as on stock;
 any other shell's completes nothing.
 """.
 -spec run_shell(shell()) -> ok | {error, term()}.
-run_shell(Shell = {Module, Function, Args})
+run_shell(Shell) ->
+    run_shell(?MODULE, Shell).
+
+-doc "run_shell/1 on the console registered as Name.".
+-spec run_shell(atom(), shell()) -> ok | {error, term()}.
+run_shell(Name, Shell = {Module, Function, Args})
   when is_atom(Module), is_atom(Function), is_list(Args) ->
-    gen_server:call(?MODULE, {run_shell, Shell}, infinity).
+    gen_server:call(Name, {run_shell, Shell}, infinity).
 
 -doc """
 Writes Bytes to the console's line as they are, but for each newline, which goes out
@@ -121,22 +161,49 @@ output of a command, which is bytes, never text the console renders.
 """.
 -spec write(iodata()) -> ok.
 write(Bytes) ->
-    gen_server:call(?MODULE, {write, iolist_to_binary(Bytes)}, infinity).
+    write(?MODULE, Bytes).
 
--spec init([]) -> {ok, #state{}}.
-init([]) ->
+-doc "write/1 on the console registered as Name.".
+-spec write(atom(), iodata()) -> ok.
+write(Name, Bytes) ->
+    gen_server:call(Name, {write, iolist_to_binary(Bytes)}, infinity).
+
+-doc """
+The terminal of this domain's line, as a shell holds it: the session's tty in a
+session's domain, the console in the system domain.
+""".
+-spec terminal() -> terminal().
+terminal() ->
+    terminal(persistent_term:get({?MODULE, line}, ?MODULE)).
+
+-doc "The terminal of the console registered as Name.".
+-spec terminal(atom()) -> terminal().
+terminal(Name) ->
+    #{write => fun(Bytes) -> write(Name, Bytes) end,
+      run_shell => fun(Shell) -> run_shell(Name, Shell) end}.
+
+-spec init(config()) -> {ok, #state{}}.
+init(#{role := Role, name := Name, driver := Start, first_shell := FirstShell}) ->
     process_flag(trap_exit, true),
-    {ok, DriverPid, Terminal} = (driver_module()):start_link(self()),
+    %% A domain has one line, which terminal/0 names.
+    persistent_term:put({?MODULE, line}, Name),
+    {ok, DriverPid, Terminal} = Start(self()),
     %% As user_drv does for a line with no terminal on it: no editing, no echo and bytes
     %% as they are.
-    TTY = banner(prim_tty:init_ssh(tty_options(Terminal), ?DEFAULT_SIZE, utf8), DriverPid),
-    User = group:start(self(), noshell, [{name, user}]),
-    Group = case first_shell(shell_arguments()) of
+    TTY = banner(Role, prim_tty:init_ssh(tty_options(Terminal), ?DEFAULT_SIZE, utf8), DriverPid),
+    User = case Role of
+               system -> group:start(self(), noshell, [{name, user}]);
+               session -> none
+           end,
+    Group = case FirstShell of
                 none -> User;
                 Shell -> start_shell(Shell, Terminal)
             end,
-    erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll),
-    {ok, gets_input(#state{driver = DriverPid,
+    [erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll) || Role =:= system],
+    {ok, gets_input(#state{role = Role,
+                           name = Name,
+                           first_shell = FirstShell,
+                           driver = DriverPid,
                            base = Group,
                            user = User,
                            tty = TTY,
@@ -144,7 +211,9 @@ init([]) ->
                            terminal = Terminal})}.
 
 %% What user_drv writes before it starts a shell, ahead of anything the groups write.
-banner(TTY, Driver) ->
+banner(session, TTY, _Driver) ->
+    TTY;
+banner(system, TTY, Driver) ->
     case first_shell(shell_arguments()) =/= none of
         true ->
             Line = unicode:characters_to_binary([slogan(), $\n]),
@@ -238,6 +307,12 @@ handle_info({erx_console_input, Bytes}, State = #state{pending = Pending}) ->
     {Events, Left} = input(Pending, Bytes),
     lists:foreach(fun(Event) -> deliver(Event, State) end, Events),
     {noreply, State#state{pending = Left}};
+handle_info(erx_console_eof, State = #state{role = session, base = Base, shells = Shells}) ->
+    %% A session's line has hung up: every shell on it ends, and the console with them,
+    %% as a UNIX session ends at its terminal's hangup. No group is told of the end of
+    %% input: the Erlang shell would halt the runtime at it, and edlin edits with it.
+    lists:foreach(fun(Group) -> exit(Group, kill) end, [Base | [G || {G, _Caller, _Shell} <- Shells]]),
+    {stop, normal, State};
 handle_info(erx_console_eof, State = #state{pending = Pending}) ->
     %% What began a character will never end it, so it reads as stock reads a bad byte.
     [deliver({data, latin1(Pending)}, State) || Pending =/= <<>>],
@@ -265,7 +340,8 @@ handle_info(erx_log_poll, State = #state{driver = Driver}) ->
             erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll),
             {noreply, State}
     end;
-handle_info({log, _Level, _Text} = Record, State = #state{driver = Driver, log_records = Records}) ->
+handle_info({log, _Level, _Text} = Record,
+            State = #state{role = system, driver = Driver, log_records = Records}) ->
     %% A record sent to this name is the system domain's: another domain's send to a
     %% registered name never leaves that domain (edit 27 of docs/design-runtime.md),
     %% and its records arrive through its console facet, under its own source.
@@ -287,8 +363,9 @@ handle_info({erx_console_written, {Group, Reply}}, State) ->
 handle_info({'EXIT', User, Reason}, State = #state{user = User}) ->
     %% user_sup kills `user` when the system stops: the runtime is on its way out.
     {stop, Reason, State};
-handle_info({'EXIT', Pid, Reason}, State = #state{driver = Driver, base = Base, shells = Shells,
-                                                  terminal = Terminal, input_ended = Ended}) ->
+handle_info({'EXIT', Pid, Reason},
+            State = #state{role = Role, driver = Driver, base = Base, shells = Shells,
+                           first_shell = FirstShell, terminal = Terminal, input_ended = Ended}) ->
     case lists:keytake(Pid, 1, Shells) of
         {value, {Pid, Caller, _Shell}, Others} ->
             %% A shell run_shell/1 started has ended, and its group with it, in whatever
@@ -303,7 +380,7 @@ handle_info({'EXIT', Pid, Reason}, State = #state{driver = Driver, base = Base, 
             %% group the console no longer holds.
             case after_first_shell(Reason, Ended) of
                 restart ->
-                    New = start_shell(first_shell(shell_arguments()), Terminal),
+                    New = start_shell(FirstShell, Terminal),
                     {noreply, gets_input(State#state{base = New})};
                 {halt, 0} ->
                     erlang:halt(0),
@@ -313,6 +390,8 @@ handle_info({'EXIT', Pid, Reason}, State = #state{driver = Driver, base = Base, 
                     erlang:halt(Status),
                     {stop, Reason, State}
             end;
+        false when Pid =:= Driver, Role =:= session ->
+            {stop, Reason, State};
         false when Pid =:= Driver ->
             %% Nothing would read the terminal again, and its keys no longer signal: end
             %% the runtime, whose exit restores the terminal.

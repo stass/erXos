@@ -62,6 +62,8 @@ that matches nothing stays as written.
                    fds := #{fd() => erx_cmd:stream()},
                    table := erx_shell_namespace:table(),
                    facets := #{atom() => term()},
+                   %% The terminal's run_shell, which the interactive shell's commands get.
+                   run_shell => fun((erx_console:shell()) -> ok | {error, term()}),
                    %% The interactive shell's job control, and whether this state
                    %% is its line's or a piece's run apart; `none` in a script.
                    job_control => {erx_shell:job_control(), line | apart} | none}.
@@ -74,10 +76,11 @@ that matches nothing stays as written.
 -doc """
 The runner and its state for the interactive layer: from `/`, with
 standard input at its end and standard output and error the terminal,
-whose write function takes a command's bytes unchanged, the command
+whose write function takes a command's bytes unchanged and whose
+run_shell its commands get in their context, the command
 namespace of the shell's release and the session's facets.
 """.
--spec new(#{write := fun((iodata()) -> ok)}) -> {erx_shell_eval:runner(), state()}.
+-spec new(erx_shell:terminal()) -> {erx_shell_eval:runner(), state()}.
 new(Terminal = #{write := Write}) ->
     {Table, _Problems} = erx_shell_namespace:from_applications([erx_shell]),
     S = state(#{cwd => <<"/">>, fds => #{0 => null, 1 => {tty, Write}, 2 => {tty, Write}},
@@ -86,7 +89,8 @@ new(Terminal = #{write := Write}) ->
                      #{job_control := Shell} -> {Shell, line};
                      _ -> none
                  end,
-    {runner(), S#{job_control => JobControl}}.
+    WithShell = maps:merge(S, maps:with([run_shell], Terminal)),
+    {runner(), WithShell#{job_control => JobControl}}.
 
 -doc "A runner state from a working directory, descriptors, table and facets.".
 -spec state(#{cwd := binary(), fds := #{fd() => erx_cmd:stream()},
@@ -188,9 +192,10 @@ apart(S) -> S.
 
 command(#{name := Name, module := Module, usage := Usage, needs := Needs},
         Args, Vars, #{cwd := Cwd, facets := Facets} = S) ->
-    Ctx = #{name => Name, cwd => Cwd, env => Vars,
+    Ctx0 = #{name => Name, cwd => Cwd, env => Vars,
             stdin => stream(0, S), stdout => stream(1, S), stderr => stream(2, S),
             facets => Facets},
+    Ctx = maps:merge(Ctx0, maps:with([run_shell], S)),
     case [Need || Need <- Needs, not is_map_key(Need, Facets)] of
         [] ->
             outcome(isolated(fun() -> invoke(Module, Args, Ctx) end), Usage, Ctx);

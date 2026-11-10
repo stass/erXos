@@ -65,7 +65,9 @@ status, as `SIGPIPE` ends a program.
                  stdin := stream(),
                  stdout := stream(),
                  stderr := stream(),
-                 facets := #{atom() => term()}}.
+                 facets := #{atom() => term()},
+                 %% The terminal's run_shell, at an interactive shell only.
+                 run_shell => fun((erx_console:shell()) -> ok | {error, term()})}.
 
 -doc "Writes bytes to standard output.".
 -spec write(ctx(), iodata()) -> ok.
