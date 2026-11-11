@@ -27,7 +27,8 @@ module Erx
   # prints its banner at boot; the console logs root in, and root's session, root_1,
   # takes the line once its tty names itself, so the next banner is the session's own
   # command shell's. There `echo hi` answers, `ls /tmp` lists a file the shell wrote, and
-  # `ps` lists none of the system domain's processes. The session's Erlang shell answers
+  # `ps` lists none of the system domain's processes, and `dmesg` writes the kernel log, which
+  # the session reads through the system domain (KERNEL_LOG). The session's Erlang shell answers
   # node() as root_1@erxos, writes a line to /data/across, the storage domain's tree
   # through the session's `data` facet, and reads it back once that grant has arrived
   # (with_data), and writes 64 KiB in numbered lines while Ctrl-G opens the menu and Esc
@@ -105,6 +106,11 @@ module Erx
     # Typed at either command shell: the domain service runs in the system domain only, so
     # the session's `ps` counts 0 of it and the system's 1.
     COUNT_SERVICE = "ps | grep -c erx_domain_srv\r"
+    # Typed at root's session's command shell: the kernel log's line for the storage domain's
+    # volume, which the session reads through the `log` facet the console hands root's session
+    # in a development build (erx_log_facet), as the system shell reads it (MediumBoot).
+    KERNEL_LOG = "dmesg | grep 'erx_lfs: volume mounted'\r"
+    KERNEL_LOG_LINE = /\A#[0-9]+ [0-9]+\.[0-9]{6} debug space [0-9]+: erx_lfs: volume mounted\r*\n\z/n
 
     module_function
 
@@ -162,7 +168,8 @@ module Erx
        session_shell('root_1-shell', "echo hi\r"),
        { name: 'echo-hi', pattern: line('hi'), seconds: 60, type: "echo x > /tmp/session; ls /tmp\r" }.freeze,
        { name: 'ls-tmp', pattern: line('session'), seconds: 60, type: COUNT_SERVICE }.freeze,
-       { name: 'session-ps', pattern: line('0'), seconds: 60, type: ERL }.freeze,
+       { name: 'session-ps', pattern: line('0'), seconds: 60, type: KERNEL_LOG }.freeze,
+       { name: 'session-dmesg', pattern: KERNEL_LOG_LINE, seconds: 60, type: ERL }.freeze,
        shell.merge(name: 'root_1-erlang-shell', type: "node().\r").freeze,
        { name: 'root_1-node', pattern: answer('root_1@erxos'), seconds: 60, type: with_data(WRITE_ACROSS) }.freeze,
        { name: 'session-data', pattern: answer(ACROSS_READ), seconds: 180, type: BURST }.freeze,

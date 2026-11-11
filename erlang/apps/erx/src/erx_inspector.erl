@@ -32,9 +32,10 @@ In Phase 1 the inspector answers for two domains. The processes it lists
 and describes, through erx_process_records, are its own runtime's, as the
 domain this runtime is (runtime_domain/0), so in a session domain
 `[processes]` lists the session's processes. Kernel objects, through
-erx_kernel_records on the root's own capabilities, the domain record,
-through erx_runtime_records, and the kernel log, through erx_log_records,
-are the system domain's only. A pid of another runtime, and any other
+erx_kernel_records on the root's own capabilities, and the domain record,
+through erx_runtime_records, are the system domain's only; the kernel
+log, through erx_log_records, is read in the system domain, by a session
+that holds the `log` facet too. A pid of another runtime, and any other
 domain's path, name nothing it can reach and are answered `{error,
 scope}`; a path the schema declares that has no collector here is
 `{error, unsupported}`.

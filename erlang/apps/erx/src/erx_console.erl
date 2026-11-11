@@ -183,6 +183,9 @@
                 login = none :: none | starting | {started | connected, pos_integer()},
                 %% The process behind every session's console facet (facet_endpoint/1).
                 endpoint :: pid(),
+                %% The process behind the `log` facet of every session it starts in a
+                %% development build (log_reader/1); none in a session's console.
+                log_reader :: pid() | none,
                 %% The domain a pid belongs to (config()).
                 owner :: fun((pid()) -> non_neg_integer())}).
 
@@ -355,7 +358,13 @@ init(Config = #{role := Role, name := Name, driver := Start, first_shell := Firs
                            terminal = Terminal,
                            menu = maps:get(menu, Config, Role =:= system),
                            owner = maps:get(owner, Config, fun erx:owner/1),
-                           endpoint = spawn(fun() -> facet_endpoint(Console) end)})}.
+                           endpoint = spawn(fun() -> facet_endpoint(Console) end),
+                           log_reader = log_reader(Role)})}.
+
+%% The kernel log reader behind the `log` facet of the sessions the system console
+%% starts (erx_log_facet); a session's console starts no session.
+log_reader(system) -> erx_log_facet:start_reader();
+log_reader(session) -> none.
 
 %% What user_drv writes before it starts a shell, ahead of anything the groups write.
 banner(session, TTY, _Driver) ->
@@ -944,17 +953,21 @@ menu_action(start, Menu, State) ->
 %% domain takes seconds, so a helper asks the domain service and the console hears
 %% {erx_console_started, Why, Principal, Started}, Started the service's answer, once
 %% the session's init has reported ready or the start is refused (session_started/4).
-%% The helper never calls the console, which is not waiting for it.
-start_session(Why, #state{principal = Principal, endpoint = Endpoint}) ->
+%% The helper never calls the console, which is not waiting for it. In a development
+%% build the helper also hands the session the `log` facet, through which it reads the
+%% kernel log (erx_log_facet:grant/2); the helper decides, since it reads the manifest.
+start_session(Why, #state{principal = Principal, endpoint = Endpoint, log_reader = Reader}) ->
     Console = self(),
-    Facets = #{console => console_facet(Endpoint)},
-    _ = spawn(fun() -> Console ! {erx_console_started, Why, Principal, started(Principal, Facets)} end),
+    ConsoleFacet = console_facet(Endpoint),
+    _ = spawn(fun() -> Console ! {erx_console_started, Why, Principal, started(Principal, ConsoleFacet, Reader)} end),
     ok.
 
 %% The domain service's answer to a session's start; a runtime with no domain service, or
 %% none loaded, as a hosted one, starts none.
-started(Principal, Facets) ->
-    try erx_domain:start_session(Principal, Facets)
+started(Principal, ConsoleFacet, Reader) ->
+    try
+        LogFacets = erx_log_facet:grant(erx_log_facet:build_flags(), Reader),
+        erx_domain:start_session(Principal, LogFacets#{console => ConsoleFacet})
     catch
         exit:{noproc, _} -> {error, enotsup};
         error:undef -> {error, enotsup};

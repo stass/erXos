@@ -23,6 +23,7 @@ class ErxConsoleMasterTest < Minitest::Test
                  erlang/apps/erx/src/erx_console_log.erl erlang/apps/erx/src/erx_tty_master.erl
                  erlang/apps/erx/src/erx_console_keys.erl erlang/apps/erx/src/erx_console_menu.erl
                  erlang/apps/erx/src/erx_facet.erl erlang/apps/erx_domain/src/erx_domain_facet.erl
+                 erlang/apps/erx/src/erx_log_facet.erl
                  erlang/apps/erx_session/src/erx_tty_link.erl
                  test/erlang/erx_tty_master_tests.erl test/erlang/erx_console_keys_tests.erl
                  test/erlang/erx_console_menu_tests.erl

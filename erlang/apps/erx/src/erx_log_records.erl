@@ -6,7 +6,9 @@
 The collector of `[kernel, log]` (docs/design-live.md, "Inspection
 records"): the kernel log's lines from a sequence number on, read with
 erx_log:read/1 from a cursor of the inspector's own, so nothing the
-console or another reader sees moves.
+console or another reader sees moves. A session that holds the `log`
+facet, root's in a development build, makes each read through the system
+domain, which alone reads the log on the stopgap kernel (erx_log_facet).
 
 The record's entries are `{Sequence, Line}`, each line as the log core
 rendered it, without its newline, so every byte of it is already escaped.
@@ -45,11 +47,12 @@ with made-up reads.
 
 -doc """
 The record of `[kernel, log]` from the sequence number Offset on, read
-from the kernel log; see record/2.
+from the kernel log, through the `log` facet where this domain holds one;
+see record/2.
 """.
 -spec log(non_neg_integer()) -> {ok, erx_schema:record()} | {error, refusal()}.
 log(Offset) ->
-    record(Offset, fun erx_log:read/1).
+    record(Offset, erx_log_facet:read_fun(maps:get(log, erx_facets:domain(), undefined))).
 
 -doc """
 The record of `[kernel, log]` from Offset on, as Read answers: its

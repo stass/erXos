@@ -8,8 +8,9 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/generated'
 
 # Runs the EUnit cases of the inspector on stock's emulator (ERX_ERL and ERX_ERLC, which
-# make check supplies): erx_kernel_records' pure core (test/erlang/erx_kernel_records_tests.erl)
-# and the process records, scopes and renderers (test/erlang/erx_inspector_tests.erl), against
+# make check supplies): erx_kernel_records' pure core (test/erlang/erx_kernel_records_tests.erl),
+# the process records, scopes and renderers (test/erlang/erx_inspector_tests.erl) and the kernel
+# log facet (test/erlang/erx_log_facet_tests.erl), against
 # the sources, the generated ones from build/gen. erx_object_info is compiled but its NIF is
 # never loaded: the cases reach the kernel only through the pure core.
 class ErxInspectorTest < Minitest::Test
@@ -21,10 +22,11 @@ class ErxInspectorTest < Minitest::Test
   SOURCES = [*%w[generated/erx_schema erx_text_tables]
                .map { |name| Erx::Generated.path("erlang/apps/erx/src/#{name}.erl", root: ROOT) },
              *%w[erx_text erx_object_info erx_kernel_records erx_process_records erx_inspector
-                 erx_log_records erx_runtime_records erx_facets erx].map { |name| File.join(ERX, "src/#{name}.erl") },
+                 erx_log_records erx_log_facet erx_runtime_records erx_facets erx].map { |name| File.join(ERX, "src/#{name}.erl") },
              *%w[erx_render].map { |name| File.join(ROOT, "erlang/apps/erx_shell/src/#{name}.erl") },
              File.join(ROOT, 'test/erlang/erx_kernel_records_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_inspector_tests.erl')].freeze
+             File.join(ROOT, 'test/erlang/erx_inspector_tests.erl'),
+             File.join(ROOT, 'test/erlang/erx_log_facet_tests.erl')].freeze
 
   def test_kernel_record_cases_pass_under_eunit
     eunit('erx_kernel_records_tests')
@@ -32,6 +34,10 @@ class ErxInspectorTest < Minitest::Test
 
   def test_inspector_cases_pass_under_eunit
     eunit('erx_inspector_tests')
+  end
+
+  def test_log_facet_cases_pass_under_eunit
+    eunit('erx_log_facet_tests')
   end
 
   private

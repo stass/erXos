@@ -4459,7 +4459,14 @@ to the corpus and follow rc
   Security](docs/design-web.md#security)): once the system domain exports root's session's line to the web
   domain, every view a browser opens reads at scope `all`, so a browser reaches the machine-wide paths
   (`/proc/kernel`, `/proc/cpus`, the kernel log, the machine record's `all` attributes), as the session's own
-  `/proc` does; on the stopgap a session's runtime answers most of them `unsupported`. The facet exists only in a
+  `/proc` does; on the stopgap a session's runtime answers most of them `unsupported`, all but the kernel log.
+  The kernel log goes with this scope: in a development build the console hands every session it starts (root's,
+  in a development build) a `log` facet in front of the system domain's log reader (`erlang/apps/erx/src/erx_log_facet.erl`, `grant/2`),
+  through which the session's `/proc/kernel/log`, its `dmesg` and its web views read the whole kernel log; a
+  narrowing removes that grant with the scope. Its gate is the manifest's development flag alone, read by a copy of
+  `erx_hostlink_files:build_flags/0`: one `development_build/0` in `erx` should own the decision for both, and
+  `grant/2` should check root's principal, not rely on a development build having no other; a session keeps a dead
+  facet after a console restart, as its console facet. The facet exists only in a
   development build, which runs trusted code only. The owner accepted the wide scope; narrowing it to root's own
   domains, or removing it, changes design-live.md ("Scopes"), design-web.md (W1) and design-domains.md
   (property 9) with it, and needs a test that a browser's view of `/proc/kernel` ends `scope`. The line widens
