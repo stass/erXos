@@ -94,14 +94,15 @@ const MILESTONES = [
     { marker: /L4Re Microkernel/, label: "Kernel up" },
     { marker: /erx: root task/, label: "Starting the system domain" },
     { marker: /Erlang\/OTP 29/, label: "Starting Erlang" },
-    // Root's session takes the console before the storage domain mounts
-    // /data, and /data answers I/O error until then. The machine is ready
-    // when the storage domain's mount has resolved, mounted or failed (a
-    // damaged disk fails it, and the page must still become usable). This
-    // stands in for starting the session after storage, the first item
-    // under "Bugs by subsystem" in TODO.md; with that fixed the session's
-    // own banner is the marker again.
-    { marker: /erx_lfs: (volume mounted|mount failed)/, label: "Ready: type at the prompt" },
+    // The machine is ready at root's session's command shell, whose banner
+    // reaches the line only once the session's namespace is in place: the
+    // storage domain reports ready only after /data has mounted, so /data
+    // answers at the first prompt (docs/design-system.md, "A session takes
+    // the console"). A damaged disk fails the mount and ends the storage
+    // domain, which answers the session too, so its banner still comes; a
+    // login that fails leaves the system shell at the line, after the
+    // console's line saying so, which readies the page as well.
+    { marker: /rc: the command shell; exit ends it|erx_console: the login session did not start/, label: "Ready: type at the prompt" },
 ];
 // The download is the first part of the progress bar; each milestone
 // fills an equal share of the rest.

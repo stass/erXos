@@ -72,9 +72,17 @@ moves to installing; any other reply fails the operation. Since an operation
 exists only while its pair is current, a reply after either domain's end
 matches nothing. Refused, dropped and failed actions carry only bounded
 terms: atoms, the service's own numbers, or a reason the core names.
+
+Namespaces. A grantee's namespace is in place (docs/design-system.md, "A
+session takes the console") when each of its grants of a files service,
+the names config's files lists, has settled: installed, failed, or idle
+while its server row is not starting. in_place/3 decides it from the
+grants alone and the rows the service names as starting, so it needs no
+state of its own, and a grant with an operation is bounded by its
+deadline, a starting server by its boot timeout.
 """.
 
--export([new/1, step/2, grants/1]).
+-export([new/1, step/2, grants/1, in_place/3]).
 -export_type([state/0, config/0, event/0, action/0, grant/0, key/0, pair/0]).
 
 -define(SYSTEM_ID, 4).
@@ -100,6 +108,7 @@ terms: atoms, the service's own numbers, or a reason the core names.
                     grants := [{Grantee :: row() | system | {template, template()}, name(), Server :: row(),
                                 Limits :: map()}],
                     owner := fun((pid()) -> non_neg_integer()),
+                    files => [name()],
                     deadline => pos_integer()}.
 %% ready carries the incarnation's node, which the service knows; the rest of the
 %% untrusted events' fields are any term a domain sent.
@@ -127,13 +136,16 @@ terms: atoms, the service's own numbers, or a reason the core names.
                      sessions := #{id() => template()},
                      next_tag := tag(),
                      owner := fun((pid()) -> non_neg_integer()),
+                     files := [name()],
                      deadline := pos_integer()}.
 
 -doc """
 The state of a boot from the manifest's service rows, each a server row and a
 name, and its facet rows served by configured domains, each a grantee, the
 service's name, its server row and the grant's limits. A grantee
-{template, T} grants each session made from template T. A grant of a
+{template, T} grants each session made from template T. Files names the
+services of the files interface, whose grants a namespace mounts; none by
+default. A grant of a
 service its server does not declare, a grant to its own server, or two
 grants of one name to one grantee is a bug of the caller, which the manifest
 check rules out, and fails with badarg.
@@ -153,7 +165,8 @@ new(#{services := Services, grants := Grants, owner := Owner} = Config) when is_
     Templates = maps:groups_from_list(fun({{template, T}, _, _, _}) -> T end,
                                       fun({_, Name, Server, Limits}) -> {Name, Server, Limits} end, ForTemplates),
     #{declared => Declared, grants => Entries, rows => #{}, templates => Templates, sessions => #{},
-          next_tag => 1, owner => Owner, deadline => maps:get(deadline, Config, ?DEADLINE)}.
+          next_tag => 1, owner => Owner, files => maps:get(files, Config, []),
+          deadline => maps:get(deadline, Config, ?DEADLINE)}.
 
 entry(Server, Limits) -> #{server => Server, limits => Limits, state => idle}.
 
@@ -161,6 +174,25 @@ entry(Server, Limits) -> #{server => Server, limits => Limits, state => idle}.
 -spec grants(state()) -> #{key() => grant()}.
 grants(#{grants := Grants}) ->
     #{Key => Grant || Key := #{state := Grant} <- Grants}.
+
+-doc """
+Whether Grantee's namespace is in place: each of its grants of a files
+service is installed or failed, or is idle while its server row is not
+among Starting, the configured rows whose domain runs without having reported
+ready. An idle grant whose server is ready does not provide the name,
+so nothing more comes for it. A grantee that holds no such grant has its
+namespace in place.
+""".
+-spec in_place(grantee(), Starting :: [row()], state()) -> boolean().
+in_place(Grantee, Starting, #{grants := Grants, files := Files}) ->
+    lists:all(fun({{_, Name}, #{server := Server, state := Grant}}) ->
+                      not lists:member(Name, Files) orelse settled(Grant, Server, Starting)
+              end, [Entry || {{G, _}, _} = Entry <- maps:to_list(Grants), G =:= Grantee]).
+
+settled({installed, _Pair, _Facet}, _Server, _Starting) -> true;
+settled({failed, _Pair, _Reason}, _Server, _Starting) -> true;
+settled(idle, Server, Starting) -> not lists:member(Server, Starting);
+settled(_Pending, _Server, _Starting) -> false.
 
 -doc "The next state and the actions to perform for Event, in order.".
 -spec step(event(), state()) -> {[action()], state()}.

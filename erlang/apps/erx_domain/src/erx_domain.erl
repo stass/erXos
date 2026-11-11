@@ -86,8 +86,10 @@ info({erx_domain, Id, _, _}) ->
 
 -doc """
 Starts a session of principal Principal (docs/design-domains.md, "Principals,
-sessions and quotas"): {ok, Domain} once its init reports ready, as create/1
-answers. The domain is made from the principal's session template alone, its
+sessions and quotas"): {ok, Domain} once its init has reported ready and its
+namespace is in place, each files grant of its template installed or failed
+(docs/design-system.md, "A session takes the console"), and an error as
+create/1's if it ends before then. The domain is made from the principal's session template alone, its
 runtime, release, arguments, environment and limits, which the domain
 library judges against the principal's ceilings, share, budget and domain
 quota; Facets, as a create's spec takes them, are its facets, whose console

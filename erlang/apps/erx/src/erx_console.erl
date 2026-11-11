@@ -952,7 +952,8 @@ menu_action(start, Menu, State) ->
 %% menu's "start a session", with the line's console facet as its console. Creating a
 %% domain takes seconds, so a helper asks the domain service and the console hears
 %% {erx_console_started, Why, Principal, Started}, Started the service's answer, once
-%% the session's init has reported ready or the start is refused (session_started/4).
+%% the session has reported ready with its namespace in place, or the start is refused
+%% (session_started/4; docs/design-system.md, "A session takes the console").
 %% The helper never calls the console, which is not waiting for it. In a development
 %% build the helper also hands the session the `log` facet, through which it reads the
 %% kernel log (erx_log_facet:grant/2); the helper decides, since it reads the manifest.

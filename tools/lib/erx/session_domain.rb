@@ -26,7 +26,9 @@ module Erx
   # Its one cell, root_session, at each CPU count. The system domain's command shell
   # prints its banner at boot; the console logs root in, and root's session, root_1,
   # takes the line once its tty names itself, so the next banner is the session's own
-  # command shell's. There `echo hi` answers, `ls /tmp` lists a file the shell wrote, and
+  # command shell's. There `ls /data` lists the storage domain's tree at the first prompt, since
+  # the console takes the line only with the session's namespace in place (docs/design-system.md,
+  # "A session takes the console"), `echo hi` answers, `ls /tmp` lists a file the shell wrote, and
   # `ps` lists none of the system domain's processes, and `dmesg` writes the kernel log, which
   # the session reads through the system domain (KERNEL_LOG); `uname -a` prints every field the
   # system shell's does (MediumBoot::UNAME_A), the build facts among them, and `uname -b`
@@ -180,7 +182,8 @@ module Erx
 
       shell = ProductionImage::Run::ERLANG_SHELL
       [*points,
-       session_shell('root_1-shell', "echo hi\r"),
+       session_shell('root_1-shell', "ls /data && echo data-listed\r"),
+       { name: 'data-listed', pattern: line('data-listed'), seconds: 60, type: "echo hi\r" }.freeze,
        { name: 'echo-hi', pattern: line('hi'), seconds: 60, type: "echo x > /tmp/session; ls /tmp\r" }.freeze,
        { name: 'ls-tmp', pattern: line('session'), seconds: 60, type: COUNT_SERVICE }.freeze,
        { name: 'session-ps', pattern: line('0'), seconds: 60, type: KERNEL_LOG }.freeze,

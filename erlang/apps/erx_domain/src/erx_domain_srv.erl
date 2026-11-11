@@ -58,6 +58,15 @@ their log lines are rate-limited (throttle/2). A configured domain's facets
 of services the system domain serves go in its ready answer, each in front
 of the process its service named with erx_facet:serve/2 (served/2).
 
+A session's start is answered only once its namespace is in place, each
+files grant to it installed or settled as failed (docs/design-system.md, "A
+session takes the console"), and the console connects its line only on that
+answer. Its waiting entry outlives its ready report until
+erx_domain_mints:in_place/3 holds for it, checked after every step of the mint
+core (answer_in_place/1), or until it ends, when the start is answered with
+an error. A configured row is starting while its domain runs without having
+reported ready; the row's boot timeout bounds that.
+
 A session's ready report names its line to the web domain among its provides;
 the service keeps that pid until the session ends and hands it out only
 through erx_domain:web_line/2, when the host opens its web facet.
@@ -137,7 +146,7 @@ init(Opts) ->
     Exports = maps:get(exports, Opts, erx_dist),
     %% Whether the runtime is a node, as kernel's start left it, since net_kernel starts
     %% before any application and lives as long as the runtime (close_side/4). Waiting
-    %% holds, by domain id, each create not yet answered (wait_created/4).
+    %% holds, by domain id, each create or session's start not yet answered (wait_created/4).
     %% Introducing holds, by the pair's key, each introduce/2 caller, or {mints, Tag} for the mint core (reply/2), waiting for its
     %% connection to come up, with the timer of its deadline (settle_introductions/1).
     %% Held holds, by principal and in arrival order, each start waiting for the
@@ -182,8 +191,9 @@ handle_continue(boot, #{lib := Lib} = State) ->
             %% number is for finding a holder's driver-control facet.
             Services = lists:map(fun({Server, Name, _Interface}) -> {Server, Name} end,
                                  maps:get(services, Boot, [])),
+            Files = [Name || {_Server, Name, ?ERX_SERVICE_FILES} <- maps:get(services, Boot, [])],
             Mints = erx_domain_mints:new((maps:get(mint_config, State))#{services => Services,
-                                           grants => Minted}),
+                                           grants => Minted, files => Files}),
             Served = maps:groups_from_list(fun({Grantee, _, _, _}) -> Grantee end,
                                            fun({_, Name, _, Limits}) -> {Name, Limits} end, System),
             Booted = State#{core := erx_domain_core:new(Host), configured := Configured, mints := Mints, served := Served,
@@ -292,7 +302,8 @@ run({start_session, Principal, Facets}, From, State) ->
 answer_create(Built, From) ->
     case Built of
         {{waiting, Domain}, Next} ->
-            %% Answered by ready/4, or by settle/2 once nothing of the domain remains.
+            %% Answered by ready/4, a session's by answer_in_place/1 after it, or by
+            %% settle/2 once nothing of the domain remains.
             wait_created(Domain, none, From, Next);
         {{refused, Domain, Refusal}, Next} ->
             %% Answered Refusal by settle/2 once the stop has ended the domain and nothing
@@ -336,7 +347,10 @@ handle_info({timeout, _Timer, {boot_timeout, Id}}, #{core := Core} = State) ->
         {ok, #{state := running}} ->
             logger:notice("erx_domain: domain ~b did not report ready in time; stopping it", [Id]),
             stop(Id, State),
-            {noreply, State#{core := erx_domain_core:stopping(Id, Core)}};
+            %% A configured row stopping is no longer starting, so a session waiting for
+            %% its grant is answered now, even if the library refused the stop and no
+            %% end will come.
+            {noreply, answer_in_place(State#{core := erx_domain_core:stopping(Id, Core)})};
         _ ->
             {noreply, State}
     end;
@@ -604,13 +618,15 @@ boot_timer(_Id, infinity) -> ok;
 boot_timer(Id, Timeout) -> _ = erlang:start_timer(Timeout, self(), {boot_timeout, Id}), ok.
 
 %% Domain Id's ready report, which its domain pid passed on with Ref: the domain is ready
-%% and its create, if any, answered. A domain that ended while running, its end having
+%% and its create, if any, answered, a session's start only once its namespace is in
+%% place (answer_in_place/1). A domain that ended while running, its end having
 %% overtaken a report its pid passed on before the pid's own end, reported too, and its
-%% create answers ok. A report for a domain that is ready already, or that ended stopping
-%% for its boot timeout, changes nothing. A configured domain's report goes to the mint
-%% core with the provides it names, at its node, and a session's with its template, after
-%% the answer to the report, so the answer reaches the domain before any installation the
-%% report starts. Only a running domain's report is taken, so the core hears a session's
+%% create answers ok; a session's start, whose grants the mint core never heard of,
+%% answers its end's error (settle/2). A report for a domain that is ready already, or
+%% that ended stopping for its boot timeout, changes nothing. A configured domain's
+%% report goes to the mint core with the provides it names, at its node, and a session's
+%% with its template, after the answer to the report, so the answer reaches the domain
+%% before any installation the report starts. Only a running domain's report is taken, so the core hears a session's
 %% report at most once and before its end (unprovide/3).
 ready(Id, Ref, Provides, #{core := Core, waiting := Waiting} = State) ->
     case {erx_domain_core:fetch(Id, Core), Waiting} of
@@ -695,22 +711,32 @@ served({configured, Row}, #{served := Served}) ->
 served(_Origin, _State) ->
     #{}.
 
+%% Domain Id's create answered at its ready report; a session's start waits on for its
+%% namespace (answer_in_place/1).
 answer_ready(Id, #{waiting := Waiting} = State) ->
-    case maps:take(Id, Waiting) of
-        {#{from := From, domain := Domain}, Rest} ->
-            gen_server:reply(From, {ok, Domain}),
-            State#{waiting := Rest};
-        error ->
-            State
+    case Waiting of
+        #{Id := #{answer_at := ready}} -> answer_ok(Id, State);
+        #{} -> State
     end.
+
+answer_ok(Id, #{waiting := Waiting} = State) ->
+    {#{from := From, domain := Domain}, Rest} = maps:take(Id, Waiting),
+    gen_server:reply(From, {ok, Domain}),
+    State#{waiting := Rest}.
 
 %% A create waiting for domain Id: its caller, the domain, its domain pid's secret, that
 %% pid until it ends and gone after, the life the domain ended in and its Info once it has
-%% ended (ended/3), and the refusal to answer once nothing of it remains, none for a
-%% domain that was started.
+%% ended (ended/3), the refusal to answer once nothing of it remains, none for a domain
+%% that was started, and when it is answered ok: at the ready report, or for a session
+%% once its namespace is in place after it.
 wait_created({erx_domain, Id, _, Pid} = Domain, Refusal, From, #{core := Core, waiting := Waiting} = State) ->
-    {ok, #{ref := Ref}} = erx_domain_core:fetch(Id, Core),
-    Waiter = #{from => From, domain => Domain, ref => Ref, pid => Pid, ended => none, refusal => Refusal},
+    {ok, #{ref := Ref, origin := Origin}} = erx_domain_core:fetch(Id, Core),
+    AnswerAt = case Origin of
+                   {session, _Template} -> in_place;
+                   _ -> ready
+               end,
+    Waiter = #{from => From, domain => Domain, ref => Ref, pid => Pid, ended => none, refusal => Refusal,
+               answer_at => AnswerAt},
     State#{waiting := Waiting#{Id => Waiter}}.
 
 %% A create whose domain ended before its report reached the service waits for the
@@ -729,8 +755,9 @@ pid_ended(Pid, #{waiting := Waiting} = State) ->
         [] -> State
     end.
 
-%% Answers the create of domain Id, which ended in life Life before it reported ready,
-%% once nothing of the domain is charged but what a survivor still maps (A4 of
+%% Answers the create of domain Id, which ended in life Life before it reported ready, or
+%% a session that ended before its namespace was in place, with an error, once nothing of
+%% the domain is charged but what a survivor still maps (A4 of
 %% docs/design-system.md): it has ended, which ended/3 notes only after it asked the
 %% library to retire it (a refusal is logged by retire/2), and its domain pid has ended. ended/3 and pid_ended/2 each call this, so
 %% whichever of the two comes last answers.
@@ -744,7 +771,7 @@ settle(Id, #{waiting := Waiting} = State) ->
     end.
 
 %% The create's answer: the refusal of a domain that was not started, or how one that
-%% was started ended before it reported.
+%% was started ended before it reported, or a session before its namespace was in place.
 create_error(none, Life, Info) -> {error, unreported(Life, Info)};
 create_error({error, _} = Refusal, _Life, _Info) -> Refusal.
 
@@ -1018,7 +1045,9 @@ restart({configured, Row}, #{core := Core, configured := Configured} = State) ->
     end.
 
 %% A configured domain's end, which the mint core hears before any restart: every
-%% operation of its incarnation is cancelled. A session's end cancels its grants'
+%% operation of its incarnation is cancelled, and a session waiting for its grant is
+%% answered then, before the restart makes the row starting again (docs/design-system.md,
+%% "A session takes the console": a session does not wait for a restart). A session's end cancels its grants'
 %% operations and deletes the grants.
 unprovide({configured, Row}, Id, State) -> mints({ended, Row, Id}, State);
 unprovide({session, _Template}, Id, #{web_lines := Lines} = State) ->
@@ -1033,7 +1062,28 @@ unprovide(request, _Id, State) -> State.
 %% registry); the core's state is already the step's next, so that event sees it.
 mints(Event, #{mints := Mints} = State) ->
     {Actions, Next} = erx_domain_mints:step(Event, Mints),
-    lists:foldl(fun mint_act/2, State#{mints := Next}, Actions).
+    answer_in_place(lists:foldl(fun mint_act/2, State#{mints := Next}, Actions)).
+
+%% Each session's start still waiting after its ready report, answered once its
+%% namespace is in place (erx_domain_mints:in_place/3). The mint core hears of a session
+%% only at its report, so only a ready session's grants are checked: before then it
+%% holds none, which would read as in place. A session whose domain pid has died is
+%% ending, and its end answers it with an error (settle/2).
+answer_in_place(#{waiting := Waiting, core := Core, mints := Mints} = State) ->
+    case [Id || Id := #{answer_at := in_place, pid := Pid} <- Waiting, Pid =/= gone, is_ready(Id, Core)] of
+        [] ->
+            State;
+        Ready ->
+            Starting = [Row || #{origin := {configured, Row}, state := running} <- erx_domain_core:domains(Core)],
+            InPlace = [Id || Id <- Ready, erx_domain_mints:in_place({session, Id}, Starting, Mints)],
+            lists:foldl(fun answer_ok/2, State, InPlace)
+    end.
+
+is_ready(Id, Core) ->
+    case erx_domain_core:fetch(Id, Core) of
+        {ok, #{state := ready}} -> true;
+        _ -> false
+    end.
 
 %% An introduction that settles at once is answered through the service's own queue as
 %% one that settles later is (reply/2), so the core takes each in the same way.

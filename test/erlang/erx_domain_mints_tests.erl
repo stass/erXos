@@ -279,6 +279,38 @@ session_ready_installs_test() ->
                   [{disarm, 1}]], Actions),
     ?assertEqual(#{{{session, 9}, data} => {installed, {5, 9}, facet(5)}}, session_grants(State)).
 
+%% A namespace in place (docs/design-system.md, "A session takes the console"): each
+%% grant of a files service to the grantee is installed or failed, or has no operation
+%% while its server is not starting. data is a files service here.
+files_sessions() -> erx_domain_mints:new((config([{template, 0}]))#{files => [data]}).
+
+in_place(Starting, State) -> erx_domain_mints:in_place({session, 9}, Starting, State).
+
+namespace_waits_for_its_files_grants_test() ->
+    {_, Idle} = run([{session_ready, 0, 9}], files_sessions()),
+    %% No operation: the session waits while its server is starting, and not once it
+    %% has ended or never started, when /data answers I/O error.
+    ?assertNot(in_place([?S], Idle)),
+    ?assert(in_place([], Idle)),
+    {_, Minting} = run([ready(?S, 5, #{data => mint(5)}), {introduced, 1, ok}], Idle),
+    ?assertNot(in_place([], Minting)),
+    {_, Installed} = run([{minted, 5, 1, {ok, facet(5)}}, {installed, 9, 1}], Minting),
+    ?assert(in_place([], Installed)),
+    {_, Failed} = run([{deadline, 1}], Minting),
+    ?assert(in_place([], Failed)),
+    {_, Ended} = run([{ended, ?S, 5}], Minting),
+    ?assert(in_place([], Ended)),
+    ?assertNot(in_place([?S], Ended)),
+    %% A ready server that does not provide the name gives the grant no operation to wait for.
+    {_, Unprovided} = run([ready(?S, 5, #{})], Idle),
+    ?assert(in_place([], Unprovided)).
+
+namespace_waits_for_no_other_grant_test() ->
+    {_, Minting} = run([ready(?S, 5, #{data => mint(5)}), {session_ready, 0, 9}, {introduced, 1, ok}], sessions()),
+    ?assert(in_place([?S], Minting)),
+    ?assert(erx_domain_mints:in_place({session, 10}, [?S], Minting)),
+    ?assert(erx_domain_mints:in_place({session, 10}, [?S], files_sessions())).
+
 session_before_its_server_waits_test() ->
     {Actions, State} = run([{session_ready, 0, 9}, ready(?S, 5, #{data => mint(5)})], sessions()),
     ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 5, 9}]], Actions),

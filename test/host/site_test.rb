@@ -181,16 +181,17 @@ class SiteTest < Minitest::Test
     end
   end
 
-  # The page's "Ready" waits for the storage domain's own log lines, so a
-  # rewording of them must fail here and not leave a page that never readies.
-  def test_ready_marker_names_the_log_lines_the_storage_domain_writes
+  # The page's "Ready" waits for the banner of a session's command shell or the
+  # console's line for a login that did not start, so a rewording of either must
+  # fail here and not leave a page that never readies.
+  def test_ready_marker_names_the_lines_the_guest_writes
     terminal = File.read(File.join(REPO, 'site/terminal.js'))
-    storage = File.read(File.join(REPO, 'erlang/apps/erx_storage/src/erx_lfs.erl'))
-    ready = terminal[%r{marker: /erx_lfs: \(([^)]*)\)/}, 1]
-    refute_nil ready, 'the last milestone waits for an erx_lfs line'
-    ready.split('|').each do |line|
-      assert_includes storage, "log(\"#{line}", "erx_lfs.erl writes the line #{line.inspect}"
-    end
+    shell = File.read(File.join(REPO, 'erlang/apps/erx_shell/src/erx_shell.erl'))
+    console = File.read(File.join(REPO, 'erlang/apps/erx/src/erx_console.erl'))
+    ready = terminal.match(%r{marker: /(rc: [^|/]*)\|(erx_console: [^|/]*)/})
+    refute_nil ready, 'the last milestone waits for a session shell banner or the failed login line'
+    assert_includes shell, "-define(BANNER, <<\"#{ready[1]}\\n\">>)", 'erx_shell.erl writes the session banner'
+    assert_includes console, "\"#{ready[2]}: ~0P\"", "erx_console.erl writes the line #{ready[2].inspect}"
   end
 
   def test_routes_serve_the_built_site_but_not_its_marker

@@ -916,7 +916,8 @@ and 6 give way to the partial boot below.
    when the host opens it, at the host link's `console` line, both
    secure lines. The login asks the domain service for root's session,
    from the system principal's session template, and the session takes
-   the line once its tty names itself; the system shell stays one menu
+   the line once its tty names itself, with its namespace in place
+   ([A session takes the console](#a-session-takes-the-console)); the system shell stays one menu
    key away, and when the session ends the console logs `root` in again
    ([design-live.md](design-live.md#the-console)).
 5. **Each display's session.** For each display domain whose manifest
@@ -1023,6 +1024,64 @@ the kernel's early console prints while no console driver runs
 the kernel interface, the domain library and the execution contract are
 tested before ERTS runs. A release build's manifest has no partial boot
 (property 9).
+
+#### A session takes the console
+
+A session takes the console only with its namespace in place. The
+domain service answers a session's start only once each `files` grant of
+its template is installed in it, or that grant has settled as failed,
+and the console connects the person's line to the session only on that
+answer, so a command typed at the first prompt, `ls /data` among them,
+meets the namespace the session will keep and never an I/O error left
+over from the boot. The guarantee is about the line, not the session:
+the session's tty and shell start as soon as its init's ready report is
+answered, and until the line is connected the console holds the tty's
+first output and the tty waits, as for any session not connected
+([design-live.md](design-live.md#the-console)), so only the person's line
+is held. A session the menu
+starts is listed in it only once its start is answered, so it too is
+in place before anyone can connect to it.
+
+* **In place.** A session's namespace is in place when each grant of a
+  `files` service to it has settled: the mint core has installed it
+  ([Facets a configured domain serves](#facets-a-configured-domain-serves)),
+  its operation has failed, or it has no operation while its server is
+  not starting. A server is starting from its start until it reports
+  ready, is stopped for its boot timeout, or ends. A server that is ready
+  but does not provide the grant's name, one that has ended, and one whose
+  start was refused are not starting, so their grants have no operation
+  to wait for and count as settled. Grants of every other
+  interface (`net`, `driver_control`, `web`) are not waited for: the mint
+  core installs them when their server reports, as it does after a
+  restart.
+* **The answer.** The mint core keeps its rule that a session's ready
+  answer reaches it before any grant is installed, so the session's
+  grants exist only from its ready report on. The service keeps the
+  start's caller from the start until it answers, as it keeps a
+  create's; for a session it answers not at the ready report but at the
+  first step of the mint core after it, the report's own included, at
+  which `erx_domain_mints:in_place/3`, a pure function of the grants and
+  the starting rows, holds for the session. A session that ends before
+  then is answered with an error, as a create whose domain ends before
+  its report is, and the console treats it as any start that failed.
+* **Failure is bounded.** A server that fails or never comes up delays
+  the answer by at most its row's boot timeout (`boot_timeout_s`), after
+  which its start has ended; a grant whose introduction, mint or
+  installation stalls fails at the mint core's deadline. Either way the
+  session takes the console with that mount answering I/O error, as it
+  does whenever its server is down, and the grant is installed when the
+  server reports after a restart. A server that ends while the session
+  waits settles its grant at once: the session does not wait for a
+  restart.
+* **Why it holds by construction.** The wait reads only state the mint
+  core already keeps, the grant of each `files` service to the session,
+  and the domain service's own record of which configured domains are
+  starting; no domain is named and no list of mounts is kept. A new
+  storage-like server is waited for because it serves a `files` grant to
+  a template, and a new service of another interface is not, because it
+  does not. The console connects a session, or lists it, only once the
+  service has answered its start, so no path gives the person the line
+  sooner, and the session exchanges no message of its own for it.
 
 ### The domain library
 

@@ -963,13 +963,6 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [Medium] erx_domain boot order (`erlang/apps/erx_domain/src/erx_domain_app.erl`, `erx_console:login()`;
-  [design-system.md](docs/design-system.md#booting)): root's session takes the console before the storage
-  domain mounts `/data`, so `/data` answers I/O error for the first seconds (about 10 s of guest time on the
-  website's v64 machine, from the system shell's banner to the `erx_lfs: volume mounted` line;
-  [design-storage.md](docs/design-storage.md) specifies the error before the storage windows exist). Start the
-  session after storage is up, and still start it when storage fails. The website's "Ready" waits for the
-  mount line meanwhile (`site/terminal.js`, `MILESTONES`); put the session's banner back as that marker.
 * [Low] ERTS start-up (`otp/erts/emulator/beam/erl_process.c`, the "hold executor slots" line): the scheduler
   count follows the manifest's CPU set, not the CPUs present. The system domain and the storage domain report
   4 schedulers on the website's 1-core v64 machine. Size them from the CPUs the kernel reports present.
@@ -4995,6 +4988,16 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Medium] erx_domain boot order (`erlang/apps/erx_domain/src/erx_domain_srv.erl`, `handle_continue/2`;
+  [design-system.md](docs/design-system.md#booting)): the domain service starts every configured domain at once
+  in the manifest's boot order, so on one CPU the runtimes slow each other and the login waits for the slowest.
+  Two rules of the boot-order proposal are deferred: (A) a start waits for the
+  configured domains serving its `files` grants to settle, each bounded by its row's boot timeout, and (B)
+  configured domains that no start needs are held until the boot is quiet. Measured under TCG on 1 CPU, once
+  storage and network run on the interpreter, ordering gives 0.5 s to the prompt and 1.3 s to `/data`; on JIT
+  images it gives 2.9 s (raw data: ~/erxos-history commit 34d0390, `boot-slow-2026-11-11`). Rule C, a session
+  taking the console only with its namespace in place, is the design
+  ([design-system.md](docs/design-system.md#a-session-takes-the-console)).
 * [Medium] musl, `musl/arch/aarch64/bits/signal.h`, `abi/signals.txt`,
   `erlang/apps/erx_shell/src/erx_shell_jobs.erl`: give erXos's musl FreeBSD's signal numbers from the signal
   table of the ABI file ([design-programs.md](docs/design-programs.md#signal-numbers)). The table holds each

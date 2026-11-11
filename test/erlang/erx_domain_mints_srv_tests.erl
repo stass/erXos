@@ -28,12 +28,24 @@ mints_test_() ->
 sessions_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) -> {timeout, 20, fun sessions/0} end}.
 
-setup() ->
+%% With echo a service of the files interface, 5, a session's start is answered only
+%% once its echo grant is in place (docs/design-system.md, "A session takes the
+%% console"), and a session that ends before then is answered with an error.
+namespace_test_() ->
+    {setup, fun() -> setup(5) end, fun cleanup/1, fun(_) -> {timeout, 20, fun namespace/0} end}.
+
+namespace_end_test_() ->
+    {setup, fun() -> setup(5) end, fun cleanup/1, fun(_) -> {timeout, 20, fun namespace_end/0} end}.
+
+setup() -> setup(1).
+
+%% With echo a service of interface Interface.
+setup(Interface) ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
                                      restarts => 3, restart_period_s => 60, boot_timeout_s => 60} end,
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)],
-                          services => [{1, echo, 1}],
+                          services => [{1, echo, Interface}],
                           grants => [{0, echo, 1, #{max_request => 512}}, {system, echo, 1, #{}},
                                      {{template, 0}, echo, 1, #{max_request => 64}}]}),
     provide('a@erxos'),
@@ -271,6 +283,46 @@ sessions() ->
     ?assertEqual({error, no_line}, gen_server:call(erx_domain_srv, {web_line, 7})),
     PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, Facet}}},
     wait_counts(fun(#{{dropped, unknown_tag} := N}) -> N =:= 1 end).
+
+%% Session 7 has reported ready while its echo grant is being made: its start is
+%% answered only once the grant is installed.
+namespace() ->
+    Started = start_session(),
+    [PidA, Pid7] = [domain_pid(Id) || Id <- [5, 7]],
+    erlang:trace(Pid7, true, ['receive', {tracer, self()}]),
+    Key = {{session, 7}, echo},
+    #{Key := {introducing, {5, 7}, _}} = wait(fun(#{Key := {introducing, _, _}}) -> true end),
+    ?assertEqual(none, answer(Started, 200)),
+    PidA ! {erx_origin, 5, {erx_connection_mapped, 7}},
+    Pid7 ! {erx_origin, 7, {erx_connection_mapped, 5}},
+    #{Key := {minting, {5, 7}, Tag}} = wait(fun(#{Key := {minting, _, _}}) -> true end),
+    PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 7)}}},
+    receive {trace, Pid7, 'receive', {_, install, Tag, echo, _}} -> ok after 2000 -> error(no_install) end,
+    ?assertEqual(none, answer(Started, 200)),
+    Pid7 ! {erx_origin, 7, {erx_facets_installed, Tag}},
+    ?assertMatch({ok, {erx_domain, 7, _, Pid7}}, answer(Started, 2000)),
+    erlang:trace(Pid7, false, ['receive']).
+
+%% Session 7 ends after its ready report, while its echo grant is being made: its start
+%% is answered with an error, never ok.
+namespace_end() ->
+    Started = start_session(),
+    Key = {{session, 7}, echo},
+    #{Key := {introducing, {5, 7}, _}} = wait(fun(#{Key := {introducing, _, _}}) -> true end),
+    ?assertEqual(none, answer(Started, 200)),
+    exit(domain_pid(7), kill),
+    ?assertMatch({error, _}, answer(Started, 2000)).
+
+%% A session's start, asked of the service by a process of its own, as the console's
+%% helper asks; answer/2 takes its answer.
+start_session() ->
+    Self = self(),
+    Ref = make_ref(),
+    _ = spawn(fun() -> Self ! {Ref, erx_domain:start_session(1, #{})} end),
+    Ref.
+
+answer(Ref, Timeout) ->
+    receive {Ref, Answer} -> Answer after Timeout -> none end.
 
 %% A pid of Node with creation Creation, as a frame from that domain carries one.
 pid(Node, Creation, Number) ->
