@@ -354,6 +354,7 @@ life_step_ok(const erx_dom_step_t *step, const bool *made)
 	case ERX_DOM_STEP_IRQ:
 	case ERX_DOM_STEP_DMA:
 	case ERX_DOM_STEP_CONTIGUOUS:
+	case ERX_DOM_STEP_GIVE:
 		return (false);
 	}
 	return (false);
@@ -693,18 +694,19 @@ life_device_install(erx_dom_device_plan_t *plan, erx_dom_obj_t obj)
 }
 
 erx_status_t
-erx_dom_plan_device_give(const erx_dom_view_t *view, uint32_t id,
-    uint32_t index, erx_dom_device_plan_t *plan)
+erx_dom_plan_device_give(const erx_dom_view_t *view,
+    const erx_dom_plan_t *holder, uint32_t index, erx_dom_device_plan_t *plan)
 {
-	erx_dom_device_plan_t draft = { .index = index, .holder = id };
+	erx_dom_device_plan_t draft = { .index = index, .holder = holder->spec.id,
+	    .slot = holder->slot };
 	const erx_dom_device_entry_t *entry;
 	const erx_dom_device_t *record;
 	uint32_t held, made;
 	bool kept;
 
-	draft.slot = life_slot(view, id);
-	if (draft.slot == view->max_domains ||
-	    !life_alive(&view->domains[draft.slot]) || index >= view->ndevices)
+	/* The holder is being created, into a free record. */
+	if (draft.slot >= view->max_domains || view->domains[draft.slot].id != 0 ||
+	    index >= view->ndevices)
 		return (ERX_EINVAL);
 	entry = &view->devices[index];
 	record = &view->device_records[index];
@@ -713,7 +715,7 @@ erx_dom_plan_device_give(const erx_dom_view_t *view, uint32_t id,
 	 * device's unit on: not a requested or session domain, nor one of
 	 * another row.
 	 */
-	if (!erx_dom_from_row(&view->domains[draft.slot], entry->row))
+	if (!erx_dom_from_row(&holder->spec.origin, entry->row))
 		return (ERX_EINVAL);
 	if (record->index != index || !life_entry_ok(entry) ||
 	    life_overlaps(view, index))
@@ -817,6 +819,7 @@ life_device_step_ok(const erx_dom_step_t *step, const bool *made)
 	case ERX_DOM_STEP_MAP:
 	case ERX_DOM_STEP_BOOTINFO:
 	case ERX_DOM_STEP_THREAD:
+	case ERX_DOM_STEP_GIVE:
 		return (false);
 	}
 	return (false);

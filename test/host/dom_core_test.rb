@@ -73,6 +73,12 @@ class DomCoreTest < Minitest::Test
     'configured grant not fitted to system' =>
       ["if (!dom_grant_fits(&spec->grant, &view->system_grant) ||\n\t\t    !dom_system_reserve",
        'if (!dom_system_reserve'],
+'a configured creation gives nothing' =>
+  ["if (!erx_dom_from_row(&plan->spec.origin, view->devices[index].row))\n\t\t\tcontinue;", "continue;"],
+'a give after the boot page passes the check' =>
+  ["(step->kind == ERX_DOM_STEP_BOOTINFO && gives != plan->ngives))", "false)"],
+'a give for another holder passes the check' =>
+  ["plan->gives[step->index].holder == plan->spec.id &&\n", ""],
     'request strings tail kept' => ['memset(spec->strings + used, 0, sizeof(spec->strings) - used);', '(void)used;'],
     'record forgets the principal domain count' => ["\tprincipal->domains++;\n", ''],
     'record skips the reserve' => ["\tif (spec->origin.kind == ERX_DOM_CONFIGURED &&\n\t    !dom_system_reserve(view, &spec->grant))\n\t\treturn (ERX_EINVAL);\n", ''],
@@ -206,6 +212,23 @@ class DomCoreTest < Minitest::Test
     end
   end
 
+  # A configured row's creation gives each device its unit rows place on it,
+  # before the boot page and none of another holder's; a living earlier domain of
+  # the row keeps its device, and once it has ended the next creation is
+  # given it again over the kept memory. A plan whose gives are out of
+  # order, unplanned, missing, for another holder or past their rights
+  # fails the check.
+  def test_a_configured_creation_gives_its_devices
+    lines = run_driver(driver, 'gives')
+    assert_includes lines, 'gives first 0 ngives=1 index=0 before_boot=1 holder=1 last=DEV_MEMORY'
+    assert_includes lines, 'gives seeded valid 0'
+    %w[after_boot unplanned no_step other_holder other_slot window_phys].each do |name|
+      assert_includes lines, "gives seeded #{name} #{EINVAL}", name
+    end
+    assert_includes lines, "gives busy #{EBUSY} nsteps=0", 'a refused plan is zeroed'
+    assert_includes lines, 'gives again 0 ngives=1 last=DEV_KEPT'
+  end
+
   def test_each_mutant_is_caught
     MUTANTS.each do |name, (from, to)|
       text = File.read(File.join(@root, CORE))
@@ -220,7 +243,7 @@ class DomCoreTest < Minitest::Test
 
   private
 
-  MODES = %w[explore cases seeded principal record].freeze
+  MODES = %w[explore cases seeded principal record gives].freeze
 
   def clean_lines = @clean_lines ||= MODES.flat_map { |mode| run_driver(driver, mode) }
 

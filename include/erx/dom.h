@@ -57,8 +57,10 @@
 
 /* What a plan reserves on a budget for one bell, an IRQ object. */
 #define ERX_DOM_BELL_BYTES	ERX_PAGE_SIZE
-/* The most steps a creation plan holds. */
-#define ERX_DOM_PLAN_STEPS_MAX	40u
+/* The most devices one configured domain holds, each a give in its creation plan. */
+#define ERX_DOM_GIVES_MAX	8u
+/* The most steps a creation plan holds: its own and a GIVE step per device. */
+#define ERX_DOM_PLAN_STEPS_MAX	(40u + ERX_DOM_GIVES_MAX)
 /* The fields of erx_runtime_limits_t a request may leave out; dom_core.c
  * pins the layout, so a new field fails the build until it is handled. */
 #define ERX_DOM_LIMITS_FIELDS	11u
@@ -197,19 +199,28 @@ typedef struct erx_dom_range {
 } erx_dom_range_t;
 
 /*
- * One entry of the device service's catalogue: what erx_dom_device_give
- * creates for the device, and where the manifest places it. The boot view
- * builds one per row of the manifest's device table, in its order, so an
- * entry's index is its device row, which a give's carve of the root
- * resource names the device by; its
- * range the pages its register window touches, and admits only a
- * placement that gives each unit whole to one holder (erx_dom_view_build).
+ * One entry of the device service's catalogue: what a give makes for the
+ * device in the creation of the configured row its unit is placed on, and
+ * where the manifest places it. The boot view builds one per row of the
+ * manifest's device table, in its order, so an entry's index is its
+ * manifest device row; on the stopgap the give's window and line objects
+ * come from the entry at that index. Its ranges are the pages its
+ * register window touches, and the view admits only a placement that
+ * gives each unit whole to one holder (erx_dom_view_build).
  */
 typedef struct erx_dom_device_entry {
 	uint32_t	unit;		/* the manifest's unit row it belongs to */
 	uint32_t	row;		/* the configured row its unit is placed
 					 * on; ERX_MF_NONE for the system domain */
 	uint32_t	role;		/* ERX_MF_DEVICE_ROLE_* */
+	/* Its holder's record words (erx/device_kinds.h): the ROLE and the
+	 * CMSIS-SVD PERIPHERAL; NULL for a kind no runtime drives, which no
+	 * configured row may hold. */
+	const char	*role_word, *peripheral;
+	uint64_t	offset;		/* its registers' offset into ranges[0] */
+	uint64_t	size;		/* and their bytes, as the manifest gives them */
+	uint32_t	lines[ERX_DEVICE_IRQS_MAX];	/* each line, as the platform's
+						 * controller numbers it */
 	uint32_t	nranges;	/* at most ERX_DEVICE_RANGES_MAX */
 	uint32_t	nlines;		/* at most ERX_DEVICE_IRQS_MAX */
 	erx_dom_range_t	ranges[ERX_DEVICE_RANGES_MAX];	/* its register ranges */
@@ -462,8 +473,9 @@ typedef enum erx_dom_step_kind {
 					 * resource target, charged to budget */
 	ERX_DOM_STEP_DMA,		/* obj: a DMA window on resource target's
 					 * stream, charged to budget */
-	ERX_DOM_STEP_CONTIGUOUS		/* obj: contiguous memory of size, charged
+	ERX_DOM_STEP_CONTIGUOUS,	/* obj: contiguous memory of size, charged
 					 * to budget */
+	ERX_DOM_STEP_GIVE		/* a creation's: gives[index], applied whole */
 } erx_dom_step_kind_t;
 
 /* What undoes an applied step. */
@@ -471,7 +483,13 @@ typedef enum erx_dom_undo_kind {
 	ERX_DOM_UNDO_DESTROY,		/* destroy the step's object: a carved
 					 * budget, with all charged to it, or a
 					 * device's object */
-	ERX_DOM_UNDO_BY_BUDGET		/* goes with a carved budget's destroy */
+	ERX_DOM_UNDO_BY_BUDGET,		/* goes with a carved budget's destroy */
+	ERX_DOM_UNDO_KEEP		/* stays: a device's fresh contiguous
+					 * memory, which no driver has been told
+					 * of yet and which the backend never takes
+					 * back, so the apply phase keeps it in the
+					 * device's record for the row's next
+					 * creation */
 } erx_dom_undo_kind_t;
 
 typedef struct erx_dom_step {
@@ -506,6 +524,34 @@ typedef enum erx_dom_parent {
 /* A plan's connection_row when the domain has no system connection. */
 #define ERX_DOM_NO_ROW		UINT32_MAX
 
+/*
+ * A device's give (docs/design-system.md, "Devices"): its resource carved
+ * from the root's, a register window per range and an IRQ object per
+ * line, each charged to the holder's own budget; a DMA window for a
+ * confined device, on the same budget, or for an unconfined one its
+ * contiguous memory, made at its first give on the system domain's budget
+ * and kept in the device record after; and the holder's share installed
+ * from erx_dom_grants. A give is part of its holder's creation: the
+ * creation plan of the configured row the device's unit is placed on
+ * holds it, and its GIVE step applies it whole before the boot page is
+ * written, which names what it installed. Undo destroys each object the
+ * give made, last first, and the deletion clears every capability to it
+ * from the holder's table. The kept memory outlives an undo, so its
+ * install is the give's last step: the apply phase writes the device
+ * record, which cannot fail, once the whole creation has succeeded.
+ */
+#define ERX_DOM_DEVICE_STEPS	(2u * (ERX_DEVICE_RANGES_MAX + ERX_DEVICE_IRQS_MAX) + 3u)
+	/* the resource, a window per range, an IRQ object per line and the
+	 * DMA window or memory, then an install of each but the resource */
+
+typedef struct erx_dom_device_plan {
+	uint32_t	index;		/* the device's entry and record */
+	uint32_t	holder;		/* the domain id it goes to */
+	uint32_t	slot;		/* the holder's record */
+	uint32_t	nsteps;
+	erx_dom_step_t	steps[ERX_DOM_DEVICE_STEPS];
+} erx_dom_device_plan_t;
+
 typedef struct erx_dom_plan {
 	erx_dom_spec_t	spec;		/* the validated specification */
 	erx_dom_parent_t parent;
@@ -516,6 +562,10 @@ typedef struct erx_dom_plan {
 					 * from the system domain; 0 for none */
 	uint32_t	nsteps;
 	erx_dom_step_t	steps[ERX_DOM_PLAN_STEPS_MAX];
+	/* A configured domain's devices: one give per device its row holds,
+	 * in catalogue order; GIVE step n applies gives[n]. */
+	uint32_t	ngives;
+	erx_dom_device_plan_t gives[ERX_DOM_GIVES_MAX];
 } erx_dom_plan_t;
 
 /*
@@ -549,7 +599,11 @@ extern const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS];
  * ERX_EINVAL for a specification outside its ranges; ERX_ELIMIT for a full
  * table or an exhausted quota; ERX_ENOMEM when the principal's budget
  * cannot hold the domain's two budgets; ERX_EBUSY once the machine is
- * ending. *plan is written only on ERX_OK.
+ * ending. A configured row's plan also holds a give of each device its
+ * unit rows place on it (erx_dom_plan_device_give), and is refused as a
+ * give is. *plan holds no plan unless ERX_OK: the planner writes it in
+ * place, as it is too large for a draft on the stack, and zeroes it on a
+ * refusal.
  *
  * erx_dom_plan_request plans an admitted request: req supplies id,
  * principal, flags, release, release_files, runtime, memory, outer, grant,
@@ -571,11 +625,11 @@ erx_status_t	erx_dom_plan_configured(const erx_dom_view_t *, uint32_t id,
 erx_status_t	erx_dom_plan_partial(const erx_dom_view_t *, uint32_t id,
 		    uint32_t row, erx_dom_plan_t *plan);
 /*
- * Whether dom was created from configured-domain row `row`, so its origin
- * is ERX_DOM_CONFIGURED of that row. False for every other origin, and so
+ * Whether origin is configured-domain row `row`'s: ERX_DOM_CONFIGURED of
+ * that row. False for every other origin, and so
  * for ERX_MF_NONE, which names the system domain and no configured row.
  */
-bool		erx_dom_from_row(const erx_dom_t *dom, uint32_t row);
+bool		erx_dom_from_row(const erx_dom_origin_t *origin, uint32_t row);
 /*
  * erx_dom_plan_session plans a session of session template `template` of
  * the view, under domain id `id`, domain pid `domain_pid` and name_len
@@ -856,42 +910,19 @@ erx_status_t	erx_dom_plan_stop(const erx_dom_view_t *, uint32_t id,
 		    int64_t status, erx_dom_action_t *action);
 
 /*
- * A device's give (docs/design-system.md, "Devices"): its resource carved
- * from the root's, a register window per range and an IRQ object per
- * line, each charged to the holder's own budget; a DMA window for a
- * confined device, on the same budget, or for an unconfined one its
- * contiguous memory, made at its first give on the system domain's budget
- * and kept in the device record after; and the holder's share installed
- * from erx_dom_grants. The holder is alive, so nothing here is undone by
- * a budget: undo destroys each object the plan made, last first, and the
- * deletion clears every capability to it from the holder's table. The
- * kept memory outlives an undo, so its install is the plan's last step:
- * the apply phase writes the device record, which cannot fail, after it.
- */
-#define ERX_DOM_DEVICE_STEPS	(2u * (ERX_DEVICE_RANGES_MAX + ERX_DEVICE_IRQS_MAX) + 3u)
-	/* the resource, a window per range, an IRQ object per line and the
-	 * DMA window or memory, then an install of each but the resource */
-
-typedef struct erx_dom_device_plan {
-	uint32_t	index;		/* the device's entry and record */
-	uint32_t	holder;		/* the domain id it goes to */
-	uint32_t	slot;		/* the holder's record */
-	uint32_t	nsteps;
-	erx_dom_step_t	steps[ERX_DOM_DEVICE_STEPS];
-} erx_dom_device_plan_t;
-
-/*
- * Plans erx_dom_device_give(id, index). ERX_OK; ERX_EINVAL for a domain
- * with no record or outside built and running, a domain that is not the
+ * Plans the give of device `index` to the domain creation plan `holder`
+ * makes, into *plan, which its creation then holds. ERX_OK; ERX_EINVAL
+ * for a holder whose record slot is taken, a holder that is not the
  * configured row the entry's unit is placed on, an index past the
  * catalogue or a record whose index is not its own, an entry with more
  * ranges or lines than the ABI allows or a
  * range that is empty, unaligned, wraps, or overlaps another entry's;
- * ERX_EBUSY for a device whose record names a living holder, this domain
- * included. *plan is written only on ERX_OK.
+ * ERX_EBUSY for a device whose record names a living holder, an earlier
+ * domain of the same row included. *plan is written only on ERX_OK.
  */
-erx_status_t	erx_dom_plan_device_give(const erx_dom_view_t *, uint32_t id,
-		    uint32_t index, erx_dom_device_plan_t *plan);
+erx_status_t	erx_dom_plan_device_give(const erx_dom_view_t *,
+		    const erx_dom_plan_t *holder, uint32_t index,
+		    erx_dom_device_plan_t *plan);
 
 /*
  * Checks a device's plan whole: the resource is carved from the root's

@@ -21,6 +21,7 @@
 #include "erx/dom_lib.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/boot_info.h"
+#include "liberx/backend/core/boot_manifest.h"
 #include "liberx/system/dom_apply.h"
 #include "liberx/system/dom_install.h"
 
@@ -28,6 +29,17 @@
 #define SYSTEM_NAME	"system"
 /* A handle no table holds: what a step gets for an object no creation names. */
 #define APPLY_NO_HANDLE	UINT64_MAX
+
+/*
+ * One give of a creation in progress: the handles its steps made, by
+ * device object, each value its installs took in the holder's table, and
+ * how many of its steps were tried, the refused one included.
+ */
+typedef struct apply_give {
+	uint64_t	made[ERX_DOM_OBJ_MADE_COUNT];	/* ERX_CAP_NULL for none */
+	uint64_t	installed[ERX_DOM_OBJ_COUNT];
+	uint32_t	tried;
+} apply_give_t;
 
 /* One creation in progress: the plan, the handles made so far, and what the steps learnt. */
 typedef struct apply {
@@ -39,6 +51,10 @@ typedef struct apply {
 	uint64_t		 pc;		/* the runtime image's entry */
 	uint64_t		 bootinfo_addr;	/* where the domain sees its boot page */
 	uint64_t		 release_addr;	/* where it sees its release slice */
+	apply_give_t		 gives[ERX_DOM_GIVES_MAX];	/* plan->gives, give for give */
+	/* The boot page's -erx given record of each give, and -erx boot. */
+	char			 given_words[ERX_DOM_GIVES_MAX][ERX_BOOT_GIVEN_WORDS_MAX];
+	char			 pair_words[ERX_BOOT_PAIR_WORDS_MAX];
 } apply_t;
 
 /*
@@ -72,6 +88,7 @@ static int	apply_install(apply_t *, const erx_dom_step_t *);
 static bool	apply_node(const erx_dom_lib_t *, const char *, size_t, char *, size_t *);
 static int	apply_bootinfo(apply_t *);
 static int	apply_thread(apply_t *, const erx_dom_step_t *);
+static int	apply_give(apply_t *, uint32_t);
 static int	apply_group(apply_t *, const erx_dom_step_t *);
 static erx_status_t apply_plan(apply_t *, erx_dom_created_t *);
 static void	apply_undo(apply_t *, uint32_t);
@@ -259,8 +276,10 @@ apply_step(apply_t *apply, const erx_dom_step_t *step)
 		return (apply_bootinfo(apply));
 	case ERX_DOM_STEP_THREAD:
 		return (apply_thread(apply, step));
+	case ERX_DOM_STEP_GIVE:
+		return (apply_give(apply, step->index));
 	default:
-		/* A device's steps belong to erx_dom_device_give, not to a creation. */
+		/* A device's own steps are a give's, which a GIVE step applies whole. */
 		return (ERX_EINVAL);
 	}
 	if (status == ERX_OK)
@@ -323,6 +342,149 @@ apply_install(apply_t *apply, const erx_dom_step_t *step)
 }
 
 /*
+ * The handle a give's step names: one the give made, the holder's budget
+ * and space, which this creation made, or the device's kept memory. The
+ * system domain's budget is the root's own, which ERX_CAP_NULL names as a
+ * budget argument. No backend has a resource object yet, so the root's is
+ * none (apply_give_step).
+ */
+static uint64_t
+give_object(const apply_t *apply, const erx_dom_device_plan_t *give, uint32_t at, erx_dom_obj_t obj)
+{
+	if (obj < ERX_DOM_OBJ_MADE_COUNT)
+		return (apply->gives[at].made[obj]);
+	switch (obj) {
+	case ERX_DOM_OBJ_HOLDER_BUDGET:
+		return (apply->handles.made[ERX_DOM_OBJ_BUDGET]);
+	case ERX_DOM_OBJ_HOLDER_SPACE:
+		return (apply->handles.made[ERX_DOM_OBJ_SPACE]);
+	case ERX_DOM_OBJ_SYSTEM_BUDGET:
+		return (ERX_CAP_NULL);
+	case ERX_DOM_OBJ_DEV_KEPT:
+		return (apply->lib->device_records[give->index].memory.raw);
+	default:
+		return (APPLY_NO_HANDLE);
+	}
+}
+
+/*
+ * One step of give `at`. Every object is made from the catalogue entry of
+ * the give's own index, the manifest's device row, from the window and
+ * lines that row gives: the stopgap has no resource object, and each
+ * create ignores its resource argument (liberx/backend/api.h), so the
+ * resource step makes nothing and one index names both the entry and the
+ * device. A DMA window needs an IOMMU stream, which the stopgap's view
+ * refuses, so no give holds one.
+ */
+static int
+apply_give_step(apply_t *apply, uint32_t at, const erx_dom_step_t *step)
+{
+	const erx_dom_device_plan_t *give = &apply->plan->gives[at];
+	const erx_dom_device_entry_t *entry = &apply->lib->view.devices[give->index];
+	const uint64_t budget = give_object(apply, give, at, step->budget);
+	const uint64_t resource = give_object(apply, give, at, step->target);
+	uint64_t handle = ERX_CAP_NULL;
+	int status;
+
+	switch (step->kind) {
+	case ERX_DOM_STEP_RESOURCE:
+		return (ERX_OK);
+	case ERX_DOM_STEP_WINDOW:
+		status = erx_mem_create_physical(budget, resource, entry->ranges[step->index].base, step->size,
+		    ERX_MEM_ATTR_DEVICE, &handle);
+		break;
+	case ERX_DOM_STEP_IRQ:
+		status = erx_irq_create(budget, resource, ERX_IRQ_LINE, entry->lines[step->index], &handle);
+		break;
+	case ERX_DOM_STEP_CONTIGUOUS:
+		status = erx_mem_create_contiguous(budget, ERX_CAP_NULL, step->size, 0, &handle);
+		break;
+	case ERX_DOM_STEP_INSTALL:
+		return (erx_dom_install(step, give_object(apply, give, at, step->obj),
+		    give_object(apply, give, at, step->target), &apply->gives[at].installed[step->obj]));
+	default:
+		return (ERX_EINVAL);
+	}
+	if (status == ERX_OK)
+		apply->gives[at].made[step->obj] = handle;
+	return (status);
+}
+
+/*
+ * Give `at` of the plan, its steps in order. Its objects are the
+ * library's until the creation succeeds, when apply_keep writes them into
+ * the device's record; a refusal leaves them to apply_undo.
+ */
+static int
+apply_give(apply_t *apply, uint32_t at)
+{
+	const erx_dom_device_plan_t *give = &apply->plan->gives[at];
+	apply_give_t *state = &apply->gives[at];
+	int status;
+
+	for (state->tried = 0; state->tried < give->nsteps;) {
+		status = apply_give_step(apply, at, &give->steps[state->tried++]);
+		if (status != ERX_OK)
+			return (status);
+	}
+	return (ERX_OK);
+}
+
+/*
+ * The -erx given record of give `at` (erx_boot_given_words) from the
+ * values its installs took in the holder's table, and its length, or 0
+ * when the words do not fit, which the view's names rule out.
+ */
+static size_t
+apply_given_words(apply_t *apply, uint32_t at)
+{
+	const erx_dom_device_plan_t *give = &apply->plan->gives[at];
+	const erx_dom_device_entry_t *entry = &apply->lib->view.devices[give->index];
+	const uint64_t *installed = apply->gives[at].installed;
+	const erx_boot_given_t given = { .role = entry->role_word, .peripheral = entry->peripheral,
+	    .window = installed[ERX_DOM_OBJ_DEV_WINDOW], .offset = entry->offset, .size = entry->size,
+	    .line = installed[ERX_DOM_OBJ_DEV_IRQ],
+	    .memory = installed[ERX_DOM_OBJ_DEV_MEMORY] != ERX_CAP_NULL ?
+	    installed[ERX_DOM_OBJ_DEV_MEMORY] : installed[ERX_DOM_OBJ_DEV_KEPT],
+	    .memory_size = entry->memory };
+
+	if (entry->role_word == NULL || entry->peripheral == NULL)
+		return (0);
+	return (erx_boot_given_words(&given, apply->given_words[at], sizeof(apply->given_words[at])));
+}
+
+/*
+ * The boot page's arguments into words, which holds 2 + ERX_DOM_GIVES_MAX
+ * runs: the specification's own, a -erx given record per give, and, for a
+ * holder of a block device, -erx boot with the boot's pair, as the root's
+ * own page carries it. The number of runs, or 0 when a record does not fit.
+ */
+static size_t
+apply_args(apply_t *apply, erx_boot_words_t *words)
+{
+	const erx_dom_spec_t *spec = &apply->plan->spec;
+	size_t count = 0, length;
+	bool block = false;
+
+	if (spec->args_len != 0)
+		words[count++] = (erx_boot_words_t){ spec->strings, spec->args_len };
+	for (uint32_t at = 0; at < apply->plan->ngives; at++) {
+		if ((length = apply_given_words(apply, at)) == 0)
+			return (0);
+		words[count++] = (erx_boot_words_t){ apply->given_words[at], length };
+		block = block || apply->lib->view.devices[apply->plan->gives[at].index].role == ERX_MF_DEVICE_ROLE_BLOCK;
+	}
+	if (block) {
+		length = erx_boot_pair_words(apply->lib->boot.value, apply->lib->boot.slot, apply->pair_words,
+		    sizeof(apply->pair_words));
+		if (length == 0)
+			return (0);
+		words[count++] = (erx_boot_words_t){ apply->pair_words, length };
+	}
+	return (count);
+}
+
+/*
  * A node name into node (ERX_DOM_NODE_MAX bytes): name, an identifier
  * (planning checked a domain's), '@', and the library's host. False for
  * a name longer than ERX_DOM_NAME_MAX or a host longer than
@@ -347,7 +509,7 @@ apply_bootinfo(apply_t *apply)
 	const erx_dom_plan_t *plan = apply->plan;
 	const erx_dom_spec_t *spec = &plan->spec;
 	const uint64_t page = apply->handles.made[ERX_DOM_OBJ_BOOTINFO];
-	const erx_boot_words_t args = { spec->strings, spec->args_len };
+	erx_boot_words_t args[2 + ERX_DOM_GIVES_MAX];
 	const erx_boot_words_t env = { spec->strings + spec->args_len, spec->env_len };
 	char node[ERX_DOM_NODE_MAX], system_node[ERX_DOM_NODE_MAX];
 	erx_boot_inputs_t inputs = { 0 };
@@ -394,8 +556,10 @@ apply_bootinfo(apply_t *apply)
 		    .domain_pid_number = spec->domain_pid.number, .domain_pid_serial = spec->domain_pid.serial,
 		    .ctl_slots = spec->connections };
 	}
-	inputs.args = &args;
-	inputs.nargs = spec->args_len != 0;
+	inputs.args = args;
+	inputs.nargs = apply_args(apply, args);
+	if (inputs.nargs == 0 && (spec->args_len != 0 || apply->plan->ngives != 0))
+		return (ERX_EINVAL);
 	inputs.env = &env;
 	inputs.nenv = spec->env_len != 0;
 	inputs.limits = spec->runtime_limits;
@@ -483,13 +647,36 @@ set_undo(handle_set_t *set, const erx_dom_obj_t *undo, uint32_t count)
 	}
 }
 
-/* The undo of a creation's first applied steps. */
+/*
+ * The undo of a creation's first applied steps. Each give it tried is
+ * undone first, last first, by erx_dom_device_undo: each object it lists
+ * is destroyed by its own handle, before the budget it is charged to
+ * goes, and the handle closed. A fresh contiguous memory is not listed
+ * (ERX_DOM_UNDO_KEEP): it goes into the device's record, which names no
+ * holder, so the row's next creation gives it again as kept memory.
+ */
 static void
 apply_undo(apply_t *apply, uint32_t applied)
 {
-	erx_dom_obj_t undo[ERX_DOM_PLAN_STEPS_MAX];
+	erx_dom_obj_t undo[ERX_DOM_PLAN_STEPS_MAX], gone[ERX_DOM_DEVICE_STEPS];
 	handle_set_t set = set_of_domain(&apply->handles);
+	apply_give_t *state;
+	uint32_t count;
 
+	for (uint32_t at = apply->plan->ngives; at > 0; at--) {
+		state = &apply->gives[at - 1];
+		count = erx_dom_device_undo(&apply->plan->gives[at - 1], state->tried, gone);
+		for (uint32_t index = 0; index < count; index++) {
+			if (gone[index] >= ERX_DOM_OBJ_MADE_COUNT || state->made[gone[index]] == ERX_CAP_NULL)
+				continue;
+			(void)erx_object_destroy(state->made[gone[index]]);
+			(void)erx_cap_close(state->made[gone[index]]);
+			state->made[gone[index]] = ERX_CAP_NULL;
+		}
+		if (state->made[ERX_DOM_OBJ_DEV_MEMORY] != ERX_CAP_NULL)
+			apply->lib->device_records[apply->plan->gives[at - 1].index].memory =
+			    (erx_cap_t){ .raw = state->made[ERX_DOM_OBJ_DEV_MEMORY] };
+	}
 	set_undo(&set, undo, erx_dom_plan_undo(apply->plan, applied, undo));
 }
 
@@ -512,6 +699,72 @@ lib_view_caps(erx_dom_lib_t *lib, uint32_t slot)
 #undef CAP
 }
 
+/*
+ * Writes each give's objects into its device's record, which now names the
+ * holder: a fresh contiguous memory is the device's from here on for the
+ * boot, and kept memory stays as it was.
+ */
+static void
+apply_keep_gives(apply_t *apply)
+{
+	const erx_dom_device_plan_t *give;
+	erx_dom_device_t *record;
+	const uint64_t *made;
+
+#define CAP(obj)	((erx_cap_t){ .raw = made[obj] })
+	for (uint32_t at = 0; at < apply->plan->ngives; at++) {
+		give = &apply->plan->gives[at];
+		record = &apply->lib->device_records[give->index];
+		made = apply->gives[at].made;
+		record->holder = give->holder;
+		record->resource = CAP(ERX_DOM_OBJ_DEV_RESOURCE);
+		for (uint32_t index = 0; index < ERX_DEVICE_RANGES_MAX; index++)
+			record->windows[index] = CAP(ERX_DOM_OBJ_DEV_WINDOW + index);
+		for (uint32_t index = 0; index < ERX_DEVICE_IRQS_MAX; index++)
+			record->irqs[index] = CAP(ERX_DOM_OBJ_DEV_IRQ + index);
+		record->dma = CAP(ERX_DOM_OBJ_DEV_DMA);
+		if (made[ERX_DOM_OBJ_DEV_MEMORY] != ERX_CAP_NULL)
+			record->memory = CAP(ERX_DOM_OBJ_DEV_MEMORY);
+	}
+#undef CAP
+}
+
+/*
+ * At a holder's end, the objects of each device it held: the window, line
+ * and resource objects are destroyed, if the end of its budget has not
+ * already taken them, and their handles closed, so the record names no
+ * holder and nothing but the contiguous memory, which is the device's for
+ * the boot and which the row's next creation gives again.
+ */
+static void
+lib_devices_end(erx_dom_lib_t *lib, uint32_t id)
+{
+	erx_dom_device_t *record;
+	erx_cap_t *caps[1 + ERX_DEVICE_RANGES_MAX + ERX_DEVICE_IRQS_MAX + 1];
+	size_t ncaps;
+
+	for (uint32_t index = 0; index < lib->view.ndevices; index++) {
+		record = &lib->device_records[index];
+		if (record->holder != id)
+			continue;
+		ncaps = 0;
+		caps[ncaps++] = &record->resource;
+		for (uint32_t at = 0; at < ERX_DEVICE_RANGES_MAX; at++)
+			caps[ncaps++] = &record->windows[at];
+		for (uint32_t at = 0; at < ERX_DEVICE_IRQS_MAX; at++)
+			caps[ncaps++] = &record->irqs[at];
+		caps[ncaps++] = &record->dma;
+		for (size_t at = 0; at < ncaps; at++) {
+			if (caps[at]->raw == ERX_CAP_NULL)
+				continue;
+			(void)erx_object_destroy(caps[at]->raw);
+			(void)erx_cap_close(caps[at]->raw);
+			*caps[at] = (erx_cap_t){ .raw = ERX_CAP_NULL };
+		}
+		record->holder = 0;
+	}
+}
+
 /* Keeps the creation's handles for its record, and fills its connection's row from them. */
 static void
 apply_keep(apply_t *apply, erx_dom_created_t *created)
@@ -522,6 +775,7 @@ apply_keep(apply_t *apply, erx_dom_created_t *created)
 
 	apply->lib->handles[plan->slot] = apply->handles;
 	lib_view_caps(apply->lib, plan->slot);
+	apply_keep_gives(apply);
 	*created = (erx_dom_created_t){ .id = plan->spec.id, .connection = plan->connection };
 	if (plan->connection_row == ERX_DOM_NO_ROW)
 		return;
@@ -1006,6 +1260,7 @@ erx_dom_lib_record(erx_dom_lib_t *lib, uint64_t label, const erx_fault_t *record
 		return (false);
 	case ERX_DOM_ACT_END:
 		dom = &lib->view.domains[action.slot];
+		lib_devices_end(lib, dom->id);
 		/*
 		 * The space has ended whatever the teardown does. A refusal can come
 		 * only from a library whose handles lost the budget, and leaves its

@@ -40,6 +40,7 @@
 #include "erx/abi.h"
 #include "erx/abi_reader.h"
 #include "erx/boot_words.h"
+#include "erx/device_kinds.h"
 #include "erx/dom.h"
 #include "erx/dom_lib.h"
 
@@ -221,6 +222,28 @@ boot_pages_meet(const erx_dom_device_entry_t *a, const erx_dom_device_entry_t *b
 }
 
 /*
+ * The kind of a device-tree device, erx/device_kinds.h's row of its role and
+ * compatible string, whose names its holder's record carries; NULL for a
+ * kind no runtime drives. The reader checked every string against the
+ * string table.
+ */
+static const erx_device_kind_t *
+boot_kind(const erx_manifest_view_t *manifest, const erx_mf_device_t *device)
+{
+	const char *compatible = (const char *)manifest->bytes + manifest->header.strings.offset +
+	    device->compatible.offset;
+
+	for (size_t at = 0; at < ERX_DEVICE_KINDS_COUNT; at++) {
+		const erx_device_kind_t *kind = &erx_device_kinds[at];
+
+		if (kind->role == device->role && strlen(kind->compatible) == device->compatible.length &&
+		    memcmp(kind->compatible, compatible, device->compatible.length) == 0)
+			return (kind);
+	}
+	return (NULL);
+}
+
+/*
  * Each entry's unit and holder, from the unit rows' spans of the device
  * table. The reader proved the spans a partition of the table; a span off
  * a row boundary, past the table, or over a device another span holds is
@@ -274,6 +297,7 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
     erx_dom_device_t *records)
 {
 	const uint32_t count = manifest->header.devices.count;
+	const erx_device_kind_t *kind;
 	erx_mf_device_t device;
 	erx_dom_device_entry_t *entry;
 	const char *reason;
@@ -297,7 +321,15 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 			if (!boot_pages(device.base, device.size, &entry->ranges[0]))
 				return ("manifest: a device's register window is empty or wraps");
 			entry->nranges = 1;
+			entry->offset = device.base - entry->ranges[0].base;
+			entry->size = device.size;
 			entry->nlines = 1;
+			entry->lines[0] = device.line;
+			kind = boot_kind(manifest, &device);
+			if (kind != NULL) {
+				entry->role_word = kind->role_word;
+				entry->peripheral = kind->peripheral;
+			}
 		}
 		records[index] = (erx_dom_device_t){ .index = index, .resource = { ERX_CAP_NULL },
 		    .dma = { ERX_CAP_NULL }, .memory = { ERX_CAP_NULL } };
@@ -394,9 +426,14 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 		for (uint32_t device = 0; device < view->ndevices; device++) {
 			if (view->devices[device].row != index)
 				continue;
+			/* Its holder opens it from its record, which names its kind. */
+			if (view->devices[device].role_word == NULL)
+				return ("manifest: a configured domain holds a device of a kind no runtime drives");
 			held++;
 			block = block || view->devices[device].role == ERX_MF_DEVICE_ROLE_BLOCK;
 		}
+		if (held > ERX_DOM_GIVES_MAX)
+			return ("manifest: a configured domain holds more devices than its creation gives");
 		if (!boot_strings_fit(domain.args.length, domain.env.length, held, block))
 			return ("manifest: a configured domain's arguments and environment leave the boot page's strings "
 			    "no reserve for its node names and device records");
@@ -514,6 +551,7 @@ erx_dom_view_build(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, uint
 	lib->host = (const char *)manifest->bytes + header->strings.offset + header->host.offset;
 	lib->host_len = header->host.length;
 	lib->cap_limit = BOOT_CAP_LIMIT;
+	lib->device_records = tables->device_records;
 #ifdef ERX_DOM_TEST_HOOKS
 	lib->fail_step = UINT32_MAX;
 #endif

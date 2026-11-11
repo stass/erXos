@@ -75,7 +75,7 @@ _Static_assert(sizeof(obj_names) / sizeof(obj_names[0]) == ERX_DOM_OBJ_COUNT,
 static const char *const step_names[] = {
 	"CARVE", "SPACE", "GROUP", "MEM", "BELL", "SLICE", "IMAGE_MAP", "MAP",
 	"INSTALL", "BOOTINFO", "THREAD", "RESOURCE", "WINDOW", "IRQ", "DMA",
-	"CONTIGUOUS"
+	"CONTIGUOUS", "GIVE"
 };
 
 static erx_grant_t
@@ -219,6 +219,9 @@ model_apply(model_t *m, const erx_dom_step_t *step)
 		return (true);
 	case ERX_DOM_STEP_BOOTINFO:
 		return (m->alive[step->obj]);
+	case ERX_DOM_STEP_GIVE:
+		/* A give installs into the space, on the domain's budget. */
+		return (m->alive[ERX_DOM_OBJ_SPACE] && m->alive[ERX_DOM_OBJ_BUDGET]);
 	case ERX_DOM_STEP_RESOURCE:
 	case ERX_DOM_STEP_WINDOW:
 	case ERX_DOM_STEP_IRQ:
@@ -986,6 +989,84 @@ principals(void)
 	return (0);
 }
 
+/*
+ * A configured row's gives (docs/design-system.md, "Devices"): a catalogue
+ * of device 0, an unconfined transport placed on configured row 0, and
+ * device 1, the system domain's. Each line names a case and its result.
+ */
+static erx_dom_device_entry_t give_devices[2];
+static erx_dom_device_t give_records[2];
+
+static void
+gives_view(void)
+{
+	reset_view();
+	memset(give_records, 0, sizeof(give_records));
+	give_devices[0] = (erx_dom_device_entry_t){ .row = 0, .nranges = 1, .nlines = 1,
+	    .ranges = { { 0x0a003000, 0x1000 } }, .memory = 0x100000 };
+	give_devices[1] = (erx_dom_device_entry_t){ .row = ERX_MF_NONE, .nranges = 1, .nlines = 1,
+	    .ranges = { { 0x09000000, 0x1000 } } };
+	give_records[1].index = 1;
+	view.devices = give_devices;
+	view.device_records = give_records;
+	view.ndevices = 2;
+}
+
+/* The index of the step of kind in plan, or nsteps for none. */
+static uint32_t
+step_of(const erx_dom_plan_t *plan, erx_dom_step_kind_t kind)
+{
+	uint32_t index = 0;
+
+	while (index < plan->nsteps && plan->steps[index].kind != kind)
+		index++;
+	return (index);
+}
+
+static int
+gives(void)
+{
+	static erx_dom_plan_t plan, seeded;
+	erx_status_t status;
+	uint32_t give, boot;
+
+	gives_view();
+	status = erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan);
+	give = step_of(&plan, ERX_DOM_STEP_GIVE);
+	boot = step_of(&plan, ERX_DOM_STEP_BOOTINFO);
+	printf("gives first %d ngives=%u index=%u before_boot=%d holder=%d last=%s\n", (int)status, plan.ngives,
+	    plan.gives[0].index, give + 1 == boot, plan.gives[0].holder == 6 && plan.gives[0].slot == plan.slot,
+	    obj_names[plan.gives[0].steps[plan.gives[0].nsteps - 1].obj]);
+
+#define SEED(name, edit) do {						\
+	seeded = plan;							\
+	edit;								\
+	printf("gives seeded %s %d\n", name, (int)erx_dom_plan_check(&seeded));	\
+} while (0)
+	SEED("valid", (void)0);
+	SEED("after_boot", { seeded.steps[give] = plan.steps[boot]; seeded.steps[boot] = plan.steps[give]; });
+	SEED("unplanned", seeded.ngives = 2);
+	SEED("no_step", seeded.steps[give] = plan.steps[give - 1]);
+	SEED("other_holder", seeded.gives[0].holder = 7);
+	SEED("other_slot", seeded.gives[0].slot = plan.slot + 1);
+	SEED("window_phys", seeded.gives[0].steps[4].rights |= ERX_HR_PHYS);
+#undef SEED
+
+	/* A living domain of the row holds the device: the next creation of it is refused. */
+	gives_view();
+	domains[NDOMAINS - 1] = (erx_dom_t){ .id = 9, .state = ERX_DOM_RUNNING,
+	    .origin = { ERX_DOM_CONFIGURED, 0 }, .grant = configured.grant };
+	give_records[0] = (erx_dom_device_t){ .index = 0, .holder = 9, .memory = { 77 } };
+	status = erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan);
+	printf("gives busy %d nsteps=%u\n", (int)status, plan.nsteps);
+	/* Once it has ended, its restart is given the device again over the kept memory. */
+	domains[NDOMAINS - 1].state = ERX_DOM_ENDED;
+	status = erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan);
+	printf("gives again %d ngives=%u last=%s\n", (int)status, plan.ngives,
+	    obj_names[plan.gives[0].steps[plan.gives[0].nsteps - 1].obj]);
+	return (failures == 0 ? 0 : 1);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -999,7 +1080,9 @@ main(int argc, char **argv)
 		return (principals());
 	if (argc == 2 && strcmp(argv[1], "record") == 0)
 		return (records());
+	if (argc == 2 && strcmp(argv[1], "gives") == 0)
+		return (gives());
 	fprintf(stderr,
-	    "usage: dom_core_driver explore|cases|seeded|principal|record\n");
+	    "usage: dom_core_driver explore|cases|seeded|principal|record|gives\n");
 	return (2);
 }

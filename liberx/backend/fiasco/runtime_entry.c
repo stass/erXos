@@ -49,7 +49,7 @@ static size_t		 boot_build(erx_boot_pair_t);
 static size_t		 build_id_words(const erx_boot_handoff_view_t *);
 static size_t		 word_append(char *, size_t, size_t, const char *);
 static size_t		 console_uart_number(char *, uint64_t);
-static const char	*library_up(const erx_manifest_view_t *, const erx_pack_view_t *);
+static const char	*library_up(const erx_manifest_view_t *, const erx_pack_view_t *, erx_boot_pair_t);
 static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
 static size_t		 line_append(char *, size_t, erx_boot_words_t);
 
@@ -92,7 +92,7 @@ erx_boot_info(void)
  * root's life, and the library outlives the boot, so both are never released.
  */
 static const char *
-library_up(const erx_manifest_view_t *manifest, const erx_pack_view_t *pack)
+library_up(const erx_manifest_view_t *manifest, const erx_pack_view_t *pack, erx_boot_pair_t boot)
 {
 	static erx_dom_lib_t lib;
 	const erx_dom_boot_sizes_t sizes = erx_dom_boot_sizes(manifest, pack);
@@ -112,6 +112,8 @@ library_up(const erx_manifest_view_t *manifest, const erx_pack_view_t *pack)
 	reason = erx_dom_boot_view(&lib, manifest, pack, &tables);
 	if (reason != NULL)
 		return (reason);
+	/* A block holder's boot page carries the pair, as the root's own does. */
+	lib.boot = boot;
 	return (erx_dom_boot_up(&lib, erx_boot_info(), ERX_FIASCO_TASK_ROOT));
 }
 
@@ -163,7 +165,7 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	status = erx_boot_info_build(&inputs, boot_page, sizeof(boot_page));
 	if (status != ERX_BOOT_INFO_OK)
 		return (erx_boot_info_reason(status));
-	reason = library_up(view, pack);
+	reason = library_up(view, pack, handoff->boot);
 	if (reason != NULL)
 		return (reason);
 	erx_fiasco_libc_root_start(main);

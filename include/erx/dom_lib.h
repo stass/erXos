@@ -13,6 +13,7 @@
 #include "erx/abi.h"
 #include "erx/abi_reader.h"
 #include "erx/cdefs.h"
+#include "erx/core/boot_pair.h"
 #include "erx/dom.h"
 
 /* include/erx/pack.h's; that header's erx_boot_inputs_t is the first stage's, not the boot page's. */
@@ -95,6 +96,10 @@ typedef struct erx_dom_lib {
 	const char	*host;		/* the host part of a domain's node name */
 	size_t		 host_len;	/* at most ERX_DOM_HOST_MAX */
 	uint32_t	 pack_flags;	/* the boot image's, for each boot page */
+	erx_boot_pair_t	 boot;		/* the handoff's boot pair, for a block
+					 * holder's boot page */
+	erx_dom_device_t *device_records; /* view.ndevices: the view's, which a
+					 * holder's creation and end write */
 	uint32_t	 cap_limit;	/* each domain's handle table */
 	bool		 det;		/* the system's boot page has ERX_BOOT_DET,
 					 * so each domain's page carries it */

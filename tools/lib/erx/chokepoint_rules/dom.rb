@@ -79,9 +79,10 @@ module Erx
           pattern: /\berx_dom_(?:plan|lib)_configured\b/,
           # The NIF's configured entry is the one way from Erlang to it, and it
           # refuses every caller but the library's registered process, the
-          # domain service. dom_lib_none.c is the refusing stub of a runtime with no library.
+          # domain service. dom_lib_none.c is the refusing stub of a runtime with no library, and the
+          # native_domain guest is a test root that stands in for manifest startup on its configured row.
           sites: [DOM_BOOT, DOM_LIB_HEADER, DOM_CORE, DOM_HEADER, DOM_DRIVER, DOM_FUZZ, DOM_HOST_PLANNER, DOM_NIF,
-                  'liberx/backend/core/dom_lib_none.c'].map { |path| Chokepoints::Site.new(glob: path) },
+                  'liberx/backend/core/dom_lib_none.c', 'test/guest/native_domain/guest.c'].map { |path| Chokepoints::Site.new(glob: path) },
           seed: { 'liberx/system/dom_apply.c' => "status = erx_dom_plan_configured(&view, id, row, &plan);\n",
                   'liberx/system/dom_life.c' => "status = erx_dom_lib_configured(lib, id, row, &created);\n" }
         ),

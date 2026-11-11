@@ -70,10 +70,10 @@ const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS] = {
  * The most steps dom_plan_steps writes besides installs: three carves,
  * the space, two groups, four memory objects, two bells, the slice, the
  * image map, two mappings, the boot page write and the first thread.
- * Installs add at most one per grants row.
+ * Installs add at most one per grants row, and gives one GIVE step each.
  */
 #define DOM_FIXED_STEPS_MAX	18u
-_Static_assert(DOM_FIXED_STEPS_MAX + ERX_DOM_GRANTS_ROWS <=
+_Static_assert(DOM_FIXED_STEPS_MAX + ERX_DOM_GRANTS_ROWS + ERX_DOM_GIVES_MAX <=
     ERX_DOM_PLAN_STEPS_MAX, "every plan fits its step array");
 
 /*
@@ -110,6 +110,9 @@ static void	dom_spec_partial(const erx_dom_view_t *, uint32_t, uint32_t,
 static void	dom_spec_session(const erx_dom_view_t *, uint32_t, uint32_t,
 		    const char *, uint32_t, erx_dom_pid_t, erx_dom_spec_t *);
 static void	dom_decimal(uint32_t, erx_dom_spec_t *);
+static erx_status_t dom_plan_in(const erx_dom_spec_t *, const erx_dom_view_t *,
+		    erx_dom_plan_t *, bool *, uint64_t *, uint64_t *, uint64_t *);
+static erx_status_t dom_plan_gives(const erx_dom_view_t *, erx_dom_plan_t *);
 static erx_status_t dom_plan(const erx_dom_spec_t *, const erx_dom_view_t *,
 		    erx_dom_plan_t *);
 static erx_status_t dom_check_files(const erx_dom_spec_t *,
@@ -587,9 +590,9 @@ dom_spec_request(const erx_dom_view_t *view,
 }
 
 bool
-erx_dom_from_row(const erx_dom_t *dom, uint32_t row)
+erx_dom_from_row(const erx_dom_origin_t *origin, uint32_t row)
 {
-	return (dom->origin.kind == ERX_DOM_CONFIGURED && dom->origin.record == row);
+	return (origin->kind == ERX_DOM_CONFIGURED && origin->record == row);
 }
 
 /*
@@ -751,6 +754,7 @@ dom_step_makes(erx_dom_step_kind_t kind)
 	case ERX_DOM_STEP_MAP:
 	case ERX_DOM_STEP_INSTALL:
 	case ERX_DOM_STEP_BOOTINFO:
+	case ERX_DOM_STEP_GIVE:
 		return (false);
 	}
 	return (false);
@@ -876,6 +880,10 @@ dom_plan_steps(erx_dom_plan_t *plan, bool jit, uint64_t span,
 			    .target = row->target,
 			    .rights = dom_row_rights(spec, row) });
 	}
+	/* Each give before the boot page, which names what it installed. */
+	for (uint32_t give = 0; give < plan->ngives; give++)
+		dom_step(plan, (erx_dom_step_t){ .kind = ERX_DOM_STEP_GIVE,
+		    .index = give });
 	dom_step(plan, (erx_dom_step_t){ .kind = ERX_DOM_STEP_BOOTINFO,
 	    .obj = ERX_DOM_OBJ_BOOTINFO });
 	dom_step(plan, (erx_dom_step_t){ .kind = ERX_DOM_STEP_THREAD,
@@ -948,11 +956,32 @@ static erx_status_t
 dom_plan(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
     erx_dom_plan_t *plan)
 {
-	const erx_dom_principal_t *principal;
-	erx_dom_plan_t draft;
 	uint64_t reader, child, span;
 	erx_status_t status;
 	bool jit;
+
+	status = dom_plan_in(spec, view, plan, &jit, &span, &child, &reader);
+	if (status == ERX_OK) {
+		plan->reader = reader;
+		dom_plan_steps(plan, jit, span, child);
+		status = erx_dom_plan_check(plan);
+	}
+	if (status != ERX_OK)
+		memset(plan, 0, sizeof(*plan));
+	return (status);
+}
+
+/*
+ * dom_plan's checks, with the plan's specification, parent, slot,
+ * connection and gives written in place as they pass.
+ */
+static erx_status_t
+dom_plan_in(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
+    erx_dom_plan_t *plan, bool *jit, uint64_t *span, uint64_t *child,
+    uint64_t *reader)
+{
+	const erx_dom_principal_t *principal;
+	erx_status_t status;
 
 	if (view->ending)
 		return (ERX_EBUSY);
@@ -967,8 +996,8 @@ dom_plan(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 	if (principal == NULL)
 		return (ERX_EINVAL);
 	if ((status = dom_check_origin(spec, view)) != ERX_OK ||
-	    (status = dom_check_files(spec, view, &jit, &span)) != ERX_OK ||
-	    (status = dom_check_sizes(spec, view, &reader, &child)) != ERX_OK)
+	    (status = dom_check_files(spec, view, jit, span)) != ERX_OK ||
+	    (status = dom_check_sizes(spec, view, reader, child)) != ERX_OK)
 		return (status);
 	if (spec->origin.kind != ERX_DOM_PARTIAL_BOOT &&
 	    !dom_limits_within(&spec->runtime_limits,
@@ -977,17 +1006,37 @@ dom_plan(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 	if ((status = dom_check_grants(spec, view, principal)) != ERX_OK)
 		return (status);
 
-	memset(&draft, 0, sizeof(draft));
-	draft.spec = *spec;
-	draft.parent = spec->origin.kind == ERX_DOM_CONFIGURED ?
+	memset(plan, 0, sizeof(*plan));
+	plan->spec = *spec;
+	plan->parent = spec->origin.kind == ERX_DOM_CONFIGURED ?
 	    ERX_DOM_PARENT_SYSTEM : ERX_DOM_PARENT_PRINCIPAL;
-	if ((status = dom_check_room(spec, view, principal, &draft)) != ERX_OK)
+	if ((status = dom_check_room(spec, view, principal, plan)) != ERX_OK)
 		return (status);
-	draft.reader = reader;
-	dom_plan_steps(&draft, jit, span, child);
-	if ((status = erx_dom_plan_check(&draft)) != ERX_OK)
-		return (status);
-	*plan = draft;
+	return (spec->origin.kind == ERX_DOM_CONFIGURED ? dom_plan_gives(view, plan) : ERX_OK);
+}
+
+/*
+ * A configured domain's gives (docs/design-system.md, "Devices"): one per
+ * catalogue entry whose unit is placed on its row, each planned by
+ * erx_dom_plan_device_give, the one planner of a device's objects, for the
+ * domain the plan makes. ERX_ELIMIT past ERX_DOM_GIVES_MAX, which the boot
+ * view keeps every row within; otherwise the first give's refusal.
+ */
+static erx_status_t
+dom_plan_gives(const erx_dom_view_t *view, erx_dom_plan_t *plan)
+{
+	erx_status_t status;
+
+	for (uint32_t index = 0; index < view->ndevices; index++) {
+		if (!erx_dom_from_row(&plan->spec.origin, view->devices[index].row))
+			continue;
+		if (plan->ngives == ERX_DOM_GIVES_MAX)
+			return (ERX_ELIMIT);
+		status = erx_dom_plan_device_give(view, plan, index, &plan->gives[plan->ngives]);
+		if (status != ERX_OK)
+			return (status);
+		plan->ngives++;
+	}
 	return (ERX_OK);
 }
 
@@ -1154,13 +1203,21 @@ dom_step_ok(const erx_dom_plan_t *plan, const erx_dom_step_t *step,
 		    step->target == ERX_DOM_OBJ_SPACE &&
 		    made[ERX_DOM_OBJ_SPACE] && step->aux == ERX_DOM_OBJ_GROUP &&
 		    made[ERX_DOM_OBJ_GROUP]);
-	/* A device's objects are erx_dom_plan_device_give's alone. */
+	/* A device's objects are a give's alone, which a GIVE step applies. */
 	case ERX_DOM_STEP_RESOURCE:
 	case ERX_DOM_STEP_WINDOW:
 	case ERX_DOM_STEP_IRQ:
 	case ERX_DOM_STEP_DMA:
 	case ERX_DOM_STEP_CONTIGUOUS:
 		return (false);
+	case ERX_DOM_STEP_GIVE:
+		/* A give of this domain, on its own budget into its own space. */
+		return (step->index < plan->ngives && step->index < ERX_DOM_GIVES_MAX &&
+		    plan->spec.origin.kind == ERX_DOM_CONFIGURED &&
+		    made[ERX_DOM_OBJ_BUDGET] && made[ERX_DOM_OBJ_SPACE] &&
+		    plan->gives[step->index].holder == plan->spec.id &&
+		    plan->gives[step->index].slot == plan->slot &&
+		    erx_dom_device_check(&plan->gives[step->index]) == ERX_OK);
 	}
 	return (false);
 }
@@ -1194,11 +1251,16 @@ erx_dom_plan_check(const erx_dom_plan_t *plan)
 {
 	bool made[ERX_DOM_OBJ_MADE_COUNT] = { false };
 	const erx_dom_step_t *step;
+	uint32_t gives = 0;
 
-	if (plan->nsteps > ERX_DOM_PLAN_STEPS_MAX)
+	if (plan->nsteps > ERX_DOM_PLAN_STEPS_MAX || plan->ngives > ERX_DOM_GIVES_MAX)
 		return (ERX_EINVAL);
 	for (uint32_t index = 0; index < plan->nsteps; index++) {
 		step = &plan->steps[index];
+		/* Every give once, in order, and all before the boot page names them. */
+		if ((step->kind == ERX_DOM_STEP_GIVE && step->index != gives++) ||
+		    (step->kind == ERX_DOM_STEP_BOOTINFO && gives != plan->ngives))
+			return (ERX_EINVAL);
 		if (step->budget >= ERX_DOM_OBJ_COUNT ||
 		    step->target >= ERX_DOM_OBJ_COUNT ||
 		    step->aux >= ERX_DOM_OBJ_COUNT ||
@@ -1207,7 +1269,7 @@ erx_dom_plan_check(const erx_dom_plan_t *plan)
 		if (dom_step_makes(step->kind))
 			made[step->obj] = true;
 	}
-	return (ERX_OK);
+	return (gives == plan->ngives ? ERX_OK : ERX_EINVAL);
 }
 
 erx_dom_undo_kind_t
@@ -1219,8 +1281,9 @@ erx_dom_step_undo(erx_dom_step_kind_t kind)
 	case ERX_DOM_STEP_WINDOW:
 	case ERX_DOM_STEP_IRQ:
 	case ERX_DOM_STEP_DMA:
-	case ERX_DOM_STEP_CONTIGUOUS:
 		return (ERX_DOM_UNDO_DESTROY);
+	case ERX_DOM_STEP_CONTIGUOUS:
+		return (ERX_DOM_UNDO_KEEP);
 	case ERX_DOM_STEP_SPACE:
 	case ERX_DOM_STEP_GROUP:
 	case ERX_DOM_STEP_MEM:
@@ -1231,6 +1294,13 @@ erx_dom_step_undo(erx_dom_step_kind_t kind)
 	case ERX_DOM_STEP_INSTALL:
 	case ERX_DOM_STEP_BOOTINFO:
 	case ERX_DOM_STEP_THREAD:
+		return (ERX_DOM_UNDO_BY_BUDGET);
+	case ERX_DOM_STEP_GIVE:
+		/*
+		 * Its objects die with the holder's budget, but the apply
+		 * phase closes their handles and keeps a fresh memory by
+		 * the give's own steps' undo, erx_dom_device_undo.
+		 */
 		return (ERX_DOM_UNDO_BY_BUDGET);
 	}
 	return (ERX_DOM_UNDO_BY_BUDGET);

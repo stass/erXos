@@ -213,8 +213,8 @@ order, so a client's own requests in flight bound what the service holds
 for it, and a client that stops reading its lane blocks only its own
 window.
 
-**Where the driver runs.** The device service gives the block device to
-exactly one domain, named by the system configuration
+**Where the driver runs.** The block device goes to exactly one domain,
+named by the system configuration, whose creation gives it
 ([design-system.md](design-system.md#devices)): by default the storage
 domain that serves the data partition, so the common case costs no connection;
 on a board whose storage controller's DMA is unconfined, a domain of its
@@ -1065,7 +1065,7 @@ a file closed and opened again may get a new qid path
 | A crafted or corrupt data partition | the file system's bounds checks and checksums | that partition | the failing process ends, its supervisor restarts it, and a storage domain that fails beyond its restart intensity is started again by the domain service from its specification | the domain's death record; that partition's files unavailable |
 | littlefs's C code crashes | the port's sub-space faults, and its owner sees `{exit_status, N}` | the partition as littlefs left it; an unacknowledged operation has an unknown outcome | the owner's supervisor restarts the port once the window has answered the port's outstanding requests, and the port mounts the volume afresh | affected operations fail with `eio`; the partition unavailable until the remount |
 | The block device reports an error, or the controller stops answering | the device process's completions and its deadline | the request's buffer, quarantined until the device is reset ([design-runtime.md](design-runtime.md#the-device-nif)) | the device process reports to the device service, which resets the device | `{error, eio}` on the request; the inspector's device record |
-| The domain that runs the block driver ends | the domain service | every window dead; every client's reads and writes fail | the domain service starts the domain again from its specification, the device service gives it the device again and names its windows, and each client receives its window anew as a grant | `eio` on every file of every storage service until the windows return; the domain's death record |
+| The domain that runs the block driver ends | the domain service | every window dead; every client's reads and writes fail | the domain service starts the domain again from its specification, whose creation gives it the device again, the device service names its windows, and each client receives its window anew as a grant | `eio` on every file of every storage service until the windows return; the domain's death record |
 | A FAT volume found dirty, or a removal while mounted | the volume's dirty flag; the window's errors | the volume, read-only | none on erXos; the volume is repaired on another machine | a report naming the volume; `{error, erofs}` for writes, `{error, eio}` after a removal |
 | An update's signature or manifest fails its check | the verifier, before decoding | nothing written | none needed | the update refused, with the reason |
 

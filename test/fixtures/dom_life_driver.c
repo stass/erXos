@@ -47,12 +47,13 @@ static erx_dom_device_t device_records[NDEVICES];
 static unsigned long failures;
 
 static void	device_explore(void);
+static erx_status_t give(uint32_t, uint32_t, erx_dom_device_plan_t *);
 static void	link_record_cases(void);
 
 static const char *const step_names[] = {
 	"CARVE", "SPACE", "GROUP", "MEM", "BELL", "SLICE", "IMAGE_MAP", "MAP",
 	"INSTALL", "BOOTINFO", "THREAD", "RESOURCE", "WINDOW", "IRQ", "DMA",
-	"CONTIGUOUS"
+	"CONTIGUOUS", "GIVE"
 };
 
 /*
@@ -546,13 +547,32 @@ end_cases(void)
 	record_case("exit_crash_first", 6, ERX_FAULT_EXIT, 77, ERX_EXIT_CRASH);
 }
 
+/*
+ * Plans a give of device index to a new domain id of the origin the view's
+ * record of id has (none for an id no record holds), created into the
+ * free record 4, as a configured creation plans its gives.
+ */
+static erx_status_t
+give(uint32_t id, uint32_t index, erx_dom_device_plan_t *plan)
+{
+	static erx_dom_plan_t holder;
+
+	memset(&holder, 0, sizeof(holder));
+	holder.spec.id = id;
+	holder.slot = 4;
+	for (uint32_t slot = 0; slot < NDOMAINS; slot++)
+		if (domains[slot].id == id)
+			holder.spec.origin = domains[slot].origin;
+	return (erx_dom_plan_device_give(&view, &holder, index, plan));
+}
+
 /* A device's give: its status, then its steps' kinds and its undo's size. */
 static void
 device_case(const char *name, uint32_t id, uint32_t index)
 {
 	erx_dom_device_plan_t plan;
 	erx_dom_obj_t undo[ERX_DOM_DEVICE_STEPS];
-	erx_status_t status = erx_dom_plan_device_give(&view, id, index, &plan);
+	erx_status_t status = give(id, index, &plan);
 
 	if (status != ERX_OK) {
 		printf("dev %s %d\n", name, status);
@@ -661,14 +681,15 @@ device_explore(void)
 		for (uint32_t range = 0; range < ERX_DEVICE_RANGES_MAX; range++)
 			devices[1].ranges[range] = (erx_dom_range_t){
 			    0x20000000 + range * 0x10000, 0x1000 };
-		if (erx_dom_plan_device_give(&view, 5, index, &plan) != ERX_OK) {
+		if (give(5, index, &plan) != ERX_OK) {
 			fail("a valid give was refused", index);
 			continue;
 		}
 		for (uint32_t at = 0; at <= plan.nsteps; at++) {
 			memset(alive, 0, sizeof(alive));
 			for (uint32_t step = 0; step < at; step++)
-				if (plan.steps[step].kind != ERX_DOM_STEP_INSTALL)
+				if (plan.steps[step].kind != ERX_DOM_STEP_INSTALL &&
+				    plan.steps[step].kind != ERX_DOM_STEP_CONTIGUOUS)
 					alive[plan.steps[step].obj] = true;
 			count = erx_dom_device_undo(&plan, at, undo);
 			for (uint32_t step = 0; step < count; step++)
@@ -742,7 +763,7 @@ device_seeded(void)
 	uint32_t last;
 
 	reset_view();
-	if (erx_dom_plan_device_give(&view, 5, 0, &valid) != ERX_OK)
+	if (give(5, 0, &valid) != ERX_OK)
 		failures++;
 	last = valid.nsteps - 1;
 	printf("seeded dev_valid %d\n", erx_dom_device_check(&valid));
@@ -774,7 +795,7 @@ device_seeded(void)
 	SEED("dev_system_holder", plan.holder = ERX_DOM_SYSTEM_ID);
 	SEED("dev_too_many", plan.nsteps = ERX_DOM_DEVICE_STEPS + 1);
 	device_records[0].memory = (erx_cap_t){ 77 };
-	if (erx_dom_plan_device_give(&view, 5, 0, &valid) != ERX_OK)
+	if (give(5, 0, &valid) != ERX_OK)
 		failures++;
 	SEED("dev_kept_not_last", {
 		erx_dom_step_t kept = plan.steps[plan.nsteps - 1];
@@ -783,7 +804,7 @@ device_seeded(void)
 	});
 	reset_view();
 	device_records[0].index = 1;
-	printf("seeded dev_record_index %d\n", erx_dom_plan_device_give(&view, 5, 0, &plan));
+	printf("seeded dev_record_index %d\n", give(5, 0, &plan));
 #undef SEED
 }
 

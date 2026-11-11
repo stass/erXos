@@ -432,6 +432,53 @@ configured_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 }
 
 /*
+ * The device catalogue with its holders (docs/design-system.md,
+ * "Devices"): {ok, Devices} in catalogue order, each #{index, unit, row,
+ * role, holder}. index is the entry's manifest device row; unit its unit
+ * row; row the configured row its unit is placed on, or system; role its
+ * record's role word, or none for a kind no runtime drives; holder the
+ * living domain a creation gave it to, system for the system domain's
+ * devices, or none. Role words come from erx/device_kinds.h, never from a
+ * caller. A creation and an end change the holders, so this reads them
+ * under the lock.
+ */
+static ERL_NIF_TERM
+devices_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	ERL_NIF_TERM keys[5], values[5], row, rows;
+	const erx_dom_device_entry_t *entry;
+	uint32_t index, holder;
+
+	(void)argv;
+	if (argc != 0)
+		return (enif_make_badarg(env));
+	if (lib == NULL)
+		return (status_error(env, ERX_ENOTSUP));
+	rows = enif_make_list(env, 0);
+	enif_mutex_lock(lib_lock);
+	/* Built from the last entry back, so the list's head is entry 0. */
+	for (index = lib->view.ndevices; index-- > 0;) {
+		entry = &lib->view.devices[index];
+		holder = lib->device_records[index].holder;
+		keys[0] = atom(env, "index"), values[0] = enif_make_uint(env, index);
+		keys[1] = atom(env, "unit"), values[1] = enif_make_uint(env, entry->unit);
+		keys[2] = atom(env, "row"), values[2] = entry->row == ERX_MF_NONE ?
+		    atom(env, "system") : enif_make_uint(env, entry->row);
+		keys[3] = atom(env, "role"),
+		    values[3] = atom(env, entry->role_word == NULL ? "none" : entry->role_word);
+		keys[4] = atom(env, "holder"), values[4] = entry->row == ERX_MF_NONE ? atom(env, "system") :
+		    holder == 0 ? atom(env, "none") : enif_make_uint(env, holder);
+		if (!enif_make_map_from_arrays(env, keys, values, 5, &row)) {
+			enif_mutex_unlock(lib_lock);
+			return (enif_make_badarg(env));
+		}
+		rows = enif_make_list_cell(env, row, rows);
+	}
+	enif_mutex_unlock(lib_lock);
+	return (enif_make_tuple2(env, atom(env, "ok"), rows));
+}
+
+/*
  * The manifest's session templates (property 14 of docs/design-system.md):
  * {ok, Templates} in principal order, one per principal, each
  * #{template, principal}, template its index among them. The boot creates
@@ -927,6 +974,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "disconnect_nif", 1, disconnect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "configured_nif", 0, configured_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "templates_nif", 0, templates_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "devices_nif", 0, devices_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "configured_create_nif", 3, configured_create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "session_create_nif", 4, session_create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 };

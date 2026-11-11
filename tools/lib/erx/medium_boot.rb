@@ -145,6 +145,10 @@ module Erx
       ['DlNotCreate', 'Lib:create(Spec)', '{error,erights}'],
       ['DlNotService', "Lib:configured(#{FREE_ID},0,self())", '{error,erights}'],
       ['DlNotStop', "Lib:stop(#{CONFIGURED_ID},0)", '{error,erights}'],
+# The catalogue: block and net on the system domain, and the UARTs, which no
+# runtime drives as a given device.
+['DlDevices', 'lists:usort([{R,W,H}||#{role:=R,row:=W,holder:=H}<-element(2,Lib:devices())])',
+ '[{block,system,system},{net,system,system},{none,system,system}]'],
       # The maps the library itself refuses, asked of the service, which spends an id on each.
       ['DlFiles', 'DlAsk(<<"files">>,#{release_files=>16#ffffffff})', '{error,einval}'], # past the archive
       ['DlUnaligned', 'DlAsk(<<"unaligned">>,#{memory=>4097})', '{error,einval}'], # not whole pages

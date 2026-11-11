@@ -2224,9 +2224,9 @@ emulator](#the-terminal-emulator).
 **Drivers**: the `erx_display` behaviour with its two `flush` forms;
 the `input()` record; `erx_ui_kiosk:flush/2`.
 
-**Interaction with other subsystems.** The device service gives the
-display domain its devices and the system domain introduces sessions and
-applications to it ([Devices](design-system.md#devices)); a session's
+**Interaction with other subsystems.** The display domain's creation
+gives it the devices the manifest places on its row, and the system
+domain introduces sessions and applications to it ([Devices](design-system.md#devices)); a session's
 handler binds a window's directory into a program's namespace
 ([Narrowing](design-files.md#narrowing-for-a-program)); a session's
 terminal relay serves the tty whose master `erx_term` is

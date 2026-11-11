@@ -1291,9 +1291,9 @@ land after M11 repeat M11's closure over what they add.
    `ui.txt`'s binary form in Erlang and TypeScript
    ([design-web.md](design-web.md#uis-the-browser-renderer),
    [design-display.md](design-display.md#choosing-a-display)).
-3. **A kiosk on QEMU `virt`**, in 1b-C, after part 2, 1b-E, whose
-   device service gives a domain other than the system domain its
-   devices, and 1b-B's sub-space ports, which run the LVGL program. The
+3. **A kiosk on QEMU `virt`**, in 1b-C, after part 2, 1b-E, in which
+   a configured domain other than the system domain is given its devices
+   at its creation, and 1b-B's sub-space ports, which run the LVGL program. The
    devices attach over virtio-mmio on the stopgap, unconfined, and over
    virtio-pci behind the IOMMU from M9's kernel part; the drivers' move is
    a device record and a DMA profile, not driver code. The display domain

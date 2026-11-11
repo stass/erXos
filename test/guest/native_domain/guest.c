@@ -2092,6 +2092,260 @@ case_undo(uint32_t program)
 	say_case("undo", passed && failed == 2 * plan.nsteps);
 }
 
+/*
+ * A configured domain's device (docs/design-system.md, "Devices"): a
+ * block device on a spare page of virtio-mmio transports, which no QEMU
+ * device of this test sits behind, placed on configured row 0, whose
+ * domain waits to be stopped. The library gives it as part of the row's
+ * creation, from this catalogue entry, the manifest's device row 0.
+ */
+#define GIVEN_BASE	UINT64_C(0x0a000000)	/* transports 0 to 7 */
+#define GIVEN_LINE	48u			/* transport 0's line */
+#define GIVEN_SIZE	UINT64_C(0x200)		/* one transport */
+#define GIVEN_MEMORY	(UINT64_C(16) * ERX_PAGE_SIZE)
+#define GIVEN_RECORD	"-erx\0given\0block\0virtio_mmio\0"
+#define GIVEN_PAIR	"-erx\0boot\0normal\0a\0"
+#define GIVEN_NUMBERS	6u			/* WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE */
+
+static erx_dom_configured_t configured[1];
+static erx_dom_device_entry_t catalogue[1];
+static erx_dom_device_t device_records[1];
+static const char holder_args[] = "wait";
+
+/* Configured row 0 runs program, and holds catalogue entry 0. */
+static void
+given_view(uint32_t program)
+{
+	/*
+	 * A tenth of CPU 0 by quota, so that a second domain of the row passes
+	 * the system reserve, which counts a grant with no quota as whole CPUs,
+	 * and meets the give.
+	 */
+	const erx_grant_t grant = { .quota_ns = ERX_PERIOD_MIN, .period_ns = 10 * ERX_PERIOD_MIN, .cpuset = 1,
+	    .capacity_mcpu = 100 };
+
+	configured[0] = (erx_dom_configured_t){ .principal = PRINCIPAL, .release = release, .release_files = 1,
+	    .runtime = program, .memory = 2 * MIB, .outer = MIB, .grant = grant, .runtime_limits = limits_default(),
+	    .lane = ERX_LANE_MIN, .name = "holder", .name_len = 6, .kind = ERX_MF_SERVICE,
+	    .args = holder_args, .args_len = sizeof(holder_args) };
+	catalogue[0] = (erx_dom_device_entry_t){ .unit = 0, .row = 0, .role = ERX_MF_DEVICE_ROLE_BLOCK,
+	    .role_word = "block", .peripheral = "virtio_mmio", .offset = 0, .size = GIVEN_SIZE,
+	    .lines = { GIVEN_LINE }, .nranges = 1, .nlines = 1,
+	    .ranges = { { .base = GIVEN_BASE, .size = ERX_PAGE_SIZE } }, .memory = GIVEN_MEMORY };
+	device_records[0] = (erx_dom_device_t){ .index = 0 };
+	lib.view.configured = configured;
+	lib.view.nconfigured = 1;
+	lib.view.devices = catalogue;
+	lib.view.device_records = device_records;
+	lib.view.ndevices = 1;
+	lib.device_records = device_records;
+	lib.boot = (erx_boot_pair_t){ .value = ERX_BOOT_VALUE_NORMAL, .slot = ERX_BOOT_SLOT_A };
+}
+
+/* The run of length bytes at words, within the len bytes at bytes, or NULL. */
+static const char *
+given_find(const char *bytes, size_t len, const char *words, size_t length)
+{
+	for (size_t at = 0; length <= len && at <= len - length; at++)
+		if (memcmp(bytes + at, words, length) == 0)
+			return (bytes + at);
+	return (NULL);
+}
+
+/*
+ * The NUL-ended decimal word at *at, before end, into *value, and *at past
+ * its NUL. False for an empty word, a byte that is no digit, a value past
+ * 64 bits or a word that end cuts.
+ */
+static bool
+given_decimal(const char **at, const char *end, uint64_t *value)
+{
+	const char *start = *at;
+
+	for (*value = 0; *at < end && **at != '\0'; (*at)++) {
+		if (**at < '0' || **at > '9' || *value > (UINT64_MAX - 9) / 10)
+			return (false);
+		*value = *value * 10 + (uint64_t)(**at - '0');
+	}
+	if (*at == start || *at == end)
+		return (false);
+	(*at)++;
+	return (true);
+}
+
+/*
+ * Reads domain id's -erx given record from its boot page into numbers, and
+ * whether -erx boot follows with the library's pair. False for a page with
+ * no record or a record whose numbers are not GIVEN_NUMBERS decimals.
+ */
+static bool
+given_read(uint32_t id, uint64_t *numbers, bool *pair)
+{
+	const erx_boot_info_t *info;
+	const erx_dom_handles_t *held;
+	const char *args, *at, *end;
+	uint64_t addr;
+	bool passed;
+
+	if (!boot_page_map(id, ERX_PROT_R, &held, &addr))
+		return (false);
+	info = (const erx_boot_info_t *)(uintptr_t)addr;
+	passed = info->args_off <= ERX_PAGE_SIZE && info->args_len <= ERX_PAGE_SIZE - info->args_off;
+	args = (const char *)(uintptr_t)(addr + (passed ? info->args_off : 0));
+	end = args + (passed ? info->args_len : 0);
+	at = passed ? given_find(args, (size_t)(end - args), GIVEN_RECORD, sizeof(GIVEN_RECORD) - 1) : NULL;
+	passed = at != NULL;
+	if (passed)
+		at += sizeof(GIVEN_RECORD) - 1;
+	for (uint32_t number = 0; passed && number < GIVEN_NUMBERS; number++)
+		passed = given_decimal(&at, end, &numbers[number]);
+	*pair = passed && (size_t)(end - at) >= sizeof(GIVEN_PAIR) - 1 &&
+	    memcmp(at, GIVEN_PAIR, sizeof(GIVEN_PAIR) - 1) == 0;
+	return (erx_vm_release(ERX_CAP_SELF, addr, ERX_PAGE_SIZE) == ERX_OK && passed);
+}
+
+/*
+ * Domain id holds the device: the record names it and its window, line
+ * and memory, and its boot page's record carries values in its own table
+ * for each, the registers' place, the memory's size and the boot's pair.
+ */
+static bool
+given_held(uint32_t id)
+{
+	const erx_dom_device_t *record = &device_records[0];
+	uint64_t numbers[GIVEN_NUMBERS];
+	bool pair = false;
+	const bool read = given_read(id, numbers, &pair);
+
+	say_count("given_read", read);
+	say_count("given_pair", pair);
+	return (read && pair && record->holder == id && record->windows[0].raw != ERX_CAP_NULL &&
+	    record->irqs[0].raw != ERX_CAP_NULL && record->memory.raw != ERX_CAP_NULL &&
+	    record->resource.raw == ERX_CAP_NULL && numbers[0] != ERX_CAP_NULL && numbers[1] == 0 &&
+	    numbers[2] == GIVEN_SIZE && numbers[3] != ERX_CAP_NULL && numbers[4] != ERX_CAP_NULL &&
+	    numbers[5] == GIVEN_MEMORY);
+}
+
+/* No domain holds the device, and its record names nothing but memory, its kept memory. */
+static bool
+given_free(erx_cap_t memory)
+{
+	const erx_dom_device_t *record = &device_records[0];
+
+	return (record->holder == 0 && record->windows[0].raw == ERX_CAP_NULL && record->irqs[0].raw == ERX_CAP_NULL &&
+	    record->memory.raw == memory.raw);
+}
+
+/*
+ * Creates configured row 0 as domain id; ERX_OK or the creation's refusal.
+ * A configured domain has a system connection, whose number goes to
+ * given_connection, for given_end to disconnect.
+ */
+static uint32_t given_connection;
+
+static erx_status_t
+given_create(uint32_t id)
+{
+	erx_dom_created_t created = { 0 };
+	const erx_status_t status = erx_dom_lib_configured(&lib, id, 0, (erx_dom_pid_t){ 0 }, &created);
+
+	if (status == ERX_OK)
+		given_connection = created.connection;
+	return (status);
+}
+
+/* Starts and stops holder id, takes its end, disconnects it from the system domain and retires it. */
+static bool
+given_end(uint32_t id)
+{
+	erx_dom_report_t report = { 0 };
+	bool passed = erx_dom_lib_start(&lib, id) == ERX_OK && erx_dom_lib_stop(&lib, id, STOP_STATUS) == ERX_OK &&
+	    end_wait(&report) && report.id == id && report.end.kind == ERX_DOM_END_STOPPED;
+
+	say_count("given_end_kind", (uint64_t)report.end.kind);
+	passed = erx_dom_lib_disconnect(&lib, given_connection) == ERX_OK && passed;
+	return (erx_dom_lib_retire(&lib, id) == ERX_OK && passed);
+}
+
+/*
+ * The device given as part of a configured creation. First, one
+ * creation refused once its give is made, which grows the service's
+ * tables, leaves the device's fresh contiguous memory in its record:
+ * the backend never takes a contiguous run back, so memory destroyed on
+ * every refusal would leave the row no run to give after a few. Then a
+ * creation refused at each step in turn, before it and once it has made
+ * its object, is undone with its give: the pool, the handles and the
+ * record as they were, so no device object is left and the kept memory
+ * survives. Then the holder is created with that memory and its record
+ * in its boot page; a second domain of the row while it lives is
+ * ERX_EBUSY and changes nothing; at its end the record keeps only the
+ * memory. The memory's pages are not the pool's, and the first holder's
+ * run grows tables the service keeps, so the pool is counted from the
+ * second: the next creation gives that same memory again, and ends with
+ * the pool and the handles as after the first.
+ */
+static void
+case_given(uint32_t program)
+{
+	static erx_dom_plan_t plan;
+	uint64_t before, pages;
+	uint32_t held, handles, give = UINT32_MAX, failed = 0, id;
+	erx_cap_t memory;
+	erx_status_t busy;
+	bool passed;
+
+	given_view(program);
+	id = next_id++;
+	passed = erx_dom_plan_configured(&lib.view, id, 0, (erx_dom_pid_t){ 0 }, &plan) == ERX_OK && plan.ngives == 1;
+	for (uint32_t step = 0; passed && step < plan.nsteps; step++)
+		if (plan.steps[step].kind == ERX_DOM_STEP_GIVE)
+			give = step;
+	lib.fail_step = give;
+	lib.fail_made = true;
+	passed = passed && give != UINT32_MAX && given_create(id) == ERX_ENOMEM;
+	memory = device_records[0].memory;
+	say_count("given_undo_kept", memory.raw != ERX_CAP_NULL);
+	passed = passed && memory.raw != ERX_CAP_NULL && given_free(memory);
+	before = erx_fiasco_vm_free_pages();
+	held = handles_used();
+	for (uint32_t step = 0; passed && step < 2 * plan.nsteps; step++) {
+		lib.fail_step = step / 2;
+		lib.fail_made = step % 2 != 0;
+		passed = given_create(id) == ERX_ENOMEM && lib.failed_at == step / 2 &&
+		    erx_fiasco_vm_free_pages() == before && handles_used() == held && domains[0].id == 0 &&
+		    given_free(memory);
+		failed = passed ? step + 1 : step;
+	}
+	lib.fail_step = UINT32_MAX;
+	lib.fail_made = false;
+	say_count("given_undo_steps", failed);
+	say_case("given_undo", passed && failed == 2 * plan.nsteps);
+
+	passed = given_create(id) == ERX_OK && given_held(id) && device_records[0].memory.raw == memory.raw;
+	pages = erx_fiasco_vm_free_pages();
+	handles = handles_used();
+	busy = given_create(next_id++);
+	say_count("given_busy", (uint64_t)(int64_t)busy);
+	passed = passed && busy == ERX_EBUSY && erx_fiasco_vm_free_pages() == pages &&
+	    handles_used() == handles && device_records[0].holder == id;
+	passed = given_end(id) && passed;
+	say_count("given_free", given_free(memory));
+	passed = passed && given_free(memory);
+	say_count("given_kept_pages", before - erx_fiasco_vm_free_pages());
+	say_count("given_kept_handles", handles_used() - held);
+	passed = passed && handles_used() == held;
+	say_case("given", passed);
+
+	pages = erx_fiasco_vm_free_pages();
+	handles = handles_used();
+	id = next_id++;
+	passed = given_create(id) == ERX_OK && given_held(id) && device_records[0].memory.raw == memory.raw;
+	passed = given_end(id) && passed && given_free(memory);
+	say_count("free_pages_lost", pages - erx_fiasco_vm_free_pages());
+	say_count("handles_left", handles_used() - handles);
+	say_case("given_kept", passed && erx_fiasco_vm_free_pages() == pages && handles_used() == handles);
+}
+
 void
 erx_fiasco_root_main(void)
 {
@@ -2150,6 +2404,7 @@ erx_fiasco_root_main(void)
 	case_end("origins", connection_request(erts, origins_eval), RUN_ORIGINS, ERX_DOM_END_HALT, 0);
 	case_link(program);
 	case_undo(program);
+	case_given(program);
 	say("erx: domain: done\n");
 	(void)erx_machine_end(0, ERX_END_OFF);
 	erx_fiasco_sleep_forever();

@@ -4,9 +4,9 @@
  */
 
 /*
- * erx_boot_info_build, erx_boot_info_read, the vector made from a page, and
- * erx_boot_args_parse, each at its limits and against an independent statement of what
- * it should do. Prints one line and exits 0, or names what broke and exits 1.
+ * erx_boot_info_build, erx_boot_info_read, the vector made from a page,
+ * erx_boot_args_parse and a holder domain's records from boot_manifest.c, each at its limits
+ * and against an independent statement of what it should do. Prints one line and exits 0, or names what broke and exits 1.
  */
 
 #include <stdbool.h>
@@ -16,7 +16,9 @@
 #include <string.h>
 
 #include "erx/abi.h"
+#include "erx/core/boot_pair.h"
 #include "liberx/backend/core/boot_info.h"
+#include "liberx/backend/core/boot_manifest.h"
 #include "liberx/backend/fiasco/boot_args.h"
 
 #define CHECK(condition, ...) do {					\
@@ -342,6 +344,58 @@ test_header_corruption(void)
 	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_RESERVED, "limits' reserved word in a read");
 }
 
+/*
+ * A holder domain's records (docs/design-stopgap.md, "Boot information"): -erx given per
+ * device and -erx boot, as the domain library writes them, travel through a domain's page
+ * and its vector unchanged; and the longest of each, names at 15 bytes and every number at
+ * UINT64_MAX, takes exactly the room erx/boot_words.h states and the boot view reserves,
+ * so a record never outgrows its reserve.
+ */
+static void
+test_holder_records(void)
+{
+	static const char record[] = "-erx\0given\0block\0virtio_mmio\0" "7\0" "3584\0" "512\0" "8\0" "9\0" "65536\0"
+	    "-erx\0boot\0trial\0b\0";
+	const erx_boot_given_t given = { .role = "block", .peripheral = "virtio_mmio", .window = 7, .offset = 3584,
+	    .size = 512, .line = 8, .memory = 9, .memory_size = 65536 };
+	const erx_boot_given_t longest = { .role = "ROLEROLEROLEROL", .peripheral = "PERIPHERALPERIP", .window = UINT64_MAX,
+	    .offset = UINT64_MAX, .size = UINT64_MAX, .line = UINT64_MAX, .memory = UINT64_MAX, .memory_size = UINT64_MAX };
+	char words[ERX_BOOT_GIVEN_WORDS_MAX + ERX_BOOT_PAIR_WORDS_MAX];
+	erx_boot_inputs_t inputs = good_inputs();
+	erx_boot_words_t args[2];
+	erx_boot_view_t view;
+	size_t used, pair;
+
+	used = erx_boot_given_words(&given, words, sizeof(words));
+	CHECK(used != 0, "holder: the given record is refused");
+	pair = erx_boot_pair_words(ERX_BOOT_VALUE_TRIAL, ERX_BOOT_SLOT_B, words + used, sizeof(words) - used);
+	CHECK(pair != 0, "holder: the boot record is refused");
+	CHECK(used + pair == sizeof(record) - 1 && memcmp(words, record, used + pair) == 0, "holder: the records' words");
+	CHECK(erx_boot_pair_words(ERX_BOOT_VALUE_TRIAL, 7, words, sizeof(words)) == 0, "holder: a slot with no name is written");
+
+	inputs.flags = 0;
+	inputs.node = "web@host";
+	inputs.node_len = 8;
+	inputs.system_node = "system@host";
+	inputs.system_node_len = 11;
+	args[0] = good_args[0];
+	args[1] = (erx_boot_words_t){ words, used + pair };
+	inputs.args = args;
+	inputs.nargs = COUNT(args);
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "holder: the page is refused");
+	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_OK, "holder: the page does not read back");
+	CHECK(view.info.args_len == good_args[0].length + used + pair &&
+	    memcmp(view.args + good_args[0].length, record, used + pair) == 0, "holder: the records moved in the page");
+
+	used = erx_boot_given_words(&longest, words, sizeof(words));
+	CHECK(used == ERX_BOOT_GIVEN_WORDS_MAX, "holder: the longest given record is %zu bytes", used);
+	CHECK(erx_boot_given_words(&longest, words, used - 1) == 0, "holder: a given record past its room is written");
+	used = erx_boot_pair_words(ERX_BOOT_VALUE_UNKNOWN, ERX_BOOT_SLOT_NONE, words, sizeof(words));
+	CHECK(used == ERX_BOOT_PAIR_WORDS_MAX, "holder: the longest boot record is %zu bytes", used);
+	CHECK(erx_boot_pair_words(ERX_BOOT_VALUE_UNKNOWN, ERX_BOOT_SLOT_NONE, words, used - 1) == 0,
+	    "holder: a boot record past its room is written");
+}
+
 static void
 check_vector(const char *node, size_t node_len, const char *flag)
 {
@@ -555,6 +609,7 @@ main(void)
 	test_nodes_and_flags();
 	test_spans();
 	test_header_corruption();
+	test_holder_records();
 	check_vector("system@host", 11, "-sname");
 	check_vector("system@host.example", 19, "-name");
 	check_vector("a.b@host", 8, "-sname");

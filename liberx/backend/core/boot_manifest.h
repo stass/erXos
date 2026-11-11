@@ -87,4 +87,37 @@ bool	erx_boot_console_matches(const erx_boot_manifest_t *manifest, const char *s
  */
 size_t	erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capacity);
 
+/*
+ * A device given to a holder domain, as its creation installed it (docs/design-stopgap.md,
+ * "Boot information"): the values of its objects in the holder's table, which the holder's
+ * device NIF opens it by. window and line are its register window's and its line's IRQ
+ * object's; offset and size place its registers in the window; memory is its contiguous
+ * memory's, ERX_CAP_NULL with memory_size 0 for none.
+ */
+typedef struct erx_boot_given {
+	const char	*role;		/* erx/device_kinds.h's role word */
+	const char	*peripheral;	/* and its CMSIS-SVD peripheral */
+	uint64_t	window;
+	uint64_t	offset;
+	uint64_t	size;
+	uint64_t	line;
+	uint64_t	memory;
+	uint64_t	memory_size;
+} erx_boot_given_t;
+
+/*
+ * Writes -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE, the numbers in
+ * decimal and each word ended by NUL, into words, and returns their whole length; 0, having
+ * written nothing past capacity, when they do not fit, which ERX_BOOT_GIVEN_WORDS_MAX bytes
+ * (erx/boot_words.h) always do for names within ERX_BOOT_NAME_WORD_MAX.
+ */
+size_t	erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t capacity);
+
+/*
+ * Writes -erx boot VALUE SLOT by the names of include/erx/core/boot_pair.h into words, and
+ * returns their whole length; 0 for a value or slot that has no name, or words that do not
+ * fit, which ERX_BOOT_PAIR_WORDS_MAX bytes always do.
+ */
+size_t	erx_boot_pair_words(uint32_t value, uint32_t slot, char *words, size_t capacity);
+
 #endif /* ERX_BACKEND_BOOT_MANIFEST_H */

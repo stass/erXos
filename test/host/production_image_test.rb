@@ -448,12 +448,12 @@ class ProductionImageTest < Minitest::Test
     end
   end
 
-  # The root gives a device record to each device that matches a row of boot_manifest.c's
-  # device_kinds table and to the host link's UART, so a row added there whose role word is
+  # The root gives a device record to each device that matches a row of erx/device_kinds.h's
+  # erx_device_kinds table and to the host link's UART, so a row added there whose role word is
   # not in RECORD_UNITS would leave every production boot's argument count one record short.
   # Every row is read, and a row this test cannot read fails it rather than going unseen.
   def test_the_record_units_are_the_roots_device_kinds_and_the_host_link
-    table = File.read(File.join(ROOT, 'liberx/backend/core/boot_manifest.c'))[/device_kinds\[\] = \{\n(.*?)^\};/m, 1]
+    table = File.read(File.join(ROOT, 'include/erx/device_kinds.h'))[/erx_device_kinds\[\] = \{\n(.*?)^\};/m, 1]
     rows = table.lines.grep(/\A\s*\{/)
     words = rows.map { |row| row[/\A\s*\{\s*ERX_MF_DEVICE_ROLE_\w+,\s*"[^"]*",\s*"(\w+)"/, 1] }
     refute_empty words

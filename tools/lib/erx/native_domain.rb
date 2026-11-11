@@ -46,14 +46,15 @@ module Erx
     ERLC_DEADLINE = 120
     SYSTEM = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c
                 liberx/system/dom_dump.c
-                liberx/backend/core/boot_info.c liberx/erx_lane.c liberx/erx_etf.c].freeze
+                liberx/backend/core/boot_info.c liberx/backend/core/boot_manifest.c liberx/erx_lane.c liberx/erx_etf.c].freeze
     ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH,
                     'liberx/backend/core/refused.c', *SYSTEM, 'test/guest/native_domain/string.c',
                     'test/guest/native_domain/guest.c'].freeze
     ROOT_FLAGS = %w[-DERX_DOM_TEST_HOOKS].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_domain/program.c'].freeze
     CASES = %w[library warm halt fault stop lanes erts logger erts_refused crash jit_reload jit_write_rx jit_run_rw connection
-                 exports refs origins link_warm link link_undo link_end undo].freeze
+                 exports refs origins link_warm link link_undo link_end undo
+                 given_undo given given_kept].freeze
     RECORD = NativeRoot::DOMAIN_RECORD
     # What a case's domain prints before its case line, each a record of its space and in
     # order: init ran the ERTS domain's release; the logger case's two log records, which

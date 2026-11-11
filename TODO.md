@@ -1389,6 +1389,44 @@ it; git history is the record of completed work.
   object (a bell's bind, a group's configure), and none checks that the root's handle table
   returns to its starting occupancy after a retire or an undo, which would catch a handle the
   library forgot to close.
+* [Medium] domain library, `liberx/system/dom_boot_view.c` and `dom_life.c` (`life_overlaps`):
+  the boot view refuses register pages shared only between different units, so a manifest may
+  place two devices of one unit that share a page (QEMU `virt`'s virtio-mmio slots, 0x200 apart)
+  on one configured row, but every creation of that row then fails with ERX_EINVAL, because
+  `life_overlaps` refuses an entry whose page meets any other entry, and each give would make
+  its own window over the one page. Give windows per unit page rather than per device, and let
+  `life_overlaps` compare across units only, as the view does. Nothing shipped places such a
+  pair on a configured row.
+* [Medium] domain library, `tools/fuzz/dom_core_fuzz.c`: the planner's view has no devices, so
+  `dom_plan_gives`, `ngives` and the GIVE-before-BOOTINFO order are never reached through
+  `erx_dom_plan_configured`. Give the view fuzzed device entries with fuzzed rows, and check in
+  `fuzz_check` that a configured plan gives every entry of its row once, to its own holder and
+  slot, with its GIVE steps just before BOOTINFO.
+* [Medium] domain library, `liberx/system/dom_apply.c` (`apply_keep_gives`, `lib_devices_end`):
+  a device record's `holder` is a stored field that two effects outside the host-tested core keep
+  in step, and ERX_EBUSY and `devices/0` read it. Only a domain of the entry's row holds the
+  device and every living domain of the row holds all of its devices, so derive the holder from
+  the living domains (`life_alive` and `erx_dom_from_row`) and keep only the handles the end
+  needs in the record.
+* [Low] domain library, `liberx/system/dom_core.c` (`erx_dom_plan_check`): the check has no
+  view, so it cannot refuse a plan whose gives repeat a device index or name an entry of another
+  row; `dom_apply.c` indexes `device_records` by `give->index` on the strength of plans coming
+  only from the planner. Check distinct indices in the plan check, or re-check gives against the
+  library's view in `erx_dom_lib_apply`.
+* [Low] domain library, `liberx/backend/fiasco/runtime_entry.c` (`library_up`): the boot pair
+  (`lib.boot`) and the writable `device_records` are set beside the view rather than by its
+  constructor, so a constructor that forgets either fails a creation (an unnamed pair) or
+  dereferences NULL (records); `erx_boot_pair_words` also writes a pair
+  `erx_boot_pair_valid` would refuse. Pass both to `erx_dom_view_build`, and refuse an invalid
+  pair there.
+* [Low] domain library, `include/erx/device_kinds.h`: no check ties a kind's peripheral name to
+  `ERX_BOOT_NAME_WORD_MAX`, so a kind with a longer name would make every creation of its holder
+  fail with ERX_EINVAL. Refuse it in the view build or test the table.
+* [Medium] domain library, `liberx/system/dom_boot_view.c` against design-system.md "Devices": the
+  design runs a machine without a device marked confined that has no IOMMU stream, logging a
+  diagnostic, while the boot view refuses the whole manifest ("a device marked confined has no
+  IOMMU stream"), so the machine does not boot. Make the view leave such a device unplaced with
+  the diagnostic, or state the refusal as the stopgap's behaviour in the design.
 * [Medium] domain library, `liberx/system/dom_core.c` (`dom_check_sizes`): every crash area is
   `ERX_CRASH_SIZE`, 16 KiB, not design-runtime.md's per-domain size with its 1 MiB default, so
   a full dump arrives truncated with its slogan intact, and the design's one-page crash area
@@ -1551,10 +1589,6 @@ it; git history is the record of completed work.
   checkpoint covers only the shape refusals that come before the library. Add them to the
   end-to-end create, start, stop, `domain_ended` and retire cell once the library's boot
   view exists (DL2d).
-* [Medium] domain library, `test/guest/native_domain`: no case fails a step after it made its
-  object (a bell's bind, a group's configure), and none checks that the root's handle table
-  returns to its starting occupancy after a retire or an undo, which would catch a handle the
-  library forgot to close.
 * [Low] domain library, `liberx/system/dom_apply.c` (`apply_install`): it takes its rights
   from an `erx_dom_grants` row but is neither so named nor checked by a rule.
 * [Medium] domain library, `liberx/system/dom_core.c` (`erx_dom_plan_record`): the record

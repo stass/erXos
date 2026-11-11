@@ -212,6 +212,8 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 	    .ndevices = 2, .principals = &held, .nprincipals = 1 };
 	erx_dom_link_plan_t link, again;
 	erx_dom_device_plan_t give;
+	/* A creation plan holds a specification with its strings: too large for a stack. */
+	static erx_dom_plan_t holder;
 	erx_dom_obj_t made[ERX_DOM_DEVICE_STEPS];
 	erx_dom_principal_t principal;
 	uint32_t nmade;
@@ -308,16 +310,20 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 	    (doms[action.slot].state != ERX_DOM_BUILT &&
 	    doms[action.slot].state != ERX_DOM_RUNNING)))
 		abort();
-	if (erx_dom_plan_device_give(&view, in->a, in->dev_index, &give) ==
+	/* A give to a configured domain being created into record in->b % 3. */
+	memset(&holder, 0, sizeof(holder));
+	holder.spec.id = in->a;
+	holder.spec.origin = (erx_dom_origin_t){ ERX_DOM_CONFIGURED, (uint32_t)(in->label & 1) };
+	holder.slot = in->b % 3;
+	if (erx_dom_plan_device_give(&view, &holder, in->dev_index, &give) ==
 	    ERX_OK) {
 		nmade = 0;
 		for (uint32_t index = 0; index < give.nsteps; index++)
-			nmade += give.steps[index].kind != ERX_DOM_STEP_INSTALL;
+			nmade += give.steps[index].kind != ERX_DOM_STEP_INSTALL &&
+			    give.steps[index].kind != ERX_DOM_STEP_CONTIGUOUS;
 		if (erx_dom_device_check(&give) != ERX_OK || give.index >= 2 ||
-		    give.slot >= 3 || doms[give.slot].id != in->a ||
-		    !erx_dom_from_row(&doms[give.slot], devs[give.index].row) ||
-		    (doms[give.slot].state != ERX_DOM_BUILT &&
-		    doms[give.slot].state != ERX_DOM_RUNNING) ||
+		    give.slot != holder.slot || doms[give.slot].id != 0 || give.holder != in->a ||
+		    !erx_dom_from_row(&holder.spec.origin, devs[give.index].row) ||
 		    erx_dom_device_undo(&give, give.nsteps, made) != nmade)
 			abort();
 		for (uint32_t index = 0; index < 3; index++)

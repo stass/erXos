@@ -96,14 +96,14 @@ UNCONFINED_FIRST = 'RESOURCE,WINDOW,IRQ,CONTIGUOUS,INSTALL,INSTALL,INSTALL'
 UNCONFINED_KEPT = 'RESOURCE,WINDOW,IRQ,INSTALL,INSTALL,INSTALL'
 FULL = ['RESOURCE', *['WINDOW'] * 8, *['IRQ'] * 8, 'DMA', *['INSTALL'] * 17].join(',')
 DEVICES = {
-  'dev_unconfined_first' => "0 slot=0 steps=#{UNCONFINED_FIRST} undo=4",
-  'dev_confined' => '0 slot=1 steps=RESOURCE,WINDOW,WINDOW,IRQ,IRQ,DMA,INSTALL,INSTALL,INSTALL,INSTALL,INSTALL undo=6',
-  'dev_unconfined_kept' => "0 slot=0 steps=#{UNCONFINED_KEPT} undo=3",
-  'dev_holder_ended' => "0 slot=0 steps=#{UNCONFINED_KEPT} undo=3",
-  'dev_holder_retired' => "0 slot=0 steps=#{UNCONFINED_KEPT} undo=3",
-  'dev_adjacent' => "0 slot=0 steps=#{UNCONFINED_FIRST} undo=4",
-  'dev_no_memory' => '0 slot=0 steps=RESOURCE,WINDOW,IRQ,INSTALL,INSTALL undo=3',
-  'dev_full' => "0 slot=1 steps=#{FULL} undo=18",
+  'dev_unconfined_first' => "0 slot=4 steps=#{UNCONFINED_FIRST} undo=3",
+  'dev_confined' => '0 slot=4 steps=RESOURCE,WINDOW,WINDOW,IRQ,IRQ,DMA,INSTALL,INSTALL,INSTALL,INSTALL,INSTALL undo=6',
+  'dev_unconfined_kept' => "0 slot=4 steps=#{UNCONFINED_KEPT} undo=3",
+  'dev_holder_ended' => "0 slot=4 steps=#{UNCONFINED_KEPT} undo=3",
+  'dev_holder_retired' => "0 slot=4 steps=#{UNCONFINED_KEPT} undo=3",
+  'dev_adjacent' => "0 slot=4 steps=#{UNCONFINED_FIRST} undo=3",
+  'dev_no_memory' => '0 slot=4 steps=RESOURCE,WINDOW,IRQ,INSTALL,INSTALL undo=3',
+  'dev_full' => "0 slot=4 steps=#{FULL} undo=18",
   'dev_busy' => EBUSY, 'dev_busy_self' => EBUSY,
   'dev_unknown_domain' => EINVAL, 'dev_ended_domain' => EINVAL, 'dev_building_domain' => EINVAL,
   'dev_index_past' => EINVAL, 'dev_overlap' => EINVAL, 'dev_overlap_wrapping' => EINVAL,
@@ -172,7 +172,7 @@ DEVICES = {
     'kept memory made again' => ['record->memory.raw != ERX_CAP_NULL;', 'record->memory.raw == ERX_CAP_NULL;',
                                  'dev dev_unconfined_kept '],
     'a give skips the assigned holder' =>
-      ['if (!erx_dom_from_row(&view->domains[draft.slot], entry->row))',
+      ['if (!erx_dom_from_row(&holder->spec.origin, entry->row))',
        'if (false)', 'dev dev_wrong_holder '],
     'a device install ignores its row' =>
       ["life_granted(step));\n\tcase ERX_DOM_STEP_CARVE:", "true);\n\tcase ERX_DOM_STEP_CARVE:", 'seeded dev_window_phys ']

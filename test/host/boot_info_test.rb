@@ -12,13 +12,15 @@ require_relative '../fixtures/generated_tree'
 
 # The boot information page and the command line (docs/design-stopgap.md, "Boot
 # information" and "The command line"): liberx/backend/core/boot_info.c and
-# liberx/backend/fiasco/boot_args.c at every limit, driven by
+# liberx/backend/fiasco/boot_args.c at every limit, with the holder records of
+# liberx/backend/core/boot_manifest.c, driven by
 # test/fixtures/boot_info_driver.c. Each seed below must make the driver name what it broke.
 class BootInfoTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   INFO = 'liberx/backend/core/boot_info.c'
   ARGS = 'liberx/backend/fiasco/boot_args.c'
   WATCHDOG = 'kernel/core/watchdog.c'
+  MANIFEST = 'liberx/backend/core/boot_manifest.c'
   DRIVER = 'test/fixtures/boot_info_driver.c'
 
   # name => [source, original, replacement, the driver's diagnostic].
@@ -34,6 +36,7 @@ class BootInfoTest < Minitest::Test
     'processes not a power of two let through' => [INFO, 'if (processes == 0 || (processes & (processes - 1)) != 0)', 'if (processes == 0)', 'erts refusal'],
     'online taken from the cpuset' => [INFO, '(capacity_cpus > schedulers ? schedulers : (uint32_t)capacity_cpus)', 'schedulers', 'erts flags: the words'],
     'a raised process table admitted' => [INFO, 'if (settings->processes > limits->processes)', 'if (false)', 'admit'],
+    'the given record without its memory size' => [MANIFEST, 'number_put(words, capacity, &used, given->memory_size)', 'true', 'holder'],
     'the page marked before the checks' => [INFO, "\tif (status != ERX_BOOT_INFO_OK)\n\t\treturn (status);\n\tif (size < fixed", "\tmemset(page, 0, size);\n\tif (status != ERX_BOOT_INFO_OK)\n\t\treturn (status);\n\tif (size < fixed", 'untouched']
   }.freeze
 
@@ -55,7 +58,8 @@ class BootInfoTest < Minitest::Test
     output
   end
 
-  def sources = [INFO, ARGS, WATCHDOG].map { |source| File.join(ROOT, source) }
+  def sources = [INFO, ARGS, WATCHDOG, MANIFEST].map { |source| File.join(ROOT, source) } +
+                [Erx::Generated.path('liberx/generated/abi_reader.c', root: ROOT)]
 
   def test_the_page_and_the_command_line_at_every_limit
     output, status = Open3.capture2e(build(sources, name: 'driver'), stdin_data: '')

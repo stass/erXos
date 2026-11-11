@@ -4,37 +4,29 @@
  */
 
 #include "erx/abi_reader.h"
+#include "erx/core/boot_pair.h"
+#include "erx/device_kinds.h"
 #include "liberx/backend/core/boot_manifest.h"
 
 #define NODE_PREFIX		"system@"
 #define NODE_PREFIX_LENGTH	(sizeof(NODE_PREFIX) - 1)
 
 /*
- * The kinds of device the system domain's ERTS drives, one row each: a device of a unit the
- * system domain holds, at a device-tree path, whose role and compatible string are a row's,
- * becomes a device record with the row's names. Which transport is which device is the
- * platform record's and the manifest's to say, so the selection is by configuration and
- * touches no register: only erx_device reads a device, and a driver's first reads, of the
- * transport's magic, version and device id, find whether a disk is behind it. A second
- * kind is one more row. The console is not a row: two UARTs share its role and
- * compatible string, and machine.console names which one (console_read). The host link's
- * UART is the other of the two, named by machine.hostlink, and becomes the record
- * hostlink_kind describes, which the host link's driver alone asks for
- * (docs/design-live.md, "The host link"), when the boot asks for the host link: a machine
- * may have no UART at that path, and a driver's first read of an absent device faults the
- * system domain (docs/design-stopgap.md, "Device records").
+ * The kinds of device the system domain's ERTS drives are erx/device_kinds.h's: a device
+ * of a unit the system domain holds, at a device-tree path, whose role and compatible
+ * string are a row's, becomes a device record with the row's names. Which transport is
+ * which device is the platform record's and the manifest's to say, so the selection is
+ * by configuration and touches no register: only erx_device reads a device, and a
+ * driver's first reads, of the transport's magic, version and device id, find whether a
+ * disk is behind it. The console is not a row: two UARTs share its role and compatible
+ * string, and machine.console names which one (console_read). The host link's UART is
+ * the other of the two, named by machine.hostlink, and becomes the record hostlink_kind
+ * describes, which the host link's driver alone asks for (docs/design-live.md, "The host
+ * link"), when the boot asks for the host link: a machine may have no UART at that path,
+ * and a driver's first read of an absent device faults the system domain
+ * (docs/design-stopgap.md, "Device records").
  */
-typedef struct device_kind {
-	uint32_t	 role;		/* ERX_MF_DEVICE_ROLE_* */
-	const char	*compatible;	/* the platform record's compatible string */
-	const char	*role_word;	/* the record's ROLE */
-	const char	*peripheral;	/* the record's PERIPHERAL, as the CMSIS-SVD source names it */
-} device_kind_t;
-
-static const device_kind_t device_kinds[] = {
-	{ ERX_MF_DEVICE_ROLE_BLOCK, "virtio,mmio", "block", "virtio_mmio" },
-	{ ERX_MF_DEVICE_ROLE_NETWORK, "virtio,mmio", "net", "virtio_mmio" },
-};
+typedef erx_device_kind_t device_kind_t;
 
 /* Selected by machine.hostlink's path, among the UARTs of its driver's compatible string. */
 static const device_kind_t hostlink_kind = { ERX_MF_DEVICE_ROLE_UART, "arm,pl011", "hostlink", "pl011" };
@@ -97,9 +89,9 @@ device_kind(const erx_manifest_view_t *view, const erx_mf_device_t *device, bool
 	if (hostlink && device->role == hostlink_kind.role && string_is(view, &device->compatible, hostlink_kind.compatible) &&
 	    view->header.hostlink.length != 0 && string_equal(view, &device->path, &view->header.hostlink))
 		return (&hostlink_kind);
-	for (size_t at = 0; at < sizeof(device_kinds) / sizeof(device_kinds[0]); at++) {
-		if (device->role == device_kinds[at].role && string_is(view, &device->compatible, device_kinds[at].compatible))
-			return (&device_kinds[at]);
+	for (size_t at = 0; at < ERX_DEVICE_KINDS_COUNT; at++) {
+		if (device->role == erx_device_kinds[at].role && string_is(view, &device->compatible, erx_device_kinds[at].compatible))
+			return (&erx_device_kinds[at]);
 	}
 	return (NULL);
 }
@@ -281,6 +273,33 @@ erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capac
 	    word_put(words, capacity, &used, device->role) && word_put(words, capacity, &used, device->peripheral) &&
 	    number_put(words, capacity, &used, device->base) && number_put(words, capacity, &used, device->size) &&
 	    number_put(words, capacity, &used, device->line) && number_put(words, capacity, &used, device->dma_memory))
+		return (used);
+	return (0);
+}
+
+size_t
+erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t capacity)
+{
+	size_t used = 0;
+
+	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "given") &&
+	    word_put(words, capacity, &used, given->role) && word_put(words, capacity, &used, given->peripheral) &&
+	    number_put(words, capacity, &used, given->window) && number_put(words, capacity, &used, given->offset) &&
+	    number_put(words, capacity, &used, given->size) && number_put(words, capacity, &used, given->line) &&
+	    number_put(words, capacity, &used, given->memory) && number_put(words, capacity, &used, given->memory_size))
+		return (used);
+	return (0);
+}
+
+size_t
+erx_boot_pair_words(uint32_t value, uint32_t slot, char *words, size_t capacity)
+{
+	const char *value_name = erx_boot_value_name(value), *slot_name = erx_boot_slot_name(slot);
+	size_t used = 0;
+
+	if (value_name != NULL && slot_name != NULL && word_put(words, capacity, &used, "-erx") &&
+	    word_put(words, capacity, &used, "boot") && word_put(words, capacity, &used, value_name) &&
+	    word_put(words, capacity, &used, slot_name))
 		return (used);
 	return (0);
 }

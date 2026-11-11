@@ -2671,8 +2671,8 @@ A **driver** is an Erlang process under a supervisor, in a domain that holds
 its device's capabilities, over the device NIF
 ([design-system.md](design-system.md#drivers),
 [design-runtime.md](design-runtime.md#the-device-nif)). Which domain holds a
-device is configuration: the device service gives a device to exactly one
-domain, and a driver's messages to its clients are frames on connections
+device is configuration: the manifest places each device on exactly one
+domain, whose creation gives it, and a driver's messages to its clients are frames on connections
 like any other process's. Bulk data between a driver and its clients moves
 through memory objects the driver's domain supplies, as a file server's does
 ([design-files.md](design-files.md#the-file-protocol)): like a pipe, such

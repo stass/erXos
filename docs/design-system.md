@@ -240,7 +240,7 @@ then the domain's outer budget.
 | **A6.** No domain outlives the system domain, and a system domain that cannot serve ends the machine | every domain's space is a child of the system domain's space, which the plan names as every domain's parent (K27); the first space has no fault gate, so a fault in it, a stop of it outside an ordered end, or a watchdog deadline missed goes to the kernel's end path, which writes the crash record and ends the machine by `erx.panic`; the watchdog process pets only after every service it lists has answered a liveness call within the period, so a system domain whose runtime runs but whose device service stops answering, even after its supervisor restarted it, misses the deadline too; the domain service is the system release's significant child, so its end, the watchdog's kill of it included, ends the system domain outside an ordered end; no party outside the kernel and the system domain keeps a record of any domain, so there is nothing to reconcile and no protocol that could be wrong | a domain created under another parent; a system-domain fault handled by anything but the kernel's end path; a watchdog pet from anything but the system domain's runtime; a pet that does not wait for the listed services' answers | a host test that every plan names the system domain's space as parent; a QEMU test that kills the system domain under load and finds the machine ended with the crash record on the console and no domain running; a test that stops the pet and sees the machine end at the deadline; a test that deadlocks the device service and sees it killed and restarted with the pets going on, and one that keeps it from answering after each restart and sees the machine end at the deadline; a test that deadlocks the domain service and sees the machine end at its kill; a test that a domain's `erx_watchdog_pet` fails with `ERX_ERIGHTS` |
 | **A7.** The system domain installs only what its grant table allows | every `erx_cap_pass` the domain library makes goes through one function, `erx_dom_install`, which takes a row of `erx_dom_grants`, the constant table of installs that [Authority](#authority) describes, and the recipient the validated plan names for the row's role; each install copies one of the library's own capabilities from the system domain's table, never from another domain's, and each mask lies within its recipient's row in the authority table | a pass outside `erx_dom_install`; a pass from another domain's table; a row that grants more than its recipient's row in [Authority](#authority); a recipient the plan did not check | a source check that `erx_cap_pass` is referenced only from `erx_dom_install`, and that its source table is always the system domain's own, with a seeded violation of each; host tests that every row of `erx_dom_grants` lies within the rights the authority table lists for its recipient, transcribed into the test; domain tests that a device's objects reach their domain without `GIVE`, and that a side of a connection reaches its reader with `READ` and `MAP` alone |
 | **A8.** A space never outlives its parent: no domain outlives the system domain, no sub-space its creator, and no program its session | every space has a parent, fixed when it is created, and stops when its parent stops ([design-kernel.md](design-kernel.md#creating-spaces)); the domain library names its own space as every domain's parent; a sub-space's parent is its creator's space or one of that space's sub-spaces, and a session's programs are its sub-spaces ([design-programs.md](design-programs.md#a-program-is-a-port)); a stopped space takes no children, and `erx_thread_start` refuses a stopped space; a parent exists before its child, so the relation is a tree, and the kernel stops it from its root down without anyone keeping a list | a space created anywhere but under its creator's own space or one below it; a creation under a stopped parent; a thread started in a stopped space | the host test of A6; the kernel's host test of stopping over random trees, with creations racing each stop; a domain test that ends a session holding programs three generations deep, each with a sub-space, and sees every one's exit record before the session's |
-| **A9.** A device is held by one domain at a time, and a device never reaches memory its holder did not give it, nor a page anyone else may later use | the device service gives a device only to the domain the manifest names for it, and the domain library refuses a second living holder with `ERX_EBUSY`; the kernel refuses a second IRQ object for a line, a second MMIO object for a page and a second DMA window for a stream; a device's register windows, IRQ objects and DMA window are charged to its holder's own budget, which the fault thread destroys at the holder's exit record, and deleting a confined device's window aborts its stream before any page is freed; an unconfined device's memory is the device's for the boot, charged to the system domain and given to each of its holders in turn, so no page it may still address is ever given to anyone else; the device NIF builds every address it gives a device from a memory object the domain holds, an offset and a length it checks, through `erx_dma_map` or `erx_mem_dma_addr`, alone writes a device-address field or an addressing flag, in a register or a descriptor, posts nothing to a device until its driver has reset it, and leaves an address a device may still hold unused until the device's completion protocol has retired it or the device has been reset; pools and queues are state of the device's record in the NIF, never of a process, so a driver's crash frees nothing a device may still reach; the NIF parses nothing a device wrote | a device given twice; an unconfined device's memory freed or charged to its holder; a NIF that takes a raw address or posts before a reset; an address field or an addressing flag written from Erlang; a pool or queue freed with the process that made it; a descriptor or a device's record parsed in C | domain tests that ask for a device another living domain holds, refused with `ERX_EBUSY`; a test that ends an unconfined device's domain and finds its restarted holder given the same memory, and that memory never charged to or mapped by any other domain; the NIF's host tests over addresses outside the pool's objects, each refused, over a post before `negotiate/2`, refused, and over a seeded write of an address register from Erlang and a seeded pool owned by a process, each failing ([design-runtime.md](design-runtime.md#invariants), R8); a chokepoint check that only the device NIF's address builder references `erx_dma_map` and `erx_mem_dma_addr` in a runtime, with a seeded violation; a hostile virtio device model under QEMU that writes malformed descriptors, which crashes the driver process and nothing else |
+| **A9.** A device is held by one domain at a time, and a device never reaches memory its holder did not give it, nor a page anyone else may later use | the domain library gives a device only, in its creation, to the configured domain the manifest names for it, and refuses a second living holder with `ERX_EBUSY`; the kernel refuses a second IRQ object for a line, a second MMIO object for a page and a second DMA window for a stream; a device's register windows, IRQ objects and DMA window are charged to its holder's own budget, which the fault thread destroys at the holder's exit record, and deleting a confined device's window aborts its stream before any page is freed; an unconfined device's memory is the device's for the boot, charged to the system domain and given to each of its holders in turn, so no page it may still address is ever given to anyone else; the device NIF builds every address it gives a device from a memory object the domain holds, an offset and a length it checks, through `erx_dma_map` or `erx_mem_dma_addr`, alone writes a device-address field or an addressing flag, in a register or a descriptor, posts nothing to a device until its driver has reset it, and leaves an address a device may still hold unused until the device's completion protocol has retired it or the device has been reset; pools and queues are state of the device's record in the NIF, never of a process, so a driver's crash frees nothing a device may still reach; the NIF parses nothing a device wrote | a device given twice; an unconfined device's memory freed or charged to its holder; a NIF that takes a raw address or posts before a reset; an address field or an addressing flag written from Erlang; a pool or queue freed with the process that made it; a descriptor or a device's record parsed in C | domain tests that ask for a device another living domain holds, refused with `ERX_EBUSY`; a test that ends an unconfined device's domain and finds its restarted holder given the same memory, and that memory never charged to or mapped by any other domain; the NIF's host tests over addresses outside the pool's objects, each refused, over a post before `negotiate/2`, refused, and over a seeded write of an address register from Erlang and a seeded pool owned by a process, each failing ([design-runtime.md](design-runtime.md#invariants), R8); a chokepoint check that only the device NIF's address builder references `erx_dma_map` and `erx_mem_dma_addr` in a runtime, with a seeded violation; a hostile virtio device model under QEMU that writes malformed descriptors, which crashes the driver process and nothing else |
 | **A10.** The machine runs only a configuration whose properties the build proved | the manifest is the one source of configuration: the root-task entry, the domain service, the device service, the policy and the principal service read it through the readers generated from its layout in the ABI source, and no boot argument, release term or run-time call configures a domain, a device's holder, a facet of the manifest or a budget the manifest sets; the packer's only way to produce the manifest's bytes is the check, which returns the packed form only when every property of [The manifest](#the-manifest) holds; the manifest is a file of the system release, so only the system domain slices it | a second source, such as a boot argument or a term in a release; a service that reads configuration from elsewhere; a packing path that skips the check | a test for each property that seeds one violation into a manifest and expects the build to fail; a source check that the manifest file is opened only by the generated readers, with a seeded violation; a check over the system release's BEAM files that no module but `erx_manifest` reads the file; a QEMU test that boots each shipped manifest and finds every configured domain and device placed as it says |
 | **A11.** The system domain makes no machine code | the root task's image is the interpreter's, which carries no `ERX_IMAGE_JIT`, so the kernel creates the first space without JIT objects ([design-kernel.md](design-kernel.md#image-manifests), K8), and no JIT object, writable-then-executable view or C++ exists in the system domain; the manifest check proves that the boot image's root entry carries no `ERX_IMAGE_JIT` | a root image built with BeamAsm; a manifest that names a JIT image for the system domain | the manifest check's property, with a seeded root image that carries the flag; a boot test that a JIT object's creation in the system domain fails |
 
@@ -524,7 +524,7 @@ domain library's records, keyed by the same id:
 	slots      :: #{erx_connection:number() => non_neg_integer()}, % each one's control
 	                                     % slot, held until the domain has answered
 	                                     % every record written into it
-	devices    :: [erx_device:index()],  % devices the device service gave it
+	devices    :: [erx_device:index()],  % devices its creation gave it
 	ended      :: undefined | {erx_domain:end_(), integer()}  % the end and when
 }).
 ```
@@ -542,7 +542,7 @@ The library keeps four tables, allocated at boot from the root budget:
 the manifest's `max_domains` domain records (1,024 in the default
 manifests), its `max_connections` connection rows (4,096), twice
 `max_connections` remains rows, and one device record per entry of the
-root resource's device list. One lock guards the four; every entry holds
+device catalogue. One lock guards the four; every entry holds
 it for bounded work, and the fault thread's open wait is outside it.
 
 A domain record lives from the plan's apply to the domain's retire,
@@ -651,7 +651,8 @@ typedef struct erx_dom_connection {
 } erx_dom_connection_t;
 
 typedef struct erx_dom_device {
-	uint32_t	index;		/* in the root resource's device list */
+	uint32_t	index;		/* its catalogue entry's: the manifest's
+					 * device row */
 	uint32_t	holder;		/* the living domain it is given to; 0 for none */
 	erx_cap_t	resource;	/* the carved resource; charged to the holder's own budget */
 	erx_cap_t	windows[ERX_DEVICE_RANGES_MAX];	/* its register windows; likewise */
@@ -841,8 +842,8 @@ and 6 give way to the partial boot below.
    the domains the manifest lists, in the manifest's boot order: in the
    default manifests the devices domain, the storage domains, the slot
    writer, the network domain, the vault's storage domain, the vault. The
-   device service gives each the devices the manifest names for it as it
-   is created, before its first thread starts ([Devices](#devices)), and
+   creation gives each the devices the manifest names for it, before its
+   first thread starts ([Devices](#devices)), and
    the domain service grants it its facets and makes its introductions as
    the manifest lists them. Once the slot writer runs, and before the
    network domain or any user domain exists, the update service has it
@@ -979,7 +980,7 @@ NIFs, since none of them waits:
 | Entry | What it does | Result |
 | --- | --- | --- |
 | `erx_dom_principal(number, configuration)` | validates the complete normalized principal configuration, stores its resolved default and ceiling profiles, carves its budget from the root budget and creates its group under `users`, with its domain quota | `ERX_OK`, `ERX_EEXIST`, `ERX_ENOMEM`, `ERX_EINVAL` |
-| `erx_dom_create(spec)` | validates an `erx_dom_spec_t` into a plan and applies it ([Creating a domain](#creating-a-domain)) | the domain's record, with the number of its connection to the system domain and the system domain's values of that connection's objects, or the failing step's status after every applied step is undone |
+| `erx_dom_create(spec)` | validates an `erx_dom_spec_t` into a plan and applies it ([Creating a domain](#creating-a-domain)); a configured row's plan also gives the domain the devices the manifest places on that row ([Devices](#devices)) | the domain's record, with the number of its connection to the system domain and the system domain's values of that connection's objects, or the failing step's status after every applied step is undone, `ERX_EBUSY` when a device of the row is held by a living domain |
 | `erx_dom_start(id)` | starts the built domain's first thread | `ERX_OK`; `ERX_EDEAD` for a stopped space; `ERX_EINVAL` for any state but built |
 | `erx_dom_stop(id, status)` | stops the domain's space, and with it every sub-space below it | `ERX_OK`; `ERX_EINVAL` for an unknown or ended id |
 | `erx_dom_resize(id, memory)` | resizes a running domain's own budget with `erx_budget_resize`, guarantee and cap together, within its principal's budget ([Resource policy](#resource-policy)); refuses a configured domain, whose sizes are the manifest's (A10) | `ERX_OK`; `ERX_EINVAL` for an unknown, ended or configured id; `ERX_ENOMEM` when the principal's budget cannot cover the growth, after which nothing changes |
@@ -987,7 +988,6 @@ NIFs, since none of them waits:
 | `erx_dom_retire(id)` | releases an ended domain: destroys its crash area, frees its record and gives its principal back the domain and its own budget's bytes; destroys its outer budget when no connection names the domain, and otherwise keeps the outer budget as the domain's remains, which the disconnect of its last connection destroys; the domain service calls it once the crash area is read and the system connection disconnected, without waiting for any other connection | `ERX_OK`; `ERX_EINVAL` unless the domain has ended; `ERX_EBUSY` while its system connection stands |
 | `erx_dom_connect(a, b, a_reads, b_reads)` | creates a connection between two built or running domains: carves from each domain's outer budget a child budget for the connection; creates two sides, `b`'s sized `a_reads` and charged to `a`'s child, since `a` reads it, and `a`'s sized `b_reads` and charged to `b`'s child; and two bells, each charged to the child of the domain whose group it is bound to; gives each domain its share ([Authority](#authority)) | the connection's number and each domain's values; `ERX_ENOMEM` when a reader's outer budget cannot cover its child; `ERX_ELIMIT` for a full table; `ERX_EINVAL` for a domain outside built or running, or for `a == b` |
 | `erx_dom_disconnect(number)` | destroys the connection's child budgets, which deletes its sides and bells at once, and the remains of each retired party that no other connection names; the domain service asks it only once each party has unmapped them or ended; a capability to them fails with `ERX_ESTALE` from then on | `ERX_OK`; `ERX_EINVAL` for an unknown number |
-| `erx_dom_device_give(id, index)` | carves the device's resource and creates its register windows, IRQ objects and, for a confined device, its DMA window, from the domain's own budget; for an unconfined device creates its contiguous memory from the system domain's budget at its first give and keeps it for the boot; gives the domain its capabilities ([Devices](#devices)) | the values in the domain's table; `ERX_EBUSY` for a device another living domain holds; `ERX_ENOMEM`; `ERX_EINVAL` |
 | `erx_dom_code_object(session, size)` | creates a paged object with an execute ceiling from the session's budget through the system domain's own capability to it, which carries `CODE`, and gives the session a copy with `SUPPLY`, `READ`, `MAP`, `CHILD`, `DUP`, `GIVE` and `EXEC`; the kernel refuses an executable mapping of it until it is sealed (K8) | the object's number and the session's value; `ERX_ENOMEM`; `ERX_ELIMIT` beyond `file_objects` for the session |
 | `erx_dom_code_drop(session, number)` | deletes a session's code object, after which every mapping of it faults | `ERX_OK`; `ERX_EINVAL` |
 | `erx_dom_end_begin(how)` | installs the ending record with its absolute deadline ([Shutting down](#shutting-down)) | `ERX_OK`; `ERX_EBUSY` for a second begin; `ERX_ENOTSUP` for a trial when the boot value is `unknown` |
@@ -1231,14 +1231,17 @@ baseline remains the manifest's; runtime changes do not edit it.
       domain's side with `READ` and `MAP`, and the system domain's bell
       with `TRIGGER` alone, and no capability to its own bell, whose label
       it learns; the time page with `READ` and `MAP`; the release slice;
-      the crash area; then write the boot information page with the
+      the crash area; for a configured row, each device the manifest
+      places on the row, as a give of its own
+      ([Devices](#devices)); then write the boot information page with the
       plan's complete `runtime_limits` projection, the capability values
       the installs returned, the addresses of the
       mappings, the release slice's and the sealing page's included, the
       label of its own bell, the two data areas' sizes, the domain's own
       node name, the system domain's node name and id as the peer of its
-      first connection, and the number and serial of the domain pid the
-      request names
+      first connection, the number and serial of the domain pid the
+      request names, and each given device's record
+      ([Boot information](design-stopgap.md#boot-information))
       ([design-runtime.md](design-runtime.md#data-model));
    7. create the first thread, a worker in the domain's group, with the
       boot information page's address as its argument, stopped;
@@ -1252,8 +1255,16 @@ baseline remains the manifest's; runtime changes do not edit it.
 3. **Return** the domain's record, with the connection's number and
    the system domain's values of its connection's objects, or the
    failing step's status after undoing what was applied, which is
-   destroying the domain's two budgets, since every object of the creation
-   is charged to one of them (A4).
+   undoing the gives first, last give first, and then destroying the
+   domain's two budgets, since every object of the creation is charged to
+   one of them (A4); a give's objects are destroyed one by one, by their
+   own handles, before the holder's budget goes. A device's contiguous
+   memory is never undone: it is charged to the system domain and is the
+   device's for the boot from the give that makes it, no driver has been
+   told its address yet, and contiguous runs are not returned on the
+   stopgap, so a fresh memory goes into the device's record and the
+   row's next creation gives it again, as it does the memory an earlier
+   holder kept.
 
 The domain service creates the domain pid before it asks for the plan,
 since the boot information names it, and ends it when the plan fails.
@@ -1883,7 +1894,7 @@ Who holds what, with the rights each capability carries:
 | --- | --- |
 | the system domain | the initial capabilities, the root budget (`ALLOC`, `SPACES`, `CODE`, `CARVE`), the root resource (`CARVE`, `POWER`, `TRACE`, `ENTROPY`, `INSPECT`) and the boot image (`SYSTEM`) among them; every principal's budget and every domain's space, own and outer budgets and group with every right; every object it created for a domain; every connection's objects and child budgets, with the only `DESTROY`; every device's objects until it gives them, and their `DESTROY` always; every unconfined device's memory; the fault gate (bound to the fault thread); the sealing page; the time page; `CONFIGURE` on the `system` group, the `users` group, every principal group and every domain group; on another domain's processes, only what that domain's runtime exports to it, as any peer ([design-domains.md](design-domains.md#authority)) |
 | a domain | its own objects; its own budget (`ALLOC`, and `SPACES` only where the system domain allows it, [Sub-spaces](#sub-spaces)); its group (`ATTACH`, `SIGNAL`) and the group's shared areas; for each of its connections: its own side (`READ`, `WRITE`, `MAP`), the peer's side (`READ`, `MAP`) and the peer's bell (`TRIGGER`), and no capability to its own bell, which the system domain bound to the domain's group and whose label the domain knows; the time page (`READ`, `MAP`); its release slice; its crash area; its boot information page |
-| a domain that holds a device | as a domain, plus the IRQ objects of the device's lines or MSIs (`BIND`, `ACK`), which its driver binds to the domain's group; its DMA window (`MAP`, `BIND`), or for an unconfined device its contiguous memory (`READ`, `WRITE`, `MAP`, `PHYS`); its register windows' memory objects (`READ`, `WRITE`, `MAP`); for the block device's domain and the slot writer, a read-only view of the machine page; all as the device service asked the domain library to give them |
+| a domain that holds a device | as a domain, plus the IRQ objects of the device's lines or MSIs (`BIND`, `ACK`), which its driver binds to the domain's group; its DMA window (`MAP`, `BIND`), or for an unconfined device its contiguous memory (`READ`, `WRITE`, `MAP`, `PHYS`); its register windows' memory objects (`READ`, `WRITE`, `MAP`); for the block device's domain and the slot writer, a read-only view of the machine page; all as the domain's creation gave them |
 | a session domain | as a domain holding `SPACES`, plus each code object the domain library made for it (`SUPPLY`, `READ`, `MAP`, `CHILD`, `DUP`, `GIVE`, `EXEC`), and every object it creates for its programs, their channels, pipes and shared mappings of files, with every right, since it is their creator ([design-programs.md](design-programs.md#a-program-is-a-port), [design-pipes.md](design-pipes.md#making-a-pipe), [design-files.md](design-files.md#shared-mappings)) |
 | a domain holding `SPACES` | as its kind of domain, with `CARVE`, `DUP` and `GIVE` also on its own budget; its sub-space group, a child of its group with a grant of its own (`CONFIGURE`, `ATTACH`, `SIGNAL`, `DUP`, `GIVE`); each sub-space it created, with every right, and what it put in them |
 
@@ -1898,8 +1909,9 @@ creator, which may pass what a type's pass set excludes, such as a budget,
 a group or a device's objects, and passes a space's own capability with
 `INSPECT` alone ([design-kernel.md](design-kernel.md#passing-capabilities)).
 Its recipient is the domain being built, at creation's step 6; either end
-of a connection, at `erx_dom_connect`; a device's holder, at
-`erx_dom_device_give`; or a session, at `erx_dom_code_object`. The library
+of a connection, at `erx_dom_connect`; or a session, at
+`erx_dom_code_object`. A device's holder is the domain being built, and
+the gives of its creation install the device's objects. The library
 never passes out of another domain's table and never moves a capability:
 no flow in the design needs it, and a session installs into its programs
 itself.
@@ -2284,14 +2296,34 @@ the system domain. At boot it reads the root resource's device list
 through `erx_object_info` and builds a catalogue: path, compatible string,
 register ranges, interrupt lines, and whether a device is confined
 ([design-kernel.md](design-kernel.md#resources-dma-windows-and-consoles)).
-It gives each device the manifest names to the one domain the manifest
-names for it, and the domain library installs the device's capabilities
-there: `erx_dom_device_give` carves the device's resource, creates its
+Each device goes to the one domain the manifest names for it, as part of
+that domain's creation: for each catalogue entry whose unit the manifest
+places on the configured row, `erx_dom_plan_configured` adds a **give**,
+planned by `erx_dom_plan_device_give` and applied whole by one step of the
+creation's plan. A give carves the device's resource, creates its
 register windows as physical memory objects with device attributes, its
 IRQ objects and, for a confined device, its DMA window, all from the
 holder's own budget; for an unconfined device it gives the device's
 contiguous memory instead (below); and it gives the holder its
-capabilities ([Authority](#authority)). The `PHYS` right on contiguous
+capabilities ([Authority](#authority)). A give is its own plan, not
+steps in the creation's, because every device's objects use the same
+object numbers and so cannot share the creation's object namespace; a
+creation holds up to eight. No device service has to give at the right
+moment. The planner gives a device only to a domain of the row its unit
+is placed on, and refuses a give with `ERX_EBUSY` while a living domain
+holds the device, so a second domain of the row is refused while the
+first lives. On success the device's record names the holder and its
+objects; at the holder's end the window, line, resource and DMA objects
+are destroyed and the record names no holder, while the contiguous
+memory stays the device's for the boot, and the row's next creation
+installs that memory again instead of making new. A catalogue entry's
+index is its manifest device row. On erXos's kernel the carve finds the
+device in the root resource by the entry's device-tree path, not by its
+position in the resource's list. `erx_domain_lib:devices/0` returns the
+catalogue with each entry's holder: `{ok, [#{index, unit, row, role,
+holder}]}`, where `row` is a configured row or `system`, `role` is
+`block`, `net` or `none`, and `holder` is a domain id, `system` or `none`.
+The `PHYS` right on contiguous
 memory goes only to the domain of the device the memory is for, and is
 stripped from every other capability to that memory. A device the
 manifest does not name goes to no domain, and a PCIe function among them
@@ -2368,10 +2400,12 @@ a panic or the machine's end, and the driver owns it otherwise
 ([design-kernel.md](design-kernel.md#console-log-and-panic)).
 
 **On the stopgap.** The device service, the manifest's placement, the
-drivers and their supervisors are the same code. Behind
-`erx_dom_device_give`, the domain library creates a device's register
-window, its line's IRQ object and, at the first give, its contiguous
-memory, all in the root, and passes them to the holding domain, whose
+drivers and their supervisors are the same code. In a give, the domain
+library creates a device's register window, its line's IRQ object and, at
+the first give, its contiguous memory, all in the root, from the catalogue
+entry at the give's index, which is the manifest's device row (neither
+backend has a resource object, so the give's resource step makes
+nothing), and passes them to the holding domain, whose
 driver maps the window and binds the line to its own group, so the line's
 deliveries reach that task's readiness dispatcher; no device object is
 created from a task other than the root
@@ -2509,8 +2543,8 @@ binary matching in a supervised process and a fuzz target over
 configuration snapshots, since every parser of untrusted input has one,
 and reports each function, with its BARs, capabilities and requester id,
 to the device service, which adds it to the catalogue. To give a function
-to the domain the manifest names for it, the device service calls
-`erx_dom_device_give`, whose plan carves the function's BARs as register
+to the domain the manifest names for it, the library plans the give with
+`erx_dom_plan_device_give`, whose plan carves the function's BARs as register
 windows after checking that each lies inside the bridge's windows from
 the device tree and overlaps no other device, creates its MSIs as IRQ
 objects on the MSI frame, whose doorbell address and data the result
@@ -2549,8 +2583,8 @@ diagnostic; a manifest whose own units split a page never gets that far,
 since the domain library's boot view, which the manifest check runs too,
 refuses it whole. A unit goes to one
 domain, whose drivers reset its devices together. The domain library
-holds the placement as well: `erx_dom_device_give` gives a device only to
-a domain of the configured row the manifest places its unit on, never to
+holds the placement as well: a give, `erx_dom_plan_device_give`, gives a
+device only to a domain of the configured row the manifest places its unit on, never to
 a requested or session domain or to another row's.
 
 **Partition windows.** The block driver serves each partition of its
@@ -3666,7 +3700,7 @@ under test ran.
   enumerator enables before its DMA window exists, whose DMA aborts at the
   IOMMU; the enumerator's process killed while drivers run, whose restart
   leaves every function running; a BAR outside the bridge's windows or
-  overlapping another device, which `erx_dom_device_give` refuses with
+  overlapping another device, which `erx_dom_plan_device_give` refuses with
   `ERX_EINVAL`; a native shim in a sub-space port that faults, whose
   driver domain runs on and restarts it; a register access that aborts on
   the bus, which ends the devices domain, which the domain service
