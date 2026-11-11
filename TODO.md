@@ -1073,14 +1073,6 @@ it; git history is the record of completed work.
   check does, nor `max_message_heap` or `funnel_depth`. Generate the floors from the operation schema with
   the send-credit change, check them on the client before each call, and replace the
   hand-set limit with the generated `max_frame` floor.
-* [Medium] manifest check, `tools/lib/erx/manifest.rb` (`check_network_grants`,
-  `check_files_grants`; design-domains, "Floors from a protocol"): properties 15 and 16
-  each hold a protocol's receivers to its `max_frame` floor with their own copy of the
-  check, and 15 checks only the grantee, not the server. Keep one table from interface
-  to floor constant (`net` to `net_max_frame_min`, `files` to `files_max_frame_min`) and
-  one loop over every receiver, grantee and server, through one `max_frame_of`
-  (merging `receiver_max_frame` and `grantee_max_frame`), so a new protocol with a floor
-  is a table row; property 15 keeps only its rule that the system domain holds no `net`.
 * [Medium] network, `erx_net` and `erx_net_client` (`erx_udp_sock`, `erx_icmp_sock`,
   `erx_gen_udp_core`; design-network-stack, "Credit"): datagram memory is not bounded as
   the design says. A datagram socket's receive queue in the network domain is bounded in
@@ -1472,7 +1464,7 @@ it; git history is the record of completed work.
   start `erx_inspect_agent` in every domain, named in the ready report and kept only when the incarnation owns
   it, with `collects_domain/2` as its rule; start `erx_procfs` over the facet rather
   than at scope `all` (`otp/lib/kernel/src/kernel.erl`); then delete `erx_log_facet` and its tests, the
-  line's `scope`, the local scope of `facets/2`, and `log` and `inspect` from `UNDECLARED`. Keep the
+  line's `scope`, the local scope of `facets/2`, and `log` from `UNDECLARED`. Keep the
   `session-dmesg` QEMU checkpoint, which tests the behaviour. Until then have `erx_domain:create/1` refuse a
   spec's facet named `inspect`.
 * [Medium] shell, the session_domain QEMU cell of session P6 (`tools/lib/erx/qemu_suites/session_domain.rb`, which
@@ -1909,7 +1901,11 @@ it; git history is the record of completed work.
 * [Low] manifest check, `tools/lib/erx/manifest.rb`: `system_reservation` is 0, so the
   system domain's reservation for `max_domains` admitted domains (property 4) is not
   counted against `root_memory`; design-abi.md has the production admission planner
-  derive it, and nothing on the stopgap enforces it.
+  derive it, and nothing on the stopgap enforces it. The system domain's `max_frame` of 512 KiB,
+  `inspect`'s frame floor, makes each connection's term of it (a record buffer and a funnel scratch
+  kept at its high-water mark, about twice the frame) four times what 128 KiB made it, and a
+  `max_request` up to 512 KiB is not held to its server's `max_frame`; an `inspect` holder adds
+  `in_flight` times `inspect_worker_heap` (design-live.md, "The query worker").
 * [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#normalize_domains`): a
   configured domain's limits record (memory, outer, lane, connections, crash, flags,
   peer-held bounds) is not held to its principal's `ceiling_limits`, which design-abi.md

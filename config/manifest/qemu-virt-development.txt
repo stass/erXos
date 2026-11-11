@@ -200,8 +200,15 @@ share web
   base 16
   ceiling 31
   flags none
+# The system domain serves inspect and a session holds it, so both take inspect's
+# floors (abi/services/inspect.txt, property 16): a max_frame of
+# inspect_max_frame_min, 512 KiB, a max_message_heap of at least
+# inspect_message_heap_min, 131072 words, and a funnel_depth of at least
+# inspect_funnel_depth_min. A record buffer grows only as a frame's bytes arrive, but
+# the funnel's scratch keeps its high-water mark for the connection's life, so a peer's
+# one large frame pins up to twice max_frame there (TODO.md, the per-domain hold).
 runtime_limits system
-  max_frame 131072
+  max_frame 524288
   max_message_heap 1048576
   funnel_depth 64
   exports 256
@@ -214,7 +221,7 @@ runtime_limits system
 # processes of the web measurement's fixture (tools/lib/erx/session_domain.rb),
 # about 4 MiB of its 36 MiB.
 runtime_limits session
-  max_frame 131072
+  max_frame 524288
   max_message_heap 131072
   funnel_depth 64
   exports 256
@@ -518,4 +525,22 @@ facet web
   reductions 100000
   period_ns 1000000000
   max_heap_size 262144
+# inspect: the inspector's queries for each session made from root's template
+# (docs/design-live.md, "The inspect service"), served by the system domain, so it
+# travels on the session's system connection and takes none of max_connections. A
+# request is a path and its options within 4 KiB; in_flight is the design's default of
+# two query workers at once; max_heap_size, in words (512 KiB), bounds the facet's
+# process, which holds the requests in flight, not the answers.
+service inspect
+  server system
+  interface inspect
+facet inspect
+  grantee @session.system
+  service @service.inspect
+  operations none
+  max_request 4096
+  in_flight 2
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 65536
 shell_principal @principal.system

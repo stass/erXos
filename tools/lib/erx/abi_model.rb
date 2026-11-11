@@ -218,6 +218,7 @@ module Erx
         services.each do |service|
           add_constant(all_constants, "service_#{service.fetch(:name)}", service.fetch(:number), BASE_TYPES.fetch('u32'), abi.line)
         end
+        inspection_bounds(inspection, all_constants, abi.line) if inspection
         Names.validate(types: types, constants: all_constants, calls: calls,
                        readers: readers, architecture: architecture, line: abi.line)
         result = Schema.new(version: version, architecture: architecture, types: types.freeze,
@@ -319,7 +320,7 @@ module Erx
       def unique_definitions(declarations)
         definitions = {}
         declarations.each do |declaration|
-          next if %w[abi arch trap reg cap inspection ui draw web signal realtime fault].include?(declaration.kind)
+          next if %w[abi arch trap reg cap inspection ui draw web signal realtime fault service].include?(declaration.kind)
           name = Syntax.identifier(declaration.args.first, line: declaration.line)
           declaration.fail!("duplicate definition #{name}") if definitions.key?(name) || BASE_TYPES.key?(name)
           definitions[name] = declaration
@@ -1059,6 +1060,25 @@ module Erx
         Inspection.validate(by_kind.fetch('inspection', []), limits: limits, types: types,
                             rights: rights.keys, objects: objects.keys,
                             statuses: by_kind.fetch('status', []).map { |item| item.args.first })
+      end
+
+      # What the inspection schema lets an answer of the inspect service be
+      # (docs/design-live.md, "The inspect service"): every record without
+      # entries within the interface's inspect_reply_max, so the inspector
+      # never cuts one, and the deepest nesting of an answer published as
+      # inspect_funnel_depth_min, the funnel_depth floor of its receivers
+      # (docs/design-system.md, "The manifest", property 16).
+      def inspection_bounds(inspection, constants, line)
+        require_relative 'abi_inspection_bounds'
+        reply_max = constants['inspect_reply_max']&.value ||
+                    line.fail!('an inspection schema needs the inspect interface\'s limit inspect_reply_max')
+        InspectionBounds.oversized_records(inspection, reply_max).each do |path, kind, bytes|
+          line.fail!("kind #{kind}'s largest record at path [#{InspectionBounds.path_text(path)}] is #{bytes} bytes, " \
+                     "past inspect_reply_max #{reply_max}")
+        end
+        add_constant(constants, 'inspect_funnel_depth_min', InspectionBounds.funnel_depth(inspection),
+                     BASE_TYPES.fetch('u32'), line,
+                     description: 'the deepest nesting of an inspect answer, computed from the inspection schema')
       end
 
       # The widget format's members have namespaces of their own and refer

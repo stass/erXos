@@ -479,11 +479,13 @@ class ManifestDomainsTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 2, 'facet.grantee', source)
   end
 
-  # A session takes its grants from a configured server domain directly; the system
-  # domain's own services reach configured domains only.
-  def test_a_session_granted_a_system_domain_service_is_refused
-    source = with_session(self.class.session) + service('s', 'system') + facet('f', '@session.system', '@service.s')
-    refused(Erx::Manifest::Invalid, 2, 'facet.grantee', source)
+  # Properties 2 and 14: a session template may hold a facet of a service the system
+  # domain serves, which the domain service starts for each session made from it, as
+  # it may one of a configured domain's; no server takes a facet of its own service.
+  def test_a_session_granted_a_system_domain_service_is_admitted
+    admit(with_session(self.class.session) + service('s', 'system') + facet('f', '@session.system', '@service.s'))
+    refused(Erx::Manifest::Invalid, 2, 'facet.grantee',
+            with_session(self.class.session) + service('s', 'system') + facet('f', 'system', '@service.s'))
   end
 
   # Property 15: the system domain holds no facet of the net or netadmin interface,
@@ -531,6 +533,37 @@ class ManifestDomainsTest < Minitest::Test
      ['grantee', with_max_frame(granted.call('system'), 'system', floor - 1)]].each do |role, source|
       refused(Erx::Manifest::Invalid, 16, 'runtime_limits.max_frame', source, message: /f's #{role} .*#{floor}/)
     end
+  end
+
+  # Property 16 for inspect: a grantee of an inspect facet, here a session template, and
+  # its server, the system domain, each run with max_frame, max_message_heap and
+  # funnel_depth at least the interface's floors, as the development manifest's
+  # runtime limits do. The seeds are the design's: a check
+  # that reads only the grantee's limits admits the server's; one of max_frame alone
+  # admits the template's max_message_heap.
+  def test_an_inspect_receiver_below_a_floor_is_refused
+    floors = { 'max_frame' => @codec.constant('inspect_max_frame_min'),
+               'max_message_heap' => @codec.constant('inspect_message_heap_min'),
+               'funnel_depth' => @codec.constant('inspect_funnel_depth_min') }
+    inspect = service('i', 'system').sub('interface 1', 'interface inspect')
+    granted = with_session(self.class.session) + inspect + facet('i', '@session.system', '@service.i')
+    admit(granted)
+    refused(Erx::Manifest::Invalid, 16, 'service.server', granted.sub("service i\n  server system", "service i\n  server @domain.beta"),
+            message: /only the system domain serves the inspect interface/)
+    %w[system session].product(floors.keys).each do |name, field|
+      role = name == 'system' ? 'server' : 'grantee'
+      refused(Erx::Manifest::Invalid, 16, "runtime_limits.#{field}",
+              with_runtime_limit(granted, name, field, floors.fetch(field) - 1),
+              message: /i's #{role} runs with #{field} #{floors.fetch(field) - 1}, below inspect's floor/)
+    end
+  end
+
+  # source with field of the runtime limits name set to value.
+  def with_runtime_limit(source, name, field, value)
+    pattern = /^(runtime_limits #{name}\n(?:  .*\n)*?  #{field} )\d+$/
+    raise ArgumentError, "no #{field} in runtime_limits #{name}" unless source.match?(pattern)
+
+    source.sub(pattern) { "#{Regexp.last_match(1)}#{value}" }
   end
 
   # source with the max_frame of the runtime limits name set to bytes.

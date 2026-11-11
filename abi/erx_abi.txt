@@ -8,6 +8,7 @@ include services/driver_control.txt
 include services/net.txt
 include services/files.txt
 include services/web.txt
+include services/inspect.txt
 include manifest.txt
 include formats/elf64.txt
 include formats/virtio.txt

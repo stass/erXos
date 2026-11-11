@@ -122,9 +122,9 @@ class MediumBootTest < Minitest::Test
     sessionless = Erx::ProductionImage.without_sessions(plain)
     refute_match(/^session /, sessionless)
     refute_match(/^  grantee @session\./, sessionless)
-    # The session template's 5 lines, and the facets granted to it: the 10 of data_session
-    # and the 9 of net.
-    assert_equal 5 + 10 + 9, plain.lines.size - sessionless.lines.size
+    # The session template's 5 lines, and the facets granted to it: the 10 of data_session,
+    # the 9 of net and the 9 of inspect.
+    assert_equal 5 + 10 + 9 + 9, plain.lines.size - sessionless.lines.size
     # The web domain's records: its share's 11 lines, its runtime limits' 10, its limits'
     # 12, its domain's 10, its service's 3 and its facet's 9.
     webless = Boot.without_web(sessionless)

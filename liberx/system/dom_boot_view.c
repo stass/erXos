@@ -559,10 +559,12 @@ boot_facet_repeats(const erx_dom_view_t *view, const erx_dom_facet_t *facets, ui
 /*
  * Why facet's grantee cannot take a facet of service, or NULL. The
  * system domain takes no facet of its own services; a configured row
- * none of its own; and a session template only a configured domain's,
- * which the server grants each session directly. The reader has checked
- * the grantee's index against its kind's table and made the system
- * domain's 0; the bounds are checked again against the view's own.
+ * none of its own; and a session template a configured domain's, which
+ * the server grants each session directly, or the system domain's, whose
+ * facet the domain service starts for each session (property 14). The
+ * reader has checked the grantee's index against its kind's table and
+ * made the system domain's 0; the bounds are checked again against the
+ * view's own.
  */
 static const char *
 boot_facet_grantee(const erx_dom_view_t *view, const erx_mf_facet_t *facet, const erx_dom_service_t *service)
@@ -581,8 +583,6 @@ boot_facet_grantee(const erx_dom_view_t *view, const erx_mf_facet_t *facet, cons
 	case ERX_MF_GRANTEE_SESSION:
 		if (facet->grantee >= view->ntemplates)
 			return ("manifest: a facet's grantee is no session template");
-		if (service->server == ERX_MF_NONE)
-			return ("manifest: a session template takes a facet of the system domain's service");
 		return (NULL);
 	default:
 		return ("manifest: a facet's grantee is of no kind the boot knows");
@@ -595,8 +595,7 @@ boot_facet_grantee(const erx_dom_view_t *view, const erx_mf_facet_t *facet, cons
  * boot_configured and boot_templates set first. A server is a configured
  * row or ERX_MF_NONE, and a grantee the system domain, a configured row or
  * a session template; a facet is never granted to its service's own
- * server, a session template takes only a configured domain's service, a
- * grantee takes one facet of a service name, and a facet names no
+ * server, a grantee takes one facet of a service name, and a facet names no
  * operation or parameter (erx_dom_facet_t). The reader has checked every
  * index and string against its table.
  */

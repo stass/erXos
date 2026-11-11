@@ -15,6 +15,7 @@ class AbiInspectionTest < Minitest::Test
   ROOT_SOURCE = <<~ABI
     abi 1
     limit width u32 40
+    limit inspect_reply_max u32 262144
     status ok 0 "success"
     status inval -1 "invalid argument"
     right read 0 "read"
@@ -347,6 +348,35 @@ class AbiInspectionTest < Minitest::Test
     assert_refused(BASE, /report layouts erx_info_thing need the topic enum info_kind/,
                    root: REPORT.sub("enum info_kind u32\n  value basic 0\n  value thing 1\n", ''))
     model(BASE, root: "enum info_kind u32\n  value basic 0\n")
+  end
+
+  # The funnel_depth floor of an inspect answer, counted by hand for BASE: the facet's
+  # reply {[alias | Alias], {partial, [Record]}} opens 3 containers around a record;
+  # thing's record map, its attrs map, the attribute {Reporter, Value} and the value
+  # {ok, Size} open 4, its integer none. A list attribute nests one more.
+  def test_the_funnel_depth_floor_is_the_deepest_answer
+    assert_equal 7, model(BASE).constants.fetch('inspect_funnel_depth_min').value
+    deeper = with_attr('n pair reporters kernel visible any build all projections shell') + "  list pair index 2\n"
+    assert_equal 8, model(deeper).constants.fetch('inspect_funnel_depth_min').value
+  end
+
+  # Every record without entries fits inspect_reply_max, so the inspector never cuts
+  # one: three texts of 64 KiB fit 256 KiB, four do not.
+  def test_a_kind_whose_largest_record_passes_the_reply_bound_is_refused
+    texts = ->(count) { (1..count).map { |n| "t#{n} long reporters kernel visible any build all projections shell\n" }.join }
+    bulky = ->(count) { "#{BASE}  text long 65536\n  kind bulk\n#{texts.call(count).gsub(/^/, '    attr ')}  path bulk bulk\n" }
+    model(bulky.call(3))
+    assert_refused(bulky.call(4), /kind bulk's largest record at path \[bulk\] is \d+ bytes, past inspect_reply_max 262144/)
+  end
+
+  def test_an_inspection_schema_needs_the_reply_bound
+    error = assert_raises(Erx::ABI::SchemaError) do
+      Erx::ABI::Model.validate(Erx::ABI::SourceSet.new(
+        declarations: (Erx::ABI::Syntax.parse(ROOT_SOURCE.sub("limit inspect_reply_max u32 262144\n", ''), path: 'abi/erx_abi.txt') +
+                       Erx::ABI::Syntax.parse(BASE, path: 'abi/inspection.txt')).freeze, inputs: {}.freeze
+      ))
+    end
+    assert_match(/needs the inspect interface's limit inspect_reply_max/, error.message)
   end
 
   # The build's own generator refuses the checked-in ABI with one seeded

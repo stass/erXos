@@ -1,0 +1,27 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The inspect interface (docs/design-live.md, "The inspect service"): the inspector's two
+# queries from another domain, served by the system domain. inspect takes a path and
+# options and answers {ok, Record} or {error, Reason}; entries takes a path and answers
+# the records of a listing's entries, {ok, Records} or {partial, Records}.
+# inspect_reply_max bounds an answer's encoding in bytes: the inspector cuts a listing or
+# an append-only record's entries before it, and the generator refuses a schema whose
+# record without entries passes it. Every grantee of an inspect facet and the system
+# domain, its server, carry the three floors the funnel applies to a frame (property 16;
+# docs/design-domains.md, "Floors from a protocol"): inspect_max_frame_min bytes of
+# max_frame, an answer and its envelope in one frame; inspect_message_heap_min words of
+# max_message_heap, four times the answer bound; and inspect_funnel_depth_min of
+# funnel_depth, which the generator computes from abi/inspection.txt
+# (tools/lib/erx/abi_inspection_bounds.rb). A query worker's max_heap_size is
+# inspect_worker_heap words, and it lives at most inspect_query_max milliseconds. The
+# sizes are provisional, for Phase 1's trusted workloads, until the measurement of
+# docs/todo-performance.md sets them. A word is 8 bytes, as manifest max_message_heap
+# and OTP's max_heap_size count it.
+service inspect 7
+  operation inspect 1
+  operation entries 2
+limit inspect_reply_max u32 262144
+limit inspect_max_frame_min u32 524288
+limit inspect_message_heap_min u32 131072
+limit inspect_worker_heap u32 524288
+limit inspect_query_max u32 5000

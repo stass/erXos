@@ -188,20 +188,14 @@ class DomPlannerTest < Minitest::Test
     assert_equal 1, admit(with_sessions).report.fetch('child_plan_instances')
   end
 
-  # A facet granted to a session template, of a configured domain's service, reaches
-  # the root's view, which admits it; the same grant of a service the system domain
-  # serves, which the check never writes, the view refuses.
+  # A facet granted to a session template reaches the root's view, which admits it,
+  # whether a configured domain serves its service or the system domain does
+  # (property 14).
   def test_a_facet_granted_to_a_session_template_passes_the_view
     facet = "service b\n  server @domain.alpha\n  interface 1\nfacet gb\n  grantee @session.guest\n  service @service.b\n" \
             "  operations none\n  max_request 1\n  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
-    manifest = admit(with_sessions + facet).bytes
-    offset = @codec.open('manifest', manifest).header.fetch('services').fetch('offset')
-    paths = %w[manifest heads plan].map { |name| File.join(@directory, "session-facet-#{name}") }
-    bytes = manifest.dup.tap { |copy| copy[offset + 8, 4] = [@codec.constant('mf_none')].pack('V') }
-    [bytes, '', "order 0\n"].zip(paths).each { |content, file| File.binwrite(file, content) }
-    record = @helper.run(paths, runner: @runner, name: 'dom-plan-session-facet', deadline: 30)
-    assert_match(/\Arefused manifest: a session template takes a facet of the system domain's service\n\z/,
-                 File.binread(record.fetch('log')))
+    admit(with_sessions + facet)
+    admit(with_sessions + facet.sub('server @domain.alpha', 'server system'))
   end
 
   # What the check never writes, which the root's view refuses: two templates out
@@ -417,14 +411,15 @@ class DomPlannerTest < Minitest::Test
                "no #{unit} entry in #{lines.inspect}")
       end
     interface = ->(name) { @codec.schema.services.find { |service| service.fetch(:name) == name }.fetch(:number) }
-    # The configured domains' services, in name order, each with its server's index in boot
-    # order (network 0, storage 1, web 2): data, of files, net, network_ctl, storage_ctl
-    # and web.
+    # The services, in name order, each with its server's index in boot order (network 0,
+    # storage 1, web 2) or none for the system domain: data, of files, inspect, net,
+    # network_ctl, storage_ctl and web.
     assert_equal ["service 0 name=data server=1 interface=#{interface.call('files')}",
-                  "service 1 name=net server=0 interface=#{interface.call('net')}",
-                  "service 2 name=network_ctl server=0 interface=#{interface.call('driver_control')}",
-                  "service 3 name=storage_ctl server=1 interface=#{interface.call('driver_control')}",
-                  "service 4 name=web server=2 interface=#{interface.call('web')}"],
+                  "service 1 name=inspect server=none interface=#{interface.call('inspect')}",
+                  "service 2 name=net server=0 interface=#{interface.call('net')}",
+                  "service 3 name=network_ctl server=0 interface=#{interface.call('driver_control')}",
+                  "service 4 name=storage_ctl server=1 interface=#{interface.call('driver_control')}",
+                  "service 5 name=web server=2 interface=#{interface.call('web')}"],
                  lines.grep(/\Aservice /)
   end
 

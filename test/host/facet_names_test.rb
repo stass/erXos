@@ -49,7 +49,18 @@ class FacetNamesTest < Minitest::Test
     assert_empty Erx::FacetNames.violations(files, docs: docs).map(&:to_s)
     facets = Erx::FacetNames.table(files).first.facets.to_set { |facet| [facet.name, facet.interface] }
     assert_operator facets, :superset?, Set[%w[data files], %w[storage_ctl driver_control], %w[net net],
-                                            %w[network_ctl driver_control], %w[web web]]
+                                            %w[network_ctl driver_control], %w[web web],
+                                            %w[inspect inspect]]
+  end
+
+  # inspect is a manifest service of a declared interface that cites its design section,
+  # so its uses need no exemption.
+  def test_inspect_resolves_to_its_interface_and_citation
+    files, = tree
+    interface = Erx::FacetNames.table(files).first.interfaces.find { |item| item.name == 'inspect' }
+    assert_equal 'abi/services/inspect.txt', interface.path
+    assert_match(/design-live\.md.*The inspect service/, interface.design.to_s)
+    refute Erx::FacetNames::UNDECLARED.key?('inspect')
   end
 
   # The design's seed: a facet the table does not list, looked up by a domain.

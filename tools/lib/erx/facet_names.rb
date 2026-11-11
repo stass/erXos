@@ -57,10 +57,6 @@ module Erx
       'log' => Exemption.new(todo: 'TODO.md, Security residuals, "Web view scope": the kernel log is to be ' \
                                    'read as the inspection path [kernel, log] through the inspect facet',
                              sites: ["#{APPS}/erx/src/erx_log_records.erl"]),
-      'inspect' => Exemption.new(todo: 'TODO.md, Bugs, "a session\'s inspect facet": erx_facets:facets/2 ' \
-                                       'makes its scope locally until the system domain mints it',
-                                 sites: ["#{APPS}/erx/src/erx.erl", "#{APPS}/erx_shell/src/erx_cmd_top.erl",
-                                         "#{APPS}/erx_web_line/src/erx_web_line.erl"]),
       'console' => Exemption.new(todo: 'TODO.md, Bugs, "two facets of no declared interface": ' \
                                        'abi/services/console.txt declares no service',
                                  sites: ["#{APPS}/erx/src/erx_console.erl",

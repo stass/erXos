@@ -1060,11 +1060,14 @@ module Erx
       # queue resolved to system_queue. A facet is installed in its grantee's registry
       # under its service's name (docs/design-system.md, "Facets a configured domain
       # serves"), so a grantee takes at most one facet of a service name, whichever domain
-      # serves it (property 2); the system domain takes no facet of its own service; and a
-      # session template takes facets of configured domains' services alone, which the
-      # server grants the session directly. A facet of the driver-control interface stops
-      # and starts another domain's drivers, so only the system domain holds one
-      # (property 8); the network's facets are property 15's (check_network_grants).
+      # serves it (property 2); and the system domain takes no facet of its own service. A
+      # session template may take a facet of a configured domain's service, which the
+      # server grants each session made from it, or of a system-served one, which the
+      # domain service starts for each such session (property 14). A facet of the
+      # driver-control interface stops and starts another domain's drivers, so only the
+      # system domain holds one (property 8); the network's facets are property 15's
+      # (check_network_grants), and the files and inspect receivers' floors property 16's
+      # (check_files_grants, check_inspect_grants).
       def normalize_facets(services, tables)
         service_rows = tables.fetch('services')
         rows = records('facet').map do |record|
@@ -1082,21 +1085,20 @@ module Erx
         invalid('a grantee takes two facets of one service name', 2, 'facet.service') unless taken.uniq.size == taken.size
         invalid('the system domain takes no facet of its own service', 2, 'facet.grantee') if
           rows.any? { |row| row.fetch('grantee_kind') == grantee_kind('system') && server.call(row) == none }
-        invalid('a session template takes facets of configured domains\' services alone', 2, 'facet.grantee') if
-          rows.any? { |row| row.fetch('grantee_kind') == grantee_kind('session') && server.call(row) == none }
         control = fetch_interface('driver_control')
         invalid('only the system domain holds a driver-control facet', 8, 'facet.grantee') if
           rows.any? { |row| row.fetch('grantee_kind') != grantee_kind('system') && service_rows.fetch(row.fetch('service')).fetch('interface') == control }
         check_network_grants(rows, tables)
         check_files_grants(rows, tables)
+        check_inspect_grants(rows, tables)
         rows.sort_by { |row| [row.fetch('name'), *grantee.call(row)] }
       end
 
       # Property 15: the system domain holds no facet of the network domain's net or
       # netadmin interface, compared by number, however the service row spells it. Each
-      # grantee of net, a configured domain or a session template, takes frames of at
-      # least net_max_frame_min bytes under its own runtime limits, since the socket
-      # protocol's piece and its envelope arrive in one frame. The manifest is the only
+      # grantee of net, a configured domain or a session template, and its server take
+      # frames of at least net_max_frame_min bytes under their own runtime limits, since
+      # the socket protocol's piece and its envelope arrive in one frame. The manifest is the only
       # source of a net grant, since no requested create carries one, so this holds for
       # every grant there is.
       def check_network_grants(facets, tables)
@@ -1108,13 +1110,7 @@ module Erx
           invalid("facet #{row.fetch('name')} grants the system domain a network interface, which it never holds", 15, 'facet.grantee')
         end
         floor = @codec.constant('net_max_frame_min')
-        facets.select { |row| interface.call(row) == net }.each do |row|
-          max_frame = grantee_max_frame(row, tables)
-          next if max_frame >= floor
-
-          invalid("facet #{row.fetch('name')}'s grantee takes frames of at most #{max_frame} bytes, below net's floor of #{floor}",
-                  15, 'runtime_limits.max_frame')
-        end
+        facets_of(facets, 'net', tables).each { |row| check_receiver_floors(row, tables, 'net', { 'max_frame' => floor }, property: 15) }
       end
 
       # Property 16: every domain that receives the files protocol of a files facet, its
@@ -1124,44 +1120,67 @@ module Erx
       # or a write request of the client's 64 KiB transfer unit arrives in one frame, and
       # the funnel drops a longer frame and the facet a longer request.
       def check_files_grants(facets, tables)
-        files = fetch_interface('files')
         floor = @codec.constant('files_max_frame_min')
-        services = tables.fetch('services')
-        facets.select { |row| services.fetch(row.fetch('service')).fetch('interface') == files }.each do |row|
+        facets_of(facets, 'files', tables).each do |row|
           if row.fetch('max_request') < floor
             invalid("facet #{row.fetch('name')}'s max_request #{row.fetch('max_request')} is below files' floor of #{floor}",
                     16, 'facet.max_request')
           end
-          server = services.fetch(row.fetch('service')).fetch('server')
-          server_kind = server == @codec.constant('mf_none') ? grantee_kind('system') : grantee_kind('domain')
-          receivers = { 'grantee' => receiver_max_frame(row.fetch('grantee_kind'), row.fetch('grantee'), tables),
-                        'server' => receiver_max_frame(server_kind, server, tables) }
-          receivers.each do |role, max_frame|
-            next if max_frame >= floor
+          check_receiver_floors(row, tables, 'files', { 'max_frame' => floor }, property: 16)
+        end
+      end
 
-            invalid("facet #{row.fetch('name')}'s #{role} takes frames of at most #{max_frame} bytes, below files' floor of #{floor}",
-                    16, 'runtime_limits.max_frame')
+      # Property 16 for inspect: every grantee of an inspect facet and its server, the
+      # system domain, which also takes the runtime agents' answers of the same bound,
+      # carry the interface's floor on each of the three limits the funnel applies to a
+      # frame, so no receiver's funnel drops a valid answer (docs/design-live.md, "The
+      # inspect service"). inspect_funnel_depth_min is computed from the inspection
+      # schema (tools/lib/erx/abi_inspection_bounds.rb). Only the system domain serves
+      # inspect, since it alone validates and scopes the answers a grantee reads.
+      def check_inspect_grants(facets, tables)
+        floors = { 'max_frame' => @codec.constant('inspect_max_frame_min'),
+                   'max_message_heap' => @codec.constant('inspect_message_heap_min'),
+                   'funnel_depth' => @codec.constant('inspect_funnel_depth_min') }
+        inspect = fetch_interface('inspect')
+        if tables.fetch('services').any? { |row| row.fetch('interface') == inspect && row.fetch('server') != @codec.constant('mf_none') }
+          invalid('only the system domain serves the inspect interface', 16, 'service.server')
+        end
+        facets_of(facets, 'inspect', tables).each { |row| check_receiver_floors(row, tables, 'inspect', floors, property: 16) }
+      end
+
+      # The facet rows of the interface abi/services declares as NAME, compared by number.
+      def facets_of(facets, name, tables)
+        interface = fetch_interface(name)
+        facets.select { |row| tables.fetch('services').fetch(row.fetch('service')).fetch('interface') == interface }
+      end
+
+      # Refuses, as PROPERTY, a facet whose grantee or server runs a runtime limit below
+      # the interface's floor for it (docs/design-domains.md, "Floors from a protocol": a
+      # floor binds both receivers). FLOORS maps a runtime_limits field to its floor.
+      def check_receiver_floors(row, tables, interface, floors, property:)
+        server = tables.fetch('services').fetch(row.fetch('service')).fetch('server')
+        server_kind = server == @codec.constant('mf_none') ? grantee_kind('system') : grantee_kind('domain')
+        receivers = { 'grantee' => receiver_limits(row.fetch('grantee_kind'), row.fetch('grantee'), tables),
+                      'server' => receiver_limits(server_kind, server, tables) }
+        receivers.each do |role, limits|
+          floors.each do |field, floor|
+            next if limits.fetch(field) >= floor
+
+            invalid("facet #{row.fetch('name')}'s #{role} runs with #{field} #{limits.fetch(field)}, " \
+                    "below #{interface}'s floor of #{floor}", property, "runtime_limits.#{field}")
           end
         end
       end
 
-      # The max_frame of a receiver of a protocol: the system domain's, under the machine's
+      # The runtime limits of a receiver of a protocol: the system domain's, the machine's
       # system runtime limits, or a configured domain's or a session template's.
-      def receiver_max_frame(kind, index, tables)
-        return grantee_max_frame({ 'grantee_kind' => kind, 'grantee' => index }, tables) unless kind == grantee_kind('system')
+      def receiver_limits(kind, index, tables)
+        runtime_limits = tables.fetch('runtime_limits')
+        return runtime_limits.fetch(reference(@source.machine, 'system_runtime_limits', 'runtime_limits')) if
+          kind == grantee_kind('system')
 
-        tables.fetch('runtime_limits').fetch(reference(@source.machine, 'system_runtime_limits', 'runtime_limits')).fetch('max_frame')
-      end
-
-      # The max_frame of a configured domain's or a session template's runtime limits.
-      def grantee_max_frame(row, tables)
-        table = case row.fetch('grantee_kind')
-                when grantee_kind('domain') then 'domains'
-                when grantee_kind('session') then 'sessions'
-                else raise Erx::Error, 'the system domain has no grantee runtime limits here'
-                end
-        limits = tables.fetch('limits').fetch(tables.fetch(table).fetch(row.fetch('grantee')).fetch('limits'))
-        tables.fetch('runtime_limits').fetch(limits.fetch('runtime_limits')).fetch('max_frame')
+        table = kind == grantee_kind('domain') ? 'domains' : 'sessions'
+        runtime_limits.fetch(tables.fetch('limits').fetch(tables.fetch(table).fetch(index).fetch('limits')).fetch('runtime_limits'))
       end
 
       # The facets' edges from each configured or system grantee to its service's server,

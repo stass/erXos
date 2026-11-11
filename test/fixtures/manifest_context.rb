@@ -123,14 +123,19 @@ module ManifestContextFixture
                  /^service net\n(?:  .*\n)*/,
                  /^runtime_limits web\n(?:  .*\n)*/, /^limits web\n(?:  .*\n)*/, /^domain web\n(?:  .*\n)*/,
                  /^service web\n(?:  .*\n)*/, /^facet web\n(?:  .*\n)*/].freeze
-  SESSION_FACETS = [/^facet data_session\n(?:  .*\n)*/, /^facet net\n(?:  .*\n)*/].freeze
+  SESSION_FACETS = [/^facet data_session\n(?:  .*\n)*/, /^facet net\n(?:  .*\n)*/, /^facet inspect\n(?:  .*\n)*/].freeze
+  # The inspect service, which the system domain serves to session templates alone.
+  INSPECT_SERVICE = /^service inspect\n(?:  .*\n)*/
   DOMAIN_HOLDER = /^  holder @domain\.(?:storage|network)$/
 
   # The development manifest as the domain tests start from it: without its session
   # template, since they write their own, without its own configured domain, so the
   # domains a test adds are the only ones, and with no domain quota or max_domains,
-  # since they set what their rows need.
-  def sessionless(source) = with_quota(substitute(domainless(source), SESSION_TEMPLATE, ''), 0)
+  # since they set what their rows need. The inspect service goes with the template,
+  # the one grantee of its facet.
+  def sessionless(source)
+    with_quota(substitute(substitute(domainless(source), SESSION_TEMPLATE, ''), INSPECT_SERVICE, ''), 0)
+  end
 
   # source without its configured domains, storage, network and web: their rows removed
   # and what they hold held by the system domain, as a manifest that configures no domain

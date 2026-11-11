@@ -528,12 +528,18 @@ module Erx
         end.freeze
       end
 
+      # Service interfaces have a namespace of their own, as their constants'
+      # service_ prefix says, so an interface may share its name with a right
+      # or a type (the inspect interface and the inspect right).
       def services(declarations)
         seen_numbers = {}
+        seen_names = {}
         declarations.map do |declaration|
           Model.arity(declaration.line, 3)
           name, number = declaration.args
           Syntax.identifier(name, line: declaration.line)
+          declaration.fail!('duplicate service interface name') if seen_names.key?(name)
+          seen_names[name] = true
           number = Model.positive(number, declaration.line, maximum: (1 << 32) - 1)
           declaration.fail!('duplicate service interface number') if seen_numbers.key?(number)
           seen_numbers[number] = name
