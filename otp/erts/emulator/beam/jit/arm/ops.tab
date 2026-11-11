@@ -19,6 +19,8 @@
 #
 # %CopyrightEnd%
 #
+# Modified by erXos: a select_val that falls through on failure never becomes a jump table, whose gaps need a failure label.
+#
 
 #
 # Types that should never be used in specific operations.
@@ -123,8 +125,14 @@ init_yregs I *
 # (8 instructions + one 64-bit word for the pointer to the
 # table). Therefore we shouldn't use a jump table if there are too few
 # values.
+#
+# The gaps in a jump table jump to the failure label. A failure of []
+# (fall through to the next instruction, made by split_values in
+# generators.tab) has no label to put there, so only a select_val
+# with a failure label becomes a jump table, as in the interpreter
+# (emu/ops.tab).
 
-select_val S Fail=fn Size=u Rest=* | use_jump_tab(Size, Rest, 6) =>
+select_val S Fail=f Size=u Rest=* | use_jump_tab(Size, Rest, 6) =>
     jump_tab(S, Fail, Size, Rest)
 
 is_integer Fail=f S=s | select_val S2 Fail2 Size=u Rest=* |

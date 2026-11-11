@@ -21,6 +21,7 @@ a_SUITE             -                       long_timers                         
 a_SUITE             -                       pollset_size                                         failed     ERTS has no poll set: liberx event sources replace erts_check_io, so check_io_debug answers badarg (design-runtime.md)
 alloc_SUITE         -                       cpool_opt                                            failed     cannot run: no distribution; the case starts a peer node
 alloc_SUITE         -                       erts_mmap                                            failed     cannot run: no distribution; the case starts a peer node
+beam_SUITE          -                       select_val_mixed                                     passed     upstream bug (TODO.md): stock OTP 29.1.2's JIT crashes on the select, so stock skips the case
 bif_SUITE           -                       display                                              failed     cannot run: no distribution; the case starts a peer node
 bif_SUITE           -                       erl_bif_types                                        user_skip  cannot run: the release has no erts or dialyzer application directory to read BIF specs from
 bif_SUITE           -                       erl_crash_dump_bytes                                 failed     cannot run: no distribution; the case starts a peer node

@@ -153,9 +153,11 @@ module Erx
                    "status(?EXIT_PARENT) -> {signaled, #{signal_atom.call(kill)}}", *fault_clauses,
                    'status(Status) when is_integer(Status) -> {exited, 255}',
                    'status({fault, Kind}) when is_integer(Kind) -> {exited, 255}']
-        # A function of its own whose clauses are small integers only: stock
-        # OTP 29.1.2's JIT faults on a jump table that shares its select with
-        # a bignum such as ERX_EXIT_PARENT when the argument falls in a gap.
+        # A function of its own whose clauses are small integers only: the
+        # host tests run this module on stock OTP 29.1.2, whose JIT faults on
+        # a jump table that shares its select with a bignum such as
+        # ERX_EXIT_PARENT when the argument falls in a gap (erXos's copy makes
+        # no such jump table: otp/erts/emulator/beam/jit/arm/ops.tab).
         signaled = [*nameable.map { |signal| "signaled(#{signal.number}) -> {signaled, #{signal_atom.call(signal)}}" },
                     'signaled(_) -> {exited, 255}']
         [NOTICE, '-module(erx_prog).',

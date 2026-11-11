@@ -938,14 +938,12 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [Medium] BeamAsm, AArch64 (an upstream bug in stock OTP 29.1.2, and likely in erXos's copy): a
-  function whose clauses match a dense run of small integers with gaps and also a bignum literal
-  kills the emulator with SIGBUS when called with a small integer in a gap. Clauses `f(257)` to
-  `f(287)`, `f(321)` to `f(382)`, `f(-9223372036854775807)` and `f(X) when is_integer(X)` crash
-  on `f(300)`; without the bignum clause they do not. The generated `erx_prog:status/1`
-  (`tools/lib/erx/abi_emit_erlang.rb`) keeps its signal clauses in a function of their own for
-  this. Find the select's fail path in `beam/jit/arm`, fix it with a regression test under the
-  JIT, and report it upstream.
+* [Low] upstream, BeamAsm (`otp/erts/emulator/beam/jit/arm/ops.tab`, `jit/x86/ops.tab`): stock OTP 29.1.2's JIT
+  turns the small-integer half of a `select_val` that also matches a bignum into a jump table whose gaps branch to
+  the NIL immediate, so a small integer in a gap kills the emulator (SIGBUS on AArch64). erXos's copy gives such a
+  select a search instead. `beam_SUITE:select_val_mixed/1` is skipped on stock's JIT, and the generator of
+  `erx_prog:status/1` (`tools/lib/erx/abi_emit_erlang.rb`) keeps its signal clauses in a function of their own,
+  since the host tests run that module on stock. Report it upstream.
 * [Low] tooling, `tools/lib/erx/erlang_apps.rb` (`check_modules`): an application's `.app.src`
   module list is compared with its `src/` only when a release is built, so `make check` passes a
   module added without its `.app.src` entry and every QEMU suite and `make check-boot-image`

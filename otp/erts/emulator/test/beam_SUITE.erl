@@ -19,6 +19,10 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: adds select_val_mixed/1, a select_val over small
+%% integers and a bignum whose small integers are dense enough for a
+%% jump table but leave gaps; it is skipped on stock OTP's JIT.
+%%
 
 -module(beam_SUITE).
 
@@ -26,7 +30,7 @@
 	 init_per_group/2,end_per_group/2, 
 	 packed_registers/1, apply_last/1, apply_last_bif/1,
 	 heap_sizes/1, big_lists/1, fconv/1,
-         select_val/1, select_tuple_arity/1,
+         select_val/1, select_val_mixed/1, select_tuple_arity/1,
          swap_temp_apply/1, beam_init_yregs/1,
          beam_register_cache/1, put_list_dealloc/1]).
 
@@ -40,7 +44,7 @@ suite() -> [{ct_hooks,[ts_install_cth]}].
 all() -> 
     [packed_registers, apply_last, apply_last_bif,
      heap_sizes, big_lists, fconv,
-     select_val, select_tuple_arity,
+     select_val, select_val_mixed, select_tuple_arity,
      swap_temp_apply, beam_init_yregs,
      beam_register_cache, put_list_dealloc].
 
@@ -416,6 +420,70 @@ make_funcs([]) -> [].
 make_func(Name, List) ->
     Cs = [?Q(["(_@I@) -> _@Body@"]) || {I,Body} <- List],
     erl_syntax:function(erl_syntax:atom(Name), Cs).
+
+%% A select_val over small integers and a bignum is split by the
+%% loader into a select over the small integers, which falls through
+%% to the next instruction when none matches, and a test of the
+%% bignum. Here the small integers are dense enough for a jump table
+%% but leave a gap in it, and every value in the gap must reach the
+%% failure label.
+%%
+%% Stock OTP 29.1.2's JIT fills the gaps with the fall-through failure
+%% [] and branches to it as an address, which kills the emulator, so
+%% the case runs only on erXos and on the interpreter.
+select_val_mixed(Config) when is_list(Config) ->
+    case {os:type(), erlang:system_info(emu_flavor)} of
+        {{unix,erxos}, _} -> select_val_mixed_1();
+        {_, emu} -> select_val_mixed_1();
+        {_, jit} -> {skip, "the JIT of stock OTP 29.1.2 crashes on this select"}
+    end.
+
+select_val_mixed_1() ->
+    Mod = select_val_mixed,
+
+    Smalls = lists:seq(257, 287) ++ lists:seq(321, 382),
+    Big = -(1 bsl 63 - 1),
+    L = [{I,erlang:phash2(I)} || I <- [Big | Smalls]],
+    Integer = erlang:phash2(integer),
+
+    %% exact/1 fails on every other value, any/1 takes every other
+    %% integer in a last clause. Both test no type before the select.
+    Exact = make_func(exact, L),
+    Any = erl_syntax:function(erl_syntax:atom(any),
+                              erl_syntax:function_clauses(Exact) ++
+                                  [?Q("(X) when is_integer(X) -> _@Integer@")]),
+
+    %% typed/1 tests for an integer first, so its select fails to a
+    %% label of its own, not to the type test's.
+    CaseCs = [erl_syntax:clause([merl:term(I)], none, [merl:term(V)]) ||
+                 {I,V} <- L] ++
+        [erl_syntax:clause([erl_syntax:underscore()], none,
+                           [merl:term(Integer)])],
+    Case = erl_syntax:case_expr(erl_syntax:variable('X'), CaseCs),
+    Typed = ?Q(["typed(X) when is_integer(X) -> _@Case;\n"
+                "typed(_) -> not_an_integer."]),
+
+    Code = ?Q(["-module('@Mod@').\n"
+               "-export([exact/1, any/1, typed/1]).\n"]) ++ [Exact, Any, Typed],
+    merl:compile_and_load(Code, []),
+
+    verify_1(L, exact, Mod),
+    verify_1(L, any, Mod),
+    verify_1(L, typed, Mod),
+    Misses = [V || V <- [Big - 1, Big + 1 | lists:seq(250, 390)],
+                   not lists:keymember(V, 1, L)],
+    _ = [expect_error(Mod, exact, V) || V <- Misses],
+    verify_1([{V,Integer} || V <- Misses], any, Mod),
+    verify_1([{V,Integer} || V <- Misses], typed, Mod),
+    expect_error(Mod, exact, not_an_integer),
+    expect_error(Mod, any, not_an_integer),
+    not_an_integer = Mod:typed(not_an_integer),
+
+    %% Clean up.
+    true = code:delete(Mod),
+    false = code:purge(Mod),
+
+    ok.
 
 select_tuple_arity(_Config) ->
     Mod = ?FUNCTION_NAME,
