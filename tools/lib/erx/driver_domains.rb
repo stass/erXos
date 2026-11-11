@@ -74,8 +74,21 @@ module Erx
   #   session a new `net`. Once the new incarnation has its lease, root's command shell
   #   pings the gateway, and its Erlang shell connects through slirp's guest forward and
   #   closes the connection.
+  # * a connection across both restarts (demo_checkpoints), in root's Erlang shell: it
+  #   opens a connection T through slirp's guest forward (DEMO_CONNECT_LINE); the system's
+  #   shell restarts the unit `net` (DRIVER_RESTART_LINE), and once the link has its lease
+  #   again, T still carries bytes both ways (SURVIVE_LINE). A process of root's session
+  #   then echoes TRANSFER_PIECE bytes at a time over T (TRANSFER_LINE) while the system's
+  #   shell kills the network domain's domain pid and polls, as for the exhaustion, until a
+  #   new incarnation and both facets are new (KILL_LINE). The transfer must have ended
+  #   with at least one round done and the end's answer: {error, econnaborted} to a call
+  #   waiting when the connection ended with its domain, {error, closed} to one made
+  #   after (docs/design-network-stack.md); a send on T after that is {error, closed}
+  #   (RESULT_LINE). Once the new
+  #   incarnation has its lease, a new connection opens through root's new `net`. A ping
+  #   after the kill would cross the same new grant and lease as the exhaustion's.
   #
-  # The fun is the harness's own, typed at the system's shell: no image carries a trigger.
+  # The funs are the harness's own, typed at the shells: no image carries a trigger.
   module DriverDomains
     RESTART_ARGUMENTS = ['-pa', BlockDevice::GUEST_PATH, '-run', BlockDevice::GUEST_MODULE, 'lfs_restart'].freeze
     # Seconds the guest has, after its banner, to print "blk: done": the storage domain
@@ -112,28 +125,85 @@ module Erx
       [L1] = Link(),
       {[I || #{id := I, state := ready} <- Net()] =:= [I0], %<root_net>s =:= R0, is_pid(L1) andalso L1 =/= L0}.
     ERLANG
-    # Checks that the first incarnation is still the live one, kills erx_net_interfaces in
-    # it, then polls every 500 ms, at most EXHAUST_POLLS times, until the domain's only row
-    # is a ready incarnation other than I0 and both facets are pids other than the first.
-    EXHAUST_TEMPLATE = <<~'ERLANG'
-      [I0] = [Id || #{id := Id, state := ready} <- Net()], C0 = erx:cap(network_ctl), R0 = %<root_net>s,
-      ok = erpc:cast(N0, fun() -> exit(whereis(erx_net_interfaces), kill) end),
+    # Polls every 500 ms, at most RESTART_POLLS times, until the network domain's only row
+    # is a ready incarnation other than the one whose id the slot id names, and both
+    # facets are pids other than those the slots ctl and net name; then answers restarted.
+    RESTART_POLL_TEMPLATE = <<~'ERLANG'
       (fun Poll(0) -> timeout;
            Poll(K) ->
                case {Net(), erx:cap(network_ctl), %<root_net>s} of
                    {[#{id := NewId, state := ready}], NewCtl, NewNet}
-                     when NewId =/= I0, is_pid(NewCtl), NewCtl =/= C0, is_pid(NewNet), NewNet =/= R0 -> restarted;
+                     when NewId =/= %<id>s, is_pid(NewCtl), NewCtl =/= %<ctl>s, is_pid(NewNet), NewNet =/= %<net>s ->
+                       restarted;
                    _ -> timer:sleep(500), Poll(K - 1)
                end
        end)(%<polls>d).
     ERLANG
-    EXHAUST_POLLS = 400
+    # Checks that the first incarnation is still the live one, kills erx_net_interfaces in
+    # it, then polls for the next incarnation.
+    EXHAUST_TEMPLATE = <<~'ERLANG' + RESTART_POLL_TEMPLATE
+      [I0] = [Id || #{id := Id, state := ready} <- Net()], C0 = erx:cap(network_ctl), R0 = %<root_net>s,
+      ok = erpc:cast(N0, fun() -> exit(whereis(erx_net_interfaces), kill) end),
+    ERLANG
+    # Binds the live incarnation's id I1 and domain pid P1 and its facets C1 and R1, kills
+    # P1, which ends the domain, then polls for the next incarnation.
+    KILL_TEMPLATE = <<~'ERLANG' + RESTART_POLL_TEMPLATE
+      [#{id := I1, pid := P1}] = Net(), C1 = erx:cap(network_ctl), R1 = %<root_net>s,
+      true = exit(P1, kill),
+    ERLANG
+    RESTART_POLLS = 400
     NETWORK_LINE = DriverDomains.erlang_line(NETWORK_TEMPLATE, root_net: ROOT_NET)
     CONTROL_LINE = DriverDomains.erlang_line(CONTROL_TEMPLATE)
     SAME_LINE = DriverDomains.erlang_line(SAME_TEMPLATE, root_net: ROOT_NET)
-    EXHAUST_LINE = DriverDomains.erlang_line(EXHAUST_TEMPLATE, root_net: ROOT_NET, polls: EXHAUST_POLLS)
+    EXHAUST_LINE = DriverDomains.erlang_line(EXHAUST_TEMPLATE, root_net: ROOT_NET, polls: RESTART_POLLS,
+                                                               id: 'I0', ctl: 'C0', net: 'R0')
+    KILL_LINE = DriverDomains.erlang_line(KILL_TEMPLATE, root_net: ROOT_NET, polls: RESTART_POLLS,
+                                                         id: 'I1', ctl: 'C1', net: 'R1')
+    # The demo's lines in root's Erlang shell, whose bindings are T, the connection, T2,
+    # the one after the kill, Shell and Piece, TRANSFER_LINE's, and Result, RESULT_LINE's.
+    # TRANSFER_LINE spawns a process that sends TRANSFER_PIECE
+    # random bytes over T and reads them back, pausing TRANSFER_PAUSE_MS between rounds,
+    # until a call fails or TRANSFER_ROUNDS are done, and sends the shell
+    # {transfer, {Rounds, Answer}}; RESULT_LINE waits for that, then sends on T again.
+    TRANSFER_PIECE = 65_536
+    TRANSFER_PAUSE_MS = 100
+    TRANSFER_ROUNDS = 600
+    TRANSFER_TEMPLATE = <<~'ERLANG'
+      Shell = self(), Piece = rand:bytes(%<piece>d),
+      spawn(fun() ->
+                Shell ! {transfer,
+                         (fun Round(N) when N =:= %<rounds>d -> {N, done};
+                              Round(N) ->
+                                  case erx_gen_tcp:send(T, Piece) of
+                                      ok ->
+                                          case erx_gen_tcp:recv(T, %<piece>d, 10000) of
+                                              {ok, Piece} -> timer:sleep(%<pause>d), Round(N + 1);
+                                              Answer -> {N, Answer}
+                                          end;
+                                      Refused -> {N, Refused}
+                                  end
+                          end)(0)}
+            end),
+      started.
+    ERLANG
+    TRANSFER_LINE = DriverDomains.erlang_line(TRANSFER_TEMPLATE, piece: TRANSFER_PIECE, rounds: TRANSFER_ROUNDS,
+                                                                 pause: TRANSFER_PAUSE_MS)
+    DEMO_CONNECT_LINE = "{ok, T} = erx_gen_tcp:connect(#{NetDevice::ECHO_TUPLE}, #{QemuPlan::NIC_ECHO_PORT}, " \
+                        "[binary, {active, false}], 10000), ok.\r".freeze
+    SURVIVE_LINE = "ok = erx_gen_tcp:send(T, <<\"survives\">>), erx_gen_tcp:recv(T, 8, 10000).\r"
+    RESULT_LINE = '{receive {transfer, Result} -> Result after 30000 -> timeout end, ' \
+                  "erx_gen_tcp:send(T, <<\"after\">>)}.\r"
+    # RESULT_LINE's answer: rounds done, the transfer's end, and the later send's.
+    KILL_ANSWER = '\{\{[1-9][0-9]*,\{error,(?:econnaborted|closed)\}\},\{error,closed\}\}'
+    NEW_CONNECT_LINE = "{ok, T2} = erx_gen_tcp:connect(#{NetDevice::ECHO_TUPLE}, #{QemuPlan::NIC_ECHO_PORT}, " \
+                       "[binary, {active, false}], 10000), ok.\r".freeze
+    DRIVER_RESTART_LINE = "erx_driver_ctl:restart(erx:cap(network_ctl), net).\r"
+    # The guest forward carries every connection's bytes to the echo server in one stream:
+    # these cells send SURVIVE_LINE's bytes and at most TRANSFER_ROUNDS pieces, and the
+    # suite's own limit stays as headroom over them.
+    ECHO_LIMIT = NetDevice::ECHO_LIMIT + TRANSFER_ROUNDS * TRANSFER_PIECE
     # Longer than the poll, which waits for a whole boot of the network domain.
-    EXHAUST_SECONDS = 240
+    POLL_SECONDS = 240
     PING_ONCE = "ping -c 1 10.0.2.2\r"
     PING_ONCE_COUNTS = Regexp.escape('1 packets transmitted, 1 packets received, 0.0% packet loss')
     # From a checkpoint whose verify waits for the lease: that wait and a shell answer.
@@ -162,7 +232,9 @@ module Erx
 
     # The network cells' checkpoints after root's session's banner, whose verify waits for
     # the first lease; lease waits for the next one (NetDevice.exchange).
-    def network_checkpoints(lease) = [*control_checkpoints(lease), *exhaust_checkpoints(lease)].freeze
+    def network_checkpoints(lease)
+      [*control_checkpoints(lease), *exhaust_checkpoints(lease), *demo_checkpoints(lease)].freeze
+    end
 
     # From root's command shell to the system's Erlang shell, then network_ctl's cell,
     # ending at root's command shell with Ctrl-G typed.
@@ -177,15 +249,31 @@ module Erx
     end
 
     # From root's command shell back to the system's Erlang shell, then the exhaustion's
-    # cell, ending at root's Erlang shell.
+    # cell, ending at root's Erlang shell with the demo's connection typed.
     def exhaust_checkpoints(lease)
       [*to_system('exhaust', EXHAUST_LINE),
-       NetDevice.erl_point('exhaust-restarted', 'restarted', seconds: EXHAUST_SECONDS, verify: lease, type: CTRL_G),
+       NetDevice.erl_point('exhaust-restarted', 'restarted', seconds: POLL_SECONDS, verify: lease, type: CTRL_G),
        *to_root('exhaust', PING_ONCE, seconds: AFTER_LEASE_SECONDS),
        NetDevice.shell_point('exhaust-ping', PING_ONCE_COUNTS, type: ProductionImage::Run::ERL_LINE),
        ProductionImage::Run::ERLANG_SHELL.merge(name: 'root-erlang-shell', type: NetDevice::CONNECT_LINE).freeze,
        NetDevice.erl_point('exhaust-tcp-connect', 'ok', type: NetDevice::CLOSE_LINE),
-       NetDevice.erl_point('exhaust-tcp-close', 'ok')]
+       NetDevice.erl_point('exhaust-tcp-close', 'ok', type: DEMO_CONNECT_LINE)]
+    end
+
+    # From root's Erlang shell, the demo: the connection across the driver's restart, then
+    # the transfer across the domain's kill, and a new connection after it.
+    def demo_checkpoints(lease)
+      [NetDevice.erl_point('demo-tcp-connect', 'ok', type: CTRL_G),
+       *to_system('demo', DRIVER_RESTART_LINE),
+       NetDevice.erl_point('demo-driver-restart', 'ok', verify: lease, type: CTRL_G),
+       *to_root('demo', SURVIVE_LINE, seconds: AFTER_LEASE_SECONDS),
+       NetDevice.erl_point('demo-tcp-survives', Regexp.escape('{ok,<<"survives">>}'), type: TRANSFER_LINE),
+       NetDevice.erl_point('demo-transfer', 'started', type: CTRL_G),
+       *to_system('kill', KILL_LINE),
+       NetDevice.erl_point('kill-restarted', 'restarted', seconds: POLL_SECONDS, verify: lease, type: CTRL_G),
+       *to_root('kill', RESULT_LINE, seconds: AFTER_LEASE_SECONDS),
+       NetDevice.erl_point('kill-closed', KILL_ANSWER, type: NEW_CONNECT_LINE),
+       NetDevice.erl_point('kill-new-connect', 'ok')]
     end
 
     def restart_expected_lines
@@ -236,13 +324,14 @@ module Erx
       end
 
       # The network cells in one boot: network_ctl first, whose incarnation must stay, then
-      # the exhaustion, which ends it. Returns 'passed'; a missed checkpoint raises.
+      # the exhaustion, which ends it, then the demo, which restarts the driver and ends the
+      # next incarnation. Returns 'passed'; a missed checkpoint raises.
       def boot_network(accel, image)
         name = "network-#{accel}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"
         directory = OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/driver-domains', name),
                                             mode: 0o700)
         link = NetDevice::Link.new
-        echo = NetDevice::EchoServer.new(limit: NetDevice::ECHO_LIMIT).start
+        echo = NetDevice::EchoServer.new(limit: ECHO_LIMIT).start
         nic = QemuPlan::Nic.new(frames_port: link.frames_port, peer_port: link.peer_port, echo_port: echo.port)
         lease = ->(_line) { NetDevice.exchange(link) }
         session = SessionDomain.session_shell('root_1-shell', ProductionImage::Run::CTRL_G).merge(verify: lease).freeze

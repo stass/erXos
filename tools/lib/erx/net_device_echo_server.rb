@@ -21,7 +21,10 @@ module Erx
     # in its write and stop reading; QEMU writes the guest's bytes into the stream with a
     # blocking write from its main loop, which would then block too, and with it slirp
     # and the device. The server takes at most limit bytes: a guest that sends more fails
-    # the run instead of growing the harness.
+    # the run instead of growing the harness. QEMU resets the stream when it ends with
+    # echo it has not read, as when a guest connection ends before reading what it sent:
+    # that reset ends the stream as its end of file does, and the guest, which must read
+    # back what it sent, is what notices a stream that ends early.
     #
     # The server listens on the host's loopback only, on a port the kernel picks, from new
     # until stop, and serves the first connection it accepts, which is QEMU's.
@@ -78,7 +81,7 @@ module Erx
 
           @queue << data
         end
-      rescue EOFError
+      rescue EOFError, Errno::ECONNRESET
         nil
       rescue IOError, SystemCallError => e
         Error.new("the echo server could not read: #{e.message}")
@@ -89,6 +92,8 @@ module Erx
           data = @queue.pop
           @client.write(data)
         end
+      rescue Errno::EPIPE, Errno::ECONNRESET
+        nil
       rescue IOError, SystemCallError => e
         Error.new("the echo server could not write: #{e.message}")
       end
