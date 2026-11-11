@@ -3,12 +3,15 @@
 
 %% The domain service (docs/design-system.md, "System services"): domain ids,
 %% names, domain pids, the domains the system manifest configures, and
-%% erx_domain, the interface other processes create and stop domains through. It
-%% runs in the system domain only, whose release alone ships it.
+%% erx_domain, the interface other processes create and stop domains through, and
+%% /dev, the device catalogue as a file tree. It runs in the system domain only,
+%% whose release alone ships it.
 {application, erx_domain,
  [{description, "erXos domain service"},
   {vsn, "1"},
-  {modules, [erx_devices,
+  {modules, [erx_devfs,
+             erx_devfs_core,
+             erx_devices,
              erx_domain,
              erx_domain_app,
              erx_domain_core,
@@ -20,5 +23,5 @@
              erx_domain_sup,
              erx_ident]},
   {registered, [erx_domain_sup, erx_domain_srv]},
-  {applications, [kernel, stdlib, erx]},
+  {applications, [kernel, stdlib, erx, erx_files]},
   {mod, {erx_domain_app, []}}]}.

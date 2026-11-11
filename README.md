@@ -270,7 +270,9 @@ Error in process <0.150.0> with exit value:
   cut, and a littlefs failure ends the domain, whose restart mounts
   `/data` afresh, both checked under HVF. The system shell restarts the
   block driver through the storage domain's driver-control facet, at
-  `erl`: `erx_driver_ctl:restart(erx:cap(storage_ctl), block)`. An EROFS
+  `erl`: `erx_driver_ctl:restart(erx:cap(storage_ctl), block)`, or by
+  writing `reset` to the block device's `/dev/N-virtio,mmio/ctl`, beside
+  its `status`. An EROFS
   reader in Erlang (`erx_erofs`), behind its funnel `erx_verity`, mounts
   images in the namespace. CRC-32C is the first per-byte primitive.
   `ruby tools/erx pack --medium` writes a QEMU disk image; the QEMU

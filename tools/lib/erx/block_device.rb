@@ -61,6 +61,13 @@ module Erx
   #                                 and erx_blk names a new process at the storage node
   #   blk: control restart flux refused
   #                                 a unit the storage domain does not hold is refused
+  #   blk: dev status ok            /dev holds one directory, the block device's, whose
+  #                                 status names unit block, virtio,mmio and a holder
+  #                                 domain
+  #   blk: dev ctl reset ok         "reset" and a newline written to its ctl restarted
+  #                                 the driver through the same facet: erx_blk names a
+  #                                 new process
+  #   blk: dev ctl bogus refused    any other word written to ctl fails with einval
   #   blk: read sector 0 again ok   the new driver reads sector 0's host pattern
   #   blk: done                     the last line; the harness ends the guest on it
   #
@@ -128,6 +135,7 @@ module Erx
     WRITE_SECTORS = [3, 7].freeze
     # The driver-control lines of the first boot (header), after its writes.
     CONTROL_LINES = ['blk: control restart block ok', 'blk: control restart flux refused',
+                     'blk: dev status ok', 'blk: dev ctl reset ok', 'blk: dev ctl bogus refused',
                      'blk: read sector 0 again ok'].freeze
     DISK_NAME = 'disk.img'
     MEMORY_MIB = 512

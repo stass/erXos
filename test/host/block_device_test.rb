@@ -23,9 +23,10 @@ class BlockDeviceTest < Minitest::Test
     assert_equal 'blk: read sector 15 ok', lines[17]
     assert_equal 'blk: read sector 16 refused', lines[18]
     assert_equal ['blk: wrote sector 3', 'blk: wrote sector 7'], lines[19, 2]
-    assert_equal ['blk: control restart block ok', 'blk: control restart flux refused', 'blk: read sector 0 again ok',
-                  'blk: done'], lines.last(4)
-    assert_equal 25, lines.size
+    assert_equal ['blk: control restart block ok', 'blk: control restart flux refused', 'blk: dev status ok',
+                  'blk: dev ctl reset ok', 'blk: dev ctl bogus refused', 'blk: read sector 0 again ok',
+                  'blk: done'], lines.last(7)
+    assert_equal 28, lines.size
   end
 
   def test_a_good_log_has_no_difference_and_other_lines_are_ignored
@@ -58,7 +59,7 @@ class BlockDeviceTest < Minitest::Test
   def test_a_missing_line_names_the_first_difference
     missing = Device.expected_lines - ['blk: read sector 5 ok']
     assert_equal 'driver line 8: expected "blk: read sector 5 ok", got "blk: read sector 6 ok"', Device.line_difference(good_log(missing))
-    assert_match(/line 25: expected "blk: done", got no line/, Device.line_difference(good_log(Device.expected_lines[0...-1])))
+    assert_match(/line 28: expected "blk: done", got no line/, Device.line_difference(good_log(Device.expected_lines[0...-1])))
     assert_match(/line 1: expected .*, got no line/, Device.line_difference('nothing'))
   end
 

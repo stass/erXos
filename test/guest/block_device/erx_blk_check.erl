@@ -139,7 +139,8 @@ step(Step) ->
 
 %% In the system domain, as the system shell does it: the block driver restarted through
 %% the storage domain's driver-control facet, storage_ctl, so erx_blk names a new process;
-%% a unit the storage domain does not hold refused; and a read through the new driver.
+%% a unit the storage domain does not hold refused; the same restart through /dev (dev/0);
+%% and a read through the newest driver.
 control() ->
     case wait_cap(storage_ctl, ?STORAGE_WAIT_MS div ?POLL_MS) of
         undefined ->
@@ -156,8 +157,41 @@ control() ->
                  {error, badarg} -> text("control restart flux refused", []);
                  Other -> text("control restart flux failed: ~0p", [Other])
              end
-             | at_storage(read_again_here)]
+             | dev() ++ at_storage(read_again_here)]
     end.
+
+%% /dev in the system domain's namespace, as the system shell reads and writes it: the
+%% block device's one directory, its status naming the unit and its holder domain, a
+%% write of "reset" and its newline to its ctl, so erx_blk names a new process, and a
+%% write of any other word refused with einval.
+dev() ->
+    case attempt(fun() -> file:list_dir("/dev") end) of
+        {ok, [Name]} ->
+            Dir = filename:join("/dev", Name),
+            Ctl = filename:join(Dir, "ctl"),
+            Before = storage_driver(),
+            Reset = attempt(fun() -> file:write_file(Ctl, <<"reset\n">>) end),
+            After = storage_driver(),
+            [dev_status(attempt(fun() -> file:read_file(filename:join(Dir, "status")) end)),
+             case Reset =:= ok andalso is_pid(Before) andalso is_pid(After) andalso After =/= Before of
+                 true -> text("dev ctl reset ok", []);
+                 false -> text("dev ctl reset failed: ~0p", [{Reset, Before, After}])
+             end,
+             case attempt(fun() -> file:write_file(Ctl, <<"bogus\n">>) end) of
+                 {error, einval} -> text("dev ctl bogus refused", []);
+                 Other -> text("dev ctl bogus failed: ~0p", [Other])
+             end];
+        Other ->
+            [text("dev failed: ~0p", [Other])]
+    end.
+
+dev_status({ok, <<"unit\tblock\ncompatible\tvirtio,mmio\n", _/binary>> = Status}) ->
+    case re:run(Status, <<"\nholder\t[0-9]+\n">>) of
+        {match, _} -> text("dev status ok", []);
+        nomatch -> text("dev status failed: ~0p", [Status])
+    end;
+dev_status(Other) ->
+    text("dev status failed: ~0p", [Other]).
 
 %% The facet Name once the storage domain's ready report has installed it, or undefined.
 wait_cap(_Name, 0) ->

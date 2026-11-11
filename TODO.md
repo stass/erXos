@@ -2164,11 +2164,21 @@ it; git history is the record of completed work.
   `badarg` while the stale name works, and the network's names `vtnet0` though the
   device's interface name comes from erx_virtio_net's order. Derive each from the
   domain's installed units, or check each key at start.
-* [Low] storage, `erx_storage_sup`: the driver-control facet's units table,
-  `#{block => {erx_blk_sup, erx_blk}}`, repeats the manifest's unit name by hand, and
-  nothing checks it against the units the domain holds; a renamed unit is refused as
-  `badarg` while the stale name works. Derive it from the domain's installed units, or
-  check each key at start, before P10a repeats it for `network_ctl`.
+* [Medium] devices, `erx_devfs`: only the system domain's namespace mounts `/dev`,
+  the control tree. Administrator sessions do not get the read-only tree, and no
+  device-service control facet serves the control tree to a session
+  ([design-system.md](docs/design-system.md#devices), "The `/dev` tree"). Mount
+  `erx_devfs`'s `ro` tree from the session namespace setup, and serve the control
+  tree through the facet when a session needs it. Decide then how the device tree
+  shares `/dev` with the session's own `/dev/null`, `/dev/tty` and the rest
+  (design-files.md, "Narrowing for a program"), and that a program started from the
+  system shell does not inherit the control tree; `erx_devfs:start_link/0` unmounts
+  whatever is at `/dev` before it mounts.
+* [Low] devices, `erx_devfs`: `/dev` shows only the block device. Its `status` has no
+  `path` line, because the catalogue that reaches Erlang has no device-tree path, and
+  its `driver` line is `[unknown]`, because no facet says which process drives a unit.
+  Show every catalogue entry, export the path from the boot view, and add a driver
+  query to the driver-control interface.
 * [Medium] storage, `erx_lfs`: any process of the system domain can send the owner
   `{erx_lfs_block, ...}` or `{erx_lfs, Worker, done, _}`. A forged block message fails the
   volume or, with a request of a volume of its own, writes any sector of the data window;

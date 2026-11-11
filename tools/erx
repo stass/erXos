@@ -380,6 +380,8 @@ module Erx
                    name: 'fuzz-erx-present', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_procfs.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-procfs', deadline: 300, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_devfs.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-devfs', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_blk_request.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-blk-request', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_virtio_net_frame.rb'), '--seed',

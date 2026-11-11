@@ -2738,13 +2738,19 @@ interrupt lines, unit, confinement, holder domain and driver process, one
 `name TAB value` line each in the `/proc` format. The tree is read-only.
 The device service's control facet serves a second tree of the same
 shape, mounted at `/dev` instead for the sessions that hold that facet,
-whose device directories also hold `ctl`: a write of one line, `stop`,
-`start` or `reset` and a newline, at most 16 bytes, acts on that device
-through the facet, by asking the holder's driver supervisor to stop,
-start or restart the driver process
+whose device directories also hold `ctl`: a write of one word, `stop`,
+`start` or `reset`, with or without its newline, at most 16 bytes, acts
+on that device through the facet, by asking the holder's driver
+supervisor to stop, start or restart the driver process
 ([The holder's driver-control facet](#the-holders-driver-control-facet)),
 and any other write fails with
-`einval`. Holding the path is holding the facet, as for every file server
+`einval`. The holder's facet is found by its interface, the
+driver-control service of the configured row the device is placed on;
+while no domain of that row holds the device, or its facet is not
+installed, a write fails with `enxio`. A start of a running driver fails
+with `ebusy`, and a driver that did not stop or start, or a call that
+did not complete, such as one to the facet of a holder that has ended
+and not yet restarted, with `eio`. Holding the path is holding the facet, as for every file server
 ([design.md](design.md#decisions)), so no write is checked against who
 wrote it, and the tree changes nothing the control facet could not change.
 Like every file grant, the tree's grant acts for whoever holds its pid, so
