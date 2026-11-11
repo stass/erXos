@@ -1543,7 +1543,11 @@ applied in this order, each step undoing the ones before it on failure:
    the anchor. So the kernel ends the program with its starter and its
    session, ends the program's children with it, and keeps it within the
    session's budget and grant
-   ([design-system.md](design-system.md#sub-spaces)).
+   ([design-system.md](design-system.md#sub-spaces)). Before the anchor,
+   the driver makes the session's doorbell of step 4, registers it as the
+   port's sink, binds it, and registers the process id with the gate
+   worker under it, so no record of the program's spaces arrives before a
+   port listens for it ([The event table](#the-event-table)).
 3. **Map the image.** A program of the boot image is mapped from its
    slices with `erx_image_map`, its code shared with every program that
    runs it; an executable file runs the boot image's loader, `erx_exec`,
@@ -3841,7 +3845,14 @@ own domain, so a runtime that lies harms only itself.
   slot, or a notice that is not due, a repeated `{closed}` among them, is
   ended and reported with `SIGSYS`, and one that writes as fast as it can
   within its credit leaves at most one message per credit in its
-  handler's mailbox. The programs design's own suites run over the driver
+  handler's mailbox. The driver's decisions are a pure core
+  (`erx_program_core.c`), tested on the host: a start failing at each
+  step undoes exactly the steps before it, last first, and every input in
+  every state of a program's end agrees with a model of this section,
+  with each status reported at most once and the release made exactly
+  once; seeded failures: a skipped undo, two steps swapped, and a
+  fault's status lost to the image's exit record. The programs design's
+  own suites run over the driver
   ([design-programs.md](design-programs.md#verification-and-testing)).
 * **The device NIF.** On the hosted backend a model device completes,
   skips and misreports descriptors: every address the NIF gives it lies
