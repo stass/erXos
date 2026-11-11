@@ -185,13 +185,15 @@ disconnect(Number) ->
 What the domain service reads of the system manifest at boot: the machine's
 host name, the configured domains, in row order, the services configured
 domains serve, each its server's row and its name, and the facet rows, each
-its grantee, a configured row or system, the service's name, its server, a
+its grantee, a configured row, system, or {template, Template} for the
+sessions made from session template Template, the service's name, its server, a
 configured row or system, and the grant's limits (docs/design-system.md,
 "Facets a configured domain serves").
 """.
 -spec configured() -> {ok, #{host := binary(), domains := [configured()],
                              services := [{non_neg_integer(), atom()}],
-                             grants := [{non_neg_integer() | system, atom(), non_neg_integer() | system, map()}]}}
+                             grants := [{non_neg_integer() | system | {template, non_neg_integer()}, atom(),
+                                         non_neg_integer() | system, map()}]}}
                     | error().
 configured() ->
     configured_nif().

@@ -5,6 +5,7 @@ abi 1
 include inspection.txt
 include services/console.txt
 include services/driver_control.txt
+include services/net.txt
 include manifest.txt
 include formats/elf64.txt
 include formats/virtio.txt

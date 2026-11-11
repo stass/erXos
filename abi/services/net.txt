@@ -1,0 +1,13 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The network domain's interfaces (docs/design-network-stack.md, "The grant"): net,
+# a client's sockets, and netadmin, interface configuration and every client's
+# statistics. Their operations are the socket protocol's own messages, which no
+# facet row names, so neither declares any. The manifest grants neither to the
+# system domain (property 15), and every grantee of net carries frames of at least
+# net_max_frame_min bytes, the protocol's max_frame floor: a piece of 64 KiB and its
+# envelope (docs/design-domains.md, "Floors from a protocol";
+# docs/design-network-stack.md, "Message sizes").
+service net 3
+service netadmin 4
+limit net_max_frame_min u32 131072

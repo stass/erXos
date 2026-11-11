@@ -51,6 +51,10 @@ enum mf_device_role u32
   value network 4
   value block 5
   value tpm 6
+enum mf_grantee u32
+  value system 0
+  value domain 1
+  value session 2
 enum mf_dma u32
   value none 0
   value confined 1
@@ -265,7 +269,8 @@ layout erx_mf_facet wire_le 8 80
   field period_ns u64 48
   field max_heap_size u64 56
   field queue u64 64
-  field reserved u64 72
+  field grantee_kind mf_grantee 72
+  field reserved u32 76
   zero reserved all
 layout erx_mf_operation wire_le 4 4
   field operation u32 0
@@ -394,7 +399,12 @@ reader manifest erx_manifest @manifest_bytes_max
   string services[].name.offset services[].name.length strings identifier 63 empty no
   index services[].server domains absent 0xffffffff
   string facets[].name.offset facets[].name.length strings identifier 63 empty no
-  index facets[].grantee domains absent 0xffffffff
+  choice facets[].grantee_kind mf_grantee facets[].grantee
+    case system none
+    case domain facets[].grantee
+    case session facets[].grantee
+  index facets[].grantee domains when facets[].grantee_kind domain
+  index facets[].grantee sessions when facets[].grantee_kind session
   index facets[].service services
   partition facets[].operations.offset facets[].operations.count facet_operations
   partition facets[].parameters.offset facets[].parameters.count facet_parameters

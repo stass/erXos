@@ -11,9 +11,14 @@ module Erx
   # The seeds of the targets that read a system manifest: the bytes the packer writes.
   # QEMU virt's development manifest, as Phase 1's check admits it for a production image,
   # the same with configured domains (ManifestContextFixture.domain_source), the empty
-  # native manifest of the structural test images, with prefixes of the first, and the
-  # configured domains' with its first row's boot_timeout_s 0, which the reader refuses.
+  # native manifest of the structural test images, with prefixes of the first, the
+  # configured domains' with its first row's boot_timeout_s 0, which the reader refuses,
+  # and the configured domains' with alpha's log granted to the system principal's
+  # session template, so the facet table holds a session grantee.
   module ManifestSeeds
+    SESSION_FACET = "facet session_log\n  grantee @session.system\n  service @service.log\n  operations none\n" \
+                    "  max_request 64\n  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
+
     module_function
 
     def all
@@ -30,11 +35,13 @@ module Erx
                               codec: codec, context: context, planner: ManifestContextFixture.accepting_planner)
       empty = Manifest.structural_fixture(source: File.binread(File.join(repository, 'test/fixtures/manifest_empty.txt')),
                                           codec: codec, context: Manifest::Context.new(**fixture))
+      domain_context = Manifest::Context.new(**ManifestContextFixture.domain_arguments(codec), platform: platform)
       domains = Manifest.admit(source: ManifestContextFixture.domain_source(source), codec: codec,
-                               context: Manifest::Context.new(**ManifestContextFixture.domain_arguments(codec), platform: platform),
-                               planner: ManifestContextFixture.accepting_planner)
+                               context: domain_context, planner: ManifestContextFixture.accepting_planner)
+      session = Manifest.admit(source: ManifestContextFixture.domain_source(source) + SESSION_FACET, codec: codec,
+                               context: domain_context, planner: ManifestContextFixture.accepting_planner)
       PackFuzz.prefix_seeds(development.bytes).merge('empty' => empty.bytes, 'system-args-escape' => escape.bytes,
-                                                     'domains' => domains.bytes,
+                                                     'domains' => domains.bytes, 'session-grantee' => session.bytes,
                                                      'boot-timeout-zero' => boot_timeout(codec, domains.bytes, 0))
     end
 

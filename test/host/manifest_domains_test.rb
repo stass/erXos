@@ -167,7 +167,7 @@ class ManifestDomainsTest < Minitest::Test
   end
 
   # A configured domain's service granted to another configured domain and to the
-  # system domain, the system domain's grantee being mf_none and an omitted queue
+  # system domain, the system domain's grantee having no index, and an omitted queue
   # resolved to system_queue; the facets sort by name.
   def test_facets_of_a_configured_domains_service_reach_the_encoded_manifest
     source = @source + service('b', '@domain.beta') + facet('sb', 'system', '@service.b') +
@@ -175,8 +175,9 @@ class ManifestDomainsTest < Minitest::Test
     view = @codec.open('manifest', admit(source).bytes)
     facets = rows(view, 'facets')
     assert_equal %w[ab sb], facets.map { |row| view.string(row.fetch('name')) }
-    assert_equal [[0, 0, 512, 4096], [@codec.constant('mf_none'), 0, 1, 16_384]],
-                 facets.map { |row| row.values_at('grantee', 'service', 'max_request', 'queue') }
+    domain, system = %w[domain system].map { |kind| @codec.member('mf_grantee', kind) }
+    assert_equal [[domain, 0, 0, 512, 4096], [system, 0, 0, 1, 16_384]],
+                 facets.map { |row| row.values_at('grantee_kind', 'grantee', 'service', 'max_request', 'queue') }
     assert_equal [[0, 0]] * 2, facets.map { |row| [row.fetch('operations').fetch('count'), row.fetch('parameters').fetch('count')] }
     assert_equal [1, 0], rows(view, 'boot_order').map { |row| row.fetch('domain') }
   end
@@ -449,5 +450,68 @@ class ManifestDomainsTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 2, 'service.server', source + service('log', '@session.system'))
     refused(Erx::Manifest::Invalid, 8, 'window.holder', source.sub("window data\n  holder system", "window data\n  holder @session.system"))
     refused(Erx::Manifest::Invalid, 1, 'unit.holder', source.sub(/(unit block\n(?:  .*\n)*?  holder )system/, '\1@session.system'))
+  end
+
+  # A session template as a facet grantee, written @session.PRINCIPAL: the facet row
+  # names the template by its index in the sessions table, which the reader checks as
+  # it checks a configured domain's; a template is never a server and never placed in
+  # the boot order, so the grant adds no boot edge.
+  def test_a_facet_granted_to_a_session_template_reaches_the_encoded_manifest
+    source = with_session(self.class.session) + service('b', '@domain.beta') +
+             facet('sb', '@session.system', '@service.b') + facet('ab', '@domain.alpha', '@service.b')
+    view = @codec.open('manifest', admit(source).bytes)
+    kind = ->(name) { @codec.member('mf_grantee', name) }
+    assert_equal [[kind.call('domain'), 0], [kind.call('session'), 0]],
+                 rows(view, 'facets').map { |row| row.values_at('grantee_kind', 'grantee') }
+    alone = with_session(self.class.session) + service('b', '@domain.beta') + facet('sb', '@session.system', '@service.b')
+    assert_equal [0, 1], rows(@codec.open('manifest', admit(alone).bytes), 'boot_order').map { |row| row.fetch('domain') }
+  end
+
+  # The system domain's grantee has no index: its kind says system and its index is 0.
+  def test_a_facet_granted_to_the_system_domain_has_no_index
+    view = @codec.open('manifest', admit(@source + service('b', '@domain.beta') + facet('sb', 'system', '@service.b')).bytes)
+    assert_equal [[@codec.member('mf_grantee', 'system'), 0]],
+                 rows(view, 'facets').map { |row| row.values_at('grantee_kind', 'grantee') }
+  end
+
+  def test_a_facet_granted_to_no_session_template_is_refused
+    source = with_session(self.class.session) + service('b', '@domain.beta') + facet('f', '@session.nobody', '@service.b')
+    refused(Erx::Manifest::Invalid, 2, 'facet.grantee', source)
+  end
+
+  # A session takes its grants from a configured server domain directly; the system
+  # domain's own services reach configured domains only.
+  def test_a_session_granted_a_system_domain_service_is_refused
+    source = with_session(self.class.session) + service('s', 'system') + facet('f', '@session.system', '@service.s')
+    refused(Erx::Manifest::Invalid, 2, 'facet.grantee', source)
+  end
+
+  # Property 15: the system domain holds no facet of the net or netadmin interface,
+  # however the service row spells the interface.
+  def test_the_system_domain_holds_no_network_facet
+    net = service('n', '@domain.beta')
+    ['interface net', 'interface 3', 'interface netadmin', 'interface 4'].each do |interface|
+      source = with_session(self.class.session) + net.sub('interface 1', interface) + facet('n', 'system', '@service.n')
+      refused(Erx::Manifest::Invalid, 15, 'facet.grantee', source, message: /facet n grants the system domain/)
+    end
+  end
+
+  # Property 15's floor: a net facet's grantee, a configured domain or a session
+  # template, has a max_frame of at least net_max_frame_min in its own runtime limits,
+  # whatever the system domain's are. alpha runs under the system runtime limits, a
+  # session under the session ones.
+  def test_a_net_grantee_below_the_frame_floor_is_refused
+    floor = @codec.constant('net_max_frame_min')
+    raised = lambda do |source, name|
+      source.sub("runtime_limits #{name}\n  max_frame 65536", "runtime_limits #{name}\n  max_frame #{floor}")
+    end
+    net = service('n', '@domain.beta').sub('interface 1', 'interface net')
+    to_session = with_session(self.class.session) + net + facet('n', '@session.system', '@service.n')
+    to_alpha = with_session(self.class.session) + net + facet('n', '@domain.alpha', '@service.n')
+    admit(raised.call(to_session, 'session'))
+    admit(raised.call(to_alpha, 'system'))
+    [to_session, raised.call(to_session, 'system'), to_alpha].each do |source|
+      refused(Erx::Manifest::Invalid, 15, 'runtime_limits.max_frame', source, message: /#{floor}/)
+    end
   end
 end

@@ -139,6 +139,10 @@ init(Opts) ->
     %% mint_timers, and mint_counts and mint_log what was refused or dropped (note/4).
     %% Served holds, by configured row, the facets of services the system domain serves
     %% that the manifest grants the row, each its service's name and the grant's limits.
+    %% SessionGrants holds, by template index, the index a session's origin
+    %% {session, Template} names, the manifest's grants to the sessions made from that
+    %% template, each its service's name, its server row and the grant's limits; no
+    %% session is a configured row, so none of them reaches the mint core.
     MintConfig = maps:merge(#{owner => fun erx_dist:owner/1}, maps:with([owner, deadline], maps:get(mints, Opts, #{}))),
     {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
            configured => #{}, templates => #{}, waiting => #{}, links => erx_domain_links:new(),
@@ -146,7 +150,7 @@ init(Opts) ->
            held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT),
            mint_config => MintConfig, mints => erx_domain_mints:new(MintConfig#{services => [], grants => []}),
            mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0},
-           served => #{}},
+           served => #{}, session_grants => #{}},
      {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none
@@ -166,14 +170,21 @@ handle_continue(boot, #{lib := Lib} = State) ->
             Configured = maps:from_list([{Row, Entry} || #{row := Row} = Entry <- Ordered]),
             %% The manifest's service rows of configured domains and its facet rows,
             %% which the manifest check has proved consistent: a configured domain's
-            %% service goes to the mint core, the system domain's to the ready answers.
+            %% service goes to the mint core, the system domain's to the ready answers,
+            %% and a grant to a session template's sessions to SessionGrants.
+            {Sessions, Domains} = lists:partition(fun({{template, _}, _, _, _}) -> true; (_) -> false end,
+                                                  maps:get(grants, Boot, [])),
             {System, Minted} = lists:partition(fun({_Grantee, _Name, Server, _Limits}) -> Server =:= system end,
-                                               maps:get(grants, Boot, [])),
+                                               Domains),
+            SessionGrants = maps:groups_from_list(fun({{template, Template}, _, _, _}) -> Template end,
+                                                  fun({_, Name, Server, Limits}) -> {Name, Server, Limits} end,
+                                                  Sessions),
             Mints = erx_domain_mints:new((maps:get(mint_config, State))#{services => maps:get(services, Boot, []),
                                            grants => Minted}),
             Served = maps:groups_from_list(fun({Grantee, _, _, _}) -> Grantee end,
                                            fun({_, Name, _, Limits}) -> {Name, Limits} end, System),
             Booted = State#{core := erx_domain_core:new(Host), configured := Configured, mints := Mints, served := Served,
+                            session_grants := SessionGrants,
                             templates := maps:from_list([{P, T} || #{principal := P} = T <- Templates])},
             {noreply, lists:foldl(fun start_configured/2, Booted, Ordered)};
         {{error, _}, _} ->

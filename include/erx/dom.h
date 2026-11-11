@@ -351,15 +351,18 @@ typedef struct erx_dom_service {
 } erx_dom_service_t;
 
 /*
- * A checked facet row: a grant of a service to its grantee, a configured
- * row or ERX_MF_NONE for the system domain, never the service's own
- * server, with the grant's limits. It names no operation and no
- * parameter: those resolve against the service's generated declarations,
- * which nothing on the boot path reads, so the view refuses a row that
- * names any rather than have the domain service grant every operation.
+ * A checked facet row: a grant of a service to its grantee, the system
+ * domain, a configured row or a session template, never the service's own
+ * server, with the grant's limits. A session template takes facets only of
+ * configured domains' services, which their servers grant each session
+ * made from it. It names no operation and no parameter: those resolve
+ * against the service's generated declarations, which nothing on the boot
+ * path reads, so the view refuses a row that names any rather than have
+ * the domain service grant every operation.
  */
 typedef struct erx_dom_facet {
-	uint32_t	grantee;	/* a configured row, or ERX_MF_NONE */
+	uint32_t	grantee_kind;	/* ERX_MF_GRANTEE_SYSTEM, _DOMAIN or _SESSION */
+	uint32_t	grantee;	/* a configured row or a template; 0 for system */
 	uint32_t	service;	/* its row in the view's services */
 	uint32_t	max_request;	/* the largest request, in encoded bytes */
 	uint32_t	in_flight;	/* forwards outstanding at once */

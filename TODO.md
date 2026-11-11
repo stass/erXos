@@ -919,13 +919,21 @@ it; git history is the record of completed work.
   `closed` (stock's `async_error_am_all` gives all the reason); and re-arming after a recv
   met the end answers `{error, closed}` where stock sends `{tcp_closed, S}`.
 * [High] network, shell and manifest (`erx_cmd_ifconfig`, `erx_cmd_ping`, `erx_facets`,
-  the manifest check; design-network-stack, "The grant"; design-system, property 15): the
+  design-network-stack, "The grant"; design-system, property 15): the
   system shell holds `net` and runs `ifconfig` and `ping` through the system domain's own
   grant, where the system domain may hold no `net` grant. Take `net` out of the system
   domain's facets, run the network utilities and the network device suite's `ifconfig` and
-  `ping` in root's session at the UART, add property 15 to the manifest check with its seeded
-  manifest, and make `erx_net_admit:mint/2` refuse the system domain's id. The stack itself
+  `ping` in root's session at the UART, and make `erx_net_admit:mint/2` refuse the system
+  domain's id. The stack itself
   leaves the system domain when 1b-E's network domain lands.
+* [Medium] network (the client side of `net`; design-domains, "Floors from a protocol"):
+  the socket protocol's floors are not generated from `abi/services/net.txt`, and no client
+  checks them at run time. The manifest check holds each `net` grantee's `max_frame` to
+  `net_max_frame_min` (property 15), a limit set by hand in that file; nothing checks the
+  serving domain's `max_frame` against it at build, as design-domains says the manifest
+  check does, nor `max_message_heap` or `funnel_depth`. Generate the floors from the operation schema with
+  the send-credit change, check them on the client before each call, and replace the
+  hand-set limit with the generated `max_frame` floor.
 * [Medium] network, `erx_net` and `erx_net_client` (`erx_udp_sock`, `erx_icmp_sock`,
   `erx_gen_udp_core`; design-network-stack, "Credit"): datagram memory is not bounded as
   the design says. A datagram socket's receive queue in the network domain is bounded in

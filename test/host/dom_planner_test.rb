@@ -126,6 +126,22 @@ class DomPlannerTest < Minitest::Test
     assert_equal 1, admit(with_sessions).report.fetch('child_plan_instances')
   end
 
+  # A facet granted to a session template, of a configured domain's service, reaches
+  # the root's view, which admits it; the same grant of a service the system domain
+  # serves, which the check never writes, the view refuses.
+  def test_a_facet_granted_to_a_session_template_passes_the_view
+    facet = "service b\n  server @domain.alpha\n  interface 1\nfacet gb\n  grantee @session.guest\n  service @service.b\n" \
+            "  operations none\n  max_request 1\n  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
+    manifest = admit(with_sessions + facet).bytes
+    offset = @codec.open('manifest', manifest).header.fetch('services').fetch('offset')
+    paths = %w[manifest heads plan].map { |name| File.join(@directory, "session-facet-#{name}") }
+    bytes = manifest.dup.tap { |copy| copy[offset + 8, 4] = [@codec.constant('mf_none')].pack('V') }
+    [bytes, '', "order 0\n"].zip(paths).each { |content, file| File.binwrite(file, content) }
+    record = @helper.run(paths, runner: @runner, name: 'dom-plan-session-facet', deadline: 30)
+    assert_match(/\Arefused manifest: a session template takes a facet of the system domain's service\n\z/,
+                 File.binread(record.fetch('log')))
+  end
+
   # What the check never writes, which the root's view refuses: two templates out
   # of principal order, and two of one principal.
   def test_session_templates_not_one_per_principal_are_refused

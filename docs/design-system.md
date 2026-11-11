@@ -377,7 +377,8 @@ violation fails the build with the property, the record and the field:
    function's bus mastering stays off.
 2. **Every facet names a server the manifest contains,** a service of the
    system release or of a configured domain, and a grantee, the system
-   domain or a configured domain, never the service's own server; a
+   domain, a configured domain or a session template, never the service's
+   own server, a session template only a configured domain's service; a
    grantee takes at most one facet of a service name, since its registry
    holds each under that name; and every introduction names configured
    domains.
@@ -496,21 +497,38 @@ violation fails the build with the property, the record and the field:
     that exists, and its limits enable `SPACES`, since a session's programs
     are its sub-spaces. It has no restart intensity, boot flag or place:
     the boot order, the plans of property 12 and every unit, window,
-    service, facet and introduction resolve through the domain table, which
-    holds no template, so none of them reaches one. Its limits are judged
+    service and introduction resolve through the domain table, which holds
+    no template, so none of them reaches one. A facet alone may name a
+    template as its grantee, written `@session.PRINCIPAL`, for a service a
+    configured domain serves, which its server grants each session made
+    from the template ([Facets a configured domain
+    serves](#facets-a-configured-domain-serves)); the grant adds nothing to
+    the boot order. Its limits are judged
     against its principal's ceilings, budget and quota when a session is
     made from it, by the request path every principal's domain takes.
-15. **The system domain holds no `net` grant:** no facet of the `net`
-    service names the system domain as its grantee, so the trusted base
-    takes no socket's traffic and no answer of the network domain's
-    grant ([The network domain](#the-network-domain)). A grant made at
-    run time cannot name it either: the network service's mint refuses
-    the system domain's id as a grantee
-    ([design-network-stack.md](design-network-stack.md#the-grant)).
-    Seeded violation: a development manifest that grants the system
-    domain a `net` facet, which the check refuses with this property's
-    diagnostic, naming the facet; and a mint request naming the system
-    domain, which the mint refuses and counts.
+15. **The system domain holds no `net` grant:** no facet of the `net` or
+    `netadmin` service names the system domain as its grantee, so the
+    trusted base takes no socket's traffic and no answer of the network
+    domain's grant ([The network domain](#the-network-domain)). The check
+    compares the service row's interface number with the numbers
+    `abi/services/net.txt` declares, so a row that spells the interface
+    by number is held to it too. A grant made at run time cannot name it
+    either: the network service's mint refuses the system domain's id as
+    a grantee
+    ([design-network-stack.md](design-network-stack.md#the-grant)). Each
+    grantee of `net`, a configured domain or a session template, also
+    runs with a `max_frame` of at least the protocol's floor,
+    `net_max_frame_min`, in its own runtime limits, so a client configured
+    below it fails the build rather than at its first socket; the client
+    side checks its floors again at run time
+    ([design-domains.md](design-domains.md#principals-sessions-and-quotas),
+    "Floors from a protocol"). Seeded violations: a development manifest
+    that grants the system domain a `net` facet, which the check refuses
+    with this property's diagnostic, naming the facet; the same with the
+    interface written as its number; a `net` grantee whose runtime limits
+    have a `max_frame` below the floor while the system domain's are
+    above it; and a mint request naming the system domain, which the mint
+    refuses and counts.
 
 Each property has a test that seeds one violation into a manifest and
 expects the build to fail with that property's diagnostic.
@@ -1762,7 +1780,12 @@ Programs receive their names through their session's startup message
 A configured domain can serve a service of its own, as the storage domain
 serves `data`: the manifest's `service` row names the server and the
 service's name, and a `facet` row grants that service to a grantee, a
-configured domain or the system domain, with the grant's limits. Service
+configured domain, the system domain or a session template, with the
+grant's limits. A template's grant, written `grantee
+@session.PRINCIPAL`, is made for each session of that principal while
+the session lives, by the server directly, never through the system
+domain, so a template takes facets only of configured domains'
+services. Service
 names are unique per server, not across the manifest. The facet is a
 process of the server's domain, minted there by the server's own code with
 `erx_facet:start/3`, so the system domain never stands in front of it; the

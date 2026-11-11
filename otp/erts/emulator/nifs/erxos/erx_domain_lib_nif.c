@@ -382,8 +382,10 @@ created_term(ErlNifEnv *env, const erx_dom_created_t *created)
 
 /*
  * The services configured domains serve, [{ServerRow, Name}], and the facet
- * rows, [{Grantee, Name, Server, Limits}], Grantee a configured row or the
- * atom system, Name the service's name as an atom, Server its server's row
+ * rows, [{Grantee, Name, Server, Limits}], Grantee a configured row, the
+ * atom system, or {template, Template} for the sessions made from session
+ * template Template, the index a session's origin {session, Template}
+ * names, Name the service's name as an atom, Server its server's row
  * or, for a service the system domain serves, the atom system, and Limits
  * the grant's limits by name, each list in manifest order
  * (docs/design-system.md, "Facets a configured domain serves"). The
@@ -421,7 +423,19 @@ served_terms(ErlNifEnv *env, ERL_NIF_TERM *services, ERL_NIF_TERM *grants)
 		keys[5] = atom(env, "queue"), values[5] = enif_make_uint64(env, facet->queue);
 		if (!enif_make_map_from_arrays(env, keys, values, 6, &limits))
 			return (false);
-		grantee = facet->grantee == ERX_MF_NONE ? atom(env, "system") : enif_make_uint(env, facet->grantee);
+		switch (facet->grantee_kind) {
+		case ERX_MF_GRANTEE_DOMAIN:
+			grantee = enif_make_uint(env, facet->grantee);
+			break;
+		case ERX_MF_GRANTEE_SESSION:
+			grantee = enif_make_tuple2(env, atom(env, "template"), enif_make_uint(env, facet->grantee));
+			break;
+		case ERX_MF_GRANTEE_SYSTEM:
+			grantee = atom(env, "system");
+			break;
+		default:
+			return (false);
+		}
 		server = service->server == ERX_MF_NONE ? atom(env, "system") : enif_make_uint(env, service->server);
 		name = enif_make_atom_len(env, service->name, service->name_len);
 		*grants = enif_make_list_cell(env, enif_make_tuple4(env, grantee, name, server, limits), *grants);

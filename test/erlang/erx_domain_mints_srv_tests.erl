@@ -26,7 +26,8 @@ setup() ->
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)],
                           services => [{1, echo}],
-                          grants => [{0, echo, 1, #{max_request => 512}}, {system, echo, 1, #{}}]}),
+                          grants => [{0, echo, 1, #{max_request => 512}}, {system, echo, 1, #{}},
+                                     {{template, 0}, echo, 1, #{max_request => 64}}]}),
     provide('a@erxos'),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
@@ -54,6 +55,10 @@ provide(Node) ->
 %% is not the grantee, are dropped and counted. A reply sent to the service itself, in
 %% a's envelope, is not taken at all: the service's pid is no address of the protocol.
 installs() ->
+    %% A session template's grant is held by its template and never reaches the mint core.
+    #{mints := Mints, session_grants := SessionGrants} = sys:get_state(erx_domain_srv),
+    ?assertEqual(#{0 => [{echo, 1, #{max_request => 64}}]}, SessionGrants),
+    ?assertEqual([{0, echo}, {system, echo}], lists:sort(maps:keys(erx_domain_mints:grants(Mints)))),
     #{{system, echo} := {minting, {5, 4}, SystemTag}} = wait(fun(#{{system, echo} := {minting, _, _}}) -> true end),
     #{{0, echo} := {introducing, {5, 6}, _}} = wait(fun(#{{0, echo} := {introducing, _, _}}) -> true end),
     [PidA, PidB] = [domain_pid(Id) || Id <- [5, 6]],

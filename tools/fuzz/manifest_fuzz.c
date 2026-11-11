@@ -44,12 +44,35 @@ int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
  * What a view the library admits holds: an entry per device row, each in one
  * unit and on that unit's holder, with a record of its own index; no two units
  * on one register page; each configured row's words with room for both
- * node names; and every service and facet row, each server and grantee a
- * configured row or the system domain, no facet granted to its own server,
+ * node names; and every service and facet row, each server a configured row
+ * or the system domain and each grantee one the boot may grant (grantee_admitted),
  * no grantee taking two facets of one service name, and no facet naming an
  * operation or parameter, which the domain service would otherwise grant
  * unchecked.
  */
+/*
+ * Whether the view admitted facet's grantee as the boot may grant it: the
+ * system domain, with index 0, for a configured domain's service; a
+ * configured row other than the server; or a session template, for a
+ * configured domain's service.
+ */
+static bool
+grantee_admitted(const erx_dom_view_t *dom, const erx_dom_facet_t *facet)
+{
+	uint32_t server = dom->services[facet->service].server;
+
+	switch (facet->grantee_kind) {
+	case ERX_MF_GRANTEE_SYSTEM:
+		return (facet->grantee == 0 && server != ERX_MF_NONE);
+	case ERX_MF_GRANTEE_DOMAIN:
+		return (facet->grantee < dom->nconfigured && facet->grantee != server);
+	case ERX_MF_GRANTEE_SESSION:
+		return (facet->grantee < dom->ntemplates && server != ERX_MF_NONE);
+	default:
+		return (false);
+	}
+}
+
 static void
 view_check(const erx_manifest_view_t *view, const erx_dom_lib_t *lib)
 {
@@ -71,13 +94,13 @@ view_check(const erx_manifest_view_t *view, const erx_dom_lib_t *lib)
 		facet = &dom->facets[index];
 		if (!erx_manifest_facets_at(view, index, &facet_row) || facet_row.operations.count != 0 ||
 		    facet_row.parameters.count != 0 || facet->service >= dom->nservices ||
-		    (facet->grantee != ERX_MF_NONE && facet->grantee >= dom->nconfigured) ||
-		    facet->grantee == dom->services[facet->service].server)
+		    !grantee_admitted(dom, facet))
 			abort();
 		for (uint32_t earlier = 0; earlier < index; earlier++) {
 			a_service = &dom->services[dom->facets[earlier].service];
 			b_service = &dom->services[facet->service];
-			if (dom->facets[earlier].grantee == facet->grantee && a_service->name_len == b_service->name_len &&
+			if (dom->facets[earlier].grantee_kind == facet->grantee_kind &&
+			    dom->facets[earlier].grantee == facet->grantee && a_service->name_len == b_service->name_len &&
 			    memcmp(a_service->name, b_service->name, b_service->name_len) == 0)
 				abort();
 		}

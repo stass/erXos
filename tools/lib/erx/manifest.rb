@@ -811,8 +811,8 @@ module Erx
 
     # Phase 1's check (docs/design-stopgap.md, "The Phase 1 manifest check"): a
     # development manifest, full or partial boot, with the system domain and its
-    # configured domains. A holder, server or grantee is the system domain or a
-    # configured domain; a domain row's runtime and release name artifacts of this
+    # configured domains. A holder or server is the system domain or a configured
+    # domain, and a grantee one of those or a session template; a domain row's runtime and release name artifacts of this
     # pack; the configured domains are ordered (10), checked against the rescue
     # configuration (11), planned by the domain library's host build (12) and held to
     # the headroom in system (13). What Phase 1 does not bring is refused here.
@@ -863,8 +863,8 @@ module Erx
         invalid('two services of one server share a name', 5, 'service.name') unless
           rows['services'].map { |row| row.values_at('server', 'name') }.uniq.size == services.size
         rows['introductions'] = normalize_introductions
-        rows['facets'] = normalize_facets(services.map(&:first), rows['services'])
-        edges = rows['facets'].map { |row| [row.fetch('grantee'), rows['services'].fetch(row.fetch('service')).fetch('server')] }
+        rows['facets'] = normalize_facets(services.map(&:first), rows)
+        edges = boot_edges(rows['facets'], rows['services'])
         rows['boot_order'] = boot_order(rows['domains'], edges)
         check_rescue(rows['domains'], edges)
         check_facets_supported
@@ -957,8 +957,9 @@ module Erx
       # Property 14: each session template, keyed by its principal, from which the
       # domain service makes every session of that principal on request
       # (docs/design-system.md, "The system manifest"). A template is not a domain row,
-      # so the boot order, the plans and every holder, server, grantee and introduction,
-      # which resolve through the domain table, never reach one. A `session NAME`
+      # so the boot order, the plans and every holder, server and introduction, which
+      # resolve through the domain table, never reach one; a facet alone may name it as
+      # its grantee (facet_grantee). A `session NAME`
       # record's NAME is its principal's, so a principal has one by the source's own
       # key, and the rows are written in principal order. Its domain makes its
       # programs as sub-spaces, so its limits enable SPACES; the limits are judged
@@ -1054,40 +1055,123 @@ module Erx
         rows.sort_by { |row| row.values_at('from', 'to') }
       end
 
-      # Each facet row, sorted by name qualified by its grantee: its grantee, a configured
-      # domain's index or the system domain's mf_none, its service's index in the sorted
-      # service table and the grant's limits, an omitted queue resolved to system_queue.
-      # A facet is installed in its grantee's registry under its service's name
-      # (docs/design-system.md, "Facets a configured domain serves"), so a grantee takes
-      # at most one facet of a service name, whichever domain serves it (property 2);
-      # and the system domain takes no facet of its own service. A facet of the
-      # driver-control interface stops and starts another domain's drivers, so only the
-      # system domain holds one (property 8).
-      def normalize_facets(services, service_rows)
+      # Each facet row, sorted by name qualified by its grantee: its grantee (facet_grantee),
+      # its service's index in the sorted service table and the grant's limits, an omitted
+      # queue resolved to system_queue. A facet is installed in its grantee's registry
+      # under its service's name (docs/design-system.md, "Facets a configured domain
+      # serves"), so a grantee takes at most one facet of a service name, whichever domain
+      # serves it (property 2); the system domain takes no facet of its own service; and a
+      # session template takes facets of configured domains' services alone, which the
+      # server grants the session directly. A facet of the driver-control interface stops
+      # and starts another domain's drivers, so only the system domain holds one
+      # (property 8); the network's facets are property 15's (check_network_grants).
+      def normalize_facets(services, tables)
+        service_rows = tables.fetch('services')
         rows = records('facet').map do |record|
           token = one(record, 'service')
           index = services.index { |service| !token.quoted && "@service.#{service.name}" == token.value }
           invalid('facet names a service the manifest does not contain', 2, 'facet.service') unless index
-          facet_row(record, index)
+          facet_row(record, index, tables.fetch('sessions'))
         end
-        invalid('two facets of one grantee share a name', 5, 'facet.name') unless
-          rows.map { |row| row.values_at('grantee', 'name') }.uniq.size == rows.size
-        taken = rows.map { |row| [row.fetch('grantee'), service_rows.fetch(row.fetch('service')).fetch('name')] }
-        invalid('a grantee takes two facets of one service name', 2, 'facet.service') unless taken.uniq.size == taken.size
+        grantee = ->(row) { row.values_at('grantee_kind', 'grantee') }
+        server = ->(row) { service_rows.fetch(row.fetch('service')).fetch('server') }
         none = @codec.constant('mf_none')
+        invalid('two facets of one grantee share a name', 5, 'facet.name') unless
+          rows.map { |row| [grantee.call(row), row.fetch('name')] }.uniq.size == rows.size
+        taken = rows.map { |row| [grantee.call(row), service_rows.fetch(row.fetch('service')).fetch('name')] }
+        invalid('a grantee takes two facets of one service name', 2, 'facet.service') unless taken.uniq.size == taken.size
         invalid('the system domain takes no facet of its own service', 2, 'facet.grantee') if
-          rows.any? { |row| row.fetch('grantee') == none && service_rows.fetch(row.fetch('service')).fetch('server') == none }
+          rows.any? { |row| row.fetch('grantee_kind') == grantee_kind('system') && server.call(row) == none }
+        invalid('a session template takes facets of configured domains\' services alone', 2, 'facet.grantee') if
+          rows.any? { |row| row.fetch('grantee_kind') == grantee_kind('session') && server.call(row) == none }
         control = fetch_interface('driver_control')
         invalid('only the system domain holds a driver-control facet', 8, 'facet.grantee') if
-          rows.any? { |row| row.fetch('grantee') != none && service_rows.fetch(row.fetch('service')).fetch('interface') == control }
-        rows.sort_by { |row| row.values_at('name', 'grantee') }
+          rows.any? { |row| row.fetch('grantee_kind') != grantee_kind('system') && service_rows.fetch(row.fetch('service')).fetch('interface') == control }
+        check_network_grants(rows, tables)
+        rows.sort_by { |row| [row.fetch('name'), *grantee.call(row)] }
       end
 
-      def facet_row(record, service)
+      # Property 15: the system domain holds no facet of the network domain's net or
+      # netadmin interface, compared by number, however the service row spells it. Each
+      # grantee of net, a configured domain or a session template, takes frames of at
+      # least net_max_frame_min bytes under its own runtime limits, since the socket
+      # protocol's piece and its envelope arrive in one frame. The manifest is the only
+      # source of a net grant, since no requested create carries one, so this holds for
+      # every grant there is.
+      def check_network_grants(facets, tables)
+        net, netadmin = fetch_interface('net'), fetch_interface('netadmin')
+        interface = ->(row) { tables.fetch('services').fetch(row.fetch('service')).fetch('interface') }
+        facets.each do |row|
+          next unless row.fetch('grantee_kind') == grantee_kind('system') && [net, netadmin].include?(interface.call(row))
+
+          invalid("facet #{row.fetch('name')} grants the system domain a network interface, which it never holds", 15, 'facet.grantee')
+        end
+        floor = @codec.constant('net_max_frame_min')
+        facets.select { |row| interface.call(row) == net }.each do |row|
+          max_frame = grantee_max_frame(row, tables)
+          next if max_frame >= floor
+
+          invalid("facet #{row.fetch('name')}'s grantee takes frames of at most #{max_frame} bytes, below net's floor of #{floor}",
+                  15, 'runtime_limits.max_frame')
+        end
+      end
+
+      # The max_frame of a configured domain's or a session template's runtime limits.
+      def grantee_max_frame(row, tables)
+        table = case row.fetch('grantee_kind')
+                when grantee_kind('domain') then 'domains'
+                when grantee_kind('session') then 'sessions'
+                else raise Erx::Error, 'the system domain has no grantee runtime limits here'
+                end
+        limits = tables.fetch('limits').fetch(tables.fetch(table).fetch(row.fetch('grantee')).fetch('limits'))
+        tables.fetch('runtime_limits').fetch(limits.fetch('runtime_limits')).fetch('max_frame')
+      end
+
+      # The facets' edges from each configured or system grantee to its service's server,
+      # mf_none for the system domain, which the boot order and the rescue configuration
+      # follow. A session template is never started at boot, so its grants are no edge.
+      def boot_edges(facets, services)
+        none = @codec.constant('mf_none')
+        facets.filter_map do |row|
+          client = case row.fetch('grantee_kind')
+                   when grantee_kind('domain') then row.fetch('grantee')
+                   when grantee_kind('system') then none
+                   end
+          [client, services.fetch(row.fetch('service')).fetch('server')] if client
+        end
+      end
+
+      def grantee_kind(name) = @codec.member('mf_grantee', name)
+
+      # A facet's grantee as its kind and index: the system domain, written system, with
+      # index 0; a configured domain, @domain.NAME, by its index; or a session template,
+      # @session.PRINCIPAL, by its index in the sessions table.
+      def facet_grantee(token, sessions)
+        return [grantee_kind('system'), 0] if !token.quoted && token.value == 'system'
+
+        domain = domain_index(token)
+        return [grantee_kind('domain'), domain] if domain
+
+        session = session_index(token, sessions)
+        return [grantee_kind('session'), session] if session
+
+        invalid('names neither the system domain, a configured domain nor a session template', 2, 'facet.grantee')
+      end
+
+      # A session template's index, or nil when the token names none.
+      def session_index(token, sessions)
+        return nil if token.quoted || !token.value.start_with?('@session.')
+
+        principal = @indices.fetch('principal')[token.value.delete_prefix('@session.')]
+        principal && sessions.index { |row| row.fetch('principal') == principal }
+      end
+
+      def facet_row(record, service, sessions)
         name = record.properties.key?('name') ? text(record, 'name') : record.name.b
         invalid('facet name is not a system identifier', 5, 'facet.name') unless name.match?(Frontend::IDENTIFIER)
         queue = record.properties.key?('queue') ? number(record, 'queue') : number(@source.machine, 'system_queue')
-        { 'name' => name, 'grantee' => holder_index(one(record, 'grantee'), property: 2, field: 'facet.grantee'),
+        kind, index = facet_grantee(one(record, 'grantee'), sessions)
+        { 'name' => name, 'grantee_kind' => kind, 'grantee' => index,
           'service' => service,
           'operations' => { 'table' => 'facet_operations', 'first' => 0, 'count' => 0 },
           'parameters' => { 'table' => 'facet_parameters', 'first' => 0, 'count' => 0 },

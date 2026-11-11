@@ -1424,15 +1424,17 @@ namespace.
 | Record and size | Fields |
 | --- | --- |
 | service, 24 | `0: name str`; `8: server u32`; `12: interface u32`; `16: reserved u64` |
-| facet, 80 | `0: name str`; `8: grantee u32`; `12: service u32`; `16: operations span`; `24: parameters span`; `32: max_request u32`; `36: in_flight u32`; `40: reductions u64`; `48: period_ns u64`; `56: max_heap_size u64`; `64: queue u64`; `72: reserved u64` |
+| facet, 80 | `0: name str`; `8: grantee u32`; `12: service u32`; `16: operations span`; `24: parameters span`; `32: max_request u32`; `36: in_flight u32`; `40: reductions u64`; `48: period_ns u64`; `56: max_heap_size u64`; `64: queue u64`; `72: grantee_kind u32`; `76: reserved u32` |
 | facet operation, 4 | `0: operation u32` |
 | facet parameter, 32 | `0: key u32`; `4: kind u32`; `8: scalar u64`; `16: bytes str`; `24: index u32`; `28: reserved u32` |
 | introduction, 8 | `0: from u32`; `4: to u32` |
 | liveness target, 4 | `0: service u32` |
 
-A service's `server` is a domain reference, and so is a facet's
-`grantee`: a configured domain's index, or `mf_none` for the system
-domain. A service's interface number names
+A service's `server` is a domain reference: a configured domain's
+index, or `mf_none` for the system domain. A facet's grantee is a
+choice on `grantee_kind` (`mf_grantee`): `system`, whose `grantee` is
+0; `domain`, a configured domain's index; or `session`, a session
+template's index, written `@session.PRINCIPAL` in the source. A service's interface number names
 a declaration in `abi/services/`; the packer checks the selected
 server's verified release catalog actually supplies that interface.
 The manifest cannot invent a service by giving it a plausible name.

@@ -31,8 +31,8 @@
  * configured row and session template must leave room in its boot page's
  * strings for what the library adds to its own words (boot_strings_fit).
  * The service and facet rows are carried for the domain service
- * (boot_services), each server and grantee a configured row or the system
- * domain.
+ * (boot_services), each server a configured row or the system domain, and
+ * each grantee the system domain, a configured row or a session template.
  */
 
 #include <stdbool.h>
@@ -70,6 +70,8 @@ static const char *boot_templates(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_template_t *);
 static const char *boot_services(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_service_t *, erx_dom_facet_t *);
+static const char *boot_facet_grantee(const erx_dom_view_t *, const erx_mf_facet_t *,
+		    const erx_dom_service_t *);
 static bool	boot_facet_repeats(const erx_dom_view_t *, const erx_dom_facet_t *, uint32_t);
 
 erx_dom_boot_sizes_t
@@ -538,7 +540,8 @@ boot_facet_repeats(const erx_dom_view_t *view, const erx_dom_facet_t *facets, ui
 	service = &view->services[facets[index].service];
 	for (uint32_t earlier = 0; earlier < index; earlier++) {
 		other = &view->services[facets[earlier].service];
-		if (facets[earlier].grantee == facets[index].grantee && other->name_len == service->name_len &&
+		if (facets[earlier].grantee_kind == facets[index].grantee_kind &&
+		    facets[earlier].grantee == facets[index].grantee && other->name_len == service->name_len &&
 		    memcmp(other->name, service->name, service->name_len) == 0)
 			return (true);
 	}
@@ -546,10 +549,45 @@ boot_facet_repeats(const erx_dom_view_t *view, const erx_dom_facet_t *facets, ui
 }
 
 /*
+ * Why facet's grantee cannot take a facet of service, or NULL. The
+ * system domain takes no facet of its own services; a configured row
+ * none of its own; and a session template only a configured domain's,
+ * which the server grants each session directly. The reader has checked
+ * the grantee's index against its kind's table and made the system
+ * domain's 0; the bounds are checked again against the view's own.
+ */
+static const char *
+boot_facet_grantee(const erx_dom_view_t *view, const erx_mf_facet_t *facet, const erx_dom_service_t *service)
+{
+	switch (facet->grantee_kind) {
+	case ERX_MF_GRANTEE_SYSTEM:
+		if (service->server == ERX_MF_NONE)
+			return ("manifest: a facet is granted to its service's own server");
+		return (NULL);
+	case ERX_MF_GRANTEE_DOMAIN:
+		if (facet->grantee >= view->nconfigured)
+			return ("manifest: a facet's grantee is no configured domain");
+		if (facet->grantee == service->server)
+			return ("manifest: a facet is granted to its service's own server");
+		return (NULL);
+	case ERX_MF_GRANTEE_SESSION:
+		if (facet->grantee >= view->ntemplates)
+			return ("manifest: a facet's grantee is no session template");
+		if (service->server == ERX_MF_NONE)
+			return ("manifest: a session template takes a facet of the system domain's service");
+		return (NULL);
+	default:
+		return ("manifest: a facet's grantee is of no kind the boot knows");
+	}
+}
+
+/*
  * The service and facet rows, which the domain service reads
  * (erx_domain_lib:configured/0), so it reads view->nconfigured, which
- * boot_configured sets first. A server or grantee is a configured row or
- * ERX_MF_NONE; a facet is never granted to its service's own server, a
+ * boot_configured and boot_templates set first. A server is a configured
+ * row or ERX_MF_NONE, and a grantee the system domain, a configured row or
+ * a session template; a facet is never granted to its service's own
+ * server, a session template takes only a configured domain's service, a
  * grantee takes one facet of a service name, and a facet names no
  * operation or parameter (erx_dom_facet_t). The reader has checked every
  * index and string against its table.
@@ -560,7 +598,7 @@ boot_services(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom
 {
 	erx_mf_service_t service;
 	erx_mf_facet_t facet;
-	const char *strings;
+	const char *strings, *reason;
 
 	view->services = services;
 	view->nservices = 0;
@@ -584,13 +622,12 @@ boot_services(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom
 			return ("manifest: a facet row the reader cannot read");
 		if (facet.service >= view->nservices)
 			return ("manifest: a facet names no service");
-		if (facet.grantee != ERX_MF_NONE && facet.grantee >= view->nconfigured)
-			return ("manifest: a facet's grantee is neither the system domain nor a configured domain");
-		if (facet.grantee == services[facet.service].server)
-			return ("manifest: a facet is granted to its service's own server");
+		if ((reason = boot_facet_grantee(view, &facet, &services[facet.service])) != NULL)
+			return (reason);
 		if (facet.operations.count != 0 || facet.parameters.count != 0)
 			return ("manifest: a facet names operations or parameters, which the boot cannot check");
-		facets[index] = (erx_dom_facet_t){ .grantee = facet.grantee, .service = facet.service,
+		facets[index] = (erx_dom_facet_t){ .grantee_kind = facet.grantee_kind,
+		    .grantee = facet.grantee, .service = facet.service,
 		    .max_request = facet.max_request, .in_flight = facet.in_flight,
 		    .reductions = facet.reductions, .period_ns = facet.period_ns,
 		    .max_heap_size = facet.max_heap_size, .queue = facet.queue };
