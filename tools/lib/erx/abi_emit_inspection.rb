@@ -646,7 +646,7 @@ module Erx
           [kind, layout] if layout.is_a?(Layout)
         end
         layouts = reports.map { |kind, layout| report_layout_clause(kind, layout, topics) }
-        decoders = reports.map { |kind, layout| decode_report_clause(kind, layout) }
+        decoders = reports.map { |kind, layout| decode_report_clause(inspection, kind, layout) }
         "%% A kernel report's topic, size and reported bit of each field.\n" \
           "-spec report_layout(atom()) ->\n" \
           "          {ok, \#{topic := non_neg_integer(), size := pos_integer(), bits := \#{atom() => pos_integer()}}}\n" \
@@ -676,7 +676,7 @@ module Erx
 
       # One binary segment for each field in offset order, a skipped segment
       # for each gap, and a value bound to F<n> for the field at position n.
-      def decode_report_clause(kind, layout)
+      def decode_report_clause(inspection, kind, layout)
         fields = layout.fields.sort_by(&:offset)
         ends = [0] + fields.map { |field| field.offset + field.size }
         segments = fields.each_with_index.flat_map do |field, index|
@@ -686,7 +686,7 @@ module Erx
         segments << "_:#{layout.size - ends.last}/binary" if layout.size > ends.last
         reported = fields.index { |field| field.name == Inspection::REPORTED }
         values = fields.each_with_index.filter_map do |field, index|
-          [atom(field.name), report_value(field, "F#{index}")] unless index == reported
+          [atom(field.name), report_value(field, "F#{index}", attribute_type(inspection, kind, field.name))] unless index == reported
         end
         "decode_report(#{atom(kind)},\n              <<#{segments.join(",\n                ")}>>) ->\n" \
           "    {ok, F#{reported}, #{map(values, 12 + reported.to_s.size)}}"
@@ -698,10 +698,27 @@ module Erx
         "#{variable}:#{field.type.integer.bits}/#{field.type.integer.signed ? 'little-signed' : 'little'}"
       end
 
-      # An array of bytes stays a binary; any wider array becomes a list.
-      def report_value(field, variable)
+      # The type of the kind's attribute FIELD_NAME, or nil for a field no
+      # attribute names.
+      def attribute_type(inspection, kind, field_name)
+        attribute = inspection.kinds.fetch(kind).find { |attr| attr.key == field_name }
+        attribute && inspection.types.fetch(attribute.type)
+      end
+
+      # The value of a field for an attribute of TYPE. A scalar ABI enum's
+      # number becomes its atom, and a number the enum does not name stays a number,
+      # which the attribute's validator refuses. An array of bytes stays a
+      # binary, written in lower-case hexadecimal for a text attribute that is not
+      # UTF-8, as the
+      # build identifier is written everywhere; any wider array becomes a list.
+      def report_value(field, variable, type)
         integer = field.type.integer
-        return variable if !field.array? || integer.size == 1
+        if type&.numbers && !field.array?
+          members = type.numbers.sort_by { |_name, number| number }.map { |name, number| "#{number} => #{atom(name)}" }
+          return "maps:get(#{variable}, \#{#{members.join(', ')}}, #{variable})"
+        end
+        return variable unless field.array?
+        return (type&.form == 'text' && !type.utf8 ? "binary:encode_hex(#{variable}, lowercase)" : variable) if integer.size == 1
 
         "[X || <<X:#{integer.bits}/#{integer.signed ? 'little-signed' : 'little'}>> <= #{variable}]"
       end

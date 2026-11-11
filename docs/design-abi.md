@@ -624,7 +624,14 @@ collector maps fields and bits to attributes by name and keeps no table
 of its own; an attribute that lists `kernel`, is not `derived` and has
 no field in the layout reads as a clear bit. A field that holds an
 enum value is a plain integer, its enum named in a comment, so that a
-reader never refuses a report over a value its clear bit disowns. No
+reader never refuses a report over a value its clear bit disowns. The
+generated decoder turns such a field into its enum's atom when the
+attribute's type is that enum, and leaves a number the enum does not
+name a number, which the attribute's validator refuses only when the
+field's bit is set; a byte array whose attribute is `text` and not
+`utf8` becomes its
+lower-case hexadecimal, as the build identifier is written everywhere.
+Neither rule applies to an array of wider integers, which stays a list. No
 report layout names a
 reporter or a `partial` status. A field that a stopgap backend counts
 only partly has its `reported` bit clear, and that backend names it

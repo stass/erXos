@@ -321,6 +321,12 @@ it; git history is the record of completed work.
   above RAM's start, with no upper bound and nothing tying it to the crash root's image,
   whose range the guest could print beside its address; and `test/guest/native_threads`'s `QUEUE_SETTLE_NS` trusts a 50 ms sleep to order
   waiters, which a starved vCPU can break.
+* [Low] stopgap, `liberx/backend/fiasco/service.c`, `erx_object_info`'s cpu topic: no CPU reports `idle_time`.
+  Fiasco has `l4_scheduler_idle_time`, but erXos's Fiasco is built with `CONFIG_PERIODIC` and without
+  `FINE_GRAINED_CPUTIME`, so each 1 ms tick is charged to the thread it interrupts and a short run between ticks
+  counts as idle: the count bounds the idle time neither from below nor from above, and reporting it would give a
+  wrong answer as a right one. The inspector shows the field `unsupported`. erXos's kernel, which accounts time at
+  each switch, reports it.
 * [Low] stopgap, Fiasco's `Ipc_gate_obj::unblock_all`, `fiasco/kernel/src/kern/ipc_gate.cpp:142-166`: the gate dequeues
   a blocked sender and activates it afterwards, the race `Semaphore` closes with `Thread_sem_woken`, so a timed send can
   return first and the activation land in what the thread blocks in next. The root's one gate is created bound

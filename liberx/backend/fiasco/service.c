@@ -104,6 +104,12 @@ static void	service_page_fault(const l4_msg_regs_t *, uint32_t);
 static void	service_exception(const l4_exc_regs_t *, uint32_t);
 
 static _Alignas(16) uint8_t service_stack[SERVICE_STACK_BYTES];
+/* What the boot handoff said of the machine: written once, before the service thread exists. */
+static bool	service_boot_known;
+static uint8_t	service_build[sizeof(((erx_info_facts_t *)0)->build)];
+static uint32_t	service_boot_value;
+_Static_assert(sizeof(service_build) == sizeof(((erx_boot_handoff_view_t *)0)->build_id),
+    "the machine report's build identifier is the handoff's");
 /* Counted, never printed: a label naming no live task. */
 static _Atomic uint64_t service_dropped;
 
@@ -118,6 +124,14 @@ uint64_t
 erx_fiasco_service_thread(void)
 {
 	return (erx_fiasco_root_slot_cap(ERX_FIASCO_SLOT_SERVICE_THREAD));
+}
+
+void
+erx_fiasco_service_boot(const erx_boot_handoff_view_t *handoff)
+{
+	__builtin_memcpy(service_build, handoff->build_id, sizeof(service_build));
+	service_boot_value = handoff->boot.value;
+	service_boot_known = true;
 }
 
 const char *
@@ -519,6 +533,9 @@ service_object_info(uint32_t task, const erx_fiasco_object_info_request_t *reque
 		return (ERX_EINVAL);
 	switch (request->topic) {
 	case ERX_INFO_MACHINE:
+		facts.boot_known = service_boot_known;
+		__builtin_memcpy(facts.build, service_build, sizeof(facts.build));
+		facts.boot_value = service_boot_value;
 		facts.uptime_ns = erx_fiasco_clock_ns();
 		facts.pool_pages = erx_fiasco_vm_pool_pages();
 		facts.pool_free_pages = erx_fiasco_vm_free_pages();

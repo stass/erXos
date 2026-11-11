@@ -12,6 +12,7 @@
 
 #include "erx/abi.h"
 #include "erx/cdefs.h"
+#include "erx/core/boot_handoff.h"
 #include "erx/core/crash.h"
 #include "erx/release.h"
 #include "erx/watchdog.h"
@@ -29,6 +30,14 @@
  * root thread ends the machine. Returns NULL, or why the boot cannot go on.
  */
 const char	*erx_fiasco_root_up(const void *archive, size_t archive_bytes);
+/*
+ * Keeps what bootstrap's handoff said of the machine, its build identifier and boot
+ * value, for erx_object_info's machine report. It runs once, before
+ * erx_fiasco_root_up starts the service thread that reads them, so they never
+ * change under it. The program root calls it. A root that does not call it
+ * reports neither: libc_root, and the native test guests, though they read a handoff.
+ */
+void		 erx_fiasco_service_boot(const erx_boot_handoff_view_t *handoff);
 /* The CPUs the kernel reports online, as a mask. */
 uint64_t	 erx_fiasco_cpus_online(void);
 

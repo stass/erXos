@@ -7,7 +7,8 @@
  * The reports of erx_object_info on liberx's Phase 1 backends, and the fields they
  * count only partly (docs/design-stopgap.md, "Reporting kernel objects"). Per topic:
  *
- *   machine  cpus_online, the count of the kernel's map, reported when the map is known;
+ *   machine  build and boot_value, the boot handoff's, reported when the backend has one;
+ *            cpus_online, the count of the kernel's map, reported when the map is known;
  *            uptime, the kernel's clock, reported when it is known; memory_total and
  *            memory_free, the root's pool's pages in bytes, never reported:
  *            erx_info_partial names them, since RAM outside the pool is not counted
@@ -106,6 +107,11 @@ erx_info_report(uint32_t topic, uint64_t index, const erx_info_facts_t *facts, v
 			report.machine.memory_total = report.machine.memory_free = 0;
 		report.machine.reported = (facts->cpus_online != 0 ? ERX_INFO_MACHINE_REPORTED_CPUS_ONLINE : 0) |
 		    (facts->uptime_ns != 0 ? ERX_INFO_MACHINE_REPORTED_UPTIME : 0);
+		if (facts->boot_known) {
+			bcopy(facts->build, report.machine.build, sizeof(report.machine.build));
+			report.machine.boot_value = facts->boot_value;
+			report.machine.reported |= ERX_INFO_MACHINE_REPORTED_BUILD | ERX_INFO_MACHINE_REPORTED_BOOT_VALUE;
+		}
 		break;
 	case ERX_INFO_CPU:
 		if (index >= 64 || (facts->cpus_online >> index & 1) == 0)

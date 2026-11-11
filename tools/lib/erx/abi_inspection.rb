@@ -12,8 +12,9 @@ module Erx
     # reference that names it: `boolean`, `pid`, `rights`, `object_type`,
     # `status` or `@root_name`. ELEMENT and ELEMENTS name other types by
     # such references, which key InspectionSchema#types.
+    # NUMBERS, for an ABI enum's atoms only, maps each atom to its number.
     InspectionType = Struct.new(:name, :form, :minimum, :maximum, :multiple, :unit,
-                                :utf8, :atoms, :element, :elements, :member, keyword_init: true)
+                                :utf8, :atoms, :numbers, :element, :elements, :member, keyword_init: true)
     InspectionStopgap = Struct.new(:name, :category, :label, :scope, keyword_init: true)
     # A trace row (docs/design-live.md, "Tracing") and the one reporter, a
     # category or a stopgap name, that its collector assigns to its events.
@@ -334,8 +335,8 @@ module Erx
           end
         end
 
-        def atoms_type(name, form, atoms)
-          InspectionType.new(name: name, form: form, atoms: atoms.sort, member: false)
+        def atoms_type(name, form, atoms, numbers: nil)
+          InspectionType.new(name: name, form: form, atoms: atoms.sort, numbers: numbers, member: false)
         end
 
         def root_type(reference, line)
@@ -345,7 +346,8 @@ module Erx
             InspectionType.new(name: reference, form: 'integer', minimum: type.minimum, maximum: type.maximum,
                                multiple: type.multiple, member: false)
           when EnumType
-            atoms_type(reference, type.flags ? 'flags' : 'atoms', type.members.keys)
+            numbers = type.flags ? nil : type.members.to_h.freeze
+            atoms_type(reference, type.flags ? 'flags' : 'atoms', type.members.keys, numbers:)
           else
             line.fail!("#{reference} is not a root scalar, enum or flags")
           end

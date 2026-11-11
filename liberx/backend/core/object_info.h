@@ -6,6 +6,7 @@
 #ifndef ERX_BACKEND_CORE_OBJECT_INFO_H
 #define ERX_BACKEND_CORE_OBJECT_INFO_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "erx/abi.h"
@@ -21,6 +22,9 @@
 
 /* What the backend knows when it answers. Each topic reads only its own facts. */
 typedef struct erx_info_facts {
+	bool			boot_known;	/* machine: build and boot_value hold what the boot handoff said */
+	uint8_t			build[sizeof(((erx_info_machine_t *)0)->build)]; /* machine: the boot image's build identifier */
+	uint32_t		boot_value;	/* machine: a boot_value */
 	uint64_t		cpus_online;	/* machine, cpu: the kernel's map, 0 when it did not say */
 	uint64_t		uptime_ns;	/* machine: the kernel's clock since boot, 0 when it did not say */
 	uint64_t		pool_pages;	/* machine: the pages the root's pool was built with */

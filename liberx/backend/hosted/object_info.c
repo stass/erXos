@@ -6,8 +6,9 @@
 /*
  * erx_object_info in a macOS process (docs/design-stopgap.md, "Reporting kernel
  * objects"): the same handles, refusals and reported bits as the Fiasco backend, from
- * the hosted backend's own tables. There is one space, the process, so the budget and
- * thread topics take ERX_CAP_SELF alone.
+ * the hosted backend's own tables, except the machine's build and boot_value, which
+ * come from a boot handoff and a process has none. There is one space, the process,
+ * so the budget and thread topics take ERX_CAP_SELF alone.
  */
 
 #include <stdint.h>

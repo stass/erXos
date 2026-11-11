@@ -700,9 +700,9 @@ module Erx
 
       # The kernel-object records at the Erlang shell, at the statuses design-stopgap.md's
       # "Reporting kernel objects" table gives. Of the attributes only the kernel could
-      # report, just these are ok: the machine's cpus_online and uptime and the system
-      # group's parked and ready. The group's cpuset would be ok once a set is configured,
-      # and nothing configures the system group's. The machine's memory_total and
+      # report, just these are ok: the machine's build, boot_value, cpus_online and uptime,
+      # and the system group's parked and ready. The group's cpuset would be ok once a set
+      # is configured, and nothing configures the system group's. The machine's memory_total and
       # memory_free and the budget's used are partial, with reporter liberx_pool, and above
       # zero. Every other attribute is unsupported with reporter
       # kernel, and the CPUs and the system domain's threads are listed whole. Each answer
@@ -727,8 +727,12 @@ module Erx
         positive = '[1-9][0-9]*'
         text = ->(fixed) { Regexp.escape(fixed) }
         ok = ->(key, value) { "#{text.call("{#{key},{kernel,{ok,")}#{value}#{text.call('}}}')}" }
+        # ~w writes a binary as its bytes: the build identifier's sixteen lower-case hex digits.
+        hex_digit = '(?:4[89]|5[0-7]|9[7-9]|10[0-2])'
+        build_id = "<<#{hex_digit}(?:,#{hex_digit}){15}>>"
         pool = ->(key) { text.call("{#{key},{{stopgap,liberx_pool},{partial,") + positive + text.call('}}}') }
-        machine = text.call('[') + [ok.call('cpus_online', cpus), pool.call('memory_free'), pool.call('memory_total'),
+        machine = text.call('[') + [ok.call('boot_value', '(?:normal|trial|unknown)'), ok.call('build', build_id),
+                                    ok.call('cpus_online', cpus), pool.call('memory_free'), pool.call('memory_total'),
                                     ok.call('uptime', positive)].join(',') + text.call(']')
         cpu_listing = text.call("{ok,#{cpus},[]}")
         group = text.call('[') + ok.call('parked', any_number) + ',' + ok.call('ready', any_number) + text.call(']')
@@ -748,8 +752,8 @@ module Erx
       # a syntax error, an output longer than any FIFO, a debug log record, what
       # erlang:processes() lists, and a module compiled and a tracer started with compiler
       # and runtime_tools loaded and neither started, and an rc line the command shell's
-      # evaluator runs with its Erlang commands, and erx:i(), whose machine rows the kernel
-      # interface reports unsupported under Fiasco and whose budget's used the root pool
+      # evaluator runs with its Erlang commands, and erx:i(), whose machine rows report build,
+      # boot_value, cpus_online and uptime under Fiasco and whose budget's used the root pool
       # reports partial, with the pool's scope below the tables, and the same statuses in
       # /proc: ls and cat through the command shell's evaluator, then file:read_file/1 of a
       # process's status file, which is size 0 and read to its end as stock reads one.
@@ -799,8 +803,10 @@ module Erx
          console_point('proc-ls-status', /\Astatus\r*\n\z/n),
          console_point('proc-process-domain', /\Adomain#{TAB}4#{TAB}service\r*\n\z/n),
          console_point('proc-process-name', /\Aregistered_name#{TAB}erx_console#{TAB}runtime\r*\n\z/n),
+         console_point('proc-machine-build', /\Abuild#{TAB}[0-9a-f]{16}#{TAB}kernel\r*\n\z/n),
          console_point('proc-machine-memory', /\Amemory_total#{TAB}\[partial\]#{TAB}root pool\r*\n\z/n),
          console_point('proc-machine-uptime', /\Auptime#{TAB}[1-9][0-9]*#{TAB}kernel\r*\n\z/n),
+         console_point('proc-machine-boot-value', /\Aboot_value#{TAB}(?:normal|trial|unknown)#{TAB}kernel\r*\n\z/n),
          console_point('proc-budget-used', /\Aused#{TAB}\[partial\]#{TAB}root pool\r*\n\z/n),
          console_point('proc-ending', /\A\{ok,<<>>\}\r*\n\z/n, type: PROC_READ_EXPRESSION),
          # The echo of the line holds {proc_read, so only the answer matches.

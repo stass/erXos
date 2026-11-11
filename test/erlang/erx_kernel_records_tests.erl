@@ -142,6 +142,22 @@ machine_memory_is_the_pools_partial_test() ->
     ?assertEqual({kernel, {ok, 77}}, maps:get(uptime, Attrs)),
     ?assertEqual({kernel, unsupported}, maps:get(memory_total, machine_attr_map({ok, Report}))).
 
+%% The boot handoff's build identifier reads as the root's identity line and
+%% uname -b write it, and the boot value as its enum's name; a number the enum
+%% does not name is a fault, and entropy_quality, which no bit reports, stays
+%% unsupported.
+machine_build_and_boot_value_test() ->
+    Reported = ?ERX_INFO_MACHINE_REPORTED_BUILD bor ?ERX_INFO_MACHINE_REPORTED_BOOT_VALUE,
+    Report = fun(BootValue) ->
+                     <<16#0123456789abcdef:64/big, 0:32, 0:32, 0:64, 0:64, 0:64, BootValue:32/little,
+                       Reported:32/little>>
+             end,
+    Attrs = machine_attr_map({ok, Report(?ERX_BOOT_VALUE_TRIAL)}),
+    ?assertEqual({kernel, {ok, <<"0123456789abcdef">>}}, maps:get(build, Attrs)),
+    ?assertEqual({kernel, {ok, trial}}, maps:get(boot_value, Attrs)),
+    ?assertEqual({kernel, unsupported}, maps:get(entropy_quality, Attrs)),
+    ?assertEqual({kernel, {error, invalid}}, machine_attr(boot_value, {ok, Report(0)})).
+
 machine_attr_map(Answer) ->
     {ok, #{attrs := Attrs}} = erx_kernel_records:record(machine, [], 0, Answer, 0),
     Attrs.
