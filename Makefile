@@ -12,7 +12,7 @@ DOCKER_CONTEXT ?=
 
 .PHONY: all build run check check-sources status setup fetch check-tla check-cbmc check-litmus check-rc-oracle check-arch-terms
 .PHONY: oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
-.PHONY: generate
+.PHONY: generate web
 .PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
 .PHONY: check-runtime-seam check-runtime-hosted
 .PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant check-native-seeds check-boot-image
@@ -30,6 +30,11 @@ check:
 
 generate:
 	$(RUBY) tools/erx generate
+
+# The web client into build/web/, offline from the packages `make fetch` stored
+# (docs/design-web.md, "Build and dependencies"). `make check` runs it too.
+web:
+	$(RUBY) tools/erx build web
 
 check-reproducible:
 	$(RUBY) tools/erx check-reproducible

@@ -533,14 +533,29 @@ it; git history is the record of completed work.
   fails with `Relay::Down` and prints a line, and the server serves files and 503 forever; exit with a diagnostic
   on the socket's end, or reconnect to `--socket PATH`, and rate-limit the line.
 * [Low] `tools/lib/erx/web_http.rb`, `Http.file`: every file but `index.html` is sent `immutable`, on the
-  design's rule that `make web` names each by its content hash, which `Inventory` does not check; check it when
-  `make web` lands, or send `no-store` for a name without the hash. A refusal of a request that carried bytes
+  design's rule that `make web` names each `<stem>-<first 16 hex digits of its SHA-256>`, which `Inventory` does
+  not check; check it there, or send `no-store` for a name without the hash. A refusal of a request that carried bytes
   after its head (a 405 for a POST with a body) closes with unread input, so the kernel's reset may cost the
   client the answer; shut down writing and drain briefly before closing.
-* [Low] `test/host/web_node_test.rb`, [Build and dependencies](docs/design-web.md#build-and-dependencies):
-  no gate runs `tsc --noEmit` over the client's generated and handwritten TypeScript (Node only strips types),
-  and no `web/package.json` records the Node version, whose type stripping and `import.meta.main` the tests
-  need (Node 26 here). Both arrive with `make web`'s pnpm setup.
+* [Low] `web/tsconfig.json`, [Build and dependencies](docs/design-web.md#build-and-dependencies): `tsc --noEmit`
+  checks `web/src` (handwritten and generated) but not `web/test`, whose `node:` imports need `@types/node`,
+  which the lockfile does not pin; add it, pinned, and check the tests too.
+* [Medium] `tools/lib/erx/web_build.rb`, [Build and dependencies](docs/design-web.md#build-and-dependencies):
+  `tools/erx fetch` does not yet fetch Playwright's Chromium against a SHA-256 in `deps.lock`, and no
+  Playwright test runs; the browser tests' package adds Playwright to `web/package.json` and the Chromium pin.
+* [Medium] `tools/lib/erx/web_build.rb`, `build`: esbuild and tsc resolve a bare import through any `node_modules`
+  above the stage (the worktree, the home directory), so an import of a package missing from `web/package.json`
+  can bundle an unpinned package found there. Run esbuild with `--metafile` and refuse any input outside the
+  stage's `src/` and the lockfile's packages under `node_modules/.pnpm/`.
+* [Medium] `tools/lib/erx/web_build.rb`, `fetched?`: the store's record covers only the lockfile, not
+  `pnpm-workspace.yaml` or the pnpm that fetched it, so after a pnpm upgrade that changes the store layout
+  `tools/erx setup` skips the fetch and `make web` fails offline; record all three.
+* [Low] `tools/lib/erx/web_build.rb`: the stage copies untracked files of `web/` (a `.pnpmfile.cjs` pnpm runs, an
+  `.npmrc`, a stale `out/` whose files `build` would publish); stage only tracked sources, pass
+  `--ignore-pnpmfile`, and have esbuild write outside the stage. Two builds in one tree share `build/web-stage` and
+  `build/web.next`; take a lock as `Generated` does.
+* [Low] `docs/design-web.md`, Dependencies: React 19 ships no types, so the views' `.tsx` need `@types/react`
+  and `@types/react-dom` (MIT, DefinitelyTyped) for `tsc --noEmit`; list them beside React when it lands.
 * [Medium] `test/host/erx_ui_wire_test.rb`, [Widget format](docs/design-abi.md#widget-format): no test encodes
   each kind's largest `insert`, every property at its bound, and compares its size with the generator's
   `insert_max` (`tools/lib/erx/abi_ui.rb`'s sizes and the encoder's layout are two descriptions of one form).

@@ -1098,17 +1098,28 @@ and generator, and is never edited. The ASCII check covers the client's
 ## Build and dependencies
 
 `web/package.json` and `web/pnpm-lock.yaml` pin every package with its
-integrity hash, and `web/package.json` records the Node.js and pnpm
-versions (`engines` and `packageManager`), which `make web` checks before
-it runs either, so a build means the same on every host.
+integrity hash, and `web/package.json`'s `engines` records the oldest
+Node.js and pnpm each as `>=X.Y.Z`, which `make web` checks before it
+runs either, so a host with an older tool is refused with a diagnostic.
+The file names no `packageManager`: pnpm would fetch the exact pnpm it
+named whenever the host's differed, a network step outside the fetch,
+and a development host may run any pnpm at least as new. No package may
+run a build script: `web/pnpm-workspace.yaml` decides each package that
+has one (esbuild's only replaces its launcher with the binary it finds
+anyway) as not built.
 `tools/erx fetch` is the one step that touches the network: it runs
-`pnpm fetch` against the lockfile into a store under the build tree, and
+`pnpm fetch` against the lockfile into a store under the build tree
+(`build/web-store/`, which records the SHA-256 of the lockfile it was
+fetched for, so `make web` refuses a store fetched for another), and
 fetches the Chromium of the pinned Playwright, checked against a SHA-256
 in `deps.lock`. Every later step is offline: `pnpm install --offline
 --frozen-lockfile --ignore-scripts`, so no dependency's install script
 runs; `tsc --noEmit`; and esbuild with fixed options (ASCII output, no
 source paths, legal comments to a separate notices file) into
-`build/web/`. The files are build outputs, never checked in, and enter
+`build/web/`, over a staged copy of `web/` with the generated modules
+laid over it. Each file but `index.html` is named by its stem and the
+first 16 hexadecimal digits of its SHA-256, as `client-<hex>.js`,
+`client-<hex>.css` and `notices-<hex>.txt`. The files are build outputs, never checked in, and enter
 the web domain's release, so `make check-reproducible` covers them.
 
 The set is small on purpose: React and React DOM for the client;
@@ -1145,10 +1156,10 @@ table per platform.
 | Component | Purpose | Licence | Status |
 | --- | --- | --- | --- |
 | React and React DOM 19, with their `scheduler` | the client's rendering | MIT | permanent, in the client's files; fetched by pnpm at pinned versions and integrity hashes |
-| TypeScript 5.x | the client's language and type check | Apache-2.0 | permanent host tool |
-| esbuild | bundling the client | MIT | permanent host tool, a native binary pinned by the lockfile |
+| TypeScript 7, its native compiler | the client's language and type check | Apache-2.0 | permanent host tool, a native binary pinned by the lockfile |
+| esbuild 0.28 | bundling the client | MIT | permanent host tool, a native binary pinned by the lockfile |
 | Playwright, with its Chromium build | the client's browser tests | Apache-2.0; Chromium BSD-3-Clause with its third-party notices | test tool, never in an image; Chromium fetched with a pinned SHA-256 |
-| Node.js and pnpm | running the client's tools and tests; fetching its packages | MIT | host tools, at the versions `web/package.json` records |
+| Node.js and pnpm | running the client's tools and tests; fetching its packages | MIT | host tools, at least the versions `web/package.json` records |
 | cowboy 2, with cowlib and ranch | the network front end's HTTP, WebSocket and TLS acceptance, in the web domain | ISC | permanent; fetched at a pinned version and hash and built out of tree against erXos's OTP, or imported as erXos's code if changed |
 | Ruby standard library (`socket`, `digest`, `securerandom`) | the host tool's front end | Ruby's | no new dependency |
 

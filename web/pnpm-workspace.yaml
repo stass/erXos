@@ -1,0 +1,5 @@
+# pnpm settings of the web client (docs/design-web.md, "Build and dependencies").
+# esbuild's install script only swaps its JavaScript launcher for the native
+# binary; the launcher finds the binary itself, so no install script runs.
+allowBuilds:
+  esbuild: false

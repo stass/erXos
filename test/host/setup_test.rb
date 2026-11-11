@@ -18,9 +18,10 @@ class SetupTest < Minitest::Test
 
   def test_fresh_tree_runs_every_step_in_order
     assert_equal NAMES, Erx::Setup.plan({}, steps: Erx::Setup.steps(LOCK, hosted_runtime: true)).map(&:name)
-    assert_equal NAMES.length - 5, NAMES.take_while { |name| name.start_with?('source-') }.length
-    # The runtime build packs the hosted release, whose EROFS image fsimg writes.
-    assert_equal %w[oracle-jit oracle-emu fsimg runtime rc-oracle], NAMES.last(5)
+    assert_equal NAMES.length - 6, NAMES.take_while { |name| name.start_with?('source-') }.length
+    # The fetches come before the builds; the runtime build packs the hosted release,
+    # whose EROFS image fsimg writes.
+    assert_equal %w[web-store oracle-jit oracle-emu fsimg runtime rc-oracle], NAMES.last(6)
   end
 
   def test_a_host_without_the_hosted_runtime_leaves_out_only_its_step

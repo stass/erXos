@@ -73,9 +73,10 @@ class TopLevelCliTest < Minitest::Test
       block.call('ERX_ERL' => '/verified/erl', 'ERX_ERLC' => '/verified/erlc')
     end
     rc_oracle = ->(runner:) { commands << [['ensure-rc-oracle'], { name: 'rc-oracle', runner: runner }] }
+    web = ->(root:, runner:) { commands << [['web-build', root], { name: 'web', runner: runner }] }
     yield runner_class: Factory.new(recording_runner(commands, fail_name: fail_name)),
           checks_class: Factory.new(PassingChecks.new), arch_terms: PassingChecks.new, runtime: runtime,
-          rc_oracle: rc_oracle
+          rc_oracle: rc_oracle, web: web
   end
 
   # The gate needs HVF for its suites and TCG for its smoke and deterministic boots, and never

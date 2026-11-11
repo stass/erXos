@@ -9,6 +9,7 @@ require_relative 'runner'
 require_relative 'dependencies'
 require_relative 'fsimg'
 require_relative 'rc_oracle'
+require_relative 'web_build'
 
 module Erx
   # Prepares a fresh checkout or worktree so `make check` can run: the sources
@@ -36,6 +37,9 @@ module Erx
     # setup step must not cut short: a killed build restarts from nothing.
     ORACLE_BUILD_DEADLINE = 14_400
 
+    # The web client's packages, fetched into their store (WebBuild.fetch).
+    WEB_STORE = Step.new(name: 'web-store', kind: :web_store, argv: [], deadline: WebBuild::DEADLINE)
+
     COMMAND_STEPS = [
       Step.new(name: 'oracle-jit', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
                argv: %w[oracle build --backend native --flavour jit]),
@@ -57,7 +61,8 @@ module Erx
     def self.steps(sources, hosted_runtime: HostOs::MACOS)
       fetched = sources.map { |source| source.fetch('id') }.reject { |id| SKIPPED_SOURCES.key?(id) }
       builds = COMMAND_STEPS.reject { |step| step.name == 'runtime' && !hosted_runtime }
-      fetched.map { |id| Step.new(name: "source-#{id}", kind: :source, argv: [id], deadline: 300) } + builds
+      fetched.map { |id| Step.new(name: "source-#{id}", kind: :source, argv: [id], deadline: 300) } +
+        [WEB_STORE] + builds
     end
 
     # present: a hash of step name => true when the step's output is valid.
@@ -138,6 +143,7 @@ module Erx
       when 'runtime' then File.file?(File.join(@root, 'build/runtime/hosted/release/system.pack'))
       when 'rc-oracle' then rc_oracle_valid?
       when 'fsimg' then fsimg_valid?
+      when 'web-store' then WebBuild.fetched?(root: @root)
       end
     end
 
@@ -164,8 +170,11 @@ module Erx
 
     def perform(step, toolchain)
       Terminal.puts("setup: #{step.name}")
-      if step.kind == :source
+      case step.kind
+      when :source
         obtain_source(step.argv.first)
+      when :web_store
+        WebBuild.fetch(root: @root, runner: @runner)
       else
         @runner.run([RbConfig.ruby, File.join(@root, 'tools/erx'), *step.argv, *leftovers(step), '--jobs', @jobs.to_s],
                     name: "setup-#{step.name}", deadline: step.deadline, chdir: @root, env: toolchain)

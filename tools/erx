@@ -18,6 +18,7 @@ begin
   require_relative 'lib/erx/output_directory'
   require_relative 'lib/erx/dependencies'
   require_relative 'lib/erx/setup'
+  require_relative 'lib/erx/web_build'
   require_relative 'lib/erx/tla'
   require_relative 'lib/erx/cbmc'
   require_relative 'lib/erx/litmus'
@@ -142,7 +143,8 @@ module Erx
     end
 
     def self.check(input_arguments, runner_class: Runner, checks_class: Checks, arch_terms: ArchTerms,
-                   runtime: method(:with_test_runtime), rc_oracle: method(:ensure_rc_oracle), platform: RUBY_PLATFORM)
+                   runtime: method(:with_test_runtime), rc_oracle: method(:ensure_rc_oracle), web: WebBuild.method(:build),
+                   platform: RUBY_PLATFORM)
       arguments = input_arguments.dup
       OptionParser.new.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
@@ -150,6 +152,7 @@ module Erx
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       checks_class.new(root: ROOT, runner: runner).run
       arch_terms.check(root: ROOT)
+      web.call(root: ROOT, runner: runner)
       rc_oracle.call(runner: runner)
       left_out = []
       runtime.call(runner: runner) do |environment|
@@ -687,7 +690,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | build web | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
       0
     end
 
@@ -792,8 +795,8 @@ module Erx
     def self.build(input_arguments)
       arguments = input_arguments.dup
       component = arguments.shift
-      unless %w[fiasco runtime jit-runtime rc-oracle fsimg herd7 lvgl].include?(component)
-        raise OptionParser::InvalidArgument, 'build accepts fiasco, runtime, jit-runtime, rc-oracle, fsimg, herd7 or lvgl'
+      unless %w[fiasco runtime jit-runtime rc-oracle fsimg herd7 lvgl web].include?(component)
+        raise OptionParser::InvalidArgument, 'build accepts fiasco, runtime, jit-runtime, rc-oracle, fsimg, herd7, lvgl or web'
       end
       jobs = 4
       parser = OptionParser.new do |options|
@@ -808,6 +811,7 @@ module Erx
              when 'fsimg' then build_fsimg(jobs)
              when 'herd7' then build_herd7(jobs)
              when 'lvgl' then build_lvgl(jobs)
+             when 'web' then WebBuild.build(root: ROOT, runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
              else Fiasco.new(root: ROOT).build(jobs: jobs)
              end
       Terminal.puts("built #{path}")
@@ -884,12 +888,16 @@ module Erx
                   .fetch(cache: cache, source_id: source_id)
       # LVGL is a git submodule, cloned from its recorded URL at its recorded
       # commit; a cache holds only deps.lock's archives, so a fetch from one
-      # leaves the submodule to `git submodule update --init`.
+      # leaves the submodule to `git submodule update --init`. The web client's
+      # packages come from the npm registry by their lockfile (WebBuild.fetch),
+      # which a cache does not hold either.
       require_relative 'lib/erx/lvgl'
       if cache.nil? && source_id.nil?
         Terminal.puts(Lvgl.init(root: ROOT, runner: runner))
+        Terminal.puts("web client packages: #{WebBuild.fetch(root: ROOT, runner: runner)}")
       else
         Terminal.puts("LVGL: not fetched with --cache or --source; run `#{Lvgl::INIT_COMMAND}`")
+        Terminal.puts('web client packages: not fetched with --cache or --source; run `tools/erx fetch`')
       end
       Terminal.puts('sources verified and extracted')
       0
