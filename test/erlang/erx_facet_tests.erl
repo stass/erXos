@@ -152,3 +152,19 @@ minted_replies_through_the_domain_pid_test() ->
     after
         persistent_term:erase({erx, domain_pid})
     end.
+
+%% A mint named before init's ready report joins the report's provides; once init has
+%% taken them and left reported in their place, a later one is refused, since no report
+%% would carry it to the domain service.
+provide_is_refused_after_the_report_test() ->
+    persistent_term:erase({erx, provides}),
+    try
+        Self = self(),
+        ?assertEqual(ok, erx_facet:provide(echo, Self)),
+        ?assertEqual(#{echo => Self}, persistent_term:get({erx, provides})),
+        persistent_term:put({erx, provides}, reported),
+        ?assertEqual({error, reported}, erx_facet:provide(other, Self)),
+        ?assertEqual(reported, persistent_term:get({erx, provides}))
+    after
+        persistent_term:erase({erx, provides})
+    end.

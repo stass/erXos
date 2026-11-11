@@ -1757,9 +1757,11 @@ alone.
 **Providers.** A configured domain's services each name a **mint**, a
 process of the domain that mints facets of one service, with
 `erx_facet:provide(Name, Mint)`, before its init reports ready, and the
-ready report carries them as its `provides` map. A mint lives as long as
-its domain's incarnation: the providers are the report's until the domain
-ends. A server reports ready
+ready report carries them as its `provides` map; a mint named after the
+report is refused. A mint lives as long as its domain's incarnation: the
+providers are the report's until the domain ends, so a mint's end ends its
+domain, as a permanent application's does, and the restarted domain's
+report provides again. A server reports ready
 only once it can serve: the storage domain's report follows its mount of
 `/data`. The ready-report gate authenticates the reporting domain and its
 connection agent ([Creating a domain](#creating-a-domain)), but the

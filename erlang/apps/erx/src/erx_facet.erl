@@ -103,12 +103,15 @@ before a message is queued, and the facet's queue quota and heap limit.
 -doc """
 Names Mint, a process of this domain, as the mint of the service Name, which a
 configured domain serves (docs/design-system.md, "Facets a configured domain
-serves"). Call it while the service's application starts, before init's ready
+serves"). Call it from the service application's start/2, before init's ready
 report, which carries every mint named so far as its provides; a second call
-for Name replaces the first. The domain service keeps the mints the report
-named until the domain ends, so a mint must live as long as its domain: one
-that ends, or is named after the report, mints nothing more until the domain
-restarts. The domain service accepts a mint only for a
+for Name replaces the first, and a call after the report is refused with
+{error, reported}. The system domain, and a runtime that is no node, report
+nothing, so there the call is taken and reaches no one. The domain service keeps the mints the report named until
+the domain ends, so a mint must live as long as its domain: its end must end
+the domain, as the end of a permanent application's process does, and the
+domain's restart then provides again and makes every grant anew. The domain
+service accepts a mint only for a
 service the manifest's service rows declare for this domain, and then sends
 it {erx_facet_mint, Tag, Name, Grantee, Limits} for each configured grant,
 arriving as {erx_origin, 4, Request}: the mint acts only on a request in the
@@ -117,9 +120,13 @@ and within Limits, and replies minted(Tag, {ok, Facet}), or minted(Tag, Other)
 with any other term to refuse. {error, badarg} for a Name that is no atom or a Mint
 that is no process of this domain.
 """.
--spec provide(atom(), pid()) -> ok | {error, badarg}.
+-spec provide(atom(), pid()) -> ok | {error, badarg | reported}.
 provide(Name, Mint) when is_atom(Name), is_pid(Mint), node(Mint) =:= node() ->
-    persistent_term:put({erx, provides}, (persistent_term:get({erx, provides}, #{}))#{Name => Mint});
+    %% init leaves reported in the term once its ready report has taken the mints.
+    case persistent_term:get({erx, provides}, #{}) of
+        reported -> {error, reported};
+        Provides -> persistent_term:put({erx, provides}, Provides#{Name => Mint})
+    end;
 provide(_Name, _Mint) ->
     {error, badarg}.
 

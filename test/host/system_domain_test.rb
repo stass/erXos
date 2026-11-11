@@ -180,4 +180,33 @@ class SystemDomainTest < Minitest::Test
     end
     assert_raises(Erx::Error) { Suite.service_kill_checkpoints([shell, points[0]], domain: domain) }
   end
+
+  # The re-grant boot: the service-kill boot's rows, each restarted once, with echo
+  # granted to peer as well. Its checkpoint takes only the whole answer: a grant not
+  # made again for erts's next incarnation (a core that does not reconcile on a
+  # restarted row's report leaves the waits at none), a facet that does not answer, a
+  # mint taken after the report, or a missing refusal each fails.
+  def test_the_regrant_boot_restarts_each_domain_once_and_needs_every_grant_anew
+    rows = Suite::Regrant::ROWS
+    assert_equal 2, rows.scan("  restarts 1\n").size
+    refute_includes rows, "  restarts 0\n"
+    assert_includes rows, "facet echo_peer\n  grantee @domain.peer\n  service @service.echo\n"
+    assert Suite::Regrant.manifest(PLAIN).end_with?(rows)
+    shell = { name: 'release-shell', pattern: /y/n, seconds: 30 }.freeze
+    points = Suite::Regrant.checkpoints([shell])
+    assert_equal %w[release-shell erlang-shell regrant system-domain-ended], points.map { |point| point.fetch(:name) }
+    assert_equal "#{Suite::Regrant::EXPRESSION}\r", points[1].fetch(:type)
+    verify = points[2].fetch(:verify)
+    verify.call("1> #{Suite::Regrant::ANSWER}\r\n")
+    again = Suite::Regrant::ERTS_AGAIN
+    [Suite::Regrant::ANSWER.sub("{#{again},true,{echo,hi}},true,{error,reported},true", 'none,true,{error,{erpc,noconnection}},false'),
+     Suite::Regrant::ANSWER.sub('{error,reported}', 'ok'),
+     Suite::Regrant::ANSWER.sub(/\{#{again},true,\{echo,hi\}\},true,#\{/o, 'none,true,#{'),
+     Suite::Regrant::ANSWER.sub('{echo,hi}', "{error,{erpc,noconnection}}"),
+     Suite::Regrant::ANSWER.sub('{refused,foreign_mint} => 2', '{refused,foreign_mint} => 1')].each do |bad|
+      refute_equal Suite::Regrant::ANSWER, bad
+      assert_raises(Erx::Error) { verify.call("#{bad}\r\n") }
+    end
+    assert_raises(Erx::Error) { Suite::Regrant.checkpoints([shell, { name: 'other' }]) }
+  end
 end

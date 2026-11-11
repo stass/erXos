@@ -644,26 +644,46 @@ module Erx
         @compiler = compiler
         @linker = linker
         @qemu = qemu
-        @manifest = SystemDomain.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)))
+        source = File.binread(File.join(@root, ProductionImage::MANIFEST))
+        @manifest = SystemDomain.manifest(source)
+        @regrant_manifest = Regrant.manifest(source)
       end
 
-      # Packs the test image once, on MACHINE, then boots it at each CPU count.
+      # Packs the two test images once, on MACHINE, then boots each at each CPU count:
+      # the service-kill boot, then the re-grant boot (Regrant).
       def call(cpus:, jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
-        directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/system-domain/image'))
-        # A test image: erts's script boots the test-only erx_echo_test (ECHO_BOOT).
-        image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-        nothing = ProductionImage::Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
-        built = image.build_test_image(directory: directory, added: nothing, machine: MACHINE, domains: [ECHO_BOOT],
-                                       manifest_source: @manifest)
-        domain = MediumBoot.domain_in(built.archive, codec: ABI::Codec.new(ABI::Generator.plan(root: @root).schema))
+        service_kill_image = image(fiasco, 'image', @manifest)
+        regrant_image = image(fiasco, 'regrant-image', @regrant_manifest)
+        domain = MediumBoot.domain_in(service_kill_image.archive, codec: ABI::Codec.new(ABI::Generator.plan(root: @root).schema))
         placement.each(accels: [QemuCells::LOCAL_ACCELERATOR], cpus: cpus) do |accel, count, remote|
-          ["#{accel}-#{count}cpu", service_kill(accel, count, remote, built, domain)]
+          service_kill(accel, count, remote, service_kill_image, domain)
+          ["#{accel}-#{count}cpu", regrant(accel, count, remote, regrant_image)]
         end
       end
 
       private
+
+      # A test image under build/system-domain/name whose erts script boots the test-only
+      # erx_echo_test (ECHO_BOOT), with manifest.
+      def image(fiasco, name, manifest)
+        directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/system-domain', name))
+        image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        nothing = ProductionImage::Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
+        image.build_test_image(directory: directory, added: nothing, machine: MACHINE, domains: [ECHO_BOOT],
+                               manifest_source: manifest)
+      end
+
+      def regrant(accel, count, remote, built)
+        points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
+                                                         manifest_source: @regrant_manifest, memory_mib: MACHINE.memory_mib,
+                                                         test_image: true)
+        Qemu.new(root: @root, runner: @runner, program: @qemu)
+            .run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MACHINE.memory_mib, machine_end: true,
+                 checkpoints: Regrant.checkpoints(points))
+        'passed'
+      end
 
       def service_kill(accel, count, remote, built, domain)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
@@ -677,3 +697,5 @@ module Erx
     end
   end
 end
+
+require_relative 'system_domain_regrant'

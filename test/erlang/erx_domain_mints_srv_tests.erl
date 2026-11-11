@@ -9,7 +9,8 @@
 %% test answers for it in a's envelope through a's domain pid, as erx_facet:minted/2
 %% does, and the grantee's acknowledgement is the test's too, sent to b's domain pid in
 %% b's envelope. a and b each start as soon as they are
-%% made, a first, and a restarts after each of the test's first three ends.
+%% made, a first; a restarts after each of the test's first three ends of it, and b after
+%% its one end.
 -module(erx_domain_mints_srv_tests).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -17,7 +18,7 @@
 
 mints_test_() ->
     {setup, fun setup/0, fun cleanup/1,
-     fun(_) -> {inorder, [fun installs/0, {timeout, 20, fun restart/0}, fun foreign_mint/0, {timeout, 20, fun last_end/0}]} end}.
+     fun(_) -> {inorder, [fun installs/0, {timeout, 20, fun restart/0}, fun grantee_restart/0, fun foreign_mint/0, {timeout, 20, fun last_end/0}]} end}.
 
 setup() ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
@@ -101,6 +102,44 @@ restart() ->
     #{{0, echo} := {introducing, {7, 6}, _}} = grants(),
     wait(fun(#{{0, echo} := {failed, {7, 6}, {deadline, introducing}}}) -> true end).
 
+%% b's end and restart, id 8, leave the system domain's failed grant as it was, since
+%% its pair is unchanged, and give b's grant a new operation for b's new incarnation
+%% and a's, 7: the introduction, the mint request naming 8 as grantee, and the
+%% installation at b's new domain pid. An acknowledgement in b's old envelope, which
+%% only b's new domain pid could pass on, is dropped there and never reaches the core;
+%% b's new incarnation's own makes the grant installed. a first lets go of its connection
+%% with b's old incarnation, whose connection_up restart/0 left unanswered, as a's agent
+%% would at b's end; until then a's connection with b's new incarnation waits behind it
+%% (erx_domain_links, "Queues").
+grantee_restart() ->
+    erx_domain_srv ! {domain_ended, 6, {stopped, 0}, #{}},
+    wait(fun(#{{0, echo} := {introducing, {7, 8}, _}}) -> true end),
+    ?assertMatch(#{{system, echo} := {failed, {7, 4}, bad_reply}}, grants()),
+    [PidA, PidB] = [domain_pid(Id) || Id <- [7, 8]],
+    erlang:trace(PidA, true, ['receive', {tracer, self()}]),
+    erlang:trace(PidB, true, ['receive', {tracer, self()}]),
+    PidA ! {erx_origin, 7, {erx_connection_lost, 6, noconnection}},
+    receive {trace, PidA, 'receive', {_, record, _, {erx_connection_up, 8, _, _, _, _, _, _, _}}} -> ok
+    after 2000 -> error(no_connection_up) end,
+    PidA ! {erx_origin, 7, {erx_connection_mapped, 8}},
+    PidB ! {erx_origin, 8, {erx_connection_mapped, 7}},
+    #{{0, echo} := {minting, {7, 8}, Tag}} = wait(fun(#{{0, echo} := {minting, {7, 8}, _}}) -> true end),
+    Mint = pid('a@erxos', 7, 1),
+    ?assertMatch({erx_facet_mint, Tag, echo, 8, #{max_request := 512}},
+                 receive {trace, PidA, 'receive', {_, mint, Mint, Request}} -> Request after 2000 -> none end),
+    Facet = pid('a@erxos', 7, 6),
+    PidA ! {erx_origin, 7, {erx_facet_minted, Tag, {ok, Facet}}},
+    ?assertEqual(Facet, receive {trace, PidB, 'receive', {_, install, Tag, echo, F}} -> F after 2000 -> none end),
+    Counts = counts(),
+    PidB ! {erx_origin, 6, {erx_facets_installed, Tag}},
+    receive after 100 -> ok end,
+    ?assertMatch(#{{0, echo} := {installing, {7, 8}, Tag, Facet}}, grants()),
+    PidB ! {erx_origin, 8, {erx_facets_installed, Tag}},
+    wait(fun(#{{0, echo} := {installed, {7, 8}, F}}) -> F =:= Facet end),
+    ?assertEqual(Counts, counts()),
+    erlang:trace(PidA, false, ['receive']),
+    erlang:trace(PidB, false, ['receive']).
+
 %% A report naming a mint of another node, with the reporting incarnation's id as its
 %% creation, is refused and counted: the service passes the core the node it knows for
 %% the incarnation, never one the report suggests, so the grants have no pair.
@@ -111,13 +150,13 @@ foreign_mint() ->
     ?assertMatch(#{{refused, foreign_mint} := 1}, wait_counts(fun(#{{refused, foreign_mint} := _}) -> true end)).
 
 %% An end with no restart after it, a's fourth, cancels the operation its incarnation,
-%% 9, had pending: the grant is idle at once, and stays idle past the deadline the
+%% 10, had pending: the grant is idle at once, and stays idle past the deadline the
 %% operation had, which was disarmed.
 last_end() ->
     provide('a@erxos'),
-    erx_domain_srv ! {domain_ended, 8, {stopped, 0}, #{}},
-    wait(fun(#{{system, echo} := {minting, {9, 4}, _}}) -> true end),
     erx_domain_srv ! {domain_ended, 9, {stopped, 0}, #{}},
+    wait(fun(#{{system, echo} := {minting, {10, 4}, _}}) -> true end),
+    erx_domain_srv ! {domain_ended, 10, {stopped, 0}, #{}},
     wait(fun(#{{system, echo} := idle}) -> true end),
     receive after ?DEADLINE + 200 -> ok end,
     ?assertMatch(#{{system, echo} := idle, {0, echo} := idle}, grants()).

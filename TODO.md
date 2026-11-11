@@ -1502,13 +1502,21 @@ it; git history is the record of completed work.
   each message costs the pid and the service is not bounded. Bound what a domain can make the pid and the service spend.
 * [Low] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: configured domains
   always get the default 10 s boot timeout; the manifest has no field for it.
-* [Medium] facets, `erlang/apps/erx/src/erx_facet.erl` (`provide/2`) and
-  `erx_domain_mints`: a server's providers are fixed at its ready report, so a mint that
-  ends and is restarted inside a running server leaves every later grant of that service
-  failed at its deadline until the server restarts, and `provide/2` after the report
-  returns `ok` but reaches no one. Either end the domain with its mint (the mint's
-  application permanent and the mint its process) or let a running server name a new
-  mint, and refuse `provide/2` after the report.
+* [Medium] facets, `erlang/apps/erx/src/erx_facet.erl` (`provide/2`) and `erx_domain_srv`: that a
+  mint's end ends its domain, so its restart provides again and the grants are made anew, is each
+  server's duty (a permanent application whose process the mint is), and nothing enforces it: a
+  mint under a supervisor is restarted, `provide/2` refuses it, and its service grants nothing
+  until the domain restarts; `init:restart/0` erases the provides and the domain pid takes no
+  second report. Make it hold by construction: the domain service monitors each accepted mint and
+  stops the incarnation at its end (or init halts the node at a reported mint's end).
+* [Medium] facets, `erx_facet_mint` and configured servers' mints
+  (`test/erlang/apps/erx_echo_test`): the mint request names the grantee by its domain id only, so
+  a configured server has nothing to put in the facet's `ends_with` for the grantee, and a facet
+  minted for an incarnation that ended lives on until its server ends, one per grantee restart.
+  It admits only that grantee's id, which no later domain takes, so it grants nothing; it is a
+  leak, and design-system.md's "ends with its grantee" has no mechanism behind it for configured
+  servers. Give the mint a handle that ends with the grantee's incarnation, and have the
+  re-grant boot check the old facet ends.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names
   quota is fixed at 64 per principal, not the manifest principal's own field, which the
   library's view does not expose yet. Expose it in `configured/0` (or a principal entry) and
@@ -4334,12 +4342,23 @@ to the corpus and follow rc
 * [Medium] network, supervision (`erlang/apps/erx_net/src/erx_net_sup.erl`): under `rest_for_one`,
   the minted grants (`erx_net_grants`) and the mint come after `erx_net_tables`, the interfaces and
   the local grant, so a restart of any of those ends every client domain's grant. Minted grants are
-  `temporary` and are not made again, and the restarted mint's `erx_facet:provide/2` comes after
-  the ready report, so it mints nothing more until the network domain restarts
-  (`erlang/apps/erx/src/erx_facet.erl`): one crash of the local grant would cut every client off the
-  network. Latent while the stack runs in the system domain, which mints for no domain. Put the local
-  grant after the mint, and settle in design-network-stack what a tables restart means for minted
-  grants, which subscribe to the tables in `init`: end the network domain, or re-subscribe them.
+  `temporary` and are not made again, and `erx_facet:provide/2` refuses the restarted mint, which
+  comes after the ready report, so the network domain mints nothing more until it restarts, when
+  the domain service makes every grant anew: one crash of the local grant would cut every client
+  off the network until then. Latent while the stack runs in the system domain, which mints for no
+  domain. End the network domain with its mint and grants (the application permanent, as 1b-E
+  plans), put the local grant after the mint, and settle in design-network-stack what a tables
+  restart means for minted grants, which subscribe to the tables in `init`: end the network domain,
+  or re-subscribe them.
+* [Medium] tests, the system_domain suite's 4-CPU cell under TCG on the second host
+  (`tools/lib/erx/system_domain.rb`): under that host's load (load average about 25) the
+  service-kill boot failed twice at `echo-facet`, once with the configured domains past the 10 s
+  boot timeout and once with the system's Erlang shell ended at 31 s: `group` called
+  `shell:prompt_width/1`, which passed `{error, timeout}` from the terminal's options to
+  `proplists:get_value/3` (function_clause), so the shell died under the long typed line. The cell
+  passes under HVF. Make the shell take an options timeout (stock OTP's `shell.erl` has the same
+  code, so check it against stock first), and give the cell's configured rows a boot timeout that
+  TCG meets once the manifest has the field.
 * [Low] shell, `ping` (`erlang/apps/erx_shell/src/erx_cmd_ping.erl`): every session is root's, so ping
   takes `-s` up to 65507 and `-i` down to 1 ms for everyone. Once sessions have users, a non-root
   session gets FreeBSD's limits: `-s` at most 56 bytes and `-i` at least 1 s (ping.c's `uid` checks).

@@ -1249,13 +1249,16 @@ do_boot(Init,Flags,Start) ->
 %% come in ?FACETS_TIMEOUT milliseconds is logged, and the boot goes on without
 %% waiting for it. The report also carries, as provides, the mints the domain's
 %% services named with erx_facet:provide/2 while their applications started
-%% (docs/design-system.md, "Facets a configured domain serves").
+%% (docs/design-system.md, "Facets a configured domain serves"), and leaves the term
+%% reported in their place, so provide/2 refuses a mint named later, which no report
+%% would carry.
 report_ready() ->
     case erlang:system_info(os_type) of
         {unix, erxos} ->
             case {erx_dist:boot(), whereis(erx_connections)} of
                 {{_Id, {_SystemId, _SystemNode, DomainPid}}, Agent} when is_pid(Agent) ->
                     Provides = persistent_term:get({erx, provides}, #{}),
+                    persistent_term:put({erx, provides}, reported),
                     DomainPid ! {erx_ready, #{connections => Agent, provides => Provides}},
                     receive_facets();
                 _ ->
