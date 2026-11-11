@@ -582,9 +582,9 @@ it; git history is the record of completed work.
   after `bye protocol` the design says the client reloads; the core reconnects, and a welcome resets its delay, so a
   disagreement on a rule reconnects every second. An update whose body is not the target's kind (`entries` for a
   `path`) is handed to the page, which ignores it and never asks again; check the kind in the core and close.
-* [Low] `web/src/home.tsx`, [The client](docs/design-web.md#the-client): the record view has no unit column, and its
-  children and presentations are text, not links; they need the inspection schema's units in the generated tables
-  and the routes of `/proc` paths and presentations served by views.
+* [Low] `web/src/record.tsx`, [The client](docs/design-web.md#the-client): the record view has no unit column, and
+  its presentations are text, not links; they need the inspection schema's units in the generated tables and the
+  routes of presentations served by views.
 * [Low] `tools/lib/erx/web_build.rb`, [The client](docs/design-web.md#the-client): the bundle's notices file
   holds esbuild's legal comments, and React's say only that the MIT licence is "found in the LICENSE file", which
   the bundle does not carry; add each bundled package's LICENSE text from the store before the client's files are
@@ -1993,11 +1993,16 @@ it; git history is the record of completed work.
   `service_object_info` and `service_log_read` is checked only for 0 and wrap (trusted root). The QEMU check that
   calls `erx_kernel_records` from `erl` at the console is not written yet.
 * [Medium] inspector (`erlang/apps/erx/src/erx_inspector.erl`, `erx.erl`, `erx_process_records.erl`):
-  the inspector run in a domain other than the system domain names that domain's own processes and kernel
-  records as the system domain's (`owner/1` and `erx_kernel_records:system_domain/0`, a constant 4), so the
-  local scope `[Id]` a session's inspect facet has (`erx_facets:facets/2`) reaches none of them: `erx:i`
-  there answers `{error, scope}` and `top`'s header prints `-`. Name the runtime's own domain from
-  `erx_dist:boot/0`, and read the kernel records of the caller's group, budget and threads. The system domain's
+  the inspector run in a domain other than the system domain lists that domain's own processes
+  (`runtime_domain/0`, from `erx_dist:boot/0`), but names its kernel records and domain record as the system
+  domain's (`erx_kernel_records:system_domain/0`, a constant 4), so the local scope `[Id]` a session's inspect
+  facet has (`erx_facets:facets/2`) reaches none of them: `erx:i` there answers `{error, scope}` for them and
+  `top`'s header prints `-`. Read the kernel records of the caller's group, budget and threads, and collect
+  `[domains, Id | _]` for the runtime's own domain. A process listed in a session links to
+  `/proc/processes/<pid>` in the browser, which names it; `[domains, Id, processes]`, declared with paginated
+  entries rather than children, needs the web client's entries view (W3) before a browser shows it. `runtime_domain/0`
+  reads the boot page beside `erx_facets:domain/0`, and `owner/1`, a scope decision, calls it; read the domain once
+  at the edge (one exported reader) and pass it in. The system domain's
   runtime is not yet the node `system@<host>` (SV2), so its creation is 0 and a process record says `domain 4`
   beside a pid printed `<0.N.S>`
   (design-domains, Text). The listing page (1,000) and the scoped machine paths (`[]`, `[processes]`) are written

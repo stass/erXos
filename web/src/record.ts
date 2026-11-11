@@ -11,29 +11,53 @@
  * `[timeout N]`, `[error]`), so no status reads as a value (W7). Every text
  * the machine sent stays a MachineText part, rendered only by Text (W2); the
  * client's own text is a plain part (brackets and separators) or a token.
+ *
+ * A child is a link to its own view: the record's path and the child's name,
+ * /proc entry names the machine sent, read into a Route by pathRoute, which
+ * the page writes with hrefOf, so a link's address passed the route's checks. A name
+ * that makes no route, such as one that is not canonical, is text alone.
  */
 
-import type { Attr, Children, Datum, Name, Reporter, Status, WireRecord } from './generated/proto.ts';
+import type { Attr, Children, Datum, Name, Path, Reporter, Status, WireRecord } from './generated/proto.ts';
+import { type Route, pathRoute } from './routes.ts';
 
 export type Part =
   | { readonly kind: 'text'; readonly text: Name }
   | { readonly kind: 'plain'; readonly text: string }
   | { readonly kind: 'token'; readonly text: string }
-  | { readonly kind: 'present'; readonly type: Name; readonly text: Name };
+  | { readonly kind: 'present'; readonly type: Name; readonly text: Name }
+  | { readonly kind: 'link'; readonly route: Route; readonly text: Name };
 
 export type Row = { readonly key: Name; readonly value: readonly Part[]; readonly reporter: string };
 
 export const recordRows = (record: WireRecord): Row[] =>
   record.attrs.map((attr: Attr) => ({ key: attr.key, value: valueParts(attr.status, attr.value), reporter: reporterLabel(attr.reporter) }));
 
-/* The children's names, then the token of a listing that is not complete. */
-export function childrenParts(children: Children): Part[] {
-  const names = joined(children.names, ', ');
+/*
+ * The children's names, each a link to its view where it makes a route, then
+ * the token of a listing that is not complete. path is the record's own.
+ */
+export function childrenParts(path: Path, children: Children): Part[] {
+  const above = entryNames(path);
+  const names = children.names.flatMap((child, at) => [...(at === 0 ? [] : [plain(', ')]), ...childParts(above, child)]);
   switch (children.completeness) {
     case 'complete': return names;
     case 'partial': return [...names, ...(names.length > 0 ? [plain(' ')] : []), token('[partial]')];
     case 'unknown': return [token('[unknown]')];
   }
+}
+
+/* A child as a link below the path above it, or as its datum when it makes no route. */
+function childParts(above: readonly Name[] | undefined, child: Datum): Part[] {
+  if (above === undefined || child.tag !== 'text') return datumParts(child);
+  const route = pathRoute([...above, child.bytes]);
+  return route === undefined ? datumParts(child) : [{ kind: 'link', route, text: child.bytes }];
+}
+
+/* A path's entry names, which the machine sends as text data; undefined when one is not. */
+function entryNames(path: Path): Name[] | undefined {
+  const names = path.flatMap((datum) => (datum.tag === 'text' ? [datum.bytes] : []));
+  return names.length === path.length ? names : undefined;
 }
 
 function valueParts(status: Status, value: Datum): Part[] {

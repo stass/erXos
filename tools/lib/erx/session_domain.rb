@@ -43,7 +43,9 @@ module Erx
   # the domain's restart has installed a new `data` grant, a new read of /data/across
   # answers the line the session wrote (RESTART_STORAGE). exit(DomainPid, kill) of the
   # session then ends it as halt does, the next login's session takes the line, and its
-  # Erlang shell reads /data/across through the restarted storage domain's grant.
+  # Erlang shell reads /data/across through the restarted storage domain's grant and
+  # starts the idle processes of the GW measurement's fixture (IDLE_PROCESSES), whose
+  # listing the web check then opens (WebGuest).
   module SessionDomain
     MACHINE = ProductionImage::DEVELOPMENT_MACHINE
     # The prompt an Erlang shell's answer line may carry, of either domain's shell.
@@ -60,6 +62,13 @@ module Erx
     # and 7, at boot, so the login's is 8; each later start of a session or of a configured
     # domain takes the next, a refused one too, since admission spends the id.
     FIRST_SESSION = 8
+    # The system domain's id (erx_kernel_records' ?SYSTEM_DOMAIN), which root's session does
+    # not reach: the one domain whose record a session's inspector collects when its scope
+    # lets it, so a session that read it past the scope check would answer a record.
+    SYSTEM_DOMAIN = 4
+    # Typed at the last session's Erlang shell: WebGuest::IDLE_PROCESSES processes that
+    # wait for ever.
+    IDLE_PROCESSES = "[spawn(timer, sleep, [infinity]) || _ <- lists:seq(1, #{WebGuest::IDLE_PROCESSES})], ok.\r".freeze
     # From a session's start to its tty naming itself, which a domain creation under HVF
     # with one CPU takes seconds to reach.
     SESSION_SECONDS = 120
@@ -179,7 +188,8 @@ module Erx
          type: ESC }.freeze,
        { name: 'killed-relogin-left', pattern: MENU_LEFT, seconds: 30, type: ERL }.freeze,
        shell.merge(name: 'relogin-erlang-shell', type: with_data(READ_ACROSS)).freeze,
-       { name: 'relogin-data', pattern: answer(ACROSS_READ), seconds: 180 }.freeze].freeze
+       { name: 'relogin-data', pattern: answer(ACROSS_READ), seconds: 180, type: IDLE_PROCESSES }.freeze,
+       { name: 'idle-processes', pattern: answer('ok'), seconds: 60 }.freeze].freeze
     end
 
     # Boots the production image under HVF at each CPU count, where placement puts each
@@ -245,7 +255,7 @@ module Erx
         { directory: File.join(@root, 'build/qemu', "sd-#{accel}-#{Process.pid}"),
           link: lambda do |socket|
             { machine: HostlinkGuest.machine(socket, build: built.build_id, web_hash: hash),
-              front_end: WebGuest.call(socket, root: @root, build: built.build_id, web_hash: hash) }
+              front_end: WebGuest.call(socket, root: @root, build: built.build_id, web_hash: hash, foreign: SYSTEM_DOMAIN) }
           end,
           link_seconds: (HostlinkGuest::WEB_SECONDS * 2) + WebGuest::SECONDS }
       end

@@ -200,6 +200,9 @@ runtime_limits system
   atoms 65536
   foreign_atoms 1024
   processes 4096
+# A session's 2,048 processes leave room beside its own for the 1,000 idle
+# processes of the web measurement's fixture (tools/lib/erx/session_domain.rb),
+# about 4 MiB of its 36 MiB.
 runtime_limits session
   max_frame 131072
   max_message_heap 131072
@@ -209,7 +212,7 @@ runtime_limits session
   overlay 0
   atoms 16384
   foreign_atoms 1024
-  processes 1024
+  processes 2048
 runtime_limits storage
   max_frame 131072
   max_message_heap 131072

@@ -400,14 +400,17 @@ Error in process <0.150.0> with exit value:
   schema and binary form in Erlang, C and TypeScript, presentation types
   generated from the inspection schema, LVGL built on the host, and the
   web client's protocol and connection core. No screen shows it yet.
-* **A browser shows the machine's record:** run `make web` first,
+* **A browser shows the machine's records:** run `make web` first,
   which builds the client offline from pinned packages; boot with
   `tools/erx boot --hostlink`, run the `tools/erx web --socket PATH`
   line it prints once root's session has started, and open the URL
   that prints. The page
   shows the machine's record, attribute by attribute with each value's
-  reporter, and the names of its children; on the stopgap kernel every
-  value reads `[unsupported]`. It is the one view so far.
+  reporter, and its children as links; on the stopgap kernel every
+  value reads `[unsupported]`. A `/proc/...` address shows the record
+  of that path as root's session sees it, such as `/proc/processes`,
+  the session's own processes, each a link to its record; a path the
+  session cannot see ends with `scope`. Records are the only view so far.
 * **Designed but not built yet:** the rest of erXos's own kernel, the
   rest of the command shell, the display on a
   screen, the rest of the browser client, and the POSIX-lite layer. Each has a design document in

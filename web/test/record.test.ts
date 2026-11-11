@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { type Attr, type Datum, type Status, type WireRecord, machineText } from '../src/generated/proto.ts';
 import { type Part, childrenParts, recordRows } from '../src/record.ts';
+import { hrefOf, parseRoute } from '../src/routes.ts';
 import { escapedText } from '../src/text.ts';
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -25,6 +26,7 @@ const shown = (parts: readonly Part[]): string =>
       case 'plain': return part.text;
       case 'token': return `token:${part.text}`;
       case 'present': return escapedText(part.text.runs());
+      case 'link': return `link:${hrefOf(part.route)}:${escapedText(part.text.runs())}`;
     }
   }).join('');
 
@@ -70,9 +72,32 @@ test('compound values keep each machine text apart', () => {
 });
 
 test('children show their names and their completeness', () => {
-  const names: Datum[] = [{ tag: 'atom', name: text('cpus') }, { tag: 'int', digits: 3n }];
-  assert.equal(shown(childrenParts({ completeness: 'complete', names })), 'cpus, 3');
-  assert.equal(shown(childrenParts({ completeness: 'partial', names })), 'cpus, 3 token:[partial]');
-  assert.equal(shown(childrenParts({ completeness: 'unknown', names: [] })), 'token:[unknown]');
-  assert.equal(shown(childrenParts({ completeness: 'complete', names: [] })), '');
+  const names: Datum[] = [{ tag: 'text', bytes: text('cpus') }, { tag: 'int', digits: 3n }];
+  assert.equal(shown(childrenParts([], { completeness: 'complete', names })), 'link:/proc/cpus:cpus, 3');
+  assert.equal(shown(childrenParts([], { completeness: 'partial', names })), 'link:/proc/cpus:cpus, 3 token:[partial]');
+  assert.equal(shown(childrenParts([], { completeness: 'unknown', names: [] })), 'token:[unknown]');
+  assert.equal(shown(childrenParts([], { completeness: 'complete', names: [] })), '');
+});
+
+/*
+ * The listing of a session's processes as the GW measurement's fixture holds it:
+ * a page of 1,000 pids, each a link that parseRoute reads back as the path of
+ * that process below the listing's.
+ */
+test('a listing of 1,000 children shows 1,000 links, each read back to its path', () => {
+  const pids = Array.from({ length: 1000 }, (_, at) => `12.${at + 100}.0`);
+  const parts = childrenParts([{ tag: 'text', bytes: text('processes') }],
+    { completeness: 'partial', names: pids.map((pid): Datum => ({ tag: 'text', bytes: text(pid) })) });
+  const links = parts.flatMap((part) => (part.kind === 'link' ? [part] : []));
+  assert.equal(links.length, 1000);
+  links.forEach((link, at) => {
+    assert.deepEqual(parseRoute(hrefOf(link.route))?.value, { kind: 'proc', path: ['processes', pids[at]] });
+    assert.equal(escapedText(link.text.runs()), pids[at]);
+  });
+});
+
+test('a child that makes no route, or below a path that is not names, is text alone', () => {
+  const children = (names: string[]) => ({ completeness: 'complete' as const, names: names.map((name): Datum => ({ tag: 'text', bytes: text(name) })) });
+  assert.equal(shown(childrenParts([], children(['..', '<b>', 'a/b', '%2e']))), '.., <b>, a/b, %2e');
+  assert.equal(shown(childrenParts([{ tag: 'int', digits: 4n }], children(['threads']))), 'threads');
 });

@@ -2,20 +2,26 @@
  * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * The home page (docs/design-web.md, "The client", Views): the machine's own
- * record, the record view of the path of no segment, kept current over the
- * connection. The page shows the last update it received, "stale since" its
- * time while the connection is lost (W7), why the machine ended the view, and
- * why the machine said goodbye.
+ * A record's page (docs/design-web.md, "The client", Views): the record view
+ * of one inspector path, kept current over the connection; the path of no
+ * segment, the machine's own record, is the home page. The page shows the
+ * last update it received, "stale since" its time while the connection is
+ * lost (W7), why the machine ended the view, and why the machine said
+ * goodbye. The record's children are links to their own pages.
+ *
+ * path holds a Route's entry names, canonical /proc names in ASCII, which the
+ * open sends as its segments' bytes.
  */
 
 import { type ReactNode, useEffect, useState } from 'react';
 import { type Reopenable, connect } from './connection.ts';
 import type { ByeReason, Name, WireRecord } from './generated/proto.ts';
 import { type Part, childrenParts, recordRows } from './record.ts';
+import { hrefOf } from './routes.ts';
 import { Text } from './text.tsx';
 
-const MACHINE: Reopenable = { tag: 'path', segments: [] };
+/* A Route's names are ASCII, so their UTF-8 bytes are their ASCII bytes. */
+const utf8 = new TextEncoder();
 
 /* What the page knows of its one view: the last record and when it came. */
 type Seen = {
@@ -26,12 +32,14 @@ type Seen = {
   readonly bye?: ByeReason;
 };
 
-export function Home() {
+export function RecordPage({ path }: { readonly path: readonly string[] }) {
   const [seen, setSeen] = useState<Seen>({ stale: false });
   const [rendered, setRendered] = useState<((index: number) => void) | undefined>(undefined);
 
+  /* A page shows one path for its life: a link to another loads that one's page. */
   useEffect(() => {
-    const report = connect([MACHINE], {
+    const target: Reopenable = { tag: 'path', segments: path.map((name) => utf8.encode(name)) };
+    const report = connect([target], {
       show: (_index, body) => {
         if (body.tag === 'record') setSeen((old) => ({ ...old, record: body.record, at: new Date(), stale: false, ended: undefined, bye: undefined }));
       },
@@ -62,7 +70,7 @@ export function Home() {
 }
 
 function RecordView({ record }: { readonly record: WireRecord }) {
-  const children = childrenParts(record.children);
+  const children = childrenParts(record.path, record.children);
   return (
     <section>
       <h2><Text value={record.kind} /></h2>
@@ -86,6 +94,7 @@ function parts(list: readonly Part[]): ReactNode[] {
       case 'plain': return part.text;
       case 'token': return <span key={at} className="token">{part.text}</span>;
       case 'present': return <Text key={at} value={part.text} />;
+      case 'link': return <a key={at} href={hrefOf(part.route)}><Text value={part.text} /></a>;
     }
   });
 }

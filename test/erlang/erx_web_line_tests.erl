@@ -86,10 +86,73 @@ refused_views_end_test() ->
     {welcome, _, _} = sent(2),
     ok = data(Relay, 2, {open, 1, {path, []}}),
     ?assertEqual({ended, 1, <<"scope">>}, sent(2)),
-    ok = data(Relay, 2, {open, 2, {path, [<<"cpus">>]}}),
-    ?assertEqual({ended, 2, <<"unsupported">>}, sent(2)),
+    ok = data(Relay, 2, {open, 2, {path, [<<"nothing">>]}}),
+    ?assertEqual({ended, 2, <<"scope">>}, sent(2)),
     ok = data(Relay, 2, {open, 3, uis}),
     ?assertEqual({ended, 3, <<"unsupported">>}, sent(2)).
+
+%% The session's processes through the inspector itself at the session's scope: the
+%% processes of the domain the runtime is, on a development host the system domain
+%% (erx_inspector:runtime_domain/0). The open of their listing's path, as /proc
+%% entry names, is answered with the listing, and with 1,000 idle processes beside
+%% the test's own it holds a page of 1,000 children within one update.
+session_processes_test() ->
+    Idle = [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, 1000)],
+    try
+        Line = line(fun(Path) -> erx_inspector:inspect(Path, [?SYSTEM]) end),
+        {ok, View} = gen_server:call(Line, {open, {path, [<<"processes">>]}}),
+        receive
+            {web_view, View, {record, #{path := WirePath, kind := Kind, id := Id, attrs := Attrs,
+                                        children := {Completeness, Children}}}} ->
+                ?assertEqual([{text, <<"processes">>}], WirePath),
+                ?assertEqual({{atom, <<"processes">>}, []}, {Id, Attrs}),
+                ?assertEqual(<<"listing">>, Kind),
+                ?assertEqual(partial, Completeness),
+                ?assertEqual(1000, length(Children));
+            {web_view_ended, View, Reason} ->
+                error({ended, Reason})
+        after 5000 -> error(no_update)
+        end
+    after
+        [Pid ! stop || Pid <- Idle]
+    end.
+
+%% A process opened by the name its listing gives it, as the client's link names it,
+%% is answered with the process's record.
+listed_process_test() ->
+    Line = line(fun(Path) -> erx_inspector:inspect(Path, [?SYSTEM]) end),
+    Name = erx_procfs_core:name(self()),
+    {ok, View} = gen_server:call(Line, {open, {path, [<<"processes">>, Name]}}),
+    receive
+        {web_view, View, {record, #{path := WirePath, kind := Kind}}} ->
+            ?assertEqual({[{text, <<"processes">>}, {text, Name}], <<"process">>}, {WirePath, Kind});
+        {web_view_ended, View, Reason} ->
+            error({ended, Reason})
+    after 5000 -> error(no_update)
+    end.
+
+%% A path outside the session's scope ends the view `scope`, as /proc answers enoent:
+%% for a session whose scope is another domain, a process of the domain the runtime
+%% is and that domain's record, and a machine-wide path. Names that name nothing, or
+%% are not names, are answered as a path outside the scope, and the line goes on
+%% serving.
+scope_test() ->
+    Line = line(fun(Path) -> erx_inspector:inspect(Path, [?SYSTEM + 5]) end),
+    Ended = fun(Names) ->
+                    {ok, View} = gen_server:call(Line, {open, {path, Names}}),
+                    receive
+                        {web_view_ended, View, Reason} -> Reason;
+                        {web_view, View, Body} -> error({answered, Names, Body})
+                    after 5000 -> error(no_end)
+                    end
+            end,
+    ?assertEqual(scope, Ended([<<"processes">>, erx_procfs_core:name(self())])),
+    ?assertEqual(scope, Ended([<<"domains">>, <<"4">>])),
+    ?assertEqual(scope, Ended([<<"kernel">>])),
+    [?assertEqual({error, scope}, gen_server:call(Line, {open, {path, Names}}))
+     || Names <- [[<<"nothing">>], [<<"domains">>, <<"4">>, <<"..">>], [<<"domains/4">>], [<<>>],
+                  [<<"domains">> | <<"4">>], [domains], [<<"processes">>, <<"0.1.0">>, <<"x">>]]],
+    ?assert(is_process_alive(Line)).
 
 %% A line holds at most 64 views; past them an open is busy until one ends.
 bound_test() ->

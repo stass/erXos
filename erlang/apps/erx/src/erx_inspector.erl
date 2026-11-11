@@ -28,13 +28,16 @@ it with the scope of the inspect facet they serve.
   `all`; `system_shell` never, since no query here presents the
   system-shell facet.
 
-In Phase 1 the inspector answers for the system domain only: its kernel
-objects through erx_kernel_records, on the root's own capabilities, its
-domain record through erx_runtime_records, its processes through
-erx_process_records, and the kernel log through erx_log_records. A pid of another runtime, and
-a domain other than the system domain, name nothing it can reach and are
-answered `{error, scope}`; a path the schema declares that has no
-collector here is `{error, unsupported}`.
+In Phase 1 the inspector answers for two domains. The processes it lists
+and describes, through erx_process_records, are its own runtime's, as the
+domain this runtime is (runtime_domain/0), so in a session domain
+`[processes]` lists the session's processes. Kernel objects, through
+erx_kernel_records on the root's own capabilities, the domain record,
+through erx_runtime_records, and the kernel log, through erx_log_records,
+are the system domain's only. A pid of another runtime, and any other
+domain's path, name nothing it can reach and are answered `{error,
+scope}`; a path the schema declares that has no collector here is
+`{error, unsupported}`.
 """.
 
 -export([inspect/2, inspect/3, entries/2, overview/1]).
@@ -145,9 +148,9 @@ covered(all, _Domain) -> true;
 covered(Domains, Domain) -> lists:member(Domain, Domains).
 
 %% A path's owner, by construction from the path. A pid is its runtime's;
-%% this inspector reaches only its own runtime, the system domain's.
+%% this inspector reaches only its own runtime, the domain this runtime is.
 owner([domains, Domain | _]) -> {domain, Domain};
-owner([processes, Pid]) when node(Pid) =:= node() -> {domain, erx_kernel_records:system_domain()};
+owner([processes, Pid]) when node(Pid) =:= node() -> {domain, runtime_domain()};
 owner([processes, _Pid]) -> none;
 owner(_Path) -> machine.
 
@@ -190,7 +193,7 @@ collect(Path, Scope, _Options) ->
 collect([], _Scope) ->
     {ok, erx_kernel_records:machine()};
 collect([processes, Pid], _Scope) ->
-    found(erx_process_records:process(Pid, erx_kernel_records:system_domain()));
+    found(erx_process_records:process(Pid, runtime_domain()));
 collect([cpus, _Index] = Path, Scope) ->
     entry(Path, enumerate([cpus], Scope));
 collect([domains, Domain | Rest] = Path, Scope) ->
@@ -230,7 +233,7 @@ enumerate([domains, Domain, threads], _Scope) ->
         false -> {error, scope}
     end;
 enumerate([processes], Scope) ->
-    Domain = erx_kernel_records:system_domain(),
+    Domain = runtime_domain(),
     {Status, Pids} = page(case covered(Scope, Domain) of
                               true -> erlang:processes();
                               false -> []
@@ -238,6 +241,15 @@ enumerate([processes], Scope) ->
     {Status, [Record || Pid <- Pids, {ok, Record} <- [erx_process_records:process(Pid, Domain)]]};
 enumerate(_Path, _Scope) ->
     {error, unsupported}.
+
+%% The domain this runtime is: the one its boot page names (erx_dist:boot/0)
+%% on erXos, and on a development host, where one trusted runtime stands for
+%% the system domain, the system domain's id, as erx_facets:domain/0 reads it.
+runtime_domain() ->
+    case erlang:system_info(os_type) of
+        {unix, erxos} -> element(1, erx_dist:boot());
+        _ -> erx_kernel_records:system_domain()
+    end.
 
 page(Items) when length(Items) =< ?PAGE -> {ok, Items};
 page(Items) -> {partial, lists:sublist(Items, ?PAGE)}.

@@ -30,7 +30,12 @@ without an envelope, since it acts with the session's authority anyway.
   which the reply hands out to the peer with send alone
   (docs/design-domains.md, "Exports"); `{error, busy}` past ?VIEWS views,
   and `{error, unsupported}` for a target this line does not serve. The
-  line serves the record view of `{path, []}`, the machine's record.
+  line serves the record view of `{path, Names}`: Names are /proc entry
+  names, read into the inspector's path one at a time as /proc reads them
+  (erx_procfs_core:child/2), and names that name nothing are answered
+  `{error, scope}`, as a path outside the scope is, so the open tells no
+  more than the view would (docs/design-web.md, "URLs"). Which paths the
+  view reaches is the inspector's to decide, at the session's scope.
 * A view belongs to the process that opened it, the caller of the open:
   it answers that process alone and ends when that process ends.
 
@@ -125,13 +130,33 @@ call({Caller, _Tag} = From, Request, Config, Views) ->
 %% A request: what it is answered and the views the line then holds.
 open({open, _Target}, _Caller, _Config, Views) when map_size(Views) >= ?VIEWS ->
     {{error, busy}, Views};
-open({open, {path, []}}, Caller, Config, Views) ->
-    View = proc_lib:spawn_link(?MODULE, view_init, [Config#{conn => Caller, path => [], last => none}]),
-    {{ok, View}, Views#{View => []}};
+open({open, {path, Names}}, Caller, Config, Views) ->
+    case inspector_path([], Names) of
+        {ok, Path} ->
+            View = proc_lib:spawn_link(?MODULE, view_init, [Config#{conn => Caller, path => Path, last => none}]),
+            {{ok, View}, Views#{View => Path}};
+        error ->
+            {{error, scope}, Views}
+    end;
 open({open, _Target}, _Caller, _Config, Views) ->
     {{error, unsupported}, Views};
 open(_Request, _Caller, _Config, Views) ->
     {{error, badarg}, Views}.
+
+%% Reads Names, untrusted /proc entry names, one at a time into the inspector's
+%% path below Path; `error` at the first name that names nothing there, or when
+%% Names is not a proper list of binaries. erx_procfs_core bounds each name before
+%% it reads it and makes no atom, and the schema's bound on a path's segments ends
+%% the walk.
+inspector_path(Path, []) ->
+    {ok, Path};
+inspector_path(Path, [Name | Names]) ->
+    case erx_procfs_core:child(Path, Name) of
+        {ok, Child} -> inspector_path(Child, Names);
+        error -> error
+    end;
+inspector_path(_Path, _Names) ->
+    error.
 
 %%% A record view.
 

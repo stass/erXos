@@ -11,19 +11,23 @@ require_relative '../../tools/lib/erx/generated'
 # domain (docs/design-web.md, "Views on the line"), and of the path from a browser's open
 # through the relay's connection and the line to an update carrying the machine's record,
 # compiled from source with warnings as errors on stock's emulator (ERX_ERL and ERX_ERLC,
-# which make check supplies). The inspector and the export table are the test's stand-ins.
+# which make check supplies). The export table is the test's stand-in, and so is the
+# inspector but in the cases of a domain's processes and of the scope, which ask it itself.
 class ErxWebLineTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-  SOURCES = %w[build/gen/erlang/apps/erx/src/generated/erx_web_proto.erl build/gen/erlang/apps/erx/src/generated/erx_schema.erl
-               build/gen/erlang/apps/erx/src/generated/erx_present.erl erlang/apps/erx_files/src/erx_procfs_core.erl
-               erlang/apps/erx_web_line/src/erx_web_value.erl erlang/apps/erx_web_line/src/erx_web_line.erl
-               erlang/apps/erx/src/erx_facet.erl
-               erlang/apps/erx/src/erx_driver_ctl.erl erlang/apps/erx_web/src/erx_web_conn.erl
-               erlang/apps/erx_web/src/erx_web_relay.erl erlang/apps/erx_web/src/erx_web_relay_conn.erl
-               test/erlang/erx_web_line_tests.erl]
-            .map { |path| File.join(ROOT, path) }.freeze
+  # The line, the web domain's connection and relay, and the inspector the
+  # scope cases ask, with what the inspector reads its records through.
+  SOURCES = [*%w[generated/erx_web_proto generated/erx_schema generated/erx_present erx_text_tables]
+               .map { |name| Erx::Generated.path("erlang/apps/erx/src/#{name}.erl", root: ROOT) },
+             *%w[erx_files/src/erx_procfs_core erx_web_line/src/erx_web_value erx_web_line/src/erx_web_line
+                 erx/src/erx_facet erx/src/erx_driver_ctl erx/src/erx_inspector erx/src/erx_kernel_records
+                 erx/src/erx_process_records erx/src/erx_object_info erx/src/erx_log_records
+                 erx/src/erx_runtime_records erx/src/erx_text erx_web/src/erx_web_conn
+                 erx_web/src/erx_web_relay erx_web/src/erx_web_relay_conn]
+               .map { |name| File.join(ROOT, "erlang/apps/#{name}.erl") },
+             File.join(ROOT, 'test/erlang/erx_web_line_tests.erl')].freeze
 
   def test_relay_cases_pass_under_eunit
     Dir.mktmpdir('erx-web-line-test') do |work|
