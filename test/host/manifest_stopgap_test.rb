@@ -373,6 +373,19 @@ class ManifestStopgapTest < Minitest::Test
     refused(Erx::Manifest::Unsupported, 'unsupported', 'devices.dma', source, against, message: /M9/)
   end
 
+  # A unit goes whole to one holder (property 1): a second unit row placing the same
+  # unit and a unit row naming two holders are refused before anything is placed.
+  # That devices sharing a page are one unit is the domain library's view's judgment,
+  # which dom_planner_test runs through the build's planner.
+  def test_a_unit_on_two_holders_is_refused
+    twice = @source + "unit net_again\n  placement \"net\"\n  holder system\n"
+    refused(Erx::Manifest::Invalid, 1, 'unit.placement', twice, message: /assigned more than once/)
+    two = @source.sub(/^(unit net\n  placement "net"\n  holder system)$/, '\1 system')
+    refute_equal @source, two
+    error = assert_raises(Erx::ABI::SchemaError) { admit(two) }
+    assert_match(/holder requires one value/, error.message)
+  end
+
   def test_an_unconfined_device_without_memory_is_refused
     source, against = with_extra_device(role: 'ordinary', dma: 'unconfined', dma_memory: 0)
     refused(Erx::Manifest::Invalid, 4, 'devices.dma_memory', source, against)

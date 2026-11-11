@@ -2430,8 +2430,10 @@ stopgap is unconfined. The catalogue is the manifest's device table:
 the domain library's boot view builds an entry per device, placed on its
 unit's holder, derives the units from the devices' register pages, and
 refuses the whole view when devices that share a page are in two unit
-rows, or when a device is marked confined, since the stopgap lists no
-IOMMU stream; the manifest check builds the same view, so such a
+rows, when devices of one unit that a configured row holds share a page,
+since a give windows one device and the library refuses a window over a
+page another entry's window meets, or when a device is marked confined,
+since the stopgap lists no IOMMU stream; the manifest check builds the same view, so such a
 manifest fails the build, and no domain is created from a placement the
 view did not admit. The development manifest still gives each device
 to its own domain once drivers move out of the system domain: the block

@@ -298,6 +298,11 @@ boot_units(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries)
  * one MMIO object: devices whose pages meet are one unit, so the manifest
  * must have them in one unit row, which has one holder. A unit split
  * across two rows, two holders on one page included, refuses the view.
+ * So does a unit on a configured row whose own devices share a page: a
+ * give windows one device, and the library refuses a window over a page
+ * another entry's window meets, so every creation of that row would fail;
+ * only the system domain, whose windows the root makes, may hold such a
+ * unit until the catalogue's entry is the unit (TODO.md).
  * So does a device marked confined: the stopgap's catalogue lists no IOMMU
  * stream, and a confined device is given only on one; and DMA memory that is
  * not whole pages, which no give can make.
@@ -348,10 +353,17 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 		for (uint32_t at = 0; at < ERX_DEVICE_IRQS_MAX; at++)
 			records[index].irqs[at] = (erx_cap_t){ ERX_CAP_NULL };
 	}
-	for (uint32_t a = 0; a < count; a++)
-		for (uint32_t b = a + 1; b < count; b++)
-			if (entries[a].unit != entries[b].unit && boot_pages_meet(&entries[a], &entries[b]))
+	for (uint32_t a = 0; a < count; a++) {
+		for (uint32_t b = a + 1; b < count; b++) {
+			if (!boot_pages_meet(&entries[a], &entries[b]))
+				continue;
+			if (entries[a].unit != entries[b].unit)
 				return ("manifest: devices that share a register page are in two units");
+			/* One unit has one holder (boot_units), so a's row is b's. */
+			if (entries[a].row != ERX_MF_NONE)
+				return ("manifest: devices of a unit a configured domain holds share a register page");
+		}
+	}
 	view->ndevices = count;
 	return (NULL);
 }

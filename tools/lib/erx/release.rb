@@ -7,6 +7,7 @@ require 'fileutils'
 require 'json'
 require 'open3'
 require_relative 'abi'
+require_relative 'dom_planner'
 require_relative 'build_inputs'
 require_relative 'error'
 require_relative 'json_input'
@@ -131,6 +132,7 @@ module Erx
       Pack.new(root: @root, output_root: @root, codec: @codec, runner: @runner,
                planner: ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec),
                checker: tools.fetch('checker'), hasher: tools.fetch('hasher'),
+               domain_planner: DomainPlanner.new(helper: tools.fetch('domains'), runner: @runner),
                provenance: PackProvenance.new(root: @root, catalog: catalog, external: toolchain, runner: @runner,
                                               imports: { File.join(@root, 'otp') => 'permanent' }))
     end

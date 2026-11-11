@@ -16,7 +16,8 @@ require 'tmpdir'
 # core that mints facets configured domains serve,
 # test/erlang/erx_domain_mints_srv_tests.erl for the service applying that core, and
 # test/erlang/erx_facet_tests.erl for the facet behaviour, erx_facet, which the
-# service mints facets of.
+# service mints facets of, and test/erlang/erx_devices_tests.erl for erx_devices,
+# the catalogue presented unchanged.
 class ErxDomainTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_domain/src')
@@ -27,7 +28,8 @@ class ErxDomainTest < Minitest::Test
              File.join(ROOT, 'test/erlang/erx_domain_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_domain_links_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_domain_mints_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_domain_mints_srv_tests.erl')].freeze
+             File.join(ROOT, 'test/erlang/erx_domain_mints_srv_tests.erl'),
+             File.join(ROOT, 'test/erlang/erx_devices_tests.erl')].freeze
 
   def test_domain_service_cases_pass_under_eunit
     assert_eunit_passes('erx_domain_tests', deadline: 120)
@@ -49,6 +51,10 @@ class ErxDomainTest < Minitest::Test
     assert_eunit_passes('erx_domain_mints_srv_tests', deadline: 60)
   end
 
+  def test_device_catalogue_presentation_passes_under_eunit
+    assert_eunit_passes('erx_devices_tests', deadline: 60)
+  end
+
   private
 
   def assert_eunit_passes(mod, deadline:)
@@ -61,7 +67,7 @@ class ErxDomainTest < Minitest::Test
                                        "halt(case eunit:test(#{mod}, [verbose]) of ok -> 0; _ -> 1 end).",
                                        chdir: work, stdin_data: '')
       assert status.success?, output
-      assert_match(/All \d+ tests passed/, output)
+      assert_match(/[1-9][0-9]* tests passed/, output)
     end
   end
 end

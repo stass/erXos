@@ -1488,7 +1488,11 @@ and the manifest's unit says who holds it. A 4 KiB page holds eight transports a
 device's alone, since `erx_device` opens and maps a device's registers by the page and
 refuses a second device on an open page, so each role takes its own page: the disks the top
 page, `/virtio_mmio@a003e00` for the first and each next disk the transport below it, and
-the network device the page below, `/virtio_mmio@a002e00`. The website's machine, v64,
+the network device the page below, `/virtio_mmio@a002e00`, and a spare unit the page below
+that, `/virtio_mmio@a001e00`, which QEMU leaves without a device: the development manifest
+leaves it unplaced, and the `device_give` QEMU suite places it on a configured row, whose
+domain reads the transport's magic, is halted, and reads it again from what the row's
+restart gave it. The website's machine, v64,
 which boots the same image, has no setting for a device's transport, so `site/terminal.js`
 fills the rest of the disks' page with blank read-only disks and the network device falls
 on its transport ([site/README.md](../site/README.md#the-network)). The production image suite checks each
@@ -1824,6 +1828,7 @@ the tests.
 | **Generations**, `function_api` with a host hook that sets a record's generation to its last value: the record's next free retires it, the next create takes another record, and the stale handle is `ERX_ESTALE`; a second thread created in a created space is `ERX_ENOTSUP` | the retire step removed: the generation wraps to an earlier value and the stale handle names the new object |
 | **A group and its threads**, `native_space`: destroying a group whose home task still has a thread in it is `ERX_ENOTSUP` and the thread runs on; destroying the budget the group is charged to stops its home task, whose exit record arrives, and its stacks and pool pages return | the refusal removed: the service deletes the thread alone, and the pool count stays short by its stack |
 | **A payload read once**, a host test of the service's decoder over a public UTCB a second thread rewrites in a loop: `erx_debug_log` and `task_write` with their length changing between reads never copy more than `utcb_bytes_max` and never more than the length the decoder checked | the body reading the length again from the public UTCB: AddressSanitizer reports the overread |
+| **A configured holder restarted**, the QEMU gate's `device_give` suite: a configured domain holding the platform's spare unit opens it from its `given` record and reads the transport's magic; it is halted, the domain service restarts its row under the next id, and the new domain reads the magic again through the window and line its creation was given | the restart's plan with no gives: the new domain finds no record of the unit, and the cell's answer disagrees |
 | **A device's holder restarted**, from 1b-E, the production image suite: the network domain is killed and restarted; the new driver gets a new window and line object and the same contiguous memory, resets the device and passes its traffic test | the line's object not deleted at the exit record: the restarted holder's give is refused with `ERX_EBUSY`, since the line already has an object |
 | **vCPU upcalls**, if carried, `native_signal`: an upcall interrupts a computing worker, ends a umtx wait with `ERX_EINTR` and a reply wait not at all, and the frame is restored register by register; a delivery between a handler's last check and its resume enters the handler again | the resume ignoring a queued delivery: the second signal is lost |
 

@@ -273,6 +273,23 @@ class DomPlannerTest < Minitest::Test
     end
   end
 
+  # A unit of two devices that share a register page, as QEMU virt's virtio-mmio
+  # transports 0x200 apart do: the root makes the system domain's windows itself, so
+  # the system domain may hold it, but a give windows one device and the library
+  # refuses a window over a page another entry's window meets, so every creation of
+  # a configured row holding it would fail. The view refuses that placement, and so
+  # the build does.
+  def test_a_configured_row_holding_a_unit_whose_devices_share_a_page_fails_the_build
+    platform = JSON.parse(JSON.generate(@context.platform))
+    net = platform.fetch('units').find { |unit| unit.fetch('key') == 'net' }.fetch('devices')
+    net << net.first.merge('path' => '/virtio_mmio@a002c00', 'base' => net.first.fetch('base') - 0x200,
+                           'line' => net.first.fetch('line') - 1, 'placement_key' => 'net-second')
+    @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
+    assert_equal 1, admit(@source).report.fetch('child_plan_instances')
+    held = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
+    refused(held, 'view', /a configured domain holds share a register page/)
+  end
+
   def test_a_malformed_input_is_refused_by_the_helper
     manifest = admit(@source).bytes
     head = @codec.encode_layout('erx_image_manifest', ManifestContextFixture.image(@codec))

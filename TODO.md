@@ -1388,14 +1388,6 @@ it; git history is the record of completed work.
   object (a bell's bind, a group's configure), and none checks that the root's handle table
   returns to its starting occupancy after a retire or an undo, which would catch a handle the
   library forgot to close.
-* [Medium] domain library, `liberx/system/dom_boot_view.c` and `dom_life.c` (`life_overlaps`):
-  the boot view refuses register pages shared only between different units, so a manifest may
-  place two devices of one unit that share a page (QEMU `virt`'s virtio-mmio slots, 0x200 apart)
-  on one configured row, but every creation of that row then fails with ERX_EINVAL, because
-  `life_overlaps` refuses an entry whose page meets any other entry, and each give would make
-  its own window over the one page. Give windows per unit page rather than per device, and let
-  `life_overlaps` compare across units only, as the view does. Nothing shipped places such a
-  pair on a configured row.
 * [Medium] domain library, `tools/fuzz/dom_core_fuzz.c`: the planner's view has no devices, so
   `dom_plan_gives`, `ngives` and the GIVE-before-BOOTINFO order are never reached through
   `erx_dom_plan_configured`. Give the view fuzzed device entries with fuzzed rows, and check in
@@ -1421,11 +1413,6 @@ it; git history is the record of completed work.
 * [Low] domain library, `include/erx/device_kinds.h`: no check ties a kind's peripheral name to
   `ERX_BOOT_NAME_WORD_MAX`, so a kind with a longer name would make every creation of its holder
   fail with ERX_EINVAL. Refuse it in the view build or test the table.
-* [Medium] domain library, `liberx/system/dom_boot_view.c` against design-system.md "Devices": the
-  design runs a machine without a device marked confined that has no IOMMU stream, logging a
-  diagnostic, while the boot view refuses the whole manifest ("a device marked confined has no
-  IOMMU stream"), so the machine does not boot. Make the view leave such a device unplaced with
-  the diagnostic, or state the refusal as the stopgap's behaviour in the design.
 * [Medium] domain library, `liberx/system/dom_core.c` (`dom_check_sizes`): every crash area is
   `ERX_CRASH_SIZE`, 16 KiB, not design-runtime.md's per-domain size with its 1 MiB default, so
   a full dump arrives truncated with its slogan intact, and the design's one-page crash area
@@ -1675,12 +1662,12 @@ it; git history is the record of completed work.
   `row.key?('plan')` in `PackWire#write_image`; one helper should give an entry's head
   for both.
 * [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#check_plans`),
-  `tools/lib/erx/pack.rb`, `tools/lib/erx/release.rb`: a manifest with no configured
-  domains is planned only when the caller passes a planner, so a principal
-  `erx_dom_principal_check` refuses still passes a check without one (`Release#pack_with`
-  builds its `Pack` with none). Make the planner a required argument of `Pack.new` and
-  `Manifest.admit`, pass `DomainPlanner` in release.rb and `accepting_planner` in the
-  tests, and delete the nil branch.
+  `tools/lib/erx/pack.rb`: a manifest with no configured domains is planned, and the
+  domain library's boot view built, only when the caller passes a planner, so a pack
+  built without one admits a principal `erx_dom_principal_check` refuses, or two units
+  sharing a register page, which the root then refuses at boot. Every pack in the tree
+  passes one; make the planner a required argument of `Pack.new` and `Manifest.admit`,
+  pass `accepting_planner` in the tests, and delete the nil branch.
 * [Low] manifest check, `tools/lib/erx/manifest.rb` (`Manifest.release_names`): the image
   builds the releases its rows name before the manifest is checked, so a release named
   like another artifact fails as an artifact clash, not a manifest diagnostic.
@@ -1723,9 +1710,11 @@ it; git history is the record of completed work.
 * [Low] domain library, `liberx/system/dom_boot_view.c` and
   `erx_dom_plan_device_give`: the catalogue has an entry per device, so a
   unit of several devices that share a register page (the Raspberry Pi 4's
-  mini UART and auxiliary SPI controllers) cannot be given to a configured
-  domain: each entry's window covers the shared page and the give refuses
-  overlapping entries. Make the catalogue's entry the unit, its ranges the
+  mini UART and auxiliary SPI controllers, two of QEMU `virt`'s virtio-mmio
+  transports, 0x200 apart) cannot be given to a configured domain: each
+  entry's window covers the shared page and the give refuses overlapping
+  entries, so the boot view, and with it the build, refuses such a unit on a
+  configured row. Make the catalogue's entry the unit, its ranges the
   union of its devices' pages and its lines theirs, before a board places
   such a unit outside the system domain.
 * [Low] domain library, `dom_core.c` request planning: a requested
