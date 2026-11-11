@@ -14,7 +14,11 @@
 -module(erx_domain_mints_srv_tests).
 -include_lib("eunit/include/eunit.hrl").
 
--define(DEADLINE, 1000).
+%% The service's deadline for each mint operation, and for each introduction an
+%% operation asks for: an hour, so that no case reaches either deadline by waiting,
+%% however slow the host is. A case that needs an operation's deadline delivers it
+%% with expire/1.
+-define(DEADLINE, 3600000).
 
 mints_test_() ->
     {setup, fun setup/0, fun cleanup/1,
@@ -35,15 +39,14 @@ setup() ->
     provide('a@erxos'),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                 exports => erx_domain_fake_lib, introduce_timeout => 5000,
+                                                 exports => erx_domain_fake_lib, introduce_timeout => ?DEADLINE,
                                                  mints => #{owner => fun erx_domain_mints_tests:owner/1,
                                                             deadline => ?DEADLINE}}),
     unlink(Service),
     {Log, Service}.
 
 cleanup({Log, Service}) ->
-    exit(Service, kill),
-    exit(Log, kill),
+    erx_domain_fake_lib:kill_and_await([Service, Log]),
     _ = [persistent_term:erase(Key) || Key <- [{erx_domain_fake_lib, boot}, {erx_domain_fake_lib, provides},
                                                {erx, facets}]],
     ok.
@@ -109,7 +112,8 @@ restart() ->
     ?assertMatch(#{{dropped, wrong_domain} := 2}, counts()),
     domain_pid(7) ! {erx_origin, 7, {erx_facet_minted, SystemTag, {ok, pid('x@erxos', 7, 5)}}},
     wait(fun(#{{system, echo} := {failed, {7, 4}, bad_reply}}) -> true end),
-    #{{0, echo} := {introducing, {7, 6}, _}} = grants(),
+    #{{0, echo} := {introducing, {7, 6}, IntroduceTag}} = grants(),
+    expire(deadline_message(IntroduceTag)),
     wait(fun(#{{0, echo} := {failed, {7, 6}, {deadline, introducing}}}) -> true end).
 
 %% b's end and restart, id 8, leave the system domain's failed grant as it was, since
@@ -160,15 +164,19 @@ foreign_mint() ->
     ?assertMatch(#{{refused, foreign_mint} := 1}, wait_counts(fun(#{{refused, foreign_mint} := _}) -> true end)).
 
 %% An end with no restart after it, a's fourth, cancels the operation its incarnation,
-%% 10, had pending: the grant is idle at once, and stays idle past the deadline the
-%% operation had, which was disarmed.
+%% 10, had pending: the grant is idle at once, the operation's deadline is disarmed, and
+%% its timer's message, should it still come, leaves the grant idle.
 last_end() ->
     provide('a@erxos'),
     erx_domain_srv ! {domain_ended, 9, {stopped, 0}, #{}},
-    wait(fun(#{{system, echo} := {minting, {10, 4}, _}}) -> true end),
+    #{{system, echo} := {minting, {10, 4}, Tag}} = wait(fun(#{{system, echo} := {minting, {10, 4}, _}}) -> true end),
+    %% Read before the end, which disarms it.
+    Deadline = deadline_message(Tag),
     erx_domain_srv ! {domain_ended, 10, {stopped, 0}, #{}},
     wait(fun(#{{system, echo} := idle}) -> true end),
-    receive after ?DEADLINE + 200 -> ok end,
+    #{mint_timers := Timers} = sys:get_state(erx_domain_srv),
+    ?assertNot(is_map_key(Tag, Timers)),
+    expire(Deadline),
     ?assertMatch(#{{system, echo} := idle, {0, echo} := idle}, grants()).
 
 %% A configured domain's facets of services the system domain serves: b (row 0) is
@@ -202,7 +210,7 @@ served_setup() ->
 
 served_cleanup({Fake, Service, Log}) ->
     erlang:trace(new_processes, false, ['receive']),
-    _ = [exit(Pid, kill) || Pid <- [Service, Fake, Log]],
+    erx_domain_fake_lib:kill_and_await([Service, Fake, Log]),
     _ = [persistent_term:erase(Key) || Key <- [{erx_domain_fake_lib, boot}, {erx, serves}]],
     ok.
 
@@ -274,10 +282,22 @@ domain_pid(Id) ->
     {ok, #{pid := Pid}} = erx_domain_core:fetch(Id, Core),
     Pid.
 
+%% The message the service's timer delivers at the deadline of Tag's operation.
+deadline_message(Tag) ->
+    #{mint_timers := #{Tag := Timer}} = sys:get_state(erx_domain_srv),
+    {timeout, Timer, {mint_deadline, Tag}}.
+
+%% Delivers a deadline message now, as the timer would at the deadline, and returns once
+%% the service has handled it.
+expire(Message) ->
+    erx_domain_srv ! Message,
+    _ = sys:get_state(erx_domain_srv),
+    ok.
+
 grants() -> maps:get(grants, gen_server:call(erx_domain_srv, mints)).
 counts() -> maps:get(counts, gen_server:call(erx_domain_srv, mints)).
 
-%% The grants once Match holds for them, within two seconds and a deadline.
+%% The grants once Match holds for them, within a hundred polls 30 ms apart.
 wait(Match) -> poll(fun grants/0, Match, 100).
 wait_counts(Match) -> poll(fun counts/0, Match, 100).
 

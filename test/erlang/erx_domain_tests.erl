@@ -165,7 +165,7 @@ service_end_shuts_down(End) ->
     Why = receive {'DOWN', SupDown, process, Sup, Reason} -> Reason after 2000 -> still_up end,
     %% A restarted service is registered again. Clean up before asserting.
     Restarted = whereis(erx_domain_srv),
-    is_process_alive(Sup) andalso exit(Sup, kill),
+    erx_domain_fake_lib:kill_and_await([Pid || Pid <- [Sup, Restarted], is_pid(Pid)]),
     ?assertEqual({shutdown, undefined}, {Why, Restarted}).
 
 load_no_library() ->
@@ -200,9 +200,8 @@ configured_boot_timeout_test_() ->
              unlink(Service),
              {Log, Service}
      end,
-     fun({Log, Service}) ->
-             exit(Service, kill),
-             exit(Log, kill),
+     fun(Started) ->
+             stop_service(Started),
              persistent_term:erase({erx_domain_fake_lib, boot})
      end,
      {timeout, 30, fun configured_boot_timeout/0}}.
@@ -239,10 +238,7 @@ service_test_() ->
              unlink(Service),
              {Log, Service}
      end,
-     fun({Log, Service}) ->
-             exit(Service, kill),
-             exit(Log, kill)
-     end,
+     fun stop_service/1,
      fun(_) -> {inorder, [fun boot_order/0, fun create_stop_kill/0, fun configured_restart/0,
                           fun refused_side/0, fun side_ended/0, fun ready_report/0, fun boot_timeout/0,
                           fun report_overtaken/0, fun introduce/0, {timeout, 30, fun connection_down/0},
@@ -251,6 +247,20 @@ service_test_() ->
                           fun configured_restart_held/0, fun sessions/0, fun killed_session_restarts/0,
                           fun release_wait_bound/0,
                           fun service_end_ends_domain_pids/0]} end}.
+
+%% Ends a fixture's service and its call log, each registered by name.
+stop_service({Log, Service}) ->
+    erx_domain_fake_lib:kill_and_await([Service, Log]).
+
+%% A fixture's cleanup has ended the service and the call log by the time it returns,
+%% so the fixture after it can register erx_domain_srv and erx_domain_fake_log again.
+stop_service_frees_the_names_test() ->
+    Log = erx_domain_fake_lib:start_log(),
+    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                 exports => erx_domain_fake_lib}),
+    unlink(Service),
+    stop_service({Log, Service}),
+    ?assertEqual([undefined, undefined], [whereis(Name) || Name <- [erx_domain_srv, erx_domain_fake_log]]).
 
 next_call() ->
     erx_domain_fake_lib:next_call().

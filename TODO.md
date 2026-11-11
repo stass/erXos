@@ -5089,9 +5089,10 @@ document's "residual risks accepted" paragraph.
 * [Low] upstream OTP, `erlc` (stock OTP 29.1.2, the oracle's): run from a directory whose
   path is a string prefix of a source's absolute path without being its parent, it strips
   that prefix and fails: from `/Users/stas/erxos`, `erlc -o /tmp/x
-  /Users/stas/erxos-scratch/a.erl` reports `-scratch/a.erl: no such file or directory`. Find
-  the prefix test (in `erl_compile` or the compile server), fix it in the tree's copy with a
-  test, and report it upstream, which the owner sends.
+  /Users/stas/erxos-scratch/a.erl` reports `-scratch/a.erl: no such file or directory`. The
+  prefix test is `shorten_filename/1` in `otp/lib/compiler/src/compile.erl`: it keeps the rest
+  of the name when that rest does not start with `/`, where it should keep the whole name. Fix
+  it in the tree's copy with a test, and report it upstream, which the owner sends.
 * [Low] upstream OTP, `otp/erts/emulator/beam/bif.c` (`list_to_ref_1`): report to OTP, which the owner sends, that in
   stock OTP 29.1.2 `list_to_ref/1` of a text whose six numbers each end in `.` (`"#Ref<4.1.2.3.4.5.>"`) leaves its
   parse loop with `i` at 6, so the copy into `refn` reads `ints[6]` past its six entries and writes `refn[5]` past

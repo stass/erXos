@@ -30,7 +30,7 @@
 %% rings of a size of its own. The service makes every call here in its own process,
 %% so the process dictionary keeps each domain's pid and node and each connection.
 -module(erx_domain_fake_lib).
--export([start_log/0, next_call/0]).
+-export([start_log/0, next_call/0, kill_and_await/1]).
 -export([register/0, configured/0, configured/3, templates/0, session/4, create/1, start/1, stop/2, retire/1, crash/1,
          connect/4, disconnect/1]).
 -export([open_side/2, close_side/2, export/3]).
@@ -42,6 +42,16 @@ start_log() ->
     Pid = spawn(fun() -> queue([], []) end),
     register(erx_domain_fake_log, Pid),
     Pid.
+
+%% Kills each of Pids and returns once every one has ended. exit/2 only sends the
+%% signal; a process's registered name is gone before its monitors get 'DOWN'. So a
+%% fixture ends what it registered (the service, the call log) here, and the next
+%% fixture can register the same names.
+kill_and_await(Pids) ->
+    Monitors = [monitor(process, Pid) || Pid <- Pids],
+    _ = [exit(Pid, kill) || Pid <- Pids],
+    _ = [receive {'DOWN', Monitor, process, _, _} -> ok end || Monitor <- Monitors],
+    ok.
 
 next_call() ->
     erx_domain_fake_log ! {next, self()},
