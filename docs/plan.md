@@ -1279,8 +1279,8 @@ land after M11 repeat M11's closure over what they add.
    session's own domain alone; the host link's `web` facet, bound to
    `root`'s session; `tools/erx web` with its loopback server, token,
    cookie and `Origin` checks and its WebSocket relay; the client under
-   `web/`, built by `make web` offline from the store `tools/erx fetch`
-   fills, with the generated escape, `MachineText`, `hrefOf` and the
+   `web/`, built by `make web` offline from the packages `tools/erx fetch`
+   installs, with the generated escape, `MachineText`, `hrefOf` and the
    content security policy; the client's chokepoint checks, and the ASCII
    check over its `.ts` and `.tsx` sources
    ([design-web.md](design-web.md#the-host-tools-front-end)). Tracing

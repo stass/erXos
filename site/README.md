@@ -28,7 +28,7 @@ ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
   npm, clang with the wasm32 target, Rust with the
   `wasm32-unknown-unknown` target, and Java. `npm ci` fetches from the
   npm registry: the site build alone is exempt from the rule that npm
-  packages install offline from a fetched store, because v64 pins its
+  packages install through the fetch step against the lockfile, because v64 pins its
   tools with its own lockfile and nothing it fetches reaches an erXos
   image. `--v64 DIR` instead takes a tree an earlier run built, such as
   `build/site-v64`, and builds nothing.

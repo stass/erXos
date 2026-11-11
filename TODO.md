@@ -596,18 +596,13 @@ it; git history is the record of completed work.
 * [Medium] `tools/lib/erx/web_build.rb`, `build`: esbuild and tsc resolve a bare import through any `node_modules`
   above the stage (the worktree, the home directory), so an import of a package missing from `web/package.json`
   can bundle an unpinned package found there. Run esbuild with `--metafile` and refuse any input outside the
-  stage's `src/` and the lockfile's packages under `node_modules/.pnpm/`.
-* [Medium] `tools/lib/erx/web_build.rb`, `fetched?`: the store's record covers only the lockfile, not
-  `pnpm-workspace.yaml` or the pnpm that fetched it, so after a pnpm upgrade that changes the store layout
-  `tools/erx setup` skips the fetch and `make web` fails offline; record all three.
-* [Medium] `tools/lib/erx/web_build.rb`, `install`: the offline frozen install passes pnpm 12's lockfile check
-  only because pnpm has a pass for that lockfile's hash in its per-user cache (`lockfile-verified.jsonl`), written
-  when pnpm wrote the lockfile or by an online run; on a host whose cache lacks it the install likely fails with
-  `ERR_PNPM_NO_OFFLINE_META`. Either keep pnpm's cache inside `build/web-store` at fetch time, or decide whether
-  `trust-lockfile` fits a build whose trust root is the lockfile's integrity hashes.
-* [Low] `tools/lib/erx/web_build.rb`: the stage copies untracked files of `web/` (a `.pnpmfile.cjs` pnpm runs, an
-  `.npmrc`, a stale `out/` whose files `build` would publish); stage only tracked sources, pass
-  `--ignore-pnpmfile`, and have esbuild write outside the stage. Two builds in one tree share `build/web-stage` and
+  stage's `src/` and the lockfile's packages under `build/web-modules/node_modules/.pnpm/`.
+* [Low] `web/test`'s install tests (`test/host/web_build_test.rb`): they install offline from `build/web-store`, which
+  pnpm 12 allows only while its per-user `lockfile-verified.jsonl` holds a pass for the lockfile (an online fetch by
+  the same user writes it); on a host or user without it they fail with `ERR_PNPM_NO_OFFLINE_META`. Use
+  `trust-lockfile` in the tests' installs or install them online.
+* [Low] `tools/lib/erx/web_build.rb`: the stage copies untracked files of `web/` (a stale `out/` whose files
+  `build` would publish); stage only tracked sources and have esbuild write outside the stage. Two builds in one tree share `build/web-stage` and
   `build/web.next`; take a lock as `Generated` does.
 * [Low] `docs/design-web.md`, Dependencies: React 19 ships no types, so the views' `.tsx` need `@types/react`
   and `@types/react-dom` (MIT, DefinitelyTyped) for `tsc --noEmit`; list them beside React when it lands.

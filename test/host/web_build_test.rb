@@ -10,13 +10,18 @@ require_relative '../../tools/lib/erx/web_build'
 require_relative '../../tools/lib/erx/web_inventory'
 
 # `make web` (docs/design-web.md, "Build and dependencies"): the tool versions it
-# refuses, the names and inventory it writes, and, from the store `tools/erx
-# fetch` filled, a build that repeats byte for byte, an install that refuses a
+# refuses, the names and inventory it writes, the record that says which package
+# files node_modules was installed for and, from the packages `tools/erx fetch`
+# installed, a build that repeats byte for byte, an install that refuses a
 # package the lockfile lacks, and one that runs no package's install script.
+# The installs here run offline from the fetch's store.
 class WebBuildTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Build = Erx::WebBuild
   REQUIRED = { 'node' => [24, 2, 0], 'pnpm' => [12, 18, 0] }.freeze
+  # Options that keep a test's install from reaching the network: the store of
+  # the fetch, and a registry no request reaches.
+  OFFLINE = ['--offline', '--config.registry=http://127.0.0.1:9/'].freeze
 
   def test_engines_are_minimum_versions
     assert_equal REQUIRED, Build.engines(File.read(File.join(ROOT, 'web/package.json')))
@@ -57,15 +62,6 @@ class WebBuildTest < Minitest::Test
     assert_equal ['typescript@7.0.2'], Build.unverified(seeded)
   end
 
-  def test_the_install_reaches_no_registry
-    staged do |stage|
-      Dir.mktmpdir('erx-web-empty-store') do |empty_root|
-        assert_raises(Erx::CommandError) { Build.install(root: empty_root, runner: runner, stage: stage) }
-      end
-      Build.install(root: ROOT, runner: runner, stage: stage)
-    end
-  end
-
   def test_the_front_end_loads_what_publish_writes
     Dir.mktmpdir('erx-web-build') do |directory|
       output = File.join(directory, 'web')
@@ -88,13 +84,27 @@ class WebBuildTest < Minitest::Test
     end
   end
 
+  def test_the_install_record_names_the_package_files_it_was_made_for
+    Dir.mktmpdir('erx-web-record') do |root|
+      Dir.mkdir(File.join(root, 'web'))
+      Build::PACKAGE_FILES.each { |name| File.write(File.join(root, 'web', name), "#{name}\n") }
+      refute Build.fetched?(root: root)
+      modules = File.join(root, Build::MODULES)
+      FileUtils.mkdir_p(File.join(modules, 'node_modules'))
+      File.write(File.join(modules, Build::FETCHED), "#{Build.package_digest(File.join(root, 'web'))}\n")
+      assert Build.fetched?(root: root)
+      File.write(File.join(root, 'web/pnpm-workspace.yaml'), "changed\n")
+      refute Build.fetched?(root: root)
+    end
+  end
+
   def test_a_package_the_lockfile_lacks_fails_the_install
     staged do |stage|
-      Build.install(root: ROOT, runner: runner, stage: stage)
+      install(stage)
       # A local package, which an install that let the lockfile change would add offline.
       local_package(stage, 'unlocked')
       edit_package(stage) { |package| package['devDependencies']['unlocked'] = 'file:unlocked' }
-      assert_raises(Erx::CommandError) { Build.install(root: ROOT, runner: runner, stage: stage) }
+      assert_raises(Erx::CommandError) { install(stage) }
       refute File.exist?(File.join(stage, 'node_modules/unlocked'))
     end
   end
@@ -112,13 +122,13 @@ class WebBuildTest < Minitest::Test
       edit_package(stage) do |package|
         package.merge!('dependencies' => {}, 'devDependencies' => { 'seed' => 'file:seed' })
       end
-      runner.run(['pnpm', 'install', '--lockfile-only', '--offline', '--ignore-scripts', '--store-dir',
-                  File.join(ROOT, Build::STORE), Build::NO_REGISTRY, *Build::PNPM_OPTIONS],
+      runner.run(['pnpm', 'install', '--lockfile-only', '--ignore-scripts', '--store-dir', File.join(ROOT, Build::STORE),
+                  *OFFLINE, *Build::PNPM_OPTIONS],
                  name: 'web-seed-lock', deadline: Build::DEADLINE, chdir: stage, env: Build::OFFLINE_ENV)
       # Without --ignore-scripts pnpm refuses the seed, whose scripts no setting
       # allows, so the install fails; with it the install succeeds and runs none.
       # The marker guards a policy that would run them.
-      Build.install(root: ROOT, runner: runner, stage: stage)
+      install(stage)
       assert File.directory?(File.join(stage, 'node_modules/seed')), 'the seeded package was not installed'
       refute File.exist?(marker), 'an install script ran'
     end
@@ -129,7 +139,7 @@ class WebBuildTest < Minitest::Test
   # Text and its line escape, fails the build's type check.
   def test_a_machine_text_rendered_directly_fails_the_type_check
     staged do |stage|
-      Build.install(root: ROOT, runner: runner, stage: stage)
+      install(stage)
       File.write(File.join(stage, 'src/seeded.tsx'), <<~TSX)
         import { machineText } from './generated/proto.ts';
 
@@ -146,6 +156,10 @@ class WebBuildTest < Minitest::Test
   private
 
   def runner = @runner ||= Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+
+  def install(stage)
+    Build.install(runner: runner, dir: stage, store: File.join(ROOT, Build::STORE), extra: OFFLINE)
+  end
 
   def staged
     Dir.mktmpdir('erx-web-build') do |directory|

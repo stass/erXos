@@ -167,9 +167,9 @@ Third-party components are allowed when they pay for themselves.
   the tests or development use unmodified (stock OTP as the oracle,
   libc-test, plan9port, Arm's machine-readable register data, the TLA+
   tools, the oracle guests) is fetched at a pinned version and verified
-  against a pinned SHA-256. npm packages are verified against the integrity
-  hashes of a checked-in pnpm lockfile and installed offline from the
-  fetched store. Both are built out of tree.
+  against a pinned SHA-256. npm packages are installed by the fetch step
+  with pnpm against the integrity hashes of a checked-in lockfile. Both are
+  built out of tree.
 * **Permanent dependencies.** Prefer mature, maintained components with a C
   or Erlang API and permissive licenses (ISC, BSD, MIT, Apache-2.0). A
   browser-side dependency of the web client may have a TypeScript API

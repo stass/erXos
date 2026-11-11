@@ -12,16 +12,18 @@ require_relative 'web_stage'
 module Erx
   # The web client's build (docs/design-web.md, "Build and dependencies").
   #
-  # fetch is the one step that reaches the network: `pnpm fetch` fills a store
-  # under the build tree with the packages web/pnpm-lock.yaml pins, each checked
-  # against the lockfile's integrity hash, and records the lockfile's SHA-256
-  # beside the store. build is `make web`, offline from that store: it refuses a
-  # Node.js or pnpm older than web/package.json's engines and a store fetched for
-  # another lockfile, stages web/ with the generated modules of build/gen/web
-  # over it, installs with `--offline --frozen-lockfile --ignore-scripts`, so no
-  # package outside the lockfile and no install script runs, type-checks the
-  # client and then its tests (test/tsconfig.json) with `tsc --noEmit`, bundles
-  # src/main.ts with esbuild, and writes build/web/.
+  # fetch is the one step that reaches the network: it runs `pnpm install
+  # --frozen-lockfile --ignore-scripts` in a copy of web/'s package files under
+  # the build tree, so every package comes from the registry at the version
+  # web/pnpm-lock.yaml pins, is checked against the lockfile's integrity hash,
+  # and no package outside the lockfile and no install script runs. It records
+  # the SHA-256 of those files beside the installed node_modules. build is
+  # `make web`, with no network: it refuses a Node.js older than
+  # web/package.json's engines and node_modules installed for other package
+  # files, stages web/ with the generated modules of build/gen/web over it and
+  # node_modules linked in, type-checks the client and then its tests
+  # (test/tsconfig.json) with `tsc --noEmit`, bundles src/main.ts with esbuild,
+  # and writes build/web/.
   #
   # build/web/ holds index.html, which names the script and the stylesheet;
   # every other file is named by its stem and the first 16 hexadecimal digits of
@@ -30,22 +32,21 @@ module Erx
   # (engines, bundle, inventory) decides the names and bytes; the effects around
   # it only run the tools and move files.
   module WebBuild
+    # Where pnpm installs the packages: the copy of web/'s package files, its
+    # node_modules and the record of what they were installed for. STORE is
+    # pnpm's content store, kept in the build tree and not in the user's home.
+    MODULES = 'build/web-modules'
     STORE = 'build/web-store'
     STAGE = 'build/web-stage'
     OUTPUT = 'build/web'
-    # The record of the lockfile the store was fetched for, inside the store.
-    FETCHED = 'fetched-lock.sha256'
+    # The record, inside MODULES, of the package files node_modules was installed for.
+    FETCHED = 'installed-for.sha256'
     LOCKFILE = 'pnpm-lock.yaml'
-    # What pnpm reads to fetch: the lockfile, the package it locks and the
+    # What pnpm reads to install: the lockfile, the package it locks and the
     # settings that say no package may run a build script.
     PACKAGE_FILES = ['package.json', LOCKFILE, 'pnpm-workspace.yaml'].freeze
     # pnpm's own network use beyond the registry: its check for a newer pnpm.
     PNPM_OPTIONS = ['--config.update-notifier=false'].freeze
-    # A registry no request reaches, for every step after fetch: a step that
-    # wanted the network fails instead of fetching.
-    NO_REGISTRY = '--config.registry=http://127.0.0.1:9/'
-    # pnpm run through corepack (as on a host with no npm) may not download a
-    # pnpm of its own after fetch either.
     # pnpm run through corepack does not reach for a newer pnpm in any step.
     PNPM_ENV = { 'COREPACK_DEFAULT_TO_LATEST' => '0' }.freeze
     # Nor may the caller's environment swap esbuild's binary or load code into Node.
@@ -154,39 +155,46 @@ module Erx
       files.sort.map { |path, bytes| "#{Digest::SHA256.hexdigest(bytes)}  #{path}\n" }.join
     end
 
-    # The lockfile's SHA-256, which the store records when fetched for it.
-    def lock_digest(root) = Digest::SHA256.file(File.join(root, 'web', LOCKFILE)).hexdigest
+    # The SHA-256 of the inventory of the package files in directory, which the
+    # record holds for the node_modules installed from them.
+    def package_digest(directory)
+      Digest::SHA256.hexdigest(inventory(PACKAGE_FILES.to_h { |name| [name, File.binread(File.join(directory, name))] }))
+    end
 
     def fetched?(root:)
-      record = File.join(root, STORE, FETCHED)
-      File.file?(record) && File.read(record).strip == lock_digest(root)
+      record = File.join(root, MODULES, FETCHED)
+      File.file?(record) && File.directory?(File.join(root, MODULES, 'node_modules')) &&
+        File.read(record).strip == package_digest(File.join(root, 'web'))
     end
 
-    # `tools/erx fetch`: pnpm fetch from a copy of web/'s package files, so
-    # nothing is written under web/, into the store; then the record.
+    # `tools/erx fetch`: install web/'s packages from the registry into
+    # build/web-modules, from a copy of its package files so nothing is written
+    # under web/. The install is made beside it, with a record of the copies it
+    # read, and renamed over it when it is done, so a failed fetch leaves the
+    # earlier install as it was.
     def fetch(root:, runner:)
       verify_lockfile(root)
-      check_versions(root: root, runner: runner)
-      store = File.join(root, STORE)
-      work = fresh(File.join(root, 'build/web-fetch'))
-      PACKAGE_FILES.each { |name| FileUtils.cp(File.join(root, 'web', name), work) }
-      runner.run(['pnpm', 'fetch', '--store-dir', store, *PNPM_OPTIONS], name: 'web-fetch', deadline: DEADLINE, chdir: work,
-                                                                       env: PNPM_ENV)
-      FileUtils.rm_rf(work)
-      File.write(File.join(store, FETCHED), "#{lock_digest(root)}\n")
-      store
+      check_versions(root: root, runner: runner, tools: %w[node pnpm])
+      next_modules = fresh(File.join(root, "#{MODULES}.next"))
+      PACKAGE_FILES.each { |name| FileUtils.cp(File.join(root, 'web', name), next_modules) }
+      install(runner: runner, dir: next_modules, store: File.join(root, STORE))
+      File.write(File.join(next_modules, FETCHED), "#{package_digest(next_modules)}\n")
+      modules = File.join(root, MODULES)
+      FileUtils.rm_rf(modules)
+      File.rename(next_modules, modules)
+      modules
     end
 
-    # `make web`: build/web/ from web/ and the store, offline. stage and output
-    # are where the staged tree and the client go.
+    # `make web`: build/web/ from web/ and the installed packages, with no
+    # network. stage and output are where the staged tree and the client go.
     def build(root:, runner:, stage: File.join(root, STAGE), output: File.join(root, OUTPUT))
       verify_lockfile(root)
-      check_versions(root: root, runner: runner)
-      raise Error, "the web client's packages are not fetched for web/#{LOCKFILE}; run `tools/erx fetch`" unless
+      check_versions(root: root, runner: runner, tools: %w[node])
+      raise Error, "the web client's packages are not installed for web/'s package files; run `tools/erx fetch`" unless
         fetched?(root: root)
 
       stage_sources(root: root, stage: stage)
-      install(root: root, runner: runner, stage: stage)
+      File.symlink(File.join(root, MODULES, 'node_modules'), File.join(stage, 'node_modules'))
       in_stage = ->(name, argv) { runner.run(argv, name: name, deadline: DEADLINE, chdir: stage, env: OFFLINE_ENV) }
       in_stage.call('web-tsc', ['node', 'node_modules/typescript/bin/tsc', '--noEmit', '--project', 'tsconfig.json'])
       in_stage.call('web-tsc-test', ['node', 'node_modules/typescript/bin/tsc', '--noEmit', '--project', 'test/tsconfig.json'])
@@ -196,12 +204,12 @@ module Erx
       publish(bundle(outputs), output: output)
     end
 
-    # The packages stage/pnpm-lock.yaml pins, from the store into stage/node_modules,
-    # with no network, no package the lockfile lacks and no install script.
-    def install(root:, runner:, stage:)
-      runner.run(['pnpm', 'install', '--offline', '--frozen-lockfile', '--ignore-scripts', '--store-dir',
-                  File.join(root, STORE), NO_REGISTRY, *PNPM_OPTIONS],
-                 name: 'web-install', deadline: DEADLINE, chdir: stage, env: OFFLINE_ENV)
+    # The packages dir/pnpm-lock.yaml pins, into dir/node_modules: none the
+    # lockfile lacks, each checked against its integrity hash, and no install
+    # script. extra holds options for a caller that must not reach the network.
+    def install(runner:, dir:, store:, extra: [])
+      runner.run(['pnpm', 'install', '--frozen-lockfile', '--ignore-scripts', '--store-dir', store, *extra, *PNPM_OPTIONS],
+                 name: 'web-install', deadline: DEADLINE, chdir: dir, env: PNPM_ENV)
     end
 
     # web/ with build/gen/web over it, in a stage made afresh.
@@ -223,8 +231,10 @@ module Erx
       output
     end
 
-    def check_versions(root:, runner:)
-      required = engines(File.read(File.join(root, 'web/package.json')))
+    # Refuse a tool of tools older than web/package.json's engines require: fetch
+    # runs node and pnpm, build only node.
+    def check_versions(root:, runner:, tools:)
+      required = engines(File.read(File.join(root, 'web/package.json'))).slice(*tools)
       found = required.keys.to_h { |tool| [tool, version_of(tool, root: root, runner: runner)] }
       refused = refusals(required, found)
       raise Error, "the web client's tools: #{refused.join('; ')}" unless refused.empty?

@@ -31,7 +31,7 @@ check:
 generate:
 	$(RUBY) tools/erx generate
 
-# The web client into build/web/, offline from the packages `make fetch` stored
+# The web client into build/web/, offline from the packages `make fetch` installed
 # (docs/design-web.md, "Build and dependencies"). `make check` runs it too.
 web:
 	$(RUBY) tools/erx build web

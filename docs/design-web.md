@@ -1072,7 +1072,7 @@ WebSocket routing and the generated encoder; the end-to-end tests run
 | presentation state stays in the browser | scrolling a `scroll`, moving focus and selecting text in the browser sends no message to the machine and changes no server state | a client that reports scroll offsets fails |
 | choosing the web display | a session holding `web` opens a UI there with `display => web`; with no display facet `erx_ui:open/1` answers `{error, no_display}` at once; stopping the web domain sends each opener `{ui_down, Window, display_down}`; closing every browser ends no UI | an `erx_ui` that ignores the option opens on the wrong display; a facet without the down report leaves the test's opener waiting past its deadline |
 | secrets | a `secret` input's text reaches the application as `{erx_secret, _}`, appears in no counter, log, trace or crash report, and is empty after a re-attach | a renderer that folds the secret into its model fails |
-| build | `make web` from the fetched store, with the network disabled, twice gives byte-identical files and inventory | a seeded package missing from the lockfile fails the frozen-lockfile install; a seeded local package whose install script writes a file leaves no file; a Node.js of another version than `web/package.json` records is refused |
+| build | `make web` from the packages the fetch installed, with the network disabled, twice gives byte-identical files and inventory | a seeded package missing from the lockfile fails the frozen-lockfile install; a seeded local package whose install script writes a file leaves no file; a Node.js of another version than `web/package.json` records is refused |
 
 ### Chokepoints
 
@@ -1101,8 +1101,8 @@ and generator, and is never edited. The ASCII check covers the client's
 
 `web/package.json` and `web/pnpm-lock.yaml` pin every package with its
 integrity hash, and `web/package.json`'s `engines` records the oldest
-Node.js and pnpm each as `>=X.Y.Z`, which `make web` checks before it
-runs either, so a host with an older tool is refused with a diagnostic.
+Node.js and pnpm each as `>=X.Y.Z`, which `tools/erx fetch` checks before it
+runs pnpm and `make web` before it runs Node.js, so a host with an older tool is refused with a diagnostic.
 The file names no `packageManager`: pnpm would fetch the exact pnpm it
 named whenever the host's differed, a network step outside the fetch,
 and a development host may run any pnpm at least as new. No package may
@@ -1110,16 +1110,19 @@ run a build script: `web/pnpm-workspace.yaml` decides each package that
 has one (esbuild's only replaces its launcher with the binary it finds
 anyway) as not built.
 `tools/erx fetch` is the one step that touches the network: it runs
-`pnpm fetch` against the lockfile into a store under the build tree
-(`build/web-store/`, which records the SHA-256 of the lockfile it was
-fetched for, so `make web` refuses a store fetched for another), and
-fetches the Chromium of the pinned Playwright, checked against a SHA-256
-in `deps.lock`. Every later step is offline: `pnpm install --offline
---frozen-lockfile --ignore-scripts`, so no dependency's install script
-runs; `tsc --noEmit`; and esbuild with fixed options (ASCII output, no
-source paths, legal comments to a separate notices file) into
-`build/web/`, over a staged copy of `web/` with the generated modules
-laid over it. Each file but `index.html` is named by its stem and the
+`pnpm install --frozen-lockfile --ignore-scripts` in a copy of the three
+package files under the build tree (`build/web-modules/`), so pnpm takes
+every package from the registry at the version the lockfile pins, checks
+it against the lockfile's integrity hash, adds no package the lockfile
+lacks and runs no dependency's install script. The directory records the
+SHA-256 of the package files it was installed for, so `make web` refuses
+`node_modules` installed for others. The fetch also gets the Chromium of
+the pinned Playwright, checked against a SHA-256 in `deps.lock`. Every
+later step runs with no network: `tsc --noEmit`, and esbuild with fixed
+options (ASCII output, no source paths, legal comments to a separate
+notices file) into `build/web/`, over a staged copy of `web/` with the
+generated modules laid over it and `build/web-modules/node_modules`
+linked in. Each file but `index.html` is named by its stem and the
 first 16 hexadecimal digits of its SHA-256, as `client-<hex>.js`,
 `client-<hex>.css` and `notices-<hex>.txt`. The files are build outputs, never checked in, and enter
 the web domain's release, so `make check-reproducible` covers them.

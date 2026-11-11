@@ -37,8 +37,8 @@ module Erx
     # setup step must not cut short: a killed build restarts from nothing.
     ORACLE_BUILD_DEADLINE = 14_400
 
-    # The web client's packages, fetched into their store (WebBuild.fetch).
-    WEB_STORE = Step.new(name: 'web-store', kind: :web_store, argv: [], deadline: WebBuild::DEADLINE)
+    # The web client's packages, installed by the fetch (WebBuild.fetch).
+    WEB_MODULES = Step.new(name: 'web-modules', kind: :web_modules, argv: [], deadline: WebBuild::DEADLINE)
 
     COMMAND_STEPS = [
       Step.new(name: 'oracle-jit', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
@@ -62,7 +62,7 @@ module Erx
       fetched = sources.map { |source| source.fetch('id') }.reject { |id| SKIPPED_SOURCES.key?(id) }
       builds = COMMAND_STEPS.reject { |step| step.name == 'runtime' && !hosted_runtime }
       fetched.map { |id| Step.new(name: "source-#{id}", kind: :source, argv: [id], deadline: 300) } +
-        [WEB_STORE] + builds
+        [WEB_MODULES] + builds
     end
 
     # present: a hash of step name => true when the step's output is valid.
@@ -143,7 +143,7 @@ module Erx
       when 'runtime' then File.file?(File.join(@root, 'build/runtime/hosted/release/system.pack'))
       when 'rc-oracle' then rc_oracle_valid?
       when 'fsimg' then fsimg_valid?
-      when 'web-store' then WebBuild.fetched?(root: @root)
+      when 'web-modules' then WebBuild.fetched?(root: @root)
       end
     end
 
@@ -173,7 +173,7 @@ module Erx
       case step.kind
       when :source
         obtain_source(step.argv.first)
-      when :web_store
+      when :web_modules
         WebBuild.fetch(root: @root, runner: @runner)
       else
         @runner.run([RbConfig.ruby, File.join(@root, 'tools/erx'), *step.argv, *leftovers(step), '--jobs', @jobs.to_s],

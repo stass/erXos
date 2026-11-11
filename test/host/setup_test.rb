@@ -21,7 +21,7 @@ class SetupTest < Minitest::Test
     assert_equal NAMES.length - 6, NAMES.take_while { |name| name.start_with?('source-') }.length
     # The fetches come before the builds; the runtime build packs the hosted release,
     # whose EROFS image fsimg writes.
-    assert_equal %w[web-store oracle-jit oracle-emu fsimg runtime rc-oracle], NAMES.last(6)
+    assert_equal %w[web-modules oracle-jit oracle-emu fsimg runtime rc-oracle], NAMES.last(6)
   end
 
   def test_a_host_without_the_hosted_runtime_leaves_out_only_its_step
