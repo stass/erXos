@@ -55,3 +55,34 @@ test('a stopped machine marks the view stale within the ping interval', async ({
   // The record stays, marked, rather than vanish or pass for current.
   await expect(page.locator('main table')).toBeVisible();
 });
+
+test.describe('what the page says of values it cannot show', () => {
+  test.use({
+    record: machineRecord([
+      { key: text('uptime'), reporter: { tag: 'kernel' }, status: { tag: 'unsupported' }, value: { tag: 'list', items: [] } },
+      { key: text('used'), reporter: { tag: 'stopgap', name: 'liberx_pool' }, status: { tag: 'ok' }, value: { tag: 'int', digits: 7n } },
+    ]),
+  });
+
+  test('an unsupported value is explained and a stopgap reporter shows its scope', async ({ page }) => {
+    await page.goto('/');
+    const notes = page.locator('main .notes p');
+    await expect(notes).toHaveCount(2);
+    await expect(notes.nth(0)).toHaveText(/^\[unsupported\] kernel: the kernel interface does not report it/);
+    await expect(notes.nth(1)).toHaveText(/^stopgap liberx_pool \(root pool\): pages of the root's pool/);
+  });
+});
+
+test.describe('a record with nothing to explain', () => {
+  test.use({
+    record: machineRecord([
+      { key: text('cpus'), reporter: { tag: 'kernel' }, status: { tag: 'ok' }, value: { tag: 'int', digits: 4n } },
+    ]),
+  });
+
+  test('has no notes', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('main table tbody tr')).toHaveCount(1);
+    await expect(page.locator('main .notes')).toHaveCount(0);
+  });
+});

@@ -414,6 +414,18 @@ table.attrs td.reporter {
   white-space: nowrap;
 }
 
+/* What the table's unsupported values and stopgap reporters mean, in small print below it. */
+.notes {
+  margin: 14px 0 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.notes p {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+
 /* A value the last update changed comes in red and settles to the ink. */
 table.attrs tr.changed td.value {
   animation: settle 1200ms ease-out;

@@ -712,7 +712,13 @@ on a file of another kind, a path with a segment that is empty, hidden,
   whose page shows the trace stopped (W6).
 * **Views**: the record view, a table of attributes with name, value,
   unit and reporter, values whose status is not `ok` as their tokens, and
-  children as links (the grid shows the first 100 with a control for the rest; the front panel lights every child); the log and trace views, virtual lists of entries
+  children as links (the grid shows the first 100 with a control for the rest; the front panel lights every child); below the table
+  the page explains, in the client's own words, each status token the record
+  holds (an unsupported value by its reporter: the kernel interface, a
+  service or the runtime does not report it) and shows the generated scope
+  of each stopgap reporter the table names; the page shows a status's token
+  and never the datum sent with it, so these words are the client's fixed
+  text and claim no cause the status does not carry; the log and trace views, virtual lists of entries
   with gaps shown; the home page; the trace page, whose start button opens
   the `trace` view; the login page. A record's page is an operator's
   console: the path as a trail of links, a status strip whose colour band

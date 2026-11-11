@@ -23,7 +23,7 @@
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { type Reopenable, connect } from './connection.ts';
 import type { ByeReason, Name, WireRecord } from './generated/proto.ts';
-import { type Light, type Listing, type Panel, type Part, CHILDREN_SHOWN, childrenListing, crumbs, frontPanel, recordRows, shownChildren } from './record.ts';
+import { type Legend, type Light, type Listing, type Panel, type Part, type Scope, CHILDREN_SHOWN, childrenListing, crumbs, frontPanel, recordLegend, recordRows, recordScopes, shownChildren } from './record.ts';
 import { Route, hrefOf } from './routes.ts';
 import { Text } from './text.tsx';
 
@@ -147,6 +147,8 @@ function Strip({ seen, state }: { readonly seen: Seen; readonly state: ViewState
 function RecordView({ record, prior, updates }: { readonly record: WireRecord; readonly prior?: WireRecord; readonly updates: number }) {
   const panel = frontPanel(record, prior);
   const listing = childrenListing(record.path, record.children);
+  const legend = recordLegend(record);
+  const scopes = recordScopes(record);
   return (
     <>
       {(panel.attrs.length > 0 || panel.children.length > 0) && <FrontPanel panel={panel} mark={listing.mark} updates={updates} />}
@@ -167,9 +169,27 @@ function RecordView({ record, prior, updates }: { readonly record: WireRecord; r
             </tbody>
           </table>
         )}
+        {(legend.length > 0 || scopes.length > 0) && <Notes legend={legend} scopes={scopes} />}
         {(listing.names.length > 0 || listing.mark !== undefined) && <Children listing={listing} />}
       </section>
     </>
+  );
+}
+
+/*
+ * Below the table, what its unsupported and incomplete values mean and what
+ * each stopgap reporter it names sees: the client's own words, and the
+ * reporter's name, which the decoder admits only from the schema's generated
+ * names (printable ASCII), so none of it passes through Text.
+ */
+function Notes({ legend, scopes }: { readonly legend: readonly Legend[]; readonly scopes: readonly Scope[] }) {
+  return (
+    <section className="notes" aria-label="notes on the values">
+      {legend.map((entry, at) => (
+        <p key={`legend-${at}`}>{parts([entry.token])}{entry.reporter !== undefined && <> {entry.reporter}</>}: {entry.meaning}</p>
+      ))}
+      {scopes.map((note) => <p key={note.reporter}>{note.reporter} ({note.label}): {note.scope}</p>)}
+    </section>
   );
 }
 

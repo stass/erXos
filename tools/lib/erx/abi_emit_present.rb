@@ -196,8 +196,10 @@ module Erx
         [head, marks_function(inspection, marked), type_function(marked), ERLANG_CODE].join("\n")
       end
 
-      # The client's table: each presentation's marked path, a literal
-      # segment by its name and a variable one by its value type.
+      # The client's tables: each presentation's marked path, a literal
+      # segment by its name and a variable one by its value type, and each
+      # stopgap reporter's label and scope, which a renderer shows below a
+      # table that names the reporter (docs/design-live.md, "Inspection").
       def typescript(inspection)
         ts = TypeScript
         entries = inspection.paths.select(&:present).map do |path|
@@ -206,16 +208,24 @@ module Erx
           end
           [ts.string(path.present), "[#{segments.join(', ')}]"]
         end
+        notes = inspection.stopgaps.map do |name, stopgap|
+          [ts.string(name), "{ label: #{ts.string(stopgap.label)}, scope: #{ts.string(stopgap.scope)} }"]
+        end
         [
           ts.header(source: 'abi/inspection.txt', summary: <<~TEXT),
             The presentation types (docs/design-display.md, "Presentations"), the
             table erx_present holds: each presentation's marked path, whose
-            variable segments its canonical text fills in order, joined by "/".
+            variable segments its canonical text fills in order, joined by "/";
+            and the stopgap reporters' labels and scopes.
           TEXT
           "export type PresentSegment = { readonly literal: string } | { readonly variable: string };\n",
           "/* Each presentation's marked path, in declaration order. */\n" \
           "export const PRESENTATIONS: ReadonlyMap<string, readonly PresentSegment[]> = " \
-          "#{ts.map(entries, type: 'string, readonly PresentSegment[]')};\n"
+          "#{ts.map(entries, type: 'string, readonly PresentSegment[]')};\n",
+          "export type StopgapNote = { readonly label: string; readonly scope: string };\n",
+          "/* Each stopgap reporter's label and the scope of what it sees, by name. */\n" \
+          "export const STOPGAP_NOTES: ReadonlyMap<string, StopgapNote> = " \
+          "#{ts.map(notes, type: 'string, StopgapNote')};\n"
         ].join("\n")
       end
 

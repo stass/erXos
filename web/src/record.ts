@@ -22,6 +22,7 @@
  */
 
 import type { Attr, Children, Datum, Name, Path, Reporter, Status, WireRecord } from './generated/proto.ts';
+import { STOPGAP_NOTES } from './generated/present.ts';
 import { Route, pathRoute } from './routes.ts';
 import type { MachineText } from './text.ts';
 
@@ -39,6 +40,78 @@ export type Row = { readonly key: Name; readonly value: readonly Part[]; readonl
 
 export const recordRows = (record: WireRecord): Row[] =>
   record.attrs.map((attr: Attr) => ({ key: attr.key, value: valueParts(attr.status, attr.value), reporter: reporterLabel(attr.reporter) }));
+
+/*
+ * What the page tells of the values it cannot show, in the client's own words
+ * (the page shows a status's token, never the datum the machine sent with it):
+ * one entry for each status token the record holds, an unsupported value told
+ * apart by the reporter that says so, since who does not report it is what
+ * explains it. The tokens of the children's listing count too. Entries come in
+ * the order they first appear. The sentences claim only what the status itself
+ * says, never a cause: the kernel backing the interface, or the reason a
+ * reporter has no answer, is not on the wire.
+ */
+export type Legend = { readonly token: Part; readonly reporter: string | undefined; readonly meaning: string };
+
+type Seen = { readonly status: Status; readonly reporter: Reporter | undefined };
+
+export function recordLegend(record: WireRecord): Legend[] {
+  const listing = record.children.completeness;
+  const seen: Seen[] = [
+    ...record.attrs.map((attr) => ({ status: attr.status, reporter: attr.reporter })),
+    ...(listing === 'complete' ? [] : [{ status: { tag: listing } as Status, reporter: undefined }]),
+  ];
+  const entries = new Map<string, Legend>();
+  for (const { status, reporter } of seen) {
+    const key = status.tag === 'unsupported' ? `unsupported ${reporter === undefined ? '' : reporterLabel(reporter)}` : status.tag;
+    if (status.tag !== 'ok' && !entries.has(key)) {
+      entries.set(key, {
+        token: token(status.tag === 'timeout' ? '[timeout N]' : `[${status.tag}]`, status.tag),
+        reporter: status.tag === 'unsupported' && reporter !== undefined ? reporterLabel(reporter) : undefined,
+        meaning: meaning(status.tag, reporter),
+      });
+    }
+  }
+  return [...entries.values()];
+}
+
+/* A status other than ok in words; a reporter is given for an unsupported value, which always has one. */
+function meaning(status: Lamp, reporter: Reporter | undefined): string {
+  switch (status) {
+    case 'ok': return 'the value is known';
+    case 'partial': return 'incomplete, or counted over a different scope than its name says; see the reporter below';
+    case 'unknown': return 'the reporter could not determine it';
+    case 'timeout': return 'the reporter gave no answer within N milliseconds';
+    case 'error': return 'the reporter failed to read it';
+    case 'unsupported': return unsupportedBy(reporter);
+  }
+}
+
+function unsupportedBy(reporter: Reporter | undefined): string {
+  switch (reporter?.tag) {
+    case 'kernel': return 'the kernel interface does not report it';
+    case 'service': return 'the service does not provide it';
+    case 'runtime': return 'the runtime does not provide it';
+    case 'stopgap': return `the stopgap ${reporter.name} does not report it`;
+    case undefined: return 'the reporter does not provide it';
+  }
+}
+
+/*
+ * The scope of each stopgap reporter the record names, once each and in name
+ * order, as docs/design-web.md asks of the record view: the schema's label and
+ * what the reporter sees, from the generated table. The decoder admits only the
+ * names that table holds, so none is left out here.
+ */
+export type Scope = { readonly reporter: string; readonly label: string; readonly scope: string };
+
+export const recordScopes = (record: WireRecord): Scope[] =>
+  [...new Set(record.attrs.flatMap((attr) => (attr.reporter.tag === 'stopgap' ? [attr.reporter.name] : [])))]
+    .sort()
+    .flatMap((name) => {
+      const note = STOPGAP_NOTES.get(name);
+      return note === undefined ? [] : [{ reporter: `stopgap ${name}`, ...note }];
+    });
 
 /*
  * The children as the page lists them: the parts of each named child, each a

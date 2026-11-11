@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { type Attr, type Datum, type Status, type WireRecord, machineText } from '../src/generated/proto.ts';
-import { CHILDREN_SHOWN, type Listing, type Part, childrenListing, crumbs, frontPanel, recordRows, shownChildren } from '../src/record.ts';
+import { CHILDREN_SHOWN, type Listing, type Part, childrenListing, crumbs, frontPanel, recordLegend, recordRows, recordScopes, shownChildren } from '../src/record.ts';
 import { hrefOf, parseRoute } from '../src/routes.ts';
 import { escapedText } from '../src/text.ts';
 
@@ -185,4 +185,48 @@ test('the trail links every path above a page and the page itself', () => {
   assert.deepEqual(crumbs([]), []);
   assert.deepEqual(crumbs(['processes', '123']).map((crumb) => [crumb.name, hrefOf(crumb.route)]),
                    [['processes', '/proc/processes'], ['123', '/proc/processes/123']]);
+});
+
+test('an unsupported value is explained by its reporter, and a stopgap reporter shows its scope', () => {
+  const value: Datum = { tag: 'list', items: [] };
+  const named = record([
+    attr('used', { tag: 'unsupported' }, value),
+    attr('free', { tag: 'unsupported' }, value, { tag: 'runtime' }),
+    attr('size', { tag: 'unsupported' }, value),
+    attr('total', { tag: 'partial' }, value, { tag: 'stopgap', name: 'liberx_pool' }),
+    attr('pages', { tag: 'ok' }, { tag: 'int', digits: 3n }, { tag: 'stopgap', name: 'liberx_pool' }),
+  ], { completeness: 'partial', names: [] });
+  assert.deepEqual(recordLegend(named).map((entry) => [shown([entry.token]), entry.reporter, entry.meaning]), [
+    ['token:[unsupported]', 'kernel', 'the kernel interface does not report it'],
+    ['token:[unsupported]', 'runtime', 'the runtime does not provide it'],
+    ['token:[partial]', undefined, 'incomplete, or counted over a different scope than its name says; see the reporter below'],
+  ]);
+  const scopes = recordScopes(named);
+  assert.deepEqual(scopes.map((note) => [note.reporter, note.label]), [['stopgap liberx_pool', 'root pool']]);
+  assert.match(scopes[0]?.scope ?? '', /^pages of the root's pool/);
+});
+
+test('a record with no unsupported or incomplete value and no stopgap reporter has neither legend nor scope', () => {
+  const plain = record([attr('cpus', { tag: 'ok' }, { tag: 'int', digits: 4n }, { tag: 'service' })], { completeness: 'complete', names: [] });
+  assert.deepEqual(recordLegend(plain), []);
+  assert.deepEqual(recordScopes(plain), []);
+});
+
+test('each other status and an unsupported stopgap value have their own entry, in the order they appear', () => {
+  const value: Datum = { tag: 'list', items: [] };
+  const entries = recordLegend(record([
+    attr('a', { tag: 'timeout', ms: 500 }, value),
+    attr('b', { tag: 'unsupported' }, value, { tag: 'stopgap', name: 'liberx_pool' }),
+    attr('c', { tag: 'unsupported' }, value, { tag: 'service' }),
+    attr('d', { tag: 'error' }, value),
+    attr('e', { tag: 'timeout', ms: 9 }, value),
+  ], { completeness: 'unknown', names: [] }));
+  assert.deepEqual(entries.map((entry) => [shown([entry.token]), entry.reporter]), [
+    ['token:[timeout N]', undefined],
+    ['token:[unsupported]', 'stopgap liberx_pool'],
+    ['token:[unsupported]', 'service'],
+    ['token:[error]', undefined],
+    ['token:[unknown]', undefined],
+  ]);
+  assert.equal(entries[1]?.meaning, 'the stopgap liberx_pool does not report it');
 });
