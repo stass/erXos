@@ -2174,6 +2174,10 @@ it; git history is the record of completed work.
   (design-files.md, "Narrowing for a program"), and that a program started from the
   system shell does not inherit the control tree; `erx_devfs:start_link/0` unmounts
   whatever is at `/dev` before it mounts.
+* [Medium] devices, `erx_devfs`: it is a permanent child of `erx_domain_sup` (default
+  intensity, 1 restart in 5 s), so a bug that crashes the `/dev` grant twice within 5 s
+  ends the system domain and resets the machine. Move it under a supervisor whose end
+  the domain service survives, when the device service gets its own.
 * [Low] devices, `erx_devfs`: `/dev` shows only the block device. Its `status` has no
   `path` line, because the catalogue that reaches Erlang has no device-tree path, and
   its `driver` line is `[unknown]`, because no facet says which process drives a unit.
