@@ -9,8 +9,9 @@ named otherwise. It shows and changes nothing else: any further operand, an addr
 a parameter to set, is a usage error, since interfaces are configured by the network
 domain's configuration and DHCP, not from the shell.
 
-The state comes from the stack's read path, erx_net:interfaces/0, each interface's own
-answer; the command reads no table of the stack. Each interface is written in FreeBSD's
+The state comes from the domain's grant, its `interfaces` operation through
+erx_inet:call/1, which checks the answer (erx_sock_admit); the command calls no module of
+the stack and reads none of its tables. Each interface is written in FreeBSD's
 layout and order, one tab before each line after the first:
 
     vtnet0: flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
@@ -27,7 +28,7 @@ interface name is written through the field escape (erx_text:escape_field/1), al
 the stack's names are its own.
 
 A name no interface has is reported as FreeBSD reports it, `ifconfig: interface NAME does
-not exist`, with status 1; a stack that is not running is reported as `ifconfig: network
+not exist`, with status 1; a grant that does not answer is reported as `ifconfig: network
 stack: ...`, with status 1.
 
 The selection and the layout are a pure core, select/2, flags/1 and interface/1, which
@@ -43,6 +44,13 @@ the tests drive directly; run/2 asks the stack and writes the lines.
 
 -export([run/2]).
 -export([select/2, flags/1, interface/1]).
+
+-export_type([interface/0]).
+
+-doc "An interface as the grant's `interfaces` operation answers it, checked.".
+-type interface() :: #{name := binary(), lladdr := <<_:48>>, mtu := pos_integer(), link := up | down,
+                       config := static | dhcp,
+                       addrs := [#{addr := inet:ip_address(), plen := 0..128, broadcast => inet:ip4_address()}]}.
 
 %% FreeBSD's flag bits (net/if.h) and names (sbin/ifconfig/ifconfig.c IFFBITS), in bit order.
 -define(FLAG_BITS, [{up, 16#1, <<"UP">>}, {broadcast, 16#2, <<"BROADCAST">>},
@@ -62,7 +70,7 @@ run(Args, Ctx) ->
     end.
 
 show(Operands, Ctx) ->
-    case erx_net:interfaces() of
+    case erx_inet:call(interfaces) of
         {ok, Interfaces} ->
             case select(Operands, Interfaces) of
                 {ok, Selected} ->
@@ -83,35 +91,32 @@ show(Operands, Ctx) ->
 The interfaces an operand list selects: every one for none, the one named for a name, or
 `no_interface` with the name when none has it.
 """.
--spec select([binary()], [erx_net:interface()]) ->
-          {ok, [erx_net:interface()]} | {error, {no_interface, binary()}}.
+-spec select([binary()], [interface()]) ->
+          {ok, [interface()]} | {error, {no_interface, binary()}}.
 select([], Interfaces) ->
     {ok, Interfaces};
 select([Name], Interfaces) ->
-    case [I || #{name := N} = I <- Interfaces, name(N) =:= Name] of
+    case [I || #{name := N} = I <- Interfaces, N =:= Name] of
         [] -> {error, {no_interface, Name}};
         Found -> {ok, Found}
     end.
 
 -doc "The flags of an interface, by name in FreeBSD's bit order.".
--spec flags(erx_net:interface()) -> [atom()].
+-spec flags(interface()) -> [atom()].
 flags(#{link := Link}) ->
     [up, broadcast, running, simplex, multicast] ++ [lower_up || Link =:= up].
 
 -doc "The lines ifconfig writes for one interface.".
--spec interface(erx_net:interface()) -> iodata().
+-spec interface(interface()) -> iodata().
 interface(#{name := Name, lladdr := Lladdr, mtu := Mtu, link := Link, addrs := Addrs} = I) ->
     Flags = flags(I),
     Bits = lists:sum([Bit || {Flag, Bit, _} <- ?FLAG_BITS, lists:member(Flag, Flags)]),
     Names = [Text || {Flag, _, Text} <- ?FLAG_BITS, lists:member(Flag, Flags)],
-    [erx_text:escape_field(name(Name)), <<": flags=">>, hex(Bits, 1), $<,
+    [erx_text:escape_field(Name), <<": flags=">>, hex(Bits, 1), $<,
      lists:join($,, Names), <<"> metric 0 mtu ">>, integer_to_binary(Mtu), $\n,
      <<"\tether ">>, ether(Lladdr), $\n,
      [inet(A) || #{addr := {_, _, _, _}} = A <- Addrs],
      <<"\tstatus: ">>, status(Link), $\n].
-
-name(Name) when is_atom(Name) -> atom_to_binary(Name);
-name(Name) when is_binary(Name) -> Name.
 
 %% ether_ntoa's layout: lower-case hex, two digits each, separated by colons.
 ether(Lladdr) ->

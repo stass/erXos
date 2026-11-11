@@ -1448,6 +1448,17 @@ release starts `erx_net` as a `temporary` application, so the stack's end, a cra
 packet provokes included, is reported and ends neither the system domain nor the boot; a
 machine without the device boots the same, with no interface.
 
+While the stack runs there, the system domain's own grant is the one `erx_net` mints for its
+node at start, with the grantee `local`, and the system domain's `net` facet has the value
+`local` rather than that grant's pid (`erx_facets:facets/2`). The facets are computed once,
+when the system shell's session starts at boot, which may be before `erx_net` has started
+and registered its grant, and again never; a pid taken then could be missing or, after the
+stack restarts, a dead grant's. The facet only says that the domain holds `net`: commands
+such as `ifconfig` and `ping` gate on it, and reach the grant through `erx_net_client`'s
+`grant` key, which `erx_inet:call/1` alone reads at each call
+([design-network-stack.md](design-network-stack.md#the-grants-contract)), so a restarted
+stack's new grant is found as the old one was.
+
 `gpu` and `input` are values of the manifest's `mf_device_role` beside `network` and `block`, since
 the manifest check reasons about a display domain's devices by role
 ([design-system.md](design-system.md#the-manifest), property 9). A further kind of device is one more row.

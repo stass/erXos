@@ -906,6 +906,31 @@ it; git history is the record of completed work.
   network domain receives `{erx_origin, D, {udp, S, Ip, Port, Data}}`, which no stock
   `receive` matches. To build (1b-E P9b): `erx_gen_udp_core` and the datagram socket's side of
   the protocol, with the 128 KiB credit floor. Still missing on the TCP side:
+* [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb` (`program_directories`,
+  `memo_key`), `test/host/fiasco_test.rb`: `tools/erx build fiasco` stops in kconfig with
+  `gcc: not found`, because Fiasco's host tools build with `HOSTCC=gcc` and FreeBSD has no
+  `gcc`, so the port's cross GCC 11.3 is never reached; the build should name the host
+  compiler (`cc`, or the build's clang). `fiasco_test` fails there too: the port installs the
+  cross tools in `/usr/local/bin`, which is also on the caller's PATH, so the build PATH test
+  finds an ambient directory in it, and four reuse tests see a second build of an unchanged
+  fixture run 2 commands instead of none, with the memo key fingerprinting every program in
+  `/usr/local/bin` and every library in `/usr/local/lib`; why that key changes between two
+  builds is not yet known.
+* [High] network, `erx_net_client` (`erx_gen_udp`, `erx_gen_icmp`, `erx_gen_tcp`;
+  design-network-stack, "The socket process"): TCP has its socket process (`erx_gen_tcp`,
+  `erx_gen_tcp_core`) and the socket protocol; UDP and ICMP have not. `erx_gen_udp` and
+  `erx_gen_icmp` call the datagram and echo sockets directly with `gen_server:call`, which
+  `erx_udp_sock` and `erx_icmp_sock` take as plain calls, not through `erx_net_admit`, and
+  `erx_udp_sock` presents datagrams itself, so an owner outside the network domain receives
+  `{erx_origin, D, {udp, S, Ip, Port, Data}}`, which no stock `receive` matches, and an
+  enveloped call from another domain reaches their `handle_info` and is ignored. To build
+  (1b-E P9c): `erx_gen_udp` as a `gen_statem` socket process with `erx_gen_udp_core`, and the
+  datagram and echo sockets' side of the protocol, `{erx_net, Client, {call, N, Req}}`
+  admitted by `erx_net_admit:request/3` with a socket kind and `{datagram, Ip, Port, Data}`
+  pushes, with the 128 KiB credit floor; the `erx_net_admit` and `erx_sock_admit` fuzz targets
+  extended to their requests and pushes; and `erx_sock_admit:result/2` taking `{error,
+  Reason}` only from the request kind's closed list, where it now takes any reason for any
+  kind. Still missing on the TCP side:
   `listen/2` and `accept` (the listener's socket process), local `controlling_process/2`
   (`enotsup`), the packet modes and the `buffer`, `exit_on_close` and `show_econnreset`
   options, the schema-generated request validators, and `erxos/erx_net_client_erxos`
@@ -919,25 +944,6 @@ it; git history is the record of completed work.
   socket stays passive; only the first waiting recv gets a passive error's reason, the rest
   `closed` (stock's `async_error_am_all` gives all the reason); and re-arming after a recv
   met the end answers `{error, closed}` where stock sends `{tcp_closed, S}`.
-* [High] network, `erx_net_client` (`erx_gen_tcp:connect/4`, `erx_gen_udp:open/2`, `erx_inet`;
-  design-network-stack, "Untrusted input", "Answers from the grant"): the grant's answers
-  reach program code unchecked. `connect` and `open` return the grant's reply to their caller
-  as it came, the socket term included, and `erx_inet:grant/0` hands every backend the
-  grant's pid to call itself, so no one check stands between the network domain and the
-  caller. Once the grant is in another domain, a network domain can hand a program any term
-  as its socket, and a backend that later calls that term with `gen_server:call/3` follows
-  `{global, _}` and `{via, Module, _}` names as well as pids. The resolver loader matches
-  `{erx_net_resolver, Grant, Answer}` without its envelope, so a loader in another domain
-  drops every change and keeps its first answer, and it calls `watch_resolver` with a
-  5000 ms timeout where the design's build check allows only `infinity`. To build:
-  `erx_inet:call/1` in place of `grant/0`, as the one reader of the `grant` key and the one
-  caller of the grant, waiting with `infinity`; every answer through
-  `erx_sock_admit:answer/3` against the schema's reply type; an open's socket required to be
-  a pid of the grant's node; the resolver's answers and its change messages, in their
-  envelope with `D` the grant's, checked there too; and the build checks that only
-  `erx_inet` reads the key and that every call's timeout is `infinity`.
-  While the stack runs in the system domain the grant is the caller's own node's, so nothing
-  reaches the client from another domain yet.
 * [Medium] Fiasco backend, `liberx/backend/fiasco/service_task.c` (`erx_fiasco_task_create_body`):
   a create from a task other than the root is not refused, though the call table and the
   deferred table say `ERX_ENOTSUP` in 1b-A (docs/design-stopgap.md, `erx_space_create`), so a task with a fault
@@ -1177,8 +1183,7 @@ it; git history is the record of completed work.
   that keeps queued packets out of a crash report, as `erx_net_driver` has.
 * [Medium] network, TCP effect layer (E2, `erx_tcp_conn`, `erx_net_grant`, `erx_gen_tcp`): active
   opens over IPv4 only. Not yet: `listen`/`accept`, the syncache hand-off and a SYN reinjected from
-  TIME-WAIT (E3, counted `reinject`); `erx_net_admit` (the grant checks the connect request's
-  shape inline) and the grant's limits other than `buffers`, and its account (`erx_net_grant_core`
+  TIME-WAIT (E3, counted `reinject`); the grant's limits other than `buffers`, and its account (`erx_net_grant_core`
   holds only the buffer reservations); receive-buffer autosizing (`tcp_do_autorcvbuf`, a
   `reserve_buffer` for the receive side like the send side's); `exit_on_close` (a socket whose peer closed
   stays open until its owner closes it), `controlling_process/2` (`enotsup`), the packet modes,
@@ -4319,8 +4324,18 @@ to the corpus and follow rc
   specific binding first and the bind asks nothing of who holds the wildcard one; FreeBSD's
   `in_pcbbind_setup` refuses such a bind with `EADDRINUSE` when the wildcard socket belongs to
   another user. And a grant opens any number of sockets, since `erx_net_grant_core`'s limits are not
-  built, so one domain can hold every ephemeral port. Refuse a specific bind over another grant's
-  wildcard one, as FreeBSD does across users, and cap each grant's sockets with the grant's limits.
+  built, so one domain can hold every ephemeral port, or every ICMP echo identifier by repeated
+  `icmp_open`. Refuse a specific bind over another grant's wildcard one, as FreeBSD does across
+  users, and cap each grant's sockets with the grant's limits.
+* [Medium] network, supervision (`erlang/apps/erx_net/src/erx_net_sup.erl`): under `rest_for_one`,
+  the minted grants (`erx_net_grants`) and the mint come after `erx_net_tables`, the interfaces and
+  the local grant, so a restart of any of those ends every client domain's grant. Minted grants are
+  `temporary` and are not made again, and the restarted mint's `erx_facet:provide/2` comes after
+  the ready report, so it mints nothing more until the network domain restarts
+  (`erlang/apps/erx/src/erx_facet.erl`): one crash of the local grant would cut every client off the
+  network. Latent while the stack runs in the system domain, which mints for no domain. Put the local
+  grant after the mint, and settle in design-network-stack what a tables restart means for minted
+  grants, which subscribe to the tables in `init`: end the network domain, or re-subscribe them.
 * [Low] shell, `ping` (`erlang/apps/erx_shell/src/erx_cmd_ping.erl`): every session is root's, so ping
   takes `-s` up to 65507 and `-i` down to 1 ms for everyone. Once sessions have users, a non-root
   session gets FreeBSD's limits: `-s` at most 56 bytes and `-i` at least 1 s (ping.c's `uid` checks).

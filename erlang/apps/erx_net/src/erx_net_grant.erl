@@ -4,7 +4,19 @@
 -module(erx_net_grant).
 -moduledoc """
 A client domain's grant (docs/design-network-stack.md, "The grant's contract", "The
-grant"), as far as an active open, a datagram socket and name resolution need it.
+grant"), as far as an active open, a datagram socket, an echo socket, the interfaces and
+name resolution need it. Each grant serves one grantee: `local`, the stack's own domain,
+whose grant is registered as `erx_net_grant`, or a domain id, whose grant the network
+service's mint starts (erx_net:mint_grant/2).
+
+**Admission.** The grant acts on no message erx_net_admit:request/2 has not admitted:
+gen_server takes a bare call apart before handle_call/3 sees it, so the grant puts it back
+together and admits it as it came, and every other message it does not make for itself,
+an enveloped call among them, is admitted in handle_info/2. A message erx_net_admit
+leaves out (another domain's, or a call whose reply would go outside the grantee's
+domain) is dropped and counted; a call of the grantee's that is no operation's is
+answered `{error, badarg}` and counted. The owner of every socket the grant starts is the
+admitted call's caller.
 
 **Connect.** `{tcp_connect, inet, Ip, Port, Opts, Timeout}` starts the connection linked
 to the grant, with a generator split from its own, owned by the caller, its socket
@@ -17,9 +29,13 @@ A connection's demultiplexing entries are deleted by erx_net_tables, which watch
 the grant's place.
 
 **Open.** `{udp_open, inet, Local, Port, Opts}` starts a datagram socket (erx_udp_sock)
-linked to the grant and owned by the caller, which the socket monitors; `Local` is `any`
-or an IPv4 address, `Port` 0 for an ephemeral port, and `Opts` the gen_udp options the
-socket checks.
+owned by the caller, which the socket monitors; `Local` is `any` or an IPv4 address,
+`Port` 0 for an ephemeral port, and `Opts` the gen_udp options the socket checks.
+`{icmp_open, inet}` starts an echo socket (erx_icmp_sock) owned by the caller.
+
+**Interfaces.** `interfaces` answers `{ok, Interfaces}`, each interface's name, link-layer
+address, MTU, link state, configuration and addresses as erx_net:interfaces/0 gives them,
+which any holder of the grant may read, as FreeBSD's ifconfig shows them to any user.
 
 **Resolver.** `resolver` answers `{ok, #{nameservers := [{Ip, 53}], search :=
 [binary()]}}`, the name servers and search list of the interfaces' rows
@@ -46,15 +62,13 @@ gives both buffers back with `release_buffers/2` once it needs them no more, in 
 with its socket process gone, and its exit, by whatever means, releases what it still
 holds; an `'EXIT'` message naming a connection still alive is not its exit, and is ignored.
 
-Each request is checked here before anything acts on it, as `erx_net_admit:request/2`
-will check it: addresses and ports as `gen_tcp` and `gen_udp` give them, a list of
-options, a timeout, and the caller as owner. The grant's other limits and its account are
-not built: the grant admits every well-formed request whose buffers fit.
+The grant's other limits and its account are not built: the grant admits every
+well-formed request whose buffers fit.
 """.
 
 -behaviour(gen_server).
 
--export([start_link/2, reserve_buffer/4, release_buffers/2]).
+-export([start_link/2, reserve_buffer/4, release_buffers/2, counts/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -define(MAX_REQUEST, 64).
@@ -64,18 +78,24 @@ not built: the grant admits every well-formed request whose buffers fit.
 -define(DNS_PORT, 53).
 -define(MAXNS, 3).
 -define(MAXDNSRCH, 6).
--define(IS_BYTE(X), (is_integer(X) andalso X >= 0 andalso X =< 255)).
--define(IS_BYTE4(A, B, C, D), (?IS_BYTE(A) andalso ?IS_BYTE(B) andalso ?IS_BYTE(C) andalso ?IS_BYTE(D))).
--define(IS_IP4(T), (is_tuple(T) andalso tuple_size(T) =:= 4 andalso
-                    ?IS_BYTE4(element(1, T), element(2, T), element(3, T), element(4, T)))).
 
 -doc """
-Starts the grant of `Grantee`. The node's own grant, `local`, is registered as
-`erx_net_grant`, where erx_net:local_grant/0 finds it.
+Starts the grant of `Grantee`, `local` or a domain id. The node's own grant, `local`, is
+registered as `erx_net_grant`, where erx_net:local_grant/0 finds it.
 """.
--spec start_link(local, map()) -> {ok, pid()} | {error, term()}.
+-spec start_link(local | pos_integer(), map()) -> {ok, pid()} | {error, term()}.
 start_link(local, Limits) when is_map(Limits) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, {local, Limits}, []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, {local, Limits}, []);
+start_link(Grantee, Limits) when is_integer(Grantee), Grantee > 0, is_map(Limits) ->
+    gen_server:start_link(?MODULE, {Grantee, Limits}, []).
+
+-doc """
+The messages the grant has left out (`unknown`) and the calls it refused (`refused`),
+asked by a process of its own node.
+""".
+-spec counts(pid()) -> #{unknown := non_neg_integer(), refused := non_neg_integer()}.
+counts(Grant) ->
+    gen_server:call(Grant, counts, infinity).
 
 -doc """
 Asks the grant to let the calling connection, whose start carried `Token`, hold `Bytes` of
@@ -101,13 +121,41 @@ init({Grantee, Limits}) ->
     ok = (erx_net_sup:runtime()):serve(?MAX_REQUEST),
     ok = erx_net_tables:watch_resolver(self()),
     {ok, #{grantee => Grantee, limits => Limits, gen => erx_net_rand:new(erx_net_clock:entropy(16)), callers => #{},
-           buffers => erx_net_grant_core:new(Limits), subscriber => none, resolver => none}}.
+           buffers => erx_net_grant_core:new(Limits), subscriber => none, resolver => none,
+           unknown => 0, refused => 0}}.
 
+%% gen_server took a bare call apart; it is put back together, so the grant admits every
+%% call as it came.
 -doc false.
-handle_call({tcp_connect, inet, {A, B, C, D}, Port, Opts, Timeout}, {Owner, _} = From,
-            #{grantee := Grantee, gen := Gen0, callers := Callers, buffers := Buffers0} = S)
-  when ?IS_BYTE4(A, B, C, D), is_integer(Port), Port > 0, Port =< 16#ffff, is_list(Opts),
-       Timeout =:= infinity orelse (is_integer(Timeout) andalso Timeout >= 0) ->
+handle_call(Request, From, S) ->
+    admit({'$gen_call', From, Request}, S).
+
+%% Acts on a message as erx_net_admit:request/2 admitted it. The reply goes out by
+%% gen_server:reply/2 whichever callback took the message, since handle_info/2 has no
+%% reply of its own.
+admit(Message, #{grantee := Grantee} = S0) ->
+    case erx_net_admit:request(Message, Grantee) of
+        {ok, Request, From} ->
+            case act(Request, From, S0) of
+                {reply, Reply, S} ->
+                    gen_server:reply(From, Reply),
+                    {noreply, S};
+                {noreply, _} = NoReply ->
+                    NoReply
+            end;
+        {refused, shape, From} ->
+            gen_server:reply(From, {error, badarg}),
+            {noreply, count(refused, S0)};
+        unknown ->
+            {noreply, count(unknown, S0)}
+    end.
+
+count(Key, S) ->
+    maps:update_with(Key, fun(N) -> N + 1 end, S).
+
+%% An admitted request: answered, or answered later by what it started.
+act({tcp_connect, inet, {A, B, C, D}, Port, Opts, Timeout}, {Owner, _} = From,
+    #{grantee := Grantee, gen := Gen0, callers := Callers, buffers := Buffers0} = S) ->
     Initial = #{snd => ?SNDBUF, rcv => ?RCVBUF},
     case erx_net_grant_core:room(Buffers0) >= ?SNDBUF + ?RCVBUF of
         false ->
@@ -128,33 +176,33 @@ handle_call({tcp_connect, inet, {A, B, C, D}, Port, Opts, Timeout}, {Owner, _} =
                     {reply, {error, Reason}, S#{gen := Gen}}
             end
     end;
-handle_call({reserve_buffer, Token, Kind, Bytes}, {Conn, _}, #{buffers := Buffers0} = S)
-  when is_reference(Token), (Kind =:= snd orelse Kind =:= rcv), is_integer(Bytes), Bytes >= 0 ->
+act({reserve_buffer, Token, Kind, Bytes}, {Conn, _}, #{buffers := Buffers0} = S) ->
     case erx_net_grant_core:reserve(Conn, Token, Kind, Bytes, Buffers0) of
         {ok, Buffers} -> {reply, ok, S#{buffers := Buffers}};
         {error, _} = Error -> {reply, Error, S}
     end;
-handle_call({release_buffers, Token}, {Conn, _}, #{buffers := Buffers0} = S)
-  when is_reference(Token) ->
+act({release_buffers, Token}, {Conn, _}, #{buffers := Buffers0} = S) ->
     case erx_net_grant_core:release(Conn, Token, Buffers0) of
         {ok, Buffers} -> {reply, ok, S#{buffers := Buffers}};
         {error, _} = Error -> {reply, Error, S}
     end;
-handle_call({udp_open, inet, Local, Port, Opts}, {Owner, _}, S)
-  when (Local =:= any orelse ?IS_IP4(Local)), is_integer(Port), Port >= 0, Port =< 16#ffff,
-       is_list(Opts) ->
+act({udp_open, inet, Local, Port, Opts}, {Owner, _}, S) ->
     Reply = case erx_udp_sock:options(Opts) of
                 {ok, SockOpts} -> erx_udp_sock:open(Port, SockOpts#{ip => Local, owner => Owner});
                 {error, _} = Error -> Error
             end,
     {reply, Reply, S};
-handle_call(resolver, _From, S) ->
+act({icmp_open, inet}, {Owner, _}, S) ->
+    {reply, erx_icmp_sock:open(#{owner => Owner}), S};
+act(counts, _From, #{unknown := Unknown, refused := Refused} = S) ->
+    {reply, #{unknown => Unknown, refused => Refused}, S};
+act(interfaces, _From, S) ->
+    {reply, interfaces(), S};
+act(resolver, _From, S) ->
     {reply, {ok, resolver()}, S};
-handle_call(watch_resolver, {Pid, _}, #{subscriber := Old} = S) ->
+act(watch_resolver, {Pid, _}, #{subscriber := Old} = S) ->
     Resolver = resolver(),
-    {reply, {ok, Resolver}, S#{subscriber := subscribe(Pid, Old), resolver := Resolver}};
-handle_call(_Request, _From, S) ->
-    {reply, {error, badarg}, S}.
+    {reply, {ok, Resolver}, S#{subscriber := subscribe(Pid, Old), resolver := Resolver}}.
 
 -doc false.
 handle_cast(_Msg, S) ->
@@ -189,8 +237,20 @@ handle_info({'EXIT', Conn, _Reason}, #{callers := Callers0, buffers := Buffers} 
                     {noreply, S}
             end
     end;
-handle_info(_Msg, S) ->
-    {noreply, S}.
+handle_info(Message, S) ->
+    admit(Message, S).
+
+%% The interfaces as the `interfaces` operation shows them: what ifconfig prints, and not
+%% the routes and resolver servers, which the resolver operation answers.
+interfaces() ->
+    case erx_net:interfaces() of
+        {ok, Ifs} -> {ok, [(maps:with([lladdr, mtu, link, config, addrs], If))#{name => name(Name)}
+                           || #{name := Name} = If <- Ifs]};
+        {error, _} = Error -> Error
+    end.
+
+name(Name) when is_atom(Name) -> atom_to_binary(Name);
+name(Name) when is_binary(Name) -> Name.
 
 %% The resolver operation's answer: the interfaces' name servers and search lists, in the
 %% order of the interfaces' names, repeats dropped, cut to resolv.conf's limits, three

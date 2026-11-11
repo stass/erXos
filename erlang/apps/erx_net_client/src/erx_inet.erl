@@ -66,14 +66,17 @@ servers included, is loaded. A name that passes holds no byte a terminal acts on
 -doc "A request of the grant, each operation's as the grant takes it.".
 -type request() :: {tcp_connect, inet, inet:ip4_address(), inet:port_number(), [term()], timeout()}
                  | {udp_open, inet, any | inet:ip4_address(), inet:port_number(), [term()]}
+                 | {icmp_open, inet}
+                 | interfaces
                  | resolver
                  | watch_resolver.
 
 -doc """
 Calls the grant with `Request` and answers its reply as erx_sock_admit admitted it: an
-open's `{ok, Pid}`, a resolver's `{ok, resolver()}`, or `{error, Reason}`.
+open's `{ok, Pid}`, the interfaces' `{ok, [map()]}`, a resolver's `{ok, resolver()}`, or
+`{error, Reason}`.
 """.
--spec call(request()) -> {ok, pid() | resolver()} | {error, term()}.
+-spec call(request()) -> {ok, pid() | [map()] | resolver()} | {error, term()}.
 call(Request) ->
     case find() of
         {ok, Grant, _Origin} -> ask(Grant, Request);

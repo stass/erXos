@@ -3746,21 +3746,47 @@ the runtime seam nor the facet machinery changes them:
   admission path before any step sees it:
 
   ```erlang
+  %% A message to a grant.
   erx_net_admit:request(Msg :: term(), Grantee :: local | pos_integer()) ->
-      {ok, Request :: term(), ReplyTo :: pid()} | {refuse, Reason :: term()}.
+      {ok, Request :: term(), From :: gen_server:from()}
+    | {refused, shape, From :: gen_server:from()}
+    | unknown.
+  %% A message to a socket whose socket process is SockProc.
+  erx_net_admit:request(Grantee :: local | pos_integer(), SockProc :: pid() | none,
+                        Msg :: term()) ->
+      {ok, Body :: term()} | {refused, shape} | unknown.
   ```
 
   A message wrapped as `{erx_origin, D, Inner}` comes from domain `D`; a
   message without an envelope comes from the receiver's own domain,
   `local` ([design-domains.md](design-domains.md#facets)). The origin
-  must be the grantee; `Inner` must be a request of
-  `abi/services/net.txt`, within the bounds the schema declares for each
-  argument ([Message sizes](#message-sizes)); and the reply target, and
-  any socket process a request names, must be a pid of the grantee's
-  domain. A refused request is answered `{error, badarg}` and counted, as a
-  facet refuses ([design-domains.md](design-domains.md#facets)). A socket
-  then also requires `ReplyTo` to be its own socket process
-  ([Sockets act for one domain](#sockets-act-for-one-domain)).
+  must be the grantee, and a grant's message must be a call,
+  `{'$gen_call', From, Request}`, whose reply goes to the grantee's domain:
+  `From` is `{Pid, [alias | Alias]}`, and both `Pid` and `Alias` carry the
+  grantee's domain id
+  ([design-domains.md](design-domains.md#domain-ids-pids-and-references)),
+  since `gen:reply/2` sends to the alias rather than to the pid, as a
+  facet requires of its caller
+  ([design-domains.md](design-domains.md#facets)); a message without an
+  envelope needs only a pid of the grant's node; a
+  socket's must name that socket's own socket process as its sender
+  ([Sockets act for one domain](#sockets-act-for-one-domain)). A message
+  that fails either is `unknown`: dropped and counted, and answered to no
+  one, since its reply would go to a party outside the grantee's domain
+  or to no socket process of the socket. `Request` must then be a request
+  of `abi/services/net.txt`, within the bounds the schema declares for
+  each argument ([Message sizes](#message-sizes)); one that is not is
+  refused for its shape, answered `{error, badarg}` and counted, as a
+  facet refuses ([design-domains.md](design-domains.md#facets)). The
+  admitted request comes back with its caller, and the caller is the
+  owner of what the request opens: no request names an owner of its own,
+  so no request can make a socket serve a process of another domain. The
+  stack's own calls of a grant (a connection's reservation and release of
+  its buffers, and the grant's counts) are admitted only without an
+  envelope and from a process of the grant's node. The mint has the same
+  path, `erx_net_admit:mint/2`, which takes only `{erx_facet_mint, Tag,
+  net, Grantee, Limits}` in the system domain's envelope
+  ([design-system.md](design-system.md#facets-a-configured-domain-serves)).
   `erx_net_admit` is generated from the schema into the app's build
   output, the one generated module `erx_net` needs; an app taken out of
   the tree carries that output with it. Until the schema generator
@@ -3896,12 +3922,14 @@ The client side is the application `erx_net_client`, in
 `erx` and a node outside erXos runs beside `erx_net`: `erx_gen_tcp` and
 `erx_gen_udp`, the socket backends, each the stubs `gen_tcp`, `gen_udp`
 and `inet` call and the `gen_statem` of its socket process;
+`erx_gen_icmp`, the echo socket's backend, which `ping` uses, with a
+socket process of the same shape;
 `erx_gen_tcp_core` and `erx_gen_udp_core`, the pure presentation step
 each socket process runs; `erx_sock_admit`, the check of every message
 the client side takes from the network domain, a socket's push or the
 grant's answer; and `erx_inet`, the one path to the grant, `call/1`,
-which the socket processes and `inet:getifaddrs/0` use, and the
-resolver loader. It depends on
+which the socket processes, `inet:getifaddrs/0` and `ifconfig` use,
+and the resolver loader. It depends on
 `kernel` and `stdlib` alone, and its one call into erXos is its `grant`
 key's, through `erxos/erx_net_client_erxos`
 ([Two places, four seams](#two-places-four-seams)).
@@ -4197,7 +4225,8 @@ socket for the rest.
 | `gen_udp:recv/2,3` | from the datagrams it holds, waiting until the deadline, behind any earlier `recv` | none | none |
 | `inet:setopts/2`, `inet:getopts/2` | its own options locally, the rest forwarded ([Options](#options)) | `{setopts, Opts}`, `{getopts, Names}` for the socket's options | socket |
 | `inet:peername/1`, `inet:sockname/1`, `inet:port/1`, `inet:getstat/2` | forwarded | `peername`, `sockname`, `{getstat, Names}` | socket |
-| `inet:getifaddrs/0`, `inet:gethostname/0` | no socket process: the caller calls the grant through `erx_inet:call/1`, which admits the answer ([Untrusted input](#untrusted-input)) | `getifaddrs`, `hostname` | grant |
+| `inet:getifaddrs/0`, `inet:gethostname/0`, `ifconfig` | no socket process: the caller calls the grant through `erx_inet:call/1`, which admits the answer ([Untrusted input](#untrusted-input)); `inet:getifaddrs/0` builds its answer from the interfaces' records | `interfaces`, `hostname` | grant |
+| `erx_gen_icmp:open/0`, which `ping` uses | started by the stub, owned by the caller | `{icmp_open, Family}` | grant |
 
 A socket closes when its owner exits, as a `gen_tcp` socket does: the
 socket process monitors its owner. The pushed messages are stock's:
@@ -4831,9 +4860,11 @@ a call, and the loader tries again only when it finds no grant or the
 grant ends. What it admits:
 
 * an open's `{ok, Socket}`: `Socket` a pid of the grant's node;
-* `getifaddrs`: interface names of 1 to 15 bytes, FreeBSD's `IFNAMSIZ`,
-  of letters, digits, `.`, `-` and `_`; well-formed addresses; flags
-  from `inet`'s closed list;
+* `interfaces`: at most 64 interfaces, each rebuilt from the keys
+  `ifconfig` shows and nothing else: a name of 1 to 15 bytes, FreeBSD's
+  `IFNAMSIZ`, of letters, digits, `.`, `-` and `_`; a six-byte
+  link-layer address; an MTU; the link state; the configuration; and at
+  most 64 well-formed addresses with their prefix lengths;
 * `hostname`: a name of labels as FreeBSD's `res_hnok` admits;
 * `resolver` and `watch_resolver`: a map of at most three IPv4 name
   servers on port 53 and at most six search domains, the check
@@ -5818,7 +5849,7 @@ connection's pid, sends the socket process crafted
 the owner; and a process of the owner's domain other than the socket
 process sends the connection a well-formed request, which must have no
 effect. A test grant that lies answers an open with a pid of the third
-domain and `getifaddrs` with an interface name that holds an escape
+domain and `interfaces` with an interface name that holds an escape
 byte; each call must answer `{error, badarg}`.
 
 *Seeded failures:* an `erx_sock_admit` that takes `{erx_origin, _, Inner}`

@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require_relative 'device_callers'
+require_relative 'origin_unwraps'
 
 module Erx
   # The build checks of the network stack's application, erx_net
@@ -40,14 +41,19 @@ module Erx
   #   list_to_binary/1, binary:copy/1,2, binary:list_to_bin/1 or
   #   erlang:iolist_to_iovec/1 only in the functions COPY_SITES lists, so a
   #   payload byte is copied only where the fast path's design says
-  #   (docs/design-network-fastpath.md, "Copies").
+  #   (docs/design-network-fastpath.md, "Copies");
+  # * origin: in erx_net and erx_net_client, only erx_net_admit and
+  #   erx_sock_admit name the atom erx_origin, bare or quoted, so only they take
+  #   apart the envelope of a message from another domain (D18).
   #
   # Like DeviceCallers these read the source text with comments removed, and
   # catch a slip, not a determined bypass that builds a name from pieces. The
   # atoms check keeps strings and quoted atoms, since `apply(erlang,
   # 'list_to_atom', ...)` names the function as surely as a call does; the
   # seq-wrap check blanks them, since a literal inside a string is no
-  # arithmetic. The call-timeout check splits a call's arguments at the commas
+  # arithmetic. The origin check reads code as OriginUnwraps does, comments and
+  # strings gone and quoted atoms kept, so a module's documentation may name the
+  # envelope. The call-timeout check splits a call's arguments at the commas
   # outside brackets, so a call holding a `fun` or `case` with a comma among
   # its arguments is refused rather than misread.
   module NetChecks
@@ -85,6 +91,10 @@ module Erx
     # A left shift of an integer literal, through any spacing or line break
     # and an optional parenthesis.
     SHIFT = /\bbsl\b\s*\(?\s*(?=\d)/
+
+    # The modules that may name the envelope of a message from another domain,
+    # one on each side of the stack (design-network-stack.md, "Build checks").
+    ORIGIN_OWNERS = %W[#{APPLICATION}/src/erx_net_admit.erl #{CLIENT_APPLICATION}/src/erx_sock_admit.erl].freeze
 
     # The one client module that reads the application's environment, and so
     # the `grant` key (design-network-stack.md, "Answers from the grant").
@@ -146,7 +156,20 @@ module Erx
       client = files.select { |path, _| File.fnmatch?(CLIENT_SCOPE, path, GLOB_FLAGS) }
       [*atom_violations(sources), *random_violations(sources), *seq_violations(sources),
        *notice_violations(sources, notice: files[NOTICE]), *grant_key_violations(client),
-       *call_timeout_violations(sources.merge(client)), *copy_violations(sources.merge(client))]
+       *call_timeout_violations(sources.merge(client)), *copy_violations(sources.merge(client)),
+       *origin_violations(sources.merge(client))]
+    end
+
+    def origin_violations(sources)
+      sources.reject { |path, _| ORIGIN_OWNERS.include?(path) }.flat_map do |path, text|
+        OriginUnwraps.code_text(text).each_line.with_index(1).filter_map do |line, number|
+          next unless line.match?(OriginUnwraps::ENVELOPE)
+
+          Violation.new(rule: 'origin', path: path, line: number,
+                        detail: "erx_origin outside #{ORIGIN_OWNERS.map { |owner| File.basename(owner, '.erl') }.join(' and ')}: " \
+                                'only they take apart the envelope of a message from another domain')
+        end
+      end
     end
 
     def copy_violations(sources)

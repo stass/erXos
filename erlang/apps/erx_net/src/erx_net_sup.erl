@@ -85,8 +85,14 @@ init({stack, Interfaces}) ->
     Children = [#{id => erx_net_tables, start => {erx_net_tables, start_link, []}},
                 #{id => interfaces, type => supervisor,
                   start => {supervisor, start_link, [?MODULE, {interfaces, Interfaces}]}},
-                #{id => grant, start => {runtime(), start_grant, [local, #{}]}}],
+                #{id => grant, start => {runtime(), start_grant, [local, #{}]}},
+                #{id => grants, type => supervisor,
+                  start => {supervisor, start_link, [{local, erx_net_grants}, ?MODULE, grants]}},
+                #{id => mint, start => {runtime(), start_mint, []}}],
     {ok, {#{strategy => rest_for_one}, Children}};
+init(grants) ->
+    Grant = #{id => grant, start => {runtime(), start_grant, []}, restart => temporary},
+    {ok, {#{strategy => simple_one_for_one}, [Grant]}};
 init({interfaces, Interfaces}) ->
     Children = [#{id => Name, type => supervisor, start => {?MODULE, start_link_sup, [If]}}
                 || #{name := Name} = If <- Interfaces],

@@ -8,6 +8,9 @@ development host", "Addresses and routes"):
 
 * `local_grant/0` is what `erx_net_client`'s `grant` key names on a node that runs the
   stack itself, `{erx_net, local_grant, []}`;
+* `mint_grant/2` starts the grant of another domain, the one function the network
+  service's mint calls when the system domain introduces a client ("The grant's
+  contract");
 * `interfaces/0` is the read path of netadmin's view of the interfaces, which `ifconfig`
   shows and the resolver reads its name servers from: each interface's own `status`
   answer (erx_net_if_core), in `inet`'s address forms. Each interface answers for itself,
@@ -16,7 +19,7 @@ development host", "Addresses and routes"):
   out, since it no longer exists.
 """.
 
--export([local_grant/0, interfaces/0]).
+-export([local_grant/0, mint_grant/2, interfaces/0]).
 
 -export_type([interface/0]).
 
@@ -42,6 +45,15 @@ local_grant() ->
         undefined -> {error, enotconn};
         Pid -> {ok, Pid, local}
     end.
+
+-doc """
+Starts the grant of the domain `Grantee` within `Limits`, through the runtime's
+start_grant/2, under the stack's grant supervisor: a grant is never restarted, since the
+domain service grants a domain again only when either domain restarts.
+""".
+-spec mint_grant(pos_integer(), map()) -> {ok, pid()} | {error, term()}.
+mint_grant(Grantee, Limits) when is_integer(Grantee), Grantee > 0, is_map(Limits) ->
+    supervisor:start_child(erx_net_grants, [Grantee, Limits]).
 
 -doc "Every interface, in the order of their names; `enotconn` when the stack is not running.".
 -spec interfaces() -> {ok, [interface()]} | {error, enotconn}.

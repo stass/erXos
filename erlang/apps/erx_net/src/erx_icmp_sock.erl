@@ -28,12 +28,17 @@ part, as it is ping's.
 **Sending.** `send/4` builds an echo request with the socket's identifier, the given
 sequence number and data, over the path the current configuration gives
 (`erx_net_frame:path/3`, `ip/4`) with the TTL asked for, and sends it through erx_net_tx.
-A full transmit path answers `{error, enobufs}`. As FreeBSD's `rip_output` does, a request
+A full transmit path answers `{error, enobufs}`. Each request is checked for its shape: an
+address, a sequence number, the data as a binary and a TTL; anything else is answered
+`{error, einval}`. The socket takes plain calls only, so an enveloped call of another
+domain reaches handle_info/2 and is dropped; taking its requests through erx_net_admit, as
+a TCP connection does, is TODO.md's item on the socket protocol for UDP and ICMP. As FreeBSD's `rip_output` does, a request
 may go to a broadcast address.
 
 **Ending.** The socket monitors its owner and ends with it, giving up its identifier;
-`close/1` does the same at once. As with erx_udp_sock, erx_net_tables watches it in the
-grant's place, since the socket belongs to no grant.
+`close/1` does the same at once. A program opens it through its grant (`icmp_open`),
+which links it; as with erx_udp_sock, erx_net_tables watches it in the grant's place,
+since the grant's account is not built.
 """.
 
 -behaviour(gen_server).
@@ -52,6 +57,8 @@ grant's place, since the socket belongs to no grant.
 -define(IP_HDR_LEN, 20).
 -define(ICMP_MINLEN, 8).
 -define(IP_MAXPACKET, 16#ffff).
+%% A recv's timeout: `infinity`, or at most the longest timer, 4294967295 ms.
+-define(IS_TIMEOUT(T), (T =:= infinity orelse (is_integer(T) andalso T >= 0 andalso T =< 4294967295))).
 
 -record(state, {owner :: reference(),
                 ident :: 0..16#ffff,
@@ -62,19 +69,20 @@ grant's place, since the socket belongs to no grant.
                 config = none :: none | {non_neg_integer(), erx_net_frame:snapshot()},
                 armed = infinity :: erx_net_clock:armed()}).
 
--type options() :: #{limit => pos_integer()}.
+-type options() :: #{limit => pos_integer(), owner => pid()}.
 -type send_options() :: #{ttl => 1..255}.
 -type reply() :: {inet:ip4_address(), Ttl :: 0..255, Seq :: 0..16#ffff, Data :: binary()}.
 
 %% --- API -------------------------------------------------------------------------
 
 -doc """
-Opens an echo socket for the calling process, which it monitors. Option: `limit`, the
-replies that may wait for `recv/2` (16 when absent).
+Opens an echo socket linked to the calling process. Options: `limit`, the replies that may
+wait for `recv/2` (16 when absent), and `owner`, the process the socket monitors and ends
+with (the caller when absent).
 """.
 -spec open(options()) -> {ok, pid()} | {error, term()}.
 open(Opts) when is_map(Opts) ->
-    gen_server:start(?MODULE, {self(), Opts}, []).
+    gen_server:start_link(?MODULE, {maps:get(owner, Opts, self()), Opts}, []).
 
 -doc """
 Sends an echo request with sequence number `Seq` and `Data` to `Ip`, with the TTL
@@ -82,9 +90,9 @@ Sends an echo request with sequence number `Seq` and `Data` to `Ip`, with the TT
 """.
 -spec send(pid(), inet:ip4_address(), 0..16#ffff, #{data := iodata(), ttl => 1..255}) ->
           ok | {error, term()}.
-send(Sock, {_, _, _, _} = Ip, Seq, #{data := _} = Opts)
+send(Sock, {_, _, _, _} = Ip, Seq, #{data := Data} = Opts)
   when is_integer(Seq), Seq >= 0, Seq =< 16#ffff ->
-    gen_server:call(Sock, {send, addr(Ip), Seq, Opts}, infinity).
+    gen_server:call(Sock, {send, addr(Ip), Seq, (maps:with([ttl], Opts))#{data => iolist_to_binary(Data)}}, infinity).
 
 -doc """
 Takes the next echo reply that carries the socket's identifier, waiting at most `Timeout`
@@ -115,12 +123,18 @@ init({Owner, Opts}) ->
     end.
 
 -doc false.
-handle_call({send, Dst, Seq, Opts}, _From, S0) ->
-    {Reply, S} = transmit(Dst, Seq, Opts, configured(S0)),
-    {reply, Reply, S};
-handle_call({recv, _Timeout}, _From, #state{waiter = {_, _}} = S) ->
+handle_call({send, <<_:32>> = Dst, Seq, #{data := Data} = Opts}, _From, S0)
+  when is_integer(Seq), Seq >= 0, Seq =< 16#ffff, is_binary(Data) ->
+    case send_options(Opts) of
+        true ->
+            {Reply, S} = transmit(Dst, Seq, Opts, configured(S0)),
+            {reply, Reply, S};
+        false ->
+            {reply, {error, einval}, S0}
+    end;
+handle_call({recv, Timeout}, _From, #state{waiter = {_, _}} = S) when ?IS_TIMEOUT(Timeout) ->
     {reply, {error, einval}, S};
-handle_call({recv, Timeout}, From, S) ->
+handle_call({recv, Timeout}, From, S) when ?IS_TIMEOUT(Timeout) ->
     Deadline = case Timeout of
                    infinity -> infinity;
                    Ms -> erx_net_clock:now() + Ms * 1000
@@ -128,7 +142,15 @@ handle_call({recv, Timeout}, From, S) ->
     {noreply, arm(serve(S#state{waiter = {From, Deadline}}))};
 handle_call(close, _From, #state{ident = Ident} = S) ->
     ok = erx_net_bind:delete(key(Ident)),
-    {stop, normal, ok, S}.
+    {stop, normal, ok, S};
+handle_call(_Request, _From, S) ->
+    {reply, {error, einval}, S}.
+
+%% A send's options: the data alone, or the data and a TTL from 1 to 255.
+send_options(#{ttl := Ttl} = Opts) ->
+    map_size(Opts) =:= 2 andalso is_integer(Ttl) andalso Ttl >= 1 andalso Ttl =< 255;
+send_options(Opts) ->
+    map_size(Opts) =:= 1.
 
 -doc false.
 handle_cast(_Msg, S) ->

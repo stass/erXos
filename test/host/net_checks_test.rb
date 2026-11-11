@@ -186,6 +186,27 @@ class NetChecksTest < Minitest::Test
     assert_empty source_rules("#{SRC}/erx_net_app.erl", 'application:get_env(erx_net, interfaces)')
   end
 
+  # The design's seeded failure: a handler in a socket module that matches the
+  # envelope of a message from another domain itself.
+  def test_the_envelope_fails_outside_the_two_admission_modules
+    body = 'handle_info({erx_origin, _, _}, S) -> {noreply, S}.'
+    assert_equal [['origin', 2]], source_rules("#{SRC}/erx_udp_sock.erl", body)
+    assert_equal [['origin', 2]], source_rules('erlang/apps/erx_net/erxos/erx_net_erxos.erl', body)
+    assert_equal [['origin', 3]], source_rules("#{CLIENT}/erx_gen_udp.erl", "a() -> ok.\nb(M) -> M =:= 'erx_origin'.")
+    # Each admission module is the owner on its own side only.
+    assert_equal [['origin', 2]], source_rules("#{SRC}/erx_sock_admit.erl", body)
+    assert_equal [['origin', 2]], source_rules("#{CLIENT}/erx_net_admit.erl", body)
+  end
+
+  def test_the_envelope_passes_in_the_admission_modules_comments_and_strings
+    body = 'handle_info({erx_origin, D, M}, S) -> admit(D, M, S).'
+    assert_empty source_rules("#{SRC}/erx_net_admit.erl", body)
+    assert_empty source_rules("#{CLIENT}/erx_sock_admit.erl", body)
+    doc = "-moduledoc \"\"\"\nTakes `{erx_origin, D, Msg}`.\n\"\"\".\n%% erx_origin is the envelope\nx() -> \"erx_origin\", my_erx_origin."
+    assert_empty source_rules("#{SRC}/erx_udp_sock.erl", doc)
+    assert_empty source_rules("#{CLIENT}/erx_inet.erl", doc)
+  end
+
   # The design's seeded failure: the resolver loader's watch_resolver call
   # with a timeout of 5000 ms.
   def test_calls_without_the_literal_infinity_fail

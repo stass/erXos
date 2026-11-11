@@ -31,7 +31,7 @@ the 1024 sequence numbers it remembers. Under 8 data bytes there is no room for 
 time, and, as on FreeBSD, no reply shows a time and no round-trip line is written. The
 status is 0 when a reply came and 2 when none did.
 
-Matching. The echo socket (erx_icmp_sock) hands this command only the replies that carry
+Matching. The echo socket, which the domain's grant opens (erx_gen_icmp), hands this command only the replies that carry
 its identifier, at most 16 waiting. This command matches the sequence number: a reply
 counts only when it carries a sequence number this ping sent and still remembers (the
 last 1024), and every other reply is ignored. The round-trip time is measured from this
@@ -97,7 +97,7 @@ fail(Ctx, Text, Status) ->
 
 %% FreeBSD's ping ends with EX_OSERR when it cannot open its socket.
 ping(Opts, Ctx) ->
-    case erx_icmp_sock:open(#{}) of
+    case erx_gen_icmp:open() of
         {ok, Sock} ->
             ping(Sock, Opts, Ctx);
         {error, Reason} ->
@@ -125,7 +125,7 @@ ping(Sock, #{size := Size, timeout := Timeout} = Opts, Ctx) ->
             #{} -> ok
         end
     after
-        erx_icmp_sock:close(Sock)
+        erx_gen_icmp:close(Sock)
     end.
 
 %% FreeBSD's main loop: a request at each interval while the count allows, then one more
@@ -140,11 +140,19 @@ loop(#{finish := Finish} = L, Record) ->
         false ->
             #{next := Next} = L,
             Wait = max(0, (min(Next, Finish) - Now + 999) div 1000),
-            case erx_icmp_sock:recv(maps:get(sock, L), Wait) of
+            case erx_gen_icmp:recv(maps:get(sock, L), Wait) of
                 {ok, Reply} -> tick(L, received(Reply, L, Record));
-                {error, timeout} -> tick(L, Record)
+                {error, timeout} -> tick(L, Record);
+                {error, Reason} -> recv_failed(L, Reason, Record)
             end
     end.
+
+%% A receive that failed for good: the echo socket has ended (`closed`, its grant gone) or
+%% the network domain's answer was refused (`badarg`). It is reported as FreeBSD reports a
+%% failed recvfrom, and the loop ends with the statistics so far, since no reply can come.
+recv_failed(#{ctx := Ctx}, Reason, Record) ->
+    _ = erx_cmd:report(Ctx, <<"recvfrom">>, Reason),
+    Record.
 
 all_in(#{opts := #{count := Count}}, #{received := Received}) ->
     Count =/= infinity andalso Received >= Count.
@@ -170,7 +178,7 @@ due(#{opts := #{interval := Interval, size := Size, host := Host}, sock := Sock,
       next := Next} = L, #{transmitted := N} = Record) ->
     Seq = N band 16#ffff,
     Now = now_us(),
-    case erx_icmp_sock:send(Sock, Host, Seq, #{data => payload(Size, Now)}) of
+    case erx_gen_icmp:send(Sock, Host, Seq, #{data => payload(Size, Now)}) of
         ok -> ok;
         {error, Reason} -> erx_cmd:report(Ctx, <<"sendto">>, Reason)
     end,
@@ -302,7 +310,7 @@ sent(Seq, Now, #{transmitted := N, sent := Sent} = Record) ->
 The line for a reply that arrived at `Now`, and the record after it, or no line and the
 record unchanged for a reply to a sequence number this ping does not remember sending.
 """.
--spec reply(erx_icmp_sock:reply(), integer(), tally()) -> {iodata(), tally()}.
+-spec reply(erx_gen_icmp:reply(), integer(), tally()) -> {iodata(), tally()}.
 reply({Src, Ttl, Seq, Data}, Now, #{sent := Sent} = Record0) ->
     Slot = Seq rem ?MAX_DUP_CHK,
     case Sent of

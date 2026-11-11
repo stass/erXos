@@ -43,7 +43,7 @@ class CommandNeedsTest < Minitest::Test
     refute_equal files.fetch(IFCONFIG), seeded
     violations = Erx::CommandNeeds.violations(files.merge(IFCONFIG => seeded))
     assert_equal [IFCONFIG], violations.map(&:path)
-    assert_match(/names erx_net, of the net service, without -erx_needs\(\[net\]\)/, violations.first.to_s)
+    assert_match(/names erx_inet, of the net service, without -erx_needs\(\[net\]\)/, violations.first.to_s)
   end
 
   def test_socket_modules_resolver_functions_and_a_remote_fun_count

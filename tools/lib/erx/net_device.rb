@@ -52,6 +52,14 @@ module Erx
   # one to the host's loopback, where the echo server listens, and connect; slirp in
   # restricted mode must refuse it, since the guest reaches the host only through the
   # forward.
+  #
+  # Every request above that needs the network (ifconfig's interfaces, ping's echo
+  # socket, the resolver's and the TCP connect) reaches the stack only as a call of the
+  # system domain's grant, admitted by erx_net_admit (docs/design-network-stack.md, "The
+  # grant's contract"). The Erlang shell then makes a call of the grant that is no
+  # operation of it, which must be refused with {error, badarg}, and reads the grant's
+  # counts, which must show that one refusal and nothing left out: no call of the steps
+  # before was refused or dropped (grant_checkpoint).
   module NetDevice
     GUEST_IP = [10, 0, 2, 15].freeze
     HOST_IP = [10, 0, 2, 100].freeze
@@ -118,6 +126,12 @@ module Erx
     # merged units (docs/design-network-fastpath.md, "The merge, before classification").
     MERGED_LINE = 'begin {ok, #{pid := If}} = erx_net_tables:interface(vtnet0), ' \
                   "{ok, C} = erx_net_if:admin(If, counters), maps:get(units, C, 0) > 0 end.\r"
+    # A call of the system domain's grant that is no operation of it, then the grant's
+    # counts: {Answer, Refused, LeftOut}.
+    GRANT_LINE = 'begin Refusal = gen_server:call(erx_net_grant, no_operation, infinity), ' \
+                 'Counts = erx_net_grant:counts(whereis(erx_net_grant)), ' \
+                 "{Refusal, maps:get(refused, Counts), maps:get(unknown, Counts)} end.\r"
+    GRANT_ANSWER = '{{error,badarg},1,0}'
 
     module_function
 
@@ -177,8 +191,12 @@ module Erx
        erl_point('tcp-digest', '\{[0-9]+,<<"[0-9A-F]{32}">>\}', verify: verify_digest, type: MERGED_LINE),
        erl_point('tcp-merged', 'true', type: CLOSE_LINE),
        erl_point('tcp-close', 'ok', type: refused_line(refused_port)),
-       erl_point('tcp-refused', Regexp.escape('{error,econnrefused}'))].freeze
+       erl_point('tcp-refused', Regexp.escape('{error,econnrefused}'), type: GRANT_LINE)].freeze
     end
+
+    # What the grant line shows: the refusal of a call that is no operation, the one refusal
+    # the grant counted, and no message left out.
+    def grant_checkpoint = erl_point('grant-counts', Regexp.escape(GRANT_ANSWER))
 
     # Checks the tcp-digest line against what the echo server took, received
     # (EchoServer#received): TCP_BYTES bytes whose MD5 is the one the guest gives of what
@@ -364,7 +382,8 @@ module Erx
         shell = ProductionImage::Run::RELEASE_SHELL.merge(verify: exchange, type: IFCONFIG_LINE).freeze
         checkpoints = [*Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB), ProductionImage::Run::SLOGAN, shell,
                        *NetDevice.shell_checkpoints(-> { answered.fetch(:mac) }),
-                       *NetDevice.tcp_checkpoints(refused_port: echo.port, verify_digest: verify_digest)]
+                       *NetDevice.tcp_checkpoints(refused_port: echo.port, verify_digest: verify_digest),
+                       NetDevice.grant_checkpoint]
         Qemu.new(root: @root, runner: @runner).run(accel: accel, image: image, memory_mib: ProductionImage::MEMORY_MIB,
                                                    directory: directory, checkpoints: checkpoints, nic: nic,
                                                    command_line: ProductionImage::Run::COMMAND_LINES[accel])
@@ -375,7 +394,8 @@ module Erx
                   'and its shell showed vtnet0 with the lease, pinged 10.0.2.2 three times and resolved www ' \
                   "in the lease's domain through the name server at #{SERVER}, with random query IDs; " \
                   "its Erlang shell sent #{TCP_BYTES} bytes over TCP to the echo server and read them back, " \
-                  "and was refused the host's loopback"
+                  "and was refused the host's loopback; the system domain's grant admitted every call " \
+                  'of these and refused one that is no operation'
         @measurements << "net_device: #{accel}, 1 CPU: TCP from the guest's Erlang shell through slirp's guest forward " \
                          "to the harness's echo server: #{TCP_BYTES} bytes each way in #{transfer_ms} ms " \
                          "(#{rate(transfer_ms)} each way), from the start of the send to the last byte back"

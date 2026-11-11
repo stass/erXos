@@ -15,7 +15,7 @@ sent, by sequence number, with duplicates.
 -define(US, 1000).    % one millisecond, in the record's microseconds
 
 vtnet0(Link) ->
-    #{name => vtnet0, lladdr => <<16#52, 16#54, 0, 16#12, 16#34, 16#56>>, mtu => 1500,
+    #{name => <<"vtnet0">>, lladdr => <<16#52, 16#54, 0, 16#12, 16#34, 16#56>>, mtu => 1500,
       link => Link, config => dhcp,
       addrs => [#{addr => {10, 0, 2, 15}, plen => 24, broadcast => {10, 0, 2, 255}}],
       routes => [#{prefix => {0, 0, 0, 0}, plen => 0, gateway => {10, 0, 2, 2}}],
@@ -45,9 +45,9 @@ netmask_follows_the_prefix_length_test() ->
                                       <<"\tinet 192.168.86.20 netmask 0xfffffffc\n">>)).
 
 selection_by_name_test() ->
-    Two = [vtnet0(up), (vtnet0(up))#{name := vtnet1}],
+    Two = [vtnet0(up), (vtnet0(up))#{name := <<"vtnet1">>}],
     ?assertEqual({ok, Two}, erx_cmd_ifconfig:select([], Two)),
-    ?assertMatch({ok, [#{name := vtnet1}]}, erx_cmd_ifconfig:select([<<"vtnet1">>], Two)),
+    ?assertMatch({ok, [#{name := <<"vtnet1">>}]}, erx_cmd_ifconfig:select([<<"vtnet1">>], Two)),
     ?assertEqual({error, {no_interface, <<"vtnet9">>}}, erx_cmd_ifconfig:select([<<"vtnet9">>], Two)).
 
 configuration_is_a_usage_error_test() ->
