@@ -394,7 +394,8 @@ Error in process <0.150.0> with exit value:
   There is no web view to open yet: the host's `tools/erx web` server
   exists, and `make web` builds the browser client offline from pinned
   packages into the files that server serves, but the client shows only
-  its heading and the machine does not serve it.
+  its heading and the machine does not serve it. Once it does,
+  `tools/erx boot --hostlink` is the boot to open it from.
 * **Designed but not built yet:** the rest of erXos's own kernel, the
   rest of the command shell, the network domain, the display on a
   screen, the browser client, and the POSIX-lite layer. Each has a design document in
@@ -670,6 +671,10 @@ shell's `1>` prompt comes up. It needs the compiler variables from
 otherwise. `--accel` chooses; `--cpus` sets the guest's CPUs, from 1 to
 8, default 1. Quit with Ctrl-A then X. Ctrl-A then C switches to the
 QEMU monitor and back. The first build of ERTS takes a while.
+`--hostlink` also puts the guest's host link on a UNIX socket in
+`build/production-image/hostlink/`, for `tools/erx load`, `files` and
+`web`, and gives it a fresh data medium for `/data`; the boot prints the
+`tools/erx web --socket PATH` line to run in another terminal.
 
 ## Guest and stock oracle
 

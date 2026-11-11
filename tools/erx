@@ -692,7 +692,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | build web | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | build web | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
       0
     end
 
@@ -821,16 +821,21 @@ module Erx
     end
 
     # The development boot image in QEMU with its serial line on this terminal,
-    # for a person to type at (InteractiveBoot). The arguments are read whole
-    # before anything is built or run.
+    # for a person to type at (InteractiveBoot); with --hostlink, also its host
+    # link on a socket and a data medium, and the `tools/erx web` line to run
+    # next. The arguments are read whole before anything is built or run.
     def self.boot(arguments, runner_class: Runner)
       request = InteractiveBoot.request(arguments)
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       accel = request.accel || InteractiveBoot.default_accel(QemuGate.available_accelerators(runner: runner))
       Terminal.puts("building the development boot image into #{InteractiveBoot::DIRECTORY}")
-      image = InteractiveBoot.build_image(root: ROOT, runner: runner, jobs: request.jobs)
-      argv = InteractiveBoot.argv(accel: accel, cpus: request.cpus, image: image)
+      boot = InteractiveBoot.build(root: ROOT, runner: runner, jobs: request.jobs, hostlink: request.hostlink)
+      argv = InteractiveBoot.argv(accel: accel, cpus: request.cpus, image: boot.image, link: boot.link)
       Terminal.puts("booting: accelerator #{accel}, #{request.cpus} guest CPU(s); #{InteractiveBoot::QUIT_HINT}")
+      if boot.link
+        Terminal.puts("host link on #{boot.link.socket}; once root's session has started, run in another terminal:")
+        Terminal.puts("  #{InteractiveBoot.web_command(File.join(ROOT, 'tools/erx'), boot.link.socket)}")
+      end
       InteractiveBoot.run(argv)
     end
 

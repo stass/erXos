@@ -4,8 +4,10 @@
 
 require 'io/console'
 require 'optparse'
+require 'shellwords'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu'
 
@@ -17,16 +19,30 @@ module Erx
   # image and running QEMU are the effects at the edge.
   #
   # The image builds into one directory of the tree's build/, which each boot
-  # replaces, so two boots of one tree at once would build over each other.
+  # replaces, so two boots of one tree at once would build over each other,
+  # and the second would remove the first's host link socket.
+  #
+  # With --hostlink the guest also gets what the host tools need of it: its
+  # host link's UART on a UNIX socket in an owner-only directory of build/,
+  # where `tools/erx web`, `load` and `files` connect, and the image's release
+  # medium as its disk, so the storage domain serves /data and root's session
+  # has its data. The medium is written fresh with each build, so /data starts
+  # empty at every boot.
   module InteractiveBoot
     DIRECTORY = 'build/production-image/interactive'
     QUIT_HINT = 'quit QEMU with Ctrl-A then X'
     # How long QEMU has to exit after SIGTERM before it is killed.
     STOP_SECONDS = 10
     DEFAULT_JOBS = 4
+    # The host link socket's directory, emptied and made owner-only at each boot.
+    HOSTLINK_DIRECTORY = 'build/production-image/hostlink'
 
     # What the person asked for. A nil accel asks for this host's best.
-    Request = Data.define(:accel, :cpus, :jobs)
+    Request = Data.define(:accel, :cpus, :jobs, :hostlink)
+    # The host link's socket and the medium the guest boots with, both absolute.
+    Link = Data.define(:socket, :medium)
+    # What a boot runs: the image's boot file, and its Link or nil.
+    Boot = Data.define(:image, :link)
 
     module_function
 
@@ -34,11 +50,12 @@ module Erx
     # errors, which `tools/erx` reports as a usage error, before anything runs.
     def request(arguments)
       arguments = arguments.dup
-      options = { accel: nil, cpus: 1, jobs: DEFAULT_JOBS }
+      options = { accel: nil, cpus: 1, jobs: DEFAULT_JOBS, hostlink: false }
       OptionParser.new do |flags|
         flags.on('--accel NAME', %w[tcg hvf], 'Guest accelerator') { |value| options[:accel] = value }
         flags.on('--cpus N', Integer, 'Guest CPUs') { |value| options[:cpus] = value }
         flags.on('--jobs N', Integer, 'Build jobs') { |value| options[:jobs] = value }
+        flags.on('--hostlink', 'Host link socket and data medium') { options[:hostlink] = true }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       unless QemuPlan::CPUS.cover?(options.fetch(:cpus))
@@ -56,20 +73,45 @@ module Erx
 
     # QEMU's argument vector: the harness's own plan, with the memory and the
     # kernel command line its boots of this image use, and the serial line on
-    # this terminal in place of a file.
-    def argv(accel:, cpus:, image:)
+    # this terminal in place of a file. With a link, the host link's UART
+    # listens on its socket, without waiting for a client, and the medium is the
+    # guest's disk; without one, the UART is QEMU's null device and there is no disk.
+    def argv(accel:, cpus:, image:, link: nil)
       QemuPlan.argv(accel: accel, cpus: cpus, image: image, serial: QemuPlan::CONSOLE,
-                    memory_mib: ProductionImage::MEMORY_MIB, command_line: ProductionImage::Run::COMMAND_LINES[accel])
+                    memory_mib: ProductionImage::MEMORY_MIB, command_line: ProductionImage::Run::COMMAND_LINES[accel],
+                    hostlink: link&.socket, disks: link ? [QemuPlan::Disk.new(path: link.medium)] : [])
     end
+
+    # The command a person runs in another terminal to see the guest's web
+    # view; program is tools/erx's own path, so it runs from any directory.
+    def web_command(program, socket) = Shellwords.join([program, 'web', '--socket', socket])
 
     # Builds the kernel and the image into DIRECTORY under root, replacing the
     # image an earlier boot left there, and returns the path of its boot file.
-    def build_image(root:, runner:, jobs:, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+    def build_image(root:, runner:, jobs:) = build(root: root, runner: runner, jobs: jobs, hostlink: false).image
+
+    # Builds the kernel and the image into DIRECTORY under root, replacing the
+    # image an earlier boot left there. With hostlink, the image's release
+    # medium is written beside it, and HOSTLINK_DIRECTORY under root is first
+    # emptied of any socket an earlier boot left, made owner-only, and its
+    # socket path checked, so a path QEMU cannot take fails before the build.
+    def build(root:, runner:, jobs:, hostlink:, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+      socket = hostlink_socket(root) if hostlink
       fiasco = Fiasco.new(root: root, runner: runner, compiler: compiler)
       fiasco.build(jobs: jobs)
       directory = ProductionImage.clear_directory(root: root, path: File.join(root, DIRECTORY))
-      ProductionImage.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco)
-                     .build(directory: directory).single
+      image_builder = ProductionImage.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco)
+      return Boot.new(image: image_builder.build(directory: directory).single, link: nil) unless socket
+
+      built, written = image_builder.build_medium(directory: directory)
+      Boot.new(image: built.single, link: Link.new(socket: socket, medium: written.path))
+    end
+
+    def hostlink_socket(root)
+      directory = ProductionImage.clear_directory(root: root, path: File.join(root, HOSTLINK_DIRECTORY))
+      socket = File.join(OutputDirectory.prepare(root: root, path: directory, mode: 0o700), 'socket')
+      QemuPlan.hostlink_arguments(socket) # raises on a path QEMU cannot take
+      socket
     end
 
     # Runs argv on this process's terminal until it exits, and returns its
@@ -125,6 +167,6 @@ module Erx
     rescue SystemCallError
       nil
     end
-    private_class_method :stop, :restore_mode
+    private_class_method :hostlink_socket, :stop, :restore_mode
   end
 end

@@ -13,12 +13,13 @@ require_relative '../../tools/lib/erx/interactive_boot'
 # with a Ruby child standing in for QEMU. Nothing here boots a guest.
 class InteractiveBootTest < Minitest::Test
   def test_no_arguments_ask_for_one_cpu_and_this_hosts_accelerator
-    assert_equal Erx::InteractiveBoot::Request.new(accel: nil, cpus: 1, jobs: Erx::InteractiveBoot::DEFAULT_JOBS),
+    assert_equal Erx::InteractiveBoot::Request.new(accel: nil, cpus: 1, jobs: Erx::InteractiveBoot::DEFAULT_JOBS,
+                                                    hostlink: false),
                  Erx::InteractiveBoot.request([])
   end
 
   def test_options_name_the_accelerator_cpus_and_jobs
-    assert_equal Erx::InteractiveBoot::Request.new(accel: 'tcg', cpus: 4, jobs: 2),
+    assert_equal Erx::InteractiveBoot::Request.new(accel: 'tcg', cpus: 4, jobs: 2, hostlink: false),
                  Erx::InteractiveBoot.request(%w[--accel tcg --cpus 4 --jobs 2])
   end
 
@@ -61,6 +62,32 @@ class InteractiveBootTest < Minitest::Test
     word = Erx::QemuPlan::HOSTLINK_WORD
     assert_equal ['-append', "#{word} #{Erx::ProductionImage::Run::COMMAND_LINES.fetch('tcg')}"], tcg.last(2)
     assert_equal ['-append', word], hvf.last(2)
+  end
+
+  def test_hostlink_asks_for_the_host_link_and_a_data_medium
+    refute Erx::InteractiveBoot.request([]).hostlink
+    assert Erx::InteractiveBoot.request(%w[--hostlink]).hostlink
+    assert_raises(OptionParser::ParseError) { Erx::InteractiveBoot.request(%w[--hostlink /tmp/socket]) }
+  end
+
+  # With a link, the second serial line listens on its socket without waiting
+  # for a client, and the medium is the guest's one disk; the console stays on
+  # this terminal.
+  def test_a_link_puts_the_host_link_on_its_socket_and_attaches_the_medium
+    link = Erx::InteractiveBoot::Link.new(socket: '/tree/build/link/socket', medium: '/tree/build/medium.img')
+    argv = Erx::InteractiveBoot.argv(accel: 'hvf', cpus: 1, image: '/tree/build/image.boot', link: link)
+    assert_equal ['mon:stdio', 'unix:/tree/build/link/socket,server=on,wait=off'],
+                 argv.each_index.select { |at| argv[at] == '-serial' }.map { |at| argv[at + 1] }
+    drives = argv.each_index.select { |at| argv[at] == '-drive' }.map { |at| argv[at + 1] }
+    assert_equal ['file=/tree/build/medium.img,format=raw,if=none,id=disk0'], drives
+    assert_includes argv, '-no-reboot'
+  end
+
+  def test_the_web_command_names_the_socket_as_one_shell_word
+    assert_equal '/tree/tools/erx web --socket /tree/build/link/socket',
+                 Erx::InteractiveBoot.web_command('/tree/tools/erx', '/tree/build/link/socket')
+    assert_equal '/my\\ tree/tools/erx web --socket /my\\ tree/socket',
+                 Erx::InteractiveBoot.web_command('/my tree/tools/erx', '/my tree/socket')
   end
 
   def test_run_returns_the_childs_exit_status
