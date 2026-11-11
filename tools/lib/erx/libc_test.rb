@@ -283,8 +283,7 @@ module Erx
       # default, under -Wparentheses, where the gcc libc-test's own build assumes only warns.
       TEST_FLAGS = { 'musl/pleval' => %w[-Wno-parentheses] }.freeze
       COMMON = %w[fdfill memfill mtest path print rand setrlim utf8 vmfill].freeze
-      TASK_SOURCES = [*(NativeRoot::TASK - ["#{NativeRoot::BACKEND}/root_mem.c"]), "#{NativeRoot::BACKEND}/libc_start.c",
-                      "#{NativeRoot::BACKEND}/libc_task.c"].freeze
+      TASK_SOURCES = NativeRoot::LIBC_TASK
       ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH,
                       'test/guest/native_libc_test/guest.c'].freeze
 

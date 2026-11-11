@@ -170,7 +170,7 @@ class ChecksTest < Minitest::Test
       original = File.exist?(File.join(@root, relative)) ? File.binread(File.join(@root, relative)) : nil
       path = write(relative, source)
       error = assert_raises(Erx::Error) { checks.run }
-      assert_equal 'a test image is built only by tools/lib/erx/oracle_qemu.rb and tools/lib/erx/block_device.rb and tools/lib/erx/system_domain.rb: ' \
+      assert_equal "a test image is built only by #{Erx::Checks::TEST_IMAGE_BUILDERS.join(' and ')}: " \
                    "#{relative}:#{source.lines.size}", error.message
       original ? File.binwrite(path, original) : File.unlink(path)
     end

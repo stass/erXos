@@ -67,6 +67,10 @@ module Erx
               #{BACKEND}/service_stubs.c liberx/backend/core/gate.c liberx/backend/core/grow_table.c #{BACKEND}/thread.c
               #{BACKEND}/arch/aarch64/thread_start.S #{BACKEND}/thread_claim.c #{BACKEND}/umtx.c #{BACKEND}/umtx_table.c #{BACKEND}/park.c liberx/backend/core/park_table.c #{BACKEND}/time.c #{BACKEND}/time_table.c
               #{BACKEND}/arch/aarch64/clock.c #{BACKEND}/arch/aarch64/cache.c #{BACKEND}/trace_stub.c].freeze
+    # A task's test program linked with musl: TASK's entry, less root_mem.c, whose memcpy
+    # musl gives, with libc_task.c, which stops the task with main's return. libc-test's
+    # tasks and the programs suite's are built from it.
+    LIBC_TASK = [*(TASK - ["#{BACKEND}/root_mem.c"]), "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_task.c"].freeze
     # The root that checks the handoff and the archive and has nothing to run: the boot
     # suite's. The archive's core comes from Fiasco's boot archive, which does not hold the
     # handoff record's core, since bootstrap only writes it.
@@ -178,6 +182,16 @@ module Erx
         place.is_a?(Integer) && place >= RAM_FIRST && (place % 4096).zero?
 
       [format('--defsym=erx_fiasco_image_start=0x%x', place)]
+    end
+
+    # A task's program over archives, at task.ld's fixed addresses, with its receipt, as
+    # build_domain_runtime_receipted gives the runtime's: what a production image's packer
+    # takes for a program it carries in a release (the programs suite's, ProductionImage's
+    # Added entries).
+    def build_task_receipted(name:, sources:, directory:, archives:)
+      program = build(name: name, sources: sources, directory: directory, archives: archives, strip_debug: true,
+                      script: TASK_LINK_SCRIPT, link_flags: TASK_LINK_FLAGS, place: nil)
+      receipted(program, sources: sources, script: TASK_LINK_SCRIPT, directory: directory)
     end
 
     # A task's program for the boot image: fixed addresses, as task.ld gives.

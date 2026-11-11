@@ -92,11 +92,15 @@ module Erx
     KILL_SESSION = '[P] = [Pid || #{origin := {session, _}, pid := Pid} <- ' \
                    'erx_domain_core:domains(maps:get(core, sys:get_state(erx_domain_srv)))], ' \
                    "exit(P, kill).\r".freeze
-    # Typed at root_1's Erlang shell: starts programs the release does not hold, so each start
-    # makes the program's budget, group, IRQ object and spaces, refuses the image map or the
-    # pid, and undoes what it made (docs/design-runtime.md, "Programs as ports").
-    PROGRAM_REFUSED = '{erx_program:start(#{image => <<"bin/exit42">>, pid => 2}), ' \
-                      'erx_program:start(#{image => <<"bin/exit42">>, pid => 1})}.' "\r"
+    # Typed at root_1's Erlang shell: two starts the driver refuses (docs/design-runtime.md,
+    # "Programs as ports"). The first names a program the release does not hold, so the
+    # start makes the program's budget, group, IRQ object and spaces, the image map fails
+    # with einval, and the start undoes what it made; the second names pid 1, which the
+    # spec check refuses with erange before anything is made. The
+    # production image's session release holds no program; the programs suite's test image
+    # adds some and runs them (tools/lib/erx/programs.rb).
+    PROGRAM_REFUSED = '{erx_program:start(#{image => <<"bin/none">>, pid => 2}), ' \
+                      'erx_program:start(#{image => <<"bin/none">>, pid => 1})}.' "\r"
     # The file root's session writes and every later step reads, in Erlang and at the system
     # shell, and its one line, `across`, as file:read_file/1 answers it in the shell.
     WRITE_ACROSS = 'ok = file:write_file("/data/across", <<"across\n">>), file:read_file("/data/across")'

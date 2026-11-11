@@ -1534,8 +1534,18 @@ it; git history is the record of completed work.
 * [Low] ERTS, `sys/erxos/erx_program_drv.c`: the driver does not refuse a spec whose pid a live
   program already has, and nothing reads a program's pid yet. The command server that names pids
   owns their uniqueness (docs/design-programs.md, a program's start, step 5) and makes it hold by
-  never giving a pid twice; until it exists, a test's spec names the pid. The gate worker's 64 labels
-  bound a session to 32 programs at once, each start past that refused with `elimit`.
+  never giving a pid twice; until it exists, a test's spec names the pid. The gate worker's 64 registrations
+  (two a program) bound a session to 32 programs at once, each start past that refused with `elimit`.
+* [Low] QEMU harness, `tools/lib/erx/programs.rb`: the programs suite shows that `port_close/1` on a
+  running program closes its port, reports nothing and gives back the gate worker's registrations,
+  but not that the program's spaces stopped, since a close reports nothing to the session. Check
+  the anchor's end with status `ERX_EXIT_SIGNAL` + SIGKILL from the session, through kernel trace's
+  `space_end` (as `native_trace` reads a task's) or the inspector, once a session may read either.
+* [Low] QEMU harness, `tools/lib/erx/programs.rb`: the suite packs its programs as file entries,
+  which `erx_fiasco_task_image_map_body` copies into the space. docs/design-runtime.md, "Programs as
+  ports", step 3 maps a boot-image program from its slice with its code shared, the image-entry path
+  (`task_segment_share`), which no program of a session runs yet. Pack one as an image entry
+  inside the domain release and run it.
 * [Low] hosted backend, `liberx/backend/hosted/refused.c`: a hosted runtime runs no programs; the
   budget's carve is refused, so `erx_program:start/1` answers `{error, enotsup}`. Programs in hosted
   mode need the hosted backend to make spaces.
