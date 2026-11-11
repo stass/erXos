@@ -19,7 +19,7 @@ require_relative '../../tools/lib/erx/generated'
 # test/erlang/erx_facet_tests.erl for the facet behaviour, erx_facet, which the
 # service mints facets of, and test/erlang/erx_devices_tests.erl for erx_devices,
 # the catalogue presented unchanged, and test/erlang/erx_driver_ctl_tests.erl for
-# erx_driver_ctl, the driver-control facet.
+# erx_driver_ctl, the driver-control facet, and erx_blk_sup behind it.
 class ErxDomainTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # erx_domain_srv includes the generated erx_abi.hrl, in build/gen.
@@ -29,6 +29,7 @@ class ErxDomainTest < Minitest::Test
   SOURCES = [*Dir[File.join(APPLICATION, '*.erl')].sort,
              File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
              File.join(ROOT, 'erlang/apps/erx/src/erx_driver_ctl.erl'),
+             File.join(ROOT, 'erlang/apps/erx_blk/src/erx_blk_sup.erl'),
              File.join(ROOT, 'test/erlang/erx_driver_ctl_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_facet_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_domain_fake_lib.erl'),

@@ -2,13 +2,20 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% The block driver's supervisor (docs/design-storage.md, "The block driver"): the device
-%% process, erx_blk, restarted after a crash and left stopped after a shutdown, which is how
-%% it ends on a device that refuses a reset; then the partition process, erx_blk_service,
-%% which admits the partition table and holds the windows; then the mounts of its image
-%% windows at /images/NAME. erx_storage's supervisor starts /data on the data window
-%% once this application has started. A machine without a disk starts
-%% no device process: erx_blk's init/1 returns ignore, and the partition process serves no
-%% window.
+%% process, erx_blk; then the partition process, erx_blk_service, which admits the
+%% partition table and holds the windows; then the mounts of its image windows at
+%% /images/NAME. erx_storage's supervisor starts /data on the data window once this
+%% application has started. A machine without a disk starts no device process: erx_blk's
+%% init/1 returns ignore, and the partition process serves no window.
+%%
+%% It restarts nothing (docs/design-stopgap.md, "littlefs in the storage domain"): every
+%% child that runs a process is permanent, under a restart intensity of 0, so the end of
+%% the device or the partition process, by a crash or by the shutdown with which erx_blk
+%% ends on a device that refuses a reset, ends this supervisor and the erx_blk
+%% application, which is permanent, and so the storage domain, whose restart gives the
+%% device again. A stop, start or restart through the driver-control facet
+%% (erx_driver_ctl) is no such end: the supervisor's terminate_child/2 and
+%% restart_child/2 count no restart.
 
 -module(erx_blk_sup).
 -behaviour(supervisor).
@@ -22,7 +29,7 @@ start_link() ->
 init([]) ->
     Device = #{id => erx_blk,
                start => {erx_blk, start_link, []},
-               restart => transient,
+               restart => permanent,
                shutdown => 2000,
                type => worker,
                modules => [erx_blk]},
@@ -39,4 +46,4 @@ init([]) ->
                shutdown => brutal_kill,
                type => worker,
                modules => [erx_blk_service]},
-    {ok, {#{strategy => one_for_one, intensity => 3, period => 60}, [Device, Service, Images]}}.
+    {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, [Device, Service, Images]}}.

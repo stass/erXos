@@ -20,9 +20,9 @@
 %% no manifest, the read fails and no image is served, which is one line of the log.
 %%
 %% The windows are linked to the service, which does not trap exits, so a window that
-%% crashes takes the service and its other windows with it, and the supervisor's restart
-%% reads the table again and starts new windows; a client's old pid then answers eio, and
-%% so does a mounted image until the next boot.
+%% crashes takes the service and its other windows with it, and so, through erx_blk_sup,
+%% which restarts nothing, the storage domain; its restart reads the table again and
+%% starts new windows.
 %%
 %% window/1 is where a window's pid is handed out, to any caller in the driver's domain and
 %% for any role. It is the seam the device service replaces: that service names each

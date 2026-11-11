@@ -158,7 +158,8 @@ act(restart, Supervisor, Child) ->
         Error -> Error
     end.
 
-%% A supervisor call, with a supervisor that is not running taken as its answer, so the
-%% facet outlives it and answers the grantee.
+%% A supervisor call, with a supervisor that is not running, or that ends during the call
+%% (its domain is ending), taken as its answer, so the facet outlives it and answers the
+%% grantee.
 supervise(Call) ->
-    try Call() catch exit:{noproc, _} -> {error, noproc} end.
+    try Call() catch exit:Reason -> {error, {ended, Reason}} end.

@@ -684,7 +684,7 @@ it; git history is the record of completed work.
   user's actions (a click, the menu), so a client's request only raises; `decorate/2` then needs that state.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device_nif.c`: a move of a bound edge line can lose the one delivery taken under the old label just before the old sink was unregistered, while a level
   line fires again at the bind's acknowledgement. A driver of an edge line looks at its device after binding. The PL011's line is level.
-* [Medium] `erlang/apps/erx_net/erxos/erx_virtio_net.erl`, `erlang/apps/erx_blk`: no test runs a real driver under a hostile device. `test/integration/runtime_device_test.rb` breaks a hosted stand-in's queue under a driver written in the test, so the drivers' own broken-queue path (`error({virtio_net, broken, rx})`), its supervision and restart, and that the crash ends only the driver process are unchecked; plan.md's 1b-E exit criterion asks for it under QEMU. Running `erx_virtio_net` over a virtio stand-in hosted, or a hostile model device under QEMU, would settle it.
+* [Medium] `erlang/apps/erx_net/erxos/erx_virtio_net.erl`, `erlang/apps/erx_blk`: no test runs a real driver under a hostile device. `test/integration/runtime_device_test.rb` breaks a hosted stand-in's queue under a driver written in the test, so the drivers' own broken-queue path (`error({virtio_net, broken, rx})`), its supervision and restart, and that the crash ends only the driver process (the network driver; the block driver's crash ends the storage domain) are unchecked; plan.md's 1b-E exit criterion asks for it under QEMU. Running `erx_virtio_net` over a virtio stand-in hosted, or a hostile model device under QEMU, would settle it.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, the hosted stand-in: its virtio model (`stand_in_preset`, `stand_in_stored`, a hook in `store()`) is a second model of a virtio-mmio transport beside `test/fixtures/erx_device_dma_harness.c`'s, which sits at the access seam and leaves `erx_device.c` untouched. A hosted-only `device_access` over the fixture's model would remove the hook and the duplicate, and keep `queue_ready` per selected queue, which the stand-in's one word cannot (so one queue still ready, `ERX_EBUSY`, is not expressible hosted).
 * [Low] `tools/lib/erx/chokepoint_rules/device.rb`: "no loop over device-written bytes in the NIF" and "within `erx_device.c` only `write_address` writes a ring's address register" have no check: the first holds as `erx_device_complete` copies with `bcopy` alone, the second by reading the file; a check needs a function-level site.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, `negotiate/2`: `device_features` and `queue_num_max` stay readable through `read/2` though their selectors are the NIF's, so such a read returns whichever word or queue the NIF selected last; and a driver learns the offered features and a queue's maximum only through a negotiation, so a multi-queue device (virtio-blk with `MQ`) needs two. Refuse reads of selector-banked registers and have `negotiate/2` return the offered set, or design a read-only probe.
@@ -2138,6 +2138,11 @@ it; git history is the record of completed work.
   `badarg` while the stale name works, and the network's names `vtnet0` though the
   device's interface name comes from erx_virtio_net's order. Derive each from the
   domain's installed units, or check each key at start.
+* [Low] storage, `erx_storage_sup`: the driver-control facet's units table,
+  `#{block => {erx_blk_sup, erx_blk}}`, repeats the manifest's unit name by hand, and
+  nothing checks it against the units the domain holds; a renamed unit is refused as
+  `badarg` while the stale name works. Derive it from the domain's installed units, or
+  check each key at start, before P10a repeats it for `network_ctl`.
 * [Medium] storage, `erx_lfs`: any process of the system domain can send the owner
   `{erx_lfs_block, ...}` or `{erx_lfs, Worker, done, _}`. A forged block message fails the
   volume or, with a request of a volume of its own, writes any sector of the data window;
@@ -4354,15 +4359,19 @@ to the corpus and follow rc
 
 ## Security residuals
 
-* [Medium] Storage domain, littlefs's failures end the whole domain (`erx_lfs.erl`,
-  `erx_lfs_sup.erl`, `erx_storage_sup.erl`): any end of littlefs's owner, worker or `/data`
-  grant ends the storage domain, the block driver and every window it serves with it, and
+* [Medium] Storage domain, littlefs's and the block driver's failures end the whole domain
+  (`erx_lfs.erl`, `erx_lfs_sup.erl`, `erx_storage_sup.erl`, `erx_blk_sup.erl`): any end of
+  littlefs's owner, worker or `/data` grant, and any end of the block driver's device or
+  partition process, a malformed completion or a refused reset included, ends the storage
+  domain, the block driver and every window it serves with it, and
   after `restarts 5` within `restart_period_s 60` the domain stays down. Nothing outside
   the domain reaches `/data` yet; once the `data` facet serves other domains, a client
   that can end the grant or break the volume six times a minute takes down every
   partition's driver, not only `/data`. The facet's design bounds what a client can make
   the grant do (its own lane), or littlefs moves into a sub-space port whose end the
-  domain survives (design-storage.md).
+  domain survives (design-storage.md). A device that fails six times a minute keeps the
+  domain down too, until littlefs moves into such a port and the block driver restarts in
+  place again.
 * [Medium] Storage domain, file data in crash dumps (`erx_blk_window.erl`, `erx_blk.erl`,
   the `erx_fs` grant): a littlefs failure halts the storage node, whose crash dump goes to
   the domain's crash area (design-runtime.md). `erx_lfs`'s owner and worker are

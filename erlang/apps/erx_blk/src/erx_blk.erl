@@ -2,7 +2,7 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% The virtio-mmio block driver's device process (docs/design-storage.md, "The block
-%% driver"), under erx_blk_sup in the system domain, over erx_device
+%% driver"), under erx_blk_sup in the storage domain, over erx_device
 %% (docs/design-runtime.md, "The device NIF"). It owns the device's one request queue,
 %% posts each read and write as one request, and answers its caller when the device
 %% completes it, on the line's interrupt.
@@ -19,8 +19,8 @@
 %% and bad_count before the device is touched, busy when the backlog is full, ioerr, unsupp,
 %% {status, N} and {length, N} from what the device wrote (erx_blk_request:decode/2), and
 %% broken for a request in flight when the device broke its queue. A broken queue is
-%% renegotiated in place; a device that refuses that ends the driver with a shutdown, which
-%% the supervisor does not restart.
+%% renegotiated in place; a device that refuses that ends the driver with a shutdown, which,
+%% as any end of the driver, ends erx_blk_sup and the storage domain.
 
 -module(erx_blk).
 -behaviour(gen_server).

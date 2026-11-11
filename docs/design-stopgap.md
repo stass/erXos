@@ -1670,7 +1670,14 @@ moves the state from *pending* to *ended*, and a lost swap means the request is 
 answer `{error, eio}`. The NIF's flag is the one record of it: the worker reads it (`broken/1`) after each operation and ends when it is set. The
 worker's end, the window's, or a mount that fails ends the owner. `erx_lfs_sup` and `erx_storage_sup` restart nothing (their children are permanent
 and their restart intensity is 0), so the end escalates to `erx_storage`, a permanent application, and ends the node and the domain. Every queued
-request answers `{error, eio}`, and nothing in the domain replays or remounts. The domain service restarts the domain within its row's intensity
+request answers `{error, eio}`, and nothing in the domain replays or remounts. The block driver's failures end the domain the same way, whether or
+not a request is in flight: `erx_blk_sup` restarts nothing either, so the end of its device or partition process, by a crash or by the shutdown
+with which `erx_blk` ends on a device that refuses a reset, ends the `erx_blk` application, which is permanent, and the domain; the driver never
+restarts on its own under a mounted volume. A stop, start or restart through `storage_ctl` is the system domain's, and the supervisor counts no
+restart for it, so it does not end the domain itself: a block request it interrupts, or one made while the driver is stopped, fails as at a crash
+and breaks the volume, which does, and a
+start whose device refuses the reset answers `{error, failed}` and leaves the domain up without a driver until littlefs's next request fails.
+The domain service restarts the domain within its row's intensity
 (`restarts 5`, `restart_period_s 60`): creation gives it the device again, the driver resets it, and littlefs mounts the volume afresh. The owner
 answers its start only once the volume has mounted, so `/data` is mounted, and the domain reports ready, only over a mounted volume, and a mount that
 fails fails the domain's boot. A delayed old write cannot race a newer one, since none outlives the domain that issued it, and littlefs's power-loss
@@ -1865,7 +1872,7 @@ the tests.
 | **End path**, on a quiet console, the QEMU gate's `native_crash` suite: a read of a decommitted page, a write to a read-only page, a read from another thread and a trap each give a whole crash frame, held to what the guest said it would touch; a root fault gives the undrained lines; `erx_machine_end` with each `how` | the frame's write removed: `crash_frame.rb` reports none. The drain removed: the last line is missing |
 | **Console handoff**: lines before and after the create arrive once, in order; a counter of the service's `l4_vcon_write` calls stays still after the create; a failed map leaves the sink alone. On the host, `dispatch_test.rb`'s handoff, readers and wrap cases count the core's console writes; natively, the console suite logs a tab and an escape sequence after the create and finds them escaped on the line, and a root that stops with the console suspended still shows its parked record | the sink never switched: the counter moves |
 | **littlefs**: a file operation under `+SDio 1` with a block read in the callback completes | `complete` made a dirty NIF: the deadline fires |
-| littlefs: an injected block error fails that operation as unknown, and the next is `{error, eio}`; the driver killed under load: no later writes reach it, and after a reboot a file synced earlier is there; a littlefs worker killed ends the storage domain, whose restart mounts `/data` afresh with a file written earlier (the driver_domains suite) | the error swallowed: success claimed. The owner resends: a later write is counted. Sync skipped: the file is lost |
+| littlefs: an injected block error fails that operation as unknown, and the next is `{error, eio}`; the driver killed under load: no later writes reach it, and after a reboot a file synced earlier is there; a littlefs worker killed ends the storage domain, whose restart mounts `/data` afresh with a file written earlier (the driver_domains suite); a block device process killed or shut down ends `erx_blk_sup`, and `storage_ctl`'s stop, start and restart do not (`erx_driver_ctl_tests`, on the host) | the error swallowed: success claimed. The owner resends: a later write is counted. Sync skipped: the file is lost. The driver restarted in place: `erx_blk_sup` outlives the kill |
 | **Manifest check**: each kept property with a seeded violation, each refusal with a seeded record | [the table](#the-phase-1-manifest-check) is the pairing |
 | **Service decoder**: fuzz target, and a task sending an unknown number, wrong count, bad index and long payload | word-count check removed: the fuzz target reports it |
 | **Chokepoint**: a Fiasco header outside the backend | the seeded violation is the case |
