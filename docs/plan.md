@@ -128,9 +128,9 @@ names; the table's order is the order.
 | **Phase 1b** | | | | |
 | 1b-A M5 on the stopgap | spawn into a sandbox domain with a link, crash it, get `{domain_down, D, crash}`; kill a domain mid-burst and watch its end arrive after its last messages; kill the system domain and read its crash record after the reset; every guarantee deferred | 9,000 lines of C17, 6,000 of Erlang for M5, its kernel interface carried as backend rows in the Fiasco backend, and in the hosted backend where cheap (2,000 to 4,000 lines of C17, a guess until the first rows land) | Phase 1 | G5, provisionally |
 | 1b-B Track S, programs | `find /tmp/logs -type f \| xargs tail -n 1` through toybox's applets as ports of the session, and `within` confining a program to one grant, on the stopgap | in track S's figure | 1b-A | |
-| 1b-C Track D, parts 1 to 3 | `tools/erx web` shows a QEMU guest's records, kernel log and traces in a browser over the host link, with no network or display device; one application's user interface in the browser, and the same interface on a QEMU `virt` kiosk drawn by LVGL, with no login | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice; part 3 also 1b-E and 1b-B's sub-space ports | GW |
+| 1b-C Track D, parts 1 to 3 | `tools/erx web` shows a QEMU guest's records, kernel log and the traces of `root`'s session domain in a browser over the host link, with no network or display device; one application's user interface in the browser, and the same interface on a QEMU `virt` kiosk drawn by LVGL in the display domain, with no login | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice; part 3 also 1b-E and 1b-B's sub-space ports | GW |
 | 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B's session domain, sub-space ports and pipes, not toybox's applets | GP, provisionally; the G6 baseline |
-| 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; the kill ends the storage domain, whose restart resets the device and mounts `/data` again with every synced file present ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)); drivers run in the storage, network and display domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A | G9's measurements, deciding nothing |
+| 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; the kill ends the storage domain, whose restart resets the device and mounts `/data` again with every synced file present ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)); drivers run in the storage and network domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A | G9's measurements, deciding nothing |
 | 1b-F Track D, parts 5 to 7 | a QEMU `virt` desktop whose terminal windows run the shell, the same user interface term as on the web, and acme and sam editing a file | estimated per part before it starts | 1b-E and 1b-C; part 7 also 1b-D | |
 | 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | Phase 1: the network driver and stack run in the system domain, as M6's block driver does, until 1b-E moves them into the network domain | GN-QEMU's baseline, deciding nothing |
 | M14 erXos's network stack, on QEMU | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang from FreeBSD's, on QEMU in 1b-G; the boards follow with M12 | estimated in its design document | 1b-G's prototype | G14 |
@@ -701,7 +701,8 @@ erXos's kernel supplies its trace ring.
 status/reporter-preserving renderers and `/proc` projections; generated
 Ruby clients for host-exposed service operations, with their bounded
 request/reply checks; the inspector, the tracer in the system domain
-(its trace facet and relay come with M5's connections), the host link with its
+(the trace facet served across domains and the relay come with M5's kernel
+part), the host link with its
 sessions and deframer (and their fuzz targets), on the UART that the
 system manifest
 names by its device-tree path, the code service with the install arena
@@ -848,12 +849,12 @@ grants and the hostile runtime, which M5's kernel part adds.
   [design-system.md](design-system.md#verification-and-testing).
 
 **On the stopgap (1b-A).** Every bullet of the scope lands on the stopgap
-Fiasco except two: tracing across domains, which lands in 1b-C, whose
-browser views are its first consumer
-([track D](#track-d-windows-widgets-and-the-web)), and the kernel
-interface sub-spaces and programs need, which
-lands on erXos's kernel as M5's kernel part, after M2. On the stopgap its
-consumers use rows that the Fiasco backend adds behind the unchanged
+Fiasco except two, tracing across domains and the kernel interface
+sub-spaces and programs need, which land on erXos's kernel as M5's
+kernel part, after M2. Until then the trace view of
+[track D](#track-d-windows-widgets-and-the-web)'s part 1 traces its
+session's own domain. On the stopgap that interface's consumers use rows
+that the Fiasco backend adds behind the unchanged
 interface, the creations and passes among them called from the root,
 where the domain library runs, and
 the hosted backend, one process through 1b-A, adds only
@@ -1001,11 +1002,12 @@ pauses.
 domain with its authority, as the system shell does; the session domain,
 programs and executables from EROFS through sealed file objects follow
 1b-A, on the stopgap, as 1b-B, whose first slice is the session domain;
-littlefs runs as a NIF in the storage domain that 1b-E configures, and its
-sub-space port follows once this track's port driver exists, and a crash injected
-into littlefs mid-write then ends only that port, whose owner restarts it and
-remounts, with no acknowledged write lost; the job control of programs follows
-M7, on erXos's kernel. On the stopgap a program's budget and group are
+the job control of programs follows M7, on erXos's kernel. littlefs runs
+as a NIF in the storage domain that 1b-E configures. Its sub-space port
+follows once this track's port driver exists; from then a crash injected
+into littlefs mid-write ends only that port, whose owner restarts it and
+remounts the volume with no acknowledged write lost. On the stopgap a
+program's budget and group are
 unenforced records, its doorbells are IRQ objects whose deliveries reach
 the dispatcher of the task that consumes them, the program's for its own,
 and the pipe server's and the session's creates and installs
@@ -1273,17 +1275,20 @@ land after M11 repeat M11's closure over what they add.
    domain of the development manifest,
    with the connection core `erx_web_conn`; the session's `erx_web_line`,
    whose views fetch records, the kernel log and traces through the
-   session's own inspect and trace facets, with M5's tracing across
-   domains, the trace facet and the trace relay, which land here
-   ([M5](#m5-a-wall-around-some-processes)); the host link's `web` facet,
-   bound to `root`'s session, with the manifest check's refusal of it in a
-   release manifest; `tools/erx web` with its loopback server, token,
+   session's own inspect and trace facets, a trace view tracing the
+   session's own domain alone; the host link's `web` facet, bound to
+   `root`'s session; `tools/erx web` with its loopback server, token,
    cookie and `Origin` checks and its WebSocket relay; the client under
    `web/`, built by `make web` offline from the store `tools/erx fetch`
    fills, with the generated escape, `MachineText`, `hrefOf` and the
    content security policy; the client's chokepoint checks, and the ASCII
    check over its `.ts` and `.tsx` sources
-   ([design-web.md](design-web.md#the-host-tools-front-end)).
+   ([design-web.md](design-web.md#the-host-tools-front-end)). Tracing
+   across domains, the trace facet served across domains, the trace relay
+   and tracing of cross-domain frames come with M5's kernel part
+   ([M5](#m5-a-wall-around-some-processes)), and the manifest check's
+   refusal of the `web` facet in a release manifest with
+   [M11](#m11-security-closure).
 2. **Widgets on the web**, in 1b-C, after part 1. The display service of
    `abi/services/display.txt` and its generated dispatch; `erx_ui`, which
    opens a user interface on the display its options name or on the
@@ -1292,7 +1297,9 @@ land after M11 repeat M11's closure over what they add.
    named `web`; `erx_ui_server` with the browser renderer; the readers of
    `ui.txt`'s binary form in Erlang and TypeScript
    ([design-web.md](design-web.md#uis-the-browser-renderer),
-   [design-display.md](design-display.md#choosing-a-display)).
+   [design-display.md](design-display.md#choosing-a-display)). Its tests
+   check the browser renderer alone; its parity test with LVGL comes with
+   part 3, and with the Erlang renderer with part 6.
 3. **A kiosk on QEMU `virt`**, in 1b-C, after part 2, 1b-E, in which
    a configured domain other than the system domain is given its devices
    at its creation, and 1b-B's sub-space ports, which run the LVGL program. The
@@ -1322,7 +1329,8 @@ land after M11 repeat M11's closure over what they add.
    which reaches no renderer; Gate GD on the panel, once part 6's
    Erlang renderer runs
    ([design-display.md](design-display.md#kiosks-and-glasses)).
-5. **A desktop on QEMU `virt`**, as 1b-F, after 1b-E and part 2. On the
+5. **A desktop on QEMU `virt`**, as 1b-F, after part 3, which brings the
+display domain's virtio-gpu and virtio-input drivers. On the
    stopgap a hostile draw client that corrupts the display domain reaches
    the GPU's DMA, a recorded residual
    ([design-display.md](design-display.md), the display domain's trust).
@@ -1381,8 +1389,7 @@ refused, a client that never sends `next` gets one update per view while
 the web domain holds under 1 MiB for it, and a record that changed 100
 times while the client paused arrives once (W8); every view through the
 host link's `web` facet equals what `root`'s session reads through its
-own facets (design-web's W1 over the host link); a release manifest that
-lists the host link's `web` facet fails the manifest check; `make web`
+own facets (design-web's W1 over the host link); `make web`
 twice with the network disabled gives byte-identical files; each
 chokepoint check catches its seeded violation; the end-to-end tests run
 `tools/erx web` against a QEMU guest under HVF.
@@ -1809,8 +1816,13 @@ M7.
 process and then the network driver process are killed; each supervisor
 resets its device and restarts the driver; the shell never notices. The
 inspector shows every driver as a process with its device's registers by
-name. On the stopgap the drivers run over virtio-mmio, unconfined, a killed
-block driver ends the storage domain, whose restart recovers it, and the
+name. On the stopgap the drivers run over virtio-mmio, unconfined, and a
+block driver restarts only with its domain: its kill ends the storage
+domain, `/data` is unavailable until the domain's restart has reset the
+device and mounted the volume again, and every synced file is present
+([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)).
+The network driver restarts in its domain under a TCP connection of
+root's session, which echoes again once the link has its lease, and the
 ping runs from root's session through the network domain's `net` grant.
 
 **Scope, on the stopgap (1b-E).** The storage domain, which holds the
@@ -1827,12 +1839,15 @@ memory the device can write, transmit copies as per-byte C, interrupt
 acknowledgement, and
 the build check that register accessors are referenced only from the
 device NIF ([design-runtime.md](design-runtime.md#the-device-nif)); the
-block, network, GPU and input drivers in Erlang over virtio-mmio, each a
-row of the stopgap's device records, in the storage, network and display
+block and network drivers in Erlang over virtio-mmio, each a
+row of the stopgap's device records, in the storage and network
 domains that hold their devices, unconfined, written after sDDF's model
 of the driver-versus-policy split, with sDDF's published throughput as
 the oracle and nothing imported, and M6's block driver among them; the
-restart demo. Drivers run in their own domains rather than the system
+restart demo. The GPU and input drivers come with the display domain of
+track D's kiosk (1b-C's part 3,
+[track D](#track-d-windows-widgets-and-the-web)). Drivers run in their own
+domains rather than the system
 domain, since that is the structure a person sees and the device
 service's first real exercise; the unconfined DMA residual is the same
 either way. No task other than the root creates a device object: the
@@ -1883,12 +1898,12 @@ and the MSI frame's driver are the kernel part's.
 
 **Exit criteria, on the stopgap (1b-E).** A storage domain killed under
 load restarts with no acknowledged write lost; a littlefs failure ends the
-storage domain, which restarts and remounts with no acknowledged write lost,
+storage domain, which restarts and remounts with no acknowledged write lost;
 driver restarts under load
 lose no acknowledged data, and a device reset after a driver's crash
-returns every posted buffer to its pool; the drivers' descriptor parsers,
-the GPU's responses and the input events among them, survive their fuzz
-budgets, a hostile device model under QEMU writing malformed descriptors
+returns every posted buffer to its pool; the drivers' descriptor parsers
+survive their fuzz budgets; a hostile device model under QEMU writing
+malformed descriptors
 and completions crashes at most the driver process and never the runtime;
 `/dev` reads every device's status, and only the control facet's tree
 accepts `ctl` writes; the chokepoint check over the register accessors
@@ -2129,7 +2144,10 @@ an IOMMU window; the logged-in session holds only its principal's facets.
 budget; ASan, UBSan and TSan clean on the host builds and a UBSan kernel
 through the QEMU suite; the external review; unconfined DMA refused unless
 configured, device by device, and each unconfined device in a domain of
-its own; hostile code in the sub-spaces of a domain holding `SPACES`, and
+its own; the manifest check's refusal of the host link's `web` facet in a
+release manifest
+([design-web.md](design-web.md#the-host-tools-front-end)); hostile code in
+the sub-spaces of a domain holding `SPACES`, and
 a domain that churns sub-spaces
 ([design-kernel.md](design-kernel.md#security)); the hash check of EROFS
 images: the packer's dm-verity version 1 hash tree for each image and the
@@ -2162,7 +2180,9 @@ signature's small verifier pinned and built
 either fixed or recorded in `TODO.md` as accepted, with its reason. Every
 EROFS image the packer writes passes `erx_verity`'s check on the host; one byte flipped in an
 image fails the reads of its block with `eio` while every other file reads
-on; the hash-checking reader runs its fuzz budget clean. Release images are
+on; the hash-checking reader runs its fuzz budget clean; a release
+manifest that lists the host link's `web` facet fails the manifest check.
+Release images are
 built with exactly LLVM 23.1.3, and their SHA-256 hashes are published, so
 anyone can rebuild an image with that release and compare the bytes.
 
@@ -2585,7 +2605,7 @@ Phase 2:   M7 --> M2 --> M5's and M9's kernel parts --> G6 --> M8 --> M10 --> M1
   reach the boards with M12.
 * Track D runs beside the critical paths from the session domain on; no
   milestone needs it. Its first part, the browser over the host link,
-  needs no device and comes first; the desktop follows 1b-E, and its
+  needs no device and comes first; the desktop follows the kiosk, and its
   later parts wait for the milestones that bring their programs, boards,
   logins and network.
 * Host-buildable code (the C17 cores, the funnel and the lane reader, the
