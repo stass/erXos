@@ -92,6 +92,18 @@ class ManifestDomainsTest < Minitest::Test
     assert_equal 2, view.header.fetch('max_domains')
   end
 
+  # A row's boot_timeout_s reaches the encoded row; a row without one gets
+  # boot_timeout_default_s; 0 and anything past boot_timeout_max_s are refused.
+  def test_a_configured_domains_boot_timeout_is_its_own_or_the_default_within_bounds
+    alpha = "  restart_period_s 5\ndomain beta"
+    view = @codec.open('manifest', admit(@source.sub(alpha, "  restart_period_s 5\n  boot_timeout_s 90\ndomain beta")).bytes)
+    assert_equal [90, @codec.constant('boot_timeout_default_s')], rows(view, 'domains').map { |row| row.fetch('boot_timeout_s') }
+    [0, @codec.constant('boot_timeout_max_s') + 1].each do |seconds|
+      refused(Erx::Manifest::Invalid, 'source', 'domain.boot_timeout_s',
+              @source.sub(alpha, "  restart_period_s 5\n  boot_timeout_s #{seconds}\ndomain beta"))
+    end
+  end
+
   def test_the_report_counts_the_planned_domains
     report = admit.report
     assert_equal 'stopgap', report.fetch('mode')

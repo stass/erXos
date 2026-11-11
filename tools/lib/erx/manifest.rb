@@ -161,7 +161,7 @@ module Erx
         'runtime_limits' => %w[max_frame max_message_heap funnel_depth exports tmp overlay atoms foreign_atoms processes],
         'limits' => %w[memory outer grant spaces lane connections crash flags runtime_limits peer_held peer_held_total],
         'lane_class' => %w[lane],
-        'domain' => %w[principal limits kind flags runtime release restarts restart_period_s args env],
+        'domain' => %w[principal limits kind flags runtime release restarts restart_period_s boot_timeout_s args env],
         'session' => %w[limits runtime release args env],
         'unit' => %w[placement holder],
         'window' => %w[holder device role partition rights image],
@@ -170,7 +170,7 @@ module Erx
         'image' => %w[device input salt],
         'partial_boot' => %w[image]
       }.freeze
-      OPTIONAL = { 'machine' => %w[system_args], 'domain' => %w[args env], 'session' => %w[args env], 'service' => %w[name],
+      OPTIONAL = { 'machine' => %w[system_args], 'domain' => %w[boot_timeout_s args env], 'session' => %w[args env], 'service' => %w[name],
                    'facet' => %w[name queue], 'image' => %w[salt] }.freeze
       DIRECTIVES = { 'introduce' => 2, 'liveness' => 1, 'shell_principal' => 1 }.freeze
       IDENTIFIER = /\A[a-z0-9][a-z0-9_-]{0,62}\z/.freeze
@@ -933,9 +933,25 @@ module Erx
             'flags' => flags(record, 'flags', 'mf_domain_flags'), 'runtime' => runtime.fetch('entry'),
             'release' => release.fetch('entry'), 'release_files' => release.fetch('files'),
             'limits' => reference(record, 'limits', 'limits'), 'restarts' => number(record, 'restarts'),
-            'restart_period_s' => number(record, 'restart_period_s'),
+            'restart_period_s' => number(record, 'restart_period_s'), 'boot_timeout_s' => boot_timeout(record),
             'args' => args, 'env' => words(record, 'env') }
         end
+      end
+
+      # The seconds a configured domain's init has to report ready: its row's own, or
+      # boot_timeout_default_s where the row states none, from 1 to boot_timeout_max_s,
+      # the reader's bound (abi/manifest.txt).
+      def boot_timeout(record)
+        seconds = if record.properties.key?('boot_timeout_s')
+                    number(record, 'boot_timeout_s')
+                  else
+                    @codec.constant('boot_timeout_default_s')
+                  end
+        maximum = @codec.constant('boot_timeout_max_s')
+        return seconds if seconds.between?(1, maximum)
+
+        invalid("a configured domain's boot timeout of #{seconds} s is outside 1 to #{maximum} s", 'source',
+                'domain.boot_timeout_s')
       end
 
       # Property 14: each session template, keyed by its principal, from which the

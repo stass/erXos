@@ -433,14 +433,14 @@ served_terms(ErlNifEnv *env, ERL_NIF_TERM *services, ERL_NIF_TERM *grants)
  * What the domain service reads of the manifest's configured domains:
  * {ok, #{host => Host, domains => Rows, services => Services, grants =>
  * Grants}}, Rows in row order, each #{row, place, name, principal, kind,
- * restarts, restart_period_s}, place its place in the boot order, and
- * Services and Grants as served_terms makes them. The view is fixed at
- * boot, so this reads it without the lock.
+ * restarts, restart_period_s, boot_timeout_s}, place its place in the boot
+ * order, and Services and Grants as served_terms makes them. The view is
+ * fixed at boot, so this reads it without the lock.
  */
 static ERL_NIF_TERM
 configured_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	ERL_NIF_TERM keys[7], values[7], row, rows, host, services, grants, result;
+	ERL_NIF_TERM keys[8], values[8], row, rows, host, services, grants, result;
 	const erx_dom_configured_t *configured;
 	unsigned char *bytes;
 	uint32_t index;
@@ -466,7 +466,8 @@ configured_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		keys[4] = atom(env, "restarts"), values[4] = enif_make_uint(env, configured->restarts);
 		keys[5] = atom(env, "restart_period_s"), values[5] = enif_make_uint(env, configured->restart_period_s);
 		keys[6] = atom(env, "place"), values[6] = enif_make_uint(env, configured->place);
-		if (!enif_make_map_from_arrays(env, keys, values, 7, &row))
+		keys[7] = atom(env, "boot_timeout_s"), values[7] = enif_make_uint(env, configured->boot_timeout_s);
+		if (!enif_make_map_from_arrays(env, keys, values, 8, &row))
 			return (enif_make_badarg(env));
 		rows = enif_make_list_cell(env, row, rows);
 	}

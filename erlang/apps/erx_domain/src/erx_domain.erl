@@ -12,7 +12,8 @@ docs/design-runtime.md); a domain with no system connection, which has no way
 to report, is ready when its first thread runs. Spec names the domain, an
 identifier, and its boot script, boot, an identifier naming
 bin/<boot>.boot of the boot image's domain release, may set boot_timeout,
-how long in milliseconds init has to report (default 10000, or infinity),
+how long in milliseconds init has to report (default 60000, the system
+manifest's boot_timeout_default_s, or infinity),
 and gives the domain library's request fields directly (TODO.md, the
 request fields item): runtime, release and release_files (the boot image's
 indexes of the domain release's run), memory, outer, grant, lane, args,

@@ -470,6 +470,7 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 		row->kind = domain.kind;
 		row->restarts = domain.restarts;
 		row->restart_period_s = domain.restart_period_s;
+		row->boot_timeout_s = domain.boot_timeout_s;
 		row->place = UINT32_MAX;
 		view->nconfigured = index + 1;
 	}

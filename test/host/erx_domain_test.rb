@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # Runs the EUnit cases of the domain service (docs/design-system.md, "System
 # services"), compiled with warnings as errors on stock's emulator (ERX_ERL
@@ -21,6 +22,9 @@ require 'tmpdir'
 # erx_driver_ctl, the driver-control facet.
 class ErxDomainTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  # erx_domain_srv includes the generated erx_abi.hrl, in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_domain/src')
   SOURCES = [*Dir[File.join(APPLICATION, '*.erl')].sort,
              File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
@@ -66,7 +70,8 @@ class ErxDomainTest < Minitest::Test
 
   def assert_eunit_passes(mod, deadline:)
     Dir.mktmpdir('erx-domain-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *SOURCES, stdin_data: '')
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE, '-o', work, *SOURCES,
+                                       stdin_data: '')
       assert status.success?, output
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', deadline.to_s, ENV.fetch('ERX_ERL'), '-noshell',

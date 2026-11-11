@@ -1504,8 +1504,19 @@ it; git history is the record of completed work.
   shares, and which drops and counts each one no connection expects (design-system.md "What
   a domain sends the domain service"). A count is one integer per domain, but the time
   each message costs the pid and the service is not bounded. Bound what a domain can make the pid and the service spend.
-* [Low] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: configured domains
-  always get the default 10 s boot timeout; the manifest has no field for it.
+* [High] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`started/4`, the export step):
+  under TCG with 4 CPUs the configured storage domain fails to start at boot with
+  `{export,noconnection}`: `erx_dist:export/3` finds no connection to the domain's node right after
+  `open_side`, so the export races the side's connection coming up. One more domain id is then spent
+  (by a restart of storage, not yet confirmed), which shifts the session ids and fails the session_domain cell at
+  `relogin-listed`; HVF does not show it. Make the export wait for, or follow from, the open side.
+* [Medium] domain service and manifest check, `erx_domain_core:restart/5` and `tools/lib/erx/manifest.rb`
+  (`normalize_domains`): a configured row may restart `restarts` times within `restart_period_s`, and
+  a boot that hangs is stopped only after its `boot_timeout_s`, so a row with `restarts` above 0 and
+  `restart_period_s` at most `restarts` times `boot_timeout_s` never reaches its limit and restarts a
+  hung boot without end. Refuse such a row in the manifest check; the test rows derived from
+  MediumBoot's with `restarts 1` and `restart_period_s 5` (`system_domain_regrant.rb`,
+  `device_give.rb`) then need a longer period.
 * [Medium] facets, `erlang/apps/erx/src/erx_facet.erl` (`provide/2`) and `erx_domain_srv`: that a
   mint's end ends its domain, so its restart provides again and the grants are made anew, is each
   server's duty (a permanent application whose process the mint is), and nothing enforces it: a
@@ -4380,13 +4391,11 @@ to the corpus and follow rc
   or re-subscribe them.
 * [Medium] tests, the system_domain suite's 4-CPU cell under TCG on the second host
   (`tools/lib/erx/system_domain.rb`): under that host's load (load average about 25) the
-  service-kill boot failed twice at `echo-facet`, once with the configured domains past the 10 s
-  boot timeout and once with the system's Erlang shell ended at 31 s: `group` called
+  service-kill boot failed at `echo-facet` with the system's Erlang shell ended at 31 s: `group` called
   `shell:prompt_width/1`, which passed `{error, timeout}` from the terminal's options to
   `proplists:get_value/3` (function_clause), so the shell died under the long typed line. The cell
   passes under HVF. Make the shell take an options timeout (stock OTP's `shell.erl` has the same
-  code, so check it against stock first), and give the cell's configured rows a boot timeout that
-  TCG meets once the manifest has the field.
+  code, so check it against stock first).
 * [Low] shell, `ping` (`erlang/apps/erx_shell/src/erx_cmd_ping.erl`): every session is root's, so ping
   takes `-s` up to 65507 and `-i` down to 1 ms for everyone. Once sessions have users, a non-root
   session gets FreeBSD's limits: `-s` at most 56 bytes and `-i` at least 1 s (ping.c's `uid` checks).

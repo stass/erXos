@@ -88,12 +88,15 @@ lanes the domain and the system domain read.
 -doc """
 A configured domain of the system manifest: its row in the manifest's domain
 table, its place in the boot order (from 0), its name, an identifier the
-manifest check accepted, its principal, its kind, and its restart intensity:
-at most restarts restarts within restart_period_s seconds.
+manifest check accepted, its principal, its kind, its restart intensity:
+at most restarts restarts within restart_period_s seconds, and the seconds
+its init has to report ready, from 1 to the manifest reader's
+boot_timeout_max_s.
 """.
 -type configured() :: #{row := non_neg_integer(), place := non_neg_integer(), name := binary(),
                         principal := pos_integer(), kind := service | secret,
-                        restarts := non_neg_integer(), restart_period_s := non_neg_integer()}.
+                        restarts := non_neg_integer(), restart_period_s := non_neg_integer(),
+                        boot_timeout_s := pos_integer()}.
 
 -doc """
 A session template of the system manifest, from which each session of its

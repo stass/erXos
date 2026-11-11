@@ -71,6 +71,8 @@ reach it only through facets, which arrive with the connections.
 -export([start_link/0, start_link/1]).
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2]).
 
+-include("generated/erx_abi.hrl").
+
 %% Every domain is the system principal's, number 1, the one principal the library's
 %% view has (include/erx/dom.h, erx_dom_principal_t).
 -define(SYSTEM_PRINCIPAL, 1).
@@ -82,10 +84,12 @@ reach it only through facets, which arrive with the connections.
 %% id, principal and domain_pid, which the service sets, and facets, the service's own.
 -define(REQUEST_KEYS, [runtime, release, release_files, memory, outer, grant, lane, args, env,
                        connections, flags, spaces, limits, facets]).
-%% How long a domain's init has to report ready, in milliseconds, unless its request
-%% sets boot_timeout (docs/design-domains.md, "Erlang interface"); a configured domain
-%% always has this long.
--define(BOOT_TIMEOUT, 10000).
+%% How long a session's init has to report ready, in milliseconds, and a requested
+%% domain's unless its request sets boot_timeout (docs/design-domains.md, "Erlang
+%% interface"): the manifest's default for a configured row, so every domain the
+%% machine boots has one default. A configured domain has its row's boot_timeout_s,
+%% which the manifest's reader bounds (abi/manifest.txt).
+-define(BOOT_TIMEOUT, (?ERX_BOOT_TIMEOUT_DEFAULT_S * 1000)).
 %% How long an introduce/2 caller waits for the connection to come up at both ends, in
 %% milliseconds, unless start_link/1's introduce_timeout sets it (docs/design-domains.md,
 %% "Erlang interface").
@@ -464,14 +468,16 @@ start_session(Principal, Facets, #{templates := Templates} = State) ->
             {{error, no_template}, State}
     end.
 
-start_configured(#{row := Row, name := Name, principal := Principal}, #{lib := Lib} = State) ->
+%% A configured row, which has its own boot_timeout_s to report ready in.
+start_configured(#{row := Row, name := Name, principal := Principal, boot_timeout_s := Seconds},
+                 #{lib := Lib} = State) ->
     case erx_ident:new(Name) of
         {error, bad_identifier} ->
             logger:error("erx_domain: configured row ~b has no identifier for a name", [Row]),
             State;
         Ident ->
             Make = fun(Id, Pid) -> Lib:configured(Id, Row, Pid) end,
-            case build(Ident, Principal, {configured, Row}, Make, #{}, ?BOOT_TIMEOUT, State) of
+            case build(Ident, Principal, {configured, Row}, Make, #{}, Seconds * 1000, State) of
                 {{error, Reason}, Next} ->
                     logger:error("erx_domain: configured domain ~ts did not start: ~0p", [Name, Reason]),
                     Next;

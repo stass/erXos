@@ -6,6 +6,15 @@ limit manifest_bytes_max u32 16777216
 limit manifest_records_max u32 65536
 limit manifest_strings_max u32 4194304
 limit mf_none u32 0xffffffff
+# The seconds a configured domain's init has to report ready to the domain
+# service: its row's boot_timeout_s, which the manifest source may leave out
+# for the default, and which the reader bounds to 1 .. boot_timeout_max_s, so
+# its milliseconds fit an Erlang timer. The default is also a session's and a
+# create request's. It suits an emulated machine as well as hardware: QEMU
+# virt under TCG on a loaded host takes longer than 10 s to boot a BeamAsm
+# domain, and a longer default only notices a hung boot later.
+limit boot_timeout_default_s u32 60
+limit boot_timeout_max_s u32 3600
 limit quota_none u64 0xffffffffffffffff
 flags manifest_flags u16
   bit development 0
@@ -161,10 +170,9 @@ layout erx_mf_domain wire_le 8 64
   field limits u32 32
   field restarts u32 36
   field restart_period_s u32 40
-  field reserved u32 44
+  field boot_timeout_s u32 44
   field args erx_mf_str 48
   field env erx_mf_str 56
-  zero reserved all
 layout erx_mf_session wire_le 8 40
   field principal u32 0
   field limits u32 4
@@ -310,6 +318,7 @@ reader manifest erx_manifest @manifest_bytes_max
   range root.max_domains 0 65536
   range root.max_connections 1 65536
   range root.system_reserve 1 1000
+  range domains[].boot_timeout_s 1 @boot_timeout_max_s
   choice root.flags manifest_mode root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.partial_boot.count
     case release root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count
     case development root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count

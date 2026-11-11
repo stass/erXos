@@ -22,7 +22,7 @@ mints_test_() ->
 
 setup() ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
-                                     restarts => 3, restart_period_s => 60} end,
+                                     restarts => 3, restart_period_s => 60, boot_timeout_s => 60} end,
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)],
                           services => [{1, echo}],
@@ -174,7 +174,7 @@ served_test() ->
 
 served_setup() ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
-                                     restarts => 0, restart_period_s => 60} end,
+                                     restarts => 0, restart_period_s => 60, boot_timeout_s => 60} end,
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)], services => [],
                           grants => [{0, log, system, #{max_request => 64, in_flight => 2, queue => 4096}},

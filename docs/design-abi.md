@@ -1275,7 +1275,7 @@ runtime defaults.
 | Record and size | Fields |
 | --- | --- |
 | principal, 80 | `0: name str`; `8: memory u64`; `16: grant share`; `64: domains u32`; `68: names u32`; `72: default_limits u32`; `76: ceiling_limits u32` |
-| configured domain, 64 | `0: name str`; `8: principal u32`; `12: kind u32`; `16: flags u32`; `20: runtime u32`; `24: release u32`; `28: release_files u32`; `32: limits u32`; `36: restarts u32`; `40: restart_period_s u32`; `44: reserved u32`; `48: args str`; `56: env str` |
+| configured domain, 64 | `0: name str`; `8: principal u32`; `12: kind u32`; `16: flags u32`; `20: runtime u32`; `24: release u32`; `28: release_files u32`; `32: limits u32`; `36: restarts u32`; `40: restart_period_s u32`; `44: boot_timeout_s u32`; `48: args str`; `56: env str` |
 | domain limits, 160 | `0: name str`; `8: memory u64`; `16: outer u64`; `24: grant share`; `72: spaces share`; `120: lane u32`; `124: connections u32`; `128: crash u32`; `132: flags u32`; `136: runtime_limits u32`; `140: reserved u32`; `144: peer_held u64`; `152: peer_held_total u64` |
 | runtime limits, 56 | `0: name str`; `8: max_frame u32`; `12: max_message_heap u32`; `16: funnel_depth u32`; `20: exports u32`; `24: tmp u64`; `32: overlay u64`; `40: atoms u32`; `44: foreign_atoms u32`; `48: processes u32`; `52: reserved u32` |
 | lane class, 16 | `0: name str`; `8: lane u32`; `12: reserved u32` |
@@ -1611,7 +1611,7 @@ field or computed charge is an accepted property.
 | `runtime_limits NAME` | exactly the nine non-name, non-reserved fields of the packed runtime-limits record, each an integer |
 | `limits NAME` | its packed scalar fields except name, reserved and runtime index; `grant` share reference; `spaces` share reference or `none`; `runtime_limits` runtime-limits reference; `flags` flag list |
 | `lane_class NAME` | `lane` integer |
-| `domain NAME` | `principal`, `limits` references; `kind service\|secret`; `flags` flag list; `runtime`, `release` artifact references; `restarts`, `restart_period_s` integers; `args`, `env` vectors |
+| `domain NAME` | `principal`, `limits` references; `kind service\|secret`; `flags` flag list; `runtime`, `release` artifact references; `restarts`, `restart_period_s` integers; `boot_timeout_s` integer, 1 to `boot_timeout_max_s` (3,600), `boot_timeout_default_s` (60) when absent; `args`, `env` vectors |
 | `session PRINCIPAL` | the session template of the principal its name names, so a principal has one; `limits` reference; `runtime`, `release` artifact references; `args`, `env` vectors |
 | `unit NAME` | `placement` string naming a complete checked platform unit; `holder` domain reference or `system` |
 | `window NAME` | `holder` domain reference; `device` checked platform-device string; `role` declared role name; `partition` integer; `rights` flag list; `image` image reference or `none` |

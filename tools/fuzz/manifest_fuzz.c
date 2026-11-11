@@ -9,7 +9,7 @@
  * each row its header counts reads back, and the row one past the end does not.
  * The domain library's boot view (liberx/system/dom_boot_view.c) then reads every
  * manifest the reader accepts, as the root does next, and what it admits must keep
- * the placement and string rules it exists for (view_check).
+ * the placement, string and boot timeout rules it exists for (view_check).
  */
 
 #include <stddef.h>
@@ -98,6 +98,9 @@ view_check(const erx_manifest_view_t *view, const erx_dom_lib_t *lib)
 	for (uint32_t index = 0; index < dom->nconfigured; index++) {
 		row = &dom->configured[index];
 		if ((uint64_t)row->args_len + row->env_len + 2u * ERX_DOM_NODE_MAX > ERX_BOOT_STRINGS_MAX)
+			abort();
+		/* The domain service makes it milliseconds of an Erlang timer. */
+		if (row->boot_timeout_s < 1 || row->boot_timeout_s > ERX_BOOT_TIMEOUT_MAX_S)
 			abort();
 	}
 }

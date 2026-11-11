@@ -71,6 +71,7 @@ module AbiErlangFixture
     AbiManifestFixture.integer(body, 484, 2)
     AbiManifestFixture.integer(body, 488, 2)
     AbiManifestFixture.integer(body, 492, 1)
+    AbiManifestFixture.integer(body, 508, 10) # the row's boot_timeout_s, from 1
     AbiManifestFixture.span(body, 512, 40, 0)
     AbiManifestFixture.span(body, 520, 40, 0)
     AbiManifestFixture.span(body, 744, 40, 7)

@@ -10,8 +10,9 @@ require_relative '../lib/erx/manifest'
 module Erx
   # The seeds of the targets that read a system manifest: the bytes the packer writes.
   # QEMU virt's development manifest, as Phase 1's check admits it for a production image,
-  # the same with configured domains (ManifestContextFixture.domain_source), and the empty
-  # native manifest of the structural test images, with prefixes of the first.
+  # the same with configured domains (ManifestContextFixture.domain_source), the empty
+  # native manifest of the structural test images, with prefixes of the first, and the
+  # configured domains' with its first row's boot_timeout_s 0, which the reader refuses.
   module ManifestSeeds
     module_function
 
@@ -33,7 +34,16 @@ module Erx
                                context: Manifest::Context.new(**ManifestContextFixture.domain_arguments(codec), platform: platform),
                                planner: ManifestContextFixture.accepting_planner)
       PackFuzz.prefix_seeds(development.bytes).merge('empty' => empty.bytes, 'system-args-escape' => escape.bytes,
-                                                     'domains' => domains.bytes)
+                                                     'domains' => domains.bytes,
+                                                     'boot-timeout-zero' => boot_timeout(codec, domains.bytes, 0))
+    end
+
+    # The manifest bytes with their first configured domain's boot_timeout_s set to seconds.
+    def boot_timeout(codec, bytes, seconds)
+      offset = codec.open('manifest', bytes).header.fetch('domains').fetch('offset')
+      row = codec.decode_layout('erx_mf_domain', bytes, offset: offset, prefix: true)
+      encoded = codec.encode_layout('erx_mf_domain', row.merge('boot_timeout_s' => seconds))
+      bytes.b.tap { |copy| copy[offset, encoded.bytesize] = encoded }
     end
   end
 end

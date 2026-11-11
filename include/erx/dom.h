@@ -308,6 +308,8 @@ typedef struct erx_dom_configured {
 	uint32_t	kind;		/* ERX_MF_SERVICE or ERX_MF_SECRET */
 	uint32_t	restarts;	/* its restart intensity: at most restarts */
 	uint32_t	restart_period_s; /* within this many seconds */
+	uint32_t	boot_timeout_s;	/* its init reports ready within this many
+					 * seconds, 1 to ERX_BOOT_TIMEOUT_MAX_S */
 	uint32_t	place;		/* its place in the boot order, from 0 */
 	/* Its arguments and environment, NUL-terminated words in the manifest's
 	 * strings as a request's are in its own; args_len + env_len <=

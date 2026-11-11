@@ -10,9 +10,10 @@
 %% refused, so it never ends. It also
 %% stands in for the export table (erx_dist:export/3). A started domain's init
 %% reports ready to its domain pid at once, in its envelope from the domain,
-%% naming an agent of the domain's node, unless the domain is named silent,
-%% whose init never reports, or overtaken, which ends at its start and whose
-%% report its side hands the domain pid only at close_side, as the lane
+%% naming an agent of the domain's node, unless the domain is named silent
+%% or late, whose init never reports (a test sends late's report itself), or
+%% overtaken, which ends at its start and whose report its side hands the
+%% domain pid only at close_side, as the lane
 %% driver's finish reads the lane to its end, or behind, which ends at its start
 %% and whose report reaches the domain pid behind the service's domain_down, the
 %% pid suspended from close_side until retire, which the service calls after it
@@ -60,9 +61,9 @@ register() -> ok.
 configured() ->
     {ok, maps:merge(#{host => <<"erxos">>,
                       domains => [#{row => 0, place => 1, name => <<"b">>, principal => 1, kind => service,
-                                    restarts => 1, restart_period_s => 60},
+                                    restarts => 1, restart_period_s => 60, boot_timeout_s => 60},
                                   #{row => 1, place => 0, name => <<"a">>, principal => 1, kind => service,
-                                    restarts => 1, restart_period_s => 60}]},
+                                    restarts => 1, restart_period_s => 60, boot_timeout_s => 60}]},
                     persistent_term:get({?MODULE, boot}, #{}))}.
 templates() -> {ok, [#{template => 0, principal => 1}]}.
 session(Id, Template, Name, DomainPid) when is_pid(DomainPid) ->
@@ -91,7 +92,7 @@ create(#{id := Id, name := Name, domain_pid := DomainPid} = Spec) ->
     log({create, Spec}), {ok, created(Id, maps:get(connections, Spec, 4))}.
 start(Id) ->
     case get({domain, Id}) of
-        {_, <<"silent">>} -> ok;
+        {_, Quiet} when Quiet =:= <<"silent">>; Quiet =:= <<"late">> -> ok;
         {_, Ends} when Ends =:= <<"overtaken">>; Ends =:= <<"behind">> ->
             erx_domain_srv ! {domain_ended, Id, {halt, 0}, #{}};
         {DomainPid, Name} -> DomainPid ! {erx_origin, Id, {erx_ready, ready_report(Name, Id)}}

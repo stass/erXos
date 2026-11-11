@@ -284,8 +284,11 @@ check below over it, and packs the result. The manifest holds:
   or `secret`); its runtime image and release, as boot-image entries; its
   own and outer budgets, grant, lane size, `connections` quota and crash
   area; whether it holds `SPACES`, and its sub-space group's grant; its
-  restart intensity, whether it is `required`, and whether the rescue
-  configuration starts it; its arguments and environment; its **devices**,
+  restart intensity, the seconds its runtime has to report ready (its
+  boot timeout, 60 unless the row says otherwise, a default sessions and
+  create requests share, long enough for an emulated machine), whether
+  it is `required`, and whether the rescue configuration starts it; its
+  arguments and environment; its **devices**,
   given by unit ([Devices](#devices)), each by device-tree path or, for a
   PCIe function, by its place on a bus, with its compatible string, its
   mark as confined or unconfined if it masters DMA, the size of its memory
@@ -3397,7 +3400,7 @@ partition, as a fresh installation does.
 | --- | --- | --- | --- | --- |
 | A malformed creation specification | the planning entries | nothing | none needed | the status code in the domain service; a counter |
 | A creation step fails | the step's status | nothing: the applied steps undone by destroying the domain's two budgets (A4) | the domain library | `erx_domain:create/1` returns the mapped error |
-| A domain's runtime never reports ready | the spec's boot timeout | the built domain | the domain service stops it, and it ends as any domain does | `{error, timeout}`; a log line |
+| A domain's runtime never reports ready | the spec's boot timeout, or a configured domain's row's | the built domain | the domain service stops it, and it ends as any domain does | a log line; for a request, `{error, timeout}` |
 | A domain ends | the fault gate | nothing of its own budget, which the fault thread destroyed at once, its devices' objects with it; each connection's child budget of its outer budget until both parties have let go of that connection; its crash area until the domain service reads it at the retire; its outer budget, as its remains, until no connection names it | the library, the domain service | `{domain_down, D, Info}` in linked processes; `noconnection` across every connection of the domain; the death record in the inspector |
 | A peer never answers `connection_down` | the domain service's record, which shows the connection closing | that connection's child budget, its sides and bells, and with it the dead domain's outer budget as its remains, whose other children go as their parties let go; within the survivor's own `connections` quota; the dead domain itself is retired at its end, and a configured one restarts | the survivor, when it unmaps or ends; then the domain service asks `erx_dom_disconnect`, which destroys the remains with the last connection | the inspector shows the connection closing, with the party that holds it |
 | A domain sends the domain service a malformed message, or one about a connection it is not a party to | the generated admission and the connection's state | nothing | none needed: the message is dropped | a counter on the sending domain |

@@ -107,6 +107,10 @@
 # The image release is the system release's EROFS image in the slot, with no
 # hash tree; the packer takes its extent from the image it builds
 # (ReleaseMedium.image), and the storage domain holds a read-only window on it.
+#
+# The storage domain restarts at most 5 times in 600 s: a boot that hangs is
+# stopped after the default 60 s boot timeout, so a shorter period would never
+# see 5 of them and would restart a hung storage domain without end.
 manifest 1
 share system
   quota_ns 30000000
@@ -305,7 +309,7 @@ domain storage
   runtime @artifact.jit
   release @artifact.storage
   restarts 5
-  restart_period_s 60
+  restart_period_s 600
   args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx"
 service storage_ctl
   server @domain.storage

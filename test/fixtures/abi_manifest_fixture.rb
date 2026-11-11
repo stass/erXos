@@ -117,6 +117,7 @@ module AbiManifestFixture
     domain = "\0".b * 64
     span(domain, 0, 18, 4)
     integer(domain, 12, 2)
+    integer(domain, 44, 10) # boot_timeout_s, which the reader takes from 1
     service = "\0".b * 24
     span(service, 0, 18, 4)
     integer(service, 8, 0xffffffff)
