@@ -126,6 +126,41 @@ class AbiErlangTest < Minitest::Test
     assert_equal expected, File.binread(record.fetch('log'))
   end
 
+  # erx_prog:status/1 over every kind of end (docs/design-programs.md, "A
+  # program's end"): ERX_EXIT_SIGNAL + N for N from 0 to 255 is signaled
+  # with the name erx_abi_signals gives N, or exited 255 where it gives
+  # none; a halt 0 to 255 is exited with it; ERX_EXIT_PARENT is signaled
+  # sigkill; each fault kind gives its fault table's signal; and every other
+  # status, the kernel's nothread and released, crash and a fault record of
+  # no fault kind, exit's included, is exited 255.
+  def test_generated_status_reads_every_end
+    @runner.run([File.join(@oracle, 'erlc'), '-Werror', '-o', @directory,
+                 File.join(@directory, 'erx_abi_signals.erl'), File.join(@directory, 'erx_prog.erl')],
+                name: 'erlc-status', deadline: 60, env: @environment)
+    script = <<~ERLANG.tr("\n", ' ')
+      Signals = [erx_prog:status(256 + N) =:= case erx_abi_signals:name(N) of
+                                                  unknown -> {exited, 255};
+                                                  Name -> {signaled, Name}
+                                              end || N <- lists:seq(0, 255)],
+      Halts = [erx_prog:status(N) =:= {exited, N} || N <- lists:seq(0, 255)],
+      io:format("~w ~w~n", [lists:usort(Signals), lists:usort(Halts)]),
+      io:format("~w~n", [[erx_prog:status(S) || S <- [256 + 11, 256 + 33, 256 + 66, 256 + 126, -1, 512,
+                          -9223372036854775807, -9223372036854775806, -9223372036854775805,
+                          -9223372036854775804]]]),
+      io:format("~w~n", [[erx_prog:status({fault, K}) || K <- lists:seq(0, 10)]]),
+      halt().
+    ERLANG
+    record = @runner.run([File.join(@oracle, 'erl'), '+S', '1:1', '+SDcpu', '1', '+SDio', '1', '-noshell',
+                          '-noinput', '-pa', @directory, '-eval', script], name: 'status', deadline: 60, env: @environment)
+    expected = "[true] [true]\n" \
+               "[{signaled,sigsegv},{exited,255},{signaled,'sigrtmin+1'},{signaled,sigrtmax},{exited,255}," \
+               "{exited,255},{signaled,sigkill},{exited,255},{exited,255},{exited,255}]\n" \
+               '[{exited,255},{signaled,sigsegv},{signaled,sigbus},{signaled,sigill},{signaled,sigbus},' \
+               '{signaled,sigtrap},{signaled,sigsys},{signaled,sigbus},{signaled,sigkill},{exited,255},' \
+               "{exited,255}]\n"
+    assert_equal expected, File.binread(record.fetch('log'))
+  end
+
   private
 
   def write_partition_and_parameter_fixtures

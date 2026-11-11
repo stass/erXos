@@ -178,12 +178,28 @@ flags right u8
   bit introduce 4
 # The first three are the kernel's own, which erx_space_stop refuses as a
 # status; crash is a runtime's, which stops its space with it after its
-# crash dump.
+# crash dump. signal is the base of an end by a signal: a space stopped
+# with signal + N, N a number of the signal table, ended by signal N, and
+# a status 0 to 255 is a halt with that status (docs/design-programs.md,
+# "A program's end").
 enum exit_kind i64
   value parent -9223372036854775807
   value released -9223372036854775806
   value nothread -9223372036854775805
   value crash -9223372036854775804
+  value signal 256
+# The fault table: the signal whose number, added to ERX_EXIT_SIGNAL, a
+# program's space stops with when one of its threads faults with each
+# kind. Every fault kind but exit, which marks a space's exit record, has
+# one row, or generation fails.
+fault memory segv
+fault deleted bus
+fault undefined ill
+fault alignment bus
+fault breakpoint trap
+fault foreign_trap sys
+fault async_error bus
+fault budget kill
 enum budget_kind u32
   value wall 1
   value elastic 2

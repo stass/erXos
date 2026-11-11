@@ -15,6 +15,9 @@ module Erx
     # The signal table: every signal in number order, and each alias with
     # the name of the signal it stands for.
     SignalTable = Struct.new(:signals, :aliases, keyword_init: true)
+    # One row of the fault table: a fault kind's name and number, and the
+    # signal that ends a program whose thread faults with that kind.
+    FaultSignal = Struct.new(:kind, :value, :signal, keyword_init: true)
 
     # The signal and realtime lines of abi/signals.txt
     # (docs/design-programs.md, "Signal numbers").
@@ -25,6 +28,8 @@ module Erx
       NAME = /\A[a-z][a-z0-9]{0,15}\z/
       # FreeBSD's _SIG_MAXSIG: signal numbers are 1 to 128.
       MAX_NUMBER = 128
+      # The fault_kind member that marks a space's exit record, not a fault.
+      NOT_A_FAULT = 'exit'
 
       module_function
 
@@ -39,6 +44,54 @@ module Erx
         unique(signals.map(&:number), label: 'signal number', line: line)
         unique(signals.map(&:name) + aliases.keys, label: 'signal name', line: line)
         SignalTable.new(signals: signals.map(&:freeze).freeze, aliases: aliases.freeze).freeze
+      end
+
+      # The fault lines (fault KIND SIGNAL) against the fault_kind enum, in
+      # kind order (docs/design-programs.md, "A program's end"). The table is
+      # total: every kind but exit has exactly one row, and each row names a
+      # signal a program may name, so a kind added without a signal fails
+      # generation.
+      def faults(by_kind, types, table)
+        rows = by_kind.fetch('fault', [])
+        kinds = types['fault_kind']&.members
+        if kinds.nil?
+          rows.first&.fail!('the fault table needs the fault_kind enum')
+          return [].freeze
+        end
+        signals = table.signals.select(&:nameable?).to_h { |signal| [signal.name, signal] }
+        listed = rows.map { |declaration| fault(declaration, kinds, signals) }
+        rows.zip(listed).group_by { |_row, entry| entry.kind }.each_value do |pairs|
+          pairs[1]&.first&.fail!("duplicate fault kind #{pairs[1].last.kind}")
+        end
+        missing = kinds.keys - [NOT_A_FAULT] - listed.map(&:kind)
+        raise SchemaError, "fault kind #{missing.first} has no signal in the fault table" if missing.any?
+
+        exit_statuses(types)
+        raise SchemaError, 'the fault table needs the signal kill' unless signals.key?('kill')
+        listed.sort_by(&:value).freeze
+      end
+
+      # What erx_prog:status/1 reads beside the tables: exit_kind's parent,
+      # and its signal above every halt status 0 to 255, so that no halt
+      # reads as a signal, with every signal number below the next value.
+      def exit_statuses(types)
+        values = types['exit_kind']&.members || {}
+        raise SchemaError, 'the fault table needs exit_kind parent and signal' unless
+          values.key?('parent') && values.key?('signal')
+
+        base = values.fetch('signal')
+        clash = values.values.find { |value| value != base && value.between?(base, base + MAX_NUMBER) }
+        raise SchemaError, 'exit_kind signal must exceed 255' unless base > 255
+        raise SchemaError, "exit_kind value #{clash} lies among the signal statuses" if clash
+      end
+
+      def fault(declaration, kinds, signals)
+        declaration.fail!('fault does not take members') unless declaration.members.empty?
+        declaration.fail!('expected fault KIND SIGNAL') unless declaration.args.size == 2
+        kind, name = declaration.args
+        declaration.fail!("#{kind} is no fault kind") if kind == NOT_A_FAULT || !kinds.key?(kind)
+        declaration.fail!("fault #{kind} names no signal a program may name") unless signals.key?(name)
+        FaultSignal.new(kind: kind.freeze, value: kinds.fetch(kind), signal: signals.fetch(name)).freeze
       end
 
       # The constants of the table: sig and the name of each signal whose

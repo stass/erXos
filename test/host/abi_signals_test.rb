@@ -81,6 +81,60 @@ class AbiSignalsTest < Minitest::Test
     end
   end
 
+  # The fault table gives each fault kind of abi/kernel.txt but exit the
+  # signal docs/design-programs.md's "A program's end" names, and
+  # erx_fault_signal answers it by the kind's number, and 0 for any other.
+  def test_fault_table_and_its_c_lookup
+    Dir.mktmpdir('erx-abi-faults-c-') do |work|
+      header = File.join(work, 'erx/abi.h')
+      FileUtils.mkdir_p(File.dirname(header))
+      File.write(header, header_of(ROOT))
+      source = File.join(work, 'faults.c')
+      File.write(source, <<~C)
+        #include <stdio.h>
+        #include <erx/abi.h>
+
+        int
+        main(void)
+        {
+        	printf("%lld", (long long)ERX_EXIT_SIGNAL);
+        	for (uint32_t kind = 0; kind <= 10; kind++)
+        		printf(" %d", erx_fault_signal(kind));
+        	printf(" %d\\n", erx_fault_signal(UINT32_MAX));
+        	return (0);
+        }
+      C
+      binary = File.join(work, 'faults')
+      execute(*LIMIT, ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-Wall', '-Wextra', '-Werror', '-I', work,
+          '-o', binary, source)
+      assert_equal "256 0 11 10 4 10 5 12 10 9 0 0 0\n", execute(*LIMIT, binary)
+    end
+  end
+
+  # Seeded fault: a fault kind without a row in the fault table fails
+  # generation, and so do a row for exit, which is no fault, a second row
+  # for a kind, a row naming a signal no program may name, and a signal
+  # base that would read a halt status as a signal.
+  def test_fault_table_must_be_total
+    {
+      ->(text) { text.sub(/^fault budget kill\n/, '') } => /fault kind budget has no signal/,
+      ->(text) { text + "fault exit kill\n" } => /exit is no fault kind/,
+      ->(text) { text + "fault memory bus\n" } => /duplicate fault kind memory/,
+      ->(text) { text.sub(/^  value signal 256$/, '  value signal 128') } => /exit_kind signal must exceed 255/,
+      ->(text) { text.sub(/^fault budget kill$/, 'fault budget thr') } => /fault budget names no signal/
+    }.each do |seed, message|
+      Dir.mktmpdir('erx-abi-faults-') do |root|
+        FileUtils.cp_r(File.join(ROOT, 'abi'), root)
+        path = File.join(root, 'abi/erx_abi.txt')
+        text = File.read(path)
+        refute_equal text, seed.call(text)
+        File.write(path, seed.call(text))
+        error = assert_raises(Erx::ABI::SchemaError) { header_of(root) }
+        assert_match message, error.message
+      end
+    end
+  end
+
   private
 
   def action_value(action)

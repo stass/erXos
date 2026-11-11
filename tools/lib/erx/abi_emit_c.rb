@@ -164,7 +164,23 @@ module Erx
          'static inline bool', 'erx_sig_valid(int signo)', '{',
          "\tint action = erx_sig_action(signo);", '',
          "\treturn (action != #{constant('sig_action_none')} && action != #{constant('sig_action_reserved')});",
-         '}', '']
+         '}', ''] + fault_table(schema)
+      end
+
+      # The fault table's lookup by fault kind (docs/design-programs.md, "A
+      # program's end"), a switch over the kinds it lists.
+      def fault_table(schema)
+        return [] if schema.faults.empty?
+
+        cases = schema.faults.flat_map do |row|
+          ["\tcase #{constant("fault_#{row.kind}")}:", "\t\treturn (#{constant("sig#{row.signal.name}")});"]
+        end
+        ['/*', ' * The fault table\'s signal for a fault kind: a program whose thread faults',
+         ' * with that kind ends as if by that signal, its space stopped with',
+         " * #{constant('exit_signal')} plus the signal's number. 0 for #{constant('fault_exit')}, which",
+         ' * marks an exit record, and for a number no fault kind holds.', ' */',
+         'static inline int', 'erx_fault_signal(uint32_t kind)', '{', "\tswitch (kind) {", *cases,
+         "\tdefault:", "\t\treturn (0);", "\t}", '}', '']
       end
 
       # A signal name in upper case as a C string literal: the table holds

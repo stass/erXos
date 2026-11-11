@@ -27,6 +27,8 @@ module Erx
         result = { 'erlang/apps/erx/include/generated/erx_abi.hrl' => header(schema),
                    'erlang/apps/erx/src/generated/erx_abi_events.erl' => events(schema),
                    'erlang/apps/erx/src/generated/erx_abi_signals.erl' => signals(schema) }
+        # Beside erx_prog_grammar, the program protocol's other generated module.
+        result['otp/erts/preloaded/src/erx_prog.erl'] = program_status(schema) if schema.faults&.any?
         schema.readers.each do |specification|
           module_name = Names.c(specification.name)
           unless module_name.match?(/\Aerx_[a-z][a-z0-9_]*\z/) && module_name.bytesize <= 255
@@ -130,6 +132,48 @@ module Erx
          '-spec default_action(atom()) -> action() | unknown.',
          clauses.call('default_action', nameable.map { |signal| [name.call(signal), atom(signal.action)] }), '']
           .join("\n")
+      end
+
+      # erx_prog: status/1, the one reading of a program's end
+      # (docs/design-programs.md, "A program's end"). Its clauses come from
+      # the signal table, the fault table and exit_kind's signal and parent,
+      # which the model has checked (Signals.faults); the two catch-all
+      # clauses take every other status and fault record.
+      def program_status(schema)
+        value = ->(name) { schema.constants.fetch(name).value }
+        signal_atom = ->(signal) { literal(atom("sig#{signal.name}")) }
+        nameable = schema.signals.signals.select(&:nameable?)
+        kill = nameable.find { |signal| signal.name == 'kill' }
+        fault_clauses = schema.faults.map do |row|
+          "%% fault_kind #{row.kind}.\nstatus({fault, #{row.value}}) -> {signaled, #{signal_atom.call(row.signal)}}"
+        end
+        clauses = ['status(Status) when is_integer(Status), Status >= 0, Status =< 255 -> {exited, Status}',
+                   "status(Status) when is_integer(Status), Status > ?EXIT_SIGNAL, Status =< ?EXIT_SIGNAL + 255 ->\n" \
+                   '    signaled(Status - ?EXIT_SIGNAL)',
+                   "status(?EXIT_PARENT) -> {signaled, #{signal_atom.call(kill)}}", *fault_clauses,
+                   'status(Status) when is_integer(Status) -> {exited, 255}',
+                   'status({fault, Kind}) when is_integer(Kind) -> {exited, 255}']
+        # A function of its own whose clauses are small integers only: stock
+        # OTP 29.1.2's JIT faults on a jump table that shares its select with
+        # a bignum such as ERX_EXIT_PARENT when the argument falls in a gap.
+        signaled = [*nameable.map { |signal| "signaled(#{signal.number}) -> {signaled, #{signal_atom.call(signal)}}" },
+                    'signaled(_) -> {exited, 255}']
+        [NOTICE, '-module(erx_prog).',
+         %(-moduledoc "The reading of a program's end: the status its parent's wait and rc's $status see".),
+         '-export([status/1]).', '-export_type([status/0]).', '',
+         "-define(EXIT_SIGNAL, #{value.call('exit_signal')}). % ERX_EXIT_SIGNAL",
+         "-define(EXIT_PARENT, #{value.call('exit_parent')}). % ERX_EXIT_PARENT", '',
+         '-type status() :: {exited, 0..255} | {signaled, atom()}.', '',
+         "%% The status of a program's end, read from the exit status its space",
+         '%% stopped with or from the kind of a fault record of one of its threads.',
+         '%% A halt 0 to 255 is exited with it. ERX_EXIT_SIGNAL plus a signal a',
+         "%% program may name, the stop of its parent's end and each fault kind are",
+         "%% signaled. Every other status, the kernel's nothread among them, and a",
+         '%% fault record of no fault kind are exited 255.',
+         '-spec status(integer() | {fault, integer()}) -> status().',
+         clauses.join(";\n") + '.', '',
+         '%% The end by signal N, or exited 255 for an N that is no signal a program may name.',
+         signaled.join(";\n") + '.', ''].join("\n")
       end
 
       def status_function(schema)

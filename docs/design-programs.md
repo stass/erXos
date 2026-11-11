@@ -1199,13 +1199,15 @@ driver turns a fault record into the program's end: it stops the anchor
 with `ERX_EXIT_SIGNAL` plus the signal the ABI file's fault table gives the
 fault's kind, and keeps the record for the shell. An exit record reaches
 the handler as the port's exit status, and one pure function,
-`erx_prog:status/1`, maps it to the status the parent's `wait` sees and to
-rc's `$status`:
+`erx_prog:status/1`, maps it, or `{fault, Kind}` for a fault record of
+kind `Kind`, to the status the parent's `wait` sees, `{exited, N}` or
+`{signaled, Signal}`, and to rc's `$status`. `ERX_EXIT_SIGNAL` is 256, so
+no halt status from 0 to 255 reads as a signal:
 
 | The image ended by | Status | `$status` |
 | --- | --- | --- |
 | a halt with status `n` from 0 to 255, which `exit(s)`, `_Exit(s)` and a return of `s` from `main` give as `n = s & 0xff` | exited `n` | empty for 0, else `n` |
-| a halt with status `ERX_EXIT_SIGNAL + n`, `n` a signal of the ABI file's signal table: a signal's default action, or `abort`, a failed assertion and `liberx`'s own fatal path, which halt with `SIGABRT` | signaled `n` | the signal's name, such as `sigint` |
+| a halt with status `ERX_EXIT_SIGNAL + n`, `n` a signal of the ABI file's signal table that a program may name: a signal's default action, or `abort`, a failed assertion and `liberx`'s own fatal path, which halt with `SIGABRT` | signaled `n` | the signal's name, such as `sigint` |
 | a fault of kind `k`, which the port driver turned into a stop | signaled with the signal the fault table gives `k`: `SIGSEGV` for a memory fault, `SIGBUS` for an alignment fault, an asynchronous error or an access to memory whose object was deleted, `SIGILL` for an undefined instruction, `SIGTRAP` for a breakpoint, `SIGSYS` for a foreign system-call trap or a frame outside the program protocol's grammar, `SIGKILL` for an exhausted budget | the signal's name; the shell prints the fault record |
 | a stop by its session: `SIGKILL`, its parent's end (`ERX_EXIT_PARENT`), its session's end | signaled `SIGKILL` | `sigkill` |
 | a halt with any other status, or the kernel's `ERX_EXIT_NOTHREAD` | exited 255 | `halt` and the status |
