@@ -918,6 +918,14 @@ it; git history is the record of completed work.
   socket stays passive; only the first waiting recv gets a passive error's reason, the rest
   `closed` (stock's `async_error_am_all` gives all the reason); and re-arming after a recv
   met the end answers `{error, closed}` where stock sends `{tcp_closed, S}`.
+* [High] network, shell and manifest (`erx_cmd_ifconfig`, `erx_cmd_ping`, `erx_facets`,
+  the manifest check; design-network-stack, "The grant"; design-system, property 15): the
+  system shell holds `net` and runs `ifconfig` and `ping` through the system domain's own
+  grant, where the system domain may hold no `net` grant. Take `net` out of the system
+  domain's facets, run the network utilities and the network device suite's `ifconfig` and
+  `ping` in root's session at the UART, add property 15 to the manifest check with its seeded
+  manifest, and make `erx_net_admit:mint/2` refuse the system domain's id. The stack itself
+  leaves the system domain when 1b-E's network domain lands.
 * [Medium] network, `erx_net` and `erx_net_client` (`erx_udp_sock`, `erx_icmp_sock`,
   `erx_gen_udp_core`; design-network-stack, "Credit"): datagram memory is not bounded as
   the design says. A datagram socket's receive queue in the network domain is bounded in

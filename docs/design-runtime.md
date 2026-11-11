@@ -405,7 +405,7 @@ of behaviour, however many lines it touches:
 | `beam/erl_process.h`, `beam/erl_process.c` | 6. `Process` carries a job tag, taken from its parent at `erl_create_process` |
 | `beam/erl_lock_count.c` and the run-queue, process and carrier lock paths | 7. `defer` raised and lowered around the scheduler's and allocator's critical sections, under `ERX_GROUP_DEFER` |
 | `beam/external.c` | 8. encoding one of the domain's own pids or aliases for a connection, a control term's sender included, gives the peer `send` on it where it holds nothing yet, and past the table's bound writes nothing and counts the failure for `erx_dist:exports_refused/0`; 9. the distribution decoder takes a safe-mode flag, set in the system domain, which creates no atom and reports a refused atom apart from a malformed term |
-| `beam/dist.c` | 10. in the system domain, a message to a peer whose entry's queue is past the manifest's `system_queue` is dropped and counted on the receiver instead of suspending the sender, and any other signal that does not fit ends the connection; 11. an entry counts toward `peer_held` each link and monitor a peer's process holds with a local one and each signal ERTS queues for the peer on behalf of no process, answers a new `LINK` or `MONITOR_P` past it with `system_limit`, and ends the connection when a signal does not fit; 12. `erts_net_message` drops and counts a message whose decoded size, as the funnel measured it, is past its target's `max_request`, the request limit a facet sets on itself |
+| `beam/dist.c` | 10. in the system domain, a message to a peer whose entry's queue, the frames of `async_dist` senders included, is past the manifest's `system_queue` is dropped and counted on the receiver instead of suspending the sender, and any other signal that does not fit ends the connection; 11. an entry counts toward `peer_held` each link and monitor a peer's process holds with a local one and each signal ERTS queues for the peer on behalf of no process, answers a new `LINK` or `MONITOR_P` past it with `system_limit`, and ends the connection when a signal does not fit; 12. `erts_net_message` drops and counts a message whose decoded size, as the funnel measured it, is past its target's `max_request`, the request limit a facet sets on itself |
 | `beam/erl_process.c` (exit) | 13. a process's exit clears its export holders, a field of its own record |
 | `beam/erl_monitor_link.c`, `beam/bif.c`, `sys/erxos/erx_alias.c` | 14. an alias's registry entry, which holds its export holders, exists exactly while its origin monitor is in a monitor tree with an alias state: the tree's insert adds it, the tree's delete and both of its foreach-delete walks, the exit path's among them, remove it with its holders, and so does `unalias/1`'s in-place clear |
 | `beam/erl_proc_sig_queue.c`, `beam/erl_gc.c`, `beam/erl_process.h` | 15. a process keeps the bytes of its queued undecoded frames from other domains, added when the drain queues a frame on it and released when `erts_proc_sig_decode_dist` decodes the frame or the process exits; the drain leaves in the lane an authorised frame whose target has reached its queue quota, and takes nothing more from that lane until the count falls below it, and the decode or exit that brings it below schedules that lane port's input task again; before a process waits in `receive` while its count is at its quota, it decodes every frame queued on it, its own messages, which from then on count toward its `max_heap_size` alone, so no waiting process holds a lane paused, a `gen_server:call` that skips older messages included; the same bytes count toward the size `max_heap_size` limits, as on-heap message data does |
@@ -420,6 +420,7 @@ of behaviour, however many lines it touches:
 | `beam/erl_init.c` | 25. the environment and the node name come from the boot information page, and the arguments arrive as the `argv` that `sys/erxos`'s `erx_runtime_main` builds from it for `erl_start`, the flags of the page's limits and grant first; once they are read, `erx_runtime_settings_check` refuses a process table, atom table or scheduler count above those flags |
 | `beam/io.c`, `beam/erl_port_task.c` | 26. `open_port` accepts only erXos's linked-in drivers; spawn, `fd` and forker paths are deleted |
 | `beam/dist.c`, `beam/bif.c` (registered names) | 27. on a connection to another domain, the sender drops every operation on the peer's registered names: a send to `{Name, Node}` (`REG_SEND`) is dropped in `erts_dsig_send_msg`, the one encoder of a send, and counted for `erx_dist:names_dropped/0`, a send toward a domain whose connection is not up yet included, and a monitor by name is answered by `monitor/2,3` with a `DOWN` of reason `noproc` locally and never sent, and `demonitor/1,2` sends no `DEMONITOR_P` for a monitor its connection never carried, so stock code writes no frame the receiving funnel refuses; a peer is another domain when its node name is at this node's host name, the rule of `erx_dist:select/1`, and a monitor by name toward a domain whose connection is not up yet, or that has none, gets `noconnection` at once, what stock answers when the attempt fails |
+| `beam/dist.c`, `beam/bif.c` (refused senders) | 67. `erlang:send/3` takes the option `notify` beside `nosuspend`: a send to another node that the busy check refuses records the entry's `connection_id` under the entry's lock, where the check reads the busy flag, and enlists the sender on that entry's notify list only while the entry still has that connection and, under the queue's lock, is busy again; otherwise it sends the sender `{erx_lane_ready, Node}` at once; `get_suspended_on_de`, which every site that resumes suspended senders calls under the same lock, also takes the notify list, and its callers send each enlisted process `{erx_lane_ready, Node}` once they have dropped the lock, so a refused sender is told exactly where a suspended one would resume ([Connections in ERTS](#connections-in-erts)) |
 | `beam/dist.c`, `beam/bif.c` (pids of another run) | 66. on a connection to another domain that is up, `link/1,2` and `monitor/2,3` of a pid of the peer's node name whose creation is not the connection's, a pid of an ended domain of that name (or, newer, of a later one the entry has not been replaced by yet, or a forgery), answer it themselves, as stock answers a pid of an earlier run of this node, and send no frame: the monitor gets `DOWN` with `noproc` at once, and the link raises `noproc` or, in a process that traps exits, is made and gets an exit of reason `noproc` (decided again as the link would be sent, so a connection replaced in between gives a process that does not trap exits that exit instead, as stock gives it for a dead remote pid); each is left with a dead connection, as stock leaves one toward a node it cannot reach, so `unlink/1` and `demonitor/1,2` send nothing for it. The peer could answer only in that pid's name, which the asker's funnel refuses by the sender rule (D6 of [design-domains.md](design-domains.md#the-funnel)); `erts_dist_other_run()` decides, under the entry's lock, from the entry's state and creation alone |
 | `lib/kernel/src/net_adm.erl` | 28. `ping/1` toward a node at the machine's host name answers `pong` when the node is `node()` or a member of `nodes()` and `pang` otherwise, and never calls `erlang:disconnect_node/1`, where stock OTP calls `net_kernel` by its registered name and disconnects the node after a failure: a connection between domains exists only by introduction, so a ping of an unconnected domain has nothing to try, and a ping of a connected one needs no call; a ping of another machine's node is stock's |
 | `lib_src/pthread/ethread.c`, `include/internal/ethread.h` | 29. `ethr_thr_opts` takes `executor`, and `ethr_thr_create` then calls `erx_pthread_create_executor`; 30. the monotonic clock is `erx_clock_ns`, without `init_get_monotonic_time`'s `uname` check, which reads its buffer whether or not the call succeeded |
@@ -1180,6 +1181,96 @@ counted on the receiver, and any other signal that does not fit ends the
 connection (edit 10). A frame larger than `ERX_FRAME_MAX`, which no lane carries,
 takes ERTS's own too-large path, `ERTS_DSIG_SEND_TOO_LRG`: the sender
 gets `system_limit`.
+
+**Senders that are refused, and told.** A process that must never
+suspend, the network stack's socket process for one
+([design-network-stack.md](design-network-stack.md#the-socket-process)),
+sends with `erlang:send/3` and `[nosuspend, notify]`
+([design-domains.md](design-domains.md#flow-control) gives the rule).
+The refusal is stock: `erts_dsig_prepare` reads the entry's busy flag
+for a `nosuspend` send and answers `ERTS_DSIG_PREP_WOULD_SUSPEND`
+without encoding anything (`dist.c:3417-3419`); `remote_send` answers
+`SEND_YIELD` for it, and `erlang:send/3` returns `nosuspend`
+(`bif.c:2489-2491`, `:2845-2849`). The check takes no lock, the send's
+last phase queues a `nosuspend` frame whole whatever the queue holds by
+then (`dist.c:3765-3771`, `:3786`), and the encoding between them may
+yield (`dist.c:3727-3728`), so the queue can pass the busy limit by one
+frame of each process caught between the two; a plain sender adds
+fragments only while the queue is under the limit and then suspends.
+Edit 67 adds the notification, in three places:
+
+1. **Enlisting.** The refusal names its connection: `erts_dsig_prepare`
+   copies the entry's `connection_id` into the send's context before
+   it reads the busy flag, under the entry's read lock that it holds
+   for the check (`dist.c:3386`, `:3418`), where stock copies it only
+   after the check (`:3429`). On a refused send with `notify`,
+   `remote_send` then takes the entry's read lock and its `qlock`, in
+   the order the send's last phase takes them (`dist.c:3743`, `:3786`),
+   and enlists the process on the entry's `notify` list, an
+   `ErtsProcList` beside `suspended`, only when the entry is connected
+   or pending with the refusal's `connection_id` and the busy flag,
+   read again under `qlock`, is still set, as the suspend path reads it
+   again once it has suspended its caller (`dist.c:3836-3842`).
+   Otherwise it sends the notification at once: the queue drained, or
+   the connection that refused ended, and a connection that took the
+   entry's place since is not the one the sender waits on. Either way
+   the refusal is followed by exactly one notification, none is lost
+   between the check and the lock, and no sender joins the list of a
+   connection that did not refuse it.
+2. **Telling.** Every site that resumes suspended senders gets them
+   from `get_suspended_on_de` under `qlock`: the output path when the
+   queue falls under the limit (`dist.c:4306-4317`), the controller's
+   data path (`:4785-4798`), and a connection's end, up or pending
+   (`:1117-1146`, `:5731-5751`). `get_suspended_on_de` takes the
+   `notify` list with the `suspended` one, and returns neither while the
+   entry's exit is scheduled, as it already does for `suspended`
+   (`dist.c:293-311`), so the end's own call takes both. Its callers
+   send `{erx_lane_ready, Node}` to each enlisted process once they have
+   dropped the lock, beside `erts_resume_processes`. A refused sender is
+   therefore told exactly where a suspended one would resume, and no
+   site can be forgotten, since there is one function.
+3. **The option.** `erlang:send/3` takes `notify` only with `nosuspend`
+   and a destination on another node; elsewhere it is `badarg`.
+
+A process enlisted twice is told twice; the socket process sends
+nothing between a refusal and its notification, so it is enlisted at
+most once. The message is a local one, made by the runtime, which only
+a process of the domain itself could forge, and a forged one costs its
+receiver one refused attempt.
+
+**The bell, a prototype without the edit.** The notification can be
+had from stock ERTS, at a cost, and is measured that way before edit 67
+is made. One bell process per destination domain takes the refused
+processes' requests to be told; for each round it makes a plain,
+suspending send of a small no-op message to a process of that domain
+that drops it, the grant in the network stack's case, which counts it
+as an unknown message. ERTS suspends the bell while the entry is busy
+and resumes it at the same sites that edit 67 tells from, so when the
+send returns the bell tells every process that asked before the send
+began, and starts another round for those that asked since. It costs a
+process per destination, a frame on the lane per round and a local
+message each way per refusal. The bench
+of design-network-stack records the bell's numbers first, so the
+edit's gain is measured.
+
+ERTS's own `async_dist` flag keeps its stock meaning on erXos, with no
+edit: `erts_dsig_prepare` marks a flagged process's send `ignore_busy`
+(`dist.c:3412-3413`), its frames go onto the queue whatever its size
+and count toward the queue's total but not toward `qsize`, which alone
+decides **busy**, and the process is never suspended; a `nosuspend`
+send from it is never refused, since the busy check is skipped
+(`dist.c:3412-3419`). A runtime's default for new processes comes from
+the emulator flag `+pad` (`erl_init.c:1382`, `erl_process.c:12458`),
+which a domain's specification may set, so a process that relies on
+being refused clears the flag at its spawn, whatever the default: the
+socket process is spawned with `{async_dist, false}`
+([design-network-stack.md](design-network-stack.md#the-socket-process)).
+A process that sets the flag grows only its own domain's memory. Two
+counts elsewhere must therefore not read the total as something else:
+edit 10, in the system domain, measures against `system_queue` the
+bytes every process queued, flagged or not; and the answers a
+connection holds are counted at their source, by change 11, never as
+the queue's total beyond `qsize`.
 
 **Receiving.** A connection is a port sink like any other. Its bell
 schedules the lane port's input task; ERTS runs that task on a normal
@@ -3344,9 +3435,11 @@ Everything not listed behaves as stock OTP 29.1.2.
 | `rpc:block_call/4,5`, `rpc:abcast/2,3`, `rpc:sbcast/2,3`, `rpc:server_call/4`, `rpc:multi_server_call/2,3` toward another domain | they address a registered name (`rex` or the caller's), which never crosses a domain: `block_call` returns `{badrpc, {'EXIT', {noproc, _}}}`; `abcast` writes no frame; `sbcast` and `multi_server_call` list the domain among the bad nodes; `server_call` returns `{error, nodedown}` ([design-domains.md](design-domains.md#compatibility-and-migration)) |
 | `global`, `pg` | see only the local node: neither spans domains, by design. A name registry shared across domains would let any domain register or join any name, so a send to a registered name (`REG_SEND`) is outside the frame grammar ([design-domains.md](design-domains.md#the-funnel)): `{Name, Node} ! Msg` toward another domain is dropped at the sender, and `monitor(process, {Name, Node})` gets a `DOWN` with reason `noproc` at once. A name one domain offers another is an export its owner's runtime writes ([design-domains.md](design-domains.md#exports)). `kernel`'s `connect_all` is `false` in every erXos release, so `global` attempts no fully connected network and disconnects no node |
 | a message larger than the connection's lane allows | `system_limit` from the send, ERTS's own too-large path |
+| `erlang:send/3` with `[nosuspend, notify]` | added: the option `notify`, valid only with `nosuspend` toward another node; a send refused as busy returns `nosuspend` as stock does, and the sender then receives `{erx_lane_ready, Node}` once, when the queue stops being busy or the connection ends (edit 67, [Connections in ERTS](#connections-in-erts)) |
 | `erx:export/3` | added: `erx:export(Name, Rights, Peer)` sets what a peer holds on one of the calling domain's own names, a pid or alias of the domain or the domain itself, to exactly `Rights`, widening or narrowing; only the owner grants, and an encode gives a peer `send` alone ([Connections in ERTS](#connections-in-erts)) |
 | a message from another domain | arrives as `{erx_origin, D, Msg}`, `D` the lane's peer, in every process (edit 16); `gen` and `io` take call and io replies in their envelopes (edits 58, 60), and `sys` takes nothing apart ([design-domains.md](design-domains.md#the-peer)) |
 | `erx:owner/1` | added: the domain id a pid, reference or port carries, its creation ([design-domains.md](design-domains.md#erlang-interface)) |
+| `erx:limits/0` | added: the `max_frame`, `max_message_heap` and `funnel_depth` the calling domain's runtime enforces, from the limit record it installed at its start, as its options lowered them ([design-domains.md](design-domains.md#erlang-interface)) |
 | `{erx_serve, any}` | added: a start option of `gen_server` and `gen_statem`, `{erx_serve, own}` the default; with `any` the server takes calls and casts from other domains (edit 59) ([design-domains.md](design-domains.md#erlang-interface)) |
 | `erx_program:start/1`, `send/2`, `install/2`, `pause/1`, `resume/1`, `stop/3`, `fork/2`, `exec/2`, and `{Port, {exit_status, N}}`, `{erx_channel, Port, Request}`, `{erx_channel_room, Port}` | added: the program driver's interface ([Programs as ports](#programs-as-ports)) |
 | `erx_device` | added: the device NIF ([The device NIF](#the-device-nif)) |
@@ -3453,7 +3546,7 @@ across them is the conformance suite.
 | The group's quota is exhausted | the kernel throttles | nothing fails | none needed | slower progress; throttling counters in the inspector |
 | A blocking call from an executor | `ERX_EWOULDBLOCK` | nothing changed | none needed | the NIF's error; a trace event naming the call, which the inspector counts per call site |
 | A lane's positions or a frame fail their checks | `erx_lane_take`'s checks; the funnel | the ring unread past the bad record | the lane driver closes the port; `erx_connections` reports it; the system domain takes the connection down for both | `noconnection` on everything across the connection in both domains; a log line naming the peer and the reason; the peer is a bug suspect |
-| A peer stops taking frames | the lane is full | the frames in the ring, and the rest in the entry's queue | none needed | once the entry's queue passes ERTS's busy limit, the senders to that peer are suspended, as toward a busy distribution connection; in the system domain no sender is suspended, a message past the manifest's `system_queue` is dropped and counted, and any other signal ends the connection |
+| A peer stops taking frames | the lane is full | the frames in the ring, and the rest in the entry's queue | none needed | once the entry's queue passes ERTS's busy limit, the senders to that peer are suspended, as toward a busy distribution connection, and a `nosuspend` send is refused, its sender told when to try again if it asked with `notify`; in the system domain no sender is suspended, a message past the manifest's `system_queue` is dropped and counted, and any other signal ends the connection |
 | A process stops taking its messages from other domains | its queue quota, where it has one | its undecoded frames up to the quota and one more, then the frame for it and those behind it in the lane they share | none needed | the drain takes nothing more from that lane until the process takes its messages, so the lane's sender waits on a full lane; without a quota, the process's `max_heap_size` ends it, as in stock OTP |
 | A program's channel record is malformed, or a frame on it is beyond the program's credit, a request on a busy slot or a notice that is not due | the funnel in channel mode; the driver's count of the program's credit | the record discarded | the driver ends the program as a fault ends it, and the owner gets `{exit_status, N}` with `ERX_EXIT_SIGNAL` plus `SIGSYS` ([design-programs.md](design-programs.md#the-channel)) | the handler sees the port close; the shell reports the program's end |
 | A device returns a used index, descriptor index or length out of range | `erx_device_queue`'s check in `complete/2` | the queue broken: entries before it returned, every buffer still posted, `post/4` and `complete/2` `{error, broken}` | the driver calls `negotiate/2`, whose reset returns every buffer to its pool | the driver's log line naming the device; the driver's supervisor may restart it |
@@ -3646,7 +3739,28 @@ own domain, so a runtime that lies harms only itself.
   (D9), and the peer cannot tell the three apart by outcome or timing. A
   peer that stops reading suspends exactly the senders to it, and a
   `gen_server:call` to it times out while unrelated processes run. A
-  message above the lane's limit raises `system_limit`. A malformed frame
+  process that sends such a peer 4 MiB in numbered messages with
+  `[nosuspend, notify]`, sending the next only after an `ok` or, after
+  a refusal, after its `{erx_lane_ready, Node}`, never waits more than
+  a second for any call to return, receives one notification per
+  refusal, none before the peer reads again, and when the peer reads
+  again its messages all arrive once and in order; the sender's queue
+  stays within the busy limit and one frame; the same run with the
+  peer ended instead of reading again delivers the notification at the
+  connection's end. Eight such senders on eight schedulers, against a
+  peer that reads slowly, keep the queue within the busy limit and eight
+  frames, and none is left enlisted without a notification. A sender
+  held, by a test build's pause point, between its refusal and its
+  enlisting while the refusing connection ends and a new connection to
+  the same domain takes the entry and becomes busy is told at once.
+  Seeded failures: enlisting without the second look at the busy flag
+  under `qlock`, under which the run with a peer that drains between
+  the check and the lock leaves a sender enlisted with no notification;
+  enlisting without the comparison of `connection_id`, under which the
+  held sender joins the new connection's list and waits past the
+  deadline; and a `get_suspended_on_de` that leaves the notify list for
+  the end, under which a refused sender waits past the deadline after
+  the peer reads again. A message above the lane's limit raises `system_limit`. A malformed frame
   closes the connection with `noconnection` on both sides and a report to the
   system domain. The hostile-peer corpus of
   [design-domains.md](design-domains.md#the-funnel) is replayed into a

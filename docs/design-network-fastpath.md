@@ -1034,10 +1034,14 @@ queues' copy of a small piece (`erx_tcp_conn:compact/1`,
 `erx_tcp_reass:hold/1`), which keeps a few bytes from holding a frame
 alive; the socket process's join of a delivery that spans pieces
 (`erx_gen_tcp_core`'s `split/2`), which copies exactly the delivery's
-bytes once and which a delivery within one piece skips; the owner's
-iodata made into the one binary a send carries (`erx_gen_tcp:send/2`),
-nothing for a binary, where stock hands its port the iodata as an I/O
-vector; the pipe's `process` end
+bytes once and which a delivery within one piece skips; a send's
+pieces, each made a binary of its own size as it is cut
+(`erx_gen_tcp_core`'s `piece/2`), iodata joined a piece at a time and a
+piece cut from a larger binary copied, so that no queued piece keeps
+more than its own bytes alive
+([The socket process](design-network-stack.md#the-socket-process)),
+nothing for data already in binaries of a piece or less, where stock
+hands its port the iodata as an I/O vector; the pipe's `process` end
 (`erx_net_pipe:send/2`), whose far end, a test, takes each frame as one
 binary; the frame layer's finishing of a delayed checksum for a
 transport that does not finish (`erx_net_frame:finish/1`), the copy the

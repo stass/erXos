@@ -1027,12 +1027,17 @@ development build, only through an inspect facet the system domain
 mints for it; no other facet it was handed widens the scope. The system
 domain's session, handed none, holds the inspect facet of scope `all`
 and, for each service of the system domain that runs in that domain,
-the value `local`: the service is the domain's own. A command that names
-a module of a service of the system domain declares that service's
-facet, `ifconfig`, `ping` and `host` the network stack's `net`, and no
+the value `local`: the service is the domain's own. It never holds
+`net`, since the system domain holds no `net` grant
+([design-system.md](design-system.md#the-manifest), property 15), so
+the network utilities run in a session that holds it, root's at the
+UART in a development build, and not in the system shell. A command
+that names a module of a service declares that service's facet,
+`ifconfig`, `ping` and `host` the network stack's `net`, and no
 other module of the command shell's application names one, which a
-build check proves (SH1), so in a session without the facet the command
-fails with `ifconfig: no_facet` before it starts. The check is a guard
+build check proves (SH1), so in a session without the facet, the
+system shell among them, the command fails with `ifconfig: no_facet`
+before it starts. The check is a guard
 against a slip, not the boundary: what a session reaches rests on its
 domain, whose release ships no service's modules. `ps` lists the
 session's own table and `dmesg` reads its namespace's `/proc`, so
@@ -1310,7 +1315,7 @@ remain independent of catalog generation.
     each round-trip time from its own send record, never from the
     reply's data, and writes FreeBSD's reply lines and statistics; the
     network device suite runs `ifconfig` and
-    `ping -c 3 10.0.2.2` at the command shell on QEMU and matches vtnet0
+    `ping -c 3 10.0.2.2` in root's session on QEMU and matches vtnet0
     with slirp's lease, three replies and no loss. Matching a reply of
     any sequence number fails.
   * `host`: the names it tries follow the search list as `res_search(3)`

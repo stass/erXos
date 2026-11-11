@@ -500,6 +500,17 @@ violation fails the build with the property, the record and the field:
     holds no template, so none of them reaches one. Its limits are judged
     against its principal's ceilings, budget and quota when a session is
     made from it, by the request path every principal's domain takes.
+15. **The system domain holds no `net` grant:** no facet of the `net`
+    service names the system domain as its grantee, so the trusted base
+    takes no socket's traffic and no answer of the network domain's
+    grant ([The network domain](#the-network-domain)). A grant made at
+    run time cannot name it either: the network service's mint refuses
+    the system domain's id as a grantee
+    ([design-network-stack.md](design-network-stack.md#the-grant)).
+    Seeded violation: a development manifest that grants the system
+    domain a `net` facet, which the check refuses with this property's
+    diagnostic, naming the facet; and a mint request naming the system
+    domain, which the mint refuses and counts.
 
 Each property has a test that seeds one violation into a manifest and
 expects the build to fail with that property's diagnostic.
@@ -2830,12 +2841,23 @@ system domain gives it and keeps for it:
   facet is a process of the network domain, which the network service
   makes when the domain service introduces the client to it, as a
   storage service makes its grants; the domain service keeps its grant
-  record as for any facet. The introduction carries the limits and the
-  client's `max_frame`, whose floor for a domain that holds `net` the
-  grant checks
-  ([design-domains.md](design-domains.md#principals-sessions-and-quotas)).
+  record as for any facet. The introduction carries the grant's limits.
+  The three limits the client's funnel applies to a frame, `max_frame`,
+  `max_message_heap` and `funnel_depth`, each have a floor in a domain
+  that holds `net`, which the client side checks against its own
+  runtime before it sends a request, answering `{error, enobufs}`
+  itself for what it could not carry
+  ([design-domains.md](design-domains.md#principals-sessions-and-quotas),
+  [design-network-stack.md](design-network-stack.md#message-sizes)).
   The `netadmin` facet, which configures interfaces and reads every
   client's statistics, is granted to administrators only.
+* **The system domain holds no `net` grant** (property 15). The
+  trusted base parses no network traffic, its own or a client's, and
+  takes no stream of a socket into its queues; what in it would need
+  the network runs in a service domain instead. Root's session at the
+  UART holds `net`, so `ifconfig`, `ping`, `host` and the programs root
+  runs reach the network from there, not from the system shell
+  ([design-network-stack.md](design-network-stack.md#the-grant)).
 * **A restart makes the grants anew.** A network domain that ends is
   restarted within its intensity as any configured domain is; every
   socket ended with it, and the grants with it. Once it reports ready,

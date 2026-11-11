@@ -321,7 +321,7 @@ call ([design-runtime.md](design-runtime.md#liberx)).
 | **D6.** A domain reports deaths only of its own processes | the receiver knows the sender by the lane; the sender rule requires every frame's sending pid to carry the lane's node name and domain id; a receiving runtime acts on a link exit or `DOWN` only for a link or monitor it holds, which ERTS already checks | a frame accepted with another domain's sending pid | hostile-runtime tests that forge exits and `DOWN`s for other domains' processes and for processes they are not linked to |
 | **D7.** Stopping a domain never needs its runtime | the kernel's `erx_space_stop` stops every thread of a space at once, and the spaces below it stop with it ([design-kernel.md](design-kernel.md#creating-spaces)); a holder of the exit right on the domain pid stops the domain through the system domain, which needs nothing from the domain | a stop path that waits for the runtime | tests that stop a domain whose runtime never returns, runs a long NIF, or never drains its lanes |
 | **D9.** Signals from one process to another arrive in the order sent, but for a domain pid's connection-control records about different peer node names | a runtime writes each sending process's frames for one peer into one lane in send order; a domain pid's records travel in its domain's control table, outside the lane, and at most one per peer node name is outstanding ([Connections](#connections)); a lane is a single-producer, single-consumer ring, read in order; `erts_net_message` keeps order per connection; every answer about a process comes from its own runtime, on the same lane behind what it sent before | a path that reorders one pair's frames; an answer about a process written by anyone but its runtime | a property test that interleaves sends, links, monitors of dead and unexported processes, links to processes held without `link`, and exits between three domains and checks per-pair order |
-| **D12.** What a peer can make a runtime hold is bounded by the runtime's own limits, and what a domain can make the system domain hold is a sum fixed when the domain is admitted | the lane a receiver reads is sized by its own `lane`; an open record's private buffer grows as its bytes arrive, up to the receiver's own `max_frame`, never allocated whole on a header's word; a decoded term by its `max_message_heap`, or by the target process's own request limit; what its processes keep queued and undecoded by their queue quotas, past which the funnel leaves the next frame for them in the lane, and, for a process without one, by its own `max_heap_size`; the links and monitors it holds with a peer's processes, and the signals it queues for them, by its `peer_held`, past which it ends the connection; its queue to a peer that does not drain by ERTS's busy limit, past which its senders wait, and in the system domain by `system_queue`, past which a message is dropped and any other signal ends the connection; its export table by its `exports`; atoms, funs and exports by its `foreign_atoms`; the system domain's sum per domain is [Flow control](#flow-control)'s | a delivery path that skips a check; a buffer the receiver allocates on a peer's say-so without a bound of its own; a queue in the system domain that grows while a domain does not drain; a funnel that queues a frame on a process at its quota | floods past every limit from many peers at once, and records whose bytes trickle in; the receiver's memory stays within its budget, and the system domain's within the sum per admitted domain |
+| **D12.** What a peer can make a runtime hold is bounded by the runtime's own limits, and what a domain can make the system domain hold is a sum fixed when the domain is admitted | the lane a receiver reads is sized by its own `lane`; an open record's private buffer grows as its bytes arrive, up to the receiver's own `max_frame`, never allocated whole on a header's word; a decoded term by its `max_message_heap`, or by the target process's own request limit; what its processes keep queued and undecoded by their queue quotas, past which the funnel leaves the next frame for them in the lane, and, for a process without one, by its own `max_heap_size`; the links and monitors it holds with a peer's processes, and the signals it queues for them, by its `peer_held`, past which it ends the connection; its queue to a peer that does not drain by ERTS's busy limit, past which its senders wait or, sending with `nosuspend`, are refused and told when to try again, plus one frame for each process caught between the busy check and its enqueue ([Flow control](#flow-control)), and in the system domain by `system_queue`, past which a message is dropped and any other signal ends the connection; a process with stock OTP's `async_dist` set queues past the busy limit in its own domain's memory, so a process that must be refused is spawned with the flag cleared; its export table by its `exports`; atoms, funs and exports by its `foreign_atoms`; the system domain's sum per domain is [Flow control](#flow-control)'s | a delivery path that skips a check; a buffer the receiver allocates on a peer's say-so without a bound of its own; a queue in the system domain that grows while a domain does not drain; a funnel that queues a frame on a process at its quota | floods past every limit from many peers at once, and records whose bytes trickle in; the receiver's memory stays within its budget, and the system domain's within the sum per admitted domain |
 | **D13.** A stale export costs nothing to find | an export's holders live on its name's own record, the process or the active alias, and go with it, at the transition that ends the process or deactivates the alias; a peer's holders end when the connection goes down; a pid names its process by number and serial, so a lookup that finds no live record finds no holder | holders kept anywhere but on their name's own record; an entry keyed in a way a later process can match | a soak test of a million alias exports and deactivations from one live process, with every OTP alias mode, and of pids handed out by processes that then exit; the export table stays at its live names |
 | **D16.** Every page of a connection has one writer, is charged to a child budget of an outer budget, one child per connection, that the system domain destroys only once both parties have let go: the reader's outer budget for a connection between domains, the domain's for its system connection; and only the system domain deletes it | each party writes exactly one memory object of a connection and maps the other's read-only; the system domain carves the connection's children and creates both sides and both bells from them, and gives each party its capabilities without `DESTROY` ([Connections](#connections)); it deletes a connection's objects and destroys its children only once each party has unmapped them or ended, never on a timer while a party lives, and destroys an ended domain's outer budget only once none of its children remains, keeping it meanwhile as the domain's remains, charged to its principal, while the domain itself is released at its end | a page both parties write; a capability with the delete right in a party's table; a lane charged to its writer, to the budget its reader alone maps, to the system domain's own budget, or to an outer budget directly; a deletion while a party that has not answered still maps it | a test that each party's table holds no delete right on a connection's objects; budgets return to their baselines after every test; a hostile peer that rewrites its pages while the other reads them disturbs nothing but its own frames; a survivor that never answers `connection_down` keeps the connection's objects, counted against its own `connections`, never faults on them, and keeps of the ended domain's outer budget only that connection's child, which a test that reads the budget's charge after the end checks, while the ended domain, a configured one, restarts at once; seeded failure: a connection charged to the outer budget directly, under which the survivor keeps the whole outer budget |
 | **D17.** A domain's end reaches each peer behind everything the domain published on their lane | the kernel posts a space's exit record only when no thread of it can run, so the dead domain's write position is final; a runtime told that a connection is down first drains that lane to the position it reads then, waiting on nothing the dead domain would have to do, and only then fires its links and monitors with the peer's processes | a runtime that acts on a connection down before draining; a stop reported while a thread can still run | a test that kills a domain mid-burst on every CPU and checks that each peer sees the burst, then the death |
@@ -1544,10 +1544,11 @@ and drivers](#native-processes-and-drivers)).
 * **Busy.** A sender whose lane is full keeps the frames for it in the
   entry's queue in its own runtime, in its own memory. ERTS suspends a
   process that sends on an entry whose queue exceeds its busy limit, 1 MiB
-  (`ERTS_DE_BUSY_LIMIT`, `beam/dist.h:213`), as it suspends senders to any
+  (`ERTS_DE_BUSY_LIMIT`, `beam/dist.h:215`), as it suspends senders to any
   busy distribution connection; `erlang:send/3` with `nosuspend` returns
-  `nosuspend`; processes sending to other domains carry on. That is the
-  whole of flow control ([Flow control](#flow-control)).
+  `nosuspend`, and with `notify` as well the sender is told when to try
+  again; processes sending to other domains carry on. That is the whole
+  of flow control ([Flow control](#flow-control)).
 * **Input.** A lane has one consumer by construction: the lane port's
   input task, which the connection's bell schedules and ERTS runs on a
   normal scheduler under the port's lock
@@ -1652,7 +1653,9 @@ and drivers](#native-processes-and-drivers)).
   its slot of the domain's control table ([Connections](#connections)). A
   domain that never drains what the system domain sends it loses the
   system domain's messages, and holds no more of the system domain than
-  `system_queue`.
+  `system_queue`. No system process holds a socket: the system domain
+  holds no `net` grant ([design-system.md](design-system.md#the-manifest),
+  property 15), so no stream of a socket ever waits in that queue.
 
 ### Flow control
 
@@ -1666,9 +1669,73 @@ every ring, in each domain's control table ([Connections](#connections)).
 
 What a sender's full lane does, from the sender's side, is ERTS's busy rule:
 processes that send to that domain are suspended once the entry's queue is
-long, told `nosuspend` if they asked, and processes sending to other domains
-carry on. What it does from the receiver's side is nothing: a receiver that
-stops reading a lane holds back only the senders writing to it.
+long, or refused if they sent with `nosuspend`, and then told when to try
+again if they asked (below); processes sending to other domains carry on.
+What it does from the receiver's side is nothing: a receiver that stops
+reading a lane holds back only the senders writing to it.
+
+**Senders that are refused, and told.** A process that must never
+suspend sends to another domain with `erlang:send/3` and the options
+`[nosuspend, notify]`. While the domain's queue is busy the send queues
+nothing and returns `nosuspend`, as stock ERTS refuses a `nosuspend`
+send (`beam/dist.c:3417-3419`); with `notify`, the runtime also enlists
+the process on the connection and sends it `{erx_lane_ready, Node}`,
+once, when the queue stops being busy, at the moment it would resume a
+suspended sender, or when the connection ends (edit 67 of
+[design-runtime.md](design-runtime.md#connections-in-erts)). The sender
+keeps what was refused where it already keeps what it has not sent, and
+tries again at the notification. Nothing therefore waits for the lane
+but in the queue the busy limit bounds, and a process that never
+suspends adds to that queue no more than any other sender.
+
+* **What bounds the queue.** The busy limit, plus one frame for each
+  process caught between the busy check and its enqueue. The check reads
+  the busy flag without the queue's lock, and the enqueue takes the lock
+  later and queues a `nosuspend` send's frame whole, whatever the queue
+  then holds (`beam/dist.c:3418`, `:3765-3771`, `:3786`); a send can
+  yield between the two while it encodes, so the bound counts processes,
+  not schedulers. The receiver holds nothing more, since the lane it
+  sized is the whole of what a sender can place in it.
+* **Order.** A refused send makes no frame, so it leaves no gap in what
+  the process sent before it; what the process sends after a refusal is
+  its own to order, and every frame that is sent keeps its place in the
+  one queue for the lane (D9).
+* **A notification is a hint.** It says only that the queue stopped
+  being busy; the next send may be refused again, which enlists the
+  process again. Only a process of the receiver's own domain can send it
+  bare, so a false one costs one refused attempt and nothing else.
+* **Links and monitors.** `link/1`, `monitor/2` and `demonitor/1` towards
+  a busy domain queue their signal and then suspend the caller as a
+  plain send does, and take no `nosuspend` (`beam/bif.c:334`, `:909`,
+  `:607`; `beam/dist.c:3824-3842`). A process that must never suspend
+  makes none towards another domain: the other domain links to it, with
+  the `link` right it exported for the purpose ([Exports](#exports)), as
+  the network stack's socket process does
+  ([design-network-stack.md](design-network-stack.md#the-socket-process)).
+  An exiting process sends its exit signals to other domains only after
+  its local links and monitors have fired, so an exit held at a busy
+  queue holds no local waiter.
+* **The system domain.** It suspends no sender, so no option or flag
+  changes anything there: a message past `system_queue` is dropped and
+  counted whatever its sender's options and flags, the frames of
+  `async_dist` senders count toward the queue that `system_queue`
+  measures, and any other signal ends the connection (edit 10 of
+  [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)).
+  No system process needs a send that is refused and told: the system
+  domain holds no `net` grant
+  ([design-system.md](design-system.md#the-manifest), property 15), so
+  it holds no socket and has no stream to keep whole across a full
+  queue.
+* **`async_dist`.** Stock OTP's process flag keeps its stock meaning: a
+  flagged process is never suspended, its `nosuspend` sends are never
+  refused, and its frames go onto the queue past the busy limit,
+  counting toward the queue's total but not toward the limit, in its own
+  domain's memory and bounded by nothing but its budget. A runtime's
+  default for new processes is the emulator flag `+pad`, which a
+  domain's specification may set, so a process that relies on being
+  refused clears the flag when it is spawned: the socket process is
+  spawned with `{async_dist, false}`
+  ([design-network-stack.md](design-network-stack.md#the-socket-process)).
 
 **The queue quota** bounds what the funnel moves into one process. The
 funnel keeps, for each process of its runtime, the bytes of the frames it
@@ -1716,7 +1783,9 @@ but in its sender or its lane:
   `system_limit`;
 * **waits in its sender's queue**, in the sender's own memory, until the
   lane has room, its process suspended as ERTS suspends a sender to a busy
-  distribution connection, or told `nosuspend`; or in the lane, while the
+  distribution connection (a send with `nosuspend` to a busy queue makes
+  no frame, returns `nosuspend` and, with `notify`, is told when to try
+  again); or in the lane, while the
   process it is for, or the process of a frame ahead of it, is at its
   queue quota; a connection-control record from the system domain is in
   no sender's queue and no lane, and waits in its control slot only while
@@ -2617,15 +2686,52 @@ A domain's limits, fixed at creation within its principal's ceilings:
 | `cpu` | its group's grant: quota per period, cpuset, ceiling | the kernel | the principal's share |
 | `lane` | the data area of each lane it reads, a power of two from 4 KiB to 16 MiB ([Connections](#connections)) | the domain library, which sizes the object | 64 KiB |
 | `connections` | connections it may have at once, the system connection included, and the slots of its control table ([Connections](#connections)) | the domain service, at an introduction | 256; for the system domain, the manifest's `max_domains` ([design-system.md](design-system.md#the-manifest)) |
-| `max_frame` | the largest payload it takes into a buffer of its own, which grows as the bytes arrive; a longer one is dropped as it passes | its own runtime; the floor for a domain that holds `net`, by the network grant, which opens no socket for a domain below it and logs why ([design-network-stack.md](design-network-stack.md#message-sizes)) | 1 MiB, at most `ERX_FRAME_MAX`; for the system domain, the largest `max_request` its configuration lets a grant name; at least 128 KiB in a domain that holds `net`, the system domain included, since every frame of the socket protocol is at most 64 KiB and a header and a dropped push hangs its socket |
-| `max_message_heap` | the largest decoded message it accepts | its own runtime | 8 MiB, at most 256 MiB |
-| `funnel_depth` | nesting outside tail positions in a frame it accepts | its own runtime | 16,384 |
+| `max_frame` | the largest payload it takes into a buffer of its own, which grows as the bytes arrive; a longer one is dropped as it passes | its own runtime; a protocol's floor, by the client side of that protocol (**Floors from a protocol**, below) | 1 MiB, at most `ERX_FRAME_MAX`; for the system domain, the largest `max_request` its configuration lets a grant name; at least the `net` protocol's floor, which its schema sets, in a domain that holds `net` |
+| `max_message_heap` | the largest decoded message it accepts | its own runtime; a protocol's floor, as for `max_frame` | 8 MiB, at most 256 MiB; at least the socket protocol's floor in a domain that holds `net` |
+| `funnel_depth` | nesting outside tail positions in a frame it accepts | its own runtime; a protocol's floor, as for `max_frame` | 16,384; at least the socket protocol's floor in a domain that holds `net` |
 | `exports` | entries in its export table | its own runtime | 16,384 |
 | `peer_held`, `peer_held_total` | what its runtime holds because of other domains' processes, each link or monitor counted as 256 bytes and each queued signal as its bytes, for one connection and for all; past them it answers `system_limit` and ends the connection | its own runtime | 4 MiB; 64 MiB; for the system domain's own `peer_held`, 64 KiB per connection, the manifest's `peer_held` ([design-system.md](design-system.md#the-manifest)) |
 | `tmp` | bytes its RAM file system may hold | its own runtime | an eighth of `memory` |
 | `overlay` | bytes of blobs its specification's overlay may name | the code service | 16 MiB |
 | `atoms`, `foreign_atoms` | atom table; atoms, funs and exports decoding may create, a sixteenth of them per peer | its own runtime | 262,144; 16,384 |
 | `processes` | ERTS's `+P`: a power of two, at least ERTS's 1,024 ([design-runtime.md](design-runtime.md#starting-a-runtime)) | its own runtime | 65,536 |
+
+**Floors from a protocol.** A protocol whose messages have no reply to
+report a loss cannot survive the funnel dropping one, so its operation
+schema may set a floor on each of the three limits the funnel applies to
+a frame: `max_frame`, `max_message_heap` and `funnel_depth`. The `net`
+protocol does: a dropped push strands its credit and hangs its socket
+for good, a dropped stream piece loses bytes with no error, and a
+dropped reply leaves its caller waiting. Its generator computes the
+floors from `abi/services/net.txt`, for each operation the largest
+frame, decoded size and nesting of any message it carries either way,
+rounded up to a power of two, as constants of the generated admission
+modules, and fails the build when a floor passes the limit's default
+([design-network-stack.md](design-network-stack.md#message-sizes)).
+A floor binds only a domain that receives the protocol: a client that
+holds the grant, and the domain that serves it; the system domain holds
+no `net` grant ([design-system.md](design-system.md#the-manifest),
+property 15). Each is checked by the party whose values they are, before
+anything is sent:
+
+* **a client's, by the client, before each call.** The client side of
+  the protocol, generated with the floors, compares an operation's
+  floors with its own runtime's limits (`erx:limits/0`, which reports
+  them as the runtime enforces them, after any option lowered them)
+  before it sends the operation's request, and answers a call it could
+  not carry `{error, enobufs}` itself, with one line to the domain's log
+  naming the operation, the limit, its value and the floor, the first
+  time. No request leaves the domain for an operation whose reply or
+  pushes its own funnel would drop, so no answer can be lost on the way
+  back, the refusal included, and the serving side checks nothing for
+  the client: a client that skips the check harms only itself. A domain
+  configured below a floor so fails at its first use of what it cannot
+  carry, with the reason in its log, never with a silent hang;
+* **the serving domain's, at build.** Its three limits, and the
+  `max_request` its grants name, are fields of its specification in the
+  system manifest, and the manifest's build check compares each with its
+  floor, so a server that would drop a correct client's frame does not
+  build.
 
 Every limit a receiver enforces protects the receiver itself, which is why
 its own runtime may enforce it; the limits that protect someone else, a
@@ -2829,6 +2935,11 @@ from a control slot, and the agent acts only on the system domain's.
 -spec erx:cap(Name :: atom()) -> pid() | undefined.
 -spec erx:caps() -> #{atom() => pid()}.
 -spec erx:owner(pid() | reference() | port()) -> pos_integer().
+%% The limits the calling domain's runtime enforces, as it installed them
+%% at its start (design-runtime.md, "Data model"), lowered by its options.
+-spec erx:limits() -> #{max_frame := pos_integer(),
+                        max_message_heap := pos_integer(),
+                        funnel_depth := pos_integer()}.
 
 %% A start option of gen_server:start/3,4, start_link/3,4, start_monitor/3,4
 %% and of gen_statem's same functions:
@@ -3020,7 +3131,7 @@ domain](#domain-ids-pids-and-references)):
 | An exit signal to an alias of another domain's process | no effect |
 | A NIF resource, ETS table or prepared-code reference that leaves its domain | a plain reference, even when it returns |
 | A sender whose lane to a domain is full | suspended as for a busy connection once its entry's queue exceeds the busy limit, until the receiver drains; senders to other domains carry on |
-| `erlang:send/3` with `nosuspend` | returns `nosuspend` when the destination domain is busy for the sender |
+| `erlang:send/3` with `nosuspend` | returns `nosuspend` when the destination domain is busy for the sender; with `notify` as well, an erXos option, the sender then receives `{erx_lane_ready, Node}` once the queue stops being busy or the connection ends |
 | What a runtime holds because of another domain, its links and monitors and the signals queued for it without a sender, past `peer_held` for the connection or `peer_held_total` in all | a link or monitor beyond `peer_held` is answered at once with an exit or `DOWN` with reason `system_limit`; a signal that does not fit, or the total passed, ends a connection: links and monitors between the two domains fire with `noconnection` |
 | A message from the system domain to a domain whose lane from it is full past `system_queue` | dropped and counted on the receiver; no system process suspends |
 | Any other signal from the system domain to such a domain | the connection ends, and with it the domain |
@@ -3378,8 +3489,10 @@ for the same reason.
     while it waits: at most one needless ring per crossing, and a waiter
     that follows the handshake is always rung;
   * never drains the lane the receiver writes: the receiver's senders to it
-    suspend at the busy limit, `nosuspend` returns `nosuspend`, senders to
-    other domains carry on, and a system-domain process never suspends;
+    suspend at the busy limit, `nosuspend` returns `nosuspend` and, with
+    `notify`, the sender receives one `{erx_lane_ready, Node}` when the
+    peer drains again or the connection ends, senders to other domains
+    carry on, and a system-domain process never suspends;
     the system domain holds at most `system_queue` for it, drops its
     messages past that, ends its connection, and so the domain, at the
     first other signal past it, and still writes every connection-control

@@ -488,17 +488,61 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   frames on HVF with `connections` at 1 and at 4,096; the fix on the table
   is a table-wide count of records written, loaded once per run.
 
-* **[Medium] network, a round trip per piece of a `gen_tcp:send/2`
-  across a lane**
-  ([design-network-stack.md](design-network-stack.md#message-sizes)).
-  Each send is cut into pieces of 64 KiB, and the socket process sends
-  the next piece only after the connection's reply that the last is in
-  its send buffer, so a bulk send costs one lane round trip per 64 KiB,
-  and a datagram socket one per datagram, since sends on one socket go
-  one at a time. Settled by bulk throughput with 1 KiB, 64 KiB and 16 MiB
-  sends, and by datagrams per second on one socket, against line rate;
-  the fix on the table is a window of pieces in flight against a byte
-  credit the connection returns, taken by the socket process.
+* **[Medium] network, send credit's messages and a round trip per
+  datagram sent**
+  ([design-network-stack.md](design-network-stack.md#the-socket-process)).
+  A stream's pieces cross the lane with no reply, within send credit the
+  connection grants by the half-buffer rule, so a bulk send costs one
+  credit message per half send buffer acknowledged and one more each
+  time a stalled peer leaves less than half a buffer free; a datagram
+  socket's send is still a call, one lane round trip per datagram,
+  since sends on one socket go one at a time. Settled by bulk throughput
+  with 1 KiB, 64 KiB and 16 MiB sends against line rate, with the credit
+  messages per MiB sent counted from the connection's counters, and the
+  outlet's refusals and the time the socket process waits for their
+  notifications counted from its own, and by
+  datagrams per second on one socket; the fix on the table for streams
+  is a larger grant step than half the buffer, and for datagrams send
+  credit too, with the outcomes only the network domain knows (no
+  route, a full transmit queue) reported at the next call, which changes
+  what `gen_udp:send` returns and needs a design of its own.
+* **[Medium] network, the refused sender's notification against the
+  bell**
+  ([design-runtime.md](design-runtime.md#connections-in-erts)). A socket
+  process whose send to the network domain is refused waits for
+  `{erx_lane_ready, Node}`, which edit 67 sends where ERTS resumes a
+  suspended sender; without the edit, a bell process per destination
+  makes a plain suspending send of a no-op and tells the waiters when it
+  returns, at a frame on the lane per round and a local message each way
+  per refusal. Neither is measured. Settled by a 64 MiB bulk send and
+  rr-64 with the owner in a test domain on QEMU under HVF, with the
+  network domain's lane small enough that the client's queue passes the
+  busy limit: throughput, refusals per MiB and the time from the queue
+  falling under the limit to the next accepted send, for the bell and
+  for the edit; the edit is made only when it beats the bell beyond the
+  rounds' spread.
+* **[Low] network, a connection's first send waits for the first contact**
+  ([design-network-stack.md](design-network-stack.md#the-socket-process)).
+  A socket sends its socket process nothing before that process's first
+  message, so a connection's first grant of send credit follows the
+  first receive credit, and a `send` made at once after `connect` or
+  `accept` returns waits one lane round trip for it. Settled by the time
+  from `connect` returning to the first byte at the peer, against the
+  same with the open's answer carrying the connection's first send
+  credit, on QEMU under HVF; that answer is the change should the wait
+  show in a request-reply workload that opens a connection per request.
+* **[Medium] network, the copy of a send's pieces**
+  ([design-network-stack.md](design-network-stack.md#the-socket-process)).
+  The socket process makes every piece a binary of its own size, copying
+  a piece cut from a larger binary and joining iodata a piece at a time,
+  so that a queued piece keeps only its own bytes alive however its send
+  ends. A bulk send of one large binary therefore makes one more pass
+  over all its bytes beside the lane's own copy, where a send of iodata
+  pays no more than the whole-binary join it replaces. Settled by bulk
+  send throughput and CPU per byte with 64 KiB, 1 MiB and 64 MiB sends
+  of one binary and of iodata of 4 KiB binaries, against the same sends
+  with the copy disabled, on the FreeBSD x86-64 test host and on QEMU
+  under HVF.
 * **[Medium] network, the socket process's hop**
   ([design-network-stack.md](design-network-stack.md#the-socket-process)).
   Every delivery takes one local message from the socket process to the
@@ -514,25 +558,45 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   reductions per delivered byte in the owner's domain, and memory per
   socket. The fixes on the table are coalescing several pushes into one
   delivery when the owner is behind, and granting credit less often.
-* **[Medium] network, two local messages more per call through the
-  socket process**
+* **[Medium] network, the local round trip per call through the socket
+  process**
   ([design-network-stack.md](design-network-stack.md#the-socket-process)).
-  A `gen_tcp` call that needs the connection goes from its caller to the
-  socket process and on to the connection, and its reply back the same
-  way: two local messages more than a call to the connection itself. In
-  active mode each delivery also takes one more hop, from the connection
-  through the socket process to the owner. Request-reply pays both on
-  every transaction: on the FreeBSD x86-64 test host, natively on stock
-  OTP 29 (erts 17.1), default flags, medians of 5, rr-64 measured 13,824
-  transactions a second against its parent's 15,065 (8 percent less) and
-  rr-64x16 80,035 against 86,775 (`~/erxos-history`,
-  `net-bench/1be-p9a`, commit 3200779, against
+  A `gen_tcp` call goes from its caller to the socket process and back,
+  and a `send` that fits its credit is answered there, its bytes
+  crossing the lane once with no reply, so a request-reply exchange
+  costs four local messages in the owner's domain and one lane
+  crossing each way. A build with a reply per piece, one lane message
+  more per transaction, measured the hop's cost: on the FreeBSD x86-64
+  test host, natively on stock OTP 29 (erts 17.1), default flags,
+  medians of 5, rr-64 measured 13,824 transactions a second against its
+  parent's 15,065 (8 percent less) and rr-64x16 80,035 against 86,775
+  (`~/erxos-history`, `net-bench/1be-p9a`, commit 3200779, against
   `net-bench-freebsd-fast-p6c-2026-11-10/branch0`, commit 83f7a0a).
-  Settled by the same rr-64 run with the socket process's share taken
-  apart: messages and reductions per transaction in the socket process,
-  against a build whose send call goes to the connection directly. The
-  fix on the table is the connection answering a one-piece send's caller
-  itself, with the socket process forwarding the call.
+  The bench the design requires
+  ([design-network-stack.md](design-network-stack.md#the-socket-process-exploration-and-two-domains))
+  ran its FreeBSD part on a throwaway hack that granted 32 KiB at the
+  start and then by the grant rule's first clause only, with no
+  reservation and no admission, against master b37ef9d0a with the bench's warm-up fix:
+  on the same host, natively on stock OTP 29 (erts 17.1, JIT), Erlang
+  compiled with the oracle's `erlc`, the tap path to a vnet jail, seven
+  interleaved rounds, medians with the range over the rounds. rr-64
+  (64-byte request-reply against a stock `gen_tcp` echo server, 10 s)
+  took 9.01 messages per transaction against 10.00 in a traced run at
+  `+S 1:1`; CPU per transaction fell 4.0 percent at `+S 1:1`, 54.31 to
+  52.13 us, and 7.9 percent with default flags, 78.33 to 72.15 us, each
+  outside the rounds' spread; bulk send and receive of 512 MiB to and
+  from `nc` stayed within noise, bulk send at `+S 1:1` 4.2 percent
+  faster at 4.9 percent less CPU (`~/erxos-history`,
+  `net-sendcredit-hack-2026-11-10/`, commit 4eb3cef). Settled by the
+  bench's QEMU part, rr-64 and a 64 MiB send with the owner in a test
+  domain on QEMU under HVF against master, lane crossings per
+  transaction and the outlet's refusals counted, run when the package is
+  built. What
+  remains after it is the hop itself, whose
+  removal the owner declined until measured: within one domain on a
+  standalone `erx_net` release, and as native code only when a
+  measurement across domains shows the owner's side among the larger
+  costs (decisions 16 and 17 of the design).
 * **[Low] network, a send of iodata is flattened**
   ([design-network-fastpath.md](design-network-fastpath.md#copies)).
   `erx_gen_tcp:send/2` makes the owner's iodata one binary, a copy of
