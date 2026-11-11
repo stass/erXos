@@ -7,6 +7,7 @@ require 'socket'
 require_relative 'error'
 require_relative 'etf'
 require_relative 'hostlink_client'
+require_relative 'abi_emit_web'
 require_relative 'web_server'
 
 module Erx
@@ -45,6 +46,15 @@ module Erx
         web = web_connection(client)
         { session: first.id.unpack1('H*'), replaced: replaced.unpack1('H*'), missing: missing, bytes_sent: sent,
           web: web }
+      end
+    end
+
+    # Connects to the host link at socket of a guest whose console has logged root in,
+    # and runs machine_record: build as for call/2, web_hash the web protocol's hash in
+    # hexadecimal (web_hash/1). Returns the update's first bytes in hexadecimal.
+    def machine(socket, build:, web_hash:)
+      UNIXSocket.open(socket) do |io|
+        machine_record(HostlinkClient.new(io: io, expected_build: build), web_hash)
       end
     end
 
@@ -118,6 +128,80 @@ module Erx
       raise Error, "host link: the web core's answer: the guest sent #{seen.map { |message| message.class.name }}" unless answered
 
       seen.first.bytes.unpack1('H*')
+    end
+
+    # The web protocol's hash for the tree at root, as the generated codecs carry it: over
+    # the protocol's sources as the tree holds them (Erx::ABI::WebEmitter).
+    def web_hash(root)
+      inputs = ABI::WebEmitter::HASHED.to_h { |path| [path, File.binread(File.join(root, path))] }
+      ABI::WebEmitter.protocol_hash(ABI::WebEmitter.hashed_sources(root: root, inputs: inputs))
+    end
+
+    # The web protocol's messages this check sends and expects, little-endian as
+    # abi/protocols/web.txt lays them out: a browser's hello (tag 1, the 32-byte hash
+    # as bytes, u32 length first) and its open of view 1 on the machine's path (tag 2,
+    # view, target path, tag 1, of no segments); the tags of the welcome and of a view's
+    # end; and the start of the update that answers the open with a record: tag 2, view
+    # 1, body record (tag 1), the record's path of no segments and its kind, the atom
+    # name `machine`.
+    WELCOME = 1
+    ENDED = 3
+    OPEN_MACHINE = [2, 1, 1, 0].pack('CVCV').freeze
+    MACHINE_UPDATE = ([2, 1, 1, 0, 7].pack('CVCVV') + 'machine').b.freeze
+
+    def hello(hash) = [1, 32].pack('CV') + [hash].pack('H64')
+
+    # A browser's open of the machine's path, on a connection through the web facet, is
+    # answered with an update carrying the machine's record, which the web domain's line
+    # to root's session read from the inspector (docs/design-web.md, "Views on the
+    # line"). The facet reaches root's line as it opens; the console starts root's next
+    # session when one ends, and a facet opened while none is logged in answers every
+    # open `ended unsupported`, so the check opens the facet again until WEB_SECONDS
+    # pass. Returns the update's first bytes in hexadecimal.
+    def machine_record(client, hash)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WEB_SECONDS
+      loop do
+        update = machine_update(Web::Relay.new(link: client), hash)
+        if update.getbyte(0) == ENDED
+          raise Error, "host link: the machine's record: every open ended: #{update.unpack1('H*')}" if
+            Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+          sleep 1
+          next
+        end
+        check(update.start_with?(MACHINE_UPDATE), "the machine's record", update.unpack1('H*'))
+        return update.byteslice(0, MACHINE_UPDATE.bytesize).unpack1('H*')
+      end
+    end
+
+    # The machine's answer to an open of the machine's path on a fresh facet: an update
+    # or the view's end.
+    def machine_update(relay, hash)
+      relay.open
+      check(relay.connect(2), 'a web connection', relay)
+      check(relay.data(2, hello(hash)), 'the hello', relay)
+      welcome = delivered(relay, 2, 'the welcome')
+      check(welcome.getbyte(0) == WELCOME, 'the welcome', welcome.unpack1('H*'))
+      check(relay.data(2, OPEN_MACHINE), 'the open of the machine', relay)
+      answer = delivered(relay, 2, "the machine's record")
+      relay.close(2)
+      answer
+    end
+
+    # The next message the machine delivered on connection number, within WEB_SECONDS.
+    def delivered(relay, number, what)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WEB_SECONDS
+      loop do
+        relay.messages(1).each do |message|
+          case message
+          in Web::Relay::Delivered[^number, String => bytes] then return bytes
+          in Web::Relay::Ended[^number] then raise Error, "host link: #{what}: the web connection ended"
+          else nil
+          end
+        end
+        raise Error, "host link: #{what}: nothing came in #{WEB_SECONDS} seconds" if
+          Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      end
     end
 
     def expect_facet(reply, number)

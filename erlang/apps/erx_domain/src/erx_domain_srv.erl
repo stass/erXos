@@ -58,6 +58,10 @@ their log lines are rate-limited (throttle/2). A configured domain's facets
 of services the system domain serves go in its ready answer, each in front
 of the process its service named with erx_facet:serve/2 (served/2).
 
+A session's ready report names its line to the web domain among its provides;
+the service keeps that pid until the session ends and hands it out only
+through erx_domain:web_line/2, when the host opens its web facet.
+
 Its state, erx_domain_core's and erx_domain_links's, lives in its own heap and nowhere else. The
 service is never restarted: its end, however it comes, ends the system
 domain (erx_domain_sup), and no domain outlives that, so no successor needs
@@ -149,7 +153,7 @@ init(Opts) ->
            held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT),
            mint_config => MintConfig, mints => erx_domain_mints:new(MintConfig#{services => [], grants => []}),
            mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0},
-           served => #{}},
+           served => #{}, web_lines => #{}},
      {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none
@@ -218,6 +222,11 @@ handle_call({introduce, A, B}, From, State) when is_integer(A), is_integer(B) ->
             {noreply, wait_introduced(A, B, From, Next)};
         {Reply, Next} ->
             {reply, Reply, Next}
+    end;
+handle_call({web_line, Id}, _From, #{web_lines := Lines} = State) ->
+    case Lines of
+        #{Id := Line} -> {reply, {ok, Line}, State};
+        #{} -> {reply, {error, no_line}, State}
     end;
 handle_call(mints, _From, #{mints := Mints, mint_counts := Counts} = State) ->
     %% Each grant's state, configured and per session, and how many of each refusal and drop were counted.
@@ -611,7 +620,7 @@ ready(Id, Ref, Provides, #{core := Core, waiting := Waiting} = State) ->
             Answered = answer_ready(Id, grant_facets(Id, served(Origin, Ready), perform(Actions, Ready))),
             case Origin of
                 {configured, Row} -> mints({ready, Row, Id, Node, Provides}, Answered);
-                {session, Template} -> mints({session_ready, Template, Id}, Answered);
+                {session, Template} -> mints({session_ready, Template, Id}, keep_web_line(Id, Node, Provides, Answered));
                 request -> Answered
             end;
         {_, #{Id := #{ref := Ref, ended := {running, _Info}}}} ->
@@ -631,6 +640,15 @@ grant_facets(Id, Served, #{core := Core, exports := Exports} = State) ->
     %% The manifest grants a configured domain no spec, so the two never share a name.
     Minted = maps:filtermap(fun(Name, Facet) -> mint(Id, Pid, Name, Facet, Exports) end, maps:merge(Facets, Served)),
     Pid ! {Ref, facets, Minted},
+    State.
+
+%% A session's line to the web domain, which its ready report names among its provides as
+%% web_line, a process of the session's own node (erx_web_line). The service keeps it
+%% until the session ends, for erx_domain:web_line/2 to hand to the web domain when the
+%% host opens the web facet; it hands the pid to no one before then.
+keep_web_line(Id, Node, #{web_line := Line}, #{web_lines := Lines} = State) when is_pid(Line), node(Line) =:= Node ->
+    State#{web_lines := Lines#{Id => Line}};
+keep_web_line(_Id, _Node, _Provides, State) ->
     State.
 
 mint(Id, DomainPid, Name, {Behind, Limits}, Exports) ->
@@ -1003,7 +1021,8 @@ restart({configured, Row}, #{core := Core, configured := Configured} = State) ->
 %% operation of its incarnation is cancelled. A session's end cancels its grants'
 %% operations and deletes the grants.
 unprovide({configured, Row}, Id, State) -> mints({ended, Row, Id}, State);
-unprovide({session, _Template}, Id, State) -> mints({session_ended, Id}, State);
+unprovide({session, _Template}, Id, #{web_lines := Lines} = State) ->
+    mints({session_ended, Id}, State#{web_lines := maps:remove(Id, Lines)});
 unprovide(request, _Id, State) -> State.
 
 %%% The facets configured domains serve (docs/design-system.md, "Facets a configured

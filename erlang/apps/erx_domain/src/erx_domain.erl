@@ -44,7 +44,7 @@ domain. Monitoring the domain pid watches the domain: it ends with
 or stopped.
 """.
 
--export([create/1, start_session/2, info/1, introduce/2, stop/2, id/1, node/1, pid/1]).
+-export([create/1, start_session/2, info/1, introduce/2, web_line/2, stop/2, id/1, node/1, pid/1]).
 -export_type([domain/0, spec/0]).
 
 -opaque domain() :: {erx_domain, Id :: pos_integer(), Node :: node(), Pid :: pid()}.
@@ -105,6 +105,37 @@ start_session(Principal, Facets) when is_integer(Principal), Principal > 0 ->
 -spec introduce(domain(), domain()) -> ok | {error, term()}.
 introduce({erx_domain, A, _, _}, {erx_domain, B, _, _}) ->
     gen_server:call(erx_domain_srv, {introduce, A, B}, infinity).
+
+-doc """
+Session's line to the web domain Web (docs/design-web.md, "Logging in and the
+line"), for the host link's `web` facet as it opens: the erx_web_line the
+session's ready report named, once the service has introduced the two domains
+and the line, asked in the system domain's envelope, has exported itself to Web
+with send. Each is its own domain's act: the service makes the connection, the
+session's runtime the export, so no domain reaches the line before the facet
+opens. {error, no_line} for a session that named no line or has ended, the
+introduction's refusal as introduce/2 answers it, by the service's own deadline,
+and {error, unavailable} when the line did not answer within five seconds,
+{error, refused} when it refused.
+""".
+-spec web_line(pos_integer(), pos_integer()) -> {ok, pid()} | {error, term()}.
+web_line(Session, Web) when is_integer(Session), Session > 0, is_integer(Web), Web > 0 ->
+    maybe
+        {ok, Line} ?= gen_server:call(erx_domain_srv, {web_line, Session}),
+        ok ?= gen_server:call(erx_domain_srv, {introduce, Session, Web}, infinity),
+        ok ?= export_line(Line, Web),
+        {ok, Line}
+    end.
+
+%% The line's answer, which its session wrote, is taken only as ok; anything else is
+%% refused, so no term of the session's reaches the caller.
+export_line(Line, Web) ->
+    try gen_server:call(Line, {export, Web}, 5000) of
+        ok -> ok;
+        _Refused -> {error, refused}
+    catch
+        exit:_ -> {error, unavailable}
+    end.
 
 -doc "exit(pid(Domain), Reason).".
 -spec stop(domain(), term()) -> ok.

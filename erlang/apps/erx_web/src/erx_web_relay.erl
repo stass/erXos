@@ -47,8 +47,9 @@ is one table entry per open connection.
 -export_type([line/0]).
 
 %% The principal and build a connection's `welcome` reports, as the system
-%% domain binds the host's connections.
--type line() :: #{principal := binary(), build := binary()}.
+%% domain binds the host's connections, and the line its views are opened on,
+%% the session's erx_web_line, which that session exported to this domain.
+-type line() :: #{principal := binary(), build := binary(), line => pid()}.
 -type config() :: #{system := pos_integer()}.
 
 %% The connections one sink may hold at once: the host tool's own bound on its
@@ -155,7 +156,8 @@ each of the three shapes is forwarded to the relay with the sink; any other
 is refused.
 """.
 admit({connect, C, #{principal := Principal, build := Build} = Line}, Sink, Relay)
-  when ?IS_NUMBER(C), is_binary(Principal), is_binary(Build) ->
+  when ?IS_NUMBER(C), is_binary(Principal), is_binary(Build),
+       (not is_map_key(line, Line) orelse is_pid(map_get(line, Line))) ->
     {forward, Relay, {connect, Sink, C, Line}, Relay};
 admit({data, C, Bytes}, Sink, Relay) when ?IS_NUMBER(C), is_binary(Bytes) ->
     {forward, Relay, {data, Sink, C, Bytes}, Relay};

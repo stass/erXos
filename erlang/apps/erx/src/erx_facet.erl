@@ -119,6 +119,10 @@ system domain's envelope, and starts the facet with start/3, bound to Grantee
 and within Limits, and replies minted(Tag, {ok, Facet}), or minted(Tag, Other)
 with any other term to refuse. {error, badarg} for a Name that is no atom or a Mint
 that is no process of this domain.
+
+A session names one process this way, its line to the web domain as `web_line`
+(erx_web_line_app), which the domain service keeps for erx_domain:web_line/2 until
+the session ends and mints nothing for.
 """.
 -spec provide(atom(), pid()) -> ok | {error, badarg | reported}.
 provide(Name, Mint) when is_atom(Name), is_pid(Mint), node(Mint) =:= node() ->

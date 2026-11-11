@@ -4,6 +4,7 @@
 
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'hostlink_guest'
 require_relative 'medium_boot'
 require_relative 'output_directory'
 require_relative 'production_image'
@@ -217,10 +218,27 @@ module Erx
                                                          manifest_source: @manifest, memory_mib: MACHINE.memory_mib)
         report = Qemu.new(root: @root, runner: @runner, program: @qemu)
                      .run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MACHINE.memory_mib,
-                          directory: File.join(directory, 'boot'), disks: [QemuPlan::Disk.new(path: medium)],
-                          checkpoints: SessionDomain.root_session_checkpoints(points))
+                          disks: [QemuPlan::Disk.new(path: medium)],
+                          checkpoints: SessionDomain.root_session_checkpoints(points),
+                          **web_check(accel, count, built, directory: File.join(directory, 'boot')))
         SessionDomain.burst_whole!(File.binread(report.fetch('serial_log')))
         'passed'
+      end
+
+      # At one CPU, once the transcript is whole, the host opens the web facet and a
+      # browser's open of the machine's path is answered with the machine's record
+      # through root's line (HostlinkGuest.machine): the one cell whose console has
+      # logged root in and has a host link. The boot's directory, which holds the host
+      # link's socket, is then a short one under build/qemu, as the production image's
+      # host link boot's is, since a UNIX socket's path is short; otherwise it is
+      # directory.
+      def web_check(accel, count, built, directory:)
+        return { directory: directory } unless count == 1
+
+        hash = HostlinkGuest.web_hash(@root)
+        { directory: File.join(@root, 'build/qemu', "sd-#{accel}-#{Process.pid}"),
+          link: ->(socket) { HostlinkGuest.machine(socket, build: built.build_id, web_hash: hash) },
+          link_seconds: HostlinkGuest::WEB_SECONDS * 2 }
       end
     end
   end

@@ -96,7 +96,7 @@
 -behaviour(gen_server).
 
 -export([start/0, start_link/1, run_shell/1, run_shell/2, write/1, write/2, terminal/0, terminal/1]).
--export([facet/0, add_session/2, login/0, connect/1, detach/0, first_group/0]).
+-export([facet/0, add_session/2, login/0, login_session/0, connect/1, detach/0, first_group/0]).
 -export([input/2, first_shell/1, after_first_shell/2, erlang_shell_group/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -295,6 +295,15 @@ login() ->
     gen_server:cast(?MODULE, login).
 
 -doc """
+The domain of the session login/0 started for the line's principal, root's in a
+development build, from its start until its end; none before login/0 has started one,
+while one is starting, and between its end and the start of the next.
+""".
+-spec login_session() -> {ok, pos_integer()} | none.
+login_session() ->
+    gen_server:call(?MODULE, login_session).
+
+-doc """
 Gives the line to domain Domain's session, taking it from whoever had it: the session's
 held output is written, and the bytes typed go to its tty until Ctrl-G or detach/0
 gives the line to the menu or the console's own groups, or the session ends or fails a
@@ -443,6 +452,10 @@ handle_call(first_group, _From, State = #state{base = Base}) ->
 handle_call({write, Bytes}, From, State = #state{driver = Driver}) ->
     Driver ! {erx_console_output, {caller, From}, onlcr(Bytes)},
     {noreply, State};
+handle_call(login_session, _From, State = #state{login = {_Phase, Domain}}) ->
+    {reply, {ok, Domain}, State};
+handle_call(login_session, _From, State) ->
+    {reply, none, State};
 handle_call(facet, _From, State = #state{endpoint = Endpoint}) ->
     {reply, console_facet(Endpoint), State};
 handle_call({add_session, Domain, Spec}, _From, State) ->

@@ -76,7 +76,14 @@ module Erx
     WEB_ONLY = %w[erx_web].freeze
     raise Error, "WEB_ONLY names what the runtime does not build: #{WEB_ONLY - APPLICATIONS}" unless
       (WEB_ONLY - APPLICATIONS).empty?
-    SYSTEM_APPLICATIONS = (APPLICATIONS - STORAGE_ONLY - NETWORK_ONLY - WEB_ONLY).freeze
+    # Applications only the session's boot script boots: the session's line to the web
+    # domain (docs/design-web.md, "Views on the line"), which must be up before init's
+    # ready report names it, so the boot script starts it, unlike erx_session (DOMAIN_ONLY).
+    # The system release does not ship it, since the system domain is no session.
+    SESSION_ONLY = %w[erx_web_line].freeze
+    raise Error, "SESSION_ONLY names what the runtime does not build: #{SESSION_ONLY - APPLICATIONS}" unless
+      (SESSION_ONLY - APPLICATIONS).empty?
+    SYSTEM_APPLICATIONS = (APPLICATIONS - STORAGE_ONLY - NETWORK_ONLY - WEB_ONLY - SESSION_ONLY).freeze
     SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: SYSTEM_APPLICATIONS, system: true,
                          boots: { 'start' => SYSTEM_APPLICATIONS }.freeze)
     # Where the one domain release lies: domains/erxos/, which sorts after boot/ and

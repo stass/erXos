@@ -75,19 +75,25 @@ relay_answering(Test, Answer) ->
             relay_answering(Test, Answer)
     end.
 
--define(ROOT_LINE, #{principal => <<"root">>, build => <<"00000000000000ff">>}).
+%% Root's line stands in as the test process; the facet passes on only its line.
+-define(ROOT_LINE, #{principal => <<"root">>, build => <<"00000000000000ff">>, line => self()}).
 
 open_web(Relay) ->
-    erx_hostlink_web:open(self(), Relay, {ok, <<"00000000000000ff">>}, ?ERX_MANIFEST_DEVELOPMENT).
+    Test = self(),
+    erx_hostlink_web:open(self(), Relay, {ok, <<"00000000000000ff">>}, ?ERX_MANIFEST_DEVELOPMENT,
+                          fun(_Web) -> #{line => Test, principal => <<"forged">>} end).
+
+%% Root's line is reached for no open that is refused.
+no_line(_Web) -> error(line_reached).
 
 %% The root opens a web facet only where the domain holds the web domain's relay and
 %% knows its build.
 web_facet_needs_the_relay_test() ->
     Relay = spawn(fun() -> receive stop -> ok end end),
     ?assertEqual({{error, unsupported}, []},
-                 erx_hostlink_web:open(self(), undefined, {ok, <<"00">>}, ?ERX_MANIFEST_DEVELOPMENT)),
+                 erx_hostlink_web:open(self(), undefined, {ok, <<"00">>}, ?ERX_MANIFEST_DEVELOPMENT, fun no_line/1)),
     ?assertEqual({{error, unsupported}, []},
-                 erx_hostlink_web:open(self(), Relay, {error, {no_build, "none"}}, ?ERX_MANIFEST_DEVELOPMENT)),
+                 erx_hostlink_web:open(self(), Relay, {error, {no_build, "none"}}, ?ERX_MANIFEST_DEVELOPMENT, fun no_line/1)),
     persistent_term:put({erx, facets}, #{web => Relay}),
     try ?assertEqual({{error, unsupported}, []}, erx_hostlink:root({open, web}, self()))
     after persistent_term:erase({erx, facets})
@@ -96,13 +102,14 @@ web_facet_needs_the_relay_test() ->
 
 %% The web front end logs every browser in as root, so the root offers the web facet only
 %% on a development build: a release build, a partial boot of one, or a build whose
-%% manifest flags are unknown is refused with the relay held, and no facet starts.
+%% manifest flags are unknown is refused with the relay held, no facet starts and root's
+%% line is not reached, so no session is exported to the web domain.
 web_facet_needs_a_development_build_test() ->
     Relay = spawn(fun() -> receive stop -> ok end end),
     Build = {ok, <<"00000000000000ff">>},
-    ?assertEqual({{error, unsupported}, []}, erx_hostlink_web:open(self(), Relay, Build, ?ERX_MANIFEST_MODE_RELEASE)),
-    ?assertEqual({{error, unsupported}, []}, erx_hostlink_web:open(self(), Relay, Build, ?ERX_MANIFEST_PARTIAL_BOOT)),
-    ?assertEqual({{error, unsupported}, []}, erx_hostlink_web:open(self(), Relay, Build, unknown)),
+    ?assertEqual({{error, unsupported}, []}, erx_hostlink_web:open(self(), Relay, Build, ?ERX_MANIFEST_MODE_RELEASE, fun no_line/1)),
+    ?assertEqual({{error, unsupported}, []}, erx_hostlink_web:open(self(), Relay, Build, ?ERX_MANIFEST_PARTIAL_BOOT, fun no_line/1)),
+    ?assertEqual({{error, unsupported}, []}, erx_hostlink_web:open(self(), Relay, Build, unknown, fun no_line/1)),
     Relay ! stop.
 
 hostlink_call(Facet, Request) ->

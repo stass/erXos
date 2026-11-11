@@ -102,19 +102,20 @@ class ReleaseFilesTest < Minitest::Test
     %w[compiler runtime_tools].each { |application| assert_includes release, "{#{application},\"#{VERSION}\",load}" }
     assert_includes release, "{erx_session,\"#{VERSION}\",load}", 'a domain\'s own application runs in no system domain'
     started = Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::DOMAIN_ONLY - Erx::ReleaseFiles::STORAGE_ONLY -
-              Erx::ReleaseFiles::NETWORK_ONLY - Erx::ReleaseFiles::WEB_ONLY
+              Erx::ReleaseFiles::NETWORK_ONLY - Erx::ReleaseFiles::WEB_ONLY - Erx::ReleaseFiles::SESSION_ONLY
     [*%w[kernel stdlib], *started].each do |application|
       assert_includes release, "{#{application},\"#{VERSION}\"}"
     end
   end
 
-  # The block driver and littlefs run in the storage domain alone, and the network stack
-  # and its client in the domains that use the network, so the system release neither
-  # ships nor names them.
-  def test_the_system_release_does_not_ship_the_storage_or_network_applications
+  # The block driver and littlefs run in the storage domain alone, the network stack
+  # and its client in the domains that use the network, and the web line in a session
+  # alone, so the system release neither ships nor names them.
+  def test_the_system_release_does_not_ship_the_storage_network_or_session_applications
     paths = entries.map { |entry| entry.fetch('path') }
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
-    [*Erx::ReleaseFiles::STORAGE_ONLY, *Erx::ReleaseFiles::NETWORK_ONLY].each do |application|
+    only = [*Erx::ReleaseFiles::STORAGE_ONLY, *Erx::ReleaseFiles::NETWORK_ONLY, *Erx::ReleaseFiles::SESSION_ONLY]
+    only.each do |application|
       refute_includes release, "{#{application},"
       refute(paths.any? { |path| path.start_with?("system/lib/#{application}-") }, "the system release ships #{application}")
     end
@@ -190,13 +191,14 @@ class ReleaseFilesTest < Minitest::Test
   end
 
   # The boot table's session script (ProductionImage::DOMAIN_BOOTS) boots the command
-  # shell and erx_session beside what every domain boots through, and starts the shell
-  # but only loads erx_session, which the session template's -eval starts once init
-  # holds the domain's facets; a name the table does not hold boots the base alone.
+  # shell, the web line and erx_session beside what every domain boots through, and
+  # starts the shell and the line, which init's ready report names, but only loads
+  # erx_session, which the session template's -eval starts once init holds the domain's
+  # facets; a name the table does not hold boots the base alone.
   def test_the_session_script_boots_the_shell_and_erx_session
     domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('session')]))
-    assert_match(/\{erx_shell,"#{VERSION}"\},\{erx_session,"#{VERSION}",load\}\]\}\.\n\z/, boot_release_file('session'),
-                 'the session script only loads erx_session')
+    assert_match(/\{erx_shell,"#{VERSION}"\},\{erx_web_line,"#{VERSION}"\},\{erx_session,"#{VERSION}",load\}\]\}\.\n\z/,
+                 boot_release_file('session'), 'the session script starts the line and only loads erx_session')
     assert_equal Erx::ReleaseFiles::DOMAIN_BASE, Erx::ProductionImage.domain_boot('erts').applications
   end
 

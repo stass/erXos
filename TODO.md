@@ -484,12 +484,23 @@ it; git history is the record of completed work.
   fixed fields and props, so a `removals` or `input` field in insert would undercount `insert_max`;
   `encode({input, Bad}, _)` raises `{bad_value, Bad}` where other records raise `bad_record`; no refusal case pins
   that a key input with a bad direction and a truncated code is `bad_key_direction`.
-* [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`, [Values](docs/design-web.md#values): a huge integer's
+* [Medium] web, the connection side of the line (`erlang/apps/erx_web/src/erx_web_conn.erl`, `perform/2`;
+  `erlang/apps/erx_web/src/erx_web_relay_conn.erl`, `remember/2`): `erx_web_conn` is documented as a pure state
+  machine but `perform/2` calls the line, monitors and sends; move it to a driver module of its own. The relay
+  connection keeps a second map from view pid to view beside the core's, filled outside the core, and its close
+  is an `exit(normal)` inside a closure; have the core own the lookup by pid (`update_from`, `ended_from`, `down`
+  inputs) and make the close an explicit clause. `perform/2` also takes any pid the line answers as a view;
+  require the line's domain (`erx:owner/1`).
+* [Low] build, the system release's applications (`tools/lib/erx/release_files.rb`, `SYSTEM_APPLICATIONS`): the
+  system release ships every application less three hand-kept lists (`STORAGE_ONLY`, `WEB_ONLY`, `SESSION_ONLY`),
+  so a new domain-only application left out of them starts in the system domain unseen. Derive the system set
+  from an allowlist, or the exclusions from the domain boot table.
+* [Medium] `erlang/apps/erx_web_line/src/erx_web_value.erl`, [Values](docs/design-web.md#values): a huge integer's
   `leading/1` (a power of ten and a bignum division) costs 110-160 ms for the largest bignum and is charged only
   its 4 KiB print, so about 15 of them fit one projection, about 2 s of the session's CPU per update (13 copies
   measured at 1.5 s). Charge the work, or reuse one `10^Dropped` per byte length within a projection, and time
   15 separate huge integers in `erx_web_value_tests`.
-* [Medium] `erlang/apps/erx_web/src/erx_web_value.erl`: a printed map's copy is rebuilt with `maps:from_list`, so
+* [Medium] `erlang/apps/erx_web_line/src/erx_web_value.erl`: a printed map's copy is rebuilt with `maps:from_list`, so
   its print order can differ from the term's: a map of more than 32 keys cut to 32 or fewer prints sorted where
   the term prints in hash order, and a huge integer key shortened by `leading/1` can sort before a smaller key.
   Copy a map as its pairs in the term's own print order, with a property test comparing the copy's print with
@@ -1949,7 +1960,7 @@ it; git history is the record of completed work.
   `record()`'s `entries` is answered only for `[kernel, log]`; a domain's pids, also marked `entries`, are still
   a listing's children, and no query takes `limit`, so a page is always erx_schema's 1,000. Answer every
   `entries` path with entries and take `limit` in `erx_inspector:inspect/3`.
-* [Low] `erlang/apps/erx_shell/src/erx_render.erl`, `erlang/apps/erx_web/src/erx_web_value.erl`: neither shows a
+* [Low] `erlang/apps/erx_shell/src/erx_render.erl`, `erlang/apps/erx_web_line/src/erx_web_value.erl`: neither shows a
   record's `entries`, so `erx:i([kernel, log])` prints an empty record and the web's log view
   ([design-web.md](docs/design-web.md#views-on-the-line)) has nothing to read; `/proc/kernel/log` and `dmesg`
   are the only readers.

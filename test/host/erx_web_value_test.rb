@@ -17,7 +17,7 @@ class ErxWebValueTest < Minitest::Test
   Erx::Generated.ensure(root: ROOT)
   SOURCES = %w[build/gen/erlang/apps/erx/src/generated/erx_schema.erl build/gen/erlang/apps/erx/src/generated/erx_present.erl
                erlang/apps/erx_files/src/erx_procfs_core.erl
-               erlang/apps/erx_web/src/erx_web_value.erl test/erlang/erx_web_value_tests.erl]
+               erlang/apps/erx_web_line/src/erx_web_value.erl test/erlang/erx_web_value_tests.erl]
             .map { |path| File.join(ROOT, path) }.freeze
 
   def test_value_cases_pass_under_eunit

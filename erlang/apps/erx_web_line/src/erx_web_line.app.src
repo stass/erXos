@@ -1,0 +1,14 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% A session's line to the web domain (docs/design-web.md, "Views on the line"):
+%% erx_web_line, whose views project records with erx_web_value. The session's boot
+%% script starts it, permanent, before init's ready report, which names the line.
+{application, erx_web_line,
+ [{description, "erXos session's line to the web domain"},
+  {vsn, "1"},
+  {modules, [erx_web_line, erx_web_line_app, erx_web_value]},
+  {registered, []},
+  {applications, [kernel, stdlib, erx, erx_files]},
+  {mod, {erx_web_line_app, []}},
+  {env, []}]}.

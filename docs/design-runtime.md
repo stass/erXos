@@ -352,8 +352,9 @@ application per device class, `erx_uart` and `erx_blk`; `erx_shell`, the
 command shell; and the system services and their clients: `erx_domain`,
 the domain service, which only the system release ships; `erx_code`, the
 code service; `erx_hostlink`, the host link; `erx_net`, the TCP/IP stack;
-`erx_net_client`, its socket backends; and `erx_session`, a session's
-domain. Every domain release ships `kernel`, `stdlib`, `erx` and
+`erx_net_client`, its socket backends; `erx_web_line`, a session's line to
+the web domain, which only the domain release ships; and `erx_session`,
+a session's domain. Every domain release ships `kernel`, `stdlib`, `erx` and
 `erx_files` at the least.
 
 `erx`, `erx_files`, `erx_uart` and `erx_shell` have no application
@@ -373,7 +374,10 @@ their own, under the start types the release file gives them: `erx_net`
 with start type `temporary`, so that a crash loop in the stack ends the
 stack and not the system domain, and `erx_session` with start type
 `load` in the system release, so that it runs only in a domain whose
-release holds it.
+release holds it, where the session template's `-eval` starts it once
+the domain holds its facets; `erx_web_line` starts from the session's
+boot script, before the session reports ready, since the ready report
+names the line.
 `crypto`, `ssl`, `ssh`, `inets`
 and the rest are outside the shipped set: they depend on a network stack
 and on OpenSSL 3.5 ([design.md](design.md#dependencies)), and arrive with

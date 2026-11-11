@@ -42,7 +42,7 @@ small record each, the encoded `welcome` and the highest view number. Its
 updates pass through and are never stored.
 """.
 
--export([new/1, step/2]).
+-export([new/1, step/2, perform/2]).
 -export_type([state/0, input/0, action/0]).
 
 -type view() :: erx_web_proto:view().
@@ -75,6 +75,9 @@ updates pass through and are never stored.
                last = none :: none | view(),
                views = #{} :: #{view() => #view{}}}).
 -opaque state() :: #conn{}.
+
+%% How long the line may take to start a view.
+-define(LINE_MS, 5000).
 
 -doc """
 A connection that has heard nothing yet, for a session of principal
@@ -265,3 +268,54 @@ encoded(Message) ->
 put_view(View, Entry, #conn{views = Views} = State) -> State#conn{views = Views#{View := Entry}}.
 
 drop_view(View, #conn{views = Views} = State) -> State#conn{views = maps:remove(View, Views)}.
+
+%%% The driver's effects.
+
+-doc """
+Performs one action of step/2 for a front end, the one function both front
+ends perform actions with (W5), and returns the inputs it produced for
+step/2, in order. Driver names the front end's own effects, `send` and
+`close`, each a fun of the action's argument, and the connection's line,
+the session's erx_web_line, or `none` where the connection has none.
+
+* An `open` of a `path` target is a call on the line, which answers the
+  view's process, `{opened, View, Pid}`, monitored here so that its end
+  reaches the driver as a 'DOWN', or `{ended, View, Reason}` for the line's
+  refusal and `{ended, View, unavailable}` when the line did not answer.
+  Every other target, and every open without a line, is `{ended, View,
+  unsupported}`: the line serves records, and no UI is served yet.
+* `next` and `stop` are messages to the view; the view answers a `next`
+  with `{web_view, Pid, Body}` or `{web_view_ended, Pid, Reason}`, which the
+  driver hands to step/2 as `update` and `ended` of the view it opened as Pid.
+* An `event` is dropped, since no UI view opens.
+""".
+-spec perform(action(), #{send := fun((binary()) -> term()), close := fun((close_reason()) -> term()),
+                          line := pid() | none}) -> [input()].
+perform({send, Bytes}, #{send := Send}) ->
+    _ = Send(Bytes),
+    [];
+perform({close, Reason}, #{close := Close}) ->
+    _ = Close(Reason),
+    [];
+perform({open, View, {path, _} = Target}, #{line := Line}) when is_pid(Line) ->
+    try gen_server:call(Line, {open, Target}, ?LINE_MS) of
+        {ok, Pid} when is_pid(Pid) ->
+            _ = erlang:monitor(process, Pid),
+            [{opened, View, Pid}];
+        {error, Reason} when is_atom(Reason) ->
+            [{ended, View, Reason}];
+        _Other ->
+            [{ended, View, failed}]
+    catch
+        exit:_ -> [{ended, View, unavailable}]
+    end;
+perform({open, View, _Target}, #{}) ->
+    [{ended, View, unsupported}];
+perform({next, Pid}, #{}) ->
+    Pid ! next,
+    [];
+perform({stop, Pid}, #{}) ->
+    Pid ! stop,
+    [];
+perform({event, _Pid, _Record}, #{}) ->
+    [].

@@ -495,14 +495,16 @@ and closes it without a `bye`, since nothing is listening.
 
 ### Views on the line
 
-`erx_web_line`, in every session domain's release, is a supervisor of
-the session's views and nothing else: `{open, Target}` from the web
+`erx_web_line`, its own application in every session domain's release,
+is the parent of the session's views and nothing else: `{open, Target}` from the web
 domain starts a view process under it and answers `{ok, View}`, the view's
 pid, exported to the web domain with the reply, or `{error, busy}` past
 64 views. A view's crash ends that view alone, which the web domain sees
-through its monitor and reports as `ended closed`; the line is a
-significant child of the session's release, so the line and the session
-domain end together. A view is one process with one query or one trace at
+through its monitor and reports as `ended closed`. The session's boot
+script starts the line's application permanent, before the session
+reports ready, and the line is the application's one process, so the
+ready report can name the line and the line and the session domain end
+together. A view is one process with one query or one trace at
 a time, so the line's inspector queries in flight are at most its open
 views.
 

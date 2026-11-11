@@ -110,9 +110,10 @@ module Erx
     # boot table defines a script's applications under its name (docs/design-stopgap.md,
     # "The production image"); the manifest only names the script, so two rows naming
     # one cannot disagree on what it boots. The session script, which a principal's
-    # session domain boots, adds the command shell, erx_session and the network client
-    # (docs/design-domains.md, "Principals, sessions and quotas"; ReleaseFiles::NETWORK_ONLY),
-    # whose `grant` key the session template's arguments set; the storage script adds
+    # session domain boots, adds the network client (ReleaseFiles::NETWORK_ONLY), whose
+    # `grant` key the session template's arguments set, the command shell, the session's
+    # line to the web domain (ReleaseFiles::SESSION_ONLY) and erx_session
+    # (docs/design-domains.md, "Principals, sessions and quotas"); the storage script adds
     # the block driver and littlefs's volume, which the system release does not ship
     # (ReleaseFiles::STORAGE_ONLY; docs/design-stopgap.md, "littlefs in the storage domain"); the
     # network script adds the network stack, which it starts permanent, so the stack's end
@@ -124,7 +125,8 @@ module Erx
     # medium_boot's manifest configures a domain (MediumBoot.manifest), and a test image
     # may carry more scripts (build_test_image's domains).
     DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
-    DOMAIN_BOOTS = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_net_client', 'erx_shell', 'erx_session'].freeze,
+    DOMAIN_BOOTS = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_net_client', 'erx_shell', *ReleaseFiles::SESSION_ONLY,
+                                   'erx_session'].freeze,
                      'storage' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::STORAGE_ONLY].freeze,
                      'network' => [*DOMAIN_APPLICATIONS, 'erx_net'].freeze,
                      'web' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::WEB_ONLY].freeze }.freeze
