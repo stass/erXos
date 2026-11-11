@@ -106,6 +106,40 @@ class DomPlannerTest < Minitest::Test
     end
   end
 
+  # A facet the check admits reaches the root's view; one granted to its service's own
+  # server, which property 10 rules out and the check never writes, the view refuses.
+  def test_a_facet_granted_to_its_own_server_is_refused_by_the_view
+    facet = "service b\n  server @domain.beta\n  interface 1\nfacet ab\n  grantee @domain.alpha\n  service @service.b\n" \
+            "  operations none\n  max_request 1\n  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
+    manifest = admit(with_domains('alpha', 'beta') + facet).bytes
+    offset = @codec.open('manifest', manifest).header.fetch('facets').fetch('offset')
+    paths = %w[manifest heads plan].map { |name| File.join(@directory, "facet-#{name}") }
+    bytes = manifest.dup.tap { |copy| copy[offset + 8, 4] = [1].pack('V') }
+    [bytes, '', "order 1\norder 0\n"].zip(paths).each { |content, file| File.binwrite(file, content) }
+    record = @helper.run(paths, runner: @runner, name: 'dom-plan-facet', deadline: 30)
+    assert_match(/\Arefused manifest: a facet is granted to its service's own server\n\z/, File.binread(record.fetch('log')))
+  end
+
+  # Two facets of one service name to one grantee, which the check never writes: the
+  # view refuses them, since the domain service would refuse them at boot. Facet ab
+  # grants alpha beta's b, facet bc grants beta gamma's c, also named b, and the
+  # patch makes alpha bc's grantee.
+  def test_two_facets_of_one_service_name_to_one_grantee_are_refused_by_the_view
+    facet = lambda do |name, grantee, service|
+      "facet #{name}\n  grantee @domain.#{grantee}\n  service @service.#{service}\n  operations none\n" \
+        "  max_request 1\n  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
+    end
+    services = "service b\n  server @domain.beta\n  interface 1\nservice c\n  name \"b\"\n  server @domain.gamma\n  interface 1\n"
+    manifest = admit(with_domains('alpha', 'beta', 'gamma', share: 'narrow') + NARROW + services +
+                     facet.call('ab', 'alpha', 'b') + facet.call('bc', 'beta', 'c')).bytes
+    offset = @codec.open('manifest', manifest).header.fetch('facets').fetch('offset')
+    paths = %w[manifest heads plan].map { |name| File.join(@directory, "facets-#{name}") }
+    bytes = manifest.dup.tap { |copy| copy[offset + 80 + 8, 4] = [0].pack('V') }
+    [bytes, '', "order 2\norder 1\norder 0\n"].zip(paths).each { |content, file| File.binwrite(file, content) }
+    record = @helper.run(paths, runner: @runner, name: 'dom-plan-facets', deadline: 30)
+    assert_match(/\Arefused manifest: a grantee takes two facets of one service name\n\z/, File.binread(record.fetch('log')))
+  end
+
   # The Ruby check takes any byte count; the library takes only whole pages.
   def test_a_budget_the_library_refuses_fails_the_build
     error = assert_raises(Erx::Manifest::Invalid) { admit(@source.sub("limits app\n  memory 4194304", "limits app\n  memory 4194305")) }

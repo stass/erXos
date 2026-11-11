@@ -385,7 +385,7 @@ reader manifest erx_manifest @manifest_bytes_max
   string services[].name.offset services[].name.length strings identifier 63 empty no
   index services[].server domains absent 0xffffffff
   string facets[].name.offset facets[].name.length strings identifier 63 empty no
-  index facets[].grantee domains
+  index facets[].grantee domains absent 0xffffffff
   index facets[].service services
   partition facets[].operations.offset facets[].operations.count facet_operations
   partition facets[].parameters.offset facets[].parameters.count facet_parameters

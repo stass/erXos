@@ -62,7 +62,7 @@ the grantee's share of reductions; the funnel's check of max_request
 before a message is queued, and the facet's queue quota and heap limit.
 """.
 
--export([start/3, info/1]).
+-export([start/3, info/1, provide/2, minted/2]).
 
 -callback init(Grant :: grant()) -> {ok, State :: term()}.
 -callback admit(Request :: term(), From :: pid(), State :: term()) ->
@@ -99,6 +99,44 @@ before a message is queued, and the facet's queue quota and heap limit.
                    max_request := pos_integer(), in_flight := pos_integer(), exports := module(),
                    ends_with := #{reference() => pid()}, forwards := #{reference() => forward()},
                    dropped := non_neg_integer(), refused := non_neg_integer()}.
+
+-doc """
+Names Mint, a process of this domain, as the mint of the service Name, which a
+configured domain serves (docs/design-system.md, "Facets a configured domain
+serves"). Call it while the service's application starts, before init's ready
+report, which carries every mint named so far as its provides; a second call
+for Name replaces the first. The domain service keeps the mints the report
+named until the domain ends, so a mint must live as long as its domain: one
+that ends, or is named after the report, mints nothing more until the domain
+restarts. The domain service accepts a mint only for a
+service the manifest's service rows declare for this domain, and then sends
+it {erx_facet_mint, Tag, Name, Grantee, Limits} for each configured grant,
+arriving as {erx_origin, 4, Request}: the mint acts only on a request in the
+system domain's envelope, and starts the facet with start/3, bound to Grantee
+and within Limits, and replies minted(Tag, {ok, Facet}), or minted(Tag, Other)
+with any other term to refuse. {error, badarg} for a Name that is no atom or a Mint
+that is no process of this domain.
+""".
+-spec provide(atom(), pid()) -> ok | {error, badarg}.
+provide(Name, Mint) when is_atom(Name), is_pid(Mint), node(Mint) =:= node() ->
+    persistent_term:put({erx, provides}, (persistent_term:get({erx, provides}, #{}))#{Name => Mint});
+provide(_Name, _Mint) ->
+    {error, badarg}.
+
+-doc """
+A mint's reply to the request tagged Tag (provide/2): {ok, Facet} names the
+facet it started, and any other Reply refuses. It goes to this domain's own
+domain pid, which passes it on to the domain service as an answer of this
+domain, so the reply names its domain by the connection it came over, and the
+mint never needs a pid of the system domain. {error, noconnection} in a
+domain with no system connection, which no request reaches.
+""".
+-spec minted(pos_integer(), term()) -> ok | {error, noconnection}.
+minted(Tag, Reply) when is_integer(Tag), Tag > 0 ->
+    case persistent_term:get({erx, domain_pid}, none) of
+        none -> {error, noconnection};
+        DomainPid -> DomainPid ! {erx_facet_minted, Tag, Reply}, ok
+    end.
 
 -doc """
 Starts a facet of Callback for Grant. Opts may name exports, the export table's

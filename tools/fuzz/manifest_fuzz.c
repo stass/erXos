@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "erx/abi_reader.h"
 #include "erx/dom_lib.h"
@@ -42,8 +43,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 /*
  * What a view the library admits holds: an entry per device row, each in one
  * unit and on that unit's holder, with a record of its own index; no two units
- * on one register page; and each configured row's words with room for both
- * node names.
+ * on one register page; each configured row's words with room for both
+ * node names; and every service and facet row, each server and grantee a
+ * configured row or the system domain, no facet granted to its own server,
+ * no grantee taking two facets of one service name, and no facet naming an
+ * operation or parameter, which the domain service would otherwise grant
+ * unchecked.
  */
 static void
 view_check(const erx_manifest_view_t *view, const erx_dom_lib_t *lib)
@@ -51,10 +56,32 @@ view_check(const erx_manifest_view_t *view, const erx_dom_lib_t *lib)
 	const erx_dom_view_t *dom = &lib->view;
 	const erx_dom_device_entry_t *a, *b;
 	const erx_dom_configured_t *row;
+	const erx_dom_facet_t *facet;
+	const erx_dom_service_t *a_service, *b_service;
+	erx_mf_facet_t facet_row;
 	erx_mf_unit_t unit;
 
-	if (dom->ndevices != view->header.devices.count)
+	if (dom->ndevices != view->header.devices.count ||
+	    dom->nservices != view->header.services.count || dom->nfacets != view->header.facets.count)
 		abort();
+	for (uint32_t index = 0; index < dom->nservices; index++)
+		if (dom->services[index].server != ERX_MF_NONE && dom->services[index].server >= dom->nconfigured)
+			abort();
+	for (uint32_t index = 0; index < dom->nfacets; index++) {
+		facet = &dom->facets[index];
+		if (!erx_manifest_facets_at(view, index, &facet_row) || facet_row.operations.count != 0 ||
+		    facet_row.parameters.count != 0 || facet->service >= dom->nservices ||
+		    (facet->grantee != ERX_MF_NONE && facet->grantee >= dom->nconfigured) ||
+		    facet->grantee == dom->services[facet->service].server)
+			abort();
+		for (uint32_t earlier = 0; earlier < index; earlier++) {
+			a_service = &dom->services[dom->facets[earlier].service];
+			b_service = &dom->services[facet->service];
+			if (dom->facets[earlier].grantee == facet->grantee && a_service->name_len == b_service->name_len &&
+			    memcmp(a_service->name, b_service->name, b_service->name_len) == 0)
+				abort();
+		}
+	}
 	for (uint32_t index = 0; index < dom->ndevices; index++) {
 		a = &dom->devices[index];
 		if (!erx_manifest_units_at(view, a->unit, &unit) || unit.holder != a->row ||

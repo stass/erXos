@@ -1367,7 +1367,9 @@ party_forged(lane_party_t *party, const erx_etf_pid_t *eval)
  * Whether a frame record is init's ready report (edit 65 of docs/design-runtime.md): a
  * SEND_SENDER {22, From, To} from a domain pid to the domain pid the root wrote on the
  * boot page, a pid of the system node of words BOOT_PID_NUMBER and BOOT_PID_SERIAL and
- * creation 4, of {erx_ready, #{connections => Agent}}, Agent a pid of the domain.
+ * creation 4, of {erx_ready, #{connections => Agent, provides => #{}}}, Agent a pid of
+ * the domain: nothing in the test release calls erx_facet:provide/2, so provides is the
+ * empty map. The root sends no answer, so init boots on after its wait.
  */
 static bool
 party_ready(const lane_party_t *party, const uint8_t *record, size_t len)
@@ -1377,9 +1379,15 @@ party_ready(const lane_party_t *party, const uint8_t *record, size_t len)
 	/* NEW_PID_EXT, SMALL_ATOM_UTF8_EXT of the system node; ID, Serial and Creation follow */
 	static const uint8_t to_head[] = { 88, 119, sizeof(SYSTEM_NODE) - 1 };
 	const size_t to_len = sizeof(to_head) + sizeof(SYSTEM_NODE) - 1 + 12;
-	/* SMALL_TUPLE_EXT of 2, the atom erx_ready, MAP_EXT of one pair, the atom connections; Agent follows */
-	static const uint8_t head[] = { 104, 2, 119, 9, 'e', 'r', 'x', '_', 'r', 'e', 'a', 'd', 'y', 116, 0, 0, 0, 1,
+	/*
+	 * SMALL_TUPLE_EXT of 2, the atom erx_ready, MAP_EXT of two pairs, the atom
+	 * connections; Agent follows, then tail: the atom provides and an empty MAP_EXT.
+	 * ERTS writes a small map's atom keys in atom-table order, not alphabetical
+	 * order, and init.beam creates connections before provides.
+	 */
+	static const uint8_t head[] = { 104, 2, 119, 9, 'e', 'r', 'x', '_', 'r', 'e', 'a', 'd', 'y', 116, 0, 0, 0, 2,
 	    119, 11, 'c', 'o', 'n', 'n', 'e', 'c', 't', 'i', 'o', 'n', 's' };
+	static const uint8_t tail[] = { 119, 8, 'p', 'r', 'o', 'v', 'i', 'd', 'e', 's', 116, 0, 0, 0, 0 };
 	party_frame_t frame;
 	erx_etf_pid_t from, agent;
 	const uint8_t *to, *numbers;
@@ -1393,9 +1401,10 @@ party_ready(const lane_party_t *party, const uint8_t *record, size_t len)
 	return (memcmp(to, to_head, sizeof(to_head)) == 0 &&
 	    memcmp(to + sizeof(to_head), SYSTEM_NODE, sizeof(SYSTEM_NODE) - 1) == 0 &&
 	    party_be32(numbers) == BOOT_PID_NUMBER && party_be32(numbers + 4) == BOOT_PID_SERIAL &&
-	    party_be32(numbers + 8) == 4 && frame.payload_len == sizeof(head) + PARTY_PID_LEN &&
+	    party_be32(numbers + 8) == 4 && frame.payload_len == sizeof(head) + PARTY_PID_LEN + sizeof(tail) &&
 	    memcmp(frame.payload, head, sizeof(head)) == 0 &&
-	    party_pid_read(party, frame.payload + sizeof(head), PARTY_PID_LEN, &agent));
+	    party_pid_read(party, frame.payload + sizeof(head), PARTY_PID_LEN, &agent) &&
+	    memcmp(frame.payload + sizeof(head) + PARTY_PID_LEN, tail, sizeof(tail)) == 0);
 }
 
 /*

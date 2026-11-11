@@ -373,8 +373,11 @@ violation fails the build with the property, the record and the field:
    a PCIe function found at run time among them, goes to no domain, and a
    function's bus mastering stays off.
 2. **Every facet names a server the manifest contains,** a service of the
-   system release or of a configured domain, and every introduction a
-   configured domain.
+   system release or of a configured domain, and a grantee, the system
+   domain or a configured domain, never the service's own server; a
+   grantee takes at most one facet of a service name, since its registry
+   holds each under that name; and every introduction names configured
+   domains.
 3. **Exactly one domain holds PCIe configuration space, and that domain
    holds nothing else,** on every platform where erXos drives a PCIe
    bridge in a full boot: the PCIe domain, `pcie`, which runs the PCIe enumerator and
@@ -1747,12 +1750,16 @@ names are unique per server, not across the manifest. The facet is a
 process of the server's domain, minted there by the server's own code with
 `erx_facet:start/3`, so the system domain never stands in front of it; the
 domain service decides when each grant is minted, asks the server, and
-installs the result in the grantee's capability registry.
+installs the result in the grantee's capability registry, under the
+service's name; the facet row's own name names the row in the manifest
+alone.
 
 **Providers.** A configured domain's services each name a **mint**, a
 process of the domain that mints facets of one service, with
 `erx_facet:provide(Name, Mint)`, before its init reports ready, and the
-ready report carries them as its `provides` map. A server reports ready
+ready report carries them as its `provides` map. A mint lives as long as
+its domain's incarnation: the providers are the report's until the domain
+ends. A server reports ready
 only once it can serve: the storage domain's report follows its mount of
 `/data`. The ready-report gate authenticates the reporting domain and its
 connection agent ([Creating a domain](#creating-a-domain)), but the
@@ -1811,11 +1818,16 @@ The record moves on these events, and on nothing else:
   service never reuses, and a **deadline** of 10 seconds from its start,
   for the whole of its introduction, mint and installation;
 * **the introduction's result**: `ok` sends the mint
-  `{erx_facet_mint, Tag, Name, Grantee, Limits, Service}`, where `Service`
-  is the domain service's pid, exported to the server by that frame with
-  `send`; an error fails the operation;
-* **the mint's reply**, `{erx_facet_minted, Tag, Reply}`, which arrives
-  in the envelope that names its sender's domain. It is untrusted. It
+  `{erx_facet_mint, Tag, Name, Grantee, Limits}` through the server's
+  domain pid, which the server's domain already holds, since a send
+  exports its sender's pid to the receiving domain; the request names no
+  process to reply to. An error fails the operation;
+* **the mint's reply**, `{erx_facet_minted, Tag, Reply}`, which the server
+  sends its own domain pid with `erx_facet:minted/2`, and the domain pid
+  passes on as an answer of its domain, as it passes on
+  `connection_mapped`. So no pid of the domain service leaves the system
+  domain, and nothing a server sends reaches the domain service but
+  through its domain pid. The reply is untrusted. It
   counts only from the pair's server, for an operation in `minting` with
   that tag. `{ok, Facet}` with `Facet` a pid the server's incarnation
   owns, node and creation both, moves the operation to `installing` and

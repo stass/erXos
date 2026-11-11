@@ -39,6 +39,20 @@ those actions, hands each record to the party's domain pid, which writes it,
 and applies each answer the domain pid passes on. A party is added when its
 domain is built, is ready when its init reports, and ends with its domain.
 
+It mints the facets configured domains serve (docs/design-system.md,
+"Facets a configured domain serves"): erx_domain_mints, that protocol's
+pure core, takes each configured domain's ready report, with the provides
+its domain pid passed on, and its end, and decides; the service performs
+its actions and feeds back what they produce. Nothing in it waits on a
+domain: an introduction the library cannot settle at once is answered later
+as an introduce/2 caller is, the mint's request and the installation are
+messages, the mint's reply arrives in its envelope and the grantee's
+acknowledgement through its domain pid, and each operation's deadline is a
+timer. A facet for the system domain goes into the system domain's own
+registry, which erx:cap/1 reads, and is acknowledged there and then. Every
+refusal and dropped message is counted (the call mints);
+their log lines are rate-limited (throttle/2).
+
 Its state, erx_domain_core's and erx_domain_links's, lives in its own heap and nowhere else. The
 service is never restarted: its end, however it comes, ends the system
 domain (erx_domain_sup), and no domain outlives that, so no successor needs
@@ -79,6 +93,13 @@ reach it only through facets, which arrive with the connections.
 -define(RELEASE_WAIT, 10000).
 %% The longest boot_timeout erlang:start_timer/3 takes.
 -define(BOOT_TIMEOUT_MAX, 16#ffffffff).
+%% At most this many log lines for refused and dropped mint messages within each window
+%% of this many milliseconds; the rest are counted, and their number logged as the next
+%% window opens (throttle/2).
+-define(MINT_LOG_BURST, 10).
+-define(MINT_LOG_WINDOW, 60000).
+%% The system domain's id, a grantee whose registry is the service's own runtime's.
+-define(SYSTEM_ID, 4).
 %% A domain that has not ended, whose domain pid stands for it (erx_domain_core:ended/5).
 -define(IS_LIVE(Life), (Life =:= built orelse Life =:= running orelse Life =:= ready orelse Life =:= stopping)).
 
@@ -89,8 +110,9 @@ start_link() ->
 Opts may name lib, the domain library's module (erx_domain_lib), agent, the
 connection agent's (erx_connections), exports, the export table's
 (erx_dist), introduce_timeout, an introduce/2 caller's deadline in
-milliseconds, and release_wait, a held start's (start/3), for a host test's
-stand-ins.
+milliseconds, release_wait, a held start's (start/3), and mints, the
+owner function (erx_dist:owner/1, as erx:owner/1, by default) and deadline that erx_domain_mints:new/1
+takes, for a host test's stand-ins.
 """.
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
@@ -103,14 +125,19 @@ init(Opts) ->
     %% Whether the runtime is a node, as kernel's start left it, since net_kernel starts
     %% before any application and lives as long as the runtime (close_side/4). Waiting
     %% holds, by domain id, each create not yet answered (wait_created/4).
-    %% Introducing holds, by the pair's key, each introduce/2 caller waiting for its
+    %% Introducing holds, by the pair's key, each introduce/2 caller, or {mints, Tag} for the mint core (reply/2), waiting for its
     %% connection to come up, with the timer of its deadline (settle_introductions/1).
     %% Held holds, by principal and in arrival order, each start waiting for the
     %% principal's ending domains to be retired, with the timer of its bound (start/3).
+    %% Mints is erx_domain_mints' state, its pending operations' deadlines by tag in
+    %% mint_timers, and mint_counts and mint_log what was refused or dropped (note/4).
+    MintConfig = maps:merge(#{owner => fun erx_dist:owner/1}, maps:with([owner, deadline], maps:get(mints, Opts, #{}))),
     {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
            configured => #{}, templates => #{}, waiting => #{}, links => erx_domain_links:new(),
            introducing => #{}, introduce_timeout => maps:get(introduce_timeout, Opts, ?INTRODUCE_TIMEOUT),
-           held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT)},
+           held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT),
+           mint_config => MintConfig, mints => erx_domain_mints:new(MintConfig#{services => [], grants => []}),
+           mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0}},
      {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none
@@ -125,10 +152,14 @@ library(Lib) ->
 
 handle_continue(boot, #{lib := Lib} = State) ->
     case {configured(Lib), templates(Lib)} of
-        {{ok, #{host := Host, domains := Rows}}, {ok, Templates}} ->
+        {{ok, #{host := Host, domains := Rows} = Boot}, {ok, Templates}} ->
             Ordered = lists:sort(fun(#{place := A}, #{place := B}) -> A =< B end, Rows),
             Configured = maps:from_list([{Row, Entry} || #{row := Row} = Entry <- Ordered]),
-            Booted = State#{core := erx_domain_core:new(Host), configured := Configured,
+            %% The manifest's service rows and the facet rows of services configured
+            %% domains serve, which the manifest check has proved consistent.
+            Mints = erx_domain_mints:new((maps:get(mint_config, State))#{services => maps:get(services, Boot, []),
+                                           grants => maps:get(grants, Boot, [])}),
+            Booted = State#{core := erx_domain_core:new(Host), configured := Configured, mints := Mints,
                             templates := maps:from_list([{P, T} || #{principal := P} = T <- Templates])},
             {noreply, lists:foldl(fun start_configured/2, Booted, Ordered)};
         {{error, _}, _} ->
@@ -165,6 +196,9 @@ handle_call({introduce, A, B}, From, State) when is_integer(A), is_integer(B) ->
         {Reply, Next} ->
             {reply, Reply, Next}
     end;
+handle_call(mints, _From, #{mints := Mints, mint_counts := Counts} = State) ->
+    %% Each configured grant's state and how many of each refusal and drop were counted.
+    {reply, #{grants => erx_domain_mints:grants(Mints), counts => Counts}, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, badarg}, State}.
 
@@ -226,7 +260,7 @@ run({start_session, Principal, Facets}, From, State) ->
 answer_create(Built, From) ->
     case Built of
         {{waiting, Domain}, Next} ->
-            %% Answered by ready/3, or by settle/2 once nothing of the domain remains.
+            %% Answered by ready/4, or by settle/2 once nothing of the domain remains.
             wait_created(Domain, none, From, Next);
         {{refused, Domain, Refusal}, Next} ->
             %% Answered Refusal by settle/2 once the stop has ended the domain and nothing
@@ -245,8 +279,17 @@ handle_cast(_Request, State) ->
 
 handle_info({domain_ended, Id, End, _Record}, State) ->
     {noreply, ended(Id, End, State)};
-handle_info({domain_ready, Ref, Id, _Agents}, State) ->
-    {noreply, ready(Id, Ref, State)};
+handle_info({domain_ready, Ref, Id, Provides}, State) ->
+    {noreply, ready(Id, Ref, Provides, State)};
+handle_info({mint_introduced, Tag, Result}, State) ->
+    {noreply, mints({introduced, Tag, Result}, State)};
+handle_info({timeout, Timer, {mint_deadline, Tag}}, #{mint_timers := Timers} = State) ->
+    %% A deadline that was disarmed while its message was on the way finds another timer
+    %% or none.
+    case Timers of
+        #{Tag := Timer} -> {noreply, mints({deadline, Tag}, State#{mint_timers := maps:remove(Tag, Timers)})};
+        #{} -> {noreply, State}
+    end;
 handle_info({domain_answer, Ref, Id, Answer}, State) ->
     {noreply, answer(Id, Ref, Answer, State)};
 handle_info({timeout, Timer, {introduce_timeout, Key, From}}, State) ->
@@ -256,7 +299,7 @@ handle_info({timeout, Timer, {release_wait, Principal}}, State) ->
 handle_info({timeout, _Timer, {boot_timeout, Id}}, #{core := Core} = State) ->
     %% Ids are never reused, so the timer of a domain that reported ready or ended finds
     %% it ready or gone. A domain stopping for its timeout takes no late report
-    %% (ready/3), and its create is answered timeout once the stop's end arrives.
+    %% (ready/4), and its create is answered timeout once the stop's end arrives.
     case erx_domain_core:fetch(Id, Core) of
         {ok, #{state := running}} ->
             logger:notice("erx_domain: domain ~b did not report ready in time; stopping it", [Id]),
@@ -528,13 +571,19 @@ boot_timer(Id, Timeout) -> _ = erlang:start_timer(Timeout, self(), {boot_timeout
 %% and its create, if any, answered. A domain that ended while running, its end having
 %% overtaken a report its pid passed on before the pid's own end, reported too, and its
 %% create answers ok. A report for a domain that is ready already, or that ended stopping
-%% for its boot timeout, changes nothing.
-ready(Id, Ref, #{core := Core, waiting := Waiting} = State) ->
+%% for its boot timeout, changes nothing. A configured domain's report goes to the mint
+%% core with the provides it names, at its node, after the answer to the report, so the
+%% answer reaches the domain before any installation the report starts.
+ready(Id, Ref, Provides, #{core := Core, waiting := Waiting} = State) ->
     case {erx_domain_core:fetch(Id, Core), Waiting} of
-        {{ok, #{ref := Ref, state := running}}, _} ->
+        {{ok, #{ref := Ref, state := running, origin := Origin, node := Node}}, _} ->
             {Actions, Links} = erx_domain_links:ready(Id, maps:get(links, State)),
             Ready = State#{core := erx_domain_core:ready(Id, Core), links := Links},
-            answer_ready(Id, grant_facets(Id, perform(Actions, Ready)));
+            Answered = answer_ready(Id, grant_facets(Id, perform(Actions, Ready))),
+            case Origin of
+                {configured, Row} -> mints({ready, Row, Id, Node, Provides}, Answered);
+                _ -> Answered
+            end;
         {_, #{Id := #{ref := Ref, ended := {running, _Info}}}} ->
             answer_ready(Id, State);
         _ ->
@@ -709,7 +758,7 @@ wait_introduced(A, B, From, #{introducing := Introducing, introduce_timeout := T
 introduce_timed_out(Key, From, Timer, #{introducing := Introducing} = State) ->
     case Introducing of
         #{Key := #{From := Timer} = Callers} ->
-            gen_server:reply(From, {error, timeout}),
+            reply(From, {error, timeout}),
             Rest = maps:remove(From, Callers),
             State#{introducing := case map_size(Rest) of
                                       0 -> maps:remove(Key, Introducing);
@@ -734,9 +783,14 @@ settle_introductions(#{introducing := Introducing, links := Links} = State) ->
 answer_callers(Callers, Reply) ->
     _ = [begin
              _ = erlang:cancel_timer(Timer, [{async, true}, {info, false}]),
-             gen_server:reply(From, Reply)
+             reply(From, Reply)
          end || From := Timer <- Callers],
     false.
+
+%% An introduction's answer: to an introduce/2 caller, or, for one the mint core asked
+%% for, {mints, Tag}, to the service itself, which feeds it to the core (mint_act/2).
+reply({mints, Tag}, Reply) -> self() ! {mint_introduced, Tag, Reply}, ok;
+reply(From, Reply) -> gen_server:reply(From, Reply).
 
 %% Performs erx_domain_links's actions in order: each record goes to its party's domain
 %% pid, tagged with the secret the two share and the slot the core gave it, and the pid
@@ -787,13 +841,23 @@ retire(Lib, Id) ->
 answer(Id, Ref, Answer, #{core := Core, links := Links} = State) ->
     case erx_domain_core:fetch(Id, Core) of
         {ok, #{ref := Ref}} ->
-            {Actions, Next} = erx_domain_links:answer(Id, unwire(Answer), Links),
-            perform(Actions, State#{links := Next});
+            case Answer of
+                {erx_facets_installed, Tag} ->
+                    mints({installed, Id, Tag}, State);
+                %% A mint's reply, which the core takes only from the server its
+                %% operation asked, for that operation's tag.
+                {erx_facet_minted, Tag, Reply} ->
+                    mints({minted, Id, Tag, Reply}, State);
+                _ ->
+                    {Actions, Next} = erx_domain_links:answer(Id, unwire(Answer), Links),
+                    perform(Actions, State#{links := Next})
+            end;
         _ ->
             State
     end.
 
-%% The pid passes on only the three answers (erx_domain_pid:is_answer/1).
+%% The pid passes on only the three connection answers, the installation's
+%% acknowledgement and a mint's reply (erx_domain_pid:is_answer/1).
 unwire({erx_connection_mapped, Peer}) -> {connection_mapped, Peer};
 unwire({erx_connection_unmapped, Peer}) -> {connection_unmapped, Peer};
 unwire({erx_connection_lost, Peer, Reason}) -> {connection_lost, Peer, Reason};
@@ -826,7 +890,7 @@ ended(Id, End, #{lib := Lib, core := Core, links := Links} = State) ->
             disconnect(Lib, Connection),
             Pid ! {Ref, domain_down, Info},
             {Actions, Unlinked} = erx_domain_links:ended(Id, Info, Links),
-            Told = perform(Actions, State#{core := Ended, links := Unlinked}),
+            Told = unprovide(Origin, Id, perform(Actions, State#{core := Ended, links := Unlinked})),
             _ = retire(Lib, Id),
             release(restart(Origin, waiter_ended(Id, Life, Info, Told)))
     end.
@@ -872,3 +936,91 @@ restart({configured, Row}, #{core := Core, configured := Configured} = State) ->
         {yes, Next} -> start_configured(Entry, State#{core := Next});
         {no, Next} -> State#{core := Next}
     end.
+
+%% A configured domain's end, which the mint core hears before any restart: every
+%% operation of its incarnation is cancelled.
+unprovide({configured, Row}, Id, State) -> mints({ended, Row, Id}, State);
+unprovide(_Origin, _Id, State) -> State.
+
+%%% The facets configured domains serve (docs/design-system.md, "Facets a configured
+%%% domain serves").
+
+%% Event, for erx_domain_mints, and its actions performed in order. An action may feed
+%% the core a further event at once (an installation in the system domain's own
+%% registry); the core's state is already the step's next, so that event sees it.
+mints(Event, #{mints := Mints} = State) ->
+    {Actions, Next} = erx_domain_mints:step(Event, Mints),
+    lists:foldl(fun mint_act/2, State#{mints := Next}, Actions).
+
+%% An introduction that settles at once is answered through the service's own queue as
+%% one that settles later is (reply/2), so the core takes each in the same way.
+mint_act({introduce, Tag, ServerId, GranteeId}, State) ->
+    case introduce(ServerId, GranteeId, State) of
+        {wait, Next} ->
+            wait_introduced(ServerId, GranteeId, {mints, Tag}, Next);
+        {Result, Next} ->
+            ok = reply({mints, Tag}, Result),
+            Next
+    end;
+mint_act({mint, Tag, Mint, Name, GranteeId, Limits}, #{core := Core, mint_config := #{owner := Owner}} = State) ->
+    %% Sent by the server's domain pid, never by the service: a send carries its
+    %% sender's pid, which the runtime then exports to the receiving domain, and the
+    %% domain pid is the one process of the system domain its domain already holds.
+    %% The request names no process to reply to either: the server replies through
+    %% that domain pid (erx_facet:minted/2). The core asks only a mint its server's
+    %% ready incarnation owns, so Owner(Mint) is that server, and it is ready.
+    {ok, #{pid := Pid, ref := Ref}} = erx_domain_core:fetch(Owner(Mint), Core),
+    Pid ! {Ref, mint, Mint, {erx_facet_mint, Tag, Name, GranteeId, Limits}},
+    State;
+mint_act({install, Tag, ?SYSTEM_ID, Name, Facet}, State) ->
+    persistent_term:put({erx, facets}, (persistent_term:get({erx, facets}, #{}))#{Name => Facet}),
+    mints({installed, ?SYSTEM_ID, Tag}, State);
+mint_act({install, Tag, GranteeId, Name, Facet}, #{core := Core} = State) ->
+    %% The core installs only in a grantee that is ready and has not ended.
+    {ok, #{pid := Pid, ref := Ref}} = erx_domain_core:fetch(GranteeId, Core),
+    Pid ! {Ref, install, Tag, Name, Facet},
+    State;
+mint_act({arm, Tag, Milliseconds}, #{mint_timers := Timers} = State) ->
+    State#{mint_timers := Timers#{Tag => erlang:start_timer(Milliseconds, self(), {mint_deadline, Tag})}};
+mint_act({disarm, Tag}, #{mint_timers := Timers} = State) ->
+    case maps:take(Tag, Timers) of
+        {Timer, Rest} ->
+            _ = erlang:cancel_timer(Timer, [{async, true}, {info, false}]),
+            State#{mint_timers := Rest};
+        error ->
+            State
+    end;
+mint_act({failed, {Grantee, Name}, {ServerId, GranteeId}, Reason}, State) ->
+    %% One line per operation, so bounded by the restarts of its two domains.
+    logger:warning("erx_domain: facet ~ts of domain ~b for ~0p (domain ~b) failed: ~0p",
+                   [Name, ServerId, Grantee, GranteeId, Reason]),
+    State;
+mint_act({Kind, Reason, Detail}, State) when Kind =:= refused; Kind =:= dropped ->
+    note(Kind, Reason, Detail, State).
+
+%% A refusal or a dropped message, counted by its kind and reason, and logged unless
+%% throttle/2 holds the line back. Detail holds only atoms and the service's own
+%% numbers, which the core chose, so nothing a domain wrote reaches the log.
+note(Kind, Reason, Detail, #{mint_counts := Counts, mint_log := Log} = State) ->
+    Key = {Kind, Reason},
+    Counted = State#{mint_counts := Counts#{Key => maps:get(Key, Counts, 0) + 1}},
+    {Verdict, Next} = throttle(erlang:monotonic_time(millisecond), Log),
+    case Verdict of
+        quiet -> ok;
+        log -> logger:notice("erx_domain: facet mint ~ts ~ts: ~0p", [Kind, Reason, Detail]);
+        {log, Held} ->
+            logger:notice("erx_domain: ~b facet mint log lines held back", [Held]),
+            logger:notice("erx_domain: facet mint ~ts ~ts: ~0p", [Kind, Reason, Detail])
+    end,
+    Counted#{mint_log := Next}.
+
+%% Whether a line logged at Now passes the rate limit, Log being {Start, Lines, Held}:
+%% the window that opened at Start, the lines logged in it and the lines held back.
+%% A line in a window with room is logged; past ?MINT_LOG_BURST it is held back; the
+%% first line of a new window is logged with the number held back in the last.
+throttle(Now, {Start, _Lines, Held}) when Now - Start >= ?MINT_LOG_WINDOW ->
+    {case Held of 0 -> log; _ -> {log, Held} end, {Now, 1, 0}};
+throttle(_Now, {Start, Lines, Held}) when Lines < ?MINT_LOG_BURST ->
+    {log, {Start, Lines + 1, Held}};
+throttle(_Now, {Start, Lines, Held}) ->
+    {quiet, {Start, Lines, Held + 1}}.

@@ -2061,10 +2061,10 @@ logger proxy, which sends the domain's log records to
 the console facet ([design-live.md](design-live.md#the-console)); and the
 domain agent that answers inspection ([design-live.md](design-live.md)).
 Init reports ready to the domain pid, naming the agents, the connection
-agent among them, in `{erx_ready, #{connections => Agent}}`, a map other
+agent among them, and the mints its services provide ([design-system.md](design-system.md#facets-a-configured-domain-serves)), in `{erx_ready, #{connections => Agent, provides => Provides}}`, a map other
 agents join as they come to exist, which exports them to the system domain by that
 message; the domain pid keeps the connection agent's pid, the one process
-that does, and passes the report to the domain service, which from then
+that does, and passes the report's provides to the domain service, which from then
 on sends the domain, through the domain pid, the connection-control
 records its connections need, the `connection_up` of its creator's
 connection first.
@@ -2754,6 +2754,7 @@ answers each as the call's result.
 | `{erx_facets, #{Name => Facet}}` | domain pid to agent | the domain service's answer to init's ready report: the domain's facets by name, every domain that reported getting one, with no facets too; an ordinary message, in the ring; the agent hands it to init, which keeps it for `erx:cap/1` (edit 65) |
 | `{erx_facets_install, Tag, Name, Facet}` | domain pid to agent | a facet a configured domain minted for this domain, installed under `Name` in the domain's registry, replacing an older pid of that name; the agent takes it only from its connection to the system domain, an ordinary message in the ring, and answers `facets_installed` ([design-system.md](design-system.md#facets-a-configured-domain-serves)) |
 | `{erx_facets_installed, Tag}` | agent to domain pid | the domain has installed the facet of the install tagged `Tag` |
+| `{erx_facet_minted, Tag, Reply}` | a mint of the domain to domain pid | the reply to the mint request tagged `Tag`, `{ok, Facet}` or a refusal, sent with `erx_facet:minted/2` to the domain's own domain pid, which the agent names to the domain at its start ([design-system.md](design-system.md#facets-a-configured-domain-serves)) |
 
 The `erx_connection_up` and `erx_connection_down` messages are the **connection-control records**. The
 domain service sends the records about one peer node name one at a time,

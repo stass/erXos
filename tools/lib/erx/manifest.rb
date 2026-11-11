@@ -863,10 +863,11 @@ module Erx
         invalid('two services of one server share a name', 5, 'service.name') unless
           rows['services'].map { |row| row.values_at('server', 'name') }.uniq.size == services.size
         rows['introductions'] = normalize_introductions
-        edges = facet_edges(services.map(&:first), rows['services'])
+        rows['facets'] = normalize_facets(services.map(&:first), rows['services'])
+        edges = rows['facets'].map { |row| [row.fetch('grantee'), rows['services'].fetch(row.fetch('service')).fetch('server')] }
         rows['boot_order'] = boot_order(rows['domains'], edges)
         check_rescue(rows['domains'], edges)
-        unsupported('a facet resolves its operations and parameters against its service\'s generated declarations and grant checker, which M5 brings', 'facet') unless edges.empty?
+        check_facets_supported(edges)
         rows['images'], rows['extents'] = normalize_images(rows.fetch('devices'))
         rows['windows'] = normalize_windows(rows.fetch('devices'), rows.fetch('images'))
         RootStartup.check(loadable: root_loadable_bytes, baseline: baseline,
@@ -1020,16 +1021,57 @@ module Erx
         rows.sort_by { |row| row.values_at('from', 'to') }
       end
 
-      # Each facet's edge from its grantee to its service's server, both configured
-      # domain indices, or the system domain's mf_none for a service it serves.
-      def facet_edges(services, rows)
-        records('facet').map do |record|
-          grantee = domain_index(one(record, 'grantee')) || invalid('a facet is granted to no configured domain', 2, 'facet.grantee')
+      # Each facet row, sorted by name qualified by its grantee: its grantee, a configured
+      # domain's index or the system domain's mf_none, its service's index in the sorted
+      # service table and the grant's limits, an omitted queue resolved to system_queue.
+      # A facet is installed in its grantee's registry under its service's name
+      # (docs/design-system.md, "Facets a configured domain serves"), so a grantee takes
+      # at most one facet of a service name, whichever domain serves it (property 2);
+      # and the system domain takes no facet of its own service.
+      def normalize_facets(services, service_rows)
+        rows = records('facet').map do |record|
           token = one(record, 'service')
           index = services.index { |service| !token.quoted && "@service.#{service.name}" == token.value }
           invalid('facet names a service the manifest does not contain', 2, 'facet.service') unless index
-          [grantee, rows.fetch(index).fetch('server')]
+          facet_row(record, index)
         end
+        invalid('two facets of one grantee share a name', 5, 'facet.name') unless
+          rows.map { |row| row.values_at('grantee', 'name') }.uniq.size == rows.size
+        taken = rows.map { |row| [row.fetch('grantee'), service_rows.fetch(row.fetch('service')).fetch('name')] }
+        invalid('a grantee takes two facets of one service name', 2, 'facet.service') unless taken.uniq.size == taken.size
+        none = @codec.constant('mf_none')
+        invalid('the system domain takes no facet of its own service', 2, 'facet.grantee') if
+          rows.any? { |row| row.fetch('grantee') == none && service_rows.fetch(row.fetch('service')).fetch('server') == none }
+        rows.sort_by { |row| row.values_at('name', 'grantee') }
+      end
+
+      def facet_row(record, service)
+        name = record.properties.key?('name') ? text(record, 'name') : record.name.b
+        invalid('facet name is not a system identifier', 5, 'facet.name') unless name.match?(Frontend::IDENTIFIER)
+        queue = record.properties.key?('queue') ? number(record, 'queue') : number(@source.machine, 'system_queue')
+        { 'name' => name, 'grantee' => holder_index(one(record, 'grantee'), property: 2, field: 'facet.grantee'),
+          'service' => service,
+          'operations' => { 'table' => 'facet_operations', 'first' => 0, 'count' => 0 },
+          'parameters' => { 'table' => 'facet_parameters', 'first' => 0, 'count' => 0 },
+          'queue' => queue }.merge(%w[max_request in_flight reductions period_ns max_heap_size].to_h { |key| [key, number(record, key)] })
+      end
+
+      # What the stopgap cannot honour, refused once properties 2, 10 and 11 hold: a
+      # facet that names an operation or a parameter, which resolve against its
+      # service's generated declarations and grant checker at M5, so the row would
+      # grant every operation; and a facet of a service the system domain serves, which
+      # the domain service installs in no configured domain yet. edges pairs each facet
+      # row's grantee with its service's server.
+      def check_facets_supported(edges)
+        records('facet').each do |record|
+          operations = one(record, 'operations')
+          next if record.parameters.empty? && !operations.quoted && operations.value == 'none'
+
+          unsupported('a facet resolves its operations and parameters against its service\'s generated declarations and grant checker, which M5 brings', 'facet')
+        end
+        return unless edges.any? { |_grantee, server| server == @codec.constant('mf_none') }
+
+        unsupported('the domain service installs no facet of a service the system domain serves in a configured domain', 'facet')
       end
 
       # Property 10: every server before its clients, ties broken by name order, which
@@ -1049,8 +1091,9 @@ module Erx
       def check_rescue(domains, edges)
         rescue_flag = @codec.member('mf_domain_flags', 'rescue')
         rescued = ->(index) { (domains.fetch(index).fetch('flags') & rescue_flag) != 0 }
+        none = @codec.constant('mf_none')
         edges.each do |client, server|
-          next unless rescued.call(client) && server != @codec.constant('mf_none') && !rescued.call(server)
+          next unless client != none && server != none && rescued.call(client) && !rescued.call(server)
 
           invalid('a rescue domain names a service of a domain the rescue configuration does not start', 11, 'facet.service')
         end

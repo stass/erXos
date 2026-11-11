@@ -27,9 +27,11 @@ acts on Msg only when Id is its own domain's and Msg is init's ready report
 (edit 65) or one of the agent's three answers (docs/design-domains.md,
 "Messages between the domain service and a runtime"). The first report must
 name, as the connection agent, a pid of the domain's own node; the pid keeps
-that agent, the one process of the system domain that does, and passes the
-report on as {domain_ready, Ref, Id, Agents}, and each answer as
-{domain_answer, Ref, Id, Answer}. Every other message, a second report, the
+that agent, the one process of the system domain that does, and passes on
+the report's provides, the mints the domain names for its services
+(docs/design-system.md, "Facets a configured domain serves"), as
+{domain_ready, Ref, Id, Provides}, untouched for the service to
+authenticate, and each answer as {domain_answer, Ref, Id, Answer}. Every other message, a second report, the
 creator's or any other domain's included, is dropped and counted; the
 service reads the count with {Ref, info, From}. A process of the system
 domain can write the envelope itself, so the check keeps other domains,
@@ -52,6 +54,21 @@ domain's lane is too full to take it, the pid asks the service to stop the
 domain, whose init would wait in vain. The service sends it only
 after the report, which named the agent; one that comes before is dropped
 and counted.
+
+An installation, {Ref, install, Tag, Name, Facet}, a facet a configured
+domain minted for this one, the pid sends its agent as {erx_facets_install,
+Tag, Name, Facet}, an ordinary message, which follows the answer, never
+suspended either: one the lane cannot take is dropped, and the service's
+deadline for the installation fails it. The agent's acknowledgement,
+{erx_facets_installed, Tag}, is an answer the pid passes on.
+
+A mint request, {Ref, mint, Mint, Request}, the pid sends Mint, a process of
+its own domain, never suspended, so the request's sender is the domain pid,
+which the domain already holds; a send from the service would export the
+service's own pid to the domain. The mint's reply, {erx_facet_minted, Tag,
+Reply}, which the domain sends its own domain pid (erx_facet:minted/2), is
+an answer the pid passes on. So the service's pid never leaves the system
+domain.
 """.
 
 -export([start_link/4]).
@@ -94,6 +111,14 @@ loop(#{service := Service, id := Id, ref := Ref} = State) ->
                 ok -> ok;
                 nosuspend -> Service ! {stop_request, Ref, Id}
             end,
+            loop(State);
+        {Ref, install, Tag, Name, Facet} when is_pid(map_get(agent, State)) ->
+            _ = erlang:send(map_get(agent, State), {erx_facets_install, Tag, Name, Facet}, [nosuspend]),
+            loop(State);
+        {Ref, mint, Mint, Request} when is_pid(Mint), node(Mint) =:= map_get(node, State) ->
+            %% Never suspended behind the domain's lane: a request that does not go
+            %% fails at the service's deadline.
+            _ = erlang:send(Mint, Request, [nosuspend]),
             loop(State);
         {Ref, info, From} ->
             #{agent := Agent, dropped := Dropped} = State,
@@ -150,10 +175,10 @@ finish(Info, #{id := Id} = State) ->
 %% A message of the pid's own domain: its first ready report, which names a pid of the
 %% domain's node as its agent, or, after it, an answer by its shape; nothing else. The
 %% service sends no record before the report, so an answer before it answers nothing.
-from_domain({erx_ready, #{connections := Agent} = Agents},
+from_domain({erx_ready, #{connections := Agent} = Report},
             #{service := Service, id := Id, node := Node, ref := Ref, agent := none} = State)
   when is_pid(Agent), node(Agent) =:= Node ->
-    Service ! {domain_ready, Ref, Id, Agents},
+    Service ! {domain_ready, Ref, Id, maps:get(provides, Report, #{})},
     State#{agent := Agent};
 from_domain(_Message, #{agent := none} = State) ->
     dropped(State);
@@ -169,6 +194,8 @@ from_domain(Answer, #{service := Service, id := Id, ref := Ref} = State) ->
 is_answer({erx_connection_mapped, Peer}) -> is_integer(Peer);
 is_answer({erx_connection_unmapped, Peer}) -> is_integer(Peer);
 is_answer({erx_connection_lost, Peer, _Reason}) -> is_integer(Peer);
+is_answer({erx_facets_installed, Tag}) -> is_integer(Tag);
+is_answer({erx_facet_minted, Tag, _Reply}) -> is_integer(Tag);
 is_answer(_Message) -> false.
 
 dropped(#{dropped := Dropped} = State) ->

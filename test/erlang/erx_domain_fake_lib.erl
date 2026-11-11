@@ -55,12 +55,15 @@ queue(Calls, Waiting) ->
 log(Call) -> erx_domain_fake_log ! {lib, Call}, ok.
 
 register() -> ok.
+%% The boot's configured rows, and anything the persistent term {?MODULE, boot} sets
+%% over them: erx_domain_mints_srv_tests' service and facet rows and restarts.
 configured() ->
-    {ok, #{host => <<"erxos">>,
-           domains => [#{row => 0, place => 1, name => <<"b">>, principal => 1, kind => service,
-                         restarts => 1, restart_period_s => 60},
-                       #{row => 1, place => 0, name => <<"a">>, principal => 1, kind => service,
-                         restarts => 1, restart_period_s => 60}]}}.
+    {ok, maps:merge(#{host => <<"erxos">>,
+                      domains => [#{row => 0, place => 1, name => <<"b">>, principal => 1, kind => service,
+                                    restarts => 1, restart_period_s => 60},
+                                  #{row => 1, place => 0, name => <<"a">>, principal => 1, kind => service,
+                                    restarts => 1, restart_period_s => 60}]},
+                    persistent_term:get({?MODULE, boot}, #{}))}.
 templates() -> {ok, [#{template => 0, principal => 1}]}.
 session(Id, Template, Name, DomainPid) when is_pid(DomainPid) ->
     session(get(session), Id, Template, Name, DomainPid).
@@ -91,7 +94,7 @@ start(Id) ->
         {_, <<"silent">>} -> ok;
         {_, Ends} when Ends =:= <<"overtaken">>; Ends =:= <<"behind">> ->
             erx_domain_srv ! {domain_ended, Id, {halt, 0}, #{}};
-        {DomainPid, Name} -> DomainPid ! {erx_origin, Id, {erx_ready, #{connections => agent(Name, Id)}}}
+        {DomainPid, Name} -> DomainPid ! {erx_origin, Id, {erx_ready, ready_report(Name, Id)}}
     end,
     log({start, Id}).
 stop(Id, _Status) ->
@@ -170,6 +173,14 @@ export(Pid, Rights, Peer) when is_pid(Pid) -> log({export, Peer, Rights}).
 
 %% Init's ready report from domain Id, in its envelope.
 report(Name, Id) -> {erx_origin, Id, {erx_ready, #{connections => agent(Name, Id)}}}.
+
+%% A started domain's report: its agent, and the provides that the persistent term
+%% {?MODULE, provides} makes for its name and id, if any.
+ready_report(Name, Id) ->
+    case persistent_term:get({?MODULE, provides}, #{}) of
+        #{Name := Provides} -> #{connections => agent(Name, Id), provides => Provides(Id)};
+        #{} -> #{connections => agent(Name, Id)}
+    end.
 
 %% A pid of domain Id's node, Name@erxos, as a frame from the domain carries one:
 %% NEW_PID_EXT, its node a SMALL_ATOM_UTF8_EXT, its creation the domain's id.

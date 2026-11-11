@@ -149,16 +149,47 @@ class ManifestDomainsTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 2, 'facet.service', @source + facet('f', '@domain.alpha', '@service.absent'))
   end
 
-  def test_a_facet_granted_to_no_configured_domain_is_refused
-    source = @source + service('log', 'system') + facet('f', 'system', '@service.log')
+  def test_a_facet_granted_to_neither_the_system_domain_nor_a_configured_domain_is_refused
+    source = @source + service('b', '@domain.beta') + facet('f', '@domain.absent', '@service.b')
     refused(Erx::Manifest::Invalid, 2, 'facet.grantee', source)
   end
 
+  # A configured domain's service granted to another configured domain and to the
+  # system domain, the system domain's grantee being mf_none and an omitted queue
+  # resolved to system_queue; the facets sort by name.
+  def test_facets_of_a_configured_domains_service_reach_the_encoded_manifest
+    source = @source + service('b', '@domain.beta') + facet('sb', 'system', '@service.b') +
+             facet('ab', '@domain.alpha', '@service.b').sub("  max_request 1\n", "  max_request 512\n  queue 4096\n")
+    view = @codec.open('manifest', admit(source).bytes)
+    facets = rows(view, 'facets')
+    assert_equal %w[ab sb], facets.map { |row| view.string(row.fetch('name')) }
+    assert_equal [[0, 0, 512, 4096], [@codec.constant('mf_none'), 0, 1, 16_384]],
+                 facets.map { |row| row.values_at('grantee', 'service', 'max_request', 'queue') }
+    assert_equal [[0, 0]] * 2, facets.map { |row| [row.fetch('operations').fetch('count'), row.fetch('parameters').fetch('count')] }
+    assert_equal [1, 0], rows(view, 'boot_order').map { |row| row.fetch('domain') }
+  end
+
+  # The registry installs a facet under its service's name, so one grantee takes one
+  # facet of a service name, and the system domain none of its own service.
+  def test_two_facets_of_one_service_name_to_one_grantee_are_refused
+    source = @source + service('b', '@domain.beta') + facet('ab', '@domain.alpha', '@service.b') +
+             facet('ab2', '@domain.alpha', '@service.b')
+    refused(Erx::Manifest::Invalid, 2, 'facet.service', source)
+  end
+
+  def test_a_facet_of_the_system_domains_own_service_to_it_is_refused
+    refused(Erx::Manifest::Invalid, 2, 'facet.grantee', @source + service('log', 'system') + facet('f', 'system', '@service.log'))
+  end
+
   # A facet's operations and parameters resolve against its service's generated
-  # declarations, which the packer does not read in Phase 1.
-  def test_a_facet_on_a_known_service_is_refused_naming_its_milestone
-    source = @source + service('log', 'system') + facet('f', '@domain.alpha', '@service.log')
-    refused(Erx::Manifest::Unsupported, 'unsupported', 'facet', source, message: /M5/)
+  # declarations, which the packer does not read in Phase 1, so a facet that names any
+  # is refused; and the domain service installs no system-served facet in a configured
+  # domain.
+  def test_a_facet_naming_an_operation_or_a_parameter_is_refused_naming_its_milestone
+    facet = facet('ab', '@domain.alpha', '@service.b')
+    [facet.sub('operations none', 'operations read'), facet + "  parameter root \"/\"\n"].each do |named|
+      refused(Erx::Manifest::Unsupported, 'unsupported', 'facet', @source + service('b', '@domain.beta') + named, message: /M5/)
+    end
   end
 
   def test_introductions_are_written_once_lower_index_first

@@ -28,7 +28,7 @@ agent_test_() ->
      || {Name, Case} <- [{mapped_then_lost, fun mapped_then_lost/1}, {ended_before_up, fun ended_before_up/1},
                          {owner_ended, fun owner_ended/1}, {refused_hand_over, fun refused_hand_over/1},
                          {refused_open, fun refused_open/1}, {down, fun down/1}, {forged, fun forged/1},
-                         {facets, fun facets/1}]].
+                         {facets, fun facets/1}, {installs, fun installs/1}]].
 
 %% Runs Case with an agent started from the test's own process, which plays the
 %% agent's environment, and ends the agent after.
@@ -110,7 +110,8 @@ answer() ->
     receive
         {erx_connection_mapped, _} = Answer -> Answer;
         {erx_connection_unmapped, _} = Answer -> Answer;
-        {erx_connection_lost, _, _} = Answer -> Answer
+        {erx_connection_lost, _, _} = Answer -> Answer;
+        {erx_facets_installed, _} = Answer -> Answer
     after 2000 ->
             none
     end.
@@ -244,6 +245,31 @@ facets(Agent) ->
     erlang:trace(Init, false, ['receive']),
     ?assertEqual([#{echo => Facet}], First ++ init_facets(100)),
     Facet ! stop.
+
+installs(Agent) ->
+    %% A facet a configured domain minted for this domain is installed in its registry,
+    %% beside the answer's facets, and acknowledged to the domain pid with its tag, only
+    %% from the system connection's envelope: one a peer sends, one sent bare and one
+    %% with a name that is no atom are dropped and counted, and install nothing. A later
+    %% installation under a name replaces the older pid.
+    Answer = spawn(fun() -> receive stop -> ok end end),
+    [Old, New] = [spawn(fun() -> receive stop -> ok end end) || _ <- [1, 2]],
+    try
+        record(Agent, {erx_facets, #{echo => Answer}}),
+        Agent ! {erx_origin, ?PEER, {erx_facets_install, 1, data, Old}},
+        Agent ! {erx_facets_install, 2, data, Old},
+        record(Agent, {erx_facets_install, 3, <<"data">>, Old}),
+        record(Agent, {erx_facets_install, 4, data, Old}),
+        ?assertEqual({erx_facets_installed, 4}, answer()),
+        ?assertEqual(3, erx_connections:dropped()),
+        ?assertEqual(#{echo => Answer, data => Old}, persistent_term:get({erx, facets})),
+        record(Agent, {erx_facets_install, 5, data, New}),
+        ?assertEqual({erx_facets_installed, 5}, answer()),
+        ?assertEqual(#{echo => Answer, data => New}, persistent_term:get({erx, facets}))
+    after
+        persistent_term:erase({erx, facets}),
+        [Pid ! stop || Pid <- [Answer, Old, New]]
+    end.
 
 %% The facets answers init received, in order, from the trace of its receives, waiting
 %% at most Ms for each. The first wait is long: the agent has answered dropped/0 once it

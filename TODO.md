@@ -1521,6 +1521,13 @@ it; git history is the record of completed work.
   each message costs the pid and the service is not bounded. Bound what a domain can make the pid and the service spend.
 * [Low] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: configured domains
   always get the default 10 s boot timeout; the manifest has no field for it.
+* [Medium] facets, `erlang/apps/erx/src/erx_facet.erl` (`provide/2`) and
+  `erx_domain_mints`: a server's providers are fixed at its ready report, so a mint that
+  ends and is restarted inside a running server leaves every later grant of that service
+  failed at its deadline until the server restarts, and `provide/2` after the report
+  returns `ok` but reaches no one. Either end the domain with its mint (the mint's
+  application permanent and the mint its process) or let a running server name a new
+  mint, and refuse `provide/2` after the report.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names
   quota is fixed at 64 per principal, not the manifest principal's own field, which the
   library's view does not expose yet. Expose it in `configured/0` (or a principal entry) and
@@ -1636,6 +1643,15 @@ it; git history is the record of completed work.
   takes 46.70) packs and passes `make check`, and the pool falls short only at boot. Check
   archive plus `root_memory` against the machine's platform record when packing, with a
   seeded-fault test.
+* [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#check_facets_supported`):
+  a facet that names an operation or a parameter is refused (`unsupported`, naming M5),
+  because those resolve against its service's generated declarations and grant checker
+  (design-abi.md, "Services, facets and their parameter schemas"), which the packer does
+  not read; the boot view refuses one too, so an admitted facet grants its whole service.
+  A facet of a service the system domain serves is refused as well, since the domain
+  service installs none in a configured domain. A service's `interface` is a number,
+  not the qualified ABI service name, and the server's release is not checked to supply
+  it.
 * [Low] manifest check, `tools/lib/erx/manifest.rb`: `system_reservation` is 0, so the
   system domain's reservation for `max_domains` admitted domains (property 4) is not
   counted against `root_memory`; design-abi.md has the production admission planner

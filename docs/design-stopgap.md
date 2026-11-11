@@ -361,7 +361,11 @@ system domain and its configured domains. It accepts the records the system
 release's services and the configured domains need, `domain`, `window`,
 `service`, `facet`, `introduce` and `image` among them, and refuses
 `partial_boot` and `liveness` records with a diagnostic naming the milestone
-that brings them. Its `image` records are
+that brings them. It accepts a `facet` only of a service a configured domain
+serves, and only when it names no operation and no parameter: those resolve
+against the service's generated declarations at M5, so such a facet grants
+the whole service, and the domain library's boot view refuses one that names
+any. Its `image` records are
 format `erofs_unchecked` ([design-abi.md](design-abi.md)): the packer writes no
 hash tree, so an image's record carries its data's length and extents, which
 the packer derives from the built image, the artifact its `input` names, and
@@ -382,7 +386,7 @@ seeded violation and each refusal with a seeded record:
 | Property | Phase 1 | Whole again at |
 | --- | --- | --- |
 | 1 one holder per device and unit | kept; a holder is the system domain or a configured domain | |
-| 2 facets name servers | kept, with introductions: a facet names a service of the manifest, served by the system domain or a configured domain | |
+| 2 facets name servers | kept, with introductions: a facet names a service of the manifest, served by the system domain or a configured domain, and is granted to the system domain or a configured domain, which takes one facet of a service name; a facet's operations and parameters are not resolved, so a facet that names any is refused | M5 (operations and parameters) |
 | 3 PCIe configuration space | QEMU `virt` drives no bridge in Phase 1, so no holder is allowed and no `pci` device is placed | M9 |
 | 4 budgets and grants sum | kept for `root_memory`, baseline, shares, the configured domains' budgets and grants and `max_domains`; the configured domains' sums are the planner's (property 12); `root_startup` by the rule below. The sums are checked at build time; nothing enforces them at run time ([Budgets and groups as records](#budgets-and-groups-as-records)) | Track K (`root_startup`, enforcement) |
 | 5 names | kept | |

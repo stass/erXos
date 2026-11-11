@@ -103,9 +103,12 @@ serve(Kernel, {PeerId, PeerNode, DomainPid}) ->
 
 %% A domain's agent serving the records of the system domain SystemId's domain pid
 %% DomainPid (records/3), with net_kernel Kernel taking each introduced connection's
-%% port, which Open opens from its open command.
+%% port, which Open opens from its open command. The domain pid is also where the
+%% domain's mints reply (erx_facet:minted/2), so the agent names it in the persistent
+%% term {erx, domain_pid} before it serves anything.
 -spec introduced(pid(), pos_integer(), pid(), fun((string()) -> port())) -> no_return().
 introduced(Kernel, SystemId, DomainPid, Open) ->
+    persistent_term:put({erx, domain_pid}, DomainPid),
     records(#{kernel => Kernel, system => SystemId, domain_pid => DomainPid, open => Open}, #{}, 0).
 
 %% An introduced connection's port, on the lane driver.
@@ -275,7 +278,8 @@ hand_over(Kernel, #{port := Port} = Connection) ->
 %%   {erx_origin, SystemId, Record}, so a peer handed the agent's pid can reach it but
 %%   not steer it;
 %% * in the same envelope, the domain service's answer to init's ready report, the
-%%   domain's facets by name, which the agent hands init (edit 65);
+%%   domain's facets by name, which the agent hands init (edit 65), and each later
+%%   installation of a facet a configured domain minted for this one (install/4);
 %% * erx_dist's word that an introduced connection's entry is up;
 %% * each introduced port's end, and net_kernel's end.
 %% What else arrives is dropped and counted in Dropped, so its queue stays empty
@@ -295,7 +299,13 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
         {erx_origin, SystemId, {erx_connection_down, Peer, Reason}} when is_integer(Peer) ->
             records(Env, connection_down(Env, Peer, Reason, Held), Dropped);
         {erx_origin, SystemId, {erx_facets, Facets}} when is_map(Facets) ->
-            init ! {erx_facets, #{Name => Facet || Name := Facet <- Facets, is_atom(Name), is_pid(Facet)}},
+            Valid = #{Name => Facet || Name := Facet <- Facets, is_atom(Name), is_pid(Facet)},
+            register_facets(Valid),
+            init ! {erx_facets, Valid},
+            records(Env, Held, Dropped);
+        {erx_origin, SystemId, {erx_facets_install, Tag, Name, Facet}}
+          when is_integer(Tag), is_atom(Name), is_pid(Facet) ->
+            install(Env, Tag, Name, Facet),
             records(Env, Held, Dropped);
         {erx_connection_inserted, Peer, Port} ->
             records(Env, inserted(Env, Peer, Port, Held), Dropped);
@@ -312,6 +322,21 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
         _ ->
             records(Env, Held, Dropped + 1)
     end.
+
+%% A facet a configured domain minted for this domain, installed under Name in the
+%% domain's registry, replacing an older pid of that name, and acknowledged to the domain
+%% pid with the installation's tag (docs/design-system.md, "Facets a configured domain
+%% serves"). The registry is the persistent term {erx, facets}, which erx:cap/1 reads.
+install(#{domain_pid := DomainPid}, Tag, Name, Facet) ->
+    register_facets(#{Name => Facet}),
+    DomainPid ! {erx_facets_installed, Tag},
+    ok.
+
+%% The agent is the registry's one writer in a domain, the answer to the ready report's
+%% facets and every installation, so no installation is lost to a write that read the
+%% registry before it.
+register_facets(Facets) ->
+    persistent_term:put({erx, facets}, maps:merge(persistent_term:get({erx, facets}, #{}), Facets)).
 
 %% connection_up: the port opens, on the lane driver (lane_open/1), with the record's
 %% words, "erx_lane Side PeerSide PeerBell Label OutSize InSize Peer PeerNode"

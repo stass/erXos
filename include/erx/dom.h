@@ -336,6 +336,34 @@ typedef struct erx_dom_template {
 	uint32_t	args_len, env_len;
 } erx_dom_template_t;
 
+/*
+ * A checked service row of the system manifest: its public name, unique
+ * per server, and its server, a configured row or ERX_MF_NONE for the
+ * system domain. What the domain service reads of it
+ * (erx_domain_lib:configured/0).
+ */
+typedef struct erx_dom_service {
+	const char	*name;		/* an identifier in the manifest's strings, */
+	uint32_t	name_len;	/* which outlive the view; <= ERX_DOM_NAME_MAX */
+	uint32_t	server;		/* a configured row, or ERX_MF_NONE */
+} erx_dom_service_t;
+
+/*
+ * A checked facet row: a grant of a service to its grantee, a configured
+ * row or ERX_MF_NONE for the system domain, never the service's own
+ * server, with the grant's limits. It names no operation and no
+ * parameter: those resolve against the service's generated declarations,
+ * which nothing on the boot path reads, so the view refuses a row that
+ * names any rather than have the domain service grant every operation.
+ */
+typedef struct erx_dom_facet {
+	uint32_t	grantee;	/* a configured row, or ERX_MF_NONE */
+	uint32_t	service;	/* its row in the view's services */
+	uint32_t	max_request;	/* the largest request, in encoded bytes */
+	uint32_t	in_flight;	/* forwards outstanding at once */
+	uint64_t	reductions, period_ns, max_heap_size, queue;
+} erx_dom_facet_t;
+
 /* A checked native program row of a partial-boot manifest. */
 typedef struct erx_dom_partial {
 	uint32_t	runtime;	/* the program's image */
@@ -376,6 +404,10 @@ typedef struct erx_dom_view {
 	uint32_t		 nconfigured;
 	const erx_dom_template_t *templates;	/* in principal order */
 	uint32_t		 ntemplates;
+	const erx_dom_service_t	*services;	/* the manifest's, in its order */
+	uint32_t		 nservices;
+	const erx_dom_facet_t	*facets;	/* the manifest's, in its order */
+	uint32_t		 nfacets;
 	const erx_dom_partial_t	*partial;
 	uint32_t		 npartial;
 	uint32_t		 partial_principal;	/* the partial boot's principal */

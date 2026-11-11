@@ -138,3 +138,17 @@ ends_with_its_grant_test() ->
     ?assertEqual({error, noproc},
                  erx_facet:start(erx_domain_facet, #{grantee => ?GRANTEE, ends_with => [Gone], behind => Gone},
                                  #{exports => ?MODULE})).
+
+%% A mint's reply goes to the domain's own domain pid, which the connection agent names
+%% in {erx, domain_pid}; a domain with none has no system connection to reply over.
+minted_replies_through_the_domain_pid_test() ->
+    persistent_term:erase({erx, domain_pid}),
+    ?assertEqual({error, noconnection}, erx_facet:minted(7, {ok, self()})),
+    persistent_term:put({erx, domain_pid}, self()),
+    try
+        ?assertEqual(ok, erx_facet:minted(7, {ok, self()})),
+        Self = self(),
+        ?assertEqual({ok, Self}, receive {erx_facet_minted, 7, Reply} -> Reply after 1000 -> timeout end)
+    after
+        persistent_term:erase({erx, domain_pid})
+    end.

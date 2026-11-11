@@ -246,6 +246,8 @@ typedef struct erx_dom_boot_sizes {
 	uint32_t	ntemplates;	/* its session templates */
 	uint32_t	nfiles;		/* the boot image's entries */
 	uint32_t	ndevices;	/* the manifest's device rows */
+	uint32_t	nservices;	/* its service rows */
+	uint32_t	nfacets;	/* its facet rows */
 } erx_dom_boot_sizes_t;
 
 typedef struct erx_dom_boot_tables {
@@ -262,6 +264,8 @@ typedef struct erx_dom_boot_tables {
 	erx_dom_file_t		*files;		/* nfiles */
 	erx_dom_device_entry_t	*devices;	/* ndevices: the catalogue */
 	erx_dom_device_t	*device_records; /* ndevices, entry for entry */
+	erx_dom_service_t	*services;	/* nservices */
+	erx_dom_facet_t		*facets;	/* nfacets */
 } erx_dom_boot_tables_t;
 
 /* The sizes of the view the manifest and a boot image of nfiles entries describe. */

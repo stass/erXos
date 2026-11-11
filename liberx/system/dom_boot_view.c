@@ -30,6 +30,9 @@
  * nothing builds a domain from a placement the view did not admit. Each
  * configured row and session template must leave room in its boot page's
  * strings for what the library adds to its own words (boot_strings_fit).
+ * The service and facet rows are carried for the domain service
+ * (boot_services), each server and grantee a configured row or the system
+ * domain.
  */
 
 #include <stdbool.h>
@@ -65,6 +68,9 @@ static const char *boot_configured(erx_dom_view_t *, const erx_manifest_view_t *
 		    erx_dom_configured_t *);
 static const char *boot_templates(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_template_t *);
+static const char *boot_services(erx_dom_view_t *, const erx_manifest_view_t *,
+		    erx_dom_service_t *, erx_dom_facet_t *);
+static bool	boot_facet_repeats(const erx_dom_view_t *, const erx_dom_facet_t *, uint32_t);
 
 erx_dom_boot_sizes_t
 erx_dom_view_sizes(const erx_manifest_view_t *manifest, uint32_t nfiles)
@@ -74,7 +80,9 @@ erx_dom_view_sizes(const erx_manifest_view_t *manifest, uint32_t nfiles)
 	    .nprincipals = manifest->header.principals.count,
 	    .nconfigured = manifest->header.domains.count,
 	    .ntemplates = manifest->header.sessions.count, .nfiles = nfiles,
-	    .ndevices = manifest->header.devices.count });
+	    .ndevices = manifest->header.devices.count,
+	    .nservices = manifest->header.services.count,
+	    .nfacets = manifest->header.facets.count });
 }
 
 /*
@@ -114,7 +122,9 @@ erx_dom_boot_layout(const erx_dom_boot_sizes_t *sizes, uintptr_t base, erx_dom_b
 	    !BOOT_PLACE(templates, sizes->ntemplates) ||
 	    !BOOT_PLACE(files, sizes->nfiles) ||
 	    !BOOT_PLACE(devices, sizes->ndevices) ||
-	    !BOOT_PLACE(device_records, sizes->ndevices))
+	    !BOOT_PLACE(device_records, sizes->ndevices) ||
+	    !BOOT_PLACE(services, sizes->nservices) ||
+	    !BOOT_PLACE(facets, sizes->nfacets))
 		return (false);
 #undef BOOT_PLACE
 	*bytes = used;
@@ -500,6 +510,84 @@ boot_templates(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_do
 	return (NULL);
 }
 
+/*
+ * Whether facet row index grants its grantee a service of the name an
+ * earlier row grants it: a grantee's registry holds each facet under its
+ * service's name, so it takes one facet of a name (property 2), and the
+ * domain service's erx_domain_mints refuses a second. Quadratic in the
+ * facet rows, which are few.
+ */
+static bool
+boot_facet_repeats(const erx_dom_view_t *view, const erx_dom_facet_t *facets, uint32_t index)
+{
+	const erx_dom_service_t *service, *other;
+
+	service = &view->services[facets[index].service];
+	for (uint32_t earlier = 0; earlier < index; earlier++) {
+		other = &view->services[facets[earlier].service];
+		if (facets[earlier].grantee == facets[index].grantee && other->name_len == service->name_len &&
+		    memcmp(other->name, service->name, service->name_len) == 0)
+			return (true);
+	}
+	return (false);
+}
+
+/*
+ * The service and facet rows, which the domain service reads
+ * (erx_domain_lib:configured/0), so it reads view->nconfigured, which
+ * boot_configured sets first. A server or grantee is a configured row or
+ * ERX_MF_NONE; a facet is never granted to its service's own server, a
+ * grantee takes one facet of a service name, and a facet names no
+ * operation or parameter (erx_dom_facet_t). The reader has checked every
+ * index and string against its table.
+ */
+static const char *
+boot_services(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_service_t *services,
+    erx_dom_facet_t *facets)
+{
+	erx_mf_service_t service;
+	erx_mf_facet_t facet;
+	const char *strings;
+
+	view->services = services;
+	view->nservices = 0;
+	view->facets = facets;
+	view->nfacets = 0;
+	/* The reader checked every string against the string table; the manifest's bytes outlive the view. */
+	strings = (const char *)manifest->bytes + manifest->header.strings.offset;
+	for (uint32_t index = 0; index < manifest->header.services.count; index++) {
+		if (!erx_manifest_services_at(manifest, index, &service))
+			return ("manifest: a service row the reader cannot read");
+		if (service.server != ERX_MF_NONE && service.server >= view->nconfigured)
+			return ("manifest: a service's server is neither the system domain nor a configured domain");
+		if (service.name.length == 0 || service.name.length > ERX_DOM_NAME_MAX)
+			return ("manifest: a service's name is not 1 to 63 bytes");
+		services[index] = (erx_dom_service_t){ .name = strings + service.name.offset,
+		    .name_len = service.name.length, .server = service.server };
+		view->nservices = index + 1;
+	}
+	for (uint32_t index = 0; index < manifest->header.facets.count; index++) {
+		if (!erx_manifest_facets_at(manifest, index, &facet))
+			return ("manifest: a facet row the reader cannot read");
+		if (facet.service >= view->nservices)
+			return ("manifest: a facet names no service");
+		if (facet.grantee != ERX_MF_NONE && facet.grantee >= view->nconfigured)
+			return ("manifest: a facet's grantee is neither the system domain nor a configured domain");
+		if (facet.grantee == services[facet.service].server)
+			return ("manifest: a facet is granted to its service's own server");
+		if (facet.operations.count != 0 || facet.parameters.count != 0)
+			return ("manifest: a facet names operations or parameters, which the boot cannot check");
+		facets[index] = (erx_dom_facet_t){ .grantee = facet.grantee, .service = facet.service,
+		    .max_request = facet.max_request, .in_flight = facet.in_flight,
+		    .reductions = facet.reductions, .period_ns = facet.period_ns,
+		    .max_heap_size = facet.max_heap_size, .queue = facet.queue };
+		if (boot_facet_repeats(view, facets, index))
+			return ("manifest: a grantee takes two facets of one service name");
+		view->nfacets = index + 1;
+	}
+	return (NULL);
+}
+
 const char *
 erx_dom_view_build(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, uint32_t nfiles,
     const erx_dom_boot_tables_t *tables)
@@ -535,7 +623,8 @@ erx_dom_view_build(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, uint
 	if ((reason = boot_principals(lib, manifest, tables)) != NULL ||
 	    (reason = boot_devices(&lib->view, manifest, tables->devices, tables->device_records)) != NULL ||
 	    (reason = boot_configured(&lib->view, manifest, tables->configured)) != NULL ||
-	    (reason = boot_templates(&lib->view, manifest, tables->templates)) != NULL)
+	    (reason = boot_templates(&lib->view, manifest, tables->templates)) != NULL ||
+	    (reason = boot_services(&lib->view, manifest, tables->services, tables->facets)) != NULL)
 		return (reason);
 	if (!boot_limits(manifest, header->native_limits, &lib->view.native_limits))
 		return ("manifest: native_limits names no limits record");

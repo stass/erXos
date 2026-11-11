@@ -127,20 +127,23 @@ owner(Name) ->
 %%% Facets (docs/design-domains.md, "Facets").
 
 -doc """
-The facet named `Name` that the domain service minted for this domain when
-it started, as its spec's `facets` named it, or `undefined` when the domain
-holds none of that name. The domain's init waits for them after its ready
-report, before any `-eval`, `-s` or `-run`, and keeps them (edit 65); the
-system domain, which reports nothing, holds none.
+The facet named `Name` that this domain holds, or `undefined` when it holds
+none of that name: one the domain service minted for it when it started, as
+its spec's `facets` named it, which init waits for after its ready report,
+before any `-eval`, `-s` or `-run` (edit 65), or one a configured domain
+minted for it under a facet row of the manifest, installed whenever that
+domain is ready and replacing an older pid of the name
+(docs/design-system.md, "Facets a configured domain serves"). The system
+domain holds only the latter. A facet whose server ended is a dead pid until
+the server's next incarnation installs another.
 """.
 -spec cap(atom()) -> pid() | undefined.
 cap(Name) when is_atom(Name) ->
     maps:get(Name, caps(), undefined).
 
 -doc """
-Every facet the domain service minted for this domain when it started, by
-name, each as cap/1 finds it: none in the system domain, and none in a
-domain whose facets did not come in time. For a caller that hands on what
+Every facet this domain holds, by name, each as cap/1 finds it. For a
+caller that hands on what
 the domain holds as a whole, as the command shell builds a session's
 facets.
 """.

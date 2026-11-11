@@ -1430,7 +1430,9 @@ namespace.
 | introduction, 8 | `0: from u32`; `4: to u32` |
 | liveness target, 4 | `0: service u32` |
 
-A service's `server` is a domain reference. Its interface number names
+A service's `server` is a domain reference, and so is a facet's
+`grantee`: a configured domain's index, or `mf_none` for the system
+domain. A service's interface number names
 a declaration in `abi/services/`; the packer checks the selected
 server's verified release catalog actually supplies that interface.
 The manifest cannot invent a service by giving it a plausible name.
