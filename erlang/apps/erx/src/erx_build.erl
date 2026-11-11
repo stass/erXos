@@ -7,17 +7,19 @@ What this runtime knows of the boot image's build: its identifier and the
 facts of its build that `uname -v` shows.
 
 The build identifier is the pack header's `build_id` (abi/erx_abi.txt,
-`erx_pack_header`), as the system domain's init receives it: liberx's
-runtime entry adds `-erx build ID`, the identifier's bytes read big-endian
+`erx_pack_header`), as every domain's init receives it: liberx's runtime
+entry adds `-erx build ID` to the system domain's arguments and the domain
+library to every other domain's, the identifier's bytes read big-endian
 as one number in decimal, since init parses each `-erx` value as a term
 and hexadecimal digits need not scan as one. It is answered in lower-case
 hexadecimal, two digits per byte, as the root's identity line, the host
 link's hello and `uname -b` show it. A runtime whose init was given no
-`-erx build`, such as a hosted one or another domain's, has
-`{error, {no_build, _}}`, which its callers report as unknown.
+`-erx build`, such as a hosted one, has `{error, {no_build, _}}`, which
+its callers report as unknown.
 
-The build facts are the file the image build writes into the system
-release at abi/erx_abi.txt's `build_facts_path`
+The build facts are the file the image build writes into each release of
+the image, the system release and the domain release, at
+abi/erx_abi.txt's `build_facts_path` under the release's root
 (tools/lib/erx/build_facts.rb): one `name value` line per fact, in a fixed
 order, for the source revision, its commit's time in seconds since the
 epoch (UTC), the configuration (the platform and the build kind, as
@@ -25,7 +27,7 @@ epoch (UTC), the configuration (the platform and the build kind, as
 is `unknown` where the build could not determine it. The file is a build
 artifact, so it is parsed with every bound checked, and each value may hold
 only the printable characters its field allows. A runtime whose release
-has no such file, a hosted one or another domain's, has
+has no such file, such as a hosted one, has
 `{error, {no_facts, _}}`, and one whose file does not parse
 `{error, {bad_facts, _}}`; its callers report every fact as unknown.
 """.
@@ -93,10 +95,9 @@ decimal(Word, Bits) ->
 -doc "The build facts in this runtime's release.".
 -spec facts() -> {ok, facts()} | {error, {atom(), string()}}.
 facts() ->
-    %% The path's system/ prefix names the system release, which the release
-    %% file system serves at the runtime's root (docs/design-runtime.md).
-    <<"system/", Path/binary>> = ?ERX_BUILD_FACTS_PATH_BYTES,
-    case file:open(filename:join(code:root_dir(), Path), [read, raw, binary]) of
+    %% The path is under the release's root, which the release file system
+    %% serves at the runtime's root (docs/design-runtime.md).
+    case file:open(filename:join(code:root_dir(), ?ERX_BUILD_FACTS_PATH_BYTES), [read, raw, binary]) of
         {ok, Device} ->
             Read = read_bounded(Device, <<>>),
             _ = file:close(Device),

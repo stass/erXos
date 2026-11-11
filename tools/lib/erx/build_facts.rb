@@ -8,7 +8,7 @@ require_relative 'source_revision'
 module Erx
   # The facts of an image's build that `uname -v`, `-i` and `-K` show
   # (docs/design-shell.md, "Text commands"), as the file the image build
-  # writes into the system release at abi/erx_abi.txt's build_facts_path and
+  # writes into each release of the image at abi/erx_abi.txt's build_facts_path and
   # erx_build reads back. The file is one `name value` line per fact, in
   # Facts' order:
   #

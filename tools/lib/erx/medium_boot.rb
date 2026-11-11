@@ -437,6 +437,10 @@ module Erx
       [previous.merge(type: "erx_shell:start().\r").freeze, *COMMAND_SHELL]
     end
 
+    # `uname -a` on the development machine, in any domain of the image: every field known,
+    # the build's identifier and facts among them, so no field is `unknown`.
+    UNAME_A = %r{\AerXos erxos [0-9][0-9.]* (?:n[1-9][0-9]{0,9}-)?[0-9a-f]{12}(?:-dirty)? [A-Z][a-z]{2} [A-Z][a-z]{2} [ 1-3][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} UTC [0-9]{4} qemu-virt/development fiasco-[0-9a-f]{12} arm64\r*\n\z}n
+
     # The command shell on the console (docs/design-shell.md), started from the Erlang
     # shell: each line it shows, and what the person then types. The banner says it has
     # the input, so nothing is typed before; a variable, a loop that echoes it, a line
@@ -472,7 +476,7 @@ module Erx
       ['rc-pwd', %r{\A/tmp\r*\n\z}n, "ls -1 /\r"],
       ['rc-ls-proc', /\Aproc\r*\n\z/n, nil],
       ['rc-ls-tmp', /\Atmp\r*\n\z/n, "uname -a\r"],
-      ['rc-uname', %r{\AerXos erxos [0-9][0-9.]* (?:n[1-9][0-9]{0,9}-)?[0-9a-f]{12}(?:-dirty)? [A-Z][a-z]{2} [A-Z][a-z]{2} [ 1-3][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} UTC [0-9]{4} qemu-virt/development fiasco-[0-9a-f]{12} arm64\r*\n\z}n, "uname -i\r"],
+      ['rc-uname', UNAME_A, "uname -i\r"],
       ['rc-uname-i', %r{\Aqemu-virt/development\r*\n\z}n, "uname -K\r"],
       ['rc-uname-k', /\Afiasco-[0-9a-f]{12}\r*\n\z/n, "dmesg | grep 'erx_lfs: volume mounted'\r"],
       ['rc-dmesg', /\A#[0-9]+ [0-9]+\.[0-9]{6} debug space [0-9]+: erx_lfs: volume mounted\r*\n\z/n, "exit\r"],

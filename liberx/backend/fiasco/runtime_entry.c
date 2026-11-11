@@ -46,10 +46,9 @@ static const char	*release_read(const erx_boot_handoff_view_t *, bool, erx_boot_
 static const char	*gather_args(const erx_boot_handoff_view_t *, const erx_boot_manifest_t *, size_t *);
 static size_t		 console_uart_build(const erx_boot_console_t *);
 static size_t		 boot_build(erx_boot_pair_t);
-static size_t		 build_id_words(const erx_boot_handoff_view_t *);
 static size_t		 word_append(char *, size_t, size_t, const char *);
 static size_t		 console_uart_number(char *, uint64_t);
-static const char	*library_up(const erx_manifest_view_t *, const erx_pack_view_t *, erx_boot_pair_t);
+static const char	*library_up(const erx_manifest_view_t *, const erx_pack_view_t *, const erx_boot_handoff_view_t *);
 static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
 static size_t		 line_append(char *, size_t, erx_boot_words_t);
 static const char	*device_give(const erx_boot_device_t *, char *, size_t, size_t *);
@@ -72,13 +71,8 @@ _Static_assert(ERX_BOOT_GIVEN_WORDS_MAX >= ERX_BOOT_DEVICE_WORDS_MAX, "a device 
 /* -erx boot VALUE SLOT: the longest names are "unknown" and "none", each with its NUL. */
 static const char boot_prefix[] = "-erx\0boot";
 static char boot_words[ERX_BOOT_PAIR_WORDS_MAX];
-/*
- * -erx build ID: the boot image's build identifier, its bytes read as one big-endian number in
- * decimal and its NUL. init reads an -erx word's values as terms, so a value must scan as one,
- * which hexadecimal digits do not (2255e43f is an illegal integer); a decimal number always does.
- */
-static const char build_prefix[] = "-erx\0build";
-static char build_words[sizeof(build_prefix) + CONSOLE_UART_NUMBER_MAX];
+/* -erx build ID (erx_boot_build_words), the system domain's; the domain library writes every other domain's. */
+static char build_words[ERX_BOOT_BUILD_WORDS_MAX];
 _Static_assert(sizeof(((erx_boot_handoff_view_t *)0)->build_id) == sizeof(uint64_t),
     "the build identifier is one 64-bit number");
 
@@ -95,7 +89,7 @@ erx_boot_info(void)
  * root's life, and the library outlives the boot, so both are never released.
  */
 static const char *
-library_up(const erx_manifest_view_t *manifest, const erx_pack_view_t *pack, erx_boot_pair_t boot)
+library_up(const erx_manifest_view_t *manifest, const erx_pack_view_t *pack, const erx_boot_handoff_view_t *handoff)
 {
 	static erx_dom_lib_t lib;
 	const erx_dom_boot_sizes_t sizes = erx_dom_boot_sizes(manifest, pack);
@@ -115,8 +109,9 @@ library_up(const erx_manifest_view_t *manifest, const erx_pack_view_t *pack, erx
 	reason = erx_dom_boot_view(&lib, manifest, pack, &tables);
 	if (reason != NULL)
 		return (reason);
-	/* A block holder's boot page carries the pair, as the root's own does. */
-	lib.boot = boot;
+	/* A block holder's boot page carries the pair, and every domain's page the build, as the root's own does. */
+	lib.boot = handoff->boot;
+	lib.build_id = erx_boot_handoff_build_id(handoff);
 	return (erx_dom_boot_up(&lib, erx_boot_info(), ERX_FIASCO_TASK_ROOT));
 }
 
@@ -168,7 +163,7 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	status = erx_boot_info_build(&inputs, boot_page, sizeof(boot_page));
 	if (status != ERX_BOOT_INFO_OK)
 		return (erx_boot_info_reason(status));
-	reason = library_up(view, pack, handoff->boot);
+	reason = library_up(view, pack, handoff);
 	if (reason != NULL)
 		return (reason);
 	erx_fiasco_libc_root_start(main);
@@ -250,6 +245,7 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	const char *word;
 	size_t word_len;
 	size_t boot_length;
+	size_t build_length;
 
 	arg_words[(*nargs)++] = manifest->system_args;
 	if (manifest->console.size != 0)
@@ -259,7 +255,10 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	if (boot_length == 0)
 		return ("the handoff: a boot value or slot that has no name");
 	arg_words[(*nargs)++] = (erx_boot_words_t){ boot_words, boot_length };
-	arg_words[(*nargs)++] = (erx_boot_words_t){ build_words, build_id_words(handoff) };
+	build_length = erx_boot_build_words(erx_boot_handoff_build_id(handoff), build_words, sizeof(build_words));
+	if (build_length == 0)
+		return ("the handoff: the build identifier's words outgrow their room");
+	arg_words[(*nargs)++] = (erx_boot_words_t){ build_words, build_length };
 	for (size_t at = 0; at < manifest->device_count; at++) {
 		const erx_boot_device_t *const device = &manifest->devices[at];
 		size_t length = 0;
@@ -339,23 +338,6 @@ boot_build(erx_boot_pair_t boot)
 	if (used != 0)
 		used = word_append(boot_words, sizeof(boot_words), used, slot);
 	return (used);
-}
-
-/*
- * Writes -erx build ID into build_words, the handoff's build identifier read big-endian, as the
- * root's identity line prints its bytes in order, in decimal, and returns their whole length,
- * the last NUL included. build_words holds the prefix and the longest number, so no write fails.
- */
-static size_t
-build_id_words(const erx_boot_handoff_view_t *handoff)
-{
-	uint64_t id = 0;
-
-	for (size_t at = 0; at < sizeof(build_prefix); at++)
-		build_words[at] = build_prefix[at];
-	for (size_t at = 0; at < sizeof(handoff->build_id); at++)
-		id = id << 8 | handoff->build_id[at];
-	return (sizeof(build_prefix) + console_uart_number(build_words + sizeof(build_prefix), id));
 }
 
 /* NAME and its NUL at WORDS + USED, within SIZE bytes; returns the new length, or 0 if they do not fit. */

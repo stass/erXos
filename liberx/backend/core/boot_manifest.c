@@ -327,3 +327,14 @@ erx_boot_pair_words(uint32_t value, uint32_t slot, char *words, size_t capacity)
 		return (used);
 	return (0);
 }
+
+size_t
+erx_boot_build_words(uint64_t build_id, char *words, size_t capacity)
+{
+	size_t used = 0;
+
+	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "build") &&
+	    number_put(words, capacity, &used, build_id))
+		return (used);
+	return (0);
+}

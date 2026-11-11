@@ -34,4 +34,7 @@
 #define ERX_BOOT_PAIR_WORDS_MAX		(sizeof("-erx") + sizeof("boot") + \
 	sizeof("unknown") + sizeof("none"))
 
+/* -erx build ID: the boot image's build identifier as one decimal number. */
+#define ERX_BOOT_BUILD_WORDS_MAX	(sizeof("-erx") + sizeof("build") + ERX_BOOT_NUMBER_WORD_MAX)
+
 #endif /* ERX_BOOT_WORDS_H */

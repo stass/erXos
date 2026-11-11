@@ -578,7 +578,8 @@ one configuration gives one image. Each value has one source:
   a system identifier and so ASCII, which needs no escaping;
 * the build identifier is the boot image's, the pack header's
   `build_id` in hexadecimal, as the boot banner and the host link's
-  hello show it; it plays the part of FreeBSD's `kern.build_id`;
+  hello show it, which init's `-erx build` gives every domain of the
+  image; it plays the part of FreeBSD's `kern.build_id`;
 * the source revision is the one the image was built from, in
   FreeBSD's `newvers.sh` form without its branch,
   `[n<count>-]<hash>[-dirty]`: the count of first-parent commits,
@@ -599,8 +600,10 @@ one configuration gives one image. Each value has one source:
   stand-in.
 
 The image build gathers the last four where it packs the image, and
-writes them into the system release as a small file at `build_facts_path`
-of `abi/erx_abi.txt`, one `name value` line per fact; its receipt names
+writes them into each release of the image, the system release and the
+domain release, as a small file at `build_facts_path` of `abi/erx_abi.txt`
+under the release's root, one `name value` line per fact, so every domain
+shows the same facts; its receipt names
 the code that writes it, as a compiled file's names its sources. Only the
 commit's facts come from the build host. `erx_build` reads the file back,
 refuses it whole unless every line is in its place with a value of its
@@ -609,7 +612,7 @@ field's shape, and `uname` writes each value through the field escape.
 A value the command's domain cannot know is written `unknown`, as GNU's
 `uname` writes a field it cannot tell: the host name of a runtime that is
 not a node, the build identifier where init was given none, every build
-fact of a hosted runtime or a domain, whose release has no such file, and
+fact of a hosted runtime, whose release has no such file, and
 the revision and the date of an image built from a tree that is not a git
 checkout. FreeBSD's `-U` (the userland's `__FreeBSD_version`) has no
 erXos value and is not offered, nor are the `UNAME_x` environment

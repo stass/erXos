@@ -2373,6 +2373,8 @@ erx_fiasco_root_main(void)
 	if (reason == NULL) {
 		erx_fiasco_task_set_archive(&pack);
 		files_from(&pack, program);
+		/* Each domain's page names the image's build, as the root's library gives it. */
+		lib.build_id = erx_boot_handoff_build_id(&handoff);
 		/* Only the BeamAsm manifest carries the JIT mark. */
 		if (!files[erts].image_ok || (files[erts].image_flags & ERX_IMAGE_JIT) != 0 || !files[jit].image_ok ||
 		    (files[jit].image_flags & ERX_IMAGE_JIT) == 0)

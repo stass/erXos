@@ -37,14 +37,14 @@ module Erx
     PLATFORM = 'config/platforms/qemu-virt.json'
     # What an archive names by itself rather than by the release: the root and these
     # two say what each build links, so a comparison of two archives leaves them out,
-    # as it leaves out the build facts at the ABI's build_facts_path, which say which
+    # as it leaves out the system release's build facts (the ABI's build_facts_path), which say which
     # build an image is and which only the production image carries.
     NOT_RELEASE_FILES = %w[system/root system/manifest system/NOTICES].freeze
 
     # The archive's release files as [path, content hash], sorted, from its index alone.
     def self.file_table(archive:, codec:)
       rows = PackWire.entries_of(File.binread(archive), codec).map { |path, entry| [path, entry.fetch('file_hash').unpack1('H*')] }
-      excluded = [*NOT_RELEASE_FILES, codec.fixed_bytes('build_facts_path')]
+      excluded = [*NOT_RELEASE_FILES, ReleaseFiles::SYSTEM.prefix + codec.fixed_bytes('build_facts_path')]
       rows.select { |path, _hash| path.start_with?('system/') && !excluded.include?(path) }.sort.freeze
     end
 

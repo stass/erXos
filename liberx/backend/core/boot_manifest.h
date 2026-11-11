@@ -150,4 +150,14 @@ size_t	erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t c
  */
 size_t	erx_boot_pair_words(uint32_t value, uint32_t slot, char *words, size_t capacity);
 
+/*
+ * Writes -erx build ID, the boot image's build identifier in decimal, into words, and
+ * returns their whole length; 0 for words that do not fit, which ERX_BOOT_BUILD_WORDS_MAX
+ * bytes always do. init reads an -erx word's values as terms, so a value must scan as one,
+ * which hexadecimal digits do not (2255e43f is an illegal integer); a decimal number always
+ * does. The root writes it into the system domain's boot page and the domain library into
+ * every other domain's, so each domain of the image names the same build.
+ */
+size_t	erx_boot_build_words(uint64_t build_id, char *words, size_t capacity);
+
 #endif /* ERX_BACKEND_BOOT_MANIFEST_H */

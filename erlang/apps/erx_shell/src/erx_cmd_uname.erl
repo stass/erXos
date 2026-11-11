@@ -39,7 +39,7 @@ Where each value comes from (docs/design-shell.md, "Text commands"):
   no distribution;
 * the build identifier is the one init's `-erx build` carries (erx_build);
 * the source revision, its date, the configuration and the kernel are
-  the build facts the image build wrote into the system release
+  the build facts the image build wrote into this domain's release
   (erx_build:facts/0). The date is the commit's, in UTC, in the layout of
   macOS's `date`, so an image's bytes do not depend on when it was built.
 

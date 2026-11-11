@@ -78,6 +78,21 @@ erx_boot_node_path_valid(const uint8_t *path, size_t length)
 	return (true);
 }
 
+/*
+ * The boot image's build identifier as one number, its bytes read big-endian,
+ * as the root's identity line prints them in order. The root gives it to the
+ * system domain and the domain library to every other domain, as -erx build.
+ */
+static inline uint64_t
+erx_boot_handoff_build_id(const erx_boot_handoff_view_t *handoff)
+{
+	uint64_t id = 0;
+
+	for (size_t at = 0; at < sizeof(handoff->build_id); at++)
+		id = id << 8 | handoff->build_id[at];
+	return (id);
+}
+
 /* Returns NULL when the record is good, else the check that failed. */
 const char *erx_boot_handoff_accept(const uint8_t *, size_t,
     erx_boot_handoff_view_t *);

@@ -396,6 +396,29 @@ test_holder_records(void)
 	    "holder: a boot record past its room is written");
 }
 
+/*
+ * -erx build ID, which the root and the domain library write into every domain's page: the
+ * identifier in decimal, so init scans it as one integer; the longest fills
+ * ERX_BOOT_BUILD_WORDS_MAX, and one byte less is refused, writing nothing past its room.
+ */
+static void
+test_build_words(void)
+{
+	static const char record[] = "-erx\0build\0" "2474978957553200051\0";
+	char words[ERX_BOOT_BUILD_WORDS_MAX + 1];
+	size_t used;
+
+	memset(words, 'x', sizeof(words));
+	used = erx_boot_build_words(UINT64_C(0x2258e43fb7866bb3), words, sizeof(words));
+	CHECK(used == sizeof(record) - 1 && memcmp(words, record, used) == 0, "build: the record's words");
+	used = erx_boot_build_words(UINT64_MAX, words, sizeof(words));
+	CHECK(used == ERX_BOOT_BUILD_WORDS_MAX, "build: the longest build record is %zu bytes", used);
+	memset(words, 'x', sizeof(words));
+	CHECK(erx_boot_build_words(UINT64_MAX, words, ERX_BOOT_BUILD_WORDS_MAX - 1) == 0,
+	    "build: a build record past its room is written");
+	CHECK(words[ERX_BOOT_BUILD_WORDS_MAX - 1] == 'x', "build: a refused record wrote past its room");
+}
+
 static void
 check_vector(const char *node, size_t node_len, const char *flag)
 {
@@ -610,6 +633,7 @@ main(void)
 	test_spans();
 	test_header_corruption();
 	test_holder_records();
+	test_build_words();
 	check_vector("system@host", 11, "-sname");
 	check_vector("system@host.example", 19, "-name");
 	check_vector("a.b@host", 8, "-sname");

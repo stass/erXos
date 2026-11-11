@@ -16,7 +16,7 @@ that runs them is started as the system release is, with
 no epmd outlives it; it runs no distribution and a line
 run through the shell finds the host `erxtest` among init's arguments;
 its init has no `-erx build` and its root no build facts, so the build
-configurationifier and every build fact are `unknown`, the never-fabricate case
+identifier and every build fact are `unknown`, the never-fabricate case
 end to end.
 """.
 
@@ -73,7 +73,7 @@ fields_test_() ->
      ?_assertEqual([build], F("b")),
      ?_assertEqual([configuration], F("i")),
      ?_assertEqual([kernel], F("K")),
-     %% -a is -mnrsv: no processor and no build configurationifier, as on FreeBSD.
+     %% -a is -mnrsv: no processor and no build identifier, as on FreeBSD.
      ?_assertEqual([sysname, nodename, release, version, machine], F("a")),
      ?_assertEqual([sysname, nodename, release, version, machine, processor, build], F("abp")),
      ?_assertEqual([sysname, nodename, release, version, machine, processor, configuration, kernel, build], F("abpiK")),

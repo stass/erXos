@@ -380,8 +380,8 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 /*
  * Whether a domain's boot page's strings hold its arguments and
  * environment beside what the library writes there (docs/design-stopgap.md,
- * "Boot information"): its own node name and the system node's, a
- * -erx given record per device it holds, and -erx boot when it holds a
+ * "Boot information"): its own node name and the system node's, -erx
+ * build, a -erx given record per device it holds, and -erx boot when it holds a
  * block device. The reserve takes each at its longest, so a row the view
  * admits never fails its creation for its strings: a node name at
  * ERX_DOM_NODE_MAX, though the system node's is at most 71 bytes, and the
@@ -392,7 +392,8 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 static bool
 boot_strings_fit(uint64_t args_len, uint64_t env_len, uint32_t held, bool block)
 {
-	const uint64_t reserve = 2u * (uint64_t)ERX_DOM_NODE_MAX + (uint64_t)held * ERX_BOOT_GIVEN_WORDS_MAX +
+	const uint64_t reserve = 2u * (uint64_t)ERX_DOM_NODE_MAX + ERX_BOOT_BUILD_WORDS_MAX +
+	    (uint64_t)held * ERX_BOOT_GIVEN_WORDS_MAX +
 	    (block ? ERX_BOOT_PAIR_WORDS_MAX : 0);
 
 	return (args_len + env_len + reserve <= ERX_BOOT_STRINGS_MAX);

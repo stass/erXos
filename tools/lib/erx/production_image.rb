@@ -47,7 +47,7 @@ module Erx
     # records and uname -i names (BuildFacts.configuration).
     BUILD_KIND = 'development'
     # The code that gathers and writes the build-facts file (BuildFacts, SourceRevision,
-    # build_facts_entry and Fiasco#kernel_name), which its receipt names as its sources.
+    # build_facts_file, build_facts_entry and Fiasco#kernel_name), which its receipt names as its sources.
     BUILD_FACTS_SOURCES = %w[tools/lib/erx/build_facts.rb tools/lib/erx/source_revision.rb tools/lib/erx/production_image.rb
                              tools/lib/erx/fiasco.rb].freeze
     ROOT_ENTRY_PATH = 'system/root'
@@ -308,12 +308,13 @@ module Erx
       sigma0 = assembled_receipt(@fiasco.sigma0_path, name: 'sigma0', directory: directory)
       archive = File.join(directory, 'image.erxpack')
       File.write(self.class.sources_path(archive), sources)
+      facts = build_facts_file(directory: directory)
       release = [*ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries,
-                 build_facts_entry(directory: directory)]
+                 build_facts_entry(facts, release: ReleaseFiles::SYSTEM)]
       erofs, images = ReleaseMedium.image(entries: release, directory: directory, runner: @runner)
       # Only domains run the BeamAsm image, so an image without them does not build it.
       jit = domains.empty? ? nil : @jit_runtime.build(interpreter: erts)
-      domain = domain_parts(domains, erts: erts, jit: jit, archives: archives, directory: directory)
+      domain = domain_parts(domains, erts: erts, jit: jit, archives: archives, facts: facts, directory: directory)
       report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *domain.entries, *added.entries], root_task: root_task,
                     images: images, manifest_source: manifest_source, erts: erts, jit: jit, output: archive,
                     imports: IMPORTS.merge(added.imports),
@@ -1282,14 +1283,15 @@ module Erx
     # their receipts name; nothing when there are no boot scripts. ReleaseFiles.domain
     # refuses a script it did not make, whose name could leave the work directory, and
     # two scripts of one name.
-    def domain_parts(boots, erts:, jit:, archives:, directory:)
+    def domain_parts(boots, erts:, jit:, archives:, facts:, directory:)
       return NOTHING_ADDED if boots.empty?
 
       release = ReleaseFiles.domain(boots)
       runtime = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
                           .build_domain_runtime_receipted(directory: File.join(directory, 'domain-runtime'), archives: archives)
-      releases = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'domains'), runner: @runner,
-                                  codec: @codec, release: release).entries
+      releases = [*ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'domains'), runner: @runner,
+                                    codec: @codec, release: release).entries,
+                  build_facts_entry(facts, release: release)]
       beamasm = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
                           .build_jit_runtime_receipted(directory: File.join(directory, 'jit-runtime'),
                                                        archives: jit.link_archives(libgcc: @fiasco.user_library('libgcc.a')))
@@ -1345,11 +1347,12 @@ module Erx
 
     def platform_record = JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record')
 
-    # The system release's build-facts file (BuildFacts), from the facts this build
+    # The build-facts file (BuildFacts) and its receipt, from the facts this build
     # packs: the platform record's name and the build kind, the kernel it packs
     # (Fiasco#kernel_name, beside kernel_path), and the source revision. Its receipt
-    # attributes it to the code that writes it.
-    def build_facts_entry(directory:)
+    # attributes it to the code that writes it. Each release of the image carries it
+    # (build_facts_entry), so every domain reads the same facts.
+    def build_facts_file(directory:)
       configuration = BuildFacts.configuration(platform: platform_record.fetch('name'), build_kind: BUILD_KIND)
       facts = BuildFacts.gather(root: @root, runner: @runner, configuration: configuration, kernel: @fiasco.kernel_name)
       path = File.join(directory, 'build-facts')
@@ -1357,9 +1360,15 @@ module Erx
       receipt = File.join(directory, 'build-facts.receipt.json')
       File.write(receipt, JSON.pretty_generate('version' => 1, 'kind' => 'compiled', 'artifact' => reference(path),
                                                'sources' => BUILD_FACTS_SOURCES.map { |source| reference(File.join(@root, source)) }) + "\n")
-      entry_path = @codec.fixed_bytes('build_facts_path')
-      { 'path' => entry_path, 'kind' => @codec.member('entry_kind', 'file'), 'flags' => @codec.member('entry_flags', 'system'),
-        'id' => entry_path, 'artifact' => path, 'receipt' => receipt }
+      { 'artifact' => path, 'receipt' => receipt }.freeze
+    end
+
+    # The archive entry of facts, build_facts_file's, at the ABI's build_facts_path under
+    # release's root, with the system mark only in the system release, as its other files.
+    def build_facts_entry(facts, release:)
+      entry_path = release.prefix + @codec.fixed_bytes('build_facts_path')
+      { 'path' => entry_path, 'kind' => @codec.member('entry_kind', 'file'),
+        'flags' => release.system ? @codec.member('entry_flags', 'system') : 0, 'id' => entry_path, **facts }
     end
 
     # A receipt that says the kernel or sigma0 comes from Fiasco's audited build.

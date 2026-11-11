@@ -52,9 +52,10 @@ typedef struct apply {
 	uint64_t		 bootinfo_addr;	/* where the domain sees its boot page */
 	uint64_t		 release_addr;	/* where it sees its release slice */
 	apply_give_t		 gives[ERX_DOM_GIVES_MAX];	/* plan->gives, give for give */
-	/* The boot page's -erx given record of each give, and -erx boot. */
+	/* The boot page's -erx given record of each give, -erx boot and -erx build. */
 	char			 given_words[ERX_DOM_GIVES_MAX][ERX_BOOT_GIVEN_WORDS_MAX];
 	char			 pair_words[ERX_BOOT_PAIR_WORDS_MAX];
+	char			 build_words[ERX_BOOT_BUILD_WORDS_MAX];
 } apply_t;
 
 /*
@@ -454,10 +455,11 @@ apply_given_words(apply_t *apply, uint32_t at)
 }
 
 /*
- * The boot page's arguments into words, which holds 2 + ERX_DOM_GIVES_MAX
- * runs: the specification's own, a -erx given record per give, and, for a
- * holder of a block device, -erx boot with the boot's pair, as the root's
- * own page carries it. The number of runs, or 0 when a record does not fit.
+ * The boot page's arguments into words, which holds 3 + ERX_DOM_GIVES_MAX
+ * runs: the specification's own, -erx build with the boot image's build
+ * identifier, a -erx given record per give, and, for a holder of a block
+ * device, -erx boot with the boot's pair, each as the root's own page
+ * carries it. The number of runs, or 0 when a record does not fit.
  */
 static size_t
 apply_args(apply_t *apply, erx_boot_words_t *words)
@@ -468,6 +470,9 @@ apply_args(apply_t *apply, erx_boot_words_t *words)
 
 	if (spec->args_len != 0)
 		words[count++] = (erx_boot_words_t){ spec->strings, spec->args_len };
+	if ((length = erx_boot_build_words(apply->lib->build_id, apply->build_words, sizeof(apply->build_words))) == 0)
+		return (0);
+	words[count++] = (erx_boot_words_t){ apply->build_words, length };
 	for (uint32_t at = 0; at < apply->plan->ngives; at++) {
 		if ((length = apply_given_words(apply, at)) == 0)
 			return (0);
@@ -509,7 +514,7 @@ apply_bootinfo(apply_t *apply)
 	const erx_dom_plan_t *plan = apply->plan;
 	const erx_dom_spec_t *spec = &plan->spec;
 	const uint64_t page = apply->handles.made[ERX_DOM_OBJ_BOOTINFO];
-	erx_boot_words_t args[2 + ERX_DOM_GIVES_MAX];
+	erx_boot_words_t args[3 + ERX_DOM_GIVES_MAX];
 	const erx_boot_words_t env = { spec->strings + spec->args_len, spec->env_len };
 	char node[ERX_DOM_NODE_MAX], system_node[ERX_DOM_NODE_MAX];
 	erx_boot_inputs_t inputs = { 0 };
@@ -558,7 +563,7 @@ apply_bootinfo(apply_t *apply)
 	}
 	inputs.args = args;
 	inputs.nargs = apply_args(apply, args);
-	if (inputs.nargs == 0 && (spec->args_len != 0 || apply->plan->ngives != 0))
+	if (inputs.nargs == 0)
 		return (ERX_EINVAL);
 	inputs.env = &env;
 	inputs.nenv = spec->env_len != 0;

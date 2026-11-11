@@ -28,7 +28,9 @@ module Erx
   # takes the line once its tty names itself, so the next banner is the session's own
   # command shell's. There `echo hi` answers, `ls /tmp` lists a file the shell wrote, and
   # `ps` lists none of the system domain's processes, and `dmesg` writes the kernel log, which
-  # the session reads through the system domain (KERNEL_LOG). The session's Erlang shell answers
+  # the session reads through the system domain (KERNEL_LOG); `uname -a` prints every field the
+  # system shell's does (MediumBoot::UNAME_A), the build facts among them, and `uname -b`
+  # the build identifier, so none is `unknown`. The session's Erlang shell answers
   # node() as root_1@erxos, writes a line to /data/across, the storage domain's tree
   # through the session's `data` facet, and reads it back once that grant has arrived
   # (with_data), and writes 64 KiB in numbered lines while Ctrl-G opens the menu and Esc
@@ -116,6 +118,10 @@ module Erx
     # in a development build (erx_log_facet), as the system shell reads it (MediumBoot).
     KERNEL_LOG = "dmesg | grep 'erx_lfs: volume mounted'\r"
     KERNEL_LOG_LINE = /\A#[0-9]+ [0-9]+\.[0-9]{6} debug space [0-9]+: erx_lfs: volume mounted\r*\n\z/n
+    # `uname -b` at the session's command shell: the boot image's build identifier, which
+    # the domain library gives every domain it starts, as the root gives the system domain.
+    # A library that never set the identifier would give 0, which is no build's.
+    BUILD_ID = /\A(?!0{16})[0-9a-f]{16}\r*\n\z/n
 
     module_function
 
@@ -174,7 +180,9 @@ module Erx
        { name: 'echo-hi', pattern: line('hi'), seconds: 60, type: "echo x > /tmp/session; ls /tmp\r" }.freeze,
        { name: 'ls-tmp', pattern: line('session'), seconds: 60, type: COUNT_SERVICE }.freeze,
        { name: 'session-ps', pattern: line('0'), seconds: 60, type: KERNEL_LOG }.freeze,
-       { name: 'session-dmesg', pattern: KERNEL_LOG_LINE, seconds: 60, type: ERL }.freeze,
+       { name: 'session-dmesg', pattern: KERNEL_LOG_LINE, seconds: 60, type: "uname -a\r" }.freeze,
+       { name: 'session-uname', pattern: MediumBoot::UNAME_A, seconds: 60, type: "uname -b\r" }.freeze,
+       { name: 'session-build', pattern: BUILD_ID, seconds: 60, type: ERL }.freeze,
        shell.merge(name: 'root_1-erlang-shell', type: "node().\r").freeze,
        { name: 'root_1-node', pattern: answer('root_1@erxos'), seconds: 60, type: PROGRAM_REFUSED }.freeze,
        { name: 'program-refused', pattern: answer('{{error,einval},{error,erange}}'), seconds: 60,
