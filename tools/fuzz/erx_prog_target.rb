@@ -10,24 +10,12 @@ require_relative '../../test/fixtures/prog_profile_frames'
 # bound (every encoding, a capability past 2^63 - 1, wrappers past the depth, lists in
 # segments), a start frame with a pipe's two ends, and a request frame.
 frames = ProgProfileFrames
-etf = ProgProfileFrames::Etf
-pairs = ->(map) { map.map { |key, value| [etf.atom(key.to_s), value] } }
-reader = ->(rix, cap) { etf.tuple(etf.small(rix), etf.small(cap)) }
-write_end = etf.map(pairs.call(wend: etf.small(1), ring: etf.small(101), rpage: etf.small(102),
-                               size: etf.int(16_384), readers: etf.list([reader.call(0, 103)])))
-writer = etf.tuple(etf.small(1), etf.small(105), etf.small(106), etf.int(65_536), etf.small(107), etf.atom('open'))
-read_end = etf.map(pairs.call(rix: etf.small(0), lock: etf.small(104), wends: etf.small(1),
-                              writers: etf.list([writer]), readers: etf.list([])))
-pipes = etf.list([
-  etf.tuple(etf.small(0), etf.tuple(etf.atom('pipe'), etf.atom('write'), etf.tuple(etf.small(1), etf.small(2)), write_end)),
-  etf.tuple(etf.small(1), etf.tuple(etf.atom('pipe'), etf.atom('read'), etf.tuple(etf.small(2), etf.small(3)), read_end))
-])
 fixtures = frames::ALL.select { |fixture| fixture.bytes.bytesize < 32_768 }
+choice = { 'start' => "\x00".b, 'request' => "\x01".b }.freeze
 Erx::PackFuzz.declare_target(
   sources: %w[liberx/erx_profile.c liberx/erx_etf.c kernel/crypto/blake3/blake3.c
               kernel/crypto/blake3/blake3_portable.c build/gen/liberx/generated/prog_profile.c],
-  seeds: fixtures.to_h { |fixture| [fixture.name.to_s.tr('_', '-'), "\x00".b + fixture.bytes] }.merge(
-    'pipes' => "\x00".b + frames.start(frames::BASE_PAIRS.merge(fds: pipes)),
-    'request' => "\x01".b + etf.frame(etf.tuple(etf.atom('erx_prog'), etf.small(1), etf.small(0), etf.atom('ok')))
+  seeds: fixtures.to_h { |fixture| [fixture.name.to_s.tr('_', '-'), choice.fetch('start') + fixture.bytes] }.merge(
+    frames::SEEDS.to_h { |seed| [seed.name, choice.fetch(seed.frame) + seed.bytes] }
   )
 )

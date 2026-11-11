@@ -964,6 +964,13 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] ABI generator, frame profiles (`tools/lib/erx/abi_profile.rb`, `include/erx/profile.h`): the C
+  check's bounds on depth and totals are written in both files, tied only by the generated table's static
+  asserts, and the 64-key bound of a map or union (`ERX_PROFILE_KEYS_MAX`) has no model rule, so a protocol
+  past it fails as a C compile error rather than at its declaration. Give the bounds one source and add the
+  keys rule to the model.
+* [Low] tests, `test/fixtures/prog_profile_mutations.rb`: the rule helpers pass `[rule, value, reason]`
+  triples and `places` passes `[kind, value, path]` triples; name them with `Data.define`.
 * [Low] ERTS start-up (`otp/erts/emulator/beam/erl_process.c`, the "hold executor slots" line): the scheduler
   count follows the manifest's CPU set, not the CPUs present. The system domain and the storage domain report
   4 schedulers on the website's 1-core v64 machine. Size them from the CPUs the kernel reports present.

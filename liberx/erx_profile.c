@@ -15,6 +15,7 @@
  * the walk's own array.
  */
 
+#include <limits.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -52,6 +53,10 @@ typedef struct level {
 	bool			 held_refers;
 } level_t;
 
+/* A level's mask holds a bit for each of a map's keys or a union's cases. */
+_Static_assert(sizeof(((level_t *)0)->seen) * CHAR_BIT >= ERX_PROFILE_KEYS_MAX,
+    "a level's mask is narrower than ERX_PROFILE_KEYS_MAX");
+
 typedef struct walk {
 	const erx_profile_t	*p;
 	erx_profile_refusal_t	*refusal;
@@ -64,6 +69,7 @@ typedef struct walk {
 	size_t			 nuniq;
 	size_t			 uniq_cap;
 	size_t			 item;		/* offset of the item being read */
+	uint16_t		 frame;		/* the frame's name, for malformed */
 	unsigned		 top;
 	bool			 global;	/* count the frame-wide rules */
 } walk_t;
@@ -104,6 +110,16 @@ refuse(walk_t *w, erx_profile_reason_t reason, uint16_t kind)
 	return (false);
 }
 
+/*
+ * Bytes that are no term of the wire grammar, named by the frame as the
+ * grammar names them.
+ */
+static bool
+malformed(walk_t *w)
+{
+	return (refuse(w, ERX_PROFILE_MALFORMED, w->frame));
+}
+
 static bool
 atom_is(const erx_etf_item_t *item, const char *name)
 {
@@ -117,17 +133,17 @@ atom_is(const erx_etf_item_t *item, const char *name)
 /*
  * The next term's first item.  A LIST_EXT of no element is its tail, so
  * the loop takes the item after it in its place.  Bytes that are no item,
- * or none at all, are malformed, refused as of kind.
+ * or none at all, are malformed.
  */
 static bool
-read_term(walk_t *w, erx_etf_item_t *item, uint16_t kind)
+read_term(walk_t *w, erx_etf_item_t *item)
 {
 	erx_etf_reason_t reason;
 
 	for (;;) {
 		w->item = w->rd.pos;
 		if (erx_etf_next(&w->rd, item, &reason) != ERX_ETF_STEP_ITEM)
-			return (refuse(w, ERX_PROFILE_MALFORMED, kind));
+			return (malformed(w));
 		if (item->kind != ERX_ETF_LIST || item->count != 0)
 			return (true);
 	}
@@ -334,7 +350,7 @@ push(walk_t *w, uint16_t kind, uint8_t *store, level_t **out)
 
 	k = &w->p->kinds[kind];
 	if (w->top >= ERX_PROFILE_DEPTH_MAX)
-		return (refuse(w, ERX_PROFILE_MALFORMED, kind));
+		return (malformed(w));
 	*out = &w->stack[w->top++];
 	**out = (level_t){ .k = k, .kind = kind, .store = store };
 	if (store != NULL && k->form != ERX_PROFILE_LIST)
@@ -464,7 +480,7 @@ begin_list(walk_t *w, uint16_t kind, const erx_etf_item_t *item, uint8_t *store)
 	level_t *l;
 
 	view = (erx_profile_list_t){ .profile = w->p, .frame = w->rd.bytes,
-	    .len = w->rd.len, .pos = w->rd.pos,
+	    .len = w->rd.len, .pos = w->rd.pos, .kind = kind,
 	    .element = w->p->kinds[kind].element };
 	if (item->kind == ERX_ETF_NIL) {
 		store_value(store, &view, sizeof(view));
@@ -531,7 +547,7 @@ begin(walk_t *w, uint16_t kind, uint8_t *store)
 	bool b;
 
 	k = &w->p->kinds[kind];
-	if (!read_term(w, &item, kind))
+	if (!read_term(w, &item))
 		return (false);
 	switch (k->form) {
 	case ERX_PROFILE_INTEGER:
@@ -590,7 +606,7 @@ begin(walk_t *w, uint16_t kind, uint8_t *store)
 	case ERX_PROFILE_LIST:
 		return (begin_list(w, kind, &item, store));
 	}
-	return (refuse(w, ERX_PROFILE_MALFORMED, kind));
+	return (malformed(w));
 }
 
 /* Pops the top level; its value is done. */
@@ -636,7 +652,7 @@ step_list(walk_t *w, level_t *l)
 
 	while (!l->in_string && l->segment_left == 0) {
 		/* A segment's tail: another segment, or the list's end. */
-		if (!read_term(w, &item, l->kind))
+		if (!read_term(w, &item))
 			return (false);
 		if (item.kind == ERX_ETF_NIL)
 			return (pop(w));
@@ -688,7 +704,7 @@ step_map(walk_t *w, level_t *l)
 		return (pop(w));
 	}
 	l->index--;
-	if (!read_term(w, &item, l->kind))
+	if (!read_term(w, &item))
 		return (false);
 	for (i = 0; i < l->k->nfields; i++) {
 		if (atom_is(&item, l->k->fields[i].name))
@@ -698,7 +714,7 @@ step_map(walk_t *w, level_t *l)
 		return (refuse(w, ERX_PROFILE_KEY, l->kind));
 	/* ERTS's decoder refuses a map with a key repeated. */
 	if (l->seen & UINT64_C(1) << i)
-		return (refuse(w, ERX_PROFILE_MALFORMED, l->kind));
+		return (malformed(w));
 	l->seen |= UINT64_C(1) << i;
 	f = &l->k->fields[i];
 	has = true;
@@ -724,7 +740,7 @@ step_union(walk_t *w, level_t *l)
 	c = &l->k->cases[first];
 	if (l->index < c->natoms) {
 		/* Candidates past the first atom share the case atom, so their count of atoms too. */
-		if (!read_term(w, &item, l->kind))
+		if (!read_term(w, &item))
 			return (false);
 		for (i = first; i < l->k->ncases; i++) {
 			if ((l->seen & UINT64_C(1) << i) && (l->index >=
@@ -764,7 +780,7 @@ step(walk_t *w)
 	case ERX_PROFILE_UNION:
 		return (step_union(w, l));
 	default:
-		return (refuse(w, ERX_PROFILE_MALFORMED, l->kind));
+		return (malformed(w));
 	}
 }
 
@@ -899,15 +915,15 @@ walk_frame(walk_t *w, const erx_profile_frame_t *f, uint8_t *slot, void *out)
 	erx_etf_item_t item;
 	uint64_t v;
 
-	if (!read_term(w, &item, f->name))
+	if (!read_term(w, &item))
 		return (false);
 	if (item.kind != ERX_ETF_TUPLE || item.count != (f->slot ? 4u : 3u))
 		return (refuse(w, ERX_PROFILE_SHAPE, f->name));
-	if (!read_term(w, &item, f->name))
+	if (!read_term(w, &item))
 		return (false);
 	if (!atom_is(&item, f->tag))
 		return (refuse(w, ERX_PROFILE_SHAPE, f->name));
-	if (!read_term(w, &item, f->name))
+	if (!read_term(w, &item))
 		return (false);
 	if ((item.kind != ERX_ETF_INTEGER && item.kind != ERX_ETF_BIG) ||
 	    !item_u64(&item, &v) || v != w->p->version)
@@ -945,6 +961,7 @@ erx_profile_check(const erx_profile_t *p, uint16_t frame, const uint8_t *bytes,
 	w.p = p;
 	w.refusal = refusal;
 	w.global = true;
+	w.frame = f->name;
 	w.uniq = (uint64_t *)(void *)((uint8_t *)scratch + pad);
 	w.uniq_cap = len / 2;
 	w.bitmaps = (uint8_t *)scratch + pad + 8 * w.uniq_cap;
@@ -957,23 +974,25 @@ erx_profile_check(const erx_profile_t *p, uint16_t frame, const uint8_t *bytes,
 		return (false);
 	w.item = w.rd.pos;
 	if (erx_etf_next(&w.rd, &item, &reason) != ERX_ETF_STEP_END)
-		return (refuse(&w, ERX_PROFILE_MALFORMED, f->name));
+		return (malformed(&w));
 	return (frame_rules(&w));
 }
 
 bool
-erx_profile_next(erx_profile_list_t *list, void *element)
+erx_profile_next(const erx_profile_t *profile, uint16_t kind,
+    erx_profile_list_t *list, void *element)
 {
 	erx_profile_refusal_t refusal;
 	erx_etf_item_t item;
 	uint8_t byte;
 	walk_t w;
 
-	if (list->left == 0)
+	if (list->profile != profile || list->kind != kind || list->left == 0)
 		return (false);
 	memset(&w, 0, sizeof(w));
 	w.p = list->profile;
 	w.refusal = &refusal;
+	w.frame = ERX_PROFILE_NONE;
 	w.rd = (erx_etf_reader_t){ .bytes = list->frame, .len = list->len,
 	    .pos = list->pos };
 	for (;;) {
@@ -989,7 +1008,7 @@ erx_profile_next(erx_profile_list_t *list, void *element)
 		if (list->segment_left > 0)
 			break;
 		/* The accepted list goes on in another segment. */
-		if (!read_term(&w, &item, list->element))
+		if (!read_term(&w, &item))
 			return (false);
 		list->pos = w.rd.pos;
 		if (item.kind == ERX_ETF_LIST)

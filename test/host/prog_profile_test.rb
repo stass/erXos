@@ -7,14 +7,18 @@ require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/generated'
 require_relative '../fixtures/prog_profile_frames'
+require_relative '../fixtures/prog_profile_mutations'
 
 # The program protocol's two checks over one corpus (docs/design-abi.md#program-protocol):
 # liberx's C check, through test/fixtures/prog_profile_driver.c, and the generated Erlang
 # grammar erx_prog_grammar, through test/erlang/erx_prog_profile_diff.erl, run on stock's
-# emulator (ERX_ERL and ERX_ERLC). Their verdicts agree on every frame, their reason and
-# kind on every single-rule mutation, each accepted frame written again from the C
+# emulator (ERX_ERL and ERX_ERLC). The corpus is that module's frames and mutations, the
+# mutations test/fixtures/prog_profile_mutations.rb generates from the protocol's model,
+# the hand-encoded fixtures and the C fuzz target's seeds. Their verdicts agree on every
+# frame, their reason and kind on every single-rule mutation, each accepted frame written again from the C
 # accessors decodes to the frame's own term, and half the promised scratch adds no
 # refusal but scratch.
 class ProgProfileTest < Minitest::Test
@@ -27,6 +31,10 @@ class ProgProfileTest < Minitest::Test
                test/fixtures/prog_profile_driver.c].freeze
   CHECK = SOURCES[0]
   TABLE = SOURCES[4]
+  PROTOCOL = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)).protocols
+                            .find { |protocol| protocol.fetch(:name) == 'erx_prog' }
+  MUTATIONS, SKIPPED = ProgProfileMutations.from(PROTOCOL)
+  CFLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic].freeze
 
   def setup
     @directory = Dir.mktmpdir('erx-prog-profile-')
@@ -103,6 +111,40 @@ class ProgProfileTest < Minitest::Test
     assert_includes fixture_mismatches(seeded), :segmented
   end
 
+  # Each list's iterator is its own type: a view handed to another list's next fails to
+  # compile, and one handed over by a cast is refused by the next's kind check.
+  def test_one_lists_iterator_does_not_compile_as_anothers
+    assert compiles?(crossing('erx_prog_argv_iter_t')), 'the control does not compile'
+    refute compiles?(crossing('erx_prog_fds_iter_t')), "fds's iterator compiles as argv's"
+  end
+
+  def test_a_view_is_read_only_by_its_own_list
+    assert(c_answers(fixture_requests).none? { |answer| answer.split[2] == 'crossed' })
+  end
+
+  def test_a_next_without_its_kind_check_reads_another_lists_view
+    seeded = seed(CHECK, 'list->kind != kind', 'kind == ERX_PROFILE_NONE')
+    assert(c_answers(fixture_requests, seeded).any? { |answer| answer.split[2] == 'crossed' })
+  end
+
+  # The generated table builds only against the bounds the generator assumed.
+  def test_a_header_depth_bound_below_the_generators_fails_the_build
+    assert compiles?(File.binread(File.join(ROOT, TABLE))), 'the table does not compile'
+    header = File.binread(File.join(ROOT, 'include/erx/profile.h'))
+    seeded = header.sub(/^(#define ERX_PROFILE_DEPTH_MAX\t)16$/, '\1' '15')
+    refute_equal header, seeded
+    refute compiles?(File.binread(File.join(ROOT, TABLE)), headers: { 'erx/profile.h' => seeded })
+  end
+
+  # The generated mutations name refusals the hand-written corpus does not, and skip only
+  # the rules and kinds listed.
+  def test_the_generated_mutations_reach_past_the_hand_written_ones
+    hand = corpus(File.binread(GRAMMAR)).fetch(:hand).to_set
+    assert_operator MUTATIONS.map(&:verdict).uniq.count { |verdict| !hand.include?(verdict) }, :>, 0
+    assert_equal ['argv length', 'env length', 'request', 'signals length', 'writers length'],
+                 SKIPPED.map { |line| line.split(':').first }.sort
+  end
+
   private
 
   # The sources with path's text changed by one substitution, which must change it.
@@ -145,7 +187,7 @@ class ProgProfileTest < Minitest::Test
     answers = c_answers(corpus.fetch(:requests), sources)
     judge = corpus.fetch(:requests).zip(answers).map do |request, answer|
       frame, _, hex = request.split
-      rewrite = answer.split[2] if answer.split[1] == 'accepted' && answer.split[2] != '-'
+      rewrite = answer.split[2] if answer.split[1] == 'accepted' && answer.split[2].match?(/\A\h+\z/)
       [frame, hex, rewrite].compact.join(' ')
     end
     verdicts = erlang_verdicts(judge, grammar)
@@ -163,8 +205,12 @@ class ProgProfileTest < Minitest::Test
     @corpus[grammar] ||= begin
       dir = Dir.mktmpdir('corpus', @directory)
       erl(dir, grammar, 'corpus')
-      { requests: File.readlines(File.join(dir, 'requests'), chomp: true) + fixture_requests,
-        expected: File.readlines(File.join(dir, 'expected'), chomp: true) + ProgProfileFrames::ALL.map(&:verdict) }
+      seeds = ProgProfileFrames::SEEDS
+      hand = File.readlines(File.join(dir, 'expected'), chomp: true) + ProgProfileFrames::ALL.map(&:verdict)
+      { requests: File.readlines(File.join(dir, 'requests'), chomp: true) + fixture_requests +
+          MUTATIONS.map { |mutation| "start full #{mutation.bytes.unpack1('H*')}" } +
+          seeds.map { |seed| "#{seed.frame} full #{seed.bytes.unpack1('H*')}" },
+        expected: hand + MUTATIONS.map(&:verdict) + seeds.map(&:verdict), hand: hand }
     end
   end
 
@@ -196,8 +242,7 @@ class ProgProfileTest < Minitest::Test
 
       File.join(dir, File.basename(source)).tap { |path| File.binwrite(path, sources.fetch(source)) }
     end
-    output, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-Wall', '-Wextra', '-Werror',
-                                     '-pedantic', '-O1', '-g', *@flags, '-I', File.join(ROOT, 'build/gen/include'),
+    output, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), *CFLAGS, '-O1', '-g', *@flags, '-I', File.join(ROOT, 'build/gen/include'),
                                      '-I', File.join(ROOT, 'include'), '-I', File.join(ROOT, 'kernel/crypto'),
                                      *sources, '-o', program, stdin_data: '')
     raise output unless status.success?
@@ -208,5 +253,26 @@ class ProgProfileTest < Minitest::Test
     raise output unless status.success?
 
     File.readlines(File.join(dir, 'answers'), chomp: true)
+  end
+
+  # A translation unit that hands an iterator of type to argv's next.
+  def crossing(type)
+    "#include <erx/prog_profile.h>\n" \
+      "bool crossed(#{type} *it, erx_profile_text_t *t);\n" \
+      "bool\ncrossed(#{type} *it, erx_profile_text_t *t)\n{\n\treturn (erx_prog_argv_next(it, t));\n}\n"
+  end
+
+  # Whether source compiles, with headers (an include path => its text) ahead of the tree's.
+  def compiles?(source, headers: {})
+    dir = Dir.mktmpdir('compile', @directory)
+    headers.each do |name, text|
+      FileUtils.mkdir_p(File.join(dir, File.dirname(name)))
+      File.binwrite(File.join(dir, name), text)
+    end
+    File.binwrite(File.join(dir, 'unit.c'), source)
+    _, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), *CFLAGS, '-fsyntax-only', '-I', dir,
+                                '-I', File.join(ROOT, 'build/gen/include'), '-I', File.join(ROOT, 'include'),
+                                File.join(dir, 'unit.c'), stdin_data: '')
+    status.success?
   end
 end

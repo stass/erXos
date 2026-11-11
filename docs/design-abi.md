@@ -1173,12 +1173,21 @@ length, never NUL-terminated, which `liberx` copies where C needs a
 string (`argv`, `environ`, the working directory). An `optional` key has
 a `has_` flag. A tuple, map or union nested in a struct is read into a
 struct of its own; a list alone stays a view, an iterator whose `next`
-reads one element into its struct. So the structs are small and fixed,
+reads one element into its struct. Each list's iterator is a type of
+its own, a struct around the view, so one list's iterator handed to
+another list's `next` does not compile, and each `next` checks that the
+view is of its own list and fails otherwise. So the structs are small and fixed,
 whatever the frame holds, and no worst case sizes any of them. Since
 every iterator comes from a struct the check filled, or from an element
 read through one, a read never meets a byte the check has not accepted,
-and `next` fails only at the list's end. Each view borrows the frame,
-which `liberx`'s private copy keeps unchanged while it is used.
+and `next` fails only at the list's end or on another list's view. Each view borrows the frame,
+which `liberx`'s private copy keeps unchanged while it is used. The
+generated table holds static asserts that the check's fixed bounds in
+`erx/profile.h` hold it: the generator's bounds on depth and totals are
+the header's, the table's depth and totals are within them, each map's
+keys and each union's cases fit the 64 bits of a level's mask, and each
+iterator is its view alone, so a table the check cannot walk does not
+build.
 
 **The Erlang grammar.** `tools/lib/erx/abi_emit_protocol.rb` emits
 `erx_prog_grammar` as it emits `erx_9p_grammar`, preloaded, calling only
@@ -1203,7 +1212,8 @@ rule; `key`, a key missing or unknown; `no_case`; `order`;
 are no term of the wire grammar (a truncation, a trailing byte, a tag
 outside the grammar, a map key repeated, which ERTS's decoder refuses
 too), and `scratch`, and gives the byte offset of the item it stopped
-at. A frame from the handler that `liberx` refuses ends the program with
+at. `size` and `malformed` name the frame, as the grammar names a
+decode failure, whatever kind the bytes held. A frame from the handler that `liberx` refuses ends the program with
 status 127. A refused startup message ends it before `main` and without
 a line, since a program's descriptors come only from a startup message
 `liberx` has accepted, and it never reads the refused one's `fds` to find
@@ -1237,15 +1247,21 @@ reads the channel's ring is the funnel's existing rule.
 code under test ran:
 
 * **The differential test** runs both checks over one corpus: frames the
-  builders make from values drawn up to every bound; one boundary
-  mutation per rule of the table, each breaking that rule alone (one
+  builders make from values drawn up to every bound; the mutations
+  `test/fixtures/prog_profile_mutations.rb` generates from the
+  protocol's model, one for each rule of each kind at the kind's last
+  value in a base frame, each meeting that rule first in stream order,
+  with the frame-wide rules, a map key repeated in each map and a
+  truncated frame (a list maximum no frame within the bound reaches
+  first, and a kind the base frame does not hold, are named as
+  skipped); hand-written boundary mutations (one
   past a maximum, a missing, unknown or repeated key, two keys out of
   order, `erlang`, an atom every runtime holds, in place of a
   descriptor's case, a repeated capability value, a `dup` of a `dup` or of a number
   absent, invalid UTF-8, a zero byte, an `env` string without a name, a
   relative or unnormalised `cwd`, `total` passed by one, a frame one
   byte over its bound, a byte after the term); and the C fuzz target's
-  corpus. The Erlang side of bytes is the frame bound; then the wire
+  seeds. The Erlang side of bytes is the frame bound; then the wire
   grammar, `erx_etf_next` reading the frame to its end, whose own
   agreement with `binary_to_term/1` is the funnel's differential test;
   then `{Term, Used} = binary_to_term(Bytes, [safe, used])` with `Used`
@@ -1268,6 +1284,12 @@ code under test ran:
   and in order in another. Seeded: the check refusing a big integer must
   fail the capability fixture, and an iterator that ends a list at its
   first segment's end must fail the segmented one.
+* **Iterators and bounds.** A translation unit handing `fds`'s
+  iterator to `argv`'s `next` must fail to compile, and the generated
+  table must fail to compile against an `erx/profile.h` whose depth
+  bound is one less. Seeded: a `next` without its kind check must fail
+  the host driver's check that `argv`'s `next` refuses `fds`'s view,
+  handed over by a cast.
 * **Fuzz targets.** `tools/fuzz/erx_prog_fuzz.c` runs the C check under
   ASan and UBSan, with all the scratch `erx_prog_scratch_bytes` promises
   and with half of it, checks that the first never runs short and that

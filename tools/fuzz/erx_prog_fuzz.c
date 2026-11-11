@@ -49,15 +49,27 @@ check_end(uint32_t left, uint32_t read, bool more)
 }
 
 static void
-read_texts(erx_profile_list_t it, bool env)
+read_argv(erx_prog_argv_iter_t it)
 {
 	erx_profile_text_t t;
 	uint32_t left, n;
 	bool more;
 
-	left = it.left;
-	for (n = 0; (more = env ? erx_prog_env_next(&it, &t) :
-	    erx_prog_argv_next(&it, &t)) && n < left; n++)
+	left = it.view.left;
+	for (n = 0; (more = erx_prog_argv_next(&it, &t)) && n < left; n++)
+		check_text(t);
+	check_end(left, n, more);
+}
+
+static void
+read_env(erx_prog_env_iter_t it)
+{
+	erx_profile_text_t t;
+	uint32_t left, n;
+	bool more;
+
+	left = it.view.left;
+	for (n = 0; (more = erx_prog_env_next(&it, &t)) && n < left; n++)
 		check_text(t);
 	check_end(left, n, more);
 }
@@ -69,7 +81,7 @@ read_signals(erx_prog_signals_iter_t it)
 	uint32_t left, n;
 	bool more;
 
-	left = it.left;
+	left = it.view.left;
 	for (n = 0; (more = erx_prog_signals_next(&it, &number)) && n < left;
 	    n++)
 		;
@@ -77,15 +89,29 @@ read_signals(erx_prog_signals_iter_t it)
 }
 
 static void
-read_readers(erx_profile_list_t it, bool write)
+read_write_readers(erx_prog_write_readers_iter_t it)
 {
 	erx_prog_reader_t r;
 	uint32_t left, n;
 	bool more;
 
-	left = it.left;
-	for (n = 0; (more = write ? erx_prog_write_readers_next(&it, &r) :
-	    erx_prog_read_readers_next(&it, &r)) && n < left; n++)
+	left = it.view.left;
+	for (n = 0; (more = erx_prog_write_readers_next(&it, &r)) && n < left;
+	    n++)
+		;
+	check_end(left, n, more);
+}
+
+static void
+read_read_readers(erx_prog_read_readers_iter_t it)
+{
+	erx_prog_reader_t r;
+	uint32_t left, n;
+	bool more;
+
+	left = it.view.left;
+	for (n = 0; (more = erx_prog_read_readers_next(&it, &r)) && n < left;
+	    n++)
 		;
 	check_end(left, n, more);
 }
@@ -99,11 +125,11 @@ read_read_end(const erx_prog_read_end_t *e)
 	bool more;
 
 	it = e->writers;
-	left = it.left;
+	left = it.view.left;
 	for (n = 0; (more = erx_prog_writers_next(&it, &w)) && n < left; n++)
 		;
 	check_end(left, n, more);
-	read_readers(e->readers, false);
+	read_read_readers(e->readers);
 }
 
 static void
@@ -111,14 +137,14 @@ read_descriptor(const erx_prog_descriptor_t *d)
 {
 	switch (d->which) {
 	case ERX_PROG_DESCRIPTOR_PIPE_WRITE:
-		read_readers(d->u.pipe_write.write_end.readers, true);
+		read_write_readers(d->u.pipe_write.write_end.readers);
 		break;
 	case ERX_PROG_DESCRIPTOR_PIPE_READ:
 		read_read_end(&d->u.pipe_read.read_end);
 		break;
 	case ERX_PROG_DESCRIPTOR_SOCKETPAIR:
 		read_read_end(&d->u.socketpair.read_end);
-		read_readers(d->u.socketpair.write_end.readers, true);
+		read_write_readers(d->u.socketpair.write_end.readers);
 		break;
 	default:
 		break;
@@ -133,13 +159,13 @@ read_start(const erx_prog_start_t *s)
 	uint32_t left, n;
 	bool more;
 
-	read_texts(s->argv, false);
-	read_texts(s->env, true);
+	read_argv(s->argv);
+	read_env(s->env);
 	check_text(s->cwd);
 	read_signals(s->sigmask);
 	read_signals(s->sigignore);
 	it = s->fds;
-	left = it.left;
+	left = it.view.left;
 	for (n = 0; (more = erx_prog_fds_next(&it, &entry)) && n < left; n++)
 		read_descriptor(&entry.descriptor);
 	check_end(left, n, more);

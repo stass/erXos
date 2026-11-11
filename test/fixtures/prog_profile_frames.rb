@@ -188,4 +188,26 @@ module ProgProfileFrames
 
   ALL = [ENCODINGS, CAP_ABOVE_INT64, WRAPPERS_PAST_DEPTH, SEGMENTED, SEGMENTED_OUT_OF_ORDER,
          at_frame_max(:at_frame_max, 0), at_frame_max(:past_frame_max, 1)].freeze
+
+  # A frame of the C fuzz target's seeds beyond ALL (tools/fuzz/erx_prog_target.rb), which
+  # the differential corpus holds too. frame: "start" or "request"; verdict as Fixture's.
+  Seed = Data.define(:name, :frame, :bytes, :verdict)
+
+  # A start frame's descriptors: a pipe's write end and its read end.
+  def self.pipes
+    pairs = ->(map) { map.map { |key, value| [atom(key.to_s), value] } }
+    reader = tuple(small(0), small(103))
+    write_end = map(pairs.call(wend: small(1), ring: small(101), rpage: small(102), size: int(16_384),
+                               readers: list([reader])))
+    writer = tuple(small(1), small(105), small(106), int(65_536), small(107), atom('open'))
+    read_end = map(pairs.call(rix: small(0), lock: small(104), wends: small(1), writers: list([writer]),
+                              readers: list([])))
+    list([tuple(small(0), tuple(atom('pipe'), atom('write'), tuple(small(1), small(2)), write_end)),
+          tuple(small(1), tuple(atom('pipe'), atom('read'), tuple(small(2), small(3)), read_end))])
+  end
+
+  SEEDS = [Seed.new(name: 'pipes', frame: 'start', bytes: start(BASE_PAIRS.merge(fds: pipes)), verdict: 'accept'),
+           Seed.new(name: 'request', frame: 'request',
+                    bytes: frame(tuple(atom('erx_prog'), small(1), small(0), atom('ok'))),
+                    verdict: 'no_case request')].freeze
 end

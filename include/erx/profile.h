@@ -18,9 +18,12 @@
  * fixed array of ERX_PROFILE_DEPTH_MAX levels, one per container of the
  * profile, and a LIST_EXT of no element is read as its tail without a
  * level.  On acceptance it fills the frame's struct: every scalar is read
- * into it, every list stays a view (an erx_profile_list_t) whose
- * erx_profile_next reads one element at a time.  Texts and views point
- * into the frame, which the caller keeps unchanged while it uses them.
+ * into it, every list stays a view (an erx_profile_list_t, wrapped in the
+ * list's own generated iterator type) whose erx_profile_next reads one
+ * element at a time.  A refusal for bytes that are no term (malformed) or
+ * for the frame's size names the frame, as the Erlang grammar's does.
+ * Texts and views point into the frame, which the caller keeps unchanged
+ * while it uses them.
  * The check is pure: it reads only its arguments and writes only the
  * scratch, the struct and the refusal.
  */
@@ -31,6 +34,8 @@
 
 #define ERX_PROFILE_DEPTH_MAX	16
 #define ERX_PROFILE_TOTALS_MAX	8
+/* A map's keys or a union's cases: each takes a bit of a level's mask. */
+#define ERX_PROFILE_KEYS_MAX	64
 #define ERX_PROFILE_NONE	UINT16_MAX
 
 typedef struct erx_profile erx_profile_t;
@@ -198,8 +203,8 @@ struct erx_profile {
 };
 
 /*
- * A list's view: where its next element starts and how many are left.
- * Only erx_profile.c changes the fields.
+ * A list's view: which list of which profile it is, where its next element
+ * starts and how many are left.  Only erx_profile.c changes the fields.
  */
 struct erx_profile_list {
 	const erx_profile_t	*profile;
@@ -210,6 +215,7 @@ struct erx_profile_list {
 	uint32_t		 string_left;
 	uint32_t		 segment_left;	/* elements left in a LIST_EXT segment */
 	uint32_t		 left;		/* elements left in the list */
+	uint16_t		 kind;		/* the list's own kind */
 	uint16_t		 element;
 };
 
@@ -231,8 +237,14 @@ bool	erx_profile_check(const erx_profile_t *profile, uint16_t frame,
 	    const uint8_t *bytes, size_t len, void *scratch, size_t scratch_len,
 	    uint8_t *slot, void *out, erx_profile_refusal_t *refusal);
 
-/* Reads the next element of an accepted list into *element; false at the end. */
-bool	erx_profile_next(erx_profile_list_t *list, void *element);
+/*
+ * Reads the next element of an accepted list into *element, the C value of
+ * the list's element kind.  False at the list's end, and for a view whose
+ * profile and list kind are not the ones the typed next names, so a view
+ * handed to another list's next is never read as that list.
+ */
+bool	erx_profile_next(const erx_profile_t *profile, uint16_t kind,
+	    erx_profile_list_t *list, void *element);
 
 const char *erx_profile_name(const erx_profile_t *profile, uint16_t name);
 const char *erx_profile_reason_name(erx_profile_reason_t reason);

@@ -13,7 +13,8 @@
  * as malformed); VERDICT is "refused REASON KIND OFFSET", or for an
  * accepted start frame "accepted HEX", the frame written again from the
  * struct and every accessor with erx_etf's writer, which the test decodes
- * and compares with the frame's own term.
+ * and compares with the frame's own term, or "accepted crossed" when
+ * argv's next reads the frame's fds view.
  */
 
 #include <stdio.h>
@@ -59,7 +60,7 @@ put_signals(erx_etf_writer_t *w, erx_prog_signals_iter_t it)
 	int32_t number;
 	unsigned i;
 
-	erx_etf_put_list(w, it.left);
+	erx_etf_put_list(w, it.view.left);
 	while (erx_prog_signals_next(&it, &number)) {
 		for (i = 0; i < erx_prog_profile.nsignals; i++) {
 			if (erx_prog_profile.signals[i].number == number)
@@ -72,12 +73,23 @@ put_signals(erx_etf_writer_t *w, erx_prog_signals_iter_t it)
 }
 
 static void
-put_texts(erx_etf_writer_t *w, erx_profile_list_t it, bool env)
+put_argv(erx_etf_writer_t *w, erx_prog_argv_iter_t it)
 {
 	erx_profile_text_t t;
 
-	erx_etf_put_list(w, it.left);
-	while (env ? erx_prog_env_next(&it, &t) : erx_prog_argv_next(&it, &t))
+	erx_etf_put_list(w, it.view.left);
+	while (erx_prog_argv_next(&it, &t))
+		put_text(w, t);
+	erx_etf_put_nil(w);
+}
+
+static void
+put_env(erx_etf_writer_t *w, erx_prog_env_iter_t it)
+{
+	erx_profile_text_t t;
+
+	erx_etf_put_list(w, it.view.left);
+	while (erx_prog_env_next(&it, &t))
 		put_text(w, t);
 	erx_etf_put_nil(w);
 }
@@ -91,17 +103,32 @@ put_pipe_end(erx_etf_writer_t *w, const erx_prog_pipe_end_t *e)
 }
 
 static void
-put_readers(erx_etf_writer_t *w, erx_profile_list_t it, bool write)
+put_reader(erx_etf_writer_t *w, const erx_prog_reader_t *r)
+{
+	erx_etf_put_tuple(w, 2);
+	put_u64(w, r->rix);
+	put_u64(w, r->cap);
+}
+
+static void
+put_write_readers(erx_etf_writer_t *w, erx_prog_write_readers_iter_t it)
 {
 	erx_prog_reader_t r;
 
-	erx_etf_put_list(w, it.left);
-	while (write ? erx_prog_write_readers_next(&it, &r) :
-	    erx_prog_read_readers_next(&it, &r)) {
-		erx_etf_put_tuple(w, 2);
-		put_u64(w, r.rix);
-		put_u64(w, r.cap);
-	}
+	erx_etf_put_list(w, it.view.left);
+	while (erx_prog_write_readers_next(&it, &r))
+		put_reader(w, &r);
+	erx_etf_put_nil(w);
+}
+
+static void
+put_read_readers(erx_etf_writer_t *w, erx_prog_read_readers_iter_t it)
+{
+	erx_prog_reader_t r;
+
+	erx_etf_put_list(w, it.view.left);
+	while (erx_prog_read_readers_next(&it, &r))
+		put_reader(w, &r);
 	erx_etf_put_nil(w);
 }
 
@@ -118,7 +145,7 @@ put_write_end(erx_etf_writer_t *w, const erx_prog_write_end_t *e)
 	put_atom(w, "size");
 	put_u64(w, e->size);
 	put_atom(w, "readers");
-	put_readers(w, e->readers, true);
+	put_write_readers(w, e->readers);
 }
 
 static void
@@ -136,7 +163,7 @@ put_read_end(erx_etf_writer_t *w, const erx_prog_read_end_t *e)
 	put_u64(w, e->wends);
 	put_atom(w, "writers");
 	it = e->writers;
-	erx_etf_put_list(w, it.left);
+	erx_etf_put_list(w, it.view.left);
 	while (erx_prog_writers_next(&it, &wr)) {
 		erx_etf_put_tuple(w, 6);
 		put_u64(w, wr.wend);
@@ -149,7 +176,7 @@ put_read_end(erx_etf_writer_t *w, const erx_prog_read_end_t *e)
 	}
 	erx_etf_put_nil(w);
 	put_atom(w, "readers");
-	put_readers(w, e->readers, false);
+	put_read_readers(w, e->readers);
 }
 
 static const char *
@@ -218,6 +245,25 @@ put_descriptor(erx_etf_writer_t *w, const erx_prog_descriptor_t *d)
 	}
 }
 
+/*
+ * Whether argv's next refuses fds's view, handed to it as only a cast can
+ * hand it.  element holds either list's element, so a next that skipped
+ * its kind check would write fds's entry within it.
+ */
+static bool
+crossed_refused(const erx_prog_start_t *s)
+{
+	union {
+		erx_profile_text_t	text;
+		erx_prog_fd_entry_t	entry;
+	} element;
+	erx_prog_fds_iter_t fds;
+
+	fds = s->fds;
+	return (!erx_prog_argv_next((erx_prog_argv_iter_t *)(void *)&fds,
+	    &element.text));
+}
+
 /* The start frame again, from the struct and its iterators. */
 static bool
 put_start(const erx_prog_start_t *s, uint8_t *out, size_t cap, size_t *len)
@@ -238,9 +284,9 @@ put_start(const erx_prog_start_t *s, uint8_t *out, size_t cap, size_t *len)
 	put_atom(&w, "pgid");
 	put_u64(&w, s->pgid);
 	put_atom(&w, "argv");
-	put_texts(&w, s->argv, false);
+	put_argv(&w, s->argv);
 	put_atom(&w, "env");
-	put_texts(&w, s->env, true);
+	put_env(&w, s->env);
 	put_atom(&w, "cwd");
 	put_text(&w, s->cwd);
 	put_atom(&w, "spawn");
@@ -257,7 +303,7 @@ put_start(const erx_prog_start_t *s, uint8_t *out, size_t cap, size_t *len)
 	put_u64(&w, s->data_area.data_slots);
 	put_atom(&w, "fds");
 	fds = s->fds;
-	erx_etf_put_list(&w, fds.left);
+	erx_etf_put_list(&w, fds.view.left);
 	while (erx_prog_fds_next(&fds, &entry)) {
 		erx_etf_put_tuple(&w, 2);
 		put_u64(&w, entry.fd);
@@ -351,6 +397,10 @@ main(int argc, char **argv)
 			fprintf(answers, "refused %s %s %zu\n",
 			    erx_profile_reason_name(refusal.reason),
 			    erx_prog_kind_name(refusal.kind), refusal.offset);
+			continue;
+		}
+		if (strcmp(kind, "start") == 0 && !crossed_refused(&start)) {
+			fprintf(answers, "accepted crossed\n");
 			continue;
 		}
 		if (strcmp(kind, "start") != 0 ||
