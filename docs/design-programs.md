@@ -487,8 +487,12 @@ each capability value once; each signal at most once in each set; and at
 most 192 KiB in all. A spawn whose strings pass 128 KiB fails with `E2BIG`
 in its planner. The grammar and bounds are a frame profile of the ABI
 file ([design-files.md](design-files.md#interfaces)), from which `liberx`'s
-decoder is generated; the decoder has a fuzz target. A message that fails
-it ends the program with status 127 before `main`.
+decoder is generated; the decoder has a fuzz target
+([design-abi.md](design-abi.md#program-protocol)). The profile holds each
+descriptor number, each signal of a set, and each index and write end
+number of a pipe end's lists to one appearance by keeping those lists in
+ascending order, which the generated builders give them. A message that
+fails it ends the program with status 127 before `main`.
 
 ### The program record
 
@@ -611,7 +615,8 @@ request the handler either refuses or answers from the session's policy.
 ### The program protocol
 
 A program and its handler exchange frames of one grammar on the program's
-channel, a frame profile of the ABI file with version 1, which both sides
+channel, a frame profile of the ABI file with version 1
+([design-abi.md](design-abi.md#program-protocol)), which both sides
 decode with generated decoders that have fuzz targets. A request has the
 form `{erx_prog, 1, Slot, Request}`, where `Slot`, from 0 to 15, is the
 reply slot the requesting thread waits in, each slot holding one request
@@ -653,8 +658,8 @@ unanswered, and the handler makes them at its `{exec_commit}`
 with `SIGCHLD` ignored reaps in the same way each ended child its startup
 message names.
 
-A program also sends **notices**, frames its handler takes without an
-answer; the thread that makes a change sends its notice in the same step,
+A program also sends **notices**, as `{erx_prog, 1, Notice}` without a
+slot, frames its handler takes without an answer; the thread that makes a change sends its notice in the same step,
 under the outbound lane's lock, so a thread that stops between the change
 and its send never takes the notice with it:
 

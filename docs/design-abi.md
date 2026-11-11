@@ -982,6 +982,317 @@ Both codecs carry the protocol hash: SHA-256 over one line per source,
 order. The generation plan records terminal.txt and its Unicode data among its inputs, so
 a change to any of them regenerates both codecs.
 
+### Program protocol
+
+`protocols/prog.txt` holds `protocol erx_prog`, the frame profile of a
+program's channel: the startup message and the requests, replies,
+reports and notices of the program protocol
+([design-programs.md](design-programs.md#the-startup-message),
+[design-programs.md](design-programs.md#the-program-protocol),
+[design-pipes.md](design-pipes.md#the-program-protocol)), and the root
+limits named `prog_*`, its bounds. It is written in the declaration
+language of `protocols/9p.txt`, the file protocol's profile, and
+`tools/lib/erx/abi_protocol.rb` reads both into one model. Two fixed
+checks read the one table: `liberx`'s C check, which a program runs on
+every frame from its handler, the startup message first, and the Erlang
+grammar `erx_prog_grammar`, which the handler runs on every frame from its
+program and the command image on its startup message. Each takes a whole
+frame and accepts it or names one refusal; no field of a frame is read
+before its check has accepted all of it.
+
+| Member | Meaning |
+| --- | --- |
+| `version N` | the version every frame carries as its second element |
+| `reader c` | the generator also emits the C check and accessors; the members that describe 9P2000.L's bytes (`length`, `packed`, `local`, `errors`, `operation`, `writes`, `check`) fail in such a protocol |
+| `frame NAME to\|from TAG [slot] KIND` | a frame to the program or from it: `{TAG, Version, Value}`, or `{TAG, Version, Slot, Value}` with `slot`, `Slot` from 0 to 15 |
+| `integer NAME BASE [in MIN MAX \| values N...] [except N] [unique] [refers LIST]` | an integer of `u8`, `u16`, `u32` or `u64` within the range or among the values given; `unique`: no two values of the kind in one frame are equal, for a kind that is never itself a list's element; `refers LIST`: the value is the first field of an element of the frame's `LIST` that holds no `refers` value itself |
+| `text NAME max N [utf8] [refuse nul] [assign] [path] [sum TOTAL]` | a binary of at most N bytes; `utf8`, valid UTF-8 as RFC 3629 defines it; `refuse nul`, no zero byte; `assign`, at least one byte before its first `=`; `path`, absolute and normalised: a leading `/`, no empty, `.` or `..` component, and a trailing `/` only in `/` itself; `sum TOTAL`, its length plus one counts towards `TOTAL` |
+| `total NAME MAX` | at most MAX in one frame over the texts marked `sum NAME`: for `argv` and `env`, their bytes with the NUL that C adds to each, as FreeBSD counts `ARG_MAX` |
+| `tuple NAME KIND...` | a tuple of the kinds in order |
+| `list NAME KIND max N [ascending]` | a proper list of at most N elements; `ascending`, strictly increasing in Erlang's term order of each element, or of its first field when it is a tuple, which is an integer or an atom |
+| `map NAME`, with `field NAME KIND` and `optional NAME KIND` beneath | a map whose keys are the atoms named: each `field` present, each `optional` present or absent, no other key |
+| `union NAME`, with `case ATOM [=ATOM...] [KIND...]` beneath | a case without fields is its atom; one with fields is a tuple of its atom, its literal atoms (`=ATOM`) and its fields; a tuple's arity and leading atoms select its case, whose C name joins its atoms with `_` |
+| `boolean`, `signal` | built in: `true` or `false`; a signal's protocol name ([design-programs.md](design-programs.md#signal-numbers)), the atom `sig` followed by its name in `abi/signals.txt`, as `sigint` or `'sigrtmin+1'`, for each signal a program may name and never an alias or a reserved number, the names `erx_abi_signals` lists, whose C value is the signal's number |
+
+A bound is a number or a limit's name. A descriptor number, a signal of a
+set, a read end's index and a write end's number appear at most once
+because each list that names them is `ascending`, a signal set in the
+order of its atoms' spelling, not of the signals' numbers: no uniqueness rule and
+no table of seen keys is needed, and the generated builders, which sort
+those lists, keep the session from having to. Only a capability value,
+which appears in many places of one frame, needs `unique`, and only
+`{dup, Fd}` needs `refers`, which refuses a `dup` of a `dup` and a `dup`
+of a number the message lacks.
+
+**Encodings.** Both checks judge the value, not its encoding, within the
+channel's wire grammar: the tags of the funnel's grammar
+([design-domains.md](design-domains.md#the-funnel)), which `erx_etf_next`
+reads, so a frame has no compressed term and its atoms are in UTF-8
+only. Within that grammar the C check accepts every encoding that
+`binary_to_term/1` decodes to the same term, and the Erlang grammar sees
+only the decoded term: an integer in any of its encodings, a `u64` above
+2^63 - 1 as a big integer; a list as a list, `[]` or a string of bytes; a
+binary as a binary or a bitstring of whole bytes; an atom in either of
+its tags; a map's pairs in any order. A frame is at most
+`prog_frame_max` bytes, 192 KiB, a bound which the C check, the port
+driver's copy and the builders hold to the encoded bytes.
+
+Two list encodings do not follow the nesting of the term they decode
+to, and the C check and every iterator read them as ERTS's decoder
+does. A `LIST_EXT` of no element is its tail: wherever a term is read, the reader takes the
+tail in its place, in a loop and without a level of its stack, so any
+number of such wrappers around any term leaves the term and its depth
+unchanged. And one proper list may span segments: a `LIST_EXT`'s tail
+continues the list when it is another `LIST_EXT` or a `STRING_EXT`, whose
+bytes are integer elements, and ends it when it is `NIL_EXT`; any other
+tail is an improper list, refused as `shape`. A list's length, held to
+its maximum, and its `ascending` order count across all its segments.
+
+The startup message's profile, the part with the members above:
+
+```
+limit prog_frame_max u32 196608
+limit prog_args_max u32 131072
+limit prog_path_max u32 4096
+limit prog_fds_max u32 1024
+
+protocol erx_prog
+  version 1
+  reader c
+  integer fd u16 in 0 1023
+  integer dup_target u16 in 0 1023 refers fds
+  integer cap u64 except @cap_null unique
+  integer open u16
+  integer lane_size u32 values 16384 65536
+  total args @prog_args_max
+  text arg max @prog_args_max utf8 refuse nul sum args
+  text env_var max @prog_args_max utf8 refuse nul assign sum args
+  text cwd max @prog_path_max utf8 refuse nul path
+  list signals signal max 128 ascending
+  union descriptor
+    case pipe =write pipe_end write_end
+    case pipe =read pipe_end read_end
+    case socketpair pipe_end read_end pipe_end write_end
+    case file open access
+    case tty open access
+    case dir open
+    case socket open
+    case dup dup_target
+    case null
+  tuple fd_entry fd descriptor
+  list fds fd_entry max @prog_fds_max ascending
+  # pid, access, pipe_end, write_end, read_end and image as the
+  # programs and pipes designs give them
+  map start
+    field pid pid
+    ...
+    field fds fds
+    optional image image
+  union request
+  frame start to erx_start start
+  frame request from erx_prog slot request
+```
+
+`request` has no case until a package adds one, so every request frame
+is refused. A pipe's number, an end's number and a write end's number,
+`pos_integer()` in the programs and pipes designs, are `u32` from 1, as
+the pipe server's C layouts hold them
+([design-pipes.md](design-pipes.md#the-pipe-servers-records)), and a read
+end's index is 0 to 63; the file's header comment states these readings,
+as `9p.txt`'s does.
+
+Generation fails for a cycle among a protocol's kinds or a nesting
+deeper than 16, the C check's stack; two cases of one union that the
+same arity and leading atoms select, or whose C names collide; an
+`ascending` list whose elements have no integer or atom key; a `unique`
+kind that is a list's element; a `refers`
+to a list whose elements are not tuples, whose key ranges over more than
+4,096 values, or which can occur twice in one frame; a range outside its
+base or with MIN above MAX; a repeated value of `values`; a `sum` that
+names no `total`; and two frames of one direction that the same tag and
+slot form select.
+
+**The C check.** `liberx/erx_profile.c`, with `include/erx/profile.h`,
+is the one interpreter of the tables the generator emits for a protocol
+with `reader c`; from `prog.txt` it emits the table and the typed
+functions over it, `include/erx/prog_profile.h` and
+`liberx/generated/prog_profile.c`:
+
+```c
+size_t	erx_prog_scratch_bytes(size_t len);
+bool	erx_prog_check_start(const uint8_t *frame, size_t len,
+	    void *scratch, size_t scratch_len, erx_prog_start_t *start,
+	    erx_profile_refusal_t *refusal);
+bool	erx_prog_fds_next(erx_prog_fds_iter_t *it,
+	    erx_prog_fd_entry_t *entry);
+const char *erx_prog_kind_name(uint16_t kind);
+```
+
+`erx_prog_check_FRAME` walks the frame once with `erx_etf_next`, never
+recursing: its stack is a fixed array of the profile's depth, which the
+generator computes from the acyclic table, one level per container of the
+profile and none for a wrapper of the wire, and each level keeps what its
+container needs, the map keys seen as a bit mask, a list's last key, a
+union's remaining candidates. The scratch holds only the values of
+`unique` kinds, which it sorts in place once the walk ends, and two
+bitmaps over the key range of each `refers`, one of the numbers referred
+to and one of the targets a reference may name, compared once the walk
+ends. `erx_prog_scratch_bytes(len)` is 7 bytes of alignment, 8 bytes for
+every two bytes of `len`, and the bitmaps, 2 x ceil(range / 8) bytes for
+each `refers`, computed with checked arithmetic and `SIZE_MAX` when it
+overflows, as `erx_etf_scratch_bytes` is. It always suffices because a
+`unique` kind is never a list's element: each of its values is then an
+item of its own, at least two bytes (`SMALL_INTEGER_EXT`), and never a
+byte of a `STRING_EXT`, so a frame of `len` bytes holds at most `len / 2`
+of them. The scratch grows with the frame, not with the worst case; the
+check aligns its arrays inside it, and with less than it needs refuses
+with `scratch` and writes nothing past `scratch_len`. The check
+is pure: it reads only its arguments and writes only the scratch and its
+two outputs, so it builds and is tested on the host. A frame to the
+program is checked by `erx_prog_check_to_program`, which takes the
+request each slot holds, as the file protocol's `decode_reply/2` takes
+its request; a reply on a slot that holds none is refused.
+
+On acceptance the check fills the frame's struct. Every scalar is read
+into it: an integer as the C type of its base, a `boolean`
+as `bool`, a union of atoms or a signal as its generated enumeration or
+number, a text as an `erx_profile_text_t`, a pointer into the frame and a
+length, never NUL-terminated, which `liberx` copies where C needs a
+string (`argv`, `environ`, the working directory). An `optional` key has
+a `has_` flag. A tuple, map or union nested in a struct is read into a
+struct of its own; a list alone stays a view, an iterator whose `next`
+reads one element into its struct. So the structs are small and fixed,
+whatever the frame holds, and no worst case sizes any of them. Since
+every iterator comes from a struct the check filled, or from an element
+read through one, a read never meets a byte the check has not accepted,
+and `next` fails only at the list's end. Each view borrows the frame,
+which `liberx`'s private copy keeps unchanged while it is used.
+
+**The Erlang grammar.** `tools/lib/erx/abi_emit_protocol.rb` emits
+`erx_prog_grammar` as it emits `erx_9p_grammar`, preloaded, calling only
+BIFs: `check_start/1`, `check_from_program/1` and `check_to_program/2`,
+whose second argument is the request each busy slot holds, each answering
+`ok` or `{error, {Reason, Kind}}`, total over any term, making no atom and
+walking no list past its maximum; and a builder per frame, which sorts
+each `ascending` list with `lists:sort/1`, keeping a repeated key so the
+check still refuses it, then checks the frame and its encoded size and
+returns it or the refusal. A spawn's planner answers with `E2BIG` every
+refusal of a startup message that the strings' size causes: `size`;
+`length` of an `arg`, an `env_var` or a list of them; and `total` of
+`args`.
+
+**Refusals.** Both checks name a refusal by the same `Reason` and `Kind`,
+the kind being the profile's name of the type being checked: `size`, a
+frame over its bound; `shape`, a term of another type or arity, or a
+tag other than the frame's; `version`; `range`; `length`, a text or list
+past its maximum; `utf8`; `text`, a zero byte, an `assign` or a `path`
+rule; `key`, a key missing or unknown; `no_case`; `order`;
+`unique`; `refers`; and `total`. The C check adds `malformed`, bytes that
+are no term of the wire grammar (a truncation, a trailing byte, a tag
+outside the grammar, a map key repeated, which ERTS's decoder refuses
+too), and `scratch`, and gives the byte offset of the item it stopped
+at. A frame from the handler that `liberx` refuses ends the program with
+status 127. A refused startup message ends it before `main` and without
+a line, since a program's descriptors come only from a startup message
+`liberx` has accepted, and it never reads the refused one's `fds` to find
+an error stream. Any later frame refused ends it with one line on its
+standard error, `erx: FRAME frame refused: REASON in KIND at byte N`,
+made of the table's names and a number only, so no byte of the frame
+reaches a terminal. A frame from a program that the handler's grammar refuses
+ends the program as a fault ends it, with `SIGSYS`.
+
+**Atoms.** A frame from a program becomes a term in one place: the port
+driver `erx_program`'s input task, after the funnel's channel mode, by
+ERTS's decoder `erts_decode_ext` with `ERTS_DIST_EXT_BTT_SAFE`, which
+refuses an atom the runtime does not hold instead of making it
+([design-runtime.md](design-runtime.md#programs-as-ports)). Every atom
+the profile names, its keys, cases, literals and signal names, is a
+literal of the preloaded grammar module, so it exists in every runtime
+image before any program runs and a frame in the grammar always decodes.
+The safe decode is no list of the protocol's atoms: it refuses an atom
+the runtime does not hold, and the grammar refuses an atom the runtime
+holds but the profile does not name; either ends the program with
+`SIGSYS`. The grammar makes no atom of its own. The chokepoint is the safe decode, not a check
+of the bytes: `erx_etf_check` cannot know the runtime's atom table, and
+the C check does not run on this path. Its build check, a rule of
+`tools/lib/erx/chokepoint_rules/`, allows a call of `erts_decode_ext` in
+erXos's own ERTS sources only in the driver's one decode function and
+only with the safe flag named in the call; a fixture with a second call,
+and one with the flag left out, must each fail it. That no other code
+reads the channel's ring is the funnel's existing rule.
+
+**Tests.** Each check's passing case has a seeded fault that proves the
+code under test ran:
+
+* **The differential test** runs both checks over one corpus: frames the
+  builders make from values drawn up to every bound; one boundary
+  mutation per rule of the table, each breaking that rule alone (one
+  past a maximum, a missing, unknown or repeated key, two keys out of
+  order, `erlang`, an atom every runtime holds, in place of a
+  descriptor's case, a repeated capability value, a `dup` of a `dup` or of a number
+  absent, invalid UTF-8, a zero byte, an `env` string without a name, a
+  relative or unnormalised `cwd`, `total` passed by one, a frame one
+  byte over its bound, a byte after the term); and the C fuzz target's
+  corpus. The Erlang side of bytes is the frame bound; then the wire
+  grammar, `erx_etf_next` reading the frame to its end, whose own
+  agreement with `binary_to_term/1` is the funnel's differential test;
+  then `{Term, Used} = binary_to_term(Bytes, [safe, used])` with `Used`
+  equal to the frame's size; then the grammar. A refusal before the
+  grammar, a decode failure or a `Used` short of the frame counts as
+  `malformed`. Verdicts agree on every input, and `Reason` and `Kind` on
+  every single-rule mutation. Seeded: the generated C table with `cwd`'s
+  maximum raised by one, the grammar with its `ascending` test removed,
+  and the Erlang side ignoring `Used`, must each fail the test.
+* **The round trip.** A host tool reads each accepted frame through
+  every generated accessor and writes it again with `erx_etf`'s writer;
+  its decoding equals the Erlang term exactly. Seeded: each text view one
+  byte short must fail it.
+* **Fixtures.** Hand-encoded frames in `test/fixtures/` with their
+  expected fields written by hand: each encoding above, a capability
+  value above 2^63 - 1, map pairs out of order, a startup message at
+  exactly 192 KiB, a field behind more empty `LIST_EXT` wrappers than the
+  profile's depth, and a descriptor list in three `LIST_EXT` segments
+  whose last tail is an empty `STRING_EXT`, out of order across a segment boundary in one copy
+  and in order in another. Seeded: the check refusing a big integer must
+  fail the capability fixture, and an iterator that ends a list at its
+  first segment's end must fail the segmented one.
+* **Fuzz targets.** `tools/fuzz/erx_prog_fuzz.c` runs the C check under
+  ASan and UBSan, with all the scratch `erx_prog_scratch_bytes` promises
+  and with half of it, checks that the first never runs short and that
+  `scratch` is the only refusal the second adds, and reads every accepted
+  frame through every accessor. `erx_prog_grammar`'s target follows `erx_9p_grammar`'s:
+  terms near the grammar, no exception, the atom count unchanged, and a
+  copy whose `cwd` bound is one larger, which must fail.
+* **Startup.** A program given a startup message with a relative `cwd`
+  ends with status 127 before `main`, writing nothing. Seeded: `liberx`
+  with the check skipped must fail the test by reaching `main`.
+* **`E2BIG`.** A spawn with one argument of 131,072 bytes, within its
+  own maximum but past `total` by its NUL, fails with `E2BIG`. Seeded: a
+  planner that maps `size` alone must fail it.
+* **Atoms.** A program's frame with a fresh atom leaves the session's
+  atom count unchanged and ends the program with `SIGSYS`. Seeded: the
+  driver with the safe flag removed must fail it, and fails the build
+  check too. An atom the runtime holds but the profile does not name is
+  the grammar's to refuse, and the differential test's mutations hold
+  one.
+
+**Extension.** Each request with its reply, report and notice joins
+`prog.txt` with the package that first uses it: a request as a case of
+`request` with a `reply` line naming its reply union, a report and a
+notice as cases of `report` and `notice`, under `frame report to
+erx_prog report` and `frame notice from erx_prog notice`, both
+`{erx_prog, 1, Value}` without a slot; the `exec` and
+`fork` keys of the startup message join with `exec` and `fork`. Error
+names join with the first reply that carries one, from the ABI file's
+errno table, as signal names come from its signal table. A new member
+of the declaration language, or a use of one that generation refuses,
+such as a `unique` list element, joins only with the first frame that
+needs it, with its C and Erlang checks, a boundary mutation and a seeded
+fault, as each member above has, and, when the scratch holds what it
+adds, the bound in input bytes that keeps `erx_prog_scratch_bytes`
+sufficient. The file protocol may use the new members; nothing obliges
+it to.
+
 ## Numeric assignment and versions
 
 The declaration source contains every assignment literally. Generation
@@ -1840,6 +2151,7 @@ The output families have explicit locations, shown relative to `build/gen/`:
 | `fuzz/generated/` | entry points invoking production readers |
 | `web/src/generated/` | the web client's TypeScript: `web.txt`'s types, codec, limits and hash; `ui.txt`'s tables and the reader and writer of its binary form; the inspection schema's kinds, attribute names, units, stopgap reporters and `present` marks ([design-web.md](design-web.md#the-client)) |
 | `erlang/apps/erx_display/src/erx_draw_codec.erl`, `include/erx/draw_codec.h`, `display/generated/erx_draw_codec.c` | the draw protocol's codec and its C twin |
+| `otp/erts/preloaded/src/erx_prog_grammar.erl`, `include/erx/prog_profile.h`, `liberx/generated/prog_profile.c` | the program protocol's Erlang grammar, and the table and typed accessors of its C check |
 | `docs/generated/abi-reference.md` | signatures, assignments, fields, bounds and mapping tables |
 
 Independent raw-byte fixtures live in `test/fixtures/` and do not derive

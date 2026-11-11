@@ -468,7 +468,12 @@ across a wait.
 The records are the truth about every pipe of the session; `erx_pipe:step/2`
 computes every change from them and an event, and the pipe server applies
 the actions it returns ([The pipe server](#the-pipe-server)). The lock
-page's `wends` is `next_wend - 1`, stored at each write end's creation. A
+page's `wends` is `next_wend - 1`, stored at each write end's creation.
+A pipe's number, an end's number and a write end's number are 32-bit and
+start at 1, as the lock page and `erx_pipe_end` hold them, and none is
+reused: `erx_pipe:step/2` refuses a pipe or an end that would need a
+number past 2^32 - 1, as it refuses one past the session's quota, with
+`ENFILE`, and never wraps. A
 writer that is gone stays in the records, with the read ends that have
 not yet reported its lane drained, until that list is empty; then the
 pipe server closes its capabilities to the lane and forgets the write end.
@@ -1135,9 +1140,10 @@ executor never does.
 Messages between a program and its handler on the program's channel,
 part of the program protocol's frame profile in the ABI file
 ([design-programs.md](design-programs.md#the-program-protocol)). A
-**notice** is a frame from a program that its handler takes without an
-answer, and a **report** a frame from the handler that the program takes
-without an answer; both travel on the channel in order and without loss:
+**notice**, `{erx_prog, 1, Notice}`, is a frame from a program that its
+handler takes without an answer, and a **report**, `{erx_prog, 1,
+Report}`, a frame from the handler that the program takes without an
+answer; both travel on the channel in order and without loss:
 
 | Message | Kind | Meaning | Answer |
 | --- | --- | --- | --- |
