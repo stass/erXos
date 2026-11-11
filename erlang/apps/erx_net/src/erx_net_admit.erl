@@ -38,15 +38,25 @@ calls of a grant, a connection's reservation and release of its buffers
 `counts` (erx_net_grant:counts/1), are admitted only bare and from a process of this node,
 whatever the grantee.
 
-**Sockets.** request/3 takes a message a TCP connection received, for its socket process
-`SockProc`, whose grantee's messages arrive by `Origin`, bare or enveloped as above.
-`Msg` must be `{erx_net, SockProc, Body}` from that very socket process; anything else,
-an envelope of another domain included, is `unknown`, for the socket to drop and count,
-and no reply goes to a party that is not its socket process. `Body` must be one of the
-protocol's requests: `{credit, Bytes}` with `Bytes` from 1 to 64 MiB, or `{call, N,
-Request}` with `N` a request count and `Request` one of `{send, Piece}` (a binary of at
-most 64 KiB), `{shutdown, How}`, `close`, `{setopts, [{nodelay, Boolean}]}`, `{getopts,
-[nodelay]}`, `sockname` or `peername`. A body of any other shape is refused (`shape`).
+**Sockets.** request/4 takes a message a socket received, for its socket process
+`SockProc`, whose grantee's messages arrive by `Origin`, bare or enveloped as above; the
+socket's kind, `tcp` for a connection, `udp` for a datagram socket, `icmp` for an echo
+socket, names the requests it takes. `Msg` must be `{erx_net, SockProc, Body}` from that
+very socket process; anything else, an envelope of another domain included, is
+`unknown`, for the socket to drop and count, and no reply goes to a party that is not its
+socket process. `Body` must be `{credit, Bytes}` with `Bytes` from 1 to 64 MiB, or
+`{call, N, Request}` with `N` a request count and `Request` one of its kind's requests:
+
+* `tcp`: `{send, Piece}` (a binary of at most 64 KiB), `{shutdown, How}`, `close`,
+  `{setopts, [{nodelay, Boolean}]}`, `{getopts, [nodelay]}`, `sockname` or `peername`;
+* `udp`: `{send_to, Ip, Port, Data}` with an IPv4 address tuple, a port and a binary of
+  at most 65,527 bytes, the largest UDP payload; `{send, Data}` to the connected peer;
+  `{connect, Ip, Port}` with a port from 1; `sockname` or `close`;
+* `icmp`: `{echo_send, Ip, Seq, Ttl, Data}` with an IPv4 address tuple, a sequence
+  number from 0 to 65535, a TTL from 1 to 255 or `default`, and a binary of at most
+  65,507 bytes; or `close`.
+
+A body of any other shape, or a request of another kind, is refused (`shape`).
 
 **The mint.** mint/2 takes a message the network service's mint received: only
 `{erx_facet_mint, Tag, net, Grantee, Limits}` in the system domain's envelope, with a
@@ -57,11 +67,15 @@ The operation schema's generator will produce these checks from `abi/services/ne
 until it exists they are written here with its signatures.
 """.
 
--export([request/2, request/3, mint/2, domain/1]).
+-export([request/2, request/4, mint/2, domain/1]).
 
--export_type([origin/0, request/0, grant_request/0]).
+-export_type([origin/0, kind/0, request/0, grant_request/0]).
 
 -define(PIECE, 65536).
+%% The largest UDP payload (an IPv6 jumbogram aside) and the largest ICMP echo data of
+%% an IPv4 datagram: 65535 less the IPv6 or IPv4 header and the UDP or echo header.
+-define(MAX_UDP, 65527).
+-define(MAX_ECHO, 65507).
 -define(MAX_OPTS, 64).
 %% The longest timer erlang:start_timer/3 takes, in milliseconds.
 -define(MAX_TIMEOUT, 4294967295).
@@ -84,11 +98,17 @@ until it exists they are written here with its signatures.
                        | {reserve_buffer, reference(), snd | rcv, non_neg_integer()}
                        | {release_buffers, reference()} | counts.
 
--doc "A socket protocol request, as request/3 admits it.".
+-doc "A socket's kind: a TCP connection, a UDP datagram socket or an ICMP echo socket.".
+-type kind() :: tcp | udp | icmp.
+
+-doc "A socket protocol request, as request/4 admits it.".
 -type request() :: {credit, pos_integer()}
                  | {call, non_neg_integer(),
                     {send, binary()} | {shutdown, read | write | read_write} | close
-                    | {setopts, [{nodelay, boolean()}]} | {getopts, [nodelay]} | sockname | peername}.
+                    | {setopts, [{nodelay, boolean()}]} | {getopts, [nodelay]} | sockname | peername
+                    | {send_to, inet:ip4_address(), inet:port_number(), binary()}
+                    | {connect, inet:ip4_address(), 1..16#ffff}
+                    | {echo_send, inet:ip4_address(), 0..16#ffff, 1..255 | default, binary()}}.
 
 -doc """
 Takes `Message`, received by the grant of `Grantee`: the call it carries with its caller,
@@ -177,35 +197,45 @@ mint(_System, _Message) ->
     unknown.
 
 -doc """
-Takes `Message`, received by a socket whose socket process is `SockProc` (`none` once it
-has none) and whose grantee's messages arrive by `Origin`.
+Takes `Message`, received by a socket of kind `Kind` whose socket process is `SockProc`
+(`none` once it has none) and whose grantee's messages arrive by `Origin`.
 """.
--spec request(origin(), pid() | none, term()) -> {ok, request()} | unknown | {refused, shape}.
-request(local, SockProc, {erx_net, SockProc, Body}) when is_pid(SockProc) ->
-    body(Body);
-request(Origin, SockProc, {erx_origin, D, {erx_net, SockProc, Body}})
+-spec request(kind(), origin(), pid() | none, term()) -> {ok, request()} | unknown | {refused, shape}.
+request(Kind, local, SockProc, {erx_net, SockProc, Body}) when is_pid(SockProc) ->
+    body(Kind, Body);
+request(Kind, Origin, SockProc, {erx_origin, D, {erx_net, SockProc, Body}})
   when Origin =/= local, D =:= Origin, is_pid(SockProc) ->
-    body(Body);
-request(_Origin, _SockProc, _Message) ->
+    body(Kind, Body);
+request(_Kind, _Origin, _SockProc, _Message) ->
     unknown.
 
-body({credit, Bytes}) when is_integer(Bytes), Bytes > 0, Bytes =< ?MAX_CREDIT ->
+body(_Kind, {credit, Bytes}) when is_integer(Bytes), Bytes > 0, Bytes =< ?MAX_CREDIT ->
     {ok, {credit, Bytes}};
-body({call, N, Request}) when is_integer(N), N >= 0 ->
-    case call(Request) of
+body(Kind, {call, N, Request}) when is_integer(N), N >= 0 ->
+    case call(Kind, Request) of
         true -> {ok, {call, N, Request}};
         false -> {refused, shape}
     end;
-body(_) ->
+body(_Kind, _) ->
     {refused, shape}.
 
-call({send, Piece}) -> is_binary(Piece) andalso byte_size(Piece) =< ?PIECE;
-call({shutdown, How}) -> How =:= read orelse How =:= write orelse How =:= read_write;
-call(close) -> true;
-call({setopts, []}) -> true;
-call({setopts, [{nodelay, B}]}) -> is_boolean(B);
-call({getopts, []}) -> true;
-call({getopts, [nodelay]}) -> true;
-call(sockname) -> true;
-call(peername) -> true;
-call(_) -> false.
+call(tcp, {send, Piece}) -> is_binary(Piece) andalso byte_size(Piece) =< ?PIECE;
+call(tcp, {shutdown, How}) -> How =:= read orelse How =:= write orelse How =:= read_write;
+call(tcp, {setopts, []}) -> true;
+call(tcp, {setopts, [{nodelay, B}]}) -> is_boolean(B);
+call(tcp, {getopts, []}) -> true;
+call(tcp, {getopts, [nodelay]}) -> true;
+call(tcp, peername) -> true;
+call(udp, {send_to, Ip, Port, Data}) ->
+    is_tuple(Ip) andalso ?IS_IP4(Ip) andalso is_integer(Port) andalso Port >= 0 andalso Port =< 16#ffff
+        andalso is_binary(Data) andalso byte_size(Data) =< ?MAX_UDP;
+call(udp, {send, Data}) -> is_binary(Data) andalso byte_size(Data) =< ?MAX_UDP;
+call(udp, {connect, Ip, Port}) ->
+    is_tuple(Ip) andalso ?IS_IP4(Ip) andalso is_integer(Port) andalso Port >= 1 andalso Port =< 16#ffff;
+call(icmp, {echo_send, Ip, Seq, Ttl, Data}) ->
+    is_tuple(Ip) andalso ?IS_IP4(Ip) andalso is_integer(Seq) andalso Seq >= 0 andalso Seq =< 16#ffff
+        andalso (Ttl =:= default orelse (is_integer(Ttl) andalso Ttl >= 1 andalso Ttl =< 255))
+        andalso is_binary(Data) andalso byte_size(Data) =< ?MAX_ECHO;
+call(Kind, sockname) -> Kind =:= tcp orelse Kind =:= udp;
+call(_Kind, close) -> true;
+call(_Kind, _) -> false.

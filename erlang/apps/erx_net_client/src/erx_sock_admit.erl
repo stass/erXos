@@ -40,32 +40,46 @@ very grant, and `Answer` passes the `resolver` reply type. A bare message from a
 in another domain, an envelope of another domain, or a change from another grant is
 refused.
 
-**Pushes.** push/3 takes a message the socket process received, for its socket `Socket`
-whose grant's domain arrives by `Origin`. A message bare from a `local` socket, or
-`{erx_origin, D, Msg}` with `D` the origin, and `Msg` `{erx_net, Socket, Body}` from that
-very socket, is the socket's; anything else is `unknown`, for the caller to drop and
-count. Of the socket's, `Body` must be one of the socket protocol's pushes:
+**Pushes.** push/4 takes a message the socket process received, for its socket `Socket`
+of kind `tcp`, `udp` or `icmp`, whose grant's domain arrives by `Origin`. A message bare
+from a `local` socket, or `{erx_origin, D, Msg}` with `D` the origin, and `Msg`
+`{erx_net, Socket, Body}` from that very socket, is the socket's; anything else is
+`unknown`, for the caller to drop and count. Of the socket's, `Body` must be one of the
+pushes its kind's socket makes:
 
-* `{reply, N, Result}`, `N` a request count, `Result` checked by result/2 once the
-  socket process knows which request `N` was;
-* `{data, Pieces}`, a proper list of 1 to 64 binaries of 1 to 65,536 bytes in all,
-  counted without walking past the 64th element, so a long list costs no more;
-* `eof`, and `{error, Reason}` with `Reason` one of the end reasons.
+* any kind: `{reply, N, Result}`, `N` a request count, `Result` checked by result/2 once
+  the socket process knows which request `N` was;
+* `tcp`: `{data, Pieces}`, a proper list of 1 to 64 binaries of 1 to 65,536 bytes in all,
+  counted without walking past the 64th element, so a long list costs no more; `eof`;
+  and `{error, Reason}` with `Reason` one of the end reasons;
+* `udp`: `{datagram, Ip, Port, Data}`, an IPv4 address tuple, a port and a binary of at
+  most 65,527 bytes;
+* `icmp`: `{echo, Ip, Ttl, Seq, Data}`, an echo reply: an IPv4 address tuple, a TTL from
+  0 to 255, a sequence number from 0 to 65535 and a binary of at most 65,507 bytes.
 
 A push of any other shape is refused (`push`), and the socket process aborts the socket.
 
 **Replies.** result/2 checks a reply to a request of the socket protocol against its
-reply type: `ok` or an error from a closed list for `send`, `shutdown` and `setopts`;
-`{ok, [{nodelay, Boolean}]}` for `getopts`; `{ok, {Ip, Port}}` for `sockname` and
-`peername`. It checks an echo socket's replies too: `ok` or an error for `echo_send`
-and `echo_close`, and for `echo_recv` `{ok, {Ip, Ttl, Seq, Data}}` with an IPv4 address,
-a TTL from 0 to 255, a sequence number from 0 to 65535 and a binary of at most 65535
-bytes, or `{error, timeout}`.
+kind's reply type, its errors from that kind's closed list:
+
+* `send`: `ok`, or `epipe`, `ebusy`, `enotconn`, `badarg` or an end reason;
+  `shutdown`: `ok`, or `enotconn`, `badarg` or an end reason; `setopts`: `ok`;
+  `getopts`: `{ok, [{nodelay, Boolean}]}`; `sockname` and `peername`: `{ok, {Ip, Port}}`
+  with an IPv4 address;
+* `udp_send`: `ok`, or a refusal of the datagram's path or of the driver
+  (`edestaddrreq`, `emsgsize`, `enobufs`, `enetunreach`, `ehostunreach`,
+  `eaddrnotavail`, `einval`, `badarg`); `udp_connect`: `ok`;
+* `echo_send`: `ok`, or a refusal of its path or of the driver;
+* `close`: `ok`.
+
+The errors of the replies answered at once (`setopts`, `getopts`, `sockname`,
+`peername`, `udp_connect`, `close`) are `badarg` alone, the socket's refusal of a request
+that breaks the protocol.
 """.
 
--export([answer/3, change/3, push/3, result/2]).
+-export([answer/3, change/3, push/4, result/2]).
 
--export_type([operation/0, origin/0, check/0, push/0, end_reason/0]).
+-export_type([operation/0, origin/0, kind/0, result_kind/0, check/0, push/0, end_reason/0]).
 
 -doc "An operation of the grant whose reply this module checks.".
 -type operation() :: tcp_connect | udp_open | icmp_open | interfaces | resolver | watch_resolver.
@@ -85,9 +99,18 @@ or `eof` after `eof`.
 """.
 -type check() :: operation | shape | socket | interface | reason | resolver | origin | push | reply | credit | order.
 
--doc "A socket's push, as push/3 admits it.".
+-doc "A socket's kind: a TCP connection, a UDP datagram socket or an ICMP echo socket.".
+-type kind() :: tcp | udp | icmp.
+
+-doc "What a request was, for result/2: the reply type its result is checked against.".
+-type result_kind() :: send | shutdown | setopts | getopts | sockname | peername | udp_send | udp_connect
+                     | echo_send | close.
+
+-doc "A socket's push, as push/4 admits it.".
 -type push() :: {reply, non_neg_integer(), term()} | {data, [binary(), ...]} | eof
-              | {error, end_reason()}.
+              | {error, end_reason()}
+              | {datagram, inet:ip4_address(), inet:port_number(), binary()}
+              | {echo, inet:ip4_address(), 0..255, 0..16#ffff, binary()}.
 
 -doc "Why a socket ended: its last push.".
 -type end_reason() :: closed | econnreset | econnaborted | econnrefused | etimedout
@@ -101,20 +124,26 @@ or `eof` after `eof`.
                           | ?OPEN_REASONS]).
 -define(RESOLVER_REASONS, [eacces, badarg]).
 -define(INTERFACES_REASONS, [enotconn, eacces, badarg]).
-%% An echo socket's refusals of a send (erx_icmp_sock, erx_net_frame:path/3).
--define(ECHO_REASONS, [emsgsize, enobufs, enetunreach, ehostunreach, eaddrnotavail, einval, closed, badarg]).
+%% A datagram's or an echo request's refusals of a send: its path's (erx_net_frame:path/3,
+%% `eacces` for a broadcast destination as FreeBSD refuses one without SO_BROADCAST; udp/5,
+%% echo/5), the driver's full credit, and the socket protocol's `badarg`.
+-define(DATAGRAM_REASONS, [edestaddrreq, emsgsize, enobufs, enetunreach, ehostunreach, eaddrnotavail, eacces,
+                           einval, badarg]).
 -define(MAX_INTERFACES, 64).
 -define(MAX_ADDRS, 64).
 -define(IFNAMSIZ, 15).
--define(MAX_ECHO_DATA, 65535).
+%% The largest UDP payload and the largest echo data of an IPv4 datagram.
+-define(MAX_UDP, 65527).
+-define(MAX_ECHO_DATA, 65507).
 %% The ends of a connection: `closed` without an error, or the error that ended it, an
 %% ICMP soft error among them (`enoprotoopt` for a parameter problem: erx_tcp_icmp,
 %% erx_icmp4, erx_icmp6).
 -define(END_REASONS, [closed, econnreset, econnaborted, econnrefused, etimedout, ehostunreach, enetunreach, enoprotoopt,
                       epipe, timeout]).
-%% The errors a socket answers its requests with: its refusals (erx_tcp_user) and the
-%% socket protocol's `badarg`.
--define(SOCKET_REASONS, [einval, enotconn, epipe, ebusy, ealready, eisconn, badarg | ?END_REASONS]).
+%% A connection's refusals of a send and a shutdown (erx_tcp_user), the socket protocol's
+%% `badarg`, and the end that answers a send still waiting.
+-define(SEND_REASONS, [epipe, ebusy, enotconn, badarg | ?END_REASONS]).
+-define(SHUTDOWN_REASONS, [enotconn, badarg | ?END_REASONS]).
 -define(PIECE, 65536).
 -define(MAX_PIECES, 64).
 -define(IS_BYTE(X), (is_integer(X) andalso X >= 0 andalso X =< 255)).
@@ -144,31 +173,39 @@ change(_Origin, _Grant, _Message) ->
     {refused, origin}.
 
 -doc """
-Takes `Message`, received by the socket process of `Socket`, whose grant's domain's
-messages arrive by `Origin`: the push it carries, `unknown` when it is not that socket's,
-or the check that refused it.
+Takes `Message`, received by the socket process of `Socket`, a socket of kind `Kind`
+whose grant's domain's messages arrive by `Origin`: the push it carries, `unknown` when
+it is not that socket's, or the check that refused it.
 """.
--spec push(origin(), pid(), term()) -> {ok, push()} | unknown | {refused, check()}.
-push(local, Socket, {erx_net, Socket, Body}) ->
-    body(Body);
-push(Origin, Socket, {erx_origin, D, {erx_net, Socket, Body}}) when Origin =/= local, D =:= Origin ->
-    body(Body);
-push(_Origin, _Socket, _Message) ->
+-spec push(kind(), origin(), pid(), term()) -> {ok, push()} | unknown | {refused, check()}.
+push(Kind, local, Socket, {erx_net, Socket, Body}) ->
+    body(Kind, Body);
+push(Kind, Origin, Socket, {erx_origin, D, {erx_net, Socket, Body}}) when Origin =/= local, D =:= Origin ->
+    body(Kind, Body);
+push(_Kind, _Origin, _Socket, _Message) ->
     unknown.
 
-body({reply, N, Result}) when is_integer(N), N >= 0 -> {ok, {reply, N, Result}};
-body({data, Pieces}) ->
+body(_Kind, {reply, N, Result}) when is_integer(N), N >= 0 -> {ok, {reply, N, Result}};
+body(tcp, {data, Pieces}) ->
     case pieces(Pieces, 0, 0) of
         ok -> {ok, {data, Pieces}};
         error -> {refused, push}
     end;
-body(eof) -> {ok, eof};
-body({error, Reason}) ->
+body(tcp, eof) -> {ok, eof};
+body(tcp, {error, Reason}) ->
     case lists:member(Reason, ?END_REASONS) of
         true -> {ok, {error, Reason}};
         false -> {refused, push}
     end;
-body(_) -> {refused, push}.
+body(udp, {datagram, {A, B, C, D}, Port, Data})
+  when ?IS_BYTE(A), ?IS_BYTE(B), ?IS_BYTE(C), ?IS_BYTE(D), is_integer(Port), Port >= 0, Port =< 16#ffff,
+       is_binary(Data), byte_size(Data) =< ?MAX_UDP ->
+    {ok, {datagram, {A, B, C, D}, Port, Data}};
+body(icmp, {echo, {A, B, C, D}, Ttl, Seq, Data})
+  when ?IS_BYTE(A), ?IS_BYTE(B), ?IS_BYTE(C), ?IS_BYTE(D), ?IS_BYTE(Ttl), is_integer(Seq), Seq >= 0,
+       Seq =< 16#ffff, is_binary(Data), byte_size(Data) =< ?MAX_ECHO_DATA ->
+    {ok, {echo, {A, B, C, D}, Ttl, Seq, Data}};
+body(_Kind, _) -> {refused, push}.
 
 %% A proper list of at most ?MAX_PIECES binaries, of 1 to ?PIECE bytes in all.
 pieces([], Count, Bytes) when Count > 0, Bytes > 0 -> ok;
@@ -178,11 +215,12 @@ pieces([Piece | Rest], Count, Bytes) when is_binary(Piece), Count < ?MAX_PIECES,
 pieces(_, _, _) -> error.
 
 -doc """
-Checks `Result`, a socket's reply to a request of kind `Kind` (`send`, `shutdown`,
-`setopts`, `getopts`, `sockname` or `peername`), against its reply type.
+Checks `Result`, a socket's reply to a request of kind `Kind`, against that kind's reply
+type; answers it rebuilt from its checked parts, or the check that refused it.
 """.
--spec result(atom(), term()) -> {ok, term()} | {refused, check()}.
-result(Kind, ok) when Kind =:= send; Kind =:= shutdown; Kind =:= setopts ->
+-spec result(result_kind(), term()) -> {ok, term()} | {refused, check()}.
+result(Kind, ok) when Kind =:= send; Kind =:= shutdown; Kind =:= setopts; Kind =:= udp_send;
+                      Kind =:= udp_connect; Kind =:= echo_send; Kind =:= close ->
     {ok, ok};
 result(getopts, {ok, []}) ->
     {ok, {ok, []}};
@@ -192,28 +230,19 @@ result(Kind, {ok, {{A, B, C, D}, Port}})
   when (Kind =:= sockname orelse Kind =:= peername), ?IS_BYTE(A), ?IS_BYTE(B), ?IS_BYTE(C), ?IS_BYTE(D),
        is_integer(Port), Port >= 0, Port =< 16#ffff ->
     {ok, {ok, {{A, B, C, D}, Port}}};
-result(echo_recv, {ok, {{A, B, C, D}, Ttl, Seq, Data}})
-  when ?IS_BYTE(A), ?IS_BYTE(B), ?IS_BYTE(C), ?IS_BYTE(D), ?IS_BYTE(Ttl), is_integer(Seq), Seq >= 0,
-       Seq =< 16#ffff, is_binary(Data), byte_size(Data) =< ?MAX_ECHO_DATA ->
-    {ok, {ok, {{A, B, C, D}, Ttl, Seq, Data}}};
-result(echo_recv, {error, timeout}) ->
-    {ok, {error, timeout}};
-result(Kind, ok) when Kind =:= echo_send; Kind =:= echo_close ->
-    {ok, ok};
-result(Kind, {error, Reason}) when Kind =:= echo_send; Kind =:= echo_close ->
-    case lists:member(Reason, ?ECHO_REASONS) of
-        true -> {ok, {error, Reason}};
-        false -> {refused, reason}
-    end;
-result(echo_recv, _Result) ->
-    {refused, shape};
-result(_Kind, {error, Reason}) ->
-    case lists:member(Reason, ?SOCKET_REASONS) of
+result(Kind, {error, Reason}) when is_atom(Kind) ->
+    case lists:member(Reason, reasons(Kind)) of
         true -> {ok, {error, Reason}};
         false -> {refused, reason}
     end;
 result(_Kind, _Result) ->
     {refused, shape}.
+
+%% The closed list of errors each kind of request may be answered with.
+reasons(send) -> ?SEND_REASONS;
+reasons(shutdown) -> ?SHUTDOWN_REASONS;
+reasons(Kind) when Kind =:= udp_send; Kind =:= echo_send -> ?DATAGRAM_REASONS;
+reasons(_) -> [badarg].
 
 %% The reply type of each operation: what its `ok` carries, and its error reasons.
 reply_type(tcp_connect) -> {ok, {socket, ?CONNECT_REASONS}};

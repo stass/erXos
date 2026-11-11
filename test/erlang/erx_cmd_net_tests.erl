@@ -160,13 +160,14 @@ a_stream_of_replies_does_not_stop_the_count_test_() ->
         end
     end}.
 
-%% Answers every recv at once with a reply to sequence number 0, and every send with ok.
+%% Stands for the echo socket process: answers every recv at once with a reply to
+%% sequence number 0, and every send with ok.
 flooding_socket() ->
     receive
         {'$gen_call', From, {recv, _}} ->
             gen_server:reply(From, {ok, {{10, 0, 2, 2}, 64, 0, <<0:64>>}}),
             flooding_socket();
-        {'$gen_call', From, {send, _, _, _}} ->
+        {'$gen_call', From, {echo_send, _, _, _, _}} ->
             gen_server:reply(From, ok),
             flooding_socket();
         {'$gen_call', From, close} ->

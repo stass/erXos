@@ -28,10 +28,12 @@ never sees the second answer: a call's reply alias is gone once its first reply 
 A connection's demultiplexing entries are deleted by erx_net_tables, which watches it in
 the grant's place.
 
-**Open.** `{udp_open, inet, Local, Port, Opts}` starts a datagram socket (erx_udp_sock)
-owned by the caller, which the socket monitors; `Local` is `any` or an IPv4 address,
-`Port` 0 for an ephemeral port, and `Opts` the gen_udp options the socket checks.
-`{icmp_open, inet}` starts an echo socket (erx_icmp_sock) owned by the caller.
+**Open.** `{udp_open, inet, Local, Port, []}` starts a datagram socket (erx_udp_sock)
+for the caller, its socket process, which the socket monitors and speaks the socket
+protocol to, its messages arriving by the grantee's origin; `Local` is `any` or an IPv4
+address and `Port` 0 for an ephemeral port. Options are the socket process's own, so a
+non-empty list is refused with `einval`. `{icmp_open, inet}` starts an echo socket
+(erx_icmp_sock) for the caller likewise.
 
 **Interfaces.** `interfaces` answers `{ok, Interfaces}`, each interface's name, link-layer
 address, MTU, link state, configuration and addresses as erx_net:interfaces/0 gives them,
@@ -186,14 +188,13 @@ act({release_buffers, Token}, {Conn, _}, #{buffers := Buffers0} = S) ->
         {ok, Buffers} -> {reply, ok, S#{buffers := Buffers}};
         {error, _} = Error -> {reply, Error, S}
     end;
-act({udp_open, inet, Local, Port, Opts}, {Owner, _}, S) ->
-    Reply = case erx_udp_sock:options(Opts) of
-                {ok, SockOpts} -> erx_udp_sock:open(Port, SockOpts#{ip => Local, owner => Owner});
-                {error, _} = Error -> Error
-            end,
-    {reply, Reply, S};
-act({icmp_open, inet}, {Owner, _}, S) ->
-    {reply, erx_icmp_sock:open(#{owner => Owner}), S};
+act({udp_open, inet, Local, Port, []}, {Owner, _}, #{grantee := Grantee} = S) ->
+    {reply, erx_udp_sock:open(Port, #{ip => Local, owner => Owner, origin => Grantee}), S};
+act({udp_open, inet, _Local, _Port, _Opts}, _From, S) ->
+    %% The socket process keeps every option gen_udp:open/2 takes; the socket takes none.
+    {reply, {error, einval}, S};
+act({icmp_open, inet}, {Owner, _}, #{grantee := Grantee} = S) ->
+    {reply, erx_icmp_sock:open(#{owner => Owner, origin => Grantee}), S};
 act(counts, _From, #{unknown := Unknown, refused := Refused} = S) ->
     {reply, #{unknown => Unknown, refused => Refused}, S};
 act(interfaces, _From, S) ->

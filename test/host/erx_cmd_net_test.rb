@@ -27,9 +27,10 @@ class ErxCmdNetTest < Minitest::Test
              File.join(ROOT, 'erlang/apps/erx/src/erx_facets.erl'),
              File.join(APPLICATION, 'erx_cmd.erl'),
              *Dir[File.join(APPLICATION, '*.erl')].sort,
-             # ping's loop calls the echo socket's client, whose socket its case answers with
-             # a stand-in, and the client checks the stand-in's replies.
+             # ping's loop calls the echo socket's client, a stub of the datagram socket process,
+             # whose socket process its case answers with a stand-in.
              File.join(ROOT, 'erlang/apps/erx_net_client/src/erx_gen_icmp.erl'),
+             File.join(ROOT, 'erlang/apps/erx_net_client/src/erx_gen_udp.erl'),
              File.join(ROOT, 'erlang/apps/erx_net_client/src/erx_sock_admit.erl'),
              File.join(ROOT, 'test/erlang/erx_cmd_net_tests.erl')].uniq.freeze
   SEEDED = ['#{Slot := {Seq, At, Seen}} ->', '#{Slot := {_, At, Seen}} ->'].freeze

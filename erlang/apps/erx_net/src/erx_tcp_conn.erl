@@ -211,7 +211,7 @@ handle_info({erx_net_clock, hint}, S) ->
 handle_info({'DOWN', Ref, process, _, _}, #state{owner_ref = Ref} = S) ->
     settle(owner_closed(S));
 handle_info(Msg, #state{origin = Origin, owner = Owner} = S) ->
-    case erx_net_admit:request(Origin, Owner, Msg) of
+    case erx_net_admit:request(tcp, Origin, Owner, Msg) of
         {ok, Request} -> request(Request, S);
         unknown -> {noreply, count(unknown, S)};
         {refused, Check} -> {noreply, count(Check, S)}

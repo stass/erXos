@@ -3751,11 +3751,18 @@ the runtime seam nor the facet machinery changes them:
       {ok, Request :: term(), From :: gen_server:from()}
     | {refused, shape, From :: gen_server:from()}
     | unknown.
-  %% A message to a socket whose socket process is SockProc.
-  erx_net_admit:request(Grantee :: local | pos_integer(), SockProc :: pid() | none,
-                        Msg :: term()) ->
+  %% A message to a socket of kind Kind whose socket process is SockProc.
+  erx_net_admit:request(Kind :: tcp | udp | icmp, Grantee :: local | pos_integer(),
+                        SockProc :: pid() | none, Msg :: term()) ->
       {ok, Body :: term()} | {refused, shape} | unknown.
   ```
+
+  A socket takes only its own kind's requests: a datagram socket
+  `{send_to, Ip, Port, Data}`, `{send, Data}`, `{connect, Ip, Port}`,
+  `sockname` and `close`; an echo socket `{echo_send, Ip, Seq, Ttl,
+  Data}` and `close`; a connection those of
+  [The socket process](#the-socket-process); and every kind `{credit,
+  Bytes}`. A request of another kind is refused for its shape.
 
   A message wrapped as `{erx_origin, D, Inner}` comes from domain `D`; a
   message without an envelope comes from the receiver's own domain,
@@ -3922,8 +3929,10 @@ The client side is the application `erx_net_client`, in
 `erx` and a node outside erXos runs beside `erx_net`: `erx_gen_tcp` and
 `erx_gen_udp`, the socket backends, each the stubs `gen_tcp`, `gen_udp`
 and `inet` call and the `gen_statem` of its socket process;
-`erx_gen_icmp`, the echo socket's backend, which `ping` uses, with a
-socket process of the same shape;
+`erx_gen_icmp`, the echo socket's backend, which `ping` uses, whose
+socket process is `erx_gen_udp`'s, started for the kind `icmp`, so one
+`gen_statem` and one core serve every socket that carries whole
+datagrams;
 `erx_gen_tcp_core` and `erx_gen_udp_core`, the pure presentation step
 each socket process runs; `erx_sock_admit`, the check of every message
 the client side takes from the network domain, a socket's push or the
@@ -4308,8 +4317,7 @@ protocol, a closed set of shapes, each `{erx_net, Sender, Body}` with
 %% Socket process to socket.
 -type request_body() ::
       {call, N :: non_neg_integer(), Request :: erx_net_admit:request()}
-    | {credit, Bytes :: pos_integer()}.     % for a connection and a
-                                            % datagram socket alike
+    | {credit, Bytes :: pos_integer()}.     % for every kind of socket
 
 %% Socket to socket process.
 -type push_body() ::
@@ -4319,6 +4327,9 @@ protocol, a closed set of shapes, each `{erx_net, Sender, Body}` with
                                             % and at most a piece in all
     | {datagram, inet:ip_address(), inet:port_number(), binary()}
                                             % one whole datagram
+    | {echo, inet:ip_address(), Ttl :: 0..255, Seq :: 0..65535, binary()}
+                                            % one echo reply, an echo
+                                            % socket's only push
     | eof                                   % the peer's FIN, after every byte
     | {error, erx_sock_admit:end_reason()}. % the socket has ended; its last push
 ```
@@ -4470,7 +4481,7 @@ socket to answer a dead pid, which the funnel drops.
 connection and for a datagram socket alike. The socket pushes only
 within the credit it holds, at most a piece per push
 ([Message sizes](#message-sizes)), a datagram whole and only when the
-credit covers its length, and keeps the rest: a connection in its
+credit covers its cost, and keeps the rest: a connection in its
 receive buffer, whose free space is the window it advertises, and a
 datagram socket in its queue up to its receive buffer, past which it
 drops and counts, as FreeBSD drops on a full receive buffer. The socket
@@ -4485,6 +4496,13 @@ half the target, so credit costs one message per half target received,
 and at once when a waiting `recv` or a packet in progress needs more
 than it holds and has outstanding, so no recv waits for bytes its socket
 holds but may not push.
+
+A datagram costs its length in credit, and an empty datagram one byte,
+on both sides: the socket pushes it only when its credit covers
+`max(1, byte_size(Data))` and the socket process counts it so. An empty
+datagram is never free, so a peer that floods a socket with empty
+datagrams spends the credit as any other sender does and is held to one
+credit message per half target, 65,536 empty datagrams by default.
 
 Between grants, what the socket process holds plus the credit
 outstanding therefore stays above half the target, so once it holds
@@ -4504,9 +4522,10 @@ per recv would cost. Both bounds are bytes, as stock's `recbuf` is. So:
   message per half target received: the owner's mailbox is bounded only
   by how fast the owner reads, as on stock, and the lane paces the
   pushes;
-* in `{active, once}` and `{active, N}`, when the count runs out the
-  socket process sends `{tcp_passive, S}` or `{udp_passive, S}` and
-  stops presenting; what arrives fills its target, its grants stop, and
+* in `{active, once}` after one delivery, and in `{active, N}` when the
+  count runs out, the socket process stops presenting, sending
+  `{tcp_passive, S}` or `{udp_passive, S}` for a count only, as stock
+  does; what arrives fills its target, its grants stop, and
   the connection's receive buffer fills and its window closes, as
   stock's socket stops reading the kernel's buffer. `inet:setopts(S,
   [{active, N}])` is answered locally and presents what is held at once,
@@ -4558,7 +4577,12 @@ constant bounds the bytes it carries: the **piece**, 64 KiB.
   each as `{call, N, {send, Piece}}`, and answers the caller after the
   last piece's reply, or with the first error, as stock's send answers
   an error after a partial write. A datagram larger than IP allows is
-  refused with `{error, emsgsize}` before anything is sent.
+  refused with `{error, emsgsize}` before anything is sent: the socket
+  process refuses a UDP payload or an echo request's data over 65,507
+  bytes, the most an IPv4 datagram carries after its headers. The
+  protocol's bounds, which `erx_net_admit` and `erx_sock_admit` check,
+  are 65,527 bytes for a datagram, what the UDP length field allows
+  under any IP version, and 65,507 for an echo's data.
 * Every other request and reply is bounded by the operation schema,
   `abi/services/net.txt`: the length of an option list, the names
   `getstat` takes, the shape of each operation's reply. The socket

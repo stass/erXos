@@ -200,10 +200,15 @@ decode(<<_Eth:14/binary, Packet/binary>>) ->
                                              Seg),
     {Udp, Payload}.
 
-%% A datagram from From, handed to the socket as an interface hands it.
-hand({'$inet', erx_gen_udp, Sock} = S, From, Data) ->
+%% The datagram socket in the stack behind the socket process of S, and its credit.
+datagram_socket(S) ->
     {ok, {_, Port}} = erx_gen_udp:sockname(S),
-    [#{credit := Credit}] = erx_net_tables:demux({udp, inet, any, Port}),
+    [#{pid := Sock, credit := Credit}] = erx_net_tables:demux({udp, inet, any, Port}),
+    {Sock, Credit}.
+
+%% A datagram from From, handed to the datagram socket as an interface hands it.
+hand(S, From, Data) ->
+    {Sock, Credit} = datagram_socket(S),
     ok = erx_net_credit:hand(Sock, Credit, 1, {items, self(), [{datagram, From, ?OURS, Data}]}).
 
 udp_exchange() ->
@@ -237,8 +242,8 @@ udp_ends_with_owner() ->
                           receive stop -> ok end
                   end),
     S = receive {opened, Opened} -> Opened after ?WAIT -> error(not_opened) end,
-    {'$inet', erx_gen_udp, Sock} = S,
     {ok, {_, Port}} = erx_gen_udp:sockname(S),
+    {Sock, _} = datagram_socket(S),
     Ref = monitor(process, Sock),
     exit(Owner, kill),
     receive {'DOWN', Ref, process, Sock, _} -> ok after ?WAIT -> error(socket_outlived_owner) end,

@@ -141,7 +141,13 @@ open_forged() ->
 open_admitted() ->
     Sock = spawn(fun() -> receive stop -> ok end end),
     with_grant(fun({udp_open, inet, any, 0, []}) -> {ok, Sock} end,
-               fun() -> ?assertEqual({ok, {'$inet', erx_gen_udp, Sock}}, erx_gen_udp:open(0, [])) end),
+               fun() ->
+                       %% The socket is the socket process, which holds the admitted socket.
+                       {ok, {'$inet', erx_gen_udp, Proc}} = erx_gen_udp:open(0, []),
+                       ?assert(is_pid(Proc) andalso Proc =/= Sock),
+                       {monitors, Monitors} = process_info(Proc, monitors),
+                       ?assert(lists:member({process, Sock}, Monitors))
+               end),
     Sock ! stop.
 
 call_grant_ends() ->

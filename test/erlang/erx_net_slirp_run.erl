@@ -60,9 +60,9 @@ current() ->
 
 %% A datagram to the gateway makes the interface resolve it.
 arp(If) ->
-    {ok, Sock} = erx_udp_sock:open(0, #{active => false}),
-    _ = erx_udp_sock:send(Sock, {10, 0, 2, 2}, 9, <<"resolve">>),
-    ok = erx_udp_sock:close(Sock),
+    {ok, Sock} = erx_gen_udp:open(0, [{active, false}, binary]),
+    _ = erx_gen_udp:send(Sock, {10, 0, 2, 2}, 9, <<"resolve">>),
+    ok = erx_gen_udp:close(Sock),
     until(fun() ->
                   case erx_net_tables:neighbour(If, ?GATEWAY) of
                       {<<_:48>>, fresh} -> ok;
@@ -73,28 +73,28 @@ arp(If) ->
 %% An echo request from an echo socket; slirp's reply comes back to the socket that
 %% holds its identifier.
 ping(_If) ->
-    {ok, Sock} = erx_icmp_sock:open(#{}),
+    {ok, Sock} = erx_gen_icmp:open(),
     Payload = <<"erx_net ping">>,
-    Result = case erx_icmp_sock:send(Sock, {10, 0, 2, 2}, 1, #{data => Payload}) of
+    Result = case erx_gen_icmp:send(Sock, {10, 0, 2, 2}, 1, #{data => Payload}) of
                  ok ->
-                     case erx_icmp_sock:recv(Sock, ?WAIT_MS) of
+                     case erx_gen_icmp:recv(Sock, ?WAIT_MS) of
                          {ok, {{10, 0, 2, 2}, _Ttl, 1, Payload}} -> ok;
                          Other -> Other
                      end;
                  Error -> Error
              end,
-    ok = erx_icmp_sock:close(Sock),
+    ok = erx_gen_icmp:close(Sock),
     Result.
 
 udp(_If, EchoPort) ->
-    {ok, Sock} = erx_udp_sock:open(0, #{active => false}),
+    {ok, Sock} = erx_gen_udp:open(0, [{active, false}, binary]),
     Payload = <<"erx_net says hello">>,
-    ok = erx_udp_sock:send(Sock, {10, 0, 2, 2}, EchoPort, Payload),
-    Result = case erx_udp_sock:recv(Sock, ?WAIT_MS) of
+    ok = erx_gen_udp:send(Sock, {10, 0, 2, 2}, EchoPort, Payload),
+    Result = case erx_gen_udp:recv(Sock, 0, ?WAIT_MS) of
                  {ok, {{10, 0, 2, 2}, EchoPort, Payload}} -> ok;
                  Other -> Other
              end,
-    ok = erx_udp_sock:close(Sock),
+    ok = erx_gen_udp:close(Sock),
     Result.
 
 %% 1 MiB to the host's TCP echo server and back, in passive mode, a sender beside the

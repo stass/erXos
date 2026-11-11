@@ -915,21 +915,9 @@ it; git history is the record of completed work.
   fixture run 2 commands instead of none, with the memo key fingerprinting every program in
   `/usr/local/bin` and every library in `/usr/local/lib`; why that key changes between two
   builds is not yet known.
-* [High] network, `erx_net_client` (`erx_gen_udp`, `erx_gen_icmp`, `erx_gen_tcp`;
-  design-network-stack, "The socket process"): TCP has its socket process (`erx_gen_tcp`,
-  `erx_gen_tcp_core`) and the socket protocol; UDP and ICMP have not. `erx_gen_udp` and
-  `erx_gen_icmp` call the datagram and echo sockets directly with `gen_server:call`, which
-  `erx_udp_sock` and `erx_icmp_sock` take as plain calls, not through `erx_net_admit`, and
-  `erx_udp_sock` presents datagrams itself, so an owner outside the network domain receives
-  `{erx_origin, D, {udp, S, Ip, Port, Data}}`, which no stock `receive` matches, and an
-  enveloped call from another domain reaches their `handle_info` and is ignored. To build
-  (1b-E P9c): `erx_gen_udp` as a `gen_statem` socket process with `erx_gen_udp_core`, and the
-  datagram and echo sockets' side of the protocol, `{erx_net, Client, {call, N, Req}}`
-  admitted by `erx_net_admit:request/3` with a socket kind and `{datagram, Ip, Port, Data}`
-  pushes, with the 128 KiB credit floor; the `erx_net_admit` and `erx_sock_admit` fuzz targets
-  extended to their requests and pushes; and `erx_sock_admit:result/2` taking `{error,
-  Reason}` only from the request kind's closed list, where it now takes any reason for any
-  kind. Still missing on the TCP side:
+* [High] network, `erx_net_client` (`erx_gen_tcp`; design-network-stack, "The socket
+  process"): the TCP socket process lacks parts of the design.
+  Still missing:
   `listen/2` and `accept` (the listener's socket process), local `controlling_process/2`
   (`enotsup`), the packet modes and the `buffer`, `exit_on_close` and `show_econnreset`
   options, the schema-generated request validators, and `erxos/erx_net_client_erxos`
@@ -943,6 +931,31 @@ it; git history is the record of completed work.
   socket stays passive; only the first waiting recv gets a passive error's reason, the rest
   `closed` (stock's `async_error_am_all` gives all the reason); and re-arming after a recv
   met the end answers `{error, closed}` where stock sends `{tcp_closed, S}`.
+* [Medium] network, `erx_net` and `erx_net_client` (`erx_udp_sock`, `erx_icmp_sock`,
+  `erx_gen_udp_core`; design-network-stack, "Credit"): datagram memory is not bounded as
+  the design says. A datagram socket's receive queue in the network domain is bounded in
+  datagrams (`limit`, 64 by default; an echo socket's 16), not in bytes up to its receive
+  buffer, so one socket may hold 64 datagrams of 65,527 bytes, about 4 MiB, of the network
+  domain's memory. On the owner's side the credit charges a datagram `max(1, size)`, which
+  bounds bytes but not memory: a peer sending 131,072 empty datagrams to a passive socket
+  whose owner does not read makes its socket process hold about 14 words each, some 14 MiB,
+  against the design's "at most the target per socket". Charge a fixed overhead per
+  datagram on both sides, as FreeBSD's `sb_mbcnt` charges `MSIZE` per mbuf, bound the
+  network side's queue by that cost at its receive buffer, and state the cost in the
+  design's credit paragraph.
+* [Medium] network, `erx_net_client` (`erx_sock_admit:result/2`; design-network-stack,
+  "Untrusted input"): each request kind's closed list of errors is a hand-written copy of
+  what the network side's paths (`erx_net_frame:path/3`, `udp/5`, `echo/5`, `erx_net_tx`)
+  can return, and the `erx_net_admit` fuzz target checks it against a second copy, so an
+  error missing from both closes the socket as a protocol break where stock answers the
+  error (a broadcast send's `eacces` did). Have each network-side socket map its errors
+  into the closed list at its one reply site, total over the specs it calls, or generate
+  both from `abi/services/net.txt` with the request validators.
+* [Low] network, `erx_net` and `erx_net_client` (`erx_udp_sock`, `erx_icmp_sock`,
+  `erx_gen_udp`): the datagram and echo sockets and the datagram socket process count
+  unknown and refused messages, but nothing reads the counts: no `counts` call or
+  inspector view shows them. `erx_net_admit` also still admits up to 64 `udp_open`
+  options, which the grant refuses unless the list is empty.
 * [Medium] Fiasco backend, `liberx/backend/fiasco/service_task.c` (`erx_fiasco_task_create_body`):
   a create from a task other than the root is not refused, though the call table and the
   deferred table say `ERX_ENOTSUP` in 1b-A (docs/design-stopgap.md, `erx_space_create`), so a task with a fault

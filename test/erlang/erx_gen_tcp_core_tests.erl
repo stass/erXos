@@ -5,8 +5,8 @@
 -moduledoc """
 The socket protocol's pure parts (docs/design-network-stack.md, "The socket process",
 "Message sizes", "Requests in flight"): erx_gen_tcp_core's step, and the checks of each
-side, erx_sock_admit:push/3 and result/2 for the socket process and
-erx_net_admit:request/3 for the connection. The core is driven with events and its
+side, erx_sock_admit:push/4 and result/2 for the socket process and
+erx_net_admit:request/4 for the connection. The core is driven with events and its
 actions read back: a send is cut into pieces sent one at a time and in order, a second
 send waits for the first, at most 64 requests are in flight, credit is granted at half
 the target and at once for a recv that needs it, and a push past the credit or a reply
@@ -245,33 +245,33 @@ push_test_() ->
     Sock = spawn(fun() -> ok end),
     Other = spawn(fun() -> ok end),
     [{"a local socket's bare push is taken",
-      ?_assertEqual({ok, eof}, erx_sock_admit:push(local, Sock, {erx_net, Sock, eof}))},
+      ?_assertEqual({ok, eof}, erx_sock_admit:push(tcp, local, Sock, {erx_net, Sock, eof}))},
      {"another process's push is unknown",
-      ?_assertEqual(unknown, erx_sock_admit:push(local, Sock, {erx_net, Other, eof}))},
+      ?_assertEqual(unknown, erx_sock_admit:push(tcp, local, Sock, {erx_net, Other, eof}))},
      {"the grant's domain's envelope is taken",
-      ?_assertEqual({ok, eof}, erx_sock_admit:push(7, Sock, {erx_origin, 7, {erx_net, Sock, eof}}))},
+      ?_assertEqual({ok, eof}, erx_sock_admit:push(tcp, 7, Sock, {erx_origin, 7, {erx_net, Sock, eof}}))},
      {"another domain's envelope is unknown",
-      ?_assertEqual(unknown, erx_sock_admit:push(7, Sock, {erx_origin, 8, {erx_net, Sock, eof}}))},
+      ?_assertEqual(unknown, erx_sock_admit:push(tcp, 7, Sock, {erx_origin, 8, {erx_net, Sock, eof}}))},
      {"a bare push from a remote socket is unknown",
-      ?_assertEqual(unknown, erx_sock_admit:push(7, Sock, {erx_net, Sock, eof}))},
+      ?_assertEqual(unknown, erx_sock_admit:push(tcp, 7, Sock, {erx_net, Sock, eof}))},
      {"data of 64 binaries and a piece is taken",
       ?_assertMatch({ok, {data, _}},
-                    erx_sock_admit:push(local, Sock, {erx_net, Sock, {data, lists:duplicate(64, <<0:8192>>)}}))},
+                    erx_sock_admit:push(tcp, local, Sock, {erx_net, Sock, {data, lists:duplicate(64, <<0:8192>>)}}))},
      {"data of 65 binaries is refused",
       ?_assertEqual({refused, push},
-                    erx_sock_admit:push(local, Sock, {erx_net, Sock, {data, lists:duplicate(65, <<0>>)}}))},
+                    erx_sock_admit:push(tcp, local, Sock, {erx_net, Sock, {data, lists:duplicate(65, <<0>>)}}))},
      {"data past a piece is refused",
       ?_assertEqual({refused, push},
-                    erx_sock_admit:push(local, Sock, {erx_net, Sock, {data, [<<0:524288>>, <<0>>]}}))},
+                    erx_sock_admit:push(tcp, local, Sock, {erx_net, Sock, {data, [<<0:524288>>, <<0>>]}}))},
      {"empty, improper or non-binary data is refused",
-      [?_assertEqual({refused, push}, erx_sock_admit:push(local, Sock, {erx_net, Sock, {data, D}}))
+      [?_assertEqual({refused, push}, erx_sock_admit:push(tcp, local, Sock, {erx_net, Sock, {data, D}}))
        || D <- [[], [<<>>], [<<1>> | <<2>>], [<<1>>, "2"], <<1>>]]},
      {"an ICMP parameter problem's enoprotoopt ends a socket and answers a request",
       [?_assertEqual({ok, {error, enoprotoopt}},
-                     erx_sock_admit:push(local, Sock, {erx_net, Sock, {error, enoprotoopt}})),
+                     erx_sock_admit:push(tcp, local, Sock, {erx_net, Sock, {error, enoprotoopt}})),
        ?_assertEqual({ok, {error, enoprotoopt}}, erx_sock_admit:result(send, {error, enoprotoopt}))]},
      {"an end reason off the list is refused",
-      ?_assertEqual({refused, push}, erx_sock_admit:push(local, Sock, {erx_net, Sock, {error, made_up}}))},
+      ?_assertEqual({refused, push}, erx_sock_admit:push(tcp, local, Sock, {erx_net, Sock, {error, made_up}}))},
      {"a reply's result is checked against its request",
       [?_assertEqual({ok, ok}, erx_sock_admit:result(send, ok)),
        ?_assertEqual({refused, shape}, erx_sock_admit:result(peername, ok)),
@@ -284,19 +284,19 @@ request_test_() ->
     SockProc = spawn(fun() -> ok end),
     Req = {erx_net, SockProc, {call, 3, peername}},
     [{"a local socket process's bare request is taken",
-      ?_assertEqual({ok, {call, 3, peername}}, erx_net_admit:request(local, SockProc, Req))},
+      ?_assertEqual({ok, {call, 3, peername}}, erx_net_admit:request(tcp, local, SockProc, Req))},
      {"the grantee's envelope is taken",
-      ?_assertEqual({ok, {call, 3, peername}}, erx_net_admit:request(7, SockProc, {erx_origin, 7, Req}))},
+      ?_assertEqual({ok, {call, 3, peername}}, erx_net_admit:request(tcp, 7, SockProc, {erx_origin, 7, Req}))},
      {"another domain's envelope is unknown",
-      ?_assertEqual(unknown, erx_net_admit:request(7, SockProc, {erx_origin, 8, Req}))},
+      ?_assertEqual(unknown, erx_net_admit:request(tcp, 7, SockProc, {erx_origin, 8, Req}))},
      {"an envelope to a local grantee is unknown",
-      ?_assertEqual(unknown, erx_net_admit:request(local, SockProc, {erx_origin, 8, Req}))},
+      ?_assertEqual(unknown, erx_net_admit:request(tcp, local, SockProc, {erx_origin, 8, Req}))},
      {"another process's request is unknown",
-      ?_assertEqual(unknown, erx_net_admit:request(local, self(), Req))},
+      ?_assertEqual(unknown, erx_net_admit:request(tcp, local, self(), Req))},
      {"no request is taken once the socket process is gone",
-      ?_assertEqual(unknown, erx_net_admit:request(local, none, Req))},
+      ?_assertEqual(unknown, erx_net_admit:request(tcp, local, none, Req))},
      {"a send past a piece, a credit past 64 MiB and other shapes are refused",
-      [?_assertEqual({refused, shape}, erx_net_admit:request(local, SockProc, {erx_net, SockProc, Body}))
+      [?_assertEqual({refused, shape}, erx_net_admit:request(tcp, local, SockProc, {erx_net, SockProc, Body}))
        || Body <- [{call, 1, {send, <<0:524296>>}}, {credit, 67108865}, {credit, 0},
                    {call, -1, close}, {call, 1, {setopts, [{active, true}]}}, {call, 1, recv}]]}].
 

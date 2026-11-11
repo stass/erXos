@@ -29,8 +29,9 @@ request not in flight, or a reply that fails its reply type breaks the protocol:
 socket is aborted with `econnaborted`.
 
 **Presenting.** In active mode every push is presented at once, as one `{tcp, S, Data}`
-(its pieces joined into one binary, or a list in `list` mode); `{active, once}` and
-`{active, N}` count deliveries down and send `{tcp_passive, S}` at zero. A passive
+(its pieces joined into one binary, or a list in `list` mode); `{active, once}` turns
+passive after one delivery, with no notice, and `{active, N}` counts deliveries down and
+sends `{tcp_passive, S}` at zero, as stock's inet does. A passive
 `recv(S, 0)` takes all that is held, `recv(S, Length)` exactly `Length` bytes; a recv
 that times out leaves what is held for the next one. Recvs that wait when the socket
 turns active are answered `{error, einval}`, as a recv of an active socket is.

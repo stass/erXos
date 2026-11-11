@@ -155,7 +155,7 @@ creation(Pid) ->
         Creation -> Creation
     end.
 
-%% --- request/3 -------------------------------------------------------------------
+%% --- request/4 -------------------------------------------------------------------
 
 request3() ->
     Origin = grantee(),
@@ -165,13 +165,14 @@ request3() ->
                   1 -> garbage();
                   _ -> frame(Origin, {erx_net, Wrong, socket_body()})
               end,
-    judge(request3, fun() -> erx_net_admit:request(Origin, Sock, Message) end,
-          expected_request3(Origin, Sock, Message), {Origin, Sock, Message}).
+    Kind = pick([tcp, udp, icmp]),
+    judge(request3, fun() -> erx_net_admit:request(Kind, Origin, Sock, Message) end,
+          expected_request3(Kind, Origin, Sock, Message), {Kind, Origin, Sock, Message}).
 
-expected_request3(Origin, Sock, Message) ->
+expected_request3(Kind, Origin, Sock, Message) ->
     case taken(Origin, Sock, Message) of
         {ok, Body} ->
-            case body_ok(Body) of
+            case body_ok(Kind, Body) of
                 true -> {ok, Body};
                 false -> {refused, shape}
             end;
@@ -183,18 +184,26 @@ taken(local, Sock, {erx_net, Sock, Body}) when is_pid(Sock) -> {ok, Body};
 taken(Origin, Sock, {erx_origin, Origin, {erx_net, Sock, Body}}) when Origin =/= local, is_pid(Sock) -> {ok, Body};
 taken(_Origin, _Sock, _Message) -> unknown.
 
-body_ok({credit, Bytes}) -> within(Bytes, 1, 67108864);
-body_ok({call, N, Request}) -> is_integer(N) andalso N >= 0 andalso call_ok(Request);
-body_ok(_) -> false.
+body_ok(_Kind, {credit, Bytes}) -> within(Bytes, 1, 67108864);
+body_ok(Kind, {call, N, Request}) -> is_integer(N) andalso N >= 0 andalso call_ok(Kind, Request);
+body_ok(_Kind, _) -> false.
 
-call_ok({send, Piece}) -> is_binary(Piece) andalso byte_size(Piece) =< 65536;
-call_ok({shutdown, How}) -> lists:member(How, [read, write, read_write]);
-call_ok(close) -> true;
-call_ok({setopts, Options}) -> lists:member(Options, [[], [{nodelay, true}], [{nodelay, false}]]);
-call_ok({getopts, Options}) -> lists:member(Options, [[], [nodelay]]);
-call_ok(sockname) -> true;
-call_ok(peername) -> true;
-call_ok(_) -> false.
+call_ok(tcp, {send, Piece}) -> is_binary(Piece) andalso byte_size(Piece) =< 65536;
+call_ok(tcp, {shutdown, How}) -> lists:member(How, [read, write, read_write]);
+call_ok(tcp, {setopts, Options}) -> lists:member(Options, [[], [{nodelay, true}], [{nodelay, false}]]);
+call_ok(tcp, {getopts, Options}) -> lists:member(Options, [[], [nodelay]]);
+call_ok(tcp, peername) -> true;
+call_ok(udp, {send_to, Ip, Port, Data}) -> ip4(Ip) andalso within(Port, 0, 65535) andalso datagram(Data, 65527);
+call_ok(udp, {send, Data}) -> datagram(Data, 65527);
+call_ok(udp, {connect, Ip, Port}) -> ip4(Ip) andalso within(Port, 1, 65535);
+call_ok(icmp, {echo_send, Ip, Seq, Ttl, Data}) ->
+    ip4(Ip) andalso within(Seq, 0, 65535) andalso (Ttl =:= default orelse within(Ttl, 1, 255))
+        andalso datagram(Data, 65507);
+call_ok(Kind, sockname) -> Kind =/= icmp;
+call_ok(_Kind, close) -> true;
+call_ok(_Kind, _) -> false.
+
+datagram(Data, Max) -> is_binary(Data) andalso byte_size(Data) =< Max.
 
 socket_body() ->
     case rand:uniform(10) of
@@ -205,7 +214,7 @@ socket_body() ->
     end.
 
 socket_call() ->
-    case rand:uniform(14) of
+    case rand:uniform(24) of
         1 -> {send, piece()};
         2 -> {send, piece()};
         3 -> {shutdown, pick([read, write, read_write, rw, 1])};
@@ -216,7 +225,25 @@ socket_call() ->
         7 -> sockname;
         8 -> peername;
         9 -> pick([{close}, {send}, abc, {sockname, 1}, [], <<>>]);
+        N when N >= 17; N =:= 11 -> {send_to, address(), port(), datagram()};
+        12 -> {send, datagram()};
+        13 -> {connect, address(), port()};
+        14 -> {echo_send, address(), port(), pick([default, 0, 1, 64, 255, 256, x]), datagram()};
+        15 -> {send_to, address(), port()};
+        16 -> {echo_send, address(), 1, 64};
         _ -> {send, <<"hello">>}
+    end.
+
+address() -> pick([{10, 0, 2, 3}, {10, 0, 2, 3}, {10, 0, 2, 3}, {10, 0, 2, 3}, {255, 255, 255, 255}, {0, 0, 0, 0}, {256, 0, 0, 1}, {1, 2, 3}, {-1, 0, 0, 0},
+                   {0, 0, 0, 0, 0, 0, 0, 1}, "10.0.2.3", x]).
+
+port() -> pick([0, 1, 53, 53, 53, 53, 65535, 65536, -1, x]).
+
+%% Data around the largest IPv4 and IPv6 payloads.
+datagram() ->
+    case rand:uniform(6) of
+        1 -> pick([<<1:3>>, [<<"io">>], x]);
+        _ -> binary:copy(<<"d">>, pick([0, 1, 65507, 65508, 65527, 65528, 70000]))
     end.
 
 piece() ->
@@ -364,13 +391,18 @@ connect_reasons() ->
 end_reasons() ->
     [closed, econnreset, econnaborted, econnrefused, etimedout, ehostunreach, enetunreach, enoprotoopt, epipe, timeout].
 
-socket_reasons() -> [einval, enotconn, epipe, ebusy, ealready, eisconn, badarg | end_reasons()].
+%% What each kind of socket request may be answered with, besides its `ok`.
+kind_reasons(send) -> [epipe, ebusy, enotconn, badarg | end_reasons()];
+kind_reasons(shutdown) -> [enotconn, badarg | end_reasons()];
+kind_reasons(Kind) when Kind =:= udp_send; Kind =:= echo_send ->
+    [edestaddrreq, emsgsize, enobufs, enetunreach, ehostunreach, eaddrnotavail, eacces, einval, badarg];
+kind_reasons(_) -> [badarg].
 
-echo_reasons() -> [emsgsize, enobufs, enetunreach, ehostunreach, eaddrnotavail, einval, closed, badarg].
+result_kinds() -> [send, shutdown, setopts, getopts, sockname, peername, udp_send, udp_connect, echo_send, close].
 
 %% Every reason of any list above, and some of none.
 reason() ->
-    pick(connect_reasons() ++ end_reasons() ++ socket_reasons() ++ echo_reasons() ++
+    pick(connect_reasons() ++ end_reasons() ++ lists:append([kind_reasons(K) || K <- result_kinds()]) ++
              [enotconn, eperm, enoent, 1, {crash, [stack]}, "closed", <<"closed">>]).
 
 carried(socket, Grant, Value) ->
@@ -591,7 +623,7 @@ taken_change(Origin, Grant, {erx_origin, Origin, {erx_net_resolver, Grant, Answe
     {ok, Answer};
 taken_change(_Origin, _Grant, _Message) -> unknown.
 
-%% --- push/3 ----------------------------------------------------------------------
+%% --- push/4 ----------------------------------------------------------------------
 
 push() ->
     Origin = grantee(),
@@ -601,28 +633,39 @@ push() ->
                   1 -> garbage();
                   _ -> frame(Origin, {erx_net, Wrong, push_body()})
               end,
-    judge(push, fun() -> erx_sock_admit:push(Origin, Socket, Message) end,
-          expected_push(Origin, Socket, Message), {Origin, Socket, Message}).
+    Kind = pick([tcp, udp, icmp]),
+    judge(push, fun() -> erx_sock_admit:push(Kind, Origin, Socket, Message) end,
+          expected_push(Kind, Origin, Socket, Message), {Kind, Origin, Socket, Message}).
 
-expected_push(Origin, Socket, Message) ->
+expected_push(Kind, Origin, Socket, Message) ->
     case taken(Origin, Socket, Message) of
         unknown -> unknown;
-        {ok, Body} -> push_verdict(Body)
+        {ok, Body} -> push_verdict(Kind, Body)
     end.
 
-push_verdict({reply, N, _Result} = Body) when is_integer(N), N >= 0 -> {ok, Body};
-push_verdict({data, Pieces} = Body) ->
+push_verdict(_Kind, {reply, N, _Result} = Body) when is_integer(N), N >= 0 -> {ok, Body};
+push_verdict(udp, {datagram, Ip, Port, Data} = Body) ->
+    case ip4(Ip) andalso within(Port, 0, 65535) andalso datagram(Data, 65527) of
+        true -> {ok, Body};
+        false -> {refused, push}
+    end;
+push_verdict(icmp, {echo, Ip, Ttl, Seq, Data} = Body) ->
+    case ip4(Ip) andalso within(Ttl, 0, 255) andalso within(Seq, 0, 65535) andalso datagram(Data, 65507) of
+        true -> {ok, Body};
+        false -> {refused, push}
+    end;
+push_verdict(tcp, {data, Pieces} = Body) ->
     case pieces_ok(Pieces) of
         true -> {ok, Body};
         false -> {refused, push}
     end;
-push_verdict(eof) -> {ok, eof};
-push_verdict({error, Reason} = Body) ->
+push_verdict(tcp, eof) -> {ok, eof};
+push_verdict(tcp, {error, Reason} = Body) ->
     case lists:member(Reason, end_reasons()) of
         true -> {ok, Body};
         false -> {refused, push}
     end;
-push_verdict(_) -> {refused, push}.
+push_verdict(_Kind, _) -> {refused, push}.
 
 %% 1 to 64 binaries of 1 to 65536 bytes in all.
 pieces_ok(Pieces) ->
@@ -630,13 +673,16 @@ pieces_ok(Pieces) ->
         andalso within(lists:sum([byte_size(Piece) || Piece <- Pieces]), 1, 65536).
 
 push_body() ->
-    case rand:uniform(10) of
+    case rand:uniform(12) of
         1 -> {reply, pick([0, 1, 1 bsl 40, -1, x, 1.5]), garbage()};
         2 -> {reply, rand:uniform(100), result_value()};
         3 -> {reply, rand:uniform(100), ok};
         4 -> eof;
         5 -> {error, reason()};
         6 -> pick([{error}, {data}, {reply, 1}, {reply, 1, ok, extra}, {eof}, x, [], <<"data">>]);
+        7 -> {datagram, address(), port(), datagram()};
+        8 -> {echo, address(), pick([0, 64, 255, 256, -1, x]), port(), datagram()};
+        9 -> pick([{datagram, {10, 0, 2, 3}, 53}, {echo, {10, 0, 2, 3}, 64, 1}]);
         _ -> {data, pieces()}
     end.
 
@@ -669,8 +715,7 @@ pieces() ->
 %% --- result/2 --------------------------------------------------------------------
 
 result() ->
-    Kind = pick([send, shutdown, setopts, getopts, sockname, peername, echo_send, echo_recv, echo_recv, echo_recv,
-                 echo_close]),
+    Kind = pick(result_kinds()),
     Result = result_value(),
     judge(result, fun() -> erx_sock_admit:result(Kind, Result) end, expected_result(Kind, Result), {Kind, Result}).
 
@@ -681,10 +726,6 @@ result_value() ->
                    {ok, [{nodelay, true}, {nodelay, true}]}, {ok, [nodelay]}, {ok, x}]);
         3 -> {ok, {pick([gen_ip4(), gen_ip4(), {10, 0, 2, 3}]), port(0)}};
         4 -> {ok, {gen_ip6(), 80}};
-        5 -> echo_reply();
-        6 -> echo_reply();
-        13 -> echo_reply();
-        14 -> echo_reply();
         7 -> {error, timeout};
         8 -> {error, reason()};
         9 -> {error, reason()};
@@ -693,55 +734,29 @@ result_value() ->
         _ -> {ok, {{10, 0, 2, 3}, 80}}
     end.
 
-%% A reply of an echo socket with at most one field at or over its bound.
-echo_reply() ->
-    {Ttl, Seq, Size} = case rand:uniform(6) of
-                           1 -> {pick([255, 256, -1, x]), 7, 1};
-                           2 -> {64, pick([65535, 65536, 65536, -1, x]), 1};
-                           3 -> {64, pick([65535, 65536]), 1};
-                           4 -> {64, 7, pick([0, 65535, 65536, 70000])};
-                           5 -> {64, 7, x};
-                           _ -> {64, 7, 1}
-                       end,
-    Data = case Size of
-               x -> pick([x, "data", <<1:3>>]);
-               _ -> binary:copy(<<"d">>, Size)
-           end,
-    {ok, {pick([{192, 0, 2, 1}, {192, 0, 2, 1}, gen_ip4()]), Ttl, Seq, Data}}.
-
-%% A reply is admitted by what it says, whatever else the kind of the request: `ok` and
-%% the closed lists of errors, the shapes of the reply types, and nothing else.
+%% A reply is admitted by what it says for its kind of request: `ok` for the kinds that
+%% answer it, the shapes of the reply types, and errors from the kind's closed list.
 expected_result(Kind, Result) ->
     case result_ok(Kind, Result) of
         true -> {ok, Result};
-        false -> result_refusal(Kind, Result)
+        false -> result_refusal(Result)
     end.
 
 result_ok(Kind, ok) ->
-    lists:member(Kind, [send, shutdown, setopts, echo_send, echo_close]);
+    lists:member(Kind, [send, shutdown, setopts, udp_send, udp_connect, echo_send, close]);
 result_ok(getopts, {ok, []}) ->
     true;
 result_ok(getopts, {ok, [{nodelay, Boolean}]}) ->
     is_boolean(Boolean);
 result_ok(Kind, {ok, {Ip, Port}}) ->
     lists:member(Kind, [sockname, peername]) andalso ip4(Ip) andalso within(Port, 0, 16#ffff);
-result_ok(echo_recv, {ok, {Ip, Ttl, Seq, Data}}) ->
-    ip4(Ip) andalso within(Ttl, 0, 255) andalso within(Seq, 0, 16#ffff) andalso is_binary(Data)
-        andalso byte_size(Data) =< 16#ffff;
-result_ok(echo_recv, {error, timeout}) ->
-    true;
 result_ok(Kind, {error, Reason}) ->
-    case Kind of
-        echo_recv -> false;
-        echo_send -> lists:member(Reason, echo_reasons());
-        echo_close -> lists:member(Reason, echo_reasons());
-        _ -> lists:member(Reason, socket_reasons())
-    end;
+    lists:member(Reason, kind_reasons(Kind));
 result_ok(_Kind, _Result) ->
     false.
 
-result_refusal(Kind, {error, _}) when Kind =/= echo_recv -> {refused, reason};
-result_refusal(_Kind, _Result) -> {refused, shape}.
+result_refusal({error, _}) -> {refused, reason};
+result_refusal(_Result) -> {refused, shape}.
 
 %% --- messages and pids -----------------------------------------------------------
 

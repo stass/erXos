@@ -41,9 +41,9 @@ current() ->
 
 %% A datagram to the peer makes the interface resolve it.
 arp(If, PeerIp) ->
-    {ok, Sock} = erx_udp_sock:open(0, #{active => false}),
-    _ = erx_udp_sock:send(Sock, PeerIp, 9, <<"resolve">>),
-    ok = erx_udp_sock:close(Sock),
+    {ok, Sock} = erx_gen_udp:open(0, [{active, false}, binary]),
+    _ = erx_gen_udp:send(Sock, PeerIp, 9, <<"resolve">>),
+    ok = erx_gen_udp:close(Sock),
     Deadline = erlang:monotonic_time(millisecond) + ?WAIT_MS,
     wait_neighbour(If, ip4(PeerIp), Deadline).
 

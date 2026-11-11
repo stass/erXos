@@ -5,10 +5,12 @@
 
 # Runs test/erlang/erx_net_admit_fuzz.erl, the fuzz target of the network stack's admission
 # of messages from the other domain (docs/design-network-stack.md, "Untrusted input"), for
-# one target, against the sources as they are and against a copy with the target's seeded
-# fault, which must fail it:
+# one target, against the sources as they are and against a copy with each of the target's
+# seeded faults, each of which must fail it:
 #   admit  erx_net_admit:request/2, with the comparison of the reply alias's domain dropped;
-#   sock   erx_sock_admit:answer/3, with the interface name's bound of 15 bytes dropped.
+#          erx_net_admit:request/4, with the bound of a UDP send_to's data dropped;
+#   sock   erx_sock_admit:answer/3, with the interface name's bound of 15 bytes dropped;
+#          erx_sock_admit:push/4, with the bound of a pushed datagram's data dropped.
 
 require 'open3'
 require 'optparse'
@@ -28,13 +30,22 @@ module ErxNetAdmitFuzz
   INET = 'erlang/apps/erx_net_client/src/erx_inet.erl'
 
   FAULTS = {
-    'admit' => Fault.new(what: 'a grant that does not compare the reply alias\'s domain', source: ADMIT,
-                         anchor: 'domain(Pid) =:= Grantee andalso domain(Alias) =:= Grantee',
-                         replacement: 'domain(Pid) =:= Grantee',
-                         marker: 'request2_admitted_bad'),
-    'sock' => Fault.new(what: 'an interfaces check without the name bound', source: SOCK,
-                        anchor: 'byte_size(Name) >= 1, byte_size(Name) =< ?IFNAMSIZ,',
-                        replacement: 'byte_size(Name) >= 1,', marker: 'answer_admitted_bad')
+    'admit' => [
+      Fault.new(what: 'a grant that does not compare the reply alias\'s domain', source: ADMIT,
+                anchor: 'domain(Pid) =:= Grantee andalso domain(Alias) =:= Grantee',
+                replacement: 'domain(Pid) =:= Grantee', marker: 'request2_admitted_bad'),
+      Fault.new(what: 'a send_to check without the datagram bound', source: ADMIT,
+                anchor: 'andalso is_binary(Data) andalso byte_size(Data) =< ?MAX_UDP;',
+                replacement: 'andalso is_binary(Data);', marker: 'request3_admitted_bad')
+    ],
+    'sock' => [
+      Fault.new(what: 'an interfaces check without the name bound', source: SOCK,
+                anchor: 'byte_size(Name) >= 1, byte_size(Name) =< ?IFNAMSIZ,',
+                replacement: 'byte_size(Name) >= 1,', marker: 'answer_admitted_bad'),
+      Fault.new(what: 'a datagram push check without the datagram bound', source: SOCK,
+                anchor: 'is_binary(Data), byte_size(Data) =< ?MAX_UDP ->',
+                replacement: 'is_binary(Data) ->', marker: 'push_admitted_bad')
+    ]
   }.freeze
 
   # The sources each target compiles beside the fuzz module: the checks under test, and what
@@ -47,17 +58,22 @@ module ErxNetAdmitFuzz
   module_function
 
   def run(target:, seed:)
-    fault = FAULTS.fetch(target)
     Erx::Generated.ensure(root: ROOT)
     texts = SOURCES.fetch(target).to_h { |path| [path, File.binread(File.join(ROOT, path))] }
     output, status = fuzz(texts, target: target, seed: seed)
     abort(output) unless status.success? && output.match?(PASSED)
-    raise "no #{fault.anchor} in #{fault.source}" unless texts.fetch(fault.source).include?(fault.anchor)
+    puts "erx_net_admit #{target}: every input passed"
+    FAULTS.fetch(target).each { |fault| run_fault(fault, texts, target: target, seed: seed) }
+  end
 
-    faulty = texts.merge(fault.source => texts.fetch(fault.source).sub(fault.anchor) { fault.replacement })
-    output, = fuzz(faulty, target: target, seed: seed)
+  def run_fault(fault, texts, target:, seed:)
+    source = texts.fetch(fault.source)
+    raise "no single #{fault.anchor} in #{fault.source}" unless source.scan(fault.anchor).length == 1
+
+    output, = fuzz(texts.merge(fault.source => source.sub(fault.anchor) { fault.replacement }),
+                   target: target, seed: seed)
     abort("#{fault.what} passed:\n#{output}") if output.match?(PASSED) || !output.include?(fault.marker)
-    puts "erx_net_admit #{target}: every input passed, and #{fault.what} failed with #{fault.marker}"
+    puts "erx_net_admit #{target}: #{fault.what} failed with #{fault.marker}"
   end
 
   # In a directory of its own, which also takes the crash dump of a failed run.
