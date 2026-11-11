@@ -10,17 +10,37 @@
  * its count is their number; a lookup hands out a reference only to a
  * reachable object that a live slot at the value's generation names.
  *
- * Bounds: one table of one page (ERX_CAP_PAGE_SLOTS slots) and two
- * objects, one of them paid for by a budget dead or alive at random; SLOT_STEPS
- * = 2 calls, each an erx_cap_install_kind, an erx_cap_install_copy, an
- * erx_cap_slot_clear or a destroy's close of either object, with every
- * mask and object argument; then one erx_cap_lookup. The free list is
- * FIFO, so SLOT_STEPS installs reach only slots 1 to SLOT_STEPS, and the
- * checks walk those; within the bound a slot's generation is 0 or 1. The
- * values the calls take name slot 0 to SLOT_STEPS + 1 at generation 0 or
- * 1: every slot the steps reach, the reserved slot and a free one, live
- * and stale; cap_read's harness covers every other value. Loops unwound
- * 6 times; the table set-up's loops over the page 65 times.
+ * Bounds: one table of one page of PAGE_SLOTS = 4 slots, at least
+ * SLOT_STEPS + 2, as many as its limit, and two objects, one of them paid for by a budget dead or alive at random;
+ * SLOT_STEPS = 2 calls, each an erx_cap_install_kind, an
+ * erx_cap_install_copy, an erx_cap_slot_clear or a destroy's close of
+ * either object, with every mask and object argument; then one
+ * erx_cap_lookup. The free list is FIFO, so SLOT_STEPS installs reach only
+ * slots 1 to SLOT_STEPS, and the checks walk those; within the bound a
+ * slot's generation is 0 or 1. The values the calls take name slot 0 to
+ * SLOT_STEPS + 1 at generation 0 or 1: every slot the steps reach, the
+ * never-issued slot 0 and a free one, live and stale; cap_read's harness covers
+ * every other value. Loops unwound 6 times; the table set-up's loops over
+ * the page PAGE_SLOTS + 1 times.
+ *
+ * Why this small page checks what the ABI's full page would. Tables with
+ * either page, each limited to its page, differ in the limit, the
+ * capacity, the free count, the free list's tail (slot PAGE_SLOTS - 1,
+ * against the full page's last slot) and slot PAGE_SLOTS - 1's next,
+ * which set-up leaves 0 on the small page and pointing onward on the
+ * full one. None of them is observed. Set-up puts slots 1 to
+ * PAGE_SLOTS - 1 on the free list in order. A take reads the head's next
+ * and removes the head; a clear zeroes its slot's next and appends it
+ * after the tail, writing the old tail's next. With at most SLOT_STEPS
+ * takes and PAGE_SLOTS - 1 > SLOT_STEPS, the takes hand out slots 1 to
+ * SLOT_STEPS on either page and read only their next fields; a clear
+ * needs a live slot, so no take follows it and no tail's next is read.
+ * The list never runs dry, so no install sees ERX_ELIMIT on either page,
+ * and only set-up reads the limit. Every value names a slot below
+ * SLOT_STEPS + 2, inside the capacity of either page, so no lookup, copy
+ * or clear reads a slot past it, and the full page's other slots stay as
+ * set-up left them. With one page, a slot's index divided by the page's
+ * length is 0 and the remainder is the index itself on both.
  *
  * Not reached at this bound: a clear of a slot with a neighbour on its
  * list. The one clear two calls allow follows one install, so the
@@ -50,12 +70,36 @@
  */
 
 #include "cbmc_harness.h"
-#include "cap.c"
 
 #ifndef SLOT_STEPS
 #define SLOT_STEPS	2
 #endif
 #define NOBJECTS	2
+
+/*
+ * The table's page, cut from the ABI's ERX_CAP_PAGE_SLOTS to PAGE_SLOTS
+ * slots, at least slot 0, every slot the steps install and one free.
+ * cap.c reads ERX_CAP_PAGE_SLOTS only as the page's length, and nothing
+ * the calls do reaches past slot SLOT_STEPS + 1 (see Bounds above), so
+ * the cut changes no result the checks see. It is what keeps the harness
+ * cheap: every store through a slot pointer the steps compute is encoded
+ * over the whole page, so the formula grows with the page's bytes. The
+ * macro is redefined before cap.c, so cap.c builds with the small page,
+ * which must divide ERX_CAPS_MAX as a real page does (cap.c's whole-pages
+ * assert). The asserts here check that the small page is large enough
+ * for the steps and no larger than the ABI's, and that the redefinition
+ * is still the one in effect after cap.c.
+ */
+#define PAGE_SLOTS	4
+_Static_assert(SLOT_STEPS + 2 <= PAGE_SLOTS,
+    "the page holds slot 0, every slot the steps install and one free");
+#include "erx/abi.h"
+enum { ABI_PAGE_SLOTS = ERX_CAP_PAGE_SLOTS };
+_Static_assert(PAGE_SLOTS <= ABI_PAGE_SLOTS, "the cut page fits in a real one");
+#undef ERX_CAP_PAGE_SLOTS
+#define ERX_CAP_PAGE_SLOTS	((uint32_t)PAGE_SLOTS)
+#include "cap.c"
+_Static_assert(ERX_CAP_PAGE_SLOTS == PAGE_SLOTS, "cap.c builds with the cut page");
 
 /* The object store's records, as far as the capability table sees them. */
 struct erx_object {
@@ -68,7 +112,7 @@ struct erx_object {
 
 static erx_cap_table_t table;
 static _Atomic(erx_cap_slot_t *) directory[1];
-static erx_cap_slot_t page[ERX_CAP_PAGE_SLOTS];
+static erx_cap_slot_t page[PAGE_SLOTS];
 static erx_object_t objects[NOBJECTS];
 static uint64_t budget_storage;
 static bool budget_is_dead;
@@ -247,7 +291,7 @@ harness(void)
 	bool released;
 
 	__CPROVER_assume(erx_cap_table_init(&table, directory,
-	    sizeof(directory), ERX_CAP_PAGE_SLOTS) == ERX_OK);
+	    sizeof(directory), PAGE_SLOTS) == ERX_OK);
 	__CPROVER_assume(erx_cap_table_add_page(&table, page,
 	    sizeof(page)) == ERX_OK);
 	for (which = 0; which < NOBJECTS; which++) {

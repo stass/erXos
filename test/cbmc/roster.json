@@ -161,13 +161,13 @@
       "unwind": 6,
       "unwindset": {
         "erx_cap_table_init.0": 3,
-        "erx_cap_table_add_page.0": 65,
-        "erx_cap_table_add_page.1": 65,
+        "erx_cap_table_add_page.0": 5,
+        "erx_cap_table_add_page.1": 5,
         "cap_page_in_use.0": 3,
         "cap_read_slot.0": 2
       },
       "object_bits": 12,
-      "bounds": "one table of one page and two objects; SLOT_STEPS = 2 installs of a kind, copies, clears or closes with every mask and object, and values naming slots 0 to SLOT_STEPS + 1 at generation 0 or 1; then one lookup; loops unwound 6 times, the page's set-up 65",
+      "bounds": "one table of one page of 4 slots, at least SLOT_STEPS + 2, ERX_CAP_PAGE_SLOTS redefined to that for cap.c, which reaches every slot the calls can and so checks what a full page would, and two objects; SLOT_STEPS = 2 installs of a kind, copies, clears or closes with every mask and object, and values naming slots 0 to SLOT_STEPS + 1 at generation 0 or 1; then one lookup; loops unwound 6 times, the page's set-up 5",
       "assumptions": [
         "one thread holding the locks the writers name: each _Atomic access is indivisible and sequentially consistent, its memory order ignored (test/cbmc/include/stdatomic.h)",
         "the object store and the attach insert are stubs that keep erx/object.h's and erx/attach.h's contracts; the budget's death is a stub returning a value chosen at random and fixed for the run"

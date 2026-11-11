@@ -281,11 +281,12 @@ it; git history is the record of completed work.
   keeping the seven single-decision harnesses in the gate and moving
   `page_funnel` and `cap_slot_list` out of it: they take about 2 h 27 min
   of the gate's 2 h 33 min and check what the fuzz targets already check.
-  Until the owner decides, the gate runs all nine. In the parallel gate
-  on a second development host (master 83221dc9) every harness verified except
-  `cap_slot_list`, which timed out at its 3,600 s deadline, as did its
-  mutants `insert-leaves-head-prev` and `clear-keeps-head`, so the gate
-  fails until that harness shrinks or leaves the gate.
+  Until the owner decides, the gate runs all nine. `cap_slot_list`
+  checks a table whose page is cut to 4 slots, which its header argues
+  checks what the ABI's 64-slot page would; on the Intel second
+  development host with cbmc 6.11.0 it verifies in 214 s and its three
+  mutants are caught in 219 s, 316 s and 290 s, where on the full page
+  the harness and two mutants passed the 3,600 s deadline.
 
 * [High] kernel, Track K, the one route from user mode: in erXos's kernel
   only the trap immediate of `abi/arch/<arch>.txt` reaches `erx_dispatch`,
