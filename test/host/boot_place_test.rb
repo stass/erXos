@@ -162,7 +162,7 @@ class BootPlaceTest < Minitest::Test
   end
 
   # The development machine's root fits that machine; one linked for the oracle's 2 GiB
-  # machine lies past the end of its 160 MiB.
+  # machine, 192 MiB into RAM, is refused there: it lies past what that RAM holds.
   def test_the_development_machines_root_loads_on_the_development_machine
     machine = Erx::ProductionImage::DEVELOPMENT_MACHINE
     output = plan(archive(standard.merge('boot/stopgap-root' => linked_root(machine: machine))),

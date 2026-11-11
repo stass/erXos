@@ -399,11 +399,13 @@ fits the platform's RAM less `fiasco_reserve`. `fiasco_reserve` is a number in
 the platform record beside `ram_bytes`, the harness's RAM size. `sigma0`'s
 resource dump at 512 MiB on a 4-CPU HVF boot of the fork shows 33.8 MiB it does
 not offer the root: 32 MiB of kernel memory, the kernel's image, the device
-tree's 1 MiB and `sigma0` itself; at 160 MiB the kernel memory is 10 MiB. QEMU
-`virt`'s `fiasco_reserve` is 16 MiB, a little more than that. The rule leaves the
+tree's 1 MiB and `sigma0` itself; at 160 MiB the kernel memory is 10 MiB, and
+at the development machine's 192 MiB it is 6% rounded up, as Fiasco rounds it,
+to 12 MiB (computed, not measured). QEMU `virt`'s
+`fiasco_reserve` is 16 MiB, a little more than that. The rule leaves the
 archive out: `bootstrap` reserves it whole and it is never released, so a
 manifest's `root_memory` must leave it room below RAM less the reserve; QEMU
-`virt`'s 96 MiB leaves it 48 MiB. If either is wrong, the pool fails at boot with a
+`virt`'s 126.25 MiB leaves it and the root's image 49.75 MiB. If either is wrong, the pool fails at boot with a
 diagnostic. A platform record without these numbers is not admitted. The
 `Admitted` value records `root_startup: declared` in its report, and
 `erx_root_plan` replaces the rule behind the same value in Track K.
@@ -444,13 +446,13 @@ as 6% of it, a growth added to both `root_memory` and `system_baseline` of the
 development manifest, a growth of `/tmp`'s cap, and the root's place, the one
 address `liberx/backend/fiasco/root.ld` takes from the root's link; the rest of the
 added RAM widens the archive's room below RAM, up to the root's place. The
-development machine links the root 64 MiB into RAM, so it fits 160 MiB, and the
+development machine links the root 64 MiB into RAM, so it fits small machines, and the
 oracle's 2 GiB machine 192 MiB into RAM, which holds the archive to about 187 MiB
 ([Boot](design-platforms.md#boot) gives the arithmetic).
 No other line of the manifest changes, and the manifest check proves the
 grown manifest against the platform record with that RAM and reserve as it proves
 the development one. The production image always boots on the development machine,
-which is the platform record's own 160 MiB and 16 MiB: small, since the browser
+which is the platform record's own 192 MiB and 16 MiB: small, since the browser
 emulator's guest RAM is the tab's memory, yet with room to spare at the shell. `OracleQemu` boots on 2 GiB with a
 160 MiB reserve, the system domain 1 GiB larger and `/tmp`'s cap 160 MiB, since
 OTP's suites ask for more than the development baseline holds (compiler's

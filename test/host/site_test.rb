@@ -7,6 +7,7 @@ require 'tmpdir'
 require 'yaml'
 require 'zlib'
 require_relative '../../tools/lib/erx/site'
+require_relative '../../tools/lib/erx/production_image'
 
 class SiteTest < Minitest::Test
   REPO = File.expand_path('../..', __dir__)
@@ -33,6 +34,13 @@ class SiteTest < Minitest::Test
 
   def inventory(root, image, ref: COMMIT)
     Erx::Site.inventory(root:, v64: File.join(root, 'v64'), image:, source: Erx::Site.source(ref))
+  end
+
+  # The page boots the production image, whose manifest's root_memory needs the
+  # development machine's RAM, so terminal.js gives the guest exactly that much.
+  def test_the_page_gives_the_guest_the_development_machines_ram
+    script = File.read(File.join(REPO, 'site/terminal.js'))
+    assert_equal [Erx::ProductionImage::MEMORY_MIB.to_s], script.scan(/^const RAM_MIB = ([0-9]+);$/).flatten
   end
 
   def test_publish_writes_digest_named_files_notices_and_a_checked_image

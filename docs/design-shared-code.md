@@ -68,8 +68,9 @@ Decisions every reader needs:
 ## The problem and its evidence
 
 The owner's question was why ERTS code is not shared between domains to
-save memory, with the constraint that the machine stays small: 160 MiB for
-the development machine, and "we can't be eating 512M of ram" for an
+save memory, with the constraint that the machine stays small: the RAM of
+the development machine (`config/platforms/qemu-virt.json`), and "we can't
+be eating 512M of ram" for an
 embedded system.
 
 **What a domain's runtime holds.** The system domain at the Erlang shell
@@ -175,7 +176,7 @@ Tracing and NIF loading write the code itself.
 From the owner and from the working agreement, quoted where they are
 rules:
 
-1. Save memory per domain on a machine of 160 MiB, without giving up
+1. Save memory per domain on the development machine's RAM, without giving up
    behaviour.
 2. "erXos's Erlang behaves like stock OTP": OTP's suites on erXos are
    compared with stock OTP 29.1.2, and every difference is a bug, a

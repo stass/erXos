@@ -200,8 +200,12 @@ class ManifestStopgapTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 4, 'machine.shares', @source.sub('quota_ns 30000000', 'quota_ns 40000000'))
   end
 
+  # The development manifest with root_memory set to bytes.
+  def with_root_memory(bytes) = changed(@source.sub(/^(  root_memory )\d+$/) { "#{Regexp.last_match(1)}#{bytes}" })
+  def ram_less_the_reserve = @platform.fetch('ram_bytes') - @platform.fetch('fiasco_reserve')
+
   def test_root_memory_over_ram_less_the_reserve_is_refused
-    refused(Erx::Manifest::Invalid, 4, 'root_startup', @source.sub('root_memory 100925440', 'root_memory 150999040'), message: /fiasco_reserve/)
+    refused(Erx::Manifest::Invalid, 4, 'root_startup', with_root_memory(ram_less_the_reserve + 4096), message: /fiasco_reserve/)
   end
 
   def test_loadable_segments_and_baseline_over_root_memory_are_refused
@@ -351,7 +355,7 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   def test_root_memory_up_to_ram_less_the_reserve_is_admitted
-    assert_instance_of Erx::Manifest::Admitted, admit(@source.sub('root_memory 100925440', 'root_memory 150994944'))
+    assert_instance_of Erx::Manifest::Admitted, admit(with_root_memory(ram_less_the_reserve))
   end
 
   # Property 9: release builds wait for the confinement check.

@@ -1629,6 +1629,13 @@ it; git history is the record of completed work.
   manifest has a facet and the boot order is name order. A service's `interface` is a
   number, not the qualified ABI service name, and the server's release is not checked to
   supply it. design-stopgap.md lists `facet` among the records the check accepts.
+* [Medium] packer, `tools/lib/erx/manifest.rb` (`RootStartup`) and `pack.rb`: nothing at build
+  time holds the archive and `root_memory` together to RAM less `fiasco_reserve`. The root
+  startup rule checks only `root_memory` against RAM less the reserve, so a release that grows
+  the archive past the room the development manifest leaves (47.75 MiB, of which the archive
+  takes 46.70) packs and passes `make check`, and the pool falls short only at boot. Check
+  archive plus `root_memory` against the machine's platform record when packing, with a
+  seeded-fault test.
 * [Low] manifest check, `tools/lib/erx/manifest.rb`: `system_reservation` is 0, so the
   system domain's reservation for `max_domains` admitted domains (property 4) is not
   counted against `root_memory`; design-abi.md has the production admission planner
@@ -4598,7 +4605,7 @@ document's "residual risks accepted" paragraph.
 
 * [Low] website, `site/terminal.js` (`FAULTS`, [site/README.md](site/README.md)): what the fault menu still lacks.
   It is tested under Node against a stand-in for v64's objects only: drive each entry in a browser, where the
-  site's image reaches the shell (as it does under v64 in Node at 160 MiB). RAM fail is disabled: v64's bus
+  site's image reaches the shell, and check that it does under v64 at the development machine's RAM. RAM fail is disabled: v64's bus
   maps RAM as one region and `register_mmio` refuses a range over it, so it needs a change inside v64
   (a list of failed RAM ranges that `AddressSpace::lookup` in `src/rust/aarch64/bus.rs` checks before its RAM
   case, set by a new export that also bumps the bus generation and drops the range's compiled code, as

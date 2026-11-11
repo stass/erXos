@@ -376,7 +376,7 @@ class ProductionImageTest < Minitest::Test
   end
 
   # Each machine names the root's place. The development machine's lies inside its own
-  # RAM and the refusal boot's, below the device tree QEMU puts at half of a 160 MiB
+  # RAM and the refusal boot's, below the device tree QEMU puts at half of the development
   # machine's RAM and above the one at half of the refusal boot's; the oracle's lies high
   # enough for its large archive. A place with no room for the root is refused, and the
   # link takes only a page-aligned address in RAM.

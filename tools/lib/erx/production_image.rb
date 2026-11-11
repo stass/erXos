@@ -51,7 +51,22 @@ module Erx
                              tools/lib/erx/fiasco.rb].freeze
     ROOT_ENTRY_PATH = 'system/root'
     NOTICES_PATH = 'system/NOTICES'
-    MEMORY_MIB = 160
+    # A field of the platform record in whole MiB, which is how QEMU's -m and Machine take it.
+    def self.record_mib(record, field)
+      bytes = record.fetch(field)
+      raise Error, "#{PLATFORM}: #{field} must be a positive whole number of MiB" unless
+        bytes.is_a?(Integer) && bytes.positive? && (bytes % (1 << 20)).zero?
+
+      bytes >> 20
+    end
+    # The development machine's RAM and fiasco_reserve, read once from the platform
+    # record, their one source: the production image boots on the record's own machine
+    # (DEVELOPMENT_MACHINE), and the QEMU harness gives it MEMORY_MIB of RAM.
+    PLATFORM_RECORD = JsonInput.parse(File.binread(File.expand_path("../../../#{PLATFORM}", __dir__)), max_bytes: 65_536,
+                                                                                                    label: 'platform record')
+    private_constant :PLATFORM_RECORD
+    MEMORY_MIB = record_mib(PLATFORM_RECORD, 'ram_bytes')
+    FIASCO_RESERVE_MIB = record_mib(PLATFORM_RECORD, 'fiasco_reserve')
     # No more RAM than root_memory, of which Fiasco and the archive take their part first,
     # so the pool falls short and the root must refuse the boot. The development machine's
     # root, 64 MiB into RAM, ends inside it, and QEMU's device tree, at half of RAM below
@@ -162,8 +177,8 @@ module Erx
           end
       end
     end
-    DEVELOPMENT_MACHINE = Machine.new(memory_mib: MEMORY_MIB, fiasco_reserve_mib: 16, system_growth_mib: 0, tmp_growth_mib: 0,
-                                      root_mib: 64)
+    DEVELOPMENT_MACHINE = Machine.new(memory_mib: MEMORY_MIB, fiasco_reserve_mib: FIASCO_RESERVE_MIB, system_growth_mib: 0,
+                                      tmp_growth_mib: 0, root_mib: 64)
 
     # source with no session template: each `session` record, to the next record. The
     # production image keeps its template, so the console logs root in at boot and the

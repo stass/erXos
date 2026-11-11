@@ -4,8 +4,8 @@
 // The pure parts of site/terminal.js under Node: the boot-log parse that
 // finds the system domain's memory for the Corrupt RAM fault, and the fault
 // table's groups and availability. fixtures/boot-160m.log is the serial
-// output of the site's machine (1 core, 160 MiB, erx.watchdog=1,30,600)
-// booted under QEMU's virt, up to the root task's first report.
+// output of a boot on QEMU's virt (1 core, 160 MiB, erx.watchdog=1,30,600)
+// up to the root task's first report.
 // Run by test/host/site_faults_test.rb.
 
 import { test } from "node:test";

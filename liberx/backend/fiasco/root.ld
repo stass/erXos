@@ -12,7 +12,7 @@
  * --defsym (NativeRoot.place_flags), and a link that does not fails on the
  * undefined symbol. A system image takes it from the machine it is built for
  * (ProductionImage::Machine#root_address), which docs/design-platforms.md
- * explains: low, 64 MiB into RAM, for the development machine, so a 160 MiB
+ * explains: low, 64 MiB into RAM, for the development machine, so a small
  * machine holds it, and 192 MiB into RAM for the QEMU oracle's machine, so a
  * single file of about 188 MiB lies below it. Test roots take
  * NativeRoot::PLACE, the low place.

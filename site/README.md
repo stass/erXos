@@ -137,11 +137,11 @@ what readers without JavaScript see, and what everyone sees before
 booting. The hint and the source line are page text below the case.
 
 With JavaScript, `terminal.js` shows a "Boot erXos" key, the download
-size and the simulated machine, `ARMv8-A · 1 core · 160 MiB RAM`. On a
+size and the simulated machine, `ARMv8-A · 1 core · 192 MiB RAM`. On a
 click it loads xterm.js (from jsDelivr, pinned to an exact version and
 checked by Subresource Integrity), v64, the image and the disk, showing a
 progress bar on the case; checks the image and the disk against
-`boot.json`; and boots the image with 160 MiB of guest memory and one
+`boot.json`; and boots the image with 192 MiB of guest memory and one
 core (`RAM_MIB` and `CPU_CORES`, the one place to change each, from which
 the readout is built too), v64's page-tier JIT on, the kernel command
 line `erx.watchdog=1,30,600`, the disk as its virtio block device and a
@@ -284,7 +284,7 @@ went away held it.
 `terminal.js` runs under Node too, without a page, for its pure parts:
 `ruby test/host/site_faults_test.rb` runs `test/site/terminal_test.mjs`,
 which checks the boot-log parse against `test/site/fixtures/boot-160m.log`,
-the site's machine (one core, 160 MiB) booted under QEMU's `virt`, and the
+a boot on one core and 160 MiB under QEMU's `virt`, and the
 disk faults against a stand-in for v64's objects.
 
 Browsers without WebAssembly or `DecompressionStream` keep the recorded
