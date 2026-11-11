@@ -104,7 +104,14 @@ end
       marker = File.join(stage, 'install-script-ran')
       script = "node -e " + "require('node:fs').writeFileSync(#{marker.to_json}, 'ran')".to_json
       local_package(stage, 'seed', scripts: { preinstall: script, install: script, postinstall: script })
-      edit_package(stage) { |package| package['devDependencies']['seed'] = 'file:seed' }
+      # The seed is the stage's only dependency, so pnpm re-locks it offline from
+      # the manifest alone. Re-locking a registry package that has peers
+      # (react-dom, @types/react-dom) wants registry metadata, which neither
+      # the store nor an offline host holds, and a lockfile edited by hand fails
+      # pnpm's supply-chain check, which wants the same metadata.
+      edit_package(stage) do |package|
+        package.merge!('dependencies' => {}, 'devDependencies' => { 'seed' => 'file:seed' })
+      end
       runner.run(['pnpm', 'install', '--lockfile-only', '--offline', '--ignore-scripts', '--store-dir',
                   File.join(ROOT, Build::STORE), Build::NO_REGISTRY, *Build::PNPM_OPTIONS],
                  name: 'web-seed-lock', deadline: Build::DEADLINE, chdir: stage, env: Build::OFFLINE_ENV)

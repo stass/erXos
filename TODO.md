@@ -537,6 +537,27 @@ it; git history is the record of completed work.
   not check; check it there, or send `no-store` for a name without the hash. A refusal of a request that carried bytes
   after its head (a 405 for a POST with a body) closes with unread input, so the kernel's reset may cost the
   client the answer; shut down writing and drain briefly before closing.
+* [Medium] `web/src/connection.ts`, [Failure handling](docs/design-web.md#failure-handling-diagnostics-and-debuggability):
+  a view the machine ends `closed` is not reopened, as the design's recovery says, until the socket drops; view
+  numbers are fixed per target, so a reopen needs a per-connection counter of numbers, and a rule for which end
+  reasons reopen and how often, so a view that crashes at once is not reopened at the network's pace.
+* [Medium] `web/test`, W2 in [Invariants](docs/design-web.md#invariants): no test seeds a component that renders a
+  `MachineText` directly and confirms `tsc --noEmit` fails on it, so the barrier rests on `@types/react`'s
+  `ReactNode` staying narrow; add the staged seed to `test/host/web_build_test.rb`.
+* [Medium] `web/src/connection.ts`, W7: the browser sees no ping, and a record view is silent while its record does
+  not change, so a half-open socket (a laptop's sleep, a dropped NAT entry) shows the last record as current with no
+  "stale since"; the network front end needs a heartbeat the client sees and a client timer that ends the socket.
+* [Low] `web/src/connection.ts`, [Failure handling](docs/design-web.md#failure-handling-diagnostics-and-debuggability):
+  after `bye protocol` the design says the client reloads; the core reconnects, and a welcome resets its delay, so a
+  disagreement on a rule reconnects every second. An update whose body is not the target's kind (`entries` for a
+  `path`) is handed to the page, which ignores it and never asks again; check the kind in the core and close.
+* [Low] `web/src/home.tsx`, [The client](docs/design-web.md#the-client): the record view has no unit column, and its
+  children and presentations are text, not links; they need the inspection schema's units in the generated tables
+  and the routes of `/proc` paths and presentations served by views.
+* [Low] `tools/lib/erx/web_build.rb`, [The client](docs/design-web.md#the-client): the bundle's notices file
+  holds esbuild's legal comments, and React's say only that the MIT licence is "found in the LICENSE file", which
+  the bundle does not carry; add each bundled package's LICENSE text from the store before the client's files are
+  distributed, by the web domain's release or the website's demo image.
 * [Low] `web/tsconfig.json`, [Build and dependencies](docs/design-web.md#build-and-dependencies): `tsc --noEmit`
   checks `web/src` (handwritten and generated) but not `web/test`, whose `node:` imports need `@types/node`,
   which the lockfile does not pin; add it, pinned, and check the tests too.

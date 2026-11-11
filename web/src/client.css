@@ -13,3 +13,28 @@
 body {
   margin: 0 16px;
 }
+
+.machine-text {
+  unicode-bidi: isolate;
+}
+
+/* An escape token or a status token: the client's own text, never the machine's. */
+.token {
+  font-family: ui-monospace, monospace;
+  opacity: 0.7;
+}
+
+.notice {
+  font-weight: bold;
+}
+
+table.record {
+  border-collapse: collapse;
+}
+
+table.record th,
+table.record td {
+  padding: 2px 12px 2px 0;
+  text-align: left;
+  vertical-align: top;
+}
