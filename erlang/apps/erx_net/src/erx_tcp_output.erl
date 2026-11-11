@@ -155,7 +155,7 @@ Departures, each from erXos's model:
 -include("erx_tcp_wire.hrl").
 -include("erx_net_frame.hrl").
 
--export([output/2, output/3, setpersist/2, request_r_scale/0, segments/1]).
+-export([output/2, output/3, sndbuf_autoscale/2, setpersist/2, request_r_scale/0, segments/1]).
 
 %% TCP_MAXWIN and TCP_MAX_WINSHIFT (tcp.h).
 -define(TCP_MAXWIN, 16#ffff).
@@ -163,6 +163,14 @@ Departures, each from erXos's model:
 %% SB_MAX (sys/sys/sockbuf.h), kern.ipc.maxsockbuf's default, from which tcp_connect picks
 %% the window scale it requests.
 -define(SB_MAX, (2 * 1024 * 1024)).
+%% sb_max_adj (uipc_sockbuf.c:66-69), the largest buffer sbreserve grants under the default
+%% sb_max: SB_MAX scaled by MCLBYTES / (MSIZE + MCLBYTES), the share of an mbuf cluster's
+%% memory that holds data.
+-define(SB_MAX_ADJ, (?SB_MAX * 2048 div (256 + 2048))).
+%% V_tcp_autosndbuf_inc and V_tcp_autosndbuf_max (tcp_output.c:120-126), FreeBSD's defaults:
+%% the step by which autosizing grows the send buffer, and the size past which it stops.
+-define(AUTOSNDBUF_INC, 8192).
+-define(AUTOSNDBUF_MAX, (8 * 1024 * 1024)).
 %% V_tcp_retries (tcp_timer.c), where tcp_setpersist stops counting.
 -define(TCP_RETRIES, 12).
 %% V_tcp_minmss (tcp_subr.c): with path MTU discovery on, its default, a connection whose
@@ -230,6 +238,42 @@ output(#tcb{snd_una = Una, snd_max = Max, snd_nxt = Nxt} = Tcb0,
     Idle = Max =:= Una,
     {Tcb1, Out} = again(after_idle(Idle, Tcb, Ctx), Idle, {Credit, Runs}, Ctx, []),
     {done(Tcb1, Ctx), Out}.
+
+-doc """
+`tcp_sndbuf_autoscale` (tcp_output.c:2123-2178): whether the send buffer grows one step
+before this pass sends, from the connection as output finds it, the restart window after an
+idle period included. It grows when the peer's window, with a 5/4 fudge, covers the buffer,
+the buffer is 7/8 full, it holds less than `tcp_autosndbuf_max`, and the window covers what
+is not yet sent. The step is `tcp_autosndbuf_inc`, to at most `tcp_autosndbuf_max`, asked of
+the grant as `{reserve_buffer, snd, Bytes}`. A size past `sb_max_adj`, which `sbreserve`
+would refuse, is not asked and turns autosizing off; so does the grant's refusal, which
+erx_tcp's dispatch of `{buffer, snd, refused}` handles. FreeBSD clears SB_AUTOSIZE when
+`sbreserve` fails in the same way, so a connection asks no more after its first refusal.
+`tcp_sendbuf_auto_lowat` is off by default, so the low watermark takes no part.
+
+FreeBSD runs it on every round of tcp_output's `again` loop; the step runs it once, before
+output, and the growth it grants is a step of its own, whose output runs it again.
+""".
+-spec sndbuf_autoscale(#tcb{}, #tcp_ctx{}) -> {#tcb{}, [erx_tcp:action()]}.
+sndbuf_autoscale(#tcb{snd_autosize = false} = Tcb, _Ctx) ->
+    {Tcb, []};
+sndbuf_autoscale(#tcb{snd_una = Una, snd_nxt = Nxt, snd_max = Max, snd_wnd = SndWnd,
+                      snd_hiwat = Hiwat, sndbuf = Buf} = Tcb, Ctx) ->
+    Used = erx_tcp_sndbuf:size(Buf),
+    SendWin = min(SndWnd, cwnd(after_idle(Max =:= Una, Tcb, Ctx))),
+    %% FreeBSD takes sbused - (snd_nxt - snd_una) unsigned, so a SYN or FIN in flight, which
+    %% the buffer does not hold, wraps it past every window.
+    Unsent = Used - (max(Nxt, Una) - Una),
+    Grows = SndWnd div 4 * 5 >= Hiwat
+        andalso Used >= Hiwat div 8 * 7
+        andalso Used < ?AUTOSNDBUF_MAX
+        andalso Unsent >= 0 andalso SendWin >= Unsent,
+    Bytes = min(Hiwat + ?AUTOSNDBUF_INC, ?AUTOSNDBUF_MAX),
+    case {Grows, Bytes =< ?SB_MAX_ADJ} of
+        {false, _} -> {Tcb, []};
+        {true, true} -> {Tcb, [{reserve_buffer, snd, Bytes}]};
+        {true, false} -> {Tcb#tcb{snd_autosize = false}, []}
+    end.
 
 -doc """
 `tcp_setpersist` as the persist timer's next probe: arms it backed off by the timeouts so

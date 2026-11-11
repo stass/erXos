@@ -103,6 +103,9 @@
     %% buffer: read by the owner, or held by a waiting recv.
     sndbuf :: erx_tcp_sndbuf:buf(),
     snd_hiwat :: non_neg_integer(),             % so_snd.sb_hiwat
+    %% SB_AUTOSIZE on so_snd: output may grow the send buffer (erx_tcp_output:
+    %% sndbuf_autoscale/2) until a reservation is refused.
+    snd_autosize = true :: boolean(),
     snd_lowat :: non_neg_integer(),             % so_snd.sb_lowat: free space that wakes a writer
     rcv_hiwat :: non_neg_integer(),             % so_rcv.sb_hiwat
     rcv_buffered = 0 :: non_neg_integer(),      % sbavail(&so->so_rcv)

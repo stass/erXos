@@ -675,16 +675,20 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Remove this item once those numbers are recorded.
 * **[Medium] network, fixed buffer sizes and connection credit**
   ([design-network-stack.md](design-network-stack.md#credited-queues)).
-  A connection has a 32 KiB send buffer and a 64 KiB receive buffer
-  (FreeBSD's defaults, without its autosizing) and a credit of 256 items;
-  32 KiB in flight over a path of 0.1 to 0.3 ms caps one flow. In the FreeBSD
-  run of 2026-11-09 (the entry on one connection process per flow) the
-  counters showed no drops and no retransmissions and the tap helper used
-  2 percent of a CPU, so the limit is on the Erlang side; the sizes'
-  effect was not measured. Settled by the same send and receive with the
-  buffers at 32 KiB to 2 MiB and the credit at 64 to 1,024; the fix on
-  the table is FreeBSD's buffer autosizing (`tcp_autorcvbuf`,
-  `tcp_autosndbuf`).
+  A connection's send buffer grows by FreeBSD's autosizing
+  (`tcp_sndbuf_autoscale`) within its grant's `buffers` limit; its receive
+  buffer stays at 64 KiB (FreeBSD's default, without `tcp_autorcvbuf`),
+  and its credit at 256 items. On the FreeBSD x86-64 test host (FreeBSD
+  16.0-CURRENT, native, stock OTP 29 with `+S 128:128`, tap to a vnet
+  jail, `tools/erx bench net-freebsd --runs 5 --only bulk-send,rr-64`,
+  median of 5, 2026-11-10, erxos-history `net-autosnd-2026-11-10`),
+  send autosizing took bulk-send from 2,644 to 5,100 Mbit/s (lwIP 6,655)
+  and from 8.04 to 7.22 CPU-s/GiB, against master 0df5308b with a fixed
+  32 KiB send buffer; rr-64 stayed at about 14,200 txn/s. Receive
+  autosizing is left out: a separate measurement showed larger receive
+  windows overflow the test path's tap queue. Settled for the receive side
+  by bulk-recv with the receive buffer at 64 KiB to 2 MiB over a medium
+  whose queue holds the window, and the credit at 64 to 1,024.
 * **[Medium] network, a fixed-length `recv` of a few segments**
   ([design-network-stack.md](design-network-stack.md#the-interface-towards-erlang-programs)).
   `erx_tcp_conn`'s `take/2` joins the whole receive queue into one binary

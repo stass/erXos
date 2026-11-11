@@ -47,7 +47,12 @@ conn_test_() ->
       {"active mode delivers to the owner", fun active_mode_delivers_to_the_owner/0},
       {"another domain's envelope is dropped and counted",
        fun a_non_grantee_envelope_is_dropped_and_counted/0},
-      {"close runs FIN both ways into TIME-WAIT", fun close_reaches_time_wait_with_its_timer/0}]].
+      {"close runs FIN both ways into TIME-WAIT", fun close_reaches_time_wait_with_its_timer/0},
+      {"buffers are reserved at the grant", fun buffers_are_reserved_at_the_grant/0},
+      {"short connections give their buffers back",
+       fun short_connections_give_their_buffers_back/0},
+      {"an open socket in TIME-WAIT keeps its buffers",
+       fun an_open_socket_in_time_wait_keeps_its_buffers/0}]].
 
 %% --- The stand-in interface ------------------------------------------------------
 
@@ -371,6 +376,98 @@ close_reaches_time_wait_with_its_timer() ->
     [{#tcp{flags = ?TH_ACK, ack = Ack}, <<>>}] = segments(),
     ?assertEqual(Rcv + 1, Ack),
     #tcb{state = time_wait} = assert_armed(Conn).
+
+%% The grant reserves a connection's buffers (docs/design-network-stack.md, "Sockets act for
+%% one domain"): with room for only the initial ones, tcp_mss's rounding up to whole segments
+%% is refused and leaves them as they were, a second connect is refused with ENOBUFS, an
+%% `EXIT` message naming the live connection frees nothing, and the first connection's
+%% real exit gives its reservation back.
+buffers_are_reserved_at_the_grant() ->
+    Initial = 32768 + 65536,
+    Grant = restart_grant(#{buffers => Initial}),
+    try
+        #{conn := Conn} = established(),
+        #tcb{snd_hiwat = Snd, rcv_hiwat = Rcv} = element(2, sys:get_state(Conn)),
+        ?assertEqual({32768, 65536}, {Snd, Rcv}),
+        %% An exit in the name of a connection still alive frees nothing.
+        Grant ! {'EXIT', Conn, normal},
+        ?assertEqual({error, enobufs}, refused_connect()),
+        Ref = monitor(process, Conn),
+        exit(Conn, kill),
+        receive {'DOWN', Ref, _, _, _} -> ok end,
+        _ = sys:get_state(Grant),
+        {_, #tcp{flags = ?TH_SYN}} = start_connect()
+    after
+        unlink(Grant),
+        exit(Grant, kill)
+    end.
+
+%% The setup's grant replaced by one with Limits, under the same name.
+restart_grant(Limits) ->
+    Old = whereis(erx_net_grant),
+    Ref = monitor(process, Old),
+    exit(Old, kill),
+    receive {'DOWN', Ref, _, _, _} -> ok end,
+    {ok, Grant} = erx_net_grant:start_link(local, Limits),
+    Grant.
+
+%% Short connections, each closed by its owner into TIME-WAIT, give their buffers back as
+%% they reach it: a grant with room for one connection's buffers takes connection after
+%% connection, though each closed one waits out 2MSL.
+short_connections_give_their_buffers_back() ->
+    Grant = restart_grant(#{buffers => 32768 + 65536}),
+    try
+        [begin
+             #{conn := Conn} = closed_into_time_wait(),
+             _ = sys:get_state(Conn)
+         end || _ <- lists:seq(1, 3)],
+        {_, #tcp{flags = ?TH_SYN}} = start_connect()
+    after
+        unlink(Grant),
+        exit(Grant, kill)
+    end.
+
+%% A connection in TIME-WAIT whose owner still holds the socket, with the peer's bytes not
+%% yet read, keeps its buffers; the owner's close gives them back.
+an_open_socket_in_time_wait_keeps_its_buffers() ->
+    Grant = restart_grant(#{buffers => 32768 + 65536}),
+    try
+        #{conn := Conn, port := Port, sock := Sock, snd := Snd, rcv := Rcv} = established(),
+        ok = erx_gen_tcp:shutdown(Sock, write),
+        [{#tcp{flags = Fin, seq = Snd}, <<>>}] = segments(),
+        ?assert(Fin band ?TH_FIN =/= 0),
+        hand(Conn, Port, #{seq => Rcv, ack => Snd + 1, flags => ?TH_ACK bor ?TH_FIN bor ?TH_PUSH},
+             <<"hello">>),
+        [{#tcp{flags = ?TH_ACK, ack = Ack}, <<>>}] = segments(),
+        ?assertEqual(Rcv + 6, Ack),
+        #tcb{state = time_wait} = element(2, sys:get_state(Conn)),
+        ?assertEqual({error, enobufs}, refused_connect()),
+        ok = erx_gen_tcp:close(Sock),
+        _ = sys:get_state(Conn),
+        {_, #tcp{flags = ?TH_SYN}} = start_connect()
+    after
+        unlink(Grant),
+        exit(Grant, kill)
+    end.
+
+%% An established connection closed by its owner: our FIN, the peer's ACK and FIN, our ACK.
+closed_into_time_wait() ->
+    Established = established(),
+    #{conn := Conn, port := Port, sock := Sock, snd := Snd, rcv := Rcv} = Established,
+    ok = erx_gen_tcp:close(Sock),
+    [{#tcp{flags = Fin, seq = Snd}, <<>>}] = segments(),
+    ?assert(Fin band ?TH_FIN =/= 0),
+    hand(Conn, Port, #{seq => Rcv, ack => Snd + 1, flags => ?TH_ACK bor ?TH_FIN}, <<>>),
+    [{#tcp{flags = ?TH_ACK}, <<>>}] = segments(),
+    Established.
+
+%% The answer to a connect the grant cannot start.
+refused_connect() ->
+    {ok, SockProc} = gen_statem:start(erx_gen_tcp, self(), []),
+    Req = gen_statem:send_request(SockProc, {connect, {10, 0, 2, 2}, ?PEER_PORT,
+                                             [binary, {active, false}], 10000}),
+    {reply, Reply} = gen_statem:receive_response(Req, ?WAIT),
+    Reply.
 
 %% A connection that dies before it answers still leaves no connect caller waiting: its
 %% grant, which the death reaches by the link, answers in its place.

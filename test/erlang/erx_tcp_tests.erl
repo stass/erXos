@@ -144,9 +144,10 @@ send_test() ->
 
 %% An ACK that empties the send buffer moves the waiting writer's bytes in, and the same step
 %% sends them: nothing else may follow to send them, since one batch can carry every ACK of
-%% what was in flight (the tap transport reads a burst's ACKs in one call).
+%% what was in flight (the tap transport reads a burst's ACKs in one call). The buffer keeps
+%% its size, autosizing off, so the writer waits.
 an_ack_that_frees_room_sends_the_waiting_writers_bytes_test() ->
-    Open = (in(established))#tcb{snd_wnd = 65535, max_sndwnd = 65535},
+    Open = (in(established))#tcb{snd_wnd = 65535, max_sndwnd = 65535, snd_autosize = false},
     T0 = Open#tcb{ccv = (Open#tcb.ccv)#ccv{cwnd = 65535}},
     {T1, First} = step({user, {send, ?FROM, binary:copy(<<"a">>, 100)}}, T0, ?T0),
     ?assertEqual({[1001], 100}, {seqs(First), payload_bytes(First)}),
@@ -159,9 +160,10 @@ an_ack_that_frees_room_sends_the_waiting_writers_bytes_test() ->
                   T3#tcb.send_waiter}).
 
 %% A writer still waiting when the send side closes is answered EPIPE, as sosend answers
-%% after its sbwait, and none of its bytes enter the buffer behind the FIN.
+%% after its sbwait, and none of its bytes enter the buffer behind the FIN. The buffer keeps
+%% its size, autosizing off, so the writer waits.
 a_writer_waiting_when_the_send_side_closes_gets_epipe_test() ->
-    Open = (in(established))#tcb{snd_wnd = 65535, max_sndwnd = 65535},
+    Open = (in(established))#tcb{snd_wnd = 65535, max_sndwnd = 65535, snd_autosize = false},
     T0 = Open#tcb{ccv = (Open#tcb.ccv)#ccv{cwnd = 65535}},
     {T1, _} = step({user, {send, ?FROM, binary:copy(<<"a">>, 100)}}, T0, ?T0),
     {T2, []} = step({user, {send, ?FROM, binary:copy(<<"b">>, 100)}}, T1, ?T0),

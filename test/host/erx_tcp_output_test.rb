@@ -6,9 +6,10 @@ require 'minitest/autorun'
 require_relative 'erx_net_eunit'
 
 # Runs the EUnit cases of TCP output (test/erlang/erx_tcp_output_tests.erl): windows, Nagle,
-# silly-window avoidance, persist, FIN and RST, SACK retransmission, options, credit and a
-# missing route, with seeded faults that settle a lost segment's ACK or D-SACK block as if it
-# had left, or clear the ACK an ENOBUFS pass owes.
+# silly-window avoidance, persist, FIN and RST, SACK retransmission, options, send-buffer
+# autosizing, credit and a missing route, with seeded faults that settle a lost segment's ACK
+# or D-SACK block as if it had left, or clear the ACK an ENOBUFS pass owes, or move
+# autosizing's bounds.
 class ErxTcpOutputTest < Minitest::Test
   include ErxNetEunit
 
@@ -54,7 +55,13 @@ class ErxTcpOutputTest < Minitest::Test
     run_bound_off_by_one: ['payload(Seg, Want, ?RUN_PIECES, Tcb)', 'payload(Seg, Want, ?RUN_PIECES + 1, Tcb)',
                            'run_bound_is_exact'],
     run_with_cwr: ['andalso ecn_steady(ecn(Seg, Tcb), Flags, Ecn).', 'andalso (ecn_steady(ecn(Seg, Tcb), Flags, Ecn) orelse true).',
-                   'runs_equal_per_segment_output']
+                   'runs_equal_per_segment_output'],
+    # tcp_output.c:2169: a buffer exactly 7/8 full grows.
+    autoscale_fill_bound_off_by_one: ['andalso Used >= Hiwat div 8 * 7', 'andalso Used > Hiwat div 8 * 7',
+                                      'autoscale_grows_a_full_buffer'],
+    # uipc_sockbuf.c:659: no size past sb_max_adj is asked of the grant.
+    autoscale_past_sb_max_adj: ['{Grows, Bytes =< ?SB_MAX_ADJ}', '{Grows, Bytes =< ?AUTOSNDBUF_MAX}',
+                                'autoscale_stops_at_the_largest_buffer']
   }.freeze
 
   def test_output_cases_pass_under_eunit

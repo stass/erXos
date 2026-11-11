@@ -123,13 +123,17 @@ receive window it advertises.
 What the step is handed: segments from the interface, in order, as erx_tcp_wire decoded
 them; a request; a timer message, whose time is only a hint, since the context's time is
 the one the step uses; an ICMP or ICMPv6 error quoting one of the connection's segments
-(erx_tcp_icmp); or the buffer size the grant reserved.
+(erx_tcp_icmp); or the grant's answer to a `reserve_buffer`: the size it reserved, or
+`refused`, which leaves the buffer as it is and, for the send buffer, turns autosizing off,
+as a failed `sbreserve` clears SB_AUTOSIZE (tcp_output.c:2173-2176). A refused rounding of
+`tcp_mss` to whole segments turns autosizing off too, where FreeBSD ignores a failed
+`sbreserve` there and keeps autosizing (tcp_input.c:3903).
 """.
 -type event() :: {segments, [segment()]}
                | {user, request()}
                | {expired, Hint :: integer()}
                | {icmp, erx_tcp_icmp:report()}
-               | {buffer, snd | rcv, Bytes :: non_neg_integer()}.
+               | {buffer, snd | rcv, Bytes :: non_neg_integer() | refused}.
 
 -doc """
 A received segment as the interface hands it on: the header and payload erx_tcp_wire
@@ -197,7 +201,11 @@ dispatch({icmp, Report}, Tcb, Ctx) ->
 dispatch({buffer, snd, Bytes}, Tcb, _) when is_integer(Bytes), Bytes >= 0 ->
     {Tcb#tcb{snd_hiwat = Bytes}, []};
 dispatch({buffer, rcv, Bytes}, Tcb, _) when is_integer(Bytes), Bytes >= 0 ->
-    {Tcb#tcb{rcv_hiwat = Bytes}, []}.
+    {Tcb#tcb{rcv_hiwat = Bytes}, []};
+dispatch({buffer, snd, refused}, Tcb, _) ->
+    {Tcb#tcb{snd_autosize = false}, []};
+dispatch({buffer, rcv, refused}, Tcb, _) ->
+    {Tcb, []}.
 
 settle(#tcb{ended = true} = Tcb0, Actions, Ctx) ->
     {Tcb, Out} = case Tcb0#tcb.reset_peer of
@@ -215,12 +223,16 @@ settle(#tcb{ended = true} = Tcb0, Actions, Ctx) ->
      Actions ++ transmit(Out) ++ [{reply, W, {error, Reason}} || W <- Waiters] ++ Told ++ [finish]};
 %% A waiting writer moves into the room the event made before output runs, so its bytes
 %% leave in this step: an ACK that frees the room may be the last event for a while, as when
-%% one batch carries every ACK of what was in flight.
+%% one batch carries every ACK of what was in flight. Autosizing looks at the send buffer as
+%% output finds it, before its segments, as tcp_sndbuf_autoscale runs inside tcp_output
+%% before `send:`; the growth it asks for is the step's last action, and the grant's answer
+%% is a step of its own.
 settle(Tcb0, Actions, Ctx) ->
     {Tcb1, Sent} = answer_send(Tcb0),
-    {Tcb2, Out} = erx_tcp_output:output(Tcb1, Ctx),
-    {Tcb, Connected} = answer_connect(Tcb2),
-    {Tcb, Actions ++ transmit(Out) ++ Connected ++ Sent}.
+    {Tcb2, Grow} = erx_tcp_output:sndbuf_autoscale(Tcb1, Ctx),
+    {Tcb3, Out} = erx_tcp_output:output(Tcb2, Ctx),
+    {Tcb, Connected} = answer_connect(Tcb3),
+    {Tcb, Actions ++ transmit(Out) ++ Connected ++ Sent ++ Grow}.
 
 transmit([]) -> [];
 transmit(Segments) -> [{transmit, Segments}].

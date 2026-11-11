@@ -539,3 +539,92 @@ segments_by_hand_test() ->
                  [F || {#tcp{flags = F}, _, _} <- Wire]),
     ?assertEqual([#{ecn => 0, df => true}], lists:usort([M || {_, M, _} <- Wire])),
     ?assertEqual([{5, 6}], lists:usort([Ts || {#tcp{opts = #tcp_opts{ts = Ts}}, _, _} <- Wire])).
+
+%% --- tcp_sndbuf_autoscale (tcp_output.c:2123-2178) ---
+
+%% FreeBSD's sb_max_adj for the default sb_max (uipc_sockbuf.c:66-69): the largest buffer
+%% sbreserve grants, 2 MiB * MCLBYTES / (MSIZE + MCLBYTES).
+-define(SB_MAX_ADJ, 1864135).
+
+%% A connection whose buffer of `Hiwat` holds `Bytes` unsent, with the peer's window and the
+%% congestion window at `Wnd` and `Cwnd`.
+autosizing(Hiwat, Bytes, Wnd, Cwnd) ->
+    #tcb{ccv = Ccv} = T = est(Bytes),
+    T#tcb{snd_hiwat = Hiwat, snd_wnd = Wnd, max_sndwnd = Wnd, ccv = Ccv#ccv{cwnd = Cwnd}}.
+
+autoscale(Tcb) -> erx_tcp_output:sndbuf_autoscale(Tcb, ctx(64)).
+
+grows(Tcb) ->
+    case autoscale(Tcb) of
+        {Tcb, [{reserve_buffer, snd, Bytes}]} -> Bytes;
+        {Tcb, []} -> none
+    end.
+
+%% tcp_output.c:2167-2176: the buffer grows one tcp_autosndbuf_inc when the peer's window,
+%% with its 5/4 fudge, covers it, it is 7/8 full, and the window covers what is unsent;
+%% each bound is exact.
+autoscale_grows_a_full_buffer_test() ->
+    ?assertEqual(16000 + 8192, grows(autosizing(16000, 14000, 65535, 20000))),
+    ?assertEqual(none, grows(autosizing(16000, 13999, 65535, 20000))),
+    ?assertEqual(none, grows(autosizing(16000, 14000, 65535, 13999))),
+    %% What is in flight does not count against the window.
+    ?assertEqual(16000 + 8192, grows(sent(autosizing(16000, 14000, 65535, 13999), 1000))),
+    %% The peer's window covers the buffer from 12800 on, with 4000 in flight so that the
+    %% window still covers what is unsent.
+    ?assertEqual(16000 + 8192, grows(sent(autosizing(16000, 14000, 12800, 20000), 4000))),
+    ?assertEqual(none, grows(sent(autosizing(16000, 14000, 12799, 20000), 4000))).
+
+%% Tcb with its first Bytes in flight, sent as one range.
+sent(#tcb{snd_una = Una, sendlog = Log} = Tcb, Bytes) ->
+    Tcb#tcb{snd_nxt = Una + Bytes, snd_max = Una + Bytes,
+            sendlog = erx_tcp_sendlog:sent(Log, Una, Una + Bytes, 1000, ?T0),
+            send_timer = {rexmt, ?T0 + ?S(1000)}}.
+
+%% A FIN in flight, which the buffer does not hold, keeps the buffer as it is, as the
+%% unsigned difference FreeBSD takes wraps past every window.
+autoscale_not_with_a_fin_in_flight_test() ->
+    T = sent(autosizing(16000, 14000, 65535, 20000), 14000),
+    ?assertEqual(16000 + 8192, grows(T)),
+    ?assertEqual(none, grows(T#tcb{snd_nxt = 1001 + 14001, snd_max = 1001 + 14001})).
+
+%% The step asks for the growth after its segments, and only while autosizing is on.
+autoscale_is_asked_of_the_grant_by_the_step_test() ->
+    T = autosizing(16000, 14000, 65535, 20000),
+    {_, Actions} = erx_tcp:step({user, {rcvd, 0}}, T, ctx(64)),
+    ?assertMatch([{transmit, _}, {reserve_buffer, snd, 24192}], Actions),
+    {_, Off} = erx_tcp:step({user, {rcvd, 0}}, T#tcb{snd_autosize = false}, ctx(64)),
+    ?assertMatch([{transmit, _}], Off).
+
+%% sbreserve refuses past sb_max_adj, and the refusal turns autosizing off (SB_AUTOSIZE
+%% cleared, tcp_output.c:2173-2176): the largest buffer is the last step at or under it.
+autoscale_stops_at_the_largest_buffer_test() ->
+    Last = ?SB_MAX_ADJ - 8192,
+    Big = 4 * ?SB_MAX_ADJ,
+    ?assertEqual(?SB_MAX_ADJ, grows(autosizing(Last, Last, Big, Big))),
+    T = autosizing(Last + 1, Last + 1, Big, Big),
+    ?assertMatch({#tcb{snd_autosize = false, snd_hiwat = H}, []} when H =:= Last + 1,
+                 autoscale(T)).
+
+%% A reservation the grant refuses leaves the buffer as it is and turns autosizing off, so
+%% no later step asks again; one it grants sets the buffer, and a waiting writer moves into
+%% the new room in the same step.
+autoscale_refused_leaves_the_buffer_test() ->
+    T = autosizing(16000, 14000, 65535, 20000),
+    {T1, _} = erx_tcp:step({buffer, snd, refused}, T, ctx(64)),
+    ?assertEqual({16000, false}, {T1#tcb.snd_hiwat, T1#tcb.snd_autosize}),
+    {_, Actions} = erx_tcp:step({user, {rcvd, 0}}, T1, ctx(64)),
+    ?assertEqual([], [A || {reserve_buffer, _, _} = A <- Actions]).
+
+autoscale_granted_takes_the_waiting_writer_test() ->
+    T = (autosizing(16000, 16000, 65535, 20000))#tcb{send_waiter = {{self(), w}, binary:copy(<<"y">>, 10000)}},
+    {T1, _} = erx_tcp:step({buffer, snd, 24192}, T, ctx(64)),
+    ?assertEqual({24192, 24192}, {T1#tcb.snd_hiwat, erx_tcp_sndbuf:size(T1#tcb.sndbuf)}),
+    ?assertMatch({_, <<_:1808/binary>>}, T1#tcb.send_waiter).
+
+%% Growth only grows: every size asked is above the buffer and at most sb_max_adj, so the
+%% buffer never falls below what it holds.
+autoscale_never_shrinks_test() ->
+    Big = 4 * ?SB_MAX_ADJ,
+    Asked = [{H, grows(autosizing(H, H, Big, Big))}
+             || H <- [8, 1000, 33304, 65536, 1 bsl 20, ?SB_MAX_ADJ - 8192]],
+    ?assertEqual([], [{H, A} || {H, A} <- Asked, not (A > H andalso A =< ?SB_MAX_ADJ)]).

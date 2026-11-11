@@ -1641,7 +1641,7 @@ control block copies the small record
     | {user, erx_tcp_user:request()}         % connect, send, recv, close, ...
     | {expired, Now :: integer()}            % a timer hint
     | {icmp, erx_tcp_icmp:report()}          % unreachable, too big
-    | {buffer, Kind :: snd | rcv, Bytes :: non_neg_integer()}.
+    | {buffer, Kind :: snd | rcv, Bytes :: non_neg_integer() | refused}.
 
 -type action() ::
       {transmit, [outgoing()]}
@@ -1707,6 +1707,34 @@ only for a connection dropped after it received a SYN, so that output is
 the RST of `tcp_drop`, then tells the socket process how it ended and returns
 `finish`. No stage has to remember any of this, since it follows from the
 state.
+
+A buffer grows only through the grant. When `tcp_mss` rounds the buffers
+up to whole segments, or autosizing grows the send buffer, the step
+returns `{reserve_buffer, Kind, Bytes}` and changes nothing; the
+connection process asks its grant
+([Sockets act for one domain](#sockets-act-for-one-domain)) once it has
+performed the step's other actions, and steps the answer: `{buffer,
+Kind, Bytes}` sets the buffer, and `{buffer, Kind, refused}`, past the
+grant's `buffers` limit, leaves it as it is.
+Send autosizing is `tcp_sndbuf_autoscale` (`tcp_output.c:2123-2178`),
+which the step runs once, before output, on the connection as output
+finds it: the buffer grows by `tcp_autosndbuf_inc`, 8 KiB, when the
+peer's window with a 5/4 fudge covers it, it is 7/8 full, it holds less
+than `tcp_autosndbuf_max`, and the send window covers what is not yet
+sent. A size past `sb_max_adj`, which `sbreserve` refuses
+(`uipc_sockbuf.c:659`), is not asked, and that or the grant's refusal
+turns autosizing off for the connection, as FreeBSD clears `SB_AUTOSIZE`
+when `sbreserve` fails, so the largest send buffer is FreeBSD's, the last
+step at or under `sb_max_adj` (about 1.78 MiB), and a connection whose
+grant is full asks no more. A refused rounding of `tcp_mss` to whole
+segments turns send autosizing off too, where FreeBSD ignores a failed
+`sbreserve` there and keeps autosizing (`tcp_input.c:3903`): so a
+connection that opens while its grant is full never autosizes, even once
+room frees. A growth the grant reserves is a step of its own, whose
+output may grow the buffer again, as each round of `sosend` calls
+`tcp_output` in FreeBSD. The chain ends: the bytes the buffer holds
+grow within it only by the waiting writer's one piece, and the buffer
+stops growing once they are under 7/8 of it.
 
 `tcp_do_segment` is about 2,000 lines that mix state handling, ACK
 processing and data delivery. It is split by stage, not ported in order.
@@ -4055,11 +4083,26 @@ domain's own grant for the interface processes and the drivers
 
 Buffer space is reserved at the grant: a socket asks its grant, with a
 local call, before it grows a buffer by autosizing or by a `sndbuf` or
-`recbuf` option, and the grant refuses past its `buffers` limit. A
-connection the interface process starts reserves its initial buffers as
-it starts and, refused, ends with a RST, as FreeBSD answers a completed
-handshake it cannot give a socket. The grant holds each socket's
-reservation and releases it when the socket exits, by whatever means.
+`recbuf` option, and the grant refuses past its `buffers` limit. Each
+call names a token the grant made for that socket alone and handed it
+at its start, so a reservation is never charged to a socket on the word
+of a pid in a message. A connection the grant starts reserves its
+initial buffers first and, refused, is answered `{error, enobufs}`; a
+connection the interface process starts reserves them as it starts and,
+refused, ends with a RST, as FreeBSD answers a completed handshake it
+cannot give a socket. The grant holds each socket's reservation and
+releases it when the socket exits, by whatever means, or earlier, when
+a connection reaches TIME-WAIT with its socket process gone: then its
+send buffer is empty, since the peer acknowledged our FIN, its receive
+queue was dropped with the socket process, and nothing more can be
+queued or delivered. FreeBSD keeps a closed socket's `chgsbsize` charge
+until `tcp_close` frees it at the end of 2MSL (`tcp_usr_close` holds the
+socket by `INP_SOCKREF`, and `tcp_twstart` only calls
+`soisdisconnected`, which empties the send buffer but keeps its
+reservation); its per-user limit is unlimited by default, so the
+charge costs nothing there. A grant's limit is finite, and a client
+that makes many short connections would otherwise hold 96 KiB for each
+of them for a minute after closing it.
 
 ### Ports and the demultiplexing table
 

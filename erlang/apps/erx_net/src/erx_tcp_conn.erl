@@ -28,14 +28,21 @@ actions in order:
   end; `reply` answers the connect caller with `{ok, self()}`, and a request of the socket
   process with `{reply, N, Result}`;
 * `reset` and `charge_rst` go to the interface, which holds the RST limit;
-* `reserve_buffer` is granted at once, with the size the step asked for, which erx_tcp_mss
-  holds to `SB_MAX` (the grant's reservations are not built);
+* `reserve_buffer` waits until the step's other actions are performed; then each is asked
+  of the grant in order (erx_net_grant:reserve_buffer/4) and its answer stepped, `{buffer,
+  Kind, Bytes}` when the grant reserved the size and `{buffer, Kind, refused}` when its
+  `buffers` limit refused it, so no step runs inside another's actions;
 * `finish` ends the process once the step's answers are out.
 
 After the actions the loop pushes the receive queue to its socket process within the
 credit it holds, and steps `{user, {rcvd, Bytes}}` for what left the receive buffer, so
-the window opens as the socket process takes the bytes. Then it arms the clock no later
-than the earliest of the step's deadline and the connect deadline.
+the window opens as the socket process takes the bytes. A connection in TIME-WAIT whose
+socket process is gone then gives both of its buffers back to the grant
+(erx_net_grant:release_buffers/2): its send buffer is empty, since the peer acknowledged
+the FIN, its receive queue was dropped with the socket process, and nothing more can be
+queued or delivered, so a client's closed connections hold none of the grant's `buffers`
+limit through the 2MSL wait. Then the loop arms the clock no later than the earliest of
+the step's deadline and the connect deadline.
 
 **The socket protocol** (docs/design-network-stack.md, "The socket process"). The
 connection's owner is its socket process, the grant's caller, which it monitors and the
@@ -89,21 +96,20 @@ the socket process: the owner's exit closes the connection as `close/1` does.
 -define(MAX_PIECES, 64).
 -define(MAX_IN_FLIGHT, 64).
 -define(MAX_PUSH_CREDIT, 67108864).
-%% tcp_sendspace and tcp_recvspace, FreeBSD's default buffer sizes (tcp_usrreq.c).
--define(SNDBUF, 32768).
--define(RCVBUF, 65536).
 %% A delivered piece smaller than this joins a small newest piece of the receive queue.
 -define(SMALL_PIECE, 512).
 
 -doc """
 What the grant starts a connection with: its owner, the socket process; how its grantee's
 messages arrive; the connect caller it answers; the remote address and port; the
-connection's own options (`nodelay`); the connect timeout in milliseconds; and the
-generator split from the grant's.
+connection's own options (`nodelay`); the connect timeout in milliseconds; the generator
+split from the grant's; the grant itself, which reserves the buffers; the token that names
+this connection in the grant's buffer calls; and the initial buffer sizes it reserved.
 """.
 -type start() :: #{owner := pid(), origin := erx_net_admit:origin(), from := gen_server:from(),
                    remote := {<<_:32>>, 1..16#ffff}, opts := list(), timeout := timeout(),
-                   gen := erx_net_rand:gen()}.
+                   gen := erx_net_rand:gen(), grant := pid(), token := reference(),
+                   buffers := #{snd := pos_integer(), rcv := pos_integer()}}.
 
 -record(state, {tcb :: #tcb{},
                 key :: erx_net_input:key(),
@@ -111,6 +117,9 @@ generator split from the grant's.
                 owner :: pid() | none,               % the socket process; none once it closed
                 owner_ref :: reference() | none,
                 origin :: erx_net_admit:origin(),
+                grant :: pid(),                      % reserves the buffers
+                token :: reference(),                % names this connection to the grant
+                buffers = held :: held | released,   % released in TIME-WAIT once the owner closed
                 push_credit = 0 :: non_neg_integer(), % bytes the socket process granted
                 pending = #{} :: #{non_neg_integer() => send | shutdown}, % requests in flight
                 rcvq = [] :: [binary()],             % newest first
@@ -142,7 +151,8 @@ start_link(Start) ->
 
 -doc false.
 init(#{owner := Owner, origin := Origin, from := From, remote := {Raddr, Rport}, opts := Opts0,
-       timeout := Timeout, gen := Rand0}) ->
+       timeout := Timeout, gen := Rand0, grant := Grant, token := Token,
+       buffers := #{snd := SndBuf, rcv := RcvBuf}}) ->
     %% The requests in flight, the close that goes out past them, and a credit message.
     ok = (erx_net_sup:runtime()):serve(?MAX_IN_FLIGHT + 2),
     maybe
@@ -160,22 +170,24 @@ init(#{owner := Owner, origin := Origin, from := From, remote := {Raddr, Rport},
         Tcb = erx_tcp_user:new(#{family => inet, local => {Src, Port}, remote => {Raddr, Rport},
                                  iss => Iss, ts_offset => TsOffset,
                                  cc => erx_tcp_cc_cubic, loss => erx_tcp_loss_dupack,
-                                 snd_hiwat => ?SNDBUF, rcv_hiwat => ?RCVBUF, gen => TcbGen,
+                                 snd_hiwat => SndBuf, rcv_hiwat => RcvBuf, gen => TcbGen,
                                  now => Now, nodelay => maps:get(nodelay, Opts, false)}),
         S = #state{tcb = Tcb, key = KeyOf(Port), credit = Credit, owner = Owner,
-                   owner_ref = erlang:monitor(process, Owner), origin = Origin,
-                   connect = {From, deadline(Timeout, Now)},
+                   owner_ref = erlang:monitor(process, Owner), origin = Origin, grant = Grant,
+                   token = Token, connect = {From, deadline(Timeout, Now)},
                    path = Path, config_gen = ConfigGen, gen = Rand},
-        {ok, step({user, {connect, From}}, S), {continue, settle}}
+        {ok, S, {continue, connect}}
     else
         {error, Reason} -> {stop, Reason}
     end.
 
 %% --- gen_server ------------------------------------------------------------------
 
+%% The connect's step runs once the grant is out of start_link/1, so a buffer the step asks
+%% for can be asked of the grant.
 -doc false.
-handle_continue(settle, S) ->
-    settle(S).
+handle_continue(connect, #state{connect = {From, _}} = S) ->
+    settle(step({user, {connect, From}}, S)).
 
 -doc false.
 handle_call(_Request, _From, S) ->
@@ -288,13 +300,37 @@ guarded(Event, S) ->
         error:_ -> count(raised, S)
     end.
 
+%% Steps Event and performs its actions, then asks the grant for each buffer the step asked
+%% for, in order, and steps each answer in turn, whose own actions may ask for more.
 step(Event, S0) ->
+    {S, Reserves} = step_once(Event, S0),
+    ask_grant(Reserves, S).
+
+ask_grant([], S) ->
+    S;
+ask_grant([{reserve_buffer, Kind, Bytes} | Rest], #state{grant = Grant, token = Token} = S0) ->
+    Answer = case erx_net_grant:reserve_buffer(Grant, Token, Kind, Bytes) of
+                 ok -> Bytes;
+                 {error, enobufs} -> refused;
+                 %% The grant does not know this connection or its token: a bug, which
+                 %% ends the connection rather than counting it as a raised step.
+                 {error, badarg} -> exit(badarg)
+             end,
+    {S, More} = step_once({buffer, Kind, Answer}, S0),
+    ask_grant(Rest ++ More, S).
+
+%% One step of the TCB with its actions performed, but for the buffer reservations it asks
+%% for, which it returns in order.
+step_once(Event, S0) ->
     #state{tcb = Tcb0, path = #{mtu := Mtu, iface := #{driver_credit := Tx}}, route = Route} =
         S = configured(S0),
     Ctx = #tcp_ctx{now = erx_net_clock:now(), credit = erx_net_credit:free(Tx), mtu = Mtu,
                    route = Route},
     {Tcb, Actions} = erx_tcp:step(Event, Tcb0, Ctx),
-    lists:foldl(fun perform/2, S#state{tcb = Tcb}, Actions).
+    {Reserves, Rest} = lists:partition(fun({reserve_buffer, _, _}) -> true;
+                                          (_) -> false
+                                       end, Actions),
+    {lists:foldl(fun perform/2, S#state{tcb = Tcb}, Rest), Reserves}.
 
 %% The path, built again over the configuration when its generation moved; a path that no
 %% longer exists keeps the old one and makes the route the step's EHOSTUNREACH.
@@ -338,8 +374,6 @@ perform({reply, {call, N}, Reply}, S) ->
 perform({reply, From, Reply}, S) ->
     gen_server:reply(From, Reply),
     S;
-perform({reserve_buffer, Kind, Bytes}, S) ->
-    step({buffer, Kind, Bytes}, S);
 perform({reset, Segment}, #state{path = #{next_hop := NextHop, src := Src} = Path, gen = Gen0} = S) ->
     case erx_net_frame:tcp(Path, [Segment], Gen0) of
         {ok, Packets, Gen} ->
@@ -404,7 +438,7 @@ settle(S0) ->
     S1 = hand_over(S0),
     case S0#state.rcv_bytes - S1#state.rcv_bytes of
         0 ->
-            S = tell_end(S1),
+            S = release_buffers(tell_end(S1)),
             case S of
                 #state{finished = true, key = Key} ->
                     ok = erx_net_bind:delete(Key),
@@ -441,6 +475,15 @@ pieces([Bin | Rest], Room, Count, Acc, Bytes) when Count > 0, Room > 0 ->
     end;
 pieces(Rest, _Room, _Count, Acc, Bytes) ->
     {lists:reverse(Acc), Bytes, Rest}.
+
+%% Both buffers given back to the grant once the connection is in TIME-WAIT and its owner is
+%% gone: nothing is left in them and nothing more can enter them.
+release_buffers(#state{buffers = held, owner = none, tcb = #tcb{state = time_wait},
+                       grant = Grant, token = Token} = S) ->
+    ok = erx_net_grant:release_buffers(Grant, Token),
+    S#state{buffers = released};
+release_buffers(S) ->
+    S.
 
 %% The end of the stream, once every byte before it was pushed: `eof` for the peer's FIN,
 %% then `{error, Reason}` (`closed` without an error) as the last push when the connection

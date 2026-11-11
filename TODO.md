@@ -1185,8 +1185,9 @@ it; git history is the record of completed work.
 * [Medium] network, TCP effect layer (E2, `erx_tcp_conn`, `erx_net_grant`, `erx_gen_tcp`): active
   opens over IPv4 only. Not yet: `listen`/`accept`, the syncache hand-off and a SYN reinjected from
   TIME-WAIT (E3, counted `reinject`); `erx_net_admit` (the grant checks the connect request's
-  shape inline) and the grant's limits, account and buffer reservations (a `reserve_buffer` is
-  granted at once, up to erx_tcp_mss's `SB_MAX`); `exit_on_close` (a socket whose peer closed
+  shape inline) and the grant's limits other than `buffers`, and its account (`erx_net_grant_core`
+  holds only the buffer reservations); receive-buffer autosizing (`tcp_do_autorcvbuf`, a
+  `reserve_buffer` for the receive side like the send side's); `exit_on_close` (a socket whose peer closed
   stays open until its owner closes it), `controlling_process/2` (`enotsup`), the packet modes,
   `getstat` and every option but `binary`, `list`, `mode`, `active` and `nodelay`; `local_peer`
   is never set, so a connection to one of the machine's own addresses keeps the full MSL; the
