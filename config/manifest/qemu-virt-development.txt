@@ -26,10 +26,17 @@
 # manifest's system baseline and the block driver and littlefs in the system domain);
 # 1,000 more idle processes
 # add about 4 MiB, and the rest of the baseline over ERTS and /tmp, 5.8 MiB, is the
-# margin. The system principal's 68 MiB holds root's one session, whose limits'
-# memory is 36 MiB and outer 1 MiB, and the storage domain, 30 MiB and outer 1 MiB;
-# with it the baseline leaves root_memory the block device's 1 MiB, the network
-# device's 256 KiB and 41 MiB no one is promised. The storage domain's 30 MiB is its
+# margin. The system principal's 69 MiB holds root's one session, whose limits'
+# memory is 36 MiB and outer 1 MiB, the storage domain, 30 MiB and outer 1 MiB, and
+# 1 MiB for the outer budget of a domain that has ended while the other still holds a
+# connection to it: that outer budget is the library's until the survivor answers the
+# connection's end (erx_domain_srv ended/3), and a session's next login or the
+# storage domain's restart is admitted before that answer arrives. One such budget is
+# the bound for root's one session and one storage domain as long as the survivor
+# answers before its peer ends a second time; a second leftover refuses the next start
+# (TODO.md, "a refused restart is not retried"). With it the
+# baseline leaves root_memory the block device's 1 MiB, the network device's 256 KiB
+# and 40 MiB no one is promised. The storage domain's 30 MiB is its
 # use rounded up to a whole MiB: 7,635 pool pages, 29.8 MiB, with BeamAsm, erx_blk
 # and erx_storage running and /data mounted, at rest, measured as Footprint measures
 # (the root's pool pages in use with the domain up minus those once it has ended;
@@ -88,13 +95,14 @@
 # The 224 MiB machine has the memory to admit the system domain, root's session, the
 # storage domain and a network domain, once max_domains and the principal's domains
 # grow to three. Admission charges budgets, not use: the system baseline, 46 MiB, the
-# system principal's 68 MiB (root's session, 36 MiB and outer 1 MiB, and the storage
-# domain, 30 MiB and outer 1 MiB) and the devices' 1.25 MiB promise 115.25 MiB of
-# root_memory's 156.25 MiB, which leaves 41 MiB no one is promised. That is the network
+# system principal's 69 MiB (root's session, 36 MiB and outer 1 MiB, the storage
+# domain, 30 MiB and outer 1 MiB, and an ended domain's outer 1 MiB) and the devices'
+# 1.25 MiB promise 116.25 MiB of root_memory's 156.25 MiB, which leaves 40 MiB no one
+# is promised. That is the network
 # row's room: it needs about 21 MiB and outer 1 MiB, the network release's 20.5 MiB at
 # rest in the Footprint table above, measured on the interpreter with one scheduler, and
 # is measured again when the row is configured. On BeamAsm with four schedulers, as the
-# storage row runs, the storage domain's figure suggests about 30 MiB, which the 41 MiB
+# storage row runs, the storage domain's figure suggests about 30 MiB, which the 40 MiB
 # still holds. In use, the root's pool holds the system domain's 31.5 MiB (36.2 MiB at
 # the interactive shell of the development image), the session's about 19 MiB (the bare
 # release's 18.3 MiB and the shell's modules) and the storage domain's 29.8 MiB: about 80
@@ -214,7 +222,7 @@ limits storage
   peer_held 4096
   peer_held_total 4096
 principal system
-  memory 71303168
+  memory 72351744
   grant @share.users
   domains 2
   names 64

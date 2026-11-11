@@ -4403,15 +4403,20 @@ to the corpus and follow rc
   (`erx_lfs.erl`, `erx_lfs_sup.erl`, `erx_storage_sup.erl`, `erx_blk_sup.erl`): any end of
   littlefs's owner, worker or `/data` grant, and any end of the block driver's device or
   partition process, a malformed completion or a refused reset included, ends the storage
-  domain, the block driver and every window it serves with it, and
-  after `restarts 5` within `restart_period_s 60` the domain stays down. Nothing outside
-  the domain reaches `/data` yet; once the `data` facet serves other domains, a client
-  that can end the grant or break the volume six times a minute takes down every
-  partition's driver, not only `/data`. The facet's design bounds what a client can make
-  the grant do (its own lane), or littlefs moves into a sub-space port whose end the
-  domain survives (design-storage.md). A device that fails six times a minute keeps the
-  domain down too, until littlefs moves into such a port and the block driver restarts in
-  place again.
+  domain, the block driver and every window it serves with it, and after `restarts 5`
+  within `restart_period_s 600` the domain stays down. The system domain and root's
+  session reach `/data` through the `data` facet, so a client whose requests can end
+  littlefs's owner or worker, or break the volume, six times in ten minutes takes down
+  every partition's driver, not only `/data`. The facet's design bounds what a client can make the grant do (its own lane),
+  or littlefs moves into a sub-space port whose end the domain survives
+  (design-storage.md). A device that fails six times in ten minutes keeps the domain down
+  too, until littlefs moves into such a port and the block driver restarts in place again.
+* [Low] Domain service, a refused restart is not retried (`erx_domain_srv.erl`
+  `start_configured/2`): a configured domain's restart that the library refuses, such as
+  `no_memory` while more than one ended domain's outer budget still waits for its peer's
+  disconnect (the system principal reserves one, `config/manifest/qemu-virt-development.txt`),
+  is only logged, so the storage domain stays down and `/data` answers `eio` until the
+  next boot. Retry it once the remains are disconnected, within its restart intensity.
 * [Medium] Storage domain, file data in crash dumps (`erx_blk_window.erl`, `erx_blk.erl`,
   the `erx_fs` grant): a littlefs failure halts the storage node, whose crash dump goes to
   the domain's crash area (design-runtime.md). `erx_lfs`'s owner and worker are
@@ -5120,11 +5125,6 @@ document's "residual risks accepted" paragraph.
   the domain library write each image window's placement (image name, format, extent)
   into the holder's boot page beside `-erx boot`, and have `erx_blk_image` read those
   words instead of the manifest file.
-* [Medium] storage, `/data` from other domains (`config/manifest/qemu-virt-development.txt`,
-  `erlang/apps/erx_storage`): the storage domain has `connections 0` and no grant or introduce
-  row, and the system release ships neither `erx_blk` nor `erx_storage`, so neither the system
-  shell, root's session nor the website's image reaches `/data`. Serve it to them through a
-  grant of the storage domain's file server.
 * [Low] storage, log lines at every boot (`erlang/apps/erx_blk/src/erx_blk_service.erl`
   `image_windows/0`, `mount_images/0`): in the storage domain the driver logs that the manifest
   cannot be read and that no image is served or mounted on every normal boot, which reads as an
