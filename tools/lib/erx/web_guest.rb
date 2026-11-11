@@ -136,15 +136,8 @@ module Erx
     # The WebSocket's upgrade, then the welcome and the machine's record, each within
     # WEB_SECONDS of the message before it, and then the path views (path_views).
     def machine_record(url, cookie, hash, foreign, log)
-      authority = "#{url.host}:#{url.port}"
       TCPSocket.open(url.host, url.port) do |io|
-        io.write("GET /ws HTTP/1.1\r\nHost: #{authority}\r\nOrigin: http://#{authority}\r\nCookie: #{cookie}\r\n" \
-                 "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" \
-                 "Sec-WebSocket-Key: #{[SecureRandom.bytes(16)].pack('m0')}\r\n\r\n")
-        frames = ServerFrames.new(io, log: log)
-        status = frames.head.lines.first.to_s.strip
-        fail_with(log, "the upgrade answered #{status.inspect}") unless status.start_with?('HTTP/1.1 101 ')
-
+        frames = upgrade(io, url, cookie, log)
         io.write(browser_frame(HostlinkGuest.hello(hash)) + browser_frame(HostlinkGuest::OPEN_MACHINE))
         welcome = frames.binary('the welcome')
         fail_with(log, "the welcome is #{welcome.unpack1('H*')}") unless welcome.getbyte(0) == HostlinkGuest::WELCOME
@@ -154,6 +147,19 @@ module Erx
         path_views(io, frames, foreign, log)
         update
       end
+    end
+
+    # The upgrade of /ws on io, a connection to the front end at url, with the cookie
+    # and the server's origin; the front end's frames once it has answered 101.
+    def upgrade(io, url, cookie, log)
+      authority = "#{url.host}:#{url.port}"
+      io.write("GET /ws HTTP/1.1\r\nHost: #{authority}\r\nOrigin: http://#{authority}\r\nCookie: #{cookie}\r\n" \
+               "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" \
+               "Sec-WebSocket-Key: #{[SecureRandom.bytes(16)].pack('m0')}\r\n\r\n")
+      frames = ServerFrames.new(io, log: log)
+      status = frames.head.lines.first.to_s.strip
+      fail_with(log, "the upgrade answered #{status.inspect}") unless status.start_with?('HTTP/1.1 101 ')
+      frames
     end
 
     # Views 2 and 3, opened together: root's session's processes, answered with their

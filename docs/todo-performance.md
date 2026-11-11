@@ -360,13 +360,13 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   panel and at QEMU `virt`'s screen size under HVF; the fix on the table
   is the scan-out buffer mapped into the program's sub-space, which
   design-display rejects until a number asks for it.
-* **[Medium] web, a record view's round trip over the host tool's front end**
-  ([design-web.md](design-web.md#performance)): each update crosses the host
-  link, the system domain's relay, the web domain, the session's line and the
-  inspector, and a record view sends whole records every 2 s while they change.
-  Settled by round-trip times and link bytes per second for the machine's
-  record and a 1,000-child listing, under HVF and over a 115,200-baud
-  UART; the fix on the table is a record difference message.
+* **[Low] web, gate GW on a board's UART**
+  ([design-web.md](design-web.md#risks-and-open-questions)): GW's UART
+  numbers come from a host-side pacer at 11,520 bytes a second each way,
+  standing in for a 115,200-baud UART. Settled by `tools/erx bench web`'s
+  round trips over a board's own UART host link at M12, against the pacer's
+  1,095 ms for the 1,000-child listing; if a board is much slower, the fix on
+  the table is a record difference message.
 * **[Low] web, `erx_ui_model:pair/3`, `delta/2` and `erx_ui_schema` for a
   1,000-node tree,** and a tree's first attachment, which arrives over several 64 KiB
   updates. Settled by time per call on HVF and the attachment's time over the

@@ -1135,12 +1135,6 @@ connection and the models are a few hundred lines of the client's own.
 Numbers to measure, on the
 [watch list](todo-performance.md):
 
-* a record view's round trip over the host tool's front end, which
-  crosses the host link, the system domain's relay, the web domain, the
-  line and the inspector, for the machine's record and a 1,000-child
-  listing, under HVF and over a 115,200-baud UART, where whole
-  records every 2 s may be too much and a record difference would be
-  the fix;
 * `erx_ui_model:delta/2` and `erx_ui_schema` for a 1,000-node tree, and
   a tree's first attachment over several 64 KiB updates on the UART;
 * the client's first load over the host tool and over the network, and
@@ -1192,7 +1186,7 @@ table per platform.
 
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
-| whole records over a UART host link are slow for large listings | medium | a 1,000-child view updates every few seconds | the measurement; the inspector's page limit; a record difference message if the numbers ask for it |
+| whole records over a UART host link are slow for large listings | certain, mild | an update of the inspector's largest listing page, 1,000 children, holds a 115,200-baud line for about 1.1 s, so a view of a listing that keeps changing refreshes about once a second and keeps the line busy meanwhile, beside `load`, `watch` and `files`; an update at the 64 KiB bound would hold it for about 5.7 s; views are pulled, so a slower line refreshes less often and queues nothing | whole records stay (decision 3), on gate GW's numbers from `tools/erx bench web` (record: `~/erxos-history/web-gw-2026-11-11`, commit 50028c3): opening the 1,000-child listing of root's session's processes takes 59 ms with the host link unpaced and 1,095 ms paced to 11,520 bytes a second each way, for a 12,117-byte update and 12,321 host link bytes; the machine's record takes 5.1 ms and 44.6 ms, for 249 bytes. Medians of 21 opens through the host tool's front end, each an upper bound on one update's time on the line, since a first update is always whole; the unpaced link the baseline; Apple M3 Max, HVF, one guest CPU, QEMU 11.1.3, the development production image built with Homebrew clang 23.1.3 and its default flags. The paced link is a host-side stand-in for a 115,200-baud UART with 8N1 framing; a board's UART at M12 measures it again |
 | a browser without Trusted Types | medium | the sink check carries W2 alone | the check is the guarantee; Trusted Types is a second line |
 | cowboy's version does not fit erXos's OTP | low | the network front end waits | cowboy is plain Erlang; a patched copy enters as erXos's code |
 | `ui.txt`'s widget set lacks what a browser UI wants | medium | plainer UIs | the tree gains a kind for every display, never a browser-only one |
@@ -1211,8 +1205,10 @@ library for the host tool's server; TypeScript for the client. And:
    `console` over the host link or through the network front end.
 2. **Chromium is the one test browser** for now, as Playwright's build,
    a test tool run as a subprocess and never shipped.
-3. **Whole records** travel until a measurement over the serial host link
-   shows that differences are needed.
+3. **Whole records** travel, with no record difference: at a 115,200-baud
+   UART's rate an update of a 1,000-child listing, the inspector's page,
+   crosses the host link in about 1.1 s, so a view of it refreshes about
+   once a second (gate GW, in the risks above).
 4. **Node.js is approved** for the client's build and test tools, beside
    pnpm.
 5. **The web is a different medium**: renderers render for their medium,

@@ -24,6 +24,7 @@
   {modules, [erx,
              erx_9p,
              erx_abi_events,
+             erx_abi_signals,
              erx_build,
              erx_bytes,
              erx_connections,

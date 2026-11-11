@@ -45,6 +45,7 @@ begin
   require_relative 'lib/erx/bench_bytes'
   require_relative 'lib/erx/bench_g3'
   require_relative 'lib/erx/bench_g5'
+  require_relative 'lib/erx/bench_web'
   require_relative 'lib/erx/net_bench_freebsd'
   require_relative 'lib/erx/toolchain_provenance'
   require_relative 'lib/erx/code_commands'
@@ -692,7 +693,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | build web | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | build web | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
       0
     end
 
@@ -1171,12 +1172,13 @@ module Erx
         flags.on('--iterations N', Integer, 'host benchmarks only') { |value| options[:iterations] = value }
         flags.on('--samples N', Integer, 'host benchmarks only') { |value| options[:samples] = value }
         flags.on('--image PATH', 'g3 and bytes only: boot this built image instead of building one') { |value| options[:image] = value }
-        flags.on('--accel NAME', %w[tcg hvf], 'g3, g5 and bytes only: the guest accelerator') { |value| options[:accel] = value }
+        flags.on('--accel NAME', %w[tcg hvf], 'g3, g5, bytes and web only: the guest accelerator') { |value| options[:accel] = value }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
 
       inapplicable = { 'g3' => %i[iterations samples], 'g5' => %i[iterations samples image flavour],
-                       'bytes' => %i[iterations samples flavour] }.fetch(name, %i[image accel])
+                       'bytes' => %i[iterations samples flavour],
+                       'web' => %i[iterations samples image flavour] }.fetch(name, %i[image accel])
       refused = inapplicable.select { |option| options.key?(option) }
       unless refused.empty?
         raise OptionParser::InvalidArgument, "#{refused.map { |option| "--#{option}" }.join(', ')} do not apply to bench #{name}"
@@ -1184,6 +1186,7 @@ module Erx
       return bench_g3(options) if name == 'g3'
       return bench_g5(options) if name == 'g5'
       return bench_bytes(options) if name == 'bytes'
+      return bench_web(options) if name == 'web'
 
       report = Bench.new(root: ROOT).run(name, flavour: options.fetch(:flavour, 'emu'),
                                          iterations: options.fetch(:iterations, 10_000),
@@ -1250,6 +1253,24 @@ module Erx
       report = BenchBytes.new(root: ROOT).run(image: options[:image])
       Terminal.puts("bytes benchmark (hvf): #{report.fetch('report')}")
       Terminal.puts("bytes medians, ns per call less the loop's: #{report.fetch('net_of_loop').inspect}")
+      report.fetch('complete') ? 0 : 1
+    end
+
+    # Gate GW: a record view's round trip over tools/erx web, unpaced and at a
+    # 115,200-baud UART's rate (BenchWeb). The exit status is nonzero unless both links
+    # measured both views.
+    def self.bench_web(options)
+      raise OptionParser::InvalidArgument, 'bench web runs under --accel hvf only' unless options[:accel] == 'hvf'
+
+      report = BenchWeb.new(root: ROOT).run
+      Terminal.puts("web benchmark (hvf): #{report.fetch('report')}")
+      report.fetch('links').each do |link, targets|
+        targets.each do |target, summary|
+          Terminal.puts("web #{link} #{target}: median #{summary.fetch('median_ms')} ms, " \
+                        "p95 #{summary.fetch('p95_ms')} ms, update #{summary.fetch('update_bytes').join('..')} bytes")
+        end
+      end
+      Terminal.puts("web benchmark failed: #{LineEscape.escape(report.fetch('error'))}") if report.fetch('error')
       report.fetch('complete') ? 0 : 1
     end
 

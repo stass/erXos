@@ -1485,8 +1485,12 @@ allows plain HTTP fails the manifest check.
 
 **Gate GW, with part 1.** Measures a record view's round trip over the
 host tool's front end, for the machine's record and a 1,000-child listing,
-under HVF and over a 115,200-baud UART host link. Decides whether
-whole records stay on the wire or the protocol gains a record difference
+under HVF and over a host link paced to a 115,200-baud UART's rate
+(`tools/erx bench web`); the pacer stands in for the UART, and a board's
+UART measures it again at M12. Decides whether whole records stay on the
+wire or the protocol gains a record difference: whole records stay, since
+an update of the listing crosses the paced link in about 1.1 s, so a view
+of a changing listing still refreshes about once a second
 ([design-web.md](design-web.md#risks-and-open-questions)).
 
 **Gate GD, on part 4's panel, once part 6's Erlang renderer runs.**
@@ -2489,7 +2493,7 @@ their numbers.
 | GP | track P | a program's start (`tools/erx bench spawn`) against its budget and `posix_spawn` on Linux; the `make`-shaped workload and `tools/erx bench pipe`, hosted and under HVF, the stopgap's numbers provisional | the channel's and data area's defaults; the handler's batching; one ring per write end (whether a program's start needs a cheaper path is GK3's) |
 | G6 baseline | the end of 1b-D, on the stopgap | an idle domain's memory by kind, a session's and a program's, the session services' floor and a facet's heap; E-D1 and E-D2; `tools/erx bench fs` and `blk` against M6's baseline | nothing; it records the baseline G6 compares against |
 | G6 | after M5's and M9's kernel parts | the system on erXos's kernel: an idle domain's memory by kind, a session's and a program's, the session services' floor and a facet's heap; E-D1 and E-D2; a program's start; isolation beside hostile domains; the EROFS reader's, littlefs's and the block driver's throughput and commit latency on QEMU (`tools/erx bench fs`, `blk`) against M6's baseline and the G6 baseline | whether the system meets the design's budgets before M8 and M10 build on it; G5's lane defaults and the facets' limits confirmed or revised |
-| GW | track D's part 1, in 1b-C | a record view's round trip over the host tool's front end for the machine's record and a 1,000-child listing, under HVF and over a 115,200-baud UART host link | whether whole records stay on the wire or the web protocol gains a record difference |
+| GW | track D's part 1, in 1b-C | a record view's round trip over the host tool's front end for the machine's record and a 1,000-child listing, under HVF and over a host link paced to a 115,200-baud UART's rate, a stand-in that a board's UART replaces at M12 | whether whole records stay on the wire or the web protocol gains a record difference: whole records stay, since an update of the listing crosses the paced link in about 1.1 s, so a view of a changing listing still refreshes about once a second |
 | GD | track D's part 4, on its panel, once part 6 has run the Erlang renderer | the Erlang renderer's frame time on a 240 by 240 panel against LVGL's on the same panel; the parity test through both; part 6's Erlang renderer may record a QEMU frame time as a preview before the panel exists, deciding nothing | whether LVGL leaves the panels |
 | G8 | M8 | E-S1 (the ladder C0 to C2), E-S3 to E-S9 | default cooperation features; time slice, grace and period; capacity rules; the shared services' sizing rule and whether a service needs a child group per client class |
 | G9 | M9: recorded in 1b-E, decided at its kernel part | interrupt-to-handler latency per device class (`tools/erx bench irq`), ring throughput against sDDF's figures, `tools/erx bench blk`, the network driver's packet rate, MSIs under HVF; the stopgap's numbers recorded with the stopgap named | at the kernel part only: completion batching per device class; virtio-pci over virtio-mmio; each row of the driver table, which alone admits a native shim; no row from the stopgap's numbers |
