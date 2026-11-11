@@ -31,7 +31,7 @@ class RcOracleTest < Minitest::Test
       case verb
       when 'out' then $stdout.write(text + "\\n")
       when 'err' then $stderr.write(text + "\\n")
-      when 'report' then IO.new(3).write("erx_oracle_status=\#{text}\\n")
+      when 'report' then IO.new(3).tap { |io| io.sync = true }.write("erx_oracle_status=\#{text}\\n")
       when 'sleep' then sleep(Float(text))
       when 'flood' then $stdout.write('x' * Integer(text))
       when 'exit' then exit(Integer(text))
@@ -112,9 +112,11 @@ class RcOracleTest < Minitest::Test
   end
 
   def test_a_deadline_kill_is_timed_out_and_reports_nothing_more
+    # The deadline runs from the spawn, so it outlasts the stand-in's own start-up on
+    # a loaded host and `before` is written before the kill; `sleep 30` outlasts it.
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    result = @oracle.run(script('out before', 'report done', 'sleep 30'), deadline: 1)
-    assert_operator(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 10)
+    result = @oracle.run(script('out before', 'report done', 'sleep 30'), deadline: 5)
+    assert_operator(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 20)
     assert_equal(:timed_out, result.state)
     assert_nil(result.status, 'a status written before the kill is not the final status')
     assert_nil(result.exit_status)

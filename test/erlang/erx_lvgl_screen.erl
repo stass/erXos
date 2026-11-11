@@ -38,10 +38,13 @@ summary.
 -define(BUTTON, 3).
 -define(LABEL_HEIGHT, 40).
 -define(BUTTON_HEIGHT, 60).
-%% How long the program must stay silent for a change to count as shown,
-%% and how long a change may keep it busy.
+%% How long the program must stay silent, once a change is shown, for the
+%% change to count as complete, and how long a change may take in all, from
+%% the request until the program is silent again. A sanitized program on a
+%% loaded host is slow to show a change, so the wait for the change has the
+%% long bound, and only the silence after it is a fixed window.
 -define(QUIET_MS, 500).
--define(BUSY_MS, 10000).
+-define(SETTLE_MS, 60000).
 
 -doc "Runs the scenario against the erx-lvgl at Program on a screen of channel `x8r8g8b8` or `r5g6b5`.".
 -spec run(file:filename(), x8r8g8b8 | r5g6b5) -> map().
@@ -54,25 +57,20 @@ run(Program, Channel) ->
                      [binary, stream, use_stdio, exit_status]),
     send(Port, [{screen, ?WIDTH, ?HEIGHT, Chan}
                | ops()]),
-    {First, []} = settle(Port, Depth),
-    Canvas = paint(blank(Depth), First, Depth),
-    Background = pixel(Canvas, ?WIDTH - 1, ?HEIGHT - 1, Depth),
-    true = lists:any(fun({X, Y}) -> pixel(Canvas, X, Y, Depth) =/= Background end,
-                     [{X, Y} || Y <- lists:seq(?PAD, ?PAD + ?LABEL_HEIGHT - 1),
-                                X <- lists:seq(0, ?WIDTH - 1)])
-        orelse error(label_not_drawn),
+    {First, []} = settle(Port, Depth, fun(Reports, _) -> label_drawn(Reports, Depth) end),
+    true = label_drawn(First, Depth) orelse error(label_not_drawn),
     Y = ?PAD + ?LABEL_HEIGHT + ?BUTTON_HEIGHT div 2,
     send(Port, [{input, {pointer, ?WIDTH div 2, Y, 1}},
                 {input, {pointer, ?WIDTH div 2, Y, 0}}]),
-    {Pressed, Events} = settle(Port, Depth),
+    {Pressed, Events} = settle(Port, Depth, fun(_, Es) -> Es =/= [] end),
     [{event, ?BUTTON, on_click, none}] = Events,
     %% The label starts at the odd pixel PAD, so its change is an area off a word.
     send(Port, [{set, ?LABEL, #{text => <<"pressed">>}, []}, commit]),
-    {Changed, []} = settle(Port, Depth),
+    {Changed, []} = settle(Port, Depth, fun(Rs, _) -> Rs =/= [] end),
     [_ | _] = Changed,
     send(Port, [repaint]),
-    {Repaint, []} = settle(Port, Depth),
-    ?WIDTH * ?HEIGHT = lists:sum([W * H || {pixels, _, _, W, H, _} <- Repaint]),
+    {Repaint, []} = settle(Port, Depth, fun(Rs, _) -> area(Rs) >= ?WIDTH * ?HEIGHT end),
+    ?WIDTH * ?HEIGHT = area(Repaint),
     port_close(Port),
     #{first => length(First), pressed => length(Pressed),
       changed => [{X, W} || {pixels, X, _, W, _, _} <- Changed],
@@ -94,27 +92,54 @@ send(Port, Records) ->
     Present = fun(_Type, _Value) -> error(no_presentations) end,
     true = port_command(Port, [erx_ui_wire:encode(R, Present) || R <- Records]).
 
-%% What the program sends until it is silent for QUIET_MS: its pixels
-%% reports, each checked against the screen, and its events.
-settle(Port, Depth) ->
-    Deadline = erlang:monotonic_time(millisecond) + ?BUSY_MS,
-    settle(Port, Depth, <<>>, [], [], Deadline).
+%% What the program sends for a change: its pixels reports, each checked
+%% against the screen, and its events. It waits, up to SETTLE_MS in all,
+%% until Shown(Reports, Events) holds of what has arrived, the condition
+%% that says the change is on screen, and then until the program is silent
+%% for QUIET_MS. Silence alone cannot say the change is shown: a slow
+%% program stays silent before its first report.
+settle(Port, Depth, Shown) ->
+    Deadline = erlang:monotonic_time(millisecond) + ?SETTLE_MS,
+    settle(Port, Depth, Shown, <<>>, [], [], Deadline).
 
-settle(Port, Depth, Buffer, Reports, Events, Deadline) ->
-    case erlang:monotonic_time(millisecond) > Deadline of
-        true -> error({never_idle, length(Reports)});
-        false -> ok
-    end,
+settle(Port, Depth, Shown, Buffer, Reports, Events, Deadline) ->
+    Remaining = Deadline - erlang:monotonic_time(millisecond),
+    IsShown = Shown(Reports, Events),
+    %% Checked on every pass, so a program that never stops writing fails too.
+    Remaining > 0 orelse error(never_settled(IsShown, Reports, Events)),
+    Wait = case IsShown of
+               true -> min(?QUIET_MS, Remaining);
+               false -> Remaining
+           end,
     receive
         {Port, {data, Data}} ->
             {Rs, Es, Rest} = records(<<Buffer/binary, Data/binary>>, Depth, [], []),
-            settle(Port, Depth, Rest, Reports ++ Rs, Events ++ Es, Deadline);
+            settle(Port, Depth, Shown, Rest, Reports ++ Rs, Events ++ Es, Deadline);
         {Port, {exit_status, Status}} ->
             error({renderer_down, Status})
-    after ?QUIET_MS ->
-        <<>> = Buffer,
-        {Reports, Events}
+    after Wait ->
+        case IsShown andalso Wait =:= ?QUIET_MS of
+            true ->
+                <<>> = Buffer,
+                {Reports, Events};
+            false ->
+                error(never_settled(IsShown, Reports, Events))
+        end
     end.
+
+never_settled(true, Reports, _Events) -> {never_idle, length(Reports)};
+never_settled(false, Reports, Events) -> {never_shown, length(Reports), length(Events)}.
+
+%% Whether the label's band of the screen painted by Reports is not all
+%% background, taken to be the colour of the screen's last pixel.
+label_drawn(Reports, Depth) ->
+    Canvas = paint(blank(Depth), Reports, Depth),
+    Background = pixel(Canvas, ?WIDTH - 1, ?HEIGHT - 1, Depth),
+    lists:any(fun({X, Y}) -> pixel(Canvas, X, Y, Depth) =/= Background end,
+              [{X, Y} || Y <- lists:seq(?PAD, ?PAD + ?LABEL_HEIGHT - 1),
+                         X <- lists:seq(0, ?WIDTH - 1)]).
+
+area(Reports) -> lists:sum([W * H || {pixels, _, _, W, H, _} <- Reports]).
 
 records(Bytes, Depth, Reports, Events) ->
     case erx_ui_wire:read(Bytes) of
