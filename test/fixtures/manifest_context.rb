@@ -109,10 +109,14 @@ module ManifestContextFixture
   MAX_DOMAINS = /^(  max_domains )\d+$/
 
   # The development manifest's own configured domain, storage, with the profile and
-  # runtime limits only it names, its driver-control service and facet, and the holder
-  # lines naming it.
+  # runtime limits only it names, its driver-control and data services and the system
+  # domain's facets of them, and the holder lines naming it.
   STORAGE_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/,
-                  /^service storage_ctl\n(?:  .*\n)*/, /^facet storage_ctl\n(?:  .*\n)*/].freeze
+                  /^service storage_ctl\n(?:  .*\n)*/, /^facet storage_ctl\n(?:  .*\n)*/,
+                  /^service data\n(?:  .*\n)*/, /^facet data\n(?:  .*\n)*/].freeze
+  # Root's session template's facet of data, which a sessionless source
+  # (ProductionImage.without_sessions) no longer holds.
+  STORAGE_SESSION_FACET = /^facet data_session\n(?:  .*\n)*/
   STORAGE_HOLDER = /^  holder @domain\.storage$/
 
   # The development manifest as the domain tests start from it: without its session
@@ -126,7 +130,9 @@ module ManifestContextFixture
   def domainless(source)
     raise ArgumentError, 'the manifest has no holder @domain.storage' unless source.match?(STORAGE_HOLDER)
 
-    STORAGE_ROWS.reduce(source.gsub(STORAGE_HOLDER, '  holder system')) { |text, row| substitute(text, row, '') }
+    STORAGE_ROWS.reduce(source.gsub(STORAGE_HOLDER, '  holder system').sub(STORAGE_SESSION_FACET, '')) do |text, row|
+      substitute(text, row, '')
+    end
   end
 
   # source with the system principal's domain quota and max_domains both quota.

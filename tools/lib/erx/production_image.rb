@@ -193,12 +193,16 @@ module Erx
     DEVELOPMENT_MACHINE = Machine.new(memory_mib: MEMORY_MIB, fiasco_reserve_mib: FIASCO_RESERVE_MIB, system_growth_mib: 0,
                                       tmp_growth_mib: 0, root_mib: 64)
 
-    # source with no session template: each `session` record, to the next record. The
-    # production image keeps its template, so the console logs root in at boot and the
-    # UART's first prompt is root's session; a harness whose cells type at the system
+    # source with no session template: each `session` record, to the next record, and
+    # each facet granted to a session template, which names a template no longer there.
+    # The production image keeps its template, so the console logs root in at boot and
+    # the UART's first prompt is root's session; a harness whose cells type at the system
     # shell, and every test image (Machine#manifest), boots without one.
     SESSION_RECORD = /^session [a-z0-9_]+\n(?:  .*\n)*/
-    def self.without_sessions(source) = source.gsub(SESSION_RECORD, '')
+    def self.without_sessions(source)
+      source.gsub(SESSION_RECORD, '')
+            .gsub(/^facet [a-z0-9_]+\n(?:  .*\n)*/) { |record| record.match?(/^  grantee @session\./) ? '' : record }
+    end
 
     # source's session templates, each record whole and in order: what without_sessions
     # takes out, for a test image that boots with them (SystemDomain::Regrant).

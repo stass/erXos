@@ -982,6 +982,14 @@ it; git history is the record of completed work.
   check does, nor `max_message_heap` or `funnel_depth`. Generate the floors from the operation schema with
   the send-credit change, check them on the client before each call, and replace the
   hand-set limit with the generated `max_frame` floor.
+* [Medium] manifest check, `tools/lib/erx/manifest.rb` (`check_network_grants`,
+  `check_files_grants`; design-domains, "Floors from a protocol"): properties 15 and 16
+  each hold a protocol's receivers to its `max_frame` floor with their own copy of the
+  check, and 15 checks only the grantee, not the server. Keep one table from interface
+  to floor constant (`net` to `net_max_frame_min`, `files` to `files_max_frame_min`) and
+  one loop over every receiver, grantee and server, through one `max_frame_of`
+  (merging `receiver_max_frame` and `grantee_max_frame`), so a new protocol with a floor
+  is a table row; property 15 keeps only its rule that the system domain holds no `net`.
 * [Medium] network, `erx_net` and `erx_net_client` (`erx_udp_sock`, `erx_icmp_sock`,
   `erx_gen_udp_core`; design-network-stack, "Credit"): datagram memory is not bounded as
   the design says. A datagram socket's receive queue in the network domain is bounded in
@@ -1575,6 +1583,12 @@ it; git history is the record of completed work.
   hung boot without end. Refuse such a row in the manifest check; the test rows derived from
   MediumBoot's with `restarts 1` and `restart_period_s 5` (`system_domain_regrant.rb`,
   `device_give.rb`) then need a longer period.
+* [Medium] domains, `liberx/system/dom_life.c` (`life_connections`) and design-domains'
+  limits table: the table says a domain's `connections` counts the system connection,
+  and `life_connections` leaves it out of the quota, which the development manifest's
+  counts follow (storage 2, root's session 3). Make the two agree, and check whether
+  `ctl_slots = connections` (`dom_apply.c`) then needs a slot for the system connection;
+  write the derivation of the machine's `max_connections 8` beside it in the manifest.
 * [Medium] facets, `erlang/apps/erx/src/erx_facet.erl` (`provide/2`) and `erx_domain_srv`: that a
   mint's end ends its domain, so its restart provides again and the grants are made anew, is each
   server's duty (a permanent application whose process the mint is), and nothing enforces it: a

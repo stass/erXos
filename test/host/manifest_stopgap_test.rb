@@ -132,8 +132,8 @@ class ManifestStopgapTest < Minitest::Test
 
   def test_admitted_services_reach_the_encoded_manifest
     view = @codec.open('manifest', admit(@source + SERVICE).bytes)
-    # The development manifest's own, storage_ctl, and this one.
-    assert_equal %w[log storage_ctl], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
+    # The development manifest's own, data and storage_ctl, and this one.
+    assert_equal %w[data log storage_ctl], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
     assert_equal 0, view.count('liveness')
   end
 
@@ -336,12 +336,30 @@ class ManifestStopgapTest < Minitest::Test
     assert_equal admit.bytes, admit(@source.sub('window data', 'window zzz')).bytes
   end
 
+  # The development manifest grants the storage domain's data, a files facet, to the
+  # system domain and to root's session template, under one name.
+  def test_the_storage_domain_grants_data_to_the_system_and_root_s_session
+    view = @codec.open('manifest', admit(@source).bytes)
+    services = view.count('services').times.map { |index| view.fetch('services', index) }
+    data = services.index { |row| view.string(row.fetch('name')) == 'data' }
+    refute_nil data
+    assert_equal @codec.schema.services.find { |service| service.fetch(:name) == 'files' }.fetch(:number),
+                 services.fetch(data).fetch('interface')
+    grants = view.count('facets').times.map { |index| view.fetch('facets', index) }
+                 .select { |row| row.fetch('service') == data }
+                 .map { |row| [view.string(row.fetch('name')), row.fetch('grantee_kind')] }
+    kinds = %w[system session].map { |kind| @codec.member('mf_grantee', kind) }
+    assert_equal kinds.map { |kind| ['data', kind] }.sort, grants.sort
+  end
+
   def test_services_sort_by_encoded_name
     services = "service zeta\n  name \"alpha\"\n  server system\n  interface 1\n" \
                "service alpha\n  name \"zeta\"\n  server system\n  interface 2\n"
     view = @codec.open('manifest', admit(@source + services).bytes)
-    assert_equal 1, view.fetch('services', 0).fetch('interface')
-    assert_equal 2, view.fetch('services', 1).fetch('interface')
+    names = view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
+    assert_equal names.sort, names
+    assert_equal 1, view.fetch('services', names.index('alpha')).fetch('interface')
+    assert_equal 2, view.fetch('services', names.index('zeta')).fetch('interface')
   end
 
   def test_a_pci_function_is_refused

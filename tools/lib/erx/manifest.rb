@@ -1088,6 +1088,7 @@ module Erx
         invalid('only the system domain holds a driver-control facet', 8, 'facet.grantee') if
           rows.any? { |row| row.fetch('grantee_kind') != grantee_kind('system') && service_rows.fetch(row.fetch('service')).fetch('interface') == control }
         check_network_grants(rows, tables)
+        check_files_grants(rows, tables)
         rows.sort_by { |row| [row.fetch('name'), *grantee.call(row)] }
       end
 
@@ -1114,6 +1115,42 @@ module Erx
           invalid("facet #{row.fetch('name')}'s grantee takes frames of at most #{max_frame} bytes, below net's floor of #{floor}",
                   15, 'runtime_limits.max_frame')
         end
+      end
+
+      # Property 16: every domain that receives the files protocol of a files facet, its
+      # grantee (the system domain, a configured domain or a session template) and its
+      # server, takes frames of at least files_max_frame_min bytes under its own runtime
+      # limits, and the facet's max_request admits a request that long, since a read reply
+      # or a write request of the client's 64 KiB transfer unit arrives in one frame, and
+      # the funnel drops a longer frame and the facet a longer request.
+      def check_files_grants(facets, tables)
+        files = fetch_interface('files')
+        floor = @codec.constant('files_max_frame_min')
+        services = tables.fetch('services')
+        facets.select { |row| services.fetch(row.fetch('service')).fetch('interface') == files }.each do |row|
+          if row.fetch('max_request') < floor
+            invalid("facet #{row.fetch('name')}'s max_request #{row.fetch('max_request')} is below files' floor of #{floor}",
+                    16, 'facet.max_request')
+          end
+          server = services.fetch(row.fetch('service')).fetch('server')
+          server_kind = server == @codec.constant('mf_none') ? grantee_kind('system') : grantee_kind('domain')
+          receivers = { 'grantee' => receiver_max_frame(row.fetch('grantee_kind'), row.fetch('grantee'), tables),
+                        'server' => receiver_max_frame(server_kind, server, tables) }
+          receivers.each do |role, max_frame|
+            next if max_frame >= floor
+
+            invalid("facet #{row.fetch('name')}'s #{role} takes frames of at most #{max_frame} bytes, below files' floor of #{floor}",
+                    16, 'runtime_limits.max_frame')
+          end
+        end
+      end
+
+      # The max_frame of a receiver of a protocol: the system domain's, under the machine's
+      # system runtime limits, or a configured domain's or a session template's.
+      def receiver_max_frame(kind, index, tables)
+        return grantee_max_frame({ 'grantee_kind' => kind, 'grantee' => index }, tables) unless kind == grantee_kind('system')
+
+        tables.fetch('runtime_limits').fetch(reference(@source.machine, 'system_runtime_limits', 'runtime_limits')).fetch('max_frame')
       end
 
       # The max_frame of a configured domain's or a session template's runtime limits.

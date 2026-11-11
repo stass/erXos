@@ -529,6 +529,18 @@ violation fails the build with the property, the record and the field:
     have a `max_frame` below the floor while the system domain's are
     above it; and a mint request naming the system domain, which the mint
     refuses and counts.
+16. **Every receiver of `files` takes its frames:** for each facet of the
+    `files` interface (`abi/services/files.txt`), compared by number, the
+    grantee (the system domain under the machine's system runtime limits, a
+    configured domain or a session template) and the service's server
+    each run with a `max_frame` of at least `files_max_frame_min`, 128 KiB:
+    a read reply or a write request of the file client's 64 KiB transfer
+    unit arrives in one frame, and the funnel drops a longer one, which
+    would leave the 9P caller waiting; the facet's `max_request` admits a
+    request that long. The storage domain's `data` is one such facet
+    ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)).
+    Seeded violation: a check that reads only the grantee's limits, which
+    admits a server below the floor.
 
 Each property has a test that seeds one violation into a manifest and
 expects the build to fail with that property's diagnostic.

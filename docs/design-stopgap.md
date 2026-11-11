@@ -1637,7 +1637,11 @@ domain that holds the data window: the storage domain, which the development man
 domain with the `block` unit and runs `erx_blk` and `erx_storage` (`erx_lfs_sup` under `erx_storage_sup`). The system
 release ships neither application, so a manifest that leaves the `block` unit with the system domain runs no block
 driver and serves no `/data`. The Erlang side is the
-port's, and only the glue below differs.
+port's, and only the glue below differs. The storage domain serves the tree as the `data` service, of the `files`
+interface, whose facets the manifest grants to the system domain and to root's session template: each grant is
+read-write over the whole of `/data`, so every session of root's principal reads and writes all of it, which a
+development build's trusted code allows (property 16 of [design-system.md](design-system.md) holds both ends to the
+protocol's frame floor).
 
 A process running a dirty NIF cannot run its receive loop, so two share the work. The **owner** takes clients' requests, one at a time, and never
 blocks. The **worker**, linked to it, alone calls the littlefs NIF, on a dirty I/O scheduler, one operation at a time.

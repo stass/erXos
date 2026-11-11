@@ -81,6 +81,12 @@ class DomPlannerTest < Minitest::Test
     File.readlines(@runner.run([@view_driver, path], name: "dom-view-#{name}", deadline: 30).fetch('log'), chomp: true)
   end
 
+  # source with the machine's max_connections set to count; raises when the manifest
+  # has no such row, so a manifest change cannot quietly disable a test.
+  def with_max_connections(source, count)
+    ManifestContextFixture.substitute(source, /^(  max_connections )\d+$/, "\\1#{count}")
+  end
+
   def refused(source, field, message)
     error = assert_raises(Erx::Manifest::Invalid) { admit(source) }
     assert_equal [12, field], [error.property, error.field], error.message
@@ -266,25 +272,25 @@ class DomPlannerTest < Minitest::Test
   end
 
   def test_system_connections_past_the_table_fail_the_build
-    source = with_domains('alpha', 'beta').sub('max_connections 4', 'max_connections 1').sub('  connections 2', '  connections 1')
+    source = with_max_connections(with_domains('alpha', 'beta'), 1).sub('  connections 2', '  connections 1')
     refused(source, 'domain', /configured domain beta with limit/)
   end
 
   def test_introductions_within_every_bound_are_admitted
-    source = "#{NARROW}#{with_domains('alpha', 'beta', 'gamma', share: 'narrow').sub('max_connections 4', 'max_connections 5')}" \
+    source = "#{NARROW}#{with_max_connections(with_domains('alpha', 'beta', 'gamma', share: 'narrow'), 5)}" \
              "introduce @domain.alpha @domain.beta\nintroduce @domain.beta @domain.gamma\n"
     assert_equal 3, admit(source).report.fetch('child_plan_instances')
   end
 
   def test_an_introduction_past_the_connection_table_fails_the_build
-    source = "#{with_domains('alpha', 'beta').sub('max_connections 4', 'max_connections 2')}introduce @domain.alpha @domain.beta\n"
+    source = "#{with_max_connections(with_domains('alpha', 'beta'), 2)}introduce @domain.alpha @domain.beta\n"
     refused(source, 'introduce', /introduction of alpha and beta with limit/)
   end
 
   # Each recorded introduction counts against both parties' connections quota.
   def test_an_introduction_past_a_partys_connections_quota_fails_the_build
-    source = NARROW + with_domains('alpha', 'beta', 'gamma', share: 'narrow').sub('max_connections 4', 'max_connections 6')
-                                                                            .sub('  connections 2', '  connections 1')
+    source = NARROW + with_max_connections(with_domains('alpha', 'beta', 'gamma', share: 'narrow'), 6)
+                      .sub('  connections 2', '  connections 1')
     source += "introduce @domain.alpha @domain.beta\nintroduce @domain.alpha @domain.gamma\n"
     refused(source, 'introduce', /introduction of alpha and gamma with limit/)
   end
@@ -377,8 +383,11 @@ class DomPlannerTest < Minitest::Test
         assert(lines.any? { |line| line.match?(/\Adevice \d+ unit=#{unit} compatible=#{compatible} #{page}\z/) },
                "no #{unit} entry in #{lines.inspect}")
       end
-    control = @codec.schema.services.find { |service| service.fetch(:name) == 'driver_control' }.fetch(:number)
-    assert_includes lines, "service 0 name=storage_ctl server=0 interface=#{control}"
+    interface = ->(name) { @codec.schema.services.find { |service| service.fetch(:name) == name }.fetch(:number) }
+    # The storage domain's services, in name order: data, of files, and storage_ctl.
+    assert_equal ["service 0 name=data server=0 interface=#{interface.call('files')}",
+                  "service 1 name=storage_ctl server=0 interface=#{interface.call('driver_control')}"],
+                 lines.grep(/\Aservice /)
   end
 
   def test_a_malformed_input_is_refused_by_the_helper

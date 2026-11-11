@@ -117,7 +117,9 @@ class MediumBootTest < Minitest::Test
                   grown[/^principal system\n(?:  .*\n)*?(  domains [0-9]+)$/, 1], grown[/^  max_domains [0-9]+$/]]
     sessionless = Erx::ProductionImage.without_sessions(plain)
     refute_match(/^session /, sessionless)
-    assert_equal 5, plain.lines.size - sessionless.lines.size
+    refute_match(/^  grantee @session\./, sessionless)
+    # The session template's 5 lines and the 10 of data_session, the facet granted to it.
+    assert_equal 5 + 10, plain.lines.size - sessionless.lines.size
     assert_equal 4, sessionless.lines.zip(grown.lines).count { |left, right| left != right }
     assert_equal sessionless.lines.size, grown.lines.size - Boot::DOMAIN_ROW.lines.size
     assert grown.end_with?(Boot::DOMAIN_ROW)

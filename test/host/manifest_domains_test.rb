@@ -502,16 +502,42 @@ class ManifestDomainsTest < Minitest::Test
   # session under the session ones.
   def test_a_net_grantee_below_the_frame_floor_is_refused
     floor = @codec.constant('net_max_frame_min')
-    raised = lambda do |source, name|
-      source.sub("runtime_limits #{name}\n  max_frame 65536", "runtime_limits #{name}\n  max_frame #{floor}")
-    end
     net = service('n', '@domain.beta').sub('interface 1', 'interface net')
     to_session = with_session(self.class.session) + net + facet('n', '@session.system', '@service.n')
     to_alpha = with_session(self.class.session) + net + facet('n', '@domain.alpha', '@service.n')
-    admit(raised.call(to_session, 'session'))
-    admit(raised.call(to_alpha, 'system'))
-    [to_session, raised.call(to_session, 'system'), to_alpha].each do |source|
+    admit(to_session)
+    admit(to_alpha)
+    [with_max_frame(to_session, 'session', floor - 1), with_max_frame(to_alpha, 'system', floor - 1)].each do |source|
       refused(Erx::Manifest::Invalid, 15, 'runtime_limits.max_frame', source, message: /#{floor}/)
     end
+  end
+
+  # Property 16: a files facet's grantee, the system domain, a configured domain or a
+  # session template, and its server each take frames of at least files_max_frame_min
+  # under their own runtime limits, and the facet's max_request admits a request that
+  # long. beta serves under the system runtime limits, and so does alpha as a grantee; a
+  # session takes the session ones.
+  def test_a_files_receiver_below_the_frame_floor_is_refused
+    floor = @codec.constant('files_max_frame_min')
+    files = service('f', '@domain.beta').sub('interface 1', 'interface files')
+    files_facet = ->(grantee) { facet('f', grantee, '@service.f').sub('max_request 1', "max_request #{floor}") }
+    granted = ->(grantee) { with_session(self.class.session) + files + files_facet.call(grantee) }
+    refused(Erx::Manifest::Invalid, 16, 'facet.max_request', granted.call('system').sub("max_request #{floor}", "max_request #{floor - 1}"),
+            message: /f's max_request #{floor - 1} .*#{floor}/)
+    %w[system @domain.alpha @session.system].each { |grantee| admit(granted.call(grantee)) }
+    admit(with_max_frame(granted.call('@domain.alpha'), 'session', floor - 1))
+    [['grantee', with_max_frame(granted.call('@session.system'), 'session', floor - 1)],
+     ['server', with_max_frame(granted.call('@session.system'), 'system', floor - 1)],
+     ['grantee', with_max_frame(granted.call('system'), 'system', floor - 1)]].each do |role, source|
+      refused(Erx::Manifest::Invalid, 16, 'runtime_limits.max_frame', source, message: /f's #{role} .*#{floor}/)
+    end
+  end
+
+  # source with the max_frame of the runtime limits name set to bytes.
+  def with_max_frame(source, name, bytes)
+    pattern = /^(runtime_limits #{name}\n  max_frame )\d+$/
+    raise ArgumentError, "no runtime_limits #{name}" unless source.match?(pattern)
+
+    source.sub(pattern, "\\1#{bytes}")
   end
 end

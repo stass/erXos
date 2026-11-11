@@ -10,7 +10,9 @@
 # "littlefs in the storage domain"); the slot writer's four windows stay the
 # system domain's (property 8). It serves storage_ctl, its driver-control facet,
 # to the system domain alone (property 8; docs/design-system.md, "The holder's
-# driver-control facet"). Fixed
+# driver-control facet"), and data, an erx_fs grant of /data's tree, to the system
+# domain and to root's session (property 16; docs/design-stopgap.md, "littlefs in the
+# storage domain"). Fixed
 # medium roles carry partition 0, as docs/design-abi.md says. The machine is
 # QEMU virt with 224 MiB of RAM (config/platforms/qemu-virt.json), small for the
 # browser emulator yet roomy at the shell; root_memory, 156.25 MiB, leaves 51.75 MiB
@@ -146,7 +148,7 @@ share session
   ceiling 31
   flags none
 runtime_limits system
-  max_frame 65536
+  max_frame 131072
   max_message_heap 1048576
   funnel_depth 64
   exports 256
@@ -156,7 +158,7 @@ runtime_limits system
   foreign_atoms 1024
   processes 4096
 runtime_limits session
-  max_frame 65536
+  max_frame 131072
   max_message_heap 131072
   funnel_depth 64
   exports 256
@@ -166,7 +168,7 @@ runtime_limits session
   foreign_atoms 1024
   processes 1024
 runtime_limits storage
-  max_frame 65536
+  max_frame 131072
   max_message_heap 131072
   funnel_depth 64
   exports 256
@@ -193,7 +195,7 @@ limits session
   grant @share.session
   spaces @share.session
   lane 4096
-  connections 1
+  connections 3
   crash 0
   flags spaces
   runtime_limits @runtime_limits.session
@@ -205,7 +207,7 @@ limits storage
   grant @share.users
   spaces none
   lane 4096
-  connections 0
+  connections 2
   crash 0
   flags none
   runtime_limits @runtime_limits.storage
@@ -235,7 +237,7 @@ machine
   users_share @share.users
   system_principal @principal.system
   max_domains 2
-  max_connections 4
+  max_connections 8
   system_lane 4096
   system_queue 16384
   peer_held 4096
@@ -323,4 +325,34 @@ facet storage_ctl
   reductions 100000
   period_ns 1000000000
   max_heap_size 65536
+# data: one erx_fs grant of /data's tree for each grantee, read-write and bound to the
+# grantee's domain id. Its max_request is files_max_frame_min (property 16), not the
+# largest 9P msize, 65560, since a request is measured as its encoded Erlang term, which
+# for a 64 KiB write with its envelope is longer than that; in_flight caps the requests the grant holds at once; max_heap_size, in
+# words (2 MiB), bounds the grant's process, which holds up to in_flight write requests of
+# 64 KiB with their data. reductions and period_ns bind no erx_fs grant. The storage
+# domain takes two connections, root's session and one more while a session is replaced,
+# and root's session three: data, net and one more.
+service data
+  server @domain.storage
+  interface files
+facet data
+  grantee system
+  service @service.data
+  operations none
+  max_request 131072
+  in_flight 16
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 262144
+facet data_session
+  name "data"
+  grantee @session.system
+  service @service.data
+  operations none
+  max_request 131072
+  in_flight 16
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 262144
 shell_principal @principal.system

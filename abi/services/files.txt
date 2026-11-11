@@ -1,0 +1,11 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The files interface (docs/design-files.md, "Serving: the erx_fs behaviour"): an erx_fs
+# grant of a tree, which a client mounts in its namespace and speaks 9P2000.L to. Its
+# operations are the 9P protocol's own messages, which no facet row names, so it declares
+# none. Every grantee and every server of a files facet carries frames of at least
+# files_max_frame_min bytes (property 16): a read reply or a write request of the client's
+# 64 KiB transfer unit and its encoding arrive in one frame (abi/protocols/9p.txt,
+# docs/design-domains.md, "Floors from a protocol").
+service files 5
+limit files_max_frame_min u32 131072
