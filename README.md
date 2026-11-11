@@ -295,7 +295,7 @@ Error in process <0.150.0> with exit value:
   redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
   Its commands are Erlang commands (`echo`, `cat`, `ls`, `wc`, `grep`,
   `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `top`, `mount`, `uname`, `dmesg`, `ifconfig`,
-  `ping`, `erl`, `true` and `false`); every pipe carries text, and `ls`, `ps`, `grep`, `sort` and
+  `ping`, `host`, `erl`, `true` and `false`); every pipe carries text, and `ls`, `ps`, `grep`, `sort` and
   `wc` print what FreeBSD's do for the options they offer; `uname` takes
   FreeBSD's flags and layout, and `uname -v` names the build. `dmesg` prints
   the kernel log from `/proc/kernel/log`, which reads the log without taking
@@ -338,10 +338,12 @@ Error in process <0.150.0> with exit value:
   cause (`test/oracle/hosted_known_differences/`). On QEMU the system domain
   runs all four groups whole against stock (`make check-oracle`), with
   every difference classified or tracked in TODO.md.
-* **The release** carries kernel, stdlib, compiler and runtime_tools (the
-  last two loaded, not started), and the erXos applications `erx`,
-  `erx_files`, `erx_uart`, `erx_blk`, `erx_shell`, `erx_code` and
-  `erx_hostlink`.
+* **The system release** carries kernel, stdlib, compiler and
+  runtime_tools (the last two loaded, not started) and the erXos
+  applications the system domain runs. The storage applications
+  (`erx_blk`, `erx_storage`) and the network ones (`erx_net`,
+  `erx_net_client`) ship only in the domain release, so the system
+  domain holds no driver or network code.
 * **A demo runs in the browser**, on an AArch64 emulator built from v86,
   with a disk that keeps its files across a power cut and a menu of
   hardware faults (dead, corrupt or hung disk, corrupt RAM, an interrupt
