@@ -44,8 +44,10 @@ module Erx
     # system's release (macOS keeps them on its sealed system volume), which every program
     # identity names (system_release).
     SYSTEM_DIRECTORIES = %w[/usr/bin /bin /usr/sbin /sbin].freeze
-    # Whether the release names those directories' programs. On Linux a package upgrade
-    # changes them under the same release, so there no record is reused: every step runs.
+    # Whether the release names those directories' programs. On macOS the sealed system
+    # volume's release does. On FreeBSD and Linux an upgrade of the base system or a package
+    # replaces them under the same release (installworld, pkgbase), so there no record is
+    # reused: every step runs.
     REUSE = HostOs::MACOS
     SHARED_LIBRARY = /\.(?:dylib|so)\z|\.so\.[0-9.]+\z/
     # The whole environment of a compile whose output a key names (CompileMemo, and the
@@ -77,12 +79,16 @@ module Erx
     # program loads from the operating system the release names. Homebrew keeps each
     # version and revision of a package in a directory of its own, so the real path also
     # names the helpers a driver runs from its install by path (gcc's cc1, its libgcc.a).
-    def self.program_identity(path)
+    #
+    # libraries is called with a bin directory and returns its install's library digest
+    # (install_libraries); a caller naming many programs of one install passes one that
+    # remembers its answers, so the install's libraries are read once, not once per program.
+    def self.program_identity(path, libraries: method(:install_libraries))
       # A bare name would be found on the step's PATH, not here.
       raise Error, "build memo program #{path} is not an absolute path" unless path.to_s.start_with?('/')
 
       real = File.realpath(path)
-      [real, file_digest(real), install_libraries(real), system_release].join(' ')
+      [real, file_digest(real), libraries.call(File.dirname(real)), system_release].join(' ')
     rescue Errno::ENOENT
       # A program that is not there makes no output for a record to reuse: any step that
       # runs it fails.
@@ -91,10 +97,21 @@ module Erx
       raise Error, "cannot identify build program #{path}: #{error.message}"
     end
 
-    # The SHA-256 of the shared libraries directly in the lib directory beside program's
-    # bin directory, by name and content; none for a program of the operating system's.
-    def self.install_libraries(program)
-      bin = File.dirname(program)
+    # Every executable file directly in directory, by name and identity: what a build that
+    # finds its programs there can run. The install's libraries are named once.
+    def self.directory_identities(directory)
+      libraries_by_bin = {}
+      libraries = ->(bin) { libraries_by_bin[bin] ||= install_libraries(bin) }
+      Dir.children(directory).sort.map { |name| File.join(directory, name) }
+         .select { |path| File.file?(path) && File.executable?(path) }
+         .to_h { |path| [File.basename(path), program_identity(path, libraries: libraries)] }
+    rescue SystemCallError => error
+      raise Error, "cannot list build program directory #{directory}: #{error.message}"
+    end
+
+    # The SHA-256 of the shared libraries directly in the lib directory beside bin, a bin
+    # directory, by name and content; none for the operating system's own.
+    def self.install_libraries(bin)
       directory = File.expand_path('../lib', bin)
       return 'none' if SYSTEM_DIRECTORIES.include?(bin) || !File.directory?(directory)
 
@@ -109,15 +126,25 @@ module Erx
     def self.tool_environment = ENV.keys.to_h { |name| [name, nil] }.merge(TOOL_ENVIRONMENT)
 
     # The operating system and its release, which name its own programs and libraries.
-    def self.system_release = Etc.uname.values_at(:sysname, :release, :version).join(' ')
+    def self.system_release
+      @system_release ||= Etc.uname.values_at(:sysname, :release, :version).join(' ').freeze
+    end
 
     # The SHA-256 of a file, read once per process for each state of the file (its inode,
     # size and change and modification times), since a compiler's libraries are hundreds
-    # of megabytes and every key of a build names them.
+    # of megabytes and every key of a build names them. A file this user cannot read (a
+    # setuid program of mode --x, such as sudo, in a directory a build's PATH names) is
+    # named by that state and its mode, marked unreadable: the build cannot run it by
+    # reading it either, and a change of the file changes its change time.
     def self.file_digest(path)
       stat = File.stat(path)
+      state = [path, stat.mode, stat.ino, stat.size, stat.mtime.to_r, stat.ctime.to_r]
       @file_digests ||= {}
-      @file_digests[[path, stat.ino, stat.size, stat.mtime.to_r, stat.ctime.to_r]] ||= Digest::SHA256.file(path).hexdigest
+      @file_digests[state] ||= begin
+        Digest::SHA256.file(path).hexdigest
+      rescue Errno::EACCES
+        "unreadable #{format('%o', stat.mode)} #{stat.ino} #{stat.size} #{stat.mtime.to_r} #{stat.ctime.to_r}"
+      end
     end
 
     # The SHA-256 over every file below directory, by relative path and content: a tree a

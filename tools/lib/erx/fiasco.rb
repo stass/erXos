@@ -9,6 +9,7 @@ require 'tmpdir'
 require_relative 'runner'
 require_relative 'bounded_file'
 require_relative 'build_memo'
+require_relative 'host_os'
 require_relative 'boot_file'
 require_relative 'json_input'
 require_relative 'sources'
@@ -77,11 +78,12 @@ module Erx
     BUILD_RECORD_BYTES = 65_536
     # Beside the cross gcc and binutils (CrossToolchain::PROBES), one program of each
     # package the build runs from outside the operating system: GNU make, gawk (the
-    # inherited Makeconf's AWKP), dtc and, on macOS, GNU coreutils, findutils and sed. The
-    # directory each really lives in goes on the build's PATH (program_directories), so
-    # the build finds every other program of those packages beside it, and memo_key names
-    # every program in those directories.
-    PROGRAMS = [*%w[gmake gawk dtc], *(RUBY_PLATFORM.include?('darwin') ? %w[gcp gfind gsed] : [])].freeze
+    # inherited Makeconf's AWKP), dtc, perl (Fiasco's preprocessor) and, on macOS, GNU
+    # coreutils, findutils and sed. The directory each really lives in goes on the build's
+    # PATH (program_directories), so the build finds every other program of those
+    # packages beside it, and memo_key names every program in those directories. On
+    # FreeBSD that is /usr/local/bin, a directory every package shares.
+    PROGRAMS = [*%w[gmake gawk dtc perl], *(HostOs::MACOS ? %w[gcp gfind gsed] : [])].freeze
     # The packages whose plain GNU names (make, cp, find), in their libexec/gnubin, the
     # inherited build expects ahead of the operating system's programs of those names.
     GNU_NAMED = %w[gmake gcp gfind].freeze
@@ -208,18 +210,11 @@ module Erx
     def memo_key
       environment = build_environment.compact
       programs = environment.fetch('PATH').split(File::PATH_SEPARATOR).reject { |directory| BuildMemo::SYSTEM_DIRECTORIES.include?(directory) }
-                            .to_h { |directory| [directory, directory_programs(directory)] }
+                            .to_h { |directory| [directory, BuildMemo.directory_identities(directory)] }
       BuildMemo.key('inputs' => @captured.fetch('sha256'), 'tools' => BuildMemo.tools_digest(root: @root),
                     'compiler' => BuildMemo.program_identity(@compiler), 'cross_compile' => cross_toolchain.prefix,
                     'programs' => programs,
                     'system' => BuildMemo.system_release, 'environment' => environment)
-    end
-
-    # Every program in directory, by name and identity.
-    def directory_programs(directory)
-      Dir.children(directory).sort.map { |name| File.join(directory, name) }
-         .select { |path| File.file?(path) && File.executable?(path) }
-         .to_h { |path| [File.basename(path), BuildMemo.program_identity(path)] }
     end
 
     # What the build leaves for the image and the native builds, and the receipt that
@@ -514,8 +509,11 @@ module Erx
     # The build's PATH: for the programs of cross named in CrossToolchain::PROBES and each
     # of PROGRAMS, found in the absolute directories of this process's PATH, the directory
     # it really lives in, after its package's GNU names (GNU_NAMED); then the operating
-    # system's directories. Nothing else on the caller's PATH reaches the build, so it
-    # runs no program memo_key does not name.
+    # system's directories. A directory of the caller's PATH reaches the build only as the
+    # home of one of those programs, and then the build can run every program in it, which
+    # is why memo_key names every program there. The system directories come last whatever
+    # a program's home: perl at /usr/bin (macOS) must not put the BSD cp and find ahead of
+    # the GNU ones.
     def self.program_directories(cross:)
       search = HostPath.directories(ENV.fetch('PATH', ''))
       found = [*CrossToolchain::PROBES.map { |probe| cross.program(probe) }, *PROGRAMS].flat_map do |program|
@@ -526,7 +524,7 @@ module Erx
         gnu = File.expand_path('../libexec/gnubin', bin)
         GNU_NAMED.include?(program) && File.directory?(gnu) ? [gnu, bin] : [bin]
       end
-      (found + BuildMemo::SYSTEM_DIRECTORIES).uniq
+      ((found - BuildMemo::SYSTEM_DIRECTORIES) + BuildMemo::SYSTEM_DIRECTORIES).uniq
     end
   end
 end

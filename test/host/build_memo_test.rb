@@ -145,6 +145,52 @@ class BuildMemoTest < Minitest::Test
     refute_equal before, Erx::BuildMemo.program_identity(program)
   end
 
+  # A directory shared by many packages (FreeBSD's /usr/local/bin) is named program by program,
+  # each with its install's libraries.
+  def test_directory_identities_name_every_executable_and_the_install_libraries
+    FileUtils.mkdir_p(File.join(@root, 'shared/bin'))
+    FileUtils.mkdir_p(File.join(@root, 'shared/lib'))
+    %w[cc as].each do |name|
+      File.write(File.join(@root, 'shared/bin', name), "#!/bin/sh\n")
+      File.chmod(0o755, File.join(@root, 'shared/bin', name))
+    end
+    File.write(File.join(@root, 'shared/bin/data'), 'not a program')
+    File.write(File.join(@root, 'shared/lib/libshared.so'), 'one')
+    before = Erx::BuildMemo.directory_identities(File.join(@root, 'shared/bin'))
+    assert_equal %w[as cc], before.keys
+    assert_equal Erx::BuildMemo.program_identity(File.join(@root, 'shared/bin/cc')), before.fetch('cc')
+    File.write(File.join(@root, 'shared/lib/libshared.so'), 'two')
+    refute_equal before, Erx::BuildMemo.directory_identities(File.join(@root, 'shared/bin'))
+  end
+
+  # A program reached through a link names the libraries beside its real install, not those
+  # beside the link (Homebrew's bin, FreeBSD's /usr/local/bin).
+  def test_a_linked_program_names_the_libraries_of_its_real_install
+    %w[install/bin install/lib links].each { |name| FileUtils.mkdir_p(File.join(@root, name)) }
+    program = File.join(@root, 'install/bin/cc')
+    File.write(program, "#!/bin/sh\n")
+    File.chmod(0o755, program)
+    File.symlink(program, File.join(@root, 'links/cc'))
+    File.write(File.join(@root, 'install/lib/libcc.so'), 'one')
+    before = Erx::BuildMemo.directory_identities(File.join(@root, 'links')).fetch('cc')
+    File.write(File.join(@root, 'install/lib/libcc.so'), 'two')
+    refute_equal before, Erx::BuildMemo.directory_identities(File.join(@root, 'links')).fetch('cc')
+  end
+
+  # A program this user cannot read (setuid sudo, mode --x, in a PATH directory) is named by
+  # its state and mode, marked unreadable, instead of failing every build.
+  def test_an_unreadable_program_is_named_by_its_state
+    skip 'root reads every file' if Process.uid.zero?
+    FileUtils.mkdir_p(File.join(@root, 'shared/bin'))
+    program = File.join(@root, 'shared/bin/sudo')
+    File.write(program, 'one')
+    File.chmod(0o111, program)
+    before = Erx::BuildMemo.directory_identities(File.join(@root, 'shared/bin')).fetch('sudo')
+    assert_includes before, 'unreadable 100111'
+    File.chmod(0o4111, program)
+    refute_equal before, Erx::BuildMemo.directory_identities(File.join(@root, 'shared/bin')).fetch('sudo')
+  end
+
   # The C17 cores the Fiasco build links compile as the memo's compiles do.
   def test_core_compiles_see_only_the_tool_environment_and_no_configuration_file
     assert_equal Erx::BuildMemo.tool_environment, Erx::CoreArchive.environment

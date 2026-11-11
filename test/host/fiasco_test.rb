@@ -223,9 +223,20 @@ class FiascoTest < Minitest::Test
     @runner.commands.size - before
   end
 
+  # The build after an unchanged one runs no command on a host that reuses records
+  # (BuildMemo::REUSE) and all of them again on a host that does not.
+  def assert_second_build(fiasco = @fiasco)
+    commands = commands_of_a_build(fiasco)
+    if Erx::BuildMemo::REUSE
+      assert_equal 0, commands, 'an unchanged build is reused'
+    else
+      assert commands.positive?, 'a host that reuses no record runs the build again'
+    end
+  end
+
   def test_a_finished_build_is_reused_until_an_input_changes
     assert commands_of_a_build.positive?
-    assert_equal 0, commands_of_a_build
+    assert_second_build
     File.write(File.join(@directory, 'fiasco/kernel/extra.cpp'), "int extra;\n")
     assert commands_of_a_build.positive?
   end
@@ -238,7 +249,7 @@ class FiascoTest < Minitest::Test
     File.write(tool, "#!/bin/sh\n")
     File.chmod(0o755, tool)
     assert commands_of_a_build(fiasco).positive?
-    assert_equal 0, commands_of_a_build(fiasco)
+    assert_second_build(fiasco)
     File.write(tool, "#!/bin/sh\nexit 0\n")
     assert commands_of_a_build(fiasco).positive?, 'a changed program builds again'
     other = File.join(fiasco.programs, 'other')
@@ -252,7 +263,7 @@ class FiascoTest < Minitest::Test
   # make and in the users' Makeconf.local, with that directory on its PATH.
   def test_another_cross_prefix_builds_again_with_that_prefix
     assert commands_of_a_build.positive?
-    assert_equal 0, commands_of_a_build
+    assert_second_build
     other = (Erx::CrossToolchain::PREFIXES - [Erx::CrossToolchain.find.prefix]).first
     programs = File.join(File.realpath(@directory), 'other-toolchain')
     FileUtils.mkdir_p(programs)
@@ -282,7 +293,7 @@ class FiascoTest < Minitest::Test
     FileUtils.mkdir_p(File.dirname(header))
     File.write(header, "#define L4 1\n")
     assert commands_of_a_build.positive?, 'headers the last build did not leave build again'
-    assert_equal 0, commands_of_a_build
+    assert_second_build
     File.write(header, "#define L4 2\n")
     assert commands_of_a_build.positive?, 'an edited header builds again'
   end
@@ -291,9 +302,50 @@ class FiascoTest < Minitest::Test
     path = Erx::Fiasco.build_environment(cross: Erx::CrossToolchain.find).fetch('PATH').split(File::PATH_SEPARATOR)
     packages = path - Erx::BuildMemo::SYSTEM_DIRECTORIES
     assert packages.all? { |directory| directory == File.realpath(directory) }, packages.inspect
-    ambient = ENV.fetch('PATH').split(File::PATH_SEPARATOR) - Erx::BuildMemo::SYSTEM_DIRECTORIES
-    assert_empty packages & ambient
+    # Each directory is the real home of a program the build names (FreeBSD's /usr/local/bin
+    # is one, though the caller's PATH names it too), and memo_key names every program in it.
+    cross = Erx::CrossToolchain.find
+    caller_path = Erx::HostPath.directories(ENV.fetch('PATH'))
+    homes = [*Erx::CrossToolchain::PROBES.map { |probe| cross.program(probe) }, *Erx::Fiasco::PROGRAMS].flat_map do |program|
+      bin = File.dirname(File.realpath(Erx::HostPath.find_program(program, directories: caller_path)))
+      Erx::Fiasco::GNU_NAMED.include?(program) ? [bin, File.expand_path('../libexec/gnubin', bin)] : [bin]
+    end
+    assert_empty packages - homes
     assert_equal Erx::BuildMemo::SYSTEM_DIRECTORIES, path.last(Erx::BuildMemo::SYSTEM_DIRECTORIES.size)
+  end
+
+  # The build's PATH when a directory holding only the executable name sits ahead of the
+  # caller's own PATH, and that directory.
+  def build_path_with_only(name)
+    directory = File.realpath(Dir.mktmpdir(name, @directory))
+    File.write(File.join(directory, name), "#!/bin/sh\n")
+    File.chmod(0o755, File.join(directory, name))
+    original = ENV.fetch('PATH')
+    begin
+      ENV['PATH'] = [directory, original].join(File::PATH_SEPARATOR)
+      [directory, Erx::Fiasco.build_environment(cross: Erx::CrossToolchain.find).fetch('PATH').split(File::PATH_SEPARATOR)]
+    ensure
+      ENV['PATH'] = original
+    end
+  end
+
+  # A directory of the caller's PATH that holds no program of the build stays out of the
+  # build's PATH, wherever it sits on the caller's PATH.
+  def test_a_caller_directory_with_no_build_program_does_not_reach_the_build_path
+    decoy, path = build_path_with_only('cc')
+    refute_includes path, decoy
+    assert_equal Erx::BuildMemo::SYSTEM_DIRECTORIES, path.last(Erx::BuildMemo::SYSTEM_DIRECTORIES.size)
+  end
+
+  # And a directory holding a program the build names (perl, Fiasco's preprocessor, which
+  # on FreeBSD lives beside the cross tools and on macOS in /usr/bin) reaches it, ahead of
+  # the system's directories.
+  def test_a_caller_directory_with_a_build_program_reaches_the_build_path
+    %w[gmake gawk dtc perl].each do |name|
+      home, path = build_path_with_only(name)
+      assert_includes path, home, "#{name} found on the caller's PATH is named by its directory"
+      assert_operator path.index(home), :<, path.index(Erx::BuildMemo::SYSTEM_DIRECTORIES.first)
+    end
   end
 
   def test_banner_recipe_has_no_default_root_task

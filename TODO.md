@@ -895,16 +895,10 @@ it; git history is the record of completed work.
   that abort by design dump core into the tree root (`mutant-*.core`, `page.core`,
   `object.core`; FreeBSD's `kern.corefile` is `%N.core` in the working directory), 17 files
   per `make check`. Test commands should run with `RLIMIT_CORE` 0.
-* [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb` (`program_directories`,
-  `memo_key`), `test/host/fiasco_test.rb`: `tools/erx build fiasco` stops in kconfig with
-  `gcc: not found`, because Fiasco's host tools build with `HOSTCC=gcc` and FreeBSD has no
-  `gcc`, so the port's cross GCC 11.3 is never reached; the build should name the host
-  compiler (`cc`, or the build's clang). `fiasco_test` fails there too: the port installs the
-  cross tools in `/usr/local/bin`, which is also on the caller's PATH, so the build PATH test
-  finds an ambient directory in it, and four reuse tests see a second build of an unchanged
-  fixture run 2 commands instead of none, with the memo key fingerprinting every program in
-  `/usr/local/bin` and every library in `/usr/local/lib`; why that key changes between two
-  builds is not yet known.
+* [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb` (the Fiasco `Makeconf` host compiler):
+  `tools/erx build fiasco` stops in kconfig with `gcc: not found`, because Fiasco's host tools
+  build with `HOSTCC=gcc` and FreeBSD has no `gcc`, so the port's cross GCC 11.3 is never
+  reached; the build should name the host compiler (`cc`, or the build's clang).
 * [High] network, `erx_net_client` (`erx_gen_udp`, `erx_gen_tcp`; design-network-stack, "The
   socket process"): TCP has its socket process (`erx_gen_tcp`, `erx_gen_tcp_core`) and the
   socket protocol; UDP has not. `erx_gen_udp` calls the datagram socket directly with
@@ -4163,11 +4157,18 @@ to the corpus and follow rc
 
 * [Low] host tooling, the build memo (`tools/lib/erx/build_memo.rb`):
   records are reused only on macOS, whose sealed system volume the
-  system release names; on FreeBSD every step runs. FreeBSD's base
-  programs change only with a world install, which `uname` does not
-  always show; naming the base world (its libraries' hashes, or
-  `freebsd-version -u` together with the kernel's) would let FreeBSD
-  reuse records too.
+  system release names; on FreeBSD every step runs, so a second Fiasco
+  build of an unchanged tree runs its commands again. FreeBSD's base
+  programs change with a world install or pkgbase upgrade under the
+  same `uname` and `freebsd-version -u` on a -CURRENT host; reuse there
+  needs the base programs and their libraries named by content, and the
+  helpers a package runs by unversioned path (`/usr/local/libexec/gcc/...`
+  cc1, `/usr/local/lib/perl5`), which `directory_identities` does not name;
+  Homebrew's versioned Cellar paths name them by path.
+* [Low] host tooling, the Fiasco build (`tools/lib/erx/fiasco.rb`, `memo_key`): a
+  perl that is a version-manager shim (plenv, mise) goes on the build's PATH
+  as such, so the key names the shim, not the interpreter it picks, and
+  switching the global perl leaves a stale hit on macOS.
 * [Medium] host tooling, the source check (`tools/lib/erx/checks.rb`):
   `Runner` writes a child's stdout and stderr to one log, so the check
   finds a git warning only because it breaks the NUL-terminated listing.

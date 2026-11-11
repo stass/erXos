@@ -75,8 +75,11 @@ path also names the helpers a driver runs from its install by path
   captured inputs' record (FiascoInputs), the build tools' own Ruby, the
   compiler and the environment the build runs in. Its `PATH` holds the
   directory each package it uses really lives in (GNU make, the cross gcc
-  and binutils, gawk, dtc, GNU coreutils, findutils and sed) and the operating
-  system's directories, and the key names every program in the former. A
+  and binutils, gawk, dtc, perl, and on macOS GNU coreutils, findutils and
+  sed) and the operating system's directories, and the key names every
+  program in the former that is not a system directory. A directory the caller's `PATH` also names (the
+  FreeBSD `/usr/local/bin`, shared by every package) is on the build's `PATH`
+  only as such a home, so every program in it is in the key. A
   hit also needs the image, the kernel, sigma0, the libraries, the user
   header trees the native compiles include and the receipt to hold the
   content the finished build left.
