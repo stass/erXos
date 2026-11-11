@@ -898,23 +898,6 @@ it; git history is the record of completed work.
 * [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb`: the Kconfig step now builds with `cc`
   (`HostOs::HOST_CC`) and the users build is given `HOST_CC`/`HOST_CXX`, but `tools/erx build fiasco` has not been
   run through to an image there; run it on the FreeBSD test host and fix what stops it, then delete this item.
-* [High] network, `erx_net_client` (`erx_gen_udp`, `erx_gen_tcp`; design-network-stack, "The
-  socket process"): TCP has its socket process (`erx_gen_tcp`, `erx_gen_tcp_core`) and the
-  socket protocol; UDP has not. `erx_gen_udp` calls the datagram socket directly with
-  `gen_server:call`, and `erx_udp_sock` presents datagrams itself, so an owner outside the
-  network domain receives `{erx_origin, D, {udp, S, Ip, Port, Data}}`, which no stock
-  `receive` matches. To build (1b-E P9b): `erx_gen_udp_core` and the datagram socket's side of
-  the protocol, with the 128 KiB credit floor. Still missing on the TCP side:
-* [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb` (`program_directories`,
-  `memo_key`), `test/host/fiasco_test.rb`: `tools/erx build fiasco` stops in kconfig with
-  `gcc: not found`, because Fiasco's host tools build with `HOSTCC=gcc` and FreeBSD has no
-  `gcc`, so the port's cross GCC 11.3 is never reached; the build should name the host
-  compiler (`cc`, or the build's clang). `fiasco_test` fails there too: the port installs the
-  cross tools in `/usr/local/bin`, which is also on the caller's PATH, so the build PATH test
-  finds an ambient directory in it, and four reuse tests see a second build of an unchanged
-  fixture run 2 commands instead of none, with the memo key fingerprinting every program in
-  `/usr/local/bin` and every library in `/usr/local/lib`; why that key changes between two
-  builds is not yet known.
 * [High] network, `erx_net_client` (`erx_gen_tcp`; design-network-stack, "The socket
   process"): the TCP socket process lacks parts of the design.
   Still missing:
