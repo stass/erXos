@@ -91,10 +91,17 @@ const XTERM_FIT_JS = { src: "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.
 // Serial output that marks a boot stage, in boot order, with what the
 // status line says once it appears.
 const MILESTONES = [
-    { marker: "L4Re Microkernel", label: "Kernel up" },
-    { marker: "erx: root task", label: "Starting the system domain" },
-    { marker: "Erlang/OTP 29", label: "Starting Erlang" },
-    { marker: "rc: the command shell", label: "Ready: type at the prompt" },
+    { marker: /L4Re Microkernel/, label: "Kernel up" },
+    { marker: /erx: root task/, label: "Starting the system domain" },
+    { marker: /Erlang\/OTP 29/, label: "Starting Erlang" },
+    // Root's session takes the console before the storage domain mounts
+    // /data, and /data answers I/O error until then. The machine is ready
+    // when the storage domain's mount has resolved, mounted or failed (a
+    // damaged disk fails it, and the page must still become usable). This
+    // stands in for starting the session after storage, the first item
+    // under "Bugs by subsystem" in TODO.md; with that fixed the session's
+    // own banner is the marker again.
+    { marker: /erx_lfs: (volume mounted|mount failed)/, label: "Ready: type at the prompt" },
 ];
 // The download is the first part of the progress bar; each milestone
 // fills an equal share of the rest.
@@ -724,7 +731,7 @@ const machine = {
             if(!flush_scheduled) { flush_scheduled = true; setTimeout(flush, 16); }
             if(stage === MILESTONES.length) return;
             tail = (tail + String.fromCharCode(byte)).slice(-128);
-            while(stage < MILESTONES.length && tail.includes(MILESTONES[stage].marker)) {
+            while(stage < MILESTONES.length && MILESTONES[stage].marker.test(tail)) {
                 const { label } = MILESTONES[stage];
                 stage += 1;
                 show_status(label, DOWNLOAD_SHARE + (1 - DOWNLOAD_SHARE) * stage / MILESTONES.length);
@@ -790,7 +797,7 @@ const machine = {
     },
 
     // The page's own listeners on a session, beside the terminal's in
-    // start(): the machine's end, readiness for faults (the shell's prompt
+    // start(): the machine's end, readiness for faults (the last MILESTONES
     // marker), and the boot log, kept up to BOOT_LOG_LIMIT characters until
     // the root task's first report, for parse_system_memory. A power cut
     // calls session.rewatch() to read the next boot the same way.
@@ -821,7 +828,7 @@ const machine = {
             }
             if(session.ready) return;
             tail = (tail + char).slice(-128);
-            if(!tail.includes(ready_marker.marker)) return;
+            if(!ready_marker.marker.test(tail)) return;
             session.ready = true;
             show_state("live");
             if(session.rebooted) show_status(ready_marker.label);

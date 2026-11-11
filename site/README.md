@@ -243,7 +243,7 @@ Beside Reset, the fault menu injects a hardware fault into the running
 machine, so the visitor sees how erXos handles it. It is a native
 `<select>` drawn as a key, grouped Devices, Memory and Machine, and an
 Inject key with alert ink. Both are shown with Reset once a machine
-exists and are usable only while it runs, once the shell is ready, and
+exists and are usable only while it runs, once `/data` is mounted or its mount has failed, and
 while no fault is in progress. An entry the machine cannot take is
 disabled, its reason in its label. Nothing asks for confirmation; after
 each fault the status line, a polite live region, says what was done,

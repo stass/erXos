@@ -330,9 +330,11 @@ Error in process &lt;0.150.0&gt; with exit value:
           <li><span class="tag on">ON</span><span>ERTS runs in user mode as the system domain.</span></li>
           <li><span class="tag on">ON</span><span>The serial console's driver is an Erlang process.</span></li>
           <li><span class="tag on">ON</span><span>Files, per-domain namespaces and <code>/tmp</code> on a RAM file system written in Erlang.</span></li>
-          <li><span class="tag on">ON</span><span>Storage: a virtio block driver, littlefs and an EROFS reader, all in Erlang.</span></li>
-          <li><span class="tag on">ON</span><span>An rc-language command shell, written in Erlang, at the console.</span></li>
-          <li><span class="tag on">ON</span><span>Networking: a virtio-net driver and a TCP/IP stack, both in Erlang. DHCP, <code>ifconfig</code> and <code>ping</code> work.</span></li>
+          <li><span class="tag on">ON</span><span>Domains beyond the system domain: storage, the network stack and root's session each run in a domain of their own, with their own ERTS.</span></li>
+          <li><span class="tag on">ON</span><span>Storage: a virtio block driver, littlefs and an EROFS reader, all in Erlang. A failure ends the storage domain, and it restarts.</span></li>
+          <li><span class="tag on">ON</span><span>An rc-language command shell, written in Erlang, at the console, with job control of Erlang commands.</span></li>
+          <li><span class="tag on">ON</span><span>Networking: a virtio-net driver and a TCP/IP stack, both in Erlang. DHCP, <code>ifconfig</code>, <code>ping</code> and <code>host</code> work.</span></li>
+          <li><span class="tag on">ON</span><span>A browser view of the machine's records over the host link, in development builds through <code>tools/erx web</code>, not on this page.</span></li>
           <li><span class="tag on">ON</span><span>OTP's own test suites compare erXos with stock OTP.</span></li>
         </ul>
       </div>
@@ -340,10 +342,9 @@ Error in process &lt;0.150.0&gt; with exit value:
         <h3 class="label">Designed, not built yet</h3>
         <ul class="checks">
           <li><span class="tag off">OFF</span><span>erXos's own kernel.</span></li>
-          <li><span class="tag off">OFF</span><span>Domains beyond the system domain.</span></li>
-          <li><span class="tag off">OFF</span><span>The rest of the command shell.</span></li>
-          <li><span class="tag off">OFF</span><span>Network sockets for programs, and name lookup.</span></li>
-          <li><span class="tag off">OFF</span><span>The display and the web UI.</span></li>
+          <li><span class="tag off">OFF</span><span>Native programs run by the shell, and the pipes that join them.</span></li>
+          <li><span class="tag off">OFF</span><span>Network sockets for programs.</span></li>
+          <li><span class="tag off">OFF</span><span>The display and the UI on the machine itself.</span></li>
           <li><span class="tag off">OFF</span><span>The POSIX-lite layer.</span></li>
         </ul>
       </div>

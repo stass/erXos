@@ -181,6 +181,18 @@ class SiteTest < Minitest::Test
     end
   end
 
+  # The page's "Ready" waits for the storage domain's own log lines, so a
+  # rewording of them must fail here and not leave a page that never readies.
+  def test_ready_marker_names_the_log_lines_the_storage_domain_writes
+    terminal = File.read(File.join(REPO, 'site/terminal.js'))
+    storage = File.read(File.join(REPO, 'erlang/apps/erx_storage/src/erx_lfs.erl'))
+    ready = terminal[%r{marker: /erx_lfs: \(([^)]*)\)/}, 1]
+    refute_nil ready, 'the last milestone waits for an erx_lfs line'
+    ready.split('|').each do |line|
+      assert_includes storage, "log(\"#{line}", "erx_lfs.erl writes the line #{line.inspect}"
+    end
+  end
+
   def test_routes_serve_the_built_site_but_not_its_marker
     with_inputs do |root, image|
       out = File.join(root, 'build/site')

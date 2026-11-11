@@ -938,6 +938,16 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] erx_domain boot order (`erlang/apps/erx_domain/src/erx_domain_app.erl`, `erx_console:login()`;
+  [design-system.md](docs/design-system.md#booting)): root's session takes the console before the storage
+  domain mounts `/data`, so `/data` answers I/O error for the first seconds (about 10 s of guest time on the
+  website's v64 machine, from the system shell's banner to the `erx_lfs: volume mounted` line;
+  [design-storage.md](docs/design-storage.md) specifies the error before the storage windows exist). Start the
+  session after storage is up, and still start it when storage fails. The website's "Ready" waits for the
+  mount line meanwhile (`site/terminal.js`, `MILESTONES`); put the session's banner back as that marker.
+* [Low] ERTS start-up (`otp/erts/emulator/beam/erl_process.c`, the "hold executor slots" line): the scheduler
+  count follows the manifest's CPU set, not the CPUs present. The system domain and the storage domain report
+  4 schedulers on the website's 1-core v64 machine. Size them from the CPUs the kernel reports present.
 * [Low] upstream, BeamAsm (`otp/erts/emulator/beam/jit/arm/ops.tab`, `jit/x86/ops.tab`): stock OTP 29.1.2's JIT
   turns the small-integer half of a `select_val` that also matches a bignum into a jump table whose gaps branch to
   the NIL immediate, so a small integer in a gap kills the emulator (SIGBUS on AArch64). erXos's copy gives such a
