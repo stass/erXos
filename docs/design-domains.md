@@ -2752,6 +2752,8 @@ answers each as the call's result.
 | `{erx_connection_unmapped, Peer}` | agent to domain pid | the domain has unmapped the connection's objects and closed its capabilities |
 | `{erx_connection_lost, Peer, Reason}` | agent to domain pid | the domain ended the connection from its side, `Reason` saying how: `malformed` for a malformed frame, position or record from the peer, or a peer that does not read its answers, `no_memory` when the runtime could not allocate for it, `disconnect` after `erlang:disconnect_node/1`, and `noconnection` for any other end, a signal past `peer_held` among them; `{map, refused}` when the open or `net_kernel` refused it, and `{map, R}`, `R` one of the four, when it ended before its entry was up; it has already unmapped |
 | `{erx_facets, #{Name => Facet}}` | domain pid to agent | the domain service's answer to init's ready report: the domain's facets by name, every domain that reported getting one, with no facets too; an ordinary message, in the ring; the agent hands it to init, which keeps it for `erx:cap/1` (edit 65) |
+| `{erx_facets_install, Tag, Name, Facet}` | domain pid to agent | a facet a configured domain minted for this domain, installed under `Name` in the domain's registry, replacing an older pid of that name; the agent takes it only from its connection to the system domain, an ordinary message in the ring, and answers `facets_installed` ([design-system.md](design-system.md#facets-a-configured-domain-serves)) |
+| `{erx_facets_installed, Tag}` | agent to domain pid | the domain has installed the facet of the install tagged `Tag` |
 
 The `erx_connection_up` and `erx_connection_down` messages are the **connection-control records**. The
 domain service sends the records about one peer node name one at a time,

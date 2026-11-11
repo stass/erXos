@@ -11,7 +11,9 @@ require 'tmpdir'
 # and ERX_ERLC, which make check supplies): test/erlang/erx_domain_tests.erl
 # for erx_ident, erx_domain_core and erx_domain_srv over a stand-in for the
 # domain library's NIF module, and test/erlang/erx_domain_links_tests.erl,
-# the exhaustive exploration of the connection protocol's core, and
+# the exhaustive exploration of the connection protocol's core,
+# test/erlang/erx_domain_mints_tests.erl, the exhaustive exploration of the
+# core that mints facets configured domains serve, and
 # test/erlang/erx_facet_tests.erl for the facet behaviour, erx_facet, which the
 # service mints facets of.
 class ErxDomainTest < Minitest::Test
@@ -22,7 +24,8 @@ class ErxDomainTest < Minitest::Test
              File.join(ROOT, 'test/erlang/erx_facet_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_domain_fake_lib.erl'),
              File.join(ROOT, 'test/erlang/erx_domain_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_domain_links_tests.erl')].freeze
+             File.join(ROOT, 'test/erlang/erx_domain_links_tests.erl'),
+             File.join(ROOT, 'test/erlang/erx_domain_mints_tests.erl')].freeze
 
   def test_domain_service_cases_pass_under_eunit
     assert_eunit_passes('erx_domain_tests', deadline: 120)
@@ -34,6 +37,10 @@ class ErxDomainTest < Minitest::Test
 
   def test_connection_protocol_core_passes_under_eunit
     assert_eunit_passes('erx_domain_links_tests', deadline: 300)
+  end
+
+  def test_facet_mint_core_passes_under_eunit
+    assert_eunit_passes('erx_domain_mints_tests', deadline: 120)
   end
 
   private

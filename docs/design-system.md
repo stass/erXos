@@ -1726,6 +1726,155 @@ rather than imply that a runtime assignment edits that configuration.
 Programs receive their names through their session's startup message
 ([design-programs.md](design-programs.md#the-channel)).
 
+### Facets a configured domain serves
+
+A configured domain can serve a service of its own, as the storage domain
+serves `data`: the manifest's `service` row names the server and the
+service's name, and a `facet` row grants that service to a grantee, a
+configured domain or the system domain, with the grant's limits. Service
+names are unique per server, not across the manifest. The facet is a
+process of the server's domain, minted there by the server's own code with
+`erx_facet:start/3`, so the system domain never stands in front of it; the
+domain service decides when each grant is minted, asks the server, and
+installs the result in the grantee's capability registry.
+
+**Providers.** A configured domain's services each name a **mint**, a
+process of the domain that mints facets of one service, with
+`erx_facet:provide(Name, Mint)`, before its init reports ready, and the
+ready report carries them as its `provides` map. A server reports ready
+only once it can serve: the storage domain's report follows its mount of
+`/data`. The ready-report gate authenticates the reporting domain and its
+connection agent ([Creating a domain](#creating-a-domain)), but the
+`provides` map is the server's own words and is untrusted. The domain
+service takes from it only what the manifest and the reporting
+incarnation vouch for:
+
+* the report is from the **current incarnation** of a configured domain:
+  the newest domain id of that row, which has not ended and has not
+  reported before. A report of an incarnation that ended, or of an older
+  id than the row's newest, provides nothing;
+* each name is one the row's `service` rows declare for that server. A
+  name another server declares, or none does, is refused;
+* each mint is a pid that incarnation **owns**: its node is the
+  incarnation's node, and its creation, `erx:owner(Mint)`, is the
+  incarnation's domain id. Both are checked, since a send goes over the
+  connection the pid's node names while the creation is a field the pid's
+  maker wrote, so a pid with the server's creation and another domain's
+  node would carry the request to that domain. A pid of a third domain, a
+  registered name, a fun, an `{M, F, A}` or any other term is refused, so
+  the system domain sends a request only to a process of the server the
+  manifest names;
+* a `provides` value that is not a map, or holds more entries than the row
+  declares services, is refused whole.
+
+Every refusal is logged and counted, and leaves the rest of the report,
+the domain's ready state included, as it was. What is accepted is the
+incarnation's providers until it ends.
+
+**One operation per grant.** For each configured grant, named by its
+grantee and its service's name, the domain service keeps one record. The
+grant's **pair** is the current ready incarnation of its server, if that
+incarnation provides the name, and the current ready incarnation of its
+grantee; the system domain, id 4, is always ready. The record follows the
+pair, so each operation is bound to both incarnations by construction:
+
+| State | Meaning |
+| --- | --- |
+| `idle` | the grant has no pair: its server or its grantee is not ready, or the server provided no mint for the name |
+| `introducing` | the domain service is introducing the grantee to the server ([Creating a domain](#creating-a-domain)); skipped when the grantee is the system domain, which every domain is connected to |
+| `minting` | the mint has been asked for a facet bound to the grantee, and its reply is awaited |
+| `installing` | the facet's pid has been sent to the grantee's registry, and its acknowledgement is awaited |
+| `installed` | the grantee acknowledged; the grant holds the facet's pid |
+| `failed` | the operation for this pair failed, and was logged; nothing is retried for the pair |
+
+The record moves on these events, and on nothing else:
+
+* **a ready report** of a configured domain, with its accepted providers,
+  or **its end**. After either, every grant whose pair changed leaves its
+  state: a pending operation is cancelled, its deadline disarmed, and, if
+  the grant has a new pair, a new operation starts in `introducing`, or in
+  `minting` for the system domain as grantee. A grant whose pair did not
+  change keeps its state, so a repeated trigger coalesces into the one
+  operation already there, and there is never more than one operation per
+  grant. Each operation carries a fresh **tag**, a number the domain
+  service never reuses, and a **deadline** of 10 seconds from its start,
+  for the whole of its introduction, mint and installation;
+* **the introduction's result**: `ok` sends the mint
+  `{erx_facet_mint, Tag, Name, Grantee, Limits, Service}`, where `Service`
+  is the domain service's pid, exported to the server by that frame with
+  `send`; an error fails the operation;
+* **the mint's reply**, `{erx_facet_minted, Tag, Reply}`, which arrives
+  in the envelope that names its sender's domain. It is untrusted. It
+  counts only from the pair's server, for an operation in `minting` with
+  that tag. `{ok, Facet}` with `Facet` a pid the server's incarnation
+  owns, node and creation both, moves the operation to `installing` and
+  sends the grantee
+  `{erx_facets_install, Tag, Name, Facet}`; any other reply fails it. A
+  reply with an unknown or finished tag, a second reply, or one from
+  any other domain is dropped and counted;
+* **the acknowledgement**, `{erx_facets_installed, Tag}` from the
+  grantee's connection agent, which installs a name only from its
+  connection to the system domain and answers through its domain pid, as
+  it answers `connection_mapped`. It counts only from the pair's grantee,
+  for an operation in `installing` with that tag, and makes the grant
+  `installed`. Anything else is dropped and counted. The system domain's
+  own registry is local: the domain service installs there itself and
+  acknowledges at once;
+* **the deadline**, which fails an operation still pending.
+
+Since an operation exists only while both incarnations of its pair are
+current, an end of either cancels it before any later message of it is
+read, and a reply or acknowledgement that arrives afterwards matches no
+operation and is dropped. So no facet of an ended server reaches a
+grantee, and none reaches an ended grantee, with no check before the
+installation to remember. Domain ids are never reused within a boot, so an
+id names one incarnation for good.
+
+A later installation under the same name replaces the older pid, as
+[Granting a running domain](#granting-a-running-domain) says; the older
+pid, a facet of the server's ended incarnation, is dead already. Nothing
+uninstalls a facet: its revocation is its exit, which the registry sees.
+The manifest check refuses a configured grant whose name is also a facet
+the grantee's spec takes from the system domain, so an installation never
+replaces a facet of the ready answer; that answer reaches the grantee
+first, since the domain service sends it as it takes the grantee's ready
+report, which every operation for that grantee follows. Until its grant
+is installed, and while its server restarts, the grantee finds the name
+absent or its facet dead, and treats both as the service being
+unavailable.
+
+**Failure.** A failed operation is logged, with the step it failed in: the
+introduction's error, a bad reply, or the deadline in `introducing`,
+`minting` or `installing`, which names the party that was silent. It stays
+failed for its pair until either incarnation changes: the domain service
+retries nothing and ends neither domain over it. A service that cannot
+mint ends its application, which is permanent, so its domain ends and is
+restarted, and the new incarnation's ready report starts a new operation;
+a failure the server does not see, a refused introduction or a grantee
+that never acknowledges, leaves the grant failed until one of the two
+domains restarts, which the log names for the operator. The domain
+service never waits on a server or a grantee: every step is a message and
+a state change, so a silent or slow mint holds one record until its
+deadline and no more, and the domain service goes on handling ends and
+restarts meanwhile. The server's mint starts each facet with
+`erx_facet:start/3`, which exports it to the grantee before the reply
+names it. A facet whose operation was cancelled or failed after the
+server minted it is never installed; it ends with its grantee through its
+`ends_with`, or, for the system domain as grantee, with the server. There
+is at most one such facet per pair, since a pair runs one operation.
+
+The decisions are a pure state machine, `erx_domain_mints`, beside
+`erx_domain_core` and `erx_domain_links`: it takes the manifest's rows and
+the events above, and returns the next state and the actions, to
+introduce, send the mint, send the install, arm and disarm a deadline, and
+log a refusal, a dropped message or a failure, which `erx_domain_srv`
+applies; it logs and counts every refusal and drop. The actions for the
+log carry only atoms, the service's own numbers and the reasons the core
+names, never a term a domain sent. It is tested exhaustively over every
+order of these events, with two incarnations of a server and of a
+grantee, a third domain that claims the name, forged pids, and replies
+that come late, twice, or from the wrong domain.
+
 ### Authority
 
 Who holds what, with the rights each capability carries:
