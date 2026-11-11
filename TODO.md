@@ -572,9 +572,6 @@ it; git history is the record of completed work.
   a view the machine ends `closed` is not reopened, as the design's recovery says, until the socket drops; view
   numbers are fixed per target, so a reopen needs a per-connection counter of numbers, and a rule for which end
   reasons reopen and how often, so a view that crashes at once is not reopened at the network's pace.
-* [Medium] `web/test`, W2 in [Invariants](docs/design-web.md#invariants): no test seeds a component that renders a
-  `MachineText` directly and confirms `tsc --noEmit` fails on it, so the barrier rests on `@types/react`'s
-  `ReactNode` staying narrow; add the staged seed to `test/host/web_build_test.rb`.
 * [Medium] `web/src/connection.ts`, W7: the browser sees no ping, and a record view is silent while its record does
   not change, so a half-open socket (a laptop's sleep, a dropped NAT entry) shows the last record as current with no
   "stale since"; the network front end needs a heartbeat the client sees and a client timer that ends the socket.
@@ -589,12 +586,13 @@ it; git history is the record of completed work.
   holds esbuild's legal comments, and React's say only that the MIT licence is "found in the LICENSE file", which
   the bundle does not carry; add each bundled package's LICENSE text from the store before the client's files are
   distributed, by the web domain's release or the website's demo image.
-* [Low] `web/tsconfig.json`, [Build and dependencies](docs/design-web.md#build-and-dependencies): `tsc --noEmit`
-  checks `web/src` (handwritten and generated) but not `web/test`, whose `node:` imports need `@types/node`,
-  which the lockfile does not pin; add it, pinned, and check the tests too.
-* [Medium] `tools/lib/erx/web_build.rb`, [Build and dependencies](docs/design-web.md#build-and-dependencies):
-  `tools/erx fetch` does not yet fetch Playwright's Chromium against a SHA-256 in `deps.lock`, and no
-  Playwright test runs; the browser tests' package adds Playwright to `web/package.json` and the Chromium pin.
+* [Medium] `test/host/web_browser_test.rb`, [Verification and testing](docs/design-web.md#verification-and-testing):
+  `deps.lock` pins Playwright's Chromium for macOS on arm64 only, as Playwright builds none for FreeBSD, so the
+  browser tests are not run on the FreeBSD x86-64 check host that runs the landing gate's `make check`; run them
+  in the gate's local step on macOS, or pin a FreeBSD Chromium (the `www/chromium` package) by its SHA-256.
+* [Low] `web/test/browser`, W6 and W7: the client has no trace page and no view but the home record, so the URL
+  test can only find that no form opens a trace, and the stale test covers one view; extend both as the views land
+  (a reconnect with the trace page open, every open view marked stale, a ring overrun's gap).
 * [Medium] `tools/lib/erx/web_build.rb`, `build`: esbuild and tsc resolve a bare import through any `node_modules`
   above the stage (the worktree, the home directory), so an import of a package missing from `web/package.json`
   can bundle an unpinned package found there. Run esbuild with `--metafile` and refuse any input outside the

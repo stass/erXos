@@ -49,22 +49,22 @@ class WebBuildTest < Minitest::Test
     assert_raises(Erx::Error) { Build.bundle('main.js' => 's') }
   end
 
-def test_a_package_without_an_integrity_hash_is_refused
-  lockfile = File.read(File.join(ROOT, 'web/pnpm-lock.yaml'))
-  assert_empty Build.unverified(lockfile)
-  seeded = lockfile.sub(/^  typescript@7\.0\.2:\n    resolution: \{integrity: [^}]*\}/,
-                        "  typescript@7.0.2:\n    resolution: {tarball: https://example.invalid/t.tgz}")
-  assert_equal ['typescript@7.0.2'], Build.unverified(seeded)
-end
-
-def test_the_install_reaches_no_registry
-  staged do |stage|
-    Dir.mktmpdir('erx-web-empty-store') do |empty_root|
-      assert_raises(Erx::CommandError) { Build.install(root: empty_root, runner: runner, stage: stage) }
-    end
-    Build.install(root: ROOT, runner: runner, stage: stage)
+  def test_a_package_without_an_integrity_hash_is_refused
+    lockfile = File.read(File.join(ROOT, 'web/pnpm-lock.yaml'))
+    assert_empty Build.unverified(lockfile)
+    seeded = lockfile.sub(/^  typescript@7\.0\.2:\n    resolution: \{integrity: [^}]*\}/,
+                          "  typescript@7.0.2:\n    resolution: {tarball: https://example.invalid/t.tgz}")
+    assert_equal ['typescript@7.0.2'], Build.unverified(seeded)
   end
-end
+
+  def test_the_install_reaches_no_registry
+    staged do |stage|
+      Dir.mktmpdir('erx-web-empty-store') do |empty_root|
+        assert_raises(Erx::CommandError) { Build.install(root: empty_root, runner: runner, stage: stage) }
+      end
+      Build.install(root: ROOT, runner: runner, stage: stage)
+    end
+  end
 
   def test_the_front_end_loads_what_publish_writes
     Dir.mktmpdir('erx-web-build') do |directory|
@@ -121,6 +121,25 @@ end
       Build.install(root: ROOT, runner: runner, stage: stage)
       assert File.directory?(File.join(stage, 'node_modules/seed')), 'the seeded package was not installed'
       refute File.exist?(marker), 'an install script ran'
+    end
+  end
+
+  # W2's type barrier (docs/design-web.md, "Invariants"): MachineText is not a
+  # ReactNode, so a component that renders one directly, rather than through
+  # Text and its line escape, fails the build's type check.
+  def test_a_machine_text_rendered_directly_fails_the_type_check
+    staged do |stage|
+      Build.install(root: ROOT, runner: runner, stage: stage)
+      File.write(File.join(stage, 'src/seeded.tsx'), <<~TSX)
+        import { machineText } from './generated/proto.ts';
+
+        export const Seeded = () => <p>{machineText(new Uint8Array(0))}</p>;
+      TSX
+      error = assert_raises(Erx::CommandError) do
+        runner.run(['node', 'node_modules/typescript/bin/tsc', '--noEmit', '--project', 'tsconfig.json'],
+                   name: 'web-tsc-seeded', deadline: Build::DEADLINE, chdir: stage, env: Build::OFFLINE_ENV)
+      end
+      assert_match(%r{src/seeded\.tsx\(3,\d+\): error TS\d+:.*MachineText}, File.read(error.result.fetch('log')))
     end
   end
 

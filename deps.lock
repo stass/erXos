@@ -168,6 +168,17 @@
       "members": "lib/legal sys/include sys/src/libmemdraw sys/src/libdraw",
       "license": "MIT",
       "status": "permanent"
+    },
+    {
+      "id": "chromium-headless-shell",
+      "kind": "zip",
+      "version": "158.0.8127.18",
+      "url": "https://cdn.playwright.dev/builds/cft/158.0.8127.18/mac-arm64/chrome-headless-shell-mac-arm64.zip",
+      "sha256": "f34261d2aad94fb71b336597acabf20166ee5a2f14926c731f33d04c5da6cd3f",
+      "directory": "chrome-headless-shell-mac-arm64",
+      "host": "darwin-arm64",
+      "license": "BSD-3-Clause",
+      "status": "permanent"
     }
   ]
 }

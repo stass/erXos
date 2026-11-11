@@ -51,7 +51,7 @@ class SetupTest < Minitest::Test
   # image is not.
   def test_every_fetched_source_is_of_a_kind_setup_obtains_offline
     fetched = LOCK.reject { |source| Erx::Setup::SKIPPED_SOURCES.key?(source.fetch('id')) }
-    assert_empty fetched.map { |source| source.fetch('kind') } - %w[tar git file]
+    assert_empty fetched.map { |source| source.fetch('kind') } - %w[tar zip git file]
   end
 
   # Only tools/erx sysreg refresh reads Arm's archive; make check never does.

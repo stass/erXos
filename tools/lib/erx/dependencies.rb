@@ -14,6 +14,10 @@ require_relative 'bounded_file'
 module Erx
   module DependencySchema
     COMMON_FIELDS = %w[id kind version sha256 license status].freeze
+    # The hosts a zip source can name, each with the Ruby platforms it covers. A zip
+    # source is a prebuilt program for one host (Playwright's Chromium), fetched only
+    # on that host.
+    HOSTS = { 'darwin-arm64' => /\A(?:arm64|aarch64)-darwin/ }.freeze
     module_function
 
     def parse(bytes)
@@ -39,6 +43,9 @@ module Erx
         # members, when given, names what of directory is extracted: an archive whose
         # whole tree exceeds Sources' bounds pins the parts a build reads.
         fields = COMMON_FIELDS + %w[url directory] + (source.key?('members') ? %w[members] : [])
+        member = 'directory'
+      when 'zip'
+        fields = COMMON_FIELDS + %w[url directory host]
         member = 'directory'
       when 'git'
         fields = COMMON_FIELDS + %w[url directory commit]
@@ -68,6 +75,7 @@ module Erx
       raise Error, 'invalid source SHA-256' unless /\A[0-9a-f]{64}\z/.match?(source.fetch('sha256'))
       raise Error, 'invalid source commit' if source.fetch('kind') == 'git' && !/\A[0-9a-f]{40}\z/.match?(source.fetch('commit'))
       raise Error, 'invalid dependency status' unless %w[permanent stopgap].include?(source.fetch('status'))
+      raise Error, 'invalid source host' if source.fetch('kind') == 'zip' && !HOSTS.key?(source.fetch('host'))
 
       if source.fetch('kind') == 'oci'
         unless /\A[a-z0-9][a-z0-9.:-]*(?:\/[a-z0-9][a-z0-9._-]*)+\z/.match?(source.fetch('repository')) &&
@@ -86,23 +94,32 @@ module Erx
       raise Error, 'invalid dependency URL'
     end
     private_class_method :validate_source
+
+    # Whether source is fetched on a host of platform (a RUBY_PLATFORM): every
+    # source but a zip for another host.
+    def for_host?(source, platform:) = source.fetch('kind') != 'zip' || HOSTS.fetch(source.fetch('host')).match?(platform)
   end
 
   class Dependencies
     MAX_ARCHIVE_BYTES = Sources::MAX_ARCHIVE_BYTES
-    attr_reader :sources
+    # sources are deps.lock's sources this host uses, which every caller walks;
+    # elsewhere the programs it pins for other hosts, which no step here fetches.
+    attr_reader :sources, :elsewhere
 
-    def initialize(root:, runner:, lock_path: File.join(root, 'deps.lock'), tar_program: 'tar', docker_context: nil)
+    def initialize(root:, runner:, lock_path: File.join(root, 'deps.lock'), tar_program: 'tar', docker_context: nil,
+                   platform: RUBY_PLATFORM)
       @root = File.expand_path(root)
       @runner = runner
       @tar_program = tar_program
       @docker_context = docker_context
-      @sources = DependencySchema.parse(File.binread(lock_path))
+      @sources, @elsewhere = DependencySchema.parse(File.binread(lock_path))
+                                             .partition { |source| DependencySchema.for_host?(source, platform: platform) }
+                                             .map(&:freeze)
     end
 
+    # Fetches every source this host uses, or source_id alone.
     def fetch(cache: nil, source_id: nil)
-      selected = source_id ? sources.select { |source| source.fetch('id') == source_id } : sources
-      raise Error, "unknown source: #{source_id}" if selected.empty?
+      selected = source_id ? [pinned(source_id)] : sources
       if cache && selected.any? { |source| source.fetch('kind') == 'oci' }
         raise Error, 'OCI images use the Docker cache; fetch them explicitly without --cache'
       end
@@ -116,12 +133,12 @@ module Erx
     # pin of ID: its provenance record equals the pin's entry.
     def fetched?(id) = recorded?(pinned(id))
 
-    # The unpacked tree of a tar or git source as fetch published it, for a
+    # The unpacked tree of a tar, zip or git source as fetch published it, for a
     # build that compiles from it. Raises with the command that fetches it
     # when the source is absent or holds another pin.
     def fetched_tree(id)
       source = pinned(id)
-      raise Error, "#{id} is a #{source.fetch('kind')} source, not a tree" unless %w[tar git].include?(source.fetch('kind'))
+      raise Error, "#{id} is a #{source.fetch('kind')} source, not a tree" unless %w[tar zip git].include?(source.fetch('kind'))
 
       destination = File.join(@root, 'build/third_party', id)
       raise Error, "source #{id} is not fetched; #{fetch_command(id)}" unless File.exist?(destination) || File.symlink?(destination)
@@ -240,7 +257,11 @@ module Erx
     end
 
     def archive_path(source)
-      suffix = %w[tar git].include?(source.fetch('kind')) ? '.tar.gz' : File.extname(source.fetch('filename'))
+      suffix = case source.fetch('kind')
+               when 'tar', 'git' then '.tar.gz'
+               when 'zip' then '.zip'
+               else File.extname(source.fetch('filename'))
+               end
       parent = OutputDirectory.check(root: @root, path: File.join(@root, 'build/downloads'))
       path = File.join(parent, "#{source.fetch('id')}-#{source.fetch('sha256')}#{suffix}")
       raise Error, 'downloaded source archive must not be a symbolic link' if File.symlink?(path)
@@ -296,7 +317,11 @@ module Erx
     end
 
     def pinned(id)
-      sources.find { |source| source.fetch('id') == id } or raise Error, "deps.lock pins no source #{id}"
+      found = sources.find { |source| source.fetch('id') == id }
+      return found if found
+
+      other = elsewhere.find { |source| source.fetch('id') == id }
+      raise Error, other ? "#{id} is a program for #{other.fetch('host')} only" : "deps.lock pins no source #{id}"
     end
 
     def fetch_command(id) = "run `ruby tools/erx fetch --source #{id}`"
@@ -351,7 +376,8 @@ module Erx
 
       Dir.mktmpdir('.source-', parent) do |temporary|
         extracted = File.join(temporary, 'tree')
-        if %w[tar git].include?(source.fetch('kind'))
+        # tar is bsdtar on every host a zip source names, and reads a zip as it reads a tar.
+        if %w[tar zip git].include?(source.fetch('kind'))
           selected = extracted
           if source.fetch('directory') != '.'
             Dir.mkdir(extracted)

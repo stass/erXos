@@ -55,7 +55,7 @@ test('the record writer refuses what a reader refuses', () => {
   assert.notEqual(writeRecord(label([visible])), null);
   const refused: UIRecord<Uint8Array>[] = [
     { tag: 'remove', node: 0 },
-    { ...label([]), kind: 'nothing' },
+    { ...label([]), kind: 'nothing' } as unknown as UIRecord<Uint8Array>,
     label([visible, visible]),
     label([{ ...visible, number: visible.number + 1 }]),
     label([{ ...visible, status: 'unknown', value: null }]),

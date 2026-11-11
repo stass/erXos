@@ -44,6 +44,28 @@ class DependenciesTest < Minitest::Test
     assert_raises(Erx::Error) { parse([entry.merge('directory' => 'wrong')]) }
   end
 
+  # A zip is a prebuilt program for the one host it names, and only that host fetches it.
+  def test_a_zip_names_its_host_and_another_host_leaves_it_out
+    zip = source.merge('kind' => 'zip', 'host' => 'darwin-arm64')
+    assert_equal 'darwin-arm64', parse([zip]).first.fetch('host')
+    assert_raises(Erx::Error) { parse([zip.except('host')]) }
+    assert_raises(Erx::Error) { parse([zip.merge('host' => 'freebsd-amd64')]) }
+    assert_raises(Erx::Error) { parse([source.merge('host' => 'darwin-arm64')]) }
+    assert(Erx::DependencySchema.for_host?(zip, platform: 'arm64-darwin25'))
+    refute(Erx::DependencySchema.for_host?(zip, platform: 'x86_64-darwin24'))
+    refute(Erx::DependencySchema.for_host?(zip, platform: 'amd64-freebsd16'))
+
+    lock = File.join(@directory, 'deps.lock')
+    File.write(lock, JSON.generate('version' => 1, 'sources' => [zip]))
+    elsewhere = Erx::Dependencies.new(root: @directory, runner: nil, lock_path: lock, platform: 'amd64-freebsd16')
+    assert_empty elsewhere.sources, 'every caller that walks sources leaves it out'
+    assert_equal [zip], elsewhere.elsewhere
+    elsewhere.fetch(cache: @cache)
+    refute File.exist?(File.join(@directory, 'build')), 'a program for another host is not fetched'
+    error = assert_raises(Erx::Error) { elsewhere.fetch(cache: @cache, source_id: 'fixture') }
+    assert_includes error.message, 'darwin-arm64'
+  end
+
   def test_unknown_fields_fail
     assert_raises(Erx::Error) { parse([source.merge('unknown' => 'field')]) }
   end

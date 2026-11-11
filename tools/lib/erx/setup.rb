@@ -21,7 +21,7 @@ module Erx
   # Setup#call gathers that and performs the steps in order.
   class Setup
     # Setup fetches every source deps.lock pins except these, which only a
-    # gate or tool of their own uses; each says which. A tar, git or file source
+    # gate or tool of their own uses; each says which. A tar, zip, git or file source
     # deps.lock gains is fetched by setup without an edit here; setup cannot
     # obtain an OCI image offline, so one must be named here.
     SKIPPED_SOURCES = {

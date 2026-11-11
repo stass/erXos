@@ -19,8 +19,9 @@ module Erx
   # Node.js or pnpm older than web/package.json's engines and a store fetched for
   # another lockfile, stages web/ with the generated modules of build/gen/web
   # over it, installs with `--offline --frozen-lockfile --ignore-scripts`, so no
-  # package outside the lockfile and no install script runs, type-checks with
-  # `tsc --noEmit`, bundles src/main.ts with esbuild, and writes build/web/.
+  # package outside the lockfile and no install script runs, type-checks the
+  # client and then its tests (test/tsconfig.json) with `tsc --noEmit`, bundles
+  # src/main.ts with esbuild, and writes build/web/.
   #
   # build/web/ holds index.html, which names the script and the stylesheet;
   # every other file is named by its stem and the first 16 hexadecimal digits of
@@ -131,22 +132,22 @@ module Erx
       HTML
     end
 
-# The entries of a pnpm lockfile's packages section that pnpm would fetch
-# without checking an integrity hash (a git, tarball or directory source),
-# by name. fetch and build refuse a lockfile with any, so every package
-# is verified against the hash the lockfile pins.
-def unverified(lockfile)
-  section = lockfile.split(/^packages:\n/, 2).fetch(1, '').split(/^\S/, 2).first
-  section.split(/^(?=  \S)/).reject { |entry| entry.strip.empty? }.filter_map do |entry|
-    name = entry.lines.first.strip.delete_suffix(':')
-    name unless entry.match?(/^    resolution: \{integrity: sha512-[A-Za-z0-9+\/]+=*\}$/)
-  end
-end
+    # The entries of a pnpm lockfile's packages section that pnpm would fetch
+    # without checking an integrity hash (a git, tarball or directory source),
+    # by name. fetch and build refuse a lockfile with any, so every package
+    # is verified against the hash the lockfile pins.
+    def unverified(lockfile)
+      section = lockfile.split(/^packages:\n/, 2).fetch(1, '').split(/^\S/, 2).first
+      section.split(/^(?=  \S)/).reject { |entry| entry.strip.empty? }.filter_map do |entry|
+        name = entry.lines.first.strip.delete_suffix(':')
+        name unless entry.match?(/^    resolution: \{integrity: sha512-[A-Za-z0-9+\/]+=*\}$/)
+      end
+    end
 
-def verify_lockfile(root)
-  bad = unverified(File.read(File.join(root, 'web', LOCKFILE)))
-  raise Error, "web/#{LOCKFILE} pins without an integrity hash: #{bad.join(', ')}" unless bad.empty?
-end
+    def verify_lockfile(root)
+      bad = unverified(File.read(File.join(root, 'web', LOCKFILE)))
+      raise Error, "web/#{LOCKFILE} pins without an integrity hash: #{bad.join(', ')}" unless bad.empty?
+    end
 
     # inventory.txt for files (path => bytes): sha256sum's format, sorted by path.
     def inventory(files)
@@ -188,6 +189,7 @@ end
       install(root: root, runner: runner, stage: stage)
       in_stage = ->(name, argv) { runner.run(argv, name: name, deadline: DEADLINE, chdir: stage, env: OFFLINE_ENV) }
       in_stage.call('web-tsc', ['node', 'node_modules/typescript/bin/tsc', '--noEmit', '--project', 'tsconfig.json'])
+      in_stage.call('web-tsc-test', ['node', 'node_modules/typescript/bin/tsc', '--noEmit', '--project', 'test/tsconfig.json'])
       in_stage.call('web-esbuild', ['node', 'node_modules/esbuild/bin/esbuild', 'src/main.ts', *ESBUILD_OPTIONS,
                                    '--outdir=out'])
       outputs = Dir.children(File.join(stage, 'out')).to_h { |name| [name, File.binread(File.join(stage, 'out', name))] }

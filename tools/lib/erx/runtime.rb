@@ -5,6 +5,7 @@
 require 'digest'
 require 'fileutils'
 require 'open3'
+require_relative 'dependencies'
 require_relative 'erlang_apps'
 require_relative 'error'
 require_relative 'generated'
@@ -147,22 +148,36 @@ module Erx
       test/host/runtime_build_test.rb
     ].freeze
 
+    # The browser tests run Playwright's Chromium, which deps.lock pins for one host.
+    BROWSER_RULE = "deps.lock pins Playwright's Chromium for macOS on arm64 only"
+    BROWSER_TESTS = %w[test/host/web_browser_test.rb].freeze
+
+    # Test files only some hosts run: the files, why another host leaves them out,
+    # and whether a host of platform (a RUBY_PLATFORM) runs them.
+    HostOnly = Data.define(:paths, :reason, :runs_on)
+    HOST_ONLY = [
+      HostOnly.new(paths: HOSTED_ONLY_TESTS, reason: HOST_RULE, runs_on: ->(platform) { host_supported?(platform: platform) }),
+      HostOnly.new(paths: BROWSER_TESTS, reason: BROWSER_RULE,
+                   runs_on: ->(platform) { DependencySchema::HOSTS.fetch('darwin-arm64').match?(platform) }),
+    ].freeze
+
     # The host test files to run on this host, and each one left out with why.
     HostTestPlan = Data.define(:run, :not_run)
     NotRun = Data.define(:path, :reason)
 
     # Splits paths, each root joined with a path relative to the tree, by
-    # HOSTED_ONLY_TESTS.
+    # HOST_ONLY.
     # A listed file that does not exist raises, so a renamed file cannot drop
     # out of the list and start failing, or the list keep a stale name.
     def self.host_test_plan(paths, root:, platform: RUBY_PLATFORM)
-      listed = HOSTED_ONLY_TESTS.map { |path| File.join(root, path) }
-      missing = listed.reject { |path| File.file?(path) }
-      raise Error, "HOSTED_ONLY_TESTS names missing files: #{missing.join(' ')}" unless missing.empty?
-      return HostTestPlan.new(run: paths, not_run: []) if host_supported?(platform: platform)
+      rules = HOST_ONLY.map { |rule| [rule, rule.paths.map { |path| File.join(root, path) }] }
+      missing = rules.flat_map(&:last).reject { |path| File.file?(path) }
+      raise Error, "a host-only test list names missing files: #{missing.join(' ')}" unless missing.empty?
 
-      left_out, run = paths.partition { |path| listed.include?(path) }
-      HostTestPlan.new(run: run, not_run: left_out.map { |path| NotRun.new(path: path, reason: HOST_RULE) })
+      not_run = rules.reject { |rule, _listed| rule.runs_on.call(platform) }.flat_map do |rule, listed|
+        (paths & listed).map { |path| NotRun.new(path: path, reason: rule.reason) }
+      end
+      HostTestPlan.new(run: paths - not_run.map(&:path), not_run: not_run)
     end
 
     def build(jobs: 4)

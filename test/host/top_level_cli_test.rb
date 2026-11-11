@@ -117,6 +117,8 @@ class TopLevelCliTest < Minitest::Test
 
   def hosted_only = Erx::Runtime::HOSTED_ONLY_TESTS.map { |path| File.join(Erx::ROOT, path) }
 
+  def browser_only = Erx::Runtime::BROWSER_TESTS.map { |path| File.join(Erx::ROOT, path) }
+
   def test_check_runs_the_stack_proof_and_native_integration
     commands = []
     with_checks(commands) do |collaborators|
@@ -140,7 +142,7 @@ class TopLevelCliTest < Minitest::Test
     refute commands.any? { |argv, _options| argv.include?('fetch') || argv.include?('emulator_test') }
   end
 
-  # Off macOS the hosted runtime's files are named as not run, with the rule, and
+  # Off macOS the hosted runtime's files and the browser tests are named as not run, with their rules, and
   # counted in the closing line; the rest still run.
   def test_check_off_macos_reports_the_hosted_files_as_not_run
     commands = []
@@ -150,11 +152,14 @@ class TopLevelCliTest < Minitest::Test
       assert_equal 0, status, output
     end
     discovered = Dir.glob(File.join(Erx::ROOT, 'test/host/*_test.rb'))
-    assert_equal (discovered - hosted_only).sort, step_commands(commands, 'host-tests').map { |argv, _options| argv.last }.sort
+    assert_equal (discovered - hosted_only - browser_only).sort, step_commands(commands, 'host-tests').map { |argv, _options| argv.last }.sort
     hosted_only.each do |path|
       assert_includes output, "host-tests: #{path}: not run on this host: #{Erx::Runtime::HOST_RULE}"
     end
-    assert_includes output, "checks passed; #{hosted_only.size} test files not run on this host (listed above)"
+    browser_only.each do |path|
+      assert_includes output, "host-tests: #{path}: not run on this host: #{Erx::Runtime::BROWSER_RULE}"
+    end
+    assert_includes output, "checks passed; #{hosted_only.size + browser_only.size} test files not run on this host (listed above)"
   end
 
   # The command shell's integration tests read the rc oracle, so check makes sure of it

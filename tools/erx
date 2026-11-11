@@ -891,8 +891,11 @@ module Erx
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
 
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-      Dependencies.new(root: ROOT, runner: runner, docker_context: docker_context)
-                  .fetch(cache: cache, source_id: source_id)
+      dependencies = Dependencies.new(root: ROOT, runner: runner, docker_context: docker_context)
+      dependencies.fetch(cache: cache, source_id: source_id)
+      dependencies.elsewhere.each do |source|
+        Terminal.puts("#{source.fetch('id')}: a program for #{source.fetch('host')}; not fetched on this host")
+      end
       # LVGL is a git submodule, cloned from its recorded URL at its recorded
       # commit; a cache holds only deps.lock's archives, so a fetch from one
       # leaves the submodule to `git submodule update --init`. The web client's

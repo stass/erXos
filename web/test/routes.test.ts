@@ -90,7 +90,7 @@ test('a route is made only by the checks and does not change', () => {
   assert.throws(() => new Unchecked(Symbol('route'), { kind: 'proc', path: ['..'] }), TypeError);
   const route = parseRoute('/proc/a') as Route;
   assert.throws(() => {
-    (route.value as { path: string[] }).path.push('..');
+    (route.value as unknown as { path: string[] }).path.push('..');
   }, TypeError);
   assert.throws(() => {
     (route as unknown as { value: unknown }).value = { kind: 'proc', path: ['..'] };
