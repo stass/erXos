@@ -12,6 +12,8 @@ require_relative 'qemu'
 require_relative 'qemu_cells'
 require_relative 'release_medium'
 require_relative 'runner'
+require_relative 'web_build'
+require_relative 'web_guest'
 
 module Erx
   # Root's session domain on the development machine (docs/design-live.md, "The console";
@@ -196,10 +198,12 @@ module Erx
         @manifest = File.binread(File.join(@root, ProductionImage::MANIFEST))
       end
 
-      # Packs the production image once, then boots it at each CPU count.
+      # Packs the production image once and builds the web client the one-CPU cell's
+      # front end serves (web_check), then boots the image at each CPU count.
       def call(cpus:, jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
+        WebBuild.build(root: @root, runner: @runner) if cpus.include?(1)
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/session-domain/image'))
         built, written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
                                         .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest)
@@ -227,18 +231,23 @@ module Erx
 
       # At one CPU, once the transcript is whole, the host opens the web facet and a
       # browser's open of the machine's path is answered with the machine's record
-      # through root's line (HostlinkGuest.machine): the one cell whose console has
-      # logged root in and has a host link. The boot's directory, which holds the host
-      # link's socket, is then a short one under build/qemu, as the production image's
-      # host link boot's is, since a UNIX socket's path is short; otherwise it is
-      # directory.
+      # through root's line (HostlinkGuest.machine), and then again through the host
+      # tool's front end, tools/erx web, as a browser makes it (WebGuest): the one cell
+      # whose console has logged root in and has a host link. The link's time is the
+      # first check's two waits and the second's worst case. The boot's directory, which
+      # holds the host link's socket, is then a short one under build/qemu, as the
+      # production image's host link boot's is, since a UNIX socket's path is short;
+      # otherwise it is directory.
       def web_check(accel, count, built, directory:)
         return { directory: directory } unless count == 1
 
         hash = HostlinkGuest.web_hash(@root)
         { directory: File.join(@root, 'build/qemu', "sd-#{accel}-#{Process.pid}"),
-          link: ->(socket) { HostlinkGuest.machine(socket, build: built.build_id, web_hash: hash) },
-          link_seconds: HostlinkGuest::WEB_SECONDS * 2 }
+          link: lambda do |socket|
+            { machine: HostlinkGuest.machine(socket, build: built.build_id, web_hash: hash),
+              front_end: WebGuest.call(socket, root: @root, build: built.build_id, web_hash: hash) }
+          end,
+          link_seconds: (HostlinkGuest::WEB_SECONDS * 2) + WebGuest::SECONDS }
       end
     end
   end
