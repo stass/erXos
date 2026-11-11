@@ -13,6 +13,7 @@ require_relative 'web_sinks'
 require_relative 'generated'
 require_relative 'net_checks'
 require_relative 'command_needs'
+require_relative 'facet_names'
 require_relative 'ns_writers'
 require_relative 'origin_unwraps'
 require_relative 'attach_fields'
@@ -158,6 +159,7 @@ module Erx
       check_erofs_reads(listed)
       check_net(listed)
       check_command_needs(listed)
+      check_facet_names(listed)
       check_web_sinks(listed)
       check_ns_writers(listed)
       check_origin_unwraps(listed)
@@ -370,6 +372,20 @@ module Erx
     def check_command_needs(listed)
       sources = listed.select { |relative| CommandNeeds.reads?(relative) && File.file?(File.join(@root, relative)) }
       violations = CommandNeeds.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    # Every facet name the Erlang sources use is in the table of abi/services and the
+    # system manifest, and each interface cites a design heading (FacetNames). A listing
+    # with no Erlang source, as the tests of the other checks make, has nothing to hold.
+    def check_facet_names(listed)
+      return unless listed.any? { |relative| FacetNames.covers?(relative) }
+
+      read = ->(paths) { paths.select { |relative| File.file?(File.join(@root, relative)) }
+                              .to_h { |relative| [relative, File.binread(File.join(@root, relative))] } }
+      files = read.call(listed.select { |relative| FacetNames.covers?(relative) || FacetNames.table_file?(relative) })
+      docs = read.call(listed.select { |relative| FacetNames.design_doc?(relative) })
+      violations = FacetNames.violations(files, docs: docs)
       raise Error, violations.join("\n") unless violations.empty?
     end
 

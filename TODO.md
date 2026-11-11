@@ -1418,6 +1418,21 @@ it; git history is the record of completed work.
   declaration holds no facet by construction, and shrink the command-needs build check
   (`tools/lib/erx/command_needs.rb`) to "no erx_shell module names a stack module": its list of OTP's
   network modules and functions is an enumeration that a new OTP call outside it gets past.
+* [Medium] domains, two facets of no declared interface (`tools/lib/erx/facet_names.rb`, `UNDECLARED`;
+  [design-abi.md](docs/design-abi.md#services-facets-and-their-parameter-schemas)): a session's `console`
+  facet, which `erx_console` hands in its create spec and `erx_session_tty` reads with `erx:cap(console)`
+  ([design-live.md](docs/design-live.md#the-console)), is of no interface, since `abi/services/console.txt`
+  declares no service; and `web_line`, which `erx_web_line_app` provides through `erx_facet:provide/2` and the
+  domain service hands the web domain ([design-web.md](docs/design-web.md#overview)), is an export of the
+  session's line that rides the facet registry. Declare the console's interface in `abi/services/console.txt`
+  with its design section, and take `web_line` off the registry or declare it, then drop both from
+  `UNDECLARED`.
+* [Medium] domains, the facet-names check reads text (`tools/lib/erx/facet_names.rb`): a facet named by a
+  quoted atom, a macro or a variable, or a create spec built away from `erx_domain:start_session/2` and a
+  `facets => #{...}` literal, gets past it, and it reads the manifest with its own small parser rather than
+  `Erx::ABI::Syntax.parse`. Make the funnel refuse what the table does not list: generate the declared names
+  (the manifest's services and the exemptions) into an Erlang header at build time and have
+  `erx_domain_srv:facets/1` refuse any other key of a create spec, so the source check is a second line.
 * [Medium] shell and domains, a session's inspect facet (`erlang/apps/erx/src/erx_facets.erl`,
   `facets/2`; `erlang/apps/erx_domain/src/erx_domain_srv.erl`): a session's scope is always `[Id]`, its
   own domain's, and a handed facet named `inspect` is dropped, while design-live.md ("Scopes") gives a

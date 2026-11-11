@@ -98,6 +98,12 @@ module Erx
           test: 'test/host/command_needs_test.rb'
         ),
         Chokepoints::Elsewhere.new(
+          name: 'facet-names', rule: 'a domain reaches another domain only through a facet the table of abi/services ' \
+                                     'and the system manifest declares, each interface citing its design section',
+          design: 'docs/design-abi.md#services-facets-and-their-parameter-schemas', check: 'FacetNames, in Checks',
+          test: 'test/host/facet_names_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
           name: 'json-input', rule: 'host tooling parses JSON only through JsonInput',
           design: 'docs/design-build.md', check: 'Checks::JSON_OUTSIDE_WRITING', test: 'test/host/checks_test.rb'
         )
