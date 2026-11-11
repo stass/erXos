@@ -174,7 +174,8 @@ class NetChecksTest < Minitest::Test
   def test_grant_key_reads_fail_outside_erx_inet
     { 'application:get_env(erx_net_client, grant)' => 2, "'application':get_all_env()" => 2,
       "fun application:\n  get_env/2" => 2, 'application:get_key(erx_net_client, env)' => 2,
-      '{ok, G, _} = erx_net:local_grant()' => 2, 'whereis(erx_net_grant)' => 2 }.each do |body, line|
+      '{ok, G, _} = erx_net:local_grant()' => 2, 'whereis(erx_net_grant)' => 2, 'erx:cap(net)' => 2,
+      'maps:get(net, erx:caps())' => 2, '{ok, G, D} = erx_net_client_erxos:grant()' => 2 }.each do |body, line|
       assert_equal [['grant-key', line]], source_rules("#{CLIENT}/erx_gen_tcp.erl", body), body
     end
   end
@@ -184,6 +185,15 @@ class NetChecksTest < Minitest::Test
     assert_empty source_rules("#{CLIENT}/erx_inet.erl", body)
     assert_empty source_rules("#{CLIENT}/erx_gen_udp.erl", "%% application:get_env is erx_inet's\nmy_application:get_env(k)")
     assert_empty source_rules("#{SRC}/erx_net_app.erl", 'application:get_env(erx_net, interfaces)')
+  end
+
+  # The facets are erx_net_client_erxos's to read, and the key erx_inet's: neither
+  # reads the other's.
+  def test_facet_reads_pass_only_in_erx_net_client_erxos
+    facet_reader = 'erlang/apps/erx_net_client/erxos/erx_net_client_erxos.erl'
+    assert_empty source_rules(facet_reader, 'erx:cap(net)')
+    assert_equal [['grant-key', 2]], source_rules("#{CLIENT}/erx_inet.erl", 'erx:cap(net)')
+    assert_equal [['grant-key', 2]], source_rules(facet_reader, 'application:get_env(erx_net_client, grant)')
   end
 
   # The design's seeded failure: a handler in a socket module that matches the

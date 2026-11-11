@@ -2656,12 +2656,13 @@ The runtime's seam is the behaviour `erx_net_runtime`:
     % most MaxRequest in decoded size, the runtime dropping a larger one
     % before it is queued; on erXos every one arrives enveloped with its
     % origin
--callback start_grant(Grantee :: local | pos_integer(), Limits :: map()) ->
+-callback start_grant(Grantee :: local | {pos_integer(), port(), module()},
+                      Limits :: map()) ->
     {ok, pid()} | {error, Reason :: term()}.
 ```
 
 A grant and every socket call `serve/1` as they start; the
-`erx_net:mint_grant/2` of [The grant's contract](#the-grants-contract)
+`erx_net:mint_grant/4` of [The grant's contract](#the-grants-contract)
 calls `start_grant/2`. The client side, `erx_net_client`, finds its
 grant through its own `grant` key, a `{Module, Function, Args}` called
 once per socket opened, which answers `{ok, Grant, Origin}` or
@@ -3751,9 +3752,10 @@ What the stack's modules rely on from a grant is fixed here, so neither
 the runtime seam nor the facet machinery changes them:
 
 * A grant is an `erx_net_grant` process, minted by `erx_net:mint_grant(Grantee,
-  Limits)`, the one function the network service's introduction of a
-  client calls ([The grant](#the-grant)), which starts it through the
-  runtime's `start_grant/2`. It holds the limits of
+  Connection, Limits, Exports)`, the one function the network service's
+  introduction of a client calls ([The grant](#the-grant)), which starts
+  it through the runtime's `start_grant/2`, exported to its grantee and
+  ending with its connection. It holds the limits of
   [The grant](#the-grant) and the account of
   [Sockets act for one domain](#sockets-act-for-one-domain), which a
   pure core, `erx_net_grant_core`, decides over.
@@ -4040,6 +4042,25 @@ the client stubs, the admission path and the request validators
 ([design-domains.md](design-domains.md#authority)). A domain without the
 grant gets `{error, eacces}` from every call that would need it, as
 POSIX's `socket` answers a refused protocol.
+
+**Its start and its end.** The mint starts a grant with the grantee's
+id and the port of the network domain's connection to the grantee,
+which the domain agent's `erx_connections:connection/1` answers once the
+peer's entry is up. The grant monitors that port first, then exports
+itself to the grantee with `send` alone, and only then does its start
+return: the mint never answers with a grant its grantee cannot reach,
+and a refused export is the start's refusal, which leaves no grant. The
+grant ends with `{shutdown, connection_ended}` when the port ends. The
+port lives exactly as long as the connection, and a port monitor is
+local and matched by its reference, so no other process can forge the
+end, as one can a `{nodedown, Node}` message, and it needs no node
+monitor of the distribution. Because the monitor comes before the
+export, the connection's end at any moment ends the grant, even when a
+newer connection has replaced it by the time of the export, and the
+grant's export goes with it
+([design-domains.md](design-domains.md#exports), D13). A grant is never
+restarted: the domain service grants a domain again only when either
+domain restarts.
 
 **The system domain never holds the grant.** The trusted base parses
 no network traffic: no socket's stream, push or exit and no answer of

@@ -28,7 +28,7 @@ agent_test_() ->
      || {Name, Case} <- [{mapped_then_lost, fun mapped_then_lost/1}, {ended_before_up, fun ended_before_up/1},
                          {owner_ended, fun owner_ended/1}, {refused_hand_over, fun refused_hand_over/1},
                          {refused_open, fun refused_open/1}, {down, fun down/1}, {forged, fun forged/1},
-                         {facets, fun facets/1}, {installs, fun installs/1}]].
+                         {facets, fun facets/1}, {installs, fun installs/1}, {connection, fun connection/1}]].
 
 %% Runs Case with an agent started from the test's own process, which plays the
 %% agent's environment, and ends the agent after.
@@ -139,6 +139,22 @@ mapped_then_lost(Agent) ->
     ?assertEqual({erx_connection_mapped, ?PEER}, answer()),
     exit(Port, erx_lane_malformed),
     ?assertEqual({erx_connection_lost, ?PEER, malformed}, answer()).
+
+connection(Agent) ->
+    %% The port of a connection is named only once the peer's entry is up, and no longer
+    %% once the port has ended; a peer never introduced has none.
+    ?assertEqual({error, noconnection}, erx_connections:connection(?PEER)),
+    up(Agent),
+    {_, Port} = opened(),
+    {Port, _Owner} = accept(Agent, owner),
+    ?assertEqual({error, noconnection}, erx_connections:connection(?PEER)),
+    Agent ! {erx_connection_inserted, ?PEER, Port},
+    ?assertEqual({erx_connection_mapped, ?PEER}, answer()),
+    ?assertEqual({ok, Port}, erx_connections:connection(?PEER)),
+    ?assertEqual({error, noconnection}, erx_connections:connection(?PEER + 1)),
+    exit(Port, erx_lane_malformed),
+    ?assertEqual({erx_connection_lost, ?PEER, malformed}, answer()),
+    ?assertEqual({error, noconnection}, erx_connections:connection(?PEER)).
 
 ended_before_up(Agent) ->
     %% A port that ends before the owner's word that its entry is up was never mapped:

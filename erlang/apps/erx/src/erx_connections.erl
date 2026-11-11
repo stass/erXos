@@ -18,7 +18,7 @@
 -module(erx_connections).
 -moduledoc false.
 
--export([start/2, open_side/2, close_side/2, dropped/0]).
+-export([start/2, open_side/2, close_side/2, dropped/0, connection/1]).
 %% A domain's agent past its system connection's hand-over, and the system domain's agent,
 %% which start/2 runs and the host test (test/erlang/erx_connections_tests.erl) runs with
 %% a stand-in opener.
@@ -69,6 +69,15 @@ close_side(Id, Reason) when Reason =/= normal ->
 -spec dropped() -> non_neg_integer() | {error, noproc}.
 dropped() ->
     call(dropped).
+
+%% In a domain: the port of this domain's connection to domain Peer, which the system
+%% domain introduced, once the peer's entry is up. The port lives exactly as long as the
+%% connection, so a process that must end with it, such as a grant the network service
+%% minted for Peer, monitors the port. {error, noconnection} while the agent holds no such
+%% connection, or the agent's own refusal where it serves no introductions.
+-spec connection(pos_integer()) -> {ok, port()} | {error, noconnection | noproc | badarg}.
+connection(Peer) when is_integer(Peer), Peer > 0 ->
+    call({connection, Peer}).
 
 call(Request) ->
     try gen:call(?MODULE, '$gen_call', Request, infinity) of
@@ -341,6 +350,12 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
             records(Env, ended_itself(Env, Peer, Monitor, Port, Reason, Held), Dropped);
         {'$gen_call', From, dropped} ->
             gen:reply(From, Dropped),
+            records(Env, Held, Dropped);
+        {'$gen_call', From, {connection, Peer}} ->
+            gen:reply(From, case Held of
+                                #{Peer := {up, Port, _Monitor}} -> {ok, Port};
+                                #{} -> {error, noconnection}
+                            end),
             records(Env, Held, Dropped);
         {'$gen_call', From, _Request} ->
             gen:reply(From, {error, badarg}),

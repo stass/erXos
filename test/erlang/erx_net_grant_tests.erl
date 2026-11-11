@@ -12,6 +12,9 @@ to a third domain, is built here without that domain.
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% The stack's runtime seam and the export table, stood in for by the mint cases.
+-export([serve/1, start_grant/2, export/3]).
+
 -define(GRANTEE, 7).
 -define(OTHER, 9).
 -define(SYSTEM, 4).
@@ -111,6 +114,11 @@ not_a_call() ->
 mint_test() ->
     Request = {erx_facet_mint, 3, net, ?GRANTEE, #{}},
     ?assertEqual({ok, 3, ?GRANTEE, #{}}, erx_net_admit:mint(?SYSTEM, {erx_origin, ?SYSTEM, Request})),
+    ?assertEqual({refused, eperm, 3},
+                 erx_net_admit:mint(?SYSTEM, {erx_origin, ?SYSTEM, {erx_facet_mint, 3, net, ?SYSTEM, #{}}})),
+    From = {self(), make_ref()},
+    ?assertEqual({counts, From}, erx_net_admit:mint(?SYSTEM, {'$gen_call', From, counts})),
+    ?assertEqual(unknown, erx_net_admit:mint(?SYSTEM, {erx_origin, ?SYSTEM, {'$gen_call', From, counts}})),
     [?assertEqual(unknown, erx_net_admit:mint(?SYSTEM, Message))
      || Message <- [Request, {erx_origin, ?OTHER, Request},
                     {erx_origin, ?SYSTEM, {erx_facet_mint, 3, storage, ?GRANTEE, #{}}},
@@ -138,7 +146,7 @@ grant_test_() ->
       {"an echo socket is its caller's, and ends with it", fun icmp_open_owned/0}]}.
 
 remote_other_domain_dropped() ->
-    {ok, Grant} = erx_net_grant:start_link(?GRANTEE, #{}),
+    {ok, Grant} = remote_grant(),
     Tag = make_ref(),
     Grant ! {erx_origin, ?OTHER, {'$gen_call', {pid_of(?OTHER), Tag}, interfaces}},
     Grant ! {erx_origin, ?OTHER, {'$gen_call', {self(), Tag}, interfaces}},
@@ -146,7 +154,7 @@ remote_other_domain_dropped() ->
     nothing(Tag).
 
 remote_foreign_owner_dropped() ->
-    {ok, Grant} = erx_net_grant:start_link(?GRANTEE, #{}),
+    {ok, Grant} = remote_grant(),
     Tag = make_ref(),
     Grant ! {erx_origin, ?GRANTEE, {'$gen_call', {pid_of(?OTHER), Tag}, {icmp_open, inet}}},
     Grant ! {erx_origin, ?GRANTEE, {'$gen_call', {self(), Tag}, {tcp_connect, inet, {10, 0, 2, 2}, 80, [], infinity}}},
@@ -156,14 +164,14 @@ remote_foreign_owner_dropped() ->
 %% The reply goes to the grantee's caller, which the test cannot be; the count shows it
 %% was refused rather than left out.
 remote_bounds_refused() ->
-    {ok, Grant} = erx_net_grant:start_link(?GRANTEE, #{}),
+    {ok, Grant} = remote_grant(),
     Caller = {pid_of(?GRANTEE), [alias | ref_of(?GRANTEE)]},
     Grant ! {erx_origin, ?GRANTEE, {'$gen_call', Caller, {udp_open, inet, any, 0, lists:duplicate(65, binary)}}},
     Grant ! {erx_origin, ?GRANTEE, {'$gen_call', Caller, {release_buffers, make_ref()}}},
     ?assertEqual(#{unknown => 0, refused => 2}, erx_net_grant:counts(Grant)).
 
 remote_bare_dropped() ->
-    {ok, Grant} = erx_net_grant:start_link(?GRANTEE, #{}),
+    {ok, Grant} = remote_grant(),
     Request = gen_server:send_request(Grant, interfaces),
     ?assertEqual(timeout, gen_server:wait_response(Request, ?QUIET)),
     ?assertEqual(#{unknown => 1, refused => 0}, erx_net_grant:counts(Grant)).
@@ -184,6 +192,149 @@ icmp_open_owned() ->
     Ref = monitor(process, Sock),
     Owner ! stop,
     receive {'DOWN', Ref, process, Sock, _} -> ok after ?WAIT -> error(socket_outlived_owner) end.
+
+%% --- erx_net:mint_grant/4 --------------------------------------------------------------
+%%
+%% The grants supervisor runs as in the stack, with this module as the runtime, whose
+%% start_grant/2 starts the grant as erXos's does, and as the export table, whose export/3
+%% tells the test what it was asked and whether the grant was alive then, and answers what
+%% the case set under {?MODULE, export}: an answer, or {close, Connection, Answer}, the
+%% connection ending during the export.
+
+mint_grant_test_() ->
+    {foreach, fun mint_setup/0, fun mint_cleanup/1,
+     [{"a minted grant is exported to its grantee, send alone, before it is answered", fun minted_exported/0},
+      {"a refused export ends the grant and answers the refusal", fun refused_export_ends_grant/0},
+      {"a connection that ends during the mint leaves the refusal and no grant", fun connection_ends_during_mint/0},
+      {"the grantee's call of a minted grant is served, a third domain's is not", fun minted_serves_grantee_only/0},
+      {"a minted grant ends when its connection to the grantee ends", fun grant_ends_with_connection/0}]}.
+
+minted_exported() ->
+    {ok, Grant} = mint(connection()),
+    receive
+        {exported, Exported, Rights, Peer, Alive} ->
+            ?assertEqual({Grant, [send], ?GRANTEE, true}, {Exported, Rights, Peer, Alive})
+    after 0 ->
+            error(answered_before_export)
+    end,
+    ?assertEqual([Grant], grants()).
+
+refused_export_ends_grant() ->
+    persistent_term:put({?MODULE, export}, {error, noconnection}),
+    ?assertEqual({error, noconnection}, mint(connection())),
+    receive {exported, Grant, _, _, true} -> ?assertNot(is_process_alive(Grant)) after 0 -> error(not_exported) end,
+    ?assertEqual([], grants()).
+
+connection_ends_during_mint() ->
+    Connection = connection(),
+    persistent_term:put({?MODULE, export}, {close, Connection, {error, noconnection}}),
+    ?assertEqual({error, noconnection}, mint(Connection)),
+    ?assertEqual([], grants()).
+
+minted_serves_grantee_only() ->
+    {ok, Grant} = mint(connection()),
+    Grant ! {erx_origin, ?GRANTEE, {'$gen_call', {pid_of(?GRANTEE), [alias | ref_of(?GRANTEE)]}, interfaces}},
+    Grant ! {erx_origin, ?OTHER, {'$gen_call', {pid_of(?OTHER), [alias | ref_of(?OTHER)]}, interfaces}},
+    ?assertEqual(#{unknown => 1, refused => 0}, erx_net_grant:counts(Grant)).
+
+grant_ends_with_connection() ->
+    Connection = connection(),
+    {ok, Grant} = mint(Connection),
+    Ref = monitor(process, Grant),
+    true = port_close(Connection),
+    receive {'DOWN', Ref, process, Grant, Reason} -> ?assertEqual({shutdown, connection_ended}, Reason)
+    after ?WAIT -> error(grant_outlived_connection)
+    end,
+    %% The supervisor's 'EXIT' may reach it after the 'DOWN' reaches the test.
+    dropped(Grant, ?WAIT).
+
+mint_setup() ->
+    ok = persistent_term:put({erx_net_sup, runtime}, ?MODULE),
+    persistent_term:put({?MODULE, export}, ok),
+    {ok, Tables} = erx_net_tables:start_link(),
+    unlink(Tables),
+    {ok, Grants} = supervisor:start_link({local, erx_net_grants}, erx_net_sup, grants),
+    unlink(Grants),
+    {Tables, Grants}.
+
+mint_cleanup({Tables, Grants}) ->
+    [begin Ref = monitor(process, P), exit(P, kill), receive {'DOWN', Ref, _, _, _} -> ok end end
+     || P <- [Grants, Tables]],
+    persistent_term:erase({?MODULE, export}),
+    persistent_term:erase({?MODULE, test}),
+    ok.
+
+%% Mints the grantee's grant over Connection, with this module as the export table, which
+%% tells the calling test what it was asked.
+mint(Connection) ->
+    persistent_term:put({?MODULE, test}, self()),
+    erx_net:mint_grant(?GRANTEE, Connection, #{}, ?MODULE).
+
+grants() ->
+    [Pid|| {_, Pid, _, _} <- supervisor:which_children(erx_net_grants)].
+
+-doc false.
+serve(_MaxRequest) ->
+    ok.
+
+-doc false.
+start_grant(Grantee, Limits) ->
+    erx_net_grant:start_link(Grantee, Limits).
+
+-doc false.
+export(Name, Rights, Peer) ->
+    persistent_term:get({?MODULE, test}) ! {exported, Name, Rights, Peer, is_process_alive(Name)},
+    case persistent_term:get({?MODULE, export}) of
+        {close, Connection, Answer} ->
+            true = port_close(Connection),
+            ended(Name),
+            Answer;
+        Answer ->
+            Answer
+    end.
+
+%% Waits for the grant's end after its connection's, and for the grants supervisor to drop
+%% it, whose 'EXIT' may reach it after the 'DOWN' reaches the test, so the export's answer
+%% meets a grant that is gone; nothing to wait for when the export runs in the grant itself.
+ended(Grant) when Grant =:= self() ->
+    ok;
+ended(Grant) ->
+    Ref = monitor(process, Grant),
+    receive {'DOWN', Ref, process, Grant, _} -> ok after ?WAIT -> error(grant_outlived_connection) end,
+    dropped(Grant, ?WAIT).
+
+dropped(Grant, Left) ->
+    case lists:member(Grant, grants()) of
+        false -> ok;
+        true when Left > 0 -> timer:sleep(10), dropped(Grant, Left - 10);
+        true -> error(grant_kept)
+    end.
+
+%% --- erx_net_client_erxos:grant/0 ------------------------------------------------------
+
+client_grant_test() ->
+    Grant = pid_of(?OTHER),
+    with_erx(#{net => Grant}, fun() -> ?assertEqual({ok, Grant, ?OTHER}, erx_net_client_erxos:grant()) end),
+    with_erx(#{echo => Grant}, fun() -> ?assertEqual({error, enotconn}, erx_net_client_erxos:grant()) end).
+
+%% Runs Fun with a stand-in of erx loaded: the facets this domain holds, read from the
+%% registry's persistent term as erx:cap/1 reads it, and owner/1, the domain id a name's
+%% creation carries, as erx_dist:owner/1 answers it.
+with_erx(Facets, Fun) ->
+    Text = ["-module(erx).", "-export([cap/1, owner/1]).",
+            "cap(Name) -> maps:get(Name, persistent_term:get({erx, facets}, #{}), undefined).",
+            "owner(Name) -> erx_net_admit:domain(Name)."],
+    Forms = [begin {ok, Tokens, _} = erl_scan:string(Form), {ok, Parsed} = erl_parse:parse_form(Tokens), Parsed end
+             || Form <- Text],
+    {ok, erx, Beam} = compile:forms(Forms),
+    {module, erx} = code:load_binary(erx, "erx.erl", Beam),
+    persistent_term:put({erx, facets}, Facets),
+    try Fun()
+    after
+        persistent_term:erase({erx, facets}),
+        code:purge(erx),
+        code:delete(erx)
+    end.
 
 %% --- Set-up ----------------------------------------------------------------------------
 
@@ -227,6 +378,18 @@ nothing(Tag) ->
     after ?QUIET ->
         ok
     end.
+
+%% A stand-in of the network domain's connection to the grantee: a port, whose end is the
+%% connection's end, as the lane driver's port of an introduced connection is.
+connection() ->
+    open_port({spawn, "cat"}, [binary]).
+
+%% A grant of ?GRANTEE over a connection of its own, exported through this module's
+%% stand-in of the export table.
+remote_grant() ->
+    persistent_term:put({?MODULE, export}, ok),
+    persistent_term:put({?MODULE, test}, self()),
+    erx_net_grant:start_link({?GRANTEE, connection(), ?MODULE}, #{}).
 
 %% A pid of domain Domain, as another domain's process arrives here: its node's creation is
 %% the domain id.

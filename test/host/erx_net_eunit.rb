@@ -30,6 +30,8 @@ module ErxNetEunit
   # "Two places, four seams"); compiled after src/, whose behaviours they implement.
   PORTABLE = File.join(ROOT, 'erlang/apps/erx_net/portable')
   CLIENT = File.join(ROOT, 'erlang/apps/erx_net_client/src')
+  # The client's erXos module, whose one call into erXos, `erx`, a test stands in for.
+  CLIENT_ERXOS = File.join(ROOT, 'erlang/apps/erx_net_client/erxos')
   INCLUDE = File.join(ROOT, 'erlang/apps/erx_net/include')
   TESTS = File.join(ROOT, 'test/erlang')
   DEADLINE = 300
@@ -79,7 +81,7 @@ module ErxNetEunit
         includes += ['-I', File.join(tree, 'include')]
         erlc(ebin, Dir[File.join(tree, 'src', '*.erl')].sort, includes: includes)
       end
-      application = [APPLICATION, PORTABLE, CLIENT].flat_map { |dir| Dir[File.join(dir, '**', '*.erl')].sort }
+      application = [APPLICATION, PORTABLE, CLIENT, CLIENT_ERXOS].flat_map { |dir| Dir[File.join(dir, '**', '*.erl')].sort }
                                            .map { |source| faulty_copy(work, source, fault) }
       sources = [*application, *(extra + modules).map { |name| File.join(TESTS, "#{name}.erl") }]
       erlc(ebin, sources, includes: includes, flags: Erx::ErlangApps::FLAGS)

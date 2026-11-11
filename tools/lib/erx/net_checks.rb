@@ -27,9 +27,11 @@ module Erx
   #   to key a generator or draw a stack-wide secret in their initialisation;
   # * grant-key: in the client application, erx_net_client, only erx_inet
   #   calls application:get_env, get_all_env or get_key, or names
-  #   erx_net:local_grant or the registered erx_net_grant, so only it reads
-  #   the `grant` key and knows the grant's pid, and every answer of the grant passes
-  #   erx_sock_admit through erx_inet:call/1;
+  #   erx_net:local_grant, the registered erx_net_grant or
+  #   erx_net_client_erxos:grant, and only erx_net_client_erxos, which answers
+  #   the key on erXos from the `net` facet, calls erx:cap or erx:caps, so only
+  #   erx_inet reads the `grant` key and knows the grant's pid, and every answer
+  #   of the grant passes erx_sock_admit through erx_inet:call/1;
   # * call-timeout: in erx_net and erx_net_client, every gen_server:call and
   #   gen_statem:call has three arguments and every gen:call four, the last
   #   the literal `infinity`, and no `fun` names one of them, so no wait of
@@ -99,7 +101,13 @@ module Erx
     # The one client module that reads the application's environment, and so
     # the `grant` key (design-network-stack.md, "Answers from the grant").
     GRANT_KEY_READER = "#{CLIENT_APPLICATION}/src/erx_inet.erl"
-    GRANT_READ = /(?<![A-Za-z0-9_@])(?:application\s*:\s*(?:get_env|get_all_env|get_key)|erx_net\s*:\s*local_grant|erx_net_grant)(?![A-Za-z0-9_@])/
+    GRANT_READ = /(?<![A-Za-z0-9_@])(?:application\s*:\s*(?:get_env|get_all_env|get_key)|erx_net\s*:\s*local_grant|erx_net_grant|erx_net_client_erxos\s*:\s*grant)(?![A-Za-z0-9_@])/
+    # The one client module that reads the domain's facets, to answer the
+    # `grant` key on erXos (design-network-stack.md, "Answers from the grant").
+    FACET_READER = "#{CLIENT_APPLICATION}/erxos/erx_net_client_erxos.erl"
+    FACET_READ = /(?<![A-Za-z0-9_@])erx\s*:\s*caps?(?![A-Za-z0-9_@])/
+    # Each grant-key pattern with the one client module that may match it.
+    GRANT_READERS = { GRANT_READ => GRANT_KEY_READER, FACET_READ => FACET_READER }.freeze
     # The calls whose timeout must be the literal infinity, each with the
     # arity at which the timeout is its last argument.
     CALL = /(?<![A-Za-z0-9_@])(?<module>gen_server|gen_statem|gen)\s*:\s*call(?![A-Za-z0-9_@])/
@@ -194,10 +202,13 @@ module Erx
     end
 
     def grant_key_violations(client)
-      client.reject { |path, _| path == GRANT_KEY_READER }.flat_map do |path, text|
-        matches(calls_text(text), GRANT_READ).map do |line, read|
-          Violation.new(rule: 'grant-key', path: path, line: line,
-                        detail: "#{read.delete(" \t\n")} outside erx_inet: only erx_inet:call/1 reaches the grant")
+      GRANT_READERS.flat_map do |pattern, reader|
+        client.reject { |path, _| path == reader }.flat_map do |path, text|
+          matches(calls_text(text), pattern).map do |line, read|
+            Violation.new(rule: 'grant-key', path: path, line: line,
+                          detail: "#{read.delete(" \t\n")} outside #{File.basename(reader, '.erl')}: " \
+                                  'only erx_inet:call/1 reaches the grant')
+          end
         end
       end
     end

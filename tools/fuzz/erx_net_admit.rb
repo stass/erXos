@@ -9,6 +9,7 @@
 # seeded faults, each of which must fail it:
 #   admit  erx_net_admit:request/2, with the comparison of the reply alias's domain dropped;
 #          erx_net_admit:request/4, with the bound of a UDP send_to's data dropped;
+#          erx_net_admit:mint/2, with the refusal of the system domain as a grantee dropped;
 #   sock   erx_sock_admit:answer/3, with the interface name's bound of 15 bytes dropped;
 #          erx_sock_admit:push/4, with the bound of a pushed datagram's data dropped.
 
@@ -36,7 +37,10 @@ module ErxNetAdmitFuzz
                 replacement: 'domain(Pid) =:= Grantee', marker: 'request2_admitted_bad'),
       Fault.new(what: 'a send_to check without the datagram bound', source: ADMIT,
                 anchor: 'andalso is_binary(Data) andalso byte_size(Data) =< ?MAX_UDP;',
-                replacement: 'andalso is_binary(Data);', marker: 'request3_admitted_bad')
+                replacement: 'andalso is_binary(Data);', marker: 'request3_admitted_bad'),
+      Fault.new(what: 'a mint that admits the system domain as a grantee', source: ADMIT,
+                anchor: 'case Grantee =:= System of', replacement: 'case Grantee =:= -1 of',
+                marker: 'mint_admitted_bad')
     ],
     'sock' => [
       Fault.new(what: 'an interfaces check without the name bound', source: SOCK,

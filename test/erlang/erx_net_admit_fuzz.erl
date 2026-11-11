@@ -262,7 +262,7 @@ mint() ->
                 1 -> {erx_facet_mint, 1, net, 3};
                 2 -> {erx_facet_mint, 1, net, 3, #{}, extra};
                 _ -> {erx_facet_mint, pick([1, 7, 0, -1, x, 1 bsl 70]), pick([net, net, net, fs]),
-                      pick([1, 2, 9, 0, -1, x]), pick([#{}, #{a => 1}, [], x])}
+                      pick([1, 2, 5, 9, 0, -1, x]), pick([#{}, #{a => 1}, [], x])}
             end,
     Message = case rand:uniform(8) of
                   1 -> Inner;
@@ -274,6 +274,7 @@ mint() ->
 
 expected_mint(System, {erx_origin, System, {erx_facet_mint, Tag, net, Grantee, Limits}}) ->
     case within(Tag, 1, 1 bsl 80) andalso within(Grantee, 1, 1 bsl 80) andalso is_map(Limits) of
+        true when Grantee =:= System -> {refused, eperm, Tag};
         true -> {ok, Tag, Grantee, Limits};
         false -> unknown
     end;

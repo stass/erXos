@@ -7,7 +7,16 @@ A client domain's grant (docs/design-network-stack.md, "The grant's contract", "
 grant"), as far as an active open, a datagram socket, an echo socket, the interfaces and
 name resolution need it. Each grant serves one grantee: `local`, the stack's own domain,
 whose grant is registered as `erx_net_grant`, or a domain id, whose grant the network
-service's mint starts (erx_net:mint_grant/2).
+service's mint starts (erx_net:mint_grant/4).
+
+**Its start and its end.** A grant of a domain id exports itself to its grantee, with send
+alone, before its start returns, so no one is handed a grant its grantee cannot reach; a
+refused export is its start's refusal. Before the export it monitors the port of this
+domain's connection to the grantee, which it is started with, and it ends with
+`{shutdown, connection_ended}` when that port ends: the connection is gone, so the grantee
+can no longer call, and the grant's export goes with it (docs/design-domains.md, D13). A
+grant is never restarted: the domain service grants a domain again only when either
+domain restarts.
 
 **Admission.** The grant acts on no message erx_net_admit:request/2 has not admitted:
 gen_server takes a bare call apart before handle_call/3 sees it, so the grant puts it back
@@ -82,14 +91,18 @@ well-formed request whose buffers fit.
 -define(MAXDNSRCH, 6).
 
 -doc """
-Starts the grant of `Grantee`, `local` or a domain id. The node's own grant, `local`, is
-registered as `erx_net_grant`, where erx_net:local_grant/0 finds it.
+Starts the grant of `local`, the node's own, registered as `erx_net_grant`, where
+erx_net:local_grant/0 finds it, or of a domain, `{Grantee, Connection, Exports}`: the
+domain id, the port of this domain's connection to it, and the export table's module
+(erx_dist, or a host test's stand-in). A domain's grant is exported to it before this
+returns; a refused export is answered `{error, Reason}` and leaves no grant.
 """.
--spec start_link(local | pos_integer(), map()) -> {ok, pid()} | {error, term()}.
+-spec start_link(local | {pos_integer(), port(), module()}, map()) -> {ok, pid()} | {error, term()}.
 start_link(local, Limits) when is_map(Limits) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, {local, Limits}, []);
-start_link(Grantee, Limits) when is_integer(Grantee), Grantee > 0, is_map(Limits) ->
-    gen_server:start_link(?MODULE, {Grantee, Limits}, []).
+start_link({Grantee, Connection, Exports} = Client, Limits)
+  when is_integer(Grantee), Grantee > 0, is_port(Connection), is_atom(Exports), is_map(Limits) ->
+    gen_server:start_link(?MODULE, {Client, Limits}, []).
 
 -doc """
 The messages the grant has left out (`unknown`) and the calls it refused (`refused`),
@@ -118,11 +131,25 @@ release_buffers(Grant, Token) ->
     gen_server:call(Grant, {release_buffers, Token}, infinity).
 
 -doc false.
-init({Grantee, Limits}) ->
+init({local, Limits}) ->
+    start(local, none, Limits);
+init({{Grantee, Connection, Exports}, Limits}) ->
+    %% The monitor comes first: a connection that ends at any time from here on, before the
+    %% export or after it, ends the grant, and a port that has ended already is answered at
+    %% once with a 'DOWN'. So the grant never outlives the connection whose port it was
+    %% given, even when the export binds to a newer one.
+    ConnectionMonitor = erlang:monitor(port, Connection),
+    case Exports:export(self(), [send], Grantee) of
+        ok -> start(Grantee, ConnectionMonitor, Limits);
+        {error, _} = Refused -> Refused
+    end.
+
+start(Grantee, ConnectionMonitor, Limits) ->
     process_flag(trap_exit, true),
     ok = (erx_net_sup:runtime()):serve(?MAX_REQUEST),
     ok = erx_net_tables:watch_resolver(self()),
-    {ok, #{grantee => Grantee, limits => Limits, gen => erx_net_rand:new(erx_net_clock:entropy(16)), callers => #{},
+    {ok, #{grantee => Grantee, connection_monitor => ConnectionMonitor, limits => Limits,
+           gen => erx_net_rand:new(erx_net_clock:entropy(16)), callers => #{},
            buffers => erx_net_grant_core:new(Limits), subscriber => none, resolver => none,
            unknown => 0, refused => 0}}.
 
@@ -220,6 +247,8 @@ handle_info({erx_net_tables, resolver}, #{resolver := Old, subscriber := {Pid, _
             Pid ! {erx_net_resolver, self(), New},
             {noreply, S#{resolver := New}}
     end;
+handle_info({'DOWN', Ref, port, _, _}, #{connection_monitor := Ref} = S) ->
+    {stop, {shutdown, connection_ended}, S};
 handle_info({'DOWN', Ref, process, _, _}, #{subscriber := {_, Ref}} = S) ->
     {noreply, S#{subscriber := none}};
 handle_info({'EXIT', Conn, _Reason}, #{callers := Callers0, buffers := Buffers} = S0) ->

@@ -8,7 +8,7 @@ development host", "Addresses and routes"):
 
 * `local_grant/0` is what `erx_net_client`'s `grant` key names on a node that runs the
   stack itself, `{erx_net, local_grant, []}`;
-* `mint_grant/2` starts the grant of another domain, the one function the network
+* `mint_grant/4` starts the grant of another domain, the one function the network
   service's mint calls when the system domain introduces a client ("The grant's
   contract");
 * `interfaces/0` is the read path of netadmin's view of the interfaces, which `ifconfig`
@@ -19,7 +19,7 @@ development host", "Addresses and routes"):
   out, since it no longer exists.
 """.
 
--export([local_grant/0, mint_grant/2, interfaces/0]).
+-export([local_grant/0, mint_grant/4, interfaces/0]).
 
 -export_type([interface/0]).
 
@@ -48,12 +48,20 @@ local_grant() ->
 
 -doc """
 Starts the grant of the domain `Grantee` within `Limits`, through the runtime's
-start_grant/2, under the stack's grant supervisor: a grant is never restarted, since the
-domain service grants a domain again only when either domain restarts.
+start_grant/2, under the stack's grant supervisor. The grant exports itself to `Grantee`
+with send alone through `Exports`, the export table's module (erx_dist, or a host test's
+stand-in), before its start returns (erx_net_grant:start_link/2), so the grantee can
+reach the grant before anyone hands its pid out and can do nothing else with it; a
+refused export is the answer, and no grant is left. The grant ends with `Connection`,
+the port of this domain's connection to the grantee (erx_connections:connection/1), so
+it never outlives the connection its grantee's calls arrive over. A grant is never
+restarted, since the domain service grants a domain again only when either domain
+restarts.
 """.
--spec mint_grant(pos_integer(), map()) -> {ok, pid()} | {error, term()}.
-mint_grant(Grantee, Limits) when is_integer(Grantee), Grantee > 0, is_map(Limits) ->
-    supervisor:start_child(erx_net_grants, [Grantee, Limits]).
+-spec mint_grant(pos_integer(), port(), map(), module()) -> {ok, pid()} | {error, term()}.
+mint_grant(Grantee, Connection, Limits, Exports)
+  when is_integer(Grantee), Grantee > 0, is_port(Connection), is_map(Limits), is_atom(Exports) ->
+    supervisor:start_child(erx_net_grants, [{Grantee, Connection, Exports}, Limits]).
 
 -doc "Every interface, in the order of their names; `enotconn` when the stack is not running.".
 -spec interfaces() -> {ok, [interface()]} | {error, enotconn}.

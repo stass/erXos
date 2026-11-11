@@ -19,12 +19,12 @@ origin, at most `MaxRequest` at once.
 -callback serve(MaxRequest :: pos_integer()) -> ok.
 
 -doc "Starts a grant for `Grantee` with `Limits`.".
--callback start_grant(Grantee :: local | pos_integer(), Limits :: map()) ->
+-callback start_grant(Grantee :: local | {pos_integer(), port(), module()}, Limits :: map()) ->
     {ok, pid()} | {error, Reason :: term()}.
 
 -doc """
 Starts the network service's mint, linked to the caller, the process that takes the
-system domain's requests for a client's grant and starts each with erx_net:mint_grant/2;
+system domain's requests for a client's grant and starts each with erx_net:mint_grant/4;
 `ignore` where no domain service sends any.
 """.
 -callback start_mint() -> {ok, pid()} | ignore.

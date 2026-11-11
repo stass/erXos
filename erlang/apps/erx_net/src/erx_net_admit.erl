@@ -61,7 +61,11 @@ A body of any other shape, or a request of another kind, is refused (`shape`).
 **The mint.** mint/2 takes a message the network service's mint received: only
 `{erx_facet_mint, Tag, net, Grantee, Limits}` in the system domain's envelope, with a
 positive `Tag`, a domain id `Grantee` and a map of limits, is a mint request; anything
-else is `unknown` (docs/design-system.md, "Facets a configured domain serves").
+else is `unknown` (docs/design-system.md, "Facets a configured domain serves"). A
+request whose `Grantee` is the system domain's own id is refused, `{refused, eperm,
+Tag}`, for the mint to answer and count: the system domain never holds the grant
+(docs/design-network-stack.md, "The grant"). The mint's counts, `counts`, are asked
+only bare and from a process of this node, as the grant's are.
 
 The operation schema's generator will produce these checks from `abi/services/net.txt`;
 until it exists they are written here with its signatures.
@@ -187,12 +191,20 @@ domain(Ref) when is_reference(Ref) ->
 
 -doc """
 Takes `Message`, received by the network service's mint in a domain whose system
-domain's id is `System`: the mint request it carries, or `unknown`.
+domain's id is `System`: the mint request it carries, its refusal when it names the
+system domain as the grantee, a call of the mint's counts, or `unknown`.
 """.
--spec mint(pos_integer(), term()) -> {ok, pos_integer(), pos_integer(), map()} | unknown.
+-spec mint(pos_integer(), term()) ->
+          {ok, pos_integer(), pos_integer(), map()} | {refused, eperm, pos_integer()}
+          | {counts, gen_server:from()} | unknown.
 mint(System, {erx_origin, D, {erx_facet_mint, Tag, net, Grantee, Limits}})
   when D =:= System, is_integer(Tag), Tag > 0, is_integer(Grantee), Grantee > 0, is_map(Limits) ->
-    {ok, Tag, Grantee, Limits};
+    case Grantee =:= System of
+        true -> {refused, eperm, Tag};
+        false -> {ok, Tag, Grantee, Limits}
+    end;
+mint(_System, {'$gen_call', {Pid, _} = From, counts}) when is_pid(Pid), node(Pid) =:= node() ->
+    {counts, From};
 mint(_System, _Message) ->
     unknown.
 

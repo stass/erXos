@@ -902,13 +902,46 @@ it; git history is the record of completed work.
 * [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb`: the Kconfig step now builds with `cc`
   (`HostOs::HOST_CC`) and the users build is given `HOST_CC`/`HOST_CXX`, but `tools/erx build fiasco` has not been
   run through to an image there; run it on the FreeBSD test host and fix what stops it, then delete this item.
+* [Medium] domains, mints (`erx_net_erxos` mint, `erx_driver_ctl` mint; design-system,
+  "Facets a configured domain serves"): a mint answers its request only after the grant or
+  facet is started and exported, and the domain service drops a reply that comes after the
+  request's deadline or after it cancelled the request (`erx_domain_mints`). The grant or
+  facet minted for a dropped reply stays alive and exported to its grantee until the
+  connection between the two domains ends (the network grant) or the serving domain ends
+  (the storage domain's `storage_ctl` facet, which ends only with its mint), since no
+  message withdraws a mint's answer. Give the domain service a withdrawal it sends the mint
+  for every request it stops waiting on, or have each grant end unless the grantee claims
+  it within the deadline.
+* [Medium] network, `erx_net_erxos` mint loop (`mint/2`, `count/2`, `mint_one/2`,
+  `mint_counts/0`): no host test drives the loop itself. The tests cover
+  `erx_net_admit:mint/2` and `erx_net:mint_grant/4`, but not that the loop answers a
+  system-grantee refusal and a `noconnection` through `erx_facet:minted/2`, counts refused
+  and unknown messages under the right keys, and answers `counts`. Move the loop's decision
+  into a pure function returning the reply and the next counts, and test it, or run the loop
+  on the host with stand-ins for `erx_facet`, `erx_connections` and `erx_kernel_records`.
+* [Medium] network, `erx_net_grant:init/1` (design-network-stack, "The grant"): only
+  `erx_net_admit:mint/2` refuses the system domain as a grantee; `erx_net:mint_grant/4` and
+  the grant's own export check nothing about it, and the property holds because the mint is
+  the only caller and `erx_connections:connection/1` answers `noconnection` for the system
+  domain. Refuse a system-domain grantee in `init/1` before the export, so the grant is
+  never exported there whoever calls, and keep the admit refusal for its count.
+* [Low] network, `erx_net_erxos` mint: a grant start that crashes after the export answers
+  `{error, {Reason, Stack}}` to the domain service unchanged, so the network domain's
+  internal terms (its `Limits` among them) reach the system domain's refusal log. Map any
+  answer other than `{error, atom()}` to a fixed `{error, start_failed}`.
+* [Low] design-network-stack, "The grant" (with design-system, `connection_lost`): a grant
+  ends with its connection, and the domain service grants a domain again only when either
+  domain restarts, but a connection can end while both domains live (`malformed`,
+  `no_memory`, `disconnect`). State whether the two domains are introduced and granted
+  again then, or the client keeps a dead `net` facet until a restart.
 * [High] network, `erx_net_client` (`erx_gen_tcp`; design-network-stack, "The socket
   process"): the TCP socket process lacks parts of the design.
   Still missing:
   `listen/2` and `accept` (the listener's socket process), local `controlling_process/2`
   (`enotsup`), the packet modes and the `buffer`, `exit_on_close` and `show_econnreset`
-  options, the schema-generated request validators, and `erxos/erx_net_client_erxos`
-  answering the `grant` key with the grantee's `Origin` once the grant is in another domain.
+  options, the schema-generated request validators, `erxos/erx_net_client_erxos`'s
+  `expose/2`, and the session template's `grant` key naming its `grant/0` once the grant is
+  in another domain.
   The calls the socket process forwards (`sockname`, `peername`, `getopts`, `shutdown`) wait
   for the connection's reply with no deadline of their own, and within one domain a socket
   protocol message proves its sender only by its pid field. Differences from stock at
