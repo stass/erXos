@@ -14,9 +14,31 @@
 #define MCPU_PER_CPU		1000
 
 _Static_assert(ERX_CAP_NULL == 0, "a zeroed page holds null capabilities");
-/* The flags and their NULs, each number at most ten digits: 3 + 11 + 3 + 5 + 3 + 11 + 3 + 6 + 7 + 6 + 6 + 2. */
-_Static_assert(ERX_BOOT_ERTS_WORDS_MAX >= 66 && ERX_BOOT_ERTS_SCHEDULERS_MAX <= 99 && ERX_BOOT_ERTS_PORTS <= 9999 &&
-    ERX_BOOT_ERTS_DIRTY_IO <= 9, "the ERTS flags fit their buffer");
+/*
+ * ERTS's allocator flags, the same in every runtime (docs/design-runtime.md, "Memory"). A
+ * carrier's pages are committed and charged to the domain's budget whole, touched or not, so
+ * ERTS's host sizes, made for memory a host commits lazily, cost a domain what it never uses:
+ * the multiblock carriers of every allocator -Mu reaches (all but literal_alloc and
+ * temp_alloc) grow from 128 KiB to at most 1 MiB instead of up to 10 MiB, and mseg_alloc caches
+ * two freed carriers instead of ten. With no cache, every carrier a process's collection gives
+ * back is unmapped and the next one mapped again through liberx, which slows collecting work
+ * badly; two carriers win back most of it at little memory (docs/todo-performance.md keeps the
+ * workloads still slower than with ten). They are defaults: a page's flag after them may change
+ * them either way, on its domain's own budget.
+ *
+ * The production image's checks (tools/lib/erx/production_image.rb) count these words from
+ * this declaration, so it keeps its shape: one line starting "static const char
+ * ALLOCATOR_WORDS[] =", adjacent string literals with nothing between them, no escape but a
+ * \0 between words (never before a digit), and no \0 after the last word.
+ */
+static const char ALLOCATOR_WORDS[] = "-MMmcs\0" "2\0" "-Mulmbcs\0" "1024\0" "-Musmbcs\0" "128";
+
+/*
+ * The flags and their NULs, each number at most ten digits: 3 + 11 + 3 + 5 + 3 + 11 + 3 + 6 +
+ * 7 + 6 + 6 + 2, then the allocator flags.
+ */
+_Static_assert(ERX_BOOT_ERTS_WORDS_MAX >= 66 + sizeof(ALLOCATOR_WORDS) && ERX_BOOT_ERTS_SCHEDULERS_MAX <= 99 &&
+    ERX_BOOT_ERTS_PORTS <= 9999 && ERX_BOOT_ERTS_DIRTY_IO <= 9, "the ERTS flags fit their buffer");
 
 static size_t
 fixed_size(uint32_t flags)
@@ -409,7 +431,8 @@ erts_words(const erx_boot_erts_limits_t *limits, char *words)
 	used = pair_append(words, used, limits->schedulers, limits->online);
 	used = text_append(words, used, "-SDio");
 	used = decimal_append(words, used, ERX_BOOT_ERTS_DIRTY_IO);
-	return (used);
+	memcpy(words + used, ALLOCATOR_WORDS, sizeof(ALLOCATOR_WORDS));
+	return (used + sizeof(ALLOCATOR_WORDS));
 }
 
 /* The NUL-ended words of LENGTH bytes at WORDS. */

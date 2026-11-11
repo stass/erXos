@@ -753,7 +753,10 @@ process table is the startup limits' `processes` and the atom table their
 `liberx/backend/core/boot_info.c`, derives all of them from the page and
 writes them as the vector's first flags, `+P`, `+Q 1024`, `+t`, `+S N:M`,
 `+SDcpu N:M` and `+SDio 2`, so ERTS's own parser checks each against its
-ranges and a specification's flag after them lowers a setting. Once the
+ranges and a specification's flag after them lowers a setting. The
+allocator flags of [Memory](#memory) follow them, the same in every
+runtime; they are defaults, which a specification's flag after them may
+change either way, at its own budget's cost. Once the
 arguments are read, `erx_runtime_settings_check` compares the process
 table, the atom table and both scheduler counts with what the plan
 derived and ends the start with a diagnostic if any argument, `+SP`
@@ -1231,7 +1234,7 @@ system domain that decode runs in safe mode (edit 9), so the system
 domain never learns an atom from another domain (D5), and a reason
 refused only by the atom policy arrives as `{erx_foreign_reason, Bin}`,
 so no exit is lost. The receiver's queued undecoded frames count toward
-its **queue quota** (edit 15): when an authorised frame's target has
+its **queue quota**: when an authorised frame's target has
 reached it, the drain leaves that frame in the lane and takes nothing
 more from that lane until the target's decodes bring the count below the
 quota ([design-domains.md](design-domains.md#flow-control)). In the
@@ -1838,6 +1841,37 @@ calls from one reserved range. A runtime that wants warning before a
 commit is refused arms `erx_budget_watch` on its budget with a software
 IRQ object bound to its group, and trims its carriers at the notice.
 
+**Carriers sized for committed memory.** A host commits a carrier's
+pages as they are first touched; erXos commits them when the carrier is
+made, and charges them all to the domain's budget. ERTS's host sizes
+(multiblock carriers growing up to 10 MiB, ten freed carriers cached by
+`mseg_alloc`) therefore cost a domain memory it never touches. Every
+runtime starts with `+MMmcs 2 +Mulmbcs 1024 +Musmbcs 128`, the last
+words of the flags `erx_boot_argv_plan` writes ([Starting a
+runtime](#starting-a-runtime)): the multiblock carriers of every
+allocator `+Mu` reaches grow from 128 KiB to at most 1 MiB, and
+`mseg_alloc` caches two freed carriers. erXos keeps a cache because a
+process whose heap outgrows the single-block threshold gives back a
+carrier and takes a new one at every collection: without a cache, each
+carrier given back is unmapped and the next one mapped again, each a
+call through `liberx`, which makes such work markedly slower. Two cached
+carriers win back most of that. A domain at rest holds a few dozen pages
+more with them than with none, and one that has just worked a few
+hundred more until the cache ages its carriers out; ERTS's ten hold
+hundreds of pages more again in a busy domain. The cache bounds how many
+freed carriers each of `mseg_alloc`'s per-scheduler instances keeps, not
+their size: a freed single-block carrier of several MiB stays committed
+and charged to the domain's budget until the cache ages it out, so a
+domain near its budget can be refused a carrier while its own freed ones
+sit in a cache. That costs only the domain itself, since budgets are
+walls. `+Mu` does not reach `literal_alloc` or `temp_alloc`, which keep
+ERTS's sizes, the literal allocator inside its literal range; main
+carriers and the single-block threshold keep ERTS's sizes too. ERTS's
+super carrier (`+MMscs`) is left off: with ERTS's `+MMscrpm true` it
+would commit its whole size at start-up, and with `false` it commits per
+carrier as `mseg_alloc` does, so it saves no page and only caps a
+domain's carrier space.
+
 **No allocator of its own.** The system domain's interpreter image keeps
 ERTS's allocators as every image has them, with no bookkeeping of memory
 per client inside the allocators. What the system domain holds
@@ -1849,7 +1883,7 @@ it is a bound the runtime enforces:
 * the **facet process's queue quota**, its grant's or the manifest's
   `system_queue`, for the frames queued on it and not yet decoded, past
   which the drain leaves the grantee's next frame for it in the
-  grantee's lane (edit 15), so a facet that stops reading holds its quota
+  grantee's lane, so a facet that stops reading holds its quota
   and one frame, and its grantee waits on its own full lane;
 * the **facet process's `max_heap_size`**, with `include_shared_binaries`,
   which counts the binaries a request's terms refer to and the queued
@@ -3378,6 +3412,7 @@ specification writes each `+` as `-`:
 | `+S N:M`, `+SP N:M` | lowers the schedulers created and the limit online; the grant's by default, and a larger value ends the start |
 | `+SDcpu N:M` | lowers the dirty CPU schedulers; never above the normal schedulers |
 | `+SDio N` | dirty I/O schedulers, workers; 2 by default |
+| `+MMmcs N`, `+Mulmbcs N`, `+Musmbcs N` | `2`, `1024` and `128` by default, in every runtime ([Memory](#memory)); a specification may change them, and what its carriers hold is charged to the domain's own budget |
 | `+sbt u` | executors unpinned, placed by the kernel at each wake; any other value pins in cpuset order |
 | `+sbwt`, `+sbwtdcpu`, `+sbwtdio`: `none` (default) or `very_short` | busy waiting before parking, which spends the group's quota; longer settings are clamped to `very_short` |
 | `+JPperf`, `+JMsingle` | ignored with a warning: there is no `perf`, and a mapping is never writable and executable at once |

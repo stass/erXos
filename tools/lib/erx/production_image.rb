@@ -451,8 +451,33 @@ module Erx
       # page's limits and grant (-P, -Q, -t, -S, -SDcpu and -SDio with their values) and the node
       # flag with its name, around the page's words, and the five words of -erx console_uart, the
       # four of -erx boot VALUE SLOT and the three of -erx build ID, which the root adds to the
-      # manifest's.
-      ARGUMENTS_ALWAYS = 27
+      # manifest's. The allocator flags erx_boot_argv_plan ends its flags with are counted from
+      # their one copy (allocator_words).
+      ARGUMENTS_FIXED = 27
+      # The file whose ALLOCATOR_WORDS string holds the allocator flags of every runtime.
+      BOOT_INFO = 'liberx/backend/core/boot_info.c'
+
+      # The declaration's adjacent literals: plain characters and \0 word breaks only, a \0
+      # never before an octal digit, which C would read as one character.
+      ALLOCATOR_DECLARATION = /^static const char ALLOCATOR_WORDS\[\] =((?:\s*"[^"\\]*(?:\\0(?![0-7])[^"\\]*)*")+);/
+
+      # The allocator flags and their values, as boot_info.c's ALLOCATOR_WORDS holds them: one
+      # string of NUL-separated words written as adjacent C literals, read here so that changing
+      # a flag there changes the count every production boot checks. A declaration of another
+      # shape, or an empty word (a \0 after the last word, or two together), raises rather than
+      # being counted differently from C.
+      def self.allocator_words(root)
+        literals = File.read(File.join(root, BOOT_INFO))[ALLOCATOR_DECLARATION, 1]
+        raise Error, "#{BOOT_INFO}: no ALLOCATOR_WORDS string of plain words" unless literals
+
+        words = literals.scan(/"([^"]*)"/).join.split('\0', -1)
+        raise Error, "#{BOOT_INFO}: ALLOCATOR_WORDS has an empty word" if words.any?(&:empty?)
+
+        words
+      end
+
+      # Every word of ERTS's arguments that the manifest's own words do not add.
+      def self.arguments_always(root) = ARGUMENTS_FIXED + allocator_words(root).size
       # The words of -erx device ROLE PERIPHERAL BASE SIZE LINE DMA_MEMORY, which the root adds
       # for each device of a RECORD_UNITS unit (docs/design-stopgap.md, "Device records").
       DEVICE_RECORD_WORDS = 8
@@ -568,7 +593,7 @@ module Erx
         units = source.scan(/^unit /).size
         recorded = hostlink == QemuPlan::NO_HOSTLINK ? RECORD_UNITS - [HOSTLINK_UNIT] : RECORD_UNITS
         records = source.scan(/^unit (\w+)$/).flatten.count { |unit| recorded.include?(unit) } * DEVICE_RECORD_WORDS
-        arguments = ARGUMENTS_ALWAYS + records + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
+        arguments = arguments_always(root) + records + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         count = schedulers(source, cpus: cpus)
         raise Error, 'a production boot refuses a test image' if built.test_code
 

@@ -347,7 +347,7 @@ check_vector(const char *node, size_t node_len, const char *flag)
 {
 	erx_boot_inputs_t inputs = good_inputs();
 	const char *const words[] = { "beam", "-P", "4096", "-Q", "1024", "-t", "65536", "-S", "4:4", "-SDcpu", "4:4",
-	    "-SDio", "2", "-S", "2:2", "--", "-boot", "/bin/start", flag, node };
+	    "-SDio", "2", "-MMmcs", "2", "-Mulmbcs", "1024", "-Musmbcs", "128", "-S", "2:2", "--", "-boot", "/bin/start", flag, node };
 	erx_boot_view_t view;
 	erx_boot_argv_plan_t plan;
 	char **argv;
@@ -502,14 +502,15 @@ check_schedulers(uint64_t cpuset, uint32_t capacity_mcpu, uint32_t schedulers, u
 static void
 test_erts_limits(void)
 {
-	const char lead[] = "-P\0" "131072\0" "-Q\0" "1024\0" "-t\0" "262144\0" "-S\0" "3:2\0" "-SDcpu\0" "3:2\0" "-SDio\0" "2";
+	const char lead[] = "-P\0" "131072\0" "-Q\0" "1024\0" "-t\0" "262144\0" "-S\0" "3:2\0" "-SDcpu\0" "3:2\0" "-SDio\0" "2\0"
+	    "-MMmcs\0" "2\0" "-Mulmbcs\0" "1024\0" "-Musmbcs\0" "128";
 	erx_boot_argv_plan_t plan;
 	erx_boot_erts_settings_t settings;
 
 	CHECK(erts_plan(131072, 262144, 0x15, 1500, &plan) == NULL, "erts flags: a good page refused");
 	CHECK(plan.limits.processes == 131072 && plan.limits.atoms == 262144, "erts flags: the tables are not the limits");
 	CHECK(plan.lead_len == sizeof(lead) && memcmp(plan.lead, lead, sizeof(lead)) == 0, "erts flags: the words are not %s",
-	    "-P 131072 -Q 1024 -t 262144 -S 3:2 -SDcpu 3:2 -SDio 2");
+	    "-P 131072 -Q 1024 -t 262144 -S 3:2 -SDcpu 3:2 -SDio 2 -MMmcs 2 -Mulmbcs 1024 -Musmbcs 128");
 
 	check_schedulers(0x1, 1000, 1, 1);
 	check_schedulers(0xf, 4000, 4, 4);

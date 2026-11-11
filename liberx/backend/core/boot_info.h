@@ -91,12 +91,14 @@ typedef struct erx_boot_view {
  * schedulers are the CPUs of the grant's cpuset, at most ERX_BOOT_ERTS_SCHEDULERS_MAX, with
  * the grant's capacity rounded up online. They reach ERTS as the vector's first flags, which
  * ERTS's own parser checks against its ranges, so a page's flag after them may lower a
- * setting; erx_boot_erts_admit then refuses any setting a flag raised past them.
+ * setting; erx_boot_erts_admit then refuses any setting a flag raised past them. The
+ * allocator flags that follow them are the same for every page and are defaults, which a
+ * page's flag may change either way (boot_info.c).
  */
 #define ERX_BOOT_ERTS_SCHEDULERS_MAX	32	/* a group's 64 executor slots hold both pools */
 #define ERX_BOOT_ERTS_PORTS		1024	/* ERTS's least port table, not a startup limit */
 #define ERX_BOOT_ERTS_DIRTY_IO		2	/* dirty I/O schedulers, workers that hold no slot */
-#define ERX_BOOT_ERTS_WORDS_MAX		80	/* six flags, their values, and their NULs */
+#define ERX_BOOT_ERTS_WORDS_MAX		128	/* nine flags, their values, and their NULs */
 
 typedef struct erx_boot_erts_limits {
 	uint32_t	processes;	/* -P, a power of two, so ERTS's rounding up keeps it */

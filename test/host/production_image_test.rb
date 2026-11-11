@@ -412,7 +412,7 @@ class ProductionImageTest < Minitest::Test
     refute_equal 0, system_args
     # The manifest has a block unit, a net unit and the host link's, so the root adds three
     # device records.
-    always = Erx::ProductionImage::Run::ARGUMENTS_ALWAYS + 3 * Erx::ProductionImage::Run::DEVICE_RECORD_WORDS
+    always = Erx::ProductionImage::Run.arguments_always(ROOT) + 3 * Erx::ProductionImage::Run::DEVICE_RECORD_WORDS
     checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always + system_args} arguments\n")
     checkpoint_verifier('erts-start', extra_arguments: 1).call("erx: erts: erl_start runs, #{always + system_args + 1} arguments\n")
     assert_raises(Erx::Error) { checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always} arguments\n") }
@@ -420,6 +420,30 @@ class ProductionImageTest < Minitest::Test
     plain = always - Erx::ProductionImage::Run::DEVICE_RECORD_WORDS + system_args
     checkpoint_verifier('erts-start', hostlink: Erx::QemuPlan::NO_HOSTLINK).call("erx: erts: erl_start runs, #{plain} arguments\n")
     assert_raises(Erx::Error) { checkpoint_verifier('erts-start', hostlink: Erx::QemuPlan::NO_HOSTLINK).call("erx: erts: erl_start runs, #{always + system_args} arguments\n") }
+  end
+
+  # The count reads boot_info.c's ALLOCATOR_WORDS: a misread string would leave every
+  # production boot's count off, so the words read must be ERTS allocator flags, each with a
+  # number, and a string this reader cannot take whole fails it rather than counting short.
+  def test_the_allocator_words_are_read_whole_from_boot_info
+    words = Erx::ProductionImage::Run.allocator_words(ROOT)
+    refute_empty words
+    words.each_slice(2) do |flag, value|
+      assert_match(/\A-M[A-Za-z]+\z/, flag)
+      assert_match(/\A\d+\z/, value.to_s)
+    end
+    # Another escape, a trailing \0 (an empty word to C), an octal escape C reads as one
+    # character, and a declaration only quoted in a comment.
+    refused = ['"-MMmcs\\0" "2\\n"', '"-MMmcs\\0" "2\\0"', '"-MMmcs\\012"']
+    Dir.mktmpdir('erx-boot-info-') do |root|
+      path = File.join(root, Erx::ProductionImage::Run::BOOT_INFO)
+      FileUtils.mkdir_p(File.dirname(path))
+      (refused.map { |literals| "static const char ALLOCATOR_WORDS[] = #{literals};\n" } +
+       [%(/* static const char ALLOCATOR_WORDS[] = "-MMmcs\\0" "2"; */\n)]).each do |source|
+        File.write(path, source)
+        assert_raises(Erx::Error, source) { Erx::ProductionImage::Run.allocator_words(root) }
+      end
+    end
   end
 
   # The root gives a device record to each device that matches a row of boot_manifest.c's

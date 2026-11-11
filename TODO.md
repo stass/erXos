@@ -870,10 +870,24 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] runtime, `otp/erts/emulator/sys/common/erl_mseg.c` (`mseg_alloc`): when the budget
+  refuses the commit behind a new carrier, `mseg_alloc` fails without emptying the segment
+  caches, so a domain near its budget can be refused a carrier while its own freed carriers
+  (up to two per scheduler's instance, single-block ones of any size) stay committed in them.
+  `erts_mseg_clear_cache` runs only on the `malloc` paths of `sys/erxos/sys.c`, and clears only
+  two instances. On a refused commit, clear every instance's cache and retry once; the
+  regression test frees a large binary in a domain held near its budget and then allocates.
 * [Medium] oracle log tree test (`test/integration/oracle_log_tree_test.rb`, `tools/lib/erx/oracle_hosted.rb`): the
   test assumes a /tmp cap of 160 MiB (`TMP_CAP`), but the hosted oracle takes the system
   domain's cap from the development manifest, 4 MiB, and runs its suites in /tmp/ct on it. Give the
   oracle's work directory a tree of its own, or derive `TMP_CAP` from the manifest.
+* [Medium] benchmarks, `tools/lib/erx/bench_guest.rb` (`exchanges`, `transcript`):
+  `tools/erx bench g3` times out at its `footprint` checkpoint on the development image,
+  whose console starts root's session at boot. The `erl` line typed at the development
+  warning starts the system domain's Erlang shell, then root's session takes the UART and
+  its command shell reads the footprint expression (`rc: syntax error`). G3 has to say
+  whose shell it measures (the system domain's, or the session's `erl`) and wait for that
+  prompt before typing.
 * [Low] host tests on FreeBSD, `tools/lib/erx/runner.rb`: the seeded-fault (mutant) binaries
   that abort by design dump core into the tree root (`mutant-*.core`, `page.core`,
   `object.core`; FreeBSD's `kern.corefile` is `%N.core` in the working directory), 17 files

@@ -19,58 +19,58 @@
 # margin. The system principal's 37 MiB holds root's one session, whose limits'
 # memory is 36 MiB and outer 1 MiB; with it the baseline leaves root_memory the
 # block device's 1 MiB, the network device's 256 KiB and 12 MiB no one is promised.
-# One session at its command shell maps 21.4 MB of ERTS memory, 15.3 MB of it
-# erlang:memory (the same host, 1 CPU), with its runtime_limits' max_message_heap
-# of 131072 words and its template's allocator flags: -MLlmbcs 1024 -MLsmbcs 128 keep
-# the literal allocator's carriers small and -MMmcs 0 caches no free segment.
-# A test
-# image that needs more names a larger machine (ProductionImage::Machine), which
-# grows root_memory, the baseline and /tmp's cap.
+# A session's runtime starts with its runtime_limits' max_message_heap of 131072
+# words and the allocator flags every runtime starts with (docs/design-runtime.md,
+# "Memory"), which shrink the carriers of every allocator but literal_alloc and
+# temp_alloc. A test image that needs more names a larger machine
+# (ProductionImage::Machine), which grows root_memory, the baseline and /tmp's cap.
 #
 # What a driver domain costs (tools/lib/erx/medium_boot.rb, Footprint; an Apple M3 Max
 # host, HVF, QEMU 11.1.3, Homebrew clang 23.1.3, 4 guest CPUs, the 768 MiB medium
 # machine, interpreter ERTS domains with 1,024 processes, 16,384 atoms and tmp 0, at
-# rest). A domain's cost is the root's pool pages in use with the domain up minus the
-# pages once it has stopped; the pool is a stopgap's partial figure. The domains are
-# upper bounds, since nothing of ERTS is shared between them. A domain's figure was
-# the same within 2 pages over four creates in a run and 6,696 in three steps of an
-# earlier run, so it is a range; the system domain's moved by 2.7 MiB between runs.
+# rest; two runs, the system domain's /tmp cap 16 MiB in one and 4 MiB in the other).
+# A domain's cost is the root's pool pages in use with the domain up minus the pages
+# once it has stopped; the pool is a stopgap's partial figure. Each range is the two
+# runs' figures.
 #
-#   release (applications)                    pool pages    MiB
-#   bare (kernel stdlib erx erx_files)        6,696-6,954   26.2-27.2   archive 11.04 MB
-#   storage (bare + erx_blk, loaded)          6,696-6,952   26.2-27.2   archive +0.05 MB
-#   network (bare + erx_net, erx_net_client)  6,696-6,952   26.2-27.2   archive +1.07 MB
-#   the network release, its 80 modules loaded  7,976       31.2
-#   system domain at the shell, /tmp 16 MiB   8,521         33.3
-#   system domain at the shell, /tmp 4 MiB    9,225         36.0
+#   release (applications)                      pool pages    MiB
+#   bare (kernel stdlib erx erx_files)          4,536-4,568   17.7-17.8   archive 11.05 MB
+#   storage (bare + erx_blk, loaded)            4,566-4,598   17.8-18.0   archive +0.05 MB
+#   network (bare + erx_net, erx_net_client)    4,568-4,600   17.8-18.0   archive +1.11 MB
+#   the storage release, its 9 modules loaded   4,918-4,950   19.2-19.3
+#   the network release, its 82 modules loaded  5,496-5,528   21.5-21.6
+#   system domain at the shell, /tmp 16 MiB     8,108         31.7
+#   system domain at the shell, /tmp 4 MiB      8,203         32.0
 #
-# The system rows are read after the domains of the run have ended and stopped; read
-# 3 s after the configured domains ended, the same domain held 9,110 and 9,814 pages.
-# A domain's 27.2 MiB is ERTS's image copied per domain, 3.44 MiB of text and read-only
-# data and 0.72 MiB of data and bss (4.17 MiB); the allocators' carriers, 19.6 MiB, of
-# which erlang:memory() reports 10.4 MiB in use (ll_alloc holds 12.0 MiB for 5.9 MiB of
-# code); and 2.4-3.4 MiB left for the threads' stacks (one scheduler, one dirty CPU
-# scheduler, two dirty IO schedulers and one async thread) and the rest. Release files
-# are mapped from the archive's pages, so they cost the domain nothing; each added
-# domain release costs the archive about 11 MB, as it carries its own copy of the domain
-# base. Loading erx_blk's 9 modules adds 0.1 MiB of memory and no page; erx_net's and
-# erx_net_client's 80 add 1.7 MiB of memory and 1,024 pages. erx_net and erx_blk are
-# loaded, not started: the network application needs the system domain's local
-# transport and a device needs its holder, so these are the domains at rest. The system
-# domain's carriers hold 24.8-27.6 MiB for 15.8 MiB in use. A tmp cap above 0 does not
-# move a domain's figure (6,954 pages with a 4 MiB cap, as with none): the cap is
-# charged on use, not up front.
+# The system rows are read after the domains of the run have ended and stopped. Every
+# domain maps ERTS's 2.84 MiB of text and 0.60 MiB of read-only data from the archive's
+# pages, shared by all of them, so a domain's 17.8 MiB is ERTS's data and bss, 0.72 MiB,
+# of which it has its own copy; the allocators' carriers, 14.0 MiB, of which
+# erlang:memory() reports 10.5 MiB in use (ll_alloc holds 8.75 MiB for 5.9 MiB of
+# code, literal_alloc 2.0 MiB); and 3.1 MiB left for the threads' stacks (one
+# scheduler, one dirty CPU scheduler, two dirty IO schedulers and one async thread)
+# and the rest. Release files are mapped from the archive's pages, so they cost the
+# domain nothing; each added domain release costs the archive about 11 MB, as it
+# carries its own copy of the domain base. Loading the modules adds 192 pages even to
+# the bare release, which has none to load: carriers the step's work frees stay in
+# mseg_alloc's cache of two. Loading erx_blk's 9 modules adds 0.5 MiB of memory and
+# 320-384 pages; erx_net's and erx_net_client's 82 add 1.7 MiB of memory and 928
+# pages. erx_net and erx_blk are loaded, not started: the network application needs
+# the system domain's local transport and a device needs its holder, so these are the
+# domains at rest. The system domain's carriers hold 22.7 MiB for 16.1-16.5 MiB in
+# use. A tmp cap above 0 does not move a domain's figure beyond the runs' spread (the
+# bare release with a 4 MiB cap, created last, took 4,568 and 4,600 pages, as the
+# storage and network releases did): the cap is charged on use, not up front.
 #
 # The 160 MiB machine does not hold the system domain, the root's session at 36 MiB, a
-# storage domain and a network domain. At rest they need about 126 MiB of pool
-# (36 + 36 + 27 + 27) against root_memory's 96.25 MiB, and the archive, with the
-# domain releases and the runtime image, needs about 62 MiB against the 47.75 MiB the
-# machine leaves for it and the bootstrap: about 205 MiB in all with the Fiasco
-# reserve. Admission charges budgets, not use, and the system baseline is 58 MiB, so
-# the shortfall is larger. Sharing one image of the domain base (it saves 22 MiB of
-# archive across the three releases) and ERTS's text and read-only data (3.4 MiB a
-# domain) brings the total to about 170 MiB, still over; the driver domains need a
-# machine of 256 MiB, the 160 MiB machine staying for the system domain and one session.
+# storage domain and a network domain. At rest they need about 108 MiB of pool
+# (36 + 36 + 18 + 18) against root_memory's 96.25 MiB, and the archive of the
+# Footprint image, which carries the system release, the three domain releases and
+# the interpreter and BeamAsm runtime images, is 68.8 MiB against the 47.75 MiB the
+# machine leaves for it and the bootstrap: about 193 MiB in all with the Fiasco
+# reserve's 16 MiB. Admission charges budgets, not use, and the system baseline is
+# 46 MiB, so the shortfall is larger. The driver domains need a machine of 256 MiB,
+# the 160 MiB machine staying for the system domain and one session.
 #
 # The image release is the system release's EROFS image in the slot, with no
 # hash tree; the packer takes its extent from the image it builds
@@ -164,7 +164,7 @@ session system
   limits @limits.session
   runtime @artifact.emu
   release @artifact.session
-  args "-MLlmbcs 1024 -MLsmbcs 128 -MMmcs 0 -- -root / -bindir /bin -progname erl -home / -boot /bin/start -nouser -nocookie -no_epmd -proto_dist erx -eval ok=application:start(erx_session)"
+  args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -nouser -nocookie -no_epmd -proto_dist erx -eval ok=application:start(erx_session)"
 machine
   flags development
   host "erxos"
