@@ -870,6 +870,10 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] tooling, `tools/lib/erx/erlang_apps.rb` (`check_modules`): an application's `.app.src`
+  module list is compared with its `src/` only when a release is built, so `make check` passes a
+  module added without its `.app.src` entry and every QEMU suite and `make check-boot-image`
+  then fail. Run the same comparison for every application in `make check`, without building.
 * [Medium] runtime, `otp/erts/emulator/sys/common/erl_mseg.c` (`mseg_alloc`): when the budget
   refuses the commit behind a new carrier, `mseg_alloc` fails without emptying the segment
   caches, so a domain near its budget can be refused a carrier while its own freed carriers
