@@ -193,6 +193,15 @@ erx_fiasco_task_space_target(uint32_t caller, uint64_t space, uint32_t *task)
 	return (erx_fiasco_task(*task)->state == ERX_FIASCO_TASK_LIVE ? ERX_OK : ERX_EINVAL);
 }
 
+/* The space record outlives no creator: the creator's end releases the space with it. */
+bool
+erx_fiasco_task_created_by(uint32_t task, uint32_t caller)
+{
+	const uint32_t space = erx_fiasco_task(task)->tree.space;
+
+	return (space != 0 && erx_fiasco_object_at(space - 1)->creator == caller);
+}
+
 static uint64_t
 task_slot(uint32_t task, uint32_t slot)
 {
@@ -438,47 +447,81 @@ task_image_slice(uint32_t entry, uint32_t *slice)
 }
 
 /*
- * The kernel's call takes a slice of the image and an entry of it; this backend has
- * one image, the boot archive, and no slices, so image is ignored. An entry loads in
- * either of its two forms: an image entry (a domain's runtime) by the manifest the
- * pack tool wrote, through erx_image_plan, or a file entry holding an ELF executable
- * (the test launcher's programs) through erx_elf_plan. Only a program linked at fixed
- * addresses can load, as there is no relocation here. An image entry's read-only and
- * read-execute segments are its slice's pages, shared by every space that runs it;
- * its writable segments, and every segment of a file entry, whose offsets are the
- * ELF file's, are copied into the space.
+ * The archive index a map names. A slice the caller holds names its run of entries,
+ * and entry counts from the run's first, ERX_ERANGE past its last; a handle that names
+ * no slice is the lookup's refusal, ERX_ETYPE for another kind. The root alone may name
+ * ERX_CAP_NULL, the whole archive, and then entry is the archive's own index: how the
+ * domain library maps a runtime's image entry, which no slice may hold.
+ */
+static int
+task_image_entry(uint32_t caller, uint64_t image, uint64_t entry, uint32_t *index)
+{
+	uint32_t object, first, count;
+	int status;
+
+	if (caller == ERX_FIASCO_TASK_ROOT && image == ERX_CAP_NULL) {
+		if (entry > UINT32_MAX)
+			return (ERX_EINVAL);
+		*index = (uint32_t)entry;
+		return (ERX_OK);
+	}
+	status = erx_fiasco_object_find(caller, image, ERX_BACKEND_OBJECT_MEMORY, &object);
+	if (status == ERX_OK)
+		status = erx_fiasco_vm_slice_entries(object, &first, &count);
+	if (status != ERX_OK)
+		return (status);
+	if (entry >= count)
+		return (ERX_ERANGE);
+	/* The slice's run lies inside the archive, so first + entry does not wrap. */
+	*index = first + (uint32_t)entry;
+	return (ERX_OK);
+}
+
+/*
+ * Loads an entry of the image into a space the caller created: any task's call, as a
+ * session starts a program from its release's slice. An entry loads in either of its
+ * two forms: an image entry (a domain's runtime) by the manifest the pack tool wrote,
+ * through erx_image_plan, or a file entry holding an ELF executable (the test
+ * launcher's and a session's programs) through erx_elf_plan. Only a program linked at
+ * fixed addresses can load, as there is no relocation here. An image entry's
+ * read-only and read-execute segments are its slice's pages, shared by every space
+ * that runs it; its writable segments, and every segment of a file entry, whose
+ * offsets are the ELF file's, are copied into the space.
  */
 int
-erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, uint64_t *start)
+erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t image, uint64_t entry, uint64_t *start)
 {
 	erx_pack_entry_t file;
 	erx_elf_error_t error;
-	const uint8_t *image;
-	uint32_t task, slice = 0;
+	const uint8_t *bytes;
+	uint32_t task, index, slice = 0;
 	bool planned;
+	int status;
 
-	if (caller != ERX_FIASCO_TASK_ROOT)
-		return (ERX_ENOTSUP);
-	if (erx_fiasco_task_space_target(caller, space, &task) != ERX_OK || task == caller || entry > UINT32_MAX ||
-	    task_archive == NULL || !erx_pack_entry_at(task_archive, (uint32_t)entry, &file))
+	status = erx_fiasco_task_space_target(caller, space, &task);
+	if (status == ERX_OK)
+		status = task_image_entry(caller, image, entry, &index);
+	if (status != ERX_OK)
+		return (status);
+	if (task == caller || task_archive == NULL || !erx_pack_entry_at(task_archive, index, &file))
 		return (ERX_EINVAL);
-	image = task_archive->bytes + file.data_off;
+	bytes = task_archive->bytes + file.data_off;
 	if (file.kind == ERX_ENTRY_IMAGE)
-		planned = erx_image_plan(image, (size_t)file.data_size, &task_plan, &error);
+		planned = erx_image_plan(bytes, (size_t)file.data_size, &task_plan, &error);
 	else
-		planned = erx_elf_plan(image, (size_t)file.data_size, UINT64_MAX, &task_plan, &error);
+		planned = erx_elf_plan(bytes, (size_t)file.data_size, UINT64_MAX, &task_plan, &error);
 	if (!planned || (task_plan.flags & ERX_IMAGE_FIXED) == 0)
 		return (ERX_EINVAL);
-	if (file.kind == ERX_ENTRY_IMAGE && task_image_slice((uint32_t)entry, &slice) != ERX_OK)
+	if (file.kind == ERX_ENTRY_IMAGE && task_image_slice(index, &slice) != ERX_OK)
 		return (ERX_ENOMEM);
-	for (uint32_t index = 0; index < task_plan.nloads; index++) {
-		const erx_elf_load_t *const load = &task_plan.loads[index];
+	for (uint32_t step = 0; step < task_plan.nloads; step++) {
+		const erx_elf_load_t *const load = &task_plan.loads[step];
 		bool loaded;
 
 		if (file.kind == ERX_ENTRY_IMAGE && load->segment.prot != ERX_PROT_RW)
 			loaded = task_segment_share(task, slice, load, task_plan.fixed_base);
 		else
-			loaded = task_segment_load(task, image, load, task_plan.fixed_base);
+			loaded = task_segment_load(task, bytes, load, task_plan.fixed_base);
 		if (!loaded)
 			return (ERX_ENOMEM);
 	}

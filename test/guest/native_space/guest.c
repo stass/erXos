@@ -56,6 +56,8 @@
 #define HELD_LABEL	UINT64_C(0x5e0000000000e000)
 #define IMAGE_LABEL	UINT64_C(0x5e0000000000f000)
 #define IMAGE_STATUS	78
+/* The most tasks one case holds at once: case_created's other task, creator, child and grandchild. */
+#define WARM_TASKS	4u
 /* More pages than one erx_mem_copy request copies. */
 #define COPY_PAGES	66u
 
@@ -64,6 +66,9 @@ void erx_fiasco_root_main(void);
 static uint32_t program_entry;
 /* The program's entry, the same in every task the launcher makes from its fixed image. */
 static uint64_t program_pc;
+
+static void	item_put(size_t, uint64_t, uint32_t, bool);
+static uint64_t	item_word(size_t, size_t);
 
 static void
 say(const char *text)
@@ -397,19 +402,44 @@ case_gate_queue(void)
 }
 
 /*
- * A task creates spaces below its own and one with a bad parent (MODE_CREATOR
- * in program.c); its end stops and frees them with it, so the pool's pages come back.
+ * A task creates spaces below its own and one with a bad parent, and runs the program in
+ * its child from a slice of the program's entry that the root passed it (MODE_CREATOR in
+ * program.c). The root also makes another task's first thread and passes its handle,
+ * which the creator may not start: the root's own start of it then succeeds. Each
+ * task's end stops and frees what it made, so the pool's pages come back.
  */
 static void
 case_created(void)
 {
 	const uint64_t before = erx_fiasco_vm_free_pages();
-	uint64_t space;
-	const int64_t status = erx_fiasco_launch_make(program_entry, 0, &space, &program_pc) == ERX_OK ?
-	    task_finish(space, MODE_CREATOR) : INT64_MIN;
+	uint64_t space = 0, other = 0, slice = 0, thread = 0;
+	int64_t status = INT64_MIN, other_status = INT64_MIN;
+	bool passed = erx_image_slice(0, 0, program_entry, 1, &slice) == ERX_OK &&
+	    erx_fiasco_launch_make(program_entry, 0, &other, &program_pc) == ERX_OK;
 
+	if (passed) {
+		erx_fiasco_launch_set_registers(program_pc, FIRST_TAG << SLOT_SHIFT | MODE_FIRST);
+		passed = erx_thread_create(0, other, 0, ERX_THREAD_CLASS_WORKER, &thread) == ERX_OK &&
+		    erx_fiasco_launch_make(program_entry, 0, &space, &program_pc) == ERX_OK;
+	}
+	if (passed) {
+		item_put(0, slice, ERX_HR_READ, false);
+		passed = erx_cap_pass(ERX_CAP_SELF, space, 1) == ERX_OK;
+	}
+	if (passed)
+		status = task_finish(space, MODE_CREATOR | item_word(0, 1) << CREATOR_SLICE_SHIFT |
+		    thread << CREATOR_THREAD_SHIFT | (uint64_t)program_entry << CREATOR_ENTRY_SHIFT);
+	else if (space != 0)
+		task_drop(space);
+	if (thread != 0 && erx_thread_start(thread) == ERX_OK)
+		(void)erx_fiasco_task_join_until(other, erx_fiasco_clock_ns() + WAIT_NS, &other_status);
+	else if (other != 0)
+		task_drop(other);
 	say_count("created_status", (uint64_t)status);
-	say_case("created", status == 0 && erx_fiasco_vm_free_pages() == before);
+	say_count("created_other_status", (uint64_t)other_status);
+	passed = (slice == 0 || erx_cap_close(slice) == ERX_OK) && passed;
+	say_case("created", passed && status == 0 && other_status == FIRST_STATUS &&
+	    erx_fiasco_vm_free_pages() == before);
 }
 
 /* What the root's create refuses: a parent or a fault gate that names no space or gate it holds. */
@@ -899,22 +929,24 @@ case_copy(uint32_t first)
 }
 
 /*
- * The root's own tables, and the service's rows for the first two task indices, take
- * their pages here, so no case counts them against its pool.
+ * The root's own tables, and the service's rows for the first WARM_TASKS task indices,
+ * as many as one case holds at once (case_created), take their pages here, so no case
+ * counts them against its pool.
  */
 static void
 warm_up(void)
 {
-	uint64_t mem, addr, gate, label, first = 0, second = 0;
+	uint64_t mem, addr, gate, label, tasks[WARM_TASKS] = { 0 };
 
-	if (erx_fiasco_launch_make(program_entry, 0, &first, &program_pc) != ERX_OK)
-		say("erx: space: warm-up refused\n");
-	else if (erx_fiasco_launch_make(program_entry, 0, &second, &program_pc) != ERX_OK)
-		say("erx: space: warm-up refused\n");
-	else
-		task_drop(second);
-	if (first != 0)
-		task_drop(first);
+	for (size_t made = 0; made < WARM_TASKS; made++) {
+		if (erx_fiasco_launch_make(program_entry, 0, &tasks[made], &program_pc) != ERX_OK) {
+			say("erx: space: warm-up refused\n");
+			break;
+		}
+	}
+	for (size_t made = WARM_TASKS; made > 0; made--)
+		if (tasks[made - 1] != 0)
+			task_drop(tasks[made - 1]);
 
 	if (erx_mem_create(0, PAGE, 0, &mem) != ERX_OK || erx_vm_reserve(ERX_CAP_SELF, 0, PAGE, 0, &addr) != ERX_OK ||
 	    erx_vm_map(ERX_CAP_SELF, addr, PAGE, mem, 0, ERX_PROT_RW) != ERX_OK ||

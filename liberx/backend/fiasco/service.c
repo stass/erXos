@@ -430,7 +430,8 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 		return (erx_fiasco_group_configure_body(decoded->task, words));
 	case ERX_FIASCO_CALL_IMAGE_MAP:
 		return (erx_fiasco_task_image_map_body(decoded->task, ((const erx_fiasco_image_map_request_t *)words)->space,
-		    ((const erx_fiasco_image_map_request_t *)words)->entry, &reply->first));
+		    ((const erx_fiasco_image_map_request_t *)words)->image, ((const erx_fiasco_image_map_request_t *)words)->entry,
+		    &reply->first));
 	case ERX_FIASCO_CALL_SPACE_STOP:
 		return (erx_fiasco_task_stop_body(decoded->task, ((const erx_fiasco_space_stop_request_t *)words)->space,
 		    ((const erx_fiasco_space_stop_request_t *)words)->status));
@@ -609,12 +610,15 @@ erx_fiasco_thread_handle_name(uint32_t caller, uint64_t handle, uint32_t *task, 
 {
 	const uint64_t named = handle >> SERVICE_HANDLE_TASK_SHIFT;
 
-	if ((named != 0 && caller != ERX_FIASCO_TASK_ROOT) || named > UINT32_MAX ||
-	    (handle & SERVICE_HANDLE_INDEX_MASK) >= ERX_FIASCO_THREADS_MAX)
+	if (named > UINT32_MAX || (handle & SERVICE_HANDLE_INDEX_MASK) >= ERX_FIASCO_THREADS_MAX)
 		return (ERX_EINVAL);
 	*task = named != 0 ? (uint32_t)named : caller;
 	*index = (uint32_t)(handle & SERVICE_HANDLE_INDEX_MASK);
-	return (erx_fiasco_task_live(*task) ? ERX_OK : ERX_EINVAL);
+	if (!erx_fiasco_task_live(*task))
+		return (ERX_EINVAL);
+	if (named != 0 && caller != ERX_FIASCO_TASK_ROOT && !erx_fiasco_task_created_by(*task, caller))
+		return (ERX_EINVAL);
+	return (ERX_OK);
 }
 
 /*
@@ -622,9 +626,9 @@ erx_fiasco_thread_handle_name(uint32_t caller, uint64_t handle, uint32_t *task, 
  * of a task the root names, and takes the starting registers from the caller's
  * public UTCB. Everything goes through the window, so the record may be another task's.
  * A task holds its semaphore at the same slot the root's own threads use. A created
- * space takes one first thread from its creator, the root, ever: a second create there,
- * or any other caller's, is ERX_ENOTSUP. The thread joins the group the request names,
- * whose home its task becomes (group.c).
+ * space takes one first thread from its creator, ever, the caller holding the space's
+ * handle: a second create there is ERX_ENOTSUP. The thread joins the group the request
+ * names, whose home its task becomes (group.c).
  */
 static int
 service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t *request, erx_fiasco_reply_t *reply)
@@ -637,8 +641,6 @@ service_thread_create(uint32_t caller, const erx_fiasco_thread_create_request_t 
 	int status;
 
 	if (request->space != 0) {
-		if (caller != ERX_FIASCO_TASK_ROOT)
-			return (ERX_ENOTSUP);
 		status = erx_fiasco_task_space_target(caller, request->space, &task);
 		if (status != ERX_OK)
 			return (status);

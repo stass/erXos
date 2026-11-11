@@ -12,7 +12,7 @@
 #define MODE_WRITER	1	/* finds the root's pattern, writes its own, releases the range: ends with 0 */
 #define MODE_READER	2	/* finds the writer's pattern read-only, releases the range: ends with 0 */
 #define MODE_REVOKED	3	/* finds the root's pattern, raises its signal, reads until a fault ends it */
-#define MODE_CREATOR	4	/* creates spaces below its own and a refused one, ends with 0 */
+#define MODE_CREATOR	4	/* creates spaces below its own, runs one from the slice passed, ends with 0 */
 #define MODE_FIRST	5	/* finds FIRST_TAG above its mode, ends with FIRST_STATUS */
 #define MODE_GROUP	6	/* in its domain group: its take is its own, which a worker may not make: ends with 0 */
 #define MODE_HOLDER	7	/* maps the object whose handle the root passed it, the next bytes, read-only: ends with 0 */
@@ -64,5 +64,18 @@
 #define HANDLE_MASK	UINT64_C(0xffffff)
 #define BELL_LABEL	UINT64_C(0xbe11000000000001)
 #define BACK_LABEL	UINT64_C(0xbe11000000000002)
+
+/*
+ * MODE_CREATOR's argument: the handle of the slice of the program's entry the root
+ * passed it, and the root's handle of another task's first thread, which it may not start.
+ * Its child reports under CREATOR_LABEL and the grandchild under the next label.
+ */
+#define CREATOR_SLICE_SHIFT	8u
+#define CREATOR_THREAD_SHIFT	32u
+#define CREATOR_THREAD_MASK	UINT64_C(0xffff)
+/* The program's archive index, which the creator may not map without a slice. */
+#define CREATOR_ENTRY_SHIFT	48u
+#define CREATOR_LABEL	UINT64_C(1)
+#define CREATOR_WAIT_NS	UINT64_C(10000000000)
 
 #endif /* ERX_NATIVE_SPACE_MODES_H */

@@ -104,8 +104,10 @@ void		*erx_fiasco_task_record(uint32_t task, uint32_t index);
 
 /*
  * The task and index a thread handle names for the caller: its own handle is the
- * index, and the root's handle of another task's thread carries the task above it.
- * ERX_EINVAL for a handle that names no live task's index. Defined in service.c.
+ * index, and a handle of another task's thread carries the task above it, which names
+ * a thread only for the root or that task's creator. ERX_EINVAL for a handle that
+ * names no live task's index, or another task the caller did not create. Defined in
+ * service.c.
  */
 int	erx_fiasco_thread_handle_name(uint32_t caller, uint64_t handle, uint32_t *task, uint32_t *index)
 	    ERX_WARN_UNUSED_RESULT;
@@ -116,7 +118,7 @@ const erx_pack_view_t	*erx_fiasco_task_archive(void);
 
 /* The bodies. caller is the calling task; each result is the call table's. */
 int	erx_fiasco_task_create_body(uint32_t caller, const erx_fiasco_space_create_request_t *request, uint64_t *space);
-int	erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t entry, uint64_t *start);
+int	erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t image, uint64_t entry, uint64_t *start);
 int	erx_fiasco_task_stop_body(uint32_t caller, uint64_t space, int64_t status);
 /*
  * The root's join of a space it created: ERX_EBUSY with the task's index in *task while
@@ -130,6 +132,12 @@ int	erx_fiasco_task_join_body(uint32_t caller, uint64_t space, int64_t *status, 
  * erx_fiasco_object_find gives them, and ERX_EINVAL for a space that has stopped.
  */
 int	erx_fiasco_task_space_target(uint32_t caller, uint64_t space, uint32_t *task) ERX_WARN_UNUSED_RESULT;
+/*
+ * Whether caller made the live task task, by its space record's creator: the one
+ * task besides the root that may name the task's threads. The root, which no
+ * space record holds, is no task's creation.
+ */
+bool	erx_fiasco_task_created_by(uint32_t task, uint32_t caller);
 /*
  * A space record's end, from object.c: the last handle's close or its creator's
  * destroy or end releases the space, which stops with ERX_EXIT_RELEASED if it runs and

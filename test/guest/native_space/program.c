@@ -76,31 +76,89 @@ mode_revoked(uint64_t slot)
 	return (31);
 }
 
+/* The starting registers erx_thread_create reads from the head of the calling thread's public UTCB. */
+static void
+first_registers(uint64_t pc, uint64_t argument)
+{
+	erx_fiasco_start_t start = { 0 };
+	const uint64_t *const words = (const uint64_t *)(const void *)&start;
+
+	start.regs.pc = pc;
+	start.regs.gpr[0] = argument;
+	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
+		atomic_store_explicit(&erx_utcb_self()->mr[word], words[word], memory_order_relaxed);
+}
+
+/* The next record at the gate bound to the calling thread, as erx_ipc_wait leaves it in its public UTCB. */
+static bool
+record_take(erx_fault_t *record, uint64_t *label)
+{
+	uint64_t words[sizeof(*record) / sizeof(uint64_t)];
+	erx_msgtag_t tag;
+
+	if (erx_ipc_wait(erx_fiasco_clock_ns() + CREATOR_WAIT_NS, &tag, label) != ERX_OK)
+		return (false);
+	for (size_t word = 0; word < sizeof(words) / sizeof(words[0]); word++)
+		words[word] = atomic_load_explicit(&erx_utcb_self()->mr[word], memory_order_relaxed);
+	__builtin_memcpy(record, words, sizeof(words));
+	return (true);
+}
+
 /*
  * Spaces below its own: a child, and a grandchild below the child, each reporting to a
  * gate of its own, and the child given a page of its object; then a parent that names
- * no space, and the child's first thread, which only the root makes. Its end stops
- * both, children first, and frees them.
+ * no space. The child runs this program, index 0 of the slice the root passed: the map
+ * refuses an index past the slice, a target that is no space, an image that is no
+ * slice, and the whole archive, which only the root names, even at the program's entry. The child's first thread takes FIRST_TAG, a second create there is
+ * ERX_ENOTSUP, and the start of the root's first thread in a task this one did not
+ * create, whose handle the root passed, ERX_EINVAL. The child's end stops the
+ * grandchild below it, and both exit records come to the gate. Its own end frees what
+ * is left.
  */
 static int64_t
-mode_creator(void)
+mode_creator(uint64_t argument)
 {
-	uint64_t gate, mem, child, grandchild, refused;
+	const uint64_t slice = argument >> CREATOR_SLICE_SHIFT & HANDLE_MASK;
+	const uint64_t others = argument >> CREATOR_THREAD_SHIFT & CREATOR_THREAD_MASK;
+	const uint64_t entry = argument >> CREATOR_ENTRY_SHIFT;
+	uint64_t gate, mem, child, grandchild, refused, pc, thread, label;
+	erx_fault_t record;
+	bool child_ended = false, grandchild_ended = false;
 
 	if (erx_gate_create(0, &gate) != ERX_OK || erx_mem_create(0, PAGE, 0, &mem) != ERX_OK)
 		return (40);
-	if (erx_space_create(0, ERX_CAP_SELF, gate, 1, 0, CREATED_CAP_LIMIT, &child) != ERX_OK)
+	if (erx_space_create(0, ERX_CAP_SELF, gate, CREATOR_LABEL, 0, CREATED_CAP_LIMIT, &child) != ERX_OK)
 		return (41);
-	if (erx_space_create(0, child, gate, 2, 0, CREATED_CAP_LIMIT, &grandchild) != ERX_OK)
+	if (erx_space_create(0, child, gate, CREATOR_LABEL + 1, 0, CREATED_CAP_LIMIT, &grandchild) != ERX_OK)
 		return (42);
 	if (erx_vm_reserve(child, SHARED_ADDR, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) != ERX_OK ||
 	    erx_vm_map(child, SHARED_ADDR, PAGE, mem, 0, ERX_PROT_RW) != ERX_OK)
 		return (43);
 	if (erx_space_create(0, mem, gate, 3, 0, CREATED_CAP_LIMIT, &refused) != ERX_ETYPE)
 		return (44);
-	/* Only the root makes a created space's first thread. */
-	if (erx_thread_create(0, child, 0, ERX_THREAD_CLASS_WORKER, &refused) != ERX_ENOTSUP)
+	if (erx_image_map(child, slice, 1, &pc) != ERX_ERANGE || erx_image_map(mem, slice, 0, &pc) != ERX_ETYPE ||
+	    erx_image_map(child, mem, 0, &pc) != ERX_ETYPE || erx_image_map(child, ERX_CAP_NULL, entry, &pc) != ERX_EINVAL)
 		return (45);
+	if (erx_image_map(child, slice, 0, &pc) != ERX_OK)
+		return (46);
+	first_registers(pc, FIRST_TAG << SLOT_SHIFT | MODE_FIRST);
+	if (erx_thread_create(0, child, 0, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK ||
+	    erx_thread_create(0, child, 0, ERX_THREAD_CLASS_WORKER, &refused) != ERX_ENOTSUP)
+		return (47);
+	if (erx_thread_start(others) != ERX_EINVAL)
+		return (48);
+	if (erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) != ERX_OK || erx_thread_start(thread) != ERX_OK)
+		return (49);
+	while (!child_ended || !grandchild_ended) {
+		if (!record_take(&record, &label) || record.kind != ERX_FAULT_EXIT)
+			return (120);
+		if (label == CREATOR_LABEL && !child_ended && record.status == FIRST_STATUS)
+			child_ended = true;
+		else if (label == CREATOR_LABEL + 1 && !grandchild_ended)
+			grandchild_ended = true;
+		else
+			return (121);
+	}
 	return (0);
 }
 
@@ -284,7 +342,7 @@ erx_task_main(uint64_t argument)
 	case MODE_GROUP:
 		return (erx_group_take_ready(1) == ERX_ETYPE ? 0 : 51);
 	case MODE_CREATOR:
-		return (mode_creator());
+		return (mode_creator(argument));
 	case MODE_FIRST:
 		return (mode_first(argument));
 	case MODE_HOLDER:
