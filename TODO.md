@@ -494,11 +494,11 @@ it; git history is the record of completed work.
   the term prints in hash order, and a huge integer key shortened by `leading/1` can sort before a smaller key.
   Copy a map as its pairs in the term's own print order, with a property test comparing the copy's print with
   the term's.
-* [Medium] `web/src/names.ts`, [URLs](docs/design-web.md#urls): the client refuses a `/proc` segment that
-  decodes to `.` or `..` (`%2E`, `%2E%2E`, in either case of hexadecimal), which a browser's URL parser takes as dot
-  segments (`new URL('/proc/a/%2E%2E', base)` is `/proc/`). `presentationPath` and the router, when it exists, must
-  answer such a segment as a path that names nothing, with a test in `web/test` in both cases of hexadecimal and
-  `erx_present`'s differential test agreeing on the refusal.
+* [Low] `abi/protocols/web.txt`, [URLs](docs/design-web.md#urls): `web_segment_max` (256) bounds a path segment,
+  which is an encoded `/proc` entry name, while `erx_procfs_core` admits names of up to 765 encoded bytes (255 bytes,
+  each `%XX`); so an entry whose encoded name is longer than 256 bytes has no route or link in the client
+  (`web/src/routes.ts`), and the browser cannot open it. Raise the bound to the longest encoded name, or state the
+  limit in the design.
 * [Medium] `test/host/erx_web_proto_test.rb`, [Web protocol](docs/design-abi.md#web-protocol): no test encodes a
   term one past each bound in both languages; every encoded term is in bounds or came from a decoder, so an
   encoder that stopped refusing an over-bound list, text or integer would pass. Erlang's encoder refuses

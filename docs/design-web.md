@@ -409,8 +409,10 @@ tree](design-live.md#the-proc-tree)), so no segment is `.` or `..` or
 holds `/`; an empty segment is refused by the client and by the line. A
 browser's URL parser reads `%2E` and `%2E%2E` as dot segments, so the
 client also refuses a segment that decodes to `.` or `..`, as a path that
-names nothing, and never puts one in a URL or a link. A
-presentation's text is in the `erx:` URI encoding, which keeps `.` and `/`
+names nothing, and never puts one in a URL or a link. A canonical name
+writes its percent-encodings in upper case, so a segment with one in lower
+case names nothing here either. The machine's own record is at `/`, so
+`/proc` with no segment names nothing. A presentation's text is in the `erx:` URI encoding, which keeps `.` and `/`
 as well ([Presentations](design-display.md#presentations)), so the
 `erx:TYPE/TEXT` link a terminal shows and the `/TYPE/TEXT` link a browser
 shows are the same text after the scheme. The client resolves a
@@ -722,10 +724,22 @@ on a file of another kind, a path with a segment that is empty, hidden,
   keeps what the page shows, coalescing an `input`'s or a `slider`'s
   changes to one per animation frame, and sends nothing for scrolling,
   focus or text selection.
-* **Links**: `hrefOf/1` is the one function that writes an `href`, from a
-  route value, through the generated encodings; a presentation is always a
-  link to `/TYPE/TEXT`, and a plain click on one in a UI whose node
-  declares `on_select` sends the event instead of following it.
+* **`routes.ts`**: `parseRoute`, which reads a URL's path into a `Route`,
+  and `hrefOf/1`, the one function that writes an `href`, from a `Route`.
+  A `Route` is checked when it is made, by `parseRoute` or from names the
+  machine sent, and cannot be made otherwise: its constructor takes a token
+  private to the module, and its value is an instance private field, so
+  `Route` is a nominal type and `hrefOf` refuses any other object. So every
+  link `hrefOf` writes is a path `parseRoute` reads back to the same route,
+  and each route has one URL. A presentation's link writes its canonical
+  text in the `erx:` URI encoding, as `erx_present:uri/2` does. A name the
+  machine sent is read through its line escape, which is the name itself
+  when the bytes are a canonical `/proc` entry name, since the escape keeps
+  every printable ASCII character. A name with an escape token holds `<`,
+  which no name holds, so it makes no route.
+* **Links**: a presentation is always a link to `/TYPE/TEXT`, and a plain
+  click on one in a UI whose node declares `on_select` sends the event
+  instead of following it.
 
 The client keeps no state that needs the machine's trust: a view's data
 is what the last update said, and closing a tab discards it.
@@ -1037,6 +1051,7 @@ WebSocket routing and the generated encoder; the end-to-end tests run
 | `ui.txt` readers: fuzz targets and parity | mutated event payloads into the generated Erlang event reader, which refuses or decodes within bounds; the C reader and the TypeScript reader accept the same inputs and decode the same operations | an Erlang reader without a detail length check fails; a reader with two property tags swapped fails parity |
 | escape differential and fuzz target | `escapeLine` agrees with `erx_text:escape_line/1` and the Ruby twin over the attributed-text corpus and random bytes; invalid bytes are tokens | a decoder using `TextDecoder` with replacement fails on `0xC0` |
 | encodings and presentation paths | the client's `/proc` and `erx:` encoders and its presentation path table agree with `erx_procfs`'s and `erx_present`'s over the generated corpus of names and values | a client encoder that keeps `.` in a `/proc` segment fails |
+| routes and links | each URL form names its route and is written back as itself; a path with an empty, dot or lower-case segment, or past a bound, names nothing; the router's fuzz target (Node) finds that `parseRoute` never throws, that every route it returns is written back as the same path, and that every link `hrefOf` writes, from a browser's path or from the machine's names, is one a browser's URL parser leaves unchanged and `parseRoute` reads back to the same route | a router without the dot-segment check fails on `/domain/..`; one that keeps a leading zero in a UI number fails on `/ui/00` |
 | W2 in the browser | the attributed-text corpus (`<script>`, `&`, U+202E, U+200B, a C1 control, an invalid byte) as attribute values, labels and log lines renders as text and tokens, with no element created | a `Text` that sets `innerHTML` fails; Trusted Types throws in Chromium |
 | W2 types | `tsc --noEmit` passes | a seeded component rendering a `MachineText` directly fails to type-check |
 | W3 policy | the headers on every file; the client works under them | a seeded inline script and a seeded `eval` are blocked and reported |
@@ -1061,9 +1076,9 @@ WebSocket routing and the generated encoder; the end-to-end tests run
 
 | Rule | Check |
 | --- | --- |
-| No handwritten client source writes an HTML or code sink | a source check over `web/src` outside `generated/` that fails on `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `writeln`, `srcdoc`, `createContextualFragment`, `DOMParser`, `eval`, `new Function`, a string passed to `setTimeout` or `setInterval`, and a `javascript:` literal; its test is a seeded file with each |
+| No handwritten client source writes an HTML or code sink | a source check over `web/src` outside `generated/` that fails on `dangerouslySetInnerHTML`, `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `writeln`, `srcdoc`, `createContextualFragment`, `DOMParser`, `eval`, `new Function`, `setHTMLUnsafe`, `parseHTMLUnsafe`, an event handler set by `setAttribute`, a string passed to `setTimeout` or `setInterval`, and a `javascript:` literal; it reads the code with comments blanked, a comment starting only at a line's start or after white space, so a `//` or `/*` in JSX text is read as code; its test is a seeded file with each |
 | Only the line escape reads a `MachineText`'s bytes | by construction: the bytes are a JavaScript private field of the class in `text.ts`, which no code outside the class can name, and its one method returns `escapeLine`'s runs |
-| Only `hrefOf` writes an `href` | a source check that every `href` in `.tsx` is `hrefOf(...)`, whose test is a seeded literal `href` |
+| Only `hrefOf` writes an `href` | a source check that every `href` in `.tsx` is `hrefOf(...)`, that nothing assigns `location`, and that `location.assign`, `location.replace`, `window.open` and `history`'s `pushState` and `replaceState` take `hrefOf(...)` as their URL, whose test is a seeded literal `href` and a seeded navigation to a URL |
 | Only the generated codecs encode or decode the protocol | the generated tree's determinism test, and a source check that no other module of the web domain or the client reads a message's bytes, whose test is a seeded module that does |
 | The web domain's release calls no inspect, trace, console or shell client | an xref check over the release, whose test is a seeded call of `erx:inspect/2` in a module of the release |
 | Only the front ends write HTTP headers, from the generated table | a source check that `Content-Type`, `Set-Cookie` and the security headers appear only in `erx_web_cowboy` and `Erx::Web`, as the table's names, whose test is a seeded header literal elsewhere |

@@ -23,6 +23,8 @@ class WebPresentTest < Minitest::Test
                build/gen/erlang/apps/erx/src/generated/erx_present.erl
                erlang/apps/erx_files/src/erx_procfs_core.erl
                test/erlang/erx_web_present_corpus.erl].map { |path| File.join(ROOT, path) }.freeze
+  # web.txt's web_segment_max: a longer entry name has no route (TODO.md).
+  SEGMENT_MAX = 256
   ERX_KEPT = 'const ERX_KEPT = /[A-Za-z0-9_+,:=@./-]/;'
 
   Value = Data.define(:type, :text, :link, :path)
@@ -41,8 +43,8 @@ class WebPresentTest < Minitest::Test
     end
   end
 
-  # Each value's [link, path] as the client writes them, the path nil for a
-  # text that names nothing.
+  # Each value's [link, path, href] as the client writes them, the path nil
+  # for a text that names nothing and the href nil for a value with no route.
   def client(values, stage)
     input = values.map { |value| "#{value.type} x#{value.text.unpack1('H*')}\n" }.join
     output, status = Open3.capture2e('gtimeout', '-k', '10', '120', *Erx::WebStage::NODE, 'test/present_cli.ts',
@@ -59,7 +61,10 @@ class WebPresentTest < Minitest::Test
     assert values.any? { |value| value.text.include?('%2E') }, 'no text segment escapes a dot'
     answers = Erx::WebStage.with(root: ROOT) { |stage| client(values, stage) }
     assert_equal values.size, answers.size
-    values.zip(answers).each do |value, (link, path)|
+    values.zip(answers).each do |value, (link, path, href)|
+      routable = value.text.split('/').all? { |part| part.bytesize <= SEGMENT_MAX }
+      assert_equal(routable ? value.link.sub(/\Aerx:/, '/') : nil, href,
+                   "the browser's link differs from the terminal's for #{value.type} #{value.text}")
       assert_equal value.link, link, "the client's link differs for #{value.type} #{value.text}"
       assert_equal value.path, path, "the client's path differs for #{value.type} #{value.text}"
     end

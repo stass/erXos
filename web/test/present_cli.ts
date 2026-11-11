@@ -12,6 +12,8 @@
 
 import { readFileSync } from 'node:fs';
 import { erxText, presentationPath } from '../src/names.ts';
+import { hrefOf, presentRoute } from '../src/routes.ts';
+import { MachineText } from '../src/text.ts';
 
 const hex = (text: string): string => Buffer.from(text, 'latin1').toString('hex');
 const lines = readFileSync(0, 'latin1').split('\n').filter((line) => line !== '');
@@ -19,6 +21,8 @@ const answers = lines.map((line) => {
   const [type = '', field = ''] = line.split(' ');
   const text = Buffer.from(field.slice(1), 'hex');
   const path = presentationPath(type, text.toString('latin1'));
-  return `x${hex(`erx:${type}/${erxText(Uint8Array.from(text))}`)} ${path === undefined ? '-' : `x${hex(path.join('/'))}`}\n`;
+  const route = presentRoute(new MachineText(Buffer.from(type, 'latin1')), new MachineText(Uint8Array.from(text)));
+  const href = route === undefined ? '-' : `x${hex(hrefOf(route))}`;
+  return `x${hex(`erx:${type}/${erxText(Uint8Array.from(text))}`)} ${path === undefined ? '-' : `x${hex(path.join('/'))}`} ${href}\n`;
 });
 process.stdout.write(answers.join(''));

@@ -9,6 +9,7 @@ require_relative 'device_callers'
 require_relative 'dependencies'
 require_relative 'device_posters'
 require_relative 'erofs_reads'
+require_relative 'web_sinks'
 require_relative 'generated'
 require_relative 'net_checks'
 require_relative 'command_needs'
@@ -156,6 +157,7 @@ module Erx
       check_erofs_reads(listed)
       check_net(listed)
       check_command_needs(listed)
+      check_web_sinks(listed)
       check_ns_writers(listed)
       check_origin_unwraps(listed)
       check_attach_fields(listed)
@@ -351,6 +353,14 @@ module Erx
       return if files.empty?
 
       violations = NetChecks.violations(files.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    # The web client's handwritten sources write no HTML or code sink, and
+    # only hrefOf writes an href (WebSinks).
+    def check_web_sinks(listed)
+      sources = listed.select { |relative| WebSinks.covers?(relative) && File.file?(File.join(@root, relative)) }
+      violations = WebSinks.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 

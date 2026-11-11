@@ -24,7 +24,7 @@ const INTERESTING = [
 ];
 
 /* A deterministic generator of 32-bit values (xorshift32). */
-function generator(seed: number): () => number {
+export function generator(seed: number): () => number {
   let state = seed >>> 0 || 1;
   return () => {
     state ^= state << 13;
