@@ -429,20 +429,31 @@ nothing from `test/fixtures`, and `production_image_test.rb` checks the loaded f
 No production image carries test code, by construction rather than by a caller's
 convention. `ProductionImage#build` takes no additions: its image holds the system
 release, the domain release with the boot scripts its manifest names, the runtime images, and nothing else. The one way to add files to that release is the test entry
-point, `ProductionImage#build_test_image(directory:, added:, machine:, domains:)`, which packs them with
+point, `ProductionImage#build_test_image(directory:, added:, machine:, domains:, manifest_source:)`, which packs them with
 `ERX_PACK_TEST_CODE` set in the archive's flags. The packer sets the bit only in a
 development build, the archive check and the kernel refuse it in any other, the
 kernel's banner prints `test image: carries test code` after the development warning,
 and the image's `Built` record reports the bit read back from the archive header. The
-production boot check refuses an image with the bit and requires the kernel's
+production boot check refuses an image with the bit, unless a test harness
+asks for a test image's boot, and requires the kernel's
 `erx: boot image build` line to report the archive's own identity and flags. The
 source check (`Checks::TEST_IMAGE_BUILDERS`, the `test-image-builder` chokepoint rule)
 fails the build when Ruby under `tools/` other than `ProductionImage` itself and
-the two QEMU harnesses that boot test code, `OracleQemu`, the oracle's run, and
-`BlockDevice`, the block device suite's, names the test entry point or hands the
+the QEMU harnesses that boot test code, `OracleQemu`, the oracle's run,
+`BlockDevice`, the block device suite's, and `SystemDomain`, names the test entry point or hands the
 packer a literal true for its `test_code` keyword; each harness's boot transcript
 checks the banner's test-image line;
 `test/host/checks_test.rb` seeds its violations.
+
+Test code may also be a test-only Erlang application, in `test/erlang/apps/` and
+listed in `ErlangApps::TEST_ONLY`: the runtime build compiles it beside erXos's own,
+no release lists it, and only a test domain boot script
+(`ReleaseFiles.domain_boot(..., test: true)`), which the boot table never makes,
+boots it. A test image's `domains` may carry such a script, which replaces the
+manifest's script of its name, and the image build refuses one in an image
+without `ERX_PACK_TEST_CODE` (`ProductionImage.check_test_scripts`, seeded in
+`test/host/production_image_test.rb`). The system domain suite's configured
+server boots `erx_echo_test` this way, to provide a service before its ready report.
 
 A test image may also name a larger machine (`ProductionImage::Machine`): its RAM,
 its `fiasco_reserve`, which grows with RAM because Fiasco sizes its kernel memory

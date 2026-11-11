@@ -1886,6 +1886,22 @@ server minted it is never installed; it ends with its grantee through its
 `ends_with`, or, for the system domain as grantee, with the server. There
 is at most one such facet per pair, since a pair runs one operation.
 
+**Facets of the system domain's services.** A `facet` row may also grant
+a configured domain a service the system domain serves. No mint is
+involved: each such service names the process behind it with
+`erx_facet:serve(Name, Pid)` as it starts, in the system domain's own
+table, and when a configured domain reports ready, the domain service
+starts a facet in front of that process for each such row granted to the
+domain's row, bound to the domain and within the row's limits, and sends
+it in the ready answer with any other facet the domain gets there. So
+these facets reach every incarnation with its ready answer, before any
+installation, and end with it, or with the process behind them. A
+service that has named no living process by then is left out and logged; the domain finds the name absent, as it
+finds any unavailable service, until it restarts. The domain service
+creates the configured domains as it starts, so a service whose facets
+the manifest grants them is started before it, by an application the
+system release starts before `erx_domain`.
+
 The decisions are a pure state machine, `erx_domain_mints`, beside
 `erx_domain_core` and `erx_domain_links`: it takes the manifest's rows and
 the events above, and returns the next state and the actions, to

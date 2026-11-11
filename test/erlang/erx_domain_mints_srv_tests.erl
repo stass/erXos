@@ -122,6 +122,63 @@ last_end() ->
     receive after ?DEADLINE + 200 -> ok end,
     ?assertMatch(#{{system, echo} := idle, {0, echo} := idle}, grants()).
 
+%% A configured domain's facets of services the system domain serves: b (row 0) is
+%% granted log, which a process of this runtime names with erx_facet:serve/2 before
+%% the service starts, and a (row 1) is granted clock, which no service names. b's
+%% ready answer carries a facet in front of log's process, bound to b and within the
+%% row's max_request; a's carries none, and neither grant reaches the mint core.
+%% It starts the service itself: the trace of the domain pids goes to the process that
+%% asks for it, and EUnit runs a fixture's setup in another process than its test.
+served_test() ->
+    Started = served_setup(),
+    try served() after served_cleanup(Started) end.
+
+served_setup() ->
+    Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
+                                     restarts => 0, restart_period_s => 60} end,
+    persistent_term:put({erx_domain_fake_lib, boot},
+                        #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)], services => [],
+                          grants => [{0, log, system, #{max_request => 64, in_flight => 2, queue => 4096}},
+                                     {1, clock, system, #{max_request => 1}}]}),
+    Log = spawn(fun() -> receive stop -> ok end end),
+    ok = erx_facet:serve(log, Log),
+    Self = self(),
+    erlang:trace(new_processes, true, ['receive', {tracer, Self}]),
+    Fake = erx_domain_fake_lib:start_log(),
+    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                 exports => erx_domain_fake_lib,
+                                                 mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
+    unlink(Service),
+    {Fake, Service, Log}.
+
+served_cleanup({Fake, Service, Log}) ->
+    erlang:trace(new_processes, false, ['receive']),
+    _ = [exit(Pid, kill) || Pid <- [Service, Fake, Log]],
+    _ = [persistent_term:erase(Key) || Key <- [{erx_domain_fake_lib, boot}, {erx, serves}]],
+    ok.
+
+served() ->
+    [PidA, PidB] = [domain_pid(Id) || Id <- [5, 6]],
+    Answers = answers([PidA, PidB], #{}),
+    ?assertEqual(#{}, maps:get(PidA, Answers)),
+    #{log := Facet} = maps:get(PidB, Answers),
+    ?assertEqual([log], maps:keys(maps:get(PidB, Answers))),
+    ?assertMatch(#{grantee := 6, max_request := 64, in_flight := 2}, erx_facet:info(Facet)),
+    ?assertEqual(#{}, grants()).
+
+%% The ready answer each of Pids received, from the trace of its receives.
+answers([], Answers) ->
+    Answers;
+answers(Pids, Answers) ->
+    receive
+        {trace, Pid, 'receive', {_Ref, facets, Facets}} ->
+            answers(lists:delete(Pid, Pids), Answers#{Pid => Facets});
+        {trace, _, 'receive', _} ->
+            answers(Pids, Answers)
+    after 2000 ->
+            error({no_answer, Pids})
+    end.
+
 %% A pid of Node with creation Creation, as a frame from that domain carries one.
 pid(Node, Creation, Number) ->
     Name = atom_to_binary(Node),

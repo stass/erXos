@@ -1,0 +1,13 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% A test-only application (tools/lib/erx/erlang_apps.rb, TEST_ONLY): the server
+%% side of the system_domain suite's echo checkpoint (tools/lib/erx/system_domain.rb).
+%% Only a test image's domain boot script boots it.
+{application, erx_echo_test,
+ [{description, "erXos test: a configured domain's echo service behind a facet"},
+  {vsn, "1"},
+  {modules, [erx_echo_test, erx_echo_test_app]},
+  {registered, []},
+  {applications, [kernel, stdlib, erx]},
+  {mod, {erx_echo_test_app, []}}]}.

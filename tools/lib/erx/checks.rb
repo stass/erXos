@@ -93,7 +93,7 @@ module Erx
     # a comment, or a literal true for the packer's test_code keyword. The check reads
     # lines, as the JSON check does, so it catches a slip, not a name assembled from
     # pieces. Tests outside tools/ may name either.
-    TEST_IMAGE_BUILDERS = %w[tools/lib/erx/oracle_qemu.rb tools/lib/erx/block_device.rb].freeze
+    TEST_IMAGE_BUILDERS = %w[tools/lib/erx/oracle_qemu.rb tools/lib/erx/block_device.rb tools/lib/erx/system_domain.rb].freeze
     TEST_IMAGE_DEFINER = 'tools/lib/erx/production_image.rb'
     TEST_IMAGE_ENTRY = /\bbuild_test_image\b|\btest_code:\s*true\b/
 

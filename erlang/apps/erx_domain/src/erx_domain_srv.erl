@@ -51,7 +51,9 @@ acknowledgement through its domain pid, and each operation's deadline is a
 timer. A facet for the system domain goes into the system domain's own
 registry, which erx:cap/1 reads, and is acknowledged there and then. Every
 refusal and dropped message is counted (the call mints);
-their log lines are rate-limited (throttle/2).
+their log lines are rate-limited (throttle/2). A configured domain's facets
+of services the system domain serves go in its ready answer, each in front
+of the process its service named with erx_facet:serve/2 (served/2).
 
 Its state, erx_domain_core's and erx_domain_links's, lives in its own heap and nowhere else. The
 service is never restarted: its end, however it comes, ends the system
@@ -131,13 +133,16 @@ init(Opts) ->
     %% principal's ending domains to be retired, with the timer of its bound (start/3).
     %% Mints is erx_domain_mints' state, its pending operations' deadlines by tag in
     %% mint_timers, and mint_counts and mint_log what was refused or dropped (note/4).
+    %% Served holds, by configured row, the facets of services the system domain serves
+    %% that the manifest grants the row, each its service's name and the grant's limits.
     MintConfig = maps:merge(#{owner => fun erx_dist:owner/1}, maps:with([owner, deadline], maps:get(mints, Opts, #{}))),
     {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
            configured => #{}, templates => #{}, waiting => #{}, links => erx_domain_links:new(),
            introducing => #{}, introduce_timeout => maps:get(introduce_timeout, Opts, ?INTRODUCE_TIMEOUT),
            held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT),
            mint_config => MintConfig, mints => erx_domain_mints:new(MintConfig#{services => [], grants => []}),
-           mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0}},
+           mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0},
+           served => #{}},
      {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none
@@ -155,11 +160,16 @@ handle_continue(boot, #{lib := Lib} = State) ->
         {{ok, #{host := Host, domains := Rows} = Boot}, {ok, Templates}} ->
             Ordered = lists:sort(fun(#{place := A}, #{place := B}) -> A =< B end, Rows),
             Configured = maps:from_list([{Row, Entry} || #{row := Row} = Entry <- Ordered]),
-            %% The manifest's service rows and the facet rows of services configured
-            %% domains serve, which the manifest check has proved consistent.
+            %% The manifest's service rows of configured domains and its facet rows,
+            %% which the manifest check has proved consistent: a configured domain's
+            %% service goes to the mint core, the system domain's to the ready answers.
+            {System, Minted} = lists:partition(fun({_Grantee, _Name, Server, _Limits}) -> Server =:= system end,
+                                               maps:get(grants, Boot, [])),
             Mints = erx_domain_mints:new((maps:get(mint_config, State))#{services => maps:get(services, Boot, []),
-                                           grants => maps:get(grants, Boot, [])}),
-            Booted = State#{core := erx_domain_core:new(Host), configured := Configured, mints := Mints,
+                                           grants => Minted}),
+            Served = maps:groups_from_list(fun({Grantee, _, _, _}) -> Grantee end,
+                                           fun({_, Name, _, Limits}) -> {Name, Limits} end, System),
+            Booted = State#{core := erx_domain_core:new(Host), configured := Configured, mints := Mints, served := Served,
                             templates := maps:from_list([{P, T} || #{principal := P} = T <- Templates])},
             {noreply, lists:foldl(fun start_configured/2, Booted, Ordered)};
         {{error, _}, _} ->
@@ -344,7 +354,7 @@ handle_info(_Message, State) ->
 %% does for a configured row and a session template (docs/design-stopgap.md, "The
 %% production image"), so args that name -boot are refused. Its facets
 %% name processes of the system domain, by facet name, each with its grant's limits or
-%% none; the domain gets a facet in front of each once it reports ready (grant_facets/2),
+%% none; the domain gets a facet in front of each once it reports ready (grant_facets/3),
 %% and the library never sees them.
 create(_Spec, #{lib := none} = State) ->
     {{error, enotsup}, State};
@@ -579,7 +589,7 @@ ready(Id, Ref, Provides, #{core := Core, waiting := Waiting} = State) ->
         {{ok, #{ref := Ref, state := running, origin := Origin, node := Node}}, _} ->
             {Actions, Links} = erx_domain_links:ready(Id, maps:get(links, State)),
             Ready = State#{core := erx_domain_core:ready(Id, Core), links := Links},
-            Answered = answer_ready(Id, grant_facets(Id, perform(Actions, Ready))),
+            Answered = answer_ready(Id, grant_facets(Id, served(Origin, Ready), perform(Actions, Ready))),
             case Origin of
                 {configured, Row} -> mints({ready, Row, Id, Node, Provides}, Answered);
                 _ -> Answered
@@ -590,14 +600,16 @@ ready(Id, Ref, Provides, #{core := Core, waiting := Waiting} = State) ->
             State
     end.
 
-%% The answer to domain Id's ready report, its facets by name. Each is minted in front of
-%% the process the spec named, bound to the domain and exported to it (erx_facet:start/3),
-%% and ends with the domain pid or that process. The answer goes to the domain pid, which
-%% hands it to the domain's agent for init (edit 65). Init waits for it, so every domain
-%% that reported is answered, with no facets too.
-grant_facets(Id, #{core := Core, exports := Exports} = State) ->
+%% The answer to domain Id's ready report, its facets by name: its spec's, and Served,
+%% a configured domain's facets of services the system domain serves. Each is minted in
+%% front of the process the spec or the service named, bound to the domain and exported
+%% to it (erx_facet:start/3), and ends with the domain pid or that process. The answer
+%% goes to the domain pid, which hands it to the domain's agent for init (edit 65). Init
+%% waits for it, so every domain that reported is answered, with no facets too.
+grant_facets(Id, Served, #{core := Core, exports := Exports} = State) ->
     {ok, #{pid := Pid, ref := Ref, facets := Facets}} = erx_domain_core:fetch(Id, Core),
-    Minted = maps:filtermap(fun(Name, Facet) -> mint(Id, Pid, Name, Facet, Exports) end, Facets),
+    %% The manifest grants a configured domain no spec, so the two never share a name.
+    Minted = maps:filtermap(fun(Name, Facet) -> mint(Id, Pid, Name, Facet, Exports) end, maps:merge(Facets, Served)),
     Pid ! {Ref, facets, Minted},
     State.
 
@@ -614,6 +626,36 @@ mint(Id, DomainPid, Name, {Behind, Limits}, Exports) ->
             logger:error("erx_domain: domain ~b's facet ~ts did not start: ~0p", [Id, Name, Reason]),
             false
     end.
+
+%% The facets of services the system domain serves that the manifest grants a configured
+%% domain, each {Behind, Limits} by its service's name: Behind is the process the service
+%% named for it with erx_facet:serve/2, which the system domain's services do as they
+%% start, and Limits the grant's limits that erx_facet applies, max_request and in_flight,
+%% checked as a spec's are (facet/1). A service with no living process, or a grant whose
+%% limits fail that check, is left out and logged, so the domain finds the name absent,
+%% as it finds any service that is unavailable, until it restarts. Each facet ends with
+%% its process, and nothing grants a new one when the service restarts (TODO.md).
+served({configured, Row}, #{served := Served}) ->
+    Servers = persistent_term:get({erx, serves}, #{}),
+    maps:from_list(lists:filtermap(
+                     fun({Name, Limits}) ->
+                             Facet = case Servers of
+                                         #{Name := Behind} -> is_process_alive(Behind) andalso
+                                                                  facet({Behind, maps:with([max_request, in_flight], Limits)});
+                                         #{} -> false
+                                     end,
+                             case Facet of
+                                 {true, Grant} ->
+                                     {true, {Name, Grant}};
+                                 false ->
+                                     %% A manifest name and row: no text a domain wrote.
+                                     logger:error("erx_domain: service ~ts of the system domain has no facet for configured row ~b",
+                                                  [Name, Row]),
+                                     false
+                             end
+                     end, maps:get(Row, Served, [])));
+served(_Origin, _State) ->
+    #{}.
 
 answer_ready(Id, #{waiting := Waiting} = State) ->
     case maps:take(Id, Waiting) of

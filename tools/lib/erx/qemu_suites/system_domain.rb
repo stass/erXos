@@ -6,7 +6,10 @@ require_relative '../qemu_gate'
 require_relative '../system_domain'
 
 # The system domain with ERTS domains running under it, under HVF at each CPU count
-# (tools/lib/erx/system_domain.rb): service_kill ends one configured domain's system side
+# (tools/lib/erx/system_domain.rb), booted from a test image: first the system domain
+# calls the echo facet that one configured domain serves through the test-only
+# erx_echo_test, and reads the domain service's refusals of that domain's hostile
+# provides; then service_kill ends one configured domain's system side
 # with another domain's {domain_down, D2, x}, which its watcher sees as noconnection, and
 # the other by having it kill its agent behind a burst it published, which halts it with
 # status 69; the burst arrives whole, then the exit (the lane driver's finish), and the end fires

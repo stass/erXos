@@ -14,8 +14,9 @@ class SystemDomainTest < Minitest::Test
   # The rows are MediumBoot's with the halt dropped, so each configured domain stays up,
   # over the erx carrier, as MediumBoot's, so each is a node, behind the flag that lets the
   # control_table step hold a domain's ring; the manifest differs from MediumBoot's only in
-  # that row's arguments, its one connection, the control table's one slot, and in the
-  # second row, peer.
+  # that row's arguments, its one connection, the control table's one slot, erts's test
+  # script (ECHO_BOOT), the second row, peer, and the echo checkpoint's service and facet
+  # rows.
   def test_the_configured_domains_stay_up_as_nodes_and_are_the_manifests_one_change
     row_args = Suite::DOMAIN_ROW[/^  args "(.*)"$/, 1].split
     medium_args = Erx::MediumBoot::DOMAIN_ARGS[0...-2]
@@ -28,12 +29,16 @@ class SystemDomainTest < Minitest::Test
     assert_equal Suite::DOMAIN_ROW[/^domain erts\n.*/m].sub("domain erts\n", "domain peer\n"), Suite::PEER_ROW
     medium = Erx::MediumBoot.manifest(PLAIN)
     ours = Suite.manifest(PLAIN)
-    assert ours.end_with?(Suite::DOMAIN_ROW + Suite::PEER_ROW)
+    assert ours.end_with?(Suite::ECHO_ROW + Suite::PEER_ROW + Suite::ECHO_SERVICES)
+    assert_equal Suite::DOMAIN_ROW, Suite::ECHO_ROW.sub("  release @artifact.echo\n", "  release @artifact.erts\n")
+    assert Suite::ECHO_BOOT.test
+    assert_includes Suite::ECHO_BOOT.applications, 'erx_echo_test'
     kept = medium.lines.size - 1
-    assert_equal [["  connections 0\n", "  connections 1\n"]],
+    assert_equal [["  connections 0\n", "  connections 1\n"], ["  release @artifact.erts\n", "  release @artifact.echo\n"]],
                  medium.lines[0...-1].zip(ours.lines[0...kept]).reject { |theirs, mine| theirs == mine }
     assert_match(/^  args ".* -eval /, medium.lines.last)
-    assert_equal ["  args \"#{Suite::DOMAIN_ARGS.join(' ')}\"\n", *Suite::PEER_ROW.lines], ours.lines[kept..]
+    assert_equal ["  args \"#{Suite::DOMAIN_ARGS.join(' ')}\"\n", *Suite::PEER_ROW.lines, *Suite::ECHO_SERVICES.lines],
+                 ours.lines[kept..]
   end
 
   # The kill follows the Erlang shell; the answer must name both configured domains
@@ -45,7 +50,7 @@ class SystemDomainTest < Minitest::Test
     domain = Erx::MediumBoot::Domain.new(runtime: 11, jit: 12, release: 13, release_files: 14)
     points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell], domain: domain)
     line = Suite.service_kill_line(domain)
-    assert_equal %w[image-identity release-shell erlang-shell domain-running control-table introduced hostile connection-down
+    assert_equal %w[image-identity release-shell erlang-shell echo-facet domain-running control-table introduced hostile connection-down
                     ignored-down later-domain domain-ends system-domain-ended],
                  points.map { |point| point.fetch(:name) }
     assert_equal Erx::ProductionImage::Run::ERL_LINE, points[1].fetch(:type)
@@ -53,8 +58,19 @@ class SystemDomainTest < Minitest::Test
     # The later domain's request names the image's runtime and release, the rows' boot
     # script, and one connection.
     assert line.start_with?('SdSpec=#{name=><<"peer">>,runtime=>11,release=>13,release_files=>14,boot=><<"erts">>,')
-    assert_includes line, ',connections=>1},SdLives='
+    assert_includes line, ",connections=>1},#{Suite::ECHO_EXPRESSION},SdLives="
     running, table, _introduced, _hostile, _down, ignored, later, ends, ended = points.last(9)
+    # The echo checkpoint: the facet answered and both hostile provides refused, and
+    # nothing else. A report whose foreign mint was taken (no owner check), a call the
+    # facet did not answer, or a facet erx:cap/1 does not find each fails.
+    echo = points[3]
+    good_echo = '{echo_facet,true,{echo,hi},{error,badarg},#{{refused,foreign_mint} => 1,{refused,undeclared} => 1}}'
+    echo.fetch(:verify).call("1> #{good_echo}\r\n")
+    refute_match echo.fetch(:pattern), "1> #{line}\r\n"
+    [good_echo.sub('{refused,foreign_mint} => 1,', ''), good_echo.sub('{echo,hi}', "{'EXIT',noproc}"),
+     good_echo.sub('echo_facet,true', 'echo_facet,false')].each do |bad|
+      assert_raises(Erx::Error) { echo.fetch(:verify).call("#{bad}\r\n") }
+    end
     refute_match running.fetch(:pattern), "1> #{line}\r\n"
     good = '{service_kill,[{5,erts@erxos,ready},{6,peer@erxos,ready}],system@erxos,4,' \
            '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}],{2,erts@erxos}}'

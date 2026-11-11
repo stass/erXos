@@ -28,6 +28,12 @@ module Erx
     # tracks"): the host tests compile them, and no release holds them yet.
     UNRELEASED = %w[erx_display erx_web].freeze
     SOURCE = 'erlang/apps'
+    # Test-only applications, in test/erlang/apps: the runtime build compiles them into the
+    # OTP copy beside the others, so a test image's domain boot script can take one
+    # (ReleaseFiles.domain_boot with test: true, ProductionImage's test entry point), and no
+    # release lists them, so no other image carries one.
+    TEST_ONLY = %w[erx_echo_test].freeze
+    TEST_SOURCE = 'test/erlang/apps'
     # OTP's applications in the tree, whose include/ headers erXos's include_lib reads.
     OTP_LIB = 'otp/lib'
     # Kernel's own error and warning flags (otp/lib/kernel/src/Makefile, otp/make/otp.mk.in)
@@ -37,7 +43,10 @@ module Erx
     DEADLINE = 300
 
     # The tree's directory of an application, relative to the root.
-    def self.source(application) = File.join(SOURCE, application)
+    def self.source(application) = File.join(TEST_ONLY.include?(application) ? TEST_SOURCE : SOURCE, application)
+
+    # Whether application is one of erXos's own, compiled here, test-only ones included.
+    def self.own?(application) = APPLICATIONS.include?(application) || TEST_ONLY.include?(application)
 
     # The generated tree's directory of an application, relative to the root.
     def self.generated(application) = File.join(Generated::OUTPUT, source(application))
@@ -96,10 +105,10 @@ module Erx
                          .flat_map { |directory| ['-I', directory] } + ['-I', OTP_LIB]
     end
 
-    # Every file a build compiles or copies, as absolute paths: the sources the release's
-    # receipts name for these applications.
-    def self.sources(root:)
-      APPLICATIONS.flat_map do |application|
+    # Every file a build compiles or copies for applications, as absolute paths: the
+    # sources the release's receipts name for them.
+    def self.sources(root:, applications: APPLICATIONS)
+      applications.flat_map do |application|
         [*modules(root: root, application: application), File.join(source(application), 'src', "#{application}.app.src")]
           .map { |path| File.join(root, path) }
       end
@@ -116,8 +125,10 @@ module Erx
     def build(otp:)
       unlisted = Dir.children(File.join(@root, SOURCE)).sort - APPLICATIONS - UNRELEASED
       raise Error, "#{SOURCE} holds applications ErlangApps does not list: #{unlisted.join(' ')}" unless unlisted.empty?
+      tests = Dir.children(File.join(@root, TEST_SOURCE)).sort - TEST_ONLY
+      raise Error, "#{TEST_SOURCE} holds applications ErlangApps does not list: #{tests.join(' ')}" unless tests.empty?
 
-      APPLICATIONS.each { |application| build_application(application, otp: otp) }
+      [*APPLICATIONS, *TEST_ONLY].each { |application| build_application(application, otp: otp) }
       ServingSet.check(runner: @runner, erl: File.join(File.dirname(@erlc), 'erl'),
                        directories: ServingSet.directories(otp: otp), root: @root)
     end

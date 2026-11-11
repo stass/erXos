@@ -62,7 +62,7 @@ the grantee's share of reductions; the funnel's check of max_request
 before a message is queued, and the facet's queue quota and heap limit.
 """.
 
--export([start/3, info/1, provide/2, minted/2]).
+-export([start/3, info/1, provide/2, minted/2, serve/2]).
 
 -callback init(Grant :: grant()) -> {ok, State :: term()}.
 -callback admit(Request :: term(), From :: pid(), State :: term()) ->
@@ -121,6 +121,21 @@ that is no process of this domain.
 provide(Name, Mint) when is_atom(Name), is_pid(Mint), node(Mint) =:= node() ->
     persistent_term:put({erx, provides}, (persistent_term:get({erx, provides}, #{}))#{Name => Mint});
 provide(_Name, _Mint) ->
+    {error, badarg}.
+
+-doc """
+Names Pid, a process of the system domain, as the one behind the service Name,
+which the system domain serves (docs/design-system.md, "Facets a configured
+domain serves"): for each configured domain the manifest grants Name, the
+domain service starts a facet in front of Pid in that domain's ready answer, and
+the facet ends with Pid. Call it while the service's application starts,
+before the domain service starts; a second call for Name replaces the first.
+{error, badarg} for a Name that is no atom or a Pid that is no local process.
+""".
+-spec serve(atom(), pid()) -> ok | {error, badarg}.
+serve(Name, Pid) when is_atom(Name), is_pid(Pid), node(Pid) =:= node() ->
+    persistent_term:put({erx, serves}, (persistent_term:get({erx, serves}, #{}))#{Name => Pid});
+serve(_Name, _Pid) ->
     {error, badarg}.
 
 -doc """

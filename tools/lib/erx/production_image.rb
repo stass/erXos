@@ -118,6 +118,14 @@ module Erx
     DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
     DOMAIN_BOOTS = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_shell', 'erx_session'].freeze }.freeze
 
+    # Refuses a test script (ReleaseFiles::DomainBoot#test) among domains unless the image
+    # is a test image, whose archive flags mark its test code, so no image without the
+    # mark boots a test-only application.
+    def self.check_test_scripts(domains, test_code:)
+      tests = domains.select(&:test).map(&:name)
+      raise Error, "only a test image carries a test domain boot script: #{tests.join(', ')}" unless test_code || tests.empty?
+    end
+
     # The domain boot script named name, with the applications the boot table gives it.
     def self.domain_boot(name) = ReleaseFiles.domain_boot(name, applications: DOMAIN_BOOTS.fetch(name, DOMAIN_APPLICATIONS))
     # A domain's runtime image in the archive: the interpreter's, under the flavour
@@ -241,16 +249,19 @@ module Erx
     # The production image with test code added to its system release, marked in its
     # archive's flags (ERX_PACK_TEST_CODE) so the kernel's banner says so and the kernel
     # refuses it in any build but a development one. Only the QEMU harnesses that boot
-    # test code, OracleQemu and BlockDevice, call it, which the source check holds
+    # test code, OracleQemu, BlockDevice and SystemDomain, call it, which the source check holds
     # (Checks::TEST_IMAGE_BUILDERS). domains are the domain boot scripts it carries
-    # (ReleaseFiles.domain_boot) beside the manifest's, in the one domain release, with
-    # the domain runtime image.
-    def build_test_image(directory:, added:, machine: DEVELOPMENT_MACHINE, domains: [])
-      raise Error, 'a test image adds test code' unless added.is_a?(Added) && !added.entries.empty?
+    # (ReleaseFiles.domain_boot) in the one domain release, with the domain runtime image,
+    # each in place of the manifest's script of its name; one of them may be a test
+    # script, booting a test-only application (ErlangApps::TEST_ONLY), which is test code
+    # too. manifest_source is machine's manifest unless a harness names its own.
+    def build_test_image(directory:, added:, machine: DEVELOPMENT_MACHINE, domains: [],
+                         manifest_source: machine.manifest(File.binread(File.join(@root, MANIFEST))))
+      raise Error, 'a test image adds test code' unless
+        added.is_a?(Added) && (!added.entries.empty? || domains.any?(&:test))
 
-      source = machine.manifest(File.binread(File.join(@root, MANIFEST)))
-      # The manifest's own scripts, beside those added.
-      carried = (domain_boots(source) + domains).uniq(&:name)
+      source = manifest_source
+      carried = (domains + domain_boots(source)).uniq(&:name)
       assemble(directory: directory, manifest_source: source, added: added, test_code: true, machine: machine,
                domains: carried)
     end
@@ -258,6 +269,7 @@ module Erx
     # Both entry points' one build: the system release, the domain releases with their
     # runtime image, any additions, and the mark that says whether there are some.
     def assemble(directory:, manifest_source:, added:, test_code:, machine:, domains:)
+      self.class.check_test_scripts(domains, test_code: test_code)
       directory = OutputDirectory.prepare(root: @root, path: directory)
       raise Error, 'a production image builds into a clean directory' unless Dir.empty?(directory)
 
@@ -605,9 +617,10 @@ module Erx
       # one per CPU of the system's share on this machine. Erlang's init then boots the
       # release, `kernel` starts, and erx_console's slogan and its command shell's banner,
       # written through erx_pl011, prove the release ran that far. The command shell's
-      # prompt ends no line, so no point names it.
+      # prompt ends no line, so no point names it. A test image (ProductionImage#build_test_image)
+      # is booted only when test_image says so, and adds its banner line.
       def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0, manifest_source: File.read(File.join(root, MANIFEST)),
-                           hostlink: nil, memory_mib: MEMORY_MIB)
+                           hostlink: nil, memory_mib: MEMORY_MIB, test_image: false)
         source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
@@ -616,12 +629,13 @@ module Erx
                         .sum { |unit| unit == HOSTLINK_UNIT ? DEVICE_RECORD_WORDS : GIVEN_RECORD_WORDS }
         arguments = arguments_always(root) + records + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         count = schedulers(source, cpus: cpus)
-        raise Error, 'a production boot refuses a test image' if built.test_code
+        raise Error, 'a production boot refuses a test image' if built.test_code && !test_image
+        raise Error, 'a test boot takes a test image' if test_image && !built.test_code
 
         image = /\Aerx: boot image build #{built.build_id} index #{built.index_hash} flags 0x#{built.flags.to_s(16)} archive /n
         identity = /\Aerx: root task: build #{built.build_id} index #{built.index_hash} entries [0-9]+\r?\n\z/n
         manifest = /\Aerx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units} pool pages [0-9]+\r?\n\z/n
-        [*Qemu.boot_transcript(memory_mib: memory_mib),
+        [*Qemu.boot_transcript(memory_mib: memory_mib, test_image: test_image),
          point('image-identity', /\Aerx: boot image build/n, image, speaker: 'the kernel reports'),
          point('root-identity', /\Aerx: root task: build/n, identity),
          point('root-manifest', /\Aerx: root task: manifest/n, manifest),
@@ -1215,7 +1229,7 @@ module Erx
       jit_image = { 'path' => JIT_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0, 'jit' => true,
                     'id' => 'jit-runtime', 'artifact' => beamasm.fetch(:program), 'receipt' => beamasm.fetch(:receipt) }
       Added.new(entries: [image, jit_image, *releases].freeze,
-                inputs: [*runtime.fetch(:inputs), *beamasm.fetch(:inputs), *ReleaseFiles.inputs_of(releases, root: @root)].freeze,
+                inputs: [*runtime.fetch(:inputs), *beamasm.fetch(:inputs), *ReleaseFiles.inputs_of(releases, root: @root, applications: release.applications)].freeze,
                 imports: {}.freeze)
     end
 

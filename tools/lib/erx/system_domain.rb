@@ -12,7 +12,7 @@ require_relative 'runner'
 
 module Erx
   # The system domain with ERTS domains running under it (docs/design-system.md,
-  # "System services", "The root task and its end"). It boots the production image on
+  # "System services", "The root task and its end"). It boots a test image (ECHO_BOOT) on
   # MediumBoot's machine with a manifest whose two configured ERTS domains stay up, each
   # a node over the erx carrier, and types at the system's Erlang shell, as a person
   # would, from the production checkpoints' command shell on.
@@ -64,6 +64,23 @@ module Erx
 
     PEER_ROW = DOMAIN_ROW[/^domain erts\n.*/m].to_s.sub(/\Adomain erts\n/, "domain peer\n").freeze
     raise Error, 'MediumBoot::DOMAIN_ROW has no domain erts' unless PEER_ROW.start_with?("domain peer\n")
+
+    # The echo checkpoint (ECHO_EXPRESSION): erts boots ECHO_BOOT, MediumBoot's script with
+    # the test-only application erx_echo_test, which provides echo before init's ready
+    # report and adds relay, a mint of the system domain's, and stray, a name no row
+    # declares; peer boots MediumBoot's script, without it. erts serves echo, relay and
+    # spare; nothing provides spare, which keeps the report's three entries within the row's
+    # declarations and each is judged by itself (erx_domain_mints:authenticate); the
+    # system domain is granted echo. Only a test image carries ECHO_BOOT
+    # (ProductionImage#build_test_image).
+    ECHO_BOOT = ReleaseFiles.domain_boot('echo', applications: [*MediumBoot::DOMAIN_BOOT.applications, 'erx_echo_test'],
+                                                 test: true)
+    ECHO_ROW = DOMAIN_ROW.sub("  release @artifact.#{MediumBoot::DOMAIN_BOOT.name}\n", "  release @artifact.#{ECHO_BOOT.name}\n").freeze
+    raise Error, 'MediumBoot::DOMAIN_ROW names no release line' if ECHO_ROW == DOMAIN_ROW
+
+    ECHO_SERVICES = %w[echo relay spare].map { |name| "service #{name}\n  server @domain.erts\n  interface 1\n" }.join +
+                    "facet echo\n  grantee system\n  service @service.echo\n  operations none\n  max_request 512\n" \
+                    "  in_flight 4\n  reductions 100000\n  period_ns 1000000000\n  max_heap_size 65536\n"
 
     # The domain service gives the configured rows the first ids above the system domain's,
     # in row order; host is the development manifest's.
@@ -509,6 +526,20 @@ module Erx
       "{service_kill,[#{lives}],#{SYSTEM_NODE},#{SYSTEM_CREATION},[#{nodes}],[#{peers}],{2,erts@erxos}}".freeze
     end
     SERVICE_KILL_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{service_kill,/n
+    # Typed ahead of the service kill: SdEcho waits up to 60 s for the system domain's
+    # echo grant to be installed and answers its facet; the line then calls it with an
+    # echo and with a request erx_echo_test refuses, and reads the domain service's counts.
+    ECHO_EXPRESSION = 'SdEcho=fun SdE(0)->none;SdE(SdK)->case maps:get({system,echo},' \
+                      'maps:get(grants,gen_server:call(erx_domain_srv,mints)),none) of ' \
+                      '{installed,_,SdEf}->SdEf;_->timer:sleep(100),SdE(SdK-1) end end,SdEf=SdEcho(600),' \
+                      'io:format("~0p~n",[{echo_facet,SdEf=:=erx:cap(echo),catch gen_server:call(SdEf,{echo,hi},5000),' \
+                      'catch gen_server:call(SdEf,other,5000),maps:get(counts,gen_server:call(erx_domain_srv,mints))}])'
+    # erts's facet installed in the system domain, which erx:cap/1 finds, answers the echo
+    # and refuses the other request; erts's report had relay refused as a mint it does not
+    # own and stray as undeclared, and nothing else was refused or dropped.
+    ECHO_ANSWER = '{echo_facet,true,{echo,hi},{error,badarg},' \
+                  '#{{refused,foreign_mint} => 1,{refused,undeclared} => 1}}'
+    ECHO_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{echo_facet,/n
     # peer stopped by its side's end while erts runs, its watcher told noconnection twice;
     # then erts halted with status 69, its watcher told {domain_down, Erts, {halt, 69}} by
     # the link, the monitor and the spawn's error reply, and the library calls given
@@ -541,8 +572,8 @@ module Erx
 
     module_function
 
-    # The manifest: MediumBoot's, room for two domains, with DOMAIN_ROW and PEER_ROW for its rows.
-    def manifest(source) = MediumBoot.manifest(source, row: DOMAIN_ROW + PEER_ROW)
+    # The manifest: MediumBoot's, room for two domains, with ECHO_ROW, PEER_ROW and ECHO_SERVICES for its rows.
+    def manifest(source) = MediumBoot.manifest(source, row: ECHO_ROW + PEER_ROW + ECHO_SERVICES)
 
     # The request erx_domain:create/1 takes for SERVICE_KILL_LATER's later domain of peer:
     # the configured rows' runtime image and release, at domain's indexes in the image's
@@ -560,7 +591,7 @@ module Erx
 
     # The line typed at the Erlang shell: SdSpec bound to later_spec(domain), then
     # SERVICE_KILL_EXPRESSION.
-    def service_kill_line(domain) = "SdSpec=#{later_spec(domain)},#{SERVICE_KILL_EXPRESSION}"
+    def service_kill_line(domain) = "SdSpec=#{later_spec(domain)},#{ECHO_EXPRESSION},#{SERVICE_KILL_EXPRESSION}"
 
     # The production checkpoints to the command shell, then the Erlang shell, the kill and
     # the runtime's end. points must end at the command shell; domain is where the image's
@@ -568,6 +599,7 @@ module Erx
     def service_kill_checkpoints(points, domain:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
+      echo = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(ECHO_ANSWER)}\r*\n\z/n
       answer = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(SERVICE_KILL_ANSWER)}\r*\n\z/n
       ends = /\A#{Regexp.escape(DOMAIN_ENDS_ANSWER)}\r*\n\z/n
       table = /\A#{Regexp.escape(CONTROL_TABLE_ANSWER)}\r*\n\z/n
@@ -578,6 +610,8 @@ module Erx
       later = /\A#{Regexp.escape(LATER_DOMAIN_ANSWER)}\r*\n\z/n
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
        ProductionImage::Run::ERLANG_SHELL.merge(type: "#{service_kill_line(domain)}\r").freeze,
+       { name: 'echo-facet', pattern: ECHO_START, seconds: 180,
+         verify: ->(text) { raise Error, "the echo facet gave #{text.inspect}" unless echo.match?(text) } }.freeze,
        { name: 'domain-running', pattern: SERVICE_KILL_START, seconds: 180,
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} before the kill" unless answer.match?(text) } }.freeze,
        { name: 'control-table', pattern: CONTROL_TABLE_START, seconds: 180,
@@ -613,14 +647,16 @@ module Erx
         @manifest = SystemDomain.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)))
       end
 
-      # Packs the image once (with its release medium, which no boot here attaches: the
-      # medium build is the one that takes MACHINE), then boots it at each CPU count.
+      # Packs the test image once, on MACHINE, then boots it at each CPU count.
       def call(cpus:, jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/system-domain/image'))
-        built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                                .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest)
+        # A test image: erts's script boots the test-only erx_echo_test (ECHO_BOOT).
+        image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        nothing = ProductionImage::Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
+        built = image.build_test_image(directory: directory, added: nothing, machine: MACHINE, domains: [ECHO_BOOT],
+                                       manifest_source: @manifest)
         domain = MediumBoot.domain_in(built.archive, codec: ABI::Codec.new(ABI::Generator.plan(root: @root).schema))
         placement.each(accels: [QemuCells::LOCAL_ACCELERATOR], cpus: cpus) do |accel, count, remote|
           ["#{accel}-#{count}cpu", service_kill(accel, count, remote, built, domain)]
@@ -631,7 +667,8 @@ module Erx
 
       def service_kill(accel, count, remote, built, domain)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
-                                                         manifest_source: @manifest, memory_mib: MACHINE.memory_mib)
+                                                         manifest_source: @manifest, memory_mib: MACHINE.memory_mib,
+                                                         test_image: true)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
             .run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MACHINE.memory_mib, machine_end: true,
                  checkpoints: SystemDomain.service_kill_checkpoints(points, domain: domain))

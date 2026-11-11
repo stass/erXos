@@ -394,6 +394,14 @@ module Erx
                    name: 'fuzz-erx-ramfs-core', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_fs_grant.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-fs-grant', deadline: 660, chdir: ROOT, env: environment)
+        %w[report reply].each do |target|
+          runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_domain_mints.rb'), '--target', target,
+                      '--seed', options.fetch(:seed).to_s],
+                     name: "fuzz-erx-domain-mints-#{target}", deadline: 600, chdir: ROOT, env: environment)
+        end
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_connections_install.rb'), '--seed',
+                    options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-connections-install', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_file_remote.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-file-remote', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_path.rb'), '--seed', options.fetch(:seed).to_s],

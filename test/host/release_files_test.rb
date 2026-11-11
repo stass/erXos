@@ -216,6 +216,17 @@ class ReleaseFilesTest < Minitest::Test
     assert_includes error.message, 'mnesia'
   end
 
+  # A release's pack inputs name the sources of its own applications, test-only ones
+  # included, so a test image's catalog authorizes what its receipts name, and the
+  # system release's name none of a test-only application's.
+  def test_pack_inputs_name_the_sources_of_the_release_s_applications
+    app = File.join(ROOT, 'test/erlang/apps/erx_echo_test/src/erx_echo_test.app.src')
+    tests = Erx::ReleaseFiles.inputs_of([], root: ROOT, applications: [*Erx::ReleaseFiles::DOMAIN_BASE, 'erx_echo_test'])
+    assert_includes tests, app
+    assert_includes tests, File.join(ROOT, 'test/erlang/apps/erx_echo_test/src/erx_echo_test.erl')
+    refute_includes Erx::ReleaseFiles.inputs_of([], root: ROOT), app
+  end
+
   # The release takes only scripts domain_boot made, at least one, each name once.
   def test_the_domain_release_takes_distinct_scripts_domain_boot_made
     assert_raises(Erx::Error) { Erx::ReleaseFiles.domain([]) }

@@ -183,8 +183,7 @@ class ManifestDomainsTest < Minitest::Test
 
   # A facet's operations and parameters resolve against its service's generated
   # declarations, which the packer does not read in Phase 1, so a facet that names any
-  # is refused; and the domain service installs no system-served facet in a configured
-  # domain.
+  # is refused.
   def test_a_facet_naming_an_operation_or_a_parameter_is_refused_naming_its_milestone
     facet = facet('ab', '@domain.alpha', '@service.b')
     [facet.sub('operations none', 'operations read'), facet + "  parameter root \"/\"\n"].each do |named|
@@ -333,9 +332,14 @@ class ManifestDomainsTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 11, 'facet.service', source)
   end
 
-  def test_a_rescue_domain_on_the_system_domain_passes_property_eleven
+  # A facet of a service the system domain serves, granted to a configured domain,
+  # reaches the encoded manifest, which the domain service reads at boot.
+  def test_a_system_served_facet_of_a_rescue_domain_passes_property_eleven_and_is_encoded
     source = @source + service('s', 'system') + facet('bs', '@domain.beta', '@service.s')
-    refused(Erx::Manifest::Unsupported, 'unsupported', 'facet', source)
+    view = @codec.open('manifest', admit(source).bytes)
+    services = rows(view, 'services')
+    assert_equal [[1, @codec.constant('mf_none')]],
+                 rows(view, 'facets').map { |row| [row.fetch('grantee'), services.fetch(row.fetch('service')).fetch('server')] }
   end
 
   # Property 12: what the domain library refuses fails the build, and without the

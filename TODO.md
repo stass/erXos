@@ -1646,10 +1646,19 @@ it; git history is the record of completed work.
   because those resolve against its service's generated declarations and grant checker
   (design-abi.md, "Services, facets and their parameter schemas"), which the packer does
   not read; the boot view refuses one too, so an admitted facet grants its whole service.
-  A facet of a service the system domain serves is refused as well, since the domain
-  service installs none in a configured domain. A service's `interface` is a number,
+  A service's `interface` is a number,
   not the qualified ABI service name, and the server's release is not checked to supply
   it.
+* [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`served/2`): a
+  configured domain's facet of a service the system domain serves ends with the process
+  behind it, and when that service restarts and names a new process (`erx_facet:serve/2`)
+  nothing grants the domain a new facet, so the domain finds the facet dead until it
+  restarts itself. Re-grant through the installation path (`{erx_facets_install, ...}` and its
+  acknowledgement) when a served name gets a new process, with a host test.
+* [Low] manifest check, `tools/lib/erx/manifest.rb`: a facet row's `max_request` and
+  `in_flight` may be 0, which makes a facet that refuses everything (the domain service leaves
+  a system-served one out), and `max_request` is not held to the grantee's `max_frame`
+  (design-domains.md, "Facets"). Refuse both at the check, with tests.
 * [Low] manifest check, `tools/lib/erx/manifest.rb`: `system_reservation` is 0, so the
   system domain's reservation for `max_domains` admitted domains (property 4) is not
   counted against `root_memory`; design-abi.md has the production admission planner

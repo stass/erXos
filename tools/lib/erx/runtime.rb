@@ -41,7 +41,7 @@ module Erx
     LIBERX_TREES = %w[config/manifest include kernel/core kernel/crypto/blake3 liberx].freeze
     # Every tree a runtime is built from, whose digest marks a build stale: the
     # generated tree among them, so a change to a generator's input does too.
-    SOURCE_TREES = ['otp', 'littlefs', ErlangApps::SOURCE, *LIBERX_TREES, Generated::OUTPUT].freeze
+    SOURCE_TREES = ['otp', 'littlefs', ErlangApps::SOURCE, ErlangApps::TEST_SOURCE, *LIBERX_TREES, Generated::OUTPUT].freeze
     # What the build copies over the OTP copy from the generated tree: the files the
     # generators write beneath otp/, such as erts/preloaded/src/erx_9p_grammar.erl, which
     # the emulator embeds compiled with the other preloaded modules (build_emulator).

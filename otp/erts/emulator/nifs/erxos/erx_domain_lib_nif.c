@@ -382,20 +382,19 @@ created_term(ErlNifEnv *env, const erx_dom_created_t *created)
 
 /*
  * The services configured domains serve, [{ServerRow, Name}], and the facet
- * rows that grant them, [{Grantee, Name, ServerRow, Limits}], Grantee a
- * configured row or the atom system, Name the service's name as an atom
- * and Limits the grant's limits by name, each list in manifest order
- * (docs/design-system.md, "Facets a configured domain serves"). Rows of a
- * service the system domain serves are left out: the domain service mints
- * only configured domains' facets, and the manifest check refuses a facet
- * of the system domain's service. A name is a checked identifier of at most
- * 63 bytes from the manifest, never from a request, so the atoms are bounded
- * by the manifest's rows.
+ * rows, [{Grantee, Name, Server, Limits}], Grantee a configured row or the
+ * atom system, Name the service's name as an atom, Server its server's row
+ * or, for a service the system domain serves, the atom system, and Limits
+ * the grant's limits by name, each list in manifest order
+ * (docs/design-system.md, "Facets a configured domain serves"). The
+ * services list leaves out the system domain's own, which no mint serves.
+ * A name is a checked identifier of at most 63 bytes from the manifest,
+ * never from a request, so the atoms are bounded by the manifest's rows.
  */
 static bool
 served_terms(ErlNifEnv *env, ERL_NIF_TERM *services, ERL_NIF_TERM *grants)
 {
-	ERL_NIF_TERM keys[6], values[6], limits, grantee, name;
+	ERL_NIF_TERM keys[6], values[6], limits, grantee, name, server;
 	const erx_dom_service_t *service;
 	const erx_dom_facet_t *facet;
 	uint32_t index;
@@ -414,8 +413,6 @@ served_terms(ErlNifEnv *env, ERL_NIF_TERM *services, ERL_NIF_TERM *grants)
 	for (index = lib->view.nfacets; index-- > 0;) {
 		facet = &lib->view.facets[index];
 		service = &lib->view.services[facet->service];
-		if (service->server == ERX_MF_NONE)
-			continue;
 		keys[0] = atom(env, "max_request"), values[0] = enif_make_uint(env, facet->max_request);
 		keys[1] = atom(env, "in_flight"), values[1] = enif_make_uint(env, facet->in_flight);
 		keys[2] = atom(env, "reductions"), values[2] = enif_make_uint64(env, facet->reductions);
@@ -425,9 +422,9 @@ served_terms(ErlNifEnv *env, ERL_NIF_TERM *services, ERL_NIF_TERM *grants)
 		if (!enif_make_map_from_arrays(env, keys, values, 6, &limits))
 			return (false);
 		grantee = facet->grantee == ERX_MF_NONE ? atom(env, "system") : enif_make_uint(env, facet->grantee);
+		server = service->server == ERX_MF_NONE ? atom(env, "system") : enif_make_uint(env, service->server);
 		name = enif_make_atom_len(env, service->name, service->name_len);
-		*grants = enif_make_list_cell(env, enif_make_tuple4(env, grantee, name,
-		    enif_make_uint(env, service->server), limits), *grants);
+		*grants = enif_make_list_cell(env, enif_make_tuple4(env, grantee, name, server, limits), *grants);
 	}
 	return (true);
 }

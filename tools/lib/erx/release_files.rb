@@ -75,22 +75,31 @@ module Erx
     DOMAIN_BASE = %w[kernel stdlib erx erx_files].freeze
 
     # One boot script of the domain release: its name, which a domain row's
-    # `release @artifact.NAME` names, and the applications it boots.
-    DomainBoot = Data.define(:name, :applications)
+    # `release @artifact.NAME` names, the applications it boots, and whether it is a test
+    # image's, which alone may boot a test-only application (ErlangApps::TEST_ONLY).
+    DomainBoot = Data.define(:name, :applications, :test) do
+      def initialize(name:, applications:, test: false) = super
+    end
+    # Every application a test image's domain boot script may take, in release order.
+    TEST_APPLICATIONS = [*APPLICATIONS, *ErlangApps::TEST_ONLY].freeze
 
     # The boot script named name, of applications, which the system release ships too,
     # DOMAIN_BASE among them, since a release boots through it. A name is a manifest
     # identifier, so a domain row's @artifact.NAME names the script, and it is one path
-    # component.
-    def self.domain_boot(name, applications:)
+    # component. Only a test script, test true, which only a test image carries
+    # (ProductionImage's test entry point), boots a test-only application.
+    def self.domain_boot(name, applications:, test: false)
       raise Error, "a domain boot script's name is an identifier, not #{name.inspect}" unless
         name.is_a?(String) && name.match?(Manifest::Frontend::IDENTIFIER) && !name.include?('/')
-      unknown = applications - APPLICATIONS
+      tests = applications & ErlangApps::TEST_ONLY
+      raise Error, "only a test image's domain boot script boots a test-only application: #{tests.join(', ')}" unless
+        test || tests.empty?
+      unknown = applications - TEST_APPLICATIONS
       raise Error, "a domain boot script boots only applications the runtime builds, not #{unknown.join(', ')}" unless unknown.empty?
       missing = DOMAIN_BASE - applications
       raise Error, "a domain boot script boots what every domain's kernel starts: #{missing.join(', ')}" unless missing.empty?
 
-      DomainBoot.new(name: name, applications: (APPLICATIONS & applications).freeze)
+      DomainBoot.new(name: name, applications: (TEST_APPLICATIONS & applications).freeze, test: test)
     end
 
     # The one domain release: each file of boots' applications once, and a boot script
@@ -100,10 +109,10 @@ module Erx
     def self.domain(boots)
       raise Error, 'a domain release has a boot script' if boots.empty?
       raise Error, 'a domain boot script is one ReleaseFiles.domain_boot made' unless
-        boots.all? { |boot| boot.is_a?(DomainBoot) && boot == domain_boot(boot.name, applications: boot.applications) }
+        boots.all? { |boot| boot.is_a?(DomainBoot) && boot == domain_boot(boot.name, applications: boot.applications, test: boot.test) }
       raise Error, 'two domain boot scripts share a name' unless boots.map(&:name).uniq.size == boots.size
 
-      Release.new(name: NAME, prefix: DOMAIN_PREFIX, applications: (APPLICATIONS & boots.flat_map(&:applications)).freeze,
+      Release.new(name: NAME, prefix: DOMAIN_PREFIX, applications: (TEST_APPLICATIONS & boots.flat_map(&:applications)).freeze,
                   system: false, boots: boots.sort_by(&:name).to_h { |boot| [boot.name, boot.applications] }.freeze)
     end
 
@@ -151,10 +160,12 @@ module Erx
     end
 
     # The files a pack's build inputs must name for these entries: each built file and its
-    # receipt, and the sources the receipts name in erXos's own applications. OTP's
-    # sources are in its imported tree's catalog already.
-    def self.inputs_of(entries, root:)
-      [*entries.flat_map { |entry| [entry.fetch('artifact'), entry.fetch('receipt')] }, *ErlangApps.sources(root: root)]
+    # receipt, and the sources the receipts name in erXos's own applications among
+    # applications, the release's, test-only ones included. OTP's sources are in its
+    # imported tree's catalog already.
+    def self.inputs_of(entries, root:, applications: ErlangApps::APPLICATIONS)
+      own = applications.select { |application| ErlangApps.own?(application) }
+      [*entries.flat_map { |entry| [entry.fetch('artifact'), entry.fetch('receipt')] }, *ErlangApps.sources(root: root, applications: own)]
     end
 
     # What one application ships, as paths under its directory to the files they copy:
@@ -183,7 +194,7 @@ module Erx
 
     # Where an application's sources are, relative to the root: OTP's own under otp/lib.
     def self.source_directory(application)
-      return ErlangApps.source(application) if ErlangApps::APPLICATIONS.include?(application)
+      return ErlangApps.source(application) if ErlangApps.own?(application)
 
       File.join('otp/lib', application)
     end
@@ -247,7 +258,7 @@ module Erx
       base = File.basename(name, '.*')
       return [File.join(source, "#{base}.app.src")] if name.end_with?('.app')
 
-      found = ErlangApps::APPLICATIONS.include?(application) ? erxos_source(application, base) : otp_source(application, base)
+      found = ErlangApps.own?(application) ? erxos_source(application, base) : otp_source(application, base)
       raise Error, "no source in #{self.class.source_directory(application)} for #{name}" unless found
 
       [found]

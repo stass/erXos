@@ -279,8 +279,25 @@ class ProductionImageTest < Minitest::Test
   def test_the_production_build_takes_no_additions
     production = Erx::ProductionImage.instance_method(:build).parameters
     refute_includes production.map(&:last), :added
-    assert_equal [%i[keyreq directory], %i[keyreq added], %i[key machine], %i[key domains]],
+    assert_equal [%i[keyreq directory], %i[keyreq added], %i[key machine], %i[key domains], %i[key manifest_source]],
                  Erx::ProductionImage.instance_method(:build_test_image).parameters
+  end
+
+  # A test-only application (ErlangApps::TEST_ONLY) boots only from a test script, which
+  # domain_boot makes only when asked, never from the boot table, and only an image with
+  # the test-code mark carries a test script; no release lists one.
+  def test_only_a_test_image_boots_a_test_only_application
+    applications = [*Erx::ReleaseFiles::DOMAIN_BASE, *Erx::ErlangApps::TEST_ONLY]
+    error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_boot('echo', applications: applications) }
+    assert_match(/test-only application: erx_echo_test/, error.message)
+    script = Erx::ReleaseFiles.domain_boot('echo', applications: applications, test: true)
+    assert_equal applications.sort, script.applications.sort
+    error = assert_raises(Erx::Error) { Erx::ProductionImage.check_test_scripts([script], test_code: false) }
+    assert_match(/only a test image carries a test domain boot script: echo/, error.message)
+    Erx::ProductionImage.check_test_scripts([script], test_code: true)
+    Erx::ProductionImage.check_test_scripts([Erx::ProductionImage.domain_boot('session')], test_code: false)
+    assert_empty Erx::ReleaseFiles::APPLICATIONS & Erx::ErlangApps::TEST_ONLY
+    refute Erx::ProductionImage.domain_boot('echo').test
   end
 
   # The production image carries the domain releases its manifest's domain rows and

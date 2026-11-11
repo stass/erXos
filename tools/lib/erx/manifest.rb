@@ -867,7 +867,7 @@ module Erx
         edges = rows['facets'].map { |row| [row.fetch('grantee'), rows['services'].fetch(row.fetch('service')).fetch('server')] }
         rows['boot_order'] = boot_order(rows['domains'], edges)
         check_rescue(rows['domains'], edges)
-        check_facets_supported(edges)
+        check_facets_supported
         rows['images'], rows['extents'] = normalize_images(rows.fetch('devices'))
         rows['windows'] = normalize_windows(rows.fetch('devices'), rows.fetch('images'))
         RootStartup.check(loadable: root_loadable_bytes, baseline: baseline,
@@ -1059,19 +1059,14 @@ module Erx
       # What the stopgap cannot honour, refused once properties 2, 10 and 11 hold: a
       # facet that names an operation or a parameter, which resolve against its
       # service's generated declarations and grant checker at M5, so the row would
-      # grant every operation; and a facet of a service the system domain serves, which
-      # the domain service installs in no configured domain yet. edges pairs each facet
-      # row's grantee with its service's server.
-      def check_facets_supported(edges)
+      # grant every operation.
+      def check_facets_supported
         records('facet').each do |record|
           operations = one(record, 'operations')
           next if record.parameters.empty? && !operations.quoted && operations.value == 'none'
 
           unsupported('a facet resolves its operations and parameters against its service\'s generated declarations and grant checker, which M5 brings', 'facet')
         end
-        return unless edges.any? { |_grantee, server| server == @codec.constant('mf_none') }
-
-        unsupported('the domain service installs no facet of a service the system domain serves in a configured domain', 'facet')
       end
 
       # Property 10: every server before its clients, ties broken by name order, which

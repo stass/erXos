@@ -148,10 +148,10 @@ class RuntimeBuildTest < Minitest::Test
        otp_only.c OTP_VERSION].each { |path| write_otp(path, 'stock') }
     write_otp(Runtime::XCOMP_FILE, 'stock')
     Runtime::LIBERX_SOURCES.each { |path| write_tree(path, 'stock') }
-    # erXos's applications, each with its resource file and no modules but erx_files'
-    # serving list: the build refuses a tree without them, and the recording runner
-    # compiles nothing.
-    ErlangApps::APPLICATIONS.each do |application|
+    # erXos's applications, test-only ones included, each with its resource file and no
+    # modules but erx_files' serving list: the build refuses a tree without them, and the
+    # recording runner compiles nothing.
+    [*ErlangApps::APPLICATIONS, *ErlangApps::TEST_ONLY].each do |application|
       modules = application == 'erx_files' ? 'erx_ramfs_serving' : ''
       write_tree(File.join(ErlangApps.source(application), 'src', "#{application}.app.src"),
                  "{application, #{application}, [{modules, [#{modules}]}]}.\n")
