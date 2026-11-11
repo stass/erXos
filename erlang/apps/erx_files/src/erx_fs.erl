@@ -41,7 +41,7 @@ client as `eio`.
 """.
 
 -export([start_link/3, start_link/4]).
--export([init/2, loop/1, file_loop/4]).
+-export([init/2, loop/2, file_loop/4]).
 
 -export_type([qid/0, attr/0, statfs/0, dirent/0, what/0]).
 
@@ -121,14 +121,31 @@ start_link(Module, Args, Rights) ->
 
 -doc """
 Serves one grant of `Module`'s tree. `client` names the domain the grant is
-for, `own` for the server's own (the default) or another domain's id, and
-`pool` its fid bound (4,096).
+for, `own` for the server's own (the default) or another domain's id;
+`pool` is its fid bound (4,096), `in_flight` and `msize` its bounds on the
+requests it holds and on the message size (erx_fs_grant:new/1), and
+`max_heap_size` its process's heap bound in words, shared binaries included
+(4,194,304).
+
+A grant for another domain is exported to that domain alone, with `send`
+alone, before this returns, through `exports` (erx_dist, or a host test's
+stand-in); a refused export is answered `{error, Reason}` and leaves no
+grant. Such a grant must name `ends_with`: the port of this domain's connection to
+the client, which the grant monitors before the export and ends with
+`{shutdown, connection_ended}` when it ends, so the grant and its export
+never outlive the connection its client calls through; or `none`, for a
+client whose grant lives as long as this domain. A grant for another domain
+without it fails to start.
 """.
 -spec start_link(module(), term(), erx_fs_grant:rights(),
-                 #{client => erx_fs_grant:client(), pool => pos_integer()}) ->
+                 #{client => erx_fs_grant:client(), pool => pos_integer(),
+                   in_flight => pos_integer(), msize => pos_integer(),
+                   max_heap_size => pos_integer(), ends_with => port() | none,
+                   exports => module()}) ->
           {ok, pid()} | {error, term()}.
 start_link(Module, Args, Rights, Options) ->
-    Heap = #{size => ?MAX_HEAP_WORDS, kill => true, include_shared_binaries => true},
+    Heap = #{size => maps:get(max_heap_size, Options, ?MAX_HEAP_WORDS), kill => true,
+             include_shared_binaries => true},
     proc_lib:start_link(?MODULE, init, [self(), {Module, Args, Rights, Options}],
                         infinity, [{max_heap_size, Heap}]).
 
@@ -137,26 +154,51 @@ start_link(Module, Args, Rights, Options) ->
 init(Parent, {Module, Args, Rights, Options}) ->
     {module, Module} = code:ensure_loaded(Module),
     {ok, Fs} = Module:init(Args),
-    Grant = erx_fs_grant:new((maps:with([pool], Options))#{
+    Client = maps:get(client, Options, own),
+    Grant = erx_fs_grant:new((maps:with([pool, in_flight, msize], Options))#{
                                module => Module, fs => Fs, rights => Rights,
-                               client => maps:get(client, Options, own)}),
-    proc_lib:init_ack(Parent, {ok, self()}),
-    loop(Grant).
+                               client => Client}),
+    %% The monitor comes first: a connection that ends at any time from here on,
+    %% before the export or after it, ends the grant, and a port that has ended
+    %% already is answered at once with a 'DOWN'.
+    ConnectionMonitor = connection_monitor(Client, Options),
+    case export(Client, maps:get(exports, Options, erx_dist)) of
+        ok ->
+            proc_lib:init_ack(Parent, {ok, self()}),
+            loop(Grant, ConnectionMonitor);
+        {error, _} = Refused ->
+            proc_lib:init_ack(Parent, Refused)
+    end.
+
+%% A grant for another domain ends with the connection Options name, or names none;
+%% one that names neither is a caller's mistake, and its start fails.
+connection_monitor(own, _Options) -> none;
+connection_monitor(_Client, #{ends_with := none}) -> none;
+connection_monitor(_Client, #{ends_with := Port}) when is_port(Port) -> erlang:monitor(port, Port).
+
+%% A grant for another domain is exported to that domain alone, with send alone; a
+%% grant for the server's own domain is exported to no one.
+export(own, _Exports) ->
+    ok;
+export(Client, Exports) ->
+    Exports:export(self(), [send], Client).
 
 %% Each message is handled whole, and the next is awaited through a remote call,
 %% so a grant moves to newly loaded code between messages and the purge of the
 %% old code kills no grant. A grant takes no `sys` suspension: an upgrade that
 %% changes the core's state must restart its grants.
 -doc false.
--spec loop(erx_fs_grant:grant()) -> no_return().
-loop(Grant) ->
+-spec loop(erx_fs_grant:grant(), reference() | none) -> no_return().
+loop(Grant, ConnectionMonitor) ->
     receive
+        {'DOWN', ConnectionMonitor, port, _, _} ->
+            exit({shutdown, connection_ended});
         {'DOWN', Ref, process, Owner, _} when is_reference(Ref), is_pid(Owner) ->
-            ?MODULE:loop(perform(erx_fs_grant:owner_down(Ref, Owner, Grant)));
+            ?MODULE:loop(perform(erx_fs_grant:owner_down(Ref, Owner, Grant)), ConnectionMonitor);
         {erx_fs_file, Tag, Alias, Reply} when is_reference(Tag), is_reference(Alias) ->
-            ?MODULE:loop(perform(erx_fs_grant:file_answer(Tag, Alias, Reply, Grant)));
+            ?MODULE:loop(perform(erx_fs_grant:file_answer(Tag, Alias, Reply, Grant)), ConnectionMonitor);
         Frame ->
-            ?MODULE:loop(perform(erx_fs_grant:handle_frame(Frame, Grant)))
+            ?MODULE:loop(perform(erx_fs_grant:handle_frame(Frame, Grant)), ConnectionMonitor)
     end.
 
 perform({Effects, Grant}) ->

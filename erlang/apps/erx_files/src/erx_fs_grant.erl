@@ -116,6 +116,8 @@ check rejected, a clunk, `..`, an owner's end.
                 rights :: rights(),
                 client :: client(),
                 pool :: pos_integer(),
+                in_flight_max :: 1..?IN_FLIGHT_MAX,
+                msize_max :: ?MSIZE_MIN..?MSIZE_MAX,
                 fids = #{} :: #{fid() => #fid{}},
                 owners = #{} :: #{pid() => #owner{}},
                 files = #{} :: #{term() => #file{}},
@@ -148,17 +150,25 @@ check rejected, a clunk, `..`, an owner's end.
 A grant with no fids. `rights` is the grant's (`ro`, `rw` or `rx`); a tree
 whose module has no `write/4` callback is read-only whatever they say (F5).
 `client` is the domain the grant serves, `own` for the server's own domain or
-another domain's id, and `pool` its fid bound.
+another domain's id, `pool` its fid bound, `in_flight` the most requests it
+holds at once (64 at most, and the default) and `msize` the largest message size
+it agrees to (4,096 to 65,560, the default).
 """.
 -spec new(#{module := module(), fs := term(), rights := rights(),
-            client := client(), pool => pos_integer()}) -> grant().
+            client := client(), pool => pos_integer(),
+            in_flight => 1..?IN_FLIGHT_MAX, msize => ?MSIZE_MIN..?MSIZE_MAX}) -> grant().
 new(#{module := Module, fs := Fs, rights := Rights, client := Client} = Options)
   when (Rights =:= ro orelse Rights =:= rw orelse Rights =:= rx),
        Client =:= own orelse is_integer(Client) andalso Client > 0 ->
     Pool = maps:get(pool, Options, ?DEFAULT_POOL),
     true = is_integer(Pool) andalso Pool > 0,
+    InFlightMax = maps:get(in_flight, Options, ?IN_FLIGHT_MAX),
+    true = is_integer(InFlightMax) andalso InFlightMax >= 1 andalso InFlightMax =< ?IN_FLIGHT_MAX,
+    MsizeMax = maps:get(msize, Options, ?MSIZE_MAX),
+    true = is_integer(MsizeMax) andalso MsizeMax >= ?MSIZE_MIN andalso MsizeMax =< ?MSIZE_MAX,
     Writes = erlang:function_exported(Module, write, 4),
     #grant{module = Module, fs = Fs, client = Client, pool = Pool,
+           in_flight_max = InFlightMax, msize_max = MsizeMax,
            rights = effective_rights(Rights, Writes)}.
 
 effective_rights(rw, false) -> ro;
@@ -411,8 +421,8 @@ admit(Alias, _, Request, #grant{pending = Pending} = Grant)
 admit(Alias, _, {flush, OldTag} = Request, #grant{pending = Pending} = Grant)
   when not is_map_key(OldTag, Pending) ->
     finish(Alias, Request, ok, Grant);
-admit(Alias, _, Request, #grant{in_flight = InFlight} = Grant)
-  when InFlight >= ?IN_FLIGHT_MAX ->
+admit(Alias, _, Request, #grant{in_flight = InFlight, in_flight_max = Max} = Grant)
+  when InFlight >= Max ->
     finish(Alias, Request, {error, emfile}, Grant);
 admit(Alias, _, {flush, OldTag}, #grant{pending = Pending, in_flight = InFlight} = Grant) ->
     #{OldTag := #pending{flushes = Flushes} = Record} = Pending,
@@ -512,8 +522,8 @@ forget_loose(#grant{loose = Loose, held = Held, steps = Steps, module = Module, 
 %% Each admitted operation, as {Reply, Grant}, or {{to_file, Node, Call}, Grant}
 %% for one the file process answers. Every fid a request names is looked
 %% up here; a fid the grant does not hold is ebadf.
-dispatch(_, {version, Msize, Version}, Grant) ->
-    {version(Msize, Version), Grant};
+dispatch(_, {version, Msize, Version}, #grant{msize_max = Max} = Grant) ->
+    {version(Msize, Version, Max), Grant};
 dispatch(Owner, {attach, Fid, Afid, _, Aname, _}, Grant) ->
     attach(Owner, Fid, Afid, Aname, Grant);
 dispatch(Owner, {walk, Fid, NewFid, Names}, Grant) ->
@@ -581,9 +591,9 @@ dispatch(_, _, Grant) ->
     %% auth, the extended attributes and the locks are not served.
     {{error, enotsup}, Grant}.
 
-version(Msize, _) when Msize < ?MSIZE_MIN -> {error, einval};
-version(Msize, ?VERSION) -> {ok, min(Msize, ?MSIZE_MAX), ?VERSION};
-version(Msize, _) -> {ok, min(Msize, ?MSIZE_MAX), <<"unknown">>}.
+version(Msize, _, _) when Msize < ?MSIZE_MIN -> {error, einval};
+version(Msize, ?VERSION, Max) -> {ok, min(Msize, Max), ?VERSION};
+version(Msize, _, Max) -> {ok, min(Msize, Max), <<"unknown">>}.
 
 attach(_, _, Afid, _, Grant) when Afid =/= ?ERX_P9_NOFID ->
     %% auth is not served, so the grant holds no fid an Afid could name.

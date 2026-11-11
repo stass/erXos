@@ -917,16 +917,23 @@ it; git history is the record of completed work.
 * [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb`: the Kconfig step now builds with `cc`
   (`HostOs::HOST_CC`) and the users build is given `HOST_CC`/`HOST_CXX`, but `tools/erx build fiasco` has not been
   run through to an image there; run it on the FreeBSD test host and fix what stops it, then delete this item.
-* [Medium] domains, mints (`erx_net_erxos` mint, `erx_driver_ctl` mint; design-system,
+* [Medium] domains, mints (`erx_net_erxos` mint, `erx_driver_ctl` mint, `erx_lfs_mint`; design-system,
   "Facets a configured domain serves"): a mint answers its request only after the grant or
   facet is started and exported, and the domain service drops a reply that comes after the
   request's deadline or after it cancelled the request (`erx_domain_mints`). The grant or
   facet minted for a dropped reply stays alive and exported to its grantee until the
-  connection between the two domains ends (the network grant) or the serving domain ends
-  (the storage domain's `storage_ctl` facet, which ends only with its mint), since no
+  connection between the two domains ends (the network grant, and a `data` grant of the
+  storage domain to any domain but the system domain) or the serving domain ends (the
+  storage domain's `storage_ctl` facet, which ends only with its mint, and its `data`
+  grant to the system domain), since no
   message withdraws a mint's answer. Give the domain service a withdrawal it sends the mint
   for every request it stops waiting on, or have each grant end unless the grantee claims
   it within the deadline.
+* [Medium] storage, `erx_lfs_mint` loop (`mint/3`): no host test drives the loop itself.
+  `test/erlang/erx_lfs_mint_tests.erl` covers `mint_request/3`, `grant_options/1` and the
+  answers `grant/5` gives, refusals included, but not that the loop (`mint/3`,
+  `mint_one/3`) sends each through `erx_facet:minted/2`; drive it with a stand-in of
+  `erx_facet`, as the network mint's item below asks.
 * [Medium] network, `erx_net_erxos` mint loop (`mint/2`, `count/2`, `mint_one/2`,
   `mint_counts/0`): no host test drives the loop itself. The tests cover
   `erx_net_admit:mint/2` and `erx_net:mint_grant/4`, but not that the loop answers a

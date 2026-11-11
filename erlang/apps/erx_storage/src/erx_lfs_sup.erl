@@ -4,34 +4,39 @@
 -module(erx_lfs_sup).
 -moduledoc """
 The domain's `/data` (docs/design-stopgap.md#littlefs-in-the-storage-domain):
-the volume's owner, `erx_lfs`, on the block service's data window, and the
-grant that mounts it at `/data`. The owner starts once the volume has
+the volume's owner, `erx_lfs`, on the block service's data window; the
+grant that mounts it at `/data`; and the mint of `data`, the volume's files
+service to other domains (erx_lfs_mint). The owner starts once the volume has
 mounted, so a mount that fails fails the domain's boot before it reports
-ready. Both children are permanent and the restart intensity is 0: when
-either ends, as the owner does when the volume fails, this supervisor ends,
+ready, and the mint names itself the service's mint before that report.
+Every child is permanent and the restart intensity is 0: when
+any ends, as the owner does when the volume fails, this supervisor ends,
 and through erx_storage_sup the storage domain. Nothing is restarted here:
 the domain's restart mounts the volume afresh, so no later write races one
 the failed volume left outstanding. A machine without a data window starts
-neither.
+none of them.
 """.
 
 -behaviour(supervisor).
 
--export([start_link/0, start_link/3, start_grant/2]).
+-export([start_link/0, start_link/4, start_grant/2]).
 -export([init/1]).
 
 -doc "Starts `/data` on the data window, mounted at `/data`.".
 -spec start_link() -> supervisor:startlink_ret().
 start_link() ->
-    start_link(data, <<"/data">>, erx_lfs).
+    start_link(data, <<"/data">>, erx_lfs, data).
 
--doc "Starts a littlefs volume on the window of `Role`, mounted at `Point`.".
--spec start_link(erx_blk_table:role(), binary(), atom()) -> supervisor:startlink_ret().
-start_link(Role, Point, Name) ->
-    supervisor:start_link(?MODULE, {Role, Point, Name}).
+-doc """
+Starts a littlefs volume on the window of `Role`, its owner registered as `Name`,
+mounted at `Point` and served to other domains as the files service `Service`.
+""".
+-spec start_link(erx_blk_table:role(), binary(), atom(), atom()) -> supervisor:startlink_ret().
+start_link(Role, Point, Name, Service) ->
+    supervisor:start_link(?MODULE, {Role, Point, Name, Service}).
 
 -doc false.
-init({Role, Point, Name}) ->
+init({Role, Point, Name, Service}) ->
     Flags = #{strategy => one_for_all, intensity => 0, period => 1},
     Owner = #{id => owner, start => {erx_lfs, start_link, [Role, Name]},
               restart => permanent, shutdown => brutal_kill, type => worker,
@@ -39,7 +44,10 @@ init({Role, Point, Name}) ->
     Grant = #{id => grant, start => {?MODULE, start_grant, [Name, Point]},
               restart => permanent, shutdown => brutal_kill, type => worker,
               modules => [erx_fs]},
-    {ok, {Flags, [Owner, Grant]}}.
+    Mint = #{id => mint, start => {erx_lfs_mint, start_link, [Service, Name]},
+             restart => permanent, shutdown => brutal_kill, type => worker,
+             modules => [erx_lfs_mint]},
+    {ok, {Flags, [Owner, Grant, Mint]}}.
 
 -doc false.
 -spec start_grant(atom(), binary()) -> {ok, pid()} | ignore | {error, term()}.

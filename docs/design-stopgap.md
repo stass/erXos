@@ -1677,6 +1677,21 @@ fails fails the domain's boot. A delayed old write cannot race a newer one, sinc
 design handles the cut. A late `complete` loses its swap and does nothing; the term keeps the buffer alive. `design-storage.md`'s rule, which remounts
 once every outstanding request is answered, belongs to the port.
 
+**`/data` for other domains.** The volume is also the files service `data`, which the manifest grants to the system domain and to root's session
+([design-files.md](design-files.md)). Its mint, `erx_lfs_mint`, is the third child of `erx_lfs_sup`, after the owner and the local grant, and names
+itself the service's mint before the domain reports ready. It takes only a mint request in the system domain's envelope and drops anything else. For
+each one it starts an `erx_fs` grant of the volume's tree, read-write, whose client is the grantee's domain id, so the grant takes frames only in that
+domain's envelope and with that domain's names. The grant exports itself to the grantee, with `send` alone, before its start returns, so no answer
+names a grant the grantee cannot reach; a refused export is the mint's answer, and no grant is left. A grant for any domain but the system domain
+monitors this domain's connection to the grantee (`erx_connections:connection/1`) before the export and ends with it: a grantee's restart is a new
+domain id over a new connection, and no grant of the old incarnation remains to take its frames. The system domain's grant lives as long as the
+storage domain. The grants are temporary children of a supervisor linked to the mint, so a grant's end, by its connection or its heap bound, ends
+nothing else, while the volume's end ends the mint and every grant, and the domain's restart answers new mint requests over the new volume. Of the
+facet row's limits a grant applies three: `in_flight`, the most requests it holds at once (at most `erx_fs_grant`'s 64); `max_request`, the largest
+message size it agrees to at `version`, which it advertises but does not check against each frame (at most 9P's 65,560; a row below 9P's least, 4,096, is refused with `{error, einval}`); and `max_heap_size`,
+its process's heap bound in words, shared binaries included. `reductions` and `period_ns` bind no grant, as they bind no facet yet. The grantee's
+namespace reads its `data` grant at each lookup, so the mint keeps no record of what it handed out.
+
 ## Deterministic mode
 
 `erx.det=1` is one CPU, TCG with instruction counting, the interpreter. The harness runs QEMU with `-smp 1`, `-icount shift=0,sleep=off` (without `shift`, `-icount` counts nothing), `-rtc base=2026-01-01,clock=vm`, so the real-time clock starts at a fixed date and runs on the instruction count, and the `virt` machine's `dtb-randomness=off`, so the device tree carries no random seeds; `Erx::QemuPlan` adds them exactly when the kernel command line carries `erx.det=1`, and refuses that word under HVF or on more than one CPU. Fiasco's tick comes from

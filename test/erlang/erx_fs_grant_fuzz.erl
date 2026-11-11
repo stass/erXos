@@ -4,13 +4,17 @@
 %% Random sequences of messages through erx_fs_grant, the pure core of one erx_fs grant,
 %% over erx_fs_test_tree: valid requests on a few fids and names of the tree, requests with
 %% one field replaced, arbitrary terms, frames whose alias or owner belongs to another
-%% domain, frames in another domain's envelope, flushes, owners going down and file
-%% answers with the wrong tag. A shell here performs the core's effects as erx_fs does,
+%% domain, frames in another domain's envelope or bare, flushes, owners going down and
+%% file answers with the wrong tag. A sequence's grant serves the server's own domain or
+%% another, ?CLIENT, whose frames arrive in its envelope, {erx_origin, ?CLIENT, Frame},
+%% with names of its node, as edit 16 delivers them; erx_dist's stand-in reads a name's
+%% domain as the BIF does. A shell here performs the core's effects as erx_fs does,
 %% holding back a file process's jobs for a while so requests stay in flight and flushes
 %% find them.
 %%
 %% Whatever arrives, the core never raises, and:
-%% * a reply goes only to an alias of the client's domain whose frame awaits one, and
+%% * a reply goes only to an alias of the client's domain whose frame, in the client's
+%%   envelope or bare for the server's own domain, awaits one, and
 %%   decode_reply/2 accepts it for that frame's request (an error reply, for a frame the
 %%   grammar refused); the core runs the same check before it replies, so what this adds
 %%   is the alias, the count and the order: a flush answered ok comes after what it flushed;
@@ -34,12 +38,16 @@
 -define(IN_FLIGHT_MAX, 64).
 -define(ALL_JOBS, 1 bsl 30).
 -define(FOREIGN, <<"other@far">>).
+%% Another domain a grant may serve, and a third domain, as their names carry them.
+-define(CLIENT, 5).
+-define(THIRD, 9).
+-define(DOMAIN_NODE, <<"d@erxos11">>).
 
-%% The shell's view of one sequence: the core, the tree's handle, the frames each local
-%% alias awaits a reply for (each numbered in the order sent) and the replies it has had,
+%% The shell's view of one sequence: the core, the tree's handle, the domain the grant
+%% serves, the frames each of that domain's aliases awaits a reply for (each numbered in the order sent) and the replies it has had,
 %% the monitor it holds for each owner, and each live file process with its tag and the
 %% jobs it has not run yet, oldest first.
--record(shell, {core, fs, owners, awaited = #{}, replies = #{}, sent = 0, monitors = #{},
+-record(shell, {core, fs, client, owners, awaited = #{}, replies = #{}, sent = 0, monitors = #{},
                 files = #{}, aliases = [], pool, tally = #{}}).
 
 run([Seed]) ->
@@ -51,31 +59,37 @@ run([Seed]) ->
 
 sequence(Tally) ->
     {ok, #{tree := Tree} = Fs} = ?TREE:init([]),
-    Owners = [self() | [spawn_link(fun idle/0) || _ <- [1, 2]]],
+    Client = pick([own, ?CLIENT]),
+    Owners = owners(Client),
     Pool = pick([1, 2, 3, 8, 4096]),
     Core = ?CORE:new(#{module => ?TREE, fs => Fs, rights => pick([ro, rw, rx]),
-                       client => own, pool => Pool}),
-    Shell = #shell{core = Core, fs = Fs, owners = Owners, pool = Pool, tally = Tally},
+                       client => Client, pool => Pool}),
+    Shell = #shell{core = Core, fs = Fs, client = Client, owners = Owners, pool = Pool, tally = Tally},
     %% Most sequences open as a client does, so later requests find a session and a fid.
     Prologue = case rand:uniform(4) of
                    1 -> [];
                    _ -> [{version, 8192, <<"9P2000.L">>}, {attach, 0, 16#ffffffff, <<"u">>, <<"test">>, 0}]
                end,
-    Opened = lists:foldl(fun(Request, S) -> checked(frame(request_frame(Request, S), S)) end,
+    Opened = lists:foldl(fun(Request, S) -> checked(frame(delivered(request_frame(Request, S), S), S)) end,
                          Shell, Prologue),
     Steps = lists:foldl(fun(_, S) -> checked(step(S)) end, Opened,
                         lists:seq(1, rand:uniform(?STEPS))),
     Counted = finished(Steps),
-    [begin unlink(Pid), exit(Pid, kill) end || Pid <- [Tree | tl(Owners)]],
+    [begin unlink(Pid), exit(Pid, kill) end || Pid <- [Tree | Owners], Pid =/= self(), node(Pid) =:= node()],
     Counted.
 
 idle() ->
     receive stop -> ok end.
 
+%% The owners a sequence's frames name: this test and two idle processes for the
+%% server's own domain, and three pids of the client's node for another domain.
+owners(own) -> [self() | [spawn_link(fun idle/0) || _ <- [1, 2]]];
+owners(Client) -> [domain_pid(Client, N) || N <- [1, 2, 3]].
+
 step(Shell) ->
     case rand:uniform(20) of
-        N when N =< 13 -> frame(request_frame(request(Shell), Shell), Shell);
-        14 -> frame(request_frame(mutated(request(Shell)), Shell), Shell);
+        N when N =< 13 -> frame(delivered(request_frame(request(Shell), Shell), Shell), Shell);
+        14 -> frame(delivered(request_frame(mutated(request(Shell)), Shell), Shell), Shell);
         15 -> frame(odd_frame(Shell), Shell);
         16 -> owner_down(Shell);
         17 -> stray_answer(Shell);
@@ -87,11 +101,11 @@ frame(Frame, #shell{core = Core} = Shell) ->
     {Effects, Core1} = ?CORE:handle_frame(Frame, Core),
     effects(Effects, expect(Frame, Shell#shell{core = Core1})).
 
-expect(Frame, #shell{awaited = Awaited} = Shell) ->
-    Local = fun(Alias) -> node(Alias) =:= node() end,
-    Expected = case ?G:decode_request_frame(Frame) of
-                   {ok, Alias, _, Request} -> Local(Alias) andalso {Alias, {request, Request}};
-                   {error, Alias, _} -> Local(Alias) andalso {Alias, refused};
+expect(Message, #shell{awaited = Awaited, client = Client} = Shell) ->
+    Ours = fun(Alias) -> of_client(Alias, Client) end,
+    Expected = case ?G:decode_request_frame(frame_of(Message, Client)) of
+                   {ok, Alias, _, Request} -> Ours(Alias) andalso {Alias, {request, Request}};
+                   {error, Alias, _} -> Ours(Alias) andalso {Alias, refused};
                    error -> false
                end,
     case Expected of
@@ -141,7 +155,7 @@ effects([Effect | _], _) ->
 replied(Alias, Reply, #shell{awaited = Awaited, replies = Replies, tally = Tally} = Shell) ->
     Waiting = [What || {_, What} <- maps:get(Alias, Awaited, [])],
     Had = [Reply | maps:get(Alias, Replies, [])],
-    matched(Had, Waiting) orelse error({unexpected_reply, Alias, Reply, Waiting}),
+    matched(Had, Waiting) orelse error({check_failed, unexpected_reply, Alias, Reply, Waiting}),
     Flushes = [{Sent, Old} || {Sent, {request, {flush, Old}}} <- maps:get(Alias, Awaited, []), Reply =:= ok],
     Flushes =:= [] orelse lists:any(fun({Sent, Old}) -> flushed_after(Old, Sent, Shell) end, Flushes)
         orelse error({check_failed, flush_answered_first, Alias, Flushes}),
@@ -288,12 +302,12 @@ request(Shell) ->
         26 -> pick([{lock, Fid, 1, 0, 0, 0, 1, <<"h">>}, {getlock, Fid, 0, 0, 0, 1, <<"h">>}])
     end.
 
-%% A frame with its own owner and alias around Request, now and then the same alias as a
-%% frame before it, which the core answers once more.
+%% A frame with its own owner and alias, of the client's domain, around Request, now and
+%% then the same alias as a frame before it, which the core answers once more.
 request_frame(Request, Shell) ->
     Alias = case rand:uniform(8) of
                 1 when Shell#shell.aliases =/= [] -> pick(Shell#shell.aliases);
-                _ -> make_ref()
+                _ -> alias(Shell#shell.client)
             end,
     {erx_9p, Alias, pick(Shell#shell.owners), Request}.
 
@@ -302,20 +316,49 @@ mutated({flush, _} = Request) ->
 mutated(Request) ->
     setelement(1 + rand:uniform(tuple_size(Request) - 1), Request, random_field()).
 
-%% A frame no client of the domain sends whole: its alias or owner in another domain, an
-%% alias that is no reference, an owner that is no pid, the wrong arity, any term, or a
-%% frame of the domain's own in the envelope a frame from another domain arrives in.
-odd_frame(Shell) ->
-    {erx_9p, Alias, Owner, Request} = request_frame(request(Shell), Shell),
-    case rand:uniform(7) of
-        1 -> {erx_9p, foreign_ref(), Owner, Request};
-        2 -> {erx_9p, Alias, foreign_pid(), Request};
-        3 -> {erx_9p, pick([self(), 1, <<>>]), Owner, Request};
-        4 -> {erx_9p, Alias, pick([Alias, node(), 0]), Request};
-        5 -> {erx_9p, Alias, Owner};
+%% A message the client's domain never sends: a frame whose alias or owner is of another
+%% domain, an alias that is no reference, an owner that is no pid, the wrong arity, any
+%% term, a client's frame in another domain's envelope, or bare from another domain.
+odd_frame(#shell{client = Client} = Shell) ->
+    {erx_9p, Alias, Owner, Request} = Frame = request_frame(request(Shell), Shell),
+    case rand:uniform(8) of
+        1 -> delivered({erx_9p, other_alias(Client), Owner, Request}, Shell);
+        2 -> delivered({erx_9p, Alias, other_owner(Client), Request}, Shell);
+        3 -> delivered({erx_9p, pick([self(), 1, <<>>]), Owner, Request}, Shell);
+        4 -> delivered({erx_9p, Alias, pick([Alias, node(), 0]), Request}, Shell);
+        5 -> delivered({erx_9p, Alias, Owner}, Shell);
         6 -> pick([random_field(), {erx_9p}, {Alias, Request}, Request]);
-        7 -> {erx_origin, pick([0, 1, 7]), {erx_9p, Alias, Owner, Request}}
+        7 -> {erx_origin, pick([0, 1, 7, ?THIRD]), Frame};
+        8 when Client =:= own -> {erx_origin, ?CLIENT, Frame};
+        8 -> Frame
     end.
+
+%% Message as the grant receives Frame from the client's domain: bare from the server's
+%% own, in the envelope of edit 16 from another.
+delivered(Frame, #shell{client = own}) -> Frame;
+delivered(Frame, #shell{client = Client}) -> {erx_origin, Client, Frame}.
+
+%% The frame inside a message the client's domain sent, or none for any other message.
+frame_of({erx_origin, Client, Frame}, Client) when is_integer(Client) -> Frame;
+frame_of({erx_origin, _, _}, _) -> none;
+frame_of(Frame, own) -> Frame;
+frame_of(_, _) -> none.
+
+%% Whether a frame's alias is of the client's domain: of this node for the server's own,
+%% of the client's id, as erx_dist reads it, for another.
+of_client(Alias, own) -> node(Alias) =:= node();
+of_client(Alias, Client) -> erx_dist:owner(Alias) =:= Client.
+
+%% A fresh alias of the client's domain.
+alias(own) -> make_ref();
+alias(Client) -> domain_ref(Client).
+
+%% An alias and an owner that are not the client domain's.
+other_alias(own) -> pick([foreign_ref(), domain_ref(?THIRD)]);
+other_alias(_) -> pick([foreign_ref(), domain_ref(?THIRD), make_ref()]).
+
+other_owner(own) -> pick([foreign_pid(), domain_pid(?THIRD, 1)]);
+other_owner(_) -> pick([foreign_pid(), domain_pid(?THIRD, 1), self()]).
 
 
 fid() ->
@@ -355,6 +398,16 @@ foreign_pid() ->
 foreign_ref() ->
     binary_to_term(<<131, 90, 3:16, 119, (byte_size(?FOREIGN)), ?FOREIGN/binary, 1:32,
                      (rand:uniform(1000)):32, 0:32, 0:32>>).
+
+%% A pid and a reference of domain D's node, whose creation is the domain id; each
+%% reference is new.
+domain_pid(D, N) ->
+    binary_to_term(<<131, 88, 119, (byte_size(?DOMAIN_NODE)), ?DOMAIN_NODE/binary, N:32, 0:32, D:32>>).
+
+domain_ref(D) ->
+    Id = erlang:unique_integer([positive]) band 16#ffffffff,
+    binary_to_term(<<131, 90, 3:16, 119, (byte_size(?DOMAIN_NODE)), ?DOMAIN_NODE/binary, D:32,
+                     1:32, Id:32, 0:32>>).
 
 pick(List) ->
     lists:nth(rand:uniform(length(List)), List).

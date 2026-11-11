@@ -2332,8 +2332,12 @@ recovers a value's exact bytes
 * **`erx_fs`**, the behaviour above, and
   `erx_fs:start_link(Module, Args, Rights)` to serve one grant of a tree's
   root to the server's own domain, and `start_link/4`, whose options name
-  the client domain (`client`, `own` or the domain's id) and the grant's
-  pool (`pool`);
+  the client domain (`client`, `own` or the domain's id), the grant's
+  pool (`pool`), its bounds on requests in flight and message size
+  (`in_flight`, `msize`) and its process's heap (`max_heap_size`), and
+  for another domain the port of the connection the grant ends with
+  (`ends_with`) and the export table it exports itself through before
+  its start returns (`exports`);
   every file server is one. `erx_fs_version:init/0` makes the domain's
   file version counter and `erx_fs_version:draw/0` draws from it
   ([Identity and version](#identity-and-version)).

@@ -9,11 +9,12 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/generated'
 
-# The erx_fs grant and the domain's file version counter: test/erlang/erx_fs_tests.erl and
-# erx_fs_version_tests.erl run on stock's emulator (ERX_ERL and ERX_ERLC, which make check
-# supplies) against the sources as they are, and against each seeded fault of
-# docs/design-files.md#verification-and-testing, where the named test must fail. A fault
-# in the protocol table reaches the grant through the grammar generated from it.
+# The erx_fs grant, the domain's file version counter and storage's data mint:
+# test/erlang/erx_fs_tests.erl, erx_fs_version_tests.erl and erx_lfs_mint_tests.erl run on
+# stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies) against the sources
+# as they are, and against each seeded fault of docs/design-files.md#verification-and-testing
+# and of the mint, where the named test must fail. A fault in the protocol table reaches
+# the grant through the grammar generated from it.
 class ErxFsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.
@@ -23,15 +24,20 @@ class ErxFsTest < Minitest::Test
     erlang/apps/erx_files/src/erx_fs_grant.erl
     erlang/apps/erx_files/src/erx_fs.erl
     erlang/apps/erx_files/src/erx_fs_version.erl
+    erlang/apps/erx_storage/src/erx_lfs_mint.erl
   ].freeze
   TESTS = %w[
     test/erlang/erx_fs_test_tree.erl
     test/erlang/erx_fs_stale_tree.erl
     test/erlang/erx_fs_tests.erl
     test/erlang/erx_fs_version_tests.erl
+    test/erlang/erx_lfs_mint_tests.erl
     test/erlang/stand_in/erx_dist.erl
+    test/erlang/stand_in/erx_connections.erl
   ].freeze
   GRANT = 'erlang/apps/erx_files/src/erx_fs_grant.erl'
+  SERVER = 'erlang/apps/erx_files/src/erx_fs.erl'
+  MINT = 'erlang/apps/erx_storage/src/erx_lfs_mint.erl'
   GRAMMAR = 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl'
   VERSION = 'erlang/apps/erx_files/src/erx_fs_version.erl'
   TABLE = 'abi/protocols/9p.txt'
@@ -83,8 +89,33 @@ class ErxFsTest < Minitest::Test
               to: "walked(Owner, _, NewFid, {stopped, Qids, _, Grant}) ->\n" \
                   "    {{ok, lists:reverse(Qids)}, add_fid(NewFid, Owner, [{1, {16#80, 0, 1}, root}], Grant)};",
               caught_by: 'fid_table_model_test_'),
+    Fault.new(name: 'a grant is never exported', file: SERVER,
+              from: '    case export(Client, maps:get(exports, Options, erx_dist)) of',
+              to: '    case export(own, maps:get(exports, Options, erx_dist)) of',
+              caught_by: 'the_export_comes_before_the_start_returns_test'),
+    Fault.new(name: 'a refused export leaves the grant serving', file: SERVER,
+              from: "            proc_lib:init_ack(Parent, Refused)\n",
+              to: "            proc_lib:init_ack(Parent, element(1, {{ok, self()}, Refused})),\n" \
+                  "            loop(Grant, ConnectionMonitor)\n",
+              caught_by: 'a_refused_export_leaves_no_grant_test'),
+    Fault.new(name: 'a grant outlives its connection', file: SERVER,
+              from: '            exit({shutdown, connection_ended});',
+              to: '            ?MODULE:loop(Grant, ConnectionMonitor);',
+              caught_by: 'the_grant_ends_with_its_connection_test'),
+    Fault.new(name: "the mint takes a request outside the system domain's envelope", file: MINT,
+              from: 'mint_request(System, Service, {erx_origin, System,',
+              to: 'mint_request(_System, Service, {erx_origin, _Origin,',
+              caught_by: 'only_the_system_domains_mint_request_is_granted_test'),
+    Fault.new(name: 'a minted grant serves another domain than its grantee', file: MINT,
+              from: '[Options#{client => Grantee, ends_with',
+              to: '[Options#{client => Grantee + 1, ends_with',
+              caught_by: 'an_enveloped_exchange_is_served_test'),
+    Fault.new(name: "the mint ties no grantee's grant to its connection", file: MINT,
+              from: 'connection_to(_System, Grantee) -> erx_connections:connection(Grantee).',
+              to: 'connection_to(_System, _Grantee) -> {ok, none}.',
+              caught_by: 'the_grant_ends_with_its_connection_test'),
     Fault.new(name: 'the in-flight bound admits one more', file: GRANT,
-              from: 'when InFlight >= ?IN_FLIGHT_MAX ->', to: 'when InFlight > ?IN_FLIGHT_MAX ->',
+              from: 'when InFlight >= Max ->', to: 'when InFlight > Max ->',
               caught_by: 'in_flight_bound_test'),
     Fault.new(name: 'an rx grant writes', file: GRANT,
               from: 'case Rights =:= rw orelse', to: 'case Rights =/= ro orelse',
@@ -236,7 +267,7 @@ class ErxFsTest < Minitest::Test
       # EUnit's line for its test; the logger stays quiet so each verdict keeps its line.
       Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       'logger:set_primary_config(level, none), ' \
-                      'halt(case eunit:test([erx_fs_tests, erx_fs_version_tests], [verbose]) ' \
+                      'halt(case eunit:test([erx_fs_tests, erx_fs_version_tests, erx_lfs_mint_tests], [verbose]) ' \
                       'of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')
     end
