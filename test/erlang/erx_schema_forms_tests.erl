@@ -63,11 +63,12 @@ list_and_tuple_test() ->
     accepts(labels, [[<<"a">>, <<"b">>, <<"c">>]]),
     refuses(labels, [[<<"a">>, <<"b">>, <<"c">>, <<"d">>], [<<16#c0>>]]).
 
-boolean_and_pid_test() ->
+boolean_and_proc_id_test() ->
     accepts(flag, [true, false]),
     refuses(flag, [yes, 1]),
-    accepts(owner, [self()]),
-    refuses(owner, [1, "<0.1.0>"]).
+    accepts(owner, [{pid, 0, 1, 0}, {pid, 16#ffffffff, 16#ffffffff, 16#ffffffff}]),
+    refuses(owner, [self(), 1, "<0.1.0>", {pid, -1, 1, 0}, {pid, 0, 1 bsl 32, 0}, {pid, a, 1, 0},
+                    {pid, 0, 1}, {port, 0, 1, 0}]).
 
 %% Every status keeps its value and its reporter; a value outside its type becomes
 %% {error, invalid}, still the reporter's.
@@ -127,13 +128,13 @@ match(_, _) -> false.
 
 resolve_term_test() ->
     Paths = [{[], listing}, {[things], listing}, {[things, 3], thing}, {[things, 3, secret], listing},
-             {[named], listing}, {[named, <<"a.b">>], thing}, {[owners, self()], thing}, {[log], listing}],
+             {[named], listing}, {[named, <<"a.b">>], thing}, {[owners, {pid, 0, 1, 0}], thing}, {[log], listing}],
     [begin
          ?assertEqual(1, matching(Path)),
          ?assertMatch({ok, #{kind := Kind}}, erx_schema:resolve(Path))
      end || {Path, Kind} <- Paths],
     Unknown = [[things, 10], [things, -1], [named, a], [named, <<>>], [named, <<"123456789">>], [owners, 1],
-               [things, 3, other], [other], [things | 3], not_a_path],
+               [owners, self()], [things, 3, other], [other], [things | 3], not_a_path],
     [?assertEqual({error, unknown_path}, erx_schema:resolve(Path)) || Path <- Unknown],
     [?assertEqual(0, matching(Path)) || Path <- Unknown, is_list(Path), Path =/= [things | 3]].
 
@@ -147,17 +148,13 @@ path_marks_test() ->
     {ok, Things} = erx_schema:resolve([things]),
     ?assertEqual({variable, {type, index}}, maps:get(children, Things)).
 
-pid_text() ->
-    "<" ++ Text = pid_to_list(self()),
-    list_to_binary(lists:droplast(Text)).
-
 resolve_text_test() ->
-    Pid = self(),
     Texts = [{<<>>, []}, {<<"/">>, []}, {<<"things">>, [things]}, {<<"/things/3">>, [things, 3]},
              {<<"things/3/secret">>, [things, 3, secret]}, {<<"named/a%2Eb">>, [named, <<"a.b">>]},
              {<<"named/%25%2F%C3%A9">>, [named, <<"%/", 16#c3, 16#a9>>]},
              {<<"named/A_+,:=@-">>, [named, <<"A_+,:=@-">>]},
-             {<<"owners/", (pid_text())/binary>>, [owners, Pid]}],
+             {<<"owners/0.1.0">>, [owners, {pid, 0, 1, 0}]},
+             {<<"owners/9.1.0">>, [owners, {pid, 9, 1, 0}]}],
     [begin
          {ok, Path, Declaration} = erx_schema:resolve_text(Text),
          ?assertEqual(Expected, Path),
@@ -171,7 +168,7 @@ resolve_text_refusals_test() ->
     Unknown = [<<"things/03">>, <<"things/-0">>, <<"things/+3">>, <<"things/10">>, <<"things/x">>,
                <<"named/a.b">>, <<"named/%41">>, <<"named/%2e">>, <<"named/%2">>, <<"named/%G0">>,
                <<"named/%C0%80">>, <<"named/123456789">>, <<"owners/0.1">>, <<"owners/0.1.2.3">>,
-               <<"owners/9.1.0">>, <<"owners/00.1.0">>, <<"owners/0.4294967296.0">>,
+               <<"owners/<0.1.0>">>, <<"owners/00.1.0">>, <<"owners/0.4294967296.0">>,
                <<"never_seen_before_segment">>, <<"things/3/never_seen_either">>],
     [?assertEqual({error, unknown_path}, erx_schema:resolve_text(Text)) || Text <- Unknown],
     Seventeen = <<(binary:copy(<<"a/">>, 16))/binary, "a">>,

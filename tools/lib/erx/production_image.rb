@@ -1039,8 +1039,8 @@ module Erx
       # A tab of a file as the console writes it: the byte, or CHT where it renders tabs.
       TAB = '(?:\t|\e\[I)'
       # /proc through the command shell's evaluator: the console process's directory is its
-      # pid's text without brackets.
-      PROC_EXPRESSION = 'P=tl(lists:droplast(pid_to_list(whereis(erx_console)))),' \
+      # proc_id, D.N.S, with D the system domain's 4 and N.S the numbers of its local pid.
+      PROC_EXPRESSION = 'P=["4",lists:droplast(string:find(pid_to_list(whereis(erx_console)),"."))],' \
                         'erx_shell_script:run(["ls -1 /proc; cat /proc/processes/",P,' \
                         '"/status /proc/status /proc/domains/4/budget/status"]).' "\r"
       # One display of top, its process table cut to one row.

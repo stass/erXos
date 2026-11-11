@@ -1455,6 +1455,12 @@ it; git history is the record of completed work.
   (V10); start the facet with the session's ready answer as a system-service grant of its template, with
   `erx_domain_core:inspect_scope/3`, its arguments the grantee's principal, the manifest's system-shell
   principals and `erx:development_build/0`;
+  `inspect_worker_heap` and `inspect_query_max`; write V10's test (read `[processes, P]` and
+  `[domains, 4, exports]` through a session's facet of scope `all` and find `erx:exports/1` unchanged) with its
+  seed of a validation removed, and validate every answer once where it leaves `erx_inspector` (`inspect/3`,
+  `entries/2`, `seen/2`) rather than in each collector, so a new collector cannot skip it; start the facet with the session's ready answer as a system-service grant of its template, with
+  `erx_domain_core:inspect_scope/2` (one
+  `development_build/0` in `erx` replacing `erx_hostlink_files:build_flags/0` and its copy in `erx_log_facet`);
   route `erx_inspector`'s calls without a scope through the facet, each request in a bounded query worker;
   start `erx_inspect_agent` in every domain, named in the ready report and kept only when the incarnation owns
   it, with `collects_domain/2` as its rule; start `erx_procfs` over the facet rather
@@ -2062,14 +2068,10 @@ it; git history is the record of completed work.
   (`build/gen/tools/generated/abi_inspection.rb`) are generated; the bounded C record builders of
   [design-generation.md](docs/design-generation.md#inspection-and-diagnostics) are not, since their consumer is
   erXos's kernel, and the host table has no Ruby validators yet. Generate each with its first consumer.
-* [Medium] inspection, `erx_schema` (`tools/lib/erx/abi_emit_inspection.rb`): `resolve_text/1` makes a pid segment
-  with the runtime's `list_to_pid/1`, which on erXos refuses a domain the runtime is not connected to, so the
-  answer depends on more than the text; the inspector must answer `unknown_path` and a path outside the scope
-  alike (design-live, Scope), or the parser should return the three integers and leave the pid to the inspector
-  after its scope check. `validate_record/1` leaves the record's `id` unchecked (type it as the path's last
-  variable segment), ignores an attribute's `build` (a release record may carry a `development` attribute), and
-  has no fuzz target over random terms. `cpu_index`'s bound 63 is written beside `@cpu_limit` because the grammar
-  has no `@limit - 1`. The domain kind lacks design-live's death record and group usage.
+* [Medium] inspection, `erx_schema` (`tools/lib/erx/abi_emit_inspection.rb`): `validate_record/1` ignores an
+  attribute's `build` (a release record may carry a `development` attribute). `cpu_index`'s bound 63 is written
+  beside `@cpu_limit` because the grammar has no `@limit - 1`. The domain kind lacks design-live's death record and
+  group usage.
 * [Medium] kernel reports, tests and collector (`erlang/apps/erx/src/erx_kernel_records.erl`,
   `liberx/backend/core/object_info.c`): design-live's host test that every bit of each backend's `erx_info_partial`
   names an attribute listing a stopgap for `kernel` (seeded on `guarantee`) is missing, as are design-stopgap's
@@ -2079,7 +2081,6 @@ it; git history is the record of completed work.
   every derived attribute with all-ok inputs. `erx_fiasco_pool_put` holds `held_pages` at 0 on a put of a page never
   taken, a liberx bug it hides rather than reports. The group topic maps every `erx_group_info` failure to
   `ERX_ENOTSUP`, not `ERX_EINVAL` alone; a CPU listing ends at the first gap in the map; the root's window to
-  `service_object_info` and `service_log_read` is checked only for 0 and wrap (trusted root).
   `service_object_info` and `service_log_read` is checked only for 0 and wrap (trusted root). The QEMU check that
   calls `erx_kernel_records` from `erl` at the console is not written yet.
 * [Medium] inspector (`erlang/apps/erx/src/erx_inspector.erl`, `erx.erl`, `erx_process_records.erl`):
@@ -2091,11 +2092,14 @@ it; git history is the record of completed work.
   `[domains, Id | _]` for the runtime's own domain. A process listed in a session links to
   `/proc/processes/<pid>` in the browser, which names it; `[domains, Id, processes]`, declared with paginated
   entries rather than children, needs the web client's entries view (W3) before a browser shows it. `runtime_domain/0`
-  reads the boot page beside `erx_facets:domain/0`, and `owner/1`, a scope decision, calls it; read the domain once
-  at the edge (one exported reader) and pass it in. The system domain's
-  runtime is not yet the node `system@<host>` (SV2), so its creation is 0 and a process record says `domain 4`
-  beside a pid printed `<0.N.S>`
-  (design-domains, Text). The listing page (1,000) and the scoped machine paths (`[]`, `[processes]`) are written
+  reads the boot page beside `erx_facets:domain/0`, and `collect/2` calls it after the scope decision; read the
+  domain once at the edge (one exported reader) and pass it in. The system domain's runtime is not yet the node
+  `system@<host>` (SV2), so it runs at creation 0: `erx_process_records:proc_id/2` names a local pid by the
+  runtime's domain rather than its creation, and the system domain's `self()`, `pid_to_list/1` and `ps` print
+  `<0.N.S>` beside `/proc/processes/4.N.S` (design-domains, Text); with creation 4, `proc_id/2` reads every
+  pid's creation and the production image's `PROC_EXPRESSION` drops its written `4`. The browser shows a
+  process's links and monitors, lists of `proc_id()`, as tuples (`erx_web_value`), not as pid presentations.
+  The listing page (1,000) and the scoped machine paths (`[]`, `[processes]`) are written
   in `erx_inspector`; have `erx_schema` export the page and the schema mark which machine paths a scoped facet
   reads. A thread past a partial listing's end is answered `{error, scope}`, as one that does not exist.
   Not collected yet: `[groups]`, `[budgets]`, `[domains]` and a domain's record, modules, exports, connections

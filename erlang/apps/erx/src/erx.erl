@@ -40,18 +40,29 @@ i() ->
 -doc """
 Prints the record of Path, a path of abi/inspection.txt such as
 `[processes, Pid]` or `[domains, 4, budget]`, each value with its
-reporter; `{error, scope}` for a path that names nothing the caller may
-see, `{error, unsupported}` for one the inspector cannot collect.
+reporter; a pid alone is its process's path. A pid in Path becomes its
+`proc_id()` in this runtime (docs/design-live.md, "Names travel as
+data"), so the question holds no name. `{error, scope}` for a path that
+names nothing the caller may see, `{error, unsupported}` for one the
+inspector cannot collect.
 """.
--spec i([erx_schema:segment()]) -> ok | {error, scope | unsupported}.
+-spec i([erx_schema:segment() | pid()] | pid()) -> ok | {error, scope | unsupported}.
+i(Pid) when is_pid(Pid) ->
+    i([processes, Pid]);
 i(Path) ->
-    case erx_inspector:inspect(Path, inspect_scope()) of
+    case erx_inspector:inspect(as_data(Path), inspect_scope()) of
         {ok, Record} ->
             {ok, Machine} = erx_inspector:inspect([], inspect_scope()),
             io:put_chars(erx_render:record(Record, build([{[], {ok, Machine}}])));
         {error, _Reason} = Error ->
             Error
     end.
+
+%% Path with each pid in it as its proc_id(), an improper tail kept as it is
+%% for the inspector to refuse.
+as_data([Pid | Rest]) when is_pid(Pid) -> [erx_inspector:proc_id(Pid) | as_data(Rest)];
+as_data([Segment | Rest]) -> [Segment | as_data(Rest)];
+as_data(Tail) -> Tail.
 
 %% The scope of the inspect facet of the domain the caller runs in, the
 %% facet's own value (erx_facets:domain/0): `all` in the system domain and

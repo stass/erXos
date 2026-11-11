@@ -483,7 +483,9 @@ its name, never by its position, so adding a member renumbers nothing.
 | `attr KEY TYPE reporters LIST visible CLASS build BUILD projections LIST` | an attribute of the kind, described below |
 | `path KIND SEGMENT...` | a path and the kind of its record, described below, with its marks at four spaces |
 
-A value type is a member type, `boolean`, `pid`, `rights` (a set of the
+A value type is a member type, `boolean`, `proc_id` (a process as the
+`proc_id()` `{pid, D, N, S}` of three numbers, never a live pid:
+[design-live.md](design-live.md#inspection-records)), `rights` (a set of the
 root's `right` names), `object_type` (one of the root's `type` names),
 `status` (one of the root's `status` names), or a `@` reference to a root
 `scalar`, which is an integer within its range, an `enum`, which is one
@@ -532,7 +534,7 @@ schema's field order.
 
 A path's SEGMENTs are literal segments, identifiers that become atoms of
 `erx_schema`, and variable segments `*TYPE`, each one segment holding a
-value of TYPE, which is an integer, text or `pid` type; a path has at
+value of TYPE, which is an integer, text or `proc_id` type; a path has at
 most 16 segments and a text segment type a MAX of at most 256, the web's
 bounds ([design-web.md](design-web.md#the-protocol)). `path machine`,
 with no segments, declares the root `[]`. The built-in kind `listing` has
@@ -544,7 +546,7 @@ term or as text, resolves to exactly one declaration or is refused. A
 path's variable segment has the type of its prefix's at that position,
 and no variable segment holds the empty text, which a path's text cannot
 write. A path's text is its segments joined by `/`, with an optional
-leading `/`: a pid as `D.N.S`, an integer in canonical decimal and a
+leading `/`: a `proc_id()` as `D.N.S`, an integer in canonical decimal and a
 text in `/proc`'s name encoding
 ([design-live.md](design-live.md#the-proc-tree)); `erx_schema` reads only
 that spelling of each path, with or without the leading `/`, and has a fuzz target, since the text

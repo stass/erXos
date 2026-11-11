@@ -19,9 +19,7 @@
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    Pids = [self() | [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, 3)]],
-    Accepted = length([ok || _ <- lists:seq(1, ?ROUNDS), round_of(input(Pids)) =:= accepted]),
-    [Pid ! stop || Pid <- tl(Pids)],
+    Accepted = length([ok || _ <- lists:seq(1, ?ROUNDS), round_of(input()) =:= accepted]),
     case Accepted >= ?MIN_ACCEPTED of
         true -> io:format("fuzz: ~p rounds ok, ~p accepted~n", [?ROUNDS, Accepted]);
         false -> error({too_few_accepted, Accepted})
@@ -55,9 +53,9 @@ written(link, Type, Value) -> uri(Type, text(Value)).
 
 %% {Reader, Input, {Type, Value}} for a written value, {Reader, Input, none} for
 %% anything else.
-input(Pids) ->
+input() ->
     {Type, Pattern} = pick(erx_present:marks()),
-    Segments = [segment(descriptor(Variable), Pids) || {variable, Variable} <- Pattern],
+    Segments = [segment(descriptor(Variable)) || {variable, Variable} <- Pattern],
     Value = case Segments of [One] -> One; _ -> list_to_tuple(Segments) end,
     Text = text(Value),
     {Reader, Written} = case rand:uniform(2) of
@@ -77,16 +75,19 @@ descriptor({type, Name}) ->
 descriptor(Descriptor) ->
     Descriptor.
 
-segment({integer, Minimum, Maximum, _Multiple}, _Pids) ->
+segment({integer, Minimum, Maximum, _Multiple}) ->
     pick([Minimum, Maximum, Minimum + rand:uniform(Maximum - Minimum + 1) - 1, Minimum + 1]);
-segment({text, Maximum, Encoding}, _Pids) ->
+segment({text, Maximum, Encoding}) ->
     Length = pick([1, 2, rand:uniform(Maximum), Maximum]),
     case Encoding of
         bytes -> << <<(rand:uniform(256) - 1)>> || _ <- lists:seq(1, Length) >>;
         utf8 -> utf8(Length)
     end;
-segment(pid, Pids) ->
-    pick(Pids).
+segment(proc_id) ->
+    {pid, part(), part(), part()}.
+
+%% A part of a proc_id(): 0, 2^32 - 1 or between.
+part() -> pick([0, 4294967295, rand:uniform(4294967296) - 1]).
 
 %% Valid UTF-8 of at most Length bytes and at least one character.
 utf8(Length) ->
@@ -94,11 +95,11 @@ utf8(Length) ->
                   || _ <- lists:seq(1, max(1, Length div 4))],
     unicode:characters_to_binary(Characters).
 
-%% The canonical text of a value: its segments joined by "/", a pid as D.N.S, an
+%% The canonical text of a value: its segments joined by "/", a proc_id as D.N.S, an
 %% integer in decimal and a text with every byte outside PLAIN as %XX.
+text({pid, D, N, S}) -> iolist_to_binary(io_lib:format("~b.~b.~b", [D, N, S]));
 text(Value) when is_tuple(Value) -> iolist_to_binary(lists:join("/", [text(Item) || Item <- tuple_to_list(Value)]));
 text(Value) when is_integer(Value) -> integer_to_binary(Value);
-text(Value) when is_pid(Value) -> list_to_binary(string:trim(pid_to_list(Value), both, "<>"));
 text(Value) when is_binary(Value) -> iolist_to_binary([escape(Byte, ?PLAIN) || <<Byte>> <= Value]).
 
 uri(Type, Text) ->

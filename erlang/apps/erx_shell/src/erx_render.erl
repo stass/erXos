@@ -86,7 +86,12 @@ kind(_Attr) -> status.
 text(Value) when is_binary(Value) -> Value;
 text(Value) when is_integer(Value) -> integer_to_binary(Value);
 text(Value) when is_atom(Value) -> atom_to_binary(Value);
-text(Value) when is_pid(Value) -> list_to_binary(pid_to_list(Value));
+%% A process as data, its proc_id(), prints as its pid's text <D.N.S>, alone
+%% or as a list of them.
+text({pid, D, N, S}) when is_integer(D), is_integer(N), is_integer(S) ->
+    iolist_to_binary([$<, integer_to_binary(D), $., integer_to_binary(N), $., integer_to_binary(S), $>]);
+text([{pid, _, _, _} | _] = ProcIds) ->
+    iolist_to_binary([$[, lists:join($,, [text(ProcId) || ProcId <- ProcIds]), $]]);
 %% An inspected location, {Module, Function, Arity, File, Line}, the file
 %% and line shown when it has a source position.
 text({Module, Function, Arity, <<>>, 0})
@@ -254,6 +259,7 @@ title(Path) ->
     escaped([$/ | lists:join($/, [segment(Segment) || Segment <- Path])]).
 
 segment(Segment) when is_binary(Segment) -> Segment;
+segment({pid, _D, _N, _S} = ProcId) -> erx_schema:segment_text(ProcId);
 segment(Segment) -> text(Segment).
 
 escaped(Text) -> erx_text:escape_line(Text).

@@ -54,29 +54,39 @@ module Erx
         keep_if(true, Value) -> Value;
         keep_if(false, _Value) -> {error, invalid}.
 
-        %% A whole record: its path resolves to a declaration of its kind, each
-        %% attribute passes validate_attr/4 under the reporter the record gives
-        %% it, which the inspector assigned, each child is a distinct segment
-        %% the declaration admits, and its entries, where it has them, pass
-        %% valid_entries/2. The first refusal is the answer.
+        %% A whole record: it holds no name, refused as {error, name} before any
+        %% other check (holds_name/1); its path resolves to a declaration of its
+        %% kind; its id is the path's last segment where that segment is
+        %% variable; each attribute passes validate_attr/4 under the reporter the
+        %% record gives it, which the inspector assigned; each child is a
+        %% distinct segment the declaration admits; and its entries, where it has
+        %% them, pass valid_entries/2. The first refusal is the answer.
         -spec validate_record(term()) -> {ok, record()} | {error, atom()}.
-        validate_record(#{schema := Schema, path := Path, kind := Kind, id := _Id,
+        validate_record(Record) ->
+            case holds_name([Record]) of
+                true -> {error, name};
+                false -> validate_fields(Record)
+            end.
+
+        validate_fields(#{schema := Schema, path := Path, kind := Kind, id := Id,
                           attrs := Attrs, children := Children} = Record)
           when is_map(Attrs), map_size(Record) =:= 6 orelse
                               (map_size(Record) =:= 7 andalso is_map_key(entries, Record)) ->
             case {Schema =:= schema(), resolve(Path)} of
                 {false, _} ->
                     {error, schema};
-                {true, {ok, #{kind := Kind} = Declaration}} ->
-                    case validate_attrs(Kind, maps:to_list(Attrs), #{}) of
-                        {ok, Checked} ->
+                {true, {ok, #{kind := Kind, pattern := Pattern} = Declaration}} ->
+                    case {valid_id(Pattern, Path, Id), validate_attrs(Kind, maps:to_list(Attrs), #{})} of
+                        {false, _} ->
+                            {error, id};
+                        {true, {ok, Checked}} ->
                             case {valid_children(Declaration, Children),
                                   valid_entries(Declaration, maps:get(entries, Record, none))} of
                                 {true, true} -> {ok, Record#{attrs := Checked}};
                                 {false, _} -> {error, children};
                                 {true, false} -> {error, entries}
                             end;
-                        {error, _Reason} = Error ->
+                        {true, {error, _Reason} = Error} ->
                             Error
                     end;
                 {true, {ok, _Declaration}} ->
@@ -84,8 +94,37 @@ module Erx
                 {true, {error, _Reason} = Error} ->
                     Error
             end;
-        validate_record(_Record) ->
+        validate_fields(_Record) ->
             {error, malformed}.
+
+        %% Whether a term holds a pid, port, reference or fun anywhere: as itself,
+        %% or inside a list, an improper one included, a tuple, or a map's keys or
+        %% values (docs/design-live.md, "Names travel as data", V10). Encoding any of
+        %% them toward a peer would hand it a name. The walk keeps its own stack
+        %% of the terms left to visit, so a deeply nested term costs heap, never
+        %% a deep chain of calls.
+        holds_name([]) ->
+            false;
+        holds_name([Term | _Rest]) when is_pid(Term); is_port(Term); is_reference(Term); is_function(Term) ->
+            true;
+        holds_name([[Head | Tail] | Rest]) ->
+            holds_name([Head, Tail | Rest]);
+        holds_name([Tuple | Rest]) when is_tuple(Tuple) ->
+            holds_name(tuple_to_list(Tuple) ++ Rest);
+        holds_name([Map | Rest]) when is_map(Map) ->
+            holds_name(maps:keys(Map) ++ maps:values(Map) ++ Rest);
+        holds_name([_Term | Rest]) ->
+            holds_name(Rest).
+
+        %% A record's id is its path's last segment where the declaration ends in
+        %% a variable segment, so a record cannot name one process, CPU or thread
+        %% at its path and another as its id. A path that ends in a literal, and
+        %% the machine's [], name their record by the declaration alone.
+        valid_id(Pattern, Path, Id) ->
+            case lists:reverse(Pattern) of
+                [{variable, _Type} | _] -> Id =:= lists:last(Path);
+                _ -> true
+            end.
 
         validate_attrs(_Kind, [], Checked) ->
             {ok, Checked};
@@ -166,8 +205,8 @@ module Erx
                                   lists:zip(Elements, tuple_to_list(Value)));
         valid(boolean, Value) ->
             is_boolean(Value);
-        valid(pid, Value) ->
-            is_pid(Value);
+        valid(proc_id, {pid, D, N, S}) ->
+            lists:all(fun(Part) -> is_integer(Part) andalso Part >= 0 andalso Part =< ?U32 end, [D, N, S]);
         valid(_Descriptor, _Value) ->
             false.
 
@@ -219,7 +258,7 @@ module Erx
         valid_segment(Type, Segment) -> valid(Type, Segment).
 
         %% A path as /proc and the host write it: segments separated by "/", with
-        %% an optional leading "/"; a pid as D.N.S; a text segment in /proc's
+        %% an optional leading "/"; a proc_id as D.N.S; a text segment in /proc's
         %% injective name encoding, every byte outside A-Z, a-z, 0-9 and _+,:=@-
         %% written as % and two upper-case hexadecimal digits. Only the canonical
         %% spelling of a path is accepted, so each path has one spelling up to the
@@ -278,8 +317,8 @@ module Erx
             typed(Type, decimal(Part));
         segment({text, _Maximum, _Encoding} = Type, Part) ->
             typed(Type, unescape(Part, <<>>));
-        segment(pid, Part) ->
-            pid_text(Part);
+        segment(proc_id, Part) ->
+            proc_id_text(Part);
         segment(_Type, _Part) ->
             error.
 
@@ -339,42 +378,27 @@ module Erx
         plain(Byte) when Byte >= $0, Byte =< $9 -> true;
         plain(Byte) -> lists:member(Byte, "_+,:=@-").
 
-        %% D.N.S, each a canonical decimal of at most 32 bits, made a pid by the
-        %% runtime's own list_to_pid/1, which refuses one it cannot name: on erXos
-        %% a pid of a domain this runtime is not connected to. The inspector answers
-        %% such an unknown path as it answers a path outside the caller's scope. The
-        %% pid is kept only when the runtime writes it back as the same text, since
-        %% stock OTP on a node that is not distributed takes any D as its own node,
-        %% which would give a pid a second spelling.
-        pid_text(Part) ->
+        %% D.N.S, a proc_id(): three canonical decimals of at most 32 bits, read as
+        %% numbers alone. No pid is made, so the answer depends on the text alone,
+        %% whichever domains this runtime reaches, and the one who maps a proc_id()
+        %% to a live process is the inspector of its domain's own runtime.
+        proc_id_text(Part) ->
             case [decimal(Number) || Number <- binary:split(Part, <<".">>, [global])] of
-                [{ok, D}, {ok, N}, {ok, S}] when D >= 0, D =< ?U32, N >= 0, N =< ?U32, S >= 0, S =< ?U32 ->
-                    Text = "<" ++ integer_to_list(D) ++ "." ++ integer_to_list(N) ++ "."
-                        ++ integer_to_list(S) ++ ">",
-                    try list_to_pid(Text) of
-                        Pid ->
-                            case pid_to_list(Pid) =:= Text of
-                                true -> {ok, Pid};
-                                false -> error
-                            end
-                    catch error:badarg -> error
-                    end;
-                _ ->
-                    error
+                [{ok, D}, {ok, N}, {ok, S}] -> typed(proc_id, {ok, {pid, D, N, S}});
+                _ -> error
             end.
 
         %% The text of one path segment, the spelling resolve_text/1 reads back as
-        %% it: a literal as itself, an integer in decimal, a pid as D.N.S and a
-        %% text with every byte that plain/1 refuses written as %XX.
+        %% it: a literal as itself, an integer in decimal, a proc_id as D.N.S, without
+        %% the brackets of a pid's text, so a shell needs no quoting, and a text with
+        %% every byte that plain/1 refuses written as %XX.
         -spec segment_text(segment()) -> binary().
         segment_text(Segment) when is_atom(Segment) ->
             atom_to_binary(Segment);
         segment_text(Segment) when is_integer(Segment) ->
             integer_to_binary(Segment);
-        segment_text(Segment) when is_pid(Segment) ->
-            %% "<D.N.S>" without its brackets, so a shell needs no quoting.
-            Text = list_to_binary(pid_to_list(Segment)),
-            binary:part(Text, 1, byte_size(Text) - 2);
+        segment_text({pid, D, N, S}) when is_integer(D), is_integer(N), is_integer(S) ->
+            iolist_to_binary([integer_to_binary(D), $., integer_to_binary(N), $., integer_to_binary(S)]);
         segment_text(Segment) when is_binary(Segment) ->
             << <<(escaped(Byte))/binary>> || <<Byte>> <= Segment >>.
 
@@ -432,7 +456,7 @@ module Erx
                    reporter_label/1, unit_label/1, type/1, declarations/0, valid/2, validate_attr/4,
                    validate_record/1, resolve/1, resolve_text/1, segment_text/1, report_layout/1, decode_report/2,
                    status_name/1]).
-          -export_type([record/0, attr/0, reporter/0, value/0, segment/0, descriptor/0, declaration/0]).
+          -export_type([record/0, attr/0, reporter/0, value/0, segment/0, proc_id/0, descriptor/0, declaration/0]).
           %% record() is the inspection record's name in docs/design-live.md.
           -compile({nowarn_redefined_builtin_type, [{record, 0}]}).
 
@@ -448,7 +472,10 @@ module Erx
           -type value() :: {ok, term()} | {partial, term()} | unknown | unsupported
                          | {timeout, pos_integer()} | {error, term()}.
           -type attr() :: {reporter(), value()}.
-          -type segment() :: atom() | integer() | binary() | pid().
+          %% A process named as data: the three numbers of its pid's text <D.N.S>.
+          -type proc_id() :: {pid, Domain :: non_neg_integer(), Number :: non_neg_integer(),
+                              Serial :: non_neg_integer()}.
+          -type segment() :: atom() | integer() | binary() | proc_id().
           -type record() :: \#{schema := #{inspection.version}, path := [segment()], kind := kind(), id := term(),
                               attrs := \#{atom() => attr()},
                               children := [segment()] | {partial, [segment()]} | unknown,
@@ -456,7 +483,7 @@ module Erx
           -type class() :: #{union(Inspection::VISIBILITY.map { |name| atom(name) })}.
           -type descriptor() :: {type, atom()} | {integer, integer(), integer(), pos_integer()}
                               | {text, pos_integer(), bytes | utf8} | {atoms, [atom()]} | {flags, [atom()]}
-                              | {list, descriptor(), pos_integer()} | {tuple, [descriptor()]} | boolean | pid.
+                              | {list, descriptor(), pos_integer()} | {tuple, [descriptor()]} | boolean | proc_id.
           -type declaration() :: \#{kind := kind(), pattern := [atom() | {variable, descriptor()}],
                                    visible := [class()], entries := none | {descriptor(), pos_integer()},
                                    append_only := boolean(),

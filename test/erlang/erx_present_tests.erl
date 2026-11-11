@@ -23,14 +23,13 @@ round_trip(Type, Value) ->
     ?assertEqual(Path, erx_present:path(Type, Value)).
 
 the_design_table_test() ->
-    [_, N, S] = string:split(string:trim(pid_to_list(self()), both, "<>"), ".", all),
-    ?assertEqual(iolist_to_binary(["0.", N, ".", S]), erx_present:text(pid, self())),
+    ?assertEqual(<<"4.85.0">>, erx_present:text(pid, {pid, 4, 85, 0})),
     ?assertEqual(<<"3">>, erx_present:text(domain, 3)),
     ?assertEqual(<<"3/lists">>, erx_present:text(module, {3, <<"lists">>})),
     ?assertEqual(<<"7">>, erx_present:text(budget, 7)),
     ?assertEqual(<<"2">>, erx_present:text(group, 2)),
     ?assertEqual([domains, 3, modules, <<"lists">>], erx_present:path(module, {3, <<"lists">>})),
-    ?assertEqual([processes, self()], erx_present:path(pid, self())),
+    ?assertEqual([processes, {pid, 4, 85, 0}], erx_present:path(pid, {pid, 4, 85, 0})),
     ?assertEqual(<<"erx:module/3/lists">>, erx_present:uri(module, {3, <<"lists">>})).
 
 %% A text segment's /proc escapes are escaped again in the link, which keeps
@@ -46,7 +45,8 @@ malformed_texts_are_refused_test() ->
      || {Type, Text} <- [{domain, <<"03">>}, {domain, <<"/3">>}, {domain, <<"3/">>}, {domain, <<>>},
                          {domain, <<"4294967296">>}, {budget, <<"0">>}, {module, <<"3">>},
                          {module, <<"3/lists/x">>}, {module, <<"3//lists">>}, {module, <<"3/a.b">>},
-                         {module, <<"3/a%2eb">>}, {module, <<"3/a%41">>}, {pid, <<"0.1">>},
+                         {module, <<"3/a%2eb">>}, {module, <<"3/a%41">>}, {pid, <<"0.1">>}, {pid, <<"<0.1.0>">>}, {pid, <<"0.4294967296.0">>},
+                         {pid, <<"0.01.0">>},
                          {nothing, <<"3">>}, {<<"domain">>, <<"3">>}, {domain, "3"},
                          {domain, binary:copy(<<"1">>, 4097)}]],
     [?assertEqual(error, erx_present:parse_uri(Link))
@@ -58,7 +58,8 @@ malformed_texts_are_refused_test() ->
 values_outside_the_type_raise_test() ->
     [?assertError(badarg, erx_present:text(Type, Value))
      || {Type, Value} <- [{domain, -1}, {budget, 0}, {module, 3}, {module, {3, <<>>}},
-                          {module, {3, <<255>>}}, {pid, 3}, {nothing, 3}]],
+                          {module, {3, <<255>>}}, {pid, 3}, {pid, self()}, {pid, {pid, 0, -1, 0}},
+                          {pid, {pid, 0, 0, 4294967296}}, {nothing, 3}]],
     ?assertError(badarg, erx_present:path(domain, <<"3">>)),
     ?assertError(badarg, erx_present:uri(module, {3})).
 
@@ -93,7 +94,7 @@ samples({text, Maximum, Encoding}) ->
                   bytes -> binary:copy(<<255>>, Maximum)
               end,
     [<<"lists">>, <<"a.b/c d%">>, Longest];
-samples(pid) -> [self()].
+samples(proc_id) -> [{pid, 0, 0, 0}, {pid, 4294967295, 4294967295, 4294967295}].
 
 path_text(Path) ->
     iolist_to_binary(lists:join($/, [erx_schema:segment_text(Segment) || Segment <- Path])).

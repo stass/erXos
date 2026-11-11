@@ -21,7 +21,7 @@ inspection 7
     attr shade shade reporters kernel visible all build all projections web
     attr pairs pairs reporters kernel visible any build all projections shell
     attr flag boolean reporters kernel visible any build all projections shell
-    attr owner pid reporters kernel visible any build all projections shell
+    attr owner proc_id reporters kernel visible any build all projections shell
     attr rights rights reporters kernel visible any build all projections shell
     attr object object_type reporters kernel visible any build all projections shell
     attr status status reporters kernel visible any build all projections shell
@@ -39,7 +39,7 @@ inspection 7
   path listing named
   path thing named *label
   path listing owners
-  path thing owners *pid
+  path thing owners *proc_id
   path listing log
     entries label 100
     append_only

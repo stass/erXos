@@ -20,9 +20,7 @@
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    Pids = [self() | [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, 3)]],
-    Accepted = length([ok || _ <- lists:seq(1, ?ROUNDS), round_of(case_of(Pids)) =:= accepted]),
-    [Pid ! stop || Pid <- tl(Pids)],
+    Accepted = length([ok || _ <- lists:seq(1, ?ROUNDS), round_of(case_of()) =:= accepted]),
     case Accepted >= ?MIN_ACCEPTED of
         true -> io:format("fuzz: ~p rounds ok, ~p accepted~n", [?ROUNDS, Accepted]);
         false -> error({too_few_accepted, Accepted})
@@ -45,7 +43,8 @@ round_of({Dir, Name, Expected}) ->
             error({disagrees_with_writer, Dir, Name, Expected, Said})
     end.
 
-%% A walk under a lookup that answers every question finds what child/2 found, the
+%% A walk under a lookup that answers every question finds what child/2 found, as a
+%% directory or, for an append-only path such as [kernel, log], as its lines; the
 %% status file, a marker or nothing, and never raises.
 walked(Dir, Name, Said) ->
     Lookup = fun({exists, _Path}) -> {ok, exists};
@@ -53,6 +52,7 @@ walked(Dir, Name, Said) ->
              end,
     case {erx_procfs_core:walk(Dir, Name, Lookup), Said} of
         {{ok, {dir, Child}}, {ok, Child}} -> ok;
+        {{ok, {lines, Child}}, {ok, Child}} -> ok;
         %% A text entry spelled "status", a module's of that name, is shadowed by the
         %% directory's status file (TODO.md, /proc).
         {{ok, {status, Dir}}, _} when Name =:= <<"status">> -> ok;
@@ -68,8 +68,8 @@ listing(Path) ->
            children => {partial, []}}}.
 
 %% {Dir, Name, Child} for a written name, {Dir, Name, none} for anything else.
-case_of(Pids) ->
-    {Dir, Child} = written(Pids),
+case_of() ->
+    {Dir, Child} = written(),
     Name = erx_procfs_core:name(lists:last(Child)),
     case rand:uniform(6) of
         N when N =< 2 -> {Dir, Name, Child};
@@ -81,25 +81,28 @@ case_of(Pids) ->
     end.
 
 %% A declared path of at least one segment, split into its directory and itself.
-written(Pids) ->
+written() ->
     Declarations = [D || #{pattern := [_ | _]} = D <- erx_schema:declarations()],
     #{pattern := Pattern} = lists:nth(rand:uniform(length(Declarations)), Declarations),
-    Child = [segment(Element, Pids) || Element <- Pattern],
+    Child = [segment(Element) || Element <- Pattern],
     {lists:droplast(Child), Child}.
 
-segment({variable, Type}, Pids) -> value(Type, Pids);
-segment(Literal, _Pids) -> Literal.
+segment({variable, Type}) -> value(Type);
+segment(Literal) -> Literal.
 
-value({type, Name}, Pids) ->
+value({type, Name}) ->
     {ok, Descriptor} = erx_schema:type(Name),
-    value(Descriptor, Pids);
-value({integer, Minimum, Maximum, 1}, _Pids) ->
+    value(Descriptor);
+value({integer, Minimum, Maximum, 1}) ->
     lists:nth(rand:uniform(3), [Minimum, Maximum, Minimum + rand:uniform(Maximum - Minimum + 1) - 1]);
-value({text, Maximum, utf8}, _Pids) ->
+value({text, Maximum, utf8}) ->
     Points = [lists:nth(rand:uniform(6), [$a, $., $%, $/, 16#e9, 16#1F600]) || _ <- lists:seq(1, rand:uniform(min(Maximum, 12)))],
     unicode:characters_to_binary(Points);
-value(pid, Pids) ->
-    lists:nth(rand:uniform(length(Pids)), Pids).
+value(proc_id) ->
+    {pid, part(), part(), part()}.
+
+%% A part of a proc_id(): 0, 2^32 - 1 or between.
+part() -> lists:nth(rand:uniform(3), [0, 4294967295, rand:uniform(4294967296) - 1]).
 
 mutate(<<>>) ->
     noise();

@@ -7,9 +7,11 @@ require_relative 'abi_source'
 module Erx
   module ABI
     # A value type of the inspection schema, resolved. FORM is one of
-    # integer, text, atoms, flags, list, tuple, boolean and pid. NAME is the
-    # member's name, or for a type the schema does not declare itself the
-    # reference that names it: `boolean`, `pid`, `rights`, `object_type`,
+    # integer, text, atoms, flags, list, tuple, boolean and proc_id, a process
+    # named as data by the three numbers of its pid's text (docs/design-live.md,
+    # "Names travel as data"). NAME is the member's name, or for a type the
+    # schema does not declare itself the reference that names it: `boolean`,
+    # `proc_id`, `rights`, `object_type`,
     # `status` or `@root_name`. ELEMENT and ELEMENTS name other types by
     # such references, which key InspectionSchema#types.
     # NUMBERS, for an ABI enum's atoms only, maps each atom to its number.
@@ -50,7 +52,7 @@ module Erx
       VISIBILITY = %w[any owner all system_shell].freeze
       BUILDS = %w[all development].freeze
       PROJECTIONS = %w[shell host proc web].freeze
-      BUILTIN_TYPES = %w[boolean pid rights object_type status].freeze
+      BUILTIN_TYPES = %w[boolean proc_id rights object_type status].freeze
       VALUE_MEMBERS = %w[integer text atoms list tuple].freeze
       RESERVED = (CATEGORIES + BUILTIN_TYPES + %w[listing none]).freeze
       NAME = /\A[a-z][a-z0-9_]{0,62}\z/.freeze
@@ -327,7 +329,7 @@ module Erx
 
         def reference_type(reference, line)
           case reference
-          when 'boolean', 'pid' then InspectionType.new(name: reference, form: reference, member: false)
+          when 'boolean', 'proc_id' then InspectionType.new(name: reference, form: reference, member: false)
           when 'rights' then atoms_type(reference, 'flags', @root.fetch(:rights))
           when 'object_type' then atoms_type(reference, 'atoms', @root.fetch(:objects))
           when 'status' then atoms_type(reference, 'atoms', @root.fetch(:statuses))
@@ -492,7 +494,7 @@ module Erx
         # that % as %25.
         def longest_text(type, escaped:)
           case type.form
-          when 'pid' then 3 * 10 + 2
+          when 'proc_id' then 3 * 10 + 2
           when 'integer' then [type.minimum, type.maximum].map { |bound| bound.to_s.size }.max
           else escaped * type.maximum
           end
@@ -514,12 +516,12 @@ module Erx
           return InspectionSegment.new(literal: plain(word, line)) unless word.start_with?('*')
 
           name = word.delete_prefix('*')
-          type = name == 'pid' ? 'pid' : reference(name, line)
+          type = reference(name, line)
           types[type] ||= reference_type(type, line)
           resolved = types.fetch(type)
-          unless resolved.form == 'pid' || (resolved.member && resolved.form == 'integer') ||
+          unless resolved.form == 'proc_id' || (resolved.member && resolved.form == 'integer') ||
                  (resolved.member && resolved.form == 'text' && resolved.maximum <= MAX_SEGMENT_TEXT)
-            line.fail!("a variable segment is an integer, a text of at most #{MAX_SEGMENT_TEXT} bytes or a pid")
+            line.fail!("a variable segment is an integer, a text of at most #{MAX_SEGMENT_TEXT} bytes or a proc_id")
           end
           InspectionSegment.new(type: type)
         end

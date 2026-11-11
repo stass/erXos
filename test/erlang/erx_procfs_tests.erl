@@ -13,16 +13,16 @@
 %%% Names
 
 names_round_trip_through_child_test() ->
-    Pid = self(),
+    Pid = {pid, 4, 85, 0},
     [?assertEqual({ok, Parent ++ [Segment]}, erx_procfs_core:child(Parent, erx_procfs_core:name(Segment)))
      || {Parent, Segment} <- [{[], processes}, {[], domains}, {[domains], 4}, {[domains, 4], threads},
                               {[domains, 4, threads], 0}, {[cpus], 63}, {[processes], Pid},
                               {[domains, 4, modules], <<"lists">>},
                               {[domains, 4, modules], <<".odd name\t\n%/", 16#c3, 16#a9>>}]].
 
-pid_name_has_no_brackets_test() ->
-    "<" ++ Text = pid_to_list(self()),
-    ?assertEqual(list_to_binary(lists:droplast(Text)), erx_procfs_core:name(self())).
+proc_id_name_is_three_numbers_test() ->
+    ?assertEqual(<<"4.85.0">>, erx_procfs_core:name({pid, 4, 85, 0})),
+    ?assertEqual(<<"0.4294967295.7">>, erx_procfs_core:name({pid, 0, 4294967295, 7})).
 
 text_names_encode_every_other_byte_test() ->
     ?assertEqual(<<"%2Ea%20b%2F%25%FF">>, erx_procfs_core:name(<<".a b/%", 255>>)),
@@ -46,7 +46,7 @@ walk_answers_status_without_asking_test() ->
 
 walk_reads_scope_as_no_entry_test() ->
     Scope = fun({exists, _}) -> {error, scope} end,
-    ?assertEqual({error, enoent}, erx_procfs_core:walk([processes], erx_procfs_core:name(self()), Scope)),
+    ?assertEqual({error, enoent}, erx_procfs_core:walk([processes], <<"4.85.0">>, Scope)),
     Unsupported = fun({exists, _}) -> {error, unsupported} end,
     ?assertEqual({ok, {dir, [groups]}}, erx_procfs_core:walk([], <<"groups">>, Unsupported)),
     ?assertEqual({error, enoent}, erx_procfs_core:walk([], <<"nothing">>, Unsupported)).
@@ -82,8 +82,8 @@ a_listing_lists_its_ids_and_markers_test() ->
                  names(erx_procfs_core:listing([domains, 4, processes], {error, unsupported}, all))),
     ?assertEqual([<<"status">>, <<"budget">>, <<"group">>, <<"threads">>, <<"modules">>, <<"processes">>],
                  names(erx_procfs_core:listing([domains, 4], none, all))),
-    ?assertEqual([<<"status">>, erx_procfs_core:name(self())],
-                 names(erx_procfs_core:listing([processes], listing([processes], [self()]), all))).
+    ?assertEqual([<<"status">>, <<"4.85.0">>],
+                 names(erx_procfs_core:listing([processes], listing([processes], [{pid, 4, 85, 0}]), all))).
 
 marker_files_never_fabricate_test() ->
     ?assertEqual(<<"left_out\t[unknown]\n">>, erx_procfs_core:marker(partial, listing([cpus], {partial, [0]}))),
@@ -195,14 +195,14 @@ the_processes_directory_lists_this_process_test() ->
     {ok, Entries} = erx_procfs:readdir(Handle, 0, 256, Fs),
     Names = [Name || {_, _, _, Name} <- Entries],
     ?assertEqual(<<"status">>, hd(Names)),
-    ?assert(lists:member(erx_procfs_core:name(self()), Names)),
+    ?assert(lists:member(erx_procfs_core:name(erx_inspector:proc_id(self())), Names)),
     {ok, Rest} = erx_procfs:readdir(Handle, 1, 256, Fs),
     ?assertEqual(tl(Entries), Rest),
     ok = erx_procfs:clunk(Handle, Fs),
     Dead = spawn(fun() -> ok end),
     Ref = monitor(process, Dead),
     receive {'DOWN', Ref, process, Dead, _} -> ok end,
-    ?assertEqual({error, enoent}, erx_procfs:walk(Processes, erx_procfs_core:name(Dead), Fs)).
+    ?assertEqual({error, enoent}, erx_procfs:walk(Processes, erx_procfs_core:name(erx_inspector:proc_id(Dead)), Fs)).
 
 the_257th_snapshot_is_refused_test() ->
     {ok, Fs} = erx_procfs:init([4]),
@@ -217,7 +217,7 @@ a_crashing_query_answers_eio_and_keeps_its_snapshot_test() ->
     {ok, Fs} = erx_procfs:init(all),
     %% On stock erx_object_info's NIF is not loaded, so the machine's record, which a
     %% status file asks for its build's projection, crashes.
-    [?assertEqual({error, eio}, erx_procfs:open({status, [processes, self()]}, 0, Fs)) || _ <- lists:seq(1, 300)],
+    [?assertEqual({error, eio}, erx_procfs:open({status, [processes, erx_inspector:proc_id(self())]}, 0, Fs)) || _ <- lists:seq(1, 300)],
     ?assertMatch({ok, _}, erx_procfs:open(erx_procfs_core:root(), 0, Fs)).
 
 %%% Helpers
@@ -233,8 +233,8 @@ budget(Attrs) ->
       children => []}.
 
 process(Attrs) ->
-    #{schema => 1, path => [processes, self()], kind => process, id => self(), attrs => Attrs,
-      children => []}.
+    #{schema => 1, path => [processes, {pid, 4, 85, 0}], kind => process, id => {pid, 4, 85, 0},
+      attrs => Attrs, children => []}.
 
 %% A listing whose entries the inspector could not get.
 unknown_listing(Path) ->

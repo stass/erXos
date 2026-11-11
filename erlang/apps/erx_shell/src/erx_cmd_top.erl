@@ -152,7 +152,7 @@ system(Ctx) ->
 
 system_figures(Scope) ->
     Machine = maps:with([uptime, memory_total, memory_free], attrs([], Scope)),
-    case attrs([processes, self()], Scope) of
+    case attrs([processes, erx_inspector:proc_id(self())], Scope) of
         #{domain := {_Reporter, {ok, Domain}}} ->
             Budget = maps:with([used, guarantee, cap], attrs([domains, Domain, budget], Scope)),
             Runtime = maps:with([run_queue], attrs([domains, Domain], Scope)),

@@ -50,7 +50,7 @@ inspection 1
   atoms priority low normal high max
   atoms module_origin boot_image overlay loaded
   list urgency_counts count 64
-  list pids pid 1000
+  list proc_ids proc_id 1000
   tuple location module_name name arity file_name line_number
 
   stopgap liberx_pool kernel "root pool" "pages of the root's pool: those handed out, carved budgets' included, and the pool's total and free; not the kernel's or sigma0's memory, page tables or mapping records"
@@ -126,10 +126,10 @@ inspection 1
     attr stack_size word_count reporters runtime visible owner build all projections shell,host,proc,web
     attr message_queue_len count reporters runtime visible owner build all projections shell,host,proc,web
     attr registered_name name reporters runtime visible owner build all projections shell,host,proc,web
-    attr group_leader pid reporters runtime visible owner build all projections shell,host,proc,web
+    attr group_leader proc_id reporters runtime visible owner build all projections shell,host,proc,web
     attr trap_exit boolean reporters runtime visible owner build all projections shell,host,proc,web
-    attr links pids reporters runtime visible owner build all projections shell,host,proc,web
-    attr monitors pids reporters runtime visible owner build all projections shell,host,proc,web
+    attr links proc_ids reporters runtime visible owner build all projections shell,host,proc,web
+    attr monitors proc_ids reporters runtime visible owner build all projections shell,host,proc,web
 
   # The kernel log: its record is its lines, entries of [kernel, log].
   kind log
@@ -164,9 +164,9 @@ inspection 1
   path module domains *domain_id modules *module_name
     present module
   path listing domains *domain_id processes
-    entries pid 1048576
+    entries proc_id 1048576
   path listing processes
-  path process processes *pid
+  path process processes *proc_id
     present pid
   path listing kernel
     visible all

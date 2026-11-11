@@ -105,7 +105,7 @@ class AbiInspectionTest < Minitest::Test
   def test_names_are_declared_once_and_never_reserved
     assert_refused(with('integer index 0 3'), /duplicate inspection member index/)
     assert_refused(with('atoms thing a b'), /duplicate inspection member thing/)
-    %w[kernel service runtime boolean pid rights object_type status listing none].each do |name|
+    %w[kernel service runtime boolean proc_id rights object_type status listing none].each do |name|
       assert_refused(with("atoms #{name} a"), /#{name} is reserved/)
     end
     assert_refused(with('atoms Upper a'), /invalid inspection name/)
@@ -227,12 +227,16 @@ class AbiInspectionTest < Minitest::Test
                    /differs in type from its prefix/)
     assert_refused(with('path nothing things'), /undefined kind "nothing"/)
     assert_refused(with("atoms shade a b\npath listing shades\npath listing shades *shade"),
-                   /an integer, a text of at most 256 bytes or a pid/)
+                   /an integer, a text of at most 256 bytes or a proc_id/)
     assert_refused(with("text long 257\npath listing names\npath listing names *long"),
-                   /an integer, a text of at most 256 bytes or a pid/)
+                   /an integer, a text of at most 256 bytes or a proc_id/)
     deep = (1..17).map { |count| "path listing #{(['a'] * count).join(' ')}" }.join("\n")
     assert_refused(with(deep), /at most 16 segments/)
-    model(with("text short 256\npath listing names\npath listing names *short\npath listing pids\npath listing pids *pid"))
+    model(with("text short 256\npath listing names\npath listing names *short\npath listing procs\npath listing procs *proc_id"))
+    # A process is named only as data: the schema has no pid type, as a segment or a value.
+    assert_refused(with("path listing pids\npath listing pids *pid"), /undefined inspection type pid/)
+    assert_refused(with_attr("leader pid reporters runtime visible any build all projections shell"),
+                   /undefined inspection type pid/)
   end
 
   def test_path_marks
@@ -387,7 +391,7 @@ class AbiInspectionTest < Minitest::Test
     assert_equal 'root pool', generated::STOPGAPS.fetch('liberx_pool').fetch(:label)
     assert_equal inspection.trace_rows.transform_values(&:reporter), generated::TRACE_ROWS
     process = generated::PATHS.find { |path| path.fetch(:segments).first == 'processes' && path.fetch(:segments).size == 2 }
-    assert_equal ['processes', { type: 'pid' }], process.fetch(:segments)
+    assert_equal ['processes', { type: 'proc_id' }], process.fetch(:segments)
     assert generated::PATHS.frozen? && process.fetch(:segments).last.frozen?
     assert_equal %w[kernel log], generated::PATHS.last.fetch(:segments)
   end

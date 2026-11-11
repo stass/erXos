@@ -26,7 +26,7 @@ valid_trees_test() ->
     ?assertEqual(ok, v({input, #{secret => true, on_submit => {login, 1}}, []})),
     ?assertEqual(ok, v({label, #{text => {kernel, {ok, <<"up">>}}}, []})),
     ?assertEqual(ok, v({label, #{text => {{stopgap, liberx_pool}, {timeout, 5}}}, []})),
-    ?assertEqual(ok, v({label, #{present => {runtime, {partial, {pid, self()}}}}, []})),
+    ?assertEqual(ok, v({label, #{present => {runtime, {partial, {pid, {pid, 4, 60, 0}}}}}, []})),
     ?assertEqual(ok, v({label, #{present => {module, {0, <<"m.x/y">>}}}, []})).
 
 %% A presentation is one abi/inspection.txt marks, with a value of its marked

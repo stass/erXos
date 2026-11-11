@@ -18,7 +18,7 @@ every decision is tested with made-up answers.
 * **Names.** A path's segment becomes an entry name through name/1, which
   is erx_schema:segment_text/1, the writer of the encoding
   erx_schema:resolve_text/1 reads: a literal as itself, an integer in
-  decimal, a pid as `D.N.S`, a text with every byte outside
+  decimal, a process's `proc_id()` as `D.N.S`, a text with every byte outside
   `A-Z a-z 0-9 _+,:=@-` as `%XX`. child/2 reads a name by handing the
   parent's text and the name to resolve_text/1, so `/proc` has one writer
   and one reader of path text, and a name is accepted only in the

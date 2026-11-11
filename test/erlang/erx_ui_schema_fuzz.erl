@@ -98,7 +98,7 @@ plain({enum, Atoms}) -> lists:nth(rand:uniform(length(Atoms)), Atoms);
 plain({image, Atoms}) -> lists:nth(rand:uniform(length(Atoms)), Atoms);
 plain(boolean) -> rand:uniform(2) =:= 1;
 plain(event) -> {event, rand:uniform(100)};
-plain(presentation) -> lists:nth(rand:uniform(3), [{pid, self()}, {domain, rand:uniform(1 bsl 32) - 1},
+plain(presentation) -> lists:nth(rand:uniform(3), [{pid, {pid, 4, rand:uniform(1000), 0}}, {domain, rand:uniform(1 bsl 32) - 1},
                                                    {module, {rand:uniform(10), <<"m.x/y">>}}]).
 
 text(Max) ->

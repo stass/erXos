@@ -54,8 +54,8 @@ Decisions every reader of this document needs:
   that stands in for one of them. A compromised domain can lie
   about its own processes, and the record says so.
 * **The pid space is the inspector's index.** Any process is
-  `[processes, Pid]`, whatever domain it lives in. Its owner is its pid's
-  creation, so the inspector routes every query and checks every scope by
+  `[processes, ProcId]`, whatever domain it lives in. Its owner is the
+  domain its `proc_id()` names, so the inspector routes every query and checks every scope by
   construction, never by asking a domain who owns what.
 * **A program is shown under its session.** A native program is a port of
   its session's runtime and a sub-space of its session's domain; the
@@ -416,7 +416,7 @@ adding attributes keeps it.
 | `[domains, Id, modules]`, `[..., modules, Module]` | module: version (its blob's SHA-256), OTP's `md5`, source file, origin (boot image, overlay, loaded in the domain), whether its source is in the boot image | runtime |
 | `[domains, Id, modules, Module, history]` | the last 16 hashes loaded for the module, newest first, with their times | service, from the code service |
 | `[domains, Id, modules, Module, source]` | source text, paginated by lines | runtime, from the boot image |
-| `[processes, Pid]` | process: domain (from the pid itself); state, priority, reductions, current function and location, heap and stack size, message queue length, registered name, group leader, `trap_exit`, links and monitors | the domain, by construction; the rest, runtime |
+| `[processes, ProcId]` | process: domain (from the `proc_id()` itself); state, priority, reductions, current function and location, heap and stack size, message queue length, registered name, group leader, `trap_exit`, links and monitors | the domain, by construction; the rest, runtime |
 | `[processes, Pid, source]` | the source lines around the process's current location | runtime |
 | `[devices]`, `[devices, Name]`, `[devices, Name, registers]` | device: the domain that holds it and its driver process, interrupt bindings, DMA profile (service, from the device service's table); registers read by the driver's domain through the device NIF at the device service's request and decoded field by field from the device's SVD description (runtime of the driver's domain); a register whose read has side effects is `unsupported` | each attribute marked |
 | `[budgets]`, `[budgets, Id]` | budget: kind (wall or elastic), guarantee, cap, used, carved, lent, pinned and threshold, the watch's threshold, as the kernel reports them; from them the inspector derives and shows spending (`used + carved + lent`), borrowing (spending above the guarantee, else 0), room (cap less spending, saturating at 0), deficit (spending above the cap after a shrink, else 0) and what a destroy would give back to the parent (`guarantee + borrowing - pinned`, exact, since a pin counts the record pages it keeps when it is made), never an unsigned difference that could wrap, with a test for a budget whose spending stands above its cap; a dead budget is not shown, since the kernel refuses every capability to it from its close, and what it still holds is in its nearest live ancestor's `used` and `pinned` ([design-kernel.md](design-kernel.md#budgets)); the funded domain (service) | kernel; the funded domain, service |

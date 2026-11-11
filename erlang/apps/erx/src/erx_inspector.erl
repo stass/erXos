@@ -16,8 +16,8 @@ it with the scope of the inspect facet they serve.
   append-only, is the sequence number its entries start from, 0 when
   it is left out (docs/design-live.md, "Paths").
 * A scope is `all` or a list of domain ids. A path's owner is decided by
-  construction: `[domains, D | _]` is D's, `[processes, Pid]` is the
-  domain of the pid, and every other path is the machine's. A path the
+  construction: `[domains, D | _]` and `[processes, {pid, D, N, S}]` are
+  D's, and every other path is the machine's. A path the
   schema marks `visible all` needs scope `all`, a domain's path needs its
   domain in the scope, and a path outside the scope gets the answer of a
   path that names nothing, `{error, scope}`, so a scoped caller cannot
@@ -35,13 +35,13 @@ domain this runtime is (runtime_domain/0), so in a session domain
 erx_kernel_records on the root's own capabilities, and the domain record,
 through erx_runtime_records, are the system domain's only; the kernel
 log, through erx_log_records, is read in the system domain, by a session
-that holds the `log` facet too. A pid of another runtime, and any other
-domain's path, name nothing it can reach and are answered `{error,
+that holds the `log` facet too. A process of another runtime, and any
+other domain's path, name nothing it can reach and are answered `{error,
 scope}`; a path the schema declares that has no collector here is
 `{error, unsupported}`.
 """.
 
--export([inspect/2, inspect/3, entries/2, overview/1]).
+-export([inspect/2, inspect/3, entries/2, overview/1, proc_id/1]).
 -export([scoped/3, declared_reachable/3, listing/2, collects_domain/2]).
 -export_type([scope/0, answer/0, entries/0]).
 
@@ -116,8 +116,8 @@ within(Path, Scope, Answer) ->
 
 -doc """
 The owner of Path when Scope reaches it, given erx_schema:resolve/1's
-answer for it; `error` for a path outside the scope, one that names no
-declared path, and a pid of a runtime this inspector does not reach.
+answer for it; `error` for a path outside the scope and one that names no
+declared path.
 """.
 -spec declared_reachable(term(), {ok, erx_schema:declaration()} | {error, unknown_path}, scope()) ->
           {ok, owner()} | error.
@@ -137,7 +137,6 @@ declared_reachable(Path, {ok, _Declaration}, Scope) ->
 %% scoped callers until it is named here.
 reachable(Path, Scope) ->
     case owner(Path) of
-        none -> error;
         {domain, Domain} = Owner -> answer(covered(Scope, Domain), Owner);
         machine -> answer(Scope =:= all orelse lists:member(Path, ?SCOPED_MACHINE_PATHS), machine)
     end.
@@ -148,11 +147,10 @@ answer(false, _Owner) -> error.
 covered(all, _Domain) -> true;
 covered(Domains, Domain) -> lists:member(Domain, Domains).
 
-%% A path's owner, by construction from the path. A pid is its runtime's;
-%% this inspector reaches only its own runtime, the domain this runtime is.
+%% A path's owner, by construction from the path: a process is the domain
+%% its proc_id() names.
 owner([domains, Domain | _]) -> {domain, Domain};
-owner([processes, Pid]) when node(Pid) =:= node() -> {domain, runtime_domain()};
-owner([processes, _Pid]) -> none;
+owner([processes, {pid, Domain, _Number, _Serial}]) -> {domain, Domain};
 owner(_Path) -> machine.
 
 -doc """
@@ -206,8 +204,12 @@ collect(Path, Scope, _Options) ->
 
 collect([], _Scope) ->
     {ok, erx_kernel_records:machine()};
-collect([processes, Pid], _Scope) ->
-    found(erx_process_records:process(Pid, runtime_domain()));
+collect([processes, ProcId], _Scope) ->
+    Domain = runtime_domain(),
+    case erx_process_records:local_pid(ProcId, Domain) of
+        {ok, Pid} -> found(erx_process_records:process(Pid, Domain));
+        error -> {error, scope}
+    end;
 collect([cpus, _Index] = Path, Scope) ->
     entry(Path, enumerate([cpus], Scope));
 collect([domains, Domain | Rest] = Path, Scope) ->
@@ -255,6 +257,15 @@ enumerate([processes], Scope) ->
     {Status, [Record || Pid <- Pids, {ok, Record} <- [erx_process_records:process(Pid, Domain)]]};
 enumerate(_Path, _Scope) ->
     {error, unsupported}.
+
+-doc """
+The `proc_id()` of Pid as this runtime names it (docs/design-live.md,
+"Names travel as data"), so a caller that holds a live pid asks for its
+record by data: `[processes, erx_inspector:proc_id(Pid)]`.
+""".
+-spec proc_id(pid()) -> erx_schema:proc_id().
+proc_id(Pid) ->
+    erx_process_records:proc_id(Pid, runtime_domain()).
 
 %% The domain this runtime is: the one its boot page names (erx_dist:boot/0)
 %% on erXos, and on a development host, where one trusted runtime stands for

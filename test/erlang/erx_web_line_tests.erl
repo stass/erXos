@@ -128,7 +128,7 @@ session_processes_test() ->
 %% is answered with the process's record.
 listed_process_test() ->
     Line = line_at([?SYSTEM]),
-    Name = erx_procfs_core:name(self()),
+    Name = erx_procfs_core:name(erx_inspector:proc_id(self())),
     {ok, View} = gen_server:call(Line, {open, {path, [<<"processes">>, Name]}}),
     receive
         {web_view, View, {record, #{path := WirePath, kind := Kind}}} ->
@@ -153,7 +153,7 @@ scope_test() ->
                     after 5000 -> error(no_end)
                     end
             end,
-    ?assertEqual(scope, Ended([<<"processes">>, erx_procfs_core:name(self())])),
+    ?assertEqual(scope, Ended([<<"processes">>, erx_procfs_core:name(erx_inspector:proc_id(self()))])),
     ?assertEqual(scope, Ended([<<"domains">>, <<"4">>])),
     ?assertEqual(scope, Ended([<<"kernel">>])),
     [?assertEqual({error, scope}, gen_server:call(Line, {open, {path, Names}}))

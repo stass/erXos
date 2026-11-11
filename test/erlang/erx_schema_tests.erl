@@ -59,7 +59,9 @@ trace_rows_test() ->
 
 values_outside_their_type_are_invalid_test() ->
     Cases = [{budget, used, {partial, -1}}, {domain, name, {ok, <<16#ff>>}}, {domain, state, {ok, dead}},
-             {process, links, {ok, [self() | self()]}}, {process, location, {ok, {lists, <<"map">>, 2, <<>>, 1}}},
+             {process, links, {ok, [{pid, 4, 1, 0} | {pid, 4, 2, 0}]}}, {process, group_leader, {ok, self()}},
+             {process, group_leader, {ok, {pid, 16#100000000, 1, 0}}}, {process, links, {ok, [{pid, 4, -1, 0}]}},
+             {process, location, {ok, {lists, <<"map">>, 2, <<>>, 1}}},
              {machine, entropy_quality, {ok, poor}}, {cpu, ready_threads, {ok, lists:duplicate(65, 0)}}],
     [?assertEqual({ok, {Reporter, {error, invalid}}}, erx_schema:validate_attr(Kind, Key, Reporter, Value))
      || {Kind, Key, Value} <- Cases,
@@ -73,9 +75,8 @@ sample({integer, Minimum, _Maximum, _Multiple}) ->
     {Minimum + 1, integer_to_binary(Minimum + 1)};
 sample({text, _Maximum, _Encoding}) ->
     {<<"lists.erl">>, <<"lists%2Eerl">>};
-sample(pid) ->
-    "<" ++ Text = pid_to_list(self()),
-    {self(), list_to_binary(lists:droplast(Text))}.
+sample(proc_id) ->
+    {{pid, 4, 85, 0}, <<"4.85.0">>}.
 
 samples(Pattern) ->
     lists:unzip([case Element of
@@ -113,9 +114,9 @@ machine_wide_paths_are_marked_test() ->
     ?assertEqual([], Visible([domains, 4, group])),
     ?assertEqual([], Visible([domains, 4, threads, 7])),
     ?assertEqual([], Visible([domains, 4, budget])),
-    ?assertEqual([], Visible([processes, self()])),
+    ?assertEqual([], Visible([processes, {pid, 4, 85, 0}])),
     {ok, Processes} = erx_schema:resolve([domains, 4, processes]),
-    ?assertMatch(#{entries := {pid, 1048576}, append_only := false}, Processes),
+    ?assertMatch(#{entries := {proc_id, 1048576}, append_only := false}, Processes),
     ?assertEqual([all], Visible([kernel, log])),
     {ok, Log} = erx_schema:resolve([kernel, log]),
     ?assertMatch(#{kind := log, entries := {{type, log_line}, 65536}, append_only := true}, Log).
@@ -126,13 +127,58 @@ unknown_paths_test() ->
     [?assertEqual({error, unknown_path}, erx_schema:resolve_text(Text))
      || Text <- [<<"cpus/64">>, <<"budgets/0">>, <<"domains/4/modules/lists.erl">>, <<"kernel/trace">>]].
 
-%% A pid is read only in the spelling the runtime writes it: stock OTP's list_to_pid/1
-%% takes any domain number on a node that is not distributed as its own, which would
-%% give "processes/3.N.S" a second spelling.
-pid_text_is_read_in_the_runtimes_one_spelling_test() ->
-    [_, N, S] = string:split(string:trim(pid_to_list(self()), both, "<>"), ".", all),
-    ?assertMatch({ok, [processes, _], _}, erx_schema:resolve_text(iolist_to_binary(["processes/0.", N, ".", S]))),
-    ?assertEqual({error, unknown_path}, erx_schema:resolve_text(iolist_to_binary(["processes/3.", N, ".", S]))).
+%% A process's segment is its proc_id(), three numbers read from D.N.S as numbers alone:
+%% no pid is made, so any domain's number reads alike, connected or not, and each part
+%% is a canonical decimal of at most 32 bits.
+proc_id_text_is_three_numbers_test() ->
+    ?assertMatch({ok, [processes, {pid, 4, 85, 0}], _}, erx_schema:resolve_text(<<"processes/4.85.0">>)),
+    ?assertMatch({ok, [processes, {pid, 3, 85, 0}], _}, erx_schema:resolve_text(<<"processes/3.85.0">>)),
+    ?assertMatch({ok, [processes, {pid, 16#ffffffff, 0, 16#ffffffff}], _},
+                 erx_schema:resolve_text(<<"processes/4294967295.0.4294967295">>)),
+    [?assertEqual({error, unknown_path}, erx_schema:resolve_text(<<"processes/", Text/binary>>))
+     || Text <- [<<"4294967296.0.0">>, <<"4.85">>, <<"4.85.0.1">>, <<"04.85.0">>, <<"4.-1.0">>,
+                 <<"<4.85.0>">>, <<"4..0">>, <<"4.85.0.">>]],
+    ?assertEqual(<<"4.85.0">>, erx_schema:segment_text({pid, 4, 85, 0})).
+
+%% docs/design-live.md, V10: a record holds no pid, port, reference or fun at any depth,
+%% in an attribute, its id, an error's reason or nested in a list, a tuple or a map,
+%% and validate_record/1 refuses it whole, before any other check.
+names() ->
+    Port = hd(erlang:ports()),
+    [self(), make_ref(), Port, fun() -> ok end].
+
+process_record(Attrs) ->
+    #{schema => 1, path => [processes, {pid, 4, 85, 0}], kind => process, id => {pid, 4, 85, 0},
+      attrs => Attrs, children => []}.
+
+a_record_of_proc_ids_is_valid_test() ->
+    Attrs = #{group_leader => {runtime, {ok, {pid, 4, 1, 0}}}, links => {runtime, {ok, [{pid, 5, 2, 3}]}},
+              monitors => {runtime, {partial, []}}},
+    ?assertEqual({ok, process_record(Attrs)}, erx_schema:validate_record(process_record(Attrs))).
+
+no_record_holds_a_name_test() ->
+    [?assertEqual({error, name}, erx_schema:validate_record(Record))
+     || Name <- names(),
+        Record <- [process_record(#{group_leader => {runtime, {ok, Name}}}),
+                   process_record(#{links => {runtime, {ok, [{pid, 4, 1, 0}, Name]}}}),
+                   process_record(#{links => {runtime, {partial, [[Name]]}}}),
+                   process_record(#{state => {runtime, {error, Name}}}),
+                   process_record(#{state => {runtime, {error, {Name}}}}),
+                   process_record(#{location => {runtime, {ok, {<<"m">>, <<"f">>, 0, #{Name => 1}, 0}}}}),
+                   (process_record(#{}))#{id := Name},
+                   (process_record(#{}))#{id := #{key => [Name]}},
+                   (process_record(#{}))#{children := [Name]},
+                   (process_record(#{}))#{path := [processes, Name]},
+                   (process_record(#{}))#{extra => Name},
+                   #{name => Name}]].
+
+%% A record's id is its path's last segment where that segment is variable.
+id_is_the_last_variable_segment_test() ->
+    ?assertEqual({error, id}, erx_schema:validate_record((process_record(#{}))#{id := {pid, 4, 86, 0}})),
+    ?assertEqual({error, id}, erx_schema:validate_record((process_record(#{}))#{id := 85})),
+    Cpu = #{schema => 1, path => [cpus, 2], kind => cpu, id => 2, attrs => #{}, children => []},
+    ?assertMatch({ok, _}, erx_schema:validate_record(Cpu)),
+    ?assertEqual({error, id}, erx_schema:validate_record(Cpu#{id := 3})).
 
 %% /proc's status file and the shell show fields in schema order.
 fields_test() ->

@@ -24,8 +24,7 @@ line(Type, Value) ->
     [atom_to_binary(Type), [[$\s, $x, binary:encode_hex(iolist_to_binary(Text))]
                             || Text <- [erx_present:text(Type, Value), erx_present:uri(Type, Value), Path]], $\n].
 
-value(pid) -> list_to_pid("<0." ++ integer_to_list(rand:uniform(1 bsl 28) - 1) ++ "."
-                          ++ integer_to_list(rand:uniform(1 bsl 13) - 1) ++ ">");
+value(pid) -> {pid, value(domain), value(domain), value(domain)};
 value(domain) -> rand:uniform(1 bsl 32) - 1;
 value(budget) -> rand:uniform(1 bsl 32 - 1);
 value(group) -> rand:uniform(1 bsl 32 - 1);

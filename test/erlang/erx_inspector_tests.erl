@@ -6,8 +6,8 @@
 %% process_info answer, with a seed that flips its status; the scope rules
 %% for paths and attributes; every status and reporter as erx_render prints
 %% it, each with a seed that changes the record and must change the text;
-%% hostile names through the line escape; and erx:i/0's overview within 80
-%% columns.
+%% hostile names through the line escape; erx:i/0's overview within 80
+%% columns; and every process named as data, by its proc_id() (V10).
 -module(erx_inspector_tests).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -22,6 +22,9 @@ info() ->
      {current_location, {gen_server, loop, 7, [{file, "gen_server.erl"}, {line, 2405}]}},
      {heap_size, 233}, {stack_size, 9}, {message_queue_len, 2}, {registered_name, worker},
      {group_leader, self()}, {trap_exit, true}, {links, [self()]}, {monitors, [{process, self()}]}].
+
+%% This runtime's proc_id() of its own process: the system domain's on a host.
+me() -> erx_inspector:proc_id(self()).
 
 attrs(Info) ->
     {ok, #{attrs := Attrs}} = erx_process_records:record(self(), Info, ?SYSTEM),
@@ -50,19 +53,59 @@ location_without_position_test() ->
 
 link_to_a_port_is_partial_test() ->
     [Port | _] = erlang:ports(),
-    ?assertEqual({runtime, {ok, [self()]}}, maps:get(links, attrs(info()))),
-    ?assertEqual({runtime, {partial, [self()]}}, maps:get(links, attrs(with(links, [self(), Port])))).
+    ?assertEqual({runtime, {ok, [me()]}}, maps:get(links, attrs(info()))),
+    ?assertEqual({runtime, {partial, [me()]}}, maps:get(links, attrs(with(links, [self(), Port])))).
 
 links_beyond_the_bound_are_partial_test() ->
     Pids = lists:duplicate(1001, self()),
-    ?assertEqual({runtime, {ok, lists:duplicate(1000, self())}},
+    ?assertEqual({runtime, {ok, lists:duplicate(1000, me())}},
                  maps:get(links, attrs(with(links, lists:sublist(Pids, 1000))))),
-    ?assertEqual({runtime, {partial, lists:duplicate(1000, self())}},
+    ?assertEqual({runtime, {partial, lists:duplicate(1000, me())}},
                  maps:get(links, attrs(with(links, Pids)))).
 
 monitor_of_a_name_is_partial_test() ->
     Named = [{process, self()}, {process, {logger, node()}}],
-    ?assertEqual({runtime, {partial, [self()]}}, maps:get(monitors, attrs(with(monitors, Named)))).
+    ?assertEqual({runtime, {partial, [me()]}}, maps:get(monitors, attrs(with(monitors, Named)))).
+
+%% docs/design-live.md, V10: the record names its process, its group leader, its
+%% links and its monitors by proc_id(), and holds no pid anywhere. A pid of another
+%% domain is the domain its text names.
+names_are_proc_ids_test() ->
+    {ok, #{path := Path, id := Id, attrs := Attrs}} = erx_process_records:record(self(), info(), ?SYSTEM),
+    ?assertEqual({[processes, me()], me()}, {Path, Id}),
+    ?assertEqual({runtime, {ok, me()}}, maps:get(group_leader, Attrs)),
+    "<" ++ Text = pid_to_list(self()),
+    [_, N, S] = string:lexemes(Text, ".>"),
+    ?assertEqual({pid, ?SYSTEM, list_to_integer(N), list_to_integer(S)}, me()),
+    ?assertEqual({pid, 7, 1, 0}, erx_process_records:proc_id(foreign_pid(), ?SYSTEM)).
+
+%% Seeded (V10): a collector that put the live group leader into the record has it
+%% refused whole by the validation, so no name leaves in a record.
+a_live_group_leader_is_refused_test() ->
+    {ok, #{attrs := Attrs} = Record} = erx_process_records:record(self(), info(), ?SYSTEM),
+    Seeded = Record#{attrs := Attrs#{group_leader := {runtime, {ok, group_leader()}}}},
+    ?assertEqual({error, name}, erx_schema:validate_record(Seeded)).
+
+%% A pid of an earlier run of this node, its name but another creation, prints as
+%% a local pid of the same numbers yet is another process: it is named by its own
+%% creation, never as the live process of this runtime that has those numbers.
+an_earlier_run_of_this_node_is_not_this_runtime_test() ->
+    <<131, Node/binary>> = term_to_binary(node()),
+    Creation = erlang:system_info(creation) + 1,
+    Earlier = binary_to_term(<<131, 88, Node/binary, 1:32, 0:32, Creation:32>>),
+    ?assertEqual(node(), node(Earlier)),
+    ?assertEqual({pid, Creation, 1, 0}, erx_process_records:proc_id(Earlier, ?SYSTEM)).
+
+%% A proc_id() is this runtime's pid only when it names this runtime's domain and
+%% numbers it prints as; any other is no pid here.
+proc_id_back_to_its_pid_test() ->
+    {pid, _, N, S} = me(),
+    ?assertEqual({ok, self()}, erx_process_records:local_pid(me(), ?SYSTEM)),
+    ?assertEqual(error, erx_process_records:local_pid(me(), 5)),
+    ?assertEqual(error, erx_process_records:local_pid({pid, 5, N, S}, ?SYSTEM)),
+    ?assertEqual(error, erx_process_records:local_pid({pid, ?SYSTEM, 1 bsl 32, S}, ?SYSTEM)),
+    ?assertEqual(error, erx_process_records:local_pid({pid, ?SYSTEM, -1, S}, ?SYSTEM)),
+    ?assertEqual(error, erx_process_records:local_pid(self(), ?SYSTEM)).
 
 name_longer_than_the_schema_is_invalid_test() ->
     Long = list_to_atom(lists:duplicate(200, 16#e9)),
@@ -73,7 +116,7 @@ gone_process_is_no_record_test() ->
 
 live_process_record_test() ->
     {ok, #{path := Path, attrs := Attrs}} = erx_process_records:process(self(), ?SYSTEM),
-    ?assertEqual([processes, self()], Path),
+    ?assertEqual([processes, me()], Path),
     ?assertMatch({runtime, {ok, running}}, maps:get(state, Attrs)).
 
 %%% Scopes
@@ -93,13 +136,20 @@ machine_paths_need_scope_all_test() ->
 domain_paths_need_their_domain_test() ->
     ?assertEqual({ok, {domain, ?SYSTEM}}, reachable([domains, ?SYSTEM, budget], [?SYSTEM])),
     ?assertEqual(error, reachable([domains, ?SYSTEM, budget], [5])),
-    ?assertEqual({ok, {domain, ?SYSTEM}}, reachable([processes, self()], [?SYSTEM])),
-    ?assertEqual(error, reachable([processes, self()], [5])).
+    ?assertEqual({ok, {domain, ?SYSTEM}}, reachable([processes, me()], [?SYSTEM])),
+    ?assertEqual(error, reachable([processes, me()], [5])),
+    ?assertEqual({ok, {domain, 9}}, reachable([processes, {pid, 9, 1, 0}], [9])),
+    ?assertEqual(error, reachable([processes, self()], all)).
 
 unknown_and_unreachable_paths_answer_as_scope_test() ->
     ?assertEqual(error, reachable([nothing], all)),
-    ?assertEqual(error, reachable([processes, foreign_pid()], all)),
-    ?assertEqual({error, scope}, erx_inspector:inspect([processes, foreign_pid()], all)),
+    ?assertEqual(error, reachable([processes, {pid, 0, 1 bsl 32, 0}], all)),
+    ?assertEqual({error, scope}, erx_inspector:inspect([processes, {pid, 9, 1, 0}], all)),
+    ?assertEqual({error, scope}, erx_inspector:inspect([processes, self()], all)),
+    %% A caller of domain 5 that writes 5 for this runtime's domain in a process's
+    %% proc_id() reaches no process of this runtime.
+    {pid, ?SYSTEM, N, S} = me(),
+    ?assertEqual({error, scope}, erx_inspector:inspect([processes, {pid, 5, N, S}], [5])),
     ?assertEqual({error, scope}, erx_inspector:inspect([cpus], [?SYSTEM])),
     ?assertEqual({error, scope}, erx_inspector:inspect([domains, 9, budget], all)),
     ?assertEqual({error, scope}, erx_inspector:inspect([nothing], all)).
@@ -107,19 +157,19 @@ unknown_and_unreachable_paths_answer_as_scope_test() ->
 dead_process_answers_as_scope_test() ->
     {Pid, Ref} = spawn_monitor(fun() -> ok end),
     receive {'DOWN', Ref, process, Pid, _} -> ok end,
-    ?assertEqual({error, scope}, erx_inspector:inspect([processes, Pid], all)).
+    ?assertEqual({error, scope}, erx_inspector:inspect([processes, erx_inspector:proc_id(Pid)], all)).
 
 uncollected_path_is_unsupported_test() ->
     ?assertEqual({error, unsupported}, erx_inspector:inspect([groups], all)),
     ?assertEqual({error, unsupported}, erx_inspector:entries([domains], all)).
 
 process_paths_test() ->
-    {ok, #{kind := process, id := Self}} = erx_inspector:inspect([processes, self()], all),
-    ?assertEqual(self(), Self),
+    {ok, #{kind := process, id := Me}} = erx_inspector:inspect([processes, me()], all),
+    ?assertEqual(me(), Me),
     {ok, #{kind := listing, children := Children}} = erx_inspector:inspect([processes], all),
-    ?assert(lists:member(self(), Children)),
+    ?assert(lists:member(me(), Children)),
     {ok, Records} = erx_inspector:entries([processes], all),
-    ?assert(lists:any(fun(#{id := Id}) -> Id =:= self() end, Records)),
+    ?assert(lists:any(fun(#{id := Id}) -> Id =:= me() end, Records)),
     ?assertEqual({ok, []}, erx_inspector:entries([processes], [5])).
 
 machine() ->
@@ -140,7 +190,7 @@ scoped_record_keeps_what_the_scope_sees_test() ->
 %%% Renderers
 
 process_record(Attrs) ->
-    #{schema => 1, path => [processes, self()], kind => process, id => self(),
+    #{schema => 1, path => [processes, me()], kind => process, id => me(),
       attrs => Attrs, children => []}.
 
 rendered(Attr) ->
@@ -214,7 +264,7 @@ overview_shows_error_statuses_test() ->
 
 overview_names_a_cells_own_reporter_test() ->
     {ok, A} = erx_process_records:record(self(), info(), ?SYSTEM),
-    B = A#{id := list_to_pid("<0.1.0>"),
+    B = A#{id := {pid, ?SYSTEM, 1, 0},
            attrs := (maps:get(attrs, A))#{reductions := {service, {ok, 7}}}},
     Text = iolist_to_binary(erx_render:overview([{[processes], {ok, [A, B]}}], release)),
     ?assertMatch({match, _}, re:run(Text, <<"\n  by +runtime +runtime +runtime">>)),

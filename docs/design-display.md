@@ -822,7 +822,7 @@ would write back as other text, parses as `error`.
 
 | Presentation | Marked path | Value | Text |
 | --- | --- | --- | --- |
-| `pid` | `processes *pid` | a pid | `3.45.0` |
+| `pid` | `processes *proc_id` | `{pid, 3, 45, 0}` | `3.45.0` |
 | `domain` | `domains *domain_id` | `3` | `3` |
 | `module` | `domains *domain_id modules *module_name` | `{3, <<"lists">>}` | `3/lists` |
 | `budget` | `budgets *budget_id` | `7` | `7` |
@@ -841,7 +841,7 @@ An attribute's value is shown as a presentation when its type is the
 variable segment type of a presentation of one segment, and the generator
 refuses two such presentations over one type, so which values are
 presentations is a fact derived from the schema: a process's
-`group_leader`, of type `pid`, shows as a pid presentation, and a
+`group_leader`, of type `proc_id`, shows as a pid presentation, and a
 budget's `domain`, of type `domain_id`, as a domain presentation. A value
 of a presentation of several segments, a module or a program, is made by
 the code that knows the parts, as `erx:ps()` names a program.
