@@ -3,7 +3,7 @@
   "cpuset": 15,
   "console": "/pl011@9000000",
   "hostlink": "/pl011@9040000",
-  "ram_bytes": 201326592,
+  "ram_bytes": 234881024,
   "fiasco_reserve": 16777216,
   "units": [
     {

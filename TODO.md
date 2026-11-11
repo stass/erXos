@@ -1628,7 +1628,7 @@ it; git history is the record of completed work.
 * [Medium] packer, `tools/lib/erx/manifest.rb` (`RootStartup`) and `pack.rb`: nothing at build
   time holds the archive and `root_memory` together to RAM less `fiasco_reserve`. The root
   startup rule checks only `root_memory` against RAM less the reserve, so a release that grows
-  the archive past the room the development manifest leaves (47.75 MiB, of which the archive
+  the archive past the room the development manifest leaves (51.75 MiB, of which the archive
   takes 46.70) packs and passes `make check`, and the pool falls short only at boot. Check
   archive plus `root_memory` against the machine's platform record when packing, with a
   seeded-fault test.

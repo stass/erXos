@@ -162,7 +162,7 @@ class BootPlaceTest < Minitest::Test
   end
 
   # The development machine's root fits that machine; one linked for the oracle's 2 GiB
-  # machine, 192 MiB into RAM, is refused there: it lies past what that RAM holds.
+  # machine, 192 MiB into RAM, is refused on a machine of 192 MiB: it lies past what that RAM holds.
   def test_the_development_machines_root_loads_on_the_development_machine
     machine = Erx::ProductionImage::DEVELOPMENT_MACHINE
     output = plan(archive(standard.merge('boot/stopgap-root' => linked_root(machine: machine))),
@@ -172,7 +172,7 @@ class BootPlaceTest < Minitest::Test
     assert_includes machine.root_address...(machine.root_address + MIB2), placed.to_i(16)
     assert_equal 'refused boot/stopgap-root place_outside_memory',
                  refused(archive(standard.merge('boot/stopgap-root' => linked_root(machine: Erx::OracleQemu::MACHINE))),
-                         memory_size: machine.memory_mib << 20)
+                         memory_size: 192 << 20)
   end
 
   def test_a_reservation_moves_the_kernel_to_the_next_unit
