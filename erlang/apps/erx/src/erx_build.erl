@@ -3,8 +3,9 @@
 
 -module(erx_build).
 -moduledoc """
-What this runtime knows of the boot image's build: its identifier and the
-facts of its build that `uname -v` shows.
+What this runtime knows of the boot image's build: its identifier, the
+facts of its build that `uname -v` shows, and whether it is a development
+build (development/0).
 
 The build identifier is the pack header's `build_id` (abi/erx_abi.txt,
 `erx_pack_header`), as every domain's init receives it: liberx's runtime
@@ -36,6 +37,7 @@ has no such file, such as a hosted one, has
 
 -export([id/0, id/1]).
 -export([facts/0, parse_facts/1]).
+-export([development/0, development/1, development_flag/1]).
 
 -export_type([facts/0]).
 
@@ -91,6 +93,44 @@ decimal(Word, Bits) ->
         false ->
             error
     end.
+
+-doc """
+Whether this is a development build: the system manifest's development flag,
+which is the build's kind, since the image build checks the flag against the
+kind it builds. False when the manifest cannot be read or does not parse,
+so a reader that cannot tell takes the release build's answer. The manifest
+is read at its path in the system domain's namespace, where the system
+release's tree is the root, so only the system domain's answer is the
+build's.
+""".
+-spec development() -> boolean().
+development() ->
+    <<"system/", Path/binary>> = ?ERX_SYSTEM_MANIFEST_PATH_BYTES,
+    development(file:read_file(<<"/", Path/binary>>)).
+
+-doc """
+The development flag of the system manifest `file:read_file/1` returned,
+false for one it could not read or parse. Pure, for its tests.
+""".
+-spec development({ok, binary()} | {error, term()}) -> boolean().
+development({ok, Manifest}) ->
+    maybe
+        {ok, View} ?= erx_manifest:open(Manifest),
+        {ok, #{flags := Flags}} ?= erx_manifest:header(View),
+        development_flag(Flags)
+    else
+        _ -> false
+    end;
+development({error, _}) ->
+    false.
+
+-doc """
+Whether a manifest's Flags mark a development build, a partial boot's
+included. Pure, for its tests.
+""".
+-spec development_flag(non_neg_integer()) -> boolean().
+development_flag(Flags) ->
+    Flags band ?ERX_MANIFEST_DEVELOPMENT =/= 0.
 
 -doc "The build facts in this runtime's release.".
 -spec facts() -> {ok, facts()} | {error, {atom(), string()}}.

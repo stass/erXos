@@ -41,7 +41,7 @@ reach a terminal only through the field escape of `/proc/kernel/log`
 (erx_procfs_core) or a view's renderer, as in the system domain.
 """.
 
--export([start_reader/0, grant/2, build_flags/0]).
+-export([start_reader/0, grant/2]).
 -export([read_fun/1, answer/1]).
 -export([reader_init/1]).
 
@@ -85,34 +85,17 @@ serve(_Request) ->
     {error, ?ERX_EINVAL}.
 
 -doc """
-The facets the console hands a session beside its console facet, for a
-build whose system manifest has Flags (build_flags/0): `log`, in front of
-Reader with erx_facet's default limits, in a development build, and none
-in a release build or one whose manifest could not be read.
+The facets the console hands a session beside its console facet, where
+Development is whether this is a development build
+(erx:development_build/0): `log`, in front of Reader with erx_facet's
+default limits, in a development build, and none in a release build or one
+whose manifest could not be read.
 """.
--spec grant(non_neg_integer() | unknown, pid() | none) -> #{log => {pid(), #{}}}.
-grant(Flags, Reader) when is_integer(Flags), Flags band ?ERX_MANIFEST_DEVELOPMENT =/= 0, is_pid(Reader) ->
+-spec grant(boolean(), pid() | none) -> #{log => {pid(), #{}}}.
+grant(true, Reader) when is_pid(Reader) ->
     #{log => {Reader, #{}}};
-grant(_Flags, _Reader) ->
+grant(_Development, _Reader) ->
     #{}.
-
--doc """
-The flags of this build's system manifest, or `unknown` when it cannot be
-read: its development flag is the build's kind, which the image build
-checks against the kind it builds. Read in the system domain, where the
-system release's tree is the root.
-""".
--spec build_flags() -> non_neg_integer() | unknown.
-build_flags() ->
-    <<"system/", Path/binary>> = ?ERX_SYSTEM_MANIFEST_PATH_BYTES,
-    maybe
-        {ok, Manifest} ?= file:read_file(<<"/", Path/binary>>),
-        {ok, View} ?= erx_manifest:open(Manifest),
-        {ok, #{flags := Flags}} ?= erx_manifest:header(View),
-        Flags
-    else
-        _ -> unknown
-    end.
 
 %%% The session's side.
 

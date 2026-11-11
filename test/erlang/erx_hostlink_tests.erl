@@ -8,7 +8,6 @@
 -module(erx_hostlink_tests).
 
 -include_lib("eunit/include/eunit.hrl").
--include("generated/erx_abi.hrl").
 
 %% The root passes the build identifier in decimal, which init can parse as a term; the
 %% hello reports it in hexadecimal, as the root's identity line prints it. 2255e43fb7866bb3
@@ -80,7 +79,7 @@ relay_answering(Test, Answer) ->
 
 open_web(Relay) ->
     Test = self(),
-    erx_hostlink_web:open(self(), Relay, {ok, <<"00000000000000ff">>}, ?ERX_MANIFEST_DEVELOPMENT,
+    erx_hostlink_web:open(self(), Relay, {ok, <<"00000000000000ff">>}, true,
                           fun(_Web) -> #{line => Test, principal => <<"forged">>} end).
 
 %% Root's line is reached for no open that is refused.
@@ -91,9 +90,9 @@ no_line(_Web) -> error(line_reached).
 web_facet_needs_the_relay_test() ->
     Relay = spawn(fun() -> receive stop -> ok end end),
     ?assertEqual({{error, unsupported}, []},
-                 erx_hostlink_web:open(self(), undefined, {ok, <<"00">>}, ?ERX_MANIFEST_DEVELOPMENT, fun no_line/1)),
+                 erx_hostlink_web:open(self(), undefined, {ok, <<"00">>}, true, fun no_line/1)),
     ?assertEqual({{error, unsupported}, []},
-                 erx_hostlink_web:open(self(), Relay, {error, {no_build, "none"}}, ?ERX_MANIFEST_DEVELOPMENT, fun no_line/1)),
+                 erx_hostlink_web:open(self(), Relay, {error, {no_build, "none"}}, true, fun no_line/1)),
     persistent_term:put({erx, facets}, #{web => Relay}),
     try ?assertEqual({{error, unsupported}, []}, erx_hostlink:root({open, web}, self()))
     after persistent_term:erase({erx, facets})
@@ -101,15 +100,13 @@ web_facet_needs_the_relay_test() ->
     Relay ! stop.
 
 %% The web front end logs every browser in as root, so the root offers the web facet only
-%% on a development build: a release build, a partial boot of one, or a build whose
-%% manifest flags are unknown is refused with the relay held, no facet starts and root's
-%% line is not reached, so no session is exported to the web domain.
+%% on a development build: any other, a release build or one whose manifest cannot be
+%% read (erx:development_build/0), is refused with the relay held, no facet starts and
+%% root's line is not reached, so no session is exported to the web domain.
 web_facet_needs_a_development_build_test() ->
     Relay = spawn(fun() -> receive stop -> ok end end),
     Build = {ok, <<"00000000000000ff">>},
-    ?assertEqual({{error, unsupported}, []}, erx_hostlink_web:open(self(), Relay, Build, ?ERX_MANIFEST_MODE_RELEASE, fun no_line/1)),
-    ?assertEqual({{error, unsupported}, []}, erx_hostlink_web:open(self(), Relay, Build, ?ERX_MANIFEST_PARTIAL_BOOT, fun no_line/1)),
-    ?assertEqual({{error, unsupported}, []}, erx_hostlink_web:open(self(), Relay, Build, unknown, fun no_line/1)),
+    ?assertEqual({{error, unsupported}, []}, erx_hostlink_web:open(self(), Relay, Build, false, fun no_line/1)),
     Relay ! stop.
 
 hostlink_call(Facet, Request) ->

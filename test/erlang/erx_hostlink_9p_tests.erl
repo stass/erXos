@@ -11,6 +11,7 @@ check what a host reads back.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(NOFID, 16#ffffffff).
 -define(MSIZE, 8192).
@@ -403,15 +404,20 @@ the_fid_table_holds_256_fids_by_default_test() ->
 %%% The trees a build serves ----------------------------------------------
 
 a_development_build_serves_the_designs_trees_test() ->
-    ?assertEqual([<<"proc">>, <<"data">>], erx_hostlink_files:default_trees(1)),
-    %% A partial boot is a development build's too.
-    ?assertEqual([<<"proc">>, <<"data">>], erx_hostlink_files:default_trees(3)).
+    ?assertEqual([<<"proc">>, <<"data">>], erx_hostlink_files:default_trees(true)).
 
+%% A manifest's development flag marks a development build, a partial boot's too.
+the_development_flag_marks_a_development_build_test() ->
+    ?assert(erx_build:development_flag(?ERX_MANIFEST_DEVELOPMENT)),
+    ?assert(erx_build:development_flag(?ERX_MANIFEST_DEVELOPMENT bor ?ERX_MANIFEST_PARTIAL_BOOT)),
+    ?assertNot(erx_build:development_flag(?ERX_MANIFEST_MODE_RELEASE)).
+
+%% A manifest that cannot be read, or does not parse, is no development build's
+%% (erx_build:development/1), so the build serves no tree.
 a_release_build_or_an_unread_manifest_serves_none_test() ->
-    ?assertEqual([], erx_hostlink_files:default_trees(0)),
-    ?assertEqual([], erx_hostlink_files:default_trees(unknown)),
-    ?assertEqual(unknown, erx_hostlink_files:manifest_flags({error, enoent})),
-    ?assertEqual(unknown, erx_hostlink_files:manifest_flags({ok, <<"not a manifest">>})).
+    ?assertEqual([], erx_hostlink_files:default_trees(false)),
+    ?assertNot(erx_build:development({error, enoent})),
+    ?assertNot(erx_build:development({ok, <<"not a manifest">>})).
 
 %% The configuration's list of trees is atoms; any other entry, or a value that is no
 %% list, refuses the configuration with that entry named, line-escaped, rather than

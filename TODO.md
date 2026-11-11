@@ -1452,8 +1452,8 @@ it; git history is the record of completed work.
   widens to `all`. Declare `abi/services/inspect.txt` with `inspect_reply_max`, the three floors,
   `inspect_worker_heap` and `inspect_query_max`; make records name processes as `proc_id()` data, never pids
   (V10); start the facet with the session's ready answer as a system-service grant of its template, with
-  `erx_domain_core:inspect_scope/2` (one
-  `development_build/0` in `erx` replacing `erx_hostlink_files:build_flags/0` and its copy in `erx_log_facet`);
+  `erx_domain_core:inspect_scope/3`, its arguments the grantee's principal, the manifest's system-shell
+  principals and `erx:development_build/0`;
   route `erx_inspector`'s calls without a scope through the facet, each request in a bounded query worker;
   start `erx_inspect_agent` in every domain, named in the ready report and kept only when the incarnation owns
   it, with `collects_domain/2` as its rule; start `erx_procfs` over the facet rather
@@ -4534,9 +4534,9 @@ to the corpus and follow rc
   The kernel log goes with this scope: in a development build the console hands every session it starts (root's,
   in a development build) a `log` facet in front of the system domain's log reader (`erlang/apps/erx/src/erx_log_facet.erl`, `grant/2`),
   through which the session's `/proc/kernel/log`, its `dmesg` and its web views read the whole kernel log; a
-  narrowing removes that grant with the scope. Its gate is the manifest's development flag alone, read by a copy of
-  `erx_hostlink_files:build_flags/0`: one `development_build/0` in `erx` should own the decision for both, and
-  `grant/2` should check root's principal, not rely on a development build having no other; a session keeps a dead
+  narrowing removes that grant with the scope. Its gate is the manifest's development flag alone
+  (`erx:development_build/0`): `grant/2` should check root's principal, not rely on a development build having
+  no other; a session keeps a dead
   facet after a console restart, as its console facet. The facet exists only in a
   development build, which runs trusted code only. The owner accepted the wide scope; narrowing it to root's own
   domains, or removing it, changes design-live.md ("Scopes"), design-web.md (W1) and design-domains.md

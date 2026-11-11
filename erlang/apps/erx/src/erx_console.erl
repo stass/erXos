@@ -967,7 +967,7 @@ start_session(Why, #state{principal = Principal, endpoint = Endpoint, log_reader
 %% none loaded, as a hosted one, starts none.
 started(Principal, ConsoleFacet, Reader) ->
     try
-        LogFacets = erx_log_facet:grant(erx_log_facet:build_flags(), Reader),
+        LogFacets = erx_log_facet:grant(erx:development_build(), Reader),
         erx_domain:start_session(Principal, LogFacets#{console => ConsoleFacet})
     catch
         exit:{noproc, _} -> {error, enotsup};

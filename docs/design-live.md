@@ -1407,9 +1407,11 @@ inspector, and sends it with the grantee's ready answer, a session's and
 a configured domain's alike
 ([design-system.md](design-system.md#facets-a-configured-domain-serves),
 "Facets of the system domain's services"), with the scope
-that one pure function, `erx_domain_core:inspect_scope/2`, gives for the
-grantee's principal and the manifest's development flag: `all` for
-`root` in a development build, and otherwise `{principal, P}`, the
+that one pure function, `erx_domain_core:inspect_scope/3`, gives for the
+grantee's principal, the manifest's system-shell principals and its
+development flag: `all` for a system-shell principal (`root` in a
+development build) in a development build, and otherwise
+`{principal, P}`, the
 principal's domains. The inspector resolves `{principal, P}` at each
 query from the domain service's records, its death records included,
 so a domain the principal starts later is in scope from its start and
@@ -2388,6 +2390,7 @@ grant's rights and bounds (V3).
 | `erx:trace(Spec) -> {ok, reference()} \| {error, Reason}` | starts a trace of processes, frames or kernel events, `Spec` as in [Tracing](#tracing), that prints in the shell; `Reason` is `badarg`, `no_facet` or `scope` for a refusal, and `{failed, Why}` when the trace process ends before it has started the trace, `Why` its exit reason; `erx:trace_stop(Ref)` ends it |
 | `erx:attach(Domain) -> ok \| {error, Reason}` | a console session with a shell inside `Domain`, through its console facet, which the caller holds for its own principal's domains; the shell has that domain's authority, never the system shell's ([The console](#the-console)) |
 | `erx:console_size(Width, Height) -> ok` | system domain only |
+| `erx:development_build() -> boolean()` | system domain only: the system manifest's development flag, false when the manifest cannot be read or does not parse |
 | `erx_code:history(DomainId, Module) -> {ok, [{Hash, Time}]} \| {error, scope}` | the hashes loaded into a domain for a module, newest first, at most 16, through the caller's inspect facet ([The code store](#the-code-store)) |
 
 **Shortcuts.** The shell commands of the vision work without the `erx:`
@@ -2702,7 +2705,7 @@ determinism test of the generated tree.
   late, which is printed marked `late`.
 * **The inspect service and the runtime agent:** each test names the
   seeded fault that must make it fail:
-  * `erx_domain_core:inspect_scope/2` over every pair of `root` or
+  * `erx_domain_core:inspect_scope/3` over every pair of `root` or
     another principal and the development flag set or clear, on the
     host; seeded: `all` for every principal of a development build.
   * A holder cannot widen its scope: a request that carries a scope, in

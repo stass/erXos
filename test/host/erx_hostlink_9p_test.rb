@@ -9,8 +9,9 @@ require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_hostlink_9p_tests.erl, the EUnit cases of the host link's 9P bridge
 # (erx_hostlink_9p's core and erx_hostlink_files over a real erx_fs grant of
-# erx_fs_test_tree), compiled from source on stock's emulator (ERX_ERL and ERX_ERLC, which
-# make check supplies) with the generated codec, grammar and erx_abi.hrl from build/gen.
+# erx_fs_test_tree, and erx_build's reading of the manifest's development flag),
+# compiled from source on stock's emulator (ERX_ERL and ERX_ERLC, which make check
+# supplies) with the generated codec, grammar and erx_abi.hrl from build/gen.
 class ErxHostlink9pTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.
@@ -22,7 +23,7 @@ class ErxHostlink9pTest < Minitest::Test
   SOURCES = [*GENERATED,
              *%w[erlang/apps/erx_files/src/erx_fs_grant.erl
                  erlang/apps/erx_files/src/erx_fs.erl erlang/apps/erx_files/src/erx_fs_version.erl
-                 erlang/apps/erx/src/erx_text.erl
+                 erlang/apps/erx/src/erx_text.erl erlang/apps/erx/src/erx_build.erl
                  erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl erlang/apps/erx_hostlink/src/erx_hostlink_files.erl]
                .map { |source| File.join(ROOT, source) }].freeze
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)

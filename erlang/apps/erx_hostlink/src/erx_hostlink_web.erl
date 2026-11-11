@@ -59,7 +59,7 @@ with it, and the host opens the facet again.
 The root's answer to `{open, web}`, with the facets it opened. The facet
 opens, and ends with `Link`, when all three hold:
 
-* the system manifest's development flag is set, since the host's front
+* this is a development build (erx:development_build/0), since the host's front
   end logs every browser in as `root`, which only a development build's
   host may do (docs/design-web.md, "The host tool's front end");
 * this domain holds the web domain's relay, the facet of service `web`
@@ -82,23 +82,22 @@ logged in.
 """.
 -spec open(pid()) -> {{ok, pid()} | {error, unsupported}, [pid()]}.
 open(Link) ->
-    open(Link, erx:cap(web), erx_build:id(), erx_hostlink_files:build_flags(), fun root_line/1).
+    open(Link, erx:cap(web), erx_build:id(), erx:development_build(), fun root_line/1).
 
 -doc """
-open/1 on the relay, build identifier and manifest flags given, and
+open/1 on the relay, build identifier and development flag given, and
 `LineOf`, which exports root's line to the web domain whose id it is
 given and answers `#{line => Line}`, or `#{}` with no line. For the tests.
 """.
--spec open(pid(), pid() | undefined, {ok, binary()} | {error, term()}, non_neg_integer() | unknown,
+-spec open(pid(), pid() | undefined, {ok, binary()} | {error, term()}, boolean(),
            fun((pos_integer()) -> #{line => pid()})) ->
           {{ok, pid()} | {error, unsupported}, [pid()]}.
-open(Link, Relay, {ok, Build}, Flags, LineOf)
-  when is_pid(Relay), is_integer(Flags), Flags band ?ERX_MANIFEST_DEVELOPMENT =/= 0 ->
+open(Link, Relay, {ok, Build}, true, LineOf) when is_pid(Relay) ->
     Web = erx:owner(Relay),
     Line = maps:with([line], LineOf(Web)),
     {ok, Facet} = start(Link, Relay, Web, Line#{principal => ?PRINCIPAL, build => Build}),
     {{ok, Facet}, [Facet]};
-open(_Link, _Relay, _Build, _Flags, _LineOf) ->
+open(_Link, _Relay, _Build, _Development, _LineOf) ->
     {{error, unsupported}, []}.
 
 %% Root's line, exported to the web domain Web, or none. Every wait is bounded: the

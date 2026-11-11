@@ -5,7 +5,8 @@
 -moduledoc """
 The domain service's pure core (docs/design-system.md, "The domain service's
 record"; docs/design-domains.md, "Domain ids, pids and references"): ids,
-names, each domain's life, death records and configured restarts. It makes
+names, each domain's life, death records, configured restarts and the scope
+of a domain's inspect facet (inspect_scope/3). It makes
 no call; erx_domain_srv does the effects and keeps the state in its own heap.
 
 Ids. The system domain is 4, since a domain's id is its node's creation and
@@ -36,7 +37,8 @@ state is a bug of the caller and fails with a badmatch.
 
 -export([new/1, host/1, admit/4, built/5, running/2, ready/2, stopping/2, failed/2, ended/5,
          restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1, session_name/3]).
--export_type([state/0, domain/0, origin/0, info/0, slogan/0]).
+-export([inspect_scope/3]).
+-export_type([state/0, domain/0, origin/0, info/0, slogan/0, inspect_scope/0]).
 
 -define(SYSTEM_ID, 4).
 -define(ID_MAX, 16#ffffffff).
@@ -55,6 +57,8 @@ state is a bug of the caller and fails with a badmatch.
 -type binding() :: #{principal := pos_integer(), node := node(), holder := none | pos_integer()}.
 -type death() :: #{id := pos_integer(), name := erx_ident:t(), info := info(), at := integer(),
                    slogan => slogan()}.
+%% Every domain, or the domains of one principal (inspect_scope/3).
+-type inspect_scope() :: all | {principal, pos_integer()}.
 %% A crash's slogan as the domain wrote it, untrusted text, or why its crash area could not be read.
 -type slogan() :: binary() | {unreadable, atom() | {status, integer()}}.
 -opaque state() :: #{host := binary(), next_id := pos_integer(),
@@ -234,6 +238,24 @@ info({halt, Status}) -> {halt, Status};
 info({crash, _}) -> crash;
 info({fault, Kind}) -> {fault, Kind};
 info({stopped, _}) -> stopped.
+
+-doc """
+The scope of the inspect facet the service mints for a domain of Principal
+(docs/design-live.md, "The inspect service"): `all`, every domain, for root
+in a development build, and otherwise `{principal, Principal}`, the
+principal's own domains, which the inspector resolves at each query. Root is
+any of Roots, the system manifest's system-shell principals, and Development
+is the manifest's development flag (erx:development_build/0); the caller
+reads both, so no principal number is root by itself. This is the one
+decision of an inspect facet's scope.
+""".
+-spec inspect_scope(pos_integer(), [pos_integer()], boolean()) -> inspect_scope().
+inspect_scope(Principal, Roots, Development)
+  when is_integer(Principal), Principal > 0, is_list(Roots), is_boolean(Development) ->
+    case Development andalso lists:member(Principal, Roots) of
+        true -> all;
+        false -> {principal, Principal}
+    end.
 
 %% Only a crash's death carries a slogan.
 death(#{info := crash} = Death, Slogan) when Slogan =/= none -> Death#{slogan => Slogan};

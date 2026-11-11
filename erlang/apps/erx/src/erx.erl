@@ -9,7 +9,8 @@ to the module that does the work, with that module's authority and no
 authority of its own.
 """.
 
--export([i/0, i/1, source/1, trace/1, trace_stop/1, export/3, exports/1, owner/1, cap/1, caps/0]).
+-export([i/0, i/1, source/1, trace/1, trace_stop/1, export/3, exports/1, owner/1, cap/1, caps/0,
+         development_build/0]).
 
 %%% Source lines: erx:source/1.
 
@@ -150,3 +151,16 @@ facets.
 -spec caps() -> #{atom() => pid()}.
 caps() ->
     persistent_term:get({erx, facets}, #{}).
+
+%%% The build.
+
+-doc """
+System domain only: whether this is a development build, from the system
+manifest's development flag (erx_build:development/0), and false when the
+manifest cannot be read or does not parse. The path read is the manifest's
+in the system domain's namespace, so in any other domain the answer is not
+the build's.
+""".
+-spec development_build() -> boolean().
+development_build() ->
+    erx_build:development().

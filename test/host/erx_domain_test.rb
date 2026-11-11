@@ -22,7 +22,7 @@ require_relative '../../tools/lib/erx/generated'
 # erx_driver_ctl, the driver-control facet, and erx_blk_sup behind it, and
 # test/erlang/erx_devfs_tests.erl for /dev, erx_devfs and erx_devfs_core, with the
 # erx_fs behaviour and the schema's and text's modules they call. Each fault of
-# DEVFS_FAULTS replaces one passage of /dev's sources, and the case it names must fail.
+# FAULTS replaces one passage of one of these sources, and the case it names must fail.
 class ErxDomainTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # erx_domain_srv includes the generated erx_abi.hrl, in build/gen.
@@ -80,25 +80,34 @@ class ErxDomainTest < Minitest::Test
     assert_eunit_passes('erx_devfs_tests', deadline: 60)
   end
 
-  DevfsFault = Data.define(:name, :from, :to, :caught_by)
-  DEVFS = File.join(APPLICATION, 'erx_devfs.erl')
-  # The read-only tree's own refusal of ctl, the seeded fault of P5b: without it the tree
-  # walks to ctl, so a session holding only the read-only tree could reset a driver.
-  DEVFS_FAULTS = [
-    DevfsFault.new(name: 'a read-only tree that accepts ctl',
-                   from: %q{walk({device, Index}, <<"ctl">>, #{rights := rw}) ->},
-                   to: %q{walk({device, Index}, <<"ctl">>, _Fs) ->},
-                   caught_by: 'the_read_only_tree_has_no_ctl_test')
+  # Each fault replaces one passage of one source of the service, and the case it names,
+  # of the EUnit module tests, must fail.
+  Fault = Data.define(:name, :file, :from, :to, :tests, :caught_by)
+  FAULTS = [
+    # The read-only tree's own refusal of ctl, the seeded fault of P5b: without it the
+    # tree walks to ctl, so a session holding only the read-only tree could reset a driver.
+    Fault.new(name: 'a read-only tree that accepts ctl', file: File.join(APPLICATION, 'erx_devfs.erl'),
+              from: %q{walk({device, Index}, <<"ctl">>, #{rights := rw}) ->},
+              to: %q{walk({device, Index}, <<"ctl">>, _Fs) ->},
+              tests: 'erx_devfs_tests', caught_by: 'the_read_only_tree_has_no_ctl_test'),
+    # The inspect facet's scope (docs/design-live.md, "The inspect service"): a development
+    # build that gives every principal's session the whole machine.
+    Fault.new(name: 'scope all for every principal of a development build',
+              file: File.join(APPLICATION, 'erx_domain_core.erl'),
+              from: 'Development andalso lists:member(Principal, Roots)',
+              to: 'Development andalso is_list(Roots)',
+              tests: 'erx_domain_tests', caught_by: 'inspect_scope_test')
   ].freeze
 
-  def test_dev_tree_cases_catch_each_seeded_fault
-    DEVFS_FAULTS.each do |fault|
-      source = File.read(DEVFS)
+  def test_the_cases_catch_each_seeded_fault
+    FAULTS.each do |fault|
+      source = File.read(fault.file)
       assert_includes source, fault.from, fault.name
-      Dir.mktmpdir('erx-devfs-fault') do |faulted|
-        File.write(File.join(faulted, 'erx_devfs.erl'), source.sub(fault.from, fault.to))
-        sources = SOURCES.map { |path| path == DEVFS ? File.join(faulted, 'erx_devfs.erl') : path }
-        output = eunit_output('erx_devfs_tests', deadline: 60, sources: sources)
+      Dir.mktmpdir('erx-domain-fault') do |faulted|
+        copy = File.join(faulted, File.basename(fault.file))
+        File.write(copy, source.sub(fault.from, fault.to))
+        sources = SOURCES.map { |path| path == fault.file ? copy : path }
+        output = eunit_output(fault.tests, deadline: 120, sources: sources)
         refute output.fetch(:passed), "#{fault.name} passed:\n#{output.fetch(:text)}"
         assert_match(/#{fault.caught_by}.*\*failed\*/m, output.fetch(:text), fault.name)
       end

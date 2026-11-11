@@ -9,14 +9,12 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
 
-%% Only a development build's manifest hands the facet, in front of the reader.
+%% Only a development build hands the facet, in front of the reader.
 grant_test() ->
     Reader = self(),
-    ?assertEqual(#{log => {Reader, #{}}}, erx_log_facet:grant(?ERX_MANIFEST_DEVELOPMENT, Reader)),
-    ?assertEqual(#{log => {Reader, #{}}}, erx_log_facet:grant(?ERX_MANIFEST_DEVELOPMENT bor 16#100, Reader)),
-    ?assertEqual(#{}, erx_log_facet:grant(0, Reader)),
-    ?assertEqual(#{}, erx_log_facet:grant(16#100, Reader)),
-    ?assertEqual(#{}, erx_log_facet:grant(unknown, Reader)).
+    ?assertEqual(#{log => {Reader, #{}}}, erx_log_facet:grant(true, Reader)),
+    ?assertEqual(#{}, erx_log_facet:grant(false, Reader)),
+    ?assertEqual(#{}, erx_log_facet:grant(true, none)).
 
 %% A read's lines and a refusal pass as they are; any other shape fails the check.
 answer_test() ->

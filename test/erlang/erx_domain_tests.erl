@@ -132,6 +132,24 @@ deaths_kept_test() ->
     ?assertEqual(16, length(Deaths)),
     ?assertMatch([#{id := 24} | _], Deaths).
 
+%% The inspect facet's scope for every pair of root (a system-shell principal the
+%% manifest names) or another principal, and a development or a release build: only
+%% root in a development build has `all`. Root is whichever principal the manifest
+%% names, so principal 1 is root only where the manifest says so, and a manifest
+%% naming none has no root.
+inspect_scope_test() ->
+    Cases = [{1, [1], true, all},
+             {2, [1], true, {principal, 2}},
+             {1, [1], false, {principal, 1}},
+             {2, [1], false, {principal, 2}},
+             {3, [1, 3], true, all},
+             {7, [7], true, all},
+             {1, [7], true, {principal, 1}},
+             {1, [], true, {principal, 1}}],
+    [?assertEqual({Principal, Roots, Development, Scope},
+                  {Principal, Roots, Development, erx_domain_core:inspect_scope(Principal, Roots, Development)})
+     || {Principal, Roots, Development, Scope} <- Cases].
+
 restart_test() ->
     Core0 = erx_domain_core:new(<<"erxos">>),
     {yes, Core1} = erx_domain_core:restart(0, 2, 10, 100, Core0),

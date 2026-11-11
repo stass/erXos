@@ -23,17 +23,14 @@ anything else the bridge receives is dropped.
 Which trees the host may reach is the host-link configuration's:
 `files_trees` in `erx_hostlink`'s environment, a list of atoms, when it sets
 one, and otherwise the build's (`default_trees/1`): `proc` and `data` in a
-development build, none in a release build. The build's kind is the system
-manifest's development flag, which the image build checks against the kind
-it builds, so the bridge reads it there; a manifest it cannot read lists
-none. Each tree is found among the system domain's namespace entries as the
-grant mounted with that tree name and no root below it (`tree_grant/3`).
+development build, none in a release build, as erx:development_build/0
+tells them apart, a manifest that cannot be read counting as a release
+build's. Each tree is found among the system domain's namespace entries as
+the grant mounted with that tree name and no root below it (`tree_grant/3`).
 """.
 
--export([start/2, tree_grant/3, configured_trees/0, default_trees/1, build_flags/0, manifest_flags/1]).
+-export([start/2, tree_grant/3, configured_trees/0, default_trees/1]).
 -export([init/2]).
-
--include("generated/erx_abi.hrl").
 
 %% The bridge's heap: its tables are bounded by the pool, 256 fids, and 64
 %% slots, and a message it holds by the stream's msize.
@@ -132,7 +129,7 @@ configured_trees() ->
         {ok, Names} ->
             tree_names(Names, []);
         undefined ->
-            {ok, default_trees(build_flags())}
+            {ok, default_trees(erx:development_build())}
     end.
 
 tree_names([], Acc) ->
@@ -148,42 +145,13 @@ refused(Bad) ->
     {error, {files_trees, erx_text:escape_line(io_lib:format("~tP", [Bad, 12]))}}.
 
 -doc """
-The trees a build serves when its configuration lists none, from its system
-manifest's flags: `proc` and `data` in a development build, and none in a
-release build or when the flags are `unknown` (docs/design-live.md, "Files
-between the host and the machine"). Pure, for the tests.
+The trees a build serves when its configuration lists none: `proc` and
+`data` in a development build, and none in any other, a release build or
+one whose manifest cannot be read (docs/design-live.md, "Files between the
+host and the machine"). Pure, for the tests.
 """.
--spec default_trees(non_neg_integer() | unknown) -> [binary()].
-default_trees(Flags) when is_integer(Flags), Flags band ?ERX_MANIFEST_DEVELOPMENT =/= 0 ->
+-spec default_trees(boolean()) -> [binary()].
+default_trees(true) ->
     [<<"proc">>, <<"data">>];
-default_trees(_Flags) ->
+default_trees(false) ->
     [].
-
--doc """
-The flags of this build's system manifest, or `unknown` when it cannot be
-read. Its development flag is the build's kind, which the image build checks
-against the kind it builds, so the host link's development-only facets read
-it here.
-""".
--spec build_flags() -> non_neg_integer() | unknown.
-build_flags() ->
-    manifest_flags(file:read_file(manifest_path())).
-
--doc "The flags of the system manifest `file:read_file/1` returned, or `unknown`. Pure, for the tests.".
--spec manifest_flags({ok, binary()} | {error, term()}) -> non_neg_integer() | unknown.
-manifest_flags({ok, Manifest}) ->
-    maybe
-        {ok, View} ?= erx_manifest:open(Manifest),
-        {ok, #{flags := Flags}} ?= erx_manifest:header(View),
-        Flags
-    else
-        _ -> unknown
-    end;
-manifest_flags({error, _}) ->
-    unknown.
-
-%% The system manifest in the system domain's namespace, where the system
-%% release's tree is the root.
-manifest_path() ->
-    <<"system/", Path/binary>> = ?ERX_SYSTEM_MANIFEST_PATH_BYTES,
-    <<"/", Path/binary>>.
