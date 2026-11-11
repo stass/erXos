@@ -52,7 +52,7 @@ class Erx9pTest < Minitest::Test
       ->(text) { text.sub('  integer fid u32 except @p9_nofid', '  integer fid u32 except @p9_nofid local') } =>
         /only an integer with or ATOM may be local/,
       ->(text) { text.sub('  text data max @p9_io_max length u32', '  text data max @p9_io_max') } =>
-        /outside 0\.\.65535/,
+        /kind data: max past its u16 length/,
       ->(text) { text.sub('  text data max @p9_io_max length u32', '  text data max @p9_io_max length u8') } =>
         /length u16 or u32/
     }.each do |edit, message|

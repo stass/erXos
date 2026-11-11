@@ -49,6 +49,7 @@ module Erx
         files.merge!(CallEmitter.outputs(schema))
         files.merge!(ErlangEmitter.outputs(schema))
         files.merge!(ProtocolEmitter.outputs(schema))
+        files.merge!(ProfileEmitter.outputs(schema))
         files.merge!(WireEmitter.outputs(schema))
         files.merge!(InspectionEmitter.outputs(schema))
         files.merge!(PresentEmitter.outputs(schema))

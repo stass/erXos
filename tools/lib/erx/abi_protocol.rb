@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require_relative 'abi_model'
+require_relative 'abi_profile'
 
 module Erx
   module ABI
@@ -18,7 +19,15 @@ module Erx
       REFUSALS = %w[nul slash empty dot dotdot].freeze
       MEASURES = %w[value bytes length packed].freeze
       RELATIONS = %w[le le_nonempty].freeze
-      MAX_FIELDS = 32
+MAX_FIELDS = 32
+MAX_CASES = 32
+# Built-in kinds of a frame protocol: true or false, and a signal's protocol
+# name from abi/signals.txt (docs/design-abi.md, "Program protocol").
+FRAME_BUILTINS = %w[boolean signal].freeze
+# The words after an integer's base that start an option, which end a list of values.
+INTEGER_OPTIONS = %w[max in values or except unique refers local].freeze
+# A list of a frame protocol may hold up to 2^24 elements; a frame's own bound holds it far below.
+LIST_MAX = 1 << 24
       # The kind by which a request names a node. Each request field of this kind
       # ends in one of FID_ATTRIBUTES, what its fid names: "directory" a directory,
       # "node" any node, "new" a fid the request makes name a node (walk's may be
@@ -36,7 +45,7 @@ module Erx
       ERLANG_RESERVED = %w[after and andalso band begin bnot bor bsl bsr bxor case catch cond div else end
                            fun if let maybe not of or orelse receive rem try when xor].freeze
       RESERVED_KINDS = %w[atom binary bitstring boolean float function integer list list_of map number
-                          pid port record reference tuple utf8].freeze
+                          pid port record reference signal tuple utf8].freeze
 
       module_function
 
@@ -51,11 +60,20 @@ module Erx
         end.freeze
       end
 
+      # A protocol is one of two shapes: the file protocol's operations, each a
+      # request and its reply with an errors list, or a channel's frames, each
+      # {Tag, Version, Value} or {Tag, Version, Slot, Value} (docs/design-abi.md,
+      # "Program protocol"). Both declare their kinds in the one language below;
+      # the members that describe 9P2000.L's bytes fail in a frame protocol.
       def protocol(declaration, name, constants)
         errors = nil
         error_type = nil
         kinds = {}
         operations = []
+        frames = []
+        totals = {}
+        version = nil
+        reader = nil
         declaration.members.slice_before { |member| member.indent == 2 }.each do |line, *children|
           line.fail!('nested member has no parent') unless line.indent == 2
           keyword, *words = line.words
@@ -65,18 +83,38 @@ module Erx
             line.fail!('expected errors type N') unless words.size == 2 && words.first == 'type'
             error_type = number(words[1], 255, line, constants).fetch(:value)
             errors = error_numbers(children, line, constants)
-          when 'integer', 'text', 'tuple', 'list', 'map'
+          when 'integer', 'text', 'tuple', 'list', 'map', 'union'
             kind_name = atom_name(words.first, line: line)
             line.fail!("reserved kind name #{kind_name}") if RESERVED_KINDS.include?(kind_name)
-            line.fail!("duplicate kind #{kind_name}") if kinds.key?(kind_name) || BASE_KINDS.include?(kind_name)
-            line.fail!('only a map takes members') unless children.empty? || keyword == 'map'
+            if kinds.key?(kind_name) || BASE_KINDS.include?(kind_name) || totals.key?(kind_name)
+              line.fail!("duplicate kind #{kind_name}")
+            end
+            line.fail!('only a map or a union takes members') unless children.empty? || %w[map union].include?(keyword)
             kinds[kind_name] = kind(keyword, words.drop(1), children, line, kinds, constants)
+          when 'total'
+            line.fail!('expected total NAME MAX') unless words.size == 2
+            total = atom_name(words[0], line: line)
+            line.fail!("duplicate total #{total}") if totals.key?(total) || kinds.key?(total)
+            totals[total] = number(words[1], (1 << 32) - 1, line, constants)
+          when 'version'
+            line.fail!('expected one version N') unless words.size == 1 && version.nil?
+            version = number(words[0], 255, line, constants).fetch(:value)
+          when 'reader'
+            line.fail!('expected one reader c') unless words == ['c'] && reader.nil?
+            reader = 'c'
+          when 'frame' then frames << frame(line, words, kinds)
           when 'operation'
             operations << operation(line, words, children, kinds, constants)
           else
             line.fail!("unknown protocol member #{keyword}")
           end
         end
+        return Profile.frames(declaration, name: name, kinds: kinds, frames: frames, totals: totals,
+                                           version: version, reader: reader, constants: constants,
+                                           nine_p: errors || !operations.empty?) unless frames.empty?
+
+        declaration.fail!('only a frame protocol takes version, reader or total') if version || reader || !totals.empty?
+        Profile.operation_kinds!(declaration, kinds)
         declaration.fail!('protocol requires an errors list') unless errors
         declaration.fail!('protocol requires an operation') if operations.empty?
         Model.unique_values(operations.to_h { |item| [item.fetch(:name), item.fetch(:type)] },
@@ -86,7 +124,7 @@ module Erx
         end
         message_types = operations.flat_map { |item| [item.fetch(:type), item.fetch(:type) + 1] } + [error_type]
         declaration.fail!('message types of requests, replies and errors collide') unless message_types.uniq.size == message_types.size
-        used = used_kinds(kinds, operations)
+        used = used_kinds(kinds, operations.flat_map { |item| item.fetch(:request) + (item.fetch(:reply) || []) }.map(&:last))
         unused = kinds.keys - used
         declaration.fail!("unused kinds #{unused.join(' ')}") unless unused.empty?
         { name: name, module: "#{name}_grammar", source: declaration.line.path,
@@ -103,75 +141,151 @@ module Erx
           line.fail!('a tuple has 1 to 32 elements') unless words.size.between?(1, MAX_FIELDS)
           { form: 'tuple', elements: words.map { |word| known_kind(word, line, kinds) }.freeze }.freeze
         when 'list' then list_kind(words, line, kinds, constants)
-        when 'map'
-          line.fail!('a map takes no options') unless words.empty?
-          line.fail!('a map has 1 to 32 fields') unless children.size.between?(1, MAX_FIELDS)
-          fields = children.map do |child|
-            child.fail!('expected field NAME KIND') unless child.words.size == 3 && child.words.first == 'field'
-            [atom_name(child.words[1], line: child), known_kind(child.words[2], child, kinds)]
-          end
-          line.fail!('duplicate map field') unless fields.map(&:first).uniq.size == fields.size
-          { form: 'map', fields: fields.map(&:freeze).freeze }.freeze
+        when 'map' then map_kind(words, children, line, kinds)
+        when 'union' then union_kind(words, children, line, kinds)
         end
       end
 
+      def map_kind(words, children, line, kinds)
+        line.fail!('a map takes no options') unless words.empty?
+        line.fail!('a map has 1 to 32 fields') unless children.size.between?(1, MAX_FIELDS)
+        fields = children.map do |child|
+          unless child.words.size == 3 && %w[field optional].include?(child.words.first)
+            child.fail!('expected field NAME KIND or optional NAME KIND')
+          end
+          [atom_name(child.words[1], line: child), known_kind(child.words[2], child, kinds),
+           child.words.first == 'optional'].freeze
+        end
+        line.fail!('duplicate map field') unless fields.map(&:first).uniq.size == fields.size
+        # fields keeps the [name, kind] pairs every map has; optional names the keys that may be absent.
+        { form: 'map', fields: fields.map { |field, kind, _| [field, kind].freeze }.freeze,
+          optional: fields.select(&:last).map(&:first).freeze }.freeze
+      end
+
+      # Each "case ATOM [=ATOM...] [KIND...]": the atoms that select it, the
+      # case's own first, and the kinds of its fields.
+      def union_kind(words, children, line, kinds)
+        line.fail!('a union takes no options') unless words.empty?
+        line.fail!("a union has at most #{MAX_CASES} cases") if children.size > MAX_CASES
+        cases = children.map do |child|
+          keyword, first, *rest = child.words
+          child.fail!('expected case ATOM [=ATOM...] [KIND...]') unless keyword == 'case' && first
+          literals = rest.take_while { |word| word.start_with?('=') }
+          fields = rest.drop(literals.size)
+          child.fail!('a literal atom comes before the fields') if fields.any? { |word| word.start_with?('=') }
+          atoms = [first, *literals.map { |word| word.delete_prefix('=') }].map { |word| atom_name(word, line: child) }
+          child.fail!('a case has at most 32 elements') if atoms.size + fields.size > MAX_FIELDS
+          { atoms: atoms.freeze, fields: fields.map { |word| known_kind(word, child, kinds) }.freeze,
+            c_name: atoms.join('_') }.freeze
+        end
+        { form: 'union', cases: cases.freeze }.freeze
+      end
+
+      # u8, u16, u32 or u64, then the options: one of "max N", "in MIN MAX",
+      # "values N..." and "or ATOM"; "except N", "unique", "refers LIST"
+      # and "local", each at most once.
       def integer_kind(words, line, constants)
-        local = words.last == 'local'
-        base, option, *values = local ? words[0...-1] : words
+        base, *options = words
         line.fail!('an integer is u8, u16, u32 or u64') unless INTEGER_BITS.key?(base)
         maximum = (1 << INTEGER_BITS.fetch(base)) - 1
-        numbers = -> { values.map { |value| number(value, maximum, line, constants) } }
-        result = { form: 'integer', base: base }
-        case [option, values.size]
-        in ['max', 1] then result[:max] = numbers.call.first
-        in ['except', 1] then result[:except] = numbers.call.first
-        in ['in', 1..16]
-          result[:in] = numbers.call.freeze
-          line.fail!('duplicate value') unless result[:in].map { |item| item.fetch(:value) }.uniq.size == values.size
-        in ['or', 1] then result[:atom] = atom_name(values.first, line: line)
-        else line.fail!('an integer takes max N, except N, in VALUES or or ATOM')
+        value = ->(word) { number(word, maximum, line, constants) }
+        result = { form: 'integer', base: base, local: false }
+        until options.empty?
+          option = options.shift
+          range = %i[max min values atom].any? { |key| result.key?(key) }
+          case option
+          when 'max', 'in', 'values', 'or' then line.fail!('an integer takes one range') if range
+          end
+          line.fail!("duplicate integer option #{option}") if %w[except unique refers local].include?(option) &&
+                                                             result.key?(option.to_sym) && result[option.to_sym]
+          case option
+          when 'max' then result[:max] = value.call(options.shift)
+          when 'in'
+            result[:min] = value.call(options.shift)
+            result[:max] = value.call(options.shift)
+            line.fail!('an integer range has MIN above MAX') if result[:min].fetch(:value) > result[:max].fetch(:value)
+          when 'values'
+            numbers = options.take_while { |word| !INTEGER_OPTIONS.include?(word) }
+            line.fail!('values takes 1 to 16 numbers') unless numbers.size.between?(1, 16)
+            options = options.drop(numbers.size)
+            result[:values] = numbers.map(&value).freeze
+            line.fail!('duplicate value') unless result[:values].map { |item| item.fetch(:value) }.uniq.size == numbers.size
+          when 'or' then result[:atom] = atom_name(options.shift, line: line)
+          when 'except' then result[:except] = value.call(options.shift)
+          when 'unique' then result[:unique] = true
+          when 'refers' then result[:refers] = atom_name(options.shift, line: line)
+          when 'local' then result[:local] = true
+          else line.fail!('an integer takes max N, in MIN MAX, values N..., or ATOM, except N, unique, refers LIST or local')
+          end
         end
-        line.fail!('only an integer with or ATOM may be local') if local && !result[:atom]
-        result[:local] = local
+        line.fail!('only an integer with or ATOM may be local') if result[:local] && !result[:atom]
         result.freeze
       end
 
+      # max N, then "utf8", "refuse" and its refusals, "assign", "path",
+      # "sum TOTAL" and "length u16|u32", in any order.
       def text_kind(words, line, constants)
         line.fail!('a text starts with max N') unless words[0] == 'max' && words.size >= 2
-        length = words.size >= 4 && words[-2] == 'length' ? words.last : 'u16'
-        line.fail!('a text has length u16 or u32') unless LENGTHS.key?(length)
-        words = words[0...-2] if words[-2] == 'length'
-        result = { form: 'text', max: number(words[1], LENGTHS.fetch(length), line, constants),
-                   utf8: false, refuse: [], length: length }
-        rest = words.drop(2)
-        if rest.first == 'utf8'
-          result[:utf8] = true
-          rest = rest.drop(1)
+        options = words.drop(2)
+        result = { form: 'text', utf8: false, refuse: [], length: 'u16', assign: false, path: false }
+        until options.empty?
+          option = options.shift
+          case option
+          when 'utf8', 'assign', 'path'
+            line.fail!("duplicate text option #{option}") if result[option.to_sym]
+            result[option.to_sym] = true
+          when 'refuse'
+            refusals = options.take_while { |word| REFUSALS.include?(word) }
+            line.fail!('expected refuse followed by refusals') if refusals.empty? || !result[:refuse].empty?
+            line.fail!('unknown or duplicate refusal') unless refusals.uniq.size == refusals.size
+            options = options.drop(refusals.size)
+            result[:refuse] = refusals
+          when 'sum' then result[:sum] = atom_name(options.shift, line: line)
+          when 'length'
+            result[:length] = options.shift
+            result[:length_given] = true
+            line.fail!('a text has length u16 or u32') unless LENGTHS.key?(result[:length])
+          else line.fail!("unknown text option #{option}")
+          end
         end
-        unless rest.empty?
-          line.fail!('expected refuse followed by refusals') unless rest.first == 'refuse' && rest.size > 1
-          refusals = rest.drop(1)
-          line.fail!('unknown or duplicate refusal') unless refusals.all? { |item| REFUSALS.include?(item) } &&
-                                                            refusals.uniq.size == refusals.size
-          result[:refuse] = refusals
-        end
+        # A text without length is bounded by its frame; 9P2000.L's u16 length is held in operation_kinds!.
+        result[:max] = number(words[1], result[:length_given] ? LENGTHS.fetch(result[:length]) : LIST_MAX, line, constants)
         result[:refuse] = result[:refuse].freeze
         result.freeze
       end
 
       def list_kind(words, line, kinds, constants)
         element, max_word, maximum, *rest = words
-        line.fail!('a list is ELEMENT max N [packed N]') unless max_word == 'max' && [0, 2].include?(rest.size)
+        line.fail!('a list is ELEMENT max N [packed N] [ascending]') unless max_word == 'max'
         result = { form: 'list', element: known_kind(element, line, kinds),
-                   max: number(maximum, 65_536, line, constants) }
-        unless rest.empty?
-          line.fail!('expected packed N') unless rest.first == 'packed'
-          tuple = kinds[element]
-          last = tuple && tuple[:form] == 'tuple' && kinds[tuple.fetch(:elements).last]
-          line.fail!('a packed list holds tuples that end in a text') unless last && last[:form] == 'text'
-          result[:packed] = number(rest[1], 65_536, line, constants)
+                   max: number(maximum, LIST_MAX, line, constants), ascending: false }
+        until rest.empty?
+          case rest.shift
+          when 'ascending'
+            line.fail!('duplicate ascending') if result[:ascending]
+            result[:ascending] = true
+          when 'packed'
+            tuple = kinds[element]
+            last = tuple && tuple[:form] == 'tuple' && kinds[tuple.fetch(:elements).last]
+            line.fail!('a packed list holds tuples that end in a text') unless last && last[:form] == 'text'
+            line.fail!('duplicate packed') if result[:packed]
+            result[:packed] = number(rest.shift, 65_536, line, constants)
+          else line.fail!('a list is ELEMENT max N [packed N] [ascending]')
+          end
         end
         result.freeze
+      end
+
+      # frame NAME to|from TAG [slot] KIND
+      def frame(line, words, kinds)
+        name, direction, tag, *rest = words
+        slot = rest.first == 'slot'
+        rest = rest.drop(1) if slot
+        unless %w[to from].include?(direction) && tag && rest.size == 1
+          line.fail!('expected frame NAME to|from TAG [slot] KIND')
+        end
+        { name: atom_name(name, line: line), direction: direction, tag: atom_name(tag, line: line), slot: slot,
+          kind: known_kind(rest.first, line, kinds), line: line }.freeze
       end
 
       def operation(line, words, children, kinds, constants)
@@ -309,7 +423,8 @@ module Erx
 
       def known_kind(word, line, kinds)
         name = atom_name(word, line: line)
-        line.fail!("unknown kind #{name}") unless BASE_KINDS.include?(name) || kinds.key?(name)
+        known = BASE_KINDS.include?(name) || FRAME_BUILTINS.include?(name) || kinds.key?(name)
+        line.fail!("unknown kind #{name}") unless known
         name
       end
 
@@ -321,19 +436,20 @@ module Erx
         { value: value, constant: word.start_with?('@') ? word.delete_prefix('@') : nil }.freeze
       end
 
-      # Every kind an operation reaches, directly or through another kind.
-      def used_kinds(kinds, operations)
-        pending = operations.flat_map { |item| item.fetch(:request) + (item.fetch(:reply) || []) }.map(&:last)
+      # Every kind roots reach, directly or through another kind.
+      def used_kinds(kinds, roots)
+        pending = roots.dup
         seen = []
         until pending.empty?
           name = pending.shift
-          next if seen.include?(name) || BASE_KINDS.include?(name)
+          next if seen.include?(name) || BASE_KINDS.include?(name) || FRAME_BUILTINS.include?(name)
 
           seen << name
           kind = kinds.fetch(name)
           pending.concat(kind.fetch(:elements, []))
           pending << kind[:element] if kind[:element]
           pending.concat(kind.fetch(:fields, []).map(&:last))
+          pending.concat(kind.fetch(:cases, []).flat_map { |item| item.fetch(:fields) })
         end
         seen
       end

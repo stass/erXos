@@ -27,7 +27,7 @@ module Erx
       CODE_VARIABLES = /\ABin\d+\z/
 
       def self.outputs(schema)
-        schema.protocols.to_h do |protocol|
+        schema.protocols.select { |protocol| protocol.key?(:operations) }.to_h do |protocol|
           ["#{OUTPUT_DIRECTORY}/#{protocol.fetch(:name)}.erl", new(protocol).emit]
         end.freeze
       end
@@ -96,7 +96,7 @@ module Erx
       end
 
       def wire_macros
-        numbers = @kinds.values.flat_map { |kind| [kind[:max], kind[:except], *kind.fetch(:in, [])] }
+        numbers = @kinds.values.flat_map { |kind| [kind[:max], kind[:except], *kind.fetch(:values, [])] }
         defines = numbers.compact.select { |number| number.fetch(:constant) }.uniq
                          .sort_by { |number| number.fetch(:constant) }
                          .map { |number| "-define(#{macro(number)}, #{number.fetch(:value)})." }

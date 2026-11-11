@@ -394,6 +394,8 @@ module Erx
                    name: 'fuzz-erx-code-request', deadline: 660, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_9p_grammar.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-9p-grammar', deadline: 660, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_prog_grammar.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-prog-grammar', deadline: 660, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_9p.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-9p', deadline: 660, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_hostlink_9p.rb'), '--seed', options.fetch(:seed).to_s],

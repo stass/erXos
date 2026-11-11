@@ -1,0 +1,127 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The program protocol's frame profile: the frames of a program's channel
+# (docs/design-programs.md#the-startup-message,
+# docs/design-programs.md#the-program-protocol) and their bounds
+# (docs/design-abi.md#program-protocol). tools/lib/erx/abi_emit_protocol.rb
+# generates the Erlang grammar build/gen/otp/erts/preloaded/src/erx_prog_grammar.erl
+# from it, and tools/lib/erx/abi_emit_profile.rb the table liberx's C check
+# reads (build/gen/include/erx/prog_profile.h and
+# build/gen/liberx/generated/prog_profile.c).
+#
+# Readings where the programs and pipes designs state no bound:
+# * A pid and a pgid are 2 to 2^31 - 1 and a ppid 1 to 2^31 - 1, as the
+#   startup message gives them.
+# * A pipe's number, an end's number, a write end's number and a pipe's
+#   count of write ends, pos_integer() in the designs, are u32 from 1, as the
+#   pipe server's C layouts hold them (docs/design-pipes.md#the-pipe-servers-records);
+#   a read end's index is 0 to 63.
+# * A read end's list of write ends holds at most 8,192 entries, more than
+#   a frame of prog_frame_max bytes can carry, so the frame bound is the
+#   one that holds it.
+# * The data area's Slots, its count of 64 KiB slots, is 1 to 16, the
+#   slots a request may name.
+# * An open is any u16, an entry of the program's open table.
+#
+# Members (docs/design-abi.md#program-protocol has the full table):
+# "version N" is the version every frame carries; "reader c" makes the
+# generator emit the C check; "frame NAME to|from TAG [slot] KIND" is a
+# frame {TAG, Version, Value} or {TAG, Version, Slot, Value}. An integer is
+# u8, u16, u32 or u64, "in MIN MAX" or "values N...", "except N",
+# "unique" (no two values of the kind in one frame are equal) and
+# "refers LIST" (the value is the first field of an element of LIST that
+# holds no refers value itself). A text has "max N", "utf8",
+# "refuse nul", "assign" (a name before its first "="), "path" (absolute
+# and normalised) and "sum TOTAL"; "total NAME MAX" bounds the texts marked
+# "sum NAME", each counting its length and its NUL. A list has "max N" and
+# "ascending"; a map's "field" keys must be present and its "optional"
+# keys may be; a union's "case ATOM [=ATOM...] [KIND...]" is its atom, or
+# a tuple of its atom, its literal atoms and its fields. "boolean" and
+# "signal" are built in.
+
+limit prog_frame_max u32 196608
+limit prog_args_max u32 131072
+limit prog_path_max u32 4096
+limit prog_fds_max u32 1024
+
+protocol erx_prog
+  version 1
+  reader c
+  integer process_id u32 in 2 0x7fffffff
+  integer parent_id u32 in 1 0x7fffffff
+  integer fd u16 in 0 1023
+  integer dup_target u16 in 0 1023 refers fds
+  integer cap u64 except @cap_null unique
+  integer open u16 in 0 0xffff
+  integer umask u16 in 0 511
+  integer data_slots u8 in 1 16
+  integer pipe_id u32 in 1 0xffffffff
+  integer end_id u32 in 1 0xffffffff
+  integer wend u32 in 1 0xffffffff
+  integer wend_count u32 in 1 0xffffffff
+  integer rix u8 in 0 63
+  integer lane_size u32 values 16384 65536
+  total args @prog_args_max
+  text arg max @prog_args_max utf8 refuse nul sum args
+  text env_var max @prog_args_max utf8 refuse nul assign sum args
+  text cwd max @prog_path_max utf8 refuse nul path
+  list argv arg max @prog_args_max
+  list env env_var max @prog_args_max
+  list signals signal max 128 ascending
+  union access
+    case read
+    case write
+    case read_write
+  union writer_state
+    case open
+    case gone
+  tuple pipe_end pipe_id end_id
+  tuple reader rix cap
+  list write_readers reader max 64 ascending
+  list read_readers reader max 63 ascending
+  tuple writer wend cap cap lane_size cap writer_state
+  list writers writer max 8192 ascending
+  map write_end
+    field wend wend
+    field ring cap
+    field rpage cap
+    field size lane_size
+    field readers write_readers
+  map read_end
+    field rix rix
+    field lock cap
+    field wends wend_count
+    field writers writers
+    field readers read_readers
+  union descriptor
+    case pipe =write pipe_end write_end
+    case pipe =read pipe_end read_end
+    case socketpair pipe_end read_end pipe_end write_end
+    case file open access
+    case tty open access
+    case dir open
+    case socket open
+    case dup dup_target
+    case null
+  tuple fd_entry fd descriptor
+  list fds fd_entry max @prog_fds_max ascending
+  tuple data_area cap data_slots
+  union image
+    case object cap
+  map start
+    field pid process_id
+    field ppid parent_id
+    field pgid process_id
+    field argv argv
+    field env env
+    field cwd cwd
+    field spawn boolean
+    field sigmask signals
+    field sigignore signals
+    field umask umask
+    field data_area data_area
+    field fds fds
+    optional image image
+  union request
+  frame start to erx_start start
+  frame request from erx_prog slot request

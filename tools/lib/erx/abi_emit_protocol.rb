@@ -4,6 +4,8 @@
 
 require_relative 'abi_model'
 require_relative 'abi_emit_erlang'
+require_relative 'abi_emit_frame_grammar'
+require_relative 'abi_emit_profile'
 
 module Erx
   module ABI
@@ -30,8 +32,14 @@ module Erx
                         'dotdot' => '".."' }.freeze
 
       def self.outputs(schema)
+        signals = schema.signals.signals.select(&:nameable?)
         schema.protocols.to_h do |protocol|
-          ["#{OUTPUT_DIRECTORY}/#{protocol.fetch(:module)}.erl", new(protocol).emit]
+          emitter = if protocol.key?(:frames)
+                      FrameGrammarEmitter.new(protocol, signals: signals, frame_max: protocol.fetch(:frame_max))
+                    else
+                      new(protocol)
+                    end
+          ["#{OUTPUT_DIRECTORY}/#{protocol.fetch(:module)}.erl", emitter.emit]
         end.freeze
       end
 
@@ -83,7 +91,7 @@ module Erx
 
       # Every limit the table names becomes a macro of the same name.
       def macros
-        numbers = @kinds.values.flat_map { |kind| [kind[:max], kind[:except], kind[:packed], *kind.fetch(:in, [])] } +
+        numbers = @kinds.values.flat_map { |kind| [kind[:max], kind[:except], kind[:packed], *kind.fetch(:values, [])] } +
                   @operations.filter_map { |operation| operation[:writes] }
                              .flat_map { |rule| [rule[:value], *rule.fetch(:masks, [])] }
         defines = numbers.compact.select { |number| number.fetch(:constant) }.uniq
@@ -274,7 +282,7 @@ module Erx
         base = "a #{kind.fetch(:base)}"
         if kind[:max] then "#{base} of at most #{literal(kind[:max])}"
         elsif kind[:except] then "#{base} other than #{literal(kind[:except])}"
-        elsif kind[:in] then kind[:in].map { |value| literal(value) }.join(' or ')
+        elsif kind[:values] then kind[:values].map { |value| literal(value) }.join(' or ')
         else "#{base} or #{kind.fetch(:atom)}"
         end
       end
@@ -304,7 +312,7 @@ module Erx
         base = "is_#{kind.fetch(:base)}(Value)"
         body = if kind[:max] then "#{base} andalso Value =< #{literal(kind[:max])}"
                elsif kind[:except] then "#{base} andalso Value =/= #{literal(kind[:except])}"
-               elsif kind[:in] then kind[:in].map { |value| "Value =:= #{literal(value)}" }.join(' orelse ')
+               elsif kind[:values] then kind[:values].map { |value| "Value =:= #{literal(value)}" }.join(' orelse ')
                else "Value =:= #{kind.fetch(:atom)} orelse #{base}"
                end
         "is_#{kind_name}(Value) ->\n    #{body}."

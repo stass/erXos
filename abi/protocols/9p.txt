@@ -32,7 +32,7 @@
 # carries (Linux's asm-generic errno-base.h and errno.h; ENOTSUP is
 # EOPNOTSUPP there). "integer", "text", "tuple", "list" and "map" declare
 # the field kinds; an integer is u8, u16, u32 or u64 with "max N",
-# "except N", "in A B" or "or ATOM", and "local" after "or ATOM" for one
+# "except N", "values A B" or "or ATOM", and "local" after "or ATOM" for one
 # 9P2000.L does not carry; a text has "max N", "utf8", "refuse" of nul,
 # slash, empty, dot (".") and dotdot (".."), and "length u32"; a list has
 # "max N" elements and "packed N" for a list of tuples ending in a text,
@@ -149,7 +149,7 @@ protocol erx_9p
   integer fid u32 except @p9_nofid
   integer io_count u32 max @p9_io_max
   integer xattr_size u64 max @p9_xattr_max
-  integer unlink_flags u32 in 0 @p9_at_removedir
+  integer unlink_flags u32 values 0 @p9_at_removedir
   integer at u64 or unknown local
   text name max @name_max utf8 refuse nul slash empty dot dotdot
   text walk_name max @name_max utf8 refuse nul slash empty dot

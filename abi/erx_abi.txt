@@ -17,6 +17,7 @@ include formats/erofs.txt
 include kernel.txt
 include signals.txt
 include protocols/9p.txt
+include protocols/prog.txt
 include protocols/hostlink.txt
 include formats/ui.txt
 include formats/draw.txt

@@ -45,8 +45,9 @@ class Erx9pGrammarTest < Minitest::Test
       '  integer utf8 u32 max 1' => /reserved kind name utf8/,
       '  integer a.b u32 max 1' => /not a plain Erlang atom/,
       '  integer q u64 or end' => /not a plain Erlang atom/,
+      '  integer odd u32 max 10 except 5' => /takes one of max, values, or ATOM and except/,
       "  operation error 201\n    request fid u32" => /cannot be named error/,
-      '  text huge max 65536' => /outside 0\.\.65535/,
+      '  text huge max 65536' => /kind huge: max past its u16 length/,
       '  text huge max 65537 length u32' => /outside 0\.\.65536/,
       "  operation clunk2 120\n    request fid u32" => /duplicate operation type/,
       "  operation odd 200\n    request fid u32\n    reply data u8\n    check data.length le fid.value" =>
