@@ -1905,11 +1905,12 @@ it; git history is the record of completed work.
   `Thread#kill`, which can land between `Process.spawn` and the pid's assignment in `Runner#run` or inside a
   cleanup ensure, leaving a local QEMU to its deadline or a remote one to the remote timeout. Give every lane a
   shared cancellation flag passed to `Runner#run`'s `cancelled:` instead. Cell names are agreed by string: each
-  Run spells `"#{accel}-#{count}cpu"` and the gate parses declared names with `CELL_NAME`; have suites declare
-  `QemuCells::Cell` values and `Placement#each` yield the `Cell`, so names have one source. A moved cell is
-  placed before reuse is consulted, so a busy host turns a stored HVF pass into a fresh TCG boot; look up the
-  local cell's record first. Nothing sweeps run directories a failed remote cleanup leaves under the remote
-  work directory.
+  Run spells `"#{accel}-#{count}cpu"` (boot_image adds its case after it) and the gate parses declared names
+  with `CELL_CASE_NAME`; have suites declare `QemuCells::Cell` values and `Placement#each` yield the `Cell`, so
+  names have one source. A moved cell is placed before reuse is consulted: with the default `--busy-load` a
+  load that crosses it turns a stored HVF pass into a fresh TCG boot; with `--busy-load 0` placement does not
+  depend on load, and only an HVF pass `make check-qemu` stored goes unused by the landing gate. Nothing
+  sweeps run directories a failed remote cleanup leaves under the remote work directory.
 * [Medium] build memo, `tools/lib/erx/build_memo.rb`: a warm `check-qemu --suite medium_boot` still runs the native
   runtime builds (OTP make walks, about 25 s of steps: `runtime-emulator`, `runtime-preloaded`, the Erlang apps),
   the pack-time Fiasco audit (70 `fiasco-audit-member` steps) and about 40 s of the orchestrator's own Ruby

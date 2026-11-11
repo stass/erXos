@@ -7,9 +7,11 @@ require_relative '../qemu_gate'
 
 # The domain library applying plans, and its ends, on native Fiasco, under HVF at each CPU count
 # (tools/lib/erx/native_domain.rb). check_qemu builds the kernel before any suite runs, so this suite does not.
+# Its multi-CPU cells pass under TCG on a second host, so it declares offload (QemuGate::Suite).
 cpus = [1, 4]
 Erx::QemuGate.declare_suite(
   cells: Erx::QemuGate.suite_cells(cpus),
+  offload: true,
   run: lambda do |context|
     run = Erx::NativeDomain::Run.new(root: context.root)
     ran = run.call(accels: [Erx::QemuGate::SUITE_ACCELERATOR], cpus: cpus, jobs: context.jobs, build: false,

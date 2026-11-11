@@ -8,7 +8,7 @@ require_relative '../qemu_gate'
 # A second task on native Fiasco, under HVF at each CPU count
 # (tools/lib/erx/native_task.rb). Run raises on the first disagreement, which the
 # gate reports as this suite failing. check_qemu builds the kernel before any suite runs, so this suite does not.
-# Its 4-CPU cell takes about 42 s under HVF here, so it declares offload (QemuGate::Suite).
+# Its multi-CPU cells pass under TCG on a second host, so it declares offload (QemuGate::Suite).
 cpus = [1, 4]
 Erx::QemuGate.declare_suite(
   cells: Erx::QemuGate.suite_cells(cpus),

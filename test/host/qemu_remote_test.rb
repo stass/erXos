@@ -110,6 +110,9 @@ class QemuRemoteTest < Minitest::Test
     assert_equal 'hvf-1cpu', Cells.place(Cells::Cell.new(accel: 'hvf', cpus: 1), HOST).name
     assert_equal %w[hvf-1cpu tcg-4cpu smoke-tcg-1cpu],
                  %w[hvf-1cpu hvf-4cpu smoke-tcg-1cpu].map { |name| Cells.placed_name(name, HOST) }
+    # A cell named with its case after it (boot_image's) moves as the cell does.
+    assert_equal %w[hvf-1cpu-single tcg-4cpu-single hvf-1cpu-two-file damage-cases],
+                 %w[hvf-1cpu-single hvf-4cpu-single hvf-1cpu-two-file damage-cases].map { |name| Cells.placed_name(name, HOST) }
   end
 
   def test_cells_move_only_for_an_offload_suite_on_a_busy_host

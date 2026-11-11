@@ -14,7 +14,7 @@ module Erx
   # suite before it runs (QemuCells.placement): its cells boot side by side
   # when this host has the idle cores for all of them, and at the landing
   # gate, when asked for and while this host is busy, a suite that declares
-  # its multi-CPU cells worth moving sends them to a remote host under TCG.
+  # offload sends its multi-CPU cells to a remote host under TCG.
   module QemuCells
     # The accelerator every suite cell runs under here, and the one a moved
     # cell runs under there: the remote host is not this host's architecture.
@@ -35,6 +35,8 @@ module Erx
 
     # A suite cell's name as Cell#name spells it.
     CELL_NAME = /\A(?<accel>[a-z]+)-(?<cpus>[1-9])cpu\z/
+    # A declared cell's name: a cell's, with the case it boots after it, if any.
+    CELL_CASE_NAME = /\A(?<accel>[a-z]+)-(?<cpus>[1-9])cpu(?<case>-[a-z0-9-]+)?\z/
 
     # One suite's placement: the remote host its multi-CPU cells move to, or
     # nil, and whether the cells that stay here boot side by side.
@@ -73,18 +75,21 @@ module Erx
       cell.with(accel: REMOTE_ACCELERATOR, remote: remote)
     end
 
-    # The name a suite's declared cell reports under remote; a name that is
-    # not a cell's (a conformance case, a smoke cell) is unchanged.
+    # The name a suite's declared cell reports under remote. A cell's name may
+    # carry the case it boots after it (boot_image's hvf-4cpu-single), which
+    # moves with the cell; a name that is not a cell's (a conformance case, a
+    # smoke cell) is unchanged.
     def placed_name(name, remote)
-      match = CELL_NAME.match(name)
+      match = CELL_CASE_NAME.match(name)
       return name unless match
 
-      place(Cell.new(accel: match[:accel], cpus: Integer(match[:cpus], 10)), remote).name
+      place(Cell.new(accel: match[:accel], cpus: Integer(match[:cpus], 10)), remote).name + match[:case].to_s
     end
 
     # A suite's placement, from this host's state as the gate reads it before
     # the suite runs. remote is the host the gate was given, or nil; offload
-    # is whether the suite declares its multi-CPU cells long enough to move.
+    # is whether the suite declares that its multi-CPU cells may move there
+    # (QemuGate::Suite).
     # They move only when this host is busy: its one-minute load average is
     # at least busy_load. The cells that stay here boot side by side when
     # their guest CPUs fit in the cores the load leaves idle.

@@ -158,12 +158,15 @@ host's one-minute load average and decides two things:
 * **Moved to a second host.** At the landing gate, `tools/erx check-qemu
   --remote DEST` names a second development host reached by ssh. A
   suite's cells at more than one CPU move there, under TCG, only when the
-  suite declares `offload` (one of its multi-CPU cells takes 30 s or more
-  under HVF here) and this host is busy: its one-minute load is at least
-  `--busy-load` (by default its CPU count). The 1-CPU cell stays here under
-  HVF, and the two hosts' boots run at once. A TCG cell on the other host
-  is slower than the HVF cell it replaces; what moving buys is load taken
-  off a saturated host.
+  suite declares `offload` and this host is busy: its one-minute load is at
+  least `--busy-load` (by default its CPU count; `--busy-load 0` moves them
+  always). A suite declares `offload` when its harness places its cells and
+  its multi-CPU cells pass under TCG on the other host in a gate's time; a
+  suite whose harness boots every cell here, or whose cells need what a
+  remote boot does not carry (below), does not. The 1-CPU cell stays here
+  under HVF, and the two hosts' boots run at once. A TCG cell on the other
+  host is slower than the HVF cell it replaces; what moving buys is load
+  taken off this host while its 1-CPU cells boot.
 
 `make check-qemu`, the milestone gate, passes `--one-at-a-time`: it never
 moves a cell and never boots two side by side, so every cell runs here
@@ -182,9 +185,10 @@ random name under the remote work directory, copies the image, initrd and
 device tree into it over ssh, and starts the remote QEMU with its serial
 line on ssh's standard input and output: the serial log fills here as a
 local boot's does, the transcript types through ssh's standard input, and
-the tree's own checkpoints and verifiers judge it here. Only a boot QEMU's inputs
-alone decide moves, the same boots reuse keys (no disk, network device or
-host link); a suite whose cells need those keeps them here. Reuse keys a
+the tree's own checkpoints and verifiers judge it here. Only a boot whose
+QEMU inputs alone decide its result moves, the same boots reuse keys: one
+with no disk, network device or host link (`Qemu#run` refuses a remote
+boot with any of them); a suite whose cells need those keeps them here. Reuse keys a
 remote boot by the host, the remote QEMU's path and its SHA-256, so no
 record is shared between hosts.
 

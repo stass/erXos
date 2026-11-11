@@ -19,9 +19,11 @@ require_relative '../system_domain'
 # runtime end with its slogan and the
 # machine end by itself. Run raises on the first disagreement, which the gate reports as this suite
 # failing. check_qemu builds the kernel before any suite runs, so this suite does not.
+# Its multi-CPU cells pass under TCG on a second host, so it declares offload (QemuGate::Suite).
 cpus = [1, 4]
 Erx::QemuGate.declare_suite(
   cells: Erx::SystemDomain::Run.cells(cpus),
+  offload: true,
   run: lambda do |context|
     ran = Erx::SystemDomain::Run.new(root: context.root).call(cpus: cpus, jobs: context.jobs, build: false,
                                                                     placement: context.placement)

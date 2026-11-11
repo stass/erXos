@@ -82,9 +82,9 @@ module Erx
 
     # A suite's cells are the ones it must report, as named here; the gate
     # holds it to them where it placed them (QemuGate.run), so a run that
-    # leaves one out cannot pass. offload declares its multi-CPU cells long
-    # enough to be worth moving to a remote host: one takes 30 s or more under
-    # HVF here.
+    # leaves one out cannot pass. offload declares that its multi-CPU cells
+    # may move to a remote host: its harness places them and they pass under
+    # TCG there in a gate's time (docs/design-build.md, "Placing cells").
     Suite = Data.define(:name, :cells, :run, :offload) do
       def initialize(name:, cells:, run:, offload: false)
         valid = cells.is_a?(Array) && !cells.empty? && cells.all?(String) && cells.uniq.size == cells.size

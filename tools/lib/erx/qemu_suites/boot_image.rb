@@ -11,10 +11,12 @@ require_relative '../runner'
 # BootImageCheck::Run raises on the first disagreement, which the gate reports
 # as this suite failing. check_qemu builds the kernel before any suite runs,
 # so this suite does not.
+# Its multi-CPU cells pass under TCG on a second host, so it declares offload (QemuGate::Suite).
 cpus = [1, 4]
 accel = Erx::QemuGate::SUITE_ACCELERATOR
 Erx::QemuGate.declare_suite(
   cells: [*cpus.map { |count| "#{accel}-#{count}cpu-single" }, "#{accel}-1cpu-two-file", 'damage-cases'],
+  offload: true,
   run: lambda do |context|
     runner = Erx::Runner.new(owner_root: context.root, log_dir: File.join(context.root, 'build/logs'))
     check = Erx::BootImageCheck::Run.new(root: context.root, runner: runner, compiler: ENV.fetch('ERX_CLANG', ''),
