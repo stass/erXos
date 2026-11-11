@@ -5,12 +5,15 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/data_volume'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/host_os'
 
 # The littlefs NIF (otp/erts/emulator/nifs/erxos/erx_littlefs_nif.c) built for the host,
 # loaded into the stock OTP 29.1.2 runtime, and driven with erx_lfs over a RAM window by
-# test/fixtures/erx_littlefs_tests.erl, on one dirty I/O scheduler. The runtime runs
+# test/fixtures/erx_littlefs_tests.erl, on one dirty I/O scheduler. Each volume starts as
+# installation writes it, from lfs-format's output (DataVolume), since a mount never formats. The runtime runs
 # uninstrumented: a loaded NIF under AddressSanitizer needs DYLD_INSERT_LIBRARIES, which
 # the development host's sandbox strips (TODO.md, storage); the image fuzz target runs
 # littlefs under both sanitizers.
@@ -36,13 +39,14 @@ class ErxLittlefsTest < Minitest::Test
   ERLANG
   CASES = %w[synced_file_survives_a_cut tree_operations block_error_ends_the_owner
              worker_end_ends_the_owner window_end_ends_the_owner mount_failure_ends_the_owner
-             deadline_ends_a_request refuses_bad_arguments].freeze
+             corrupt_volume_never_formats blank_blocks_do_not_mount deadline_ends_a_request refuses_bad_arguments].freeze
 
   def test_volume_cases_pass_under_one_dirty_io_scheduler
     skip 'stock OTP not built: make oracle-bootstrap' unless File.directory?(OTP)
 
     Dir.mktmpdir('erx-littlefs-') do |directory|
       build_nif(directory)
+      format_volume(directory)
       compile_modules(directory)
       output = run_cases(directory)
       CASES.each { |name| assert_match(/^ok #{name}$/, output) }
@@ -60,6 +64,12 @@ class ErxLittlefsTest < Minitest::Test
       '-o', File.join(directory, 'erx_littlefs.so'), stdin_data: ''
     )
     assert status.success?, output
+  end
+
+  # The fresh volume of the fixture's 2048-sector disk, as data.lfs beside the runtime.
+  def format_volume(directory)
+    runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
+    Erx::DataVolume.format(root: ROOT, owner_root: directory, runner: runner, directory: directory, data_sectors: 2048)
   end
 
   def compile_modules(directory)

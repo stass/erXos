@@ -624,6 +624,20 @@ unbounded recursion ([research](research-boards-storage.md#file-systems)).
 littlefs keeps no links and no device nodes, so its callback module
 answers `symlink`, `link` and `mknod` with `eperm`.
 
+**A mount never formats.** Only installation makes a volume. The step
+that writes a medium formats its data partition once, with the in-tree
+littlefs built for the development host (`tools/host/lfs_format.c`, with
+the geometry the guest mounts with, `erx_littlefs.h`), and places the
+volume's first blocks at the partition's start; every other block of a
+fresh volume is zeros. The release medium, the test suites' media and the
+website's disk are all written this way. The guest has no format
+operation: a mount that finds no volume, or a volume whose metadata fails
+its checks, fails with `eintegrity`, writes nothing and ends the storage
+domain. The domain service restarts the domain within its row's restart
+intensity, each restart's mount fails the same way, and the domain then
+stays ended with its death record. The files stay on the medium for a
+repair, and a corrupt volume never comes back as an empty `/data`.
+
 **Shared mappings.** A file that programs map shared is served by their
 session, which fills its own object with ordinary reads and writes it
 back with ordinary writes
@@ -1062,7 +1076,7 @@ a file closed and opened again may get a new qid path
 | A torn or unreadable record | the slot writer's read of the record | both slots complete | none on the machine: no row allows a write; an installation writes the record afresh | the update service reports the record and accepts no update |
 | An EROFS block fails its hash check | the hash-checking reader | the mount, read-only | none needed | `{error, eio}` for the read, and a log line naming the image and block |
 | A verified EROFS block holds a malformed structure | the reader's bounds checks | the mount | none needed | `{error, eio}` for the operation, and a log line naming the image and block |
-| A crafted or corrupt data partition | the file system's bounds checks and checksums | that partition | the failing process ends, its supervisor restarts it, and a storage domain that fails beyond its restart intensity is started again by the domain service from its specification | the domain's death record; that partition's files unavailable |
+| A crafted or corrupt data partition | the file system's bounds checks and checksums | that partition, which a mount that fails never writes | the failing process ends and the storage domain with it; the domain service starts it again from its specification within its restart intensity, and a volume that fails every mount leaves it ended, never formatted ([A mount never formats](#read-write-storage)) | the domain's death record; that partition's files unavailable |
 | littlefs's C code crashes | the port's sub-space faults, and its owner sees `{exit_status, N}` | the partition as littlefs left it; an unacknowledged operation has an unknown outcome | the owner's supervisor restarts the port once the window has answered the port's outstanding requests, and the port mounts the volume afresh | affected operations fail with `eio`; the partition unavailable until the remount |
 | The block device reports an error, or the controller stops answering | the device process's completions and its deadline | the request's buffer, quarantined until the device is reset ([design-runtime.md](design-runtime.md#the-device-nif)) | the device process reports to the device service, which resets the device | `{error, eio}` on the request; the inspector's device record |
 | The domain that runs the block driver ends | the domain service | every window dead; every client's reads and writes fail | the domain service starts the domain again from its specification, whose creation gives it the device again, the device service names its windows, and each client receives its window anew as a grant | `eio` on every file of every storage service until the windows return; the domain's death record |

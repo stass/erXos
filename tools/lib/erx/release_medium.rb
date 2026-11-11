@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require_relative 'boot_record'
+require_relative 'data_volume'
 require_relative 'erofs_image'
 require_relative 'error'
 require_relative 'medium_image'
@@ -13,9 +14,10 @@ module Erx
   # file and, after it, the release's EROFS image, which fsimg writes from the system
   # release's files at the paths the boot image's archive gives them
   # (ProductionImage::Built#release). The boot-selection record commits slot A
-  # (BootRecord.sector), and the rest of its partition, slot B, the vault's partition
-  # and the data partition hold zeros; /data's littlefs formats its volume over the
-  # zeros at its first mount (erx_lfs).
+  # (BootRecord.sector), and the rest of its partition, slot B and the vault's partition
+  # hold zeros. The data partition holds a fresh littlefs volume (DataVolume): writing a
+  # medium is installation, the one step that formats /data, since the guest's mount
+  # never does.
   module ReleaseMedium
     NAME = 'medium.img'
     EROFS = 'release.erofs'
@@ -37,8 +39,9 @@ module Erx
     # A slot's contents: the bootable file's extent and each EROFS image's, in order.
     SlotPlan = Data.define(:boot, :images)
     # The medium as written: its path, the EROFS image's path beside it, its data
-    # partition's length and slot A's plan.
-    Written = Data.define(:path, :erofs, :data_sectors, :slot)
+    # partition's length, slot A's plan and the data partition's fresh volume
+    # (DataVolume.format).
+    Written = Data.define(:path, :erofs, :data_sectors, :slot, :volume)
 
     module_function
 
@@ -98,22 +101,25 @@ module Erx
     end
 
     # Writes the medium into directory, which holds the build of built, whose EROFS image
-    # the build wrote (ProductionImage::Built#erofs).
-    def write(built:, directory:, data_sectors: MediumImage.constant('data_sectors_min'))
+    # the build wrote (ProductionImage::Built#erofs), with volume, a fresh volume of
+    # data_sectors' partition (DataVolume.format), in its data partition.
+    def write(built:, directory:, volume:, data_sectors: MediumImage.constant('data_sectors_min'))
       plan = slot_plan(boot: slot_file('boot', built.single), images: [slot_file(IMAGE, built.erofs)])
-      Written.new(path: medium(plan, directory: directory, data_sectors: data_sectors), erofs: built.erofs,
-                  data_sectors: data_sectors, slot: plan)
+      Written.new(path: medium(plan, directory: directory, data_sectors: data_sectors, volume: volume), erofs: built.erofs,
+                  data_sectors: data_sectors, slot: plan, volume: volume)
     end
 
-    # Writes the medium, NAME in directory, whose slot A holds plan's files and whose
-    # boot-selection record commits slot A; returns its path. A boot that may write
-    # its medium takes a fresh one from the plan of the release medium written once.
-    def medium(plan, directory:, data_sectors:)
+    # Writes the medium, NAME in directory, whose slot A holds plan's files, whose
+    # boot-selection record commits slot A and whose data partition holds volume; returns
+    # its path. A boot that may write its medium takes a fresh one from the plan and
+    # volume of the release medium written once.
+    def medium(plan, directory:, data_sectors:, volume:)
       slot = MediumImage.constant('slot_a_start')
       pieces = [plan.boot, *plan.images].to_h do |extent|
         [slot + (extent.slot_offset / SECTOR_BYTES), MediumImage::FilePiece.new(path: extent.file.path, length: extent.file.length)]
       end
       pieces[BootRecord::RECORD_OFFSET / SECTOR_BYTES] = BootRecord.sector(:a)
+      pieces.merge!(DataVolume.pieces(volume))
       MediumImage.create(directory: directory, name: NAME, data_sectors: data_sectors, pieces: pieces)
     end
 

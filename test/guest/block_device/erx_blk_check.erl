@@ -25,7 +25,7 @@
 %% medium layout, and the module drives the block service's windows alone
 %% (erx_blk_service:window/1, erx_blk_window). It reports each window's length, the medium
 %% sector whose host pattern its first and last sectors hold (the data window's last only:
-%% /data's littlefs volume formats over its first block at boot), and the refusal of the
+%% its first block holds /data's littlefs volume, which installation wrote), and the refusal of the
 %% sector past its end; it rewrites the data window's last sector with the guest's pattern of the
 %% medium sector it read there, and is refused a write past the vault's end. It does not
 %% know the layout: the harness checks the sectors it names against it.
@@ -43,13 +43,19 @@
 %% the storage domain ending, waits for the domain's next incarnation to run erx_storage, and
 %% reads the file back from /data as that incarnation mounted it.
 %%
+%% lfs_corrupt/0 is the driver domains suite's too, on a medium whose populated volume's
+%% metadata the harness corrupted: it watches the domain service's records until the storage
+%% domain has ended once for its first boot and once for each of its five restarts, each
+%% at a mount that failed, and is not made again, which is its death record standing, and sees no incarnation run
+%% erx_storage, whose start is /data's mount.
+%%
 %% Each line goes to the console in one erlang:display_string/2 call, which reaches the
 %% console's sink, its driver, whole (docs/design-runtime.md, "The console and standard
 %% I/O"), so a kernel log line the console writes lands between two lines, never inside one.
 
 -module(erx_blk_check).
 
--export([main/0, medium/0, data_write/0, data_read/0, lfs_restart/0]).
+-export([main/0, medium/0, data_write/0, data_read/0, lfs_restart/0, lfs_corrupt/0]).
 %% Run at the storage domain's node by step/1.
 -export([run/1, main_here/0, read_again_here/0, medium_here/0, data_write_here/0,
          data_read_here/0, lfs_write_here/0, lfs_kill_here/0, lfs_read_here/0]).
@@ -88,6 +94,12 @@
 -define(RESTARTED, "/data/restarted").
 -define(STORAGE_END_MS, 60000).
 -define(KILL_DELAY_MS, 200).
+%% lfs_corrupt's storage domain: its manifest row's name, its ends (a first boot and its
+%% row's five restarts), the time it has for them and how long none must follow.
+-define(STORAGE_NAME, <<"storage">>).
+-define(STORAGE_ENDS, 6).
+-define(CORRUPT_WAIT_MS, 240000).
+-define(SETTLE_MS, 5000).
 
 -spec main() -> ok.
 main() -> report(at_storage(main_here) ++ control()).
@@ -174,6 +186,46 @@ lfs_restart() ->
                timeout ->
                    [text("no driver", [])]
            end).
+
+-spec lfs_corrupt() -> ok.
+lfs_corrupt() ->
+    Deadline = erlang:monotonic_time(millisecond) + ?CORRUPT_WAIT_MS,
+    report(case ended_for_good(Deadline) of
+               {mounted, Ends} -> [text("storage domain mounted /data after ~b ends", [Ends])];
+               {timeout, Ends, Live} -> [text("storage domain ended ~b times, ~b live", [Ends, Live])];
+               {ended, Ends} -> [text("storage domain ended ~b times", [Ends]), text("storage domain not restarted", [])]
+           end).
+
+%% Waits until the storage domain has ended STORAGE_ENDS times and has no live
+%% incarnation, and none comes for SETTLE_MS: {ended, Ends}. An incarnation that runs
+%% erx_storage has mounted /data: {mounted, Ends}. Neither by Deadline, a monotonic time
+%% in milliseconds: {timeout, Ends, Live}.
+ended_for_good(Deadline) ->
+    case {storage_record(), wait_storage(1)} of
+        {{Ends, _}, ok} ->
+            {mounted, Ends};
+        {{Ends, 0}, timeout} when Ends >= ?STORAGE_ENDS ->
+            timer:sleep(?SETTLE_MS),
+            case storage_record() of
+                {Ends, 0} -> {ended, Ends};
+                _ -> ended_for_good(Deadline)
+            end;
+        {{Ends, Live}, timeout} ->
+            case erlang:monotonic_time(millisecond) >= Deadline of
+                true -> {timeout, Ends, Live};
+                false -> timer:sleep(?POLL_MS), ended_for_good(Deadline)
+            end
+    end.
+
+%% The storage domain's death records and live incarnations, from the domain service's
+%% state, which this test reads as the inspector would: the deaths of the storage row's
+%% principal, through the core's own API.
+storage_record() ->
+    #{core := Core, configured := Configured} = sys:get_state(erx_domain_srv),
+    Storage = fun(#{name := Name}) -> erx_ident:to_binary(Name) =:= ?STORAGE_NAME end,
+    Principals = lists:usort([Principal || #{principal := Principal} <- maps:values(Configured)]),
+    Deaths = lists:append([erx_domain_core:deaths(Principal, Core) || Principal <- Principals]),
+    {length(lists:filter(Storage, Deaths)), length(lists:filter(Storage, erx_domain_core:domains(Core)))}.
 
 %% The storage domain's end, seen as its node going down, and its next incarnation, seen
 %% running erx_storage, with the file read back from its /data.

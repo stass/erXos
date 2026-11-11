@@ -37,13 +37,14 @@ module Erx
     end
     module_function
 
-    def build(root:, owner_root:, directory:, runner:, compiler: 'clang', sanitizers: [])
+    def build(root:, owner_root:, directory:, runner:, compiler: 'clang', sanitizers: [], tools: PackToolRecipe::PROGRAMS.keys)
       raise Error, 'invalid host parser sanitizer' unless (sanitizers - %w[address undefined]).empty?
+      raise Error, 'unknown host parser recipe' unless tools.is_a?(Array) && !tools.empty? && (tools - PackToolRecipe::PROGRAMS.keys).empty?
       root = File.realpath(root)
       directory = OutputDirectory.prepare(root: owner_root, path: directory)
       compiler_profile = PackToolRecipe.compiler_profile(compiler: compiler, runner: runner, directory: directory,
                                                          owner_root: owner_root, root: root)
-      PackToolRecipe::PROGRAMS.keys.to_h do |key|
+      tools.uniq.to_h do |key|
         recipe = PackToolRecipe.plan(root: root, tool: key, sanitizers: sanitizers, compiler_profile: compiler_profile)
         name = recipe.fetch('name')
         path = File.join(directory, name)

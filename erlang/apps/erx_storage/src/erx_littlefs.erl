@@ -15,11 +15,11 @@ Open flags are littlefs's `LFS_O_` bits, which `erx_lfs` builds.
 """.
 
 -export([new/3, complete/2, payload/1, broken/1]).
--export([format/1, mount/1, stat/2, readdir/4, open/3, read/4, write/4,
+-export([mount/1, stat/2, readdir/4, open/3, read/4, write/4,
          truncate/3, size/2, sync/2, close/2, mkdir/2, remove/2, rename/3,
          fsstat/1]).
 
--nifs([new/3, complete/2, payload/1, broken/1, format/1, mount/1, stat/2, readdir/4,
+-nifs([new/3, complete/2, payload/1, broken/1, mount/1, stat/2, readdir/4,
        open/3, read/4, write/4, truncate/3, size/2, sync/2, close/2, mkdir/2,
        remove/2, rename/3, fsstat/1]).
 
@@ -56,9 +56,11 @@ could not make) has broken the volume, so that every operation answers
 -spec broken(vol()) -> boolean() | {error, ebusy}.
 broken(_Vol) -> ?NIF.
 
--spec format(vol()) -> ok | {error, atom()}.
-format(_Vol) -> ?NIF.
--doc "Mounts; `{error, eintegrity}` when the blocks hold no volume.".
+-doc """
+Mounts; `{error, eintegrity}` when the blocks hold no volume or its metadata
+is corrupt. There is no format: installation writes the volume
+(tools/host/lfs_format.c), and the guest never makes one.
+""".
 -spec mount(vol()) -> ok | {error, atom()}.
 mount(_Vol) -> ?NIF.
 -spec stat(vol(), binary()) -> {ok, kind(), non_neg_integer()} | {error, atom()}.

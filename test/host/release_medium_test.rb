@@ -138,6 +138,9 @@ class ReleaseMediumTest < Minitest::Test
         assert_equal File.binread(boot), medium.pread(File.size(boot), slot + first.slot.boot.slot_offset)
         assert_equal File.binread(first.erofs), medium.pread(image.file.length, slot + image.slot_offset)
         zeros(first).each { |offset| assert_equal "\0".b * SECTOR, medium.pread(SECTOR, offset), "sector #{offset / SECTOR}" }
+        # Installation formatted the data partition: its fresh volume from the first sector.
+        volume = File.binread(first.volume.path)
+        assert_equal volume, medium.pread(volume.bytesize, CODEC.constant('medium_data_start') * SECTOR), 'the data volume'
         assert_equal Erx::BootRecord.sector(:a), medium.pread(SECTOR, Erx::BootRecord::RECORD_OFFSET), 'the record commits slot A'
         count = (CODEC.constant('medium_record_start') + CODEC.constant('medium_record_count_start')) * SECTOR
         assert_equal "\0".b * SECTOR, medium.pread(SECTOR, count), 'the reset count is zero'
@@ -209,7 +212,10 @@ class ReleaseMediumTest < Minitest::Test
     FileUtils.mkdir_p(directory)
     erofs, artifacts = Erx::ReleaseMedium.image(entries: release, directory: directory, runner: runner(directory))
     built = Struct.new(:single, :erofs).new(boot, erofs)
-    [Erx::ReleaseMedium.write(built: built, directory: directory), artifacts]
+    data_sectors = CODEC.constant('medium_data_sectors_min')
+    volume = Erx::DataVolume.format(root: ROOT, owner_root: directory, runner: runner(directory), directory: directory,
+                                    data_sectors: data_sectors)
+    [Erx::ReleaseMedium.write(built: built, directory: directory, volume: volume, data_sectors: data_sectors), artifacts]
   end
 
   # The windows erx_blk_table admits from the medium's three records.
@@ -238,7 +244,9 @@ class ReleaseMediumTest < Minitest::Test
     boot_end = boot_start + written.slot.boot.file.length
     gap_start = (boot_end + SECTOR - 1) / SECTOR * SECTOR
     windows = Medium.windows(data_sectors: written.data_sectors).reject { |window| window.role == :slot_a }
-    [*windows.flat_map { |window| [window.start * SECTOR, window.last * SECTOR] },
+    # The data window's first sector holds the fresh volume.
+    starts = windows.reject { |window| window.role == :data }.map(&:start)
+    [*starts.map { |start| start * SECTOR }, *windows.map { |window| window.last * SECTOR },
      slot_a, boot_start - SECTOR, gap_start, slot_a + image.slot_offset - SECTOR,
      slot_a + image.slot_offset + image.file.length, slot_a + slot_bytes - SECTOR]
   end

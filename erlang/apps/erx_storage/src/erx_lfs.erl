@@ -106,9 +106,12 @@ only on a request that carries the reference.
 
 -doc """
 Starts the owner of the volume on the block service's window of `Role`,
-registered as `Name`, and mounts it, formatting blocks that hold no volume.
-It answers `{ok, Pid}` once the volume has mounted; a mount that fails ends
-the owner, and the answer is `{error, Reason}`. A machine without that
+registered as `Name`, and mounts it. It never formats: installation alone
+writes a volume (docs/design-storage.md, "A mount never formats"), so blocks that hold
+no volume, or a volume whose metadata is corrupt, fail the mount with
+`eintegrity` and stay as they are. It answers `{ok, Pid}` once the volume has
+mounted; a mount that fails ends the owner, and the answer is the mount's
+`{error, Reason}`. A machine without that
 window starts nothing: `ignore`. Tests pass `{window, Pid}` for a window of
 their own.
 """.
@@ -133,7 +136,7 @@ owner({start, Parent, Role, Name}) ->
             %% Acknowledged once mounted (mounted/3): the owner serves the
             %% mount's block requests in its loop, so it acknowledges there.
             Mounted = fun(Result, S) -> mounted(Result, Parent, S) end,
-            ?MODULE:owner(run(mount, fun mount/1, Mounted, State));
+            ?MODULE:owner(run(mount, fun erx_littlefs:mount/1, Mounted, State));
         {error, {refused, no_device}} ->
             %% No block driver: a machine without a disk, which has no line, or a disk
             %% erx_blk refused and has already logged. No second line either way.
@@ -233,24 +236,14 @@ done(Result, #owner{busy = {Alias, Then}} = State) ->
 reply(mount, _Reply) -> ok;
 reply(Alias, Reply) -> erlang:send(Alias, {?MODULE, Alias, Reply}).
 
-mount(Vol) ->
-    case erx_littlefs:mount(Vol) of
-        {error, eintegrity} ->
-            %% Blocks that hold no volume: a fresh partition.
-            case erx_littlefs:format(Vol) of
-                ok -> erx_littlefs:mount(Vol);
-                Error -> Error
-            end;
-        Result ->
-            Result
-    end.
-
 mounted(ok, Parent, State) ->
     log("volume mounted", []),
     proc_lib:init_ack(Parent, {ok, self()}),
     {ok, State};
-mounted(Error, _Parent, State) ->
-    fail("mount failed: ~p", [Error], State).
+%% The mount's answer goes to the starter, and the owner ends as any failure ends it.
+mounted({error, Reason} = Error, Parent, _State) ->
+    log("mount failed: ~p; the storage domain ends", [Reason]),
+    proc_lib:init_fail(Parent, Error, {exit, {?MODULE, failed}}).
 
 %% A block request from the worker's operation, sent on to the window. The
 %% window has no flush: it answers each write once the device has, so a

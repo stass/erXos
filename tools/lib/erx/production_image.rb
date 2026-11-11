@@ -29,6 +29,7 @@ require_relative 'output_directory'
 require_relative 'pack'
 require_relative 'pack_provenance'
 require_relative 'pack_tools'
+require_relative 'data_volume'
 require_relative 'qemu'
 require_relative 'release_files'
 require_relative 'release_medium'
@@ -247,7 +248,10 @@ module Erx
     def build_medium(directory:, machine: DEVELOPMENT_MACHINE, manifest_source: File.binread(File.join(@root, MANIFEST)))
       built = assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
                        machine: machine, domains: domain_boots(manifest_source))
-      [built, ReleaseMedium.write(built: built, directory: built_directory(built))]
+      directory = built_directory(built)
+      data_sectors = MediumImage.constant('data_sectors_min')
+      volume = DataVolume.format(root: @root, runner: @runner, compiler: @compiler, directory: directory, data_sectors: data_sectors)
+      [built, ReleaseMedium.write(built: built, directory: directory, volume: volume, data_sectors: data_sectors)]
     end
 
     # The production image with test code added to its system release, marked in its

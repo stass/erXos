@@ -483,7 +483,6 @@ get_slot(ErlNifEnv *env, erx_lfs_vol_t *vol, ERL_NIF_TERM term)
 
 /* The operations, each run with the volume entered and mounted. */
 enum vol_op {
-	OP_FORMAT,
 	OP_MOUNT,
 	OP_STAT,
 	OP_READDIR,
@@ -501,17 +500,6 @@ enum vol_op {
 };
 
 static ERL_NIF_TERM
-op_format(ErlNifEnv *env, erx_lfs_vol_t *vol)
-{
-	int err;
-
-	if (vol->mounted)
-		return (error_posix(env, "ebusy"));
-	err = lfs_format(&vol->lfs, &vol->cfg);
-	return (err < 0 ? lfs_error(env, vol, err) : atom_ok);
-}
-
-static ERL_NIF_TERM
 op_mount(ErlNifEnv *env, erx_lfs_vol_t *vol)
 {
 	int err;
@@ -519,7 +507,11 @@ op_mount(ErlNifEnv *env, erx_lfs_vol_t *vol)
 	if (vol->mounted)
 		return (error_posix(env, "ebusy"));
 	err = lfs_mount(&vol->lfs, &vol->cfg);
-	/* No volume found, distinct from a block failure: the owner formats. */
+	/*
+	 * No volume, or one whose metadata is corrupt, distinct from a block
+	 * failure. The guest never formats: installation writes the volume
+	 * (tools/host/lfs_format.c), and a mount that finds none fails.
+	 */
 	if (err == LFS_ERR_CORRUPT && !vol->broken)
 		return (error_posix(env, "eintegrity"));
 	if (err < 0)
@@ -830,8 +822,6 @@ static ERL_NIF_TERM
 dispatch(ErlNifEnv *env, erx_lfs_vol_t *vol, enum vol_op op,
     const ERL_NIF_TERM argv[])
 {
-	if (op == OP_FORMAT)
-		return (op_format(env, vol));
 	if (op == OP_MOUNT)
 		return (op_mount(env, vol));
 	if (vol->broken)
@@ -899,7 +889,6 @@ run_op(ErlNifEnv *env, const ERL_NIF_TERM argv[], enum vol_op op)
 		return (run_op(env, argv, op));				\
 	}
 
-VOL_NIF(format, OP_FORMAT)
 VOL_NIF(mount, OP_MOUNT)
 VOL_NIF(stat, OP_STAT)
 VOL_NIF(readdir, OP_READDIR)
@@ -922,7 +911,6 @@ static ErlNifFunc nif_funcs[] = {
 	{"complete", 2, nif_complete, 0},
 	{"payload", 1, nif_payload, 0},
 	{"broken", 1, nif_broken, 0},
-	{"format", 1, nif_format, DIRTY},
 	{"mount", 1, nif_mount, DIRTY},
 	{"stat", 2, nif_stat, DIRTY},
 	{"readdir", 4, nif_readdir, DIRTY},

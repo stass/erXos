@@ -5,6 +5,7 @@
 require 'digest'
 require 'json'
 require_relative 'abi'
+require_relative 'data_volume'
 require_relative 'block_image'
 require_relative 'bounded_file'
 require_relative 'erlang_apps'
@@ -79,8 +80,9 @@ module Erx
   #                                 its first and last sectors hold the host's pattern
   #                                 of the medium's sectors S and E, so the window maps
   #                                 its sectors to the partition's, and only those; the
-  #                                 data window has no "sector 0" line, since /data's
-  #                                 littlefs volume formats over its first block at boot
+  #                                 data window has no "sector 0" line, since its first
+  #                                 block holds /data's littlefs volume, which
+  #                                 installation wrote there (fresh_medium)
   #   blk: window R sector N refused
   #                                 a read past its end is refused with erange
   #
@@ -205,13 +207,41 @@ module Erx
 
     # What the medium must hold after a good run: the host's pattern in every window's
     # first and last sector but the data window's last, which the guest rewrote, and its
-    # first, which /data's littlefs volume formatted over.
+    # first, where the medium's fresh littlefs volume starts.
     def medium_expected_tags
       windows = MediumImage.windows
       data = windows.find { |window| window.role == :data }
       windows.flat_map { |window| [window.start, window.last] }
              .reject { |index| index == data.start }
              .to_h { |index| [index, index == data.last ? BlockImage::GUEST_TAG : BlockImage::HOST_TAG] }
+    end
+
+    # The bytes of the data volume's superblock pair, its first two blocks: both copies of
+    # the root's metadata pair (erx_littlefs.h's 4096-byte blocks).
+    VOLUME_PAIR_BYTES = 2 * 4096
+
+    # Inverts every byte of the medium's data volume's superblock pair, so the volume's
+    # files remain but its metadata no longer checks.
+    def corrupt_volume(path)
+      offset = MediumImage.constant('data_start') * MediumImage::SECTOR_BYTES
+      File.open(path, File::RDWR | File::NOFOLLOW) do |medium|
+        medium.binmode
+        bytes = medium.pread(VOLUME_PAIR_BYTES, offset)
+        medium.pwrite(bytes.bytes.map { |byte| byte ^ 0xff }.pack('C*'), offset)
+      end
+    end
+
+    # The SHA-256 digest of the medium's data partition.
+    def data_digest(path)
+      offset = MediumImage.constant('data_start') * MediumImage::SECTOR_BYTES
+      File.open(path, File::RDONLY | File::NOFOLLOW) do |medium|
+        medium.binmode
+        digest = Digest::SHA256.new
+        (0...(MediumImage::DATA_SECTORS * MediumImage::SECTOR_BYTES)).step(1 << 20) do |at|
+          digest << medium.pread(1 << 20, offset + at)
+        end
+        digest.hexdigest
+      end
     end
 
     # The sectors of the medium that are not as expected, or nil when all are.
@@ -329,8 +359,25 @@ module Erx
       # seconds of the banner. Returns 'passed'; any disagreement raises.
       def boot_fresh_medium(accel, image, arguments:, expected:, seconds: GUEST_SECONDS)
         directory = run_directory(accel)
-        disk = MediumImage.create(directory: directory, name: MEDIUM_NAME, pieces: MediumImage.probes(MediumImage::DATA_SECTORS))
+        disk = fresh_medium(directory)
         boot(accel, image, directory: directory, disk: disk, arguments: arguments, expected: expected, seconds: seconds) { nil }
+      end
+
+      # The corrupt volume (driver_domains.rb): a fresh medium whose /data a first boot
+      # fills (data_write), whose volume's metadata the host then corrupts
+      # (BlockDevice.corrupt_volume), and a boot on it that runs arguments. The data
+      # partition must hold the same bytes after that boot as before it: a mount never
+      # writes to a volume it could not mount. Each boot keeps its serial log in a
+      # directory of its own beside the medium.
+      def boot_corrupt_medium(accel, image, arguments:, expected:, seconds:)
+        directory = run_directory(accel)
+        disk = fresh_medium(directory)
+        boot(accel, image, directory: File.join(directory, 'fill'), disk: disk, arguments: WRITE_ARGUMENTS,
+                           expected: BlockDevice.write_expected_lines) { nil }
+        BlockDevice.corrupt_volume(disk)
+        before = BlockDevice.data_digest(disk)
+        boot(accel, image, directory: File.join(directory, 'corrupt'), disk: disk, arguments: arguments, expected: expected,
+                           seconds: seconds) { BlockDevice.data_digest(disk) == before ? nil : 'the corrupt volume changed' }
       end
 
       private
@@ -346,7 +393,7 @@ module Erx
       # The medium laid out by the ABI file, driven through the block service's windows.
       def run_medium(accel, image)
         directory = run_directory(accel)
-        disk = MediumImage.create(directory: directory, name: MEDIUM_NAME, pieces: MediumImage.probes(MediumImage::DATA_SECTORS))
+        disk = fresh_medium(directory)
         boot(accel, image, directory: directory, disk: disk, arguments: MEDIUM_ARGUMENTS,
                            expected: BlockDevice.medium_expected_lines) { BlockDevice.medium_image_difference(disk) }
       end
@@ -356,7 +403,7 @@ module Erx
       # boot keeps its serial log in a directory of its own beside the medium.
       def run_power_cut(accel, image)
         directory = run_directory(accel)
-        disk = MediumImage.create(directory: directory, name: MEDIUM_NAME, pieces: MediumImage.probes(MediumImage::DATA_SECTORS))
+        disk = fresh_medium(directory)
         boot(accel, image, directory: File.join(directory, 'write'), disk: disk, arguments: WRITE_ARGUMENTS,
                            expected: BlockDevice.write_expected_lines) { nil }
         boot(accel, image, directory: File.join(directory, 'read'), disk: disk, arguments: READ_ARGUMENTS,
@@ -364,6 +411,17 @@ module Erx
         outcome = BlockDevice.unsynced_outcome(read_serial(File.join(directory, 'read', 'serial.log')))
         @notes << "#{accel}: the unsynced file after the power cut: #{outcome}"
         'passed'
+      end
+
+      # A medium laid out by the ABI file, as installation leaves it, in directory: the
+      # host's pattern in each window's first and last sector but the data window's first,
+      # where the data partition's fresh littlefs volume starts (DataVolume), since the
+      # guest's mount never formats.
+      def fresh_medium(directory)
+        volume = DataVolume.format(root: @root, runner: @runner, compiler: @compiler, directory: directory,
+                                   data_sectors: MediumImage::DATA_SECTORS)
+        pieces = MediumImage.probes(MediumImage::DATA_SECTORS).merge(DataVolume.pieces(volume))
+        MediumImage.create(directory: directory, name: MEDIUM_NAME, pieces: pieces)
       end
 
       def run_directory(accel)

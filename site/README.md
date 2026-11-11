@@ -48,11 +48,14 @@ ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
   gzip-compressed as `image-<digest>.boot.gz`.
 * The machine's disk is made by the build, not taken: a boot medium laid
   out by `abi/medium.txt` with the data partition at its minimum length
-  and every window blank (`Erx::Site.blank_medium`), attached where the
-  QEMU harness attaches its guest's disk. At the first boot `/data`'s
-  littlefs volume formats itself over the blank data window. The medium is 1.2 GiB, since the layout fixes where the data
-  partition starts, but only its partition table's three records hold
-  bytes, so it is published as `disk-<digest>.bin`, those 1.5 KiB, and
+  and every window blank but for the data partition, which holds a fresh
+  littlefs volume (`Erx::Site.fresh_medium`), attached where the QEMU
+  harness attaches its guest's disk. Making the disk is the page's
+  installation: the guest's mount never formats, so the build formats
+  `/data`'s volume with the host formatter (`Erx::DataVolume`). The medium
+  is 1.2 GiB, since the layout fixes where the data partition starts, but
+  only its partition table's three records and the volume's first blocks
+  hold bytes, so it is published as `disk-<digest>.bin`, those bytes, and
   `boot.json` lists the extents they fill.
 * `--source REF` is the erXos release tag or full commit the image was
   built from, by default this tree's `HEAD`. The image carries the

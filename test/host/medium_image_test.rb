@@ -61,7 +61,7 @@ class MediumImageTest < Minitest::Test
                  lines.grep(/sectors \d+\z/).map { |line| line.sub(/ \d+\z/, '') }
     vault = Medium.windows.find { |window| window.role == :vault }
     assert_includes lines, "blk: window vault sector #{vault.sectors - 1} holds host #{vault.last}"
-    # /data's littlefs volume formats over the data window's first block at boot.
+    # The data window's first block holds /data's littlefs volume, which installation wrote.
     assert_empty lines.grep(/\Ablk: window data sector 0 /)
     assert_nil Device.line_difference("#{lines.map { |line| "#{line}\r\n" }.join}", expected: lines)
     assert_match(/driver line 2:/, Device.line_difference("#{lines.first}\nblk: done\n", expected: lines))

@@ -11,19 +11,23 @@
 -export([main/0, window/2]).
 -export([synced_file_survives_a_cut/0, tree_operations/0, block_error_ends_the_owner/0,
          worker_end_ends_the_owner/0, window_end_ends_the_owner/0,
-         mount_failure_ends_the_owner/0,
+         mount_failure_ends_the_owner/0, corrupt_volume_never_formats/0, blank_blocks_do_not_mount/0,
          deadline_ends_a_request/0, refuses_bad_arguments/0]).
 
 -include("generated/erx_abi.hrl").
 
 -define(SECTOR, 512).
 -define(DISK_SECTORS, 2048).
+%% The fresh volume of a DISK_SECTORS partition, as installation writes it: lfs-format's
+%% output (DataVolume.format), which the test leaves in the runtime's directory.
+-define(VOLUME, "data.lfs").
+-define(BLOCK, 4096).
 
 main() ->
     ok = erx_fs_version:init(),
     Cases = [synced_file_survives_a_cut, tree_operations, block_error_ends_the_owner,
              worker_end_ends_the_owner, window_end_ends_the_owner,
-             mount_failure_ends_the_owner,
+             mount_failure_ends_the_owner, corrupt_volume_never_formats, blank_blocks_do_not_mount,
              deadline_ends_a_request, refuses_bad_arguments],
     Results = [run(Case) || Case <- Cases],
     erlang:halt(case lists:all(fun(R) -> R end, Results) of true -> 0; false -> 1 end).
@@ -72,6 +76,12 @@ serve({write, Sector, Bytes}, Disk, _) ->
     <<Before:At/binary, _:(byte_size(Bytes))/binary, After/binary>> = Disk,
     {ok, <<Before/binary, Bytes/binary, After/binary>>}.
 
+%% A medium's data partition as installation leaves it: the fresh volume's blocks, then
+%% zeros.
+fresh_disk() ->
+    {ok, Volume} = file:read_file(?VOLUME),
+    <<Volume/binary, 0:((?DISK_SECTORS * ?SECTOR) - byte_size(Volume))/unit:8>>.
+
 snapshot(Window) ->
     Window ! {snapshot, self()},
     receive {snapshot, Disk} -> Disk after 5000 -> error(no_snapshot) end.
@@ -96,7 +106,7 @@ stop_volume({Window, Owner, _}) ->
 %% fresh owner over the blocks as the cut left them; a file written but not
 %% synced holds none of its data.
 synced_file_survives_a_cut() ->
-    Volume = {Window, _, Fs} = start_volume(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>, lfs_cut1),
+    Volume = {Window, _, Fs} = start_volume(fresh_disk(), lfs_cut1),
     {ok, <<"data">>, Root, _} = erx_lfs:root(Fs),
     Data = binary:copy(<<"synced data ">>, 1000),
     {ok, Path, _, Handle} = erx_lfs:make(Root, <<"kept">>, {file, 8#644, ?ERX_P9_O_RDWR}, Fs),
@@ -128,7 +138,7 @@ read_all(Handle, Offset, Size, Fs, Acc) ->
 
 %% Directories, listings, renames, removals and their refusals.
 tree_operations() ->
-    Volume = {_, _, Fs} = start_volume(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>, lfs_tree),
+    Volume = {_, _, Fs} = start_volume(fresh_disk(), lfs_tree),
     {ok, _, Root, {?ERX_P9_QTDIR, _, _}} = erx_lfs:root(Fs),
     {ok, Dir, {?ERX_P9_QTDIR, _, DirId}} = erx_lfs:make(Root, <<"d">>, {directory, 8#755}, Fs),
     {ok, File, {0, _, FileId}, H} = erx_lfs:make(Dir, <<"f">>, {file, 8#644, ?ERX_P9_O_WRONLY}, Fs),
@@ -166,7 +176,7 @@ tree_operations() ->
 %% owner ends, which ends its worker: nothing answers from a volume whose
 %% state is unknown, and the storage domain's restart mounts it afresh.
 block_error_ends_the_owner() ->
-    Volume = {Window, Owner, Fs} = start_volume(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>, lfs_fail),
+    Volume = {Window, Owner, Fs} = start_volume(fresh_disk(), lfs_fail),
     {ok, _, Root, _} = erx_lfs:root(Fs),
     Worker = worker(Owner),
     Monitors = [erlang:monitor(process, Pid) || Pid <- [Owner, Worker]],
@@ -178,7 +188,7 @@ block_error_ends_the_owner() ->
 
 %% A worker that ends ends its owner, and the request it ran answers eio.
 worker_end_ends_the_owner() ->
-    Volume = {_, Owner, Fs} = start_volume(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>, lfs_worker),
+    Volume = {_, Owner, Fs} = start_volume(fresh_disk(), lfs_worker),
     {ok, _, _, _} = erx_lfs:root(Fs),
     Monitor = erlang:monitor(process, Owner),
     exit(worker(Owner), kill),
@@ -188,7 +198,7 @@ worker_end_ends_the_owner() ->
 
 %% A window that ends ends the owner and its worker.
 window_end_ends_the_owner() ->
-    Volume = {Window, Owner, Fs} = start_volume(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>, lfs_window),
+    Volume = {Window, Owner, Fs} = start_volume(fresh_disk(), lfs_window),
     {ok, _, _, _} = erx_lfs:root(Fs),
     Monitors = [erlang:monitor(process, Pid) || Pid <- [Owner, worker(Owner)]],
     exit(Window, kill),
@@ -208,6 +218,43 @@ mount_failure_ends_the_owner() ->
     undefined = whereis(lfs_unmounted),
     exit(Window, kill),
     ok.
+
+%% A populated volume whose superblock pair, both copies of the root's metadata pair, is
+%% corrupt fails to mount with eintegrity, and the mount writes nothing: the files stay
+%% for repair and the volume is never formatted over.
+corrupt_volume_never_formats() ->
+    Volume = {Window, _, Fs} = start_volume(fresh_disk(), lfs_corrupt1),
+    {ok, <<"data">>, Root, _} = erx_lfs:root(Fs),
+    {ok, _, _, Handle} = erx_lfs:make(Root, <<"kept">>, {file, 8#644, ?ERX_P9_O_RDWR}, Fs),
+    {ok, 4000, 0} = erx_lfs:write(Handle, 0, binary:copy(<<"kept">>, 1000), Fs),
+    ok = erx_lfs:fsync(Handle, Fs),
+    Populated = snapshot(Window),
+    ok = stop_volume(Volume),
+    Corrupt = corrupt_block(corrupt_block(Populated, 0), 1),
+    unmounted(Corrupt, lfs_corrupt2).
+
+%% Blocks that hold no volume are no special case: the mount fails as for a corrupt one.
+blank_blocks_do_not_mount() ->
+    unmounted(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>, lfs_blank).
+
+%% The owner over Disk answers eintegrity and ends, and Disk is as it was.
+unmounted(Disk, Name) ->
+    Window = start_window(Disk),
+    Trapped = process_flag(trap_exit, true),
+    %% The link's 'EXIT', which proc_lib:start_link consumes, would kill a
+    %% caller that did not trap exits.
+    {error, eintegrity} = erx_lfs:start_link({window, Window}, Name),
+    process_flag(trap_exit, Trapped),
+    undefined = whereis(Name),
+    Disk = snapshot(Window),
+    exit(Window, kill),
+    ok.
+
+%% Disk with every byte of block Index inverted.
+corrupt_block(Disk, Index) ->
+    At = Index * ?BLOCK,
+    <<Before:At/binary, Block:?BLOCK/binary, After/binary>> = Disk,
+    <<Before/binary, << <<(B bxor 16#ff)>> || <<B>> <= Block >>/binary, After/binary>>.
 
 %% The owner's worker: the one process it linked to besides its parent. It is
 %% sensitive, so its initial call does not show.

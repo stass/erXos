@@ -2075,10 +2075,17 @@ it; git history is the record of completed work.
   the hosted build's `CLOCK_REALTIME` is the wall clock, so a clock step fails a block wait
   or stretches it. Waiting with `erx_umtx_wait` against an `erx_clock_ns` deadline fixes both
   and empties `imports.txt`'s `[only_erx_littlefs_nif]`.
-* [Medium] storage, `erx_lfs`: a mount that reports `LFS_ERR_CORRUPT` formats the partition,
-  blank blocks or not: one metadata pair whose copies both fail their checksum, or a cycle
-  in the list, wipes the volume rather than refusing it, and the log says only "mounted".
-  An installation step that formats the data partition once would remove this.
+* [Medium] storage, `tools/lib/erx/data_volume.rb` and the medium writers: a data volume and its
+  partition's length travel separately (`ReleaseMedium.write`, `Site.fresh_medium`,
+  `BlockDevice::Run#fresh_medium`), and each writer must remember to place the volume, since
+  `MediumImage.create` accepts a medium without one. A volume formatted for another length, or a
+  writer that forgets it, gives a /data that never mounts. `MediumImage.create` should require the
+  volume, or format it itself from `data_sectors`, so every medium has one by construction.
+* [Medium] storage, `erx_storage`: a data volume that fails every mount ends the whole storage
+  domain after its row's restarts, so the block driver, its windows and `storage_ctl` go with
+  `/data` until a reboot. Serving the domain without `/data` (erx_lfs answering a failed mount
+  with an unmounted state) would keep the rest, and design.md's "served read-only or not at all"
+  row wants an operator's repair or reformat path.
 * [Medium] tests, `test/host/erx_littlefs_test.rb`: the NIF runs uninstrumented in the stock
   runtime. A loaded NIF under AddressSanitizer needs `DYLD_INSERT_LIBRARIES`, which the
   development host's sandbox strips from every child; on a host that passes it, build the

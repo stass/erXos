@@ -32,8 +32,12 @@ class SiteTest < Minitest::Test
     end
   end
 
+  # A stand-in for the data partition's fresh volume (DataVolume.format): whole sectors.
+  VOLUME = ('erXos littlefs volume' * 400).byteslice(0, 8192)
+
   def inventory(root, image, ref: COMMIT)
-    Erx::Site.inventory(root:, v64: File.join(root, 'v64'), image:, source: Erx::Site.source(ref))
+    Erx::Site.inventory(root:, v64: File.join(root, 'v64'), image:, source: Erx::Site.source(ref),
+                        disk: Erx::Site.fresh_medium(volume: VOLUME))
   end
 
   # The page boots the production image, whose manifest's root_memory needs the
@@ -66,9 +70,10 @@ class SiteTest < Minitest::Test
     end
   end
 
-  # The disk is the blank medium's partition table, published as its bytes
-  # and the extents they fill, and boot.json names it with its digest.
-  def test_publish_writes_the_blank_medium_as_its_extents
+  # The disk is the fresh medium's partition table and data volume, published
+  # as their bytes and the extents they fill, and boot.json names it with its
+  # digest.
+  def test_publish_writes_the_fresh_medium_as_its_extents
     with_inputs do |root, image|
       out = File.join(root, 'build/site')
       disk = Erx::Site.publish(inventory(root, image), out:).fetch(:disk)
@@ -81,7 +86,8 @@ class SiteTest < Minitest::Test
       assert_equal Erx::MediumImage.sectors(data_sectors:) * 512, disk.fetch(:capacity)
       # The medium writer's own image holds the published bytes at each extent.
       Dir.mktmpdir('erx-medium-') do |directory|
-        medium = Erx::MediumImage.create(directory:, name: 'medium.img', pieces: {}, data_sectors:)
+        medium = Erx::MediumImage.create(directory:, name: 'medium.img', data_sectors:,
+                                         pieces: { Erx::MediumImage.constant('data_start') => VOLUME })
         assert_equal disk.fetch(:capacity), File.size(medium)
         at = 0
         File.open(medium, 'rb') do |input|
@@ -93,7 +99,8 @@ class SiteTest < Minitest::Test
         assert_equal content.bytesize, at
       end
       assert_equal [0, Erx::MediumImage.constant('extended_start'), Erx::MediumImage.constant('data_ebr')]
-                     .map { |sector| [sector * 512, 512] }, disk.fetch(:extents)
+                     .map { |sector| [sector * 512, 512] } + [[Erx::MediumImage.constant('data_start') * 512, VOLUME.bytesize]],
+                   disk.fetch(:extents)
     end
   end
 

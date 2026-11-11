@@ -489,7 +489,7 @@ module Erx
       def boot(count, built, written, domain, slot_image)
         directory = OutputDirectory.prepare(root: @root, mode: 0o700,
                                             path: File.join(@root, 'build/medium-boot', "hvf-#{count}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"))
-        medium = ReleaseMedium.medium(written.slot, directory: directory, data_sectors: written.data_sectors)
+        medium = ReleaseMedium.medium(written.slot, directory: directory, data_sectors: written.data_sectors, volume: written.volume)
         choice = BootRecord.read(medium)
         image = BootRecord.extract(medium, choice, output: File.join(directory, 'slot.boot'))
         raise Error, 'the slot parser chose a file that is not the packed image' unless FileUtils.compare_file(image, built.single)

@@ -10,6 +10,9 @@
 
 require 'optparse'
 require_relative 'lib/erx/runner'
+require 'tmpdir'
+require_relative 'lib/erx/data_volume'
+require_relative 'lib/erx/output_directory'
 require_relative 'lib/erx/site'
 
 root = File.expand_path('..', __dir__)
@@ -49,7 +52,12 @@ begin
         File.read(runner.run(%W[git -C #{root} rev-parse HEAD], name: 'site-head', deadline: 30).fetch('log')).strip
   source = Erx::Site.source(ref)
   v64 = options[:v64] || Erx::SiteV64.build(root:, runner:)
-  plan = Erx::Site.inventory(root:, v64:, image: options.fetch(:image), source:)
+  # The page's installation: a fresh data volume, formatted in a directory of its own.
+  disk = Dir.mktmpdir('site-volume-', Erx::OutputDirectory.prepare(root:, path: File.join(root, 'build/site-volume'))) do |directory|
+    volume = Erx::DataVolume.format(root:, runner:, directory:, data_sectors: Erx::Site.data_sectors)
+    Erx::Site.fresh_medium(volume: File.binread(volume.path))
+  end
+  plan = Erx::Site.inventory(root:, v64:, image: options.fetch(:image), source:, disk:)
   manifest = Erx::Site.publish(plan, out: options.fetch(:out))
   puts "Site: #{options.fetch(:out)} (image #{manifest.fetch(:bytes)} bytes, " \
        "#{manifest.fetch(:compressed_bytes)} compressed; disk #{manifest.dig(:disk, :capacity)} bytes, " \

@@ -21,10 +21,11 @@ module Erx
   #
   # It also makes the disk the page attaches to the machine as its virtio
   # block device, on the virtio-mmio slot where the QEMU harness attaches
-  # its guest's: a boot medium laid out by abi/medium.txt with every window
-  # blank (blank_medium). The medium is 1.2 GiB, but only its partition
-  # table holds bytes, so it is published as those bytes and the extents
-  # they fill, and the page keeps it sparse.
+  # its guest's: a boot medium laid out by abi/medium.txt whose windows are
+  # blank but for the data partition's fresh littlefs volume (fresh_medium).
+  # The medium is 1.2 GiB, but only its partition table and the volume's
+  # first blocks hold bytes, so it is published as those bytes and the
+  # extents they fill, and the page keeps it sparse.
   #
   # The image, the disk, terminal.js and v64's two files are stored under
   # names that carry their digests, and boot.json (fetched without the
@@ -113,20 +114,24 @@ module Erx
     end
     private_class_method :disk_span
 
-    # The disk the page attaches: a boot medium whose data partition has the
-    # layout's minimum length (128 MiB) and whose windows are all blank.
-    # erx_blk_table admits it, and /data's littlefs volume formats itself
-    # over the blank data window at the first boot (erx_lfs formats blocks
-    # that hold no volume). Only the partition table's three records hold
-    # bytes.
-    def blank_medium
-      data_sectors = MediumImage.constant('data_sectors_min')
-      disk(pieces: MediumImage.records(data_sectors:), capacity: MediumImage.sectors(data_sectors:) * SECTOR_BYTES)
+    # The data partition's length on the page's disk: the layout's minimum
+    # (128 MiB).
+    def data_sectors = MediumImage.constant('data_sectors_min')
+
+    # The disk the page attaches: a boot medium of data_sectors whose windows
+    # are blank but for the data partition, which holds volume, the bytes of
+    # a fresh littlefs volume of that partition (DataVolume.format). Making
+    # the disk is the page's installation, the one step that formats /data,
+    # since the guest's mount never does. erx_blk_table admits it. Only the
+    # partition table's three records and the volume hold bytes.
+    def fresh_medium(volume:)
+      pieces = MediumImage.records(data_sectors:).merge(MediumImage.constant('data_start') => volume)
+      disk(pieces:, capacity: MediumImage.sectors(data_sectors:) * SECTOR_BYTES)
     end
 
     # Reads the inputs' sizes and digests and decides which file goes where.
     # Raises Erx::Error naming the first missing input.
-    def inventory(root:, v64:, image:, source:, disk: blank_medium)
+    def inventory(root:, v64:, image:, source:, disk:)
       page = PAGE_FILES.to_h { |name| [name, File.join(root, 'site', name)] }
       emulator = SiteV64::TARGETS.transform_values { |path| File.join(v64, path) }
       notices = SiteV64::NOTICES.transform_values { |path| File.join(v64, path) }
