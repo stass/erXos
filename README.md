@@ -166,9 +166,10 @@ pixels. The [overview](docs/overview.md) tells the longer story.
 ## Current status
 
 erXos is in Phase 1 of the [roadmap](docs/plan.md), which brings the
-system up on the stopgap Fiasco kernel. `tools/erx boot` builds a
-development image and boots it in QEMU. Below, it boots under HVF on one
-CPU of a 160 MiB machine, into the command shell. There a
+system up on the stopgap Fiasco kernel. Its Phase 1b, which moves the
+user-facing parts into domains of their own, is under way. `tools/erx
+boot` builds a development image and boots it in QEMU. Below, it boots
+under HVF on one CPU of a 224 MiB machine, into the command shell. There a
 few commands list the root, write a file to `/tmp`, read it back and
 count the processes; then `erl` starts the Erlang shell, which catches a
 crash with a monitor and passes a token around a ring of 5,000
@@ -301,36 +302,21 @@ Error in process <0.150.0> with exit value:
   `erx:trace/1` streams trace events; `/proc` serves the same records as
   read-only files. Values the stopgap kernel cannot measure show as
   unsupported or partial, never invented.
-* **Domains are coming up on the stopgap.** `liberx`'s Fiasco backend
-  creates spaces in a tree, starts a created space's first thread at the
-  address its creator gives, stops a space with everything below it and
-  queues its faults and exit record at a gate, keeps budgets and groups
-  as records whose objects go with them, and passes handles from the
-  root into the spaces it created. Over it, the domain library creates a
-  domain from a request, step by step with each step undone on a
-  failure, connects and disconnects two domains, and hears of a domain's
-  end at its fault gate. In the `native_domain` suite a domain runs ERTS
-  on its own release to `init` and halts. `liberx` also has a lane's
-  writer with its wake handshake, and the funnel's check of a frame's
-  sender and target. In the booted system the domain service,
-  `erx_domain`, starts the manifest's configured domains and creates
-  others on request, each running ERTS as the interpreter or as BeamAsm;
-  only the BeamAsm image, whose manifest marks it, gets a space that can
-  hold generated code. `erx_domain:introduce/2` connects two domains,
-  whose processes then message and call each other as Erlang nodes do;
-  when either end goes, both are told `noconnection`. An ended domain
-  releases its record at once, and a domain of the same name starts again
-  while a peer still holds a connection to the old one. A message from
-  another domain is acted on only by its protocol's owner, and the
-  `system_domain` suite checks that forged connection records are
-  dropped. A session domain's release, with its terminal relay, is
-  built, though no session starts yet. A device's holder domain, the one
-  given the device, binds the interrupt line it was given to its own
-  group and opens the device in the form it was given, with the device's
-  queues carved from one block of memory; the booted system does not
-  start a driver domain over it yet. The funnel sizes its scratch space
-  from the frame it checks, so a connection between domains costs about
-  132 KiB, not 16 MiB.
+* **Domains work on the stopgap** (1b-A). Each runs its own ERTS, as the
+  interpreter or as BeamAsm, in an address space of its own, on
+  `liberx`'s Fiasco backend and its domain library. In the booted system
+  the domain service, `erx_domain`, starts the manifest's configured
+  domains and creates others on request; only the BeamAsm image, whose
+  manifest marks it, gets a space that can hold generated code.
+  `erx_domain:introduce/2` connects two domains, whose processes then
+  message and call each other as Erlang nodes do; when either end goes,
+  both are told `noconnection`, and a crashed domain leaves a crash
+  record. A message from another domain is acted on only by its protocol's
+  owner. Root's session domain runs at boot and takes the UART. The
+  configured domains serve facets that the domain service mints from the
+  manifest and makes anew when a domain restarts. A device's holder
+  domain binds its interrupt line and opens the device in the form it was
+  given. A connection between domains costs about 132 KiB.
 * **Hosted mode** runs the runtime as a macOS process, on Apple Silicon
   and on x86_64 Macs. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
@@ -378,8 +364,9 @@ Error in process <0.150.0> with exit value:
   and names resolve: the lease's name servers and domain reach `inet_db`
   through the grant, `gen_udp` and `gen_tcp` go through the grant by
   default, and the `host` command looks names and addresses up in
-  FreeBSD's lines. The network domain it moves into later is not built
-  yet. Its fast path (checksums folded into the copy, whole runs of
+  FreeBSD's lines. TCP, UDP and ICMP sockets work over a per-client
+  grant that admits every message. The network domain it moves into is
+  not configured yet. Its fast path (checksums folded into the copy, whole runs of
   segments sent and merged on receive) was measured on the FreeBSD
   x86-64 test host, over a native FreeBSD tap, with erXos running in
   hosted mode (the medians of 5 runs). Bulk send reaches about 2,470
@@ -394,11 +381,12 @@ Error in process <0.150.0> with exit value:
   and `wctl`, the widget model's deltas, `ui.txt` with its generated
   schema and binary form in Erlang, C and TypeScript, presentation types
   generated from the inspection schema, LVGL built on the host, and the
-  web client's protocol and connection core. No screen shows it yet.
+  web client's protocol and connection core. No screen shows it yet. The
+  web view (1b-C) has its host front end and the client's routes; the
+  browser client is not built yet.
 * **Designed but not built yet:** the rest of erXos's own kernel, the
-  domain service and messages between domains, the rest of the command
-  shell, the network domain, the display on a screen, the web
-  UI, and the POSIX-lite layer. Each has a design document in
+  rest of the command shell, the network domain, the display on a
+  screen, the browser client, and the POSIX-lite layer. Each has a design document in
   [docs/](docs/).
 
 ## Correctness and testing
