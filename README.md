@@ -264,7 +264,7 @@ Error in process <0.150.0> with exit value:
 * **Storage works**: M6's demo of the [roadmap](docs/plan.md) runs. A
   virtio block driver in Erlang (`erx_blk`) serves the partitions of an
   MBR with extended boot records as windows. It runs in the storage
-  domain, a BeamAsm service domain that holds the block device, which the
+  domain, an interpreter service domain that holds the block device, which the
   development manifest configures and the domain service starts at boot.
   littlefs serves `/data` there; a file synced there survives a kill of the
   machine, and a littlefs failure ends the domain, whose restart mounts

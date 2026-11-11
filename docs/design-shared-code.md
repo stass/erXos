@@ -208,12 +208,14 @@ The design is ready; its implementation waits for the system to need it.
   system domain never adopts the image, and with two adopters the image
   about breaks even ([Memory saved and what it costs](#memory-saved-and-what-it-costs)),
   so a count of interpreter domains overstates the gain. In 1b-E's manifest
-  of [plan.md](plan.md) root's session is the one adopter: the storage
-  and network domains run BeamAsm, the default of
+  of [plan.md](plan.md) root's session and the storage, network and web
+  domains run the interpreter, so four domains could adopt the image.
+  The storage and network domains choose it over BeamAsm, the default of
   [design-runtime.md](design-runtime.md#beamasm) for an ordinary domain,
-  since BeamAsm costs such a domain about 0.4 MB beyond the interpreter
-  at rest (the medium boot cell's `DlJitExtra`) and the interpreter
-  moves bulk TCP at less than half BeamAsm's rate.
+  because BeamAsm compiles every module it loads, which slows a boot of
+  several runtimes on one CPU. The price is bulk TCP, which the interpreter
+  moves at less than half BeamAsm's rate; BeamAsm's memory cost at rest is
+  only about 0.4 MB (the medium boot cell's `DlJitExtra`).
 * **The order of work before it.** Each step is cheaper than this design
   and helps every domain, whether or not it adopts an image:
   1. Measure a session's pages at its prompt, with the funnel's scratch

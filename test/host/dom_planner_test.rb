@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/dom_planner'
 require_relative '../../tools/lib/erx/manifest'
+require_relative '../../tools/lib/erx/net_device'
 require_relative '../../tools/lib/erx/network_domain'
 require_relative '../../tools/lib/erx/production_image'
 require_relative '../../tools/lib/erx/runner'
@@ -143,6 +144,22 @@ class DomPlannerTest < Minitest::Test
                                                                 .merge(platform: Erx::MediumBoot::MACHINE.platform(@context.platform)))
     admitted = Erx::Manifest.admit(source: Erx::NetworkDomain.manifest(source), codec: @codec, context: context,
                                    planner: @planner)
+    assert_equal 3, admitted.report.fetch('child_plan_instances')
+  end
+
+  # The net_device suite's manifest (NetDevice.manifest), the development manifest with
+  # the network row on BeamAsm and the storage row still on the interpreter: the library
+  # plans it on the development machine the suite boots, and only the network row changed.
+  def test_the_library_plans_the_net_device_suites_beamasm_network_row
+    source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    edited = Erx::NetDevice.manifest(source)
+    assert_equal '@artifact.jit', edited[/^domain network\n(?:  .*\n)*?  runtime (\S+)$/, 1]
+    assert_equal '@artifact.emu', edited[/^domain storage\n(?:  .*\n)*?  runtime (\S+)$/, 1]
+    assert_equal source.lines.size, edited.lines.size
+    machine = Erx::ProductionImage::DEVELOPMENT_MACHINE
+    context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec)
+                                                                .merge(platform: machine.platform(@context.platform)))
+    admitted = Erx::Manifest.admit(source: edited, codec: @codec, context: context, planner: @planner)
     assert_equal 3, admitted.report.fetch('child_plan_instances')
   end
 

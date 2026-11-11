@@ -1642,7 +1642,7 @@ A crash injected into littlefs ends only its port, since a fault ends nothing bu
 it. What the backend does not promise is that a port which bypasses `liberx` cannot reach the storage domain's memory.
 
 **The NIF form.** Phase 1 runs littlefs as a NIF behind the `erx_fs` callback module, the seam the design names, in the
-domain that holds the data window: the storage domain, which the development manifest configures as a BeamAsm service
+domain that holds the data window: the storage domain, which the development manifest configures as an interpreter service
 domain with the `block` unit and runs `erx_blk` and `erx_storage` (`erx_lfs_sup` under `erx_storage_sup`). The system
 release ships neither application, so a manifest that leaves the `block` unit with the system domain runs no block
 driver and serves no `/data`. The Erlang side is the

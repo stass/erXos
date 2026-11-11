@@ -8,6 +8,14 @@ it; git history is the record of completed work.
 
 ## Major initiatives
 
+* [Medium] runtime, `docs/design-shared-code.md`: build shared loaded code, one prepared copy of the
+  preloaded modules and the applications every domain boots, mapped read-only into every domain that runs
+  the interpreter. The owner wants it long term. Its trigger, three adopting domains at once, is met: the
+  development manifest runs root's session and the storage, network and web domains on the interpreter. Each
+  domain loads its own `kernel` and `stdlib` at boot, and on one CPU an image that runs everything in the
+  system domain still reaches root's shell about 3.2 times sooner under TCG (the measurement and the order
+  of work are in [todo-performance.md](docs/todo-performance.md), "every domain loads its own kernel and
+  stdlib"; raw logs in ~/erxos-history/boot-slow-2026-11-11 and boot-fast-2026-11-11).
 * [Medium] architecture: evaluate the remaining
   [simplification candidates](docs/todo-simplification.md), recording for
   each the mechanism it removes, its cost and the evidence needed to adopt

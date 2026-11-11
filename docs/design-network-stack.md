@@ -5846,7 +5846,8 @@ change.
 
 The network domain's memory is measured as the storage domain's is (the
 system manifest's header): the root's pool pages in use with the domain
-up, minus those once it has ended. With BeamAsm and the users share's four schedulers and four dirty
+up, minus those once it has ended. With the network row on BeamAsm (the development manifest
+runs it on the interpreter, which holds less) and the users share's four schedulers and four dirty
 CPU schedulers, the domain holds at least 8,463 pages, 33.1 MiB, once DHCP
 has leased its address (a lower bound: root's session grows before the
 last reading), and 8,603 pages, 33.6 MiB, after root's session has

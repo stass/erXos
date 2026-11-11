@@ -144,8 +144,20 @@ module Erx
                  'Counts = erx_net_grant:counts(G), ' \
                  "{maps:get(units, C, 0) > 0, maps:get(refused, Counts), maps:get(unknown, Counts)} end, 10000) end.\r"
     PROBE_ANSWER = '{true,1,0}'
+    # The one edit of the development manifest: the network row runs BeamAsm, as a
+    # service domain does by default (docs/design-runtime.md, "BeamAsm"), so the TCP
+    # line times the stack on the runtime a throughput figure assumes; the development
+    # manifest runs it on the interpreter for a faster boot.
+    BEAMASM_EDIT = /^(domain network\n(?:  .*\n)*?  runtime )@artifact\.emu$/
 
     module_function
+
+    # The development manifest source with BEAMASM_EDIT, which must match exactly once.
+    def manifest(source)
+      raise Error, "the manifest does not have exactly one match of #{BEAMASM_EDIT.source}" unless source.scan(BEAMASM_EDIT).size == 1
+
+      source.sub(BEAMASM_EDIT) { "#{Regexp.last_match(1)}@artifact.jit" }
+    end
 
     # What the shell shows after the exchange, whose result mac reads the guest's
     # link-layer address from: ifconfig's lines for vtnet0, in FreeBSD's layout with the
@@ -363,8 +375,8 @@ module Erx
         @measurements = []
       end
 
-      # Boots the development image with a network device under each accelerator and
-      # runs the exchange from root's session. Returns { "<accelerator>-1cpu" => 'passed' }; a guest that
+      # Boots the development image, its network row on BeamAsm (manifest), with a network
+      # device under each accelerator and runs the exchange from root's session. Returns { "<accelerator>-1cpu" => 'passed' }; a guest that
       # misses a step raises.
       def call(accels:, jobs: 4, build: true)
         raise Error, 'the network device suite runs under tcg or hvf' unless accels.all? { |accel| %w[tcg hvf].include?(accel) }
@@ -372,8 +384,9 @@ module Erx
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/net-device/image'))
+        manifest = NetDevice.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)))
         image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                               .build(directory: directory).single
+                               .build(directory: directory, manifest_source: manifest).single
         accels.to_h { |accel| ["#{accel}-1cpu", boot(accel, image)] }
       end
 

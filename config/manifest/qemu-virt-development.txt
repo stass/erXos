@@ -4,19 +4,27 @@
 # The development manifest of QEMU virt: the system domain, three configured domains,
 # storage, network and web, as docs/design-stopgap.md's "The Phase 1 manifest check"
 # admits them, and the system principal's session template, from which the console starts root's
-# session at boot (docs/design-system.md, "Booting"). The storage domain is a
-# BeamAsm service domain that holds the block unit and its data and release
+# session at boot (docs/design-system.md, "Booting"). The storage domain is an
+# interpreter service domain that holds the block unit and its data and release
 # windows and runs the block driver and littlefs at /data (docs/design-stopgap.md,
 # "littlefs in the storage domain"); the slot writer's four windows stay the
 # system domain's (property 8). It serves storage_ctl, its driver-control facet,
 # to the system domain alone (property 8; docs/design-system.md, "The holder's
 # driver-control facet"), and data, an erx_fs grant of /data's tree, to the system
 # domain and to root's session (property 16; docs/design-stopgap.md, "littlefs in the
-# storage domain"). The network domain is a BeamAsm service domain that holds the net
+# storage domain"). The network domain is an interpreter service domain that holds the net
 # unit and runs the network stack (docs/design-network-stack.md, "Who holds the network
 # device"). It serves net, a grant of the stack, to the system principal's sessions, since the
 # system domain may hold none (docs/design-system.md, property 15), and network_ctl,
-# its driver-control facet, to the system domain alone (property 8). The web domain is an
+# its driver-control facet, to the system domain alone (property 8). The storage and
+# network rows choose the interpreter over BeamAsm, the default for a service domain
+# (docs/design-runtime.md, "BeamAsm"), because BeamAsm compiles each module it loads,
+# which slows a boot that starts several runtimes on one CPU (docs/todo-performance.md,
+# "every domain loads its own kernel and stdlib"). Where network throughput is
+# measured, the network row runs BeamAsm: the net_device suite's exchange cell, whose
+# TCP line measures it, boots the row on BeamAsm (NetDevice.manifest), and
+# `tools/erx bench net-freebsd` runs the stack on stock OTP.
+# The web domain is an
 # interpreter service domain that runs the connection core of each browser connection
 # the host tool carries (docs/design-web.md, "The host tool's front end"); it serves
 # web, the relay of those connections, to the system domain, whose host link offers it
@@ -54,7 +62,8 @@
 # measured. Its grant, the web share, is a quarter of one CPU, what the system share's
 # reserve leaves beside the storage and network domains' one CPU each (property 13).
 # The storage domain's 30 MiB is its
-# use rounded up to a whole MiB: 7,635 pool pages, 29.8 MiB, with BeamAsm, erx_blk
+# use rounded up to a whole MiB: 7,635 pool pages, 29.8 MiB, with BeamAsm (more than the
+# interpreter the row runs: docs/design-shared-code.md, DlJitExtra), erx_blk
 # and erx_storage running and /data mounted, at rest, measured as Footprint measures
 # (the root's pool pages in use with the domain up minus those once it has ended;
 # the block_device suite's medium boot, 512 MiB, HVF, 1 guest CPU, an Apple M3 Max
@@ -117,7 +126,8 @@
 # 1.25 MiB promise 178.25 MiB of root_memory's 186.25 MiB, which leaves 8 MiB no one is
 # promised. The network
 # domain's 36 MiB is its use rounded up to a whole MiB, 34 MiB, and 2 MiB of headroom:
-# 8,603 pool pages, 33.6 MiB, with BeamAsm and the users share's four schedulers, after
+# 8,603 pool pages, 33.6 MiB, with BeamAsm (more than the interpreter the row runs) and
+# the users share's four schedulers, after
 # root's session has run ping -c 3 and echoed 1 MiB over TCP through it, measured as
 # Footprint measures (docs/design-network-stack.md, the network domain's memory; the
 # net_device suite's network-domain cell, a 768 MiB machine, HVF, 1 guest CPU, an Apple
@@ -398,7 +408,7 @@ domain storage
   limits @limits.storage
   kind service
   flags none
-  runtime @artifact.jit
+  runtime @artifact.emu
   release @artifact.storage
   restarts 5
   restart_period_s 600
@@ -408,7 +418,7 @@ domain network
   limits @limits.network
   kind service
   flags none
-  runtime @artifact.jit
+  runtime @artifact.emu
   release @artifact.network
   restarts 5
   restart_period_s 600
