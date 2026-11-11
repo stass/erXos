@@ -93,7 +93,7 @@ class ManifestStopgapTest < Minitest::Test
     assert result.matches?(@context)
     assert result.bytes.frozen?
     view = @codec.open('manifest', result.bytes)
-    assert_equal 2, view.count('domains')
+    assert_equal 3, view.count('domains')
     assert_equal 4, view.count('devices')
     assert_equal 6, view.count('windows')
     assert_equal 1, view.count('images')
@@ -106,7 +106,7 @@ class ManifestStopgapTest < Minitest::Test
     assert_equal 'supplied_catalog', report.fetch('executable')
     assert_equal 'supplied_context', report.fetch('provenance')
     assert_equal 'unsupported', report.fetch('policy_admission')
-    assert_equal 2, report.fetch('child_plan_instances')
+    assert_equal 3, report.fetch('child_plan_instances')
     assert_equal 0, report.fetch('dynamic_domain_reservation')
     assert_equal @platform.fetch('fiasco_reserve'), report.fetch('fiasco_reserve')
     assert_equal @platform.fetch('ram_bytes'), report.fetch('ram_bytes')
@@ -114,7 +114,7 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   # The development manifest as a partial boot, which makes no sessions and configures
-  # no domains, so without its session template and its storage domain.
+  # no domains, so without its session template and its storage, network and web domains.
   def partial_boot
     changed(ManifestContextFixture.domainless(@source).sub('flags development', 'flags development,partial_boot')
                                   .sub(/^session system\n(?:  .*\n)*/, ''))
@@ -132,8 +132,8 @@ class ManifestStopgapTest < Minitest::Test
 
   def test_admitted_services_reach_the_encoded_manifest
     view = @codec.open('manifest', admit(@source + SERVICE).bytes)
-    # The development manifest's own, data, net, network_ctl and storage_ctl, and this one.
-    assert_equal %w[data log net network_ctl storage_ctl], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
+    # The development manifest's own, data, net, network_ctl, storage_ctl and web, and this one.
+    assert_equal %w[data log net network_ctl storage_ctl web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
     assert_equal 0, view.count('liveness')
   end
 

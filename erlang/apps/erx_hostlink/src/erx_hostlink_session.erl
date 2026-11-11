@@ -71,6 +71,10 @@ decides what the stream's results mean:
   its printed name, which carries none of a fun's captured values. A reply
   whose encoding fails `measure` or the message limit is replaced by
   `{error, system_limit}`.
+* **Facet casts.** A facet sends the host a message of its own as a
+  `facet_cast` event, its payload already encoded; it goes out as a cast
+  on the facet's number. A cast of a pid the table does not hold, or past
+  the message limit, is counted and dropped.
 
 Malformed input is never answered: it is discarded and counted under a
 reason, which `info/1` reports with the deframer's and the receiver's
@@ -116,6 +120,7 @@ default to erx_hostlink_payload's.
                | idle
                | {call_done, serial(), pos_integer(), term(), [pid()]}
                | {facet_down, pid()}
+               | {facet_cast, pid(), binary()}
                | {output, terminal | events | files, binary()}.
 -type end_reason() :: replaced | exhausted.
 -type action() :: {send, binary()}
@@ -241,6 +246,8 @@ step({facet_down, Pid}, #core{session = #session{numbers = Numbers} = S} = Core)
     end;
 step({facet_down, _Pid}, Core) ->
     {Core, []};
+step({facet_cast, Pid, Payload}, Core) when is_pid(Pid), is_binary(Payload) ->
+    facet_cast(Pid, Payload, Core);
 step({output, Stream, Body}, Core)
   when (Stream =:= terminal orelse Stream =:= events orelse Stream =:= files),
        is_binary(Body) ->
@@ -572,6 +579,25 @@ output(files, Body, Core) when byte_size(Body) > ?ERX_HOSTLINK_BODY_MAX ->
     {count(oversize_files_output, Core), []};
 output(Stream, Body, Core) ->
     frames(Stream, 0, chunks(Body, ?ERX_HOSTLINK_BODY_MAX), Core).
+
+%% A cast from facet Pid to the host: a cast message on the facet's number.
+%% A facet the table does not hold, one closed or of an ended session, has no
+%% number the host knows, so its cast is counted and dropped, as is one past
+%% the message limit, which the host would not reassemble.
+facet_cast(_Pid, _Payload, #core{session = none} = Core) ->
+    {count(cast_from_no_facet, Core), []};
+facet_cast(Pid, Payload, #core{session = S, limits = #{message_max := Max}} = Core) ->
+    case S#session.numbers of
+        #{Pid := _} when byte_size(Payload) > Max ->
+            {count(oversize_cast, Core), []};
+        #{Pid := N} ->
+            case erx_hostlink_stream:message(cast, 0, N, Payload, S#session.sender) of
+                {ok, Wire, Sender} -> {set_session(S#session{sender = Sender}, Core), sends(Wire)};
+                {error, exhausted} -> end_session(exhausted, Core)
+            end;
+        #{} ->
+            {count(cast_from_no_facet, Core), []}
+    end.
 
 %% A read of Bytes counted to the current session's grant, and the credit
 %% frame it sends, if any.

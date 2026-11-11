@@ -58,6 +58,12 @@ module Erx
     # The domain's own budget and its outer one: what native_domain's ERTS domain runs in.
     DOMAIN_MEMORY = 160 << 20
     DOMAIN_OUTER = 1 << 20
+    # The development manifest's web domain, which a medium boot leaves out (without_web):
+    # its share, runtime limits, limits and domain records, its relay service and the
+    # system domain's facet of it, and its limits' budget and outer one.
+    WEB_ROWS = [/^share web\n(?:  .*\n)*/, /^runtime_limits web\n(?:  .*\n)*/, /^limits web\n(?:  .*\n)*/,
+                /^domain web\n(?:  .*\n)*/, /^service web\n(?:  .*\n)*/, /^facet web\n(?:  .*\n)*/].freeze
+    WEB_LIMITS = /^limits web\n  memory ([0-9]+)\n  outer ([0-9]+)\n/
     # The boot script the domain runs, of the applications every domain boots through, as
     # the image's build defines a boot script named by a manifest row (ProductionImage).
     DOMAIN_BOOT = ReleaseFiles.domain_boot('erts', applications: ProductionImage::DOMAIN_APPLICATIONS)
@@ -83,7 +89,8 @@ module Erx
     # eighth of a CPU on the users share's CPUs. The configured domains' grants together
     # may come to at most the system share's rate less its reserve, 2250 mcpu of its 3000
     # (dom_system_reserve, liberx/system/dom_core.c). The development manifest's storage
-    # and network domains take a whole CPU each, which leaves 250 mcpu: two eighths, as
+    # and network domains take a whole CPU each and its web domain, which manifest leaves
+    # out, the last 250 mcpu; without it 250 mcpu remain: two eighths, as
     # SystemDomain's erts and peer take. Nothing enforces a grant at run time in Phase 1
     # (docs/design-stopgap.md, property 13), and the share's CPUs, which set a runtime's
     # schedulers, are the users share's, so the domains run as with a larger grant.
@@ -305,21 +312,47 @@ module Erx
     # stops behind its pid while the next create runs, once the configured one has ended. So
     # the system principal's quota and max_domains each grow by domains (2), and its memory
     # and root_memory each by that many domains' budgets. Machine#manifest drops the system
-    # principal's session template, so the console's login at boot starts no session and
-    # the ids and the room are the cell's own. The development manifest itself, what the
-    # production image promises, is unchanged. row replaces DOMAIN_ROW for a harness whose
-    # configured domain runs another way (SystemDomain); domains is how many of
-    # domain_memory's domains the principal gains room for.
+    # principal's session template, so the console's login at boot starts no session, and
+    # without_web drops the web domain, so the ids and the room are the cell's own: the web
+    # domain's grant would take the 250 mcpu, of what the system share's reserve leaves,
+    # that the cells' rows use, and its id would come before theirs (HostlinkGuest, the
+    # production image's host link check, boots it). The development manifest itself, what the production image promises, is
+    # unchanged. row replaces DOMAIN_ROW for a harness whose configured domain runs another
+    # way (SystemDomain); domains is how many of domain_memory's domains the principal
+    # gains room for.
     def manifest(source, row: DOMAIN_ROW, domains: 2, domain_memory: DOMAIN_MEMORY)
-      growth = domains * (domain_memory + DOMAIN_OUTER)
-      { /^(principal system\n  memory )([0-9]+)$/ => growth, /^(  root_memory )([0-9]+)$/ => growth,
+      grown(MACHINE.manifest(without_web(source)), memory: domains * (domain_memory + DOMAIN_OUTER), domains: domains) +
+        row
+    end
+
+    # source without the web domain: WEB_ROWS removed, each exactly once, and the room
+    # they took given back, the web limits' budget and outer one from the system principal's
+    # memory and root_memory, one domain from its quota and max_domains, and the row its
+    # system connection takes from max_connections.
+    def without_web(source)
+      limits = source.match(WEB_LIMITS)
+      raise Error, 'the manifest has no limits web record' unless limits
+
+      rest = WEB_ROWS.reduce(source) do |text, row|
+        raise Error, "the manifest does not have exactly one #{row.source[1, 20]} record" unless text.scan(row).size == 1
+
+        text.sub(row, '')
+      end
+      grown(rest, memory: -(Integer(limits[1], 10) + Integer(limits[2], 10)), domains: -1, connections: -1)
+    end
+
+    # source with the system principal's memory and root_memory each grown by memory, its
+    # domain quota and max_domains each by domains, and max_connections by connections; a
+    # negative figure shrinks them.
+    def grown(source, memory:, domains:, connections: 0)
+      { /^(principal system\n  memory )([0-9]+)$/ => memory, /^(  root_memory )([0-9]+)$/ => memory,
         /^(principal system\n(?:  .*\n)*?  domains )([0-9]+)$/ => domains,
-        /^(  max_domains )([0-9]+)$/ => domains }
-        .reduce(MACHINE.manifest(source)) do |text, (pattern, added)|
+        /^(  max_domains )([0-9]+)$/ => domains, /^(  max_connections )([0-9]+)$/ => connections }
+        .reduce(source) do |text, (pattern, added)|
           raise Error, "the manifest does not have exactly one line #{pattern.source}" unless text.scan(pattern).size == 1
 
           text.sub(pattern) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + added}" }
-        end + row
+        end
     end
 
     # The domain's runtime images and release in the archive at path: the indexes of the

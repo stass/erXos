@@ -102,7 +102,7 @@ class ReleaseFilesTest < Minitest::Test
     %w[compiler runtime_tools].each { |application| assert_includes release, "{#{application},\"#{VERSION}\",load}" }
     assert_includes release, "{erx_session,\"#{VERSION}\",load}", 'a domain\'s own application runs in no system domain'
     started = Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::DOMAIN_ONLY - Erx::ReleaseFiles::STORAGE_ONLY -
-              Erx::ReleaseFiles::NETWORK_ONLY
+              Erx::ReleaseFiles::NETWORK_ONLY - Erx::ReleaseFiles::WEB_ONLY
     [*%w[kernel stdlib], *started].each do |application|
       assert_includes release, "{#{application},\"#{VERSION}\"}"
     end

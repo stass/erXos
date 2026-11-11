@@ -694,6 +694,23 @@ streams_are_delivered_and_sent_test() ->
     {H3, []} = step({output, files, binary:copy(<<"x">>, 8193)}, H2),
     ?assertEqual(1, maps:get(oversize_files_output, counts(H3))).
 
+%% A facet's cast goes to the host as a cast message on the facet's number, in
+%% as many frames as its payload needs; one from a pid the table does not hold,
+%% or with no session, sends nothing and is counted.
+facet_casts_go_to_the_host_test() ->
+    H = open(#{}),
+    {H1, _} = call(H, 1),
+    {H2, _} = done(H1, 1, {ok, pid(100)}, [pid(100)]),
+    Payload = term_to_binary({web, 3, binary:copy(<<"b">>, 20000)}),
+    {H3, Out} = step({facet_cast, pid(100), Payload}, H2),
+    Frames = sent(Out),
+    ?assertEqual([{cast, 1, 0}], lists:usort([{K, T, I} || #{target := T, control := #{kind := K, id := I}} <- Frames])),
+    ?assertEqual(3, length(Frames)),
+    ?assertEqual(Payload, iolist_to_binary([B || #{body := B} <- Frames])),
+    {H4, []} = step({facet_cast, pid(101), Payload}, H3),
+    ?assertEqual(1, maps:get(cast_from_no_facet, counts(H4))),
+    {_, []} = step({facet_cast, pid(100), Payload}, boot(#{})).
+
 casts_execute_without_a_reply_test() ->
     H = open(#{}),
     {_, Actions} = send_frames(H, message_frames(H, cast, 0, 0, <<"p">>)),

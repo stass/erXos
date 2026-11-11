@@ -36,14 +36,14 @@ module ManifestContextFixture
 
   # The archive the development manifest names, as both packs carry it: the domain
   # release under domains/erxos/ with the session boot script its session template
-  # names and the storage and network boot scripts its storage and network rows name, the
-  # domain runtime images, runtimes/emu and runtimes/jit, and the system release's
-  # generated files and root.
-  def arguments(codec) = archive_arguments(codec, boots: %w[network session storage])
+  # names and the storage, network and web boot scripts its domain rows name, the domain
+  # runtime images, runtimes/emu and runtimes/jit, and the system release's generated
+  # files and root.
+  def arguments(codec) = archive_arguments(codec, boots: %w[network session storage web])
 
   # The same archive with the boot script app beside session, which domain_source's
   # domains name.
-  def domain_arguments(codec) = archive_arguments(codec, boots: %w[app network session storage])
+  def domain_arguments(codec) = archive_arguments(codec, boots: %w[app network session storage web])
 
   # An archive of the domain release, with a boot script for each of boots and one
   # library file, then runtimes/emu, then system/, the order the archive's sorted paths
@@ -109,17 +109,20 @@ module ManifestContextFixture
   SYSTEM_QUOTA = /^(principal system\n(?:  .*\n)*?  domains )\d+$/
   MAX_DOMAINS = /^(  max_domains )\d+$/
 
-  # The development manifest's own configured domains, storage and network, with the
-  # profiles and runtime limits only they name, their driver-control, data and net
-  # services and the system domain's facets of them, root's session template's facets of
-  # data and net (which a sessionless source, ProductionImage.without_sessions, does not
-  # holds), and the holder lines naming them.
+  # The development manifest's own configured domains, storage, network and web, with
+  # the profiles and runtime limits only they name, their services (storage's
+  # driver-control and data, network's driver-control and net, web's relay) and the
+  # system domain's facets of them, root's session template's facets of data and net
+  # (which a sessionless source, ProductionImage.without_sessions, does not hold), and
+  # the holder lines naming them.
   DOMAIN_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/,
                  /^service storage_ctl\n(?:  .*\n)*/, /^facet storage_ctl\n(?:  .*\n)*/,
                  /^service data\n(?:  .*\n)*/, /^facet data\n(?:  .*\n)*/,
                  /^runtime_limits network\n(?:  .*\n)*/, /^limits network\n(?:  .*\n)*/, /^domain network\n(?:  .*\n)*/,
                  /^service network_ctl\n(?:  .*\n)*/, /^facet network_ctl\n(?:  .*\n)*/,
-                 /^service net\n(?:  .*\n)*/].freeze
+                 /^service net\n(?:  .*\n)*/,
+                 /^runtime_limits web\n(?:  .*\n)*/, /^limits web\n(?:  .*\n)*/, /^domain web\n(?:  .*\n)*/,
+                 /^service web\n(?:  .*\n)*/, /^facet web\n(?:  .*\n)*/].freeze
   SESSION_FACETS = [/^facet data_session\n(?:  .*\n)*/, /^facet net\n(?:  .*\n)*/].freeze
   DOMAIN_HOLDER = /^  holder @domain\.(?:storage|network)$/
 
@@ -129,9 +132,9 @@ module ManifestContextFixture
   # since they set what their rows need.
   def sessionless(source) = with_quota(substitute(domainless(source), SESSION_TEMPLATE, ''), 0)
 
-  # source without the storage and network domains: their rows removed and what they
-  # hold held by the system domain, as a manifest that configures no domain holds them.
-  # A session facet is removed where the source still has it.
+  # source without its configured domains, storage, network and web: their rows removed
+  # and what they hold held by the system domain, as a manifest that configures no domain
+  # holds them. A session facet is removed where the source still has it.
   def domainless(source)
     raise ArgumentError, 'the manifest has no configured domain holder' unless source.match?(DOMAIN_HOLDER)
 

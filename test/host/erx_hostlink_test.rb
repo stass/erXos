@@ -8,7 +8,7 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/generated'
 
 # Runs test/erlang/erx_hostlink_tests.erl, the EUnit cases of erx_hostlink's pure parts and
-# its install facet's lifetime, compiled from source on stock's emulator (ERX_ERL and
+# its install and web facets, compiled from source on stock's emulator (ERX_ERL and
 # ERX_ERLC, which make check supplies). erx_device_record and erx_pl011 are not loaded: no
 # case starts the host link's process, which the production image's boot runs end to end.
 class ErxHostlinkTest < Minitest::Test
@@ -17,7 +17,9 @@ class ErxHostlinkTest < Minitest::Test
   Erx::Generated.ensure(root: ROOT)
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   SOURCES = %w[erlang/apps/erx/src/erx_build.erl
+               erlang/apps/erx/src/erx.erl test/erlang/stand_in/erx_dist.erl
                erlang/apps/erx_hostlink/src/erx_hostlink.erl erlang/apps/erx_hostlink/src/erx_hostlink_install.erl
+               erlang/apps/erx_hostlink/src/erx_hostlink_web.erl erlang/apps/erx_hostlink/src/erx_hostlink_files.erl
                erlang/apps/erx_hostlink/src/erx_hostlink_frame.erl erlang/apps/erx_hostlink/src/erx_hostlink_stream.erl
                erlang/apps/erx_hostlink/src/erx_hostlink_payload.erl erlang/apps/erx_hostlink/src/erx_hostlink_session.erl
                test/erlang/host_bytes/erx_bytes.erl test/erlang/erx_hostlink_tests.erl].freeze

@@ -99,24 +99,25 @@ class DomPlannerTest < Minitest::Test
   end
 
   # The development manifest as it ships, with its session template and its own
-  # configured domains, storage, which holds the block unit, and network, which holds the
-  # net unit: the library plans both, and the system domain's arguments start no stack.
+  # configured domains, storage, which holds the block unit, network, which holds the net
+  # unit, and web: the library plans all three, and the system domain's arguments start
+  # no stack.
   def test_the_library_plans_the_development_manifests_domains
     source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
-    assert_equal 2, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
+    assert_equal 3, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
                                  .report.fetch('child_plan_instances')
     refute_includes source[/^  system_args .*$/], '-erx_net'
     assert_includes source, "unit net\n  placement \"net\"\n  holder @domain.network\n"
   end
 
   # The production image's narrow manifest (ProductionImage::Run.narrow_manifest), which
-  # its 4-CPU cells boot: the system share on two CPUs, and the storage domain's grant,
-  # which must fit the system share, on them too, so the library plans it.
+  # its 4-CPU cells boot: the system share on two CPUs, and the storage and web domains'
+  # grants, which must fit the system share, on them too, so the library plans them.
   def test_the_library_plans_the_narrow_images_domain
     source = Erx::ProductionImage::Run.narrow_manifest(ROOT)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
-    assert_equal 1, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
+    assert_equal 2, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
                                  .report.fetch('child_plan_instances')
   end
 
@@ -142,7 +143,7 @@ class DomPlannerTest < Minitest::Test
                                                                 .merge(platform: Erx::MediumBoot::MACHINE.platform(@context.platform)))
     admitted = Erx::Manifest.admit(source: Erx::NetworkDomain.manifest(source), codec: @codec, context: context,
                                    planner: @planner)
-    assert_equal 2, admitted.report.fetch('child_plan_instances')
+    assert_equal 3, admitted.report.fetch('child_plan_instances')
   end
 
   # Two principals' session templates (property 14), each its principal's, of the
@@ -400,11 +401,13 @@ class DomPlannerTest < Minitest::Test
       end
     interface = ->(name) { @codec.schema.services.find { |service| service.fetch(:name) == name }.fetch(:number) }
     # The configured domains' services, in name order, each with its server's index in boot
-    # order (network 0, storage 1): data, of files, net, network_ctl and storage_ctl.
+    # order (network 0, storage 1, web 2): data, of files, net, network_ctl, storage_ctl
+    # and web.
     assert_equal ["service 0 name=data server=1 interface=#{interface.call('files')}",
                   "service 1 name=net server=0 interface=#{interface.call('net')}",
                   "service 2 name=network_ctl server=0 interface=#{interface.call('driver_control')}",
-                  "service 3 name=storage_ctl server=1 interface=#{interface.call('driver_control')}"],
+                  "service 3 name=storage_ctl server=1 interface=#{interface.call('driver_control')}",
+                  "service 4 name=web server=2 interface=#{interface.call('web')}"],
                  lines.grep(/\Aservice /)
   end
 

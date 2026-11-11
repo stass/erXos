@@ -205,7 +205,8 @@ class SystemDomainTest < Minitest::Test
     assert manifest.end_with?("facet echo_session\n  grantee @session.system\n  service @service.echo\n" \
                               "#{regrant::FACET_LIMITS.sub("  service @service.echo\n", '')}")
     assert_equal 1, manifest.scan(/^session /).size
-    assert_equal Integer(PLAIN[/^  max_connections ([0-9]+)$/, 1], 10) + 2, Integer(manifest[/^  max_connections ([0-9]+)$/, 1], 10)
+    assert_equal Integer(Erx::MediumBoot.without_web(PLAIN)[/^  max_connections ([0-9]+)$/, 1], 10) + 2,
+                 Integer(manifest[/^  max_connections ([0-9]+)$/, 1], 10)
     assert_raises(Erx::Error) { regrant.manifest(Erx::ProductionImage.without_sessions(PLAIN)) }
     shell = { name: 'release-shell', pattern: /y/n, seconds: 30 }.freeze
     points = regrant.checkpoints([shell])

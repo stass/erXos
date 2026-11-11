@@ -46,9 +46,12 @@ to the session's resident limit, which is killed on passing it, and the
 payload is then refused as too large.
 
 The root (target 0) offers `{open, Name}`. Of the facets the design lists, the
-install facet exists (erx_hostlink_install, over erx_code); the others answer
-`{error, unsupported}` until their services exist, and any other request to
-the root `{error, badarg}`. Casts reach no facet: none takes them.
+install facet exists (erx_hostlink_install, over erx_code), and the web facet
+(erx_hostlink_web) in a development build whose manifest configures a web
+domain; the others answer `{error, unsupported}` until their services exist,
+and any other request to the root `{error, badarg}`. The host's casts reach
+no facet: none takes them. A facet's own casts to the host arrive as
+`{facet_cast, Facet, Payload}` and go out on the facet's number.
 """.
 
 -export([start_link/0, root/2, bounded_measure/1]).
@@ -71,7 +74,7 @@ the root `{error, badarg}`. Casts reach no facet: none takes them.
 -define(OUTPUT_BACKLOG, 4 * ?ERX_HOSTLINK_ENCODED_MAX).
 %% The facets docs/design-live.md lists for a development build's host whose
 %% services this package does not serve yet.
--define(NOT_SERVED, [inspect, trace, update, code, domain, console, web]).
+-define(NOT_SERVED, [inspect, trace, update, code, domain, console]).
 
 -record(state, {
     driver :: pid(),
@@ -142,6 +145,8 @@ handle_info({call_done, Worker, Reply, Opened}, #state{workers = Workers} = Stat
         error ->
             {noreply, State}
     end;
+handle_info({facet_cast, Facet, Payload}, State) when is_pid(Facet), is_binary(Payload) ->
+    {noreply, step({facet_cast, Facet, Payload}, State)};
 handle_info({files_out, Bridge, Bytes}, #state{files = {Bridge, _}} = State) ->
     {noreply, step({output, files, Bytes}, State)};
 handle_info({'DOWN', Ref, process, Bridge, _Reason}, #state{files = {Bridge, Ref}} = State) ->
@@ -254,9 +259,25 @@ work(Server, Target, Payload) ->
     {ok, Term} = erx_hostlink_payload:decode(Payload),
     {Reply, Opened} = case Target of
                           root -> root(Term, Server);
-                          Facet -> {erx_hostlink_install:call(Facet, Term), []}
+                          Facet -> {facet_call(Facet, Term), []}
                       end,
     Server ! {call_done, self(), Reply, Opened}.
+
+%% A facet's answer to Request: every facet the root opens takes
+%% {hostlink_call, From, Ref, Request} and answers {Ref, Reply}, within a
+%% deadline of its own, so the caller sets none: a caller that gave up first
+%% would leave the request queued, to run after its host was told it had
+%% failed. A facet that has ended exits the caller.
+facet_call(Facet, Request) ->
+    Ref = erlang:monitor(process, Facet),
+    Facet ! {hostlink_call, self(), Ref, Request},
+    receive
+        {Ref, Reply} ->
+            erlang:demonitor(Ref, [flush]),
+            Reply;
+        {'DOWN', Ref, process, Facet, Reason} ->
+            exit({Reason, {?MODULE, facet_call, [Facet]}})
+    end.
 
 -doc """
 What the root answers a request, with the facets the answer opened: the
@@ -268,6 +289,8 @@ Each facet ends with `Link`, the host link's process.
 root({open, install}, Link) ->
     {ok, Facet} = erx_hostlink_install:start(Link),
     {{ok, Facet}, [Facet]};
+root({open, web}, Link) ->
+    erx_hostlink_web:open(Link);
 root({open, Name}, _Link) when is_atom(Name) ->
     case lists:member(Name, ?NOT_SERVED) of
         true -> {{error, unsupported}, []};

@@ -1,0 +1,11 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The web domain's relay of the host link's web facet (docs/design-web.md, "The host
+# tool's front end"): the system domain hands the web domain each browser connection
+# the host tool carries, connect, data for each whole message and close, and the web
+# domain sends the system domain's caller what goes back to the browser. The
+# development manifest grants it to the system domain.
+service web 6
+  operation connect 1
+  operation data 2
+  operation close 3

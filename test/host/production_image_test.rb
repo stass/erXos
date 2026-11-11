@@ -301,24 +301,24 @@ class ProductionImageTest < Minitest::Test
   end
 
   # The production image carries the domain releases its manifest's domain rows and
-  # session templates name. The development manifest configures the storage and network
-  # domains and has a session template, so it carries the network, session and storage
-  # releases, and the network and storage releases without the template; a manifest with
-  # domain rows names each release once, and a reference of another form names nothing,
-  # for the manifest check to refuse.
+  # session templates name. The development manifest configures the storage, network and
+  # web domains and has a session template, so it carries the network, session, storage
+  # and web releases, and the network, storage and web releases without the template; a
+  # manifest with domain rows names each release once, and a reference of another form
+  # names nothing, for the manifest check to refuse.
   def test_the_production_image_carries_the_releases_its_domain_rows_name
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
-    assert_equal %w[network session storage], Erx::Manifest.release_names(source: source, codec: codec)
+    assert_equal %w[network session storage web], Erx::Manifest.release_names(source: source, codec: codec)
     source = Erx::ProductionImage.without_sessions(source)
-    assert_equal %w[network storage], Erx::Manifest.release_names(source: source, codec: codec)
+    assert_equal %w[network storage web], Erx::Manifest.release_names(source: source, codec: codec)
     rows = %w[zeta beta zeta].each_with_index.map do |release, index|
       "domain d#{index}\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
         "  runtime @artifact.emu\n  release @artifact.#{release}\n  restarts 0\n  restart_period_s 0\n"
     end
     quoted = "domain q\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
              "  runtime @artifact.emu\n  release \"other\"\n  restarts 0\n  restart_period_s 0\n"
-    assert_equal %w[beta network storage zeta], Erx::Manifest.release_names(source: source + rows.join + quoted, codec: codec)
+    assert_equal %w[beta network storage web zeta], Erx::Manifest.release_names(source: source + rows.join + quoted, codec: codec)
   end
 
   # A domain row's runtime names the domain runtime image and its release a boot script

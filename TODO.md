@@ -505,6 +505,26 @@ it; git history is the record of completed work.
   over-long bytes and texts as `too_long` and over-count lists as `too_many`, as both decoders do, which
   `erx_web_conn` relies on to end a view `too_large`; the TypeScript encoder still answers `bad_term` there. Make
   it match, then a table-driven case over `type/1` and `TYPES` expecting the same reason from both closes it.
+* [Medium] `tools/lib/erx/manifest.rb`, [The host tool's front end](docs/design-web.md#the-host-tools-front-end):
+  the design says a release manifest that offers the host the `web` facet fails the manifest check. At run time
+  the host link offers it only where the manifest's development flag is set and the system domain holds a facet of
+  the `web` interface (`erx_hostlink_web:open/1`), but Phase 1's check refuses every release manifest, so the
+  build-time rule has no site yet; with the release check (M11), refuse a release manifest that grants a facet of
+  the `web` interface, with a seeded violation.
+* [Medium] `config/manifest/qemu-virt-development.txt`, the web domain's row: its 24 MiB and its grant, a quarter
+  of one CPU, are estimates, and so are the 256 MiB machine's `root_memory` (186.25 MiB) and the system
+  principal's 131 MiB that make room for it; no boot-time or memory figure has been recorded for a boot with the
+  web domain. Measure the domain with `Footprint` at rest and with the host tool's four connections open, the
+  boot's time to the shell before and after the web domain (`tools/erx bench`), and size the row and
+  `root_memory` from the figures.
+* [Medium] `erlang/apps/erx_hostlink/src/erx_hostlink_web.erl`, `tools/lib/erx/web_server.rb`,
+  [The host tool's front end](docs/design-web.md#the-host-tools-front-end): a restart of the web domain ends the
+  system domain's facet with the relay (`exit(shutdown)`), and the session drops the facet's number without
+  telling the host. The host tool keeps the dead number: every later call is answered `{error, noproc}`, a reply
+  rather than a link failure, so each new WebSocket is refused with 503 until the host link breaks or `erx web`
+  restarts, and an open one stays open while its browser answers the tool's pings. Give the host a signal (a
+  cast of `{web_closed, C, down}` for each connection the facet relayed before it exits, and the host tool
+  reopening the facet on `noproc`), with a host test that ends the relay under an open connection.
 * [Medium] `erlang/apps/erx_web/src/erx_web_conn.erl`, W8 in [Requirements](docs/design-web.md#requirements): a
   browser's `event` messages have no flow control. Each becomes one message to the UI's renderer, so a hostile
   browser can fill the renderer's mailbox as fast as its connection carries bytes, while W8 bounds what one
@@ -4393,6 +4413,14 @@ to the corpus and follow rc
   kernel.
 
 ## Security residuals
+
+* [Medium] Host link, the web facet's casts (`erlang/apps/erx_hostlink/src/erx_hostlink_web.erl`,
+  `erx_hostlink.erl`): each `{web, C, Bytes}` the web domain sends the facet becomes a `facet_cast` to the host
+  link's process, which queues it for the host outside the output bound that holds back input (`OUTPUT_BACKLOG`),
+  so a compromised web domain can grow the system domain's memory by sending faster than the host link drains
+  (the facet's and the host link's queues have no heap limit), until the system domain runs out of memory,
+  which resets the machine. Phase 1 runs trusted code only (M11). Count casts against the same output bound,
+  dropping or ending the facet when it is full, with a host test that floods the facet.
 
 * [Medium] Storage domain, littlefs's and the block driver's failures end the whole domain
   (`erx_lfs.erl`, `erx_lfs_sup.erl`, `erx_storage_sup.erl`, `erx_blk_sup.erl`): any end of

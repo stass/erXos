@@ -116,16 +116,18 @@ module Erx
     # the block driver and littlefs's volume, which the system release does not ship
     # (ReleaseFiles::STORAGE_ONLY; docs/design-stopgap.md, "littlefs in the storage domain"); the
     # network script adds the network stack, which it starts permanent, so the stack's end
-    # ends the network domain (docs/design-network-stack.md, "The process tree"); a name
+    # ends the network domain (docs/design-network-stack.md, "The process tree"); the
+    # web script adds the web front end (ReleaseFiles::WEB_ONLY; docs/design-web.md); a name
     # the table does not hold boots DOMAIN_APPLICATIONS, the applications every domain
     # boots through. The development manifest's session template names the session
-    # script, its storage row the storage script and its network row the network script;
+    # script, and its storage, network and web rows the scripts of those names;
     # medium_boot's manifest configures a domain (MediumBoot.manifest), and a test image
     # may carry more scripts (build_test_image's domains).
     DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
     DOMAIN_BOOTS = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_net_client', 'erx_shell', 'erx_session'].freeze,
                      'storage' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::STORAGE_ONLY].freeze,
-                     'network' => [*DOMAIN_APPLICATIONS, 'erx_net'].freeze }.freeze
+                     'network' => [*DOMAIN_APPLICATIONS, 'erx_net'].freeze,
+                     'web' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::WEB_ONLY].freeze }.freeze
 
     # Refuses a test script (ReleaseFiles::DomainBoot#test) among domains unless the image
     # is a test image, whose archive flags mark its test code, so no image without the
@@ -1180,9 +1182,10 @@ module Erx
       # The manifest with the system share on the machine's first two CPUs only. A boot of it
       # on a larger machine tells a scheduler count taken from the share and the online CPUs
       # together from one taken from the online CPUs alone, which the manifest's own cpuset,
-      # every CPU the runs have, cannot. Every share is narrowed (Run.narrow_share), so a
-      # configured domain's grant, the storage domain's grant of users, still fits the system
-      # share, as the domain library requires (docs/design-system.md, "The domain library").
+      # every CPU the runs have, cannot. Every share is narrowed (Run.narrow_share), so the
+      # configured domains' grants, the storage domain's of users and the web domain's of
+      # web, still fit the system share, as the domain library requires
+      # (docs/design-system.md, "The domain library").
       # Two CPUs' system share less its reserve holds one grant of users, not two, so the
       # narrow manifest leaves out the network domain (NARROW_DROPPED), whose net unit the
       # narrow cells, which boot without a network device, do not use. The manifest check

@@ -30,7 +30,7 @@ none. Each tree is found among the system domain's namespace entries as the
 grant mounted with that tree name and no root below it (`tree_grant/3`).
 """.
 
--export([start/2, tree_grant/3, configured_trees/0, default_trees/1, manifest_flags/1]).
+-export([start/2, tree_grant/3, configured_trees/0, default_trees/1, build_flags/0, manifest_flags/1]).
 -export([init/2]).
 
 -include("generated/erx_abi.hrl").
@@ -132,7 +132,7 @@ configured_trees() ->
         {ok, Names} ->
             tree_names(Names, []);
         undefined ->
-            {ok, default_trees(manifest_flags(file:read_file(manifest_path())))}
+            {ok, default_trees(build_flags())}
     end.
 
 tree_names([], Acc) ->
@@ -158,6 +158,16 @@ default_trees(Flags) when is_integer(Flags), Flags band ?ERX_MANIFEST_DEVELOPMEN
     [<<"proc">>, <<"data">>];
 default_trees(_Flags) ->
     [].
+
+-doc """
+The flags of this build's system manifest, or `unknown` when it cannot be
+read. Its development flag is the build's kind, which the image build checks
+against the kind it builds, so the host link's development-only facets read
+it here.
+""".
+-spec build_flags() -> non_neg_integer() | unknown.
+build_flags() ->
+    manifest_flags(file:read_file(manifest_path())).
 
 -doc "The flags of the system manifest `file:read_file/1` returned, or `unknown`. Pure, for the tests.".
 -spec manifest_flags({ok, binary()} | {error, term()}) -> non_neg_integer() | unknown.

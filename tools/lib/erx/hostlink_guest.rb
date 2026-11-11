@@ -7,6 +7,7 @@ require 'socket'
 require_relative 'error'
 require_relative 'etf'
 require_relative 'hostlink_client'
+require_relative 'web_server'
 
 module Erx
   # The host link's checks end to end, against a booted guest's system domain over its
@@ -14,8 +15,10 @@ module Erx
   # session replacement, at-most-once calls, credit and the 1,025th facet). The pure
   # session machine has its exhaustive host tests (test/erlang/erx_hostlink_session_tests.erl);
   # these show the same rules hold through erx_hostlink's effects, erx_pl011 and QEMU's
-  # socket, with the Ruby client as the host. Each check raises Erx::Error naming what
-  # the guest answered instead.
+  # socket, with the Ruby client as the host. Last, the web facet carries one browser
+  # connection to the web domain's connection core and back, through the host tool's own
+  # relay (docs/design-web.md, "The host tool's front end"). Each check raises Erx::Error
+  # naming what the guest answered instead.
   module HostlinkGuest
     # The seconds the checks take on a loaded host, with a wide margin: about 1,100 calls.
     SECONDS = 300
@@ -39,7 +42,9 @@ module Erx
         repeated = at_most_once(client)
         sent = full_table(client, opened: 3, repeated: repeated)
         replaced = replacement(client, first, facet)
-        { session: first.id.unpack1('H*'), replaced: replaced.unpack1('H*'), missing: missing, bytes_sent: sent }
+        web = web_connection(client)
+        { session: first.id.unpack1('H*'), replaced: replaced.unpack1('H*'), missing: missing, bytes_sent: sent,
+          web: web }
       end
     end
 
@@ -91,6 +96,28 @@ module Erx
       check(gone == error(:noproc), 'a facet of the replaced session', gone)
       expect_facet(client.call(OPEN_INSTALL), 1)
       second.id
+    end
+
+    # The seconds the web domain has to answer a connection's message.
+    WEB_SECONDS = 30
+
+    # A connection the web facet carries reaches the web domain's connection core, and the
+    # core's answer comes back: a message its codec refuses is answered with one message,
+    # `bye protocol`, and the connection's end. Opening the facet starts a session of its
+    # own. Returns the answer's bytes in hexadecimal.
+    def web_connection(client)
+      relay = Web::Relay.new(link: client)
+      relay.open
+      check(relay.connect(1), 'a web connection', relay)
+      check(relay.data(1, "\xff".b), 'a message on the web connection', relay)
+      seen = []
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WEB_SECONDS
+      seen.concat(relay.messages(1)) until seen.any?(Web::Relay::Ended) ||
+                                           Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+      answered = seen in [Web::Relay::Delivered[1, String], Web::Relay::Ended[1]]
+      raise Error, "host link: the web core's answer: the guest sent #{seen.map { |message| message.class.name }}" unless answered
+
+      seen.first.bytes.unpack1('H*')
     end
 
     def expect_facet(reply, number)

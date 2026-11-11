@@ -169,7 +169,7 @@ erXos is in Phase 1 of the [roadmap](docs/plan.md), which brings the
 system up on the stopgap Fiasco kernel. Its Phase 1b, which moves the
 user-facing parts into domains of their own, is under way. `tools/erx
 boot` builds a development image and boots it in QEMU. Below, it boots
-under HVF on one CPU of a 224 MiB machine, into the command shell. There a
+under HVF on one CPU of a 256 MiB machine, into the command shell. There a
 few commands list the root, write a file to `/tmp`, read it back and
 count the processes; then `erl` starts the Erlang shell, which catches a
 crash with a monitor and passes a token around a ring of 5,000

@@ -8,7 +8,8 @@
 %% replies, the facet table); erx_hostlink_payload is Phase 1's check of a payload from the
 %% host. erx_hostlink is the process that performs the session's actions on the UART, under
 %% erx_hostlink_sup, which erx_hostlink_app starts; erx_hostlink_install is the install
-%% facet, over erx_code. erx_hostlink_files is the files stream's 9P bridge, one for each
+%% facet, over erx_code, and erx_hostlink_web the web facet, a relay of browser
+%% connections to the web domain. erx_hostlink_files is the files stream's 9P bridge, one for each
 %% session, around erx_hostlink_9p's pure core; files_trees, when set, lists the trees it
 %% serves, and otherwise the system manifest's development flag decides them.
 {application, erx_hostlink,
@@ -16,7 +17,8 @@
   {vsn, "1"},
   {modules, [erx_hostlink, erx_hostlink_9p, erx_hostlink_app, erx_hostlink_files,
              erx_hostlink_frame, erx_hostlink_install,
-             erx_hostlink_payload, erx_hostlink_session, erx_hostlink_stream, erx_hostlink_sup]},
+             erx_hostlink_payload, erx_hostlink_session, erx_hostlink_stream, erx_hostlink_sup,
+             erx_hostlink_web]},
   {registered, [erx_hostlink, erx_hostlink_sup]},
   {applications, [kernel, stdlib, erx, erx_uart, erx_code]},
   {mod, {erx_hostlink_app, []}}]}.

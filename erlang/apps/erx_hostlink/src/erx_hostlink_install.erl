@@ -12,34 +12,18 @@ so erx_code_store's reader is the one check of their shape.
 A facet is a process so that the session's table can name it, monitor it
 and close it: one session's facets die with the session, and each ends with
 the host link's process, which it monitors, so none outlives the link that
-handed it out. It takes no casts.
+handed it out. It takes no casts. Its calls arrive as erx_hostlink's
+`facet_call/2` sends them, and it always answers, within the code service's
+own deadline (erx_code:call/1).
 """.
 
--export([start/1, call/2]).
+-export([start/1]).
 -export([init/1]).
 
 -doc "Starts a facet that ends when `Link` does.".
 -spec start(pid()) -> {ok, pid()}.
 start(Link) ->
     proc_lib:start(?MODULE, init, [Link]).
-
--doc """
-The facet's answer to `Request`. The facet always answers, within the code
-service's own deadline (erx_code:call/1), so the caller sets none: a caller
-that gave up first would leave the request queued, to run after its host
-was told it had failed. A facet that has ended exits the caller.
-""".
--spec call(pid(), term()) -> erx_code:reply() | {error, unknown}.
-call(Facet, Request) ->
-    Ref = erlang:monitor(process, Facet),
-    Facet ! {install_call, self(), Ref, Request},
-    receive
-        {Ref, Reply} ->
-            erlang:demonitor(Ref, [flush]),
-            Reply;
-        {'DOWN', Ref, process, Facet, Reason} ->
-            exit({Reason, {?MODULE, call, [Facet]}})
-    end.
 
 -doc false.
 -spec init(pid()) -> no_return().
@@ -50,7 +34,7 @@ init(Link) ->
 
 loop(Watch) ->
     receive
-        {install_call, From, Ref, Request} ->
+        {hostlink_call, From, Ref, Request} ->
             From ! {Ref, serve(Request)},
             loop(Watch);
         {'DOWN', Watch, process, _Link, _Reason} ->

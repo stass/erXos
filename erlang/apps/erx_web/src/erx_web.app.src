@@ -1,14 +1,18 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% The web domain's services and the session side of its views
-%% (docs/design-web.md): erx_web_value, the projection of an inspection
-%% record into the web protocol's closed set of values, and erx_web_conn,
-%% the pure core of one browser connection.
+%% The web domain (docs/design-web.md): erx_web_relay, the service `web` through
+%% which the system domain relays the host tool's browser connections, each a
+%% process of erx_web_relay_conn around erx_web_conn, the pure core of one browser
+%% connection; and erx_web_value, the projection of an inspection record into the
+%% web protocol's closed set of values. Only the web domain's boot script boots it;
+%% the system release does not ship it, since the system domain decodes no protocol
+%% message.
 {application, erx_web,
  [{description, "erXos web front end"},
   {vsn, "1"},
-  {modules, [erx_web_conn, erx_web_value]},
-  {registered, []},
+  {modules, [erx_web_app, erx_web_conn, erx_web_relay, erx_web_relay_conn, erx_web_sup, erx_web_value]},
+  {registered, [erx_web_sup]},
   {applications, [kernel, stdlib, erx, erx_files]},
+  {mod, {erx_web_app, []}},
   {env, []}]}.

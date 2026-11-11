@@ -70,7 +70,13 @@ module Erx
     NETWORK_ONLY = %w[erx_net erx_net_client].freeze
     raise Error, "NETWORK_ONLY names what the runtime does not build: #{NETWORK_ONLY - APPLICATIONS}" unless
       (NETWORK_ONLY - APPLICATIONS).empty?
-    SYSTEM_APPLICATIONS = (APPLICATIONS - STORAGE_ONLY - NETWORK_ONLY).freeze
+    # Applications only the web domain's boot script boots (docs/design-web.md,
+    # "Overview"): the connection core and its relay. The system release does not ship
+    # them, since the system domain decodes no web protocol message.
+    WEB_ONLY = %w[erx_web].freeze
+    raise Error, "WEB_ONLY names what the runtime does not build: #{WEB_ONLY - APPLICATIONS}" unless
+      (WEB_ONLY - APPLICATIONS).empty?
+    SYSTEM_APPLICATIONS = (APPLICATIONS - STORAGE_ONLY - NETWORK_ONLY - WEB_ONLY).freeze
     SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: SYSTEM_APPLICATIONS, system: true,
                          boots: { 'start' => SYSTEM_APPLICATIONS }.freeze)
     # Where the one domain release lies: domains/erxos/, which sorts after boot/ and
