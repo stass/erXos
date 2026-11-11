@@ -81,7 +81,8 @@ module Erx
     # Runs the visit against the guest whose host link socket is socket; root is the tree
     # whose tools/erx serves its build/web, build the boot image's build identifier in
     # hexadecimal or nil for any, web_hash the web protocol's (HostlinkGuest.web_hash),
-    # foreign the id of a domain root's session does not reach. The front end's
+    # foreign the id of a domain whose records root's session's runtime does not collect
+    # (erx_inspector:collects_domain/2), at scope `all` as at any other. The front end's
     # output goes to web-front-end.log beside the socket. Returns the machine's update's
     # first bytes in hexadecimal.
     def call(socket, root:, build:, web_hash:, foreign:)
@@ -162,17 +163,22 @@ module Erx
       frames
     end
 
-    # Views 2 and 3, opened together: root's session's processes, answered with their
-    # listing, and the record of domain foreign, which ends `scope`; their answers come in
-    # either order. Then view 4 on the first listed process, as its link names it, which is
-    # answered with that process's record.
+    # Views 2, 3 and 4, opened together: root's session's processes, answered with their
+    # listing; /proc/kernel, a machine-wide path only scope `all` reaches, answered with
+    # its listing; and the record of domain foreign, which ends `scope`. Their answers
+    # come in any order. Then view 5 on the first listed process, as its link names it,
+    # which is answered with that process's record. A connection's view numbers only
+    # grow (erx_web_conn), so the views open in the order of their numbers.
     def path_views(io, frames, foreign, log)
-      io.write(browser_frame(open_path(2, ['processes'])) + browser_frame(open_path(3, ['domains', foreign.to_s])))
-      answers = Array.new(2) { frames.binary('the path views') }.to_h { |answer| [answer.byteslice(1, 4).unpack1('V'), answer] }
+      io.write([open_path(2, ['processes']), open_path(3, ['kernel']), open_path(4, ['domains', foreign.to_s])]
+                 .map { browser_frame(_1) }.join)
+      answers = Array.new(3) { frames.binary('the path views') }.to_h { |answer| [answer.byteslice(1, 4).unpack1('V'), answer] }
       processes = answers.fetch(2) { fail_with(log, "view 2 was not answered: #{answers.keys}") }
       fail_with(log, "the session's processes are #{processes.byteslice(0, 96).unpack1('H*')}") unless
         processes.start_with?(processes_update(2))
-      fail_with(log, "domain #{foreign}'s record is #{answers[3].to_s.unpack1('H*')}") unless answers[3] == ended_scope(3)
+      fail_with(log, "/proc/kernel's record is #{answers[3].to_s.byteslice(0, 96).unpack1('H*')}") unless
+        answers[3].to_s.start_with?(record_update(3, ['kernel'], 'listing'))
+      fail_with(log, "domain #{foreign}'s record is #{answers[4].to_s.unpack1('H*')}") unless answers[4] == ended_scope(4)
       process_view(io, frames, first_child(processes), log)
     end
 
@@ -183,10 +189,10 @@ module Erx
     end
 
     def process_view(io, frames, pid, log)
-      io.write(browser_frame(open_path(4, ['processes', pid])))
+      io.write(browser_frame(open_path(5, ['processes', pid])))
       process = frames.binary("process #{LineEscape.escape(pid)}")
       fail_with(log, "process #{LineEscape.escape(pid)}'s record is #{process.byteslice(0, 96).unpack1('H*')}") unless
-        process.start_with?(record_update(4, ['processes', pid], 'process'))
+        process.start_with?(record_update(5, ['processes', pid], 'process'))
     end
 
     # A browser's binary frame: final and masked (RFC 6455 section 5.3), with the 7-bit

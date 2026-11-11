@@ -62,9 +62,10 @@ module Erx
     # and 7, at boot, so the login's is 8; each later start of a session or of a configured
     # domain takes the next, a refused one too, since admission spends the id.
     FIRST_SESSION = 8
-    # The system domain's id (erx_kernel_records' ?SYSTEM_DOMAIN), which root's session does
-    # not reach: the one domain whose record a session's inspector collects when its scope
-    # lets it, so a session that read it past the scope check would answer a record.
+    # The system domain's id (erx_kernel_records' ?SYSTEM_DOMAIN), whose records root's
+    # session's runtime does not collect, even at the web line's scope `all`: its kernel
+    # records are its own, so a session that collected them would show its own group and
+    # counters as the system domain's (erx_inspector:collects_domain/2).
     SYSTEM_DOMAIN = 4
     # Typed at the last session's Erlang shell: WebGuest::IDLE_PROCESSES processes that
     # wait for ever.

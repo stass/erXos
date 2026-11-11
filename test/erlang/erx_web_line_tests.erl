@@ -41,6 +41,13 @@ line(Inspect) ->
                                            exports => ?MODULE}),
     Line.
 
+%% A line already serving its peer whose views read through the inspector itself at
+%% Scope.
+line_at(Scope) ->
+    {ok, Line} = erx_web_line:start_link(#{peer => ?PEER, system => ?SYSTEM, scope => Scope,
+                                           exports => ?MODULE}),
+    Line.
+
 data(Relay, C, Message) ->
     {ok, Bytes} = erx_web_proto:encode(browser, Message),
     gen_server:call(Relay, {data, self(), C, Bytes}).
@@ -58,7 +65,7 @@ nothing_sent() ->
 %% line, is answered with one update carrying the machine's record; a `next` while
 %% the record is unchanged is not answered, and the browser's close ends the view.
 open_machine_record_test() ->
-    Line = line(fun([]) -> machine(7) end),
+    Line = line(fun([], _Scope) -> machine(7) end),
     {ok, Relay} = erx_web_relay:start_link(#{system => 4}),
     ?assertEqual(ok, gen_server:call(Relay, {connect, self(), 1, #{principal => <<"root">>, build => ?BUILD,
                                                                    line => Line}})),
@@ -79,7 +86,7 @@ open_machine_record_test() ->
 %% A view the inspector refuses ends with the inspector's reason, and a target the
 %% line does not serve is unsupported.
 refused_views_end_test() ->
-    Line = line(fun([]) -> {error, scope} end),
+    Line = line(fun([], _Scope) -> {error, scope} end),
     {ok, Relay} = erx_web_relay:start_link(#{system => 4}),
     ok = gen_server:call(Relay, {connect, self(), 2, #{principal => <<"root">>, build => ?BUILD, line => Line}}),
     ok = data(Relay, 2, {hello, erx_web_proto:hash()}),
@@ -99,7 +106,7 @@ refused_views_end_test() ->
 session_processes_test() ->
     Idle = [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, 1000)],
     try
-        Line = line(fun(Path) -> erx_inspector:inspect(Path, [?SYSTEM]) end),
+        Line = line_at([?SYSTEM]),
         {ok, View} = gen_server:call(Line, {open, {path, [<<"processes">>]}}),
         receive
             {web_view, View, {record, #{path := WirePath, kind := Kind, id := Id, attrs := Attrs,
@@ -120,7 +127,7 @@ session_processes_test() ->
 %% A process opened by the name its listing gives it, as the client's link names it,
 %% is answered with the process's record.
 listed_process_test() ->
-    Line = line(fun(Path) -> erx_inspector:inspect(Path, [?SYSTEM]) end),
+    Line = line_at([?SYSTEM]),
     Name = erx_procfs_core:name(self()),
     {ok, View} = gen_server:call(Line, {open, {path, [<<"processes">>, Name]}}),
     receive
@@ -137,7 +144,7 @@ listed_process_test() ->
 %% are not names, are answered as a path outside the scope, and the line goes on
 %% serving.
 scope_test() ->
-    Line = line(fun(Path) -> erx_inspector:inspect(Path, [?SYSTEM + 5]) end),
+    Line = line_at([?SYSTEM + 5]),
     Ended = fun(Names) ->
                     {ok, View} = gen_server:call(Line, {open, {path, Names}}),
                     receive
@@ -156,7 +163,7 @@ scope_test() ->
 
 %% A line holds at most 64 views; past them an open is busy until one ends.
 bound_test() ->
-    Line = line(fun([]) -> machine(1) end),
+    Line = line(fun([], _Scope) -> machine(1) end),
     Views = [begin {ok, V} = gen_server:call(Line, {open, {path, []}}), V end || _ <- lists:seq(1, 64)],
     ?assertEqual({error, busy}, gen_server:call(Line, {open, {path, []}})),
     flush_updates(),
@@ -167,7 +174,7 @@ bound_test() ->
 %% From another domain the line takes a call only in its peer's envelope, and a
 %% view a `next` likewise; the view answers its opener alone.
 envelope_test() ->
-    Line = line(fun([]) -> machine(1) end),
+    Line = line(fun([], _Scope) -> machine(1) end),
     Alias = alias(),
     Line ! {erx_origin, ?PEER + 1, {'$gen_call', {self(), [alias | Alias]}, {open, {path, []}}}},
     receive {[alias | Alias], Refused} -> error({answered, Refused}) after 200 -> ok end,
@@ -183,7 +190,7 @@ envelope_test() ->
 %% A peer's call whose alias is no reference is dropped unanswered, and the line
 %% goes on serving its peer.
 peer_alias_test() ->
-    Line = line(fun([]) -> machine(1) end),
+    Line = line(fun([], _Scope) -> machine(1) end),
     process_flag(trap_exit, true),
     Line ! {erx_origin, ?PEER, {'$gen_call', {self(), [alias | not_an_alias]}, {open, {path, []}}}},
     Alias = alias(),
@@ -198,7 +205,7 @@ peer_alias_test() ->
 %% In the peer's envelope, a call whose caller or alias is another domain's is dropped
 %% unanswered and opens no view, so no reply and no update goes to a third domain.
 third_domain_test() ->
-    Line = line(fun([]) -> machine(1) end),
+    Line = line(fun([], _Scope) -> machine(1) end),
     Other = alias(),
     persistent_term:put({?MODULE, owner, Other}, ?PEER + 1),
     try
@@ -220,7 +227,7 @@ third_domain_test() ->
 %% from no process of the session, and the line serves the domain it was exported to.
 export_test() ->
     register(?EXPORTS, self()),
-    {ok, Line} = erx_web_line:start_link(#{system => ?SYSTEM, inspect => fun([]) -> machine(1) end,
+    {ok, Line} = erx_web_line:start_link(#{system => ?SYSTEM, inspect => fun([], _Scope) -> machine(1) end,
                                            exports => ?MODULE}),
     Alias = alias(),
     Call = fun(D, Request) -> Line ! {erx_origin, D, {'$gen_call', {self(), [alias | Alias]}, Request}} end,
@@ -237,6 +244,34 @@ export_test() ->
     Call(?PEER, {open, {path, []}}),
     receive {[alias | Alias], {ok, View}} when is_pid(View) -> ok after 5000 -> error(not_served) end,
     unregister(?EXPORTS).
+
+%% The system domain exports only root's session's line, and only in a development
+%% build (erx_hostlink_web), so from the export on the line's views read at scope
+%% `all`, as root's session in a development build inspects (docs/design-live.md,
+%% "Scopes"); before it, at the session's own scope. Through the inspector itself, a
+%% session whose own scope is another domain gets `scope` for the machine-wide
+%% /proc/kernel until the export, and the record after it.
+export_reads_all_test() ->
+    {ok, Line} = erx_web_line:start_link(#{system => ?SYSTEM, scope => [?SYSTEM + 5],
+                                           exports => ?MODULE}),
+    Open = fun(Request) ->
+                   {ok, View} = gen_server:call(Line, Request),
+                   receive
+                       {web_view, View, {record, #{path := Path, kind := Kind}}} -> {Path, Kind};
+                       {web_view_ended, View, Reason} -> Reason
+                   after 5000 -> error(no_answer)
+                   end
+           end,
+    ?assertEqual(scope, Open({open, {path, [<<"kernel">>]}})),
+    %% An export asked by a process of the session, or in the peer's envelope, is
+    %% refused and widens nothing.
+    ?assertEqual({error, badarg}, gen_server:call(Line, {export, ?PEER})),
+    Line ! {erx_origin, ?PEER, {'$gen_call', {self(), [alias | alias()]}, {export, ?PEER}}},
+    ?assertEqual(scope, Open({open, {path, [<<"kernel">>]}})),
+    Alias = alias(),
+    Line ! {erx_origin, ?SYSTEM, {'$gen_call', {self(), [alias | Alias]}, {export, ?PEER}}},
+    receive {[alias | Alias], Exported} -> ?assertEqual(ok, Exported) after 5000 -> error(no_answer) end,
+    ?assertEqual({[{text, <<"kernel">>}], <<"listing">>}, Open({open, {path, [<<"kernel">>]}})).
 
 views(Line) ->
     {links, Links} = erlang:process_info(Line, links),

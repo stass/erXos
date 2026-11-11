@@ -4435,6 +4435,24 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] Web view scope, root's session through the host link's `web` facet
+  (`erlang/apps/erx_web_line/src/erx_web_line.erl`, `export/2`; [design-web.md's
+  Security](docs/design-web.md#security)): once the system domain exports root's session's line to the web
+  domain, every view a browser opens reads at scope `all`, so a browser reaches the machine-wide paths
+  (`/proc/kernel`, `/proc/cpus`, the kernel log, the machine record's `all` attributes), as the session's own
+  `/proc` does; on the stopgap a session's runtime answers most of them `unsupported`. The facet exists only in a
+  development build, which runs trusted code only. The owner accepted the wide scope; narrowing it to root's own
+  domains, or removing it, changes design-live.md ("Scopes"), design-web.md (W1) and design-domains.md
+  (property 9) with it, and needs a test that a browser's view of `/proc/kernel` ends `scope`. The line widens
+  itself on any export the system domain sends (`{export, Web}`), and today only the host link's `web` facet
+  sends one, for root's development session: the network login (`erx_web_login`) must not export its sessions'
+  lines through the same call. The facet the session item under Bugs mints, taken by `erx_facets:facets/2`,
+  is the better source of the scope; with it the line's own `scope` goes. Not yet consistent at `all` in a
+  session's runtime: `[domains, 4, threads]` through `entries/2` is gated only on the domain, not on the runtime
+  (`erx_inspector:collects_domain/2` covers `collect/2` alone), and `/proc/cpus` answers a partial empty
+  listing where the stopgap refuses a task's `erx_object_info`, which `erx_kernel_records:listing/6` should
+  answer `unsupported`.
+
 * [Medium] Host link, the web facet's casts (`erlang/apps/erx_hostlink/src/erx_hostlink_web.erl`,
   `erx_hostlink.erl`): each `{web, C, Bytes}` the web domain sends the facet becomes a `facet_cast` to the host
   link's process, which queues it for the host outside the output bound that holds back input (`OUTPUT_BACKLOG`),

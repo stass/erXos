@@ -22,7 +22,7 @@ class ErxWebLineTest < Minitest::Test
   SOURCES = [*%w[generated/erx_web_proto generated/erx_schema generated/erx_present erx_text_tables]
                .map { |name| Erx::Generated.path("erlang/apps/erx/src/#{name}.erl", root: ROOT) },
              *%w[erx_files/src/erx_procfs_core erx_web_line/src/erx_web_value erx_web_line/src/erx_web_line
-                 erx/src/erx_facet erx/src/erx_driver_ctl erx/src/erx_inspector erx/src/erx_kernel_records
+                 erx/src/erx_facet erx/src/erx_facets erx/src/erx_driver_ctl erx/src/erx_inspector erx/src/erx_kernel_records
                  erx/src/erx_process_records erx/src/erx_object_info erx/src/erx_log_records
                  erx/src/erx_runtime_records erx/src/erx_text erx_web/src/erx_web_conn
                  erx_web/src/erx_web_relay erx_web/src/erx_web_relay_conn]

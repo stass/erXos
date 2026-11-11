@@ -388,3 +388,15 @@ the_record_validator_checks_entries_test() ->
                  erx_schema:validate_record(#{schema => 1, path => [kernel], kind => listing, id => kernel,
                                               attrs => #{}, children => [log], entries => {ok, 0, []}})),
     ?assertEqual({error, malformed}, erx_schema:validate_record(Record#{entries => {ok, 0, []}, other => 1})).
+
+%% A runtime collects the system domain's records only when it is the system domain.
+%% Another runtime's kernel records are its own domain's, so a session, even one whose
+%% inspect scope is `all`, collects none rather than show its own as the system
+%% domain's, and no runtime collects another domain's.
+collects_domain_test() ->
+    System = erx_kernel_records:system_domain(),
+    Session = System + 4,
+    ?assert(erx_inspector:collects_domain(System, System)),
+    ?assertNot(erx_inspector:collects_domain(System, Session)),
+    ?assertNot(erx_inspector:collects_domain(Session, Session)),
+    ?assertNot(erx_inspector:collects_domain(Session, System)).

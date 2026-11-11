@@ -41,7 +41,7 @@ scope}`; a path the schema declares that has no collector here is
 """.
 
 -export([inspect/2, inspect/3, entries/2, overview/1]).
--export([scoped/3, declared_reachable/3, listing/2]).
+-export([scoped/3, declared_reachable/3, listing/2, collects_domain/2]).
 -export_type([scope/0, answer/0, entries/0]).
 
 -type scope() :: all | [non_neg_integer()].
@@ -178,9 +178,22 @@ project(Error, _Owner, _Scope) -> Error.
 
 %%% Collection: each path from its reporter.
 
+-doc """
+Whether a runtime of domain Runtime collects Domain's records: only the
+system domain's, the one whose objects the root names, and only in the system
+domain's own runtime. Another runtime's counters are its own domain's
+(erx_runtime_records), and so are its group, budget and threads where the
+kernel reports them to it (erx_kernel_records reads them on its own
+capabilities), so it collects none rather than show its own as the system
+domain's, whatever its scope.
+""".
+-spec collects_domain(non_neg_integer(), non_neg_integer()) -> boolean().
+collects_domain(Domain, Runtime) ->
+    Domain =:= Runtime andalso Domain =:= erx_kernel_records:system_domain().
+
 %% One clause per path shape this inspector collects; a domain path is
-%% collected only for the system domain, the one whose objects the root
-%% names, and every other domain names nothing it reaches.
+%% collected only for the system domain, in its own runtime
+%% (collects_domain/2), and every other domain names nothing it reaches.
 collect([kernel, log], _Scope, Options) ->
     case Options of
         #{offset := Offset} -> erx_log_records:log(Offset);
@@ -197,7 +210,7 @@ collect([processes, Pid], _Scope) ->
 collect([cpus, _Index] = Path, Scope) ->
     entry(Path, enumerate([cpus], Scope));
 collect([domains, Domain | Rest] = Path, Scope) ->
-    case Domain =:= erx_kernel_records:system_domain() of
+    case collects_domain(Domain, runtime_domain()) of
         true -> system_domain(Path, Rest, Scope);
         false -> {error, scope}
     end;

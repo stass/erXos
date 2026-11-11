@@ -6,9 +6,11 @@
 -moduledoc """
 The session's line to the web domain (docs/design-web.md, "Views on the
 line"): the process through which the web domain opens views of this
-session, each a process of this domain that queries the inspector with the
-session's own scope, so a browser sees what the principal's console session
-would (W1).
+session, each a process of this domain that queries the inspector at the
+line's scope: the session's own until the system domain exports the line to
+the web domain, and `all` from then on, the scope the design gives root's
+session in a development build (docs/design-live.md, "Scopes"; export/2),
+which its inspect facet does not carry yet (TODO.md).
 
 The line serves one peer, the web domain it was exported to, and none
 until then. The session names the line to the domain service in its ready
@@ -35,7 +37,7 @@ without an envelope, since it acts with the session's authority anyway.
   (erx_procfs_core:child/2), and names that name nothing are answered
   `{error, scope}`, as a path outside the scope is, so the open tells no
   more than the view would (docs/design-web.md, "URLs"). Which paths the
-  view reaches is the inspector's to decide, at the session's scope.
+  view reaches is the inspector's to decide, at the line's scope.
 * A view belongs to the process that opened it, the caller of the open:
   it answers that process alone and ends when that process ends.
 
@@ -59,13 +61,16 @@ at most one update of 64 KiB (W8).
 -export_type([config/0]).
 
 %% peer is the web domain's id, none until the system domain has the line
-%% exported, and system the system domain's. inspect answers a path's record,
-%% by default erx_inspector's with the session's own inspect scope
-%% (erx_facets:domain/0), read at each query, which costs a lookup and keeps no
-%% state of the line's. exports answers export/3 and
-%% owner/1, erx_dist or a host test's stand-in.
+%% exported, and system the system domain's. scope is the scope views read at:
+%% own, the session's own inspect scope (erx_facets:domain/0), read at each
+%% query, which costs a lookup and keeps no state of the line's, until the
+%% export makes it all (export/2). inspect answers a path's record at a scope,
+%% erx_inspector:inspect/2 or a host test's stand-in. exports answers export/3
+%% and owner/1, erx_dist or a host test's stand-in.
 -type config() :: #{peer => pos_integer() | none, system => pos_integer(),
-                    inspect => fun((list()) -> erx_inspector:answer()), exports => module()}.
+                    scope => own | erx_inspector:scope(),
+                    inspect => fun((list(), erx_inspector:scope()) -> erx_inspector:answer()),
+                    exports => module()}.
 
 %% The views one line holds at once (docs/design-web.md, "Views on the line").
 -define(VIEWS, 64).
@@ -75,12 +80,15 @@ at most one update of 64 KiB (W8).
 -doc "Starts the line for Config, linked to the caller.".
 -spec start_link(config()) -> {ok, pid()}.
 start_link(Config) when is_map(Config) ->
-    Defaults = #{peer => none, inspect => fun inspect/1, exports => erx_dist},
+    Defaults = #{peer => none, scope => own, inspect => fun erx_inspector:inspect/2, exports => erx_dist},
     proc_lib:start_link(?MODULE, line_init, [self(), maps:merge(Defaults, Config)]).
 
-inspect(Path) ->
+%% The scope a view reads at, from the line's.
+scope(own) ->
     #{inspect := Scope} = erx_facets:domain(),
-    erx_inspector:inspect(Path, Scope).
+    Scope;
+scope(Scope) ->
+    Scope.
 
 -doc false.
 line_init(Parent, Config) ->
@@ -116,9 +124,17 @@ line(Parent, #{peer := Peer, system := System, exports := Exports} = Config, Vie
 %% The system domain's request to serve Web: the line exports itself to Web
 %% with send alone, as encoding its name in a frame for Web would, and serves Web
 %% from then on. A refused export leaves the peer as it was.
+%%
+%% From the export on, the line's views read at scope `all`, the scope the design
+%% gives root's session in a development build (docs/design-live.md, "Scopes"):
+%% the system domain exports only the line of the session the console logged root
+%% in at, and only in a development build (erx_hostlink_web), so no other session's
+%% line reaches it. That the line widens on the export rather than through the
+%% session's inspect facet, and what a browser reads at `all`, is a security
+%% residual in TODO.md.
 export(Web, #{exports := Exports} = Config) ->
     case Exports:export(self(), [send], Web) of
-        ok -> {ok, Config#{peer := Web}};
+        ok -> {ok, Config#{peer := Web, scope := all}};
         {error, Reason} -> {{error, Reason}, Config}
     end.
 
@@ -187,8 +203,8 @@ request(_Message, #{}) -> other.
 %% Queries until there is something new to send, sends it and returns the view
 %% with it as the last answer; ends the view when the query cannot be answered.
 %% While it waits to query again it takes only its end.
-answer(#{conn := Conn, path := Path, inspect := Inspect, last := Last} = View) ->
-    case body(Inspect(Path)) of
+answer(#{conn := Conn, path := Path, scope := Scope, inspect := Inspect, last := Last} = View) ->
+    case body(Inspect(Path, scope(Scope))) of
         {ok, Last} ->
             wait(erlang:start_timer(?REQUERY_MS, self(), requery), View);
         {ok, Body} ->
