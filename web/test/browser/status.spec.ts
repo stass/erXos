@@ -5,7 +5,8 @@
  * W7 in the browser (docs/design-web.md, "Invariants"): never fabricate. A
  * value whose status is not ok shows its token, as erx_render prints it, and
  * never the value it carries; a partial listing is marked partial; and when
- * the machine stops, the view says it is stale within the ping interval.
+ * the machine stops, the view says it is stale within the ping interval. The
+ * front panel lights only what the record holds, each attribute by its status.
  */
 
 import { WEB_PING_MS } from '../../src/generated/proto.ts';
@@ -29,11 +30,19 @@ test('values that are not ok show their tokens, never their values', async ({ pa
   const rows = page.locator('main table tbody tr');
   await expect(rows).toHaveCount(4);
   await expect(rows.nth(0)).toContainText('4');
-  await expect(rows.nth(1).locator('.token')).toHaveText('[partial]');
-  await expect(rows.nth(2).locator('.token')).toHaveText('[unknown]');
-  await expect(rows.nth(3).locator('.token')).toHaveText('[timeout 500]');
-  await expect(page.locator('main')).toContainText('cpus [partial]');
+  await expect(rows.nth(1).locator('.status-token')).toHaveText('[partial]');
+  await expect(rows.nth(2).locator('.status-token')).toHaveText('[unknown]');
+  await expect(rows.nth(3).locator('.status-token')).toHaveText('[timeout 500]');
+  await expect(page.locator('main .listing li')).toHaveText(['cpus', '[partial]']);
+  await expect(page.locator('.front-panel .bank-children .bank-label')).toHaveText('1 children [partial]');
   await expect(page.locator('main')).not.toContainText(HIDDEN.toString());
+  // The front panel lights each attribute by its status, and the one child the listing names.
+  const lamps = page.locator('.front-panel .bank-attributes .led');
+  await expect(lamps).toHaveCount(4);
+  for (const [at, lamp] of ['ok', 'partial', 'unknown', 'timeout'].entries()) {
+    await expect(lamps.nth(at)).toHaveClass(new RegExp(`(^| )lamp-${lamp}( |$)`));
+  }
+  await expect(page.locator('.front-panel .bank-children .led')).toHaveCount(1);
 });
 
 test('a stopped machine marks the view stale within the ping interval', async ({ page, machine }) => {
@@ -42,6 +51,7 @@ test('a stopped machine marks the view stale within the ping interval', async ({
   await expect(page.locator('main')).not.toContainText('stale since');
   machine.stop();
   await expect(page.locator('main .notice')).toContainText('stale since', { timeout: WEB_PING_MS });
+  await expect(page.locator('main .strip')).toHaveClass(/\bstrip-stale\b/);
   // The record stays, marked, rather than vanish or pass for current.
   await expect(page.locator('main table')).toBeVisible();
 });

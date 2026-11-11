@@ -714,7 +714,17 @@ on a file of another kind, a path with a segment that is empty, hidden,
   unit and reporter, values whose status is not `ok` as their tokens, and
   children as links; the log and trace views, virtual lists of entries
   with gaps shown; the home page; the trace page, whose start button opens
-  the `trace` view; the login page.
+  the `trace` view; the login page. A record's page is an operator's
+  console: the path as a trail of links, a status strip whose colour band
+  drains when the view is not live and whose lamp flashes for each update,
+  and a front panel of lights, one per attribute lit by its status and one
+  per child, a light blinking where the update changed its datum. Every
+  light and lamp is the record's own data (W7): a status token keeps its
+  text beside its lamp, and apart from one scan across the panel when it
+  appears, nothing moves that the machine did not change. A view that is
+  not live dims its panel and table.
+  Motion stops under `prefers-reduced-motion`, and the fonts are the
+  system's, since the policy loads none from elsewhere.
 * **The UI renderer**: applies each `ui` update's operations to its model
   of the tree on `commit` and renders the model with React, keyed by node
   number, for the browser as [Rendering for the

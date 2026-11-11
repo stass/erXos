@@ -2,39 +2,532 @@
  * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * The client's one stylesheet (docs/design-web.md, "The client").
+ * The client's one stylesheet (docs/design-web.md, "The client"): an
+ * operator's console of a parallel machine. A matte black cabinet; a front
+ * panel of red lights, one per attribute and per child; a band of colours
+ * under the bezel that is the connection's state, full while the view is
+ * live and drained to grey when it is not; engineering labels in a plain
+ * grotesque and the machine's values in a monospace face. Fonts are the
+ * system's, since the content security policy loads nothing from elsewhere.
+ * Motion marks only what the machine did (an update arriving, a light whose
+ * datum changed), apart from one scan across the front panel when it first
+ * shows, and stops where the reader asks for reduced motion.
  */
 
 :root {
-  color-scheme: light dark;
-  font-family: system-ui, sans-serif;
+  color-scheme: dark;
+
+  --cabinet: #000;
+  --panel: #060606;
+  --seam: #2b2b2b;
+  --ink: #ece9e2;
+  --ink-dim: #8e8f93;
+  --ink-faint: #55565a;
+
+  --led-on: #ff3a1c;
+  --led-glow: rgb(255 58 28 / 55%);
+  --led-off: #2c0905;
+  --amber: #ffad1f;
+  --amber-glow: rgb(255 173 31 / 45%);
+  --fault: #ffe3dc;
+
+  --band-1: #8f1d22;
+  --band-2: #e0681c;
+  --band-3: #2c5ab0;
+  --band-4: #5c3e97;
+  --band-drained: #3a3a3c;
+  --bar: #151515;
+
+  --grotesk: "Helvetica Neue", Helvetica, "Nimbus Sans", Arial, sans-serif;
+  --mono: "SF Mono", Menlo, "DejaVu Sans Mono", ui-monospace, monospace;
+
+  --led: 7px;
+  --gutter: 16px;
+
+  font-family: var(--grotesk);
+  font-size: 15px;
+  line-height: 1.4;
 }
 
 body {
-  margin: 0 16px;
+  margin: 0;
+  min-height: 100vh;
+  background: var(--cabinet);
+  color: var(--ink);
 }
 
+a {
+  color: inherit;
+  text-decoration-color: var(--ink-faint);
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  color: var(--led-on);
+  text-decoration-color: currentcolor;
+}
+
+a:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+/* Machine text, through Text: its own direction, never its neighbours'. */
 .machine-text {
   unicode-bidi: isolate;
 }
 
-/* An escape token or a status token: the client's own text, never the machine's. */
+/* An escape token inside machine text: the client's own mark for a byte or character it will not show raw. */
 .token {
-  font-family: ui-monospace, monospace;
-  opacity: 0.7;
+  font-family: var(--mono);
+  font-size: 0.86em;
+  color: var(--ink-dim);
+  border: 1px solid var(--seam);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* A status token, `[partial]` and the rest: its text beside an indicator lamp of the status. */
+.status-token {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  white-space: nowrap;
+}
+
+.status-token::before {
+  content: "";
+  display: inline-block;
+  width: 0.62em;
+  height: 0.62em;
+  margin-right: 0.45em;
+  border-radius: 50%;
+  vertical-align: 0.02em;
+}
+
+/*
+ * The lamps, shared by the status tokens and the front panel's lights:
+ * ok burns red, partial and timeout amber (timeout dimmer), unknown is dark,
+ * unsupported is dark and struck through, error is white hot.
+ */
+.lamp-ok {
+  --lamp: var(--led-on);
+  --lamp-glow: var(--led-glow);
+}
+
+.lamp-partial {
+  --lamp: var(--amber);
+  --lamp-glow: var(--amber-glow);
+}
+
+.lamp-timeout {
+  --lamp: #a86d0e;
+  --lamp-glow: transparent;
+}
+
+.lamp-unknown,
+.lamp-unsupported {
+  --lamp: var(--led-off);
+  --lamp-glow: transparent;
+}
+
+.lamp-error {
+  --lamp: var(--fault);
+  --lamp-glow: rgb(255 227 220 / 60%);
+}
+
+.status-token::before,
+.led {
+  background: var(--lamp);
+  box-shadow: 0 0 6px var(--lamp-glow);
+}
+
+.status-token.lamp-unknown::before,
+.status-token.lamp-unsupported::before,
+.led.lamp-unknown,
+.led.lamp-unsupported {
+  box-shadow: inset 0 0 0 1px var(--ink-faint);
+}
+
+.status-token.lamp-unsupported::before,
+.led.lamp-unsupported {
+  background: linear-gradient(135deg, transparent 44%, var(--ink-dim) 44%, var(--ink-dim) 56%, transparent 56%), var(--lamp);
+}
+
+/* The console: one column of instruments on the black cabinet. */
+.console {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 var(--gutter) 48px;
+}
+
+/* The bezel: the machine's name, the path beside it and the status strip below. */
+.bezel {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: 24px;
+  padding-top: 20px;
+}
+
+.wordmark {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.trail {
+  font-family: var(--mono);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.trail a {
+  text-decoration: none;
+  color: var(--ink-dim);
+}
+
+.trail a:hover {
+  color: var(--led-on);
+}
+
+.trail a[aria-current="page"] {
+  color: var(--ink);
+}
+
+.trail .proc {
+  color: var(--ink-dim);
+}
+
+.trail .slash {
+  color: var(--ink-faint);
+}
+
+/*
+ * The status strip: the connection's words on a dark bar that rides a band
+ * of four colours. The band runs the width of the console and drains to grey
+ * when the view is not live, so the state reads from across the room.
+ */
+.strip {
+  grid-column: 1 / -1;
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 14px;
+  padding: 7px 14px 17px 32px;
+  border-radius: 0 0 18px 18px;
+  background:
+    linear-gradient(90deg, var(--band-1) 0 25%, var(--band-2) 25% 50%, var(--band-3) 50% 75%, var(--band-4) 75%) bottom / 100% 10px no-repeat,
+    var(--bar);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.strip p {
+  margin: 0;
+}
+
+.strip-waiting,
+.strip-stale,
+.strip-down {
+  background: linear-gradient(var(--band-drained), var(--band-drained)) bottom / 100% 10px no-repeat, var(--bar);
+}
+
+.strip-stale {
+  box-shadow: inset 4px 0 0 var(--amber);
+}
+
+.strip-down {
+  box-shadow: inset 4px 0 0 var(--led-on);
 }
 
 .notice {
-  font-weight: bold;
+  font-weight: 700;
 }
 
-table.record {
+.strip .updated {
+  color: var(--ink-dim);
+  font-family: var(--mono);
+}
+
+/* The activity lamp: it flashes once as each update arrives and rests dark. */
+.activity {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -9px;
+  border-radius: 50%;
+  background: var(--led-off);
+  box-shadow: inset 0 0 0 1px var(--ink-faint);
+}
+
+.strip-live .activity {
+  animation: received 700ms ease-out;
+}
+
+@keyframes received {
+  0%,
+  30% {
+    background: var(--led-on);
+    box-shadow: 0 0 10px var(--led-glow);
+  }
+}
+
+/*
+ * The front panel: banks of lights on a black plate, one per attribute and
+ * per child. A plate is scanned once when the page first shows it.
+ */
+.front-panel {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 36px;
+  margin-top: 22px;
+  padding: 18px;
+  background:
+    linear-gradient(rgb(255 255 255 / 3%) 1px, transparent 1px) 0 0 / 100% 18px,
+    var(--panel);
+  border: 1px solid var(--seam);
+  border-radius: 3px;
+}
+
+.front-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 58 28 / 18%) 48%, rgb(255 255 255 / 22%) 50%, transparent 52%);
+  transform: translateX(-100%);
+  animation: scan 1100ms ease-in 1 forwards;
+  pointer-events: none;
+}
+
+@keyframes scan {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.bank {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.bank:last-child {
+  flex: 1 1 320px;
+}
+
+.leds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.led {
+  width: var(--led);
+  height: var(--led);
+  border-radius: 1px;
+}
+
+/* An attribute's light is an indicator lamp, larger and round, beside the children's dense LEDs. */
+.bank-attributes .leds {
+  gap: 8px;
+}
+
+.bank-attributes .led {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+/* A light whose datum the last update changed blinks, then holds its lamp. */
+.led.changed {
+  animation: blink 300ms steps(1) 4;
+}
+
+@keyframes blink {
+  50% {
+    background: #fff;
+    box-shadow: 0 0 9px #fff;
+  }
+}
+
+.bank-label {
+  margin: 10px 0 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+/* The record: its kind as the title, its attributes and its children. */
+.record {
+  margin-top: 26px;
+}
+
+.kind {
+  margin: 0 0 12px;
+  font-size: 34px;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+}
+
+table.attrs {
+  width: 100%;
   border-collapse: collapse;
 }
 
-table.record th,
-table.record td {
-  padding: 2px 12px 2px 0;
+table.attrs th {
+  padding: 0 16px 6px 0;
+  border-bottom: 2px solid var(--ink);
+  color: var(--ink-dim);
+  font-size: 12px;
+  font-weight: 400;
+  text-align: left;
+}
+
+table.attrs td {
+  padding: 7px 16px 7px 0;
+  border-bottom: 1px solid var(--seam);
   text-align: left;
   vertical-align: top;
+}
+
+table.attrs td.key {
+  width: 22%;
+  color: var(--ink-dim);
+}
+
+table.attrs td.value {
+  font-family: var(--mono);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+table.attrs td.reporter {
+  width: 1%;
+  padding-right: 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* A value the last update changed comes in red and settles to the ink. */
+table.attrs tr.changed td.value {
+  animation: settle 1200ms ease-out;
+}
+
+@keyframes settle {
+  from {
+    color: var(--led-on);
+  }
+}
+
+/* The children: a grid of their names, each a link to its own record. */
+.children h3 {
+  margin: 30px 0 10px;
+  color: var(--ink-dim);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.listing {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14ch, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.listing > li {
+  margin: 0 -1px -1px 0;
+  padding: 3px 8px;
+  border: 1px solid var(--seam);
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+
+.listing a {
+  text-decoration: none;
+}
+
+/* A view that is not live dims its instruments: what they show is no longer current. */
+.console-stale .front-panel,
+.console-down .front-panel {
+  filter: saturate(0.2) brightness(0.55);
+}
+
+.console-stale .record,
+.console-down .record {
+  opacity: 0.6;
+}
+
+@media (max-width: 640px) {
+  .bezel {
+    grid-template-columns: 1fr;
+  }
+
+  .wordmark {
+    font-size: 24px;
+  }
+
+  .kind {
+    font-size: 26px;
+  }
+
+  .console {
+    --led: 5px;
+  }
+
+  .leds {
+    gap: 3px;
+  }
+
+  table.attrs thead {
+    display: none;
+  }
+
+  table.attrs tr {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--seam);
+  }
+
+  table.attrs td {
+    padding: 0;
+    border: 0;
+  }
+
+  table.attrs td.key,
+  table.attrs td.reporter {
+    width: auto;
+  }
+
+  table.attrs td.value {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .strip-live .activity,
+  .led.changed,
+  table.attrs tr.changed td.value {
+    animation: none;
+  }
+
+  .front-panel::after {
+    display: none;
+  }
+
+  /* Without the blink, a changed light keeps a still mark until the next update. */
+  .led.changed {
+    outline: 1px solid var(--ink);
+    outline-offset: 1px;
+  }
 }
