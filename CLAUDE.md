@@ -304,6 +304,27 @@ scripts live in `~/erxos-scratch/tools/`.
   whether changing the architecture would make the edge cases disappear rather
   than handling them one by one. A simpler design that eliminates a class of
   problems beats a clever one that patches each instance.
+* **No new mechanism without a design that names it.** Before adding a
+  facet, protocol, process kind, registry, flag or special case, find the
+  mechanism the design documents already give for the job and use it. A
+  domain reaches another only through a facet of a service `abi/services`
+  declares, and a new need goes to one of three homes: state someone reads
+  is an inspection path, shown at `/proc`; bytes someone keeps or a thing
+  someone commands is a file tree its owner serves and the reader mounts,
+  with a `ctl` file for one-shot control; a live conversation is a declared
+  protocol with its own design. When a change needs
+  something the design does not name, stop and bring the question to the
+  design (and to me when it is architectural) instead of building it.
+  * Agents' briefs say so, and a change is checked against the design
+    documents for new concepts before it lands, not only for correctness.
+  * Every cross-domain facet is declared in one checked-in table that names
+    the design section justifying it; a build check fails on a facet the
+    table does not list.
+  * A **drift review** runs about once a day of active landing, or every
+    fifteen or so landings: a Fable pass over the diff since the last one
+    that lists the new concepts, which of them duplicate an existing
+    abstraction or contradict a design document, and what can be deleted.
+    Its findings come to me as conform, merge or delete.
 * **The common path first; the long tail goes to `TODO.md`.** Build what the
   milestone needs for the cases that occur in it. Rare failure modes, in-place
   recovery machinery and protection against hostile peer domains beyond the
