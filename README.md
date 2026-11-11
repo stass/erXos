@@ -381,9 +381,10 @@ Error in process <0.150.0> with exit value:
   and `wctl`, the widget model's deltas, `ui.txt` with its generated
   schema and binary form in Erlang, C and TypeScript, presentation types
   generated from the inspection schema, LVGL built on the host, and the
-  web client's protocol and connection core. No screen shows it yet. The
-  web view (1b-C) has its host front end and the client's routes; the
-  browser client is not built yet.
+  web client's protocol and connection core. No screen shows it yet.
+  There is no web view to open yet: the host's `tools/erx web` server and
+  some of the browser client's code exist, but the browser client is not
+  built and the machine does not serve it.
 * **Designed but not built yet:** the rest of erXos's own kernel, the
   rest of the command shell, the network domain, the display on a
   screen, the browser client, and the POSIX-lite layer. Each has a design document in
