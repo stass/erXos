@@ -281,12 +281,13 @@ session_facet_is_an_inspector_scope_test() ->
     ?assertEqual(9, map_size(maps:get(attrs, erx_inspector:scoped(machine(), machine, Scope)))).
 
 %% A domain's facets: the system domain's are the inspect facet of scope
-%% `all` and a facet for each service that runs in it; another domain's are
+%% `all` alone, since it may hold no `net` (docs/design-system.md, property
+%% 15); another domain's are
 %% the local scope of its own id and the facets it was handed, and an
 %% inspect facet handed to it never widens that scope.
 facets_test() ->
     Net = spawn(fun() -> ok end),
-    ?assertEqual(#{inspect => all, net => local}, erx_facets:facets(system, #{})),
+    ?assertEqual(#{inspect => all}, erx_facets:facets(system, #{})),
     ?assertEqual(#{inspect => [7]}, erx_facets:facets({domain, 7}, #{})),
     ?assertEqual(#{inspect => [7], net => Net}, erx_facets:facets({domain, 7}, #{net => Net})),
     ?assertEqual(#{inspect => [7]}, erx_facets:facets({domain, 7}, #{inspect => Net})).

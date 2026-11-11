@@ -999,14 +999,6 @@ it; git history is the record of completed work.
   socket stays passive; only the first waiting recv gets a passive error's reason, the rest
   `closed` (stock's `async_error_am_all` gives all the reason); and re-arming after a recv
   met the end answers `{error, closed}` where stock sends `{tcp_closed, S}`.
-* [High] network, shell and manifest (`erx_cmd_ifconfig`, `erx_cmd_ping`, `erx_facets`,
-  design-network-stack, "The grant"; design-system, property 15): the
-  system shell holds `net` and runs `ifconfig` and `ping` through the system domain's own
-  grant, where the system domain may hold no `net` grant. Take `net` out of the system
-  domain's facets, run the network utilities and the network device suite's `ifconfig` and
-  `ping` in root's session at the UART, and make `erx_net_admit:mint/2` refuse the system
-  domain's id. The stack itself
-  leaves the system domain when 1b-E's network domain lands.
 * [Medium] network (the client side of `net`; design-domains, "Floors from a protocol"):
   the socket protocol's floors are not generated from `abi/services/net.txt`, and no client
   checks them at run time. The manifest check holds each `net` grantee's `max_frame` to
@@ -2507,6 +2499,8 @@ it; git history is the record of completed work.
 * [Low] tests, `test/integration/runtime_console_test.rb` (`make check-runtime-hosted`): the cases that start the Erlang shell wait for `1> ` at the start of a line, but the hosted system domain is a named node and its shell prompts `(system@erxos)1> `, so every `with_erxos` case times out before it begins. Match the prompt with its node name, or make the patterns node-agnostic as the `Ctrl-G` case is.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names quota is the constant `NAMES_QUOTA`, 64, for every principal; the manifest's per-principal `names` is read by no one. Take each principal's from its row, as the domain quota is.
 * [Low] session memory, `config/manifest/qemu-virt-development.txt`: re-measure one session at its command shell under the lane driver's frame-sized funnel scratch (at most about 132 KiB a connection) and lower the session's 36 MiB budget, the principal's memory and its `max_message_heap` of 131,072 words if the numbers allow; they were sized for a scratch of 16 bytes a word of `max_message_heap`.
+* [Medium] CPU grants, `config/manifest/qemu-virt-development.txt`: the storage and network domains each take a whole CPU of the users share, 2,000 of the 2,250 mcpu that the system share's reserve leaves configured domains (`dom_system_reserve`, `liberx/system/dom_core.c`), so a third configured domain (a web domain) has 250 mcpu of room. Size each service domain's grant from its measured use, or grow the reserve's bound, before a third configured domain is added.
+* [Medium] tooling, configured-domain ids in the QEMU harnesses: `MediumBoot` (`NETWORK_ID`, `STORAGE_ID`, `DOMAIN_IDS`, `FREE_ID` and the catalogue rows of `DlControl` and `DlDevices`), `SystemDomain`, `SessionDomain::FIRST_SESSION`, `Regrant` and `DeviceGive::RESTART_ID` each re-derive by hand that configured domains boot in name order and that each later create spends an id, so adding a configured domain edits six files. Derive every id and row from one helper that sorts the manifest's configured domain names with the cell's added rows.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: a domain whose pid died and whose stop the library refused never ends, so `ending/2` counts it for good and every later create and session start of its principal waits the full `release_wait` (10 s); record the refused stop and leave such a domain out of the hold.
 * [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: a login's session that has had the line and keeps ending (a shell that dies at its first input) is started again without limit, a domain build each round; throttle it as FreeBSD's init throttles a getty that keeps failing, and say so on the line.
 * [Medium] session, `erlang/apps/erx_session/src/erx_session_sup.erl`: a restarted tty relay names itself with a new pid, which the console refuses (`tty_opened/4`), so the session is cut off from its line while its domain lives and holds the principal's one domain; make the relay's end end the session domain, or accept a new tty of the same domain once the old one is dead.
@@ -4528,17 +4522,6 @@ to the corpus and follow rc
   other clients' entries in resolution; the sender credit bounds only the rate of hand-overs. Bound it per
   grant: tag each hand-over with its grant, count the entries each grant's packets started, and drop a
   grant's hand-overs past a cap as lost frames.
-* [Medium] network, the stack's placement (`erlang/apps/erx_net`, `erx_virtio_net`,
-  [design-stopgap.md](docs/design-stopgap.md#device-records)): network input is parsed in the
-  system domain until 1b-E moves the stack and its driver into the network domain. Every packet
-  parser of `erx_net` runs in the trusted base, beside the system domain's unconfined device
-  memory, so a bug a packet reaches is a bug of the system domain's. `erx_net` starts as a
-  `temporary` application (`ReleaseFiles::TEMPORARY`), and `erx_net_sup` restarts none of its
-  children, so the end of any of them (the interfaces supervisor giving up after a burst of link
-  crashes included) ends the stack until the next boot, and not the system domain; a memory-safety bug in a NIF it calls is not contained, the merge's C
-  over frames a device wrote among them (`erx_bytes:tcp_merge/1`,
-  [design-network-fastpath.md](docs/design-network-fastpath.md#what-the-stack-believes)).
-  Closed by 1b-E.
 * [Medium] network, sockets (`erlang/apps/erx_net/src/erx_net_grant.erl`, `erx_net_bind`,
   `erx_net_input:udp/3`): a socket bound to a specific address and a port takes that address's
   datagrams from a socket another domain bound to `any` on the same port, since input tries the
@@ -4903,7 +4886,7 @@ document's "residual risks accepted" paragraph.
   `erx_net_loop`, `erx_net_runtime` with `erx_net_local`, the processes,
   then `erx_net_vclock`, `erx_net_script`, `erx_net_impair` and
   `erx_net_relay` in the app's `test/`; `erx_virtio_net` and `erx_net_erxos`, which run in the
-  system domain, the stopgap placement, until 1b-E's network domain. Three things to confirm on
+  network domain. Three things to confirm on
   the FreeBSD test host before its runs: that the test user can open `/dev/tapN` (a devfs rule) and
   the tap comes up on open (`net.link.tap.up_on_open`), that the bridge
   can put two jails behind separate tap devices for the relay's FreeBSD

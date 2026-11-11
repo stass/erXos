@@ -1,9 +1,9 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# The development manifest of QEMU virt: the system domain, one configured domain,
-# storage, as docs/design-stopgap.md's "The Phase 1 manifest check" admits it, and
-# the system principal's session template, from which the console starts root's
+# The development manifest of QEMU virt: the system domain, two configured domains,
+# storage and network, as docs/design-stopgap.md's "The Phase 1 manifest check" admits
+# them, and the system principal's session template, from which the console starts root's
 # session at boot (docs/design-system.md, "Booting"). The storage domain is a
 # BeamAsm service domain that holds the block unit and its data and release
 # windows and runs the block driver and littlefs at /data (docs/design-stopgap.md,
@@ -12,7 +12,11 @@
 # to the system domain alone (property 8; docs/design-system.md, "The holder's
 # driver-control facet"), and data, an erx_fs grant of /data's tree, to the system
 # domain and to root's session (property 16; docs/design-stopgap.md, "littlefs in the
-# storage domain"). Fixed
+# storage domain"). The network domain is a BeamAsm service domain that holds the net
+# unit and runs the network stack (docs/design-network-stack.md, "Who holds the network
+# device"). It serves net, a grant of the stack, to the system principal's sessions, since the
+# system domain may hold none (docs/design-system.md, property 15), and network_ctl,
+# its driver-control facet, to the system domain alone (property 8). Fixed
 # medium roles carry partition 0, as docs/design-abi.md says. The machine is
 # QEMU virt with 224 MiB of RAM (config/platforms/qemu-virt.json), small for the
 # browser emulator yet roomy at the shell; root_memory, 156.25 MiB, leaves 51.75 MiB
@@ -26,17 +30,18 @@
 # manifest's system baseline and the block driver and littlefs in the system domain);
 # 1,000 more idle processes
 # add about 4 MiB, and the rest of the baseline over ERTS and /tmp, 5.8 MiB, is the
-# margin. The system principal's 69 MiB holds root's one session, whose limits'
-# memory is 36 MiB and outer 1 MiB, the storage domain, 30 MiB and outer 1 MiB, and
-# 1 MiB for the outer budget of a domain that has ended while the other still holds a
+# margin. The system principal's 106 MiB holds root's one session, whose limits'
+# memory is 36 MiB and outer 1 MiB, the storage domain, 30 MiB and outer 1 MiB, the
+# network domain, 36 MiB and outer 1 MiB, and
+# 1 MiB for the outer budget of a domain that has ended while another still holds a
 # connection to it: that outer budget is the library's until the survivor answers the
-# connection's end (erx_domain_srv ended/3), and a session's next login or the
-# storage domain's restart is admitted before that answer arrives. One such budget is
-# the bound for root's one session and one storage domain as long as the survivor
-# answers before its peer ends a second time; a second leftover refuses the next start
+# connection's end (erx_domain_srv ended/3), and a session's next login or a
+# configured domain's restart is admitted before that answer arrives. One such budget
+# is the bound as long as one domain at a time ends and the survivor answers before its
+# peer ends a second time; a second leftover refuses the next start
 # (TODO.md, "a refused restart is not retried"). With it the
 # baseline leaves root_memory the block device's 1 MiB, the network device's 256 KiB
-# and 40 MiB no one is promised. The storage domain's 30 MiB is its
+# and 3 MiB no one is promised. The storage domain's 30 MiB is its
 # use rounded up to a whole MiB: 7,635 pool pages, 29.8 MiB, with BeamAsm, erx_blk
 # and erx_storage running and /data mounted, at rest, measured as Footprint measures
 # (the root's pool pages in use with the domain up minus those once it has ended;
@@ -60,10 +65,10 @@
 #   release (applications)                      pool pages    MiB
 #   bare (kernel stdlib erx erx_files)          4,568         17.8
 #   blk (bare + erx_blk, loaded)                4,568         17.8
-#   network (bare + erx_net, erx_net_client)    4,568         17.8
+#   net (bare + erx_net, erx_net_client)        4,568         17.8
 #   the bare release, loaded                    4,696         18.3
 #   the blk release, its 9 modules loaded       4,760         18.6
-#   the network release, its 82 modules loaded  5,240         20.5
+#   the net release, its 82 modules loaded      5,240         20.5
 #   system domain at the shell, /tmp 4 MiB      8,072         31.5
 #
 # The archive of the Footprint image is 48,967,680 bytes (46.70 MiB): the system release
@@ -92,21 +97,25 @@
 # 4 MiB cap, created last, took 4,568 pages as the others did): the cap is charged on
 # use, not up front.
 #
-# The 224 MiB machine has the memory to admit the system domain, root's session, the
-# storage domain and a network domain, once max_domains and the principal's domains
-# grow to three. Admission charges budgets, not use: the system baseline, 46 MiB, the
-# system principal's 69 MiB (root's session, 36 MiB and outer 1 MiB, the storage
-# domain, 30 MiB and outer 1 MiB, and an ended domain's outer 1 MiB) and the devices'
-# 1.25 MiB promise 116.25 MiB of root_memory's 156.25 MiB, which leaves 40 MiB no one
-# is promised. That is the network
-# row's room: it needs about 21 MiB and outer 1 MiB, the network release's 20.5 MiB at
-# rest in the Footprint table above, measured on the interpreter with one scheduler, and
-# is measured again when the row is configured. On BeamAsm with four schedulers, as the
-# storage row runs, the storage domain's figure suggests about 30 MiB, which the 40 MiB
-# still holds. In use, the root's pool holds the system domain's 31.5 MiB (36.2 MiB at
+# The 224 MiB machine admits the system domain, root's session, the storage domain and
+# the network domain. Admission charges budgets, not use: the system baseline, 46 MiB,
+# the system principal's 106 MiB (root's session, 36 MiB and outer 1 MiB, the storage
+# domain, 30 MiB and outer 1 MiB, the network domain, 36 MiB and outer 1 MiB, and an
+# ended domain's outer 1 MiB) and the devices' 1.25 MiB promise 153.25 MiB of
+# root_memory's 156.25 MiB, which leaves 3 MiB no one is promised. The network
+# domain's 36 MiB is its use rounded up to a whole MiB, 34 MiB, and 2 MiB of headroom:
+# 8,603 pool pages, 33.6 MiB, with BeamAsm and the users share's four schedulers, after
+# root's session has run ping -c 3 and echoed 1 MiB over TCP through it, measured as
+# Footprint measures (docs/design-network-stack.md, the network domain's memory; the
+# net_device suite's network-domain cell, a 768 MiB machine, HVF, 1 guest CPU, an Apple
+# M3 Max host, QEMU 11.1.3, Homebrew clang 23.1.3). The storage and network domains each
+# take a whole CPU of the users share, 2,000 of the 2,250 mcpu the system share's
+# reserve leaves the configured domains (dom_system_reserve, liberx/system/dom_core.c).
+# In use, the root's pool holds the system domain's 31.5 MiB (36.2 MiB at
 # the interactive shell of the development image), the session's about 19 MiB (the bare
-# release's 18.3 MiB and the shell's modules) and the storage domain's 29.8 MiB: about 80
-# to 85 MiB, which leaves about 71 to 76 MiB of root_memory unused. RAM less root_memory
+# release's 18.3 MiB and the shell's modules), the storage domain's 29.8 MiB and the
+# network domain's 33.6 MiB: about 114 to 119 MiB, which leaves about 37 to 42 MiB of
+# root_memory unused. RAM less root_memory
 # leaves 67.75 MiB to Fiasco's kernel memory, 14 MiB at 224 MiB (its boot log's "Reserved
 # 14 MiB as kernel memory"), its image and sigma0, the archive, the root's image (4.7 MiB)
 # and the device tree's 1 MiB. root_memory keeps about 1.4 MiB below what sigma0 offers
@@ -118,9 +127,9 @@
 # hash tree; the packer takes its extent from the image it builds
 # (ReleaseMedium.image), and the storage domain holds a read-only window on it.
 #
-# The storage domain restarts at most 5 times in 600 s: a boot that hangs is
-# stopped after the default 60 s boot timeout, so a shorter period would never
-# see 5 of them and would restart a hung storage domain without end.
+# The storage and network domains restart at most 5 times in 600 s: a boot that hangs
+# is stopped after the default 60 s boot timeout, so a shorter period would never
+# see 5 of them and would restart a hung domain without end.
 manifest 1
 share system
   quota_ns 30000000
@@ -185,6 +194,16 @@ runtime_limits storage
   atoms 16384
   foreign_atoms 1024
   processes 1024
+runtime_limits network
+  max_frame 131072
+  max_message_heap 1048576
+  funnel_depth 64
+  exports 256
+  tmp 0
+  overlay 0
+  atoms 16384
+  foreign_atoms 1024
+  processes 4096
 limits native
   memory 16777216
   outer 1048576
@@ -202,8 +221,8 @@ limits session
   outer 1048576
   grant @share.session
   spaces @share.session
-  lane 4096
-  connections 3
+  lane 65536
+  connections 4
   crash 0
   flags spaces
   runtime_limits @runtime_limits.session
@@ -221,10 +240,22 @@ limits storage
   runtime_limits @runtime_limits.storage
   peer_held 4096
   peer_held_total 4096
-principal system
-  memory 72351744
+limits network
+  memory 37748736
+  outer 1048576
   grant @share.users
-  domains 2
+  spaces none
+  lane 65536
+  connections 2
+  crash 0
+  flags none
+  runtime_limits @runtime_limits.network
+  peer_held 4096
+  peer_held_total 4096
+principal system
+  memory 111149056
+  grant @share.users
+  domains 3
   names 64
   default_limits @limits.native
   ceiling_limits @limits.native
@@ -232,7 +263,7 @@ session system
   limits @limits.session
   runtime @artifact.emu
   release @artifact.session
-  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx -eval ok=application:start(erx_session)"
+  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx -erx_net_client grant {erx_net_client_erxos,grant,[]} -eval ok=application:start(erx_session)"
 machine
   flags development
   host "erxos"
@@ -244,8 +275,8 @@ machine
   system_share @share.system
   users_share @share.users
   system_principal @principal.system
-  max_domains 2
-  max_connections 8
+  max_domains 3
+  max_connections 10
   system_lane 4096
   system_queue 16384
   peer_held 4096
@@ -253,7 +284,7 @@ machine
   sealing none
   system_runtime_limits @runtime_limits.system
   native_limits @limits.native
-  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -no_epmd -proto_dist erx -erx_net interfaces {erx_virtio_net,interfaces,[]} -erx_net runtime erx_net_erxos"
+  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -no_epmd -proto_dist erx"
 unit console
   placement "console-uart"
   holder system
@@ -265,7 +296,7 @@ unit block
   holder @domain.storage
 unit net
   placement "net"
-  holder system
+  holder @domain.network
 window slot_a
   holder system
   device "/virtio_mmio@a003e00"
@@ -321,6 +352,16 @@ domain storage
   restarts 5
   restart_period_s 600
   args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx"
+domain network
+  principal @principal.system
+  limits @limits.network
+  kind service
+  flags none
+  runtime @artifact.jit
+  release @artifact.network
+  restarts 5
+  restart_period_s 600
+  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx -erx_net interfaces {erx_virtio_net,interfaces,[]} -erx_net runtime erx_net_erxos"
 service storage_ctl
   server @domain.storage
   interface driver_control
@@ -340,7 +381,13 @@ facet storage_ctl
 # words (2 MiB), bounds the grant's process, which holds up to in_flight write requests of
 # 64 KiB with their data. reductions and period_ns bind no erx_fs grant. The storage
 # domain takes two connections, root's session and one more while a session is replaced,
-# and root's session three: data, net and one more.
+# and root's session four: data, net, and one more for each while its server is
+# replaced; a domain's system connection counts against no quota (life_connections,
+# liberx/system/dom_life.c). The network domain, like the storage domain, takes two.
+# The machine's max_connections, 10, holds the five rows at rest (the system
+# connections of root's session and of the two configured domains, and the session's
+# data and net), the three a replacement session makes beside its predecessor's
+# closing rows, and the two a restarted configured domain makes beside its own.
 service data
   server @domain.storage
   interface files
@@ -363,4 +410,28 @@ facet data_session
   reductions 100000
   period_ns 1000000000
   max_heap_size 262144
+service net
+  server @domain.network
+  interface net
+facet net
+  grantee @session.system
+  service @service.net
+  operations none
+  max_request 64
+  in_flight 16
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 65536
+service network_ctl
+  server @domain.network
+  interface driver_control
+facet network_ctl
+  grantee system
+  service @service.network_ctl
+  operations none
+  max_request 256
+  in_flight 1
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 65536
 shell_principal @principal.system

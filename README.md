@@ -366,15 +366,16 @@ Error in process <0.150.0> with exit value:
   connections through `gen_tcp`'s calls, echoing 1 MiB each way off a
   host server. On FreeBSD it also runs over a tap device through its tap
   transport, where a vnet jail resolves and pings it. On erXos under QEMU it
-  runs in the system domain over its virtio-net driver, takes a DHCP
-  lease and answers ARP and ping, the command shell's `ifconfig` and
+  runs in a network domain of its own over its virtio-net driver, takes a
+  DHCP lease and answers ARP and ping; root's session reaches it through
+  its `net` grant, and the system domain holds neither the network device
+  nor the stack. The session's `ifconfig` and
   `ping` show its interface and ping slirp's gateway in FreeBSD's layout,
   and names resolve: the lease's name servers and domain reach `inet_db`
   through the grant, `gen_udp` and `gen_tcp` go through the grant by
   default, and the `host` command looks names and addresses up in
   FreeBSD's lines. TCP, UDP and ICMP sockets work over a per-client
-  grant that admits every message. The network domain it moves into is
-  not configured yet. Its fast path (checksums folded into the copy, whole runs of
+  grant that admits every message. Its fast path (checksums folded into the copy, whole runs of
   segments sent and merged on receive) was measured on the FreeBSD
   x86-64 test host, over a native FreeBSD tap, with erXos running in
   hosted mode (the medians of 5 runs). Bulk send reaches about 2,470

@@ -35,13 +35,6 @@ module Erx
     # A name here that the release does not ship would leave that application started.
     raise Error, "LOAD_ONLY names what the release does not ship: #{LOAD_ONLY - APPLICATIONS}" unless
       (LOAD_ONLY - APPLICATIONS).empty?
-    # Started with start type temporary in the system release, so that their end is
-    # reported and the system domain goes on. The network stack parses network input, and
-    # the development manifest runs it in the system domain (docs/design-stopgap.md),
-    # so a crash loop in it ends the stack, never the system domain. A domain boot script
-    # starts them permanent: the network script's stack ending ends the network domain
-    # (docs/design-network-stack.md, "The process tree").
-    TEMPORARY = %w[erx_net].freeze
     # A domain's own applications: the system release ships them, so that a domain
     # boot script can take them, and every release only loads them, so that none runs in the
     # system domain and none starts before its domain's facets: the session template's
@@ -50,8 +43,6 @@ module Erx
     DOMAIN_ONLY = %w[erx_session].freeze
     raise Error, "DOMAIN_ONLY names what the release does not ship: #{DOMAIN_ONLY - APPLICATIONS}" unless
       (DOMAIN_ONLY - APPLICATIONS).empty?
-    raise Error, "TEMPORARY names what the release does not ship: #{TEMPORARY - APPLICATIONS}" unless
-      (TEMPORARY - APPLICATIONS).empty?
 
     NAME = 'erxos'
     BOOT_DEADLINE = 120
@@ -71,7 +62,15 @@ module Erx
     STORAGE_ONLY = %w[erx_blk erx_storage].freeze
     raise Error, "STORAGE_ONLY names what the runtime does not build: #{STORAGE_ONLY - APPLICATIONS}" unless
       (STORAGE_ONLY - APPLICATIONS).empty?
-    SYSTEM_APPLICATIONS = (APPLICATIONS - STORAGE_ONLY).freeze
+    # The network stack and its client, which only the domains that use the network boot:
+    # the network script the stack, the session script the client
+    # (docs/design-network-stack.md, "Who holds the network device"). The system release
+    # does not ship them, so the system domain parses no network input and holds no code
+    # that reaches a `net` grant, which it may not hold (docs/design-system.md, property 15).
+    NETWORK_ONLY = %w[erx_net erx_net_client].freeze
+    raise Error, "NETWORK_ONLY names what the runtime does not build: #{NETWORK_ONLY - APPLICATIONS}" unless
+      (NETWORK_ONLY - APPLICATIONS).empty?
+    SYSTEM_APPLICATIONS = (APPLICATIONS - STORAGE_ONLY - NETWORK_ONLY).freeze
     SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: SYSTEM_APPLICATIONS, system: true,
                          boots: { 'start' => SYSTEM_APPLICATIONS }.freeze)
     # Where the one domain release lies: domains/erxos/, which sorts after boot/ and
@@ -310,14 +309,12 @@ module Erx
     end
 
     # An application's term in the release file: its name and version, and the start
-    # type load for one only loaded, DOMAIN_ONLY's among them in every release,
-    # and temporary for TEMPORARY's in the system release; the others take systools'
-    # default, permanent.
+    # type load for one only loaded, DOMAIN_ONLY's among them in every release; the
+    # others take systools' default, permanent.
     def release_entry(application)
       term = "#{application},\"#{version(application)}\""
       if LOAD_ONLY.include?(application) || DOMAIN_ONLY.include?(application)
         "{#{term},load}"
-      elsif @release.system && TEMPORARY.include?(application) then "{#{term},temporary}"
       else "{#{term}}"
       end
     end

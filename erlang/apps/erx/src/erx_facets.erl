@@ -42,17 +42,15 @@ domain() ->
 -doc """
 A domain's facets from what it is and what it was handed. The system
 domain is handed none. It holds the inspect facet of scope `all`, and
-`net` with the value `local`: the network stack runs in the system
-domain (docs/design-stopgap.md), so the facet is the domain's own,
-reached through the stack's own modules. Every facet a command of the
-command shell declares is in this map, so the system shell refuses
-none. Any other domain holds the facets it was handed, each a pid, and
-the inspect facet of the local scope `[Id]`, its own; a handed facet
+no `net`, which it may not hold (docs/design-system.md, property 15), so
+the system shell refuses the network commands with `no_facet`; they run
+in a session. Any other domain holds the facets it was handed, each a
+pid, and the inspect facet of the local scope `[Id]`, its own; a handed facet
 named `inspect` never replaces it, so nothing the domain was handed
 widens its scope.
 """.
 -spec facets(system | {domain, pos_integer()}, #{atom() => pid()}) -> facets().
 facets(system, _Held) ->
-    #{inspect => all, net => local};
+    #{inspect => all};
 facets({domain, Id}, Held) when is_map(Held) ->
     Held#{inspect => [Id]}.

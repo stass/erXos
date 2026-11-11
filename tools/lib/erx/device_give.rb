@@ -37,7 +37,8 @@ module Erx
     DOMAIN_ROW = MediumBoot::DOMAIN_ROW.sub(ARGS_LINE, "  args \"#{MediumBoot::UP_ARGS.join(' ')}\"\n")
                                        .sub(RESTARTS_LINE, "  restarts 1\n").freeze
     FIRST_ID = MediumBoot::CONFIGURED_ID
-    # The restart's id: the next after the storage domain's, which boot gave after erts's.
+    # The restart's id: the next after the storage domain's, which boot gave last, after
+    # erts's and the network domain's.
     RESTART_ID = MediumBoot::STORAGE_ID + 1
     # QEMU virt's virtio-mmio magic, "virt" read little-endian, and where the spare
     # transport sits in its page and how long its window is.

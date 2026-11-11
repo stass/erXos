@@ -14,8 +14,7 @@ class SystemDomainTest < Minitest::Test
   # The rows are MediumBoot's with the halt dropped, so each configured domain stays up,
   # over the erx carrier, as MediumBoot's, so each is a node, behind the flag that lets the
   # control_table step hold a domain's ring; the manifest differs from MediumBoot's only in
-  # that row's arguments, its one connection, the control table's one slot, its grant
-  # (Suite::HALF_SHARE, a record of its own before the row), erts's test
+  # that row's arguments, its one connection, the control table's one slot, erts's test
   # script (ECHO_BOOT), the second row, peer, and the echo checkpoint's service and facet
   # rows.
   def test_the_configured_domains_stay_up_as_nodes_and_are_the_manifests_one_change
@@ -34,11 +33,10 @@ class SystemDomainTest < Minitest::Test
     assert_equal Suite::DOMAIN_ROW, Suite::ECHO_ROW.sub("  release @artifact.echo\n", "  release @artifact.erts\n")
     assert Suite::ECHO_BOOT.test
     assert_includes Suite::ECHO_BOOT.applications, 'erx_echo_test'
-    assert ours.start_with?(medium.delete_suffix(Erx::MediumBoot::DOMAIN_ROW) + Suite::HALF_SHARE)
-    rows = ours.sub(Suite::HALF_SHARE, '')
+    assert ours.start_with?(medium.delete_suffix(Erx::MediumBoot::DOMAIN_ROW) + Erx::MediumBoot::EIGHTH_SHARE)
+    rows = ours
     kept = medium.lines.size - 1
-    assert_equal [["  grant @share.users\n", "  grant @share.half\n"], ["  connections 0\n", "  connections 1\n"],
-                  ["  release @artifact.erts\n", "  release @artifact.echo\n"]],
+    assert_equal [["  connections 0\n", "  connections 1\n"], ["  release @artifact.erts\n", "  release @artifact.echo\n"]],
                  medium.lines[0...-1].zip(rows.lines[0...kept]).reject { |theirs, mine| theirs == mine }
     assert_match(/^  args ".* -eval /, medium.lines.last)
     assert_equal ["  args \"#{Suite::DOMAIN_ARGS.join(' ')}\"\n", *Suite::PEER_ROW.lines, *Suite::ECHO_SERVICES.lines],
@@ -76,12 +74,13 @@ class SystemDomainTest < Minitest::Test
       assert_raises(Erx::Error) { echo.fetch(:verify).call("#{bad}\r\n") }
     end
     refute_match running.fetch(:pattern), "1> #{line}\r\n"
-    good = '{service_kill,[{5,erts@erxos,ready},{6,peer@erxos,ready}],system@erxos,4,' \
-           '[erts@erxos,peer@erxos,storage@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}],{2,erts@erxos}}'
+    good = '{service_kill,[{5,erts@erxos,ready},{7,peer@erxos,ready}],system@erxos,4,' \
+           '[erts@erxos,network@erxos,peer@erxos,storage@erxos],[{5,erts@erxos,5},{7,peer@erxos,7}],{2,erts@erxos}}'
     running.fetch(:verify).call("1> #{good}\r\n")
-    ['timeout', good.sub('system@erxos,4', 'nonode@nohost,0'), good.sub('[erts@erxos,peer@erxos,storage@erxos]', '[erts@erxos,storage@erxos]'),
-     good.sub('{6,peer@erxos,6}', '{6,{error,{erpc,noconnection}},{error,{erpc,noconnection}}}'),
-     good.sub('{6,peer@erxos,ready}', '{6,peer@erxos,running}'), good.sub('{2,erts@erxos}', '{3,erts@erxos}')].each do |line|
+    ['timeout', good.sub('system@erxos,4', 'nonode@nohost,0'), good.sub('peer@erxos,storage', 'storage'),
+     good.sub('network@erxos,', ''),
+     good.sub('{7,peer@erxos,7}', '{7,{error,{erpc,noconnection}},{error,{erpc,noconnection}}}'),
+     good.sub('{7,peer@erxos,ready}', '{7,peer@erxos,running}'), good.sub('{2,erts@erxos}', '{3,erts@erxos}')].each do |line|
       assert_raises(Erx::Error) { running.fetch(:verify).call("#{line}\r\n") }
     end
     # The control table: the introduction's record through the full lane and the paused
@@ -146,15 +145,15 @@ class SystemDomainTest < Minitest::Test
     # the later domain's process of the same number and serial, each fails.
     refute_match later.fetch(:pattern), "1> #{line}\r\n"
     later.fetch(:verify).call("#{Suite::LATER_DOMAIN_ANSWER}\r\n")
-    [Suite::LATER_DOMAIN_ANSWER.sub('{8,ok}', '{6,ok}'), Suite::LATER_DOMAIN_ANSWER.sub('[nodedown,nodeup]', '[nodeup,nodedown]'),
-     Suite::LATER_DOMAIN_ANSWER.sub('true},up}', 'true},down}'), Suite::LATER_DOMAIN_ANSWER.sub('{8,ok}', '{error,name_taken}'),
+    [Suite::LATER_DOMAIN_ANSWER.sub('{9,ok}', '{7,ok}'), Suite::LATER_DOMAIN_ANSWER.sub('[nodedown,nodeup]', '[nodeup,nodedown]'),
+     Suite::LATER_DOMAIN_ANSWER.sub('true},up}', 'true},down}'), Suite::LATER_DOMAIN_ANSWER.sub('{9,ok}', '{error,name_taken}'),
      Suite::LATER_DOMAIN_ANSWER.sub('{noproc,noproc,noproc,noproc,', '{noconnection,noproc,noconnection,noconnection,'),
      Suite::LATER_DOMAIN_ANSWER.sub('sd_new', 'sd_old')]
       .each { |answer| assert_raises(Erx::Error) { later.fetch(:verify).call("#{answer}\r\n") } }
     refute_match ends.fetch(:pattern), "1> #{line}\r\n"
     down = '{domain_down,5,{halt,69}}'
-    good_ends = '{domain_ends,[{6,stopped}],[{5,erts@erxos,ready}],[noconnection,noconnection],gone,' \
-                "[{5,{halt,69}},{6,stopped}],[#{down},#{down},{error,#{down}}]," \
+    good_ends = '{domain_ends,[{7,stopped}],[{5,erts@erxos,ready}],[noconnection,noconnection],gone,' \
+                "[{5,{halt,69}},{7,stopped}],[#{down},#{down},{error,#{down}}]," \
                 'ok,[ok,ok,ok,ok],[{badrpc,nodedown},{exit,{nodedown,erts@erxos}},{error,{erpc,noconnection}},noconnection,noconnection],' \
                 "{500,true,#{down}}}"
     ends.fetch(:verify).call("#{good_ends}\r\n")
@@ -162,8 +161,8 @@ class SystemDomainTest < Minitest::Test
     # told noconnection for erts's end (no edit 56) or erts's reason for peer's end (no
     # creation check); erts still answering when the spawn was made; a library call given
     # the raw domain_down reason, not stock's result for a node gone down.
-    [good_ends.sub('[{5,erts@erxos,ready}]', '[]'), good_ends.sub('[{5,{halt,69}},{6,stopped}]', '[{5,stopped},{6,stopped}]'),
-     good_ends.sub('[{5,{halt,69}},{6,stopped}]', '[{6,stopped}]'),
+    [good_ends.sub('[{5,erts@erxos,ready}]', '[]'), good_ends.sub('[{5,{halt,69}},{7,stopped}]', '[{5,stopped},{7,stopped}]'),
+     good_ends.sub('[{5,{halt,69}},{7,stopped}]', '[{7,stopped}]'),
      good_ends.sub("[#{down},#{down},{error,#{down}}]", '[noconnection,noconnection,{error,noconnection}]'),
      good_ends.sub('[noconnection,noconnection]', '[{domain_down,5,x},{domain_down,5,x}]'),
      good_ends.sub(',gone,', ',alive,'),

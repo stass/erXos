@@ -118,8 +118,9 @@ class MediumBootTest < Minitest::Test
     sessionless = Erx::ProductionImage.without_sessions(plain)
     refute_match(/^session /, sessionless)
     refute_match(/^  grantee @session\./, sessionless)
-    # The session template's 5 lines and the 10 of data_session, the facet granted to it.
-    assert_equal 5 + 10, plain.lines.size - sessionless.lines.size
+    # The session template's 5 lines, and the facets granted to it: the 10 of data_session
+    # and the 9 of net.
+    assert_equal 5 + 10 + 9, plain.lines.size - sessionless.lines.size
     assert_equal 4, sessionless.lines.zip(grown.lines).count { |left, right| left != right }
     assert_equal sessionless.lines.size, grown.lines.size - Boot::DOMAIN_ROW.lines.size
     assert grown.end_with?(Boot::DOMAIN_ROW)
@@ -141,7 +142,7 @@ class MediumBootTest < Minitest::Test
     assert_equal figure.(plain, /^  root_memory ([0-9]+)$/) + growth, figure.(grown, /^  root_memory ([0-9]+)$/)
     assert_equal figure.(plain, /^principal system\n  memory ([0-9]+)$/) + growth,
                  figure.(grown, /^principal system\n  memory ([0-9]+)$/)
-    assert_equal %w[storage bare blk network], grown.scan(/^domain ([a-z]+)$/).flatten
+    assert_equal %w[storage network bare blk net], grown.scan(/^domain ([a-z]+)$/).flatten
     without_tmp = plain.sub(/^(runtime_limits system\n(?:  .*\n)*?)  tmp [0-9]+\n/, '\1')
     assert_raises(Erx::Error) { cell.manifest(without_tmp, system_tmp: 0) }
     runs = cell::RELEASES.keys.to_h { |name| [name, { 'entry' => name.size, 'files' => 7 }] }
@@ -156,13 +157,13 @@ class MediumBootTest < Minitest::Test
   # end, a restarted configured domain or a refused create does not pass.
   def test_the_domain_cell_names_the_archives_indexes_and_must_see_every_end
     expression = Boot.domain_lib_expression(DOMAIN)
-    assert_match(/id=>16,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
+    assert_match(/id=>17,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
     # The library refuses an id at or below the system domain's, so the service's ids
     # start above it; the shell's own calls of the library are refused.
     header = File.read(File.expand_path('../../include/erx/dom.h', __dir__))
     assert_equal Integer(header[/^#define\s+ERX_DOM_SYSTEM_ID\s+([0-9]+)u$/, 1], 10), Boot::SYSTEM_DOMAIN_ID
     assert_includes expression, 'DlNotCreate=Lib:create(Spec)'
-    assert_includes expression, 'DlNotService=Lib:configured(16,0,self())'
+    assert_includes expression, 'DlNotService=Lib:configured(17,0,self())'
     assert_includes expression, 'DlNotStop=Lib:stop(5,0)'
     assert expression.start_with?('io:format("~0p~n",[(fun(Lib,Spec,JitFields,FacetFields,UpFields)->DlDeath=fun(Id)->')
     # The BeamAsm domain names the BeamAsm image and halts 0 only as BeamAsm.

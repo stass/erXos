@@ -41,7 +41,7 @@ module Erx
       SESSION_FACET = "facet echo_session\n  grantee @session.system\n#{FACET_LIMITS}"
 
       # The ids the domain service gives: erts, peer and the development manifest's
-      # storage at boot, then root_1, the console's login, then erts's next incarnation
+      # network and storage at boot, then root_1, the console's login, then erts's next incarnation
       # and peer's, in the order the expression halts them.
       ERTS = DOMAINS.fetch('erts')
       PEER = DOMAINS.fetch('peer')

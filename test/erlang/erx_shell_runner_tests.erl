@@ -279,17 +279,20 @@ session_commands_without_facets_test() ->
     ?assertNotEqual(<<"no_facet">>, run_status([<<"dmesg">>], Session)),
     _ = drain(<<>>).
 
-%% The system domain's session holds every facet any command of the shell
-%% declares, so the system shell refuses none of them.
-system_facets_cover_every_command_test() ->
+%% The system domain holds the inspect facet alone and no `net`, which it
+%% may not hold (docs/design-system.md, property 15), so the system shell
+%% refuses exactly the commands that need `net`, and no command needs any
+%% other facet it lacks.
+system_facets_refuse_only_the_network_commands_test() ->
     Dir = filename:dirname(code:which(erx_cmd)),
     Modules = [list_to_atom(filename:basename(File, ".beam")) || File <- filelib:wildcard("erx_cmd_*.beam", Dir)],
     {Table, []} = erx_shell_namespace:build(
                     [{Module, Module:module_info(attributes), Module:module_info(exports)} || Module <- Modules]),
     ?assert(lists:member(erx_cmd_ifconfig, Modules)),
     System = erx_facets:facets(system, #{}),
-    ?assertEqual([], [Name || {erlang, #{name := Name, needs := Needs}} <- maps:values(Table),
-                              Need <- Needs, not is_map_key(Need, System)]).
+    Missing = [{Name, Need} || {erlang, #{name := Name, needs := Needs}} <- maps:values(Table),
+                               Need <- Needs, not is_map_key(Need, System)],
+    ?assertEqual([{<<"host">>, net}, {<<"ifconfig">>, net}, {<<"ping">>, net}], lists:usort(Missing)).
 
 drain(Acc) ->
     receive

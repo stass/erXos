@@ -79,11 +79,23 @@ module Erx
                      -no_epmd -proto_dist erx -eval #{NAMED_HALT}].freeze
     # DOMAIN_ARGS without the halt: a domain that stays up until it is stopped.
     UP_ARGS = DOMAIN_ARGS[0...-2].freeze
-    # The medium manifest's configured domain: the interpreter's image on DOMAIN_BOOT,
-    # in a limits profile of the domain's budgets, with DOMAIN_ARGS, the arguments the
-    # cell's own creates pass. The domain service starts it at boot and, with restarts 0,
-    # never again once it halts.
-    DOMAIN_ROW = "limits erts\n  memory #{DOMAIN_MEMORY}\n  outer #{DOMAIN_OUTER}\n  grant @share.users\n  spaces none\n" \
+    # The share record of the grant that the cells' configured test domains take: an
+    # eighth of a CPU on the users share's CPUs. The configured domains' grants together
+    # may come to at most the system share's rate less its reserve, 2250 mcpu of its 3000
+    # (dom_system_reserve, liberx/system/dom_core.c). The development manifest's storage
+    # and network domains take a whole CPU each, which leaves 250 mcpu: two eighths, as
+    # SystemDomain's erts and peer take. Nothing enforces a grant at run time in Phase 1
+    # (docs/design-stopgap.md, property 13), and the share's CPUs, which set a runtime's
+    # schedulers, are the users share's, so the domains run as with a larger grant.
+    EIGHTH_SHARE = "share eighth\n  quota_ns 1250000\n  period_ns 10000000\n  cpuset 15\n  capacity_mcpu 125\n" \
+                   "  capacity_first 0\n  slice_us 1000\n  grace_us 5\n  base 16\n  ceiling 31\n  flags none\n"
+
+    # The medium manifest's configured domain: EIGHTH_SHARE, then the interpreter's image
+    # on DOMAIN_BOOT, in a limits profile of the domain's budgets granting that share, with
+    # DOMAIN_ARGS, the arguments the cell's own creates pass. The domain service starts it
+    # at boot and, with restarts 0, never again once it halts.
+    DOMAIN_ROW = EIGHTH_SHARE +
+                 "limits erts\n  memory #{DOMAIN_MEMORY}\n  outer #{DOMAIN_OUTER}\n  grant @share.eighth\n  spaces none\n" \
                  "  lane 4096\n  connections 0\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
                  "  peer_held 4096\n  peer_held_total 4096\n" \
                  "domain erts\n  principal @principal.system\n  limits @limits.erts\n  kind service\n  flags none\n" \
@@ -92,18 +104,19 @@ module Erx
 
     # The system domain's id, ERX_DOM_SYSTEM_ID (include/erx/dom.h): the library refuses
     # any id at or below it, and the domain service gives ids in turn above it, so the
-    # configured domains take the first two in boot order, erts before storage by name,
-    # the cell's two creates the library refuses the next two, and its seven domains the
-    # seven after.
+    # configured domains take the first three in boot order, which is name order: erts,
+    # network, storage; the cell's two creates the library refuses the next two, and its
+    # seven domains the seven after.
     SYSTEM_DOMAIN_ID = 4
     CONFIGURED_ID = SYSTEM_DOMAIN_ID + 1
-    STORAGE_ID = SYSTEM_DOMAIN_ID + 2
+    NETWORK_ID = SYSTEM_DOMAIN_ID + 2
+    STORAGE_ID = SYSTEM_DOMAIN_ID + 3
     # The driver-control interface's number, from the ABI's own model of abi/services.
     DRIVER_CONTROL = ABI::Model.validate(ABI::Sources.read(root: File.expand_path('../../..', __dir__)))
                                .services.find { |service| service.fetch(:name) == 'driver_control' }.fetch(:number)
-    DOMAIN_IDS = (5..11).map { |offset| SYSTEM_DOMAIN_ID + offset }.freeze
+    DOMAIN_IDS = (6..12).map { |offset| SYSTEM_DOMAIN_ID + offset }.freeze
     # An id nothing takes in the cell, for the calls the shell makes of the library itself.
-    FREE_ID = SYSTEM_DOMAIN_ID + 12
+    FREE_ID = DOMAIN_IDS.last + 1
 
     # Where the domain's runtime images and release are in the archive: the boot image's
     # indexes a create names them by. runtime is the interpreter's image, jit the BeamAsm
@@ -155,11 +168,11 @@ module Erx
       ['DlNotCreate', 'Lib:create(Spec)', '{error,erights}'],
       ['DlNotService', "Lib:configured(#{FREE_ID},0,self())", '{error,erights}'],
       ['DlNotStop', "Lib:stop(#{CONFIGURED_ID},0)", '{error,erights}'],
-      # The catalogue: block on the storage domain, row 1 after erts by name, held by its
-      # running domain; net on the system domain; and the UARTs, which no runtime drives
-      # as a given device.
+      # The catalogue: block on the storage domain and net on the network domain, rows 2
+      # and 1 after erts by name, each held by its running domain; and the UARTs, which
+      # no runtime drives as a given device.
       ['DlDevices', 'lists:usort([{R,W,H}||#{role:=R,row:=W,holder:=H}<-element(2,Lib:devices())])',
-       "[{block,1,#{STORAGE_ID}},{net,system,system},{none,system,system}]"],
+       "[{block,2,#{STORAGE_ID}},{net,1,#{NETWORK_ID}},{none,system,system}]"],
       # What /dev shows of each: its unit's name, its kind's compatible string (none for
       # the UARTs), one page range, one interrupt line, and no IOMMU stream.
       ['DlDeviceView', 'lists:usort([{R,N,C,length(Rs),length(Ls),Cf}||#{role:=R,unit_name:=N,compatible:=C,' \
@@ -170,8 +183,9 @@ module Erx
       # the page that holds it.
       ['DlRegisters', '[{Rg,Rs}||#{unit_name:=<<"block">>,registers:=Rg,ranges:=Rs}<-element(2,Lib:devices())]',
        "[{{#{0xa003e00},512},[{#{0xa003000},4096}]}]"],
-      # The storage domain's driver-control facet, on row 1, found by its interface's number.
-      ['DlControl', '[I||{1,storage_ctl,I}<-maps:get(services,element(2,Lib:configured()))]',
+      # The storage domain's driver-control facet, on row 2 (rows follow the configured
+      # domains by name: erts 0, network 1, storage 2), found by its interface's number.
+      ['DlControl', '[I||{2,storage_ctl,I}<-maps:get(services,element(2,Lib:configured()))]',
        "[#{DRIVER_CONTROL}]"],
       # The maps the library itself refuses, asked of the service, which spends an id on each.
       ['DlFiles', 'DlAsk(<<"files">>,#{release_files=>16#ffffffff})', '{error,einval}'], # past the archive
@@ -545,7 +559,8 @@ module Erx
     # product code). It boots MACHINE's image with three configured domains that halt at
     # once, so the archive's domain release carries their boot scripts: bare (the domain
     # base), blk (base and erx_blk, named apart from the manifest's own storage domain)
-    # and network (base, erx_net and erx_net_client), each in a small runtime_limits
+    # and net (base, erx_net and erx_net_client, named apart from the manifest's own
+    # network domain), each in a small runtime_limits
     # profile. At the system domain's shell it creates a
     # domain booting each script, reads the root's pool pages in use (the system
     # domain's budget record) with the domain up and again once it has stopped, and asks
@@ -560,9 +575,9 @@ module Erx
       RELEASES = {
         'bare' => ProductionImage::DOMAIN_APPLICATIONS,
         'blk' => [*ProductionImage::DOMAIN_APPLICATIONS, 'erx_blk'].freeze,
-        'network' => [*ProductionImage::DOMAIN_APPLICATIONS, 'erx_net', 'erx_net_client'].freeze
+        'net' => [*ProductionImage::DOMAIN_APPLICATIONS, 'erx_net', 'erx_net_client'].freeze
       }.freeze
-      # Applications a release only loads: erx_net's needs the system domain's local transport and
+      # Applications a release only loads: erx_net's needs the stack's arguments and a device, and
       # erx_blk's a device. The cell loads the modules of these and of erx_net_client by hand.
       LOAD_ONLY = %w[erx_net erx_blk].freeze
       LOADED = %w[erx_blk erx_net erx_net_client].freeze
@@ -572,7 +587,7 @@ module Erx
       ATOMS = 16_384
       # A step: its name, its release and the cap of the domain's /tmp in bytes. The last step
       # has a tmp cap above 0: the pool figure must not change, since a tmp cap is charged on use.
-      STEPS = [['bare', 'bare', 0], ['blk', 'blk', 0], ['network', 'network', 0],
+      STEPS = [['bare', 'bare', 0], ['blk', 'blk', 0], ['net', 'net', 0],
                ['bare-tmp4', 'bare', 4 << 20]].freeze
       # The system domain's /tmp cap: the tmp line of the runtime_limits system row.
       TMP_LINE = /^(runtime_limits system\n(?:  .*\n)*?  tmp )[0-9]+$/

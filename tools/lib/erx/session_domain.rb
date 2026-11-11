@@ -33,7 +33,7 @@ module Erx
   # halt(3) ends the session's domain: the console writes `session root_1 ended:
   # {halt,3}` and logs root in again, and the new session, root_1 again in a new domain,
   # takes the line. The menu lists it, refuses "start a session" past the principal's
-  # domain quota, which the storage domain and the session fill, and gives the line to
+  # domain quota, which the storage and network domains and the session fill, and gives the line to
   # the system shell, whose `ps` lists the domain service and whose `cat` reads
   # /data/across through the system domain's own `data` facet. Its Erlang shell answers
   # node() as system@erxos and ends the storage domain with exit(DomainPid, kill); once
@@ -52,11 +52,11 @@ module Erx
     # is up may write its runtime's kernel log lines between "Esc returns. " and the reset.
     MENU_LEFT = /\e\\\e\[0m\r*\n\z/n
     ERL = ProductionImage::Run::ERL_LINE
-    # The domain id root's first session takes: the development manifest configures one
-    # domain, storage, which takes the domain service's first id, 5, at boot, so the
-    # login's is 6; each later start of a session or of the storage domain takes the next,
-    # a refused one too, since admission spends the id.
-    FIRST_SESSION = 6
+    # The domain id root's first session takes: the development manifest configures two
+    # domains, network and storage, which take the domain service's first ids, 5 and 6, at
+    # boot, so the login's is 7; each later start of a session or of a configured domain
+    # takes the next, a refused one too, since admission spends the id.
+    FIRST_SESSION = 7
     # From a session's start to its tty naming itself, which a domain creation under HVF
     # with one CPU takes seconds to reach.
     SESSION_SECONDS = 120
@@ -71,7 +71,7 @@ module Erx
     # ended, an optional notice, the menu, and the line ended again as it is left.
     MENU_BLOCK = /\e\\\e\[0m\r\n(?:[^\r\n]*\r\n)?erx_console: Ctrl-G menu\r\n.*?Esc returns\. \e\\\e\[0m\r\n/mn
     # Typed at the system's Erlang shell: the domain pid of the one session domain the
-    # domain service holds, beside the configured storage domain, killed, as a person
+    # domain service holds, beside the configured storage and network domains, killed, as a person
     # would end a session from there.
     KILL_SESSION = '[P] = [Pid || #{origin := {session, _}, pid := Pid} <- ' \
                    'erx_domain_core:domains(maps:get(core, sys:get_state(erx_domain_srv)))], ' \
@@ -82,11 +82,11 @@ module Erx
     READ_ACROSS = 'file:read_file("/data/across")'
     ACROSS_READ = '{ok,<<"across\n">>}'
     CAT_ACROSS = "cat /data/across\r"
-    # Typed at the system's Erlang shell: the storage domain, the one configured domain,
-    # ended through its domain pid, and the file read again once the domain's restart has
+    # Typed at the system's Erlang shell: the storage domain, the configured domain whose
+    # node is storage@erxos, ended through its domain pid, and the file read again once the domain's restart has
     # installed a `data` grant other than the one the registry held before; a read before
     # that reaches the dead grant and answers eio.
-    RESTART_STORAGE = '[S] = [Pid || #{origin := {configured, _}, pid := Pid} <- ' \
+    RESTART_STORAGE = '[S] = [Pid || #{origin := {configured, _}, node := storage@erxos, pid := Pid} <- ' \
                       'erx_domain_core:domains(maps:get(core, sys:get_state(erx_domain_srv)))], ' \
                       'Old = erx:cap(data), exit(S, kill), '
     # Typed at either command shell: the domain service runs in the system domain only, so

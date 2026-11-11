@@ -392,8 +392,8 @@ seeded violation and each refusal with a seeded record:
 | 5 names | kept | |
 | 6 no JIT in the root | kept; a full boot may use the native root image, since the interpreter image is not yet the root | |
 | 7 the sealing secret | `sealing` is `none`, no entry carries `ERX_ENTRY_SEAL`, no TPM | M11 |
-| 8 partitions and devices reach holders | kept: the UARTs are the system domain's; the slot and data windows are the system domain's or a storage domain's, as the manifest places them; the network device is the system domain's, which runs the network stack until 1b-E, and from 1b-E only the network domain holds it; the display domain holds the gpu and input devices; only the system domain holds a facet of the driver-control interface, whichever way its service row names the interface; no vault partition | M11 (vault) |
-| 9 a release build's confinement | release builds refused. In a development build every virtio-mmio device is unconfined and allowed, whoever holds it, the display domain's gpu and input devices and the net device among them, which the system domain holds until 1b-E and the network domain from then, as the property's development clause says; the display domain is reported in the trusted base. The packer sets `ERX_PACK_UNCONFINED_DMA` when the manifest gives an unconfined device, as the property says, and nothing reads it | M11 |
+| 8 partitions and devices reach holders | kept: the UARTs are the system domain's; the slot and data windows are the system domain's or a storage domain's, as the manifest places them; the network device is the network domain's, which runs the network stack; the display domain holds the gpu and input devices; only the system domain holds a facet of the driver-control interface, whichever way its service row names the interface; no vault partition | M11 (vault) |
+| 9 a release build's confinement | release builds refused. In a development build every virtio-mmio device is unconfined and allowed, whoever holds it, the display domain's gpu and input devices and the network domain's net device among them, as the property's development clause says; the display domain is reported in the trusted base. The packer sets `ERX_PACK_UNCONFINED_DMA` when the manifest gives an unconfined device, as the property says, and nothing reads it | M11 |
 | 10 boot order, 11 rescue, 12 child domains, 13 headroom | kept; 12 runs the host build of `erx_dom_plan_configured` in boot order and `erx_dom_plan_connect` over the introductions, recording each plan, as on erXos's kernel, so the configured domains' sums of 4 and 13 are the planner's; 13 is a configuration check and nothing enforces grants at run time | |
 | 14 session templates | kept: a template is a record of the session table, keyed by its principal's name, so a principal has one; its principal exists and its profile has `SPACES`; nothing that resolves through the domain table reaches it, and the domain library's boot view refuses templates out of principal order | |
 
@@ -1447,28 +1447,28 @@ transports, each with compatible `virtio,mmio` and peripheral `virtio_mmio`:
 | Manifest role | Record role | Holder in the development manifest |
 | --- | --- | --- |
 | `block` | `block` | the storage domain, or the system domain when no storage domain is configured |
-| `network` | `net` | the system domain, which runs the network stack and its driver until the network domain exists at 1b-E; then the network domain |
+| `network` | `net` | the network domain |
 | `gpu` | `gpu` | the display domain |
 | `input` | `input` | the display domain |
 
-Until 1b-E builds the network domain, the system domain runs the network stack, `erx_net`,
-and its virtio-net driver, as it runs the block driver until a storage domain is configured:
-the development manifest gives it the `net` record, and its `system_args` name
-`erx_virtio_net:interfaces/0` for the stack's interfaces. The stack's packet parsers then run in the trusted base. The system
-release starts `erx_net` as a `temporary` application, so the stack's end, a crash loop a
-packet provokes included, is reported and ends neither the system domain nor the boot; a
-machine without the device boots the same, with no interface.
+The network domain runs the network stack, `erx_net`, and its virtio-net driver: the
+development manifest gives it the `net` record, and its row's arguments name
+`erx_virtio_net:interfaces/0` for the stack's interfaces. It serves `net` to the system
+principal's sessions and `network_ctl`, its driver-control facet, to the system domain.
+The system release ships neither the stack nor its client, `erx_net_client`
+(`ReleaseFiles::NETWORK_ONLY`), and the system domain holds no `net` facet
+(`erx_facets:facets/2`; [design-system.md](design-system.md#the-manifest), property 15),
+so its command shell refuses `ifconfig`, `ping` and `host` with `no_facet`; they run in
+root's session, whose `erx_net_client` reaches the grant through its `grant` key.
 
-While the stack runs there, the system domain's own grant is the one `erx_net` mints for its
-node at start, with the grantee `local`, and the system domain's `net` facet has the value
-`local` rather than that grant's pid (`erx_facets:facets/2`). The facets are computed once,
-when the system shell's session starts at boot, which may be before `erx_net` has started
-and registered its grant, and again never; a pid taken then could be missing or, after the
-stack restarts, a dead grant's. The facet only says that the domain holds `net`: commands
-such as `ifconfig` and `ping` gate on it, and reach the grant through `erx_net_client`'s
-`grant` key, which `erx_inet:call/1` alone reads at each call
-([design-network-stack.md](design-network-stack.md#the-grants-contract)), so a restarted
-stack's new grant is found as the old one was.
+What the network domain controls, for its clients: the bytes it delivers, the results
+of their calls, the resolver's answers and the ends of their sockets, and it can leave a
+call unanswered, since `erx_inet` calls its grant with `infinity`. A client checks the
+shape of each push and reply (`erx_sock_admit`, with its EUnit tests and fuzz target),
+so a malformed answer fails the call, not the client. In Phase 1 the domain is trusted:
+its virtio-net device is unconfined, so it can reach all memory through it, and the
+stopgap kernel gives it no isolation that a hostile network domain could not cross
+(TODO.md, security residuals).
 
 `gpu` and `input` are values of the manifest's `mf_device_role` beside `network` and `block`, since
 the manifest check reasons about a display domain's devices by role

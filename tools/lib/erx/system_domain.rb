@@ -52,28 +52,18 @@ module Erx
 
     DOMAIN_ARGS = ['-erx', 'test_lane_hold', *MediumBoot::UP_ARGS].freeze
 
-    # The share record of the grant that erts and peer both take: half a CPU on the users
-    # share's CPUs. The configured domains' grants together may come to at most the system
-    # share's rate less its reserve, 2250 mcpu of its 3000 (dom_system_reserve,
-    # liberx/system/dom_core.c). Two whole CPUs beside the development manifest's storage,
-    # a third, would not fit; two halves do.
-    HALF_SHARE = "share half\n  quota_ns 5000000\n  period_ns 10000000\n  cpuset 15\n  capacity_mcpu 500\n" \
-                 "  capacity_first 0\n  slice_us 1000\n  grace_us 5\n  base 16\n  ceiling 31\n  flags none\n"
-
-    # The suite's records for erts: HALF_SHARE, then MediumBoot's limits erts and domain
-    # erts with three changes. The limits grant @share.half. The limits allow one
-    # connection, so the control table has one slot. The domain takes DOMAIN_ARGS. A
-    # second domain, peer, of the same limits and arguments, follows (PEER_ROW). Both have
-    # restarts 0, so the domain service starts each once, at boot.
+    # The suite's records for erts: MediumBoot's share eighth, limits erts and domain erts
+    # with two changes. The limits allow one connection, so the control table has one
+    # slot. The domain takes DOMAIN_ARGS. A second domain, peer, of the same limits and
+    # arguments, follows (PEER_ROW), so the two take the 250 mcpu the reserve leaves (see
+    # MediumBoot::EIGHTH_SHARE). Both have restarts 0, so the domain service starts each
+    # once, at boot.
     ARGS_LINE = /^  args ".*"\n\z/
     CONNECTIONS_LINE = /^  connections 0\n/
-    USERS_GRANT = /^  grant @share\.users\n/
-    DOMAIN_ROW = (HALF_SHARE + MediumBoot::DOMAIN_ROW.sub(ARGS_LINE, "  args \"#{DOMAIN_ARGS.join(' ')}\"\n")
-                                                    .sub(CONNECTIONS_LINE, "  connections 1\n")
-                                                    .sub(USERS_GRANT, "  grant @share.half\n")).freeze
+    DOMAIN_ROW = MediumBoot::DOMAIN_ROW.sub(ARGS_LINE, "  args \"#{DOMAIN_ARGS.join(' ')}\"\n")
+                                       .sub(CONNECTIONS_LINE, "  connections 1\n").freeze
     raise Error, 'MediumBoot::DOMAIN_ROW does not end in its args line' unless DOMAIN_ROW.include?('test_lane_hold')
     raise Error, 'MediumBoot::DOMAIN_ROW has no connections 0 line' unless DOMAIN_ROW.include?("  connections 1\n")
-    raise Error, 'MediumBoot::DOMAIN_ROW does not grant @share.users' unless DOMAIN_ROW.include?("  grant @share.half\n")
 
     PEER_ROW = DOMAIN_ROW[/^domain erts\n.*/m].to_s.sub(/\Adomain erts\n/, "domain peer\n").freeze
     raise Error, 'MediumBoot::DOMAIN_ROW has no domain erts' unless PEER_ROW.start_with?("domain peer\n")
@@ -96,29 +86,33 @@ module Erx
                     "  in_flight 4\n  reductions 100000\n  period_ns 1000000000\n  max_heap_size 65536\n"
 
     # The domain service gives the configured rows the first ids above the system domain's,
-    # in boot order, which is name order here: erts, peer, then the development manifest's
-    # storage domain, which the cell leaves out of what it reads of the service's domains
-    # (SdLives) but not of the system node's nodes(); host is the development manifest's.
+    # in boot order, which is name order here: erts, the development manifest's network
+    # domain, peer, then the development manifest's storage domain. The cell leaves the
+    # development manifest's two (MANIFEST_NODES) out of what it reads of the service's
+    # domains (SdLives) but not of the system node's nodes(); host is the development
+    # manifest's.
     CONFIGURED_ID = MediumBoot::CONFIGURED_ID
-    DOMAINS = { 'erts' => CONFIGURED_ID, 'peer' => CONFIGURED_ID + 1 }.freeze
-    STORAGE_ID = CONFIGURED_ID + 2
-    STORAGE_NODE = 'storage@erxos'
+    DOMAINS = { 'erts' => CONFIGURED_ID, 'peer' => CONFIGURED_ID + 2 }.freeze
+    STORAGE_ID = CONFIGURED_ID + 3
+    MANIFEST_NODES = %w[network@erxos storage@erxos].freeze
     SYSTEM_NODE = 'system@erxos'
     SYSTEM_CREATION = MediumBoot::SYSTEM_DOMAIN_ID
 
     # Typed at the Erlang shell, in parts. Every variable carries the prefix Sd, which no
     # other expression of the suite binds, since the shell keeps every binding.
     # SdLives: each of the cell's domains' id, node and life, by id, from the domain
-    # service's state (MediumBoot reads it the same way), the storage domain left out; the
+    # service's state (MediumBoot reads it the same way), MANIFEST_NODES left out; the
     # shell starts after the boot, so the core is built.
     SERVICE_KILL_LIVES = 'SdLives=fun()->lists:sort([{SdI,SdN,SdS}||#{id:=SdI,node:=SdN,state:=SdS}<-' \
-                         "erx_domain_core:domains(maps:get(core,sys:get_state(erx_domain_srv))),SdN=/=#{STORAGE_NODE}]) end"
+                         "erx_domain_core:domains(maps:get(core,sys:get_state(erx_domain_srv)))," \
+                         "not lists:member(SdN,[#{MANIFEST_NODES.join(',')}])]) end"
     # SdWait: polls SdLives every 100 ms at most N times until two domains are ready, their
-    # inits having reported, and the storage domain is a node of the system's nodes(), so
-    # the nodes the cell reads hold it whichever domain the boot made last; answers the
+    # inits having reported, and MANIFEST_NODES are nodes of the system's nodes(), so
+    # the nodes the cell reads hold them whichever domain the boot made last; answers the
     # last SdLives.
-    SERVICE_KILL_WAIT = 'SdWait=fun SdW(0)->SdLives();SdW(SdK)->case {SdLives(),lists:member(' + STORAGE_NODE + ',nodes())} of ' \
-                        '{[{_,_,ready},{_,_,ready}]=SdLv,true}->SdLv;_->timer:sleep(100),SdW(SdK-1) end end'
+    SERVICE_KILL_WAIT = 'SdWait=fun SdW(0)->SdLives();SdW(SdK)->case {SdLives(),' \
+                        "[SdM||SdM<-[#{MANIFEST_NODES.join(',')}],not lists:member(SdM,nodes())]} of " \
+                        '{[{_,_,ready},{_,_,ready}]=SdLv,[]}->SdLv;_->timer:sleep(100),SdW(SdK-1) end end'
     # SdAsk: erpc:call of erlang:F(A) at a node, within 10 s, or the class and reason it
     # raised. SdPeers: each domain's id with its node() and creation, as it answers them.
     SERVICE_KILL_ASK = 'SdAsk=fun(SdN,SdF,SdA)->try erpc:call(SdN,erlang,SdF,SdA,10000) catch SdC:SdR->{SdC,SdR} end end,' \
@@ -498,8 +492,8 @@ module Erx
                          'spawn(erts@erxos,fun()->SdLqo!sd_old,SdLq!sd_new end),' \
                          'SdLqv=receive {erx_origin,_,{sd_lq,SdLq,SdLqv0}}->SdLqv0 after 20000->timeout end,' \
                          'SdLn=SdAsk(peer@erxos,system_info,[creation])'
-    # The domain service never reuses an id: the three configured domains took the first
-    # three, and the later peer is the first domain created after them.
+    # The domain service never reuses an id: the four configured domains took the first
+    # four, and the later peer is the first domain created after them.
     LATER_ID = STORAGE_ID + 1
     LATER_DOMAIN_ANSWER = "{later_domain,ok,{#{LATER_ID},ok},{[nodedown,nodeup],{noproc,noproc,noproc,noproc,true},up},ok,sd_new,#{LATER_ID}}"
     LATER_DOMAIN_START = /\A\{later_domain,/n
@@ -540,7 +534,7 @@ module Erx
                               'exit(whereis(erx_domain_srv),kill).'
     SERVICE_KILL_ANSWER = begin
       lives = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,ready}" }.join(',')
-      nodes = [*DOMAINS.keys.map { |name| "#{name}@erxos" }, STORAGE_NODE].sort.join(',')
+      nodes = [*DOMAINS.keys.map { |name| "#{name}@erxos" }, *MANIFEST_NODES].sort.join(',')
       peers = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,#{id}}" }.join(',')
       "{service_kill,[#{lives}],#{SYSTEM_NODE},#{SYSTEM_CREATION},[#{nodes}],[#{peers}],{2,erts@erxos}}".freeze
     end

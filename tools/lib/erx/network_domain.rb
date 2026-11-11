@@ -11,32 +11,14 @@ require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu_gate'
 require_relative 'qemu'
-require_relative 'release_files'
 require_relative 'runner'
 require_relative 'session_domain'
 
 module Erx
-  # The network stack in a network domain of its own, root's session using it, on a test
-  # manifest (docs/design-network-stack.md, "Who holds the network device"). The development
-  # manifest keeps the stack in the system domain; manifest gives the rows that move it:
-  #
-  # * the domain `network`, a BeamAsm service domain booting the network script
-  #   (ProductionImage::DOMAIN_BOOTS) with the stack's arguments, which leave system_args,
-  #   under runtime limits that take 128 KiB frames; its row restarts it 0 times, so that
-  #   the cell ends it for good with one kill;
-  # * the unit `net` held by the network domain, so the system domain holds no network
-  #   device;
-  # * the services `net` and `network_ctl` of the network domain, and their facets: `net`
-  #   to every session of the system principal, `network_ctl` to the system domain;
-  # * root's session with erx_net_client in its boot script (SESSION_SCRIPT) and the
-  #   client's `grant` key naming erx_net_client_erxos, which reads the session's `net`
-  #   facet at each use; the session's lane grows to 64 KiB and its connections by 2;
-  # * room for the third domain in the system principal and the machine.
-  #
-  # The system release still ships the stack for the development manifest and starts it
-  # temporary (ReleaseFiles::TEMPORARY); without the stack's arguments it defaults to the
-  # runtime erx_net_local, which the erXos build does not ship, so it ends at once on this
-  # image, logged as a crash, and the system domain goes on.
+  # The network domain's footprint on the medium machine: the development manifest, whose
+  # `network` domain runs the stack (docs/design-network-stack.md, "Who holds the network
+  # device"), with one edit, the domain's row restarting it 0 times, so that the cell ends
+  # it for good with one kill.
   #
   # The image is the medium machine's (MediumBoot::MACHINE), with the release medium, so
   # the storage domain runs as on the development image. The cell boots it with a network
@@ -49,94 +31,14 @@ module Erx
   # each figure (after the lease, after the echo) minus that last one is the domain's
   # footprint as MediumBoot::Footprint counts it, printed in the run's measurements. The
   # echo's figure is exact; the lease's is a lower bound, since root's session grows (its
-  # Erlang shell, the echo's bindings) between the lease and the last reading.
+  # Erlang shell, the echo's bindings) between the lease and the last reading. The domain
+  # runs within the development manifest's budget, so the cell also shows that the budget
+  # holds the domain through the echo.
   module NetworkDomain
     MACHINE = MediumBoot::MACHINE
-    # The network domain's budget while it is measured: generous, so the measurement is
-    # not bounded by it (the measurement in docs/design-network-stack.md, "Where C is used, and what is
-    # measured").
-    MEMORY = 64 << 20
-    OUTER = 1 << 20
-    MAX_FRAME = 131_072
-    LANE = 65_536
-    # The stack's arguments, as system_args gives them on the development manifest.
-    STACK_ARGS = ' -erx_net interfaces {erx_virtio_net,interfaces,[]} -erx_net runtime erx_net_erxos'
-    DOMAIN_ARGS = '-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx'
-    CLIENT_GRANT = ' -erx_net_client grant {erx_net_client_erxos,grant,[]}'
-    # The session script with the network client, which the development table's lacks.
-    SESSION_SCRIPT = ReleaseFiles.domain_boot('session', applications: [*ProductionImage::DOMAIN_BOOTS.fetch('session'),
-                                                                        'erx_net_client'])
-    ROWS = <<~ROWS
-      runtime_limits network
-        max_frame #{MAX_FRAME}
-        max_message_heap 1048576
-        funnel_depth 64
-        exports 256
-        tmp 0
-        overlay 0
-        atoms 16384
-        foreign_atoms 1024
-        processes 4096
-      limits network
-        memory #{MEMORY}
-        outer #{OUTER}
-        grant @share.users
-        spaces none
-        lane #{LANE}
-        connections 2
-        crash 0
-        flags none
-        runtime_limits @runtime_limits.network
-        peer_held 4096
-        peer_held_total 4096
-      domain network
-        principal @principal.system
-        limits @limits.network
-        kind service
-        flags none
-        runtime @artifact.jit
-        release @artifact.network
-        restarts 0
-        restart_period_s 60
-        args "#{DOMAIN_ARGS}#{STACK_ARGS}"
-      service net
-        server @domain.network
-        interface net
-      facet net
-        grantee @session.system
-        service @service.net
-        operations none
-        max_request 64
-        in_flight 16
-        reductions 100000
-        period_ns 1000000000
-        max_heap_size 65536
-      service network_ctl
-        server @domain.network
-        interface driver_control
-      facet network_ctl
-        grantee system
-        service @service.network_ctl
-        operations none
-        max_request 256
-        in_flight 1
-        reductions 100000
-        period_ns 1000000000
-        max_heap_size 65536
-    ROWS
-    # Each edit of the development manifest: a pattern that must match exactly once, and
-    # its replacement, given the match.
-    EDITS = [
-      [/^(  system_args ".*?)#{Regexp.escape(STACK_ARGS)}"$/, ->(m) { "#{m[1]}\"" }],
-      [/^(unit net\n  placement "net"\n  holder )system$/, ->(m) { "#{m[1]}@domain.network" }],
-      [/^(session system\n(?:  .*\n)*?  args ".*?)( -eval [^ "]+")$/, ->(m) { "#{m[1]}#{CLIENT_GRANT}#{m[2]}" }],
-      [/^(limits session\n(?:  .*\n)*?  lane )[0-9]+$/, ->(m) { "#{m[1]}#{LANE}" }],
-      [/^(limits session\n(?:  .*\n)*?  connections )([0-9]+)$/, ->(m) { "#{m[1]}#{Integer(m[2], 10) + 2}" }],
-      [/^(principal system\n  memory )([0-9]+)$/, ->(m) { "#{m[1]}#{Integer(m[2], 10) + MEMORY + OUTER}" }],
-      [/^(  root_memory )([0-9]+)$/, ->(m) { "#{m[1]}#{Integer(m[2], 10) + MEMORY + OUTER}" }],
-      [/^(principal system\n(?:  .*\n)*?  domains )([0-9]+)$/, ->(m) { "#{m[1]}#{Integer(m[2], 10) + 1}" }],
-      [/^(  max_domains )([0-9]+)$/, ->(m) { "#{m[1]}#{Integer(m[2], 10) + 1}" }]
-    ].freeze
+    # The one edit of the development manifest: a pattern that must match exactly once,
+    # and its replacement, given the match.
+    EDIT = [/^(domain network\n(?:  .*\n)*?  restarts )[0-9]+$/, ->(m) { "#{m[1]}0" }].freeze
 
     ECHO_BYTES = 1 << 20
     RECV_PIECE = NetDevice::RECV_PIECE
@@ -153,8 +55,7 @@ module Erx
     LEASE_LINE = [
       'NdDomains = fun() -> erx_domain_core:domains(maps:get(core, sys:get_state(erx_domain_srv))) end',
       'NdUsed = fun() -> #{attrs := #{used := {_, {_, NdU}}}} = erx_kernel_records:budget(), NdU end',
-      'NdIfs = fun(NdN) -> erpc:call(NdN, fun() -> {ok, NdG, _} = erx_net:local_grant(), ' \
-      'gen_server:call(NdG, interfaces) end, 5000) end',
+      'NdIfs = fun(NdN) -> erpc:call(NdN, erx_net, interfaces, [], 5000) end',
       'NdLeased = fun(NdN) -> string:find(lists:flatten(io_lib:format("~0p", [NdIfs(NdN)])), "{10,0,2,15}") =/= nomatch end',
       'NdWait = fun NdW(0) -> timeout; NdW(NdK) -> case catch [NdN || #{name := {erx_ident, <<"network">>}, node := NdN} <- NdDomains()] of ' \
       '[NdN] -> case catch NdLeased(NdN) of true -> NdN; _ -> timer:sleep(500), NdW(NdK - 1) end; ' \
@@ -181,13 +82,12 @@ module Erx
 
     module_function
 
-    # The development manifest source with the network domain's rows: EDITS, then ROWS.
+    # The development manifest source with EDIT.
     def manifest(source)
-      EDITS.reduce(source) do |text, (pattern, replace)|
-        raise Error, "the manifest does not have exactly one match of #{pattern.source}" unless text.scan(pattern).size == 1
+      pattern, replace = EDIT
+      raise Error, "the manifest does not have exactly one match of #{pattern.source}" unless source.scan(pattern).size == 1
 
-        text.sub(pattern) { replace.call(Regexp.last_match) }
-      end + ROWS
+      source.sub(pattern) { replace.call(Regexp.last_match) }
     end
 
     def answer(source) = /\A#{PROMPT}#{source}\r*\n\z/n
@@ -249,8 +149,7 @@ module Erx
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/network-domain/image'))
         built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                                .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest,
-                                              domains: [SESSION_SCRIPT])
+                                .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest)
         { CELL => boot(built) }
       end
 

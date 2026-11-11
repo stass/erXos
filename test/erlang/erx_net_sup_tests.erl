@@ -146,10 +146,10 @@ drop() ->
     receive _ -> drop() end.
 
 %% The units map of network_ctl in erXos's runtime, read from its children, the mints of
-%% net and network_ctl and then the grant local; the host test's seeded fault edits this map.
+%% net and network_ctl; the host test's seeded fault edits this map.
 erxos_units() ->
-    [{net, _}, {network_ctl, {erx_driver_ctl, start_mint, [network_ctl, Units]}},
-     {erx_net_grant, _}] = erx_net_erxos:children(),
+    [{net, _}, {network_ctl, {erx_driver_ctl, start_mint, [network_ctl, Units]}}] =
+        erx_net_erxos:children(),
     Units.
 
 %% vtnet0's link supervisor, or undefined while it is stopped.

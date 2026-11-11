@@ -36,13 +36,14 @@ module ManifestContextFixture
 
   # The archive the development manifest names, as both packs carry it: the domain
   # release under domains/erxos/ with the session boot script its session template
-  # names and the storage boot script its storage row names, the domain runtime images,
-  # runtimes/emu and runtimes/jit, and the system release's generated files and root.
-  def arguments(codec) = archive_arguments(codec, boots: %w[session storage])
+  # names and the storage and network boot scripts its storage and network rows name, the
+  # domain runtime images, runtimes/emu and runtimes/jit, and the system release's
+  # generated files and root.
+  def arguments(codec) = archive_arguments(codec, boots: %w[network session storage])
 
   # The same archive with the boot script app beside session, which domain_source's
   # domains name.
-  def domain_arguments(codec) = archive_arguments(codec, boots: %w[app session storage])
+  def domain_arguments(codec) = archive_arguments(codec, boots: %w[app network session storage])
 
   # An archive of the domain release, with a boot script for each of boots and one
   # library file, then runtimes/emu, then system/, the order the archive's sorted paths
@@ -108,16 +109,19 @@ module ManifestContextFixture
   SYSTEM_QUOTA = /^(principal system\n(?:  .*\n)*?  domains )\d+$/
   MAX_DOMAINS = /^(  max_domains )\d+$/
 
-  # The development manifest's own configured domain, storage, with the profile and
-  # runtime limits only it names, its driver-control and data services and the system
-  # domain's facets of them, and the holder lines naming it.
-  STORAGE_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/,
-                  /^service storage_ctl\n(?:  .*\n)*/, /^facet storage_ctl\n(?:  .*\n)*/,
-                  /^service data\n(?:  .*\n)*/, /^facet data\n(?:  .*\n)*/].freeze
-  # Root's session template's facet of data, which a sessionless source
-  # (ProductionImage.without_sessions) no longer holds.
-  STORAGE_SESSION_FACET = /^facet data_session\n(?:  .*\n)*/
-  STORAGE_HOLDER = /^  holder @domain\.storage$/
+  # The development manifest's own configured domains, storage and network, with the
+  # profiles and runtime limits only they name, their driver-control, data and net
+  # services and the system domain's facets of them, root's session template's facets of
+  # data and net (which a sessionless source, ProductionImage.without_sessions, does not
+  # holds), and the holder lines naming them.
+  DOMAIN_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/,
+                 /^service storage_ctl\n(?:  .*\n)*/, /^facet storage_ctl\n(?:  .*\n)*/,
+                 /^service data\n(?:  .*\n)*/, /^facet data\n(?:  .*\n)*/,
+                 /^runtime_limits network\n(?:  .*\n)*/, /^limits network\n(?:  .*\n)*/, /^domain network\n(?:  .*\n)*/,
+                 /^service network_ctl\n(?:  .*\n)*/, /^facet network_ctl\n(?:  .*\n)*/,
+                 /^service net\n(?:  .*\n)*/].freeze
+  SESSION_FACETS = [/^facet data_session\n(?:  .*\n)*/, /^facet net\n(?:  .*\n)*/].freeze
+  DOMAIN_HOLDER = /^  holder @domain\.(?:storage|network)$/
 
   # The development manifest as the domain tests start from it: without its session
   # template, since they write their own, without its own configured domain, so the
@@ -125,14 +129,14 @@ module ManifestContextFixture
   # since they set what their rows need.
   def sessionless(source) = with_quota(substitute(domainless(source), SESSION_TEMPLATE, ''), 0)
 
-  # source without the storage domain: its rows removed and what it holds held by the
-  # system domain, as a manifest that configures no domain holds them.
+  # source without the storage and network domains: their rows removed and what they
+  # hold held by the system domain, as a manifest that configures no domain holds them.
+  # A session facet is removed where the source still has it.
   def domainless(source)
-    raise ArgumentError, 'the manifest has no holder @domain.storage' unless source.match?(STORAGE_HOLDER)
+    raise ArgumentError, 'the manifest has no configured domain holder' unless source.match?(DOMAIN_HOLDER)
 
-    STORAGE_ROWS.reduce(source.gsub(STORAGE_HOLDER, '  holder system').sub(STORAGE_SESSION_FACET, '')) do |text, row|
-      substitute(text, row, '')
-    end
+    held = SESSION_FACETS.reduce(source.gsub(DOMAIN_HOLDER, '  holder system')) { |text, facet| text.sub(facet, '') }
+    DOMAIN_ROWS.reduce(held) { |text, row| substitute(text, row, '') }
   end
 
   # source with the system principal's domain quota and max_domains both quota.

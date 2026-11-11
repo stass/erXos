@@ -79,7 +79,7 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "node system@erxos\n"
-    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -no_epmd -proto_dist erx -erx_net interfaces {erx_virtio_net,interfaces,[]} -erx_net runtime erx_net_erxos \n"
+    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -no_epmd -proto_dist erx \n"
     assert_includes output, "limits #{system_runtime_limits.join(' ')}\n"
   end
 
@@ -93,22 +93,33 @@ class BootManifestTest < Minitest::Test
 
   # The device records (docs/design-stopgap.md, "Device records"), in the order of the device
   # table: the host link's UART, which machine.hostlink names by its path (docs/design-live.md,
-  # "The host link"), and the one device of a unit the system domain holds whose role and
+  # "The host link"), and each device of a unit the system domain holds whose role and
   # compatible string are a row of device_kinds, each with the platform record's window, line
   # and DMA memory. The console's UART, a UART of the same compatible string in a unit the
-  # system domain holds, is no record, and the block unit is the storage domain's, so there
-  # are two: erx_pl011 reads -erx console_uart.
-  # Net is given: the root makes a window object over its transport's page, the transport at
-  # 0xe00 in it, and its record is -erx given with the driver's stand-in handles 11, 12 and
-  # 13 for the window, line and memory objects. The host link's UART, which does no DMA, is
-  # the one physical record.
-  def test_the_net_and_hostlink_units_give_one_device_record_each
+  # system domain holds, is no record, and the block and net units are the storage and
+  # network domains', so the development manifest gives the system domain one record, the
+  # host link's: erx_pl011 reads -erx console_uart.
+  def test_the_hostlink_unit_gives_the_system_domain_s_one_device_record
     output, status = read(admitted)
     assert status.success?, output
-    assert_includes output, "devices 2\n"
+    assert_includes output, "devices 1\n"
     assert_includes output, "device hostlink pl011 151257088 4096 40 0 " \
                             "words-erx device hostlink pl011 151257088 4096 40 exact 1 short 0\n"
-    refute_match(/^device block /, output)
+    refute_match(/^device (?:block|net) /, output)
+  end
+
+  # With the net unit held by the system domain, its record follows the host link's. Net is
+  # given: the root makes a window object over its transport's page, the transport at 0xe00
+  # in it, and its record is -erx given with the driver's stand-in handles 11, 12 and 13 for
+  # the window, line and memory objects. The host link's UART, which does no DMA, is the one
+  # physical record.
+  def test_a_net_unit_the_system_domain_holds_gives_a_given_record
+    source = @source.sub("unit net\n  placement \"net\"\n  holder @domain.network\n",
+                         "unit net\n  placement \"net\"\n  holder system\n")
+    refute_equal @source, source
+    output, status = read(admitted(source))
+    assert status.success?, output
+    assert_includes output, "devices 2\n"
     assert_includes output, "device net virtio_mmio 167783936 512 71 262144 window 167780352 4096 3584 " \
                             "words-erx given net virtio_mmio 11 3584 512 12 13 262144 exact 1 short 0\n"
   end
@@ -145,7 +156,7 @@ class BootManifestTest < Minitest::Test
     assert_match(/^device hostlink pl011 151257088 /, asked)
     plain, status = read(admitted, hostlink: false)
     assert status.success?, plain
-    assert_includes plain, "devices 1\n"
+    assert_includes plain, "devices 0\n"
     refute_match(/^device hostlink /, plain)
     assert_equal asked.lines.grep(/^device net /), plain.lines.grep(/^device net /)
   end
@@ -156,7 +167,7 @@ class BootManifestTest < Minitest::Test
     refute_equal @source, source
     output, status = read(admitted(source))
     assert status.success?, output
-    assert_includes output, "devices 2\n"
+    assert_includes output, "devices 1\n"
     refute_match(/^device block /, output)
   end
 

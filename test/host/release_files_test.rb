@@ -101,30 +101,23 @@ class ReleaseFilesTest < Minitest::Test
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
     %w[compiler runtime_tools].each { |application| assert_includes release, "{#{application},\"#{VERSION}\",load}" }
     assert_includes release, "{erx_session,\"#{VERSION}\",load}", 'a domain\'s own application runs in no system domain'
-    started = Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::TEMPORARY - Erx::ReleaseFiles::DOMAIN_ONLY -
-              Erx::ReleaseFiles::STORAGE_ONLY
+    started = Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::DOMAIN_ONLY - Erx::ReleaseFiles::STORAGE_ONLY -
+              Erx::ReleaseFiles::NETWORK_ONLY
     [*%w[kernel stdlib], *started].each do |application|
       assert_includes release, "{#{application},\"#{VERSION}\"}"
     end
   end
 
-  # The block driver and littlefs run in the storage domain alone, so the system release
-  # neither ships nor names them.
-  def test_the_system_release_does_not_ship_the_storage_applications
+  # The block driver and littlefs run in the storage domain alone, and the network stack
+  # and its client in the domains that use the network, so the system release neither
+  # ships nor names them.
+  def test_the_system_release_does_not_ship_the_storage_or_network_applications
     paths = entries.map { |entry| entry.fetch('path') }
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
-    Erx::ReleaseFiles::STORAGE_ONLY.each do |application|
+    [*Erx::ReleaseFiles::STORAGE_ONLY, *Erx::ReleaseFiles::NETWORK_ONLY].each do |application|
       refute_includes release, "{#{application},"
       refute(paths.any? { |path| path.start_with?("system/lib/#{application}-") }, "the system release ships #{application}")
     end
-  end
-
-  # The network stack parses network input in the system domain, so it starts temporary:
-  # its end does not end the system domain.
-  def test_the_release_file_starts_the_network_stack_temporary
-    entries
-    release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
-    assert_includes release, "{erx_net,\"#{VERSION}\",temporary}"
   end
 
   def test_the_release_ships_no_appup
@@ -208,8 +201,7 @@ class ReleaseFilesTest < Minitest::Test
   end
 
   # The network script starts the stack permanent, so the stack's end ends the network
-  # domain, while the system release, which still runs it on the development manifest,
-  # starts it temporary (test_the_release_file_starts_the_network_stack_temporary).
+  # domain (docs/design-network-stack.md, "The process tree").
   def test_the_network_script_starts_the_network_stack_permanent
     domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('network')]))
     assert_match(/,\{erx_files,"#{VERSION}"\},\{erx_net,"#{VERSION}"\}\]\}\.\n\z/, boot_release_file('network'))

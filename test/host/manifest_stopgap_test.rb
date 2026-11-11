@@ -93,7 +93,7 @@ class ManifestStopgapTest < Minitest::Test
     assert result.matches?(@context)
     assert result.bytes.frozen?
     view = @codec.open('manifest', result.bytes)
-    assert_equal 1, view.count('domains')
+    assert_equal 2, view.count('domains')
     assert_equal 4, view.count('devices')
     assert_equal 6, view.count('windows')
     assert_equal 1, view.count('images')
@@ -106,7 +106,7 @@ class ManifestStopgapTest < Minitest::Test
     assert_equal 'supplied_catalog', report.fetch('executable')
     assert_equal 'supplied_context', report.fetch('provenance')
     assert_equal 'unsupported', report.fetch('policy_admission')
-    assert_equal 1, report.fetch('child_plan_instances')
+    assert_equal 2, report.fetch('child_plan_instances')
     assert_equal 0, report.fetch('dynamic_domain_reservation')
     assert_equal @platform.fetch('fiasco_reserve'), report.fetch('fiasco_reserve')
     assert_equal @platform.fetch('ram_bytes'), report.fetch('ram_bytes')
@@ -132,8 +132,8 @@ class ManifestStopgapTest < Minitest::Test
 
   def test_admitted_services_reach_the_encoded_manifest
     view = @codec.open('manifest', admit(@source + SERVICE).bytes)
-    # The development manifest's own, data and storage_ctl, and this one.
-    assert_equal %w[data log storage_ctl], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
+    # The development manifest's own, data, net, network_ctl and storage_ctl, and this one.
+    assert_equal %w[data log net network_ctl storage_ctl], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
     assert_equal 0, view.count('liveness')
   end
 
@@ -152,7 +152,7 @@ class ManifestStopgapTest < Minitest::Test
 
   # Property 1: one holder per device and unit.
   def test_a_unit_held_by_another_domain_is_refused
-    refused(Erx::Manifest::Invalid, 1, 'unit.holder', changed(@source.sub("placement \"net\"\n  holder system", "placement \"net\"\n  holder other")))
+    refused(Erx::Manifest::Invalid, 1, 'unit.holder', changed(@source.sub("placement \"net\"\n  holder @domain.network", "placement \"net\"\n  holder other")))
   end
 
   def test_a_unit_placed_twice_is_refused
@@ -402,7 +402,7 @@ class ManifestStopgapTest < Minitest::Test
   def test_a_unit_on_two_holders_is_refused
     twice = @source + "unit net_again\n  placement \"net\"\n  holder system\n"
     refused(Erx::Manifest::Invalid, 1, 'unit.placement', twice, message: /assigned more than once/)
-    two = @source.sub(/^(unit net\n  placement "net"\n  holder system)$/, '\1 system')
+    two = @source.sub(/^(unit net\n  placement "net"\n  holder @domain.network)$/, '\1 system')
     refute_equal @source, two
     error = assert_raises(Erx::ABI::SchemaError) { admit(two) }
     assert_match(/holder requires one value/, error.message)

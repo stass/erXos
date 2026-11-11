@@ -9,12 +9,13 @@ require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu'
 require_relative 'runner'
+require_relative 'session_domain'
 require_relative 'net_device_echo_server'
 require_relative 'net_device_name_server'
 
 module Erx
   # The network stack end to end on QEMU virt: the development image boots with a
-  # virtio-net device on QEMU's user networking (QemuPlan::Nic), the system domain's
+  # virtio-net device on QEMU's user networking (QemuPlan::Nic), the network domain's
   # erx_net drives it through erx_virtio_net and takes a DHCP lease from slirp, and the
   # harness, one more host on the guest's link through the hub's `dgram` port, asks it
   # for its address with ARP and pings it. The guest must answer both:
@@ -26,15 +27,17 @@ module Erx
   # * ICMP: an echo request to that address, answered by an echo reply from GUEST_IP
   #   with the request's identifier, sequence number and data, within REPLY_SECONDS.
   #
-  # The exchange runs as the verifier of the command shell's banner, the boot's last
-  # line, so QEMU runs throughout and the run's deadline covers it. The harness then plays
-  # a name server on the link (NameServer) and types at that shell (shell_checkpoints):
+  # The exchange runs as the verifier of the banner of root's session's command shell,
+  # which takes the line once the console has logged root in, so QEMU runs throughout and
+  # the run's deadline covers it. The harness then plays a name server on the link
+  # (NameServer) and types at that shell (shell_checkpoints):
   # `ifconfig`, which must show vtnet0 up with the link-layer address that answered ARP
   # and slirp's lease; `ping -c 3` to slirp's gateway, which must show three replies and
   # FreeBSD's statistics with no loss; `host www HOST_IP`, which must find www in the
   # lease's domain, NIC_DOMAIN, slirp's option 15, with its address and IPv6 address;
   # `host nonexistent HOST_IP`, which must be NXDOMAIN; `host ADDRESS HOST_IP`, which
-  # must give the pointer back; and, in the Erlang shell, inet_db's name servers and
+  # must give the pointer back; and, in the Erlang shell, the node, which must be root's
+  # session's, and inet_db's name servers and
   # search list, which must be the lease's: none, since slirp in restricted mode, which
   # keeps the guest's traffic on the host, leaves the router and name server options out
   # of its lease, and NIC_DOMAIN (that a lease's name servers reach inet_db is
@@ -46,8 +49,7 @@ module Erx
   # Last, the Erlang shell opens TCP connections with erx_gen_tcp (tcp_checkpoints): one
   # through slirp's guest forward to the harness's echo server (EchoServer), over which
   # it sends TCP_BYTES random bytes and must read the same bytes back, while the server's
-  # MD5 of what it took must equal the guest's of what it sent, and whose echo, coming back
-  # in bursts, the interface must have merged into units at least once; and one to the gateway,
+  # MD5 of what it took must equal the guest's of what it sent; and one to the gateway,
   # 10.0.2.2, at the echo server's own host port. An unrestricted slirp would carry that
   # one to the host's loopback, where the echo server listens, and connect; slirp in
   # restricted mode must refuse it, since the guest reaches the host only through the
@@ -55,11 +57,15 @@ module Erx
   #
   # Every request above that needs the network (ifconfig's interfaces, ping's echo
   # socket, the resolver's and the TCP connect) reaches the stack only as a call of the
-  # system domain's grant, admitted by erx_net_admit (docs/design-network-stack.md, "The
-  # grant's contract"). The Erlang shell then makes a call of the grant that is no
-  # operation of it, which must be refused with {error, badarg}, and reads the grant's
-  # counts, which must show that one refusal and nothing left out: no call of the steps
-  # before was refused or dropped (grant_checkpoint).
+  # session's grant, its `net` facet, admitted by erx_net_admit
+  # (docs/design-network-stack.md, "The grant's contract"). The Erlang shell then makes a
+  # call of the grant that is no operation of it, which must be refused with
+  # {error, badarg}. The line then goes to the system domain's command shell, which holds
+  # no `net` facet: its ifconfig, ping and host must each be refused with `no_facet`. Its
+  # Erlang shell, last, probes the network domain over erpc, as the harness and not as a
+  # client (system_checkpoints): vtnet0 must have merged the echo's bursts into units at
+  # least once, and the network domain's one grant, the session's, must count that one
+  # refusal and nothing left out, so no call of the steps before was refused or dropped.
   module NetDevice
     GUEST_IP = [10, 0, 2, 15].freeze
     HOST_IP = [10, 0, 2, 100].freeze
@@ -67,7 +73,9 @@ module Erx
     BROADCAST = [0xff] * 6
     ETHERTYPE_ARP = 0x0806
     ETHERTYPE_IP = 0x0800
-    LEASE_SECONDS = 60
+    # From the session shell's banner: the network domain boots beside root's session and
+    # takes its lease meanwhile.
+    LEASE_SECONDS = 180
     REPLY_SECONDS = 5
     ARP_RETRY = 0.5
     PING_ID = 0xe1
@@ -85,10 +93,10 @@ module Erx
     HOST_LINE = "host www #{SERVER}\r".freeze
     MISSING_LINE = "host nonexistent #{SERVER}\r".freeze
     POINTER_LINE = "host 192.0.2.10 #{SERVER}\r".freeze
-    RESOLVER_LINE = "{inet_db:res_option(nameservers), inet_db:res_option(search)}.\r"
-    # What inet_db holds once the lease is loaded: no name server, which a restricted
-    # slirp does not offer, and NIC_DOMAIN.
-    RESOLVER_ANSWER = "{[],[\"#{QemuPlan::NIC_DOMAIN}\"]}".freeze
+    RESOLVER_LINE = "{node(), inet_db:res_option(nameservers), inet_db:res_option(search)}.\r"
+    # The shell's node, root's session's, and what inet_db holds once the lease is loaded:
+    # no name server, which a restricted slirp does not offer, and NIC_DOMAIN.
+    RESOLVER_ANSWER = "{root_1@erxos,[],[\"#{QemuPlan::NIC_DOMAIN}\"]}".freeze
     # Four query IDs inet_db draws in a row, which must not be a counter's run.
     IDS_LINE = "list_to_tuple([inet_db:res_option(next_id) || _ <- lists:seq(1, 4)]).\r"
     # The Erlang shell's prompt, which may open the line its answer is on.
@@ -122,16 +130,20 @@ module Erx
                 "T = erlang:monotonic_time(millisecond) - T0, E =:= D.\r".freeze
     DIGEST_LINE = "{T, binary:encode_hex(erlang:md5(D))}.\r"
     CLOSE_LINE = "erx_gen_tcp:close(S).\r"
-    # Whether vtnet0's interface merged any of the bursts the echo came back in: its count of
-    # merged units (docs/design-network-fastpath.md, "The merge, before classification").
-    MERGED_LINE = 'begin {ok, #{pid := If}} = erx_net_tables:interface(vtnet0), ' \
-                  "{ok, C} = erx_net_if:admin(If, counters), maps:get(units, C, 0) > 0 end.\r"
-    # A call of the system domain's grant that is no operation of it, then the grant's
-    # counts: {Answer, Refused, LeftOut}.
-    GRANT_LINE = 'begin Refusal = gen_server:call(erx_net_grant, no_operation, infinity), ' \
-                 'Counts = erx_net_grant:counts(whereis(erx_net_grant)), ' \
-                 "{Refusal, maps:get(refused, Counts), maps:get(unknown, Counts)} end.\r"
-    GRANT_ANSWER = '{{error,badarg},1,0}'
+    # A call of the session's grant, its `net` facet, that is no operation of it.
+    GRANT_LINE = "gen_server:call(erx:cap(net), no_operation, infinity).\r"
+    # Typed at the system domain's Erlang shell: in the network domain, whether vtnet0's
+    # interface merged any of the bursts the echo came back in, its count of merged units
+    # (docs/design-network-fastpath.md, "The merge, before classification"), and the counts
+    # of the domain's one grant, the session's: {Merged, Refused, LeftOut}.
+    PROBE_LINE = 'begin [N] = [Nd || #{name := {erx_ident, <<"network">>}, node := Nd} <- ' \
+                 'erx_domain_core:domains(maps:get(core, sys:get_state(erx_domain_srv)))], ' \
+                 'erpc:call(N, fun() -> {ok, #{pid := If}} = erx_net_tables:interface(vtnet0), ' \
+                 '{ok, C} = erx_net_if:admin(If, counters), ' \
+                 '[G] = [P || {_, P, _, _} <- supervisor:which_children(erx_net_grants)], ' \
+                 'Counts = erx_net_grant:counts(G), ' \
+                 "{maps:get(units, C, 0) > 0, maps:get(refused, Counts), maps:get(unknown, Counts)} end, 10000) end.\r"
+    PROBE_ANSWER = '{true,1,0}'
 
     module_function
 
@@ -188,15 +200,24 @@ module Erx
       [erl_point('tcp-connect', 'ok', type: DATA_LINE),
        erl_point('tcp-data', TCP_BYTES.to_s, type: ECHO_LINE),
        erl_point('tcp-echo', '(?:true|false)', seconds: TCP_SECONDS, verify: echoed, type: DIGEST_LINE),
-       erl_point('tcp-digest', '\{[0-9]+,<<"[0-9A-F]{32}">>\}', verify: verify_digest, type: MERGED_LINE),
-       erl_point('tcp-merged', 'true', type: CLOSE_LINE),
+       erl_point('tcp-digest', '\{[0-9]+,<<"[0-9A-F]{32}">>\}', verify: verify_digest, type: CLOSE_LINE),
        erl_point('tcp-close', 'ok', type: refused_line(refused_port)),
-       erl_point('tcp-refused', Regexp.escape('{error,econnrefused}'), type: GRANT_LINE)].freeze
+       erl_point('tcp-refused', Regexp.escape('{error,econnrefused}'), type: GRANT_LINE),
+       erl_point('grant-refusal', Regexp.escape('{error,badarg}'), type: ProductionImage::Run::CTRL_G)].freeze
     end
 
-    # What the grant line shows: the refusal of a call that is no operation, the one refusal
-    # the grant counted, and no message left out.
-    def grant_checkpoint = erl_point('grant-counts', Regexp.escape(GRANT_ANSWER))
+    # From the Ctrl-G menu to the system domain's command shell, whose ifconfig, ping and
+    # host are refused for want of the `net` facet, then the probe at its Erlang shell.
+    def system_checkpoints
+      run = ProductionImage::Run
+      [{ name: 'system-menu', pattern: run::CTRL_G_MENU, seconds: SHELL_SECONDS, type: 's' }.freeze,
+       { name: 'system-shell', pattern: SessionDomain::MENU_LEFT, seconds: SHELL_SECONDS, type: IFCONFIG_LINE }.freeze,
+       shell_point('system-ifconfig', Regexp.escape('ifconfig: no_facet'), type: PING_LINE),
+       shell_point('system-ping', Regexp.escape('ping: no_facet'), type: HOST_LINE),
+       shell_point('system-host', Regexp.escape('host: no_facet'), type: run::ERL_LINE),
+       run::ERLANG_SHELL.merge(name: 'system-erlang-shell', type: PROBE_LINE).freeze,
+       erl_point('network-probe', Regexp.escape(PROBE_ANSWER))].freeze
+    end
 
     # Checks the tcp-digest line against what the echo server took, received
     # (EchoServer#received): TCP_BYTES bytes whose MD5 is the one the guest gives of what
@@ -343,7 +364,7 @@ module Erx
       end
 
       # Boots the development image with a network device under each accelerator and
-      # runs the exchange. Returns { "<accelerator>-1cpu" => 'passed' }; a guest that
+      # runs the exchange from root's session. Returns { "<accelerator>-1cpu" => 'passed' }; a guest that
       # misses a step raises.
       def call(accels:, jobs: 4, build: true)
         raise Error, 'the network device suite runs under tcg or hvf' unless accels.all? { |accel| %w[tcg hvf].include?(accel) }
@@ -352,7 +373,7 @@ module Erx
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/net-device/image'))
         image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                               .build(directory: directory, manifest_source: ProductionImage.sessionless_manifest(@root)).single
+                               .build(directory: directory).single
         accels.to_h { |accel| ["#{accel}-1cpu", boot(accel, image)] }
       end
 
@@ -379,11 +400,12 @@ module Erx
           answered = NetDevice.exchange(link)
           server.start
         end
-        shell = ProductionImage::Run::RELEASE_SHELL.merge(verify: exchange, type: IFCONFIG_LINE).freeze
-        checkpoints = [*Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB), ProductionImage::Run::SLOGAN, shell,
+        session = SessionDomain.session_shell('root_1-shell', IFCONFIG_LINE).merge(verify: exchange).freeze
+        checkpoints = [*Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB), ProductionImage::Run::SLOGAN,
+                       ProductionImage::Run::RELEASE_SHELL, session,
                        *NetDevice.shell_checkpoints(-> { answered.fetch(:mac) }),
                        *NetDevice.tcp_checkpoints(refused_port: echo.port, verify_digest: verify_digest),
-                       NetDevice.grant_checkpoint]
+                       *NetDevice.system_checkpoints]
         Qemu.new(root: @root, runner: @runner).run(accel: accel, image: image, memory_mib: ProductionImage::MEMORY_MIB,
                                                    directory: directory, checkpoints: checkpoints, nic: nic,
                                                    command_line: ProductionImage::Run::COMMAND_LINES[accel])
@@ -394,8 +416,8 @@ module Erx
                   'and its shell showed vtnet0 with the lease, pinged 10.0.2.2 three times and resolved www ' \
                   "in the lease's domain through the name server at #{SERVER}, with random query IDs; " \
                   "its Erlang shell sent #{TCP_BYTES} bytes over TCP to the echo server and read them back, " \
-                  "and was refused the host's loopback; the system domain's grant admitted every call " \
-                  'of these and refused one that is no operation'
+                  "and was refused the host's loopback; the session's grant admitted every call " \
+                  'of these and refused one that is no operation; the system shell was refused ifconfig, ping and host'
         @measurements << "net_device: #{accel}, 1 CPU: TCP from the guest's Erlang shell through slirp's guest forward " \
                          "to the harness's echo server: #{TCP_BYTES} bytes each way in #{transfer_ms} ms " \
                          "(#{rate(transfer_ms)} each way), from the start of the send to the last byte back"

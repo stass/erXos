@@ -6,12 +6,8 @@
 erXos's runtime (docs/design-network-stack.md, "Two places, four seams"), built only into
 erXos's images.
 
-The stack runs in the system domain in Phase 1, the stopgap placement of the network
-domain, and no socket of it is exported to another domain: every request comes from the
-system domain's own processes, so `serve/1` has no envelope to take off and no lane to
-limit, as for the portable runtime. The network domain's runtime replaces this once that
-domain exists: it takes requests out of their envelope, `{erx_origin, D, Request}`, and
-runs each grant under its ERTS's request limit and `erx_facet`.
+The stack runs in the network domain, which serves each client domain its own grant
+(start_grant/2), minted by the network service's mint (start_mint/0).
 """.
 
 -behaviour(erx_net_runtime).
@@ -19,24 +15,23 @@ runs each grant under its ERTS's request limit and `erx_facet`.
 -export([serve/1, start_grant/2, children/0, mint_counts/0]).
 -export([start_mint/0, mint_init/1]).
 
--doc "Nothing to do: every request comes from the system domain's own processes.".
+-doc "Nothing to do: each grant admits its own requests (erx_net_grant).".
 -spec serve(pos_integer()) -> ok.
 serve(MaxRequest) when is_integer(MaxRequest), MaxRequest > 0 ->
     ok.
 
 -doc """
-Starts the grant of `Grantee`, the system domain's own (`local`) or another domain's with
-the port of the connection to it and the export table's module (erx_net_grant:start_link/2),
-linked to the caller (erx_net_sup or its grant supervisor).
+Starts the grant of the domain `Grantee` with the port of the connection to it and the
+export table's module (erx_net_grant:start_link/2), linked to the caller, the stack's
+grant supervisor.
 """.
--spec start_grant(local | {pos_integer(), port(), module()}, map()) ->
+-spec start_grant({pos_integer(), port(), module()}, map()) ->
           {ok, pid()} | {error, term()}.
 start_grant(Grantee, Limits) ->
     erx_net_grant:start_link(Grantee, Limits).
 
 -doc """
-The mints of the two services the stack provides, then the node's grant `local`, which the
-system domain's own processes use while the stack runs there:
+The mints of the two services the stack provides; the domain holds no grant of its own:
 
 * `net`, the network service's mint (start_mint/0);
 * `network_ctl`, the driver-control facet's mint (erx_driver_ctl), through which the
@@ -52,8 +47,7 @@ system domain's own processes use while the stack runs there:
 children() ->
     Units = #{net => {erx_net_interfaces, vtnet0}},
     [{net, {?MODULE, start_mint, []}},
-     {network_ctl, {erx_driver_ctl, start_mint, [network_ctl, Units]}},
-     {erx_net_grant, {?MODULE, start_grant, [local, #{}]}}].
+     {network_ctl, {erx_driver_ctl, start_mint, [network_ctl, Units]}}].
 
 -doc """
 Starts the network service's mint (docs/design-system.md, "Facets a configured domain
@@ -68,9 +62,7 @@ answering through erx_facet:minted/2:
 * a request naming the system domain as the grantee: `{error, eperm}`, counted, since the
   system domain never holds the grant (docs/design-network-stack.md, "The grant").
 
-Every other message is dropped and counted; mint_counts/0 reads both counts. Until the
-network domain exists the stack runs in the system domain, which no domain service asks
-for a grant.
+Every other message is dropped and counted; mint_counts/0 reads both counts.
 """.
 -spec start_mint() -> {ok, pid()}.
 start_mint() ->
