@@ -58,9 +58,7 @@ module Erx
     CTRL_G = ProductionImage::Run::CTRL_G
     CTRL_G_MENU = ProductionImage::Run::CTRL_G_MENU
     ESC = ProductionImage::Run::ESC
-    # The menu's close, its reset at the end of a line: a session starting while the menu
-    # is up may write its runtime's kernel log lines between "Esc returns. " and the reset.
-    MENU_LEFT = /\e\\\e\[0m\r*\n\z/n
+    MENU_LEFT = ProductionImage::Run::MENU_LEFT
     ERL = ProductionImage::Run::ERL_LINE
     # The domain id root's first session takes: the development manifest configures three
     # domains, network, storage and web, which take the domain service's first ids, 5, 6

@@ -199,6 +199,11 @@ class ProductionImageTest < Minitest::Test
     assert_equal [run::ESC, "1+2\x7f3.\r"], [menu, left].map { |point| point.fetch(:type) }
     assert_match menu.fetch(:pattern), "erx_console: Ctrl-G menu\r\n"
     assert_match left.fetch(:pattern), "Esc returns. \e\\\e[0m\r\n"
+    # A log line is written whole between whatever else is written, so one can land after
+    # the menu's last line, which has no newline, and before the close (docs/design-live.md,
+    # "Log lines and program output"); the close then starts a line of its own.
+    assert_match left.fetch(:pattern), "\e\\\e[0m\r\n"
+    refute_match left.fetch(:pattern), "Esc returns. #6 0.689895 debug space 1: erx_virtio_net: the network device is not driven\r\n"
 
     release, erlang = shells.call(run.idle_checkpoints(cpus: 1, root: ROOT))
     assert_equal ["erl\r", run::BUSY_EXPRESSION], [release, erlang].map { |point| point.fetch(:type) }

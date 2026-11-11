@@ -476,11 +476,18 @@ module Erx
       # with Eshell V and whose prompt, `1> `, ends no line.
       ERL_LINE = "erl\r"
       # Ctrl-G opens erx_console's menu, whose first line is its title; Esc, typed alone,
-      # leaves it, and the console ends the menu's last line, which has no newline of its own.
+      # leaves it. The menu's last line, "Esc returns. ", has no newline of its own; the
+      # console ends it with the close it writes whenever the line changes hands: ESC \ and
+      # ESC [0m, which end a string left open and reset the style, then CR-LF. MENU_LEFT
+      # matches the close alone. A log line is written whole between whatever else is
+      # written (docs/design-live.md, "Log lines and program output"), so one written while
+      # the menu is up lands between "Esc returns. " and the close, which then starts a line;
+      # a log line cannot hold the close, since the line escape turns its ESC into text. The
+      # checkpoint is armed after the menu's title, so the close it sees is the one Esc causes.
       CTRL_G = "\a"
       ESC = "\e"
       CTRL_G_MENU = /\Aerx_console: Ctrl-G menu\r*\n\z/n
-      MENU_LEFT = /Esc returns\. \e\\\e\[0m\r*\n\z/n
+      MENU_LEFT = /\e\\\e\[0m\r*\n\z/n
       ERLANG_SHELL = { name: 'erlang-shell', pattern: /\AEshell V/n, seconds: 60 }.freeze
       # kernel_sup's children in the system release, a node over the erx carrier (net_sup
       # holds net_kernel and the connection agent), in which_children's order: the last
