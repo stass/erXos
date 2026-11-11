@@ -1026,13 +1026,15 @@ from which `erx_cmd:facet(Ctx, Name)` returns the facet or
 `-erx_needs(Names)`, which the shell checks before it runs the command.
 A session's facets are its domain's (`erx_facets:domain/0`):
 each facet the domain service minted for the domain, a pid by its name
-(`erx:caps/0`), the inspect facet among them. A session reads every
-inspection path, its own domain's included, through that one facet,
+(`erx:caps/0`), the inspect facet among them. A session's inspector
+queries, of its own domain's paths included, go through that one facet,
 whose scope, its principal's domains or `root`'s `all` in a development
 build, the domain service fixed when it minted the facet and the session
 never states ([design-live.md](design-live.md#the-inspect-service)); a
-domain that holds no inspect facet reads nothing, and its runtime makes
-up no scope of its own. The system domain's session, handed none,
+domain that holds no inspect facet gets no inspector answer, and its
+runtime makes up no scope of its own. Its own process and port tables
+are not inspector queries: `ps` and the `Ctrl-T` line read them in the
+session's runtime, with or without the facet. The system domain's session, handed none,
 reads at scope `all` in its own runtime and holds, for each service of
 the system domain that runs in that domain, the value `local`: the
 service is the domain's own. It never holds

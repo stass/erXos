@@ -378,7 +378,7 @@ violation fails the build with the property, the record and the field:
 2. **Every facet names a server the manifest contains,** a service of the
    system release or of a configured domain, and a grantee, the system
    domain, a configured domain or a session template, never the service's
-   own server, a session template only a configured domain's service; a
+   own server; a
    grantee takes at most one facet of a service name, since its registry
    holds each under that name; and every introduction names configured
    domains.
@@ -501,9 +501,10 @@ violation fails the build with the property, the record and the field:
     no template, so none of them reaches one. A facet alone may name a
     template as its grantee, written `@session.PRINCIPAL`, for a service a
     configured domain serves, which its server grants each session made
-    from the template ([Facets a configured domain
-    serves](#facets-a-configured-domain-serves)); the grant adds nothing to
-    the boot order. Its limits are judged
+    from the template, or for a service the system domain serves, whose
+    facet the domain service starts for each such session ([Facets a
+    configured domain serves](#facets-a-configured-domain-serves)); the
+    grant adds nothing to the boot order. Its limits are judged
     against its principal's ceilings, budget and quota when a session is
     made from it, by the request path every principal's domain takes.
 15. **The system domain holds no `net` grant:** no facet of the `net` or
@@ -543,12 +544,15 @@ violation fails the build with the property, the record and the field:
     receivers to its own floor the same way: every grantee of an
     `inspect` facet and the system domain, its server, which also takes
     the runtime agents' answers of the same bound, run with a `max_frame`
-    of at least `inspect_max_frame_min`, 512 KiB, so an answer of
-    `inspect_reply_max` arrives in one frame
+    of at least `inspect_max_frame_min`, a `max_message_heap` of at least
+    `inspect_message_heap_min` and a `funnel_depth` of at least
+    `inspect_funnel_depth_min`, so no funnel drops a valid answer
     ([design-live.md](design-live.md#the-inspect-service)).
     Seeded violations: a check that reads only the grantee's limits, which
-    admits a server below the floor; and a session template that holds
-    `inspect` with a `max_frame` below its floor.
+    admits a server below the floor; a session template that holds
+    `inspect` with a `max_frame` below its floor; and a check of
+    `max_frame` alone, which admits a template whose `max_message_heap`
+    is below `inspect_message_heap_min`.
 
 Each property has a test that seeds one violation into a manifest and
 expects the build to fail with that property's diagnostic.
@@ -1804,8 +1808,8 @@ configured domain, the system domain or a session template, with the
 grant's limits. A template's grant, written `grantee
 @session.PRINCIPAL`, is made for each session of that principal while
 the session lives, by the server directly, never through the system
-domain, so a template takes facets only of configured domains'
-services. Service
+domain; a template's grant of a service the system domain serves is
+started by the domain service, as below. Service
 names are unique per server, not across the manifest. The facet is a
 process of the server's domain, minted there by the server's own code with
 `erx_facet:start/3`, so the system domain never stands in front of it; the
@@ -1956,15 +1960,19 @@ server minted it is never installed; it ends with its grantee through its
 is at most one such facet per pair, since a pair runs one operation.
 
 **Facets of the system domain's services.** A `facet` row may also grant
-a configured domain a service the system domain serves. No mint is
-involved: each such service names the process behind it with
-`erx_facet:serve(Name, Pid)` as it starts, in the system domain's own
-table, and when a configured domain reports ready, the domain service
-starts a facet in front of that process for each such row granted to the
-domain's row, bound to the domain and within the row's limits, and sends
-it in the ready answer with any other facet the domain gets there. So
-these facets reach every incarnation with its ready answer, before any
-installation, and end with it, or with the process behind them. A
+a configured domain or a session template a service the system domain
+serves. No mint is involved: each such service names the process behind
+it with `erx_facet:serve(Name, Pid)` as it starts, in the system domain's
+own table, and when a configured domain or a session reports ready, the
+domain service starts a facet in front of that process for each such row
+granted to the domain's row or the session's template, bound to the
+domain and within the row's limits, with the scope the service's own
+pure function gives for the grantee where the service has scopes, as
+`inspect` does ([design-live.md](design-live.md#the-inspect-service)),
+and sends it in the ready answer with any other facet the domain gets
+there. So these facets reach every incarnation and every session with
+its ready answer, before any installation, and end with it, or with the
+process behind them. A
 service that has named no living process by then is left out and logged; the domain finds the name absent, as it
 finds any unavailable service, until it restarts. The domain service
 creates the configured domains as it starts, so a service whose facets

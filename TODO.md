@@ -1456,11 +1456,14 @@ it; git history is the record of completed work.
   invents in the session's runtime, and each runtime's inspector collects for itself; the kernel log reaches
   root's session through a `log` facet of its own (`erx_log_facet`, granted by `erx_console`, read through
   `erx_log_records:log/1`'s `read_fun`); and `erx_web_line` keeps a `scope` of its own that `{export, Web}`
-  widens to `all`. Declare `abi/services/inspect.txt` with `inspect_reply_max` and `inspect_max_frame_min`;
-  mint the facet in `erx_domain:start_session/2` with `erx_domain_core:inspect_scope/2` (one
+  widens to `all`. Declare `abi/services/inspect.txt` with `inspect_reply_max`, the three floors,
+  `inspect_worker_heap` and `inspect_query_max`; make records name processes as `proc_id()` data, never pids
+  (V10); start the facet with the session's ready answer as a system-service grant of its template, with
+  `erx_domain_core:inspect_scope/2` (one
   `development_build/0` in `erx` replacing `erx_hostlink_files:build_flags/0` and its copy in `erx_log_facet`);
-  route `erx_inspector`'s calls without a scope through the facet; start `erx_inspect_agent` in every domain,
-  named in the ready report, with `collects_domain/2` as its rule; start `erx_procfs` over the facet rather
+  route `erx_inspector`'s calls without a scope through the facet, each request in a bounded query worker;
+  start `erx_inspect_agent` in every domain, named in the ready report and kept only when the incarnation owns
+  it, with `collects_domain/2` as its rule; start `erx_procfs` over the facet rather
   than at scope `all` (`otp/lib/kernel/src/kernel.erl`); then delete `erx_log_facet` and its tests, the
   line's `scope`, the local scope of `facets/2`, and `log` and `inspect` from `UNDECLARED`. Keep the
   `session-dmesg` QEMU checkpoint, which tests the behaviour. Until then have `erx_domain:create/1` refuse a
@@ -4516,10 +4519,9 @@ to the corpus and follow rc
 * [Low] inspect service, the runtime agent leg ([design-live.md](docs/design-live.md#the-runtime-agent)): a
   domain's inspection agent takes questions one at a time, so a holder of scope `all` that asks without pause
   keeps the agents busy and another holder's runtime attributes read `{timeout, 500}`, and a domain can answer
-  slowly on purpose to the same effect; the inspector bounds neither the questions it has in flight to one
-  agent nor what it spends waiting. The system domain carries `inspect_max_frame_min` as its `max_frame`, which
-  raises what each domain can make it hold (D12 of design-domains.md). Development builds run trusted code only;
-  settle both with the sizing of D12 on erXos's own kernel.
+  slowly on purpose to the same effect, so that a listing at scope `all` waits 500 ms for each stalled domain
+  and ends `partial` at `inspect_query_max`. Development builds run trusted code only; settle it with the
+  scheduling of service work on erXos's own kernel.
 * [Medium] Web view scope, root's session through the host link's `web` facet
   (`erlang/apps/erx_web_line/src/erx_web_line.erl`, `export/2`; [design-web.md's
   Security](docs/design-web.md#security)): once the system domain exports root's session's line to the web

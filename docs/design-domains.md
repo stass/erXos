@@ -1022,7 +1022,7 @@ domain that owns the name (D4):
    call it with `rpc` and `erpc`. It is also the only source of
    `introduce`, which means something only on a domain pid: the domain
    service, which owns every domain pid, has the domain pid write it. So neither an encoded
-   domain pid, such as one in an inspector's listing, nor a
+   domain pid nor a
    `connection_up`, which names the peer by its id, carries the authority
    to introduce that domain.
 
@@ -1819,7 +1819,7 @@ is a sum fixed when the domain is admitted, with these terms per domain:
 | the one record it is reading from that lane, in a private buffer that grows as the record's bytes arrive and is never allocated whole on the header's word, and the funnel's scratch for judging it ([The funnel](#the-funnel)) | the system domain's `max_frame`, which is the largest `max_request` a grant may name ([Principals, sessions and quotas](#principals-sessions-and-quotas)), and of scratch the larger of 65 KiB and twice the record with `funnel_depth` stack frames |
 | its queue to the domain while the domain's lane from it is full | `system_queue`: past it a message is dropped and counted, and any other signal ends the connection instead |
 | what it holds because of the domain's processes: their links and monitors with system processes, and the signals queued for them | its own `peer_held` |
-| each facet granted to the domain, with the requests queued on it | that facet's queue quota for the requests queued on it undecoded, plus the one frame that crossed it, and its `max_heap_size` for what it decodes and keeps ([Facets](#facets)) |
+| each facet granted to the domain, with the requests queued on it and the processes it starts for the domain | that facet's queue quota for the requests queued on it undecoded, plus the one frame that crossed it, and its `max_heap_size` for what it decodes and keeps; and for the processes a facet starts to act for the domain, the grant's limit on them times the `max_heap_size` each runs with, which counts the frames queued on it ([Facets](#facets), "Processes a facet starts"), as an `inspect` facet's query workers ([design-live.md](design-live.md#the-inspect-service)) |
 | its frames queued undecoded on system processes that are not its facets, such as the domain service | each such process's quota, `system_queue`, plus one frame; every domain that reaches such a process shares that quota, so the system domain reserves it once per process, in its baseline, and not per domain |
 
 The domain service reserves that sum in the system domain's own budget
@@ -2133,8 +2133,11 @@ the domain's own runtime ([design-live.md](design-live.md#the-runtime-agent)).
 Init reports ready to the domain pid, naming the agents, the connection
 agent among them, and the mints its services provide ([design-system.md](design-system.md#facets-a-configured-domain-serves)), in `{erx_ready, #{connections => Agent, inspect => InspectAgent, provides => Provides}}`, a map other
 agents join as they come to exist, which exports them to the system domain by that
-message; the domain pid keeps the connection agent's pid, the one process
-that does, and passes the report's provides to the domain service, which from then
+message; the domain pid keeps the connection agent's pid, and the domain
+service the inspection agent's, each only when the reporting incarnation
+owns it, node and creation both, by the check a provider's mint passes
+([design-system.md](design-system.md#facets-a-configured-domain-serves)),
+and passes the report's provides to the domain service, which from then
 on sends the domain, through the domain pid, the connection-control
 records its connections need, the `connection_up` of its creator's
 connection first.
@@ -2394,6 +2397,11 @@ process that paused; a pause reported after a turn it missed is resumed
 at once. Each process checks before a step and charges after it, so the
 account exceeds the share by at most one step per such process, which
 the grant's limit on them bounds, and the debt repays it.
+In the system domain each such process runs with the heap limit its
+interface declares for it and ends with the facet, to which it is
+linked, so the grant's limit on them times that heap limit is a term of
+what the grantee can make the system domain hold ([Flow
+control](#flow-control)).
 
 **Who asks.**
  A facet acts only for its grantee, and never on a pid only
@@ -2516,7 +2524,10 @@ build generates from the manifest the table of service names, and the
 domain service's one funnel for a domain's facets,
 `erx_domain_srv:facets/1`, through which every create spec, every
 session start and every mint passes, refuses a key the table does not
-hold with `{error, {bad_spec, facets}}`. So a facet enters a domain's
+hold with `{error, {bad_spec, facets}}`, and installs under a key only a
+facet whose grant record ([Grant records](#facets)) names that key's
+service and that grantee, taking the pid from the record, never from a
+spec. So a facet enters a domain's
 table only as a declared instance, by construction, and a need that
 has no interface of its own finds no way in: it is an inspection path,
 a file in its owner's tree, or a protocol with a design and an
@@ -2708,8 +2719,8 @@ A domain's limits, fixed at creation within its principal's ceilings:
 | `lane` | the data area of each lane it reads, a power of two from 4 KiB to 16 MiB ([Connections](#connections)) | the domain library, which sizes the object | 64 KiB |
 | `connections` | connections it may have at once, the system connection included, and the slots of its control table ([Connections](#connections)) | the domain service, at an introduction | 256; for the system domain, the manifest's `max_domains` ([design-system.md](design-system.md#the-manifest)) |
 | `max_frame` | the largest payload it takes into a buffer of its own, which grows as the bytes arrive; a longer one is dropped as it passes | its own runtime; a protocol's floor, by the client side of that protocol (**Floors from a protocol**, below) | 1 MiB, at most `ERX_FRAME_MAX`; for the system domain, the largest `max_request` its configuration lets a grant name; at least the `net` protocol's floor, which its schema sets, in a domain that holds `net`, `files_max_frame_min` in a domain that serves or holds a `files` facet, and `inspect_max_frame_min` in a domain that holds an `inspect` facet and in the system domain (property 16 of design-system.md) |
-| `max_message_heap` | the largest decoded message it accepts | its own runtime; a protocol's floor, as for `max_frame` | 8 MiB, at most 256 MiB; at least the socket protocol's floor in a domain that holds `net` |
-| `funnel_depth` | nesting outside tail positions in a frame it accepts | its own runtime; a protocol's floor, as for `max_frame` | 16,384; at least the socket protocol's floor in a domain that holds `net` |
+| `max_message_heap` | the largest decoded message it accepts | its own runtime; a protocol's floor, as for `max_frame` | 8 MiB, at most 256 MiB; at least the socket protocol's floor in a domain that holds `net`, and `inspect_message_heap_min` in a domain that holds an `inspect` facet and in the system domain |
+| `funnel_depth` | nesting outside tail positions in a frame it accepts | its own runtime; a protocol's floor, as for `max_frame` | 16,384; at least the socket protocol's floor in a domain that holds `net`, and `inspect_funnel_depth_min` in a domain that holds an `inspect` facet and in the system domain |
 | `exports` | entries in its export table | its own runtime | 16,384 |
 | `peer_held`, `peer_held_total` | what its runtime holds because of other domains' processes, each link or monitor counted as 256 bytes and each queued signal as its bytes, for one connection and for all; past them it answers `system_limit` and ends the connection | its own runtime | 4 MiB; 64 MiB; for the system domain's own `peer_held`, 64 KiB per connection, the manifest's `peer_held` ([design-system.md](design-system.md#the-manifest)) |
 | `tmp` | bytes its RAM file system may hold | its own runtime | an eighth of `memory` |
