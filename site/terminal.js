@@ -170,7 +170,8 @@ function show_keys(machine_exists) {
 // `emulator.v86.cpu`: the MMIO windows (`io`), the virtio devices and their
 // transports, the GIC's lines (`set_irq`) and the devices by name.
 //
-// A fault that changes a v64 object pushes its undo onto `session.repairs`;
+// A fault that changes a v64 object pushes its undo onto `repairs`, the
+// array its action is given; inject() keeps them in `session.repairs`, and
 // a power cut runs them before the machine powers on again, so the new boot
 // gets the hardware back whole, with the disk's contents as they were.
 
@@ -270,13 +271,43 @@ const hex_address = n => `0x${n.toString(16)}`;
 
 // The disk's line stops following the device: an instance property shadows
 // VirtioMmio.prototype.update_irq, which every raise and lower goes through.
-function freeze_disk_line(session, disk) {
+// The undo releases the line whichever fault froze it.
+function freeze_disk_line(repairs, disk) {
     disk.transport.update_irq = () => undefined;
-    session.repairs.push(() => {
+    repairs.push(() => {
         delete disk.transport.update_irq;
         disk.transport.level = false;
         disk.cpu.set_irq(disk.intid, false);
     });
+}
+
+// The disk's controller stops answering: its virtio-mmio window is
+// unmapped, so the driver's next register access is a synchronous external
+// abort, and its interrupt is raised and held. Returns the window's base.
+function unplug_disk(repairs, disk) {
+    const owner = disk.cpu.virtio_mmio_slots[disk.slot];
+    const { base, size, handler } = disk.cpu.io.ranges[owner];
+    disk.cpu.io.unregister_mmio(owner);
+    repairs.push(() => {
+        disk.cpu.virtio_mmio_slots[disk.slot] = disk.cpu.io.register_mmio(base, size, handler);
+    });
+    freeze_disk_line(repairs, disk);
+    disk.cpu.set_irq(disk.intid, true);
+    return base;
+}
+
+// Ends a fault that ends by itself: runs `repairs`, the undo its action
+// pushed, takes them out of session.repairs and the fault off the applied
+// list. A power cut that ran them first leaves nothing to do; returns
+// whether anything was undone.
+function end_fault(session, name, repairs) {
+    const pending = repairs.filter(repair => session.repairs.includes(repair));
+    if(pending.length === 0) return false;
+    const others = session.repairs.filter(repair => !pending.includes(repair));
+    session.repairs.splice(0, session.repairs.length, ...others);
+    for(const repair of pending) repair();
+    session.applied.delete(name);
+    return true;
 }
 
 const DISK_BLOCK = 4096;
@@ -285,6 +316,8 @@ const DISK_SKIP = 64 << 10;
 const DISK_CORRUPT_BLOCKS = 8;
 const RAM_FLIPS = 64;
 const CPU_FREEZE_MS = 15000;
+// How long a failed disk controller takes to come back, in wall time.
+const CONTROLLER_REBOOT_MS = 3000;
 const CLOCK_JUMP_HOURS = 3;
 
 const buffer_get = (buffer, start, length) => new Promise(resolve => buffer.get(start, length, resolve));
@@ -313,36 +346,47 @@ let next_seed = 1;
 
 // The menu's entries by name. `needs` names what an entry waits for ("disk",
 // "system_memory"); `unsupported` is the reason an entry cannot be offered.
+// `disk_down` is the reason the disk faults are refused while the entry is
+// applied. An entry with `back_after_ms` ends by itself after that long:
+// inject()'s bring_back() then runs its repairs and shows `back_note`.
 const FAULTS = {
-    dead_disk: {
-        label: "Dead disk", needs: "disk",
-        action({ emulator, session }) {
+    controller_failure: {
+        label: "Disk controller failure", needs: "disk", disk_down: "the disk's controller is down",
+        back_after_ms: CONTROLLER_REBOOT_MS,
+        back_note: "the controller answers again; the storage domain's next start finds it and mounts /data",
+        action({ emulator, repairs }) {
             const disk = disk_of(emulator);
-            const owner = disk.cpu.virtio_mmio_slots[disk.slot];
-            const { base, size, handler } = disk.cpu.io.ranges[owner];
-            disk.cpu.io.unregister_mmio(owner);
-            session.repairs.push(() => {
-                disk.cpu.virtio_mmio_slots[disk.slot] = disk.cpu.io.register_mmio(base, size, handler);
-            });
-            freeze_disk_line(session, disk);
-            disk.cpu.set_irq(disk.intid, true);
-            return `the disk's registers at ${hex_address(base)} are gone and its interrupt, INTID ${disk.intid}, is raised`;
+            const base = unplug_disk(repairs, disk);
+            return `the controller's registers at ${hex_address(base)} are gone and its interrupt, INTID ` +
+                `${disk.intid}, is raised; the storage domain ends on its driver's fault and starts again, and the ` +
+                `controller answers again in ${CONTROLLER_REBOOT_MS / 1000} s; watch the console for the ` +
+                "storage domain's volume mounted line, then /data answers again";
+        },
+    },
+    dead_disk: {
+        label: "Dead disk", needs: "disk", disk_down: "the disk is dead already",
+        action({ emulator, repairs }) {
+            const disk = disk_of(emulator);
+            const base = unplug_disk(repairs, disk);
+            return `the disk's registers at ${hex_address(base)} are gone and its interrupt, INTID ${disk.intid}, ` +
+                "is raised; the storage domain restarts up to 5 times, then stays down: /data answers an error " +
+                "and the rest of the system keeps running";
         },
     },
     hung_disk: {
         label: "Hung disk", needs: "disk",
-        action({ emulator, session }) {
+        action({ emulator, repairs }) {
             const disk = disk_of(emulator);
-            freeze_disk_line(session, disk);
+            freeze_disk_line(repairs, disk);
             disk.cpu.set_irq(disk.intid, false);
             return `the disk works on, but its interrupt, INTID ${disk.intid}, no longer reaches the processor`;
         },
     },
     irq_storm: {
         label: "Interrupt storm", needs: "disk",
-        action({ emulator, session }) {
+        action({ emulator, repairs }) {
             const disk = disk_of(emulator);
-            freeze_disk_line(session, disk);
+            freeze_disk_line(repairs, disk);
             disk.cpu.set_irq(disk.intid, true);
             return `the disk's interrupt, INTID ${disk.intid}, is held asserted`;
         },
@@ -437,33 +481,42 @@ const FAULTS = {
 
 // The menu's groups, in order.
 const FAULT_GROUPS = [
-    { label: "Devices", faults: ["dead_disk", "hung_disk", "irq_storm", "corrupt_disk"] },
+    { label: "Devices", faults: ["controller_failure", "dead_disk", "hung_disk", "irq_storm", "corrupt_disk"] },
     { label: "Memory", faults: ["corrupt_ram", "ram_fail"] },
     { label: "Machine", faults: ["power_cut", "clock_jump", "cpu_freeze"] },
 ];
 
 // Whether an entry can be injected, from facts about the running machine:
-// { disk, disk_dead, memory } where `memory` is parse_system_memory's
-// answer or null before the log reached it. Returns { enabled, reason }.
+// { disk, disk_down, line_held, memory } where `disk_down` is an applied
+// entry's `disk_down` reason or null, `line_held` says whether a fault
+// holds the disk's interrupt (freeze_disk_line), and `memory` is
+// parse_system_memory's answer or null before the log reached it. Returns
+// { enabled, reason }.
 function fault_availability(fault, facts) {
     if(fault.unsupported) return { enabled: false, reason: fault.unsupported };
     if(fault.needs === "disk" && !facts.disk) return { enabled: false, reason: "this machine has no disk" };
-    if(fault.needs === "disk" && facts.disk_dead) return { enabled: false, reason: "the disk is dead already" };
+    if(fault.needs === "disk" && facts.disk_down) return { enabled: false, reason: facts.disk_down };
+    // Its repair, run while the machine goes on, would also let go of the
+    // interrupt the other entry holds.
+    if(fault.back_after_ms && facts.line_held)
+        return { enabled: false, reason: "another fault holds the disk's interrupt" };
     if(fault.needs === "system_memory" && !facts.memory?.range)
         return { enabled: false, reason: facts.memory?.reason ?? "waiting for the boot log's memory map" };
     return { enabled: true, reason: "" };
 }
 
 function fault_facts(session) {
-    return { disk: disk_of(session.emulator) !== null, disk_dead: session.applied.has("dead_disk"),
-             memory: session.memory };
+    const disk_down = [...session.applied].map(name => FAULTS[name].disk_down).find(Boolean) ?? null;
+    const disk = disk_of(session.emulator);
+    const line_held = disk !== null && Object.hasOwn(disk.transport, "update_irq");
+    return { disk: disk !== null, disk_down, line_held, memory: session.memory };
 }
 
 // The menu shows each entry's availability; it and Inject are usable only
 // while a machine runs, is ready and no fault is in progress.
 function render_faults(session) {
     const usable = Boolean(session?.ready && !session.ended && !session.busy);
-    const facts = session ? fault_facts(session) : { disk: false, disk_dead: false, memory: null };
+    const facts = session ? fault_facts(session) : { disk: false, disk_down: null, line_held: false, memory: null };
     for(const option of ui.fault_select.options) {
         const fault = FAULTS[option.value];
         const { enabled, reason } = fault_availability(fault, facts);
@@ -850,15 +903,18 @@ const machine = {
         render_faults(session);
         show_status(`${fault.label}: injecting the fault`);
         const still_current = () => this.current === session && !session.ended;
+        const repairs = [];
         try {
-            const note = await fault.action({ emulator: session.emulator, session, still_current });
+            const note = await fault.action({ emulator: session.emulator, session, repairs, still_current });
             if(!still_current()) return;
             session.applied.add(name);
             show_status(`${fault.label}: ${note}`);
+            if(fault.back_after_ms) this.bring_back(session, name, repairs);
         } catch(error) {
             if(!still_current()) return;
             show_status(`${fault.label}: could not inject it: ${error?.message ?? error}`);
         } finally {
+            session.repairs.push(...repairs);
             session.busy = false;
             if(still_current()) {
                 session.fault = null;
@@ -866,6 +922,19 @@ const machine = {
                 if(session.menu_focused) ui.fault_select.focus();
             }
         }
+    },
+
+    // An entry that ends by itself, as a controller that reboots does: after
+    // its `back_after_ms` its own repairs run, unless the machine is gone or
+    // a power cut ran them first.
+    bring_back(session, name, repairs) {
+        const fault = FAULTS[name];
+        setTimeout(() => {
+            if(this.current !== session || session.ended || !end_fault(session, name, repairs)) return;
+            // A fault in progress keeps the status line for its own note.
+            if(!session.busy) show_status(`${fault.label}: ${fault.back_note}`);
+            render_faults(session);
+        }, fault.back_after_ms);
     },
 
     // The machine stopped by itself: it powered off after a crash, or after
@@ -922,5 +991,5 @@ function init() {
 
 if(page) init();
 
-export { parse_system_memory, seeded_numbers, disk_of, fault_availability, FAULTS, FAULT_GROUPS, BOOT_LOG_LIMIT,
+export { parse_system_memory, seeded_numbers, disk_of, fault_availability, end_fault, FAULTS, FAULT_GROUPS, BOOT_LOG_LIMIT,
          virtio_disks, virtio_slots, NET_DEVICE };

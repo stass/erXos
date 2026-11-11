@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parse_system_memory, seeded_numbers, disk_of, fault_availability, FAULTS, FAULT_GROUPS, BOOT_LOG_LIMIT,
+import { parse_system_memory, seeded_numbers, disk_of, fault_availability, end_fault, FAULTS, FAULT_GROUPS, BOOT_LOG_LIMIT,
          virtio_disks, virtio_slots, NET_DEVICE }
     from "../../site/terminal.js";
 
@@ -95,16 +95,18 @@ test("the menu's groups hold each fault once", () => {
 
 test("availability names the reason an entry cannot be offered", () => {
     const memory = parse_system_memory(real_log);
-    const none = { disk: false, disk_dead: false, memory: null };
-    const all = { disk: true, disk_dead: false, memory };
+    const none = { disk: false, disk_down: null, line_held: false, memory: null };
+    const all = { disk: true, disk_down: null, line_held: false, memory };
     const reason = (name, facts) => fault_availability(FAULTS[name], facts).reason;
     assert.equal(reason("ram_fail", all), "needs a change inside v64");
     assert.equal(reason("clock_jump", all), "erXos has no wall clock yet");
-    for(const name of ["dead_disk", "hung_disk", "irq_storm", "corrupt_disk"]) {
+    for(const name of ["controller_failure", "dead_disk", "hung_disk", "irq_storm", "corrupt_disk"]) {
         assert.equal(reason(name, none), "this machine has no disk");
         assert.equal(fault_availability(FAULTS[name], all).enabled, true);
-        assert.equal(reason(name, { ...all, disk_dead: true }), "the disk is dead already");
+        assert.equal(reason(name, { ...all, disk_down: "the disk is dead already" }), "the disk is dead already");
     }
+    assert.equal(reason("controller_failure", { ...all, line_held: true }), "another fault holds the disk's interrupt");
+    assert.equal(fault_availability(FAULTS.dead_disk, { ...all, line_held: true }).enabled, true);
     assert.equal(reason("corrupt_ram", none), "waiting for the boot log's memory map");
     assert.match(reason("corrupt_ram", { ...none, memory: parse_system_memory("") }), /no RAM/);
     assert.equal(fault_availability(FAULTS.corrupt_ram, all).enabled, true);
@@ -138,7 +140,7 @@ function fake_machine({ disk_bytes = null } = {}) {
     }
     const emulator = { v86: { cpu } };
     const session = { emulator, repairs: [], applied: new Set() };
-    return { cpu, lines, emulator, session, handler };
+    return { cpu, lines, emulator, session, repairs: session.repairs, handler };
 }
 
 test("before v64 builds its machine, and without a disk, there is no disk", () => {
@@ -150,7 +152,7 @@ test("before v64 builds its machine, and without a disk, there is no disk", () =
 test("dead disk unmaps the disk's window and raises its line; the repair maps it again", () => {
     const { cpu, lines, emulator, session, handler } = fake_machine({ disk_bytes: new Uint8Array(1 << 17) });
     const window_owner = cpu.virtio_mmio_slots[31];
-    const note = FAULTS.dead_disk.action({ emulator, session });
+    const note = FAULTS.dead_disk.action({ emulator, repairs: session.repairs });
     assert.match(note, /0xa003e00/);
     assert.match(note, /INTID 79/);
     assert.equal(cpu.io.ranges[window_owner], null);
@@ -165,6 +167,39 @@ test("dead disk unmaps the disk's window and raises its line; the repair maps it
     cpu.virtio_mmio[31].isr = 1;
     cpu.virtio_mmio[31].update_irq();
     assert.equal(lines.get(79), true, "the device moves the line again");
+});
+
+test("a controller failure ends by itself: its own repairs run once, unless a power cut ran them", () => {
+    const machine = fake_machine({ disk_bytes: new Uint8Array(1 << 17) });
+    const { cpu, lines, session, handler } = machine;
+    const window_owner = cpu.virtio_mmio_slots[31];
+    const other = () => undefined;
+    session.repairs.push(other);
+    const note = FAULTS.controller_failure.action(machine);
+    assert.match(note, /0xa003e00/);
+    assert.match(note, /INTID 79/);
+    assert.match(note, /answers again in 3 s/);
+    assert.equal(cpu.io.ranges[window_owner], null);
+    assert.equal(lines.get(79), true);
+    session.applied.add("controller_failure");
+    const own = session.repairs.slice(1);
+    assert.equal(end_fault(session, "controller_failure", own), true);
+    assert.deepEqual(session.repairs, [other], "another fault's repair stays for a power cut");
+    assert.equal(session.applied.has("controller_failure"), false);
+    assert.deepEqual(cpu.io.ranges[cpu.virtio_mmio_slots[31]], { base: 0x0a003e00, size: 0x200, handler });
+    assert.equal(lines.get(79), false);
+    cpu.virtio_mmio[31].isr = 1;
+    cpu.virtio_mmio[31].update_irq();
+    assert.equal(lines.get(79), true, "the device moves the line again");
+    assert.equal(end_fault(session, "controller_failure", own), false, "a second end does nothing");
+
+    const cut = fake_machine({ disk_bytes: new Uint8Array(1 << 17) });
+    FAULTS.controller_failure.action(cut);
+    const undo = cut.session.repairs.slice();
+    for(const repair of cut.session.repairs.splice(0)) repair();
+    const slots = cut.cpu.io.ranges.length;
+    assert.equal(end_fault(cut.session, "controller_failure", undo), false);
+    assert.equal(cut.cpu.io.ranges.length, slots, "the window is not mapped twice");
 });
 
 test("hung disk keeps completions from the line; a storm holds it high", () => {

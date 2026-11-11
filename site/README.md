@@ -253,7 +253,8 @@ into the guest, and reaches only the visitor's own emulator.
 
 | Entry | What v64 is made to do |
 | --- | --- |
-| Dead disk | The disk's virtio-mmio window is unmapped, so the driver's next register access is a synchronous external abort, and its interrupt is raised and held. |
+| Disk controller failure | As Dead disk, then the controller answers again by itself 3 s later in wall time: the window is mapped again with the device as it was, the interrupt follows the device, and the restarted driver resets the device as it starts. The note tells the visitor to watch the storage domain end on the driver's fault, restart, find the controller and mount `/data` again; a second note says when the controller is back. A power cut before then undoes the fault at once. Refused while Hung disk or Interrupt storm holds the interrupt, since the controller's return would let go of it. |
+| Dead disk | The disk's virtio-mmio window is unmapped, so the driver's next register access is a synchronous external abort, and its interrupt is raised and held. The storage domain ends on the driver's fault and restarts up to 5 times (its manifest row allows 5 restarts in 600 s), then stays down: `/data` answers an error and the rest of the system keeps running. The note says so. |
 | Hung disk | The disk still does its work, but its interrupt never rises: the transport's `update_irq` is shadowed on the instance. |
 | Interrupt storm | The disk's interrupt is held asserted whatever the device says. |
 | Corrupt disk | 8 bytes, chosen from a seed, are inverted in blocks that hold data (past the first 64 KiB, and not one byte value throughout); the visitor is told to read files. |
@@ -265,8 +266,9 @@ into the guest, and reaches only the visitor's own emulator.
 
 The disk entries take the machine's first virtio-blk disk on a virtio-mmio
 slot (`cpu.virtio_devices`, the list v64's `disk_devices()` reads) and say
-"this machine has no disk" when there is none. A fault that changes a v64
-object records its undo, which a power cut runs.
+"this machine has no disk" when there is none. While the controller is
+down or the disk is dead, the disk entries are refused. A fault that
+changes a v64 object records its undo, which a power cut runs.
 
 Corrupt RAM aims at the range the page reads from the boot console's
 output it already shows: the first 32 KiB of the log, up to the root
