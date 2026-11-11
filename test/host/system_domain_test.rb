@@ -186,31 +186,50 @@ class SystemDomainTest < Minitest::Test
   end
 
   # The re-grant boot: the service-kill boot's rows, each restarted once, with echo
-  # granted to peer as well. Its checkpoint takes only the whole answer: a grant not
-  # made again for erts's next incarnation (a core that does not reconcile on a
-  # restarted row's report leaves the waits at none), a facet that does not answer, a
-  # mint taken after the report, or a missing refusal each fails.
+  # granted to peer and to the system principal's sessions as well, and the development
+  # manifest's session template kept, so root_1 takes the line at boot and Ctrl-G gives
+  # it to the system shell. Its checkpoint takes only the whole answer: a grant not made
+  # again for erts's next incarnation (a core that does not reconcile on a restarted
+  # row's report leaves the waits at none), a facet that does not answer, a mint taken
+  # after the report, a missing refusal, or a session that keeps its old facet, gets
+  # none or gets none again each fails.
   def test_the_regrant_boot_restarts_each_domain_once_and_needs_every_grant_anew
-    rows = Suite::Regrant::ROWS
+    regrant = Suite::Regrant
+    rows = regrant::ROWS
     assert_equal 2, rows.scan("  restarts 1\n").size
     refute_includes rows, "  restarts 0\n"
+    assert_includes rows, "limits erts\n"
+    assert_includes rows, "  connections 2\n"
     assert_includes rows, "facet echo_peer\n  grantee @domain.peer\n  service @service.echo\n"
-    assert Suite::Regrant.manifest(PLAIN).end_with?(rows)
+    manifest = regrant.manifest(PLAIN)
+    assert manifest.end_with?(rows + Erx::ProductionImage.sessions(PLAIN) + regrant::SESSION_FACET)
+    assert manifest.end_with?("facet echo_session\n  grantee @session.system\n  service @service.echo\n" \
+                              "#{regrant::FACET_LIMITS.sub("  service @service.echo\n", '')}")
+    assert_equal 1, manifest.scan(/^session /).size
+    assert_equal Integer(PLAIN[/^  max_connections ([0-9]+)$/, 1], 10) + 2, Integer(manifest[/^  max_connections ([0-9]+)$/, 1], 10)
+    assert_raises(Erx::Error) { regrant.manifest(Erx::ProductionImage.without_sessions(PLAIN)) }
     shell = { name: 'release-shell', pattern: /y/n, seconds: 30 }.freeze
-    points = Suite::Regrant.checkpoints([shell])
-    assert_equal %w[release-shell erlang-shell regrant system-domain-ended], points.map { |point| point.fetch(:name) }
-    assert_equal "#{Suite::Regrant::EXPRESSION}\r", points[1].fetch(:type)
-    verify = points[2].fetch(:verify)
-    verify.call("1> #{Suite::Regrant::ANSWER}\r\n")
-    again = Suite::Regrant::ERTS_AGAIN
-    [Suite::Regrant::ANSWER.sub("{#{again},true,{echo,hi}},true,{error,reported},true", 'none,true,{error,{erpc,noconnection}},false'),
-     Suite::Regrant::ANSWER.sub('{error,reported}', 'ok'),
-     Suite::Regrant::ANSWER.sub(/\{#{again},true,\{echo,hi\}\},true,#\{/o, 'none,true,#{'),
-     Suite::Regrant::ANSWER.sub('{echo,hi}', "{error,{erpc,noconnection}}"),
-     Suite::Regrant::ANSWER.sub('{refused,foreign_mint} => 2', '{refused,foreign_mint} => 1')].each do |bad|
-      refute_equal Suite::Regrant::ANSWER, bad
+    points = regrant.checkpoints([shell])
+    assert_raises(Erx::Error) { regrant.checkpoints([shell.merge(type: "x\r")]) }
+    assert_equal %w[release-shell root_1-shell menu system-shell erlang-shell regrant system-domain-ended],
+                 points.map { |point| point.fetch(:name) }
+    assert_equal [nil, "\a", 's', "erl\r", "#{regrant::EXPRESSION}\r"], points[0..4].map { |point| point[:type] }
+    verify = points[5].fetch(:verify)
+    verify.call("1> #{regrant::ANSWER}\r\n")
+    again = regrant::ERTS_AGAIN
+    first = "{#{regrant::ERTS},true,{echo,hi}}"
+    [regrant::ANSWER.sub("{#{again},true,{echo,hi}},true,{error,reported},true", 'none,true,{error,{erpc,noconnection}},false'),
+     regrant::ANSWER.sub('{error,reported}', 'ok'),
+     regrant::ANSWER.sub(/\{#{again},true,\{echo,hi\}\},true,\{session,/o, 'none,true,{session,'),
+     regrant::ANSWER.sub('{echo,hi}', "{error,{erpc,noconnection}}"),
+     regrant::ANSWER.sub('{refused,foreign_mint} => 2', '{refused,foreign_mint} => 1'),
+     regrant::ANSWER.sub("{session,#{first}", '{session,none'),
+     regrant::ANSWER.sub("{session,#{first},{domain_down,#{regrant::ERTS},{halt,0}}", "{session,#{first},none"),
+     regrant::ANSWER.sub("{halt,0}},{#{again},true,{echo,hi}},true}", "{halt,0}},{#{regrant::ERTS},false,{echo,hi}},true}"),
+     regrant::ANSWER.sub("{halt,0}},{#{again},true,{echo,hi}},true}", '{halt,0}},none,true}')].each do |bad|
+      refute_equal regrant::ANSWER, bad
       assert_raises(Erx::Error) { verify.call("#{bad}\r\n") }
     end
-    assert_raises(Erx::Error) { Suite::Regrant.checkpoints([shell, { name: 'other' }]) }
+    assert_raises(Erx::Error) { regrant.checkpoints([shell, { name: 'other' }]) }
   end
 end

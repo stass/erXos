@@ -375,7 +375,11 @@ grants of its namespace and its facets. It returns `ok`, a usage error or
 another error; a crash is an error whose reason goes to standard error. A
 command declares the facets it uses (`-erx_needs([inspect])`), so one run
 without them fails with `no_facet` before it starts, and its help says
-what it needs.
+what it needs. The shell reads the session's facets for each command,
+never once at its start: a grant to a session may arrive after the shell
+starts, when its server comes up later or restarts. A facet installed
+meanwhile serves the next command; until then a command that needs it
+fails with `no_facet`.
 
 An Erlang command run in the session's own domain is still Erlang code in
 that domain: the context is the interface through which it acts, not a

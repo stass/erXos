@@ -1831,8 +1831,9 @@ Every refusal is logged and counted, and leaves the rest of the report,
 the domain's ready state included, as it was. What is accepted is the
 incarnation's providers until it ends.
 
-**One operation per grant.** For each configured grant, named by its
-grantee and its service's name, the domain service keeps one record. The
+**One operation per grant.** For each grant, named by its grantee (a
+configured domain, the system domain or a live session) and its service's
+name, the domain service keeps one record. The
 grant's **pair** is the current ready incarnation of its server, if that
 incarnation provides the name, and the current ready incarnation of its
 grantee; the system domain, id 4, is always ready. The record follows the
@@ -1849,6 +1850,12 @@ pair, so each operation is bound to both incarnations by construction:
 
 The record moves on these events, and on nothing else:
 
+* **a session's ready report**, which adds a record for each of its
+  template's grants, keyed by the session's id, so two sessions of a
+  template never share one, or **the session's end**, which cancels their
+  operations and deletes them. A session is never restarted, so only its
+  server's restart makes its grants anew; a failed one stays failed for
+  the session's life.
 * **a ready report** of a configured domain, with its accepted providers,
   or **its end**. After either, every grant whose pair changed leaves its
   state: a pending operation is cancelled, its deadline disarmed, and, if
@@ -1951,10 +1958,16 @@ introduce, send the mint, send the install, arm and disarm a deadline, and
 log a refusal, a dropped message or a failure, which `erx_domain_srv`
 applies; it logs and counts every refusal and drop. The actions for the
 log carry only atoms, the service's own numbers and the reasons the core
-names, never a term a domain sent. It is tested exhaustively over every
+names, never a term a domain sent. A session template's grant is held
+per live session, keyed by the session's id: the session's ready report adds
+one for each of the template's grants, its end cancels their operations and
+deletes them, and the server's restart makes them anew for every live
+session, so two sessions of a template never share a grant and an ended
+session leaves nothing in the domain service. It is tested exhaustively over every
 order of these events, with two incarnations of a server and of a
-grantee, a third domain that claims the name, forged pids, and replies
-that come late, twice, or from the wrong domain.
+grantee, one session beside two incarnations of the server and two
+sessions beside one, a third domain that claims the name, forged pids, and
+replies that come late, twice, or from the wrong domain or session.
 
 ### Authority
 

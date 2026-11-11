@@ -31,8 +31,19 @@ incarnation owns, are kept. Every other entry, and a value that is not a map
 or is larger than the row's declarations, is refused, as a refused action
 that erx_domain_srv logs and counts; the incarnation is ready all the same.
 
-Grants. Each configured grant, keyed by its grantee (a row, or system) and
-its service's name, has one state:
+Sessions. A grant to a session template is a grant to every session made
+from it. A session is one incarnation, never restarted, named by its id:
+its ready report, {session_ready, Template, Id}, adds a grant keyed by
+{session, Id} for each of the template's grants, and its end,
+{session_ended, Id}, cancels their operations and deletes them, so the
+core holds entries only for live sessions, each its own. The service
+passes a session's report on at most once and before its end, and names
+the template from its own record of the domain, never from the report;
+a second report of a live session is refused as stale, and an end of a
+session the core does not hold changes nothing.
+
+Grants. Each grant, keyed by its grantee (a row, system or a session)
+and its service's name, has one state:
 
     idle | {introducing, Pair, Tag} | {minting, Pair, Tag}
          | {installing, Pair, Tag, Facet} | {installed, Pair, Facet}
@@ -73,7 +84,9 @@ terms: atoms, the service's own numbers, or a reason the core names.
 -type id() :: pos_integer().
 -type name() :: atom().
 -type tag() :: pos_integer().
--type key() :: {Grantee :: row() | system, name()}.
+-type template() :: non_neg_integer().
+-type grantee() :: row() | system | {session, id()}.
+-type key() :: {grantee(), name()}.
 -type pair() :: {ServerId :: id(), GranteeId :: id()}.
 -type pending() :: introducing | minting | installing.
 -type reason() :: {introduce, term()} | bad_reply | {deadline, pending()}.
@@ -84,13 +97,16 @@ terms: atoms, the service's own numbers, or a reason the core names.
                | {installed, pair(), Facet :: pid()}
                | {failed, pair(), reason()}.
 -type config() :: #{services := [{Server :: row(), name()}],
-                    grants := [{Grantee :: row() | system, name(), Server :: row(), Limits :: map()}],
+                    grants := [{Grantee :: row() | system | {template, template()}, name(), Server :: row(),
+                                Limits :: map()}],
                     owner := fun((pid()) -> non_neg_integer()),
                     deadline => pos_integer()}.
 %% ready carries the incarnation's node, which the service knows; the rest of the
 %% untrusted events' fields are any term a domain sent.
 -type event() :: {ready, row(), id(), node(), Provides :: term()}
                | {ended, row(), id()}
+               | {session_ready, template(), id()}
+               | {session_ended, id()}
                | {introduced, tag(), ok | {error, term()}}
                | {minted, Origin :: non_neg_integer(), Tag :: term(), Reply :: term()}
                | {installed, Origin :: non_neg_integer(), Tag :: term()}
@@ -107,6 +123,8 @@ terms: atoms, the service's own numbers, or a reason the core names.
 -opaque state() :: #{declared := #{row() => [name()]},
                      grants := #{key() => #{server := row(), limits := map(), state := grant()}},
                      rows := #{row() => incarnation()},
+                     templates := #{template() => [{name(), Server :: row(), Limits :: map()}]},
+                     sessions := #{id() => template()},
                      next_tag := tag(),
                      owner := fun((pid()) -> non_neg_integer()),
                      deadline := pos_integer()}.
@@ -114,24 +132,30 @@ terms: atoms, the service's own numbers, or a reason the core names.
 -doc """
 The state of a boot from the manifest's service rows, each a server row and a
 name, and its facet rows served by configured domains, each a grantee, the
-service's name, its server row and the grant's limits. A grant of a service
-its server does not declare, a grant to its own server, or two grants of one
-name to one grantee is a bug of the caller, which the manifest check rules
-out, and fails with badarg.
+service's name, its server row and the grant's limits. A grantee
+{template, T} grants each session made from template T. A grant of a
+service its server does not declare, a grant to its own server, or two
+grants of one name to one grantee is a bug of the caller, which the manifest
+check rules out, and fails with badarg.
 """.
 -spec new(config()) -> state().
 new(#{services := Services, grants := Grants, owner := Owner} = Config) when is_function(Owner, 1) ->
     Declared = maps:groups_from_list(fun({Row, _}) -> Row end, fun({_, Name}) -> Name end, Services),
-    Entries = maps:from_list([{{Grantee, Name}, #{server => Server, limits => Limits, state => idle}}
-                              || {Grantee, Name, Server, Limits} <- Grants]),
-    Valid = map_size(Entries) =:= length(Grants)
+    Keys = [{Grantee, Name} || {Grantee, Name, _, _} <- Grants],
+    Valid = length(lists:usort(Keys)) =:= length(Grants)
         andalso lists:all(fun({Grantee, Name, Server, Limits}) ->
                                   Grantee =/= Server andalso is_map(Limits)
                                       andalso lists:member(Name, maps:get(Server, Declared, []))
                           end, Grants),
     Valid orelse error(badarg),
-    #{declared => Declared, grants => Entries, rows => #{}, next_tag => 1, owner => Owner,
-      deadline => maps:get(deadline, Config, ?DEADLINE)}.
+    {ForTemplates, ForDomains} = lists:partition(fun({{template, _}, _, _, _}) -> true; (_) -> false end, Grants),
+    Entries = maps:from_list([{{Grantee, Name}, entry(Server, Limits)} || {Grantee, Name, Server, Limits} <- ForDomains]),
+    Templates = maps:groups_from_list(fun({{template, T}, _, _, _}) -> T end,
+                                      fun({_, Name, Server, Limits}) -> {Name, Server, Limits} end, ForTemplates),
+    #{declared => Declared, grants => Entries, rows => #{}, templates => Templates, sessions => #{},
+          next_tag => 1, owner => Owner, deadline => maps:get(deadline, Config, ?DEADLINE)}.
+
+entry(Server, Limits) -> #{server => Server, limits => Limits, state => idle}.
 
 -doc "Each grant's state, by its key.".
 -spec grants(state()) -> #{key() => grant()}.
@@ -155,6 +179,26 @@ step({ended, Row, Id}, #{rows := Rows} = State) ->
             {[], State};
         #{} ->
             reconcile(State#{rows := Rows#{Row => {Id, ended}}})
+    end;
+step({session_ready, Template, Id}, #{sessions := Sessions, templates := Templates, grants := Grants} = State) ->
+    case {Sessions, Templates} of
+        {#{Id := _}, _} ->
+            {[{refused, stale_report, {session, Id}}], State};
+        {#{}, #{Template := Granted}} ->
+            Added = maps:from_list([{{{session, Id}, Name}, entry(Server, Limits)} || {Name, Server, Limits} <- Granted]),
+            reconcile(State#{sessions := Sessions#{Id => Template}, grants := maps:merge(Grants, Added)});
+        {#{}, #{}} ->
+            {[], State}
+    end;
+step({session_ended, Id}, #{sessions := Sessions} = State) ->
+    case maps:take(Id, Sessions) of
+        {_Template, Rest} ->
+            %% With the session gone its grants have no pair, so reconcile cancels
+            %% their operations; then nothing of the session is kept.
+            {Actions, #{grants := Grants} = Next} = reconcile(State#{sessions := Rest}),
+            {Actions, Next#{grants := maps:filter(fun({Grantee, _}, _) -> Grantee =/= {session, Id} end, Grants)}};
+        error ->
+            {[], State}
     end;
 step({introduced, Tag, Result}, State) ->
     case find(Tag, State) of
@@ -265,7 +309,7 @@ start({Grantee, _Name} = Key, {ServerId, GranteeId} = Pair, Cancel,
         system ->
             {Cancel ++ [{arm, Tag, Deadline}, mint_request(Key, Pair, Tag, State)],
              set_grant(Key, {minting, Pair, Tag}, Armed)};
-        _Row ->
+        _RowOrSession ->
             {Cancel ++ [{arm, Tag, Deadline}, {introduce, Tag, ServerId, GranteeId}],
              set_grant(Key, {introducing, Pair, Tag}, Armed)}
     end.
@@ -295,16 +339,21 @@ fail_at_deadline(Key, Pair, Reason, State) ->
 %% the name, and its grantee's.
 current_pair({Grantee, Name} = Key, #{rows := Rows} = State) ->
     #{server := Server} = grant_entry(Key, State),
-    case {Rows, ready_id(Grantee, Rows)} of
+    case {Rows, ready_id(Grantee, State)} of
         {#{Server := {ServerId, ready, _, #{Name := _}}}, GranteeId} when GranteeId =/= none ->
             {ServerId, GranteeId};
         _ ->
             none
     end.
 
-ready_id(system, _Rows) ->
+ready_id(system, _State) ->
     ?SYSTEM_ID;
-ready_id(Row, Rows) ->
+ready_id({session, Id}, #{sessions := Sessions}) ->
+    case Sessions of
+        #{Id := _} -> Id;
+        #{} -> none
+    end;
+ready_id(Row, #{rows := Rows}) ->
     case Rows of
         #{Row := {Id, ready, _, _}} -> Id;
         #{} -> none

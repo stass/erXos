@@ -42,7 +42,10 @@ domain is built, is ready when its init reports, and ends with its domain.
 It mints the facets configured domains serve (docs/design-system.md,
 "Facets a configured domain serves"): erx_domain_mints, that protocol's
 pure core, takes each configured domain's ready report, with the provides
-its domain pid passed on, and its end, and decides; the service performs
+its domain pid passed on, and its end, and each session's ready report and
+end, with the template its own record of the session names, and decides,
+so every live session of a template holds its own grant of each of the
+template's facets; the service performs
 its actions and feeds back what they produce. Nothing in it waits on a
 domain: an introduction the library cannot settle at once is answered later
 as an introduce/2 caller is, the mint's request and the installation are
@@ -139,10 +142,6 @@ init(Opts) ->
     %% mint_timers, and mint_counts and mint_log what was refused or dropped (note/4).
     %% Served holds, by configured row, the facets of services the system domain serves
     %% that the manifest grants the row, each its service's name and the grant's limits.
-    %% SessionGrants holds, by template index, the index a session's origin
-    %% {session, Template} names, the manifest's grants to the sessions made from that
-    %% template, each its service's name, its server row and the grant's limits; no
-    %% session is a configured row, so none of them reaches the mint core.
     MintConfig = maps:merge(#{owner => fun erx_dist:owner/1}, maps:with([owner, deadline], maps:get(mints, Opts, #{}))),
     {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
            configured => #{}, templates => #{}, waiting => #{}, links => erx_domain_links:new(),
@@ -150,7 +149,7 @@ init(Opts) ->
            held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT),
            mint_config => MintConfig, mints => erx_domain_mints:new(MintConfig#{services => [], grants => []}),
            mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0},
-           served => #{}, session_grants => #{}},
+           served => #{}},
      {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none
@@ -170,15 +169,11 @@ handle_continue(boot, #{lib := Lib} = State) ->
             Configured = maps:from_list([{Row, Entry} || #{row := Row} = Entry <- Ordered]),
             %% The manifest's service rows of configured domains and its facet rows,
             %% which the manifest check has proved consistent: a configured domain's
-            %% service goes to the mint core, the system domain's to the ready answers,
-            %% and a grant to a session template's sessions to SessionGrants.
-            {Sessions, Domains} = lists:partition(fun({{template, _}, _, _, _}) -> true; (_) -> false end,
-                                                  maps:get(grants, Boot, [])),
+            %% service, and a grant to a session template's sessions, which only a
+            %% configured domain serves, go to the mint core, the system domain's
+            %% to the ready answers.
             {System, Minted} = lists:partition(fun({_Grantee, _Name, Server, _Limits}) -> Server =:= system end,
-                                               Domains),
-            SessionGrants = maps:groups_from_list(fun({{template, Template}, _, _, _}) -> Template end,
-                                                  fun({_, Name, Server, Limits}) -> {Name, Server, Limits} end,
-                                                  Sessions),
+                                               maps:get(grants, Boot, [])),
             %% erx_domain_mints takes each service's {Server, Name}; the interface
             %% number is for finding a holder's driver-control facet.
             Services = lists:map(fun({Server, Name, _Interface}) -> {Server, Name} end,
@@ -188,7 +183,6 @@ handle_continue(boot, #{lib := Lib} = State) ->
             Served = maps:groups_from_list(fun({Grantee, _, _, _}) -> Grantee end,
                                            fun({_, Name, _, Limits}) -> {Name, Limits} end, System),
             Booted = State#{core := erx_domain_core:new(Host), configured := Configured, mints := Mints, served := Served,
-                            session_grants := SessionGrants,
                             templates := maps:from_list([{P, T} || #{principal := P} = T <- Templates])},
             {noreply, lists:foldl(fun start_configured/2, Booted, Ordered)};
         {{error, _}, _} ->
@@ -226,7 +220,7 @@ handle_call({introduce, A, B}, From, State) when is_integer(A), is_integer(B) ->
             {reply, Reply, Next}
     end;
 handle_call(mints, _From, #{mints := Mints, mint_counts := Counts} = State) ->
-    %% Each configured grant's state and how many of each refusal and drop were counted.
+    %% Each grant's state, configured and per session, and how many of each refusal and drop were counted.
     {reply, #{grants => erx_domain_mints:grants(Mints), counts => Counts}, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, badarg}, State}.
@@ -605,8 +599,10 @@ boot_timer(Id, Timeout) -> _ = erlang:start_timer(Timeout, self(), {boot_timeout
 %% overtaken a report its pid passed on before the pid's own end, reported too, and its
 %% create answers ok. A report for a domain that is ready already, or that ended stopping
 %% for its boot timeout, changes nothing. A configured domain's report goes to the mint
-%% core with the provides it names, at its node, after the answer to the report, so the
-%% answer reaches the domain before any installation the report starts.
+%% core with the provides it names, at its node, and a session's with its template, after
+%% the answer to the report, so the answer reaches the domain before any installation the
+%% report starts. Only a running domain's report is taken, so the core hears a session's
+%% report at most once and before its end (unprovide/3).
 ready(Id, Ref, Provides, #{core := Core, waiting := Waiting} = State) ->
     case {erx_domain_core:fetch(Id, Core), Waiting} of
         {{ok, #{ref := Ref, state := running, origin := Origin, node := Node}}, _} ->
@@ -615,7 +611,8 @@ ready(Id, Ref, Provides, #{core := Core, waiting := Waiting} = State) ->
             Answered = answer_ready(Id, grant_facets(Id, served(Origin, Ready), perform(Actions, Ready))),
             case Origin of
                 {configured, Row} -> mints({ready, Row, Id, Node, Provides}, Answered);
-                _ -> Answered
+                {session, Template} -> mints({session_ready, Template, Id}, Answered);
+                request -> Answered
             end;
         {_, #{Id := #{ref := Ref, ended := {running, _Info}}}} ->
             answer_ready(Id, State);
@@ -1003,9 +1000,11 @@ restart({configured, Row}, #{core := Core, configured := Configured} = State) ->
     end.
 
 %% A configured domain's end, which the mint core hears before any restart: every
-%% operation of its incarnation is cancelled.
+%% operation of its incarnation is cancelled. A session's end cancels its grants'
+%% operations and deletes the grants.
 unprovide({configured, Row}, Id, State) -> mints({ended, Row, Id}, State);
-unprovide(_Origin, _Id, State) -> State.
+unprovide({session, _Template}, Id, State) -> mints({session_ended, Id}, State);
+unprovide(request, _Id, State) -> State.
 
 %%% The facets configured domains serve (docs/design-system.md, "Facets a configured
 %%% domain serves").

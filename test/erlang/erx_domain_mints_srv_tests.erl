@@ -20,6 +20,10 @@ mints_test_() ->
     {setup, fun setup/0, fun cleanup/1,
      fun(_) -> {inorder, [fun installs/0, {timeout, 20, fun restart/0}, fun grantee_restart/0, fun foreign_mint/0, {timeout, 20, fun last_end/0}]} end}.
 
+%% Template 0's sessions, beside a (5) and b (6), each get a grant of their own.
+sessions_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) -> {timeout, 20, fun sessions/0} end}.
+
 setup() ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
                                      restarts => 3, restart_period_s => 60, boot_timeout_s => 60} end,
@@ -55,9 +59,8 @@ provide(Node) ->
 %% is not the grantee, are dropped and counted. A reply sent to the service itself, in
 %% a's envelope, is not taken at all: the service's pid is no address of the protocol.
 installs() ->
-    %% A session template's grant is held by its template and never reaches the mint core.
-    #{mints := Mints, session_grants := SessionGrants} = sys:get_state(erx_domain_srv),
-    ?assertEqual(#{0 => [{echo, 1, #{max_request => 64}}]}, SessionGrants),
+    %% A session template's grant has no entry until a session of it reports ready.
+    #{mints := Mints} = sys:get_state(erx_domain_srv),
     ?assertEqual([{0, echo}, {system, echo}], lists:sort(maps:keys(erx_domain_mints:grants(Mints)))),
     #{{system, echo} := {minting, {5, 4}, SystemTag}} = wait(fun(#{{system, echo} := {minting, _, _}}) -> true end),
     #{{0, echo} := {introducing, {5, 6}, _}} = wait(fun(#{{0, echo} := {introducing, _, _}}) -> true end),
@@ -222,6 +225,37 @@ answers(Pids, Answers) ->
     after 2000 ->
             error({no_answer, Pids})
     end.
+
+%% A session of template 0 (7) gets its own echo grant: it is introduced to a, a's mint
+%% is asked for the session's id with the template's limits, the facet is installed
+%% through the session's domain pid, and only the session's acknowledgement settles it,
+%% b's being dropped. The session's end deletes its grant, and a late reply for its
+%% operation is dropped as of no operation. erx_domain_mints_tests covers two sessions
+%% at once; the fake library holds one.
+sessions() ->
+    {ok, {erx_domain, 7, _, _} = Session} = erx_domain:start_session(1, #{}),
+    [PidA, PidB, Pid7] = [domain_pid(Id) || Id <- [5, 6, 7]],
+    erlang:trace(PidA, true, ['receive', {tracer, self()}]),
+    erlang:trace(Pid7, true, ['receive', {tracer, self()}]),
+    Key = {{session, 7}, echo},
+    #{Key := {introducing, {5, 7}, _}} = wait(fun(#{Key := {introducing, _, _}}) -> true end),
+    PidA ! {erx_origin, 5, {erx_connection_mapped, 7}},
+    Pid7 ! {erx_origin, 7, {erx_connection_mapped, 5}},
+    #{Key := {minting, {5, 7}, Tag}} = wait(fun(#{Key := {minting, _, _}}) -> true end),
+    ?assertMatch({erx_facet_mint, Tag, echo, 7, #{max_request := 64}},
+                 receive {trace, PidA, 'receive', {_, mint, _, {erx_facet_mint, Tag, _, _, _} = R}} -> R
+                 after 2000 -> none end),
+    Facet = pid('a@erxos', 5, 7),
+    PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, Facet}}},
+    ?assertEqual(Facet, receive {trace, Pid7, 'receive', {_, install, Tag, echo, F}} -> F after 2000 -> none end),
+    PidB ! {erx_origin, 6, {erx_facets_installed, Tag}},
+    wait_counts(fun(#{{dropped, wrong_domain} := N}) -> N =:= 1 end),
+    Pid7 ! {erx_origin, 7, {erx_facets_installed, Tag}},
+    wait(fun(#{Key := {installed, {5, 7}, F}}) -> F =:= Facet end),
+    ok = erx_domain:stop(Session, kill),
+    wait(fun(Grants) -> not is_map_key(Key, Grants) end),
+    PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, Facet}}},
+    wait_counts(fun(#{{dropped, unknown_tag} := N}) -> N =:= 1 end).
 
 %% A pid of Node with creation Creation, as a frame from that domain carries one.
 pid(Node, Creation, Number) ->

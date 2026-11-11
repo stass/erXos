@@ -9,7 +9,10 @@ Erlang processes, the session's namespace of files and the command
 namespace (docs/design-shell.md, "Commands" and "Pipelines").
 
 State. The runner's state is the working directory, the descriptor
-table, the command namespace and the session's facets. The working
+table, the command namespace and the reader of the session's facets,
+which it calls for each command: authority is read when it is used,
+never kept, so a facet installed after the shell started, as a grant
+to a session may be, serves the next command. The working
 directory is the shell's own, never the runtime's, which every process
 of the domain shares: every path the runner opens or a command takes is
 made absolute against it (erx_cmd:path/2). A descriptor holds a stream
@@ -61,7 +64,7 @@ that matches nothing stays as written.
 -type state() :: #{cwd := binary(),
                    fds := #{fd() => erx_cmd:stream()},
                    table := erx_shell_namespace:table(),
-                   facets := #{atom() => term()},
+                   facets := fun(() -> #{atom() => term()}),
                    %% The terminal's run_shell, which the interactive shell's commands get.
                    run_shell => fun((erx_console:shell()) -> ok | {error, term()}),
                    %% The interactive shell's job control, and whether this state
@@ -78,13 +81,14 @@ The runner and its state for the interactive layer: from `/`, with
 standard input at its end and standard output and error the terminal,
 whose write function takes a command's bytes unchanged and whose
 run_shell its commands get in their context, the command
-namespace of the shell's release and the session's facets.
+namespace of the shell's release and the session's facets, read for
+each command (erx_facets:domain/0).
 """.
 -spec new(erx_shell:terminal()) -> {erx_shell_eval:runner(), state()}.
 new(Terminal = #{write := Write}) ->
     {Table, _Problems} = erx_shell_namespace:from_applications([erx_shell]),
     S = state(#{cwd => <<"/">>, fds => #{0 => null, 1 => {tty, Write}, 2 => {tty, Write}},
-                table => Table, facets => erx_facets:domain()}),
+                table => Table, facets => fun erx_facets:domain/0}),
     JobControl = case Terminal of
                      #{job_control := Shell} -> {Shell, line};
                      _ -> none
@@ -92,9 +96,9 @@ new(Terminal = #{write := Write}) ->
     WithShell = maps:merge(S, maps:with([run_shell], Terminal)),
     {runner(), WithShell#{job_control => JobControl}}.
 
--doc "A runner state from a working directory, descriptors, table and facets.".
+-doc "A runner state from a working directory, descriptors, table and the reader of its facets.".
 -spec state(#{cwd := binary(), fds := #{fd() => erx_cmd:stream()},
-              table := erx_shell_namespace:table(), facets := #{atom() => term()}}) -> state().
+              table := erx_shell_namespace:table(), facets := fun(() -> #{atom() => term()})}) -> state().
 state(#{cwd := _, fds := _, table := _, facets := _} = State) -> State.
 
 -doc "The runner function to give erx_shell_eval:new/3.".
@@ -191,7 +195,8 @@ apart(S) -> S.
 %%% Erlang commands
 
 command(#{name := Name, module := Module, usage := Usage, needs := Needs},
-        Args, Vars, #{cwd := Cwd, facets := Facets} = S) ->
+        Args, Vars, #{cwd := Cwd, facets := Read} = S) ->
+    Facets = Read(),
     Ctx0 = #{name => Name, cwd => Cwd, env => Vars,
             stdin => stream(0, S), stdout => stream(1, S), stderr => stream(2, S),
             facets => Facets},

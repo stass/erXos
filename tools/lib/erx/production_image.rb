@@ -197,7 +197,12 @@ module Erx
     # production image keeps its template, so the console logs root in at boot and the
     # UART's first prompt is root's session; a harness whose cells type at the system
     # shell, and every test image (Machine#manifest), boots without one.
-    def self.without_sessions(source) = source.gsub(/^session [a-z0-9_]+\n(?:  .*\n)*/, '')
+    SESSION_RECORD = /^session [a-z0-9_]+\n(?:  .*\n)*/
+    def self.without_sessions(source) = source.gsub(SESSION_RECORD, '')
+
+    # source's session templates, each record whole and in order: what without_sessions
+    # takes out, for a test image that boots with them (SystemDomain::Regrant).
+    def self.sessions(source) = source.scan(SESSION_RECORD).join
 
     # The development manifest without its session template, for the harnesses that type
     # at the system shell.

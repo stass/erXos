@@ -1567,10 +1567,20 @@ it; git history is the record of completed work.
   until the domain restarts; `init:restart/0` erases the provides and the domain pid takes no
   second report. Make it hold by construction: the domain service monitors each accepted mint and
   stops the incarnation at its end (or init halts the node at a reported mint's end).
+* [Low] facets, `test/erlang/erx_domain_mints_fuzz.erl`: the mint fuzz target sends no
+  session events (`session_ready`, `session_ended`); the exhaustive explorer covers them, and
+  their fields are the domain service's own, but the fuzz oracle should hold session grants too.
+* [Medium] tests, `tools/lib/erx/system_domain_regrant.rb`: the re-grant boot's connection room
+  has no slack (`MORE_CONNECTIONS = 2`, root_1's session limits `connections 1`). After erts
+  halts, each introduced pair row is freed only when its survivor lets go, so erts's next
+  incarnation is introduced only because its boot outlasts that release; a slow survivor on a
+  loaded multi-CPU cell would leave a grant at `none` and fail the cell. Wait for the old pair
+  rows to go (or give the room one row of slack) if the cell flakes.
 * [Medium] facets, `erx_facet_mint` and configured servers' mints
   (`test/erlang/apps/erx_echo_test`): the mint request names the grantee by its domain id only, so
   a configured server has nothing to put in the facet's `ends_with` for the grantee, and a facet
-  minted for an incarnation that ended lives on until its server ends, one per grantee restart.
+  minted for an incarnation that ended lives on until its server ends, one per grantee restart,
+  and one per session for each grant to a session template, so per login.
   It admits only that grantee's id, which no later domain takes, so it grants nothing; it is a
   leak, and design-system.md's "ends with its grantee" has no mechanism behind it for configured
   servers. Give the mint a handle that ends with the grantee's incarnation, and have the

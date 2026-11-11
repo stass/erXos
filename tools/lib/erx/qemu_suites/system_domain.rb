@@ -22,7 +22,10 @@ require_relative '../system_domain'
 # runtime end with its slogan and the
 # machine end by itself. A second test image then boots per cell (SystemDomain::Regrant):
 # erts, the echo server, and peer, its grantee, each restart once, and each restart makes
-# the grants anew, for peer and the system domain, bound to the new incarnation. Run raises on the first disagreement, which the gate reports as this suite
+# the grants anew, for peer and the system domain, bound to the new incarnation; root's
+# session, root_1, which the console logs in at boot, is granted echo through the
+# session template, and erts's restart ends its facet and gives it one of the new
+# incarnation. Run raises on the first disagreement, which the gate reports as this suite
 # failing. check_qemu builds the kernel before any suite runs, so this suite does not.
 # Its multi-CPU cells pass under TCG on a second host, so it declares offload (QemuGate::Suite).
 cpus = [1, 4]

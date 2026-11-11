@@ -26,7 +26,7 @@ run_line(Source, Dir) ->
                      || Module <- [erx_cmd_ps, erx_cmd_sort, erx_cmd_grep, erx_cmd_ls, erx_cmd_wc,
                                    erx_cmd_echo, erx_cmd_cat]]),
     State = erx_shell_runner:state(#{cwd => Dir, fds => #{0 => null, 1 => sink(out), 2 => sink(err)},
-                                     table => Table, facets => #{}}),
+                                     table => Table, facets => fun() -> #{} end}),
     Shell = erx_shell_eval:new(#{}, erx_shell_runner:runner(), State),
     {ok, Done} = erx_shell_eval:run_source(Source, Shell),
     {erx_shell_eval:status(Done), shown(out), shown(err)}.

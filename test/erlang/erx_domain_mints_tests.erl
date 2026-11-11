@@ -25,7 +25,12 @@
 %% introduction, or any domain the model started, or 99, answering any tag
 %% as a mint or as a grantee. It runs with the grant to G alone, and with
 %% grants to G and to the system domain side by side, over fewer
-%% incarnations. Every step the model allows is taken from every reachable
+%% incarnations, and with the grant to template 0's sessions: one session
+%% beside two incarnations of S, and two sessions beside one, each started, reporting ready and ending in any order beside
+%% S's incarnations. A session's report reaches the core when it is made,
+%% before its end, as erx_domain_srv passes it on; a session answers
+%% hostile acts like any other domain, so one session may acknowledge
+%% another's install. Every step the model allows is taken from every reachable
 %% state, breadth first, and these hold everywhere:
 %%
 %% * one_timer: the armed deadlines are exactly the pending operations' tags,
@@ -40,6 +45,8 @@
 %%   current incarnation;
 %% * acknowledged: a grant becomes installed only on its grantee's
 %%   acknowledgement of the install sent for that operation;
+%% * session_entries: the core holds a session's grant exactly while the
+%%   session is ready, so an ended session leaves nothing behind;
 %% * honest_progress: once nothing is in flight in a run with no hostile act,
 %%   no refused step and no fired deadline, every grant that has a pair is
 %%   installed.
@@ -242,16 +249,123 @@ invalid_configuration_is_refused_test() ->
            #{services => [{?T, data}], grants => [{?G, data, ?S, #{}}], owner => Owner}],
     [?assertError(badarg, erx_domain_mints:new(Config)) || Config <- Bad].
 
+%% Sessions: template 0's sessions are granted data. A session's id is never reused
+%% within a boot, and the service passes on its ready report at most once, before its end.
+
+sessions() -> erx_domain_mints:new(config([{template, 0}])).
+
+session_grants(State) -> erx_domain_mints:grants(State).
+
+%% S1 = 5 ready, session 9 ready and introduced: its grant is minting tag 1.
+session_minting() ->
+    {_, State} = run([ready(?S, 5, #{data => mint(5)}), {session_ready, 0, 9}, {introduced, 1, ok}], sessions()),
+    ?assertEqual(#{{{session, 9}, data} => {minting, {5, 9}, 1}}, session_grants(State)),
+    State.
+
+%% Session 9's grant installed, and session 10's.
+two_sessions_installed() ->
+    {_, State} = run([{session_ready, 0, 10}, {introduced, 2, ok}, {minted, 5, 1, {ok, facet(5)}},
+                      {minted, 5, 2, {ok, facet(5)}}, {installed, 9, 1}, {installed, 10, 2}],
+                     session_minting()),
+    State.
+
+session_ready_installs_test() ->
+    {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), {session_ready, 0, 9}, {introduced, 1, ok},
+                            {minted, 5, 1, {ok, facet(5)}}, {installed, 9, 1}], sessions()),
+    ?assertEqual([[],
+                  [{arm, 1, 10000}, {introduce, 1, 5, 9}],
+                  [{mint, 1, mint(5), data, 9, ?LIMITS}],
+                  [{install, 1, 9, data, facet(5)}],
+                  [{disarm, 1}]], Actions),
+    ?assertEqual(#{{{session, 9}, data} => {installed, {5, 9}, facet(5)}}, session_grants(State)).
+
+session_before_its_server_waits_test() ->
+    {Actions, State} = run([{session_ready, 0, 9}, ready(?S, 5, #{data => mint(5)})], sessions()),
+    ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 5, 9}]], Actions),
+    ?assertEqual(#{{{session, 9}, data} => {introducing, {5, 9}, 1}}, session_grants(State)).
+
+session_end_cancels_and_drops_its_late_replies_test() ->
+    {Actions, State} = run([{session_ended, 9}, {minted, 5, 1, {ok, facet(5)}}, {installed, 9, 1}],
+                           session_minting()),
+    ?assertEqual([[{disarm, 1}], [{dropped, unknown_tag, {minted, 5}}], [{dropped, unknown_tag, {installed, 9}}]],
+                 Actions),
+    ?assertEqual(#{}, session_grants(State)).
+
+two_sessions_get_two_grants_test() ->
+    {Actions, State} = run([{session_ready, 0, 10}, {introduced, 2, ok}, {minted, 5, 1, {ok, facet(5)}},
+                            {minted, 5, 2, {ok, facet(5)}}, {installed, 10, 1}, {installed, 9, 2},
+                            {installed, 9, 1}, {installed, 10, 2}], session_minting()),
+    ?assertEqual([[{arm, 2, 10000}, {introduce, 2, 5, 10}],
+                  [{mint, 2, mint(5), data, 10, ?LIMITS}],
+                  [{install, 1, 9, data, facet(5)}],
+                  [{install, 2, 10, data, facet(5)}],
+                  [{dropped, wrong_domain, {installed, 10}}],
+                  [{dropped, wrong_domain, {installed, 9}}],
+                  [{disarm, 1}],
+                  [{disarm, 2}]], Actions),
+    ?assertEqual(#{{{session, 9}, data} => {installed, {5, 9}, facet(5)},
+                   {{session, 10}, data} => {installed, {5, 10}, facet(5)}}, session_grants(State)).
+
+one_session_ending_leaves_the_other_its_grant_test() ->
+    {Actions, State} = run([{session_ended, 9}, {deadline, 2}], two_sessions_installed()),
+    ?assertEqual([[], []], Actions),
+    ?assertEqual(#{{{session, 10}, data} => {installed, {5, 10}, facet(5)}}, session_grants(State)).
+
+server_restart_regrants_every_live_session_test() ->
+    {Actions, State} = run([{ended, ?S, 5}, ready(?S, 8, #{data => mint(8)})], two_sessions_installed()),
+    ?assertEqual([[], [{arm, 3, 10000}, {introduce, 3, 8, 9}, {arm, 4, 10000}, {introduce, 4, 8, 10}]], Actions),
+    ?assertEqual(#{{{session, 9}, data} => {introducing, {8, 9}, 3},
+                   {{session, 10}, data} => {introducing, {8, 10}, 4}}, session_grants(State)).
+
+second_report_of_a_live_session_is_refused_test() ->
+    {Actions, State} = run([{session_ready, 0, 9}, {session_ended, 77}], session_minting()),
+    ?assertEqual([[{refused, stale_report, {session, 9}}], []], Actions),
+    ?assertEqual(#{{{session, 9}, data} => {minting, {5, 9}, 1}}, session_grants(State)).
+
+session_of_a_template_without_grants_holds_nothing_test() ->
+    {Actions, State} = run([{session_ready, 1, 11}, {session_ended, 11}], session_minting()),
+    ?assertEqual([[], []], Actions),
+    ?assertEqual(#{{{session, 9}, data} => {minting, {5, 9}, 1}}, session_grants(State)).
+
+%% Each ended session leaves nothing behind: the core is the same size after many as
+%% after one.
+repeated_sessions_leave_no_entry_test() ->
+    {_, Ready} = run([ready(?S, 5, #{data => mint(5)})], sessions()),
+    Cycle = fun(Id, State) ->
+                    {[_, [{arm, Tag, _}, _] | _], Next} =
+                        run([{session_ended, Id - 1}, {session_ready, 0, Id}], State),
+                    {_, Done} = run([{introduced, Tag, ok}, {minted, 5, Tag, {ok, facet(5)}}, {installed, Id, Tag}], Next),
+                    Done
+            end,
+    One = Cycle(1000, Ready),
+    Many = lists:foldl(Cycle, One, lists:seq(1001, 1100)),
+    ?assertEqual(#{{{session, 1100}, data} => {installed, {5, 1100}, facet(5)}}, session_grants(Many)),
+    ?assertEqual(erts_debug:flat_size(One), erts_debug:flat_size(Many)).
+
+invalid_template_grants_are_refused_test() ->
+    Owner = fun ?MODULE:owner/1,
+    Bad = [#{services => [{?S, data}], grants => [{{template, 0}, other, ?S, #{}}], owner => Owner},
+           #{services => [{?S, data}], grants => [{{template, 0}, data, ?S, #{}}, {{template, 0}, data, ?S, #{}}],
+             owner => Owner},
+           #{services => [{?S, data}], grants => [{{template, 0}, data, ?S, none}], owner => Owner}],
+    [?assertError(badarg, erx_domain_mints:new(Config)) || Config <- Bad].
+
 %% Exhaustive exploration.
 
 explore_row_grantee_test_() ->
-    {timeout, 300, fun() -> explore_and_report([?G], 2) end}.
+    {timeout, 300, fun() -> explore_and_report([?G], 2, 0) end}.
 
 explore_two_grants_test_() ->
-    {timeout, 300, fun() -> explore_and_report([?G, system], 1) end}.
+    {timeout, 300, fun() -> explore_and_report([?G, system], 1, 0) end}.
 
-explore_and_report(Grantees, Incarnations) ->
-    {States, Transitions} = explore(Grantees, Incarnations),
+explore_session_regrant_test_() ->
+    {timeout, 300, fun() -> explore_and_report([{template, 0}], 2, 1) end}.
+
+explore_two_sessions_test_() ->
+    {timeout, 300, fun() -> explore_and_report([{template, 0}], 1, 2) end}.
+
+explore_and_report(Grantees, Incarnations, Sessions) ->
+    {States, Transitions} = explore(Grantees, Incarnations, Sessions),
     io:format(user, "~nerx_domain_mints, grantees ~p: ~b states, ~b transitions~n", [Grantees, States, Transitions]).
 
 %% The model's state: per row its incarnations started and its live one, as
@@ -259,15 +373,17 @@ explore_and_report(Grantees, Incarnations) ->
 %% in flight to the core; the requests the core made of a party; the armed
 %% deadlines; the tags whose introduction succeeded; the installs sent, as
 %% {Tag, GranteeId}; the highest tag issued; the hostile act and the duplicate
-%% left; and whether the run is honest.
-initial(Grantees, Incarnations) ->
+%% left; whether the run is honest; and each session started, running or
+%% ready by its id, and how many more may start.
+initial(Grantees, Incarnations, Sessions) ->
     Rows = maps:from_list([{?S, {0, none}}, {?T, {1, {running, 50, true}}}] ++
                               [{?G, {0, none}} || lists:member(?G, Grantees)]),
     #{rows => Rows, incarnations => Incarnations, next_id => 5, msgs => [], reqs => [], armed => [],
-      introduced => [], installs => [], tags => 0, hostile => 1, dup => 1, honest => true}.
+      introduced => [], installs => [], tags => 0, hostile => 1, dup => 1, honest => true,
+      sessions => #{}, session_starts => Sessions}.
 
-explore(Grantees, Incarnations) ->
-    Start = {erx_domain_mints:new(config(Grantees)), initial(Grantees, Incarnations)},
+explore(Grantees, Incarnations, Sessions) ->
+    Start = {erx_domain_mints:new(config(Grantees)), initial(Grantees, Incarnations, Sessions)},
     bfs(queue:from_list([Start]), #{Start => root}, 0).
 
 bfs(Queue, Seen, Transitions) ->
@@ -319,7 +435,7 @@ apply_action({disarm, Tag}, #{armed := Armed} = Env, Node, Label, Seen) ->
     lists:member(Tag, Armed) orelse violation(one_timer, Node, Label, Seen),
     Env#{armed := Armed -- [Tag]};
 apply_action({introduce, Tag, ServerId, GranteeId}, #{reqs := Reqs} = Env, Node, Label, Seen) ->
-    (ready_id(?S, Env) =:= ServerId andalso ready_id(?G, Env) =:= GranteeId)
+    (ready_id(?S, Env) =:= ServerId andalso GranteeId =/= 4 andalso is_grantee(GranteeId, Env))
         orelse violation(current_pair, Node, Label, Seen),
     Env#{reqs := lists:sort([{introduce, Tag} | Reqs])};
 apply_action({mint, Tag, Mint, data, GranteeId, #{max_request := 4096}}, #{reqs := Reqs} = Env, Node, Label, Seen) ->
@@ -344,6 +460,7 @@ check_state(Core, Env, Node, Seen) ->
     Grants = erx_domain_mints:grants(Core),
     check_one_timer(Grants, Env, Node, Seen),
     check_current_pair(Grants, Env, Node, Seen),
+    check_session_entries(Grants, Env, Node, Seen),
     check_honest_progress(Grants, Env, Node, Seen).
 
 check_one_timer(Grants, #{armed := Armed}, Node, Seen) ->
@@ -360,6 +477,10 @@ check_current_pair(Grants, Env, Node, Seen) ->
                          element(2, Grant) =:= current_pair(Key, Env) orelse violation(current_pair, Node, state, Seen)
                  end, Grants).
 
+check_session_entries(Grants, #{sessions := Sessions}, Node, Seen) ->
+    Held = lists:sort([Id || {{session, Id}, data} := _ <- Grants]),
+    Held =:= lists:sort([Id || Id := ready <- Sessions]) orelse violation(session_entries, Node, state, Seen).
+
 check_honest_progress(Grants, #{msgs := Msgs, reqs := Reqs, honest := Honest} = Env, Node, Seen) ->
     Stuck = [Key || Key := Grant <- Grants, element(1, Grant) =/= installed,
                     honest_report(?S, Env), element(2, current_pair(Key, Env)) =/= none],
@@ -368,14 +489,21 @@ check_honest_progress(Grants, #{msgs := Msgs, reqs := Reqs, honest := Honest} = 
 
 %% The pair the model says grant Key should carry.
 current_pair({system, data}, Env) -> {ready_id(?S, Env), 4};
-current_pair({?G, data}, Env) -> {ready_id(?S, Env), ready_id(?G, Env)}.
+current_pair({?G, data}, Env) -> {ready_id(?S, Env), ready_id(?G, Env)};
+current_pair({{session, Id}, data}, Env) -> {ready_id(?S, Env), ready_session(Id, Env)}.
 
 is_grantee(4, _Env) -> true;
-is_grantee(Id, Env) -> Id =:= ready_id(?G, Env).
+is_grantee(Id, Env) -> Id =:= ready_id(?G, Env) orelse Id =:= ready_session(Id, Env).
+
+ready_session(Id, #{sessions := Sessions}) ->
+    case Sessions of
+        #{Id := ready} -> Id;
+        #{} -> none
+    end.
 
 %% Every move the model allows from Env: {Label, Event | none, Env1}.
 moves(Env) ->
-    lists:append([row_moves(Env), message_moves(Env), request_moves(Env), deadline_moves(Env), third_moves(Env)]).
+    lists:append([row_moves(Env), session_moves(Env), message_moves(Env), request_moves(Env), deadline_moves(Env), third_moves(Env)]).
 
 row_moves(#{rows := Rows} = Env) ->
     lists:append([row_moves(Row, Live, Env) || Row := Live <- Rows]).
@@ -406,6 +534,17 @@ provides(?S, _Id, third_mint) -> #{data => mint(?THIRD)};
 provides(?S, Id, forged_mint) -> #{data => pid(node_of(?THIRD), Id, 1)};
 provides(?G, _Id, honest) -> #{};
 provides(?T, Id, honest) -> #{data => mint(Id)}.
+
+%% A session started with the next id while starts are left; a running session
+%% reporting ready, which the core hears at once; any session ending, its requests
+%% gone with it.
+session_moves(#{sessions := Sessions, session_starts := Left, next_id := Id, reqs := Reqs} = Env) ->
+    [{{session_start, Id}, none, Env#{sessions := Sessions#{Id => running}, session_starts := Left - 1, next_id := Id + 1}}
+     || Left > 0] ++
+    [{{session_report, S}, {session_ready, 0, S}, Env#{sessions := Sessions#{S := ready}}} || S := running <- Sessions] ++
+    [{{session_end, S}, {session_ended, S},
+      Env#{sessions := maps:remove(S, Sessions), reqs := [Req || Req <- Reqs, party(Req) =/= S]}}
+     || S := _ <- Sessions].
 
 %% Each message in flight delivered, once, or once and kept for a duplicate.
 message_moves(#{msgs := Msgs, dup := Dup} = Env) ->

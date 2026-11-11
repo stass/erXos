@@ -12,8 +12,9 @@ typed at the Erlang shell or a script, and gives how it ended.
 The evaluator runs in a process of its own with a heap limit, so a
 runaway script ends that process and never its caller (SH2). The
 context it hands commands holds the session's facets, those of the
-domain the shell runs in (erx_facets:domain/0), so a command that declares a
-facet the session lacks fails with `no_facet` before it starts.
+domain the shell runs in (erx_facets:domain/0), read for each command, so a
+command that declares a facet the session lacks fails with `no_facet` before
+it starts, and one installed while the script runs serves the next command.
 """.
 
 -export([run/1, run/2, script/1, main/1]).
@@ -47,7 +48,7 @@ run(Source, Options) ->
     {Table, _Problems} = erx_shell_namespace:from_applications(
                            maps:get(applications, Options, [erx_shell])),
     State = erx_shell_runner:state(#{cwd => maps:get(cwd, Options, <<"/">>), fds => Fds,
-                                   table => Table, facets => erx_facets:domain()}),
+                                   table => Table, facets => fun erx_facets:domain/0}),
     Vars = maps:merge(#{<<"home">> => [<<"/">>], <<"*">> => []}, maps:get(vars, Options, #{})),
     Shell = erx_shell_eval:new(Vars, erx_shell_runner:runner(), State),
     evaluate(iolist_to_binary(Source), Shell).

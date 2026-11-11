@@ -153,6 +153,9 @@ cmd_getopt_test() ->
 
 %%% The runner
 
+%% Facets is the session's facets, or the reader the runner calls for them at each command.
+runner_state(Facets, Err) when is_map(Facets) ->
+    runner_state(fun() -> Facets end, Err);
 runner_state(Facets, Err) ->
     {Table, []} = erx_shell_namespace:build(
                     [{Module, Module:module_info(attributes), Module:module_info(exports)}
@@ -164,6 +167,20 @@ runner_state(Facets, Err) ->
 run_status(Argv, State) ->
     {Status, _} = (erx_shell_runner:runner())({run, Argv, #{}}, State),
     Status.
+
+%% The runner reads the session's facets for each command, never once at its start, so a
+%% facet installed after the shell started serves the next command (erx_shell_runner).
+facets_are_read_at_each_command_test() ->
+    Key = {?MODULE, facets},
+    persistent_term:put(Key, #{}),
+    State = runner_state(fun() -> persistent_term:get(Key) end, null),
+    try
+        ?assertEqual(<<"no_facet">>, run_status([<<"needy">>], State)),
+        persistent_term:put(Key, #{inspect => [7]}),
+        ?assertNotEqual(<<"no_facet">>, run_status([<<"needy">>], State))
+    after
+        persistent_term:erase(Key)
+    end.
 
 runner_statuses_test() ->
     Pipe = erx_shell_pipe:new(),
@@ -254,7 +271,7 @@ session_commands_without_facets_test() ->
     {Table, []} = erx_shell_namespace:build(
                     [{Module, Module:module_info(attributes), Module:module_info(exports)} || Module <- Modules]),
     Session = erx_shell_runner:state(#{cwd => <<"/">>, fds => #{0 => null, 1 => null, 2 => Err},
-                                       table => Table, facets => erx_facets:facets({domain, 7}, #{})}),
+                                       table => Table, facets => fun() -> erx_facets:facets({domain, 7}, #{}) end}),
     Needy = [[<<"ifconfig">>], [<<"ping">>], [<<"host">>]],
     ?assertEqual([<<"no_facet">>, <<"no_facet">>, <<"no_facet">>], [run_status(Argv, Session) || Argv <- Needy]),
     ?assertEqual(<<"ifconfig: no_facet\nping: no_facet\nhost: no_facet\n">>, drain(<<>>)),
