@@ -82,7 +82,7 @@ class FiascoConfigIntegrationTest < Minitest::Test
     defconfig = File.join(@directory, name, 'kernel.defconfig')
     File.binwrite(defconfig, File.binread(DEFCONFIG) + defconfig_extra)
     @runner.run(['gmake', '-C', source, "B=#{build}", "DEFCONFIG=#{defconfig}",
-                 "CROSS_COMPILE=#{cross.prefix}"],
+                 "CROSS_COMPILE=#{cross.prefix}", *Erx::Fiasco.host_variables],
                 name: "fiasco-config-#{name}", deadline: 120, env: Erx::Fiasco.build_environment(cross: cross))
     File.join(build, 'globalconfig.out')
   end

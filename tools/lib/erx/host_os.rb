@@ -21,6 +21,14 @@ module Erx
     FREEBSD = NAME == :freebsd
     LINUX = NAME == :linux
 
+    # The C and C++ compilers for the programs the Fiasco build runs on the host: the
+    # Kconfig tools (fixdep, conf, variable HOSTCC) and the L4Re make system's tools
+    # (libgendep, elf-patcher, variables HOST_CC and HOST_CXX). The inherited rules
+    # default to `gcc` and `g++`, which macOS keeps (Xcode ships them as clang shims) and
+    # FreeBSD lacks; FreeBSD and Linux have the system compilers `cc` and `c++`.
+    HOST_CC = MACOS ? 'gcc' : 'cc'
+    HOST_CXX = MACOS ? 'g++' : 'c++'
+
     # The linker flags that make a NIF: a library the emulator loads, whose
     # references to the emulator's own functions resolve at load time. macOS
     # calls such a library a bundle; elsewhere it is a position-independent

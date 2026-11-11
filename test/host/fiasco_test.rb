@@ -122,6 +122,8 @@ class FiascoTest < Minitest::Test
     assert_includes kernel.fetch(:argv), "ERX_CORE_ARCHIVE=#{cores}/erx_cores.a"
     assert_includes kernel.fetch(:argv), "ERX_CORE_INCLUDE=#{cores}/seam"
     assert_includes users.fetch(:argv), "CROSS_COMPILE=#{Erx::CrossToolchain.find.prefix}"
+    Erx::Fiasco.host_variables.each { |variable| assert_includes users.fetch(:argv), variable }
+    %w[HOSTCC HOST_CC HOST_CXX].each { |name| assert(users.fetch(:argv).any? { |argument| argument.start_with?("#{name}=") }) }
   end
 
   def test_kernel_uses_recorded_private_inputs_and_rejects_later_repository_edits
@@ -283,6 +285,7 @@ class FiascoTest < Minitest::Test
     assert makes.all? { |command| command.fetch(:options).fetch(:env).fetch('PATH').split(File::PATH_SEPARATOR).include?(programs) }
     local = File.read(File.join(@directory, 'build/fiasco/users/Makeconf.local'))
     assert_includes local, "CROSS_COMPILE := #{other}\n"
+    assert_includes local, "HOST_CC := #{Erx::HostOs::HOST_CC}\nHOST_CXX := #{Erx::HostOs::HOST_CXX}\n"
   ensure
     ENV['PATH'] = path if path
   end
@@ -332,7 +335,7 @@ class FiascoTest < Minitest::Test
   # A directory of the caller's PATH that holds no program of the build stays out of the
   # build's PATH, wherever it sits on the caller's PATH.
   def test_a_caller_directory_with_no_build_program_does_not_reach_the_build_path
-    decoy, path = build_path_with_only('cc')
+    decoy, path = build_path_with_only('ninja')
     refute_includes path, decoy
     assert_equal Erx::BuildMemo::SYSTEM_DIRECTORIES, path.last(Erx::BuildMemo::SYSTEM_DIRECTORIES.size)
   end

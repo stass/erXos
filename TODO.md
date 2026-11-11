@@ -895,10 +895,9 @@ it; git history is the record of completed work.
   that abort by design dump core into the tree root (`mutant-*.core`, `page.core`,
   `object.core`; FreeBSD's `kern.corefile` is `%N.core` in the working directory), 17 files
   per `make check`. Test commands should run with `RLIMIT_CORE` 0.
-* [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb` (the Fiasco `Makeconf` host compiler):
-  `tools/erx build fiasco` stops in kconfig with `gcc: not found`, because Fiasco's host tools
-  build with `HOSTCC=gcc` and FreeBSD has no `gcc`, so the port's cross GCC 11.3 is never
-  reached; the build should name the host compiler (`cc`, or the build's clang).
+* [Medium] Fiasco build on a FreeBSD host, `tools/lib/erx/fiasco.rb`: the Kconfig step now builds with `cc`
+  (`HostOs::HOST_CC`) and the users build is given `HOST_CC`/`HOST_CXX`, but `tools/erx build fiasco` has not been
+  run through to an image there; run it on the FreeBSD test host and fix what stops it, then delete this item.
 * [High] network, `erx_net_client` (`erx_gen_udp`, `erx_gen_tcp`; design-network-stack, "The
   socket process"): TCP has its socket process (`erx_gen_tcp`, `erx_gen_tcp_core`) and the
   socket protocol; UDP has not. `erx_gen_udp` calls the datagram socket directly with

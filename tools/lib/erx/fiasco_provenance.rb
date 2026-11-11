@@ -116,7 +116,7 @@ module Erx
       environment = command_environment
       kernel = File.join(@build, 'kernel')
       emit = lambda do |directory, output, variable, arguments|
-        @runner.run(['gmake', '-C', directory, *arguments, "CROSS_COMPILE=#{cross_toolchain.prefix}",
+        @runner.run(['gmake', '-C', directory, *arguments, "CROSS_COMPILE=#{cross_toolchain.prefix}", *Fiasco.host_variables,
                      '--eval=.PHONY: erx-provenance',
                      "--eval=erx-provenance: ; $(file >#{output},$(#{variable}))", 'erx-provenance'],
                     name: 'fiasco-construction', deadline: 45, env: environment)
