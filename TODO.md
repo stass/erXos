@@ -1439,20 +1439,32 @@ it; git history is the record of completed work.
   declares no service; and `web_line`, which `erx_web_line_app` provides through `erx_facet:provide/2` and the
   domain service hands the web domain ([design-web.md](docs/design-web.md#overview)), is an export of the
   session's line that rides the facet registry. Declare the console's interface in `abi/services/console.txt`
-  with its design section, and take `web_line` off the registry or declare it, then drop both from
-  `UNDECLARED`.
+  with the tty's six messages, as design-live.md ("The tty") states, and take `web_line` off the registry,
+  since design-web.md ("Overview") makes the line a name the login hands out rather than a facet, then drop
+  both from `UNDECLARED`.
 * [Medium] domains, the facet-names check reads text (`tools/lib/erx/facet_names.rb`): a facet named by a
   quoted atom, a macro or a variable, or a create spec built away from `erx_domain:start_session/2` and a
   `facets => #{...}` literal, gets past it, and it reads the manifest with its own small parser rather than
   `Erx::ABI::Syntax.parse`. Make the funnel refuse what the table does not list: generate the declared names
   (the manifest's services and the exemptions) into an Erlang header at build time and have
   `erx_domain_srv:facets/1` refuse any other key of a create spec, so the source check is a second line.
-* [Medium] shell and domains, a session's inspect facet (`erlang/apps/erx/src/erx_facets.erl`,
-  `facets/2`; `erlang/apps/erx_domain/src/erx_domain_srv.erl`): a session's scope is always `[Id]`, its
-  own domain's, and a handed facet named `inspect` is dropped, while design-live.md ("Scopes") gives a
-  session its principal's domains and `root`'s development session `all`, through an inspect facet the
-  system domain mints. Mint it (session plan A12, with 1b-C), have `facets/2` take its scope from it, and
-  until then have `erx_domain:create/1` refuse a spec's facet named `inspect`.
+* [Medium] shell and domains, the inspect service (`erlang/apps/erx/src/erx_facets.erl`, `facets/2`;
+  `erx_inspector.erl`; `erx_log_facet.erl`; `erlang/apps/erx_web_line/src/erx_web_line.erl`;
+  `erlang/apps/erx_domain/src/erx_domain_srv.erl`): the code departs from design-live.md
+  ([The inspect service](docs/design-live.md#the-inspect-service), [The runtime agent](docs/design-live.md#the-runtime-agent),
+  [The /proc tree](docs/design-live.md#the-proc-tree)). A session's scope is always `[Id]`, which `facets/2`
+  invents in the session's runtime, and each runtime's inspector collects for itself; the kernel log reaches
+  root's session through a `log` facet of its own (`erx_log_facet`, granted by `erx_console`, read through
+  `erx_log_records:log/1`'s `read_fun`); and `erx_web_line` keeps a `scope` of its own that `{export, Web}`
+  widens to `all`. Declare `abi/services/inspect.txt` with `inspect_reply_max` and `inspect_max_frame_min`;
+  mint the facet in `erx_domain:start_session/2` with `erx_domain_core:inspect_scope/2` (one
+  `development_build/0` in `erx` replacing `erx_hostlink_files:build_flags/0` and its copy in `erx_log_facet`);
+  route `erx_inspector`'s calls without a scope through the facet; start `erx_inspect_agent` in every domain,
+  named in the ready report, with `collects_domain/2` as its rule; start `erx_procfs` over the facet rather
+  than at scope `all` (`otp/lib/kernel/src/kernel.erl`); then delete `erx_log_facet` and its tests, the
+  line's `scope`, the local scope of `facets/2`, and `log` and `inspect` from `UNDECLARED`. Keep the
+  `session-dmesg` QEMU checkpoint, which tests the behaviour. Until then have `erx_domain:create/1` refuse a
+  spec's facet named `inspect`.
 * [Medium] shell, the session_domain QEMU cell of session P6 (`tools/lib/erx/qemu_suites/session_domain.rb`, which
   session P5 brings with the session domain): `ifconfig` typed in a session prints `ifconfig: no_facet`
   and sets the status `no_facet`, and in the system shell lists the interfaces; `ps` lists the session's
@@ -2084,9 +2096,9 @@ it; git history is the record of completed work.
   `shell_default` shortcuts, which `test/erlang/erx_shortcut_tests.erl` lists as pending.
 * [Medium] /proc (`erlang/apps/erx_files/src/erx_procfs.erl`, `erx_procfs_core.erl`; design-live's
   [The /proc tree](docs/design-live.md#the-proc-tree)): `kernel_safe_sup` starts one tree of scope `all` and mounts
-  it at `/proc` in every runtime, since every Phase 1 runtime is the system domain's; when domains come (M5), start
-  a tree per inspect facet, linked to it, and the system shell's tree with the console, presenting the system-shell
-  facet. A pid's directory is its pid's text, `0.N.S` in the system domain until its runtime runs as a node (the inspector item above),
+  it at `/proc` in every runtime, a session's included; each runtime's tree should read through its domain's inspect
+  facet (the inspect service item under Bugs), and the system shell's tree start with the console, presenting the
+  system-shell facet. A pid's directory is its pid's text, `0.N.S` in the system domain until its runtime runs as a node (the inspector item above),
   so M5's exit check of `4.N.S` in plan.md waits for them. The design leaves open: a text entry spelled `status`, a module of that
   name, which the directory's `status` file shadows; how many entries `.partial` says were left out, which the
   inspector does not count (the file says `left_out [unknown]`); and what the `status` file of a path the inspector
@@ -4501,6 +4513,13 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Low] inspect service, the runtime agent leg ([design-live.md](docs/design-live.md#the-runtime-agent)): a
+  domain's inspection agent takes questions one at a time, so a holder of scope `all` that asks without pause
+  keeps the agents busy and another holder's runtime attributes read `{timeout, 500}`, and a domain can answer
+  slowly on purpose to the same effect; the inspector bounds neither the questions it has in flight to one
+  agent nor what it spends waiting. The system domain carries `inspect_max_frame_min` as its `max_frame`, which
+  raises what each domain can make it hold (D12 of design-domains.md). Development builds run trusted code only;
+  settle both with the sizing of D12 on erXos's own kernel.
 * [Medium] Web view scope, root's session through the host link's `web` facet
   (`erlang/apps/erx_web_line/src/erx_web_line.erl`, `export/2`; [design-web.md's
   Security](docs/design-web.md#security)): once the system domain exports root's session's line to the web

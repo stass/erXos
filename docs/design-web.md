@@ -234,7 +234,14 @@ of paths and traces; and, minted at the same introduction, the session's
 **display facet named `web`**, through which the session's applications
 open UIs on the web. A session has at most one line, and its line and its
 `web` facet end with the session domain, so neither has a lifetime of its
-own to track.
+own to track. The line itself is not a facet and has no row in the facet
+table: it is a name that an operation of a declared facet hands out,
+`login` of the login facet or the host link's `web` root, which is how
+every route between domains begins
+([design.md](design.md#decisions)); what travels on it is the web
+relay's conversation, the protocol's types as Erlang terms. Its views
+read through the session's own inspect facet, at that facet's scope,
+and the line holds no scope of its own.
 
 A **login** binds a browser to a line. On the network front end a login
 starts a session, as a console login does, and binds a cookie to its line;

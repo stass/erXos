@@ -1026,15 +1026,16 @@ from which `erx_cmd:facet(Ctx, Name)` returns the facet or
 `-erx_needs(Names)`, which the shell checks before it runs the command.
 A session's facets are its domain's (`erx_facets:domain/0`):
 each facet the domain service minted for the domain, a pid by its name
-(`erx:caps/0`), and the inspect facet, whose value is its scope
-([design-live.md](design-live.md#inspection), "Scopes"). A session reads
-its own domain, the scope `[Id]`, through its own runtime's inspector,
-and a wider scope, its principal's other domains or `root`'s `all` in a
-development build, only through an inspect facet the system domain
-mints for it; no other facet it was handed widens the scope. The system
-domain's session, handed none, holds the inspect facet of scope `all`
-and, for each service of the system domain that runs in that domain,
-the value `local`: the service is the domain's own. It never holds
+(`erx:caps/0`), the inspect facet among them. A session reads every
+inspection path, its own domain's included, through that one facet,
+whose scope, its principal's domains or `root`'s `all` in a development
+build, the domain service fixed when it minted the facet and the session
+never states ([design-live.md](design-live.md#the-inspect-service)); a
+domain that holds no inspect facet reads nothing, and its runtime makes
+up no scope of its own. The system domain's session, handed none,
+reads at scope `all` in its own runtime and holds, for each service of
+the system domain that runs in that domain, the value `local`: the
+service is the domain's own. It never holds
 `net`, since the system domain holds no `net` grant
 ([design-system.md](design-system.md#the-manifest), property 15), so
 the network utilities run in a session that holds it, root's at the

@@ -193,9 +193,9 @@ design.
  +------------------+  virtio-9p   |        |-- trace facet  -> erx_tracer    |
  | QEMU 9P server   |<-------.     |        |-- console facet                 |
  | (a host dir)     |        |     |        `-- files stream: 9P bridge      |
- +------------------+        |     | erx_procfs: /proc per inspect facet      |
+ +------------------+        |     | erx_procfs: the system domain's /proc    |
                              |     | erx_inspector: kernel objects, the       |
-                             |     | services' records, domain agents         |
+                             |     | services' records, runtime agents        |
                              |     |         system domain (user mode)        |
                              |     +------------------------------------------+
                              |         ^ a tty's bytes, both   ^ facets, on
@@ -204,7 +204,9 @@ design.
                              |     | session domain: Erlang shell, command    |
                              |     | shell, terminal relay, terminals on a    |
                              |     | display (erx_term), command server, a    |
-                             |     | handler per program, the export          |
+                             |     | handler per program, the export,         |
+                             |     | erx_inspect_agent, and /proc: erx_procfs |
+                             |     | over the session's inspect facet         |
                              |     +------------------------------------------+
                              |         | channels, pipes, data areas
                              |         v
@@ -226,14 +228,17 @@ and other local files through the session's export. A person at a
 display types into a terminal, `erx_term`, a program of their session
 that is the master of one of the session's ttys
 ([design-display.md](design-display.md#the-terminal)), so no byte of it
-passes through the system domain; `erx_procfs` and
-`erx_code`, with each principal's hot store, sit in the system domain
-beside the inspector. `erx:i([processes, Pid])` asks `erx_inspector`, which
-reads the pid's creation to find its domain, takes the domain's kernel
-facts (its group's usage, its budget) with `erx_object_info`, and asks the
-domain's agent about the process over the domain's connection; the record comes
-back with each attribute's status and reporter, and `erx_render` writes it
-with the line escape. On the Mac, `erx inspect /processes/<7.85.0>` sends the
+passes through the system domain; `erx_code`, with each principal's hot
+store, sits in the system domain beside the inspector, and each domain's
+`/proc` is `erx_procfs` in its own runtime, a view of the inspector
+through the domain's inspect facet. In a session, `erx:i([processes,
+Pid])` asks the session's inspect facet, which hands the path, and nothing
+else, to `erx_inspector` in the system domain; the inspector reads the
+pid's creation to find its domain, takes the domain's kernel facts (its
+group's usage, its budget) with `erx_object_info`, and asks the domain's
+inspection agent about the process over the domain's connection; the
+record comes back to the session with each attribute's status and
+reporter, and `erx_render` writes it with the line escape. On the Mac, `erx inspect /processes/<7.85.0>` sends the
 same query over the host link and renders the same record. `erx watch src
 --domain 7` recompiles a changed module with the host's `erlc` and loads
 it through domain 7's code facet; the code service also records it in the
@@ -653,7 +658,10 @@ messages and refuses every call, so a session reaches nothing of the
 console but its tty's six messages; the facet's `max_request` is the
 encoded size of the largest `tty_output`, and it forwards each of the
 tty's messages with the session's domain id
-([Facets](design-domains.md#facets)). The console
+([Facets](design-domains.md#facets)). A tty's bytes are a live
+conversation, so the facet is an instance of the `console` interface,
+which `abi/services/console.txt` declares with the six messages of the
+table above and which cites this section. The console
 takes an output only once its line driver has written it, so a session
 has at most one output in the console and the driver together. A master
 in another domain is heard only through the envelope of its own domain
@@ -1142,8 +1150,8 @@ orders by text, data and stack size, which erXos does not split, so its
 **`top [-bn] [-d count] [-s time] [number]`** shows the table `ps` reads
 as FreeBSD's `top` (`usr.bin/top`) shows a machine's, display after
 display. A display is a header and a process table. The header has
-FreeBSD's lines where they map, each figure read through the inspector
-with the scope of the session's inspect facet
+FreeBSD's lines where they map, each figure read through the
+session's inspect facet, at its scope
 ([System values](#system-values-one-tree-many-views)):
 
 * `run queue: 0;  up 0+00:05:12    10:15:37`: the run queue of the
@@ -1277,20 +1285,26 @@ its reporter:
   domain service's (domains, their states and death records, the connections it
   created and their lanes), the device service's device table, and the
   code service's overlays and histories.
-* **Runtime attributes** come from the domain's agent, a process each
-  domain starts at boot, which runs `process_info/2` and friends inside the
-  domain and answers with a frame on the domain's connection to the system
-  domain, which the system domain's funnel validates before the inspector
-  decodes it ([design-domains.md](design-domains.md#the-funnel)). A late
-  answer becomes `{timeout, 500}` (500 ms by default), a domain that is
-  booting `unknown`, an attribute the runtime cannot provide
-  `unsupported`, a list cut at the page limit of 1,000 entries `partial`.
+* **Runtime attributes** come from the domain's inspection agent,
+  `erx_inspect_agent`, a process each domain starts at boot, which runs
+  `process_info/2` and friends inside the domain and answers with a frame
+  on the domain's connection to the system domain, which the system
+  domain's funnel validates before the inspector decodes it
+  ([design-domains.md](design-domains.md#the-funnel), [The runtime
+  agent](#the-runtime-agent)). A late answer becomes `{timeout, 500}`
+  (500 ms by default), a domain that is booting `unknown`, an attribute
+  the runtime cannot provide `unsupported`, a list cut at the page limit
+  of 1,000 entries `partial`. For the system domain's own processes the
+  inspector calls the same collectors in its own runtime.
 
 **Scopes.** Queries arrive through an inspect facet whose scope is `all` or
-a list of domains. A facet's value is what its holder hands the service
-behind it: an inspect facet's value is its scope, and `erx:i/1`, the
-shell's commands and `/proc` hand it to the inspector as it is, so no
-view translates or widens it. A session's inspect facet has scope over its
+a principal's domains. The scope lives only in the facet, in the system
+domain, fixed when the facet is minted ([The inspect
+service](#the-inspect-service)); a holder sends a path and its options and
+nothing else, so no view and no value of the holder's own runtime can
+translate or widen it. In the system domain, whose services are its own,
+`erx:i/1`, the shell's commands and `/proc` call the inspector in the same
+runtime at scope `all`. A session's inspect facet has scope over its
 principal's own domains, with one exception: in a development build
 `root`'s session holds one of scope `all`, as the host link does
 ([The host link](#the-host-link)). In a release build no session's facet
@@ -1330,6 +1344,127 @@ source there even when no release carries it.
 renders the same record on the host. Both escape every string and show
 every value's reporter, and below the table the scope of each stopgap
 reporter it names.
+
+#### The inspect service
+
+The inspector is reached from another domain through one interface,
+`inspect`, which `abi/services/inspect.txt` declares and which cites
+this section. Its two operations are the inspector's two queries:
+
+| Operation | Request | Answer |
+| --- | --- | --- |
+| `inspect` | `Path`, `Options` | `{ok, Record}`, or `{error, Reason}` with `Reason` one of `scope`, `unsupported`, `invalid` and `failed` |
+| `entries` | `Path` | `{ok, Records}` or `{partial, Records}`, the records of a listing's entries, or `{error, scope}` or `{error, unsupported}` |
+
+A path is data, so a value someone needs to read is a path of
+`abi/inspection.txt` and never an operation, a facet or a validator of
+its own: the kernel log is `[kernel, log]` through `inspect`, as at the
+system shell.
+
+**Who holds one, and its scope.** The system manifest declares the
+service once, served by the system domain, and its facet rows name the
+grantees: the session templates, and any configured domain that reads
+system values. The domain service mints each facet, at a session's start
+for a session and at creation for a configured domain, with the scope
+that one pure function, `erx_domain_core:inspect_scope/2`, gives for the
+grantee's principal and the manifest's development flag: `all` for
+`root` in a development build, and otherwise `{principal, P}`, the
+principal's domains. The inspector resolves `{principal, P}` at each
+query from the domain service's records, its death records included,
+so a domain the principal starts later is in scope from its start and
+one that ended stays in scope while its record is kept, and a path of a
+domain that is not the principal's gets the answer of a path that names
+nothing. No other code decides a scope: the console and the web line
+take what the session holds, and the host link's root has the scope of
+its configuration (below). A command
+domain gets the facet attenuated in front of its starter's, as any
+facet ([design-domains.md](design-domains.md#facets)).
+
+**How a query travels.** `erx_inspector:inspect/1,2` and `entries/1`
+take no scope. In any runtime but the system domain's they call the
+domain's `inspect` facet and return its answer, or `{error, no_facet}`
+when the domain holds none; `erx:i/1`, `erx:inspect/2`, the shell's
+commands, `/proc` and the web line's views all go through them, so each
+holder has one gate for every form. In the system domain they call the
+inspector's core in the same runtime at scope `all`, and the system
+shell's calls present the system-shell facet besides. The facet's
+callback hands the core the path, the options and its own scope, and
+runs each admitted request in a process it starts for its grantee
+([design-domains.md](design-domains.md#facets), "Processes a facet
+starts"), up to the grant's limit in flight, so a query that waits on a
+slow domain holds up no other query and the inspector's work is charged
+to the grantee's share.
+
+**Bounds.** A request is a path of at most 16 segments, each an atom
+`erx_schema` already holds, an integer, a pid, or a binary of at most
+765 bytes, the longest encoded entry name; and options holding at most
+`offset`, a sequence number, and `limit`, a page of at most 1,000
+(`erx:inspect/2`'s `timeout` is the caller's own wait and is not sent).
+The generated admission path decodes it in
+safe mode, so it creates no atom, and refuses anything else with
+`{error, badarg}`; the whole request is within the facet's default
+`max_request` of 4 KiB. An answer's encoding is at most
+`inspect_reply_max`, 256 KiB, which the interface declares: the
+inspector stops a listing at 1,000 entries, and stops a listing or an
+append-only record's entries earlier when the next one would pass that
+bound, marking it `partial`; an append-only record's `Next` says where
+the next query starts;
+the schema's bounds keep every record without entries within
+`inspect_reply_max`, which the generator checks for each kind, so no
+record needs cutting.
+The interface declares the frame floor `inspect_max_frame_min`, 512 KiB,
+an answer and its envelope in one frame, which every grantee of an
+`inspect` facet and the system domain, which serves it and takes the
+runtime agents' answers of the same bound, carry as their `max_frame`
+([design-system.md](design-system.md#the-manifest), property 16;
+[design-domains.md](design-domains.md#principals-sessions-and-quotas),
+"Floors from a protocol"). The query decoder has a fuzz target.
+
+**The host link.** The host link's `inspect` root is not a facet of
+another domain: the host link is the system domain's, so its root calls
+the inspector's core at the scope the host link's configuration gives,
+`all` in a development build ([The host link](#the-host-link)).
+
+#### The runtime agent
+
+What only a domain's runtime knows, its processes, modules, exports,
+programs and pipes, the inspector asks that domain's inspection agent:
+
+* **The agent.** `erx_inspect_agent`, a process of `erx` that every
+  domain but the system domain starts before init's ready report, which
+  names it as `inspect` and so exports it to the system domain with
+  `send` ([design-domains.md](design-domains.md#domain-lifecycle)). The domain
+  service keeps its pid in the domain's record for the domain's life; a
+  domain that has not reported ready has none, and its runtime
+  attributes are `unknown`.
+* **The question.** `{erx_inspect_ask, Alias, Query}`, `Query` being
+  `{inspect, Path, Options}` or `{entries, Path}`, in the system
+  domain's envelope; the agent drops and counts a message from any
+  other origin or of any other shape
+  ([design-domains.md](design-domains.md#messages-between-the-domain-service-and-a-runtime)).
+  It answers only a path its own domain owns, `[domains, Self | _]` and
+  `[processes, Pid]` for a pid of its own creation, with the attributes
+  its runtime's collectors give, and answers any other path `{error,
+  scope}`: a runtime describes only itself. A session's agent relays its
+  programs' and pipes' attributes from its command server and pipe
+  server. The agent takes questions one at a time, in order, and keeps
+  its answer within `inspect_reply_max` by the inspector's own rules of
+  cutting.
+* **The wait.** The process that runs a query sends each question with a
+  fresh alias and waits 500 ms for its answer; a query that spans several
+  domains, such as `[processes]` at scope `all`, asks them at once, each
+  under its own deadline. An answer that misses its deadline makes each
+  runtime attribute it would have given `{timeout, 500}` and a listing it
+  would have filled `partial`, and when it arrives later the alias has
+  ended and it is dropped. A frame over the system domain's `max_frame`
+  is dropped by the funnel, so it too reads as a timeout.
+* **What the inspector believes.** The funnel validates the frame, the
+  inspector decodes it in safe mode and checks it with
+  `erx_schema:validate_record/1`, drops every pid of another domain's
+  creation, and marks every attribute it takes `runtime`, whatever the
+  frame says. Kernel and service attributes it collects itself, so a
+  lying runtime can misname its own processes and programs but cannot
+  hide its charges or describe another domain.
 
 #### System values: one tree, many views
 
@@ -1385,22 +1520,26 @@ root.
 ### The /proc tree
 
 `/proc` is the inspector's path namespace as a read-only file tree, served
-by `erx_procfs`, an `erx_fs` server that the system domain starts for each
-holder of an inspect facet, with that facet's scope
+by `erx_procfs`, an `erx_fs` server that each domain's runtime starts in
+that domain and mounts at `/proc`
 ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)). A
-domain mounts it at `/proc`, and a session's handler mounts it for a
-program the session gives it to, so `cat`, `ls` and `grep` read live
-state. The tree is a view of the inspector's tree and decides nothing
-itself: a read of a file is the inspector's query for the file's path
-through the facet the tree serves, rendered as text, and a path that
-answers `{error, scope}` reads as `enoent`, so the tree grants nothing
-that `erx:i/1` with the same facet does not, and each record has one gate
-for both forms by construction. Each `erx_procfs` is linked to the facet it serves, so revoking the
-facet ends the tree and every fid on it; like every file grant, the tree's
-grant acts for the domain it was made for
-([design-files.md](design-files.md#narrowing-for-a-program)), so a session
-that gives it to a program shares the facet's view with that program
-until the facet ends.
+session's handler gives a program a grant of it, rooted where the session
+chooses, so `cat`, `ls` and `grep` read live state. The tree is a view
+of the inspector's tree and decides nothing itself: a read of a file is
+the query `erx_inspector:inspect/2` makes for the file's path, which in a
+domain other than the system domain goes through the domain's inspect
+facet ([The inspect service](#the-inspect-service)), rendered as text in
+the reader's runtime; a path that answers `{error, scope}` reads as
+`enoent`, so the tree grants nothing that `erx:i/1` in the same domain
+does not, and each record has one gate for both forms by construction. A
+domain that holds no inspect facet finds every path of its `/proc`
+`enoent`, and a revoked facet admits no query after its end, so from
+then on each open is `enoent` while snapshots already open stay as they
+were read. The scope is the facet's, in the system domain; the root of a
+program's grant narrows within it, at the session's own server, which
+the program reaches only through fids its handler walked. The server's
+fid state, its rendering and its snapshots are the reader's domain's
+memory and work, charged to it.
 
 * **Paths.** Each inspector path is a directory whose `status` file holds
   its record, and whose subdirectories are the paths below it:
@@ -1423,9 +1562,9 @@ until the facet ends.
   `/proc/kernel/crash` is `[kernel, crash]`, the last reset's crash
   record, rendered as a file: it answers only where that query does, in
   the system shell's tree, and reads as `enoent` in every other tree.
-  The console starts the system shell's tree with that shell, over the
-  system domain's inspect facet and presenting the system-shell facet it
-  lends the shell; the tree is mounted only in the system shell's
+  The console starts the system shell's tree with that shell, in the
+  system domain's runtime at scope `all` and presenting the system-shell
+  facet it lends the shell; the tree is mounted only in the system shell's
   namespace, is never given to a program, and ends with the login; the kernel's trace
   ring has no file, since only a tracer drains it ([Tracing](#tracing)).
 * **Names.** A name a domain reports, such as a module's or a program's,
@@ -1460,20 +1599,24 @@ until the facet ends.
   is the inspector's own (500 ms by default), and reads see that snapshot
   until the file is closed; a record is at most 64 KiB, and a larger one is
   cut, with `[partial]` as its last line. A grant holds at most 256 open
-  snapshots, so one reader makes its tree hold at most 16 MiB, within the
-  grant process's heap limit, and a 257th open fails with `emfile`
+  snapshots, so one reader makes its tree hold at most 16 MiB of its own
+  domain's memory, within the grant process's heap limit, and a 257th
+  open fails with `emfile`
   ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)). A
   directory lists at most 1,000 entries, the inspector's page; a longer
   listing ends with an entry named `.partial`, whose file says how many
   entries were left out, and a directory whose listing the inspector
   could not get holds only `.unknown`, whose file gives the status.
-* **What a runtime reports.** The pids a domain's agent lists for its
-  domain whose creation is another domain's are dropped, so a lying
-  runtime can describe only its own processes.
+* **What a runtime reports.** The pids a domain's inspection agent lists
+  for its domain whose creation is another domain's are dropped, so a
+  lying runtime can describe only its own processes
+  ([The runtime agent](#the-runtime-agent)).
 * **Scope.** A path outside the facet's scope answers `enoent`, as a path
-  that names nothing does. The inspector decides scope from the path
-  alone, before it looks anything up, so the answer never depends on
-  whether something outside the scope exists.
+  that names nothing does. The inspector decides scope from the path and
+  the domain service's record of the domain the path names, before it
+  collects anything, and a domain that does not exist and one outside the
+  scope get the same answer, so the answer never depends on whether
+  something outside the scope exists.
 
 The same paths serve the host: `erx inspect /processes/7.85.0` renders the
 record that `cat /proc/processes/7.85.0/status` shows.
@@ -1935,7 +2078,17 @@ SSH service; it does not reuse CRC as a MAC or add a custom cipher.
   manifest lists, by default nothing, and `console` there starts a login,
   as the serial console does. A `domain` facet carries
   `erx_domain`'s operations on one domain: stop it, and read its death
-  record.
+  record. These roots are targets of the host link's own protocol,
+  `abi/protocols/hostlink.txt`, at the machine's edge, and not facets
+  minted for another domain: the host link is the system domain's, so
+  each root calls a service of the system domain in that domain's own
+  runtime, at the scope its configuration gives, and its admission is
+  the host link's session table, V3. The one root that reaches another
+  domain, `web`, does so through the system domain's facet of the web
+  domain's `web` interface (`abi/services/web.txt`), a declared instance
+  like any other. The same services reached from a domain are facets of
+  their declared interfaces: the host link's `inspect` and a session's
+  are one interface at two scopes.
   * A session holds at most 1,024 facets; opening one more fails with
     `{error, system_limit}`. A facet's number is never reused within a
     session, so a number the host kept names nothing once its facet is
@@ -2234,8 +2387,13 @@ sessions in other domains (only a tty's bytes, its size and a hang-up
 cross, and the console copies the bytes without reading them; the shell
 runs with the target domain's authority, never the system domain's); the command
 shell and its programs ([design-shell.md](design-shell.md#security)); the
-`/proc` trees (one server per inspect facet, scope decided from the path
-and the facets the server presents alone, names encoded injectively, snapshots bounded per grant); the code
+inspect service (the scope held only by the facet in the system domain
+and fixed at its mint by one pure function, a request that carries a
+path and options alone, a bounded query decoder in safe mode with a fuzz
+target, and answers within `inspect_reply_max`); the `/proc` trees (a
+server in each reader's own runtime over its inspect facet, so the tree
+can show nothing its facet does not answer, names encoded injectively,
+snapshots bounded per grant and charged to the reader); the code
 store (blobs checked by hash before any loader reads them, each
 principal's hot store written only by the code service, overlays and
 stores read back from the data partition through a bounded, fuzzed
@@ -2399,6 +2557,51 @@ determinism test of the generated tree.
   `runtime`. The trace merger with a source that stops answering, which
   delays the stream by at most 100 ms, and a source whose event arrives
   late, which is printed marked `late`.
+* **The inspect service and the runtime agent:** each test names the
+  seeded fault that must make it fail:
+  * `erx_domain_core:inspect_scope/2` over every pair of `root` or
+    another principal and the development flag set or clear, on the
+    host; seeded: `all` for every principal of a development build.
+  * A holder cannot widen its scope: a request that carries a scope, in
+    its options or as an extra argument, is refused with `{error,
+    badarg}`, and `root`'s session in a release build gets `{error,
+    scope}` for `[kernel, log]` and `enoent` for `/proc/kernel/log`;
+    seeded: an admission path that takes a scope from the options.
+  * In `root`'s session of a development build, `dmesg`, `cat
+    /proc/status`, `erx:i([])` and the browser's log view all read
+    through the one facet, and a non-root session's `dmesg` fails, its
+    `/proc/kernel/log` being `enoent`; seeded:
+    a session start that mints the facet with the session's own domain
+    as its scope, which fails the first, and one that mints `all` for
+    every session, which fails the second.
+  * A principal's scope follows its domains: a command domain started
+    after the session's facet was minted is in scope, and a domain of
+    another principal and a domain id never used answer the same
+    `{error, scope}`; seeded: a scope fixed as a list at the mint.
+  * A domain that holds no inspect facet gets `{error, no_facet}` from
+    `erx:i([])` and `enoent` for `/proc/status`; seeded: a runtime that
+    invents a scope of its own domain when it holds none.
+  * An agent that never answers: the record of one of its processes
+    arrives within the deadline and a margin, its kernel attributes `ok`
+    and its runtime attributes `{timeout, 500}`, while a query of
+    another session through its own facet answers at its usual time;
+    seeded: a wait with no deadline, and a facet that runs its requests
+    in its own process, one after another, which delays the second.
+  * An agent answers only the system domain and only about itself: a
+    question from an introduced peer is dropped and counted, a question
+    about another domain's path is answered `{error, scope}`, and a
+    lying agent's listing of another domain's pids is dropped; seeded:
+    an agent that answers any origin.
+  * Answers stay within their bound: a listing whose records pass
+    `inspect_reply_max` before 1,000 entries arrives `partial` at a
+    grantee whose `max_frame` is the floor, with every entry it holds
+    whole; seeded: the byte cut removed, after which the funnel drops
+    the answer and the query reads as a timeout. The schema generator
+    fails on a kind whose largest record passes `inspect_reply_max`,
+    with a seeded kind holding a longer text.
+  * The query decoder has a fuzz target, which checks that every request
+    it accepts is within the segment, binary and size bounds and creates
+    no atom; seeded: the bound on a path's length removed.
 * **Tracing:** a trace of a process whose messages carry atoms the system
   domain does not hold, rendered in the traced domain and shown in the
   shell; a frame trace of a conversation between two traced domains, each
@@ -2659,6 +2862,33 @@ marked so; the facts that matter for trust (a domain's CPU time, memory,
 threads, sub-spaces and doorbell traffic) come from the kernel and the
 system domain's own records.
 
+**`/proc` served by the system domain for each holder of an inspect
+facet.** The system domain would run an `erx_procfs` per facet, and a
+domain would mount it over the connection as it mounts `/data`. It loses
+because records must cross the boundary anyway: `erx:i`, `top` and the
+browser need each value's status, reporter and type, which `/proc` text
+renders away, so the typed `inspect` interface exists in any case, and a
+second server of the same tree would be a second crossing with a second
+admission path to keep equal to the first. It would also put a 9P fid
+state machine, text rendering and up to 16 MiB of snapshots per reader
+in the trusted base, charged to the system domain, where in the reader's
+runtime they are the reader's. The security does not move: the scope is
+the facet's either way, and the root of a program's grant narrows at the
+session's server, which the program cannot touch.
+
+**One crossing as files only.** The typed facet would go, and the
+browser and `erx:i` would read a term-encoded `record` file beside each
+`status`. It loses a file kind added to the tree, and listings would cost a
+walk, an open, a read and a clunk per process for `erx:ps()` and a
+browser's listing, where a listing page is one round trip.
+
+**A facet for each value someone needs.** The kernel log, say, would get
+a `log` facet in front of a reader in the system domain. Each such facet
+is a request shape, a validator and a grant rule of its own, decided
+beside the inspector's scopes rather than by them, so a value could be
+reached by two routes with two answers. A path of the schema reaches it
+through the one gate.
+
 ## Risks and open questions
 
 | Risk | Likelihood | Impact | Mitigation |
@@ -2666,11 +2896,26 @@ system domain's own records.
 | The emulated UART is too slow for comfortable uploads | medium | slow `erx watch` | `tools/erx bench hostlink`; virtio-console behind the same framing |
 | `prim_tty`'s ssh mode misses a feature the shell uses | low | a rendering gap | the console tests cover every request type; erXos owns `prim_tty` and can extend it |
 | A domain answers inspections slowly | medium | sluggish `erx:i/1` | deadlines and `timeout` statuses; kernel and service attributes need no answer |
+| Records are larger than `inspect_reply_max` allows a listing page of 1,000 | medium | `erx:ps()` and listings at scope `all` page early and show `partial` | the cut is by bytes, so a page is never lost, only shorter; the record sizes are on the performance watch list |
 | Frame traces of a user domain are only as true as that domain's funnel says | low | a compromised domain hides or invents frames in its own trace | the trace is marked `runtime`; the other end of every conversation is traced too, and the system domain's end is trusted; doorbell counts come from the kernel |
 | The code store's history keeps blobs alive that no domain needs | medium | memory and storage growth | at most 16 hashes per module per specification, charged to the principal; blobs that no history, overlay or release of the principal names are freed |
 | Escaping default-ignorable characters breaks legitimate text | low | a sequence shows as tokens, such as a subdivision flag built from tag characters | the four exceptions cover joiners and presentation selectors; each case is decided with a test |
 
-Open questions: none. Whether release builds offer a host link at all
+Open questions, each the owner's, with a recommendation:
+
+* **The size of an inspection answer.** `inspect_reply_max` is 256 KiB
+  and its frame floor 512 KiB, which the system domain must carry too,
+  since it takes the runtime agents' answers: that raises the frame each
+  domain can make the system domain hold, a term of D12 in
+  [design-domains.md](design-domains.md#invariants). Recommended: accept
+  it while every domain runs trusted code, measure the records, and set
+  the bound from the measurement before erXos's own kernel enforces D12.
+* **Who holds an inspect facet.** The manifest's facet rows decide it.
+  Recommended: the default manifests grant it to every session template,
+  so every user can run `ps` and read `/proc`, with no rule that forces
+  it on a manifest that wants a session without one.
+
+Whether release builds offer a host link at all
 belongs to the release process ([plan.md](plan.md#beyond-the-plan)); the
 mechanism is the same in every build, and a release build's session holds
 only the facets its system configuration lists, by default none.

@@ -2128,9 +2128,10 @@ the modules that arrive through the domain's code facet
 its log ([design-runtime.md](design-runtime.md#the-console-and-standard-io)); a
 logger proxy, which sends the domain's log records to
 the console facet ([design-live.md](design-live.md#the-console)); and the
-domain agent that answers inspection ([design-live.md](design-live.md)).
+inspection agent, `erx_inspect_agent`, which answers the inspector about
+the domain's own runtime ([design-live.md](design-live.md#the-runtime-agent)).
 Init reports ready to the domain pid, naming the agents, the connection
-agent among them, and the mints its services provide ([design-system.md](design-system.md#facets-a-configured-domain-serves)), in `{erx_ready, #{connections => Agent, provides => Provides}}`, a map other
+agent among them, and the mints its services provide ([design-system.md](design-system.md#facets-a-configured-domain-serves)), in `{erx_ready, #{connections => Agent, inspect => InspectAgent, provides => Provides}}`, a map other
 agents join as they come to exist, which exports them to the system domain by that
 message; the domain pid keeps the connection agent's pid, the one process
 that does, and passes the report's provides to the domain service, which from then
@@ -2506,8 +2507,28 @@ stays as usable as it was, so a service that must take back what it handed
 out hands names that it checks against the grant on each use, or aliases
 that end with the grant.
 
-The services of the live machine are reached through facets: console, code,
-domain, inspect, trace and install ([design-live.md](design-live.md)).
+**The facet table.** Every facet is an instance of an interface that
+`abi/services` declares: the system manifest's service row names the
+interface, its server and the name grantees hold it under, and its
+facet rows name the grantees, so `data` is an instance of `files`, and
+`storage_ctl` and `network_ctl` are instances of `driver_control`. The
+build generates from the manifest the table of service names, and the
+domain service's one funnel for a domain's facets,
+`erx_domain_srv:facets/1`, through which every create spec, every
+session start and every mint passes, refuses a key the table does not
+hold with `{error, {bad_spec, facets}}`. So a facet enters a domain's
+table only as a declared instance, by construction, and a need that
+has no interface of its own finds no way in: it is an inspection path,
+a file in its owner's tree, or a protocol with a design and an
+interface of its own ([design.md](design.md#decisions), "Every route
+between domains starts at a declared facet").
+
+The services of the live machine are reached through facets of
+interfaces `abi/services` declares: `inspect`
+([design-live.md](design-live.md#the-inspect-service)), and the console,
+code, domain, trace and install interfaces ([design-live.md](design-live.md)).
+The host link's session table opens the same services for the host, as
+roots of its own protocol ([design-live.md](design-live.md#the-host-link)).
 
 **Lineage.** Facets come from the object-capability tradition. A facet is a
 forwarder that admits part of what its target accepts, which is Redell's
@@ -2686,7 +2707,7 @@ A domain's limits, fixed at creation within its principal's ceilings:
 | `cpu` | its group's grant: quota per period, cpuset, ceiling | the kernel | the principal's share |
 | `lane` | the data area of each lane it reads, a power of two from 4 KiB to 16 MiB ([Connections](#connections)) | the domain library, which sizes the object | 64 KiB |
 | `connections` | connections it may have at once, the system connection included, and the slots of its control table ([Connections](#connections)) | the domain service, at an introduction | 256; for the system domain, the manifest's `max_domains` ([design-system.md](design-system.md#the-manifest)) |
-| `max_frame` | the largest payload it takes into a buffer of its own, which grows as the bytes arrive; a longer one is dropped as it passes | its own runtime; a protocol's floor, by the client side of that protocol (**Floors from a protocol**, below) | 1 MiB, at most `ERX_FRAME_MAX`; for the system domain, the largest `max_request` its configuration lets a grant name; at least the `net` protocol's floor, which its schema sets, in a domain that holds `net`, and `files_max_frame_min` in a domain that serves or holds a `files` facet (property 16 of design-system.md) |
+| `max_frame` | the largest payload it takes into a buffer of its own, which grows as the bytes arrive; a longer one is dropped as it passes | its own runtime; a protocol's floor, by the client side of that protocol (**Floors from a protocol**, below) | 1 MiB, at most `ERX_FRAME_MAX`; for the system domain, the largest `max_request` its configuration lets a grant name; at least the `net` protocol's floor, which its schema sets, in a domain that holds `net`, `files_max_frame_min` in a domain that serves or holds a `files` facet, and `inspect_max_frame_min` in a domain that holds an `inspect` facet and in the system domain (property 16 of design-system.md) |
 | `max_message_heap` | the largest decoded message it accepts | its own runtime; a protocol's floor, as for `max_frame` | 8 MiB, at most 256 MiB; at least the socket protocol's floor in a domain that holds `net` |
 | `funnel_depth` | nesting outside tail positions in a frame it accepts | its own runtime; a protocol's floor, as for `max_frame` | 16,384; at least the socket protocol's floor in a domain that holds `net` |
 | `exports` | entries in its export table | its own runtime | 16,384 |
@@ -2855,6 +2876,11 @@ export of the domain pid to the domain, which needs that connection,
 follows the answer; a side that ends or is closed before its entry is up
 answers `noconnection`.
 
+The protocol also carries the inspector's questions to each domain's
+inspection agent, which init's ready report names beside the connection
+agent and so exports to the system domain; they travel as ordinary
+messages in the system connection's ring, outside the domain pid.
+
 | Message | Direction | Meaning |
 | --- | --- | --- |
 | `{erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize}` | domain pid to agent | a connection to domain `Peer`, node `PeerNode`, exists: the capability slots of the domain's side, the peer's side and the peer's bell, the label the domain's own bell is bound with, and the data areas' sizes, the domain's own lane first; the agent maps, opens the port, brings the entry up and answers `connection_mapped` |
@@ -2866,6 +2892,8 @@ answers `noconnection`.
 | `{erx_facets_install, Tag, Name, Facet}` | domain pid to agent | a facet a configured domain minted for this domain, installed under `Name` in the domain's registry, replacing an older pid of that name; the agent takes it only from its connection to the system domain, an ordinary message in the ring, and answers `facets_installed` ([design-system.md](design-system.md#facets-a-configured-domain-serves)) |
 | `{erx_facets_installed, Tag}` | agent to domain pid | the domain has installed the facet of the install tagged `Tag` |
 | `{erx_facet_minted, Tag, Reply}` | a mint of the domain to domain pid | the reply to the mint request tagged `Tag`, `{ok, Facet}` or a refusal, sent with `erx_facet:minted/2` to the domain's own domain pid, which the agent names to the domain at its start ([design-system.md](design-system.md#facets-a-configured-domain-serves)) |
+| `{erx_inspect_ask, Alias, Query}` | the system domain's inspector to the domain's inspection agent | a question about the domain's own runtime, `Query` being `{inspect, Path, Options}` or `{entries, Path}` for a path the domain owns; the agent takes it only in the system domain's envelope and answers to `Alias`, which the question exported ([design-live.md](design-live.md#the-runtime-agent)) |
+| `{Alias, Answer}` | inspection agent to the inspector | the runtime's attributes for the path, of the inspector's answer types, within `inspect_reply_max`; the inspector validates and marks them `runtime` whatever they claim, and a late or missing answer is `{timeout, 500}` |
 
 The `erx_connection_up` and `erx_connection_down` messages are the **connection-control records**. The
 domain service sends the records about one peer node name one at a time,

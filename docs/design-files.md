@@ -216,12 +216,14 @@ Non-goals:
   | file:read_file("/data/a")          |  (two lanes)  | D's grant on /data       |
   |   prim_file -> erx_path            |-------------->|  (erx_facet, read-write) |---> storage
   |     mount /data -> grant G, "a"    |   9P2000.L    |                          |     service
-  |   erx_file_remote: walk, lopen,    |   terms to    | /proc grant for D        |     (Erlang,
-  |     read, clunk, each to an alias  |<--------------|  (erx_fs over the        |      erx_fs)
-  |                                    |  replies to   |   inspector, D's scope)  |
+  |   erx_file_remote: walk, lopen,    |   terms to    | D's inspect facet        |     (Erlang,
+  |     read, clunk, each to an alias  |<--------------|  (erx_facet, D's scope)  |      erx_fs)
+  |                                    |  replies to   |   -> erx_inspector       |
   | local mounts: / in the NIF, EROFS  |  the alias    +--------------------------+
   |   in erx_erofs; /tmp a grant of D's|
   |   own erx_ramfs server (design-tmp)|
+  |   /proc: D's own erx_procfs, which |
+  |   queries through D's inspect facet|
   +------------------------------------+
 
   session domain (ERTS)                                 storage service
@@ -1236,10 +1238,12 @@ never learns another's mounts.
 specification: `/` is the release slice, an EROFS image mounts where its
 release names it, and each entry of the
 specification's `files` map mounts a facet the domain is granted, such as
-`/data` (its principal's directory on the data partition, read-write),
-`/proc` (the inspector's tree in the domain's inspect scope) or `/dev`
-(the device service's tree, for an administrator principal). The local
-entries follow from the release, and the facets arrive with the domain's
+`/data` (its principal's directory on the data partition, read-write)
+or `/dev` (the device service's tree, for an administrator principal).
+The local entries follow from the release, `/proc` among them, a tree
+of the domain's own `erx_procfs` that reads through the domain's inspect
+facet ([design-live.md](design-live.md#the-proc-tree)), and the facets
+arrive with the domain's
 other facets, each a grant the server made for the domain when the system
 domain introduced the two
 ([design-system.md](design-system.md#creating-a-domain)); the runtime

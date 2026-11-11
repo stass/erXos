@@ -529,7 +529,7 @@ violation fails the build with the property, the record and the field:
     have a `max_frame` below the floor while the system domain's are
     above it; and a mint request naming the system domain, which the mint
     refuses and counts.
-16. **Every receiver of `files` takes its frames:** for each facet of the
+16. **Every receiver of `files` and of `inspect` takes its frames:** for each facet of the
     `files` interface (`abi/services/files.txt`), compared by number, the
     grantee (the system domain under the machine's system runtime limits, a
     configured domain or a session template) and the service's server
@@ -539,8 +539,16 @@ violation fails the build with the property, the record and the field:
     would leave the 9P caller waiting; the facet's `max_request` admits a
     request that long. The storage domain's `data` is one such facet
     ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)).
-    Seeded violation: a check that reads only the grantee's limits, which
-    admits a server below the floor.
+    The `inspect` interface (`abi/services/inspect.txt`) holds its
+    receivers to its own floor the same way: every grantee of an
+    `inspect` facet and the system domain, its server, which also takes
+    the runtime agents' answers of the same bound, run with a `max_frame`
+    of at least `inspect_max_frame_min`, 512 KiB, so an answer of
+    `inspect_reply_max` arrives in one frame
+    ([design-live.md](design-live.md#the-inspect-service)).
+    Seeded violations: a check that reads only the grantee's limits, which
+    admits a server below the floor; and a session template that holds
+    `inspect` with a `max_frame` below its floor.
 
 Each property has a test that seeds one violation into a manifest and
 expects the build to fail with that property's diagnostic.
@@ -2865,12 +2873,12 @@ manifest lists: the vault.
 | device service, `erx_devices` | the device catalogue, each device given to the domain the manifest names, `/dev` | [Devices](#devices) |
 | watchdog, `erx_watchdog` | pets the kernel's watchdog every period, at priority `max`, once every service it lists has answered a liveness call | [Boot](#boot) |
 | console service, `erx_console` | the two console lines: the UART over its driver in the system domain and the host-link port's bytes; each line's menu and login prompt, the connection of sessions' ttys, and the system-shell facet, which it grants to a login at a secure line, holds for that login and ends with it | [Devices](#devices), [design-live.md](design-live.md#the-console) |
-| inspector, `erx_inspector` | one schema over kernel, service and runtime reports, the previous boot's crash record included | [design-live.md](design-live.md#inspection) |
+| inspector, `erx_inspector` | one schema over kernel, service and runtime reports, the previous boot's crash record included; the `inspect` service, whose facets the domain service mints with the scope `erx_domain_core:inspect_scope/2` gives, and the questions to each domain's inspection agent | [design-live.md](design-live.md#inspection), [design-live.md](design-live.md#the-inspect-service) |
 | tracer, `erx_tracer` | trace sessions and the kernel's trace | [design-live.md](design-live.md#tracing) |
 | host link, `erx_hostlink` | sessions with the development host | [design-live.md](design-live.md#the-host-link) |
 | code service, `erx_code` | the code store, code facets, overlays, the install facet | [design-live.md](design-live.md#the-code-store) |
 | update service, `erx_update` | system updates, through the slot writer: writing the spare slot, the trial, the commit and the fallback | [design-storage.md](design-storage.md#system-updates) |
-| file trees, `erx_procfs` and the device service's tree | `/proc` for each inspect facet; `/dev` for administrators | [design-live.md](design-live.md#the-proc-tree), [Devices](#devices) |
+| file trees, `erx_procfs` and the device service's tree | the system domain's own `/proc`, the system shell's and the host link's, as every domain runs one for itself; `/dev` for administrators | [design-live.md](design-live.md#the-proc-tree), [Devices](#devices) |
 | web login, `erx_web_login` | the web domain's facet with two operations: `login`, which checks a login with the vault as the console does, starts a session and introduces it to the web domain, and `logout`, which ends a session a login through it started; the sessions it started end with it | [design-web.md](design-web.md#logging-in-and-the-line) |
 | vault, `erx_vault`, in a domain of its own | principals' keys and secrets; logins; signatures for key facets, by purpose; its sealing backend, and that backend's driver where it has one | [The vault](#the-vault) |
 
