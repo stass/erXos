@@ -413,8 +413,9 @@ class ProductionImageTest < Minitest::Test
     system_args = File.read(File.join(ROOT, Erx::ProductionImage::MANIFEST))[/^\s*system_args "(.*)"$/, 1].split.size
     refute_equal 0, system_args
     # The manifest has a block unit, a net unit and the host link's, so the root adds three
-    # device records.
-    always = Erx::ProductionImage::Run.arguments_always(ROOT) + 3 * Erx::ProductionImage::Run::DEVICE_RECORD_WORDS
+    # device records: two given and the host link's physical one.
+    always = Erx::ProductionImage::Run.arguments_always(ROOT) + (2 * Erx::ProductionImage::Run::GIVEN_RECORD_WORDS) +
+             Erx::ProductionImage::Run::DEVICE_RECORD_WORDS
     checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always + system_args} arguments\n")
     checkpoint_verifier('erts-start', extra_arguments: 1).call("erx: erts: erl_start runs, #{always + system_args + 1} arguments\n")
     assert_raises(Erx::Error) { checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always} arguments\n") }

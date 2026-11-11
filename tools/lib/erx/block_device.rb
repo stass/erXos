@@ -35,7 +35,8 @@ module Erx
   # build test images.
   #
   # The guest's lines, in this order and no others starting with "blk: ", each ended
-  # by a newline (a carriage return before it is allowed):
+  # by a newline (a carriage return before it is allowed) and each perhaps opened by
+  # the command shell's PROMPT, which ends no line:
   #
   #   blk: transport version 2      the device's virtio-mmio transport is version
   #                                 TRANSPORT_VERSION, the one the driver runs
@@ -114,6 +115,10 @@ module Erx
     MEMORY_MIB = 512
     # Seconds the guest has, after its banner, to print the line "blk: done".
     GUEST_SECONDS = 120
+    # The command shell's prompt (DEFAULT_PROMPT in erlang/apps/erx_shell/src/erx_shell.erl),
+    # which ends no line and so may open the driver's next one; it is not part of the
+    # driver's line.
+    PROMPT = '% '
     # The test module, the guest directory its beam is packed in, and the kernel command
     # line words that start it after the release.
     GUEST_SOURCE = 'test/guest/block_device/erx_blk_check.erl'
@@ -210,11 +215,12 @@ module Erx
     end
 
     # The driver's lines in the serial bytes, in order, without line endings, up to
-    # and including the first "blk: done"; whatever follows it is not judged. Serial
-    # bytes come from the guest and are only compared here; a report quotes them
-    # only through quote.
+    # and including the first "blk: done", each without a PROMPT that opened it;
+    # whatever follows it is not judged. Serial bytes come from the guest and are
+    # only compared here; a report quotes them only through quote.
     def guest_lines(bytes)
-      lines = bytes.b.split("\n").map { |line| line.chomp("\r") }.select { |line| line.start_with?('blk: ') }
+      lines = bytes.b.split("\n").map { |line| line.chomp("\r").delete_prefix(PROMPT) }
+                   .select { |line| line.start_with?('blk: ') }
       done = lines.index('blk: done')
       done ? lines.first(done + 1) : lines
     end
@@ -260,7 +266,7 @@ module Erx
     # test module's last line.
     def checkpoints
       [*Qemu.boot_transcript(memory_mib: MEMORY_MIB, test_image: true),
-       { name: 'block-done', pattern: /^blk: done\r?\n/n, seconds: GUEST_SECONDS }.freeze].freeze
+       { name: 'block-done', pattern: /^(?:#{Regexp.escape(PROMPT)})?blk: done\r?\n/n, seconds: GUEST_SECONDS }.freeze].freeze
     end
 
     # The kernel command line of a boot under accel: the harness's words for it, then

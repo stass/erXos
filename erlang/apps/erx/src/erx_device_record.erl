@@ -5,12 +5,14 @@
 %% "Device records"), one per device the domain drives, in one of two forms, each with its
 %% own word so neither is told from the other by counting:
 %%
-%% - `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE`, a holder
-%%   domain's device: the handles of the window, line and memory objects the domain library
-%%   installed when it created the domain, the transport's offset and size in the window
-%%   object, and the memory's bytes, 0 for a device that does no DMA;
-%% - `-erx device ROLE PERIPHERAL BASE SIZE LINE DMA_MEMORY`, the system domain's physical
-%%   record, built by liberx/backend/core/boot_manifest.c from the system manifest.
+%% - `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE`, a given device:
+%%   the handles of the window, line and memory objects the domain library installed when it
+%%   created the domain, or the root made for itself at boot for a device the system domain
+%%   holds, the transport's offset and size in the window object, and the memory's bytes, 0
+%%   for a device that does no DMA;
+%% - `-erx device ROLE PERIPHERAL BASE SIZE LINE`, the system domain's physical record of its
+%%   host link's UART, which does no DMA, built by liberx/backend/core/boot_manifest.c from
+%%   the system manifest.
 %%
 %% A driver asks for the records of its role and its peripheral and opens each with
 %% erx_device:open/1. No record is a normal state, a machine without a disk, and is
@@ -23,13 +25,13 @@
 -export_type([spec/0]).
 
 %% What erx_device:open/1 takes: a given device's objects, or a physical device's window and
-%% line with the boot's DMA memory beside them.
+%% line.
 -type spec() :: #{peripheral := atom(),
                   window := {object, non_neg_integer(), non_neg_integer(), non_neg_integer()},
                   lines := [{object, non_neg_integer()}],
                   memory => {object, non_neg_integer(), pos_integer()}}
               | #{peripheral := atom(), window := {physical, non_neg_integer(), non_neg_integer()},
-                  lines := [non_neg_integer()], dma_memory := non_neg_integer()}.
+                  lines := [non_neg_integer()]}.
 
 %% The records of Role and Peripheral among init's `-erx` arguments.
 -spec find(atom(), atom()) -> {ok, [spec()]} | {error, {bad_device_record, string()}}.
@@ -72,15 +74,15 @@ spec(Peripheral, {"given", [Window, Offset, Size, Line, Memory, MemorySize | _]}
     end;
 spec(_Peripheral, {"given", _}) ->
     bad("a given device record has fewer than six numbers");
-spec(Peripheral, {"device", [Base, Size, Line, Dma | _]}) ->
-    case {number(Base, 64), number(Size, 64), number(Line, 32), number(Dma, 64)} of
-        {{ok, B}, {ok, S}, {ok, L}, {ok, D}} ->
-            {ok, #{peripheral => Peripheral, window => {physical, B, S}, lines => [L], dma_memory => D}};
+spec(Peripheral, {"device", [Base, Size, Line | _]}) ->
+    case {number(Base, 64), number(Size, 64), number(Line, 32)} of
+        {{ok, B}, {ok, S}, {ok, L}} ->
+            {ok, #{peripheral => Peripheral, window => {physical, B, S}, lines => [L]}};
         _ ->
-            bad("a device record's base, size, line or DMA memory is not a decimal number of its field's width")
+            bad("a device record's base, size or line is not a decimal number of its field's width")
     end;
 spec(_Peripheral, {"device", _}) ->
-    bad("a device record has fewer than four numbers").
+    bad("a device record has fewer than three numbers").
 
 %% A device that does no DMA has no memory object, and its record says 0 bytes.
 with_memory(Spec, _Memory, 0) -> Spec;

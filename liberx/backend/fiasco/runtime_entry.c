@@ -52,6 +52,7 @@ static size_t		 console_uart_number(char *, uint64_t);
 static const char	*library_up(const erx_manifest_view_t *, const erx_pack_view_t *, erx_boot_pair_t);
 static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
 static size_t		 line_append(char *, size_t, erx_boot_words_t);
+static const char	*device_give(const erx_boot_device_t *, char *, size_t, size_t *);
 
 static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 /*
@@ -65,7 +66,9 @@ static const char console_uart_prefix[] = "-erx\0console_uart";
 static char console_uart_words[sizeof(console_uart_prefix) + 3 * CONSOLE_UART_NUMBER_MAX];
 _Static_assert(sizeof(console_uart_words) >= sizeof(console_uart_prefix) + 3 * CONSOLE_UART_NUMBER_MAX,
     "the console words hold the prefix and three numbers");
-static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_DEVICE_WORDS_MAX];
+/* Each device record's words: the given form's, or the host link's physical one, which is shorter. */
+static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_GIVEN_WORDS_MAX];
+_Static_assert(ERX_BOOT_GIVEN_WORDS_MAX >= ERX_BOOT_DEVICE_WORDS_MAX, "a device record's room holds either form");
 /* -erx boot VALUE SLOT: the longest names are "unknown" and "none", each with its NUL. */
 static const char boot_prefix[] = "-erx\0boot";
 static char boot_words[ERX_BOOT_PAIR_WORDS_MAX];
@@ -258,10 +261,19 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	arg_words[(*nargs)++] = (erx_boot_words_t){ boot_words, boot_length };
 	arg_words[(*nargs)++] = (erx_boot_words_t){ build_words, build_id_words(handoff) };
 	for (size_t at = 0; at < manifest->device_count; at++) {
-		const size_t length = erx_boot_device_words(&manifest->devices[at], device_words[at], sizeof(device_words[at]));
+		const erx_boot_device_t *const device = &manifest->devices[at];
+		size_t length = 0;
 
+		if (device->given) {
+			const char *const reason = device_give(device, device_words[at], sizeof(device_words[at]), &length);
+
+			if (reason != NULL)
+				return (reason);
+		} else {
+			length = erx_boot_device_words(device, device_words[at], sizeof(device_words[at]));
+		}
 		if (length == 0)
-			return ("a device record: its words outgrow ERX_BOOT_DEVICE_WORDS_MAX");
+			return ("a device record: its words outgrow their room");
 		arg_words[(*nargs)++] = (erx_boot_words_t){ device_words[at], length };
 	}
 	while (erx_boot_args_next_arg(handoff->bootargs, handoff->bootargs_len, &cursor, &word, &word_len)) {
@@ -269,6 +281,40 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 			return ("the kernel command line: more erx.arg words than the page holds");
 		arg_words[(*nargs)++] = (erx_boot_words_t){ word, word_len };
 	}
+	return (NULL);
+}
+
+/*
+ * The root's own give of a device the system domain holds (docs/design-stopgap.md, "Device
+ * records"). It makes in the root's own table the objects a holder's creation makes: the
+ * register window over the pages of the device's registers, its line's IRQ object and,
+ * for a device that does DMA, its contiguous memory for the boot. It then writes their
+ * -erx given record (erx_boot_device_given) into words, capacity bytes, with *length its
+ * whole length, 0 when it does not fit.
+ *
+ * Nothing deletes the objects: the system domain holds the device for the boot, and a
+ * fault of the system domain resets the machine. Returns NULL, or why the root cannot
+ * boot: the backend refused an object, so the device would have no driver.
+ */
+static const char *
+device_give(const erx_boot_device_t *device, char *words, size_t capacity, size_t *length)
+{
+	uint64_t window_handle, line_handle, memory_handle = ERX_CAP_NULL;
+	erx_boot_window_t window;
+	erx_boot_given_t given;
+
+	if (!erx_boot_device_window(device, &window))
+		return ("a device record: its registers are empty or wrap");
+	if (erx_mem_create_physical(ERX_CAP_NULL, ERX_CAP_NULL, window.base, window.size, ERX_MEM_ATTR_DEVICE,
+	    &window_handle) != ERX_OK)
+		return ("a device record: the backend refused its register window");
+	if (erx_irq_create(ERX_CAP_NULL, ERX_CAP_NULL, ERX_IRQ_LINE, device->line, &line_handle) != ERX_OK)
+		return ("a device record: the backend refused its line");
+	if (device->dma_memory != 0 &&
+	    erx_mem_create_contiguous(ERX_CAP_NULL, ERX_CAP_NULL, device->dma_memory, 0, &memory_handle) != ERX_OK)
+		return ("a device record: the backend refused its DMA memory");
+	given = erx_boot_device_given(device, &window, window_handle, line_handle, memory_handle);
+	*length = erx_boot_given_words(&given, words, capacity);
 	return (NULL);
 }
 

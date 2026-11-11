@@ -32,25 +32,38 @@ typedef struct erx_boot_console {
 
 /*
  * A device record: a device of a unit the system domain holds, of a kind its ERTS drives,
- * which the root hands that ERTS as -erx device ROLE PERIPHERAL BASE SIZE LINE DMA_MEMORY
- * so that erx_device can open it (docs/design-stopgap.md, "Device records"). The kinds
- * are the rows of device_kinds in boot_manifest.c; role and peripheral point at a row's
- * names, and the numbers are the manifest's device entry. A manifest whose units hold no
- * such device has no record: a missing disk is a normal state. The host link's UART gives a
- * record only when the boot asks for the host link, with erx.hostlink=1 on the kernel
- * command line.
+ * which the root hands that ERTS so that erx_device can open it (docs/design-stopgap.md,
+ * "Device records"). A device of a row of erx/device_kinds.h is given: the root makes its
+ * window, line and memory objects at boot, as a holder's creation makes them, and hands
+ * their handles as -erx given (erx_boot_given_words), so a device that does DMA has one
+ * form in every domain. The host link's UART, which does no DMA, is the one physical
+ * record, -erx device ROLE PERIPHERAL BASE SIZE LINE (erx_boot_device_words). role and
+ * peripheral point at a row's names, and the numbers are the manifest's device entry. A
+ * manifest whose units hold no such device has no record: a missing disk is a normal
+ * state. The host link's UART gives a record only when the boot asks for the host link,
+ * with erx.hostlink=1 on the kernel command line.
  */
 #define ERX_BOOT_DEVICES_MAX	8
-/* Each record's words fit ERX_BOOT_DEVICE_WORDS_MAX (erx/boot_words.h). */
 
 typedef struct erx_boot_device {
-	const char	*role;		/* the record's role word: "block" or "hostlink" */
+	const char	*role;		/* the record's role word: "block", "net" or "hostlink" */
 	const char	*peripheral;	/* the peripheral's name in the CMSIS-SVD source */
+	bool		given;		/* a row of erx/device_kinds.h; false for the host link's UART */
 	uint64_t	base;		/* the register window */
 	uint64_t	size;
 	uint32_t	line;		/* the interrupt, as the platform's controller numbers it */
-	uint64_t	dma_memory;	/* bytes reserved for the device's DMA for the boot; 0 for none */
+	uint64_t	dma_memory;	/* a given device's memory for the boot, whole pages; 0 for none */
 } erx_boot_device_t;
+
+/*
+ * The pages that hold a device's registers, which its window object covers, and where the
+ * registers start in them: the OFFSET of its -erx given record.
+ */
+typedef struct erx_boot_window {
+	uint64_t	base;		/* the first page's physical address */
+	uint64_t	size;		/* whole pages, from base through the registers' last byte */
+	uint64_t	offset;		/* the registers' base less the first page's */
+} erx_boot_window_t;
 
 typedef struct erx_boot_manifest {
 	char			node[ERX_BOOT_NODE_MAX];
@@ -81,11 +94,18 @@ bool	erx_boot_console_matches(const erx_boot_manifest_t *manifest, const char *s
 	    size_t stdout_len);
 
 /*
- * Writes the record's words, -erx device ROLE PERIPHERAL BASE SIZE LINE DMA_MEMORY with the
+ * Writes a physical record's words, -erx device ROLE PERIPHERAL BASE SIZE LINE with the
  * numbers in decimal, each word ended by NUL, into words, and returns their whole length.
- * Returns 0, having written nothing past capacity, when they do not fit.
+ * Returns 0, having written nothing past capacity, when they do not fit. Only a device that
+ * is not given has this record; a given one's is -erx given (erx_boot_device_given).
  */
 size_t	erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capacity);
+
+/*
+ * The pages of the device's registers into *window; false, writing nothing, for registers
+ * that are empty or end past the top of the address space.
+ */
+bool	erx_boot_device_window(const erx_boot_device_t *device, erx_boot_window_t *window);
 
 /*
  * A device given to a holder domain, as its creation installed it (docs/design-stopgap.md,
@@ -104,6 +124,16 @@ typedef struct erx_boot_given {
 	uint64_t	memory;
 	uint64_t	memory_size;
 } erx_boot_given_t;
+
+/*
+ * The given record of a device the root gives itself (docs/design-stopgap.md, "Device
+ * records"): the device's names and register size, the offset of its window (from
+ * erx_boot_device_window), and the handles of the objects the root made for it, its
+ * register window, its line's IRQ object and its contiguous memory. A device without
+ * dma_memory has no memory: the record names ERX_CAP_NULL, whatever memory_handle is.
+ */
+erx_boot_given_t	erx_boot_device_given(const erx_boot_device_t *device, const erx_boot_window_t *window,
+	    uint64_t window_handle, uint64_t line_handle, uint64_t memory_handle);
 
 /*
  * Writes -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE, the numbers in

@@ -13,8 +13,8 @@
 /*
  * The kinds of device a runtime drives, one row each: a manifest device of
  * a row's role and compatible string gets a record with the row's names,
- * -erx device in the system domain's boot page and -erx given in a holder
- * domain's (docs/design-stopgap.md, "Boot information"). ROLE is the
+ * -erx given, in the system domain's boot page and in a holder domain's
+ * (docs/design-stopgap.md, "Boot information"). ROLE is the
  * record's role word and PERIPHERAL the CMSIS-SVD peripheral the device
  * NIF opens. The root's reader (liberx/backend/core/boot_manifest.c) and
  * the domain library's boot view (liberx/system/dom_boot_view.c) both read

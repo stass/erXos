@@ -65,10 +65,10 @@ spec("given", [Window, Offset, Size, Line, Memory, Bytes | _]) ->
         _ ->
             bad
     end;
-spec("device", [Base, Size, Line, Dma | _]) ->
-    case {decimal(Base, ?U64), decimal(Size, ?U64), decimal(Line, ?U32), decimal(Dma, ?U64)} of
-        {B, S, L, D} when is_integer(B), is_integer(S), is_integer(L), is_integer(D) ->
-            #{peripheral => virtio_mmio, window => {physical, B, S}, lines => [L], dma_memory => D};
+spec("device", [Base, Size, Line | _]) ->
+    case {decimal(Base, ?U64), decimal(Size, ?U64), decimal(Line, ?U32)} of
+        {B, S, L} when is_integer(B), is_integer(S), is_integer(L) ->
+            #{peripheral => virtio_mmio, window => {physical, B, S}, lines => [L]};
         _ ->
             bad
     end;
@@ -98,7 +98,7 @@ entry() ->
     Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
     Words = [word() || _ <- lists:seq(1, rand:uniform(?MAX_WORDS + 1) - 1)],
     Form = Pick(["device", "given"]),
-    Count = #{"device" => 4, "given" => 6},
+    Count = #{"device" => 3, "given" => 6},
     case rand:uniform(4) of
         1 -> [Form, "block", "virtio_mmio" | Words];
         2 -> [Form, "block", "virtio_mmio" | [number() || _ <- lists:seq(1, maps:get(Form, Count))] ++ Words];

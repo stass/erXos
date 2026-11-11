@@ -40,8 +40,7 @@
                 | {physical, Base :: non_neg_integer(), Size :: non_neg_integer()} | stand_in.
 -type line() :: {object, Irq :: non_neg_integer()} | non_neg_integer().
 -type spec() :: #{peripheral := atom(), window := window(), lines := [line()],
-                  memory => {object, Memory :: non_neg_integer(), Bytes :: pos_integer()},
-                  dma_memory => non_neg_integer()}.
+                  memory => {object, Memory :: non_neg_integer(), Bytes :: pos_integer()}}.
 -opaque queue() :: non_neg_integer().
 -type segment() :: {out, binary()} | {in, pos_integer()}.
 
@@ -55,8 +54,10 @@ init() ->
 %% driver, which does not look inside it: the peripheral's name in the SVD source, and either
 %% a given device's objects (`{object, Window, Offset, Size}`, `{object, Irq}` lines and
 %% `memory => {object, Memory, Bytes}` for a device that does DMA, whose queues are carved
-%% from that one memory, `{error, erange}` past its end) or a physical device's window, line
-%% selectors and the boot's DMA memory. A hosted runtime has no devices, so either form is an
+%% from that one memory, `{error, erange}` past its end) or a physical device's window and
+%% line selectors, a UART's, which has no queue (`{error, enotsup}` from queue_create/4).
+%% Every device that does DMA is given, in the system domain too, whose root gives itself
+%% the devices it holds. A hosted runtime has no devices, so either form is an
 %% error there, and `stand_in` gives plain memory and software lines for tests; natively
 %% `stand_in` is `{error, enotsup}`.
 -spec open(spec()) -> {ok, device()} | {error, atom() | {status, integer()}}.

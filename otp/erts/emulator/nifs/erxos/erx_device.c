@@ -559,51 +559,6 @@ write_address(const erx_device_t *device, const erx_device_register_t *const wor
 	put(device, words[1], addr >> 32);
 }
 
-/* Contiguous memory of at least `size` bytes, made here and mapped, and its object. */
-static int
-map_dma(uint64_t size, uint64_t *mem, uint8_t **mapping)
-{
-	uint64_t rounded, addr;
-	int status;
-
-	if (!erx_device_page_round(size, &rounded))
-		return (ERX_EINVAL);
-	status = erx_mem_create_contiguous(0, 0, rounded, 0, mem);
-	if (status == ERX_OK)
-		status = map_object(*mem, 0, rounded, &addr);
-	if (status == ERX_OK)
-		*mapping = (uint8_t *)(uintptr_t)addr;
-	return (status);
-}
-
-/*
- * A physical device's queue: its rings' memory and its pool's, each made here, which only the
- * root may, with every device address the queue needs. The system domain's devices that do
- * DMA open in the physical form and take their queues this way (TODO.md, "one DMA form").
- */
-static int
-make_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size)
-{
-	const uint32_t offsets[3] = { record->layout.desc, record->layout.avail, record->layout.used };
-	uint64_t ring_mem, pool_mem, pool;
-	uint8_t *rings;
-	int status;
-
-	status = map_dma(record->layout.bytes, &ring_mem, &rings);
-	for (uint32_t ring = 0; status == ERX_OK && ring < 3; ring++)
-		status = erx_mem_dma_addr(ring_mem, offsets[ring], &record->ring_addrs[ring]);
-	if (status == ERX_OK)
-		status = map_dma((uint64_t)size * buffer_size, &pool_mem, &record->buffers);
-	if (status == ERX_OK)
-		status = erx_mem_dma_addr(pool_mem, 0, &pool);
-	if (status != ERX_OK)
-		return (status);
-	if (!erx_device_queue_init(&record->core, size, buffer_size, pool))
-		return (ERX_ERANGE);
-	record->rings = rings;
-	return (ERX_OK);
-}
-
 /*
  * A given device's queue, in the next pages of the device's one memory object: its rings, then
  * its pool, each device address from the object and an offset in it. Nothing is read from
@@ -676,6 +631,9 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 	queue_record_t *record;
 	int status;
 
+	/* A physical device does no DMA, so it has no queue (docs/design-stopgap.md, "Device records"). */
+	if (device->form == ERX_DEVICE_FORM_PHYSICAL)
+		return (ERX_ENOTSUP);
 	if (!erx_device_queue_layout(size, &layout) || buffer_size == 0 || buffer_size > ERX_DEVICE_BUFFER_MAX ||
 	    (uint64_t)size * buffer_size > ERX_MEM_CONTIGUOUS_MAX)
 		return (ERX_EINVAL);
@@ -699,12 +657,8 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 	record->device = device;
 	record->index = index;
 	record->layout = layout;
-	if (device->form == ERX_DEVICE_FORM_GIVEN)
-		status = carve_queue_memory(record, size, buffer_size);
-	else if (device->form == ERX_DEVICE_FORM_STAND_IN)
-		status = stand_in_queue_memory(record, size, buffer_size);
-	else
-		status = make_queue_memory(record, size, buffer_size);
+	status = device->form == ERX_DEVICE_FORM_GIVEN ? carve_queue_memory(record, size, buffer_size) :
+	    stand_in_queue_memory(record, size, buffer_size);
 	if (status != ERX_OK)
 		return (status);
 	*queue = queues_open++;

@@ -30,9 +30,11 @@ typedef struct erx_device erx_device_t;
 
 /*
  * Where a device's objects come from. A given device's window, lines and memory are objects
- * its domain was given, which it maps and binds; a physical one's are made here, which only
- * the root may, and serve the system domain's devices; a stand-in is a hosted test's plain
- * memory and software lines.
+ * its domain was given, which it maps and binds; the system domain's root gives itself the
+ * devices it holds that are of a kind erx/device_kinds.h lists, so every device that does DMA
+ * is given. A physical one's window and lines are made here, which only the root may, and
+ * serve the system domain's UARTs, which do no DMA and have no queue; a stand-in is a hosted
+ * test's plain memory and software lines.
  */
 typedef enum erx_device_form {
 	ERX_DEVICE_FORM_PHYSICAL = 0,
@@ -121,7 +123,7 @@ bool	erx_device_line_irq(const erx_device_t *device, uint64_t line, uint64_t *ir
  * version 2. A queue is state of the device's record for the boot: erx_device_queue's
  * bookkeeping, its rings and its pool of `size` buffers, in contiguous memory mapped here,
  * whose device addresses nothing outside this file sees. A given device's queues are carved
- * from its one memory object, a physical device's are each made here. The bookkeeping lives
+ * from its one memory object; a physical device has none. The bookkeeping lives
  * in this record alone and the rings are written whole at the install, so a new record over
  * memory a former record and the device wrote never reads what they left. The caller
  * serialises every call below; the register accesses above stay lock-free.
@@ -148,8 +150,8 @@ typedef uint8_t	*erx_device_sink_t(void *context, uint64_t tag, uint32_t length)
  * another geometry is ERX_EBUSY. A device that is not virtio-mmio version 2 is ERX_ENOTSUP. A
  * given device's queue takes the next pages of its memory, and one they do not fit, or a
  * given device with no memory, is ERX_ERANGE with nothing taken. A new queue is not on the
- * device until erx_device_negotiate installs it. A physical device's failure may leave
- * memory made, for the boot.
+ * device until erx_device_negotiate installs it. A physical device, a UART, has no queue:
+ * ERX_ENOTSUP, with nothing made.
  */
 int	erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t size, uint32_t buffer_size,
 	    uint32_t *queue);

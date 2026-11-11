@@ -83,6 +83,17 @@ class BlockDeviceTest < Minitest::Test
     refute_match last.fetch(:pattern), "blk: wrote sector 7\r\n"
   end
 
+  # The command shell's prompt ends no line, so the driver's next line can follow it.
+  def test_a_command_shell_prompt_may_open_a_driver_line
+    assert_match Device.checkpoints.last.fetch(:pattern), "% blk: done\r\n"
+    prompted = good_log.sub("blk: done\r\n", "% blk: done\r\n").sub('blk: read sector 4 ok', '% blk: read sector 4 ok')
+    refute_equal good_log, prompted
+    assert_nil Device.line_difference(prompted)
+    failed = prompted.sub('% blk: read sector 4 ok', '% blk: read sector 4 failed')
+    assert_match(/line 7: .*got "blk: read sector 4 failed"/, Device.line_difference(failed))
+    refute_match Device.checkpoints.last.fetch(:pattern), "%% blk: done\r\n"
+  end
+
   def test_the_power_cut_lines_are_the_documented_sequence
     assert_equal ['blk: data unsynced written', 'blk: data synced 10000 bytes', 'blk: done'], Device.write_expected_lines
     synced, unsynced, done = Device.read_expected_lines

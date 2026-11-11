@@ -148,7 +148,8 @@ devices_read(const erx_manifest_view_t *view, bool hostlink, erx_boot_manifest_t
 			if (result->device_count == ERX_BOOT_DEVICES_MAX)
 				return ("device_records");
 			result->devices[result->device_count++] = (erx_boot_device_t){
-				.role = kind->role_word, .peripheral = kind->peripheral, .base = device.base,
+				.role = kind->role_word, .peripheral = kind->peripheral, .given = kind != &hostlink_kind,
+				.base = device.base,
 				.size = device.size, .line = device.line, .dma_memory = device.dma_memory,
 			};
 		}
@@ -272,9 +273,32 @@ erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capac
 	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "device") &&
 	    word_put(words, capacity, &used, device->role) && word_put(words, capacity, &used, device->peripheral) &&
 	    number_put(words, capacity, &used, device->base) && number_put(words, capacity, &used, device->size) &&
-	    number_put(words, capacity, &used, device->line) && number_put(words, capacity, &used, device->dma_memory))
+	    number_put(words, capacity, &used, device->line))
 		return (used);
 	return (0);
+}
+
+bool
+erx_boot_device_window(const erx_boot_device_t *device, erx_boot_window_t *window)
+{
+	const uint64_t page_mask = (uint64_t)ERX_PAGE_SIZE - 1;
+	const uint64_t first = device->base & ~page_mask;
+	uint64_t last;
+
+	if (device->size == 0 || __builtin_add_overflow(device->base, device->size - 1, &last) ||
+	    (last | page_mask) == UINT64_MAX)
+		return (false);
+	*window = (erx_boot_window_t){ .base = first, .size = (last | page_mask) + 1 - first, .offset = device->base - first };
+	return (true);
+}
+
+erx_boot_given_t
+erx_boot_device_given(const erx_boot_device_t *device, const erx_boot_window_t *window, uint64_t window_handle,
+    uint64_t line_handle, uint64_t memory_handle)
+{
+	return ((erx_boot_given_t){ .role = device->role, .peripheral = device->peripheral, .window = window_handle,
+	    .offset = window->offset, .size = device->size, .line = line_handle,
+	    .memory = device->dma_memory != 0 ? memory_handle : ERX_CAP_NULL, .memory_size = device->dma_memory });
 }
 
 size_t

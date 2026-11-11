@@ -292,7 +292,7 @@ function and maps it read-only.
 task's first thread as its argument. Its `flags` carry `ERX_BOOT_DET` when the system's page does. Its strings hold the
 domain's node name and the system node's, its `args` and `env`, and the words the library adds to its `args`, after
 the row's own: one record per device it was given, `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H
-MEM_SIZE`, beside the system domain's `-erx device` record ([Device records](#device-records)), and, when it holds a
+MEM_SIZE`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), and, when it holds a
 block device, `-erx boot VALUE SLOT` with the boot's pair, as the root's own page carries it ([Image
 windows](#image-windows)). WINDOW_H, LINE_H and MEM_H are the installed objects' values in the holder's own handle
 table, OFFSET and SIZE place the registers in the window page, and MEM_H and MEM_SIZE are 0 for a device with no
@@ -532,8 +532,8 @@ callers as it says.
 | `erx_mem_create_paged`, `erx_mem_supply`, `erx_mem_seal` | code objects, which the domain service makes for a session's command server (`erx_dom_code_object`); data objects, which a session's filler makes | service, from 1b-B, whose sessions are the first consumer, and `ERX_ENOTSUP` in 1b-A: a paged object is a shared object with a sealed flag, its pages zero at creation; a supply copies from the source object's window pages into the target's, as `erx_mem_copy` does; a seal sets the flag, and every map and supply reads it, since the service performs every one | a map of an unsealed paged object `ERX_EBUSY`; a supply into a sealed one, and a write right in a map of one, `ERX_ERIGHTS`; a supply whose offset plus length passes the target's end, or whose source offset plus length passes the source's, each computed with checked arithmetic, `ERX_ERANGE`, before any byte moves; a source that is physical memory or a JIT object `ERX_ETYPE`; a supply writes every page of its range, supplied before or not; `ERX_MEM_CODE` from a task other than the root `ERX_ERIGHTS`, since the code right is the system domain's; a seal always succeeds, since an unsealed object has no mapping and so no writer; `erx_mem_dirty`, `erx_mem_child`, `erx_mem_own` `ERX_ENOTSUP` | pages supplied on demand; a supply fills only pages not yet supplied; copy-on-write children (Track Q) |
 | `erx_mem_copy` | the domain service reading a crash area; a server reading a client's memory | service: copies between the two objects' window pages, at most 64 pages a request, so the stub loops | either object gone `ERX_ESTALE`, never a fault; an offset plus length past either object, computed with checked arithmetic, `ERX_ERANGE`, before any byte moves; physical memory or a JIT object `ERX_ETYPE`; a sealed destination, or a slice, whose pages are the archive's, `ERX_ERIGHTS` | in the kernel, through its own mappings |
 | cache maintenance, the code barrier | BeamAsm | local: asmjit's and ERTS's sequences unchanged ([design-arch-aarch64.md](design-arch-aarch64.md)) | correct | none |
-| `erx_mem_create_physical` | `erx_device`: the console UART (M3) and the host link's; through a give in its holder's creation, each device's register window for its holder ([Device records](#device-records)) | service, from the root only: `l4sigma0_map_iomem` into the root's device window, over the base and size its caller reads from the manifest's device entry; each map is then `l4_task_map` from there into the space named, as for a shared object; for the console UART also [the handoff](#the-console) | RAM, which `sigma0` keeps, `ERX_ERANGE`; execute `ERX_ERIGHTS`; a full window `ERX_ENOMEM`; a create from a task other than the root `ERX_ENOTSUP`, since the domain library makes every device's objects and passes them | within rights, from a carved resource |
-| `erx_mem_create_contiguous`, `erx_mem_dma_addr` | the device NIF's buffers and rings, in whichever domain holds the device | service: a create from the root only, first fit from a [contiguous pool](#the-pool), aligned to its size rounded up to a power of two, at most 1 MiB, wholly below the caller's limit, cached, zeroed, and never given back; the domain library passes it to the device's holder. `dma_addr`, from any task holding the object, is physical address plus offset, since QEMU `virt` as the harness starts it has no IOMMU | no such run `ERX_ENOMEM`; `dma_addr` of another kind of object `ERX_ETYPE`, past the object `ERX_ERANGE`; execute `ERX_ERIGHTS`; a create from a task other than the root `ERX_ENOTSUP`; unconfined; `erx_dma_map`, windows `ERX_ENOTSUP` | through a DMA window (M9) |
+| `erx_mem_create_physical` | `erx_device`: the console UART (M3) and the host link's; through a give in its holder's creation, each device's register window for its holder, and the root's own give at boot for each such device the system domain holds ([Device records](#device-records)) | service, from the root only: `l4sigma0_map_iomem` into the root's device window, over the base and size its caller reads from the manifest's device entry; each map is then `l4_task_map` from there into the space named, as for a shared object; for the console UART also [the handoff](#the-console) | RAM, which `sigma0` keeps, `ERX_ERANGE`; execute `ERX_ERIGHTS`; a full window `ERX_ENOMEM`; a create from a task other than the root `ERX_ENOTSUP`, since the domain library makes every device's objects and passes them | within rights, from a carved resource |
+| `erx_mem_create_contiguous`, `erx_mem_dma_addr` | a device's one memory for the boot, which the device NIF carves its rings and buffers from, in whichever domain holds the device | service: a create from the root only, first fit from a [contiguous pool](#the-pool), aligned to its size rounded up to a power of two, at most 1 MiB, wholly below the caller's limit, cached, zeroed, and never given back; the domain library passes it to the device's holder, and the root makes one at boot for each device of a kind the system domain holds ([Device records](#device-records)). `dma_addr`, from any task holding the object, is physical address plus offset, since QEMU `virt` as the harness starts it has no IOMMU | no such run `ERX_ENOMEM`; `dma_addr` of another kind of object `ERX_ETYPE`, past the object `ERX_ERANGE`; execute `ERX_ERIGHTS`; a create from a task other than the root `ERX_ENOTSUP`; unconfined; `erx_dma_map`, windows `ERX_ENOTSUP` | through a DMA window (M9) |
 | `erx_irq_create`, `erx_irq_bind`, `erx_irq_ack`, `erx_irq_trigger` | device lines, in whichever domain holds the device; a connection's bells; a channel's and a pipe end's doorbells; ERTS's wakes | service: `l4_factory_create_irq` from the root in 1b-A; from any task when a session needs it (1b-B); for a line, from the root only, `l4_icu_bind`; a bind to a group, from the root into any group it holds and from another task holding the object only into the group that task is the home of, gives the object a free entry of the group, records the label and runs `l4_rcv_ep_bind_thread(irq, dispatcher, entry)` on the group's home task's dispatcher once both exist, a bind again to the same group moves the label, and an unbind runs `l4_irq_detach` ([Interrupts and readiness](#interrupts-and-readiness)); the object's destroy runs `l4_irq_detach`; `l4_irq_unmask`; `l4_irq_trigger`. Every call is a request: no IRQ capability is mapped into a task, and a delivery goes from Fiasco to the dispatcher directly | each label once, the line masked until acked; `erx_irq_route` `ERX_ENOTSUP`; a target that is not a group the caller holds `ERX_ETYPE`, or a thread, `ERX_ENOTSUP` unless [vCPU upcalls](#vcpu-upcalls-on-fiasco) are carried; a bind of a bound object to another group `ERX_ENOTSUP`; from a task other than the root, a bind to a group it is not the home of, or a bind or an unbind of an object bound to such a group, `ERX_ETYPE`; a group's 65th bound object `ERX_ELIMIT`; a line's second object `ERX_EBUSY`; a line created from a task other than the root `ERX_ENOTSUP`; the resource ignored | by capability, without the root; `BIND` and `TRIGGER` split; route applied |
 | `erx_group_create`, `_configure`, `_info`, `_take_ready` | the adapter's five changes (M3); the domain library's group and sub-space group for each domain; a session's group for each program | service for `create`, `configure` and `info`, local for `take_ready` in the group's home task: [Budgets and groups as records](#budgets-and-groups-as-records), [Interrupts and readiness](#interrupts-and-readiness). `configure` keeps only the CPU set of the grant in the caller's UTCB, and `info` writes an `erx_info_group` there, with that set as `cpuset` and the home task's status page's `parked` and `ready`, and only their bits of `reported` set, `cpuset`'s only once a set was configured ([Reporting kernel objects](#reporting-kernel-objects)) | correct readiness; everything else `unsupported`; no guarantee, quota or throttling; budget and parent recorded, and a group goes with its budget; every thread of a group runs in one task, its home, so a thread created in another task `ERX_ENOTSUP`; a task's second home group `ERX_ENOTSUP` | grants enforced, usage reported; a group's threads in any space |
 | `erx_park`, `erx_executor_wake`, `erx_yield` | ERTS's schedulers (M3) | local: [The park protocol](#the-park-protocol); `l4_thread_yield` | no lost wake; a worker `ERX_ETYPE` | in the kernel, the executor switched |
@@ -1407,13 +1407,25 @@ A root fault, the root's own stop and `erx_machine_end` reach it on the service,
 The root hands the system domain's ERTS a record of each device the manifest places, as it hands it
 the console's words, and the records are the device service's catalogue, which on erXos's kernel
 comes from the root resource's device list: for each device of a unit the manifest gives to
-any domain, at a device-tree path, whose role and compatible string are a row of the kinds table in
-`liberx/backend/core/boot_manifest.c`, it adds `-erx device ROLE PERIPHERAL BASE SIZE LINE
-DMA_MEMORY`. ROLE and PERIPHERAL are the row's names, PERIPHERAL the peripheral's name in
-the CMSIS-SVD source that `erx_device` opens it as; the numbers, in decimal, are the
-manifest's device entry: its register window, its interrupt line and the DMA memory the
-platform reserves for it. The rows are QEMU `virt`'s virtio-mmio transports, each with
-compatible `virtio,mmio` and peripheral `virtio_mmio`:
+no other domain, so the system domain holds it, at a device-tree path, whose role and compatible string are a row of the kinds table in
+`include/erx/device_kinds.h`, it gives itself the device as a holder's creation gives one: at boot,
+before ERTS starts, it makes the register window with `erx_mem_create_physical` over the pages of
+the registers, the line's IRQ object with `erx_irq_create` and, for a device with DMA memory, the
+device's one contiguous object of that size with `erx_mem_create_contiguous`, each in its own
+table, and adds the same `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE`
+record a holder's page carries, below (`liberx/backend/fiasco/runtime_entry.c`, `device_give`;
+`erx_boot_device_window` computes the pages and OFFSET). ROLE and PERIPHERAL are the row's names,
+PERIPHERAL the peripheral's name in the CMSIS-SVD source that `erx_device` opens it as; the
+pages, SIZE, the line and MEM_SIZE come from the manifest's device entry: its register window,
+its interrupt line and the DMA memory the platform reserves for it. So a device that does DMA
+has one form in every domain: its queues are carved from its one memory, and the system domain's
+driver opens it exactly as a holder's does. Nothing deletes these objects, since the system
+domain holds the device for the boot and its fault resets the machine; an object the backend
+refuses refuses the boot, naming the record. The host link's UART, which does no DMA, is the one
+physical record, `-erx device ROLE PERIPHERAL BASE SIZE LINE`, whose window and line the device
+NIF makes from the numbers in the system domain, as it does for the console's UART from `-erx
+console_uart`; a physical device has no queue. The rows are QEMU `virt`'s virtio-mmio
+transports, each with compatible `virtio,mmio` and peripheral `virtio_mmio`:
 
 | Manifest role | Record role | Holder in the development manifest |
 | --- | --- | --- |
@@ -1434,8 +1446,10 @@ machine without the device boots the same, with no interface.
 the manifest check reasons about a display domain's devices by role
 ([design-system.md](design-system.md#the-manifest), property 9). A further kind of device is one more row.
 
-**A device the system domain holds**, the console's UART, the host link's and a block device
-with no storage domain, its driver opens from its record as below. The host link's UART has a
+**A device the system domain holds**, the console's UART, the host link's, a block device
+with no storage domain and a network device with no network domain, its driver opens
+from its record as below, the UARTs by their addresses and the rest from the objects the root
+gave itself. The host link's UART has a
 record only under `erx.hostlink=1` ([The command line](#the-command-line)). **A device another domain
 holds** reaches it as on erXos's kernel: the creation of the configured row that holds it gives it,
 and the give's body on this backend creates the register window with `erx_mem_create_physical` over the
@@ -1478,20 +1492,21 @@ driver's first reads of the transport, its magic, version and device id, say whe
 device is behind it. A manifest with no such unit has no record, and a machine without the
 device boots the same, with nothing for its driver to drive.
 
-A holder domain's records have a word of their own, `-erx given ROLE PERIPHERAL WINDOW_H
-OFFSET SIZE LINE_H MEM_H MEM_SIZE`: the handles of the window, line and memory objects the
-domain library installed when it created the domain, the transport's offset and size in the
-window object, and the memory's bytes, 0 for a device that does no DMA. Since each form has
-its own word, the reader never tells one from the other by counting numbers, and a plain
-word of the command line after a record cannot make one form look like the other.
+A given record, a holder domain's or the root's own, has a word of its own, `-erx given ROLE
+PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE`: the handles of the window, line and
+memory objects the domain library installed when it created the domain, or the root made for
+itself, the transport's offset and size in the window object, and the memory's bytes, 0 for a
+device that does no DMA. Since each form has its own word, the reader never tells one from
+the other by counting numbers, and a plain word of the command line after a record cannot
+make one form look like the other.
 
 A driver finds its records with `erx_device_record:find(Role, Peripheral)`, which returns
-each as a spec for `erx_device:open/1`: a `device` record's with `dma_memory` beside the
-physical window and line, a `given` record's as `{object, Window, Offset, Size}`, `[{object,
-Line}]` and, for a nonzero size, `memory => {object, Memory, Bytes}`; and `{ok, []}` when
-there is none. Words after a record's numbers are not the record's. Each number must be
-decimal within its field (64, 64, 32 and 64 bits for a `device` record, 64 bits each for a
-`given` one), or the records of that role and peripheral are refused with a stated reason
+each as a spec for `erx_device:open/1`: a `device` record's as the physical window and line,
+a `given` record's as `{object, Window, Offset, Size}`, `[{object, Line}]` and, for a nonzero
+size, `memory => {object, Memory, Bytes}`; and `{ok, []}` when there is none. Words after a
+record's numbers are not the record's. Each number must be decimal within its field (64, 64
+and 32 bits for a `device` record, 64 bits each for a `given` one), or the records of that
+role and peripheral are refused with a stated reason
 (`erx_device_record:find/3`, which has a fuzz target). The hosted entry adds no record,
 since a hosted runtime has no devices. More records than `ERX_BOOT_DEVICES_MAX` refuse
 the manifest at boot.

@@ -480,9 +480,12 @@ module Erx
 
       # Every word of ERTS's arguments that the manifest's own words do not add.
       def self.arguments_always(root) = ARGUMENTS_FIXED + allocator_words(root).size
-      # The words of -erx device ROLE PERIPHERAL BASE SIZE LINE DMA_MEMORY, which the root adds
-      # for each device of a RECORD_UNITS unit (docs/design-stopgap.md, "Device records").
-      DEVICE_RECORD_WORDS = 8
+      # The words of -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE, which
+      # the root adds for the device of each RECORD_UNITS unit but the host link's, and of -erx
+      # device ROLE PERIPHERAL BASE SIZE LINE, the host link's UART's physical record
+      # (docs/design-stopgap.md, "Device records").
+      GIVEN_RECORD_WORDS = 10
+      DEVICE_RECORD_WORDS = 7
       # The manifest unit that holds the host link's UART, which gives a device record only
       # when the boot sends erx.hostlink=1.
       HOSTLINK_UNIT = 'hostlink'
@@ -594,7 +597,8 @@ module Erx
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
         recorded = hostlink == QemuPlan::NO_HOSTLINK ? RECORD_UNITS - [HOSTLINK_UNIT] : RECORD_UNITS
-        records = source.scan(/^unit (\w+)$/).flatten.count { |unit| recorded.include?(unit) } * DEVICE_RECORD_WORDS
+        records = source.scan(/^unit (\w+)$/).flatten.select { |unit| recorded.include?(unit) }
+                        .sum { |unit| unit == HOSTLINK_UNIT ? DEVICE_RECORD_WORDS : GIVEN_RECORD_WORDS }
         arguments = arguments_always(root) + records + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         count = schedulers(source, cpus: cpus)
         raise Error, 'a production boot refuses a test image' if built.test_code

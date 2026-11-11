@@ -97,15 +97,43 @@ class BootManifestTest < Minitest::Test
   # compatible string are a row of device_kinds, each with the platform record's window, line
   # and DMA memory. The console's UART, a UART of the same compatible string in a unit the
   # system domain holds, is no record, so there are three: erx_pl011 reads -erx console_uart.
+  # Block and net are given: the root makes each a window object over its transport's page,
+  # the transport at 0xe00 in it, and its record is -erx given with the driver's stand-in
+  # handles 11, 12 and 13 for the window, line and memory objects. The host link's UART,
+  # which does no DMA, is the one physical record.
   def test_the_block_net_and_hostlink_units_give_one_device_record_each
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "devices 3\n"
     assert_includes output, "device hostlink pl011 151257088 4096 40 0 " \
-                            "words-erx device hostlink pl011 151257088 4096 40 0 exact 1 short 0\n"
-    assert_includes output, "device block virtio_mmio 167788032 512 79 1048576 " \
-                            "words-erx device block virtio_mmio 167788032 512 79 1048576 exact 1 short 0\n"
-    assert_includes output, "device net virtio_mmio 167783936 512 71 262144 words-erx device net virtio_mmio 167783936 512 71 262144 exact 1 short 0\n"
+                            "words-erx device hostlink pl011 151257088 4096 40 exact 1 short 0\n"
+    assert_includes output, "device block virtio_mmio 167788032 512 79 1048576 window 167784448 4096 3584 " \
+                            "words-erx given block virtio_mmio 11 3584 512 12 13 1048576 exact 1 short 0\n"
+    assert_includes output, "device net virtio_mmio 167783936 512 71 262144 window 167780352 4096 3584 " \
+                            "words-erx given net virtio_mmio 11 3584 512 12 13 262144 exact 1 short 0\n"
+  end
+
+  # A given device's window object covers whole pages from the one that holds its first
+  # register through the one that holds its last, and registers that are empty, wrap, or end
+  # in the last page of the address space are refused rather than given a window of 0 bytes.
+  # The record places the registers at the window's offset, and a device without DMA memory
+  # names no memory object, whatever handle the root holds.
+  def test_a_given_device_s_window_covers_the_pages_of_its_registers
+    given = lambda do |window, offset, size|
+      "window #{window} #{offset} words-erx given block virtio_mmio 11 #{offset} #{size} 12 0 0 exact 1 short 0\n"
+    end
+    {
+      %w[0xa003e00 0x200] => given.call('167784448 4096', 3584, 512),
+      %w[0xfff 2] => given.call('0 8192', 4095, 2),
+      %w[0x1000 0x1000] => given.call('4096 4096', 0, 4096),
+      %w[0x1000 0] => "window refused\n",
+      %w[0xfffffffffffffffe 4] => "window refused\n",
+      %w[0xfffffffffffff000 16] => "window refused\n"
+    }.each do |(base, size), expected|
+      output, status = Open3.capture2e(@driver, 'window', base, size, stdin_data: '')
+      assert status.success?, output
+      assert_equal expected, output, "#{base} #{size}"
+    end
   end
 
   # The host link is the boot's to ask for (docs/design-stopgap.md, "Device records"): without
