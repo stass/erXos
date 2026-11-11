@@ -149,6 +149,16 @@
       "status": "permanent"
     },
     {
+      "id": "freebsd-signal",
+      "kind": "file",
+      "version": "95719d8a895bf8170851e9844d9b4092b1d2b6fe",
+      "url": "https://raw.githubusercontent.com/freebsd/freebsd-src/95719d8a895bf8170851e9844d9b4092b1d2b6fe/sys/sys/signal.h",
+      "sha256": "94e036dd56ac872b0429a87944304767b5e8700df91fc9716565a5f5337bcaa4",
+      "filename": "signal.h",
+      "license": "BSD-3-Clause",
+      "status": "permanent"
+    },
+    {
       "id": "libvterm",
       "kind": "tar",
       "version": "0.3.3",

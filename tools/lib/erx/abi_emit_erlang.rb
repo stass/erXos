@@ -4,6 +4,7 @@
 
 require_relative 'abi_model'
 require_relative 'abi_names'
+require_relative 'abi_signals'
 
 module Erx
   module ABI
@@ -24,7 +25,8 @@ module Erx
 
       def outputs(schema)
         result = { 'erlang/apps/erx/include/generated/erx_abi.hrl' => header(schema),
-                   'erlang/apps/erx/src/generated/erx_abi_events.erl' => events(schema) }
+                   'erlang/apps/erx/src/generated/erx_abi_events.erl' => events(schema),
+                   'erlang/apps/erx/src/generated/erx_abi_signals.erl' => signals(schema) }
         schema.readers.each do |specification|
           module_name = Names.c(specification.name)
           unless module_name.match?(/\Aerx_[a-z][a-z0-9_]*\z/) && module_name.bytesize <= 255
@@ -99,6 +101,35 @@ module Erx
          "-spec describe(#{enum_type}, integer()) ->",
          '    {atom(), [{atom(), argument_type()}]} | unknown.',
          clauses.join(";\n") + '.', '', status_function(schema), '', flags_function(schema), ''].join("\n")
+      end
+
+      # erx_abi_signals: each signal a program may name, by its protocol
+      # name (sig and its name, sigint or 'sigrtmin+1'), with its number and
+      # default action. Reserved numbers are the C library's and have no
+      # protocol name.
+      def signals(schema)
+        nameable = schema.signals.signals.select(&:nameable?)
+        clauses = lambda do |function, pairs|
+          (pairs.map { |key, value| "#{function}(#{literal(key)}) -> #{literal(value)}" } +
+           ["#{function}(_) -> unknown"]).join(";\n") + '.'
+        end
+        name = ->(signal) { atom("sig#{signal.name}") }
+        actions = Signals::ACTIONS.keys - %w[none reserved]
+        [NOTICE, '-module(erx_abi_signals).',
+         '-moduledoc "The signal table of the ABI file: each signal a program may name, its number and ' \
+         'its default action.".',
+         '-export([number/1, name/1, default_action/1]).', '-export_type([action/0]).', '',
+         "-type action() :: #{actions.map { |action| literal(atom(action)) }.join(' | ')}.", '',
+         '%% The number of a signal, or unknown for an atom that names none.',
+         '-spec number(atom()) -> pos_integer() | unknown.',
+         clauses.call('number', nameable.map { |signal| [name.call(signal), signal.number] }), '',
+         '%% The name of a signal number, or unknown for a number that is no signal a program may name.',
+         '-spec name(integer()) -> atom() | unknown.',
+         clauses.call('name', nameable.map { |signal| [signal.number, name.call(signal)] }), '',
+         '%% The default action of a signal, or unknown for an atom that names none.',
+         '-spec default_action(atom()) -> action() | unknown.',
+         clauses.call('default_action', nameable.map { |signal| [name.call(signal), atom(signal.action)] }), '']
+          .join("\n")
       end
 
       def status_function(schema)

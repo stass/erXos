@@ -1,0 +1,51 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The signal table (docs/design-programs.md, "Signal numbers"). Numbers are
+# FreeBSD 15.1's (sys/sys/signal.h) and default actions FreeBSD's
+# (sys/kern/kern_sig.c, sigproptbl); test/host/abi_signals_test.rb compares
+# the numbers with the header at deps.lock's freebsd-signal pin.
+#
+#   signal NAME NUMBER ACTION [alias NAME]
+#   realtime FIRST LAST ACTION
+#
+# NAME is the signal's name without SIG, in lower case. ACTION is
+# terminate, ignore, stop or continue for a signal a program may name, and
+# reserved for a number the C library keeps for itself, which no program
+# may name. realtime numbers the real-time signals FIRST to LAST and names
+# them as sig2str does: rtmin, rtmin+1 up to the middle of the range, then
+# rtmax-N down to rtmax. A number the table does not list is not a signal.
+signal hup 1 terminate
+signal int 2 terminate
+signal quit 3 terminate
+signal ill 4 terminate
+signal trap 5 terminate
+signal abrt 6 terminate alias iot
+signal emt 7 terminate
+signal fpe 8 terminate
+signal kill 9 terminate
+signal bus 10 terminate
+signal segv 11 terminate
+signal sys 12 terminate
+signal pipe 13 terminate
+signal alrm 14 terminate
+signal term 15 terminate
+signal urg 16 ignore
+signal stop 17 stop
+signal tstp 18 stop
+signal cont 19 continue
+signal chld 20 ignore
+signal ttin 21 stop
+signal ttou 22 stop
+# SIGPOLL is Linux's name of SIGIO; FreeBSD defines no SIGPOLL.
+signal io 23 ignore alias poll
+signal xcpu 24 terminate
+signal xfsz 25 terminate
+signal vtalrm 26 terminate
+signal prof 27 terminate
+signal winch 28 ignore
+signal info 29 ignore
+signal usr1 30 terminate
+signal usr2 31 terminate
+signal thr 32 reserved alias lwp
+signal librt 33 reserved
+realtime 65 126 terminate

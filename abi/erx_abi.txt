@@ -15,6 +15,7 @@ include formats/mbr.txt
 include medium.txt
 include formats/erofs.txt
 include kernel.txt
+include signals.txt
 include protocols/9p.txt
 include protocols/hostlink.txt
 include formats/ui.txt

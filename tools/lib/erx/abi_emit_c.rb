@@ -69,6 +69,7 @@ module Erx
           out.concat(layout_operations(type, schema)) if type.is_a?(Layout) && !type.private?
         end
         out.concat(status_table(schema))
+        out.concat(signal_tables(schema))
         out.concat(event_tables(schema))
         out.concat(rights_tables(schema)) if schema.objects.any?
         out.concat(['#endif /* ERX_ABI_H */', ''])
@@ -138,6 +139,39 @@ module Erx
          "\tstatic const char *const table[] = {", *entries, "\t};", '',
          "\tif (status > 0 || (uint64_t)-(int64_t)status >= sizeof(table) / sizeof(table[0]))",
          "\t\treturn (NULL);", "\treturn (table[-(int64_t)status]);", '}', '']
+      end
+
+      # The signal table's lookups by number. Each table is indexed by
+      # the number after its bound check, and an unlisted entry reads as
+      # NULL or ERX_SIG_ACTION_NONE, which is 0.
+      def signal_tables(schema)
+        signals = schema.signals.signals
+        return [] if signals.empty?
+
+        names = signals.map { |signal| "\t\t[#{signal.number}] = #{signal_string(signal.name)}," }
+        actions = signals.map { |signal| "\t\t[#{signal.number}] = #{constant("sig_action_#{signal.action}")}," }
+        bound = "\tif (signo < 0 || (size_t)signo >= sizeof(table) / sizeof(table[0]))"
+        ['/*', ' * The signal table\'s name of a number without SIG, in upper case (HUP,',
+         ' * RTMIN+1, and THR for a reserved number), or NULL for an unlisted number.', ' */',
+         'static inline const char *', 'erx_sig_name(int signo)', '{',
+         "\tstatic const char *const table[] = {", *names, "\t};", '', bound,
+         "\t\treturn (NULL);", "\treturn (table[signo]);", '}', '',
+         '/* A signal\'s default action, an ERX_SIG_ACTION_ value: NONE for no signal. */',
+         'static inline int', 'erx_sig_action(int signo)', '{',
+         "\tstatic const uint8_t table[] = {", *actions, "\t};", '', bound,
+         "\t\treturn (#{constant('sig_action_none')});", "\treturn (table[signo]);", '}', '',
+         '/* Whether a number is a signal a program may name: listed and not reserved. */',
+         'static inline bool', 'erx_sig_valid(int signo)', '{',
+         "\tint action = erx_sig_action(signo);", '',
+         "\treturn (action != #{constant('sig_action_none')} && action != #{constant('sig_action_reserved')});",
+         '}', '']
+      end
+
+      # A signal name in upper case as a C string literal: the table holds
+      # only [a-z0-9+-], so it needs no escaping.
+      def signal_string(name)
+        raise SchemaError, "cannot quote signal #{name.inspect}" unless name.match?(/\A[a-z][a-z0-9+-]*\z/)
+        "\"#{name.upcase}\""
       end
 
       def event_type_tag(type) = constant("abi_arg_#{type}")

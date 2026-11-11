@@ -118,7 +118,8 @@ module Erx
     Schema = Struct.new(:version, :architecture, :types, :type_order,
                         :constants, :rights, :objects, :kinds, :caps, :calls,
                         :readers, :translations, :services, :projections,
-                        :protocols, :inspection, :ui, :draw, :web, :inputs, :statuses, keyword_init: true) do
+                        :protocols, :inspection, :ui, :draw, :web, :inputs, :statuses, :signals,
+                        keyword_init: true) do
       # The enums with args lines, in type order: the ones the generator
       # emits event tables for.
       def event_enums
@@ -131,7 +132,7 @@ module Erx
     module Model
       TOP_LEVEL = %w[abi arch trap reg limit scalar enum flags bytes layout
                      status right type kind cap call reader translation service
-                     projection protocol inspection ui draw web].freeze
+                     projection protocol inspection ui draw web signal realtime].freeze
       TYPE_KINDS = %w[scalar enum flags bytes layout].freeze
       BASE_TYPES = [1, 2, 4, 8].flat_map do |size|
         [false, true].map do |signed|
@@ -182,7 +183,11 @@ module Erx
         kinds = validate_kinds(by_kind.fetch('kind', []), objects, rights)
         caps = validate_caps(by_kind.fetch('cap', []), kinds)
         definitions = unique_definitions(declarations + root_extension(caps))
+        signals = validate_signals(by_kind)
         constants = collect_constants(by_kind)
+        Signals.constants(signals).each do |name, value|
+          add_constant(constants, name, value, BASE_TYPES.fetch('i32'), abi.line)
+        end
         add_constant(constants, 'abi_version', version, BASE_TYPES.fetch('u32'), abi.line)
         types, type_order = resolve_types(definitions, constants)
         calls = validate_calls(by_kind.fetch('call', []), types, constants, objects, rights)
@@ -221,7 +226,7 @@ module Erx
                    translations: translations.freeze, services: services.freeze,
                    projections: projections.freeze, protocols: protocols,
                    inspection: inspection, ui: ui, draw: draw, web: web, inputs: source.inputs,
-                   statuses: status_values(by_kind)).freeze
+                   statuses: status_values(by_kind), signals: signals).freeze
         freeze_value(result)
       end
 
@@ -313,7 +318,7 @@ module Erx
       def unique_definitions(declarations)
         definitions = {}
         declarations.each do |declaration|
-          next if %w[abi arch trap reg cap inspection ui draw web].include?(declaration.kind)
+          next if %w[abi arch trap reg cap inspection ui draw web signal realtime].include?(declaration.kind)
           name = Syntax.identifier(declaration.args.first, line: declaration.line)
           declaration.fail!("duplicate definition #{name}") if definitions.key?(name) || BASE_TYPES.key?(name)
           definitions[name] = declaration
@@ -1037,6 +1042,11 @@ module Erx
       def validate_protocols(declarations, constants)
         require_relative 'abi_protocol'
         Protocols.validate(declarations, constants)
+      end
+
+      def validate_signals(by_kind)
+        require_relative 'abi_signals'
+        Signals.validate(by_kind)
       end
 
       # The inspection schema's members have a namespace of their own and
