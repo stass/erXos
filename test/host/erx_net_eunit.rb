@@ -33,6 +33,14 @@ module ErxNetEunit
   INCLUDE = File.join(ROOT, 'erlang/apps/erx_net/include')
   TESTS = File.join(ROOT, 'test/erlang')
   DEADLINE = 300
+  # EUnit's own timeouts, the 5 s a case gets by default included, are multiplied by this
+  # (its scale_timeouts option), so a case that waits on a loaded host's scheduler is not cut
+  # short. DEADLINE still ends a run that hangs, and ends one first where a case's explicit
+  # hang guard scaled by this passes it.
+  TIMEOUT_SCALE = 3
+  # OTP modules whose first use loads a NIF library or a socket layer, loaded with the
+  # stack's own before EUnit starts.
+  OTP_PRELOAD = %w[crypto gen_udp inet rand socket].freeze
 
   # Requires every EUnit case of modules, each test/erlang/MODULE.erl, to pass.
   # extra: further test/erlang module names to compile, such as an oracle.
@@ -52,6 +60,10 @@ module ErxNetEunit
     output, status = run_erx_net_eunit(modules, extra: extra, pkt: false, tap: tap, fault: fault, c_fault: c_fault)
     seeds = [*fault.keys, *c_fault.keys].join(', ')
     refute status.success?, "the seeded fault #{seeds} passed:\n#{output}"
+    if output.match?(/\*timed out\*|were cancelled/) && !output.match?(/Failed: [1-9]/)
+      flunk "the seeded fault #{seeds} ended in cancelled cases (a timeout, a failed setup or a dead test " \
+            "process), not in a failing case:\n#{output}"
+    end
     assert_match(/Failed: [1-9]/, output)
     output
   end
@@ -72,11 +84,27 @@ module ErxNetEunit
       sources = [*application, *(extra + modules).map { |name| File.join(TESTS, "#{name}.erl") }]
       erlc(ebin, sources, includes: includes, flags: Erx::ErlangApps::FLAGS)
 
-      list = "[#{modules.join(', ')}]"
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE.to_s, ENV.fetch('ERX_ERL'), '-noshell', '-pa', ebin,
-                      '-eval', "halt(case eunit:test(#{list}, []) of ok -> 0; _ -> 1 end).",
-                      chdir: work, stdin_data: '')
+                      '-eval', eunit_call(modules, preload: preloaded(sources, tap)), chdir: work, stdin_data: '')
     end
+  end
+
+  # The modules to load before EUnit starts: each source of the run, and the OTP modules of
+  # OTP_PRELOAD. erx_tap_nif is left out unless the run builds its library, since its
+  # on_load fails without it.
+  def preloaded(sources, tap)
+    names = sources.map { |source| File.basename(source, '.erl') }
+    names -= ['erx_tap_nif'] unless tap
+    [*names, *OTP_PRELOAD]
+  end
+
+  # The Erlang expression a run evaluates: it first loads preload, so the code server's work,
+  # a NIF library's load included, is done before the first case starts and no case's
+  # timeout covers it, then runs EUnit over modules with its timeouts scaled. A module that
+  # fails to load is left for the case that uses it to report.
+  def eunit_call(modules, preload:)
+    "_ = code:ensure_modules_loaded([#{preload.join(', ')}]), " \
+      "halt(case eunit:test([#{modules.join(', ')}], [{scale_timeouts, #{TIMEOUT_SCALE}}]) of ok -> 0; _ -> 1 end)."
   end
 
   # Source itself, or for a module named in fault a copy in work with its exact
