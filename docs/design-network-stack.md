@@ -1686,6 +1686,21 @@ RST landed in a window, the side channel of CVE-2016-5696.
 `erx_tcp:step/3` is the only entry. It dispatches the event to the module
 that translates the FreeBSD code for it, then runs output, as
 `tcp_do_segment` ends by calling `tcp_output` when an ACK or data is due.
+The only other entry is `erx_tcp:rcvd/2`, for bytes that left the
+receive buffer: FreeBSD's `tcp_usr_rcvd` calls `tcp_output`, and what
+output sends because of them is a window update past the receiver's
+silly window avoidance (`tcp_output.c:655-692`). The connection
+process asks it first and steps `rcvd` only when output would send: a
+window update, an owed ACK, or a segment its last pass held back because
+the step's credit was spent (ENOBUFS), which output records in the control
+block (`stopped_short`) so the next read sends it as FreeBSD's does.
+Otherwise the bytes come off the control block without a step, and what
+such calls take off adds up against the same advertised edge, so it
+reaches the update and the window does not stall. The rest of what output
+reads outside the control block may have changed since the last step: the
+cut of the congestion window after idle, and data a missing route held
+back once the route returns, come at the next step or the retransmission
+timer.
 
 The user requests are FreeBSD's `pr_usrreqs` for a connected stream:
 `connect`, `send`, `rcvd` (so many bytes left the receive buffer, pushed

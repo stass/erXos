@@ -39,6 +39,7 @@ conn_test_() ->
       {"the credit is taken as items arrive", fun credit_is_taken_as_items_arrive/0},
       {"queued items are stepped once", fun queued_items_are_stepped_once/0},
       {"reading opens the window", fun reading_opens_the_window/0},
+      {"a read sends its window update", fun a_read_sends_its_window_update/0},
       {"a recv of the whole buffer completes", fun recv_of_the_whole_buffer_completes/0},
       {"a recv that times out keeps what it held", fun recv_that_times_out_keeps_what_it_held/0},
       {"a short tail at the FIN answers closed and stays",
@@ -215,6 +216,36 @@ reading_opens_the_window() ->
     window_opens_past(Rcv + 120000, 60000),
     ?assertEqual({ok, binary:part(Data, 65536, 120000 - 65536)}, erx_gen_tcp:recv(Sock, 0, ?WAIT)).
 
+%% The window update a read makes due goes with the read, as FreeBSD's tcp_usr_rcvd calls
+%% tcp_output. Once the full buffer is acknowledged, the clock hint the connection armed
+%% earlier is waited out, and no deadline is left within the wait: only the read's own step
+%% can send the update.
+a_read_sends_its_window_update() ->
+    #{conn := Conn, port := Port, sock := Sock, snd := Snd, rcv := Rcv} = established(),
+    Data = pattern(120000),
+    hand(Conn, Port, #{seq => Rcv, ack => Snd, flags => ?TH_ACK bor ?TH_PUSH}, binary:part(Data, 0, 60000)),
+    _ = window_acking(Rcv + 60000),
+    hand(Conn, Port, #{seq => Rcv + 60000, ack => Snd, flags => ?TH_ACK bor ?TH_PUSH},
+         binary:part(Data, 60000, 60000)),
+    ?assert(window_acking(Rcv + 120000) < 20000),
+    nothing_due_within(Conn, 2 * ?WAIT),
+    ?assertEqual({ok, binary:part(Data, 0, 65536)}, erx_gen_tcp:recv(Sock, 0, ?WAIT)),
+    ?assert(window_opens_past(Rcv + 120000, 60000) > 60000).
+
+%% Waits until neither a deadline of the connection nor its armed clock hint, which can be
+%% earlier than any deadline left, falls within the next Ms milliseconds.
+nothing_due_within(Conn, Ms) ->
+    State = sys:get_state(Conn),
+    Hint = case element(tuple_size(State) - 1, State) of
+               infinity -> infinity;
+               {At, _Timer} -> At
+           end,
+    Limit = erx_net_clock:now() + Ms * 1000,
+    case erx_tcp:next_deadline(element(2, State)) > Limit andalso Hint > Limit of
+        true -> ok;
+        false -> timer:sleep(100), nothing_due_within(Conn, Ms)
+    end.
+
 %% A recv for 64 KiB, the receive buffer's size before it is rounded up to whole segments,
 %% then one for twice that, each get exactly that, as on stock: the bytes a recv waits for
 %% leave the buffer as they arrive, pushed to the socket process, which grants the credit
@@ -319,11 +350,11 @@ window_acking(Seq) ->
         [] -> window_acking(Seq)
     end.
 
-%% Waits for a segment acknowledging Seq whose window is past Min; earlier updates, sent
-%% before the bytes left the receive buffer, are passed over.
+%% Waits for a segment acknowledging Seq whose window is past Min, and returns that window;
+%% earlier updates, sent before the bytes left the receive buffer, are passed over.
 window_opens_past(Seq, Min) ->
     case [Win || {#tcp{ack = Ack, win = Win}, _} <- segments(), Ack =:= Seq, Win > Min] of
-        [_ | _] -> ok;
+        [Win | _] -> Win;
         [] -> window_opens_past(Seq, Min)
     end.
 

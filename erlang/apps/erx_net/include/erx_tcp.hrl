@@ -131,6 +131,10 @@
     ack_now = false :: boolean(),               % TF_ACKNOW
     force_data = false :: boolean(),            % TF_FORCEDATA
     rxwin0_sent = false :: boolean(),           % TF_RXWIN0SENT: our last window was 0
+    %% Output's last pass stopped at a full driver queue (ENOBUFS) with a segment left to
+    %% send; while it is set, bytes leaving the receive buffer step the connection, so the
+    %% next read sends what the queue held back (erx_tcp:rcvd/2). Each pass sets it afresh.
+    stopped_short = false :: boolean(),
     %% The loss module's window for this step's output and the one kept after it, which
     %% input sets from allowance/3 after an acknowledgement (erx_tcp_loss).
     allowance = none :: erx_tcp_loss:allowance(),

@@ -193,6 +193,40 @@ rcvd_opens_the_window_test() ->
     ?assertEqual(0, T#tcb.rcv_buffered),
     ?assertEqual(65536, erx_tcp:rcv_space(T)).
 
+%% tcp_usrreq.c:834-870, tcp_output.c:655-692: bytes leaving the receive buffer take a step
+%% only when its output would send a window update on its own, at the update's exact
+%% thresholds. A full 64 KiB buffer with nothing advertised and 1448-byte segments: two
+%% segments of window, under an eighth of the buffer, are worth an update and a byte less is
+%% not; in a 2000-byte buffer half the buffer is. Quiet calls add up, so a reader taking a
+%% byte at a time still reaches the update, and draining the buffer always does: no stall.
+%% No update goes while a delayed ACK will carry the window or once the peer's FIN came; an
+%% ACK, or data, the driver's full queue held back is owed whatever the window.
+rcvd_steps_only_for_a_window_update_test() ->
+    Full = (in(established))#tcb{maxseg = 1448, rcv_buffered = 65536, rcv_adv = 5001},
+    {quiet, Below} = erx_tcp:rcvd(2 * 1448 - 1, Full),
+    ?assertEqual(65536 - (2 * 1448 - 1), Below#tcb.rcv_buffered),
+    ?assertEqual(step, erx_tcp:rcvd(2 * 1448, Full)),
+    ?assertEqual(step, erx_tcp:rcvd(1, Below)),
+    ?assertEqual(step, erx_tcp:rcvd(65536, Full)),
+    Small = Full#tcb{rcv_hiwat = 2000, rcv_buffered = 2000},
+    ?assertMatch({quiet, #tcb{rcv_buffered = 1001}}, erx_tcp:rcvd(999, Small)),
+    ?assertEqual(step, erx_tcp:rcvd(1000, Small)),
+    Delack = Full#tcb{deadlines = #deadlines{delack = ?T0 + 40}},
+    ?assertMatch({quiet, #tcb{rcv_buffered = 0}}, erx_tcp:rcvd(65536, Delack)),
+    ?assertMatch({quiet, #tcb{rcv_buffered = 0}},
+                 erx_tcp:rcvd(65536, Full#tcb{state = close_wait})),
+    ?assertEqual(step, erx_tcp:rcvd(1, Full#tcb{ack_now = true})),
+    ?assertEqual(step, erx_tcp:rcvd(1, Full#tcb{stopped_short = true})).
+
+%% The step the caller takes at the threshold sends the update, with the whole window the
+%% bytes opened; below it, the step sends nothing, which is what the quiet call skips.
+rcvd_step_sends_the_update_test() ->
+    Full = (in(established))#tcb{maxseg = 1448, rcv_buffered = 65536, rcv_adv = 5001},
+    {T, [{transmit, [{#tcp{ack = 5001, win = Win}, _, []}]}]} =
+        step({user, {rcvd, 2 * 1448}}, Full, ?T0),
+    ?assertEqual({2 * 1448, 5001 + 2 * 1448}, {Win, T#tcb.rcv_adv}),
+    ?assertMatch({_, []}, step({user, {rcvd, 2 * 1448 - 1}}, Full, ?T0)).
+
 %% --- tcp_timer.c ---
 
 next_deadline_is_the_earliest_test() ->

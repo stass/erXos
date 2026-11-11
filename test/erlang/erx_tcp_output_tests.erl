@@ -254,6 +254,14 @@ enobufs_keeps_the_ack_owed_test() ->
     {T2, [{#tcp{flags = ?TH_ACK, ack = 5001}, _, []}]} = out(T1),
     ?assertNot(T2#tcb.ack_now).
 
+%% A pass the credit cuts short (ENOBUFS) with data left to send records it, so the next read
+%% steps (erx_tcp:rcvd/2); the next pass with credit sends the data and clears the record.
+enobufs_records_the_short_pass_test() ->
+    {T1, []} = erx_tcp_output:output(est(3000), ctx(0)),
+    ?assert(T1#tcb.stopped_short),
+    {T2, [_ | _]} = out(T1),
+    ?assertNot(T2#tcb.stopped_short).
+
 %% tcp_output.c:1635-1641: the D-SACK block an ACK lost for want of a route reported is
 %% reported again by the next ACK, and cleared only once one has left.
 no_route_keeps_the_dsack_block_test() ->

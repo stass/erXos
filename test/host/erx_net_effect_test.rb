@@ -38,7 +38,11 @@ class ErxNetEffectTest < Minitest::Test
     ],
     # Bytes handed to the owner never stepped as read: the window stays shut.
     reading_opens_the_window: [
-      'settle(step({user, {rcvd, Released}}, S1))', '_ = Released, settle(S1)'
+      'settle(rcvd(Released, S1))', '_ = Released, settle(rcvd(0, S1))'
+    ],
+    # The step erx_tcp:rcvd/2 asks for ignored: the bytes come off, but no update is sent.
+    a_read_sends_its_window_update: [
+      'step -> step({user, {rcvd, Released}}, S)', 'step -> S#state{tcb = erx_tcp_user:rcvd(Released, Tcb0)}'
     ],
     # A batch's units never taken: the peer's segments hold the credit for good.
     credit_is_taken_as_items_arrive: [

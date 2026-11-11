@@ -35,8 +35,11 @@ actions in order:
 * `finish` ends the process once the step's answers are out.
 
 After the actions the loop pushes the receive queue to its socket process within the
-credit it holds, and steps `{user, {rcvd, Bytes}}` for what left the receive buffer, so
-the window opens as the socket process takes the bytes. A connection in TIME-WAIT whose
+credit it holds, and gives what left the receive buffer to erx_tcp:rcvd/2, so the window
+opens as the socket process takes the bytes: it steps `{user, {rcvd, Bytes}}` only when
+output would send for them (a window update, an owed ACK, or what a full driver queue held
+back), as FreeBSD's `tcp_usr_rcvd` sends nothing below tcp_output's thresholds, and
+otherwise takes them off the control block without a step. A connection in TIME-WAIT whose
 socket process is gone then gives both of its buffers back to the grant
 (erx_net_grant:release_buffers/2): its send buffer is empty, since the peer acknowledged
 the FIN, its receive queue was dropped with the socket process, and nothing more can be
@@ -430,10 +433,10 @@ owner_closed(#state{owner_ref = Ref} = S) ->
 
 %% --- Settling: the socket process, the end and the clock ----------------------------
 
-%% Pushes the receive queue within the credit, stepping `rcvd` for what left the receive
-%% buffer until nothing more does, pushes the end, then ends the process or arms the clock.
-%% What left the buffer is what it counted before the pushes less what it counts after, so
-%% no way of pushing can step more or less than it took.
+%% Pushes the receive queue within the credit, giving the step what left the receive buffer
+%% until nothing more does, pushes the end, then ends the process or arms the clock. What
+%% left the buffer is what it counted before the pushes less what it counts after, so no way
+%% of pushing can give the step more or less than it took.
 settle(S0) ->
     S1 = hand_over(S0),
     case S0#state.rcv_bytes - S1#state.rcv_bytes of
@@ -447,7 +450,17 @@ settle(S0) ->
                     {noreply, arm(S)}
             end;
         Released ->
-            settle(step({user, {rcvd, Released}}, S1))
+            settle(rcvd(Released, S1))
+    end.
+
+%% Bytes that left the receive buffer: a step only when its output would send for them, a
+%% window update, an owed ACK or what a full driver queue held back (erx_tcp:rcvd/2);
+%% otherwise they are taken off the control block alone, and the next segment out carries
+%% the window they opened.
+rcvd(Released, #state{tcb = Tcb0} = S) ->
+    case erx_tcp:rcvd(Released, Tcb0) of
+        {quiet, Tcb} -> S#state{tcb = Tcb};
+        step -> step({user, {rcvd, Released}}, S)
     end.
 
 %% The receive queue pushed in pieces while the socket process's credit lasts; dropped

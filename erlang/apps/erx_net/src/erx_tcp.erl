@@ -78,7 +78,8 @@
 -module(erx_tcp).
 -moduledoc """
 The step of a TCP connection (docs/design-network-stack.md, "Events and the step" and
-"Deadlines, not timers"): `step/3` is the only entry. It hands the event to the module that
+"Deadlines, not timers"): `step/3` is the only entry but one, `rcvd/2` (below).
+The step hands the event to the module that
 translates the FreeBSD code for it, then runs output, as `tcp_do_segment` ends by calling
 `tcp_output`, and then settles what follows from the resulting state:
 
@@ -96,6 +97,18 @@ give them. The event modules are erx_tcp_input (segments, with erx_tcp_timewait 
 reaching TIME-WAIT), erx_tcp_user (requests), erx_tcp_timer (expirations), erx_tcp_icmp
 (ICMP reports) and erx_tcp_output (output).
 
+Bytes that left the receive buffer have the other entry, `rcvd/2`. FreeBSD's
+`tcp_usr_rcvd` calls `tcp_output` for them, and what output sends because of them is a
+window update past the receiver's silly window avoidance (erx_tcp_output:window_update/1).
+`rcvd/2` takes the bytes off without a step when no update is due, no ACK is owed and
+output's last pass did not stop for want of the step's credit (ENOBUFS), and the next
+segment out advertises the window they opened; otherwise the caller steps
+`{user, {rcvd, Bytes}}`, whose output sends the update, the ACK or the segment held back.
+The rest of what output reads outside the control block may have changed since the last
+step, so what FreeBSD's read would send because of it comes at the next step or the
+retransmission timer instead: the cut of the congestion window after idle, and data a
+missing route held back once the route returns.
+
 The module also holds what those modules share: the state order of `tcp_fsm.h`, the
 connection's side of `cc_cong_signal` and `cc_ack_received` (sys/netinet/tcp_input.c), the
 calls a loss module returns, `tcp_respond` for a connection (sys/netinet/tcp_subr.c) and the
@@ -105,7 +118,7 @@ receive window it advertises.
 -include("erx_tcp.hrl").
 -include("erx_tcp_wire.hrl").
 
--export([step/3, next_deadline/1, merged/3]).
+-export([step/3, rcvd/2, next_deadline/1, merged/3]).
 -export([have_rcvd_syn/1, have_established/1, have_rcvd_fin/1, rank/1]).
 -export([cong_signal/4, loss_events/4, rewind/3, ccv/2, rxtshift/1, respond/5, challenge_ack/3,
          rcv_space/1, ts_now/2]).
@@ -258,6 +271,27 @@ answer_send(#tcb{send_waiter = {From, Rest}, sndbuf = Buf, snd_hiwat = Hiwat,
         false -> {Tcb, []};
         true -> erx_tcp_user:fill(From, Rest, Tcb)
     end.
+
+-doc """
+Takes `Bytes` that left the receive buffer off the control block and returns
+`{quiet, Tcb}` when no window update is due on its own (erx_tcp_output:window_update/1,
+tcp_output.c:655-692), no ACK is owed and output's last pass did not stop short at a full
+driver queue (`stopped_short`). Otherwise returns `step`, and the caller steps
+`{user, {rcvd, Bytes}}`, as FreeBSD's `tcp_usr_rcvd` calls `tcp_output`
+(tcp_usrreq.c:834-870). Quiet calls add up in `rcv_buffered` against the same advertised
+edge, so their sum reaches the update and the window never stalls. The module
+documentation names what a skipped step leaves to the next one.
+""".
+-spec rcvd(non_neg_integer(), #tcb{}) -> {quiet, #tcb{}} | step.
+rcvd(Bytes, #tcb{ack_now = false, stopped_short = false} = Tcb0)
+  when is_integer(Bytes), Bytes >= 0 ->
+    Tcb = erx_tcp_user:rcvd(Bytes, Tcb0),
+    case erx_tcp_output:window_update(Tcb) of
+        true -> step;
+        false -> {quiet, Tcb}
+    end;
+rcvd(Bytes, #tcb{}) when is_integer(Bytes), Bytes >= 0 ->
+    step.
 
 -doc """
 The earliest deadline of the connection, `infinity` when none is armed: the retransmission

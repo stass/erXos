@@ -82,7 +82,7 @@ calling `tcp_output`.
 
 -include("erx_tcp.hrl").
 
--export([new/1, request/3, drop/2, close/1, usrclosed/2, fill/3]).
+-export([new/1, request/3, rcvd/2, drop/2, close/1, usrclosed/2, fill/3]).
 
 -export_type([request/0, init/0]).
 
@@ -198,8 +198,8 @@ request({connect, From}, Tcb, _) ->
     {Tcb, [{reply, From, {error, already_connected(Tcb)}}]};
 request({send, From, Data}, Tcb, _) when is_binary(Data) ->
     send(From, Data, Tcb);
-request({rcvd, Bytes}, #tcb{rcv_buffered = Buffered} = Tcb, _) when is_integer(Bytes), Bytes >= 0 ->
-    {Tcb#tcb{rcv_buffered = Buffered - min(Bytes, Buffered)}, []};
+request({rcvd, Bytes}, Tcb, _) when is_integer(Bytes), Bytes >= 0 ->
+    {rcvd(Bytes, Tcb), []};
 request({shutdown, From, How}, Tcb, Ctx) when How =:= read; How =:= write; How =:= read_write ->
     shutdown(From, How, Tcb, Ctx);
 request(close, #tcb{state = time_wait} = Tcb, _) ->
@@ -208,6 +208,15 @@ request(close, Tcb, Ctx) ->
     {disconnect(Tcb#tcb{user_closed = true}, Ctx), []};
 request(abort, Tcb, _) ->
     {drop(Tcb, econnaborted), []}.
+
+-doc """
+`Bytes` left the receive buffer (`tcp_usr_rcvd`): they no longer count against the window,
+`sbspace`. The request's step runs output after it; erx_tcp:rcvd/2 takes them off without a
+step when output would send nothing for them.
+""".
+-spec rcvd(non_neg_integer(), #tcb{}) -> #tcb{}.
+rcvd(Bytes, #tcb{rcv_buffered = Buffered} = Tcb) ->
+    Tcb#tcb{rcv_buffered = Buffered - min(Bytes, Buffered)}.
 
 already_connected(#tcb{state = syn_sent}) -> ealready;
 already_connected(_) -> eisconn.

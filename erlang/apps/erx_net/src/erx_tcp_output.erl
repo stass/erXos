@@ -155,7 +155,8 @@ Departures, each from erXos's model:
 -include("erx_tcp_wire.hrl").
 -include("erx_net_frame.hrl").
 
--export([output/2, output/3, sndbuf_autoscale/2, setpersist/2, request_r_scale/0, segments/1]).
+-export([output/2, output/3, window_update/1, sndbuf_autoscale/2, setpersist/2, request_r_scale/0,
+         segments/1]).
 
 %% TCP_MAXWIN and TCP_MAX_WINSHIFT (tcp.h).
 -define(TCP_MAXWIN, 16#ffff).
@@ -234,7 +235,7 @@ output(#tcb{state = closed} = Tcb, Ctx, _Runs) ->
     {done(Tcb, Ctx), []};
 output(#tcb{snd_una = Una, snd_max = Max, snd_nxt = Nxt} = Tcb0,
        #tcp_ctx{credit = Credit} = Ctx, Runs) ->
-    Tcb = Tcb0#tcb{snd_nxt = max(Nxt, Una)},
+    Tcb = Tcb0#tcb{snd_nxt = max(Nxt, Una), stopped_short = false},
     Idle = Max =:= Una,
     {Tcb1, Out} = again(after_idle(Idle, Tcb, Ctx), Idle, {Credit, Runs}, Ctx, []),
     {done(Tcb1, Ctx), Out}.
@@ -526,10 +527,15 @@ data_goes(#out_seg{start = Start, len = Len, source = Source},
         orelse Nxt < Max
         orelse Source =/= next.
 
-%% Receiver silly-window avoidance for a window update on its own: only when the window
-%% grows by two segments and by a quarter of the buffer (or the buffer is small or nearly
-%% full), or by half the buffer; never while a delayed ACK will carry it, or once the peer
-%% has sent its FIN, or while a simultaneous open's SYN is unacknowledged (TF_NEEDSYN).
+-doc """
+Whether output sends a window update on its own (tcp_output.c:655-692), receiver silly
+window avoidance: only when the window grows by two segments and by a quarter of the buffer
+(or the buffer is small or nearly full), or by half the buffer; never while a delayed ACK
+will carry it, or once the peer has sent its FIN, or while a simultaneous open's SYN is
+unacknowledged (TF_NEEDSYN). erx_tcp:rcvd/2 asks it whether bytes leaving the receive
+buffer are worth a step.
+""".
+-spec window_update(#tcb{}) -> boolean().
 window_update(#tcb{state = State, rcv_adv = Adv, rcv_nxt = RcvNxt, maxseg = Mss,
                    rcv_hiwat = Hiwat, deadlines = #deadlines{delack = Delack},
                    need_syn = NeedSyn} = Tcb) ->
@@ -925,9 +931,10 @@ bit(_, _) -> 0.
 
 %% ENOBUFS: the segment the credit does not cover is not sent; the congestion window drops
 %% to one segment (tcp_maxseg) and a segment that carried sequence space leaves a send
-%% timer armed.
+%% timer armed. The pass records that it stopped short, so the next read steps to send it.
 enobufs(#out_seg{len = Len, flags = Flags}, #tcb{ccv = Ccv, maxseg = Mss, ts = Ts} = Tcb, Ctx) ->
-    Tcb1 = Tcb#tcb{ccv = Ccv#ccv{cwnd = erx_tcp_mss:maxseg(Mss, {synchronized, is_record(Ts, ts), 0})}},
+    Tcb1 = Tcb#tcb{ccv = Ccv#ccv{cwnd = erx_tcp_mss:maxseg(Mss, {synchronized, is_record(Ts, ts), 0})},
+                   stopped_short = true},
     case (Len > 0 orelse Flags band (?TH_SYN bor ?TH_FIN) =/= 0)
          andalso Tcb#tcb.send_timer =:= none of
         true -> arm_rexmt(Tcb1, Ctx);
