@@ -646,8 +646,9 @@ make check-litmus
   use after return and lets allocations fail. Leak and
   initialization-order checks need Linux, so macOS reports them
   unsupported. `check-asan` and `check-tsan` both select this combined
-  host gate. `check-ubsan` runs it too, then fails on purpose: its kernel
-  UBSan boot cannot run until erXos's own kernel exists.
+  host gate. `check-ubsan` runs it too, then reports its kernel UBSan boot
+  unsupported, as it cannot run until erXos's own kernel exists; the host
+  run decides its status.
 * **Fuzzing** runs the generated C ABI and manifest decoder and the
   `ERXPACK` and ELF C cores under libFuzzer with ASan and UBSan. It also
   runs the generated Erlang reader's hostile corpus and the Ruby parser

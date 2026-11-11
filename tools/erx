@@ -72,9 +72,9 @@ module Erx
       when 'check-sanitizers'
         check_sanitizers(command_arguments, **collaborators)
       when 'check-ubsan'
-        check_sanitizers(command_arguments, **collaborators)
-        Terminal.puts('unsupported: kernel UBSan boot requires erXos kernel implementation; host UBSan checks passed')
-        1
+        status = check_sanitizers(command_arguments, **collaborators)
+        Terminal.puts("kernel UBSan boot: unsupported; no UBSan trap-mode kernel build exists until erXos's own kernel does")
+        status
       when 'gates'
         gates(command_arguments, **collaborators)
       when 'pack'

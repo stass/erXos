@@ -26,7 +26,10 @@ module ErxManifestFuzz
   Erx::Generated.ensure(root: ROOT)
   MODULE_SOURCE = File.join(ROOT, 'build/gen/erlang/apps/erx/src/generated/erx_manifest.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_manifest_fuzz.erl')
-  C_SOURCES = %w[build/gen/liberx/generated/abi_reader.c tools/fuzz/manifest_fuzz.c tools/fuzz/manifest_verdicts.c].freeze
+  # The C reader's verdict program links the libFuzzer target's own sources, includes and
+  # macros (tools/fuzz/manifest_target.rb), with a main of its own beside them.
+  TARGET = Erx::PackFuzz.targets.to_h { |target| [target.kind, target] }.fetch('manifest')
+  VERDICTS_SOURCE = 'tools/fuzz/manifest_verdicts.c'
   RESERVED = 'ensure((Unsigned band maps:get(zero, Field)) =:= 0,'
   WRONG_RESERVED = 'ensure((Unsigned band maps:get(zero, Field)) >= 0,'
   INPUTS = 20_000
@@ -98,8 +101,10 @@ module ErxManifestFuzz
     output, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-Wall', '-Wextra', '-Werror',
                                      '-pedantic', '-O1', '-g', '-fsanitize=address,undefined',
                                      '-fno-sanitize-recover=undefined', '-fno-omit-frame-pointer',
-                                     *Erx::Generated.include_flags(root: ROOT), '-I', File.join(ROOT, 'include'),
-                                     *C_SOURCES.map { |source| File.join(ROOT, source) }, '-o', program,
+                                     *Erx::PackFuzz.define_flags(TARGET),
+                                     *Erx::PackFuzz.include_flags(TARGET, root: ROOT),
+                                     *Erx::PackFuzz.source_paths(TARGET, root: ROOT), File.join(ROOT, VERDICTS_SOURCE),
+                                     '-o', program,
                                      stdin_data: '')
     raise output unless status.success?
 

@@ -424,6 +424,29 @@ class TopLevelCliTest < Minitest::Test
     assert tests.all? { |_argv, options| options.fetch(:env).fetch('ERX_SANITIZERS') == 'address,undefined' }
   end
 
+  # The kernel UBSan boot has no erXos kernel to boot in Phase 1, so the gate reports it
+  # unsupported and passes on the host UBSan run, as check-sanitizers reports LeakSanitizer.
+  def test_ubsan_gate_reports_the_kernel_boot_unsupported_and_passes_on_the_host_run
+    commands = []
+    with_checks(commands) do |collaborators|
+      status, output = run_cli('check-ubsan', **collaborators.slice(:runner_class, :runtime), platform: MACOS)
+      assert_equal 0, status, output
+      assert_includes output, 'these tests passed with ERX_SANITIZERS=address,undefined'
+      assert_includes output, "kernel UBSan boot: unsupported;"
+    end
+    refute_empty step_commands(commands, 'sanitizer-tests')
+  end
+
+  def test_ubsan_gate_fails_when_the_host_run_fails
+    commands = []
+    with_checks(commands, fail_name: 'sanitizer-tests') do |collaborators|
+      status, output = run_cli('check-ubsan', **collaborators.slice(:runner_class, :runtime), platform: MACOS)
+      assert_equal 1, status, output
+      refute_includes output, 'these tests passed'
+      refute_includes output, 'kernel UBSan boot'
+    end
+  end
+
   def assert_sanitizer_gate_leaves_out_the_hosted_files_off_macos(expected)
     commands = []
     output = nil

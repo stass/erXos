@@ -134,10 +134,23 @@ module Erx
     # target declares, the generated ones first.
     def compile_command(target, root:, compiler:, program:)
       [compiler, '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
-       '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer', *target.defines.map { |name| "-D#{name}" },
-       *['build/gen', 'build/gen/include', *target.includes, 'include'].uniq.flat_map { |path| ['-I', File.join(root, path)] },
-       *[*target.sources, 'build/gen/liberx/generated/abi_reader.c'].uniq.map { |source| File.join(root, source) },
-       File.join(root, "tools/fuzz/#{target.kind}_fuzz.c"), '-o', program]
+       '-fsanitize=fuzzer,address,undefined', '-fno-omit-frame-pointer', *define_flags(target),
+       *include_flags(target, root: root), *source_paths(target, root: root), '-o', program]
+    end
+
+    # The -D flags of the macros that target declares.
+    def define_flags(target) = target.defines.map { |name| "-D#{name}" }
+
+    # The include paths of target's program, the generated ones first.
+    def include_flags(target, root:)
+      ['build/gen', 'build/gen/include', *target.includes, 'include'].uniq.flat_map { |path| ['-I', File.join(root, path)] }
+    end
+
+    # Every C file of target's program. A harness of another shape (a main in place of
+    # libFuzzer's) links these same files, so its source list cannot drift from the target's.
+    def source_paths(target, root:)
+      [*target.sources, 'build/gen/liberx/generated/abi_reader.c', "tools/fuzz/#{target.kind}_fuzz.c"]
+        .uniq.map { |source| File.join(root, source) }
     end
 
     # The whole run's deadline, which allows every kind both in full.
