@@ -765,8 +765,12 @@ it; git history is the record of completed work.
   the audit's word and as `permanent`, whatever the audit's status, and `resolve_fiasco` picks out
   erXos's additions by their evidence text. The audit should emit each one's status and notices.
 * [Low] stopgap, `liberx/backend/fiasco/vm.c`: the pool takes all of `sigma0`'s memory and only
-  checks it against `root_memory`; nothing keeps the excess for a later budget. Budgets over the
-  pool arrive with the domains they guard (M5).
+  checks it against `root_memory`; nothing keeps the excess for a later budget, and nothing holds a
+  domain to its own budget, which is a record (docs/design-stopgap.md, "Budgets and groups as
+  records"): a configured row below its domain's use is admitted and runs (a storage row of 19 MiB
+  admitted a domain that used 29.8 MiB), and only a measurement such as medium_boot's Footprint shows
+  it. Footprint should measure each configured domain of the development manifest as it runs, so a
+  row that falls below its use fails a suite. Enforcement is erXos's kernel's (Phase 2).
 * [Low] musl, `liberx/backend/fiasco/arch/aarch64/task_start.S`: a task's 256 KiB first stack lies in `.bss` with no
   guard page, so a deep test overruns its own globals, possibly `t_status`, instead of faulting.
 * [Medium] tooling, `tools/lib/erx/qemu.rb`, `Transcript#consume_lines`: a serial line past 64 KiB ends the boot, and a task's `write` can
@@ -4227,6 +4231,16 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] Storage domain's write authority (`erlang/apps/erx_blk/src/erx_blk_service.erl`
+  `serve/1`, `config/manifest/qemu-virt-development.txt`): the block driver starts a writable
+  window on every partition role of the layout (record, `slot_a`, `slot_b`, vault, data)
+  whatever the manifest's window rows say, so the storage domain, which holds the block unit
+  and also runs the littlefs NIF over medium data, can rewrite the boot slots and the
+  boot-selection record that the manifest gives the system domain (property 8) and the vault
+  that PW1 gives only the vault's storage domain. A fault in that domain, say through a crafted
+  littlefs image, could persist across reboots. Have the driver serve only the windows the
+  domain library names for its own domain (data and the image), refusing slot, record and
+  vault roles outside the slot writer's domain, with a test that a request for them fails.
 * [Medium] Forged pids and `erx:owner/1` (erx.erl `owner/1`, erx_dist, the funnel): a pid's creation is a field its maker writes, while ERTS sends to a remote pid over the connection its node names, so a pid with domain A's creation and domain X's node passes an `erx:owner(Pid) =:= A` check and a send to it goes to X's connection, handing every local pid in the frame out to X (external.c's encoder) before X's funnel drops the frame as one to a dead name. erx_facet's caller check and the `erx:owner/1` doc's "a reply sent to a forged name goes to no third domain" rely on the creation alone. erx_domain_mints checks node and creation both. The fix by construction: the funnel refuses, at decode, a pid, reference or port whose node is a domain of this machine and whose creation is not that domain's, so `erx:owner/1` is authoritative for every caller; then the node check in erx_domain_mints can go.
 * [Medium] Session tty input (erx_session_tty, erx_tty_link): each `{tty_input, Bytes}` is checked at 4 KiB, but what waits unread in the shell's group has no bound; a master that types faster than the session reads grows the session's heap. erx_tty's `input/2` bound (docs/design-live.md, "Between domains") closes it when the line discipline lands.
 * [Low] Console line and terminal reports (erx_console.erl, erx_console_keys.erl): a terminal that reports text a session chose, such as xterm's title report where it is allowed, lets the session type anything at the line, `Ctrl-G` included, which no rule over the bytes can tell from typing. The menu drops the rest of the read that opened it and takes only one-byte reads, which stops a reply that arrives in one read; one the line driver splits into single bytes could still choose an entry, the system shell included. Settle it when logins come (M10): the system shell entry asks for the line's login again, or the host tool's console refuses terminal reports the session did not ask for. A terminal that sends 8-bit controls as raw bytes (0x9D, not U+009D written as UTF-8) is not recognized either, since such a byte is a UTF-8 continuation byte; recognizing it needs the rule to track UTF-8 lead bytes.
@@ -4902,11 +4916,41 @@ document's "residual risks accepted" paragraph.
   record's sector (`BootRecord.sector`) without the FAT whose
   `autoboot.txt` file is that sector, which the Raspberry Pi's firmware
   needs and nothing on QEMU reads. The EROFS image in the slot holds a copy
-  of the whole system release, its manifest excepted, which the system
-  domain mounts at `/images/release` and reads as files only, and the boot
+  of the whole system release, its manifest excepted, which no domain
+  mounts while the storage domain holds the block unit (next item), and the boot
   image holds the release too, from which the system domain starts, until
   the boot from the medium decides which releases leave the boot image
   ([design-storage.md](docs/design-storage.md#data-model)).
+* [Low] storage, the release image across domains (`liberx/system/dom_apply.c`,
+  `erlang/apps/erx_blk/src/erx_blk_service.erl`, `erx_blk_image.erl`): with the block
+  unit held by the storage domain, no image window is served
+  ([design-stopgap.md](docs/design-stopgap.md#image-windows)): the storage domain's
+  namespace holds no manifest, and `erx_blk_image` picks only windows the system domain
+  holds. Nothing outside tests reads `/images/release` yet. When a reader appears, have
+  the domain library write each image window's placement (image name, format, extent)
+  into the holder's boot page beside `-erx boot`, and have `erx_blk_image` read those
+  words instead of the manifest file.
+* [Medium] storage, `/data` from other domains (`config/manifest/qemu-virt-development.txt`,
+  `erlang/apps/erx_storage`): the storage domain has `connections 0` and no grant or introduce
+  row, and the system release ships neither `erx_blk` nor `erx_storage`, so neither the system
+  shell, root's session nor the website's image reaches `/data`. Serve it to them through a
+  grant of the storage domain's file server.
+* [Low] storage, log lines at every boot (`erlang/apps/erx_blk/src/erx_blk_service.erl`
+  `image_windows/0`, `mount_images/0`): in the storage domain the driver logs that the manifest
+  cannot be read and that no image is served or mounted on every normal boot, which reads as an
+  error. Skip the manifest read outside the system domain, or log it once as information,
+  until the image placement reaches the holder's boot page (the release image item above).
+* [Low] storage, `erx_lfs`'s unavailability text (`erlang/apps/erx_storage/src/erx_lfs.erl`
+  log lines, `erx_lfs_sup` moduledoc): they say `/data` stays unavailable until the next boot,
+  but the storage domain has `restarts 5` and starts its applications `permanent`, so an
+  exhausted supervisor ends the node and the domain's restart mounts `/data` again. Say so.
+* [Low] storage, slot windows (`config/manifest/qemu-virt-development.txt`,
+  `tools/lib/erx/manifest.rb` property 8): the four slot-writer windows (`slot_a`,
+  `slot_b`, `boot_selection`, `reset_count`) are held by the system domain, as property
+  8 requires of the slot writer, but their driver runs in the storage domain and no
+  grant carries slot writes from the storage domain to the system domain, so the rows
+  describe a grant nothing implements. The slot writer needs that grant (a facet of the
+  storage domain's driver, or the device service's window grants, PW1) before it writes.
 * [Low] storage, image windows (`erlang/apps/erx_blk/src/erx_blk_service.erl`):
   a restart of the block service starts new windows, but the image mounts
   made at boot (`mount_images/0`, a supervisor child that runs once) are not

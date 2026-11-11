@@ -62,8 +62,16 @@ module Erx
     # (docs/design-kernel.md, "The boot image"), and its boot scripts: for each name,
     # bin/<name>.boot, whose release file names the applications given, in that order.
     Release = Data.define(:name, :prefix, :applications, :system, :boots)
-    SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: APPLICATIONS, system: true,
-                         boots: { 'start' => APPLICATIONS }.freeze)
+    # Applications only the storage domain's boot script boots (docs/design-stopgap.md,
+    # "littlefs in the storage domain"): the block driver and littlefs's volume. The system release
+    # does not ship them, so no system domain starts or loads the driver of a device the
+    # manifest gives the storage domain, and none reads its windows.
+    STORAGE_ONLY = %w[erx_blk erx_storage].freeze
+    raise Error, "STORAGE_ONLY names what the runtime does not build: #{STORAGE_ONLY - APPLICATIONS}" unless
+      (STORAGE_ONLY - APPLICATIONS).empty?
+    SYSTEM_APPLICATIONS = (APPLICATIONS - STORAGE_ONLY).freeze
+    SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: SYSTEM_APPLICATIONS, system: true,
+                         boots: { 'start' => SYSTEM_APPLICATIONS }.freeze)
     # Where the one domain release lies: domains/erxos/, which sorts after boot/ and
     # before system/, so it is one run of whole entries that does not split the system
     # run (docs/design-stopgap.md, "The production image").

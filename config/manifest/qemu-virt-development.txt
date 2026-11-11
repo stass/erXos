@@ -1,10 +1,14 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# The development manifest of QEMU virt: the system domain, configured with no
-# other domain, as docs/design-stopgap.md's "The Phase 1 manifest check" admits
-# it, and the system principal's session template, from which the console starts
-# root's session at boot (docs/design-system.md, "Booting"). Fixed
+# The development manifest of QEMU virt: the system domain, one configured domain,
+# storage, as docs/design-stopgap.md's "The Phase 1 manifest check" admits it, and
+# the system principal's session template, from which the console starts root's
+# session at boot (docs/design-system.md, "Booting"). The storage domain is a
+# BeamAsm service domain that holds the block unit and its data and release
+# windows and runs the block driver and littlefs at /data (docs/design-stopgap.md,
+# "littlefs in the storage domain"); the slot writer's four windows stay the
+# system domain's (property 8). Fixed
 # medium roles carry partition 0, as docs/design-abi.md says. The machine is
 # QEMU virt with 224 MiB of RAM (config/platforms/qemu-virt.json), small for the
 # browser emulator yet roomy at the shell; root_memory, 156.25 MiB, leaves 51.75 MiB
@@ -15,11 +19,20 @@
 # processes and 213 modules, the system domain holds 9,268 liberx pool pages,
 # 36.2 MiB (an Apple M3 Max host, HVF, QEMU 11.1.3, Homebrew clang 23.1.3, 4 guest
 # CPUs, one boot of the interactive development image on 160 MiB of RAM, with this
-# manifest's budgets); 1,000 more idle processes
+# manifest's system baseline and the block driver and littlefs in the system domain);
+# 1,000 more idle processes
 # add about 4 MiB, and the rest of the baseline over ERTS and /tmp, 5.8 MiB, is the
-# margin. The system principal's 37 MiB holds root's one session, whose limits'
-# memory is 36 MiB and outer 1 MiB; with it the baseline leaves root_memory the
-# block device's 1 MiB, the network device's 256 KiB and 72 MiB no one is promised.
+# margin. The system principal's 68 MiB holds root's one session, whose limits'
+# memory is 36 MiB and outer 1 MiB, and the storage domain, 30 MiB and outer 1 MiB;
+# with it the baseline leaves root_memory the block device's 1 MiB, the network
+# device's 256 KiB and 41 MiB no one is promised. The storage domain's 30 MiB is its
+# use rounded up to a whole MiB: 7,635 pool pages, 29.8 MiB, with BeamAsm, erx_blk
+# and erx_storage running and /data mounted, at rest, measured as Footprint measures
+# (the root's pool pages in use with the domain up minus those once it has ended;
+# the block_device suite's medium boot, 512 MiB, HVF, 1 guest CPU, an Apple M3 Max
+# host, QEMU 11.1.3, Homebrew clang 23.1.3). The users share's cpuset of four CPUs
+# gives it four schedulers and four dirty CPU schedulers; with a cpuset of one CPU it
+# took 5,629 pages, 22.0 MiB.
 # A session's runtime starts with its runtime_limits' max_message_heap of 131072
 # words and the allocator flags every runtime starts with (docs/design-runtime.md,
 # "Memory"), which shrink the carriers of every allocator but literal_alloc and
@@ -35,10 +48,10 @@
 #
 #   release (applications)                      pool pages    MiB
 #   bare (kernel stdlib erx erx_files)          4,568         17.8
-#   storage (bare + erx_blk, loaded)            4,568         17.8
+#   blk (bare + erx_blk, loaded)                4,568         17.8
 #   network (bare + erx_net, erx_net_client)    4,568         17.8
 #   the bare release, loaded                    4,696         18.3
-#   the storage release, its 9 modules loaded   4,760         18.6
+#   the blk release, its 9 modules loaded       4,760         18.6
 #   the network release, its 82 modules loaded  5,240         20.5
 #   system domain at the shell, /tmp 4 MiB      8,072         31.5
 #
@@ -68,26 +81,30 @@
 # 4 MiB cap, created last, took 4,568 pages as the others did): the cap is charged on
 # use, not up front.
 #
-# The 224 MiB machine has the memory to admit the system domain, root's session, a
-# storage domain and a network domain, once the manifest configures the two domains
-# (max_domains is 1 until then). Admission charges budgets, not use: the system baseline,
-# 46 MiB, the principal's 37 MiB and the devices' 1.25 MiB promise 84.25 MiB of
-# root_memory's 156.25 MiB, which leaves 72 MiB for the two domains, whose budgets are at
-# least their use with their outer budgets: the storage domain, BeamAsm with four
-# schedulers, used 29.8 MiB at rest, and the network domain's 20.5 MiB was measured on the
-# interpreter. In use, the root's pool holds the system domain's 31.5 MiB (36.2 MiB at the
-# interactive shell of the development image), the session's about 19 MiB (the bare
-# release's 18.3 MiB and the shell's modules) and the two domains'. RAM less root_memory
+# The 224 MiB machine has the memory to admit the system domain, root's session, the
+# storage domain and a network domain, once max_domains and the principal's domains
+# grow to three. Admission charges budgets, not use: the system baseline, 46 MiB, the
+# system principal's 68 MiB (root's session, 36 MiB and outer 1 MiB, and the storage
+# domain, 30 MiB and outer 1 MiB) and the devices' 1.25 MiB promise 115.25 MiB of
+# root_memory's 156.25 MiB, which leaves 41 MiB no one is promised. That is the network
+# row's room: it needs about 21 MiB and outer 1 MiB, the network release's 20.5 MiB at
+# rest in the Footprint table above, measured on the interpreter with one scheduler, and
+# is measured again when the row is configured. On BeamAsm with four schedulers, as the
+# storage row runs, the storage domain's figure suggests about 30 MiB, which the 41 MiB
+# still holds. In use, the root's pool holds the system domain's 31.5 MiB (36.2 MiB at
+# the interactive shell of the development image), the session's about 19 MiB (the bare
+# release's 18.3 MiB and the shell's modules) and the storage domain's 29.8 MiB: about 80
+# to 85 MiB, which leaves about 71 to 76 MiB of root_memory unused. RAM less root_memory
 # leaves 67.75 MiB to Fiasco's kernel memory, 14 MiB at 224 MiB (its boot log's "Reserved
-# 14 MiB as kernel memory"), its image and sigma0, the archive (46.70 MiB), the root's
-# image (4.7 MiB) and the device tree's 1 MiB. root_memory keeps about 1.4 MiB below what
-# sigma0 offers the root, as on 192 MiB with 126.25 (sigma0 offered about 127.6 MiB there,
-# the session suite's image on the Apple M3 Max host, HVF, QEMU 11.1.3): it grows by 30
-# MiB with the 32 MiB of RAM because Fiasco's kernel memory grows by 2.
+# 14 MiB as kernel memory"), its image and sigma0, the archive, the root's image (4.7 MiB)
+# and the device tree's 1 MiB. root_memory keeps about 1.4 MiB below what sigma0 offers
+# the root, as on 192 MiB with 126.25 (sigma0 offered about 127.6 MiB there, the session
+# suite's image on the Apple M3 Max host, HVF, QEMU 11.1.3): it grows by 30 MiB with the
+# 32 MiB of RAM because Fiasco's kernel memory grows by 2.
 #
 # The image release is the system release's EROFS image in the slot, with no
 # hash tree; the packer takes its extent from the image it builds
-# (ReleaseMedium.image), and the system domain holds a read-only window on it.
+# (ReleaseMedium.image), and the storage domain holds a read-only window on it.
 manifest 1
 share system
   quota_ns 30000000
@@ -142,6 +159,16 @@ runtime_limits session
   atoms 16384
   foreign_atoms 1024
   processes 1024
+runtime_limits storage
+  max_frame 65536
+  max_message_heap 131072
+  funnel_depth 64
+  exports 256
+  tmp 0
+  overlay 0
+  atoms 16384
+  foreign_atoms 1024
+  processes 1024
 limits native
   memory 16777216
   outer 1048576
@@ -166,10 +193,22 @@ limits session
   runtime_limits @runtime_limits.session
   peer_held 4096
   peer_held_total 4096
-principal system
-  memory 38797312
+limits storage
+  memory 31457280
+  outer 1048576
   grant @share.users
-  domains 1
+  spaces none
+  lane 4096
+  connections 0
+  crash 0
+  flags none
+  runtime_limits @runtime_limits.storage
+  peer_held 4096
+  peer_held_total 4096
+principal system
+  memory 71303168
+  grant @share.users
+  domains 2
   names 64
   default_limits @limits.native
   ceiling_limits @limits.native
@@ -189,7 +228,7 @@ machine
   system_share @share.system
   users_share @share.users
   system_principal @principal.system
-  max_domains 1
+  max_domains 2
   max_connections 4
   system_lane 4096
   system_queue 16384
@@ -207,7 +246,7 @@ unit hostlink
   holder system
 unit block
   placement "block"
-  holder system
+  holder @domain.storage
 unit net
   placement "net"
   holder system
@@ -240,7 +279,7 @@ window reset_count
   rights read,write
   image none
 window data
-  holder system
+  holder @domain.storage
   device "/virtio_mmio@a003e00"
   role data
   partition 0
@@ -250,10 +289,20 @@ image release
   device "/virtio_mmio@a003e00"
   input @artifact.release
 window release
-  holder system
+  holder @domain.storage
   device "/virtio_mmio@a003e00"
   role verified_image
   partition 0
   rights read
   image @image.release
+domain storage
+  principal @principal.system
+  limits @limits.storage
+  kind service
+  flags none
+  runtime @artifact.jit
+  release @artifact.storage
+  restarts 5
+  restart_period_s 60
+  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx"
 shell_principal @principal.system

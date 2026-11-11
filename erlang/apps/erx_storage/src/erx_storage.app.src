@@ -1,0 +1,16 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The storage domain (docs/design-stopgap.md, "littlefs in the storage domain"): littlefs's
+%% volume on the block driver's data window, its owner erx_lfs over the NIF
+%% erx_littlefs, mounted at the domain's /data. Only the storage domain's boot
+%% script boots it, after erx_blk, whose windows it reads; the system release does
+%% not ship it.
+{application, erx_storage,
+ [{description, "erXos storage domain"},
+  {vsn, "1"},
+  {modules, [erx_lfs, erx_lfs_sup, erx_littlefs, erx_storage_app, erx_storage_sup]},
+  {registered, [erx_storage_sup, erx_lfs]},
+  {applications, [kernel, stdlib, erx, erx_files, erx_blk]},
+  {mod, {erx_storage_app, []}},
+  {env, []}]}.

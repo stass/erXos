@@ -26,12 +26,13 @@ module Erx
              "facet echo_peer\n  grantee @domain.peer\n  service @service.echo\n  operations none\n  max_request 512\n" \
              "  in_flight 4\n  reductions 100000\n  period_ns 1000000000\n  max_heap_size 65536\n"
 
-      # The ids the domain service gives: erts and peer at boot, then erts's next
-      # incarnation and peer's, in the order the expression halts them.
+      # The ids the domain service gives: erts, peer and the development manifest's
+      # storage at boot, then erts's next incarnation and peer's, in the order the
+      # expression halts them.
       ERTS = DOMAINS.fetch('erts')
       PEER = DOMAINS.fetch('peer')
-      ERTS_AGAIN = PEER + 1
-      PEER_AGAIN = PEER + 2
+      ERTS_AGAIN = STORAGE_ID + 1
+      PEER_AGAIN = STORAGE_ID + 2
 
       # Every variable carries the prefix Rg. RgWait polls the domain service's grant G
       # every 100 ms, at most 1200 times, until it is installed for the pair P (server id,

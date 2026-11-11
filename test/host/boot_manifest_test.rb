@@ -49,7 +49,7 @@ class BootManifestTest < Minitest::Test
   def admitted(source = @source)
     platform = JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json')))
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: platform, build_kind: 'development'))
-    Erx::Manifest.admit(source: source, codec: @codec, context: context).bytes
+    Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: ManifestContextFixture.accepting_planner).bytes
   end
 
   # hostlink: whether the boot carries erx.hostlink=1, which the driver passes on as its third argument.
@@ -96,19 +96,19 @@ class BootManifestTest < Minitest::Test
   # "The host link"), and the one device of a unit the system domain holds whose role and
   # compatible string are a row of device_kinds, each with the platform record's window, line
   # and DMA memory. The console's UART, a UART of the same compatible string in a unit the
-  # system domain holds, is no record, so there are three: erx_pl011 reads -erx console_uart.
-  # Block and net are given: the root makes each a window object over its transport's page,
-  # the transport at 0xe00 in it, and its record is -erx given with the driver's stand-in
-  # handles 11, 12 and 13 for the window, line and memory objects. The host link's UART,
-  # which does no DMA, is the one physical record.
-  def test_the_block_net_and_hostlink_units_give_one_device_record_each
+  # system domain holds, is no record, and the block unit is the storage domain's, so there
+  # are two: erx_pl011 reads -erx console_uart.
+  # Net is given: the root makes a window object over its transport's page, the transport at
+  # 0xe00 in it, and its record is -erx given with the driver's stand-in handles 11, 12 and
+  # 13 for the window, line and memory objects. The host link's UART, which does no DMA, is
+  # the one physical record.
+  def test_the_net_and_hostlink_units_give_one_device_record_each
     output, status = read(admitted)
     assert status.success?, output
-    assert_includes output, "devices 3\n"
+    assert_includes output, "devices 2\n"
     assert_includes output, "device hostlink pl011 151257088 4096 40 0 " \
                             "words-erx device hostlink pl011 151257088 4096 40 exact 1 short 0\n"
-    assert_includes output, "device block virtio_mmio 167788032 512 79 1048576 window 167784448 4096 3584 " \
-                            "words-erx given block virtio_mmio 11 3584 512 12 13 1048576 exact 1 short 0\n"
+    refute_match(/^device block /, output)
     assert_includes output, "device net virtio_mmio 167783936 512 71 262144 window 167780352 4096 3584 " \
                             "words-erx given net virtio_mmio 11 3584 512 12 13 262144 exact 1 short 0\n"
   end
@@ -138,16 +138,16 @@ class BootManifestTest < Minitest::Test
 
   # The host link is the boot's to ask for (docs/design-stopgap.md, "Device records"): without
   # erx.hostlink=1 its UART gives no record, so a machine with one UART, the website's, boots
-  # with no host link, and the block device's record is the same either way.
+  # with no host link, and the net device's record is the same either way.
   def test_the_hostlink_record_is_there_only_when_the_boot_asks_for_it
     asked, status = read(admitted, hostlink: true)
     assert status.success?, asked
     assert_match(/^device hostlink pl011 151257088 /, asked)
     plain, status = read(admitted, hostlink: false)
     assert status.success?, plain
-    assert_includes plain, "devices 2\n"
+    assert_includes plain, "devices 1\n"
     refute_match(/^device hostlink /, plain)
-    assert_equal asked.lines.grep(/^device block /), plain.lines.grep(/^device block /)
+    assert_equal asked.lines.grep(/^device net /), plain.lines.grep(/^device net /)
   end
 
   # A missing disk is a normal state: a manifest with no block unit reads, and has no record.

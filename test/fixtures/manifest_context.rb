@@ -36,13 +36,13 @@ module ManifestContextFixture
 
   # The archive the development manifest names, as both packs carry it: the domain
   # release under domains/erxos/ with the session boot script its session template
-  # names, the domain runtime image, runtimes/emu, and the system release's generated
-  # files and root.
-  def arguments(codec) = archive_arguments(codec, boots: %w[session])
+  # names and the storage boot script its storage row names, the domain runtime images,
+  # runtimes/emu and runtimes/jit, and the system release's generated files and root.
+  def arguments(codec) = archive_arguments(codec, boots: %w[session storage])
 
   # The same archive with the boot script app beside session, which domain_source's
   # domains name.
-  def domain_arguments(codec) = archive_arguments(codec, boots: %w[app session])
+  def domain_arguments(codec) = archive_arguments(codec, boots: %w[app session storage])
 
   # An archive of the domain release, with a boot script for each of boots and one
   # library file, then runtimes/emu, then system/, the order the archive's sorted paths
@@ -61,6 +61,8 @@ module ManifestContextFixture
       *domains,
       { 'path' => 'runtimes/emu', 'kind' => executable, 'flags' => 0,
         'source' => { 'kind' => 'artifact', 'id' => 'domain-runtime', 'sha256' => 'd' * 64 }, 'image' => image(codec) },
+      { 'path' => 'runtimes/jit', 'kind' => executable, 'flags' => 0,
+        'source' => { 'kind' => 'artifact', 'id' => 'jit-runtime', 'sha256' => 'e' * 64 }, 'image' => image(codec) },
       { 'path' => 'system/NOTICES', 'kind' => ordinary, 'flags' => system,
         'source' => { 'kind' => 'generated', 'producer' => 'notices' } },
       { 'path' => 'system/manifest', 'kind' => ordinary, 'flags' => system,
@@ -74,7 +76,8 @@ module ManifestContextFixture
     root = paths.index('system/root')
     { build_kind: 'development', platform: platform, root_entry: root,
       artifacts: { 'root' => { 'kind' => 'executable', 'entry' => root },
-                   'emu' => { 'kind' => 'executable', 'entry' => paths.index('runtimes/emu') } }.merge(runs, images),
+                   'emu' => { 'kind' => 'executable', 'entry' => paths.index('runtimes/emu') },
+                   'jit' => { 'kind' => 'executable', 'entry' => paths.index('runtimes/jit') } }.merge(runs, images),
       catalog: catalog,
       provenance: [{ 'path' => 'fixture/root.c', 'sha256' => 'a' * 64,
                      'license' => 'BSD-2-Clause', 'evidence' => 'fixture',
@@ -94,7 +97,7 @@ module ManifestContextFixture
     app = "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
           "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
           "  peer_held 4096\n  peer_held_total 4096\n"
-    with_quota(plain, 3).sub("window data\n  holder system", "window data\n  holder @domain.alpha") +
+    with_quota(domainless(plain), 3).sub("window data\n  holder system", "window data\n  holder @domain.alpha") +
       app + domain.call('alpha', 'required') + domain.call('beta', 'rescue') +
       "service log\n  server @domain.alpha\n  interface 1\nintroduce @domain.alpha @domain.beta\n"
   end
@@ -105,10 +108,24 @@ module ManifestContextFixture
   SYSTEM_QUOTA = /^(principal system\n(?:  .*\n)*?  domains )\d+$/
   MAX_DOMAINS = /^(  max_domains )\d+$/
 
+  # The development manifest's own configured domain, storage, with the profile and
+  # runtime limits only it names, and the holder lines naming it.
+  STORAGE_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/].freeze
+  STORAGE_HOLDER = /^  holder @domain\.storage$/
+
   # The development manifest as the domain tests start from it: without its session
-  # template, since they write their own, and with no domain quota or max_domains,
+  # template, since they write their own, without its own configured domain, so the
+  # domains a test adds are the only ones, and with no domain quota or max_domains,
   # since they set what their rows need.
-  def sessionless(source) = with_quota(substitute(source, SESSION_TEMPLATE, ''), 0)
+  def sessionless(source) = with_quota(substitute(domainless(source), SESSION_TEMPLATE, ''), 0)
+
+  # source without the storage domain: its rows removed and what it holds held by the
+  # system domain, as a manifest that configures no domain holds them.
+  def domainless(source)
+    raise ArgumentError, 'the manifest has no holder @domain.storage' unless source.match?(STORAGE_HOLDER)
+
+    STORAGE_ROWS.reduce(source.gsub(STORAGE_HOLDER, '  holder system')) { |text, row| substitute(text, row, '') }
+  end
 
   # source with the system principal's domain quota and max_domains both quota.
   def with_quota(source, quota) = substitute(substitute(source, SYSTEM_QUOTA, "\\1#{quota}"), MAX_DOMAINS, "\\1#{quota}")

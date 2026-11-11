@@ -25,7 +25,7 @@ class ErxLittlefsTest < Minitest::Test
   FLAGS = ['-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
            '-DERX_LITTLEFS_LOADABLE', '-DLFS_NO_DEBUG', '-DLFS_NO_WARN', '-DLFS_NO_ERROR'].freeze
   MODULES = ['erlang/apps/erx_files/src/erx_fs.erl', 'erlang/apps/erx_files/src/erx_fs_version.erl',
-             'erlang/apps/erx_files/src/erx_littlefs.erl', 'erlang/apps/erx_files/src/erx_lfs.erl',
+             'erlang/apps/erx_storage/src/erx_littlefs.erl', 'erlang/apps/erx_storage/src/erx_lfs.erl',
              'erlang/apps/erx_blk/src/erx_blk_window.erl', 'test/fixtures/erx_littlefs_tests.erl'].freeze
   # erx_log's NIF is the guest's. The stub drops the line: standard_error's writer is a
   # dirty I/O NIF, which the test's one dirty I/O thread may be holding.

@@ -5,7 +5,8 @@
 %% process, erx_blk, restarted after a crash and left stopped after a shutdown, which is how
 %% it ends on a device that refuses a reset; then the partition process, erx_blk_service,
 %% which admits the partition table and holds the windows; then the mounts of its image
-%% windows at /images/NAME and of the data window at /data. A machine without a disk starts
+%% windows at /images/NAME. erx_storage's supervisor starts /data on the data window
+%% once this application has started. A machine without a disk starts
 %% no device process: erx_blk's init/1 returns ignore, and the partition process serves no
 %% window.
 
@@ -38,12 +39,4 @@ init([]) ->
                shutdown => brutal_kill,
                type => worker,
                modules => [erx_blk_service]},
-    %% /data: littlefs on the data window (docs/design-stopgap.md, "littlefs in the
-    %% system domain"), once the service holds the windows. It is not restarted.
-    Data = #{id => erx_lfs_sup,
-             start => {erx_lfs_sup, start_link, []},
-             restart => temporary,
-             shutdown => infinity,
-             type => supervisor,
-             modules => [erx_lfs_sup]},
-    {ok, {#{strategy => one_for_one, intensity => 3, period => 60}, [Device, Service, Images, Data]}}.
+    {ok, {#{strategy => one_for_one, intensity => 3, period => 60}, [Device, Service, Images]}}.

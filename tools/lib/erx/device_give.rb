@@ -37,6 +37,8 @@ module Erx
     DOMAIN_ROW = MediumBoot::DOMAIN_ROW.sub(ARGS_LINE, "  args \"#{MediumBoot::UP_ARGS.join(' ')}\"\n")
                                        .sub(RESTARTS_LINE, "  restarts 1\n").freeze
     FIRST_ID = MediumBoot::CONFIGURED_ID
+    # The restart's id: the next after the storage domain's, which boot gave after erts's.
+    RESTART_ID = MediumBoot::STORAGE_ID + 1
     # QEMU virt's virtio-mmio magic, "virt" read little-endian, and where the spare
     # transport sits in its page and how long its window is.
     MAGIC = 0x74726976
@@ -45,10 +47,11 @@ module Erx
 
     # The parts of the line typed at the Erlang shell. Every variable starts with Dg, which
     # no other expression of the suite binds, since the shell keeps every binding.
-    # DgReady: the ids of the ready domains, from the domain service's state, or none while
-    # the service is too busy to answer (a create inside its restart can outlast
-    # sys:get_state's 5 s), so the wait polls on.
-    READY = 'DgReady=fun()->try [DgI||#{id:=DgI,state:=ready}<-erx_domain_core:domains(' \
+    # DgReady: the ids of the ready domains of the erts node, from the domain service's
+    # state, so the configured storage domain is not counted, or none while the service
+    # is too busy to answer (a create inside its restart can outlast sys:get_state's 5 s),
+    # so the wait polls on.
+    READY = 'DgReady=fun()->try [DgI||#{id:=DgI,state:=ready,node:=erts@erxos}<-erx_domain_core:domains(' \
             'maps:get(core,sys:get_state(erx_domain_srv)))] catch _:_->[] end end'
     # DgWait(Old, K): polls every 100 ms at most K times until exactly one ready domain's id
     # is not Old, and answers that id, or timeout.
@@ -71,7 +74,7 @@ module Erx
     LINE = [READY, WAIT, READ_DEVICE, SEQUENCE].join(',').freeze
     # What each domain's read answers: the magic, the window's place, and the domain's id.
     def self.read_answer(id) = "{#{MAGIC},#{OFFSET},#{SIZE},#{id}}"
-    ANSWER = "{device_give,#{FIRST_ID},#{read_answer(FIRST_ID)},#{FIRST_ID + 1},#{read_answer(FIRST_ID + 1)}}"
+    ANSWER = "{device_give,#{FIRST_ID},#{read_answer(FIRST_ID)},#{RESTART_ID},#{read_answer(RESTART_ID)}}"
     # The shell's prompt, which may precede the answer.
     PROMPT = '(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?'
     START = /\A#{PROMPT}\{device_give,/n

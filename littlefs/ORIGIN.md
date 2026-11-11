@@ -6,7 +6,7 @@ Revision: v2.11.3 (6cb4e86540eca0d9ba62500a298385c9d863c8be)
 
 littlefs, the stopgap read-write file system of the data partition
 (`/data`) and of the vault's partition, imported as
-erXos's code ([design-stopgap.md](../docs/design-stopgap.md#littlefs-in-the-system-domain)).
+erXos's code ([design-stopgap.md](../docs/design-stopgap.md#littlefs-in-the-storage-domain)).
 The files were taken from the release archive
 `https://github.com/littlefs-project/littlefs/archive/refs/tags/v2.11.3.tar.gz`,
 whose SHA-256 is `archive_sha256` below, after checking it against that

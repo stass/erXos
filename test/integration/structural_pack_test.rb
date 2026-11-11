@@ -87,9 +87,11 @@ class StructuralPackTest < Minitest::Test
     assert_equal 'existing output', File.binread(output)
   end
 
-  # This pack holds the root alone, no domain runtime or release, so the session template,
-  # which names both, is left out; the packs that carry them admit it.
-  def test_the_real_development_manifest_is_admitted_and_packed
+  # This pack holds the root alone, no domain runtime or release, so the session template
+  # and the storage domain, which name both, are left out, the storage domain's devices
+  # held by the system domain (ManifestContextFixture.domainless). The production image's
+  # build packs the whole manifest, and dom_planner_test plans its storage domain.
+  def test_the_root_only_development_manifest_is_admitted_and_packed
     native = fixture('admitted').fetch('native')
     planner = Erx::ElfPlanner.new(helper: @tools.fetch('planner'), runner: @runner, codec: @codec)
     resolver = Erx::PackProvenance.new(root: @root, catalog: native.fetch('catalog'), external: @external, runner: @runner)
@@ -103,7 +105,7 @@ class StructuralPackTest < Minitest::Test
     result = production.build(entries: entries, root_path: 'system/root', build_kind: 'development',
                               platform: JSON.parse(File.read(File.join(@root, 'config/platforms/qemu-virt.json'))),
                               artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } }.merge(ManifestContextFixture.images),
-                              manifest_source: Erx::ProductionImage.sessionless_manifest(@root),
+                              manifest_source: ManifestContextFixture.domainless(Erx::ProductionImage.sessionless_manifest(@root)),
                               output: output)
     assert_equal 'stopgap', result.fetch('manifest').fetch('mode')
     assert_equal 'declared', result.fetch('manifest').fetch('root_startup')

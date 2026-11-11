@@ -4,7 +4,7 @@
 -module(erx_lfs).
 -moduledoc """
 The domain's `/data`: the `erx_fs` callback module over littlefs, the stopgap
-read-write file system (docs/design-stopgap.md#littlefs-in-the-system-domain),
+read-write file system (docs/design-stopgap.md#littlefs-in-the-storage-domain),
 on one window of the block service.
 
 Two processes serve a volume. The **owner** takes every request of the

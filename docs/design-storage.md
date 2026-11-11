@@ -587,9 +587,9 @@ file interface, a stopgap whose limits on large media (files of at most
 * **Parity.** It replaces littlefs only at parity over the file-semantics
   test corpus, as every stopgap's replacement does.
 
-In Phase 1 littlefs instead runs as a NIF in the system domain, behind the
+In Phase 1 littlefs instead runs as a NIF in the storage domain, behind the
 same `erx_fs` interface; its design is the littlefs section of
-[design-stopgap.md](design-stopgap.md#littlefs-in-the-system-domain), and
+[design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain), and
 the port below is the target.
 
 **littlefs, the stopgap**, runs in the same storage domain behind the same

@@ -1572,6 +1572,18 @@ domain's own images; the system domain still starts from the release in
 the boot image and reads the slot's image as files only, never as code
 ([design-live.md](design-live.md#invariants) V5).
 
+**No image window is served across domains.** Where a storage domain
+holds the `block` unit, as the development manifest has it, the driver
+places no image window: the storage domain's `/` is its domain release,
+which holds no manifest, and its runtime does not know its own index
+among the manifest's domains, so `erx_blk_service` logs that the manifest
+cannot be read and serves no image, and `/images/release` is mounted
+nowhere. The `-erx boot` words reach the storage domain all the same,
+since the domain library adds them to a configured block holder's
+arguments. Serving the release image from the storage domain is the domain
+library's work: it writes each image window's placement into the holder's boot
+page beside `-erx boot`, so the driver needs no manifest file.
+
 ### The console
 
 The native boot's console driver is `erx_pl011`, which the manifest's `system_args` name with `-erx console_driver erx_pl011`. The root adds `-erx console_uart BASE SIZE LINE`, from the device entry `machine.console` names, and the driver opens that window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64 and 32 bits), and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). A plain `erx.arg` word that joins any of these lists of arguments, the console's or a device record's, is ignored.
@@ -1610,7 +1622,7 @@ mapping does. That is the one difference between what a program writes and what 
 unchanged; it then sets the sink to the ring and replies. The driver's first touch of a register needs that reply, so it follows the service's
 last `l4_vcon_write` of a log record; a program's output goes on as above. A partial boot never maps the entry, so its log lines reach the UART for the whole run.
 
-## littlefs in the system domain
+## littlefs in the storage domain
 
 **The port.** Where a storage domain holds the data window, littlefs is that domain's sub-space port, as
 [design-storage.md](design-storage.md) places it: a sub-space the storage domain creates, with a channel to it, its block
@@ -1620,9 +1632,12 @@ handle](#passing-a-handle), [Fault gates](#fault-gates)), so the port and `desig
 A crash injected into littlefs ends only its port, since a fault ends nothing but its space once its gate's server stops
 it. What the backend does not promise is that a port which bypasses `liberx` cannot reach the storage domain's memory.
 
-**The system domain's form.** Where the system domain holds the data window itself, as a manifest with no storage domain
-has it, littlefs runs in the system domain as a NIF behind the `erx_fs` callback module, the seam the design names, since
-the system domain runs no port driver. The Erlang side is the port's, and only the glue below differs.
+**The NIF form.** Phase 1 runs littlefs as a NIF behind the `erx_fs` callback module, the seam the design names, in the
+domain that holds the data window: the storage domain, which the development manifest configures as a BeamAsm service
+domain with the `block` unit and runs `erx_blk` and `erx_storage` (`erx_lfs_sup` under `erx_storage_sup`). The system
+release ships neither application, so a manifest that leaves the `block` unit with the system domain runs no block
+driver and serves no `/data`. The Erlang side is the
+port's, and only the glue below differs.
 
 A process running a dirty NIF cannot run its receive loop, so two share the work. The **owner** takes clients' requests, one at a time, and never
 blocks. The **worker**, linked to it, alone calls the littlefs NIF, on a dirty I/O scheduler, one operation at a time.
@@ -1777,7 +1792,7 @@ since no consumer calls it before then.
 * Without vCPU upcalls, a program takes each signal's default action only.
 * When the watchdog ends the machine, log lines the console had not taken are lost.
 * The crash frame may interleave with a console driver that is writing, a task's frame with the watchdog end's art and frame, and a kernel `WARN` or panic line may interleave at any time.
-* Any littlefs block error, deadline or driver restart in the system domain's form makes the volume unavailable until reboot.
+* Any littlefs block error, deadline or driver restart makes the volume unavailable until the storage domain restarts.
 * Only the root's parks and wakes are in `erx:trace`, and the trace ring's `thread`, `space` and `target` are reused indices, not object ids.
 * `erx_group_configure` keeps the CPU set of the root's own group alone. On any other group its caller holds it checks the handle and that the set is not empty, and keeps nothing of the grant; no group's rate, ceiling or flags is enforced.
 * A kernel hang or a stalled watchdog thread is caught only by the harness's deadline.

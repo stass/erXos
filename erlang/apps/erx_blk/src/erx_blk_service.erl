@@ -16,14 +16,15 @@
 %% {image, Name}, which erx_blk_image places from the root's -erx boot words and the
 %% manifest; a boot with no slot serves none, and an image it refuses is one line of the
 %% log. mount_images/0, the supervisor's next child, mounts each at /images/NAME
-%% (docs/design-stopgap.md, "Image windows").
+%% (docs/design-stopgap.md, "Image windows"). In a storage domain, whose namespace holds
+%% no manifest, the read fails and no image is served, which is one line of the log.
 %%
 %% The windows are linked to the service, which does not trap exits, so a window that
 %% crashes takes the service and its other windows with it, and the supervisor's restart
 %% reads the table again and starts new windows; a client's old pid then answers eio, and
 %% so does a mounted image until the next boot.
 %%
-%% window/1 is where a window's pid is handed out, to any caller in the system domain and
+%% window/1 is where a window's pid is handed out, to any caller in the driver's domain and
 %% for any role. It is the seam the device service replaces: that service names each
 %% client's windows by role and hands their pids out as grants, the slot and record windows
 %% to the slot writer alone (PW1).

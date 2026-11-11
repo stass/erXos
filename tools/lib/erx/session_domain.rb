@@ -26,8 +26,8 @@ module Erx
   # log, with the menu taken out, holds every line whole and in order (burst_whole!).
   # halt(3) ends the session's domain: the console writes `session root_1 ended:
   # {halt,3}` and logs root in again, and the new session, root_1 again in a new domain,
-  # takes the line. The menu lists it, refuses "start a session" past the principal's one
-  # domain, and gives the line to the system shell, whose `ps` lists the domain service and
+  # takes the line. The menu lists it, refuses "start a session" past the principal's
+  # domain quota, which the storage domain and the session fill, and gives the line to the system shell, whose `ps` lists the domain service and
   # whose Erlang shell answers node() as system@erxos. exit(DomainPid, kill) there ends
   # the session as halt does, and the next login's session takes the line.
   module SessionDomain
@@ -41,10 +41,11 @@ module Erx
     # is up may write its runtime's kernel log lines between "Esc returns. " and the reset.
     MENU_LEFT = /\e\\\e\[0m\r*\n\z/n
     ERL = ProductionImage::Run::ERL_LINE
-    # The domain id root's first session takes: the development manifest configures no
-    # domain, so the domain service's first id, 5, is the login's; each later start of a
-    # session takes the next, a refused one too, since admission spends the id.
-    FIRST_SESSION = 5
+    # The domain id root's first session takes: the development manifest configures one
+    # domain, storage, which takes the domain service's first id, 5, at boot, so the
+    # login's is 6; each later start of a session takes the next, a refused one too, since
+    # admission spends the id.
+    FIRST_SESSION = 6
     # From a session's start to its tty naming itself, which a domain creation under HVF
     # with one CPU takes seconds to reach.
     SESSION_SECONDS = 120
@@ -58,10 +59,11 @@ module Erx
     # The menu as the console draws it over whatever the line holds: the line's last holder
     # ended, an optional notice, the menu, and the line ended again as it is left.
     MENU_BLOCK = /\e\\\e\[0m\r\n(?:[^\r\n]*\r\n)?erx_console: Ctrl-G menu\r\n.*?Esc returns\. \e\\\e\[0m\r\n/mn
-    # Typed at the system's Erlang shell: the one domain pid the domain service holds, the
-    # session's, killed, as a person would end a session from there.
-    KILL_SESSION = '[P] = [L || L <- element(2, process_info(whereis(erx_domain_srv), links)), is_pid(L), ' \
-                   'element(1, element(2, process_info(L, current_function))) =:= erx_domain_pid], ' \
+    # Typed at the system's Erlang shell: the domain pid of the one session domain the
+    # domain service holds, beside the configured storage domain, killed, as a person
+    # would end a session from there.
+    KILL_SESSION = '[P] = [Pid || #{origin := {session, _}, pid := Pid} <- ' \
+                   'erx_domain_core:domains(maps:get(core, sys:get_state(erx_domain_srv)))], ' \
                    "exit(P, kill).\r".freeze
     # Typed at either command shell: the domain service runs in the system domain only, so
     # the session's `ps` counts 0 of it and the system's 1.

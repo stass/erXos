@@ -23,10 +23,10 @@ module Erx
                                  max_bytes: 65_536, label: 'config/platforms/qemu-virt.json')
       source = File.binread(File.join(repository, 'config/manifest/qemu-virt-development.txt'))
       context = Manifest::Context.new(**fixture, platform: platform)
-      development = Manifest.admit(source: source, codec: codec, context: context)
+      development = Manifest.admit(source: source, codec: codec, context: context, planner: ManifestContextFixture.accepting_planner)
       # A terminal escape in an argument, which the boot page's reader refuses.
       escape = Manifest.admit(source: source.sub(/^\s*system_args .*$/, '  system_args hex:2d5a1b5d323b7265766965770700'),
-                              codec: codec, context: context)
+                              codec: codec, context: context, planner: ManifestContextFixture.accepting_planner)
       empty = Manifest.structural_fixture(source: File.binread(File.join(repository, 'test/fixtures/manifest_empty.txt')),
                                           codec: codec, context: Manifest::Context.new(**fixture))
       domains = Manifest.admit(source: ManifestContextFixture.domain_source(source), codec: codec,

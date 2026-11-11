@@ -33,7 +33,9 @@ class DeviceGiveTest < Minitest::Test
     assert_equal [Suite::OFFSET, Suite::SIZE], [device.fetch('base') % 4096, device.fetch('size')]
     assert_equal %w[network none], device.values_at('role', 'dma')
     assert_includes Suite::LINE, 'find(net,virtio_mmio)'
-    assert_equal "{device_give,5,{1953655158,3584,512,5},6,{1953655158,3584,512,6}}", Suite::ANSWER
+    # erts takes id 5 and the storage domain 6 at boot, so the restart takes 7.
+    assert_equal "{device_give,5,{1953655158,3584,512,5},7,{1953655158,3584,512,7}}", Suite::ANSWER
+    assert_includes Suite::LINE, 'state:=ready,node:=erts@erxos}'
   end
 
   # The line follows the shell's last checkpoint, and the end is SystemDomain's.

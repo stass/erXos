@@ -15,6 +15,7 @@ class MediumBootTest < Minitest::Test
   Boot = Erx::MediumBoot
   Choice = Erx::BootRecord::Choice
   DOMAIN = Erx::MediumBoot::Domain.new(runtime: 41, jit: 42, release: 7, release_files: 30)
+  IMAGE = Erx::MediumBoot::SlotImage.new(format: 2, slot_offset: 128 << 20, length: 8192)
 
   def dtc(*arguments, input: nil)
     output, status = Open3.capture2e('dtc', '-q', *arguments, stdin_data: input.to_s)
@@ -40,12 +41,12 @@ class MediumBootTest < Minitest::Test
 
   def test_the_boot_value_line_follows_the_image_line_and_must_name_the_slot
     points = [{ name: 'banner' }, { name: 'image-identity' }, { name: 'root-identity' }, { name: 'release-shell' }]
-    merged = Boot.checkpoints(points, Choice.new(slot: :b, offset: 0, length: 64), release: release, domain: DOMAIN)
+    merged = Boot.checkpoints(points, Choice.new(slot: :b, offset: 0, length: 64), release: release, domain: DOMAIN, image: IMAGE)
     assert_equal %w[banner image-identity boot-value root-identity release-shell erlang-shell image-md5 crc32c domain-lib] +
                  Boot::COMMAND_SHELL.map { |point| point.fetch(:name) }, merged.map { |point| point.fetch(:name) }
     typed = merged.to_h { |point| [point.fetch(:name), point[:type]] }
     assert_equal "erl\r", typed.fetch('release-shell')
-    assert_match %r{\Aapplication:ensure_all_started\(erx_blk\)}, typed.fetch('erlang-shell')
+    assert_match(/\AImWait=fun /, typed.fetch('erlang-shell'))
     assert_equal "#{Boot.domain_lib_expression(DOMAIN)}\r", typed.fetch('crc32c')
     assert_equal "erx_shell:start().\r", typed.fetch('domain-lib')
     assert_match merged.find { |point| point.fetch(:name) == 'erlang-shell' }.fetch(:pattern),
@@ -56,14 +57,17 @@ class MediumBootTest < Minitest::Test
     ["erx: boot value normal slot a\n", "erx: boot value unknown slot none\n", "erx: boot value trial slot b\n"].each do |line|
       assert_raises(Erx::Error, line) { verify.call(line) }
     end
-    assert_raises(Erx::Error) { Boot.checkpoints([{ name: 'banner' }], Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN) }
-    assert_raises(Erx::Error) { Boot.checkpoints(points[0..2], Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN) }
+    assert_raises(Erx::Error) { Boot.checkpoints([{ name: 'banner' }], Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN, image: IMAGE) }
+    assert_raises(Erx::Error) { Boot.checkpoints(points[0..2], Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN, image: IMAGE) }
   end
 
-  # The shell reads stdlib's lists module from /images/release, and only its packed MD5
-  # passes; a release without the module has nothing to read.
+  # The shell reads stdlib's lists module from the image at the storage node, which it
+  # places from the slot image's extent, and only its packed MD5 passes; a release without
+  # the module has nothing to read.
   def test_the_shell_reads_a_release_file_from_the_image_and_must_print_its_md5
-    shell, answer = Boot.image_checkpoints({ name: 'erlang-shell', pattern: /\AEshell V/n }, release)
+    shell, answer = Boot.image_checkpoints({ name: 'erlang-shell', pattern: /\AEshell V/n }, release, IMAGE)
+    assert_match %r{erpc:call\('storage@erxos',fun\(\)->}, shell.fetch(:type)
+    assert_includes shell.fetch(:type), 'format=>2,data_bytes=>8192,extents=>[{134217728,8192}]'
     assert_match %r{file:read_file\("/images/release/system/lib/stdlib-7\.0/ebin/lists\.beam"\)}, shell.fetch(:type)
     assert shell.fetch(:type).end_with?(".\r")
     verify = answer.fetch(:verify)
@@ -71,10 +75,11 @@ class MediumBootTest < Minitest::Test
     assert_match answer.fetch(:pattern), "2> {image_md5,<<\"#{hex}\">>}\r\n"
     verify.call("2> {image_md5,<<\"#{hex}\">>}\r\n")
     verify.call("{image_md5,<<\"#{hex}\">>}\n")
-    ["{image_md5,<<\"#{hex.downcase}\">>}\n", "{image_md5,{error,enoent}}\n", "{image_md5,<<\"00\">>}\n"].each do |line|
+    ["{image_md5,<<\"#{hex.downcase}\">>}\n", "{image_md5,{error,enoent}}\n", "{image_md5,<<\"00\">>}\n",
+     "{image_md5,{error,{erpc,noconnection}}}\n"].each do |line|
       assert_raises(Erx::Error, line) { verify.call(line) }
     end
-    assert_raises(Erx::Error) { Boot.image_checkpoints({ name: 'erlang-shell' }, release.take(1)) }
+    assert_raises(Erx::Error) { Boot.image_checkpoints({ name: 'erlang-shell' }, release.take(1), IMAGE) }
   end
 
   # After the image's answer the shell runs the CRC-32C primitive, and only the answer
@@ -82,7 +87,7 @@ class MediumBootTest < Minitest::Test
   # refusal of one call over 65536 bytes.
   def test_the_shell_runs_the_crc32c_primitive_and_must_print_the_models_values
     merged = Boot.checkpoints([{ name: 'image-identity' }, Erx::ProductionImage::Run::RELEASE_SHELL],
-                              Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN)
+                              Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN, image: IMAGE)
     image_answer, crc = %w[image-md5 crc32c].map { |name| merged.find { |point| point.fetch(:name) == name } }
     assert_equal "#{Boot::CRC32C_EXPRESSION}\r", image_answer.fetch(:type)
     assert_equal '{crc32c,"%X","%X",badarg}' % [crc32c('123456789'), crc32c('erXos' * 20_000)], Boot::CRC32C_ANSWER
@@ -104,10 +109,10 @@ class MediumBootTest < Minitest::Test
     plain = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
     grown = Boot.manifest(plain)
     growth = 2 * (Boot::DOMAIN_MEMORY + Boot::DOMAIN_OUTER)
-    memory, root_memory = [/^principal system\n  memory ([0-9]+)$/, /^  root_memory ([0-9]+)$/]
-                          .map { |pattern| Integer(plain[pattern, 1], 10) }
+    memory, root_memory, domains = [/^principal system\n  memory ([0-9]+)$/, /^  root_memory ([0-9]+)$/, /^  max_domains ([0-9]+)$/]
+                                   .map { |pattern| Integer(plain[pattern, 1], 10) }
     assert_equal ["principal system\n  memory #{memory + growth}", "  root_memory #{root_memory + growth}",
-                  "  domains 3", "  max_domains 3"],
+                  "  domains #{domains + 2}", "  max_domains #{domains + 2}"],
                  [grown[/^principal system\n  memory [0-9]+$/], grown[/^  root_memory [0-9]+$/],
                   grown[/^principal system\n(?:  .*\n)*?(  domains [0-9]+)$/, 1], grown[/^  max_domains [0-9]+$/]]
     sessionless = Erx::ProductionImage.without_sessions(plain)
@@ -116,7 +121,7 @@ class MediumBootTest < Minitest::Test
     assert_equal 4, sessionless.lines.zip(grown.lines).count { |left, right| left != right }
     assert_equal sessionless.lines.size, grown.lines.size - Boot::DOMAIN_ROW.lines.size
     assert grown.end_with?(Boot::DOMAIN_ROW)
-    assert_raises(Erx::Error) { Boot.manifest(plain.sub("  max_domains 1\n", '')) }
+    assert_raises(Erx::Error) { Boot.manifest(plain.sub(/^  max_domains [0-9]+\n/, '')) }
   end
 
   # The footprint cell's manifest has room for its three domains and sets the system domain's
@@ -134,7 +139,7 @@ class MediumBootTest < Minitest::Test
     assert_equal figure.(plain, /^  root_memory ([0-9]+)$/) + growth, figure.(grown, /^  root_memory ([0-9]+)$/)
     assert_equal figure.(plain, /^principal system\n  memory ([0-9]+)$/) + growth,
                  figure.(grown, /^principal system\n  memory ([0-9]+)$/)
-    assert_equal %w[bare storage network], grown.scan(/^domain ([a-z]+)$/).flatten
+    assert_equal %w[storage bare blk network], grown.scan(/^domain ([a-z]+)$/).flatten
     without_tmp = plain.sub(/^(runtime_limits system\n(?:  .*\n)*?)  tmp [0-9]+\n/, '\1')
     assert_raises(Erx::Error) { cell.manifest(without_tmp, system_tmp: 0) }
     runs = cell::RELEASES.keys.to_h { |name| [name, { 'entry' => name.size, 'files' => 7 }] }
@@ -149,13 +154,13 @@ class MediumBootTest < Minitest::Test
   # end, a restarted configured domain or a refused create does not pass.
   def test_the_domain_cell_names_the_archives_indexes_and_must_see_every_end
     expression = Boot.domain_lib_expression(DOMAIN)
-    assert_match(/id=>15,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
+    assert_match(/id=>16,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
     # The library refuses an id at or below the system domain's, so the service's ids
     # start above it; the shell's own calls of the library are refused.
     header = File.read(File.expand_path('../../include/erx/dom.h', __dir__))
     assert_equal Integer(header[/^#define\s+ERX_DOM_SYSTEM_ID\s+([0-9]+)u$/, 1], 10), Boot::SYSTEM_DOMAIN_ID
     assert_includes expression, 'DlNotCreate=Lib:create(Spec)'
-    assert_includes expression, 'DlNotService=Lib:configured(15,0,self())'
+    assert_includes expression, 'DlNotService=Lib:configured(16,0,self())'
     assert_includes expression, 'DlNotStop=Lib:stop(5,0)'
     assert expression.start_with?('io:format("~0p~n",[(fun(Lib,Spec,JitFields,FacetFields,UpFields)->DlDeath=fun(Id)->')
     # The BeamAsm domain names the BeamAsm image and halts 0 only as BeamAsm.
@@ -169,14 +174,14 @@ class MediumBootTest < Minitest::Test
                  expression)
     refute_match(/[^\x20-\x7e]/, expression)
     merged = Boot.checkpoints([{ name: 'image-identity' }, Erx::ProductionImage::Run::RELEASE_SHELL],
-                              Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN)
+                              Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN, image: IMAGE)
     point = merged.find { |each| each.fetch(:name) == 'domain-lib' }
     refute_match point.fetch(:pattern), "4> #{expression}\r\n"
     point.fetch(:verify).call("4> #{Boot::DOMAIN_LIB_ANSWER}\r\n")
     [Boot::DOMAIN_LIB_ANSWER.sub('{halt,0}', '{halt,1}'), Boot::DOMAIN_LIB_ANSWER.sub('{error,einval}', '{error,enotsup}'),
      Boot::DOMAIN_LIB_ANSWER.sub('[{5,{halt,0}}]', '[{8,{halt,0}},{5,{halt,0}}]'),
-     Boot::DOMAIN_LIB_ANSWER.sub('{10,ok,killed}', '{error,quota}'),
-     Boot::DOMAIN_LIB_ANSWER.sub('{11,ok,{domain_down,11,{halt,0}}}', '{11,ok,{domain_down,11,crash}}'),
+     Boot::DOMAIN_LIB_ANSWER.sub("{#{Boot::DOMAIN_IDS[2]},ok,killed}", '{error,quota}'),
+     Boot::DOMAIN_LIB_ANSWER.sub("{domain_down,#{Boot::DOMAIN_IDS[3]},{halt,0}}", "{domain_down,#{Boot::DOMAIN_IDS[3]},crash}"),
      Boot::DOMAIN_LIB_ANSWER.sub(/true\}\z/, 'false}')].each do |line|
       assert_raises(Erx::Error, line) { point.fetch(:verify).call("#{line}\n") }
     end

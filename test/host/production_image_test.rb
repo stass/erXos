@@ -301,23 +301,24 @@ class ProductionImageTest < Minitest::Test
   end
 
   # The production image carries the domain releases its manifest's domain rows and
-  # session templates name. The development manifest configures no domains, so it carries
-  # only its session template's, the session release; a manifest with domain rows names
-  # each release once, and a reference of another form names nothing, for the manifest
-  # check to refuse.
+  # session templates name. The development manifest configures the storage domain and
+  # has a session template, so it carries the storage and session releases, and the
+  # storage release alone without the template; a manifest with domain rows names each
+  # release once, and a reference of another form names nothing, for the manifest check
+  # to refuse.
   def test_the_production_image_carries_the_releases_its_domain_rows_name
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
-    assert_equal ['session'], Erx::Manifest.release_names(source: source, codec: codec)
+    assert_equal %w[session storage], Erx::Manifest.release_names(source: source, codec: codec)
     source = Erx::ProductionImage.without_sessions(source)
-    assert_empty Erx::Manifest.release_names(source: source, codec: codec)
+    assert_equal ['storage'], Erx::Manifest.release_names(source: source, codec: codec)
     rows = %w[zeta beta zeta].each_with_index.map do |release, index|
       "domain d#{index}\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
         "  runtime @artifact.emu\n  release @artifact.#{release}\n  restarts 0\n  restart_period_s 0\n"
     end
     quoted = "domain q\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
              "  runtime @artifact.emu\n  release \"other\"\n  restarts 0\n  restart_period_s 0\n"
-    assert_equal %w[beta zeta], Erx::Manifest.release_names(source: source + rows.join + quoted, codec: codec)
+    assert_equal %w[beta storage zeta], Erx::Manifest.release_names(source: source + rows.join + quoted, codec: codec)
   end
 
   # A domain row's runtime names the domain runtime image and its release a boot script
@@ -429,9 +430,10 @@ class ProductionImageTest < Minitest::Test
   def test_the_erts_line_must_count_the_manifests_arguments_and_the_command_lines
     system_args = File.read(File.join(ROOT, Erx::ProductionImage::MANIFEST))[/^\s*system_args "(.*)"$/, 1].split.size
     refute_equal 0, system_args
-    # The manifest has a block unit, a net unit and the host link's, so the root adds three
-    # device records: two given and the host link's physical one.
-    always = Erx::ProductionImage::Run.arguments_always(ROOT) + (2 * Erx::ProductionImage::Run::GIVEN_RECORD_WORDS) +
+    # The system domain holds the net unit and the host link's, and the storage domain the
+    # block unit, so the root adds two device records to the system's: net's given one and
+    # the host link's physical one.
+    always = Erx::ProductionImage::Run.arguments_always(ROOT) + Erx::ProductionImage::Run::GIVEN_RECORD_WORDS +
              Erx::ProductionImage::Run::DEVICE_RECORD_WORDS
     checkpoint_verifier('erts-start').call("erx: erts: erl_start runs, #{always + system_args} arguments\n")
     checkpoint_verifier('erts-start', extra_arguments: 1).call("erx: erts: erl_start runs, #{always + system_args + 1} arguments\n")
@@ -487,13 +489,14 @@ class ProductionImageTest < Minitest::Test
     assert_raises(Erx::Error) { verify.call("erx: erts: 4 schedulers and 1 dirty CPU schedulers hold executor slots\n") }
   end
 
-  # The narrow manifest puts the system share on two CPUs, so a machine of four runs two schedulers:
+  # The narrow manifest puts every share on two CPUs at most, so a machine of four runs two schedulers:
   # a count taken from the online CPUs alone says four and fails.
   def test_the_narrow_image_counts_schedulers_from_the_share_and_the_online_cpus
-    run = Erx::ProductionImage::Run.allocate.tap { |instance| instance.instance_variable_set(:@root, ROOT) }
-    narrow = run.send(:narrow_manifest)
+    narrow = Erx::ProductionImage::Run.narrow_manifest(ROOT)
     assert_match(/^share system\n(?:  .*\n)*?  cpuset 3$/, narrow)
-    assert_match(/^share users\n(?:  .*\n)*?  cpuset 15$/, narrow)
+    assert_match(/^share users\n(?:  .*\n)*?  cpuset 3$/, narrow)
+    assert_match(/^share system\n  quota_ns 20000000$/, narrow)
+    assert_raises(Erx::Error) { Erx::ProductionImage::Run.narrow_share("share far\n  quota_ns 5000000\n  period_ns 10000000\n  cpuset 12\n") }
     verify = checkpoint_verifier("erts-executors", manifest_source: narrow)
     verify.call("erx: erts: 2 schedulers and 2 dirty CPU schedulers hold executor slots\n")
     assert_raises(Erx::Error) { verify.call("erx: erts: 4 schedulers and 4 dirty CPU schedulers hold executor slots\n") }

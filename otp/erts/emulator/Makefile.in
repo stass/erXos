@@ -1005,7 +1005,7 @@ $(OBJDIR)/%.o: nifs/common/%.cpp
 $(OBJDIR)/erx_device.o $(OBJDIR)/erx_device_nif.o: CFLAGS += $(if $(findstring hosted,$(TARGET)),-DERX_DEVICE_STAND_IN)
 
 # littlefs, the stopgap read-write file system of /data (docs/design-stopgap.md,
-# "littlefs in the system domain"), built from its import in littlefs/.
+# "littlefs in the storage domain"), built from its import in littlefs/.
 LFS_DIR = $(ERX_TREE)/littlefs
 LFS_CFLAGS = -I$(LFS_DIR) -DLFS_NO_DEBUG -DLFS_NO_WARN -DLFS_NO_ERROR
 

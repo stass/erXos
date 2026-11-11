@@ -101,8 +101,21 @@ class ReleaseFilesTest < Minitest::Test
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
     %w[compiler runtime_tools].each { |application| assert_includes release, "{#{application},\"#{VERSION}\",load}" }
     assert_includes release, "{erx_session,\"#{VERSION}\",load}", 'a domain\'s own application runs in no system domain'
-    [*%w[kernel stdlib], *(Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::TEMPORARY - Erx::ReleaseFiles::DOMAIN_ONLY)].each do |application|
+    started = Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::TEMPORARY - Erx::ReleaseFiles::DOMAIN_ONLY -
+              Erx::ReleaseFiles::STORAGE_ONLY
+    [*%w[kernel stdlib], *started].each do |application|
       assert_includes release, "{#{application},\"#{VERSION}\"}"
+    end
+  end
+
+  # The block driver and littlefs run in the storage domain alone, so the system release
+  # neither ships nor names them.
+  def test_the_system_release_does_not_ship_the_storage_applications
+    paths = entries.map { |entry| entry.fetch('path') }
+    release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
+    Erx::ReleaseFiles::STORAGE_ONLY.each do |application|
+      refute_includes release, "{#{application},"
+      refute(paths.any? { |path| path.start_with?("system/lib/#{application}-") }, "the system release ships #{application}")
     end
   end
 

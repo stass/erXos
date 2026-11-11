@@ -4,8 +4,8 @@
  */
 
 /*
- * littlefs, the stopgap read-write file system, as a NIF of the system
- * domain (docs/design-stopgap.md#littlefs-in-the-system-domain).
+ * littlefs, the stopgap read-write file system, as a NIF of the domain that
+ * holds the data window (docs/design-stopgap.md#littlefs-in-the-storage-domain).
  *
  * One volume is one resource that holds littlefs's state, its buffers and a
  * fixed table of open-file slots, so nothing littlefs points at is ever freed

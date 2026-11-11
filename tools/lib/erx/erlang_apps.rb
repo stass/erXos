@@ -22,7 +22,7 @@ module Erx
   class ErlangApps
     # In dependency order, as the release file lists them. A directory of erlang/apps/
     # missing here fails the build, so none is left out of the release unseen.
-    APPLICATIONS = %w[erx erx_files erx_uart erx_blk erx_net erx_net_client erx_shell erx_code erx_hostlink erx_domain erx_session].freeze
+    APPLICATIONS = %w[erx erx_files erx_uart erx_blk erx_storage erx_net erx_net_client erx_shell erx_code erx_hostlink erx_domain erx_session].freeze
     # Applications of another domain's image, written and tested on the host ahead of
     # the milestone that builds that image (docs/plan.md, "Critical path and parallel
     # tracks"): the host tests compile them, and no release holds them yet.
@@ -145,8 +145,12 @@ module Erx
       ebin = File.join(otp, 'lib', application, 'ebin')
       FileUtils.rm_rf(File.dirname(ebin))
       FileUtils.mkdir_p(ebin)
-      # -pa ebin: a module of the application may name another's behaviour, compiled first.
-      @runner.run([@erlc, *FLAGS, *includes, '-pa', ebin, '-o', ebin, *modules], name: "erlang-app-#{application}",
+      # -pa ebin: a module of the application may name another's behaviour, compiled first,
+      # of its own or of an application APPLICATIONS lists before it (erx_storage's erx_lfs
+      # implements erx_files' erx_fs).
+      earlier = APPLICATIONS.take_while { |other| other != application }
+                            .flat_map { |other| ['-pa', File.join(otp, 'lib', other, 'ebin')] }
+      @runner.run([@erlc, *FLAGS, *includes, *earlier, '-pa', ebin, '-o', ebin, *modules], name: "erlang-app-#{application}",
                                                                    deadline: DEADLINE, chdir: @root, env: Oracle::CLEAN_ERLANG_ENV)
       File.write(File.join(ebin, "#{application}.app"), self.class.with_modules(resource, [*listed, *erxos]))
     end

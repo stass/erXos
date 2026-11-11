@@ -23,8 +23,12 @@ module Erx
   # disk image whose sectors hold known patterns (block_image.rb), the system boots,
   # and a test module, erx_blk_check (GUEST_SOURCE), drives the block driver through
   # its public calls: it reads the sectors, is refused a read past the end, and
-  # writes two sectors of its own. It reports each step on the serial line, and the
-  # harness then reads the image back.
+  # writes two sectors of its own. The driver runs in the storage domain, which the
+  # development manifest gives the block unit, so the module, started in the system
+  # domain, waits for storage@erxos to run erx_storage, loads its own object code
+  # there and runs each step at that node over erpc; the system domain prints the
+  # lines the step answers on the serial line, and the harness then reads the image
+  # back.
   #
   # The module is test code, so it reaches the guest only in a test image: the
   # harness compiles it with the stock oracle's erlc, adds the beam to the system

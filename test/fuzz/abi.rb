@@ -67,7 +67,8 @@ module AbiFuzz
             view.each(table) { |_record| }
           end
         when 3
-          Erx::Manifest.admit(source: mutate(system_seed, random), codec: codec, context: system_context)
+          Erx::Manifest.admit(source: mutate(system_seed, random), codec: codec, context: system_context,
+                              planner: ManifestContextFixture.accepting_planner)
         when 4
           Erx::Manifest.admit(source: mutate(domain_seed, random), codec: codec, context: domain_context,
                               planner: ManifestContextFixture.accepting_planner)

@@ -4,8 +4,11 @@
 %% The guest side of the block device suite (tools/lib/erx/block_device.rb, whose header
 %% defines the lines printed here). It is test code: the suite's harness compiles it, adds
 %% it to a test image's system release under /test/blk and starts it with the kernel
-%% command line's `-run erx_blk_check main`, after the release, erx_blk included, has
-%% started. No production image holds it.
+%% command line's `-run erx_blk_check main` in the system domain. The block driver and /data
+%% run in the storage domain (docs/design-stopgap.md, "littlefs in the storage domain"), so each
+%% entry waits for that domain's node to run erx_storage, loads this module's object code there
+%% and runs the step at that node with erpc; the step's lines come back as its answer and
+%% the system domain prints them. No production image holds it.
 %%
 %% It drives the driver only through erx_blk's public calls: it reports the transport
 %% version and the capacity, reads each sector of the harness's disk and compares it with
@@ -38,6 +41,8 @@
 -module(erx_blk_check).
 
 -export([main/0, medium/0, data_write/0, data_read/0]).
+%% Run at the storage domain's node by at_storage/1.
+-export([run/1, main_here/0, medium_here/0, data_write_here/0, data_read_here/0]).
 
 -define(ROLES, [record, slot_a, slot_b, vault, data]).
 
@@ -61,9 +66,66 @@
 -define(DATA_BYTES, 10000).
 -define(SYNCED, "/data/synced").
 -define(UNSYNCED, "/data/unsynced").
+%% The storage domain's node (its manifest row's name at the machine's host) and how long
+%% an entry waits for it to run erx_storage, polling every POLL_MS, and for its step.
+-define(STORAGE_NODE, 'storage@erxos').
+-define(STORAGE_WAIT_MS, 90000).
+-define(POLL_MS, 200).
+-define(STEP_MS, 60000).
 
 -spec main() -> ok.
-main() ->
+main() -> at_storage(main_here).
+
+-spec medium() -> ok.
+medium() -> at_storage(medium_here).
+
+-spec data_write() -> ok.
+data_write() -> at_storage(data_write_here).
+
+-spec data_read() -> ok.
+data_read() -> at_storage(data_read_here).
+
+%% Runs Step at the storage domain's node and prints its lines, then "blk: done". A domain
+%% that never runs erx_storage, or a step that fails at its node, prints "no driver".
+at_storage(Step) ->
+    Lines = case wait_storage(?STORAGE_WAIT_MS div ?POLL_MS) of
+                ok ->
+                    {Module, Binary, File} = code:get_object_code(?MODULE),
+                    try
+                        {module, Module} = erpc:call(?STORAGE_NODE, code, load_binary, [Module, File, Binary], ?STEP_MS),
+                        erpc:call(?STORAGE_NODE, ?MODULE, run, [Step], ?STEP_MS)
+                    catch
+                        Class:Reason -> [text("no driver: ~0p", [{Class, Reason}])]
+                    end;
+                timeout ->
+                    [text("no driver", [])]
+            end,
+    lists:foreach(fun display/1, Lines ++ [text("done", [])]).
+
+wait_storage(0) ->
+    timeout;
+wait_storage(Tries) ->
+    Running = try erpc:call(?STORAGE_NODE, application, which_applications, [], ?POLL_MS) of
+                  Applications -> lists:keymember(erx_storage, 1, Applications)
+              catch
+                  _:_ -> false
+              end,
+    case Running of
+        true -> ok;
+        false -> timer:sleep(?POLL_MS), wait_storage(Tries - 1)
+    end.
+
+%% At the storage domain's node: Step's lines, in order.
+-spec run(main_here | medium_here | data_write_here | data_read_here) -> [binary()].
+run(Step) ->
+    put(lines, []),
+    ok = ?MODULE:Step(),
+    lines().
+
+lines() -> lists:reverse(get(lines)).
+
+-spec main_here() -> ok.
+main_here() ->
     case call(fun erx_blk:info/0) of
         {ok, #{version := Version, capacity := Capacity}} ->
             line("transport version ~b", [Version]),
@@ -74,11 +136,10 @@ main() ->
         _NoDriver ->
             line("no driver", []),
             timer:sleep(?LOG_DRAIN_MS)
-    end,
-    line("done", []).
+    end.
 
--spec medium() -> ok.
-medium() ->
+-spec medium_here() -> ok.
+medium_here() ->
     case call(fun erx_blk:info/0) of
         {ok, #{capacity := Capacity}} ->
             line("capacity ~b sectors", [Capacity]),
@@ -95,24 +156,25 @@ medium() ->
         _NoDriver ->
             line("no driver", []),
             timer:sleep(?LOG_DRAIN_MS)
-    end,
-    line("done", []).
+    end.
 
--spec data_write() -> ok.
-data_write() ->
+-spec data_write_here() -> ok.
+data_write_here() ->
     Parent = self(),
     {Holder, Monitor} = spawn_monitor(fun() -> hold(Parent) end),
     receive
-        {Holder, written} -> ok;
+        {Holder, written, Lines} -> put(lines, lists:reverse(Lines, get(lines)));
         {'DOWN', Monitor, process, Holder, _} -> timer:sleep(?LOG_DRAIN_MS)
     end,
-    line("done", []).
+    ok.
 
 %% Writes both files, tells data_write, and then holds them open, without sync or close,
-%% until the power cut: the holder's end would close them.
+%% until the power cut: the holder's end would close them. It outlives the step's erpc
+%% call, at the storage domain's node.
 hold(Parent) ->
+    put(lines, []),
     write_files(),
-    Parent ! {self(), written},
+    Parent ! {self(), written, lines()},
     receive after infinity -> ok end.
 
 %% A step that fails prints its line and the next one runs, so the harness names it.
@@ -139,8 +201,8 @@ open_write(Path, Seed) ->
             Failed
     end.
 
--spec data_read() -> ok.
-data_read() ->
+-spec data_read_here() -> ok.
+data_read_here() ->
     case file:read_file(?SYNCED) of
         {ok, Synced} ->
             line("data synced ~b bytes md5 ~s", [byte_size(Synced), binary:encode_hex(erlang:md5(Synced), lowercase)]);
@@ -158,8 +220,7 @@ data_read() ->
         _Other ->
             line("data unsynced failed", []),
             timer:sleep(?LOG_DRAIN_MS)
-    end,
-    line("done", []).
+    end.
 
 data_content(Seed) ->
     << <<((Index + Seed) rem 251)>> || Index <- lists:seq(0, ?DATA_BYTES - 1) >>.
@@ -243,6 +304,14 @@ pattern(Sector, Tag) ->
 call(Fun) ->
     try Fun() catch exit:Reason -> {exit, Reason} end.
 
+%% A line of the step, kept for the system domain to print.
 line(Format, Arguments) ->
-    true = erlang:display_string(stdout, iolist_to_binary(["blk: ", io_lib:format(Format, Arguments), $\n])),
+    put(lines, [text(Format, Arguments) | get(lines)]),
+    ok.
+
+text(Format, Arguments) ->
+    iolist_to_binary(["blk: ", io_lib:format(Format, Arguments), $\n]).
+
+display(Line) ->
+    true = erlang:display_string(stdout, Line),
     ok.

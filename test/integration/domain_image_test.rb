@@ -67,10 +67,13 @@ class DomainImageTest < Minitest::Test
     assert(paths.all? { |path| path.start_with?('domains/erxos/') }, 'one domain release')
     assert_includes paths, 'domains/erxos/bin/base.boot'
     assert_includes paths, 'domains/erxos/bin/session.boot'
+    assert_includes paths, 'domains/erxos/bin/storage.boot'
     assert(paths.any? { |path| path.match?(%r{\Adomains/erxos/lib/kernel-[0-9.]+/ebin/kernel\.app\z}) }, 'kernel.app')
     assert_equal 1, paths.count { |path| path.match?(%r{\Adomains/erxos/lib/stdlib-[0-9.]+/ebin/lists\.beam\z}) }, 'lists.beam once'
     shipped = paths.filter_map { |path| path[%r{\Adomains/erxos/lib/([a-z_]+)-}, 1] }.uniq.sort
-    assert_equal Erx::ProductionImage::DOMAIN_BOOTS.fetch('session').sort, shipped
+    # The release ships each application once, of every boot script the manifest names:
+    # the session template's and the storage domain's.
+    assert_equal %w[session storage].flat_map { |name| Erx::ProductionImage::DOMAIN_BOOTS.fetch(name) }.uniq.sort, shipped
   end
 
   def test_the_system_run_stays_whole

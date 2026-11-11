@@ -27,7 +27,10 @@ class ErxBlkImageTest < Minitest::Test
 
   def setup
     @codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
-    @source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    # erx_blk_image places the windows the system domain holds; the development manifest
+    # gives the release window to the storage domain, which does not place it, so the
+    # cases start from the manifest with the system domain holding it.
+    @source = ManifestContextFixture.domainless(File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt')))
     @platform = JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json')))
   end
 

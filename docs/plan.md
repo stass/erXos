@@ -1809,7 +1809,7 @@ ping joins the demo once 1b-G's network service answers it.
 **Scope, on the stopgap (1b-E).** The storage domain, which holds the
 block driver and the file systems from here, with littlefs as its
 sub-space port over track S's port driver (1b-B)
-([design-stopgap.md](design-stopgap.md#littlefs-in-the-system-domain)),
+([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)),
 and the part of the device service that gives it its device; the device service in full, with the
 system manifest's placement of devices and its `/dev` tree
 ([design-system.md](design-system.md#devices)); the device NIF in full:

@@ -45,24 +45,25 @@ class RuntimeReleaseTest < Minitest::Test
     assert_includes paths, 'system/bin/start.boot'
     %w[kernel/ebin/kernel.app kernel/ebin/code_server.beam stdlib/ebin/stdlib.app stdlib/ebin/lists.beam
        erx/ebin/erx.app erx/ebin/erx_console.beam erx_files/ebin/erx_files.app erx_uart/ebin/erx_pl011.beam
-       erx_blk/ebin/erx_blk.app erx_blk/ebin/erx_blk_write.beam compiler/ebin/compile.beam
+       compiler/ebin/compile.beam
        runtime_tools/ebin/dbg.beam].each do |file|
       application, rest = file.split('/', 2)
       assert(paths.any? { |path| path.match?(%r{\Asystem/lib/#{application}-[0-9.]+/#{Regexp.escape(rest)}\z}) }, file)
     end
     shipped = paths.filter_map { |path| path[%r{\Asystem/lib/([a-z_]+)-[^/]+/}, 1] }.uniq
-    assert_equal %w[compiler erx erx_blk erx_code erx_domain erx_files erx_hostlink erx_net erx_net_client erx_session
+    assert_equal %w[compiler erx erx_code erx_domain erx_files erx_hostlink erx_net erx_net_client erx_session
                     erx_shell erx_uart kernel runtime_tools stdlib], shipped.sort,
                  'the release holds its applications and no more'
   end
 
-  # Each of erXos's applications holds the modules of its sources and no other, and
+  # Each of erXos's applications the system release ships (ReleaseFiles::SYSTEM_APPLICATIONS)
+  # holds the modules of its sources and no other, and
   # OTP's applications hold none of erXos's: kernel's hooks, net_kernel and logger name
   # erx's modules, which the boot script's code path finds (docs/design-runtime.md,
   # "Everything else").
   def test_erxos_modules_are_in_their_own_applications
     paths = @table.map(&:first)
-    Erx::ErlangApps::APPLICATIONS.each do |application|
+    (Erx::ErlangApps::APPLICATIONS & Erx::ReleaseFiles::SYSTEM_APPLICATIONS).each do |application|
       sources = Erx::ErlangApps.modules(root: ROOT, application: application)
       beams = paths.filter_map { |path| path[%r{\Asystem/lib/#{application}-[^/]+/ebin/([^/]+\.beam)\z}, 1] }
       assert_equal sources.map { |source| "#{File.basename(source, '.erl')}.beam" }.sort, beams.sort, application

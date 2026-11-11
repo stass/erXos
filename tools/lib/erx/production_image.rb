@@ -110,13 +110,17 @@ module Erx
     # "The production image"); the manifest only names the script, so two rows naming
     # one cannot disagree on what it boots. The session script, which a principal's
     # session domain boots, adds the command shell and erx_session
-    # (docs/design-domains.md, "Principals, sessions and quotas"); a name the table does
-    # not hold boots DOMAIN_APPLICATIONS, the applications every domain boots through.
-    # The development manifest's session template names the session script;
-    # medium_boot's manifest configures a domain (MediumBoot.manifest), and a test image
-    # may carry more scripts (build_test_image's domains).
+    # (docs/design-domains.md, "Principals, sessions and quotas"); the storage script adds
+    # the block driver and littlefs's volume, which the system release does not ship
+    # (ReleaseFiles::STORAGE_ONLY; docs/design-stopgap.md, "littlefs in the storage domain"); a name
+    # the table does not hold boots DOMAIN_APPLICATIONS, the applications every domain
+    # boots through. The development manifest's session template names the session
+    # script and its storage row the storage script; medium_boot's manifest configures
+    # a domain (MediumBoot.manifest), and a test image may carry more scripts
+    # (build_test_image's domains).
     DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
-    DOMAIN_BOOTS = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_shell', 'erx_session'].freeze }.freeze
+    DOMAIN_BOOTS = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_shell', 'erx_session'].freeze,
+                     'storage' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::STORAGE_ONLY].freeze }.freeze
 
     # Refuses a test script (ReleaseFiles::DomainBoot#test) among domains unless the image
     # is a test image, whose archive flags mark its test code, so no image without the
@@ -438,7 +442,7 @@ module Erx
       # The crash record may come this much before the pet deadline D: the last pet is up to a
       # pet interval older than the suspension, and the harness reads the serial log on a poll.
       PET_EARLY_SECONDS = 2
-      # The system share's cpuset in the narrow image: CPUs 0 and 1.
+      # The narrow image's CPUs, 0 and 1: the system share's cpuset, and the bound of every other.
       NARROW_CPUSET = 3
       # erx_console's first line, which only a release that started `kernel` writes.
       SLOGAN = { name: 'release-slogan', pattern: %r{\AErlang/OTP 29 }n, seconds: 240 }.freeze
@@ -603,7 +607,7 @@ module Erx
         fiasco.build(jobs: jobs) if build
         check_device_paths
         built = image(fiasco)
-        narrow = cpus.max > 1 ? image(fiasco, directory: 'build/production-image/narrow', manifest_source: narrow_manifest) : nil
+        narrow = cpus.max > 1 ? image(fiasco, directory: 'build/production-image/narrow', manifest_source: Run.narrow_manifest(@root)) : nil
         full_matrix(accels, cpus, built, narrow).merge(smoke ? smoke_cells(built) : {})
       end
 
@@ -611,7 +615,8 @@ module Erx
       # without test code, and the kernel's line names its archive's identity and flags,
       # so a test image's mark shows. The manifest line
       # carries the numbers the source says, so a root that misread it fails. ERTS's
-      # arguments count each device record. hostlink is the boot's QemuPlan host link: a
+      # arguments count each device record of a unit the system domain holds; a unit a
+      # configured domain holds gives its record to that domain. hostlink is the boot's QemuPlan host link: a
       # plan of QemuPlan::NO_HOSTLINK sends no erx.hostlink=1, so the host link's UART gives
       # no record. memory_mib is the RAM QEMU gives the guest, which bootstrap reports. Schedulers are
       # one per CPU of the system's share on this machine. Erlang's init then boots the
@@ -625,7 +630,8 @@ module Erx
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
         recorded = hostlink == QemuPlan::NO_HOSTLINK ? RECORD_UNITS - [HOSTLINK_UNIT] : RECORD_UNITS
-        records = source.scan(/^unit (\w+)$/).flatten.select { |unit| recorded.include?(unit) }
+        records = source.scan(/^unit (\w+)\n(?:  .*\n)*?  holder (\S+)$/)
+                        .filter_map { |unit, holder| unit if holder == 'system' && recorded.include?(unit) }
                         .sum { |unit| unit == HOSTLINK_UNIT ? DEVICE_RECORD_WORDS : GIVEN_RECORD_WORDS }
         arguments = arguments_always(root) + records + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         count = schedulers(source, cpus: cpus)
@@ -1157,14 +1163,41 @@ module Erx
       # The manifest with the system share on the machine's first two CPUs only. A boot of it
       # on a larger machine tells a scheduler count taken from the share and the online CPUs
       # together from one taken from the online CPUs alone, which the manifest's own cpuset,
-      # every CPU the runs have, cannot.
-      def narrow_manifest
-        ProductionImage.sessionless_manifest(@root).sub(/^(share system\n(?:  .*\n)*?  cpuset )\d+$/) { "#{Regexp.last_match(1)}#{NARROW_CPUSET}" }
+      # every CPU the runs have, cannot. Every share is narrowed (Run.narrow_share), so a
+      # configured domain's grant, among them the storage domain's grant of users, still fits
+      # the system share, as the domain library requires (docs/design-system.md, "The domain
+      # library"). The manifest check and the library's planner judge the result whole.
+      def self.narrow_manifest(root)
+        ProductionImage.sessionless_manifest(root).gsub(/^share [a-z0-9_-]+\n(?:  .*\n)*/) { |record| narrow_share(record) }
       end
+
+      # One share record of the narrow manifest: its cpuset keeps only NARROW_CPUSET's CPUs,
+      # its quota_ns is capped at period_ns per remaining CPU and its capacity_mcpu at 1000
+      # per remaining CPU, since the library gives a share whose quota its cpuset cannot spend
+      # no rate, and plans no domain under it. A share with none of those CPUs is refused:
+      # cpuset 0 would mean every CPU.
+      def self.narrow_share(record)
+        cpuset = share_field(record, 'cpuset') & NARROW_CPUSET
+        raise Error, "the narrow manifest leaves #{record.lines.first.chomp} no CPU" if cpuset.zero?
+
+        cpus = cpuset.to_s(2).count('1')
+        record.sub(/^  cpuset \d+$/, "  cpuset #{cpuset}")
+              .sub(/^  quota_ns \d+$/) { "  quota_ns #{[share_field(record, 'quota_ns'), share_field(record, 'period_ns') * cpus].min}" }
+              .sub(/^  capacity_mcpu \d+$/) { "  capacity_mcpu #{[share_field(record, 'capacity_mcpu'), cpus * 1000].min}" }
+      end
+
+      # A share record's numeric field; a record without it is refused.
+      def self.share_field(record, name)
+        value = record[/^  #{name} (\d+)$/, 1]
+        raise Error, "the narrow manifest finds no numeric #{name} in #{record.lines.first.chomp}" unless value
+
+        Integer(value, 10)
+      end
+      private_class_method :share_field
 
       def boot_narrow(accel, count, built)
         points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count,
-                                        manifest_source: narrow_manifest)
+                                        manifest_source: Run.narrow_manifest(@root))
         boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
       end
 

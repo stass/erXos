@@ -4,7 +4,7 @@
 -module(erx_littlefs).
 -moduledoc """
 littlefs as a NIF (otp/erts/emulator/nifs/erxos/erx_littlefs_nif.c), the stopgap read-write file system of
-docs/design-stopgap.md#littlefs-in-the-system-domain. `erx_lfs` is its one
+docs/design-stopgap.md#littlefs-in-the-storage-domain. `erx_lfs` is its one
 user: the volume's worker alone calls the operations, each on a dirty I/O
 scheduler; the owner alone calls `complete/2` and `payload/1`, which are
 normal NIFs, as it serves the block requests the operations post to it.

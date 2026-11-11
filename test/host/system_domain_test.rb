@@ -14,7 +14,8 @@ class SystemDomainTest < Minitest::Test
   # The rows are MediumBoot's with the halt dropped, so each configured domain stays up,
   # over the erx carrier, as MediumBoot's, so each is a node, behind the flag that lets the
   # control_table step hold a domain's ring; the manifest differs from MediumBoot's only in
-  # that row's arguments, its one connection, the control table's one slot, erts's test
+  # that row's arguments, its one connection, the control table's one slot, its grant
+  # (Suite::HALF_SHARE, a record of its own before the row), erts's test
   # script (ECHO_BOOT), the second row, peer, and the echo checkpoint's service and facet
   # rows.
   def test_the_configured_domains_stay_up_as_nodes_and_are_the_manifests_one_change
@@ -33,12 +34,15 @@ class SystemDomainTest < Minitest::Test
     assert_equal Suite::DOMAIN_ROW, Suite::ECHO_ROW.sub("  release @artifact.echo\n", "  release @artifact.erts\n")
     assert Suite::ECHO_BOOT.test
     assert_includes Suite::ECHO_BOOT.applications, 'erx_echo_test'
+    assert ours.start_with?(medium.delete_suffix(Erx::MediumBoot::DOMAIN_ROW) + Suite::HALF_SHARE)
+    rows = ours.sub(Suite::HALF_SHARE, '')
     kept = medium.lines.size - 1
-    assert_equal [["  connections 0\n", "  connections 1\n"], ["  release @artifact.erts\n", "  release @artifact.echo\n"]],
-                 medium.lines[0...-1].zip(ours.lines[0...kept]).reject { |theirs, mine| theirs == mine }
+    assert_equal [["  grant @share.users\n", "  grant @share.half\n"], ["  connections 0\n", "  connections 1\n"],
+                  ["  release @artifact.erts\n", "  release @artifact.echo\n"]],
+                 medium.lines[0...-1].zip(rows.lines[0...kept]).reject { |theirs, mine| theirs == mine }
     assert_match(/^  args ".* -eval /, medium.lines.last)
     assert_equal ["  args \"#{Suite::DOMAIN_ARGS.join(' ')}\"\n", *Suite::PEER_ROW.lines, *Suite::ECHO_SERVICES.lines],
-                 ours.lines[kept..]
+                 rows.lines[kept..]
   end
 
   # The kill follows the Erlang shell; the answer must name both configured domains
@@ -73,9 +77,9 @@ class SystemDomainTest < Minitest::Test
     end
     refute_match running.fetch(:pattern), "1> #{line}\r\n"
     good = '{service_kill,[{5,erts@erxos,ready},{6,peer@erxos,ready}],system@erxos,4,' \
-           '[erts@erxos,peer@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}],{2,erts@erxos}}'
+           '[erts@erxos,peer@erxos,storage@erxos],[{5,erts@erxos,5},{6,peer@erxos,6}],{2,erts@erxos}}'
     running.fetch(:verify).call("1> #{good}\r\n")
-    ['timeout', good.sub('system@erxos,4', 'nonode@nohost,0'), good.sub('[erts@erxos,peer@erxos]', '[erts@erxos]'),
+    ['timeout', good.sub('system@erxos,4', 'nonode@nohost,0'), good.sub('[erts@erxos,peer@erxos,storage@erxos]', '[erts@erxos,storage@erxos]'),
      good.sub('{6,peer@erxos,6}', '{6,{error,{erpc,noconnection}},{error,{erpc,noconnection}}}'),
      good.sub('{6,peer@erxos,ready}', '{6,peer@erxos,running}'), good.sub('{2,erts@erxos}', '{3,erts@erxos}')].each do |line|
       assert_raises(Erx::Error) { running.fetch(:verify).call("#{line}\r\n") }
@@ -142,8 +146,8 @@ class SystemDomainTest < Minitest::Test
     # the later domain's process of the same number and serial, each fails.
     refute_match later.fetch(:pattern), "1> #{line}\r\n"
     later.fetch(:verify).call("#{Suite::LATER_DOMAIN_ANSWER}\r\n")
-    [Suite::LATER_DOMAIN_ANSWER.sub('{7,ok}', '{6,ok}'), Suite::LATER_DOMAIN_ANSWER.sub('[nodedown,nodeup]', '[nodeup,nodedown]'),
-     Suite::LATER_DOMAIN_ANSWER.sub('true},up}', 'true},down}'), Suite::LATER_DOMAIN_ANSWER.sub('{7,ok}', '{error,name_taken}'),
+    [Suite::LATER_DOMAIN_ANSWER.sub('{8,ok}', '{6,ok}'), Suite::LATER_DOMAIN_ANSWER.sub('[nodedown,nodeup]', '[nodeup,nodedown]'),
+     Suite::LATER_DOMAIN_ANSWER.sub('true},up}', 'true},down}'), Suite::LATER_DOMAIN_ANSWER.sub('{8,ok}', '{error,name_taken}'),
      Suite::LATER_DOMAIN_ANSWER.sub('{noproc,noproc,noproc,noproc,', '{noconnection,noproc,noconnection,noconnection,'),
      Suite::LATER_DOMAIN_ANSWER.sub('sd_new', 'sd_old')]
       .each { |answer| assert_raises(Erx::Error) { later.fetch(:verify).call("#{answer}\r\n") } }

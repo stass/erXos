@@ -262,14 +262,18 @@ Error in process <0.150.0> with exit value:
   server in one domain serves a client in another over their connection.
 * **Storage works**: M6's demo of the [roadmap](docs/plan.md) runs. A
   virtio block driver in Erlang (`erx_blk`) serves the partitions of an
-  MBR with extended boot records as windows. littlefs serves `/data`; a
-  file synced there survives a power cut, checked under HVF. An EROFS
+  MBR with extended boot records as windows. It runs in the storage
+  domain, a BeamAsm service domain that holds the block device, which the
+  development manifest configures and the domain service starts at boot.
+  littlefs serves `/data` there; a file synced there survives a power
+  cut, checked under HVF. An EROFS
   reader in Erlang (`erx_erofs`), behind its funnel `erx_verity`, mounts
   images in the namespace. CRC-32C is the first per-byte primitive.
   `ruby tools/erx pack --medium` writes a QEMU disk image; the QEMU
   harness boots from it, playing the firmware, which reads the
-  boot-selection record and boots the slot it names. The shell then reads
-  the release's files from that slot's EROFS image at `/images/release`.
+  boot-selection record and boots the slot it names. The harness then
+  reads the release's files from that slot's EROFS image at the storage
+  domain; the image is not yet served to the system domain.
   The funnel does not check image hashes yet; that is M11.
 * **The command shell works at the console.** The console's first shell
   is an rc-language command shell, written in Erlang, and `erl` in it

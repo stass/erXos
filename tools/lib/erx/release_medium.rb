@@ -80,11 +80,14 @@ module Erx
     # names, with its one extent in the slot.
     def image(entries:, directory:, runner:)
       path = ErofsImage.new(runner: runner).write(files: files(entries), name: IMAGE, output: File.join(directory, EROFS))
-      extents = image_extents([slot_file(IMAGE, path)]).map do |extent|
-        { 'slot_offset' => extent.slot_offset, 'length' => extent.file.length }
-      end
+      extent = image_extent(path)
+      extents = [{ 'slot_offset' => extent.slot_offset, 'length' => extent.file.length }]
       [path, { IMAGE => { 'kind' => 'erofs_image', 'extents' => extents } }]
     end
+
+    # Where a slot holds the system release's EROFS image at path, the slot's one image:
+    # its Extent, as image_extents places it.
+    def image_extent(path) = image_extents([slot_file(IMAGE, path)]).fetch(0)
 
     # The EROFS image's files: each release entry's archive path, mapped to its built file.
     def files(entries)

@@ -85,7 +85,7 @@ class ManifestDomainsTest < Minitest::Test
     domains = rows(view, 'domains')
     assert_equal %w[beta gamma], domains.map { |row| view.string(row.fetch('name')) }
     emu = @context.artifacts.fetch('emu').fetch('entry')
-    assert_equal [[emu, 0, 3]] * 2, domains.map { |row| row.values_at('runtime', 'release', 'release_files') }
+    assert_equal [[emu, 0, @context.artifacts.fetch('app').fetch('files')]] * 2, domains.map { |row| row.values_at('runtime', 'release', 'release_files') }
     assert_equal [@codec.member('mf_domain_flags', 'rescue'), 0], domains.map { |row| row.fetch('flags') }
     assert_equal [[3, 5]] * 2, domains.map { |row| row.values_at('restarts', 'restart_period_s') }
     assert_equal [0, 1], rows(view, 'boot_order').map { |row| row.fetch('domain') }

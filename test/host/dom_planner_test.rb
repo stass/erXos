@@ -7,7 +7,9 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/dom_planner'
 require_relative '../../tools/lib/erx/manifest'
+require_relative '../../tools/lib/erx/production_image'
 require_relative '../../tools/lib/erx/runner'
+require_relative '../../tools/lib/erx/system_domain'
 require_relative '../fixtures/manifest_context'
 
 # Property 12 with the domain library's own host build: the manifest check runs
@@ -64,6 +66,39 @@ class DomPlannerTest < Minitest::Test
 
   def test_the_library_plans_a_configured_domain
     assert_equal 1, admit(@source).report.fetch('child_plan_instances')
+  end
+
+  # The development manifest as it ships, with its session template and its own
+  # configured domain, storage, which holds the block unit: the library plans it.
+  def test_the_library_plans_the_development_manifests_domain
+    source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
+    assert_equal 1, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
+                                 .report.fetch('child_plan_instances')
+  end
+
+  # The production image's narrow manifest (ProductionImage::Run.narrow_manifest), which
+  # its 4-CPU cells boot: the system share on two CPUs, and the storage domain's grant,
+  # which must fit the system share, on them too, so the library plans it.
+  def test_the_library_plans_the_narrow_images_domain
+    source = Erx::ProductionImage::Run.narrow_manifest(ROOT)
+    context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
+    assert_equal 1, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
+                                 .report.fetch('child_plan_instances')
+  end
+
+  # The system_domain suite's manifests, the service-kill boot's (SystemDomain.manifest)
+  # and the re-grant boot's (SystemDomain::Regrant.manifest): their two configured rows,
+  # erts and peer, beside the development manifest's storage, all three grants within
+  # the system share's reserve, so the library plans each.
+  def test_the_library_plans_the_system_domain_suites_domains
+    source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    arguments = ManifestContextFixture.archive_arguments(@codec, boots: %w[echo erts session storage])
+    context = Erx::Manifest::Context.new(**arguments.merge(platform: Erx::MediumBoot::MACHINE.platform(@context.platform)))
+    [Erx::SystemDomain, Erx::SystemDomain::Regrant].each do |suite|
+      admitted = Erx::Manifest.admit(source: suite.manifest(source), codec: @codec, context: context, planner: @planner)
+      assert_equal 3, admitted.report.fetch('child_plan_instances'), suite.name
+    end
   end
 
   # Two principals' session templates (property 14), each its principal's, of the

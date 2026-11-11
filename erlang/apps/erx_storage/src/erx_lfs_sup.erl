@@ -3,7 +3,7 @@
 
 -module(erx_lfs_sup).
 -moduledoc """
-The domain's `/data` (docs/design-stopgap.md#littlefs-in-the-system-domain):
+The domain's `/data` (docs/design-stopgap.md#littlefs-in-the-storage-domain):
 the volume's owner, `erx_lfs`, on the block service's data window, and the
 grant that mounts it at `/data`. Neither is restarted: a volume that failed
 stays unavailable until the next boot, so no later write races one the

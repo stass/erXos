@@ -38,7 +38,7 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   def admit(source = @source, against = @context)
-    Erx::Manifest.admit(source: source, codec: @codec, context: against)
+    Erx::Manifest.admit(source: source, codec: @codec, context: against, planner: ManifestContextFixture.accepting_planner)
   end
 
   def refused(klass, property, field, source = @source, against = @context, message: nil)
@@ -93,7 +93,7 @@ class ManifestStopgapTest < Minitest::Test
     assert result.matches?(@context)
     assert result.bytes.frozen?
     view = @codec.open('manifest', result.bytes)
-    assert_equal 0, view.count('domains')
+    assert_equal 1, view.count('domains')
     assert_equal 4, view.count('devices')
     assert_equal 6, view.count('windows')
     assert_equal 1, view.count('images')
@@ -106,16 +106,19 @@ class ManifestStopgapTest < Minitest::Test
     assert_equal 'supplied_catalog', report.fetch('executable')
     assert_equal 'supplied_context', report.fetch('provenance')
     assert_equal 'unsupported', report.fetch('policy_admission')
-    assert_equal 0, report.fetch('child_plan_instances')
+    assert_equal 1, report.fetch('child_plan_instances')
     assert_equal 0, report.fetch('dynamic_domain_reservation')
     assert_equal @platform.fetch('fiasco_reserve'), report.fetch('fiasco_reserve')
     assert_equal @platform.fetch('ram_bytes'), report.fetch('ram_bytes')
     assert_equal 4096, report.fetch('root_image_loadable_bytes')
   end
 
-  # The development manifest as a partial boot, which makes no sessions, so without
-  # its session template.
-  def partial_boot = changed(@source.sub('flags development', 'flags development,partial_boot').sub(/^session system\n(?:  .*\n)*/, ''))
+  # The development manifest as a partial boot, which makes no sessions and configures
+  # no domains, so without its session template and its storage domain.
+  def partial_boot
+    changed(ManifestContextFixture.domainless(@source).sub('flags development', 'flags development,partial_boot')
+                                  .sub(/^session system\n(?:  .*\n)*/, ''))
+  end
 
   def test_a_partial_boot_flag_without_partial_boot_records_is_admitted
     source = partial_boot
@@ -148,7 +151,7 @@ class ManifestStopgapTest < Minitest::Test
 
   # Property 1: one holder per device and unit.
   def test_a_unit_held_by_another_domain_is_refused
-    refused(Erx::Manifest::Invalid, 1, 'unit.holder', @source.sub("placement \"block\"\n  holder system", "placement \"block\"\n  holder storage"))
+    refused(Erx::Manifest::Invalid, 1, 'unit.holder', changed(@source.sub("placement \"net\"\n  holder system", "placement \"net\"\n  holder other")))
   end
 
   def test_a_unit_placed_twice_is_refused
@@ -289,7 +292,7 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   def test_a_window_held_by_no_configured_domain_is_refused
-    refused(Erx::Manifest::Invalid, 8, 'window.holder', @source + window(role: 'fat', holder: '@domain.storage'))
+    refused(Erx::Manifest::Invalid, 8, 'window.holder', @source + window(role: 'fat', holder: '@domain.absent'))
   end
 
   def test_a_window_on_no_placed_device_is_refused
@@ -321,8 +324,8 @@ class ManifestStopgapTest < Minitest::Test
   def test_windows_encode_in_contract_order_on_the_block_device
     view = @codec.open('manifest', admit.bytes)
     rows = (0...view.count('windows')).map { |index| view.fetch('windows', index) }
-    roles = rows.map { |row| row.fetch('role') }
-    assert_equal roles.sort, roles
+    order = rows.map { |row| row.values_at('holder', 'role') }
+    assert_equal order.sort, order
     rows.each do |row|
       assert_equal @codec.member('mf_device_role', 'block'), view.fetch('devices', row.fetch('device')).fetch('role')
     end
