@@ -304,6 +304,20 @@ scripts live in `~/erxos-scratch/tools/`.
   whether changing the architecture would make the edge cases disappear rather
   than handling them one by one. A simpler design that eliminates a class of
   problems beats a clever one that patches each instance.
+* **The common path first; the long tail goes to `TODO.md`.** Build what the
+  milestone needs for the cases that occur in it. Rare failure modes, in-place
+  recovery machinery and protection against hostile peer domains beyond the
+  rules written here are recorded in `TODO.md` (as residuals in Phase 1), not
+  designed now. Where a failure needs handling, prefer the recovery that
+  already exists, such as restarting the component, over new machinery.
+  * Deferring never relaxes what makes a gap safe to leave open:
+    bounds-checked parsing of untrusted input, no memory errors, no crash or
+    panic on bad input, and an accurate record of the gap.
+  * Defer a case only when leaving it open fails safely, with an error, a
+    stop or a restart. Never defer one that would corrupt or lose data, widen
+    authority, or return a wrong answer as a right one.
+  * When review rounds keep finding new rare cases, stop and ask which of
+    them the milestone needs; record the rest.
 * **Open-ended enumeration is the smell; "by construction" is the fix.** The
   warning is a correctness argument that depends on remembering every caller,
   execution path or exception that must participate in a protocol. Each new
