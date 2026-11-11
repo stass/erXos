@@ -381,7 +381,9 @@ created_term(ErlNifEnv *env, const erx_dom_created_t *created)
 }
 
 /*
- * The services configured domains serve, [{ServerRow, Name}], and the facet
+ * The services configured domains serve, [{ServerRow, Name, Interface}],
+ * Interface the abi/services number of the interface it serves (an
+ * ERX_SERVICE_* value), and the facet
  * rows, [{Grantee, Name, Server, Limits}], Grantee a configured row, the
  * atom system, or {template, Template} for the sessions made from session
  * template Template, the index a session's origin {session, Template}
@@ -408,8 +410,8 @@ served_terms(ErlNifEnv *env, ERL_NIF_TERM *services, ERL_NIF_TERM *grants)
 		if (service->server == ERX_MF_NONE)
 			continue;
 		name = enif_make_atom_len(env, service->name, service->name_len);
-		*services = enif_make_list_cell(env,
-		    enif_make_tuple2(env, enif_make_uint(env, service->server), name), *services);
+		*services = enif_make_list_cell(env, enif_make_tuple3(env, enif_make_uint(env, service->server),
+		    name, enif_make_uint(env, service->interface)), *services);
 	}
 	*grants = enif_make_list(env, 0);
 	for (index = lib->view.nfacets; index-- > 0;) {
@@ -500,23 +502,113 @@ configured_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (enif_make_tuple2(env, atom(env, "ok"), result));
 }
 
+/* An entry's register ranges, [{Base, Size}], from the last back. */
+static ERL_NIF_TERM
+ranges_term(ErlNifEnv *env, const erx_dom_device_entry_t *entry)
+{
+	ERL_NIF_TERM list = enif_make_list(env, 0);
+
+	for (uint32_t at = entry->nranges; at-- > 0;)
+		list = enif_make_list_cell(env, enif_make_tuple2(env, enif_make_uint64(env, entry->ranges[at].base),
+		    enif_make_uint64(env, entry->ranges[at].size)), list);
+	return (list);
+}
+
+/* An entry's interrupt lines, [Line], from the last back. */
+static ERL_NIF_TERM
+lines_term(ErlNifEnv *env, const erx_dom_device_entry_t *entry)
+{
+	ERL_NIF_TERM list = enif_make_list(env, 0);
+
+	for (uint32_t at = entry->nlines; at-- > 0;)
+		list = enif_make_list_cell(env, enif_make_uint(env, entry->lines[at]), list);
+	return (list);
+}
+
+/* A binary holding len bytes from bytes, or false where none can be made. */
+static bool
+binary_term(ErlNifEnv *env, const char *bytes, size_t len, ERL_NIF_TERM *term)
+{
+	unsigned char *copy;
+
+	if ((copy = enif_make_new_binary(env, len, term)) == NULL)
+		return (false);
+	memcpy(copy, bytes, len);
+	return (true);
+}
+
+/*
+ * One catalogue entry as devices_nif shows it, or false for an entry the
+ * view could not have built (a unit name out of bounds, more ranges or
+ * lines than an entry holds, a compatible string without a role word), so
+ * a broken view fails closed rather than reading past an entry.
+ */
+static bool
+device_term(ErlNifEnv *env, uint32_t index, const erx_dom_device_entry_t *entry, uint32_t holder,
+    ERL_NIF_TERM *row)
+{
+	ERL_NIF_TERM keys[11], values[11], name, compatible, registers, owner;
+
+	if (entry->unit_name == NULL || entry->unit_name_len == 0 || entry->unit_name_len > ERX_DOM_NAME_MAX ||
+	    (entry->role_word == NULL) != (entry->compatible == NULL) ||
+	    entry->nranges > ERX_DEVICE_RANGES_MAX || entry->nlines > ERX_DEVICE_IRQS_MAX)
+		return (false);
+	if (!binary_term(env, entry->unit_name, entry->unit_name_len, &name))
+		return (false);
+	if (entry->compatible == NULL)
+		compatible = atom(env, "none");
+	else if (!binary_term(env, entry->compatible, strlen(entry->compatible), &compatible))
+		return (false);
+	/* A device-tree device's window is offset bytes into its first page range; a PCIe function has none here. */
+	if (entry->nranges == 0)
+		registers = atom(env, "unknown");
+	else
+		registers = enif_make_tuple2(env, enif_make_uint64(env, entry->ranges[0].base + entry->offset),
+		    enif_make_uint64(env, entry->size));
+	if (entry->row == ERX_MF_NONE)
+		owner = atom(env, "system");
+	else if (holder == 0)
+		owner = atom(env, "none");
+	else
+		owner = enif_make_uint(env, holder);
+	keys[0] = atom(env, "index"), values[0] = enif_make_uint(env, index);
+	keys[1] = atom(env, "unit"), values[1] = enif_make_uint(env, entry->unit);
+	keys[2] = atom(env, "unit_name"), values[2] = name;
+	keys[3] = atom(env, "row"),
+	    values[3] = entry->row == ERX_MF_NONE ? atom(env, "system") : enif_make_uint(env, entry->row);
+	keys[4] = atom(env, "role"), values[4] = atom(env, entry->role_word == NULL ? "none" : entry->role_word);
+	keys[5] = atom(env, "compatible"), values[5] = compatible;
+	keys[6] = atom(env, "registers"), values[6] = registers;
+	keys[7] = atom(env, "ranges"), values[7] = ranges_term(env, entry);
+	keys[8] = atom(env, "lines"), values[8] = lines_term(env, entry);
+	keys[9] = atom(env, "confined"), values[9] = atom(env, entry->confined ? "true" : "false");
+	keys[10] = atom(env, "holder"), values[10] = owner;
+	return (enif_make_map_from_arrays(env, keys, values, sizeof(keys) / sizeof(keys[0]), row) != 0);
+}
+
 /*
  * The device catalogue with its holders (docs/design-system.md,
- * "Devices"): {ok, Devices} in catalogue order, each #{index, unit, row,
- * role, holder}. index is the entry's manifest device row; unit its unit
- * row; row the configured row its unit is placed on, or system; role its
- * record's role word, or none for a kind no runtime drives; holder the
- * living domain a creation gave it to, system for the system domain's
- * devices, or none. Role words come from erx/device_kinds.h, never from a
- * caller. A creation and an end change the holders, so this reads them
- * under the lock.
+ * "Devices"): {ok, Devices} in catalogue order, each #{index, unit,
+ * unit_name, row, role, compatible, registers, ranges, lines, confined,
+ * holder}. index is the entry's manifest device row; unit its unit row and
+ * unit_name that unit's manifest name, a binary; row the configured row
+ * its unit is placed on, or system; role its record's role word and
+ * compatible its kind's compatible string, a binary, each none for a kind
+ * no runtime drives; registers its register window, {Address, Bytes}, or
+ * unknown for a PCIe function, whose configuration space gives it; ranges
+ * the whole pages the window touches, [{Base, Bytes}]; lines its interrupt
+ * lines as the platform's controller numbers them, none listed for a PCIe
+ * function; confined whether it has an IOMMU stream; holder the living domain
+ * a creation gave it to, system for the system domain's devices, or none.
+ * Role words and compatible strings come from erx/device_kinds.h, never
+ * from a caller. A creation and an end change the holders, so this reads
+ * them under the lock; an entry the view could not have built is badarg.
  */
 static ERL_NIF_TERM
 devices_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	ERL_NIF_TERM keys[5], values[5], row, rows;
-	const erx_dom_device_entry_t *entry;
-	uint32_t index, holder;
+	ERL_NIF_TERM row, rows;
+	uint32_t index;
 
 	(void)argv;
 	if (argc != 0)
@@ -527,17 +619,7 @@ devices_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	enif_mutex_lock(lib_lock);
 	/* Built from the last entry back, so the list's head is entry 0. */
 	for (index = lib->view.ndevices; index-- > 0;) {
-		entry = &lib->view.devices[index];
-		holder = lib->device_records[index].holder;
-		keys[0] = atom(env, "index"), values[0] = enif_make_uint(env, index);
-		keys[1] = atom(env, "unit"), values[1] = enif_make_uint(env, entry->unit);
-		keys[2] = atom(env, "row"), values[2] = entry->row == ERX_MF_NONE ?
-		    atom(env, "system") : enif_make_uint(env, entry->row);
-		keys[3] = atom(env, "role"),
-		    values[3] = atom(env, entry->role_word == NULL ? "none" : entry->role_word);
-		keys[4] = atom(env, "holder"), values[4] = entry->row == ERX_MF_NONE ? atom(env, "system") :
-		    holder == 0 ? atom(env, "none") : enif_make_uint(env, holder);
-		if (!enif_make_map_from_arrays(env, keys, values, 5, &row)) {
+		if (!device_term(env, index, &lib->view.devices[index], lib->device_records[index].holder, &row)) {
 			enif_mutex_unlock(lib_lock);
 			return (enif_make_badarg(env));
 		}

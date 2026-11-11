@@ -208,6 +208,10 @@ module Erx
         kinds.each { |name, value| add_constant(all_constants, "kind_#{name}", value.fetch(:number), BASE_TYPES.fetch('u32'), abi.line) }
         caps.each { |name, value| add_constant(all_constants, "root_slot_#{name}", value.fetch(:slot), BASE_TYPES.fetch('u32'), abi.line) }
         calls.each { |name, value| add_constant(all_constants, "call_#{name}", value.fetch(:number), BASE_TYPES.fetch('u32'), abi.line) }
+        # Each abi/services interface's number, as a manifest's service row names it.
+        services.each do |service|
+          add_constant(all_constants, "service_#{service.fetch(:name)}", service.fetch(:number), BASE_TYPES.fetch('u32'), abi.line)
+        end
         Names.validate(types: types, constants: all_constants, calls: calls,
                        readers: readers, architecture: architecture, line: abi.line)
         result = Schema.new(version: version, architecture: architecture, types: types.freeze,

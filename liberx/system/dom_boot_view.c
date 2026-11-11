@@ -256,15 +256,19 @@ boot_kind(const erx_manifest_view_t *manifest, const erx_mf_device_t *device)
 }
 
 /*
- * Each entry's unit and holder, from the unit rows' spans of the device
- * table. The reader proved the spans a partition of the table; a span off
- * a row boundary, past the table, or over a device another span holds is
- * refused all the same, so every entry has exactly one unit.
+ * Each entry's unit, its unit's name and its holder, from the unit rows'
+ * spans of the device table. The reader proved the spans a partition of
+ * the table; a span off a row boundary, past the table, or over a device
+ * another span holds is refused all the same, so every entry has exactly
+ * one unit. The reader proved each unit's name an identifier of 1 to 63
+ * bytes (ERX_DOM_NAME_MAX) in the string table, whose bytes outlive the
+ * view.
  */
 static const char *
 boot_units(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries)
 {
 	const erx_mf_span_t table = manifest->header.devices;
+	const char *strings = (const char *)manifest->bytes + manifest->header.strings.offset;
 	erx_mf_unit_t unit;
 	uint32_t first;
 
@@ -281,6 +285,8 @@ boot_units(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries)
 			if (entries[index].unit != UINT32_MAX)
 				return ("manifest: a device is in two units");
 			entries[index].unit = at;
+			entries[index].unit_name = strings + unit.name.offset;
+			entries[index].unit_name_len = unit.name.length;
 			entries[index].row = unit.holder;
 		}
 	}
@@ -346,6 +352,7 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 			if (kind != NULL) {
 				entry->role_word = kind->role_word;
 				entry->peripheral = kind->peripheral;
+				entry->compatible = kind->compatible;
 			}
 		}
 		records[index] = (erx_dom_device_t){ .index = index, .resource = { ERX_CAP_NULL },
@@ -614,7 +621,8 @@ boot_services(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom
 		if (service.name.length == 0 || service.name.length > ERX_DOM_NAME_MAX)
 			return ("manifest: a service's name is not 1 to 63 bytes");
 		services[index] = (erx_dom_service_t){ .name = strings + service.name.offset,
-		    .name_len = service.name.length, .server = service.server };
+		    .name_len = service.name.length, .server = service.server,
+		    .interface = service.interface };
 		view->nservices = index + 1;
 	}
 	for (uint32_t index = 0; index < manifest->header.facets.count; index++) {

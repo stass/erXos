@@ -533,6 +533,7 @@ module Erx
         declarations.map do |declaration|
           Model.arity(declaration.line, 3)
           name, number = declaration.args
+          Syntax.identifier(name, line: declaration.line)
           number = Model.positive(number, declaration.line, maximum: (1 << 32) - 1)
           declaration.fail!('duplicate service interface number') if seen_numbers.key?(number)
           seen_numbers[number] = name

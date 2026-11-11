@@ -217,6 +217,12 @@ typedef struct erx_dom_device_entry {
 	 * CMSIS-SVD PERIPHERAL; NULL for a kind no runtime drives, which no
 	 * configured row may hold. */
 	const char	*role_word, *peripheral;
+	/* Its kind's compatible string (erx/device_kinds.h), NULL exactly
+	 * when role_word is NULL; and its unit's name, an identifier of 1 to ERX_DOM_NAME_MAX
+	 * bytes in the manifest's strings, which outlive the view. */
+	const char	*compatible;
+	const char	*unit_name;
+	uint32_t	unit_name_len;
 	uint64_t	offset;		/* its registers' offset into ranges[0] */
 	uint64_t	size;		/* and their bytes, as the manifest gives them */
 	uint32_t	lines[ERX_DEVICE_IRQS_MAX];	/* each line, as the platform's
@@ -340,14 +346,16 @@ typedef struct erx_dom_template {
 
 /*
  * A checked service row of the system manifest: its public name, unique
- * per server, and its server, a configured row or ERX_MF_NONE for the
- * system domain. What the domain service reads of it
- * (erx_domain_lib:configured/0).
+ * per server; its server, a configured row or ERX_MF_NONE for the system
+ * domain; and the interface it serves, an abi/services number (ERX_SERVICE_*),
+ * by which the system domain finds a holder's driver-control facet. What the
+ * domain service reads of it (erx_domain_lib:configured/0).
  */
 typedef struct erx_dom_service {
 	const char	*name;		/* an identifier in the manifest's strings, */
 	uint32_t	name_len;	/* which outlive the view; <= ERX_DOM_NAME_MAX */
 	uint32_t	server;		/* a configured row, or ERX_MF_NONE */
+	uint32_t	interface;	/* its abi/services interface number */
 } erx_dom_service_t;
 
 /*

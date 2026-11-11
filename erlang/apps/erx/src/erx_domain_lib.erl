@@ -112,9 +112,22 @@ its index, the manifest's device row; its unit row; the configured row its
 unit is placed on, or system; its role word, or none for a kind no runtime
 drives; and the domain that holds it: a living domain of that row, system
 for the system domain's devices, or none while the row has no living domain.
+What /dev shows of it as well: its unit's manifest name; its kind's
+compatible string, none when its role is none; its registers, the
+{Address, Bytes} of its register window, or unknown for a PCIe function,
+whose configuration space gives them; its ranges, the {Base, Bytes} of
+each run of whole pages its registers touch, which a give maps; its
+interrupt lines, as the platform's interrupt controller numbers them,
+none listed for a PCIe function; and whether it is confined, that is,
+has an IOMMU stream.
 """.
 -type device() :: #{index := non_neg_integer(), unit := non_neg_integer(),
+                    unit_name := binary(),
                     row := non_neg_integer() | system, role := block | net | none,
+                    compatible := binary() | none,
+                    registers := {Address :: non_neg_integer(), Bytes :: pos_integer()} | unknown,
+                    ranges := [{Base :: non_neg_integer(), Bytes :: pos_integer()}],
+                    lines := [non_neg_integer()], confined := boolean(),
                     holder := pos_integer() | system | none}.
 
 on_load() ->
@@ -184,14 +197,17 @@ disconnect(Number) ->
 -doc """
 What the domain service reads of the system manifest at boot: the machine's
 host name, the configured domains, in row order, the services configured
-domains serve, each its server's row and its name, and the facet rows, each
+domains serve, each its server's row, its name and the abi/services number
+of the interface it serves (erx_abi.hrl's ERX_SERVICE_* macros, so a
+holder's driver-control facet is found by ?ERX_SERVICE_DRIVER_CONTROL),
+and the facet rows, each
 its grantee, a configured row, system, or {template, Template} for the
 sessions made from session template Template, the service's name, its server, a
 configured row or system, and the grant's limits (docs/design-system.md,
 "Facets a configured domain serves").
 """.
 -spec configured() -> {ok, #{host := binary(), domains := [configured()],
-                             services := [{non_neg_integer(), atom()}],
+                             services := [{non_neg_integer(), atom(), non_neg_integer()}],
                              grants := [{non_neg_integer() | system | {template, non_neg_integer()}, atom(),
                                          non_neg_integer() | system, map()}]}}
                     | error().

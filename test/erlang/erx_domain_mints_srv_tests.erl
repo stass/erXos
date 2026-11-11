@@ -25,7 +25,7 @@ setup() ->
                                      restarts => 3, restart_period_s => 60, boot_timeout_s => 60} end,
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)],
-                          services => [{1, echo}],
+                          services => [{1, echo, 1}],
                           grants => [{0, echo, 1, #{max_request => 512}}, {system, echo, 1, #{}},
                                      {{template, 0}, echo, 1, #{max_request => 64}}]}),
     provide('a@erxos'),

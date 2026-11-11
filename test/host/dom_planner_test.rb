@@ -10,6 +10,7 @@ require_relative '../../tools/lib/erx/manifest'
 require_relative '../../tools/lib/erx/production_image'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/system_domain'
+require_relative '../fixtures/generated_tree'
 require_relative '../fixtures/manifest_context'
 
 # Property 12 with the domain library's own host build: the manifest check runs
@@ -56,6 +57,28 @@ class DomPlannerTest < Minitest::Test
     rows = names.map { |name| DOMAINS.delete_prefix(LIMITS).sub('domain alpha', "domain #{name}") }
     limits = LIMITS.sub('grant @share.users', "grant @share.#{share}")
     ManifestContextFixture.with_quota(@plain, quota) + limits + rows.join
+  end
+
+  def development_manifest
+    source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
+    Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner).bytes
+  end
+
+  # The view's catalogue and services, or its refusal, as test/fixtures/dom_view_driver.c prints them.
+  def view_lines(manifest, name)
+    @view_driver ||= File.join(@directory, 'dom-view').tap do |output|
+      sources = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_boot_view.c liberx/erx_lane.c
+                   tools/host/input.c test/fixtures/dom_view_driver.c].map { |path| File.join(ROOT, path) }
+      @runner.run([ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror',
+                   '-O1', *Erx::Generated.include_flags(root: ROOT), '-I', File.join(ROOT, 'include'),
+                   '-I', File.join(ROOT, 'tools/host'), *sources,
+                   Erx::Generated.path('liberx/generated/abi_reader.c', root: ROOT), '-o', output],
+                  name: 'dom-view-build', deadline: 120)
+    end
+    path = File.join(@directory, "view-#{name}.bin")
+    File.binwrite(path, manifest)
+    File.readlines(@runner.run([@view_driver, path], name: "dom-view-#{name}", deadline: 30).fetch('log'), chomp: true)
   end
 
   def refused(source, field, message)
@@ -339,6 +362,23 @@ class DomPlannerTest < Minitest::Test
     assert_equal 1, admit(@source).report.fetch('child_plan_instances')
     held = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
     refused(held, 'view', /a configured domain holds share a register page/)
+  end
+
+  # What /dev and the domain service read of the root's view of the development
+  # manifest as it ships (test/fixtures/dom_view_driver.c): each device's unit name,
+  # its kind's compatible string (none for the UARTs, which no runtime drives), its
+  # register pages and line, and the storage domain's service with the
+  # driver-control interface's number.
+  def test_the_view_keeps_what_dev_shows
+    lines = view_lines(development_manifest, 'dev')
+    page = /ranges=0x[0-9a-f]+000\+0x1000 lines=\d+ confined=0/
+    { 'console' => 'none', 'hostlink' => 'none', 'block' => 'virtio,mmio', 'net' => 'virtio,mmio' }
+      .each do |unit, compatible|
+        assert(lines.any? { |line| line.match?(/\Adevice \d+ unit=#{unit} compatible=#{compatible} #{page}\z/) },
+               "no #{unit} entry in #{lines.inspect}")
+      end
+    control = @codec.schema.services.find { |service| service.fetch(:name) == 'driver_control' }.fetch(:number)
+    assert_includes lines, "service 0 name=storage_ctl server=0 interface=#{control}"
   end
 
   def test_a_malformed_input_is_refused_by_the_helper

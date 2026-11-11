@@ -179,7 +179,11 @@ handle_continue(boot, #{lib := Lib} = State) ->
             SessionGrants = maps:groups_from_list(fun({{template, Template}, _, _, _}) -> Template end,
                                                   fun({_, Name, Server, Limits}) -> {Name, Server, Limits} end,
                                                   Sessions),
-            Mints = erx_domain_mints:new((maps:get(mint_config, State))#{services => maps:get(services, Boot, []),
+            %% erx_domain_mints takes each service's {Server, Name}; the interface
+            %% number is for finding a holder's driver-control facet.
+            Services = lists:map(fun({Server, Name, _Interface}) -> {Server, Name} end,
+                                 maps:get(services, Boot, [])),
+            Mints = erx_domain_mints:new((maps:get(mint_config, State))#{services => Services,
                                            grants => Minted}),
             Served = maps:groups_from_list(fun({Grantee, _, _, _}) -> Grantee end,
                                            fun({_, Name, _, Limits}) -> {Name, Limits} end, System),

@@ -5,6 +5,8 @@
 require 'digest/md5'
 require 'fileutils'
 require 'json'
+require_relative 'abi_model'
+require_relative 'abi_source'
 require_relative 'boot_record'
 require_relative 'error'
 require_relative 'fiasco'
@@ -96,6 +98,9 @@ module Erx
     SYSTEM_DOMAIN_ID = 4
     CONFIGURED_ID = SYSTEM_DOMAIN_ID + 1
     STORAGE_ID = SYSTEM_DOMAIN_ID + 2
+    # The driver-control interface's number, from the ABI's own model of abi/services.
+    DRIVER_CONTROL = ABI::Model.validate(ABI::Sources.read(root: File.expand_path('../../..', __dir__)))
+                               .services.find { |service| service.fetch(:name) == 'driver_control' }.fetch(:number)
     DOMAIN_IDS = (5..11).map { |offset| SYSTEM_DOMAIN_ID + offset }.freeze
     # An id nothing takes in the cell, for the calls the shell makes of the library itself.
     FREE_ID = SYSTEM_DOMAIN_ID + 12
@@ -155,6 +160,19 @@ module Erx
       # as a given device.
       ['DlDevices', 'lists:usort([{R,W,H}||#{role:=R,row:=W,holder:=H}<-element(2,Lib:devices())])',
        "[{block,1,#{STORAGE_ID}},{net,system,system},{none,system,system}]"],
+      # What /dev shows of each: its unit's name, its kind's compatible string (none for
+      # the UARTs), one page range, one interrupt line, and no IOMMU stream.
+      ['DlDeviceView', 'lists:usort([{R,N,C,length(Rs),length(Ls),Cf}||#{role:=R,unit_name:=N,compatible:=C,' \
+                       'ranges:=Rs,lines:=Ls,confined:=Cf}<-element(2,Lib:devices())])',
+       '[{block,<<"block">>,<<"virtio,mmio">>,1,1,false},{net,<<"net">>,<<"virtio,mmio">>,1,1,false},' \
+       '{none,<<"console">>,none,1,1,false},{none,<<"hostlink">>,none,1,1,false}]'],
+      # The block device's register window, from config/platforms/qemu-virt.json, and
+      # the page that holds it.
+      ['DlRegisters', '[{Rg,Rs}||#{unit_name:=<<"block">>,registers:=Rg,ranges:=Rs}<-element(2,Lib:devices())]',
+       "[{{#{0xa003e00},512},[{#{0xa003000},4096}]}]"],
+      # The storage domain's driver-control facet, on row 1, found by its interface's number.
+      ['DlControl', '[I||{1,storage_ctl,I}<-maps:get(services,element(2,Lib:configured()))]',
+       "[#{DRIVER_CONTROL}]"],
       # The maps the library itself refuses, asked of the service, which spends an id on each.
       ['DlFiles', 'DlAsk(<<"files">>,#{release_files=>16#ffffffff})', '{error,einval}'], # past the archive
       ['DlUnaligned', 'DlAsk(<<"unaligned">>,#{memory=>4097})', '{error,einval}'], # not whole pages
