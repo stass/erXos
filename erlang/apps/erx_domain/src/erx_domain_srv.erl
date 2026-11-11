@@ -558,9 +558,11 @@ add_party(Id, Node, #{ctl_slots := Slots}, #{links := Links}) ->
 
 %% A made domain's system side, opened with the library's values of it and the domain's
 %% node, its port handed to the domain pid, which writes the domain's control records
-%% through it, then the domain pid's export to it, then its first thread; a domain with no
-%% system connection has no side. The domain gets send on its pid, its one way to report
-%% ready and answer; its creator, a process of the system domain, which holds every
+%% through it, then the domain pid's export to it, then its first thread. The side's open
+%% answers once the domain's entry is up (erx_connections:open_side/2), so the export,
+%% which needs that connection, finds it unless the side has ended since. A domain with
+%% no system connection has no side. The domain gets send on its pid, its one way to
+%% report ready and answer; its creator, a process of the system domain, which holds every
 %% right on the system domain's own pids, needs no export.
 started(Id, Pid, Ref, Values, #{lib := Lib, agent := Agent, exports := Exports}) ->
     first_refusal([{system_side, fun() -> open_side(Agent, Id, Pid, Ref, Values) end},

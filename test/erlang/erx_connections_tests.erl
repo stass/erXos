@@ -280,3 +280,87 @@ init_facets(Ms) ->
         {trace, _, 'receive', _} -> init_facets(Ms)
     after Ms -> []
     end.
+
+%% The system domain's agent, serving the domain service's open_side and close_side over
+%% the same stand-in opener; the test is its net_kernel and the owner's word that the
+%% side's entry is up. Each open_side runs in a caller of its own, which plays the domain
+%% service: it passes the answer, and anything the agent sends it after, to the test.
+side_test_() ->
+    [{atom_to_list(Name), fun() -> with_sides(Case) end}
+     || {Name, Case} <- [{side_answered_once_up, fun side_answered_once_up/1},
+                         {side_ended_before_up, fun side_ended_before_up/1},
+                         {side_ended_after_up, fun side_ended_after_up/1},
+                         {side_closed_before_up, fun side_closed_before_up/1}]].
+
+with_sides(Case) ->
+    Test = self(),
+    Opener = fun(Command) ->
+                     Port = open_port({spawn, "cat"}, [binary]),
+                     Test ! {opened, Command, Port},
+                     Port
+             end,
+    Agent = spawn(fun() ->
+                          process_flag(trap_exit, true),
+                          true = register(erx_connections, self()),
+                          Test ! {registered, self()},
+                          erx_connections:system_sides(Test, Opener)
+                  end),
+    receive {registered, Agent} -> ok end,
+    try Case(Agent) after stop(Agent) end.
+
+%% The library's values of a domain's system connection, as erx_domain_lib:create/1 gives them.
+side_values() ->
+    #{node => ?PEER_NODE, connection => 9, side => 11, peer_side => 12, bell => 13, reader => 2,
+      system_lane => 3, ctl_slots => 4, domain_pid_number => 40, domain_pid_serial => 0}.
+
+%% open_side for the peer from a caller standing for the domain service.
+open_side() ->
+    Test = self(),
+    spawn(fun() -> Test ! {side, erx_connections:open_side(?PEER, side_values())}, forward(Test) end).
+
+forward(Test) ->
+    receive Msg -> Test ! {side, Msg}, forward(Test) end.
+
+side_answer(Ms) ->
+    receive {side, Answer} -> Answer after Ms -> none end.
+
+side_answered_once_up(Agent) ->
+    %% The answer waits for the owner's word that the side's entry is up, so the domain
+    %% service's export to the domain, which needs that entry, never runs before it.
+    open_side(),
+    {_Command, Port} = opened(),
+    {Port, _Owner} = accept(Agent, owner),
+    ?assertEqual(none, side_answer(200)),
+    Agent ! {erx_connection_inserted, ?PEER, Port},
+    ?assertEqual({ok, Port}, side_answer(2000)).
+
+side_ended_before_up(Agent) ->
+    %% A side whose port ends before its entry is up never opened: noconnection, and the
+    %% service is told nothing more, since it holds no side to stop.
+    open_side(),
+    {_Command, Port} = opened(),
+    {Port, _Owner} = accept(Agent, owner),
+    exit(Port, kill),
+    ?assertEqual({error, noconnection}, side_answer(2000)),
+    ?assertEqual(none, side_answer(200)),
+    Agent ! {erx_connection_inserted, ?PEER, Port},
+    ?assertEqual(none, side_answer(200)).
+
+side_ended_after_up(Agent) ->
+    %% An open side's end by itself is the service's word to stop the domain.
+    open_side(),
+    {_Command, Port} = opened(),
+    {Port, _Owner} = accept(Agent, owner),
+    Agent ! {erx_connection_inserted, ?PEER, Port},
+    ?assertEqual({ok, Port}, side_answer(2000)),
+    exit(Port, kill),
+    ?assertEqual({system_side_ended, ?PEER}, side_answer(2000)).
+
+side_closed_before_up(Agent) ->
+    %% close_side on a side still coming up ends it, and its opener hears noconnection.
+    open_side(),
+    {_Command, Port} = opened(),
+    {Port, _Owner} = accept(Agent, owner),
+    ?assertEqual(ok, erx_connections:close_side(?PEER, stopped)),
+    ?assertEqual({error, noconnection}, side_answer(2000)),
+    ?assertEqual(none, side_answer(200)).

@@ -2848,7 +2848,12 @@ in init's ready report, whose encoding hands it out with `send` (edit 8 of
 domain service sends a domain no record before that report. The system
 domain's own agent takes the same two records from the domain service as
 calls, for the system domain's side of each system connection, and
-answers each as the call's result.
+answers each as the call's result. It answers the open of a side only
+once `erx_dist`'s owner has brought the domain's entry up, as a domain's
+agent answers `connection_mapped` only then, so the domain service's
+export of the domain pid to the domain, which needs that connection,
+follows the answer; a side that ends or is closed before its entry is up
+answers `noconnection`.
 
 | Message | Direction | Meaning |
 | --- | --- | --- |

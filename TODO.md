@@ -1512,12 +1512,6 @@ it; git history is the record of completed work.
   shares, and which drops and counts each one no connection expects (design-system.md "What
   a domain sends the domain service"). A count is one integer per domain, but the time
   each message costs the pid and the service is not bounded. Bound what a domain can make the pid and the service spend.
-* [High] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`started/4`, the export step):
-  under TCG with 4 CPUs the configured storage domain fails to start at boot with
-  `{export,noconnection}`: `erx_dist:export/3` finds no connection to the domain's node right after
-  `open_side`, so the export races the side's connection coming up. One more domain id is then spent
-  (by a restart of storage, not yet confirmed), which shifts the session ids and fails the session_domain cell at
-  `relogin-listed`; HVF does not show it. Make the export wait for, or follow from, the open side.
 * [Medium] domain service and manifest check, `erx_domain_core:restart/5` and `tools/lib/erx/manifest.rb`
   (`normalize_domains`): a configured row may restart `restarts` times within `restart_period_s`, and
   a boot that hangs is stopped only after its `boot_timeout_s`, so a row with `restarts` above 0 and

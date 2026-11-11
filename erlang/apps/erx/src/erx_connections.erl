@@ -19,9 +19,10 @@
 -moduledoc false.
 
 -export([start/2, open_side/2, close_side/2, dropped/0]).
-%% A domain's agent past its system connection's hand-over, which start/2 runs and the
-%% host test (test/erlang/erx_connections_tests.erl) runs with a stand-in opener.
--export([introduced/4]).
+%% A domain's agent past its system connection's hand-over, and the system domain's agent,
+%% which start/2 runs and the host test (test/erlang/erx_connections_tests.erl) runs with
+%% a stand-in opener.
+-export([introduced/4, system_sides/2]).
 
 %% The lane driver's port_control command that finishes the port (erx_lane_drv.c).
 -define(CONTROL_FINISH, 2).
@@ -42,10 +43,13 @@ start(Kernel, System) ->
 
 %% In the system domain: opens the system side of domain Id's system connection and hands
 %% it to net_kernel as an accepted connection to the domain's node, before the domain's
-%% first thread runs. The caller is sent {system_side_ended, Id} if the side ends before
-%% close_side/2 closes it. {error, noproc} where no agent runs, the runtime being no node;
-%% the lane driver's or net_kernel's refusal otherwise, and badarg for a domain whose side
-%% is open already.
+%% first thread runs, and answers once erx_dist's owner has brought the domain's entry up,
+%% so the caller finds the connection to the domain's node there: erx_dist:export/3 to
+%% the domain succeeds from the answer on. The caller is then sent {system_side_ended, Id}
+%% if the side ends before close_side/2 closes it. {error, noconnection} for a side that
+%% ends, or is closed, before its entry is up; {error, noproc} where no agent runs, the
+%% runtime being no node; the lane driver's or net_kernel's refusal otherwise, and badarg
+%% for a domain whose side is open or opening already.
 -spec open_side(pos_integer(), side_values()) -> {ok, port()} | {error, term()}.
 open_side(Id, Values) ->
     call({open_side, Id, Values}).
@@ -85,7 +89,7 @@ init(Kernel, System) ->
 %% (kernel_ended/1), answer dropped/0 with the count of what they dropped, and answer any
 %% other call badarg.
 serve(Kernel, none) ->
-    sides(Kernel, #{}, 0);
+    system_sides(Kernel, fun lane_open/1);
 serve(Kernel, {PeerId, PeerNode, DomainPid}) ->
     try
         Port = open_port({spawn_driver, "erx_lane system"}, [binary]),
@@ -115,60 +119,84 @@ introduced(Kernel, SystemId, DomainPid, Open) ->
 lane_open(Command) ->
     open_port({spawn_driver, Command}, [binary]).
 
-%% The system domain's agent: the domain service's two calls, with each open side by domain
-%% id as {Port, Monitor, Service}: its port, the monitor on it and the process that opened
-%% it, the domain service.
+%% The system domain's agent, with net_kernel Kernel taking each side's port, which Open
+%% opens from its open command.
+-spec system_sides(pid(), fun((string()) -> port())) -> no_return().
+system_sides(Kernel, Open) ->
+    sides(#{kernel => Kernel, open => Open}, #{}, 0).
+
+%% The system domain's agent: the domain service's two calls, with each side by domain id
+%% as {Port, Monitor, Phase}: its port, the monitor on it, and {opening, From}, the
+%% open_side call still to answer, until erx_dist's owner says the side's entry is up,
+%% then {open, Service}, the process that made the call, the domain service. The answer
+%% waits for the entry, so the export to the domain that follows it finds the connection
+%% (open_side/2); a side that ends before then answers noconnection and was never open.
+%% A close_side while a side is opening comes only from the host test, since the service,
+%% the one caller, waits in open_side then; it answers the opener noconnection too.
 %% A side's port ends with its owner (erx_dist), each linked to the other, so its monitor
 %% fires on every end of either: the agent then tells the service, which stops the domain
 %% (docs/design-system.md, "A lost system connection ends the domain"). A side the
-%% service closes is no longer monitored, so its ordered end tells no one. erx_dist's
-%% word that a side's entry is up, which only an introduced connection's agent awaits, is
-%% ignored, and anything else dropped and counted in Dropped.
-sides(Kernel, Sides, Dropped) ->
+%% service closes is no longer monitored, so its ordered end tells no one. The owner's
+%% word for a side no longer opening, one closed or ended first, is ignored, and anything
+%% else dropped and counted in Dropped.
+sides(#{kernel := Kernel, open := Open} = Env, Sides, Dropped) ->
     receive
-        {'$gen_call', {Service, _} = From, {open_side, Id, Values}} when not is_map_key(Id, Sides) ->
-            Opened = open(Kernel, Id, Values),
-            Next = case Opened of
-                       {ok, Port} ->
-                           Monitor = erlang:monitor(port, Port, [{tag, {side_ended, Id}}]),
-                           Sides#{Id => {Port, Monitor, Service}};
-                       {error, _} ->
-                           Sides
-                   end,
-            gen:reply(From, Opened),
-            sides(Kernel, Next, Dropped);
+        {'$gen_call', From, {open_side, Id, Values}} when not is_map_key(Id, Sides) ->
+            case open(Kernel, Open, Id, Values) of
+                {ok, Port} ->
+                    Monitor = erlang:monitor(port, Port, [{tag, {side_ended, Id}}]),
+                    sides(Env, Sides#{Id => {Port, Monitor, {opening, From}}}, Dropped);
+                {error, _} = Refused ->
+                    gen:reply(From, Refused),
+                    sides(Env, Sides, Dropped)
+            end;
+        {erx_connection_inserted, Id, Port} ->
+            case Sides of
+                #{Id := {Port, Monitor, {opening, {Service, _} = From}}} ->
+                    gen:reply(From, {ok, Port}),
+                    sides(Env, Sides#{Id := {Port, Monitor, {open, Service}}}, Dropped);
+                #{} ->
+                    sides(Env, Sides, Dropped)
+            end;
         {'$gen_call', From, {close_side, Id, Reason}} ->
             case maps:take(Id, Sides) of
-                {{Port, Monitor, _Service}, Rest} ->
+                {{Port, Monitor, Phase}, Rest} ->
                     erlang:demonitor(Monitor, [flush]),
                     finish(Port, Reason),
+                    answer_unopened(Phase),
                     gen:reply(From, ok),
-                    sides(Kernel, Rest, Dropped);
+                    sides(Env, Rest, Dropped);
                 error ->
                     gen:reply(From, ok),
-                    sides(Kernel, Sides, Dropped)
+                    sides(Env, Sides, Dropped)
             end;
         {'$gen_call', From, dropped} ->
             gen:reply(From, Dropped),
-            sides(Kernel, Sides, Dropped);
+            sides(Env, Sides, Dropped);
         {'$gen_call', From, _Request} ->
             gen:reply(From, {error, badarg}),
-            sides(Kernel, Sides, Dropped);
+            sides(Env, Sides, Dropped);
         {{side_ended, Id}, Monitor, port, Port, _Reason} ->
             case maps:take(Id, Sides) of
-                {{Port, Monitor, Service}, Rest} ->
+                {{Port, Monitor, {open, Service}}, Rest} ->
                     Service ! {system_side_ended, Id},
-                    sides(Kernel, Rest, Dropped);
+                    sides(Env, Rest, Dropped);
+                {{Port, Monitor, {opening, _} = Phase}, Rest} ->
+                    answer_unopened(Phase),
+                    sides(Env, Rest, Dropped);
                 _ ->
-                    sides(Kernel, Sides, Dropped)
+                    sides(Env, Sides, Dropped)
             end;
-        {erx_connection_inserted, _Id, _Port} ->
-            sides(Kernel, Sides, Dropped);
         {'EXIT', Kernel, Reason} ->
             kernel_ended(Reason);
         _ ->
-            sides(Kernel, Sides, Dropped + 1)
+            sides(Env, Sides, Dropped + 1)
     end.
+
+%% A side that ends, or is closed, while opening answers its open_side noconnection; an
+%% open side's call was answered already.
+answer_unopened({opening, From}) -> gen:reply(From, {error, noconnection});
+answer_unopened({open, _Service}) -> ok.
 
 %% The port's open command, "erx_lane table" and its words, names the system domain's own
 %% side first, the one it writes and whose control table it ends in, then the domain's, the
@@ -180,7 +208,7 @@ sides(Kernel, Sides, Dropped) ->
 %% domain's, peer_side the system domain's; reader is the lane the system domain writes,
 %% system_lane the one it reads. A port that net_kernel did not take is ended before the
 %% answer, so no refused open leaves a port mapping the connection's objects.
-open(Kernel, Id, #{node := Node, connection := Label, side := DomainSide, peer_side := OwnSide,
+open(Kernel, Open, Id, #{node := Node, connection := Label, side := DomainSide, peer_side := OwnSide,
                    bell := Bell, reader := Reader, system_lane := SystemLane, ctl_slots := CtlSlots,
                    domain_pid_number := PidNumber, domain_pid_serial := PidSerial})
   when is_atom(Node), is_integer(Label), is_integer(DomainSide), is_integer(OwnSide),
@@ -189,12 +217,12 @@ open(Kernel, Id, #{node := Node, connection := Label, side := DomainSide, peer_s
     Words = [integer_to_list(Word) || Word <- [OwnSide, DomainSide, Bell, Label, Reader, SystemLane, Id,
                                                PidNumber, PidSerial, CtlSlots]],
     Command = lists:join($\s, ["erx_lane", "table" | Words] ++ [atom_to_list(Node)]),
-    try open_port({spawn_driver, lists:flatten(Command)}, [binary]) of
+    try Open(lists:flatten(Command)) of
         Port -> accepted(Kernel, Port, #{port => Port, node => Node, id => Id, system => false})
     catch
         error:Reason -> {error, Reason}
     end;
-open(_Kernel, _Id, _Values) ->
+open(_Kernel, _Open, _Id, _Values) ->
     {error, badarg}.
 
 %% The port is linked to the agent until hand_over gives it to its owner, so a refused one
