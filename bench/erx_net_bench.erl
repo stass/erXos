@@ -197,9 +197,9 @@ start_stack(Device, Peer) ->
     {ok, _} = erx_net_sup:start_link(#{interfaces => [#{name => en0,
         ip4 => #{addr => tuple_to_binary(?LOCAL_IP), plen => 24},
         transport => {erx_tap, #{device => Device, lladdr => ?LLADDR}}}]}),
-    {ok, Sock} = erx_udp_sock:open(0, #{active => false}),
-    _ = erx_udp_sock:send(Sock, Peer, 9, <<"resolve">>),
-    ok = erx_udp_sock:close(Sock),
+    {ok, Sock} = erx_udp_sock:open(0, #{owner => self(), origin => local}),
+    Sock ! {erx_net, self(), {call, 0, {send_to, Peer, 9, <<"resolve">>}}},
+    Sock ! {erx_net, self(), {call, 1, close}},
     timer:sleep(?SETTLE_MS).
 
 tuple_to_binary(Tuple) -> list_to_binary(tuple_to_list(Tuple)).
