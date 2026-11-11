@@ -1,0 +1,10 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The driver-control interface (docs/design-system.md, "The holder's driver-control
+# facet"): a domain that holds a unit serves it so the system domain can stop, start
+# or restart the unit's driver process. The manifest grants a facet of this interface
+# to the system domain alone (property 8).
+service driver_control 2
+  operation stop 1
+  operation start 2
+  operation restart 3

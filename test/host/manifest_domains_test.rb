@@ -181,6 +181,24 @@ class ManifestDomainsTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 2, 'facet.grantee', @source + service('log', 'system') + facet('f', 'system', '@service.log'))
   end
 
+  # Property 8: a facet of the driver-control interface stops and starts the drivers of
+  # its server's units, so only the system domain holds one, however the service row
+  # spells the interface; its service row keeps the declared number.
+  def test_a_driver_control_facet_goes_to_the_system_domain_alone
+    control = service('ctl', '@domain.beta').sub('interface 1', 'interface driver_control')
+    view = @codec.open('manifest', admit(@source + control + facet('ctl', 'system', '@service.ctl')).bytes)
+    assert_equal [2], rows(view, 'services').map { |row| row.fetch('interface') }
+    [control, control.sub('interface driver_control', 'interface 2')].each do |row|
+      refused(Erx::Manifest::Invalid, 8, 'facet.grantee', @source + row + facet('ctl', '@domain.alpha', '@service.ctl'))
+    end
+  end
+
+  def test_an_interface_name_no_fragment_declares_is_refused
+    source = @source + service('ctl', '@domain.beta').sub('interface 1', 'interface driver_ctl')
+    error = assert_raises(Erx::ABI::SchemaError) { admit(source) }
+    assert_match(/interface names no service/, error.message)
+  end
+
   # A facet's operations and parameters resolve against its service's generated
   # declarations, which the packer does not read in Phase 1, so a facet that names any
   # is refused.

@@ -13,9 +13,11 @@
 %% It drives the driver only through erx_blk's public calls: it reports the transport
 %% version and the capacity, reads each sector of the harness's disk and compares it with
 %% the host's pattern, asks for the sector past the end, writes the guest's pattern to two
-%% sectors, and ends with "blk: done", on which the harness ends the guest and reads the
-%% disk back. A step that does not go as expected prints its "failed" line and the run goes
-%% on, so the harness names the first step that went wrong.
+%% sectors, restarts the driver from the system domain through the storage domain's
+%% driver-control facet (erx_driver_ctl), as the system shell does, and reads a sector
+%% through the new driver. It ends with "blk: done", on which the harness ends the guest
+%% and reads the disk back. A step that does not go as expected prints its "failed" line
+%% and the run goes on, so the harness names the first step that went wrong.
 %%
 %% medium/0 is the second boot's: the harness attaches a medium laid out by the ABI file's
 %% medium layout, and the module drives the block service's windows alone
@@ -42,7 +44,8 @@
 
 -export([main/0, medium/0, data_write/0, data_read/0]).
 %% Run at the storage domain's node by at_storage/1.
--export([run/1, main_here/0, medium_here/0, data_write_here/0, data_read_here/0]).
+-export([run/1, main_here/0, read_again_here/0, medium_here/0, data_write_here/0,
+         data_read_here/0]).
 
 -define(ROLES, [record, slot_a, slot_b, vault, data]).
 
@@ -74,33 +77,74 @@
 -define(STEP_MS, 60000).
 
 -spec main() -> ok.
-main() -> at_storage(main_here).
+main() -> report(at_storage(main_here) ++ control()).
 
 -spec medium() -> ok.
-medium() -> at_storage(medium_here).
+medium() -> report(at_storage(medium_here)).
 
 -spec data_write() -> ok.
-data_write() -> at_storage(data_write_here).
+data_write() -> report(at_storage(data_write_here)).
 
 -spec data_read() -> ok.
-data_read() -> at_storage(data_read_here).
+data_read() -> report(at_storage(data_read_here)).
 
-%% Runs Step at the storage domain's node and prints its lines, then "blk: done". A domain
-%% that never runs erx_storage, or a step that fails at its node, prints "no driver".
-at_storage(Step) ->
-    Lines = case wait_storage(?STORAGE_WAIT_MS div ?POLL_MS) of
-                ok ->
-                    {Module, Binary, File} = code:get_object_code(?MODULE),
-                    try
-                        {module, Module} = erpc:call(?STORAGE_NODE, code, load_binary, [Module, File, Binary], ?STEP_MS),
-                        erpc:call(?STORAGE_NODE, ?MODULE, run, [Step], ?STEP_MS)
-                    catch
-                        Class:Reason -> [text("no driver: ~0p", [{Class, Reason}])]
-                    end;
-                timeout ->
-                    [text("no driver", [])]
-            end,
+%% Prints Lines, then "blk: done".
+report(Lines) ->
     lists:foreach(fun display/1, Lines ++ [text("done", [])]).
+
+%% Runs Step at the storage domain's node: its lines. A domain that never runs erx_storage,
+%% or a step that fails at its node, is the line "no driver".
+at_storage(Step) ->
+    case wait_storage(?STORAGE_WAIT_MS div ?POLL_MS) of
+        ok ->
+            {Module, Binary, File} = code:get_object_code(?MODULE),
+            try
+                {module, Module} = erpc:call(?STORAGE_NODE, code, load_binary, [Module, File, Binary], ?STEP_MS),
+                erpc:call(?STORAGE_NODE, ?MODULE, run, [Step], ?STEP_MS)
+            catch
+                Class:Reason -> [text("no driver: ~0p", [{Class, Reason}])]
+            end;
+        timeout ->
+            [text("no driver", [])]
+    end.
+
+%% In the system domain, as the system shell does it: the block driver restarted through
+%% the storage domain's driver-control facet, storage_ctl, so erx_blk names a new process;
+%% a unit the storage domain does not hold refused; and a read through the new driver.
+control() ->
+    case wait_cap(storage_ctl, ?STORAGE_WAIT_MS div ?POLL_MS) of
+        undefined ->
+            [text("control no facet", [])];
+        Facet ->
+            Before = storage_driver(),
+            Restarted = attempt(fun() -> erx_driver_ctl:restart(Facet, block) end),
+            After = storage_driver(),
+            [case Restarted =:= ok andalso is_pid(Before) andalso is_pid(After) andalso After =/= Before of
+                 true -> text("control restart block ok", []);
+                 false -> text("control restart block failed: ~0p", [{Restarted, Before, After}])
+             end,
+             case attempt(fun() -> erx_driver_ctl:restart(Facet, flux) end) of
+                 {error, badarg} -> text("control restart flux refused", []);
+                 Other -> text("control restart flux failed: ~0p", [Other])
+             end
+             | at_storage(read_again_here)]
+    end.
+
+%% The facet Name once the storage domain's ready report has installed it, or undefined.
+wait_cap(_Name, 0) ->
+    undefined;
+wait_cap(Name, Tries) ->
+    case erx:cap(Name) of
+        Facet when is_pid(Facet) -> Facet;
+        undefined -> timer:sleep(?POLL_MS), wait_cap(Name, Tries - 1)
+    end.
+
+storage_driver() ->
+    attempt(fun() -> erpc:call(?STORAGE_NODE, erlang, whereis, [erx_blk], ?STEP_MS) end).
+
+%% Fun's answer, or the exception it raised as {Class, Reason}.
+attempt(Fun) ->
+    try Fun() catch Class:Reason -> {Class, Reason} end.
 
 wait_storage(0) ->
     timeout;
@@ -116,7 +160,8 @@ wait_storage(Tries) ->
     end.
 
 %% At the storage domain's node: Step's lines, in order.
--spec run(main_here | medium_here | data_write_here | data_read_here) -> [binary()].
+-spec run(main_here | read_again_here | medium_here | data_write_here | data_read_here) ->
+          [binary()].
 run(Step) ->
     put(lines, []),
     ok = ?MODULE:Step(),
@@ -136,6 +181,14 @@ main_here() ->
         _NoDriver ->
             line("no driver", []),
             timer:sleep(?LOG_DRAIN_MS)
+    end.
+
+%% At the storage domain's node, after the restart: sector 0 read through the new driver.
+-spec read_again_here() -> ok.
+read_again_here() ->
+    case call(fun() -> erx_blk:read(0, 1) end) =:= {ok, pattern(0, ?HOST_TAG)} of
+        true -> line("read sector 0 again ok", []);
+        false -> line("read sector 0 again failed", [])
     end.
 
 -spec medium_here() -> ok.

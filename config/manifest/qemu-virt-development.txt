@@ -8,7 +8,9 @@
 # BeamAsm service domain that holds the block unit and its data and release
 # windows and runs the block driver and littlefs at /data (docs/design-stopgap.md,
 # "littlefs in the storage domain"); the slot writer's four windows stay the
-# system domain's (property 8). Fixed
+# system domain's (property 8). It serves storage_ctl, its driver-control facet,
+# to the system domain alone (property 8; docs/design-system.md, "The holder's
+# driver-control facet"). Fixed
 # medium roles carry partition 0, as docs/design-abi.md says. The machine is
 # QEMU virt with 224 MiB of RAM (config/platforms/qemu-virt.json), small for the
 # browser emulator yet roomy at the shell; root_memory, 156.25 MiB, leaves 51.75 MiB
@@ -305,4 +307,16 @@ domain storage
   restarts 5
   restart_period_s 60
   args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx"
+service storage_ctl
+  server @domain.storage
+  interface driver_control
+facet storage_ctl
+  grantee system
+  service @service.storage_ctl
+  operations none
+  max_request 256
+  in_flight 1
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 65536
 shell_principal @principal.system

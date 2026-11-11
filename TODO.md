@@ -2022,6 +2022,20 @@ it; git history is the record of completed work.
 * [Low] `otp/erts/emulator/beam/erl_trace.c`, hosted runtime and system domain: `trace_call_count_SUITE:combo` fails in the
   `dynamic_pre_post` group only, with a `badmatch` on trace messages that include `erlang:trace_info/2`'s own
   call, `return_from` and `return_to`; the `legacy_pre_post` run of the same case passes. Unexplained.
+* [Medium] storage, `erx_driver_ctl` and `erx_lfs`: a `stop` or `restart` of the
+  block unit through `storage_ctl` while `/data` is in use leaves `/data` failed until
+  the domain restarts, and the facet still answers `ok`. Between the stop and the start
+  `erx_blk` answers `no_device`, a request it was serving exits, the window answers
+  `eio`, and littlefs fails the volume on any failed block request
+  (`erx_lfs.erl`, "unavailable until reboot"). P8b's window retry covers a restart; a
+  `stop` held while `/data` is mounted still fails it. Decide whether the holder's
+  units name what depends on each driver, so the facet refuses a stop while it is
+  mounted, or remounts after the start; the block_device cell checks only a raw read.
+* [Low] storage, `erx_storage_sup`: the driver-control facet's units table,
+  `#{block => {erx_blk_sup, erx_blk}}`, repeats the manifest's unit name by hand, and
+  nothing checks it against the units the domain holds; a renamed unit is refused as
+  `badarg` while the stale name works. Derive it from the domain's installed units, or
+  check each key at start, before P10a repeats it for `network_ctl`.
 * [Medium] storage, `erx_lfs`: any process of the system domain can send the owner
   `{erx_lfs_block, ...}` or `{erx_lfs, Worker, done, _}`. A forged block message fails the
   volume or, with a request of a volume of its own, writes any sector of the data window;

@@ -109,8 +109,10 @@ module ManifestContextFixture
   MAX_DOMAINS = /^(  max_domains )\d+$/
 
   # The development manifest's own configured domain, storage, with the profile and
-  # runtime limits only it names, and the holder lines naming it.
-  STORAGE_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/].freeze
+  # runtime limits only it names, its driver-control service and facet, and the holder
+  # lines naming it.
+  STORAGE_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/,
+                  /^service storage_ctl\n(?:  .*\n)*/, /^facet storage_ctl\n(?:  .*\n)*/].freeze
   STORAGE_HOLDER = /^  holder @domain\.storage$/
 
   # The development manifest as the domain tests start from it: without its session

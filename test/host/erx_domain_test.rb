@@ -17,12 +17,15 @@ require 'tmpdir'
 # test/erlang/erx_domain_mints_srv_tests.erl for the service applying that core, and
 # test/erlang/erx_facet_tests.erl for the facet behaviour, erx_facet, which the
 # service mints facets of, and test/erlang/erx_devices_tests.erl for erx_devices,
-# the catalogue presented unchanged.
+# the catalogue presented unchanged, and test/erlang/erx_driver_ctl_tests.erl for
+# erx_driver_ctl, the driver-control facet.
 class ErxDomainTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_domain/src')
   SOURCES = [*Dir[File.join(APPLICATION, '*.erl')].sort,
              File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
+             File.join(ROOT, 'erlang/apps/erx/src/erx_driver_ctl.erl'),
+             File.join(ROOT, 'test/erlang/erx_driver_ctl_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_facet_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_domain_fake_lib.erl'),
              File.join(ROOT, 'test/erlang/erx_domain_tests.erl'),
@@ -49,6 +52,10 @@ class ErxDomainTest < Minitest::Test
 
   def test_domain_service_applies_the_mint_core_under_eunit
     assert_eunit_passes('erx_domain_mints_srv_tests', deadline: 60)
+  end
+
+  def test_driver_control_facet_passes_under_eunit
+    assert_eunit_passes('erx_driver_ctl_tests', deadline: 60)
   end
 
   def test_device_catalogue_presentation_passes_under_eunit

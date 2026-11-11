@@ -132,7 +132,8 @@ class ManifestStopgapTest < Minitest::Test
 
   def test_admitted_services_reach_the_encoded_manifest
     view = @codec.open('manifest', admit(@source + SERVICE).bytes)
-    assert_equal 1, view.count('services')
+    # The development manifest's own, storage_ctl, and this one.
+    assert_equal %w[log storage_ctl], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
     assert_equal 0, view.count('liveness')
   end
 

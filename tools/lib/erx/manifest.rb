@@ -1004,8 +1004,25 @@ module Erx
         name = service_name(record)
         invalid('service name is not a system identifier', 5, 'service.name') unless name.match?(Frontend::IDENTIFIER)
         { 'name' => name, 'server' => holder_index(one(record, 'server'), property: 2, field: 'service.server'),
-          'interface' => number(record, 'interface') }
+          'interface' => interface_number(record) }
       end
+
+      # A service's interface number: the name of an interface abi/services declares, as
+      # design-abi.md writes it, or a number, which the stopgap also takes for an
+      # interface no fragment declares yet. The row holds the number either way, so a
+      # check that reasons from a declared interface (property 8's driver control) sees
+      # both spellings.
+      def interface_number(record)
+        token = one(record, 'interface')
+        return number(record, 'interface') if token.quoted || token.value.match?(/\A[0-9]/)
+
+        find_interface(token.value) || record.line.fail!('interface names no service abi/services declares')
+      end
+
+      def find_interface(name) = @codec.schema.services.find { |service| service.fetch(:name) == name }&.fetch(:number)
+
+      # An interface a check reasons from, which the ABI must declare.
+      def fetch_interface(name) = find_interface(name) || raise(Erx::Error, "abi/services declares no interface #{name}")
 
       # design-abi.md: an introduction joins two different configured domains and is
       # unique as an unordered pair, so each is written with the lower index first.
@@ -1027,7 +1044,9 @@ module Erx
       # A facet is installed in its grantee's registry under its service's name
       # (docs/design-system.md, "Facets a configured domain serves"), so a grantee takes
       # at most one facet of a service name, whichever domain serves it (property 2);
-      # and the system domain takes no facet of its own service.
+      # and the system domain takes no facet of its own service. A facet of the
+      # driver-control interface stops and starts another domain's drivers, so only the
+      # system domain holds one (property 8).
       def normalize_facets(services, service_rows)
         rows = records('facet').map do |record|
           token = one(record, 'service')
@@ -1042,6 +1061,9 @@ module Erx
         none = @codec.constant('mf_none')
         invalid('the system domain takes no facet of its own service', 2, 'facet.grantee') if
           rows.any? { |row| row.fetch('grantee') == none && service_rows.fetch(row.fetch('service')).fetch('server') == none }
+        control = fetch_interface('driver_control')
+        invalid('only the system domain holds a driver-control facet', 8, 'facet.grantee') if
+          rows.any? { |row| row.fetch('grantee') != none && service_rows.fetch(row.fetch('service')).fetch('interface') == control }
         rows.sort_by { |row| row.values_at('name', 'grantee') }
       end
 

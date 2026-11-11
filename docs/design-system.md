@@ -415,7 +415,10 @@ violation fails the build with the property, the record and the field:
    `hostlink` name are the system domain's, and the two paths differ; only
    the storage domain that serves the vault holds the vault's partition,
    and only the vault holds a facet of that domain's tree; only the
-   network domain holds a network device.
+   network domain holds a network device; and only the system domain
+   holds a facet of the driver-control interface, which stops and starts
+   another domain's drivers ([The holder's driver-control
+   facet](#the-holders-driver-control-facet)).
 9. **A release build's manifest confines what it can:** each unconfined
    device's holder holds that device's unit and nothing else, so the file
    system or network stack that parses what an unconfined `hostile` device
@@ -2676,7 +2679,9 @@ shape, mounted at `/dev` instead for the sessions that hold that facet,
 whose device directories also hold `ctl`: a write of one line, `stop`,
 `start` or `reset` and a newline, at most 16 bytes, acts on that device
 through the facet, by asking the holder's driver supervisor to stop,
-start or restart the driver process, and any other write fails with
+start or restart the driver process
+([The holder's driver-control facet](#the-holders-driver-control-facet)),
+and any other write fails with
 `einval`. Holding the path is holding the facet, as for every file server
 ([design.md](design.md#decisions)), so no write is checked against who
 wrote it, and the tree changes nothing the control facet could not change.
@@ -2690,6 +2695,40 @@ tree's name with its pid and rights, as `erx_ns:mount`'s options do, so a
 namespace entry names the facet's pid, its rights and the tree, and the
 grant answers `enoent` to an attach that names any other tree
 ([design-files.md](design-files.md#namespaces)).
+
+#### The holder's driver-control facet
+
+A domain that holds a unit serves the system domain a facet of the
+driver-control interface (`abi/services/driver_control.txt`), under a
+name of its own, such as the storage domain's `storage_ctl`: the system
+domain's registry holds each facet under its service's name, so one name
+per holder keeps the holders apart, and one facet covers every unit its
+holder holds. Its requests are `{stop | start | restart, Unit}`, with
+`Unit` the unit's manifest name. `stop` ends the unit's driver process
+through the holder's driver supervisor, which then leaves it stopped;
+`start` starts a stopped one; `restart` does both. The answer is `ok`,
+`{error, running}` for a start of a running driver, or `{error, failed}`
+when the driver did not start, which the driver's own log line explains;
+a unit the holder does not name, and a request of any other shape, is
+refused with `{error, badarg}`. The facet reaches only the driver
+processes of its holder's own units, through the supervisor that already
+restarts them after a crash, so it adds no authority over a device.
+Unlike a crash, a stop holds the driver down until a start: in between
+the driver serves nothing, a request it was serving fails as at its
+crash, and what its clients do with that failure is theirs, as for
+littlefs over the block driver ([design-storage.md](design-storage.md)).
+
+Only the system domain holds such a facet. The manifest check proves it
+(property 8) from the service's interface, not from its name, and the
+holder's mint refuses a mint request that names any other grantee, so a
+manifest row the check let through still grants nothing. The system
+shell calls it through `erx:cap/1`, as
+`erx_driver_ctl:restart(erx:cap(storage_ctl), block)`, and the device
+service's control facet and its `/dev` tree are fronts over it. A unit
+name in a request is only a key of the holder's table of its units, so a
+request makes no atom and names no process. One module, `erx_driver_ctl`,
+is both sides: the grantee's calls, and the mint and facet each holder
+starts with its own table of units.
 
 #### The driver table
 

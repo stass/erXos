@@ -23,7 +23,8 @@ module Erx
   # disk image whose sectors hold known patterns (block_image.rb), the system boots,
   # and a test module, erx_blk_check (GUEST_SOURCE), drives the block driver through
   # its public calls: it reads the sectors, is refused a read past the end, and
-  # writes two sectors of its own. The driver runs in the storage domain, which the
+  # writes two sectors of its own; then, from the system domain, it restarts the
+  # driver through the storage domain's driver-control facet. The driver runs in the storage domain, which the
   # development manifest gives the block unit, so the module, started in the system
   # domain, waits for storage@erxos to run erx_storage, loads its own object code
   # there and runs each step at that node over erpc; the system domain prints the
@@ -52,10 +53,18 @@ module Erx
   #   blk: wrote sector I           for I in WRITE_SECTORS, in order: the driver wrote
   #                                 BlockImage.pattern(I, GUEST_TAG) and the device
   #                                 completed the request with a good status
+  #   blk: control restart block ok the system domain restarted the driver through
+  #                                 storage_ctl, the storage domain's driver-control
+  #                                 facet, as the system shell does with
+  #                                 erx_driver_ctl:restart(erx:cap(storage_ctl), block),
+  #                                 and erx_blk names a new process at the storage node
+  #   blk: control restart flux refused
+  #                                 a unit the storage domain does not hold is refused
+  #   blk: read sector 0 again ok   the new driver reads sector 0's host pattern
   #   blk: done                     the last line; the harness ends the guest on it
   #
-  # A step that fails is reported as "blk: read sector I failed" or "blk: wrote
-  # sector I failed", and a guest whose driver did not start prints "blk: no driver"
+  # A step that fails is reported as "blk: read sector I failed", "blk: wrote
+  # sector I failed" or a control line ending "failed" and what the step saw, and a guest whose driver did not start prints "blk: no driver"
   # and then "blk: done"; any line other than the above fails the suite. Other lines
   # the guest prints are not the test module's and are ignored.
   #
@@ -115,6 +124,9 @@ module Erx
     SECTORS = 16
     TRANSPORT_VERSION = 2
     WRITE_SECTORS = [3, 7].freeze
+    # The driver-control lines of the first boot (header), after its writes.
+    CONTROL_LINES = ['blk: control restart block ok', 'blk: control restart flux refused',
+                     'blk: read sector 0 again ok'].freeze
     DISK_NAME = 'disk.img'
     MEMORY_MIB = 512
     # Seconds the guest has, after its banner, to print the line "blk: done".
@@ -153,6 +165,7 @@ module Erx
        *(0...SECTORS).map { |index| "blk: read sector #{index} ok" },
        "blk: read sector #{SECTORS} refused",
        *WRITE_SECTORS.map { |index| "blk: wrote sector #{index}" },
+       *CONTROL_LINES,
        'blk: done']
     end
 

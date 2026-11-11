@@ -35,6 +35,7 @@
              erx_device_record,
              erx_dist,
              erx_domain_lib,
+             erx_driver_ctl,
              erx_facet,
              erx_facets,
              erx_inspector,
