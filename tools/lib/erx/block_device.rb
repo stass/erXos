@@ -280,10 +280,10 @@ module Erx
     end
 
     # The checkpoints of one boot: the usual banner with its test-image line, then the
-    # test module's last line.
-    def checkpoints
+    # test module's last line, within seconds of the banner.
+    def checkpoints(seconds: GUEST_SECONDS)
       [*Qemu.boot_transcript(memory_mib: MEMORY_MIB, test_image: true),
-       { name: 'block-done', pattern: /^(?:#{Regexp.escape(PROMPT)})?blk: done\r?\n/n, seconds: GUEST_SECONDS }.freeze].freeze
+       { name: 'block-done', pattern: /^(?:#{Regexp.escape(PROMPT)})?blk: done\r?\n/n, seconds: seconds }.freeze].freeze
     end
 
     # The kernel command line of a boot under accel: the harness's words for it, then
@@ -306,17 +306,32 @@ module Erx
       # the guest's lines and the image. Returns { "<accelerator>-1cpu" => 'passed' }
       # (the driver test runs one CPU); any disagreement raises.
       def call(accels:, jobs: 4, build: true)
-        unless accels.all? { |accel| %w[tcg hvf].include?(accel) }
-          raise Error, 'the block device suite runs under tcg or hvf'
-        end
-        fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
-        fiasco.build(jobs: jobs) if build
-        image = test_image(fiasco)
+        image = test_image_for(accels: accels, jobs: jobs, build: build)
         accels.to_h { |accel| ["#{accel}-1cpu", run_one(accel, image) && run_medium(accel, image) && run_power_cut(accel, image)] }
       end
 
       # What the runs saw that passes either way: the unsynced file's outcome.
       def notes = @notes.dup.freeze
+
+      # The test image with the test module, which the driver domains suite boots too
+      # (driver_domains.rb); build builds the kernel first.
+      def test_image_for(accels:, jobs:, build:)
+        unless accels.all? { |accel| %w[tcg hvf].include?(accel) }
+          raise Error, 'the block device test image boots under tcg or hvf'
+        end
+        fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
+        fiasco.build(jobs: jobs) if build
+        test_image(fiasco)
+      end
+
+      # One boot of image on a fresh medium laid out by the ABI file, the test module
+      # started with arguments, judged by its lines, of which the last is due within
+      # seconds of the banner. Returns 'passed'; any disagreement raises.
+      def boot_fresh_medium(accel, image, arguments:, expected:, seconds: GUEST_SECONDS)
+        directory = run_directory(accel)
+        disk = MediumImage.create(directory: directory, name: MEDIUM_NAME, pieces: MediumImage.probes(MediumImage::DATA_SECTORS))
+        boot(accel, image, directory: directory, disk: disk, arguments: arguments, expected: expected, seconds: seconds) { nil }
+      end
 
       private
 
@@ -359,11 +374,11 @@ module Erx
 
       # One boot with disk attached, judged by its lines and then by the block that
       # reads the disk back.
-      def boot(accel, image, directory:, disk:, arguments:, expected:)
+      def boot(accel, image, directory:, disk:, arguments:, expected:, seconds: GUEST_SECONDS)
         serial = File.join(directory, 'serial.log')
         begin
           Qemu.new(root: @root, runner: @runner).run(accel: accel, image: image, memory_mib: MEMORY_MIB, directory: directory,
-                                                     checkpoints: BlockDevice.checkpoints, disks: [QemuPlan::Disk.new(path: disk)],
+                                                     checkpoints: BlockDevice.checkpoints(seconds: seconds), disks: [QemuPlan::Disk.new(path: disk)],
                                                      command_line: BlockDevice.command_line(accel, arguments: arguments))
         rescue TranscriptTimeout => error
           # A driver that fails stops printing before "blk: done": say which step.

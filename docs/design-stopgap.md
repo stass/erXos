@@ -1661,11 +1661,17 @@ from a read, program or sync callback:
 one dirty thread, and nothing it waits for needs a second. To keep that true, the owner makes no synchronous call; the owner and driver use no file
 operation, and no `logger` handler writes to `/data`; `complete` and `payload` are not dirty NIFs.
 
-**Failure has one answer: the volume is unavailable until reboot.** A block error, a deadline (the callback moves the state from *pending* to *ended*,
-and a lost swap means the request is done), or the death of the driver or owner leaves the operation's outcome unknown, and it is reported so. The owner
-then answers every request `{error, eio}`. The pair's supervisor does not restart it, and nothing replays or remounts. A late `complete` loses its swap and
-does nothing; the term keeps the buffer alive. So a delayed old write cannot race a newer one: there are none until the machine has rebooted, and littlefs's
-power-loss design handles the reboot. `design-storage.md`'s rule, which remounts once every outstanding request is answered, belongs to the port.
+**Failure has one answer: the storage domain ends.** Any block failure (an error answer, a request the owner refuses, or a deadline: the callback
+moves the state from *pending* to *ended*, and a lost swap means the request is done) breaks the NIF's volume, so the operation and every later one
+answer `{error, eio}`. The NIF's flag is the one record of it: the worker reads it (`broken/1`) after each operation and ends when it is set. The
+worker's end, the window's, or a mount that fails ends the owner. `erx_lfs_sup` and `erx_storage_sup` restart nothing (their children are permanent
+and their restart intensity is 0), so the end escalates to `erx_storage`, a permanent application, and ends the node and the domain. Every queued
+request answers `{error, eio}`, and nothing in the domain replays or remounts. The domain service restarts the domain within its row's intensity
+(`restarts 5`, `restart_period_s 60`): creation gives it the device again, the driver resets it, and littlefs mounts the volume afresh. The owner
+answers its start only once the volume has mounted, so `/data` is mounted, and the domain reports ready, only over a mounted volume, and a mount that
+fails fails the domain's boot. A delayed old write cannot race a newer one, since none outlives the domain that issued it, and littlefs's power-loss
+design handles the cut. A late `complete` loses its swap and does nothing; the term keeps the buffer alive. `design-storage.md`'s rule, which remounts
+once every outstanding request is answered, belongs to the port.
 
 ## Deterministic mode
 
@@ -1792,7 +1798,7 @@ since no consumer calls it before then.
 * Without vCPU upcalls, a program takes each signal's default action only.
 * When the watchdog ends the machine, log lines the console had not taken are lost.
 * The crash frame may interleave with a console driver that is writing, a task's frame with the watchdog end's art and frame, and a kernel `WARN` or panic line may interleave at any time.
-* Any littlefs block error, deadline or driver restart makes the volume unavailable until the storage domain restarts.
+* Any littlefs block error, deadline or driver restart ends the storage domain, and `/data` is unavailable until its restart has mounted the volume again.
 * Only the root's parks and wakes are in `erx:trace`, and the trace ring's `thread`, `space` and `target` are reused indices, not object ids.
 * `erx_group_configure` keeps the CPU set of the root's own group alone. On any other group its caller holds it checks the handle and that the set is not empty, and keeps nothing of the grant; no group's rate, ceiling or flags is enforced.
 * A kernel hang or a stalled watchdog thread is caught only by the harness's deadline.
@@ -1840,7 +1846,7 @@ the tests.
 | **End path**, on a quiet console, the QEMU gate's `native_crash` suite: a read of a decommitted page, a write to a read-only page, a read from another thread and a trap each give a whole crash frame, held to what the guest said it would touch; a root fault gives the undrained lines; `erx_machine_end` with each `how` | the frame's write removed: `crash_frame.rb` reports none. The drain removed: the last line is missing |
 | **Console handoff**: lines before and after the create arrive once, in order; a counter of the service's `l4_vcon_write` calls stays still after the create; a failed map leaves the sink alone. On the host, `dispatch_test.rb`'s handoff, readers and wrap cases count the core's console writes; natively, the console suite logs a tab and an escape sequence after the create and finds them escaped on the line, and a root that stops with the console suspended still shows its parked record | the sink never switched: the counter moves |
 | **littlefs**: a file operation under `+SDio 1` with a block read in the callback completes | `complete` made a dirty NIF: the deadline fires |
-| littlefs: an injected block error fails that operation as unknown, and the next is `{error, eio}`; the driver killed under load: no later writes reach it, and after a reboot a file synced earlier is there | the error swallowed: success claimed. The owner resends: a later write is counted. Sync skipped: the file is lost |
+| littlefs: an injected block error fails that operation as unknown, and the next is `{error, eio}`; the driver killed under load: no later writes reach it, and after a reboot a file synced earlier is there; a littlefs worker killed ends the storage domain, whose restart mounts `/data` afresh with a file written earlier (the driver_domains suite) | the error swallowed: success claimed. The owner resends: a later write is counted. Sync skipped: the file is lost |
 | **Manifest check**: each kept property with a seeded violation, each refusal with a seeded record | [the table](#the-phase-1-manifest-check) is the pairing |
 | **Service decoder**: fuzz target, and a task sending an unknown number, wrong count, bad index and long payload | word-count check removed: the fuzz target reports it |
 | **Chokepoint**: a Fiasco header outside the backend | the seeded violation is the case |

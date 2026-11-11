@@ -25,7 +25,9 @@
  *
  * Any block failure (an error answer, a deadline, an owner that is gone)
  * marks the volume broken: the failing operation and every later one answer
- * `{error, eio}` and nothing is retried, as the design requires.
+ * `{error, eio}` and nothing is retried, as the design requires. The
+ * worker reads the flag with broken/1 after each operation and ends, which
+ * ends the storage domain.
  */
 
 #include <errno.h>
@@ -426,6 +428,32 @@ op_leave(erx_lfs_vol_t *vol)
 {
 	vol->env = NULL;
 	atomic_flag_clear(&vol->busy);
+}
+
+/*
+ * broken(Vol): whether a block failure has broken the volume, so that every
+ * operation answers eio. A normal NIF that reads the flag between
+ * operations: one running is ebusy.
+ */
+static ERL_NIF_TERM
+nif_broken(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_lfs_vol_t *vol;
+	int broken;
+
+	if (argc != 1)
+		return (enif_make_badarg(env));
+	switch (op_enter(env, argv[0], &vol)) {
+	case 0:
+		return (enif_make_badarg(env));
+	case -1:
+		return (error_posix(env, "ebusy"));
+	default:
+		break;
+	}
+	broken = vol->broken;
+	op_leave(vol);
+	return (enif_make_atom(env, broken ? "true" : "false"));
 }
 
 /* A path from Erlang: no NUL inside, shorter than the buffer. */
@@ -893,6 +921,7 @@ static ErlNifFunc nif_funcs[] = {
 	{"new", 3, nif_new, 0},
 	{"complete", 2, nif_complete, 0},
 	{"payload", 1, nif_payload, 0},
+	{"broken", 1, nif_broken, 0},
 	{"format", 1, nif_format, DIRTY},
 	{"mount", 1, nif_mount, DIRTY},
 	{"stat", 2, nif_stat, DIRTY},

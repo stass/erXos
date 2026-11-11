@@ -34,7 +34,8 @@ class ErxLittlefsTest < Minitest::Test
     -export([debug/1]).
     debug(_Message) -> ok.
   ERLANG
-  CASES = %w[synced_file_survives_a_cut tree_operations block_error_fails_the_volume
+  CASES = %w[synced_file_survives_a_cut tree_operations block_error_ends_the_owner
+             worker_end_ends_the_owner window_end_ends_the_owner mount_failure_ends_the_owner
              deadline_ends_a_request refuses_bad_arguments].freeze
 
   def test_volume_cases_pass_under_one_dirty_io_scheduler

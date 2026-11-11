@@ -8,17 +8,18 @@ docs/design-stopgap.md#littlefs-in-the-storage-domain. `erx_lfs` is its one
 user: the volume's worker alone calls the operations, each on a dirty I/O
 scheduler; the owner alone calls `complete/2` and `payload/1`, which are
 normal NIFs, as it serves the block requests the operations post to it.
+The worker calls `broken/1`, also a normal NIF, after each operation.
 
 Paths are binaries from the volume's root, `<<"/">>` and `<<"/a/b">>`.
 Open flags are littlefs's `LFS_O_` bits, which `erx_lfs` builds.
 """.
 
--export([new/3, complete/2, payload/1]).
+-export([new/3, complete/2, payload/1, broken/1]).
 -export([format/1, mount/1, stat/2, readdir/4, open/3, read/4, write/4,
          truncate/3, size/2, sync/2, close/2, mkdir/2, remove/2, rename/3,
          fsstat/1]).
 
--nifs([new/3, complete/2, payload/1, format/1, mount/1, stat/2, readdir/4,
+-nifs([new/3, complete/2, payload/1, broken/1, format/1, mount/1, stat/2, readdir/4,
        open/3, read/4, write/4, truncate/3, size/2, sync/2, close/2, mkdir/2,
        remove/2, rename/3, fsstat/1]).
 
@@ -46,6 +47,14 @@ complete(_Req, _Answer) -> ?NIF.
 -doc "A write request's bytes.".
 -spec payload(req()) -> binary().
 payload(_Req) -> ?NIF.
+
+-doc """
+Whether a block failure (an error answer, a deadline, a request the volume
+could not make) has broken the volume, so that every operation answers
+`{error, eio}`: `{error, ebusy}` while an operation runs.
+""".
+-spec broken(vol()) -> boolean() | {error, ebusy}.
+broken(_Vol) -> ?NIF.
 
 -spec format(vol()) -> ok | {error, atom()}.
 format(_Vol) -> ?NIF.

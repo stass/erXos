@@ -4,18 +4,17 @@
 -module(erx_storage_sup).
 -moduledoc """
 The storage domain's supervisor (docs/design-stopgap.md, "littlefs in the storage domain").
-Its children:
+Its children, both permanent under a restart intensity of 0, so the end of
+either ends this supervisor and erx_storage, a permanent application, and so
+the node and the storage domain:
 
 * the mint of storage_ctl, the driver-control facet through which the system
   domain stops, starts or restarts the block driver under erx_blk's supervisor
-  (erx_driver_ctl). The domain service holds the mint until the domain ends, so
-  the mint is permanent under an intensity of 0: its end ends this supervisor,
-  and with it the application, which is permanent, and the domain;
+  (erx_driver_ctl). The domain service holds the mint until the domain ends;
 * `/data`, littlefs on the block driver's data window (erx_lfs_sup), which
   erx_storage's application starts once erx_blk's has started, so the block
-  service holds the windows by then. It is not restarted: a volume that failed
-  stays unavailable, so no later write races one the failed volume left
-  outstanding.
+  service holds the windows by then. The domain service's restart mounts
+  `/data` afresh.
 """.
 -behaviour(supervisor).
 
@@ -38,7 +37,7 @@ init([]) ->
                 modules => [erx_driver_ctl]},
     Data = #{id => erx_lfs_sup,
              start => {erx_lfs_sup, start_link, []},
-             restart => temporary,
+             restart => permanent,
              shutdown => infinity,
              type => supervisor,
              modules => [erx_lfs_sup]},

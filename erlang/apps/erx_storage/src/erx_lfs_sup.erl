@@ -5,9 +5,13 @@
 -moduledoc """
 The domain's `/data` (docs/design-stopgap.md#littlefs-in-the-storage-domain):
 the volume's owner, `erx_lfs`, on the block service's data window, and the
-grant that mounts it at `/data`. Neither is restarted: a volume that failed
-stays unavailable until the next boot, so no later write races one the
-failed volume left outstanding. A machine without a data window starts
+grant that mounts it at `/data`. The owner starts once the volume has
+mounted, so a mount that fails fails the domain's boot before it reports
+ready. Both children are permanent and the restart intensity is 0: when
+either ends, as the owner does when the volume fails, this supervisor ends,
+and through erx_storage_sup the storage domain. Nothing is restarted here:
+the domain's restart mounts the volume afresh, so no later write races one
+the failed volume left outstanding. A machine without a data window starts
 neither.
 """.
 
@@ -30,10 +34,10 @@ start_link(Role, Point, Name) ->
 init({Role, Point, Name}) ->
     Flags = #{strategy => one_for_all, intensity => 0, period => 1},
     Owner = #{id => owner, start => {erx_lfs, start_link, [Role, Name]},
-              restart => temporary, shutdown => brutal_kill, type => worker,
+              restart => permanent, shutdown => brutal_kill, type => worker,
               modules => [erx_lfs]},
     Grant = #{id => grant, start => {?MODULE, start_grant, [Name, Point]},
-              restart => temporary, shutdown => brutal_kill, type => worker,
+              restart => permanent, shutdown => brutal_kill, type => worker,
               modules => [erx_fs]},
     {ok, {Flags, [Owner, Grant]}}.
 

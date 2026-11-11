@@ -267,9 +267,10 @@ Error in process <0.150.0> with exit value:
   domain, a BeamAsm service domain that holds the block device, which the
   development manifest configures and the domain service starts at boot.
   littlefs serves `/data` there; a file synced there survives a power
-  cut, checked under HVF. The system shell restarts the block driver
-  through the storage domain's driver-control facet, at `erl`:
-  `erx_driver_ctl:restart(erx:cap(storage_ctl), block)`. An EROFS
+  cut, and a littlefs failure ends the domain, whose restart mounts
+  `/data` afresh, both checked under HVF. The system shell restarts the
+  block driver through the storage domain's driver-control facet, at
+  `erl`: `erx_driver_ctl:restart(erx:cap(storage_ctl), block)`. An EROFS
   reader in Erlang (`erx_erofs`), behind its funnel `erx_verity`, mounts
   images in the namespace. CRC-32C is the first per-byte primitive.
   `ruby tools/erx pack --medium` writes a QEMU disk image; the QEMU

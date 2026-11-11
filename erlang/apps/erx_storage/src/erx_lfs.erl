@@ -23,10 +23,16 @@ synchronous call after its start, so it always reaches the next block request.
 None of them uses a file of `/data`, so nothing they wait on needs a second
 dirty thread or the worker.
 
-**Failure has one answer.** A block request the window refuses or never
-answers, a window or worker that ends, or a deadline in the NIF leaves the
-operation's outcome unknown: the operation answers `{error, eio}`, the volume
-is unavailable until the next boot, and nothing is retried or remounted.
+**Failure ends the volume.** Any block failure, whether the window answers
+an error, the NIF's deadline passes or the owner refuses the request,
+breaks the NIF's volume: the operation and every later one answer
+`{error, eio}`. The worker reads that flag (`erx_littlefs:broken/1`) after
+each operation and ends when it is set. The worker's end, the window's, or
+a mount that fails ends the owner, and its supervisors end the storage
+domain: every queued request answers `{error, eio}`, as a call to an owner
+that is gone does. Nothing is retried or remounted within the domain. The
+domain service's restart gives the domain the device again and mounts the
+volume afresh, so no write of the failed volume can race a later one.
 
 Nodes are paths from the volume's root, `<<"/">>` and `<<"/a/b">>`, and a
 handle is `{dir, Path}` or `{file, Path, Slot}`. littlefs stores no file
@@ -91,7 +97,6 @@ only on a request that carries the reference.
                 queue = queue:new() :: queue:queue(),
                 %% The one block request the window has: its id and the NIF's request.
                 block = none :: none | {gen_server:request_id(), erx_littlefs:req()},
-                failed = false :: boolean(),
                 %% Each path met: its qid path and data version.
                 paths = #{} :: #{binary() => {pos_integer(), pos_integer()}}}).
 
@@ -102,8 +107,10 @@ only on a request that carries the reference.
 -doc """
 Starts the owner of the volume on the block service's window of `Role`,
 registered as `Name`, and mounts it, formatting blocks that hold no volume.
-A machine without that window starts nothing: `ignore`. Tests pass
-`{window, Pid}` for a window of their own.
+It answers `{ok, Pid}` once the volume has mounted; a mount that fails ends
+the owner, and the answer is `{error, Reason}`. A machine without that
+window starts nothing: `ignore`. Tests pass `{window, Pid}` for a window of
+their own.
 """.
 -spec start_link(erx_blk_table:role() | {window, pid()}, atom()) -> {ok, pid()} | ignore | {error, term()}.
 start_link(Role, Name) when is_atom(Name) ->
@@ -119,12 +126,14 @@ owner({start, Parent, Role, Name}) ->
             true = register(Name, self()),
             Secret = make_ref(),
             Vol = erx_littlefs:new(self(), Blocks, ?DEADLINE_MS),
-            Worker = proc_lib:spawn_link(?MODULE, worker, [self(), Vol]),
+            Worker = proc_lib:spawn_link(?MODULE, worker, [{start, self()}, Vol]),
             _ = erlang:monitor(process, Window),
             persistent_term:put({?MODULE, Name}, {self(), Secret}),
-            proc_lib:init_ack(Parent, {ok, self()}),
             State = #owner{secret = Secret, vol = Vol, worker = Worker, window = Window},
-            ?MODULE:owner(run(mount, fun mount/1, fun mounted/2, State));
+            %% Acknowledged once mounted (mounted/3): the owner serves the
+            %% mount's block requests in its loop, so it acknowledges there.
+            Mounted = fun(Result, S) -> mounted(Result, Parent, S) end,
+            ?MODULE:owner(run(mount, fun mount/1, Mounted, State));
         {error, {refused, no_device}} ->
             %% No block driver: a machine without a disk, which has no line, or a disk
             %% erx_blk refused and has already logged. No second line either way.
@@ -142,12 +151,13 @@ owner(#owner{secret = Secret, worker = Worker} = State) ->
             ?MODULE:owner(block(Op, Sector, Count, Req, State));
         {?MODULE, Worker, done, Result} ->
             ?MODULE:owner(next(done(Result, State)));
+        {'EXIT', Worker, {?MODULE, broken}} ->
+            fail("a block failure broke the volume", [], State);
         {'EXIT', Worker, _} ->
-            log("the worker ended; /data unavailable until reboot", []),
-            ?MODULE:owner(next(done({error, eio}, State#owner{failed = true})));
-        {'DOWN', _, process, Window, _} when Window =:= State#owner.window,
-                                             State#owner.block =:= none ->
-            ?MODULE:owner(State#owner{failed = true});
+            fail("the worker ended", [], State);
+        %% Its own monitor's or a block request's: either way the window is gone.
+        {'DOWN', _, process, Window, _} when Window =:= State#owner.window ->
+            fail("the window ended", [], State);
         Message ->
             ?MODULE:owner(answered(Message, State))
     end.
@@ -171,24 +181,31 @@ window(Role) ->
     end.
 
 -doc false.
-%% The worker runs one request's littlefs work at a time, for its owner only.
+%% The worker runs one request's littlefs work at a time, for its owner only,
+%% and ends once a block failure has broken the volume (moduledoc). Its heap
+%% holds the files' data, which a crash dump of the domain must not show.
+worker({start, Owner}, Vol) ->
+    _ = process_flag(sensitive, true),
+    worker(Owner, Vol);
 worker(Owner, Vol) ->
     receive
         {?MODULE, Owner, run, Work} ->
             Result = try Work(Vol) catch _:_ -> {error, eio} end,
+            %% Never ebusy: the worker alone runs operations on Vol.
+            case erx_littlefs:broken(Vol) of
+                false -> ok;
+                true -> exit({?MODULE, broken})
+            end,
             Owner ! {?MODULE, self(), done, Result},
             ?MODULE:worker(Owner, Vol)
     end.
 
-%% The next queued request, when the worker is idle. A failed volume answers
-%% eio, and a request the owner answers itself never reaches the worker.
+%% The next queued request, when the worker is idle. A request the owner
+%% answers itself never reaches the worker.
 next(#owner{busy = idle, queue = Queue} = State) ->
     case queue:out(Queue) of
         {empty, _} ->
             State;
-        {{value, {Alias, _}}, Queue1} when State#owner.failed ->
-            reply(Alias, {error, eio}),
-            next(State#owner{queue = Queue1});
         {{value, {Alias, Request}}, Queue1} ->
             State1 = State#owner{queue = Queue1},
             case plan(Request, State1) of
@@ -228,35 +245,37 @@ mount(Vol) ->
             Result
     end.
 
-mounted(ok, State) ->
+mounted(ok, Parent, State) ->
     log("volume mounted", []),
+    proc_lib:init_ack(Parent, {ok, self()}),
     {ok, State};
-mounted(Error, State) ->
-    log("mount failed: ~p; /data unavailable until reboot", [Error]),
-    {Error, State#owner{failed = true}}.
+mounted(Error, _Parent, State) ->
+    fail("mount failed: ~p", [Error], State).
 
 %% A block request from the worker's operation, sent on to the window. The
 %% window has no flush: it answers each write once the device has, so a
-%% flush has nothing left to wait for (TODO.md, storage).
-block(Op, Sector, Count, Req, #owner{failed = Failed, block = Block, window = Window} = State) ->
-    Request = case {Op, Failed, Block} of
-                  {_, true, _} -> refuse;
-                  {_, _, {_, _}} -> refuse;
-                  {read, _, _} when is_integer(Sector), is_integer(Count) -> {read, Sector, Count};
-                  {write, _, _} when is_integer(Sector) -> {write, Sector, payload(Req)};
-                  {flush, _, _} -> flush;
+%% flush has nothing left to wait for (TODO.md, storage). The NIF makes one
+%% request at a time, so a request while one is outstanding means a message
+%% the NIF did not send took the slot: it is refused, which breaks the volume.
+%% Completing a message that holds no request of the NIF changes nothing.
+block(Op, Sector, Count, Req, #owner{block = Block, window = Window} = State) ->
+    Request = case {Op, Block} of
+                  {_, {_, _}} -> refuse;
+                  {read, none} when is_integer(Sector), is_integer(Count) -> {read, Sector, Count};
+                  {write, none} when is_integer(Sector) -> {write, Sector, payload(Req)};
+                  {flush, none} -> flush;
                   _ -> refuse
               end,
     case Request of
-        refuse ->
-            complete(Req, error),
-            State#owner{failed = true};
         flush ->
             complete(Req, ok),
             State;
+        refuse ->
+            complete(Req, error),
+            State;
         {write, _, error} ->
             complete(Req, error),
-            State#owner{failed = true};
+            State;
         _ ->
             State#owner{block = {gen_server:send_request(Window, Request), Req}}
     end.
@@ -277,12 +296,24 @@ answered(Message, #owner{block = {Id, Req}} = State) ->
         Failure ->
             %% Complete first: the callback waits on it, and logging may wait.
             complete(Req, error),
-            log("block request failed: ~p; /data unavailable until reboot", [Failure]),
-            State#owner{block = none, failed = true}
+            log("block request failed: ~p", [Failure]),
+            State#owner{block = none}
     end.
 
-%% A message that claims to be a block request but holds no request of the
-%% NIF changes nothing.
+%% Ends the owner, and with it the worker and the storage domain (moduledoc).
+%% The outstanding block request completes with error first: its callback
+%% waits on it, and logging may wait.
+fail(Format, Arguments, #owner{block = Block}) ->
+    _ = case Block of
+            {_, Req} -> complete(Req, error);
+            none -> ok
+        end,
+    log(Format ++ "; the storage domain ends", Arguments),
+    exit({erx_lfs, failed}).
+
+%% The answer to a block request. It is late after the request's deadline,
+%% or for a message that holds no request of the NIF. Ignoring that is safe:
+%% a deadline has already broken the volume, which ends the worker.
 complete(Req, Answer) ->
     try erx_littlefs:complete(Req, Answer) catch error:badarg -> late end.
 
@@ -590,7 +621,7 @@ init(Name) when is_atom(Name) ->
 root(Server) ->
     case call(Server, root) of
         {ok, #{qid := Qid}} -> {ok, ?TREE, ?ROOT, Qid};
-        %% A volume that is unavailable still roots a tree, whose every
+        %% An owner that has ended still roots a tree, whose every
         %% request then answers eio.
         _ -> {ok, ?TREE, ?ROOT, {?ERX_P9_QTDIR, 0, 0}}
     end.

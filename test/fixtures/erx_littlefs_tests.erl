@@ -9,7 +9,9 @@
 -module(erx_littlefs_tests).
 
 -export([main/0, window/2]).
--export([synced_file_survives_a_cut/0, tree_operations/0, block_error_fails_the_volume/0,
+-export([synced_file_survives_a_cut/0, tree_operations/0, block_error_ends_the_owner/0,
+         worker_end_ends_the_owner/0, window_end_ends_the_owner/0,
+         mount_failure_ends_the_owner/0,
          deadline_ends_a_request/0, refuses_bad_arguments/0]).
 
 -include("generated/erx_abi.hrl").
@@ -19,7 +21,9 @@
 
 main() ->
     ok = erx_fs_version:init(),
-    Cases = [synced_file_survives_a_cut, tree_operations, block_error_fails_the_volume,
+    Cases = [synced_file_survives_a_cut, tree_operations, block_error_ends_the_owner,
+             worker_end_ends_the_owner, window_end_ends_the_owner,
+             mount_failure_ends_the_owner,
              deadline_ends_a_request, refuses_bad_arguments],
     Results = [run(Case) || Case <- Cases],
     erlang:halt(case lists:all(fun(R) -> R end, Results) of true -> 0; false -> 1 end).
@@ -158,17 +162,66 @@ tree_operations() ->
     true = DirId =/= FileId,
     stop_volume(Volume).
 
-%% A block request the window refuses fails its operation, and the volume
-%% answers eio from then on, even once the window answers again.
-block_error_fails_the_volume() ->
-    Volume = {Window, _, Fs} = start_volume(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>, lfs_fail),
+%% A block request the window refuses fails its operation with eio, and the
+%% owner ends, which ends its worker: nothing answers from a volume whose
+%% state is unknown, and the storage domain's restart mounts it afresh.
+block_error_ends_the_owner() ->
+    Volume = {Window, Owner, Fs} = start_volume(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>, lfs_fail),
     {ok, _, Root, _} = erx_lfs:root(Fs),
+    Worker = worker(Owner),
+    Monitors = [erlang:monitor(process, Pid) || Pid <- [Owner, Worker]],
     Window ! {mode, fail},
     {error, eio} = erx_lfs:make(Root, <<"x">>, {directory, 8#755}, Fs),
-    Window ! {mode, normal},
-    {error, eio} = erx_lfs:make(Root, <<"y">>, {directory, 8#755}, Fs),
+    ok = ended(Monitors),
     {error, eio} = erx_lfs:walk(Root, <<"x">>, Fs),
     stop_volume(Volume).
+
+%% A worker that ends ends its owner, and the request it ran answers eio.
+worker_end_ends_the_owner() ->
+    Volume = {_, Owner, Fs} = start_volume(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>, lfs_worker),
+    {ok, _, _, _} = erx_lfs:root(Fs),
+    Monitor = erlang:monitor(process, Owner),
+    exit(worker(Owner), kill),
+    ok = ended([Monitor]),
+    {error, eio} = erx_lfs:getattr(<<"/">>, Fs),
+    stop_volume(Volume).
+
+%% A window that ends ends the owner and its worker.
+window_end_ends_the_owner() ->
+    Volume = {Window, Owner, Fs} = start_volume(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>, lfs_window),
+    {ok, _, _, _} = erx_lfs:root(Fs),
+    Monitors = [erlang:monitor(process, Pid) || Pid <- [Owner, worker(Owner)]],
+    exit(Window, kill),
+    ok = ended(Monitors),
+    stop_volume(Volume).
+
+%% A mount that fails ends the owner before it answers its start, so a
+%% volume that did not mount never starts.
+mount_failure_ends_the_owner() ->
+    Window = start_window(<<0:(?DISK_SECTORS * ?SECTOR)/unit:8>>),
+    Window ! {mode, fail},
+    Trapped = process_flag(trap_exit, true),
+    %% The link's 'EXIT', which proc_lib:start_link consumes, would kill a
+    %% caller that did not trap exits.
+    {error, _} = erx_lfs:start_link({window, Window}, lfs_unmounted),
+    process_flag(trap_exit, Trapped),
+    undefined = whereis(lfs_unmounted),
+    exit(Window, kill),
+    ok.
+
+%% The owner's worker: the one process it linked to besides its parent. It is
+%% sensitive, so its initial call does not show.
+worker(Owner) ->
+    [{links, Links}, {parent, Parent}] = process_info(Owner, [links, parent]),
+    [Worker] = [Pid || Pid <- Links, is_pid(Pid), Pid =/= Parent],
+    Worker.
+
+ended(Monitors) ->
+    lists:foreach(fun(Monitor) ->
+                          receive {'DOWN', Monitor, process, _, _} -> ok
+                          after 5000 -> error(not_ended)
+                          end
+                  end, Monitors).
 
 %% A block request nobody answers ends at its deadline as eio; the owner's
 %% answer after it is late and changes nothing, and the volume stays failed.
@@ -179,6 +232,7 @@ deadline_ends_a_request() ->
     {Req, Count} = receive {erx_lfs_block, read, _, C, R} -> {R, C} after 5000 -> error(no_request) end,
     {error, eio} = receive {result, Result} -> Result after 5000 -> error(no_deadline) end,
     late = erx_littlefs:complete(Req, {ok, <<0:(Count * 512)/unit:8>>}),
+    true = erx_littlefs:broken(Vol),
     {error, eio} = erx_littlefs:mount(Vol),
     ok.
 
@@ -188,10 +242,12 @@ refuses_bad_arguments() ->
            fun() -> erx_littlefs:new(self(), 16, 0) end,
            fun() -> erx_littlefs:stat(make_ref(), <<"/">>) end,
            fun() -> erx_littlefs:complete(make_ref(), ok) end,
-           fun() -> erx_littlefs:payload(make_ref()) end],
+           fun() -> erx_littlefs:payload(make_ref()) end,
+           fun() -> erx_littlefs:broken(make_ref()) end],
     [badarg = try F() catch error:badarg -> badarg end || F <- Bad],
     %% An unmounted volume refuses every operation.
     Vol = erx_littlefs:new(self(), 16, 100),
     {error, enodev} = erx_littlefs:stat(Vol, <<"/">>),
+    false = erx_littlefs:broken(Vol),
     {error, enodev} = erx_littlefs:read(Vol, 99, 0, 1),
     ok.

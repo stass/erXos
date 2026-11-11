@@ -4256,6 +4256,23 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] Storage domain, littlefs's failures end the whole domain (`erx_lfs.erl`,
+  `erx_lfs_sup.erl`, `erx_storage_sup.erl`): any end of littlefs's owner, worker or `/data`
+  grant ends the storage domain, the block driver and every window it serves with it, and
+  after `restarts 5` within `restart_period_s 60` the domain stays down. Nothing outside
+  the domain reaches `/data` yet; once the `data` facet serves other domains, a client
+  that can end the grant or break the volume six times a minute takes down every
+  partition's driver, not only `/data`. The facet's design bounds what a client can make
+  the grant do (its own lane), or littlefs moves into a sub-space port whose end the
+  domain survives (design-storage.md).
+* [Medium] Storage domain, file data in crash dumps (`erx_blk_window.erl`, `erx_blk.erl`,
+  the `erx_fs` grant): a littlefs failure halts the storage node, whose crash dump goes to
+  the domain's crash area (design-runtime.md). `erx_lfs`'s owner and worker are
+  `sensitive`, so the dump shows no heap, stack or messages of theirs, but the windows,
+  the block driver and the grant are not, and their heaps and queues can hold sectors of
+  `/data`. Mark them sensitive, or keep file data out of the crash area, and test that a
+  dump after a write holds none of its bytes.
+
 * [Medium] Storage domain's write authority (`erlang/apps/erx_blk/src/erx_blk_service.erl`
   `serve/1`, `config/manifest/qemu-virt-development.txt`): the block driver starts a writable
   window on every partition role of the layout (record, `slot_a`, `slot_b`, vault, data)
@@ -4963,10 +4980,6 @@ document's "residual risks accepted" paragraph.
   cannot be read and that no image is served or mounted on every normal boot, which reads as an
   error. Skip the manifest read outside the system domain, or log it once as information,
   until the image placement reaches the holder's boot page (the release image item above).
-* [Low] storage, `erx_lfs`'s unavailability text (`erlang/apps/erx_storage/src/erx_lfs.erl`
-  log lines, `erx_lfs_sup` moduledoc): they say `/data` stays unavailable until the next boot,
-  but the storage domain has `restarts 5` and starts its applications `permanent`, so an
-  exhausted supervisor ends the node and the domain's restart mounts `/data` again. Say so.
 * [Low] storage, slot windows (`config/manifest/qemu-virt-development.txt`,
   `tools/lib/erx/manifest.rb` property 8): the four slot-writer windows (`slot_a`,
   `slot_b`, `boot_selection`, `reset_count`) are held by the system domain, as property

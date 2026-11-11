@@ -2,8 +2,10 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% The guest side of the block device suite (tools/lib/erx/block_device.rb, whose header
-%% defines the lines printed here). It is test code: the suite's harness compiles it, adds
-%% it to a test image's system release under /test/blk and starts it with the kernel
+%% defines the lines printed here) and of the driver domains suite's littlefs restart
+%% (tools/lib/erx/driver_domains.rb, whose header defines lfs_restart/0's lines). It is
+%% test code: the suite's harness compiles it, adds it to a test image's system release
+%% under /test/blk and starts it with the kernel
 %% command line's `-run erx_blk_check main` in the system domain. The block driver and /data
 %% run in the storage domain (docs/design-stopgap.md, "littlefs in the storage domain"), so each
 %% entry waits for that domain's node to run erx_storage, loads this module's object code there
@@ -36,16 +38,21 @@
 %% size and MD5 digest, which the harness compares with its own, and what is left of the
 %% unsynced one, which nothing promises.
 %%
+%% lfs_restart/0 is the driver domains suite's: it writes and closes /data/restarted at the
+%% storage domain's node, kills that node's littlefs worker, sees the node go down, which is
+%% the storage domain ending, waits for the domain's next incarnation to run erx_storage, and
+%% reads the file back from /data as that incarnation mounted it.
+%%
 %% Each line goes to the console in one erlang:display_string/2 call, which reaches the
 %% console's sink, its driver, whole (docs/design-runtime.md, "The console and standard
 %% I/O"), so a kernel log line the console writes lands between two lines, never inside one.
 
 -module(erx_blk_check).
 
--export([main/0, medium/0, data_write/0, data_read/0]).
-%% Run at the storage domain's node by at_storage/1.
+-export([main/0, medium/0, data_write/0, data_read/0, lfs_restart/0]).
+%% Run at the storage domain's node by step/1.
 -export([run/1, main_here/0, read_again_here/0, medium_here/0, data_write_here/0,
-         data_read_here/0]).
+         data_read_here/0, lfs_write_here/0, lfs_kill_here/0, lfs_read_here/0]).
 
 -define(ROLES, [record, slot_a, slot_b, vault, data]).
 
@@ -75,6 +82,12 @@
 -define(STORAGE_WAIT_MS, 90000).
 -define(POLL_MS, 200).
 -define(STEP_MS, 60000).
+%% lfs_restart's file, data_content(2), and how long it waits for the storage domain to
+%% end once its worker is killed. The kill waits KILL_DELAY_MS, so the kill step's answer
+%% leaves the node before the domain's end can overtake it.
+-define(RESTARTED, "/data/restarted").
+-define(STORAGE_END_MS, 60000).
+-define(KILL_DELAY_MS, 200).
 
 -spec main() -> ok.
 main() -> report(at_storage(main_here) ++ control()).
@@ -92,20 +105,24 @@ data_read() -> report(at_storage(data_read_here)).
 report(Lines) ->
     lists:foreach(fun display/1, Lines ++ [text("done", [])]).
 
-%% Runs Step at the storage domain's node: its lines. A domain that never runs erx_storage,
-%% or a step that fails at its node, is the line "no driver".
+%% Runs Step at the storage domain's node once that node runs erx_storage: its lines. A
+%% domain that never runs erx_storage, or a step that fails at its node, is the line
+%% "no driver".
 at_storage(Step) ->
     case wait_storage(?STORAGE_WAIT_MS div ?POLL_MS) of
-        ok ->
-            {Module, Binary, File} = code:get_object_code(?MODULE),
-            try
-                {module, Module} = erpc:call(?STORAGE_NODE, code, load_binary, [Module, File, Binary], ?STEP_MS),
-                erpc:call(?STORAGE_NODE, ?MODULE, run, [Step], ?STEP_MS)
-            catch
-                Class:Reason -> [text("no driver: ~0p", [{Class, Reason}])]
-            end;
-        timeout ->
-            [text("no driver", [])]
+        ok -> step(Step);
+        timeout -> [text("no driver", [])]
+    end.
+
+%% Step's lines from the storage domain's node, after loading this module's object code
+%% there, which each incarnation of the domain needs anew.
+step(Step) ->
+    {Module, Binary, File} = code:get_object_code(?MODULE),
+    try
+        {module, Module} = erpc:call(?STORAGE_NODE, code, load_binary, [Module, File, Binary], ?STEP_MS),
+        erpc:call(?STORAGE_NODE, ?MODULE, run, [Step], ?STEP_MS)
+    catch
+        Class:Reason -> [text("no driver: ~0p", [{Class, Reason}])]
     end.
 
 %% In the system domain, as the system shell does it: the block driver restarted through
@@ -146,6 +163,31 @@ storage_driver() ->
 attempt(Fun) ->
     try Fun() catch Class:Reason -> {Class, Reason} end.
 
+-spec lfs_restart() -> ok.
+lfs_restart() ->
+    report(case wait_storage(?STORAGE_WAIT_MS div ?POLL_MS) of
+               ok ->
+                   Written = step(lfs_write_here),
+                   true = erlang:monitor_node(?STORAGE_NODE, true),
+                   Killed = step(lfs_kill_here),
+                   Written ++ Killed ++ restarted();
+               timeout ->
+                   [text("no driver", [])]
+           end).
+
+%% The storage domain's end, seen as its node going down, and its next incarnation, seen
+%% running erx_storage, with the file read back from its /data.
+restarted() ->
+    receive
+        {nodedown, ?STORAGE_NODE} ->
+            case wait_storage(?STORAGE_WAIT_MS div ?POLL_MS) of
+                ok -> [text("storage domain ended", []), text("storage domain back", []) | step(lfs_read_here)];
+                timeout -> [text("storage domain ended", []), text("storage domain not back", [])]
+            end
+    after ?STORAGE_END_MS ->
+        [text("storage domain did not end", [])]
+    end.
+
 wait_storage(0) ->
     timeout;
 wait_storage(Tries) ->
@@ -160,8 +202,8 @@ wait_storage(Tries) ->
     end.
 
 %% At the storage domain's node: Step's lines, in order.
--spec run(main_here | read_again_here | medium_here | data_write_here | data_read_here) ->
-          [binary()].
+-spec run(main_here | read_again_here | medium_here | data_write_here | data_read_here
+          | lfs_write_here | lfs_kill_here | lfs_read_here) -> [binary()].
 run(Step) ->
     put(lines, []),
     ok = ?MODULE:Step(),
@@ -351,6 +393,41 @@ write(Sector) ->
 
 pattern(Sector, Tag) ->
     binary:copy(<<Tag/binary, Sector:64/little>>, ?SECTOR_BYTES div ?RECORD_BYTES).
+
+-spec lfs_write_here() -> ok.
+lfs_write_here() ->
+    case file:write_file(?RESTARTED, data_content(2)) of
+        ok -> line("lfs wrote ~b bytes", [?DATA_BYTES]);
+        _Failed -> line("lfs write failed", [])
+    end.
+
+%% Kills the volume's worker, the one process erx_lfs links to besides its parent, erx_lfs_sup,
+%% KILL_DELAY_MS after its line. The worker is sensitive, so its initial call does not show.
+-spec lfs_kill_here() -> ok.
+lfs_kill_here() ->
+    Workers = case whereis(erx_lfs) of
+                  undefined ->
+                      [];
+                  Owner ->
+                      [{links, Links}, {parent, Parent}] = process_info(Owner, [links, parent]),
+                      [Pid || Pid <- Links, is_pid(Pid), Pid =/= Parent]
+              end,
+    case Workers of
+        [Worker] ->
+            _ = spawn(fun() -> timer:sleep(?KILL_DELAY_MS), exit(Worker, kill) end),
+            line("lfs worker found", []);
+        _None ->
+            line("lfs worker not found", [])
+    end.
+
+-spec lfs_read_here() -> ok.
+lfs_read_here() ->
+    Expected = data_content(2),
+    case file:read_file(?RESTARTED) of
+        {ok, Expected} -> line("lfs read back ~b bytes", [?DATA_BYTES]);
+        {ok, _Other} -> line("lfs read back other", []);
+        _Failed -> line("lfs read failed", [])
+    end.
 
 %% A driver call, with the exit of a call that timed out or found the driver gone taken as
 %% that step's failure, so one bad step does not end the run before "blk: done".
