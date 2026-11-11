@@ -586,26 +586,42 @@ stack sends ([Verification](#verification)).
 ### The process tree
 
 ```text
-erx_net_sup  (rest_for_one)
+erx_net_sup  (one_for_one, intensity 0: restarts nothing)
  |- erx_net_tables          ETS tables, secrets, port-mapper names;
  |                          monitors each interface, deletes its rows
- |- erx_net_if_sup  (one_for_one)
- |   |- link supervisor per interface  (rest_for_one)
+ |- erx_net_grants  (simple_one_for_one, temporary children)
+ |   |- erx_net_grant        one per client domain; traps exits
+ |       ~ linked, not supervised: erx_tcp_conn, erx_tcp_listen,
+ |         erx_udp_sock, each acting for that grant's domain alone
+ |- erx_net_interfaces  (one_for_one)
+ |   |- link supervisor per interface, its id the interface's name
+ |       |                   (vtnet0 ...), permanent; rest_for_one
  |       |- the driver       erx_net_driver over its transport: erx_virtio_net,
  |       |                   erx_net_loop for loopback, or erx_net_pipe on a host
  |       |- erx_net_if       the interface process
  |       |- erx_dhcp4        when the interface is configured for DHCP
- |- erx_net_grant_sup  (simple_one_for_one, temporary children)
- |   |- erx_net_grant        one per client domain; traps exits
- |       ~ linked, not supervised: erx_tcp_conn, erx_tcp_listen,
- |         erx_udp_sock, each acting for that grant's domain alone
  |- erx_epmd                the port mapper for exposed domains
+ |- the runtime's children  erx_net_runtime:children/0: the node's grant
+                            `local`; on erXos also the mints of `net` and of
+                            `network_ctl`, the driver-control facet
 ```
 
+Every child of `erx_net_sup` is permanent, and the supervisor restarts
+none: the end of any of them, `erx_net_interfaces` giving up included,
+ends the stack, which runs standalone and on erXos alike. On erXos the
+application is permanent in the network domain, so the stack's end ends
+the domain, and the domain service restarts it, which grants the device
+and every client again. A restart at the top would do less well whatever
+it restarted. Minted grants are temporary and are not made again, so a
+restart of the grants' supervisor, or of the tables they subscribed to
+in `init`, would leave clients without the network. And a restarted mint
+names itself after the domain's ready report, which no report carries,
+so the domain would mint nothing more. Ending the stack instead leaves
+no list of which restart destroys which grant to keep right.
+
 `erx_net_tables` owns the shared ETS tables, so a crash of any other
-process loses no table; the `rest_for_one` strategy restarts everything
-after it when it fails, since every socket's entries live in its tables.
-A driver restart resets its device
+process loses no table. Ordinary failures stay below the top. A driver
+restart resets its device
 ([design-runtime.md](design-runtime.md#the-device-nif)) and restarts its
 interface process, which loses only soft state: neighbour entries,
 reassembly queues and half-open handshakes, which peers retransmit. The
@@ -617,6 +633,17 @@ a driver lives a second at the least, which bounds how fast a dead
 medium restarts its link, and the interfaces supervisor's intensity is
 set to the most its links reach at that rate
 ([Ending](#the-driver)).
+
+A link is also what the network domain's driver-control facet,
+`network_ctl`, stops, starts and restarts for the system domain
+([design-system.md](design-system.md#the-holders-driver-control-facet)).
+Its units map the manifest's unit `net` to `{erx_net_interfaces,
+vtnet0}`, the link of the interface `erx_virtio_net` makes of the
+domain's network device. The link is a permanent child with a stable
+id, so a stop leaves its place and a start builds the driver, the
+interface and the DHCP client again in order; neither touches a grant
+or the domain. The driver is not the controlled object: it is a
+temporary child of the link, which a stop would remove for good.
 
 Connections, listeners and datagram sockets are never restarted, since a
 restarted TCP connection would be a different connection: each is a
@@ -2659,11 +2686,17 @@ The runtime's seam is the behaviour `erx_net_runtime`:
 -callback start_grant(Grantee :: local | {pos_integer(), port(), module()},
                       Limits :: map()) ->
     {ok, pid()} | {error, Reason :: term()}.
+-callback children() -> [{Id :: atom(), Start :: {module(), atom(), [term()]}}].
+    % the runtime's own children of erx_net_sup, each made a permanent
+    % worker and started after its tables,
+    % grants and interfaces: the grant local, and on erXos the mints
+    % of net and network_ctl
 ```
 
 A grant and every socket call `serve/1` as they start; the
 `erx_net:mint_grant/4` of [The grant's contract](#the-grants-contract)
-calls `start_grant/2`. The client side, `erx_net_client`, finds its
+calls `start_grant/2`; `erx_net_sup` starts the runtime's `children/0`
+last ([The process tree](#the-process-tree)). The client side, `erx_net_client`, finds its
 grant through its own `grant` key, a `{Module, Function, Args}` called
 once per socket opened, which answers `{ok, Grant, Origin}` or
 `{error, Reason}`. `Origin` is how messages from the grant's domain

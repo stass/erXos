@@ -46,9 +46,11 @@ module ErxNetEunit
 
   # Requires every EUnit case of modules, each test/erlang/MODULE.erl, to pass.
   # extra: further test/erlang module names to compile, such as an oracle.
+  # sources: further erXos sources to compile with the stack, paths from the root,
+  # such as erx_driver_ctl, whose facet acts on the stack's tree.
   # tap: true builds the tap transport's NIF library into erx_net's priv/.
-  def assert_erx_net_eunit(*modules, extra: [], pkt: false, tap: false)
-    output, status = run_erx_net_eunit(modules, extra: extra, pkt: pkt, tap: tap, fault: {}, c_fault: {})
+  def assert_erx_net_eunit(*modules, extra: [], sources: [], pkt: false, tap: false)
+    output, status = run_erx_net_eunit(modules, extra: extra, sources: sources, pkt: pkt, tap: tap, fault: {}, c_fault: {})
     assert status.success?, output
     # EUnit words a run of exactly two tests "2 tests passed.", without "All".
     assert_match(/All \d+ tests passed|^\s*2 tests passed|Test passed/, output)
@@ -58,8 +60,8 @@ module ErxNetEunit
   # fault is compiled with its seeded fault, given as [exact text, faulty text],
   # and each c_src/ file named in c_fault built with its own, and returns EUnit's
   # output for the caller to check which case failed.
-  def refute_erx_net_eunit(*modules, fault: {}, c_fault: {}, extra: [], tap: false)
-    output, status = run_erx_net_eunit(modules, extra: extra, pkt: false, tap: tap, fault: fault, c_fault: c_fault)
+  def refute_erx_net_eunit(*modules, fault: {}, c_fault: {}, extra: [], sources: [], tap: false)
+    output, status = run_erx_net_eunit(modules, extra: extra, sources: sources, pkt: false, tap: tap, fault: fault, c_fault: c_fault)
     seeds = [*fault.keys, *c_fault.keys].join(', ')
     refute status.success?, "the seeded fault #{seeds} passed:\n#{output}"
     if output.match?(/\*timed out\*|were cancelled/) && !output.match?(/Failed: [1-9]/)
@@ -72,7 +74,7 @@ module ErxNetEunit
 
   private
 
-  def run_erx_net_eunit(modules, extra:, pkt:, tap:, fault:, c_fault:)
+  def run_erx_net_eunit(modules, extra:, pkt:, tap:, fault:, c_fault:, sources: [])
     Dir.mktmpdir('erx-net-eunit') do |work|
       ebin = Erx::ErxNetHost.lay_out(work, erl: ENV.fetch('ERX_ERL'), tap: tap, c_src: faulty_c_src(work, c_fault))
       includes = ['-I', Erx::Generated.path('erlang/apps/erx/include', root: ROOT), '-I', INCLUDE]
@@ -81,13 +83,14 @@ module ErxNetEunit
         includes += ['-I', File.join(tree, 'include')]
         erlc(ebin, Dir[File.join(tree, 'src', '*.erl')].sort, includes: includes)
       end
-      application = [APPLICATION, PORTABLE, CLIENT, CLIENT_ERXOS].flat_map { |dir| Dir[File.join(dir, '**', '*.erl')].sort }
-                                           .map { |source| faulty_copy(work, source, fault) }
-      sources = [*application, *(extra + modules).map { |name| File.join(TESTS, "#{name}.erl") }]
-      erlc(ebin, sources, includes: includes, flags: Erx::ErlangApps::FLAGS)
+      stack = [APPLICATION, PORTABLE, CLIENT, CLIENT_ERXOS].flat_map { |dir| Dir[File.join(dir, '**', '*.erl')].sort }
+      application = [*stack, *sources.map { |path| File.join(ROOT, path) }]
+                    .map { |source| faulty_copy(work, source, fault) }
+      compiled = [*application, *(extra + modules).map { |name| File.join(TESTS, "#{name}.erl") }]
+      erlc(ebin, compiled, includes: includes, flags: Erx::ErlangApps::FLAGS)
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE.to_s, ENV.fetch('ERX_ERL'), '-noshell', '-pa', ebin,
-                      '-eval', eunit_call(modules, preload: preloaded(sources, tap)), chdir: work, stdin_data: '')
+                      '-eval', eunit_call(modules, preload: preloaded(compiled, tap)), chdir: work, stdin_data: '')
     end
   end
 

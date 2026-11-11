@@ -7,19 +7,33 @@ The stack's supervisors (docs/design-network-stack.md, "The process tree"), one 
 its three levels:
 
 ```text
-erx_net_sup  (rest_for_one)
+erx_net_sup  (one_for_one, intensity 0)
  |- erx_net_tables
- |- interfaces  (one_for_one)
- |   |- link supervisor per interface  (rest_for_one)
+ |- erx_net_grants  (simple_one_for_one): the minted grants, temporary
+ |- erx_net_interfaces  (one_for_one)
+ |   |- link supervisor per interface, its id the interface's name  (rest_for_one)
  |       |- erx_net_driver over its transport
  |       |- erx_net_if
  |       |- erx_dhcp4, when the interface is configured for DHCP
- |- erx_net_grant, the node's grant `local`, started through the runtime
+ |- the runtime's children (erx_net_runtime:children/0): the node's grant `local`, and
+    on erXos the mints of `net` and `network_ctl`
 ```
 
-`erx_net_tables` comes first, so that its crash restarts everything that wrote into its
-tables. The grant comes last, so its restart, which ends the connections linked to it,
-leaves the interfaces running.
+Every child of `erx_net_sup` is permanent and none is restarted: the end of any of them,
+the interfaces supervisor giving up included, ends the stack and every grant with it.
+Where the application is permanent, as in the network domain, the domain ends with it,
+and the domain service's restart grants every client anew; where it is temporary, as in
+the system domain, the node runs on without a stack. A restart at the top
+would leave the minted grants dead, since they are temporary and not made again, and a
+restarted mint would name itself after the domain's ready report, which no report
+carries. The supervisors
+are registered, `erx_net_grants` for erx_net:mint_grant/4 and `erx_net_interfaces` for the
+driver-control facet, whose units name a link by its interface (erx_net_erxos).
+
+Ordinary failures stay below the top. A link supervisor is a permanent child of
+`erx_net_interfaces` under its interface's name, so a link restarts there, and a stop
+through the driver-control facet (supervisor:terminate_child/2) keeps its place for the
+start that builds it again (supervisor:restart_child/2).
 
 A link is started by `start_link_sup/1` alone, at the stack's start and at every restart:
 its driver first, then, once the driver runs, its interface and DHCP client. A driver whose
@@ -35,8 +49,9 @@ A driver lives a second at the least (erx_net_driver, "The hold"), so a link who
 fails at every start restarts once a second, and the interfaces supervisor's intensity is
 what its links can reach that way, `erx_net_driver:starts_within/1` for each over its
 period: a dead device or far end never makes it give up. What ends a link faster adds to
-the count and can reach the stack's supervisor: a transport whose `init` fails at a
-restart, or an interface or DHCP client crashing past the link's own intensity.
+the count, and once the interfaces supervisor gives up, the stack ends: a transport whose
+`init` fails at a restart, or an interface or DHCP client crashing past the link's own
+intensity.
 
 Listeners, datagram sockets under a grant and the port mapper join the tree as they are
 written.
@@ -83,18 +98,20 @@ runtime() ->
 -doc false.
 init({stack, Interfaces}) ->
     Children = [#{id => erx_net_tables, start => {erx_net_tables, start_link, []}},
-                #{id => interfaces, type => supervisor,
-                  start => {supervisor, start_link, [?MODULE, {interfaces, Interfaces}]}},
-                #{id => grant, start => {runtime(), start_grant, [local, #{}]}},
-                #{id => grants, type => supervisor,
+                #{id => erx_net_grants, type => supervisor,
                   start => {supervisor, start_link, [{local, erx_net_grants}, ?MODULE, grants]}},
-                #{id => mint, start => {runtime(), start_mint, []}}],
-    {ok, {#{strategy => rest_for_one}, Children}};
+                #{id => erx_net_interfaces, type => supervisor,
+                  start => {supervisor, start_link, [{local, erx_net_interfaces}, ?MODULE,
+                                                     {interfaces, Interfaces}]}}
+                | [#{id => Id, start => Start, restart => permanent}
+                   || {Id, Start} <- (runtime()):children()]],
+    {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, Children}};
 init(grants) ->
     Grant = #{id => grant, start => {runtime(), start_grant, []}, restart => temporary},
     {ok, {#{strategy => simple_one_for_one}, [Grant]}};
 init({interfaces, Interfaces}) ->
-    Children = [#{id => Name, type => supervisor, start => {?MODULE, start_link_sup, [If]}}
+    Children = [#{id => Name, type => supervisor, start => {?MODULE, start_link_sup, [If]},
+                  restart => permanent}
                 || #{name := Name} = If <- Interfaces],
     Intensity = length(Interfaces) * erx_net_driver:starts_within(?LINKS_PERIOD_S),
     {ok, {#{strategy => one_for_one, intensity => Intensity, period => ?LINKS_PERIOD_S},

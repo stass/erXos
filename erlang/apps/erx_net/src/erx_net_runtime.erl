@@ -8,8 +8,8 @@ process asks of the runtime it runs on. `erx_net_erxos` implements it in a netwo
 `erx_net_local` (in `portable/`) outside erXos; the stack's `runtime` key chooses one.
 
 A grant and every socket call `serve/1` as they start; minting a grant calls
-`start_grant/2`; the stack's supervisor starts the network service's mint with
-`start_mint/0`.
+`start_grant/2`; the stack's supervisor starts the runtime's own children, which
+`children/0` names, after its tables, grants and interfaces.
 """.
 
 -doc """
@@ -23,8 +23,10 @@ origin, at most `MaxRequest` at once.
     {ok, pid()} | {error, Reason :: term()}.
 
 -doc """
-Starts the network service's mint, linked to the caller, the process that takes the
-system domain's requests for a client's grant and starts each with erx_net:mint_grant/4;
-`ignore` where no domain service sends any.
+The runtime's own children of the stack's supervisor, each an id and the function that
+starts it linked to the caller, started in the order given after the tables, grants and
+interfaces: the node's grant `local`, and where a domain service asks the stack for
+grants, the mints of the services it provides. erx_net_sup makes each a permanent worker
+under a supervisor that restarts no child, so the end of any of them ends the stack.
 """.
--callback start_mint() -> {ok, pid()} | ignore.
+-callback children() -> [{Id :: atom(), Start :: {module(), atom(), [term()]}}].

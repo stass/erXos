@@ -16,8 +16,8 @@ runs each grant under its ERTS's request limit and `erx_facet`.
 
 -behaviour(erx_net_runtime).
 
--export([serve/1, start_grant/2, start_mint/0, mint_counts/0]).
--export([mint_init/1]).
+-export([serve/1, start_grant/2, children/0, mint_counts/0]).
+-export([start_mint/0, mint_init/1]).
 
 -doc "Nothing to do: every request comes from the system domain's own processes.".
 -spec serve(pos_integer()) -> ok.
@@ -33,6 +33,27 @@ linked to the caller (erx_net_sup or its grant supervisor).
           {ok, pid()} | {error, term()}.
 start_grant(Grantee, Limits) ->
     erx_net_grant:start_link(Grantee, Limits).
+
+-doc """
+The mints of the two services the stack provides, then the node's grant `local`, which the
+system domain's own processes use while the stack runs there:
+
+* `net`, the network service's mint (start_mint/0);
+* `network_ctl`, the driver-control facet's mint (erx_driver_ctl), through which the
+  system domain stops, starts or restarts the link of the network device it granted the
+  domain. Its units map the manifest's unit `net` to that link: the link supervisor of
+  `vtnet0`, the interface erx_virtio_net makes of the domain's first network device, a
+  permanent child of `erx_net_interfaces` under its interface name. A stop leaves the
+  link stopped; a start builds its driver, interface and DHCP client again; neither
+  touches a grant. The driver, a temporary child of the link, is not the controlled
+  object: a stop would remove it for good.
+""".
+-spec children() -> [{atom(), {module(), atom(), [term()]}}].
+children() ->
+    Units = #{net => {erx_net_interfaces, vtnet0}},
+    [{net, {?MODULE, start_mint, []}},
+     {network_ctl, {erx_driver_ctl, start_mint, [network_ctl, Units]}},
+     {erx_net_grant, {?MODULE, start_grant, [local, #{}]}}].
 
 -doc """
 Starts the network service's mint (docs/design-system.md, "Facets a configured domain

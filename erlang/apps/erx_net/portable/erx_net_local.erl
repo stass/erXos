@@ -11,7 +11,7 @@ limit, and doing nothing is correct, not merely harmless.
 
 -behaviour(erx_net_runtime).
 
--export([serve/1, start_grant/2, start_mint/0]).
+-export([serve/1, start_grant/2, children/0]).
 
 -doc "Nothing to do: every request comes from the node's own processes.".
 -spec serve(pos_integer()) -> ok.
@@ -28,7 +28,10 @@ start_grant(local, Limits) ->
 start_grant(_Grantee, _Limits) ->
     {error, enotsup}.
 
--doc "No mint: outside erXos no domain service asks for a grant.".
--spec start_mint() -> ignore.
-start_mint() ->
-    ignore.
+-doc """
+The node's grant, `local`, alone: outside erXos no domain service asks for a grant, so
+there is no mint.
+""".
+-spec children() -> [{atom(), {module(), atom(), [term()]}}].
+children() ->
+    [{erx_net_grant, {?MODULE, start_grant, [local, #{}]}}].

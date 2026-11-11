@@ -24,7 +24,7 @@
                erx_tcp_sack, erx_tcp_sendlog, erx_tcp_seq, erx_tcp_sndbuf, erx_tcp_syncache,
                erx_tcp_timer, erx_tcp_timewait, erx_tcp_user, erx_tcp_wire, erx_udp,
                erx_udp_sock, erx_udp_wire]},
-  {registered, []},
+  {registered, [erx_net_tables, erx_net_grants, erx_net_interfaces, erx_net_grant, erx_net_mint]},
   {applications, [kernel, stdlib, erx]},
   {mod, {erx_net_app, []}},
   {env, []}]}.

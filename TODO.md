@@ -2131,11 +2131,13 @@ it; git history is the record of completed work.
   `stop` held while `/data` is mounted still fails it. Decide whether the holder's
   units name what depends on each driver, so the facet refuses a stop while it is
   mounted, or remounts after the start; the block_device cell checks only a raw read.
-* [Low] storage, `erx_storage_sup`: the driver-control facet's units table,
-  `#{block => {erx_blk_sup, erx_blk}}`, repeats the manifest's unit name by hand, and
-  nothing checks it against the units the domain holds; a renamed unit is refused as
-  `badarg` while the stale name works. Derive it from the domain's installed units, or
-  check each key at start, before P10a repeats it for `network_ctl`.
+* [Low] storage and network, `erx_storage_sup` and `erx_net_erxos:children/0`: the
+  driver-control facets' units tables, `#{block => {erx_blk_sup, erx_blk}}` and
+  `#{net => {erx_net_interfaces, vtnet0}}`, repeat the manifest's unit names by hand, and
+  nothing checks them against the units the domain holds; a renamed unit is refused as
+  `badarg` while the stale name works, and the network's names `vtnet0` though the
+  device's interface name comes from erx_virtio_net's order. Derive each from the
+  domain's installed units, or check each key at start.
 * [Medium] storage, `erx_lfs`: any process of the system domain can send the owner
   `{erx_lfs_block, ...}` or `{erx_lfs, Worker, done, _}`. A forged block message fails the
   volume or, with a request of a volume of its own, writes any sector of the data window;
@@ -4477,8 +4479,9 @@ to the corpus and follow rc
   system domain until 1b-E moves the stack and its driver into the network domain. Every packet
   parser of `erx_net` runs in the trusted base, beside the system domain's unconfined device
   memory, so a bug a packet reaches is a bug of the system domain's. `erx_net` starts as a
-  `temporary` application (`ReleaseFiles::TEMPORARY`), so a crash loop in it ends the stack and
-  not the system domain; a memory-safety bug in a NIF it calls is not contained, the merge's C
+  `temporary` application (`ReleaseFiles::TEMPORARY`), and `erx_net_sup` restarts none of its
+  children, so the end of any of them (the interfaces supervisor giving up after a burst of link
+  crashes included) ends the stack until the next boot, and not the system domain; a memory-safety bug in a NIF it calls is not contained, the merge's C
   over frames a device wrote among them (`erx_bytes:tcp_merge/1`,
   [design-network-fastpath.md](docs/design-network-fastpath.md#what-the-stack-believes)).
   Closed by 1b-E.
@@ -4491,17 +4494,6 @@ to the corpus and follow rc
   built, so one domain can hold every ephemeral port, or every ICMP echo identifier by repeated
   `icmp_open`. Refuse a specific bind over another grant's wildcard one, as FreeBSD does across
   users, and cap each grant's sockets with the grant's limits.
-* [Medium] network, supervision (`erlang/apps/erx_net/src/erx_net_sup.erl`): under `rest_for_one`,
-  the minted grants (`erx_net_grants`) and the mint come after `erx_net_tables`, the interfaces and
-  the local grant, so a restart of any of those ends every client domain's grant. Minted grants are
-  `temporary` and are not made again, and `erx_facet:provide/2` refuses the restarted mint, which
-  comes after the ready report, so the network domain mints nothing more until it restarts, when
-  the domain service makes every grant anew: one crash of the local grant would cut every client
-  off the network until then. Latent while the stack runs in the system domain, which mints for no
-  domain. End the network domain with its mint and grants (the application permanent, as 1b-E
-  plans), put the local grant after the mint, and settle in design-network-stack what a tables
-  restart means for minted grants, which subscribe to the tables in `init`: end the network domain,
-  or re-subscribe them.
 * [Medium] tests, the system_domain suite's 4-CPU cell under TCG on the second host
   (`tools/lib/erx/system_domain.rb`): under that host's load (load average about 25) the
   service-kill boot failed at `echo-facet` with the system's Erlang shell ended at 31 s: `group` called

@@ -311,7 +311,7 @@ nothing_to_drive_is_no_interface_test() ->
     Link = #{name => en0, ip4 => dhcp, transport => {?MODULE, #{nothing_to_drive => true}}},
     {ok, Stack} = erx_net_sup:start_link(#{interfaces => [Link]}),
     unlink(Stack),
-    [Interfaces] = [Pid || {interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
+    [Interfaces] = [Pid || {erx_net_interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
     ?assertMatch([{en0, undefined, supervisor, _}], supervisor:which_children(Interfaces)),
     ?assertEqual(none, erx_net_tables:driver(en0)),
     ok = proc_lib:stop(Stack, shutdown, infinity).
@@ -328,7 +328,7 @@ nothing_at_restart_is_no_interface_test() ->
     {ok, Stack} = erx_net_sup:start_link(#{interfaces => [#{name => en0, ip4 => dhcp,
                                                             transport => Transport}]}),
     unlink(Stack),
-    [Interfaces] = [Pid || {interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
+    [Interfaces] = [Pid || {erx_net_interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
     [{en0, Link, supervisor, _}] = supervisor:which_children(Interfaces),
     [Driver] = [Pid || {driver, Pid, worker, _} <- supervisor:which_children(Link)],
     exit(Driver, kill),
@@ -621,7 +621,7 @@ static_pipe() ->
       transport => {erx_net_pipe, #{far => {process, ?FAR}, lladdr => ?MAC}}}.
 
 interfaces(Stack) ->
-    [Interfaces] = [Pid || {interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
+    [Interfaces] = [Pid || {erx_net_interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
     Interfaces.
 
 %% Polls the driver registered for en0 until a third distinct one is seen, and answers
