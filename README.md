@@ -266,16 +266,20 @@ Error in process <0.150.0> with exit value:
   MBR with extended boot records as windows. It runs in the storage
   domain, a BeamAsm service domain that holds the block device, which the
   development manifest configures and the domain service starts at boot.
-  littlefs serves `/data` there; a file synced there survives a power
-  cut, and a littlefs failure ends the domain, whose restart mounts
-  `/data` afresh, both checked under HVF. Root's session writes `/data`
-  and the system shell reads it, through the storage domain's `data`
-  facet, and both reach it again once the storage domain has restarted,
-  checked under HVF. The system shell restarts the
+  littlefs serves `/data` there; a file synced there survives a kill of the
+  machine, and a littlefs failure ends the domain, whose restart mounts
+  `/data` afresh, both checked under HVF. A power cut on a real disk also
+  needs the device to flush its write cache, which is not built yet
+  ([TODO.md](TODO.md)). The system shell and root's session
+  both read and write `/data` through the storage domain's `data` facet,
+  and both reach it again once the storage domain has restarted. Under HVF,
+  root's session writes a file, the system shell reads it, and the file is
+  read again after the storage domain restarts. The system shell restarts the
   block driver through the storage domain's driver-control facet, at
   `erl`: `erx_driver_ctl:restart(erx:cap(storage_ctl), block)`, or by
   writing `reset` to the block device's `/dev/N-virtio,mmio/ctl`, beside
-  its `status`. An EROFS
+  its `status`: in the system shell, `/dev` lists the block device, shows
+  its status and takes the control words `stop`, `start` and `reset`. An EROFS
   reader in Erlang (`erx_erofs`), behind its funnel `erx_verity`, mounts
   images in the namespace. CRC-32C is the first per-byte primitive.
   `ruby tools/erx pack --medium` writes a QEMU disk image; the QEMU
@@ -305,7 +309,9 @@ Error in process <0.150.0> with exit value:
   programs is not on master yet.
 * **The machine is an object** (M4). A host link over the second serial
   line lets `tools/erx load` and `watch` replace modules in the running
-  system, and `tools/erx files` read the guest's files over 9P2000.L. At
+  system, and `tools/erx files` read the guest's files over 9P2000.L; `tools/erx boot
+  --hostlink` boots the guest with that link on a UNIX socket and a fresh
+  copy of the release disk, so `/data` starts empty. At
   the Erlang shell, `erx:i()` shows processes and kernel objects, `source(Pid)` shows the source line a process is at, and
   `erx:trace/1` streams trace events; `/proc` serves the same records as
   read-only files. Values the stopgap kernel cannot measure show as
@@ -369,7 +375,8 @@ Error in process <0.150.0> with exit value:
   runs in a network domain of its own over its virtio-net driver, takes a
   DHCP lease and answers ARP and ping; root's session reaches it through
   its `net` grant, and the system domain holds neither the network device
-  nor the stack. The session's `ifconfig` and
+  nor the stack, so the system shell refuses `ifconfig`, `ping` and `host`
+  and they work in root's session. There `ifconfig` and
   `ping` show its interface and ping slirp's gateway in FreeBSD's layout,
   and names resolve: the lease's name servers and domain reach `inet_db`
   through the grant, `gen_udp` and `gen_tcp` go through the grant by
@@ -397,7 +404,7 @@ Error in process <0.150.0> with exit value:
   its heading and the machine does not serve it. Once it does,
   `tools/erx boot --hostlink` is the boot to open it from.
 * **Designed but not built yet:** the rest of erXos's own kernel, the
-  rest of the command shell, the network domain, the display on a
+  rest of the command shell, the display on a
   screen, the browser client, and the POSIX-lite layer. Each has a design document in
   [docs/](docs/).
 

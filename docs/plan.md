@@ -130,7 +130,7 @@ names; the table's order is the order.
 | 1b-B Track S, programs | `find /tmp/logs -type f \| xargs tail -n 1` through toybox's applets as ports of the session, and `within` confining a program to one grant, on the stopgap | in track S's figure | 1b-A | |
 | 1b-C Track D, parts 1 to 3 | `tools/erx web` shows a QEMU guest's records, kernel log and traces in a browser over the host link, with no network or display device; one application's user interface in the browser, and the same interface on a QEMU `virt` kiosk drawn by LVGL, with no login | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice; part 3 also 1b-E and 1b-B's sub-space ports | GW |
 | 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B's session domain, sub-space ports and pipes, not toybox's applets | GP, provisionally; the G6 baseline |
-| 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; the kill ends the storage domain, whose restart resets the device and mounts `/data` again with every synced file present ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)); drivers run in the storage, network and display domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A; littlefs's sub-space port also 1b-B | G9's measurements, deciding nothing |
+| 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; the kill ends the storage domain, whose restart resets the device and mounts `/data` again with every synced file present ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)); drivers run in the storage, network and display domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A | G9's measurements, deciding nothing |
 | 1b-F Track D, parts 5 to 7 | a QEMU `virt` desktop whose terminal windows run the shell, the same user interface term as on the web, and acme and sam editing a file | estimated per part before it starts | 1b-E and 1b-C; part 7 also 1b-D | |
 | 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | Phase 1: the network driver and stack run in the system domain, as M6's block driver does, until 1b-E moves them into the network domain | GN-QEMU's baseline, deciding nothing |
 | M14 erXos's network stack, on QEMU | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang from FreeBSD's, on QEMU in 1b-G; the boards follow with M12 | estimated in its design document | 1b-G's prototype | G14 |
@@ -1001,8 +1001,10 @@ pauses.
 domain with its authority, as the system shell does; the session domain,
 programs and executables from EROFS through sealed file objects follow
 1b-A, on the stopgap, as 1b-B, whose first slice is the session domain;
-the sub-space port of littlefs follows in 1b-E, where the storage domain
-first holds the block device; the job control of programs follows
+littlefs runs as a NIF in the storage domain that 1b-E configures, and its
+sub-space port follows once this track's port driver exists, and a crash injected
+into littlefs mid-write then ends only that port, whose owner restarts it and
+remounts, with no acknowledged write lost; the job control of programs follows
 M7, on erXos's kernel. On the stopgap a program's budget and group are
 unenforced records, its doorbells are IRQ objects whose deliveries reach
 the dispatcher of the task that consumes them, the program's for its own,
@@ -1543,8 +1545,8 @@ the guest's power cut and the next boot.
   process serves its block requests through the block driver, with a fuzz
   target for its images, on the data partition
   ([design-storage.md](design-storage.md#read-write-storage)); its
-  sub-space port form lands in 1b-E, with the storage domain, behind the
-  same callback module.
+  sub-space port form lands once track S's port driver (1b-B) exists, in the
+  storage domain, behind the same callback module.
 * **Booting from the disk image.** The QEMU harness's normal boot, without
   trials: it plays the firmware, reads the record from the disk image with
   its slot parser, which has its fuzz target, boots the slot the record
@@ -1805,11 +1807,10 @@ resets its device and restarts the driver; the shell never notices. The
 inspector shows every driver as a process with its device's registers by
 name. On the stopgap the drivers run over virtio-mmio, unconfined, a killed
 block driver ends the storage domain, whose restart recovers it, and the
-ping joins the demo once 1b-G's network service answers it.
+ping runs from root's session through the network domain's `net` grant.
 
 **Scope, on the stopgap (1b-E).** The storage domain, which holds the
-block driver and the file systems from here, with littlefs as its
-sub-space port over track S's port driver (1b-B)
+block driver and the file systems from here, with littlefs as a NIF
 ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)),
 and the part of the device service that gives it its device; the device service in full, with the
 system manifest's placement of devices and its `/dev` tree
@@ -1877,9 +1878,9 @@ placement and `/dev`, the supervisors and the tests. The PCIe enumerator
 and the MSI frame's driver are the kernel part's.
 
 **Exit criteria, on the stopgap (1b-E).** A storage domain killed under
-load restarts with no acknowledged write lost; a crash injected into
-littlefs mid-write ends its sub-space port, whose owner restarts it and
-remounts, with no acknowledged write lost; driver restarts under load
+load restarts with no acknowledged write lost; a littlefs failure ends the
+storage domain, which restarts and remounts with no acknowledged write lost,
+driver restarts under load
 lose no acknowledged data, and a device reset after a driver's crash
 returns every posted buffer to its pool; the drivers' descriptor parsers,
 the GPU's responses and the input events among them, survive their fuzz
@@ -2522,7 +2523,7 @@ interpreter, within a frame's cost across a connection).
 | The Phase 1 manifest check and root startup rule | the packer's `Admitted` value and the manifest's properties | track K (`erx_root_plan`); M5, M9 and M11 (the properties, as [design-stopgap.md](design-stopgap.md#the-phase-1-manifest-check) lists them) |
 | Virtio-mmio devices with ordinary interrupts and unconfined DMA, driven by the same Erlang drivers | DMA profiles; IRQ objects; the device NIF | M9's kernel part (virtio-pci with MSIs and the IOMMU), M11 (refused unless configured) |
 | A host link holding every facet but the system-shell facet | session facet tables | M10, M11 |
-| littlefs, the read-write file system of the data partition and the vault's partition, a NIF of the system domain in Phase 1 and a sub-space port of its storage domain from 1b-E | `erx_fs`, the storage service's file interface, and the port's channel | M13, by erXos's F2FS, in Erlang, at G13, decided on QEMU in 1b-H, through an installation that creates both partitions afresh, which comes to the boards with M12 |
+| littlefs, the read-write file system of the data partition and the vault's partition, a NIF in the system domain at M6, in the storage domain from 1b-E, and a sub-space port of the storage domain once track S's port driver exists | `erx_fs`, the storage service's file interface, and the port's channel | M13, by erXos's F2FS, in Erlang, at G13, decided on QEMU in 1b-H, through an installation that creates both partitions afresh, which comes to the boards with M12 |
 | LVGL, the widget renderer on panels, a native program in a sub-space of the display domain | the renderer behaviour `erx_ui_renderer` and the generated reader of `ui.txt`'s operations | by the Erlang renderer, when GD admits it; GD is first measured on track D's part 4 panel |
 
 The stopgap carries the rows of the backend's table in

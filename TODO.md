@@ -2196,7 +2196,8 @@ it; git history is the record of completed work.
 * [Medium] storage, block service: a window has no `flush` (design-storage.md, Interfaces),
   so `erx_lfs` answers littlefs's sync at once. A write is answered once the device has
   completed it, which holds across a QEMU kill but not across a power cut on a medium with a
-  write cache.
+  write cache. `erx_blk_window` answers no `flush` and the driver negotiates no
+  `VIRTIO_BLK_F_FLUSH`, so a file system cannot order its writes against the medium's cache.
 * [Low] storage, `erx_littlefs_nif.c`: `deadline_after` ignores `clock_gettime`'s result, and
   the hosted build's `CLOCK_REALTIME` is the wall clock, so a clock step fails a block wait
   or stretches it. Waiting with `erx_umtx_wait` against an `erx_clock_ns` deadline fixes both
@@ -4403,8 +4404,9 @@ to the corpus and follow rc
   littlefs's owner or worker, or break the volume, six times in ten minutes takes down
   every partition's driver, not only `/data`. The facet's design bounds what a client can make the grant do (its own lane),
   or littlefs moves into a sub-space port whose end the domain survives
-  (design-storage.md). A device that fails six times in ten minutes keeps the domain down
-  too, until littlefs moves into such a port and the block driver restarts in place again.
+  (design-storage.md), which waits for track S's port driver (1b-B), so no build
+  yet ends only a port on a littlefs crash. A device that fails six times in ten minutes
+  keeps the domain down too.
 * [Low] Domain service, a refused restart is not retried (`erx_domain_srv.erl`
   `start_configured/2`): a configured domain's restart that the library refuses, such as
   `no_memory` while more than one ended domain's outer budget still waits for its peer's
@@ -4546,9 +4548,13 @@ to the corpus and follow rc
   user-facing system on the stopgap rests on but does not get is a row of
   [What Phase 1 defers](docs/design-stopgap.md#what-phase-1-defers),
   with the milestone that closes it; that table is the one list. Those that
-  untrusted input reaches once 1b's code lands: unconfined DMA beside the
-  network domain's packet parsers and the display domain's draw clients
-  (M9's kernel part, M11); no wall around any domain, the browser-facing
+  untrusted input reaches: unconfined DMA (M9's kernel part, M11), where a
+  device can write any page, so every driver domain (storage, network,
+  display) is in the trusted base, beside the network domain's packet parsers
+  and the display domain's draw clients, and no bounce buffer, software IOMMU
+  or address filter is built in user mode; the network domain's CPU grant and
+  per-interface ingress budget, which are records on the stopgap, so a flood
+  from the wire can take CPU from other domains (M5's kernel part, M8); no wall around any domain, the browser-facing
   web domain included (M5's kernel part); and nothing stopping a domain or
   program that bypasses `liberx` (M5's kernel part, M7). Development
   builds run trusted code only until M11.
@@ -5430,8 +5436,6 @@ document's "residual risks accepted" paragraph.
   their sectors, but nothing yet confines clients to them. The device service, which names each client's windows by
   role and hands their pids out as grants (PW1), replaces `erx_blk_service:window/1`, which hands any role's window to
   any caller, slot and record windows included.
-* [Medium] erx_blk_window: a window answers no `flush` (docs/design-storage.md, Interfaces); the driver negotiates no
-  `VIRTIO_BLK_F_FLUSH` and posts no flush request, so a file system cannot order its writes against the medium's cache.
 * [Medium] erx_blk_table, `tools/lib/erx/medium_image.rb`: the extended boot records' encoding (first entry relative
   to its own record, link entry relative to the extended partition and spanning the next record and its partition) is
   checked only by copies written from one reading of the format; list a `MediumImage` medium with an independent

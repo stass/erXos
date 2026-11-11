@@ -2518,15 +2518,19 @@ since a give windows one device and the library refuses a window over a
 page another entry's window meets, or when a device is marked confined,
 since the stopgap lists no IOMMU stream; the manifest check builds the same view, so such a
 manifest fails the build, and no domain is created from a placement the
-view did not admit. The development manifest still gives each device
-to its own domain once drivers move out of the system domain: the block
-device to the storage domain, which runs the block driver and the file
-systems, littlefs as its sub-space port; the network device to the network
-domain; virtio-gpu and virtio-input to the display domain. The Phase 1
-manifest check allows these unconfined devices in a development build, and
+view did not admit. The development manifest gives the block and network devices each
+a domain of its own: the block device to the storage domain, which
+runs the block driver and the file systems, littlefs as a NIF behind the
+`erx_fs` seam until the sub-space port replaces it; the network device to
+the network domain, which runs the network stack and its virtio-net
+driver. Of the devices, the system domain holds only the UARTs of the console and
+the host link. A manifest that configures a display domain gives it
+virtio-gpu and virtio-input; the development manifest configures none.
+The Phase 1 manifest check allows these unconfined devices in a development build, and
 property 9 refuses them in a release manifest as it does on erXos's kernel;
-the stopgap builds no release. Drivers die and restart under their
-supervisors as this section describes, but their DMA reaches all memory,
+the stopgap builds no release. In the storage domain a driver's end ends the domain, whose restart gives
+the device back; other drivers die and restart under their supervisors as
+this section describes. Every driver's DMA reaches all memory,
 so a driver, or a domain that parses hostile bytes beside one, can reach
 every domain through its device. DMA windows, MSIs and the lifetime of
 device buffers are erXos's kernel's
