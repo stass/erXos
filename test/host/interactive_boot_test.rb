@@ -14,12 +14,12 @@ require_relative '../../tools/lib/erx/interactive_boot'
 class InteractiveBootTest < Minitest::Test
   def test_no_arguments_ask_for_one_cpu_and_this_hosts_accelerator
     assert_equal Erx::InteractiveBoot::Request.new(accel: nil, cpus: 1, jobs: Erx::InteractiveBoot::DEFAULT_JOBS,
-                                                    hostlink: false),
+                                                    hostlink: false, without_web: false),
                  Erx::InteractiveBoot.request([])
   end
 
   def test_options_name_the_accelerator_cpus_and_jobs
-    assert_equal Erx::InteractiveBoot::Request.new(accel: 'tcg', cpus: 4, jobs: 2, hostlink: false),
+    assert_equal Erx::InteractiveBoot::Request.new(accel: 'tcg', cpus: 4, jobs: 2, hostlink: false, without_web: false),
                  Erx::InteractiveBoot.request(%w[--accel tcg --cpus 4 --jobs 2])
   end
 
@@ -68,6 +68,22 @@ class InteractiveBootTest < Minitest::Test
     refute Erx::InteractiveBoot.request([]).hostlink
     assert Erx::InteractiveBoot.request(%w[--hostlink]).hostlink
     assert_raises(OptionParser::ParseError) { Erx::InteractiveBoot.request(%w[--hostlink /tmp/socket]) }
+  end
+
+  # --without-web asks for the development manifest minus its web domain: no record
+  # of it and no reference to it remain, and the domain count shrinks by one. It
+  # cannot be combined with --hostlink, whose web view the web domain serves.
+  def test_without_web_asks_for_the_development_manifest_without_the_web_domain
+    root = File.expand_path('../..', __dir__)
+    refute Erx::InteractiveBoot.request([]).without_web
+    assert Erx::InteractiveBoot.request(%w[--without-web]).without_web
+    assert_raises(OptionParser::ParseError) { Erx::InteractiveBoot.request(%w[--without-web --hostlink]) }
+    with = Erx::InteractiveBoot.manifest_source(root: root, without_web: false)
+    without = Erx::InteractiveBoot.manifest_source(root: root, without_web: true)
+    assert_match(/^domain web$/, with)
+    refute_match(/^(?:share|runtime_limits|limits|domain|service|facet) web$|@(?:share|domain|service)\.web$/, without)
+    domains = ->(text) { Integer(text[/^  max_domains ([0-9]+)$/, 1], 10) }
+    assert_equal domains.(with) - 1, domains.(without)
   end
 
   # With a link, the second serial line listens on its socket without waiting

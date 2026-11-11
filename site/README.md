@@ -45,7 +45,13 @@ ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
   input cannot ship without its notice.
 * `--image` is the erXos boot image, by default
   `build/production-image/interactive/image.boot`. It is stored
-  gzip-compressed as `image-<digest>.boot.gz`.
+  gzip-compressed as `image-<digest>.boot.gz`. The page needs no web
+  domain, which only the host link serves, and the domain costs boot time,
+  so the site's image is built with
+  `tools/erx boot --without-web`, which builds it into that directory and
+  boots it once on the terminal (quit QEMU with Ctrl-A then X). A later
+  `tools/erx boot` without the option replaces it with the development
+  image, web domain included.
 * The machine's disk is made by the build, not taken: a boot medium laid
   out by `abi/medium.txt` with the data partition at its minimum length
   and every window blank but for the data partition, which holds a fresh
@@ -87,8 +93,8 @@ Runs share one `pages` concurrency group, so two deployments never
 overlap; a run waiting there is replaced by a newer dispatch.
 
 To publish: in the repository settings, set Pages to deploy from GitHub
-Actions; attach an interactive production `image.boot` to a release; then
-run the `site` workflow with that asset's URL and SHA-256:
+Actions; attach an `image.boot` built with `tools/erx boot --without-web`
+to a release; then run the `site` workflow with that asset's URL and SHA-256:
 
 ```
 gh workflow run site.yml -f image_url=URL -f image_sha256=DIGEST -f image_source=TAG

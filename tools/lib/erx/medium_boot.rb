@@ -58,7 +58,7 @@ module Erx
     # The domain's own budget and its outer one: what native_domain's ERTS domain runs in.
     DOMAIN_MEMORY = 160 << 20
     DOMAIN_OUTER = 1 << 20
-    # The development manifest's web domain, which a medium boot leaves out (without_web):
+    # The development manifest's web domain, which a medium boot and the website's image leave out (without_web):
     # its share, runtime limits, limits and domain records, its relay service and the
     # system domain's facet of it, and its limits' budget and outer one.
     WEB_ROWS = [/^share web\n(?:  .*\n)*/, /^runtime_limits web\n(?:  .*\n)*/, /^limits web\n(?:  .*\n)*/,

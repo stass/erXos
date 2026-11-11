@@ -7,6 +7,7 @@ require 'optparse'
 require 'shellwords'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'medium_boot'
 require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu'
@@ -38,7 +39,7 @@ module Erx
     HOSTLINK_DIRECTORY = 'build/production-image/hostlink'
 
     # What the person asked for. A nil accel asks for this host's best.
-    Request = Data.define(:accel, :cpus, :jobs, :hostlink)
+    Request = Data.define(:accel, :cpus, :jobs, :hostlink, :without_web)
     # The host link's socket and the medium the guest boots with, both absolute.
     Link = Data.define(:socket, :medium)
     # What a boot runs: the image's boot file, and its Link or nil.
@@ -50,14 +51,18 @@ module Erx
     # errors, which `tools/erx` reports as a usage error, before anything runs.
     def request(arguments)
       arguments = arguments.dup
-      options = { accel: nil, cpus: 1, jobs: DEFAULT_JOBS, hostlink: false }
+      options = { accel: nil, cpus: 1, jobs: DEFAULT_JOBS, hostlink: false, without_web: false }
       OptionParser.new do |flags|
         flags.on('--accel NAME', %w[tcg hvf], 'Guest accelerator') { |value| options[:accel] = value }
         flags.on('--cpus N', Integer, 'Guest CPUs') { |value| options[:cpus] = value }
         flags.on('--jobs N', Integer, 'Build jobs') { |value| options[:jobs] = value }
         flags.on('--hostlink', 'Host link socket and data medium') { options[:hostlink] = true }
+        flags.on('--without-web', 'Leave the web domain out of the image, as the website\'s image does') { options[:without_web] = true }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      if options.fetch(:hostlink) && options.fetch(:without_web)
+        raise OptionParser::InvalidArgument, '--without-web leaves out the web domain that --hostlink serves'
+      end
       unless QemuPlan::CPUS.cover?(options.fetch(:cpus))
         raise OptionParser::InvalidArgument, "--cpus must be between #{QemuPlan::CPUS.min} and #{QemuPlan::CPUS.max}"
       end
@@ -88,22 +93,31 @@ module Erx
 
     # Builds the kernel and the image into DIRECTORY under root, replacing the
     # image an earlier boot left there, and returns the path of its boot file.
-    def build_image(root:, runner:, jobs:) = build(root: root, runner: runner, jobs: jobs, hostlink: false).image
+    def build_image(root:, runner:, jobs:, **tools) = build(root: root, runner: runner, jobs: jobs, hostlink: false, **tools).image
+
+    # The system manifest the image is built from: the development manifest, without
+    # its web domain when without_web.
+    def manifest_source(root:, without_web:)
+      source = File.binread(File.join(root, ProductionImage::MANIFEST))
+      without_web ? MediumBoot.without_web(source) : source
+    end
 
     # Builds the kernel and the image into DIRECTORY under root, replacing the
     # image an earlier boot left there. With hostlink, the image's release
     # medium is written beside it, and HOSTLINK_DIRECTORY under root is first
     # emptied of any socket an earlier boot left, made owner-only, and its
     # socket path checked, so a path QEMU cannot take fails before the build.
-    def build(root:, runner:, jobs:, hostlink:, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+    # With without_web the image has no web domain (manifest_source).
+    def build(root:, runner:, jobs:, hostlink:, without_web: false, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
       socket = hostlink_socket(root) if hostlink
       fiasco = Fiasco.new(root: root, runner: runner, compiler: compiler)
       fiasco.build(jobs: jobs)
       directory = ProductionImage.clear_directory(root: root, path: File.join(root, DIRECTORY))
       image_builder = ProductionImage.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco)
-      return Boot.new(image: image_builder.build(directory: directory).single, link: nil) unless socket
+      source = manifest_source(root: root, without_web: without_web)
+      return Boot.new(image: image_builder.build(directory: directory, manifest_source: source).single, link: nil) unless socket
 
-      built, written = image_builder.build_medium(directory: directory)
+      built, written = image_builder.build_medium(directory: directory, manifest_source: source)
       Boot.new(image: built.single, link: Link.new(socket: socket, medium: written.path))
     end
 
