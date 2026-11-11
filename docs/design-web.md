@@ -712,7 +712,7 @@ on a file of another kind, a path with a segment that is empty, hidden,
   whose page shows the trace stopped (W6).
 * **Views**: the record view, a table of attributes with name, value,
   unit and reporter, values whose status is not `ok` as their tokens, and
-  children as links; the log and trace views, virtual lists of entries
+  children as links (the grid shows the first 100 with a control for the rest; the front panel lights every child); the log and trace views, virtual lists of entries
   with gaps shown; the home page; the trace page, whose start button opens
   the `trace` view; the login page. A record's page is an operator's
   console: the path as a trail of links, a status strip whose colour band

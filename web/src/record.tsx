@@ -23,7 +23,7 @@
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { type Reopenable, connect } from './connection.ts';
 import type { ByeReason, Name, WireRecord } from './generated/proto.ts';
-import { type Light, type Listing, type Panel, type Part, childrenListing, crumbs, frontPanel, recordRows } from './record.ts';
+import { type Light, type Listing, type Panel, type Part, CHILDREN_SHOWN, childrenListing, crumbs, frontPanel, recordRows, shownChildren } from './record.ts';
 import { Route, hrefOf } from './routes.ts';
 import { Text } from './text.tsx';
 
@@ -202,15 +202,26 @@ function Bank({ lights, label, mark, updates }: BankProps) {
   );
 }
 
-/* The children, one cell each, then the listing's token when it is not complete. */
+/*
+ * The children, one cell each, then the listing's token when it is not
+ * complete. A long listing shows its first CHILDREN_SHOWN cells and a button
+ * for the rest; the choice is kept across updates while the grid stays on the page.
+ */
 function Children({ listing }: { readonly listing: Listing }) {
+  const [all, setAll] = useState(false);
+  const { cells, hidden } = shownChildren(listing, { all });
   return (
     <section className="children">
       <h3>children</h3>
       <ul className="listing">
-        {listing.names.map((child, at) => <li key={at}>{parts(child)}</li>)}
+        {cells.map((child, at) => <li key={at}>{parts(child)}</li>)}
         {listing.mark !== undefined && <li>{parts([listing.mark])}</li>}
       </ul>
+      {hidden > 0 && (
+        <button type="button" className="show-all" onClick={() => setAll(true)}>
+          showing the first {CHILDREN_SHOWN}; show the other {hidden}
+        </button>
+      )}
     </section>
   );
 }

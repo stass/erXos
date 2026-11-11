@@ -57,6 +57,23 @@ export function childrenListing(path: Path, children: Children): Listing {
   }
 }
 
+/*
+ * How many children's cells the page shows before a control offers the rest.
+ * The front panel still has one light for each child, so its count and its
+ * blinks cover the whole listing; only the grid of links is cut short.
+ */
+export const CHILDREN_SHOWN = 100;
+
+/*
+ * The cells of the children's grid: the first CHILDREN_SHOWN names, or all of
+ * them when all is set or the listing is no longer than CHILDREN_SHOWN;
+ * hidden counts the names left out.
+ */
+export function shownChildren(listing: Listing, { all }: { readonly all: boolean }): { readonly cells: Listing['names']; readonly hidden: number } {
+  const cells = all ? listing.names : listing.names.slice(0, CHILDREN_SHOWN);
+  return { cells, hidden: listing.names.length - cells.length };
+}
+
 /* The children a listing names: none when the listing is unknown, whatever names it carries. */
 const listed = (children: Children): readonly Datum[] => (children.completeness === 'unknown' ? [] : children.names);
 

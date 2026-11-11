@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { type Attr, type Datum, type Status, type WireRecord, machineText } from '../src/generated/proto.ts';
-import { type Listing, type Part, childrenListing, crumbs, frontPanel, recordRows } from '../src/record.ts';
+import { CHILDREN_SHOWN, type Listing, type Part, childrenListing, crumbs, frontPanel, recordRows, shownChildren } from '../src/record.ts';
 import { hrefOf, parseRoute } from '../src/routes.ts';
 import { escapedText } from '../src/text.ts';
 
@@ -90,7 +90,7 @@ test('children show their names, one entry each, and their completeness', () => 
  * a page of 1,000 pids, each a link that parseRoute reads back as the path of
  * that process below the listing's.
  */
-test('a listing of 1,000 children shows 1,000 links, each read back to its path', () => {
+test('a listing of 1,000 children names 1,000 links, each read back to its path', () => {
   const pids = Array.from({ length: 1000 }, (_, at) => `12.${at + 100}.0`);
   const listing = childrenListing([{ tag: 'text', bytes: text('processes') }],
     { completeness: 'partial', names: pids.map((pid): Datum => ({ tag: 'text', bytes: text(pid) })) });
@@ -100,6 +100,33 @@ test('a listing of 1,000 children shows 1,000 links, each read back to its path'
     assert.deepEqual(parseRoute(hrefOf(link.route))?.value, { kind: 'proc', path: ['processes', pids[at]] });
     assert.equal(escapedText(link.text.runs()), pids[at]);
   });
+});
+
+test('a long listing shows its first cells and offers the rest', () => {
+  const names = Array.from({ length: 1000 }, (_, at): Datum => ({ tag: 'text', bytes: text(`12.${at + 100}.0`) }));
+  const listing = childrenListing([{ tag: 'text', bytes: text('processes') }], { completeness: 'partial', names });
+
+  const cut = shownChildren(listing, { all: false });
+  assert.deepEqual(cut.cells, listing.names.slice(0, CHILDREN_SHOWN));
+  assert.equal(cut.hidden, 1000 - CHILDREN_SHOWN);
+  assert.deepEqual(shownChildren(listing, { all: true }), { cells: listing.names, hidden: 0 });
+
+  /* A cell is still a link that parseRoute reads back to its child's path. */
+  const first = cut.cells[0]?.[0];
+  assert.equal(first?.kind, 'link');
+  if (first?.kind === 'link') assert.deepEqual(parseRoute(hrefOf(first.route))?.value, { kind: 'proc', path: ['processes', '12.100.0'] });
+});
+
+test('a listing one longer than the cut hides one child', () => {
+  const names = Array.from({ length: CHILDREN_SHOWN + 1 }, (_, at): Datum => ({ tag: 'text', bytes: text(`c${at}`) }));
+  const listing = childrenListing([], { completeness: 'complete', names });
+  assert.equal(shownChildren(listing, { all: false }).hidden, 1);
+});
+
+test('a listing no longer than the cut is shown whole', () => {
+  const names = Array.from({ length: CHILDREN_SHOWN }, (_, at): Datum => ({ tag: 'text', bytes: text(`c${at}`) }));
+  const listing = childrenListing([], { completeness: 'complete', names });
+  assert.deepEqual(shownChildren(listing, { all: false }), { cells: listing.names, hidden: 0 });
 });
 
 test('a child that makes no route, or below a path that is not names, is text alone', () => {
