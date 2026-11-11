@@ -90,6 +90,11 @@ module Erx
     KILL_SESSION = '[P] = [Pid || #{origin := {session, _}, pid := Pid} <- ' \
                    'erx_domain_core:domains(maps:get(core, sys:get_state(erx_domain_srv)))], ' \
                    "exit(P, kill).\r".freeze
+    # Typed at root_1's Erlang shell: starts programs the release does not hold, so each start
+    # makes the program's budget, group, IRQ object and spaces, refuses the image map or the
+    # pid, and undoes what it made (docs/design-runtime.md, "Programs as ports").
+    PROGRAM_REFUSED = '{erx_program:start(#{image => <<"bin/exit42">>, pid => 2}), ' \
+                      'erx_program:start(#{image => <<"bin/exit42">>, pid => 1})}.' "\r"
     # The file root's session writes and every later step reads, in Erlang and at the system
     # shell, and its one line, `across`, as file:read_file/1 answers it in the shell.
     WRITE_ACROSS = 'ok = file:write_file("/data/across", <<"across\n">>), file:read_file("/data/across")'
@@ -171,7 +176,9 @@ module Erx
        { name: 'session-ps', pattern: line('0'), seconds: 60, type: KERNEL_LOG }.freeze,
        { name: 'session-dmesg', pattern: KERNEL_LOG_LINE, seconds: 60, type: ERL }.freeze,
        shell.merge(name: 'root_1-erlang-shell', type: "node().\r").freeze,
-       { name: 'root_1-node', pattern: answer('root_1@erxos'), seconds: 60, type: with_data(WRITE_ACROSS) }.freeze,
+       { name: 'root_1-node', pattern: answer('root_1@erxos'), seconds: 60, type: PROGRAM_REFUSED }.freeze,
+       { name: 'program-refused', pattern: answer('{{error,einval},{error,erange}}'), seconds: 60,
+         type: with_data(WRITE_ACROSS) }.freeze,
        { name: 'session-data', pattern: answer(ACROSS_READ), seconds: 180, type: BURST }.freeze,
        { name: 'burst-first', pattern: line(burst_line(1).chomp("\r\n")), seconds: 60, type: CTRL_G }.freeze,
        { name: 'burst-menu', pattern: CTRL_G_MENU, seconds: 30, type: ESC }.freeze,

@@ -933,8 +933,8 @@ sub-space arrives there; a domain's own records go to the domain
 library's fault thread in the system domain
 ([design-kernel.md](design-kernel.md#creating-spaces),
 [design-system.md](design-system.md#ending-a-domain)). A port that
-creates spaces registers the label they carry, the program's process id,
-with its own IRQ object, which the port created with every right and
+creates spaces registers the labels they carry, one per space that the
+port allocates and never reuses, with its own IRQ object, which the port created with every right and
 bound into the group, before it creates the first of them, and ends the
 registration before it closes the object. For
 each record the worker finds the port that registered the record's
@@ -1539,9 +1539,11 @@ applied in this order, each step undoing the ones before it on failure:
    a child of the session's programs group with the limits the spec
    gives; create its **anchor**, a space with no thread whose parent is
    its starter's anchor, or the session's space for a program the shell
-   starts, with the session's fault gate and the program's process id as
-   label; and create its **image**, the space its threads run in, below
-   the anchor. So the kernel ends the program with its starter and its
+   starts, with the session's fault gate and a label of its own; and
+   create its **image**, the space its threads run in, below the anchor,
+   with another label. The port allocates each label and never reuses
+   it, so a record's label says which program's space, and which of its
+   two spaces, the record is about, whatever order the records come in. So the kernel ends the program with its starter and its
    session, ends the program's children with it, and keeps it within the
    session's budget and grant
    ([design-system.md](design-system.md#sub-spaces)). Before the anchor,
@@ -1684,7 +1686,7 @@ and the program's children are unchanged
 ([design-programs.md](design-programs.md#exec)).
 
 **Ending.** The gate worker deposits each exit or fault record of the
-program's spaces, which carry the program's process id as their label,
+program's spaces, each under the label the port gave that space,
 with the port, and triggers the port's object; the input task reads it.
 A fault record of one of the image's threads ends the program: the
 driver stops the anchor with `ERX_EXIT_SIGNAL` plus the signal the ABI

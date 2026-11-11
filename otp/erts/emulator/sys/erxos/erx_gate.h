@@ -5,8 +5,8 @@
  * The gate worker (docs/design-runtime.md, "The event table"): the one thread of the
  * domain that waits in IPC, on the domain's fault gate, which every space the runtime
  * creates names, so every exit and fault record of those spaces arrives there. A port that
- * creates spaces registers the label it gives them with its own IRQ object; the worker
- * keeps each record for that label in the port's slot and triggers the object, and the
+ * creates spaces registers the label it gives each of them with its own IRQ object; the
+ * worker keeps each record for a label in that label's slot and triggers the object, and the
  * port's input task takes the records. A record for a label no port registered is dropped.
  *
  * A port's order, so that no record of its spaces is dropped or triggers an object no one

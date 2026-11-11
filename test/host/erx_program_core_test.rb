@@ -29,16 +29,16 @@ class ErxProgramCoreTest < Minitest::Test
   # The driver prints erx_program_act_t's and erx_program_phase_t's names, so no numbering is copied here.
 
   # The start's steps in order: the session's budget and group records, then the port's IRQ
-  # object, sink, bind and gate registration before any space carries the label, then the
-  # spaces, the map and the thread.
-  STEPS = %i[budget_create group_create irq_create sink_register irq_bind gate_register
-             anchor_create image_create image_map thread_create thread_start].freeze
+  # object, sink, bind and both labels' gate registrations before any space carries a label,
+  # then the spaces, the map and the thread.
+  STEPS = %i[budget_create group_create irq_create sink_register irq_bind gate_register_anchor
+             gate_register_image anchor_create image_create image_map thread_create thread_start].freeze
   # What undoes each step that made something; a map dies with its space, and the start is last.
   UNDO = { budget_create: :budget_destroy, group_create: :group_close, irq_create: :irq_close,
-           sink_register: :sink_unregister, irq_bind: :irq_unbind, gate_register: :gate_unregister,
+           sink_register: :sink_unregister, irq_bind: :irq_unbind,
+           gate_register_anchor: :gate_unregister_anchor, gate_register_image: :gate_unregister_image,
            anchor_create: :anchor_destroy, image_create: :image_close, thread_create: :thread_close }.freeze
-  RELEASE = %i[thread_close image_close anchor_destroy gate_unregister irq_unbind sink_unregister
-               irq_close group_close budget_destroy].freeze
+  RELEASE = STEPS.reverse.filter_map { UNDO[_1] }.freeze
 
   # Each spec the driver names and the status constant erx_program_spec_check answers.
   SPECS = {
@@ -52,6 +52,10 @@ class ErxProgramCoreTest < Minitest::Test
     'cap-above-pool' => :elimit, 'cap-max' => :elimit
   }.freeze
 
+  # The end's state as the driver prints it: the phase, FAULTED's status, and three flags.
+  State = Data.define(:phase, :status, :anchor_ended, :answered, :close_held)
+  STARTED = State.new(phase: :running, status: 0, anchor_ended: false, answered: false, close_held: false)
+
   # The model of the end, given the driver's constants (k) and the fault table (signals).
   class EndModel
     def initialize(constants, signals)
@@ -59,28 +63,39 @@ class ErxProgramCoreTest < Minitest::Test
       @signals = signals
     end
 
-    def call(phase, status, input)
-      return [:released, 0, []] if phase == :released
+    def call(state, input)
+      return [state.with(answered: true, close_held: false), state.close_held ? [[:close_port, 0]] : []] if input == [:answered]
+      return [input == [:close] ? state.with(close_held: false) : state, []] if state.phase == :released
 
-      case [phase, *input]
-      in [:running, :exit, n] then [:ended, 0, [[:report, n], [:stop_anchor, anchor_status(n)]]]
-      in [:running, :fault, kind] then [:faulted, fault_status(kind), [[:stop_anchor, fault_status(kind)]]]
+      case [state.phase, *input]
+      in [:ended, :image_exit, _] then [state, []]
       # The fault's status only for an image its anchor's stop ended; an earlier halt is its own.
-      in [:faulted, :exit, n] then [:ended, 0, [[:report, n == @k.fetch('exit_parent') ? status : n]]]
-      in [:ended, :exit, _] then release(close_port: true)
-      in [:faulted | :ended, :fault, _] then [phase, status, []]
-      in [:running, :close] then release(stop: true)
-      in [:running, :lost] then release(stop: true, close_port: true)
-      in [_, :close] then release
-      in [_, :lost] then release(close_port: true)
+      in [:faulted, :image_exit, n] then image_ended(state, [[:report, n == @k.fetch('exit_parent') ? state.status : n]])
+      in [:running, :image_exit, n] then image_ended(state, [[:report, n]] + stop(state, anchor_status(n)))
+      in [:ended, :anchor_exit, _] then release(state, port_open: true)
+      in [_, :anchor_exit, _] then [state.with(anchor_ended: true), []]
+      in [:running, :fault, kind] then [state.with(phase: :faulted, status: fault_status(kind)), stop(state, fault_status(kind))]
+      in [_, :fault, _] then [state, []]
+      in [phase, :close | :lost => how]
+        release(state, before: phase == :running ? stop(state, @k.fetch('killed')) : [], port_open: how == :lost)
       end
     end
 
     private
 
-    def release(stop: false, close_port: false)
-      actions = (stop ? [[:stop_anchor, @k.fetch('killed')]] : []) + RELEASE.map { [_1, 0] }
-      [:released, 0, close_port ? actions + [[:close_port, 0]] : actions]
+    # A stop of the anchor, unless its exit record arrived.
+    def stop(state, status) = state.anchor_ended ? [] : [[:stop_anchor, status]]
+
+    def image_ended(state, actions)
+      ended = state.with(phase: :ended, status: 0)
+      state.anchor_ended ? release(ended, before: actions, port_open: true) : [ended, actions]
+    end
+
+    # The port's close comes with the release once the answer was read, else it is held.
+    def release(state, port_open:, before: [])
+      close = port_open && state.answered ? [[:close_port, 0]] : []
+      [STARTED.with(phase: :released, answered: state.answered, close_held: port_open && !state.answered),
+       before + RELEASE.map { [_1, 0] } + close]
     end
 
     # erx_space_stop refuses the kernel's own statuses, so an image that ended by one has its
@@ -117,18 +132,25 @@ class ErxProgramCoreTest < Minitest::Test
   # A seeded failure of the core, the check that must catch it, and the edit that plants it.
   MUTANTS = {
     'an undo is skipped' =>
-      [:start_differences, '{ ERX_PROGRAM_GATE_REGISTER, ERX_PROGRAM_GATE_UNREGISTER },',
-       '{ ERX_PROGRAM_GATE_REGISTER, NO_UNDO },'],
+      [:start_differences, '{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },',
+       '{ ERX_PROGRAM_GATE_REGISTER_IMAGE, NO_UNDO },'],
     'two steps are swapped' =>
       [:start_differences,
-       "{ ERX_PROGRAM_GATE_REGISTER, ERX_PROGRAM_GATE_UNREGISTER },\n\t{ ERX_PROGRAM_ANCHOR_CREATE, ERX_PROGRAM_ANCHOR_DESTROY },",
-       "{ ERX_PROGRAM_ANCHOR_CREATE, ERX_PROGRAM_ANCHOR_DESTROY },\n\t{ ERX_PROGRAM_GATE_REGISTER, ERX_PROGRAM_GATE_UNREGISTER },"],
+       "{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },\n\t{ ERX_PROGRAM_ANCHOR_CREATE, ERX_PROGRAM_ANCHOR_DESTROY },",
+       "{ ERX_PROGRAM_ANCHOR_CREATE, ERX_PROGRAM_ANCHOR_DESTROY },\n\t{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },"],
     "a fault's status is lost to the image's exit record" =>
       [:broken_guarantees, '? end->status : input.status', '? input.status : input.status'],
     "a fault's status overrides the image's own halt" =>
       [:broken_guarantees, 'input.status == ERX_EXIT_PARENT ? end->status : input.status', 'end->status'],
     'a released program still acts' =>
-      [:end_differences, "if (end->phase == ERX_PROGRAM_RELEASED)\n\t\treturn (0);\n", '']
+      [:end_differences, 'if (end->phase == ERX_PROGRAM_RELEASED) {', 'if (0) {'],
+    'the port closes before the start answer is read' =>
+      [:broken_guarantees, 'if (!closing && end->answered)', 'if (!closing)'],
+    "the image's and the anchor's exits are swapped" =>
+      [:end_differences, 'space == ERX_PROGRAM_SPACE_ANCHOR ?', 'space == ERX_PROGRAM_SPACE_IMAGE ?'],
+    "the anchor's exit releases before the image's report" =>
+      [:broken_guarantees, 'end->phase == ERX_PROGRAM_ENDED ? release(end, actions, 0, false) : 0',
+       'release(end, actions, 0, false)']
   }.freeze
 
   def test_seeded_failures_are_caught
@@ -165,9 +187,9 @@ class ErxProgramCoreTest < Minitest::Test
 
   def end_differences(out)
     model = EndModel.new(out[:constants], out[:signals])
-    out[:ends].filter_map do |(phase, status, input), got|
-      want = model.call(phase, status, input)
-      "end #{phase} #{status} #{input.inspect}: got #{got.inspect}, want #{want.inspect}" unless got == want
+    out[:ends].filter_map do |(state, input), got|
+      want = model.call(state, input)
+      "end #{state.to_h} #{input.inspect}: got #{got.inspect}, want #{want.inspect}" unless got == want
     end
   end
 
@@ -175,7 +197,8 @@ class ErxProgramCoreTest < Minitest::Test
   # table and checks erx_program_core.h's guarantees on what each sequence asked for.
   def broken_guarantees(out)
     k = out[:constants]
-    inputs = [[:exit, 0], [:exit, 42], [:exit, k.fetch('exit_parent')], [:fault, 1], [:fault, 10], [:close], [:lost]]
+    inputs = [[:image_exit, 0], [:image_exit, 42], [:image_exit, k.fetch('exit_parent')],
+              [:anchor_exit, k.fetch('killed')], [:fault, 1], [:fault, 10], [:close], [:lost], [:answered]]
     (1..5).flat_map { inputs.repeated_permutation(_1).to_a }.filter_map do |sequence|
       problem = sequence_problem(out, sequence)
       "#{sequence.inspect}: #{problem}" if problem
@@ -183,34 +206,61 @@ class ErxProgramCoreTest < Minitest::Test
   end
 
   def sequence_problem(out, sequence)
-    state = [:running, 0]
+    state = STARTED
     asked = sequence.map do |input|
-      row = out[:ends][[*state, input]] or return "no row for #{state.inspect} #{input.inspect}"
-      state = row.first(2)
+      row = out[:ends][[state, input]] or return "no row for #{state.to_h} #{input.inspect}"
+      state = row.first
       row.last
     end
-    sequence_violation(out, sequence, asked, state)
+    release_violation(sequence, asked, state) || port_violation(sequence, asked) ||
+      report_violation(out, sequence, asked)
   end
 
-  def sequence_violation(out, sequence, asked, state)
-    flat = asked.flatten(1)
-    acts = flat.map(&:first)
-    reports = flat.select { _1.first == :report }
+  # The anchor's stop and the release: each at most once, the release whole, and nothing of
+  # the program after it.
+  def release_violation(sequence, asked, state)
+    acts = asked.flatten(1).map(&:first)
     released_at = asked.index { |actions| actions.map(&:first).include?(:budget_destroy) }
-    decided = sequence.first
-    first_exit = sequence.index { _1.first == :exit }
-    return 'more than one report' if reports.size > 1
+    anchor_ended_at = sequence.index { _1.first == :anchor_exit }
     return 'more than one anchor stop' if acts.count(:stop_anchor) > 1
-    return 'a release is not whole or not once' if released_at && acts.each_cons(RELEASE.size).count(RELEASE) != 1
-    return 'released but no release' if state.first == :released && released_at.nil?
-    return 'actions after the release' if released_at && asked.drop(released_at + 1).any?(&:any?)
-    return 'a report without an exit record' if reports.any? && first_exit.nil?
-    if first_exit && %i[exit fault].include?(decided.first) && sequence.first(first_exit).none? { %i[close lost].include?(_1.first) }
-      ended_by_stop = sequence[first_exit].last == out[:constants].fetch('exit_parent')
-      want = decided.first == :fault && ended_by_stop ? fault_status(out, decided.last) : sequence[first_exit].last
-      return "reported #{reports.inspect}, want #{want}" unless reports == [[:report, want]]
+    return "an anchor stopped after its exit" if anchor_ended_at && asked.drop(anchor_ended_at).flatten(1).any? { _1.first == :stop_anchor }
+    return 'released but no release' if state.phase == :released && released_at.nil?
+    return nil unless released_at
+    return 'a release is not whole or not once' if acts.each_cons(RELEASE.size).count(RELEASE) != 1
+
+    after = asked[released_at].map(&:first).drop_while { _1 != RELEASE.last }.drop(1) +
+            asked.drop(released_at + 1).flatten(1).map(&:first)
+    'actions of the program after the release' unless after.all?(:close_port)
+  end
+
+  # The port's close: at most once, never at or after a close of the port, never before the
+  # start's answer is read, and owed once the program released with the answer read.
+  def port_violation(sequence, asked)
+    closes = asked.each_index.select { |at| asked[at].any? { _1.first == :close_port } }
+    answered_at = sequence.index([:answered])
+    closed_at = sequence.index([:close])
+    released_at = asked.index { |actions| actions.map(&:first).include?(:budget_destroy) }
+    return 'more than one close of the port' if asked.flatten(1).count { _1.first == :close_port } > 1
+    return 'the port closed before the answer was read' if closes.any? { answered_at.nil? || _1 < answered_at }
+    return 'the port closed after it was closing' if closes.any? { closed_at && _1 >= closed_at }
+    owed = released_at && sequence[released_at] != [:close] && answered_at && closed_at.nil?
+    'the port was never closed' if owed && closes.empty?
+  end
+
+  # The one report: from the image's exit record before any close or loss, with its status,
+  # or the first fault's status for an image the fault's stop ended.
+  def report_violation(out, sequence, asked)
+    reports = asked.flatten(1).select { _1.first == :report }
+    live = sequence.take_while { !%i[close lost].include?(_1.first) }
+    image_at = live.index { _1.first == :image_exit }
+    want = []
+    if image_at
+      fault = live.first(image_at).find { _1.first == :fault }
+      status = live[image_at].last
+      by_stop = fault && status == out[:constants].fetch('exit_parent')
+      want = [[:report, by_stop ? fault_status(out, fault.last) : status]]
     end
-    nil
+    "reported #{reports.inspect}, want #{want.inspect}" unless reports == want
   end
 
   def fault_status(out, kind)
@@ -257,10 +307,13 @@ class ErxProgramCoreTest < Minitest::Test
   end
 
   def parse_end(out, before, after)
-    phase, status, *input = before
-    next_phase, next_status, *actions = after
-    out[:ends][[out[:phases].fetch(Integer(phase)), Integer(status), input_of(input)]] =
-      [out[:phases].fetch(Integer(next_phase)), Integer(next_status), actions.map { action_of(out, _1) }]
+    out[:ends][[state_of(out, before.first(5)), input_of(before.drop(5))]] =
+      [state_of(out, after.first(5)), after.drop(5).map { action_of(out, _1) }]
+  end
+
+  def state_of(out, (phase, status, anchor_ended, answered, close_held))
+    State.new(phase: out[:phases].fetch(Integer(phase)), status: Integer(status),
+              anchor_ended: anchor_ended == '1', answered: answered == '1', close_held: close_held == '1')
   end
 
   def input_of(words) = [words.first.to_sym, *words.drop(1).map { Integer(_1) }]

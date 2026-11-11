@@ -27,6 +27,13 @@ block a milestone's numbers.
   domain's service, so a scheduler registering, taking or unregistering a port's records meanwhile
   waits behind that request. Measure the take's latency in the `programs` suite with many programs
   ending at once; the fix is a per-sink generation that lets the trigger run outside the lock.
+* **[Low] runtime, a program's image found by walking the release.** The erx_program driver's
+  start (`sys/erxos/erx_program_drv.c`, `release_index`) finds the image's entry by reading the
+  session release's entries one by one with `erx_release_entry`, which copies each path, under
+  the port's lock. A release of thousands of files makes every program start walk them all.
+  Measure a start's latency in the `programs` suite against the release's file count; the fix is
+  the sorted name table `erx_prim_file.c` already builds (`erx_release_fs_lookup`), shared with
+  the driver, or a binary search over the sorted entries.
 * **[Low] runtime, one open of `/proc/kernel/log`.** `erx_log_records:record/2`
   (`erlang/apps/erx/src/erx_log_records.erl`) reads a window of about four records per
   `erx_log:read/1`, and each read walks the ring's headers from its oldest record to the cursor

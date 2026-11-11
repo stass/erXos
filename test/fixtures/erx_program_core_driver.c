@@ -9,15 +9,18 @@
  *   spec NAME STATUS                   erx_program_spec_check's answer for a named spec
  *   act VALUE NAME, phase VALUE NAME   the enums' names
  *   start NAME ACT... = ERROR          a start's whole run, each action it returned in order
- *   end PHASE STATUS INPUT... = PHASE STATUS ACT:STATUS...
+ *   end STATE INPUT... = STATE ACT:STATUS...
  *                                      one input in one state of the end, every state reachable
  *                                      from a started program by every input of the alphabet
  *
  * A start named fail-K fails the K-th action it returns with STEP_FAILURE and every other
  * with ERX_OK; undo-fail-K also fails every action after the K-th, whose outcomes the core
- * must not read. An input is "exit STATUS", "fault KIND" (a record of that kind made into an
- * input by erx_program_input_of), "close" or "lost". A run that never ends, or an end that
- * writes past its bound, is a broken core: the driver says so and exits 2.
+ * must not read. A STATE is the end's phase, its status, and whether the anchor ended, the
+ * answer was read and the close is held, as 0 or 1. An input is "image_exit STATUS" or
+ * "anchor_exit STATUS" (an exit record of that space made into an input by
+ * erx_program_input_of), "fault KIND" (a record of that kind from the image), "close",
+ * "lost" or "answered". A run that never ends, or an end that writes past its bound, is a
+ * broken core: the driver says so and exits 2.
  */
 
 #include <inttypes.h>
@@ -31,7 +34,7 @@
 #define UNDO_FAILURE	ERX_EINVAL
 /* More actions than any start can return: steps and undos, each at most once. */
 #define RUN_BOUND	64
-#define STATES_MAX	64
+#define STATES_MAX	256
 
 static const char good_image[] = "bin/exit42";
 /* Every fault kind, and kinds no record names. */
@@ -168,7 +171,10 @@ starts(void)
 	}
 }
 
-/* The end's input alphabet: every record kind, exit statuses of every class, a close and a loss. */
+/*
+ * The end's input alphabet: every record kind, exit statuses of every class from the image,
+ * the anchor's exits, a close, a loss and the answer.
+ */
 typedef struct {
 	char			text[48];
 	erx_program_input_t	input;
@@ -177,6 +183,7 @@ typedef struct {
 static size_t
 alphabet(input_t inputs[], size_t max)
 {
+	static const int64_t anchor_statuses[] = { ERX_PROGRAM_KILLED, ERX_EXIT_PARENT };
 	static const int64_t statuses[] = { 0, 42, 255, 256, ERX_EXIT_SIGNAL + ERX_SIGKILL,
 	    ERX_EXIT_SIGNAL + ERX_SIGSEGV, ERX_EXIT_PARENT, ERX_EXIT_NOTHREAD, ERX_EXIT_RELEASED, ERX_EXIT_CRASH,
 	    -1, INT64_MAX };
@@ -185,21 +192,29 @@ alphabet(input_t inputs[], size_t max)
 	for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]) && n < max; i++, n++) {
 		const erx_fault_t record = { .kind = ERX_FAULT_EXIT, .status = statuses[i] };
 
-		snprintf(inputs[n].text, sizeof(inputs[n].text), "exit %" PRId64, statuses[i]);
-		inputs[n].input = erx_program_input_of(&record);
+		snprintf(inputs[n].text, sizeof(inputs[n].text), "image_exit %" PRId64, statuses[i]);
+		inputs[n].input = erx_program_input_of(&record, ERX_PROGRAM_SPACE_IMAGE);
+	}
+	for (size_t i = 0; i < sizeof(anchor_statuses) / sizeof(anchor_statuses[0]) && n < max; i++, n++) {
+		const erx_fault_t record = { .kind = ERX_FAULT_EXIT, .status = anchor_statuses[i] };
+
+		snprintf(inputs[n].text, sizeof(inputs[n].text), "anchor_exit %" PRId64, anchor_statuses[i]);
+		inputs[n].input = erx_program_input_of(&record, ERX_PROGRAM_SPACE_ANCHOR);
 	}
 	for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]) && n < max; i++, n++) {
 		/* A fault record's status is not the program's: a stray one must change nothing. */
 		const erx_fault_t record = { .kind = (erx_fault_kind_t)kinds[i], .status = 77 };
 
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "fault %" PRIu32, kinds[i]);
-		inputs[n].input = erx_program_input_of(&record);
+		inputs[n].input = erx_program_input_of(&record, ERX_PROGRAM_SPACE_IMAGE);
 	}
-	if (n + 2 <= max) {
+	if (n + 3 <= max) {
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "close");
 		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_CLOSE };
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "lost");
 		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_LOST };
+		snprintf(inputs[n].text, sizeof(inputs[n].text), "answered");
+		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_ANSWERED };
 	}
 	return (n);
 }
@@ -207,14 +222,22 @@ alphabet(input_t inputs[], size_t max)
 static int
 same_state(erx_program_end_t a, erx_program_end_t b)
 {
-	return (a.phase == b.phase && a.status == b.status);
+	return (a.phase == b.phase && a.status == b.status && a.anchor_ended == b.anchor_ended &&
+	    a.answered == b.answered && a.close_held == b.close_held);
+}
+
+static void
+print_state(erx_program_end_t end)
+{
+	printf(" %d %" PRId64 " %d %d %d", (int)end.phase, end.status, end.anchor_ended, end.answered,
+	    end.close_held);
 }
 
 /* Every state reachable from a started program, and every input in each. */
 static void
 ends(void)
 {
-	input_t inputs[32];
+	input_t inputs[48];
 	const size_t count = alphabet(inputs, sizeof(inputs) / sizeof(inputs[0]));
 	erx_program_end_t states[STATES_MAX];
 	size_t known = 1;
@@ -232,8 +255,10 @@ ends(void)
 				printf("broken end: %zu actions\n", written);
 				exit(2);
 			}
-			printf("end %d %" PRId64 " %s =", (int)states[at].phase, states[at].status, inputs[i].text);
-			printf(" %d %" PRId64, (int)end.phase, end.status);
+			printf("end");
+			print_state(states[at]);
+			printf(" %s =", inputs[i].text);
+			print_state(end);
 			for (size_t a = 0; a < written; a++)
 				printf(" %d:%" PRId64, (int)actions[a].act, actions[a].status);
 			printf("\n");
@@ -258,7 +283,8 @@ static const char *const act_names[] = {
 	[ERX_PROGRAM_IRQ_CREATE] = "irq_create",
 	[ERX_PROGRAM_SINK_REGISTER] = "sink_register",
 	[ERX_PROGRAM_IRQ_BIND] = "irq_bind",
-	[ERX_PROGRAM_GATE_REGISTER] = "gate_register",
+	[ERX_PROGRAM_GATE_REGISTER_ANCHOR] = "gate_register_anchor",
+	[ERX_PROGRAM_GATE_REGISTER_IMAGE] = "gate_register_image",
 	[ERX_PROGRAM_ANCHOR_CREATE] = "anchor_create",
 	[ERX_PROGRAM_IMAGE_CREATE] = "image_create",
 	[ERX_PROGRAM_IMAGE_MAP] = "image_map",
@@ -267,7 +293,8 @@ static const char *const act_names[] = {
 	[ERX_PROGRAM_THREAD_CLOSE] = "thread_close",
 	[ERX_PROGRAM_IMAGE_CLOSE] = "image_close",
 	[ERX_PROGRAM_ANCHOR_DESTROY] = "anchor_destroy",
-	[ERX_PROGRAM_GATE_UNREGISTER] = "gate_unregister",
+	[ERX_PROGRAM_GATE_UNREGISTER_IMAGE] = "gate_unregister_image",
+	[ERX_PROGRAM_GATE_UNREGISTER_ANCHOR] = "gate_unregister_anchor",
 	[ERX_PROGRAM_IRQ_UNBIND] = "irq_unbind",
 	[ERX_PROGRAM_SINK_UNREGISTER] = "sink_unregister",
 	[ERX_PROGRAM_IRQ_CLOSE] = "irq_close",

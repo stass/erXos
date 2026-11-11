@@ -2,8 +2,8 @@
  * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * The gate worker's core (docs/design-runtime.md, "The event table"): the table from the
- * label a port gave the spaces it created to that port's slot and IRQ object, and what an
+ * The gate worker's core (docs/design-runtime.md, "The event table"): the table from each
+ * label a port gave a space it created to that label's slot and the port's IRQ object, and what an
  * exit or fault record taken from the domain's fault gate does there. A record whose label
  * a sink holds is kept in the sink's slot, after every record kept before it, and the
  * sink's IRQ object is to be triggered; any other record is dropped and counted. It knows
@@ -19,11 +19,11 @@
 
 #include "erx/abi.h"
 
-/* Ports with spaces at once; a lookup searches, so the table stays small. */
+/* Labels registered at once, two per program; a lookup searches, so the table stays small. */
 #define ERX_GATE_SINKS		64
 /*
- * Records a slot keeps until its port takes them. A program's spaces post one record per
- * space and one per faulting thread; an end needs the image's and the anchor's.
+ * Records a slot keeps until its port takes them. A program's image posts its exit record
+ * and one per faulting thread, and its anchor its exit record, each under its own label.
  */
 #define ERX_GATE_SLOT_RECORDS	8
 

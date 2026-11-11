@@ -26,7 +26,8 @@ static const struct {
 	{ ERX_PROGRAM_IRQ_CREATE, ERX_PROGRAM_IRQ_CLOSE },
 	{ ERX_PROGRAM_SINK_REGISTER, ERX_PROGRAM_SINK_UNREGISTER },
 	{ ERX_PROGRAM_IRQ_BIND, ERX_PROGRAM_IRQ_UNBIND },
-	{ ERX_PROGRAM_GATE_REGISTER, ERX_PROGRAM_GATE_UNREGISTER },
+	{ ERX_PROGRAM_GATE_REGISTER_ANCHOR, ERX_PROGRAM_GATE_UNREGISTER_ANCHOR },
+	{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },
 	{ ERX_PROGRAM_ANCHOR_CREATE, ERX_PROGRAM_ANCHOR_DESTROY },
 	{ ERX_PROGRAM_IMAGE_CREATE, ERX_PROGRAM_IMAGE_CLOSE },
 	{ ERX_PROGRAM_IMAGE_MAP, NO_UNDO },
@@ -34,7 +35,7 @@ static const struct {
 	{ ERX_PROGRAM_THREAD_START, NO_UNDO },
 };
 #define PLAN_STEPS	((uint32_t)(sizeof(plan) / sizeof(plan[0])))
-_Static_assert(PLAN_STEPS + 2 <= ERX_PROGRAM_ACTIONS_MAX, "an end's stop, release and close fit its actions");
+_Static_assert(PLAN_STEPS + 3 <= ERX_PROGRAM_ACTIONS_MAX, "an end's report, stop, release and close fit its actions");
 
 /* No control byte, and every component, the bytes between slashes, is neither empty, "." nor "..". */
 static bool
@@ -116,11 +117,12 @@ erx_program_end_begin(void)
 }
 
 erx_program_input_t
-erx_program_input_of(const erx_fault_t *record)
+erx_program_input_of(const erx_fault_t *record, erx_program_space_t space)
 {
-	if (record->kind == ERX_FAULT_EXIT)
-		return ((erx_program_input_t){ .kind = ERX_PROGRAM_EXIT, .status = record->status });
-	return ((erx_program_input_t){ .kind = ERX_PROGRAM_FAULT, .fault = (uint32_t)record->kind });
+	if (record->kind != ERX_FAULT_EXIT)
+		return ((erx_program_input_t){ .kind = ERX_PROGRAM_FAULT, .fault = (uint32_t)record->kind });
+	return ((erx_program_input_t){ .kind = space == ERX_PROGRAM_SPACE_ANCHOR ? ERX_PROGRAM_ANCHOR_EXIT :
+	    ERX_PROGRAM_IMAGE_EXIT, .status = record->status });
 }
 
 /*
@@ -156,18 +158,20 @@ put(erx_program_action_t actions[], size_t at, erx_program_act_t act, int64_t st
 
 /*
  * Ends the program's hold on everything the start made, after the actions already in
- * actions[0..at): every undo, last step first, then the port's close while it is open.
+ * actions[0..at): every undo, last step first, then, unless the port is closing already,
+ * its close, or the close held when the start's answer is not read yet.
  */
 static size_t
-release(erx_program_end_t *end, erx_program_action_t actions[], size_t at, bool port_open)
+release(erx_program_end_t *end, erx_program_action_t actions[], size_t at, bool closing)
 {
 	for (uint32_t step = PLAN_STEPS; step > 0; step--) {
 		if (plan[step - 1].undo != NO_UNDO)
 			at = put(actions, at, plan[step - 1].undo, 0);
 	}
-	if (port_open)
+	if (!closing && end->answered)
 		at = put(actions, at, ERX_PROGRAM_CLOSE_PORT, 0);
-	*end = (erx_program_end_t){ .phase = ERX_PROGRAM_RELEASED };
+	*end = (erx_program_end_t){ .phase = ERX_PROGRAM_RELEASED, .answered = end->answered,
+	    .close_held = !closing && !end->answered };
 	return (at);
 }
 
@@ -177,41 +181,58 @@ erx_program_end_next(erx_program_end_t *end, erx_program_input_t input,
 {
 	size_t at = 0;
 
-	if (end->phase == ERX_PROGRAM_RELEASED)
+	/* The answer is the port's, not the program's: it counts in every phase. */
+	if (input.kind == ERX_PROGRAM_ANSWERED) {
+		const bool held = end->close_held;
+
+		end->answered = true;
+		end->close_held = false;
+		return (held ? put(actions, 0, ERX_PROGRAM_CLOSE_PORT, 0) : 0);
+	}
+	if (end->phase == ERX_PROGRAM_RELEASED) {
+		/* A port that is closing owes no close. */
+		if (input.kind == ERX_PROGRAM_CLOSE)
+			end->close_held = false;
 		return (0);
+	}
 	switch (input.kind) {
-	case ERX_PROGRAM_EXIT:
-		/* The first exit record is the image's, the second the anchor's (erx_program_core.h). */
+	case ERX_PROGRAM_IMAGE_EXIT:
 		if (end->phase == ERX_PROGRAM_ENDED)
-			return (release(end, actions, 0, true));
+			return (0);
 		if (end->phase == ERX_PROGRAM_FAULTED) {
 			/*
-			 * The anchor is stopping already. An image ended by that stop reports the
-			 * fault's status; one that halted on its own first reports its own.
+			 * The fault stopped the anchor already. An image ended by that stop reports
+			 * the fault's status; one that halted on its own first reports its own.
 			 */
 			at = put(actions, at, ERX_PROGRAM_REPORT,
 			    input.status == ERX_EXIT_PARENT ? end->status : input.status);
 		} else {
 			at = put(actions, at, ERX_PROGRAM_REPORT, input.status);
-			at = put(actions, at, ERX_PROGRAM_STOP_ANCHOR, anchor_status(input.status));
+			if (!end->anchor_ended)
+				at = put(actions, at, ERX_PROGRAM_STOP_ANCHOR, anchor_status(input.status));
 		}
-		*end = (erx_program_end_t){ .phase = ERX_PROGRAM_ENDED };
-		return (at);
+		end->phase = ERX_PROGRAM_ENDED;
+		end->status = 0;
+		return (end->anchor_ended ? release(end, actions, at, false) : at);
+	case ERX_PROGRAM_ANCHOR_EXIT:
+		/* The image's record reports; an anchor that ended first waits for it. */
+		end->anchor_ended = true;
+		return (end->phase == ERX_PROGRAM_ENDED ? release(end, actions, 0, false) : 0);
 	case ERX_PROGRAM_FAULT:
 		/* Only the first fault decides; the image's exit record reports it. */
 		if (end->phase != ERX_PROGRAM_RUNNING)
 			return (0);
-		*end = (erx_program_end_t){ .phase = ERX_PROGRAM_FAULTED, .status = fault_status(input.fault) };
-		return (put(actions, 0, ERX_PROGRAM_STOP_ANCHOR, end->status));
+		end->phase = ERX_PROGRAM_FAULTED;
+		end->status = fault_status(input.fault);
+		return (end->anchor_ended ? 0 : put(actions, 0, ERX_PROGRAM_STOP_ANCHOR, end->status));
 	case ERX_PROGRAM_CLOSE:
-	case ERX_PROGRAM_LOST: {
-		const bool port_open = input.kind == ERX_PROGRAM_LOST;
-
+	case ERX_PROGRAM_LOST:
 		/* No status is reported: the port is closing, or a record of the end may be lost. */
-		if (end->phase == ERX_PROGRAM_RUNNING)
+		if (end->phase == ERX_PROGRAM_RUNNING && !end->anchor_ended)
 			at = put(actions, 0, ERX_PROGRAM_STOP_ANCHOR, ERX_PROGRAM_KILLED);
-		return (release(end, actions, at, port_open));
-	}
+		return (release(end, actions, at, input.kind == ERX_PROGRAM_CLOSE));
+	case ERX_PROGRAM_ANSWERED:
+		break;
 	}
 	return (0);
 }

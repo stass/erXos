@@ -1477,6 +1477,24 @@ it; git history is the record of completed work.
   message its gates carry. Decide whether BK8b's IRQ deliveries share the same open wait before
   any thread other than the gate worker (`sys/erxos/erx_gate.c`), which binds only the domain's
   fault gate, waits in it.
+* [Medium] ERTS, `sys/erxos/erx_program_drv.c` (`PROGRAM_POOL`): no session has a pool for programs
+  yet, and the stopgap reports no budget's cap, so the driver checks a spec's cap against
+  `UINT64_MAX` and only the carve of the program's budget bounds it. Give the session its pool, as
+  docs/design-runtime.md, "Programs as ports", step 1 has it, and check against that.
+* [Medium] ERTS, `sys/erxos/erx_program_drv.c`: a failed `erx_space_stop` of a program's anchor is
+  not fed back to the core, so a program whose anchor did not stop leaves its port waiting for a
+  close that only `port_close/1` or its owner's exit gives.
+* [Medium] session domain, programs: a program's anchor is a sub-space of the session,
+  but nothing yet ends a session's programs with the session domain. Until something does, no test ends a
+  session while one of its programs runs.
+* [Low] ERTS, `sys/erxos/erx_program_drv.c`: the driver does not refuse a spec whose pid a live
+  program already has, and nothing reads a program's pid yet. The command server that names pids
+  owns their uniqueness (docs/design-programs.md, a program's start, step 5) and makes it hold by
+  never giving a pid twice; until it exists, a test's spec names the pid. The gate worker's 64 labels
+  bound a session to 32 programs at once, each start past that refused with `elimit`.
+* [Low] hosted backend, `liberx/backend/hosted/refused.c`: a hosted runtime runs no programs; the
+  budget's carve is refused, so `erx_program:start/1` answers `{error, enotsup}`. Programs in hosted
+  mode need the hosted backend to make spaces.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/fault_gate.c` (`erx_fiasco_gate_fault`): a
   fault takes any free entry of its space's pool, since Fiasco's fault message names only the task, so
   its record's thread is unknown and design-stopgap.md's "a fault in its thread's record" does not
@@ -4479,6 +4497,12 @@ to the corpus and follow rc
   listing where the stopgap refuses a task's `erx_object_info`, which `erx_kernel_records:listing/6` should
   answer `unsupported`.
 
+* [Low] liberx Fiasco backend, `service.c` (`service_thread_handle`): the handle
+  of a first thread created in another space is that task above the index (`task << 8 | index`),
+  not a slot of the caller's handle table, so the erx_program driver's `erx_cap_close` of it at
+  `ERX_PROGRAM_THREAD_CLOSE` names no slot of a table of up to 256 handles and closes nothing, and
+  in a larger table could close an unrelated capability. On the stopgap only; erXos's kernel gives
+  every thread a capability slot.
 * [Medium] Host link, the web facet's casts (`erlang/apps/erx_hostlink/src/erx_hostlink_web.erl`,
   `erx_hostlink.erl`): each `{web, C, Bytes}` the web domain sends the facet becomes a `facet_cast` to the host
   link's process, which queues it for the host outside the output bound that holds back input (`OUTPUT_BACKLOG`),

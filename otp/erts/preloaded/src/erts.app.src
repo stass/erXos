@@ -1,4 +1,4 @@
-%% Modified by erXos: erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs and erx_erofs_file are added to the preloaded modules.
+%% Modified by erXos: erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs, erx_erofs_file, erx_prog, erx_prog_grammar and erx_program are added to the preloaded modules.
 %%
 %% %CopyrightBegin%
 %%
@@ -41,6 +41,9 @@
 		erx_verity,
 		erx_erofs,
 		erx_erofs_file,
+		erx_prog,
+		erx_prog_grammar,
+		erx_program,
 		prim_inet,
 		prim_zip,
                 atomics,
