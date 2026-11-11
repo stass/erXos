@@ -346,6 +346,17 @@ it; git history is the record of completed work.
   count can move, as the thread deletion seed stops the suite at its earlier `service` case.
 * [Low] stopgap, `liberx/backend/fiasco`, fault gates: each space's `dropped` counter of records lost after its gate was
   destroyed has no reader until the inspector reads it at SV4.
+* [Low] stopgap, `liberx/backend/fiasco/service.c` (`service_main`), fault gates: a fault posted to a space's
+  gate is left unanswered in the service thread's one implicit reply capability, as `docs/design-stopgap.md`
+  ("Faults") asks, so the service's next receive of a call overwrites it and Fiasco logs
+  `Application bug: reply capability overwritten!` (`fiasco/kernel/src/kern/receiver.cpp`, `set_reply_cap`) at
+  every fault posted to a gate: each end of the storage domain on a dead disk, the native_domain suite's fault
+  cases. Nothing misbehaves: Fiasco empties the slot, and the faulting thread stays blocked until its space's
+  stop deletes it, as designed. To silence it, receive into Fiasco's explicit reply capabilities
+  (`l4_ipc_wait_ext`, `CONFIG_EXPLICIT_REPLY_CAPS`), keep the slot of each fault posted to a gate with its task,
+  receive on into a free slot, and free the kept slots once the task's teardown has deleted its threads, whose
+  cancelled calls empty them. A gateless fault or a thread that stops its own task (`ERX_FIASCO_NO_REPLY`) warns
+  the same way when the killed thread has not yet emptied its slot by the service's next receive.
 * [Low] stopgap, `tools/lib/erx/native_semaphore_race.rb`: the race runs under TCG at 4 CPUs only, as every
   seed under `make check-native-seeds` does, and no gate runs it under HVF.
 * [Medium] stopgap, `test/fixtures/fiasco_park_driver.c`: the exhaustive model reads the core rather than
@@ -4474,9 +4485,9 @@ to the corpus and follow rc
   littlefs's owner, worker or `/data` grant, and any end of the block driver's device or
   partition process, a malformed completion or a refused reset included, ends the storage
   domain, the block driver and every window it serves with it, and after `restarts 5`
-  within `restart_period_s 600` the domain stays down. The system domain and root's
+  within `restart_period_s 60` the domain stays down. The system domain and root's
   session reach `/data` through the `data` facet, so a client whose requests can end
-  littlefs's owner or worker, or break the volume, six times in ten minutes takes down
+  littlefs's owner or worker, or break the volume, six times in a minute takes down
   every partition's driver, not only `/data`. The facet's design bounds what a client can make the grant do (its own lane),
   or littlefs moves into a sub-space port whose end the domain survives
   (design-storage.md), which waits for track S's port driver (1b-B), so no build
