@@ -109,6 +109,10 @@ erx_dom_lib_configured erx_dom_lib_connect erx_dom_lib_create erx_dom_lib_discon
 erx_dom_lib_start erx_dom_lib_stop erx_dom_lib_system erx_dom_lib_take erx_gate_bind
 erx_dom_lib_crash_copy erx_dom_dump_read erx_mem_create erx_cap_close
 
+# erx_gate.c alone, the gate worker: the domain's fault gate, its bind and the wait on it.
+[only_erx_gate]
+erx_gate_create erx_gate_bind erx_ipc_wait
+
 # erx_crash_area.c alone: only the crash path stops the runtime's own space.
 [only_erx_crash_area]
 erx_space_stop

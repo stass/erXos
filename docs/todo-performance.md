@@ -22,6 +22,11 @@ block a milestone's numbers.
 * **[Low] runtime, one AES decipher per timer cancel or read.** `erts_get_ref_numbers_thr_id` deciphers a timer's reference to find the scheduler that owns the timer, on every `erlang:cancel_timer/1,2` and `read_timer/1,2`. Settle it with a bench of `start_timer`/`cancel_timer` pairs on HVF against the parent tree.
 * **[Medium] runtime, the alias registry on every `gen_server:call`.** Each call's alias monitor inserts an entry into `erx_alias.c`'s striped table under a mutex and removes it at the reply, and every reference of this node that `binary_to_term/1` or a frame decodes looks the registry up, then the magic table. Settle it with 100 000 local `gen_server:call`s on 1 and 4 schedulers on HVF against the parent tree, and the stripe locks' contention from `lcnt`.
 * **[Medium] runtime, the log sink under a flood of events.** `erx_log_h:log/2` sends every record without the queue checks of `logger_olp`, and `erx_console_log` drops past 16 KiB a second only once the record is in `erx_console`'s queue. Settle it with a crash loop logging large reports in the system domain and in a domain: `erx_console`'s queue length and console echo latency, and the proxy's queue and its kernel calls per second, with and without a queue-length bound in `log/2`.
+* **[Low] runtime, the gate worker triggers under its lock.** The gate worker (`sys/erxos/erx_gate.c`)
+  holds `gate_lock` across `erx_irq_trigger`, which on the stopgap is a request to the system
+  domain's service, so a scheduler registering, taking or unregistering a port's records meanwhile
+  waits behind that request. Measure the take's latency in the `programs` suite with many programs
+  ending at once; the fix is a per-sink generation that lets the trigger run outside the lock.
 * **[Low] runtime, one open of `/proc/kernel/log`.** `erx_log_records:record/2`
   (`erlang/apps/erx/src/erx_log_records.erl`) reads a window of about four records per
   `erx_log:read/1`, and each read walks the ring's headers from its oldest record to the cursor

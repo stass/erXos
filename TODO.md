@@ -1460,8 +1460,9 @@ it; git history is the record of completed work.
 
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/service.h` (`erx_ipc_wait`): the stopgap's
   open wait returns design-kernel.md's tag and label, but only for fault and exit records, the one
-  message its gates carry. Decide whether BK8b's IRQ deliveries share the same open wait before a
-  session's gate worker calls it.
+  message its gates carry. Decide whether BK8b's IRQ deliveries share the same open wait before
+  any thread other than the gate worker (`sys/erxos/erx_gate.c`), which binds only the domain's
+  fault gate, waits in it.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/fault_gate.c` (`erx_fiasco_gate_fault`): a
   fault takes any free entry of its space's pool, since Fiasco's fault message names only the task, so
   its record's thread is unknown and design-stopgap.md's "a fault in its thread's record" does not

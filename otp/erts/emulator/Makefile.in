@@ -1307,6 +1307,8 @@ OS_OBJS = \
 	$(OBJDIR)/erx_lane_core.o \
 	$(OBJDIR)/erx_event.o \
 	$(OBJDIR)/erx_event_table.o \
+	$(OBJDIR)/erx_gate.o \
+	$(OBJDIR)/erx_gate_core.o \
 	$(OBJDIR)/erx_alias.o \
 	$(OBJDIR)/erx_exports.o \
 	$(OBJDIR)/erx_ref.o \

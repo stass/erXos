@@ -6,9 +6,10 @@
 /*
  * The calls of api.h's domain-building list that a hosted runtime links: the
  * erx_domain_lib NIF module names them for the domain library's fault gate
- * and its crash copies. The hosted process is the system domain alone and
- * builds no domain library (liberx/backend/core/dom_lib_none.c), so the
- * module calls none of them. Each is ERX_ENOTSUP for every hosted caller, as
+ * and its crash copies, and the gate worker (sys/erxos/erx_gate.c) for its
+ * fault gate. The hosted process is the system domain alone, builds no
+ * domain library (liberx/backend/core/dom_lib_none.c) and has no sub-space
+ * group, so neither calls any of them. Each is ERX_ENOTSUP for every hosted caller, as
  * the call table answers a call it does not offer (docs/design-stopgap.md,
  * "The hosted backend"): a hosted BeamAsm image, which none builds, would
  * find its code space (sys/erxos/erx_jit_memory.c) refused here.
@@ -37,5 +38,19 @@ int
 erx_gate_bind(uint64_t gate, uint64_t thread, uint64_t label)
 {
 	(void)gate, (void)thread, (void)label;
+	return (ERX_ENOTSUP);
+}
+
+int
+erx_gate_create(uint64_t budget, uint64_t *gate)
+{
+	(void)budget, (void)gate;
+	return (ERX_ENOTSUP);
+}
+
+int
+erx_ipc_wait(uint64_t wait_by, erx_msgtag_t *tag, uint64_t *label)
+{
+	(void)wait_by, (void)tag, (void)label;
 	return (ERX_ENOTSUP);
 }

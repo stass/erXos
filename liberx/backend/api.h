@@ -270,9 +270,9 @@ int	erx_watchdog_pet(void) ERX_WARN_UNUSED_RESULT;
  * code outside a backend names no backend header. Each backend documents its own
  * answers beside its definitions (liberx/backend/fiasco/service.h, group.h, vm.h,
  * whose declarations these repeat); hosted, which makes no spaces, refuses
- * erx_space_stop (hosted/vm.c) and the three the domain service's NIF module links
- * (hosted/refused.c), and defines none of the rest, so only a native build links the
- * library's apply phase.
+ * erx_space_stop (hosted/vm.c), the three the domain service's NIF module links and
+ * the gate worker's gate and wait (hosted/refused.c), and defines none of the rest, so
+ * only a native build links the library's apply phase.
  */
 int	erx_mem_create(uint64_t budget, uint64_t size, uint32_t flags, uint64_t *mem) ERX_WARN_UNUSED_RESULT;
 int	erx_group_create(uint64_t budget, uint64_t parent, uint64_t *group) ERX_WARN_UNUSED_RESULT;

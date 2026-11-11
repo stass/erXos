@@ -80,6 +80,7 @@
 #include "erl_cpu_topology.h"
 #include "erl_osenv.h"
 #include "erx_stdio.h"
+#include "erx_gate.h"
 #include "erx_lane_drv.h"
 #include "erl_dyn_lock_check.h"
 extern int  driver_interrupt(int, int);
@@ -373,6 +374,7 @@ erl_sys_init(void)
 #endif
 
     erts_sys_init_float();
+    erx_gate_worker_init();
 }
 
 /*

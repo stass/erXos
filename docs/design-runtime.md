@@ -931,11 +931,20 @@ domain creates names at creation, so every exit and fault record of a
 sub-space arrives there; a domain's own records go to the domain
 library's fault thread in the system domain
 ([design-kernel.md](design-kernel.md#creating-spaces),
-[design-system.md](design-system.md#ending-a-domain)). For each record
-it finds the space's sink in the event table, a program port, deposits
-the record and
-dispatches the sink as the ready list would: it triggers the port's own
-IRQ object, which the port created with every right. It parses nothing:
+[design-system.md](design-system.md#ending-a-domain)). A port that
+creates spaces registers the label they carry, the program's process id,
+with its own IRQ object, which the port created with every right and
+bound into the group, before it creates the first of them, and ends the
+registration before it closes the object. For
+each record the worker finds the port that registered the record's
+label, keeps the record in the port's slot after those the port has not
+taken, and dispatches the port as the ready list would: it triggers the
+port's IRQ object. A record whose label no port holds, because its port
+closed first, is dropped and counted, as the event table drops a label
+whose entry is gone. A full slot drops the newest record and counts it
+for the port; a port that finds a count above zero cannot know its
+program's status, so it ends the program as a close of the port does and
+reports no status it did not read. It parses nothing:
 a record is a fixed layout the kernel wrote, copied once and checked by
 `liberx`.
 

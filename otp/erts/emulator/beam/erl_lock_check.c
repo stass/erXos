@@ -17,7 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: the event table's lock replaces the poll set's in the order, and the
+ * Modified by erXos: the event table's lock replaces the poll set's in the order, the gate
+ * worker's lock (erx_gate.c), which holds no other, follows it, and the
  * export table's stripes (erx_exports.c) come before the allocator's, taken under them.
  * The alias registry's stripes come before the export table's, which are taken under
  * them, and the shared reference source's lock, which holds no other, comes after both
@@ -129,6 +130,7 @@ static erts_lc_lock_order_t erts_lock_order[] = {
     {"cpu_info",				NULL},
     {"erx_event",                               NULL},
     {"erx_event_task",                          NULL},
+    {"erx_gate",                                NULL},
     {"alcu_init_atoms",			        NULL},
     {"mseg_init_atoms",			        NULL},
     {"mmap_init_atoms",			        NULL},
