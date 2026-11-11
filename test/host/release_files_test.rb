@@ -206,8 +206,16 @@ class ReleaseFilesTest < Minitest::Test
                  'the session script only loads erx_session')
     assert_equal Erx::ReleaseFiles::DOMAIN_BASE, Erx::ProductionImage.domain_boot('erts').applications
   end
+
+  # The network script starts the stack permanent, so the stack's end ends the network
+  # domain, while the system release, which still runs it on the development manifest,
+  # starts it temporary (test_the_release_file_starts_the_network_stack_temporary).
+  def test_the_network_script_starts_the_network_stack_permanent
+    domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('network')]))
+    assert_match(/,\{erx_files,"#{VERSION}"\},\{erx_net,"#{VERSION}"\}\]\}\.\n\z/, boot_release_file('network'))
+  end
+
   # A script's release file names the script and its applications alone, in the
-  # A script's release file names the release and its applications alone, in the
   # system release's order whatever order they were asked in.
   def test_a_boot_script_takes_the_system_release_order
     domain_entries(Erx::ReleaseFiles.domain([base_boot]))

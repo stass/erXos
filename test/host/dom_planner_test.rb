@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/dom_planner'
 require_relative '../../tools/lib/erx/manifest'
+require_relative '../../tools/lib/erx/network_domain'
 require_relative '../../tools/lib/erx/production_image'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/system_domain'
@@ -128,6 +129,21 @@ class DomPlannerTest < Minitest::Test
       admitted = Erx::Manifest.admit(source: suite.manifest(source), codec: @codec, context: context, planner: @planner)
       assert_equal 3, admitted.report.fetch('child_plan_instances'), suite.name
     end
+  end
+
+  # The network domain cell's manifest (NetworkDomain.manifest): the network row beside
+  # the development manifest's storage, the net unit held by it, and its two services'
+  # facets, which the check admits and the library plans.
+  def test_the_library_plans_the_network_domain_cells_domains
+    source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    arguments = ManifestContextFixture.archive_arguments(@codec, boots: %w[network session storage])
+    context = Erx::Manifest::Context.new(**arguments.merge(platform: Erx::MediumBoot::MACHINE.platform(@context.platform)))
+    admitted = Erx::Manifest.admit(source: Erx::NetworkDomain.manifest(source), codec: @codec, context: context,
+                                   planner: @planner)
+    assert_equal 2, admitted.report.fetch('child_plan_instances')
+    manifest = Erx::NetworkDomain.manifest(source)
+    refute_includes manifest[/^  system_args .*$/], '-erx_net'
+    assert_includes manifest, "unit net\n  placement \"net\"\n  holder @domain.network\n"
   end
 
   # Two principals' session templates (property 14), each its principal's, of the

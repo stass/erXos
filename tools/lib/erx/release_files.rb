@@ -35,10 +35,12 @@ module Erx
     # A name here that the release does not ship would leave that application started.
     raise Error, "LOAD_ONLY names what the release does not ship: #{LOAD_ONLY - APPLICATIONS}" unless
       (LOAD_ONLY - APPLICATIONS).empty?
-    # Started with start type temporary, so that their end is reported and the system
-    # domain goes on. The network stack parses network input, and it runs in the system
-    # domain until the network domain exists (docs/design-stopgap.md), so a crash loop in
-    # it ends the stack, never the system domain.
+    # Started with start type temporary in the system release, so that their end is
+    # reported and the system domain goes on. The network stack parses network input, and
+    # the development manifest runs it in the system domain (docs/design-stopgap.md),
+    # so a crash loop in it ends the stack, never the system domain. A domain boot script
+    # starts them permanent: the network script's stack ending ends the network domain
+    # (docs/design-network-stack.md, "The process tree").
     TEMPORARY = %w[erx_net].freeze
     # A domain's own applications: the system release ships them, so that a domain
     # boot script can take them, and every release only loads them, so that none runs in the
@@ -309,12 +311,13 @@ module Erx
 
     # An application's term in the release file: its name and version, and the start
     # type load for one only loaded, DOMAIN_ONLY's among them in every release,
-    # and temporary for TEMPORARY's; the others take systools' default, permanent.
+    # and temporary for TEMPORARY's in the system release; the others take systools'
+    # default, permanent.
     def release_entry(application)
       term = "#{application},\"#{version(application)}\""
       if LOAD_ONLY.include?(application) || DOMAIN_ONLY.include?(application)
         "{#{term},load}"
-      elsif TEMPORARY.include?(application) then "{#{term},temporary}"
+      elsif @release.system && TEMPORARY.include?(application) then "{#{term},temporary}"
       else "{#{term}}"
       end
     end

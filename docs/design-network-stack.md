@@ -5844,6 +5844,18 @@ same signature, and the Erlang function stays as its oracle in a
 differential test over the same inputs. The process structure does not
 change.
 
+The network domain's memory is measured as the storage domain's is (the
+system manifest's header): the root's pool pages in use with the domain
+up, minus those once it has ended. With BeamAsm and the users share's four schedulers and four dirty
+CPU schedulers, the domain holds at least 8,463 pages, 33.1 MiB, once DHCP
+has leased its address (a lower bound: root's session grows before the
+last reading), and 8,603 pages, 33.6 MiB, after root's session has
+run `ping -c 3` and echoed 1 MiB over TCP through it (the net_device
+suite's network-domain cell on its test manifest: an Apple M3 Max host,
+HVF, QEMU 11.1.3, Homebrew clang 23.1.3, one guest CPU, a 768 MiB
+machine; the baseline is the pages in use once the domain has ended;
+raw logs in erxos-history, `network-domain-footprint-2026-11-11`).
+
 Costs this design leaves unmeasured are on the performance watch list,
 [todo-performance.md](todo-performance.md).
 

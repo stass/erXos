@@ -3,22 +3,26 @@
 # frozen_string_literal: true
 
 require_relative '../net_device'
+require_relative '../network_domain'
 require_relative '../qemu_gate'
 
 # The network stack on QEMU virt under HVF: the development image boots with a
 # virtio-net device on QEMU's user networking, the system domain's erx_net takes a DHCP
 # lease from slirp, and the guest answers the harness's ARP request and ICMP echo
 # request, and its Erlang shell opens TCP connections through slirp
-# (tools/lib/erx/net_device.rb, whose header defines the exchange). HVF at one
-# CPU is its one cell. check_qemu builds the kernel before any suite runs, so this
+# (tools/lib/erx/net_device.rb, whose header defines the exchange), at one CPU. Its
+# second cell, also at one CPU, runs the stack in a network domain of its own on a test
+# manifest (tools/lib/erx/network_domain.rb). check_qemu builds the kernel before any suite runs, so this
 # suite does not.
-cells = Erx::QemuGate.suite_cells([1])
+cells = [*Erx::QemuGate.suite_cells([1]), Erx::NetworkDomain::Run::CELL]
 Erx::QemuGate.declare_suite(
   cells: cells,
   run: lambda do |context|
     run = Erx::NetDevice::Run.new(root: context.root)
     results = run.call(accels: [Erx::QemuGate::SUITE_ACCELERATOR], jobs: context.jobs, build: false)
-    run.measurements.each { |line| Erx::Terminal.puts(line) }
+    domain = Erx::NetworkDomain::Run.new(root: context.root)
+    results = results.merge(domain.call(jobs: context.jobs, build: false))
+    [*run.measurements, *domain.measurements].each { |line| Erx::Terminal.puts(line) }
     Erx::QemuGate.result(results, notes: run.notes)
   end
 )

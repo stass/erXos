@@ -113,15 +113,19 @@ module Erx
     # session domain boots, adds the command shell and erx_session
     # (docs/design-domains.md, "Principals, sessions and quotas"); the storage script adds
     # the block driver and littlefs's volume, which the system release does not ship
-    # (ReleaseFiles::STORAGE_ONLY; docs/design-stopgap.md, "littlefs in the storage domain"); a name
+    # (ReleaseFiles::STORAGE_ONLY; docs/design-stopgap.md, "littlefs in the storage domain"); the
+    # network script adds the network stack, which it starts permanent
+    # (ReleaseFiles#release_entry; docs/design-network-stack.md, "The process tree"); a name
     # the table does not hold boots DOMAIN_APPLICATIONS, the applications every domain
     # boots through. The development manifest's session template names the session
     # script and its storage row the storage script; medium_boot's manifest configures
-    # a domain (MediumBoot.manifest), and a test image may carry more scripts
+    # a domain (MediumBoot.manifest), the network domain cell's names the network script
+    # (NetworkDomain.manifest), and a test image may carry more scripts
     # (build_test_image's domains).
     DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
     DOMAIN_BOOTS = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_shell', 'erx_session'].freeze,
-                     'storage' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::STORAGE_ONLY].freeze }.freeze
+                     'storage' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::STORAGE_ONLY].freeze,
+                     'network' => [*DOMAIN_APPLICATIONS, 'erx_net'].freeze }.freeze
 
     # Refuses a test script (ReleaseFiles::DomainBoot#test) among domains unless the image
     # is a test image, whose archive flags mark its test code, so no image without the
@@ -253,10 +257,14 @@ module Erx
     # The image and the release medium for QEMU that holds it (ReleaseMedium), both in
     # directory, which must be clean: by default the production image. A boot that creates
     # a domain (MediumBoot) names a larger machine and a manifest with room for it, whose
-    # domain row names the release and runtime image the image then carries.
-    def build_medium(directory:, machine: DEVELOPMENT_MACHINE, manifest_source: File.binread(File.join(@root, MANIFEST)))
+    # domain row names the release and runtime image the image then carries. domains are
+    # boot scripts (ReleaseFiles.domain_boot, none a test script), each in place of the
+    # manifest's script of its name, for a harness whose manifest moves a service before
+    # the development table does (NetworkDomain).
+    def build_medium(directory:, machine: DEVELOPMENT_MACHINE, manifest_source: File.binread(File.join(@root, MANIFEST)),
+                     domains: [])
       built = assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
-                       machine: machine, domains: domain_boots(manifest_source))
+                       machine: machine, domains: (domains + domain_boots(manifest_source)).uniq(&:name))
       directory = built_directory(built)
       data_sectors = MediumImage.constant('data_sectors_min')
       volume = DataVolume.format(root: @root, runner: @runner, compiler: @compiler, directory: directory, data_sectors: data_sectors)
