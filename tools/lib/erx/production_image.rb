@@ -1116,11 +1116,17 @@ module Erx
                                   command_line: [COMMAND_LINES[accel], CONSOLE_PLAIN_WORD].compact.join(' '))
       end
 
-      # A record the console has not read when the root stops itself: the end path writes it to
-      # the line before the machine ends, so suspending the console first loses nothing. The
-      # text is "parked", tab, "at", tab, "end", as code points, since the line holds no quote.
+      # The record is written after the console is suspended, so only the end path can put it
+      # on the line before the machine ends. After the suspend the expression calls only BIFs
+      # and modules already loaded, so erx_log is loaded first. The console's first poll loads
+      # erx_log too, and the code server lets one process load a module while every other
+      # caller waits for it, so a console suspended in the middle of that load would leave
+      # erx_log:debug waiting forever, with no record, no halt and the watchdog still petted.
+      # The text is "parked", tab, "at", tab, "end", as code points, since the line holds no
+      # quote.
       def parked_log_boot(accel, count, built)
-        expression = 'erlang:suspend_process(whereis(erx_console)),' \
+        expression = '{module,erx_log}=code:ensure_loaded(erx_log),' \
+                     'erlang:suspend_process(whereis(erx_console)),' \
                      'erx_log:debug([112,97,114,107,101,100,9,97,116,9,101,110,100]),erlang:halt().'
         boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true,
                                   command_line: [COMMAND_LINES[accel], "erx.arg=-eval erx.arg=#{expression}"].compact.join(' '),
