@@ -88,14 +88,13 @@ erx_fiasco_budget_named(uint32_t task, uint64_t handle, uint64_t *charged)
 	return (status);
 }
 
+/* Any task carves, as a session carves each program's budget from its own; only the root resizes. */
 int
 erx_fiasco_budget_create_body(uint32_t task, uint64_t parent, uint64_t kind, uint64_t guarantee, uint64_t cap,
     uint64_t *budget)
 {
 	const budget_row_t row = { .kind = kind, .guarantee = guarantee, .cap = cap };
 
-	if (task != ERX_FIASCO_TASK_ROOT)
-		return (ERX_ENOTSUP);
 	if (kind != ERX_BUDGET_WALL && kind != ERX_BUDGET_ELASTIC)
 		return (ERX_EINVAL);
 	/* The create's one path names parent as the budget the new record is charged to. */

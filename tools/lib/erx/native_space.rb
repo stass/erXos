@@ -27,7 +27,7 @@ module Erx
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_space/program.c'].freeze
     CASES = %w[program_found writer_released between_tasks bounds revoke gate_refusals gate_queue
                created space_refusals released first_thread budget_calls budget_destroy groups passing time budget_held
-               doorbells slices copy image_shared].freeze
+               doorbells made slices copy image_shared].freeze
     # The image's domains/sample/ release, as test/guest/native_space/modes.h describes it.
     RELEASE_FILES = { 'domains/sample/alpha' => "alpha file\n",
                       "domains/sample/#{'long-name/' * 60}end" => "long file\n" }.freeze

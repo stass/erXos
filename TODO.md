@@ -298,7 +298,7 @@ it; git history is the record of completed work.
   the console path, the clock and the cross-compiled core, not a kernel entry.
   The test that a call keeps the caller's registers left with the trap route
   and returns with the `erx` backend's kernel.
-* [Low] stopgap, `liberx/backend/fiasco`: own-task thread handles are still the bare index, not `ERX_FIASCO_THREAD_HANDLE_BASE` plus the index that design-stopgap.md's "Thread handles" names, so thread 0's handle equals `ERX_CAP_NULL` and `erx_gate_bind` reaches thread 0 only through `ERX_CAP_SELF_THREAD`. Move handles onto the base. Likewise the root's handle to a created space's first thread is the task above the index (`service_thread_handle` in `service.c`), not the handle-table entry "Thread creation" names, so it can equal one of the root's entries once the root holds 256 of them, and `erx_cap_close` or `erx_cap_dup` of it reaches that entry; give it a value no entry can bear, as the base does.
+* [Low] stopgap, `liberx/backend/fiasco`: own-task thread handles are still the bare index, not `ERX_FIASCO_THREAD_HANDLE_BASE` plus the index that design-stopgap.md's "Thread handles" names, so thread 0's handle equals `ERX_CAP_NULL` and `erx_gate_bind` reaches thread 0 only through `ERX_CAP_SELF_THREAD`. Move handles onto the base. Likewise the handle the root or a creator holds to a created space's first thread is the task above the index (`service_thread_handle` in `service.c`), not the handle-table entry "Thread creation" names, so it can equal one of the root's entries once the root holds 256 of them, and `erx_cap_close` or `erx_cap_dup` of it reaches that entry; give it a value no entry can bear, as the base does.
 * [Low] stopgap, `liberx/backend/fiasco`: own-task thread handles are still the bare index, not `ERX_FIASCO_THREAD_HANDLE_BASE` plus the index that design-stopgap.md's "Thread handles" names, so thread 0's handle equals `ERX_CAP_NULL` and `erx_gate_bind` reaches thread 0 only through `ERX_CAP_SELF_THREAD`, and an `erx_cap_pass` item holding an own thread's handle is read as the handle table's entry of that number, so it may pass a memory object instead of being refused. Move handles onto the base.
 * [Medium] stopgap, `liberx/backend/fiasco/vm.c`: the page index's size counts the window, contiguous and device pages but not the archive pages a slice adds, one index entry each per live slice, so enough live slices fill the index and `page_find` spins on the service thread. One slice per domain cannot reach it; before a session slices per command, count live slice pages against a cap and refuse past it with `ERX_ENOMEM`, as `vm_device_pages_used` does, and correct `vm_table.h`'s "committing never finds it full".
 * [Low] stopgap, `liberx/backend/fiasco/service_wire.c`: the decoder copies a call's words into `decoded.request` without checking them against `ERX_FIASCO_WIRE_WORDS_MAX`; `erx_fiasco_mem_copy_request` fills all seven, so a longer layout would overflow it. Refuse past the maximum in the decoder, or assert every layout's size.
@@ -1474,6 +1474,8 @@ it; git history is the record of completed work.
   `erx_budget_create`'s parent is read the same way. Move them to `ERX_CAP_SELF` and refuse `ERX_CAP_NULL`
   with `ERX_ETYPE`, on the hosted backend too.
 
+* [Medium] stopgap, `liberx/backend/fiasco/budget.c` (`budget_takes`): a budget's end takes a group charged to it while the group's home task still runs, when that task's space is charged elsewhere, so the home loses its group and its doorbells stop delivering; design-stopgap.md's "Budgets and groups as records" says the first sweep stops the home task of every such group instead. Any task can now build this. Either stop the home in the spaces sweep, or refuse at `erx_fiasco_group_admit` a home whose space is not below the group's budget; add a native_space case first.
+* [Low] stopgap, native_space and native_task suites: no case checks that a task's end frees the budgets, groups and doorbells it made (the drain path), since the root's checks count pool pages only, not IRQ slots or object records; add a root-side count of live IRQ slots and records.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/task_refused.c`: in a task,
   `erx_vm_free_pages` reports 0 while commits through the service still succeed, an
   invented count that `api.h`'s exact contract does not allow; it should answer
@@ -1486,7 +1488,8 @@ it; git history is the record of completed work.
 * [Medium] domain library, `liberx/system/dom_apply.c`: two stopgap details reach permanent
   code: the fault thread's `erx_dom_lib_take` uses the stopgap's `erx_ipc_wait(deadline,
   *label)` before the target receive signature is settled (the `erx_ipc_wait` item above),
-  and the boot image's handle is passed as 0 to `erx_image_slice` and `erx_image_map`;
+  and the boot image is named by 0, the root's name for the stopgap's whole archive, in `erx_image_slice` and
+  `erx_image_map`;
   `erx_dom_held_t` should hold the image's handle.
 * [Medium] domain library, `liberx/system/dom_apply.c` (`apply_pass`): design-system.md A7
   asks that every `erx_cap_pass` of the library go through one function, `erx_dom_install`,

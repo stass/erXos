@@ -22,6 +22,7 @@
 #define MODE_DATA	11	/* finds DATA_PATTERN in its own writable data and writes WRITER_PATTERN there: ends with 0 */
 #define MODE_CODE_READ	12	/* ends with the first word of its own code as its status */
 #define MODE_CODE_WRITE	13	/* writes the first word of its own code, which faults at its gate */
+#define MODE_MAKER	14	/* in its domain group: makes a program's budget, group and bell, runs the child: ends with 0 */
 #define MODE_MASK	UINT64_C(0xff)
 #define SLOT_SHIFT	8u
 
@@ -77,5 +78,14 @@
 #define CREATOR_ENTRY_SHIFT	48u
 #define CREATOR_LABEL	UINT64_C(1)
 #define CREATOR_WAIT_NS	UINT64_C(10000000000)
+
+/*
+ * MODE_MAKER's argument: the handle of the slice of the program's entry the root passed
+ * it. Its child reports under MAKER_LABEL, and the budget it carves from its own holds
+ * MAKER_PAGES as guarantee and cap.
+ */
+#define MAKER_SLICE_SHIFT	8u
+#define MAKER_LABEL	UINT64_C(7)
+#define MAKER_PAGES	UINT64_C(64)
 
 #endif /* ERX_NATIVE_SPACE_MODES_H */

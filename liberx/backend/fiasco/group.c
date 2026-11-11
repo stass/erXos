@@ -5,9 +5,8 @@
 
 /*
  * Groups as records (docs/design-stopgap.md, "Budgets and groups as records"): the
- * service's group records and their homes, and the root's stubs of the group calls and
- * of erx_irq_create. A group record is an object record of kind group in the root's
- * handle table. Its home, the one task its threads run in, is that task's row
+ * service's group records and their homes, and the root's stubs of the group calls. A
+ * group record is an object record of kind group in its creator's handle table. Its home, the one task its threads run in, is that task's row
  * (service_task.h), which the group's first thread sets; a task is the home of one group
  * at most. The home's park record (park.c) holds the group's readiness and the
  * dispatcher that triggers it.
@@ -47,12 +46,14 @@ group_fill(uint32_t index, const void *request)
 	return (ERX_OK);
 }
 
-/* Only the root makes a group, as only the domain library does in Phase 1. */
+/*
+ * Any task makes a group, with no home, as the domain library makes a domain's and a
+ * session a program's: its first thread, the caller's own or its child's first, makes
+ * that thread's task its home (erx_fiasco_group_admit).
+ */
 int
 erx_fiasco_group_create_body(uint32_t task, uint64_t budget, uint64_t *group)
 {
-	if (task != ERX_FIASCO_TASK_ROOT)
-		return (ERX_ENOTSUP);
 	return (erx_fiasco_object_create(task, ERX_BACKEND_OBJECT_GROUP, budget, group_fill, NULL, group));
 }
 
@@ -207,21 +208,6 @@ erx_group_info(uint64_t group)
 		return (ERX_EINVAL);
 	erx_backend_group_report(erx_utcb_self(), erx_fiasco_group_status(), &group_cpuset);
 	return (ERX_OK);
-}
-
-int
-erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector, uint64_t *irq)
-{
-	const erx_fiasco_irq_create_request_t request = { .caller = erx_fiasco_thread_self()->index,
-	    .kind = kind, .selector = selector, .budget = budget };
-	erx_fiasco_reply_t reply;
-	int status;
-
-	(void)resource;
-	status = erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_CREATE, &request, sizeof(request), &reply);
-	if (status == ERX_OK)
-		*irq = reply.first;
-	return (status);
 }
 
 /*

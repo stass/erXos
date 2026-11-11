@@ -507,6 +507,21 @@ erx_budget_watch(uint64_t budget, uint64_t irq, uint64_t threshold)
 	return (ERX_ENOTSUP);
 }
 
+int
+erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector, uint64_t *irq)
+{
+	const erx_fiasco_irq_create_request_t request = { .caller = erx_fiasco_thread_self()->index,
+	    .kind = kind, .selector = selector, .budget = budget };
+	erx_fiasco_reply_t reply;
+	int status;
+
+	(void)resource;
+	status = erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_CREATE, &request, sizeof(request), &reply);
+	if (status == ERX_OK)
+		*irq = reply.first;
+	return (status);
+}
+
 /*
  * ERX_CAP_NULL unbinds. The service keeps every bind, writes each label and checks the
  * group, so a task other than the root binds only within its own home group (irq.c).

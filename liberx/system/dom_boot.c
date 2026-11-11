@@ -76,7 +76,7 @@ erx_dom_boot_up(erx_dom_lib_t *lib, const erx_boot_info_t *system_page, uint64_t
 	lib->view.system_space = system_space;
 	lib->held.system_group = system_page->group.raw;
 	lib->held.time_page = system_page->time_page.raw;
-	/* The stopgap's backend has one archive and reads no image handle. */
+	/* On the stopgap the root names its one boot archive as image 0. */
 	lib->held.image = 0;
 	lib->pack_flags = system_page->pack_flags;
 	lib->det = (system_page->flags & ERX_BOOT_DET) != 0;

@@ -21,8 +21,10 @@
  *
  * The one property kept is that an object goes with its budget: a budget's end, at
  * its destroy, at its last handle's close or as a step of an outer budget's end, ends
- * everything charged to it or to a budget carved from it. Only the root carves and
- * resizes, so every budget record is the root's and no task's end ends one.
+ * everything charged to it or to a budget carved from it. Any task carves, from its own
+ * budget or one it holds, and only the root resizes. A budget record is in its
+ * creator's handle table, and a task's end leaves the end of a budget it held to the
+ * drain after it (erx_fiasco_object_drain).
  * Only the service thread calls these.
  */
 
@@ -39,9 +41,9 @@ const char	*erx_fiasco_budget_init(void);
 int	erx_fiasco_budget_named(uint32_t task, uint64_t handle, uint64_t *charged) ERX_WARN_UNUSED_RESULT;
 
 /*
- * erx_budget_create's body: a record under parent, one of the root's budgets, with the
- * three values recorded. A kind other than wall or elastic is ERX_EINVAL; a task other
- * than the root ERX_ENOTSUP.
+ * erx_budget_create's body, for any task: a record under parent, as
+ * erx_fiasco_budget_named names it, with the three values recorded. A kind other than
+ * wall or elastic is ERX_EINVAL.
  */
 int	erx_fiasco_budget_create_body(uint32_t task, uint64_t parent, uint64_t kind, uint64_t guarantee, uint64_t cap,
 	    uint64_t *budget) ERX_WARN_UNUSED_RESULT;

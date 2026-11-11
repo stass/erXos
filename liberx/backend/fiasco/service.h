@@ -49,9 +49,12 @@ uint64_t	erx_fiasco_service_thread(void);
  * else ERX_ETYPE, and the space's records go to it with label as their label;
  * parent is accepted and ignored, and budget charges the space as for every create
  * (erx_budget_create below); cap_limit bounds the task's handle table, counting ERX_CAP_NULL as erXos's
- * kernel does, and outside 2 to ERX_CAPS_MAX is ERX_EINVAL; only the root makes a task. image is ignored and entry is the boot
- * archive's; *start is where the task's first thread will start. A task stops itself
- * with ERX_CAP_SELF, and on success that call does not return; the root may stop a task.
+ * kernel does, and outside 2 to ERX_CAPS_MAX is ERX_EINVAL; any task makes a task below its own
+ * space or one it created. erx_image_map loads into a space the caller created: image is
+ * 0, the whole boot archive, from the root alone, or a slice the caller holds, and entry
+ * is an index in it; *start is where the task's first thread will start. A task stops
+ * itself with ERX_CAP_SELF, and on success that call does not return; a holder of a
+ * space's handle may stop it.
  */
 int	erx_space_create(uint64_t budget, uint64_t parent, uint64_t fault, uint64_t label, uint32_t flags,
 	    uint32_t cap_limit, uint64_t *space) ERX_WARN_UNUSED_RESULT;

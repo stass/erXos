@@ -7,7 +7,8 @@
  * A task's side of its start (docs/design-stopgap.md, "Helper threads"): its first
  * thread readies its own record, starts the task's reaper and its dispatcher through
  * the ordinary calls, runs the program, and stops the task with the program's status.
- * A task reaches the service through the gate the root mapped at the pager's slot.
+ * A task reaches the service through the gate the root mapped at the pager's slot, and
+ * makes its groups here, where the root's own stubs in group.c are not linked.
  */
 
 #include <stdint.h>
@@ -15,6 +16,7 @@
 #include <l4/sys/consts.h>
 
 #include "erx/abi.h"
+#include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/park.h"
 #include "liberx/backend/fiasco/service.h"
@@ -30,6 +32,25 @@ uint64_t
 erx_fiasco_service_gate(void)
 {
 	return (L4_BASE_PAGER_CAP);
+}
+
+/*
+ * A task's group create is the request alone, and starts no dispatcher, since the
+ * task's dispatcher already runs. The group's first thread fixes its home.
+ * parent is ignored, as in the root.
+ */
+int
+erx_group_create(uint64_t budget, uint64_t parent, uint64_t *group)
+{
+	const erx_fiasco_group_create_request_t request = { .caller = erx_fiasco_thread_self()->index, .budget = budget };
+	erx_fiasco_reply_t reply;
+	int status;
+
+	(void)parent;
+	status = erx_fiasco_service_call(ERX_FIASCO_CALL_GROUP_CREATE, &request, sizeof(request), &reply);
+	if (status == ERX_OK)
+		*group = reply.first;
+	return (status);
 }
 
 /* The service mapped it at the task's creation (time_page.c). */

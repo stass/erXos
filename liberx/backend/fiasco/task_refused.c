@@ -40,17 +40,6 @@ erx_group_info(uint64_t group)
 	return (ERX_ENOTSUP);
 }
 
-int
-erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector, uint64_t *irq)
-{
-	(void)budget;
-	(void)resource;
-	(void)kind;
-	(void)selector;
-	(void)irq;
-	return (ERX_ENOTSUP);
-}
-
 /* The machine's watchdog is the system domain's to pet, and no other's. */
 int
 erx_watchdog_pet(void)

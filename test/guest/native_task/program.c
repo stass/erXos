@@ -298,11 +298,12 @@ mode_race(void)
 }
 
 /*
- * Only the root makes IRQ objects, whatever the kind, so a task asks the service directly
- * and each create answers ERX_ENOTSUP. A holder binds, unbinds, triggers and acks an object
+ * A task makes no line, which only the root makes, so a task asks the service directly
+ * and that create answers ERX_ENOTSUP. A holder binds, unbinds, triggers and acks an object
  * it was given, but through a handle of its own table, which holds none here: ERX_CAP_NULL
  * names nothing (ERX_EINVAL), and none of the handles 1 to IRQ_SCAN, which include the
  * object the root made before it started this task, answers ERX_OK to any of the four.
+ * Last, the task makes a doorbell of its own, which its end takes with it.
  */
 static int64_t
 mode_irq_refused(void)
@@ -314,8 +315,6 @@ mode_irq_refused(void)
 	const erx_fiasco_irq_request_t none = { .caller = caller, .irq = ERX_CAP_NULL };
 	erx_fiasco_reply_t reply;
 
-	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_CREATE, &soft, sizeof(soft), &reply) != ERX_ENOTSUP)
-		return (80);
 	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_CREATE, &line, sizeof(line), &reply) != ERX_ENOTSUP)
 		return (81);
 	if (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_BIND, &bind, sizeof(bind), &reply) != ERX_EINVAL)
@@ -336,7 +335,7 @@ mode_irq_refused(void)
 		    erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_UNBIND, &held, sizeof(held), &reply) == ERX_OK)
 			return (100 + (int64_t)handle);
 	}
-	return (0);
+	return (erx_fiasco_service_call(ERX_FIASCO_CALL_IRQ_CREATE, &soft, sizeof(soft), &reply) == ERX_OK ? 0 : 80);
 }
 
 /*

@@ -781,8 +781,8 @@ layout erx_fiasco_cap_request wire_le 8 16
   field caller u64 0
   field cap u64 8
 
-# erx_group_create, from the root alone: the group's handle is the reply's
-# first word.
+# erx_group_create, from any task: the group's handle is the reply's first
+# word.
 layout erx_fiasco_group_create_request wire_le 8 16
   field caller u64 0
   field budget u64 8

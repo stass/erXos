@@ -210,7 +210,8 @@ static _Atomic int64_t bell_result = BELL_RUNNING;
 
 /*
  * An executor of the task's home group: parks until a take gives its bell's label, then
- * acks the bell and rings the root's object, from this task's own handles to both.
+ * acks the bell and rings the back object, if the argument names one, from this task's
+ * own handles to both.
  */
 static void
 bell_executor(uint64_t argument)
@@ -232,14 +233,14 @@ bell_executor(uint64_t argument)
 			break;
 	}
 	if (taken == 1 && erx_utcb_mr_load(erx_utcb_self(), 0, &label) && label == BELL_LABEL)
-		result = erx_irq_ack(bell) == ERX_OK && erx_irq_trigger(back) == ERX_OK ? 0 : 62;
+		result = erx_irq_ack(bell) == ERX_OK && (back == ERX_CAP_NULL || erx_irq_trigger(back) == ERX_OK) ? 0 : 62;
 	atomic_store_explicit(&bell_result, result, memory_order_release);
 	erx_thread_exit();
 }
 
-/* The first thread, a worker: starts the executor, and ends with its result once it has one. */
+/* From the first thread, a worker, once: starts the executor, and returns its result once it has one. */
 static int64_t
-mode_bell(uint64_t argument)
+bell_run(uint64_t argument)
 {
 	erx_fiasco_start_t start = { 0 };
 	const uint64_t *const words = (const uint64_t *)(const void *)&start;
@@ -260,6 +261,56 @@ mode_bell(uint64_t argument)
 	    erx_fiasco_clock_ns() < deadline)
 		erx_yield();
 	return (result == BELL_RUNNING ? 63 : result);
+}
+
+/*
+ * What a session makes for each program, from this task's own authority (MODE_MAKER):
+ * a budget carved from the one its own space is charged to, a budget carved from that,
+ * a group and a bell charged to them, and a child below its own space, charged to the
+ * first budget, running index 0 of the slice the root passed in the new group. A task
+ * resizes no budget and makes no line. The bell binds only into this task's own home
+ * group, not into the child's, and its ring reaches this task's executor. The child's
+ * first thread ends with FIRST_STATUS, and the first budget's destroy takes everything
+ * charged to either budget, the bell included.
+ */
+static int64_t
+mode_maker(uint64_t argument)
+{
+	const uint64_t slice = argument >> MAKER_SLICE_SHIFT & HANDLE_MASK;
+	uint64_t budget, carved, group, bell, refused, gate, child, pc, thread, label;
+	erx_fault_t record;
+	int64_t rung;
+
+	if (erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_WALL, MAKER_PAGES, MAKER_PAGES, &budget) != ERX_OK ||
+	    erx_budget_create(budget, ERX_BUDGET_ELASTIC, 1, 2, &carved) != ERX_OK)
+		return (70);
+	if (erx_budget_resize(budget, 1, 1) != ERX_ENOTSUP)
+		return (71);
+	if (erx_group_create(budget, 0, &group) != ERX_OK || erx_irq_create(carved, 0, ERX_IRQ_SOFT, 0, &bell) != ERX_OK)
+		return (72);
+	if (erx_irq_create(budget, 0, ERX_IRQ_LINE, 0, &refused) != ERX_ENOTSUP)
+		return (73);
+	if (erx_gate_create(budget, &gate) != ERX_OK ||
+	    erx_space_create(budget, ERX_CAP_SELF, gate, MAKER_LABEL, 0, CREATED_CAP_LIMIT, &child) != ERX_OK ||
+	    erx_image_map(child, slice, 0, &pc) != ERX_OK)
+		return (74);
+	first_registers(pc, FIRST_TAG << SLOT_SHIFT | MODE_FIRST);
+	if (erx_thread_create(0, child, group, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK)
+		return (75);
+	/* The child is the new group's home, so the group is not this task's to bind into. */
+	if (erx_irq_bind(bell, group, BELL_LABEL) != ERX_ETYPE)
+		return (76);
+	if (erx_irq_bind(bell, ERX_CAP_SELF, BELL_LABEL) != ERX_OK || erx_irq_trigger(bell) != ERX_OK)
+		return (77);
+	rung = bell_run(bell << BELL_SHIFT | ERX_CAP_NULL << BACK_SHIFT);
+	if (rung != 0)
+		return (rung);
+	if (erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) != ERX_OK || erx_thread_start(thread) != ERX_OK)
+		return (78);
+	if (!record_take(&record, &label) || record.kind != ERX_FAULT_EXIT || label != MAKER_LABEL ||
+	    record.status != FIRST_STATUS)
+		return (79);
+	return (erx_object_destroy(budget) == ERX_OK && erx_irq_trigger(bell) == ERX_ESTALE ? 0 : 80);
 }
 
 static bool
@@ -350,7 +401,9 @@ erx_task_main(uint64_t argument)
 	case MODE_TIME:
 		return (mode_time());
 	case MODE_BELL:
-		return (mode_bell(argument));
+		return (bell_run(argument));
+	case MODE_MAKER:
+		return (mode_maker(argument));
 	case MODE_RELEASE:
 		return (mode_release(argument >> SLOT_SHIFT));
 	case MODE_DATA:

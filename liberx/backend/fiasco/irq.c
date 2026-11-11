@@ -6,8 +6,9 @@
 /*
  * The IRQ calls' bodies, on the service, which alone touches this table
  * (docs/design-stopgap.md, "Interrupts and readiness"). An IRQ object is an object
- * record of kind IRQ, the root's to make, and any holder's to trigger, ack and bind; its
- * kernel object sits in one of the root's slots, kept here with its bind. The root binds
+ * record of kind IRQ, any task's to make as a doorbell and the root's alone as a line,
+ * and any holder's to trigger, ack and bind; its kernel object sits in one of the root's
+ * slots, kept here with its bind. The root binds
  * into any group it holds, as the domain library binds a domain's bell, and the root's own
  * drivers their lines; another holder binds only within the group it is the home of
  * (irq_group_allowed).
@@ -184,7 +185,8 @@ irq_fill(uint32_t record, const void *argument)
 int
 erx_fiasco_irq_create_body(uint32_t task, const erx_fiasco_irq_create_request_t *request, uint64_t *irq)
 {
-	if (task != ERX_FIASCO_TASK_ROOT || request->kind == ERX_IRQ_MSI)
+	/* MSI is not offered, and a line is the root's alone. */
+	if (request->kind == ERX_IRQ_MSI || (task != ERX_FIASCO_TASK_ROOT && request->kind == ERX_IRQ_LINE))
 		return (ERX_ENOTSUP);
 	if ((request->kind != ERX_IRQ_SOFT && request->kind != ERX_IRQ_LINE) || request->selector > UINT32_MAX)
 		return (ERX_EINVAL);

@@ -201,8 +201,8 @@ erx_fiasco_gate_create_body(uint32_t task, uint64_t budget, uint64_t *gate)
 
 /*
  * thread is ERX_CAP_NULL, which unbinds; ERX_CAP_SELF_THREAD; or a handle of one of
- * the caller's own threads, its index. The root's handle of another task's thread is
- * ERX_ENOTSUP, as on the stopgap a gate's thread is always its binder's.
+ * the caller's own threads, its index. A handle the root or a creator holds of another
+ * task's thread is ERX_ENOTSUP, as on the stopgap a gate's thread is always its binder's.
  */
 int
 erx_fiasco_gate_bind_body(uint32_t task, uint32_t caller, uint64_t gate, uint64_t thread)

@@ -232,7 +232,7 @@ library_up(void)
 	lib.fail_step = UINT32_MAX;
 	lib.held.principals = principals_held;
 	lib.held.time_page = erx_fiasco_time_object();
-	/* The stopgap's backend has one archive and reads no image handle. */
+	/* On the stopgap the root names its one boot archive as image 0. */
 	lib.held.image = 0;
 	if (erx_group_create(0, 0, &lib.held.system_group) != ERX_OK ||
 	    erx_group_create(0, 0, &principals_held[0].group) != ERX_OK)

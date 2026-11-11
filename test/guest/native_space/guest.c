@@ -11,7 +11,8 @@
  * below its own, the create's refusals, and a release at the last handle's close; a
  * created space's first thread, which the root makes and starts; budgets and groups as
  * records; handles the root passes into a task with erx_cap_pass; a budget whose
- * last handle a task holds, which ends after that task's end; and slices of the
+ * last handle a task holds, which ends after that task's end; a program's budgets,
+ * group and doorbell that a task makes itself; and slices of the
  * image, which a task lists with erx_release_entry, and erx_mem_copy. Each case says
  * one line, which tools/lib/erx/native_space.rb holds the transcript to.
  */
@@ -804,6 +805,37 @@ case_doorbells(void)
 }
 
 /*
+ * A task makes a program's records from its own authority, as a session does (MODE_MAKER
+ * in program.c): budgets, a group, a bell and a child that runs, from a slice of the
+ * program's entry the root passed it, in the new group. The root starts the task in a
+ * domain group, its home, into which the task binds its bell. The task's end takes the
+ * domain group with it, and the pages come back. After case_doorbells, as the root
+ * already has a group of its own.
+ */
+static void
+case_made(void)
+{
+	const uint64_t before = erx_fiasco_vm_free_pages();
+	uint64_t domain = ERX_CAP_NULL, slice = ERX_CAP_NULL, task = 0;
+	int64_t status = INT64_MIN;
+	bool passed = erx_group_create(0, 0, &domain) == ERX_OK && erx_image_slice(0, 0, program_entry, 1, &slice) == ERX_OK &&
+	    erx_fiasco_launch_make(program_entry, 0, &task, &program_pc) == ERX_OK;
+
+	item_put(0, slice, ERX_HR_READ, false);
+	passed = passed && erx_cap_pass(ERX_CAP_SELF, task, 1) == ERX_OK;
+	if (passed && group_start(task, domain, MODE_MAKER | (item_word(0, 1) & HANDLE_MASK) << MAKER_SLICE_SHIFT)) {
+		if (erx_fiasco_task_join_until(task, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK)
+			status = INT64_MIN;
+	} else if (task != 0) {
+		task_drop(task);
+	}
+	say_count("made_status", (uint64_t)status);
+	passed = passed && status == 0 && erx_object_destroy(domain) == ERX_ESTALE;
+	passed = erx_cap_close(slice) == ERX_OK && passed;
+	say_case("made", passed && erx_fiasco_vm_free_pages() == before);
+}
+
+/*
  * A task that holds the last handle of the budget its own space is charged to ends that
  * budget with its own end. The root moves the budget and a group charged to it into
  * the space, so it keeps no handle to either, and starts the space's first thread,
@@ -1104,6 +1136,7 @@ erx_fiasco_root_main(void)
 	case_time();
 	case_budget_held();
 	case_doorbells();
+	case_made();
 	if (erx_fiasco_launcher_find(&pack, RELEASE_FIRST_PATH, &release_first) != ERX_OK)
 		say("erx: space: no domain release\n");
 	case_slices(release_first);

@@ -116,9 +116,9 @@ case_ends(const char *name, uint32_t flags, uint64_t mode, int64_t expected)
 }
 
 /*
- * A task cannot make an IRQ object, and reaches none through a handle it was not given: the
- * root holds an object, within the handles the task probes, while the task runs, and still
- * holds it afterwards.
+ * A task cannot make a line, and reaches no IRQ object through a handle it was not given:
+ * the root holds an object, within the handles the task probes, while the task runs, and
+ * still holds it afterwards. The doorbell the task makes last goes with the task.
  */
 static void
 case_irq_refused(void)

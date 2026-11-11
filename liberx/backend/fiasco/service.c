@@ -281,7 +281,7 @@ service_main(void)
 }
 
 /*
- * The IRQ calls (irq.c): the root makes an object, and any task holding its handle
+ * The IRQ calls (irq.c): any task makes a doorbell and the root a line, and any task holding its handle
  * triggers, acks, binds and unbinds it, a task other than the root only within the group
  * it is the home of.
  */
@@ -589,7 +589,8 @@ service_task_write(uint32_t task, const erx_fiasco_task_write_request_t *request
 
 /*
  * A thread handle, for the calling task: a task's own handle is an index, and the
- * root's handle of another task's thread carries that task above the index. These
+ * handle the root or a creator holds of another task's thread carries that task above
+ * the index. These
  * two are the service's directions; the stubs in thread.c and irq.c read a task's
  * own handle as its index.
  */
@@ -623,7 +624,7 @@ erx_fiasco_thread_handle_name(uint32_t caller, uint64_t handle, uint32_t *task, 
 
 /*
  * Makes the kernel's objects for an index the stub claimed, or for the first thread
- * of a task the root names, and takes the starting registers from the caller's
+ * of a task its creator or the root names, and takes the starting registers from the caller's
  * public UTCB. Everything goes through the window, so the record may be another task's.
  * A task holds its semaphore at the same slot the root's own threads use. A created
  * space takes one first thread from its creator, ever, the caller holding the space's

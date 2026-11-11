@@ -24,9 +24,9 @@
 #define ERX_FIASCO_GROUP_NONE	UINT32_MAX
 
 /*
- * Makes a group record with no home and returns its handle; only the root makes one,
- * so a task is ERX_ENOTSUP. The root's first also starts the root's dispatcher in it,
- * which makes it the root's own group. parent is ignored: a recorded difference.
+ * Makes a group record with no home and returns its handle, from any task (the root's
+ * stub in group.c, a task's in task_start.c). The root's first also starts the root's
+ * dispatcher in it, which makes it the root's own group. parent is ignored: a recorded difference.
  */
 int	erx_group_create(uint64_t budget, uint64_t parent, uint64_t *group) ERX_WARN_UNUSED_RESULT;
 
@@ -37,7 +37,7 @@ int	erx_group_create(uint64_t budget, uint64_t parent, uint64_t *group) ERX_WARN
  */
 int	erx_group_take_ready(uint32_t max) ERX_WARN_UNUSED_RESULT;
 
-/* The service's group bodies. erx_group_create's: a task is ERX_ENOTSUP. */
+/* The service's group bodies. */
 int	erx_fiasco_group_create_body(uint32_t task, uint64_t budget, uint64_t *group);
 /*
  * erx_group_configure on a group the root did not take as its own: a handle that names
@@ -65,10 +65,11 @@ void	erx_fiasco_group_free(uint32_t record);
 int	erx_fiasco_dispatcher_set_body(uint32_t task, uint64_t thread);
 
 /*
- * IRQ objects (docs/design-stopgap.md, "Interrupts and readiness"), made by the root
- * alone: kind is ERX_IRQ_SOFT, or ERX_IRQ_LINE with selector the line, and resource is
- * ignored. A line the kernel will not attach, taken or not there, is ERX_EBUSY; an object
- * past the machine's ERX_FIASCO_IRQS_MAX, ERX_ENOMEM. A task's create is ERX_ENOTSUP.
+ * IRQ objects (docs/design-stopgap.md, "Interrupts and readiness"): kind is
+ * ERX_IRQ_SOFT, a doorbell, which any task makes, or ERX_IRQ_LINE with selector the line,
+ * which only the root makes, and resource is ignored. A line the kernel will not attach,
+ * taken or not there, is ERX_EBUSY; an object past the machine's ERX_FIASCO_IRQS_MAX,
+ * ERX_ENOMEM; a task's line or any MSI, ERX_ENOTSUP.
  */
 int	erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector,
 	    uint64_t *irq) ERX_WARN_UNUSED_RESULT;
