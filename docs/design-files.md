@@ -316,6 +316,11 @@ clients](#native-clients-liberxs-file-client)).
                                            % a grant at a file server, by pid,
                                            % and the tree it roots in, its
                                            % attach name
+                  | {facet, atom(), Tree :: name()}
+                                           % a facet's grant, by the facet's
+                                           % name: the grant the domain's
+                                           % facet registry holds for it at
+                                           % each resolution
                   | ended                  % a grant that has ended: every
                                            % request answers eio, unsent
                   | {fid, fid()}.          % a program's mount, in its
@@ -1273,8 +1278,13 @@ is written as the plain names it is: it is absolute, empty names and a
 trailing `/` are dropped as for any path, so `/a//b/` is `/a/b`, and one
 holding `.` or `..` is refused with `einval`, since it names an entry
 rather than a directory to resolve.
-`erx_ns:mount(Pid, To, Options)` adds an entry for a grant's pid, with
-the tree and the rights its options name.
+`erx_ns:mount(Pid, To, Options)` adds an entry for a grant's pid, a
+process of the domain's own runtime, with the tree and the rights its
+options name.
+`erx_ns:mount({facet, Name}, To, Options)` adds an entry for the facet
+`Name`, with the same options, whose provider names the facet and holds
+no pid (below, "A facet's mount"); it is the only way a grant
+of another domain is mounted.
 `erx_ns:mount({erofs, Window}, To, Options)` adds a read-only entry for
 the EROFS image that the block service's window `Window` holds: `erx_ns`'s
 process mounts the image with the EROFS reader, which reads it
@@ -1313,6 +1323,29 @@ operation on a path whose server ended answers `eio` whichever table
 names it. The monitors are the process's only state beyond the term;
 a restarted process reads the term and monitors its grants again, and
 one whose grant ended meanwhile answers `DOWN` at once.
+
+**A facet's mount.** A grant of another domain is reached by path
+through a facet's mount, never by its pid: the entry's provider is
+`{facet, Name, Tree}`, and the table a resolution uses is the term with
+each such entry, binds of it included, read at that moment against the
+domain's facet registry, the term `{erx, facets}` that `erx:cap/1`
+reads ([design-system.md](design-system.md#facets-a-configured-domain-serves)):
+on the grant the registry holds for `Name`, or `ended` when it holds
+none (`erx_path:with_facets/2`, which `prim_file:erx_table/0` applies
+to the term at each resolution). The authority is read at use, so
+nothing follows the registry: when a server's domain restarts, the
+re-grant its new incarnation mints for the domain replaces the facet in
+the registry, and the next lookup reaches it, with no change to the
+table. `erx_ns`'s process monitors no facet's grant. A grant that has
+ended, or whose connection has, answers every request `eio` through the
+file client's own monitor on it, so between a grant's end and its
+re-grant the facet's paths answer `eio`, as they do before its first
+grant; they never resolve through the entry beneath. A descriptor keeps
+the grant and fid it was opened on (F10): once that grant has ended,
+every operation on it that reaches the server answers `eio`, a read
+first answering any bytes the descriptor already holds, and only a new
+open reaches the re-grant, so a writer reopens its files after the
+server's domain restarts.
 
 ### Narrowing for a program
 

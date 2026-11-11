@@ -4736,6 +4736,19 @@ document's "residual risks accepted" paragraph.
   they stay in the caller's mailbox, the code server's included, and each receive
   rescans them. Bound what a caller keeps from a server (a deadline, or dropping what
   arrives at the alias that is not its reply) with a test of a flooding server.
+* [Medium] Namespace, a facet's mount (`erx_path:with_facets/2`, design-files.md, "A facet's
+  mount"): every lookup under a facet's mount, `/data` among them, goes to whatever pid the
+  domain's registry holds for the facet, which a server domain minted, so a server that stalls,
+  floods or answers as no file server holds its clients as the two `erx_file_remote` items above
+  describe. Deferred to Phase 2 with them, when domains other than trusted ones serve facets.
+* [Medium] Namespace, raw and resolved tables (`prim_file:erx_mounts/0` and `erx_table/0`): only
+  `erx_ns` may read the raw mounts and every resolution must read the resolved table, and nothing
+  checks either; a resolution of the raw table meets `{facet, _, _}` and fails with `function_clause`
+  in `erx_on/2`. Add a build check that only erx_ns.erl calls `erx_mounts/0`, as
+  test/host/ns_writers_test.rb does for the term's writers, and a facet case in
+  test/integration/prim_file_compare.erl through the real `prim_file`. `erx_table/0` also rebuilds
+  the table's list at every lookup, facets or not; return it unchanged when it holds no facet. The
+  `mount` command shows a facet as the grant it resolved to, or `ended`, never by its name.
 * [Medium] erx_fs grant fuzz (`test/erlang/erx_fs_grant_fuzz.erl`): every sequence
   runs a grant for its own domain, and the model's "a reply goes only to the client's
   domain" is stated by node, so the funnel's path for another domain's client

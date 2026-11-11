@@ -27,7 +27,10 @@ ns_test_() ->
       fun the_table_holds_at_most_64_entries/0,
       fun an_ended_grant_marks_every_entry_of_it_ended/0,
       fun a_grant_ended_while_the_process_was_down_ends_on_restart/0,
-      fun a_malformed_request_answers_einval_and_changes_nothing/0]}.
+      fun a_malformed_request_answers_einval_and_changes_nothing/0,
+      fun a_facet_mount_reads_the_registry_at_use/0,
+      fun a_facet_grant_that_ends_leaves_the_table_and_survives_a_restart/0,
+      fun facet_mount_refusals/0]}.
 
 start() ->
     persistent_term:erase(erx_ns),
@@ -40,9 +43,10 @@ stop(_Ns) ->
     exit(Ns, kill),
     wait_down(Ns),
     persistent_term:erase(erx_ns),
+    persistent_term:erase({erx, facets}),
     flush().
 
-table() -> erx_ns_prim_stub:erx_table().
+table() -> erx_ns_prim_stub:erx_mounts().
 
 grant() -> spawn(fun() -> receive stop -> ok end end).
 
@@ -198,6 +202,72 @@ image_mount_refusals() ->
     ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)),
     unregister(erx_ns_log),
     ?assertMatch([{log, ["erx_ns: image ", _, ": ", <<"erofs: block 0: no EROFS magic">>]} | _], logged()).
+
+%% A facet's mount holds the facet's name, not a pid, and a resolution reads the domain's
+%% facet registry, the term {erx, facets}, as it uses the table: each entry of the facet,
+%% binds included, is on the grant the registry holds now, a re-grant serves the next
+%% lookup, and with no grant, or a value that is no pid, the entries answer eio. The
+%% process keeps no monitor for a facet, so a grant of another domain never meets
+%% is_process_alive/1.
+a_facet_mount_reads_the_registry_at_use() ->
+    ?assertEqual(ok, erx_ns:mount({facet, data}, <<"/data">>, [{tree, <<"data">>}, rw])),
+    ok = erx_ns:bind(<<"/data/sub">>, <<"/s">>, [ro]),
+    ?assertMatch([_, #{point := [<<"data">>], provider := {facet, data, <<"data">>}, root := [], rights := rw},
+                  #{point := [<<"s">>], provider := {facet, data, <<"data">>}, root := [<<"sub">>], rights := ro}],
+                 table()),
+    ?assertMatch([_, #{provider := ended}, #{provider := ended}], at_use()),
+    [First, Second] = [grant(), grant()],
+    persistent_term:put({erx, facets}, #{data => First}),
+    ?assertMatch([_, #{provider := {grant, First, <<"data">>}, rights := rw},
+                  #{provider := {grant, First, <<"data">>}, root := [<<"sub">>], rights := ro}], at_use()),
+    persistent_term:put({erx, facets}, #{data => Second, other => First}),
+    ?assertMatch([_, #{provider := {grant, Second, _}}, #{provider := {grant, Second, _}}], at_use()),
+    Remote = remote_pid(),
+    persistent_term:put({erx, facets}, #{data => Remote}),
+    ?assertMatch([_, #{provider := {grant, Remote, _}}, #{provider := {grant, Remote, _}}], at_use()),
+    persistent_term:put({erx, facets}, #{data => not_a_pid}),
+    ?assertMatch([_, #{provider := ended}, #{provider := ended}], at_use()),
+    ?assertEqual(#{}, maps:get(monitors, sys:get_state(erx_ns))).
+
+%% A facet's grant that ends changes nothing in the table: the next lookup still sends to
+%% it and the client's own monitor on it answers eio, until the registry holds the
+%% re-grant. A restarted process keeps the facet's entries as the term holds them.
+a_facet_grant_that_ends_leaves_the_table_and_survives_a_restart() ->
+    ok = erx_ns:mount({facet, data}, <<"/data">>, [{tree, <<"data">>}, rw]),
+    Grant = grant(),
+    persistent_term:put({erx, facets}, #{data => Grant}),
+    Grant ! stop,
+    wait_down(Grant),
+    Before = settled(),
+    ?assertMatch([_, #{provider := {facet, data, <<"data">>}}], Before),
+    ?assertMatch([_, #{provider := {grant, Grant, _}}], at_use()),
+    Ns = whereis(erx_ns),
+    exit(Ns, kill),
+    wait_down(Ns),
+    {ok, Again} = erx_ns:start_link(erx_ns_prim_stub),
+    unlink(Again),
+    ?assertEqual(Before, settled()).
+
+%% A facet is named by an atom, and its mount takes a grant's options; a pid of another
+%% domain is never mounted directly, only through a facet.
+facet_mount_refusals() ->
+    [?assertEqual({error, Reason}, erx_ns:mount(Source, Point, Options))
+     || {Reason, Source, Point, Options} <-
+            [{einval, {facet, <<"data">>}, <<"/data">>, [{tree, <<"data">>}]},
+             {einval, {facet, data}, <<"/data">>, []},
+             {einval, {facet, data}, <<"/data">>, [{tree, <<"data">>}, rw, ro]},
+             {einval, {facet, data}, <<"data">>, [{tree, <<"data">>}]},
+             {einval, remote_pid(), <<"/data">>, [{tree, <<"data">>}, rw]}]],
+    ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)).
+
+%% The table as a resolution uses it, prim_file:erx_table/0's.
+at_use() ->
+    erx_path:with_facets(table(), persistent_term:get({erx, facets}, #{})).
+
+%% A pid of another node, which this node is not connected to.
+remote_pid() ->
+    Node = <<"storage@erxos">>,
+    binary_to_term(<<131, 88, 119, (byte_size(Node)), Node/binary, 1:32, 0:32, 7:32>>).
 
 logged() ->
     receive {log, _} = Log -> [Log | logged()] after 0 -> [] end.

@@ -42,7 +42,7 @@
 
 %% erXos: the namespace's table, for erx_ns, and the runtime's fid counter, for
 %% erx_file_remote.
--export([erx_table/0, erx_fid/0, erx_tmp_limit/0]).
+-export([erx_table/0, erx_mounts/0, erx_fid/0, erx_tmp_limit/0]).
 
 -export([read_link/1, read_link_all/1,
          read_link_info/1, read_link_info/2,
@@ -918,12 +918,20 @@ erx_fid() ->
 erx_tmp_limit() ->
     erx_tmp_limit_nif().
 
-%% erXos: the runtime's namespace table (design-files.md, Building, binding and
-%% mounting): the persistent term erx_ns's process alone writes, or until it writes one
-%% the boot table, the domain's local entries. These are the release slice at /, and
-%% each EROFS image where its release names it, of which the boot information names
-%% none yet; erx_ns:mount/3 mounts an image the runtime holds a window on.
+%% erXos: the runtime's namespace table as a resolution uses it (design-files.md,
+%% Building, binding and mounting): the mounts, each of a facet on the grant the
+%% domain's facet registry, the term {erx, facets}, holds for it now, or ended when it
+%% holds none (erx_path:with_facets/2). It is read at each resolution, so a re-grant
+%% serves the next lookup.
 erx_table() ->
+    erx_path:with_facets(erx_mounts(), persistent_term:get({erx, facets}, #{})).
+
+%% erXos: the mounts as erx_ns keeps them: the persistent term erx_ns's process alone
+%% writes, or until it writes one the boot table, the domain's local entries. These are
+%% the release slice at /, and each EROFS image where its release names it, of which
+%% the boot information names none yet; erx_ns:mount/3 mounts an image the runtime
+%% holds a window on.
+erx_mounts() ->
     persistent_term:get(erx_ns, [#{point => [], provider => release, root => [], rights => ro}]).
 
 

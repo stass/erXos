@@ -2,11 +2,11 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% prim_file as erx_ns's process sees it, for erx_ns_tests on stock's emulator: the
-%% table read as prim_file:erx_table/0 reads it.
+%% mounts read as prim_file:erx_mounts/0 reads them.
 
 -module(erx_ns_prim_stub).
 
--export([erx_table/0]).
+-export([erx_mounts/0]).
 
-erx_table() ->
+erx_mounts() ->
     persistent_term:get(erx_ns, [#{point => [], provider => release, root => [], rights => ro}]).

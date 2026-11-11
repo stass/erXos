@@ -49,7 +49,7 @@ functions and the two callbacks, and reads no state but its arguments, so a
 table changed while it runs is not seen by it.
 """.
 
--export([resolve/6, cwd/1, target_place/1, listing/3]).
+-export([resolve/6, cwd/1, target_place/1, listing/3, with_facets/2]).
 -export_type([name/0, place/0, entry/0, table/0, op/0, flags/0, kind/0,
               reply/0, callbacks/0, action/0, resume/0]).
 
@@ -119,6 +119,30 @@ resolve(Path, Op, #{follow := Follow, willbedir := WillBeDir}, Table, Cwd,
        Op =:= rename ->
     read(Path, Cwd, [], #st{op = Op, follow = Follow, willbedir = WillBeDir,
                             table = Table, callbacks = Callbacks}).
+
+-doc """
+The table a resolution walks, made from the mounts as it starts: each entry
+of a facet, provider `{facet, Name, Tree}`, a bind of one included, is on
+the grant that `Facets`, the domain's facet registry, holds for `Name` at
+that moment, `{grant, Pid, Tree}`, or is `ended`, which answers `eio`, when
+the registry holds no pid for `Name` or is no map. Every other entry is as
+the table holds it. A facet's mount names the facet, never a pid, so a
+re-grant serves the next lookup and nothing has to follow the registry.
+This is the one function here that reads a provider, kept here because it
+is pure, preloaded and builds for the host tests; `prim_file:erx_table/0`
+calls it at each resolution.
+""".
+-spec with_facets(table(), term()) -> table().
+with_facets(Table, Facets) ->
+    [case Entry of
+         #{provider := {facet, Name, Tree}} ->
+             case Facets of
+                 #{Name := Pid} when is_pid(Pid) -> Entry#{provider := {grant, Pid, Tree}};
+                 _ -> Entry#{provider := ended}
+             end;
+         #{} ->
+             Entry
+     end || Entry <- Table].
 
 -doc """
 Reads the text of a working directory as the place it names: `/` alone, or

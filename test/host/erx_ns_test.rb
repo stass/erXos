@@ -18,7 +18,7 @@ class ErxNsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The generated sources and headers named here are in build/gen.
   Erx::Generated.ensure(root: ROOT)
-  SOURCES = %w[erlang/apps/erx/src/erx_ns.erl test/erlang/erx_ns_prim_stub.erl
+  SOURCES = %w[erlang/apps/erx/src/erx_ns.erl test/erlang/erx_ns_prim_stub.erl otp/erts/preloaded/src/erx_path.erl
                test/erlang/erx_ns_tests.erl otp/erts/preloaded/src/erx_erofs.erl
                otp/erts/preloaded/src/erx_verity.erl test/erlang/erx_erofs_tests.erl]
             .map { |path| File.join(ROOT, path) }.freeze

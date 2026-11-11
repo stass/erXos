@@ -9,7 +9,7 @@
 %% turn, checks it, builds the new table from the one the term holds and puts it, so
 %% two changes never lose each other and a resolution reads the term without a copy or
 %% a lock. Until the process writes a table the term is absent, and
-%% prim_file:erx_table/0 answers the boot table. The changes are functions over a
+%% prim_file:erx_mounts/0 answers the boot table. The changes are functions over a
 %% table, change/2, which a session's handler can apply to a program's table as well;
 %% each is pure but for an image's mount, which reads the image.
 %%
@@ -25,6 +25,18 @@
 %% mounted path's requests. The monitors are its only state beyond the term: a
 %% restarted process reads the term and monitors its grants again, and one that ended
 %% meanwhile answers 'DOWN' at once.
+%%
+%% A facet's mount, {facet, Name}, holds the facet's name and no pid: its entries, and
+%% each bind of one, have the provider {facet, Name, Tree}, which a resolution reads as
+%% the grant the domain's facet registry (erx:caps/0) holds for Name at that moment, or
+%% as ended when it holds none (erx_path:with_facets/2, through prim_file:erx_table/0).
+%% This is how a domain reaches a grant of another domain by path: a re-grant, such as
+%% the one a restarted server's domain is given, serves the next lookup with no change
+%% to the table, and the process monitors no facet's grant. A grant that has ended
+%% answers each request with eio through the file client's own monitor on it. A
+%% descriptor keeps the grant and fid it was opened on: once that grant has ended,
+%% every operation that reaches it answers eio, a read may first answer bytes the
+%% descriptor already holds, and only a new open finds the re-grant.
 %%
 %% Each call answers ok or {error, Reason}: einval for a malformed path, place or
 %% option, a mount point holding . or .., or an unmount where no entry is; enametoolong
@@ -47,7 +59,8 @@
 
 -type name() :: binary().
 -type rights() :: ro | rw | rx.
--type provider() :: release | {erofs, erx_erofs:fs()} | {grant, pid(), Tree :: name()} | ended.
+-type provider() :: release | {erofs, erx_erofs:fs()} | {grant, pid(), Tree :: name()}
+                  | {facet, Name :: atom(), Tree :: name()} | ended.
 -type entry() :: #{point := [name()], provider := provider(), root := [name()], rights := rights()}.
 -type table() :: [entry()].
 -type option() :: {tree, binary()} | rights().
@@ -55,7 +68,7 @@
 %% A change as the process receives it, from this module's functions or from any other
 %% process, so every field is checked before it changes anything. A bind's source is
 %% the place it reached, an absolute path of plain names.
--type request() :: {mount, To :: binary(), pid() | {erofs, Window :: pid()}, [option()]}
+-type request() :: {mount, To :: binary(), pid() | {erofs, Window :: pid()} | {facet, atom()}, [option()]}
                  | {bind, From :: binary(), To :: binary(), [] | [ro]}
                  | {unmount, To :: binary()}.
 %% A change once checked against the table, with its paths as plain names.
@@ -63,7 +76,7 @@
                  | {mount_image, [name()], Window :: pid()}
                  | {bind, [name()], [name()], boolean()}
                  | {unmount, [name()]}.
-%% The module whose erx_table/0 reads the term (prim_file, or a stub in the EUnit
+%% The module whose erx_mounts/0 reads the term (prim_file, or a stub in the EUnit
 %% cases), and the monitor of each grant
 %% pid the table holds, which follows from the table.
 -type state() :: #{prim := module(), monitors := #{pid() => reference()}}.
@@ -79,9 +92,13 @@ start_link(Prim) ->
 %% Mounts the grant Pid at To, a local process. Options name the tree the grant roots in,
 %% {tree, Name}, once, and at most one of ro, rw and rx, ro when none is given.
 %%
+%% Or mounts at To, with the same options, the facet Name, {facet, Name}: whatever grant
+%% the domain's facet registry holds for Name when a path under To is resolved, a grant
+%% of another domain included, which is the only way such a grant is mounted.
+%%
 %% Or mounts at To, read-only, the EROFS image the block service's window Window holds,
 %% with no option or ro alone.
--spec mount(pid() | {erofs, pid()}, file:name_all(), [option()]) -> ok | {error, reason()}.
+-spec mount(pid() | {facet, atom()} | {erofs, pid()}, file:name_all(), [option()]) -> ok | {error, reason()}.
 mount({erofs, Window}, To, Options) ->
     request(fun() -> {mount, text(To), {erofs, Window}, Options} end);
 mount(Pid, To, Options) ->
@@ -123,11 +140,11 @@ change(Request, Table) ->
 
 -spec init(module()) -> {ok, state()}.
 init(Prim) ->
-    {ok, #{prim => Prim, monitors => watched(Prim:erx_table(), #{})}}.
+    {ok, #{prim => Prim, monitors => watched(Prim:erx_mounts(), #{})}}.
 
 -spec handle_call(term(), gen_server:from(), state()) -> {reply, ok | {error, reason()}, state()}.
 handle_call(Request, _From, #{prim := Prim} = State) ->
-    Table = Prim:erx_table(),
+    Table = Prim:erx_mounts(),
     case change(Request, Table) of
         {ok, Changed} ->
             {reply, ok, put_table(Changed, State)};
@@ -147,7 +164,7 @@ handle_info({'DOWN', Monitor, process, Pid, _}, #{prim := Prim, monitors := Moni
         #{Pid := Monitor} ->
             %% Any process can send a message that looks like a 'DOWN'.
             case is_process_alive(Pid) of
-                false -> {noreply, put_table(ended(Pid, Prim:erx_table()), State)};
+                false -> {noreply, put_table(ended(Pid, Prim:erx_mounts()), State)};
                 true -> {noreply, State}
             end;
         #{} ->
@@ -178,6 +195,13 @@ checked({mount, To, Pid, Options}, Table) when is_pid(Pid), node(Pid) =:= node()
         {ok, Point} ?= new_point(To, Table),
         ok ?= tree(Tree),
         {ok, {mount, Point, {grant, Pid, Tree}, Rights}}
+    end;
+checked({mount, To, {facet, Name}, Options}, Table) when is_atom(Name) ->
+    maybe
+        {ok, Tree, Rights} ?= mount_options(Options, undefined, undefined),
+        {ok, Point} ?= new_point(To, Table),
+        ok ?= tree(Tree),
+        {ok, {mount, Point, {facet, Name, Tree}, Rights}}
     end;
 checked({mount, To, {erofs, Window}, Options}, Table)
   when is_pid(Window), node(Window) =:= node(), Options =:= [] orelse Options =:= [ro] ->
