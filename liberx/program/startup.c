@@ -143,9 +143,3 @@ erx_prog_startup_plan(const uint8_t *frame, size_t len, void *scratch,
 	out->cause = ERX_PROG_STARTUP_GO;
 	return (out->status);
 }
-
-int
-erx_prog_later_frame_status(void)
-{
-	return (ERX_PROG_STATUS_REFUSED);
-}

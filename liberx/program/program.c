@@ -13,7 +13,9 @@
  * whole it plans the start-up. A refused plan stops the program's space with status 127
  * before main and without a line; an accepted one sets the verdict and wakes the first
  * thread, which alone reads the plan from then on. The executor stays the lane's reader:
- * any later frame stops the program the same way.
+ * every later frame is a report, which it copies whole, reads and applies. What each
+ * record's header admits, and whether a report reads, is inbound.c's pure decision; a
+ * record it refuses stops the program the same way.
  *
  * Every failure before main, a mapping or a commit as much as a refused message, stops
  * the program with ERX_PROG_STATUS_REFUSED, as an exec that fails does on UNIX. The layer
@@ -31,6 +33,7 @@
 #include "erx/abi.h"
 #include "erx/lane.h"
 #include "liberx/backend/api.h"
+#include "liberx/program/inbound.h"
 #include "liberx/program/program.h"
 #include "liberx/pthread_executor.h"
 
@@ -51,7 +54,16 @@ static erx_lane_reader_t inbound;
 static uint8_t *message;		/* the record's body, then the check's scratch */
 static uint64_t message_run;		/* the run's bytes, whole pages */
 static size_t message_len;
-static size_t message_have;
+/* The record being copied: its decision, where its body goes, and how much is there. */
+static bool startup_opened;			/* the startup message's record opened */
+static erx_prog_inbound_t record_kind;
+static uint8_t *record_body;
+static size_t record_len;
+static size_t record_have;
+/* One report at a time, and the profile check's scratch for it, taken before main. */
+static uint8_t report[ERX_PROG_REPORT_BYTES];
+static uint8_t *report_scratch;
+static uint64_t report_scratch_len;
 /* Written by the executor before VERDICT_GO, read by the first thread after it. */
 static erx_prog_startup_t plan;
 static _Atomic uint32_t verdict = VERDICT_WAIT;
@@ -158,24 +170,22 @@ labels_take(void)
 }
 
 /*
- * A record opened: the startup message's, before any verdict, whose header must be a
- * frame within the profile's bound. Commits one run for its body and, after it, the
- * check's scratch, so a small message costs a few pages and the largest a few hundred.
+ * The startup message's record opened, len bytes the decision admitted. Commits one run
+ * for its body and, after it, the check's scratch, so a small message costs a few pages
+ * and the largest a few hundred.
  */
 static void
-message_open(const erx_lane_part_t *part)
+message_open(uint32_t len)
 {
-	const size_t scratch = erx_prog_scratch_bytes(part->len);
-	const uint64_t body = page_round(part->len), rest = page_round(scratch);
+	const size_t scratch = erx_prog_scratch_bytes(len);
+	const uint64_t body = page_round(len), rest = page_round(scratch);
 
-	if (part->kind != ERX_REC_FRAME || part->zero != 0 || part->len > ERX_PROG_FRAME_MAX ||
-	    rest == 0 || __builtin_add_overflow(body, rest, &message_run))
+	if (rest == 0 || __builtin_add_overflow(body, rest, &message_run))
 		stop(ERX_PROG_STATUS_REFUSED);
 	message = pages_take(message_run);
 	if (message == NULL)
 		stop(ERX_PROG_STATUS_REFUSED);
-	message_len = part->len;
-	message_have = 0;
+	message_len = len;
 }
 
 /* The startup message is whole: plans the start-up, and stops the program or lets it run. */
@@ -186,14 +196,75 @@ message_close(void)
 
 	if (erx_prog_startup_plan(message, message_len, message + body, message_run - body, &plan) != 0)
 		stop(plan.status);
+	report_scratch_len = page_round(erx_prog_scratch_bytes(ERX_PROG_REPORT_BYTES));
+	report_scratch = pages_take(report_scratch_len);
+	if (report_scratch == NULL)
+		stop(ERX_PROG_STATUS_REFUSED);
 	atomic_store_explicit(&verdict, VERDICT_GO, memory_order_release);
 	(void)erx_umtx_wake((uint64_t)(uintptr_t)&verdict, 1);
 }
 
 /*
+ * A report is whole: reads it, or stops the program. No end of the program is set up
+ * yet (startup.c refuses every pipe descriptor), so every report names an end the
+ * program does not hold, and the executor closes the capabilities it installed.
+ */
+static void
+report_apply(void)
+{
+	uint64_t caps[ERX_PROG_REPORT_CAPS];
+	erx_prog_report_t got;
+	size_t ncaps;
+
+	if (!erx_prog_report_read(report, record_len, report_scratch, report_scratch_len, &got))
+		stop(ERX_PROG_STATUS_REFUSED);
+	ncaps = erx_prog_report_caps(&got, caps);
+	for (size_t at = 0; at < ncaps; at++)
+		(void)erx_cap_close(caps[at]);
+}
+
+/* A record opened: what its header admits decides where its body goes. */
+static void
+record_open(const erx_lane_part_t *part)
+{
+	record_kind = erx_prog_inbound_open(startup_opened, part->kind, part->zero, part->len);
+	startup_opened = true;
+	switch (record_kind) {
+	case ERX_PROG_INBOUND_START:
+		message_open(part->len);
+		record_body = message;
+		break;
+	case ERX_PROG_INBOUND_REPORT:
+		record_body = report;
+		break;
+	case ERX_PROG_INBOUND_REFUSE:
+		stop(ERX_PROG_STATUS_REFUSED);
+	}
+	record_len = part->len;
+	record_have = 0;
+}
+
+/* The record's last byte is copied: plans the start-up or applies the report. */
+static void
+record_close(void)
+{
+	switch (record_kind) {
+	case ERX_PROG_INBOUND_START:
+		message_close();
+		break;
+	case ERX_PROG_INBOUND_REPORT:
+		report_apply();
+		break;
+	case ERX_PROG_INBOUND_REFUSE:
+		/* Not reached: record_open stopped the program at the header. */
+		stop(ERX_PROG_STATUS_REFUSED);
+	}
+}
+
+/*
  * Takes the next part of the inbound lane with take, erx_lane_take or erx_lane_take_armed:
- * between records only a header, inside the startup message as much of its body as is
- * published, into the copy after what it holds.
+ * between records only a header, inside a record as much of its body as is published,
+ * into the copy after what it holds; the decision bounded the body by its copy's room.
  */
 static erx_lane_status_t
 lane_take(erx_lane_status_t (*take)(erx_lane_reader_t *, void *, size_t, erx_lane_part_t *),
@@ -201,7 +272,7 @@ lane_take(erx_lane_status_t (*take)(erx_lane_reader_t *, void *, size_t, erx_lan
 {
 	if (inbound.phase != ERX_LANE_IN_BODY)
 		return (take(&inbound, NULL, 0, part));
-	return (take(&inbound, message + message_have, message_len - message_have, part));
+	return (take(&inbound, record_body + record_have, record_len - record_have, part));
 }
 
 /*
@@ -234,14 +305,11 @@ executor_main(void *unused)
 		/* The session may wait for this room; a failed ring is the session's to miss. */
 		if (part.ring)
 			(void)erx_irq_trigger(self.regs[ERX_PROGRAM_ARG_DOORBELL]);
-		if (part.opened) {
-			if (atomic_load_explicit(&verdict, memory_order_relaxed) != VERDICT_WAIT)
-				stop(erx_prog_later_frame_status());
-			message_open(&part);
-		}
-		message_have += part.copied;
+		if (part.opened)
+			record_open(&part);
+		record_have += part.copied;
 		if (part.closed)
-			message_close();
+			record_close();
 	}
 	return (NULL);
 }

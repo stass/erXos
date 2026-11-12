@@ -1816,12 +1816,35 @@ it; git history is the record of completed work.
   for its own executor, counts as exported, or moves beside `elf_plan.c`.
 * [Low] `abi/erx_abi.txt` (`program_arg`): the generator emits no count, so
   `ERX_PROGRAM_INSTALL_DATA` (`erx_program_core.h`) assumes `doorbell` is the last index.
-* [Medium] liberx program layer, `liberx/program/program.c` (`executor_main`, `message_open`,
-  `message_close`): the per-part decision on the inbound lane (accept the header, refuse a later
-  frame, append, plan at the close) is mixed into the effects, and no test sends a non-frame
-  record, a nonzero zero word, a header past `ERX_PROG_FRAME_MAX`, a zero-length record or a
-  second frame. Move the decision into a pure function beside `startup.c`, test it exhaustively on
-  the host, and add a raw-path case to the `programs` suite that sends a second frame and expects 127.
+* [Medium] liberx program layer, `liberx/program/inbound.h` (`ERX_PROG_REPORT_BYTES`): every frame
+  after the startup message is bounded at 512 bytes by a liberx constant that neither
+  `abi/protocols/prog.txt` nor the design names, and `erx_program:send/2` does not enforce it. A
+  reply to a worker's request (`{erx_prog, 1, Slot, Reply}`), such as `pipe`'s, can carry a read
+  end's descriptor far past it, and the header decision cannot tell a reply from a report. Make
+  the bound a `limit` of the profile, have `send/2` refuse past it with `einval`, and size the
+  executor's copy for replies before workers send requests.
+* [Medium] liberx program layer, `liberx/program/inbound.c` (`erx_prog_report_caps`): which reports
+  carry capabilities is a hand-written `switch` on a `uint16_t`, so a report kind the profile gains
+  falls through to none and its capabilities leak. Generate the per-case capability fields from
+  the profile (`tools/lib/erx/abi_emit_profile.rb`), or have the host test walk the profile's
+  report cases and fail on one it does not know.
+* [Medium] docs/design-pipes.md ("Ends and their holders", "The program protocol"): the design
+  does not say what a program does with a report for an end it no longer holds, though a
+  `{pipe_writer}` can cross the program's `{closed}`. `liberx` closes the capabilities the report
+  installed. Write the rule into the design, and say whether `{closed}` cancels the `{drained}`
+  such a report made due in the port driver's credit.
+* [Low] liberx program layer, `liberx/program/program.c` (`report_apply`): a refused later frame
+  stops the program with 127 without the line design-abi.md and design-programs.md require
+  (`erx: FRAME frame refused: REASON in KIND at byte N`), and `erx_prog_report_read` drops the
+  refusal that names them. Return the refusal and write the line once a program has a standard
+  error. The executor also closes whatever capability values a report names, its own channel,
+  group, budget, doorbell or data area included; the session is trusted, but refusing a report
+  that names one of `self.regs` or the data area is cheap.
+* [Low] QEMU harness, `tools/lib/erx/programs.rb`: the inbound decision
+  (`liberx/program/inbound.c`) is tested on the host only; no `programs` case sends a program a
+  malformed later frame (a non-frame record, a nonzero zero word, a report past
+  `ERX_PROG_REPORT_BYTES` or one the profile refuses) and expects 127. Add one when the session can
+  write a raw record to a program, or once `erx_prog_handler` sends reports.
 * [Low] erx_program driver, `erx_program_drv.c` (`DRAINED_MAX`): a program's credit holds at most
   1024 due `{drained}` notices, a fixed stand-in for the session's `pipes` quota that
   docs/design-programs.md ("Credit") names as the bound, since no session has a `pipes` quota yet.
@@ -1846,10 +1869,10 @@ it; git history is the record of completed work.
   one source. `abi/` has no home for a driver's port-control interface;
   give it one in the generator and generate both sides.
 * [Low] QEMU harness, `tools/lib/erx/programs.rb`: no programs case delivers a due notice as
-  `{erx_channel, Port, Frame}`, since a program ends with 127 at any frame after its startup
-  message, so a notice made due by a later frame races that end. The note cases cover the decode,
-  the credit's refusals and a request's delivery, and the host credit test covers a notice's
-  delivery; add a notice case when liberx takes frames after its startup message.
+  `{erx_channel, Port, Frame}`, since a frame that makes a notice due names a pipe end, which no
+  program holds until `erx_prog_handler` installs one. The note cases cover the decode, the credit's refusals and a
+  request's delivery, and the host credit test covers a notice's delivery; add a notice case with
+  the first program that holds a pipe end.
 * [Low] liberx program layer, `liberx/program/program.c` (`main_run`): design-programs.md's step 9
   has the first thread set its signal mask; the layer keeps `sigmask` and `sigignore` in
   `erx_prog_self_t` and applies neither until signals reach programs.

@@ -6,15 +6,13 @@
 /*
  * The host driver of liberx's start-up core (test/host/prog_startup_test.rb).
  * Each line of the requests file is "plan HEX", HEX a startup message's
- * bytes, planned with all the scratch erx_prog_scratch_bytes promises, or
- * "later", the status of a frame after the startup message.  Each answer is
- * one line:
+ * bytes, planned with all the scratch erx_prog_scratch_bytes promises.  Each
+ * answer is one line:
  *   go KEY=VALUE...		the plan's fields; texts in hex, a list's
  *				elements joined by ':', fds as numbers
  *   refused check REASON KIND OFFSET
  *   refused descriptor FD
  *   refused bound
- *   later STATUS
  */
 
 #include <stdio.h>
@@ -168,10 +166,6 @@ main(int argc, char **argv)
 	if (argc != 2 || (requests = fopen(argv[1], "r")) == NULL)
 		return (2);
 	while (fgets(line, sizeof(line), requests) != NULL) {
-		if (strcmp(line, "later\n") == 0) {
-			printf("later %d\n", erx_prog_later_frame_status());
-			continue;
-		}
 		if (strncmp(line, "plan ", 5) != 0 ||
 		    (len = unhex(line + 5, frame)) == SIZE_MAX)
 			return (2);

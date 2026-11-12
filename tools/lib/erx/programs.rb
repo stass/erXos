@@ -185,8 +185,8 @@ module Erx
        # Flow control: a startup message of about 40 KiB, larger than the 16 KiB ring, is
        # sent before the first thread runs, so the driver still holds most of it and a second
        # frame is busy. Once the thread runs and reads, the driver tells the owner the room
-       # returned, and the second frame is taken; spin's liberx then ends it with 127 at that
-       # later frame, which shows it arrived.
+       # returned, and the second frame is taken. It is a report the profile refuses, pipe 0,
+       # so spin's liberx ends it with 127 at that later frame, which shows it arrived.
        Case.new(name: 'busy', seconds: 60, answer: '{busy,ok,busy,room,ok,127}', expression: line(<<~ERLANG)),
          (fun() ->
             P = open_port({spawn_driver, "erx_program 12 0 4096 4 bin/spin"}, [binary]),
@@ -195,7 +195,7 @@ module Erx
                                                      argv => [<<"spin">>, binary:copy(<<"x">>, 40000)], env => [],
                                                      cwd => <<"/">>, spawn => false, sigmask => [], sigignore => [],
                                                      umask => 8#022, data_area => {D, 4}, fds => []}),
-            R = {erx_prog, 1, {pipe_lost, 1, 1}},
+            R = {erx_prog, 1, {pipe_lost, 0, 1}},
             A = erx_program:send(P, F),
             B = erx_program:send(P, R),
             <<"ok">> = port_control(P, 3, []),

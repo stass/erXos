@@ -36,7 +36,7 @@ module Erx
         )
       ],
       unchecked_objects: %w[liberx/program/program.c liberx/program/program.h liberx/program/startup.c
-                            liberx/program/startup.h]
+                            liberx/program/startup.h liberx/program/inbound.c liberx/program/inbound.h]
     )
   end
 end

@@ -13,8 +13,8 @@ require_relative '../fixtures/prog_profile_frames'
 # liberx's start-up core, erx_prog_startup_plan (liberx/program/startup.h), through
 # test/fixtures/prog_startup_driver.c: the hand-encoded start frames of
 # test/fixtures/prog_profile_frames.rb, and frames built here from their pieces, plan to the
-# argv, env and cwd written by hand, or end with status 127 for the check's refusal, a
-# descriptor other than null, or any frame after the startup message
+# argv, env and cwd written by hand, or end with status 127 for the check's refusal or a
+# descriptor other than null
 # (docs/design-programs.md#the-startup-message, docs/design-abi.md#program-protocol, Startup).
 class ProgStartupTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
@@ -102,11 +102,6 @@ class ProgStartupTest < Minitest::Test
         assert_equal expected, got, name.to_s
       end
     end
-  end
-
-  # The program profile names no frame to the program after the startup message.
-  def test_a_later_frame_is_refused
-    assert_equal ['later 127'], answers(['later'])
   end
 
   # Seeded faults: a plan that skips the check runs a frame the check refuses, from the

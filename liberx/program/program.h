@@ -17,9 +17,9 @@
  * (erx_prog_startup_plan).  A refused message stops the program's space
  * with ERX_PROG_STATUS_REFUSED before main and without a line; an accepted
  * one wakes the first thread, which maps the data area, copies argv, env
- * and cwd into NUL-terminated strings and calls main.  Any frame after the
- * startup message stops the program the same way
- * (erx_prog_later_frame_status).
+ * and cwd into NUL-terminated strings and calls main.  Every later frame
+ * is a report (inbound.h), which the executor reads and applies, and one
+ * it refuses stops the program the same way.
  *
  * The layer makes its memory page by page from the program's budget
  * (erx_vm_reserve and erx_vm_commit) and calls neither musl's malloc nor

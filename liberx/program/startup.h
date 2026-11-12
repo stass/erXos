@@ -103,11 +103,4 @@ typedef struct erx_prog_startup {
 int	erx_prog_startup_plan(const uint8_t *frame, size_t len, void *scratch,
 	    size_t scratch_len, erx_prog_startup_t *out);
 
-/*
- * The status of any frame from the handler after the startup message.  The
- * program profile (abi/protocols/prog.txt) names no frame to the program
- * but the startup message, so liberx refuses every later one.
- */
-int	erx_prog_later_frame_status(void);
-
 #endif /* !LIBERX_PROGRAM_STARTUP_H */

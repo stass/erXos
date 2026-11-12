@@ -81,7 +81,7 @@ module Erx
     # profile reader over the ETF reader, which hashes atoms with BLAKE3, and the backend
     # names the layer calls by, with task_refused.c for those a task has no service answer
     # for. The programs suite's programs are built from it.
-    PROGRAM_LAYER = %w[liberx/program/program.c liberx/program/startup.c liberx/erx_lane.c
+    PROGRAM_LAYER = %w[liberx/program/program.c liberx/program/startup.c liberx/program/inbound.c liberx/erx_lane.c
                        liberx/erx_profile.c build/gen/liberx/generated/prog_profile.c liberx/erx_etf.c
                        kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c].freeze
     PROGRAM = [*(LIBC_TASK - ["#{BACKEND}/libc_task.c"]), "#{BACKEND}/program_task.c", "#{BACKEND}/api_names.c",
