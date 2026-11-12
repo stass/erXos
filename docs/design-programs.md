@@ -719,7 +719,7 @@ no notice: the end, which outlives it, still owes it.
 only within the program's credit, which it keeps from the frames it
 writes and reads and spends as it parses
 ([design-runtime.md](design-runtime.md#programs-as-ports)): a slot is
-busy from the request the driver delivers on it until the driver takes
+busy from the request the driver takes on it, delivered or not, until the driver takes
 the reply on it; a `{closed, Pipe, End}` is due once for each pipe end
 that a frame it wrote gave the program, in a startup message, a `pipe`
 reply or a redemption's reply; and a `{drained, Pipe, End, Writer}` is

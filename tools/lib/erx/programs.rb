@@ -52,8 +52,8 @@ module Erx
     # How many rounds many runs: more than the 32 programs the gate worker's 64
     # registrations hold at once, for each way a program ends.
     MANY_RUNS = 50
-    # How long an expression waits for a program's message or its port's end, in
-    # milliseconds.
+    # How long an expression waits for a program's message, its port's end or its
+    # credit's admission of a reply, in milliseconds.
     WAIT_MS = 10_000
     NODE = "node().\r"
     ROOT_NODE = 'root_1@erxos'
@@ -163,8 +163,14 @@ module Erx
        # A frame for an owner that is gone: the port is handed to a process that unlinks
        # from it and exits, so the port outlives its owner, and only then does the program
        # run and write a request the credit admits. The driver drops the frame for want of a
-       # reader, and the session goes on to close the port.
-       Case.new(name: 'owner_gone', seconds: 60, answer: '{owner_gone,ok,<<"ok">>,true}', expression: line(<<~ERLANG)),
+       # reader, and the session goes on to close the port. The credit says when the driver
+       # has taken the request: until then slot 0 is free and a reply on it is refused with
+       # einval, and from then on it is admitted (docs/design-programs.md, "Credit"). A driver
+       # that refused the frame would have ended the program, and a send to an ended program
+       # is einval too, so ok also shows the frame was dropped and the program lives on. The
+       # program never reads the reply. No frame reaches this process, which is not the owner.
+       Case.new(name: 'owner_gone', seconds: 60, answer: '{owner_gone,ok,<<"ok">>,ok,none,true}',
+                expression: line(<<~ERLANG)),
          (fun() ->
             P = open_port({spawn_driver, "erx_program 14 0 4096 4 bin/note"}, [binary]),
             <<"ok", D:64>> = port_control(P, 1, []),
@@ -178,8 +184,16 @@ module Erx
             B ! go,
             receive {'DOWN', M, process, B, normal} -> ok end,
             R = port_control(P, 3, []),
-            receive after 1000 -> ok end,
-            {owner_gone, A, R, port_close(P)}
+            AwaitTake = fun W(T) when T > 0 ->
+                            case erx_program:send(P, {erx_prog, 1, 0, {ok, 14}}) of
+                                ok -> ok;
+                                _ -> receive after 10 -> W(T - 10) end
+                            end;
+                        W(_) -> timeout
+                    end,
+            Taken = AwaitTake(#{WAIT_MS}),
+            Stray = receive {erx_channel, P, X} -> X after 0 -> none end,
+            {owner_gone, A, R, Taken, Stray, port_close(P)}
           end)().
        ERLANG
        # Flow control: a startup message of about 40 KiB, larger than the 16 KiB ring, is
