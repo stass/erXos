@@ -35,7 +35,10 @@ module Erx
                         tools/lib/erx/dom_planner.rb tools/lib/erx/data_volume.rb].freeze
     # The include directories every program compiles with, from the root.
     INCLUDES = %w[build/gen build/gen/include include kernel/crypto littlefs otp/erts/emulator/nifs/erxos].freeze
-    FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic -O1 -g].freeze
+    # glibc under -std=c17 declares only ISO C, hiding the POSIX and BSD names
+    # the tools use (O_NOFOLLOW, strtok_r, bzero); _DEFAULT_SOURCE restores
+    # them. macOS and FreeBSD ignore it.
+    FLAGS = %w[-std=c17 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -pedantic -O1 -g].freeze
     module_function
 
     def plan(root:, tool:, sanitizers:, dependencies: [], compiler_profile: nil)
