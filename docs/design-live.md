@@ -1417,7 +1417,9 @@ grantee's principal, the manifest's system-shell principals and its
 development flag: `all` for a system-shell principal (`root` in a
 development build) in a development build, and otherwise
 `{principal, P}`, the
-principal's domains. The inspector resolves `{principal, P}` at each
+principal's domains. The scope is a parameter the domain service
+computes at the mint ([design-system.md](design-system.md#facets-a-configured-domain-serves),
+"Parameters the domain service computes at the mint"). The inspector resolves `{principal, P}` at each
 query from the domain service's records, its death records included,
 so a domain the principal starts later is in scope from its start and
 one that ended stays in scope while its record is kept, and a path of a

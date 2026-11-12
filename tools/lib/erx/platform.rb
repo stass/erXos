@@ -5,7 +5,7 @@ require_relative 'json_input'
 
 module Erx
   # A board's platform record (config/platforms/NAME.json) and the manifests beside it
-  # (config/manifest/NAME-development.txt, NAME-site.txt): what every tool that builds or
+  # (config/manifest/NAME-development.txt, and NAME-site.txt for a board the website boots): what every tool that builds or
   # boots an image takes as a parameter in place of one board's constants
   # (docs/design-stopgap.md, "The Raspberry Pi 4"). The record states the board's RAM, its
   # first address (ram_first) and size (ram_bytes, the smallest RAM the port boots on), the
@@ -54,10 +54,18 @@ module Erx
 
     def record_path = self.class.record_path(name)
     def manifest_path = "config/manifest/#{name}-development.txt"
-    # The website's manifest: the development manifest without its web domain, which
-    # `tools/erx boot --without-web` builds the site's image from (InteractiveBoot).
-    def site_manifest_path = "config/manifest/#{name}-site.txt"
     def manifest_source(root) = File.binread(File.join(root, manifest_path))
+    # The website's manifest, which only a board the website boots has: the development
+    # manifest without its web domain, which `tools/erx boot --without-web` builds the
+    # site's image from (InteractiveBoot) and the medium boots start from (MediumBoot).
+    # A board without one is refused on use, never handed its development manifest.
+    def site_manifest_path = "config/manifest/#{name}-site.txt"
+
+    def site_manifest_source(root)
+      File.binread(File.join(root, site_manifest_path))
+    rescue Errno::ENOENT
+      raise Error, "the #{name} board has no site manifest #{site_manifest_path}, so no website image or medium boot"
+    end
 
     # RAM's first address, where the root's place is counted from (ProductionImage::Machine).
     def ram_first = record.fetch('ram_first')

@@ -80,6 +80,13 @@ module Erx
           seed: { PIPE_CHECK => "case ERX_REC_FRAME:\n",
                   'liberx/erx_pipe_core.c' => "if (copy.kind == ERX_REC_FRAME)\n",
                   PIPE_NIF => "kind = ERX_REC_FRAME;\n" }
+        ),
+        # Only the pipe server makes an end (PI1): no Erlang module but erx_pipe_srv
+        # calls the NIF's make_lock/0, make_lane/1 or make_bell/3.
+        Chokepoints::Elsewhere.new(
+          name: 'pipe-makers', rule: "only the session's pipe server, erx_pipe_srv, calls erx_pipe_nif's make_lock/0, " \
+                                     'make_lane/1 and make_bell/3, which make a pipe\'s lock, lanes and bells',
+          design: "#{PIPES}#invariants", check: 'PipeMakers, in Checks', test: 'test/host/pipe_makers_test.rb'
         )
       ]
     )

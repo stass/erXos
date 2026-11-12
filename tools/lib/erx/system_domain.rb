@@ -658,7 +658,7 @@ module Erx
         @linker = linker
         @qemu = qemu
         @machine = MediumBoot.machine(platform)
-        source = platform.manifest_source(@root)
+        source = platform.site_manifest_source(@root)
         @manifest = SystemDomain.manifest(source)
         @regrant_manifest = Regrant.manifest(source)
       end

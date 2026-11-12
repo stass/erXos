@@ -549,7 +549,7 @@ it; git history is the record of completed work.
   into the DMA window, before the display driver.
 * [High] [design-apps.md](docs/design-apps.md): the code the design asks for, in the order
   [Track A](docs/plan.md#track-a-apps) builds it; nothing of it is built. The `start` row in `abi/manifest.txt` and
-  property 17; `erx_start` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and
+  property 17; `erx_starter` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and
   `ctl`'s parsers with their fuzz targets; the `apps` tree and `service`; `erx_domain:start_session/2` with `display`
   and `default_display`; the session mark in the domain service's grant records, carried as `session` by every mint;
   the mint request `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint
@@ -593,7 +593,7 @@ it; git history is the record of completed work.
     and its area added to the refresh's damage, one `damage` report at the last, which stays open until `presented`
     and is waited on through LVGL's flush-wait callback; `erx_ui_lvgl` writes the program nothing but `presented` while
     a report is unanswered; the host model screen maps a file both sides share and plays `erx_ui_lvgl` and
-    the display, where it plays `erx_ui_kiosk` today.
+    the display, where it plays the renderer's side of the `pixels` reports.
   * **Programs** ([The startup message](docs/design-programs.md#the-startup-message)): the `mem` descriptor in the
     startup message's profile, `liberx`'s decoder and its fuzz target, `mmap` and `fstat` of it in the personality,
     and the session's mapping of a buffer's pages into a program's sub-space while it builds it.
@@ -1747,9 +1747,11 @@ it; git history is the record of completed work.
   `pipe_server_lost` notice is dropped, so a closed end never reaches the server (no eof or `EPIPE`
   follows) or a drained lane is never forgotten. Out of memory only; retry from the next call or
   preallocate one environment per end.
-* [Low] session, `erx_pipe_nif.erl`: `make_lock/0`, `make_lane/1` and `make_bell/3` are exported, so any
-  session process can make pipe objects outside the step's `pipes` quota; they are collected with
-  their terms. Restrict them to `erx_pipe_srv`'s process when `erx_policy` sets the quota.
+* [Low] session, `erx_pipe_nif.erl`: `make_lock/0`, `make_lane/1` and `make_bell/3` are exported, so code that
+  does not come from the tree (an expression at a session's `erl` shell, an app installed at run time) can make pipe
+  objects outside the step's `pipes` quota; they are collected with their terms. The build check
+  `tools/lib/erx/pipe_makers.rb` keeps the tree's own modules from calling them; restrict them to `erx_pipe_srv`'s
+  process when `erx_policy` sets the quota.
 * [Low] session, `erx_pipe_nif.c` (`end_broken`): the broken-lane line goes to stderr, not to the
   debug log as one escaped line (docs/design-pipes.md, "Failure handling"); it carries integers only.
 * [Low] session, `erx_pipe_nif.c` (`get_obj`, `obj_keep`): `closed` is read without `obj_mutex`, and

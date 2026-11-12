@@ -7,7 +7,6 @@ require 'rbconfig'
 require 'set'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/interactive_boot'
-require_relative '../../tools/lib/erx/medium_boot'
 
 # The pure half of `tools/erx boot` (its arguments, the accelerator it picks
 # and the QEMU argument vector it plans) and the child handling of its run,
@@ -92,21 +91,51 @@ class InteractiveBootTest < Minitest::Test
     assert_equal 'build/production-image/site', Erx::InteractiveBoot.image_directory(without_web: true)
   end
 
-  # The site manifest is the development manifest without its web domain, record for
-  # record: no record of the web domain and no reference to it remain, the domain count
-  # shrinks by one, and every other record is the development manifest's, so the site
-  # grants nothing the development image does not and moves with it. Comments may differ.
+  # The site manifest is the development manifest without its web domain: the development
+  # manifest's records less the web domain's six (its share, runtime limits, limits and
+  # domain, its relay service and the system domain's facet of it) are the site's, line
+  # for line, except the room the web domain took: the system principal's memory and
+  # domains less the web limits' budget and outer one and less one, and the root's
+  # root_memory, max_domains and max_connections less the same budget, one domain and its
+  # system connection's row. No reference to the web domain remains, so the site grants
+  # nothing the development image does not and moves with it. Comments and blank lines
+  # may differ.
   def test_the_site_manifest_is_the_development_manifest_without_the_web_domain
     root = File.expand_path('../..', __dir__)
-    development = File.binread(File.join(root, PLATFORM.manifest_path))
-    site = File.binread(File.join(root, PLATFORM.site_manifest_path))
-    records = ->(text) { text.lines.reject { |line| line.start_with?('#') } }
-    assert_match(/^domain web$/, development)
-    refute_match(/^(?:share|runtime_limits|limits|domain|service|facet) web$|@(?:share|domain|service)\.web$/, site)
-    domains = ->(text) { Integer(text[/^  max_domains ([0-9]+)$/, 1], 10) }
-    assert_equal domains.(development) - 1, domains.(site)
-    assert_equal records.(Erx::MediumBoot.without_web(development)), records.(site),
-                 'config/manifest/qemu-virt-site.txt differs from the development manifest without its web domain'
+    development = manifest_records(File.binread(File.join(root, PLATFORM.manifest_path)))
+    site = manifest_records(File.binread(File.join(root, PLATFORM.site_manifest_path)))
+    web, kept = development.partition { |record| record.first.match?(/\A[a-z_]+ web\n\z/) }
+    assert_equal %w[share runtime_limits limits domain service facet], web.map { |record| record.first[/\A[a-z_]+/] }
+    refute_match(/@(?:share|domain|service)\.web$/, site.join)
+    limits = web.find { |record| record.first == "limits web\n" }.join
+    room = Integer(limits[/^  memory ([0-9]+)$/, 1], 10) + Integer(limits[/^  outer ([0-9]+)$/, 1], 10)
+    assert_equal kept.map(&:first), site.map(&:first), 'config/manifest/qemu-virt-site.txt has other records'
+    root = kept.find { |record| record.any?(/\A  max_domains /) }.first
+    assert_equal [["principal system\n", 'domains', -1], ["principal system\n", 'memory', -room],
+                  [root, 'max_connections', -1],
+                  [root, 'max_domains', -1],
+                  [root, 'root_memory', -room]].sort,
+                 figure_changes(kept, site).sort
+  end
+
+  # A manifest's records, each the list of its lines, header first, without comments
+  # and blank lines.
+  def manifest_records(text)
+    text.lines.reject { |line| line.start_with?('#') || line.strip.empty? }.slice_before(/\A\S/).to_a
+  end
+
+  # Where two lists of the same records differ, each as [header, field, change]: the
+  # lines must be one numeric field each, the same field on both sides.
+  def figure_changes(before, after)
+    before.zip(after).flat_map do |old, new|
+      assert_equal old.size, new.size, "#{old.first.strip} has other lines"
+      old.zip(new).reject { |left, right| left == right }.map do |left, right|
+        field, figure = left.match(/\A {2}([a-z_]+) ([0-9]+)\n\z/)&.captures
+        changed = field && right.match(/\A {2}#{field} ([0-9]+)\n\z/)
+        assert changed, "#{old.first.strip}: #{right.inspect} in place of #{left.inspect}"
+        [old.first, field, Integer(changed[1], 10) - Integer(figure, 10)]
+      end
+    end
   end
 
   # With a link, the second serial line listens on its socket without waiting

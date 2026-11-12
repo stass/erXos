@@ -21,7 +21,7 @@
 # The image's build admits this file with the same manifest check as the development
 # manifest, so the check proves what the website ships.
 # test/host/interactive_boot_test.rb holds its records equal to the development
-# manifest's without the web domain's (MediumBoot.without_web), so a change to the
+# manifest's less the web domain's six and the room they took, so a change to the
 # development manifest fails that test until this file takes it too.
 #
 manifest 1

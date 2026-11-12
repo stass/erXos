@@ -131,7 +131,7 @@ device ([design-system.md](design-system.md#devices)).
  the build                               the machine
  ---------                               -----------
  manifest: principal clock, its           system domain
-   session template (release                erx_start  merges the `start` rows with rc.conf,
+   session template (release               erx_starter merges the `start` rows with rc.conf,
    @artifact.clock), facet rows                |       one supervisor and keeper per enabled
    granting the template, `start` rows         |       row; serves /apps (ctl, rc.conf)
  the boot image's domain release:              |  erx_domain:start_session(clock, Start)
@@ -148,7 +148,7 @@ device ([design-system.md](design-system.md#devices)).
 `clock`, its session template, whose `release` names the boot script of
 `clock`'s applications, the facet rows that grant the template what the
 app needs, and a `start` row for `clock`. At boot, once the configured
-domains run, the start service, `erx_start`, merges the manifest's
+domains run, the start service, `erx_starter`, merges the manifest's
 `start` rows with `rc.conf` and starts a supervisor for each enabled
 row; the row's supervisor starts its keeper, a process that asks the
 domain service for a session of `clock`. The domain service makes the
@@ -161,8 +161,8 @@ supervisor starts the keeper again within the row's intensity.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **AP1.** Enabling, disabling or starting a row changes nothing the manifest check proved | a row carries a principal, a flag, a display and an intensity, and no limit, grant, device, service or code; the keeper's session is planned by `erx_dom_plan_session` from its principal's template index as every session is, and its facets pass the domain service's one funnel, which installs only rows of the manifest; so the manifest stays the only source of every domain row, device holder, service, budget, share, quota, limit and grant ([design-system.md](design-system.md#invariants), A10) | a row field that names a grant, a limit or a release; a keeper that creates a domain by any call but `start_session/2` | a source check that `erx_start` reaches the domain service only through `erx_domain:start_session/2` and `erx_domain:stop/2`, with a seeded call of `erx_domain:create/1` |
-| **AP2.** A session exists without a person only by a row of the start table | the keepers of `erx_start` are the only callers of `erx_domain:start_session/2` besides the console and the web login, and a keeper exists only for an enabled row or one `start` command on a row | another boot-time starter | the source check of AP1; a QEMU test that boots a manifest with no `start` row and finds no session but the console's |
+| **AP1.** Enabling, disabling or starting a row changes nothing the manifest check proved | a row carries a principal, a flag, a display and an intensity, and no limit, grant, device, service or code; the keeper's session is planned by `erx_dom_plan_session` from its principal's template index as every session is, and its facets pass the domain service's one funnel, which installs only rows of the manifest; so the manifest stays the only source of every domain row, device holder, service, budget, share, quota, limit and grant ([design-system.md](design-system.md#invariants), A10) | a row field that names a grant, a limit or a release; a keeper that creates a domain by any call but `start_session/2` | a source check that `erx_starter` reaches the domain service only through `erx_domain:start_session/2` and `erx_domain:stop/2`, with a seeded call of `erx_domain:create/1` |
+| **AP2.** A session exists without a person only by a row of the start table | the keepers of `erx_starter` are the only callers of `erx_domain:start_session/2` besides the console and the web login, and a keeper exists only for an enabled row or one `start` command on a row | another boot-time starter | the source check of AP1; a QEMU test that boots a manifest with no `start` row and finds no session but the console's |
 | **AP3.** The table names only principals the manifest declares startable | a row exists only for a manifest `start` row; an `rc.conf` line or a `ctl` command for a name with no such row is skipped or refused, so the data partition and the `apps` grant only enable, disable or set the display and intensity of a declared row | a local line that adds a row | the merge's host test, a line for an unknown name skipped; seeded: a merge that adds a row for a principal with a template but no `start` row |
 | **AP4.** A display's session is the session its enabled row keeps, and no other, across a restart of either domain | the merged table holds at most one enabled row for each display; only a row's keeper names a display with `display`; the domain service fixes the session mark in the record of that session's grant on the display and every mint of the record carries it ([design-system.md](design-system.md#facets-a-configured-domain-serves)) | two enabled rows on one display; a mark set by whichever session opens a window first; a re-mint that drops the mark | the table's host test with two enabled rows on one display, the second refused; the kiosk tests of [Verification and testing](#verification-and-testing), the display domain's restart among them |
 | **AP5.** A row whose display its principal cannot draw on never starts | the merge refuses a row whose display is not a `windows` service granted to its principal's template, with `{no_grant, Display}` at `/proc/apps`; the manifest check refuses such a manifest row (property 17) and `service enable` such a command | a reserved display that stays blank because its session holds no grant there | the merge's host test; the QEMU test of a local line naming such a display |
@@ -302,7 +302,7 @@ the table, so one command shows everything that starts.
 ### Starting a session
 
 Every session a row keeps is started by a **keeper**, a process of
-`erx_start`, with `erx_domain:start_session(Principal, Start)`. `Start`
+`erx_starter`, with `erx_domain:start_session(Principal, Start)`. `Start`
 names the display in one of two ways: `#{display => D}` from an enabled
 row's keeper, which makes the session the display's session, or
 `#{default_display => D}` from `onestart` and `start APP display=D` on a
@@ -341,7 +341,7 @@ A keeper holds one session. It starts the session, monitors its domain
 pid, and exits when the session ends or its start is refused; the
 session ends with its keeper, as a web login's sessions end with the
 web login service. Each enabled row has a supervisor of its own in
-`erx_start`, with the row's intensity and the keeper as its one
+`erx_starter`, with the row's intensity and the keeper as its one
 permanent child, so OTP's supervisor is the restart policy and no other
 exists:
 
@@ -354,7 +354,7 @@ exists:
 
 The boot starts the table at step 5 of
 [Boot](design-system.md#boot): once the configured domains of the boot
-order run, `erx_start` merges the table and starts each enabled row's
+order run, `erx_starter` merges the table and starts each enabled row's
 supervisor, a row that names a display once that display's domain has
 reported ready. The rescue configuration starts no row.
 
@@ -420,7 +420,7 @@ For a configured domain, `service` prints its state and answers every
 other request that it is configured in the system manifest.
 
 **The `apps` tree**, a service of the system domain and an instance of
-`files`, which `erx_start` serves with `erx_fs` and a session mounts at
+`files`, which `erx_starter` serves with `erx_fs` and a session mounts at
 `/apps`:
 
 | File | Read | Write |
@@ -602,9 +602,9 @@ and `rc.conf`'s grammar.
 
 **Chokepoints**, each a build check with a seeded violation:
 
-* `erx_start` reaches the domain service only through
+* `erx_starter` reaches the domain service only through
   `start_session/2` and `stop/2`;
-* only `erx_start` passes `display` or `default_display` to
+* only `erx_starter` passes `display` or `default_display` to
   `start_session/2`.
 
 ## Performance

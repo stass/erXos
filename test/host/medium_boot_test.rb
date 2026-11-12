@@ -103,58 +103,52 @@ class MediumBootTest < Minitest::Test
   end
 
   # The medium manifest gives the system principal room for two more domains, drops its
-  # session template and the web domain, appends the configured one, and leaves every
-  # other line of the development manifest as it was.
+  # session template, appends the configured one, and leaves every other line of the site
+  # manifest as it was. A manifest with the web domain, the development one, is refused.
   def test_the_medium_manifest_has_room_for_two_domains_and_changes_nothing_else
-    plain = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
-    grown = Boot.manifest(plain)
+    site = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
+    grown = Boot.manifest(site)
     growth = 2 * (Boot::DOMAIN_MEMORY + Boot::DOMAIN_OUTER)
-    web = plain.match(Boot::WEB_LIMITS).captures.sum { |figure| Integer(figure, 10) }
     memory, root_memory, domains = [/^principal system\n  memory ([0-9]+)$/, /^  root_memory ([0-9]+)$/, /^  max_domains ([0-9]+)$/]
-                                   .map { |pattern| Integer(plain[pattern, 1], 10) }
-    assert_equal ["principal system\n  memory #{memory - web + growth}", "  root_memory #{root_memory - web + growth}",
-                  "  domains #{domains - 1 + 2}", "  max_domains #{domains - 1 + 2}"],
+                                   .map { |pattern| Integer(site[pattern, 1], 10) }
+    assert_equal ["principal system\n  memory #{memory + growth}", "  root_memory #{root_memory + growth}",
+                  "  domains #{domains + 2}", "  max_domains #{domains + 2}"],
                  [grown[/^principal system\n  memory [0-9]+$/], grown[/^  root_memory [0-9]+$/],
                   grown[/^principal system\n(?:  .*\n)*?(  domains [0-9]+)$/, 1], grown[/^  max_domains [0-9]+$/]]
-    # The web domain's system connection's row goes with it.
-    assert_equal Integer(plain[/^  max_connections ([0-9]+)$/, 1], 10) - 1,
-                 Integer(grown[/^  max_connections ([0-9]+)$/, 1], 10)
-    sessionless = Erx::ProductionImage.without_sessions(plain)
+    assert_equal site[/^  max_connections [0-9]+$/], grown[/^  max_connections [0-9]+$/]
+    sessionless = Erx::ProductionImage.without_sessions(site)
     refute_match(/^session /, sessionless)
     refute_match(/^  grantee @session\./, sessionless)
     # The session template's 5 lines, and the facets granted to it: the 10 of data_session,
     # the 9 of net and the 9 of inspect.
-    assert_equal 5 + 10 + 9 + 9, plain.lines.size - sessionless.lines.size
-    # The web domain's records: its share's 11 lines, its runtime limits' 10, its limits'
-    # 12, its domain's 10, its service's 3 and its facet's 9.
-    webless = Boot.without_web(sessionless)
-    assert_equal 11 + 10 + 12 + 10 + 3 + 9, sessionless.lines.size - webless.lines.size
-    refute_match(/^(?:share|runtime_limits|limits|domain|service|facet) web$|@(?:share|domain|service)\.web$/, grown)
-    assert_equal 4, webless.lines.zip(grown.lines).count { |left, right| left != right }
-    assert_equal webless.lines.size, grown.lines.size - Boot::DOMAIN_ROW.lines.size
+    assert_equal 5 + 10 + 9 + 9, site.lines.size - sessionless.lines.size
+    assert_equal 4, sessionless.lines.zip(grown.lines).count { |left, right| left != right }
+    assert_equal sessionless.lines.size, grown.lines.size - Boot::DOMAIN_ROW.lines.size
     assert grown.end_with?(Boot::DOMAIN_ROW)
-    assert_raises(Erx::Error) { Boot.manifest(plain.sub(/^  max_domains [0-9]+\n/, '')) }
+    assert_raises(Erx::Error) { Boot.manifest(site.sub(/^  max_domains [0-9]+\n/, '')) }
+    development = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
+    error = assert_raises(Erx::Error) { Boot.manifest(development) }
+    assert_equal 'a medium boot starts from the site manifest, which has no web domain', error.message
   end
 
   # The footprint cell's manifest has room for its three domains and sets the system domain's
   # /tmp cap; its expression creates one domain per step, booting the step's script, the
   # last with a tmp cap, and says what it measures.
   def test_the_footprint_cell_has_room_for_its_domains_and_one_step_each
-    plain = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
+    site = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
     cell = Boot::Footprint
     system_tmp = /^runtime_limits system\n(?:  .*\n)*?  tmp ([0-9]+)$/
-    grown = cell.manifest(plain, system_tmp: 8_388_608)
+    grown = cell.manifest(site, system_tmp: 8_388_608)
     assert_equal 8_388_608, grown[system_tmp, 1].to_i
     figure = ->(text, pattern) { text[pattern, 1].to_i }
-    # The figures grow from the development manifest's without the web domain.
-    webless = Boot.without_web(plain)
-    assert_equal figure.(webless, /^  max_domains ([0-9]+)$/) + 3, figure.(grown, /^  max_domains ([0-9]+)$/)
+    # The figures grow from the site manifest's.
+    assert_equal figure.(site, /^  max_domains ([0-9]+)$/) + 3, figure.(grown, /^  max_domains ([0-9]+)$/)
     growth = 3 * (cell::MEMORY + Boot::DOMAIN_OUTER)
-    assert_equal figure.(webless, /^  root_memory ([0-9]+)$/) + growth, figure.(grown, /^  root_memory ([0-9]+)$/)
-    assert_equal figure.(webless, /^principal system\n  memory ([0-9]+)$/) + growth,
+    assert_equal figure.(site, /^  root_memory ([0-9]+)$/) + growth, figure.(grown, /^  root_memory ([0-9]+)$/)
+    assert_equal figure.(site, /^principal system\n  memory ([0-9]+)$/) + growth,
                  figure.(grown, /^principal system\n  memory ([0-9]+)$/)
     assert_equal %w[storage network bare blk net], grown.scan(/^domain ([a-z]+)$/).flatten
-    without_tmp = plain.sub(/^(runtime_limits system\n(?:  .*\n)*?)  tmp [0-9]+\n/, '\1')
+    without_tmp = site.sub(/^(runtime_limits system\n(?:  .*\n)*?)  tmp [0-9]+\n/, '\1')
     assert_raises(Erx::Error) { cell.manifest(without_tmp, system_tmp: 0) }
     runs = cell::RELEASES.keys.to_h { |name| [name, { 'entry' => name.size, 'files' => 7 }] }
     expression = cell.expression(runs: runs, runtime: 41)

@@ -2,16 +2,18 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 -module(erx_lvgl_screen).
 -moduledoc """
-A model screen for erx-lvgl on the host: it plays erx_ui_kiosk and the
-widget server over the program's two pipes (docs/design-display.md,
+A model screen for erx-lvgl on the host: it plays the renderer's side,
+erx_ui_lvgl's in the design, of the program's `pixels` reports (the
+design's `damage` and `presented` are TODO.md's, erx-lvgl), and the
+widget server, over the program's two pipes (docs/design-display.md,
 "The widget server" and "Kiosks and glasses"). It sends the screen
 record, a small widget tree, a press on the tree's button and a
 repaint, keeps the pixels it is sent on a canvas, and checks what a
 screen owner relies on:
 
 * every report lies within the screen and holds exactly its rectangle's
-  rows in the channel, Plan 9's bytesperline each, as erx_ui_kiosk:flush/2
-  checks; the tree's padding is odd, so on a 16-bit channel this fails
+  rows in the channel, Plan 9's bytesperline each, as the renderer's
+  flush checks; the tree's padding is odd, so on a 16-bit channel this fails
   unless each area starts on a 32-bit word;
 * after the first frame the label's band is not all background, so the
   tree was rendered where the layout puts it;

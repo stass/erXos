@@ -11,17 +11,17 @@ require_relative '../../tools/lib/erx/device_give'
 class DeviceGiveTest < Minitest::Test
   Suite = Erx::DeviceGive
   ROOT = File.expand_path('../..', __dir__)
-  PLAIN = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+  SITE = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-site.txt'))
 
   # The manifest is MediumBoot's with the row staying up, restarting once, and holding the
-  # spare unit, which the development manifest leaves unplaced.
+  # spare unit, which the site manifest leaves unplaced.
   def test_the_row_stays_up_restarts_once_and_holds_the_spare_unit
-    ours = Suite.manifest(PLAIN)
+    ours = Suite.manifest(SITE)
     assert ours.end_with?(Suite::DOMAIN_ROW + Suite::UNIT)
     assert_match(/^  restarts 1$/, Suite::DOMAIN_ROW)
     refute_includes Suite::DOMAIN_ROW[/^  args "(.*)"$/, 1].split, '-eval'
     assert_equal Erx::MediumBoot::DOMAIN_ROW.lines.size, Suite::DOMAIN_ROW.lines.size
-    refute_match(/placement "spare"/, PLAIN)
+    refute_match(/placement "spare"/, SITE)
   end
 
   # The answer's offset and size are the spare device's place in its register page, and its

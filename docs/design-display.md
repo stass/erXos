@@ -1226,7 +1226,9 @@ facet row that grants the display to a configured domain or to the
 session template the session was made from ([Facets a configured domain
 serves](design-system.md#facets-a-configured-domain-serves)). One
 parameter no facet row sets: `session`, which every mint carries from
-the domain service's record of the grant. That record's **session
+the domain service's record of the grant. It is a parameter the domain service
+computes at the mint ([design-system.md](design-system.md#facets-a-configured-domain-serves),
+"Parameters the domain service computes at the mint"). The record's **session
 mark** is fixed when the session that a start row's keeper started on
 this display reports ready, is set on that session's grant on this
 display and no other, and is copied into every mint of the grant, the

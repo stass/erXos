@@ -8,6 +8,7 @@ require_relative 'chokepoint_rules'
 require_relative 'device_callers'
 require_relative 'dependencies'
 require_relative 'device_posters'
+require_relative 'pipe_makers'
 require_relative 'erofs_reads'
 require_relative 'web_sinks'
 require_relative 'generated'
@@ -158,6 +159,7 @@ module Erx
       check_test_image_builders(own_sources)
       check_device_callers(listed)
       check_device_posters(listed)
+      check_pipe_makers(listed)
       check_erofs_reads(listed)
       check_net(listed)
       check_command_needs(listed)
@@ -334,6 +336,13 @@ module Erx
     def check_device_posters(listed)
       sources = listed.select { |relative| DevicePosters.covers?(relative) && File.file?(File.join(@root, relative)) }
       violations = DevicePosters.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    # Imports included, as for the device callers.
+    def check_pipe_makers(listed)
+      sources = listed.select { |relative| PipeMakers.covers?(relative) && File.file?(File.join(@root, relative)) }
+      violations = PipeMakers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 

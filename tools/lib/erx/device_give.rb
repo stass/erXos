@@ -112,7 +112,7 @@ module Erx
         @linker = linker
         @qemu = qemu
         @machine = MediumBoot.machine(platform)
-        @manifest = DeviceGive.manifest(platform.manifest_source(@root))
+        @manifest = DeviceGive.manifest(platform.site_manifest_source(@root))
       end
 
       # Packs the image once, then boots it at each CPU count.

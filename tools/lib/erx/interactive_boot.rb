@@ -106,7 +106,7 @@ module Erx
     # The system manifest the image is built from, as checked in for platform's board:
     # the website's manifest, which has no web domain, when without_web, else the development manifest.
     def manifest_source(root:, platform:, without_web:)
-      File.binread(File.join(root, without_web ? platform.site_manifest_path : platform.manifest_path))
+      without_web ? platform.site_manifest_source(root) : platform.manifest_source(root)
     end
 
     # Builds the kernel and the image into its directory under root, replacing the

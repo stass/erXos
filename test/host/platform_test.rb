@@ -31,7 +31,17 @@ class PlatformTest < Minitest::Test
     assert_equal [256, 16], [VIRT.memory_mib, VIRT.fiasco_reserve_mib]
     assert_equal 'config/manifest/qemu-virt-development.txt', VIRT.manifest_path
     assert File.file?(File.join(ROOT, VIRT.manifest_path))
-    assert File.file?(File.join(ROOT, VIRT.site_manifest_path))
+    assert_equal File.binread(File.join(ROOT, 'config/manifest/qemu-virt-site.txt')), VIRT.site_manifest_source(ROOT)
+  end
+
+  # Only a board the website boots has a site manifest; another board's is refused by
+  # name, never replaced with its development manifest.
+  def test_a_board_without_a_site_manifest_is_refused_on_use
+    Dir.mktmpdir do |root|
+      error = assert_raises(Erx::Error) { VIRT.site_manifest_source(root) }
+      assert_equal 'the qemu-virt board has no site manifest config/manifest/qemu-virt-site.txt, ' \
+                   'so no website image or medium boot', error.message
+    end
   end
 
   def test_a_record_without_a_ram_number_is_refused_by_name

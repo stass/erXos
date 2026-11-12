@@ -2115,6 +2115,21 @@ creates the configured domains as it starts, so a service whose facets
 the manifest grants them is started before it, by an application the
 system release starts before `erx_domain`.
 
+**Parameters the domain service computes at the mint.** A grant's
+parameters are its facet row's, except a parameter the domain service
+computes at the mint: a value no facet row may set, which the domain
+service derives from its own records, with a pure function, each time it
+mints the grant or starts its facet, and carries in that mint. It is one
+mechanism, with two uses: `inspect`'s scope, which
+`erx_domain_core:inspect_scope/3` gives from the grantee's principal, the
+manifest's system-shell principals and its development flag
+([design-live.md](design-live.md#the-inspect-service)), and the `windows`
+grant's `session`, the session mark the domain service fixes for the
+display's session and copies into every mint of that grant
+([design-display.md](design-display.md#the-pixel-area)). A service that
+needs a value only the domain service knows takes it the same way, never
+through a facet row or a protocol of its own.
+
 The decisions are a pure state machine, `erx_domain_mints`, beside
 `erx_domain_core` and `erx_domain_links`: it takes the manifest's rows and
 the events above, and returns the next state and the actions, to
@@ -3024,7 +3039,7 @@ manifest lists: the vault.
 | host link, `erx_hostlink` | sessions with the development host | [design-live.md](design-live.md#the-host-link) |
 | code service, `erx_code` | the code store, code facets, overlays, the install facet | [design-live.md](design-live.md#the-code-store) |
 | update service, `erx_update` | system updates, through the slot writer: writing the spare slot, the trial, the commit and the fallback | [design-storage.md](design-storage.md#system-updates) |
-| start service, `erx_start` | the start table, the manifest's `start` rows with the machine's `rc.conf` over them, and the supervisor and keeper of each row; the `apps` tree | [design-apps.md](design-apps.md) |
+| start service, `erx_starter` | the start table, the manifest's `start` rows with the machine's `rc.conf` over them, and the supervisor and keeper of each row; the `apps` tree | [design-apps.md](design-apps.md) |
 | file trees, `erx_procfs` and the device service's tree | the system domain's own `/proc`, the system shell's and the host link's, as every domain runs one for itself; `/dev` for administrators | [design-live.md](design-live.md#the-proc-tree), [Devices](#devices) |
 | web login, `erx_web_login` | the web domain's facet with two operations: `login`, which checks a login with the vault as the console does, starts a session and introduces it to the web domain, and `logout`, which ends a session a login through it started; the sessions it started end with it | [design-web.md](design-web.md#logging-in-and-the-line) |
 | vault, `erx_vault`, in a domain of its own | principals' keys and secrets; logins; signatures for key facets, by purpose; its sealing backend, and that backend's driver where it has one | [The vault](#the-vault) |

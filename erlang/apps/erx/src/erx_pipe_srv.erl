@@ -35,8 +35,9 @@ stream; the supervisor starts a server for later pipes.
 
 Programs reach the server through their handlers (erx_prog_handler),
 which forward their requests and notices with the program as the holder
-and perform the installs and reports of a program holder; until the
-handler exists, only session processes hold ends.
+and perform the installs and reports of a program holder. This server
+performs the actions of session processes' ends only, so only session
+processes hold ends (TODO.md, erx_pipe_srv).
 
 read/3 and write/3 are the blocking calls a session process makes on
 its ends: the NIF never waits, and where it would it returns

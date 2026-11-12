@@ -58,12 +58,6 @@ module Erx
     # The domain's own budget and its outer one: what native_domain's ERTS domain runs in.
     DOMAIN_MEMORY = 160 << 20
     DOMAIN_OUTER = 1 << 20
-    # The development manifest's web domain, which a medium boot leaves out (without_web):
-    # its share, runtime limits, limits and domain records, its relay service and the
-    # system domain's facet of it, and its limits' budget and outer one.
-    WEB_ROWS = [/^share web\n(?:  .*\n)*/, /^runtime_limits web\n(?:  .*\n)*/, /^limits web\n(?:  .*\n)*/,
-                /^domain web\n(?:  .*\n)*/, /^service web\n(?:  .*\n)*/, /^facet web\n(?:  .*\n)*/].freeze
-    WEB_LIMITS = /^limits web\n  memory ([0-9]+)\n  outer ([0-9]+)\n/
     # The boot script the domain runs, of the applications every domain boots through, as
     # the image's build defines a boot script named by a manifest row (ProductionImage).
     DOMAIN_BOOT = ReleaseFiles.domain_boot('erts', applications: ProductionImage::DOMAIN_APPLICATIONS)
@@ -89,8 +83,8 @@ module Erx
     # eighth of a CPU on the users share's CPUs. The configured domains' grants together
     # may come to at most the system share's rate less its reserve, 2250 mcpu of its 3000
     # (dom_system_reserve, liberx/system/dom_core.c). The development manifest's storage
-    # and network domains take a whole CPU each and its web domain, which manifest leaves
-    # out, the last 250 mcpu; without it 250 mcpu remain: two eighths, as
+    # and network domains take a whole CPU each and its web domain, which the site manifest
+    # leaves out, the last 250 mcpu; without it 250 mcpu remain: two eighths, as
     # SystemDomain's erts and peer take. Nothing enforces a grant at run time in Phase 1
     # (docs/design-stopgap.md, property 13), and the share's CPUs, which set a runtime's
     # schedulers, are the users share's, so the domains run as with a larger grant.
@@ -302,8 +296,9 @@ module Erx
     # An Erlang map expression of pairs, each value an expression already.
     def erlang_map(pairs) = "\#{#{pairs.map { |key, value| "#{key}=>#{value}" }.join(',')}}"
 
-    # The development manifest with a domain row and room for two domains (a medium
-    # machine's manifest, with no growth of the system). The row, DOMAIN_ROW, is there so the image
+    # The board's site manifest, the development manifest without its web domain, with a
+    # domain row and room for two domains (a medium machine's manifest, with no growth of
+    # the system). The row, DOMAIN_ROW, is there so the image
     # carries the release and the runtime image it names, which is how a manifest makes
     # its image carry them (docs/design-stopgap.md, "The production image"). The domain
     # service starts the row at boot; the shell creates the cell's domains through the
@@ -313,33 +308,18 @@ module Erx
     # stops behind its pid while the next create runs, once the configured one has ended. So
     # the system principal's quota and max_domains each grow by domains (2), and its memory
     # and root_memory each by that many domains' budgets. ProductionImage.without_sessions drops the system
-    # principal's session template, so the console's login at boot starts no session, and
-    # without_web drops the web domain, so the ids and the room are the cell's own: the web
-    # domain's grant would take the 250 mcpu, of what the system share's reserve leaves,
-    # that the cells' rows use, and its id would come before theirs (HostlinkGuest, the
-    # production image's host link check, boots it). The development manifest itself, what the production image promises, is
-    # unchanged. row replaces DOMAIN_ROW for a harness whose configured domain runs another
+    # principal's session template, so the console's login at boot starts no session. The
+    # source has no web domain, so the ids and the room are the cell's own: the web domain's
+    # grant would take the 250 mcpu, of what the system share's reserve leaves, that the
+    # cells' rows use, and its id would come before theirs (HostlinkGuest, the production
+    # image's host link check, boots it); a source with one is refused. The production
+    # image's own manifest is not grown. row replaces DOMAIN_ROW for a harness whose configured domain runs another
     # way (SystemDomain); domains is how many of domain_memory's domains the principal
     # gains room for.
     def manifest(source, row: DOMAIN_ROW, domains: 2, domain_memory: DOMAIN_MEMORY)
-      grown(ProductionImage.without_sessions(without_web(source)), memory: domains * (domain_memory + DOMAIN_OUTER), domains: domains) +
-        row
-    end
+      raise Error, 'a medium boot starts from the site manifest, which has no web domain' if source.match?(/^domain web$/)
 
-    # source without the web domain: WEB_ROWS removed, each exactly once, and the room
-    # they took given back, the web limits' budget and outer one from the system principal's
-    # memory and root_memory, one domain from its quota and max_domains, and the row its
-    # system connection takes from max_connections.
-    def without_web(source)
-      limits = source.match(WEB_LIMITS)
-      raise Error, 'the manifest has no limits web record' unless limits
-
-      rest = WEB_ROWS.reduce(source) do |text, row|
-        raise Error, "the manifest does not have exactly one #{row.source[1, 20]} record" unless text.scan(row).size == 1
-
-        text.sub(row, '')
-      end
-      grown(rest, memory: -(Integer(limits[1], 10) + Integer(limits[2], 10)), domains: -1, connections: -1)
+      grown(ProductionImage.without_sessions(source), memory: domains * (domain_memory + DOMAIN_OUTER), domains: domains) + row
     end
 
     # source with the system principal's memory and root_memory each grown by memory, its
@@ -537,7 +517,7 @@ module Erx
         @linker = linker
         @qemu = qemu
         @machine = MediumBoot.machine(platform)
-        @manifest = MediumBoot.manifest(platform.manifest_source(@root))
+        @manifest = MediumBoot.manifest(platform.site_manifest_source(@root))
       end
 
       # Packs the production image and its release medium once, then boots each CPU
@@ -699,7 +679,7 @@ module Erx
       # A medium machine's manifest with room for the three domains, the configured rows, and the
       # system domain's /tmp cap at system_tmp bytes.
       def manifest(source, system_tmp:)
-        raise Error, 'the development manifest does not have exactly one tmp line in its runtime_limits system row' unless source.scan(TMP_LINE).size == 1
+        raise Error, 'the site manifest does not have exactly one tmp line in its runtime_limits system row' unless source.scan(TMP_LINE).size == 1
 
         MediumBoot.manifest(source.sub(TMP_LINE) { "#{Regexp.last_match(1)}#{system_tmp}" }, domains: RELEASES.size, domain_memory: MEMORY,
                                                                           row: PROFILE + RELEASES.keys.map { |name| domain_row(name) }.join)
@@ -798,7 +778,7 @@ module Erx
         def measure(cpus:, system_tmp:, directory:, jobs:, build:)
           ProductionImage.singleton_class.prepend(Table)
           ReleaseFiles.prepend(LoadOnly)
-          manifest = Footprint.manifest(@platform.manifest_source(@root), system_tmp: system_tmp)
+          manifest = Footprint.manifest(@platform.site_manifest_source(@root), system_tmp: system_tmp)
           fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
           fiasco.build(jobs: jobs) if build
           image = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/footprint/image'))

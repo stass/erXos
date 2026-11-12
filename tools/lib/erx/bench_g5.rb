@@ -79,7 +79,7 @@ module Erx
     def run(accel:, jobs: 4)
       plan = PLANS.fetch(accel) { raise Error, "no G5 plan for accelerator #{accel}" }
       build = build_record
-      manifest = MediumBoot.manifest(@machine.platform.manifest_source(@root))
+      manifest = MediumBoot.manifest(@machine.platform.site_manifest_source(@root))
       built, domain = build_image(manifest: manifest, jobs: jobs)
       before = @bench.load_average
       directory = File.join(@root, 'build/qemu', "g5-#{accel}-#{Process.pid}-#{Random.bytes(4).unpack1('H*')}")

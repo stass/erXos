@@ -1636,7 +1636,7 @@ design and its implementation, which adds apps at run time.
 
 1. **The start table**, in 1b, after 1b-A, 1b-B's session domain and
    M6's data partition, on which `rc.conf` lies. `start` rows in
-   `abi/manifest.txt` and its reader; property 17; `erx_start` with
+   `abi/manifest.txt` and its reader; property 17; `erx_starter` with
    one supervisor and keeper per enabled row, boot step 5 and the rescue
    configuration's empty table; `erx_domain:start_session/2` with its
    two forms of display; the session mark in the domain service's grant

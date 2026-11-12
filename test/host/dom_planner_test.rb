@@ -128,7 +128,7 @@ class DomPlannerTest < Minitest::Test
   # erts and peer, beside the development manifest's storage and network, all four grants
   # within the system share's reserve, so the library plans each.
   def test_the_library_plans_the_system_domain_suites_domains
-    source = PLATFORM.manifest_source(ROOT)
+    source = PLATFORM.site_manifest_source(ROOT)
     arguments = ManifestContextFixture.archive_arguments(@codec, boots: %w[echo erts network session storage])
     context = Erx::Manifest::Context.new(**arguments.merge(platform: Erx::MediumBoot.machine(PLATFORM).record))
     [Erx::SystemDomain, Erx::SystemDomain::Regrant].each do |suite|

@@ -1063,7 +1063,11 @@ exits or closes it. A session process makes a pipe with
 `erx_pipe_srv:inherit/2`, the pipe server's `inherit` event with that
 process as the child: the server opens the new end for the child and
 answers it to the caller, which hands it over, and only the child may use
-it.
+it. The process reads, writes and closes its ends with
+`erx_pipe_srv:read/3`, `write/3` and `close/1`, which call the NIF in
+the caller's own process; where it returns `would_block`, `read/3` and
+`write/3` wait, up to their timeout, for one of the messages below and
+call it again (`retry/2`).
 
 The NIF and a program's ends run the one pipe runner, `liberx`'s
 `erx_pipe_wrun` and `erx_pipe_rrun` (`liberx/erx_pipe_run.c`): it steps

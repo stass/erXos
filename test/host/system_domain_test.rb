@@ -9,7 +9,7 @@ require_relative '../../tools/lib/erx/system_domain'
 # Nothing boots here.
 class SystemDomainTest < Minitest::Test
   Suite = Erx::SystemDomain
-  PLAIN = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
+  SITE = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
 
   # The rows are MediumBoot's with the halt dropped, so each configured domain stays up,
   # over the erx carrier, as MediumBoot's, so each is a node, behind the flag that lets the
@@ -27,8 +27,8 @@ class SystemDomainTest < Minitest::Test
     refute_includes row_args, 'start_distribution'
     assert_match(/^  restarts 0$/, Suite::DOMAIN_ROW)
     assert_equal Suite::DOMAIN_ROW[/^domain erts\n.*/m].sub("domain erts\n", "domain peer\n"), Suite::PEER_ROW
-    medium = Erx::MediumBoot.manifest(PLAIN)
-    ours = Suite.manifest(PLAIN)
+    medium = Erx::MediumBoot.manifest(SITE)
+    ours = Suite.manifest(SITE)
     assert ours.end_with?(Suite::ECHO_ROW + Suite::PEER_ROW + Suite::ECHO_SERVICES)
     assert_equal Suite::DOMAIN_ROW, Suite::ECHO_ROW.sub("  release @artifact.echo\n", "  release @artifact.erts\n")
     assert Suite::ECHO_BOOT.test
@@ -200,14 +200,14 @@ class SystemDomainTest < Minitest::Test
     assert_includes rows, "limits erts\n"
     assert_includes rows, "  connections 2\n"
     assert_includes rows, "facet echo_peer\n  grantee @domain.peer\n  service @service.echo\n"
-    manifest = regrant.manifest(PLAIN)
-    assert manifest.end_with?(rows + Erx::ProductionImage.sessions(PLAIN) + regrant::SESSION_FACET)
+    manifest = regrant.manifest(SITE)
+    assert manifest.end_with?(rows + Erx::ProductionImage.sessions(SITE) + regrant::SESSION_FACET)
     assert manifest.end_with?("facet echo_session\n  grantee @session.system\n  service @service.echo\n" \
                               "#{regrant::FACET_LIMITS.sub("  service @service.echo\n", '')}")
     assert_equal 1, manifest.scan(/^session /).size
-    assert_equal Integer(Erx::MediumBoot.without_web(PLAIN)[/^  max_connections ([0-9]+)$/, 1], 10) + 2,
+    assert_equal Integer(SITE[/^  max_connections ([0-9]+)$/, 1], 10) + 2,
                  Integer(manifest[/^  max_connections ([0-9]+)$/, 1], 10)
-    assert_raises(Erx::Error) { regrant.manifest(Erx::ProductionImage.without_sessions(PLAIN)) }
+    assert_raises(Erx::Error) { regrant.manifest(Erx::ProductionImage.without_sessions(SITE)) }
     shell = { name: 'release-shell', pattern: /y/n, seconds: 30 }.freeze
     points = regrant.checkpoints([shell])
     assert_raises(Erx::Error) { regrant.checkpoints([shell.merge(type: "x\r")]) }
