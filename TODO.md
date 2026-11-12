@@ -1129,10 +1129,6 @@ it; git history is the record of completed work.
 * [Low] tooling, `tools/erx pack` and the raspi4b suite share `build/production-image/raspi4b/`, cleared before
   each build: a suite run replaces the card the owner packed, two packs of one platform at once remove each other's
   files, and a failed pack leaves the directory partial. Build into a sibling directory and rename it into place.
-* [Medium] PL011 window, `hw/svd/pl011/pl011.svd`: its address block is 0x1000 bytes, and
-  `erx_device` refuses a window smaller than the block, but the Raspberry Pi 4's PL011s are 0x200
-  bytes apart and its record gives UART3, the host link, 0x200. Shrink the block to the registers
-  the driver uses (the ID registers at 0xfe0 are unused) before the board's host link is tried.
 * [Medium] liberx, the console handoff (`erx_fiasco_task_mem_physical_body`, `erx_boot_console_page`):
   the root hands the log to the console at the first physical object it creates at the console's
   page, whoever the object is for. On the Raspberry Pi 4 that page also holds the auxiliary SPI

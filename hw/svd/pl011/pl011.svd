@@ -16,7 +16,7 @@
   <peripherals>
     <peripheral>
       <name>PL011</name><baseAddress>0</baseAddress>
-      <addressBlock><offset>0</offset><size>0x1000</size><usage>registers</usage></addressBlock>
+      <addressBlock><offset>0</offset><size>0x200</size><usage>registers</usage></addressBlock>
       <registers>
         <register>
           <name>DR</name><ownedByNif>false</ownedByNif>
@@ -203,72 +203,6 @@
             <field><name>RXDMAE</name><description>Receive DMA enable. If this bit is set to 1, DMA for the receive FIFO is enabled.</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth><access>read-write</access></field>
             <field><name>TXDMAE</name><description>Transmit DMA enable. If this bit is set to 1, DMA for the transmit FIFO is enabled.</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth><access>read-write</access></field>
             <field><name>DMAONERR</name><description>DMA on error. If this bit is set to 1, the DMA receive request outputs, UARTRXDMASREQ or UARTRXDMABREQ, are disabled when the UART error interrupt is asserted.</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth><access>read-write</access></field>
-          </fields>
-        </register>
-        <register>
-          <name>PERIPHID0</name><ownedByNif>false</ownedByNif>
-          <description>UARTPeriphID0 Register</description>
-          <addressOffset>0xfe0</addressOffset><access>read-only</access>
-          <fields>
-            <field><name>PARTNUMBER0</name><description>These bits read back as 0x11</description><bitOffset>0</bitOffset><bitWidth>8</bitWidth><access>read-only</access></field>
-          </fields>
-        </register>
-        <register>
-          <name>PERIPHID1</name><ownedByNif>false</ownedByNif>
-          <description>UARTPeriphID1 Register</description>
-          <addressOffset>0xfe4</addressOffset><access>read-only</access>
-          <fields>
-            <field><name>PARTNUMBER1</name><description>These bits read back as 0x0</description><bitOffset>0</bitOffset><bitWidth>4</bitWidth><access>read-only</access></field>
-            <field><name>DESIGNER0</name><description>These bits read back as 0x1</description><bitOffset>4</bitOffset><bitWidth>4</bitWidth><access>read-only</access></field>
-          </fields>
-        </register>
-        <register>
-          <name>PERIPHID2</name><ownedByNif>false</ownedByNif>
-          <description>UARTPeriphID2 Register</description>
-          <addressOffset>0xfe8</addressOffset><access>read-only</access>
-          <fields>
-            <field><name>DESIGNER1</name><description>These bits read back as 0x4</description><bitOffset>0</bitOffset><bitWidth>4</bitWidth><access>read-only</access></field>
-            <field><name>REVISION</name><description>This field depends on the revision of the UART: r1p0 0x0 r1p1 0x1 r1p3 0x2 r1p4 0x2 r1p5 0x3</description><bitOffset>4</bitOffset><bitWidth>4</bitWidth><access>read-only</access></field>
-          </fields>
-        </register>
-        <register>
-          <name>PERIPHID3</name><ownedByNif>false</ownedByNif>
-          <description>UARTPeriphID3 Register</description>
-          <addressOffset>0xfec</addressOffset><access>read-only</access>
-          <fields>
-            <field><name>CONFIGURATION</name><description>These bits read back as 0x00</description><bitOffset>0</bitOffset><bitWidth>8</bitWidth><access>read-only</access></field>
-          </fields>
-        </register>
-        <register>
-          <name>PCELLID0</name><ownedByNif>false</ownedByNif>
-          <description>UARTPCellID0 Register</description>
-          <addressOffset>0xff0</addressOffset><access>read-only</access>
-          <fields>
-            <field><name>UARTPCELLID0</name><description>These bits read back as 0x0D</description><bitOffset>0</bitOffset><bitWidth>8</bitWidth><access>read-only</access></field>
-          </fields>
-        </register>
-        <register>
-          <name>PCELLID1</name><ownedByNif>false</ownedByNif>
-          <description>UARTPCellID1 Register</description>
-          <addressOffset>0xff4</addressOffset><access>read-only</access>
-          <fields>
-            <field><name>UARTPCELLID1</name><description>These bits read back as 0xF0</description><bitOffset>0</bitOffset><bitWidth>8</bitWidth><access>read-only</access></field>
-          </fields>
-        </register>
-        <register>
-          <name>PCELLID2</name><ownedByNif>false</ownedByNif>
-          <description>UARTPCellID2 Register</description>
-          <addressOffset>0xff8</addressOffset><access>read-only</access>
-          <fields>
-            <field><name>UARTPCELLID2</name><description>These bits read back as 0x05</description><bitOffset>0</bitOffset><bitWidth>8</bitWidth><access>read-only</access></field>
-          </fields>
-        </register>
-        <register>
-          <name>PCELLID3</name><ownedByNif>false</ownedByNif>
-          <description>UARTPCellID3 Register</description>
-          <addressOffset>0xffc</addressOffset><access>read-only</access>
-          <fields>
-            <field><name>UARTPCELLID3</name><description>These bits read back as 0xB1</description><bitOffset>0</bitOffset><bitWidth>8</bitWidth><access>read-only</access></field>
           </fields>
         </register>
       </registers>

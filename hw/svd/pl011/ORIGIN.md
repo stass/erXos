@@ -32,11 +32,16 @@ of the carved file as it stands in the tree. The edits, all made by that script:
   because the table is generic over the device's instances; the board gives
   the address. The device `version` and `description` are erXos's (`1` and
   "PrimeCell UART register interface") where upstream describes the RP2040.
-* The peripheral has the UART's registers up to `PCELLID3` only. The Arm
-  manual's integration test registers at 0x80 to 0x8C are in neither upstream
-  nor this file.
+* The address block is 0x200 bytes, and only the registers inside it are
+  kept: `DR` up to `DMACR` at 0x48. The Raspberry Pi 4's BCM2711 places its
+  PL011s 0x200 apart, and `erx_device` refuses a device window smaller than
+  the block, so the block is the smallest spacing a board gives. Upstream's
+  PrimeCell identification registers (`UARTPERIPHID0` to `UARTPCELLID3`, at
+  0xfe0 to 0xffc) lie outside it and are dropped; nothing in erXos reads
+  them. The Arm manual's integration test registers at 0x80 to 0x8C are in
+  neither upstream nor this file.
 * The `UART` prefix is stripped from register names (`UARTDR` is `DR`,
-  `UARTLCR_H` is `LCR_H`, `UARTPERIPHID0` is `PERIPHID0`). Field names stay as
+  `UARTLCR_H` is `LCR_H`). Field names stay as
   upstream has them (`BAUD_DIVINT`, `BAUD_DIVFRAC`).
 * `bitRange` `[high:low]` becomes `bitOffset` and `bitWidth`.
 * The upstream states access on fields only. Each register gets the weakest
@@ -82,7 +87,7 @@ which is not redistributable and is not in the tree.
       "license": "BSD-3-Clause",
       "evidence": "file SPDX",
       "reviewed": false,
-      "sha256": "716a244fb04ab21f2a41c2af2074e600c32ca620bd70b9d360434273a43aa117",
+      "sha256": "5b245da023465a673b692c19b20644509f51d615ca5d3db950632f4eaf12c83f",
       "kind": "file",
       "non_ascii_lines": []
     }

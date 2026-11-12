@@ -29,6 +29,13 @@ module Erx
     WRITE_ONLY = %w[UARTICR].freeze
     READ_ONLY_FIELDS = %w[UARTRSR].freeze
 
+    # The address block is the smallest spacing a board gives its PL011s: the
+    # BCM2711 places them 0x200 apart, and erx_device refuses a window smaller
+    # than the block. Every register the UART works through ends at DMACR
+    # (0x48); the PrimeCell identification registers at 0xfe0-0xffc lie outside
+    # the block and are left out, since nothing reads them.
+    BLOCK_SIZE = 0x200
+
     HEAD = <<~XML
       <?xml version="1.0" encoding="UTF-8"?>
       <!-- Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
@@ -48,7 +55,7 @@ module Erx
         <peripherals>
           <peripheral>
             <name>PL011</name><baseAddress>0</baseAddress>
-            <addressBlock><offset>0</offset><size>0x1000</size><usage>registers</usage></addressBlock>
+            <addressBlock><offset>0</offset><size>#{format('0x%x', BLOCK_SIZE)}</size><usage>registers</usage></addressBlock>
             <registers>
     XML
     TAIL = <<~XML
@@ -76,7 +83,7 @@ module Erx
       peripherals = root.get_elements('peripherals/peripheral').select { |node| node.elements['name'].text == 'UART0' }
       raise Error, 'rp2040.svd has no single UART0' unless peripherals.size == 1
 
-      peripherals.first.get_elements('registers/register').map { |node| register(node) }
+      peripherals.first.get_elements('registers/register').map { |node| register(node) }.select { |register| in_block?(register) }
     end
 
     def register(node)
@@ -86,6 +93,8 @@ module Erx
                    offset: node.elements['addressOffset'].text.then { |value| Integer(value, 16) },
                    access: register_access(name, fields), read_action: READ_ACTIONS[name], fields: fields)
     end
+
+    def in_block?(register) = register.offset < BLOCK_SIZE
 
     # The Pico SDK states access on fields only; the profile wants it on the
     # register too, so it is the weakest access that admits every field.

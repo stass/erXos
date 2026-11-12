@@ -324,7 +324,8 @@ Error in process <0.150.0> with exit value:
 * **The Raspberry Pi 4 boots on QEMU's `raspi4b` model.** TF-A BL31 hands
   off to Fiasco, and the system boots to the serial shell on the mini
   UART. It runs under TCG only, because QEMU cannot run this model under
-  HVF.
+  HVF. The packed card's device tree, whose `serial0` is the mini UART,
+  boots on a 4 GB board.
 * **The machine is an object** (M4). A host link over the second serial
   line lets `tools/erx load` and `watch` replace modules in the running
   system, and `tools/erx files` read the guest's files over 9P2000.L; `tools/erx boot

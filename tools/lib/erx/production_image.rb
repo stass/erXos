@@ -291,7 +291,8 @@ module Erx
                        machine: machine, domains: domain_boots(manifest_source))
       directory = built_directory(built)
       if BootPartition.boot_partition_medium?(machine.platform)
-        return [built, BootPartition.lay_out(root: @root, runner: @runner, platform: machine.platform, bootable: built.single,
+        return [built, BootPartition.lay_out(root: @root, runner: @runner, platform: machine.platform, build_kind: BUILD_KIND,
+                                             bootable: built.single,
                                              directory: directory, compiler: @compiler, linker: @linker)]
       end
 

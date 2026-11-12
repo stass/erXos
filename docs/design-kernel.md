@@ -7615,8 +7615,8 @@ checks](#chokepoint-checks)).
 **The early console.** The kernel writes one UART, whose kind and
 address the platform's kernel build fixes: the UART the board documents
 as its console, on QEMU `virt` the PL011 at the address the `virt`
-board fixes, on the Raspberry Pi 4 the mini UART its firmware makes the
-console, and on the Raspberry Pi 5 its debug PL011
+board fixes, on the Raspberry Pi 4 the mini UART, which `enable_uart=1`
+puts on the header's console pins, and on the Raspberry Pi 5 its debug PL011
 ([design-platforms.md](design-platforms.md#uarts)). It writes it from
 the first step of its boot, at that physical address while translation
 is off and afterwards through the one page step 3 maps for those

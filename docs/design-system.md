@@ -2618,8 +2618,8 @@ its start, so the system release does not boot and the machine ends as a
 failed boot does ([Boot](#boot)), with a kernel log line naming both
 paths. The
 check proves the host link's path differs from the console's (property
-8), so a host link the boot accepts is never the console's UART, however
-firmware rewrites the `serialN` aliases.
+8), so a host link the boot accepts is never the console's UART, whatever
+the device tree's `serialN` aliases say.
 
 **Which domain holds a device is the manifest's**, and nothing else: a
 device goes where its capabilities are installed, and devices are given by

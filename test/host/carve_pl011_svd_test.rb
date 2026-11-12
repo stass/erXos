@@ -62,6 +62,16 @@ class CarvePl011SvdTest < Minitest::Test
 
   def test_register_names_lose_the_prefix
     assert_equal 'LCR_H', Erx::CarvePl011.strip_prefix('UARTLCR_H')
-    assert_equal 'PERIPHID0', Erx::CarvePl011.strip_prefix('UARTPERIPHID0')
+  end
+
+  # The block is the BCM2711's 0x200 spacing of its PL011s: DMACR is the last
+  # register kept, and the identification registers at 0xfe0 are dropped.
+  def test_only_registers_inside_the_block_are_kept
+    assert_equal 0x200, Erx::CarvePl011::BLOCK_SIZE
+    dmacr = Erx::CarvePl011.register(upstream_register('UARTDMACR', '0x48', [['RXDMAE', '[0:0]', 'read-write', false]]))
+    periphid0 = Erx::CarvePl011.register(upstream_register('UARTPERIPHID0', '0xfe0',
+                                                           [['PARTNUMBER0', '[7:0]', 'read-only', false]]))
+    assert Erx::CarvePl011.in_block?(dmacr)
+    refute Erx::CarvePl011.in_block?(periphid0)
   end
 end

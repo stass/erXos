@@ -21,8 +21,8 @@ class HardwareTest < Minitest::Test
 
   def test_register_facts_and_side_effects
     device = Erx::Hardware.parse_svd(@source)
-    assert_equal [0, 4, 0x18, 0x20, 0x24, 0x28, 0x2c, 0x30, 0x34, 0x38, 0x3c, 0x40, 0x44, 0x48,
-                  0xfe0, 0xfe4, 0xfe8, 0xfec, 0xff0, 0xff4, 0xff8, 0xffc], device.registers.map(&:offset)
+    assert_equal [0, 4, 0x18, 0x20, 0x24, 0x28, 0x2c, 0x30, 0x34, 0x38, 0x3c, 0x40, 0x44, 0x48], device.registers.map(&:offset)
+    assert_equal 0x200, device.size
     assert_equal [32], device.registers.map(&:width).uniq
     assert_equal 'modify', device.registers.first.read_action
     icr = device.registers.find { |register| register.name == 'ICR' }

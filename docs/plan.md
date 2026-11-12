@@ -2190,8 +2190,10 @@ screen. Every guarantee is deferred, as on QEMU.
 **Decided.** The port runs on the stopgap Fiasco. The firmware boots the
 single bootable file directly as `kernel8.img`, with TF-A's BL31 as the
 armstub and no U-Boot, as [design-platforms.md](design-platforms.md#firmware)
-has it. The console is the mini UART, which the firmware makes the
-console, with its core clock pinned by `enable_uart=1`; the host link is
+has it. The console is the mini UART, which `enable_uart=1` puts on the
+header's GPIO 14 and 15 and whose core clock it pins, and which the
+card's device tree names `serial0`, where BL31 points
+`/chosen/stdout-path`; the host link is
 UART3, a PL011, for the reasons
 [design-platforms.md](design-platforms.md#raspberry-pi-4-model-b) gives,
 driven by `erx_pl011` as on QEMU `virt`. Stage (a) is developed on QEMU's
@@ -2252,10 +2254,9 @@ side.
      the PL011's, and `CONFIG_DRIVERS_FRST_UART_DRV_8250` on; the kernel
      build QEMU uses, which already carries the mini UART's driver; TF-A
      2.15.0's BL31 built from its pinned source; the board's device tree,
-     compiled unmodified with its source beside it, and for the model
-     with the overlays of `config.txt` and the firmware's edits (the
-     memory node, `/chosen/stdout-path` and the serial aliases) applied
-     on the host; and the boot files
+     compiled with its serial aliases swapped and its source beside
+     it, and for the model with the overlays of `config.txt` and the
+     memory node the firmware fills applied on the host; and the boot files
      (the firmware, `config.txt` with `enable_uart=1` and
      `dtoverlay=uart3`, the board's device tree, BL31 and the bootable
      file) laid out by a host tool for the firmware's network boot and

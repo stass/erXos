@@ -16,40 +16,75 @@ module Erx
   # `linux-dts` (docs/design.md, the dependency table; docs/design-stopgap.md, "The
   # Raspberry Pi 4"):
   #
-  # * the board's tree, compiled from Linux's source unmodified, with that source, as
-  #   preprocessed, beside it, since the tree is GPL-2.0 and ships as a file of its own;
-  #   the firmware loads it, applies the overlays config.txt names, and edits it itself
-  #   (the memory node, /chosen/stdout-path, the serial aliases);
+  # * the board's tree, compiled from Linux's source with one edit, the serial aliases,
+  #   and with that source, as preprocessed and edited, beside it, since the tree is
+  #   GPL-2.0 and ships as a file of its own. The firmware loads it, applies the
+  #   overlays config.txt names and fills its memory node; it leaves the aliases as
+  #   they are. BL31 points /chosen/stdout-path at serial0 (TF-A's
+  #   plat/rpi/rpi4/rpi4_setup.c), so the board's serial0 must be the console's UART:
+  #   the edit makes it so, and the build refuses a record whose console is not it;
   # * each overlay config.txt names, compiled from erXos's source in hw/dts;
-  # * the model's tree: the board's with the overlays applied and the firmware's edits
-  #   written here from the platform record, since no firmware runs under QEMU.
+  # * the model's tree: what the firmware makes of the card's files, since no firmware
+  #   runs under QEMU: the board's tree with the overlays applied and the memory node
+  #   written from the platform record, and nothing else, so BL31 picks the console's
+  #   UART on the model from the same aliases as on the board.
   #
-  # The source is run through the C preprocessor, as Linux's build does, then dtc with
-  # symbols (-@) so overlays apply; fdtoverlay applies them and fdtput writes the edits.
+  # The source is run through the C preprocessor, as Linux's build does, and the alias
+  # edit appended; dtc compiles it with symbols (-@) so overlays apply; fdtoverlay
+  # applies them and fdtput writes the memory node.
   module BoardTree
     SOURCE_ID = 'linux-dts'
     OUTPUT = 'build/board-tree'
     DEADLINE = 60
 
     # source: the board's tree in the Linux tree; file: the name the firmware loads it
-    # by; memory: the memory node the firmware fills; overlays: config.txt's dtoverlay
-    # names and erXos's source of each.
-    Board = Data.define(:source, :file, :memory, :overlays)
+    # by; memory: the memory node the firmware fills; aliases: the serial aliases the
+    # board's tree carries in place of Linux's; overlays: config.txt's dtoverlay names
+    # and erXos's source of each. The Pi's aliases swap Linux's two: serial0 is the mini
+    # UART, the console on GPIO 14 and 15, and serial1 the PL011 UART0, which the board
+    # wires to its Bluetooth chip.
+    Board = Data.define(:source, :file, :memory, :aliases, :overlays)
     BOARDS = {
       'raspi4b' => Board.new(source: 'arch/arm/boot/dts/broadcom/bcm2711-rpi-4-b.dts', file: 'bcm2711-rpi-4-b.dtb',
-                             memory: '/memory@0', overlays: { 'uart3' => 'hw/dts/raspi4b-uart3.dtso' }.freeze)
+                             memory: '/memory@0',
+                             aliases: { 'serial0' => '/soc/serial@7e215040', 'serial1' => '/soc/serial@7e201000' }.freeze,
+                             overlays: { 'uart3' => 'hw/dts/raspi4b-uart3.dtso' }.freeze)
     }.freeze
 
     # board: the board's tree; source: its preprocessed source; overlays: each overlay's
     # compiled file by its name; model: the tree the QEMU model boots with.
     Built = Data.define(:board, :source, :overlays, :model)
 
-    # The console's line setting the firmware writes after the console's path.
-    CONSOLE_MODE = '115200n8'
-
     module_function
 
     def board(platform) = BOARDS.fetch(platform.name) { raise Error, "platform #{platform.name} has no board tree" }
+
+    # The platform's board, for a record whose console is the board tree's serial0, the
+    # UART that BL31's stdout-path and so every stage after it writes. Any other console
+    # is refused: the card would print to one UART and the root task expect another.
+    def console_board(platform)
+      board = board(platform)
+      console = platform.record.fetch('console')
+      serial0 = board.aliases.fetch('serial0')
+      return board if console == serial0
+
+      raise Error, "platform #{platform.name}: the console #{console} is not serial0 of the board's tree, " \
+                   "#{serial0}, which BL31's stdout-path names"
+    end
+
+    # The source appended to Linux's preprocessed tree: the board's serial aliases, which
+    # replace Linux's, since a later definition of a property wins. dtc refuses an alias
+    # whose node the tree lacks (-E alias_paths), and a path that is not a plain node
+    # path is refused here, before it is quoted.
+    def alias_source(board)
+      aliases = board.aliases.map do |name, path|
+        raise Error, "board tree: alias #{name} is not a node path" unless path.match?(%r{\A/[A-Za-z0-9,._+@/-]*\z})
+
+        "\t\t#{name} = \"#{path}\";"
+      end
+      ['', '/* erXos edit: the serial aliases, serial0 naming the console (tools/lib/erx/board_tree.rb). */',
+       '/ {', "\taliases {", *aliases, "\t};", '};'].map { |line| "#{line}\n" }.join
+    end
 
     # The cells of the memory node's reg for RAM as the record states it, in the tree's
     # root #address-cells and #size-cells: each number split into 32-bit cells, most
@@ -61,18 +96,6 @@ module Erx
 
         (cells - 1).downto(0).map { |index| (value >> (32 * index)) & 0xffff_ffff }
       end
-    end
-
-    # /chosen/stdout-path as the firmware writes it: the console's path and line setting.
-    def stdout_path(platform) = "#{platform.record.fetch('console')}:#{CONSOLE_MODE}"
-
-    # The serial aliases as the firmware writes them: serial0 names the console, and the
-    # alias that named the console before names what serial0 did, so the two trade places.
-    # BL31 rewrites /chosen/stdout-path to serial0 (TF-A's plat/rpi/rpi4/rpi4_setup.c),
-    # so on the model this alias, not stdout-path, is what picks the console.
-    def serial_aliases(platform, serial0:, serial1:)
-      console = platform.record.fetch('console')
-      { 'serial0' => console, 'serial1' => serial1 == console ? serial0 : serial1 }
     end
 
     # The GIC's interrupt types in a tree's interrupts cells, with the interrupt number each
@@ -118,7 +141,7 @@ module Erx
     def build(root:, runner:, platform:, compiler: ENV.fetch('ERX_CLANG', ''))
       raise Error, 'the board tree needs ERX_CLANG, whose preprocessor reads Linux\'s tree' if compiler.empty?
 
-      board = board(platform)
+      board = console_board(platform)
       tree = Dependencies.new(root: root, runner: runner).fetched_tree(SOURCE_ID)
       parent = OutputDirectory.prepare(root: root, path: File.join(root, OUTPUT))
       destination = File.join(parent, platform.name)
@@ -128,6 +151,7 @@ module Erx
         compile = Compile.new(runner: runner)
         source = compile.preprocess(compiler: compiler, linux: tree, source: File.join(tree, board.source),
                                     output: File.join(output, source_file(board)))
+        File.write(source, alias_source(board), mode: 'a')
         base = compile.dtc(source, File.join(output, board.file))
         overlays = board.overlays.to_h do |name, overlay|
           [name, compile.dtc(File.join(root, overlay), File.join(output, 'overlays', "#{name}.dtbo"))]
@@ -137,10 +161,6 @@ module Erx
         cells = %w[#address-cells #size-cells].map { |name| compile.cell(model, '/', name) }
         compile.run(['fdtput', '-t', 'u', model, board.memory, 'reg',
                      *memory_cells(platform, address_cells: cells[0], size_cells: cells[1]).map(&:to_s)], 'fdtput-memory')
-        compile.run(['fdtput', '-t', 's', model, '/chosen', 'stdout-path', stdout_path(platform)], 'fdtput-chosen')
-        aliases = serial_aliases(platform, serial0: compile.text(model, '/aliases', 'serial0'),
-                                           serial1: compile.text(model, '/aliases', 'serial1'))
-        aliases.each { |name, path| compile.run(['fdtput', '-t', 's', model, '/aliases', name, path], 'fdtput-alias') }
         raise Error, "board tree output is a symbolic link: #{destination}" if File.symlink?(destination)
 
         FileUtils.rm_rf(destination)
@@ -180,7 +200,7 @@ module Erx
       end
 
       def dtc(source, output)
-        run(['dtc', '-q', '-@', '-I', 'dts', '-O', 'dtb', '-o', output, source], 'dtc')
+        run(['dtc', '-q', '-E', 'alias_paths', '-@', '-I', 'dts', '-O', 'dtb', '-o', output, source], 'dtc')
         output
       end
 
@@ -191,15 +211,6 @@ module Erx
         raise Error, "#{node} #{property} is not one number" unless text.match?(/\A\d{1,10}\n?\z/)
 
         Integer(text, 10)
-      end
-
-      # A path property of the tree, as fdtget prints it.
-      def text(tree, node, property)
-        log = run(['fdtget', '-t', 's', tree, node, property], 'fdtget').fetch('log')
-        text = BoundedFile.read(log, maximum: 256).chomp
-        raise Error, "#{node} #{property} is not a node path" unless text.match?(%r{\A/[A-Za-z0-9,._+@/-]*\z})
-
-        text
       end
 
       def run(argv, name) = runner.run(argv, name: "board-tree-#{name}", deadline: DEADLINE)

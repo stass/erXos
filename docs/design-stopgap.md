@@ -1767,9 +1767,11 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
 * **Boot files.** One directory, `boot/`, serves as the firmware's network boot root and as an SD card's boot
   partition, and `sdcard.img` beside it is the card's image of the same files; both are the production image's
   medium for the board, written by `tools/erx pack --medium --platform raspi4b` into
-  `build/production-image/raspi4b/` (`tools/lib/erx/boot_partition.rb`): the firmware and its licence; `config.txt`, written from the platform record;
-  BL31 and its licence; the bootable file as `kernel8.img`; Linux's device tree for the board, compiled unmodified
-  from its pinned source, with that source beside it; and the overlays `config.txt` names, which the firmware applies.
+  `build/production-image/raspi4b/` (`tools/lib/erx/boot_partition.rb`): the firmware and its licence; `config.txt`, written from the platform record, with,
+  on a development card only, the firmware's boot log on the console (`uart_2ndstage=1`) and the ARM's JTAG on GPIO 22
+  to 27 (`enable_jtag_gpio=1`);
+  BL31 and its licence; the bootable file as `kernel8.img`; Linux's device tree for the board, compiled from its
+  pinned source with its two serial aliases swapped, so that `serial0` names the console, with that source beside it; and the overlays `config.txt` names, which the firmware applies.
   Mainline Linux has no overlays, so erXos keeps their sources in `hw/dts`, and the board's tree, its overlays and
   the model's tree are built by `tools/lib/erx/board_tree.rb`.
 * **Under QEMU.** The same image, device tree and BL31 also boot on QEMU's `raspi4b` model under TCG, where QEMU's
@@ -1787,9 +1789,10 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   firmware's mailbox for memory and tells the boards apart by their CPU, is not used. The firmware enters the bootable
   file in a higher privilege mode than the kernel's, and `bootstrap` drops to the kernel's before it starts Fiasco;
   the boot probe confirms the entry state. The console is the mini UART (`brcm,bcm2835-aux-uart`), which `bootstrap`
-  and Fiasco find by `/chosen/stdout-path`. BL31 rewrites that property to `serial0`, the alias the firmware points
-  at the console (TF-A's `plat/rpi/rpi4/rpi4_setup.c`), so on the model, where no firmware runs, the host writes
-  that alias into the tree as the firmware does. The kernel build already carries Fiasco's driver for it
+  and Fiasco find by `/chosen/stdout-path`. BL31 rewrites that property to `serial0` (TF-A's
+  `plat/rpi/rpi4/rpi4_setup.c`), and the firmware leaves the aliases as the card's tree has them, so the card's tree
+  names the mini UART `serial0`, swapping Linux's two serial aliases, and the model boots that same tree
+  ([design-platforms.md](design-platforms.md#raspberry-pi-4-model-b)). The kernel build already carries Fiasco's driver for it
   (`fiasco/kernel/src/lib/uart/uart_bcm2835.cc`, built under `CONFIG_PF_ARM_GEN_SELECT_UART_16550`, on by default);
   `bootstrap`'s UART library (`fiasco/drivers-frst/uart`) holds only the PL011 driver, so the Pi's `bootstrap` build
   imports Fiasco's 16550 and BCM2835 drivers into it and turns on `CONFIG_DRIVERS_FRST_UART_DRV_8250`. Both keep the

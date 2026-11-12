@@ -82,13 +82,19 @@ module Erx
     # image from one, which is a board with a tree of its own (BoardTree::BOARDS).
     def boot_partition_medium?(platform) = BoardTree::BOARDS.key?(platform.name)
 
-    # config.txt for platform: a 64-bit kernel from kernel8.img, loaded where the model's
-    # loader puts it and bootstrap is linked, with BL31 as its stub; the mini UART's line
-    # set and the core clock it divides from pinned (enable_uart); the PL011s' clock from
-    # the record; the record's RAM (total_mem, gpu_mem); and the overlays the board's
-    # tree carries, each with its pins.
-    def config_txt(platform, overlays:)
-      <<~CONFIG + overlays.map { |name| overlay_lines(name) }.join
+    # config.txt for platform and build_kind (development or release), setting by setting:
+    # * arm_64bit, kernel, kernel_address, armstub: a 64-bit kernel8.img, loaded where the
+    #   model's loader puts it and bootstrap is linked, entered through BL31.
+    # * enable_uart: the console, the mini UART, on GPIO 14 and 15 in function ALT5, with
+    #   its line set and the core clock it divides from pinned, so its divisor holds for
+    #   the later stages. The firmware puts the pins in ALT5 whatever gpio= lines say.
+    # * init_uart_clock: the PL011s' clock from the record, for UART3, the host link.
+    # * total_mem, gpu_mem: the record's RAM.
+    # * development_lines: the firmware's own boot log on the console and the JTAG pins,
+    #   on a development card only.
+    # * each overlay the board's tree carries, with its pins.
+    def config_txt(platform, overlays:, build_kind:)
+      <<~CONFIG + development_lines(build_kind) + overlays.map { |name| overlay_lines(name) }.join
         # erXos boot partition for #{platform.name}, written by tools/lib/erx/boot_partition.rb.
         arm_64bit=1
         kernel=#{KERNEL}
@@ -112,6 +118,18 @@ module Erx
       TOTAL_MEM_MIB
     end
 
+    # The firmware's own boot log on the console (uart_2ndstage), and the ARM's JTAG on
+    # GPIO 22 to 27 in function ALT4 (enable_jtag_gpio), for a probe when the serial log
+    # cannot locate a hang, on pins neither the console (GPIO 14 and 15) nor UART3 (GPIO 4
+    # and 5) uses. A release card keeps both off its header.
+    def development_lines(build_kind)
+      case build_kind
+      in 'development' then "uart_2ndstage=1\nenable_jtag_gpio=1\n"
+      in 'release' then ''
+      else raise Error, "boot partition: build kind #{build_kind.inspect} is neither development nor release"
+      end
+    end
+
     def overlay_lines(name)
       pins = OVERLAY_PINS.fetch(name) { raise Error, "boot partition: the pins of overlay #{name} are not known" }
       ["dtoverlay=#{name}", *pins].map { |line| "#{line}\n" }.join
@@ -131,10 +149,10 @@ module Erx
     # The layout as a map from each file's name in the partition to its source path,
     # or to its Text for config.txt; firmware maps each firmware file's name to its path.
     # Pure.
-    def plan(platform:, bootable:, bl31:, bl31_licence:, tree:, firmware:)
+    def plan(platform:, build_kind:, bootable:, bl31:, bl31_licence:, tree:, firmware:)
       board = BoardTree.board(platform)
       own = { KERNEL => bootable, ARMSTUB => bl31, ARMSTUB_LICENCE => bl31_licence,
-              CONFIG => Text.new(config_txt(platform, overlays: tree.overlays.keys)),
+              CONFIG => Text.new(config_txt(platform, overlays: tree.overlays.keys, build_kind: build_kind)),
               board.file => tree.board, BoardTree.source_file(board) => tree.source,
               **tree.overlays.to_h { |name, path| ["overlays/#{name}.dtbo", path] } }
       clash = own.keys & firmware.keys
@@ -211,10 +229,10 @@ module Erx
     # Builds BL31 and the board's tree, takes the firmware as deps.lock pins it, verified
     # against its pinned hashes, and writes the layout for bootable, with its build
     # record, into directory, the production image's.
-    def lay_out(root:, runner:, platform:, bootable:, directory:, compiler:, linker:)
+    def lay_out(root:, runner:, platform:, build_kind:, bootable:, directory:, compiler:, linker:)
       dependencies = Dependencies.new(root: root, runner: runner)
       pinned = FIRMWARE.map { |id| dependencies.archive_for(id) }
-      plan = plan(platform: platform, bootable: bootable,
+      plan = plan(platform: platform, build_kind: build_kind, bootable: bootable,
                   firmware: pinned.to_h { |source, archive| [source.fetch('filename'), archive] },
                   bl31_licence: Bl31.licence(root: root, runner: runner),
                   bl31: Bl31.ensure(root: root, runner: runner, compiler: compiler, linker: linker),

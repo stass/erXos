@@ -17,24 +17,49 @@ class BootPartitionTest < Minitest::Test
   PI = Erx::Platform.load(root: ROOT, name: 'raspi4b')
 
   def test_config_txt_comes_from_the_record
-    config = Erx::BootPartition.config_txt(PI, overlays: ['uart3'])
-    lines = config.lines(chomp: true).reject { |line| line.start_with?('#') }
     assert_equal %w[arm_64bit=1 kernel=kernel8.img kernel_address=0x200000 armstub=bl31.bin enable_uart=1
-                    init_uart_clock=48000000 total_mem=1024 gpu_mem=76 dtoverlay=uart3 gpio=4=a4,pn gpio=5=a4,pu],
-                 lines
+                    init_uart_clock=48000000 total_mem=1024 gpu_mem=76 uart_2ndstage=1 enable_jtag_gpio=1
+                    dtoverlay=uart3 gpio=4=a4,pn gpio=5=a4,pu],
+                 settings('development')
+  end
+
+  # A release card leaves the firmware's log and the ARM's JTAG off the header; any other
+  # build kind is refused.
+  def test_only_a_development_card_has_jtag
+    assert_equal settings('development') - %w[uart_2ndstage=1 enable_jtag_gpio=1], settings('release')
+    error = assert_raises(Erx::Error) { Erx::BootPartition.config_txt(PI, overlays: [], build_kind: 'debug') }
+    assert_match(/neither development nor release/, error.message)
+  end
+
+  # enable_jtag_gpio puts JTAG on GPIO 22 to 27, so no gpio line may set one of those, and
+  # no two lines set one pin. enable_uart puts the console's GPIO 14 and 15 in ALT5
+  # whatever a gpio line says (seen on the board), so no line names them either. A line
+  # may name one pin or a range (gpio=22-27=...).
+  def test_no_two_settings_take_one_pin
+    pins = settings('development').grep(/\Agpio=/).flat_map do |line|
+      first, last = line[/\Agpio=([\d-]+)=/, 1].split('-').map { |pin| Integer(pin, 10) }
+      (first..(last || first)).to_a
+    end
+    assert_equal pins.uniq, pins
+    assert_empty pins & [*14..15, *22..27]
+  end
+
+  def settings(build_kind)
+    Erx::BootPartition.config_txt(PI, overlays: ['uart3'], build_kind: build_kind)
+                      .lines(chomp: true).reject { |line| line.start_with?('#') }
   end
 
   # The board's RAM is the record's: total_mem less gpu_mem must be ram_bytes, so a
   # record measured at another size is refused, not written into a card that disagrees.
   def test_the_memory_config_txt_sets_is_the_records
-    error = assert_raises(Erx::Error) { Erx::BootPartition.config_txt(record(ram_bytes: PI.record.fetch('ram_bytes') + (1 << 20)), overlays: []) }
+    error = assert_raises(Erx::Error) { Erx::BootPartition.config_txt(record(ram_bytes: PI.record.fetch('ram_bytes') + (1 << 20)), overlays: [], build_kind: 'development') }
     assert_match(/is not total_mem 1024 MiB less gpu_mem 76 MiB/, error.message)
   end
 
   # The firmware sets no pins from an overlay, so an overlay whose pins config.txt does
   # not know is refused.
   def test_an_overlay_needs_its_pins
-    assert_raises(Erx::Error) { Erx::BootPartition.config_txt(PI, overlays: ['uart5']) }
+    assert_raises(Erx::Error) { Erx::BootPartition.config_txt(PI, overlays: ['uart5'], build_kind: 'development') }
   end
 
   def test_the_pl011s_need_one_clock
@@ -188,7 +213,7 @@ class BootPartitionTest < Minitest::Test
       tree = Erx::BoardTree::Built.new(board: sources.fetch('bcm2711-rpi-4-b.dtb'), source: sources.fetch('bcm2711-rpi-4-b.dts'),
                                        model: '', overlays: {})
       assert_raises(Erx::Error) do
-        Erx::BootPartition.plan(platform: PI, bootable: 'k', bl31: 'b', bl31_licence: 'l', tree: tree,
+        Erx::BootPartition.plan(platform: PI, build_kind: 'development', bootable: 'k', bl31: 'b', bl31_licence: 'l', tree: tree,
                                 firmware: { 'kernel8.img' => 'x' })
       end
     end
@@ -223,7 +248,7 @@ class BootPartitionTest < Minitest::Test
     tree = Erx::BoardTree::Built.new(board: stand_in.('tree.dtb'), source: stand_in.('tree.dts'), model: stand_in.('model.dtb'),
                                      overlays: { 'uart3' => stand_in.('uart3.dtbo') })
     firmware = %w[start4.elf fixup4.dat LICENCE.broadcom].to_h { |name| [name, stand_in.(name)] }
-    Erx::BootPartition.plan(platform: PI, bootable: stand_in.('kernel8', 'kernel'), bl31: stand_in.('bl31'),
+    Erx::BootPartition.plan(platform: PI, build_kind: 'development', bootable: stand_in.('kernel8', 'kernel'), bl31: stand_in.('bl31'),
                             bl31_licence: stand_in.('licence'),
                             tree: tree, firmware: firmware)
   end

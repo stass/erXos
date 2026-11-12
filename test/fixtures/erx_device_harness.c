@@ -26,6 +26,9 @@
 	} while (0)
 
 #define WINDOW_BYTES	4096u
+/* The PL011's register block as hw/svd/pl011/pl011.svd describes it: up to DMACR,
+ * the BCM2711's spacing of its UARTs. */
+#define PL011_BLOCK_BYTES	0x200u
 #define KEY_BASE	100u
 
 static const erx_device_element_t plain = { .indexed = false };
@@ -302,7 +305,7 @@ check_slot(void)
 
 /* What open refuses makes nothing visible, and a window already open is that device again. */
 static uint32_t
-check_open(const char *name)
+check_open(const char *name, uint64_t block_bytes)
 {
 	erx_device_spec_t spec = spec_of(name, 0x9000000);
 	uint32_t device = 99, again = 99;
@@ -318,7 +321,7 @@ check_open(const char *name)
 	spec.peripheral_length = strlen(name) - 1;
 	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_EINVAL);
 	spec = spec_of(name, 0x9000000);
-	spec.size = WINDOW_BYTES - 1;
+	spec.size = block_bytes - 1;
 	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_EINVAL);
 	spec = spec_of(name, 0x9000000);
 	spec.line_count = ERX_DEVICE_LINES_MAX + 1;
@@ -523,21 +526,23 @@ main(void)
 {
 #ifdef ERX_DEVICE_FIXTURE
 	const char *const name = "fixture";
+	const uint64_t block_bytes = WINDOW_BYTES;
 #else
 	const char *const name = "pl011";
+	const uint64_t block_bytes = PL011_BLOCK_BYTES;
 #endif
 	const erx_device_peripheral_t *const peripheral = erx_device_peripheral_find(name, strlen(name));
 	uint32_t device;
 
 	CHECK(peripheral != NULL && peripheral->register_count <= ERX_DEVICE_REGISTERS_MAX &&
-	    peripheral->field_count <= ERX_DEVICE_FIELDS_MAX && peripheral->window_size == WINDOW_BYTES);
+	    peripheral->field_count <= ERX_DEVICE_FIELDS_MAX && peripheral->window_size == block_bytes);
 	CHECK(erx_device_peripheral_find(name, strlen(name) - 1) == NULL);
 	CHECK(erx_device_peripheral_find("", 0) == NULL);
 	CHECK(erx_device_peripheral_find("no_such_peripheral", 18) == NULL);
 	check_keys();
 	check_window_pages();
 	check_every_entry(peripheral);
-	device = check_open(name);
+	device = check_open(name, block_bytes);
 	check_peripheral(peripheral, erx_device_get(device));
 	printf("erx_device %s done\n", name);
 	return (0);

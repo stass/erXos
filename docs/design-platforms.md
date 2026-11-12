@@ -248,9 +248,19 @@ the harness plays the firmware's part in a trial.
 
 ### Raspberry Pi 4 Model B
 
-The BCM2711, with Cortex-A72 cores and a GIC-400. Its firmware makes the
-mini UART (`brcm,bcm2835-aux-uart`) the console, so the mini UART is the
-Pi 4's early console. The mini UART's baud rate is divided from the core
+The BCM2711, with Cortex-A72 cores and a GIC-400. The console is the mini
+UART (`brcm,bcm2835-aux-uart`), the Pi 4's early console, on the header's
+GPIO 14 and 15. The board wires UART0, the first PL011, to its Bluetooth
+chip, and `enable_uart=1` puts GPIO 14 and 15 in the mini UART's function,
+ALT5, whatever `gpio=` lines in `config.txt` ask for them; with
+`enable_uart=0` neither UART reaches the header and nothing, BL31
+included, prints (both seen on a 4 GB board). Linux's device tree for the
+board names UART0 `serial0` and the mini UART `serial1`, the firmware
+leaves those aliases as the card's tree has them, and BL31 points
+`/chosen/stdout-path` at `serial0` (TF-A's `plat/rpi/rpi4/rpi4_setup.c`),
+so the card's tree swaps the two aliases: `serial0` names the mini UART
+and `serial1` UART0, and the build refuses a platform record whose
+console is not the card's `serial0`. The mini UART's baud rate is divided from the core
 clock, which the firmware may change at run time, so the board's
 `config.txt` sets `enable_uart=1`, which has the firmware pin the core
 clock and set the mini UART's line; the early console, Fiasco's
@@ -266,8 +276,8 @@ firmware sets no pins from an overlay, so `config.txt`'s `gpio=4=a4,pn`
 and `gpio=5=a4,pu` lines put the pins in UART3's function; UART2, the other PL011
 with pins of its own, sits on GPIO 0 and 1, the bus of a HAT's
 identification EEPROM, which the firmware reads at boot. The manifest
-names the host link by its device-tree path, so the firmware's rewriting
-of the `serialN` aliases never makes it the console's UART. The PL011s
+names the host link by its device-tree path, so no `serialN` alias ever
+makes it the console's UART. The PL011s
 share one register page, and the mini UART shares its page with the
 auxiliary SPI controllers, so each page is one unit. The manifest gives
 both units whole to the system domain: the mini UART's because it is the
@@ -368,7 +378,8 @@ controllers.
 The **early console** is the board's documented console UART, whose kind
 and address the platform's kernel build fixes: on QEMU `virt` the PL011
 at `0x09000000`, on the Raspberry Pi 4 the mini UART
-(`brcm,bcm2835-aux-uart`), which its firmware makes the console, and on
+(`brcm,bcm2835-aux-uart`), which `enable_uart=1` puts on the header's
+console pins, and on
 the Raspberry Pi 5 its debug PL011. The kernel writes it from the first
 step of its boot, so every stop of the boot prints its reason, and stops
 the boot, with a message on that UART, when `/chosen/stdout-path` names
@@ -393,8 +404,8 @@ UARTs' units in the system domain, and the build's manifest check fails
 on one that places either anywhere else or names one UART for both. At
 boot the device service refuses a manifest whose `console` path is not
 the UART `/chosen/stdout-path` names, so the console is always the early
-console's UART and the host link never is, however the firmware rewrites
-the `serialN` aliases ([design-system.md](design-system.md#devices)). In
+console's UART and the host link never is, whatever the tree's `serialN`
+aliases say ([design-system.md](design-system.md#devices)). In
 the system domain an Erlang UART driver over the device NIF feeds the
 console service: a domain reads what the operator types only while its
 session is connected, never a passphrase typed at the login prompt, and
@@ -1021,11 +1032,12 @@ pinned core clock.
 **BL31 on the model.** No firmware runs on the model. QEMU's generic
 loader (`-device loader`) puts TF-A's Pi 4 BL31, built from its pinned
 release, at address 0 and starts CPU 0 there (`cpu-num=0`); puts the
-bootable file at the address BL31 enters; and puts the board's device
-tree where BL31 expects it, with `config.txt`'s overlays applied on the
-host and with what the firmware writes into the tree written on the host
-too: the memory node, `/chosen/stdout-path`, and the `serial0` alias
-naming the console, which is what BL31 points `/chosen/stdout-path` at. The chain is the board's: BL31 at EL3 enters the bootable file
+bootable file at the address BL31 enters; and puts the device tree where
+BL31 expects it: the card's tree, with `config.txt`'s overlays applied
+and the memory node written on the host, which is all the firmware does
+to it. The card's `serial0` alias, which BL31 points
+`/chosen/stdout-path` at, is the card's own, so the model picks the
+console's UART from the very tree the board does. The chain is the board's: BL31 at EL3 enters the bootable file
 at EL2 (`SPSR` `0x3c9`, MMU off, the device tree's address in `x0`), the
 kernel starts the other three CPUs with PSCI's `CPU_ON` and ends them
 with `CPU_OFF`, and resets the machine through BL31
@@ -1061,8 +1073,8 @@ stop it printing.
 
 **What the model never checks.** The Pi firmware runs on the VideoCore,
 which QEMU does not emulate, so nothing on the model reads `config.txt`,
-makes the firmware's edits to the device tree (the memory node,
-`/chosen/stdout-path`, the Ethernet MAC address), places the device tree
+makes the firmware's edits to the device tree (the memory node as the
+firmware computes it, the Ethernet MAC address), places the device tree
 and the bootable file as the firmware does, or accepts or refuses a
 bootable file by its size. QEMU's DMA is coherent, so a driver that
 misses a cache clean or invalidate passes on the model. The model has no
@@ -1132,9 +1144,8 @@ Put the card in the Pi, start logging on the adapter, then power the Pi.
 
 1. BL31's banner, two lines: `NOTICE:  BL31: v2.15.0(release):v2.15.0`
    and `NOTICE:  BL31: Built : erXos`.
-   BL31 writes to the UART whose pins GPIO 14 and 15 are, so the banner
-   should arrive here; if it does not, the board went on regardless and
-   BL31 used the other UART, which the pass is to find out.
+   BL31 writes the mini UART, since its Pi 4 port takes it when GPIO 14
+   is in ALT5, where `enable_uart=1` puts it.
 2. bootstrap's memory line, exactly
    `  Total RAM: 948.0 MiB; available for Bootstrap/Sigma0/Kernel: 948.0 MiB`:
    the 1024 MiB `total_mem` gives less the 76 MiB of `gpu_mem`.
@@ -1152,10 +1163,20 @@ Put the card in the Pi, start logging on the adapter, then power the Pi.
 receive interrupt with bits 3:2 of its interrupt-enable register set, as
 the console driver sets them although Broadcom's manual marks those bits
 reserved; anything at all after BL31 means the firmware loaded
-`kernel8.img` at `kernel_address`, where bootstrap is linked; where
-BL31's banner appeared tells which UART it chose; and the memory line and
-the shell together show that the device tree the firmware made from the
-partition's tree and `uart3` overlay is the one erXos expects.
+`kernel8.img` at `kernel_address`, where bootstrap is linked; output
+after BL31's banner means the card's `serial0` is the UART on the
+adapter; and the memory line and the shell together show that the device
+tree the firmware made from the partition's tree and `uart3` overlay is
+the one erXos expects.
+
+**What a 4 GB board shows.** BL31 enters `kernel8.img` at `0x200000` in
+EL2 with the device tree's address in `x0`; the firmware leaves the
+card's serial aliases as they are; `enable_uart=1` puts GPIO 14 and 15 in
+ALT5 even when `config.txt` has `gpio=14=a0` and `gpio=15=a0,pu` lines
+after it, and `enable_uart=0` leaves the header's UART silent, BL31's
+banner included. BL31's banner followed by silence on the adapter means
+the card's `serial0` is not the mini UART: every stage after BL31 then
+writes UART0, and the root task refuses the manifest.
 
 **Send back** the whole serial log of the console adapter (and of the
 second adapter, if one was wired), from power-on to `dmesg`'s output.
