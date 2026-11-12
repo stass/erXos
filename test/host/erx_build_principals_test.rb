@@ -61,6 +61,18 @@ class ErxBuildPrincipalsTest < Minitest::Test
     assert_equal '{ok,#{system => 2,names => #{1 => <<"alpha">>,2 => <<"root">>}}}', principals(packed(source))
   end
 
+  # The system principal's sessions are root_N, so a principal named root that is not
+  # the system principal would share their names; the packer refuses it.
+  def test_only_the_system_principal_may_be_named_root
+    source = File.binread(FIXTURE).sub("share users\n", "#{HALF}share users\n")
+                 .gsub('grant @share.users', 'grant @share.half')
+                 .sub("principal root\n", "#{ALPHA.sub('principal alpha', 'principal root')}principal sys\n")
+                 .sub('system_principal @principal.root', 'system_principal @principal.sys')
+                 .sub('max_domains 4', 'max_domains 5')
+    error = assert_raises(Erx::Manifest::Invalid) { packed(source) }
+    assert_match(/only the system principal may be named root/, error.message)
+  end
+
   def test_a_manifest_that_does_not_parse_names_no_principal
     assert_equal 'error', principals('junk'.b)
   end

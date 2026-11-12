@@ -94,9 +94,6 @@ reach it only through facets, which arrive with the connections.
 -include("generated/erx_abi.hrl").
 -include("generated/erx_facet_names.hrl").
 
-%% Every domain is the system principal's, number 1, the one principal the library's
-%% view has (include/erx/dom.h, erx_dom_principal_t).
--define(SYSTEM_PRINCIPAL, 1).
 %% The keys of a session's start beyond its console: the display the session is the
 %% session of, or the one it only takes as its default (session_start/3).
 -define(START_DISPLAYS, [display, default_display]).
@@ -189,16 +186,18 @@ inspect_policy(_Opts) ->
 
 %% The system manifest's system principal and principal names, which name each
 %% principal's sessions (erx_domain_core:session_prefix/3), read once, as the service
-%% starts, as inspect_policy/1 reads its policy; a host test names its own. A manifest
-%% the service cannot read names no principal, and its system principal is the one the
-%% service charges its own creates to.
+%% starts, as inspect_policy/1 reads its policy; a host test names its own. The system
+%% principal is the one the service charges its own creates to: the packer numbers
+%% principals in name order, so it is whichever the manifest's root.system_principal
+%% names, not principal 1. A manifest the service cannot read names no principal and
+%% its system principal is unknown, so its creates are refused (create/2).
 principals(#{principals := #{system := System, names := Names} = Principals})
   when is_integer(System), is_map(Names) ->
     Principals;
 principals(_Opts) ->
     case erx_build:principals() of
         {ok, Principals} -> Principals;
-        error -> #{system => ?SYSTEM_PRINCIPAL, names => #{}}
+        error -> #{system => unknown, names => #{}}
     end.
 
 %% The library, registered with this process as the one that hears of every end, or none
@@ -289,7 +288,7 @@ handle_call(_Request, _From, State) ->
 %% principal's domains is ending (release/1), or at its bound, release_wait, when the
 %% library answers it as it stands.
 start(Start, From, #{held := Held, release_wait := Wait} = State) ->
-    Principal = principal(Start),
+    Principal = principal(Start, State),
     case maps:is_key(Principal, Held) orelse ending(Principal, State) =/= [] of
         false ->
             run(Start, From, State);
@@ -298,8 +297,9 @@ start(Start, From, #{held := Held, release_wait := Wait} = State) ->
             State#{held := Held#{Principal => maps:get(Principal, Held, []) ++ [{Timer, Start, From}]}}
     end.
 
-principal({create, _Spec}) -> ?SYSTEM_PRINCIPAL;
-principal({start_session, Principal, _Start}) -> Principal.
+%% The principal a start is charged to: a create's is the system principal.
+principal({create, _Spec}, #{principals := #{system := System}}) -> System;
+principal({start_session, Principal, _Start}, _State) -> Principal.
 
 %% Principal's domains whose domain pid has ended before their end arrived, so the
 %% library has not yet retired them and each still counts against the principal's
@@ -433,6 +433,8 @@ handle_info(_Message, State) ->
 %% (grant_facets/3), and the library never sees them.
 create(_Spec, #{lib := none} = State) ->
     {{error, enotsup}, State};
+create(_Spec, #{principals := #{system := unknown}} = State) ->
+    {{error, enotsup}, State};
 create(#{name := Name} = Spec, State) ->
     Timeout = maps:get(boot_timeout, Spec, ?BOOT_TIMEOUT),
     Facets = facets(maps:get(facets, Spec, #{}), State),
@@ -456,13 +458,13 @@ create(#{name := Name} = Spec, State) ->
                 {error, bad_identifier} = Error ->
                     {Error, State};
                 Ident ->
-                    #{lib := Lib} = State,
+                    #{lib := Lib, principals := #{system := System}} = State,
                     Make = fun(Id, Pid) ->
                                    Lib:create((maps:without([facets], Fields))#{id => Id, name => Name, args => Args,
-                                                                                principal => ?SYSTEM_PRINCIPAL,
+                                                                                principal => System,
                                                                                 domain_pid => Pid})
                            end,
-                    build(Ident, ?SYSTEM_PRINCIPAL, request, Make, #{facets => Facets}, Timeout, State)
+                    build(Ident, System, request, Make, #{facets => Facets}, Timeout, State)
             end
     end;
 create(_Spec, State) ->

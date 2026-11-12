@@ -417,8 +417,9 @@ violation fails the build with the property, the record and the field:
 5. **Every name is a system identifier,** the host name included, and so
    is every pooled name a principal's `names` quota allows
    ([Identifiers](#identifiers)); no two configured domains or principals
-   share a name, and no configured domain's name has a pooled name's
-   form.
+   share a name, no configured domain's name has a pooled name's
+   form, and no principal but the system principal is named `root`, whose
+   pooled names the system principal's sessions take.
 6. **The root task makes no machine code:** the boot image's root entry
    carries no `ERX_IMAGE_JIT` (A11). A full boot uses the interpreter
    image; a native partial boot may use the C17 root-entry image without

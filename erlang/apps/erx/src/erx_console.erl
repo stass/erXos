@@ -134,8 +134,6 @@
 -define(DEFAULT_SIZE, {80, 24}).
 -define(MAX_SIDE, 65535).
 -define(LOG_POLL_MS, 100).
-%% The system principal, number 1, whose domain the system domain is (include/erx/dom.h).
--define(SYSTEM_PRINCIPAL, 1).
 -define(ESC, 16#1B).
 
 -record(state, {role :: system | session,
@@ -170,8 +168,9 @@
                 %% Ctrl-G menu, which knows who had the line before it.
                 line = system :: erx_console_menu:owner() | {menu, erx_console_menu:menu()},
                 %% The line's principal, whose sessions its menu lists: in a development
-                %% build root, who is the system principal (docs/design-domains.md).
-                principal = ?SYSTEM_PRINCIPAL :: pos_integer(),
+                %% build root, who is the system principal (docs/design-domains.md), as
+                %% the system manifest names it (line_principal/2).
+                principal = unknown :: pos_integer() | unknown,
                 %% Whether a typed Ctrl-G opens the menu (config()).
                 menu :: boolean(),
                 %% The sessions whose tty the console is the master of, by domain id.
@@ -354,8 +353,23 @@ init(Config = #{role := Role, name := Name, driver := Start, first_shell := Firs
                            size = ?DEFAULT_SIZE,
                            terminal = Terminal,
                            menu = maps:get(menu, Config, Role =:= system),
+                           principal = line_principal(Role, Config),
                            owner = maps:get(owner, Config, fun erx:owner/1),
                            endpoint = spawn(fun() -> facet_endpoint(Console) end)})}.
+
+%% The line's principal, read once, as the console starts: the one Config names, or the
+%% system principal the system manifest names (root.system_principal; the packer numbers
+%% principals in name order, so it need not be 1) on the system domain's line, unknown
+%% where the manifest cannot be read and on a session's line.
+line_principal(_Role, #{principal := Principal}) when is_integer(Principal), Principal > 0 ->
+    Principal;
+line_principal(system, _Config) ->
+    case erx_build:principals() of
+        {ok, #{system := System}} -> System;
+        error -> unknown
+    end;
+line_principal(session, _Config) ->
+    unknown.
 
 %% What user_drv writes before it starts a shell, ahead of anything the groups write.
 banner(session, TTY, _Driver) ->
@@ -522,7 +536,7 @@ handle_info({log, _Level, _Text} = Record,
     %% A record sent to this name is the system domain's: another domain's send to a
     %% registered name never leaves that domain (edit 27 of docs/design-runtime.md),
     %% and its records arrive through its console facet, under its own source.
-    case erx_console_log:accept(Record, system_source(), os:perf_counter(nanosecond), Records) of
+    case erx_console_log:accept(Record, system_source(State), os:perf_counter(nanosecond), Records) of
         {line, Line, Next} ->
             Driver ! {erx_console_output, none, Line},
             {noreply, State#state{log_records = Next}};
@@ -953,7 +967,9 @@ start_session(Why, #state{principal = Principal, endpoint = Endpoint}) ->
     ok.
 
 %% The domain service's answer to a session's start; a runtime with no domain service, or
-%% none loaded, as a hosted one, starts none.
+%% none loaded, as a hosted one, starts none, nor does a line whose principal is unknown.
+started(unknown, _ConsoleFacet) ->
+    {error, enotsup};
 started(Principal, ConsoleFacet) ->
     try
         erx_domain:start_session(Principal, #{console => ConsoleFacet})
@@ -1148,9 +1164,9 @@ onlcr(Bytes) ->
     binary:replace(Bytes, <<"\n">>, <<"\r\n">>, [global]).
 
 %% The system domain as the source of its own log records: its id, the system
-%% principal and its name.
-system_source() ->
-    #{id => erx_kernel_records:system_domain(), principal => ?SYSTEM_PRINCIPAL, name => <<"system">>}.
+%% domain's line principal, the system principal as the manifest names it, and its name.
+system_source(#state{principal = Principal}) ->
+    #{id => erx_kernel_records:system_domain(), principal => Principal, name => <<"system">>}.
 
 %% A rendered log line ends in its one newline; a terminal's line ends in CR-LF.
 log_line(<<>>) ->

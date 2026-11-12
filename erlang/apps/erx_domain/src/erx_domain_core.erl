@@ -115,7 +115,8 @@ root_1, root_2 and on, and for any other principal its name in the system
 manifest, of Names, the manifest's principal names by number, so a session
 of principal clock is clock_1. error for a principal Names does not name.
 """.
--spec session_prefix(pos_integer(), pos_integer(), #{pos_integer() => binary()}) -> {ok, binary()} | error.
+-spec session_prefix(pos_integer(), pos_integer() | unknown, #{pos_integer() => binary()}) ->
+          {ok, binary()} | error.
 session_prefix(System, System, _Names) -> {ok, <<"root">>};
 session_prefix(Principal, _System, Names) -> maps:find(Principal, Names).
 

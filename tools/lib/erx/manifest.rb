@@ -523,6 +523,11 @@ module Erx
         invalid('duplicate shell principal', 5, 'shell_principals') unless shell.map { |row| row.fetch('principal') }.uniq.size == shell.size
         rows['shell_principals'] = shell.sort_by { |row| row.fetch('principal') }
         check_and_place(rows, root_memory: root_memory, baseline: baseline, max_domains: max_domains)
+        system_principal = reference(machine, 'system_principal', 'principal')
+        # The system principal's sessions are root_N (erx_domain_core:session_prefix/3),
+        # so a principal named root must be the system principal.
+        root = @indices.fetch('principal').fetch('root', system_principal)
+        invalid('only the system principal may be named root', 5, 'principal.name') unless root == system_principal
         header = {
           'magic' => @codec.constant('manifest_magic'), 'version' => @codec.constant('manifest_version'),
           'flags' => flags, 'host' => text(machine, 'host'), 'system_args' => words(machine, 'system_args'),
@@ -530,7 +535,7 @@ module Erx
           'hostlink' => hostlink, 'platform' => platform_name, 'root_memory' => root_memory,
           'system_baseline' => baseline, 'system_reservation' => 0,
           'system_share' => system_share, 'users_share' => users_share,
-          'system_principal' => reference(machine, 'system_principal', 'principal'),
+          'system_principal' => system_principal,
           'max_domains' => max_domains, 'max_connections' => number(machine, 'max_connections'),
           'system_lane' => number(machine, 'system_lane'), 'system_queue' => number(machine, 'system_queue'),
           'peer_held' => number(machine, 'peer_held'), 'system_reserve' => number(machine, 'system_reserve'),

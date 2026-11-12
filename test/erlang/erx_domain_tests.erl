@@ -289,6 +289,38 @@ session_names() ->
      || {Principal, Template, Name, Node} <- [{1, 0, <<"clock_1">>, 'clock_1@erxos'},
                                               {3, 2, <<"root_1">>, 'root_1@erxos'}]].
 
+%% A create is charged to the system principal the manifest names, not to principal 1:
+%% the packer numbers principals in name order, so alpha, which sorts before system,
+%% is 1 and system is 2, as erx_build:principals/1 reads such a manifest
+%% (test/host/erx_build_principals_test.rb).
+system_principal_test_() ->
+    {setup,
+     fun() ->
+             persistent_term:put({erx_domain_fake_lib, boot}, #{domains => []}),
+             Log = erx_domain_fake_lib:start_log(),
+             {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                          exports => erx_domain_fake_lib,
+                                                          principals => #{system => 2,
+                                                                          names => #{1 => <<"alpha">>,
+                                                                                     2 => <<"system">>}}}),
+             unlink(Service),
+             {Log, Service}
+     end,
+     fun(Started) ->
+             stop_service(Started),
+             persistent_term:erase({erx_domain_fake_lib, boot}),
+             ok
+     end,
+     fun create_charged_to_the_system_principal/0}.
+
+create_charged_to_the_system_principal() ->
+    {ok, Domain} = erx_domain:create(#{boot => <<"base">>, name => <<"made">>, memory => 4096}),
+    Id = erx_domain:id(Domain),
+    ?assertMatch({create, #{id := Id, principal := 2}}, next_call()),
+    _ = [next_call() || _ <- [open_side, export, start]],
+    ok = erx_domain:stop(Domain, shutdown),
+    retired(Id).
+
 %% Starts a session of Principal, which the library makes from Template under Name, stops
 %% it once it is ready and awaits its end: the session's node.
 session_named(Principal, Template, Name) ->
@@ -311,7 +343,8 @@ service_test_() ->
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
-                                                          introduce_timeout => 2000, release_wait => 1000}),
+                                                          introduce_timeout => 2000, release_wait => 1000,
+                                                          principals => #{system => 1, names => #{1 => <<"system">>}}}),
              unlink(Service),
              {Log, Service}
      end,
@@ -328,6 +361,19 @@ service_test_() ->
 %% Ends a fixture's service and its call log, each registered by name.
 stop_service({Log, Service}) ->
     erx_domain_fake_lib:kill_and_await([Service, Log]).
+
+%% A service that cannot read the system manifest knows no system principal, so it
+%% refuses a create rather than charge it to a principal it guessed; the host has no
+%% system manifest at the system domain's path.
+unknown_system_principal_refuses_creates_test() ->
+    persistent_term:put({erx_domain_fake_lib, boot}, #{domains => []}),
+    Log = erx_domain_fake_lib:start_log(),
+    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                 exports => erx_domain_fake_lib}),
+    unlink(Service),
+    ?assertEqual({error, enotsup}, erx_domain:create(#{boot => <<"base">>, name => <<"made">>, memory => 4096})),
+    stop_service({Log, Service}),
+    persistent_term:erase({erx_domain_fake_lib, boot}).
 
 %% A fixture's cleanup has ended the service and the call log by the time it returns,
 %% so the fixture after it can register erx_domain_srv and erx_domain_fake_log again.

@@ -19,6 +19,9 @@
 %% however slow the host is. A case that needs an operation's deadline delivers it
 %% with expire/1.
 -define(DEADLINE, 3600000).
+%% The fixture's system principal, which the service charges creates to and whose
+%% sessions are root_N; the fake library's templates are principal 1's.
+-define(PRINCIPALS, #{system => 1, names => #{}}).
 
 mints_test_() ->
     {setup, fun setup/0, fun cleanup/1,
@@ -64,7 +67,7 @@ setup(Interface, Opts) ->
     provide('a@erxos'),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(Opts#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                      exports => erx_domain_fake_lib, introduce_timeout => ?DEADLINE,
+                                                      exports => erx_domain_fake_lib, principals => ?PRINCIPALS, introduce_timeout => ?DEADLINE,
                                                       mints => #{owner => fun erx_domain_mints_tests:owner/1,
                                                                  deadline => ?DEADLINE}}),
     unlink(Service),
@@ -284,7 +287,7 @@ served_setup() ->
     erlang:trace(new_processes, true, ['receive', {tracer, Self}]),
     Fake = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                 exports => erx_domain_fake_lib,
+                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
                                                  mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
     unlink(Service),
     {Fake, Service, Log}.
@@ -350,7 +353,7 @@ inspect_setup(Grants) ->
     erlang:trace(new_processes, true, ['receive', {tracer, self()}]),
     Fake = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                 exports => erx_domain_fake_lib,
+                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
                                                  inspect_policy => #{roots => [1], development => false},
                                                  mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
     unlink(Service),

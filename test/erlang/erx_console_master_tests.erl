@@ -67,7 +67,7 @@ master_test_() ->
 
 master() ->
     process_flag(trap_exit, true),
-    {ok, Console} = erx_console:start_link(#{role => session, name => erx_console, menu => true,
+    {ok, Console} = erx_console:start_link(#{role => session, name => erx_console, menu => true, principal => 1,
                                              owner => fun tty_owner/1,
                                              driver => driver(self()),
                                              first_shell => {?MODULE, shell, []}}),

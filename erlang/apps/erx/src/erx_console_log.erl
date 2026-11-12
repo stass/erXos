@@ -36,8 +36,9 @@ The module is pure: accept/4 takes the arrival time and returns the next state.
 -define(NS_PER_US, 1000).
 -define(LEVELS, [emergency, alert, critical, error, warning, notice, info, debug]).
 
-%% Where a record arrived from: the domain's id, its principal and its name.
--type source() :: #{id := non_neg_integer(), principal := non_neg_integer(),
+%% Where a record arrived from: the domain's id, its principal, unknown for the system
+%% domain's own records where its manifest cannot be read, and its name.
+-type source() :: #{id := non_neg_integer(), principal := non_neg_integer() | unknown,
                     name := unicode:chardata()}.
 %% For each domain that has sent a record: the second its count is for, the bytes of
 %% lines written in it, and the records dropped since its last accepted line.
@@ -85,8 +86,11 @@ valid(_Message) ->
 line(#{id := Id, principal := Principal, name := Name}, Now, Level, Text, Dropped) ->
     [integer_to_binary(Now div ?NS_PER_S), $., micro(Now rem ?NS_PER_S div ?NS_PER_US),
      $\s, atom_to_binary(Level), <<" domain ">>, integer_to_binary(Id),
-     <<" principal ">>, integer_to_binary(Principal), dropped(Dropped), $\s,
+     <<" principal ">>, principal(Principal), dropped(Dropped), $\s,
      erx_text:escape_line(Name), <<": ">>, erx_text:escape_line(Text), <<"\r\n">>].
+
+principal(unknown) -> <<"unknown">>;
+principal(Principal) -> integer_to_binary(Principal).
 
 micro(Micro) ->
     string:pad(integer_to_binary(Micro), 6, leading, $0).

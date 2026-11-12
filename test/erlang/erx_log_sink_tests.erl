@@ -32,6 +32,13 @@ a_logged_error_reaches_the_console_escaped_test() ->
     ?assertEqual(<<"12.000345 error domain 4 principal 1 system: "
                    "tab<U+0009>here esc<U+001B>[31mred nl, end\r\n">>, line(Record)).
 
+%% The system domain's own records name its principal unknown where the system
+%% manifest cannot be read, rather than a number it guessed.
+an_unknown_principal_is_shown_as_unknown_test() ->
+    Source = (source(4, <<"system">>))#{principal => unknown},
+    {line, Line, _State} = erx_console_log:accept({log, notice, <<"up">>}, Source, ?NOW, erx_console_log:new()),
+    ?assertEqual(<<"12.000345 notice domain 4 principal unknown system: up\r\n">>, iolist_to_binary(Line)).
+
 a_record_of_the_domain_s_own_making_is_escaped_test() ->
     Line = line({log, warning, <<"a\tb\e]8;;x\e\\c\nd\r">>}),
     ?assertEqual(<<"12.000345 warning domain 4 principal 1 system: "

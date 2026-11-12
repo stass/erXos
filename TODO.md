@@ -2075,13 +2075,6 @@ it; git history is the record of completed work.
   down, so its ended record keeps its view slot and its principal's domain count, and
   `retire/1` needs an id nobody heard. Keep a reported flag per record in the view, set when
   the report is sent, and have `register/0` send every ended record not yet reported.
-* [High] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`?SYSTEM_PRINCIPAL`):
-  the service charges every create and configured domain to principal 1, but the manifest's
-  packer numbers principals in name order (`tools/lib/erx/manifest.rb`, `sort_by(&:name)`) and
-  names the system principal in `root.system_principal`, so a principal named before `system`
-  (`clock`) is principal 1 and gets the system's creates. Session names already read the
-  system principal from the manifest (`erx_build:principals/0`); the creates should too, or
-  the packer should make the system principal index 0.
 * [Low] domain service, `erx_domain_srv:session_start/3`: a start's `display` may name any
   service its template is granted, not only a display, since no `windows` service exists to
   check it against; the mint then carries `session` to a server that ignores it. Check the
@@ -2089,12 +2082,19 @@ it; git history is the record of completed work.
   naming one display both get the mark: only `erx_starter`'s keepers pass `display`, and
   design-display.md wants one display's session, so whether the domain service refuses a
   second is a design question for Track D.
+* [Medium] domain service and system console, `erx_domain_srv:principals/1`,
+  `erx_console:line_principal/2`: each reads the system principal from the system manifest on
+  its own, and an unreadable manifest leaves it `unknown`, so creates are refused with
+  `enotsup` and the boot login starts nothing, without a line saying why, although the library
+  read the same manifest. Fail the service's start when the library is loaded and the manifest
+  cannot be read, make the service the one owner of the number (the console asks it for the
+  system principal's session), and keep the system domain's log-record principal apart from
+  the line's principal (`system_source/1`), which a release login will make a user's.
 * [Low] manifest packer, `tools/lib/erx/manifest.rb`: a principal's name is checked to fit
   `<name>_<names>` in 63 bytes, but a session name may take a number past `names` when
   another principal holds a lower one, so a long name's later start is refused with
-  `bad_identifier` rather than the library's quota; and a principal other than the system
-  may be named `root`, whose sessions then share numbers with the system principal's
-  `root_N`. Bound the name by the domain service's names quota and reserve `root`.
+  `bad_identifier` rather than the library's quota. Bound the name by the domain service's
+  names quota.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`create/2`):
   `erx_domain:create/1` takes the domain library's own request fields (the boot image's
   runtime and release indexes, the budgets, the grant), where design-domains.md "Erlang
