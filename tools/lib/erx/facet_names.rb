@@ -53,8 +53,8 @@ module Erx
   # The check is the second line. The first is the domain service's funnel,
   # erx_domain_srv:facets/2, which refuses a key outside the table it is built with: the
   # manifests' public service names, generated into HEADER (generation/1). No exempt
-  # name is in that table: the funnel's two stopgap names, console and log, are literals
-  # of its own, each pointing at the TODO.md item that removes it.
+  # name is in that table: the funnel's one stopgap name, console, is a literal of its
+  # own, pointing at the TODO.md item that declares it.
   # The manifests' own facet rows have no other line: the domain service trusts the
   # image's manifest and does not look its rows up at boot.
   module FacetNames
@@ -69,9 +69,6 @@ module Erx
     Exemption = Data.define(:todo, :sites)
     APPS = 'erlang/apps'
     UNDECLARED = {
-      'log' => Exemption.new(todo: 'TODO.md, Bugs, "the inspect service": the kernel log is to be ' \
-                                   'read as the inspection path [kernel, log] through the inspect facet',
-                             sites: ["#{APPS}/erx/src/erx_log_records.erl"]),
       'console' => Exemption.new(todo: 'TODO.md, Bugs, "two facets of no declared interface": ' \
                                        'abi/services/console.txt declares no service',
                                  sites: ["#{APPS}/erx/src/erx_console.erl",
@@ -81,7 +78,7 @@ module Erx
                                   sites: ["#{APPS}/erx_web_line/src/erx_web_line_app.erl"])
     }.freeze
     # The most names UNDECLARED may hold (exemption_violations/1).
-    EXEMPTIONS_MAX = 3
+    EXEMPTIONS_MAX = 2
 
     NAME = /[a-z][A-Za-z0-9_@]*/
     # The shapes of a use: each captures the facet name, or a list of them as names.

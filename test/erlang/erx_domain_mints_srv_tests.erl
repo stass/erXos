@@ -155,21 +155,21 @@ funnel() ->
     ?assertEqual(none, erx_domain_core:fetch(7, Core)).
 
 %% The running table holds only the manifest's service names: none of the names the
-%% facet-names check exempts travels into it. The funnel's two stopgap names, console
-%% and log, stand outside it and still pass, each alone and both together, with a
-%% process of the system domain, so the spec fails only at its boot, and are refused
-%% with a process of another node; web_line, exempt in the check but no stopgap of the
-%% funnel, and a name in neither are refused.
+%% facet-names check exempts travels into it. The funnel's one stopgap name, console,
+%% stands outside it and still passes with a process of the system domain, so the spec
+%% fails only at its boot, and is refused with a process of another node; log, which
+%% no interface declares and the funnel does not exempt, web_line, exempt in the
+%% check but no stopgap of the funnel, and a name in neither are refused, alone or
+%% beside console.
 stopgap_names() ->
     #{facet_names := Names} = sys:get_state(erx_domain_srv),
     ?assertEqual([], [Name || Name <- [console, log, web_line], lists:member(Name, Names)]),
     ?assert(lists:member(data, Names)),
     Spec = fun(Facets) -> #{boot => <<"../x">>, name => <<"c">>, facets => Facets} end,
-    [?assertEqual({error, {bad_spec, boot}}, erx_domain:create(Spec(Facets)))
-     || Facets <- [#{console => self()}, #{log => self()}, #{console => self(), log => self()}]],
+    ?assertEqual({error, {bad_spec, boot}}, erx_domain:create(Spec(#{console => self()}))),
     [?assertEqual({error, {bad_spec, facets}}, erx_domain:create(Spec(Facets)))
-     || Facets <- [#{console => pid('a@erxos', 5, 1)}, #{log => pid('a@erxos', 5, 1)},
-                   #{web_line => self()}, #{rogue => self()}, #{log => self(), rogue => self()}]].
+     || Facets <- [#{console => pid('a@erxos', 5, 1)}, #{log => self()}, #{console => self(), log => self()},
+                   #{web_line => self()}, #{rogue => self()}, #{console => self(), rogue => self()}]].
 
 %% The system domain's grant of echo installed, a's mint's reply its facet.
 install_system_grant() ->

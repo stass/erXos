@@ -1589,13 +1589,6 @@ it; git history is the record of completed work.
   facet-names check, and the funnel's table generated from it (`erx_facet_names.hrl`), read the manifest
   with a small parser of their own rather than `Erx::ABI::Syntax.parse`. Read it with the manifest's own
   syntax so the table and the image's manifest cannot disagree on a service's name.
-* [Medium] shell and domains, the kernel log's `log` facet (`erlang/apps/erx/src/erx_log_facet.erl`;
-  `erx_console.erl`, `log_reader/1`; `erx_log_records.erl`, `log/1`; `erx_domain_srv:facet/3`): root's session
-  reads the kernel log as every consumer reads the inspector, through its inspect facet (`/proc/kernel/log`,
-  [The /proc tree](docs/design-live.md#the-proc-tree)), so the `log` facet the console grants a session in a
-  development build is a second path to the same records. Delete `erx_log_facet` and its tests, the read
-  through it in `erx_log_records:log/1`, `log` from `UNDECLARED` (lowering `EXEMPTIONS_MAX`), and the funnel's
-  literal `log` clause. Keep the `session-dmesg` QEMU checkpoint, which tests the behaviour.
 * [Medium] domains, the inspect facet's scope wiring (`erlang/apps/erx_domain/src/erx_domain_srv.erl`,
   `system_facet/4`; `erlang/apps/erx/src/erx_build.erl`, `shell_principals/1`): no test checks the scope a
   session's minted inspect facet holds, so a `system_facet/4` that mints `all` for every grantee passes, and
@@ -2091,13 +2084,13 @@ it; git history is the record of completed work.
   queued, not by the funnel before, and likewise a query worker (`erx_inspect_worker.erl`)
   drops an agent's answer past `inspect_message_heap_min` words by its decoded size once it
   is queued, not the funnel before it; and admission is hand-written, not the generated path
-  from the service's operation schema. The funnel (`facets/2`) hands on only `console` and
-  `log`, each a literal clause of `facet/3` beside its TODO.md item, and refuses every other
+  from the service's operation schema. The funnel (`facets/2`) hands on only `console`,
+  a literal clause of `facet/3` beside its TODO.md item, and refuses every other
   name with `{bad_spec, facets}`, a name of the table included (`attenuated/2`), since
   handing on the starter's own recorded facet would pass it on unattenuated. Phase 1
-  residual: `console` and `log` take any local process the system domain
-  hands, which only trusted system-domain code can do; both names go with their items above
-  (the inspect item deletes `log`, the console item declares `console`). Build the
+  residual: `console` takes any local process the system domain
+  hands, which only trusted system-domain code can do; it goes with the console item above,
+  which declares it. Build the
   attenuating hand-on of design-domains.md "Handing a facet on", which mints a facet in
   front of the starter's within its grant record, and let `attenuated/2` hand recorded
   names on through it. Attenuation alone does not keep design-system.md's "The manifest"
@@ -4929,15 +4922,9 @@ to the corpus and follow rc
   Security](docs/design-web.md#security)): once the system domain exports root's session's line to the web
   domain, every view a browser opens reads at scope `all`, so a browser reaches the machine-wide paths
   (`/proc/kernel`, `/proc/cpus`, the kernel log, the machine record's `all` attributes), as the session's own
-  `/proc` does; on the stopgap a session's runtime answers most of them `unsupported`, all but the kernel log.
-  The kernel log goes with this scope: in a development build the console hands every session it starts (root's,
-  in a development build) a `log` facet in front of the system domain's log reader (`erlang/apps/erx/src/erx_log_facet.erl`, `grant/2`),
-  through which the session's `/proc/kernel/log`, its `dmesg` and its web views read the whole kernel log; a
-  narrowing removes that grant with the scope. Its gate is the manifest's development flag alone
-  (`erx_build:development/0`): `grant/2` should check root's principal, not rely on a development build having
-  no other; a session keeps a dead
-  facet after a console restart, as its console facet. The facet exists only in a
-  development build, which runs trusted code only. The owner accepted the wide scope; narrowing it to root's own
+  `/proc` does: the system domain's query worker answers each of them through the session's inspect facet, at
+  that facet's scope.
+  Development builds run trusted code only. The owner accepted the wide scope; narrowing it to root's own
   domains, or removing it, changes design-live.md ("Scopes"), design-web.md (W1) and design-domains.md
   (property 9) with it, and needs a test that a browser's view of `/proc/kernel` ends `scope`. The line widens
   itself on any export the system domain sends (`{export, Web}`), and today only the host link's `web` facet

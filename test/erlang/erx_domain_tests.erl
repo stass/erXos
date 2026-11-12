@@ -833,10 +833,11 @@ facets() ->
     Spec = fun(Facets) -> #{boot => <<"base">>, name => <<"f">>, facets => Facets} end,
     Refused = {error, {bad_spec, facets}},
     ?assertEqual(Refused, erx_domain:create(Spec([console]))),
-    %% A name outside the generated table is refused; so is a declared name, data or
-    %% inspect, whatever the process, since a spec hands on only console and log, which
-    %% have no grant record, each with a process of the system domain.
-    [?assertEqual(Refused, erx_domain:create(Spec(#{Name => Echo}))) || Name <- [echo, data, inspect, web_line]],
+    %% A name outside the generated table is refused, log among them; so is a declared
+    %% name, data or inspect, whatever the process, since a spec hands on only console,
+    %% which has no grant record, with a process of the system domain.
+    [?assertEqual(Refused, erx_domain:create(Spec(#{Name => Echo})))
+     || Name <- [echo, data, inspect, web_line, log]],
     ?assertEqual(Refused, erx_domain:create(Spec(#{console => self}))),
     ?assertEqual(Refused, erx_domain:create(Spec(#{<<"console">> => Echo}))),
     ?assertEqual(Refused, erx_domain:create(Spec(#{console => erx_domain_fake_lib:agent(<<"f">>, 5)}))),

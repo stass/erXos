@@ -128,7 +128,7 @@ class FacetNamesTest < Minitest::Test
 
   # The funnel's table, which the build generates: each manifest service's public name
   # and nothing else, so no exempt name travels into the running system as table data
-  # (the funnel's two stopgap names are literals of its own). A facet row's own name is
+  # (the funnel's one stopgap name is a literal of its own). A facet row's own name is
   # no service's.
   def test_the_generated_table_holds_only_the_manifest_names
     files, = table
@@ -149,9 +149,9 @@ class FacetNamesTest < Minitest::Test
     detail = ->(list) { Erx::FacetNames.exemption_violations(list).map(&:to_s).join }
     assert_empty detail.call(exemptions)
     longer = exemptions.merge('rogue' => Erx::FacetNames::Exemption.new(todo: 'none', sites: []))
-    assert_match(/UNDECLARED holds 4 names, not EXEMPTIONS_MAX \(3\): the exemptions only shrink/, detail.call(longer))
-    assert_match(/UNDECLARED holds 2 names, not EXEMPTIONS_MAX \(3\): lower EXEMPTIONS_MAX/,
-                 detail.call(exemptions.except('log')))
+    assert_match(/UNDECLARED holds 3 names, not EXEMPTIONS_MAX \(2\): the exemptions only shrink/, detail.call(longer))
+    assert_match(/UNDECLARED holds 1 names, not EXEMPTIONS_MAX \(2\): lower EXEMPTIONS_MAX/,
+                 detail.call(exemptions.except('web_line')))
   end
 
   # A manifest name outside the atom syntax generates nothing, so a name cannot close the

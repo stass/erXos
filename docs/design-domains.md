@@ -2597,8 +2597,8 @@ a file in its owner's tree, or a protocol with a design and an
 interface of its own ([design.md](design.md#decisions), "Every route
 between domains starts at a declared facet").
 
-**The exempt names, a stopgap.** Three facet names the code uses have
-no declared interface yet: `console`, `log` and `web_line`. The facet
+**The exempt names, a stopgap.** Two facet names the code uses have
+no declared interface yet: `console` and `web_line`. The facet
 table check lets each appear only in the files its exemption lists,
 beside the TODO.md item that declares or removes it
 (`FacetNames::UNDECLARED`). The list only shrinks: a name leaves it
@@ -2607,10 +2607,8 @@ ever added to it; the check fails a list whose length is not its
 bound, which is lowered with each name that leaves and never raised.
 No exempt name is in the
 funnel's table, which holds only the manifest's service names. The
-funnel hands on two of them, `console` and `log`, as literals of its
-own, each with any process of the system domain and each removed with
-its TODO.md item; `log` goes when the kernel log is read through the
-inspect facet.
+funnel hands on one of them, `console`, as a literal of its own, with
+any process of the system domain, removed with its TODO.md item.
 
 The services of the live machine are reached through facets of
 interfaces `abi/services` declares: `inspect`

@@ -492,9 +492,9 @@ facets(Facets, State) when is_map(Facets) ->
 facets(_Facets, _State) ->
     invalid.
 
-%% Whether a spec may hand Name on with its grant, and as what. Two names stand outside
-%% the table as stopgaps, each a literal here that goes with its TODO.md item; the spec
-%% hands either on with a process of the system domain, live or dead, as its pid (local/1).
+%% Whether a spec may hand Name on with its grant, and as what. One name, console, stands
+%% outside the table as a stopgap, a literal here that goes with its TODO.md item; the
+%% spec hands it on with a process of the system domain, live or dead, as its pid (local/1).
 %% Every other name must be in the table of facet names (declared/2) and is handed on
 %% only as an attenuating facet (attenuated/2).
 facet(_Name, invalid, _State) ->
@@ -502,10 +502,6 @@ facet(_Name, invalid, _State) ->
 %% Stopgap: console is of no declared interface. TODO.md, Bugs by subsystem, "two facets
 %% of no declared interface", declares it and deletes this clause.
 facet(console, {ok, Grant}, _State) ->
-    local(Grant);
-%% Stopgap: the kernel log's own facet. TODO.md, Bugs by subsystem, "the inspect service",
-%% reads the log through the inspect facet and deletes this clause.
-facet(log, {ok, Grant}, _State) ->
     local(Grant);
 facet(Name, {ok, Grant}, State) ->
     declared(Name, State) andalso attenuated(Name, Grant).
@@ -517,8 +513,8 @@ facet(Name, {ok, Grant}, State) ->
 declared(Name, #{facet_names := Names}) ->
     lists:member(Name, Names).
 
-%% A stopgap name's grant, whose pid is any process of this node, the system domain's;
-%% which process is the caller's to get right, so such a name could stand in front of
+%% The console stopgap's grant, whose pid is any process of this node, the system domain's;
+%% which process is the caller's to get right, so console could stand in front of
 %% any of the system domain's processes (the Phase 1 residual of TODO.md's facets item).
 local({Pid, Limits}) ->
     node(Pid) =:= node() andalso {true, {Pid, Limits}}.

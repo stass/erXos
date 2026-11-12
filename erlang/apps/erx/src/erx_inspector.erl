@@ -44,9 +44,9 @@ runtime attributes from the agent and every other attribute
 `unsupported`. Kernel objects, through
 erx_kernel_records on the root's own capabilities, and the domain record,
 through erx_runtime_records, are the system domain's only; the kernel
-log, through erx_log_records, is read in the system domain, by a session
-that holds the `log` facet too. To the scoped core, a process of
-another runtime, and any other domain's path, name nothing it can
+log, through erx_log_records, is read in the system domain only. To the
+scoped core, a process of another runtime, and any other domain's path,
+name nothing it can
 reach and are answered `{error, scope}`; a path the schema declares
 that has no collector here is
 `{error, unsupported}`.
