@@ -8,6 +8,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include <strings.h>
 
 #include "erx/etf.h"
@@ -199,6 +200,23 @@ anchor_status(int64_t status)
 }
 
 /*
+ * The status a decisive input ends the program with: a fault's, SIGSYS for a channel the
+ * program broke or a frame of it the driver refused, and the owner's for a STOP.
+ */
+static int64_t
+stop_status(erx_program_input_t input)
+{
+	switch (input.kind) {
+	case ERX_PROGRAM_FAULT:
+		return (fault_status(input.fault));
+	case ERX_PROGRAM_STOP:
+		return (input.status);
+	default:
+		return (ERX_EXIT_SIGNAL + ERX_SIGSYS);
+	}
+}
+
+/*
  * Whether the owner may still act on the program: it read the start's answer, and the image
  * runs with its anchor, so a thread started or a frame written now reaches a live program.
  */
@@ -279,14 +297,15 @@ erx_program_end_next(erx_program_end_t *end, erx_program_input_t input,
 		return (end->phase == ERX_PROGRAM_ENDED ? release(end, actions, 0, false) : 0);
 	case ERX_PROGRAM_FAULT:
 	case ERX_PROGRAM_BROKEN:
-		/* A broken channel holds no frame the driver can finish. */
-		if (input.kind == ERX_PROGRAM_BROKEN)
-			end->writing = false;
+	case ERX_PROGRAM_REFUSED:
+	case ERX_PROGRAM_STOP:
+		/* An ending program takes no frame more: none is being written for it, nor room owed. */
+		end->writing = end->room_owed = false;
 		/* Only the first fault decides; the image's exit record reports it. */
 		if (end->phase != ERX_PROGRAM_RUNNING)
 			return (0);
 		end->phase = ERX_PROGRAM_FAULTED;
-		end->status = input.kind == ERX_PROGRAM_BROKEN ? ERX_EXIT_SIGNAL + ERX_SIGSYS : fault_status(input.fault);
+		end->status = stop_status(input);
 		return (end->anchor_ended ? 0 : put(actions, 0, ERX_PROGRAM_STOP_ANCHOR, end->status));
 	case ERX_PROGRAM_CLOSE:
 	case ERX_PROGRAM_LOST:
@@ -300,13 +319,22 @@ erx_program_end_next(erx_program_end_t *end, erx_program_input_t input,
 		end->ran = true;
 		return (put(actions, 0, ERX_PROGRAM_THREAD_START, 0));
 	case ERX_PROGRAM_SEND:
-		if (!alive(end) || end->writing)
+		if (!alive(end))
 			return (0);
+		if (end->writing) {
+			end->room_owed = true;
+			return (put(actions, 0, ERX_PROGRAM_BUSY, 0));
+		}
 		end->writing = true;
 		return (put(actions, 0, ERX_PROGRAM_WRITE, 0));
 	case ERX_PROGRAM_WRITTEN:
+		if (!end->writing)
+			return (0);
 		end->writing = false;
-		return (0);
+		if (!end->room_owed)
+			return (0);
+		end->room_owed = false;
+		return (put(actions, 0, ERX_PROGRAM_ROOM, 0));
 	case ERX_PROGRAM_ANSWERED:
 		break;
 	}
@@ -342,24 +370,105 @@ shape_integer(erx_etf_reader_t *r, int64_t min, int64_t max, int64_t *value)
 	return (true);
 }
 
+/* The next term, which must be the atom name. */
+static bool
+shape_atom(erx_etf_reader_t *r, const char *name)
+{
+	const size_t len = strlen(name);
+	erx_etf_item_t item;
+
+	return (shape_term(r, &item) && item.kind == ERX_ETF_ATOM && item.u.data.len == len &&
+	    bcmp(item.u.data.bytes, name, len) == 0);
+}
+
+/* The next term, which must be a notice key's number, from 1 to 2^32 - 1. */
+static bool
+shape_number(erx_etf_reader_t *r, uint32_t *value)
+{
+	int64_t v;
+
+	if (!shape_integer(r, 1, UINT32_MAX, &v))
+		return (false);
+	*value = (uint32_t)v;
+	return (true);
+}
+
+/* The notice key that is the next term: {closed, Pipe, End} or {drained, Pipe, End, Writer}. */
+static bool
+shape_notice(erx_etf_reader_t *r, erx_program_notice_t *notice)
+{
+	erx_etf_item_t item;
+
+	if (!shape_term(r, &item) || item.kind != ERX_ETF_TUPLE)
+		return (false);
+	*notice = (erx_program_notice_t){ 0 };
+	if (item.count == 3 && shape_atom(r, "closed"))
+		notice->kind = ERX_PROGRAM_NOTICE_CLOSED;
+	else if (item.count == 4 && shape_atom(r, "drained"))
+		notice->kind = ERX_PROGRAM_NOTICE_DRAINED;
+	else
+		return (false);
+	return (shape_number(r, &notice->pipe) && shape_number(r, &notice->end) &&
+	    (notice->kind == ERX_PROGRAM_NOTICE_CLOSED || shape_number(r, &notice->writer)));
+}
+
 erx_program_frame_t
 erx_program_frame_shape(const uint8_t *record, size_t len)
 {
-	static const char tag[] = "erx_prog";
 	const erx_program_frame_t other = { .kind = ERX_PROGRAM_FRAME_OTHER };
+	erx_program_frame_t frame = other;
 	erx_etf_reader_t r;
 	erx_etf_item_t item;
 	int64_t version, slot;
 
-	/* The version is an integer, one item, so the slot is the term after it, not inside it. */
+	/* The version is an integer, one item, so what follows is the term after it, not inside it. */
 	if (!erx_etf_reader_init(&r, record, len) || !shape_term(&r, &item) ||
-	    item.kind != ERX_ETF_TUPLE || item.count != 4 || !shape_term(&r, &item) ||
-	    item.kind != ERX_ETF_ATOM || item.u.data.len != sizeof(tag) - 1 ||
-	    bcmp(item.u.data.bytes, tag, sizeof(tag) - 1) != 0 ||
-	    !shape_integer(&r, INT64_MIN, INT64_MAX, &version) ||
-	    !shape_integer(&r, 0, ERX_PROGRAM_SLOTS - 1, &slot))
+	    item.kind != ERX_ETF_TUPLE || (item.count != 3 && item.count != 4) ||
+	    !shape_atom(&r, "erx_prog") || !shape_integer(&r, INT64_MIN, INT64_MAX, &version))
 		return (other);
-	return ((erx_program_frame_t){ .kind = ERX_PROGRAM_FRAME_REQUEST, .slot = (uint8_t)slot });
+	if (item.count == 4) {
+		if (!shape_integer(&r, 0, ERX_PROGRAM_SLOTS - 1, &slot))
+			return (other);
+		return ((erx_program_frame_t){ .kind = ERX_PROGRAM_FRAME_REQUEST, .slot = (uint8_t)slot });
+	}
+	if (!shape_notice(&r, &frame.notice))
+		return (other);
+	frame.kind = ERX_PROGRAM_FRAME_NOTICE;
+	return (frame);
+}
+
+void
+erx_program_credit_init(erx_program_credit_t *credit, erx_program_notice_t *due,
+    uint32_t closed_max, uint32_t drained_max)
+{
+	*credit = (erx_program_credit_t){ .due = due, .closed_max = closed_max,
+	    .drained_max = drained_max };
+}
+
+static bool
+notice_equal(erx_program_notice_t a, erx_program_notice_t b)
+{
+	return (a.kind == b.kind && a.pipe == b.pipe && a.end == b.end && a.writer == b.writer);
+}
+
+/* Spends one grant of notice: false, credit unchanged, when none is due. */
+static bool
+due_spend(erx_program_credit_t *credit, erx_program_notice_t notice)
+{
+	const uint32_t count = credit->closed + credit->drained;
+
+	for (uint32_t at = 0; at < count; at++) {
+		if (!notice_equal(credit->due[at], notice))
+			continue;
+		/* The set has no order: the last key takes the spent one's place. */
+		credit->due[at] = credit->due[count - 1];
+		if (notice.kind == ERX_PROGRAM_NOTICE_CLOSED)
+			credit->closed--;
+		else
+			credit->drained--;
+		return (true);
+	}
+	return (false);
 }
 
 erx_program_credit_verdict_t
@@ -367,25 +476,69 @@ erx_program_credit_take(erx_program_credit_t *credit, erx_program_frame_t frame)
 {
 	uint16_t bit;
 
-	if (frame.kind != ERX_PROGRAM_FRAME_REQUEST || frame.slot >= ERX_PROGRAM_SLOTS)
-		return (ERX_PROGRAM_REFUSE);
-	bit = (uint16_t)(1u << frame.slot);
-	if ((credit->busy & bit) != 0)
-		return (ERX_PROGRAM_REFUSE);
-	credit->busy |= bit;
-	return (ERX_PROGRAM_DELIVER);
+	switch (frame.kind) {
+	case ERX_PROGRAM_FRAME_NOTICE:
+		return (due_spend(credit, frame.notice) ? ERX_PROGRAM_DELIVER : ERX_PROGRAM_REFUSE);
+	case ERX_PROGRAM_FRAME_REQUEST:
+		if (frame.slot >= ERX_PROGRAM_SLOTS)
+			return (ERX_PROGRAM_REFUSE);
+		bit = (uint16_t)(1u << frame.slot);
+		if ((credit->busy & bit) != 0)
+			return (ERX_PROGRAM_REFUSE);
+		credit->busy |= bit;
+		return (ERX_PROGRAM_DELIVER);
+	case ERX_PROGRAM_FRAME_OTHER:
+		break;
+	}
+	return (ERX_PROGRAM_REFUSE);
+}
+
+/* A grant the driver can keep: a key of a known kind with every number it carries nonzero. */
+static bool
+grant_valid(erx_program_notice_t grant)
+{
+	if (grant.pipe == 0 || grant.end == 0)
+		return (false);
+	switch (grant.kind) {
+	case ERX_PROGRAM_NOTICE_CLOSED:
+		return (grant.writer == 0);
+	case ERX_PROGRAM_NOTICE_DRAINED:
+		return (grant.writer != 0);
+	}
+	return (false);
 }
 
 bool
-erx_program_credit_reply(erx_program_credit_t *credit, uint32_t slot)
+erx_program_credit_admits(const erx_program_credit_t *credit, const erx_program_send_t *send)
 {
-	uint16_t bit;
+	uint32_t closed = 0, drained = 0;
 
-	if (slot >= ERX_PROGRAM_SLOTS)
+	if (send->reply != ERX_PROGRAM_NO_REPLY &&
+	    (send->reply >= ERX_PROGRAM_SLOTS || (credit->busy & (1u << send->reply)) == 0))
 		return (false);
-	bit = (uint16_t)(1u << slot);
-	if ((credit->busy & bit) == 0)
-		return (false);
-	credit->busy &= (uint16_t)~bit;
-	return (true);
+	for (uint32_t at = 0; at < send->count; at++) {
+		if (!grant_valid(send->grants[at]))
+			return (false);
+		if (send->grants[at].kind == ERX_PROGRAM_NOTICE_CLOSED)
+			closed++;
+		else
+			drained++;
+	}
+	/* Each count is at most its bound, so neither subtraction wraps. */
+	return (closed <= credit->closed_max - credit->closed &&
+	    drained <= credit->drained_max - credit->drained);
+}
+
+void
+erx_program_credit_sent(erx_program_credit_t *credit, const erx_program_send_t *send)
+{
+	if (send->reply != ERX_PROGRAM_NO_REPLY)
+		credit->busy &= (uint16_t)~(1u << send->reply);
+	for (uint32_t at = 0; at < send->count; at++) {
+		credit->due[credit->closed + credit->drained] = send->grants[at];
+		if (send->grants[at].kind == ERX_PROGRAM_NOTICE_CLOSED)
+			credit->closed++;
+		else
+			credit->drained++;
+	}
 }

@@ -136,8 +136,8 @@ channel_open(void)
 }
 
 /*
- * Takes the group's ready labels and counts each: the channel's, the program's peer side's
- * value, which the session bound the program's doorbell with, or another. How many it
+ * Takes the group's ready labels and counts each: the channel's fixed label, which the
+ * session bound the program's doorbell with and no pipe end's equals, or another. How many it
  * took; none or an error says there is nothing to look at.
  */
 static int
@@ -149,7 +149,7 @@ labels_take(void)
 		uint64_t label = 0;
 
 		(void)erx_utcb_mr_load(erx_utcb_self(), (size_t)at, &label);
-		if (label == self.regs[ERX_PROGRAM_ARG_PEER_SIDE])
+		if (label == ERX_PROG_CHANNEL_LABEL)
 			atomic_fetch_add_explicit(&self.rings, 1, memory_order_relaxed);
 		else
 			atomic_fetch_add_explicit(&self.strays, 1, memory_order_relaxed);

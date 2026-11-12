@@ -36,7 +36,7 @@
 #define UNDO_FAILURE	ERX_EINVAL
 /* More actions than any start can return: steps and undos, each at most once. */
 #define RUN_BOUND	64
-#define STATES_MAX	256
+#define STATES_MAX	1024
 
 static const char good_image[] = "bin/exit42";
 /* Every fault kind, and kinds no record names. */
@@ -217,7 +217,7 @@ alphabet(input_t inputs[], size_t max)
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "fault %" PRIu32, kinds[i]);
 		inputs[n].input = erx_program_input_of(&record, ERX_PROGRAM_SPACE_IMAGE);
 	}
-	if (n + 7 <= max) {
+	if (n + 9 <= max) {
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "close");
 		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_CLOSE };
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "lost");
@@ -232,6 +232,10 @@ alphabet(input_t inputs[], size_t max)
 		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_WRITTEN };
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "broken");
 		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_BROKEN };
+		snprintf(inputs[n].text, sizeof(inputs[n].text), "refused");
+		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_REFUSED };
+		snprintf(inputs[n].text, sizeof(inputs[n].text), "stop 268");
+		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_STOP, .status = 268 };
 	}
 	return (n);
 }
@@ -240,14 +244,15 @@ static int
 same_state(erx_program_end_t a, erx_program_end_t b)
 {
 	return (a.phase == b.phase && a.status == b.status && a.anchor_ended == b.anchor_ended &&
-	    a.answered == b.answered && a.close_held == b.close_held && a.ran == b.ran && a.writing == b.writing);
+	    a.answered == b.answered && a.close_held == b.close_held && a.ran == b.ran && a.writing == b.writing &&
+	    a.room_owed == b.room_owed);
 }
 
 static void
 print_state(erx_program_end_t end)
 {
-	printf(" %d %" PRId64 " %d %d %d %d %d", (int)end.phase, end.status, end.anchor_ended, end.answered,
-	    end.close_held, end.ran, end.writing);
+	printf(" %d %" PRId64 " %d %d %d %d %d %d", (int)end.phase, end.status, end.anchor_ended, end.answered,
+	    end.close_held, end.ran, end.writing, end.room_owed);
 }
 
 /* Every state reachable from a started program, and every input in each. */
@@ -331,6 +336,8 @@ static const char *const act_names[] = {
 	[ERX_PROGRAM_REPORT] = "report",
 	[ERX_PROGRAM_STOP_ANCHOR] = "stop_anchor",
 	[ERX_PROGRAM_WRITE] = "write",
+	[ERX_PROGRAM_BUSY] = "busy",
+	[ERX_PROGRAM_ROOM] = "room",
 	[ERX_PROGRAM_CLOSE_PORT] = "close_port",
 };
 static const char *const phase_names[] = {

@@ -41,8 +41,8 @@
  * program_arg index (every register past the doorbell's is 0), and, once
  * main is called, the startup message's process ids, signal state, file
  * mode creation mask, working directory and data area.  rings counts the
- * deliveries the executor took that carried the channel's label, the
- * program's peer side's value; strays counts those that carried another.
+ * deliveries the executor took that carried the channel's fixed label,
+ * ERX_PROG_CHANNEL_LABEL; strays counts those that carried another.
  */
 typedef struct erx_prog_self {
 	uint64_t		 regs[ERX_ARCH_START_ARGS];

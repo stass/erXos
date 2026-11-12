@@ -48,7 +48,7 @@ module Erx
     MACHINE = ProductionImage::DEVELOPMENT_MACHINE
     # Each program by its name in the session's release, domains/erxos/bin/<name>, and the
     # source it is built from.
-    PROGRAMS = %w[exit42 fault spin args bigargs].to_h { |name| [name, "test/guest/programs/#{name}.c"] }.freeze
+    PROGRAMS = %w[exit42 fault spin args bigargs note].to_h { |name| [name, "test/guest/programs/#{name}.c"] }.freeze
     PROGRAM_PREFIX = "#{ReleaseFiles::DOMAIN_PREFIX}bin/".freeze
     # How many rounds many runs: more than the 32 programs the gate worker's 64
     # registrations hold at once, for each way a program ends.
@@ -85,15 +85,16 @@ module Erx
          (fun() -> {e2big, erx_program:start(#{spec('args', 6, argv: '[binary:copy(<<"a">>, 131072)]')})} end)().
        ERLANG
        # The raw path: start/1's steps by hand, with a relative working directory that
-       # start/1's builder refuses and liberx must refuse before main.
-       Case.new(name: 'startup', seconds: 60, answer: '{startup,<<"ok">>,<<"ok">>,127}', expression: line(<<~ERLANG)),
+       # start/1's builder refuses and liberx must refuse before main. A reply on a slot
+       # that holds no request is a send the driver refuses whole, with einval.
+       Case.new(name: 'startup', seconds: 60, answer: '{startup,{error,einval},ok,<<"ok">>,127}', expression: line(<<~ERLANG)),
          (fun() ->
             P = open_port({spawn_driver, "erx_program 7 0 4096 4 bin/args"}, [binary]),
             <<"ok", D:64>> = port_control(P, 1, []),
-            F = term_to_binary({erx_start, 1, \#{pid => 7, ppid => 1, pgid => 7, argv => [<<"args">>], env => [],
-                                                cwd => <<"home/u">>, spawn => false, sigmask => [], sigignore => [],
-                                                umask => 8#022, data_area => {D, 4}, fds => []}}),
-            {startup, port_control(P, 2, F), port_control(P, 3, []),
+            F = {erx_start, 1, \#{pid => 7, ppid => 1, pgid => 7, argv => [<<"args">>], env => [],
+                                 cwd => <<"home/u">>, spawn => false, sigmask => [], sigignore => [],
+                                 umask => 8#022, data_area => {D, 4}, fds => []}},
+            {startup, erx_program:send(P, {erx_prog, 1, 3, ok}), erx_program:send(P, F), port_control(P, 3, []),
              receive {P, {exit_status, S}} -> S after #{WAIT_MS} -> timeout end}
           end)().
        ERLANG
@@ -109,6 +110,107 @@ module Erx
          (fun() ->
             P = erx_program:start(#{spec('bigargs', 8, argv: '[<<"bigargs">>, binary:copy(<<"x">>, 130000)]')}),
             receive {P, {exit_status, S}} -> {bigargs, S} after #{WAIT_MS} -> {bigargs, timeout, P} end
+          end)().
+       ERLANG
+       # The note program writes one record of its own (test/guest/programs/note.c), and the
+       # driver ends it with 256 + SIGSYS: a notice holding an atom no image has, which the
+       # safe decode refuses without making it, so the atom count is unchanged; a record cut
+       # short; and a notice the driver never made due.
+       Case.new(name: 'note_atom', seconds: 60, answer: '{note_atom,268,0}', expression: line(<<~ERLANG)),
+         (fun() ->
+            N = erlang:system_info(atom_count),
+            P = erx_program:start(#{spec('note', 9, argv: '[<<"note">>, <<"atom">>]')}),
+            receive {P, {exit_status, S}} -> {note_atom, S, erlang:system_info(atom_count) - N}
+            after #{WAIT_MS} -> {note_atom, timeout, P} end
+          end)().
+       ERLANG
+       Case.new(name: 'note_bad', seconds: 60, answer: '{note_bad,268}', expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec('note', 10, argv: '[<<"note">>, <<"bad">>]')}),
+            receive {P, {exit_status, S}} -> {note_bad, S} after #{WAIT_MS} -> {note_bad, timeout, P} end
+          end)().
+       ERLANG
+       Case.new(name: 'note_undue', seconds: 60, answer: '{note_undue,268}', expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec('note', 11, argv: '[<<"note">>, <<"undue">>]')}),
+            receive {P, {exit_status, S}} -> {note_undue, S} after #{WAIT_MS} -> {note_undue, timeout, P} end
+          end)().
+       ERLANG
+       # A request on a free slot reaches the port's owner as {erx_channel, Port, Frame}, and
+       # the owner's stop then ends the waiting program with the status it gives.
+       Case.new(name: 'note_request', seconds: 60, answer: '{note_request,{erx_prog,1,0,getpid},ok,268}',
+                expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec('note', 15, argv: '[<<"note">>, <<"request">>]')}),
+            F = receive {erx_channel, P, Frame} -> Frame after #{WAIT_MS} -> timeout end,
+            {note_request, F, erx_program:stop(P, anchor, 268),
+             receive {P, {exit_status, S}} -> S after #{WAIT_MS} -> timeout end}
+          end)().
+       ERLANG
+       # Every frame the program wrote before its end is judged before the end is: the program
+       # writes a request on each of the 16 slots and a 17th on slot 0, which is busy, rings
+       # nothing and faults, so the driver first reads them with the fault's record in hand,
+       # past its allowance of 16 records a run. It delivers 16 and refuses the 17th before it
+       # takes the fault, so the end reports 256 + SIGSYS; a driver that took the fault at its
+       # allowance, with the 17th unread, would report SIGSEGV's status.
+       Case.new(name: 'note_burst', seconds: 60, answer: '{note_burst,16,268}', expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec('note', 16, argv: '[<<"note">>, <<"burst">>]')}),
+            S = receive {P, {exit_status, X}} -> X after #{WAIT_MS} -> timeout end,
+            Count = fun C(N) -> receive {erx_channel, P, {erx_prog, 1, _, getpid}} -> C(N + 1) after 0 -> N end end,
+            {note_burst, Count(0), S}
+          end)().
+       ERLANG
+       # A frame for an owner that is gone: the port is handed to a process that unlinks
+       # from it and exits, so the port outlives its owner, and only then does the program
+       # run and write a request the credit admits. The driver drops the frame for want of a
+       # reader, and the session goes on to close the port.
+       Case.new(name: 'owner_gone', seconds: 60, answer: '{owner_gone,ok,<<"ok">>,true}', expression: line(<<~ERLANG)),
+         (fun() ->
+            P = open_port({spawn_driver, "erx_program 14 0 4096 4 bin/note"}, [binary]),
+            <<"ok", D:64>> = port_control(P, 1, []),
+            {ok, F} = erx_prog_grammar:build_start(\#{pid => 14, ppid => 1, pgid => 14,
+                                                     argv => [<<"note">>, <<"request">>], env => [],
+                                                     cwd => <<"/">>, spawn => false, sigmask => [], sigignore => [],
+                                                     umask => 8#022, data_area => {D, 4}, fds => []}),
+            A = erx_program:send(P, F),
+            {B, M} = spawn_monitor(fun() -> receive go -> unlink(P) end end),
+            true = port_connect(P, B),
+            B ! go,
+            receive {'DOWN', M, process, B, normal} -> ok end,
+            R = port_control(P, 3, []),
+            receive after 1000 -> ok end,
+            {owner_gone, A, R, port_close(P)}
+          end)().
+       ERLANG
+       # Flow control: a startup message of about 40 KiB, larger than the 16 KiB ring, is
+       # sent before the first thread runs, so the driver still holds most of it and a second
+       # frame is busy. Once the thread runs and reads, the driver tells the owner the room
+       # returned, and the second frame is taken; spin's liberx then ends it with 127 at that
+       # later frame, which shows it arrived.
+       Case.new(name: 'busy', seconds: 60, answer: '{busy,ok,busy,room,ok,127}', expression: line(<<~ERLANG)),
+         (fun() ->
+            P = open_port({spawn_driver, "erx_program 12 0 4096 4 bin/spin"}, [binary]),
+            <<"ok", D:64>> = port_control(P, 1, []),
+            {ok, F} = erx_prog_grammar:build_start(\#{pid => 12, ppid => 1, pgid => 12,
+                                                     argv => [<<"spin">>, binary:copy(<<"x">>, 40000)], env => [],
+                                                     cwd => <<"/">>, spawn => false, sigmask => [], sigignore => [],
+                                                     umask => 8#022, data_area => {D, 4}, fds => []}),
+            R = {erx_prog, 1, {pipe_lost, 1, 1}},
+            A = erx_program:send(P, F),
+            B = erx_program:send(P, R),
+            <<"ok">> = port_control(P, 3, []),
+            C = receive {erx_channel_room, P} -> room after #{WAIT_MS} -> timeout end,
+            {busy, A, B, C, erx_program:send(P, R),
+             receive {P, {exit_status, S}} -> S after #{WAIT_MS} -> timeout end}
+          end)().
+       ERLANG
+       # The handler's stop of a program its grammar refuses: the end reports the status given.
+       Case.new(name: 'stop', seconds: 60, answer: '{stop,ok,268}', expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec('spin', 13)}),
+            {stop, erx_program:stop(P, anchor, 268),
+             receive {P, {exit_status, S}} -> S after #{WAIT_MS} -> timeout end}
           end)().
        ERLANG
        Case.new(name: 'exit42', seconds: 60, answer: '{exit42,42}', expression: line(<<~ERLANG)),

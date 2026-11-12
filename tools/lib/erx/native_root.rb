@@ -122,7 +122,7 @@ module Erx
                       test/guest/native_domain/string.c
                       liberx/program/program.c liberx/program/startup.c liberx/erx_profile.c
                       build/gen/liberx/generated/prog_profile.c test/guest/programs/args.c
-                      test/guest/programs/bigargs.c].freeze
+                      test/guest/programs/bigargs.c test/guest/programs/note.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'
     # The sources that use the FP registers, which a task may (only the kernel runs no FP
     # instruction): erx_etf.c reads and writes floats.

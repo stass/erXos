@@ -29,8 +29,12 @@
  * values the install made, write the startup message the program waits for with them (a
  * SEND, which the driver writes into the inbound lane as room returns, WRITTEN once its
  * last byte is), and start the thread (RUN). Both are the end's inputs, admitted only
- * once the start's answer is read and while the program lives; a program that breaks its
- * channel's protocol (BROKEN) ends as a fault ends it, with SIGSYS.
+ * once the start's answer is read and while the program lives. A SEND while an earlier frame
+ * is still being written is BUSY, and the end owes the owner ROOM once that frame is
+ * written, so the owner keeps the frame owed and sends it again (docs/design-programs.md,
+ * "Flow control is the lanes"). A program that breaks its channel's protocol (BROKEN), or
+ * writes a frame outside the channel's checks or its credit (REFUSED), ends as a fault ends
+ * it, with SIGSYS; the owner's STOP ends it in the same way with the status it names.
  *
  * The port closes only after erx_program:start/1 read the start's answer: a port that
  * closed before would make that read fail for a program that ran, so a program that ends
@@ -106,6 +110,8 @@ typedef enum {
 	/* The end's own. */
 	ERX_PROGRAM_THREAD_START,	/* RUN admitted: start the first thread */
 	ERX_PROGRAM_WRITE,		/* SEND admitted: write the frame into the inbound lane */
+	ERX_PROGRAM_BUSY,		/* SEND refused for now: an earlier frame is still being written */
+	ERX_PROGRAM_ROOM,		/* {erx_channel_room, Port} to the owner: send the owed frame again */
 	ERX_PROGRAM_REPORT,		/* {Port, {exit_status, status}} to the owner */
 	ERX_PROGRAM_STOP_ANCHOR,	/* erx_space_stop(anchor, status) */
 	ERX_PROGRAM_CLOSE_PORT		/* the driver ends its port */
@@ -187,6 +193,7 @@ typedef struct {
 	bool			close_held;	/* RELEASED's: the port's close waits for the answer */
 	bool			ran;		/* RUN was admitted: the first thread was started */
 	bool			writing;	/* SEND was admitted and its frame is not all written */
+	bool			room_owed;	/* a SEND was BUSY: ROOM is owed once the frame is written */
 } erx_program_end_t;
 
 typedef enum {
@@ -199,7 +206,9 @@ typedef enum {
 	ERX_PROGRAM_RUN,		/* the owner asks to start the first thread */
 	ERX_PROGRAM_SEND,		/* the owner hands a frame to write to the program */
 	ERX_PROGRAM_WRITTEN,		/* the frame's last byte is in the inbound lane */
-	ERX_PROGRAM_BROKEN		/* the program broke its channel: a check of its reader page failed */
+	ERX_PROGRAM_BROKEN,		/* the program broke its channel: a check of its reader page failed */
+	ERX_PROGRAM_REFUSED,		/* a frame of the program failed the channel's checks or its credit */
+	ERX_PROGRAM_STOP		/* the anchor's stop with status: the owner's (erx_program:stop/3), or the session's kill */
 } erx_program_input_kind_t;
 
 /* Which of the program's spaces a record is from: the driver knows it by the record's label. */
@@ -210,7 +219,7 @@ typedef enum {
 
 typedef struct {
 	erx_program_input_kind_t	kind;
-	int64_t				status;	/* IMAGE_EXIT's and ANCHOR_EXIT's */
+	int64_t				status;	/* IMAGE_EXIT's, ANCHOR_EXIT's and STOP's */
 	uint32_t			fault;	/* FAULT's: the record's kind */
 } erx_program_input_t;
 
@@ -244,7 +253,11 @@ erx_program_input_t erx_program_input_of(const erx_fault_t *record, erx_program_
  *     not ended, never while an earlier one is written (until WRITTEN, BROKEN or the
  *     release), and never after the release, so the driver holds at most one frame and
  *     drops it with the channel's unmap;
- *   - BROKEN ends a running program as a fault does, with ERX_EXIT_SIGNAL plus SIGSYS;
+ *   - a SEND that finds an earlier frame being written gets BUSY, and ROOM follows once,
+ *     at the WRITTEN of that frame, however many SENDs were BUSY; a frame that never
+ *     finishes owes no ROOM, since the program's end then reports;
+ *   - BROKEN and REFUSED end a running program as a fault does, with ERX_EXIT_SIGNAL plus
+ *     SIGSYS, and STOP with its own status; only the first of them and the faults decides;
  *   - CLOSE_PORT comes at most once, never at a close, where the port is already ending,
  *     and never before ANSWERED: with the release once the answer was read, else at the
  *     answer.
@@ -283,26 +296,63 @@ uint32_t	erx_program_install_batch(uint32_t first);
  * A program's credit (docs/design-programs.md, "Credit"): the driver delivers a frame from the
  * program to its handler only within it, so the handler holds at most one message of a program
  * for each credit, however fast the program writes. A reply slot is busy from the request the
- * driver delivers on it until the driver takes the reply on it. A request on a busy slot, and
- * every frame of another shape, are outside the credit: the driver ends the program with SIGSYS,
- * as it ends one for a malformed record. The notices the design also counts, `{closed}` and
- * `{drained}`, are due only for pipe ends a frame the driver wrote handed the program; the driver
- * writes no frame that hands one, so no notice is due and each is refused with the other shapes.
+ * driver delivers on it until the driver takes the reply on it. A notice is due once for each
+ * grant of a frame the driver took to write: {closed, Pipe, End} for each pipe end the frame
+ * gave the program, {drained, Pipe, End, Writer} for each writer it named gone to a read end;
+ * a delivered notice spends its grant. A request on a busy slot, a notice not due, a repeated
+ * one included, and every frame of another shape are outside the credit: the driver ends the
+ * program with SIGSYS, as it ends one for a malformed record.
+ *
+ * The driver never parses the frames it writes: erx_program:send/2 names the reply slot and
+ * the grants of the frame it encodes, from the same term (erx_program.erl, grants/1), and the
+ * driver hands them here as an erx_program_send_t. The due notices are bounded, {closed} ones
+ * by closed_max and {drained} ones by drained_max, so a send whose grants would pass a bound is
+ * a session bug the driver refuses, and the credit's storage is fixed when the port opens.
  */
-#define ERX_PROGRAM_SLOTS	16	/* reply slots 0 to 15 (docs/design-abi.md, "Program protocol") */
+/* A request's reply slot names a slot of the data area (abi/protocols/prog.txt). */
+#define ERX_PROGRAM_SLOTS	ERX_PROG_DATA_SLOTS_MAX
+#define ERX_PROGRAM_NO_REPLY	UINT32_MAX	/* a send that answers no request */
+
+typedef enum {
+	ERX_PROGRAM_NOTICE_CLOSED = 1,	/* {closed, Pipe, End} */
+	ERX_PROGRAM_NOTICE_DRAINED	/* {drained, Pipe, End, Writer} */
+} erx_program_notice_kind_t;
+
+/* A notice's key; each number is from 1 to 2^32 - 1, and writer is 0 in a CLOSED key. */
+typedef struct {
+	erx_program_notice_kind_t	kind;
+	uint32_t			pipe;
+	uint32_t			end;
+	uint32_t			writer;
+} erx_program_notice_t;
 
 typedef struct {
-	uint16_t	busy;	/* bit s set: slot s holds a delivered request whose reply is not taken */
+	uint16_t		busy;		/* bit s set: slot s holds a delivered request whose reply is not taken */
+	erx_program_notice_t	*due;		/* the due notices, due[0, closed + drained), in no order */
+	uint32_t		closed;		/* how many of them are CLOSED */
+	uint32_t		drained;	/* and DRAINED */
+	uint32_t		closed_max;
+	uint32_t		drained_max;	/* due has room for closed_max + drained_max keys */
 } erx_program_credit_t;
+_Static_assert(ERX_PROGRAM_SLOTS <= 16, "busy has a bit for every reply slot");
+
+/* What a frame the driver takes to write gives the program's credit. */
+typedef struct {
+	uint32_t			reply;	/* the slot it answers, or ERX_PROGRAM_NO_REPLY */
+	const erx_program_notice_t	*grants;
+	uint32_t			count;	/* grants[0, count) */
+} erx_program_send_t;
 
 typedef enum {
 	ERX_PROGRAM_FRAME_REQUEST,	/* {erx_prog, Version, Slot, Request}, Slot 0 to 15 */
+	ERX_PROGRAM_FRAME_NOTICE,	/* {erx_prog, Version, Notice}, Notice a key's shape */
 	ERX_PROGRAM_FRAME_OTHER		/* any other shape */
 } erx_program_frame_kind_t;
 
 typedef struct {
 	erx_program_frame_kind_t	kind;
 	uint8_t				slot;	/* REQUEST's */
+	erx_program_notice_t		notice;	/* NOTICE's */
 } erx_program_frame_t;
 
 typedef enum {
@@ -313,22 +363,33 @@ typedef enum {
 /*
  * The shape of one record the funnel's channel mode accepted (erx_funnel_channel): a request
  * is a 4-tuple of the atom erx_prog, an integer and an integer from 0 to 15, its slot, with any
- * fourth element. The rest of the frame is the handler's grammar's to judge. Safe on any bytes:
- * what it cannot read is another shape.
+ * fourth element; a notice is a 3-tuple of the atom erx_prog, an integer and a notice's key: a
+ * 3-tuple of the atom closed and two integers, or a 4-tuple of the atom drained and three, each
+ * from 1 to 2^32 - 1. The rest of the frame is the handler's grammar's to judge. Safe on any
+ * bytes: what it cannot read is another shape.
  */
 erx_program_frame_t	erx_program_frame_shape(const uint8_t *record, size_t len);
+/* A credit with no slot busy and no notice due, over due[0, closed_max + drained_max). */
+void	erx_program_credit_init(erx_program_credit_t *credit, erx_program_notice_t *due,
+	    uint32_t closed_max, uint32_t drained_max);
 /*
  * Spends credit on a frame of the program: DELIVER for a request on a slot not busy, which it
- * marks busy, and REFUSE, credit unchanged, for anything else. So over any sequence of frames
- * and replies a slot carries at most one delivered request between two replies on it.
+ * marks busy, and for a due notice, whose grant it spends; REFUSE, credit unchanged, for
+ * anything else. So over any sequence of frames and sends a slot carries at most one
+ * delivered request between two replies on it, and each grant at most one notice.
  */
 erx_program_credit_verdict_t erx_program_credit_take(erx_program_credit_t *credit,
 	    erx_program_frame_t frame);
 /*
- * The driver takes a reply of the handler on slot: true when the slot was busy, which it then
- * frees; false, credit unchanged, for a slot past the last or holding no request, a reply the
- * driver refuses to write.
+ * Whether the driver may take send's frame to write: its reply slot, if it names one, holds a
+ * delivered request; each grant is a well-formed key; and the due notices stay within their
+ * bounds with every grant added. Reads credit only.
  */
-bool	erx_program_credit_reply(erx_program_credit_t *credit, uint32_t slot);
+bool	erx_program_credit_admits(const erx_program_credit_t *credit, const erx_program_send_t *send);
+/*
+ * The driver took send's frame to write, which erx_program_credit_admits allowed: frees its
+ * reply slot and makes each of its grants due once more.
+ */
+void	erx_program_credit_sent(erx_program_credit_t *credit, const erx_program_send_t *send);
 
 #endif /* ERX_PROGRAM_CORE_H */

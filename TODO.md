@@ -1686,13 +1686,6 @@ it; git history is the record of completed work.
   every end a session process holds, so a session runs about 30 programs with writers; or a program holding
   64 or more pipe ends and its channel bell. The 65-writer case therefore waits for erXos's kernel. Not worked around
   on the stopgap.
-* [Medium] erx_program driver, `otp/erts/emulator/sys/erxos/erx_program_drv.c` (the program's doorbell
-  bind, about line 452) and `liberx/program/program.c` (`labels_take`): the bind uses the session's side
-  value in the program's table as the channel doorbell's label, and `labels_take` compares ready labels
-  with `ERX_PROGRAM_ARG_PEER_SIDE`. docs/design-programs.md binds it with the fixed label
-  `prog_channel_label` (1, `abi/protocols/prog.txt`), so that it can never equal a pipe end's
-  `(Pipe << 32) | End`; change both to the generated `ERX_PROG_CHANNEL_LABEL` before the first pipe end
-  is bound into a program's group.
 * [Low] stopgap, `liberx/backend/fiasco/thread.h` (`ERX_FIASCO_IRQS_MAX`, 256): the machine holds at most
   256 IRQ objects, one per program channel doorbell, one per pipe end and so on; an object past it fails
   with `ERX_ENOMEM`. Busy sessions with many programs and pipes can reach it. erXos's kernel has no such
@@ -1771,22 +1764,40 @@ it; git history is the record of completed work.
   for its own executor, counts as exported, or moves beside `elf_plan.c`.
 * [Low] `abi/erx_abi.txt` (`program_arg`): the generator emits no count, so
   `ERX_PROGRAM_INSTALL_DATA` (`erx_program_core.h`) assumes `doorbell` is the last index.
-* [Medium] erx_program driver and core (`erx_program_core.c` SEND, `erx_program_drv.c`
-  `CONTROL_SEND`): a send while the startup frame is still being written is refused with `einval`,
-  the answer a dead program gets, and `WRITTEN` stays inside the driver. docs/design-programs.md,
-  "Flow control is the lanes", has the write answer `busy` and the handler keep the frame owed until
-  room returns. Build that answer, and the owner's signal that room returned, with the first frame
-  after the startup message; until then only the startup message is sent.
 * [Medium] liberx program layer, `liberx/program/program.c` (`executor_main`, `message_open`,
   `message_close`): the per-part decision on the inbound lane (accept the header, refuse a later
   frame, append, plan at the close) is mixed into the effects, and no test sends a non-frame
   record, a nonzero zero word, a header past `ERX_PROG_FRAME_MAX`, a zero-length record or a
   second frame. Move the decision into a pure function beside `startup.c`, test it exhaustively on
   the host, and add a raw-path case to the `programs` suite that sends a second frame and expects 127.
-* [Low] erx_program driver, `erx_program_drv.c` (`frame_write`): every put status other than done
-  or short is fed as `BROKEN`, which kills the program with SIGSYS, though `ERX_LANE_PUT_REFUSED`
-  would be the session's own error; it cannot happen while the frame is bounded by
-  `ERX_PROG_FRAME_MAX`. Feed only a malformed lane as `BROKEN`.
+* [Low] erx_program driver, `erx_program_drv.c` (`DRAINED_MAX`): a program's credit holds at most
+  1024 due `{drained}` notices, a fixed stand-in for the session's `pipes` quota that
+  docs/design-programs.md ("Credit") names as the bound, since no session has a `pipes` quota yet.
+  A send past it is refused with `einval`, a startup message naming more than 1024 gone writers
+  among its read ends included, though the grammar admits one. Pass the session's quota to the port
+  at its open once `erx_policy` has one.
+* [Low] erx_program driver, `erx_program_drv.c`: a frame delivered as `{erx_channel, Port, Frame}`
+  is queued with `erts_queue_message` and no `trace_port_send`, so a port traced for sends does not
+  show it; trace it as `driver_output_term` does. `end_feed`'s answer to the owner picks the action
+  by a list of kinds (THREAD_START, WRITE, BUSY, a STOP's STOP_ANCHOR); have the core name the
+  action that answers each input instead. A STOP after the anchor ended answers `einval`, yet the
+  program's end later reports the status the image ended with; say in `stop/3`'s doc that a
+  refused stop changes nothing, and that STOP carries the session's own kills too.
+* [Low] erx_program driver, `erx_program_drv.c` (`program_control`): `CONTROL_SEND` and
+  `CONTROL_STOP` act before `answer` allocates the answer's binary, so when that allocation fails
+  the owner gets `badarg` for a frame the driver took or a stop it applied. Allocate the answer
+  first and fill it once the status is known.
+* [Low] erx_program driver and `erx_program.erl`: the port-control wire constants, the command
+  numbers, `CONTROL_SEND`'s reply byte for no reply (255), its grant kinds (1 and 2) and its
+  13-byte grant layout, are written twice, as Erlang macros and as the driver's `#define`s, and
+  `test/host/erx_program_grants_test.rb` copies the 255 once more, against the rule that the ABI has
+  one source. `abi/` has no home for a driver's port-control interface;
+  give it one in the generator and generate both sides.
+* [Low] QEMU harness, `tools/lib/erx/programs.rb`: no programs case delivers a due notice as
+  `{erx_channel, Port, Frame}`, since a program ends with 127 at any frame after its startup
+  message, so a notice made due by a later frame races that end. The note cases cover the decode,
+  the credit's refusals and a request's delivery, and the host credit test covers a notice's
+  delivery; add a notice case when liberx takes frames after its startup message.
 * [Low] liberx program layer, `liberx/program/program.c` (`main_run`): design-programs.md's step 9
   has the first thread set its signal mask; the layer keeps `sigmask` and `sigignore` in
   `erx_prog_self_t` and applies neither until signals reach programs.

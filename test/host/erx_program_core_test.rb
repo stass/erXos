@@ -73,10 +73,10 @@ class ErxProgramCoreTest < Minitest::Test
     'slots-past-max' => :einval
   }.freeze
 
-  # The end's state as the driver prints it: the phase, FAULTED's status, and five flags.
-  State = Data.define(:phase, :status, :anchor_ended, :answered, :close_held, :ran, :writing)
+  # The end's state as the driver prints it: the phase, FAULTED's status, and six flags.
+  State = Data.define(:phase, :status, :anchor_ended, :answered, :close_held, :ran, :writing, :room_owed)
   STARTED = State.new(phase: :running, status: 0, anchor_ended: false, answered: false, close_held: false,
-                      ran: false, writing: false)
+                      ran: false, writing: false, room_owed: false)
 
   # The model of the end, given the driver's constants (k) and the fault table (signals).
   class EndModel
@@ -89,7 +89,9 @@ class ErxProgramCoreTest < Minitest::Test
       return [state.with(answered: true, close_held: false), state.close_held ? [[:close_port, 0]] : []] if input == [:answered]
       return [input == [:close] ? state.with(close_held: false) : state, []] if state.phase == :released
       return owner(state, input) if %i[run send written].include?(input.first)
-      return broken(state) if input == [:broken]
+      # An ending program takes no frame more: none is written for it, and no room is owed.
+      state = state.with(writing: false, room_owed: false) if %i[fault broken refused stop].include?(input.first)
+      return broken(state) if %i[broken refused].include?(input.first)
 
       case [state.phase, *input]
       in [:ended, :image_exit, _] then [state, []]
@@ -100,6 +102,8 @@ class ErxProgramCoreTest < Minitest::Test
       in [_, :anchor_exit, _] then [state.with(anchor_ended: true), []]
       in [:running, :fault, kind] then [state.with(phase: :faulted, status: fault_status(kind)), stop(state, fault_status(kind))]
       in [_, :fault, _] then [state, []]
+      in [:running, :stop, n] then [state.with(phase: :faulted, status: n), stop(state, n)]
+      in [_, :stop, _] then [state, []]
       in [phase, :close | :lost => how]
         release(state, before: phase == :running ? stop(state, @k.fetch('killed')) : [], port_open: how == :lost)
       end
@@ -108,20 +112,23 @@ class ErxProgramCoreTest < Minitest::Test
     private
 
     # The owner's commands act only on a live program whose start's answer was read: one
-    # thread start ever, and one frame at a time.
+    # thread start ever, and one frame at a time; a send while one is written is busy, and the
+    # frame's written then owes the owner its room once.
     def owner(state, input)
       alive = state.answered && state.phase == :running && !state.anchor_ended
       case input
       in [:run] if alive && !state.ran then [state.with(ran: true), [[:thread_start, 0]]]
       in [:send] if alive && !state.writing then [state.with(writing: true), [[:write, 0]]]
-      in [:written] then [state.with(writing: false), []]
+      in [:send] if alive then [state.with(room_owed: true), [[:busy, 0]]]
+      in [:written] if state.writing
+        [state.with(writing: false, room_owed: false), state.room_owed ? [[:room, 0]] : []]
       else [state, []]
       end
     end
 
-    # A broken channel ends a running program as a fault with SIGSYS's status does.
+    # A broken channel, or a frame the driver refused, ends a running program as a fault with
+    # SIGSYS's status does.
     def broken(state)
-      state = state.with(writing: false)
       return [state, []] unless state.phase == :running
 
       status = @k.fetch('exit_signal') + @k.fetch('sigsys')
@@ -231,11 +238,17 @@ class ErxProgramCoreTest < Minitest::Test
     'a run before the answer starts the thread' =>
       [:broken_guarantees, 'return (end->answered && end->phase', 'return ((end->answered || 1) && end->phase'],
     'a send while a frame is written writes again' =>
-      [:broken_guarantees, 'if (!alive(end) || end->writing)', 'if (!alive(end))'],
+      [:broken_guarantees, 'if (end->writing) {', 'if (0) {'],
+    'a busy send owes no room' =>
+      [:broken_guarantees, "\t\t\tend->room_owed = true;\n", ''],
+    'the room is never sent' =>
+      [:broken_guarantees, 'return (put(actions, 0, ERX_PROGRAM_ROOM, 0));', 'return (0);'],
+    'a refused frame ends the program with no status' =>
+      [:end_differences, "\tcase ERX_PROGRAM_STOP:\n\t\treturn (input.status);", "\tcase ERX_PROGRAM_STOP:\n\tcase ERX_PROGRAM_REFUSED:\n\t\treturn (input.status);"],
     'a second run starts the first thread again' =>
       [:broken_guarantees, 'if (!alive(end) || end->ran)', 'if (!alive(end))'],
     "a broken channel ends the program with another signal's status" =>
-      [:end_differences, 'ERX_EXIT_SIGNAL + ERX_SIGSYS :', 'ERX_EXIT_SIGNAL + ERX_SIGSEGV :'],
+      [:end_differences, 'return (ERX_EXIT_SIGNAL + ERX_SIGSYS);', 'return (ERX_EXIT_SIGNAL + ERX_SIGSEGV);'],
     'the port closes before the start answer is read' =>
       [:broken_guarantees, 'if (!closing && end->answered)', 'if (!closing)'],
     "the image's and the anchor's exits are swapped" =>
@@ -337,7 +350,7 @@ class ErxProgramCoreTest < Minitest::Test
     k = out[:constants]
     inputs = [[:image_exit, 0], [:image_exit, 42], [:image_exit, k.fetch('exit_parent')],
               [:anchor_exit, k.fetch('killed')], [:fault, 1], [:fault, 10], [:close], [:lost], [:answered],
-              [:run], [:send], [:written], [:broken]]
+              [:run], [:send], [:written], [:broken], [:refused], [:stop, 268]]
     (1..5).flat_map { inputs.repeated_permutation(_1).to_a }.filter_map do |sequence|
       problem = sequence_problem(out, sequence)
       "#{sequence.inspect}: #{problem}" if problem
@@ -397,9 +410,26 @@ class ErxProgramCoreTest < Minitest::Test
     early = (starts + writes).any? { answered_at.nil? || _1 < answered_at || _1 >= over_at }
     open = writes.each_cons(2).any? { |a, b| sequence[a + 1...b].none? { %i[written broken].include?(_1.first) } }
     return 'more than one thread start' if starts.size > 1
+    return 'a room without a busy since the last write' unless rooms_owed?(sequence, acts)
     return 'a start or a write before the answer or after the end' if early
 
     'a write while another is open' if open
+  end
+
+  # The inputs that end a running program.
+  ENDING = %i[fault broken refused stop].freeze
+
+  # Each room comes at a written, after a busy since the last write, and a busy whose frame is
+  # written is answered by a room there, unless the program was ending by then: a fault, a broken
+  # channel, a refused frame or a stop drops the room owed, since the program takes no frame more.
+  def rooms_owed?(sequence, acts)
+    owed = false
+    acts.each_with_index.all? do |actions, at|
+      fine = actions.include?(:room) ? owed && sequence[at] == [:written] : !(owed && actions.empty? && sequence[at] == [:written] && acts[0...at].rindex { _1.include?(:write) })
+      owed = true if actions.include?(:busy)
+      owed = false if actions.include?(:room) || ENDING.include?(sequence[at].first) || actions.include?(:budget_destroy)
+      fine
+    end
   end
 
   # The one report: from the image's exit record before any close or loss, with its status,
@@ -410,7 +440,7 @@ class ErxProgramCoreTest < Minitest::Test
     image_at = live.index { _1.first == :image_exit }
     want = []
     if image_at
-      fault = live.first(image_at).find { %i[fault broken].include?(_1.first) }
+      fault = live.first(image_at).find { %i[fault broken refused stop].include?(_1.first) }
       status = live[image_at].last
       by_stop = fault && status == out[:constants].fetch('exit_parent')
       want = [[:report, by_stop ? fault_status(out, fault) : status]]
@@ -418,9 +448,12 @@ class ErxProgramCoreTest < Minitest::Test
     "reported #{reports.inspect}, want #{want.inspect}" unless reports == want
   end
 
-  # A fault input's status: its kind's signal, or SIGSYS's for a broken channel.
+  # A fault input's status: its kind's signal, SIGSYS's for a broken channel or a refused frame,
+  # or a stop's own.
   def fault_status(out, (input, kind))
     k = out[:constants]
+    return kind if input == :stop
+    return k.fetch('exit_signal') + k.fetch(%q(sigsys)) if input == :refused
     signal = input == :broken ? k.fetch(%q(sigsys)) : out[:signals].fetch(kind)
     k.fetch('exit_signal') + (signal.zero? ? k.fetch('sigkill') : signal)
   end
@@ -468,14 +501,14 @@ class ErxProgramCoreTest < Minitest::Test
   end
 
   def parse_end(out, before, after)
-    out[:ends][[state_of(out, before.first(7)), input_of(before.drop(7))]] =
-      [state_of(out, after.first(7)), after.drop(7).map { action_of(out, _1) }]
+    out[:ends][[state_of(out, before.first(8)), input_of(before.drop(8))]] =
+      [state_of(out, after.first(8)), after.drop(8).map { action_of(out, _1) }]
   end
 
-  def state_of(out, (phase, status, anchor_ended, answered, close_held, ran, writing))
+  def state_of(out, (phase, status, anchor_ended, answered, close_held, ran, writing, room_owed))
     State.new(phase: out[:phases].fetch(Integer(phase)), status: Integer(status),
               anchor_ended: anchor_ended == '1', answered: answered == '1', close_held: close_held == '1',
-              ran: ran == '1', writing: writing == '1')
+              ran: ran == '1', writing: writing == '1', room_owed: room_owed == '1')
   end
 
   def input_of(words) = [words.first.to_sym, *words.drop(1).map { Integer(_1) }]

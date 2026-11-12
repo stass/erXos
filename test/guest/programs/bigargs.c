@@ -13,7 +13,7 @@
  * argument registers held (docs/design-programs.md, "The channel"): the
  * five values of program_arg, each a capability, all distinct, and 0 past
  * the doorbell's; and that every doorbell delivery the executor took
- * carried the channel's label, the program's peer side's value. It ends
+ * carried the channel's fixed label, ERX_PROG_CHANNEL_LABEL. It ends
  * with 0 when all agree, and with a code of its own for the first that does
  * not.
  */
