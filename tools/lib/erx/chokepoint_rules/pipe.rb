@@ -4,8 +4,10 @@
 
 module Erx
   module ChokepointRules
-    # The pipe's checks of what its ends copy from shared pages.
+    # The pipe's checks of what its ends copy from shared pages, and its
+    # writer's and reader's steps.
     PIPE_CHECK = 'liberx/erx_pipe_check.c'
+    PIPE_CORE = 'liberx/erx_pipe_core.c'
     # The generated accessors that load a field of a page a pipe lane or
     # lock uses: its reader page, lock page and ring header. The published
     # positions' acquire loads are the exception: a write end's of rpos and
@@ -19,7 +21,7 @@ module Erx
     PIPES = 'docs/design-pipes.md'
 
     declare_group(
-      unchecked_objects: [PIPE_CHECK],
+      unchecked_objects: [PIPE_CHECK, PIPE_CORE],
       rules: [
         # Only erx_shm_copy reads a pipe's shared pages, apart from the one
         # acquire load of each published position (docs/design.md,

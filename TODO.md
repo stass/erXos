@@ -5046,6 +5046,32 @@ to the corpus and follow rc
   and that no pipe file reads `wpos` through a relaxed `erx_shm_copy`. Close it
   with the lane reader's item: the syntax-tree leg checks every load whose
   address derives from a pipe end's mapping.
+* [Medium] The pipe core's exploration (`test/fixtures/pipe_explore.c`)
+  covers one write end and one read end. Still to come: the shapes with
+  several write ends, where the merge's order key, batches and the
+  `wends` wait matter (the model's clock reads 0, which one lane's order
+  does not need), with the seeded reader that ignores `wends`; the
+  co-reader shapes and a reader's death inside the lock; a litmus test
+  in `check-litmus` for each fence pattern of the steps (the model
+  delays stores but never reorders loads, so the acquire loads are held
+  by the litmus tests alone); and the instrumented `erx_shm_copy` that
+  fails on a second read of one field in one step, which belongs to the
+  effect layers that copy (`liberx/program/pipe*`, the pipe NIF), since
+  the steps read no page. In one write end and one read end the settle
+  table's retire and finished rows are unreachable (only a reader that
+  dies inside a record leaves them, and none follows it), and the lost
+  pipe's `EIO` and `EPIPE` paths are not explored.
+* [Medium] `erx_pipe_rstep` in `liberx/erx_pipe_core.c` reads poorly:
+  one switch over about 37 phases with fallthroughs, a `break` into the
+  end-of-stream code after the switch, self-calls standing in for
+  jumps, and one cursor (`at`) shared by the take-up, look, arm and wake
+  loops. Split it into one small machine or named helper per design step
+  (lock, take-up, settle, pick, finish, arm, release). Settle by one call
+  of `erx_pipe_settle` on every copy taken, rather than deciding its rows
+  across four phases; and make a lane's state one variant rather than
+  the flags `writer`, `ring`, `noticed`, `gone` and `has_rec`, which can
+  express impossible pairs. The exploration and its seeded faults guard
+  the rewrite.
 * [High] DMA platform evidence: the SMMUv3 specification and QEMU
   v11.1.2 source audit is recorded in
   [research-hardware-contracts.md](docs/research-hardware-contracts.md).

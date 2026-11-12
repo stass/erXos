@@ -458,6 +458,10 @@ module Erx
         runner.run([RbConfig.ruby, File.join(ROOT, 'test/host/erx_pipe_test.rb')],
                    name: 'explore-erx-pipe', deadline: 900, chdir: ROOT,
                    env: environment.merge('ERX_PIPE_EXPLORE_DEPTH' => 'full'))
+        runner.run([RbConfig.ruby, File.join(ROOT, 'test/host/pipe_core_test.rb'),
+                    '-n', 'test_every_interleaving_keeps_the_invariants'],
+                   name: 'explore-pipe-core', deadline: 3600, chdir: ROOT,
+                   env: environment.merge('ERX_PIPE_EXPLORE' => 'full'))
       end
       require_relative 'fuzz/run_pack'
       Terminal.puts('implemented ABI, manifest and host metadata parser fuzz targets passed')
