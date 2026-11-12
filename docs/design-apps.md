@@ -337,10 +337,11 @@ domain's, with its reason in the death record.
 
 ### Keeping a session
 
-A keeper holds one session. It starts the session, monitors its domain
-pid, and exits when the session ends or its start is refused; the
-session ends with its keeper, as a web login's sessions end with the
-web login service. Each enabled row has a supervisor of its own in
+A keeper holds one session. It starts the session and links to its
+domain pid, and exits when the session ends or its start is refused.
+The link also ends the session with its keeper, for any end of the
+keeper, a kill included, as a web login's sessions end with the web
+login service. Each enabled row has a supervisor of its own in
 `erx_starter`, with the row's intensity and the keeper as its one
 permanent child, so OTP's supervisor is the restart policy and no other
 exists:
@@ -556,7 +557,7 @@ it guards.
 | --- | --- | --- |
 | the merge | settings replace defaults; `NO` disables; a bad line and a line for an undeclared name are skipped and reported; a second enabled row on one display is refused with the first's name; a row whose display its template is not granted is refused with `{no_grant, D}` | a merge that adds a row for an undeclared principal; the display rule dropped; the grant check dropped |
 | `rc.conf`'s names | `a_b_enable` sets `enable` of the row `a_b` | a split at the first `_` |
-| a row's supervisor | with a stub domain service: an ended session is started again; one end more than the intensity leaves the row down and the other rows up | a keeper that does not monitor its session |
+| a row's supervisor | with a stub domain service: an ended session is started again; one end more than the intensity leaves the row down and the other rows up | a keeper that does not link to its session |
 
 **The manifest check.** One seeded manifest for each clause of property
 17: a `start` row for a principal with no template; two rows for one

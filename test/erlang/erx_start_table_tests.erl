@@ -179,3 +179,56 @@ set_appends_to_a_file_without_a_final_newline_test() ->
     ?assertEqual({error, bad_setting}, erx_start_table:set(<<>>, <<"Clock">>, #{enable => true})),
     ?assertEqual({error, bad_setting}, erx_start_table:set(<<>>, <<"clock">>, #{display => <<"a\"b">>})),
     ?assertEqual({error, bad_setting}, erx_start_table:set(<<>>, <<"clock">>, #{period => 0})).
+
+%% apply_ctl/4: a command against the table rc.conf's text makes.
+ctl(Command, Text) ->
+    erx_start_table:apply_ctl(Command, Text, rows(), grants()).
+
+an_enable_that_displaces_another_row_is_refused_with_its_name_test() ->
+    %% clock comes before kiosk, so enabling it would take kiosk's display.
+    ?assertEqual({error, {display_held, <<"kiosk">>}}, ctl({enable, <<"clock">>, #{}}, <<>>)),
+    %% Once kiosk is disabled the display is free, and clock takes it.
+    {rc_conf, Text} = ctl({disable, <<"kiosk">>, #{}}, <<>>),
+    ?assertMatch({rc_conf, _}, ctl({enable, <<"clock">>, #{}}, Text)),
+    %% clock on a display of its own displaces nobody.
+    {rc_conf, Second} = ctl({enable, <<"clock">>, #{display => <<"second">>}}, <<>>),
+    ?assertMatch(#{status := enabled, display := <<"second">>},
+                 row(<<"clock">>, element(1, merged(Second)))).
+
+an_enable_the_merge_would_refuse_is_refused_with_its_reason_test() ->
+    Held = <<"logger_display=\"display\"\n">>,
+    ?assertEqual({error, {no_grant, <<"display">>}}, ctl({enable, <<"logger">>, #{}}, Held)),
+    ?assertEqual({error, {no_grant, <<"second">>}}, ctl({enable, <<"kiosk">>, #{display => <<"second">>}}, <<>>)),
+    ?assertEqual({error, {undeclared, <<"nobody">>}}, ctl({enable, <<"nobody">>, #{}}, <<>>)),
+    ?assertEqual({error, too_large}, ctl({enable, <<"logger">>, #{}}, binary:copy(<<"#">>, 65537))).
+
+enable_and_disable_write_the_row_flag_test() ->
+    {rc_conf, Off} = ctl({disable, <<"logger">>, #{}}, <<"# kept\n">>),
+    ?assertMatch(<<"# kept\n", _/binary>>, Off),
+    ?assertMatch(#{status := disabled}, row(<<"logger">>, element(1, merged(Off)))),
+    {rc_conf, On} = ctl({enable, <<"logger">>, #{restarts => 2}}, Off),
+    ?assertMatch(#{status := enabled, restarts := 2}, row(<<"logger">>, element(1, merged(On)))).
+
+start_and_stop_test() ->
+    ?assertEqual({start_row, <<"kiosk">>}, ctl({start, <<"kiosk">>, #{}}, <<>>)),
+    ?assertEqual({error, enabled}, ctl({start, <<"kiosk">>, #{display => <<"display">>}}, <<>>)),
+    ?assertEqual({start_once, <<"clock">>, #{}}, ctl({start, <<"clock">>, #{}}, <<>>)),
+    ?assertEqual({start_once, <<"clock">>, #{default_display => <<"second">>}},
+                 ctl({start, <<"clock">>, #{display => <<"second">>}}, <<>>)),
+    ?assertEqual({error, {no_grant, <<"third">>}}, ctl({start, <<"clock">>, #{display => <<"third">>}}, <<>>)),
+    ?assertEqual({error, {no_grant, <<"display">>}},
+                 ctl({start, <<"logger">>, #{}}, <<"logger_display=\"display\"\n">>)),
+    ?assertEqual({stop, <<"logger">>}, ctl({stop, <<"logger">>, #{}}, <<>>)).
+
+reconcile_keeps_held_rows_test() ->
+    {Rows, []} = merged(<<"logger_enable=\"NO\"\n">>),
+    %% kiosk is held and stays; logger is held and no longer enabled; nothing else starts.
+    ?assertEqual({[<<"logger">>], []}, erx_start_table:reconcile([<<"kiosk">>, <<"logger">>], Rows)),
+    ?assertEqual({[], [<<"kiosk">>]}, erx_start_table:reconcile([], Rows)).
+
+changes_restart_only_changed_rows_test() ->
+    {Before, []} = merged(<<>>),
+    {After, []} = merged(<<"logger_restarts=\"9\"\nkiosk_enable=\"NO\"\n">>),
+    ?assertEqual({[<<"kiosk">>, <<"logger">>], [<<"logger">>]}, erx_start_table:changes(Before, After)),
+    ?assertEqual({[], []}, erx_start_table:changes(After, After)),
+    ?assertEqual({[], [<<"kiosk">>]}, erx_start_table:changes(After, element(1, merged(<<"logger_restarts=\"9\"\n">>)))).

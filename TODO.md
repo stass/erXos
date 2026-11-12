@@ -536,21 +536,44 @@ it; git history is the record of completed work.
   region of the device's record (made once, wrapped by `erx_memdraw:wrap/4`, never posted) and the mapping of an area
   into the DMA window, before the display driver.
 * [High] [design-apps.md](docs/design-apps.md): the code the design asks for, in the order
-  [Track A](docs/plan.md#track-a-apps) builds it. The `start` rows and property 17's structural clauses are built;
-  property 17's planner clause (the enabled rows' sessions planned beside the configured domains), and the
-  accepting path of its display check with its seeds once `abi/services` declares `windows`, are not;
-  `erx_starter` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and
-  `ctl`'s parsers with their fuzz targets; the `apps` tree and `service`; `erx_domain:start_session/2` with `display`
-  and `default_display`; the session mark in the domain service's grant records, carried as `session` by every mint;
-  [Track A](docs/plan.md#track-a-apps) builds it; of it only `erx_domain:start_session/2`'s `display` and
-  `default_display` and the session mark are built. The `start` row in `abi/manifest.txt` and
-  property 17; `erx_starter` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and
-  `ctl`'s parsers with their fuzz targets; the `apps` tree and `service`; the session's default display handed on
-  with the ready answer and its `display` variable (design-apps.md, "Starting a session", step 3), which the
-  domain service keeps in the session's record (`start`) and hands to nothing;
-  the mint request `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint
-  that matches the old shape (`erlang/apps/erx_storage/src/erx_lfs_mint.erl`, `erx_net_admit`); the reset count
-  cleared by the first kept session.
+  [Track A](docs/plan.md#track-a-apps) builds it. Built: the `start` rows and property 17's structural clauses;
+  `erx_start_table` (`merge/3`, `rc.conf`'s and `ctl`'s parsers with their fuzz targets, `set/3`, the command check
+  `apply_ctl/4`); `erx_starter` with its table, a supervisor and keeper per enabled row, and `rc.conf` read and
+  written under `/data`; `erx_domain:start_session/2` with `display` and `default_display`, and the session mark.
+  Not built: property 17's planner clause (the enabled rows' sessions planned beside the configured domains) and
+  the accepting path of its display check with its seeds once `abi/services` declares `windows`; the `apps` tree
+  and `service`; the session's default display handed on with the ready answer and its `display` variable
+  (design-apps.md, "Starting a session", step 3), which the domain service keeps in the session's record and
+  hands to nothing; a row that names a display started only once that display's domain has reported ready
+  ("Keeping a session"), which waits for a `windows` service to exist; the mint request
+  `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint that matches the
+  old shape (`erlang/apps/erx_storage/src/erx_lfs_mint.erl`, `erx_net_admit`); the reset count cleared by the first
+  kept session.
+* [Medium] `erx_starter:manifest_table/1`, which reads the start rows, the principals and each session template's
+  grants from the system manifest, has no host test over a packed manifest with a `start` row; the QEMU suite of
+  Track A's A8b is its first check. Its grants are every service a template is granted, not only `windows`
+  services, as the domain service's own check is.
+* [Medium] `erx_starter` review residuals (A5): a table restart reconciles held rows by name only, so a row whose
+    settings changed while the table was down keeps its old session, and a restart while rc.conf cannot be read
+    reconciles against the manifest's rows alone, stopping rows only rc.conf enabled (`erx_starter.erl`
+    `apply_text/2`, `erx_start_table:reconcile/2`); a stopped row has no record and a table restart starts it again,
+    while a down row stays down (`erx_starter_sup:stop/1`); the rc.conf read gives up after 30 attempts instead of
+    reading when the `data` grant arrives, and `rows/0` does not show that the file is unread; the read and retry
+    phases live in the process, not in a pure function of `erx_start_table`; the write path, a failed read and the
+    helper's abandoned start have no process-level test, and the suite reads the host's `/data/start/rc.conf`.
+* [Medium] `rc.conf` may set `restarts` and `period` up to 2^32-1, which OTP's supervisor takes as given: a
+    row whose start is refused at once then restarts its keeper without pause, and its restart list grows without
+    bound in the system domain. Declare ceilings in `abi/erx_abi.txt` and refuse settings past them in
+    `erx_start_table` and the packer.
+* [Low] `erx_starter` review residuals (A5): no deadline on its file workers, so a hung storage operation queues
+    every later command; workers of a crashed table may race on `rc.conf.new`; no fsync before the rename; a refused
+    start and a row going down log no line naming the row; the keepers' branch has OTP's default intensity and
+    `held/0` reads `restarting` as down; the one-off keeper is a temporary child of the keepers' branch, which
+    design-apps.md calls "under no supervisor"; the rescue configuration starting no row is not checked (it is not
+    built).
+* [Low] `erx_starter_rc:read/0` treats `enoent` as a machine with no `rc.conf`. If the storage domain being down
+  answers `enoent` under `/data` rather than another error, the first read finds no settings and is not tried
+  again, so the manifest's rows stand until the next boot. Check what the stopgap answers.
 * [High] [design-display.md](docs/design-display.md): the code the design asks for that the tree does not have, in the
   order [Track D](docs/plan.md#track-d-windows-widgets-and-the-web) builds it. Nothing below is built; the cores named
   as landed are kept and changed as listed.

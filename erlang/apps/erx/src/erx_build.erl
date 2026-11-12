@@ -38,7 +38,7 @@ has no such file, such as a hosted one, has
 -export([id/0, id/1]).
 -export([facts/0, parse_facts/1]).
 -export([development/0, development/1, development_flag/1]).
--export([shell_principals/0, shell_principals/1, principals/0, principals/1]).
+-export([shell_principals/0, shell_principals/1, principals/0, principals/1, system_manifest/0]).
 
 -export_type([facts/0, principals/0]).
 
@@ -111,8 +111,11 @@ build's.
 development() ->
     development(system_manifest()).
 
-%% The system manifest's bytes, read at its path in the system domain's
-%% namespace, as file:read_file/1 answers.
+-doc """
+The system manifest's bytes, read at its path in the system domain's
+namespace, as file:read_file/1 answers.
+""".
+-spec system_manifest() -> {ok, binary()} | {error, term()}.
 system_manifest() ->
     <<"system/", Path/binary>> = ?ERX_SYSTEM_MANIFEST_PATH_BYTES,
     file:read_file(<<"/", Path/binary>>).

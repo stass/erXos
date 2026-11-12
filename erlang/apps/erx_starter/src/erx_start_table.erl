@@ -38,14 +38,24 @@ so every decision is tested with made-up manifests.
   sysrc(8) does: the first line that assigns each variable is replaced,
   later ones are dropped, a variable not yet assigned is appended, and
   every other line is kept as written.
+* **Commands.** apply_ctl/4 decides what a parsed command does: `enable`
+  and `disable` become rc.conf's new text, refused when the row they
+  write would be refused, or when any other enabled row would become
+  refused, which names that row: a command never displaces another row
+  from its display. `start` and `stop` act on the running table and
+  change no setting.
+* **Keeping the table.** reconcile/2 and changes/2 say which rows' keepers
+  stop and which start when the table is first made, against the rows
+  the keepers' branch already holds, and when it changes.
 
 No reason, value or name made from input is an atom: every atom here is
 a literal of this module.
 """.
 
 -export([parse_rc_conf/1, merge/3, parse_ctl/1, set/3]).
+-export([apply_ctl/4, reconcile/2, changes/2, rc_conf_limit/0]).
 
--export_type([row/0, field/0, value/0, local/0, merged/0, command/0]).
+-export_type([row/0, field/0, value/0, local/0, merged/0, command/0, action/0]).
 
 %% The largest rc.conf read or written (design-apps.md, "Where the file is").
 -define(MAX_RC_CONF, 65536).
@@ -79,6 +89,13 @@ a literal of this module.
                     restarts := non_neg_integer(), period := pos_integer(),
                     from_rc_conf := [field()], status := status()}.
 -type command() :: {enable | disable | start | stop, name(), #{field() => value()}}.
+%% What a command does (apply_ctl/4): write rc.conf's new text, start an
+%% enabled row's keeper, start one session no supervisor keeps, with the
+%% display it names as its default, or stop what keeps a row's session.
+-type action() :: {rc_conf, binary()} | {start_row, name()}
+                | {start_once, name(), #{default_display => name()}} | {stop, name()}.
+-type ctl_error() :: {undeclared, name()} | {no_grant, name()} | {display_held, name()}
+                   | enabled | too_large | bad_setting.
 
 %% ---------------------------------------------------------------------------
 %% rc.conf
@@ -319,6 +336,112 @@ settings([Word | Words], Allowed, Command, Name, Settings) ->
             end;
         [_] -> {error, bad_setting}
     end.
+
+%% ---------------------------------------------------------------------------
+%% Commands
+
+-doc """
+What Command, from parse_ctl/1, does to the table that Text, rc.conf's text,
+makes over Rows with Grants, as merge/3 takes them. `enable NAME` and
+`disable NAME` write the row's settings and its flag ({rc_conf, NewText}),
+refused when the row they write is refused, with its reason, and when any
+other row enabled before is refused after, as `{display_held, Other}`
+naming the row that would lose its display. `start NAME` starts an
+enabled row ({start_row, NAME}, refused with `enabled` when it names a
+display, which only the row's settings give), and for a row that is not
+enabled one session no supervisor keeps ({start_once, ...}, its display
+a default the template must be granted). `stop NAME` stops what keeps the
+row's session. A name with no row is refused `{undeclared, NAME}`.
+""".
+-spec apply_ctl(command(), binary(), [row()], #{name() => [name()]}) -> action() | {error, ctl_error()}.
+apply_ctl({_Verb, Name, _Settings} = Command, Text, Rows, Grants) ->
+    case lists:any(fun(#{principal := Principal}) -> Principal =:= Name end, Rows) of
+        true -> command(Command, Text, Rows, Grants);
+        false -> {error, {undeclared, Name}}
+    end.
+
+command({Verb, Name, Settings}, Text, Rows, Grants) when Verb =:= enable; Verb =:= disable ->
+    maybe
+        {ok, Written} ?= set(Text, Name, Settings#{enable => Verb =:= enable}),
+        Before = table(Text, Rows, Grants),
+        After = table(Written, Rows, Grants),
+        ok ?= admitted(status(Name, After)),
+        [] ?= [Other || {#{principal := Other, status := enabled}, #{status := {refused, _}}}
+                            <- lists:zip(Before, After), Other =/= Name],
+        {rc_conf, Written}
+    else
+        [Displaced | _] -> {error, {display_held, Displaced}};
+        {error, _} = Refused -> Refused
+    end;
+command({start, Name, Settings}, Text, Rows, Grants) ->
+    case {status(Name, table(Text, Rows, Grants)), Settings} of
+        {enabled, #{display := Display}} when is_binary(Display) -> {error, enabled};
+        {enabled, _} -> {start_row, Name};
+        {{refused, Reason}, _} -> {error, Reason};
+        {disabled, #{display := Display}} when is_binary(Display) ->
+            case lists:member(Display, maps:get(Name, Grants, [])) of
+                true -> {start_once, Name, #{default_display => Display}};
+                false -> {error, {no_grant, Display}}
+            end;
+        {disabled, _} -> {start_once, Name, #{}}
+    end;
+command({stop, Name, _Settings}, _Text, _Rows, _Grants) ->
+    {stop, Name}.
+
+%% The merged rows rc.conf's Text makes; text past the bound sets nothing.
+table(Text, Rows, Grants) ->
+    Local = case parse_rc_conf(Text) of
+                {ok, Parsed} -> Parsed;
+                {error, too_large} -> []
+            end,
+    element(1, merge(Rows, Local, Grants)).
+
+status(Name, Merged) ->
+    [Status] = [Status || #{principal := Principal, status := Status} <- Merged, Principal =:= Name],
+    Status.
+
+admitted({refused, Reason}) -> {error, Reason};
+admitted(_Status) -> ok.
+
+%% ---------------------------------------------------------------------------
+%% Keeping the table
+
+-doc """
+The keepers to stop and to start when the table is first made as Merged,
+while the keepers' branch holds Held, the rows it holds a supervisor for,
+running or down: a held row that is not enabled stops, and an enabled row
+not held starts. A held enabled row is left as it is, so a row that is
+down stays down when the table's process restarts.
+""".
+-spec reconcile([name()], [merged()]) -> {Stop :: [name()], Start :: [name()]}.
+reconcile(Held, Merged) ->
+    Enabled = [Principal || #{principal := Principal, status := enabled} <- Merged],
+    {[Name || Name <- Held, not lists:member(Name, Enabled)],
+     [Name || Name <- Enabled, not lists:member(Name, Held)]}.
+
+-doc """
+The keepers to stop and to start when the table changes from Before to
+After: a row enabled before stops when it is not enabled after or keeps
+its session differently (its display or its intensity changed), and a row
+enabled after starts when it was not enabled before or changed. A row
+enabled and unchanged in both is left alone, running or down.
+""".
+-spec changes([merged()], [merged()]) -> {Stop :: [name()], Start :: [name()]}.
+changes(Before, After) ->
+    Was = kept(Before),
+    Is = kept(After),
+    Order = [Principal || #{principal := Principal} <- After],
+    {[Name || Name <- Order, maps:is_key(Name, Was), maps:find(Name, Is) =/= {ok, map_get(Name, Was)}],
+     [Name || Name <- Order, maps:is_key(Name, Is), maps:find(Name, Was) =/= {ok, map_get(Name, Is)}]}.
+
+%% Each enabled row's fields its keeper and supervisor are made from.
+kept(Merged) ->
+    #{Principal => maps:with([display, restarts, period], Row)
+      || #{principal := Principal, status := enabled} = Row <- Merged}.
+
+-doc "The largest rc.conf the table reads, in bytes; a longer file sets nothing.".
+-spec rc_conf_limit() -> pos_integer().
+rc_conf_limit() -> ?MAX_RC_CONF.
 
 %% ---------------------------------------------------------------------------
 %% Writing rc.conf

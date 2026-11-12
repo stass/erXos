@@ -33,6 +33,9 @@ class ErxStartTableTest < Minitest::Test
               from: 'Granted = lists:member(Display, maps:get(Principal, Grants, [])),',
               to: 'Granted = is_map(Grants),',
               caught_by: 'a_display_the_template_is_not_granted_is_refused_test'),
+    Fault.new(name: "a command check that drops the comparison of every row before and after",
+              from: "<- lists:zip(Before, After), Other =/= Name],", to: "<- lists:zip(Before, Before), Other =/= Name],",
+              caught_by: "an_enable_that_displaces_another_row_is_refused_with_its_name_test"),
     Fault.new(name: "a variable's name split at its first _",
               from: '{At, 1} = lists:last(Underscores),', to: '{At, 1} = hd(Underscores),',
               caught_by: 'a_name_splits_at_its_last_underscore_test')
