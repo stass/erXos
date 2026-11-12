@@ -404,7 +404,7 @@ it; git history is the record of completed work.
 * [Low] stopgap, `liberx/backend/fiasco/vm.c`, `erx_fiasco_vm_contiguous_create`: a run taken by `erx_fiasco_contig_take`
   is not given back when `object_fill` then refuses (no label left, or no pool page for the object's runs), so a
   refused create leaves the run held.
-* [Low] stopgap, `liberx/backend/fiasco/irq.c`: an IRQ object is never unbound or destroyed, which a restarted block driver would want.
+* [Low] stopgap, `liberx/backend/fiasco/irq.c`: an IRQ object is unbound by a holder allowed in its group (the group's home, its creator or the root: `irq_group_allowed`) and freed with its last handle. Whether a restarted block driver can rebind its line through that is untested.
 * [Low] stopgap, `liberx/backend/fiasco/entropy.c`, `vm.c`: what needs the root to read the manifest. The generator starts from the
   counter alone, not yet the manifest's seed; one contiguous pool exists whatever the device entries ask for, and it serves any device.
 * [Medium] stopgap, `liberx/backend/fiasco/vm.c`, `liberx/backend/core/vm_table.c`: the range table sees an object's mapping as uncommitted, so
@@ -1570,6 +1570,32 @@ it; git history is the record of completed work.
   owns their uniqueness (docs/design-programs.md, a program's start, step 5) and makes it hold by
   never giving a pid twice; until it exists, a test's spec names the pid. The gate worker's 64 registrations
   (two a program) bound a session to 32 programs at once, each start past that refused with `elimit`.
+* [Low] stopgap, `liberx/backend/core/park_table.h` (`listed`) and `park_table.c`: a group holds at
+  most 64 IRQ objects, since `listed` is a 64-bit map with one bit per object and the file
+  asserts `ERX_BACKEND_PARK_OBJECTS_MAX <= 64`. A group that would need a 65th doorbell is refused with an error:
+  the session's group, which holds one per program port (`erx_program_drv.c`), the connections' bells and
+  every end a session process holds, so a session runs about 30 programs with writers; or a program holding
+  64 or more pipe ends and its channel bell. The 65-writer case therefore waits for erXos's kernel. Not worked around
+  on the stopgap.
+* [Medium] erx_program driver, `otp/erts/emulator/sys/erxos/erx_program_drv.c` (the program's doorbell
+  bind, about line 452) and `liberx/program/program.c` (`labels_take`): the bind uses the session's side
+  value in the program's table as the channel doorbell's label, and `labels_take` compares ready labels
+  with `ERX_PROGRAM_ARG_PEER_SIDE`. docs/design-programs.md binds it with the fixed label
+  `prog_channel_label` (1, `abi/protocols/prog.txt`), so that it can never equal a pipe end's
+  `(Pipe << 32) | End`; change both to the generated `ERX_PROG_CHANNEL_LABEL` before the first pipe end
+  is bound into a program's group.
+* [Low] stopgap, `liberx/backend/fiasco/thread.h` (`ERX_FIASCO_IRQS_MAX`, 256): the machine holds at most
+  256 IRQ objects, one per program channel doorbell, one per pipe end and so on; an object past it fails
+  with `ERX_ENOMEM`. Busy sessions with many programs and pipes can reach it. erXos's kernel has no such
+  table.
+* [Low] hosted backend, `liberx/backend/hosted/group.c` (`irq_objects`): the hosted backend holds 64 IRQ
+  objects in total (`ERX_BACKEND_PARK_OBJECTS_MAX`), so a hosted run with many programs and pipe ends
+  fails earlier than the QEMU runs do.
+* [Low] liberx program layer, signals: until signals reach programs, a pipe write to a closed
+  reader takes SIGPIPE's default action (the program ends with the signal) unless the start's
+  `sigignore` names it, and a run-time `signal(SIGPIPE, SIG_IGN)` is not honoured. It fails safe,
+  with a stop of the writing program, never a hang or a wrong answer; output the program would
+  have written after the `EPIPE` is lost.
 * [Low] QEMU harness, `tools/lib/erx/programs.rb`: the programs suite shows that `port_close/1` on a
   running program closes its port, reports nothing and gives back the gate worker's registrations,
   but not that the program's spaces stopped, since a close reports nothing to the session. Check
@@ -4610,7 +4636,7 @@ to the corpus and follow rc
 ## Security residuals
 
 - [Low] erx_program credit (`otp/erts/emulator/sys/erxos/erx_program_core.c`): the credit holds reply slots only, so every `{closed}` and `{drained}` notice is refused with SIGSYS. The frame that first hands a program a pipe end must add notice credit (docs/design-programs.md, "Credit").
-- [Low] program channel on the stopgap (`liberx/backend/fiasco/object.c`): the Fiasco backend records no rights per handle, so a program can map the session's lane side read-write and rebind or unbind the session's doorbell, which is also the gate worker's IRQ for the program's port. erXos's kernel enforces the rights the install grants (`erx_program_core.c` `install_rights`).
+- [Low] program channel on the stopgap (`liberx/backend/fiasco/object.c`): the Fiasco backend records no rights per handle, so a program can map the session's lane side read-write. It can bind or unbind only IRQ objects it holds in its own group: it holds no handle to its channel doorbell, and `irq_group_allowed` refuses the session's doorbell, which is also the gate worker's IRQ for the program's port. A program also holds `TRIGGER` copies of its own pipe ends' doorbells, bound in its own group, and can rebind them to any label, label 1 included; that costs it only its own wakes. Any task can create IRQ objects up to the machine-wide 256 (`ERX_FIASCO_IRQS_MAX`) and starve every other domain's doorbells. erXos's kernel enforces the rights the install grants (`erx_program_core.c` `install_rights`).
 
 * [Low] inspect service, the runtime agent leg ([design-live.md](docs/design-live.md#the-runtime-agent)): a
   domain's inspection agent takes questions one at a time, so a holder of scope `all` that asks without pause

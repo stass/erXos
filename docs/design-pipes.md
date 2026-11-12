@@ -79,7 +79,7 @@ rule live in user space, built from the kernel's general objects
   holder has closed and unmapped it.
 * **IRQ objects triggered by software** are the doorbells. The pipe server
   creates each end's doorbell and binds it to the holder's scheduling
-  group with the end as its label, since it holds the right to bind on
+  group with the end's label, since it holds the right to bind on
   every group it created
   ([design-kernel.md](design-kernel.md#irq-objects)), and installs
   `TRIGGER` alone into the end's peers. That is the session's choice,
@@ -186,8 +186,8 @@ Non-goals:
 
 A pipe's life, end to end. A program calls `pipe`; its handler asks the
 pipe server, which creates the pipe's lock page, one lane, and a doorbell
-for each of the two ends, bound to the program's group with the end as
-its label; keeps its own capabilities to them; and has the program's
+for each of the two ends, bound to the program's group with the end's
+label; keeps its own capabilities to them; and has the program's
 handler install into the program the copies each end needs. The program
 spawns a child that inherits the write end: the pipe server makes a write
 end for the child, with a lane and a doorbell of its own, raises the
@@ -238,7 +238,7 @@ maps what a client can delete, are in
 | a lane's ring, one per write end | memory object: a 4 KiB header page and a data area of 64 KiB for a pipe's first write end, 16 KiB for every other | the pipe server | its write end, with `READ` and `WRITE`; every read end, with `READ` |
 | a lane's reader page, one per write end | memory object of 4 KiB | the pipe server | every read end, with `READ` and `WRITE`; its write end, with `READ` |
 | the lock page, one per pipe | memory object of 4 KiB | the pipe server | every read end, with `READ` and `WRITE` |
-| a doorbell per end | IRQ object, bound by the pipe server to the holder's group with the end as its label | the pipe server | every end of the other kind and, for a read end's doorbell, the other read ends, with `TRIGGER` alone |
+| a doorbell per end | IRQ object, bound by the pipe server to the holder's group with the end's label | the pipe server | every end of the other kind and, for a read end's doorbell, the other read ends, with `TRIGGER` alone |
 
 The first ring takes Linux's default capacity, 65,536 bytes (pipe(7)), so
 a single writer runs as fast as on Linux and the programs that rely on a
@@ -317,7 +317,9 @@ carries each as one record of kind `ERX_REC_FRAME`, read as it is
 published ([design-programs.md](design-programs.md#the-channel)). The
 lane's layouts and the pipe's extension are fixed binary layouts of
 `abi/erx_abi.txt`, pinned with `_Static_assert`, so `liberx`, the
-session's pipe NIF and every runtime agree by construction.
+session's pipe NIF and every runtime agree by construction. The pipe's
+files read and write a lane through accessors of their own and name none
+of a connection lane's layouts.
 
 Every load from a shared page goes through one function of `liberx`,
 `erx_shm_copy`, which reads with relaxed atomic loads, so a holder that
@@ -729,11 +731,26 @@ most one needless wake.
 
 **Who makes a doorbell.** The pipe server makes an end's doorbell when it
 makes the end, with the session's budget, and binds it to the holder's
-group with the end as its label: a program's group, which the session
-created and holds the right to signal on, or the session's own group for
-an end a session process holds, where the runtime delivers the label to
-the owning process as a message
-([design-runtime.md](design-runtime.md#the-device-nif)). It installs
+group with the end's label: a program's group, which the session created
+and holds the right to signal on, or the session's own group for an end a
+session process holds, where the runtime delivers the label to the owning
+process as a message
+([design-runtime.md](design-runtime.md#the-device-nif)). In a program's
+group the end's label is `(Pipe << 32) | End`, a `u64` as a bind's label
+is ([design-kernel.md](design-kernel.md#irq-objects)); `Pipe` starts at 1,
+so it is always at least 2^32. The program's channel doorbell is bound
+with the fixed label `prog_channel_label`, 1, and not with its handle's
+value, so the two sets of labels are disjoint by construction, whatever
+a handle's value is. The shift and the channel's label are limits of
+`abi/protocols/prog.txt`, `pipe_label_shift` and `prog_channel_label`,
+from which the generator emits the constants `ERX_PIPE_LABEL_SHIFT` and
+`ERX_PROG_CHANNEL_LABEL` that `liberx` and the pipe server use. The label
+is computed in 64 bits from a 64-bit pipe number, and one helper in each
+language, in `liberx` and in the pipe server, builds and takes it apart;
+no call site writes the shift. In the
+session's own group the label is the one its event table registers for
+the end's process. The pipe
+server installs
 `TRIGGER` on it, and nothing more, into every peer that rings it: a write
 end's doorbell into every read end's holder, and a read end's doorbell
 into every write end's holder and every other read end's. It does so
@@ -800,7 +817,7 @@ passes the request to the pipe server:
    returns the objects to make: the lock page, a lane of 64 KiB, and two
    doorbells.
 2. **Make.** The pipe server creates them with the session's budget and
-   binds each doorbell to the program's group with its end as the label.
+   binds each doorbell to the program's group with the end's label.
 3. **Install.** The handler installs into the program's table, through the
    port driver, the copies each end needs: for the read end, the lane's
    ring with `READ`, its reader page with `READ` and `WRITE`, the lock page
@@ -896,7 +913,8 @@ the pipe server makes each end for the program that uses it
 
 ### Readiness, `poll` and `select`
 
-Each end's doorbell is bound to its holder's group, labelled with the end,
+Each end's doorbell is bound to its holder's group, labelled with the end
+(`(Pipe << 32) | End` in a program's group),
 so the group's ready list names exactly the ends rung since the event
 executor last looked, and the executor evaluates only those, and the ends
 whose reports it applied
@@ -926,9 +944,10 @@ report, the end of the stream, no read end remaining, or a signal.
 
 ### The pipe server
 
-`erx_pipe_srv` is a process of the session's command server. Its decisions
-are one pure function, `erx_pipe:step(State, Event) -> {State, [Action]}`;
-the process performs the actions with the pipe NIF, the port driver and the
+`erx_pipe_srv` is a process of the session's command server. The pipe's modules are `erx_pipe`, `erx_pipe_srv`,
+`erx_prog_handler` and the static NIF `erx_pipe_nif`, all in the `erx` app.
+The server's decisions are one pure function,
+`erx_pipe:step(State, Event) -> {State, [Action]}`; the process performs the actions with the pipe NIF, the port driver and the
 handlers:
 
 | Event | Actions |

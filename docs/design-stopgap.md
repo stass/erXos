@@ -1039,14 +1039,15 @@ the `SYS_` names, so that a call not ported fails at link rather than at run tim
 | `clock_gettime`, `nanosleep`, `clock_nanosleep` with no flags | `erx_fiasco_clock_ns`, a timed umtx wait | `CLOCK_REALTIME` reads the clock from boot: Phase 1 has no wall clock |
 | `sched_setaffinity` | `erx_thread_set_affinity` | a mask's first word |
 | `sched_getaffinity`, `prctl` | not offered: `ENOSYS` | so `sysconf(_SC_NPROCESSORS_*)` answers musl's default of 1 in any program, and `pthread_setname_np` on the caller fails, which ERTS ignores; ERTS counts CPUs from the boot information page |
-| `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_libc_write`: the root's (`libc_root_write.c`, alone in its file so that musl's reference pulls in the console and not the start path) to `erx_fiasco_console_write`, a task's through the service ([The console](#the-console)) | the bytes go out unchanged, as on UNIX; other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
+| `write`, `writev` to 1 and 2, `ioctl` `TIOCGWINSZ` on them | `erx_fiasco_libc_write`: the root's (`libc_root_write.c`, alone in its file so that musl's reference pulls in the console and not the start path) to `erx_fiasco_console_write`, a task's through the service ([The console](#the-console)) | the bytes go out unchanged, as on UNIX; in the root and in a task other descriptors are `EBADF`; the size reads zero, which keeps stdio line buffered |
+| a program's descriptor calls: `read`, `readv`, `write`, `writev`, `close`, `ppoll`, `pselect6`, `pipe2`, `dup3`, `fcntl`, `lseek`, `pread64`, `pwrite64` | the program layer's descriptor table, through a seam object a program links in place of `libc_root_write.c`, chosen at link as that file is; musl's syscall switch (`syscall.c`) routes these calls to the seam for a program ([design-programs.md](design-programs.md#the-posix-lite-personality)) | the table answers what it implements and refuses the rest with `ENOSYS` or `EBADF` as POSIX expects; the root and a task are offered only the console `write`, `writev` and `ioctl` row above, and the others are `ENOSYS` there |
 | `set_tid_address`, `gettid` | `erx_fiasco_thread_set_clear_word`, the index plus one | |
 | `getpid`, `getppid`, the user and group identifiers | 1, 0 and 0 | fixed values: Phase 1 has no processes and no users, so every task reads the same |
 | `sched_yield` | `erx_yield` | |
 | `set_robust_list`, `get_robust_list` | the calling thread's list head, kept in musl's `struct pthread` | kept and never walked: musl walks the list itself at thread exit, and only a task's death would need a kernel's help; a size other than Linux's three-word head is `EINVAL`; another thread's list is not offered: `ENOSYS` |
 | `rt_sigprocmask`, `tkill` of `SIGCANCEL` | answered with no effect | the signal mask reads empty |
 
-Everything else is `ENOSYS`. No signal is delivered, so `pthread_cancel` returns 0 and acts at the target's next
+Everything else is `ENOSYS` in the root and in a task; a program's descriptor rows above are the program layer's. No signal is delivered, so `pthread_cancel` returns 0 and acts at the target's next
 cancellation point rather than interrupting a call it is blocked in.
 
 `liberx/backend/fiasco/libc_start.c` calls `__libc_start_main` with one argument, no environment and the ELF headers,

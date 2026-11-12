@@ -1580,8 +1580,9 @@ applied in this order, each step undoing the ones before it on failure:
    session's pipe server made them
    ([design-pipes.md](design-pipes.md#making-a-pipe)), and the code
    object of an executable file; bind the program's doorbell to the
-   program's group with the channel as its label, the session's side's
-   value in the program's table, which both parties know from the install;
+   program's group with the channel's fixed label, `prog_channel_label`
+   (1), which no pipe end's label equals
+   ([design-pipes.md](design-pipes.md#waiting-and-doorbells));
    and create the image's first thread, stopped, with the values of the
    budget, the group, the channel's two sides and the session's doorbell
    in its argument registers.
@@ -1622,7 +1623,11 @@ reply slot is busy from the request the driver delivers on it until it
 takes the reply on it with `send/2`; a `{closed}` notice is due once for
 each pipe end that a frame it wrote gave the program; and a `{drained}`
 notice once for each frame it wrote that names a writer gone to a read
-end. A request on a busy slot, or a notice that is not due, is a frame
+end. The driver never parses the frames it writes: `send/2` encodes the
+term into the frame's bytes and, from the same term, names the pipe ends
+the frame grants and the gone writers it names, and the driver counts
+those. One encoder builds the bytes and the lists from the same term, so
+they cannot diverge. A request on a busy slot, or a notice that is not due, is a frame
 outside the grammar and ends the program with `SIGSYS`
 ([design-programs.md](design-programs.md#the-program-protocol)), so the
 handler receives at most one message of a program for each credit,

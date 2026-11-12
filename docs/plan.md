@@ -1064,6 +1064,10 @@ while that a program cannot escape `liberx` does not
 * the job control of programs through `erx_space_pause` and
   `erx_space_resume` on the program's image space, the pauses coming from
   track K's after-the-switch increment;
+* `rc` running programs in pipelines (`prog | wc`), in a stage of its own
+  after the pipes among programs: it needs the command server and
+  spawn, and the pipes are first tested from Erlang
+  ([design-shell.md](design-shell.md#pipelines));
 * toybox 0.8.15 and `wak` imported as erXos's code and built applet by
   applet, each with toybox's own tests in a test domain.
 
@@ -1082,7 +1086,12 @@ read, a writer that faults included, and a program's end reaches its
 port's owner as `{exit_status, N}` after its last bytes; a domain's
 sub-spaces, a session's programs among them, end with it; a pipe with a
 paused reader and sixty-four writers still spawns its sixty-fifth, which
-blocks on its write, never on its spawn; job control pauses, resumes and
+blocks on its write, never on its spawn (on the stopgap the check runs at
+the smaller of the two bounds on a session's writers, 64 IRQ objects a
+group, about 30 writers in practice, and the gate worker's 32 programs at
+once, and the check at 31 writers and above runs on erXos's kernel, as
+M7's checks below do; both bounds are residuals in
+[TODO.md](../TODO.md)); job control pauses, resumes and
 ends jobs of programs, checked at M7, which brings the pauses; all 256
 byte values and every control sequence a program writes reach the
 console exact (V1); a narrowed program that tries every command name

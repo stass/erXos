@@ -47,6 +47,12 @@ limit prog_data_slots_max u32 16
 # Each slot of a program's data area, in bytes: the session sizes the area
 # and the program maps it as data_slots of these.
 limit prog_data_slot_bytes u32 65536
+# The labels of the doorbells bound into a program's group. The channel's
+# bell takes prog_channel_label. A pipe end's takes
+# (Pipe << pipe_label_shift) | End, computed in 64 bits, which is at least
+# 2^32 because Pipe is at least 1, so no pipe end's label is the channel's.
+limit prog_channel_label u64 1
+limit pipe_label_shift u64 32
 
 protocol erx_prog
   version 1

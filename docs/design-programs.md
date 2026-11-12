@@ -302,7 +302,7 @@ party writes at `ERX_LANE_SIDE_DATA`
 | --- | --- | --- | --- | --- |
 | the **session's side** | the inbound lane's ring header and data area of 16 KiB; the outbound lane's reader page | the session's port driver | the session read-write; the program read-only, its copy carrying `READ` and `MAP` | the startup message, replies, reports and signals, from the handler to the program; how far the session has read the outbound lane |
 | the **program's side** | the outbound lane's ring header and data area of 16 KiB; the inbound lane's reader page | the program: the ring by its `liberx`, the reader page by its event executor | the program read-write, its copy carrying `READ`, `WRITE` and `MAP`; the session read-only | requests and notices, from the program to the handler; how far the program has read the inbound lane |
-| the **program's doorbell** | none: an IRQ object | triggered by the port driver | bound by the session to the program's group with the channel as its label, the session's side's value in the program's table, which both parties know from the install; the program holds no capability to it | wakes the program's event executor: a frame in the inbound lane, or room in the outbound one |
+| the **program's doorbell** | none: an IRQ object | triggered by the port driver | bound by the session to the program's group with the channel's fixed label, `prog_channel_label` (1), which no pipe end's label equals ([design-pipes.md](design-pipes.md#waiting-and-doorbells)); the program holds no capability to it | wakes the program's event executor: a frame in the inbound lane, or room in the outbound one |
 | the **session's doorbell** | none: an IRQ object | triggered by the program | bound by the session to its own group with the port as its label; the program holds `TRIGGER` alone | wakes the port driver: a frame in the outbound lane, or room in the inbound one |
 
 The session creates the two sides and the two IRQ objects from its own
@@ -695,7 +695,14 @@ that a frame it wrote gave the program, in a startup message, a `pipe`
 reply or a redemption's reply; and a `{drained, Pipe, End, Writer}` is
 due once for each frame it wrote that names `Writer` gone to the read
 end `End`, a `{pipe_writer_gone}` report, a join marked gone, or a
-descriptor of a startup message or a reply. A request on a busy slot,
+descriptor of a startup message or a reply. The driver never parses the
+frames it writes: `send/2` encodes the term into the frame's bytes and, from
+the same term, names the pipe ends the frame grants and the gone writers it
+names; the driver counts those, and the one encoder cannot let them diverge
+from the bytes. The notices due for one frame are bounded by `prog_fds_max`,
+the most descriptors a frame carries, and those outstanding by the pipe ends
+the program holds, which the session's `pipes` quota and the read-end bound
+limit. A request on a busy slot,
 and a notice that is not due, a repeated one included, are frames
 outside the grammar and end the program with `SIGSYS`, as a malformed
 record does. So the handler and the pipe server hold at most one message
@@ -1291,7 +1298,7 @@ list:
   umtx word in its slot, and the event executor puts the reply there and
   wakes it, so one rule routes every reply, whichever thread asked;
 * every pipe end the program holds has a doorbell the session bound to
-  the program's group with the end as its label, so the group's ready
+  the program's group with the end's label, so the group's ready
   list names exactly the ends rung since the executor last looked, each
   once, and the executor wakes the workers waiting on those ends and
   evaluates their readiness for `poll`
