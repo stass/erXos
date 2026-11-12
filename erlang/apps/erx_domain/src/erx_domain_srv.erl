@@ -19,7 +19,8 @@ domain within its restart intensity. It keeps the
 manifest's session templates by principal and makes each session of a
 principal from its template alone (start_session): the library builds the
 domain from the template's row and judges it against the principal, and the
-service chooses only its name and its facets. A template is no configured
+service chooses only its name, its facets and the display, if any, its
+start names. A template is no configured
 domain, so the boot never starts one, and nothing restarts one or a session.
 
 A create or a session's start for a principal one of whose domains is
@@ -96,10 +97,9 @@ reach it only through facets, which arrive with the connections.
 %% Every domain is the system principal's, number 1, the one principal the library's
 %% view has (include/erx/dom.h, erx_dom_principal_t).
 -define(SYSTEM_PRINCIPAL, 1).
-%% The name a principal's sessions take before _1, _2 and on: the development build's one
-%% principal, the system principal, is root (docs/design-domains.md, "Principals, sessions
-%% and quotas").
--define(SESSION_PREFIX, <<"root">>).
+%% The keys of a session's start beyond its console: the display the session is the
+%% session of, or the one it only takes as its default (session_start/3).
+-define(START_DISPLAYS, [display, default_display]).
 %% The keys of a request beyond its name, boot and boot_timeout: erx_domain_lib:spec()'s, less
 %% id, principal and domain_pid, which the service sets, and facets, the service's own.
 -define(REQUEST_KEYS, [runtime, release, release_files, memory, outer, grant, lane, args, env,
@@ -140,8 +140,10 @@ caller's deadline in milliseconds; release_wait, a held start's bound
 (start/3); mints, the owner function (erx_dist:owner/1 by default) and
 deadline that erx_domain_mints:new/1 takes; facet_names, the table of
 facet names that facets/2 checks (the generated ?ERX_FACET_NAMES by default);
-and inspect_policy, #{roots, development}, the system-shell principals and
-development flag every inspect facet's scope is decided from (inspect_policy/1).
+inspect_policy, #{roots, development}, the system-shell principals and
+development flag every inspect facet's scope is decided from (inspect_policy/1);
+and principals, the manifest's system principal and principal names, which
+name each principal's sessions (principals/1).
 """.
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
@@ -172,7 +174,7 @@ init(Opts) ->
            mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0},
            served => #{}, web_lines => #{},
            facet_names => maps:get(facet_names, Opts, ?ERX_FACET_NAMES),
-           inspect_policy => inspect_policy(Opts)},
+           inspect_policy => inspect_policy(Opts), principals => principals(Opts)},
      {continue, boot}}.
 
 %% What every inspect facet's scope is decided from (erx_domain_core:inspect_scope/3): the
@@ -184,6 +186,20 @@ inspect_policy(#{inspect_policy := #{roots := Roots, development := Development}
     Policy;
 inspect_policy(_Opts) ->
     #{roots => erx_build:shell_principals(), development => erx_build:development()}.
+
+%% The system manifest's system principal and principal names, which name each
+%% principal's sessions (erx_domain_core:session_prefix/3), read once, as the service
+%% starts, as inspect_policy/1 reads its policy; a host test names its own. A manifest
+%% the service cannot read names no principal, and its system principal is the one the
+%% service charges its own creates to.
+principals(#{principals := #{system := System, names := Names} = Principals})
+  when is_integer(System), is_map(Names) ->
+    Principals;
+principals(_Opts) ->
+    case erx_build:principals() of
+        {ok, Principals} -> Principals;
+        error -> #{system => ?SYSTEM_PRINCIPAL, names => #{}}
+    end.
 
 %% The library, registered with this process as the one that hears of every end, or none
 %% where the system domain has none. A module that does not load is not a missing
@@ -234,8 +250,8 @@ templates(Lib) -> Lib:templates().
 
 handle_call({create, Spec}, From, State) ->
     {noreply, start({create, Spec}, From, State)};
-handle_call({start_session, Principal, Facets}, From, State) ->
-    {noreply, start({start_session, Principal, Facets}, From, State)};
+handle_call({start_session, Principal, Start}, From, State) ->
+    {noreply, start({start_session, Principal, Start}, From, State)};
 handle_call({info, Id}, From, #{core := Core} = State) ->
     %% The domain pid answers the caller itself, so a flood in its mailbox delays only
     %% this caller, never the service.
@@ -283,7 +299,7 @@ start(Start, From, #{held := Held, release_wait := Wait} = State) ->
     end.
 
 principal({create, _Spec}) -> ?SYSTEM_PRINCIPAL;
-principal({start_session, Principal, _Facets}) -> Principal.
+principal({start_session, Principal, _Start}) -> Principal.
 
 %% Principal's domains whose domain pid has ended before their end arrived, so the
 %% library has not yet retired them and each still counts against the principal's
@@ -317,8 +333,8 @@ release_timed_out(Principal, Timer, #{held := Held} = State) ->
 
 run({create, Spec}, From, State) ->
     answer_create(create(Spec, State), From);
-run({start_session, Principal, Facets}, From, State) ->
-    answer_create(start_session(Principal, Facets, State), From).
+run({start_session, Principal, Start}, From, State) ->
+    answer_create(start_session(Principal, Start, State), From).
 
 %% A create's or a session's start's answer to From, now or once the domain reports or
 %% is retired.
@@ -446,7 +462,7 @@ create(#{name := Name} = Spec, State) ->
                                                                                 principal => ?SYSTEM_PRINCIPAL,
                                                                                 domain_pid => Pid})
                            end,
-                    build(Ident, ?SYSTEM_PRINCIPAL, request, Make, Facets, Timeout, State)
+                    build(Ident, ?SYSTEM_PRINCIPAL, request, Make, #{facets => Facets}, Timeout, State)
             end
     end;
 create(_Spec, State) ->
@@ -546,25 +562,55 @@ grant({Pid, Limits}) when is_pid(Pid), is_map(Limits) ->
 grant(_Grant) ->
     invalid.
 
-%% A session of Principal, made from its session template alone, with Facets checked as a
-%% request's: the console names the line it starts the session at by the console facet it
-%% hands. The service chooses only the name, the principal's prefix and the lowest number
-%% no living session holds (erx_domain_core:session_name/3), so a refused start binds
-%% no name for good.
-start_session(_Principal, _Facets, #{lib := none} = State) ->
+%% A session of Principal, made from its session template alone, with its Start checked
+%% (session_start/3): the console names the line it starts the session at by the console
+%% facet it hands, and a display, if Start names one, is kept in the session's record. The
+%% service chooses only the name, the principal's prefix (erx_domain_core:session_prefix/3)
+%% and the lowest number no living session holds (erx_domain_core:session_name/3), so a
+%% refused start binds no name for good. A principal the manifest's names do not name is
+%% refused with no_name, and a name too long for an identifier with bad_identifier, as a
+%% request's.
+start_session(_Principal, _Start, #{lib := none} = State) ->
     {{error, enotsup}, State};
-start_session(Principal, Facets, #{templates := Templates} = State) ->
-    case {Templates, facets(Facets, State)} of
-        {#{Principal := _}, invalid} ->
-            {{error, {bad_spec, facets}}, State};
-        {#{Principal := #{template := Template}}, Valid} ->
-            #{lib := Lib, core := Core} = State,
-            Name = erx_domain_core:session_name(?SESSION_PREFIX, Principal, Core),
-            Make = fun(Id, Pid) -> Lib:session(Id, Template, Name, Pid) end,
-            build(erx_ident:new(Name), Principal, {session, Template}, Make, Valid, ?BOOT_TIMEOUT, State);
-        {#{}, _} ->
-            {{error, no_template}, State}
+start_session(Principal, Start, #{templates := Templates, principals := #{system := System, names := Names},
+                                  lib := Lib, core := Core} = State) ->
+    maybe
+        #{Principal := #{template := Template}} ?= Templates,
+        {ok, Record} ?= session_start(Template, Start, State),
+        {ok, Prefix} ?= erx_domain_core:session_prefix(Principal, System, Names),
+        Name = erx_domain_core:session_name(Prefix, Principal, Core),
+        Ident = erx_ident:new(Name),
+        true ?= Ident =/= {error, bad_identifier},
+        Make = fun(Id, Pid) -> Lib:session(Id, Template, Name, Pid) end,
+        build(Ident, Principal, {session, Template}, Make, Record, ?BOOT_TIMEOUT, State)
+    else
+        #{} -> {{error, no_template}, State};
+        {error, _} = Refused -> {Refused, State};
+        error -> {{error, no_name}, State};
+        false -> {{error, bad_identifier}, State}
     end.
+
+%% A session's Start split into what the session's record keeps: its facets, which the
+%% funnel checks as a request's (facets/2), the console the only one it lets through; and
+%% its start, display or default_display, a service name the session's template is
+%% granted (erx_domain_mints:granted/3), one of them at most. display makes the session
+%% the display's session, whose grant on it carries the session mark; default_display is
+%% kept and not handed on. So a start's display marks only a grant of its template, and
+%% adds none. The checks go in order: the facets, then two displays at once, then a
+%% display the template is not granted.
+session_start(Template, Start, #{mints := Mints} = State) when is_map(Start) ->
+    Displays = maps:with(?START_DISPLAYS, Start),
+    Granted = maps:filter(fun(_Key, Display) ->
+                                  is_atom(Display) andalso erx_domain_mints:granted(Template, Display, Mints)
+                          end, Displays),
+    case {facets(maps:without(?START_DISPLAYS, Start), State), maps:keys(Displays)} of
+        {invalid, _} -> {error, {bad_spec, facets}};
+        {_, [_, _]} -> {error, {bad_spec, display}};
+        {_, [Key]} when Granted =/= Displays -> {error, {bad_spec, Key}};
+        {Facets, _} -> {ok, #{facets => Facets, start => Displays}}
+    end;
+session_start(_Template, _Start, _State) ->
+    {error, {bad_spec, facets}}.
 
 %% A configured row, which has its own boot_timeout_s to report ready in.
 start_configured(#{row := Row, name := Name, principal := Principal, boot_timeout_s := Seconds},
@@ -594,10 +640,11 @@ start_configured(#{row := Row, name := Name, principal := Principal, boot_timeou
 %% whose side, export or start is refused is stopped, its end retires it as any end
 %% does, and its create is refused once it has ended and been retired. A started domain
 %% is waiting for its init's ready report, which Timeout bounds, unless it has no system connection,
-%% the one path a report could take: then it is ready at its start. Facets are the
-%% processes the domain gets a facet in front of when it reports ready; a domain with no
-%% system connection never reports, so it gets none.
-build(Ident, Principal, Origin, Make, Facets, Timeout, #{core := Core} = State) ->
+%% the one path a report could take: then it is ready at its start. Record is what the
+%% domain's record keeps beside the library's answer: its facets, the processes it gets a
+%% facet in front of when it reports ready, and a session's start; a domain with no
+%% system connection never reports, so it gets no facet.
+build(Ident, Principal, Origin, Make, Record, Timeout, #{core := Core} = State) ->
     case erx_domain_core:admit(Ident, Principal, Origin, Core) of
         {error, _} = Error ->
             {Error, State};
@@ -606,7 +653,8 @@ build(Ident, Principal, Origin, Make, Facets, Timeout, #{core := Core} = State) 
             Pid = erx_domain_pid:start_link(self(), Id, Node, Ref),
             case made(Make, Id, Pid) of
                 {ok, #{connection := Connection} = Created} ->
-                    Built = erx_domain_core:built(Id, Created#{facets => Facets}, Pid, Ref, Admitted),
+                    Built = erx_domain_core:built(Id, maps:merge(maps:with([connection, ctl_slots, reader], Created), Record),
+                                                Pid, Ref, Admitted),
                     Next = State#{core := Built, links := add_party(Id, Node, Created, State)},
                     Domain = {erx_domain, Id, Node, Pid},
                     case started(Id, Pid, Ref, Created#{node => Node}, Next) of
@@ -693,18 +741,20 @@ boot_timer(Id, Timeout) -> _ = erlang:start_timer(Timeout, self(), {boot_timeout
 %% answers its end's error (settle/2). A report for a domain that is ready already, or
 %% that ended stopping for its boot timeout, changes nothing. A configured domain's
 %% report goes to the mint core with the provides it names, at its node, and a session's
-%% with its template, after the answer to the report, so the answer reaches the domain
-%% before any installation the report starts. Only a running domain's report is taken, so the core hears a session's
+%% with its template and the display its start named, if any (marked/1), after the answer
+%% to the report, so the answer reaches the domain before any installation the report
+%% starts. Only a running domain's report is taken, so the core hears a session's
 %% report at most once and before its end (unprovide/3).
 ready(Id, Ref, Provides, Inspect, #{core := Core, waiting := Waiting} = State) ->
     case {erx_domain_core:fetch(Id, Core), Waiting} of
-        {{ok, #{ref := Ref, state := running, origin := Origin, node := Node}}, _} ->
+        {{ok, #{ref := Ref, state := running, origin := Origin, node := Node, start := Start}}, _} ->
             {Actions, Links} = erx_domain_links:ready(Id, maps:get(links, State)),
             Ready = State#{core := erx_domain_core:ready(Id, Inspect, Core), links := Links},
             Answered = answer_ready(Id, grant_facets(Id, served(Origin, Ready), perform(Actions, Ready))),
             case Origin of
                 {configured, Row} -> mints({ready, Row, Id, Node, Provides}, Answered);
-                {session, Template} -> mints({session_ready, Template, Id}, keep_web_line(Id, Node, Provides, Answered));
+                {session, Template} -> mints({session_ready, Template, Id, marked(Start)},
+                                             keep_web_line(Id, Node, Provides, Answered));
                 request -> Answered
             end;
         {_, #{Id := #{ref := Ref, ended := {running, _Info}}}} ->
@@ -712,6 +762,12 @@ ready(Id, Ref, Provides, Inspect, #{core := Core, waiting := Waiting} = State) -
         _ ->
             State
     end.
+
+%% The grant a session's ready report marks (erx_domain_mints): the one on the display its
+%% start named with display, and none for a default_display, which is kept and not
+%% handed on, or for no display at all.
+marked(#{display := Display}) -> {display, Display};
+marked(#{}) -> none.
 
 %% The answer to domain Id's ready report, its facets by name: its spec's, and Served,
 %% its facets of services the system domain serves (served/2). Each is minted in front

@@ -240,6 +240,65 @@ configured_boot_timeout() ->
     #{core := Ready} = sys:get_state(erx_domain_srv),
     ?assertMatch({ok, #{state := ready}}, erx_domain_core:fetch(5, Ready)).
 
+%% A session's name is its principal's name in the system manifest, and root for the
+%% system principal (docs/design-apps.md, "Starting a session").
+session_prefix_test() ->
+    Names = #{1 => <<"system">>, 3 => <<"clock">>},
+    ?assertEqual({ok, <<"root">>}, erx_domain_core:session_prefix(1, 1, Names)),
+    ?assertEqual({ok, <<"clock">>}, erx_domain_core:session_prefix(3, 1, Names)),
+    ?assertEqual(error, erx_domain_core:session_prefix(2, 1, Names)).
+
+%% Principals numbered as the manifest's packer numbers them, in name order: clock is 1
+%% and the system principal, named system, is 3, so the system principal is not the
+%% first; principal 2 has a template and no name the service could read. No template has
+%% a grant, and no configured domain boots.
+session_names_test_() ->
+    {setup,
+     fun() ->
+             persistent_term:put({erx_domain_fake_lib, boot}, #{domains => []}),
+             persistent_term:put({erx_domain_fake_lib, templates},
+                                 [#{template => 0, principal => 1}, #{template => 1, principal => 2},
+                                  #{template => 2, principal => 3}]),
+             Log = erx_domain_fake_lib:start_log(),
+             {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                          exports => erx_domain_fake_lib,
+                                                          principals => #{system => 3,
+                                                                          names => #{1 => <<"clock">>,
+                                                                                     3 => <<"system">>}}}),
+             unlink(Service),
+             {Log, Service}
+     end,
+     fun(Started) ->
+             stop_service(Started),
+             _ = [persistent_term:erase({erx_domain_fake_lib, Key}) || Key <- [boot, templates]],
+             ok
+     end,
+     fun session_names/0}.
+
+session_names() ->
+    %% A principal the manifest does not name has no session; display and
+    %% default_display name services the template must be granted, and are no facets,
+    %% so a display the template is not granted is refused as a display, not as a facet.
+    ?assertEqual({error, no_name}, erx_domain:start_session(2, #{})),
+    ?assertEqual({error, {bad_spec, display}}, erx_domain:start_session(1, #{display => console})),
+    ?assertEqual({error, {bad_spec, default_display}}, erx_domain:start_session(1, #{default_display => clock})),
+    ?assertEqual({error, {bad_spec, facets}}, erx_domain:start_session(1, #{clock => self()})),
+    %% The fake ends a session a while after its stop: each end is waited for, so the fake
+    %% makes the next session and no end reaches the next fixture's service.
+    [?assertEqual(Node, session_named(Principal, Template, Name))
+     || {Principal, Template, Name, Node} <- [{1, 0, <<"clock_1">>, 'clock_1@erxos'},
+                                              {3, 2, <<"root_1">>, 'root_1@erxos'}]].
+
+%% Starts a session of Principal, which the library makes from Template under Name, stops
+%% it once it is ready and awaits its end: the session's node.
+session_named(Principal, Template, Name) ->
+    {ok, Session} = erx_domain:start_session(Principal, #{}),
+    ?assertEqual({session, erx_domain:id(Session), Template, Name}, next_call()),
+    _ = [next_call() || _ <- [open_side, export, start]],
+    ok = erx_domain:stop(Session, shutdown),
+    retired(erx_domain:id(Session)),
+    erx_domain:node(Session).
+
 %% The service over the stand-ins: configured domains in boot order, each with
 %% its system side opened before its first thread, a create, a stop, a kill,
 %% {domain_down, Id, Info} at the domain pid's monitors, the side closed before

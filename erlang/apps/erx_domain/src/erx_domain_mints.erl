@@ -33,7 +33,7 @@ that erx_domain_srv logs and counts; the incarnation is ready all the same.
 
 Sessions. A grant to a session template is a grant to every session made
 from it. A session is one incarnation, never restarted, named by its id:
-its ready report, {session_ready, Template, Id}, adds a grant keyed by
+its ready report, {session_ready, Template, Id, Marked}, adds a grant keyed by
 {session, Id} for each of the template's grants, and its end,
 {session_ended, Id}, cancels their operations and deletes them, so the
 core holds entries only for live sessions, each its own. The service
@@ -41,6 +41,18 @@ passes a session's report on at most once and before its end, and names
 the template from its own record of the domain, never from the report;
 a second report of a live session is refused as stale, and an end of a
 session the core does not hold changes nothing.
+
+The session mark (docs/design-system.md, "Facets a configured domain
+serves"). Each grant carries a mark, fixed when the grant is added and
+never changed. A session's ready report names {display, Name} for the
+display its start named, or none; the mark is true only for that
+session's grant of Name, and false for every other grant, a configured
+row's and the system domain's included. Every
+mint of a grant carries its limits with session => true where it is
+marked and with no session where it is not, the first mint and each one
+after its server's restart alike, so no facet row's limits can set it and
+no grant but the marked one ever carries it. A display the template does not
+grant marks nothing, so the mark never adds a grant.
 
 Grants. Each grant, keyed by its grantee (a row, system or a session)
 and its service's name, has one state:
@@ -82,7 +94,7 @@ state of its own, and a grant with an operation is bounded by its
 deadline, a starting server by its boot timeout.
 """.
 
--export([new/1, step/2, grants/1, in_place/3]).
+-export([new/1, step/2, grants/1, granted/3, in_place/3]).
 -export_type([state/0, config/0, event/0, action/0, grant/0, key/0, pair/0]).
 
 -define(SYSTEM_ID, 4).
@@ -98,6 +110,8 @@ deadline, a starting server by its boot timeout.
 -type pair() :: {ServerId :: id(), GranteeId :: id()}.
 -type pending() :: introducing | minting | installing.
 -type reason() :: {introduce, term()} | bad_reply | {deadline, pending()}.
+%% The service whose grant a session's ready report marks, the display its start named.
+-type marked() :: {display, name()} | none.
 -type grant() :: idle
                | {introducing, pair(), tag()}
                | {minting, pair(), tag()}
@@ -114,7 +128,7 @@ deadline, a starting server by its boot timeout.
 %% untrusted events' fields are any term a domain sent.
 -type event() :: {ready, row(), id(), node(), Provides :: term()}
                | {ended, row(), id()}
-               | {session_ready, template(), id()}
+               | {session_ready, template(), id(), marked()}
                | {session_ended, id()}
                | {introduced, tag(), ok | {error, term()}}
                | {minted, Origin :: non_neg_integer(), Tag :: term(), Reply :: term()}
@@ -130,7 +144,8 @@ deadline, a starting server by its boot timeout.
                 | {failed, key(), pair(), reason()}.
 -type incarnation() :: {id(), ready, node(), Providers :: #{name() => pid()}} | {id(), ended}.
 -opaque state() :: #{declared := #{row() => [name()]},
-                     grants := #{key() => #{server := row(), limits := map(), state := grant()}},
+                     grants := #{key() => #{server := row(), limits := map(), mark := boolean(),
+                                            state := grant()}},
                      rows := #{row() => incarnation()},
                      templates := #{template() => [{name(), Server :: row(), Limits :: map()}]},
                      sessions := #{id() => template()},
@@ -161,19 +176,29 @@ new(#{services := Services, grants := Grants, owner := Owner} = Config) when is_
                           end, Grants),
     Valid orelse error(badarg),
     {ForTemplates, ForDomains} = lists:partition(fun({{template, _}, _, _, _}) -> true; (_) -> false end, Grants),
-    Entries = maps:from_list([{{Grantee, Name}, entry(Server, Limits)} || {Grantee, Name, Server, Limits} <- ForDomains]),
+    Entries = maps:from_list([{{Grantee, Name}, entry(Server, Limits, false)}
+                              || {Grantee, Name, Server, Limits} <- ForDomains]),
     Templates = maps:groups_from_list(fun({{template, T}, _, _, _}) -> T end,
                                       fun({_, Name, Server, Limits}) -> {Name, Server, Limits} end, ForTemplates),
     #{declared => Declared, grants => Entries, rows => #{}, templates => Templates, sessions => #{},
           next_tag => 1, owner => Owner, files => maps:get(files, Config, []),
           deadline => maps:get(deadline, Config, ?DEADLINE)}.
 
-entry(Server, Limits) -> #{server => Server, limits => Limits, state => idle}.
+entry(Server, Limits, Mark) -> #{server => Server, limits => Limits, mark => Mark, state => idle}.
 
 -doc "Each grant's state, by its key.".
 -spec grants(state()) -> #{key() => grant()}.
 grants(#{grants := Grants}) ->
     #{Key => Grant || Key := #{state := Grant} <- Grants}.
+
+-doc """
+Whether the manifest grants template Template's sessions the service Name
+of a configured domain: the services a session's start may name as its
+display (erx_domain_srv), so a start names only a grant its template has.
+""".
+-spec granted(template(), term(), state()) -> boolean().
+granted(Template, Name, #{templates := Templates}) ->
+    lists:keymember(Name, 1, maps:get(Template, Templates, [])).
 
 -doc """
 Whether Grantee's namespace is in place: each of its grants of a files
@@ -212,12 +237,13 @@ step({ended, Row, Id}, #{rows := Rows} = State) ->
         #{} ->
             reconcile(State#{rows := Rows#{Row => {Id, ended}}})
     end;
-step({session_ready, Template, Id}, #{sessions := Sessions, templates := Templates, grants := Grants} = State) ->
+step({session_ready, Template, Id, Marked}, #{sessions := Sessions, templates := Templates, grants := Grants} = State) ->
     case {Sessions, Templates} of
         {#{Id := _}, _} ->
             {[{refused, stale_report, {session, Id}}], State};
         {#{}, #{Template := Granted}} ->
-            Added = maps:from_list([{{{session, Id}, Name}, entry(Server, Limits)} || {Name, Server, Limits} <- Granted]),
+            Added = maps:from_list([{{{session, Id}, Name}, entry(Server, Limits, {display, Name} =:= Marked)}
+                                    || {Name, Server, Limits} <- Granted]),
             reconcile(State#{sessions := Sessions#{Id => Template}, grants := maps:merge(Grants, Added)});
         {#{}, #{}} ->
             {[], State}
@@ -346,11 +372,17 @@ start({Grantee, _Name} = Key, {ServerId, GranteeId} = Pair, Cancel,
              set_grant(Key, {introducing, Pair, Tag}, Armed)}
     end.
 
-%% The request to the server's mint for the grant Key and its operation Tag.
+%% The request to the server's mint for the grant Key and its operation Tag, with the
+%% grant's limits as its mark has them (session_limits/2).
 mint_request({_, Name} = Key, {ServerId, GranteeId}, Tag, #{rows := Rows} = State) ->
-    #{limits := Limits, server := Server} = grant_entry(Key, State),
+    #{limits := Limits, mark := Mark, server := Server} = grant_entry(Key, State),
     #{Server := {ServerId, ready, _Node, #{Name := Mint}}} = Rows,
-    {mint, Tag, Mint, Name, GranteeId, Limits}.
+    {mint, Tag, Mint, Name, GranteeId, session_limits(Limits, Mark)}.
+
+%% A grant's limits as its mint carries them: session => true for the marked grant, and
+%% no session for any other, whatever its facet row's limits hold.
+session_limits(Limits, true) -> Limits#{session => true};
+session_limits(Limits, false) -> maps:remove(session, Limits).
 
 cancel(Grant) ->
     case tag(Grant) of

@@ -85,13 +85,17 @@ class FacetNamesTest < Minitest::Test
     assert_equal (1..11).map { |line| [MODULE, line] }, found(source)
   end
 
-  # A create spec that hands a domain a facet by a name the table does not list.
+  # A create spec that hands a domain a facet by a name the table does not list, and a
+  # session's start, whose keys are facets but for display and default_display, which name
+  # services: console is exempt only in its listed files.
   def test_a_grant_in_a_create_spec_is_read
     source = <<~'ERL'
-      f(P) -> erx_domain:start_session(P, #{seeded => {self(), #{}}, rogue => {self(), #{}}}).
+      f(P, C) -> erx_domain:start_session(P, #{console => C, display => rogue}).
       g(S) -> erx_domain:create(S#{facets => #{rogue => x}}).
+      h(P) -> erx_domain:start_session(P, #{default_display => rogue}).
+      i(P) -> erx_domain:start_session(P, #{rogue => {self(), #{}}}).
     ERL
-    assert_equal [[MODULE, 1], [MODULE, 2]], found(source)
+    assert_equal [[MODULE, 1], [MODULE, 2], [MODULE, 4]], found(source)
   end
 
   # An interface's name is no facet: only a manifest service grants one.

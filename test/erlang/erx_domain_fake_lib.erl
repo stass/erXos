@@ -75,7 +75,8 @@ configured() ->
                                   #{row => 1, place => 0, name => <<"a">>, principal => 1, kind => service,
                                     restarts => 1, restart_period_s => 60, boot_timeout_s => 60}]},
                     persistent_term:get({?MODULE, boot}, #{}))}.
-templates() -> {ok, [#{template => 0, principal => 1}]}.
+%% Principal 1's template, or the templates the persistent term {?MODULE, templates} sets.
+templates() -> {ok, persistent_term:get({?MODULE, templates}, [#{template => 0, principal => 1}])}.
 session(Id, Template, Name, DomainPid) when is_pid(DomainPid) ->
     session(get(session), Id, Template, Name, DomainPid).
 

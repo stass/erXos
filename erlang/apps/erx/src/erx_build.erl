@@ -38,9 +38,12 @@ has no such file, such as a hosted one, has
 -export([id/0, id/1]).
 -export([facts/0, parse_facts/1]).
 -export([development/0, development/1, development_flag/1]).
--export([shell_principals/0, shell_principals/1]).
+-export([shell_principals/0, shell_principals/1, principals/0, principals/1]).
 
--export_type([facts/0]).
+-export_type([facts/0, principals/0]).
+
+%% The system manifest's principals (principals/0).
+-type principals() :: #{system := pos_integer(), names := #{pos_integer() => binary()}}.
 
 -doc "The facts of the build, each `unknown` where the build could not determine it.".
 -type facts() :: #{revision := binary() | unknown,
@@ -142,6 +145,38 @@ shell_principals({ok, Manifest}) ->
     end;
 shell_principals({error, _}) ->
     [].
+
+-doc """
+The system manifest's principals, read as development/0 reads the
+manifest: system, the system principal's number, and names, each
+principal's name by number, a principal's number being its index in the
+manifest plus one (liberx/system/dom_boot_view.c). They are what
+erx_domain_core:session_prefix/3 names a session from. error when the
+manifest cannot be read or does not parse.
+""".
+-spec principals() -> {ok, principals()} | error.
+principals() ->
+    principals(system_manifest()).
+
+-doc """
+The principals of the system manifest `file:read_file/1` returned, error
+for one it could not read or parse, or one with a name it cannot read.
+Pure, for its tests.
+""".
+-spec principals({ok, binary()} | {error, term()}) -> {ok, principals()} | error.
+principals({ok, Manifest}) ->
+    maybe
+        {ok, View} ?= erx_manifest:open(Manifest),
+        {ok, #{system_principal := System}} ?= erx_manifest:header(View),
+        {ok, Refs} ?= erx_manifest:fold(View, principals, fun(#{name := Ref}, Acc) -> [Ref | Acc] end, []),
+        Read = [erx_manifest:string(View, Ref) || Ref <- lists:reverse(Refs)],
+        true ?= lists:all(fun(Result) -> element(1, Result) =:= ok end, Read),
+        {ok, #{system => System + 1, names => maps:from_list(lists:enumerate([Name || {ok, Name} <- Read]))}}
+    else
+        _ -> error
+    end;
+principals({error, _}) ->
+    error.
 
 -doc """
 The development flag of the system manifest `file:read_file/1` returned,

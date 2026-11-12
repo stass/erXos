@@ -130,6 +130,15 @@ class ErxDomainTest < Minitest::Test
               from: 'grantee({session, Template}) -> {template, Template};',
               to: 'grantee({session, _Template}) -> none;',
               tests: 'erx_domain_mints_srv_tests', caught_by: 'session_inspect'),
+    # The session mark (docs/design-system.md, "Facets a configured domain serves"): a
+    # server's end that drops the grants' marks, so its new incarnation's re-mint of the
+    # display's session's grant carries none.
+    Fault.new(name: 'a re-mint that drops the session mark',
+              file: File.join(APPLICATION, 'erx_domain_mints.erl'),
+              from: %q{reconcile(State#{rows := Rows#{Row => {Id, ended}}})},
+              to: %q{reconcile(State#{rows := Rows#{Row => {Id, ended}},
+                                      grants := maps:map(fun(_, E) -> E#{mark := false} end, maps:get(grants, State))})},
+              tests: 'erx_domain_mints_tests', caught_by: 'session_mark_test'),
     # A facet that drops a forward whose service ended without replying leaves the
     # grantee waiting out its own timeout, where an inspect worker OTP killed at its heap
     # limit must answer {error, failed}.

@@ -26,7 +26,12 @@
 %%   reply to the operation's tag, for the pair's grantee;
 %% * every pending operation has exactly one armed deadline, a tag is armed once, and
 %%   only an armed tag is disarmed;
-%% * every refusal and drop carries only atoms and integers, at most three of them.
+%% * every refusal and drop carries only atoms and integers, at most three of them;
+%% * no mint carries the session mark: no session here marks a grant, and every facet
+%%   row's limits name session, which the core strips, so each mint carries its row's
+%%   other limits alone (docs/design-system.md, "Facets a configured domain serves"). No
+%%   event here is a session's, so this covers row and system grants; erx_domain_mints_tests'
+%%   explorer and session_mark_test cover a session's marked grant.
 %% The seed comes from make check-fuzz.
 
 -module(erx_domain_mints_fuzz).
@@ -44,6 +49,10 @@
 -define(THIRD, 99).
 -define(DECLARED, #{?S => [data, log], ?T => [other]}).
 -define(GRANTS, [{?G, data, ?S}, {system, data, ?S}, {?G, other, ?T}, {system, log, ?S}]).
+%% Every grant's facet row limits, naming session, as no facet row may; and the limits
+%% every mint must carry.
+-define(ROW_LIMITS, #{max_request => 4096, session => true}).
+-define(MINT_LIMITS, #{max_request => 4096}).
 
 %% The shell's view of one sequence: the core; the oracle's rows, each {Id, ready, Node,
 %% Accepted} or {Id, ended}; every id handed out, and by row; the tags armed now and ever; the
@@ -68,7 +77,7 @@ owner(Pid) ->
 
 sequence(Kind, Tally) ->
     Config = #{services => [{Row, Name} || Row := Names <- ?DECLARED, Name <- Names],
-               grants => [{Grantee, Name, Server, #{max_request => 4096}} || {Grantee, Name, Server} <- ?GRANTS],
+               grants => [{Grantee, Name, Server, ?ROW_LIMITS} || {Grantee, Name, Server} <- ?GRANTS],
                owner => fun ?MODULE:owner/1, deadline => 10000},
     Shell = #shell{core = ?CORE:new(Config), tally = Tally},
     %% The reply target starts with every row ready and serving, so its steps reach
@@ -212,7 +221,8 @@ act({introduce, Tag, ServerId, GranteeId}, _Event, Core, #shell{intros = Intros}
     {Key, {introducing, {ServerId, GranteeId}, Tag}} = pending(Tag, Core),
     element(1, Key) =/= system orelse fail(introduced_system, Tag),
     Shell#shell{intros = Intros#{Tag => true}};
-act({mint, Tag, Mint, Name, GranteeId, _Limits}, _Event, Core, #shell{mints = Mints} = Shell) ->
+act({mint, Tag, Mint, Name, GranteeId, Limits}, _Event, Core, #shell{mints = Mints} = Shell) ->
+    Limits =:= ?MINT_LIMITS orelse fail(session_mark, Tag),
     {{_, Name} = Key, {minting, {ServerId, GranteeId}, Tag}} = pending(Tag, Core),
     {Server, _} = grant_of(Key),
     case Shell#shell.rows of

@@ -36,7 +36,7 @@ state is a bug of the caller and fails with a badmatch.
 """.
 
 -export([new/1, host/1, admit/4, built/5, running/2, ready/3, stopping/2, failed/2, ended/5,
-         restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1, session_name/3]).
+         restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1, session_prefix/3, session_name/3]).
 -export([inspect_scope/3, inspect_view/2]).
 -export_type([state/0, domain/0, origin/0, info/0, slogan/0, inspect_scope/0]).
 
@@ -53,7 +53,11 @@ state is a bug of the caller and fails with a badmatch.
                     pid := pid() | undefined, ref := reference() | undefined,
                     connection := non_neg_integer(),
                     ctl_slots := non_neg_integer(), reader := non_neg_integer(),
-                    facets := #{atom() => {pid(), map()}}, inspect := pid() | none}.
+                    facets := #{atom() => {pid(), map()}}, start := start(), inspect := pid() | none}.
+%% A session's start beyond its console (erx_domain:start_session/2): the display it is
+%% the session of, or the display it only takes as its default; a domain of no session has
+%% none.
+-type start() :: #{display => atom(), default_display => atom()}.
 -type binding() :: #{principal := pos_integer(), node := node(), holder := none | pos_integer()}.
 -type death() :: #{id := pos_integer(), name := erx_ident:t(), info := info(), at := integer(),
                    slogan => slogan()}.
@@ -105,6 +109,17 @@ admit(Name, Principal, Origin, #{names := Names, bound := Bound} = State) ->
     end.
 
 -doc """
+The prefix of Principal's session names (docs/design-apps.md, "Starting a
+session"): root for the system principal System, so its sessions stay
+root_1, root_2 and on, and for any other principal its name in the system
+manifest, of Names, the manifest's principal names by number, so a session
+of principal clock is clock_1. error for a principal Names does not name.
+""".
+-spec session_prefix(pos_integer(), pos_integer(), #{pos_integer() => binary()}) -> {ok, binary()} | error.
+session_prefix(System, System, _Names) -> {ok, <<"root">>};
+session_prefix(Principal, _System, Names) -> maps:find(Principal, Names).
+
+-doc """
 The name Principal's next session takes: Prefix_N for the lowest N from 1 whose
 name Principal may take without a new binding or, if none, the first one no
 principal has bound. A refused or ended session's name is so taken again, and a
@@ -127,7 +142,7 @@ take(Name, #{node := Node} = Binding, Principal, Origin,
      #{next_id := Id, names := Names, domains := Domains} = State) ->
     Domain = #{id => Id, name => Name, node => Node, principal => Principal, origin => Origin,
                state => building, pid => undefined, ref => undefined, connection => 0,
-               ctl_slots => 0, reader => 0, facets => #{}, inspect => none},
+               ctl_slots => 0, reader => 0, facets => #{}, start => #{}, inspect => none},
     Next = State#{next_id := Id + 1, names := Names#{erx_ident:to_binary(Name) => Binding#{holder := Id}},
                   domains := Domains#{Id => Domain}},
     {ok, Domain, Next}.
@@ -137,14 +152,15 @@ The library built domain Id, with system connection Connection, whose control ta
 CtlSlots slots, one per connection the domain may hold, and whose rings it reads have
 Reader bytes of data each; Pid and Ref are its domain pid's.
 Facets, if given, are the processes the domain gets a facet in front of when it reports
-ready (erx_domain_srv).
+ready (erx_domain_srv), and Start, if given, is a session's start beyond its console.
 """.
 -spec built(pos_integer(), #{connection := non_neg_integer(), ctl_slots := non_neg_integer(),
                              reader := non_neg_integer(), atom() => term()},
             pid(), reference(), state()) -> state().
 built(Id, #{connection := Connection, ctl_slots := CtlSlots, reader := Reader} = Created, Pid, Ref, State) ->
     update(Id, building, #{state => built, connection => Connection, ctl_slots => CtlSlots, reader => Reader,
-                           pid => Pid, ref => Ref, facets => maps:get(facets, Created, #{})}, State).
+                           pid => Pid, ref => Ref, facets => maps:get(facets, Created, #{}),
+                           start => maps:get(start, Created, #{})}, State).
 
 -doc "Domain Id's first thread started.".
 -spec running(pos_integer(), state()) -> state().

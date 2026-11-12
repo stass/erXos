@@ -364,9 +364,18 @@ inspect_cleanup(Started) ->
 %% through the session's domain pid, and only the session's acknowledgement settles it,
 %% b's being dropped. The session's end deletes its grant, and a late reply for its
 %% operation is dropped as of no operation. erx_domain_mints_tests covers two sessions
-%% at once; the fake library holds one.
+%% at once; the fake library holds one. The session's start names echo as its display,
+%% a grant of its template: the record keeps it beside no facet, and the mint carries the
+%% session mark. A display the template is not granted, and two displays, are refused
+%% before the session takes an id.
 sessions() ->
-    {ok, {erx_domain, 7, _, _} = Session} = erx_domain:start_session(1, #{}),
+    ?assertEqual({error, {bad_spec, display}}, erx_domain:start_session(1, #{display => inspect})),
+    ?assertEqual({error, {bad_spec, display}}, erx_domain:start_session(1, #{display => echo,
+                                                                              default_display => echo})),
+    {ok, {erx_domain, 7, _, _} = Session} = erx_domain:start_session(1, #{display => echo}),
+    #{core := Core} = sys:get_state(erx_domain_srv),
+    {ok, #{facets := Facets, start := Start}} = erx_domain_core:fetch(7, Core),
+    ?assertEqual({#{}, #{display => echo}}, {Facets, Start}),
     [PidA, PidB, Pid7] = [domain_pid(Id) || Id <- [5, 6, 7]],
     erlang:trace(PidA, true, ['receive', {tracer, self()}]),
     erlang:trace(Pid7, true, ['receive', {tracer, self()}]),
@@ -375,7 +384,7 @@ sessions() ->
     PidA ! {erx_origin, 5, {erx_connection_mapped, 7}},
     Pid7 ! {erx_origin, 7, {erx_connection_mapped, 5}},
     #{Key := {minting, {5, 7}, Tag}} = wait(fun(#{Key := {minting, _, _}}) -> true end),
-    ?assertMatch({erx_facet_mint, Tag, echo, 7, #{max_request := 64}},
+    ?assertMatch({erx_facet_mint, Tag, echo, 7, #{max_request := 64, session := true}},
                  receive {trace, PidA, 'receive', {_, mint, _, {erx_facet_mint, Tag, _, _, _} = R}} -> R
                  after 2000 -> none end),
     Facet = pid('a@erxos', 5, 7),

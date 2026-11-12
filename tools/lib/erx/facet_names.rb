@@ -33,7 +33,8 @@ module Erx
   #   number;
   # * a facet name the Erlang sources use that is no manifest service's public name,
   #   under which its grantees hold its facets: a grant in a create spec handed to
-  #   erx_domain:create/1 or start_session/2, a lookup (erx:cap/1, erx_cmd:facet/2, a
+  #   erx_domain:create/1 or in start_session/2's Start, less its display and
+  #   default_display, which name services and are no facets, a lookup (erx:cap/1, erx_cmd:facet/2, a
   #   key read from erx:caps/0 or erx_facets:domain/0), a command's -erx_needs, a
   #   mount of {facet, Name}, a
   #   server's mint (erx_facet:provide/2 and serve/2, erx_driver_ctl's start_mint and
@@ -81,6 +82,8 @@ module Erx
     EXEMPTIONS_MAX = 2
 
     NAME = /[a-z][A-Za-z0-9_@]*/
+    # The keys of start_session/2's Start that name services, not facets.
+    START_SERVICES = %w[display default_display].freeze
     # The shapes of a use: each captures the facet name, or a list of them as names.
     USES = [
       /(?<![A-Za-z0-9_@])erx_domain\s*:\s*start_session\s*(?<args>\((?:[^()]|\g<args>)*\))/,
@@ -307,13 +310,16 @@ module Erx
     def names_in(found)
       return [found[:name]] if found.names.include?('name')
       return keys(found[:map]) if found.names.include?('map')
-      return found[:args][1..-2].scan(MAP).flat_map { |(map)| keys(map) } if found.names.include?('args')
+      return start_facets(found[:args]) if found.names.include?('args')
 
       list = found[:names]
       list.include?(':=') ? list.scan(KEY).flatten : list.scan(/(?<![A-Za-z0-9_@])#{NAME}/)
     end
 
-    # A name outside the table, or an exempt name used outside its listed files.
+    # The facets a start_session/2 call hands on: its Start map's keys less display and
+    # default_display, as the domain service's funnel takes them (erx_domain_srv:session_start/3).
+    def start_facets(args) = args[1..-2].scan(MAP).flat_map { |(map)| keys(map) } - START_SERVICES
+
     # The keys of a map literal, {...}, at its own level: nested groups are dropped
     # first, so a key of a facet's limits is no facet.
     def keys(map)
@@ -322,6 +328,7 @@ module Erx
       inner.scan(GRANT).flatten
     end
 
+    # A name outside the table, or an exempt name used outside its listed files.
     def use_violations(uses, table)
       allowed = table.names
       uses.reject { |path, _, name| allowed.include?(name) || UNDECLARED[name]&.sites&.include?(path) }

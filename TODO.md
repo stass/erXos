@@ -542,6 +542,12 @@ it; git history is the record of completed work.
   `erx_starter` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and
   `ctl`'s parsers with their fuzz targets; the `apps` tree and `service`; `erx_domain:start_session/2` with `display`
   and `default_display`; the session mark in the domain service's grant records, carried as `session` by every mint;
+  [Track A](docs/plan.md#track-a-apps) builds it; of it only `erx_domain:start_session/2`'s `display` and
+  `default_display` and the session mark are built. The `start` row in `abi/manifest.txt` and
+  property 17; `erx_starter` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and
+  `ctl`'s parsers with their fuzz targets; the `apps` tree and `service`; the session's default display handed on
+  with the ready answer and its `display` variable (design-apps.md, "Starting a session", step 3), which the
+  domain service keeps in the session's record (`start`) and hands to nothing;
   the mint request `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint
   that matches the old shape (`erlang/apps/erx_storage/src/erx_lfs_mint.erl`, `erx_net_admit`); the reset count
   cleared by the first kept session.
@@ -2065,6 +2071,26 @@ it; git history is the record of completed work.
   down, so its ended record keeps its view slot and its principal's domain count, and
   `retire/1` needs an id nobody heard. Keep a reported flag per record in the view, set when
   the report is sent, and have `register/0` send every ended record not yet reported.
+* [High] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`?SYSTEM_PRINCIPAL`):
+  the service charges every create and configured domain to principal 1, but the manifest's
+  packer numbers principals in name order (`tools/lib/erx/manifest.rb`, `sort_by(&:name)`) and
+  names the system principal in `root.system_principal`, so a principal named before `system`
+  (`clock`) is principal 1 and gets the system's creates. Session names already read the
+  system principal from the manifest (`erx_build:principals/0`); the creates should too, or
+  the packer should make the system principal index 0.
+* [Low] domain service, `erx_domain_srv:session_start/3`: a start's `display` may name any
+  service its template is granted, not only a display, since no `windows` service exists to
+  check it against; the mint then carries `session` to a server that ignores it. Check the
+  name against the manifest's displays once `abi/services/windows.txt` exists. Two starts
+  naming one display both get the mark: only `erx_starter`'s keepers pass `display`, and
+  design-display.md wants one display's session, so whether the domain service refuses a
+  second is a design question for Track D.
+* [Low] manifest packer, `tools/lib/erx/manifest.rb`: a principal's name is checked to fit
+  `<name>_<names>` in 63 bytes, but a session name may take a number past `names` when
+  another principal holds a lower one, so a long name's later start is refused with
+  `bad_identifier` rather than the library's quota; and a principal other than the system
+  may be named `root`, whose sessions then share numbers with the system principal's
+  `root_N`. Bound the name by the domain service's names quota and reserve `root`.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`create/2`):
   `erx_domain:create/1` takes the domain library's own request fields (the boot image's
   runtime and release indexes, the budgets, the grant), where design-domains.md "Erlang

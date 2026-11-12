@@ -90,22 +90,36 @@ info({erx_domain, Id, _, _}) ->
 
 -doc """
 Starts a session of principal Principal (docs/design-domains.md, "Principals,
-sessions and quotas"): {ok, Domain} once its init has reported ready and its
-namespace is in place, each files grant of its template installed or failed
-(docs/design-system.md, "A session takes the console"), and an error as
-create/1's if it ends before then. The domain is made from the principal's session template alone, its
+sessions and quotas"; docs/design-apps.md, "Starting a session"): {ok,
+Domain} once its init has reported ready and its namespace is in place, each
+files grant of its template installed or failed (docs/design-system.md, "A
+session takes the console"), and an error as create/1's if it ends before
+then. The domain is made from the principal's session template alone, its
 runtime, release, arguments, environment and limits, which the domain
 library judges against the principal's ceilings, share, budget and domain
-quota; Facets, as a create's spec takes them, are its facets, whose console
-names the line the session starts at. The session's name is the principal's
-prefix and the lowest number no living session of it holds, root_1, and root_2
-beside it, in a development build, whose one principal is root. {error,
-no_template} for a principal with no template, and every error of create/1
-else.
+quota. Start names, each optional:
+
+* console, the session's one facet, a grant as a create's spec takes it,
+  which names the line the session starts at;
+* display, a service the template is granted, which makes the session that
+  display's session: the session's grant on it carries the session mark in
+  every mint (docs/design-system.md, "Facets a configured domain serves");
+* default_display, a service the template is granted, which the session's
+  record keeps as its default display and no mint carries.
+
+display and default_display exclude each other, and either one naming a
+service the template is not granted refuses the start with {bad_spec, Key};
+any other key is no facet the funnel lets through, {bad_spec, facets}. The
+session's name is its principal's name in the system manifest, root for the
+system principal, and the lowest number no living session of the principal
+holds: root_1 and root_2 beside it, or clock_1 for principal clock. {error,
+no_template} for a principal with no template, {error, no_name} for one
+the manifest does not name, and every error of create/1 else.
 """.
--spec start_session(pos_integer(), #{atom() => term()}) -> {ok, domain()} | {error, term()}.
-start_session(Principal, Facets) when is_integer(Principal), Principal > 0 ->
-    gen_server:call(erx_domain_srv, {start_session, Principal, Facets}, infinity).
+-spec start_session(pos_integer(), #{console => term(), display => atom(), default_display => atom()}) ->
+          {ok, domain()} | {error, term()}.
+start_session(Principal, Start) when is_integer(Principal), Principal > 0 ->
+    gen_server:call(erx_domain_srv, {start_session, Principal, Start}, infinity).
 
 -doc """
 The domains Scope covers, `all` or `{principal, P}`, each with its

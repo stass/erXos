@@ -23,7 +23,10 @@ module ErxDomainMintsFuzz
   FAULTS = {
     'report' => [Fault.new(what: 'a mint owner check without its node',
                            anchor: 'node(Pid) =:= Node andalso Owner(Pid) =:= Id',
-                           replacement: 'is_atom(Node) andalso Owner(Pid) =:= Id')],
+                           replacement: 'is_atom(Node) andalso Owner(Pid) =:= Id'),
+                 Fault.new(what: 'an unmarked grant\'s mint that keeps its facet row\'s session',
+                           anchor: 'session_limits(Limits, false) -> maps:remove(session, Limits).',
+                           replacement: 'session_limits(Limits, false) -> Limits.')],
     'reply' => [Fault.new(what: 'a reply check that takes any facet',
                           anchor: 'is_owned(Facet, {ServerId, Node}, State)',
                           replacement: 'is_atom(Node) orelse State =:= ServerId'),

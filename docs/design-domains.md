@@ -2768,9 +2768,11 @@ environment and limits record (the origin `ERX_DOM_SESSION`, whose record is
 the template's index) and judges it as any domain of the principal, against
 its ceilings, share, budget and domain quota, and a template whose limits
 lack `SPACES` makes no session. The service chooses only the name and the
-facets. The name is the principal's prefix and the lowest number no living
+facets. The name is the principal's prefix, its name in the manifest or
+`root` for the system principal, and the lowest number no living
 session of the principal holds (`root_1`, and `root_2` beside it, in a
-development build), so a refused or ended session's name is taken again
+development build; `clock_1` for a principal `clock`), so a refused or
+ended session's name is taken again
 and the names a principal binds are bounded by its living sessions; each
 new binding counts against the domain service's names quota of 64 per
 principal. `Start` is a map: its `console` names the line a login's
