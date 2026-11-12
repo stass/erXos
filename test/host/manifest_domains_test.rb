@@ -137,6 +137,12 @@ class ManifestDomainsTest < Minitest::Test
     assert_equal 0, plain.report.fetch('child_plan_instances')
   end
 
+  # The system principal's template gives root's console session, which needs the
+  # planner (property 17), so without one such a manifest fails closed.
+  def test_root_s_console_session_needs_a_planner
+    refused(Erx::Manifest::Unsupported, 12, 'planner', @plain + self.class.session, planner: nil)
+  end
+
   # Property 1: a unit's holder is the system domain or a configured domain.
   def test_a_unit_held_by_a_configured_domain_is_admitted
     source = @source.sub("placement \"block\"\n  holder system", "placement \"block\"\n  holder @domain.beta")

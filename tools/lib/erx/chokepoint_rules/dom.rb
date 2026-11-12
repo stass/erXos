@@ -89,7 +89,8 @@ module Erx
         # A session is made only from a template the view holds, and only the
         # domain service makes one, through its NIF entry, which refuses every
         # other caller; the backend's refusing stub names the entry too. The
-        # manifest check plans each enabled start row's session, never applying it.
+        # manifest check plans root's console session and each enabled start row's
+        # session, never applying them.
         Chokepoints::Forbidden.new(
           name: 'dom-session-entries',
           rule: "only the domain service, through #{DOM_NIF}, calls erx_dom_lib_session, and only #{DOM_BOOT} " \

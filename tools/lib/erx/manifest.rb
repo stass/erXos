@@ -403,7 +403,7 @@ module Erx
         normalized, report = checker.check
         bytes = Encoder.new(codec).encode(normalized)
         codec.open('manifest', bytes)
-        checker.check_plans(bytes, normalized.fetch('tables'))
+        checker.check_plans(bytes, normalized)
         new(bytes: bytes, report: report, context: context)
       end
 
@@ -1480,23 +1480,27 @@ module Erx
       # does. So the configured domains' share of properties 4 and 13 (each principal's
       # domain quota and budget, each grant within system and the service grants within
       # its reserve) and the connection rows are the library's own judgment, in its own
-      # arithmetic. Then, property 17's planning clause, it plans each enabled start row's
-      # session after them, as the boot starts it, so an enabled row whose principal
+      # arithmetic. Then, property 17's planning clause, it plans the sessions the boot
+      # starts after them, in the boot's order (planned_sessions): root's console
+      # session, and then each enabled start row's. So an enabled row whose principal
       # cannot hold its session beside the configured domains and the sessions before it
-      # fails the build. A build passes a planner always; without one, a manifest with no
-      # domains and no enabled start row is not planned, and any other fails closed.
-      def check_plans(bytes, rows)
+      # fails the build, and so does a system principal that cannot hold root's console
+      # session. A build passes a planner always; without one, a manifest with no domains
+      # and no session to plan is not planned, and any other fails closed.
+      def check_plans(bytes, normalized)
+        rows = normalized.fetch('tables')
         domains = rows.fetch('domains')
-        starts = enabled_starts(rows)
+        sessions = planned_sessions(rows, normalized.fetch('header').fetch('system_principal'))
         unless @planner
-          return if domains.empty? && starts.empty?
+          return if domains.empty? && sessions.empty?
 
-          raise Unsupported.new('configured domains and enabled start rows need the domain library\'s host planner',
+          raise Unsupported.new('configured domains and sessions need the domain library\'s host planner',
                                 property: 12, field: 'planner')
         end
 
         order = rows.fetch('boot_order').map { |step| step.fetch('domain') }
-        statuses = @planner.call(plan_view(bytes, rows, order: order, starts: starts))
+        statuses = @planner.call(plan_view(bytes, rows, order: order,
+                                           templates: sessions.map { |session| session.fetch('template') }))
         invalid("the domain library refuses the manifest's view: #{statuses.fetch('refused').delete_prefix('manifest: ')}", 12, 'view') if statuses.key?('refused')
         order.zip(statuses.fetch('domains')).each do |index, status|
           refuse_plan(status, "configured domain #{domains.fetch(index).fetch('name')}", 'domain')
@@ -1505,14 +1509,30 @@ module Erx
           names = row.values_at('from', 'to').map { |index| domains.fetch(index).fetch('name') }
           refuse_plan(status, "the introduction of #{names.join(' and ')}", 'introduce')
         end
-        principals = rows.fetch('principals')
-        starts.zip(statuses.fetch('sessions')).each do |start, status|
-          name = principals.fetch(start.fetch('principal')).fetch('name')
-          refuse_plan(status, "the session of start row #{name}", 'start', property: 17)
+        sessions.each_with_index do |session, index|
+          refuse_plan(statuses.fetch('sessions').fetch(index), session.fetch('what'), session.fetch('field'), property: 17)
         end
       end
 
       private
+
+      # The sessions the boot starts, in its order, each its template's index in the
+      # session table and how a refusal names it. First root's console session, from
+      # the system principal's template: the reader requires a console line, which
+      # logs root in at boot in a development build and must let root log in in any
+      # build, so it is planned whenever that template exists; a system principal with
+      # none gives the console no session to count. Then each enabled start row's.
+      def planned_sessions(rows, system_principal)
+        principals = rows.fetch('principals')
+        console = rows.fetch('sessions').each_index.select do |index|
+          rows.fetch('sessions').fetch(index).fetch('principal') == system_principal
+        end
+        console.map { |template| { 'template' => template, 'what' => "the console's session of root", 'field' => 'machine.console' } } +
+          enabled_starts(rows).map do |start|
+            name = principals.fetch(start.fetch('principal')).fetch('name')
+            { 'template' => start.fetch('template'), 'what' => "the session of start row #{name}", 'field' => 'start' }
+          end
+      end
 
       # The enabled start rows, in the start table's order, each its principal's index
       # and the index of that principal's session template, which property 17's
@@ -1535,15 +1555,15 @@ module Erx
 
       # The planner's view (DomainPlanner#call): the packed manifest, each archive entry
       # with the bytes it will start with, the configured rows in boot order, each
-      # introduction's parties their places in it, and each enabled start row's session
-      # template.
-      def plan_view(bytes, rows, order:, starts:)
+      # introduction's parties their places in it, and the session template of each
+      # session to plan, in the order the boot starts them.
+      def plan_view(bytes, rows, order:, templates:)
         place = order.each_with_index.to_h
         introductions = rows.fetch('introductions').map do |row|
           { 'a' => place.fetch(row.fetch('from')), 'b' => place.fetch(row.fetch('to')) }
         end
         { 'manifest' => bytes, 'files' => @context.catalog.map { |row| plan_file(row) }, 'order' => order,
-          'introductions' => introductions, 'sessions' => starts.map { |start| start.fetch('template') } }
+          'introductions' => introductions, 'sessions' => templates }
       end
 
       # A boot-image entry as the archive will hold it: an image starts with its image

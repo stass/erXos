@@ -580,10 +580,21 @@ violation fails the build with the property, the record and the field:
     with a session template, at most one row for each principal; at most
     one enabled row names each display; a display a row names is a
     `windows` service that a facet row grants the principal's template;
-    and the sessions of the enabled rows can all be built beside the
+    and the sessions the boot starts can all be built beside the
     configured domains, which the planner of property 12 decides by
-    planning each in the boot view
-    ([design-apps.md](design-apps.md#the-start-table)).
+    planning each in the boot view, in the boot's order: first root's
+    console session, from the system principal's session template, which
+    a development build's console logs in at boot (step 4 of
+    [the boot](#boot)) and from which root logs in at any build's
+    console, so it is counted in every build, and then the session of
+    each enabled row
+    ([design-apps.md](design-apps.md#the-start-table)). So a manifest
+    whose start rows fill a principal's quota or memory with no room left
+    for the console's login fails the build, not the boot. A system
+    principal with no session template gives the console no session, and
+    none is planned for it. Seeded violation: a check that plans the
+    enabled rows alone, which admits a system principal whose memory
+    holds its start row but not root's console session beside it.
 18. **A display's pixel areas fit its budget:** every `display` record
     names a service of the `windows` interface, at most one record for
     each; for each display, the `pixels` of every facet row of its

@@ -11,9 +11,10 @@
  * so every principal passes erx_dom_principal_check here or the build
  * fails. Then it plans each configured domain with erx_dom_plan_configured
  * in boot order, each introduction with erx_dom_plan_connect and then the
- * session of each enabled start row with erx_dom_plan_session (property
- * 17), and records every plan it makes in the view with erx_dom_plan_record
- * or erx_dom_link_record before planning the next, as the boot does once
+ * sessions the boot starts, root's console session and each enabled start
+ * row's, with erx_dom_plan_session (property 17), and records every plan
+ * it makes in the view with erx_dom_plan_record or erx_dom_link_record
+ * before planning the next, as the boot does once
  * each plan is applied. So what the library counts across domains (the
  * principals' quotas and budgets, the service grants against system's
  * reserve, the connection rows and each domain's connections quota) is the
@@ -39,7 +40,8 @@
  * place n (from 0) has id ERX_DOM_SYSTEM_ID + 1 + n. An introduce line
  * names two places; each party reads a side of its own profile's lane
  * size, as the boot sizes it. A session line names a session template, the
- * template of an enabled start row's principal, whose session takes the id
+ * system principal's for root's console session or the template of an
+ * enabled start row's principal, whose session takes the id
  * after the configured domains' and the sessions' before it; its name is a
  * fixed one, since the domain service chooses it and the plan judges only its
  * shape.
@@ -86,7 +88,8 @@ typedef struct dom_plan_line {
 
 /*
  * What the plan file gives: each file with its head's length, the boot order,
- * the introductions and the session templates of the enabled start rows.
+ * the introductions and the session templates of the sessions the boot
+ * starts, root's console session's and each enabled start row's.
  */
 typedef struct dom_plan_input {
 	erx_dom_file_t	*files;

@@ -537,7 +537,8 @@ it; git history is the record of completed work.
   into the DMA window, before the display driver.
 * [High] [design-apps.md](docs/design-apps.md): the code the design asks for, in the order
   [Track A](docs/plan.md#track-a-apps) builds it. Built: the `start` rows and property 17's structural clauses and
-  its planning clause (each enabled row's session planned by the domain library beside the configured domains);
+  its planning clause (root's console session and each enabled row's session planned by the domain library beside
+  the configured domains);
   `erx_start_table` (`merge/3`, `rc.conf`'s and `ctl`'s parsers with their fuzz targets, `set/3`, the command check
   `apply_ctl/4`); `erx_starter` with its table, a supervisor and keeper per enabled row, and `rc.conf` read and
   written under `/data`; the `apps` tree (`erx_starter_fs`), which a session mounts at `/apps`;
@@ -566,6 +567,12 @@ it; git history is the record of completed work.
   `erx_start_table:ctl_errno/1` has a clause per refusal and no catch-all, but nothing checks it against
   `ctl_error()` (no dialyzer runs), so a new refusal without a clause ends the session's grant on its first
   write: returning the errno with the refusal from `apply_ctl/4` makes it hold by construction.
+* [Low] Property 17 plans one root session for the console, but a development build's console also logs root in
+  at the host link's `console` line when the host opens it, and a console's relogin after a session ends may
+  overlap the old session's end; neither is counted, so a manifest that exactly fills the system principal's
+  quota or memory can have that login refused at run time, and the line falls back to the system shell
+  ([design-live.md](docs/design-live.md#the-console)). Counting each secure line's root session (and the
+  relogin overlap, as `tools/lib/erx/apps.rb` budgets two sessions per kept row) would close it.
 * [Medium] `erx_starter:manifest_table/1`, which reads the start rows, the principals and each session template's
   grants from the system manifest, has no host test over a packed manifest with a `start` row; only the `apps`
   QEMU suite (`tools/lib/erx/apps.rb`) reads one. Its grants are every service a template is granted, not only

@@ -59,6 +59,9 @@ class ErxBlkImageTest < Minitest::Test
   def admit(source, extents: nil)
     arguments = ManifestContextFixture.arguments(@codec).merge(platform: @platform, build_kind: 'development')
     arguments[:artifacts] = arguments[:artifacts].merge('release' => { 'kind' => 'erofs_image', 'extents' => extents }) if extents
-    Erx::Manifest.admit(source: source, codec: @codec, context: Erx::Manifest::Context.new(**arguments)).bytes
+    # The manifest keeps root's session template, so root's console session needs a
+    # planner (property 17); the accepting one plans everything.
+    Erx::Manifest.admit(source: source, codec: @codec, context: Erx::Manifest::Context.new(**arguments),
+                        planner: ManifestContextFixture.accepting_planner).bytes
   end
 end

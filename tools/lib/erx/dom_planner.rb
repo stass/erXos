@@ -10,7 +10,8 @@ module Erx
   # "The manifest", property 12): the host build of the library (tools/host/dom_plan.c)
   # builds the boot's view from the packed manifest with the root's own builder
   # (liberx/system/dom_boot_view.c), then plans each configured domain in boot order,
-  # each introduction and each enabled start row's session (property 17) against it,
+  # each introduction and the sessions the boot starts (property 17), root's console
+  # session and then each enabled start row's, against it,
   # recording every plan it makes. This boundary writes the manifest, each archive
   # entry's head and the plan file the helper's header comment describes, and reads back
   # one status per domain, per introduction and per session.
@@ -27,7 +28,8 @@ module Erx
     # view: 'manifest' (the packed manifest's bytes), 'files' (each archive entry's
     # kind, flags and head, the bytes the archive holds at its start), 'order' (the
     # configured rows in boot order), 'introductions' (a and b, each a place in
-    # 'order') and 'sessions' (the session template of each enabled start row). Returns
+    # 'order') and 'sessions' (the session template of each session the boot starts, in
+    # its order: root's console session, then each enabled start row's). Returns
     # 'domains', 'introductions' and 'sessions', each entry's erx_status_t in its list's
     # order, 0 for one the library plans, or 'refused' alone, the library's reason, when
     # it refuses the view itself.

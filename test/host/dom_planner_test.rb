@@ -165,7 +165,8 @@ class DomPlannerTest < Minitest::Test
 
   # Two principals' session templates (property 14), each its principal's, of the
   # profile split; system and guest split users between them, and guest takes a page
-  # of system's memory.
+  # of system's memory. System's quota holds alpha and root's console session, which
+  # the console logs in from system's template (property 17).
   SESSIONS = NARROW +
              LIMITS.sub('limits app', 'limits split').sub('grant @share.users', 'grant @share.narrow')
                    .sub('  spaces none', '  spaces @share.narrow').sub("  flags none\n", "  flags spaces\n") +
@@ -176,7 +177,7 @@ class DomPlannerTest < Minitest::Test
              end.join
 
   def with_sessions
-    source = with_domains('alpha', share: 'narrow')
+    source = with_domains('alpha', quota: 2, share: 'narrow')
     system = source.sub(/^(principal system\n  memory )(\d+)\n  grant @share\.users$/) do
       "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2)) - 4096}\n  grant @share.narrow"
     end
@@ -184,24 +185,51 @@ class DomPlannerTest < Minitest::Test
     system.sub(/(limits native\n(?:  .*\n)*?  grant )@share\.users/, '\1@share.narrow') + SESSIONS
   end
 
-  def test_session_templates_are_read_but_never_planned
+  # A template is no configured domain: alpha is the one domain the boot plans.
+  def test_session_templates_are_not_configured_domains
     assert_equal 1, admit(with_sessions).report.fetch('child_plan_instances')
   end
 
   # Property 17's planning clause: each enabled start row's session is planned with
   # erx_dom_plan_session after the configured domains and introductions, as the boot
   # starts it, and recorded before the next. Each principal's quota takes its session
-  # here, system's beside alpha. Guest has a page of memory, which holds no session of
-  # the split profile, so its enabled row fails the build; left off, it is not planned.
+  # here, system's beside alpha and root's console session. Guest has a page of memory,
+  # which holds no session of the split profile, so its enabled row fails the build;
+  # left off, it is not planned.
   def test_an_enabled_start_row_whose_session_cannot_be_planned_fails_the_build
     fixture = ManifestContextFixture
-    source = fixture.substitute(fixture.substitute(with_sessions, fixture::SYSTEM_QUOTA, '\12'), fixture::MAX_DOMAINS, '\13')
+    source = fixture.substitute(fixture.substitute(with_sessions, fixture::SYSTEM_QUOTA, '\13'), fixture::MAX_DOMAINS, '\14')
     source = fixture.substitute(source, /^(principal guest\n(?:  .*\n)*?  domains )0$/, '\11')
     admit(source + "start system\n")
     admit(source + "start guest\n  enable NO\n")
     error = assert_raises(Erx::Manifest::Invalid) { admit(source + "start system\nstart guest\n") }
     assert_equal [17, 'start'], [error.property, error.field], error.message
     assert_match(/session of start row guest with nomem\b/i, error.message)
+  end
+
+  # Property 17 counts the console's login: the console logs root in from the system
+  # principal's template, so that session is planned after the configured domains and
+  # before the start rows, as the boot starts the console before the start table. Alpha
+  # and each session of the split profile take 5 MiB of their principal's memory, their
+  # memory and outer budget. With 10 MiB, system holds alpha and root's console session,
+  # so its start row, which fits beside alpha alone, fails the build. With 5 MiB it holds
+  # alpha alone, so the console's session fails the build with no start row, and a
+  # system principal with no template plans no console session and fits.
+  def test_the_console_s_session_counts_beside_the_start_rows
+    fixture = ManifestContextFixture
+    domain = 4_194_304 + 1_048_576
+    memory = /^(principal system\n  memory )\d+$/
+    source = fixture.substitute(fixture.substitute(with_sessions, fixture::SYSTEM_QUOTA, '\13'), fixture::MAX_DOMAINS, '\13')
+    source = fixture.substitute(source, memory, "\\1#{2 * domain}")
+    admit(source)
+    error = assert_raises(Erx::Manifest::Invalid) { admit(source + "start system\n") }
+    assert_equal [17, 'start'], [error.property, error.field], error.message
+    assert_match(/session of start row system with nomem\b/i, error.message)
+    alone = fixture.substitute(source, memory, "\\1#{domain}")
+    error = assert_raises(Erx::Manifest::Invalid) { admit(alone) }
+    assert_equal [17, 'machine.console'], [error.property, error.field], error.message
+    assert_match(/console's session of root with nomem\b/i, error.message)
+    admit(fixture.substitute(alone, fixture::SESSION_TEMPLATE, ''))
   end
 
   # A facet granted to a session template reaches the root's view, which admits it,
