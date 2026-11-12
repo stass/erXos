@@ -3,7 +3,8 @@
 
 -module(erx_session_sup).
 -moduledoc """
-The session's supervisor. Its one child is the session's tty relay
+The session's supervisor. Its children are the session's pipe server
+(erx_pipe_srv), which a crash restarts for later pipes, and the session's tty relay
 (erx_session_tty), which ends normally only when its line has hung up, with
 every shell on it; the session then has no terminal, and nothing restarts it.
 """.
@@ -21,4 +22,9 @@ init([]) ->
             restart => transient,
             type => worker,
             modules => [erx_session_tty, erx_console]},
-    {ok, {#{strategy => one_for_one, intensity => 5, period => 10}, [Tty]}}.
+    Pipes = #{id => erx_pipe_srv,
+              start => {erx_pipe_srv, start_link, []},
+              restart => permanent,
+              type => worker,
+              modules => [erx_pipe_srv, erx_pipe]},
+    {ok, {#{strategy => one_for_one, intensity => 5, period => 10}, [Pipes, Tty]}}.

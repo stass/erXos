@@ -8,6 +8,8 @@ module Erx
     # writer's and reader's steps.
     PIPE_CHECK = 'liberx/erx_pipe_check.c'
     PIPE_CORE = 'liberx/erx_pipe_core.c'
+    # The runner that performs the core's steps on an end's mapped pages.
+    PIPE_RUN = 'liberx/erx_pipe_run.c'
     # The generated accessors that load a field of a page a pipe lane or
     # lock uses: its reader page, lock page and ring header. The published
     # positions' acquire loads are the exception: a write end's of rpos and
@@ -21,7 +23,7 @@ module Erx
     PIPES = 'docs/design-pipes.md'
 
     declare_group(
-      unchecked_objects: [PIPE_CHECK, PIPE_CORE],
+      unchecked_objects: [PIPE_CHECK, PIPE_CORE, PIPE_RUN],
       rules: [
         # Only erx_shm_copy reads a pipe's shared pages, apart from the one
         # acquire load of each published position (docs/design.md,

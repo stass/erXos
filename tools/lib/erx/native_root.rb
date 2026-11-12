@@ -55,6 +55,9 @@ module Erx
     # What ERTS's lane port driver (erx_lane_drv.c) calls: the lanes, the funnel and the
     # ETF reader and writer, which hashes atoms with BLAKE3.
     CONNECTION = %w[liberx/erx_lane.c liberx/erx_funnel.c liberx/erx_etf.c].freeze
+    # What ERTS's pipe NIF (erx_pipe_nif.c) calls: the pipe core, its checks and the runner
+    # that performs the core's steps on an end's mapped pages (docs/design-pipes.md).
+    PIPE = %w[liberx/erx_pipe_check.c liberx/erx_pipe_core.c liberx/erx_pipe_run.c].freeze
     # The domain library: its pure core, its apply phase and install funnel, and the lanes it sizes.
     DOMAIN_LIBRARY = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_apply.c
                         liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c
@@ -93,7 +96,7 @@ module Erx
               'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c', 'liberx/backend/core/refused.c',
               "#{BACKEND}/api_names.c", "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_root_start.c", "#{BACKEND}/libc_root_write.c", "#{BACKEND}/runtime_entry.c",
               "#{BACKEND}/park_report.c", "#{BACKEND}/runtime_main.c", 'liberx/release.c', 'liberx/release_fs.c',
-              *DOMAIN_LIBRARY, *CONNECTION].freeze
+              *DOMAIN_LIBRARY, *CONNECTION, *PIPE].freeze
     # A domain's runtime image: the interpreter ERTS as a task's program, at task.ld's
     # fixed addresses, since erx_image_map loads only an ERX_IMAGE_FIXED image. musl's
     # start enters ERTS's main through domain_entry.c, which first checks the boot page;
@@ -111,13 +114,14 @@ module Erx
                       "#{BACKEND}/runtime_main.c", 'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c',
                       'liberx/backend/core/refused.c', 'liberx/backend/core/object_info.c', 'kernel/core/log.c', "#{BACKEND}/api_names.c",
                       "#{BACKEND}/task_refused.c", 'liberx/backend/core/dom_lib_none.c', "#{BACKEND}/release_task.c", 'liberx/release_fs.c', 'liberx/system/dom_dump.c',
-                      'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c', *CONNECTION].freeze
+                      'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c', *CONNECTION, *PIPE].freeze
     # The sources that read musl's headers, which NativeRuntime's sysroot holds: the boot page builder,
     # the domain library, the native_domain root and string functions that link it, and a
     # program's layer and the programs suite's programs that read what it keeps.
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c liberx/system/dom_core.c liberx/system/dom_life.c
                       liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c liberx/system/dom_dump.c
                       liberx/erx_lane.c liberx/erx_funnel.c
+                      liberx/erx_pipe_check.c liberx/erx_pipe_core.c liberx/erx_pipe_run.c
                       liberx/erx_etf.c test/guest/native_domain/guest.c
                       test/guest/native_domain/string.c
                       liberx/program/program.c liberx/program/startup.c liberx/erx_profile.c

@@ -26,7 +26,8 @@ collector are not here):
 
 * `{pipe, Holder, Flags}`: make a pipe whose two ends `Holder` holds;
 * `{inherit, Holder, Pipe, End, Child}`: make an end of the same kind as
-  `Holder`'s end `End` for `Child`, a program being created;
+  `Holder`'s end `End` for `Child`, a program being created or a
+  session process;
 * `{closed, Holder, Pipe, End}`: `Holder` let go of its end `End`;
 * `{gone, Holder}`: every end `Holder` held is gone;
 * `{drained, Holder, Pipe, End, Writer}`: `Holder`'s read end `End`

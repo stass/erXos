@@ -34,6 +34,8 @@ module Erx
     LANE_RING_AND_RECORD = /\A(?:erx_lane_(?:hdr|rec)\w*|ERX_LANE_(?:HDR|REC)_\w+)\z/
     # The pipe ring's host fuzzer, which plays a hostile writer.
     PIPE_RING_FUZZ = 'tools/fuzz/pipe_ring_fuzz.c'
+    # The pipe runner's host test, which plays the other end of a lane.
+    PIPE_RUN_HARNESS = 'test/fixtures/pipe_run_harness.c'
 
     declare_group(
       unchecked_objects: [LANE_READER],
@@ -56,12 +58,12 @@ module Erx
         Chokepoints::Forbidden.new(
           name: 'lane-pages-reader',
           rule: "only #{LANE_READER}, whose erx_lane_take and erx_lane_put are the one reader and the one " \
-                "writer of a lane's ring and erx_lane_ctl_take and erx_lane_ctl_put of its control table, names a lane's shared layouts, their accessors or the offsets of a side (D3); the pipe's files, whose lanes carry no frames, and the pipe ring's fuzzer name only the ring header and the record",
+                "writer of a lane's ring and erx_lane_ctl_take and erx_lane_ctl_put of its control table, names a lane's shared layouts, their accessors or the offsets of a side (D3); the pipe's files, whose lanes carry no frames, the pipe ring's fuzzer and the pipe runner's test name only the ring header and the record",
           design: "#{DOMAINS}#the-funnel",
           scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*', *INHERITED_RUNTIME], except: [ASMJIT]),
           pattern: LANE_LAYOUT,
           sites: [LANE_READER, *ABI_C_OUTPUTS, *LANE_PRODUCERS].map { |path| Chokepoints::Site.new(glob: path) } +
-                 [*PIPE_FILES, PIPE_RING_FUZZ].map { |glob| Chokepoints::Site.new(glob: glob, permits: LANE_RING_AND_RECORD) },
+                 [*PIPE_FILES, PIPE_RING_FUZZ, PIPE_RUN_HARNESS].map { |glob| Chokepoints::Site.new(glob: glob, permits: LANE_RING_AND_RECORD) },
           seed: { 'liberx/erx_funnel.c' => "void f(void) { erx_lane_hdr_wpos_load(hdr, &wpos); }\n",
                   'otp/erts/emulator/sys/erxos/erx_lane_drv.c' => "const erx_lane_ctl_t *ctl = table;\n",
                   'liberx/backend/hosted/peek.c' => "data = side + ERX_LANE_SIDE_DATA;\n",

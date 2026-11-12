@@ -1714,6 +1714,34 @@ it; git history is the record of completed work.
   `{redeem}`, `{discard}`, `{withdraw}` and the collector of deposits no reader can reach
   (docs/design-pipes.md, "The second tier" and "Deposits"), and `holder()` has no
   `{deposit, Ticket}`. `test/erlang/erx_pipe_explore.erl` gains their events with them.
+* [Medium] session, `erx_pipe_srv`: it performs the actions of session processes' ends only. The
+  makes, reports, replies and installs of a program holder (`{program, _}`) belong to P8's
+  `erx_prog_handler`, which forwards a program's requests and notices to the pipe server and installs
+  into its program (docs/design-pipes.md, "The pipe server"); until it lands, no program holds an end
+  of a session's pipe.
+* [Medium] session, `erx_pipe_nif.c` (`nif_read`): a read that returned `would_block` and then data or
+  a timeout leaves its sleeper bit set in every live lane, and its waiter bit too if it never reads
+  again, since only the core's `R_DATA_WOKE` clears them and a fresh start never reaches it. Each
+  co-reader's arm and cross then rings the idle end, whose owner collects `{erx_pipe_ready, _, _}`
+  messages without bound, and a reused `rix` inherits the bit. Clear the end's bits on a fresh start
+  after a wait and in `end_release`.
+* [Low] session, `erx_pipe_nif.c`: when `enif_alloc_env` fails, a `closed`, `drained` or
+  `pipe_server_lost` notice is dropped, so a closed end never reaches the server (no eof or `EPIPE`
+  follows) or a drained lane is never forgotten. Out of memory only; retry from the next call or
+  preallocate one environment per end.
+* [Low] session, `erx_pipe_nif.erl`: `make_lock/0`, `make_lane/1` and `make_bell/3` are exported, so any
+  session process can make pipe objects outside the step's `pipes` quota; they are collected with
+  their terms. Restrict them to `erx_pipe_srv`'s process when `erx_policy` sets the quota.
+* [Low] session, `erx_pipe_nif.c` (`end_broken`): the broken-lane line goes to stderr, not to the
+  debug log as one escaped line (docs/design-pipes.md, "Failure handling"); it carries integers only.
+* [Low] session, `erx_pipe_nif.c` (`get_obj`, `obj_keep`): `closed` is read without `obj_mutex`, and
+  a keep does not refuse a closed object; reachable only if the server passed an object after its own
+  close. Check and count under `obj_mutex`.
+* [Low] session, `erx_pipe_srv` (`retry/2`): each wake restarts the whole timeout, `write/3`'s spec
+  leaves out `{error, eio}`, and a timeout after a partial write does not say how much was written.
+* [Low] liberx, `erx_pipe_run.c`: the runner relies on its caller for a lane size that is a power of
+  two of at least 16 and a mapping of `ERX_PIPE_RING_DATA` plus that size; P7's program ends must
+  give the same. `test/host/pipe_run_test.rb` seeds no fault in `run_within` or `run_lane`'s check.
 * [Medium] session, `erx_pipe:step/2` (`end_gone`, read end) and docs/design-pipes.md ("Ends and
   their holders"): the pipe server closes a gone read end's doorbell at its gone, while the handler
   may still have installs to make from an earlier step that name it: a child's write descriptor

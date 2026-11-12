@@ -46,7 +46,7 @@ module Erx
     # lane group); they never name the frame kind, and read a pipe's pages
     # only through erx_shm_copy (the pipe group).
     PIPE_NIF = 'otp/erts/emulator/nifs/erxos/erx_pipe_nif.c'
-    PIPE_FILES = ['liberx/erx_pipe*', 'include/erx/pipe.h', 'liberx/program/pipe*', PIPE_NIF].freeze
+    PIPE_FILES = ['liberx/erx_pipe*', 'include/erx/pipe.h', 'include/erx/pipe_run.h', 'liberx/program/pipe*', PIPE_NIF].freeze
     INCLUDE = Chokepoints::INCLUDE_PREFIX
 
     # An include of the header at path by any path ending in its file name,

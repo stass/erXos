@@ -1042,7 +1042,48 @@ position or bit, if any, and returns `would_block`, and the process waits
 for a message: the doorbell's label, which the runtime delivers to the
 end's owner when the doorbell rings, or the pipe server's report. An end
 is a resource owned by one process, and it is gone when that process
-exits. The command image, which runs an Erlang command or `rc` in a
+exits or closes it. A session process makes a pipe with
+`erx_pipe_srv:pipe/0` and gives another process an end with
+`erx_pipe_srv:inherit/2`, the pipe server's `inherit` event with that
+process as the child: the server opens the new end for the child and
+answers it to the caller, which hands it over, and only the child may use
+it.
+
+The NIF and a program's ends run the one pipe runner, `liberx`'s
+`erx_pipe_wrun` and `erx_pipe_rrun` (`liberx/erx_pipe_run.c`): it steps
+the pipe core, performs each step's copies, stores, fences and rings on
+the pages the end has mapped, checked against those mappings and the
+call's buffer, and returns at the first wait or at the call's end. A
+program's worker waits on its doorbell and runs again; the NIF returns
+`would_block` and starts its next call afresh, which is safe because a
+step that waits holds neither the reader lock nor an unpublished record.
+Both stamp records with the time page's monotonic clock, `erx_clock_ns`,
+never ERTS's monotonic time, which may carry an offset of its own, since a
+reader merges records from both by their stamps.
+
+A session process's end holds no capability of its own: it maps the pipe
+server's objects and keeps each by a reference count, so a capability of
+the server closes only when the server has closed it and no end of a
+session process still uses it, and no kernel copy is made. The NIF closes
+capabilities and never deletes memory, so no holder of a pipe's pages can
+make another fault.
+
+The messages the NIF's parties exchange:
+
+* `{erx_pipe_ready, Pipe, End}`, the label of an end's doorbell, which the
+  runtime delivers to the end's owner when the doorbell rings.
+* `{pipe_report, Report}`, sent by the pipe server to a session process
+  after it has applied the report to that process's end with the NIF, so
+  the end holds what the report names before its owner reads it.
+* `{pipe_server_lost, End}`, sent by an end to its owner when the pipe
+  server exits: the end is lost, so its reads fail with `EIO` and its
+  writes with `EPIPE`.
+* `{closed, {process, Owner}, Pipe, End}` and
+  `{drained, {process, Owner}, Pipe, End, Wend}`, sent by an end to the
+  pipe server when its owner exits or closes it, and after a read that
+  drained lane `Wend`.
+
+The command image, which runs an Erlang command or `rc` in a
 command domain, holds no end of a session's pipe: its standard streams are
 relayed by its session
 ([design-programs.md](design-programs.md#what-a-program-can-start)).

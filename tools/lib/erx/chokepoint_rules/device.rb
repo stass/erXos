@@ -43,12 +43,15 @@ module Erx
           # domain library NIF, read-only, the object it creates to copy one into.
           # erx_program_drv.c maps the session's two sides of a program's channel, memory
           # objects it has just created from the session's budget, never device memory.
+          # erx_pipe_nif.c maps a pipe's lock page, rings and reader pages, memory objects the
+          # pipe server created from the session's budget, never device memory.
           sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.c"),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_program_drv.c', permits: /\Aerx_vm_map\z/),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_jit_memory.c', permits: /\Aerx_vm_map\z/),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_lane_drv.c', permits: /\Aerx_vm_map\z/),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_crash_area.c', permits: /\Aerx_vm_map\z/),
-                  Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_domain_lib_nif.c", permits: /\Aerx_vm_map\z/)],
+                  Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_domain_lib_nif.c", permits: /\Aerx_vm_map\z/),
+                  Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_pipe_nif.c", permits: /\Aerx_vm_map\z/)],
           seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_mem_create_physical(0, 0, 0, 0, 0, 0); }\n",
                   'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(void) { erx_vm_map(0, 0, 0, 0, 0, 0); }\n",
                   'otp/erts/emulator/sys/common/erl_mmap.c' => "void f(void) { erx_vm_map(0, 0, 0, 0, 0, 0); }\n",

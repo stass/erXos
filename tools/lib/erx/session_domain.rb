@@ -33,7 +33,8 @@ module Erx
   # the session reads through the system domain (KERNEL_LOG); `uname -a` prints every field the
   # system shell's does (MediumBoot::UNAME_A), the build facts among them, and `uname -b`
   # the build identifier, so none is `unknown`. The session's Erlang shell answers
-  # node() as root_1@erxos, writes a line to /data/across, the storage domain's tree
+  # node() as root_1@erxos, passes bytes between its processes through the session's pipes
+  # (PIPES), writes a line to /data/across, the storage domain's tree
   # through the session's `data` facet, and reads it back once that grant has arrived
   # (with_data), and writes 64 KiB in numbered lines while Ctrl-G opens the menu and Esc
   # leaves it mid-burst; the serial log, with the menu taken out, holds every line whole
@@ -106,6 +107,42 @@ module Erx
                    'cwd => <<"/">>, spawn => false, sigmask => [], sigignore => [], umask => 8#022'
     PROGRAM_REFUSED = "{erx_program:start(\#{#{PROGRAM_SPEC}}), " \
                       "erx_program:start(\#{#{PROGRAM_SPEC}, guarantee => 2, cap => 1})}.\r"
+    # Typed at root_1's Erlang shell: the session's pipes between its processes
+    # (docs/design-pipes.md, "The session's pipe NIF"). PpGive spawns a process that waits
+    # for an end, gives it one inherited from the shell's end X, and runs F on it. The cases:
+    # a 4,096-byte write that a child reads whole in one read; a child writer that writes
+    # `abc` and exits, after which the shell reads `abc` and then eof; a child reader that
+    # exits, after which the shell's writes fail with epipe; and the pipe server killed while
+    # a child reader waits, which gets {error,eio}, never eof, before a pipe made through
+    # the restarted server passes `z`. PIPES types the first two, PIPES_LOST the other two.
+    # The supervisor's report of the kill is held back while it restarts the server: it would
+    # reach the console late, inside a later answer's line.
+    PIPES = 'PpSelf=self(),' \
+            'PpGive=fun(PpX,PpF)->PpC=spawn(fun()->receive {e,PpE}->PpF(PpE) end end),' \
+            '{ok,PpCE}=erx_pipe_srv:inherit(PpX,PpC),PpC!{e,PpCE},PpC end,' \
+            '{ok,PpR1,PpW1}=erx_pipe_srv:pipe(),PpBin=list_to_binary([PpN rem 256||PpN<-lists:seq(1,4096)]),' \
+            '_=PpGive(PpR1,fun(PpE)->PpSelf!{p1,erx_pipe_srv:read(PpE,8192,5000)} end),' \
+            'ok=erx_pipe_srv:write(PpW1,PpBin,5000),' \
+            'PpA1=receive {p1,PpG1}->PpG1=:=PpBin after 10000->timeout end,' \
+            '{ok,PpR2,PpW2}=erx_pipe_srv:pipe(),' \
+            '_=PpGive(PpW2,fun(PpE)->ok=erx_pipe_srv:write(PpE,<<"abc">>,5000) end),' \
+            'ok=erx_pipe_srv:close(PpW2),' \
+            'PpA2=[erx_pipe_srv:read(PpR2,100,5000),erx_pipe_srv:read(PpR2,100,5000)],' \
+            "io:format(\"~0p~n\",[{pipes,PpA1,PpA2}]).\r"
+    PIPES_ANSWER = '{pipes,true,[<<"abc">>,eof]}'
+    # The rest, a line of its own, so that neither line nears a terminal's line limit.
+    PIPES_LOST = '{ok,PpR3,PpW3}=erx_pipe_srv:pipe(),_=PpGive(PpR3,fun(_)->ok end),ok=erx_pipe_srv:close(PpR3),' \
+                 'PpWr=fun PpL(0)->timeout;PpL(PpK)->case erx_pipe_srv:write(PpW3,<<"x">>,1000) of ' \
+                 '{error,epipe}->epipe;ok->timer:sleep(20),PpL(PpK-1);PpO->PpO end end,PpA3=PpWr(250),' \
+                 '{ok,PpR4,_PpW4}=erx_pipe_srv:pipe(),PpOld=whereis(erx_pipe_srv),' \
+                 '_=PpGive(PpR4,fun(PpE)->PpSelf!{p4,erx_pipe_srv:read(PpE,100,20000)} end),' \
+                 'timer:sleep(500),logger:set_module_level(supervisor,critical),exit(PpOld,kill),PpA4=receive {p4,PpG4}->PpG4 after 30000->timeout end,' \
+                 'PpNew=fun PpM(0)->timeout;PpM(PpK)->case whereis(erx_pipe_srv) of ' \
+                 'PpP when is_pid(PpP),PpP=/=PpOld->ok;_->timer:sleep(100),PpM(PpK-1) end end,ok=PpNew(100),logger:unset_module_level(supervisor),' \
+                 '{ok,PpR5,PpW5}=erx_pipe_srv:pipe(),ok=erx_pipe_srv:write(PpW5,<<"z">>,5000),' \
+                 'PpA5=erx_pipe_srv:read(PpR5,10,5000),' \
+                 "io:format(\"~0p~n\",[{pipes_lost,PpA3,PpA4,PpA5}]).\r"
+    PIPES_LOST_ANSWER = '{pipes_lost,epipe,{error,eio},<<"z">>}'
     # The file root's session writes and every later step reads, in Erlang and at the system
     # shell, and its one line, `across`, as file:read_file/1 answers it in the shell.
     WRITE_ACROSS = 'ok = file:write_file("/data/across", <<"across\n">>), file:read_file("/data/across")'
@@ -202,6 +239,9 @@ module Erx
        shell.merge(name: 'root_1-erlang-shell', type: "node().\r").freeze,
        { name: 'root_1-node', pattern: answer('root_1@erxos'), seconds: 60, type: PROGRAM_REFUSED }.freeze,
        { name: 'program-refused', pattern: answer('{{error,einval},{error,einval}}'), seconds: 60,
+         type: PIPES }.freeze,
+       { name: 'session-pipes', pattern: answer(PIPES_ANSWER), seconds: 120, type: PIPES_LOST }.freeze,
+       { name: 'session-pipes-lost', pattern: answer(PIPES_LOST_ANSWER), seconds: 120,
          type: with_data(WRITE_ACROSS) }.freeze,
        { name: 'session-data', pattern: answer(ACROSS_READ), seconds: 180, type: BURST }.freeze,
        { name: 'burst-first', pattern: line(burst_line(1).chomp("\r\n")), seconds: 60, type: CTRL_G }.freeze,

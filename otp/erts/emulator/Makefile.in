@@ -1007,6 +1007,10 @@ $(OBJDIR)/%.o: nifs/common/%.cpp
 # "The hosted backend").
 $(OBJDIR)/erx_device.o $(OBJDIR)/erx_device_nif.o: CFLAGS += $(if $(findstring hosted,$(TARGET)),-DERX_DEVICE_STAND_IN)
 
+# The pipe NIF's module is erx_pipe_nif, since erx_pipe is the pipe server's step module;
+# make_driver_tab names its init function after the object less _nif.
+$(OBJDIR)/erx_pipe_nif.o: CFLAGS += -DSTATIC_ERLANG_NIF_LIBNAME=erx_pipe
+
 # littlefs, the stopgap read-write file system of /data (docs/design-stopgap.md,
 # "littlefs in the storage domain"), built from its import in littlefs/.
 LFS_DIR = $(ERX_TREE)/littlefs
@@ -1276,6 +1280,7 @@ NIF_OBJS = \
 	$(if $(findstring hosted,$(TARGET)),$(OBJDIR)/erx_stdio_nif.o) \
 	$(OBJDIR)/erx_watchdog_nif.o \
 	$(OBJDIR)/erx_device_nif.o \
+	$(OBJDIR)/erx_pipe_nif.o \
 	$(OBJDIR)/erx_log_nif.o \
 	$(OBJDIR)/erx_object_info_nif.o \
 	$(OBJDIR)/erx_littlefs_nif.o \
