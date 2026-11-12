@@ -2554,17 +2554,36 @@ facet rows name the grantees, so `data` is an instance of `files`, and
 `storage_ctl` and `network_ctl` are instances of `driver_control`. The
 build generates from the manifest the table of service names, and the
 domain service's one funnel for a domain's facets,
-`erx_domain_srv:facets/1`, through which every create spec, every
-session start and every mint passes, refuses a key the table does not
-hold with `{error, {bad_spec, facets}}`, and installs under a key only a
-facet whose grant record ([Grant records](#facets)) names that key's
-service and that grantee, taking the pid from the record, never from a
-spec. So a facet enters a domain's
+`erx_domain_srv:facets/2`, through which every create spec and every
+session start passes, refuses a key the table does not
+hold with `{error, {bad_spec, facets}}`. A spec hands a name that has a
+grant record ([Grant records](#facets)) on only as the attenuating facet
+of [Handing a facet on](#facets), minted within the record of the
+starter's facet of that key's service, so no recorded facet the starter
+holds reaches the new domain unattenuated. The manifest's facet rows
+are checked at build time by the facet table check (FacetNames), so
+every facet the system domain serves and every mint stands on a name
+the table holds. So a facet enters a domain's
 table only as a declared instance, by construction, and a need that
 has no interface of its own finds no way in: it is an inspection path,
 a file in its owner's tree, or a protocol with a design and an
 interface of its own ([design.md](design.md#decisions), "Every route
 between domains starts at a declared facet").
+
+**The exempt names, a stopgap.** Three facet names the code uses have
+no declared interface yet: `console`, `log` and `web_line`. The facet
+table check lets each appear only in the files its exemption lists,
+beside the TODO.md item that declares or removes it
+(`FacetNames::UNDECLARED`). The list only shrinks: a name leaves it
+when its interface is declared or its use is replaced, and no name is
+ever added to it; the check fails a list whose length is not its
+bound, which is lowered with each name that leaves and never raised.
+No exempt name is in the
+funnel's table, which holds only the manifest's service names. The
+funnel hands on two of them, `console` and `log`, as literals of its
+own, each with any process of the system domain and each removed with
+its TODO.md item; `log` goes when the kernel log is read through the
+inspect facet.
 
 The services of the live machine are reached through facets of
 interfaces `abi/services` declares: `inspect`

@@ -146,11 +146,11 @@ module Erx
     # 64 MiB.
     JIT_EXTRA_BOUND = 16 << 20
     # What the faceted domain evaluates in NAMED_HALT's place: a gen_server call of ping
-    # to its facet echo (erx:cap/1, docs/design-domains.md, "Facets"), which forwards it to
+    # to its facet console (erx:cap/1, docs/design-domains.md, "Facets"), which forwards it to
     # the process of the system domain behind it, whose answer is the call's. A halt with
     # status 0 says the domain held the facet before -eval and the call went through it
     # and back; 3 is another answer, 4 a call that raised, as one to undefined does.
-    FACET_HALT = 'erlang:halt(try gen_server:call(erx:cap(echo),ping,10000) of ping->0;_->3 catch _:_->4 end)'
+    FACET_HALT = 'erlang:halt(try gen_server:call(erx:cap(console),ping,10000) of ping->0;_->3 catch _:_->4 end)'
     FACET_ARGS = [*DOMAIN_ARGS[0...-1], FACET_HALT].freeze
     # The process of the system domain behind the facet: it answers every gen_server call
     # with its request.
@@ -211,7 +211,8 @@ module Erx
       # A domain of the BeamAsm image, which the library gives a space that allows JIT
       # objects because the image's manifest marks it: it runs, and halts with status 0.
       ['DlJit', 'DlRunWith(<<"jitted">>,JitFields,fun(_)->ok end)', "{#{DOMAIN_IDS[3]},ok,{domain_down,#{DOMAIN_IDS[3]},{halt,0}}}"],
-      # A domain whose spec names an echo process of the system domain under facets: the
+      # A domain whose spec names an echo process of the system domain under console, the
+      # one name besides log that a spec hands on with a process of its own: the
       # domain service mints it a facet in front of the process and answers its init's
       # report with it, and the domain's call through the facet answers, so it halts 0.
       ['DlFacet', 'DlRunWith(<<"faceted">>,FacetFields,fun(_)->ok end)',
@@ -284,7 +285,7 @@ module Erx
                         grant: erlang_map(quota_ns: (1 << 64) - 1, cpuset: 1, capacity_mcpu: 1000),
                         lane: 4096, args: binary_args(DOMAIN_ARGS), env: '<<>>', domain_pid: 'self()')
       jit = erlang_map(runtime: domain.jit, args: binary_args(JIT_ARGS))
-      facet = erlang_map(args: binary_args(FACET_ARGS), facets: erlang_map(echo: FACET_ECHO))
+      facet = erlang_map(args: binary_args(FACET_ARGS), facets: erlang_map(console: FACET_ECHO))
       up = erlang_map(args: binary_args(UP_ARGS))
       badarg = 'DlBadarg=fun(Call)->try Call() catch error:badarg->badarg end end'
       steps = DOMAIN_LIB_STEPS.map { |name, call, _answer| "#{name}=#{call}" }

@@ -11,6 +11,7 @@ require_relative 'generation_plan'
 require_relative 'json_input'
 require_relative 'abi'
 require_relative 'hardware'
+require_relative 'facet_names'
 require_relative 'terminal_generation'
 
 module Erx
@@ -104,7 +105,8 @@ module Erx
     GENERATORS = [
       Generator.new(name: 'abi', plan: ->(root) { ABI::Generator.generation(root: root) }, code: CODE),
       Generator.new(name: 'hardware', plan: ->(root) { Hardware.generation(root: root) }, code: CODE),
-      Generator.new(name: 'terminal', plan: ->(root) { TerminalRules.generation(root: root) }, code: CODE)
+      Generator.new(name: 'terminal', plan: ->(root) { TerminalRules.generation(root: root) }, code: CODE),
+      Generator.new(name: 'facets', plan: ->(root) { FacetNames.generation(root: root) }, code: CODE)
     ].freeze
 
     class << self

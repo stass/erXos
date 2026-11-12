@@ -88,6 +88,7 @@ reach it only through facets, which arrive with the connections.
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2]).
 
 -include("generated/erx_abi.hrl").
+-include("generated/erx_facet_names.hrl").
 
 %% Every domain is the system principal's, number 1, the one principal the library's
 %% view has (include/erx/dom.h, erx_dom_principal_t).
@@ -129,12 +130,13 @@ start_link() ->
     start_link(#{}).
 
 -doc """
-Opts may name lib, the domain library's module (erx_domain_lib), agent, the
-connection agent's (erx_connections), exports, the export table's
-(erx_dist), introduce_timeout, an introduce/2 caller's deadline in
-milliseconds, release_wait, a held start's (start/3), and mints, the
-owner function (erx_dist:owner/1, as erx:owner/1, by default) and deadline that erx_domain_mints:new/1
-takes, for a host test's stand-ins.
+Opts names a host test's stand-ins: lib, the domain library's module
+(erx_domain_lib by default); agent, the connection agent's (erx_connections);
+exports, the export table's (erx_dist); introduce_timeout, an introduce/2
+caller's deadline in milliseconds; release_wait, a held start's bound
+(start/3); mints, the owner function (erx_dist:owner/1 by default) and
+deadline that erx_domain_mints:new/1 takes; and facet_names, the table of
+facet names that facets/2 checks (the generated ?ERX_FACET_NAMES by default).
 """.
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
@@ -162,7 +164,8 @@ init(Opts) ->
            held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT),
            mint_config => MintConfig, mints => erx_domain_mints:new(MintConfig#{services => [], grants => []}),
            mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0},
-           served => #{}, web_lines => #{}},
+           served => #{}, web_lines => #{},
+           facet_names => maps:get(facet_names, Opts, ?ERX_FACET_NAMES)},
      {continue, boot}}.
 
 %% The library, registered with this process as the one that hears of every end, or none
@@ -392,14 +395,14 @@ handle_info(_Message, State) ->
 %% with -boot /bin/<boot> as init's first flag (boot_args/2), as the manifest's packer
 %% does for a configured row and a session template (docs/design-stopgap.md, "The
 %% production image"), so args that name -boot are refused. Its facets
-%% name processes of the system domain, by facet name, each with its grant's limits or
-%% none; the domain gets a facet in front of each once it reports ready (grant_facets/3),
-%% and the library never sees them.
+%% name the system domain's grants, by facet name, each with its limits or none, which
+%% facets/2 checks; the domain gets a facet in front of each once it reports ready
+%% (grant_facets/3), and the library never sees them.
 create(_Spec, #{lib := none} = State) ->
     {{error, enotsup}, State};
 create(#{name := Name} = Spec, State) ->
     Timeout = maps:get(boot_timeout, Spec, ?BOOT_TIMEOUT),
-    Facets = facets(maps:get(facets, Spec, #{})),
+    Facets = facets(maps:get(facets, Spec, #{}), State),
     ValidFacets = Facets =/= invalid,
     Fields = maps:without([name, boot, boot_timeout], Spec),
     Args = boot_args(maps:get(args, Fields, <<>>), maps:get(boot, Spec, none)),
@@ -457,31 +460,78 @@ boot_args(Args, _Boot) when not is_binary(Args) ->
 boot_args(_Args, _Boot) ->
     invalid.
 
-%% A spec's facets, each as {Behind, Limits}, or invalid: a map from facet names to live or
-%% dead processes of the system domain, each alone or with the limits of its grant that
-%% differ from erx_facet's defaults, max_request and in_flight.
-facets(Facets) when is_map(Facets) ->
-    Valid = maps:filtermap(fun(Name, Facet) when is_atom(Name) -> facet(Facet);
-                              (_Name, _Facet) -> false
-                           end, Facets),
+%% A spec's facets, each as {Behind, Limits}, or invalid. This is the domain service's
+%% one funnel for a domain's facets, which every create spec and session start passes
+%% (docs/design-domains.md, "Facets", the facet table). Facets maps each facet name to a
+%% grant, a pid alone or with limits (grant/1). The starter is the system domain, since
+%% the service's callers are its own processes. The spec is refused whole unless the
+%% spec may hand each of its names on (facet/3).
+facets(Facets, State) when is_map(Facets) ->
+    Valid = maps:filtermap(fun(Name, Grant) -> facet(Name, grant(Grant), State) end, Facets),
     case map_size(Valid) =:= map_size(Facets) of
         true -> Valid;
         false -> invalid
     end;
-facets(_Facets) ->
+facets(_Facets, _State) ->
     invalid.
 
-facet(Behind) when is_pid(Behind) ->
-    facet({Behind, #{}});
-facet({Behind, Limits}) when is_pid(Behind), node(Behind) =:= node(), is_map(Limits) ->
+%% Whether a spec may hand Name on with its grant, and as what. Two names stand outside
+%% the table as stopgaps, each a literal here that goes with its TODO.md item; the spec
+%% hands either on with a process of the system domain, live or dead, as its pid (local/1).
+%% Every other name must be in the table of facet names (declared/2) and is handed on
+%% only as an attenuating facet (attenuated/2).
+facet(_Name, invalid, _State) ->
+    false;
+%% Stopgap: console is of no declared interface. TODO.md, Bugs by subsystem, "two facets
+%% of no declared interface", declares it and deletes this clause.
+facet(console, {ok, Grant}, _State) ->
+    local(Grant);
+%% Stopgap: the kernel log's own facet. TODO.md, Bugs by subsystem, "the inspect service",
+%% reads the log through the inspect facet and deletes this clause.
+facet(log, {ok, Grant}, _State) ->
+    local(Grant);
+facet(Name, {ok, Grant}, State) ->
+    declared(Name, State) andalso attenuated(Name, Grant).
+
+%% Whether Name is in the table of facet names: the manifest's service names, the
+%% generated ?ERX_FACET_NAMES unless the service was started with another (start_link/1).
+%% The manifest's own facet rows are not looked up here: the build's facet table check
+%% (FacetNames) checks them.
+declared(Name, #{facet_names := Names}) ->
+    lists:member(Name, Names).
+
+%% A stopgap name's grant, whose pid is any process of this node, the system domain's;
+%% which process is the caller's to get right, so such a name could stand in front of
+%% any of the system domain's processes (the Phase 1 residual of TODO.md's facets item).
+local({Pid, Limits}) ->
+    node(Pid) =:= node() andalso {true, {Pid, Limits}}.
+
+%% The attenuating facet of a name of the table, which the service would mint in front
+%% of the starter's within the starter's grant record of that name's service
+%% (docs/design-domains.md, "Facets", Handing a facet on). The service does not make it
+%% (TODO.md's facets item), so a name of the table is refused, whatever the pid. Handing
+%% on the starter's own facet instead would pass it on unattenuated, and attenuation alone
+%% is not enough either: only the system domain holds a facet of driver control
+%% (docs/design-system.md, "The manifest", property 8), so the hand-on must also keep to
+%% the manifest's facet rows for the new domain. A system-served facet such as inspect
+%% reaches a domain only from the manifest's rows (served/2).
+attenuated(_Name, _Grant) ->
+    false.
+
+%% {ok, {Pid, Limits}}, or invalid: the limits are those of the grant that differ from
+%% erx_facet's defaults, and may name max_request and in_flight, each a positive
+%% integer, and nothing else.
+grant(Pid) when is_pid(Pid) ->
+    grant({Pid, #{}});
+grant({Pid, Limits}) when is_pid(Pid), is_map(Limits) ->
     Positive = fun(Key) -> is_integer(map_get(Key, Limits)) andalso map_get(Key, Limits) > 0 end,
     case lists:all(Positive, maps:keys(maps:with([max_request, in_flight], Limits))) andalso
          map_size(maps:without([max_request, in_flight], Limits)) =:= 0 of
-        true -> {true, {Behind, Limits}};
-        false -> false
+        true -> {ok, {Pid, Limits}};
+        false -> invalid
     end;
-facet(_Facet) ->
-    false.
+grant(_Grant) ->
+    invalid.
 
 %% A session of Principal, made from its session template alone, with Facets checked as a
 %% request's: the console names the line it starts the session at by the console facet it
@@ -491,7 +541,7 @@ facet(_Facet) ->
 start_session(_Principal, _Facets, #{lib := none} = State) ->
     {{error, enotsup}, State};
 start_session(Principal, Facets, #{templates := Templates} = State) ->
-    case {Templates, facets(Facets)} of
+    case {Templates, facets(Facets, State)} of
         {#{Principal := _}, invalid} ->
             {{error, {bad_spec, facets}}, State};
         {#{Principal := #{template := Template}}, Valid} ->
@@ -690,7 +740,7 @@ mint(Id, DomainPid, Name, {Behind, Limits}, Exports) ->
 %% domain, each {Behind, Limits} by its service's name: Behind is the process the service
 %% named for it with erx_facet:serve/2, which the system domain's services do as they
 %% start, and Limits the grant's limits that erx_facet applies, max_request and in_flight,
-%% checked as a spec's are (facet/1). A service with no living process, or a grant whose
+%% checked as a spec's are (grant/1). A service with no living process, or a grant whose
 %% limits fail that check, is left out and logged, so the domain finds the name absent,
 %% as it finds any service that is unavailable, until it restarts. Each facet ends with
 %% its process, and nothing grants a new one when the service restarts (TODO.md).
@@ -700,13 +750,13 @@ served({configured, Row}, #{served := Served}) ->
                      fun({Name, Limits}) ->
                              Facet = case Servers of
                                          #{Name := Behind} -> is_process_alive(Behind) andalso
-                                                                  facet({Behind, maps:with([max_request, in_flight], Limits)});
+                                                                  grant({Behind, maps:with([max_request, in_flight], Limits)});
                                          #{} -> false
                                      end,
                              case Facet of
-                                 {true, Grant} ->
+                                 {ok, Grant} ->
                                      {true, {Name, Grant}};
-                                 false ->
+                                 _NoFacet ->
                                      %% A manifest name and row: no text a domain wrote.
                                      logger:error("erx_domain: service ~ts of the system domain has no facet for configured row ~b",
                                                   [Name, Row]),

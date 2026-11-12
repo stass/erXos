@@ -828,16 +828,20 @@ refused_stop() ->
 
 facets() ->
     %% A spec's facets are its own: the library never sees them, and a spec whose
-    %% facets are not a map of names to the service's own pids is refused.
+    %% facets are not a map of names to grants is refused.
     Echo = spawn(fun Loop() -> receive {'$gen_call', From, Req} -> gen:reply(From, Req), Loop() end end),
-    ?assertEqual({error, {bad_spec, facets}}, erx_domain:create(#{boot => <<"base">>, name => <<"f">>, facets => [echo]})),
-    ?assertEqual({error, {bad_spec, facets}}, erx_domain:create(#{boot => <<"base">>, name => <<"f">>, facets => #{echo => self}})),
-    ?assertEqual({error, {bad_spec, facets}},
-                 erx_domain:create(#{boot => <<"base">>, name => <<"f">>, facets => #{<<"echo">> => Echo}})),
-    ?assertEqual({error, {bad_spec, facets}},
-                 erx_domain:create(#{boot => <<"base">>, name => <<"f">>, facets => #{echo => erx_domain_fake_lib:agent(<<"f">>, 5)}})),
+    Spec = fun(Facets) -> #{boot => <<"base">>, name => <<"f">>, facets => Facets} end,
+    Refused = {error, {bad_spec, facets}},
+    ?assertEqual(Refused, erx_domain:create(Spec([console]))),
+    %% A name outside the generated table is refused; so is a declared name, data or
+    %% inspect, whatever the process, since a spec hands on only console and log, which
+    %% have no grant record, each with a process of the system domain.
+    [?assertEqual(Refused, erx_domain:create(Spec(#{Name => Echo}))) || Name <- [echo, data, inspect, web_line]],
+    ?assertEqual(Refused, erx_domain:create(Spec(#{console => self}))),
+    ?assertEqual(Refused, erx_domain:create(Spec(#{<<"console">> => Echo}))),
+    ?assertEqual(Refused, erx_domain:create(Spec(#{console => erx_domain_fake_lib:agent(<<"f">>, 5)}))),
     %% A facet may name its grant's limits, max_request and in_flight, and nothing else.
-    [?assertEqual({error, {bad_spec, facets}}, erx_domain:create(#{boot => <<"base">>, name => <<"f">>, facets => #{echo => {Echo, Limits}}}))
+    [?assertEqual(Refused, erx_domain:create(Spec(#{console => {Echo, Limits}})))
      || Limits <- [#{max_request => 0}, #{in_flight => -1}, #{max_request => many}, #{other => 1}, [], {}]],
     %% The service mints a facet in front of each, bound to the domain, which exports
     %% itself to the domain, and answers the domain's report, through its domain pid,
@@ -845,19 +849,20 @@ facets() ->
     %% from the service after the report is the answer.
     Self = self(),
     erlang:trace(new_processes, true, ['receive', {tracer, Self}]),
-    {ok, Domain} = erx_domain:create(#{boot => <<"base">>, name => <<"facets">>, memory => 4096, facets => #{echo => {Echo, #{max_request => 5000}}}}),
+    {ok, Domain} = erx_domain:create(#{boot => <<"base">>, name => <<"facets">>, memory => 4096,
+                                       facets => #{console => {Echo, #{max_request => 5000}}}}),
     erlang:trace(new_processes, false, ['receive']),
     Id = erx_domain:id(Domain),
     Pid = erx_domain:pid(Domain),
-    {create, Spec} = next_call(),
-    ?assertNot(is_map_key(facets, Spec)),
+    {create, Created} = next_call(),
+    ?assertNot(is_map_key(facets, Created)),
     ?assertEqual({open_side, Id, 'facets@erxos', Id * 10}, next_call()),
     ?assertEqual({export, Id, [send]}, next_call()),
     ?assertEqual({start, Id}, next_call()),
     ?assertEqual({export, Id, [send]}, next_call()),
     Received = [Message || {trace, P, 'receive', Message} <- trace_messages(), P =:= Pid],
-    ?assertMatch([{_, port, _}, {erx_origin, Id, {erx_ready, _}}, {_, facets, #{echo := _}}], Received),
-    [#{echo := Facet}] = [Facets || {_, facets, Facets} <- Received],
+    ?assertMatch([{_, port, _}, {erx_origin, Id, {erx_ready, _}}, {_, facets, #{console := _}}], Received),
+    [#{console := Facet}] = [Facets || {_, facets, Facets} <- Received],
     _ = [erlang:trace(Traced, false, ['receive']) || Traced <- [Pid, Facet]],
     _ = trace_messages(),
     ?assertMatch(#{grantee := Id, dropped := 0, max_request := 5000}, erx_facet:info(Facet)),

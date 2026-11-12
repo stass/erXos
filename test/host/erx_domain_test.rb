@@ -22,12 +22,15 @@ require_relative '../../tools/lib/erx/generated'
 # erx_driver_ctl, the driver-control facet, and erx_blk_sup behind it, and
 # test/erlang/erx_devfs_tests.erl for /dev, erx_devfs and erx_devfs_core, with the
 # erx_fs behaviour and the schema's and text's modules they call. Each fault of
-# FAULTS replaces one passage of one of these sources, and the case it names must fail.
+# FAULTS replaces one passage of one of these sources (/dev's tree, the inspect facet's scope
+# or the domain service's funnel for a domain's facets), and the case it names must fail.
 class ErxDomainTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # erx_domain_srv includes the generated erx_abi.hrl, in build/gen.
+  # erx_domain_srv includes the generated erx_abi.hrl and erx_facet_names.hrl, in build/gen.
   Erx::Generated.ensure(root: ROOT)
-  INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
+  INCLUDES = %w[erlang/apps/erx/include erlang/apps/erx_domain/include].flat_map do |include|
+    ['-I', Erx::Generated.path(include, root: ROOT)]
+  end.freeze
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_domain/src')
   # Compiled before the rest: erx_devfs names it as its behaviour.
   BEHAVIOUR = File.join(ROOT, 'erlang/apps/erx_files/src/erx_fs.erl')
@@ -84,6 +87,7 @@ class ErxDomainTest < Minitest::Test
   # Each fault replaces one passage of one source of the service, and the case it names,
   # of the EUnit module tests, must fail.
   Fault = Data.define(:name, :file, :from, :to, :tests, :caught_by)
+  SERVICE = File.join(APPLICATION, 'erx_domain_srv.erl')
   FAULTS = [
     # The read-only tree's own refusal of ctl, the seeded fault of P5b: without it the
     # tree walks to ctl, so a session holding only the read-only tree could reset a driver.
@@ -104,7 +108,19 @@ class ErxDomainTest < Minitest::Test
               file: File.join(APPLICATION, 'erx_domain_pid.erl'),
               from: '{ok, Inspect} when is_pid(Inspect), node(Inspect) =:= Node ->',
               to: '{ok, Inspect} when is_pid(Inspect), is_atom(Node) ->',
-              tests: 'erx_domain_tests', caught_by: 'inspect_agent_of_another_incarnation_test')
+              tests: 'erx_domain_tests', caught_by: 'inspect_agent_of_another_incarnation_test'),
+    # The funnel's gates (docs/design.md, the facet table's chokepoint row): a funnel that
+    # hands a name of the table on as the starter's own facet hands the starter's recorded
+    # facets on unattenuated; and without the node check a stopgap name stands in front of
+    # another node's process.
+    Fault.new(name: "a funnel that hands on the starter's recorded facets", file: SERVICE,
+              from: "attenuated(_Name, _Grant) ->\n    false.",
+              to: "attenuated(_Name, Grant) ->\n    {true, Grant}.",
+              tests: 'erx_domain_mints_srv_tests', caught_by: 'funnel'),
+    Fault.new(name: 'a funnel that takes a process of another node for a stopgap name', file: SERVICE,
+              from: 'node(Pid) =:= node() andalso {true, {Pid, Limits}}',
+              to: 'is_pid(Pid) andalso {true, {Pid, Limits}}',
+              tests: 'erx_domain_mints_srv_tests', caught_by: 'stopgap_names')
   ].freeze
 
   def test_the_cases_catch_each_seeded_fault
@@ -135,7 +151,7 @@ class ErxDomainTest < Minitest::Test
   def eunit_output(mod, deadline:, sources:)
     Dir.mktmpdir('erx-domain-test') do |work|
       [[BEHAVIOUR], sources].each do |batch|
-        output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE, '-pa', work, '-o', work,
+        output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', *INCLUDES, '-pa', work, '-o', work,
                                          *batch, stdin_data: '')
         assert status.success?, output
       end

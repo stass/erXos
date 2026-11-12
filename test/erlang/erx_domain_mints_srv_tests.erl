@@ -37,10 +37,23 @@ namespace_test_() ->
 namespace_end_test_() ->
     {setup, fun() -> setup(5) end, fun cleanup/1, fun(_) -> {timeout, 20, fun namespace_end/0} end}.
 
+%% The domain service's funnel for a domain's facets (docs/design-domains.md, "Facets"),
+%% with a table of facet names that holds echo and other, and with the table the
+%% build generates.
+funnel_test_() ->
+    {setup, fun() -> setup(1, #{facet_names => [echo, other]}) end, fun cleanup/1,
+     fun(_) -> {timeout, 20, fun funnel/0} end}.
+
+stopgap_names_test_() ->
+    {setup, fun() -> setup(1) end, fun cleanup/1, fun(_) -> {timeout, 20, fun stopgap_names/0} end}.
+
 setup() -> setup(1).
 
-%% With echo a service of interface Interface.
-setup(Interface) ->
+setup(Interface) -> setup(Interface, #{}).
+
+%% With echo a service of interface Interface, and the service's start_link options
+%% merged with Opts, which may name a table of facet names for the funnel's cases.
+setup(Interface, Opts) ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
                                      restarts => 3, restart_period_s => 60, boot_timeout_s => 60} end,
     persistent_term:put({erx_domain_fake_lib, boot},
@@ -50,10 +63,10 @@ setup(Interface) ->
                                      {{template, 0}, echo, 1, #{max_request => 64}}]}),
     provide('a@erxos'),
     Log = erx_domain_fake_lib:start_log(),
-    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                 exports => erx_domain_fake_lib, introduce_timeout => ?DEADLINE,
-                                                 mints => #{owner => fun erx_domain_mints_tests:owner/1,
-                                                            deadline => ?DEADLINE}}),
+    {ok, Service} = erx_domain_srv:start_link(Opts#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                      exports => erx_domain_fake_lib, introduce_timeout => ?DEADLINE,
+                                                      mints => #{owner => fun erx_domain_mints_tests:owner/1,
+                                                                 deadline => ?DEADLINE}}),
     unlink(Service),
     {Log, Service}.
 
@@ -109,6 +122,62 @@ installs() ->
     ?assertEqual(#{echo => SystemFacet}, persistent_term:get({erx, facets})),
     erlang:trace(PidA, false, ['receive']),
     erlang:trace(PidB, false, ['receive']).
+
+%% A name of the table is refused whatever its grant, since the attenuating facet the
+%% domain service would mint in front of the starter's (docs/design-domains.md,
+%% "Handing a facet on") does not exist, and the spec is refused without admitting a
+%% domain. The funnel reads no grant record: the grants installed here (b's grant of
+%% echo, the system domain's own, a's mint) are the fixture for the attenuating hand-on
+%% of TODO.md's facets item, which tells them apart, and each is refused alike.
+%% console, a stopgap name outside the table, passes with a process of the system
+%% domain, so the spec fails only at its boot, checked after the facets, and is refused
+%% with a process of another node.
+funnel() ->
+    #{{0, echo} := {introducing, {5, 6}, _}} = wait(fun(#{{0, echo} := {introducing, _, _}}) -> true end),
+    [PidA, PidB] = [domain_pid(Id) || Id <- [5, 6]],
+    PidA ! {erx_origin, 5, {erx_connection_mapped, 6}},
+    PidB ! {erx_origin, 6, {erx_connection_mapped, 5}},
+    #{{0, echo} := {minting, {5, 6}, Tag}} = wait(fun(#{{0, echo} := {minting, _, _}}) -> true end),
+    GranteeFacet = pid('a@erxos', 5, 2),
+    PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, GranteeFacet}}},
+    wait(fun(#{{0, echo} := {installing, {5, 6}, _, F}}) -> F =:= GranteeFacet end),
+    PidB ! {erx_origin, 6, {erx_facets_installed, Tag}},
+    wait(fun(#{{0, echo} := {installed, {5, 6}, F}}) -> F =:= GranteeFacet end),
+    Spec = fun(Facets) -> #{boot => <<"../x">>, name => <<"c">>, memory => 4096, facets => Facets} end,
+    ?assertEqual({error, {bad_spec, facets}}, erx_domain:create(Spec(#{echo => GranteeFacet}))),
+    SystemFacet = install_system_grant(),
+    [?assertEqual({error, {bad_spec, facets}}, erx_domain:create(Spec(Facets)))
+     || Facets <- [#{echo => SystemFacet}, #{echo => {SystemFacet, #{max_request => 64}}},
+                   #{other => SystemFacet}, #{echo => pid('a@erxos', 5, 1)}, #{echo => self()},
+                   #{echo => GranteeFacet}, #{console => pid('a@erxos', 5, 1)}]],
+    ?assertEqual({error, {bad_spec, boot}}, erx_domain:create(Spec(#{console => self()}))),
+    #{core := Core} = sys:get_state(erx_domain_srv),
+    ?assertEqual(none, erx_domain_core:fetch(7, Core)).
+
+%% The running table holds only the manifest's service names: none of the names the
+%% facet-names check exempts travels into it. The funnel's two stopgap names, console
+%% and log, stand outside it and still pass, each alone and both together, with a
+%% process of the system domain, so the spec fails only at its boot, and are refused
+%% with a process of another node; web_line, exempt in the check but no stopgap of the
+%% funnel, and a name in neither are refused.
+stopgap_names() ->
+    #{facet_names := Names} = sys:get_state(erx_domain_srv),
+    ?assertEqual([], [Name || Name <- [console, log, web_line], lists:member(Name, Names)]),
+    ?assert(lists:member(data, Names)),
+    Spec = fun(Facets) -> #{boot => <<"../x">>, name => <<"c">>, facets => Facets} end,
+    [?assertEqual({error, {bad_spec, boot}}, erx_domain:create(Spec(Facets)))
+     || Facets <- [#{console => self()}, #{log => self()}, #{console => self(), log => self()}]],
+    [?assertEqual({error, {bad_spec, facets}}, erx_domain:create(Spec(Facets)))
+     || Facets <- [#{console => pid('a@erxos', 5, 1)}, #{log => pid('a@erxos', 5, 1)},
+                   #{web_line => self()}, #{rogue => self()}, #{log => self(), rogue => self()}]].
+
+%% The system domain's grant of echo installed, a's mint's reply its facet.
+install_system_grant() ->
+    #{{system, echo} := {minting, {5, 4}, Tag}} = wait(fun(#{{system, echo} := {minting, _, _}}) -> true end),
+    Facet = pid('a@erxos', 5, 3),
+    domain_pid(5) ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, Facet}}},
+    wait(fun(#{{system, echo} := {installed, {5, 4}, F}}) -> F =:= Facet end),
+    Facet.
 
 %% a's end cancels both operations' pairs, and its restart, id 7, starts new ones. A late
 %% reply of the old incarnation, which only a's new domain pid could pass on, is
@@ -195,7 +264,7 @@ last_end() ->
 %% granted log, which a process of this runtime names with erx_facet:serve/2 before
 %% the service starts, and a (row 1) is granted clock, which no service names. b's
 %% ready answer carries a facet in front of log's process, bound to b and within the
-%% row's max_request; a's carries none, and neither grant reaches the mint core.
+%% row's max_request; a's carries none, and no grant reaches the mint core.
 %% It starts the service itself: the trace of the domain pids goes to the process that
 %% asks for it, and EUnit runs a fixture's setup in another process than its test.
 served_test() ->

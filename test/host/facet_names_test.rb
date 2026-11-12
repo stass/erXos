@@ -126,17 +126,85 @@ class FacetNamesTest < Minitest::Test
     assert_equal Erx::FacetNames::UNDECLARED.flat_map { |name, exemption| [name] * exemption.sites.size }.sort, stale.sort
   end
 
+  # The funnel's table, which the build generates: each manifest service's public name
+  # and nothing else, so no exempt name travels into the running system as table data
+  # (the funnel's two stopgap names are literals of its own). A facet row's own name is
+  # no service's.
+  def test_the_generated_table_holds_only_the_manifest_names
+    files, = table
+    Dir.mktmpdir do |root|
+      write(root, files.merge(MANIFEST => files.fetch(MANIFEST).sub("facet seeded\n", "facet seeded\n  name \"other\"\n")))
+      plan = Erx::FacetNames.generation(root: root)
+      header = plan.files.fetch(Erx::FacetNames::HEADER)
+      assert_equal ["-define(ERX_FACET_NAMES, ['seeded'])."], header.lines(chomp: true).grep(/^-define\(ERX_/).grep_v(/_HRL,/)
+      assert_equal({ 'abi/services/*.txt' => [INTERFACE], 'config/manifest/*.txt' => [MANIFEST] }, plan.globs)
+    end
+  end
+
+  # The exemptions are a stopgap that only shrinks: the tree's list meets its bound, a
+  # list with one name more is refused, and so is one with a name fewer until the bound
+  # comes down with it.
+  def test_the_exemptions_only_shrink
+    exemptions = Erx::FacetNames::UNDECLARED
+    detail = ->(list) { Erx::FacetNames.exemption_violations(list).map(&:to_s).join }
+    assert_empty detail.call(exemptions)
+    longer = exemptions.merge('rogue' => Erx::FacetNames::Exemption.new(todo: 'none', sites: []))
+    assert_match(/UNDECLARED holds 4 names, not EXEMPTIONS_MAX \(3\): the exemptions only shrink/, detail.call(longer))
+    assert_match(/UNDECLARED holds 2 names, not EXEMPTIONS_MAX \(3\): lower EXEMPTIONS_MAX/,
+                 detail.call(exemptions.except('log')))
+  end
+
+  # A manifest name outside the atom syntax generates nothing, so a name cannot close the
+  # header's quoted atom and add one of its own.
+  def test_the_generated_table_refuses_a_name_that_breaks_its_quoting
+    files, = table
+    Dir.mktmpdir do |root|
+      write(root, files.merge(MANIFEST => files.fetch(MANIFEST).sub("  interface seeded\n",
+                                                                     "  interface seeded\n  name \"a',b\"\n")))
+      assert_raises(Erx::Error) { Erx::FacetNames.generation(root: root) }
+    end
+  end
+
+  # A table with a violation, here a service of an interface abi/services does not
+  # declare, generates nothing.
+  def test_the_generated_table_refuses_a_manifest_violation
+    files, = table
+    Dir.mktmpdir do |root|
+      write(root, files.merge(INTERFACE => "service other 9\n"))
+      error = assert_raises(Erx::Error) { Erx::FacetNames.generation(root: root) }
+      assert_match "service seeded's interface seeded", error.message
+    end
+  end
+
+  # A name the manifest declares while UNDECLARED still exempts it generates nothing, so
+  # no exemption outlives its declaration.
+  def test_the_generated_table_refuses_a_declared_exempt_name
+    files, = table
+    Dir.mktmpdir do |root|
+      write(root, files.merge(MANIFEST => files.fetch(MANIFEST).sub("  interface seeded\n", "  interface seeded\n  name \"console\"\n")))
+      error = assert_raises(Erx::Error) { Erx::FacetNames.generation(root: root) }
+      assert_match 'both declared and exempt in UNDECLARED: console', error.message
+    end
+  end
+
   # The source check runs the rule over the files git lists.
   def test_the_source_check_refuses_a_seeded_violation
     Dir.mktmpdir do |root|
       files, docs = table
-      files.merge(docs).merge(MODULE => "f() -> erx:cap(rogue).\n").each do |path, text|
-        FileUtils.mkdir_p(File.join(root, File.dirname(path)))
-        File.write(File.join(root, path), text)
-      end
+      write(root, files.merge(docs).merge(MODULE => "f() -> erx:cap(rogue).\n"))
       checks = Erx::Checks.new(root: root, runner: nil)
       error = assert_raises(Erx::Error) { checks.send(:check_facet_names, [*files.keys, *docs.keys, MODULE]) }
       assert_match "#{MODULE}:1", error.message
+    end
+  end
+
+  private
+
+  # Each of files written under root at its path.
+  def write(root, files)
+    files.each do |path, text|
+      FileUtils.mkdir_p(File.join(root, File.dirname(path)))
+      File.write(File.join(root, path), text)
     end
   end
 end

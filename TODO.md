@@ -1450,13 +1450,13 @@ it; git history is the record of completed work.
   session's line that rides the facet registry. Declare the console's interface in `abi/services/console.txt`
   with the tty's six messages, as design-live.md ("The tty") states, and take `web_line` off the registry,
   since design-web.md ("Overview") makes the line a name the login hands out rather than a facet, then drop
-  both from `UNDECLARED`.
-* [Medium] domains, the facet-names check reads text (`tools/lib/erx/facet_names.rb`): a facet named by a
-  quoted atom, a macro or a variable, or a create spec built away from `erx_domain:start_session/2` and a
-  `facets => #{...}` literal, gets past it, and it reads the manifest with its own small parser rather than
-  `Erx::ABI::Syntax.parse`. Make the funnel refuse what the table does not list: generate the declared names
-  (the manifest's services and the exemptions) into an Erlang header at build time and have
-  `erx_domain_srv:facets/1` refuse any other key of a create spec, so the source check is a second line.
+  both from `UNDECLARED` and lower `EXEMPTIONS_MAX` to match. Declaring `console` also deletes the funnel's
+  literal `console` clause (`erx_domain_srv:facet/3`), so it waits for the attenuating hand-on of the
+  facets item below, through which the console facet is then handed on like any recorded facet.
+* [Low] domains, the facet table's manifest reader (`tools/lib/erx/facet_names.rb`, `records_of`): the
+  facet-names check, and the funnel's table generated from it (`erx_facet_names.hrl`), read the manifest
+  with a small parser of their own rather than `Erx::ABI::Syntax.parse`. Read it with the manifest's own
+  syntax so the table and the image's manifest cannot disagree on a service's name.
 * [Medium] shell and domains, the inspect service (`erlang/apps/erx/src/erx_facets.erl`, `facets/2`;
   `erx_inspector.erl`; `erx_log_facet.erl`; `erlang/apps/erx_web_line/src/erx_web_line.erl`;
   `erlang/apps/erx_domain/src/erx_domain_srv.erl`): the code departs from design-live.md
@@ -1477,9 +1477,9 @@ it; git history is the record of completed work.
   route `erx_inspector`'s calls without a scope through the facet, each request in a bounded query worker;
   start `erx_procfs` over the facet rather
   than at scope `all` (`otp/lib/kernel/src/kernel.erl`); then delete `erx_log_facet` and its tests, the
-  line's `scope`, the local scope of `facets/2`, and `log` from `UNDECLARED`. Keep the
-  `session-dmesg` QEMU checkpoint, which tests the behaviour. Until then have `erx_domain:create/1` refuse a
-  spec's facet named `inspect`.
+  line's `scope`, the local scope of `facets/2`, `log` from `UNDECLARED` (lowering `EXEMPTIONS_MAX`), and
+  the funnel's literal `log` clause (`erx_domain_srv:facet/3`). Keep the `session-dmesg` QEMU checkpoint,
+  which tests the behaviour.
 * [Medium] inspection schema, `abi/inspection.txt`: design-live.md's path table and
   [The runtime agent](docs/design-live.md#the-runtime-agent) name `[processes, Pid, source]`, the source lines
   around a process's location from `erx_source`, but the schema declares no such path, so the inspector, and a
@@ -1809,11 +1809,12 @@ it; git history is the record of completed work.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_pid.erl`: a domain can
   fill its domain pid's mailbox as fast as its lane delivers, and the pid passes each
   answer-shaped message after the ready report on to the domain service, which every domain
-  shares; the service drops them without counting (design-system.md "What a domain sends
-  the domain service"). Bound what a domain can make the pid and the service spend, and
-  count the service's drops, when the connection protocol applies answers.
+  shares, and which drops and counts each one no connection expects (design-system.md "What
+  a domain sends the domain service"). A count is one integer per domain, but the time
+  each message costs the pid and the service is not bounded. Bound what a domain can make
+  the pid and the service spend.
 * [Medium] facets, `erlang/apps/erx/src/erx_facet.erl` and `erx_domain_srv.erl`
-  (`grant_facets/2`): the facet behaviour checks the origin, the reply target, the
+  (`grant_facets/3`, `facets/2`): the facet behaviour checks the origin, the reply target, the
   encoded size against `max_request` and the limit in flight, and nothing else of
   design-domains.md "Facets". Stopgap residuals, of fairness and memory rather than
   authority: no admission by the grantee's measured share of reductions, no queue quota and
@@ -1822,15 +1823,24 @@ it; git history is the record of completed work.
   queued, not by the funnel before, and likewise a query worker (`erx_inspect_worker.erl`)
   drops an agent's answer past `inspect_message_heap_min` words by its decoded size once it
   is queued, not the funnel before it; and admission is hand-written, not the generated path
-  from the service's operation schema. Missing: the domain service's grant records, the check
-  that a facet handed on is granted to the starter (every creator is a process of the system
-  domain, whose own processes stand behind every facet it names), `erx_domain:grant/4`, and
-  facets from a configured or session template row, since the stopgap manifest check refuses
-  manifest facet rows; a spec's `facets` is the one source of a domain's facets. Init waits
-  at most 5 s for the answer and then runs with none.
-  shares, and which drops and counts each one no connection expects (design-system.md "What
-  a domain sends the domain service"). A count is one integer per domain, but the time
-  each message costs the pid and the service is not bounded. Bound what a domain can make the pid and the service spend.
+  from the service's operation schema. The funnel (`facets/2`) hands on only `console` and
+  `log`, each a literal clause of `facet/3` beside its TODO.md item, and refuses every other
+  name with `{bad_spec, facets}`, a name of the table included (`attenuated/2`), since
+  handing on the starter's own recorded facet would pass it on unattenuated. Phase 1
+  residual: `console` and `log` take any local process the system domain
+  hands, which only trusted system-domain code can do; both names go with their items above
+  (the inspect item deletes `log`, the console item declares `console`). Build the
+  attenuating hand-on of design-domains.md "Handing a facet on", which mints a facet in
+  front of the starter's within its grant record, and let `attenuated/2` hand recorded
+  names on through it. Attenuation alone does not keep design-system.md's "The manifest"
+  property 8 (only the system domain holds a facet of driver control): design the rule
+  that ties a hand-on to the manifest's facet rows for the new domain first, in
+  design-domains.md "Handing a facet on". The facets `grant_facets/3` starts in front of a spec's grants and of
+  the system domain's served ones need grant records of their own for a starter other than
+  the system domain to hand one on. Until then the funnel's table lookup (`declared/2`)
+  decides nothing a test can see, since `attenuated/2` refuses every name of the table too.
+  Missing besides: `erx_domain:grant/4`. Init waits at most 5 s for the answer and then
+  runs with none.
 * [Medium] domain service and manifest check, `erx_domain_core:restart/5` and `tools/lib/erx/manifest.rb`
   (`normalize_domains`): a configured row may restart `restarts` times within `restart_period_s`, and
   a boot that hangs is stopped only after its `boot_timeout_s`, so a row with `restarts` above 0 and
