@@ -168,10 +168,12 @@ module Erx
         'service' => %w[name server interface],
         'facet' => %w[name grantee service operations max_request in_flight reductions period_ns max_heap_size queue],
         'image' => %w[device input salt],
-        'partial_boot' => %w[image]
+        'partial_boot' => %w[image],
+        'start' => %w[enable display restarts restart_period_s]
       }.freeze
       OPTIONAL = { 'machine' => %w[system_args], 'domain' => %w[boot_timeout_s args env], 'session' => %w[args env], 'service' => %w[name],
-                   'facet' => %w[name queue], 'image' => %w[salt] }.freeze
+                   'facet' => %w[name queue], 'image' => %w[salt],
+                   'start' => %w[enable display restarts restart_period_s] }.freeze
       DIRECTIVES = { 'introduce' => 2, 'liveness' => 1, 'shell_principal' => 1 }.freeze
       IDENTIFIER = /\A[a-z0-9][a-z0-9_-]{0,62}\z/.freeze
       module_function
@@ -908,6 +910,7 @@ module Erx
         %w[window service facet introduce image liveness].each do |kind|
           invalid('empty native boot has no service or child assignments', 9, kind) unless records(kind).empty?
         end
+        invalid('a partial boot starts no row', 17, 'start') unless records('start').empty?
       end
 
       def check_device(device)
@@ -944,6 +947,7 @@ module Erx
 
         invalid('a partial boot configures no domains', 12, 'domain') unless records('domain').empty?
         invalid('a partial boot makes no sessions', 14, 'session') unless records('session').empty?
+        invalid('a partial boot starts no row', 17, 'start') unless records('start').empty?
         %w[service facet introduce liveness].each do |kind|
           invalid('a partial boot runs no services', 2, kind) unless records(kind).empty?
         end
@@ -975,6 +979,7 @@ module Erx
           rows['services'].map { |row| row.values_at('server', 'name') }.uniq.size == services.size
         rows['introductions'] = normalize_introductions
         rows['facets'] = normalize_facets(services.map(&:first), rows)
+        rows['starts'] = normalize_starts(services.map(&:first), rows)
         edges = boot_edges(rows['facets'], rows['services'])
         rows['boot_order'] = boot_order(rows['domains'], edges)
         check_rescue(rows['domains'], edges)
@@ -1151,6 +1156,77 @@ module Erx
 
       # An interface a check reasons from, which the ABI must declare.
       def fetch_interface(name) = find_interface(name) || raise(Erx::Error, "abi/services declares no interface #{name}")
+
+      # A start row's restart intensity where its source states none: more than
+      # START_RESTARTS ends within START_RESTART_PERIOD_S seconds leave the row down
+      # (docs/design-apps.md, "The start table").
+      START_RESTARTS = 5
+      START_RESTART_PERIOD_S = 600
+
+      # The manifest's start rows, sorted by their principal's index, each with its
+      # defaults applied: enabled, no display and START_RESTARTS ends in
+      # START_RESTART_PERIOD_S seconds. Property 17's structural clauses: a row is keyed
+      # by its principal's name, so the frontend gives a principal at most one, and that
+      # principal has a session template; no two enabled rows name one display; and a
+      # display is a service of the windows interface that a facet row grants the
+      # principal's template. While abi/services declares no windows interface no
+      # service is a display, so every row naming one is refused. Property 17's last
+      # clause, that the enabled rows' sessions fit beside the configured domains, is not
+      # checked here (TODO.md, design-apps.md).
+      def normalize_starts(services, tables)
+        rows = records('start').map { |record| start_row(record, services, tables.fetch('sessions')) }
+        enabled = @codec.member('mf_start_flags', 'enabled')
+        none = @codec.constant('mf_none')
+        displays = rows.select { |row| (row.fetch('flags') & enabled) != 0 }.map { |row| row.fetch('display') } - [none]
+        invalid('two enabled start rows name one display', 17, 'start.display') unless displays.uniq.size == displays.size
+        rows.reject { |row| row.fetch('display') == none }.each { |row| check_start_display(row, tables) }
+        rows.sort_by { |row| row.fetch('principal') }
+      end
+
+      # One start row: its principal's index, which must have a session template, and
+      # each field the record states or its default. The period is at least a second,
+      # since the row's supervisor takes it as its own.
+      def start_row(record, services, sessions)
+        principal = @indices.fetch('principal')[record.name] || invalid('a start row names no principal', 17, 'start.name')
+        invalid('a start row\'s principal has no session template', 17, 'start.name') unless
+          sessions.any? { |row| row.fetch('principal') == principal }
+        stated = ->(key, default, &value) { record.properties.key?(key) ? value.call(key) : default }
+        row = { 'principal' => principal,
+                'flags' => stated.call('enable', @codec.member('mf_start_flags', 'enabled')) { start_flags(record) },
+                'display' => stated.call('display', @codec.constant('mf_none')) { start_display(record, services) },
+                'restarts' => stated.call('restarts', START_RESTARTS) { |key| number(record, key) },
+                'restart_period_s' => stated.call('restart_period_s', START_RESTART_PERIOD_S) { |key| number(record, key) } }
+        invalid('a start row\'s restart period is under a second', 17, 'start.restart_period_s') if row.fetch('restart_period_s').zero?
+        row
+      end
+
+      # A row's enable: YES or NO, as rc.conf(5) writes it.
+      def start_flags(record)
+        token = one(record, 'enable')
+        record.line.fail!('enable is YES or NO') if token.quoted || !%w[YES NO].include?(token.value)
+        token.value == 'YES' ? @codec.member('mf_start_flags', 'enabled') : 0
+      end
+
+      # A row's display, @service.NAME, as the service's index in the sorted service table.
+      def start_display(record, services)
+        token = one(record, 'display')
+        services.index { |service| !token.quoted && "@service.#{service.name}" == token.value } ||
+          invalid('a start row\'s display names a service the manifest does not contain', 17, 'start.display')
+      end
+
+      # A row's display: a service of the windows interface, granted to the row's
+      # principal's session template by a facet row.
+      def check_start_display(row, tables)
+        windows = find_interface('windows') ||
+                  invalid('a start row names a display, and abi/services declares no windows interface', 17, 'start.display')
+        display = row.fetch('display')
+        invalid('a start row\'s display is not a windows service', 17, 'start.display') unless
+          tables.fetch('services').fetch(display).fetch('interface') == windows
+        session = tables.fetch('sessions').index { |template| template.fetch('principal') == row.fetch('principal') }
+        grant = [grantee_kind('session'), session, display]
+        invalid('a start row\'s display is not granted to its principal\'s session template', 17, 'start.display') unless
+          tables.fetch('facets').any? { |facet| facet.values_at('grantee_kind', 'grantee', 'service') == grant }
+      end
 
       # design-abi.md: an introduction joins two different configured domains and is
       # unique as an unordered pair, so each is written with the lower index first.

@@ -162,6 +162,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	}
 	MANIFEST_TABLE(&view, principals, erx_mf_principal_t);
 	MANIFEST_TABLE(&view, domains, erx_mf_domain_t);
+	MANIFEST_TABLE(&view, sessions, erx_mf_session_t);
 	MANIFEST_TABLE(&view, limits, erx_mf_limits_t);
 	MANIFEST_TABLE(&view, runtime_limits, erx_mf_runtime_limits_t);
 	MANIFEST_TABLE(&view, lane_classes, erx_mf_lane_class_t);
@@ -179,6 +180,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	MANIFEST_TABLE(&view, liveness, erx_mf_liveness_t);
 	MANIFEST_TABLE(&view, shell_principals, erx_mf_shell_principal_t);
 	MANIFEST_TABLE(&view, partial_boot, erx_mf_partial_boot_t);
+	MANIFEST_TABLE(&view, starts, erx_mf_start_t);
 	view_build(&view);
 	return (0);
 }

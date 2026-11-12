@@ -66,6 +66,12 @@ class ManifestTest < Minitest::Test
     assert_raises(Erx::Manifest::Invalid) { fixture(@source, release_context) }
   end
 
+  # Property 17: the empty native boot is a partial boot, which starts no row.
+  def test_empty_native_boot_starts_no_row
+    error = assert_raises(Erx::Manifest::Invalid) { fixture(@source + "start root\n") }
+    assert_equal [17, 'start'], [error.property, error.field]
+  end
+
   def test_nonempty_native_boot_requires_real_planning
     source = @source + "partial_boot probe\n  image @artifact.root\n"
     error = assert_raises(Erx::Manifest::Unsupported) { fixture(source) }

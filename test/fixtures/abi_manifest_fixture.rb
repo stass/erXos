@@ -24,12 +24,12 @@ module AbiManifestFixture
 
   def valid
     text = 'node/uart@0fixturerootnativenative'.b
-    bytes = "\0".b * (680 + text.bytesize)
+    bytes = "\0".b * (688 + text.bytesize)
     integer(bytes, 0, 0x4d585245)
     integer(bytes, 4, 1, width: 2)
     integer(bytes, 6, 3, width: 2)
     integer(bytes, 8, bytes.bytesize)
-    integer(bytes, 12, 384)
+    integer(bytes, 12, 392)
     span(bytes, 16, 0, 4)
     span(bytes, 24, 4, 7)
     span(bytes, 32, 11, 0)
@@ -44,34 +44,34 @@ module AbiManifestFixture
     integer(bytes, 184, 16384)
     integer(bytes, 188, 4096)
     integer(bytes, 192, 250)
-    span(bytes, 208, 384, 1)
-    span(bytes, 216, 464, 0)
-    span(bytes, 224, 464, 1)
-    span(bytes, 232, 624, 1)
-    (240..352).step(8) { |offset| span(bytes, offset, 680, 0) }
-    span(bytes, 360, 680, text.bytesize)
-    span(bytes, 376, 464, 0)
-    span(bytes, 384, 18, 4)
-    integer(bytes, 392, 268_435_456, width: 8)
-    share(bytes, 400, quota: 8_000_000, capacity: 800, base: 16, ceiling: 31)
-    integer(bytes, 448, 4)
-    integer(bytes, 452, 4)
-    span(bytes, 464, 22, 6)
-    integer(bytes, 472, 16_777_216, width: 8)
-    integer(bytes, 480, 1_048_576, width: 8)
-    share(bytes, 488, quota: 8_000_000, capacity: 800, base: 16, ceiling: 31)
-    integer(bytes, 584, 4096)
-    integer(bytes, 608, 4096, width: 8)
+    span(bytes, 208, 392, 1)
+    span(bytes, 216, 472, 0)
+    span(bytes, 224, 472, 1)
+    span(bytes, 232, 632, 1)
+    (240..352).step(8) { |offset| span(bytes, offset, 688, 0) }
+    span(bytes, 360, 688, text.bytesize)
+    span(bytes, 376, 472, 0)
+    span(bytes, 384, 688, 0)
+    span(bytes, 392, 18, 4)
+    integer(bytes, 400, 268_435_456, width: 8)
+    share(bytes, 408, quota: 8_000_000, capacity: 800, base: 16, ceiling: 31)
+    integer(bytes, 456, 4)
+    integer(bytes, 460, 4)
+    span(bytes, 472, 22, 6)
+    integer(bytes, 480, 16_777_216, width: 8)
+    integer(bytes, 488, 1_048_576, width: 8)
+    share(bytes, 496, quota: 8_000_000, capacity: 800, base: 16, ceiling: 31)
+    integer(bytes, 592, 4096)
     integer(bytes, 616, 4096, width: 8)
-    span(bytes, 624, 28, 6)
-    integer(bytes, 632, 4096)
-    integer(bytes, 636, 8192)
-    integer(bytes, 640, 64)
-    integer(bytes, 644, 64)
-    integer(bytes, 664, 1024)
-    integer(bytes, 668, 64)
-    integer(bytes, 680, 64)
-    bytes[680, text.bytesize] = text
+    integer(bytes, 624, 4096, width: 8)
+    span(bytes, 632, 28, 6)
+    integer(bytes, 640, 4096)
+    integer(bytes, 644, 8192)
+    integer(bytes, 648, 64)
+    integer(bytes, 652, 64)
+    integer(bytes, 672, 1024)
+    integer(bytes, 676, 64)
+    bytes[688, text.bytesize] = text
     bytes
   end
 
@@ -84,17 +84,17 @@ module AbiManifestFixture
   def unit_partition(overlap: false, orphan: false)
     original = valid
     units = orphan ? 1 : 2
-    device_offset = 680 + units * 24
+    device_offset = 688 + units * 24
     strings_offset = device_offset + 2 * DEVICE_ROW
-    text = original.byteslice(680..-1) + (orphan ? 'unit0' : 'unit0unit1')
-    bytes = original.byteslice(0, 680) + "\0".b * (strings_offset - 680) + text
+    text = original.byteslice(688..-1) + (orphan ? 'unit0' : 'unit0unit1')
+    bytes = original.byteslice(0, 688) + "\0".b * (strings_offset - 688) + text
     integer(bytes, 8, bytes.bytesize)
-    span(bytes, 248, 680, units)
+    span(bytes, 248, 688, units)
     span(bytes, 256, device_offset, 2)
-    (264..352).step(8) { |offset| span(bytes, offset, strings_offset, 0) }
+    [*(264..352).step(8), 384].each { |offset| span(bytes, offset, strings_offset, 0) }
     span(bytes, 360, strings_offset, text.bytesize)
     units.times do |index|
-      base = 680 + index * 24
+      base = 688 + index * 24
       span(bytes, base, 34 + index * 5, 5)
       integer(bytes, base + 8, 0xffffffff)
       first = overlap ? device_offset : device_offset + index * DEVICE_ROW
@@ -123,49 +123,78 @@ module AbiManifestFixture
     integer(service, 8, 0xffffffff)
     facet = "\0".b * 80
     span(facet, 0, 18, 4)
-    # Header384, principal80, domain64, limits160, runtime-limits56,
+    # Header392, principal80, domain64, limits160, runtime-limits56,
     # service24, facet80, parameter32, then strings.
-    span(facet, 16, 848, 0)
-    span(facet, 24, 848, 1)
+    span(facet, 16, 856, 0)
+    span(facet, 24, 856, 1)
     parameter = "\0".b * 32
     integer(parameter, 4, kind)
     integer(parameter, 8, scalar, width: 8)
     span(parameter, 16, 34, text.bytesize) unless text.empty?
     integer(parameter, 24, index)
-    strings = original.byteslice(680..-1) + text
-    bytes = original.byteslice(0, 464) + domain + original.byteslice(464, 216) + service + facet + parameter + strings
+    strings = original.byteslice(688..-1) + text
+    bytes = original.byteslice(0, 472) + domain + original.byteslice(472, 216) + service + facet + parameter + strings
     integer(bytes, 8, bytes.bytesize)
     integer(bytes, 6, 1, width: 2)
-    span(bytes, 216, 464, 1)
-    span(bytes, 224, 528, 1)
-    span(bytes, 232, 688, 1)
-    (240..264).step(8) { |offset| span(bytes, offset, 744, 0) }
-    span(bytes, 272, 744, 1)
-    span(bytes, 280, 768, 1)
-    span(bytes, 288, 848, 0)
-    span(bytes, 296, 848, 1)
-    (304..352).step(8) { |offset| span(bytes, offset, 880, 0) }
-    span(bytes, 360, 880, strings.bytesize)
-    span(bytes, 376, 528, 0)
+    span(bytes, 216, 472, 1)
+    span(bytes, 224, 536, 1)
+    span(bytes, 232, 696, 1)
+    (240..264).step(8) { |offset| span(bytes, offset, 752, 0) }
+    span(bytes, 272, 752, 1)
+    span(bytes, 280, 776, 1)
+    span(bytes, 288, 856, 0)
+    span(bytes, 296, 856, 1)
+    (304..352).step(8) { |offset| span(bytes, offset, 888, 0) }
+    span(bytes, 360, 888, strings.bytesize)
+    span(bytes, 376, 536, 0)
+    span(bytes, 384, 888, 0)
     bytes
   end
 
   # The valid fixture plus one session record; every field index is 0 and
-  # args and env are empty. Header384, principal80, sessions40, limits160,
+  # args and env are empty. Header392, principal80, sessions40, limits160,
   # runtime-limits56, then strings.
   def session_template(**fields)
     original = valid
     session = "\0".b * 40
     fields.each { |name, value| integer(session, SESSION_FIELDS.fetch(name), value) }
-    strings = original.byteslice(680..-1)
-    bytes = original.byteslice(0, 464) + session + original.byteslice(464, 216) + strings
+    strings = original.byteslice(688..-1)
+    bytes = original.byteslice(0, 472) + session + original.byteslice(472, 216) + strings
     integer(bytes, 8, bytes.bytesize)
     integer(bytes, 6, 1, width: 2)
-    span(bytes, 224, 504, 1)
-    span(bytes, 232, 664, 1)
-    (240..352).step(8) { |offset| span(bytes, offset, 720, 0) }
-    span(bytes, 360, 720, strings.bytesize)
-    span(bytes, 376, 464, 1)
+    span(bytes, 224, 512, 1)
+    span(bytes, 232, 672, 1)
+    (240..352).step(8) { |offset| span(bytes, offset, 728, 0) }
+    span(bytes, 360, 728, strings.bytesize)
+    span(bytes, 376, 472, 1)
+    span(bytes, 384, 728, 0)
+    bytes
+  end
+
+  # Byte offsets of erx_mf_start's fields in abi/manifest.txt, and its size.
+  START_FIELDS = { principal: 0, flags: 4, display: 8, restarts: 12, restart_period_s: 16, reserved: 20 }.freeze
+  START_ROW = 24
+
+  # The valid fixture as a development manifest plus count start rows, each
+  # enabled, of principal 0, with no display and 5 restarts in 600 s, and fields
+  # overriding the first row. Header392, principal80, limits160,
+  # runtime-limits56, the start rows, then strings.
+  def start_rows(count: 1, partial: false, **fields)
+    original = valid
+    rows = Array.new(count) do |index|
+      row = "\0".b * START_ROW
+      { flags: 1, display: 0xffffffff, restarts: 5, restart_period_s: 600 }
+        .merge(index.zero? ? fields : {})
+        .each { |name, value| integer(row, START_FIELDS.fetch(name), value) }
+      row
+    end.join
+    strings_offset = 688 + rows.bytesize
+    strings = original.byteslice(688..-1)
+    bytes = original.byteslice(0, 688) + rows + strings
+    integer(bytes, 8, bytes.bytesize)
+    integer(bytes, 6, partial ? 3 : 1, width: 2)
+    span(bytes, 360, strings_offset, strings.bytesize)
+    span(bytes, 384, 688, count)
     bytes
   end
 end

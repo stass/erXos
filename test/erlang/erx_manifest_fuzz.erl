@@ -15,9 +15,10 @@
 -define(M, erx_manifest).
 %% The tables of the system manifest, as abi/erx_abi.txt declares them; a name that is
 %% no table fails the run.
--define(TABLES, [principals, domains, limits, runtime_limits, lane_classes, units, devices,
+-define(TABLES, [principals, domains, sessions, limits, runtime_limits, lane_classes, units, devices,
                  windows, services, facets, facet_operations, facet_parameters, introductions,
-                 images, extents, boot_order, liveness, shell_principals, partial_boot]).
+                 images, extents, boot_order, liveness, shell_principals, partial_boot,
+                 starts]).
 
 run([Corpus]) ->
     {ok, Bytes} = file:read_file(Corpus),

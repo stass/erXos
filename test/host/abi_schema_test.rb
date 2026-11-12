@@ -440,7 +440,7 @@ class AbiSchemaTest < Minitest::Test
     assert_equal 96, model.types.fetch('erx_pack_header').size
     assert_equal 64, model.types.fetch('erx_pack_entry').size
     assert_equal 32, model.types.fetch('erx_boot_locator').size
-    assert_equal 384, model.types.fetch('erx_manifest').size
+    assert_equal 392, model.types.fetch('erx_manifest').size
   end
 
   def test_nested_projection_cannot_hide_development_leaf

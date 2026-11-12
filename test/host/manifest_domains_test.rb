@@ -573,4 +573,79 @@ class ManifestDomainsTest < Minitest::Test
 
     source.sub(pattern, "\\1#{bytes}")
   end
+
+  # Property 17: a start row, keyed by its principal's name, names a principal with a
+  # session template, takes its defaults where its source states none, and names a
+  # display only as a windows service granted to that template, of which no two
+  # enabled rows name one.
+  def self.start(principal = 'system', fields = '') = "start #{principal}\n#{fields}"
+
+  # A second principal with a session template, so two start rows can name one
+  # display; it and the system principal each take half of users. Only the build
+  # check reads it, so it needs no domain quota.
+  OTHER = "share half\n  quota_ns 5000000\n  period_ns 10000000\n  cpuset 15\n  capacity_mcpu 500\n  capacity_first 0\n" \
+          "  slice_us 1000\n  grace_us 5\n  base 16\n  ceiling 31\n  flags none\n" \
+          "principal other\n  memory 1048576\n  grant @share.half\n  domains 0\n  names 1\n" \
+          "  default_limits @limits.native\n  ceiling_limits @limits.native\n"
+
+  def with_display(*starts)
+    halved = with_session(self.class.session, self.class.session('other'))
+             .sub(/^(principal system\n(?:  .*\n)*?  grant )@share.users/, '\1@share.half')
+             .sub(/^(limits native\n(?:  .*\n)*?  grant )@share.users/, '\1@share.half')
+    halved + OTHER + service('b', '@domain.beta') + facet('sb', '@session.system', '@service.b') +
+      facet('ob', '@session.other', '@service.b') + starts.join
+  end
+
+  def test_a_start_row_is_packed_with_its_defaults_or_its_own_fields
+    none = @codec.constant('mf_none')
+    enabled = @codec.member('mf_start_flags', 'enabled')
+    fields = %w[principal flags display restarts restart_period_s]
+    view = @codec.open('manifest', admit(with_session(self.class.session) + self.class.start).bytes)
+    assert_equal [[0, enabled, none, 5, 600]], rows(view, 'starts').map { |row| row.values_at(*fields) }
+    own = self.class.start('system', "  enable NO\n  restarts 3\n  restart_period_s 60\n")
+    view = @codec.open('manifest', admit(with_session(self.class.session) + own).bytes)
+    assert_equal [[0, 0, none, 3, 60]], rows(view, 'starts').map { |row| row.values_at(*fields) }
+  end
+
+  def test_a_start_row_of_a_principal_without_a_session_template_is_refused
+    refused(Erx::Manifest::Invalid, 17, 'start.name', @source + self.class.start)
+    refused(Erx::Manifest::Invalid, 17, 'start.name', with_session(self.class.session) + self.class.start('alpha'))
+  end
+
+  def test_a_start_row_s_restart_period_is_at_least_a_second
+    refused(Erx::Manifest::Invalid, 17, 'start.restart_period_s',
+            with_session(self.class.session) + self.class.start('system', "  restart_period_s 0\n"))
+  end
+
+  def test_two_start_rows_of_one_principal_are_refused
+    refused(Erx::Manifest::Invalid, 'source', 'start', with_session(self.class.session) + self.class.start + self.class.start)
+  end
+
+  def test_a_start_row_s_enable_is_only_yes_or_no
+    assert_raises(Erx::ABI::SchemaError) { admit(with_session(self.class.session) + self.class.start('system', "  enable yes\n")) }
+  end
+
+  # No interface of abi/services is windows yet, so no service is a display and a
+  # row naming one is refused, granted or not.
+  def test_a_start_row_naming_a_display_is_refused_while_no_windows_interface_exists
+    refused(Erx::Manifest::Invalid, 17, 'start.display', with_display(self.class.start('system', "  display @service.b\n")),
+            message: /windows interface/)
+    refused(Erx::Manifest::Invalid, 17, 'start.display', with_display(self.class.start('system', "  display @service.c\n")),
+            message: /does not contain/)
+  end
+
+  # Two enabled rows on one display are refused before either display is judged; a
+  # disabled row holds no display.
+  def test_two_enabled_start_rows_on_one_display_are_refused
+    display = "  display @service.b\n"
+    refused(Erx::Manifest::Invalid, 17, 'start.display',
+            with_display(self.class.start('system', display), self.class.start('other', display)), message: /two enabled/)
+    refused(Erx::Manifest::Invalid, 17, 'start.display',
+            with_display(self.class.start('system', display), self.class.start('other', "  enable NO\n#{display}")),
+            message: /windows interface/)
+  end
+
+  def test_a_partial_boot_starts_no_row
+    refused(Erx::Manifest::Invalid, 17, 'start', @plain.sub('flags development', 'flags development,partial_boot') + self.class.start)
+  end
 end

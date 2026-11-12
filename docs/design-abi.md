@@ -1577,12 +1577,12 @@ these exact offsets and sizes.
 
 ### Machine header
 
-The header is 384 bytes with alignment 8. Its fields are:
+The header is 392 bytes with alignment 8. Its fields are:
 
 | Offset | Field | Type and meaning |
 | --- | --- | --- |
 | 0, 4, 6 | `magic`, `version`, `flags` | `u32`, `u16`, `u16`; magic/version above; development at flag bit 0, partial boot at bit 1, the UART console line secure at bit 2 and the host-link line secure at bit 3, all other bits zero |
-| 8, 12 | `length`, `header_size` | `u32`, `u32`; complete file length and exactly 384 |
+| 8, 12 | `length`, `header_size` | `u32`, `u32`; complete file length and exactly 392 |
 | 16, 24, 32, 40 | `host`, `console`, `hostlink`, `platform` | four string references; system identifier, absolute device-tree path, optional device-tree path and platform identifier |
 | 48, 56, 64 | `root_memory`, `system_baseline`, `system_reservation` | three `u64` byte counts; the root assumption, configured baseline and checked admission reservation |
 | 72, 120 | `system_share`, `users_share` | two shares, for `system` and `users` |
@@ -1593,6 +1593,7 @@ The header is 384 bytes with alignment 8. Its fields are:
 | 208 through 360 | table spans | twenty `span` values, in the order below |
 | 368 | `system_args` | string reference; the system runtime's arguments |
 | 376 | `sessions` | `span` of the session templates |
+| 384 | `starts` | `span` of the start rows ([design-apps.md](design-apps.md#the-start-table)), at most `start_rows_max` |
 
 The spans at 208 through 360 are `principals`, `domains`, `limits`,
 `runtime_limits`, `lane_classes`, `units`, `devices`, `windows`,
@@ -1600,8 +1601,8 @@ The spans at 208 through 360 are `principals`, `domains`, `limits`,
 `introductions`, `images`, `extents`, `boot_order`, `liveness`,
 `shell_principals`, `partial_boot` and `strings`, at offsets 208, 216
 and so on. The tables are packed in that order, with `sessions` after
-`domains`, each at its first required alignment boundary after the
-preceding table; `strings` comes last, and its span's count is bytes.
+`domains` and `starts` after `partial_boot`, each at its first required
+alignment boundary after the preceding table; `strings` comes last, and its span's count is bytes.
 
 `root_memory` is nonzero and page-aligned. Table capacities are 1 through
 65,536, except that `max_domains` may be 0 when no domains are configured, `system_reserve` is 1 through 1,000, and the system grant has a
@@ -1890,6 +1891,7 @@ the kernel watchdog's period and cannot extend its deadline.
 | boot-order entry, 4 | `0: domain u32` |
 | system-shell principal, 4 | `0: principal u32` |
 | partial-boot program, 16 | `0: name str`; `8: image u32`; `12: reserved u32` |
+| start row, 24 | `0: principal u32`; `4: flags u32` (enabled at bit 0); `8: display u32` (a service index or `mf_none`); `12: restarts u32`; `16: restart_period_s u32` (from 1); `20: reserved u32` |
 
 Image format 1 denotes EROFS protected by the storage contract's
 dm-verity version 1 tree; hash algorithm 1 is SHA-256. Salt length is

@@ -120,16 +120,16 @@ class AbiBinaryTest < Minitest::Test
     end
   end
 
-  # The first device row is at 728: after the header and two 24-byte unit rows.
+  # The first device row is at 736: after the header and two 24-byte unit rows.
   def test_device_selector_refuses_inactive_fields_and_missing_path
     bytes = AbiManifestFixture.unit_partition
-    AbiManifestFixture.integer(bytes, 728 + 32, 1, width: 2)
+    AbiManifestFixture.integer(bytes, 736 + 32, 1, width: 2)
     assert_refused %w[inactive devices[].bus], bytes
     bytes = AbiManifestFixture.unit_partition
-    AbiManifestFixture.span(bytes, 728 + 8, 0, 0)
+    AbiManifestFixture.span(bytes, 736 + 8, 0, 0)
     assert_refused %w[string_range devices[].path.offset], bytes
     bytes = AbiManifestFixture.unit_partition
-    AbiManifestFixture.integer(bytes, 728 + 48, 4096, width: 8)
+    AbiManifestFixture.integer(bytes, 736 + 48, 4096, width: 8)
     assert_refused %w[inactive devices[].dma_memory], bytes
   end
 

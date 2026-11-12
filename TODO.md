@@ -536,8 +536,10 @@ it; git history is the record of completed work.
   region of the device's record (made once, wrapped by `erx_memdraw:wrap/4`, never posted) and the mapping of an area
   into the DMA window, before the display driver.
 * [High] [design-apps.md](docs/design-apps.md): the code the design asks for, in the order
-  [Track A](docs/plan.md#track-a-apps) builds it; nothing of it is built. The `start` row in `abi/manifest.txt` and
-  property 17; `erx_starter` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and
+  [Track A](docs/plan.md#track-a-apps) builds it. The `start` rows and property 17's structural clauses are built;
+  property 17's planner clause (the enabled rows' sessions planned beside the configured domains), and the
+  accepting path of its display check with its seeds once `abi/services` declares `windows`, are not;
+  `erx_starter` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and
   `ctl`'s parsers with their fuzz targets; the `apps` tree and `service`; `erx_domain:start_session/2` with `display`
   and `default_display`; the session mark in the domain service's grant records, carried as `session` by every mint;
   the mint request `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint
@@ -1113,6 +1115,12 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] manifest fuzz harness (`tools/fuzz/manifest_fuzz.c`, `tools/fuzz/erx_manifest.rb`): the domain
+  library check that `LLVMFuzzerTestOneInput` runs after the reader accepts a manifest aborts on the
+  unmodified QEMU virt development manifest seed, so `tools/fuzz/erx_manifest.rb` stops with "the C reader
+  failed" before comparing any verdict, on master as well. The reader itself accepts the seed; the abort is
+  in `view_check` or `erx_dom_boot_layout`. Find which check the development manifest breaks, fix the side
+  that is wrong, and keep the seed in the corpus.
 * [Low] host tests, EUnit runs (`test/host/*_test.rb`): each test file starts `erl` for `eunit:test` on its
   own, and a logger report a case provokes can split EUnit's verbose line for that case on standard output.
   `erx_inspector_test.rb` sends the logger to standard error and matches verdicts on standard output alone;

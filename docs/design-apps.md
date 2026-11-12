@@ -245,7 +245,7 @@ its defaults; this one declares `clock` and leaves it off:
 ```text
 start clock
   enable NO
-  display display
+  display @service.display
   restarts 5
   restart_period_s 600
 ```

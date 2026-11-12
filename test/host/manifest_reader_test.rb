@@ -60,7 +60,7 @@ class ManifestReaderTest < Minitest::Test
   end
 
   def test_truncated_index_is_refused
-    bytes = AbiManifestFixture.valid.byteslice(0, 408)
+    bytes = AbiManifestFixture.valid.byteslice(0, 416)
     AbiManifestFixture.integer(bytes, 8, bytes.bytesize)
     status, output = decode(bytes)
     assert_equal 1, status, output
@@ -69,7 +69,7 @@ class ManifestReaderTest < Minitest::Test
 
   def test_out_of_range_string_offset_is_refused
     bytes = AbiManifestFixture.valid
-    AbiManifestFixture.integer(bytes, 384, 0xffffffff)
+    AbiManifestFixture.integer(bytes, 392, 0xffffffff)
     status, output = decode(bytes)
     assert_equal 1, status, output
     assert_match(/error string_range principals\[\].name.offset/, output)
@@ -77,7 +77,7 @@ class ManifestReaderTest < Minitest::Test
 
   def test_inactive_subspace_grant_is_zero
     bytes = AbiManifestFixture.valid
-    AbiManifestFixture.integer(bytes, 536, 1, width: 8)
+    AbiManifestFixture.integer(bytes, 544, 1, width: 8)
     status, output = decode(bytes)
     assert_equal 1, status, output
     assert_match(/error inactive limits\[\].spaces/, output)
@@ -117,9 +117,40 @@ class ManifestReaderTest < Minitest::Test
     assert_match(/error index sessions\[\].principal/, output)
   end
 
+  # The start table: start_rows_max rows at most, each naming a principal, a
+  # service or none as its display, with its reserved word zero, and none in a
+  # partial boot.
+  def test_start_rows_are_accepted_up_to_start_rows_max
+    [1, 256].each do |count|
+      status, output = decode(AbiManifestFixture.start_rows(count: count))
+      assert_equal [0, "ok 1 0\n"], [status, output], "#{count} rows"
+    end
+  end
+
+  def test_start_rows_beyond_start_rows_max_are_refused
+    status, output = decode(AbiManifestFixture.start_rows(count: 257))
+    assert_equal 1, status, output
+    assert_match(/error .*starts/, output)
+  end
+
+  def test_start_row_fields_are_checked
+    { { reserved: 1 } => /starts\[\].reserved/, { principal: 1 } => /index starts\[\].principal/,
+      { display: 0 } => /index starts\[\].display/, { flags: 2 } => /starts\[\].flags/ }.each do |fields, error|
+      status, output = decode(AbiManifestFixture.start_rows(**fields))
+      assert_equal 1, status, "#{fields}: #{output}"
+      assert_match(error, output, fields.to_s)
+    end
+  end
+
+  def test_partial_boot_starts_no_row
+    status, output = decode(AbiManifestFixture.start_rows(partial: true))
+    assert_equal 1, status, output
+    assert_match(/error inactive root.starts.count/, output)
+  end
+
   def test_device_selector_refuses_inactive_fields
     bytes = AbiManifestFixture.unit_partition
-    AbiManifestFixture.integer(bytes, 728 + 32, 1, width: 2)
+    AbiManifestFixture.integer(bytes, 736 + 32, 1, width: 2)
     status, output = decode(bytes)
     assert_equal 1, status, output
     assert_match(/error inactive devices\[\].bus/, output)
