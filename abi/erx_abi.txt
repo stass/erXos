@@ -71,6 +71,10 @@ limit lane_max u32 16777216
 limit frame_max u32 16777216
 limit ctl_max u32 4096
 limit rec_frame u32 1
+# A pipe's record kinds (docs/design-pipes.md, "The ring"): bytes, and the
+# tickets of an SCM_RIGHTS message. No pipe lane carries ERX_REC_FRAME.
+limit rec_data u32 2
+limit rec_control u32 3
 limit lane_side_rpage u32 4096
 limit lane_side_data u32 8192
 # The bytes of one control slot (docs/design-domains.md, "The control
@@ -355,6 +359,80 @@ layout erx_lane_rec wire_le 8 16
 layout erx_frame_header wire_le 4 8
   field ctl_len u32 0
   field payload_len u32 4
+
+# A pipe (docs/design-pipes.md). A data record's payload is 1 to pipe_buf
+# bytes, a control record's whole tickets of pipe_ticket bytes, at most
+# pipe_control_max. A pipe has at most pipe_readers_max read ends, one bit
+# each in the reader page's sleepers and the lock page's waiters. Write
+# ends are numbered from 1, so pipe_none, the lock page's "no current
+# record", is what a fresh page of zeros reads. A pipe's first write end's
+# ring has a data area of pipe_ring_first bytes, every other's
+# pipe_ring_next; the area starts pipe_ring_data bytes into the ring's
+# memory object, past its header page.
+limit pipe_buf u32 4096
+limit pipe_ticket u32 8
+limit pipe_control_max u32 128
+limit pipe_readers_max u32 64
+limit pipe_none u32 0
+limit pipe_ring_first u32 65536
+limit pipe_ring_next u32 16384
+limit pipe_ring_data u32 4096
+# A pipe lane's reader page: the reader page of every lane, rpos and wake,
+# stored by the read end that holds the reader lock, then the read ends
+# that wait for data, bit r set and cleared by read end r. The write end
+# maps it read-only.
+layout erx_pipe_rpage shared 8 24
+  field rpos u64 0
+  field wake u64 8
+  field sleepers u64 16
+  atomic rpos load acquire store release
+  atomic wake load acquire store release
+  atomic sleepers load acquire store release
+  writer rpos consumer
+  writer wake consumer
+  writer sleepers readers
+  owner rpos consumer all
+  owner wake consumer all
+  owner sleepers readers all
+  visibility rpos release
+  visibility wake release
+  visibility sleepers release
+# A pipe's lock page, which its read ends alone map: the reader lock (0
+# when free, else 1 + the holder's index), the highest write end number
+# made, which the pipe server alone stores, the read ends waiting for the
+# lock, and the current record, which the lock's holder stores: write end
+# cur's record at cur_pos, of whose payload cur_off bytes are claimed.
+layout erx_pipe_lock shared 8 32
+  field owner u32 0
+  field wends u32 4
+  field waiters u64 8
+  field cur u32 16
+  field cur_off u32 20
+  field cur_pos u64 24
+  atomic owner load acquire store release
+  atomic wends load acquire store release
+  atomic waiters load acquire store release
+  atomic cur load relaxed store relaxed
+  atomic cur_off load relaxed store relaxed
+  atomic cur_pos load relaxed store relaxed
+  writer owner readers
+  writer wends pipe_server
+  writer waiters readers
+  writer cur holder
+  writer cur_off holder
+  writer cur_pos holder
+  owner owner readers all
+  owner wends pipe_server all
+  owner waiters readers all
+  owner cur holder all
+  owner cur_off holder all
+  owner cur_pos holder all
+  visibility owner release
+  visibility wends release
+  visibility waiters release
+  visibility cur release
+  visibility cur_off release
+  visibility cur_pos release
 
 # A reference's identity (docs/design-runtime.md, "Unguessable references").
 # The block a domain's reference key permutes with AES-128 holds the source

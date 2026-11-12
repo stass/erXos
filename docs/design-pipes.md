@@ -296,7 +296,8 @@ where every other lane keeps zeros:
  * read-only and copies each field once before use.
  */
 typedef struct erx_pipe_rpage {
-	erx_lane_rpage_t lane;		/* rpos and wake, stored by the read
+	_Atomic uint64_t rpos;		/* the reader page of every lane: */
+	_Atomic uint64_t wake;		/* rpos and wake, stored by the read
 					 * end that holds the reader lock */
 	_Atomic uint64_t sleepers;	/* bit r: read end r waits for data;
 					 * set and cleared by read end r */
@@ -318,8 +319,9 @@ published ([design-programs.md](design-programs.md#the-channel)). The
 lane's layouts and the pipe's extension are fixed binary layouts of
 `abi/erx_abi.txt`, pinned with `_Static_assert`, so `liberx`, the
 session's pipe NIF and every runtime agree by construction. The pipe's
-files read and write a lane through accessors of their own and name none
-of a connection lane's layouts.
+files name the lane's ring header and record, and none of a connection
+lane's reader page or control table; a build check keeps every other file
+but the lane's own reader and writer from naming any of them.
 
 Every load from a shared page goes through one function of `liberx`,
 `erx_shm_copy`, which reads with relaxed atomic loads, so a holder that
@@ -365,11 +367,11 @@ typedef struct erx_pipe_lock {
 					 * the pipe server alone stores it */
 	_Atomic uint64_t waiters;	/* bit r: read end r waits for the
 					 * lock */
-	uint32_t	 cur;		/* the write end whose record is
+	_Atomic uint32_t cur;		/* the write end whose record is
 					 * claimed, by its number, or
 					 * ERX_PIPE_NONE */
-	uint32_t	 cur_off;	/* bytes of its payload claimed */
-	uint64_t	 cur_pos;	/* the record's position in its lane */
+	_Atomic uint32_t cur_off;	/* bytes of its payload claimed */
+	_Atomic uint64_t cur_pos;	/* the record's position in its lane */
 } erx_pipe_lock_t;			/* then zeros to 4 KiB */
 ```
 
@@ -1279,9 +1281,12 @@ defines:
 ([design-domains.md](design-domains.md#lanes-and-frames-in-the-abi)),
 the pipe's layouts `erx_pipe_rpage` and `erx_pipe_lock`, the record kinds
 `ERX_REC_DATA` and `ERX_REC_CONTROL`, the limits
-`ERX_PIPE_BUF` (4,096) and `ERX_PIPE_READERS_MAX` (64), `ERX_PIPE_NONE`,
-the two ring sizes `ERX_PIPE_RING_FIRST` (65,536) and `ERX_PIPE_RING_NEXT`
-(16,384), and the frame profiles of the messages above
+`ERX_PIPE_BUF` (4,096) and `ERX_PIPE_READERS_MAX` (64), a control
+record's `ERX_PIPE_TICKET` (8) and `ERX_PIPE_CONTROL_MAX` (128),
+`ERX_PIPE_NONE` (0, which a fresh page of zeros reads), the two ring
+sizes `ERX_PIPE_RING_FIRST` (65,536) and `ERX_PIPE_RING_NEXT` (16,384),
+the data area's offset in a ring's memory object past its header page,
+`ERX_PIPE_RING_DATA` (4,096), and the frame profiles of the messages above
 ([design-kernel.md](design-kernel.md#the-abi-file)).
 
 ## Compatibility and migration

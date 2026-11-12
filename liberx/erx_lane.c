@@ -26,6 +26,7 @@
 #include "erx/abi.h"
 #include "erx/abi_reader.h"
 #include "erx/lane.h"
+#include "erx/shm.h"
 
 /* Positions, record headers and the data area are multiples of this. */
 #define LANE_GRAIN	UINT64_C(16)
@@ -109,31 +110,14 @@ lane_check_wpos(uint64_t pos, uint64_t size, uint64_t wpos, uint64_t *avail)
 
 /*
  * Copies n bytes from position pos of the data area into dst, wrapping at
- * the area's end.  Every load is an aligned relaxed atomic load of one
- * word, so a producer that rewrites the area concurrently changes what is
- * copied but never makes the copy undefined; each byte is loaded once.
- * The acquire load of wpos that made these bytes available orders them.
+ * the area's end, through the one copy out of a shared page.  The acquire
+ * load of wpos that made these bytes available orders them.
  */
 static void
 lane_copy(const erx_lane_reader_t *reader, uint64_t pos, unsigned char *dst,
     uint64_t n)
 {
-	const _Atomic uint64_t *words;
-	uint64_t chunk, mask, offset, skip, word;
-
-	words = lane_data(reader);
-	mask = reader->size - 1;
-	while (n > 0) {
-		offset = pos & mask;
-		skip = offset % sizeof(word);
-		chunk = lane_min(sizeof(word) - skip, n);
-		word = atomic_load_explicit(&words[offset / sizeof(word)],
-		    memory_order_relaxed);
-		memcpy(dst, (const unsigned char *)&word + skip, chunk);
-		pos += chunk;
-		dst += chunk;
-		n -= chunk;
-	}
+	erx_shm_copy(lane_data(reader), reader->size, pos, dst, n);
 }
 
 /* Whether a store moving a position from before to after crossed waited. */

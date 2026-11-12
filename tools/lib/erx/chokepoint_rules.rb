@@ -39,6 +39,14 @@ module Erx
     ERXOS_C = Chokepoints::Scope.new(own: true, extra: [GLUE])
     STOPGAP = 'docs/design-stopgap.md'
     KERNEL = 'docs/design-kernel.md'
+    # The pipe's files (docs/design-pipes.md, "The ring"): its checks and
+    # steps (liberx/erx_pipe_*.c) and their header, a program's pipe ends in
+    # liberx's program layer, and the session's pipe NIF. A pipe lane is the
+    # lane layout, so they may name the lane's ring header and record (the
+    # lane group); they never name the frame kind, and read a pipe's pages
+    # only through erx_shm_copy (the pipe group).
+    PIPE_NIF = 'otp/erts/emulator/nifs/erxos/erx_pipe_nif.c'
+    PIPE_FILES = ['liberx/erx_pipe*', 'include/erx/pipe.h', 'liberx/program/pipe*', PIPE_NIF].freeze
     INCLUDE = Chokepoints::INCLUDE_PREFIX
 
     # An include of the header at path by any path ending in its file name,

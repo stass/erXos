@@ -28,6 +28,12 @@ module Erx
     # writer in their tests; no build of a runtime links them.
     LANE_PRODUCERS = %w[test/fixtures/lane_driver.c tools/fuzz/lane_fuzz.c tools/fuzz/lane_writer_fuzz.c].freeze
     DOMAINS = 'docs/design-domains.md'
+    # What the pipe's files may name of a lane: the ring header and the
+    # record, their generated names, and their sizes and offsets. A pipe has
+    # its own reader page, erx_pipe_rpage, and no control table.
+    LANE_RING_AND_RECORD = /\A(?:erx_lane_(?:hdr|rec)\w*|ERX_LANE_(?:HDR|REC)_\w+)\z/
+    # The pipe ring's host fuzzer, which plays a hostile writer.
+    PIPE_RING_FUZZ = 'tools/fuzz/pipe_ring_fuzz.c'
 
     declare_group(
       unchecked_objects: [LANE_READER],
@@ -44,20 +50,24 @@ module Erx
         # address (the reader record's side pointers, or the mapping that
         # produced them), nor a name a macro pastes together
         # (erx_lane_ ## hdr): those residuals are in TODO.md, for the
-        # syntax-tree leg and for the reader owning the mapping.
+        # syntax-tree leg and for the reader owning the mapping. A pipe's
+        # lane is the lane layout and carries no frames (D3), so the pipe's
+        # files may name its ring header and record, and nothing else of it.
         Chokepoints::Forbidden.new(
           name: 'lane-pages-reader',
           rule: "only #{LANE_READER}, whose erx_lane_take and erx_lane_put are the one reader and the one " \
-                "writer of a lane's ring and erx_lane_ctl_take and erx_lane_ctl_put of its control table, names a lane's shared layouts, their accessors or the offsets of a side (D3)",
+                "writer of a lane's ring and erx_lane_ctl_take and erx_lane_ctl_put of its control table, names a lane's shared layouts, their accessors or the offsets of a side (D3); the pipe's files, whose lanes carry no frames, and the pipe ring's fuzzer name only the ring header and the record",
           design: "#{DOMAINS}#the-funnel",
           scope: Chokepoints::Scope.new(own: true, extra: ['fiasco/kernel/**/*', *INHERITED_RUNTIME], except: [ASMJIT]),
           pattern: LANE_LAYOUT,
-          sites: [LANE_READER, *ABI_C_OUTPUTS, *LANE_PRODUCERS].map { |path| Chokepoints::Site.new(glob: path) },
+          sites: [LANE_READER, *ABI_C_OUTPUTS, *LANE_PRODUCERS].map { |path| Chokepoints::Site.new(glob: path) } +
+                 [*PIPE_FILES, PIPE_RING_FUZZ].map { |glob| Chokepoints::Site.new(glob: glob, permits: LANE_RING_AND_RECORD) },
           seed: { 'liberx/erx_funnel.c' => "void f(void) { erx_lane_hdr_wpos_load(hdr, &wpos); }\n",
                   'otp/erts/emulator/sys/erxos/erx_lane_drv.c' => "const erx_lane_ctl_t *ctl = table;\n",
                   'liberx/backend/hosted/peek.c' => "data = side + ERX_LANE_SIDE_DATA;\n",
                   'liberx/erx_lane_peek.c' => "#define RING struct erx_lane_hdr\n",
-                  'liberx/erx_lane_port.c' => "erx_lane_hdr_wpos_store(hdr, pos);\n" }
+                  'liberx/erx_lane_port.c' => "erx_lane_hdr_wpos_store(hdr, pos);\n",
+                  'liberx/erx_pipe_core.c' => "(void)erx_lane_rpage_rpos_load(rpage, &rpos);\n" }
         )
       ]
     )

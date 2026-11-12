@@ -4993,6 +4993,20 @@ to the corpus and follow rc
   exist: `erx_lane.c` maps a lane's sides itself, the reader record
   becomes opaque with a test-only constructor for a start position, and
   the syntax-tree leg checks loads.
+* [Medium] The pipe's shared-page chokepoint, `pipe-pages-accessor` and
+  `pipe-pages-raw-load` in `tools/lib/erx/chokepoint_rules/pipe.rb`: text
+  rules over the pipe layouts' generated load accessors and the atomic
+  load primitives. A plain dereference of a pointer into a pipe's page (a
+  seq_cst load, since every generated field is `_Atomic`), a `memcpy`
+  from one, and an atomic load in a liberx file outside the pipe's files,
+  typed or not, escape them; the lock's compare-and-swap and the bit-set
+  read-modify-writes on `owner`, `waiters` and `sleepers` read the page
+  too and match no pattern, as design.md's row allows, so that they touch
+  only those words is held by review, as is that only write ends call
+  `erx_pipe_rpage_rpos_load` and only read ends `erx_lane_hdr_wpos_load`,
+  and that no pipe file reads `wpos` through a relaxed `erx_shm_copy`. Close it
+  with the lane reader's item: the syntax-tree leg checks every load whose
+  address derives from a pipe end's mapping.
 * [High] DMA platform evidence: the SMMUv3 specification and QEMU
   v11.1.2 source audit is recorded in
   [research-hardware-contracts.md](docs/research-hardware-contracts.md).
