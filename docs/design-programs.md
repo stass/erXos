@@ -1362,6 +1362,28 @@ Whatever it wakes a worker for, the executor first bumps that worker's
 executor, which the kernel never arms for vCPU upcalls (K20), so no signal
 ever runs on it.
 
+**Waiters.** Each object a worker can wait on, a pipe end first, keeps a
+list of its waiters under the object's own lock: a waiter is a small
+record on the waiting thread's stack that names the thread's wake word.
+A worker that waits reads its wake word, checks its condition under the
+object's lock, puts its waiter on the list and only then lets the lock
+go and sleeps on the word with the value it read; once woken it takes
+the lock again and takes its waiter off before it checks afresh. Whoever
+changes what the waiters wait for does so under the same lock and wakes
+the whole list, bumping each waiter's word before it wakes the thread:
+the executor for a ring of the object's doorbell or a report it applies
+to it, and a worker whose call ended a wait other calls of the object
+shared (a pipe end's `wake_local`,
+[design-pipes.md](design-pipes.md#ends-in-liberx)). A change made after
+a waiter's check therefore finds it on the list and bumps the word it
+read, and one made before it is seen by the check, so no wake is lost
+(P6), and a list needs no lock of its own. `poll` waits on several
+objects with one waiter on each list, all naming its one word: it puts
+them all on before it checks any object, and takes them all off before
+it returns. The lock order is the descriptor table's lock, then an
+object's: a thread that holds an object's lock never takes the table's,
+and `liberx` stops a thread that tries.
+
 ### Job control
 
 The session stops a program by **pausing** its image: the port driver

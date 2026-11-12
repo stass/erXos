@@ -11,13 +11,20 @@
  * object's own release runs after the lock is let go: a pipe end's waits
  * out an executor that found it before the unlink by taking the end's lock
  * (pipe.c), and sends its notices without the table lock held.
+ *
+ * The lock order is the table's, then an end's: every taking of the table
+ * lock goes through table_take, which stops a thread that holds an end's
+ * lock, so a wrong order fails at once in every build instead of
+ * deadlocking under one schedule.
  */
 
 #include <errno.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include "erx/abi.h"
 #include "liberx/program/fd.h"
@@ -27,6 +34,15 @@ static pthread_mutex_t table_lock = PTHREAD_MUTEX_INITIALIZER;
 static erx_prog_obj_t *slots[ERX_PROG_FDS_MAX];
 static erx_prog_obj_t *live;
 static erx_prog_obj_t null_obj = { .kind = ERX_PROG_OBJ_NULL };
+
+/* Takes table_lock; a thread that holds an end's lock has broken the lock order and stops. */
+static void
+table_take(void)
+{
+	if (erx_pipe_end_held())
+		__builtin_trap();
+	(void)pthread_mutex_lock(&table_lock);
+}
 
 /* Takes a reference; the first links the object into the live list.  The caller holds table_lock. */
 static void
@@ -97,7 +113,7 @@ fd_install(int fd, erx_prog_obj_t *obj)
 {
 	bool ok;
 
-	(void)pthread_mutex_lock(&table_lock);
+	table_take();
 	ok = fd_valid(fd) && slots[fd] == NULL;
 	if (ok) {
 		obj_hold(obj);
@@ -151,7 +167,7 @@ erx_prog_fd_get(int fd)
 {
 	erx_prog_obj_t *obj = NULL;
 
-	(void)pthread_mutex_lock(&table_lock);
+	table_take();
 	if (fd_valid(fd) && (obj = slots[fd]) != NULL)
 		obj_hold(obj);
 	(void)pthread_mutex_unlock(&table_lock);
@@ -163,7 +179,7 @@ erx_prog_obj_put(erx_prog_obj_t *obj)
 {
 	bool last;
 
-	(void)pthread_mutex_lock(&table_lock);
+	table_take();
 	last = obj_drop(obj);
 	(void)pthread_mutex_unlock(&table_lock);
 	if (last)
@@ -175,7 +191,7 @@ erx_prog_fd_dup(int fd)
 {
 	int result = -EBADF;
 
-	(void)pthread_mutex_lock(&table_lock);
+	table_take();
 	if (fd_valid(fd) && slots[fd] != NULL) {
 		result = -EMFILE;
 		for (uint32_t at = 0; at < ERX_PROG_FDS_MAX; at++) {
@@ -197,7 +213,7 @@ erx_prog_fd_close(int fd)
 	erx_prog_obj_t *obj = NULL;
 	bool last = false;
 
-	(void)pthread_mutex_lock(&table_lock);
+	table_take();
 	if (fd_valid(fd) && (obj = slots[fd]) != NULL) {
 		slots[fd] = NULL;
 		last = obj_drop(obj);
@@ -210,12 +226,54 @@ erx_prog_fd_close(int fd)
 	return (0);
 }
 
+ssize_t
+erx_prog_fd_read(int fd, void *buf, size_t len)
+{
+	erx_prog_obj_t *obj;
+	ssize_t result = 0;
+
+	if (len > SSIZE_MAX)
+		return (-EINVAL);
+	if ((obj = erx_prog_fd_get(fd)) == NULL)
+		return (-EBADF);
+	switch (obj->kind) {
+	case ERX_PROG_OBJ_NULL:
+		break;
+	case ERX_PROG_OBJ_PIPE:
+		result = erx_pipe_read(erx_pipe_end_of(obj), buf, len);
+		break;
+	}
+	erx_prog_obj_put(obj);
+	return (result);
+}
+
+ssize_t
+erx_prog_fd_write(int fd, const void *buf, size_t len)
+{
+	erx_prog_obj_t *obj;
+	ssize_t result = (ssize_t)len;
+
+	if (len > SSIZE_MAX)
+		return (-EINVAL);
+	if ((obj = erx_prog_fd_get(fd)) == NULL)
+		return (-EBADF);
+	switch (obj->kind) {
+	case ERX_PROG_OBJ_NULL:
+		break;
+	case ERX_PROG_OBJ_PIPE:
+		result = erx_pipe_write(erx_pipe_end_of(obj), buf, len);
+		break;
+	}
+	erx_prog_obj_put(obj);
+	return (result);
+}
+
 erx_pipe_end_t *
 erx_prog_fd_find_end(uint32_t pipe, uint32_t end)
 {
 	erx_pipe_end_t *found = NULL;
 
-	(void)pthread_mutex_lock(&table_lock);
+	table_take();
 	for (erx_prog_obj_t *obj = live; obj != NULL && found == NULL; obj = obj->next) {
 		switch (obj->kind) {
 		case ERX_PROG_OBJ_NULL:
@@ -228,7 +286,7 @@ erx_prog_fd_find_end(uint32_t pipe, uint32_t end)
 	}
 	/* Locked before the table lets go: the end's last release waits for this lock. */
 	if (found != NULL)
-		(void)pthread_mutex_lock(&found->lock);
+		erx_pipe_end_lock(found);
 	(void)pthread_mutex_unlock(&table_lock);
 	return (found);
 }
@@ -236,15 +294,15 @@ erx_prog_fd_find_end(uint32_t pipe, uint32_t end)
 void
 erx_prog_fd_each_end(void (*fn)(erx_pipe_end_t *))
 {
-	(void)pthread_mutex_lock(&table_lock);
+	table_take();
 	for (erx_prog_obj_t *obj = live; obj != NULL; obj = obj->next) {
 		switch (obj->kind) {
 		case ERX_PROG_OBJ_NULL:
 			break;
 		case ERX_PROG_OBJ_PIPE:
-			(void)pthread_mutex_lock(&erx_pipe_end_of(obj)->lock);
+			erx_pipe_end_lock(erx_pipe_end_of(obj));
 			fn(erx_pipe_end_of(obj));
-			(void)pthread_mutex_unlock(&erx_pipe_end_of(obj)->lock);
+			erx_pipe_end_unlock(erx_pipe_end_of(obj));
 			break;
 		}
 	}

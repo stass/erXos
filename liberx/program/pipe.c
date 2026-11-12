@@ -13,6 +13,13 @@
  * resources; this file keeps the program layer's rules: its memory is
  * whole pages (pages.h), and its notices go through the channel's send.
  *
+ * A call holds its end's lock from its start to its result or a wait, and
+ * sleeps on its thread's wake word with the end's lock let go; it is on the
+ * end's waiters while it sleeps, and leaves them once it holds the lock
+ * again.  The executor wakes the waiters on every ring of the end's
+ * doorbell and every report it applies to the end, and a call wakes them
+ * when its run sets wake_local (docs/design-pipes.md, "Ends in liberx").
+ *
  * Every value a report or descriptor carries was checked by the profile's
  * generated check, and is checked again here where it indexes or sizes
  * anything: a reader index against ERX_PIPE_READERS_MAX, a lane's size
@@ -37,10 +44,40 @@
 #include "liberx/program/inbound.h"
 #include "liberx/program/pages.h"
 #include "liberx/program/pipe.h"
+#include "liberx/program/wake.h"
 
 _Static_assert(_Alignof(erx_pipe_rmap_t) <= _Alignof(erx_pipe_rlane_t) &&
     _Alignof(erx_pipe_lane_t) <= _Alignof(erx_pipe_rmap_t),
     "a read end's three lane arrays follow each other in one run, each aligned");
+
+/* ---------------------------------------------------------------------
+ * Locks */
+
+/* The end locks the calling thread holds: 0 or 1. */
+static _Thread_local uint32_t ends_held;
+
+/* A thread holds at most one end's lock; one that takes a second, or the same again, stops. */
+void
+erx_pipe_end_lock(erx_pipe_end_t *e)
+{
+	if (ends_held != 0)
+		__builtin_trap();
+	(void)pthread_mutex_lock(&e->lock);
+	ends_held++;
+}
+
+void
+erx_pipe_end_unlock(erx_pipe_end_t *e)
+{
+	ends_held--;
+	(void)pthread_mutex_unlock(&e->lock);
+}
+
+bool
+erx_pipe_end_held(void)
+{
+	return (ends_held != 0);
+}
 
 /* ---------------------------------------------------------------------
  * Capabilities, doorbells and notices */
@@ -232,7 +269,8 @@ fx_ring_writer(void *ctx, uint32_t lane)
 {
 	const erx_pipe_end_t *e = ctx;
 
-	if (lane < e->u.r.st.nlanes)
+	/* One fx serves both kinds of end; only a read end's run names lanes. */
+	if (e->kind == ERX_PIPE_READ && lane < e->u.r.st.nlanes)
 		bell_ring(e->u.r.lanes[lane].bell);
 }
 
@@ -240,16 +278,18 @@ fx_ring_writer(void *ctx, uint32_t lane)
  * A lane drained after its writer went is let go of at once; the run holds
  * the end's lock, where no notice may be sent (the send may wait for room,
  * which only the executor announces, and the executor may wait for this
- * lock), so the {drained} is owed, and sent once the lock is let go.
+ * lock), so the {drained} is owed, and sent once the lock is let go; a
+ * lane owed already is counted once.
  */
 static void
 fx_drained(void *ctx, uint32_t lane)
 {
 	erx_pipe_end_t *e = ctx;
 
-	if (lane < e->u.r.st.nlanes) {
+	if (e->kind == ERX_PIPE_READ && lane < e->u.r.st.nlanes && !e->u.r.lanes[lane].owed) {
 		lane_let_go(&e->u.r, lane);
 		e->u.r.lanes[lane].owed = true;
+		e->u.r.owing++;
 	}
 }
 
@@ -467,6 +507,7 @@ erx_pipe_open(const erx_prog_descriptor_t *descriptor, erx_pipe_end_t **out)
 /* ---------------------------------------------------------------------
  * Reports, under the end's lock */
 
+/* pipe_lost, or for every end pipe_server_lost: the end's calls fail from then on (EIO, or EPIPE for a write). */
 static void
 end_lose(erx_pipe_end_t *e)
 {
@@ -634,29 +675,42 @@ report_end(const erx_prog_report_t *report, uint32_t *pipe, uint32_t *end)
 	return (false);
 }
 
-/* Applies a report to the end it names; the caller holds the end's lock. */
+/* pipe_server_lost, for each end under its lock: lost, and its waiters woken to find it so. */
+static void
+end_lose_wake(erx_pipe_end_t *e)
+{
+	end_lose(e);
+	erx_prog_waitq_wake(&e->waiters);
+}
+
+/*
+ * Applies a report to the end it names and wakes the end's waiters, each
+ * of which starts afresh and finds what the report changed; the caller
+ * holds the end's lock.
+ */
 static void
 report_apply(erx_pipe_end_t *e, const erx_prog_report_t *report)
 {
 	switch (report->which) {
 	case ERX_PROG_REPORT_PIPE_WRITER:
 		writer_join(e, report);
-		return;
+		break;
 	case ERX_PROG_REPORT_PIPE_WRITER_GONE:
 		writer_gone(e, report->u.pipe_writer_gone.wend);
-		return;
+		break;
 	case ERX_PROG_REPORT_PIPE_READER:
 		reader_join(e, report);
-		return;
+		break;
 	case ERX_PROG_REPORT_PIPE_READER_GONE:
 		reader_gone(e, report->u.pipe_reader_gone.rix);
-		return;
+		break;
 	case ERX_PROG_REPORT_PIPE_LOST:
 		end_lose(e);
-		return;
+		break;
 	case ERX_PROG_REPORT_PIPE_SERVER_LOST:
-		return;
+		break;
 	}
+	erx_prog_waitq_wake(&e->waiters);
 }
 
 void
@@ -668,12 +722,12 @@ erx_pipe_report(const erx_prog_report_t *report)
 	size_t ncaps;
 
 	if (report->which == ERX_PROG_REPORT_PIPE_SERVER_LOST) {
-		erx_prog_fd_each_end(end_lose);
+		erx_prog_fd_each_end(end_lose_wake);
 		return;
 	}
 	if (report_end(report, &pipe, &end) && (e = erx_prog_fd_find_end(pipe, end)) != NULL) {
 		report_apply(e, report);
-		(void)pthread_mutex_unlock(&e->lock);
+		erx_pipe_end_unlock(e);
 		return;
 	}
 	/* An end the program let go of, or never held: what the report installed closes. */
@@ -683,15 +737,170 @@ erx_pipe_report(const erx_prog_report_t *report)
 }
 
 /* ---------------------------------------------------------------------
+ * Calls, and the executor's doorbells */
+
+static void	drained_send(erx_pipe_end_t *e);
+
+/*
+ * The wait of a call whose run returned WAIT: puts the thread on the end's
+ * waiters before it lets go of the end's lock, so a ring or report after
+ * the run moves its wake word past seen, the value it read before the
+ * run, and takes it off them once it holds the lock again.  A read end's
+ * owed {drained} goes before the sleep, so a lane the wait drained is not
+ * kept for as long as the wait lasts; a wake during the send is not lost,
+ * since the thread is on the list.
+ */
+static void
+end_sleep(erx_pipe_end_t *e, uint32_t seen)
+{
+	const bool owes = e->kind == ERX_PIPE_READ && e->u.r.owing != 0;
+	erx_prog_waiter_t me;
+
+	erx_prog_waitq_join(&e->waiters, &me);
+	erx_pipe_end_unlock(e);
+	if (owes)
+		drained_send(e);
+	erx_prog_wake_sleep(seen);
+	erx_pipe_end_lock(e);
+	erx_prog_waitq_leave(&e->waiters, &me);
+}
+
+/*
+ * Sends each {drained} a read end owes, one at a time without its lock,
+ * since the send may wait for room the executor announces.
+ */
+static void
+drained_send(erx_pipe_end_t *e)
+{
+	erx_pipe_rend_t *r = &e->u.r;
+
+	for (;;) {
+		bool found = false;
+		uint32_t wend = 0;
+
+		erx_pipe_end_lock(e);
+		for (uint32_t at = 0; at < r->st.nlanes && !found; at++) {
+			if (r->lanes[at].owed) {
+				r->lanes[at].owed = false;
+				r->owing--;
+				wend = r->st.lanes[at].wend;
+				found = true;
+			}
+		}
+		erx_pipe_end_unlock(e);
+		if (!found)
+			return;
+		notice_send("drained", e, &wend);
+	}
+}
+
+ssize_t
+erx_pipe_read(erx_pipe_end_t *e, void *buf, size_t len)
+{
+	erx_pipe_rend_t *r = &e->u.r;
+	const erx_pipe_fx_t fx = end_fx(e);
+	erx_pipe_act_t act;
+	bool owes;
+
+	if (e->kind != ERX_PIPE_READ)
+		return (-EBADF);
+	erx_pipe_end_lock(e);
+	for (;;) {
+		const uint32_t seen = erx_prog_wake_seen();
+
+		erx_pipe_rstart(&r->st, len);
+		act = erx_pipe_rrun(&r->st, r->maps, r->lockpage, buf, &fx);
+		if (r->st.wake_local)
+			erx_prog_waitq_wake(&e->waiters);
+		if (act.op != ERX_PIPE_OP_WAIT)
+			break;
+		/* A read never waits with bytes copied, so the fresh call reads into buf whole. */
+		end_sleep(e, seen);
+	}
+	owes = r->owing != 0;
+	erx_pipe_end_unlock(e);
+	if (owes)
+		drained_send(e);
+	return ((ssize_t)act.result);
+}
+
+ssize_t
+erx_pipe_write(erx_pipe_end_t *e, const void *buf, size_t len)
+{
+	erx_pipe_wend_t *w = &e->u.w;
+	const erx_pipe_fx_t fx = end_fx(e);
+	const unsigned char *const bytes = buf;
+	uint64_t written = 0;		/* published by the calls before a wait */
+	erx_pipe_act_t act;
+
+	if (e->kind != ERX_PIPE_WRITE)
+		return (-EBADF);
+	erx_pipe_end_lock(e);
+	for (;;) {
+		const uint32_t seen = erx_prog_wake_seen();
+
+		erx_pipe_wstart(&w->st, len - written);
+		act = erx_pipe_wrun(&w->st, &w->map, bytes + written, &fx);
+		if (w->st.wake_local)
+			erx_prog_waitq_wake(&e->waiters);
+		if (act.op != ERX_PIPE_OP_WAIT)
+			break;
+		/* What the call published before its wait is written; the fresh call writes the rest. */
+		written += w->st.done;
+		end_sleep(e, seen);
+	}
+	erx_pipe_end_unlock(e);
+	if (act.result >= 0)
+		return ((ssize_t)(written + (uint64_t)act.result));
+	/* An error after bytes went returns their count, as the core's own calls do (pipe_count_or). */
+	if (written != 0)
+		return ((ssize_t)written);
+	return ((ssize_t)act.result);
+}
+
+void
+erx_pipe_watch(erx_pipe_end_t *e, erx_prog_waiter_t *w)
+{
+	erx_pipe_end_lock(e);
+	erx_prog_waitq_join(&e->waiters, w);
+	erx_pipe_end_unlock(e);
+}
+
+void
+erx_pipe_unwatch(erx_pipe_end_t *e, erx_prog_waiter_t *w)
+{
+	erx_pipe_end_lock(e);
+	erx_prog_waitq_leave(&e->waiters, w);
+	erx_pipe_end_unlock(e);
+}
+
+bool
+erx_pipe_doorbell(uint64_t label)
+{
+	uint64_t pipe, end;
+	erx_pipe_end_t *e;
+
+	if (!erx_pipe_label_parts(label, &pipe, &end))
+		return (false);
+	/* A ring of an end the program let go of, or of one it never held, wakes nobody. */
+	if (pipe <= UINT32_MAX && end <= UINT32_MAX &&
+	    (e = erx_prog_fd_find_end((uint32_t)pipe, (uint32_t)end)) != NULL) {
+		erx_prog_waitq_wake(&e->waiters);
+		erx_pipe_end_unlock(e);
+	}
+	return (true);
+}
+
+/* ---------------------------------------------------------------------
  * Release */
 
 void
 erx_pipe_release(erx_pipe_end_t *e)
 {
 	/* An executor that found the end before the table let go of it holds this lock: wait it out. */
-	(void)pthread_mutex_lock(&e->lock);
+	erx_pipe_end_lock(e);
 	end_let_go(e);
-	(void)pthread_mutex_unlock(&e->lock);
+	erx_pipe_end_unlock(e);
 	/* Nothing else holds the end now; its notices go without its lock, drained ones first. */
 	switch (e->kind) {
 	case ERX_PIPE_WRITE:

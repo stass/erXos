@@ -114,10 +114,11 @@ channel_open(void)
 }
 
 /*
- * Takes the group's ready labels and counts each: the channel's fixed label, which the
- * session bound the program's doorbell with and no pipe end's equals, or another. The
- * channel's label may say the session freed outbound room, so it wakes the senders waiting
- * for room. How many it took; none or an error says there is nothing to look at.
+ * Takes the group's ready labels: the channel's fixed label, which the session bound the
+ * program's doorbell with and no pipe end's equals, counted in rings; a pipe end's; or a
+ * stray, counted in strays. The channel's label may say the session freed outbound room,
+ * so it wakes the senders waiting for room; a pipe end's wakes the threads waiting on the
+ * end. How many it took; none or an error says there is nothing to look at.
  */
 static int
 labels_take(void)
@@ -131,7 +132,7 @@ labels_take(void)
 		if (label == ERX_PROG_CHANNEL_LABEL) {
 			atomic_fetch_add_explicit(&self.rings, 1, memory_order_relaxed);
 			erx_prog_channel_room();
-		} else {
+		} else if (!erx_pipe_doorbell(label)) {
 			atomic_fetch_add_explicit(&self.strays, 1, memory_order_relaxed);
 		}
 	}

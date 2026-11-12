@@ -60,7 +60,8 @@ module Erx
                             liberx/program/channel.h liberx/program/startup.c
                             liberx/program/startup.h liberx/program/inbound.c liberx/program/inbound.h
                             liberx/program/pages.c liberx/program/pages.h liberx/program/fd.c
-                            liberx/program/fd.h liberx/program/pipe.c liberx/program/pipe.h]
+                            liberx/program/fd.h liberx/program/pipe.c liberx/program/pipe.h
+                            liberx/program/wake.c liberx/program/wake.h]
     )
   end
 end

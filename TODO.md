@@ -1721,6 +1721,25 @@ it; git history is the record of completed work.
   `sigignore` names it, and a run-time `signal(SIGPIPE, SIG_IGN)` is not honoured. It fails safe,
   with a stop of the writing program, never a hang or a wrong answer; output the program would
   have written after the `EPIPE` is lost.
+* [Medium] liberx program layer, `liberx/program/pipe.c` and the pipe core: `poll` on a pipe end
+  has its registrations (`erx_pipe_watch`, `erx_pipe_unwatch`) but no readiness check, because
+  a doorbell rings only for an end that published what it waits for (a write end's `need`, a
+  read end's sleepers bits and `wake`, or its waiters bit), and only a read or a write call of
+  the core publishes them. A poll needs a core call that looks and publishes without copying:
+  a read end's first look and arm with no copy, a write end's need for one `PIPE_BUF` record;
+  it shares the end's lasting bits and `wake_local` with the end's calls, so it is explored
+  with the two-calls-on-one-end scenario (docs/design-pipes.md, "Readiness, `poll` and
+  `select`"; docs/design-programs.md, "Waiting on several descriptors").
+* [Medium] liberx program layer, `liberx/program/channel.c` (`whole_put`): the wait for outbound
+  room sleeps on the channel's own `room_epoch`, not on the thread's wake word, so a pipe call
+  that sends a notice (`{drained}`, `{closed}`) can wait where a signal will not reach it, which
+  P6 forbids. Make the room wait a waiter list under the channel's lock (liberx/program/wake.h)
+  before signals reach programs.
+* [Medium] pipe core, `liberx/erx_pipe_core.c` (`pipe_rlock_begin`): `lost` is checked only once a
+  read holds the reader lock, so after `pipe_server_lost` a read whose lock holder died holding it
+  waits forever instead of failing with `EIO` (docs/design-pipes.md failure table). Check `lost`
+  before taking the lock, clearing the waiters bit as the 0-byte path does, with an exploration
+  case.
 * [Medium] session, `erx_pipe:step/2`: the second tier's events are not there: `{exec}`, `{deposit}`,
   `{redeem}`, `{discard}`, `{withdraw}` and the collector of deposits no reader can reach
   (docs/design-pipes.md, "The second tier" and "Deposits"), and `holder()` has no

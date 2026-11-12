@@ -43,7 +43,8 @@
  * main is called, the startup message's process ids, signal state, file
  * mode creation mask, working directory and data area.  rings counts the
  * deliveries the executor took that carried the channel's fixed label,
- * ERX_PROG_CHANNEL_LABEL; strays counts those that carried another.
+ * ERX_PROG_CHANNEL_LABEL; strays counts those that carried neither it nor
+ * a pipe end's label.
  */
 typedef struct erx_prog_self {
 	uint64_t		 regs[ERX_ARCH_START_ARGS];

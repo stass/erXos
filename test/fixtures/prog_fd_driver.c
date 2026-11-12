@@ -14,7 +14,12 @@
  * erx_vm_release its munmap.  erx_cap_close and erx_irq_trigger count per
  * value, and a second close, a ring of a closed doorbell or a release of
  * memory never reserved fails the run.  The channel's send checks each
- * frame with the generated erx_prog_check_notice and keeps it.
+ * frame with the generated erx_prog_check_notice and keeps it.  A doorbell
+ * "bind" gives a label is the group's: its ring queues the label, and the
+ * driver's executor thread takes each and calls erx_pipe_doorbell, as the
+ * event executor does.  erx_umtx_wait and erx_umtx_wake are a futex over
+ * one mutex and condition variable.  Worker threads, up to WORKERS, make
+ * the liberx calls that wait.
  *
  * It reads requests, one a line, from the file its argument names, and
  * prints one answer a line:
@@ -29,6 +34,20 @@
  *   state FD               the end FD holds, as the reports left it
  *   write FD TEXT          a write of TEXT through the end's core
  *   read FD N              a read of at most N bytes; WAIT when it would wait
+ *   bind CAP LABEL         a ring of doorbell CAP comes up as LABEL
+ *   fdread FD N            erx_prog_fd_read of at most N bytes: COUNT TEXT
+ *   fdwrite FD TEXT        erx_prog_fd_write of TEXT ("-" for no bytes): COUNT
+ *   spawn T fdread FD N    worker T makes the call; "spawned"
+ *   spawn T fdwrite FD TEXT
+ *   spawn T fdwriten FD N  one erx_prog_fd_write of N bytes, each its offset's
+ *   spawn T fdreadn FD N   reads until N bytes came, each its offset's: COUNT,
+ *                          or where the first wrong result or byte came
+ *   spawn T watch FD FD    worker T watches both ends, as a poll does, sleeps
+ *                          until a wake bumps its word, and unwatches both
+ *   join T                 worker T's answer, or "stuck" after ten seconds
+ *   waiters FD K           waits up to ten seconds for FD's end to list K
+ *                          waiters; prints how many it lists
+ *   bitswait KIND CAP V    waits up to ten seconds for that word to be V; prints it
  *   setbits KIND CAP V     store V in a lock page's waiters or reader page's sleepers
  *   bits KIND CAP          print that word
  *   notices | caps | maps  what was sent, closed and rung, and the live mappings
@@ -59,9 +78,12 @@
 #include "liberx/program/inbound.h"
 #include "liberx/program/pipe.h"
 #include "liberx/program/startup.h"
+#include "liberx/program/wake.h"
 
 #define CAPS	512	/* capability values 1 to CAPS - 1 */
 #define MAPS	256
+#define WORKERS	8
+#define LABELS	64
 
 static pthread_mutex_t fake = PTHREAD_MUTEX_INITIALIZER;
 static struct cap {
@@ -70,6 +92,7 @@ static struct cap {
 	uint64_t	 size;
 	unsigned	 closes;
 	unsigned	 rings;
+	uint64_t	 label;		/* the label a ring comes up as, or 0 */
 } caps[CAPS];
 static unsigned failmap;	/* maps until one fails, or 0 */
 static struct map {
@@ -183,6 +206,77 @@ erx_vm_release(uint64_t space, uint64_t addr, uint64_t size)
 	return (ERX_EINVAL);
 }
 
+/* ---------------------------------------------------------------------
+ * The group's ready list, its executor, and the futex */
+
+static pthread_mutex_t ready_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t ready_cond = PTHREAD_COND_INITIALIZER;
+static uint64_t ready[LABELS];
+static unsigned nready;
+
+static void
+label_queue(uint64_t label)
+{
+	pthread_mutex_lock(&ready_lock);
+	for (unsigned at = 0; at < nready; at++) {
+		if (ready[at] == label) {
+			pthread_mutex_unlock(&ready_lock);
+			return;
+		}
+	}
+	if (nready == LABELS)
+		fail("too many labels ready");
+	ready[nready++] = label;
+	pthread_cond_signal(&ready_cond);
+	pthread_mutex_unlock(&ready_lock);
+}
+
+static void *
+executor_main(void *arg)
+{
+	(void)arg;
+	for (;;) {
+		uint64_t label;
+
+		pthread_mutex_lock(&ready_lock);
+		while (nready == 0)
+			pthread_cond_wait(&ready_cond, &ready_lock);
+		label = ready[0];
+		memmove(ready, ready + 1, --nready * sizeof(ready[0]));
+		pthread_mutex_unlock(&ready_lock);
+		if (!erx_pipe_doorbell(label))
+			fail("a bound label that is no pipe end's");
+	}
+	return (NULL);
+}
+
+static pthread_mutex_t futex_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t futex_cond = PTHREAD_COND_INITIALIZER;
+
+int
+erx_umtx_wait(uint64_t addr, uint32_t expected, uint64_t deadline)
+{
+	_Atomic uint32_t *const word = (_Atomic uint32_t *)(uintptr_t)addr;
+
+	(void)deadline;
+	pthread_mutex_lock(&futex_lock);
+	while (atomic_load(word) == expected)
+		pthread_cond_wait(&futex_cond, &futex_lock);
+	pthread_mutex_unlock(&futex_lock);
+	return (ERX_OK);
+}
+
+int
+erx_umtx_wake(uint64_t addr, uint32_t count)
+{
+	(void)addr;
+	(void)count;
+	pthread_mutex_lock(&futex_lock);
+	pthread_cond_broadcast(&futex_cond);
+	pthread_mutex_unlock(&futex_lock);
+	return (ERX_OK);
+}
+
 int
 erx_cap_close(uint64_t cap)
 {
@@ -201,6 +295,8 @@ erx_irq_trigger(uint64_t irq)
 		fail("a ring of a closed doorbell");
 	cap_of(irq)->rings++;
 	pthread_mutex_unlock(&fake);
+	if (cap_of(irq)->label != 0)
+		label_queue(cap_of(irq)->label);
 	return (ERX_OK);
 }
 
@@ -476,6 +572,222 @@ do_read(int fd, size_t n)
 	erx_prog_obj_put(&e->obj);
 }
 
+/* ---------------------------------------------------------------------
+ * Calls through liberx, and its workers */
+
+static void
+fd_read(int fd, size_t n, char *answer, size_t size)
+{
+	char buf[256];
+	ssize_t got;
+
+	if (n > sizeof(buf))
+		fail("a read past the buffer");
+	got = erx_prog_fd_read(fd, buf, n);
+	snprintf(answer, size, "%zd%s%.*s", got, got > 0 ? " " : "", got > 0 ? (int)got : 0, buf);
+}
+
+static void
+fd_write(int fd, const char *text, char *answer, size_t size)
+{
+	const char *bytes = strcmp(text, "-") == 0 ? "" : text;
+
+	snprintf(answer, size, "%zd", erx_prog_fd_write(fd, bytes, strlen(bytes)));
+}
+
+/* The byte at offset at of a long write: a replayed or skipped stretch reads wrong. */
+static char
+pattern_byte(size_t at)
+{
+	return ((char)('a' + at % 251 % 26));
+}
+
+static void
+fd_writen(int fd, size_t n, char *answer, size_t size)
+{
+	char *bytes = malloc(n);
+
+	if (bytes == NULL)
+		fail("malloc");
+	for (size_t at = 0; at < n; at++)
+		bytes[at] = pattern_byte(at);
+	snprintf(answer, size, "%zd", erx_prog_fd_write(fd, bytes, n));
+	free(bytes);
+}
+
+static void
+fd_readn(int fd, size_t n, char *answer, size_t size)
+{
+	char buf[4096];
+	size_t total = 0;
+
+	while (total < n) {
+		const ssize_t got = erx_prog_fd_read(fd, buf, sizeof(buf) < n - total ? sizeof(buf) : n - total);
+
+		if (got <= 0) {
+			snprintf(answer, size, "%zd after %zu", got, total);
+			return;
+		}
+		for (ssize_t at = 0; at < got; at++) {
+			if (buf[at] != pattern_byte(total + (size_t)at)) {
+				snprintf(answer, size, "a stray byte after %zu", total + (size_t)at);
+				return;
+			}
+		}
+		total += (size_t)got;
+	}
+	snprintf(answer, size, "%zu", total);
+}
+
+/* A poll's registrations, without its readiness: watch both, sleep once, unwatch both. */
+static void
+watch_two(int fd1, int fd2, char *answer, size_t size)
+{
+	erx_pipe_end_t *a = end_get(fd1), *b = end_get(fd2);
+	const uint32_t seen = atomic_load(erx_prog_wake_word());
+	erx_prog_waiter_t wa, wb;
+
+	erx_pipe_watch(a, &wa);
+	erx_pipe_watch(b, &wb);
+	erx_prog_wake_sleep(seen);
+	erx_pipe_unwatch(a, &wa);
+	erx_pipe_unwatch(b, &wb);
+	erx_prog_obj_put(&a->obj);
+	erx_prog_obj_put(&b->obj);
+	snprintf(answer, size, "woke");
+}
+
+static struct worker {
+	pthread_t	 thread;
+	char		 call[16];
+	int		 fd;
+	int		 fd2;
+	size_t		 n;
+	char		 text[256];
+	char		 answer[300];
+	_Atomic bool	 done;
+} workers[WORKERS];
+
+static void *
+worker_main(void *arg)
+{
+	struct worker *w = arg;
+
+	if (strcmp(w->call, "fdread") == 0)
+		fd_read(w->fd, w->n, w->answer, sizeof(w->answer));
+	else if (strcmp(w->call, "fdwrite") == 0)
+		fd_write(w->fd, w->text, w->answer, sizeof(w->answer));
+	else if (strcmp(w->call, "fdwriten") == 0)
+		fd_writen(w->fd, w->n, w->answer, sizeof(w->answer));
+	else if (strcmp(w->call, "fdreadn") == 0)
+		fd_readn(w->fd, w->n, w->answer, sizeof(w->answer));
+	else
+		watch_two(w->fd, w->fd2, w->answer, sizeof(w->answer));
+	atomic_store(&w->done, true);
+	return (NULL);
+}
+
+static struct worker *
+worker_of(unsigned long long t)
+{
+	if (t >= WORKERS)
+		fail("no such worker");
+	return (&workers[t]);
+}
+
+static void
+do_spawn(const char *line)
+{
+	unsigned long long t, n;
+	char call[16], text[256];
+	struct worker *w;
+	int fd, fd2;
+
+	if (sscanf(line, "%*s %llu %15s", &t, call) != 2)
+		fail("spawn T CALL ...");
+	w = worker_of(t);
+	memset(w, 0, sizeof(*w));
+	snprintf(w->call, sizeof(w->call), "%s", call);
+	if ((strcmp(call, "fdread") == 0 || strcmp(call, "fdwriten") == 0 || strcmp(call, "fdreadn") == 0) &&
+	    sscanf(line, "%*s %*s %*s %d %llu", &fd, &n) == 2) {
+		w->fd = fd;
+		w->n = (size_t)n;
+	} else if (strcmp(call, "fdwrite") == 0 && sscanf(line, "%*s %*s %*s %d %255s", &fd, text) == 2) {
+		w->fd = fd;
+		snprintf(w->text, sizeof(w->text), "%s", text);
+	} else if (strcmp(call, "watch") == 0 && sscanf(line, "%*s %*s %*s %d %d", &fd, &fd2) == 2) {
+		w->fd = fd;
+		w->fd2 = fd2;
+	} else {
+		fail("a call no worker makes");
+	}
+	if (pthread_create(&w->thread, NULL, worker_main, w) != 0)
+		fail("pthread_create");
+	printf("spawned\n");
+}
+
+/* Waits up to ten seconds for cond(arg) to hold, a margin for a loaded host. */
+static bool
+within_ten_seconds(bool (*cond)(void *), void *arg)
+{
+	const struct timespec pause = { 0, 5 * 1000 * 1000 };
+
+	for (int tries = 0; tries < 2000; tries++) {
+		if (cond(arg))
+			return (true);
+		nanosleep(&pause, NULL);
+	}
+	return (cond(arg));
+}
+
+static bool
+worker_done(void *arg)
+{
+	return (atomic_load(&((struct worker *)arg)->done));
+}
+
+static void
+do_join(unsigned long long t)
+{
+	struct worker *w = worker_of(t);
+
+	if (!within_ten_seconds(worker_done, w)) {
+		printf("stuck\n");
+		return;
+	}
+	pthread_join(w->thread, NULL);
+	printf("%s\n", w->answer);
+}
+
+struct listed {
+	erx_pipe_end_t	*e;
+	unsigned	 want;
+	unsigned	 count;
+};
+
+static bool
+waiters_listed(void *arg)
+{
+	struct listed *l = arg;
+
+	pthread_mutex_lock(&l->e->lock);
+	l->count = 0;
+	for (const erx_prog_waiter_t *w = l->e->waiters.head; w != NULL; w = w->next)
+		l->count++;
+	pthread_mutex_unlock(&l->e->lock);
+	return (l->count == l->want);
+}
+
+static void
+do_waiters(int fd, unsigned want)
+{
+	struct listed l = { end_get(fd), want, 0 };
+
+	(void)within_ten_seconds(waiters_listed, &l);
+	erx_prog_obj_put(&l.e->obj);
+	printf("%u\n", l.count);
+}
+
 /* The offset of a bits word: a lock page's waiters or a reader page's sleepers. */
 static off_t
 bits_offset(const char *kind)
@@ -516,6 +828,32 @@ do_bits(const char *kind, uint64_t cap)
 	printf("%" PRIx64 "\n", value);
 }
 
+struct bits_want {
+	off_t		 off;
+	int		 fd;
+	uint64_t	 want;
+	uint64_t	 value;
+};
+
+static bool
+bits_are(void *arg)
+{
+	struct bits_want *b = arg;
+
+	if (pread(b->fd, &b->value, sizeof(b->value), b->off) != sizeof(b->value))
+		fail("pread");
+	return (b->value == b->want);
+}
+
+static void
+do_bitswait(const char *kind, uint64_t cap, uint64_t want)
+{
+	struct bits_want b = { bits_offset(kind), object_of(cap)->fd, want, 0 };
+
+	(void)within_ten_seconds(bits_are, &b);
+	printf("%" PRIx64 "\n", b.value);
+}
+
 static void
 do_caps(void)
 {
@@ -547,6 +885,7 @@ main(int argc, char **argv)
 	char word[16];
 	unsigned long long a, b;
 	FILE *requests;
+	pthread_t executor;
 	int fd;
 
 	for (uint32_t value = 0; value < CAPS; value++)
@@ -554,6 +893,8 @@ main(int argc, char **argv)
 	if (argc != 2 || (requests = fopen(argv[1], "r")) == NULL)
 		fail("usage: prog_fd_driver REQUESTS");
 	setvbuf(stdout, NULL, _IOLBF, 0);
+	if (pthread_create(&executor, NULL, executor_main, NULL) != 0)
+		fail("pthread_create");
 	while (fgets(line, sizeof(line), requests) != NULL) {
 		if (sscanf(line, "%15s", word) != 1)
 			continue;
@@ -593,6 +934,27 @@ main(int argc, char **argv)
 			do_setbits(arg, a, b);
 		} else if (strcmp(word, "bits") == 0 && sscanf(line, "%*s %15s %llu", arg, &a) == 2) {
 			do_bits(arg, a);
+		} else if (strcmp(word, "bind") == 0 && sscanf(line, "%*s %llu %llu", &a, &b) == 2) {
+			cap_of(a)->label = b;
+			printf("bound\n");
+		} else if (strcmp(word, "fdread") == 0 && sscanf(line, "%*s %d %llu", &fd, &a) == 2) {
+			char answer[300];
+
+			fd_read(fd, (size_t)a, answer, sizeof(answer));
+			printf("%s\n", answer);
+		} else if (strcmp(word, "fdwrite") == 0 && sscanf(line, "%*s %d %s", &fd, arg) == 2) {
+			char answer[32];
+
+			fd_write(fd, arg, answer, sizeof(answer));
+			printf("%s\n", answer);
+		} else if (strcmp(word, "spawn") == 0) {
+			do_spawn(line);
+		} else if (strcmp(word, "join") == 0 && sscanf(line, "%*s %llu", &a) == 1) {
+			do_join(a);
+		} else if (strcmp(word, "waiters") == 0 && sscanf(line, "%*s %d %llu", &fd, &a) == 2) {
+			do_waiters(fd, (unsigned)a);
+		} else if (strcmp(word, "bitswait") == 0 && sscanf(line, "%*s %15s %llu %llx", arg, &a, &b) == 3) {
+			do_bitswait(arg, a, b);
 		} else if (strcmp(word, "notices") == 0) {
 			printf("%s\n", notices[0] != '\0' ? notices + 1 : "none");
 		} else if (strcmp(word, "caps") == 0) {
@@ -603,5 +965,7 @@ main(int argc, char **argv)
 			fail(line);
 		}
 	}
-	return (0);
+	/* Workers still stuck in a call end with the process. */
+	fflush(stdout);
+	_exit(0);
 }

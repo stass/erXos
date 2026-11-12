@@ -25,7 +25,9 @@
  * a new kind makes the compiler name each operation that must handle it.
  */
 
+#include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include <erx/prog_profile.h>
 
@@ -65,10 +67,19 @@ void	erx_prog_obj_put(erx_prog_obj_t *obj);
 int	erx_prog_fd_dup(int fd);
 /* Empties slot fd and drops its reference: 0 or -EBADF. */
 int	erx_prog_fd_close(int fd);
+/*
+ * read and write on slot fd, holding a counted reference for the call: a
+ * count or a negative errno, -EBADF for an empty slot and -EINVAL for a
+ * len above SSIZE_MAX, as FreeBSD refuses it.  null reads as the end of
+ * the stream and takes every byte written, as /dev/null does.
+ */
+ssize_t	erx_prog_fd_read(int fd, void *buf, size_t len);
+ssize_t	erx_prog_fd_write(int fd, const void *buf, size_t len);
 
 /*
- * The executor's: the end the report names by pipe and end number, locked,
- * or NULL when the program holds no such end.  The caller unlocks it.
+ * The executor's: the end a report or a doorbell's label names by pipe and
+ * end number, locked with erx_pipe_end_lock, or NULL when the program holds
+ * no such end.  The caller unlocks it with erx_pipe_end_unlock.
  */
 struct erx_pipe_end	*erx_prog_fd_find_end(uint32_t pipe, uint32_t end);
 /* The executor's: calls fn on each end the program holds, each under its lock. */

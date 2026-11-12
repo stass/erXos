@@ -83,7 +83,7 @@ module Erx
     # for. The layer's descriptor table holds the pipe ends the startup message gives, run by
     # the pipe core (PIPE). The programs suite's programs are built from it.
     PROGRAM_LAYER = [*%w[liberx/program/program.c liberx/program/channel.c liberx/program/startup.c liberx/program/inbound.c
-                         liberx/program/pages.c liberx/program/fd.c liberx/program/pipe.c liberx/erx_lane.c
+                         liberx/program/pages.c liberx/program/fd.c liberx/program/pipe.c liberx/program/wake.c liberx/erx_lane.c
                          liberx/erx_profile.c build/gen/liberx/generated/prog_profile.c liberx/erx_etf.c
                          kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c], *PIPE].freeze
     PROGRAM = [*(LIBC_TASK - ["#{BACKEND}/libc_task.c"]), "#{BACKEND}/program_task.c", "#{BACKEND}/api_names.c",
@@ -128,7 +128,7 @@ module Erx
                       liberx/erx_etf.c test/guest/native_domain/guest.c
                       test/guest/native_domain/string.c
                       liberx/program/program.c liberx/program/channel.c liberx/program/startup.c
-                      liberx/program/fd.c liberx/program/pipe.c liberx/erx_profile.c
+                      liberx/program/fd.c liberx/program/pipe.c liberx/program/wake.c liberx/erx_profile.c
                       build/gen/liberx/generated/prog_profile.c test/guest/programs/args.c
                       test/guest/programs/bigargs.c test/guest/programs/note.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'

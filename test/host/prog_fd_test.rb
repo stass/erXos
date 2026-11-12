@@ -16,22 +16,28 @@ require_relative '../fixtures/prog_profile_frames'
 # slot at once, the end going with its last reference, which sends {closed} exactly once
 # and closes each capability once; a read end takes its index only through erx_pipe_rtake
 # and ends its wait with a read of 0 bytes before it unmaps; and each report is applied to
-# the end it names under the end's lock, or closes what it installed when no end is held
-# (docs/design-pipes.md, "Ends in liberx" and "Ends and their holders";
-# docs/design-programs.md, "Descriptors and files"). Every case runs under the address and
-# undefined sanitizers, and each seeded fault must fail the case named beside it.
+# the end it names under the end's lock, or closes what it installed when no end is held.
+# Calls through the table on real threads wait for the end's doorbell, which the driver's
+# executor turns into erx_pipe_doorbell: two threads wait on one end, a call that clears
+# what another waits on wakes it, a report wakes a waiting read, which then sends its
+# {drained}, a poll's registrations on two ends all go when it wakes, and a thread that
+# takes the table lock holding an end's stops (docs/design-pipes.md, "Ends in liberx" and
+# "Ends and their holders"; docs/design-programs.md, "Descriptors and files" and "The event
+# executor"). Every case runs under the address and undefined sanitizers, the threaded ones
+# under the thread sanitizer too, and each seeded fault must fail the case named beside it.
 class ProgFdTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   FD = 'liberx/program/fd.c'
   PIPE = 'liberx/program/pipe.c'
-  SOURCES = [FD, PIPE, 'liberx/program/pages.c', 'liberx/program/inbound.c', 'liberx/program/startup.c',
+  SOURCES = [FD, PIPE, 'liberx/program/wake.c', 'liberx/program/pages.c', 'liberx/program/inbound.c', 'liberx/program/startup.c',
              'liberx/erx_pipe_core.c', 'liberx/erx_pipe_check.c', 'liberx/erx_pipe_run.c',
              'liberx/erx_profile.c', 'liberx/erx_etf.c', 'kernel/crypto/blake3/blake3.c',
              'kernel/crypto/blake3/blake3_portable.c', 'build/gen/liberx/generated/prog_profile.c',
              'build/gen/liberx/generated/abi_reader.c', 'test/fixtures/prog_fd_driver.c'].freeze
-  FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-pthread',
-           '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
+  FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-pthread'].freeze
+  ASAN = ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
+  TSAN = ['-fsanitize=thread'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
   F = ProgProfileFrames
   E = ProgProfileFrames::Etf
@@ -57,7 +63,39 @@ class ProgFdTest < Minitest::Test
                                                    E.tuple(int(2), E.atom('null'))]))).unpack1('H*')
   SET_UP = [['alias 105 101', 'alias'], ['alias 106 102', 'alias'], ["start #{START}", 'setup 0']].freeze
   READ_STATE = 'read 7 1 refs=1 rix=0 known=1 lost=0 peers=0 lanes=1:open:107'
+  # The read end's doorbell, 103, and the write end's, 107, come up as their labels, (7 << 32) | End.
+  BOUND = [*SET_UP, ["bind 103 #{(7 << 32) | 1}", 'bound'], ["bind 107 #{(7 << 32) | 2}", 'bound']].freeze
+  WRITER_GONE = "report #{report(E.atom('pipe_writer_gone'), int(7), int(1), int(1))}".freeze
   WRITE_STATE = 'write 7 2 refs=1 readers=1 lost=0 size=65536 peers=1'
+
+  # Calls that wait, on real threads; these run under the thread sanitizer as well.
+  THREADED = {
+    # Both threads wait on the read end; the ring of its doorbell wakes both, one takes the
+    # record and the other waits again, for the next.
+    'two threads on one end' => [*BOUND, ['spawn 0 fdread 0 2', 'spawned'], ['spawn 1 fdread 0 2', 'spawned'],
+                                 ['waiters 0 2', '2'], ['fdwrite 1 ab', '2'], ['waiters 0 1', '1'],
+                                 ['fdwrite 1 ab', '2'], ['join 0', '2 ab'], ['join 1', '2 ab'], ['waiters 0 0', '0']],
+    # A read of 0 bytes gives up the wait's sleepers bits; the waiting thread, woken for it,
+    # publishes them again, so the write that follows rings it.
+    'a call wakes the calls whose wait it ended' => [*BOUND, ['spawn 0 fdread 0 8', 'spawned'], ['waiters 0 1', '1'],
+                                                     ['bitswait sleepers 102 1', '1'], ['fdread 0 0', '0'],
+                                                     ['bitswait sleepers 102 1', '1'], ['fdwrite 1 x', '1'],
+                                                     ['join 0', '1 x']],
+    # The writer's going wakes the read, which finds the lane drained, returns the end of the
+    # stream and sends {drained}; the release then sends {closed}.
+    'a report wakes a read' => [*BOUND, ['spawn 0 fdread 0 8', 'spawned'], ['waiters 0 1', '1'], [WRITER_GONE, 'applied'],
+                                ['join 0', '0'], ['notices', 'drained:7:1:1'], ['close 0', '0'],
+                                ['notices', 'drained:7:1:1 closed:7:1']],
+    # A write larger than the ring publishes what fits, waits for room, and on the reader's
+    # ring of its doorbell writes the rest from where it stopped; it returns the whole count.
+    'a write waits for room' => [*BOUND, ['spawn 0 fdwriten 1 100000', 'spawned'], ['waiters 1 1', '1'],
+                                 ['spawn 1 fdreadn 0 100000', 'spawned'], ['join 1', '100000'], ['join 0', '100000']],
+    # A poll's registrations: one thread on both ends' lists, woken by a report to the second,
+    # leaves both.
+    'a poll watches two ends' => [*BOUND, ['spawn 0 watch 0 1', 'spawned'], ['waiters 0 1', '1'], ['waiters 1 1', '1'],
+                                  ["report #{report(E.atom('pipe_reader_gone'), int(7), int(2), int(0))}", 'applied'],
+                                  ['join 0', 'woke'], ['waiters 0 0', '0'], ['waiters 1 0', '0']]
+  }.freeze
 
   CASES = {
     'set-up' => [*SET_UP, ['state 0', READ_STATE], ['state 1', WRITE_STATE],
@@ -121,14 +159,18 @@ class ProgFdTest < Minitest::Test
                            ['caps', '103:1:1 130:1:0 131:1:0 132:0:1 140:1:0 141:1:0 142:1:0'],
                            ['close 0', '0'], ['close 1', '0'], ['maps', '0']],
     'locked' => [*SET_UP, ["locked 1 #{report(E.atom('pipe_lost'), int(7), int(2))}", 'waited'],
-                 ['state 1', 'write 7 2 refs=1 readers=1 lost=1 size=65536 peers=1']]
+                 ['state 1', 'write 7 2 refs=1 readers=1 lost=1 size=65536 peers=1']],
+    # read and write through the table: a pipe end's, null's, and an empty slot's.
+    'calls' => [*SET_UP, ['fdwrite 1 hi', '2'], ['fdread 0 8', '2 hi'], ['fdwrite 2 abc', '3'], ['fdread 2 8', '0'],
+                ['fdread 1 8', "-#{EBADF}"], ['fdwrite 0 x', "-#{EBADF}"], ['fdread 9 8', "-#{EBADF}"]],
+    **THREADED
   }.freeze
 
   # A seeded fault, the case that must catch it, and the edit that plants it.
   MUTANTS = {
     'the last reference is miscounted, so {closed} is sent early and again' => ['dup and close', FD, 'if (--obj->refs != 0)', 'if (--obj->refs > 1)'],
     'a report is applied without the end lock' =>
-      ['locked', FD, "\t\t(void)pthread_mutex_lock(&found->lock);\n", ''],
+      ['locked', FD, "\t\terx_pipe_end_lock(found);\n", ''],
     'a read end takes its index without rtake' =>
       ['take clears bits', PIPE, 'return (erx_pipe_rtake(&r->st, v->rix, r->maps, r->lockpage) ? ERX_OK : ERX_EINVAL);',
        'return (r->st.rix = v->rix, ERX_OK);'],
@@ -139,12 +181,37 @@ class ProgFdTest < Minitest::Test
        "\tcap_close(&e->peers[rix]);"],
     'the release unmaps without ending the wait' =>
       ['release ends the wait', PIPE, "\t\t\terx_pipe_rstart(&e->u.r.st, 0);\n",
-       "\t\t\terx_pipe_rstart(&e->u.r.st, 0);\n\t\t\te->u.r.st.taken = false;\n"]
+       "\t\t\terx_pipe_rstart(&e->u.r.st, 0);\n\t\t\te->u.r.st.taken = false;\n"],
+    'a read that clears what other calls wait on does not wake them' =>
+      ['a call wakes the calls whose wait it ended', PIPE,
+       "\t\tif (r->st.wake_local)\n\t\t\terx_prog_waitq_wake(&e->waiters);\n", ''],
+    'a ring of the doorbell wakes nobody' =>
+      ['two threads on one end', PIPE, "\t\terx_prog_waitq_wake(&e->waiters);\n\t\terx_pipe_end_unlock(e);\n",
+       "\t\terx_pipe_end_unlock(e);\n"],
+    'a report wakes nobody' => ['a report wakes a read', PIPE, "\t\tbreak;\n\t}\n\terx_prog_waitq_wake(&e->waiters);\n}",
+                                "\t\tbreak;\n\t}\n}"],
+    'a write after a wait starts again from its first byte' =>
+      ['a write waits for room', PIPE, "\t\twritten += w->st.done;\n", ''],
+    'a read keeps its {drained}' => ['a report wakes a read', PIPE, "\tif (owes)\n\t\tdrained_send(e);\n\treturn (",
+                                    "\tif (owes && false)\n\t\tdrained_send(e);\n\treturn ("],
+    'a poll stays on an end it unwatched' =>
+      ['a poll watches two ends', PIPE, "\terx_pipe_end_lock(e);\n\terx_prog_waitq_leave(&e->waiters, w);\n",
+       "\terx_pipe_end_lock(e);\n\t(void)w;\n"],
+    'a read returns holding the end lock, and the table lock is taken under it' =>
+      ['calls', PIPE, "\towes = r->owing != 0;\n\terx_pipe_end_unlock(e);\n", "\towes = r->owing != 0;\n"]
   }.freeze
 
   def test_each_case_under_the_address_and_undefined_sanitizers
-    with_driver({}) do |driver|
+    with_driver({}, ASAN) do |driver|
       CASES.each do |name, steps|
+        assert_equal steps.map(&:last), run_case(driver, steps), name
+      end
+    end
+  end
+
+  def test_threaded_cases_under_the_thread_sanitizer
+    with_driver({}, TSAN) do |driver|
+      THREADED.each do |name, steps|
         assert_equal steps.map(&:last), run_case(driver, steps), name
       end
     end
@@ -154,7 +221,7 @@ class ProgFdTest < Minitest::Test
     MUTANTS.each do |name, (kase, file, original, replacement)|
       source = File.read(File.join(ROOT, file))
       assert_equal 1, source.scan(original).size, "mutant #{name} must edit exactly one place"
-      with_driver({ file => source.sub(original, replacement) }) do |driver|
+      with_driver({ file => source.sub(original, replacement) }, ASAN) do |driver|
         steps = CASES.fetch(kase)
         refute_equal steps.map(&:last), run_case(driver, steps), "seeded fault not caught: #{name}"
       end
@@ -164,7 +231,7 @@ class ProgFdTest < Minitest::Test
   private
 
   # Builds the driver from SOURCES, each source named in replaced taking the text it maps to.
-  def with_driver(replaced)
+  def with_driver(replaced, sanitizers)
     Dir.mktmpdir('erx-prog-fd-') do |directory|
       sources = SOURCES.map do |source|
         next File.join(ROOT, source) unless replaced.key?(source)
@@ -174,7 +241,7 @@ class ProgFdTest < Minitest::Test
       binary = File.join(directory, 'driver')
       includes = ['-I', ROOT, '-I', File.join(ROOT, 'include'), '-I', File.join(ROOT, 'build/gen/include'),
                   '-I', File.join(ROOT, 'kernel/crypto')]
-      output, status = Open3.capture2e(COMPILER, *FLAGS, *includes, *sources, '-o', binary, stdin_data: '')
+      output, status = Open3.capture2e(COMPILER, *FLAGS, *sanitizers, *includes, *sources, '-o', binary, stdin_data: '')
       assert status.success?, "compiling the driver failed:\n#{output}"
       yield binary
     end
