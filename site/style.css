@@ -558,13 +558,20 @@ p:last-child {
  *
  * The screen, #erx-terminal, holds a recorded session until the visitor
  * boots erXos; terminal.js then puts an xterm.js terminal in it (see
- * site/README.md). It keeps one height, about 24 rows, in both states; the
+ * site/README.md). It keeps one height in both states. On a desktop that
+ * is room for the terminal's 80 by 24 cells at 11px, 396px tall in Plex
+ * Mono, plus the .xterm-host inset of 12px above and below and 4px to spare for
+ * screens and fonts that round the cells taller; a smaller screen gets a
+ * smaller font (terminal.js, fit_terminal). The
  * readout reserves its status line and the progress bar's room, and the
  * lamp's label its longest text, so booting moves neither the page nor
  * the readout. The case's lamp and status colour follow its data-erx-phase,
- * which terminal.js sets to booting, live or stopped.
+ * which terminal.js sets to booting, live or stopped. The case's own look
+ * is set on .terminal:not(.xterm): xterm.js gives its terminal's element
+ * the class terminal too, and that element takes none of the case's
+ * padding, background or shadow.
  */
-.terminal {
+.terminal:not(.xterm) {
   padding: 22px 22px 0;
   border-radius: 14px 14px 6px 6px;
   background: var(--case);
@@ -581,7 +588,7 @@ p:last-child {
 
 #erx-terminal {
   position: relative;
-  height: 400px;
+  height: 424px;
   overflow: hidden;
   border-radius: 12px / 9px;
   background: var(--code-bg);
@@ -955,7 +962,7 @@ p:last-child {
     height: 340px;
   }
 
-  .terminal {
+  .terminal:not(.xterm) {
     padding: 10px 10px 0;
     border-radius: 10px 10px 5px 5px;
   }

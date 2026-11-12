@@ -163,7 +163,10 @@ the readout is built too), v64's page-tier JIT on, the kernel command
 line `erx.watchdog=1,30,600`, the disk as its virtio block device and a
 virtio network device (below). The machine's serial console is attached
 to the terminal, and the status line follows boot milestones in the
-serial output. The case's
+serial output. The terminal is 80 columns by 24 rows, the size the guest
+takes its serial line to be, since nothing on the line reports the
+window's; on a screen too small for that at its font size, it gets a
+smaller font rather than fewer rows, so `top` keeps its header. The case's
 `data-erx-phase` (booting, live or stopped) colours the lamp and the
 status. Reset destroys the machine and boots the same image again without
 downloading it. Under reduced motion the cursor and the lamp do not

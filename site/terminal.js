@@ -85,8 +85,6 @@ const XTERM_CSS = { src: "https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xt
     integrity: "sha384-8Xk9wy/gzEDUKrXtrmCFa2bBuK3BpjpDuL/p0SeKQX19Khl/M+lHOgD/CyYf7efP" };
 const XTERM_JS = { src: "https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js",
     integrity: "sha384-M169f14mRZOXm3hD/v2Ti0ThIT/RnAQagXA9nlE15yHAtrW19gdePJh/HaTzUOe/" };
-const XTERM_FIT_JS = { src: "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js",
-    integrity: "sha384-iF+jqbuti4XlB64clWgFWYEscb+UnSRv3VgVikGYZu+otNFnSHr7y7NcKfBnGizn" };
 
 // Serial output that marks a boot stage, in boot order, with what the
 // status line says once it appears.
@@ -560,8 +558,7 @@ function load_xterm() {
         document.head.append(Object.assign(document.createElement("link"),
             { rel: "stylesheet", href: XTERM_CSS.src, integrity: XTERM_CSS.integrity, crossOrigin: "anonymous" }));
         await load_script(XTERM_JS);
-        await load_script(XTERM_FIT_JS);
-        await document.fonts.load('12px "IBM Plex Mono"').catch(() => undefined);
+        await document.fonts.load(`${TERMINAL_FONT_PX}px "IBM Plex Mono"`).catch(() => undefined);
     })().catch(error => { xterm_loaded = null; throw error; });
     return xterm_loaded;
 }
@@ -712,15 +709,27 @@ function terminal_theme() {
              selectionBackground: "#4a4843" };
 }
 
+// The guest takes its serial line for 80 columns by 24 rows, the console's
+// size when nothing reports another (docs/design-live.md, "The console"),
+// and nothing on the line tells it the window's. So the terminal is exactly
+// that size: full-screen programs such as top lay out for it, where a
+// shorter window would scroll their header away. The cells fill the screen
+// at TERMINAL_FONT_PX on a desktop (style.css sizes #erx-terminal for them);
+// a smaller screen gets a smaller font, never fewer rows or columns.
+const TERMINAL_COLUMNS = 80;
+const TERMINAL_ROWS = 24;
+const TERMINAL_FONT_PX = 11;
+// The smallest font fit_terminal sets, and the step it shrinks by.
+const TERMINAL_MIN_FONT_PX = 4;
+const TERMINAL_FONT_STEP_PX = 0.25;
+
 function open_terminal() {
     const term = new Terminal({
+        cols: TERMINAL_COLUMNS, rows: TERMINAL_ROWS,
         fontFamily: '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace',
-        fontSize: matchMedia("(max-width: 560px)").matches ? 11 : 12,
-        lineHeight: 1.2, cursorBlink: !reduced_motion, scrollback: 5000,
+        fontSize: TERMINAL_FONT_PX, lineHeight: 1.2, cursorBlink: !reduced_motion, scrollback: 5000,
         theme: terminal_theme(), convertEol: false,
     });
-    const fit = new FitAddon.FitAddon();
-    term.loadAddon(fit);
     const host = Object.assign(document.createElement("div"), { className: "xterm-host" });
     ui.screen.querySelector("pre").hidden = true;
     ui.screen.append(host);
@@ -731,14 +740,32 @@ function open_terminal() {
         // serial0_send takes one character per byte.
         machine.current?.emulator.serial0_send(Array.from(bytes, b => String.fromCharCode(b)).join(""));
     });
-    fit.fit();
-    let pending = false;
-    addEventListener("resize", () => {
-        if(pending) return;
-        pending = true;
-        requestAnimationFrame(() => { pending = false; fit.fit(); });
-    });
+    // The font follows the host's size, which the observer reports once at
+    // the start and again on every change; a new font size changes the
+    // cells, not the host, so fitting never triggers itself.
+    new ResizeObserver(() => fit_terminal(term, host)).observe(host);
     return term;
+}
+
+// Sets the largest font size, at most TERMINAL_FONT_PX, at which the
+// terminal's 80 by 24 cells fit its host: a first guess from the cells' size
+// at full size, then smaller steps until they fit. xterm lays out, draws and
+// maps the pointer at the size it is given, so selection stays on the
+// cells. A host with no size, the screen hidden, keeps the font it has.
+function fit_terminal(term, host) {
+    const cells = term.element.querySelector(".xterm-screen");
+    const fits = () => cells.offsetWidth <= host.clientWidth && cells.offsetHeight <= host.clientHeight;
+    if(host.clientWidth === 0 || host.clientHeight === 0) return;
+    term.options.fontSize = TERMINAL_FONT_PX;
+    if(fits()) return;
+    const ratio = Math.min(host.clientWidth / cells.offsetWidth, host.clientHeight / cells.offsetHeight);
+    let size = Math.max(TERMINAL_MIN_FONT_PX,
+                        Math.floor(TERMINAL_FONT_PX * ratio / TERMINAL_FONT_STEP_PX) * TERMINAL_FONT_STEP_PX);
+    term.options.fontSize = size;
+    while(!fits() && size > TERMINAL_MIN_FONT_PX) {
+        size -= TERMINAL_FONT_STEP_PX;
+        term.options.fontSize = size;
+    }
 }
 
 // The machine's whole lifecycle lives here: boot (download once, then
