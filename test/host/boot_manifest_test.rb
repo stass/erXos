@@ -95,16 +95,17 @@ class BootManifestTest < Minitest::Test
   # table: the host link's UART, which machine.hostlink names by its path (docs/design-live.md,
   # "The host link"), and each device of a unit the system domain holds whose role and
   # compatible string are a row of device_kinds, each with the platform record's window, line
-  # and DMA memory. The console's UART, a UART of the same compatible string in a unit the
-  # system domain holds, is no record, and the block and net units are the storage and
+  # DMA memory and clock. The console's UART, a UART of the same compatible string in a unit
+  # the system domain holds, is no record, and the block and net units are the storage and
   # network domains', so the development manifest gives the system domain one record, the
-  # host link's: erx_pl011 reads -erx console_uart.
+  # host link's: erx_pl011 reads -erx console_uart, whose numbers are the console's entry.
   def test_the_hostlink_unit_gives_the_system_domain_s_one_device_record
     output, status = read(admitted)
     assert status.success?, output
+    assert_includes output, "console_uart 150994944 4096 33 24000000\n"
     assert_includes output, "devices 1\n"
-    assert_includes output, "device hostlink pl011 151257088 4096 40 0 " \
-                            "words-erx device hostlink pl011 151257088 4096 40 exact 1 short 0\n"
+    assert_includes output, "device hostlink pl011 151257088 4096 40 0 24000000 " \
+                            "words-erx device hostlink pl011 151257088 4096 40 24000000 exact 1 short 0\n"
     refute_match(/^device (?:block|net) /, output)
   end
 
@@ -120,8 +121,8 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted(source))
     assert status.success?, output
     assert_includes output, "devices 2\n"
-    assert_includes output, "device net virtio_mmio 167783936 512 71 262144 window 167780352 4096 3584 " \
-                            "words-erx given net virtio_mmio 11 3584 512 12 13 262144 exact 1 short 0\n"
+    assert_includes output, "device net virtio_mmio 167783936 512 71 262144 0 window 167780352 4096 3584 " \
+                            "words-erx given net virtio_mmio 11 3584 512 12 13 262144 0 exact 1 short 0\n"
   end
 
   # A given device's window object covers whole pages from the one that holds its first
@@ -131,7 +132,7 @@ class BootManifestTest < Minitest::Test
   # names no memory object, whatever handle the root holds.
   def test_a_given_device_s_window_covers_the_pages_of_its_registers
     given = lambda do |window, offset, size|
-      "window #{window} #{offset} words-erx given block virtio_mmio 11 #{offset} #{size} 12 0 0 exact 1 short 0\n"
+      "window #{window} #{offset} words-erx given block virtio_mmio 11 #{offset} #{size} 12 0 0 0 exact 1 short 0\n"
     end
     {
       %w[0xa003e00 0x200] => given.call('167784448 4096', 3584, 512),

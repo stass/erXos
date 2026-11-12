@@ -3,6 +3,7 @@
   "cpuset": 15,
   "console": "/pl011@9000000",
   "hostlink": "/pl011@9040000",
+  "ram_first": 1073741824,
   "ram_bytes": 268435456,
   "fiasco_reserve": 16777216,
   "units": [
@@ -10,7 +11,7 @@
       "key": "console-uart",
       "devices": [
         { "selector": "dt", "role": "uart", "path": "/pl011@9000000", "bridge": "",
-          "base": 150994944, "size": 4096, "line": 33,
+          "base": 150994944, "size": 4096, "line": 33, "clock": 24000000,
           "compatible": "arm,pl011", "bus": 0, "device": 0, "function": 0,
           "dma": "none", "flags": 0, "dma_memory": 0, "placement_key": "console-uart" }
       ]
@@ -19,7 +20,7 @@
       "key": "hostlink-uart",
       "devices": [
         { "selector": "dt", "role": "uart", "path": "/pl011@9040000", "bridge": "",
-          "base": 151257088, "size": 4096, "line": 40,
+          "base": 151257088, "size": 4096, "line": 40, "clock": 24000000,
           "compatible": "arm,pl011", "bus": 0, "device": 0, "function": 0,
           "dma": "none", "flags": 0, "dma_memory": 0, "placement_key": "hostlink-uart" }
       ]

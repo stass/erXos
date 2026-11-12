@@ -72,6 +72,8 @@
 
 _Static_assert(VM_WINDOW_BASE % (UINT64_C(1) << VM_SUPERPAGE_ORDER) == 0,
     "the window starts on a superpage");
+_Static_assert(ERX_FIASCO_KIP_WINDOW % ERX_PAGE_SIZE == 0 && ERX_FIASCO_KIP_WINDOW + ERX_PAGE_SIZE <= VM_DEVICE_BASE,
+    "the kernel information page's window is a page below the device window");
 
 typedef enum vm_object_kind {
 	VM_OBJECT_PAGES,

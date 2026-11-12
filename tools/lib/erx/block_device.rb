@@ -332,8 +332,9 @@ module Erx
 
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @runner = runner
         @compiler = compiler
         @linker = linker
@@ -443,7 +444,7 @@ module Erx
       def boot(accel, image, directory:, disk:, arguments:, expected:, seconds: GUEST_SECONDS)
         serial = File.join(directory, 'serial.log')
         begin
-          Qemu.new(root: @root, runner: @runner).run(accel: accel, image: image, memory_mib: MEMORY_MIB, directory: directory,
+          Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, image: image, memory_mib: MEMORY_MIB, directory: directory,
                                                      checkpoints: BlockDevice.checkpoints(seconds: seconds), disks: [QemuPlan::Disk.new(path: disk)],
                                                      command_line: BlockDevice.command_line(accel, arguments: arguments))
         rescue TranscriptTimeout => error
@@ -474,7 +475,8 @@ module Erx
                   'flags' => codec.member('entry_flags', 'system'), 'id' => 'block-device-check', 'artifact' => beam,
                   'receipt' => receipt }
         added = ProductionImage::Added.new(entries: [entry], inputs: [beam, source, receipt], imports: {})
-        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker,
+                            machine: ProductionImage::Machine.development(@platform), fiasco: fiasco)
                        .build_test_image(directory: directory, added: added).single
       end
 

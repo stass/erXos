@@ -67,7 +67,7 @@ class DebugLogProbeTest < Minitest::Test
     flags = sanitizers.empty? ? [] : ["-fsanitize=#{sanitizers.join(',')}", '-fno-omit-frame-pointer']
     Dir.mktmpdir('erx-debug-log-') do |directory|
       runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
-      output = M::Run.new(root: directory, source: ROOT, runner: runner).hosted_output(sanitizers: flags)
+      output = M::Run.new(root: directory, source: ROOT, runner: runner, platform: Erx::Platform.development(ROOT)).hosted_output(sanitizers: flags)
       assert_empty M.accounting_errors(output)
       actual = M.transcript(output)
       expected = M.transcript(File.binread(File.join(ROOT, M::EXPECTED)))

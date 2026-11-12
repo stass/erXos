@@ -525,7 +525,6 @@ it; git history is the record of completed work.
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
 * [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`, `wait_idle`: a boot that leaves the UART or its transmitter disabled with bytes in the transmit FIFO keeps `FR.BUSY` set, and the driver exits `pl011_busy` where clearing `FEN` would flush the FIFO (DDI 0183G 3-16); the wait is bounded by a count of reads, not a time.
-* [Medium] `erlang/apps/erx_uart/src/erx_pl011.erl`: a UART the boot left with a baud divisor of 0, as Fiasco leaves it on QEMU virt, gets divisors for virt's 24 MHz clock. The UART's clock belongs in the platform record, from its device tree node's `clocks`, and reaches the driver with the window and line. The Raspberry Pi 4's host link, UART3, a PL011 whose clock is not QEMU `virt`'s and which its firmware does not set up, needs it ([plan.md](docs/plan.md#1b-i-the-raspberry-pi-4-on-the-stopgap), part (a)).
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a window overlap and memory held by another record are told by comparing handle values, so one object given under two handles (a give that installs it twice, or the root's own `-erx given` records over slots it holds otherwise) passes, and two records carve the same pages of one memory. Compare the objects the backend resolves, or make one handle per object a promise of the domain library that the NIF states.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a second record whose window shares a page with another's is `ERX_EBUSY`, where `docs/design-runtime.md`, "Windows smaller than a page", has such records share that page's one mapping; a unit of two transports in one page, given over one window object, cannot open its second. Share the mapping, or have the design give each device a window object of its own.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.h`: the physical form is the zero value of `erx_device_form_t`, so a spec whose form no decoder set makes physical objects; give 0 to a refused `ERX_DEVICE_FORM_NONE` and set the physical form explicitly in `decode_window`.
@@ -1025,13 +1024,27 @@ it; git history is the record of completed work.
   checked for only when the transcript is incomplete. With `machine_end:` a signal after the transcript is whole reads as a
   pass, and a stopped run raises a plain `Erx::Error`, which `OracleQemu.state_of` counts as an erXos crash instead of an
   unknown result. Check `SIGNAL_STOP_LINE` whenever QEMU exited by itself, and raise a subclass that reports read `cancelled`.
-* [Low] stopgap, `ERX_ROOT_KIP_WINDOW` in `liberx/backend/fiasco/root_open.c`
-  fits QEMU `virt` only: on the Raspberry Pi 4 RAM covers `0x10000000`. It moves
-  into the backend's address layout above all RAM, beside the device window, so no
-  platform record carries it
-  ([design-stopgap.md](docs/design-stopgap.md#the-raspberry-pi-4)). The root's load
-  address already comes from the machine an image is built for
-  (`ProductionImage::Machine`).
+* [Medium] manifest, `tools/lib/erx/manifest.rb` (`device_clock`), `liberx/backend/core/boot_manifest.c`,
+  `liberx/system/dom_boot_view.c`: "only a PL011 row carries a clock" is a rule on one compatible string, checked
+  only by the Ruby manifest check; the C readers pass any 32-bit clock through, so a PL011 row with clock 0 is
+  refused only when `erx_pl011` starts, and a clock below what `erx_pl011:baud_divisors/1` accepts (about
+  1.83 MHz for 115200 baud) passes the build. Make "its driver reads a clock" a property of the device kind
+  (`include/erx/device_kinds.h`'s table), read by the Ruby check, the C readers and `device_path_problems`,
+  and check the divisor bound at build time.
+* [Low] tooling, `tools/lib/erx/production_image.rb` (`device_path_problems`): the check of a platform record
+  against a device tree reads QEMU virt's tree shape only, and runs only in the production image suite's
+  device-path step, so a wrong `ram_first` or PL011 clock in a Raspberry Pi record is never checked against
+  the board's tree. Pi package 3 writes `config.txt`'s `init_uart_clock` from the record; check the Pi's
+  record against its device tree (nodes under `/soc`, the firmware's clocks) there.
+* [Low] liberx, `liberx/backend/fiasco/vm.h`, `vm.c`, `thread.c`: the backend's fixed addresses
+  (`ERX_FIASCO_KIP_WINDOW`, the device window, the UTCB area, the VM window, the area start) are spread over
+  three files, and only the KIP window's place below the device window is asserted. Gather them in one layout
+  header with static asserts of their order.
+* [Low] tooling, the native harnesses' `MEMORY_MIB = 512`, `tools/lib/erx/medium_boot.rb` (the block
+  device's window, `virt.dtb`, the `qemu-virt/development` patterns), `tools/lib/erx/qemu.rb` (`cortex-a76`,
+  the virtio-mmio bus arguments) and `ProductionImage::Run#check_device_paths` (`-cpu cortex-a72`) still hold
+  QEMU virt's values. QEMU's `raspi4b` takes only its own 2 GiB and has no virtio-mmio; move each into the
+  platform record or `QemuPlan::MACHINES` when Pi package 4 runs a suite on the model.
 * [Low] tooling, `tools/lib/erx/native_root.rb` (`build_system_receipted`): the
   root's linked receipt does not name its place, the `--defsym` of
   `erx_fiasco_image_start` that `place_flags` adds; only the link map it binds

@@ -42,7 +42,6 @@ module Erx
   # not look for one. Nor does it read a crash record: on the stopgap kernel the root's
   # own stop writes none (TODO.md, the liberx Fiasco backend's halt item).
   module SystemDomain
-    MACHINE = MediumBoot::MACHINE
     # What the configured domains' ERTS runs: MediumBoot's arguments without the -eval
     # that halts, so its init runs the release's boot script over the erx carrier and the
     # domain stays up as a node, behind the emulator flag that lets the control_table step
@@ -651,18 +650,20 @@ module Erx
       def self.cells(cpus) = cpus.map { |count| QemuCells::Cell.new(accel: QemuCells::LOCAL_ACCELERATOR, cpus: count).name }
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64',
+                     platform: Platform.development(root))
         @root = File.expand_path(root)
         @runner = runner
         @compiler = compiler
         @linker = linker
         @qemu = qemu
-        source = File.binread(File.join(@root, ProductionImage::MANIFEST))
+        @machine = MediumBoot.machine(platform)
+        source = platform.manifest_source(@root)
         @manifest = SystemDomain.manifest(source)
         @regrant_manifest = Regrant.manifest(source)
       end
 
-      # Packs the two test images once, on MACHINE, then boots each at each CPU count:
+      # Packs the two test images once, on a medium machine (MediumBoot.machine), then boots each at each CPU count:
       # the service-kill boot, then the re-grant boot (Regrant).
       def call(cpus:, jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
@@ -682,28 +683,31 @@ module Erx
       # erx_echo_test (ECHO_BOOT), with manifest.
       def image(fiasco, name, manifest)
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/system-domain', name))
-        image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                    fiasco: fiasco)
         nothing = ProductionImage::Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
-        image.build_test_image(directory: directory, added: nothing, machine: MACHINE, domains: [ECHO_BOOT],
+        image.build_test_image(directory: directory, added: nothing, domains: [ECHO_BOOT],
                                manifest_source: manifest)
       end
 
       def regrant(accel, count, remote, built)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
-                                                         manifest_source: @regrant_manifest, memory_mib: MACHINE.memory_mib,
+                                                         manifest_source: @regrant_manifest, memory_mib: @machine.memory_mib,
                                                          test_image: true)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MACHINE.memory_mib, machine_end: true,
+            .run(platform: @machine.platform, accel: accel, cpus: count, remote: remote, image: built.single,
+                 memory_mib: @machine.memory_mib, machine_end: true,
                  checkpoints: Regrant.checkpoints(points))
         'passed'
       end
 
       def service_kill(accel, count, remote, built, domain)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
-                                                         manifest_source: @manifest, memory_mib: MACHINE.memory_mib,
+                                                         manifest_source: @manifest, memory_mib: @machine.memory_mib,
                                                          test_image: true)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MACHINE.memory_mib, machine_end: true,
+            .run(platform: @machine.platform, accel: accel, cpus: count, remote: remote, image: built.single,
+                 memory_mib: @machine.memory_mib, machine_end: true,
                  checkpoints: SystemDomain.service_kill_checkpoints(points, domain: domain))
         'passed'
       end

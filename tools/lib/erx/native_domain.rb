@@ -103,8 +103,9 @@ module Erx
     # Builds the image and boots it at each accelerator and CPU count.
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @runner = runner
         @compiler = compiler
         @linker = linker
@@ -116,7 +117,7 @@ module Erx
         fiasco.build(jobs: jobs) if build
         built = image(fiasco)
         placement.each(accels: accels, cpus: cpus) do |accel, count, remote|
-          report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
+          report = Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
                                                               checkpoints: NativeDomain.checkpoints, machine_end: true)
           ["#{accel}-#{count}cpu", { serial: File.expand_path(report.fetch('serial_log'), @root),
                                      seconds: report.fetch('elapsed_seconds') }.freeze]
@@ -126,9 +127,10 @@ module Erx
       private
 
       def image(fiasco)
-        native = NativeRoot.new(root: @root, source: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        native = NativeRoot.new(root: @root, source: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform,
+                                fiasco: fiasco)
         program = native.build_task(name: 'native-domain', sources: PROGRAM_SOURCES, directory: File.join(@build, 'program'), flags: [])
-        erts = NativeRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco).build
+        erts = NativeRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco).build
         runtime = native.build_domain_runtime_receipted(directory: File.join(@build, 'erts'),
                                                         archives: [*erts.otp_archives, erts.libc, fiasco.user_library('libgcc.a')])
         root_task = native.build(name: 'domain-root', sources: ROOT_SOURCES, directory: File.join(@build, 'root'), flags: ROOT_FLAGS)
@@ -142,7 +144,7 @@ module Erx
 
       # The BeamAsm image, over the interpreter build's musl and release.
       def jit_runtime(native, fiasco, erts)
-        jit = NativeJitRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        jit = NativeJitRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco)
                               .build(interpreter: erts)
         native.build_jit_runtime_receipted(directory: File.join(@build, 'erts-jit'),
                                            archives: jit.link_archives(libgcc: fiasco.user_library('libgcc.a')))

@@ -366,8 +366,9 @@ module Erx
 
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @runner = runner
         @compiler = compiler
         @linker = linker
@@ -384,8 +385,9 @@ module Erx
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/net-device/image'))
-        manifest = NetDevice.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)))
-        image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        manifest = NetDevice.manifest(@platform.manifest_source(@root))
+        image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker,
+                                    machine: ProductionImage::Machine.development(@platform), fiasco: fiasco)
                                .build(directory: directory, manifest_source: manifest).single
         accels.to_h { |accel| ["#{accel}-1cpu", boot(accel, image)] }
       end
@@ -414,12 +416,12 @@ module Erx
           server.start
         end
         session = SessionDomain.session_shell('root_1-shell', IFCONFIG_LINE).merge(verify: exchange).freeze
-        checkpoints = [*Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB), ProductionImage::Run::SLOGAN,
+        checkpoints = [*Qemu.boot_transcript(memory_mib: @platform.memory_mib), ProductionImage::Run::SLOGAN,
                        ProductionImage::Run::RELEASE_SHELL, session,
                        *NetDevice.shell_checkpoints(-> { answered.fetch(:mac) }),
                        *NetDevice.tcp_checkpoints(refused_port: echo.port, verify_digest: verify_digest),
                        *NetDevice.system_checkpoints]
-        Qemu.new(root: @root, runner: @runner).run(accel: accel, image: image, memory_mib: ProductionImage::MEMORY_MIB,
+        Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, image: image, memory_mib: @platform.memory_mib,
                                                    directory: directory, checkpoints: checkpoints, nic: nic,
                                                    command_line: ProductionImage::Run::COMMAND_LINES[accel])
         failed = server.stop || echo.stop

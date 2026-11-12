@@ -60,11 +60,13 @@ module Erx
     CLOSE = 4
 
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                   compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                   compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
+                   platform: Platform.development(root))
       @root = File.realpath(root)
       @runner = runner
       @compiler = compiler
       @linker = linker
+      @machine = ProductionImage::Machine.development(platform)
     end
 
     # Builds the production image and the web client, boots the image and writes the
@@ -73,10 +75,11 @@ module Erx
       fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
       fiasco.build(jobs: jobs)
       WebBuild.build(root: @root, runner: @runner)
-      manifest = File.binread(File.join(@root, ProductionImage::MANIFEST))
+      manifest = @machine.platform.manifest_source(@root)
       directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/bench-web/image'))
-      built, written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                                      .build_medium(directory: directory, machine: SessionDomain::MACHINE, manifest_source: manifest)
+      built, written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                           fiasco: fiasco)
+                                      .build_medium(directory: directory, manifest_source: manifest)
       bench = Bench.new(root: @root, runner: @runner)
       before = bench.load_average
       qemu, failure = boot(built, written, manifest)
@@ -137,13 +140,13 @@ module Erx
       run = "web-hvf-#{Process.pid}-#{Random.bytes(4).unpack1('H*')}"
       directory = OutputDirectory.prepare(root: @root, mode: 0o700, path: File.join(@root, 'build/bench-web', run))
       medium = ReleaseMedium.medium(written.slot, directory: directory, data_sectors: written.data_sectors, volume: written.volume)
-      memory = SessionDomain::MACHINE.memory_mib
+      memory = @machine.memory_mib
       points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: 1,
                                                        manifest_source: manifest, memory_mib: memory)
       hash = HostlinkGuest.web_hash(@root)
       # The boot's directory holds the host link's socket, whose path must be short.
       qemu = Qemu.new(root: @root, runner: @runner)
-                 .run(accel: 'hvf', cpus: 1, image: built.single, memory_mib: memory,
+                 .run(platform: @machine.platform, accel: 'hvf', cpus: 1, image: built.single, memory_mib: memory,
                       disks: [QemuPlan::Disk.new(path: medium)], checkpoints: self.class.checkpoints(points),
                       directory: File.join(@root, 'build/qemu', "bw-#{Process.pid}"),
                       link: ->(socket) { measure(socket, built.build_id, hash) }, link_seconds: LINK_SECONDS)

@@ -4,6 +4,7 @@
 
 require_relative 'block_device'
 require_relative 'net_device'
+require_relative 'platform'
 
 module Erx
   # The drivers' domains on QEMU virt: what ends a domain that holds a device, and how it
@@ -286,12 +287,13 @@ module Erx
 
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @runner = runner
         @compiler = compiler
         @linker = linker
-        @block = BlockDevice::Run.new(root: root, runner: runner, compiler: compiler, linker: linker)
+        @block = BlockDevice::Run.new(root: root, runner: runner, compiler: compiler, linker: linker, platform: platform)
       end
 
       # Runs the littlefs restart, the corrupt volume and the network cells under each
@@ -319,7 +321,8 @@ module Erx
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         directory = ProductionImage.clear_directory(root: @root,
                                                     path: File.join(@root, 'build/driver-domains/network-image'))
-        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker,
+                            machine: ProductionImage::Machine.development(@platform), fiasco: fiasco)
                        .build(directory: directory).single
       end
 
@@ -335,9 +338,9 @@ module Erx
         nic = QemuPlan::Nic.new(frames_port: link.frames_port, peer_port: link.peer_port, echo_port: echo.port)
         lease = ->(_line) { NetDevice.exchange(link) }
         session = SessionDomain.session_shell('root_1-shell', ProductionImage::Run::CTRL_G).merge(verify: lease).freeze
-        checkpoints = [*Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB), ProductionImage::Run::SLOGAN,
+        checkpoints = [*Qemu.boot_transcript(memory_mib: @platform.memory_mib), ProductionImage::Run::SLOGAN,
                        ProductionImage::Run::RELEASE_SHELL, session, *DriverDomains.network_checkpoints(lease)]
-        Qemu.new(root: @root, runner: @runner).run(accel: accel, image: image, memory_mib: ProductionImage::MEMORY_MIB,
+        Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, image: image, memory_mib: @platform.memory_mib,
                                                    directory: directory, checkpoints: checkpoints, nic: nic,
                                                    command_line: ProductionImage::Run::COMMAND_LINES[accel])
         failed = echo.stop

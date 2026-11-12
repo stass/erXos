@@ -8,6 +8,7 @@ require_relative '../../tools/lib/erx/conformance'
 
 class ConformanceTest < Minitest::Test
   C = Erx::Conformance
+  PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
 
   def setup
     @directory = Dir.mktmpdir('erx-conformance-')
@@ -95,7 +96,7 @@ class ConformanceTest < Minitest::Test
 
   def test_repeated_configurations_and_overlong_deadlines_are_refused
     program, = fake_qemu(serial: '')
-    run = C::Run.new(root: @directory, program: program)
+    run = C::Run.new(root: @directory, program: program, platform: PLATFORM)
     error = assert_raises(Erx::Error) { run.run(image: image, roster: roster, configs: [C::MATRIX[0]] * 2) }
     assert_match(/repeated/, error.message)
     long = C.roster((1..25).map { |index| "case c#{index} 3600\n" }.join, path: 'roster.txt')
@@ -149,7 +150,7 @@ class ConformanceTest < Minitest::Test
   end
 
   def run_matrix(program, configs: C::MATRIX.first(1))
-    C::Run.new(root: @directory, program: program, boot_seconds: 1)
+    C::Run.new(root: @directory, program: program, boot_seconds: 1, platform: PLATFORM)
      .run(image: image, roster: roster, configs: configs)
   end
 
@@ -197,7 +198,7 @@ class ConformanceTest < Minitest::Test
   def test_a_roster_with_nothing_to_run_is_refused
     program, = fake_qemu(serial: '')
     error = assert_raises(Erx::Error) do
-      C::Run.new(root: @directory, program: program).run(image: image, roster: roster("pending alpha 1\n"))
+      C::Run.new(root: @directory, program: program, platform: PLATFORM).run(image: image, roster: roster("pending alpha 1\n"))
     end
     assert_match(/no case to run/, error.message)
   end

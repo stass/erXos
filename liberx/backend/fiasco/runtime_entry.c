@@ -59,12 +59,12 @@ static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
  * each erx.arg word, which takes a byte and its NUL at the least.
  */
 static erx_boot_words_t arg_words[4 + ERX_BOOT_DEVICES_MAX + ERX_BOOT_STRINGS_MAX / 2];
-/* -erx console_uart BASE SIZE LINE: three numbers, each at most UINT64_MAX's 20 digits and its NUL. */
+/* -erx console_uart BASE SIZE LINE CLOCK: four numbers, each at most UINT64_MAX's 20 digits and its NUL. */
 #define CONSOLE_UART_NUMBER_MAX	(20 + 1)
 static const char console_uart_prefix[] = "-erx\0console_uart";
-static char console_uart_words[sizeof(console_uart_prefix) + 3 * CONSOLE_UART_NUMBER_MAX];
-_Static_assert(sizeof(console_uart_words) >= sizeof(console_uart_prefix) + 3 * CONSOLE_UART_NUMBER_MAX,
-    "the console words hold the prefix and three numbers");
+static char console_uart_words[sizeof(console_uart_prefix) + 4 * CONSOLE_UART_NUMBER_MAX];
+_Static_assert(sizeof(console_uart_words) >= sizeof(console_uart_prefix) + 4 * CONSOLE_UART_NUMBER_MAX,
+    "the console words hold the prefix and four numbers");
 /* Each device record's words: the given form's, or the host link's physical one, which is shorter. */
 static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_GIVEN_WORDS_MAX];
 _Static_assert(ERX_BOOT_GIVEN_WORDS_MAX >= ERX_BOOT_DEVICE_WORDS_MAX, "a device record's room holds either form");
@@ -356,7 +356,7 @@ word_append(char *words, size_t size, size_t used, const char *name)
 
 /*
  * Writes the words into console_uart_words and returns their whole length, the last NUL
- * included. The buffer holds the prefix and three numbers of at most CONSOLE_UART_NUMBER_MAX
+ * included. The buffer holds the prefix and four numbers of at most CONSOLE_UART_NUMBER_MAX
  * bytes each, as its _Static_assert says, so no write can fail.
  */
 static size_t
@@ -369,6 +369,7 @@ console_uart_build(const erx_boot_console_t *console)
 	used += console_uart_number(console_uart_words + used, console->base);
 	used += console_uart_number(console_uart_words + used, console->size);
 	used += console_uart_number(console_uart_words + used, console->line);
+	used += console_uart_number(console_uart_words + used, console->clock);
 	return (used);
 }
 

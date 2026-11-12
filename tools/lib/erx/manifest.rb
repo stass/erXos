@@ -357,6 +357,8 @@ module Erx
       TABLES = { 'principal' => 'principals', 'limits' => 'limits',
                  'runtime_limits' => 'runtime_limits', 'lane_class' => 'lane_classes',
                  'image' => 'images', 'domain' => 'domains' }.freeze
+      # The compatible string of the one device whose row carries a clock (device_clock).
+      PL011_COMPATIBLE = 'arm,pl011'
 
       def initialize(source, codec:, context:, planner:, consumers:)
         @source = source
@@ -696,6 +698,7 @@ module Erx
             normalized['flags'] = normalized.fetch('flags', 0)
             normalized['dma_memory'] = normalized.fetch('dma_memory', 0)
             normalized.merge!(device_window(normalized))
+            normalized['clock'] = device_clock(normalized)
             check_device(normalized)
             rows.fetch('devices') << normalized
           end
@@ -718,6 +721,22 @@ module Erx
         invalid("device-tree device lacks #{missing.join(', ')}", 'context', 'platform.devices') unless missing.empty?
         invalid('device-tree device has an empty window', 'context', 'platform.devices') if device.fetch('size').zero?
         device.slice(*fields)
+      end
+
+      # The frequency in hertz of the clock a device's driver divides rates from, the first
+      # entry of its device-tree node's `clocks` (docs/design-abi.md, "Devices and partition
+      # windows"). A PL011's driver times its characters and divides its baud rate from it,
+      # and only the board knows it, so a PL011 row carries a positive integer; no other
+      # device's driver reads one, so every other row's is 0, absent or written so. The
+      # codec holds the value to the row's 32 bits.
+      def device_clock(device)
+        clock = device.fetch('clock', 0)
+        if device['compatible'] == PL011_COMPATIBLE
+          invalid('a PL011 row lacks its clock in hertz', 'context', 'platform.devices') unless clock.is_a?(Integer) && clock.positive?
+        else
+          invalid('only a PL011 row carries a clock', 'context', 'platform.devices') unless clock == 0
+        end
+        clock
       end
 
       def check_uarts(rows, console, hostlink)

@@ -20,7 +20,7 @@ module Erx
   # device"), with one edit, the domain's row restarting it 0 times, so that the cell ends
   # it for good with one kill.
   #
-  # The image is the medium machine's (MediumBoot::MACHINE), with the release medium, so
+  # The image is the medium machine's (MediumBoot.machine), with the release medium, so
   # the storage domain runs as on the development image. The cell boots it with a network
   # device on slirp (QemuPlan::Nic). At the system's Erlang shell it waits for the network
   # domain's DHCP lease, and checks that the system domain's boot arguments give it no
@@ -35,7 +35,6 @@ module Erx
   # runs within the development manifest's budget, so the cell also shows that the budget
   # holds the domain through the echo.
   module NetworkDomain
-    MACHINE = MediumBoot::MACHINE
     # The one edit of the development manifest: a pattern that must match exactly once,
     # and its replacement, given the match.
     EDIT = [/^(domain network\n(?:  .*\n)*?  restarts )[0-9]+$/, ->(m) { "#{m[1]}0" }].freeze
@@ -132,12 +131,14 @@ module Erx
       CELL = "#{QemuGate::SUITE_ACCELERATOR}-1cpu-network-domain"
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
+                     platform: Platform.development(root))
         @root = File.expand_path(root)
         @runner = runner
         @compiler = compiler
         @linker = linker
-        @manifest = NetworkDomain.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)))
+        @machine = MediumBoot.machine(platform)
+        @manifest = NetworkDomain.manifest(platform.manifest_source(@root))
         @measurements = []
       end
 
@@ -148,8 +149,9 @@ module Erx
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/network-domain/image'))
-        built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                                .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest)
+        built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                     fiasco: fiasco)
+                                .build_medium(directory: directory, machine: @machine, manifest_source: @manifest)
         { CELL => boot(built) }
       end
 
@@ -162,8 +164,9 @@ module Erx
         nic = QemuPlan::Nic.new(frames_port: link.frames_port, peer_port: link.peer_port, echo_port: echo.port)
         figures = {}
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: 1,
-                                                         manifest_source: @manifest, memory_mib: MACHINE.memory_mib)
-        Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: 1, image: built.single, memory_mib: MACHINE.memory_mib,
+                                                         manifest_source: @manifest, memory_mib: @machine.memory_mib)
+        Qemu.new(root: @root, runner: @runner).run(platform: @machine.platform, accel: accel, cpus: 1, image: built.single,
+                                                   memory_mib: @machine.memory_mib,
                                                    checkpoints: NetworkDomain.checkpoints(points, figures), nic: nic)
         failed = echo.stop
         raise failed if failed
@@ -177,7 +180,7 @@ module Erx
 
       def record(accel, figures)
         ended = figures.fetch(:ended)
-        @measurements << "network_domain: #{accel}, 1 CPU, #{MACHINE.memory_mib} MiB: the network domain's root pool pages " \
+        @measurements << "network_domain: #{accel}, 1 CPU, #{@machine.memory_mib} MiB: the network domain's root pool pages " \
                          "after the lease at least #{figures.fetch(:lease) - ended}, after ping and a #{ECHO_BYTES}-byte TCP echo " \
                          "#{figures.fetch(:echoed) - ended} (pages in use with the domain up minus #{ended} once it ended)"
       end

@@ -70,8 +70,9 @@ module Erx
     class Run
       # source is the tree the root's C comes from, which a test may seed with a fault.
       def initialize(root:, source: root, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @source = File.expand_path(source)
         @runner = runner
         @compiler = compiler
@@ -94,7 +95,7 @@ module Erx
 
       def boot(built, accel, count, remote)
         directory = File.join(@root, 'build/qemu', "irq-#{accel}-#{count}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
-        report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
+        report = Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
                                                             checkpoints: NativeIrq.checkpoints, machine_end: true, directory: directory)
       rescue Error => e
         serial = File.join(directory, 'serial.log')
@@ -107,7 +108,8 @@ module Erx
       end
 
       def image(fiasco)
-        native = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        native = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform,
+                                fiasco: fiasco)
         program = native.build_task(name: 'native-irq-holder', sources: PROGRAM_SOURCES, directory: File.join(@build, 'program'), flags: [])
         root_task = native.build(name: 'irq-root', sources: SOURCES, directory: File.join(@build, 'root'), flags: ['-DERX_FIASCO_TEST_HOOKS'])
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)

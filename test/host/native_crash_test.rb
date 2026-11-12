@@ -9,17 +9,18 @@ require_relative '../../tools/lib/erx/native_crash'
 # case, and a log held to another case, or changed, is refused for the right reason.
 class NativeCrashTest < Minitest::Test
   FIXTURES = File.expand_path('../fixtures/native_crash', __dir__)
+  PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
   CASES = Erx::NativeCrash::CASES.to_h { |kase| [kase.name, kase] }.freeze
 
   def log(name) = File.binread(File.join(FIXTURES, "#{name}.log"))
 
   def refusal(serial, name)
-    assert_raises(Erx::Error) { Erx::NativeCrash.judge(serial, CASES.fetch(name)) }.message
+    assert_raises(Erx::Error) { Erx::NativeCrash.judge(serial, CASES.fetch(name), ram_first: PLATFORM.ram_first) }.message
   end
 
   def test_each_log_agrees_with_its_own_case
     CASES.each do |name, kase|
-      fault = Erx::NativeCrash.judge(log(name), kase)
+      fault = Erx::NativeCrash.judge(log(name), kase, ram_first: PLATFORM.ram_first)
       assert_equal kase.kind, fault.fetch('kind'), name
     end
   end

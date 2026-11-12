@@ -16,6 +16,7 @@ require_relative '../../tools/lib/erx/qemu_reuse'
 class QemuReuseTest < Minitest::Test
   Reuse = Erx::QemuReuse
   CHECKPOINTS = [{ name: 'done', pattern: /^done\r?\n/n, seconds: 5 }].freeze
+  PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
 
   def setup
     @directory = Dir.mktmpdir('erx-qemu-reuse-')
@@ -56,7 +57,7 @@ class QemuReuseTest < Minitest::Test
   def boot(session, passed: true, output: "booting\ndone\n", checkpoints: CHECKPOINTS, **options)
     qemu = Erx::Qemu.new(root: @directory, program: guest(output: output))
     report, boots = session.suite('stand-in') do
-      qemu.run(accel: 'tcg', image: @image, checkpoints: checkpoints, **options)
+      qemu.run(platform: PLATFORM, accel: 'tcg', image: @image, checkpoints: checkpoints, **options)
     end
     [report, boots.close(passed: passed)]
   end
@@ -110,7 +111,7 @@ class QemuReuseTest < Minitest::Test
   def test_each_reuse_of_one_boot_counts
     boot(session)
     qemu = Erx::Qemu.new(root: @directory, program: guest)
-    _, boots = session.suite('stand-in') { 2.times { qemu.run(accel: 'tcg', image: @image, checkpoints: CHECKPOINTS) } }
+    _, boots = session.suite('stand-in') { 2.times { qemu.run(platform: PLATFORM, accel: 'tcg', image: @image, checkpoints: CHECKPOINTS) } }
     assert_equal 2, boots.close(passed: true).reused.size
   end
 
@@ -188,7 +189,7 @@ class QemuReuseTest < Minitest::Test
   def test_the_gate_lists_each_reused_log
     qemu = Erx::Qemu.new(root: @directory, program: guest)
     suite = Erx::QemuGate::Suite.new(name: 'stand-in', cells: ['tcg-1cpu'], run: lambda do |_|
-      qemu.run(accel: 'tcg', image: @image, checkpoints: CHECKPOINTS)
+      qemu.run(platform: PLATFORM, accel: 'tcg', image: @image, checkpoints: CHECKPOINTS)
       Erx::QemuGate.result({ 'tcg-1cpu' => 'passed' })
     end)
     context = Erx::QemuGate::Context.new(root: @directory, jobs: 1)

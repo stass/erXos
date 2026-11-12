@@ -145,8 +145,9 @@ module Erx
     end
 
     class Run
-      def initialize(root:, runner:, compiler:, linker:)
+      def initialize(root:, runner:, compiler:, linker:, platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @runner = runner
         @compiler = compiler
         @linker = linker
@@ -177,7 +178,7 @@ module Erx
                     verify: ->(text) { raise Error, "the kernel reports #{text.inspect}, not this image" unless line.match?(text) } }.freeze
         ordered = [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), handoff]
         # No host link, so the kernel command line is empty and the handoff line says bootargs 0.
-        report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: image, initrd: initrd,
+        report = Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: count, remote: remote, image: image, initrd: initrd,
                                                             memory_mib: MEMORY_MIB, checkpoints: ordered,
                                                             hostlink: QemuPlan::NO_HOSTLINK)
         { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds'),
@@ -201,7 +202,7 @@ module Erx
         expected = "erXos image: #{item.reason}"
         points = [{ name: 'refusal', pattern: /\A#{Regexp.escape(expected)}\r?\n\z/n, seconds: 30 }.freeze]
         report = begin
-          Qemu.new(root: @root, runner: @runner).run(accel: accel, image: path, initrd: initrd, memory_mib: MEMORY_MIB,
+          Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, image: path, initrd: initrd, memory_mib: MEMORY_MIB,
                                                      checkpoints: points)
         rescue Error => error
           raise Error, "boot image check: #{item.name}: no #{expected.inspect}: #{error.message}"

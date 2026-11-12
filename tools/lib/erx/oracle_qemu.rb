@@ -61,8 +61,10 @@ module Erx
     # leave the archive 768 MiB; the root, linked 192 MiB into RAM, holds it to about
     # 187 MiB, since QEMU puts the device tree at 128 MiB or, for a longer file, at the
     # next 2 MiB boundary behind it (docs/design-platforms.md, "Boot").
-    MACHINE = ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 156,
-                                           root_mib: 192)
+    def self.machine(platform)
+      ProductionImage::Machine.development(platform).with(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024,
+                                                          tmp_growth_mib: 156, root_mib: 192)
+    end
     MAX_SERIAL_BYTES = 256 * 1024 * 1024
     MARKER = '.erx-oracle-qemu'
     # The line erx_ct_oracle prints when Common Test returns; the machine ends
@@ -84,13 +86,14 @@ module Erx
     Outcome = Data.define(:result, :report, :seconds)
 
     def initialize(root:, out:, deadline:, group:, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
-                   qemu: 'qemu-system-aarch64')
+                   qemu: 'qemu-system-aarch64', platform: Platform.development(root))
       @root = File.realpath(root)
       @out = claim(out)
       @deadline = deadline
       @compiler = compiler
       @linker = linker
       @qemu = qemu
+      @machine = OracleQemu.machine(platform)
       @runner = Runner.new(owner_root: @root, log_dir: File.join(@out, 'logs'))
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
       @suites = OracleSuites.new(root: @root, out: @out, runner: @runner, deadline: deadline, group: group,
@@ -103,7 +106,7 @@ module Erx
       raise Error, "a guest has #{QemuPlan::CPUS.min} to #{QemuPlan::CPUS.max} CPUs, not #{cpus}" unless QemuPlan::CPUS.include?(cpus)
 
       # Stock runs as many schedulers as the system domain's ERTS gets.
-      schedulers = ProductionImage::Run.schedulers(File.read(File.join(@root, ProductionImage::MANIFEST)), cpus: cpus)
+      schedulers = ProductionImage::Run.schedulers(@machine.platform.manifest_source(@root), cpus: cpus)
       table = @suites.known_differences
       oracle = Oracle.new(root: @root, runner: @runner)
       fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
@@ -290,10 +293,10 @@ module Erx
           'receipt' => receipt }
       end
       inputs = [*compiled.flat_map { |file| [file.path, file.source] }, *added.map { |entry| entry.fetch('receipt') }].uniq
-      ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+      ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                            fiasco: fiasco)
                      .build_test_image(directory: directory,
-                                       added: ProductionImage::Added.new(entries: added, inputs: inputs, imports: IMPORTS),
-                                       machine: MACHINE)
+                                       added: ProductionImage::Added.new(entries: added, inputs: inputs, imports: IMPORTS))
     end
 
     # Boots the image under its deadline and reads the events it printed. The
@@ -301,10 +304,11 @@ module Erx
     # deadline still shows the cases it finished.
     def run_guest(built, accel:, cpus:)
       directory = ProductionImage.clear_directory(root: @root, path: File.join(@out, 'guest'))
-      points = [*Qemu.boot_transcript(memory_mib: MACHINE.memory_mib, test_image: built.test_code), ProductionImage::Run::SLOGAN,
+      points = [*Qemu.boot_transcript(memory_mib: @machine.memory_mib, test_image: built.test_code), ProductionImage::Run::SLOGAN,
                 { name: 'oracle-result', pattern: RESULT, seconds: @deadline }]
       guest = self.class.boot_guest(Qemu.new(root: @root, runner: @runner, program: @qemu), directory: directory,
-                                    accel: accel, cpus: cpus, image: built.single, memory_mib: MACHINE.memory_mib,
+                                    platform: @machine.platform, accel: accel, cpus: cpus, image: built.single,
+                                    memory_mib: @machine.memory_mib,
                                     checkpoints: points, machine_end: true,
                                     command_line: self.class.command_line(accel: accel, limit: @codec.constant('boot_strings_max')))
       printed = OracleComparison.printed_events(guest.serial)

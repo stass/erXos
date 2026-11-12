@@ -55,7 +55,6 @@ module Erx
   # starts the idle processes of the GW measurement's fixture (IDLE_PROCESSES), whose
   # listing the web check then opens (WebGuest).
   module SessionDomain
-    MACHINE = ProductionImage::DEVELOPMENT_MACHINE
     # The prompt an Erlang shell's answer line may carry, of either domain's shell.
     PROMPT = '(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?'
     CTRL_G = ProductionImage::Run::CTRL_G
@@ -279,13 +278,15 @@ module Erx
       def self.cells(cpus) = cpus.map { |count| QemuCells::Cell.new(accel: QemuCells::LOCAL_ACCELERATOR, cpus: count).name }
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64',
+                     platform: Platform.development(root))
         @root = File.expand_path(root)
         @runner = runner
         @compiler = compiler
         @linker = linker
         @qemu = qemu
-        @manifest = File.binread(File.join(@root, ProductionImage::MANIFEST))
+        @machine = ProductionImage::Machine.development(platform)
+        @manifest = platform.manifest_source(@root)
       end
 
       # Packs the production image once and builds the web client the one-CPU cell's
@@ -295,8 +296,9 @@ module Erx
         fiasco.build(jobs: jobs) if build
         WebBuild.build(root: @root, runner: @runner) if cpus.include?(1)
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/session-domain/image'))
-        built, written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                                        .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest)
+        built, written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                             fiasco: fiasco)
+                                        .build_medium(directory: directory, machine: @machine, manifest_source: @manifest)
         placement.each(accels: [QemuCells::LOCAL_ACCELERATOR], cpus: cpus) do |accel, count, remote|
           ["#{accel}-#{count}cpu", root_session(accel, count, remote, built, written)]
         end
@@ -309,9 +311,10 @@ module Erx
         directory = OutputDirectory.prepare(root: @root, mode: 0o700, path: File.join(@root, 'build/session-domain', run))
         medium = ReleaseMedium.medium(written.slot, directory: directory, data_sectors: written.data_sectors, volume: written.volume)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
-                                                         manifest_source: @manifest, memory_mib: MACHINE.memory_mib)
+                                                         manifest_source: @manifest, memory_mib: @machine.memory_mib)
         report = Qemu.new(root: @root, runner: @runner, program: @qemu)
-                     .run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MACHINE.memory_mib,
+                     .run(platform: @machine.platform, accel: accel, cpus: count, remote: remote, image: built.single,
+                          memory_mib: @machine.memory_mib,
                           disks: [QemuPlan::Disk.new(path: medium)],
                           checkpoints: SessionDomain.root_session_checkpoints(points),
                           **web_check(accel, count, built, directory: File.join(directory, 'boot')))

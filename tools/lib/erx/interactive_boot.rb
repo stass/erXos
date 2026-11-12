@@ -78,14 +78,14 @@ module Erx
     # QemuGate.available_accelerators reads from `qemu-system-aarch64 -accel help`.
     def default_accel(available) = available.include?('hvf') ? 'hvf' : 'tcg'
 
-    # QEMU's argument vector: the harness's own plan, with the memory and the
-    # kernel command line its boots of this image use, and the serial line on
+    # QEMU's argument vector for platform's board: the harness's own plan, with the
+    # memory and the kernel command line its boots of this image use, and the serial line on
     # this terminal in place of a file. With a link, the host link's UART
     # listens on its socket, without waiting for a client, and the medium is the
     # guest's disk; without one, the UART is QEMU's null device and there is no disk.
-    def argv(accel:, cpus:, image:, link: nil)
-      QemuPlan.argv(accel: accel, cpus: cpus, image: image, serial: QemuPlan::CONSOLE,
-                    memory_mib: ProductionImage::MEMORY_MIB, command_line: ProductionImage::Run::COMMAND_LINES[accel],
+    def argv(platform:, accel:, cpus:, image:, link: nil)
+      QemuPlan.argv(platform: platform, accel: accel, cpus: cpus, image: image, serial: QemuPlan::CONSOLE,
+                    memory_mib: platform.memory_mib, command_line: ProductionImage::Run::COMMAND_LINES[accel],
                     hostlink: link&.socket, disks: link ? [QemuPlan::Disk.new(path: link.medium)] : [])
     end
 
@@ -99,12 +99,14 @@ module Erx
 
     # Builds the kernel and the image into DIRECTORY under root, replacing the
     # image an earlier boot left there, and returns the path of its boot file.
-    def build_image(root:, runner:, jobs:, **tools) = build(root: root, runner: runner, jobs: jobs, hostlink: false, **tools).image
+    def build_image(root:, runner:, jobs:, platform:, **tools)
+      build(root: root, runner: runner, jobs: jobs, hostlink: false, platform: platform, **tools).image
+    end
 
-    # The system manifest the image is built from, as checked in: the website's
-    # manifest, which has no web domain, when without_web, else the development manifest.
-    def manifest_source(root:, without_web:)
-      File.binread(File.join(root, without_web ? ProductionImage::SITE_MANIFEST : ProductionImage::MANIFEST))
+    # The system manifest the image is built from, as checked in for platform's board:
+    # the website's manifest, which has no web domain, when without_web, else the development manifest.
+    def manifest_source(root:, platform:, without_web:)
+      File.binread(File.join(root, without_web ? platform.site_manifest_path : platform.manifest_path))
     end
 
     # Builds the kernel and the image into its directory under root, replacing the
@@ -113,13 +115,14 @@ module Erx
     # emptied of any socket an earlier boot left, made owner-only, and its
     # socket path checked, so a path QEMU cannot take fails before the build.
     # With without_web the image is the website's (manifest_source).
-    def build(root:, runner:, jobs:, hostlink:, without_web: false, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+    def build(root:, runner:, jobs:, hostlink:, platform:, without_web: false, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
       socket = hostlink_socket(root) if hostlink
       fiasco = Fiasco.new(root: root, runner: runner, compiler: compiler)
       fiasco.build(jobs: jobs)
       directory = ProductionImage.clear_directory(root: root, path: File.join(root, image_directory(without_web: without_web)))
-      image_builder = ProductionImage.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco)
-      source = manifest_source(root: root, without_web: without_web)
+      image_builder = ProductionImage.new(root: root, runner: runner, compiler: compiler, linker: linker,
+                                          machine: ProductionImage::Machine.development(platform), fiasco: fiasco)
+      source = manifest_source(root: root, platform: platform, without_web: without_web)
       return Boot.new(image: image_builder.build(directory: directory, manifest_source: source).single, link: nil) unless socket
 
       built, written = image_builder.build_medium(directory: directory, manifest_source: source)

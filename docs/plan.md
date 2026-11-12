@@ -2254,6 +2254,8 @@ side.
      file) laid out by a host tool for the firmware's network boot and
      for an SD card
      ([design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)).
+     The host tool writes `config.txt`'s `init_uart_clock` from the platform
+     record's PL011 clock, so the record stays the one source of that clock.
   4. **The serial shell on the model.** The Pi's platform record and
      development manifest, with the system domain alone, holding the
      mini UART's unit, the console's, which shares its register page

@@ -21,6 +21,7 @@ class QemuRemoteTest < Minitest::Test
   Remote = Erx::QemuRemote
   Gate = Erx::QemuGate
   ROOT = File.expand_path('../..', __dir__)
+  PLATFORM = Erx::Platform.development(ROOT)
   HOST = Remote::Host.new(destination: 'dev@host.example.net', work_dir: 'erxos-qemu')
 
   # Records each command and plays the remote side: setup steps succeed, the
@@ -61,7 +62,7 @@ class QemuRemoteTest < Minitest::Test
       qemu = Erx::Qemu.new(root: ROOT, runner: runner)
       points = [{ name: 'banner', pattern: /erXos\r?\n/n, seconds: 30 }]
       begin
-        report = qemu.run(accel: 'tcg', cpus: 4, image: image, memory_mib: 128, checkpoints: points,
+        report = qemu.run(platform: PLATFORM, accel: 'tcg', cpus: 4, image: image, memory_mib: 128, checkpoints: points,
                           directory: File.join(directory, 'run'), remote: HOST)
       rescue Erx::Error => e
         error = e
@@ -203,7 +204,7 @@ class QemuRemoteTest < Minitest::Test
   def test_a_remote_boot_takes_only_what_qemu_inputs_determine
     error = assert_raises(Erx::Error) do
       Erx::Qemu.new(root: ROOT, runner: FakeRunner.new(ROOT, boot_serial: nil))
-               .run(accel: 'tcg', cpus: 4, image: __FILE__, nic: Erx::QemuPlan::Nic.new(frames_port: 1, peer_port: 2, echo_port: 3),
+               .run(platform: PLATFORM, accel: 'tcg', cpus: 4, image: __FILE__, nic: Erx::QemuPlan::Nic.new(frames_port: 1, peer_port: 2, echo_port: 3),
                     remote: HOST)
     end
     assert_match(/remote boot takes no disk/, error.message)

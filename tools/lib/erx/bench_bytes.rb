@@ -27,8 +27,9 @@ module Erx
     MEASUREMENT = /\ABYTES (\{.*\})\r*\n?\z/n
     INPUTS = %w[siphash20 siphash8 csum_iolist csum_binary csum_pseudo csum_ip_header].freeze
 
-    def initialize(root:, runner: nil)
+    def initialize(root:, runner: nil, platform: Platform.development(root))
       @root = File.realpath(root)
+      @platform = platform
       @runner = runner || Runner.new(owner_root: @root, log_dir: File.join(@root, 'build/logs'))
       @bench = Bench.new(root: @root, runner: @runner)
     end
@@ -37,7 +38,7 @@ module Erx
     def run(image: nil, jobs: 4)
       build = BenchG3.new(root: @root, runner: @runner).build_record(image)
       beam = @bench.compile_beam(flavour: 'jit', name: MODULE)
-      image ||= InteractiveBoot.build_image(root: @root, runner: @runner, jobs: jobs)
+      image ||= InteractiveBoot.build_image(root: @root, runner: @runner, jobs: jobs, platform: @platform)
       before = @bench.load_average
       directory = File.join(@root, 'build/qemu', "bytes-hvf-#{Process.pid}-#{Random.bytes(4).unpack1('H*')}")
       failure = boot(image: image, beam: beam, directory: directory)
@@ -93,8 +94,8 @@ module Erx
       line = "io:format(\"BYTES ~s~n\",[json:encode(#{MODULE}:run(#{PLAN.iterations},#{PLAN.samples}))]).\r"
       steps << BenchGuest::Exchange.new('measure', line, MEASUREMENT, PLAN.wait_seconds)
       Qemu.new(root: @root, runner: @runner)
-          .run(accel: 'hvf', cpus: 1, image: image, memory_mib: ProductionImage::MEMORY_MIB,
-               checkpoints: BenchGuest.transcript(steps), directory: directory)
+          .run(platform: @platform, accel: 'hvf', cpus: 1, image: image, memory_mib: @platform.memory_mib,
+               checkpoints: BenchGuest.transcript(steps, platform: @platform), directory: directory)
       nil
     rescue Error => error
       error

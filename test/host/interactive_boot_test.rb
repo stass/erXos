@@ -13,6 +13,8 @@ require_relative '../../tools/lib/erx/medium_boot'
 # and the QEMU argument vector it plans) and the child handling of its run,
 # with a Ruby child standing in for QEMU. Nothing here boots a guest.
 class InteractiveBootTest < Minitest::Test
+  PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
+
   def test_no_arguments_ask_for_one_cpu_and_this_hosts_accelerator
     assert_equal Erx::InteractiveBoot::Request.new(accel: nil, cpus: 1, jobs: Erx::InteractiveBoot::DEFAULT_JOBS,
                                                     hostlink: false, without_web: false),
@@ -44,7 +46,7 @@ class InteractiveBootTest < Minitest::Test
   end
 
   def test_qemu_runs_on_this_terminal_with_its_monitor_muxed_and_never_reboots
-    argv = Erx::InteractiveBoot.argv(accel: 'hvf', cpus: 2, image: '/tree/build/image.boot')
+    argv = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'hvf', cpus: 2, image: '/tree/build/image.boot')
     assert_equal 'qemu-system-aarch64', argv.first
     assert_equal 'mon:stdio', argv.fetch(argv.index('-serial') + 1)
     # The console is the first serial line; the second, the host link's UART, is QEMU's null device.
@@ -52,14 +54,14 @@ class InteractiveBootTest < Minitest::Test
     assert_includes argv, '-no-reboot'
     assert_equal '/tree/build/image.boot', argv.fetch(argv.index('-kernel') + 1)
     assert_equal '2', argv.fetch(argv.index('-smp') + 1)
-    assert_equal Erx::ProductionImage::MEMORY_MIB.to_s, argv.fetch(argv.index('-m') + 1)
+    assert_equal PLATFORM.memory_mib.to_s, argv.fetch(argv.index('-m') + 1)
     refute(argv.any? { |word| word.start_with?('file:') })
   end
 
   # The harness's line, after the word that asks for the host link the plan gives the guest.
   def test_each_accelerator_gets_the_harness_kernel_command_line
-    tcg = Erx::InteractiveBoot.argv(accel: 'tcg', cpus: 1, image: 'image.boot')
-    hvf = Erx::InteractiveBoot.argv(accel: 'hvf', cpus: 1, image: 'image.boot')
+    tcg = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'tcg', cpus: 1, image: 'image.boot')
+    hvf = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'hvf', cpus: 1, image: 'image.boot')
     word = Erx::QemuPlan::HOSTLINK_WORD
     assert_equal ['-append', "#{word} #{Erx::ProductionImage::Run::COMMAND_LINES.fetch('tcg')}"], tcg.last(2)
     assert_equal ['-append', word], hvf.last(2)
@@ -81,11 +83,11 @@ class InteractiveBootTest < Minitest::Test
     refute Erx::InteractiveBoot.request([]).without_web
     assert Erx::InteractiveBoot.request(%w[--without-web]).without_web
     assert_raises(OptionParser::ParseError) { Erx::InteractiveBoot.request(%w[--without-web --hostlink]) }
-    assert_equal File.binread(File.join(root, Erx::ProductionImage::MANIFEST)),
-                 Erx::InteractiveBoot.manifest_source(root: root, without_web: false)
-    assert_equal File.binread(File.join(root, Erx::ProductionImage::SITE_MANIFEST)),
-                 Erx::InteractiveBoot.manifest_source(root: root, without_web: true)
-    assert_equal 'config/manifest/qemu-virt-site.txt', Erx::ProductionImage::SITE_MANIFEST
+    assert_equal File.binread(File.join(root, PLATFORM.manifest_path)),
+                 Erx::InteractiveBoot.manifest_source(root: root, platform: PLATFORM, without_web: false)
+    assert_equal File.binread(File.join(root, PLATFORM.site_manifest_path)),
+                 Erx::InteractiveBoot.manifest_source(root: root, platform: PLATFORM, without_web: true)
+    assert_equal 'config/manifest/qemu-virt-site.txt', PLATFORM.site_manifest_path
     assert_equal Erx::InteractiveBoot::DIRECTORY, Erx::InteractiveBoot.image_directory(without_web: false)
     assert_equal 'build/production-image/site', Erx::InteractiveBoot.image_directory(without_web: true)
   end
@@ -96,8 +98,8 @@ class InteractiveBootTest < Minitest::Test
   # grants nothing the development image does not and moves with it. Comments may differ.
   def test_the_site_manifest_is_the_development_manifest_without_the_web_domain
     root = File.expand_path('../..', __dir__)
-    development = File.binread(File.join(root, Erx::ProductionImage::MANIFEST))
-    site = File.binread(File.join(root, Erx::ProductionImage::SITE_MANIFEST))
+    development = File.binread(File.join(root, PLATFORM.manifest_path))
+    site = File.binread(File.join(root, PLATFORM.site_manifest_path))
     records = ->(text) { text.lines.reject { |line| line.start_with?('#') } }
     assert_match(/^domain web$/, development)
     refute_match(/^(?:share|runtime_limits|limits|domain|service|facet) web$|@(?:share|domain|service)\.web$/, site)
@@ -112,7 +114,7 @@ class InteractiveBootTest < Minitest::Test
   # this terminal.
   def test_a_link_puts_the_host_link_on_its_socket_and_attaches_the_medium
     link = Erx::InteractiveBoot::Link.new(socket: '/tree/build/link/socket', medium: '/tree/build/medium.img')
-    argv = Erx::InteractiveBoot.argv(accel: 'hvf', cpus: 1, image: '/tree/build/image.boot', link: link)
+    argv = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'hvf', cpus: 1, image: '/tree/build/image.boot', link: link)
     assert_equal ['mon:stdio', 'unix:/tree/build/link/socket,server=on,wait=off'],
                  argv.each_index.select { |at| argv[at] == '-serial' }.map { |at| argv[at + 1] }
     drives = argv.each_index.select { |at| argv[at] == '-drive' }.map { |at| argv[at + 1] }

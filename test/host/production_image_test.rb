@@ -14,12 +14,20 @@ require_relative '../../tools/lib/erx/production_image'
 # The production image's host-side rules. Its boot is the QEMU gate's production_image suite.
 class ProductionImageTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  PLATFORM = Erx::Platform.development(ROOT)
+  DEVELOPMENT = Erx::ProductionImage::Machine.development(PLATFORM)
   TREE = <<~DTS
     /dts-v1/;
 
     / {
+    \tmemory@40000000 {
+    \t\treg = <0x00 0x40000000 0x00 0x10000000>;
+    \t\tdevice_type = "memory";
+    \t};
+
     \tpl011@9000000 {
     \t\tclock-names = "uartclk", "apb_pclk";
+    \t\tclocks = <0x8000 0x8000>;
     \t\tcompatible = "arm,pl011", "arm,primecell";
     \t\treg = <0x00 0x9000000 0x00 0x1000>;
     \t\tinterrupts = <0x00 0x01 0x04>;
@@ -30,14 +38,24 @@ class ProductionImageTest < Minitest::Test
     \t\treg = <0x00 0xa003e00 0x00 0x200>;
     \t\tinterrupts = <0x00 0x2f 0x01>;
     \t};
+
+    \tapb-pclk {
+    \t\tphandle = <0x8000>;
+    \t\tclock-frequency = <0x16e3600>;
+    \t\tcompatible = "fixed-clock";
+    \t};
     };
   DTS
 
   UART_WINDOW = { base: 0x9000000, size: 0x1000, line: 33 }.freeze
   BLOCK_WINDOW = { base: 0xa003e00, size: 0x200, line: 79 }.freeze
 
+  # A record of one device on QEMU virt's RAM; a PL011 has virt's 24 MHz clock unless the
+  # window says otherwise.
   def platform(path:, compatible: 'arm,pl011', **window)
-    { 'units' => [{ 'devices' => [{ 'selector' => 'dt', 'path' => path, 'compatible' => compatible, **window.transform_keys(&:to_s) }] }] }
+    clock = compatible == 'arm,pl011' ? { 'clock' => 24_000_000 } : {}
+    device = { 'selector' => 'dt', 'path' => path, 'compatible' => compatible, **clock, **window.transform_keys(&:to_s) }
+    { 'ram_first' => 0x4000_0000, 'units' => [{ 'devices' => [device] }] }
   end
 
   def test_every_import_the_root_links_is_registered
@@ -47,12 +65,37 @@ class ProductionImageTest < Minitest::Test
     assert_empty linked.uniq - Erx::ProductionImage::IMPORTS.keys
   end
 
+  # The default runtimes read the machine's platform, so a machine of another type is refused
+  # with a stated reason before they do.
+  def test_an_image_is_built_for_a_machine
+    fiasco = Object.new
+    error = assert_raises(Erx::Error) do
+      Erx::ProductionImage.new(root: ROOT, runner: nil, compiler: '', linker: '', machine: PLATFORM, fiasco: fiasco)
+    end
+    assert_match(/ProductionImage::Machine/, error.message)
+  end
+
+  # The runtimes are linked for the builder's board, so a medium or test image for a machine
+  # of another board is refused before anything is built.
+  def test_an_image_builder_stays_on_its_board
+    other = Erx::Platform.new(name: 'other-board', record: PLATFORM.record.merge('name' => 'other-board'))
+    machine = DEVELOPMENT.with(platform: other)
+    image = Erx::ProductionImage.new(root: ROOT, runner: nil, compiler: '', linker: '', machine: DEVELOPMENT, fiasco: Object.new,
+                                     runtime: nil, jit_runtime: nil)
+    error = assert_raises(Erx::Error) { image.build_medium(directory: '/nonexistent', machine: machine, manifest_source: '') }
+    assert_equal 'a qemu-virt image builder cannot build for other-board', error.message
+    assert_raises(Erx::Error) do
+      image.build_test_image(directory: '/nonexistent', added: nil, machine: machine, manifest_source: '')
+    end
+  end
+
   # libbeam.a holds littlefs's objects (lfs.o and lfs_util.o, in the emulator's OS_OBJS), so
   # its attribution names littlefs's licence beside OTP's; every notice named is a tree file.
   def test_emulator_archive_carries_the_littlefs_notice
     fiasco = Struct.new(:boot_core_archive) { def user_library(name) = "/fiasco/#{name}" }.new('/fiasco/boot_cores.a')
     erts = Erx::NativeRuntime::Built.new(otp_archives: ['/otp/erl_main.o', '/otp/libbeam.a'], libc: '/musl/libc.a', otp: '/otp')
-    image = Erx::ProductionImage.new(root: ROOT, runner: nil, compiler: '', linker: '', fiasco: fiasco, runtime: nil)
+    image = Erx::ProductionImage.new(root: ROOT, runner: nil, compiler: '', linker: '', machine: DEVELOPMENT, fiasco: fiasco,
+                                     runtime: nil)
     archives = image.send(:archives, erts).to_h { |archive| [File.basename(archive.path), archive] }
     assert_equal 'Apache-2.0 AND BSD-3-Clause', archives.fetch('libbeam.a').license
     assert_equal %w[otp/LICENSE.txt littlefs/LICENSE.md], archives.fetch('libbeam.a').notices
@@ -113,6 +156,24 @@ class ProductionImageTest < Minitest::Test
     assert_match(/unreadable reg or interrupts/, problems.fetch(0))
   end
 
+  # erx_pl011 divides the baud rate from the record's clock, so a clock other than the
+  # fixed-clock the node's first clocks entry names, or none, is named.
+  def test_a_pl011_clock_the_tree_does_not_give_is_named
+    [{ clock: 48_000_000 }, { clock: nil }].each do |clock|
+      problems = Erx::ProductionImage.device_path_problems(platform(path: '/pl011@9000000', **UART_WINDOW, **clock), TREE)
+      assert_equal ["/pl011@9000000: clock #{clock.fetch(:clock).inspect} differs from the tree's 24000000"], problems
+    end
+  end
+
+  def test_a_pl011_whose_clock_is_no_fixed_clock_is_named
+    [TREE.sub("\t\tclocks = <0x8000 0x8000>;\n", ''), TREE.sub('"fixed-clock"', '"other-clock"'),
+     TREE.sub("\t\tphandle = <0x8000>;\n", "\t\tphandle = <0x8001>;\n")].each do |tree|
+      refute_equal TREE, tree
+      problems = Erx::ProductionImage.device_path_problems(platform(path: '/pl011@9000000', **UART_WINDOW), tree)
+      assert_equal ["/pl011@9000000: clock 24000000 differs from the tree's unreadable fixed-clock"], problems
+    end
+  end
+
   def test_a_row_without_its_window_is_named
     problems = Erx::ProductionImage.device_path_problems(platform(path: '/pl011@9000000'), TREE)
     assert_match(/base, size or line .* differ/, problems.fetch(0))
@@ -121,7 +182,7 @@ class ProductionImageTest < Minitest::Test
   # A device tree path's unit address is its node's first reg address, so the checked-in
   # record's base must agree with its own path without QEMU to ask.
   def test_each_recorded_base_is_its_paths_unit_address
-    record = JSON.parse(File.read(File.join(ROOT, Erx::ProductionImage::PLATFORM)))
+    record = PLATFORM.record
     windows = record.fetch('units').flat_map { |unit| unit.fetch('devices') }.select { |device| device.fetch('selector') == 'dt' }
     refute_empty windows
     windows.each { |device| assert_equal device.fetch('path')[/@(\h+)\z/, 1].to_i(16), device.fetch('base'), device.fetch('path') }
@@ -153,7 +214,7 @@ class ProductionImageTest < Minitest::Test
     assert_includes seeded, "\t\tstdout-path = \"serial0:115200n8\";\n"
     assert seeded.end_with?("/ {\n\taliases {\n\t\tserial0 = \"/uart@9000000\";\n\t};\n};\n")
     assert_raises(Erx::Error) { Erx::ProductionImage.seed_stdout_path("/ {\n};\n", node: '/a', renamed: '/b', alias_name: 'c') }
-    point = Erx::ProductionImage::Run.stdout_path_refusal_checkpoints.last
+    point = Erx::ProductionImage::Run.stdout_path_refusal_checkpoints(machine: DEVELOPMENT).last
     line = "erx: root task refused the boot: manifest: the console /pl011@9000000 is not the node /chosen/stdout-path names, /uart@9000000\r\n"
     assert_match point.fetch(:pattern), line
     refute_match point.fetch(:pattern), line.sub('/uart@9000000', '(none)')
@@ -162,7 +223,9 @@ class ProductionImageTest < Minitest::Test
   FakeBuilt = Struct.new(:build_id, :index_hash, :flags, :test_code, keyword_init: true)
 
   def checkpoint_verifier(name, built: FakeBuilt.new(build_id: 'aa', index_hash: 'bb', flags: 1, test_code: false), **options)
-    points = Erx::ProductionImage::Run.checkpoints(built, root: ROOT, watchdog: '1,30,600', cpus: 4, **options)
+    points = Erx::ProductionImage::Run.checkpoints(built, root: ROOT, watchdog: '1,30,600', cpus: 4,
+                                                   **{ manifest_source: PLATFORM.manifest_source(ROOT),
+                                                       memory_mib: DEVELOPMENT.memory_mib }.merge(options))
     points.find { |point| point.fetch(:name) == name }.fetch(:verify)
   end
 
@@ -189,7 +252,7 @@ class ProductionImageTest < Minitest::Test
     assert_match run::RELEASE_SHELL.fetch(:pattern), rc
     refute_match run::RELEASE_SHELL.fetch(:pattern), "rc: the command shell; exit ends it\r\n"
 
-    console = run.console_checkpoints
+    console = run.console_checkpoints(machine: DEVELOPMENT)
     assert_equal "erl\r", console.find { |point| point.fetch(:name) == 'development-warning' }.fetch(:type)
     release, shell = shells.call(console)
     assert_equal [%w[release-shell shell], nil, "1+1.\r"], [[release, shell].map { |point| point.fetch(:name) }, release[:type], shell[:type]]
@@ -205,7 +268,7 @@ class ProductionImageTest < Minitest::Test
     assert_match left.fetch(:pattern), "\e\\\e[0m\r\n"
     refute_match left.fetch(:pattern), "Esc returns. #6 0.689895 debug space 1: erx_virtio_net: the network device is not driven\r\n"
 
-    release, erlang = shells.call(run.idle_checkpoints(cpus: 1, root: ROOT))
+    release, erlang = shells.call(run.idle_checkpoints(cpus: 1, root: ROOT, machine: DEVELOPMENT))
     assert_equal ["erl\r", run::BUSY_EXPRESSION], [release, erlang].map { |point| point.fetch(:type) }
     assert_match release.fetch(:pattern), "erx: root task: group: parked 2 of 2#{rc}"
     assert_match erlang.fetch(:pattern), "1> #{eshell}"
@@ -218,7 +281,7 @@ class ProductionImageTest < Minitest::Test
   # refused.
   def test_the_kernel_records_boot_reads_each_collector_and_holds_the_summary_to_the_table
     run = Erx::ProductionImage::Run
-    points = run.kernel_record_checkpoints(cpus: 4)
+    points = run.kernel_record_checkpoints(cpus: 4, machine: DEVELOPMENT)
     typed = points.filter_map { |point| point[:type] }.drop_while { |line| line != "erl\r" }
     calls = %w[machine cpus group budget threads].map { |call| %(io:format("~w~n",[erx_kernel_records:#{call}()]).\r) }
     assert_equal ["erl\r", *calls, run::KERNEL_RECORD_SUMMARY], typed
@@ -318,7 +381,7 @@ class ProductionImageTest < Minitest::Test
   # names nothing, for the manifest check to refuse.
   def test_the_production_image_carries_the_releases_its_domain_rows_name
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
-    source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    source = PLATFORM.manifest_source(ROOT)
     assert_equal %w[network session storage web], Erx::Manifest.release_names(source: source, codec: codec)
     source = Erx::ProductionImage.without_sessions(source)
     assert_equal %w[network storage web], Erx::Manifest.release_names(source: source, codec: codec)
@@ -367,29 +430,28 @@ class ProductionImageTest < Minitest::Test
   # cap by its own, and leaves every other line alone, so the manifest check proves the
   # same properties.
   def test_a_larger_machine_grows_the_root_the_system_baseline_and_tmp_alone
-    plain = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    plain = PLATFORM.manifest_source(ROOT)
     source = Erx::ProductionImage.without_sessions(plain)
     refute_equal plain, source, 'the development manifest has a session template'
     refute_match(/^session /, source)
-    machine = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 64, root_mib: 64)
+    machine = DEVELOPMENT.with(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 64, root_mib: 64)
     grown = machine.manifest(plain)
     { 'root_memory' => 1024, 'system_baseline' => 1024, 'tmp' => 64 }.each do |field, growth|
       assert_equal manifest_number(source, field) + (growth << 20), manifest_number(grown, field)
     end
     changed = source.lines.zip(grown.lines).reject { |old, new| old == new }.map { |old, _| old[/\A *[a-z_]+/].strip }
     assert_equal %w[tmp root_memory system_baseline], changed
-    assert_equal source, Erx::ProductionImage::DEVELOPMENT_MACHINE.manifest(plain)
-    record = JSON.parse(File.read(File.join(ROOT, Erx::ProductionImage::PLATFORM)))
-    assert_equal record, Erx::ProductionImage::DEVELOPMENT_MACHINE.platform(record), 'the development machine is the record'
-    assert_equal({ 'ram_bytes' => 2048 << 20, 'fiasco_reserve' => 160 << 20, 'units' => [] },
-                 machine.platform('ram_bytes' => 1, 'fiasco_reserve' => 1, 'units' => []))
-    wider = Erx::ProductionImage::Machine.new(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 0, tmp_growth_mib: 64, root_mib: 64)
+    assert_equal source, DEVELOPMENT.manifest(plain)
+    assert_equal PLATFORM.record, DEVELOPMENT.record, 'the development machine is the record'
+    assert_equal(PLATFORM.record.merge('ram_bytes' => 2048 << 20, 'fiasco_reserve' => 160 << 20),
+                 machine.record)
+    wider = DEVELOPMENT.with(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 0, tmp_growth_mib: 64, root_mib: 64)
     assert_raises(Erx::Error) { wider.manifest(source) }
   end
 
   # A manifest without exactly one line of a grown field is refused, never left ungrown.
   def test_a_manifest_without_one_line_of_a_grown_field_is_refused
-    machine = Erx::ProductionImage::Machine.new(memory_mib: 1024, fiasco_reserve_mib: 96, system_growth_mib: 256, tmp_growth_mib: 0, root_mib: 64)
+    machine = DEVELOPMENT.with(memory_mib: 1024, fiasco_reserve_mib: 96, system_growth_mib: 256, tmp_growth_mib: 0, root_mib: 64)
     ["  root_memory 1\n  system_baseline 1\n", "  system_baseline 1\n  tmp 1\n", "  root_memory 1\n  tmp 1\n",
      "  root_memory 1\n  root_memory 2\n  system_baseline 1\n  tmp 1\n"].each do |source|
       assert_raises(Erx::Error) { machine.manifest(source) }
@@ -399,8 +461,8 @@ class ProductionImageTest < Minitest::Test
   # The oracle's machine keeps the /tmp cap OTP's suite groups fill (stdlib's charge
   # about 97 MiB), whatever the development manifest's own cap.
   def test_the_oracle_machine_gives_tmp_its_160_mib
-    source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
-    assert_equal 160 << 20, manifest_number(Erx::OracleQemu::MACHINE.manifest(source), 'tmp')
+    source = PLATFORM.manifest_source(ROOT)
+    assert_equal 160 << 20, manifest_number(Erx::OracleQemu.machine(PLATFORM).manifest(source), 'tmp')
   end
 
   # Each machine names the root's place. The development machine's lies inside its own
@@ -409,19 +471,19 @@ class ProductionImageTest < Minitest::Test
   # enough for its large archive. A place with no room for the root is refused, and the
   # link takes only a page-aligned address in RAM.
   def test_each_machine_names_a_root_place_its_ram_holds
-    development = Erx::ProductionImage::DEVELOPMENT_MACHINE
+    development = DEVELOPMENT
     room = Erx::ProductionImage::ROOT_ROOM_MIB
     assert_equal 0x4400_0000, development.root_address
     assert_operator development.root_mib + room, :<=, development.memory_mib / 2
     assert_operator (Erx::ProductionImage::TOO_LITTLE_MEMORY_MIB / 2) + 2, :<=, development.root_mib
     assert_operator development.root_mib + room, :<=, Erx::ProductionImage::TOO_LITTLE_MEMORY_MIB
-    assert_equal 0x4c00_0000, Erx::OracleQemu::MACHINE.root_address
+    assert_equal 0x4c00_0000, Erx::OracleQemu.machine(PLATFORM).root_address
     [development.memory_mib - room + 1, -1].each do |root_mib|
       assert_raises(Erx::Error) { development.with(root_mib: root_mib).root_address }
     end
-    assert_equal ['--defsym=erx_fiasco_image_start=0x44000000'], Erx::NativeRoot.place_flags(0x4400_0000)
+    assert_equal ['--defsym=erx_fiasco_image_start=0x44000000'], Erx::NativeRoot.place_flags(0x4400_0000, ram_first: PLATFORM.ram_first)
     [0x4400_0001, 0x3fff_f000, '0x44000000'].each do |place|
-      assert_raises(Erx::Error) { Erx::NativeRoot.place_flags(place) }
+      assert_raises(Erx::Error) { Erx::NativeRoot.place_flags(place, ram_first: PLATFORM.ram_first) }
     end
   end
 
@@ -429,16 +491,16 @@ class ProductionImageTest < Minitest::Test
   # one no larger than root_memory, of which Fiasco and the archive take a part first.
   # The default machine leaves room for both below RAM less fiasco_reserve.
   def test_the_too_little_machine_cannot_hold_root_memory_and_the_default_can
-    source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    source = PLATFORM.manifest_source(ROOT)
     root_memory = manifest_number(source, 'root_memory')
     assert_operator Erx::ProductionImage::TOO_LITTLE_MEMORY_MIB << 20, :<=, root_memory
-    machine = Erx::ProductionImage::DEVELOPMENT_MACHINE
+    machine = DEVELOPMENT
     assert_operator root_memory, :<, (machine.memory_mib - machine.fiasco_reserve_mib) << 20
   end
 
   # A root that drops system_args, or an erx.arg word, says fewer arguments than the page should hold.
   def test_the_erts_line_must_count_the_manifests_arguments_and_the_command_lines
-    system_args = File.read(File.join(ROOT, Erx::ProductionImage::MANIFEST))[/^\s*system_args "(.*)"$/, 1].split.size
+    system_args = PLATFORM.manifest_source(ROOT)[/^\s*system_args "(.*)"$/, 1].split.size
     refute_equal 0, system_args
     # The system domain holds the host link's unit, the storage domain the block unit and
     # the network domain the net unit, so the root adds one device record to the system's:
@@ -501,7 +563,7 @@ class ProductionImageTest < Minitest::Test
   # The narrow manifest puts every share on two CPUs at most, so a machine of four runs two schedulers:
   # a count taken from the online CPUs alone says four and fails.
   def test_the_narrow_image_counts_schedulers_from_the_share_and_the_online_cpus
-    narrow = Erx::ProductionImage::Run.narrow_manifest(ROOT)
+    narrow = Erx::ProductionImage::Run.narrow_manifest(ROOT, platform: PLATFORM)
     assert_match(/^share system\n(?:  .*\n)*?  cpuset 3$/, narrow)
     assert_match(/^share users\n(?:  .*\n)*?  cpuset 3$/, narrow)
     assert_match(/^share system\n  quota_ns 20000000$/, narrow)
@@ -528,14 +590,14 @@ class ProductionImageTest < Minitest::Test
   end
 
   def test_a_command_line_reaches_qemu_only_when_asked
-    plan = { accel: 'tcg', image: '/image', serial: '/serial', hostlink: Erx::QemuPlan::NO_HOSTLINK }
+    plan = { platform: PLATFORM, accel: 'tcg', image: '/image', serial: '/serial', hostlink: Erx::QemuPlan::NO_HOSTLINK }
     refute_includes Erx::QemuPlan.argv(**plan), '-append'
     assert_equal %w[-append erx.det=1], Erx::QemuPlan.argv(**plan, command_line: 'erx.det=1').last(2)
   end
 
   def test_the_manifest_line_must_carry_the_sources_numbers
     verify = checkpoint_verifier('root-manifest')
-    source = File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))
+    source = PLATFORM.manifest_source(ROOT)
     memory, baseline = manifest_number(source, 'root_memory'), manifest_number(source, 'system_baseline')
     verify.call("erx: root task: manifest root_memory #{memory} baseline #{baseline} units 4 pool pages 12\n")
     assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline #{baseline} units 4 pool pages 12\n") }
@@ -551,7 +613,7 @@ class ProductionImageTest < Minitest::Test
       FileUtils.mkdir_p([File.join(tree, 'build'), File.join(outside, 'boot')])
       File.write(File.join(outside, 'boot', 'keep'), 'not the tree')
       File.symlink(outside, File.join(tree, 'build/production-image'))
-      run = Erx::ProductionImage::Run.new(root: tree, runner: Object.new)
+      run = Erx::ProductionImage::Run.new(root: tree, runner: Object.new, platform: PLATFORM)
       assert_raises(Erx::Error) { run.send(:image, nil) }
       assert File.file?(File.join(outside, 'boot', 'keep'))
       assert_raises(Erx::Error) do

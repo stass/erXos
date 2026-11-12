@@ -79,7 +79,7 @@ module AbiManifestFixture
   SESSION_FIELDS = { principal: 0, limits: 4, runtime: 8, release: 12, release_files: 16, reserved: 20 }.freeze
 
   # erx_mf_device's size in abi/manifest.txt.
-  DEVICE_ROW = 80
+  DEVICE_ROW = 88
 
   def unit_partition(overlap: false, orphan: false)
     original = valid

@@ -2,8 +2,8 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% EUnit cases of erx_pl011:console_uart/1, the parse of the console's device words from the
-%% boot information. Each malformed form ends in a stated reason, never in an exception.
-%% test/host/erx_pl011_test.rb runs them on stock's emulator.
+%% boot information, and of erx_pl011:baud_divisors/1. Each malformed form ends in a stated
+%% reason, never in an exception. test/host/erx_pl011_test.rb runs them on stock's emulator.
 
 -module(erx_pl011_tests).
 -include_lib("eunit/include/eunit.hrl").
@@ -14,48 +14,69 @@
 parse(Arguments) ->
     erx_pl011:console_uart(Arguments).
 
-spec(Base, Size, Line) ->
-    #{peripheral => pl011, window => {physical, Base, Size}, lines => [Line]}.
+spec(Base, Size, Line, Clock) ->
+    #{peripheral => pl011, window => {physical, Base, Size}, lines => [Line], clock => Clock}.
 
 one_entry_test() ->
-    ?assertEqual({ok, spec(150994944, 4096, 33)}, parse([["console_uart", "150994944", "4096", "33"]])).
+    ?assertEqual({ok, spec(150994944, 4096, 33, 24000000)},
+                 parse([["console_uart", "150994944", "4096", "33", "24000000"]])).
 
 other_entries_and_trailing_words_are_left_alone_test() ->
-    ?assertEqual({ok, spec(1, 2, 3)},
-                 parse([["debug"], ["console_uart", "1", "2", "3", "quiet"], []])).
+    ?assertEqual({ok, spec(1, 2, 3, 4)},
+                 parse([["debug"], ["console_uart", "1", "2", "3", "4", "quiet"], []])).
 
 largest_values_test() ->
-    ?assertEqual({ok, spec(18446744073709551615, 18446744073709551615, 4294967295)},
-                 parse([["console_uart", ?U64_MAX, ?U64_MAX, ?U32_MAX]])).
+    ?assertEqual({ok, spec(18446744073709551615, 18446744073709551615, 4294967295, 4294967295)},
+                 parse([["console_uart", ?U64_MAX, ?U64_MAX, ?U32_MAX, ?U32_MAX]])).
 
 absent_test() ->
     ?assertMatch({error, {no_console_uart, _}}, parse([])),
     ?assertMatch({error, {no_console_uart, _}}, parse([["debug"], []])).
 
 duplicate_test() ->
-    Entry = ["console_uart", "1", "2", "3"],
+    Entry = ["console_uart", "1", "2", "3", "4"],
     ?assertMatch({error, {bad_console_uart, "more than one" ++ _}}, parse([Entry, Entry])),
     ?assertMatch({error, {bad_console_uart, "more than one" ++ _}}, parse([Entry, ["console_uart"]])).
 
 truncated_test() ->
     lists:foreach(fun(Words) ->
                           ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart" | Words]]))
-                  end, [[], ["1"], ["1", "2"]]).
+                  end, [[], ["1"], ["1", "2"], ["1", "2", "3"]]).
 
 non_numeric_test() ->
     lists:foreach(fun(Word) ->
-                          ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", Word, "2", "3"]])),
-                          ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "1", Word, "3"]])),
-                          ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "1", "2", Word]]))
+                          ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", Word, "2", "3", "4"]])),
+                          ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "1", Word, "3", "4"]])),
+                          ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "1", "2", Word, "4"]])),
+                          ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "1", "2", "3", Word]]))
                   end, ["", "x", "-1", "+1", " 1", "1 ", "0x10", "1e3", "1_000", [$1, 16#661]]).
 
 oversized_test() ->
     Over64 = integer_to_list((1 bsl 64)),
     Over32 = integer_to_list((1 bsl 32)),
     Long = lists:duplicate(10000, $9),
-    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", Over64, "2", "3"]])),
-    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "1", Over64, "3"]])),
-    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "1", "2", Over32]])),
-    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", Long, "2", "3"]])),
+    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", Over64, "2", "3", "4"]])),
+    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "1", Over64, "3", "4"]])),
+    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "1", "2", Over32, "4"]])),
+    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "1", "2", "3", Over32]])),
+    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", Long, "2", "3", "4"]])),
     %% Leading zeros past the width of the largest value are refused too: the boot writes none.
-    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "0" ++ ?U64_MAX, "2", "3"]])).
+    ?assertMatch({error, {bad_console_uart, _}}, parse([["console_uart", "0" ++ ?U64_MAX, "2", "3", "4"]])).
+
+%% A clock of 0 Hz times nothing and divides no rate: the manifest check refuses a PL011 entry
+%% without a clock, and the parse refuses one that arrives anyway.
+zero_clock_test() ->
+    ?assertMatch({error, {bad_console_uart, "console_uart's clock" ++ _}},
+                 parse([["console_uart", "150994944", "4096", "33", "0"]])).
+
+%% The divisors for 115200 baud, clock / (16 * 115200) in sixty-fourths rounded to the nearest
+%% (DDI 0183G 3-10): QEMU virt's 24 MHz gives 13 + 1/64, a 48 MHz clock 26 + 3/64, the
+%% slowest clock with an integer part of at least 1 gives 1 + 0/64, and a slower one is
+%% refused, as is a clock of 0. The largest 32-bit clock stays well inside IBRD's 16 bits.
+baud_divisors_test() ->
+    ?assertEqual({ok, 13, 1}, erx_pl011:baud_divisors(24000000)),
+    ?assertEqual({ok, 26, 3}, erx_pl011:baud_divisors(48000000)),
+    ?assertEqual({ok, 1, 0}, erx_pl011:baud_divisors(1828800)),
+    ?assertMatch({error, {pl011_clock, _}}, erx_pl011:baud_divisors(1828799)),
+    ?assertMatch({error, {pl011_clock, _}}, erx_pl011:baud_divisors(0)),
+    ?assertEqual({ok, 2330, 11}, erx_pl011:baud_divisors(4294967295)).

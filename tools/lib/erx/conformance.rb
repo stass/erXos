@@ -159,8 +159,9 @@ module Erx
     # group is killed when it ends.
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     program: 'qemu-system-aarch64', boot_seconds: 60)
+                     program: 'qemu-system-aarch64', boot_seconds: 60, platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @runner = runner
         @program = program
         @boot_seconds = boot_seconds
@@ -199,7 +200,7 @@ module Erx
                    'serial_log' => serial }
         if supported
           deadline = @boot_seconds + roster.reject(&:pending).sum(&:seconds)
-          argv = QemuPlan.argv(accel: config.accel, image: image, serial: serial, cpus: config.cpus,
+          argv = QemuPlan.argv(platform: @platform, accel: config.accel, image: image, serial: serial, cpus: config.cpus,
                                memory_mib: memory_mib, program: @program)
           ending = boot(argv, name: "conformance-#{config.label}", deadline: deadline)
           bytes = File.file?(serial) ? BoundedFile.read(serial, maximum: SERIAL_BYTES) : ''.b

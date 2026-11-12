@@ -28,13 +28,11 @@ require_relative '../../../test/fixtures/pack_root'
 
 module Erx
   # The system release as an archive of its own: ReleaseFiles through Pack#build with the
-  # development manifest, so hosted and native run the same files; only the root differs.
+  # development manifest of its board (platform, a Platform), so hosted and native run the same files; only the root differs.
   # Hosted, the root is a minimal static executable that never runs, since erx_pack_open
   # and the packer require one (docs/design-stopgap.md, "The archive has a root that
   # never runs").
   class Release
-    MANIFEST = 'config/manifest/qemu-virt-development.txt'
-    PLATFORM = 'config/platforms/qemu-virt.json'
     # What an archive names by itself rather than by the release: the root and these
     # two say what each build links, so a comparison of two archives leaves them out,
     # as it leaves out the system release's build facts (the ABI's build_facts_path), which say which
@@ -61,9 +59,12 @@ module Erx
     # two archives hold the same release.
     def self.differences(left, right) = ((left - right) | (right - left)).sort
 
-    def initialize(root:, output:, runner: nil, oracle: nil, compiler: ENV.fetch('ERX_CLANG', 'clang'),
+    def initialize(root:, output:, platform:, runner: nil, oracle: nil, compiler: ENV.fetch('ERX_CLANG', 'clang'),
                    linker: ENV.fetch('ERX_LLD', 'ld.lld'))
+      raise Error, 'a release is built for a Platform' unless platform.is_a?(Platform)
+
       @root = File.realpath(root)
+      @platform = platform
       @otp = output.root
       @archive = output.archive
       @directory = File.join(File.dirname(@archive), 'work')
@@ -85,14 +86,14 @@ module Erx
       root_task = PackRootFixture.build(root: @root, directory: File.join(@directory, 'root'), codec: @codec,
                                         runner: @runner, compiler: @compiler, linker: @linker)
       files = ReleaseFiles.new(root: @root, otp: @otp, directory: @directory, runner: @runner, codec: @codec, oracle: @oracle).entries
-      manifest_source = File.binread(File.join(@root, MANIFEST))
+      manifest_source = @platform.manifest_source(@root)
       domains = domain_entries(manifest_source, root_task)
       entries = [root_entry(root_task), *files, *domains]
       _erofs, images = ReleaseMedium.image(entries: files, directory: @directory, runner: @runner)
       catalog = root_task.fetch('catalog').merge(BuildInputs.pack(root: @root, paths: ReleaseFiles.inputs_of([*files, *domains], root: @root)))
       pack_with(tools, catalog).build(
         entries: entries, root_path: 'system/root', build_kind: 'development',
-        platform: JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 1024 * 1024, label: 'platform record'),
+        platform: @platform.record,
         artifacts: ProductionImage.artifacts(archive_paths(entries), images: images),
         manifest_source: manifest_source, output: output
       )

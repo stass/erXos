@@ -447,7 +447,7 @@ apply_given_words(apply_t *apply, uint32_t at)
 	    .line = installed[ERX_DOM_OBJ_DEV_IRQ],
 	    .memory = installed[ERX_DOM_OBJ_DEV_MEMORY] != ERX_CAP_NULL ?
 	    installed[ERX_DOM_OBJ_DEV_MEMORY] : installed[ERX_DOM_OBJ_DEV_KEPT],
-	    .memory_size = entry->memory };
+	    .memory_size = entry->memory, .clock = entry->clock };
 
 	if (entry->role_word == NULL || entry->peripheral == NULL)
 		return (0);

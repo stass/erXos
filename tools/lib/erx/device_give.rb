@@ -27,7 +27,6 @@ module Erx
   # no record (erx_device_record:find answers {ok, []}). A restart refused because the
   # first creation's give was never undone fails it too: no second domain becomes ready.
   module DeviceGive
-    MACHINE = MediumBoot::MACHINE
     # The platform's spare unit (config/platforms/qemu-virt.json), whose one device's role
     # makes its record `net virtio_mmio` (include/erx/device_kinds.h).
     UNIT = "unit spare\n  placement \"spare\"\n  holder @domain.erts\n"
@@ -105,13 +104,15 @@ module Erx
     # Returns { "<accel>-<n>cpu" => 'passed' }; any disagreement raises.
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64',
+                     platform: Platform.development(root))
         @root = File.expand_path(root)
         @runner = runner
         @compiler = compiler
         @linker = linker
         @qemu = qemu
-        @manifest = DeviceGive.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)))
+        @machine = MediumBoot.machine(platform)
+        @manifest = DeviceGive.manifest(platform.manifest_source(@root))
       end
 
       # Packs the image once, then boots it at each CPU count.
@@ -119,8 +120,9 @@ module Erx
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/device-give/image'))
-        built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                                .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest)
+        built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                     fiasco: fiasco)
+                                .build_medium(directory: directory, machine: @machine, manifest_source: @manifest)
         placement.each(accels: [QemuCells::LOCAL_ACCELERATOR], cpus: cpus) do |accel, count, remote|
           ["#{accel}-#{count}cpu", give(accel, count, remote, built)]
         end
@@ -130,9 +132,10 @@ module Erx
 
       def give(accel, count, remote, built)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
-                                                         manifest_source: @manifest, memory_mib: MACHINE.memory_mib)
+                                                         manifest_source: @manifest, memory_mib: @machine.memory_mib)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MACHINE.memory_mib, machine_end: true,
+            .run(platform: @machine.platform, accel: accel, cpus: count, remote: remote, image: built.single,
+                 memory_mib: @machine.memory_mib, machine_end: true,
                  checkpoints: DeviceGive.checkpoints(points))
         'passed'
       end

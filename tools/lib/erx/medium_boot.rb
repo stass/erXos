@@ -48,13 +48,13 @@ module Erx
     # test/host/medium_boot_test.rb.
     CRC32C_ANSWER = '{crc32c,"E3069283","2D78517F",badarg}'
     CRC32C_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{crc32c,/n
-    # The machine of a medium boot: the production image's, with room for the medium
-    # manifest's two domains (manifest). RAM grows to 768 MiB, Fiasco keeping about
+    # The machine of a medium boot on platform's board: the development machine, with room
+    # for the medium manifest's two domains (manifest). RAM grows to 768 MiB, Fiasco keeping about
     # 6% of it, and the root moves up to 192 MiB, as on the QEMU oracle's machine, since the
     # archive below it carries the domain runtime images and the domain release; QEMU puts
     # the device tree 128 MiB into a machine this large (docs/design-platforms.md).
-    MACHINE = ProductionImage::Machine.new(memory_mib: 768, fiasco_reserve_mib: 48, system_growth_mib: 0, tmp_growth_mib: 0,
-                                           root_mib: 192)
+    def self.machine(platform) = ProductionImage::Machine.development(platform).with(memory_mib: 768, fiasco_reserve_mib: 48,
+                                                                                         root_mib: 192)
     # The domain's own budget and its outer one: what native_domain's ERTS domain runs in.
     DOMAIN_MEMORY = 160 << 20
     DOMAIN_OUTER = 1 << 20
@@ -302,8 +302,8 @@ module Erx
     # An Erlang map expression of pairs, each value an expression already.
     def erlang_map(pairs) = "\#{#{pairs.map { |key, value| "#{key}=>#{value}" }.join(',')}}"
 
-    # The development manifest with a domain row and room for two domains (MACHINE's
-    # manifest, with no growth of the system). The row, DOMAIN_ROW, is there so the image
+    # The development manifest with a domain row and room for two domains (a medium
+    # machine's manifest, with no growth of the system). The row, DOMAIN_ROW, is there so the image
     # carries the release and the runtime image it names, which is how a manifest makes
     # its image carry them (docs/design-stopgap.md, "The production image"). The domain
     # service starts the row at boot; the shell creates the cell's domains through the
@@ -312,7 +312,7 @@ module Erx
     # and one domain of the shell's, or two at once after a kill, whose domain the service
     # stops behind its pid while the next create runs, once the configured one has ended. So
     # the system principal's quota and max_domains each grow by domains (2), and its memory
-    # and root_memory each by that many domains' budgets. Machine#manifest drops the system
+    # and root_memory each by that many domains' budgets. ProductionImage.without_sessions drops the system
     # principal's session template, so the console's login at boot starts no session, and
     # without_web drops the web domain, so the ids and the room are the cell's own: the web
     # domain's grant would take the 250 mcpu, of what the system share's reserve leaves,
@@ -322,7 +322,7 @@ module Erx
     # way (SystemDomain); domains is how many of domain_memory's domains the principal
     # gains room for.
     def manifest(source, row: DOMAIN_ROW, domains: 2, domain_memory: DOMAIN_MEMORY)
-      grown(MACHINE.manifest(without_web(source)), memory: domains * (domain_memory + DOMAIN_OUTER), domains: domains) +
+      grown(ProductionImage.without_sessions(without_web(source)), memory: domains * (domain_memory + DOMAIN_OUTER), domains: domains) +
         row
     end
 
@@ -525,18 +525,19 @@ module Erx
 
     # Boots the production image from its release medium to the shell under HVF.
     class Run
-      MEMORY_MIB = MACHINE.memory_mib
       # Under HVF the watchdog numbers are the kernel's defaults, whatever they are.
       WATCHDOG = '[0-9]+,[0-9]+,[0-9]+'
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64',
+                     platform: Platform.development(root))
         @root = File.expand_path(root)
         @runner = runner
         @compiler = compiler
         @linker = linker
         @qemu = qemu
-        @manifest = MediumBoot.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)))
+        @machine = MediumBoot.machine(platform)
+        @manifest = MediumBoot.manifest(platform.manifest_source(@root))
       end
 
       # Packs the production image and its release medium once, then boots each CPU
@@ -546,8 +547,9 @@ module Erx
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/medium-boot/image'))
-        built, written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                                        .build_medium(directory: directory, machine: MACHINE, manifest_source: @manifest)
+        built, written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                             fiasco: fiasco)
+                                        .build_medium(directory: directory, machine: @machine, manifest_source: @manifest)
         codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
         domain = MediumBoot.domain_in(built.archive, codec: codec)
         slot_image = MediumBoot.image_in(built.erofs, codec: codec)
@@ -566,9 +568,9 @@ module Erx
 
         disks = [QemuPlan::Disk.new(path: medium)]
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: WATCHDOG, cpus: count, manifest_source: @manifest,
-                                                  memory_mib: MEMORY_MIB)
+                                                  memory_mib: @machine.memory_mib)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: 'hvf', cpus: count, image: image, memory_mib: MEMORY_MIB, directory: File.join(directory, 'boot'),
+            .run(platform: @machine.platform, accel: 'hvf', cpus: count, image: image, memory_mib: @machine.memory_mib, directory: File.join(directory, 'boot'),
                  checkpoints: MediumBoot.checkpoints(points, choice, release: built.release, domain: domain, image: slot_image), dtb: firmware_tree(count, image, disks, choice, directory),
                  disks: disks)
         'passed'
@@ -581,7 +583,8 @@ module Erx
         stock = File.join(directory, 'virt.dtb')
         tree = File.join(directory, 'firmware.dtb')
         source = File.join(directory, 'firmware.dts')
-        argv = QemuPlan.argv(accel: 'hvf', image: image, serial: '/dev/null', cpus: count, memory_mib: MEMORY_MIB,
+        argv = QemuPlan.argv(platform: @machine.platform, accel: 'hvf', image: image, serial: '/dev/null', cpus: count,
+                             memory_mib: @machine.memory_mib,
                              program: @qemu, disks: disks)
         machine = argv.index('-machine') + 1
         @runner.run([*argv[0...machine], "#{argv[machine]},dumpdtb=#{stock}", *argv[(machine + 1)..]],
@@ -594,7 +597,8 @@ module Erx
     end
 
     # The measuring cell of the driver domains' footprint (docs/plan.md, G6 and G9; no
-    # product code). It boots MACHINE's image with three configured domains that halt at
+    # product code). It boots a medium machine's image (MediumBoot.machine) with three
+    # configured domains that halt at
     # once, so the archive's domain release carries their boot scripts: bare (the domain
     # base), blk (base and erx_blk, named apart from the manifest's own storage domain)
     # and net (base, erx_net and erx_net_client, named apart from the manifest's own
@@ -692,7 +696,7 @@ module Erx
           "  restarts 0\n  restart_period_s 5\n  args \"#{DOMAIN_ARGS.join(' ')}\"\n"
       end
 
-      # MACHINE's manifest with room for the three domains, the configured rows, and the
+      # A medium machine's manifest with room for the three domains, the configured rows, and the
       # system domain's /tmp cap at system_tmp bytes.
       def manifest(source, system_tmp:)
         raise Error, 'the development manifest does not have exactly one tmp line in its runtime_limits system row' unless source.scan(TMP_LINE).size == 1
@@ -760,12 +764,15 @@ module Erx
       # the table and the load types are replaced in a child process, which only measures.
       class Run
         def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                       compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
+                       compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64',
+                       platform: Platform.development(root))
           @root = File.expand_path(root)
           @runner = runner
           @compiler = compiler
           @linker = linker
           @qemu = qemu
+          @platform = platform
+          @machine = MediumBoot.machine(platform)
         end
 
         # The table and the load types are replaced in a child process, which builds, boots and
@@ -791,12 +798,13 @@ module Erx
         def measure(cpus:, system_tmp:, directory:, jobs:, build:)
           ProductionImage.singleton_class.prepend(Table)
           ReleaseFiles.prepend(LoadOnly)
-          manifest = Footprint.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)), system_tmp: system_tmp)
+          manifest = Footprint.manifest(@platform.manifest_source(@root), system_tmp: system_tmp)
           fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
           fiasco.build(jobs: jobs) if build
           image = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/footprint/image'))
-          built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                                  .build_medium(directory: image, machine: MACHINE, manifest_source: manifest)
+          built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                       fiasco: fiasco)
+                                  .build_medium(directory: image, machine: @machine, manifest_source: manifest)
           entries = PackWire.entries_of(File.binread(built.archive), ABI::Codec.new(ABI::Generator.plan(root: @root).schema))
           File.write(File.join(directory, "archive-tmp#{system_tmp}.json"),
                      JSON.pretty_generate(archive_sizes(entries, File.size(built.archive))))
@@ -814,7 +822,7 @@ module Erx
 
         def boot(cpus, built, manifest, paths, serial_copy)
           shell = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: cpus,
-                                                          manifest_source: manifest, memory_mib: MACHINE.memory_mib)
+                                                          manifest_source: manifest, memory_mib: @machine.memory_mib)
           raise Error, 'the production checkpoints do not end at the release shell' unless shell.last.fetch(:name) == 'release-shell'
 
           expression = Footprint.expression(runs: ReleaseFiles.domain_runs(paths),
@@ -827,7 +835,7 @@ module Erx
           run_directory = File.join(@root, 'build/footprint/run')
           FileUtils.rm_rf(run_directory)
           run = Qemu.new(root: @root, runner: @runner, program: @qemu)
-                    .run(accel: 'hvf', cpus: cpus, image: built.single, memory_mib: MACHINE.memory_mib, machine_end: true,
+                    .run(platform: @platform, accel: 'hvf', cpus: cpus, image: built.single, memory_mib: @machine.memory_mib, machine_end: true,
                          directory: run_directory,
                          checkpoints: checkpoints)
           FileUtils.cp(run.fetch('serial_log'), serial_copy)

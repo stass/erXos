@@ -7,6 +7,7 @@ require 'fileutils'
 require 'set'
 require 'json'
 require_relative 'bootstrap_memory'
+require_relative 'platform'
 require_relative 'qemu_remote'
 require_relative 'qemu_reuse'
 require_relative 'runner'
@@ -17,6 +18,14 @@ module Erx
   module QemuPlan
     # The guest CPU counts a plan accepts.
     CPUS = (1..8)
+    # Each board's QEMU machine, by its platform record's name (Platform): the -machine
+    # value, and the options added under TCG and in deterministic mode. QEMU virt's are
+    # GICv3, an MSI controller TCG needs for PCIe, and no random seeds in its device tree.
+    Machine = Data.define(:base, :tcg_options, :deterministic_options)
+    MACHINES = {
+      'qemu-virt' => Machine.new(base: 'virt-11.1,gic-version=3', tcg_options: %w[msi=gicv2m],
+                                 deterministic_options: %w[dtb-randomness=off])
+    }.freeze
     # As serial, the guest's serial line on this process's own standard input
     # and output, with QEMU's monitor multiplexed onto it: Ctrl-A C switches
     # between the two and Ctrl-A X quits QEMU. For a person at a terminal,
@@ -106,7 +115,14 @@ module Erx
 
     module_function
 
-    def argv(accel:, image:, serial:, cpus: 1, memory_mib: 512,
+    # The guest's RAM in MiB when a plan names none: the platform record's (Platform#memory_mib).
+    def memory_of(platform)
+      raise Error, 'a QEMU plan is for a Platform' unless platform.is_a?(Platform)
+
+      platform.memory_mib
+    end
+
+    def argv(platform:, accel:, image:, serial:, cpus: 1, memory_mib: memory_of(platform),
              program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil, dtb: nil,
              disks: [], hostlink: nil, nic: nil)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
@@ -132,9 +148,7 @@ module Erx
         raise Error, 'invalid QEMU path' unless value.is_a?(String) && !value.empty? && !value.include?("\0")
       end
 
-      machine = 'virt-11.1,gic-version=3'
-      machine += ',msi=gicv2m' if accel == 'tcg'
-      machine += ',dtb-randomness=off' if deterministic
+      machine = machine_line(platform, accel: accel, deterministic: deterministic)
       # `-monitor none` turns off only QEMU's default monitor; CONSOLE's
       # `mon:stdio` brings its own, multiplexed onto the serial line.
       [program, '-machine', machine, '-accel', accel,
@@ -146,6 +160,14 @@ module Erx
        '-kernel', image,
        *(initrd ? ['-initrd', initrd] : []), *(line ? ['-append', line] : []),
        *(dtb ? ['-dtb', dtb] : [])].freeze
+    end
+
+    # The -machine value for platform's board under accel, in deterministic mode or not.
+    def machine_line(platform, accel:, deterministic:)
+      raise Error, 'a QEMU plan is for a Platform' unless platform.is_a?(Platform)
+
+      machine = MACHINES.fetch(platform.name) { raise Error, "QEMU has no machine for platform #{platform.name}" }
+      [machine.base, *(accel == 'tcg' ? machine.tcg_options : []), *(deterministic ? machine.deterministic_options : [])].join(',')
     end
 
     # Each disk is a drive with no front end of its own and the virtio-blk
@@ -383,7 +405,7 @@ module Erx
     # serial line reaches the run's serial log over ssh. Only a boot that QEMU's inputs
     # alone determine runs there: no disk, network device or host link session. A host
     # that cannot be reached, or refuses the boot's setup, raises QemuRemote::Unreachable.
-    def run(accel:, image:, cpus: 1, memory_mib: 512, checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
+    def run(platform:, accel:, image:, cpus: 1, memory_mib: QemuPlan.memory_of(platform), checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
             dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil, remote: nil)
       raise Error, 'a run with a host link session ends when the session does, not with machine_end' if link && machine_end
       raise Error, 'a run with a host link session takes no other host link plan' if link && hostlink
@@ -402,7 +424,7 @@ module Erx
       socket = link && File.join(directory, 'hostlink.sock')
       keyboard = matcher.types? ? File.join(directory, 'keyboard') : nil
       remote_boot = remote && QemuRemote::Boot.new(host: remote)
-      plan = { accel: accel, cpus: cpus, memory_mib: memory_mib, program: remote_boot ? remote.program : @program,
+      plan = { platform: platform, accel: accel, cpus: cpus, memory_mib: memory_mib, program: remote_boot ? remote.program : @program,
                command_line: command_line }
       argv = if remote_boot
                QemuPlan.argv(**plan, image: remote_boot.path('image'), serial: QemuPlan::STDIO, initrd: initrd && remote_boot.path('initrd'),

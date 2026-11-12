@@ -8,6 +8,7 @@ require 'json'
 require_relative 'compile_memo'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'platform'
 require_relative 'interpreter_image'
 require_relative 'pack_provenance'
 
@@ -28,12 +29,12 @@ module Erx
     # RELRO header: root.ld names no program headers and would get one for it, and task.ld
     # names its own, so there the flag changes nothing.
     ROOT_LINK_FLAGS = %w[-z max-page-size=4096 -z norelro].freeze
-    # QEMU virt's RAM starts here. A root's place is an address in it that root.ld takes
-    # from its link (place_flags): a system image's comes from its machine
+    # A root's place is an address in its board's RAM that root.ld takes from its link
+    # (place_flags): a system image's comes from its machine
     # (ProductionImage::Machine#root_address), and every other root, a test's, takes
-    # PLACE, 64 MiB into RAM, the place of the development machine.
-    RAM_FIRST = 0x4000_0000
-    PLACE = RAM_FIRST + (64 << 20)
+    # development_place, DEVELOPMENT_ROOT_MIB into RAM, the place of the development machine.
+    DEVELOPMENT_ROOT_MIB = 64
+    def self.development_place(platform) = platform.ram_first + (DEVELOPMENT_ROOT_MIB << 20)
     # What every root task needs: its entry, its console and its compiler's memcpy.
     RUNTIME = %W[#{BACKEND}/arch/aarch64/root_start.S #{BACKEND}/console.c #{BACKEND}/root_mem.c].freeze
     # The root's own memory and objects: the effects over sigma0 and the four pure cores.
@@ -136,11 +137,14 @@ module Erx
     LIBRARIES = %w[libsigma0.a libl4sys.p.a].freeze
 
     # source is the tree the C comes from, which a test may seed with a fault.
-    def initialize(root:, runner:, compiler:, linker:, source: root, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler))
+    def initialize(root:, runner:, compiler:, linker:, platform:, source: root, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler))
       raise Error, 'set ERX_CLANG to the installed LLVM clang' if compiler.to_s.empty?
       raise Error, 'set ERX_LLD to the installed ld.lld' if linker.to_s.empty?
 
+      raise Error, "a root is linked for a Platform" unless platform.is_a?(Platform)
+
       @root = File.expand_path(root)
+      @platform = platform
       @source = File.expand_path(source)
       @runner = runner
       @compiler = compiler
@@ -196,10 +200,11 @@ module Erx
       receipted(program, sources: DOMAIN_RUNTIME, script: TASK_LINK_SCRIPT, directory: directory)
     end
 
-    # The linker flag that gives root.ld its place: an address in RAM on a page boundary.
-    def self.place_flags(place)
+    # The linker flag that gives root.ld its place: an address in RAM, which starts at
+    # ram_first, on a page boundary.
+    def self.place_flags(place, ram_first:)
       raise Error, format('a root place must be a page-aligned address in RAM, not 0x%x', place) unless
-        place.is_a?(Integer) && place >= RAM_FIRST && (place % 4096).zero?
+        place.is_a?(Integer) && place >= ram_first && (place % 4096).zero?
 
       [format('--defsym=erx_fiasco_image_start=0x%x', place)]
     end
@@ -227,11 +232,11 @@ module Erx
     # erXos's own code. place is where root.ld puts the program; a task.ld link, whose
     # addresses are task.ld's own, passes nil.
     def build(name:, sources:, directory:, archives: [], flags: [], script: LINK_SCRIPT, link_flags: [], strip_debug: false,
-              place: PLACE)
+              place: self.class.development_place(@platform))
       objects = compile_all(sources: sources, directory: directory, flags: flags)
       libraries = LIBRARIES.map { |library| @fiasco.user_library(library) }
       program = File.join(directory, name)
-      @runner.run([@linker, '-T', script, *(place ? self.class.place_flags(place) : []), *link_flags, *ROOT_LINK_FLAGS, *(strip_debug ? ['--strip-debug'] : []), '-Map', map_path(program),
+      @runner.run([@linker, '-T', script, *(place ? self.class.place_flags(place, ram_first: @platform.ram_first) : []), *link_flags, *ROOT_LINK_FLAGS, *(strip_debug ? ['--strip-debug'] : []), '-Map', map_path(program),
                    '-o', program, *objects,
                    # The archives name one another's symbols in no fixed order, so the linker
                    # rescans them as a group until nothing new resolves.

@@ -256,7 +256,11 @@ clock, which the firmware may change at run time, so the board's
 clock and set the mini UART's line; the early console, Fiasco's
 console on the stopgap and the Erlang mini-UART driver keep the divisor
 the firmware set and never compute one, so no core clock rate reaches
-the platform record. The host link is UART3, a PL011 on GPIO 4 and 5,
+the platform record. The PL011s' clock does: each PL011's entry in the
+record carries its clock in hertz, from its node's `clocks`, and
+`erx_pl011` divides 115200 baud from it for a PL011 the firmware leaves
+unprogrammed, as it leaves UART3
+([design-abi.md](design-abi.md#devices-and-partition-windows)). The host link is UART3, a PL011 on GPIO 4 and 5,
 whose pins `dtoverlay=uart3` in `config.txt` sets; UART2, the other PL011
 with pins of its own, sits on GPIO 0 and 1, the bus of a HAT's
 identification EEPROM, which the firmware reads at boot. The manifest

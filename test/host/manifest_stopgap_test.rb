@@ -81,6 +81,24 @@ class ManifestStopgapTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 'context', 'platform.devices', @source, context(platform: platform), message: /empty window/)
   end
 
+  # A PL011's driver times characters and divides its baud rate from the UART's clock, which
+  # only the board knows, so a PL011 row without a clock of at least one hertz is wrong.
+  def test_a_pl011_row_must_carry_its_clock
+    [nil, 0, -1, '24000000'].each do |clock|
+      platform = platform_with do |value|
+        device = value.fetch('units').first.fetch('devices').first
+        clock.nil? ? device.delete('clock') : device['clock'] = clock
+      end
+      refused(Erx::Manifest::Invalid, 'context', 'platform.devices', @source, context(platform: platform), message: /PL011 .*clock/)
+    end
+  end
+
+  # Only a PL011's driver reads a clock, so any other row's clock is 0.
+  def test_a_row_of_another_device_carries_no_clock
+    source, against = with_extra_device(compatible: 'virtio,mmio', clock: 24_000_000)
+    refused(Erx::Manifest::Invalid, 'context', 'platform.devices', source, against, message: /clock/)
+  end
+
   # Configuration space gives a PCIe function its window, so a platform row that names one is wrong.
   def test_a_pci_row_must_not_carry_a_window
     source, against = with_extra_device(selector: 'pci', role: 'ordinary', bridge: '/pcie@0', path: '')

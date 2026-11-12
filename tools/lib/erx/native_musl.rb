@@ -51,8 +51,9 @@ module Erx
 
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @runner = runner
         @compiler = compiler
         @linker = linker
@@ -66,7 +67,7 @@ module Erx
         fiasco.build(jobs: jobs) if build
         built = image(fiasco, jobs: jobs)
         placement.each(accels: accels, cpus: cpus) do |accel, count, remote|
-          report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
+          report = Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
                                                               checkpoints: NativeMusl.checkpoints(cpus: count), machine_end: true)
           ["#{accel}-#{count}cpu", { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds') }.freeze]
         end
@@ -79,7 +80,7 @@ module Erx
         directory = File.join(@build, 'musl')
         libc = musl.build(directory: directory, jobs: jobs)
         guest = compile_guest(musl.include_directories(directory: directory))
-        root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco)
                               .build(name: 'musl-root', sources: SOURCES, directory: File.join(@build, 'root'),
                                      archives: [guest, libc, fiasco.user_library('libgcc.a')])
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)

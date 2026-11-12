@@ -18,9 +18,7 @@
 #include "kernel/crypto/blake3/blake3.h"
 #include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/root_open.h"
-
-/* Where the root sees the kernel information page: no RAM on QEMU virt is here. */
-#define ERX_ROOT_KIP_WINDOW	UINT64_C(0x10000000)
+#include "liberx/backend/fiasco/vm.h"
 
 /* No stack holds these: the archive's checks want them large and long-lived. */
 static erx_blake3_ctx_t root_hasher;
@@ -42,7 +40,7 @@ erx_fiasco_root_open(erx_boot_handoff_view_t *handoff, erx_pack_view_t *pack)
 	erx_pack_error_t pack_error = { 0 };
 	const char *reason;
 
-	kip = l4sigma0_map_kip(L4_BASE_PAGER_CAP, (void *)ERX_ROOT_KIP_WINDOW,
+	kip = l4sigma0_map_kip(L4_BASE_PAGER_CAP, (void *)ERX_FIASCO_KIP_WINDOW,
 	    L4_PAGESHIFT);
 	if (kip == NULL)
 		return ("kernel information page: not mapped");

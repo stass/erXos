@@ -11,6 +11,7 @@ require_relative '../../tools/lib/erx/native_boot'
 # image, without a guest.
 class NativeBootTest < Minitest::Test
   M = Erx::NativeBoot
+  PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
   BUILT = Struct.new(:build_id, :index_hash).new('b0a36f6eb31731fa', 'dc9c' * 16)
   GOOD = "erx: root task: build b0a36f6eb31731fa index #{'dc9c' * 16} entries 6\r\n".b
 
@@ -48,7 +49,8 @@ class NativeBootTest < Minitest::Test
   def test_a_root_needs_both_tools_named
     [['', 'ld.lld'], ['clang', '']].each do |compiler, linker|
       assert_raises(Erx::Error) do
-        Erx::NativeRoot.new(root: Dir.pwd, runner: Object.new, compiler: compiler, linker: linker, fiasco: Object.new)
+        Erx::NativeRoot.new(root: Dir.pwd, runner: Object.new, compiler: compiler, linker: linker, platform: PLATFORM,
+                            fiasco: Object.new)
       end
     end
   end

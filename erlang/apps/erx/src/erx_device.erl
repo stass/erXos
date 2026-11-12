@@ -40,7 +40,8 @@
                 | {physical, Base :: non_neg_integer(), Size :: non_neg_integer()} | stand_in.
 -type line() :: {object, Irq :: non_neg_integer()} | non_neg_integer().
 -type spec() :: #{peripheral := atom(), window := window(), lines := [line()],
-                  memory => {object, Memory :: non_neg_integer(), Bytes :: pos_integer()}}.
+                  memory => {object, Memory :: non_neg_integer(), Bytes :: pos_integer()},
+                  clock => Hertz :: non_neg_integer()}.
 -opaque queue() :: non_neg_integer().
 -type segment() :: {out, binary()} | {in, pos_integer()}.
 
@@ -56,7 +57,8 @@ init() ->
 %% `memory => {object, Memory, Bytes}` for a device that does DMA, whose queues are carved
 %% from that one memory, `{error, erange}` past its end) or a physical device's window and
 %% line selectors, a UART's, which has no queue (`{error, enotsup}` from queue_create/4).
-%% Every device that does DMA is given, in the system domain too, whose root gives itself
+%% A record's `clock`, the device's clock in hertz, is for its driver: open/1 does
+%% not read it. Every device that does DMA is given, in the system domain too, whose root gives itself
 %% the devices it holds. A hosted runtime has no devices, so either form is an
 %% error there, and `stand_in` gives plain memory and software lines for tests; natively
 %% `stand_in` is `{error, enotsup}`.

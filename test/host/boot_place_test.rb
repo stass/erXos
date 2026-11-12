@@ -28,6 +28,7 @@ class BootPlaceTest < Minitest::Test
   # the device tree QEMU puts behind a long file, on its 2 MiB boundary.
   ARCHIVE_ROOM = 176 * 1024 * 1024
   ROOT_SCRIPT = File.expand_path('../../liberx/backend/fiasco/root.ld', __dir__)
+  PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
   PT_LOAD = 1
   PT_DYNAMIC = 2
   PT_KIP = 0x10
@@ -148,14 +149,16 @@ class BootPlaceTest < Minitest::Test
     File.write(source, "void _start(void) { for (;;) ; }\n")
     @runner.run([compiler, '--target=aarch64-none-elf', '-O1', '-ffreestanding', '-c', source, '-o', object],
                 name: 'compile-placed-root', deadline: 60)
-    @runner.run([linker, '-T', ROOT_SCRIPT, *Erx::NativeRoot.place_flags(machine.root_address), *Erx::NativeRoot::ROOT_LINK_FLAGS, '-o', program, object],
+    @runner.run([linker, '-T', ROOT_SCRIPT, *Erx::NativeRoot.place_flags(machine.root_address, ram_first: machine.platform.ram_first),
+                 *Erx::NativeRoot::ROOT_LINK_FLAGS, '-o', program, object],
                 name: 'link-placed-root', deadline: 60)
     File.binread(program)
   end
 
   def test_the_oracle_machines_root_clears_a_176_mib_archive_on_256_mib
     filler = "\0".b * ARCHIVE_ROOM
-    output = plan(archive(standard.merge('boot/stopgap-root' => linked_root(machine: Erx::OracleQemu::MACHINE), 'system/filler' => filler)),
+    output = plan(archive(standard.merge('boot/stopgap-root' => linked_root(machine: Erx::OracleQemu.machine(PLATFORM)),
+                                         'system/filler' => filler)),
                   memory_size: 0x1000_0000)
     assert_match(/^root \h+ \h+ \h+$/, output)
     assert_operator output[/^archive \h+ (\h+)$/, 1].to_i(16), :>, ARCHIVE_ROOM
@@ -164,14 +167,14 @@ class BootPlaceTest < Minitest::Test
   # The development machine's root fits that machine; one linked for the oracle's 2 GiB
   # machine, 192 MiB into RAM, is refused on a machine of 192 MiB: it lies past what that RAM holds.
   def test_the_development_machines_root_loads_on_the_development_machine
-    machine = Erx::ProductionImage::DEVELOPMENT_MACHINE
+    machine = Erx::ProductionImage::Machine.development(PLATFORM)
     output = plan(archive(standard.merge('boot/stopgap-root' => linked_root(machine: machine))),
                   memory_size: machine.memory_mib << 20)
     placed = output[/^root (\h+) \h+ \h+$/, 1]
     refute_nil placed, output
     assert_includes machine.root_address...(machine.root_address + MIB2), placed.to_i(16)
     assert_equal 'refused boot/stopgap-root place_outside_memory',
-                 refused(archive(standard.merge('boot/stopgap-root' => linked_root(machine: Erx::OracleQemu::MACHINE))),
+                 refused(archive(standard.merge('boot/stopgap-root' => linked_root(machine: Erx::OracleQemu.machine(PLATFORM)))),
                          memory_size: 192 << 20)
   end
 

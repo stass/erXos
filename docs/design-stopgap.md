@@ -293,11 +293,11 @@ task's first thread as its argument. Its `flags` carry `ERX_BOOT_DET` when the s
 domain's node name and the system node's, its `args` and `env`, and the words the library adds to its `args`, after
 the row's own: `-erx build ID` with the boot image's build identifier, as the root's own page carries it, so
 every domain names the same build; one record per device it was given, `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H
-MEM_SIZE`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), and, when it holds a
+MEM_SIZE CLOCK`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), and, when it holds a
 block device, `-erx boot VALUE SLOT` with the boot's pair, as the root's own page carries it ([Image
 windows](#image-windows)). WINDOW_H, LINE_H and MEM_H are the installed objects' values in the holder's own handle
-table, OFFSET and SIZE place the registers in the window page, and MEM_H and MEM_SIZE are 0 for a device with no
-memory; ROLE and PERIPHERAL come from `include/erx/device_kinds.h`, and `erx_device_record` reads the records. The
+table, OFFSET and SIZE place the registers in the window page, MEM_H and MEM_SIZE are 0 for a device with no
+memory, and CLOCK is the device's clock in hertz from its manifest row, 0 for a device whose driver reads none; ROLE and PERIPHERAL come from `include/erx/device_kinds.h`, and `erx_device_record` reads the records. The
 domain library's boot view admits a configured row or a session template only when its own words leave room within
 `ERX_BOOT_STRINGS_MAX` for all of those at their longest (`ERX_DOM_NODE_MAX` per node name, and the record sizes of
 `include/erx/boot_words.h`), and refuses the manifest with a reason naming that reserve otherwise, so a creation never
@@ -1444,8 +1444,8 @@ no other domain, so the system domain holds it, at a device-tree path, whose rol
 before ERTS starts, it makes the register window with `erx_mem_create_physical` over the pages of
 the registers, the line's IRQ object with `erx_irq_create` and, for a device with DMA memory, the
 device's one contiguous object of that size with `erx_mem_create_contiguous`, each in its own
-table, and adds the same `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE`
-record a holder's page carries, below (`liberx/backend/fiasco/runtime_entry.c`, `device_give`;
+table, and adds the same `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE
+CLOCK` record a holder's page carries, below (`liberx/backend/fiasco/runtime_entry.c`, `device_give`;
 `erx_boot_device_window` computes the pages and OFFSET). ROLE and PERIPHERAL are the row's names,
 PERIPHERAL the peripheral's name in the CMSIS-SVD source that `erx_device` opens it as; the
 pages, SIZE, the line and MEM_SIZE come from the manifest's device entry: its register window,
@@ -1454,7 +1454,8 @@ has one form in every domain: its queues are carved from its one memory, and the
 driver opens it exactly as a holder's does. Nothing deletes these objects, since the system
 domain holds the device for the boot and its fault resets the machine; an object the backend
 refuses refuses the boot, naming the record. The host link's UART, which does no DMA, is the one
-physical record, `-erx device ROLE PERIPHERAL BASE SIZE LINE`, whose window and line the device
+physical record, `-erx device ROLE PERIPHERAL BASE SIZE LINE CLOCK`. CLOCK is the device entry's
+clock in hertz, which the driver reads and the NIF does not. The record's window and line the device
 NIF makes from the numbers in the system domain, as it does for the console's UART from `-erx
 console_uart`; a physical device has no queue. The rows are QEMU `virt`'s virtio-mmio
 transports, each with compatible `virtio,mmio` and peripheral `virtio_mmio`:
@@ -1543,19 +1544,21 @@ device is behind it. A manifest with no such unit has no record, and a machine w
 device boots the same, with nothing for its driver to drive.
 
 A given record, a holder domain's or the root's own, has a word of its own, `-erx given ROLE
-PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE`: the handles of the window, line and
+PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK`: the handles of the window, line and
 memory objects the domain library installed when it created the domain, or the root made for
-itself, the transport's offset and size in the window object, and the memory's bytes, 0 for a
-device that does no DMA. Since each form has its own word, the reader never tells one from
+itself, the transport's offset and size in the window object, the memory's bytes, 0 for a
+device that does no DMA, and the device's clock, as the `device` form carries it, so a
+given PL011 has its clock as the host link's does. Since each form has its own word, the reader never tells one from
 the other by counting numbers, and a plain word of the command line after a record cannot
 make one form look like the other.
 
 A driver finds its records with `erx_device_record:find(Role, Peripheral)`, which returns
-each as a spec for `erx_device:open/1`: a `device` record's as the physical window and line,
+each as a spec for `erx_device:open/1`: a `device` record's as the physical window and line
+and `clock => Hertz`,
 a `given` record's as `{object, Window, Offset, Size}`, `[{object, Line}]` and, for a nonzero
-size, `memory => {object, Memory, Bytes}`; and `{ok, []}` when there is none. Words after a
-record's numbers are not the record's. Each number must be decimal within its field (64, 64
-and 32 bits for a `device` record, 64 bits each for a `given` one), or the records of that
+size, `memory => {object, Memory, Bytes}`, and `clock => Hertz`; and `{ok, []}` when there is none. Words after a
+record's numbers are not the record's. Each number must be decimal within its field (64, 64,
+32 and 32 bits for a `device` record, 64 bits each for a `given` one but its clock's 32), or the records of that
 role and peripheral are refused with a stated reason
 (`erx_device_record:find/3`, which has a fuzz target). The hosted entry adds no record,
 since a hosted runtime has no devices. More records than `ERX_BOOT_DEVICES_MAX` refuse
@@ -1604,7 +1607,7 @@ page beside `-erx boot`, so the driver needs no manifest file.
 
 ### The console
 
-The native boot's console driver is `erx_pl011`, which the manifest's `system_args` name with `-erx console_driver erx_pl011`. The root adds `-erx console_uart BASE SIZE LINE`, from the device entry `machine.console` names, and the driver opens that window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64 and 32 bits), and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). A plain `erx.arg` word that joins any of these lists of arguments, the console's or a device record's, is ignored.
+The native boot's console driver is `erx_pl011`, which the manifest's `system_args` name with `-erx console_driver erx_pl011`. The root adds `-erx console_uart BASE SIZE LINE CLOCK`, from the device entry `machine.console` names, and the driver opens that window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64, 32 and 32 bits) and the clock not 0, and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). The clock, the UART's in hertz from the platform record, times a character while the driver reprograms the UART and gives the divisors for 115200 baud when the boot left the UART unprogrammed; a clock with no integer divisor of 1 to 65535 for that rate stops the driver before it touches the UART. A plain `erx.arg` word that joins any of these lists of arguments, the console's or a device record's, is ignored.
 
 Without `-serial_input`, `Config::serial_input` stays `Serial_no_input` (`config.cpp:246,278-282`), so the kernel never attaches the UART's
 receive line, which `Irq_chip_gen::attach` would refuse the driver (`irq_chip_generic.cpp:77-81`). Without JDB a kernel panic halts and the

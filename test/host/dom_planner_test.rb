@@ -23,6 +23,7 @@ require_relative '../fixtures/manifest_context'
 # across domains is judged by the library alone: each seed below is one sum it holds.
 class DomPlannerTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  PLATFORM = Erx::Platform.development(ROOT)
   LIMITS = "limits app\n  memory 4194304\n  outer 1048576\n  grant @share.users\n  spaces none\n  lane 4096\n" \
            "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
            "  peer_held 4096\n  peer_held_total 4096\n"
@@ -116,7 +117,7 @@ class DomPlannerTest < Minitest::Test
   # its 4-CPU cells boot: the system share on two CPUs, and the storage and web domains'
   # grants, which must fit the system share, on them too, so the library plans them.
   def test_the_library_plans_the_narrow_images_domain
-    source = Erx::ProductionImage::Run.narrow_manifest(ROOT)
+    source = Erx::ProductionImage::Run.narrow_manifest(ROOT, platform: PLATFORM)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
     assert_equal 2, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
                                  .report.fetch('child_plan_instances')
@@ -127,9 +128,9 @@ class DomPlannerTest < Minitest::Test
   # erts and peer, beside the development manifest's storage and network, all four grants
   # within the system share's reserve, so the library plans each.
   def test_the_library_plans_the_system_domain_suites_domains
-    source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    source = PLATFORM.manifest_source(ROOT)
     arguments = ManifestContextFixture.archive_arguments(@codec, boots: %w[echo erts network session storage])
-    context = Erx::Manifest::Context.new(**arguments.merge(platform: Erx::MediumBoot::MACHINE.platform(@context.platform)))
+    context = Erx::Manifest::Context.new(**arguments.merge(platform: Erx::MediumBoot.machine(PLATFORM).record))
     [Erx::SystemDomain, Erx::SystemDomain::Regrant].each do |suite|
       admitted = Erx::Manifest.admit(source: suite.manifest(source), codec: @codec, context: context, planner: @planner)
       assert_equal 4, admitted.report.fetch('child_plan_instances'), suite.name
@@ -139,9 +140,9 @@ class DomPlannerTest < Minitest::Test
   # The network domain cell's manifest (NetworkDomain.manifest), the development manifest
   # with the network row's restarts at 0, on the medium machine: the library plans it.
   def test_the_library_plans_the_network_domain_cells_domains
-    source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    source = PLATFORM.manifest_source(ROOT)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec)
-                                                                .merge(platform: Erx::MediumBoot::MACHINE.platform(@context.platform)))
+                                                                .merge(platform: Erx::MediumBoot.machine(PLATFORM).record))
     admitted = Erx::Manifest.admit(source: Erx::NetworkDomain.manifest(source), codec: @codec, context: context,
                                    planner: @planner)
     assert_equal 3, admitted.report.fetch('child_plan_instances')
@@ -156,9 +157,8 @@ class DomPlannerTest < Minitest::Test
     assert_equal '@artifact.jit', edited[/^domain network\n(?:  .*\n)*?  runtime (\S+)$/, 1]
     assert_equal '@artifact.emu', edited[/^domain storage\n(?:  .*\n)*?  runtime (\S+)$/, 1]
     assert_equal source.lines.size, edited.lines.size
-    machine = Erx::ProductionImage::DEVELOPMENT_MACHINE
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec)
-                                                                .merge(platform: machine.platform(@context.platform)))
+                                                                .merge(platform: Erx::ProductionImage::Machine.development(PLATFORM).record))
     admitted = Erx::Manifest.admit(source: edited, codec: @codec, context: context, planner: @planner)
     assert_equal 3, admitted.report.fetch('child_plan_instances')
   end

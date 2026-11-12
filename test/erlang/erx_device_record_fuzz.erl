@@ -54,21 +54,22 @@ reference(Arguments) ->
         false -> {error, bad_device_record}
     end.
 
-spec("given", [Window, Offset, Size, Line, Memory, Bytes | _]) ->
-    case [decimal(Word, ?U64) || Word <- [Window, Offset, Size, Line, Memory, Bytes]] of
-        [W, O, S, L, M, 0] when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M) ->
-            #{peripheral => virtio_mmio, window => {object, W, O, S}, lines => [{object, L}]};
-        [W, O, S, L, M, B] when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M),
-                                is_integer(B) ->
+spec("given", [Window, Offset, Size, Line, Memory, Bytes, Clock | _]) ->
+    case {[decimal(Word, ?U64) || Word <- [Window, Offset, Size, Line, Memory, Bytes]], decimal(Clock, ?U32)} of
+        {[W, O, S, L, M, 0], C} when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M),
+                                     is_integer(C) ->
+            #{peripheral => virtio_mmio, window => {object, W, O, S}, lines => [{object, L}], clock => C};
+        {[W, O, S, L, M, B], C} when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M),
+                                     is_integer(B), is_integer(C) ->
             #{peripheral => virtio_mmio, window => {object, W, O, S}, lines => [{object, L}],
-              memory => {object, M, B}};
+              memory => {object, M, B}, clock => C};
         _ ->
             bad
     end;
-spec("device", [Base, Size, Line | _]) ->
-    case {decimal(Base, ?U64), decimal(Size, ?U64), decimal(Line, ?U32)} of
-        {B, S, L} when is_integer(B), is_integer(S), is_integer(L) ->
-            #{peripheral => virtio_mmio, window => {physical, B, S}, lines => [L]};
+spec("device", [Base, Size, Line, Clock | _]) ->
+    case {decimal(Base, ?U64), decimal(Size, ?U64), decimal(Line, ?U32), decimal(Clock, ?U32)} of
+        {B, S, L, C} when is_integer(B), is_integer(S), is_integer(L), is_integer(C) ->
+            #{peripheral => virtio_mmio, window => {physical, B, S}, lines => [L], clock => C};
         _ ->
             bad
     end;
@@ -98,7 +99,7 @@ entry() ->
     Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
     Words = [word() || _ <- lists:seq(1, rand:uniform(?MAX_WORDS + 1) - 1)],
     Form = Pick(["device", "given"]),
-    Count = #{"device" => 3, "given" => 6},
+    Count = #{"device" => 4, "given" => 7},
     case rand:uniform(4) of
         1 -> [Form, "block", "virtio_mmio" | Words];
         2 -> [Form, "block", "virtio_mmio" | [number() || _ <- lists:seq(1, maps:get(Form, Count))] ++ Words];

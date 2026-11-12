@@ -32,7 +32,7 @@ class RuntimeReleaseTest < Minitest::Test
     @codec = Erx::ABI::Codec.new(Erx::ABI::Generator.plan(root: ROOT).schema)
     path = File.join(File.dirname(OUTPUT.archive), 'second.pack')
     self.class.second ||= begin
-      Erx::Release.new(root: ROOT, output: OUTPUT).build(output: path)
+      Erx::Release.new(root: ROOT, output: OUTPUT, platform: Erx::Platform.development(ROOT)).build(output: path)
       path
     end
     @table = Erx::Release.file_table(archive: OUTPUT.archive, codec: @codec)

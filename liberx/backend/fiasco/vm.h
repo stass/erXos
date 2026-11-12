@@ -13,6 +13,13 @@
 #include "liberx/backend/core/vm_table.h"
 #include "liberx/backend/fiasco/service_wire.h"
 
+/*
+ * Where the root maps the kernel information page: a page of the backend's address
+ * layout (vm.c), above all RAM of every board and below the device window, so no
+ * platform record carries it.
+ */
+#define ERX_FIASCO_KIP_WINDOW	UINT64_C(0xDFFFFF000)
+
 /* The first address of the area the root's range table hands out. */
 #define ERX_FIASCO_AREA_START	UINT64_C(0x4000000000)
 

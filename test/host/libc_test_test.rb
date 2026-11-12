@@ -12,6 +12,8 @@ require_relative '../../tools/lib/erx/native_task'
 # The report's rules: what a boot's serial log says becomes one result per test, each
 # state shown as what it is, and nothing is guessed for a test the root did not report.
 class LibcTestTest < Minitest::Test
+  PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
+
   def read(lines, tests, machine: nil) = Erx::LibcTest.read_boot(lines.join("\n"), tests: tests, machine: machine)
 
   def test_each_end_line_is_its_own_state
@@ -82,7 +84,11 @@ class LibcTestTest < Minitest::Test
 
   def test_each_link_script_keeps_the_tls_segment_whole
     %w[task.ld root.ld].each do |script|
-      flags = script == 'task.ld' ? Erx::NativeRoot::TASK_LINK_FLAGS : Erx::NativeRoot.place_flags(Erx::NativeRoot::PLACE)
+      flags = if script == 'task.ld'
+                Erx::NativeRoot::TASK_LINK_FLAGS
+              else
+                Erx::NativeRoot.place_flags(Erx::NativeRoot.development_place(PLATFORM), ram_first: PLATFORM.ram_first)
+              end
       segment = tls_segment(File.expand_path("../../liberx/backend/fiasco/#{script}", __dir__), link_flags: flags)
       start, file_bytes, memory_bytes, alignment = segment.values_at(3, 5, 6, 7)
       assert_equal([1, 4096], [file_bytes, alignment], "#{script}: file bytes and alignment")

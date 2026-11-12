@@ -2160,7 +2160,7 @@ case_undo(uint32_t program)
 #define GIVEN_MEMORY	(UINT64_C(16) * ERX_PAGE_SIZE)
 #define GIVEN_RECORD	"-erx\0given\0block\0virtio_mmio\0"
 #define GIVEN_PAIR	"-erx\0boot\0normal\0a\0"
-#define GIVEN_NUMBERS	6u			/* WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE */
+#define GIVEN_NUMBERS	7u			/* WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK */
 
 static erx_dom_configured_t configured[1];
 static erx_dom_device_entry_t catalogue[1];
@@ -2262,7 +2262,8 @@ given_read(uint32_t id, uint64_t *numbers, bool *pair)
 /*
  * Domain id holds the device: the record names it and its window, line
  * and memory, and its boot page's record carries values in its own table
- * for each, the registers' place, the memory's size and the boot's pair.
+ * for each, the registers' place, the memory's size, a clock of 0 (a
+ * transport's driver reads none) and the boot's pair.
  */
 static bool
 given_held(uint32_t id)
@@ -2278,7 +2279,7 @@ given_held(uint32_t id)
 	    record->irqs[0].raw != ERX_CAP_NULL && record->memory.raw != ERX_CAP_NULL &&
 	    record->resource.raw == ERX_CAP_NULL && numbers[0] != ERX_CAP_NULL && numbers[1] == 0 &&
 	    numbers[2] == GIVEN_SIZE && numbers[3] != ERX_CAP_NULL && numbers[4] != ERX_CAP_NULL &&
-	    numbers[5] == GIVEN_MEMORY);
+	    numbers[5] == GIVEN_MEMORY && numbers[6] == 0);
 }
 
 /* No domain holds the device, and its record names nothing but memory, its kept memory. */

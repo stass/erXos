@@ -14,16 +14,17 @@
 find(Arguments) ->
     erx_device_record:find(block, virtio_mmio, Arguments).
 
-spec(Base, Size, Line) ->
-    #{peripheral => virtio_mmio, window => {physical, Base, Size}, lines => [Line]}.
+spec(Base, Size, Line, Clock) ->
+    #{peripheral => virtio_mmio, window => {physical, Base, Size}, lines => [Line], clock => Clock}.
 
 record(Numbers) ->
     ["device", "block", "virtio_mmio" | Numbers].
 
 %% The words the root writes for QEMU virt's host link UART, its one physical record.
 the_root_s_record_test() ->
-    ?assertEqual({ok, [#{peripheral => pl011, window => {physical, 151257088, 4096}, lines => [40]}]},
-                 erx_device_record:find(hostlink, pl011, [["device", "hostlink", "pl011", "151257088", "4096", "40"]])).
+    ?assertEqual({ok, [#{peripheral => pl011, window => {physical, 151257088, 4096}, lines => [40], clock => 24000000}]},
+                 erx_device_record:find(hostlink, pl011, [["device", "hostlink", "pl011", "151257088", "4096", "40",
+                                                           "24000000"]])).
 
 a_missing_disk_is_no_record_test() ->
     ?assertEqual({ok, []}, find([])),
@@ -35,55 +36,67 @@ other_roles_and_peripherals_are_left_alone_test() ->
                                  ["device", "block"], ["device"]])).
 
 several_records_keep_their_order_and_trailing_words_are_dropped_test() ->
-    ?assertEqual({ok, [spec(1, 2, 3), spec(5, 6, 7)]},
-                 find([record(["1", "2", "3", "plainword"]), ["debug"], record(["5", "6", "7"])])).
+    ?assertEqual({ok, [spec(1, 2, 3, 4), spec(5, 6, 7, 0)]},
+                 find([record(["1", "2", "3", "4", "plainword"]), ["debug"], record(["5", "6", "7", "0"])])).
 
 field_bounds_test() ->
-    ?assertEqual({ok, [spec(18446744073709551615, 18446744073709551615, 4294967295)]},
-                 find([record([?U64_MAX, ?U64_MAX, ?U32_MAX])])),
+    ?assertEqual({ok, [spec(18446744073709551615, 18446744073709551615, 4294967295, 4294967295)]},
+                 find([record([?U64_MAX, ?U64_MAX, ?U32_MAX, ?U32_MAX])])),
     [?assertMatch({error, {bad_device_record, _}}, find([record(Numbers)]))
-     || Numbers <- [["18446744073709551616", "1", "1"], ["1", "1", "4294967296"],
-                    ["1", "18446744073709551616", "1"], ["1", "018446744073709551615", "1"]]].
+     || Numbers <- [["18446744073709551616", "1", "1", "1"], ["1", "1", "4294967296", "1"],
+                    ["1", "18446744073709551616", "1", "1"], ["1", "018446744073709551615", "1", "1"],
+                    ["1", "1", "1", "4294967296"], ["1", "1", "1", "04294967295"]]].
 
 malformed_numbers_refuse_test() ->
     [?assertMatch({error, {bad_device_record, _}}, find([record(Numbers)]))
-     || Numbers <- [["", "1", "1"], ["-1", "1", "1"], ["0x10", "1", "1"],
-                    ["1", " 1", "1"], ["1", "1", "1e3"], [[16#661], "1", "1"]]].
+     || Numbers <- [["", "1", "1", "1"], ["-1", "1", "1", "1"], ["0x10", "1", "1", "1"],
+                    ["1", " 1", "1", "1"], ["1", "1", "1e3", "1"], [[16#661], "1", "1", "1"],
+                    ["1", "1", "1", ""], ["1", "1", "1", "-1"], ["1", "1", "1", "24MHz"]]].
 
 a_short_record_refuses_even_after_a_good_one_test() ->
-    ?assertMatch({error, {bad_device_record, _}}, find([record(["1", "2", "3"]), record(["1", "2"])])),
+    ?assertMatch({error, {bad_device_record, _}}, find([record(["1", "2", "3", "4"]), record(["1", "2", "3"])])),
     ?assertMatch({error, {bad_device_record, _}}, find([record([])])).
 
 given(Numbers) ->
     ["given", "block", "virtio_mmio" | Numbers].
 
-given_spec(Window, Offset, Size, Line) ->
-    #{peripheral => virtio_mmio, window => {object, Window, Offset, Size}, lines => [{object, Line}]}.
+given_spec(Window, Offset, Size, Line, Clock) ->
+    #{peripheral => virtio_mmio, window => {object, Window, Offset, Size}, lines => [{object, Line}],
+      clock => Clock}.
 
 %% The words the domain library writes for a holder of QEMU virt's block transport: the
-%% window object's handle, the transport at 0xe00 in its page, the line's handle and the
-%% device's one memory.
+%% window object's handle, the transport at 0xe00 in its page, the line's handle, the
+%% device's one memory and its clock, 0 since its driver reads none.
 a_holder_s_record_test() ->
-    ?assertEqual({ok, [(given_spec(12, 3584, 512, 13))#{memory => {object, 14, 1048576}}]},
-                 find([given(["12", "3584", "512", "13", "14", "1048576"])])).
+    ?assertEqual({ok, [(given_spec(12, 3584, 512, 13, 0))#{memory => {object, 14, 1048576}}]},
+                 find([given(["12", "3584", "512", "13", "14", "1048576", "0"])])).
+
+%% A given PL011 carries its clock as the physical record does.
+a_given_uart_s_clock_test() ->
+    ?assertEqual({ok, [#{peripheral => pl011, window => {object, 12, 0, 4096}, lines => [{object, 13}],
+                         clock => 24000000}]},
+                 erx_device_record:find(uart, pl011, [["given", "uart", "pl011", "12", "0", "4096", "13", "0", "0",
+                                                       "24000000"]])).
 
 a_given_record_of_no_memory_has_no_memory_key_test() ->
-    ?assertEqual({ok, [given_spec(12, 0, 4096, 13)]}, find([given(["12", "0", "4096", "13", "0", "0"])])).
+    ?assertEqual({ok, [given_spec(12, 0, 4096, 13, 0)]}, find([given(["12", "0", "4096", "13", "0", "0", "0"])])).
 
 the_two_forms_keep_their_order_and_their_own_counts_test() ->
-    ?assertEqual({ok, [spec(1, 2, 3), given_spec(5, 6, 7, 8), spec(9, 10, 11)]},
-                 find([record(["1", "2", "3", "4", "5", "6"]), given(["5", "6", "7", "8", "0", "0", "word"]),
-                       record(["9", "10", "11"])])).
+    ?assertEqual({ok, [spec(1, 2, 3, 4), given_spec(5, 6, 7, 8, 9), spec(9, 10, 11, 12)]},
+                 find([record(["1", "2", "3", "4", "5", "6"]), given(["5", "6", "7", "8", "0", "0", "9", "word"]),
+                       record(["9", "10", "11", "12"])])).
 
 given_field_bounds_test() ->
-    ?assertEqual({ok, [(given_spec(18446744073709551615, 0, 18446744073709551615, 18446744073709551615))
+    ?assertEqual({ok, [(given_spec(18446744073709551615, 0, 18446744073709551615, 18446744073709551615,
+                                   4294967295))
                        #{memory => {object, 18446744073709551615, 18446744073709551615}}]},
-                 find([given([?U64_MAX, "0", ?U64_MAX, ?U64_MAX, ?U64_MAX, ?U64_MAX])])),
+                 find([given([?U64_MAX, "0", ?U64_MAX, ?U64_MAX, ?U64_MAX, ?U64_MAX, ?U32_MAX])])),
     [?assertMatch({error, {bad_device_record, _}}, find([given(Numbers)]))
-     || Numbers <- [["18446744073709551616", "0", "1", "1", "1", "1"], ["1", "0", "1", "1", "1", "-1"],
-                    ["1", "0x0", "1", "1", "1", "1"], ["1", "0", "1", "1", "1", "018446744073709551615"]]].
+     || Numbers <- [["18446744073709551616", "0", "1", "1", "1", "1", "0"], ["1", "0", "1", "1", "1", "-1", "0"],
+                    ["1", "0x0", "1", "1", "1", "1", "0"], ["1", "0", "1", "1", "1", "018446744073709551615", "0"],
+                    ["1", "0", "1", "1", "1", "1", "4294967296"], ["1", "0", "1", "1", "1", "1", "-1"]]].
 
 a_short_given_record_refuses_test() ->
-    ?assertMatch({error, {bad_device_record, _}}, find([given(["1", "2", "3", "4", "5"])])),
-    ?assertMatch({error, {bad_device_record, _}}, find([given(["12", "3584", "512", "13", "14", "1"]),
+    ?assertMatch({error, {bad_device_record, _}}, find([given(["1", "2", "3", "4", "5", "6"])])),
+    ?assertMatch({error, {bad_device_record, _}}, find([given(["12", "3584", "512", "13", "14", "1", "0"]),
                                                         given([])])).

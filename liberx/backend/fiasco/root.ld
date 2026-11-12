@@ -15,7 +15,8 @@
  * explains: low, 64 MiB into RAM, for the development machine, so a small
  * machine holds it, and 192 MiB into RAM for the QEMU oracle's machine, so a
  * single file of about 188 MiB lies below it. Test roots take
- * NativeRoot::PLACE, the low place.
+ * NativeRoot.development_place, the low place. Each place counts from RAM's
+ * first address in the board's platform record.
  */
 ENTRY(_start)
 SECTIONS {

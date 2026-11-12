@@ -150,7 +150,8 @@ devices_read(const erx_manifest_view_t *view, bool hostlink, erx_boot_manifest_t
 			result->devices[result->device_count++] = (erx_boot_device_t){
 				.role = kind->role_word, .peripheral = kind->peripheral, .given = kind != &hostlink_kind,
 				.base = device.base,
-				.size = device.size, .line = device.line, .dma_memory = device.dma_memory,
+				.size = device.size, .line = device.line, .clock = device.clock,
+				.dma_memory = device.dma_memory,
 			};
 		}
 	}
@@ -165,7 +166,8 @@ console_read(const erx_manifest_view_t *view)
 	for (uint32_t at = 0; view->header.console.length != 0 && at < view->header.devices.count; at++) {
 		if (erx_manifest_devices_at(view, at, &device) && device.selector == ERX_MF_SELECTOR_DT &&
 		    device.role == ERX_MF_DEVICE_ROLE_UART && string_equal(view, &device.path, &view->header.console))
-			return ((erx_boot_console_t){ .base = device.base, .size = device.size, .line = device.line });
+			return ((erx_boot_console_t){ .base = device.base, .size = device.size, .line = device.line,
+			    .clock = device.clock });
 	}
 	return ((erx_boot_console_t){ 0 });
 }
@@ -273,7 +275,7 @@ erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capac
 	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "device") &&
 	    word_put(words, capacity, &used, device->role) && word_put(words, capacity, &used, device->peripheral) &&
 	    number_put(words, capacity, &used, device->base) && number_put(words, capacity, &used, device->size) &&
-	    number_put(words, capacity, &used, device->line))
+	    number_put(words, capacity, &used, device->line) && number_put(words, capacity, &used, device->clock))
 		return (used);
 	return (0);
 }
@@ -298,7 +300,8 @@ erx_boot_device_given(const erx_boot_device_t *device, const erx_boot_window_t *
 {
 	return ((erx_boot_given_t){ .role = device->role, .peripheral = device->peripheral, .window = window_handle,
 	    .offset = window->offset, .size = device->size, .line = line_handle,
-	    .memory = device->dma_memory != 0 ? memory_handle : ERX_CAP_NULL, .memory_size = device->dma_memory });
+	    .memory = device->dma_memory != 0 ? memory_handle : ERX_CAP_NULL, .memory_size = device->dma_memory,
+	    .clock = device->clock });
 }
 
 size_t
@@ -310,7 +313,8 @@ erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t capacity
 	    word_put(words, capacity, &used, given->role) && word_put(words, capacity, &used, given->peripheral) &&
 	    number_put(words, capacity, &used, given->window) && number_put(words, capacity, &used, given->offset) &&
 	    number_put(words, capacity, &used, given->size) && number_put(words, capacity, &used, given->line) &&
-	    number_put(words, capacity, &used, given->memory) && number_put(words, capacity, &used, given->memory_size))
+	    number_put(words, capacity, &used, given->memory) && number_put(words, capacity, &used, given->memory_size) &&
+	    number_put(words, capacity, &used, given->clock))
 		return (used);
 	return (0);
 }

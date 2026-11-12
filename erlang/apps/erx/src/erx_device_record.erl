@@ -5,14 +5,17 @@
 %% "Device records"), one per device the domain drives, in one of two forms, each with its
 %% own word so neither is told from the other by counting:
 %%
-%% - `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE`, a given device:
+%% - `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK`, a given device:
 %%   the handles of the window, line and memory objects the domain library installed when it
 %%   created the domain, or the root made for itself at boot for a device the system domain
 %%   holds, the transport's offset and size in the window object, and the memory's bytes, 0
 %%   for a device that does no DMA;
-%% - `-erx device ROLE PERIPHERAL BASE SIZE LINE`, the system domain's physical record of its
-%%   host link's UART, which does no DMA, built by liberx/backend/core/boot_manifest.c from
-%%   the system manifest.
+%% - `-erx device ROLE PERIPHERAL BASE SIZE LINE CLOCK`, the system domain's physical record
+%%   of its host link's UART, which does no DMA, built by liberx/backend/core/boot_manifest.c
+%%   from the system manifest.
+%%
+%% In both forms CLOCK is the device's clock in hertz from its manifest row, 0 for a device
+%% whose driver reads none, so a driver reads its clock the same way whichever form it gets.
 %%
 %% A driver asks for the records of its role and its peripheral and opens each with
 %% erx_device:open/1. No record is a normal state, a machine without a disk, and is
@@ -25,13 +28,13 @@
 -export_type([spec/0]).
 
 %% What erx_device:open/1 takes: a given device's objects, or a physical device's window and
-%% line.
+%% line, each with its clock for its driver.
 -type spec() :: #{peripheral := atom(),
                   window := {object, non_neg_integer(), non_neg_integer(), non_neg_integer()},
                   lines := [{object, non_neg_integer()}],
-                  memory => {object, non_neg_integer(), pos_integer()}}
+                  memory => {object, non_neg_integer(), pos_integer()}, clock := non_neg_integer()}
               | #{peripheral := atom(), window := {physical, non_neg_integer(), non_neg_integer()},
-                  lines := [non_neg_integer()]}.
+                  lines := [non_neg_integer()], clock := non_neg_integer()}.
 
 %% The records of Role and Peripheral among init's `-erx` arguments.
 -spec find(atom(), atom()) -> {ok, [spec()]} | {error, {bad_device_record, string()}}.
@@ -64,25 +67,27 @@ specs(Peripheral, [Record | Rest], Specs) ->
         {error, _} = Error -> Error
     end.
 
-spec(Peripheral, {"given", [Window, Offset, Size, Line, Memory, MemorySize | _]}) ->
-    case numbers([Window, Offset, Size, Line, Memory, MemorySize]) of
-        {ok, [W, O, S, L, M, MS]} ->
-            Spec = #{peripheral => Peripheral, window => {object, W, O, S}, lines => [{object, L}]},
+spec(Peripheral, {"given", [Window, Offset, Size, Line, Memory, MemorySize, Clock | _]}) ->
+    case {numbers([Window, Offset, Size, Line, Memory, MemorySize]), number(Clock, 32)} of
+        {{ok, [W, O, S, L, M, MS]}, {ok, C}} ->
+            Spec = #{peripheral => Peripheral, window => {object, W, O, S}, lines => [{object, L}],
+                     clock => C},
             {ok, with_memory(Spec, M, MS)};
-        error ->
-            bad("a given device record's handle, offset or size is not a decimal number of 64 bits")
+        _ ->
+            bad("a given device record's handle, offset, size or clock is not a decimal number "
+                "of its field's width")
     end;
 spec(_Peripheral, {"given", _}) ->
-    bad("a given device record has fewer than six numbers");
-spec(Peripheral, {"device", [Base, Size, Line | _]}) ->
-    case {number(Base, 64), number(Size, 64), number(Line, 32)} of
-        {{ok, B}, {ok, S}, {ok, L}} ->
-            {ok, #{peripheral => Peripheral, window => {physical, B, S}, lines => [L]}};
+    bad("a given device record has fewer than seven numbers");
+spec(Peripheral, {"device", [Base, Size, Line, Clock | _]}) ->
+    case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32)} of
+        {{ok, B}, {ok, S}, {ok, L}, {ok, C}} ->
+            {ok, #{peripheral => Peripheral, window => {physical, B, S}, lines => [L], clock => C}};
         _ ->
-            bad("a device record's base, size or line is not a decimal number of its field's width")
+            bad("a device record's base, size, line or clock is not a decimal number of its field's width")
     end;
 spec(_Peripheral, {"device", _}) ->
-    bad("a device record has fewer than three numbers").
+    bad("a device record has fewer than four numbers").
 
 %% A device that does no DMA has no memory object, and its record says 0 bytes.
 with_memory(Spec, _Memory, 0) -> Spec;

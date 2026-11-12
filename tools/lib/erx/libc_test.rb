@@ -288,8 +288,9 @@ module Erx
                       'test/guest/native_libc_test/guest.c'].freeze
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @runner = runner
         @compiler = compiler
         @linker = linker
@@ -318,7 +319,7 @@ module Erx
       def plan(tests, fiasco:, jobs:)
         musl = Musl.new(root: @root, runner: @runner, compiler: @compiler)
         libc = musl.build(directory: File.join(@build, 'musl'), jobs: jobs)
-        native = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        native = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco)
         task = native.compile_all(sources: TASK_SOURCES, directory: File.join(@build, 'task'))
         archives = [libc, fiasco.user_library('libgcc.a'), fiasco.boot_core_archive, *NativeRoot::LIBRARIES.map { |name| fiasco.user_library(name) }]
         makefile = File.join(@build, 'tests.mk')
@@ -379,7 +380,7 @@ module Erx
 
       def boots(tests, fiasco:, accel:, cpus:)
         sizes = tests.map { |name| [name, File.size(File.join(@build, 'tests', "#{name}.elf"))] }
-        root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco)
                               .build(name: 'libc-test-root', sources: ROOT_SOURCES, directory: File.join(@build, 'root'),
                                      flags: ["-DLIBC_TEST_SECONDS=UINT64_C(#{TASK_SECONDS})"])
         LibcTest.batches(sizes, limit: BATCH_BYTES).flat_map.with_index do |batch, index|
@@ -398,7 +399,7 @@ module Erx
         points = [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
                   { name: 'libc-test-done', pattern: /\Aerx: libc-test: done/n, seconds: [BOOT_SECONDS + batch.size * TASK_SECONDS, BOOT_LIMIT].min }.freeze]
         machine = begin
-          Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: cpus, image: image.single, memory_mib: MEMORY_MIB, checkpoints: points,
+          Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: cpus, image: image.single, memory_mib: MEMORY_MIB, checkpoints: points,
                                                      machine_end: true, directory: directory)
           nil
         rescue Error => e

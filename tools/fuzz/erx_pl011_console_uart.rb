@@ -9,28 +9,34 @@ require 'tmpdir'
 # The fuzz target of erx_pl011:console_uart/1, the parse of the console's device words that
 # the boot information carries to init's arguments, compiled from source and run alone on
 # stock's emulator (ERX_ERL and ERX_ERLC, the oracle's), so it needs no hosted build. It runs
-# the module as it is, then a copy that takes the first of several entries, which must fail:
-# that shows the reference reads duplicates.
+# the module as it is, then each seeded copy of MUTANTS, which must fail: a copy that takes
+# the first of several entries shows the reference reads duplicates, and one that accepts a
+# clock of 0 Hz shows it refuses an entry whose clock would divide nothing.
 module ErxPl011ConsoleUartFuzz
   ROOT = File.expand_path('../..', __dir__)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_uart/src/erx_pl011.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_pl011_console_uart_fuzz.erl')
-  ONE_ENTRY = '[[Base, Size, Line | _]] ->'
-  FIRST_OF_SEVERAL = '[[Base, Size, Line | _] | _] ->'
+  # What each seeded copy says, the text it replaces and the text it plants.
+  MUTANTS = {
+    'taking the first of several entries' => ['[[Base, Size, Line, Clock | _]] ->', '[[Base, Size, Line, Clock | _] | _] ->'],
+    'accepting a clock of 0 Hz' => ["{{ok, _}, {ok, _}, {ok, _}, {ok, 0}} ->\n" \
+                                    "                    {error, {bad_console_uart, \"console_uart's clock is 0 Hz\"}};\n", '']
+  }.freeze
   DEADLINE_SECONDS = '120'
 
   module_function
 
   def run(seed:)
     source = File.binread(MODULE_SOURCE)
-    raise "no one-entry clause in #{MODULE_SOURCE}" unless source.include?(ONE_ENTRY)
+    MUTANTS.each_value { |from, _to| raise "#{from.inspect} is not in #{MODULE_SOURCE}" unless source.include?(from) }
 
     output, status = fuzz(source, seed: seed)
     abort(output) unless status.success? && output.match?(/^fuzz: \d+ rounds ok, \d+ accepted$/)
-    output, status = fuzz(source.sub(ONE_ENTRY, FIRST_OF_SEVERAL), seed: seed)
-    abort("taking the first of several entries passed:\n#{output}") if status.success? ||
-                                                                         !output.include?('disagrees_with_reference')
-    puts 'erx_pl011:console_uart/1 agrees with its reference, and taking the first of several entries does not'
+    MUTANTS.each do |name, (from, to)|
+      output, status = fuzz(source.sub(from, to), seed: seed)
+      abort("#{name} passed:\n#{output}") if status.success? || !output.include?('disagrees_with_reference')
+    end
+    puts "erx_pl011:console_uart/1 agrees with its reference, and no seeded copy does (#{MUTANTS.keys.join('; ')})"
   end
 
   # In a directory of its own, which also takes the crash dump of a failed round.

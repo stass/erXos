@@ -44,7 +44,7 @@ class SiteTest < Minitest::Test
   # development machine's RAM, so terminal.js gives the guest exactly that much.
   def test_the_page_gives_the_guest_the_development_machines_ram
     script = File.read(File.join(REPO, 'site/terminal.js'))
-    assert_equal [Erx::ProductionImage::MEMORY_MIB.to_s], script.scan(/^const RAM_MIB = ([0-9]+);$/).flatten
+    assert_equal [Erx::Platform.development(REPO).memory_mib.to_s], script.scan(/^const RAM_MIB = ([0-9]+);$/).flatten
   end
 
   def test_publish_writes_digest_named_files_notices_and_a_checked_image

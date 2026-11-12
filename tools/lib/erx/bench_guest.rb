@@ -109,11 +109,12 @@ module Erx
     # The transcript the harness follows: the boot to the command shell, the Erlang shell
     # started there, then a checkpoint for each exchange's answer that types the next
     # exchange's line.
-    def checkpoints(beam:, plan:) = transcript(exchanges(beam: beam, plan: plan))
+    def checkpoints(beam:, plan:, platform:) = transcript(exchanges(beam: beam, plan: plan), platform: platform)
 
-    # The transcript for any exchanges typed at the Erlang shell, the first at its banner.
-    def transcript(steps)
-      boot = Qemu.boot_transcript(memory_mib: ProductionImage::MEMORY_MIB).map do |point|
+    # The transcript for any exchanges typed at the Erlang shell, the first at its banner,
+    # on platform's board.
+    def transcript(steps, platform:)
+      boot = Qemu.boot_transcript(memory_mib: platform.memory_mib).map do |point|
         point.fetch(:name) == FIRST_LINE_AT ? point.merge(type: ProductionImage::Run::ERL_LINE).freeze : point
       end
       raise Error, "the boot transcript has no #{FIRST_LINE_AT} point to type at" unless
@@ -135,19 +136,20 @@ module Erx
     # A timeout or QEMU failure does not discard it: the result says how the run ended and
     # each workload says whether it was measured.
     def run(root:, runner:, plan:, beam:, flavour:, image: nil, jobs: 4,
-            compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
-      image ||= InteractiveBoot.build_image(root: root, runner: runner, jobs: jobs,
+            compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root))
+      image ||= InteractiveBoot.build_image(root: root, runner: runner, jobs: jobs, platform: platform,
                                             compiler: compiler, linker: linker)
-      points = checkpoints(beam: beam, plan: plan)
+      points = checkpoints(beam: beam, plan: plan, platform: platform)
       directory = File.join(root, 'build/qemu', "g3-#{plan.accel}-#{Process.pid}-#{Random.bytes(4).unpack1('H*')}")
-      failure = boot(root: root, runner: runner, plan: plan, image: image, points: points, directory: directory)
+      failure = boot(root: root, runner: runner, plan: plan, image: image, points: points, directory: directory,
+                     platform: platform)
       settle(directory: directory, failure: failure, points: points, plan: plan, flavour: flavour)
     end
 
     # QEMU's run, returning the error that ended it (or nil) instead of raising it.
-    def boot(root:, runner:, plan:, image:, points:, directory:)
+    def boot(root:, runner:, plan:, image:, points:, directory:, platform:)
       Qemu.new(root: root, runner: runner)
-          .run(accel: plan.accel, cpus: 1, image: image, memory_mib: ProductionImage::MEMORY_MIB,
+          .run(platform: platform, accel: plan.accel, cpus: 1, image: image, memory_mib: platform.memory_mib,
                checkpoints: points, command_line: ProductionImage::Run::COMMAND_LINES[plan.accel],
                directory: directory)
       nil

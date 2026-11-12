@@ -29,6 +29,7 @@ require_relative 'output_directory'
 require_relative 'pack'
 require_relative 'pack_provenance'
 require_relative 'pack_tools'
+require_relative 'platform'
 require_relative 'data_volume'
 require_relative 'qemu'
 require_relative 'release_files'
@@ -41,11 +42,6 @@ module Erx
   # "The Phase 1 manifest check"). Test images come from BootImage instead, whose
   # structural recipe lives under test/fixtures; nothing here reaches that recipe.
   class ProductionImage
-    PLATFORM = 'config/platforms/qemu-virt.json'
-    MANIFEST = 'config/manifest/qemu-virt-development.txt'
-    # The website's manifest: the development manifest without its web domain, which
-    # `tools/erx boot --without-web` builds the site's image from (InteractiveBoot).
-    SITE_MANIFEST = 'config/manifest/qemu-virt-site.txt'
     # The kind of build every image is, which the archive header's development bit
     # records and uname -i names (BuildFacts.configuration).
     BUILD_KIND = 'development'
@@ -55,22 +51,6 @@ module Erx
                              tools/lib/erx/fiasco.rb].freeze
     ROOT_ENTRY_PATH = 'system/root'
     NOTICES_PATH = 'system/NOTICES'
-    # A field of the platform record in whole MiB, which is how QEMU's -m and Machine take it.
-    def self.record_mib(record, field)
-      bytes = record.fetch(field)
-      raise Error, "#{PLATFORM}: #{field} must be a positive whole number of MiB" unless
-        bytes.is_a?(Integer) && bytes.positive? && (bytes % (1 << 20)).zero?
-
-      bytes >> 20
-    end
-    # The development machine's RAM and fiasco_reserve, read once from the platform
-    # record, their one source: the production image boots on the record's own machine
-    # (DEVELOPMENT_MACHINE), and the QEMU harness gives it MEMORY_MIB of RAM.
-    PLATFORM_RECORD = JsonInput.parse(File.binread(File.expand_path("../../../#{PLATFORM}", __dir__)), max_bytes: 65_536,
-                                                                                                    label: 'platform record')
-    private_constant :PLATFORM_RECORD
-    MEMORY_MIB = record_mib(PLATFORM_RECORD, 'ram_bytes')
-    FIASCO_RESERVE_MIB = record_mib(PLATFORM_RECORD, 'fiasco_reserve')
     # No more RAM than root_memory, of which Fiasco and the archive take their part first,
     # so the pool falls short and the root must refuse the boot. The development machine's
     # root, 64 MiB into RAM, ends inside it, and QEMU's device tree, at half of RAM below
@@ -157,32 +137,50 @@ module Erx
     # The C++ runtime archives' notices, in the fetched llvm-project tree.
     LIBCXX_NOTICES = { 'libc++.a' => 'libcxx/LICENSE.TXT', 'libc++abi.a' => 'libcxxabi/LICENSE.TXT' }.freeze
 
-    # The QEMU virt machine an image boots on: its RAM, the part of it Fiasco keeps
+    # The machine an image boots on: its board's platform record (Platform), its RAM, the part of it Fiasco keeps
     # (fiasco_reserve, which grows with RAM, since Fiasco sizes its kernel memory as
     # 6% of it), system_growth_mib, which is added to both root_memory and
     # system_baseline of the development manifest, and tmp_growth_mib, which is added
     # to /tmp's cap and is part of the system growth, since /tmp lives in the baseline,
     # and root_mib, the root task's place in MiB from the start of RAM (root_address),
-    # which the root's link takes (liberx/backend/fiasco/root.ld). The root is a fixed
+    # counted from the record's ram_first, which the root's link takes
+    # (liberx/backend/fiasco/root.ld). The root is a fixed
     # image, so each machine names its place: low on a small machine, whose RAM must
     # hold the root, and higher where a test image's archive, which lies below the
     # root, is larger.
     # What the system growth leaves of the added RAM widens the room bootstrap keeps
-    # for the archive. The production image boots on DEVELOPMENT_MACHINE, the
-    # platform record's own; a test image whose suites need more memory or carry a
+    # for the archive. The production image boots on the development machine
+    # (Machine.development), the platform record's own; a test image whose suites need more memory or carry a
     # larger archive (OracleQemu) names a larger one, and Pack's manifest check proves
     # the grown manifest against the platform record of that machine as it proves the
     # development one.
-    Machine = Data.define(:memory_mib, :fiasco_reserve_mib, :system_growth_mib, :tmp_growth_mib, :root_mib) do
+    Machine = Data.define(:platform, :memory_mib, :fiasco_reserve_mib, :system_growth_mib, :tmp_growth_mib, :root_mib) do
+      # The record's own machine: its RAM and fiasco_reserve, the root at NativeRoot's
+      # development place.
+      def self.development(platform)
+        new(platform: platform, memory_mib: platform.memory_mib, fiasco_reserve_mib: platform.fiasco_reserve_mib,
+            system_growth_mib: 0, tmp_growth_mib: 0, root_mib: NativeRoot::DEVELOPMENT_ROOT_MIB)
+      end
+
+      def initialize(platform:, **numbers)
+        raise Error, 'a machine is on a Platform' unless platform.is_a?(Platform)
+
+        super
+      end
+
       # The root's place, with room for the root's image (about 5 MiB) before RAM ends.
       def root_address
         raise Error, "the root's place, #{root_mib} MiB into RAM, leaves no room for it in #{memory_mib} MiB" if
           root_mib.negative? || root_mib + ROOT_ROOM_MIB > memory_mib
 
-        NativeRoot::RAM_FIRST + (root_mib << 20)
+        platform.ram_first + (root_mib << 20)
       end
 
-      def platform(record) = record.merge('ram_bytes' => memory_mib << 20, 'fiasco_reserve' => fiasco_reserve_mib << 20)
+      # The platform record as Pack's manifest check proves this machine's manifest against it.
+      def record = platform.record.merge('ram_bytes' => memory_mib << 20, 'fiasco_reserve' => fiasco_reserve_mib << 20)
+
+      # The board's development manifest, as this machine boots it (manifest).
+      def test_manifest(root) = manifest(platform.manifest_source(root))
 
       # The development manifest's text for a test image on this machine: with no session
       # template (ProductionImage.without_sessions), so the console's login at boot starts
@@ -201,8 +199,6 @@ module Erx
           end
       end
     end
-    DEVELOPMENT_MACHINE = Machine.new(memory_mib: MEMORY_MIB, fiasco_reserve_mib: FIASCO_RESERVE_MIB, system_growth_mib: 0,
-                                      tmp_growth_mib: 0, root_mib: 64)
 
     # source with no session template: each `session` record, to the next record, and
     # each facet granted to a session template, which names a template no longer there.
@@ -221,16 +217,19 @@ module Erx
 
     # The development manifest without its session template, for the harnesses that type
     # at the system shell.
-    def self.sessionless_manifest(root) = without_sessions(File.binread(File.join(root, MANIFEST)))
+    def self.sessionless_manifest(root, platform:) = without_sessions(platform.manifest_source(root))
 
-    def initialize(root:, runner:, compiler:, linker:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
-                   runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco),
+    def initialize(root:, runner:, compiler:, linker:, machine:, fiasco: Fiasco.new(root: root, runner: runner, compiler: compiler),
+                   runtime: NativeRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco,
+                                              platform: platform_of(machine)),
                    jit_runtime: NativeJitRuntime.new(root: root, runner: runner, compiler: compiler, linker: linker,
-                                                     fiasco: fiasco))
+                                                     fiasco: fiasco, platform: platform_of(machine)))
+      platform_of(machine)
       @root = File.realpath(root)
       @runner = runner
       @compiler = compiler
       @linker = linker
+      @machine = machine
       @fiasco = fiasco
       @runtime = runtime
       @jit_runtime = jit_runtime
@@ -256,16 +255,17 @@ module Erx
     # Packs the image from Fiasco's last build into a directory that must be clean, so a
     # stale file cannot stand in for this build's. The image carries the system release
     # and nothing else.
-    def build(directory:, manifest_source: File.binread(File.join(@root, MANIFEST)))
+    def build(directory:, manifest_source: @machine.platform.manifest_source(@root))
       assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
-               machine: DEVELOPMENT_MACHINE, domains: domain_boots(manifest_source))
+               machine: @machine, domains: domain_boots(manifest_source))
     end
 
     # The image and the release medium for QEMU that holds it (ReleaseMedium), both in
     # directory, which must be clean: by default the production image. A boot that creates
     # a domain (MediumBoot) names a larger machine and a manifest with room for it, whose
     # domain row names the release and runtime image the image then carries.
-    def build_medium(directory:, machine: DEVELOPMENT_MACHINE, manifest_source: File.binread(File.join(@root, MANIFEST)))
+    def build_medium(directory:, machine: @machine, manifest_source: machine.platform.manifest_source(@root))
+      on_own_board(machine)
       built = assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
                        machine: machine, domains: domain_boots(manifest_source))
       directory = built_directory(built)
@@ -283,8 +283,8 @@ module Erx
     # each in place of the manifest's script of its name; one of them may be a test
     # script, booting a test-only application (ErlangApps::TEST_ONLY), which is test code
     # too. manifest_source is machine's manifest unless a harness names its own.
-    def build_test_image(directory:, added:, machine: DEVELOPMENT_MACHINE, domains: [],
-                         manifest_source: machine.manifest(File.binread(File.join(@root, MANIFEST))))
+    def build_test_image(directory:, added:, machine: @machine, domains: [], manifest_source: machine.test_manifest(@root))
+      on_own_board(machine)
       raise Error, 'a test image adds test code' unless
         added.is_a?(Added) && (!added.entries.empty? || domains.any?(&:test))
 
@@ -304,14 +304,15 @@ module Erx
       sources = Runtime.source_digest(root: @root)
       erts = @runtime.build
       archives = [*erts.otp_archives, erts.libc, @fiasco.user_library('libgcc.a')]
-      root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
+      root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: machine.platform,
+                                 fiasco: @fiasco)
                             .build_system_receipted(directory: File.join(directory, 'root'), archives: archives,
                                                     place: machine.root_address)
       kernel = assembled_receipt(@fiasco.kernel_path, name: 'kernel', directory: directory)
       sigma0 = assembled_receipt(@fiasco.sigma0_path, name: 'sigma0', directory: directory)
       archive = File.join(directory, 'image.erxpack')
       File.write(self.class.sources_path(archive), sources)
-      facts = build_facts_file(directory: directory)
+      facts = build_facts_file(directory: directory, platform: machine.platform)
       release = [*ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries,
                  build_facts_entry(facts, release: ReleaseFiles::SYSTEM)]
       erofs, images = ReleaseMedium.image(entries: release, directory: directory, runner: @runner)
@@ -387,14 +388,25 @@ module Erx
       report.merge('report' => path).freeze
     end
 
-    # The problems of a platform record against a device tree as dtc prints it: a path the
-    # tree lacks, a node whose compatible list does not name what the record says, or a
-    # window or line other than the node's.
+    # The problems of a platform record against a device tree as dtc prints it: a RAM base
+    # (ram_first) other than the tree's first memory node's, and each device's problems
+    # (device_problems). It reads QEMU virt's tree, whose nodes all sit at the top level
+    # with two address cells and whose clocks are fixed-clock nodes; the Raspberry Pi's
+    # tree, whose UARTs sit under /soc and whose clocks the firmware sets, is not of
+    # that shape, and its records are not checked this way.
     def self.device_path_problems(platform, dts)
       nodes = dts.scan(/^\t([^\s{}]+) \{\n(.*?)^\t\};/m).to_h do |name, body|
         ["/#{name}", { compatible: body[/^\t\tcompatible = (.*?);/, 1].to_s.scan(/"([^"]+)"/).flatten,
-                       window: node_window(body) }]
+                       window: node_window(body), reg: cells(body, 'reg'), phandle: cells(body, 'phandle').first,
+                       clocks: cells(body, 'clocks'), frequency: cells(body, 'clock-frequency') }]
       end
+      ram_problems(platform, nodes) + device_problems(platform, nodes)
+    end
+
+    # Each device-tree device's problem: a path the tree lacks, a node whose compatible
+    # list does not name what the record says, a window or line other than the node's, or
+    # a PL011's clock other than the tree's (pl011_clock_problem).
+    def self.device_problems(platform, nodes)
       devices = platform.fetch('units').flat_map { |unit| unit.fetch('devices') }.select { |device| device.fetch('selector') == 'dt' }
       devices.filter_map do |device|
         path = device.fetch('path')
@@ -406,9 +418,39 @@ module Erx
           "#{path}: compatible #{node.fetch(:compatible).inspect} does not name #{device.fetch('compatible')}"
         elsif recorded != node.fetch(:window)
           "#{path}: base, size or line #{recorded} differ from the tree's #{node.fetch(:window) || 'unreadable reg or interrupts'}"
+        elsif device.fetch('compatible') == Manifest::SystemDomainCheck::PL011_COMPATIBLE
+          pl011_clock_problem(path, device, node, nodes)
         end
       end
     end
+    private_class_method :device_problems
+
+    # A PL011's clock is its node's first clocks entry, uartclk by the PL011 binding: the
+    # phandle of a fixed-clock node, whose one clock-frequency cell is the clock in hertz.
+    # A record whose clock is another, or absent, or a tree whose clock is not such a node,
+    # is a problem, since erx_pl011 divides the baud rate from that clock.
+    def self.pl011_clock_problem(path, device, node, nodes)
+      phandle = node.fetch(:clocks).first
+      source = phandle && nodes.each_value.find { |candidate| candidate.fetch(:phandle) == phandle }
+      frequency = source.fetch(:frequency) if source&.fetch(:compatible)&.include?('fixed-clock')
+      tree = frequency&.size == 1 ? frequency.first : nil
+      return nil if tree && device['clock'] == tree
+
+      "#{path}: clock #{device['clock'].inspect} differs from the tree's #{tree || 'unreadable fixed-clock'}"
+    end
+    private_class_method :pl011_clock_problem
+
+    # The tree's RAM base is its first memory node's first reg address; a record whose
+    # ram_first is another, or a tree with no readable memory node, is a problem.
+    def self.ram_problems(platform, nodes)
+      first = nodes.filter_map { |path, node| node.fetch(:reg) if path.start_with?('/memory@') }.first
+      return ['the device tree has no memory node with a readable reg'] unless first && first.size >= 2
+
+      base = (first.fetch(0) << 32) | first.fetch(1)
+      ram_first = platform['ram_first']
+      ram_first == base ? [] : [format('ram_first %<record>s differs from the tree\'s RAM base 0x%<base>x', record: ram_first.inspect, base: base)]
+    end
+    private_class_method :ram_problems
 
     # A decompiled tree whose console node is renamed, with /chosen/stdout-path naming it
     # through the alias alias_name and with the UART's options after a colon: the same
@@ -514,11 +556,11 @@ module Erx
       UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
       # The program's name, the twelve words of the flags erx_boot_argv_plan derives from the
       # page's limits and grant (-P, -Q, -t, -S, -SDcpu and -SDio with their values) and the node
-      # flag with its name, around the page's words, and the five words of -erx console_uart, the
-      # four of -erx boot VALUE SLOT and the three of -erx build ID, which the root adds to the
-      # manifest's. The allocator flags erx_boot_argv_plan ends its flags with are counted from
-      # their one copy (allocator_words).
-      ARGUMENTS_FIXED = 27
+      # flag with its name, around the page's words, and the six words of -erx console_uart BASE
+      # SIZE LINE CLOCK, the four of -erx boot VALUE SLOT and the three of -erx build ID, which the
+      # root adds to the manifest's. The allocator flags erx_boot_argv_plan ends its flags with are
+      # counted from their one copy (allocator_words).
+      ARGUMENTS_FIXED = 28
       # The file whose ALLOCATOR_WORDS string holds the allocator flags of every runtime.
       BOOT_INFO = 'liberx/backend/core/boot_info.c'
 
@@ -543,12 +585,12 @@ module Erx
 
       # Every word of ERTS's arguments that the manifest's own words do not add.
       def self.arguments_always(root) = ARGUMENTS_FIXED + allocator_words(root).size
-      # The words of -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE, which
-      # the root adds for the device of each RECORD_UNITS unit but the host link's, and of -erx
-      # device ROLE PERIPHERAL BASE SIZE LINE, the host link's UART's physical record
+      # The words of -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK,
+      # which the root adds for the device of each RECORD_UNITS unit but the host link's, and of
+      # -erx device ROLE PERIPHERAL BASE SIZE LINE CLOCK, the host link's UART's physical record
       # (docs/design-stopgap.md, "Device records").
-      GIVEN_RECORD_WORDS = 10
-      DEVICE_RECORD_WORDS = 7
+      GIVEN_RECORD_WORDS = 11
+      DEVICE_RECORD_WORDS = 8
       # The manifest unit that holds the host link's UART, which gives a device record only
       # when the boot sends erx.hostlink=1.
       HOSTLINK_UNIT = 'hostlink'
@@ -598,8 +640,10 @@ module Erx
                               "U(M:group()),U(M:budget()),L(M:threads())}]).\r"
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64',
+                     platform: Platform.development(root))
         @root = File.expand_path(root)
+        @machine = Machine.development(platform)
         @runner = runner
         @compiler = compiler
         @linker = linker
@@ -614,7 +658,7 @@ module Erx
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         built = image(fiasco, directory: 'build/production-image/trace')
-        run = boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.trace_checkpoints,
+        run = boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: false, points: Run.trace_checkpoints(machine: @machine),
                                         command_line: COMMAND_LINES[accel])
         serial = File.binread(run.fetch('serial_log'))
         problems = Run.trace_problems(serial)
@@ -639,7 +683,7 @@ module Erx
         fiasco.build(jobs: jobs) if build
         check_device_paths
         built = image(fiasco)
-        narrow = cpus.max > 1 ? image(fiasco, directory: 'build/production-image/narrow', manifest_source: Run.narrow_manifest(@root)) : nil
+        narrow = cpus.max > 1 ? image(fiasco, directory: 'build/production-image/narrow', manifest_source: Run.narrow_manifest(@root, platform: @machine.platform)) : nil
         full_matrix(accels, cpus, built, narrow).merge(smoke ? smoke_cells(built) : {})
       end
 
@@ -656,8 +700,8 @@ module Erx
       # written through erx_pl011, prove the release ran that far. The command shell's
       # prompt ends no line, so no point names it. A test image (ProductionImage#build_test_image)
       # is booted only when test_image says so, and adds its banner line.
-      def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0, manifest_source: File.read(File.join(root, MANIFEST)),
-                           hostlink: nil, memory_mib: MEMORY_MIB, test_image: false)
+      def self.checkpoints(built, root:, watchdog:, cpus:, extra_arguments: 0, manifest_source:,
+                           memory_mib:, hostlink: nil, test_image: false)
         source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
@@ -696,10 +740,10 @@ module Erx
       # second first: the report must then show it wake and every executor park again. The
       # report writes beside the console driver, so the slogan and the two shells' banners are
       # looked for anywhere in a line, and its line may follow an unended prompt.
-      def self.idle_checkpoints(cpus:, root:)
+      def self.idle_checkpoints(cpus:, root:, machine:)
         # Each scheduler and each dirty CPU scheduler holds an executor slot.
-        executors = 2 * schedulers(File.read(File.join(root, MANIFEST)), cpus: cpus)
-        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+        executors = 2 * schedulers(machine.platform.manifest_source(root), cpus: cpus)
+        [*Qemu.boot_transcript(memory_mib: machine.memory_mib),
          { name: 'release-slogan', pattern: %r{Erlang/OTP 29 }n, seconds: 240 }.freeze,
          { name: 'release-shell', pattern: /#{Regexp.escape(COMMAND_SHELL_BANNER)}/n, seconds: 60, type: ERL_LINE }.freeze,
          { name: 'erlang-shell', pattern: /Eshell V/n, seconds: 60, type: BUSY_EXPRESSION }.freeze,
@@ -718,13 +762,13 @@ module Erx
       # kernel, and the CPUs and the system domain's threads are listed whole. Each answer
       # types the next collector, the last types the summary, and the summary's line must
       # be exactly that.
-      def self.kernel_record_checkpoints(cpus:)
+      def self.kernel_record_checkpoints(cpus:, machine:)
         typed = [*KERNEL_RECORD_ANSWERS.keys.map { |call| %(io:format("~w~n",[erx_kernel_records:#{call}()]).\r) },
                  KERNEL_RECORD_SUMMARY]
         answers = KERNEL_RECORD_ANSWERS.zip(typed.drop(1)).map do |(call, start), type|
           { name: "kernel-record-#{call}", pattern: start, seconds: EVAL_SECONDS, type: type }.freeze
         end
-        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), SLOGAN,
+        [*Qemu.boot_transcript(memory_mib: machine.memory_mib), SLOGAN,
          RELEASE_SHELL.merge(type: ERL_LINE).freeze, ERLANG_SHELL.merge(type: typed.first).freeze, *answers,
          { name: 'kernel-record-summary', pattern: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{object_info,/n, seconds: EVAL_SECONDS,
            verify: whole_line(kernel_record_line(cpus: cpus), speaker: 'the kernel records read') }.freeze].freeze
@@ -767,8 +811,8 @@ module Erx
       # reports partial, with the pool's scope below the tables, and the same statuses in
       # /proc: ls and cat through the command shell's evaluator, then file:read_file/1 of a
       # process's status file, which is size 0 and read to its end as stock reads one.
-      def self.console_checkpoints
-        boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
+      def self.console_checkpoints(machine:)
+        boot = Qemu.boot_transcript(memory_mib: machine.memory_mib).map do |point|
           point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
         end
         raise Error, 'the boot transcript has no development warning to type at' unless boot.any? { |point| point.key?(:type) }
@@ -857,8 +901,8 @@ module Erx
       TRACE_STOP = "erx:trace_stop(R),trace_stopped.\r"
       TRACE_REDRAW = '(?:[^\n]*\e\[J)?'
       TRACE_TIME = "\\A#{TRACE_REDRAW} *[0-9]+\\.[0-9]{9}".freeze
-      def self.trace_checkpoints
-        boot = Qemu.boot_transcript(memory_mib: MEMORY_MIB).map do |point|
+      def self.trace_checkpoints(machine:)
+        boot = Qemu.boot_transcript(memory_mib: machine.memory_mib).map do |point|
           point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
         end
         [*boot, SLOGAN,
@@ -912,9 +956,9 @@ module Erx
 
       # The release's boot with its children named, then the line that outlived the deadlines.
       # init's -eval writes beside the command shell, so a line of its may follow the unended prompt.
-      def self.survival_checkpoints(seconds:)
+      def self.survival_checkpoints(seconds:, machine:)
         children = KERNEL_CHILDREN.join(',')
-        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+        [*Qemu.boot_transcript(memory_mib: machine.memory_mib),
          SLOGAN,
          point('kernel-children', /\A(?:% )?\[[a-z0-9_,]+\]\r*\n\z/n, /\A(?:% )?\[#{children}\]\r*\n\z/n, seconds: EVAL_SECONDS),
          { name: 'past-the-deadlines', pattern: /\A(?:% )?past_the_deadlines\r*\n\z/n, seconds: seconds + 60 }.freeze].freeze
@@ -928,16 +972,16 @@ module Erx
       end
 
       # A kernel command line the root will not take: it says so and ends the machine.
-      def self.command_line_refusal_checkpoints
-        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+      def self.command_line_refusal_checkpoints(machine:)
+        [*Qemu.boot_transcript(memory_mib: machine.memory_mib),
          { name: 'root-refusal', pattern: /\Aerx: root task refused the boot: the kernel command line/n, seconds: 30 }.freeze].freeze
       end
 
       # A device tree that names the console's UART by another path than the manifest's
       # console, through an alias and with options after it: the root says both paths
       # and ends the machine.
-      def self.stdout_path_refusal_checkpoints
-        [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
+      def self.stdout_path_refusal_checkpoints(machine:)
+        [*Qemu.boot_transcript(memory_mib: machine.memory_mib),
          { name: 'root-refusal', seconds: 30,
            pattern: %r{\Aerx: root task refused the boot: manifest: the console /pl011@9000000 is not the node /chosen/stdout-path names, #{Regexp.escape(SEEDED_STDOUT_NODE)}\r?\n}n }.freeze].freeze
       end
@@ -969,8 +1013,8 @@ module Erx
 
       def smoke_boot(built)
         hostlink = QemuPlan::NO_HOSTLINK
-        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern('tcg'), cpus: 1, hostlink: hostlink)
-        full = boot('tcg', 1, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES['tcg'],
+        points = production_checkpoints(built, watchdog: watchdog_pattern('tcg'), cpus: 1, hostlink: hostlink)
+        full = boot('tcg', 1, built, memory_mib: @machine.memory_mib, points: points, machine_end: false, command_line: COMMAND_LINES['tcg'],
                                        hostlink: hostlink)
         { serial: full.fetch('serial_log'), seconds: full.fetch('elapsed_seconds') }.freeze
       end
@@ -981,13 +1025,13 @@ module Erx
 
       def full_matrix(accels, cpus, built, narrow)
         accels.product(cpus).to_h do |accel, count|
-          points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count)
-          full = boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
+          points = production_checkpoints(built, watchdog: watchdog_pattern(accel), cpus: count)
+          full = boot(accel, count, built, memory_mib: @machine.memory_mib, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
           if count == cpus.first
-            boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: UNKNOWN_WORD_LINE,
-                                      points: Run.command_line_refusal_checkpoints)
-            boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, dtb: seeded_stdout_tree(accel, count, built),
-                                      points: Run.stdout_path_refusal_checkpoints)
+            boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: true, command_line: UNKNOWN_WORD_LINE,
+                                      points: Run.command_line_refusal_checkpoints(machine: @machine))
+            boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: true, dtb: seeded_stdout_tree(accel, count, built),
+                                      points: Run.stdout_path_refusal_checkpoints(machine: @machine))
           end
           prove_pet(accel, count, built) if count == cpus.first
           boot_narrow(accel, count, narrow) if narrow && count == cpus.max
@@ -1008,9 +1052,9 @@ module Erx
       # byte for byte (DeterministicTranscript); the recipe is one CPU under TCG. The cell
       # carries how many lines the two agreed on.
       def deterministic(built)
-        points = Run.checkpoints(built, root: @root, watchdog: 'off', cpus: 1, extra_arguments: DETERMINISTIC_LINE.scan('erx.arg=').size)
+        points = production_checkpoints(built, watchdog: 'off', cpus: 1, extra_arguments: DETERMINISTIC_LINE.scan('erx.arg=').size)
         first, second = Array.new(2) do
-          report = boot('tcg', 1, built, memory_mib: MEMORY_MIB, machine_end: false, command_line: DETERMINISTIC_LINE, points: points)
+          report = boot('tcg', 1, built, memory_mib: @machine.memory_mib, machine_end: false, command_line: DETERMINISTIC_LINE, points: points)
           File.binread(report.fetch('serial_log'))
         end
         { lines: DeterministicTranscript.compare(first, second) }.freeze
@@ -1024,11 +1068,11 @@ module Erx
         seconds = proof.fetch(:boot) + PET_MARGIN_SECONDS
         line = "erx.watchdog=#{proof.values_at(:period, :pet, :boot).join(',')} erx.arg=-eval"
         expression = "#{CHILDREN_EXPRESSION},timer:sleep(#{seconds * 1000}),erlang:display(past_the_deadlines)."
-        boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.survival_checkpoints(seconds: seconds),
+        boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: false, points: Run.survival_checkpoints(seconds: seconds, machine: @machine),
                                   command_line: "#{line} erx.arg=#{expression}")
         window = proof.fetch(:pet) + proof.fetch(:period) + PET_MARGIN_SECONDS
-        stopped = boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true, command_line: "#{line} erx.arg=#{STOP_PET}",
-                                            points: [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), SLOGAN,
+        stopped = boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: true, command_line: "#{line} erx.arg=#{STOP_PET}",
+                                            points: [*Qemu.boot_transcript(memory_mib: @machine.memory_mib), SLOGAN,
                                                      { name: 'pet-stopped', pattern: /\A(?:% )?pet_stopped\r*\n\z/n, seconds: EVAL_SECONDS }.freeze,
                                                      { name: 'watchdog-fired', pattern: /#{Regexp.escape(CrashFrame::BEGIN_MARKER)}/n, seconds: window }.freeze])
         judge_missed_pet(File.binread(stopped.fetch('serial_log')))
@@ -1076,9 +1120,9 @@ module Erx
       # system domain's second UART, once the boot has reached the command shell. The guest
       # must report this image's build in its hello.
       def hostlink_boot(accel, count, built)
-        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count)
+        points = production_checkpoints(built, watchdog: watchdog_pattern(accel), cpus: count)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB, checkpoints: points, machine_end: false,
+            .run(platform: @machine.platform, accel: accel, cpus: count, image: built.single, memory_mib: @machine.memory_mib, checkpoints: points, machine_end: false,
                  command_line: COMMAND_LINES[accel], directory: hostlink_directory(accel),
                  link: ->(socket) { HostlinkGuest.call(socket, build: built.build_id) }, link_seconds: HostlinkGuest::SECONDS)
       end
@@ -1087,11 +1131,11 @@ module Erx
       # among its host link's files trees, and the host reads it through tools/erx files.
       def files_boot(accel, count, built)
         line = [COMMAND_LINES[accel], FilesGuest.command_line].compact.join(' ')
-        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count,
+        points = production_checkpoints(built, watchdog: watchdog_pattern(accel), cpus: count,
                                         extra_arguments: FilesGuest::ARGUMENTS.size)
         directory = File.join(@root, 'build/qemu', "fl-#{accel}-#{Process.pid}")
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB, checkpoints: points, machine_end: false,
+            .run(platform: @machine.platform, accel: accel, cpus: count, image: built.single, memory_mib: @machine.memory_mib, checkpoints: points, machine_end: false,
                  command_line: line, directory: directory, link_seconds: FilesGuest::SECONDS,
                  link: lambda { |socket|
                    FilesGuest.call(socket, root: @root, build: built.build_id,
@@ -1107,10 +1151,10 @@ module Erx
         modules = ReloadGuest.compile(compile: compile, root: @root, directory: sources,
                                       versions: ReloadGuest::VERSIONS)
         line = [COMMAND_LINES[accel], "erx.arg=-eval erx.arg=#{ReloadGuest::START}"].compact.join(' ')
-        points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count, extra_arguments: 2)
+        points = production_checkpoints(built, watchdog: watchdog_pattern(accel), cpus: count, extra_arguments: 2)
         directory = File.join(@root, 'build/qemu', "rl-#{accel}-#{Process.pid}")
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: count, image: built.single, memory_mib: MEMORY_MIB, checkpoints: points, machine_end: false,
+            .run(platform: @machine.platform, accel: accel, cpus: count, image: built.single, memory_mib: @machine.memory_mib, checkpoints: points, machine_end: false,
                  command_line: line, directory: directory, link_seconds: ReloadGuest::SECONDS,
                  link: lambda { |socket|
                    ReloadGuest.call(socket, build: built.build_id, modules: modules,
@@ -1122,7 +1166,7 @@ module Erx
       def hostlink_directory(accel) = File.join(@root, 'build/qemu', "hl-#{accel}-#{Process.pid}")
 
       def console_boot(accel, count, built)
-        boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.console_checkpoints,
+        boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: false, points: Run.console_checkpoints(machine: @machine),
                                   command_line: [COMMAND_LINES[accel], CONSOLE_PLAIN_WORD].compact.join(' '))
       end
 
@@ -1138,21 +1182,21 @@ module Erx
         expression = '{module,erx_log}=code:ensure_loaded(erx_log),' \
                      'erlang:suspend_process(whereis(erx_console)),' \
                      'erx_log:debug([112,97,114,107,101,100,9,97,116,9,101,110,100]),erlang:halt().'
-        boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: true,
+        boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: true,
                                   command_line: [COMMAND_LINES[accel], "erx.arg=-eval erx.arg=#{expression}"].compact.join(' '),
-                                  points: [*Qemu.boot_transcript(memory_mib: MEMORY_MIB), SLOGAN,
+                                  points: [*Qemu.boot_transcript(memory_mib: @machine.memory_mib), SLOGAN,
                                            { name: 'parked-at-end', pattern: /debug .*parked\\x09at\\x09end\r*\n\z/n,
                                              seconds: EVAL_SECONDS }.freeze])
       end
 
       def idle_boot(accel, count, built)
-        boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.idle_checkpoints(cpus: count, root: @root),
+        boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: false, points: Run.idle_checkpoints(cpus: count, root: @root, machine: @machine),
                                   command_line: [COMMAND_LINES[accel], GROUP_REPORT_WORD].compact.join(' '))
       end
 
       # The kernel-object records, read at the Erlang shell (Run.kernel_record_checkpoints).
       def kernel_records_boot(accel, count, built)
-        boot(accel, count, built, memory_mib: MEMORY_MIB, machine_end: false, points: Run.kernel_record_checkpoints(cpus: count),
+        boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: false, points: Run.kernel_record_checkpoints(cpus: count, machine: @machine),
                                   command_line: COMMAND_LINES[accel])
       end
 
@@ -1164,9 +1208,15 @@ module Erx
         raise Error, "a stopped pet ended the machine with cause #{cause}" unless cause == CrashFrame::CODEC.member('crash_cause', 'watchdog')
       end
 
+      # Run.checkpoints for a boot of the production image on this suite's machine.
+      def production_checkpoints(built, **options)
+        Run.checkpoints(built, root: @root, manifest_source: @machine.platform.manifest_source(@root),
+                               memory_mib: @machine.memory_mib, **options)
+      end
+
       def boot(accel, count, built, memory_mib:, points:, machine_end:, command_line: nil, dtb: nil, hostlink: nil)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: count, image: built.single, memory_mib: memory_mib, checkpoints: points, machine_end: machine_end,
+            .run(platform: @machine.platform, accel: accel, cpus: count, image: built.single, memory_mib: memory_mib, checkpoints: points, machine_end: machine_end,
                  command_line: command_line, dtb: dtb, hostlink: hostlink)
       end
 
@@ -1184,7 +1234,8 @@ module Erx
         FileUtils.mkdir_p(directory)
         stock = File.join(directory, "#{accel}-#{count}cpu.dtb")
         seeded = File.join(directory, "#{accel}-#{count}cpu-stdout.dtb")
-        argv = QemuPlan.argv(accel: accel, image: File.expand_path(built.single), serial: '/dev/null', cpus: count, memory_mib: MEMORY_MIB, program: @qemu)
+        argv = QemuPlan.argv(platform: @machine.platform, accel: accel, image: File.expand_path(built.single), serial: '/dev/null', cpus: count,
+                            memory_mib: @machine.memory_mib, program: @qemu)
         machine = argv.index('-machine') + 1
         @runner.run([*argv[0...machine], "#{argv[machine]},dumpdtb=#{stock}", *argv[(machine + 1)..]], name: 'qemu-dumpdtb-seed', deadline: 30)
         listing = File.read(@runner.run(['dtc', '-q', '-I', 'dtb', '-O', 'dts', stock], name: 'dtc-seed', deadline: 30).fetch('log'))
@@ -1199,8 +1250,8 @@ module Erx
       # at the system shell (ProductionImage.without_sessions), unless manifest_source names another.
       def image(fiasco, directory: 'build/production-image/boot', manifest_source: nil)
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, directory))
-        manifest_source ||= ProductionImage.sessionless_manifest(@root)
-        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        manifest_source ||= ProductionImage.sessionless_manifest(@root, platform: @machine.platform)
+        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine, fiasco: fiasco)
                        .build(directory: directory, manifest_source: manifest_source)
       end
 
@@ -1215,8 +1266,8 @@ module Erx
       # narrow manifest leaves out the network domain (NARROW_DROPPED), whose net unit the
       # narrow cells, which boot without a network device, do not use. The manifest check
       # and the library's planner judge the result whole.
-      def self.narrow_manifest(root)
-        source = NARROW_DROPPED.reduce(ProductionImage.sessionless_manifest(root)) do |text, row|
+      def self.narrow_manifest(root, platform:)
+        source = NARROW_DROPPED.reduce(ProductionImage.sessionless_manifest(root, platform: platform)) do |text, row|
           raise Error, "the narrow manifest finds no #{row.source[1, 30]} row" unless text.scan(row).size == 1
 
           text.sub(row, '')
@@ -1256,26 +1307,44 @@ module Erx
 
       def boot_narrow(accel, count, built)
         points = Run.checkpoints(built, root: @root, watchdog: watchdog_pattern(accel), cpus: count,
-                                        manifest_source: Run.narrow_manifest(@root))
-        boot(accel, count, built, memory_mib: MEMORY_MIB, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
+                                        manifest_source: Run.narrow_manifest(@root, platform: @machine.platform),
+                                        memory_mib: @machine.memory_mib)
+        boot(accel, count, built, memory_mib: @machine.memory_mib, points: points, machine_end: false, command_line: COMMAND_LINES[accel])
       end
 
-      # QEMU writes its own device tree and exits; two serial ports, since the second
-      # UART exists only when a second port is given.
+      # QEMU writes its own device tree for the suite's machine and exits; two serial ports,
+      # since the second UART exists only when a second port is given.
       def check_device_paths
         directory = File.join(@root, 'build/production-image/device-tree')
         FileUtils.mkdir_p(directory)
-        tree = File.join(directory, 'virt.dtb')
-        @runner.run([@qemu, '-machine', "virt,dumpdtb=#{tree}", '-cpu', 'cortex-a72', '-m', MEMORY_MIB.to_s, '-display', 'none',
+        platform = @machine.platform
+        tree = File.join(directory, "#{platform.name}.dtb")
+        machine = QemuPlan.machine_line(platform, accel: 'tcg', deterministic: false)
+        @runner.run([@qemu, '-machine', "#{machine},dumpdtb=#{tree}", '-cpu', 'cortex-a72', '-m', @machine.memory_mib.to_s, '-display', 'none',
                      '-serial', 'null', '-serial', 'null', '-no-reboot'], name: 'qemu-dumpdtb', deadline: 30)
-        listing = @runner.run(['dtc', '-q', '-I', 'dtb', '-O', 'dts', tree], name: 'dtc-virt', deadline: 30)
-        platform = JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record')
-        problems = ProductionImage.device_path_problems(platform, File.read(listing.fetch('log')))
-        raise Error, "#{PLATFORM} disagrees with QEMU's device tree: #{problems.join('; ')}" unless problems.empty?
+        listing = @runner.run(['dtc', '-q', '-I', 'dtb', '-O', 'dts', tree], name: "dtc-#{platform.name}", deadline: 30)
+        problems = ProductionImage.device_path_problems(platform.record, File.read(listing.fetch('log')))
+        raise Error, "#{platform.record_path} disagrees with QEMU's device tree: #{problems.join('; ')}" unless problems.empty?
       end
     end
 
     private
+
+    # The machine's platform, after checking it is a Machine: the default runtimes read it
+    # before initialize's body runs, so the check is here and not there.
+    def platform_of(machine)
+      raise Error, 'an image is built for a ProductionImage::Machine' unless machine.is_a?(Machine)
+
+      machine.platform
+    end
+
+    # A machine an image or medium is built for here, which must be on the board the
+    # runtimes were linked for: a machine may add RAM or move the root, never change board.
+    def on_own_board(machine)
+      return if platform_of(machine) == @machine.platform
+
+      raise Error, "a #{@machine.platform.name} image builder cannot build for #{machine.platform.name}"
+    end
 
     def entries(root_task, kernel, sigma0)
       file = @codec.member('entry_kind', 'file')
@@ -1309,12 +1378,14 @@ module Erx
       return NOTHING_ADDED if boots.empty?
 
       release = ReleaseFiles.domain(boots)
-      runtime = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
+      runtime = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @machine.platform,
+                               fiasco: @fiasco)
                           .build_domain_runtime_receipted(directory: File.join(directory, 'domain-runtime'), archives: archives)
       releases = [*ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'domains'), runner: @runner,
                                     codec: @codec, release: release).entries,
                   build_facts_entry(facts, release: release)]
-      beamasm = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
+      beamasm = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @machine.platform,
+                               fiasco: @fiasco)
                           .build_jit_runtime_receipted(directory: File.join(directory, 'jit-runtime'),
                                                        archives: jit.link_archives(libgcc: @fiasco.user_library('libgcc.a')))
       image = { 'path' => DOMAIN_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0,
@@ -1350,11 +1421,10 @@ module Erx
       provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts, jit), runner: @runner,
                                       imports: imports, compiler: @compiler)
       paths = (entries.map { |entry| entry.fetch('path') } + [@codec.fixed_bytes('system_manifest_path'), NOTICES_PATH]).map(&:b).sort
-      platform = machine.platform(platform_record)
       Pack.new(root: @root, output_root: @root, codec: @codec, planner: ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec),
                checker: tools.fetch('checker'), hasher: tools.fetch('hasher'), runner: @runner, provenance: provenance,
                domain_planner: DomainPlanner.new(helper: tools.fetch('domains'), runner: @runner))
-          .build(entries: entries, root_path: ROOT_ENTRY_PATH, build_kind: BUILD_KIND, platform: platform,
+          .build(entries: entries, root_path: ROOT_ENTRY_PATH, build_kind: BUILD_KIND, platform: machine.record,
                  artifacts: self.class.artifacts(paths, images: images),
                  manifest_source: manifest_source, output: output, test_code: test_code)
     end
@@ -1367,15 +1437,13 @@ module Erx
 
     def build_facts_sources = BUILD_FACTS_SOURCES.map { |source| File.join(@root, source) }
 
-    def platform_record = JsonInput.parse(File.binread(File.join(@root, PLATFORM)), max_bytes: 65_536, label: 'platform record')
-
     # The build-facts file (BuildFacts) and its receipt, from the facts this build
     # packs: the platform record's name and the build kind, the kernel it packs
     # (Fiasco#kernel_name, beside kernel_path), and the source revision. Its receipt
     # attributes it to the code that writes it. Each release of the image carries it
     # (build_facts_entry), so every domain reads the same facts.
-    def build_facts_file(directory:)
-      configuration = BuildFacts.configuration(platform: platform_record.fetch('name'), build_kind: BUILD_KIND)
+    def build_facts_file(directory:, platform:)
+      configuration = BuildFacts.configuration(platform: platform.name, build_kind: BUILD_KIND)
       facts = BuildFacts.gather(root: @root, runner: @runner, configuration: configuration, kernel: @fiasco.kernel_name)
       path = File.join(directory, 'build-facts')
       File.write(path, BuildFacts.render(facts))

@@ -20,6 +20,7 @@ require_relative '../../tools/lib/erx/runner'
 # does not.
 class DomainImageTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  MACHINE = Erx::ProductionImage::Machine.development(Erx::Platform.development(ROOT))
   DIRECTORY = File.join(ROOT, 'build/domain-image')
   BASE = Erx::ReleaseFiles.domain_boot('base', applications: Erx::ReleaseFiles::DOMAIN_BASE)
 
@@ -33,11 +34,11 @@ class DomainImageTest < Minitest::Test
       Erx::ProductionImage.clear_directory(root: ROOT, path: DIRECTORY)
       runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       image = Erx::ProductionImage.new(root: ROOT, runner: runner, compiler: ENV.fetch('ERX_CLANG', ''),
-                                       linker: ENV.fetch('ERX_LLD', ''))
-      image.send(:assemble, directory: DIRECTORY, manifest_source: File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST)),
+                                       linker: ENV.fetch('ERX_LLD', ''), machine: MACHINE)
+      image.send(:assemble, directory: DIRECTORY, manifest_source: MACHINE.platform.manifest_source(ROOT),
                             added: Erx::ProductionImage.const_get(:NOTHING_ADDED), test_code: false,
-                            machine: Erx::ProductionImage::DEVELOPMENT_MACHINE,
-                            domains: [*image.send(:domain_boots, File.binread(File.join(ROOT, Erx::ProductionImage::MANIFEST))),
+                            machine: MACHINE,
+                            domains: [*image.send(:domain_boots, MACHINE.platform.manifest_source(ROOT)),
                                       BASE])
     end
     @bytes = File.binread(self.class.built.archive)

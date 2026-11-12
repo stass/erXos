@@ -98,8 +98,9 @@ module Erx
     class Run
       def initialize(root:, source: root, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
-                     host_compiler: ENV.fetch('CC', 'cc'))
+                     host_compiler: ENV.fetch('CC', 'cc'), platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @source = File.expand_path(source)
         @runner = runner
         @compiler = compiler
@@ -120,7 +121,7 @@ module Erx
         Fiasco.new(root: @root, runner: @runner, compiler: @compiler).build(jobs: jobs) if build
         image = guest_image
         placement.each(accels: accels, cpus: cpus) do |accel, count, remote|
-          report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: image,
+          report = Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: count, remote: remote, image: image,
                                                               memory_mib: MEMORY_MIB, checkpoints: checkpoints, machine_end: true)
           serial = report.fetch('serial_log')
           judge("#{accel}-#{count}cpu", expected, BoundedFile.read(serial, maximum: SERIAL_BYTES))
@@ -154,7 +155,7 @@ module Erx
       end
 
       def guest_image
-        guest = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker)
+        guest = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform)
                           .build(name: 'debug_log_probe', sources: [*NativeRoot::RUNTIME, *GUEST_SOURCES],
                                  directory: File.join(@build, 'guest'), flags: GUEST_FLAGS)
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)

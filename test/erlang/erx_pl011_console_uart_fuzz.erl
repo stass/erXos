@@ -45,11 +45,13 @@ reference(Arguments) ->
     case lists:filter(fun(["console_uart" | _]) -> true; (_) -> false end, Arguments) of
         [] ->
             {error, no_console_uart};
-        [["console_uart", Base, Size, Line | _]] ->
+        [["console_uart", Base, Size, Line, Clock | _]] ->
             case {decimal(Base, 16#ffffffffffffffff), decimal(Size, 16#ffffffffffffffff),
-                  decimal(Line, 16#ffffffff)} of
-                {B, S, L} when is_integer(B), is_integer(S), is_integer(L) ->
-                    {ok, #{peripheral => pl011, window => {physical, B, S}, lines => [L]}};
+                  decimal(Line, 16#ffffffff), decimal(Clock, 16#ffffffff)} of
+                {_, _, _, 0} ->
+                    {error, bad_console_uart};
+                {B, S, L, C} when is_integer(B), is_integer(S), is_integer(L), is_integer(C) ->
+                    {ok, #{peripheral => pl011, window => {physical, B, S}, lines => [L], clock => C}};
                 _ ->
                     {error, bad_console_uart}
             end;
@@ -73,14 +75,14 @@ decimal(Word, Max) ->
 arguments() ->
     [entry() || _ <- lists:seq(1, rand:uniform(?MAX_ENTRIES + 1) - 1)].
 
-%% A third of the entries start with three number words, some within their fields and some
+%% A third of the entries start with four number words, some within their fields and some
 %% just past them, so the accepting path and the field bounds are reached often.
 entry() ->
     Words = [word() || _ <- lists:seq(1, rand:uniform(?MAX_WORDS + 1) - 1)],
     case rand:uniform(3) of
         1 -> ["console_uart" | Words];
         2 -> Words;
-        3 -> ["console_uart", number(), number(), number() | Words]
+        3 -> ["console_uart", number(), number(), number(), number() | Words]
     end.
 
 number() ->

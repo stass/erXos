@@ -56,7 +56,7 @@ static bool
 same_device(const erx_boot_device_t *a, const erx_boot_device_t *b)
 {
 	return (a->role == b->role && a->peripheral == b->peripheral && a->base == b->base && a->size == b->size &&
-	    a->line == b->line && a->dma_memory == b->dma_memory);
+	    a->line == b->line && a->clock == b->clock && a->dma_memory == b->dma_memory);
 }
 
 /* Without the host link the reader accepts what it accepted with it, and gives its records less the host link's. */

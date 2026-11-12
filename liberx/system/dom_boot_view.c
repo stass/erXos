@@ -346,6 +346,7 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 			entry->nranges = 1;
 			entry->offset = device.base - entry->ranges[0].base;
 			entry->size = device.size;
+			entry->clock = device.clock;
 			entry->nlines = 1;
 			entry->lines[0] = device.line;
 			kind = boot_kind(manifest, &device);

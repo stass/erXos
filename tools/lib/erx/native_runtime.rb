@@ -39,11 +39,14 @@ module Erx
                  liberx: File.join(root, SYSROOT, 'lib/liberxroot.a'), archive: nil)
     end
 
-    def initialize(root:, runner:, compiler:, linker:, fiasco:, oracle: Oracle.new(root: root, runner: runner))
+    def initialize(root:, runner:, compiler:, linker:, fiasco:, platform:, oracle: Oracle.new(root: root, runner: runner))
       super(root: root, runner: runner, oracle: oracle)
       @compiler = compiler
       @linker = linker
       @fiasco = fiasco
+      raise Error, "a runtime is linked for a Platform" unless platform.is_a?(Platform)
+
+      @platform = platform
       @base = File.join(@root, self.class::BASE)
       @sysroot = File.join(@root, SYSROOT)
       @tools = File.dirname(compiler)
@@ -107,7 +110,8 @@ module Erx
     end
 
     def build_liberx
-      root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: @fiasco)
+      root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform,
+                                 fiasco: @fiasco)
       archive(@output.liberx, root_task.compile_all(sources: NativeRoot::SYSTEM, directory: File.join(@base, 'liberx')))
     end
 
@@ -148,7 +152,7 @@ module Erx
         'ERX_TREE' => @root,
         'ERX_GEN' => File.join(@root, Generated::OUTPUT),
         # root.ld's place for ERTS's own links (otp/xcomp/erl-xcomp-aarch64-unknown-erxos.conf).
-        'ERX_ROOT_PLACE_FLAGS' => NativeRoot.place_flags(NativeRoot::PLACE).map { |flag| "-Wl,#{flag}" }.join(' ')
+        'ERX_ROOT_PLACE_FLAGS' => NativeRoot.place_flags(NativeRoot.development_place(@platform), ram_first: @platform.ram_first).map { |flag| "-Wl,#{flag}" }.join(' ')
       ).merge(flavour_environment).freeze
     end
 

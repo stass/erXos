@@ -225,6 +225,9 @@ typedef struct erx_dom_device_entry {
 	uint32_t	unit_name_len;
 	uint64_t	offset;		/* its registers' offset into ranges[0] */
 	uint64_t	size;		/* and their bytes, as the manifest gives them */
+	uint32_t	clock;		/* its clock in hertz, as the manifest gives
+					 * it; 0 for a device whose driver
+					 * reads none */
 	uint32_t	lines[ERX_DEVICE_IRQS_MAX];	/* each line, as the platform's
 						 * controller numbers it */
 	uint32_t	nranges;	/* at most ERX_DEVICE_RANGES_MAX */

@@ -105,7 +105,7 @@ class StructuralPackTest < Minitest::Test
     result = production.build(entries: entries, root_path: 'system/root', build_kind: 'development',
                               platform: JSON.parse(File.read(File.join(@root, 'config/platforms/qemu-virt.json'))),
                               artifacts: { 'root' => { 'kind' => 'executable', 'entry' => 2 } }.merge(ManifestContextFixture.images),
-                              manifest_source: ManifestContextFixture.domainless(Erx::ProductionImage.sessionless_manifest(@root)),
+                              manifest_source: ManifestContextFixture.domainless(Erx::ProductionImage.sessionless_manifest(@root, platform: Erx::Platform.development(@root))),
                               output: output)
     assert_equal 'stopgap', result.fetch('manifest').fetch('mode')
     assert_equal 'declared', result.fetch('manifest').fetch('root_startup')

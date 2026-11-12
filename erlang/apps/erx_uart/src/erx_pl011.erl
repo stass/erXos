@@ -26,19 +26,17 @@
 
 -export([start_link/1, start_link/2]).
 -export([init/2]).
--export([console_uart/1]).
+-export([console_uart/1, baud_divisors/1]).
 
 %% The spec's one line.
 -define(RX_LINE, 0).
 %% LCR_H's word length for eight bits.
 -define(WLEN_8, 3).
-%% QEMU virt's UART clock of 24 MHz, which times a character for reprogramming, and the
-%% divisors for 115200 baud at that clock, for a UART the boot left unprogrammed (3-10: an
-%% integer divisor of 0 is invalid), as Fiasco leaves it on virt. Only the board knows its
-%% clock, which belongs in the platform record (TODO.md).
--define(UART_CLOCK_HZ, 24000000).
--define(IBRD_DEFAULT, 13).
--define(FBRD_DEFAULT, 1).
+%% The rate the driver programs into a UART the boot left unprogrammed (3-10: an integer
+%% divisor of 0 is invalid), as Fiasco leaves QEMU virt's and the Raspberry Pi 4's firmware
+%% leaves UART3. Its divisors come from the UART's clock, which the board's platform record
+%% gives with the UART's window and line.
+-define(BAUD, 115200).
 %% The longest character a line format the boot chose can have: a start bit, eight data
 %% bits, a parity bit and two stop bits.
 -define(CHARACTER_BITS, 12).
@@ -64,8 +62,9 @@ init(Spec, Owner) ->
     start(Spec, Owner, {ok, self()}).
 
 start(Spec, Owner, Ack) ->
+    {Clock, Divisors} = clock(Spec),
     {ok, Dev} = erx_device:open(Spec),
-    reprogram(Dev),
+    reprogram(Dev, Clock, Divisors),
     ok = erx_device:irq_bind(Dev, ?RX_LINE),
     ok = erx_device:write_field(Dev, imsc, rxim, 1),
     ok = erx_device:write_field(Dev, imsc, rtim, 1),
@@ -83,23 +82,25 @@ spec() ->
         {error, Reason} -> exit(Reason)
     end.
 
-%% `-erx console_uart BASE SIZE LINE`, once, each number in decimal and within its field of
-%% the boot manifest's console (64, 64 and 32 bits). A plain word of the kernel command line
-%% can follow the three numbers, so an entry may be longer. A pure function, exported for its
-%% tests and fuzz target.
+%% `-erx console_uart BASE SIZE LINE CLOCK`, once, each number in decimal and within its field
+%% of the boot manifest's console (64, 64, 32 and 32 bits), the clock in hertz and not 0. A
+%% plain word of the kernel command line can follow the four numbers, so an entry may be
+%% longer. A pure function, exported for its tests and fuzz target.
 -spec console_uart([[string()]]) -> {ok, erx_device:spec()} | {error, {atom(), string()}}.
 console_uart(Arguments) ->
     case [Words || ["console_uart" | Words] <- Arguments] of
-        [[Base, Size, Line | _]] ->
-            case {number(Base, 64), number(Size, 64), number(Line, 32)} of
-                {{ok, B}, {ok, S}, {ok, L}} ->
-                    {ok, #{peripheral => pl011, window => {physical, B, S}, lines => [L]}};
+        [[Base, Size, Line, Clock | _]] ->
+            case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32)} of
+                {{ok, _}, {ok, _}, {ok, _}, {ok, 0}} ->
+                    {error, {bad_console_uart, "console_uart's clock is 0 Hz"}};
+                {{ok, B}, {ok, S}, {ok, L}, {ok, C}} ->
+                    {ok, #{peripheral => pl011, window => {physical, B, S}, lines => [L], clock => C}};
                 _ ->
-                    {error, {bad_console_uart, "console_uart's base, size or line is not a decimal "
-                                              "number of its field's width"}}
+                    {error, {bad_console_uart, "console_uart's base, size, line or clock is not a "
+                                              "decimal number of its field's width"}}
             end;
         [_] ->
-            {error, {bad_console_uart, "console_uart has fewer than three numbers"}};
+            {error, {bad_console_uart, "console_uart has fewer than four numbers"}};
         [] ->
             {error, {no_console_uart, "the manifest names no device entry as machine.console"}};
         [_, _ | _] ->
@@ -121,6 +122,34 @@ number(Word, Bits) ->
             error
     end.
 
+%% The UART's clock in hertz, which its record carries (the console's from console_uart/1,
+%% the others from erx_device_record, in either form), and its divisors for BAUD. A record without a
+%% clock, with a clock of 0, or with one that gives no divisors stops the driver with a stated
+%% reason before it touches the UART, since a guessed clock would time characters and divide
+%% the rate wrongly.
+clock(#{clock := Clock}) when is_integer(Clock), Clock > 0 ->
+    case baud_divisors(Clock) of
+        {ok, Integer, Fraction} -> {Clock, {Integer, Fraction}};
+        {error, Reason} -> exit(Reason)
+    end;
+clock(_Spec) ->
+    exit({no_uart_clock, "the UART's device record gives no clock"}).
+
+%% The integer and fractional divisors for BAUD at Clock hertz: Clock / (16 * BAUD) in
+%% sixty-fourths, rounded to the nearest (3-10). The divisor runs from 1 + 0/64 to
+%% 65535 + 0/64: an integer divisor of 65535 takes no fraction, so the bound is 65535 * 64
+%% sixty-fourths, not one past it. A clock too slow for a divisor of 1 is refused with a
+%% stated reason; no 32-bit clock reaches the upper bound. A pure function, exported for
+%% its tests.
+-spec baud_divisors(non_neg_integer()) ->
+    {ok, Integer :: pos_integer(), Fraction :: 0..63} | {error, {pl011_clock, string()}}.
+baud_divisors(Clock) ->
+    Sixtyfourths = (Clock * 4 + ?BAUD div 2) div ?BAUD,
+    case Sixtyfourths >= 64 andalso Sixtyfourths =< 65535 * 64 of
+        true -> {ok, Sixtyfourths div 64, Sixtyfourths rem 64};
+        false -> {error, {pl011_clock, "the UART's clock gives no divisor of 1 to 65535 for 115200 baud"}}
+    end.
+
 %% The control registers change only with the UART disabled and the character in flight
 %% finished, since a disabled UART completes the character it is sending or receiving before
 %% it stops (3-16). The driver waits for the transmitter to send what the boot left, disables
@@ -131,15 +160,15 @@ number(Word, Bits) ->
 %% The FIFOs are not flushed by clearing FEN: what the kernel queued goes out once the UART
 %% is enabled, and the receive FIFO holds what a person typed, that last character included.
 %% The boot's divisors stay.
-reprogram(Dev) ->
+reprogram(Dev, Clock, Divisors) ->
     wait_idle(Dev, ?BUSY_READS),
     ok = erx_device:write_field(Dev, cr, uarten, 0),
     IntegerDivisor = erx_device:read_field(Dev, ibrd, baud_divint),
-    Wait = character_ms(IntegerDivisor, erx_device:read_field(Dev, fbrd, baud_divfrac)),
+    Wait = character_ms(IntegerDivisor, erx_device:read_field(Dev, fbrd, baud_divfrac), Clock),
     receive after Wait -> ok end,
     ok = erx_device:write(Dev, imsc, 0),
     ok = erx_device:write(Dev, icr, erx_device:read(Dev, ris)),
-    set_divisors(Dev, IntegerDivisor),
+    set_divisors(Dev, IntegerDivisor, Divisors),
     ok = erx_device:write_field(Dev, lcr_h, wlen, ?WLEN_8),
     ok = erx_device:write_field(Dev, lcr_h, fen, 1),
     ok = erx_device:write_field(Dev, cr, rxe, 1),
@@ -154,21 +183,20 @@ wait_idle(Dev, Reads) ->
         1 -> wait_idle(Dev, Reads - 1)
     end.
 
-%% One character at divisor Int + Frac / 64 lasts CHARACTER_BITS * 16 * divisor / clock
-%% seconds (3-10), rounded up to whole milliseconds and at least one. The clock is virt's
-%% (UART_CLOCK_HZ); on a board with a slower one the time is short by their ratio, which the
-%% floor of one millisecond still covers at any rate of 12000 baud or more. An unprogrammed
+%% One character at divisor Int + Frac / 64 lasts CHARACTER_BITS * 16 * divisor / Clock
+%% seconds (3-10), rounded up to whole milliseconds and at least one. An unprogrammed
 %% divisor receives nothing, so the one millisecond is enough for it.
-character_ms(Int, Frac) ->
+character_ms(Int, Frac, Clock) ->
     Sixtyfourths = Int * 64 + Frac,
     Numerator = ?CHARACTER_BITS * 16 * 1000 * Sixtyfourths,
-    Denominator = 64 * ?UART_CLOCK_HZ,
+    Denominator = 64 * Clock,
     max(1, (Numerator + Denominator - 1) div Denominator).
 
-set_divisors(Dev, 0) ->
-    ok = erx_device:write_field(Dev, ibrd, baud_divint, ?IBRD_DEFAULT),
-    ok = erx_device:write_field(Dev, fbrd, baud_divfrac, ?FBRD_DEFAULT);
-set_divisors(_Dev, _Divisor) ->
+%% The boot's divisors stay; an unprogrammed UART takes those clock/1 gave for BAUD.
+set_divisors(Dev, 0, {Integer, Fraction}) ->
+    ok = erx_device:write_field(Dev, ibrd, baud_divint, Integer),
+    ok = erx_device:write_field(Dev, fbrd, baud_divfrac, Fraction);
+set_divisors(_Dev, _Divisor, _Divisors) ->
     ok.
 
 loop(Dev, Owner) ->

@@ -45,7 +45,6 @@ module Erx
   # (erx_fiasco_task_image_map_body); a program of image kind, whose code its slice
   # shares, is not run here.
   module Programs
-    MACHINE = ProductionImage::DEVELOPMENT_MACHINE
     # Each program by its name in the session's release, domains/erxos/bin/<name>, and the
     # source it is built from.
     PROGRAMS = %w[exit42 fault spin args bigargs note].to_h { |name| [name, "test/guest/programs/#{name}.c"] }.freeze
@@ -302,13 +301,15 @@ module Erx
       def self.cells(cpus) = cpus.map { |count| QemuCells::Cell.new(accel: QemuCells::LOCAL_ACCELERATOR, cpus: count).name }
 
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64',
+                     platform: Platform.development(root))
         @root = File.expand_path(root)
         @runner = runner
         @compiler = compiler
         @linker = linker
         @qemu = qemu
-        @manifest = File.binread(File.join(@root, ProductionImage::MANIFEST))
+        @machine = ProductionImage::Machine.development(platform)
+        @manifest = platform.manifest_source(@root)
         @build = File.join(@root, 'build/programs')
         @schema = ABI::Generator.plan(root: @root).schema
         @codec = ABI::Codec.new(@schema)
@@ -328,20 +329,23 @@ module Erx
       # The production image with PROGRAMS added to the domain release, under the
       # development manifest, session template and all.
       def image(fiasco)
-        runtime = NativeRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        runtime = NativeRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco,
+                                    platform: @machine.platform)
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@build, 'image'))
         # The image's build builds the runtime again; make finds nothing left to do.
         libc = runtime.build.libc
-        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco, runtime: runtime)
+        ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                            fiasco: fiasco, runtime: runtime)
                        .build_test_image(directory: directory, added: added(fiasco, libc: libc),
-                                         machine: MACHINE, manifest_source: @manifest)
+                                         manifest_source: @manifest)
       end
 
       # Each program linked over musl's libc.a, the one the runtime images link, as a
       # release file of the session's: no system mark, since only the system release's
       # files carry it.
       def added(fiasco, libc:)
-        native = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        native = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @machine.platform,
+                                fiasco: fiasco)
         programs = PROGRAMS.map do |name, source|
           [name, native.build_task_receipted(name: name, sources: [*NativeRoot::PROGRAM, source], directory: File.join(@build, name),
                                              archives: [libc, fiasco.user_library('libgcc.a')])]
@@ -356,9 +360,10 @@ module Erx
 
       def boot(accel, count, remote, built)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
-                                                         manifest_source: @manifest, memory_mib: MACHINE.memory_mib, test_image: true)
+                                                         manifest_source: @manifest, memory_mib: @machine.memory_mib, test_image: true)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
-            .run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MACHINE.memory_mib,
+            .run(platform: @machine.platform, accel: accel, cpus: count, remote: remote, image: built.single,
+                 memory_mib: @machine.memory_mib,
                  checkpoints: Programs.checkpoints(points, fault_answer: fault_answer))
         'passed'
       end

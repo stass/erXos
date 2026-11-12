@@ -22,9 +22,6 @@ module Erx
   module NativeCrash
     MEMORY_MIB = 512
     SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'test/guest/native_crash/guest.c'].freeze
-    # QEMU virt's RAM starts here, and the root's image lies above it wherever
-    # root.ld places it, so a fault in the root's code has a pc at or above it.
-    RAM_FIRST = 0x4000_0000
     THREAD_UNKNOWN = (1 << 64) - 1
     ROOT_TASK = 0
     # The fault word's low bits: bit 1 says the access was a write.
@@ -50,7 +47,9 @@ module Erx
     end
 
     # Holds one run's log to its case. Raises on the first disagreement.
-    def judge(serial, kase)
+    # The root's image lies above RAM's first address, ram_first, wherever root.ld places
+    # it, so a fault in the root's code has a pc at or above it.
+    def judge(serial, kase, ram_first:)
       uncaught = UNCAUGHT_LINE.match(serial)
       raise Error, "#{kase.name}: the guest says #{uncaught[0]}" if uncaught
 
@@ -66,7 +65,7 @@ module Erx
         'kind' => fault.fetch('kind') == kase.kind,
         'address' => kase.kind != MEMORY || fault.fetch('addr') == expected,
         'access' => kase.kind != MEMORY || (fault.fetch('cause') & WRITE_BIT != 0) == kase.write,
-        'pc' => fault.fetch('pc') >= RAM_FIRST,
+        'pc' => fault.fetch('pc') >= ram_first,
         'thread' => fault.fetch('thread') == THREAD_UNKNOWN,
         'space' => fault.fetch('space') == ROOT_TASK
       }.reject { |_name, agrees| agrees }.keys
@@ -78,8 +77,9 @@ module Erx
     class Run
       # source is the tree the root's C comes from, which a test may seed with a fault.
       def initialize(root:, source: root, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root))
         @root = File.expand_path(root)
+        @platform = platform
         @source = File.expand_path(source)
         @runner = runner
         @compiler = compiler
@@ -102,14 +102,15 @@ module Erx
       private
 
       def one(accel, count, remote, kase, built)
-        report = Qemu.new(root: @root, runner: @runner).run(accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
+        report = Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
                                                             checkpoints: NativeCrash.checkpoints, machine_end: true)
-        NativeCrash.judge(File.binread(File.expand_path(report.fetch('serial_log'), @root)), kase)
+        NativeCrash.judge(File.binread(File.expand_path(report.fetch('serial_log'), @root)), kase, ram_first: @platform.ram_first)
       end
 
       def image(fiasco, kase)
         directory = File.join(@build, kase.name)
-        root_task = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
+        root_task = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform,
+                                   fiasco: fiasco)
                               .build(name: 'crash-root', sources: SOURCES, directory: File.join(directory, 'root'),
                                      flags: ["-DERX_CRASH_CASE=#{kase.number}"])
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)

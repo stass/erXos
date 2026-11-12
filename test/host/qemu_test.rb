@@ -13,6 +13,8 @@ class InterruptingQemuRunner
 end
 
 class QemuTest < Minitest::Test
+  PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
+
   def setup
     @directory = Dir.mktmpdir('erx-qemu-')
     @serial = File.join(@directory, 'serial.log')
@@ -28,8 +30,8 @@ class QemuTest < Minitest::Test
   end
 
   def test_machine_and_accelerator_contract
-    tcg = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial')
-    hvf = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial')
+    tcg = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial')
+    hvf = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'hvf', image: 'image', serial: 'serial')
     assert_includes tcg, 'virt-11.1,gic-version=3,msi=gicv2m'
     assert_includes hvf, 'virt-11.1,gic-version=3'
     assert_includes hvf, 'host'
@@ -40,12 +42,12 @@ class QemuTest < Minitest::Test
 
   def test_the_deterministic_word_counts_instructions_on_one_tcg_cpu
     plan = { accel: 'tcg', image: 'image', serial: 'serial' }
-    argv = Erx::QemuPlan.argv(**plan, command_line: 'erx.det=1 erx.arg=-deterministic')
+    argv = Erx::QemuPlan.argv(platform: PLATFORM, **plan, command_line: 'erx.det=1 erx.arg=-deterministic')
     assert_equal %w[-smp 1 -icount shift=0,sleep=off -rtc base=2026-01-01,clock=vm], argv[argv.index('-smp'), 6]
     assert_includes argv.fetch(argv.index('-machine') + 1).split(','), 'dtb-randomness=off'
     # Not a word of its own, by the guest's reading: a word's value, and a tab inside a word.
     ['erx.watchdog=1,30,600 erx.arg=erx.det=1', "erx.arg=a\terx.det=1"].each do |line|
-      plain = Erx::QemuPlan.argv(**plan, accel: 'hvf', command_line: line)
+      plain = Erx::QemuPlan.argv(platform: PLATFORM, **plan, accel: 'hvf', command_line: line)
       refute_includes plain, '-icount'
       refute_includes plain.fetch(plain.index('-machine') + 1), 'dtb-randomness'
     end
@@ -53,13 +55,13 @@ class QemuTest < Minitest::Test
 
   def test_the_deterministic_word_refuses_hvf_and_more_cpus
     plan = { image: 'image', serial: 'serial', command_line: 'erx.det=1' }
-    assert_raises(Erx::Error) { Erx::QemuPlan.argv(**plan, accel: 'hvf') }
-    assert_raises(Erx::Error) { Erx::QemuPlan.argv(**plan, accel: 'tcg', cpus: 4) }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, **plan, accel: 'hvf') }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, **plan, accel: 'tcg', cpus: 4) }
   end
 
   def test_a_serial_input_reads_a_path_and_still_logs_to_the_file
-    plain = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial')
-    typed = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', serial_input: 'keys')
+    plain = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial')
+    typed = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', serial_input: 'keys')
     assert_equal 'file:serial', plain.fetch(plain.index('-serial') + 1)
     assert_equal 'chardev:serial0', typed.fetch(typed.index('-serial') + 1)
     assert_equal 'file,id=serial0,path=serial,input-path=keys', typed.fetch(typed.index('-chardev') + 1)
@@ -71,11 +73,11 @@ class QemuTest < Minitest::Test
     serials = lambda do |argv|
       argv.each_index.select { |at| argv[at] == '-serial' }.map { |at| argv[at + 1] }
     end
-    assert_equal %w[file:serial null], serials.call(Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial'))
-    linked = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', hostlink: '/run/x/hostlink.sock')
+    assert_equal %w[file:serial null], serials.call(Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial'))
+    linked = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', hostlink: '/run/x/hostlink.sock')
     assert_equal ['file:serial', 'unix:/run/x/hostlink.sock,server=on,wait=off'], serials.call(linked)
     ['relative.sock', '/a,b.sock', "/a\0b", "/#{'a' * Erx::QemuPlan::SOCKET_PATH_MAX}"].each do |path|
-      assert_raises(Erx::Error, path) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', hostlink: path) }
+      assert_raises(Erx::Error, path) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', hostlink: path) }
     end
   end
 
@@ -85,51 +87,51 @@ class QemuTest < Minitest::Test
   def test_the_hostlink_word_comes_with_the_hostlink_serial_line
     plan = { accel: 'tcg', image: 'image', serial: 'serial' }
     append = ->(argv) { argv.include?('-append') ? argv.fetch(argv.index('-append') + 1) : nil }
-    assert_equal 'erx.hostlink=1', append.call(Erx::QemuPlan.argv(**plan))
-    assert_equal 'erx.hostlink=1', append.call(Erx::QemuPlan.argv(**plan, command_line: ''))
-    assert_equal 'erx.hostlink=1 erx.det=1', append.call(Erx::QemuPlan.argv(**plan, command_line: 'erx.det=1'))
-    assert_equal 'erx.hostlink=1', append.call(Erx::QemuPlan.argv(**plan, hostlink: '/run/x/hostlink.sock'))
-    none = Erx::QemuPlan.argv(**plan, hostlink: Erx::QemuPlan::NO_HOSTLINK)
+    assert_equal 'erx.hostlink=1', append.call(Erx::QemuPlan.argv(platform: PLATFORM, **plan))
+    assert_equal 'erx.hostlink=1', append.call(Erx::QemuPlan.argv(platform: PLATFORM, **plan, command_line: ''))
+    assert_equal 'erx.hostlink=1 erx.det=1', append.call(Erx::QemuPlan.argv(platform: PLATFORM, **plan, command_line: 'erx.det=1'))
+    assert_equal 'erx.hostlink=1', append.call(Erx::QemuPlan.argv(platform: PLATFORM, **plan, hostlink: '/run/x/hostlink.sock'))
+    none = Erx::QemuPlan.argv(platform: PLATFORM, **plan, hostlink: Erx::QemuPlan::NO_HOSTLINK)
     assert_equal ['file:serial'], none.each_index.select { |at| none[at] == '-serial' }.map { |at| none[at + 1] }
     assert_nil append.call(none)
-    assert_equal 'erx.det=1', append.call(Erx::QemuPlan.argv(**plan, hostlink: Erx::QemuPlan::NO_HOSTLINK, command_line: 'erx.det=1'))
+    assert_equal 'erx.det=1', append.call(Erx::QemuPlan.argv(platform: PLATFORM, **plan, hostlink: Erx::QemuPlan::NO_HOSTLINK, command_line: 'erx.det=1'))
     [nil, Erx::QemuPlan::NO_HOSTLINK].each do |hostlink|
-      assert_raises(Erx::Error) { Erx::QemuPlan.argv(**plan, hostlink: hostlink, command_line: 'erx.det=1 erx.hostlink=1') }
+      assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, **plan, hostlink: hostlink, command_line: 'erx.det=1 erx.hostlink=1') }
     end
   end
 
   def test_a_console_serial_line_is_this_terminal_with_the_monitor_muxed
-    console = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: Erx::QemuPlan::CONSOLE)
+    console = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: Erx::QemuPlan::CONSOLE)
     assert_equal 'mon:stdio', console.fetch(console.index('-serial') + 1)
     assert_raises(Erx::Error) do
-      Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: Erx::QemuPlan::CONSOLE, serial_input: 'keys')
+      Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: Erx::QemuPlan::CONSOLE, serial_input: 'keys')
     end
   end
 
   def test_cpu_counts_outside_the_plan_range_are_refused
     [0, 9, '2', nil].each do |cpus|
-      assert_raises(Erx::Error, cpus.inspect) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', cpus: cpus) }
+      assert_raises(Erx::Error, cpus.inspect) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', cpus: cpus) }
     end
-    assert_includes Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', cpus: 8), '8'
+    assert_includes Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', cpus: 8), '8'
   end
 
   def test_a_comma_in_a_serial_input_path_is_refused
-    assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', serial_input: 'a,b') }
-    assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'a,b', serial_input: 'keys') }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', serial_input: 'a,b') }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'a,b', serial_input: 'keys') }
   end
 
   DISK = Erx::QemuPlan::Disk
 
   def test_a_plan_without_disks_renders_the_arguments_it_always_did
-    plain = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial')
-    assert_equal plain, Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial', disks: [])
-    assert_equal %w[qemu-system-aarch64 -machine virt-11.1,gic-version=3 -accel hvf -cpu host -smp 1 -m 512 -display none
+    plain = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'hvf', image: 'image', serial: 'serial')
+    assert_equal plain, Erx::QemuPlan.argv(platform: PLATFORM, accel: 'hvf', image: 'image', serial: 'serial', disks: [])
+    assert_equal %w[qemu-system-aarch64 -machine virt-11.1,gic-version=3 -accel hvf -cpu host -smp 1 -m 256 -display none
                     -monitor none -nic none -no-reboot -serial file:serial -serial null -kernel image -append erx.hostlink=1], plain
   end
 
   def test_a_disk_is_a_raw_drive_with_a_virtio_blk_device_on_a_non_legacy_transport
-    argv = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial', disks: [DISK.new(path: '/run/a.img')])
-    plain = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial')
+    argv = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'hvf', image: 'image', serial: 'serial', disks: [DISK.new(path: '/run/a.img')])
+    plain = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'hvf', image: 'image', serial: 'serial')
     assert_equal plain, argv - ['-global', 'virtio-mmio.force-legacy=false', '-drive', 'file=/run/a.img,format=raw,if=none,id=disk0',
                                 '-device', 'virtio-blk-device,drive=disk0,bus=virtio-mmio-bus.31']
     assert_includes argv.each_cons(2).to_a, ['-global', 'virtio-mmio.force-legacy=false']
@@ -139,7 +141,7 @@ class QemuTest < Minitest::Test
   end
 
   def test_several_disks_are_numbered_in_order
-    argv = Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', disks: [DISK.new(path: '/a'), DISK.new(path: '/b')])
+    argv = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', disks: [DISK.new(path: '/a'), DISK.new(path: '/b')])
     assert_equal %w[file=/a,format=raw,if=none,id=disk0 file=/b,format=raw,if=none,id=disk1],
                  argv.each_cons(2).select { |flag, _| flag == '-drive' }.map(&:last)
     assert_equal 1, argv.count('-global')
@@ -149,7 +151,7 @@ class QemuTest < Minitest::Test
   # port: slirp stays restricted and forwards nothing from the host into the guest.
   def test_a_network_device_is_restricted_slirp_with_one_guest_forward_to_loopback
     nic = Erx::QemuPlan::Nic.new(frames_port: 5001, peer_port: 5002, echo_port: 5003)
-    argv = Erx::QemuPlan.argv(accel: 'hvf', image: 'image', serial: 'serial', nic: nic)
+    argv = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'hvf', image: 'image', serial: 'serial', nic: nic)
     users = argv.each_cons(2).select { |flag, value| flag == '-netdev' && value.start_with?('user,') }.map(&:last)
     assert_equal ['user,id=nic_user,restrict=on,domainname=erxos.test,guestfwd=tcp:10.0.2.4:7-tcp:127.0.0.1:5003'], users
     refute(argv.any? { |argument| argument.include?('hostfwd') })
@@ -160,9 +162,9 @@ class QemuTest < Minitest::Test
       assert_raises(Erx::Error, path.inspect) { DISK.new(path: path) }
     end
     too_many = Array.new(Erx::QemuPlan::MAX_DISKS + 1) { |index| DISK.new(path: "/d#{index}") }
-    assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', disks: too_many) }
-    assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', disks: ['/a']) }
-    assert_raises(Erx::Error) { Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', disks: nil) }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', disks: too_many) }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', disks: ['/a']) }
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', disks: nil) }
   end
 
   def test_a_checkpoint_types_once_its_line_has_come
@@ -185,10 +187,10 @@ class QemuTest < Minitest::Test
 
   def test_invalid_guest_configuration_is_refused
     assert_raises(Erx::Error) do
-      Erx::QemuPlan.argv(accel: 'unknown', image: 'image', serial: 'serial')
+      Erx::QemuPlan.argv(platform: PLATFORM, accel: 'unknown', image: 'image', serial: 'serial')
     end
     assert_raises(Erx::Error) do
-      Erx::QemuPlan.argv(accel: 'tcg', image: 'image', serial: 'serial', cpus: 0)
+      Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', cpus: 0)
     end
   end
 
@@ -252,7 +254,7 @@ class QemuTest < Minitest::Test
     output = "ordinary line\n" * 6000 + "done\n"
     guest = fake_guest(output: output)
     qemu = Erx::Qemu.new(root: @directory, program: guest)
-    report = qemu.run(accel: 'tcg', image: image,
+    report = qemu.run(platform: PLATFORM, accel: 'tcg', image: image,
                       checkpoints: [{ name: 'done', pattern: /^done\n/n, seconds: 2 }])
     assert_equal 'passed', report.fetch('state')
   end
@@ -260,7 +262,7 @@ class QemuTest < Minitest::Test
   def test_version_probe_time_does_not_consume_guest_deadline
     guest = fake_guest(output: "done\n", version_delay: 1.1)
     qemu = Erx::Qemu.new(root: @directory, program: guest)
-    report = qemu.run(accel: 'tcg', image: image,
+    report = qemu.run(platform: PLATFORM, accel: 'tcg', image: image,
                       checkpoints: [{ name: 'done', pattern: /^done\n/n, seconds: 1 }])
     assert_equal 'passed', report.fetch('state')
   end
@@ -269,7 +271,7 @@ class QemuTest < Minitest::Test
     guest = fake_guest(output: '', guest_delay: 2)
     qemu = Erx::Qemu.new(root: @directory, program: guest)
     assert_raises(Erx::Error) do
-      qemu.run(accel: 'tcg', image: image,
+      qemu.run(platform: PLATFORM, accel: 'tcg', image: image,
                checkpoints: [{ name: 'done', pattern: /^done\n/n, seconds: 1 }])
     end
     path = Dir.glob(File.join(@directory, 'build/qemu/*/report.json')).fetch(0)
@@ -278,7 +280,7 @@ class QemuTest < Minitest::Test
 
   def test_interruption_does_not_leave_a_running_guest_report
     qemu = Erx::Qemu.new(root: @directory, runner: InterruptingQemuRunner.new)
-    assert_raises(Interrupt) { qemu.run(accel: 'tcg', image: image) }
+    assert_raises(Interrupt) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image) }
     path = Dir.glob(File.join(@directory, 'build/qemu/*/report.json')).fetch(0)
     assert_equal 'cancelled', JSON.parse(File.read(path)).fetch('state')
   end
@@ -289,7 +291,7 @@ class QemuTest < Minitest::Test
       File.symlink(outside, File.join(@directory, 'build/qemu'))
       qemu = Erx::Qemu.new(root: @directory, runner: InterruptingQemuRunner.new)
       begin
-        qemu.run(accel: 'tcg', image: image)
+        qemu.run(platform: PLATFORM, accel: 'tcg', image: image)
       rescue Erx::Error, Interrupt
         # An invalid output branch is refused before creating guest files.
       end
@@ -305,32 +307,32 @@ class QemuTest < Minitest::Test
 
   def boot_transcript(available:, warning: "development build: trusted code only\r\n",
                       art: "  \\___||_|   /_/\\_\\ \\___/ |___/\r\n")
-    "L4 Bootstrapper\r\n  RAM: 0000000040000000 - 000000005fffffff: 512.0 MiB\r\n" \
-      "  Total RAM: 512.0 MiB; available for Bootstrap/Sigma0/Kernel: #{available}\r\n" \
+    "L4 Bootstrapper\r\n  RAM: 0000000040000000 - 000000004fffffff: 256.0 MiB\r\n" \
+      "  Total RAM: 256.0 MiB; available for Bootstrap/Sigma0/Kernel: #{available}\r\n" \
       "#{art}\e[1;32merXos\r\n#{warning}"
   end
 
   def test_boot_without_the_banner_art_fails
     qemu = Erx::Qemu.new(root: @directory,
-                         program: fake_guest(output: boot_transcript(available: '512.0 MiB', art: '')))
-    assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image) }
+                         program: fake_guest(output: boot_transcript(available: '256.0 MiB', art: '')))
+    assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image) }
   end
 
   def test_boot_without_the_development_warning_fails
     qemu = Erx::Qemu.new(root: @directory,
-                         program: fake_guest(output: boot_transcript(available: '512.0 MiB', warning: '')))
-    assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image) }
+                         program: fake_guest(output: boot_transcript(available: '256.0 MiB', warning: '')))
+    assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image) }
   end
 
   def test_a_guest_that_must_end_the_machine_may_exit_once_its_transcript_is_whole
-    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '512.0 MiB')))
-    assert_equal 'passed', qemu.run(accel: 'tcg', image: image, machine_end: true).fetch('state')
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '256.0 MiB')))
+    assert_equal 'passed', qemu.run(platform: PLATFORM, accel: 'tcg', image: image, machine_end: true).fetch('state')
   end
 
   def test_a_guest_that_ends_the_machine_early_fails
     qemu = Erx::Qemu.new(root: @directory,
-                         program: fake_guest(output: boot_transcript(available: '512.0 MiB', warning: '')))
-    error = assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image, machine_end: true) }
+                         program: fake_guest(output: boot_transcript(available: '256.0 MiB', warning: '')))
+    error = assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image, machine_end: true) }
     assert_match(/before completing its transcript/, error.message)
   end
 
@@ -340,8 +342,8 @@ class QemuTest < Minitest::Test
     { "qemu-system-aarch64: terminating on signal 15 from pid 4242 (<unknown process>)\n" => ' from pid 4242',
       "qemu-system-aarch64: terminating on signal 2\n" => '' }.each do |line, sender|
       qemu = Erx::Qemu.new(root: @directory,
-                           program: fake_guest(output: boot_transcript(available: '512.0 MiB', warning: ''), stderr: line))
-      error = assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image) }
+                           program: fake_guest(output: boot_transcript(available: '256.0 MiB', warning: ''), stderr: line))
+      error = assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image) }
       signal = line[/signal (\d+)/, 1]
       assert_equal "QEMU was stopped by signal #{signal}#{sender} before completing its transcript", error.message
     end
@@ -353,28 +355,28 @@ class QemuTest < Minitest::Test
     points = [{ name: 'only', pattern: /line\r?\n/n, seconds: 1 }].freeze
     qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: "line\r\n", linger: 60))
     error = assert_raises(Erx::CommandError) do
-      qemu.run(accel: 'tcg', image: image, checkpoints: points, machine_end: true)
+      qemu.run(platform: PLATFORM, accel: 'tcg', image: image, checkpoints: points, machine_end: true)
     end
     assert_equal 'timed_out', error.result.fetch('state')
   end
 
   def test_boot_with_consistent_bootstrap_memory_passes
-    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '512.0 MiB')))
-    report = qemu.run(accel: 'tcg', image: image)
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '256.0 MiB')))
+    report = qemu.run(platform: PLATFORM, accel: 'tcg', image: image)
     assert_equal %w[bootstrap-memory erxos-art erxos-banner development-warning],
                  report.fetch('checkpoints').map { |entry| entry.fetch('name') }
     assert_equal 'passed', report.fetch('state')
   end
 
   def test_boot_summary_must_match_guest_ram
-    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '512.0 MiB')))
-    error = assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image, memory_mib: 1024) }
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '256.0 MiB')))
+    error = assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image, memory_mib: 1024) }
     assert_match(/expected '.*Kernel: 1024\.0 MiB'/, error.message)
   end
 
   def test_boot_reporting_more_available_than_total_memory_fails
     qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '16.0 EiB')))
-    error = assert_raises(Erx::Error) { qemu.run(accel: 'tcg', image: image) }
+    error = assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image) }
     assert_match(/Kernel: 16\.0 EiB/, error.message)
     path = Dir.glob(File.join(@directory, 'build/qemu/*/report.json')).fetch(0)
     report = JSON.parse(File.read(path))

@@ -275,7 +275,8 @@ module Erx
       fiasco.build(jobs: 4)
       parent = File.join(ROOT, 'build/reproducible')
       OutputDirectory.prepare(root: ROOT, path: parent)
-      report = ProductionImage.new(root: ROOT, runner: runner, compiler: compiler, linker: environment.fetch('ERX_LLD'), fiasco: fiasco)
+      report = ProductionImage.new(root: ROOT, runner: runner, compiler: compiler, linker: environment.fetch('ERX_LLD'),
+                                   machine: ProductionImage::Machine.development(Platform.development(ROOT)), fiasco: fiasco)
                               .check_reproducible(directory: Dir.mktmpdir('production-', parent))
       Terminal.puts("production image: byte-identical; #{report.fetch('report')}")
       claims = report.fetch('manifest')
@@ -531,7 +532,8 @@ module Erx
       fiasco.build(jobs: 4)
       parent = File.join(ROOT, 'build/production-image')
       OutputDirectory.prepare(root: ROOT, path: parent)
-      image = ProductionImage.new(root: ROOT, runner: runner, compiler: compiler, linker: environment.fetch('ERX_LLD'), fiasco: fiasco)
+      image = ProductionImage.new(root: ROOT, runner: runner, compiler: compiler, linker: environment.fetch('ERX_LLD'),
+                                  machine: ProductionImage::Machine.development(Platform.development(ROOT)), fiasco: fiasco)
       directory = Dir.mktmpdir('image-', parent)
       unless medium
         built = image.build(directory: directory)
@@ -784,7 +786,7 @@ module Erx
     # The hosted runtime and the release it boots, both of which `make check-runtime-hosted` reads.
     def self.build_runtime(jobs)
       built = Runtime.new(root: ROOT).build(jobs: jobs)
-      Release.new(root: ROOT, output: built).build
+      Release.new(root: ROOT, output: built, platform: Platform.development(ROOT)).build
       built.archive
     end
 
@@ -797,10 +799,13 @@ module Erx
       compiler = ENV.fetch('ERX_CLANG', '')
       linker = ENV.fetch('ERX_LLD', '')
       fiasco = Fiasco.new(root: ROOT, runner: runner, compiler: compiler)
-      interpreter = NativeRuntime.new(root: ROOT, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco).build(jobs: jobs)
-      jit = NativeJitRuntime.new(root: ROOT, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco)
+      platform = Platform.development(ROOT)
+      interpreter = NativeRuntime.new(root: ROOT, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco,
+                                    platform: platform).build(jobs: jobs)
+      jit = NativeJitRuntime.new(root: ROOT, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco,
+                                 platform: platform)
                             .build(interpreter: interpreter, jobs: jobs)
-      NativeRoot.new(root: ROOT, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco)
+      NativeRoot.new(root: ROOT, runner: runner, compiler: compiler, linker: linker, platform: platform, fiasco: fiasco)
                 .build_jit_runtime_receipted(directory: File.join(ROOT, NativeJitRuntime::BASE, 'image'),
                                              archives: jit.link_archives(libgcc: fiasco.user_library('libgcc.a')))
                 .fetch(:program)
@@ -841,12 +846,13 @@ module Erx
     def self.boot(arguments, runner_class: Runner)
       request = InteractiveBoot.request(arguments)
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      platform = Platform.development(ROOT)
       accel = request.accel || InteractiveBoot.default_accel(QemuGate.available_accelerators(runner: runner))
       kind = request.without_web ? 'website' : 'development'
       Terminal.puts("building the #{kind} boot image into #{InteractiveBoot.image_directory(without_web: request.without_web)}")
       boot = InteractiveBoot.build(root: ROOT, runner: runner, jobs: request.jobs, hostlink: request.hostlink,
-                                    without_web: request.without_web)
-      argv = InteractiveBoot.argv(accel: accel, cpus: request.cpus, image: boot.image, link: boot.link)
+                                    platform: platform, without_web: request.without_web)
+      argv = InteractiveBoot.argv(platform: platform, accel: accel, cpus: request.cpus, image: boot.image, link: boot.link)
       Terminal.puts("booting: accelerator #{accel}, #{request.cpus} guest CPU(s); #{InteractiveBoot::QUIT_HINT}")
       if boot.link
         Terminal.puts("host link on #{boot.link.socket}; once root's session has started, run in another terminal:")
@@ -871,7 +877,7 @@ module Erx
       options[:accel] ||= InteractiveBoot.default_accel(
         QemuGate.available_accelerators(runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
       )
-      report = Qemu.new(root: ROOT).run(**options)
+      report = Qemu.new(root: ROOT).run(platform: Platform.development(ROOT), **options)
       Terminal.puts("#{options.fetch(:accel)}: #{report.fetch('state')}; #{report.fetch('serial_log')}")
       0
     end

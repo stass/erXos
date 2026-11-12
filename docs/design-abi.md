@@ -1726,7 +1726,7 @@ creation request cannot supply origin or parent fields.
 | Record and size | Fields |
 | --- | --- |
 | unit, 24 | `0: name str`; `8: holder u32`; `12: devices span`; `20: reserved u32` |
-| device, 80 | `0: selector u32`; `4: role u32`; `8: path str`; `16: bridge str`; `24: compatible str`; `32: bus u16`; `34: device u8`; `35: function u8`; `36: dma u32`; `40: flags u32`; `44: line u32`; `48: dma_memory u64`; `56: placement_key str`; `64: base u64`; `72: size u64` |
+| device, 88 | `0: selector u32`; `4: role u32`; `8: path str`; `16: bridge str`; `24: compatible str`; `32: bus u16`; `34: device u8`; `35: function u8`; `36: dma u32`; `40: flags u32`; `44: line u32`; `48: dma_memory u64`; `56: placement_key str`; `64: base u64`; `72: size u64`; `80: clock u32`; `84: reserved u32` |
 | partition window, 32 | `0: holder u32`; `4: device u32`; `8: role u32`; `12: partition u32`; `16: rights u32`; `20: image u32`; `24: reserved u64` |
 
 A unit's `holder` is a domain reference. Its device span names a
@@ -1744,7 +1744,14 @@ are the physical address and length of the node's first `reg` entry, and
 `line` is its first interrupt, numbered as the platform's interrupt
 controller numbers the lines a device raises. The platform record carries
 all three for every device-tree device, and the production image suite
-checks them against the device tree QEMU builds. Selector 2 is a PCIe function: `bridge`
+checks them against the device tree QEMU builds. `clock` is the frequency
+in hertz of the clock the device's driver divides rates from, the rate
+of the first entry of its node's `clocks` (a fixed clock's `clock-frequency`,
+or for a clock the firmware sets, the rate the board's firmware configuration
+fixes): a PL011 (compatible `arm,pl011`) times its
+characters and divides its baud rate from it, and only the board knows
+it, so its row carries a nonzero clock, and the manifest check refuses a
+PL011 row without one; every other device's clock is 0. Selector 2 is a PCIe function: `bridge`
 names its host bridge by device-tree path, `path` is empty, bus is at
 most 255, device at most 31 and function at most 7; its `base`, `size`
 and `line` are zero, since configuration space gives them. Role values are

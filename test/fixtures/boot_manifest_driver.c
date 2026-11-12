@@ -87,15 +87,17 @@ main(int argc, char **argv)
 	    manifest.limits.funnel_depth, manifest.limits.exports, (unsigned long long)manifest.limits.tmp,
 	    (unsigned long long)manifest.limits.overlay, manifest.limits.atoms, manifest.limits.foreign_atoms,
 	    manifest.limits.processes);
+	printf("console_uart %llu %llu %u %u\n", (unsigned long long)manifest.console.base,
+	    (unsigned long long)manifest.console.size, manifest.console.line, manifest.console.clock);
 	printf("devices %zu\n", manifest.device_count);
 	for (size_t at = 0; at < manifest.device_count; at++) {
 		const erx_boot_device_t *device = &manifest.devices[at];
 		char words[ERX_BOOT_DEVICE_WORDS_MAX];
 		size_t length;
 
-		printf("device %s %s %llu %llu %u %llu ", device->role, device->peripheral,
+		printf("device %s %s %llu %llu %u %llu %u ", device->role, device->peripheral,
 		    (unsigned long long)device->base, (unsigned long long)device->size, device->line,
-		    (unsigned long long)device->dma_memory);
+		    (unsigned long long)device->dma_memory, device->clock);
 		if (device->given) {
 			given_print(device);
 			continue;

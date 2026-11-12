@@ -56,7 +56,7 @@ module Erx
     # 144 MB case log (a peer case erXos does not run; erxos-history
     # oracle-hosted/2026-11-06-kernel-ct-logs), and the system domain's
     # memory covers it beside /tmp's on the oracle's machines
-    # (OracleQemu::MACHINE; the hosted runtime has no bound of its own).
+    # (OracleQemu.machine; the hosted runtime has no bound of its own).
     ERXOS_LOGS = '/ct-logs'
     ERXOS_LOG_CAP = 256 << 20
     # erx_ct_oracle's arguments on erXos: the suites, the work directory

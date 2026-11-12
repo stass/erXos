@@ -64,12 +64,13 @@ module Erx
     HALTED = /\A\{domain_down,[0-9]+,\{halt,0\}\}\z/
 
     def initialize(root:, runner: nil, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
-                   qemu: 'qemu-system-aarch64')
+                   qemu: 'qemu-system-aarch64', platform: Platform.development(root))
       @root = File.realpath(root)
       @runner = runner || Runner.new(owner_root: @root, log_dir: File.join(@root, 'build/logs'))
       @compiler = compiler
       @linker = linker
       @qemu = qemu
+      @machine = MediumBoot.machine(platform)
       @bench = Bench.new(root: @root, runner: @runner)
     end
 
@@ -78,7 +79,7 @@ module Erx
     def run(accel:, jobs: 4)
       plan = PLANS.fetch(accel) { raise Error, "no G5 plan for accelerator #{accel}" }
       build = build_record
-      manifest = MediumBoot.manifest(File.binread(File.join(@root, ProductionImage::MANIFEST)))
+      manifest = MediumBoot.manifest(@machine.platform.manifest_source(@root))
       built, domain = build_image(manifest: manifest, jobs: jobs)
       before = @bench.load_average
       directory = File.join(@root, 'build/qemu', "g5-#{accel}-#{Process.pid}-#{Random.bytes(4).unpack1('H*')}")
@@ -216,8 +217,9 @@ module Erx
       fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
       fiasco.build(jobs: jobs)
       directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/bench/g5-image'))
-      built, _written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
-                                       .build_medium(directory: directory, machine: MediumBoot::MACHINE, manifest_source: manifest)
+      built, _written = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                            fiasco: fiasco)
+                                       .build_medium(directory: directory, manifest_source: manifest)
       [built, MediumBoot.domain_in(built.archive, codec: ABI::Codec.new(ABI::Generator.plan(root: @root).schema))]
     end
 
@@ -225,9 +227,10 @@ module Erx
     def boot(plan:, built:, manifest:, domain:, directory:)
       watchdog = plan.accel == 'hvf' ? MediumBoot::Run::WATCHDOG : ProductionImage::Run::TCG_WATCHDOG
       points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: watchdog, cpus: 1, manifest_source: manifest,
-                                                       memory_mib: MediumBoot::MACHINE.memory_mib)
+                                                       memory_mib: @machine.memory_mib)
       Qemu.new(root: @root, runner: @runner, program: @qemu)
-          .run(accel: plan.accel, cpus: 1, image: built.single, memory_mib: MediumBoot::MACHINE.memory_mib,
+          .run(platform: @machine.platform, accel: plan.accel, cpus: 1, image: built.single,
+               memory_mib: @machine.memory_mib,
                checkpoints: self.class.checkpoints(points: points, plan: plan, domain: domain),
                command_line: ProductionImage::Run::COMMAND_LINES[plan.accel], directory: directory)
       nil

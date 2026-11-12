@@ -12,9 +12,10 @@ require_relative '../../tools/lib/erx/bench_guest_log'
 class BenchGuestTest < Minitest::Test
   PLAN = Erx::BenchGuest::PLANS.fetch('tcg')
   BEAM = (0..999).map { |value| value % 256 }.pack('C*')
+  PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
 
   def test_the_transcript_is_one_the_harness_accepts_and_types_in_order
-    points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN)
+    points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN, platform: PLATFORM)
     Erx::Transcript.new(checkpoints: points)
     typed = points.filter_map { |point| point[:type] }
     # erl reaches the command shell first, and the footprint is typed at the Erlang shell's banner.
@@ -29,7 +30,7 @@ class BenchGuestTest < Minitest::Test
   end
 
   def test_each_answer_types_the_line_after_the_one_it_answers
-    points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN).to_h { |point| [point.fetch(:name), point] }
+    points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN, platform: PLATFORM).to_h { |point| [point.fetch(:name), point] }
     lines = Erx::BenchGuest.load_lines(BEAM)
     # The footprint prints and then evaluates to ok; only the second answer types the next line.
     refute points.fetch('footprint').key?(:type)
@@ -40,7 +41,7 @@ class BenchGuestTest < Minitest::Test
   end
 
   def test_the_load_prints_the_digest_of_the_module_and_waits_for_it
-    points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN)
+    points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN, platform: PLATFORM)
     answer = points.find { |point| point.fetch(:name) == "load-#{Erx::BenchGuest.load_lines(BEAM).size - 1}" }
     assert_match answer.fetch(:pattern), "G3BEAM #{MD5}\r\n"
     refute_match answer.fetch(:pattern), "ok\r\n"
@@ -239,7 +240,7 @@ class BenchGuestTest < Minitest::Test
   end
 
   def test_a_run_that_timed_out_leaves_a_partial_result
-    points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN)
+    points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN, platform: PLATFORM)
     reached = points.index { |point| point.fetch(:name) == 'workload-spawn' }
     seen = points.first(reached).each_with_index.map { |point, i| { 'name' => point.fetch(:name), 'elapsed_seconds' => i * 1.0 } }
     Dir.mktmpdir('erx-g3-') do |directory|
@@ -256,7 +257,7 @@ class BenchGuestTest < Minitest::Test
 
   def test_a_run_that_left_no_report_has_nothing_measured
     Dir.mktmpdir('erx-g3-') do |directory|
-      points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN)
+      points = Erx::BenchGuest.checkpoints(beam: BEAM, plan: PLAN, platform: PLATFORM)
       result = Erx::BenchGuest.send(:settle, directory: directory, failure: Erx::Error.new('no image'),
                                              points: points, plan: PLAN, flavour: 'emu')
       assert_equal 'failed', result.fetch('state')
