@@ -45,7 +45,12 @@ starter_test_() ->
       fun a_down_row_stays_down_when_its_settings_change/1,
       fun enable_starts_a_stopped_row_and_clears_its_mark/1,
       fun stop_marks_the_row_before_it_ends_it/1,
-      fun an_unchanged_text_is_not_recorded_again/1]}.
+      fun start_clears_the_mark_before_it_starts_the_row/1,
+      fun enable_clears_the_mark_before_the_table_is_made/1,
+      fun the_next_table_completes_a_stop_cut_short/1,
+      fun an_unchanged_text_is_not_recorded_again/1,
+      fun a_new_text_is_recorded_before_the_old_is_dropped/1,
+      fun a_restarted_table_takes_the_newer_of_two_recorded_texts/1]}.
 
 %% A first read of rc.conf that fails: the file is a directory until the case
 %% replaces it.
@@ -391,14 +396,102 @@ stop_marks_the_row_before_it_ends_it(_) ->
             ?assertEqual([Mark, End], [Call || Call <- Calls, Call =:= Mark orelse Call =:= End])
     end.
 
-%% Recording a text unchanged leaves the record alone, so a table that ends
-%% then never finds the record missing.
+%% A table that ends between the two steps of a start must not find the row
+%% marked, so the mark is cleared before the row starts.
+start_clears_the_mark_before_it_starts_the_row(_) ->
+    fun() ->
+            ok = watch(),
+            Kiosk = started(?KIOSK),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(ok, erx_starter:command({stop, <<"kiosk">>, #{}})),
+            receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(session_outlived_stop) end,
+            Calls = supervisor_calls(whereis(erx_starter),
+                                     fun() -> ok = erx_starter:command({start, <<"kiosk">>, #{}}) end),
+            Clear = {delete_child, {stopped, <<"kiosk">>}},
+            Start = {start_child, {row, <<"kiosk">>}},
+            ?assertEqual([Clear, Start], [Call || Call <- Calls, Call =:= Clear orelse Call =:= Start])
+    end.
+
+%% An enable of a stopped row clears the mark before the table is made from
+%% the text it wrote, so a table that ends between the two finds the row
+%% enabled and unmarked, and starts it once its own read answers; cleared
+%% after, the row would stay enabled and stopped. The enable changes the
+%% text, which no rc.conf in the case's directory set, so the table records it.
+enable_clears_the_mark_before_the_table_is_made(_) ->
+    fun() ->
+            ok = watch(),
+            Kiosk = started(?KIOSK),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(ok, erx_starter:command({stop, <<"kiosk">>, #{}})),
+            receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(session_outlived_stop) end,
+            Calls = supervisor_calls(whereis(erx_starter),
+                                     fun() -> ok = erx_starter:command({enable, <<"kiosk">>, #{}}) end),
+            Clear = {delete_child, {stopped, <<"kiosk">>}},
+            ?assertMatch([Clear, {start_child, _} | _],
+                         [Call || Call <- Calls, Call =:= Clear orelse is_record_call(Call)])
+    end.
+
+%% A stop cut short, its mark written and its row still running, is
+%% completed by the next table once its read of rc.conf answers.
+the_next_table_completes_a_stop_cut_short(_) ->
+    fun() ->
+            ok = watch(),
+            Kiosk = started(?KIOSK),
+            ok = wait_until(fun() -> run(<<"kiosk">>) =:= running end),
+            %% The mark erx_starter_sup:stop_row/1 writes first.
+            {ok, undefined} = supervisor:start_child(erx_starter_keepers,
+                                                     #{id => {stopped, <<"kiosk">>}, restart => transient,
+                                                       start => {erx_starter_sup, ignore, [<<"kiosk">>]}}),
+            ok = restart_table(),
+            receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(stop_cut_short_left_running) end,
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(stopped, run(<<"kiosk">>)),
+            ?assertEqual(none, started_within(?KIOSK, 200))
+    end.
+
+%% Recording a text unchanged leaves the record alone.
 an_unchanged_text_is_not_recorded_again(_) ->
     fun() ->
             ok = wait_until(fun() -> rc_conf() =:= read end),
             {ok, Text} = erx_starter_sup:recorded(),
-            ?assertEqual([], record_calls(Text)),
-            ?assertEqual([{delete_child, rc_conf}, {start_child, rc_conf}], record_calls(<<Text/binary, "# edited\n">>))
+            ?assertEqual([], record_calls(Text))
+    end.
+
+%% A new text is recorded before the old record is dropped, so a table that
+%% ends at any step finds a text recorded.
+a_new_text_is_recorded_before_the_old_is_dropped(_) ->
+    fun() ->
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            {ok, Text} = erx_starter_sup:recorded(),
+            Edited = <<Text/binary, "# edited\n">>,
+            ?assertMatch([{start_child, _}, {delete_child, _}], record_calls(Edited)),
+            ?assertEqual({ok, Edited}, erx_starter_sup:recorded())
+    end.
+
+%% A record cut short between its two steps leaves the old text and the new
+%% one recorded. The table restarted then is made from the newer while
+%% rc.conf is unreadable, and its read, once it answers, leaves one record.
+a_restarted_table_takes_the_newer_of_two_recorded_texts(Setup) ->
+    fun() ->
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(ok, erx_starter:command({enable, <<"clock">>, #{}})),
+            Newer = <<"clock_enable=\"NO\"\n">>,
+            [Generation] = [Id || {{rc_conf, Id}, _, _, _} <- supervisor:which_children(erx_starter_keepers)],
+            %% The new record erx_starter_sup:record/1 adds first.
+            {ok, undefined} = supervisor:start_child(erx_starter_keepers,
+                                                     #{id => {rc_conf, Generation + 1}, restart => transient,
+                                                       start => {erx_starter_sup, ignore, [Newer]}}),
+            ok = file:delete(rc_path(Setup)),
+            ok = file:make_dir(rc_path(Setup)),
+            ok = restart_table(),
+            ?assertEqual(unread, rc_conf()),
+            ?assertEqual(Newer, erx_starter:rc_conf()),
+            ?assertEqual(none, run(<<"clock">>)),
+            ok = file:del_dir(rc_path(Setup)),
+            ok = file:write_file(rc_path(Setup), Newer),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertMatch([_], [Id || {{rc_conf, _} = Id, _, _, _} <- supervisor:which_children(erx_starter_keepers)]),
+            ?assertEqual({ok, Newer}, erx_starter_sup:recorded())
     end.
 
 a_failed_read_starts_the_manifest_rows_and_reads_again(Setup) ->
@@ -447,6 +540,11 @@ traced(Pid) ->
         {trace, Pid, call, {supervisor, Function, [_Sup, Id]}} -> [{Function, Id} | traced(Pid)]
     after 0 -> []
     end.
+
+%% A supervisor call on a record of rc.conf's text.
+is_record_call({_Function, rc_conf}) -> true;
+is_record_call({_Function, {rc_conf, _Generation}}) -> true;
+is_record_call(_Call) -> false.
 
 %% The supervisor calls of erx_starter_sup:record(Text), made in a process
 %% of its own.

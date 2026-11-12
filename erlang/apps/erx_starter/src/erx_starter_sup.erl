@@ -34,10 +34,12 @@ the table's process, as child specs OTP keeps:
 * `{stopped, Name}`, the stopped mark, is a row that `stop` stopped while
   it was enabled. It holds nothing but the name. No setting clears it:
   the table never starts a marked row (erx_start_table:reconcile/3), so
-  it stays stopped whatever rc.conf sets, until start_row/2 clears it, at
+  it stays stopped whatever rc.conf sets, until clear/1 clears it, at
   `start` or `enable`, or the branch restarts and drops every record.
-* `rc_conf` holds the text of rc.conf the table was last made from, so a
-  restarted table has the table it had while rc.conf is unread.
+* `{rc_conf, Generation}` holds the text of rc.conf the table was last
+  made from, so a restarted table has the table it had while rc.conf is
+  unread. The newest generation is the text; an older one is left by a
+  record cut short, and the next record/1 drops it.
 
 Both of the last two hold their value in their spec's start arguments and
 stand for no process: their start function returns `ignore`, which a
@@ -48,13 +50,14 @@ is kept with, so a restarted table compares it with the table it makes.
 **Order.** stop_row/1 and start_row/2 write their record before the act it records, so a
 table that ends between the two leaves the intent behind: stop_row/1
 marks the row before it ends it, and start_row/2 clears the mark before
-it starts the row. record/1 replaces the text by deleting the old record
-and adding the new, and does nothing for an unchanged text, so the one
-moment with no record is during a real change of rc.conf (TODO.md).
+it starts the row. OTP's supervisor cannot replace a spec in one step, so
+record/1 adds the new text under the next generation before it drops the
+old: a table that ends at any step finds a text recorded, the old or the
+new, and never none. An unchanged text adds nothing.
 """.
 -behaviour(supervisor).
 
--export([start_link/0, start_link/2, start_row/2, stop_row/1, start_once/3, stop/1, held/0]).
+-export([start_link/0, start_link/2, start_row/2, clear/1, stop_row/1, start_once/3, stop/1, held/0]).
 -export([record/1, recorded/0]).
 -export([init/1, ignore/1]).
 
@@ -82,10 +85,20 @@ Pid}} for a row that runs.
 """.
 -spec start_row(binary(), erx_starter_row:row()) -> supervisor:startchild_ret().
 start_row(Name, Row) ->
-    _ = supervisor:delete_child(?KEEPERS, {row, Name}),
-    ok = remove(Name, stopped),
+    ok = clear(Name),
     supervisor:start_child(?KEEPERS, #{id => {row, Name}, start => {erx_starter_row, start_link, [Row]},
                                        restart => transient, type => supervisor, shutdown => infinity}).
+
+-doc """
+Clears the two records that keep row Name from starting when the table is
+made: its stopped mark, and its supervisor's spec when the row is down. A
+row that runs keeps running.
+""".
+-spec clear(binary()) -> ok.
+clear(Name) ->
+    _ = supervisor:delete_child(?KEEPERS, {row, Name}),
+    ok = remove(Name, stopped),
+    ok.
 
 -doc """
 Marks enabled row Name stopped, then stops it as stop/1 does, so no table
@@ -112,7 +125,7 @@ start_once(Name, Principal, Start) ->
 -doc """
 Stops what keeps row Name's sessions, its supervisor and a keeper started
 once, ends them, and drops the row's supervisor spec. A stopped mark
-stays: only start_row/2 clears it.
+stays: only clear/1 clears it.
 """.
 -spec stop(binary()) -> ok.
 stop(Name) ->
@@ -130,27 +143,52 @@ held() ->
      [Name || {{stopped, Name}, _, _, _} <- Children]}.
 
 -doc """
-Records Text as the text of rc.conf the table is made from. An unchanged
-text is left as it is recorded.
+Records Text as the text of rc.conf the table is made from, under the
+generation after the newest unless the newest holds Text already, and only
+then drops every older generation, those a record cut short left included.
 """.
 -spec record(binary()) -> ok.
 record(Text) ->
-    case recorded() of
-        {ok, Text} ->
-            ok;
-        _Other ->
-            _ = supervisor:delete_child(?KEEPERS, rc_conf),
-            {ok, undefined} = supervisor:start_child(?KEEPERS, record_spec(rc_conf, Text)),
-            ok
-    end.
+    Generations = generations(),
+    Kept = case newest(Generations) of
+               {Newest, Text} -> Newest;
+               {Newest, _Older} -> add(Newest + 1, Text);
+               none -> add(1, Text)
+           end,
+    drop(Generations -- [Kept]).
 
--doc "The text record/1 last recorded in this keepers' branch, or none.".
+-doc """
+The text record/1 last recorded in this keepers' branch, or none. It reads
+two supervisor calls apart, which is sound because only the table records,
+in its own process, and a record never drops the newest generation.
+""".
 -spec recorded() -> {ok, binary()} | none.
 recorded() ->
-    case supervisor:get_childspec(?KEEPERS, rc_conf) of
-        {ok, #{start := {?MODULE, ignore, [Text]}}} -> {ok, Text};
-        {error, not_found} -> none
+    case newest(generations()) of
+        {_Generation, Text} -> {ok, Text};
+        none -> none
     end.
+
+%% The generations of the texts recorded: one, or more after records cut
+%% short.
+generations() ->
+    [Generation || {{rc_conf, Generation}, _, _, _} <- supervisor:which_children(?KEEPERS)].
+
+%% The newest of Generations, with the text it holds, or none.
+newest([]) ->
+    none;
+newest(Generations) ->
+    Newest = lists:max(Generations),
+    {ok, #{start := {?MODULE, ignore, [Text]}}} = supervisor:get_childspec(?KEEPERS, {rc_conf, Newest}),
+    {Newest, Text}.
+
+add(Generation, Text) ->
+    {ok, undefined} = supervisor:start_child(?KEEPERS, record_spec({rc_conf, Generation}, Text)),
+    Generation.
+
+drop(Generations) ->
+    lists:foreach(fun(Generation) -> _ = supervisor:delete_child(?KEEPERS, {rc_conf, Generation}) end,
+                  Generations).
 
 -doc false.
 ignore(_Value) ->

@@ -67,8 +67,35 @@ class ErxStarterTest < Minitest::Test
               caught_by: 'enable_starts_a_stopped_row_and_clears_its_mark'),
     Fault.new(name: 'a record that rewrites an unchanged text',
               file: "#{APP}/erx_starter_sup.erl",
-              from: '{ok, Text} ->', to: '{ok, <<"never">>} ->',
-              caught_by: 'an_unchanged_text_is_not_recorded_again')
+              from: '{Newest, Text} -> Newest;', to: '{Newest, <<"never">>} -> Newest;',
+              caught_by: 'an_unchanged_text_is_not_recorded_again'),
+    Fault.new(name: 'a record that drops the old text before it records the new',
+              file: "#{APP}/erx_starter_sup.erl",
+              from: '{Newest, _Older} -> add(Newest + 1, Text);',
+              to: '{Newest, _Older} -> ok = drop([Newest]), add(Newest + 1, Text);',
+              caught_by: 'a_new_text_is_recorded_before_the_old_is_dropped'),
+    Fault.new(name: 'a restarted table that takes the oldest recorded text',
+              file: "#{APP}/erx_starter_sup.erl",
+              from: 'Newest = lists:max(Generations),', to: 'Newest = lists:min(Generations),',
+              caught_by: 'a_restarted_table_takes_the_newer_of_two_recorded_texts'),
+    Fault.new(name: 'a start that starts the row before it clears the mark',
+              file: "#{APP}/erx_starter_sup.erl",
+              from: "ok = clear(Name),\n    " \
+                    'supervisor:start_child(?KEEPERS, #{id => {row, Name}, start => {erx_starter_row, start_link, [Row]},' \
+                    "\n#{' ' * 39}restart => transient, type => supervisor, shutdown => infinity}).",
+              to: 'Started = supervisor:start_child(?KEEPERS, #{id => {row, Name}, ' \
+                  'start => {erx_starter_row, start_link, [Row]}, restart => transient, ' \
+                  "type => supervisor, shutdown => infinity}),\n    ok = clear(Name),\n    Started.",
+              caught_by: 'start_clears_the_mark_before_it_starts_the_row'),
+    Fault.new(name: 'an enable that clears the mark after the table is made from its text',
+              file: "#{APP}/erx_starter.erl",
+              from: "ok = clear_for_enable(Command),\n    Applied = apply_text(Text, State),",
+              to: "Applied = apply_text(Text, State),\n    ok = clear_for_enable(Command),",
+              caught_by: 'enable_clears_the_mark_before_the_table_is_made'),
+    Fault.new(name: 'a table that leaves a held row that is marked stopped',
+              file: "#{APP}/erx_start_table.erl",
+              from: 'decide({_Run, _Kept}, true, _Is) -> stop;', to: 'decide({_Run, _Kept}, true, _Is) -> keep;',
+              caught_by: 'the_next_table_completes_a_stop_cut_short')
   ].freeze
 
   def setup

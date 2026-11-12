@@ -490,9 +490,16 @@ so the row is then simply not enabled.
 `stop` and `start` write their record before the act it records, so a
 table that ends between the two leaves the intent behind: `stop` marks
 the row before it ends it, and `start` clears the mark before it starts
-it. `enable` writes `rc.conf` first and clears the mark only after, so a
-table that ends between the two leaves the row enabled and stopped
-(TODO.md).
+it. `enable` writes `rc.conf` first, then clears the mark and the record
+of a row that is down, and only then makes the table from the new text,
+which starts the row: a table that ends after the clear finds the row
+enabled, unmarked and not held, and starts it once its own read answers;
+one that ends while the write is in progress leaves the mark, so the row
+stays stopped and the command answers an error (TODO.md).
+The text of `rc.conf` is recorded under a generation: the new text is
+added under the next one before the old is dropped, so a table that ends
+mid-record finds the old text or the new, takes the newest, and never
+finds none.
 
 A restarted table makes its table from the recorded text and changes no
 keeper until its own read of `rc.conf` answers, so a row `rc.conf`

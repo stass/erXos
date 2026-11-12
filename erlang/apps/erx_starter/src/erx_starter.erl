@@ -300,14 +300,11 @@ act({stop, Name}, State) ->
 act({error, _} = Refused, _State) ->
     Refused.
 
-%% A write that succeeded commits its text; an `enable` also starts its row
-%% when it is down or stopped, which reconciling the text leaves so.
+%% A write that succeeded commits its text, and the table made from it
+%% starts an enabled row that is neither held nor marked.
 written({written, ok}, From, Command, Text, State) ->
+    ok = clear_for_enable(Command),
     Applied = apply_text(Text, State),
-    _ = case Command of
-            {enable, Name, _} -> start_row(Name, Applied);
-            _ -> ok
-        end,
     gen_server:reply(From, ok),
     Applied;
 written(Failed, From, _Command, _Text, State) ->
@@ -318,6 +315,15 @@ written(Failed, From, _Command, _Text, State) ->
     logger:warning("erx_starter: rc.conf cannot be written: ~0P", [Reason, 8]),
     gen_server:reply(From, {error, {failed, Reason}}),
     State.
+
+%% An `enable`, once its write of rc.conf succeeded, clears its row's stopped
+%% mark and the spec of a row that is down (erx_starter_sup:clear/1) before
+%% the table is made from the text, so making the table starts the row, and a
+%% table that ends after the clear finds the row unmarked and not held and
+%% starts it once its own read of rc.conf answers. A table that ends while the
+%% write is in progress leaves the mark, and the row stays stopped (TODO.md).
+clear_for_enable({enable, Name, _Settings}) -> erx_starter_sup:clear(Name);
+clear_for_enable(_Command) -> ok.
 
 %% The next queued command, once no write is in progress.
 next(#{writer := none, queue := Queue} = State) ->
