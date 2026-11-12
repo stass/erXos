@@ -1176,8 +1176,8 @@ module Erx
       # display is a service of the windows interface that a facet row grants the
       # principal's template. While abi/services declares no windows interface no
       # service is a display, so every row naming one is refused. Property 17's last
-      # clause, that the enabled rows' sessions fit beside the configured domains, is not
-      # checked here (TODO.md, design-apps.md).
+      # clause, that the enabled rows' sessions fit beside the configured domains, is the
+      # domain library's judgment, in check_plans.
       def normalize_starts(services, tables)
         rows = records('start').map { |record| start_row(record, services, tables.fetch('sessions')) }
         enabled = @codec.member('mf_start_flags', 'enabled')
@@ -1473,18 +1473,23 @@ module Erx
       # does. So the configured domains' share of properties 4 and 13 (each principal's
       # domain quota and budget, each grant within system and the service grants within
       # its reserve) and the connection rows are the library's own judgment, in its own
-      # arithmetic. A build passes a planner always; without one, a manifest with no
-      # domains is not planned, and one with some fails closed.
+      # arithmetic. Then, property 17's planning clause, it plans each enabled start row's
+      # session after them, as the boot starts it, so an enabled row whose principal
+      # cannot hold its session beside the configured domains and the sessions before it
+      # fails the build. A build passes a planner always; without one, a manifest with no
+      # domains and no enabled start row is not planned, and any other fails closed.
       def check_plans(bytes, rows)
         domains = rows.fetch('domains')
+        starts = enabled_starts(rows)
         unless @planner
-          return if domains.empty?
+          return if domains.empty? && starts.empty?
 
-          raise Unsupported.new('configured domains need the domain library\'s host planner', property: 12, field: 'planner')
+          raise Unsupported.new('configured domains and enabled start rows need the domain library\'s host planner',
+                                property: 12, field: 'planner')
         end
 
         order = rows.fetch('boot_order').map { |step| step.fetch('domain') }
-        statuses = @planner.call(plan_view(bytes, rows, order: order))
+        statuses = @planner.call(plan_view(bytes, rows, order: order, starts: starts))
         invalid("the domain library refuses the manifest's view: #{statuses.fetch('refused').delete_prefix('manifest: ')}", 12, 'view') if statuses.key?('refused')
         order.zip(statuses.fetch('domains')).each do |index, status|
           refuse_plan(status, "configured domain #{domains.fetch(index).fetch('name')}", 'domain')
@@ -1493,28 +1498,45 @@ module Erx
           names = row.values_at('from', 'to').map { |index| domains.fetch(index).fetch('name') }
           refuse_plan(status, "the introduction of #{names.join(' and ')}", 'introduce')
         end
+        principals = rows.fetch('principals')
+        starts.zip(statuses.fetch('sessions')).each do |start, status|
+          name = principals.fetch(start.fetch('principal')).fetch('name')
+          refuse_plan(status, "the session of start row #{name}", 'start', property: 17)
+        end
       end
 
       private
 
+      # The enabled start rows, in the start table's order, each its principal's index
+      # and the index of that principal's session template, which property 17's
+      # structural clauses make exist and the session table holds one per principal.
+      def enabled_starts(rows)
+        enabled = @codec.member('mf_start_flags', 'enabled')
+        template = rows.fetch('sessions').each_with_index.to_h { |row, index| [row.fetch('principal'), index] }
+        rows.fetch('starts').select { |row| (row.fetch('flags') & enabled) != 0 }.map do |row|
+          { 'principal' => row.fetch('principal'), 'template' => template.fetch(row.fetch('principal')) }
+        end
+      end
+
       # Refuses the manifest naming what the library refused; status 0 passes.
-      def refuse_plan(status, what, field)
+      def refuse_plan(status, what, field, property: 12)
         return if status.zero?
 
         name = (@codec.schema.statuses || {}).key(status) || status
-        invalid("the domain library refuses #{what} with #{name}", 12, field)
+        invalid("the domain library refuses #{what} with #{name}", property, field)
       end
 
       # The planner's view (DomainPlanner#call): the packed manifest, each archive entry
-      # with the bytes it will start with, the configured rows in boot order and each
-      # introduction's parties their places in it.
-      def plan_view(bytes, rows, order:)
+      # with the bytes it will start with, the configured rows in boot order, each
+      # introduction's parties their places in it, and each enabled start row's session
+      # template.
+      def plan_view(bytes, rows, order:, starts:)
         place = order.each_with_index.to_h
         introductions = rows.fetch('introductions').map do |row|
           { 'a' => place.fetch(row.fetch('from')), 'b' => place.fetch(row.fetch('to')) }
         end
         { 'manifest' => bytes, 'files' => @context.catalog.map { |row| plan_file(row) }, 'order' => order,
-          'introductions' => introductions }
+          'introductions' => introductions, 'sessions' => starts.map { |start| start.fetch('template') } }
       end
 
       # A boot-image entry as the archive will hold it: an image starts with its image

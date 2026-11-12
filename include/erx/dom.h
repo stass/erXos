@@ -682,7 +682,9 @@ bool		erx_dom_from_row(const erx_dom_origin_t *origin, uint32_t row);
  * erx_dom_plan_session plans a session of session template `template` of
  * the view, under domain id `id`, domain pid `domain_pid` and name_len
  * bytes of `name`, the name the domain service chose; only the domain
- * service's start of a session calls it. Everything but the name, id and
+ * service's start of a session calls it, beside the manifest check's host
+ * planner (tools/host/dom_plan.c), which plans each enabled start row's
+ * session and applies none. Everything but the name, id and
  * pid is the template's and its limits record's, so a session is its
  * template by construction, and planning it as any other domain judges
  * its limits against its principal's ceilings, its group against its

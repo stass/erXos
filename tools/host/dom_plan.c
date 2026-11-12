@@ -10,10 +10,11 @@
  * packed manifest's bytes as the root does (liberx/system/dom_boot_view.c),
  * so every principal passes erx_dom_principal_check here or the build
  * fails. Then it plans each configured domain with erx_dom_plan_configured
- * in boot order and each introduction with erx_dom_plan_connect, and
- * records every plan it makes in the view with erx_dom_plan_record or
- * erx_dom_link_record before planning the next, as the boot does once each
- * plan is applied. So what the library counts across domains (the
+ * in boot order, each introduction with erx_dom_plan_connect and then the
+ * session of each enabled start row with erx_dom_plan_session (property
+ * 17), and records every plan it makes in the view with erx_dom_plan_record
+ * or erx_dom_link_record before planning the next, as the boot does once
+ * each plan is applied. So what the library counts across domains (the
  * principals' quotas and budgets, the service grants against system's
  * reserve, the connection rows and each domain's connections quota) is the
  * library's own judgment, and a manifest it would refuse fails the build,
@@ -23,11 +24,13 @@
  *
  * MANIFEST is the packed manifest. PLAN is a text file the check writes,
  * one record per line, every value a decimal integer: the file lines in
- * archive order, then the order lines, then the introduce lines.
+ * archive order, then the order lines, then the introduce lines, then the
+ * session lines.
  *
  *   file KIND FLAGS HEAD_LEN
  *   order ROW
  *   introduce PLACE PLACE
+ *   session TEMPLATE
  *
  * A file line is one archive entry; HEAD_LEN bytes of HEADS, taken in
  * order, are what the archive will hold at the entry's start (an image's
@@ -35,10 +38,15 @@
  * lines give every configured row once, in boot order, and the domain at
  * place n (from 0) has id ERX_DOM_SYSTEM_ID + 1 + n. An introduce line
  * names two places; each party reads a side of its own profile's lane
- * size, as the boot sizes it.
+ * size, as the boot sizes it. A session line names a session template, the
+ * template of an enabled start row's principal, whose session takes the id
+ * after the configured domains' and the sessions' before it; its name is a
+ * fixed one, since the domain service chooses it and the plan judges only its
+ * shape.
  *
  * It prints `domain N STATUS` for each order line and then `introduce N
- * STATUS` for each introduce line, N its place among its kind from 0 and
+ * STATUS` for each introduce line and then `session N STATUS` for each
+ * session line, N its place among its kind from 0 and
  * STATUS erx_status_t's value, and exits 0; a plan refused is not
  * recorded, and the planning goes on. A view the library refuses prints
  * `refused REASON` alone and exits 0. A malformed input prints nothing and
@@ -61,6 +69,7 @@
 
 #define DOM_PLAN_ROWS_MAX	65536u	/* each table's bound, the manifest's */
 #define DOM_PLAN_WORDS_MAX	4u	/* the longest line's words */
+#define DOM_PLAN_SESSION_NAME	"session"	/* every planned session's name */
 
 /* An introduction: two places in boot order, from 0. */
 typedef struct dom_plan_pair {
@@ -75,7 +84,10 @@ typedef struct dom_plan_line {
 	uint32_t	 used;
 } dom_plan_line_t;
 
-/* What the plan file gives: each file with its head's length, the boot order and the introductions. */
+/*
+ * What the plan file gives: each file with its head's length, the boot order,
+ * the introductions and the session templates of the enabled start rows.
+ */
 typedef struct dom_plan_input {
 	erx_dom_file_t	*files;
 	uint32_t	*head_lens;
@@ -84,6 +96,8 @@ typedef struct dom_plan_input {
 	uint32_t	 norder, order_room;
 	dom_plan_pair_t	*pairs;
 	uint32_t	 npairs, pair_room;
+	uint32_t	*sessions;
+	uint32_t	 nsessions, session_room;
 } dom_plan_input_t;
 
 static bool	dom_plan_split(char *, dom_plan_line_t *);
@@ -156,7 +170,7 @@ dom_plan_grow(void **rows, uint32_t *count, uint32_t *room, size_t size)
 }
 
 
-/* Takes one line of the plan file; stage keeps the file, order and introduce lines in that order. */
+/* Takes one line of the plan file; stage keeps the file, order, introduce and session lines in that order. */
 static bool
 dom_plan_line(dom_plan_line_t *line, uint32_t *stage, dom_plan_input_t *in)
 {
@@ -183,13 +197,19 @@ dom_plan_line(dom_plan_line_t *line, uint32_t *stage, dom_plan_input_t *in)
 		    !dom_plan_u32(line, &in->order[in->norder]))
 			return (false);
 		in->norder++;
-	} else if (strcmp(line->keyword, "introduce") == 0) {
+	} else if (strcmp(line->keyword, "introduce") == 0 && *stage <= 2) {
 		*stage = 2;
 		if (!dom_plan_grow((void **)&in->pairs, &in->npairs, &in->pair_room, sizeof(*in->pairs)))
 			return (false);
 		pair = &in->pairs[in->npairs++];
 		if (!dom_plan_u32(line, &pair->a) || !dom_plan_u32(line, &pair->b))
 			return (false);
+	} else if (strcmp(line->keyword, "session") == 0) {
+		*stage = 3;
+		if (!dom_plan_grow((void **)&in->sessions, &in->nsessions, &in->session_room, sizeof(*in->sessions)) ||
+		    !dom_plan_u32(line, &in->sessions[in->nsessions]))
+			return (false);
+		in->nsessions++;
 	} else
 		return (false);
 	return (line->used == line->count);
@@ -231,7 +251,7 @@ main(int argc, char **argv)
 	bool *planned;
 	char *text;
 	size_t length, heads_len, text_len, used = 0, region_len;
-	uint32_t row, a, b;
+	uint32_t row, a, b, id;
 
 	if (argc != 4 || (bytes = erx_host_input_read(argv[1], &length)) == NULL ||
 	    !erx_manifest_open(bytes, length, &manifest, &error) ||
@@ -266,8 +286,12 @@ main(int argc, char **argv)
 		return (fflush(stdout) == 0 ? 0 : 2);
 	}
 
-	/* The order lines name every configured row once. */
-	if (in.norder != lib.view.nconfigured || in.norder > ERX_DOM_ID_MAX - ERX_DOM_SYSTEM_ID ||
+	/*
+	 * The order lines name every configured row once, and every session
+	 * line a template; each domain and session has an id of its own.
+	 */
+	if (in.norder != lib.view.nconfigured || in.nsessions > ERX_DOM_ID_MAX - ERX_DOM_SYSTEM_ID ||
+	    in.norder > ERX_DOM_ID_MAX - ERX_DOM_SYSTEM_ID - in.nsessions ||
 	    (planned = calloc((size_t)in.norder + 1, sizeof(*planned))) == NULL)
 		return (2);
 	for (uint32_t place = 0; place < in.norder; place++) {
@@ -277,6 +301,9 @@ main(int argc, char **argv)
 	}
 	for (uint32_t index = 0; index < in.npairs; index++)
 		if (in.pairs[index].a >= in.norder || in.pairs[index].b >= in.norder)
+			return (2);
+	for (uint32_t index = 0; index < in.nsessions; index++)
+		if (in.sessions[index] >= lib.view.ntemplates)
 			return (2);
 
 	for (uint32_t place = 0; place < in.norder; place++) {
@@ -294,6 +321,14 @@ main(int argc, char **argv)
 		if (status == ERX_OK)
 			status = erx_dom_link_record(&lib.view, &link);
 		printf("introduce %" PRIu32 " %d\n", index, (int)status);
+	}
+	for (uint32_t index = 0; index < in.nsessions; index++) {
+		id = ERX_DOM_SYSTEM_ID + 1 + in.norder + index;
+		status = erx_dom_plan_session(&lib.view, id, in.sessions[index], DOM_PLAN_SESSION_NAME,
+		    sizeof(DOM_PLAN_SESSION_NAME) - 1, ERX_DOM_PID_NONE, &plan);
+		if (status == ERX_OK)
+			status = erx_dom_plan_record(&lib.view, &plan);
+		printf("session %" PRIu32 " %d\n", index, (int)status);
 	}
 	return (fflush(stdout) == 0 ? 0 : 2);
 }

@@ -159,7 +159,8 @@ module ManifestContextFixture
     source.sub(pattern, replacement)
   end
 
-  # A planner that plans every configured domain and introduction, for checks that
-  # test the rest.
-  def accepting_planner = ->(view) { { 'domains' => view.fetch('order').map { 0 }, 'introductions' => view.fetch('introductions').map { 0 } } }
+  # A planner that plans every configured domain, introduction and session, for
+  # checks that test the rest.
+  def accepting_planner = ->(view) { { 'domains' => view.fetch('order').map { 0 }, 'introductions' => view.fetch('introductions').map { 0 },
+                                          'sessions' => view.fetch('sessions').map { 0 } } }
 end

@@ -18,7 +18,8 @@ class ManifestDomainsTest < Minitest::Test
                "  connections 2\n  crash 0\n  flags none\n  runtime_limits @runtime_limits.system\n" \
                "  peer_held 4096\n  peer_held_total 4096\n"
 
-  # Each domain's status, in boot order, and each introduction's; [] plans them all.
+  # Each domain's status, in boot order, and each introduction's; [] plans them all,
+  # and every session.
   class RecordingPlanner
     attr_reader :views
 
@@ -31,7 +32,8 @@ class ManifestDomainsTest < Minitest::Test
     def call(view)
       @views << view
       { 'domains' => view.fetch('order').each_index.map { |index| @statuses.fetch(index, 0) },
-        'introductions' => view.fetch('introductions').each_index.map { |index| @introductions.fetch(index, 0) } }
+        'introductions' => view.fetch('introductions').each_index.map { |index| @introductions.fetch(index, 0) },
+        'sessions' => view.fetch('sessions').map { 0 } }
     end
   end
 

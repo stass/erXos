@@ -188,6 +188,22 @@ class DomPlannerTest < Minitest::Test
     assert_equal 1, admit(with_sessions).report.fetch('child_plan_instances')
   end
 
+  # Property 17's planning clause: each enabled start row's session is planned with
+  # erx_dom_plan_session after the configured domains and introductions, as the boot
+  # starts it, and recorded before the next. Each principal's quota takes its session
+  # here, system's beside alpha. Guest has a page of memory, which holds no session of
+  # the split profile, so its enabled row fails the build; left off, it is not planned.
+  def test_an_enabled_start_row_whose_session_cannot_be_planned_fails_the_build
+    fixture = ManifestContextFixture
+    source = fixture.substitute(fixture.substitute(with_sessions, fixture::SYSTEM_QUOTA, '\12'), fixture::MAX_DOMAINS, '\13')
+    source = fixture.substitute(source, /^(principal guest\n(?:  .*\n)*?  domains )0$/, '\11')
+    admit(source + "start system\n")
+    admit(source + "start guest\n  enable NO\n")
+    error = assert_raises(Erx::Manifest::Invalid) { admit(source + "start system\nstart guest\n") }
+    assert_equal [17, 'start'], [error.property, error.field], error.message
+    assert_match(/session of start row guest with nomem\b/i, error.message)
+  end
+
   # A facet granted to a session template reaches the root's view, which admits it,
   # whether a configured domain serves its service or the system domain does
   # (property 14).
@@ -430,18 +446,22 @@ class DomPlannerTest < Minitest::Test
     [[manifest, '', "order 0 1\n"], [manifest, '', "order 1\n"], [manifest, '', "order 0\norder 0\n"],
      [manifest, head, "file 1 0 0\norder 0\n"], [manifest, '', "file 1 0 56\norder 0\n"],
      [manifest, '', "order 0\nfile 1 0 0\n"], [manifest, '', "order 0\nintroduce 0 1\n"],
-     ['short', '', "order 0\n"]].each do |bytes, heads, plan|
+     [manifest, '', "order 0\nsession 0\n"], [manifest, '', "session 0\norder 0\n"],
+     [manifest, '', "order 0\nsession 0 1\n"], ['short', '', "order 0\n"]].each do |bytes, heads, plan|
       [bytes, heads, plan].zip(paths).each { |content, file| File.binwrite(file, content) }
       assert_raises(Erx::Error, plan) { @helper.run(paths, runner: @runner, name: 'dom-plan-bad', deadline: 30) }
     end
   end
 
-  def test_the_reply_must_hold_one_status_per_domain_and_introduction
-    assert_equal({ 'domains' => [0, -6], 'introductions' => [-7] },
-                 Erx::DomainPlanner.statuses("domain 0 0\ndomain 1 -6\nintroduce 0 -7\n", domains: 2, introductions: 1))
-    ["domain 0 0\ndomain 1 0\n", "domain 1 0\ndomain 0 0\nintroduce 0 0\n", "domain 0 0\ndomain 1 x\nintroduce 0 0\n",
-     "domain 0 0\nintroduce 0 0\ndomain 1 0\n", "domain 0 0\ndomain 1 0\nintroduce 1 0\n"].each do |reply|
-      assert_raises(Erx::Error, reply) { Erx::DomainPlanner.statuses(reply, domains: 2, introductions: 1) }
+  def test_the_reply_must_hold_one_status_per_domain_introduction_and_session
+    assert_equal({ 'domains' => [0, -6], 'introductions' => [-7], 'sessions' => [-12] },
+                 Erx::DomainPlanner.statuses("domain 0 0\ndomain 1 -6\nintroduce 0 -7\nsession 0 -12\n",
+                                             domains: 2, introductions: 1, sessions: 1))
+    ["domain 0 0\ndomain 1 0\nintroduce 0 0\n", "domain 1 0\ndomain 0 0\nintroduce 0 0\nsession 0 0\n",
+     "domain 0 0\ndomain 1 x\nintroduce 0 0\nsession 0 0\n", "domain 0 0\nintroduce 0 0\ndomain 1 0\nsession 0 0\n",
+     "domain 0 0\ndomain 1 0\nintroduce 1 0\nsession 0 0\n", "domain 0 0\ndomain 1 0\nsession 0 0\nintroduce 0 0\n",
+     "domain 0 0\ndomain 1 0\nintroduce 0 0\nsession 1 0\n"].each do |reply|
+      assert_raises(Erx::Error, reply) { Erx::DomainPlanner.statuses(reply, domains: 2, introductions: 1, sessions: 1) }
     end
   end
 end

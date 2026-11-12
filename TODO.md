@@ -574,6 +574,17 @@ it; git history is the record of completed work.
 * [Low] `erx_starter_rc:read/0` treats `enoent` as a machine with no `rc.conf`. If the storage domain being down
   answers `enoent` under `/data` rather than another error, the first read finds no settings and is not tried
   again, so the manifest's rows stand until the next boot. Check what the stopgap answers.
+  [Track A](docs/plan.md#track-a-apps) builds it. Built: the `start` row in `abi/manifest.txt` with property 17's
+  structural clauses and its planning clause (each enabled row's session planned by the domain library beside the
+  configured domains), `erx_domain:start_session/2`'s `display` and `default_display`, and the session mark. Not
+  built: the accepting path of property 17's display check with its seeds once `abi/services` declares `windows`;
+  `erx_starter` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and `ctl`'s
+  parsers with their fuzz targets; the `apps` tree and `service`; the session's default display handed on with the
+  ready answer and its `display` variable (design-apps.md, "Starting a session", step 3), which the domain service
+  keeps in the session's record (`start`) and hands to nothing; the mint request
+  `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint that matches the old
+  shape (`erlang/apps/erx_storage/src/erx_lfs_mint.erl`, `erx_net_admit`); the reset count cleared by the first kept
+  session.
 * [High] [design-display.md](docs/design-display.md): the code the design asks for that the tree does not have, in the
   order [Track D](docs/plan.md#track-d-windows-widgets-and-the-web) builds it. Nothing below is built; the cores named
   as landed are kept and changed as listed.
