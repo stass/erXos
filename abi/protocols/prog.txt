@@ -89,7 +89,10 @@ protocol erx_prog
   tuple reader rix cap
   list write_readers reader max 64 ascending
   list read_readers reader max 63 ascending
-  tuple writer wend cap cap lane_size cap end_state
+  union writer_state
+    case open cap
+    case gone
+  tuple writer wend cap cap lane_size writer_state
   list writers writer max 8192 ascending
   map write_end
     field wend wend

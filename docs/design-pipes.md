@@ -432,8 +432,9 @@ typedef struct erx_pipe_end {
 		erx_pipe_rend_t	 r;	/* its index and the lock page; per
 					 * write end, by number: the lane,
 					 * whether its writer is open or
-					 * gone, the writer's doorbell and the
-					 * lane's batches; the other read
+					 * gone, the writer's doorbell while
+					 * it is open, and the lane's
+					 * batches; the other read
 					 * ends' doorbells by index */
 	} u;
 } erx_pipe_end_t;
@@ -452,26 +453,31 @@ across a wait.
 
 ```erlang
 -record(pipe, {id :: pos_integer(),
-               lock :: cap(),                       % the lock page
                writers = #{} :: #{wend() => #writer{}},
                readers = #{} :: #{rix() => #reader{}},     % at most 64
                next_wend = 1 :: pos_integer(),      % never reused in a pipe
+               next_end = 1 :: pos_integer(),       % never reused in a pipe
                deposits = #{} :: #{ticket() => deposit()}}).  % 16 a write end
--record(writer, {holder :: holder(), ring :: cap(), rpage :: cap(),
-                 size :: 16384 | 65536, doorbell :: cap(),
+-record(writer, {end_id :: pos_integer(), holder :: holder(),
+                 size :: 16384 | 65536,
                  state :: open | {gone, [rix()]}}). % read ends not yet drained
--record(reader, {holder :: holder(), doorbell :: cap()}).
-%% wend() = a write end's number; rix() = 0..63; cap() = a capability of
-%% the session's table; holder() = {program, Pid}, a program of the
-%% session by its process id, {process, pid()}, a process of the session,
-%% or {deposit, ticket()}, for an end held for a ticket; ticket() = 64
-%% random bits; deposit() = the end or the grant held for one ticket, with
-%% the write end it was made through
+-record(reader, {end_id :: pos_integer(), holder :: holder()}).
+%% wend() = a write end's number; rix() = 0..63; holder() = {program, Pid},
+%% a program of the session by its process id, {process, pid()}, a process
+%% of the session, or {deposit, ticket()}, for an end held for a ticket;
+%% ticket() = 64 random bits; deposit() = the end or the grant held for one
+%% ticket, with the write end it was made through
 ```
 
 The records are the truth about every pipe of the session; `erx_pipe:step/2`
 computes every change from them and an event, and the pipe server applies
-the actions it returns ([The pipe server](#the-pipe-server)). The lock
+the actions it returns ([The pipe server](#the-pipe-server)). They hold no
+capability: the pipe server keeps its own capability to each object of a
+pipe under a name made of its numbers, `{lock, Pipe}`, `{ring, Pipe, Wend}`,
+`{rpage, Pipe, Wend}` and `{bell, Pipe, End}`, and the step's actions,
+reports and descriptors name objects so; a program's handler installs a
+copy of each object a report or descriptor names, with the rights
+`erx_pipe:copies/1` gives it, and puts the copy's value in its place. The lock
 page's `wends` is `next_wend - 1`, stored at each write end's creation.
 A pipe's number, an end's number and a write end's number are 32-bit and
 start at 1, as the lock page and `erx_pipe_end` hold them, and none is
@@ -480,7 +486,8 @@ number past 2^32 - 1, as it refuses one past the session's quota, with
 `ENFILE`, and never wraps. A
 writer that is gone stays in the records, with the read ends that have
 not yet reported its lane drained, until that list is empty; then the
-pipe server closes its capabilities to the lane and forgets the write end.
+pipe server closes its capabilities to the lane and to the write end's
+doorbell and forgets the write end.
 
 ## Algorithms and behavior
 
@@ -765,8 +772,11 @@ copies it holds for the peer end, which for a pipe whose ends one program
 holds are the program's own doorbells, so such a pipe costs no install
 beyond the program's. A holder keys the doorbells it rings by the peer
 end, a write end by its number and a read end by its index. When an end
-goes, the pipe server tells each peer, which closes its copy, and closes
-its own; the IRQ object goes with the last capability, and a ring of a
+goes, the pipe server tells each peer, which closes its copy. The server
+closes its own capability to a read end's doorbell then, and to a write
+end's doorbell when it forgets the write end
+([Ends and their holders](#ends-and-their-holders)); the IRQ object goes
+with the last capability, and a ring of a
 deleted doorbell fails with `ERX_ESTALE`, which a ringer that has not yet
 applied the report ignores.
 
@@ -774,8 +784,8 @@ applied the report ignores.
 
 A write end holds its lane, mapped, and the trigger right on every read
 end's doorbell. A read end holds every lane of the pipe, the lock page,
-the trigger right on every write end's doorbell and on every other read
-end's. When an end object's last reference goes, `liberx` releases its
+the trigger right on every open write end's doorbell and on every other
+read end's. When an end object's last reference goes, `liberx` releases its
 mappings, closes its capabilities and sends its handler the notice
 `{closed, Pipe, End}`. When a program ends, however it ends, its handler
 sees the end record of its space and tells the pipe server that every end
@@ -786,8 +796,14 @@ The pipe server then:
 
 * for a **write end**: marks it gone, with the pipe's read ends as the
   ones that have not yet drained its lane, or forgets it at once when no
-  read end remains; closes its capability to the end's doorbell; and tells
-  every read end's holder `{pipe_writer_gone, Pipe, End, Writer}`;
+  read end remains; and tells every read end's holder
+  `{pipe_writer_gone, Pipe, End, Writer}`, on which each read end closes
+  its copy of the end's doorbell. A read end made for a child meanwhile
+  drains the lane too, and its descriptor names the gone writer without
+  a doorbell. The pipe server itself keeps its capability to the
+  doorbell until it forgets the write end, since an install the handler
+  has not yet made, such as a child's descriptor or a report, may still
+  name it;
 * for a **read end**: frees the reader lock if that read end held it, by
   one compare-and-swap of `owner` from `1 + rix` to 0, since a gone holder
   cannot release it and no waiter writes `owner`; closes its capability to
@@ -799,8 +815,9 @@ The pipe server then:
 A read end that drains a gone writer's lane unmaps and closes its copies
 and reports `{drained, Pipe, End, Writer}`; the pipe server removes it
 from the writer's list, and when the list is empty closes its own
-capabilities to the lane and forgets the write end, so the lane's memory
-returns when its last holder, the gone writer included, has let it go.
+capabilities to the lane and to the write end's doorbell and forgets the
+write end, so the lane's memory returns when its last holder, the gone
+writer included, has let it go.
 A program sends each `{closed}` and `{drained}` once, for an end it was
 given and a writer it was told is gone, and the port driver ends a program
 that sends one that is not due
@@ -884,8 +901,8 @@ a pipe, never waits on itself:
   counts lanes, and its budget. A writer that finds no room in its own
   ring waits for the reader, as a UNIX writer does; no creation ever waits
   on a reader. Each write end puts three capabilities into every read
-  end's holder, its ring, its reader page and its doorbell, which stay
-  there until the lane is drained, so a reader that drains nothing, a
+  end's holder, its ring, its reader page and its doorbell; the doorbell
+  goes when the writer does and the lane when it is drained, so a reader that drains nothing, a
   paused pager among them, holds them for every write end that joins; the
   session's policy therefore sizes each program's budget, which pays for
   its capability table and its mappings, for three capabilities and one
@@ -955,10 +972,11 @@ handlers:
 | Event | Actions |
 | --- | --- |
 | `{pipe, Holder, Flags}` | within the session's `pipes` quota, make a pipe's lock page, lane and two doorbells; install each end's copies into the holder; reply |
-| `{inherit, Holder, End, Child}` | if `Holder` holds `End`: make an end of the same kind for `Child`, a write end with a lane and a doorbell, its number stored in the lock page's `wends` before any install, a read end with an index and a doorbell, or fail with `emfile` at the 65th read end; install into every peer what it needs of the new end and tell it; return the new end's copies for the child's creation; ends of one pipe never wait for each other |
-| `{closed, Holder, End}` | if `Holder` holds `End`: the steps of [Ends and their holders](#ends-and-their-holders) |
+| `{inherit, Holder, Pipe, End, Child}` | if `Holder` holds `End` of `Pipe`: make an end of the same kind for `Child`, a write end with a lane and a doorbell, its number stored in the lock page's `wends` before any install, a read end with an index and a doorbell, or fail with `emfile` at the 65th read end; install into every peer what it needs of the new end and tell it; return the new end's copies for the child's creation; ends of one pipe never wait for each other |
+| `{closed, Holder, Pipe, End}` | if `Holder` holds `End` of `Pipe`: the steps of [Ends and their holders](#ends-and-their-holders) |
 | `{gone, Holder}` | the same for every end `Holder` holds |
-| `{drained, Holder, End, Writer}` | if `Holder` holds the read end `End` and `Writer` is gone with `End`'s index in its list: remove the index, and when the list is empty close the capabilities to the lane and forget the write end |
+| `{drained, Holder, Pipe, End, Writer}` | if `Holder` holds the read end `End` of `Pipe` and `Writer` is gone with `End`'s index in its list: remove the index, and when the list is empty close the capabilities to the lane and to the write end's doorbell and forget the write end |
+| `{install_failed, Holder, Pipe, End}` | if `Holder` holds `End` of `Pipe`: report `{pipe_lost, Pipe, End}` to it ([Failure handling](#failure-handling-diagnostics-and-debuggability)); the end stays `Holder`'s until it is closed or `Holder` is gone |
 | `{exec, Program, NewImage, Kept}` | for each end of `Program` that `Kept` names by descriptor: install into `NewImage` fresh copies of everything the end holds, from the pipe server's own capabilities, and return the values for the new image's startup message, with the pipe's `wends` for a read end; record the new image as the holder; the old image's copies go with its table ([The second tier](#the-second-tier)) |
 | `{deposit, Holder, Descriptor, Stream}` | if `Holder` holds the write end `Stream`, and fewer than 16 deposits made through `Stream` are open (`etoomanyrefs` otherwise): for `{pipe, End}`, an end `Holder` holds, make an end of the same kind, held by the deposit, telling the pipe's other holders as for an inherited end; for `{socketpair, ReadEnd, WriteEnd}`, one of each; for a file, terminal or directory descriptor, keep the open it names; hold them as one deposit under a fresh ticket of 64 random bits, made through `Stream`, and reply with the ticket |
 | `{redeem, Holder, Stream, Ticket}` | if `Holder` holds the read end `Stream` of the pipe `Ticket` was deposited on and the ticket is unredeemed: install the deposit's end into `Holder`, with every lane and doorbell the end needs and, for a read end, the pipe's `wends`, and record `Holder` as its holder, or hand on the held open, and reply with the descriptor; an install that fails fails the request, and the end is gone |
@@ -966,6 +984,18 @@ handlers:
 | `{withdraw, Holder, Stream, Ticket}` | if `Holder` holds the write end `Stream` and `Ticket` was deposited through it: close the deposit if it is open; reply `ok` either way |
 | an end gone, or a deposit made or closed | close the deposits no reader can reach ([Deposits](#deposits)) |
 | the last end of a pipe gone | close every capability held for the pipe and forget it |
+
+A step's actions, which `erx_pipe_srv` performs in the order given, name
+objects as [the records](#the-pipe-servers-records) do:
+
+| Action | Effect |
+| --- | --- |
+| `{make_lock, Lock}`, `{make_lane, Ring, RPage, Size}`, `{make_bell, Bell, Holder, Label}` | create the objects with the session's budget, a doorbell bound to `Holder`'s group with `Label`, or with the label the session's event table registers for a process (`registered`); a step's makes come before its other actions, and when one fails the server closes what the step made, keeps its old records and answers `enomem` |
+| `{store_wends, Lock, Wends}` | store the pipe's highest write end number in its lock page, with release order, before any install of that write end |
+| `{free_lock, Lock, Rix}` | free the reader lock if read end `Rix` held it, by one compare-and-swap of `owner` from `1 + Rix` to 0 |
+| `{report, Holder, Report}` | install into `Holder`, through its handler, the copies `erx_pipe:copies/1` lists for `Report`, then send it; an install that fails closes the copy it made and comes back as the event `install_failed` |
+| `{reply, Reply}` | answer the event's request; the handler installs a reply's descriptors into the holder or the child, and an install that fails there undoes the ends with `closed`, or with `gone` for a child whose creation failed |
+| `{close, Object}` | close the pipe server's own capability to `Object` |
 
 **Holders.** A program's handler forwards each request and notice of its
 program with the program as `Holder`: the handler serves one program and
@@ -1175,8 +1205,8 @@ answer; both travel on the channel in order and without loss:
 | `{withdraw, Stream, Ticket}` | request | a `sendmsg` could not publish a ticket it was given; `Stream` is the write end the deposit was made through | `ok`, also for a deposit already closed |
 | `{redeem, Stream, Ticket}` | request | take a deposit; `Stream` is a read end the requester holds | `{ok, Descriptor}`; `{error, ebadf}` for a ticket unknown, redeemed or of another pipe; `{error, emfile \| enomem}` when the install fails |
 | `{discard, Stream, Ticket}` | request | a `read`, or a `recvmsg` without room for descriptors, skipped a deposit; `Stream` is a read end the requester holds | `ok`, also for a deposit already closed |
-| `{pipe_writer, Pipe, End, Writer, Ring, RPage, Size, Doorbell, State}` | report | a write end joined the pipe of read end `End`: `Ring`, `RPage` and `Doorbell`, the trigger right, are values in the program's table, and the read end raises its count of write ends to `Writer` ([The lock page](#the-lock-page)). `State` is `open`, and the read end rings `Doorbell` once as it applies the report ([Waiting and doorbells](#waiting-and-doorbells)); or `gone`, when the handler owed the join and merged the writer's gone into it ([design-programs.md](design-programs.md#the-channel)), and the read end takes the lane as gone, drains it and lets it go | none |
-| `{pipe_writer_gone, Pipe, End, Writer}` | report | the write end `Writer` of the pipe of end `End` is gone; a read end drains its lane and then lets it go | none |
+| `{pipe_writer, Pipe, End, Writer, Ring, RPage, Size, Doorbell, State}` | report | a write end joined the pipe of read end `End`: `Ring`, `RPage` and `Doorbell`, the trigger right, are values in the program's table, and the read end raises its count of write ends to `Writer` ([The lock page](#the-lock-page)). `State` is `open`, and the read end rings `Doorbell` once as it applies the report ([Waiting and doorbells](#waiting-and-doorbells)); or `gone`, when the handler owed the join and merged the writer's gone into it ([design-programs.md](design-programs.md#the-channel)), and the read end closes `Doorbell`, takes the lane as gone, drains it and lets it go | none |
+| `{pipe_writer_gone, Pipe, End, Writer}` | report | the write end `Writer` of the pipe of end `End` is gone; a read end closes its copy of the writer's doorbell, drains the lane and then lets it go | none |
 | `{pipe_reader, Pipe, End, Rix, Doorbell, State}` | report | a read end at index `Rix` joined the pipe of end `End`: `Doorbell`, its trigger right, is a value in the program's table. `State` is `open`, and the end rings `Doorbell` once as it applies the report; or `gone`, when the handler merged the read end's gone into its owed join, and the end closes its copy of `Doorbell` at once and counts no read end for it | none |
 | `{pipe_reader_gone, Pipe, End, Rix}` | report | the read end at index `Rix` of the pipe of end `End` is gone; a write end lowers its count of read ends, and every holder closes its copy of the doorbell | none |
 | `{pipe_lost, Pipe, End}` | report | an install the end needed failed: the end counts as lost, its reads failing with `EIO` and its writes with `EPIPE` from then on ([Failure handling](#failure-handling-diagnostics-and-debuggability)) | none |
@@ -1199,8 +1229,8 @@ program:
 %% R = #{rix := 0..63, lock := Cap,
 %%       wends := pos_integer(),        % the pipe's wends at the install
 %%       writers := [{Wend :: pos_integer(), Ring :: Cap, RPage :: Cap,
-%%                    Size :: 16384 | 65536, Doorbell :: Cap,
-%%                    open | gone}],
+%%                    Size :: 16384 | 65536,
+%%                    {open, Doorbell :: Cap} | gone}],  % no copy of a gone writer's doorbell
 %%       readers := [{Rix :: 0..63, Doorbell :: Cap}]}        % at most 63
 %% Cap = a capability value in the program's own table
 ```

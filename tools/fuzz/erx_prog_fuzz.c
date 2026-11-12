@@ -130,6 +130,50 @@ read_read_readers(erx_prog_read_readers_iter_t it)
 }
 
 static void
+check_ids(uint32_t pipe_id, uint32_t end_id)
+{
+	if (pipe_id == 0 || end_id == 0)
+		abort();
+}
+
+static void
+check_cap(uint64_t cap)
+{
+	if (cap == ERX_CAP_NULL)
+		abort();
+}
+
+static void
+check_state(uint16_t state)
+{
+	if (state != ERX_PROG_END_STATE_OPEN && state != ERX_PROG_END_STATE_GONE)
+		abort();
+}
+
+/*
+ * A writer in a read end's list: an open one carries its doorbell, a gone
+ * one none, so a descriptor never names a gone writer's doorbell.
+ */
+static void
+check_writer(const erx_prog_writer_t *w)
+{
+	if (w->wend == 0 || (w->lane_size != ERX_PIPE_RING_NEXT &&
+	    w->lane_size != ERX_PIPE_RING_FIRST))
+		abort();
+	check_cap(w->cap_1);
+	check_cap(w->cap_2);
+	switch (w->writer_state.which) {
+	case ERX_PROG_WRITER_STATE_OPEN:
+		check_cap(w->writer_state.u.open.cap);
+		break;
+	case ERX_PROG_WRITER_STATE_GONE:
+		break;
+	default:
+		abort();
+	}
+}
+
+static void
 read_read_end(const erx_prog_read_end_t *e)
 {
 	erx_prog_writers_iter_t it;
@@ -140,7 +184,7 @@ read_read_end(const erx_prog_read_end_t *e)
 	it = e->writers;
 	left = it.view.left;
 	for (n = 0; (more = erx_prog_writers_next(&it, &w)) && n < left; n++)
-		;
+		check_writer(&w);
 	check_end(left, n, more);
 	read_read_readers(e->readers);
 }
@@ -316,27 +360,6 @@ enum frame_kind {
 	FRAME_NOTICE,
 	FRAME_REPORT
 };
-
-static void
-check_ids(uint32_t pipe_id, uint32_t end_id)
-{
-	if (pipe_id == 0 || end_id == 0)
-		abort();
-}
-
-static void
-check_cap(uint64_t cap)
-{
-	if (cap == ERX_CAP_NULL)
-		abort();
-}
-
-static void
-check_state(uint16_t state)
-{
-	if (state != ERX_PROG_END_STATE_OPEN && state != ERX_PROG_END_STATE_GONE)
-		abort();
-}
 
 static void
 read_notice(const erx_prog_notice_t *n)

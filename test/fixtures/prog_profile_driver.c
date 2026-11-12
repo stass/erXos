@@ -165,14 +165,18 @@ put_read_end(erx_etf_writer_t *w, const erx_prog_read_end_t *e)
 	it = e->writers;
 	erx_etf_put_list(w, it.view.left);
 	while (erx_prog_writers_next(&it, &wr)) {
-		erx_etf_put_tuple(w, 6);
+		erx_etf_put_tuple(w, 5);
 		put_u64(w, wr.wend);
 		put_u64(w, wr.cap_1);
 		put_u64(w, wr.cap_2);
 		put_u64(w, wr.lane_size);
-		put_u64(w, wr.cap_3);
-		put_atom(w, wr.end_state == ERX_PROG_END_STATE_OPEN ?
-		    "open" : "gone");
+		if (wr.writer_state.which == ERX_PROG_WRITER_STATE_OPEN) {
+			erx_etf_put_tuple(w, 2);
+			put_atom(w, "open");
+			put_u64(w, wr.writer_state.u.open.cap);
+		} else {
+			put_atom(w, "gone");
+		}
 	}
 	erx_etf_put_nil(w);
 	put_atom(w, "readers");

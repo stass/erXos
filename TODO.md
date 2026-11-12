@@ -1594,6 +1594,35 @@ it; git history is the record of completed work.
   `sigignore` names it, and a run-time `signal(SIGPIPE, SIG_IGN)` is not honoured. It fails safe,
   with a stop of the writing program, never a hang or a wrong answer; output the program would
   have written after the `EPIPE` is lost.
+* [Medium] session, `erx_pipe:step/2`: the second tier's events are not there: `{exec}`, `{deposit}`,
+  `{redeem}`, `{discard}`, `{withdraw}` and the collector of deposits no reader can reach
+  (docs/design-pipes.md, "The second tier" and "Deposits"), and `holder()` has no
+  `{deposit, Ticket}`. `test/erlang/erx_pipe_explore.erl` gains their events with them.
+* [Medium] session, `erx_pipe:step/2` (`end_gone`, read end) and docs/design-pipes.md ("Ends and
+  their holders"): the pipe server closes a gone read end's doorbell at its gone, while the handler
+  may still have installs to make from an earlier step that name it: a child's write descriptor
+  lists every read end's doorbell, a child's read descriptor every other read end's, and a
+  `pipe_reader` report carries the new read end's. Such an install then fails, so a child's
+  creation fails or a running holder loses its end, though nothing was wrong (a reader that exits
+  while a sibling's write end is still being installed). The handler's merged join,
+  `{pipe_reader, ..., gone}` (docs/design-pipes.md, the program protocol's reports), installs a
+  copy of a read end's doorbell after that end went, so as written it can never succeed. A gone
+  write end's doorbell avoids this by staying with the server until it forgets the write end.
+  Two candidate fixes: a step's installs finish before the server takes its next event, or a
+  doorbell closes only once no pending install can name it; either makes both kinds of doorbell
+  follow one rule. The explorer applies a step's copies in that step, so it cannot see this; with
+  the fix it keeps each holder's copies pending until a separate install event and checks
+  `names_only_live` at the install, which shows the race on the unfixed tree.
+* [Low] session, `erx_pipe:new/1` (`quota`): the `pipes` quota is a parameter, 1,024 lanes unless
+  given, until `erx_policy` sets it with M10's principals. It counts lanes, so a pipe whose write ends
+  have all gone and drained keeps its lock page and its read ends' doorbells outside it, bounded only
+  by its holders' ends; and a quota above 8,192 lanes would let one pipe's read end descriptor
+  outgrow the startup grammar's `writers` list. Settle both when `erx_policy` sets the quota.
+* [Low] session, `test/erlang/erx_pipe_explore.erl`: the exploration of `erx_pipe:step/2` is bounded by
+  depth, 7 at the landing gate and 8 at `tools/erx check-fuzz`, not run to completion: a complete run
+  with a quota of one lane, numbers up to 3 and two read ends did not finish in 3 minutes. A state key
+  that identifies worlds equal up to renaming the two programs (symmetry reduction) may make a complete
+  run, or a deeper one, affordable.
 * [Low] QEMU harness, `tools/lib/erx/programs.rb`: the programs suite shows that `port_close/1` on a
   running program closes its port, reports nothing and gives back the gate worker's registrations,
   but not that the program's spaces stopped, since a close reports nothing to the session. Check

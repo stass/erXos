@@ -102,8 +102,10 @@ base() ->
       fds => [{0, {tty, 1, read}}, {1, {tty, 1, write}}, {2, {dup, 1}},
               {3, {pipe, write, {1, 2}, #{wend => 1, ring => 101, rpage => 102, size => 16384,
                                          readers => [{0, 103}]}}},
-              {4, {pipe, read, {2, 3}, #{rix => 0, lock => 104, wends => 1,
-                                        writers => [{1, 105, 106, 65536, 107, open}], readers => []}}},
+              {4, {pipe, read, {2, 3}, #{rix => 0, lock => 104, wends => 2,
+                                        writers => [{1, 105, 106, 65536, {open, 107}},
+                                                    {2, 112, 113, 16384, gone}],
+                                        readers => []}}},
               {5, {socketpair, {3, 1}, #{rix => 1, lock => 108, wends => 2, writers => [], readers => [{0, 109}]},
                    {4, 1}, #{wend => 2, ring => 110, rpage => 111, size => 65536, readers => []}}},
               {6, {file, 7, read_write}}, {7, {dir, 8}}, {8, {socket, 9}}, {9, null}],
@@ -121,6 +123,11 @@ valid() ->
      built(root, Base#{cwd => <<"/">>}),
      built(fds_at_max, Base#{fds => Fds}),
      built(unsorted, Base#{sigmask => [sigterm, sigint], fds => lists:reverse(maps:get(fds, Base))})].
+
+%% Base with the read end of fd 4 naming Writers.
+writers(#{fds := Fds} = Base, Writers) ->
+    {4, {pipe, read, PipeEnd, R}} = lists:keyfind(4, 1, Fds),
+    Base#{fds := lists:keyreplace(4, 1, Fds, {4, {pipe, read, PipeEnd, R#{writers := Writers}}})}.
 
 built(Name, Value) ->
     {ok, Frame} = erx_prog_grammar:build_start(Value),
@@ -157,6 +164,11 @@ mutations() ->
                                  #{wend => 1, ring => 101, rpage => 102, size => 1000, readers => []}}})}},
       "range lane_size"},
      {cap_null, {value, B#{data_area => {0, 4}}}, "range cap"},
+     %% Only an open writer carries its doorbell.
+     {gone_writer_doorbell,
+      {value, writers(B, [{1, 105, 106, 65536, {open, 107}}, {2, 112, 113, 16384, {gone, 114}}])},
+      "no_case writer_state"},
+     {open_writer_no_doorbell, {value, writers(B, [{1, 105, 106, 65536, open}])}, "no_case writer_state"},
      {spawn_shape, {value, B#{spawn => undefined}}, "shape boolean"},
      {signal_unknown, {value, B#{sigmask => [ok]}}, "range signal"},
      {improper_list, {frame, start, {erx_start, 1, B#{argv => [<<"a">> | <<"b">>]}}}, "shape argv"},

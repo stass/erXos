@@ -200,8 +200,9 @@ module ProgProfileFrames
     reader = tuple(small(0), small(103))
     write_end = map(pairs.call(wend: small(1), ring: small(101), rpage: small(102), size: int(16_384),
                                readers: list([reader])))
-    writer = tuple(small(1), small(105), small(106), int(65_536), small(107), atom('open'))
-    read_end = map(pairs.call(rix: small(0), lock: small(104), wends: small(1), writers: list([writer]),
+    writers = [tuple(small(1), small(105), small(106), int(65_536), tuple(atom('open'), small(107))),
+               tuple(small(2), small(112), small(113), int(16_384), atom('gone'))]
+    read_end = map(pairs.call(rix: small(0), lock: small(104), wends: small(2), writers: list(writers),
                               readers: list([])))
     list([tuple(small(0), tuple(atom('pipe'), atom('write'), tuple(small(1), small(2)), write_end)),
           tuple(small(1), tuple(atom('pipe'), atom('read'), tuple(small(2), small(3)), read_end))])
