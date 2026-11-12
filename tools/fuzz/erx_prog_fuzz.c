@@ -17,6 +17,13 @@
  * frame is read through every accessor: each list's iterator yields exactly
  * the elements its view counts and then stops, and every text lies within
  * the frame.
+ *
+ * The start-up plan of liberx/program/startup.h runs on every start frame
+ * and must agree with the check: a refused frame is refused with status 127
+ * for the check's own refusal; an accepted one runs unless a descriptor
+ * other than null refuses it at that descriptor's fd; and a plan that runs
+ * keeps only views inside the frame, counts and sums its texts as those
+ * views hold them, copies cwd whole with its NUL and carries every scalar.
  */
 
 #include <stdbool.h>
@@ -26,6 +33,7 @@
 #include <string.h>
 
 #include "erx/prog_profile.h"
+#include "liberx/program/startup.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 
@@ -171,6 +179,131 @@ read_start(const erx_prog_start_t *s)
 	check_end(left, n, more);
 }
 
+/* The bytes a list of texts needs as C strings, each read inside the frame. */
+static size_t
+argv_bytes(erx_prog_argv_iter_t it)
+{
+	erx_profile_text_t t;
+	size_t sum;
+
+	read_argv(it);
+	for (sum = 0; erx_prog_argv_next(&it, &t); sum += t.len + 1)
+		;
+	return (sum);
+}
+
+static size_t
+env_bytes(erx_prog_env_iter_t it)
+{
+	erx_profile_text_t t;
+	size_t sum;
+
+	read_env(it);
+	for (sum = 0; erx_prog_env_next(&it, &t); sum += t.len + 1)
+		;
+	return (sum);
+}
+
+/* The fd of the first descriptor other than null, or -1 when all are null. */
+static int
+first_unsupported_fd(erx_prog_fds_iter_t it)
+{
+	erx_prog_fd_entry_t entry;
+
+	while (erx_prog_fds_next(&it, &entry))
+		if (entry.descriptor.which != ERX_PROG_DESCRIPTOR_NULL)
+			return (entry.fd);
+	return (-1);
+}
+
+/* The set a list of signals holds, bit N - 1 for signal N. */
+static erx_prog_sigset_t
+signal_set(erx_prog_signals_iter_t it)
+{
+	erx_prog_sigset_t set;
+	int32_t signo;
+
+	memset(&set, 0, sizeof(set));
+	while (erx_prog_signals_next(&it, &signo)) {
+		if (signo < 1 || signo > ERX_SIGRTMAX)
+			abort();
+		set.bits[(signo - 1) / 64] |= UINT64_C(1) << ((signo - 1) % 64);
+	}
+	return (set);
+}
+
+static bool
+same_set(erx_prog_sigset_t a, erx_prog_sigset_t b)
+{
+	return (a.bits[0] == b.bits[0] && a.bits[1] == b.bits[1]);
+}
+
+/* A plan that runs agrees with the check's struct s field by field. */
+static void
+check_go(const erx_prog_startup_t *p, const erx_prog_start_t *s)
+{
+	if (p->status != 0 || first_unsupported_fd(s->fds) != -1 ||
+	    p->argc != s->argv.view.left || p->envc != s->env.view.left ||
+	    p->argv_bytes != argv_bytes(p->argv) ||
+	    p->env_bytes != env_bytes(p->env) ||
+	    p->argv_bytes + p->env_bytes > ERX_PROG_ARGS_MAX ||
+	    p->cwd_len != s->cwd.len || p->cwd[p->cwd_len] != '\0' ||
+	    memcmp(p->cwd, s->cwd.bytes, p->cwd_len) != 0 ||
+	    p->pid != s->pid || p->ppid != s->ppid || p->pgid != s->pgid ||
+	    p->fds.view.left != s->fds.view.left ||
+	    first_unsupported_fd(p->fds) != -1 ||
+	    !same_set(p->sigmask, signal_set(s->sigmask)) ||
+	    !same_set(p->sigignore, signal_set(s->sigignore)) ||
+	    p->spawn != s->spawn || p->umask != s->umask ||
+	    p->data_area != s->data_area.cap ||
+	    p->data_slots != s->data_area.data_slots ||
+	    p->has_image != s->has_image ||
+	    (s->has_image && p->image != s->image.u.object.cap))
+		abort();
+}
+
+/*
+ * The start-up plan of the frame the check judged, with need bytes of
+ * scratch: accepted says whether the check accepted it, and s and refusal
+ * are what the check gave.
+ */
+static void
+plan_start(const uint8_t *frame, size_t len, size_t need, bool accepted,
+    const erx_prog_start_t *s, const erx_profile_refusal_t *refusal)
+{
+	static erx_prog_startup_t p;
+	uint8_t *scratch;
+
+	scratch = malloc(need == 0 ? 1 : need);
+	if (scratch == NULL)
+		abort();
+	(void)erx_prog_startup_plan(frame, len, scratch, need, &p);
+	free(scratch);
+	if (!accepted) {
+		if (p.status != ERX_PROG_STATUS_REFUSED ||
+		    p.cause != ERX_PROG_STARTUP_CHECK ||
+		    p.refusal.reason != refusal->reason ||
+		    p.refusal.kind != refusal->kind ||
+		    p.refusal.offset != refusal->offset)
+			abort();
+		return;
+	}
+	switch (p.cause) {
+	case ERX_PROG_STARTUP_GO:
+		check_go(&p, s);
+		return;
+	case ERX_PROG_STARTUP_DESCRIPTOR:
+		if (p.status != ERX_PROG_STATUS_REFUSED ||
+		    first_unsupported_fd(s->fds) != p.fd)
+			abort();
+		return;
+	case ERX_PROG_STARTUP_CHECK:
+	case ERX_PROG_STARTUP_BOUND:
+		break;
+	}
+	abort();
+}
+
 /*
  * The check's answer with scratch_len bytes of scratch at offset bytes into a
  * buffer that ends where the scratch does.
@@ -224,6 +357,8 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		abort();
 	if (full && !request)
 		read_start(&start);
+	if (!request)
+		plan_start(frame_start, len, need, full, &start, &full_refusal);
 	if (check(request, frame_start, len, offset, need - 1, &start,
 	    &short_refusal) || (short_refusal.reason != ERX_PROFILE_SCRATCH &&
 	    short_refusal.reason != ERX_PROFILE_SIZE))

@@ -1571,6 +1571,11 @@ it; git history is the record of completed work.
   test checks that exactly one party may write each side or what the program receives in x0-x6.
   Give the core one row per side (index, session protection, program rights) with a host check,
   and a `programs` guest that checks its argument registers and the doorbell label.
+* [Medium] liberx program layer, `liberx/program/startup.c` (`erx_prog_startup_plan`): a startup
+  message with any descriptor other than `null` ends the program with status 127 before `main`,
+  because liberx sets up no pipe end, file, tty, directory, socket or `dup` yet, and the session
+  sends only `fds => []`. Each case replaces the refusal with its set-up when the file
+  descriptors arrive (docs/design-programs.md, "Descriptors and files").
 * [Low] erx_program driver: each program costs the session about 352 KiB of its own budget (four
   24 KiB lane sides, the 256 KiB data area, two IRQ objects) with no session-side bound, since
   `PROGRAM_POOL` is unbounded; many starts can exhaust the session's own budget.

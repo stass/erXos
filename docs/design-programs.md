@@ -3066,7 +3066,10 @@ terminal cases.
   executor's call graph free of kept locks, with a seeded call to
   `malloc`; `liberx`'s one function that maps code referenced only from
   `erx_exec`, with a seeded second caller; the program layer's freedom
-  from musl's `malloc` and stdio, with a seeded call; and the generator's
+  from musl's `malloc` and stdio, with a seeded call; the program layer
+  (`liberx/program/`) naming no symbol of a kernel backend, so it sits
+  above the kernel interface and a new backend moves nothing in it, with a
+  seeded call of the Fiasco backend's; and the generator's
   check that every fault kind has a signal and every status an `errno`,
   with a seeded kind without one.
 * **Signal numbers** ([Signal numbers](#signal-numbers)). Each test has a
