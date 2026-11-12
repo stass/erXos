@@ -31,7 +31,7 @@
 # to the host as its web facet. Fixed
 # medium roles carry partition 0, as docs/design-abi.md says. The machine is
 # QEMU virt with 256 MiB of RAM (config/platforms/qemu-virt.json), small for the
-# browser emulator yet roomy at the shell; root_memory, 186.25 MiB, leaves 53.75 MiB
+# browser emulator yet roomy at the shell; root_memory, 184.75 MiB, leaves 55.25 MiB
 # below RAM less fiasco_reserve for bootstrap and the boot archive. The system
 # baseline, 46 MiB, holds ERTS at the shell and /tmp, whose cap is 4 MiB. ERTS
 # sizes its tables and schedulers from runtime_limits and the system share
@@ -54,7 +54,7 @@
 # (TODO.md, "a refused restart is not retried"). The web domain holds a connection to
 # the system domain alone, so its end leaves no such budget. With it the
 # baseline leaves root_memory the block device's 1 MiB, the network device's 256 KiB
-# and 8 MiB no one is promised.
+# and 6.5 MiB no one is promised.
 # The web domain's 24 MiB is not measured yet: the bare release, loaded, on the
 # interpreter, takes 18.3 MiB in the Footprint table below, and each of the host
 # tool's four connections holds at most 1 MiB (docs/design-web.md, W8): about 23 MiB
@@ -123,7 +123,7 @@
 # the system principal's 131 MiB (root's session, 36 MiB and outer 1 MiB, the storage
 # domain, 30 MiB and outer 1 MiB, the network domain, 36 MiB and outer 1 MiB, the web
 # domain, 24 MiB and outer 1 MiB, and an ended domain's outer 1 MiB) and the devices'
-# 1.25 MiB promise 178.25 MiB of root_memory's 186.25 MiB, which leaves 8 MiB no one is
+# 1.25 MiB promise 178.25 MiB of root_memory's 184.75 MiB, which leaves 6.5 MiB no one is
 # promised. The network
 # domain's 36 MiB is its use rounded up to a whole MiB, 34 MiB, and 2 MiB of headroom:
 # 8,603 pool pages, 33.6 MiB, with BeamAsm (more than the interpreter the row runs) and
@@ -138,15 +138,17 @@
 # (36.2 MiB at the interactive shell of the development image), the session's about
 # 19 MiB (the bare release's 18.3 MiB and the shell's modules), the storage domain's
 # 29.8 MiB, the network domain's 33.6 MiB and the web domain's about 19 MiB: about 133
-# to 138 MiB, which leaves about 48 to 53 MiB of root_memory unused. RAM less
-# root_memory leaves 69.75 MiB to Fiasco's kernel memory, 16 MiB at 256 MiB (its boot
+# to 138 MiB, which leaves about 47 to 52 MiB of root_memory unused. RAM less
+# root_memory leaves 71.25 MiB to Fiasco's kernel memory, 16 MiB at 256 MiB (its boot
 # log's "Reserved 16 MiB as kernel memory", the production image's 1-CPU HVF cell on
 # the Apple M3 Max host, QEMU 11.1.3), its image and sigma0, the archive, the
-# root's image (4.7 MiB) and the device tree's 1 MiB. root_memory keeps about 1.4 MiB
-# below what sigma0 offers the root, as on 192 MiB with 126.25 (sigma0 offered about
-# 127.6 MiB there, the session suite's image on the Apple M3 Max host, HVF, QEMU
-# 11.1.3): it grows by 30 MiB with each 32 MiB of RAM because Fiasco's kernel memory
-# grows by 2.
+# root's image (4.8 MiB) and the device tree's 1 MiB. root_memory keeps about 1.4 MiB
+# below what sigma0 offers the root on the programs suite's test image, whose archive
+# is 47.6 MiB: sigma0 offered 186.19 MiB there, 46,425 pool pages and the root's
+# image (the Apple M3 Max host, HVF, 1 guest CPU, QEMU 11.1.3). Each MiB the archive
+# grows takes a MiB of that margin, and nothing checks it before boot (TODO.md, the
+# packer's root startup rule). root_memory grows by 30 MiB with each 32 MiB of RAM
+# because Fiasco's kernel memory grows by 2.
 #
 # The image release is the system release's EROFS image in the slot, with no
 # hash tree; the packer takes its extent from the image it builds
@@ -338,7 +340,7 @@ machine
   console "/pl011@9000000"
   hostlink "/pl011@9040000"
   platform "qemu-virt"
-  root_memory 195297280
+  root_memory 193724416
   system_baseline 48234496
   system_share @share.system
   users_share @share.users

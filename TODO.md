@@ -648,7 +648,7 @@ it; git history is the record of completed work.
   build-time rule has no site yet; with the release check (M11), refuse a release manifest that grants a facet of
   the `web` interface, with a seeded violation.
 * [Medium] `config/manifest/qemu-virt-development.txt`, the web domain's row: its 24 MiB and its grant, a quarter
-  of one CPU, are estimates, and so are the 256 MiB machine's `root_memory` (186.25 MiB) and the system
+  of one CPU, are estimates, and so are the 256 MiB machine's `root_memory` (184.75 MiB) and the system
   principal's 131 MiB that make room for it; no boot-time or memory figure has been recorded for a boot with the
   web domain. Measure the domain with `Footprint` at rest and with the host tool's four connections open, the
   boot's time to the shell before and after the web domain (`tools/erx bench`), and size the row and
@@ -2141,8 +2141,9 @@ it; git history is the record of completed work.
 * [Medium] packer, `tools/lib/erx/manifest.rb` (`RootStartup`) and `pack.rb`: nothing at build
   time holds the archive and `root_memory` together to RAM less `fiasco_reserve`. The root
   startup rule checks only `root_memory` against RAM less the reserve, so a release that grows
-  the archive past the room the development manifest leaves (51.75 MiB, of which the archive
-  takes 46.70) packs and passes `make check`, and the pool falls short only at boot. Check
+  the archive past the room the development manifest leaves (about 1.4 MiB more than the
+  programs suite's 47.6 MiB test archive) packs and passes `make check`, and the pool falls
+  short only at boot, in every suite booting that manifest at 256 MiB. Check
   archive plus `root_memory` against the machine's platform record when packing, with a
   seeded-fault test.
 * [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#check_facets_supported`):
