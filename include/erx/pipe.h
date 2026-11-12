@@ -223,9 +223,9 @@ typedef struct erx_pipe_wstate {
 	uint64_t	 done;		/* bytes it published */
 	uint32_t	 rec;		/* the record being written */
 	bool		 published;	/* this call stored need and fenced */
-	bool		 wake_local;	/* this call stored a need and then found
-					 * room: its caller wakes the end's
-					 * other waiting calls */
+	bool		 wake_local;	/* this call replaced a published need:
+					 * its caller wakes the end's other
+					 * waiting calls */
 	uint64_t	 stamp;
 	uint64_t	 wake;		/* the copy of wake */
 	bool		 armed;		/* a need is published and fenced */

@@ -180,15 +180,23 @@ pipe_publish(const erx_pipe_wstate_t *w)
  * crossed, since the crossing that frees room for it crosses that need
  * first and rings the end, which wakes every waiting call of the end.  A
  * call stores its own need when none is published, when its own is
- * smaller, or when the reader has crossed the published one.  A call that
- * stored a need and then found room does not wait on it, though the
- * calls whose larger need it replaced may: it sets wake_local, and they
- * start afresh and publish theirs again (PI7).
+ * smaller, or when the reader has crossed the published one.  The reader
+ * rings only for the need it copies, so a call that replaces a published
+ * need sets wake_local: the calls that waited on the old one start afresh
+ * and find room or publish theirs again (PI7).
+ *
+ * A call short of room with an rpos at or past its own need holds an rpos
+ * erx_ring_room refused, since an rpos it accepts leaves too little room
+ * below need and enough at or past it.  Such an rpos looks past the need
+ * the call would store, so the end's calls would replace each other's
+ * needs and wake each other for ever; the call waits instead on what is
+ * published, storing nothing, and a reader that stores a bad rpos stops
+ * its writer (PI4).
  */
 static bool
 pipe_wmay_wait(const erx_pipe_wstate_t *w, uint64_t need, uint64_t rpos)
 {
-	if (w->published)
+	if (w->published || rpos >= need)
 		return (true);
 	return (w->armed && need >= w->need && rpos < w->need);
 }
@@ -209,8 +217,6 @@ erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
 	case W_ROOM:
 		span = erx_ring_span(w->rec);
 		if (erx_ring_room(w->size, w->wpos, in->value) >= span) {
-			if (w->published)
-				w->wake_local = true;
 			w->published = false;
 			w->phase = W_STAMPED;
 			return (pipe_act(ERX_PIPE_OP_CLOCK));
@@ -227,6 +233,12 @@ erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
 			w->phase = W_WOKE;
 			return (pipe_act(ERX_PIPE_OP_WAIT));
 		}
+		/*
+		 * Replacing a published need wakes the calls waiting on it.
+		 * armed is never cleared: it means a need was ever published.
+		 */
+		if (w->armed)
+			w->wake_local = true;
 		w->armed = true;
 		w->need = need;
 		w->published = true;

@@ -1788,15 +1788,6 @@ it; git history is the record of completed work.
   that sends a notice (`{drained}`, `{closed}`) can wait where a signal will not reach it, which
   P6 forbids. Make the room wait a waiter list under the channel's lock (liberx/program/wake.h)
   before signals reach programs.
-* [High] pipe core, `liberx/erx_pipe_core.c` (`erx_pipe_wstep`, `W_ROOM`): a lost wakeup between two
-  write calls of one end. Call A waits on need 32; the reader's rpos store crosses 32; call B,
-  finding the published need crossed, stores its own need 48 and waits; the reader copies need
-  after B's store lands, sees 48 uncrossed and rings nobody, so A sleeps with room for its record.
-  `test/fixtures/pipe_explore.c` scenario `wcalls` finds it (PI7). Candidate fix: a call that
-  replaces a published need sets `wake_local`, which also makes the room branch's `wake_local`
-  redundant; both it and a narrower one (only over a crossed need) pass `wcalls` at landing
-  lengths. Then add `wcalls` to `test/host/pipe_core_test.rb` with the write-side seeds (the
-  explorer's wake for a writer's `wake_local`, and the need-lowering wake).
 * [Medium] session, `erx_pipe:step/2`: the second tier's events are not there: `{exec}`, `{deposit}`,
   `{redeem}`, `{discard}`, `{withdraw}` and the collector of deposits no reader can reach
   (docs/design-pipes.md, "The second tier" and "Deposits"), and `holder()` has no

@@ -31,8 +31,8 @@ class PipeCoreTest < Minitest::Test
   # The landing gate explores the small shapes; the milestone gate adds the large ones, whose
   # seeded faults the landing gate still catches at landing lengths.
   SMALL = %w[flow partial nonblock writer-dies reader-closes reader-dies lost join merge coread
-             coread-dies-empty coread-lost-dies rcalls hostile-writer hostile-reader
-             hostile-coreader].freeze
+             coread-dies-empty coread-lost-dies rcalls wcalls hostile-writer hostile-reader
+             hostile-coreader hostile-wcalls].freeze
   LARGE = %w[merge-join coread-dies coread-lost].freeze
   SCENARIOS = FULL ? LARGE + SMALL : SMALL
   # Scenarios explored at once: each runs alone in one process.
@@ -145,7 +145,16 @@ class PipeCoreTest < Minitest::Test
     "a read that clears the sleepers bits without waking the end's other calls" =>
       ['rcalls', 'PI7', "\tr->armed = false;\n\tr->wake_local = true;", "\tr->armed = false;"],
     "liberx's read that ignores wake_local" =>
-      ['rcalls', 'PI7', "\tif (local)\n\t\twake_asleep(p);", "\tif (local && writer)\n\t\twake_asleep(p);", EXPLORER]
+      ['rcalls', 'PI7', "\tif (local)\n\t\twake_asleep(p);", "\tif (local && writer)\n\t\twake_asleep(p);", EXPLORER],
+    # Two calls on one write end: one replaces the need the other waits on.
+    "a write that replaces a published need without waking the end's other calls" =>
+      ['wcalls', 'PI7', "\t\tif (w->armed)\n\t\t\tw->wake_local = true;\n", ''],
+    "liberx's write that ignores wake_local" =>
+      ['wcalls', 'PI7', "\tif (local)\n\t\twake_asleep(p);", "\tif (local && !writer)\n\t\twake_asleep(p);", EXPLORER],
+    "write calls that always store their need, waking each other for ever" =>
+      ['wcalls', 'PI4', 'return (w->armed && need >= w->need && rpos < w->need);', 'return (w->armed && need >= w->need && rpos < w->need && w->len == 0);'],
+    "write calls that take an rpos the room check refused for a crossing" =>
+      ['hostile-wcalls', 'PI4', "\tif (w->published || rpos >= need)", "\tif (w->published)"]
   }.freeze
 
   def test_seeded_faults_are_caught

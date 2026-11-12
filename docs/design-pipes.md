@@ -479,18 +479,42 @@ their `wake`, and its waiters bit. Every call of the end that waits at
 once relies on them, so a call never clears them on the way in. A write
 end keeps the smallest need any of its waiting calls waits for: a call
 stores its own need only when none is published, when its own is
-smaller, or when the reader has crossed the published one; the crossing
-that frees room for any waiting call crosses that need first, and rings
-the end. A read end's bits are cleared only when no wait of the end
-needs them: the waiters bit once a call holds the reader lock, and the
-sleepers bits when a call that published or found them returns or waits
-for a report instead, or a read of 0 bytes gives every wait up. Whoever
-clears them, and a write call that stored a need and then found room
-without waiting on it, wakes the end's other waiting calls, which start
-afresh and publish again what they still wait for. A doorbell wakes
-every waiting call of its end. Since only a call that holds the lock,
-writes or returns does so, two calls of one end waiting for the same
-thing never wake each other back and forth.
+smaller, or when the reader has crossed the published one. The reader
+rings the end only when it crosses the need it copies, so a waiting call
+relies on the need it found or stored staying published until the reader
+crosses it; a call that replaces a published need breaks that, whether
+the reader has crossed it or not, and so wakes the end's other waiting
+calls when it returns or waits. That one rule is enough: a waiting
+call's need is either still published, and the crossing that frees room
+for the call crosses it first and rings the end, or replaced, and the
+replacing call woke it. A read end's bits are cleared only when no
+wait of the end needs them: the waiters bit once a call holds the
+reader lock, or when a read of 0 bytes or of a lost pipe gives every
+wait up; the sleepers bits after the lock is released, or by such a
+read, by a call that published or found them and returns or waits for
+a report instead.
+Whoever clears them wakes the end's other waiting calls. A woken call
+starts afresh and publishes again what it still waits for, and a
+doorbell wakes every waiting call of its end.
+
+Two calls of one end never wake each other back and forth. A read call
+clears bits only after it has held the reader lock, or when it gives
+every wait up. A write call stores a need when none is published, below
+the published one, or in place of one the rpos it copied has crossed.
+For any rpos that `erx_ring_room` accepts, a call short of room needs
+more than that rpos, so the need it stores is not crossed until the rpos
+moves: while neither the rpos nor the end's wpos moves, each rpos value
+the end sees allows one store where none is published or over a crossed
+need, the other stores only lower the need, and a woken call that keeps
+the published need wakes no one. A call short of room whose rpos is at
+or past its own need holds an rpos `erx_ring_room` refused, which would
+look past the call's need at once; such a call waits on what is
+published and stores nothing. A refused rpos below the call's need
+leaves the stored need above it, as an accepted one does. Either way a
+reader that stores a bad rpos leaves its writer no room and stops it,
+but does not set the end's calls waking each other.
+The pipe core's exploration bounds the stores a write end makes while
+neither position moves (PI4).
 
 ### The pipe server's records
 

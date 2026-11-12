@@ -71,9 +71,11 @@
  *   PI3  a write fails with EPIPE only once no read end remains or the
  *        loss has been applied, and with EAGAIN only on a non-blocking end;
  *   PI4  no step loops: a party takes at most STEPS_MAX steps without a
- *        wait or the end of its call; nothing reads or writes outside the
- *        model's memory (the address sanitizer); and every copy stays in
- *        the call's buffer and the claimed record;
+ *        wait or the end of its call; the calls of one write end store at
+ *        most NEEDS_MAX needs while neither its wpos nor its lane's rpos
+ *        moves, so they do not wake each other for ever; nothing reads or
+ *        writes outside the model's memory (the address sanitizer); and
+ *        every copy stays in the call's buffer and the claimed record;
  *   PI5  claims are made under the reader lock, each write end's claims
  *        follow its stream byte for byte (none claimed twice or skipped),
  *        a record partly claimed is the next claimed (PIPE_BUF atomicity,
@@ -130,6 +132,16 @@
 #define BUFFERED_MAX	6
 #define WRITES_MAX	4
 #define STEPS_MAX	256
+/*
+ * The need stores one write end makes while neither its wpos nor its
+ * lane's rpos moves.  The end sees at most two rpos values in that window,
+ * since the reader fences after each rpos store.  For each value the
+ * end's calls make at most one store where no need is published or over
+ * a crossed one, plus stores that strictly lower the need, one for each
+ * of its other calls: 2 x CALLERS_MAX.  It holds while each call's need is
+ * fixed by the unmoving wpos and the reader fences after each rpos store.
+ */
+#define NEEDS_MAX	(2 * CALLERS_MAX)
 #define DEPTH_MAX	4096
 #define NO_REC		0xffu
 
@@ -264,7 +276,10 @@ typedef struct world {
 	uint8_t		 cut;		/* a read end ended early */
 	uint8_t		 calls;		/* reads read end 0 started */
 	uint16_t	 now;		/* the clock's last reading */
-	uint16_t	 pad2[3];
+	/* needs[w]: the needs write end w stored since its wpos or the rpos
+	 * of its lane last moved (PI4) */
+	uint8_t		 needs[NW_MAX];
+	uint8_t		 pad2[4];
 } world_t;
 
 _Static_assert(sizeof(world_t) % sizeof(uint64_t) == 0,
@@ -349,12 +364,9 @@ static const scenario_t scenarios[] = {
 	 * Two calls on one write end.  The first two writes fill the ring
 	 * with records of 32, 48 and 48 bytes; then a write of one 48-byte
 	 * record and one of a 32-byte record wait, and the second may lower
-	 * the need the first published and find room.  It fails PI7, so
-	 * test/host/pipe_core_test.rb leaves it out (TODO.md, the pipe core's
-	 * lost wakeup between two write calls): a call
-	 * that replaces a need the reader has crossed can hide the crossing
-	 * from the reader, and the call that waits on the crossed need is
-	 * never rung.
+	 * the need the first published and find room, or replace a need the
+	 * reader has crossed, which the reader then never rings for: the call
+	 * that replaces a published need wakes the other (PI7).
 	 */
 	{ .name = "wcalls", .nw = 1, .nr = 1, .writes = { { 16, 64, 32, 16 } },
 	  .deep = { { 16, 64, 32, 16 } }, .read_len = 16, .chunk = 32,
@@ -368,6 +380,17 @@ static const scenario_t scenarios[] = {
 	  .deep = { { 40, 24 } }, .read_len = 24, .hostile = 'r', .nif = true },
 	{ .name = "hostile-coreader", .nw = 1, .nr = 2, .writes = { { 16, 9 } },
 	  .deep = { { 40, 24 } }, .read_len = 5, .hostile = 'c' },
+	/*
+	 * wcalls with a hostile reader: an rpos erx_ring_room refuses looks
+	 * past every need, and the two calls must still wait rather than
+	 * replace each other's need and wake each other for ever (PI4).  The
+	 * hostile reader makes one call: past its rewrite it may read for
+	 * ever, and only the writer's properties are checked.
+	 */
+	{ .name = "hostile-wcalls", .nw = 1, .nr = 1,
+	  .writes = { { 16, 64, 32, 16 } }, .deep = { { 16, 64, 32, 16 } },
+	  .read_len = 16, .chunk = 32, .wcalls = true, .hostile = 'r',
+	  .calls = { 1, 1 } },
 };
 
 static const scenario_t *sc;
@@ -1084,8 +1107,11 @@ wperform(world_t *wd, int w, int depth, const erx_pipe_act_t *a)
 	case ERX_PIPE_OP_STORE_WPOS:
 		s = push(p, L_WPOS, (uint8_t)w, true, PLAIN, a->value);
 		s->a = (uint32_t)(p->base + wd->ws[w].done + wd->ws[w].rec);
+		wd->needs[w] = 0;
 		break;
 	case ERX_PIPE_OP_STORE_NEED:
+		if (++wd->needs[w] > NEEDS_MAX)
+			fail(depth, "PI4", "the calls of a write end wake each other for ever");
 		push(p, L_NEED, (uint8_t)w, true, PLAIN, a->value);
 		break;
 	case ERX_PIPE_OP_FENCE:
@@ -1160,6 +1186,7 @@ rperform(world_t *wd, int r, int depth, const erx_pipe_act_t *a)
 		break;
 	case ERX_PIPE_OP_STORE_RPOS:
 		retire(wd, r, w, depth, a);
+		wd->needs[w] = 0;
 		push(p, L_RPOS, w, true, PLAIN, a->value);
 		break;
 	case ERX_PIPE_OP_STORE_WAKE:
@@ -1254,6 +1281,8 @@ rewrite(world_t *wd, int k)
 	lane_mem_t *l = &m->lane[0];
 	uint8_t *rec = &l->area[l->rpos % RING / GRAIN * GRAIN];
 
+	/* A rewrite may move the lane's wpos or rpos (PI4). */
+	memset(wd->needs, 0, sizeof(wd->needs));
 	if (sc->hostile == 'w') {
 		switch (k) {
 		case 0: l->wpos += GRAIN; return (true);
