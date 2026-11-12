@@ -359,7 +359,10 @@ bytes before they are copied changes only its own data.
 ### The lock page
 
 ```c
-/* A pipe's lock page, shared by its read ends, which alone map it. */
+/*
+ * A pipe's lock page, shared by its read ends.  The pipe server maps it
+ * too, only to store wends and to free the lock a gone read end held.
+ */
 typedef struct erx_pipe_lock {
 	_Atomic uint32_t owner;		/* the reader lock: 0 when free, else
 					 * 1 + the holder's index */
@@ -545,14 +548,15 @@ lock page's `owner` word:
 2. **Bring the lane set up to date.** Under the end's lock it takes the
    changes the event executor applied from the handler's reports: a lane
    that joined, which it maps if it has not yet; a writer that is gone,
-   whose lane it will drain; and a lane it has drained after its writer
-   went, which it unmaps and closes, sending the handler
-   `{drained, Pipe, End, Writer}` once. A lost pipe fails the read with
+   whose lane it will drain; and a lane it found broken whose writer is
+   gone, which it unmaps and closes, sending the handler
+   `{drained, Pipe, End, Writer}` once, as step 4 does for a lane it finds
+   empty after its writer went. A lost pipe fails the read with
    `EIO`.
 3. **Settle the current record** as [The lock page](#the-lock-page) says:
    the read continues it from `cur_off`, or retires it, or finds none.
-4. **Pick the next record.** Otherwise, for every lane it holds, it reads
-   the clock and then, ordered after the reading, copies the lane's `wpos`
+4. **Pick the next record.** Otherwise, for every lane it holds, it copies
+   `rpos`, reads the clock and then, ordered after the reading, copies the lane's `wpos`
    with acquire order and, when the lane is not empty, its first record's
    header, and checks them. If any lane holds a record, it copies the
    lock page's `wends` and, when that is above its own count of write

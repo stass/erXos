@@ -5172,17 +5172,6 @@ to the corpus and follow rc
   table's retire and finished rows are unreachable (only a reader that
   dies inside a record leaves them, and none follows it), and the lost
   pipe's `EIO` and `EPIPE` paths are not explored.
-* [Medium] `erx_pipe_rstep` in `liberx/erx_pipe_core.c` reads poorly:
-  one switch over about 37 phases with fallthroughs, a `break` into the
-  end-of-stream code after the switch, self-calls standing in for
-  jumps, and one cursor (`at`) shared by the take-up, look, arm and wake
-  loops. Split it into one small machine or named helper per design step
-  (lock, take-up, settle, pick, finish, arm, release). Settle by one call
-  of `erx_pipe_settle` on every copy taken, rather than deciding its rows
-  across four phases; and make a lane's state one variant rather than
-  the flags `writer`, `ring`, `noticed`, `gone` and `has_rec`, which can
-  express impossible pairs. The exploration and its seeded faults guard
-  the rewrite.
 * [High] DMA platform evidence: the SMMUv3 specification and QEMU
   v11.1.2 source audit is recorded in
   [research-hardware-contracts.md](docs/research-hardware-contracts.md).

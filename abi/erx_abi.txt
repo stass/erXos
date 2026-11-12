@@ -397,7 +397,8 @@ layout erx_pipe_rpage shared 8 24
   visibility rpos release
   visibility wake release
   visibility sleepers release
-# A pipe's lock page, which its read ends alone map: the reader lock (0
+# A pipe's lock page, which its read ends map, and the pipe server too,
+# only to store wends and to free a gone read end's lock: the reader lock (0
 # when free, else 1 + the holder's index), the highest write end number
 # made, which the pipe server alone stores, the read ends waiting for the
 # lock, and the current record, which the lock's holder stores: write end

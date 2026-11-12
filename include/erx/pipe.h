@@ -221,17 +221,29 @@ typedef struct erx_pipe_wstate {
 	uint64_t	 wake;		/* the copy of wake */
 } erx_pipe_wstate_t;
 
-/* A lane's writer, as the read end's reports give it. */
+/*
+ * A lane's writer, as the read end's reports give it.  GONE is final: a
+ * lane serves one write end, and the event executor never sets a gone
+ * writer open again nor reuses the lane for another write end, so a
+ * DRAINED lane always has a gone writer.
+ */
 typedef enum erx_pipe_writer {
 	ERX_PIPE_WRITER_OPEN = 0,
 	ERX_PIPE_WRITER_GONE
 } erx_pipe_writer_t;
 
-/* What the read end found in a lane's ring; it never returns to LIVE. */
+/*
+ * Where the read end is with a lane's ring.  A LIVE lane is read; one
+ * that fails a check is BROKEN, which counts as gone and drained (PI2);
+ * and a lane found empty after its writer went, or broken with its writer
+ * gone, is DRAINED: the read end has sent the handler {drained} for it,
+ * once, and is done with it.  A lane never returns to LIVE, and only a
+ * lane whose writer is gone is DRAINED.
+ */
 typedef enum erx_pipe_ring {
 	ERX_PIPE_RING_LIVE = 0,
-	ERX_PIPE_RING_DRAINED,	/* found empty once its writer was gone (PI2) */
-	ERX_PIPE_RING_BROKEN	/* failed a check: counts as gone and drained */
+	ERX_PIPE_RING_DRAINED,
+	ERX_PIPE_RING_BROKEN
 } erx_pipe_ring_t;
 
 /* The most batches a read end keeps for one lane. */
@@ -253,15 +265,13 @@ typedef struct erx_pipe_rlane {
 	uint64_t	 size;
 	erx_pipe_writer_t writer;
 	erx_pipe_ring_t	 ring;
-	bool		 noticed;	/* {drained} sent */
 	bool		 looked;	/* a copy of wpos was taken before */
 	uint64_t	 look;		/* the clock before the last such copy */
 	uint32_t	 nbatches;
 	erx_pipe_batch_t batch[ERX_PIPE_BATCHES];
-	/* The pick in progress, under the reader lock. */
-	uint64_t	 rpos;
-	bool		 gone;		/* its writer was gone before the look */
-	bool		 has_rec;	/* a sound data record at rpos */
+	uint64_t	 rpos;		/* the last copy, or the reader's store */
+	/* What the pick in progress found at rpos, under the reader lock. */
+	bool		 has_rec;	/* a sound data record, in a LIVE lane */
 	uint32_t	 len;
 	uint64_t	 key;
 } erx_pipe_rlane_t;
@@ -272,7 +282,8 @@ typedef struct erx_pipe_rlane {
  * reports name write ends, raising known, its count of the write ends it
  * knows (compared with the lock page's wends); batches is at most
  * ERX_PIPE_BATCHES (a model scales it down).  The rest belongs to the call
- * in progress.
+ * in progress, grouped by the reader's stage that uses it
+ * (liberx/erx_pipe_core.c).
  */
 typedef struct erx_pipe_rstate {
 	uint32_t	 rix;
@@ -282,22 +293,33 @@ typedef struct erx_pipe_rstate {
 	uint32_t	 batches;
 	erx_pipe_rlane_t *lanes;
 	uint32_t	 nlanes;
-	uint32_t	 phase;
-	uint32_t	 after;		/* what follows releasing the lock */
-	uint32_t	 at;		/* the lane the phase works on */
-	uint32_t	 scan;		/* the lanes the pick's first look covered */
-	bool		 second;	/* the pick's second look */
-	bool		 any;		/* the first look found a record */
-	bool		 armed;		/* sleepers and wake published, fenced */
+	/* Where the call is. */
+	uint32_t	 stage;		/* the design step the read is in */
+	uint32_t	 phase;		/* the action the stage waits on */
+	uint32_t	 at;		/* the lane a loop over the lanes is at */
 	uint64_t	 len;		/* bytes wanted */
 	uint64_t	 done;		/* bytes copied */
+	bool		 armed;		/* sleepers and wake published, fenced */
+	/* The settle: what its table reads, as far as it is copied. */
+	erx_pipe_cur_copy_t settle;
+	uint32_t	 settle_at;	/* the lane of settle.cur, when held */
+	/* The pick: the look in progress. */
+	uint32_t	 scan;		/* the lanes it covers, which arming
+					 * covers too */
+	bool		 second;	/* the pick's second look */
+	bool		 any;		/* the first look found a record */
+	bool		 gone;		/* the lane's writer was gone before it */
 	uint64_t	 clock;
-	uint64_t	 wpos;
-	uint32_t	 cur;		/* the lane of the current record */
-	uint32_t	 cur_off;
+	uint64_t	 wpos;		/* the lane's, checked against its rpos;
+					 * the settle's copy too */
+	/* The copy and finish: the current record, at cur_pos of lane cur. */
+	uint32_t	 cur;		/* ERX_PIPE_LANE_NONE when none */
+	uint32_t	 cur_off;	/* its payload bytes claimed */
 	uint64_t	 cur_pos;
 	uint32_t	 cur_len;
 	uint32_t	 claim;		/* bytes of it this copy takes */
+	/* The release: what follows it. */
+	uint32_t	 after;
 	int64_t		 result;
 } erx_pipe_rstate_t;
 

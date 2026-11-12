@@ -47,11 +47,11 @@ class PipeCoreTest < Minitest::Test
       ['flow', 'PI7', "\t\tw->phase = W_FENCED;\n\t\treturn (pipe_act(ERX_PIPE_OP_FENCE));",
        "\t\tw->phase = W_FENCED;\n\t\treturn (pipe_act(ERX_PIPE_OP_CLOCK));"],
     "the reader's fence after publishing wake removed" =>
-      ['flow', 'PI7', "\t\tr->phase = R_PICK;\n\t\treturn (pipe_act(ERX_PIPE_OP_FENCE));",
-       "\t\tr->phase = R_PICK;\n\t\treturn (pipe_act(ERX_PIPE_OP_CLOCK));"],
+      ['flow', 'PI7', "\tr->phase = ARM_FENCED;\n\treturn (pipe_act(ERX_PIPE_OP_FENCE));",
+       "\tr->phase = ARM_FENCED;\n\treturn (pipe_act(ERX_PIPE_OP_CLOCK));"],
     "the reader's fence after advancing rpos removed" =>
-      ['flow', 'PI7', "\t\tr->phase = R_NEED;\n\t\treturn (pipe_act(ERX_PIPE_OP_FENCE));",
-       "\t\tr->phase = R_NEED;\n\t\treturn (pipe_act(ERX_PIPE_OP_CLOCK));"],
+      ['flow', 'PI7', "\t\tr->phase = FINISH_FENCED;\n\t\treturn (pipe_act(ERX_PIPE_OP_FENCE));",
+       "\t\tr->phase = FINISH_FENCED;\n\t\treturn (pipe_act(ERX_PIPE_OP_CLOCK));"],
     # The model's records all span two grains, so room is off by one at a record's edge.
     'room that refuses an exact fit (off by one)' =>
       ['flow', 'PI7', 'erx_ring_room(w->size, w->wpos, in->value) >= span',
@@ -70,16 +70,16 @@ class PipeCoreTest < Minitest::Test
        "\t\treturn (pipe_publish(w));\n\tcase W_WRITTEN:\n\t\tw->phase = W_PUBLISHED;\n" \
        "\t\treturn (pipe_write_rec(w));"],
     'a reader that takes bytes past the published wpos' =>
-      ['flow', 'PI5', "\t\t    lane->batch[lane->nbatches - 1].end : lane->rpos;\n\t\treturn (pipe_lane_wpos(r));",
+      ['flow', 'PI5', "\t\t    lane->batch[lane->nbatches - 1].end : lane->rpos;\n\t\treturn (pipe_rlook_wpos(r));",
        "\t\t    lane->batch[lane->nbatches - 1].end + PIPE_GRAIN : lane->rpos + PIPE_GRAIN;\n" \
-       "\t\treturn (pipe_lane_wpos(r));"],
+       "\t\treturn (pipe_rlook_wpos(r));"],
     'the end of the stream before the gone lane is drained' =>
-      ['writer-dies', 'PI2', 'if (lane->ring == ERX_PIPE_RING_LIVE ||', 'if (false ||'],
+      ['writer-dies', 'PI2', 'if (r->lanes[i].ring == ERX_PIPE_RING_LIVE)', 'if (false)'],
     "a writer that skips the ring on its call's last record" =>
       ['flow', 'PI7', 'if (in->value != 0 && pipe_crossed(old, w->wpos, w->wake))',
        'if (in->value != 0 && pipe_crossed(old, w->wpos, w->wake) && w->done != w->len)'],
     'a lane counted drained while its writer is open' =>
-      ['flow', 'PI2', "\tif (lane->gone) {\n\t\tlane->ring = ERX_PIPE_RING_DRAINED;",
+      ['flow', 'PI2', "\tif (r->gone) {\n\t\tlane->ring = ERX_PIPE_RING_DRAINED;",
        "\tif (true) {\n\t\tlane->ring = ERX_PIPE_RING_DRAINED;"],
     'EPIPE while a read end remains' =>
       ['flow', 'PI3', 'if (w->lost || w->readers == 0)', 'if (w->lost || w->readers <= 1)']

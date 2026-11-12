@@ -69,6 +69,15 @@ pipe_value_act(erx_pipe_op_t op, uint32_t lane, uint64_t value)
 }
 
 static erx_pipe_act_t
+pipe_pos_act(erx_pipe_op_t op, uint32_t lane, uint64_t pos)
+{
+	erx_pipe_act_t act = pipe_lane_act(op, lane);
+
+	act.pos = pos;
+	return (act);
+}
+
+static erx_pipe_act_t
 pipe_done(int64_t result)
 {
 	erx_pipe_act_t act = pipe_act(ERX_PIPE_OP_DONE);
@@ -97,7 +106,7 @@ pipe_count_or(uint64_t done, int error)
  * publish wpos, and ring the read ends that sleep past wake.
  */
 enum {
-	W_SIDE = 0,	/* check the read side; copy rpos */
+	W_SIDE = 0,	/* the next record: check the read side, copy rpos */
 	W_ROOM,		/* in.value: rpos */
 	W_ARMED,	/* need stored: fence, then check again */
 	W_WOKE,		/* the doorbell rang: check again */
@@ -135,6 +144,23 @@ pipe_write_rec(const erx_pipe_wstate_t *w)
 	return (act);
 }
 
+/*
+ * The call's next record, at most a chunk, or the call's end: its count
+ * when every byte is written, else EPIPE when no read end is left.
+ */
+static erx_pipe_act_t
+pipe_write_next(erx_pipe_wstate_t *w)
+{
+	if (w->done == w->len)
+		return (pipe_done((int64_t)w->done));
+	if (w->lost || w->readers == 0)
+		return (pipe_done(pipe_count_or(w->done, EPIPE)));
+	w->rec = w->len - w->done < w->chunk ?
+	    (uint32_t)(w->len - w->done) : w->chunk;
+	w->phase = W_ROOM;
+	return (pipe_act(ERX_PIPE_OP_LOAD_RPOS));
+}
+
 /* Publishes the record at wpos whole, by one store of the next wpos. */
 static erx_pipe_act_t
 pipe_publish(const erx_pipe_wstate_t *w)
@@ -149,18 +175,11 @@ erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
 	uint64_t need, old, span;
 
 	switch (w->phase) {
+	case W_SIDE:
+		return (pipe_write_next(w));
 	case W_WOKE:
 		w->armed = false;
-		/* FALLTHROUGH */
-	case W_SIDE:
-		if (w->done == w->len)
-			return (pipe_done((int64_t)w->done));
-		if (w->lost || w->readers == 0)
-			return (pipe_done(pipe_count_or(w->done, EPIPE)));
-		w->rec = w->len - w->done < w->chunk ?
-		    (uint32_t)(w->len - w->done) : w->chunk;
-		w->phase = W_ROOM;
-		return (pipe_act(ERX_PIPE_OP_LOAD_RPOS));
+		return (pipe_write_next(w));
 	case W_ROOM:
 		span = erx_ring_span(w->rec);
 		if (erx_ring_room(w->size, w->wpos, in->value) >= span) {
@@ -212,58 +231,118 @@ erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
 		if (in->value != 0 && pipe_crossed(old, w->wpos, w->wake))
 			return (pipe_value_act(ERX_PIPE_OP_RING_READERS,
 			    ERX_PIPE_LANE_NONE, in->value));
-		return (erx_pipe_wstep(w, in));
+		return (pipe_write_next(w));
 	}
 	return (pipe_done(-EIO));
 }
 
 /*
- * The reader (design "Reading and merging"): take the lock, take up the
- * reports, settle the current record, then pick, claim, copy and finish
- * records until the buffer is full or nothing is readable; then the end
- * of the stream, EAGAIN, or publishing sleepers and wake and waiting; and
- * last the release, which rings the read ends waiting for the lock.
+ * The reader (design "Reading and merging") runs the design's steps as
+ * stages, each a small machine of its own:
+ *
+ *	R_LOCK		step 1: take the reader lock, or wait for it
+ *	R_TAKEUP	step 2: close each broken lane whose writer went
+ *	R_SETTLE	step 3: copy the current record, settle it by the table
+ *	R_PICK		step 4: look at every lane, check wends, look again,
+ *			and pick by order key
+ *	R_COPY		step 5: claim the record's bytes, then copy them
+ *	R_FINISH	step 6: retire a record read to its end, ring its writer
+ *	R_ARM		step 7: publish sleepers and wake, then pick again
+ *	R_RELEASE	step 8: release the lock and ring its waiters
+ *	R_WAIT		wait for data or for a report, then start over
+ *
+ * A stage begins in its pipe_r*_begin function, which returns the stage's
+ * first action; erx_pipe_rstep hands what each action copied to the
+ * stage's step function, which returns the stage's next action or begins
+ * the stage that follows.  r->phase names the action the stage waits on;
+ * the begin functions set r->stage.  A step ends in exactly one
+ * action and never calls erx_pipe_rstep again, so the begin functions are
+ * the only jumps between stages.
+ *
+ * The pick, copy and finish repeat until the buffer is full or nothing
+ * is readable; then pipe_rnothing_readable gives the count, the end of
+ * the stream, EAGAIN, or a wait.  Every way out of the lock goes through the
+ * release, which r->after follows: the call's result, or a wait.
+ *
+ * The loops over the lanes (the take-up's, the looks, arming's and
+ * the clearing of sleepers bits after a wait) each keep their place in
+ * r->at, which each loop's begin sets to 0; no two run at once.
  */
 enum {
-	R_LOCK = 0,	/* try the lock */
-	R_LOCKED,	/* in.ok */
-	R_WAITER_SET,	/* waiters bit set: fence */
-	R_RETRY,	/* try the lock again */
-	R_RELOCKED,	/* in.ok of the retry */
-	R_LOCK_WOKE,	/* woken while waiting for the lock */
-	R_TAKEUP,	/* step 2, from lane at */
-	R_SETTLE,	/* step 3: copy the current record */
-	R_CUR,		/* in: cur, cur_off, cur_pos */
-	R_CUR_RPOS,	/* in.value: cur's lane's rpos */
-	R_CUR_WPOS,	/* in.value: its wpos */
-	R_CUR_REC,	/* in: its record at rpos */
-	R_PICK,		/* step 4: a look over every lane */
-	R_LANE,		/* the look at lane at, or the next lane */
-	R_LANE_RPOS,	/* in.value: rpos */
-	R_LANE_CLOCK,	/* in.value: the clock before the wpos copy */
-	R_LANE_WPOS,	/* in.value: wpos */
-	R_LANE_REC,	/* in: the record at rpos */
-	R_LANE_NEXT,	/* a notice of lane at went out */
-	R_LOOKED,	/* every lane looked at */
-	R_WENDS,	/* in.value: wends */
-	R_COPY,		/* step 5: the claim is stored; copy */
-	R_COPIED,	/* the copy is done */
-	R_FINISH_CUR,	/* step 6: rpos stored; cur to none */
-	R_FINISH_FENCE,
-	R_NEED,		/* copy need */
-	R_NEED_IN,	/* in.value: need */
-	R_MORE,		/* go on or end the read */
-	R_ARM,		/* step 7: */		/* set sleepers bit of lane at */
-	R_ARM_WAKE,	/* store wake of lane at */
-	R_ARM_NEXT,
-	R_RELEASED,	/* step 8: the lock is released */
-	R_WAITERS,
-	R_WAITERS_IN,	/* in.value: waiters */
-	R_AFTER,	/* the end of the call, or a wait */
-	R_DATA_WOKE	/* clear sleepers bits from lane at */
+	R_LOCK = 0,
+	R_TAKEUP,
+	R_SETTLE,
+	R_PICK,
+	R_COPY,
+	R_FINISH,
+	R_ARM,
+	R_RELEASE,
+	R_WAIT
 };
 
-/* What follows the release of the reader lock. */
+/*
+ * The phases of every stage, in one enumeration grouped by stage, so no
+ * two stages share a value: a phase left over from another stage falls
+ * to the step function's default, EIO, rather than being read as one of
+ * the stage's own.
+ */
+enum {
+	/* The lock's: what its attempt waits on. */
+	LOCK_START = 0,		/* the call's start, or the bit cleared after a
+				 * wait: try the lock */
+	LOCK_TRIED,		/* in.ok of the first compare-and-swap */
+	LOCK_WAITER_SET,	/* the waiters bit is set: fence */
+	LOCK_FENCED,		/* try again */
+	LOCK_RETRIED,		/* in.ok of the second try */
+	LOCK_TAKEN,		/* the waiters bit is cleared: take up */
+	LOCK_WOKE,		/* the wait ended: clear the waiters bit */
+
+	/* The take-up's. */
+	TAKEUP_DRAINED,		/* {drained} went out for lane r->at - 1 */
+
+	/* The settle's: each copy the settle table may need, in order. */
+	SETTLE_CUR,		/* in: cur, cur_off, cur_pos */
+	SETTLE_RPOS,		/* in.value: the held lane's rpos */
+	SETTLE_WPOS,		/* in.value: its wpos */
+	SETTLE_REC,		/* in: its record at cur_pos */
+	SETTLE_CLEARED,		/* cur is stored as none: pick */
+
+	/* The pick's: the look at lane r->at, then wends. */
+	LOOK_RPOS,		/* in.value: rpos */
+	LOOK_CLOCK,		/* in.value: the clock before the wpos copy */
+	LOOK_WPOS,		/* in.value: wpos */
+	LOOK_REC,		/* in: the record at rpos */
+	LOOK_NOTICED,		/* {drained} or the broken log went out */
+	LOOK_WENDS,		/* in.value: wends */
+
+	/* The copy's. */
+	COPY_CLAIMED,		/* the claim is in the lock page: copy */
+	COPY_COPIED,		/* the bytes are in the buffer */
+
+	/* The finish's. */
+	FINISH_RPOS,		/* rpos is past the record: cur to none */
+	FINISH_CUR,		/* cur is none: fence */
+	FINISH_FENCED,		/* copy need */
+	FINISH_NEED,		/* in.value: need */
+	FINISH_RUNG,		/* the writer was rung */
+
+	/* Arming's: lane r->at. */
+	ARM_SLEEPER,		/* its sleepers bit is set: store wake */
+	ARM_WAKE,		/* its wake is stored: the next lane */
+	ARM_FENCED,		/* every open lane armed and fenced: pick */
+
+	/* The release's. */
+	RELEASE_STORED,		/* owner is 0: fence */
+	RELEASE_FENCED,		/* copy waiters */
+	RELEASE_WAITERS,	/* in.value: waiters */
+	RELEASE_RUNG,		/* the other waiters were rung */
+
+	/* The wait's. */
+	WAIT_DATA,		/* woken: clear the sleepers bits, start over */
+	WAIT_REPORT		/* woken by the report wends named: start over */
+};
+
+/* What follows step 8, the release of the reader lock. */
 enum {
 	R_AFTER_DONE = 0,	/* return result */
 	R_AFTER_DATA,		/* wait for data, then clear sleepers bits */
@@ -273,15 +352,18 @@ enum {
 void
 erx_pipe_rstart(erx_pipe_rstate_t *r, uint64_t len)
 {
-	r->phase = R_LOCK;
-	r->after = R_AFTER_DONE;
+	r->stage = R_LOCK;
+	r->phase = LOCK_START;
 	r->at = 0;
+	r->len = len;
+	r->done = 0;
+	r->armed = false;
+	r->settle = (erx_pipe_cur_copy_t){ .cur = ERX_PIPE_NONE };
+	r->settle_at = ERX_PIPE_LANE_NONE;
 	r->scan = 0;
 	r->second = false;
 	r->any = false;
-	r->armed = false;
-	r->len = len;
-	r->done = 0;
+	r->gone = false;
 	r->clock = 0;
 	r->wpos = 0;
 	r->cur = ERX_PIPE_LANE_NONE;
@@ -289,69 +371,253 @@ erx_pipe_rstart(erx_pipe_rstate_t *r, uint64_t len)
 	r->cur_pos = 0;
 	r->cur_len = 0;
 	r->claim = 0;
+	r->after = R_AFTER_DONE;
 	r->result = 0;
 }
 
+static erx_pipe_act_t pipe_rlock_begin(erx_pipe_rstate_t *);
+static erx_pipe_act_t pipe_rtakeup_begin(erx_pipe_rstate_t *);
+static erx_pipe_act_t pipe_rsettle_begin(erx_pipe_rstate_t *);
+static erx_pipe_act_t pipe_rpick_begin(erx_pipe_rstate_t *);
+static erx_pipe_act_t pipe_rcopy_begin(erx_pipe_rstate_t *);
+static erx_pipe_act_t pipe_rfinish_begin(erx_pipe_rstate_t *);
+static erx_pipe_act_t pipe_rarm_begin(erx_pipe_rstate_t *);
+static erx_pipe_act_t pipe_rrelease_begin(erx_pipe_rstate_t *, uint32_t,
+    int64_t);
+static erx_pipe_act_t pipe_rnothing_readable(erx_pipe_rstate_t *);
+static erx_pipe_act_t pipe_rwait_begin(erx_pipe_rstate_t *);
+
+/*
+ * Step 1: take the lock with one compare-and-swap of owner; while another
+ * read end holds it, publish a waiters bit, fence and try again, and if it
+ * is still held, wait and start over, clearing the bit either way.  A read
+ * of 0 bytes returns at once.
+ */
 static erx_pipe_act_t
-pipe_release(erx_pipe_rstate_t *r, uint32_t after, int64_t result)
+pipe_rlock_begin(erx_pipe_rstate_t *r)
 {
-	r->after = after;
-	r->result = result;
-	r->phase = R_RELEASED;
-	return (pipe_act(ERX_PIPE_OP_RELEASE_LOCK));
+	if (r->len == 0)
+		return (pipe_done(0));
+	r->stage = R_LOCK;
+	r->phase = LOCK_TRIED;
+	return (pipe_act(ERX_PIPE_OP_TAKE_LOCK));
 }
 
-/* Lane at failed a check: it is broken from now on, and logged once. */
-static erx_pipe_act_t pipe_break(erx_pipe_rstate_t *, erx_ring_fault_t);
-
 static erx_pipe_act_t
-pipe_break(erx_pipe_rstate_t *r, erx_ring_fault_t fault)
+pipe_rlock_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
 {
-	erx_pipe_rlane_t *lane = &r->lanes[r->at];
+	switch (r->phase) {
+	case LOCK_START:
+		return (pipe_rlock_begin(r));
+	case LOCK_TRIED:
+		if (in->ok)
+			return (pipe_rtakeup_begin(r));
+		r->phase = LOCK_WAITER_SET;
+		return (pipe_act(ERX_PIPE_OP_SET_WAITER));
+	case LOCK_WAITER_SET:
+		r->phase = LOCK_FENCED;
+		return (pipe_act(ERX_PIPE_OP_FENCE));
+	case LOCK_FENCED:
+		r->phase = LOCK_RETRIED;
+		return (pipe_act(ERX_PIPE_OP_TAKE_LOCK));
+	case LOCK_RETRIED:
+		if (in->ok) {
+			r->phase = LOCK_TAKEN;
+			return (pipe_act(ERX_PIPE_OP_CLEAR_WAITER));
+		}
+		r->phase = LOCK_WOKE;
+		return (pipe_act(ERX_PIPE_OP_WAIT));
+	case LOCK_TAKEN:
+		return (pipe_rtakeup_begin(r));
+	case LOCK_WOKE:
+		r->phase = LOCK_START;
+		return (pipe_act(ERX_PIPE_OP_CLEAR_WAITER));
+	}
+	return (pipe_done(-EIO));
+}
+
+/*
+ * Step 2: bring the lane set up to date.  The event executor has applied
+ * the reports, appending lanes and marking writers gone; a broken lane
+ * whose writer has gone is closed now, by one {drained}, as a lane found
+ * empty after its writer went is closed by the look that finds it.  A
+ * lost pipe fails the read with EIO.
+ */
+static erx_pipe_act_t
+pipe_rtakeup_next(erx_pipe_rstate_t *r)
+{
+	erx_pipe_rlane_t *lane;
 	erx_pipe_act_t act;
 
-	lane->ring = ERX_PIPE_RING_BROKEN;
-	lane->has_rec = false;
-	r->phase = R_LANE_NEXT;
-	act = pipe_lane_act(ERX_PIPE_OP_BROKEN, r->at);
-	act.n = fault;
-	return (act);
+	if (r->lost)
+		return (pipe_rrelease_begin(r, R_AFTER_DONE, -EIO));
+	for (; r->at < r->nlanes; r->at++) {
+		lane = &r->lanes[r->at];
+		if (lane->writer == ERX_PIPE_WRITER_GONE &&
+		    lane->ring == ERX_PIPE_RING_BROKEN) {
+			lane->ring = ERX_PIPE_RING_DRAINED;
+			r->phase = TAKEUP_DRAINED;
+			act = pipe_lane_act(ERX_PIPE_OP_DRAINED, r->at);
+			r->at++;
+			return (act);
+		}
+	}
+	return (pipe_rsettle_begin(r));
 }
 
-/* The current record goes: cur to none, then the next look. */
 static erx_pipe_act_t
-pipe_clear_cur(erx_pipe_rstate_t *r)
+pipe_rtakeup_begin(erx_pipe_rstate_t *r)
 {
-	r->cur = ERX_PIPE_LANE_NONE;
-	r->phase = R_PICK;
+	r->stage = R_TAKEUP;
+	r->at = 0;
+	return (pipe_rtakeup_next(r));
+}
+
+static erx_pipe_act_t
+pipe_rtakeup_step(erx_pipe_rstate_t *r)
+{
+	switch (r->phase) {
+	case TAKEUP_DRAINED:
+		return (pipe_rtakeup_next(r));
+	}
+	return (pipe_done(-EIO));
+}
+
+/*
+ * Step 3: settle the current record by the lock page's table
+ * (erx_pipe_settle).  The reader copies cur and then only what the table
+ * needs and may safely copy: cur's lane's rpos when the reader holds that
+ * lane, its wpos when rpos is at the record, and the record's header when
+ * both positions are sound with a record between them.  Where a copy
+ * leaves nothing more to copy, the table decides from what r->settle
+ * holds.  The stops mirror the table's rows: the rows that continue or
+ * retire need every copy, the others match on what came before, so a new
+ * row that reads another field must move the stops with it.
+ */
+static erx_pipe_act_t
+pipe_rsettle_begin(erx_pipe_rstate_t *r)
+{
+	r->stage = R_SETTLE;
+	r->phase = SETTLE_CUR;
+	return (pipe_act(ERX_PIPE_OP_COPY_CUR));
+}
+
+/* The lane of write end wend that the reader holds and still reads. */
+static uint32_t
+pipe_held_lane(const erx_pipe_rstate_t *r, uint32_t wend)
+{
+	uint32_t at;
+
+	if (wend == ERX_PIPE_NONE)
+		return (ERX_PIPE_LANE_NONE);
+	for (at = 0; at < r->nlanes; at++)
+		if (r->lanes[at].wend == wend &&
+		    r->lanes[at].ring == ERX_PIPE_RING_LIVE)
+			return (at);
+	return (ERX_PIPE_LANE_NONE);
+}
+
+/* The record at pos of lane at becomes current, cur_off bytes claimed. */
+static void
+pipe_make_current(erx_pipe_rstate_t *r, uint32_t at, uint64_t pos,
+    uint32_t len, uint32_t cur_off)
+{
+	r->cur = at;
+	r->cur_pos = pos;
+	r->cur_len = len;
+	r->cur_off = cur_off;
+}
+
+/*
+ * The table's row for what r->settle holds, and what the reader does.
+ * The copy is spent once decided, so r->settle and r->settle_at hold
+ * nothing between settles.
+ */
+static erx_pipe_act_t
+pipe_rsettled(erx_pipe_rstate_t *r)
+{
+	const erx_pipe_cur_copy_t copy = r->settle;
+	const uint32_t at = r->settle_at;
+
+	r->settle = (erx_pipe_cur_copy_t){ .cur = ERX_PIPE_NONE };
+	r->settle_at = ERX_PIPE_LANE_NONE;
+	switch (erx_pipe_settle(&copy)) {
+	case ERX_PIPE_SETTLE_CONTINUE:
+		pipe_make_current(r, at, copy.cur_pos, copy.len,
+		    copy.cur_off);
+		return (pipe_rcopy_begin(r));
+	case ERX_PIPE_SETTLE_RETIRE:
+		pipe_make_current(r, at, copy.cur_pos, copy.len,
+		    copy.cur_off);
+		return (pipe_rfinish_begin(r));
+	case ERX_PIPE_SETTLE_FINISHED:
+	case ERX_PIPE_SETTLE_NONE:
+		break;
+	}
+	if (copy.cur == ERX_PIPE_NONE)
+		return (pipe_rpick_begin(r));	/* already none */
+	r->phase = SETTLE_CLEARED;
 	return (pipe_act(ERX_PIPE_OP_STORE_CUR));
 }
 
-/* The current record is read to its end: advance rpos past it. */
 static erx_pipe_act_t
-pipe_finish(erx_pipe_rstate_t *r)
+pipe_rsettle_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
 {
-	r->phase = R_FINISH_CUR;
-	return (pipe_value_act(ERX_PIPE_OP_STORE_RPOS, r->cur,
-	    r->cur_pos + erx_ring_span(r->cur_len)));
+	erx_pipe_cur_copy_t *copy = &r->settle;
+	erx_ring_copy_t ring;
+
+	switch (r->phase) {
+	case SETTLE_CUR:
+		r->settle_at = pipe_held_lane(r, in->cur);
+		*copy = (erx_pipe_cur_copy_t){ .cur = in->cur,
+		    .cur_off = in->cur_off, .cur_pos = in->cur_pos,
+		    .held = r->settle_at != ERX_PIPE_LANE_NONE };
+		if (!copy->held)
+			return (pipe_rsettled(r));
+		r->phase = SETTLE_RPOS;
+		return (pipe_lane_act(ERX_PIPE_OP_LOAD_RPOS, r->settle_at));
+	case SETTLE_RPOS:
+		r->lanes[r->settle_at].rpos = in->value;
+		copy->rpos = in->value;
+		if (copy->rpos != copy->cur_pos)
+			return (pipe_rsettled(r));
+		r->phase = SETTLE_WPOS;
+		return (pipe_lane_act(ERX_PIPE_OP_LOAD_WPOS, r->settle_at));
+	case SETTLE_WPOS:
+		r->wpos = in->value;
+		ring = (erx_ring_copy_t){ .rpos = copy->cur_pos,
+		    .wpos = r->wpos, .kind = PIPE_NO_KIND };
+		if (erx_ring_check(r->lanes[r->settle_at].size, &ring) !=
+		    ERX_RING_KIND)
+			return (pipe_rsettled(r));	/* no sound record */
+		r->phase = SETTLE_REC;
+		return (pipe_pos_act(ERX_PIPE_OP_COPY_REC, r->settle_at,
+		    copy->cur_pos));
+	case SETTLE_REC:
+		ring = (erx_ring_copy_t){ .rpos = copy->cur_pos,
+		    .wpos = r->wpos, .kind = in->kind, .len = in->len };
+		copy->len = in->len;
+		copy->record_sound = in->kind == ERX_REC_DATA &&
+		    erx_ring_check(r->lanes[r->settle_at].size, &ring) ==
+		    ERX_RING_SOUND;
+		return (pipe_rsettled(r));
+	case SETTLE_CLEARED:
+		return (pipe_rpick_begin(r));
+	}
+	return (pipe_done(-EIO));
 }
 
-/* The current record's next claim: as much as is left and fits. */
-static erx_pipe_act_t
-pipe_claim(erx_pipe_rstate_t *r)
-{
-	erx_pipe_act_t act;
-	uint64_t left;
-
-	left = r->len - r->done;
-	r->claim = r->cur_len - r->cur_off < left ?
-	    r->cur_len - r->cur_off : (uint32_t)left;
-	r->phase = R_COPY;
-	act = pipe_lane_act(ERX_PIPE_OP_STORE_CUR, r->cur);
-	act.n = r->cur_off + r->claim;
-	act.pos = r->cur_pos;
-	return (act);
-}
+/*
+ * Step 4: pick the next record.  The first look covers every lane; if one
+ * holds a record, the reader copies wends, and when that names a write
+ * end the reports have not named yet, releases the lock to wait for the
+ * report.  Otherwise a second look covers the lanes found empty and the
+ * lanes appended meanwhile, and the reader takes the record with the
+ * smallest order key.  A look at a lane copies rpos, the clock, wpos
+ * (or, while every batch is open, the newest batch's end) and the record
+ * at rpos; a lane that fails a check is broken from then on, and an empty
+ * lane whose writer was gone before the look is drained and closed.
+ */
 
 /* The batches a lane may hold: the end's bound, within ERX_PIPE_BATCHES. */
 static uint32_t
@@ -372,43 +638,6 @@ pipe_close_batches(erx_pipe_rlane_t *lane)
 		if (lane->batch[i].end > lane->rpos)
 			lane->batch[kept++] = lane->batch[i];
 	lane->nbatches = kept;
-}
-
-/*
- * The look at lane at has its wpos, r->wpos, a fresh copy or the newest
- * batch's end: both positions are checked here, so a record header is
- * copied only at a sound rpos below a sound wpos.  An empty ring is
- * drained if its writer was gone before the look.
- */
-static erx_pipe_act_t
-pipe_lane_wpos(erx_pipe_rstate_t *r)
-{
-	erx_pipe_rlane_t *lane = &r->lanes[r->at];
-	erx_ring_copy_t copy = { .rpos = lane->rpos, .wpos = r->wpos,
-	    .kind = PIPE_NO_KIND };
-	erx_ring_fault_t fault;
-	erx_pipe_act_t act;
-
-	fault = erx_ring_check(lane->size, &copy);
-	if (fault != ERX_RING_SOUND && fault != ERX_RING_KIND)
-		return (pipe_break(r, fault));
-	if (r->wpos != lane->rpos) {
-		r->phase = R_LANE_REC;
-		act = pipe_lane_act(ERX_PIPE_OP_COPY_REC, r->at);
-		act.pos = lane->rpos;
-		return (act);
-	}
-	if (lane->gone) {
-		lane->ring = ERX_PIPE_RING_DRAINED;
-		if (!lane->noticed) {
-			lane->noticed = true;
-			r->phase = R_LANE_NEXT;
-			return (pipe_lane_act(ERX_PIPE_OP_DRAINED, r->at));
-		}
-	}
-	r->at++;
-	r->phase = R_LANE;
-	return (erx_pipe_rstep(r, NULL));
 }
 
 /* The lane with the smallest order key, the lowest write end on a tie. */
@@ -433,190 +662,140 @@ pipe_choose(const erx_pipe_rstate_t *r)
 	return (pick);
 }
 
-/*
- * Whether the stream has ended: every lane is broken, which counts as
- * gone and drained, or its writer is gone and the lane found drained.
- */
-static bool
-pipe_ended(const erx_pipe_rstate_t *r)
-{
-	const erx_pipe_rlane_t *lane;
-	uint32_t i;
-
-	for (i = 0; i < r->nlanes; i++) {
-		lane = &r->lanes[i];
-		if (lane->ring == ERX_PIPE_RING_LIVE ||
-		    (lane->ring == ERX_PIPE_RING_DRAINED &&
-		    lane->writer != ERX_PIPE_WRITER_GONE))
-			return (false);
-	}
-	return (true);
-}
-
-erx_pipe_act_t
-erx_pipe_rstep(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
+/* Every lane of this look is looked at: wends, the pick, or step 7. */
+static erx_pipe_act_t
+pipe_rlooked(erx_pipe_rstate_t *r)
 {
 	erx_pipe_rlane_t *lane;
-	erx_pipe_cur_copy_t settle;
-	erx_ring_copy_t copy;
-	erx_ring_fault_t fault;
-	erx_pipe_act_t act;
-	uint64_t base, mark, next;
 	uint32_t at;
 
-	lane = r->at < r->nlanes ? &r->lanes[r->at] : NULL;
+	if (!r->any)
+		return (pipe_rnothing_readable(r));
+	if (!r->second) {
+		r->phase = LOOK_WENDS;
+		return (pipe_act(ERX_PIPE_OP_COPY_WENDS));
+	}
+	at = pipe_choose(r);
+	if (at == ERX_PIPE_LANE_NONE)
+		return (pipe_rnothing_readable(r));
+	lane = &r->lanes[at];
+	pipe_make_current(r, at, lane->rpos, lane->len, 0);
+	return (pipe_rcopy_begin(r));
+}
+
+/* The look at the next lane this look covers that may hold a record. */
+static erx_pipe_act_t
+pipe_rlook_next(erx_pipe_rstate_t *r)
+{
+	erx_pipe_rlane_t *lane;
+
+	for (; r->at < r->scan; r->at++) {
+		lane = &r->lanes[r->at];
+		if (lane->ring != ERX_PIPE_RING_LIVE || lane->has_rec)
+			continue;
+		r->gone = lane->writer == ERX_PIPE_WRITER_GONE;
+		r->phase = LOOK_RPOS;
+		return (pipe_lane_act(ERX_PIPE_OP_LOAD_RPOS, r->at));
+	}
+	return (pipe_rlooked(r));
+}
+
+/* Starts a look over the lanes the reader has now. */
+static erx_pipe_act_t
+pipe_rlook_begin(erx_pipe_rstate_t *r, bool second)
+{
+	r->second = second;
+	r->scan = r->nlanes;
+	r->at = 0;
+	return (pipe_rlook_next(r));
+}
+
+static erx_pipe_act_t
+pipe_rpick_begin(erx_pipe_rstate_t *r)
+{
+	uint32_t at;
+
+	r->stage = R_PICK;
+	r->any = false;
+	for (at = 0; at < r->nlanes; at++)
+		r->lanes[at].has_rec = false;
+	return (pipe_rlook_begin(r, false));
+}
+
+/* Lane at failed a check: it is broken from now on, and logged once. */
+static erx_pipe_act_t
+pipe_rbreak(erx_pipe_rstate_t *r, erx_ring_fault_t fault)
+{
+	erx_pipe_act_t act;
+
+	r->lanes[r->at].ring = ERX_PIPE_RING_BROKEN;
+	r->phase = LOOK_NOTICED;
+	act = pipe_lane_act(ERX_PIPE_OP_BROKEN, r->at);
+	act.n = fault;
+	return (act);
+}
+
+/*
+ * The look at lane at has its wpos, r->wpos, a fresh copy or the newest
+ * batch's end: both positions are checked here, so a record header is
+ * copied only at a sound rpos below a sound wpos.  An empty ring is
+ * drained if its writer was gone before the look, and the lane closed.
+ */
+static erx_pipe_act_t
+pipe_rlook_wpos(erx_pipe_rstate_t *r)
+{
+	erx_pipe_rlane_t *lane = &r->lanes[r->at];
+	erx_ring_copy_t copy = { .rpos = lane->rpos, .wpos = r->wpos,
+	    .kind = PIPE_NO_KIND };
+	erx_ring_fault_t fault;
+
+	fault = erx_ring_check(lane->size, &copy);
+	if (fault != ERX_RING_SOUND && fault != ERX_RING_KIND)
+		return (pipe_rbreak(r, fault));
+	if (r->wpos != lane->rpos) {
+		r->phase = LOOK_REC;
+		return (pipe_pos_act(ERX_PIPE_OP_COPY_REC, r->at, lane->rpos));
+	}
+	if (r->gone) {
+		lane->ring = ERX_PIPE_RING_DRAINED;
+		r->phase = LOOK_NOTICED;
+		return (pipe_lane_act(ERX_PIPE_OP_DRAINED, r->at));
+	}
+	r->at++;
+	return (pipe_rlook_next(r));
+}
+
+static erx_pipe_act_t
+pipe_rpick_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
+{
+	erx_pipe_rlane_t *lane;
+	erx_ring_copy_t copy;
+	erx_ring_fault_t fault;
+	uint64_t base, mark;
+
 	switch (r->phase) {
-	/* Step 1: the lock. */
-	case R_LOCK:
-		if (r->len == 0)
-			return (pipe_done(0));
-		r->phase = R_LOCKED;
-		return (pipe_act(ERX_PIPE_OP_TAKE_LOCK));
-	case R_LOCKED:
-		if (in->ok) {
-			r->at = 0;
-			r->phase = R_TAKEUP;
-			return (erx_pipe_rstep(r, NULL));
-		}
-		r->phase = R_WAITER_SET;
-		return (pipe_act(ERX_PIPE_OP_SET_WAITER));
-	case R_WAITER_SET:
-		r->phase = R_RETRY;
-		return (pipe_act(ERX_PIPE_OP_FENCE));
-	case R_RETRY:
-		r->phase = R_RELOCKED;
-		return (pipe_act(ERX_PIPE_OP_TAKE_LOCK));
-	case R_RELOCKED:
-		r->at = 0;
-		r->phase = in->ok ? R_TAKEUP : R_LOCK_WOKE;
-		return (pipe_act(in->ok ? ERX_PIPE_OP_CLEAR_WAITER :
-		    ERX_PIPE_OP_WAIT));
-	case R_LOCK_WOKE:
-		r->phase = R_LOCK;
-		return (pipe_act(ERX_PIPE_OP_CLEAR_WAITER));
-
-	/* Step 2: the reports; a lane gone and drained is noticed once. */
-	case R_TAKEUP:
-		if (r->lost)
-			return (pipe_release(r, R_AFTER_DONE, -EIO));
-		for (; r->at < r->nlanes; r->at++) {
-			lane = &r->lanes[r->at];
-			if (lane->writer == ERX_PIPE_WRITER_GONE &&
-			    lane->ring != ERX_PIPE_RING_LIVE && !lane->noticed) {
-				lane->noticed = true;
-				return (pipe_lane_act(ERX_PIPE_OP_DRAINED,
-				    r->at++));
-			}
-		}
-		r->phase = R_SETTLE;
-		return (erx_pipe_rstep(r, NULL));
-
-	/* Step 3: settle the current record by the lock page's table. */
-	case R_SETTLE:
-		r->phase = R_CUR;
-		return (pipe_act(ERX_PIPE_OP_COPY_CUR));
-	case R_CUR:
-		r->cur = ERX_PIPE_LANE_NONE;
-		for (at = 0; at < r->nlanes; at++)
-			if (r->lanes[at].wend == in->cur &&
-			    r->lanes[at].ring == ERX_PIPE_RING_LIVE)
-				r->cur = at;
-		if (r->cur == ERX_PIPE_LANE_NONE) {
-			if (in->cur == ERX_PIPE_NONE) {
-				r->phase = R_PICK;
-				return (erx_pipe_rstep(r, NULL));
-			}
-			return (pipe_clear_cur(r));
-		}
-		r->cur_off = in->cur_off;
-		r->cur_pos = in->cur_pos;
-		r->phase = R_CUR_RPOS;
-		return (pipe_lane_act(ERX_PIPE_OP_LOAD_RPOS, r->cur));
-	case R_CUR_RPOS:
-		r->lanes[r->cur].rpos = in->value;
-		if (in->value == r->cur_pos) {
-			r->phase = R_CUR_WPOS;
-			return (pipe_lane_act(ERX_PIPE_OP_LOAD_WPOS, r->cur));
-		}
-		/* Not at the record: finished by another reader, or nothing. */
-		return (pipe_clear_cur(r));
-	case R_CUR_WPOS:
-		r->wpos = in->value;
-		copy = (erx_ring_copy_t){ .rpos = r->cur_pos, .wpos = r->wpos,
-		    .kind = PIPE_NO_KIND };
-		if (erx_ring_check(r->lanes[r->cur].size, &copy) !=
-		    ERX_RING_KIND)
-			return (pipe_clear_cur(r));
-		r->phase = R_CUR_REC;
-		act = pipe_lane_act(ERX_PIPE_OP_COPY_REC, r->cur);
-		act.pos = r->cur_pos;
-		return (act);
-	case R_CUR_REC:
-		copy = (erx_ring_copy_t){ .rpos = r->cur_pos, .wpos = r->wpos,
-		    .kind = in->kind, .len = in->len };
-		settle = (erx_pipe_cur_copy_t){ .cur = r->lanes[r->cur].wend,
-		    .cur_off = r->cur_off, .cur_pos = r->cur_pos, .held = true,
-		    .rpos = r->cur_pos, .len = in->len,
-		    .record_sound = in->kind == ERX_REC_DATA &&
-		    erx_ring_check(r->lanes[r->cur].size, &copy) ==
-		    ERX_RING_SOUND };
-		r->cur_len = in->len;
-		switch (erx_pipe_settle(&settle)) {
-		case ERX_PIPE_SETTLE_CONTINUE:
-			return (pipe_claim(r));
-		case ERX_PIPE_SETTLE_RETIRE:
-			return (pipe_finish(r));
-		case ERX_PIPE_SETTLE_FINISHED:
-		case ERX_PIPE_SETTLE_NONE:
-			break;
-		}
-		return (pipe_clear_cur(r));
-
-	/*
-	 * Step 4: look at every lane; if one holds a record, compare wends
-	 * with the write ends known, look again at the lanes found empty and
-	 * those taken up, and pick by order key.
-	 */
-	case R_PICK:
-		r->scan = r->nlanes;
-		r->at = 0;
-		r->second = false;
-		r->any = false;
-		for (at = 0; at < r->nlanes; at++)
-			r->lanes[at].has_rec = false;
-		r->phase = R_LANE;
-		return (erx_pipe_rstep(r, NULL));
-	case R_LANE:
-		for (; r->at < r->scan; r->at++) {
-			lane = &r->lanes[r->at];
-			if (lane->ring != ERX_PIPE_RING_LIVE || lane->has_rec)
-				continue;
-			lane->gone = lane->writer == ERX_PIPE_WRITER_GONE;
-			r->phase = R_LANE_RPOS;
-			return (pipe_lane_act(ERX_PIPE_OP_LOAD_RPOS, r->at));
-		}
-		r->phase = R_LOOKED;
-		return (erx_pipe_rstep(r, NULL));
-	case R_LANE_RPOS:
+	case LOOK_RPOS:
+		lane = &r->lanes[r->at];
 		lane->rpos = in->value;
 		pipe_close_batches(lane);
 		if (lane->nbatches < pipe_batches(r)) {
-			r->phase = R_LANE_CLOCK;
+			r->phase = LOOK_CLOCK;
 			return (pipe_act(ERX_PIPE_OP_CLOCK));
 		}
 		/* Every batch open: no new copy of wpos until one closes. */
 		r->wpos = lane->batch[lane->nbatches - 1].end;
-		return (pipe_lane_wpos(r));
-	case R_LANE_CLOCK:
+		return (pipe_rlook_wpos(r));
+	case LOOK_CLOCK:
 		r->clock = in->value;
-		r->phase = R_LANE_WPOS;
+		r->phase = LOOK_WPOS;
 		return (pipe_lane_act(ERX_PIPE_OP_LOAD_WPOS, r->at));
-	case R_LANE_WPOS:
+	case LOOK_WPOS:
+		lane = &r->lanes[r->at];
 		copy = (erx_ring_copy_t){ .rpos = lane->rpos, .wpos = in->value,
 		    .kind = PIPE_NO_KIND };
 		fault = erx_ring_check(lane->size, &copy);
 		if (fault != ERX_RING_SOUND && fault != ERX_RING_KIND)
-			return (pipe_break(r, fault));
+			return (pipe_rbreak(r, fault));
 		/*
 		 * Bytes past the newest batch open one, marked with the clock
 		 * before the previous copy, the last look without them.
@@ -631,165 +810,341 @@ erx_pipe_rstep(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
 		lane->looked = true;
 		r->wpos = lane->nbatches > 0 ?
 		    lane->batch[lane->nbatches - 1].end : lane->rpos;
-		return (pipe_lane_wpos(r));
-	case R_LANE_REC:
+		return (pipe_rlook_wpos(r));
+	case LOOK_REC:
+		lane = &r->lanes[r->at];
 		copy = (erx_ring_copy_t){ .rpos = lane->rpos, .wpos = r->wpos,
 		    .kind = in->kind, .len = in->len };
 		fault = erx_ring_check(lane->size, &copy);
 		if (fault != ERX_RING_SOUND)
-			return (pipe_break(r, fault));
+			return (pipe_rbreak(r, fault));
 		/* A control record waits for the second tier (fails safe). */
 		if (in->kind != ERX_REC_DATA)
-			return (pipe_break(r, ERX_RING_KIND));
+			return (pipe_rbreak(r, ERX_RING_KIND));
 		lane->has_rec = true;
 		lane->len = in->len;
 		lane->key = in->stamp > lane->batch[0].mark ?
 		    in->stamp : lane->batch[0].mark;
 		r->any = true;
-		/* FALLTHROUGH */
-	case R_LANE_NEXT:
 		r->at++;
-		r->phase = R_LANE;
-		return (erx_pipe_rstep(r, NULL));
-	case R_LOOKED:
-		if (!r->any)
-			break;		/* to step 7 */
-		if (!r->second) {
-			r->phase = R_WENDS;
-			return (pipe_act(ERX_PIPE_OP_COPY_WENDS));
-		}
-		r->cur = pipe_choose(r);
-		if (r->cur == ERX_PIPE_LANE_NONE)
-			break;
-		r->cur_pos = r->lanes[r->cur].rpos;
-		r->cur_len = r->lanes[r->cur].len;
-		r->cur_off = 0;
-		return (pipe_claim(r));
-	case R_WENDS:
+		return (pipe_rlook_next(r));
+	case LOOK_NOTICED:
+		r->at++;
+		return (pipe_rlook_next(r));
+	case LOOK_WENDS:
 		/* A write end the reports have not named yet: wait for it. */
 		if (in->value > r->known)
-			return (pipe_release(r, R_AFTER_REPORT, 0));
-		r->second = true;
-		r->scan = r->nlanes;
-		r->at = 0;
-		r->phase = R_LANE;
-		return (erx_pipe_rstep(r, NULL));
+			return (pipe_rrelease_begin(r, R_AFTER_REPORT, 0));
+		return (pipe_rlook_begin(r, true));
+	}
+	return (pipe_done(-EIO));
+}
 
-	/* Steps 5 and 6: claim, copy, finish, and ring the writer. */
-	case R_COPY:
-		r->phase = R_COPIED;
-		act = pipe_lane_act(ERX_PIPE_OP_COPY_DATA, r->cur);
-		act.pos = r->cur_pos + PIPE_GRAIN + r->cur_off;
+/*
+ * Step 5: record in the lock page the bytes of the current record this
+ * copy takes, as much as is left of it and fits, then copy them.  A
+ * record read to its end is finished; one that does not fit stays current
+ * for the next read, and the buffer is full.
+ */
+static erx_pipe_act_t
+pipe_rcopy_begin(erx_pipe_rstate_t *r)
+{
+	erx_pipe_act_t act;
+	uint64_t left;
+
+	left = r->len - r->done;
+	r->claim = r->cur_len - r->cur_off < left ?
+	    r->cur_len - r->cur_off : (uint32_t)left;
+	r->stage = R_COPY;
+	r->phase = COPY_CLAIMED;
+	act = pipe_lane_act(ERX_PIPE_OP_STORE_CUR, r->cur);
+	act.n = r->cur_off + r->claim;
+	act.pos = r->cur_pos;
+	return (act);
+}
+
+static erx_pipe_act_t
+pipe_rcopy_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
+{
+	erx_pipe_act_t act;
+
+	(void)in;
+	switch (r->phase) {
+	case COPY_CLAIMED:
+		r->phase = COPY_COPIED;
+		act = pipe_pos_act(ERX_PIPE_OP_COPY_DATA, r->cur,
+		    r->cur_pos + PIPE_GRAIN + r->cur_off);
 		act.n = r->claim;
 		act.off = r->done;
 		return (act);
-	case R_COPIED:
+	case COPY_COPIED:
 		r->done += r->claim;
 		r->cur_off += r->claim;
 		if (r->cur_off == r->cur_len)
-			return (pipe_finish(r));
-		/* The buffer is full; the record stays current. */
-		return (pipe_release(r, R_AFTER_DONE, (int64_t)r->done));
-	case R_FINISH_CUR:
-		r->phase = R_FINISH_FENCE;
-		return (pipe_act(ERX_PIPE_OP_STORE_CUR));
-	case R_FINISH_FENCE:
-		r->phase = R_NEED;
-		return (pipe_act(ERX_PIPE_OP_FENCE));
-	case R_NEED:
-		r->phase = R_NEED_IN;
-		return (pipe_lane_act(ERX_PIPE_OP_COPY_NEED, r->cur));
-	case R_NEED_IN:
-		next = r->cur_pos + erx_ring_span(r->cur_len);
-		at = r->cur;
-		r->lanes[at].rpos = next;
-		pipe_close_batches(&r->lanes[at]);
-		r->cur = ERX_PIPE_LANE_NONE;
-		r->phase = R_MORE;
-		if (pipe_crossed(r->cur_pos, next, in->value))
-			return (pipe_lane_act(ERX_PIPE_OP_RING_WRITER, at));
-		/* FALLTHROUGH */
-	case R_MORE:
-		if (r->done < r->len) {
-			r->phase = R_PICK;
-			return (erx_pipe_rstep(r, NULL));
-		}
-		return (pipe_release(r, R_AFTER_DONE, (int64_t)r->done));
+			return (pipe_rfinish_begin(r));
+		return (pipe_rrelease_begin(r, R_AFTER_DONE,
+		    (int64_t)r->done));
+	}
+	return (pipe_done(-EIO));
+}
 
-	/* Step 7: the end of the stream, EAGAIN, or sleep. */
-	case R_ARM:
-		for (; r->at < r->scan; r->at++) {
-			lane = &r->lanes[r->at];
-			if (lane->ring == ERX_PIPE_RING_LIVE &&
-			    lane->writer == ERX_PIPE_WRITER_OPEN) {
-				r->phase = R_ARM_WAKE;
-				return (pipe_lane_act(ERX_PIPE_OP_SET_SLEEPER,
-				    r->at));
+/*
+ * Step 6: the current record is read to its end.  Advance rpos past it,
+ * set cur to none, fence, and ring the writer if the store crossed its
+ * need; then read on while the buffer has room.
+ */
+static erx_pipe_act_t
+pipe_rfinish_begin(erx_pipe_rstate_t *r)
+{
+	r->stage = R_FINISH;
+	r->phase = FINISH_RPOS;
+	return (pipe_value_act(ERX_PIPE_OP_STORE_RPOS, r->cur,
+	    r->cur_pos + erx_ring_span(r->cur_len)));
+}
+
+/* The next record, or the count when the buffer is full. */
+static erx_pipe_act_t
+pipe_rread_on(erx_pipe_rstate_t *r)
+{
+	if (r->done < r->len)
+		return (pipe_rpick_begin(r));
+	return (pipe_rrelease_begin(r, R_AFTER_DONE, (int64_t)r->done));
+}
+
+static erx_pipe_act_t
+pipe_rfinish_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
+{
+	erx_pipe_rlane_t *lane;
+	uint64_t next;
+	uint32_t at;
+
+	switch (r->phase) {
+	case FINISH_RPOS:
+		r->phase = FINISH_CUR;
+		return (pipe_act(ERX_PIPE_OP_STORE_CUR));
+	case FINISH_CUR:
+		r->phase = FINISH_FENCED;
+		return (pipe_act(ERX_PIPE_OP_FENCE));
+	case FINISH_FENCED:
+		r->phase = FINISH_NEED;
+		return (pipe_lane_act(ERX_PIPE_OP_COPY_NEED, r->cur));
+	case FINISH_NEED:
+		at = r->cur;
+		lane = &r->lanes[at];
+		next = r->cur_pos + erx_ring_span(r->cur_len);
+		lane->rpos = next;
+		pipe_close_batches(lane);
+		r->cur = ERX_PIPE_LANE_NONE;
+		if (pipe_crossed(r->cur_pos, next, in->value)) {
+			r->phase = FINISH_RUNG;
+			return (pipe_lane_act(ERX_PIPE_OP_RING_WRITER, at));
+		}
+		return (pipe_rread_on(r));
+	case FINISH_RUNG:
+		return (pipe_rread_on(r));
+	}
+	return (pipe_done(-EIO));
+}
+
+/*
+ * Whether the stream has ended: every lane is broken, which counts as
+ * gone and drained, or drained after its writer went.
+ */
+static bool
+pipe_ended(const erx_pipe_rstate_t *r)
+{
+	uint32_t i;
+
+	for (i = 0; i < r->nlanes; i++)
+		if (r->lanes[i].ring == ERX_PIPE_RING_LIVE)
+			return (false);
+	return (true);
+}
+
+/*
+ * Step 7: nothing is readable.  A read that copied something returns its
+ * count; one that copied nothing returns 0 at the end of the stream, else
+ * fails with EAGAIN when non-blocking.  A blocking read arms every open
+ * lane and picks once more; armed and still finding nothing, it waits.
+ */
+static erx_pipe_act_t
+pipe_rnothing_readable(erx_pipe_rstate_t *r)
+{
+	if (r->done > 0)
+		return (pipe_rrelease_begin(r, R_AFTER_DONE, (int64_t)r->done));
+	if (pipe_ended(r))
+		return (pipe_rrelease_begin(r, R_AFTER_DONE, 0));
+	if (r->nonblock)
+		return (pipe_rrelease_begin(r, R_AFTER_DONE, -EAGAIN));
+	if (r->armed)
+		return (pipe_rrelease_begin(r, R_AFTER_DATA, 0));
+	return (pipe_rarm_begin(r));
+}
+
+/*
+ * Arms the next lane the last look covered whose writer is open: its
+ * sleepers bit, then wake = rpos + 1.  Once every such lane is armed, a
+ * full fence, then step 4 again.
+ */
+static erx_pipe_act_t
+pipe_rarm_next(erx_pipe_rstate_t *r)
+{
+	erx_pipe_rlane_t *lane;
+
+	for (; r->at < r->scan; r->at++) {
+		lane = &r->lanes[r->at];
+		if (lane->ring == ERX_PIPE_RING_LIVE &&
+		    lane->writer == ERX_PIPE_WRITER_OPEN) {
+			r->phase = ARM_SLEEPER;
+			return (pipe_lane_act(ERX_PIPE_OP_SET_SLEEPER, r->at));
+		}
+	}
+	r->armed = true;
+	r->phase = ARM_FENCED;
+	return (pipe_act(ERX_PIPE_OP_FENCE));
+}
+
+static erx_pipe_act_t
+pipe_rarm_begin(erx_pipe_rstate_t *r)
+{
+	r->stage = R_ARM;
+	r->at = 0;
+	return (pipe_rarm_next(r));
+}
+
+static erx_pipe_act_t
+pipe_rarm_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
+{
+	(void)in;
+	switch (r->phase) {
+	case ARM_SLEEPER:
+		r->phase = ARM_WAKE;
+		return (pipe_value_act(ERX_PIPE_OP_STORE_WAKE, r->at,
+		    r->lanes[r->at].rpos + 1));
+	case ARM_WAKE:
+		r->at++;
+		return (pipe_rarm_next(r));
+	case ARM_FENCED:
+		return (pipe_rpick_begin(r));
+	}
+	return (pipe_done(-EIO));
+}
+
+/*
+ * Step 8: release the lock by storing 0 in owner, fence, copy waiters and
+ * ring every other read end whose bit is set; then do what after says.
+ */
+static erx_pipe_act_t
+pipe_rrelease_begin(erx_pipe_rstate_t *r, uint32_t after, int64_t result)
+{
+	r->after = after;
+	r->result = result;
+	r->stage = R_RELEASE;
+	r->phase = RELEASE_STORED;
+	return (pipe_act(ERX_PIPE_OP_RELEASE_LOCK));
+}
+
+static erx_pipe_act_t
+pipe_rreleased(erx_pipe_rstate_t *r)
+{
+	if (r->after == R_AFTER_DONE)
+		return (pipe_done(r->result));
+	return (pipe_rwait_begin(r));
+}
+
+static erx_pipe_act_t
+pipe_rrelease_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
+{
+	uint64_t others;
+
+	switch (r->phase) {
+	case RELEASE_STORED:
+		r->phase = RELEASE_FENCED;
+		return (pipe_act(ERX_PIPE_OP_FENCE));
+	case RELEASE_FENCED:
+		r->phase = RELEASE_WAITERS;
+		return (pipe_act(ERX_PIPE_OP_COPY_WAITERS));
+	case RELEASE_WAITERS:
+		others = in->value & ~(UINT64_C(1) << r->rix);
+		if (others != 0) {
+			r->phase = RELEASE_RUNG;
+			return (pipe_value_act(ERX_PIPE_OP_RING_READERS,
+			    ERX_PIPE_LANE_NONE, others));
+		}
+		return (pipe_rreleased(r));
+	case RELEASE_RUNG:
+		return (pipe_rreleased(r));
+	}
+	return (pipe_done(-EIO));
+}
+
+/*
+ * The wait after step 8: for the doorbell, and then, after a wait for
+ * data, the clearing of the end's sleepers bit in every lane it reads;
+ * then the read starts over at step 1, unarmed.
+ */
+static erx_pipe_act_t
+pipe_rwait_begin(erx_pipe_rstate_t *r)
+{
+	r->stage = R_WAIT;
+	if (r->after == R_AFTER_DATA) {
+		r->at = 0;
+		r->phase = WAIT_DATA;
+	} else {
+		r->armed = false;
+		r->phase = WAIT_REPORT;
+	}
+	return (pipe_act(ERX_PIPE_OP_WAIT));
+}
+
+static erx_pipe_act_t
+pipe_rwait_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
+{
+	erx_pipe_act_t act;
+
+	(void)in;
+	switch (r->phase) {
+	case WAIT_DATA:
+		for (; r->at < r->nlanes; r->at++) {
+			if (r->lanes[r->at].ring == ERX_PIPE_RING_LIVE) {
+				act = pipe_lane_act(ERX_PIPE_OP_CLEAR_SLEEPER,
+				    r->at);
+				r->at++;
+				return (act);
 			}
 		}
-		r->armed = true;
-		r->phase = R_PICK;
-		return (pipe_act(ERX_PIPE_OP_FENCE));
-	case R_ARM_WAKE:
-		r->phase = R_ARM_NEXT;
-		return (pipe_value_act(ERX_PIPE_OP_STORE_WAKE, r->at,
-		    lane->rpos + 1));
-	case R_ARM_NEXT:
-		r->at++;
-		r->phase = R_ARM;
-		return (erx_pipe_rstep(r, NULL));
-
-	/* Step 8: release the lock and ring its waiters. */
-	case R_RELEASED:
-		r->phase = R_WAITERS;
-		return (pipe_act(ERX_PIPE_OP_FENCE));
-	case R_WAITERS:
-		r->phase = R_WAITERS_IN;
-		return (pipe_act(ERX_PIPE_OP_COPY_WAITERS));
-	case R_WAITERS_IN:
-		r->phase = R_AFTER;
-		if ((in->value & ~(UINT64_C(1) << r->rix)) != 0)
-			return (pipe_value_act(ERX_PIPE_OP_RING_READERS,
-			    ERX_PIPE_LANE_NONE,
-			    in->value & ~(UINT64_C(1) << r->rix)));
-		/* FALLTHROUGH */
-	case R_AFTER:
-		switch (r->after) {
-		case R_AFTER_DATA:
-			r->at = 0;
-			r->phase = R_DATA_WOKE;
-			return (pipe_act(ERX_PIPE_OP_WAIT));
-		case R_AFTER_REPORT:
-			r->armed = false;
-			r->phase = R_LOCK;
-			return (pipe_act(ERX_PIPE_OP_WAIT));
-		default:
-			return (pipe_done(r->result));
-		}
-	case R_DATA_WOKE:
-		for (; r->at < r->nlanes; r->at++)
-			if (r->lanes[r->at].ring == ERX_PIPE_RING_LIVE)
-				return (pipe_lane_act(ERX_PIPE_OP_CLEAR_SLEEPER,
-				    r->at++));
 		r->armed = false;
-		r->phase = R_LOCK;
-		return (erx_pipe_rstep(r, NULL));
-	default:
-		return (pipe_done(-EIO));
+		return (pipe_rlock_begin(r));
+	case WAIT_REPORT:
+		return (pipe_rlock_begin(r));
 	}
+	return (pipe_done(-EIO));
+}
 
-	/* Step 7, reached from R_LOOKED when no lane holds a record. */
-	if (r->done > 0)
-		return (pipe_release(r, R_AFTER_DONE, (int64_t)r->done));
-	if (pipe_ended(r))
-		return (pipe_release(r, R_AFTER_DONE, 0));
-	if (r->nonblock)
-		return (pipe_release(r, R_AFTER_DONE, -EAGAIN));
-	if (r->armed)
-		return (pipe_release(r, R_AFTER_DATA, 0));
-	r->at = 0;
-	r->phase = R_ARM;
-	return (erx_pipe_rstep(r, NULL));
+erx_pipe_act_t
+erx_pipe_rstep(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
+{
+	switch (r->stage) {
+	case R_LOCK:
+		return (pipe_rlock_step(r, in));
+	case R_TAKEUP:
+		return (pipe_rtakeup_step(r));
+	case R_SETTLE:
+		return (pipe_rsettle_step(r, in));
+	case R_PICK:
+		return (pipe_rpick_step(r, in));
+	case R_COPY:
+		return (pipe_rcopy_step(r, in));
+	case R_FINISH:
+		return (pipe_rfinish_step(r, in));
+	case R_ARM:
+		return (pipe_rarm_step(r, in));
+	case R_RELEASE:
+		return (pipe_rrelease_step(r, in));
+	case R_WAIT:
+		return (pipe_rwait_step(r, in));
+	}
+	return (pipe_done(-EIO));
 }
 
 short
