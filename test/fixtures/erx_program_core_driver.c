@@ -345,6 +345,7 @@ constants(void)
 	    ERX_HR_GIVE, ERX_HR_DESTROY);
 	printf("const hr_alloc %" PRIu32 "\nconst hr_attach %" PRIu32 "\nconst hr_signal %" PRIu32 "\n", ERX_HR_ALLOC,
 	    ERX_HR_ATTACH, ERX_HR_SIGNAL);
+	printf("const prot_r %" PRIu32 "\nconst prot_rw %" PRIu32 "\n", ERX_PROT_R, ERX_PROT_RW);
 	printf("const hr_read %" PRIu32 "\nconst hr_write %" PRIu32 "\nconst hr_map %" PRIu32 "\nconst hr_trigger %" PRIu32 "\n",
 	    ERX_HR_READ, ERX_HR_WRITE, ERX_HR_MAP, ERX_HR_TRIGGER);
 	for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++)
@@ -358,10 +359,8 @@ installs(void)
 	static const char *const install_names[ERX_PROGRAM_INSTALLS] = {
 		[ERX_PROGRAM_ARG_BUDGET] = "budget",
 		[ERX_PROGRAM_ARG_GROUP] = "group",
-		[ERX_PROGRAM_ARG_IN_RING] = "in_ring",
-		[ERX_PROGRAM_ARG_IN_READER] = "in_reader",
-		[ERX_PROGRAM_ARG_OUT_RING] = "out_ring",
-		[ERX_PROGRAM_ARG_OUT_READER] = "out_reader",
+		[ERX_PROGRAM_ARG_OWN_SIDE] = "own_side",
+		[ERX_PROGRAM_ARG_PEER_SIDE] = "peer_side",
 		[ERX_PROGRAM_ARG_DOORBELL] = "doorbell",
 		[ERX_PROGRAM_INSTALL_DATA] = "data",
 	};
@@ -369,6 +368,9 @@ installs(void)
 	for (uint32_t index = 0; index < ERX_PROGRAM_INSTALLS; index++)
 		printf("install %" PRIu32 " %s %" PRIu32 "\n", index, install_names[index],
 		    erx_program_install_rights(index));
+	for (uint32_t index = 0; index <= ERX_PROGRAM_INSTALLS; index++)
+		printf("prot %" PRIu32 " %s %" PRIu32 "\n", index,
+		    index < ERX_PROGRAM_INSTALLS ? install_names[index] : "past", erx_program_session_prot(index));
 	printf("install %" PRIu32 " past %" PRIu32 "\n", ERX_PROGRAM_INSTALLS,
 	    erx_program_install_rights(ERX_PROGRAM_INSTALLS));
 	for (uint32_t first = 0; first <= ERX_PROGRAM_INSTALLS + 1; first++)

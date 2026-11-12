@@ -1558,9 +1558,6 @@ it; git history is the record of completed work.
 * [Low] hosted backend, `liberx/backend/hosted/refused.c`: a hosted runtime runs no programs; the
   channel's first memory object is refused, so `erx_program:start/1` answers `{error, enotsup}`.
   Programs in hosted mode need the hosted backend to make spaces and pass handles.
-* [Low] Programs, `abi/erx_abi.txt` (`program_arg`): AArch64 and RISC-V take the 7 `program_arg`
-  indices in argument registers. An x86-64 port needs an entry stub, because x86-64 has 6 integer
-  argument registers.
 * [Low] erx_program driver, `otp/erts/emulator/sys/erxos/erx_program_drv.c`: the session makes and
   installs the program's data area, but the session's own mapping of it waits for the handler's
   copier, its NIF, which copies the bytes of reads and writes (docs/design-programs.md, "Descriptors
@@ -1577,8 +1574,18 @@ it; git history is the record of completed work.
   sends only `fds => []`. Each case replaces the refusal with its set-up when the file
   descriptors arrive (docs/design-programs.md, "Descriptors and files").
 * [Low] erx_program driver: each program costs the session about 352 KiB of its own budget (four
+* [Medium] erx_program driver (`erx_program_drv.c` `first_registers`, `ERX_PROGRAM_BELL_BIND`): no
+  test checks what a real program receives in x0-x4 or the label its doorbell rings under; the
+  `native_space` maker checks the layout only as its own imitation of a session writes it. Add a
+  `programs` guest with an entry of its own that checks its argument registers, maps its own side
+  read-write and its peer side read-only, and takes the doorbell under its peer side's value.
+* [Low] erx_program driver: each program costs the session about 304 KiB of its own budget (two
   24 KiB lane sides, the 256 KiB data area, two IRQ objects) with no session-side bound, since
   `PROGRAM_POOL` is unbounded; many starts can exhaust the session's own budget.
+* [Low] erx_program driver, `erx_program_drv.c` (`PROGRAM_LANE_SIZE`): the size of the channel's
+  lanes, which the program's `liberx` must pass to `erx_lane_reader_init` and
+  `erx_lane_writer_init` and never read from the session's side, lives only in the driver. Make it
+  a `program_lane` limit in `abi/erx_abi.txt` beside `program_arg` before `liberx/program` uses it.
 * [Low] `abi/erx_abi.txt` (`program_arg`): the generator emits no count, so
   `ERX_PROGRAM_INSTALL_DATA` (`erx_program_core.h`) assumes `doorbell` is the last index.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/fault_gate.c` (`erx_fiasco_gate_fault`): a

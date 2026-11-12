@@ -74,20 +74,17 @@ _Static_assert(ERX_PROGRAM_INSTALLS <= PROGRAM_CAP_LIMIT, "the install fits the 
 static _Atomic uint64_t labels_given;
 
 /*
- * The channel's four memory objects, each one side of a lane's layout
- * (erx_lane_side_bytes): the program_arg index its value takes in the program, and how
- * the session maps it, writable where the session writes, the inbound ring and the
- * outbound reader page, and read-only where the program does.
+ * The channel's two sides, each one memory object in a lane side's layout
+ * (erx_lane_side_bytes), named by their writer: the session's side holds the inbound ring
+ * and the outbound reader page, the program's side the outbound ring and the inbound reader
+ * page. channel_sides gives each the program_arg index its value takes in the program,
+ * named from the program's view, and the session maps each as the core says
+ * (erx_program_session_prot), so the core's rights decide both parties' access.
  */
-#define CHANNEL_SIDES	4u
-static const struct {
-	uint32_t	arg;
-	uint32_t	prot;
-} channel_sides[CHANNEL_SIDES] = {
-	{ ERX_PROGRAM_ARG_IN_RING, ERX_PROT_RW },
-	{ ERX_PROGRAM_ARG_IN_READER, ERX_PROT_R },
-	{ ERX_PROGRAM_ARG_OUT_RING, ERX_PROT_R },
-	{ ERX_PROGRAM_ARG_OUT_READER, ERX_PROT_RW },
+enum { SESSION_SIDE, PROGRAM_SIDE, CHANNEL_SIDES };
+static const uint32_t channel_sides[CHANNEL_SIDES] = {
+	[SESSION_SIDE] = ERX_PROGRAM_ARG_PEER_SIDE,
+	[PROGRAM_SIDE] = ERX_PROGRAM_ARG_OWN_SIDE,
 };
 
 typedef struct {
@@ -99,7 +96,7 @@ typedef struct {
 	uint64_t		anchor_label;	/* what the anchor's records are kept under */
 	uint64_t		image_label;	/* and the image's */
 	/* What the start made, each ERX_CAP_NULL, or address 0, until its step made it. */
-	uint64_t		side[CHANNEL_SIDES];	/* the channel's memory objects, as channel_sides orders them */
+	uint64_t		side[CHANNEL_SIDES];	/* the channel's sides, by SESSION_SIDE and PROGRAM_SIDE */
 	uint64_t		side_addr[CHANNEL_SIDES]; /* and the session's mappings of them */
 	uint64_t		bell;		/* the program's doorbell */
 	uint64_t		data;		/* the program's data area */
@@ -249,8 +246,8 @@ channel_unmap(program_t *program)
 }
 
 /*
- * The channel's four memory objects, from the session's budget, each one lane side's
- * bytes. A step makes all or nothing, so a failure destroys those already made.
+ * The channel's two sides, from the session's budget, each one lane side's bytes. A step
+ * makes all or nothing, so a failure destroys those already made.
  */
 static int
 channel_create(program_t *program, uint64_t budget)
@@ -267,7 +264,7 @@ channel_create(program_t *program, uint64_t budget)
 	return (ERX_OK);
 }
 
-/* The session's mappings of the channel, as channel_sides says, all or none. */
+/* The session's mappings of the channel, as erx_program_session_prot says, all or none. */
 static int
 channel_map(program_t *program)
 {
@@ -279,7 +276,7 @@ channel_map(program_t *program)
 
 		if (status == ERX_OK) {
 			status = erx_vm_map(ERX_CAP_SELF, addr, bytes, program->side[side], 0,
-			    channel_sides[side].prot);
+			    erx_program_session_prot(channel_sides[side]));
 			if (status != ERX_OK)
 				(void)erx_vm_release(ERX_CAP_SELF, addr, bytes);
 		}
@@ -310,7 +307,7 @@ install(program_t *program)
 	uint32_t count;
 
 	for (uint32_t side = 0; side < CHANNEL_SIDES; side++)
-		handles[channel_sides[side].arg] = program->side[side];
+		handles[channel_sides[side]] = program->side[side];
 	for (uint32_t first = 0; (count = erx_program_install_batch(first)) > 0; first += count) {
 		int status;
 
@@ -409,8 +406,11 @@ apply(program_t *program, erx_program_action_t action)
 	case ERX_PROGRAM_INSTALL:
 		return (install(program));
 	case ERX_PROGRAM_BELL_BIND:
-		/* The channel's label is the inbound ring's value, which both sides know from the install. */
-		return (erx_irq_bind(program->bell, program->group, program->installed[ERX_PROGRAM_ARG_IN_RING]));
+		/*
+		 * The channel's label is the session's side's value in the program's table, the
+		 * program's peer side, which both parties know from the install.
+		 */
+		return (erx_irq_bind(program->bell, program->group, program->installed[ERX_PROGRAM_ARG_PEER_SIDE]));
 	case ERX_PROGRAM_THREAD_CREATE:
 		first_registers(program);
 		return (erx_thread_create(program->budget, program->image, program->group,

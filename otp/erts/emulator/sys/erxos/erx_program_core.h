@@ -58,8 +58,8 @@ typedef enum {
 	 * destroyed and the program never faults on its own channel (docs/design-programs.md,
 	 * "The channel").
 	 */
-	ERX_PROGRAM_CHANNEL_CREATE,	/* the channel's four memory objects: each lane's ring and reader page */
-	ERX_PROGRAM_CHANNEL_MAP,	/* all four into the session's space: what it writes writable, the rest read-only */
+	ERX_PROGRAM_CHANNEL_CREATE,	/* the channel's two sides, the session's and the program's */
+	ERX_PROGRAM_CHANNEL_MAP,	/* both into the session's space, as erx_program_session_prot says */
 	ERX_PROGRAM_BELL_CREATE,	/* the program's doorbell, which the driver triggers */
 	ERX_PROGRAM_DATA_CREATE,	/* the program's data area */
 	ERX_PROGRAM_IRQ_CREATE,		/* the session's doorbell, the port's own IRQ object, which the program triggers */
@@ -73,7 +73,7 @@ typedef enum {
 	ERX_PROGRAM_IMAGE_CREATE,	/* below the anchor, the same gate, the image's label */
 	ERX_PROGRAM_IMAGE_MAP,		/* the boot image's program, with erx_image_map */
 	ERX_PROGRAM_INSTALL,		/* the program's copies into the image's table (erx_program_install_rights) */
-	ERX_PROGRAM_BELL_BIND,		/* the program's doorbell into its group, labelled with the inbound ring's value */
+	ERX_PROGRAM_BELL_BIND,		/* the program's doorbell into its group, labelled with the session's side's value */
 	ERX_PROGRAM_THREAD_CREATE,	/* the image's first thread, stopped, in the program's group */
 	ERX_PROGRAM_THREAD_START,
 
@@ -240,6 +240,12 @@ size_t	erx_program_end_next(erx_program_end_t *end, erx_program_input_t input,
 
 /* The rights the program's copy at index carries: 0 past the last index. */
 uint32_t	erx_program_install_rights(uint32_t index);
+/*
+ * How the session maps the channel's side at index: read-only the side the program's copy
+ * may write, its own, and read-write the side it may only read, the session's, so each
+ * side has exactly one writer by the rights above. 0, no mapping, at any other index.
+ */
+uint32_t	erx_program_session_prot(uint32_t index);
 /*
  * How many copies the install's erx_cap_pass from index first passes: at most ERX_MSG_CAPS,
  * and 0 once first is past the last, so passes from 0, each starting where the last ended,

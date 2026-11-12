@@ -92,15 +92,17 @@
  * The program MODE_MAKER starts, as a session starts one: its first thread finds
  * PROGRAM_TAG in its last argument register, which no mode's argument reaches, the
  * values the maker installed in the registers the ABI's program_arg names, and
- * PROGRAM_MARK with its index in each register the maker leaves without a value. The
+ * PROGRAM_MARK with its index in each register past them. Each party maps the program's
+ * side of the channel at PROGRAM_SIDE_ADDR and the session's at SESSION_SIDE_ADDR. The
  * program's doorbell rings under CHANNEL_LABEL, and the maker leaves the value of a
- * group the program may not bind into at CHANNEL_OTHER_WORD of the ring.
+ * group the program may not bind into at CHANNEL_OTHER_WORD of the session's side.
  */
 #define PROGRAM_TAG_ARG	7u
 #define PROGRAM_TAG	UINT64_C(0x9e0a9e0a9e0a9e0a)
 #define PROGRAM_MARK	UINT64_C(0x3a3a3a3a00000000)
 #define PROGRAM_STATUS	57
-#define CHANNEL_ADDR	UINT64_C(0x4000a00000)
+#define PROGRAM_SIDE_ADDR	UINT64_C(0x4000a00000)
+#define SESSION_SIDE_ADDR	UINT64_C(0x4000c00000)
 #define CHANNEL_LABEL	UINT64_C(0xc4a1000000000001)
 #define CHANNEL_OTHER_WORD	1u
 

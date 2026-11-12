@@ -286,27 +286,33 @@ a program can start](#what-a-program-can-start)).
 ### The channel
 
 A program's channel is one pair of lanes and two doorbells between the
-sub-space and the session. Each lane has the one layout every lane in
-erXos has, the layout of a connection's lanes and a pipe's: a ring whose
-header, `erx_lane_hdr_t`, and data area its producer alone writes, and a
-reader page, `erx_lane_rpage_t`, that its consumer alone writes, with the
-wake handshake by published positions
+sub-space and the session, in the shape of a connection. Each lane has the
+one layout every lane in erXos has: a ring whose header,
+`erx_lane_hdr_t`, and data area its producer alone writes, and a reader
+page, `erx_lane_rpage_t`, that its consumer alone writes, with the wake
+handshake by published positions. The two lanes share their memory
+objects pairwise, so that each party writes exactly one object, its
+**side**, and maps the other's read-only: a side holds the ring header of
+the lane its party writes at its start, the reader page of the lane its
+party reads at `ERX_LANE_SIDE_RPAGE`, and the data area of the lane its
+party writes at `ERX_LANE_SIDE_DATA`
 ([design-domains.md](design-domains.md#connections)):
 
-| Object | Written by | Mapped by | Purpose |
-| --- | --- | --- | --- |
-| the **inbound lane**: a ring of 16 KiB and its reader page | the ring by the session's port driver, the reader page by the program's event executor | the program maps the ring read-only and the reader page read-write; the session the reverse | the startup message, replies, reports and signals, from the handler to the program |
-| the **outbound lane**: a ring of 16 KiB and its reader page | the ring by the program's `liberx`, the reader page by the port driver | the program maps the ring read-write and the reader page read-only; the session the reverse | requests and notices, from the program to the handler |
-| the **program's doorbell** | triggered by the port driver | bound by the session to the program's group with the channel as its label, the inbound ring's value in the program's table, which both sides know from the install; the program holds no capability to it | wakes the program's event executor: a frame in the inbound lane, or room in the outbound one |
-| the **session's doorbell** | triggered by the program | bound by the session to its own group with the port as its label; the program holds `TRIGGER` alone | wakes the port driver: a frame in the outbound lane, or room in the inbound one |
+| Object | Its pages | Written by | Mapped by | Purpose |
+| --- | --- | --- | --- | --- |
+| the **session's side** | the inbound lane's ring header and data area of 16 KiB; the outbound lane's reader page | the session's port driver | the session read-write; the program read-only, its copy carrying `READ` and `MAP` | the startup message, replies, reports and signals, from the handler to the program; how far the session has read the outbound lane |
+| the **program's side** | the outbound lane's ring header and data area of 16 KiB; the inbound lane's reader page | the program: the ring by its `liberx`, the reader page by its event executor | the program read-write, its copy carrying `READ`, `WRITE` and `MAP`; the session read-only | requests and notices, from the program to the handler; how far the program has read the inbound lane |
+| the **program's doorbell** | none: an IRQ object | triggered by the port driver | bound by the session to the program's group with the channel as its label, the session's side's value in the program's table, which both parties know from the install; the program holds no capability to it | wakes the program's event executor: a frame in the inbound lane, or room in the outbound one |
+| the **session's doorbell** | none: an IRQ object | triggered by the program | bound by the session to its own group with the port as its label; the program holds `TRIGGER` alone | wakes the port driver: a frame in the outbound lane, or room in the inbound one |
 
-The session creates the four memory objects and the two IRQ objects from
-its own budget, never the program's, since the session maps them too, and
-binds the doorbells, installs into the program's table its copies, each
+The session creates the two sides and the two IRQ objects from its own
+budget, never the program's, since the session maps them too, and binds
+the doorbells, installs into the program's table its copies, each
 without `DUP`, `GIVE` or `DESTROY`, and tells the program their values in
 the first thread's argument registers, together with the values of its
 budget and its group, in the registers `abi/erx_abi.txt`'s `program_arg`
-names; `liberx` maps the four pages before anything else.
+names from the program's view: its own side, the program's, and its peer
+side, the session's; `liberx` maps the two sides before anything else.
 The session holds the only `DESTROY` on the channel's objects and deletes
 them only after the program's budget is destroyed, so the program never
 faults on its own channel; a program that unmaps or closes its channel
@@ -1021,7 +1027,7 @@ reserved:
 | 3 | the starter's handler: **validate** | checks the frame against the protocol's grammar and bounds, the requester's right to start commands, its `children` quota and its principal's `programs` quota, and that every end and open the request names is in the requester's table | nothing to undo; `EPERM` without the right, `EAGAIN` at a quota, `EBADF` for an end or open the requester does not hold |
 | 4 | the starter's handler: **resolve** | resolves `Path` through the requester's namespace to an image ([What a program can start](#what-a-program-can-start)); for an executable file, the handler makes its image check and a filler opens it for reading, and the command server makes or finds its code object ([File objects](#file-objects)) | nothing to undo, since a code object belongs to the cache; `ENOENT` for an unknown command, `EACCES` for a file without `rx`, `ETXTBSY` for a file that keeps changing while it is read |
 | 5 | the command server, the program's handler, the pipe server: **reserve** | the command server assigns the next process id, records the program in the starter's job and creates the program's handler, which builds the record: it clones at each server, with a `walk` of no names, a grant for each entry of the requester's namespace, with the requester's rights there, and gives the program an open of its own naming the open-file description of each file, directory, terminal and socket open it hands on, which asks no server anything ([design-files.md](design-files.md#narrowing-for-a-program), [Descriptors and files](#descriptors-and-files)), copies the requester's rights beyond files and its right to start commands, and has the pipe server make an end of the same kind for each pipe end the request names ([design-pipes.md](design-pipes.md#inherited-ends)) | the command server marks the id dead, never to be given again, and drops the job's record; the handler clunks the grants it made, drops the opens it made, and tells the pipe server the ends are gone; `EMFILE` beyond a pipe's read ends, a server's error for a grant it refuses |
-| 6 | the program's handler, through the port driver: **build** | hands the port driver one plan, which it validates whole and then applies. The plan first creates the channel and the data area from the session's own budget, since the session maps both and deletes them only after the program's budget. It then carves the program's budget from the session's pool for programs, with the floor as its guarantee and the cap the spec gives it, creates its group under the programs group, and creates the anchor, with the starter's anchor or the session's space as parent, the session's fault gate and a label of its own, and the image below it under another; the driver allocates both labels and never reuses them. It then maps the image, a program command's slices from the boot image with `erx_image_map`, or the loader `erx_exec` from the boot image for an executable file; installs into the image's table the budget, the group, the channel's four memory objects and the session's doorbell, the data area, each pipe end's copies as the pipe server handed them, and the code object for `erx_exec`; binds the program's doorbell to its group; and creates the first thread, stopped, with the values of the budget, the group and the channel's objects in its argument registers | the plan is undone, the anchor stopped and released, which releases the image, and then step 5's reservations as there; `EAGAIN` for a program nested deeper than the kernel's 64 levels of spaces allow, about 60 generations of programs, `ENOMEM` for the session's budget |
+| 6 | the program's handler, through the port driver: **build** | hands the port driver one plan, which it validates whole and then applies. The plan first creates the channel and the data area from the session's own budget, since the session maps both and deletes them only after the program's budget. It then carves the program's budget from the session's pool for programs, with the floor as its guarantee and the cap the spec gives it, creates its group under the programs group, and creates the anchor, with the starter's anchor or the session's space as parent, the session's fault gate and a label of its own, and the image below it under another; the driver allocates both labels and never reuses them. It then maps the image, a program command's slices from the boot image with `erx_image_map`, or the loader `erx_exec` from the boot image for an executable file; installs into the image's table the budget, the group, the channel's two sides and the session's doorbell, the data area, each pipe end's copies as the pipe server handed them, and the code object for `erx_exec`; binds the program's doorbell to its group; and creates the first thread, stopped, with the values of the budget, the group, the channel's two sides and the session's doorbell in its argument registers | the plan is undone, the anchor stopped and released, which releases the image, and then step 5's reservations as there; `EAGAIN` for a program nested deeper than the kernel's 64 levels of spaces allow, about 60 generations of programs, `ENOMEM` for the session's budget |
 | 7 | the program's handler | writes the startup message into the image's inbound lane, with the program's `pid`, `ppid` and `pgid`, the data area's value, each descriptor's values in the program's table, and for `erx_exec` the code object's value as `image` | none: the lane is the session's own memory |
 | 8 | the session's job table, then the program's handler | when the program's starter is paused for its job, or the shell starts it for a job it has stopped, the port driver pauses the image first ([Job control](#job-control)); the handler then has the port driver start the first thread | `ERX_EDEAD` when the program was stopped first, by a kill or by its parent's or session's end: the starter still gets `{ok, Pid}`, then the child's end as `SIGKILL` |
 | 9 | the starter's handler, then the program | the handler answers `{ok, Pid}`, before any report about the child, so the reply that introduces a child always precedes the child's states. `liberx`'s start-up runs on the first thread, a worker: it maps the channel, starts the event executor and waits on a umtx word; the event executor takes the startup message from the inbound lane, copying it out as it is published and checking it, and wakes the first thread, which maps the data area and its pipe ends, builds the descriptor table, sets its mask, arms itself for vCPU upcalls with its signal IRQ object and calls `main` | a malformed message ends the program with status 127 before `main`, its reason on standard error when it has one |
@@ -1832,11 +1838,11 @@ standard streams as opens on the terminal:
 | --- | --- | --- |
 | parties | the starter, its handler or the command server, the program's handler, the port driver, the kernel; the pipe server when a pipe end is inherited | |
 | frames | 2 on the starter's channel, the request and the reply; the startup message on the program's; one report to each peer of each inherited pipe end | |
-| kernel objects | 1 budget, 1 group, 2 spaces, 4 memory objects and 2 IRQ objects for the channel, 1 memory object for the data area, 1 thread: 12; plus 3 for each inherited write end and 1 for each inherited read end ([design-pipes.md](design-pipes.md#the-objects-of-a-pipe)) | the two spaces' records, root translation tables and table pages, an estimated 16 KiB from the kernel's layouts; the channel, 48 KiB; the data area, 4 slots of 64 KiB by default; the thread's kernel stack and kernel-user page; 24 KiB for each inherited write end |
-| kernel calls | about 25: the carve, the group, two space creations, five memory objects, two IRQ objects and their bindings, one to three image maps, the installs four capabilities at a time, the thread's creation and start | |
+| kernel objects | 1 budget, 1 group, 2 spaces, 2 memory objects and 2 IRQ objects for the channel, 1 memory object for the data area, 1 thread: 10; plus 3 for each inherited write end and 1 for each inherited read end ([design-pipes.md](design-pipes.md#the-objects-of-a-pipe)) | the two spaces' records, root translation tables and table pages, an estimated 16 KiB from the kernel's layouts; the channel, 48 KiB; the data area, 4 slots of 64 KiB by default; the thread's kernel stack and kernel-user page; 24 KiB for each inherited write end |
+| kernel calls | about 23: the carve, the group, two space creations, three memory objects, two IRQ objects and their bindings, one to three image maps, the installs four capabilities at a time, the thread's creation and start | |
 | Erlang | the handler's validate, resolve and reserve steps, one `walk` of no names at a server for each mount of the namespace, and nothing at a server for an open handed on | the handler, a process of a few KiB |
 
-A program's start is budgeted at 1 ms under HVF, from about 25 kernel
+A program's start is budgeted at 1 ms under HVF, from about 23 kernel
 calls at an estimated 1 to 2 us each, the clones over the session's
 connections at an estimated 5 to 10 us each for a namespace of ten
 mounts, the handler's Erlang steps and `liberx`'s start-up, which

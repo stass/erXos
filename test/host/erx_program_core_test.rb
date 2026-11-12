@@ -52,9 +52,10 @@ class ErxProgramCoreTest < Minitest::Test
   # docs/design-programs.md ("The channel") deletes them only after the program's budget.
   SESSION_KEPT = %i[channel_destroy channel_unmap bell_destroy data_destroy irq_close].freeze
   # The rights of each copy the install passes, by the names of docs/design-programs.md's tables.
-  INSTALL_RIGHTS = { 'budget' => %w[alloc], 'group' => %w[attach signal], 'in_ring' => %w[read map],
-                     'in_reader' => %w[read write map], 'out_ring' => %w[read write map],
-                     'out_reader' => %w[read map], 'doorbell' => %w[trigger],
+  # The program writes its own side of the channel alone, and only maps the session's side,
+  # its peer side, which the session writes.
+  INSTALL_RIGHTS = { 'budget' => %w[alloc], 'group' => %w[attach signal], 'own_side' => %w[read write map],
+                     'peer_side' => %w[read map], 'doorbell' => %w[trigger],
                      'data' => %w[read write map] }.freeze
 
   # Each spec the driver names and the status constant erx_program_spec_check answers.
@@ -150,6 +151,10 @@ class ErxProgramCoreTest < Minitest::Test
     assert_empty order_violations(output), order_violations(output).first(20).join("\n")
   end
 
+  def test_each_side_of_the_channel_has_one_writer
+    assert_empty side_differences(output), side_differences(output).join("\n")
+  end
+
   def test_the_install_passes_each_copy_once_with_its_rights
     assert_empty install_differences(output), install_differences(output).join("\n")
   end
@@ -171,6 +176,15 @@ class ErxProgramCoreTest < Minitest::Test
     "the channel's destroy is skipped" =>
       [:start_differences, '{ ERX_PROGRAM_CHANNEL_CREATE, ERX_PROGRAM_CHANNEL_DESTROY },',
        '{ ERX_PROGRAM_CHANNEL_CREATE, NO_UNDO },'],
+    "the channel's two sides' rights are swapped" =>
+      [:install_differences,
+       "[ERX_PROGRAM_ARG_OWN_SIDE] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP,\n\t[ERX_PROGRAM_ARG_PEER_SIDE] = ERX_HR_READ | ERX_HR_MAP,",
+       "[ERX_PROGRAM_ARG_OWN_SIDE] = ERX_HR_READ | ERX_HR_MAP,\n\t[ERX_PROGRAM_ARG_PEER_SIDE] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP,"],
+    "the session maps the program's side writable" =>
+      [:side_differences, '!= 0 ? ERX_PROT_R : ERX_PROT_RW', '!= 0 ? ERX_PROT_RW : ERX_PROT_R'],
+    'the session maps an index that is not a side' =>
+      [:side_differences, 'if (index != ERX_PROGRAM_ARG_OWN_SIDE && index != ERX_PROGRAM_ARG_PEER_SIDE)',
+       'if (index >= ERX_PROGRAM_INSTALLS)'],
     'the install passes one copy fewer' =>
       [:install_differences, 'ERX_PROGRAM_INSTALLS - first < ERX_MSG_CAPS ? ERX_PROGRAM_INSTALLS - first :',
        'ERX_PROGRAM_INSTALLS - 1 - first < ERX_MSG_CAPS ? ERX_PROGRAM_INSTALLS - 1 - first :'],
@@ -252,6 +266,18 @@ class ErxProgramCoreTest < Minitest::Test
       shared.keys.map { "install #{_1}: carries DUP, GIVE or DESTROY" } +
       (out[:installs].fetch('past', nil) == 0 ? [] : ['an index past the last has rights']) +
       batch_differences(out[:batches], got.size, k.fetch('msg_caps'))
+  end
+
+  # The session maps the program's side read-only and its own read-write, so each side has
+  # exactly one writer, the party whose copy carries WRITE, and maps nothing else.
+  def side_differences(out)
+    k = out[:constants]
+    want = out[:prots].keys.to_h { [_1, 0] }.merge('own_side' => k.fetch('prot_r'), 'peer_side' => k.fetch('prot_rw'))
+    writers = %w[own_side peer_side].reject do |side|
+      (out[:installs].fetch(side) & k.fetch('hr_write') != 0) ^ (out[:prots].fetch(side) == k.fetch('prot_rw'))
+    end
+    (out[:prots] == want ? [] : ["session mappings: got #{out[:prots].inspect}, want #{want.inspect}"]) +
+      writers.map { "side #{_1}: not exactly one writer" }
   end
 
   # Passes from 0, each where the last ended, must reach exactly count in steps of 1..caps.
@@ -367,7 +393,7 @@ class ErxProgramCoreTest < Minitest::Test
 
   def parse(lines)
     out = { acts: {}, phases: {}, constants: {}, signals: {}, specs: {}, starts: {}, ends: {}, installs: {},
-            batches: {} }
+            prots: {}, batches: {} }
     lines.each { parse_line(out, _1.split) }
     out
   end
@@ -378,6 +404,7 @@ class ErxProgramCoreTest < Minitest::Test
     in ['signal', kind, signal] then out[:signals][Integer(kind)] = Integer(signal)
     in ['spec', name, status] then out[:specs][name] = Integer(status)
     in ['install', _, name, rights] then out[:installs][name] = Integer(rights)
+    in ['prot', _, name, prot] then out[:prots][name] = Integer(prot)
     in ['batch', first, count] then out[:batches][Integer(first)] = Integer(count)
     in ['act', value, name] then out[:acts][Integer(value)] = name.to_sym
     in ['phase', value, name] then out[:phases][Integer(value)] = name.to_sym

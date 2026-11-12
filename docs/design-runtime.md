@@ -1533,10 +1533,11 @@ applied in this order, each step undoing the ones before it on failure:
    its startup message; and the guarantee and cap of its budget and the
    limits of its group, which lie within the session's pool for programs
    and the session's grant.
-2. **Create the channel and the data area**: two rings, two reader pages
-   and two doorbells, in the lane layout every lane has
+2. **Create the channel and the data area**: two sides and two
+   doorbells, in the side layout of a connection, each side written by
+   one party and mapped read-only by the other
    ([design-domains.md](design-domains.md#connections)), from the
-   session's budget, with the session's mappings of the four pages; the
+   session's budget, with the session's mappings of the two sides; the
    session's doorbell bound to the session's group under the port's
    label, registered as the port's sink in the event table; and the
    program's data area, from the session's budget as the channel is
@@ -1576,10 +1577,11 @@ applied in this order, each step undoing the ones before it on failure:
    session's pipe server made them
    ([design-pipes.md](design-pipes.md#making-a-pipe)), and the code
    object of an executable file; bind the program's doorbell to the
-   program's group with the channel as its label, the inbound ring's
-   value in the program's table, which both sides know from the install;
+   program's group with the channel as its label, the session's side's
+   value in the program's table, which both parties know from the install;
    and create the image's first thread, stopped, with the values of the
-   budget, the group and the channel's objects in its argument registers.
+   budget, the group, the channel's two sides and the session's doorbell
+   in its argument registers.
 6. **Write the startup message** as the first frame of the image's
    inbound lane, in the form the programs design defines: the program's
    process ids, arguments, environment, working directory, signal state,

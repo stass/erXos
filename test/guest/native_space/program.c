@@ -269,19 +269,24 @@ bell_run(uint64_t argument, uint64_t label)
 	return (result == BELL_RUNNING ? 63 : result);
 }
 
-/* A word of the channel's ring, where this task mapped it. */
+/* A word of a side of the channel, where this task mapped it at addr. */
 static _Atomic uint64_t *
-channel_word(uint64_t word)
+channel_word(uint64_t addr, uint64_t word)
 {
-	return ((_Atomic uint64_t *)(uintptr_t)(CHANNEL_ADDR + word * sizeof(uint64_t)));
+	return ((_Atomic uint64_t *)(uintptr_t)(addr + word * sizeof(uint64_t)));
 }
 
-/* Maps the ring at CHANNEL_ADDR in this task's own space. */
+/*
+ * Maps the channel in this task's own space as each party does: the side it writes at
+ * own_addr read-write, and its peer's at peer_addr read-only.
+ */
 static bool
-channel_map(uint64_t ring)
+channel_map(uint64_t own_addr, uint64_t own, uint64_t peer_addr, uint64_t peer)
 {
-	return (erx_vm_reserve(ERX_CAP_SELF, CHANNEL_ADDR, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_OK &&
-	    erx_vm_map(ERX_CAP_SELF, CHANNEL_ADDR, PAGE, ring, 0, ERX_PROT_RW) == ERX_OK);
+	return (erx_vm_reserve(ERX_CAP_SELF, own_addr, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_OK &&
+	    erx_vm_map(ERX_CAP_SELF, own_addr, PAGE, own, 0, ERX_PROT_RW) == ERX_OK &&
+	    erx_vm_reserve(ERX_CAP_SELF, peer_addr, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_OK &&
+	    erx_vm_map(ERX_CAP_SELF, peer_addr, PAGE, peer, 0, ERX_PROT_R) == ERX_OK);
 }
 
 /* One erx_cap_pass item in the calling thread's public UTCB: a copy of handle with the rights mask. */
@@ -305,9 +310,26 @@ item_value(size_t item)
 	return (value);
 }
 
-/* What the maker installs into its child, in order: each without DUP, GIVE or DESTROY, the session's bell TRIGGER alone. */
-enum { INSTALL_BUDGET, INSTALL_GROUP, INSTALL_RING, INSTALL_SESSION_BELL, INSTALL_OTHER, INSTALL_ITEMS };
+/*
+ * What the maker installs into its child, in order: each without DUP, GIVE or DESTROY, the
+ * program's side READ, WRITE and MAP, the session's side READ and MAP and the session's
+ * bell TRIGGER alone, as a session installs them.
+ */
+enum { INSTALL_BUDGET, INSTALL_GROUP, INSTALL_PROGRAM_SIDE, INSTALL_SESSION_SIDE, INSTALL_SESSION_BELL, INSTALL_OTHER,
+    INSTALL_ITEMS };
 #define INSTALL_RIGHTS	(UINT32_MAX & ~(ERX_HR_DUP | ERX_HR_GIVE | ERX_HR_DESTROY))
+
+/* The rights the maker passes each item with. */
+static uint32_t
+install_rights(size_t item)
+{
+	if (item == INSTALL_PROGRAM_SIDE)
+		return (ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP);
+	if (item == INSTALL_SESSION_SIDE)
+		return (ERX_HR_READ | ERX_HR_MAP);
+	return (item == INSTALL_SESSION_BELL ? ERX_HR_TRIGGER : INSTALL_RIGHTS);
+}
+
 /* What MODE_MAKER adds to its child's status when the child ends with another than PROGRAM_STATUS. */
 #define CHILD_FAILED	INT64_C(1000)
 
@@ -325,18 +347,17 @@ maker_install(uint64_t child, uint64_t gate, const uint64_t handles[INSTALL_ITEM
 	item_put(0, gate, INSTALL_RIGHTS);
 	if (erx_cap_pass(ERX_CAP_SELF, child, 1) != ERX_ENOTSUP)
 		return (101);
-	item_put(0, handles[INSTALL_RING], INSTALL_RIGHTS);
+	item_put(0, handles[INSTALL_PROGRAM_SIDE], INSTALL_RIGHTS);
 	if (erx_cap_pass(ERX_CAP_SELF, ERX_CAP_SELF, 1) != ERX_ENOTSUP)
 		return (102);
-	if (erx_cap_pass(ERX_CAP_SELF, handles[INSTALL_RING], 1) != ERX_ETYPE)
+	if (erx_cap_pass(ERX_CAP_SELF, handles[INSTALL_PROGRAM_SIDE], 1) != ERX_ETYPE)
 		return (103);
 	/* At most ERX_MSG_CAPS items a call. */
 	for (size_t first = 0; first < INSTALL_ITEMS; first += ERX_MSG_CAPS) {
 		const size_t count = INSTALL_ITEMS - first < ERX_MSG_CAPS ? INSTALL_ITEMS - first : ERX_MSG_CAPS;
 
 		for (size_t item = 0; item < count; item++)
-			item_put(item, handles[first + item],
-			    first + item == INSTALL_SESSION_BELL ? ERX_HR_TRIGGER : INSTALL_RIGHTS);
+			item_put(item, handles[first + item], install_rights(first + item));
 		if (erx_cap_pass(ERX_CAP_SELF, child, (uint32_t)count) != ERX_OK)
 			return (104);
 		for (size_t item = 0; item < count; item++)
@@ -347,8 +368,8 @@ maker_install(uint64_t child, uint64_t gate, const uint64_t handles[INSTALL_ITEM
 
 /*
  * The child's starting registers, as a session writes a program's: the installed
- * values where program_arg puts them, PROGRAM_MARK with its index in the lane
- * registers this test leaves without a value, and PROGRAM_TAG in the last.
+ * values where program_arg puts them, PROGRAM_MARK with its index in the registers
+ * past them, and PROGRAM_TAG in the last.
  */
 static void
 program_registers(uint64_t pc, const uint64_t values[INSTALL_ITEMS])
@@ -361,7 +382,8 @@ program_registers(uint64_t pc, const uint64_t values[INSTALL_ITEMS])
 		start.regs.gpr[index] = PROGRAM_MARK | index;
 	start.regs.gpr[ERX_PROGRAM_ARG_BUDGET] = values[INSTALL_BUDGET];
 	start.regs.gpr[ERX_PROGRAM_ARG_GROUP] = values[INSTALL_GROUP];
-	start.regs.gpr[ERX_PROGRAM_ARG_OUT_RING] = values[INSTALL_RING];
+	start.regs.gpr[ERX_PROGRAM_ARG_OWN_SIDE] = values[INSTALL_PROGRAM_SIDE];
+	start.regs.gpr[ERX_PROGRAM_ARG_PEER_SIDE] = values[INSTALL_SESSION_SIDE];
 	start.regs.gpr[ERX_PROGRAM_ARG_DOORBELL] = values[INSTALL_SESSION_BELL];
 	start.regs.gpr[PROGRAM_TAG_ARG] = PROGRAM_TAG;
 	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
@@ -374,21 +396,23 @@ program_registers(uint64_t pc, const uint64_t values[INSTALL_ITEMS])
  * a group, another group and a bell charged to them, and a child below its own space,
  * charged to the first budget, that will run index 0 of the slice the root passed in
  * the new group. A task resizes no budget and makes no line. From its own budget it
- * makes the channel: a ring and the program's doorbell (program_bell), which it binds into the new
- * group, its creator's to bind into though the child becomes its home, and it binds
+ * makes the channel: the program's side and the session's side, which it maps as a session
+ * does (channel_map), and the program's doorbell (program_bell), which it binds into the
+ * new group, its creator's to bind into though the child becomes its home, and it binds
  * the bell, the session's doorbell, into its own home group. It installs the budget,
- * the group, the ring, the bell and the other group into the child (maker_install),
- * leaves the other group's value in the ring, and starts the child with the values in
- * its argument registers (mode_program). The child's first thread ends with
+ * the group, both sides, the bell and the other group into the child (maker_install),
+ * leaves the other group's value in its own side, and starts the child with the values
+ * in its argument registers (mode_program). The child's first thread ends with
  * PROGRAM_STATUS, and its ring of the bell, made before, reaches this task's executor
- * with the child's pattern in the ring. The first budget's destroy takes everything
- * charged to either budget, the bell included.
+ * with the child's pattern in the program's side. The first budget's destroy takes
+ * everything charged to either budget, the bell included.
  */
 static int64_t
 mode_maker(uint64_t argument)
 {
 	const uint64_t slice = argument >> MAKER_SLICE_SHIFT & HANDLE_MASK;
-	uint64_t budget, carved, group, other, bell, ring, program_bell, refused, gate, child, pc, thread, label;
+	uint64_t budget, carved, group, other, bell, program_side, session_side, program_bell, refused, gate, child, pc,
+	    thread, label;
 	uint64_t handles[INSTALL_ITEMS], values[INSTALL_ITEMS];
 	erx_fault_t record;
 	int64_t step;
@@ -407,8 +431,9 @@ mode_maker(uint64_t argument)
 	    erx_space_create(budget, ERX_CAP_SELF, gate, MAKER_LABEL, 0, CREATED_CAP_LIMIT, &child) != ERX_OK ||
 	    erx_image_map(child, slice, 0, &pc) != ERX_OK)
 		return (74);
-	if (erx_mem_create(0, PAGE, 0, &ring) != ERX_OK ||
-	    erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &program_bell) != ERX_OK || !channel_map(ring))
+	if (erx_mem_create(0, PAGE, 0, &program_side) != ERX_OK || erx_mem_create(0, PAGE, 0, &session_side) != ERX_OK ||
+	    erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &program_bell) != ERX_OK ||
+	    !channel_map(SESSION_SIDE_ADDR, session_side, PROGRAM_SIDE_ADDR, program_side))
 		return (75);
 	if (erx_irq_bind(program_bell, group, CHANNEL_LABEL) != ERX_OK)
 		return (76);
@@ -416,13 +441,15 @@ mode_maker(uint64_t argument)
 		return (77);
 	handles[INSTALL_BUDGET] = budget;
 	handles[INSTALL_GROUP] = group;
-	handles[INSTALL_RING] = ring;
+	handles[INSTALL_PROGRAM_SIDE] = program_side;
+	handles[INSTALL_SESSION_SIDE] = session_side;
 	handles[INSTALL_SESSION_BELL] = bell;
 	handles[INSTALL_OTHER] = other;
 	step = maker_install(child, gate, handles, values);
 	if (step != 0)
 		return (step);
-	atomic_store_explicit(channel_word(CHANNEL_OTHER_WORD), values[INSTALL_OTHER], memory_order_release);
+	atomic_store_explicit(channel_word(SESSION_SIDE_ADDR, CHANNEL_OTHER_WORD), values[INSTALL_OTHER],
+	    memory_order_release);
 	program_registers(pc, values);
 	if (erx_thread_create(0, child, group, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK)
 		return (78);
@@ -438,46 +465,45 @@ mode_maker(uint64_t argument)
 	step = bell_run(bell << BELL_SHIFT | ERX_CAP_NULL << BACK_SHIFT, BELL_LABEL);
 	if (step != 0)
 		return (step);
-	if (atomic_load_explicit(channel_word(0), memory_order_acquire) != WRITER_PATTERN)
+	if (atomic_load_explicit(channel_word(PROGRAM_SIDE_ADDR, 0), memory_order_acquire) != WRITER_PATTERN)
 		return (81);
 	/* The channel's objects go after the program's budget, as a session deletes them. */
 	if (erx_object_destroy(budget) != ERX_OK || erx_irq_trigger(bell) != ERX_ESTALE)
 		return (82);
-	return (erx_object_destroy(program_bell) == ERX_OK && erx_object_destroy(ring) == ERX_OK ? 0 : 83);
+	return (erx_object_destroy(program_bell) == ERX_OK && erx_object_destroy(program_side) == ERX_OK &&
+	    erx_object_destroy(session_side) == ERX_OK ? 0 : 83);
 }
 
 /*
- * The child MODE_MAKER starts (PROGRAM_TAG): checks each marked register, maps the
- * ring and finds the other group's value there, makes a doorbell of its own from the
+ * The child MODE_MAKER starts (PROGRAM_TAG): checks each marked register, maps its own
+ * side read-write and its peer side, the session's, read-only, finds the other group's
+ * value in the peer side, makes a doorbell of its own from the
  * passed budget, which the other group, neither its home nor its own, refuses, and
  * may neither unbind nor move the session's doorbell out of the maker's group. Writes
- * WRITER_PATTERN, and, once its executor took the program's doorbell under
+ * WRITER_PATTERN in its own side, and, once its executor took the program's doorbell under
  * CHANNEL_LABEL, rings the session's doorbell. Ends with PROGRAM_STATUS.
  */
 static int64_t
 mode_program(const uint64_t args[ERX_FIASCO_START_ARGS])
 {
-	static const uint32_t marked[] = {
-		ERX_PROGRAM_ARG_IN_RING, ERX_PROGRAM_ARG_IN_READER, ERX_PROGRAM_ARG_OUT_READER
-	};
 	uint64_t own, other;
 	int64_t step;
 
-	for (size_t at = 0; at < sizeof(marked) / sizeof(marked[0]); at++)
-		if (args[marked[at]] != (PROGRAM_MARK | marked[at]))
-			return (130 + (int64_t)at);
+	for (uint32_t at = ERX_PROGRAM_ARG_DOORBELL + 1; at < PROGRAM_TAG_ARG; at++)
+		if (args[at] != (PROGRAM_MARK | at))
+			return (130);
 	if (args[ERX_PROGRAM_ARG_BUDGET] == ERX_CAP_NULL || args[ERX_PROGRAM_ARG_GROUP] == ERX_CAP_NULL ||
-	    !channel_map(args[ERX_PROGRAM_ARG_OUT_RING]))
+	    !channel_map(PROGRAM_SIDE_ADDR, args[ERX_PROGRAM_ARG_OWN_SIDE], SESSION_SIDE_ADDR, args[ERX_PROGRAM_ARG_PEER_SIDE]))
 		return (133);
 	if (erx_irq_create(args[ERX_PROGRAM_ARG_BUDGET], 0, ERX_IRQ_SOFT, 0, &own) != ERX_OK)
 		return (134);
-	other = atomic_load_explicit(channel_word(CHANNEL_OTHER_WORD), memory_order_acquire);
+	other = atomic_load_explicit(channel_word(SESSION_SIDE_ADDR, CHANNEL_OTHER_WORD), memory_order_acquire);
 	if (erx_irq_bind(own, other, BELL_LABEL) != ERX_ETYPE)
 		return (135);
 	if (erx_irq_bind(args[ERX_PROGRAM_ARG_DOORBELL], ERX_CAP_NULL, 0) != ERX_ETYPE ||
 	    erx_irq_bind(args[ERX_PROGRAM_ARG_DOORBELL], ERX_CAP_SELF, BELL_LABEL) != ERX_ETYPE)
 		return (136);
-	atomic_store_explicit(channel_word(0), WRITER_PATTERN, memory_order_release);
+	atomic_store_explicit(channel_word(PROGRAM_SIDE_ADDR, 0), WRITER_PATTERN, memory_order_release);
 	step = bell_run(ERX_CAP_NULL << BELL_SHIFT | args[ERX_PROGRAM_ARG_DOORBELL] << BACK_SHIFT, CHANNEL_LABEL);
 	return (step == 0 ? PROGRAM_STATUS : step);
 }

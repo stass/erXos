@@ -121,17 +121,16 @@ erx_program_start_next(erx_program_start_t *run, int result)
 
 /*
  * Each copy's rights, from docs/design-programs.md's tables: the budget to allocate from;
- * the group to create threads in and bind IRQ objects to; each side of a lane writable only
- * by the party that writes it, the inbound ring and the outbound reader page read-only; the
- * session's doorbell to trigger alone; the data area to read, write and map.
+ * the group to create threads in and bind IRQ objects to; the program's own side of the
+ * channel to read, write and map, and the session's side, its peer side, to read and map
+ * alone, so each side has one writer; the session's doorbell to trigger alone; the data
+ * area to read, write and map.
  */
 static const uint32_t install_rights[ERX_PROGRAM_INSTALLS] = {
 	[ERX_PROGRAM_ARG_BUDGET] = ERX_HR_ALLOC,
 	[ERX_PROGRAM_ARG_GROUP] = ERX_HR_ATTACH | ERX_HR_SIGNAL,
-	[ERX_PROGRAM_ARG_IN_RING] = ERX_HR_READ | ERX_HR_MAP,
-	[ERX_PROGRAM_ARG_IN_READER] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP,
-	[ERX_PROGRAM_ARG_OUT_RING] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP,
-	[ERX_PROGRAM_ARG_OUT_READER] = ERX_HR_READ | ERX_HR_MAP,
+	[ERX_PROGRAM_ARG_OWN_SIDE] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP,
+	[ERX_PROGRAM_ARG_PEER_SIDE] = ERX_HR_READ | ERX_HR_MAP,
 	[ERX_PROGRAM_ARG_DOORBELL] = ERX_HR_TRIGGER,
 	[ERX_PROGRAM_INSTALL_DATA] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP,
 };
@@ -140,6 +139,14 @@ uint32_t
 erx_program_install_rights(uint32_t index)
 {
 	return (index < ERX_PROGRAM_INSTALLS ? install_rights[index] : 0);
+}
+
+uint32_t
+erx_program_session_prot(uint32_t index)
+{
+	if (index != ERX_PROGRAM_ARG_OWN_SIDE && index != ERX_PROGRAM_ARG_PEER_SIDE)
+		return (0);
+	return ((install_rights[index] & ERX_HR_WRITE) != 0 ? ERX_PROT_R : ERX_PROT_RW);
 }
 
 uint32_t
