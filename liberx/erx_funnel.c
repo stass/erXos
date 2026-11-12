@@ -148,6 +148,28 @@ erx_funnel_payload_scratch_bytes(const erx_funnel_limits_t *limits, size_t len)
 	return (erx_etf_scratch_bytes(&rules, len));
 }
 
+erx_etf_verdict_t
+erx_funnel_channel(const uint8_t *term, size_t len,
+    const erx_funnel_limits_t *limits, void *scratch, size_t scratch_len,
+    erx_etf_result_t *result)
+{
+	if (len > ERX_PROG_FRAME_MAX) {
+		*result = (erx_etf_result_t){ .offset = 0,
+		    .verdict = ERX_ETF_OVER_LIMIT,
+		    .reason = ERX_ETF_ERR_TOO_LONG };
+		return (result->verdict);
+	}
+	return (erx_funnel_payload(term, len, limits, scratch, scratch_len,
+	    result));
+}
+
+/* erx_etf's scratch grows with the input, so the longest record's is enough. */
+size_t
+erx_funnel_channel_scratch_bytes(const erx_funnel_limits_t *limits)
+{
+	return (erx_funnel_payload_scratch_bytes(limits, ERX_PROG_FRAME_MAX));
+}
+
 /*
  * The payload's pass is erx_etf's structural pass: the semantic stage is
  * the receiving decoder's.

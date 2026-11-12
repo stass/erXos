@@ -48,6 +48,32 @@ module Erx
           sites: [Chokepoints::Site.new(glob: PROGRAM_DRIVER)],
           seed: { 'otp/erts/emulator/sys/erxos/erx_gate.c' =>
                     "\t(void)erx_cap_pass(ERX_CAP_SELF, space, 1);\n" }
+        ),
+        # A frame from a program becomes a term in one place: the driver's
+        # input task, by ERTS's decoder with ERTS_DIST_EXT_BTT_SAFE, which
+        # refuses an atom the runtime does not hold instead of making it
+        # (docs/design-abi.md, "Program protocol", Atoms). Stock ERTS's own
+        # decodes (binary_to_term, distribution) are outside erXos's sources
+        # and keep their own flags. Any mention of the decoder outside the
+        # driver is refused, and in the driver a line must hold one call that
+        # names the flag, unnegated, before the call's end, so a call split
+        # across lines is refused too. With no decode in the driver the rule
+        # holds with no site.
+        Chokepoints::Forbidden.new(
+          name: 'program-safe-decode',
+          rule: "only #{PROGRAM_DRIVER} calls erts_decode_ext in erXos's ERTS sources, " \
+                'and only with ERTS_DIST_EXT_BTT_SAFE in the call',
+          design: 'docs/design-abi.md#program-protocol',
+          scope: Chokepoints::Scope.new(own: false, extra: %w[otp/erts/emulator/sys/erxos/**/*
+                                                              otp/erts/emulator/nifs/erxos/**/*
+                                                              otp/erts/**/erx_*]),
+          pattern: /.*\berts_decode_ext\b.*/,
+          sites: [Chokepoints::Site.new(glob: PROGRAM_DRIVER,
+                                        permits: /\A(?!.*\berts_decode_ext\b.*\berts_decode_ext\b)
+                                              .*\berts_decode_ext\s*\([^;~]*\bERTS_DIST_EXT_BTT_SAFE\b.*\z/x)],
+          seed: { 'otp/erts/emulator/sys/erxos/erx_lane_drv.c' =>
+                    "\tterm = erts_decode_ext(&factory, &bytes, ERTS_DIST_EXT_BTT_SAFE);\n",
+                  PROGRAM_DRIVER => "\tterm = erts_decode_ext(&factory, &bytes, 0);\n" }
         )
       ]
     )

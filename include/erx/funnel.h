@@ -44,7 +44,7 @@
  * table's action for the frame (design-domains.md, "The funnel", steps 2
  * to 7).
  *
- * All four are pure: they read only their arguments, and the export
+ * All of them are pure: they read only their arguments, and the export
  * table only through the lookup the caller passes, and write only their
  * results and the caller's scratch.  None recurses.
  */
@@ -254,6 +254,23 @@ erx_etf_verdict_t erx_funnel_payload(const uint8_t *term, size_t len,
     erx_etf_result_t *result);
 size_t erx_funnel_payload_scratch_bytes(const erx_funnel_limits_t *limits,
     size_t len);
+
+/*
+ * The funnel's channel mode: a record of a program's channel
+ * (docs/design-programs.md, "The channel") is one term, version byte
+ * first, with no frame header and no control term, since a channel
+ * carries no name with authority.  It is erx_funnel_payload with the
+ * channel's limits: at most ERX_PROG_FRAME_MAX bytes, the program
+ * protocol's frame bound, refused as ERX_ETF_ERR_TOO_LONG before a byte
+ * is read, then the receiving domain's grammar, word limit and
+ * funnel_depth.  A record it refuses ends the program with SIGSYS.
+ * erx_funnel_channel_scratch_bytes(limits) bytes, fixed for a domain,
+ * suffice for every record.
+ */
+erx_etf_verdict_t erx_funnel_channel(const uint8_t *term, size_t len,
+    const erx_funnel_limits_t *limits, void *scratch, size_t scratch_len,
+    erx_etf_result_t *result);
+size_t erx_funnel_channel_scratch_bytes(const erx_funnel_limits_t *limits);
 
 /*
  * A name of the receiving domain the export table is asked about: the

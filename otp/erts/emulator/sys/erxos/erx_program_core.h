@@ -10,6 +10,9 @@
  * and everything it held released once. It knows nothing of ERTS and calls no kernel, so a
  * host test drives every path (test/host/erx_program_core_test.rb).
  *
+ * Its third state machine is the program's credit, which the input path spends on each frame
+ * the program writes and the replies the driver takes (erx_program_credit_take, below).
+ *
  * The start is a spec checked whole, then the steps below in order. What the session keeps
  * of a program's channel comes first, so a release, which undoes the steps in reverse,
  * deletes it only after the program's budget. The session's doorbell, its event-table
@@ -252,5 +255,57 @@ uint32_t	erx_program_session_prot(uint32_t index);
  * pass every index once.
  */
 uint32_t	erx_program_install_batch(uint32_t first);
+
+/*
+ * A program's credit (docs/design-programs.md, "Credit"): the driver delivers a frame from the
+ * program to its handler only within it, so the handler holds at most one message of a program
+ * for each credit, however fast the program writes. A reply slot is busy from the request the
+ * driver delivers on it until the driver takes the reply on it. A request on a busy slot, and
+ * every frame of another shape, are outside the credit: the driver ends the program with SIGSYS,
+ * as it ends one for a malformed record. The notices the design also counts, `{closed}` and
+ * `{drained}`, are due only for pipe ends a frame the driver wrote handed the program; the driver
+ * writes no frame that hands one, so no notice is due and each is refused with the other shapes.
+ */
+#define ERX_PROGRAM_SLOTS	16	/* reply slots 0 to 15 (docs/design-abi.md, "Program protocol") */
+
+typedef struct {
+	uint16_t	busy;	/* bit s set: slot s holds a delivered request whose reply is not taken */
+} erx_program_credit_t;
+
+typedef enum {
+	ERX_PROGRAM_FRAME_REQUEST,	/* {erx_prog, Version, Slot, Request}, Slot 0 to 15 */
+	ERX_PROGRAM_FRAME_OTHER		/* any other shape */
+} erx_program_frame_kind_t;
+
+typedef struct {
+	erx_program_frame_kind_t	kind;
+	uint8_t				slot;	/* REQUEST's */
+} erx_program_frame_t;
+
+typedef enum {
+	ERX_PROGRAM_DELIVER,		/* to the handler, as {erx_channel, Port, Frame} */
+	ERX_PROGRAM_REFUSE		/* end the program with SIGSYS */
+} erx_program_credit_verdict_t;
+
+/*
+ * The shape of one record the funnel's channel mode accepted (erx_funnel_channel): a request
+ * is a 4-tuple of the atom erx_prog, an integer and an integer from 0 to 15, its slot, with any
+ * fourth element. The rest of the frame is the handler's grammar's to judge. Safe on any bytes:
+ * what it cannot read is another shape.
+ */
+erx_program_frame_t	erx_program_frame_shape(const uint8_t *record, size_t len);
+/*
+ * Spends credit on a frame of the program: DELIVER for a request on a slot not busy, which it
+ * marks busy, and REFUSE, credit unchanged, for anything else. So over any sequence of frames
+ * and replies a slot carries at most one delivered request between two replies on it.
+ */
+erx_program_credit_verdict_t erx_program_credit_take(erx_program_credit_t *credit,
+	    erx_program_frame_t frame);
+/*
+ * The driver takes a reply of the handler on slot: true when the slot was busy, which it then
+ * frees; false, credit unchanged, for a slot past the last or holding no request, a reply the
+ * driver refuses to write.
+ */
+bool	erx_program_credit_reply(erx_program_credit_t *credit, uint32_t slot);
 
 #endif /* ERX_PROGRAM_CORE_H */

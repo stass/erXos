@@ -14,6 +14,8 @@
  *     -> ok TERM | REASON ETF_REASON
  *   payload SYSTEM DEPTH WORDS HEX
  *     -> accepted WORDS | malformed ETF_REASON | over ETF_REASON
+ *   channel SYSTEM DEPTH WORDS HEX  a channel record, by erx_funnel_channel
+ *     -> as payload's
  *   check RIGHTS REQUEST_WORDS HELD WORDS HEX
  *     -> ACTION CAUSE REASON ASKED WORDS
  *   scratch WORDS HELD         the scratch erx_funnel_check needs to judge
@@ -278,6 +280,44 @@ payload_request(FILE *out, const char *args, uint8_t *bytes)
 		    etf_reasons[result.reason]);
 }
 
+/* A channel record: payload's limits and answer, with channel mode's frame bound. */
+static void
+channel_request(FILE *out, const char *args, uint8_t *bytes)
+{
+	erx_funnel_limits_t limits = { .host = host,
+	    .host_len = sizeof(host) - 1 };
+	erx_etf_result_t result;
+	erx_etf_verdict_t verdict;
+	unsigned long long words;
+	unsigned system, depth;
+	void *scratch;
+	size_t len, scratch_len;
+	int skip;
+
+	if (sscanf(args, "%u %u %llu %n", &system, &depth, &words,
+	    &skip) != 3) {
+		fputs("bad request\n", out);
+		return;
+	}
+	limits.system = system != 0;
+	limits.depth = depth;
+	limits.max_words = words;
+	len = unhex(args + skip, bytes);
+	scratch_len = erx_funnel_channel_scratch_bytes(&limits);
+	if ((scratch = malloc(scratch_len)) == NULL)
+		abort();
+	verdict = erx_funnel_channel(bytes, len, &limits, scratch,
+	    scratch_len, &result);
+	free(scratch);
+	if (verdict == ERX_ETF_ACCEPTED)
+		fprintf(out, "accepted %llu\n",
+		    (unsigned long long)result.words);
+	else
+		fprintf(out, "%s %s\n",
+		    verdict == ERX_ETF_MALFORMED ? "malformed" : "over",
+		    etf_reasons[result.reason]);
+}
+
 static const char *const actions[] = {
 	[ERX_FUNNEL_DELIVER] = "deliver",
 	[ERX_FUNNEL_DELIVER_IF_LINKED] = "deliver_if_linked",
@@ -430,6 +470,8 @@ main(int argc, char **argv)
 			control_request(out, line + 8, bytes);
 		else if (strncmp(line, "payload ", 8) == 0)
 			payload_request(out, line + 8, bytes);
+		else if (strncmp(line, "channel ", 8) == 0)
+			channel_request(out, line + 8, bytes);
 		else if (strncmp(line, "check ", 6) == 0)
 			check_request(out, line + 6, bytes);
 		else if (strncmp(line, "scratch ", 8) == 0)

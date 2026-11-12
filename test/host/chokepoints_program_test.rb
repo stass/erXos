@@ -49,4 +49,32 @@ class ChokepointsProgramTest < Minitest::Test
       refute_empty evaluate(installs, { path => pass }, imported: [path]), "#{path} may pass"
     end
   end
+
+  # A program's frame becomes a term only in the driver, by a decode that names
+  # ERTS_DIST_EXT_BTT_SAFE on its line; stock ERTS's own decodes, and a comment naming the
+  # call, are not erXos's. A second decoder elsewhere, and the driver's decode without the
+  # flag or with the flag on another line, fail.
+  def test_only_the_program_driver_decodes_a_programs_frame_and_only_safely
+    decode = [rule('program-safe-decode')]
+    safe = "\tterm = erts_decode_ext(&factory, &ext, ERTS_DIST_EXT_BTT_SAFE);\n"
+    allowed = {
+      Rules::PROGRAM_DRIVER => safe,
+      'otp/erts/emulator/beam/external.c' => "\tres = erts_decode_ext(&factory, &ext, 0);\n",
+      'otp/erts/emulator/sys/erxos/erx_program_core.h' => "/* erts_decode_ext(..., 0) */\n"
+    }
+    assert_empty evaluate(decode, allowed, imported: allowed.keys.grep(/\Aotp/))
+    refused = [
+      ['otp/erts/emulator/sys/erxos/erx_lane_drv.c', safe],
+      ['otp/erts/emulator/nifs/common/erx_stdio_nif.c', safe],
+      ['otp/erts/emulator/sys/erxos/erx_lane_drv.c', "\tterm = erts_decode_ext\n\t    (&factory, &ext, ERTS_DIST_EXT_BTT_SAFE);\n"],
+      [Rules::PROGRAM_DRIVER, "\ta = erts_decode_ext(&f, &e, 0), b = erts_decode_ext(&f, &e, ERTS_DIST_EXT_BTT_SAFE);\n"],
+      [Rules::PROGRAM_DRIVER, "\tterm = erts_decode_ext(&factory, &ext, flags & ~ERTS_DIST_EXT_BTT_SAFE);\n"],
+      ['otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c', safe],
+      [Rules::PROGRAM_DRIVER, "\tterm = erts_decode_ext(&factory, &ext, 0);\n"],
+      [Rules::PROGRAM_DRIVER, "\tterm = erts_decode_ext(&factory, &ext,\n\t    ERTS_DIST_EXT_BTT_SAFE);\n"]
+    ]
+    refused.each do |path, text|
+      refute_empty evaluate(decode, { path => text }, imported: [path]), "#{path} may decode: #{text}"
+    end
+  end
 end

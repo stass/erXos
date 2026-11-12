@@ -24,6 +24,8 @@ require_relative '../fixtures/generated_tree'
 class ErxProgramCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'otp/erts/emulator/sys/erxos/erx_program_core.c'
+  # What the core links: erx_etf, which its shape reader reads frames with, and its hash.
+  ETF = %w[liberx/erx_etf.c kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c].freeze
   FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
@@ -378,7 +380,8 @@ class ErxProgramCoreTest < Minitest::Test
     log, status = Open3.capture2e(COMPILER, *FLAGS, *Erx::Generated.include_flags(root: ROOT),
                                   '-I', File.join(ROOT, 'include'),
                                   '-I', File.join(ROOT, 'otp/erts/emulator/sys/erxos'),
-                                  File.join(ROOT, 'test/fixtures/erx_program_core_driver.c'), source,
+                                  *%w[kernel/crypto kernel/crypto/blake3].flat_map { ['-I', File.join(ROOT, _1)] },
+                                  File.join(ROOT, 'test/fixtures/erx_program_core_driver.c'), source, *ETF.map { File.join(ROOT, _1) },
                                   '-o', binary, stdin_data: '')
     assert status.success?, log
     binary

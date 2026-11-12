@@ -17,7 +17,10 @@ require_relative '../fixtures/funnel_wire'
 # * every payload erx_funnel_payload accepts, among EtfGenerator's random
 #   terms, is charged exactly the words ERTS's own size pass charges it,
 #   measured on stock OTP's distribution input (test/fixtures/funnel_oracle.erl
-#   says how), including the terms whose size ERTS overestimates.
+#   says how), including the terms whose size ERTS overestimates;
+# * the funnel's channel mode, a program's record, judges every one of those
+#   payloads as erx_funnel_payload does, so the same oracle answers for it, and
+#   refuses a record one byte past ERX_PROG_FRAME_MAX that it accepts at the bound.
 #
 # One run of the driver and one of erl serve the whole class.
 class ErxFunnelOracleTest < Minitest::Test
@@ -26,6 +29,7 @@ class ErxFunnelOracleTest < Minitest::Test
   CONTROLS = 1500
   MUTATED = 1500
   PAYLOADS = 2000
+  PROG_FRAME_MAX = 196_608 # abi/protocols/prog.txt's prog_frame_max
 
   # Random control terms of every operation, each element in a random
   # encoding of a random value of its kind.
@@ -100,6 +104,11 @@ class ErxFunnelOracleTest < Minitest::Test
       { controls: controls + mutated, payloads: Array.new(PAYLOADS) { "\x83".b + terms.term(1 + random.rand(4)).bytes } }
     end
 
+# A binary record exactly ERX_PROG_FRAME_MAX bytes long, and one a byte longer.
+def channel_records
+  [PROG_FRAME_MAX, PROG_FRAME_MAX + 1].map { |size| "\x83\x6d".b + [size - 6].pack('N') + ("\x00".b * (size - 6)) }
+end
+
     def mutate(random, bytes)
       out = bytes.dup
       at = 1 + random.rand(out.bytesize - 1)
@@ -115,8 +124,10 @@ class ErxFunnelOracleTest < Minitest::Test
       runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
       driver = FunnelDriver.new(root: ROOT, runner: runner, directory: directory)
       given = inputs
+      given[:channel] = channel_records
       requests = given.fetch(:controls).map { |bytes, payload_len| "control #{payload_len} #{bytes.unpack1('H*')}" } +
-                 given.fetch(:payloads).map { |bytes| "payload 0 1024 100000000 #{bytes.unpack1('H*')}" }
+                 given.fetch(:payloads).map { |bytes| "payload 0 1024 100000000 #{bytes.unpack1('H*')}" } +
+                 (given.fetch(:payloads) + given.fetch(:channel)).map { |bytes| "channel 0 1024 100000000 #{bytes.unpack1('H*')}" }
       checked = driver.check(requests)
       oracle = oracle_requests(given, checked)
       { checked: checked, oracle: oracle.zip(run_oracle(directory, runner, oracle.map(&:first))) }
@@ -125,7 +136,7 @@ class ErxFunnelOracleTest < Minitest::Test
     # For each accepted input, what to ask stock OTP and what it must say.
     def oracle_requests(given, checked)
       inputs = given.fetch(:controls).map(&:first) + given.fetch(:payloads)
-      inputs.zip(checked).filter_map do |bytes, answer|
+      inputs.zip(checked.first(inputs.size)).filter_map do |bytes, answer|
         case answer.split(' ', 2)
         in ['ok', text] then ["control #{bytes.unpack1('H*')} #{text.unpack1('H*')}", 'same']
         in ['accepted', words] then ["words #{bytes.unpack1('H*')}", "words #{words}"]
@@ -170,5 +181,14 @@ class ErxFunnelOracleTest < Minitest::Test
     words = answers.fetch(:oracle).select { |(request, _), _| request.start_with?('words ') }
     assert_operator words.size, :>=, PAYLOADS * 9 / 10, 'most generated payloads are accepted'
     words.each { |(request, expected), got| assert_equal expected, got, request[0, 200] }
+  end
+  def test_channel_mode_judges_a_record_as_the_payload_pass_within_the_frame_bound
+    checked = answers.fetch(:checked)
+    controls = CONTROLS + MUTATED
+    payloads = checked[controls, PAYLOADS]
+    channel = checked[controls + PAYLOADS, PAYLOADS + 2]
+    assert_equal payloads, channel.first(PAYLOADS)
+    assert_match(/\Aaccepted /, channel[PAYLOADS], 'a record at the bound')
+    assert_equal 'over too_long', channel[PAYLOADS + 1], 'a record past the bound'
   end
 end

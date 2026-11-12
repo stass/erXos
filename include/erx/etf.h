@@ -116,7 +116,8 @@ typedef enum erx_etf_reason {
 	ERX_ETF_ERR_DEPTH,		/* over rules.max_depth frames */
 	ERX_ETF_ERR_WORDS,		/* over rules.max_words decoded */
 	ERX_ETF_ERR_SCRATCH,	/* the caller's scratch is too small */
-	ERX_ETF_ERR_TOO_LONG,	/* an input over ERX_ETF_INPUT_MAX bytes */
+	ERX_ETF_ERR_TOO_LONG,	/* an input over ERX_ETF_INPUT_MAX bytes, or a
+				   channel record over ERX_PROG_FRAME_MAX */
 } erx_etf_reason_t;
 
 /*

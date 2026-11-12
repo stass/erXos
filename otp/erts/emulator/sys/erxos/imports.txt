@@ -34,7 +34,7 @@ erx_etf_writer_init erx_etf_writer_done erx_etf_put_tuple erx_etf_put_atom
 erx_etf_put_integer
 
 [iso_c]
-abort atoi bsearch calloc exit free malloc memchr memcmp memcpy memmove memset
+abort atoi bcmp bsearch calloc exit free malloc memchr memcmp memcpy memmove memset
 qsort realloc sprintf sscanf strchr strcmp strcpy strerror
 strcspn strlen strncmp strspn strstr strtod strtol
 

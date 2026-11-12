@@ -7,7 +7,10 @@
  */
 
 #include <stdbool.h>
+#include <stdint.h>
+#include <strings.h>
 
+#include "erx/etf.h"
 #include "erx_program_core.h"
 
 /* A step that made nothing of its own: a map and an install die with their space, and the start is last. */
@@ -282,4 +285,81 @@ erx_program_end_next(erx_program_end_t *end, erx_program_input_t input,
 		break;
 	}
 	return (0);
+}
+
+/*
+ * The next term's first item. A LIST_EXT of no element is its tail, as ERTS decodes it, so the
+ * loop takes the item after it in its place; each pass reads at least one byte.
+ */
+static bool
+shape_term(erx_etf_reader_t *r, erx_etf_item_t *item)
+{
+	erx_etf_reason_t reason;
+
+	do {
+		if (erx_etf_next(r, item, &reason) != ERX_ETF_STEP_ITEM)
+			return (false);
+	} while (item->kind == ERX_ETF_LIST && item->count == 0);
+	return (true);
+}
+
+/* The next term, which must be an integer from min to max. */
+static bool
+shape_integer(erx_etf_reader_t *r, int64_t min, int64_t max, int64_t *value)
+{
+	erx_etf_item_t item;
+
+	if (!shape_term(r, &item) || item.kind != ERX_ETF_INTEGER || item.u.integer < min ||
+	    item.u.integer > max)
+		return (false);
+	*value = item.u.integer;
+	return (true);
+}
+
+erx_program_frame_t
+erx_program_frame_shape(const uint8_t *record, size_t len)
+{
+	static const char tag[] = "erx_prog";
+	const erx_program_frame_t other = { .kind = ERX_PROGRAM_FRAME_OTHER };
+	erx_etf_reader_t r;
+	erx_etf_item_t item;
+	int64_t version, slot;
+
+	/* The version is an integer, one item, so the slot is the term after it, not inside it. */
+	if (!erx_etf_reader_init(&r, record, len) || !shape_term(&r, &item) ||
+	    item.kind != ERX_ETF_TUPLE || item.count != 4 || !shape_term(&r, &item) ||
+	    item.kind != ERX_ETF_ATOM || item.u.data.len != sizeof(tag) - 1 ||
+	    bcmp(item.u.data.bytes, tag, sizeof(tag) - 1) != 0 ||
+	    !shape_integer(&r, INT64_MIN, INT64_MAX, &version) ||
+	    !shape_integer(&r, 0, ERX_PROGRAM_SLOTS - 1, &slot))
+		return (other);
+	return ((erx_program_frame_t){ .kind = ERX_PROGRAM_FRAME_REQUEST, .slot = (uint8_t)slot });
+}
+
+erx_program_credit_verdict_t
+erx_program_credit_take(erx_program_credit_t *credit, erx_program_frame_t frame)
+{
+	uint16_t bit;
+
+	if (frame.kind != ERX_PROGRAM_FRAME_REQUEST || frame.slot >= ERX_PROGRAM_SLOTS)
+		return (ERX_PROGRAM_REFUSE);
+	bit = (uint16_t)(1u << frame.slot);
+	if ((credit->busy & bit) != 0)
+		return (ERX_PROGRAM_REFUSE);
+	credit->busy |= bit;
+	return (ERX_PROGRAM_DELIVER);
+}
+
+bool
+erx_program_credit_reply(erx_program_credit_t *credit, uint32_t slot)
+{
+	uint16_t bit;
+
+	if (slot >= ERX_PROGRAM_SLOTS)
+		return (false);
+	bit = (uint16_t)(1u << slot);
+	if ((credit->busy & bit) == 0)
+		return (false);
+	credit->busy &= (uint16_t)~bit;
+	return (true);
 }
