@@ -43,10 +43,11 @@ reporter; a pid alone is its process's path. A pid in Path becomes its
 `proc_id()` in this runtime (docs/design-live.md, "Names travel as
 data"), so the question holds no name. `{error, scope}` for a path that
 names nothing the caller may see, `{error, unsupported}` for one the
-inspector cannot collect, and `{error, failed}` when the query failed
-(erx_inspector:inspect/1).
+inspector cannot collect, `{error, failed}` when the query failed,
+`{error, no_facet}` in a domain that holds no inspect facet, and `{error,
+badarg}` for a request the facet refuses (erx_inspector:inspect/1).
 """.
--spec i([erx_schema:segment() | pid()] | pid()) -> ok | {error, scope | unsupported | invalid | failed}.
+-spec i([erx_schema:segment() | pid()] | pid()) -> ok | {error, scope | unsupported | invalid | failed | no_facet | badarg}.
 i(Pid) when is_pid(Pid) ->
     i([processes, Pid]);
 i(Path) ->

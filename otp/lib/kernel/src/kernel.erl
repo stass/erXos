@@ -296,7 +296,17 @@ init(safe) ->
               type => worker,
               modules => [erx_inspect_agent]},
 
-    {ok, {SupFlags, Boot ++ DiskLog ++ Pg ++ [Ns, Tmp, Proc, Agent]}}.
+    %% erXos: the process behind every inspect facet, which names itself with
+    %% erx_facet:serve/2 before the domain service starts and mints them
+    %% (design-live.md, The inspect service); none but in the system domain.
+    Inspect = #{id => erx_inspect_srv,
+                start => {erx_inspect_srv, start_link, []},
+                restart => permanent,
+                shutdown => brutal_kill,
+                type => worker,
+                modules => [erx_inspect_srv]},
+
+    {ok, {SupFlags, Boot ++ DiskLog ++ Pg ++ [Ns, Tmp, Proc, Agent, Inspect]}}.
 
 start_distribution(Part) ->
     Rpc = #{id => rex,

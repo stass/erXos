@@ -317,6 +317,48 @@ answers(Pids, Answers) ->
             error({no_answer, Pids})
     end.
 
+%% A session's template granted inspect by the manifest, a service the system domain
+%% serves, finds the inspect facet in its ready answer, bound to the session and within
+%% the grant's limits; a template the manifest grants nothing finds none
+%% (docs/design-live.md, "The inspect service").
+session_inspect_test() ->
+    Started = inspect_setup([{{template, 0}, inspect, system, #{in_flight => 2}}]),
+    try
+        {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
+        #{inspect := Facet} = Facets = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
+        ?assertEqual([inspect], maps:keys(Facets)),
+        ?assertMatch(#{grantee := Id, in_flight := 2}, erx_facet:info(Facet))
+    after
+        inspect_cleanup(Started)
+    end.
+
+session_without_inspect_test() ->
+    Started = inspect_setup([]),
+    try
+        {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
+        ?assertEqual(#{}, maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})))
+    after
+        inspect_cleanup(Started)
+    end.
+
+%% No configured domain, the system domain's inspect service behind every facet, and a
+%% trace of the domain pids' receives to this process, with Grants the manifest's.
+inspect_setup(Grants) ->
+    persistent_term:put({erx_domain_fake_lib, boot}, #{domains => [], services => [], grants => Grants}),
+    Inspect = spawn(fun() -> receive stop -> ok end end),
+    ok = erx_facet:serve(inspect, Inspect),
+    erlang:trace(new_processes, true, ['receive', {tracer, self()}]),
+    Fake = erx_domain_fake_lib:start_log(),
+    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                 exports => erx_domain_fake_lib,
+                                                 inspect_policy => #{roots => [1], development => false},
+                                                 mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
+    unlink(Service),
+    {Fake, Service, Inspect}.
+
+inspect_cleanup(Started) ->
+    served_cleanup(Started).
+
 %% A session of template 0 (7) gets its own echo grant: it is introduced to a, a's mint
 %% is asked for the session's id with the template's limits, the facet is installed
 %% through the session's domain pid, and only the session's acknowledgement settles it,

@@ -25,8 +25,11 @@ What arrives is sorted by its shape before the callback sees a request:
   reply from any other party, or a second one, matches nothing and is
   dropped;
 * a 'DOWN' of one of its monitors: the end of a process in ends_with ends
-  the facet, and the end of a forward's service drops the forward, whose
-  request failed there; every other 'DOWN' is dropped;
+  the facet, and the end of a forward's service before it replied answers
+  the grantee's caller {error, failed}, the request having failed there,
+  as an inspect facet's query worker does that OTP ends at its heap limit;
+  every other 'DOWN' is dropped. A service's reply precedes its 'DOWN',
+  both being its own signals, so a forward it answered is gone by then;
 * {'$erx_facet', From, info}, without an envelope: info/1, from the facet's
   own domain;
 * a request: {erx_origin, D, {'$gen_call', {Pid, [alias | Alias]}, Request}},
@@ -230,7 +233,7 @@ loop(#{ends_with := EndsWith, forwards := Forwards, exports := Exports} = State)
         {'DOWN', Monitor, process, _Pid, Reason} when is_map_key(Monitor, EndsWith) ->
             exit(Reason);
         {'DOWN', Monitor, process, _Pid, _Reason} when is_map_key(Monitor, Forwards) ->
-            loop(State#{forwards := maps:remove(Monitor, Forwards)});
+            loop(replied(Monitor, {error, failed}, State));
         {'DOWN', _Monitor, _Type, _Object, _Info} ->
             loop(State);
         {'$erx_facet', From, info} ->

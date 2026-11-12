@@ -24,19 +24,22 @@ class ErxInspectorTest < Minitest::Test
                .map { |name| Erx::Generated.path("erlang/apps/erx/src/#{name}.erl", root: ROOT) },
              *%w[erx_text erx_object_info erx_kernel_records erx_process_records erx_inspector
                  erx_log_records erx_log_facet erx_runtime_records erx_facets erx erx_inspect_agent
-                 erx_inspect_worker].map { |name| File.join(ERX, "src/#{name}.erl") },
+                 erx_inspect_worker erx_facet erx_inspect_query erx_inspect_facet].map { |name| File.join(ERX, "src/#{name}.erl") },
              *%w[erx_render].map { |name| File.join(ROOT, "erlang/apps/erx_shell/src/#{name}.erl") },
              File.join(ROOT, 'test/erlang/erx_kernel_records_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_inspector_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_log_facet_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_inspect_agent_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_inspect_worker_tests.erl')].freeze
+             File.join(ROOT, 'test/erlang/erx_inspect_worker_tests.erl'),
+             File.join(ROOT, 'test/erlang/erx_inspect_facet_tests.erl')].freeze
 
   # Each fault replaces one passage of one source, and the case it names must fail.
   Fault = Data.define(:name, :file, :from, :to, :tests, :caught_by)
   AGENT = File.join(ERX, 'src/erx_inspect_agent.erl')
   WORKER = File.join(ERX, 'src/erx_inspect_worker.erl')
   INSPECTOR = File.join(ERX, 'src/erx_inspector.erl')
+  QUERY = File.join(ERX, 'src/erx_inspect_query.erl')
+  FACET = File.join(ERX, 'src/erx_inspect_facet.erl')
   FAULTS = [
     Fault.new(name: 'an agent that answers any origin', file: AGENT,
               from: 'handle({erx_origin, SystemId, {erx_inspect_ask, Alias, Query}}, Self, SystemId) when',
@@ -52,8 +55,8 @@ class ErxInspectorTest < Minitest::Test
                 '{Listing, Page} = lists:foldl(fun({Domain, A}, Acc) -> merge(Domain, A, Acc, Context) end, Start, Asked),',
             tests: 'erx_inspect_worker_tests', caught_by: 'eight_domains_give_one_page'),
   Fault.new(name: 'a worker that takes its answer by a selective receive', file: WORKER,
-            from: "            {answer, Answer};\n        _Dropped ->\n            case clock() >= Until of\n                true -> unalias(Alias), {timeout, Status};\n                false -> await_answer(Domain, Alias, Until, Status)\n            end\n",
-            to: "            {answer, Answer}\n",
+            from: "            exit(normal);\n        _Dropped ->\n            case clock() >= Until of\n                true -> unalias(Alias), {timeout, Status};\n                false -> await_answer(Domain, Alias, Owner, Until, Status)\n            end\n",
+            to: "            exit(normal)\n",
             tests: 'erx_inspect_worker_tests', caught_by: 'flood_leaves_the_answer_whole_test'),
   Fault.new(name: 'a worker with no deadline of its own', file: WORKER,
             from: "    case Until - clock() of\n        Left when Left =< 0 ->",
@@ -69,7 +72,25 @@ class ErxInspectorTest < Minitest::Test
   Fault.new(name: 'the byte cut removed', file: INSPECTOR,
             from: 'case Count < ?PAGE andalso Bytes + Size =< ?ERX_INSPECT_REPLY_MAX of',
             to: 'case Count < ?PAGE andalso Bytes + Size > 0 of',
-            tests: 'erx_inspect_worker_tests', caught_by: 'a_listing_is_cut_by_bytes_test')
+            tests: 'erx_inspect_worker_tests', caught_by: 'a_listing_is_cut_by_bytes_test'),
+  Fault.new(name: 'an admission path that takes a scope from the options', file: QUERY,
+            from: 'map_size(maps:without([offset, limit], Options)) =:= 0 andalso',
+            to: 'map_size(maps:without([offset, limit, scope], Options)) >= 0 andalso',
+            tests: 'erx_inspect_facet_tests', caught_by: 'a_holder_cannot_widen_its_scope_test'),
+  Fault.new(name: 'a scope fixed as a list at the mint', file: FACET,
+            from: '    {ok, #{scope => Scope, worker => maps:get(worker, Grant, #{view => fun erx_inspector:view/1})}}.',
+            to: '    Worker = maps:get(worker, Grant, #{view => fun erx_inspector:view/1}), ' \
+                '{ok, Fixed} = (maps:get(view, Worker))(Scope), ' \
+                '{ok, #{scope => [Id || {Id, _} <- Fixed], worker => Worker}}.',
+            tests: 'erx_inspect_facet_tests', caught_by: 'a_principals_scope_follows_its_domains_test'),
+  Fault.new(name: 'a facet that runs its requests in its own process', file: FACET,
+            from: '{ok, Query} -> {forward, erx_inspect_worker:serve(self(), Scope, Options), Query, State};',
+            to: '{ok, Query} -> {reply, erx_inspect_worker:call(Query, Scope, Options), State};',
+            tests: 'erx_inspect_facet_tests', caught_by: 'a_stalled_agent_holds_up_no_other_query_test'),
+  Fault.new(name: 'the bound on a path\'s length removed', file: QUERY,
+            from: 'path([Segment | Rest], Count, Literals) when Count < ?MAX_SEGMENTS ->',
+            to: 'path([Segment | Rest], Count, Literals) when is_integer(Count) ->',
+            tests: 'erx_inspect_facet_tests', caught_by: 'decoder_refuses_everything_else_test')
 ].freeze
 
   def test_kernel_record_cases_pass_under_eunit
@@ -90,6 +111,10 @@ class ErxInspectorTest < Minitest::Test
 
   def test_query_worker_cases_pass_under_eunit
     eunit('erx_inspect_worker_tests')
+  end
+
+  def test_inspect_facet_cases_pass_under_eunit
+    eunit('erx_inspect_facet_tests')
   end
 
   def test_the_cases_catch_each_seeded_fault

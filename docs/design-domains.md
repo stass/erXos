@@ -2430,8 +2430,8 @@ at once. Each process checks before a step and charges after it, so the
 account exceeds the share by at most one step per such process, which
 the grant's limit on them bounds, and the debt repays it.
 In the system domain each such process runs with the heap limit its
-interface declares for it and ends with the facet, to which it is
-linked, so the grant's limit on them times that heap limit is a term of
+interface declares for it and ends with the facet, which it monitors,
+so the grant's limit on them times that heap limit is a term of
 what the grantee can make the system domain hold ([Flow
 control](#flow-control)).
 
@@ -2470,7 +2470,12 @@ before its callback sees a request:
   makes from one, matches it against the monitors and links the facet set
   up, and drops the rest, so none reaches the callback; the exit of the
   facet behind an attenuating facet ends the attenuating one (Composition,
-  below). A wrapped one is a message some domain sent, and so a request;
+  below), and the end of a forward's service while the forward is
+  outstanding answers the grantee's caller `{error, failed}`, whatever
+  the reason: a service's reply precedes its `'DOWN'`, both being its
+  own signals, so a forward still outstanding at the `'DOWN'` has
+  failed, as when OTP ends an `inspect` facet's query worker at its heap
+  limit. A wrapped one is a message some domain sent, and so a request;
 * **a request**: every other message. Admission checks the lane's domain
   against the grantee, the operation and argument schema, the scope, the
   request's size, the requests in flight and the grantee's remaining share
@@ -2955,7 +2960,7 @@ messages in the system connection's ring, outside the domain pid.
 | `{erx_facets_installed, Tag}` | agent to domain pid | the domain has installed the facet of the install tagged `Tag` |
 | `{erx_facet_minted, Tag, Reply}` | a mint of the domain to domain pid | the reply to the mint request tagged `Tag`, `{ok, Facet}` or a refusal, sent with `erx_facet:minted/2` to the domain's own domain pid, which the agent names to the domain at its start ([design-system.md](design-system.md#facets-a-configured-domain-serves)) |
 | `{erx_inspect_ask, Alias, Query}` | the system domain's inspector to the domain's inspection agent | a question about the domain's own runtime, `Query` being `{inspect, Path, Options}` or `{entries, Path}` for a path the domain owns; the agent takes it only in the system domain's envelope and answers to `Alias`, which the question exported ([design-live.md](design-live.md#the-runtime-agent)) |
-| `{Alias, Answer}` | inspection agent to the inspector | the runtime's attributes for the path, of the inspector's answer types, within `inspect_reply_max`; the inspector validates and marks them `runtime` whatever they claim, and a late or missing answer is `{timeout, 500}` |
+| `{Alias, Answer}` | inspection agent to the inspector | the runtime's attributes for the path, of the inspector's answer types, within `inspect_reply_max`; the inspector validates and marks them `runtime` whatever they claim, and an answer missing after `inspect_agent_wait` is `{timeout, 500}` |
 
 The `erx_connection_up` and `erx_connection_down` messages are the **connection-control records**. The
 domain service sends the records about one peer node name one at a time,

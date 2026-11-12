@@ -40,6 +40,9 @@ class ErxDomainTest < Minitest::Test
              File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
              File.join(ROOT, 'test/erlang/erx_devfs_tests.erl'),
              File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
+             File.join(ROOT, 'erlang/apps/erx/src/erx_inspect_facet.erl'),
+             File.join(ROOT, 'erlang/apps/erx/src/erx_inspect_query.erl'),
+             File.join(ROOT, 'erlang/apps/erx/src/erx_build.erl'),
              File.join(ROOT, 'erlang/apps/erx/src/erx_driver_ctl.erl'),
              File.join(ROOT, 'erlang/apps/erx_blk/src/erx_blk_sup.erl'),
              File.join(ROOT, 'test/erlang/erx_driver_ctl_tests.erl'),
@@ -120,7 +123,21 @@ class ErxDomainTest < Minitest::Test
     Fault.new(name: 'a funnel that takes a process of another node for a stopgap name', file: SERVICE,
               from: 'node(Pid) =:= node() andalso {true, {Pid, Limits}}',
               to: 'is_pid(Pid) andalso {true, {Pid, Limits}}',
-              tests: 'erx_domain_mints_srv_tests', caught_by: 'stopgap_names')
+              tests: 'erx_domain_mints_srv_tests', caught_by: 'stopgap_names'),
+    # A session's template grant of a service the system domain serves, which the
+    # service skips: the session finds no inspect facet in its ready answer.
+    Fault.new(name: 'a template grant of a system service that the service skips', file: SERVICE,
+              from: 'grantee({session, Template}) -> {template, Template};',
+              to: 'grantee({session, _Template}) -> none;',
+              tests: 'erx_domain_mints_srv_tests', caught_by: 'session_inspect'),
+    # A facet that drops a forward whose service ended without replying leaves the
+    # grantee waiting out its own timeout, where an inspect worker OTP killed at its heap
+    # limit must answer {error, failed}.
+    Fault.new(name: 'a facet that drops a forward whose service ended',
+              file: File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
+              from: 'loop(replied(Monitor, {error, failed}, State));',
+              to: 'loop(State#{forwards := maps:remove(Monitor, Forwards)});',
+              tests: 'erx_facet_tests', caught_by: 'a_forwards_service_that_ends_answers_failed_test')
   ].freeze
 
   def test_the_cases_catch_each_seeded_fault

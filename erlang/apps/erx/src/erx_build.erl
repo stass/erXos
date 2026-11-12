@@ -38,6 +38,7 @@ has no such file, such as a hosted one, has
 -export([id/0, id/1]).
 -export([facts/0, parse_facts/1]).
 -export([development/0, development/1, development_flag/1]).
+-export([shell_principals/0, shell_principals/1]).
 
 -export_type([facts/0]).
 
@@ -105,8 +106,42 @@ build's.
 """.
 -spec development() -> boolean().
 development() ->
+    development(system_manifest()).
+
+%% The system manifest's bytes, read at its path in the system domain's
+%% namespace, as file:read_file/1 answers.
+system_manifest() ->
     <<"system/", Path/binary>> = ?ERX_SYSTEM_MANIFEST_PATH_BYTES,
-    development(file:read_file(<<"/", Path/binary>>)).
+    file:read_file(<<"/", Path/binary>>).
+
+-doc """
+The system manifest's system-shell principals, by principal number, the
+manifest's principal index plus one (liberx/system/dom_boot_view.c), read as
+development/0 reads the manifest, so only the system domain's answer is
+the build's: the principals erx_domain_core:inspect_scope/3 takes as
+root. None when the manifest cannot be read or does not parse, so a
+reader that cannot tell names no principal root.
+""".
+-spec shell_principals() -> [pos_integer()].
+shell_principals() ->
+    shell_principals(system_manifest()).
+
+-doc """
+The system-shell principals of the system manifest `file:read_file/1`
+returned, none for one it could not read or parse. Pure, for its tests.
+""".
+-spec shell_principals({ok, binary()} | {error, term()}) -> [pos_integer()].
+shell_principals({ok, Manifest}) ->
+    maybe
+        {ok, View} ?= erx_manifest:open(Manifest),
+        {ok, Principals} ?= erx_manifest:fold(View, shell_principals,
+                                              fun(#{principal := Index}, Acc) -> [Index + 1 | Acc] end, []),
+        lists:sort(Principals)
+    else
+        _ -> []
+    end;
+shell_principals({error, _}) ->
+    [].
 
 -doc """
 The development flag of the system manifest `file:read_file/1` returned,

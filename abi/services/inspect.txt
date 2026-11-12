@@ -13,7 +13,9 @@
 # max_message_heap, four times the answer bound; and inspect_funnel_depth_min of
 # funnel_depth, which the generator computes from abi/inspection.txt
 # (tools/lib/erx/abi_inspection_bounds.rb). A query worker's max_heap_size is
-# inspect_worker_heap words, and it lives at most inspect_query_max milliseconds. The
+# inspect_worker_heap words, it lives at most inspect_query_max milliseconds, and it waits
+# inspect_agent_wait milliseconds for one domain's runtime agent, as long as it waits for
+# the domain service's view of the domains it may ask. The
 # sizes are provisional, for Phase 1's trusted workloads, until the measurement of
 # docs/todo-performance.md sets them. A word is 8 bytes, as manifest max_message_heap
 # and OTP's max_heap_size count it.
@@ -25,3 +27,4 @@ limit inspect_max_frame_min u32 524288
 limit inspect_message_heap_min u32 131072
 limit inspect_worker_heap u32 2097152
 limit inspect_query_max u32 5000
+limit inspect_agent_wait u32 500

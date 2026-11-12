@@ -6,8 +6,9 @@
 The facets the code of a domain acts with, by name, each the value its
 holder hands the service behind it (docs/design-live.md, "Scopes";
 docs/design-shell.md, "Interfaces"): the command shell's session facets,
-which its commands get in their context, and the scope erx:i/0,1
-inspects with. domain/0 reads which domain this is and what it was
+which its commands get in their context, and an `inspect` scope, of
+which erx_inspector reads only `all`, the system domain's, to run a query
+in a local worker rather than through the inspect facet. domain/0 reads which domain this is and what it was
 handed; facets/2 is the pure decision.
 """.
 

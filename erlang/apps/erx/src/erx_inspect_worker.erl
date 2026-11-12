@@ -9,6 +9,12 @@ runtime knows through erx_inspector's core and asks other domains' agents
 (erx_inspect_agent) for what only their runtimes know, then sends the one
 answer and exits.
 
+* **Who starts it.** A local call in the system domain (call/3), whose
+  caller takes the answer at an alias of its own, or an inspect facet
+  (serve/3, erx_inspect_facet), which forwards it the one request it
+  admitted as a gen_server call and passes the answer to its grantee. It
+  monitors the one that started it and ends with it, so a revoked facet
+  or a caller gone leaves no worker asking agents on its behalf.
 * **Bounds.** It is spawned with `max_heap_size` inspect_worker_heap
   words, shared binaries counted, so OTP ends it past that, and its caller
   answers `{error, failed}`. It lives at most inspect_query_max
@@ -16,11 +22,12 @@ answer and exits.
   has, a listing `partial` and each runtime attribute it had not collected
   `{timeout, inspect_query_max}`.
 * **The agent leg.** It asks one agent at a time, `{erx_inspect_ask,
-  Alias, Query}` with a fresh `reply` alias, and waits 500 ms for
+  Alias, Query}` with a fresh `reply` alias, and waits inspect_agent_wait
+  milliseconds for
   `{erx_origin, D, {Alias, Answer}}` from the domain D it asked. Its
   receive takes every message in arrival order and keeps only that one,
   so nothing else stays queued on it. An answer that misses its wait is
-  `{timeout, 500}` and its alias is ended, so a late one is never
+  `{timeout, inspect_agent_wait}` and its alias is ended, so a late one is never
   delivered. An answer whose decoded size passes inspect_message_heap_min
   words is dropped as the funnel would drop it, and so reads as a timeout.
 * **What it believes** (check/3). An answer is taken only when it agrees
@@ -49,7 +56,7 @@ the host tests stand fake agents for domains; erx_inspector passes the
 domain service's (erx_domain:inspect_view/1).
 """.
 
--export([call/3, start/3, await/1]).
+-export([call/3, start/3, await/1, serve/3]).
 -export([check/3, owned/2]).
 
 -include("generated/erx_abi.hrl").
@@ -67,8 +74,6 @@ domain service's (erx_domain:inspect_view/1).
 
 %% The most entries one listing gives: the inspector's page.
 -define(PAGE, 1000).
-%% How long a worker waits for one agent's answer.
--define(AGENT_WAIT, 500).
 
 %%% The caller's side.
 
@@ -88,11 +93,34 @@ await/1 takes.
 -spec start(query(), erx_inspector:query_scope(), options()) -> worker().
 start(Query, Scope, Options) ->
     Reply = alias([reply]),
-    {Pid, Monitor} = spawn_opt(fun() -> run(Query, Scope, Reply, Options) end,
-                               [monitor, {fullsweep_after, 0}, {max_heap_size, #{size => ?ERX_INSPECT_WORKER_HEAP, kill => true,
-                                                           error_logger => true,
-                                                           include_shared_binaries => true}}]),
+    Caller = self(),
+    {Pid, Monitor} = spawn_opt(fun() -> run(Query, Scope, Reply, Caller, Options) end, [monitor | spawn_options()]),
     {Pid, Monitor, Reply}.
+
+-doc """
+Starts a worker at Scope for the inspect facet Facet, which forwards it
+the one request it admitted, a query, as a gen_server call; the worker
+answers that call and exits. The facet monitors the worker as its
+forward's service, so a worker that ends without answering, at its heap
+limit for one, answers the grantee `{error, failed}` (erx_facet). A
+worker that hears no request within inspect_query_max exits.
+""".
+-spec serve(pid(), erx_inspector:query_scope(), options()) -> pid().
+serve(Facet, Scope, Options) ->
+    spawn_opt(fun() -> served(Facet, Scope, Options) end, spawn_options()).
+
+%% Every worker's heap bound, which OTP checks at each major collection
+%% against the old and new heap, shared binaries counted. fullsweep_after 0
+%% makes every collection a major one, so an agent's answer the worker has
+%% merged and dropped is gone at its next collection rather than kept in
+%% an old generation that only a later major collection would sweep: the
+%% heap holds the page and the one answer it is taking, which is what
+%% inspect_worker_heap is sized for (docs/design-live.md, "The query
+%% worker").
+spawn_options() ->
+    [{fullsweep_after, 0},
+     {max_heap_size, #{size => ?ERX_INSPECT_WORKER_HEAP, kill => true, error_logger => true,
+                       include_shared_binaries => true}}].
 
 -doc "The answer of a worker start/3 started; `{error, failed}` if it ended first.".
 -spec await(worker()) -> answer().
@@ -109,19 +137,44 @@ await({Pid, Monitor, Reply}) ->
 
 %%% The worker.
 
-run(Query, Scope, Reply, Options) ->
-    Context = context(Scope, Options),
+run(Query, Scope, Reply, Caller, Options) ->
+    Context = context(Scope, Options, monitor(process, Caller)),
     Reply ! {Reply, leaving(answer(Query, Context))}.
+
+%% The facet's worker: the first message it takes is the facet's forward of
+%% the request it admitted, or the facet's end. Only the facet holds the
+%% worker's pid while it waits, so nothing else is queued before the
+%% forward; anything that is, it drops as it takes it.
+served(Facet, Scope, Options) ->
+    Owner = monitor(process, Facet),
+    Until = clock() + maps:get(query_max, Options, ?ERX_INSPECT_QUERY_MAX),
+    forwarded(Facet, Owner, Until, Scope, Options).
+
+forwarded(Facet, Owner, Until, Scope, Options) ->
+    receive
+        {'$gen_call', {Facet, _Tag} = From, Query} ->
+            gen:reply(From, leaving(answer(Query, context(Scope, Options, Owner))));
+        {'DOWN', Owner, process, Facet, _Reason} ->
+            ok;
+        _Dropped ->
+            forwarded(Facet, Owner, Until, Scope, Options)
+    after max(Until - clock(), 0) ->
+        ok
+    end.
 
 %% What the query runs under: its deadline, the scope resolved to domain
 %% ids, the domains it may ask with their agents, and whether the view is
-%% known; an unknown view makes every listing partial.
-context(Scope, Options) ->
+%% known; an unknown view makes every listing partial. A principal's scope
+%% is its domains in the view, so without the view it is unknown, and the
+%% query fails rather than answer as if the principal had no domains. Owner
+%% is the monitor of the process that started the worker, whose end ends it.
+context(Scope, Options, Owner) ->
     QueryMax = maps:get(query_max, Options, ?ERX_INSPECT_QUERY_MAX),
     Until = clock() + QueryMax,
     #{view := View} = Options,
     {Resolved, Domains, Known} = resolve(Scope, View(view_scope(Scope))),
-    #{until => Until, query_max => QueryMax, agent_wait => maps:get(agent_wait, Options, ?AGENT_WAIT),
+    #{until => Until, query_max => QueryMax, agent_wait => maps:get(agent_wait, Options, ?ERX_INSPECT_AGENT_WAIT),
+      owner => Owner,
       scope => Resolved, domains => Domains, known => Known, self => erx_inspector:runtime_domain()}.
 
 view_scope({principal, _} = Scope) -> Scope;
@@ -130,10 +183,12 @@ view_scope(_Scope) -> all.
 resolve(all, {ok, View}) -> {all, View, true};
 resolve(all, unavailable) -> {all, [], false};
 resolve({principal, _}, {ok, View}) -> {[Id || {Id, _Agent} <- View], View, true};
-resolve({principal, _}, unavailable) -> {[], [], false};
+resolve({principal, _}, unavailable) -> {unknown, [], false};
 resolve(Ids, {ok, View}) when is_list(Ids) -> {Ids, [Entry || {Id, _} = Entry <- View, lists:member(Id, Ids)], true};
 resolve(Ids, unavailable) when is_list(Ids) -> {Ids, [], false}.
 
+answer(_Query, #{scope := unknown}) ->
+    {error, failed};
 answer({entries, [processes]}, Context) ->
     processes(Context);
 answer({inspect, [processes] = Path, _Options}, Context) ->
@@ -247,7 +302,7 @@ status(false) -> partial.
 %% Asks Agent of Domain Query and waits for its answer, within the agent's
 %% wait and the query's deadline: `{answer, Answer}`, not yet checked, or
 %% `{timeout, Status}`, Status the attribute status a missed answer gives.
-ask(Agent, Domain, Query, #{until := Until, query_max := QueryMax, agent_wait := Wait}) ->
+ask(Agent, Domain, Query, #{until := Until, query_max := QueryMax, agent_wait := Wait, owner := Owner}) ->
     case Until - clock() of
         Left when Left =< 0 ->
             {timeout, {timeout, QueryMax}};
@@ -258,20 +313,22 @@ ask(Agent, Domain, Query, #{until := Until, query_max := QueryMax, agent_wait :=
                                   true -> {Left, {timeout, QueryMax}};
                                   false -> {Wait, {timeout, Wait}}
                               end,
-            sized(await_answer(Domain, Alias, clock() + Bound, Status), Status)
+            sized(await_answer(Domain, Alias, Owner, clock() + Bound, Status), Status)
     end.
 
 %% Takes the next message whatever it is, and keeps it only when it is the
 %% answer of Domain to Alias; so the worker never scans its queue, and holds
-%% nothing it does not want.
-await_answer(Domain, Alias, Until, Status) ->
+%% nothing it does not want. The end of its owner ends the worker.
+await_answer(Domain, Alias, Owner, Until, Status) ->
     receive
         {erx_origin, Domain, {Alias, Answer}} ->
             {answer, Answer};
+        {'DOWN', Owner, process, _Pid, _Reason} ->
+            exit(normal);
         _Dropped ->
             case clock() >= Until of
                 true -> unalias(Alias), {timeout, Status};
-                false -> await_answer(Domain, Alias, Until, Status)
+                false -> await_answer(Domain, Alias, Owner, Until, Status)
             end
     after max(0, Until - clock()) ->
         unalias(Alias),

@@ -53,7 +53,7 @@ that has no collector here is
 -export([inspect/1, entries/1, overview/0]).
 -export([inspect/2, inspect/3, entries/2, overview/1, proc_id/1, runtime_domain/0]).
 -export([scoped/3, declared_reachable/3, listing/2, collects_domain/2]).
--export([page/0, page_add/2, page_full/1, page_entries/2]).
+-export([page/0, page_add/2, page_full/1, page_entries/2, view/1]).
 -export_type([scope/0, query_scope/0, answer/0, entries/0, page/0]).
 
 -include("generated/erx_abi.hrl").
@@ -62,9 +62,9 @@ that has no collector here is
 %% A query's scope as an inspect facet holds it: {principal, P} is P's
 %% domains, which the query worker resolves to a scope() at each query.
 -type query_scope() :: scope() | {principal, pos_integer()}.
--type answer() :: {ok, erx_schema:record()} | {error, scope | unsupported | invalid | failed}.
+-type answer() :: {ok, erx_schema:record()} | {error, scope | unsupported | invalid | failed | no_facet | badarg}.
 -type options() :: #{offset => non_neg_integer()}.
--type entries() :: {ok | partial, [erx_schema:record()]} | {error, scope | unsupported | failed}.
+-type entries() :: {ok | partial, [erx_schema:record()]} | {error, scope | unsupported | failed | no_facet | badarg}.
 %% Whose a path is: the machine's, or a domain's by its id.
 -type owner() :: machine | {domain, non_neg_integer()}.
 %% A listing's page while it is built: its records, newest first, their
@@ -84,6 +84,9 @@ that has no collector here is
 %% only the attributes the schema marks `visible any`, and the
 %% processes, listing only its own domains' (docs/design-live.md, "Scopes").
 -define(SCOPED_MACHINE_PATHS, [[], [processes]]).
+%% How much longer than a query's own deadline a caller waits for the facet's
+%% answer, for the frames' way between the domains.
+-define(FACET_MARGIN, 1000).
 
 -doc """
 The record of Path as the caller's domain may see it, with no scope of the
@@ -91,8 +94,11 @@ caller's own (docs/design-live.md, "How a query travels"). In the system
 domain it runs in a query worker at scope `all` (erx_inspect_worker), which
 asks other domains' agents for what only their runtimes know, and a worker
 that fails, at its heap limit for one, is `{error, failed}`. In any other
-runtime it answers from that runtime alone at its local scope
-(erx_facets:domain/0).
+runtime it calls the domain's inspect facet (erx:cap(inspect)), whose
+scope the system domain fixed when it minted the facet, and returns its
+answer: `{error, no_facet}` when the domain holds none, and `{error,
+failed}` when the facet does not answer within inspect_query_max and a
+margin or has ended.
 """.
 -spec inspect(term()) -> answer().
 inspect(Path) ->
@@ -106,16 +112,26 @@ entries(Path) ->
 query(Query) ->
     case erx_facets:domain() of
         #{inspect := all} -> erx_inspect_worker:call(Query, all, #{view => fun view/1});
-        #{inspect := Scope} -> local(Query, Scope)
+        #{} -> through_facet(erx:cap(inspect), Query)
     end.
 
-local({inspect, Path, Options}, Scope) -> inspect(Path, Scope, Options);
-local({entries, Path}, Scope) -> entries(Path, Scope).
+%% The facet's answer. It decodes the request and refuses what the interface
+%% does not take, so a path that is no data is `{error, badarg}` here too.
+through_facet(undefined, _Query) ->
+    {error, no_facet};
+through_facet(Facet, Query) ->
+    try gen_server:call(Facet, Query, ?ERX_INSPECT_QUERY_MAX + ?FACET_MARGIN)
+    catch exit:_ -> {error, failed}
+    end.
 
-%% The other domains a worker may ask, from the domain service on erXos; a
-%% host runtime stands for the system domain alone and knows no other. A
-%% service that does not answer leaves the worker without a view, which it
-%% reports as partial, never as an empty machine.
+-doc """
+The other domains a query worker may ask, from the domain service on
+erXos; a host runtime stands for the system domain alone and knows no
+other. A service that does not answer leaves the worker without a view,
+which it reports as partial, never as an empty machine. The worker's
+default view, the system domain's own and its facets'.
+""".
+-spec view(all | {principal, pos_integer()}) -> {ok, erx_inspect_worker:view()} | unavailable.
 view(Scope) ->
     case erlang:system_info(os_type) of
         {unix, erxos} ->

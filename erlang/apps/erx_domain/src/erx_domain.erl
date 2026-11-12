@@ -48,6 +48,8 @@ or stopped.
 -export([inspect_view/1]).
 -export_type([domain/0, spec/0]).
 
+-include("generated/erx_abi.hrl").
+
 -opaque domain() :: {erx_domain, Id :: pos_integer(), Node :: node(), Pid :: pid()}.
 -type spec() :: #{name := binary(), atom() => term()}.
 
@@ -109,12 +111,12 @@ start_session(Principal, Facets) when is_integer(Principal), Principal > 0 ->
 The domains Scope covers, `all` or `{principal, P}`, each with its
 inspection agent, `none` or `ended` (erx_domain_core:inspect_view/2), for
 the inspector's query worker in the system domain. It waits at most
-500 ms, an agent's wait, and exits like gen_server:call/3 when the
-service does not answer.
+inspect_agent_wait milliseconds, the worker's wait for one agent, and
+exits like gen_server:call/3 when the service does not answer.
 """.
 -spec inspect_view(all | {principal, pos_integer()}) -> [{pos_integer(), pid() | none | ended}].
 inspect_view(Scope) ->
-    gen_server:call(erx_domain_srv, {inspect_view, Scope}, 500).
+    gen_server:call(erx_domain_srv, {inspect_view, Scope}, ?ERX_INSPECT_AGENT_WAIT).
 
 -doc "Introduces domains A and B: ok once their connection is up at both ends.".
 -spec introduce(domain(), domain()) -> ok | {error, term()}.

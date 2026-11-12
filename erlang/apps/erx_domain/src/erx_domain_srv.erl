@@ -54,9 +54,12 @@ acknowledgement through its domain pid, and each operation's deadline is a
 timer. A facet for the system domain goes into the system domain's own
 registry, which erx:cap/1 reads, and is acknowledged there and then. Every
 refusal and dropped message is counted (the call mints);
-their log lines are rate-limited (throttle/2). A configured domain's facets
-of services the system domain serves go in its ready answer, each in front
-of the process its service named with erx_facet:serve/2 (served/2).
+their log lines are rate-limited (throttle/2). The facets of services the
+system domain serves that the manifest grants a configured domain or a
+session's template go in the domain's ready answer, each in front of the
+process its service named with erx_facet:serve/2 (served/2); the inspect
+facet with the scope erx_domain_core:inspect_scope/3 gives the domain's
+principal (system_facet/4).
 
 A session's start is answered only once its namespace is in place, each
 files grant to it installed or settled as failed (docs/design-system.md, "A
@@ -135,8 +138,10 @@ Opts names a host test's stand-ins: lib, the domain library's module
 exports, the export table's (erx_dist); introduce_timeout, an introduce/2
 caller's deadline in milliseconds; release_wait, a held start's bound
 (start/3); mints, the owner function (erx_dist:owner/1 by default) and
-deadline that erx_domain_mints:new/1 takes; and facet_names, the table of
-facet names that facets/2 checks (the generated ?ERX_FACET_NAMES by default).
+deadline that erx_domain_mints:new/1 takes; facet_names, the table of
+facet names that facets/2 checks (the generated ?ERX_FACET_NAMES by default);
+and inspect_policy, #{roots, development}, the system-shell principals and
+development flag every inspect facet's scope is decided from (inspect_policy/1).
 """.
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
@@ -155,8 +160,9 @@ init(Opts) ->
     %% principal's ending domains to be retired, with the timer of its bound (start/3).
     %% Mints is erx_domain_mints' state, its pending operations' deadlines by tag in
     %% mint_timers, and mint_counts and mint_log what was refused or dropped (note/4).
-    %% Served holds, by configured row, the facets of services the system domain serves
-    %% that the manifest grants the row, each its service's name and the grant's limits.
+    %% Served holds, by configured row and by {template, T}, the facets of services the
+    %% system domain serves that the manifest grants the row or the template's sessions,
+    %% each its service's name and the grant's limits.
     MintConfig = maps:merge(#{owner => fun erx_dist:owner/1}, maps:with([owner, deadline], maps:get(mints, Opts, #{}))),
     {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
            configured => #{}, templates => #{}, waiting => #{}, links => erx_domain_links:new(),
@@ -165,8 +171,19 @@ init(Opts) ->
            mint_config => MintConfig, mints => erx_domain_mints:new(MintConfig#{services => [], grants => []}),
            mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0},
            served => #{}, web_lines => #{},
-           facet_names => maps:get(facet_names, Opts, ?ERX_FACET_NAMES)},
+           facet_names => maps:get(facet_names, Opts, ?ERX_FACET_NAMES),
+           inspect_policy => inspect_policy(Opts)},
      {continue, boot}}.
+
+%% What every inspect facet's scope is decided from (erx_domain_core:inspect_scope/3): the
+%% system manifest's system-shell principals and its development flag, read once, as the
+%% service starts, from the system domain's own copy of the manifest (erx_build); a host
+%% test names its own.
+inspect_policy(#{inspect_policy := #{roots := Roots, development := Development} = Policy})
+  when is_list(Roots), is_boolean(Development) ->
+    Policy;
+inspect_policy(_Opts) ->
+    #{roots => erx_build:shell_principals(), development => erx_build:development()}.
 
 %% The library, registered with this process as the one that hears of every end, or none
 %% where the system domain has none. A module that does not load is not a missing
@@ -701,17 +718,31 @@ ready(Id, Ref, Provides, Inspect, #{core := Core, waiting := Waiting} = State) -
     end.
 
 %% The answer to domain Id's ready report, its facets by name: its spec's, and Served,
-%% a configured domain's facets of services the system domain serves. Each is minted in
-%% front of the process the spec or the service named, bound to the domain and exported
-%% to it (erx_facet:start/3), and ends with the domain pid or that process. The answer
+%% its facets of services the system domain serves (served/2). Each is minted in front
+%% of the process the spec or the service named, bound to the domain and exported to it
+%% (erx_facet:start/3), and ends with the domain pid or that process: a spec's as an
+%% erx_domain_facet, a service's as its service's callback (system_facet/4). The answer
 %% goes to the domain pid, which hands it to the domain's agent for init (edit 65). Init
 %% waits for it, so every domain that reported is answered, with no facets too.
 grant_facets(Id, Served, #{core := Core, exports := Exports} = State) ->
-    {ok, #{pid := Pid, ref := Ref, facets := Facets}} = erx_domain_core:fetch(Id, Core),
-    %% The manifest grants a configured domain no spec, so the two never share a name.
-    Minted = maps:filtermap(fun(Name, Facet) -> mint(Id, Pid, Name, Facet, Exports) end, maps:merge(Facets, Served)),
+    {ok, #{pid := Pid, ref := Ref, facets := Facets, principal := Principal}} = erx_domain_core:fetch(Id, Core),
+    Specs = maps:map(fun(_Name, {Behind, Limits}) -> {erx_domain_facet, Behind, Limits#{behind => Behind}} end,
+                     Facets),
+    Systems = maps:map(fun(Name, Grant) -> system_facet(Name, Grant, Principal, State) end, Served),
+    %% A spec never names a service of the table (facet/3), and the manifest grants a
+    %% configured domain no spec, so the two never share a name.
+    Minted = maps:filtermap(fun(Name, Facet) -> mint(Id, Pid, Name, Facet, Exports) end, maps:merge(Specs, Systems)),
     Pid ! {Ref, facets, Minted},
     State.
+
+%% The facet of a service the system domain serves, for a domain of Principal: the
+%% inspect facet, whose scope erx_domain_core:inspect_scope/3 alone decides
+%% (docs/design-live.md, "The inspect service"), or an erx_domain_facet in front of the
+%% service's process.
+system_facet(inspect, {Behind, Limits}, Principal, #{inspect_policy := #{roots := Roots, development := Development}}) ->
+    {erx_inspect_facet, Behind, Limits#{scope => erx_domain_core:inspect_scope(Principal, Roots, Development)}};
+system_facet(_Name, {Behind, Limits}, _Principal, _State) ->
+    {erx_domain_facet, Behind, Limits#{behind => Behind}}.
 
 %% A session's line to the web domain, which its ready report names among its provides as
 %% web_line, a process of the session's own node (erx_web_line). The service keeps it
@@ -722,9 +753,8 @@ keep_web_line(Id, Node, #{web_line := Line}, #{web_lines := Lines} = State) when
 keep_web_line(_Id, _Node, _Provides, State) ->
     State.
 
-mint(Id, DomainPid, Name, {Behind, Limits}, Exports) ->
-    Grant = Limits#{grantee => Id, ends_with => [DomainPid, Behind], behind => Behind},
-    case erx_facet:start(erx_domain_facet, Grant, #{exports => Exports}) of
+mint(Id, DomainPid, Name, {Callback, Behind, Grant}, Exports) ->
+    case erx_facet:start(Callback, Grant#{grantee => Id, ends_with => [DomainPid, Behind]}, #{exports => Exports}) of
         {ok, Facet} ->
             {true, Facet};
         %% The domain or the process behind ended while the service minted.
@@ -737,15 +767,25 @@ mint(Id, DomainPid, Name, {Behind, Limits}, Exports) ->
     end.
 
 %% The facets of services the system domain serves that the manifest grants a configured
-%% domain, each {Behind, Limits} by its service's name: Behind is the process the service
+%% domain's row or a session's template, each {Behind, Limits} by its service's name, and
+%% none for a domain a request made: Behind is the process the service
 %% named for it with erx_facet:serve/2, which the system domain's services do as they
 %% start, and Limits the grant's limits that erx_facet applies, max_request and in_flight,
 %% checked as a spec's are (grant/1). A service with no living process, or a grant whose
 %% limits fail that check, is left out and logged, so the domain finds the name absent,
 %% as it finds any service that is unavailable, until it restarts. Each facet ends with
 %% its process, and nothing grants a new one when the service restarts (TODO.md).
-served({configured, Row}, #{served := Served}) ->
-    Servers = persistent_term:get({erx, serves}, #{}),
+served(Origin, #{served := Served}) ->
+    served(grantee(Origin), Served, persistent_term:get({erx, serves}, #{})).
+
+%% The key of Served an origin's grants are under: its row, or its template's.
+grantee({configured, Row}) -> Row;
+grantee({session, Template}) -> {template, Template};
+grantee(request) -> none.
+
+served(none, _Served, _Servers) ->
+    #{};
+served(Grantee, Served, Servers) ->
     maps:from_list(lists:filtermap(
                      fun({Name, Limits}) ->
                              Facet = case Servers of
@@ -758,13 +798,11 @@ served({configured, Row}, #{served := Served}) ->
                                      {true, {Name, Grant}};
                                  _NoFacet ->
                                      %% A manifest name and row: no text a domain wrote.
-                                     logger:error("erx_domain: service ~ts of the system domain has no facet for configured row ~b",
-                                                  [Name, Row]),
+                                     logger:error("erx_domain: service ~ts of the system domain has no facet for grantee ~0p",
+                                                  [Name, Grantee]),
                                      false
                              end
-                     end, maps:get(Row, Served, [])));
-served(_Origin, _State) ->
-    #{}.
+                     end, maps:get(Grantee, Served, []))).
 
 %% Domain Id's create answered at its ready report; a session's start waits on for its
 %% namespace (answer_in_place/1).

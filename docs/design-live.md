@@ -1319,7 +1319,7 @@ its reporter:
   domain's funnel validates before the inspector decodes it
   ([design-domains.md](design-domains.md#the-funnel), [The runtime
   agent](#the-runtime-agent)). A late answer becomes `{timeout, 500}`
-  (500 ms by default), a domain that is booting `unknown`, an attribute
+  (`inspect_agent_wait`, 500 ms, which the interface declares), a domain that is booting `unknown`, an attribute
   the runtime cannot provide `unsupported`, a list cut at the page limit
   of 1,000 entries `partial`. For the system domain's own processes the
   inspector calls the same collectors in its own runtime.
@@ -1380,8 +1380,8 @@ this section. Its two operations are the inspector's two queries:
 
 | Operation | Request | Answer |
 | --- | --- | --- |
-| `inspect` | `Path`, `Options` | `{ok, Record}`, or `{error, Reason}` with `Reason` one of `scope`, `unsupported`, `invalid` and `failed` |
-| `entries` | `Path` | `{ok, Records}` or `{partial, Records}`, the records of a listing's entries, or `{error, scope}` or `{error, unsupported}` |
+| `inspect` | `Path`, `Options` | `{ok, Record}`, or `{error, Reason}` with `Reason` one of `scope`, `unsupported`, `invalid`, `failed` and `badarg` |
+| `entries` | `Path` | `{ok, Records}` or `{partial, Records}`, the records of a listing's entries, or `{error, Reason}` with `Reason` one of `scope`, `unsupported`, `failed` and `badarg` |
 
 A path is data, so a value someone needs to read is a path of
 `abi/inspection.txt` and never an operation, a facet or a validator of
@@ -1401,7 +1401,12 @@ configured domain: a configured service's principal is commonly the
 ([design-system.md](design-system.md#identifiers)), so its `{principal,
 P}` would reach far beyond the service, and a manifest grants it to one
 only for a need of that domain's own. The web domain holds none; its views read through
-the session's ([design-web.md](design-web.md#overview)). The domain
+the session's ([design-web.md](design-web.md#overview)). The process
+that serves `inspect` in the system domain, the one every inspect facet
+names as its service and ends with, is `erx_inspect_srv`, which
+`kernel`'s supervisor starts before the domain service; it takes no
+request itself, since each facet forwards its requests to query workers
+(below), and its end ends every inspect facet. The domain
 service starts each facet in the system domain, in front of the
 inspector, and sends it with the grantee's ready answer, a session's and
 a configured domain's alike
@@ -1435,21 +1440,31 @@ process table and port table in its own runtime, with no facet
 ([The command shell](#the-command-shell),
 [design-shell.md](design-shell.md#ctrl-t-status-and-the-info-request)),
 as a UNIX user sees their own processes, and a runtime's own
-`process_info/2` is stock OTP's. In the system domain they call the
-inspector's core in the same runtime at scope `all`, and the system
-shell's calls present the system-shell facet besides. The facet's
-callback hands the core the path, the options and its own scope, and
-runs each admitted request in a query worker it starts for its grantee
-(below), up to the grant's limit in flight, 2 by default, so a query
-that waits on a slow domain holds up no other holder's query and the
-inspector's work is charged to the grantee's share. A command domain's
-attenuated facet forwards to its starter's, whose workers serve it, so
-it adds no workers of its own.
+`process_info/2` is stock OTP's. In the system domain no facet stands
+between: they start a query worker (below) at scope `all` in the same
+runtime and wait for its answer, so a system-domain query asks other
+domains' agents as a facet's does, and the system shell's calls present
+the system-shell facet besides. In front of the inspector, the facet's
+callback decodes each request with `erx_inspect_query` (Bounds, below),
+hands the path, the options and its own scope to a query worker it starts
+for its grantee, and forwards the request to it, up to the grant's limit
+in flight, which the default manifests set to 2, so a query that waits
+on a slow domain holds up no other holder's query and the inspector's work is charged to the
+grantee's share. A command domain's attenuated facet forwards to its
+starter's, whose workers serve it, so it adds no workers of its own.
 
 **The query worker.** Each admitted request runs in one process of the
 system domain, a process the facet starts for its grantee
 ([design-domains.md](design-domains.md#facets), "Processes a facet
-starts"), linked to the facet, so revoking the grant ends it:
+starts"). Each monitors the other: the worker ends when the facet does,
+so revoking the grant ends it, and the facet, which monitors the worker
+as the service of the request it forwarded, answers that request
+`{error, failed}` when the worker ends before answering. A service's
+reply precedes its end, both being its own signals, so a request that
+is still outstanding when the worker ends has failed. A worker the
+system domain starts for its own call monitors its caller the same way,
+and the caller's wait answers `{error, failed}` if the worker ends
+first. Every worker is bounded alike:
 
 * **Lifetime.** It sends the one answer and exits. It lives at most
   `inspect_query_max`, 5 s, which the interface declares; at that
@@ -1486,9 +1501,13 @@ starts"), linked to the facet, so revoking the grant ends it:
   against both semispaces of its copying collector, and grows the heap
   in steps, so the bound sits far above the live data: a worker holding
   one answer of 81,000 words and its page peaks at 833,000 words of old
-  and new heap. A worker that passes it is ended by OTP, and the facet,
-  which traps the exit of each worker it is linked to, answers the
-  request `{error, failed}`.
+  and new heap. Every collection of a worker is a major one
+  (`fullsweep_after` 0), so an answer it has merged and dropped is gone
+  at its next collection instead of lingering in an old generation, and
+  its heap holds only the page and the answer it is taking. A worker
+  that passes the bound is ended by OTP, and the facet answers the
+  request `{error, failed}`, as for any worker that ends before
+  answering; a system-domain caller's wait answers the same.
 * **Its reservation.** The grant's limit in flight times
   `inspect_worker_heap` is a term of what the grantee can make the system
   domain hold, which the domain service reserves when it admits the
@@ -1503,7 +1522,7 @@ frame; `inspect_message_heap_min` 1 MiB, four times the answer bound;
 floor with the page through the collector's growth step from 514,838 to
 832,040 words, measured on a worker holding an 81,000-word answer under
 OTP's growth policy; and a reservation of 32 MiB per holder at the
-default limit of 2 in flight. The measurement of the encoded and decoded sizes
+default manifests' limit of 2 in flight. The measurement of the encoded and decoded sizes
 of records and pages, and of the peak memory of the workers together
 ([todo-performance.md](todo-performance.md)), sets them: the decoded
 floor from the largest decoded answer, the frame floor from the largest
@@ -1514,15 +1533,20 @@ nesting any record's type allows, as the `net` generator computes its
 floors.
 
 **Bounds.** A request is a path of at most 16 segments, each an atom
-`erx_schema` already holds, an integer, a `proc_id()` of three integers
-each below 2^32, or a binary of at most
-765 bytes, the longest encoded entry name; and options holding at most
-`offset`, a sequence number, and `limit`, a page of at most 1,000
-(`erx:inspect/2`'s `timeout` is the caller's own wait and is not sent).
-The generated admission path decodes it in
-safe mode, so it creates no atom, and refuses anything else with
-`{error, badarg}`; the whole request is within the facet's default
-`max_request` of 4 KiB. An answer's encoding is at most
+that is a literal of a path `erx_schema` declares, an integer below
+2^64, a `proc_id()` of three integers each below 2^32, or a binary of
+at most 765 bytes, the longest encoded entry name; and options holding at most
+`offset`, a sequence number below 2^64, and `limit`, a page of 1 to
+1,000 (`erx:inspect/2`'s `timeout` is the caller's own wait and is not sent).
+The funnel decodes it in safe mode, so it creates no atom, and the
+facet's one decoder, `erx_inspect_query`, a pure function, refuses
+anything else with `{error, badarg}`, a scope or any other key among the
+options included, walking at most the 16 segments it accepts. A
+request whose encoding passes the grant's `max_request`, 4 KiB in the
+default manifests, the facet drops unanswered before it decodes it, as
+every facet does ([design-domains.md](design-domains.md#facets)), so its
+caller's wait ends in `{error, failed}`; a path the schema declares, its
+names within an ordinary length, is far within it. An answer's encoding is at most
 `inspect_reply_max`, 256 KiB, which the interface declares: the
 inspector stops a listing at 1,000 entries, and stops a listing or an
 append-only record's entries earlier when the next one would pass that
@@ -1581,8 +1605,9 @@ programs and pipes, the inspector asks that domain's inspection agent:
   its answer within `inspect_reply_max` by the inspector's own rules of
   cutting.
 * **The wait.** The query worker sends each question with a fresh
-  `reply` alias, which ends at its first message, and waits 500 ms for
-  the answer; a query that spans several domains, such as `[processes]`
+  `reply` alias, which ends at its first message, and waits
+  `inspect_agent_wait`, 500 ms, which the interface declares, for the
+  answer; a query that spans several domains, such as `[processes]`
   at scope `all`, asks them one after another, each under its own
   deadline, within the query's `inspect_query_max`. An answer that
   misses its deadline makes each runtime attribute it would have given
@@ -1741,7 +1766,7 @@ memory and work, charged to it.
   pass their bytes unchanged.
 * **Snapshots.** Opening a file runs one inspector query, or for an
   append-only path's file one a page, at most 16, whose deadline
-  is the inspector's own (500 ms by default), and reads see that snapshot
+  is the inspector's own, `inspect_query_max`, and reads see that snapshot
   until the file is closed; a record is at most 64 KiB, and a larger one is
   cut, with `[partial]` as its last line. A grant holds at most 256 open
   snapshots, so one reader makes its tree hold at most 16 MiB of its own
@@ -2785,9 +2810,10 @@ determinism test of the generated tree.
     the answer and the query reads as a timeout. The schema generator
     fails on a kind whose largest record passes `inspect_reply_max`,
     with a seeded kind holding a longer text.
-  * The query decoder has a fuzz target, which checks that every request
-    it accepts is within the segment, binary and size bounds and creates
-    no atom; seeded: the bound on a path's length removed.
+  * The query decoder has a fuzz target
+    (`tools/fuzz/erx_inspect_query.rb`), which checks that it accepts
+    exactly the requests within the Bounds, never raises and creates no
+    atom; seeded: the bound on a path's length removed.
 * **Tracing:** a trace of a process whose messages carry atoms the system
   domain does not hold, rendered in the traced domain and shown in the
   shell; a frame trace of a conversation between two traced domains, each

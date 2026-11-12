@@ -381,6 +381,8 @@ module Erx
                    name: 'fuzz-erx-present', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_procfs.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-procfs', deadline: 300, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_inspect_query.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-inspect-query', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_devfs.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-devfs', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_blk_request.rb'), '--seed', options.fetch(:seed).to_s],

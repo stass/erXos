@@ -139,6 +139,18 @@ ends_with_its_grant_test() ->
                  erx_facet:start(erx_domain_facet, #{grantee => ?GRANTEE, ends_with => [Gone], behind => Gone},
                                  #{exports => ?MODULE})).
 
+%% A forward's service that ends before it replies, killed as OTP kills a query worker at
+%% its heap limit, answers the grantee's caller {error, failed}, and the facet lives on.
+a_forwards_service_that_ends_answers_failed_test() ->
+    Killed = spawn(fun() -> receive {'$gen_call', _From, _Request} -> exit(kill) end end),
+    true = register(erx_facet_tests, self()),
+    {ok, Facet} = try erx_facet:start(erx_domain_facet, #{grantee => ?GRANTEE, ends_with => [domain_pid()], behind => Killed},
+                                      #{exports => ?MODULE})
+                  after unregister(erx_facet_tests)
+                  end,
+    ?assertEqual({error, failed}, call(Facet, ping)),
+    ?assertMatch(#{outstanding := 0}, erx_facet:info(Facet)).
+
 %% A mint's reply goes to the domain's own domain pid, which the connection agent names
 %% in {erx, domain_pid}; a domain with none has no system connection to reply over.
 minted_replies_through_the_domain_pid_test() ->
