@@ -22,7 +22,7 @@ domain pid or facet ends gives the line back.
 
 -include_lib("eunit/include/eunit.hrl").
 
--export([export/3, owner/1, shell/0, marker/1]).
+-export([export/3, owner/1, shell/0, marker/1, log/2]).
 
 -define(WAIT_MS, 3000).
 -define(QUIET_MS, 300).
@@ -82,6 +82,7 @@ master() ->
     held_until_connected(Facet),
     input_goes_to_the_session(),
     output_and_repeats(Facet),
+    a_lost_output_is_logged(Facet),
     a_terminal_reply_stays_with_the_session(),
     ctrl_g_opens_the_menu(Facet),
     a_wrong_number_detaches(Facet),
@@ -129,6 +130,33 @@ output_and_repeats(Facet) ->
     ?assertEqual({tty_taken, 1}, from_console()),
     ?assertEqual({tty_size, 24, 80}, from_console()).
 
+%% A resend whose first send was lost arrives as the next output with no bytes: the
+%% console takes it, and logs a line naming the session's domain and the output's number. The
+%% node's other log handlers are silenced meanwhile: the console is the node's `user`,
+%% so their copy of the line would reach the line under test.
+a_lost_output_is_logged(Facet) ->
+    Silenced = [{Id, Level} || #{id := Id, level := Level} <- logger:get_handler_config()],
+    [ok = logger:update_handler_config(Id, level, none) || {Id, _} <- Silenced],
+    ok = logger:add_handler(lost_output_probe, ?MODULE, #{config => #{to => self()}}),
+    {Taken, Logged} =
+        try
+            tty_output(Facet, 2, <<>>),
+            {from_console(),
+             receive {logged, #{msg := {"erx_console: output" ++ _ = Format, Args}}} ->
+                     lists:flatten(io_lib:format(Format, Args))
+             after ?WAIT_MS -> none
+             end}
+        after
+            ok = logger:remove_handler(lost_output_probe),
+            [ok = logger:update_handler_config(Id, level, Level) || {Id, Level} <- Silenced]
+        end,
+    ?assertEqual({tty_taken, 2}, Taken),
+    ?assertEqual("erx_console: output 2 of domain 7's tty was lost on its way to the console", Logged).
+
+%% The logger handler a_lost_output_is_logged/1 adds: each event goes to the test.
+log(Event, #{config := #{to := To}}) ->
+    To ! {logged, Event}.
+
 %% The BEL that ends a terminal's OSC reply is no Ctrl-G: the whole reply goes to the
 %% session that asked for it, which keeps the line, and so does what is typed next.
 a_terminal_reply_stays_with_the_session() ->
@@ -159,7 +187,7 @@ ctrl_g_opens_the_menu(Facet) ->
     ?assertMatch({_, _}, binary:match(Menu, <<"  s  system shell\r\n  1* root_1 (domain 7)\r\n">>)),
     nothing_from_the_console(),
     nothing_on_the_line(),
-    tty_output(Facet, 2, <<"S2">>),
+    tty_output(Facet, 3, <<"S3">>),
     nothing_from_the_console(),
     type(<<"s">>),
     type(<<"b\r">>),
@@ -168,8 +196,8 @@ ctrl_g_opens_the_menu(Facet) ->
     type(<<$\^G>>),
     {ok, _} = await(<<"Esc returns. ">>),
     type(<<"1">>),
-    {ok, _} = await(<<"S2">>),
-    ?assertEqual({tty_taken, 2}, from_console()).
+    {ok, _} = await(<<"S3">>),
+    ?assertEqual({tty_taken, 3}, from_console()).
 
 %% The menu lists only the live sessions of the line's principal, each name through the
 %% line escape: not another principal's, not one refused, and not one whose domain pid is
@@ -226,7 +254,7 @@ a_wrong_number_detaches(Facet) ->
     {ok, Seen} = await(<<"sys:c">>),
     ?assertEqual(nomatch, binary:match(Seen, <<"BAD">>)),
     ?assertEqual({error, refused}, erx_console:connect(7)),
-    tty_output(Facet, 3, <<"S3">>),
+    tty_output(Facet, 4, <<"S4">>),
     nothing_from_the_console().
 
 %% The console facet takes the largest output the tty sends, 4 KiB with a large number,

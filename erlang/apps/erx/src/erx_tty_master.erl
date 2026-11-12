@@ -24,7 +24,8 @@ taken, again with Bytes empty: the tty's resend of an output it has no answer
 for. A resend of the output last taken is answered again, with the size, since
 both are states and a lost one is sent again. A resend whose first send was
 lost arrives as the next number with no bytes, and is taken as such: those bytes
-are lost, as a line's overrun loses them. Anything else refuses the tty, with the
+are lost, as a line's overrun loses them, and the action `{lost, N}` has the
+console log the loss. Anything else refuses the tty, with the
 action `detach`: the console detaches it, and the master takes nothing from it,
 answers nothing and is never connected again.
 """.
@@ -44,6 +45,7 @@ answers nothing and is never connected again.
                 | {send, {tty_taken, non_neg_integer()}  % to the tty
                        | {tty_input, binary()}
                        | {tty_size, pos_integer(), pos_integer()}}
+                | {lost, non_neg_integer()}              % log that output N's bytes were lost
                 | detach.                                % the tty failed a check
 
 -record(master, {
@@ -72,12 +74,16 @@ output({tty_output, N, Bytes}, M)
 output(_Message, M) ->
     refuse(M).
 
-%% A new output is written if connected and held if not; a resend of the output in the
-%% console changes nothing; a resend of the output last taken is answered again.
-take(N, Bytes, M = #master{next = N, output = none, connected = true}) ->
-    {[{write, N, Bytes}], M#master{output = {writing, N}}};
-take(N, Bytes, M = #master{next = N, output = none}) ->
-    {[], M#master{output = {held, N, Bytes}}};
+%% A new output is written if connected and held if not, and one with no bytes is a
+%% resend whose first send was lost, since a tty never sends a new output empty; a
+%% resend of the output in the console changes nothing; a resend of the output last
+%% taken is answered again.
+take(N, Bytes, M = #master{next = N, output = none, connected = Connected}) ->
+    Lost = [{lost, N} || Bytes =:= <<>>],
+    case Connected of
+        true -> {Lost ++ [{write, N, Bytes}], M#master{output = {writing, N}}};
+        false -> {Lost, M#master{output = {held, N, Bytes}}}
+    end;
 take(N, <<>>, M = #master{output = {held, N, _Bytes}}) ->
     {[], M};
 take(N, <<>>, M = #master{output = {writing, N}}) ->

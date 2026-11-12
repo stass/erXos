@@ -6,7 +6,8 @@
 The master's side of a session's tty, erx_tty_master: its receiver checks as a
 property over arbitrary terms, and the master against the tty's own core,
 erx_tty_link, over random runs in which the line connects and disconnects,
-writes are slow, and messages in both directions are lost.
+writes are slow, and messages in both directions are lost: the master reports as
+lost exactly the outputs whose first send was lost.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -63,6 +64,15 @@ a_repeat_is_answered_again_test() ->
     [_, _, _, Taken] = states(),
     ?assertMatch({[{send, {tty_taken, 0}}, {send, {tty_size, 24, 80}}], _},
                  erx_tty_master:output({tty_output, 0, <<>>}, Taken)).
+
+%% A resend whose first send was lost arrives as the next output with no bytes: the
+%% master takes it, whether it writes it or holds it, and reports the loss for the log.
+a_lost_output_is_reported_test() ->
+    Fresh = erx_tty_master:new(),
+    {_, Connected} = erx_tty_master:connect({24, 80}, Fresh),
+    ?assertMatch({[{lost, 0}, {write, 0, <<>>}], _}, erx_tty_master:output({tty_output, 0, <<>>}, Connected)),
+    ?assertMatch({[{lost, 0}], _}, erx_tty_master:output({tty_output, 0, <<>>}, Fresh)),
+    ?assertMatch({[{write, 0, <<"a">>}], _}, erx_tty_master:output({tty_output, 0, <<"a">>}, Connected)).
 
 %% A tty refused once is detached for good: nothing it sends is taken, written or
 %% answered, and it cannot be connected again.
@@ -144,9 +154,10 @@ against_the_tty_test_() ->
 run() ->
     Start = #{tty => erx_tty_link:new(), master => erx_tty_master:new(),
               to_master => [], to_tty => [], writing => [], timers => [],
-              line => <<>>, wrote => <<>>, sent => [], lost => []},
+              line => <<>>, wrote => <<>>, sent => [], lost => [], reported => []},
     End = drain(lists:foldl(fun(_, S) -> step(event(), S) end, Start, lists:seq(1, ?STEPS))),
-    #{line := Line, wrote := Wrote, sent := Sent, lost := Lost} = End,
+    #{line := Line, wrote := Wrote, sent := Sent, lost := Lost, reported := Reported} = End,
+    ?assertEqual(lists:sort(Lost), lists:sort(Reported)),
     ?assertEqual(Wrote, iolist_to_binary([Bytes || {_N, Bytes} <- Sent])),
     ?assertEqual(iolist_to_binary([Bytes || {N, Bytes} <- Sent, not lists:member(N, Lost)]), Line).
 
@@ -217,5 +228,6 @@ tty({Actions, Tty}, S) ->
 master({Actions, M}, S) ->
     ?assertNot(lists:member(detach, Actions)),
     lists:foldl(fun({write, N, Bytes}, Acc = #{writing := W}) -> Acc#{writing := W ++ [{N, Bytes}]};
-                   ({send, Message}, Acc = #{to_tty := Q}) -> Acc#{to_tty := Q ++ [Message]}
+                   ({send, Message}, Acc = #{to_tty := Q}) -> Acc#{to_tty := Q ++ [Message]};
+                   ({lost, N}, Acc = #{reported := R}) -> Acc#{reported := [N | R]}
                 end, S#{master := M}, Actions).

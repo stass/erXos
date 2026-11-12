@@ -1080,9 +1080,10 @@ bell(#state{driver = Driver, tty = TTY}) ->
     ok.
 
 %% Domain's master after Actions, which it carries out in order: a write goes to the driver,
-%% which says when it is written; a message goes to the session's tty; and a detach, for
-%% a tty that failed a check, takes the line from it, if it has it, and logs a line naming
-%% the domain under the system domain's own source.
+%% which says when it is written; a message goes to the session's tty; a loss logs a line
+%% naming the session's domain and the output, by number only, since the line may be
+%% another principal's; and a detach, for a tty that failed a check, takes the line from it,
+%% if it has it, and logs a line naming the domain under the system domain's own source.
 carry_out(Domain, {Actions, Master}, State = #state{sessions = Sessions}) ->
     Session = #{tty := Tty} = maps:get(Domain, Sessions),
     Next = State#state{sessions = Sessions#{Domain := Session#{master := Master}}},
@@ -1095,6 +1096,9 @@ carry_out_one(_Domain, Tty, {send, Message}, State) when is_pid(Tty) ->
     Tty ! Message,
     State;
 carry_out_one(_Domain, none, {send, _Message}, State) ->
+    State;
+carry_out_one(Domain, _Tty, {lost, N}, State) ->
+    logger:notice("erx_console: output ~b of domain ~b's tty was lost on its way to the console", [N, Domain]),
     State;
 carry_out_one(Domain, _Tty, detach, State = #state{line = Line}) ->
     logger:notice("erx_console: domain ~b's tty failed the console's checks; detached", [Domain]),

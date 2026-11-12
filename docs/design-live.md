@@ -667,7 +667,10 @@ master that has taken output `N` answers `{tty_taken, N}` again, with the
 current `{tty_size, Rows, Columns}`, and `tty_hangup` if it has hung up: these
 are states, so a repeat of them is harmless and a lost one is sent again. A
 master that has not taken it, because the session is not connected, sends
-nothing, and that one output is all the console holds for a session. A lost
+nothing, and that one output is all the console holds for a session. A resend
+whose first send was lost arrives as the next output with no bytes: the master
+takes it as such, so those bytes are lost, as in a line's overrun, and the
+console logs a line naming the session's domain and the output's number. A lost
 `{tty_input, Bytes}` is typed input lost, as in a line's overrun, and the peer's
 count reports it. A master in the tty's own domain, `erx_term` or a
 pseudo-terminal's, sends the same messages as plain Erlang messages, which
