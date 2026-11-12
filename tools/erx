@@ -386,6 +386,10 @@ module Erx
                    name: 'fuzz-erx-inspect-query', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_devfs.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-devfs', deadline: 300, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_rc_conf.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-rc-conf', deadline: 300, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_apps_ctl.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-apps-ctl', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_blk_request.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-blk-request', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_virtio_net_frame.rb'), '--seed',

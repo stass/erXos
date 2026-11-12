@@ -1,0 +1,13 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The start service (docs/design-apps.md, "The start table"): the start
+%% table, the manifest's start rows with rc.conf over them, and what keeps
+%% each enabled row's session. It runs in the system domain only, whose
+%% release alone ships it.
+{application, erx_starter,
+ [{description, "erXos start service"},
+  {vsn, "1"},
+  {modules, [erx_start_table]},
+  {registered, []},
+  {applications, [kernel, stdlib, erx_domain]}]}.
