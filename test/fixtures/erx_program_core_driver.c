@@ -48,7 +48,7 @@ static erx_program_spec_t
 spec_of(const char *image, size_t len, int64_t pid, uint64_t guarantee, uint64_t cap)
 {
 	return ((erx_program_spec_t){ .image = (const uint8_t *)image, .image_len = len, .pid = pid,
-	    .guarantee = guarantee, .cap = cap });
+	    .guarantee = guarantee, .cap = cap, .slots = 4 });
 }
 
 static erx_program_spec_t
@@ -97,6 +97,13 @@ specs(void)
 	print_spec("pid-int64-min", spec_of(good_image, strlen(good_image), INT64_MIN, 1, 2));
 	print_spec("guarantee-equals-cap", spec_of(good_image, strlen(good_image), 2, 7, 7));
 	print_spec("guarantee-above-cap", spec_of(good_image, strlen(good_image), 2, 8, 7));
+	erx_program_spec_t spec = spec_named_image(good_image);
+	spec.slots = 0;
+	print_spec("slots-0", spec);
+	spec.slots = ERX_PROG_DATA_SLOTS_MAX;
+	print_spec("slots-max", spec);
+	spec.slots = ERX_PROG_DATA_SLOTS_MAX + 1;
+	print_spec("slots-past-max", spec);
 	print_spec("cap-equals-pool", spec_of(good_image, strlen(good_image), 2, 0, POOL));
 	print_spec("cap-above-pool", spec_of(good_image, strlen(good_image), 2, 0, POOL + 1));
 	print_spec("cap-max", spec_of(good_image, strlen(good_image), 2, 0, UINT64_MAX));
@@ -165,7 +172,7 @@ starts(void)
 	start_misuse();
 	start_run("refused", spec_of(good_image, strlen(good_image), 1, 1, 2), 0, 0);
 	/* Past the last step a failure is never asked for, so its run is the one that succeeded. */
-	for (unsigned k = 1; k <= ERX_PROGRAM_THREAD_START; k++) {
+	for (unsigned k = 1; k <= ERX_PROGRAM_THREAD_CREATE; k++) {
 		snprintf(name, sizeof(name), "fail-%u", k);
 		start_run(name, good, k, 0);
 		snprintf(name, sizeof(name), "undo-fail-%u", k);
@@ -210,13 +217,21 @@ alphabet(input_t inputs[], size_t max)
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "fault %" PRIu32, kinds[i]);
 		inputs[n].input = erx_program_input_of(&record, ERX_PROGRAM_SPACE_IMAGE);
 	}
-	if (n + 3 <= max) {
+	if (n + 7 <= max) {
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "close");
 		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_CLOSE };
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "lost");
 		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_LOST };
 		snprintf(inputs[n].text, sizeof(inputs[n].text), "answered");
 		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_ANSWERED };
+		snprintf(inputs[n].text, sizeof(inputs[n].text), "run");
+		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_RUN };
+		snprintf(inputs[n].text, sizeof(inputs[n].text), "send");
+		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_SEND };
+		snprintf(inputs[n].text, sizeof(inputs[n].text), "written");
+		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_WRITTEN };
+		snprintf(inputs[n].text, sizeof(inputs[n].text), "broken");
+		inputs[n++].input = (erx_program_input_t){ .kind = ERX_PROGRAM_BROKEN };
 	}
 	return (n);
 }
@@ -225,14 +240,14 @@ static int
 same_state(erx_program_end_t a, erx_program_end_t b)
 {
 	return (a.phase == b.phase && a.status == b.status && a.anchor_ended == b.anchor_ended &&
-	    a.answered == b.answered && a.close_held == b.close_held);
+	    a.answered == b.answered && a.close_held == b.close_held && a.ran == b.ran && a.writing == b.writing);
 }
 
 static void
 print_state(erx_program_end_t end)
 {
-	printf(" %d %" PRId64 " %d %d %d", (int)end.phase, end.status, end.anchor_ended, end.answered,
-	    end.close_held);
+	printf(" %d %" PRId64 " %d %d %d %d %d", (int)end.phase, end.status, end.anchor_ended, end.answered,
+	    end.close_held, end.ran, end.writing);
 }
 
 /* Every state reachable from a started program, and every input in each. */
@@ -315,6 +330,7 @@ static const char *const act_names[] = {
 	[ERX_PROGRAM_CHANNEL_DESTROY] = "channel_destroy",
 	[ERX_PROGRAM_REPORT] = "report",
 	[ERX_PROGRAM_STOP_ANCHOR] = "stop_anchor",
+	[ERX_PROGRAM_WRITE] = "write",
 	[ERX_PROGRAM_CLOSE_PORT] = "close_port",
 };
 static const char *const phase_names[] = {
@@ -336,8 +352,8 @@ constants(void)
 	}
 	printf("const ok %d\nconst einval %d\nconst erange %d\nconst elimit %d\nconst step_failure %d\n",
 	    ERX_OK, ERX_EINVAL, ERX_ERANGE, ERX_ELIMIT, STEP_FAILURE);
-	printf("const exit_signal %" PRId64 "\nconst sigkill %d\nconst killed %" PRId64 "\n", ERX_EXIT_SIGNAL,
-	    ERX_SIGKILL, ERX_PROGRAM_KILLED);
+	printf("const exit_signal %" PRId64 "\nconst sigsys %d\nconst sigkill %d\nconst killed %" PRId64 "\n", ERX_EXIT_SIGNAL,
+	    ERX_SIGSYS, ERX_SIGKILL, ERX_PROGRAM_KILLED);
 	printf("const exit_parent %" PRId64 "\nconst exit_released %" PRId64 "\nconst exit_nothread %" PRId64 "\n",
 	    ERX_EXIT_PARENT, ERX_EXIT_RELEASED, ERX_EXIT_NOTHREAD);
 	printf("const msg_caps %" PRIu32 "\n", ERX_MSG_CAPS);

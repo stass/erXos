@@ -1574,29 +1574,42 @@ it; git history is the record of completed work.
 * [Medium] erx_program driver and core (`erx_program_drv.c` `channel_sides`, `install()`;
   `erx_program_core.c` `install_rights`): which channel side sits at which `program_arg` index, how
   the session maps it and what rights the program gets are three tables joined by index, and no
-  test checks that exactly one party may write each side or what the program receives in x0-x6.
-  Give the core one row per side (index, session protection, program rights) with a host check,
-  and a `programs` guest that checks its argument registers and the doorbell label.
+  host test checks that exactly one party may write each side; the `programs` suite's `bigargs`
+  checks only what the program receives. Give the core one row per side (index, session
+  protection, program rights) with a host check.
 * [Medium] liberx program layer, `liberx/program/startup.c` (`erx_prog_startup_plan`): a startup
   message with any descriptor other than `null` ends the program with status 127 before `main`,
   because liberx sets up no pipe end, file, tty, directory, socket or `dup` yet, and the session
   sends only `fds => []`. Each case replaces the refusal with its set-up when the file
   descriptors arrive (docs/design-programs.md, "Descriptors and files").
-* [Low] erx_program driver: each program costs the session about 352 KiB of its own budget (four
-* [Medium] erx_program driver (`erx_program_drv.c` `first_registers`, `ERX_PROGRAM_BELL_BIND`): no
-  test checks what a real program receives in x0-x4 or the label its doorbell rings under; the
-  `native_space` maker checks the layout only as its own imitation of a session writes it. Add a
-  `programs` guest with an entry of its own that checks its argument registers, maps its own side
-  read-write and its peer side read-only, and takes the doorbell under its peer side's value.
 * [Low] erx_program driver: each program costs the session about 304 KiB of its own budget (two
-  24 KiB lane sides, the 256 KiB data area, two IRQ objects) with no session-side bound, since
+  24 KiB lane sides, the data area at 64 KiB a slot, 256 KiB by default, two IRQ objects) with no session-side bound, since
   `PROGRAM_POOL` is unbounded; many starts can exhaust the session's own budget.
-* [Low] erx_program driver, `erx_program_drv.c` (`PROGRAM_LANE_SIZE`): the size of the channel's
-  lanes, which the program's `liberx` must pass to `erx_lane_reader_init` and
-  `erx_lane_writer_init` and never read from the session's side, lives only in the driver. Make it
-  a `program_lane` limit in `abi/erx_abi.txt` beside `program_arg` before `liberx/program` uses it.
+* [Low] liberx program layer, `liberx/program/`: the build check that the layer's entry macro
+  opens every function a program may call (docs/design-programs.md, "Verification and testing")
+  is not built. Decide with it whether `erx_prog_startup_plan`, a pure function the layer exports
+  for its own executor, counts as exported, or moves beside `elf_plan.c`.
 * [Low] `abi/erx_abi.txt` (`program_arg`): the generator emits no count, so
   `ERX_PROGRAM_INSTALL_DATA` (`erx_program_core.h`) assumes `doorbell` is the last index.
+* [Medium] erx_program driver and core (`erx_program_core.c` SEND, `erx_program_drv.c`
+  `CONTROL_SEND`): a send while the startup frame is still being written is refused with `einval`,
+  the answer a dead program gets, and `WRITTEN` stays inside the driver. docs/design-programs.md,
+  "Flow control is the lanes", has the write answer `busy` and the handler keep the frame owed until
+  room returns. Build that answer, and the owner's signal that room returned, with the first frame
+  after the startup message; until then only the startup message is sent.
+* [Medium] liberx program layer, `liberx/program/program.c` (`executor_main`, `message_open`,
+  `message_close`): the per-part decision on the inbound lane (accept the header, refuse a later
+  frame, append, plan at the close) is mixed into the effects, and no test sends a non-frame
+  record, a nonzero zero word, a header past `ERX_PROG_FRAME_MAX`, a zero-length record or a
+  second frame. Move the decision into a pure function beside `startup.c`, test it exhaustively on
+  the host, and add a raw-path case to the `programs` suite that sends a second frame and expects 127.
+* [Low] erx_program driver, `erx_program_drv.c` (`frame_write`): every put status other than done
+  or short is fed as `BROKEN`, which kills the program with SIGSYS, though `ERX_LANE_PUT_REFUSED`
+  would be the session's own error; it cannot happen while the frame is bounded by
+  `ERX_PROG_FRAME_MAX`. Feed only a malformed lane as `BROKEN`.
+* [Low] liberx program layer, `liberx/program/program.c` (`main_run`): design-programs.md's step 9
+  has the first thread set its signal mask; the layer keeps `sigmask` and `sigignore` in
+  `erx_prog_self_t` and applies neither until signals reach programs.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/fault_gate.c` (`erx_fiasco_gate_fault`): a
   fault takes any free entry of its space's pool, since Fiasco's fault message names only the task, so
   its record's thread is unknown and design-stopgap.md's "a fault in its thread's record" does not
@@ -4581,6 +4594,7 @@ to the corpus and follow rc
 ## Security residuals
 
 - [Low] erx_program credit (`otp/erts/emulator/sys/erxos/erx_program_core.c`): the credit holds reply slots only, so every `{closed}` and `{drained}` notice is refused with SIGSYS. The frame that first hands a program a pipe end must add notice credit (docs/design-programs.md, "Credit").
+- [Low] program channel on the stopgap (`liberx/backend/fiasco/object.c`): the Fiasco backend records no rights per handle, so a program can map the session's lane side read-write and rebind or unbind the session's doorbell, which is also the gate worker's IRQ for the program's port. erXos's kernel enforces the rights the install grants (`erx_program_core.c` `install_rights`).
 
 * [Low] inspect service, the runtime agent leg ([design-live.md](docs/design-live.md#the-runtime-agent)): a
   domain's inspection agent takes questions one at a time, so a holder of scope `all` that asks without pause

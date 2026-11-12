@@ -13,7 +13,7 @@
 #include "erx/etf.h"
 #include "erx_program_core.h"
 
-/* A step that made nothing of its own: a map and an install die with their space, and the start is last. */
+/* A step that made nothing of its own: a map and an install die with their space. */
 #define NO_UNDO	ERX_PROGRAM_DONE
 
 /*
@@ -44,7 +44,6 @@ static const struct {
 	{ ERX_PROGRAM_INSTALL, NO_UNDO },
 	{ ERX_PROGRAM_BELL_BIND, ERX_PROGRAM_BELL_UNBIND },
 	{ ERX_PROGRAM_THREAD_CREATE, ERX_PROGRAM_THREAD_CLOSE },
-	{ ERX_PROGRAM_THREAD_START, NO_UNDO },
 };
 #define PLAN_STEPS	((uint32_t)(sizeof(plan) / sizeof(plan[0])))
 _Static_assert(PLAN_STEPS + 3 <= ERX_PROGRAM_ACTIONS_MAX, "an end's report, stop, release and close fit its actions");
@@ -81,7 +80,7 @@ erx_program_spec_check(const erx_program_spec_t *spec, uint64_t pool)
 		return (ERX_EINVAL);
 	if (spec->pid < ERX_PROGRAM_PID_MIN || spec->pid > ERX_PROGRAM_PID_MAX)
 		return (ERX_ERANGE);
-	if (spec->guarantee > spec->cap)
+	if (spec->guarantee > spec->cap || spec->slots < 1 || spec->slots > ERX_PROG_DATA_SLOTS_MAX)
 		return (ERX_EINVAL);
 	if (spec->cap > pool)
 		return (ERX_ELIMIT);
@@ -199,6 +198,16 @@ anchor_status(int64_t status)
 	return (status);
 }
 
+/*
+ * Whether the owner may still act on the program: it read the start's answer, and the image
+ * runs with its anchor, so a thread started or a frame written now reaches a live program.
+ */
+static bool
+alive(const erx_program_end_t *end)
+{
+	return (end->answered && end->phase == ERX_PROGRAM_RUNNING && !end->anchor_ended);
+}
+
 static size_t
 put(erx_program_action_t actions[], size_t at, erx_program_act_t act, int64_t status)
 {
@@ -269,11 +278,15 @@ erx_program_end_next(erx_program_end_t *end, erx_program_input_t input,
 		end->anchor_ended = true;
 		return (end->phase == ERX_PROGRAM_ENDED ? release(end, actions, 0, false) : 0);
 	case ERX_PROGRAM_FAULT:
+	case ERX_PROGRAM_BROKEN:
+		/* A broken channel holds no frame the driver can finish. */
+		if (input.kind == ERX_PROGRAM_BROKEN)
+			end->writing = false;
 		/* Only the first fault decides; the image's exit record reports it. */
 		if (end->phase != ERX_PROGRAM_RUNNING)
 			return (0);
 		end->phase = ERX_PROGRAM_FAULTED;
-		end->status = fault_status(input.fault);
+		end->status = input.kind == ERX_PROGRAM_BROKEN ? ERX_EXIT_SIGNAL + ERX_SIGSYS : fault_status(input.fault);
 		return (end->anchor_ended ? 0 : put(actions, 0, ERX_PROGRAM_STOP_ANCHOR, end->status));
 	case ERX_PROGRAM_CLOSE:
 	case ERX_PROGRAM_LOST:
@@ -281,6 +294,19 @@ erx_program_end_next(erx_program_end_t *end, erx_program_input_t input,
 		if (end->phase == ERX_PROGRAM_RUNNING && !end->anchor_ended)
 			at = put(actions, 0, ERX_PROGRAM_STOP_ANCHOR, ERX_PROGRAM_KILLED);
 		return (release(end, actions, at, input.kind == ERX_PROGRAM_CLOSE));
+	case ERX_PROGRAM_RUN:
+		if (!alive(end) || end->ran)
+			return (0);
+		end->ran = true;
+		return (put(actions, 0, ERX_PROGRAM_THREAD_START, 0));
+	case ERX_PROGRAM_SEND:
+		if (!alive(end) || end->writing)
+			return (0);
+		end->writing = true;
+		return (put(actions, 0, ERX_PROGRAM_WRITE, 0));
+	case ERX_PROGRAM_WRITTEN:
+		end->writing = false;
+		return (0);
 	case ERX_PROGRAM_ANSWERED:
 		break;
 	}

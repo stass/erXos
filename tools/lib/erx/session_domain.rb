@@ -97,12 +97,15 @@ module Erx
     # Typed at root_1's Erlang shell: two starts the driver refuses (docs/design-runtime.md,
     # "Programs as ports"). The first names a program the release does not hold, so the
     # start makes the program's budget, group, IRQ object and spaces, the image map fails
-    # with einval, and the start undoes what it made; the second names pid 1, which the
-    # spec check refuses with erange before anything is made. The
+    # with einval, and the start undoes what it made; the second asks for a guarantee above
+    # its cap, which the driver's spec check refuses with einval before anything is made.
+    # Each spec carries what the program's startup message needs. The
     # production image's session release holds no program; the programs suite's test image
     # adds some and runs them (tools/lib/erx/programs.rb).
-    PROGRAM_REFUSED = '{erx_program:start(#{image => <<"bin/none">>, pid => 2}), ' \
-                      'erx_program:start(#{image => <<"bin/none">>, pid => 1})}.' "\r"
+    PROGRAM_SPEC = 'image => <<"bin/none">>, pid => 2, ppid => 1, pgid => 2, argv => [<<"none">>], env => [], ' \
+                   'cwd => <<"/">>, spawn => false, sigmask => [], sigignore => [], umask => 8#022'
+    PROGRAM_REFUSED = "{erx_program:start(\#{#{PROGRAM_SPEC}}), " \
+                      "erx_program:start(\#{#{PROGRAM_SPEC}, guarantee => 2, cap => 1})}.\r"
     # The file root's session writes and every later step reads, in Erlang and at the system
     # shell, and its one line, `across`, as file:read_file/1 answers it in the shell.
     WRITE_ACROSS = 'ok = file:write_file("/data/across", <<"across\n">>), file:read_file("/data/across")'
@@ -198,7 +201,7 @@ module Erx
        { name: 'session-build', pattern: BUILD_ID, seconds: 60, type: ERL }.freeze,
        shell.merge(name: 'root_1-erlang-shell', type: "node().\r").freeze,
        { name: 'root_1-node', pattern: answer('root_1@erxos'), seconds: 60, type: PROGRAM_REFUSED }.freeze,
-       { name: 'program-refused', pattern: answer('{{error,einval},{error,erange}}'), seconds: 60,
+       { name: 'program-refused', pattern: answer('{{error,einval},{error,einval}}'), seconds: 60,
          type: with_data(WRITE_ACROSS) }.freeze,
        { name: 'session-data', pattern: answer(ACROSS_READ), seconds: 180, type: BURST }.freeze,
        { name: 'burst-first', pattern: line(burst_line(1).chomp("\r\n")), seconds: 60, type: CTRL_G }.freeze,

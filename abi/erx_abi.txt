@@ -202,6 +202,11 @@ enum program_arg u32
   value own_side 2
   value peer_side 3
   value doorbell 4
+# Each lane of a program's channel: its ring's data area, in bytes, a power
+# of two (docs/design-programs.md, "The channel"). The session sizes both
+# sides with it and liberx maps them with it, so neither reads it from the
+# other's pages.
+limit program_lane u32 16384
 # The fault table: the signal whose number, added to ERX_EXIT_SIGNAL, a
 # program's space stops with when one of its threads faults with each
 # kind. Every fault kind but exit, which marks a space's exit record, has

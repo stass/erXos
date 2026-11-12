@@ -69,8 +69,20 @@ module Erx
               #{BACKEND}/arch/aarch64/clock.c #{BACKEND}/arch/aarch64/cache.c #{BACKEND}/trace_stub.c].freeze
     # A task's test program linked with musl: TASK's entry, less root_mem.c, whose memcpy
     # musl gives, with libc_task.c, which stops the task with main's return. libc-test's
-    # tasks and the programs suite's are built from it.
+    # tasks are built from it.
     LIBC_TASK = [*(TASK - ["#{BACKEND}/root_mem.c"]), "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_task.c"].freeze
+    # A session's program (docs/design-programs.md, "Starting a program"): LIBC_TASK's
+    # entry with program_task.c for libc_task.c, liberx's program layer, which takes the
+    # startup message from the channel's inbound lane and checks it with the generated
+    # profile reader over the ETF reader, which hashes atoms with BLAKE3, and the backend
+    # names the layer calls by, with task_refused.c for those a task has no service answer
+    # for. The programs suite's programs are built from it.
+    PROGRAM_LAYER = %w[liberx/program/program.c liberx/program/startup.c liberx/erx_lane.c
+                       liberx/erx_profile.c build/gen/liberx/generated/prog_profile.c liberx/erx_etf.c
+                       kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c].freeze
+    PROGRAM = [*(LIBC_TASK - ["#{BACKEND}/libc_task.c"]), "#{BACKEND}/program_task.c", "#{BACKEND}/api_names.c",
+               "#{BACKEND}/task_refused.c",
+               *PROGRAM_LAYER].freeze
     # The root that checks the handoff and the archive and has nothing to run: the boot
     # suite's. The archive's core comes from Fiasco's boot archive, which does not hold the
     # handoff record's core, since bootstrap only writes it.
@@ -101,12 +113,16 @@ module Erx
                       "#{BACKEND}/task_refused.c", 'liberx/backend/core/dom_lib_none.c', "#{BACKEND}/release_task.c", 'liberx/release_fs.c', 'liberx/system/dom_dump.c',
                       'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c', *CONNECTION].freeze
     # The sources that read musl's headers, which NativeRuntime's sysroot holds: the boot page builder,
-    # the domain library, and the native_domain root and string functions that link it.
+    # the domain library, the native_domain root and string functions that link it, and a
+    # program's layer and the programs suite's programs that read what it keeps.
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c liberx/system/dom_core.c liberx/system/dom_life.c
                       liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c liberx/system/dom_dump.c
                       liberx/erx_lane.c liberx/erx_funnel.c
                       liberx/erx_etf.c test/guest/native_domain/guest.c
-                      test/guest/native_domain/string.c].freeze
+                      test/guest/native_domain/string.c
+                      liberx/program/program.c liberx/program/startup.c liberx/erx_profile.c
+                      build/gen/liberx/generated/prog_profile.c test/guest/programs/args.c
+                      test/guest/programs/bigargs.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'
     # The sources that use the FP registers, which a task may (only the kernel runs no FP
     # instruction): erx_etf.c reads and writes floats.

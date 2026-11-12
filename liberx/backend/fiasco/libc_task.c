@@ -5,8 +5,8 @@
 
 /*
  * A task's test program linked with musl: main's exit status stops the task, and
- * whoever started it reads that: the launcher's join for libc-test's programs, the
- * session's fault gate for the programs suite's (test/guest/programs). What it prints
+ * whoever started it, the launcher's join for libc-test's programs, reads that; a
+ * session's programs enter through program_task.c instead. What it prints
  * goes to the system console unchanged, through the service, not to a session's tty,
  * so only test programs use this entry. It is started with 0 and reads no boot information page; a domain's
  * runtime, which does, enters through domain_entry.c instead.

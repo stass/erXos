@@ -1530,9 +1530,12 @@ applied in this order, each step undoing the ones before it on failure:
    a file object the session holds through an `rx` grant; the handler, a
    process of the session (the owner by default); the parent of the
    program's anchor; the pipe ends and descriptors the program inherits;
-   its startup message; and the guarantee and cap of its budget and the
-   limits of its group, which lie within the session's pool for programs
-   and the session's grant.
+   what its startup message carries, which `erx_program:start/1` checks
+   with the program protocol's generated grammar before it opens the
+   port, with the largest encoding of each capability value standing in
+   for the values the install makes; the size of its data area; and the
+   guarantee and cap of its budget and the limits of its group, which lie
+   within the session's pool for programs and the session's grant.
 2. **Create the channel and the data area**: two sides and two
    doorbells, in the side layout of a connection, each side written by
    one party and mapped read-only by the other
@@ -1582,16 +1585,30 @@ applied in this order, each step undoing the ones before it on failure:
    and create the image's first thread, stopped, with the values of the
    budget, the group, the channel's two sides and the session's doorbell
    in its argument registers.
+   The driver's start ends here: the port is open and its owner, linked
+   to it as ERTS links every port, reads the start's answer, which carries
+   the values the install made that the startup message names.
 6. **Write the startup message** as the first frame of the image's
    inbound lane, in the form the programs design defines: the program's
    process ids, arguments, environment, working directory, signal state,
    data area and the values of its descriptors in its table, and no
    Erlang pid
-   ([design-programs.md](design-programs.md#the-startup-message)).
-7. **Start the first thread**, pausing the image first when the spec says
-   the program's job is stopped
-   ([design-programs.md](design-programs.md#job-control)), and link the
-   port to its owner as ERTS links every port.
+   ([design-programs.md](design-programs.md#the-startup-message)). The
+   owner builds the frame with those values and hands it to the driver's
+   send command, the path a later frame to the program takes too; the
+   driver bounds its size, writes what fits and the rest as the program
+   frees room, and keeps at most one frame. The program checks the frame
+   whole, and a program that breaks the lane's checks while it is written
+   ends as a fault ends it, with `SIGSYS`.
+7. **Start the first thread** with the driver's run command, which
+   carries no frame and starts the thread once, pausing the image first
+   when the spec says the program's job is stopped
+   ([design-programs.md](design-programs.md#job-control)). The thread may
+   start while the frame is still being written: the program reads the
+   message as it is published and runs nothing of its own before the
+   whole message is checked. `erx_program:start/1` runs steps 6 and 7
+   after the start's answer, and closes the port when the driver refuses
+   either, which kills the program.
 
 **Serving.** The session's doorbell schedules the port's input task; the
 task copies each frame out of the outbound lane once through

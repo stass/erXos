@@ -25,6 +25,13 @@
  * the driver allocates and never reuses, so a record names the space it is from and the
  * input says which; the end relies on no order between the two spaces' records.
  *
+ * The start stops before the first thread runs, so that erx_program:start/1 can read the
+ * values the install made, write the startup message the program waits for with them (a
+ * SEND, which the driver writes into the inbound lane as room returns, WRITTEN once its
+ * last byte is), and start the thread (RUN). Both are the end's inputs, admitted only
+ * once the start's answer is read and while the program lives; a program that breaks its
+ * channel's protocol (BROKEN) ends as a fault ends it, with SIGSYS.
+ *
  * The port closes only after erx_program:start/1 read the start's answer: a port that
  * closed before would make that read fail for a program that ran, so a program that ends
  * first has its close held until the answer is read.
@@ -78,7 +85,6 @@ typedef enum {
 	ERX_PROGRAM_INSTALL,		/* the program's copies into the image's table (erx_program_install_rights) */
 	ERX_PROGRAM_BELL_BIND,		/* the program's doorbell into its group, labelled with the session's side's value */
 	ERX_PROGRAM_THREAD_CREATE,	/* the image's first thread, stopped, in the program's group */
-	ERX_PROGRAM_THREAD_START,
 
 	/* The undos of the steps that made something; a release is all of them in this order. */
 	ERX_PROGRAM_THREAD_CLOSE,
@@ -98,6 +104,8 @@ typedef enum {
 	ERX_PROGRAM_CHANNEL_DESTROY,
 
 	/* The end's own. */
+	ERX_PROGRAM_THREAD_START,	/* RUN admitted: start the first thread */
+	ERX_PROGRAM_WRITE,		/* SEND admitted: write the frame into the inbound lane */
 	ERX_PROGRAM_REPORT,		/* {Port, {exit_status, status}} to the owner */
 	ERX_PROGRAM_STOP_ANCHOR,	/* erx_space_stop(anchor, status) */
 	ERX_PROGRAM_CLOSE_PORT		/* the driver ends its port */
@@ -120,10 +128,12 @@ typedef struct {
 	int64_t		pid;		/* ERX_PROGRAM_PID_MIN..ERX_PROGRAM_PID_MAX */
 	uint64_t	guarantee;	/* of the program's budget, at most cap */
 	uint64_t	cap;		/* at most the session's pool for programs */
+	uint64_t	slots;		/* the data area's 64 KiB slots, 1 to ERX_PROG_DATA_SLOTS_MAX */
 } erx_program_spec_t;
 
 /*
- * ERX_OK; ERX_EINVAL for a malformed image path or a guarantee above the cap; ERX_ERANGE
+ * ERX_OK; ERX_EINVAL for a malformed image path, a guarantee above the cap or slots out of
+ * range; ERX_ERANGE
  * for a pid outside its range; ERX_ELIMIT for a cap above pool.
  */
 int	erx_program_spec_check(const erx_program_spec_t *spec, uint64_t pool);
@@ -175,6 +185,8 @@ typedef struct {
 	bool			anchor_ended;	/* the anchor's exit record arrived */
 	bool			answered;	/* erx_program:start/1 read the start's answer */
 	bool			close_held;	/* RELEASED's: the port's close waits for the answer */
+	bool			ran;		/* RUN was admitted: the first thread was started */
+	bool			writing;	/* SEND was admitted and its frame is not all written */
 } erx_program_end_t;
 
 typedef enum {
@@ -183,7 +195,11 @@ typedef enum {
 	ERX_PROGRAM_FAULT,		/* a fault record of a thread of the program, with its kind */
 	ERX_PROGRAM_CLOSE,		/* the port is closing: port_close/1 or its owner's exit */
 	ERX_PROGRAM_LOST,		/* a take found records lost (erx_gate.h) */
-	ERX_PROGRAM_ANSWERED		/* the start's answer was read (port_control) */
+	ERX_PROGRAM_ANSWERED,		/* the start's answer was read (port_control) */
+	ERX_PROGRAM_RUN,		/* the owner asks to start the first thread */
+	ERX_PROGRAM_SEND,		/* the owner hands a frame to write to the program */
+	ERX_PROGRAM_WRITTEN,		/* the frame's last byte is in the inbound lane */
+	ERX_PROGRAM_BROKEN		/* the program broke its channel: a check of its reader page failed */
 } erx_program_input_kind_t;
 
 /* Which of the program's spaces a record is from: the driver knows it by the record's label. */
@@ -222,6 +238,13 @@ erx_program_input_t erx_program_input_of(const erx_fault_t *record, erx_program_
  *   - the anchor is stopped at most once, and never after its exit record arrived: at the
  *     first fault or the image's exit, or with ERX_PROGRAM_KILLED by a close or a loss
  *     while the image runs;
+ *   - THREAD_START comes at most once, at a RUN after ANSWERED, while the image runs and
+ *     its anchor has not ended, and never after the release;
+ *   - WRITE comes only at a SEND after ANSWERED while the image runs and its anchor has
+ *     not ended, never while an earlier one is written (until WRITTEN, BROKEN or the
+ *     release), and never after the release, so the driver holds at most one frame and
+ *     drops it with the channel's unmap;
+ *   - BROKEN ends a running program as a fault does, with ERX_EXIT_SIGNAL plus SIGSYS;
  *   - CLOSE_PORT comes at most once, never at a close, where the port is already ending,
  *     and never before ANSWERED: with the release once the answer was read, else at the
  *     answer.

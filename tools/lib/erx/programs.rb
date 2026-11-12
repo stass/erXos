@@ -48,7 +48,7 @@ module Erx
     MACHINE = ProductionImage::DEVELOPMENT_MACHINE
     # Each program by its name in the session's release, domains/erxos/bin/<name>, and the
     # source it is built from.
-    PROGRAMS = %w[exit42 fault spin].to_h { |name| [name, "test/guest/programs/#{name}.c"] }.freeze
+    PROGRAMS = %w[exit42 fault spin args bigargs].to_h { |name| [name, "test/guest/programs/#{name}.c"] }.freeze
     PROGRAM_PREFIX = "#{ReleaseFiles::DOMAIN_PREFIX}bin/".freeze
     # How many rounds many runs: more than the 32 programs the gate worker's 64
     # registrations hold at once, for each way a program ends.
@@ -69,27 +69,64 @@ module Erx
     # it reads as Erlang, then joined with single spaces.
     def line(erlang) = "#{erlang.split.join(' ')}\r"
 
+    # erx_program:start/1's spec for the program bin/<name> as pid, its own process group,
+    # with the rest of what its startup message carries; each keyword is an Erlang term.
+    def spec(name, pid, argv: "[<<\"#{name}\">>]", env: '[]', cwd: '<<"/">>', umask: '8#022', sigmask: '[]')
+      "\#{image => <<\"bin/#{name}\">>, pid => #{pid}, ppid => 1, pgid => #{pid}, argv => #{argv}, env => #{env}, " \
+        "cwd => #{cwd}, spawn => false, sigmask => #{sigmask}, sigignore => [], umask => #{umask}}"
+    end
+
     # Each case's expression is a fun applied at once, so no case binds a shell variable
     # another sees. A start the driver refused, or an answer other than the one awaited,
     # shows in the case's answer instead of a timeout alone. fault_answer is fault's
     # (Run#fault_answer).
     def cases(fault_answer:)
-      [Case.new(name: 'exit42', seconds: 60, answer: '{exit42,42}', expression: line(<<~ERLANG)),
+      [Case.new(name: 'e2big', seconds: 60, answer: '{e2big,{error,e2big}}', expression: line(<<~ERLANG)),
+         (fun() -> {e2big, erx_program:start(#{spec('args', 6, argv: '[binary:copy(<<"a">>, 131072)]')})} end)().
+       ERLANG
+       # The raw path: start/1's steps by hand, with a relative working directory that
+       # start/1's builder refuses and liberx must refuse before main.
+       Case.new(name: 'startup', seconds: 60, answer: '{startup,<<"ok">>,<<"ok">>,127}', expression: line(<<~ERLANG)),
          (fun() ->
-            P = erx_program:start(\#{image => <<"bin/exit42">>, pid => 2}),
+            P = open_port({spawn_driver, "erx_program 7 0 4096 4 bin/args"}, [binary]),
+            <<"ok", D:64>> = port_control(P, 1, []),
+            F = term_to_binary({erx_start, 1, \#{pid => 7, ppid => 1, pgid => 7, argv => [<<"args">>], env => [],
+                                                cwd => <<"home/u">>, spawn => false, sigmask => [], sigignore => [],
+                                                umask => 8#022, data_area => {D, 4}, fds => []}}),
+            {startup, port_control(P, 2, F), port_control(P, 3, []),
+             receive {P, {exit_status, S}} -> S after #{WAIT_MS} -> timeout end}
+          end)().
+       ERLANG
+       Case.new(name: 'args', seconds: 60, answer: '{args,0}', expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec('args', 5, argv: '[<<"args">>, <<"one">>, <<"two words">>]',
+                                         env: '[<<"HOME=/home/u">>, <<"TERM=vt100">>]', cwd: '<<"/home/u">>',
+                                         umask: '8#027', sigmask: '[sigterm]')}),
+            receive {P, {exit_status, S}} -> {args, S} after #{WAIT_MS} -> {args, timeout, P} end
+          end)().
+       ERLANG
+       Case.new(name: 'bigargs', seconds: 60, answer: '{bigargs,0}', expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec('bigargs', 8, argv: '[<<"bigargs">>, binary:copy(<<"x">>, 130000)]')}),
+            receive {P, {exit_status, S}} -> {bigargs, S} after #{WAIT_MS} -> {bigargs, timeout, P} end
+          end)().
+       ERLANG
+       Case.new(name: 'exit42', seconds: 60, answer: '{exit42,42}', expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec('exit42', 2)}),
             receive {P, {exit_status, S}} -> {exit42, S} after #{WAIT_MS} -> {exit42, timeout, P} end
           end)().
        ERLANG
        Case.new(name: 'fault', seconds: 60, answer: fault_answer, expression: line(<<~ERLANG)),
          (fun() ->
-            P = erx_program:start(\#{image => <<"bin/fault">>, pid => 3}),
+            P = erx_program:start(#{spec('fault', 3)}),
             receive {P, {exit_status, S}} -> {fault, S, erx_prog:status(S)} after #{WAIT_MS} -> {fault, timeout, P} end
           end)().
        ERLANG
        # The program runs for half a second first, so the close stops a running program.
        Case.new(name: 'spin', seconds: 60, answer: '{spin,true,down,none}', expression: line(<<~ERLANG)),
          (fun() ->
-            case erx_program:start(\#{image => <<"bin/spin">>, pid => 4}) of
+            case erx_program:start(#{spec('spin', 4)}) of
               P when is_port(P) ->
                 timer:sleep(500),
                 R = erlang:monitor(port, P),
@@ -105,7 +142,8 @@ module Erx
        Case.new(name: 'many', seconds: 300, answer: "{many,#{MANY_RUNS}}", expression: line(<<~ERLANG))
          (fun() ->
             Run = fun(Image, Pid, End) ->
-                case erx_program:start(\#{image => Image, pid => Pid}) of
+                case erx_program:start(\#{image => Image, pid => Pid, ppid => 1, pgid => Pid, argv => [Image], env => [],
+                                     cwd => <<"/">>, spawn => false, sigmask => [], sigignore => [], umask => 8#022}) of
                   P when is_port(P) ->
                     R = erlang:monitor(port, P),
                     case End(P) of
@@ -203,7 +241,7 @@ module Erx
       def added(fiasco, libc:)
         native = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, fiasco: fiasco)
         programs = PROGRAMS.map do |name, source|
-          [name, native.build_task_receipted(name: name, sources: [*NativeRoot::LIBC_TASK, source], directory: File.join(@build, name),
+          [name, native.build_task_receipted(name: name, sources: [*NativeRoot::PROGRAM, source], directory: File.join(@build, name),
                                              archives: [libc, fiasco.user_library('libgcc.a')])]
         end
         entries = programs.map do |name, program|

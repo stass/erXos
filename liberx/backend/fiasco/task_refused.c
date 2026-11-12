@@ -5,7 +5,8 @@
 
 /*
  * The calls of ERTS's link that a task's program has no service answer for, so a
- * domain's runtime image (NativeRoot::DOMAIN_RUNTIME) links: each refuses or reports
+ * domain's runtime image (NativeRoot::DOMAIN_RUNTIME) and a session's program
+ * (NativeRoot::PROGRAM), through api_names.c, link: each refuses or reports
  * its value unavailable, as the call table answers a call it does not offer
  * (docs/design-stopgap.md, "The call table"). The root's own bodies in group.c,
  * irq.c, time_page.c, vm.c, watchdog_thread.c and runtime_entry.c read the root's

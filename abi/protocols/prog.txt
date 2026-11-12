@@ -43,6 +43,10 @@ limit prog_frame_max u32 196608
 limit prog_args_max u32 131072
 limit prog_path_max u32 4096
 limit prog_fds_max u32 1024
+limit prog_data_slots_max u32 16
+# Each slot of a program's data area, in bytes: the session sizes the area
+# and the program maps it as data_slots of these.
+limit prog_data_slot_bytes u32 65536
 
 protocol erx_prog
   version 1
@@ -54,7 +58,7 @@ protocol erx_prog
   integer cap u64 except @cap_null unique
   integer open u16 in 0 0xffff
   integer umask u16 in 0 511
-  integer data_slots u8 in 1 16
+  integer data_slots u8 in 1 @prog_data_slots_max
   integer pipe_id u32 in 1 0xffffffff
   integer end_id u32 in 1 0xffffffff
   integer wend u32 in 1 0xffffffff

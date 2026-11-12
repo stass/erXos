@@ -9,7 +9,11 @@
  *
  * The driver's start callback runs the whole start: the core's steps, or their undos once one
  * fails. A port whose start failed stays open with nothing made, so that erx_program:start/1
- * reads the failure with port_control and closes it. The end runs in the input task: the
+ * reads the failure with port_control and closes it. The start stops before the first
+ * thread runs: erx_program:start/1 reads the data area's value from the start's answer,
+ * hands the startup message it builds with it to CONTROL_SEND, which writes it into the
+ * channel's inbound lane as room returns, and then starts the thread with CONTROL_RUN;
+ * the end admits each (docs/design-runtime.md, "Programs as ports"). The end runs in the input task: the
  * gate worker keeps each exit and fault record of the program's spaces in the port's slot
  * and triggers the port's IRQ object, whose delivery schedules this port's input task,
  * which takes the records and feeds them to the core. Each of the program's two spaces
@@ -46,19 +50,22 @@
 #include "erx_gate.h"
 #include "erx_program_core.h"
 
-/* port_control(Port, 1, []): how the start ended, "ok" or the status's e-prefixed name. */
+/*
+ * The owner's port_control commands. Each answers "ok" or the refusing status's
+ * e-prefixed name: STARTED how the start ended, "ok" followed by the data area's value in
+ * the program's table, 8 bytes big-endian; SEND the frame it carries, which the driver
+ * writes into the inbound lane as room returns; RUN, with no payload, the first thread's
+ * start.
+ */
 #define CONTROL_STARTED		1
+#define CONTROL_SEND		2
+#define CONTROL_RUN		3
 /*
  * The capabilities each of a program's spaces may hold: the image's install takes
  * ERX_PROGRAM_INSTALLS of them, and the rest is the program's own.
  */
 #define PROGRAM_CAP_LIMIT	16u
 _Static_assert(ERX_PROGRAM_INSTALLS <= PROGRAM_CAP_LIMIT, "the install fits the image's table");
-/* Each lane's ring, in bytes (docs/design-programs.md, "The channel"). */
-#define PROGRAM_LANE_SIZE	UINT64_C(16384)
-/* The data area's slots, the design's default, and each slot's bytes. */
-#define PROGRAM_DATA_SLOTS	UINT64_C(4)
-#define PROGRAM_SLOT_BYTES	UINT64_C(65536)
 /*
  * The session's pool for programs, which a spec's cap must not exceed. The stopgap keeps
  * budgets as records and reports no budget's cap, so the session has no pool to read yet;
@@ -110,6 +117,16 @@ typedef struct {
 	uint64_t		pc;		/* the image's entry, from erx_image_map */
 	/* What the install made of each copy: its value in the image's table, by install index. */
 	uint64_t		installed[ERX_PROGRAM_INSTALLS];
+	/*
+	 * The inbound lane's writer, ready once the channel is mapped, and the one frame it
+	 * writes, NULL but between a WRITE and the frame's WRITTEN or BROKEN; offered is
+	 * CONTROL_SEND's copy while the end decides on it.
+	 */
+	erx_lane_writer_t	writer;
+	uint8_t			*frame;
+	size_t			frame_len;
+	uint8_t			*offered;
+	size_t			 offered_len;
 } program_t;
 
 extern ErlDrvEntry erx_program_driver_entry;
@@ -136,7 +153,7 @@ open_word(const char **at, uint64_t *value)
 }
 
 /*
- * "erx_program Pid Guarantee Cap Image", as erx_program:start/1 writes it: three decimal
+ * "erx_program Pid Guarantee Cap Slots Image", as erx_program:start/1 writes it: four decimal
  * words, then the image's path, the rest of the command. Only the form is checked here;
  * the core checks the spec's values whole.
  */
@@ -152,7 +169,8 @@ program_open_parse(const char *command, program_t *program)
 		return (false);
 	at += sizeof(name) - 1;
 	if (!open_word(&at, &pid) || !open_word(&at, &program->spec.guarantee) ||
-	    !open_word(&at, &program->spec.cap) || pid > (uint64_t)INT64_MAX)
+	    !open_word(&at, &program->spec.cap) || !open_word(&at, &program->spec.slots) ||
+	    pid > (uint64_t)INT64_MAX)
 		return (false);
 	len = strlen(at);
 	if (len > sizeof(program->image_path))
@@ -236,7 +254,7 @@ channel_destroy(program_t *program)
 static void
 channel_unmap(program_t *program)
 {
-	const uint64_t bytes = erx_lane_side_bytes(PROGRAM_LANE_SIZE);
+	const uint64_t bytes = erx_lane_side_bytes(ERX_PROGRAM_LANE);
 
 	for (uint32_t side = 0; side < CHANNEL_SIDES; side++) {
 		if (program->side_addr[side] != 0)
@@ -253,7 +271,7 @@ static int
 channel_create(program_t *program, uint64_t budget)
 {
 	for (uint32_t side = 0; side < CHANNEL_SIDES; side++) {
-		const int status = erx_mem_create(budget, erx_lane_side_bytes(PROGRAM_LANE_SIZE), 0,
+		const int status = erx_mem_create(budget, erx_lane_side_bytes(ERX_PROGRAM_LANE), 0,
 		    &program->side[side]);
 
 		if (status != ERX_OK) {
@@ -264,11 +282,15 @@ channel_create(program_t *program, uint64_t budget)
 	return (ERX_OK);
 }
 
-/* The session's mappings of the channel, as erx_program_session_prot says, all or none. */
+/*
+ * The session's mappings of the channel, as erx_program_session_prot says, all or none,
+ * and the inbound lane's writer over them: the session's side is its ring, the program's
+ * side holds the reader page, and the size is the ABI's.
+ */
 static int
 channel_map(program_t *program)
 {
-	const uint64_t bytes = erx_lane_side_bytes(PROGRAM_LANE_SIZE);
+	const uint64_t bytes = erx_lane_side_bytes(ERX_PROGRAM_LANE);
 
 	for (uint32_t side = 0; side < CHANNEL_SIDES; side++) {
 		uint64_t addr = 0;
@@ -286,7 +308,22 @@ channel_map(program_t *program)
 		}
 		program->side_addr[side] = addr;
 	}
+	if (!erx_lane_writer_init(&program->writer, (void *)(uintptr_t)program->side_addr[SESSION_SIDE],
+	    (const void *)(uintptr_t)program->side_addr[PROGRAM_SIDE], ERX_PROGRAM_LANE)) {
+		channel_unmap(program);
+		return (ERX_EINVAL);
+	}
 	return (ERX_OK);
+}
+
+/* Drops the frame being written, if any. */
+static void
+frame_drop(program_t *program)
+{
+	if (program->frame != NULL)
+		driver_free(program->frame);
+	program->frame = NULL;
+	program->frame_len = 0;
 }
 
 /*
@@ -357,7 +394,8 @@ report(program_t *program, int64_t status)
 /*
  * Applies one of the core's actions, other than ERX_PROGRAM_DONE and ERX_PROGRAM_CLOSE_PORT,
  * which the callers act on themselves: the kernel's answer for a start step, which the
- * core reads, and any status for the rest, which it does not. The session's budget and
+ * core reads, the answer to the owner's command for THREAD_START and WRITE, and any status
+ * for the rest, which nothing reads. The session's budget and
  * group are the boot information's; the program's spaces name the domain's fault gate and
  * carry their own labels (erx_gate.h).
  */
@@ -376,7 +414,8 @@ apply(program_t *program, erx_program_action_t action)
 	case ERX_PROGRAM_BELL_CREATE:
 		return (erx_irq_create(boot->budget.raw, 0, ERX_IRQ_SOFT, 0, &program->bell));
 	case ERX_PROGRAM_DATA_CREATE:
-		return (erx_mem_create(boot->budget.raw, PROGRAM_DATA_SLOTS * PROGRAM_SLOT_BYTES, 0, &program->data));
+		return (erx_mem_create(boot->budget.raw, program->spec.slots * ERX_PROG_DATA_SLOT_BYTES, 0,
+		    &program->data));
 	case ERX_PROGRAM_BUDGET_CREATE:
 		return (erx_budget_create(boot->budget.raw, ERX_BUDGET_ELASTIC, program->spec.guarantee,
 		    program->spec.cap, &program->budget));
@@ -417,6 +456,12 @@ apply(program_t *program, erx_program_action_t action)
 		    ERX_THREAD_CLASS_WORKER, &program->thread));
 	case ERX_PROGRAM_THREAD_START:
 		return (erx_thread_start(program->thread));
+	case ERX_PROGRAM_WRITE:
+		/* The offered frame becomes the one written; frame_write writes it. */
+		program->frame = program->offered;
+		program->frame_len = program->offered_len;
+		program->offered = NULL;
+		return (ERX_OK);
 	case ERX_PROGRAM_THREAD_CLOSE:
 		return (close_cap(&program->thread));
 	case ERX_PROGRAM_BELL_UNBIND:
@@ -449,6 +494,8 @@ apply(program_t *program, erx_program_action_t action)
 	case ERX_PROGRAM_BELL_DESTROY:
 		return (destroy(&program->bell));
 	case ERX_PROGRAM_CHANNEL_UNMAP:
+		/* A frame part-written goes with the lane it was written into. */
+		frame_drop(program);
 		channel_unmap(program);
 		return (ERX_OK);
 	case ERX_PROGRAM_CHANNEL_DESTROY:
@@ -469,22 +516,64 @@ apply(program_t *program, erx_program_action_t action)
 /*
  * Feeds one input to the end and applies what it returns. True when the last action closed
  * the port: the core puts nothing after ERX_PROGRAM_CLOSE_PORT, and the port's stop may
- * already have freed program, so the caller touches it no more.
+ * already have freed program, so the caller touches it no more. When owner is not NULL it
+ * receives the answer to the owner's command the input carries: apply's for THREAD_START or
+ * WRITE, or ERX_EINVAL when the end admitted neither.
  */
 static bool
-end_feed(program_t *program, erx_program_input_t input)
+end_feed(program_t *program, erx_program_input_t input, int *owner)
 {
 	erx_program_action_t actions[ERX_PROGRAM_ACTIONS_MAX];
 	const size_t count = erx_program_end_next(&program->end, input, actions);
 
+	if (owner != NULL)
+		*owner = ERX_EINVAL;
 	for (size_t at = 0; at < count; at++) {
+		int status;
+
 		if (actions[at].act == ERX_PROGRAM_CLOSE_PORT) {
 			(void)driver_failure_eof(program->port);
 			return (true);
 		}
-		(void)apply(program, actions[at]);
+		status = apply(program, actions[at]);
+		if (owner != NULL && (actions[at].act == ERX_PROGRAM_THREAD_START || actions[at].act == ERX_PROGRAM_WRITE))
+			*owner = status;
 	}
 	return (false);
+}
+
+/*
+ * Writes what fits of the frame being written into the inbound lane, ringing the program's
+ * doorbell when the program waits for it. Once the frame's last byte is in, the end gets
+ * WRITTEN; when the program's reader page fails the writer's check, BROKEN, and the frame
+ * is dropped either way. A put that ran short waits for the program's ring on the session's
+ * doorbell, which brings program_ready_input back here. Nothing to write is nothing done.
+ * True when the end closed the port, as end_feed's.
+ */
+static bool
+frame_write(program_t *program)
+{
+	const erx_lane_iov_t iov = { .base = program->frame, .len = program->frame_len };
+	const erx_lane_item_t item = { .iov = &iov, .iovcnt = 1, .kind = ERX_REC_FRAME };
+	erx_lane_put_t put;
+	erx_lane_put_status_t status;
+
+	if (program->frame == NULL)
+		return (false);
+	memset(&put, 0, sizeof(put));
+	status = erx_lane_put_armed(&program->writer, &item, &put);
+	/* A failed ring leaves the program waiting, which its end or the owner's close ends. */
+	if (put.ring)
+		(void)erx_irq_trigger(program->bell);
+	if (status == ERX_LANE_PUT_SHORT)
+		return (false);
+	frame_drop(program);
+	/*
+	 * CONTROL_SEND's bound keeps the frame within what a put takes, so a put that is
+	 * neither done nor short found the program's reader page broken.
+	 */
+	return (end_feed(program, (erx_program_input_t){
+	    .kind = status == ERX_LANE_PUT_DONE ? ERX_PROGRAM_WRITTEN : ERX_PROGRAM_BROKEN }, NULL));
 }
 
 /*
@@ -528,15 +617,16 @@ program_stop(ErlDrvData data)
 	program_t *const program = (program_t *)data;
 
 	if (program->start_error == ERX_OK)
-		(void)end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_CLOSE });
+		(void)end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_CLOSE }, NULL);
 	driver_free(program);
 }
 
 /*
- * The port's IRQ object was delivered: takes what the gate worker kept for each of the
- * program's two labels and feeds it to the end, a loss first (erx_gate.h), each record as
- * an input of the space its label names. A delivery is a hint, so a take that finds
- * nothing does nothing.
+ * The port's IRQ object was delivered, by the program's ring or the gate worker: first
+ * writes what now fits of a frame being written, then takes what the gate worker kept for
+ * each of the program's two labels and feeds it to the end, a loss first (erx_gate.h), each
+ * record as an input of the space its label names. A delivery is a hint, so a take that
+ * finds nothing does nothing.
  */
 static void
 program_ready_input(ErlDrvData data, ErlDrvEvent event)
@@ -547,57 +637,121 @@ program_ready_input(ErlDrvData data, ErlDrvEvent event)
 	size_t image_count, anchor_count;
 
 	(void)event;
-	if (program->start_error != ERX_OK)
+	if (program->start_error != ERX_OK || frame_write(program))
 		return;
 	image_count = erx_gate_worker_take(program->image_label, image, &image_lost);
 	anchor_count = erx_gate_worker_take(program->anchor_label, anchor, &anchor_lost);
 	if ((image_lost > 0 || anchor_lost > 0) &&
-	    end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_LOST }))
+	    end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_LOST }, NULL))
 		return;
 	for (size_t at = 0; at < image_count; at++) {
-		if (end_feed(program, erx_program_input_of(&image[at], ERX_PROGRAM_SPACE_IMAGE)))
+		if (end_feed(program, erx_program_input_of(&image[at], ERX_PROGRAM_SPACE_IMAGE), NULL))
 			return;
 	}
 	for (size_t at = 0; at < anchor_count; at++) {
-		if (end_feed(program, erx_program_input_of(&anchor[at], ERX_PROGRAM_SPACE_ANCHOR)))
+		if (end_feed(program, erx_program_input_of(&anchor[at], ERX_PROGRAM_SPACE_ANCHOR), NULL))
 			return;
 	}
 }
 
 /*
- * The start's answer: "ok", or "e" and the failed status's name, "eunknown" for a status
- * with none. Reading a started program's answer feeds the end, which closes the port here
- * when the program already ended; the answer is built first, since that close frees program.
+ * A command's answer into *rbuf: "ok" followed by extra's extra_len bytes when status is
+ * ERX_OK, else "e" and the status's name, "eunknown" for a status with none. Its length,
+ * or -1 when no binary could be made.
+ */
+static ErlDrvSSizeT
+answer(int status, const uint8_t *extra, size_t extra_len, char **rbuf)
+{
+	const char *name = status == ERX_OK ? "ok" : erx_status_name(status);
+	const size_t prefix = status == ERX_OK ? 0 : 1;
+	ErlDrvBinary *bin;
+	size_t need;
+
+	if (name == NULL)
+		name = "unknown";
+	if (status != ERX_OK)
+		extra_len = 0;
+	need = prefix + strlen(name) + extra_len;
+	bin = driver_alloc_binary((ErlDrvSizeT)need);
+	if (bin == NULL)
+		return (-1);
+	if (prefix > 0)
+		bin->orig_bytes[0] = 'e';
+	memcpy(&bin->orig_bytes[prefix], name, strlen(name));
+	if (extra_len > 0)
+		memcpy(&bin->orig_bytes[prefix + strlen(name)], extra, extra_len);
+	*rbuf = (char *)bin;
+	return ((ErlDrvSSizeT)need);
+}
+
+/*
+ * CONTROL_SEND: copies the frame and offers it to the end, which admits it as WRITE only
+ * while the program lives and no other frame is being written; then writes what fits. The
+ * frame is the owner's, checked against the program protocol's grammar by
+ * erx_program:start/1; here only its size is bounded, and the program checks the rest.
+ */
+static int
+frame_send(program_t *program, const char *buf, size_t len)
+{
+	int status;
+
+	if (len < 1 || len > ERX_PROG_FRAME_MAX)
+		return (ERX_EINVAL);
+	program->offered = driver_alloc(len);
+	if (program->offered == NULL)
+		return (ERX_ENOMEM);
+	memcpy(program->offered, buf, len);
+	program->offered_len = len;
+	/* A SEND closes no port. */
+	(void)end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_SEND }, &status);
+	if (program->offered != NULL)
+		driver_free(program->offered);
+	program->offered = NULL;
+	return (status);
+}
+
+/*
+ * The owner's commands. CONTROL_STARTED reads the start's answer, which feeds the end, and
+ * the end closes the port here when the program already ended; the answer is built first,
+ * since that close frees program. CONTROL_SEND and CONTROL_RUN act only on a program whose
+ * start succeeded; the end decides whether each is admitted.
  */
 static ErlDrvSSizeT
 program_control(ErlDrvData data, unsigned int command, char *buf, ErlDrvSizeT len, char **rbuf, ErlDrvSizeT rlen)
 {
 	program_t *const program = (program_t *)data;
-	const char *name;
-	ErlDrvBinary *bin;
-	size_t need;
+	uint8_t value[sizeof(uint64_t)];
+	ErlDrvSSizeT need;
+	int status;
 
-	(void)buf;
 	(void)rlen;
-	if (command != CONTROL_STARTED || len != 0)
+	switch (command) {
+	case CONTROL_STARTED:
+		if (len != 0)
+			return (-1);
+		for (size_t at = 0; at < sizeof(value); at++)
+			value[at] = (uint8_t)(program->installed[ERX_PROGRAM_INSTALL_DATA] >> (8 * (sizeof(value) - 1 - at)));
+		need = answer(program->start_error, value, sizeof(value), rbuf);
+		if (need >= 0 && program->start_error == ERX_OK)
+			(void)end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_ANSWERED }, NULL);
+		return (need);
+	case CONTROL_SEND:
+		status = program->start_error == ERX_OK ? frame_send(program, buf, len) : ERX_EINVAL;
+		need = answer(status, NULL, 0, rbuf);
+		/* A put that ends the frame feeds the end, which closes no port at a WRITTEN or a BROKEN. */
+		if (status == ERX_OK)
+			(void)frame_write(program);
+		return (need);
+	case CONTROL_RUN:
+		if (len != 0)
+			return (-1);
+		status = ERX_EINVAL;
+		if (program->start_error == ERX_OK)
+			(void)end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_RUN }, &status);
+		return (answer(status, NULL, 0, rbuf));
+	default:
 		return (-1);
-	name = program->start_error == ERX_OK ? "ok" : erx_status_name(program->start_error);
-	if (name == NULL)
-		name = "unknown";
-	need = (program->start_error == ERX_OK ? 0 : 1) + strlen(name);
-	bin = driver_alloc_binary((ErlDrvSizeT)need);
-	if (bin == NULL)
-		return (-1);
-	if (program->start_error == ERX_OK) {
-		memcpy(bin->orig_bytes, name, need);
-	} else {
-		bin->orig_bytes[0] = 'e';
-		memcpy(&bin->orig_bytes[1], name, need - 1);
 	}
-	*rbuf = (char *)bin;
-	if (program->start_error == ERX_OK)
-		(void)end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_ANSWERED });
-	return ((ErlDrvSSizeT)need);
 }
 
 ErlDrvEntry erx_program_driver_entry = {

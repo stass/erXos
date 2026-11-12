@@ -37,12 +37,12 @@ class ErxProgramCoreTest < Minitest::Test
   # IRQ object, the session's doorbell, with its sink and bind; the program's budget and
   # group; both labels' gate registrations before any space carries a label; then the
   # spaces, the map, the install, the program's doorbell's bind, which takes its label from
-  # the install, and the thread.
+  # the install, and the thread, stopped until RUN.
   STEPS = %i[channel_create channel_map bell_create data_create irq_create sink_register irq_bind
              budget_create group_create gate_register_anchor gate_register_image anchor_create image_create
-             image_map install bell_bind thread_create thread_start].freeze
+             image_map install bell_bind thread_create].freeze
   # What undoes each step that made something; a map and an install die with their space, and
-  # the start is last.
+  # nothing else needs undoing.
   UNDO = { channel_create: :channel_destroy, channel_map: :channel_unmap, bell_create: :bell_destroy,
            data_create: :data_destroy, irq_create: :irq_close, sink_register: :sink_unregister,
            irq_bind: :irq_unbind, budget_create: :budget_destroy, group_create: :group_close,
@@ -69,12 +69,14 @@ class ErxProgramCoreTest < Minitest::Test
     'too-long' => :einval, 'pid-0' => :erange, 'pid-1' => :erange, 'pid-negative' => :erange,
     'pid-max' => :ok, 'pid-past-max' => :erange, 'pid-int64-min' => :erange,
     'guarantee-equals-cap' => :ok, 'guarantee-above-cap' => :einval, 'cap-equals-pool' => :ok,
-    'cap-above-pool' => :elimit, 'cap-max' => :elimit
+    'cap-above-pool' => :elimit, 'cap-max' => :elimit, 'slots-0' => :einval, 'slots-max' => :ok,
+    'slots-past-max' => :einval
   }.freeze
 
-  # The end's state as the driver prints it: the phase, FAULTED's status, and three flags.
-  State = Data.define(:phase, :status, :anchor_ended, :answered, :close_held)
-  STARTED = State.new(phase: :running, status: 0, anchor_ended: false, answered: false, close_held: false)
+  # The end's state as the driver prints it: the phase, FAULTED's status, and five flags.
+  State = Data.define(:phase, :status, :anchor_ended, :answered, :close_held, :ran, :writing)
+  STARTED = State.new(phase: :running, status: 0, anchor_ended: false, answered: false, close_held: false,
+                      ran: false, writing: false)
 
   # The model of the end, given the driver's constants (k) and the fault table (signals).
   class EndModel
@@ -86,6 +88,8 @@ class ErxProgramCoreTest < Minitest::Test
     def call(state, input)
       return [state.with(answered: true, close_held: false), state.close_held ? [[:close_port, 0]] : []] if input == [:answered]
       return [input == [:close] ? state.with(close_held: false) : state, []] if state.phase == :released
+      return owner(state, input) if %i[run send written].include?(input.first)
+      return broken(state) if input == [:broken]
 
       case [state.phase, *input]
       in [:ended, :image_exit, _] then [state, []]
@@ -102,6 +106,27 @@ class ErxProgramCoreTest < Minitest::Test
     end
 
     private
+
+    # The owner's commands act only on a live program whose start's answer was read: one
+    # thread start ever, and one frame at a time.
+    def owner(state, input)
+      alive = state.answered && state.phase == :running && !state.anchor_ended
+      case input
+      in [:run] if alive && !state.ran then [state.with(ran: true), [[:thread_start, 0]]]
+      in [:send] if alive && !state.writing then [state.with(writing: true), [[:write, 0]]]
+      in [:written] then [state.with(writing: false), []]
+      else [state, []]
+      end
+    end
+
+    # A broken channel ends a running program as a fault with SIGSYS's status does.
+    def broken(state)
+      state = state.with(writing: false)
+      return [state, []] unless state.phase == :running
+
+      status = @k.fetch('exit_signal') + @k.fetch('sigsys')
+      [state.with(phase: :faulted, status: status), stop(state, status)]
+    end
 
     # A stop of the anchor, unless its exit record arrived.
     def stop(state, status) = state.anchor_ended ? [] : [[:stop_anchor, status]]
@@ -203,6 +228,10 @@ class ErxProgramCoreTest < Minitest::Test
       [:broken_guarantees, 'input.status == ERX_EXIT_PARENT ? end->status : input.status', 'end->status'],
     'a released program still acts' =>
       [:end_differences, 'if (end->phase == ERX_PROGRAM_RELEASED) {', 'if (0) {'],
+    'a run before the answer starts the thread' =>
+      [:broken_guarantees, 'return (end->answered && end->phase', 'return ((end->answered || 1) && end->phase'],
+    'a send while a frame is written writes again' =>
+      [:broken_guarantees, 'if (!alive(end) || end->writing)', 'if (!alive(end))'],
     'the port closes before the start answer is read' =>
       [:broken_guarantees, 'if (!closing && end->answered)', 'if (!closing)'],
     "the image's and the anchor's exits are swapped" =>
@@ -303,7 +332,8 @@ class ErxProgramCoreTest < Minitest::Test
   def broken_guarantees(out)
     k = out[:constants]
     inputs = [[:image_exit, 0], [:image_exit, 42], [:image_exit, k.fetch('exit_parent')],
-              [:anchor_exit, k.fetch('killed')], [:fault, 1], [:fault, 10], [:close], [:lost], [:answered]]
+              [:anchor_exit, k.fetch('killed')], [:fault, 1], [:fault, 10], [:close], [:lost], [:answered],
+              [:run], [:send], [:written], [:broken]]
     (1..5).flat_map { inputs.repeated_permutation(_1).to_a }.filter_map do |sequence|
       problem = sequence_problem(out, sequence)
       "#{sequence.inspect}: #{problem}" if problem
@@ -317,7 +347,7 @@ class ErxProgramCoreTest < Minitest::Test
       state = row.first
       row.last
     end
-    release_violation(sequence, asked, state) || port_violation(sequence, asked) ||
+    release_violation(sequence, asked, state) || port_violation(sequence, asked) || owner_violation(sequence, asked) ||
       report_violation(out, sequence, asked)
   end
 
@@ -352,6 +382,22 @@ class ErxProgramCoreTest < Minitest::Test
     'the port was never closed' if owed && closes.empty?
   end
 
+  # A thread start at most once, and a write only while none is open, each only after the
+  # answer and before any release, close or loss.
+  def owner_violation(sequence, asked)
+    acts = asked.map { |actions| actions.map(&:first) }
+    answered_at = sequence.index([:answered])
+    over_at = acts.index { _1.include?(:budget_destroy) } || sequence.size
+    starts = acts.each_index.select { acts[_1].include?(:thread_start) }
+    writes = acts.each_index.select { acts[_1].include?(:write) }
+    early = (starts + writes).any? { answered_at.nil? || _1 < answered_at || _1 >= over_at }
+    open = writes.each_cons(2).any? { |a, b| sequence[a + 1...b].none? { %i[written broken].include?(_1.first) } }
+    return 'more than one thread start' if starts.size > 1
+    return 'a start or a write before the answer or after the end' if early
+
+    'a write while another is open' if open
+  end
+
   # The one report: from the image's exit record before any close or loss, with its status,
   # or the first fault's status for an image the fault's stop ended.
   def report_violation(out, sequence, asked)
@@ -360,17 +406,18 @@ class ErxProgramCoreTest < Minitest::Test
     image_at = live.index { _1.first == :image_exit }
     want = []
     if image_at
-      fault = live.first(image_at).find { _1.first == :fault }
+      fault = live.first(image_at).find { %i[fault broken].include?(_1.first) }
       status = live[image_at].last
       by_stop = fault && status == out[:constants].fetch('exit_parent')
-      want = [[:report, by_stop ? fault_status(out, fault.last) : status]]
+      want = [[:report, by_stop ? fault_status(out, fault) : status]]
     end
     "reported #{reports.inspect}, want #{want.inspect}" unless reports == want
   end
 
-  def fault_status(out, kind)
+  # A fault input's status: its kind's signal, or SIGSYS's for a broken channel.
+  def fault_status(out, (input, kind))
     k = out[:constants]
-    signal = out[:signals].fetch(kind)
+    signal = input == :broken ? k.fetch(%q(sigsys)) : out[:signals].fetch(kind)
     k.fetch('exit_signal') + (signal.zero? ? k.fetch('sigkill') : signal)
   end
 
@@ -417,13 +464,14 @@ class ErxProgramCoreTest < Minitest::Test
   end
 
   def parse_end(out, before, after)
-    out[:ends][[state_of(out, before.first(5)), input_of(before.drop(5))]] =
-      [state_of(out, after.first(5)), after.drop(5).map { action_of(out, _1) }]
+    out[:ends][[state_of(out, before.first(7)), input_of(before.drop(7))]] =
+      [state_of(out, after.first(7)), after.drop(7).map { action_of(out, _1) }]
   end
 
-  def state_of(out, (phase, status, anchor_ended, answered, close_held))
+  def state_of(out, (phase, status, anchor_ended, answered, close_held, ran, writing))
     State.new(phase: out[:phases].fetch(Integer(phase)), status: Integer(status),
-              anchor_ended: anchor_ended == '1', answered: answered == '1', close_held: close_held == '1')
+              anchor_ended: anchor_ended == '1', answered: answered == '1', close_held: close_held == '1',
+              ran: ran == '1', writing: writing == '1')
   end
 
   def input_of(words) = [words.first.to_sym, *words.drop(1).map { Integer(_1) }]

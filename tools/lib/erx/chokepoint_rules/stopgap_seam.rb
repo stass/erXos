@@ -80,6 +80,7 @@ module Erx
         liberx/backend/fiasco/libc_root_write.c
         liberx/backend/fiasco/libc_start.h
         liberx/backend/fiasco/libc_task.c
+        liberx/backend/fiasco/program_task.c
         liberx/backend/fiasco/domain_entry.c
         liberx/backend/fiasco/release_task.c
         liberx/backend/fiasco/root.c
@@ -328,12 +329,14 @@ module Erx
         # is decided in two places: the one call that makes one, and the one option that asks.
         Chokepoints::Forbidden.new(
           name: 'executor-create-caller',
-          rule: 'only ethr_thr_create calls erx_pthread_create_executor',
+          rule: "only ethr_thr_create and liberx's program layer, for its event executor, call " \
+                'erx_pthread_create_executor',
           design: 'docs/design-runtime.md#threads-and-synchronisation',
           scope: Chokepoints::Scope.new(own: true, extra: ['otp/**/*'], except: ['otp/erts/emulator/asmjit/**/*']),
           pattern: /\berx_pthread_create_executor\b/,
           sites: [Chokepoints::Site.new(glob: 'musl/src/thread/erxos/pthread_create_executor.c'), Chokepoints::Site.new(glob: 'otp/erts/lib_src/pthread/ethread.c'),
                   Chokepoints::Site.new(glob: 'liberx/pthread_executor.h'),
+                  Chokepoints::Site.new(glob: 'liberx/program/program.c'),
                   Chokepoints::Site.new(glob: 'liberx/backend/hosted/thread.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/hosted_executor_driver.c')],
           seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_pthread_create_executor(0, 0, 0, 0); }\n" }
