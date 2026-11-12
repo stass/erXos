@@ -146,8 +146,10 @@
 # below what sigma0 offers the root on the programs suite's test image, whose archive
 # is 47.6 MiB: sigma0 offered 186.19 MiB there, 46,425 pool pages and the root's
 # image (the Apple M3 Max host, HVF, 1 guest CPU, QEMU 11.1.3). Each MiB the archive
-# grows takes a MiB of that margin, and nothing checks it before boot (TODO.md, the
-# packer's root startup rule). root_memory grows by 30 MiB with each 32 MiB of RAM
+# grows takes a MiB of that margin. The packer refuses an archive that leaves too little,
+# counting what the boot keeps from the platform record (docs/design-stopgap.md, "The
+# root startup rule"): one over 48.75 MiB with this root_memory, where the boot
+# refuses one over 49.13 MiB. root_memory grows by 30 MiB with each 32 MiB of RAM
 # because Fiasco's kernel memory grows by 2.
 #
 # The image release is the system release's EROFS image in the slot, with no

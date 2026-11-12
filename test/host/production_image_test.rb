@@ -599,9 +599,47 @@ class ProductionImageTest < Minitest::Test
     verify = checkpoint_verifier('root-manifest')
     source = PLATFORM.manifest_source(ROOT)
     memory, baseline = manifest_number(source, 'root_memory'), manifest_number(source, 'system_baseline')
-    verify.call("erx: root task: manifest root_memory #{memory} baseline #{baseline} units 4 pool pages 12\n")
-    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline #{baseline} units 4 pool pages 12\n") }
-    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory #{memory} baseline 1 units 4 pool pages 12\n") }
+    verify.call("erx: root task: manifest root_memory #{memory} baseline #{baseline} units 4 pool pages 12 image 4096\n")
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline #{baseline} units 4 pool pages 12 image 4096\n") }
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory #{memory} baseline 1 units 4 pool pages 12 image 4096\n") }
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory #{memory} baseline #{baseline} units 4 pool pages 12\n") }
+  end
+
+  # A boot of the development image at 256 MiB (the Apple M3 Max host, HVF, 1 guest CPU,
+  # QEMU 11.1.3): its archive, and the pool pages and root image its root reported. It
+  # kept 4,321,280 bytes besides the archive and the page index.
+  LOGGED_ARCHIVE = 0x2dfb000
+  LOGGED_POOL_PAGES = 46_858
+  LOGGED_IMAGE = 0x4dc000
+
+  def kept_verifier(machine)
+    Dir.mktmpdir('erx-kept-') do |directory|
+      archive = File.join(directory, 'image.pack')
+      File.open(archive, 'wb') { |file| file.truncate(LOGGED_ARCHIVE) }
+      built = FakeArchiveBuilt.new(build_id: 'aa', index_hash: 'bb', flags: 1, test_code: false, archive: archive)
+      points = Erx::ProductionImage::Run.checkpoints(built, root: ROOT, watchdog: '1,30,600', cpus: 1,
+                                                     manifest_source: PLATFORM.manifest_source(ROOT),
+                                                     memory_mib: machine.memory_mib)
+      assert_raises(Erx::Error) { Erx::ProductionImage::Run.kept_checkpoints(points.reject { |each| each.fetch(:name) == 'root-manifest' }, built: built, machine: machine) }
+      Erx::ProductionImage::Run.kept_checkpoints(points, built: built, machine: machine)
+                               .find { |each| each.fetch(:name) == 'root-manifest' }.fetch(:verify)
+    end
+  end
+  FakeArchiveBuilt = Struct.new(:build_id, :index_hash, :flags, :test_code, :archive, keyword_init: true)
+
+  # The production image suite holds each boot to what the packer counts it keeps. The
+  # seeded fault is a record whose root_withheld is a page less than that boot kept.
+  def test_the_suite_refuses_a_boot_that_keeps_more_than_the_packer_counts
+    source = PLATFORM.manifest_source(ROOT)
+    line = "erx: root task: manifest root_memory #{manifest_number(source, 'root_memory')} baseline " \
+           "#{manifest_number(source, 'system_baseline')} units #{source.scan(/^unit /).size} " \
+           "pool pages #{LOGGED_POOL_PAGES} image #{LOGGED_IMAGE}\r\n"
+    kept_verifier(DEVELOPMENT).call(line)
+    short = Erx::Platform.new(name: PLATFORM.name, record: PLATFORM.record.merge('root_withheld' => 4_321_280 - 4096))
+    error = assert_raises(Erx::Error) { kept_verifier(DEVELOPMENT.with(platform: short)).call(line) }
+    assert_match(/the boot kept 6418432 bytes besides the archive, 4096 more than .*root_withheld 4317184 is too small/, error.message)
+    refute_kind_of Erx::Manifest::Invalid, error
+    assert_raises(Erx::Error) { kept_verifier(DEVELOPMENT).call(line.sub("pool pages #{LOGGED_POOL_PAGES}", 'pool pages 99999999')) }
   end
 
   # A build/production-image that links out of the tree is refused before

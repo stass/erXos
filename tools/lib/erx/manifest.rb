@@ -292,6 +292,98 @@ module Erx
           raise Invalid.new('root_memory exceeds RAM less fiasco_reserve', property: 4, field: 'root_startup')
         end
       end
+
+      # The archive rule, which the packer applies once it has written the archive. At
+      # boot the root refuses unless the pool's free pages and its own image hold
+      # root_memory (root_memory_fits in liberx/backend/fiasco/root.c). What sigma0 gives
+      # the root is RAM less fiasco_reserve, less the archive, which bootstrap reserves
+      # whole, less what the boot keeps besides (boot_kept). So the packer checks the
+      # same inequality,
+      #
+      #   archive + root_memory <= RAM - fiasco_reserve - boot_kept,
+      #
+      # with boot_kept estimated from the platform record and the archive. The estimate
+      # errs high by a few hundred KiB (docs/design-stopgap.md, "The root startup
+      # rule"), so an image this refuses fails at boot or comes within that margin of
+      # failing. Every figure is in bytes; the platform's come from archive_machine.
+      def check_archive(archive_bytes:, root_memory:, ram_bytes:, fiasco_reserve:, root_withheld:)
+        kept = boot_kept(ram_bytes: ram_bytes, fiasco_reserve: fiasco_reserve, archive_bytes: archive_bytes,
+                         root_withheld: root_withheld)
+        room = ram_bytes - fiasco_reserve - kept
+        short = archive_bytes + root_memory - room
+        return unless short.positive?
+
+        raise Invalid.new("the archive (#{mib(archive_bytes)}) and root_memory (#{mib(root_memory)}) exceed the " \
+                          "#{mib(room)} this machine leaves them (RAM less fiasco_reserve and the #{mib(kept)} " \
+                          "the boot keeps) by #{(short + 1023) / 1024} KiB",
+                          property: 4, field: 'root_startup')
+      end
+
+      # The boot's side of check_archive. The root reports the pool's free pages and its
+      # own image, what root_memory_fits counted; RAM less fiasco_reserve, the archive and
+      # those is what this boot kept besides. Once a boot keeps more than boot_kept
+      # estimates, the packer can pass an archive the root refuses, so the production
+      # image suite holds its boots to the estimate. A report that leaves the boot keeping
+      # less than the page index alone is no measurement, and is refused too. archive_bytes
+      # is the archive in whole pages, as bootstrap reserves it. The failure is the
+      # platform record's or the boot's, not the manifest's, so it is a plain Error.
+      def check_boot(archive_bytes:, pool_pages:, image_bytes:, ram_bytes:, fiasco_reserve:, root_withheld:)
+        kept = ram_bytes - fiasco_reserve - archive_bytes - (pool_pages * PAGE_BYTES) - image_bytes
+        estimate = boot_kept(ram_bytes: ram_bytes, fiasco_reserve: fiasco_reserve, archive_bytes: archive_bytes,
+                             root_withheld: root_withheld)
+        index = estimate - root_withheld
+        raise Error, "the root's report leaves the boot #{kept} bytes, less than the #{index} of the page index" if kept < index
+        return if kept <= estimate
+
+        raise Error, "the boot kept #{kept} bytes besides the archive, #{kept - estimate} more than the #{estimate} " \
+                     "the packer counts: the platform record's root_withheld #{root_withheld} is too small, " \
+                     'or Fiasco or liberx keeps more than it was measured to'
+      end
+
+      # The platform's figures check_archive and check_boot take, from the record as Pack
+      # receives it (Erx::Platform#record, or a ProductionImage::Machine's, which states
+      # that machine's RAM and fiasco_reserve): RAM, fiasco_reserve and root_withheld.
+      # Erx::Platform refuses a record without root_withheld when it loads it; a record
+      # that reaches here some other way without one packs no image.
+      def archive_machine(platform)
+        memory = declared(platform)
+        withheld = platform['root_withheld']
+        unless withheld.is_a?(Integer) && withheld.positive?
+          raise Unsupported.new('the platform record states no root_withheld to check the archive against',
+                                property: 4, field: 'root_startup')
+        end
+        { ram_bytes: memory.fetch('ram_bytes'), fiasco_reserve: memory.fetch('fiasco_reserve'),
+          root_withheld: withheld }
+      end
+
+      # What a boot keeps from RAM less fiasco_reserve besides the archive: the platform
+      # record's root_withheld (Fiasco's and sigma0's images, the device tree, the
+      # handoff page, liberx's 2 MiB contiguous pool, and the pool's object table, the
+      # root's range table and its thread table), and the pool's page index.
+      def boot_kept(ram_bytes:, fiasco_reserve:, archive_bytes:, root_withheld:)
+        root_withheld + page_index_bytes((ram_bytes - fiasco_reserve - archive_bytes) / PAGE_BYTES)
+      end
+
+      # The C sources of the copied constants: ERX_PAGE_SIZE, sizeof(erx_backend_vm_page_t)
+      # (liberx/backend/core/vm_table.h, which vm_table.c asserts) and VM_DEVICE_PAGES
+      # (liberx/backend/fiasco/vm.c).
+      PAGE_BYTES = 4096
+      PAGE_INDEX_SLOT_BYTES = 16
+      DEVICE_PAGES = 4096
+
+      # erx_backend_vm_layout (liberx/backend/core/vm_table.c) sizes the index over the
+      # pool's window, its contiguous pool and the device pages. The window and the
+      # contiguous pool lie in RAM less fiasco_reserve and the archive, so sizing it over
+      # all of those pages never comes out smaller. Its loop doubles from one page of
+      # slots to the smallest power of two at least twice the pages covered; the shift
+      # finds that power directly.
+      def page_index_bytes(pages_free)
+        covered = pages_free + DEVICE_PAGES
+        slots = 1 << ((2 * covered) - 1).bit_length
+        [slots, PAGE_BYTES / PAGE_INDEX_SLOT_BYTES].max * PAGE_INDEX_SLOT_BYTES
+      end
+
+      def mib(bytes) = format('%.2f MiB', bytes / 1_048_576.0)
     end
 
     # Phase 1's admission: Stopgap over a manifest with the system domain and
@@ -452,7 +544,7 @@ module Erx
                    'executable' => 'supplied_catalog', 'provenance' => 'supplied_context',
                    'policy_admission' => 'unsupported',
                    'child_plan_instances' => 0, 'dynamic_domain_reservation' => 0,
-                   'root_image_private_bytes' => root_private_bytes,
+                   'root_image_private_bytes' => root_private_bytes, 'root_memory' => root_memory,
                    'effective_system_cpuset' => system_cpus,
                    'effective_users_cpuset' => users_cpus,
                    'context_sha256' => @context.fingerprint }.merge(claims)

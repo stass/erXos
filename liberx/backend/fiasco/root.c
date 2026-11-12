@@ -65,10 +65,11 @@ static void root_append(char *, size_t *, const char *);
 static void root_append_decimal(char *, size_t *, uint64_t);
 static void root_append_hex(char *, size_t *, const uint8_t *, size_t);
 static const char *root_boot(erx_boot_handoff_view_t *, erx_manifest_view_t *, erx_boot_args_t *);
+static uint64_t root_image_bytes(void);
 static bool root_memory_fits(uint64_t, uint64_t, uint64_t);
 static _Noreturn void root_refuse(const char *);
 static void root_report(const erx_boot_handoff_view_t *, uint32_t);
-static void root_report_manifest(const erx_manifest_view_t *);
+static void root_report_manifest(const erx_manifest_view_t *, uint64_t);
 static void root_report_watchdog(const erx_watchdog_config_t *, erx_watchdog_mode_t);
 
 void
@@ -104,9 +105,9 @@ root_boot(erx_boot_handoff_view_t *handoff, erx_manifest_view_t *manifest, erx_b
 	    (size_t)handoff->image.size);
 	if (reason != NULL)
 		return (reason);
-	if (!root_memory_fits(erx_fiasco_vm_free_pages(),
-	    (uint64_t)(erx_fiasco_image_end - erx_fiasco_image_start),
-	    manifest->header.root_memory))
+	const uint64_t free_pages = erx_fiasco_vm_free_pages();
+
+	if (!root_memory_fits(free_pages, root_image_bytes(), manifest->header.root_memory))
 		return ("manifest: root_memory is more than this machine gives the root");
 	const erx_watchdog_config_t config = boot_args->have_watchdog ? boot_args->watchdog :
 	    erx_watchdog_config_default();
@@ -116,15 +117,23 @@ root_boot(erx_boot_handoff_view_t *handoff, erx_manifest_view_t *manifest, erx_b
 	if (reason != NULL)
 		return (reason);
 	root_report(handoff, root_pack.header.nentries);
-	root_report_manifest(manifest);
+	root_report_manifest(manifest, free_pages);
 	root_report_watchdog(&config, mode);
 	return (NULL);
 }
 
+/* The bytes of the root's own image, which root_memory counts beside the pool. */
+static uint64_t
+root_image_bytes(void)
+{
+	return ((uint64_t)(erx_fiasco_image_end - erx_fiasco_image_start));
+}
+
 /*
  * Whether the pool and the image hold what the manifest gives the root. The pool
- * has by now paid for its page index and the root's thread table, a small share of
- * RAM against the margin the packer's root startup rule leaves. The page count is
+ * has by now paid for its page index and the root's thread table. The packer holds
+ * the archive to the same rule, counting those and the rest of what the boot keeps
+ * (RootStartup.check_archive in tools/lib/erx/manifest.rb). The page count is
  * bounded by the machine's RAM, so the sum stays far from the width of the type.
  */
 static bool
@@ -185,9 +194,14 @@ root_report(const erx_boot_handoff_view_t *handoff, uint32_t entries)
 	erx_fiasco_console_write(line, used);
 }
 
-/* What the root read of the manifest, as numbers only: its strings stay off the console. */
+/*
+ * What the root read of the manifest, as numbers only: its strings stay off the console.
+ * The pool's free pages, as root_boot read them once, and the root's image are what
+ * root_memory_fits counted, from which the production image suite works out what the
+ * boot kept besides.
+ */
 static void
-root_report_manifest(const erx_manifest_view_t *manifest)
+root_report_manifest(const erx_manifest_view_t *manifest, uint64_t free_pages)
 {
 	char line[ERX_ROOT_LINE_MAX];
 	size_t used = 0;
@@ -199,7 +213,9 @@ root_report_manifest(const erx_manifest_view_t *manifest)
 	root_append(line, &used, " units ");
 	root_append_decimal(line, &used, manifest->header.units.count);
 	root_append(line, &used, " pool pages ");
-	root_append_decimal(line, &used, erx_fiasco_vm_free_pages());
+	root_append_decimal(line, &used, free_pages);
+	root_append(line, &used, " image ");
+	root_append_decimal(line, &used, root_image_bytes());
 	root_append(line, &used, "\n");
 	erx_fiasco_console_write(line, used);
 }

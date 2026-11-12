@@ -265,6 +265,99 @@ class ManifestStopgapTest < Minitest::Test
     refused(Erx::Manifest::Unsupported, 4, 'root_startup', @source, against)
   end
 
+  # The archive rule (RootStartup.check_archive) against boots of the development image
+  # from the development logs (the Apple M3 Max host, HVF, QEMU 11.1.3): each boot's RAM,
+  # Fiasco's kernel memory, the archive, root_memory, the root's pool pages and image.
+  # The root's own rule (root.c, root_memory_fits) passed the boot when the pool's pages
+  # and the image held root_memory.
+  Boot = Data.define(:ram, :reserve, :archive, :root_memory, :pool_pages, :image) do
+    def offer = (pool_pages * 4096) + image
+    def booted? = offer >= root_memory
+  end
+  MIB = 1 << 20
+  BOOTS = {
+    # The programs suite's test image before it outgrew root_memory 186.25 MiB.
+    fit: Boot.new(ram: 256 * MIB, reserve: 16 * MIB, archive: 0x2f8d000, root_memory: 195_297_280,
+                  pool_pages: 46_461, image: 0x4d7000),
+    # The same suite 144 KiB later, which the root refused 64 KiB short.
+    short: Boot.new(ram: 256 * MIB, reserve: 16 * MIB, archive: 0x2fb1000, root_memory: 195_297_280,
+                    pool_pages: 46_425, image: 0x4d7000),
+    # That archive with root_memory lowered to 184.75 MiB.
+    lowered: Boot.new(ram: 256 * MIB, reserve: 16 * MIB, archive: 0x2fb1000, root_memory: 193_724_416,
+                      pool_pages: 46_425, image: 0x4d7000),
+    # A small machine (the footprint measurement's 112 MiB) and a large one (768 MiB),
+    # whose page index is a half and four times the 256 MiB machine's.
+    small: Boot.new(ram: 112 * MIB, reserve: 8 * MIB, archive: 0x1a42000, root_memory: 50_593_792,
+                    pool_pages: 17_392, image: 0x4af000),
+    large: Boot.new(ram: 768 * MIB, reserve: 48 * MIB, archive: 0x2d5b000, root_memory: 470_024_192,
+                    pool_pages: 168_385, image: 0x4c5000)
+  }.freeze
+
+  # How far below a boot's own figure the packer may put what the root is given: the
+  # record's root_withheld errs high by 388 KiB, and this leaves a little more.
+  TOLERANCE = 512 << 10
+
+  # The record's root_withheld, on the boot's machine.
+  def machine(boot)
+    platform = platform_with { |value| value.merge!('ram_bytes' => boot.ram, 'fiasco_reserve' => boot.reserve) }
+    Erx::Manifest::RootStartup.archive_machine(platform)
+  end
+
+  def check_archive(boot)
+    Erx::Manifest::RootStartup.check_archive(archive_bytes: boot.archive, root_memory: boot.root_memory, **machine(boot))
+  end
+
+  def test_the_packer_refuses_the_archive_the_root_refused
+    boot = BOOTS.fetch(:short)
+    refute_predicate boot, :booted?
+    error = assert_raises(Erx::Manifest::Invalid) { check_archive(boot) }
+    assert_equal [4, 'root_startup'], [error.property, error.field]
+    assert_match(/the archive \(47\.69 MiB\) and root_memory \(186\.25 MiB\) exceed the 233\.50 MiB .* by 452 KiB\z/,
+                 error.message)
+  end
+
+  # What the packer expects the root to be given is never more than a boot gave it, so
+  # it never passes an archive the root refuses, and never more than TOLERANCE less.
+  def test_the_packer_expects_at_most_what_each_boot_gave
+    BOOTS.each do |name, boot|
+      label = name.to_s
+      kept = Erx::Manifest::RootStartup.boot_kept(archive_bytes: boot.archive, **machine(boot))
+      assert_includes (boot.offer - TOLERANCE)..boot.offer, boot.ram - boot.reserve - boot.archive - kept, label
+    end
+  end
+
+  # So the packer refuses every archive its root refused, and passes every one that
+  # booted with more than TOLERANCE to spare.
+  def test_the_packer_agrees_with_each_boot_outside_the_tolerance
+    BOOTS.each do |name, boot|
+      label = name.to_s
+      if !boot.booted?
+        assert_raises(Erx::Manifest::Invalid, label) { check_archive(boot) }
+      elsif boot.offer - boot.root_memory > TOLERANCE
+        assert_nil check_archive(boot), label
+      end
+    end
+  end
+
+  # The boot's side (RootStartup.check_boot), which the production image suite applies to
+  # each of its boots: none of these kept more than the record's root_withheld and the
+  # page index, and each kept more than a root_withheld TOLERANCE smaller.
+  def test_each_boot_kept_no_more_than_the_packer_counts
+    BOOTS.each do |name, boot|
+      label = name.to_s
+      figures = { archive_bytes: boot.archive, pool_pages: boot.pool_pages, image_bytes: boot.image, **machine(boot) }
+      assert_nil Erx::Manifest::RootStartup.check_boot(**figures), label
+      short = figures.merge(root_withheld: figures.fetch(:root_withheld) - TOLERANCE)
+      assert_raises(Erx::Error, label) { Erx::Manifest::RootStartup.check_boot(**short) }
+    end
+  end
+
+  def test_a_platform_without_root_withheld_packs_nothing
+    platform = platform_with { |value| value.delete('root_withheld') }
+    error = assert_raises(Erx::Manifest::Unsupported) { Erx::Manifest::RootStartup.archive_machine(platform) }
+    assert_match(/root_withheld/, error.message)
+  end
+
   # Property 5: names.
   def test_a_host_name_that_is_no_identifier_is_refused
     refused(Erx::Manifest::Invalid, 5, 'machine.host', @source.sub('host "erxos"', 'host "Not An Identifier"'))

@@ -2240,14 +2240,6 @@ it; git history is the record of completed work.
   manifest has a facet and the boot order is name order. A service's `interface` is a
   number, not the qualified ABI service name, and the server's release is not checked to
   supply it. design-stopgap.md lists `facet` among the records the check accepts.
-* [Medium] packer, `tools/lib/erx/manifest.rb` (`RootStartup`) and `pack.rb`: nothing at build
-  time holds the archive and `root_memory` together to RAM less `fiasco_reserve`. The root
-  startup rule checks only `root_memory` against RAM less the reserve, so a release that grows
-  the archive past the room the development manifest leaves (about 1.4 MiB more than the
-  programs suite's 47.6 MiB test archive) packs and passes `make check`, and the pool falls
-  short only at boot, in every suite booting that manifest at 256 MiB. Check
-  archive plus `root_memory` against the machine's platform record when packing, with a
-  seeded-fault test.
 * [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#check_facets_supported`):
   a facet that names an operation or a parameter is refused (`unsupported`, naming M5),
   because those resolve against its service's generated declarations and grant checker

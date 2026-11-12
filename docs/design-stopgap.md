@@ -414,7 +414,31 @@ the same rule gives 16 MiB. QEMU `virt`'s `fiasco_reserve` is 16 MiB. The rule l
 archive out: `bootstrap` reserves it whole and it is never released, so a
 manifest's `root_memory` must leave it room below RAM less the reserve; QEMU
 `virt`'s 184.75 MiB leaves it and the root's image 55.25 MiB. If either is wrong, the pool fails at boot with a
-diagnostic. A platform record without these numbers is not admitted. The
+diagnostic. A platform record without these numbers is not admitted.
+
+The packer then holds the archive to that room (`RootStartup.check_archive`, once the archive is
+written). The root refuses the boot unless the pool's free pages and its own image hold `root_memory`
+(`root_memory_fits` in `liberx/backend/fiasco/root.c`), and what `sigma0` gives it is RAM less the reserve,
+the archive and what the boot keeps besides. The packer checks the same inequality: archive plus
+`root_memory` at most RAM less `fiasco_reserve` less what the boot keeps.
+
+It estimates what the boot keeps as the platform record's `root_withheld` plus the pool's page index.
+`root_withheld` counts Fiasco's and `sigma0`'s images, the device tree, the handoff page, `liberx`'s 2 MiB
+contiguous pool, and the pool's object table, the root's range table and its thread table. The page index
+is `erx_backend_vm_layout`'s, sized over RAM less the reserve and the archive plus the pool's device pages,
+which covers every page the pool's own sizing counts.
+
+Boots of the development image at 112, 256 and 768 MiB (the Apple M3 Max host, HVF, QEMU 11.1.3), about
+2,600 of them at 256 MiB, on 1 and 4 guest CPUs, each kept 4,321,280 bytes besides the index, counted as
+RAM less the reserve, the archive, the pool's pages and the root's image; `test/host/manifest_stopgap_test.rb`
+pins those boots. QEMU `virt`'s `root_withheld`, 4.5 MiB, errs high by 388 KiB, so the packer refuses an
+archive that would boot with less than that to spare, and never passes one that fails while the boot keeps
+no more than measured and `fiasco_reserve` is at least the kernel memory Fiasco takes. Neither follows
+Fiasco's or `liberx`'s growth by itself, so the boots check the estimate: the root's manifest line reports
+the pool's free pages and its image, what `root_memory_fits` counted, and the production image suite
+(`RootStartup.check_boot`, seeded in `test/host/production_image_test.rb`) fails a boot whose RAM less
+`fiasco_reserve`, the archive, those pages and the image is more than `root_withheld` and the page index.
+`root_withheld` is in bytes, and a platform record without it is refused when it is loaded. The
 `Admitted` value records `root_startup: declared` in its report, and
 `erx_root_plan` replaces the rule behind the same value in Track K.
 
@@ -1759,7 +1783,8 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   baud divisor the firmware set ([design-platforms.md](design-platforms.md#raspberry-pi-4-model-b)): given a base rate
   of 0, `Uart_16550::change_mode` writes no divisor.
 * **The platform record and the machine.** The Pi's platform record and development manifest sit beside QEMU `virt`'s
-  and have their format: units, device paths, windows, lines, `ram_bytes` and `fiasco_reserve`, and RAM's first
+  and have their format: units, device paths, windows, lines, `ram_bytes`, `fiasco_reserve` and `root_withheld`
+  ([The Phase 1 manifest check](#the-phase-1-manifest-check), "The root startup rule"; the Pi's is measured on its own boots), and RAM's first
   address, which is 0 on the Pi and `0x40000000` on QEMU `virt`. Every tool that builds or boots an image takes the
   record and its `ProductionImage::Machine` as a parameter, never a constant of QEMU `virt`. The record's `ram_bytes`
   is the smallest RAM the port boots on; the manifest check proves the manifest against it, and a board with more RAM

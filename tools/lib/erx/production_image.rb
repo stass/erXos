@@ -716,7 +716,7 @@ module Erx
 
         image = /\Aerx: boot image build #{built.build_id} index #{built.index_hash} flags 0x#{built.flags.to_s(16)} archive /n
         identity = /\Aerx: root task: build #{built.build_id} index #{built.index_hash} entries [0-9]+\r?\n\z/n
-        manifest = /\Aerx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units} pool pages [0-9]+\r?\n\z/n
+        manifest = /\Aerx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units} pool pages [0-9]+ image [0-9]+\r?\n\z/n
         [*Qemu.boot_transcript(memory_mib: memory_mib, test_image: test_image),
          point('image-identity', /\Aerx: boot image build/n, image, speaker: 'the kernel reports'),
          point('root-identity', /\Aerx: root task: build/n, identity),
@@ -991,6 +991,36 @@ module Erx
       end
       private_class_method :point
 
+      # Checkpoints whose one root-manifest point also holds what the boot kept besides the
+      # archive to the packer's estimate (Manifest::RootStartup.check_boot): from the pool
+      # pages and the root's image the line reports, the machine's RAM, fiasco_reserve and
+      # root_withheld, and the archive in whole pages. A boot that keeps more fails here,
+      # before an archive the packer passed fails at the root. Points without exactly one
+      # root-manifest point are refused, so the check cannot silently drop out.
+      def self.kept_checkpoints(points, built:, machine:)
+        unless points.count { |point| point.fetch(:name) == 'root-manifest' } == 1
+          raise Error, 'the boot check needs exactly one root-manifest checkpoint'
+        end
+
+        page = Manifest::RootStartup::PAGE_BYTES
+        archive_bytes = (File.size(built.archive) + page - 1) / page * page
+        figures = Manifest::RootStartup.archive_machine(machine.record)
+        points.map do |point|
+          next point unless point.fetch(:name) == 'root-manifest'
+
+          whole = point.fetch(:verify)
+          verify = lambda do |text|
+            whole.call(text)
+            reported = text.match(/ pool pages (?<pool>\d+) image (?<image>\d+)\r?\n\z/n)
+            raise Error, "the root task reports no pool pages and image: #{text.inspect}" if reported.nil?
+
+            Manifest::RootStartup.check_boot(archive_bytes: archive_bytes, pool_pages: reported[:pool].to_i,
+                                             image_bytes: reported[:image].to_i, **figures)
+          end
+          point.merge(verify: verify).freeze
+        end.freeze
+      end
+
       # A checkpoint's verifier: the line it selected must match whole, or it raises with the line.
       def self.whole_line(whole, speaker:)
         ->(text) { raise Error, "#{speaker} #{text.inspect}" unless whole.match?(text) }
@@ -1208,10 +1238,12 @@ module Erx
         raise Error, "a stopped pet ended the machine with cause #{cause}" unless cause == CrashFrame::CODEC.member('crash_cause', 'watchdog')
       end
 
-      # Run.checkpoints for a boot of the production image on this suite's machine.
+      # Run.checkpoints for a boot of the production image on this suite's machine, whose
+      # root-manifest line also holds the boot to what the packer counts (Run.kept_checkpoints).
       def production_checkpoints(built, **options)
-        Run.checkpoints(built, root: @root, manifest_source: @machine.platform.manifest_source(@root),
-                               memory_mib: @machine.memory_mib, **options)
+        points = Run.checkpoints(built, root: @root, manifest_source: @machine.platform.manifest_source(@root),
+                                        memory_mib: @machine.memory_mib, **options)
+        Run.kept_checkpoints(points, built: built, machine: @machine)
       end
 
       def boot(accel, count, built, memory_mib:, points:, machine_end:, command_line: nil, dtb: nil, hostlink: nil)

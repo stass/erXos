@@ -9,9 +9,11 @@ module Erx
   # boots an image takes as a parameter in place of one board's constants
   # (docs/design-stopgap.md, "The Raspberry Pi 4"). The record states the board's RAM, its
   # first address (ram_first) and size (ram_bytes, the smallest RAM the port boots on), the
-  # part of it Fiasco keeps (fiasco_reserve), and its device units, which Pack's manifest
-  # check reads. A record without one of these numbers, or with one that is not a whole
-  # number of MiB, is refused when it is loaded, before any tool uses it.
+  # part of it Fiasco keeps (fiasco_reserve), what the boot keeps besides from the rest
+  # (root_withheld, in bytes, which the packer's archive check reads), and its device units,
+  # which Pack's manifest check reads. A record without one of these numbers, with a RAM
+  # number that is not a whole number of MiB, or with a root_withheld that is not a positive
+  # number of bytes, is refused when it is loaded, before any tool uses it.
   Platform = Data.define(:name, :record)
   class Platform
     # The board the QEMU harnesses and `tools/erx` build for when no caller names another:
@@ -48,6 +50,9 @@ module Erx
       end
       raise Error, "#{self.class.record_path(name)}: fiasco_reserve must be less than ram_bytes" unless
         record.fetch('fiasco_reserve') < record.fetch('ram_bytes')
+      withheld = record.fetch('root_withheld') { raise Error, "#{self.class.record_path(name)}: no root_withheld" }
+      raise Error, "#{self.class.record_path(name)}: root_withheld must be a positive number of bytes" unless
+        withheld.is_a?(Integer) && withheld.positive?
 
       super
     end
@@ -71,5 +76,8 @@ module Erx
     def ram_first = record.fetch('ram_first')
     def memory_mib = record.fetch('ram_bytes') >> 20
     def fiasco_reserve_mib = record.fetch('fiasco_reserve') >> 20
+    # What a boot keeps from RAM less fiasco_reserve besides the archive and the pool's
+    # page index, in bytes (Manifest::RootStartup.boot_kept).
+    def root_withheld = record.fetch('root_withheld')
   end
 end
