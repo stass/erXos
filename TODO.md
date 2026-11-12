@@ -274,6 +274,18 @@ it; git history is the record of completed work.
   ([design.md](docs/design.md#dependencies)). The import also records
   the link closure of L4Re's `bootstrap` and `sigma0`, their `drivers-frst`
   UART support, and the licence of each library in it.
+* [Medium] Raspberry Pi 4 BL31 (`docs/research-rpi4-bl31-qemu.md`): the fetch step
+  pins TF-A 2.15.0's tarball by SHA-256, checked against a second source
+  (the experiment's download hashed to `67b772aa...1a10`, unchecked; the
+  tree so far records only the tag commit `da738d5e`). GNU sed is a build tool
+  of that build on macOS (README host setup).
+* [Low] Raspberry Pi 4 BL31 (1b-I package 3): build BL31 with
+  `ERRATA_A72_1319367=1`. TF-A's Pi 4 port does not set it, though TF-A
+  applies the workaround to every Cortex-A72 revision and its debug build
+  warns that it is missing. It guards BL31's own switch of the lower
+  translation regimes against a speculative address translation, costs a
+  few instructions on that path, and asks nothing of the kernel, so
+  turning it on is cheaper than deciding that no kernel ever needs it.
 * [Medium] kernel, Track K, shelved Phase 1 work: three pieces of code
   written for the earlier plan, which put erXos's kernel semantics inside
   the Fiasco fork, stay on branch `shelved-phase2-cores` for Track K: the capability

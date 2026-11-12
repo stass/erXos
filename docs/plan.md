@@ -2209,25 +2209,21 @@ side.
 
 * **(a) A serial shell on the Pi, on QEMU's `raspi4b` first.** Its
   packages, in order:
-  1. **BL31 on the model**, a timeboxed experiment. TF-A 2.15.0's Pi 4
-     BL31, built from its pinned source, boots under QEMU's `raspi4b`
-     with QEMU's generic loader in place of the firmware: `-device
-     loader` puts `bl31.bin` at address 0 with `cpu-num=0`, a test image
-     at the address BL31 enters, and the board's device tree where BL31
-     expects it. The chain to reach is the board's: BL31 at the
-     firmware's level, then the test image at the level the firmware
-     enters on the board, then PSCI's `CPU_ON` for all four CPUs, then a
-     reset. Its four uncertainties, BL31's addresses for a device tree
-     and a kernel already loaded, how the other CPUs start under the
-     generic loader, the model's GIC-400 without the security extensions
-     BL31 configures, and a reset through the power-management watchdog,
-     are listed in
-     [design-platforms.md](design-platforms.md#bring-up-under-qemu). The
-     result, with how far the chain got, goes in a research record. If
-     the chain runs, the model's gate for stage (a) covers the entry
-     state, PSCI, four CPUs and reset; if it does not, the model runs one
-     CPU through QEMU's own kernel loader, and the board alone covers
-     PSCI and the other CPUs.
+  1. **BL31 on the model**, a timeboxed experiment, done. TF-A 2.15.0's
+     Pi 4 BL31, built from its pinned source with LLVM, boots under
+     QEMU's `raspi4b` with QEMU's generic loader in place of the
+     firmware: `-device loader` puts `bl31.bin` at address 0 with
+     `cpu-num=0`, a test image at the address BL31 enters and the
+     board's device tree where BL31 expects it, with BL31's stub header
+     patched on the host as the firmware patches it. The whole chain
+     runs: BL31 at EL3, the test image at EL2, PSCI's `CPU_ON` for the
+     other three CPUs, and a reset through the power-management
+     watchdog that ends QEMU under `-no-reboot`. It needs `-global
+     arm_gic.has-security-extensions=on`. The model's gate for stage (a)
+     therefore covers the entry state, PSCI, four CPUs and reset. The
+     result is in [research-rpi4-bl31-qemu.md](research-rpi4-bl31-qemu.md)
+     and the harness's configuration in
+     [design-platforms.md](design-platforms.md#bring-up-under-qemu).
   2. **The platform as a parameter.** The per-board platform record and
      `ProductionImage::Machine` are passed as a parameter through the
      image build, the release build and the native and QEMU harnesses,
@@ -2327,21 +2323,19 @@ side.
 * **QEMU's `raspi4b`, under TCG, proves stage (a) first.** Agents
   develop stage (a) on it, and its suite runs with the landing gate when
   the Pi's image or its boot changes: the Pi's image, loaded as package
-  1 settles, boots to the shell's prompt on the mini UART with the
+  1 settled, boots to the shell's prompt on the mini UART with the
   development banner, and the console transcript of the production image
   suite's cases (a sum, a line with a mistake rubbed out, an output
   longer than the transmit FIFO) passes there; the seeded fault, a
-  mini-UART driver that drops one received byte, fails the sum. If BL31
-  runs on the model, the suite also checks that four CPUs run, with the
+  mini-UART driver that drops one received byte, fails the sum. The suite
+  also checks that four CPUs run, with the
   seeded fault a device tree with one CPU's node removed, which
   shows three, and that a reset ends QEMU under `-no-reboot`.
 * **What the model cannot check**, and the board must: the firmware
   path, which runs on the VideoCore and which QEMU does not emulate
   (`config.txt`, the firmware's edits to the device tree, where it
   places the device tree and the bootable file, the entry state it
-  leaves, and the size of bootable file it accepts); PSCI and the other
-  CPUs, unless package 1 makes BL31 run on the model, so the model's
-  suite expects one CPU until it does; the host link, since the model
+  leaves, and the size of bootable file it accepts); the host link, since the model
   has no UART3; the mini UART's baud rate, since the model's mini UART
   takes no clock; cache coherency, since QEMU's DMA is coherent and a
   missing clean or invalidate passes there; and GENET and PCIe, which

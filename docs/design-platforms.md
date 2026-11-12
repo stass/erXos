@@ -1018,20 +1018,36 @@ release, at address 0 and starts CPU 0 there (`cpu-num=0`); puts the
 bootable file at the address BL31 enters; and puts the board's device
 tree where BL31 expects it, with `config.txt`'s overlays applied on the
 host and with what the firmware writes into the tree written on the host
-too. The chain is then the board's: BL31 at EL3 enters the bootable file
-at EL2, and the kernel starts the other three CPUs with PSCI's `CPU_ON`
-and resets the machine through BL31. Whether the chain runs on the model
-is not known, and four things about it are uncertain: the addresses at
-which BL31 expects a device tree and a kernel already loaded; how the
-other CPUs start under the generic loader, which sets only CPU 0's entry;
-whether BL31's set-up of the GIC's security groups works on a GIC-400
-modelled without them; and whether the model resets through the
-power-management watchdog, as BL31's `SYSTEM_RESET` and `SYSTEM_OFF` do.
-The Pi 4 port's first experiment, a timeboxed one, settles them. If the
-chain runs, the model checks EL2 entry, PSCI, four CPUs and reset; if it
-does not, the model runs one CPU, entered by QEMU's own kernel loader,
-and the board alone checks PSCI and the other CPUs. erXos's kernel, which
-stops a boot without PSCI, then uses the model only up to that check.
+too. The chain is the board's: BL31 at EL3 enters the bootable file
+at EL2 (`SPSR` `0x3c9`, MMU off, the device tree's address in `x0`), the
+kernel starts the other three CPUs with PSCI's `CPU_ON` and ends them
+with `CPU_OFF`, and resets the machine through BL31
+([research](research-rpi4-bl31-qemu.md)). The harness's configuration
+for it:
+
+* four CPUs, no `-kernel` and no `-bios`: all four leave reset at
+  address 0 in EL3, and BL31 parks CPUs 1 to 3 until `CPU_ON`;
+* BL31 and the bootable file and device tree where the loader puts them,
+  BL31 with its stub header at `0xf0` patched on the host, as the
+  firmware patches it: `stub_magic` 0, the device tree's address and the
+  bootable file's entry address (the build options `PRELOADED_*` alone
+  do not do);
+* `-global arm_gic.has-security-extensions=on`, which gives the model the
+  GIC-400 of the board. Without it BL31 still runs, but the normal
+  world reads the secure layout (`GICD_TYPER` `0x66`) and its
+  interrupts arrive spurious; with it `GICD_TYPER` reads `0x466` and
+  the timer's interrupt arrives as interrupt 30;
+* `-no-reboot`: `SYSTEM_RESET` and `SYSTEM_OFF` both write the
+  power-management watchdog, and QEMU exits with status 0. On a board
+  `SYSTEM_OFF` halts instead, so the model shows a reset where the
+  board halts;
+* a device tree the host supplies, since QEMU generates none;
+* BL31 built with LLVM alone, and GNU sed on the path.
+
+BL31's own console is the PL011 on the model, since its Pi 4 port picks
+the mini UART only when GPIO14 is in ALT5. The model logs the mini
+UART's line control and control registers as unsupported, which does not
+stop it printing.
 
 **What the model never checks.** The Pi firmware runs on the VideoCore,
 which QEMU does not emulate, so nothing on the model reads `config.txt`,
@@ -1343,10 +1359,6 @@ running (PL4).
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
 | The first Pi 4 revisions take longer than 1 s to store the trial flag | low | a trial request lost, the committed slot boots | the board port checks the timing; the watchdog resets anyway |
-| On QEMU's `raspi4b` model, BL31 looks for the device tree or the kernel elsewhere than the generic loader put them, since on the board the firmware loads both | medium | the model runs one CPU without PSCI, and the board alone checks PSCI and the other CPUs | the timeboxed experiment reads BL31's build options for both addresses before the first run |
-| On the model, the other CPUs do not start as BL31 expects, since the generic loader sets only CPU 0's entry | medium | the same | the experiment records where each CPU starts; the board is the authority |
-| BL31's set-up of the GIC's security groups fails on the model's GIC-400, which is built without the security extensions | medium | the same, or BL31 stops before it enters the kernel | the experiment records how far BL31 gets; the board is the authority |
-| The model does not reset through the power-management watchdog that BL31's `SYSTEM_RESET` and `SYSTEM_OFF` use | medium | an end of the machine on the model is caught by the harness's deadline, not by QEMU's exit | the experiment checks a reset under `-no-reboot`; the board is the authority |
 | The firmware places the device tree over the single file, refuses a kernel file that long, or describes `/chosen` differently than expected | low | the kernel's boot stops with a message | the boot probe confirms each board before anything depends on it |
 | The BCM2712's link drops between the PCIe enumerator's check and a configuration access | low | the PCIe domain ends and is restarted, or an asynchronous abort stops an unrelated thread | the enumerator checks the link before each access; the board port measures whether the abort is synchronous; a restart of the PCIe domain re-reads configuration space and changes no running function |
 | The crash region does not survive `SYSTEM_RESET` on a board, or the firmware clears it | medium | no crash record after a reset on that board; the early console alone | the boot probe checks it; the record's check rejects what the firmware left; the early console carries every record |

@@ -504,7 +504,7 @@ reports state their bounds and assumptions.
 Apple Silicon macOS is the primary host. You need:
 
 * Ruby, any version, with minitest and REXML;
-* GNU make, GNU timeout (`gtimeout`) and Perl;
+* GNU make, GNU sed, GNU timeout (`gtimeout`) and Perl;
 * LLVM clang and lld, and the LLVM binary tools;
 * AArch64 ELF GCC and binutils;
 * Autoconf, Automake and Libtool, and a C and C++ compiler, which build
