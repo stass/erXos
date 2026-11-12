@@ -1397,7 +1397,7 @@ outside this design are the user's decisions
 * Linux's dm-verity on-disk format (version 1, SHA-256), as the research
   record checks it.
 * fsimg, https://github.com/stass/fsimg (BSD-2-Clause), at commit
-  `a87ab69f4a15432951816a569b7d15571ac95097`, which `deps.lock` pins; its
+  `807cd027ad99b06cc1f53cecc2890f90d4158470`, which `deps.lock` pins; its
   manual, `docs/fsimg.1`, defines the options the packer passes (`c`, `W`,
   `-F`, `-R`, `-e`, `-o cluster=`, `-o compression=`, `-o uuid=`, `-C`)
   and the mtree keywords of the manifest.

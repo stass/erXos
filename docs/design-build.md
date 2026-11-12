@@ -514,6 +514,12 @@ release medium (`medium.img`), or for a board the firmware boots from a
 boot partition, the Raspberry Pi 4, that partition's files in `boot/`
 and the SD card's image of them, `sdcard.img`, which fsimg writes and
 verifies ([design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)).
+The Pi's boot ROM reads only 8.3 names, so every name in the
+partition's root that fits 8.3 is stored as its own short entry, with
+the case flags that restore its lowercase spelling, not as a numbered
+alias beside a long name; the build reads the card's root directory back
+with its own reader (`tools/lib/erx/fat_short_names.rb`) and refuses a
+card that breaks this.
 The card's build record, `sdcard.img.receipt.json`, names every input
 by its pin or digest: the firmware's `deps.lock` entries, verified
 against their hashes before use; BL31's build record (TF-A's pin, the

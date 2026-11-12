@@ -8,6 +8,7 @@ require 'json'
 require 'tmpdir'
 require_relative 'error'
 require_relative 'fsimg'
+require_relative 'fat_short_names'
 require_relative 'bl31'
 require_relative 'board_tree'
 require_relative 'bounded_file'
@@ -163,8 +164,9 @@ module Erx
 
     # Writes plan into directory, an existing directory under root that holds none of
     # ENTRIES: the files under boot/, the card's image of them, written with fsimg and
-    # verified, and record, the inputs' build record, with each file's and the card's
-    # SHA-256 added.
+    # verified, with each root name that fits 8.3 stored as its own short name, which is
+    # all the boot ROM reads (FatShortNames), and record, the inputs' build record, with
+    # each file's and the card's SHA-256 added.
     def write(root:, directory:, plan:, record:, runner:, fsimg:)
       plan.each_key { |name| raise Error, "boot partition: #{name.inspect} is not a file name of the layout" unless NAME.match?(name) }
       directory = OutputDirectory.check(root: root, path: directory)
@@ -186,6 +188,7 @@ module Erx
         end
         image = File.join(work, IMAGE)
         runner.run([fsimg, 'cW', '-f', image, *CARD, '-C', files, '.'], name: 'fsimg-boot-partition', deadline: CARD_DEADLINE)
+        FatShortNames.check(image, names: plan.keys.map { |name| name.split('/').first }.uniq)
         File.write(File.join(work, RECORD), JSON.pretty_generate(receipt(record, image: image, files: written)) + "\n")
         ENTRIES.each { |name| File.rename(File.join(work, name), File.join(directory, name)) }
       end
