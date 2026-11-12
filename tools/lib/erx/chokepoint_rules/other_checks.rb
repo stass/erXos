@@ -106,6 +106,12 @@ module Erx
         Chokepoints::Elsewhere.new(
           name: 'json-input', rule: 'host tooling parses JSON only through JsonInput',
           design: 'docs/design-build.md', check: 'Checks::JSON_OUTSIDE_WRITING', test: 'test/host/checks_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
+          name: 'counter-reads', rule: "only erx_fiasco_counter reads the timer's counter in a linked program, " \
+                                       'and the read sits between two ISBs',
+          design: 'docs/design-arch-aarch64.md#timer', check: 'CounterReads, on every NativeRoot link',
+          test: 'test/host/counter_reads_test.rb'
         )
       ]
     )

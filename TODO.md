@@ -2734,6 +2734,11 @@ it; git history is the record of completed work.
   A `CommandError` from `qemu --version` timing out maps to `timed_out`, and a QEMU or HVF crash
   after the bootstrap memory line maps to `failed`, so host problems read as erXos's; the
   `cancelled` branch (line 208) is unreachable from `run_guest`, which passes no `cancelled:`.
+* [Low] tooling, `tools/lib/erx/libc_test.rb`: libc-test's tasks link liberx's clock
+  (`liberx/backend/fiasco/arch/aarch64/clock.c`) through their own generated Makefile with
+  `--strip-all`, not through `NativeRoot#build`, so `CounterReads` never reads them and
+  could not name the function in a stripped program. Link them through `NativeRoot`, or
+  run the check before stripping.
 * [Low] tooling, fetched source paths: `tools/lib/erx/libc_test.rb:24` spells libc-test's
   unpacked directory (`libc-test-63e36e9`) by hand, so a pin bump in `deps.lock` fails it with
   a missing-file error, and it reads the tree without checking its provenance record. Route

@@ -6,6 +6,7 @@ require 'digest'
 require 'fileutils'
 require 'json'
 require_relative 'compile_memo'
+require_relative 'counter_reads'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'platform'
@@ -245,6 +246,7 @@ module Erx
                    # rescans them as a group until nothing new resolves.
                    '--start-group', *archives, @fiasco.boot_core_archive, *libraries, '--end-group'],
                   name: "native-root-#{name}-link", deadline: 60, chdir: @source)
+      CounterReads.check(program: program, objdump: File.join(File.dirname(@compiler), 'llvm-objdump'), runner: @runner)
       program
     end
 

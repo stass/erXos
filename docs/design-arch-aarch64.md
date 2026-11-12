@@ -86,7 +86,7 @@ firmware's.
 | Translation | stage 1, 4 KiB granule, four levels, a 48-bit user half in `TTBR0_EL1`, the kernel half in `TTBR1_EL1`; `WXN`, `PXN` and `UXN`; `E0PD1` |
 | Address-space tags and TLB maintenance | 16-bit ASIDs; `TLBI VALE1IS` for a page, `TLBI VAE1IS`, or `TLBI RVAE1IS` with `FEAT_TLBIRANGE`, for every level over a freed table's span, and `TLBI ASIDE1IS`, each with `DSB` and `ISB` |
 | Kernel access to memory | the direct map in `TTBR1_EL1`; no `LDTR` or `STTR`; `erx_uword_load`, a software walk of the space's stage 1 tables through the direct map that refuses an output address the direct map does not cover; store tracking by the hardware's dirty state (`FEAT_HAFDBS`, `TCR_EL1.HD` and the descriptor's `DBM`), folded into the object's stored marks before an entry is freed, where present, otherwise by write protection and the permission fault |
-| Timer | the EL1 virtual timer and `CNTVCT_EL0`, read after an `ISB`, or `CNTVCTSS_EL0` where the CPU has `ECV` |
+| Timer | the EL1 virtual timer and `CNTVCT_EL0`, read between two `ISB`s, or `CNTVCTSS_EL0` followed by one where the CPU has `ECV` |
 | Interrupt controller and MSIs | GICv3 with the GICv2m frame, or a GICv2; SGIs for the inter-processor interrupts |
 | CPU start and machine end | PSCI through one SMCCC routine: `CPU_ON`, `SYSTEM_OFF`, `SYSTEM_RESET` |
 | IOMMU | the SMMUv3 |
@@ -440,11 +440,16 @@ The monotonic clock is the virtual counter `CNTVCT_EL0`, at the frequency
 `CNTKCTL_EL1.EL0VCTEN` lets EL0 read the counter, and every other EL0
 timer access stays trapped. Each CPU programs the EL1 virtual timer, INTID
 27 (PPI 11) on QEMU `virt`, one-shot from its timer wheel. An idle CPU
-waits in `wfi`. A read of `CNTVCT_EL0` follows an `ISB`, so the CPU does
-not take it before the code that precedes it, or uses `CNTVCTSS_EL0`, its
-self-synchronised view, where the CPU has `ECV`; the time page's readers
-do the same. The virtual counter is the system counter less an offset that
-is the same on every CPU, so readings agree across CPUs.
+waits in `wfi`. A read of `CNTVCT_EL0` sits between two `ISB`s: the first
+keeps the CPU from taking it before the code that precedes it, and the
+second from taking it after the code that follows it, since neither a
+memory barrier nor an acquire load orders a counter read. `CNTVCTSS_EL0`,
+the self-synchronised view, where the CPU has `ECV`, needs only the second.
+The time page's readers do the same. A user program reads the counter
+only in liberx's clock function, which the build checks in the
+disassembly of each program it links (`CounterReads`). The virtual counter is the system
+counter less an offset that is the same on every CPU, so readings agree
+across CPUs.
 
 ### Interrupt controller
 
