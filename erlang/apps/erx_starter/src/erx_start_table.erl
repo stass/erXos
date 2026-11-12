@@ -44,10 +44,11 @@ so every decision is tested with made-up manifests.
   refused, which names that row: a command never displaces another row
   from its display. `start` and `stop` act on the running table and
   change no setting.
-* **Keeping the table.** reconcile/2 says which rows' keepers stop and
+* **Keeping the table.** reconcile/3 says which rows' keepers stop and
   which start whenever the table is made from rc.conf's text, against
-  the rows the keepers' branch holds and the settings each was started
-  with: a row whose settings changed is restarted.
+  the rows the keepers' branch holds, the settings each was started
+  with, and the rows `stop` marked stopped: a running row whose settings
+  changed is restarted, and a row that is down or stopped stays so.
 * **Reading rc.conf.** read_answered/3 decides what one answer of the
   table's read of rc.conf leads to: the table made from the text, or,
   for a failed read, the next read after a backoff that grows to a
@@ -61,9 +62,9 @@ a literal of this module.
 -include("generated/erx_abi.hrl").
 
 -export([parse_rc_conf/1, merge/3, parse_ctl/1, set/3]).
--export([apply_ctl/4, ctl_errno/1, reconcile/2, kept/1, read_answered/3, rc_conf_limit/0]).
+-export([apply_ctl/4, ctl_errno/1, reconcile/3, kept/1, read_answered/3, rc_conf_limit/0]).
 
--export_type([row/0, field/0, value/0, local/0, merged/0, command/0, action/0, ctl_error/0, kept/0]).
+-export_type([row/0, field/0, value/0, local/0, merged/0, command/0, action/0, ctl_error/0, kept/0, held/0]).
 -export_type([reading/0, read_answer/0, read_effect/0]).
 
 %% The largest rc.conf read or written (design-apps.md, "Where the file is").
@@ -114,6 +115,10 @@ a literal of this module.
 %% its supervisor are made from. Two rows with equal kept() keep their
 %% sessions alike.
 -type kept() :: #{display := none | name(), restarts := non_neg_integer(), period := pos_integer()}.
+%% The rows the keepers' branch keeps a supervisor for: running, or down,
+%% its supervisor ended at its intensity, each with what its session was
+%% kept with.
+-type held() :: #{name() => {running | down, kept()}}.
 %% How far the table's read of rc.conf has come: read, or not yet, after
 %% that many failed reads.
 -type reading() :: read | {unread, Failures :: non_neg_integer()}.
@@ -459,22 +464,45 @@ admitted(_Status) -> ok.
 
 -doc """
 The keepers to stop and to start when the table is made as Merged, while
-the keepers' branch holds Held: each row it holds a record for, running,
-down or stopped, with what its session was kept with. A held row stops
-when it is not enabled in Merged or is kept differently there (its
-display or its intensity changed), and an enabled row starts when it is
-not held or changed. A held row enabled and kept alike is left as it is,
-so a row that is down or stopped stays so. Stop lists every held name
-that stops, in Merged's order and then any Merged does not name; Start
-lists names in Merged's order.
+the keepers' branch holds Held, each row it keeps a supervisor for,
+running or down, with what its session was kept with, and Stopped, the
+rows `stop` marked stopped. Each name is decided alone (decide/3), and a
+row runs again only when nothing stopped it:
+
+* a held row stops when it is marked stopped, as a stop cut short
+  leaves it, or not enabled in Merged;
+* a running row kept differently in Merged (its display or its
+  intensity changed) is restarted: it stops and starts;
+* an enabled row starts when it is neither held nor marked;
+* a row that is down or stopped stays so, whatever its settings: only
+  `start`, or `enable`, which starts its row, runs it again.
+
+Stop lists every held name that stops, in Merged's order and then any
+Merged does not name; Start lists names in Merged's order.
 """.
--spec reconcile(#{name() => kept()}, [merged()]) -> {Stop :: [name()], Start :: [name()]}.
-reconcile(Held, Merged) ->
+-spec reconcile(held(), [name()], [merged()]) -> {Stop :: [name()], Start :: [name()]}.
+reconcile(Held, Stopped, Merged) ->
     Is = kept(Merged),
     Order = [Principal || #{principal := Principal} <- Merged],
-    Unnamed = lists:sort(maps:keys(Held)) -- Order,
-    {[Name || Name <- Order ++ Unnamed, maps:is_key(Name, Held), maps:find(Name, Is) =/= {ok, map_get(Name, Held)}],
-     [Name || Name <- Order, maps:is_key(Name, Is), maps:find(Name, Held) =/= {ok, map_get(Name, Is)}]}.
+    Names = Order ++ (lists:sort(maps:keys(Held)) -- Order),
+    Decided = [{Name, decide(maps:get(Name, Held, none), lists:member(Name, Stopped), maps:find(Name, Is))}
+               || Name <- Names],
+    {[Name || {Name, Action} <- Decided, Action =:= stop orelse Action =:= restart],
+     [Name || {Name, Action} <- Decided, Action =:= start orelse Action =:= restart]}.
+
+%% What becomes of one row: held as {Run, Kept}, or not held (none); marked
+%% stopped or not; and {ok, Kept} when Merged enables it, or error. The
+%% clauses for a marked row come before those that compare settings, so a
+%% mark decides alone; a running row is kept alike when both Kept match.
+-spec decide(none | {running | down, kept()}, boolean(), {ok, kept()} | error) -> keep | stop | start | restart.
+decide(none, _Marked, error) -> keep;
+decide(none, true, {ok, _Is}) -> keep;
+decide(none, false, {ok, _Is}) -> start;
+decide({_Run, _Kept}, true, _Is) -> stop;
+decide({_Run, _Kept}, false, error) -> stop;
+decide({running, Kept}, false, {ok, Kept}) -> keep;
+decide({running, _Kept}, false, {ok, _Changed}) -> restart;
+decide({down, _Kept}, false, {ok, _Is}) -> keep.
 
 -doc "Each enabled row of Merged by its name, with what its session is kept with.".
 -spec kept([merged()]) -> #{name() => kept()}.

@@ -46,12 +46,29 @@ class ErxStarterTest < Minitest::Test
               caught_by: 'a_restart_while_rc_conf_is_unreadable_stops_no_row'),
     Fault.new(name: 'a stop that leaves no record of the stopped row',
               file: "#{APP}/erx_starter.erl",
-              from: '{ok, Row} -> erx_starter_sup:stop_row(Name, Row);', to: '{ok, _Row} -> erx_starter_sup:stop(Name);',
+              from: '{ok, _Row} -> erx_starter_sup:stop_row(Name);', to: '{ok, _Row} -> erx_starter_sup:stop(Name);',
               caught_by: 'a_stopped_row_stays_stopped_across_a_restart'),
     Fault.new(name: 'a helper that leaves the session of a keeper that ended',
               file: "#{APP}/erx_starter_keeper.erl",
               from: "{'EXIT', Keeper, _} -> exit(Pid, abandoned)", to: "{'EXIT', Keeper, _} -> ok",
-              caught_by: 'a_keeper_stopped_while_its_start_is_pending_ends_the_session')
+              caught_by: 'a_keeper_stopped_while_its_start_is_pending_ends_the_session'),
+    Fault.new(name: 'a table that reconciles with no stopped marks',
+              file: "#{APP}/erx_starter.erl",
+              from: 'erx_start_table:reconcile(Held, Stopped, After)',
+              to: 'erx_start_table:reconcile(Held, Stopped -- Stopped, After)',
+              caught_by: 'a_stopped_row_stays_stopped_when_its_settings_change'),
+    Fault.new(name: 'a stop that ends the row before it marks it',
+              file: "#{APP}/erx_starter_sup.erl",
+              from: "ok = mark(Name),\n    stop(Name).", to: "ok = stop(Name),\n    mark(Name).",
+              caught_by: 'stop_marks_the_row_before_it_ends_it'),
+    Fault.new(name: 'a start that leaves the stopped mark',
+              file: "#{APP}/erx_starter_sup.erl",
+              from: 'ok = remove(Name, stopped),', to: 'ok = ok,',
+              caught_by: 'enable_starts_a_stopped_row_and_clears_its_mark'),
+    Fault.new(name: 'a record that rewrites an unchanged text',
+              file: "#{APP}/erx_starter_sup.erl",
+              from: '{ok, Text} ->', to: '{ok, <<"never">>} ->',
+              caught_by: 'an_unchanged_text_is_not_recorded_again')
   ].freeze
 
   def setup

@@ -220,25 +220,62 @@ start_and_stop_test() ->
                  ctl({start, <<"logger">>, #{}}, <<"logger_display=\"display\"\n">>)),
     ?assertEqual({stop, <<"logger">>}, ctl({stop, <<"logger">>, #{}}, <<>>)).
 
+%% What the keepers' branch holds for Merged's enabled rows, each running as
+%% it is kept there.
+running(Merged) ->
+    maps:map(fun(_Name, Kept) -> {running, Kept} end, erx_start_table:kept(Merged)).
+
 reconcile_keeps_held_rows_test() ->
     {Rows, []} = merged(<<"logger_enable=\"NO\"\n">>),
-    Held = erx_start_table:kept(element(1, merged(<<>>))),
+    Held = running(element(1, merged(<<>>))),
     %% kiosk is held alike and stays; logger is held and no longer enabled; nothing else starts.
-    ?assertEqual({[<<"logger">>], []}, erx_start_table:reconcile(Held, Rows)),
-    ?assertEqual({[], [<<"kiosk">>]}, erx_start_table:reconcile(#{}, Rows)),
+    ?assertEqual({[<<"logger">>], []}, erx_start_table:reconcile(Held, [], Rows)),
+    ?assertEqual({[], [<<"kiosk">>]}, erx_start_table:reconcile(#{}, [], Rows)),
     %% A held name the table does not have stops.
-    ?assertEqual({[<<"gone">>], []}, erx_start_table:reconcile((erx_start_table:kept(Rows))#{<<"gone">> => #{}}, Rows)).
+    ?assertEqual({[<<"gone">>], []},
+                 erx_start_table:reconcile((running(Rows))#{<<"gone">> => {down, #{}}}, [], Rows)).
 
 reconcile_restarts_a_row_whose_settings_changed_test() ->
     {Before, []} = merged(<<>>),
     {After, []} = merged(<<"logger_restarts=\"9\"\nkiosk_enable=\"NO\"\n">>),
-    ?assertEqual({[<<"kiosk">>, <<"logger">>], [<<"logger">>]},
-                 erx_start_table:reconcile(erx_start_table:kept(Before), After)),
-    ?assertEqual({[], []}, erx_start_table:reconcile(erx_start_table:kept(After), After)),
+    ?assertEqual({[<<"kiosk">>, <<"logger">>], [<<"logger">>]}, erx_start_table:reconcile(running(Before), [], After)),
+    ?assertEqual({[], []}, erx_start_table:reconcile(running(After), [], After)),
     {Display, []} = merged(<<"kiosk_display=\"\"\n">>),
-    ?assertEqual({[<<"kiosk">>], [<<"kiosk">>]}, erx_start_table:reconcile(erx_start_table:kept(Before), Display)),
+    ?assertEqual({[<<"kiosk">>], [<<"kiosk">>]}, erx_start_table:reconcile(running(Before), [], Display)),
     {Period, []} = merged(<<"kiosk_period=\"60\"\n">>),
-    ?assertEqual({[<<"kiosk">>], [<<"kiosk">>]}, erx_start_table:reconcile(erx_start_table:kept(Before), Period)).
+    ?assertEqual({[<<"kiosk">>], [<<"kiosk">>]}, erx_start_table:reconcile(running(Before), [], Period)).
+
+%% Every case of one row, the closed set reconcile/3 decides over: what the
+%% keepers' branch holds for it (running, down or nothing), whether `stop`
+%% marked it stopped, and what the table makes of it (no row, a row not
+%% enabled, enabled and kept alike, enabled and kept differently). A row that
+%% is down or stopped stays so whatever its settings; a stopped row that is
+%% still held, as a stop cut short leaves it, stops.
+reconcile_decides_every_case_of_a_row_test() ->
+    Name = <<"kiosk">>,
+    Kept = #{display => none, restarts => 3, period => 60},
+    Row = fun(Status, Settings) -> Settings#{principal => Name, status => Status} end,
+    Tables = [[], [Row(disabled, Kept)], [Row(enabled, Kept)], [Row(enabled, Kept#{restarts := 4})]],
+    %% {Held, Marked, the outcome for each of Tables in order}.
+    Expected = [{none, false, [keep, keep, start, start]},
+                {none, true, [keep, keep, keep, keep]},
+                {running, false, [stop, stop, keep, restart]},
+                {running, true, [stop, stop, stop, stop]},
+                {down, false, [stop, stop, keep, keep]},
+                {down, true, [stop, stop, stop, stop]}],
+    Outcome = fun(keep) -> {[], []};
+                 (stop) -> {[Name], []};
+                 (start) -> {[], [Name]};
+                 (restart) -> {[Name], [Name]}
+              end,
+    Cases = [{Held, Marked, Table, Outcome(Out)}
+             || {Held, Marked, Outs} <- Expected, {Table, Out} <- lists:zip(Tables, Outs)],
+    ?assertEqual(24, length(Cases)),
+    [?assertEqual({Held, Marked, Table, Want},
+                  {Held, Marked, Table,
+                   erx_start_table:reconcile(case Held of none -> #{}; _ -> #{Name => {Held, Kept}} end,
+                                             [Name || Marked], Table)})
+     || {Held, Marked, Table, Want} <- Cases].
 
 restarts_and_period_past_their_ceilings_are_refused_test() ->
     {ok, Local} = erx_start_table:parse_rc_conf(<<"kiosk_restarts=\"100\"\nkiosk_period=\"86400\"\n"

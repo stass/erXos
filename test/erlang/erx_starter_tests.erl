@@ -40,13 +40,39 @@ starter_test_() ->
       fun a_stopped_row_stays_stopped_across_a_restart/1,
       fun enable_writes_rc_conf_and_starts_the_row/1,
       fun a_failed_write_answers_its_error_and_changes_nothing/1,
-      fun a_keeper_stopped_while_its_start_is_pending_ends_the_session/1]}.
+      fun a_keeper_stopped_while_its_start_is_pending_ends_the_session/1,
+      fun a_stopped_row_stays_stopped_when_its_settings_change/1,
+      fun a_down_row_stays_down_when_its_settings_change/1,
+      fun enable_starts_a_stopped_row_and_clears_its_mark/1,
+      fun stop_marks_the_row_before_it_ends_it/1,
+      fun an_unchanged_text_is_not_recorded_again/1]}.
 
 %% A first read of rc.conf that fails: the file is a directory until the case
 %% replaces it.
 unreadable_test_() ->
     {foreach, fun() -> setup(fun(Dir) -> ok = file:make_dir(filename:join(Dir, "rc.conf")) end) end,
      fun cleanup/1, [fun a_failed_read_starts_the_manifest_rows_and_reads_again/1]}.
+
+%% The two behaviours of OTP's one_for_one supervisor the keepers' branch
+%% stands on (erx_starter_sup): a transient child that ends with shutdown is
+%% not restarted and keeps its spec with no pid, and a child whose start
+%% returns ignore keeps its spec with no pid.
+a_one_for_one_supervisor_keeps_a_spec_with_no_pid_test() ->
+    {ok, Sup} = supervisor:start_link(erx_starter_sup, keepers),
+    {ok, Child} = supervisor:start_child(Sup, #{id => transient, restart => transient, type => supervisor,
+                                                start => {supervisor, start_link, [erx_starter_sup, keepers]}}),
+    ok = gen_server:stop(Child, shutdown, ?WAIT_MS),
+    ok = wait_until(fun() -> supervisor:which_children(Sup) =:= [{transient, undefined, supervisor, [supervisor]}] end),
+    ?assertMatch({ok, #{id := transient}}, supervisor:get_childspec(Sup, transient)),
+    ?assertEqual({ok, undefined},
+                 supervisor:start_child(Sup, #{id => ignored, restart => transient,
+                                               start => {erx_starter_sup, ignore, [value]}})),
+    ?assertMatch({ok, #{start := {erx_starter_sup, ignore, [value]}}}, supervisor:get_childspec(Sup, ignored)),
+    ?assertEqual(lists:sort([{transient, undefined, supervisor, [supervisor]},
+                             {ignored, undefined, worker, [erx_starter_sup]}]),
+                 lists:sort(supervisor:which_children(Sup))),
+    unlink(Sup),
+    ok = gen_server:stop(Sup, shutdown, ?WAIT_MS).
 
 %% ---------------------------------------------------------------------------
 %% The stub domain service
@@ -182,9 +208,7 @@ a_crash_of_the_table_ends_no_session(_) ->
             ok = watch(),
             Kiosk = started(?KIOSK),
             Logger = started(?LOGGER),
-            Table = whereis(erx_starter),
-            exit(Table, kill),
-            ok = wait_until(fun() -> is_pid(whereis(erx_starter)) andalso whereis(erx_starter) =/= Table end),
+            ok = restart_table(),
             ?assertEqual(running, run(<<"kiosk">>)),
             ?assertEqual(none, started_within(?KIOSK, 200)),
             ?assert(is_process_alive(Kiosk)),
@@ -195,7 +219,8 @@ a_killed_keeper_ends_its_session(_) ->
     fun() ->
             ok = watch(),
             Kiosk = started(?KIOSK),
-            [RowSup] = [Pid || {Name, Pid, _Row} <- erx_starter_sup:held(), Name =:= <<"kiosk">>],
+            {Rows, []} = erx_starter_sup:held(),
+            [RowSup] = [Pid || {Name, Pid, _Row} <- Rows, Name =:= <<"kiosk">>],
             [Keeper] = [Pid || {keeper, Pid, _, _} <- supervisor:which_children(RowSup)],
             exit(Keeper, kill),
             receive {ended, ?KIOSK, Kiosk, killed} -> ok after ?WAIT_MS -> error(session_outlived_keeper) end,
@@ -306,6 +331,76 @@ a_keeper_stopped_while_its_start_is_pending_ends_the_session(_) ->
             receive {ended, ?KIOSK, Pending, abandoned} -> ok after ?WAIT_MS -> error(abandoned_session_kept) end
     end.
 
+a_stopped_row_stays_stopped_when_its_settings_change(Setup) ->
+    fun() ->
+            ok = watch(),
+            Kiosk = started(?KIOSK),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(ok, erx_starter:command({stop, <<"kiosk">>, #{}})),
+            receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(session_outlived_stop) end,
+            ok = file:write_file(rc_path(Setup), <<"kiosk_restarts=\"3\"\n">>),
+            ok = restart_table(),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(none, started_within(?KIOSK, 300)),
+            ?assertEqual(stopped, run(<<"kiosk">>))
+    end.
+
+a_down_row_stays_down_when_its_settings_change(Setup) ->
+    fun() ->
+            ok = watch(),
+            First = started(?KIOSK),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            Last = lists:foldl(fun(_, Session) -> Session ! {end_session, crashed}, started(?KIOSK) end,
+                               First, [1, 2]),
+            Last ! {end_session, crashed},
+            ok = wait_until(fun() -> run(<<"kiosk">>) =:= down end),
+            ok = file:write_file(rc_path(Setup), <<"kiosk_restarts=\"3\"\n">>),
+            ok = restart_table(),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(none, started_within(?KIOSK, 300)),
+            ?assertEqual(down, run(<<"kiosk">>))
+    end.
+
+enable_starts_a_stopped_row_and_clears_its_mark(_) ->
+    fun() ->
+            ok = watch(),
+            Kiosk = started(?KIOSK),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(ok, erx_starter:command({stop, <<"kiosk">>, #{}})),
+            receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(session_outlived_stop) end,
+            ?assertEqual(ok, erx_starter:command({enable, <<"kiosk">>, #{}})),
+            Again = started(?KIOSK),
+            ?assertEqual(running, run(<<"kiosk">>)),
+            %% A mark left behind would stop the row at the next table's read.
+            ok = restart_table(),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            receive {ended, ?KIOSK, Again, _} -> error(marked_row_stopped) after 300 -> ok end,
+            ?assertEqual(running, run(<<"kiosk">>))
+    end.
+
+%% A table that ends between the two steps of a stop must find the row
+%% stopped, so the mark is written before the row ends.
+stop_marks_the_row_before_it_ends_it(_) ->
+    fun() ->
+            ok = wait_until(fun() -> run(<<"kiosk">>) =:= running end),
+            Calls = supervisor_calls(whereis(erx_starter),
+                                     fun() -> ok = erx_starter:command({stop, <<"kiosk">>, #{}}) end),
+            Mark = {start_child, {stopped, <<"kiosk">>}},
+            End = {terminate_child, {row, <<"kiosk">>}},
+            ?assertMatch([_, _], [Call || Call <- Calls, Call =:= Mark orelse Call =:= End]),
+            ?assertEqual([Mark, End], [Call || Call <- Calls, Call =:= Mark orelse Call =:= End])
+    end.
+
+%% Recording a text unchanged leaves the record alone, so a table that ends
+%% then never finds the record missing.
+an_unchanged_text_is_not_recorded_again(_) ->
+    fun() ->
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            {ok, Text} = erx_starter_sup:recorded(),
+            ?assertEqual([], record_calls(Text)),
+            ?assertEqual([{delete_child, rc_conf}, {start_child, rc_conf}], record_calls(<<Text/binary, "# edited\n">>))
+    end.
+
 a_failed_read_starts_the_manifest_rows_and_reads_again(Setup) ->
     fun() ->
             ok = watch(),
@@ -330,11 +425,55 @@ rc_path(#{dir := Dir}) ->
 rc_conf() ->
     maps:get(rc_conf, erx_starter:rows()).
 
-%% Kills the table and waits for its supervisor to start the next.
+%% The calls of supervisor:start_child/2, terminate_child/2 and delete_child/2
+%% process Pid makes while Act runs, in order, each as {Function, Id}, Id the
+%% child's id.
+supervisor_calls(Pid, Act) ->
+    Functions = [start_child, terminate_child, delete_child],
+    _ = [erlang:trace_pattern({supervisor, Function, 2}, true, []) || Function <- Functions],
+    1 = erlang:trace(Pid, true, [call]),
+    try Act()
+    after
+        _ = erlang:trace(Pid, false, [call]),
+        _ = [erlang:trace_pattern({supervisor, Function, 2}, false, []) || Function <- Functions]
+    end,
+    Ref = erlang:trace_delivered(Pid),
+    receive {trace_delivered, Pid, Ref} -> ok end,
+    traced(Pid).
+
+traced(Pid) ->
+    receive
+        {trace, Pid, call, {supervisor, Function, [_Sup, #{id := Id}]}} -> [{Function, Id} | traced(Pid)];
+        {trace, Pid, call, {supervisor, Function, [_Sup, Id]}} -> [{Function, Id} | traced(Pid)]
+    after 0 -> []
+    end.
+
+%% The supervisor calls of erx_starter_sup:record(Text), made in a process
+%% of its own.
+record_calls(Text) ->
+    Test = self(),
+    Recorder = spawn_link(fun() -> receive record -> Test ! {recorded, erx_starter_sup:record(Text)} end,
+                                          receive done -> ok end
+                          end),
+    Recorded = fun() ->
+                       Recorder ! record,
+                       receive {recorded, ok} -> ok after ?WAIT_MS -> error(record_stuck) end
+               end,
+    Calls = supervisor_calls(Recorder, Recorded),
+    Recorder ! done,
+    Calls.
+
+%% Kills the table and waits for its supervisor to start the next. The kill is
+%% a signal, so the old table can still hold the name for a while after
+%% exit/2 returns; once its DOWN has arrived the name is free, and the next
+%% process to hold it is the new table, which answers calls once its init is
+%% done.
 restart_table() ->
     Table = whereis(erx_starter),
+    Ref = monitor(process, Table),
     exit(Table, kill),
-    wait_until(fun() -> is_pid(whereis(erx_starter)) andalso whereis(erx_starter) =/= Table end).
+    receive {'DOWN', Ref, process, Table, killed} -> ok after ?WAIT_MS -> error(table_outlived_kill) end,
+    wait_until(fun() -> is_pid(whereis(erx_starter)) end).
 
 %% The next session the stub starts for Principal.
 started(Principal) ->

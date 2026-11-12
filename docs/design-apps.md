@@ -349,7 +349,8 @@ exists:
 * a session that ends, for any reason, is started again;
 * more than `restarts` ends within `restart_period_s` end the row's
   supervisor. The row is then **down**, shown so at `/proc/apps`, and
-  stays down until `service NAME start` or the next boot;
+  stays down, whatever `rc.conf` then sets, until `service NAME start`,
+  `service NAME enable` or the next boot;
 * one row's failure touches no other row, since each has its own
   supervisor under a parent that restarts none of them.
 
@@ -472,16 +473,32 @@ tree, so a crash of the table's process restarts it and no session ends.
 The keepers' branch also holds what the table must not forget, as child
 specs OTP keeps without a process: each enabled row's supervisor spec,
 with what its session is kept with, whose missing pid is a row that is
-down; a record of each row `service NAME stop` stopped; and the text of
-`rc.conf` the table was last made from. A restarted table makes its
-table from that text and changes no keeper until its own read of
-`rc.conf` answers; it then stops a held row that is no longer enabled,
-restarts one whose settings changed, and starts an enabled row it does
-not hold, so a row `rc.conf` enabled is not stopped because the file
-cannot be read, and a row that is down or stopped with its settings
-unchanged stays so. A crash of
-the keepers' branch ends every session it kept, drops its records, and
-makes the table again as at boot.
+down; a stopped mark, a bare name, for each row `service NAME stop`
+stopped while it was enabled; and the text of `rc.conf` the table was
+last made from. These records are the only store of the rows' run
+state; the table's process keeps none of its own.
+
+Each time the table is made from `rc.conf`'s text, a pure decision
+(`erx_start_table:reconcile/3`) compares every row's record with the
+row the text makes: a held row that is marked stopped or no longer
+enabled stops, a running row whose settings changed is restarted, and
+an enabled row that is neither held nor marked starts. A row that is down or stopped stays so whatever its settings, as on
+FreeBSD, where editing `rc.conf` starts no service that is not running:
+only `service NAME start` or `enable`, which starts its row, clears the
+mark and runs it again. Disabling a row that is down drops its record,
+so the row is then simply not enabled.
+`stop` and `start` write their record before the act it records, so a
+table that ends between the two leaves the intent behind: `stop` marks
+the row before it ends it, and `start` clears the mark before it starts
+it. `enable` writes `rc.conf` first and clears the mark only after, so a
+table that ends between the two leaves the row enabled and stopped
+(TODO.md).
+
+A restarted table makes its table from the recorded text and changes no
+keeper until its own read of `rc.conf` answers, so a row `rc.conf`
+enabled is not stopped because the file cannot be read. A crash of the
+keepers' branch ends every session it kept, drops its records, stopped
+marks included, and makes the table again as at boot.
 
 ## Compatibility and migration
 
@@ -494,9 +511,9 @@ reported.
 
 | Failure | Detected by | What happens |
 | --- | --- | --- |
-| the storage domain is down at boot | the system domain's `data` grant is absent | the manifest's enabled rows start; the local settings wait for `rc.conf`, which is read again after a backoff that grows to a minute and never gives up, since no notice tells the system domain that its grant arrived; a row they change is stopped and started again, and until the read answers `/proc/apps` says `rc.conf` is unread |
+| the storage domain is down at boot | the system domain's `data` grant is absent | the manifest's enabled rows start; the local settings wait for `rc.conf`, which is read again after a backoff that grows to a minute and never gives up, since no notice tells the system domain that its grant arrived; a running row they change is stopped and started again, one they disable stops, and until the read answers `/proc/apps` says `rc.conf` is unread |
 | the principal has no room | the domain library's plan | the start is refused with `quota` or `no_memory`; a kept row counts it as an end |
-| a session ends more often than its row allows | the row's supervisor | the row is down, with the last reason at `/proc/apps`, until `service NAME start` |
+| a session ends more often than its row allows | the row's supervisor | the row is down, with the last reason at `/proc/apps`, until `service NAME start` or `enable` |
 | a local setting names a display the template is not granted, or one another enabled row holds | the merge | the row is `refused` with `{no_grant, D}` or `{display_held, Name}` at `/proc/apps`, and starts nothing |
 | `rc.conf` is damaged, or names a row the manifest does not declare | the table's parser | bad lines are skipped and reported; the manifest's rows stand |
 | the display domain restarts under a display's session | the domain service's grant record | the grant is minted again on the new incarnation, with the session mark |

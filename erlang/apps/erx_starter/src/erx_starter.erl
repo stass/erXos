@@ -25,17 +25,18 @@ erx_start_table's; this process carries them out.
   settings it has not read.
 * **Making the table.** Each time the table is made from rc.conf's text
   the text is recorded in the keepers' branch, and the rows' keepers are
-  reconciled with it (erx_start_table:reconcile/2): a held row no longer
-  enabled stops, a row whose settings changed is restarted, an enabled
-  row not held starts, and a row that is down or stopped with its
-  settings unchanged stays so.
+  reconciled with it (erx_start_table:reconcile/3): a held row no longer
+  enabled stops, a running row whose settings changed is restarted, an
+  enabled row neither held nor marked stopped starts, and a row that is
+  down or stopped stays so whatever its settings.
 * **Commands.** Until the table is first made every command is refused
   with `rc_conf_unread`. command/1 takes a command parse_ctl/1 made
   (erx_start_table:apply_ctl/4 decides it). A command that writes rc.conf
   hands the new text to a worker, which writes it to a temporary file and
   renames that over rc.conf; the table commits the text only once the
   write succeeded, and answers commands in order, one write at a time.
-  `stop` of an enabled row records it as stopped.
+  `stop` of an enabled row marks it stopped, and `start` or `enable` of
+  the row clears the mark as it starts the row.
 * **Restart.** A restarted process makes the table from the text the
   keepers' branch recorded, and changes nothing the branch holds until
   its own read of rc.conf answers: a row rc.conf enabled is not stopped
@@ -238,8 +239,9 @@ effect({retry, Delay}, State) ->
 apply_text(Text, State) ->
     ok = erx_starter_sup:record(Text),
     #{merged := After} = Made = make(Text, State),
-    Held = #{Name => kept(Row) || {Name, _Run, Row} <- erx_starter_sup:held()},
-    {Stop, Start} = erx_start_table:reconcile(Held, After),
+    {Rows, Stopped} = erx_starter_sup:held(),
+    Held = #{Name => {running_or_down(Run), kept(Row)} || {Name, Run, Row} <- Rows},
+    {Stop, Start} = erx_start_table:reconcile(Held, Stopped, After),
     lists:foreach(fun erx_starter_sup:stop/1, Stop),
     lists:foreach(fun(Name) -> start_row(Name, Made) end, Start),
     Made.
@@ -292,14 +294,14 @@ act({start_once, Name, Start}, #{principals := Principals}) ->
     started(erx_starter_sup:start_once(Name, map_get(Name, Principals), Start));
 act({stop, Name}, State) ->
     case row(Name, State) of
-        {ok, Row} -> erx_starter_sup:stop_row(Name, Row);
+        {ok, _Row} -> erx_starter_sup:stop_row(Name);
         none -> erx_starter_sup:stop(Name)
     end;
 act({error, _} = Refused, _State) ->
     Refused.
 
 %% A write that succeeded commits its text; an `enable` also starts its row
-%% when it is down or stopped with its settings unchanged.
+%% when it is down or stopped, which reconciling the text leaves so.
 written({written, ok}, From, Command, Text, State) ->
     Applied = apply_text(Text, State),
     _ = case Command of
@@ -361,17 +363,18 @@ kept(#{start := Start, restarts := Restarts, period := Period}) ->
 table(#{merged := none, skipped := Skipped, local := Local}) ->
     #{rows => unmade, skipped => Skipped, rc_conf => reading(Local)};
 table(#{merged := Merged, skipped := Skipped, local := Local}) ->
-    Held = #{Name => Run || {Name, Run, _Row} <- erx_starter_sup:held()},
-    #{rows => [Row#{run => run_state(Row, Held)} || Row <- Merged], skipped => Skipped, rc_conf => reading(Local)}.
+    {Rows, _Stopped} = erx_starter_sup:held(),
+    Runs = #{Name => running_or_down(Run) || {Name, Run, _Row} <- Rows},
+    #{rows => [Row#{run => run_state(Row, Runs)} || Row <- Merged], skipped => Skipped, rc_conf => reading(Local)}.
 
 reading(read) -> read;
 reading({unread, _Failures}) -> unread.
 
-%% An enabled row with no record has not been started, as one stopped.
-run_state(#{status := enabled, principal := Name}, Held) ->
-    case maps:get(Name, Held, stopped) of
-        Pid when is_pid(Pid) -> running;
-        Other -> Other
-    end;
-run_state(_Row, _Held) ->
+running_or_down(Pid) when is_pid(Pid) -> running;
+running_or_down(down) -> down.
+
+%% An enabled row with no supervisor is stopped: marked so, or not started.
+run_state(#{status := enabled, principal := Name}, Runs) ->
+    maps:get(Name, Runs, stopped);
+run_state(_Row, _Runs) ->
     none.

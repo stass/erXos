@@ -31,21 +31,30 @@ the table's process, as child specs OTP keeps:
 * `{row, Name}`, a transient child, is an enabled row's supervisor. Its
   only end is `shutdown`, at its intensity or at a stop, so OTP keeps its
   spec without restarting it: a spec with no pid is a row that is down.
-* `{stopped, Name}` is an enabled row that `stop` stopped, so a restarted
-  table leaves it stopped rather than starting it.
+* `{stopped, Name}`, the stopped mark, is a row that `stop` stopped while
+  it was enabled. It holds nothing but the name. No setting clears it:
+  the table never starts a marked row (erx_start_table:reconcile/3), so
+  it stays stopped whatever rc.conf sets, until start_row/2 clears it, at
+  `start` or `enable`, or the branch restarts and drops every record.
 * `rc_conf` holds the text of rc.conf the table was last made from, so a
   restarted table has the table it had while rc.conf is unread.
 
 Both of the last two hold their value in their spec's start arguments and
 stand for no process: their start function returns `ignore`, which a
 one_for_one supervisor answers by keeping the spec with no pid. Each
-`{row, Name}` and `{stopped, Name}` spec holds the row's
-erx_starter_row:row(), what its session is kept with, so a restarted
-table compares it with the table it makes (erx_start_table:reconcile/2).
+`{row, Name}` spec holds the row's erx_starter_row:row(), what its session
+is kept with, so a restarted table compares it with the table it makes.
+
+**Order.** stop_row/1 and start_row/2 write their record before the act it records, so a
+table that ends between the two leaves the intent behind: stop_row/1
+marks the row before it ends it, and start_row/2 clears the mark before
+it starts the row. record/1 replaces the text by deleting the old record
+and adding the new, and does nothing for an unchanged text, so the one
+moment with no record is during a real change of rc.conf (TODO.md).
 """.
 -behaviour(supervisor).
 
--export([start_link/0, start_link/2, start_row/2, stop_row/2, start_once/3, stop/1, held/0]).
+-export([start_link/0, start_link/2, start_row/2, stop_row/1, start_once/3, stop/1, held/0]).
 -export([record/1, recorded/0]).
 -export([init/1, ignore/1]).
 
@@ -79,14 +88,20 @@ start_row(Name, Row) ->
                                        restart => transient, type => supervisor, shutdown => infinity}).
 
 -doc """
-Stops enabled row Name as stop/1 does, and records it as stopped with Row,
-what it is kept with, so a restarted table leaves it stopped.
+Marks enabled row Name stopped, then stops it as stop/1 does, so no table
+starts it again, a table restarted between the two included.
 """.
--spec stop_row(binary(), erx_starter_row:row()) -> ok.
-stop_row(Name, Row) ->
-    ok = stop(Name),
-    {ok, undefined} = supervisor:start_child(?KEEPERS, record_spec({stopped, Name}, Row)),
-    ok.
+-spec stop_row(binary()) -> ok.
+stop_row(Name) ->
+    ok = mark(Name),
+    stop(Name).
+
+%% The stopped mark of row Name, written once.
+mark(Name) ->
+    case supervisor:start_child(?KEEPERS, record_spec({stopped, Name}, Name)) of
+        {ok, undefined} -> ok;
+        {error, already_present} -> ok
+    end.
 
 -doc "Starts one keeper of principal Principal's session with Start, which nothing starts again.".
 -spec start_once(binary(), pos_integer(), map()) -> supervisor:startchild_ret().
@@ -96,27 +111,38 @@ start_once(Name, Principal, Start) ->
 
 -doc """
 Stops what keeps row Name's sessions, its supervisor and a keeper started
-once, ends them, and drops the row's records.
+once, ends them, and drops the row's supervisor spec. A stopped mark
+stays: only start_row/2 clears it.
 """.
 -spec stop(binary()) -> ok.
 stop(Name) ->
-    lists:foreach(fun(Kind) -> ok = remove(Name, Kind) end, [row, once, stopped]).
+    lists:foreach(fun(Kind) -> ok = remove(Name, Kind) end, [row, once]).
 
 -doc """
-The rows the keepers' branch holds a record for: running, with its row
-supervisor's pid, down or stopped, each with the row it is kept with.
+What the keepers' branch holds: each row it keeps a supervisor for,
+running, with the supervisor's pid, or down, with the row it is kept
+with, and the names of the rows marked stopped.
 """.
--spec held() -> [{binary(), pid() | down | stopped, erx_starter_row:row()}].
+-spec held() -> {[{binary(), pid() | down, erx_starter_row:row()}], Stopped :: [binary()]}.
 held() ->
-    [{Name, run_state(Kind, Pid), row(Id)}
-     || {{Kind, Name} = Id, Pid, _, _} <- supervisor:which_children(?KEEPERS), Kind =:= row orelse Kind =:= stopped].
+    Children = supervisor:which_children(?KEEPERS),
+    {[{Name, run_state(Pid), row(Id)} || {{row, Name} = Id, Pid, _, _} <- Children],
+     [Name || {{stopped, Name}, _, _, _} <- Children]}.
 
--doc "Records Text as the text of rc.conf the table is made from.".
+-doc """
+Records Text as the text of rc.conf the table is made from. An unchanged
+text is left as it is recorded.
+""".
 -spec record(binary()) -> ok.
 record(Text) ->
-    _ = supervisor:delete_child(?KEEPERS, rc_conf),
-    {ok, undefined} = supervisor:start_child(?KEEPERS, record_spec(rc_conf, Text)),
-    ok.
+    case recorded() of
+        {ok, Text} ->
+            ok;
+        _Other ->
+            _ = supervisor:delete_child(?KEEPERS, rc_conf),
+            {ok, undefined} = supervisor:start_child(?KEEPERS, record_spec(rc_conf, Text)),
+            ok
+    end.
 
 -doc "The text record/1 last recorded in this keepers' branch, or none.".
 -spec recorded() -> {ok, binary()} | none.
@@ -139,14 +165,13 @@ remove(Name, Kind) ->
     _ = supervisor:delete_child(?KEEPERS, {Kind, Name}),
     ok.
 
-%% The row a {row, Name} or {stopped, Name} spec holds.
+%% The row a {row, Name} spec holds.
 row(Id) ->
-    {ok, #{start := {_Module, _Function, [Row]}}} = supervisor:get_childspec(?KEEPERS, Id),
+    {ok, #{start := {erx_starter_row, start_link, [Row]}}} = supervisor:get_childspec(?KEEPERS, Id),
     Row.
 
-run_state(row, Pid) when is_pid(Pid) -> Pid;
-run_state(row, _Undefined) -> down;
-run_state(stopped, _Undefined) -> stopped.
+run_state(Pid) when is_pid(Pid) -> Pid;
+run_state(_Undefined) -> down.
 
 init({top, Manifest, Directory}) ->
     Keepers = #{id => keepers, start => {supervisor, start_link, [{local, ?KEEPERS}, ?MODULE, keepers]},

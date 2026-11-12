@@ -595,6 +595,20 @@ it; git history is the record of completed work.
     rc.conf is not followed by a sync of its directory; the process tests make their rc.conf directories in the
     current directory and the failed-read case races its retry by a few microseconds; `/proc/apps` (A7) must
     show `rows/0`'s `rc_conf` state.
+* [Low] `erx_starter_sup:record/1` replaces the recorded text of `rc.conf` by deleting its child spec and adding
+  the new one, since OTP's supervisor has no replace. A table killed between the two leaves no record; its
+  successor then starts as at boot and, if the first read of `rc.conf` fails, reconciles with the manifest's rows
+  alone, starting rows `rc.conf` disabled and stopping rows only `rc.conf` enabled until a read answers. The window
+  opens only on a real change of the text (an unchanged text is not recorded again). Closing it needs a record
+  that is replaced in one step, such as a generation-keyed spec added before the old one is deleted.
+* [Low] `erx_starter` review residuals (A5c): `enable` of a stopped row writes `rc.conf` and only then clears the
+    mark (`start_row/2` after `apply_text/2` in `written/5`), so a table killed between the two leaves the row
+    enabled and stopped while `/apps/ctl` answered `eio`; clearing the mark and a down row's spec before
+    `apply_text/2` would let reconciling start it. No test pins that `start_row/2` clears the mark before it starts
+    the row, and no process test restarts the table after a stop cut short (held and marked). `/proc/apps` (A7)
+    should show the mark, since a marked row and an enabled row whose start failed both read `stopped`. A
+    `start` of a row not enabled followed by `enable` leaves its `{once, Name}` keeper beside the row's supervisor,
+    two sessions for one principal.
 * [Low] `erx_starter_rc:read/1` treats `enoent` as a machine with no `rc.conf`. If the storage domain being down
   answers `enoent` under `/data` rather than another error, the first read finds no settings and is not tried
   again, so the manifest's rows stand until the next boot, and the read counts as answered, so a later `enable`
