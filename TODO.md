@@ -571,6 +571,12 @@ it; git history is the record of completed work.
     `held/0` reads `restarting` as down; the one-off keeper is a temporary child of the keepers' branch, which
     design-apps.md calls "under no supervisor"; the rescue configuration starting no row is not checked (it is not
     built).
+* [Medium] The start table's display key (`tools/lib/erx/start_callers.rb`, start-display): the check that only
+  `erx_starter` passes `display` or `default_display` to `erx_domain:start_session/2` reads the atoms in the
+  calling module only, so a start map built in a helper module that never starts a session passes unseen (the
+  keeper already passes a map built elsewhere). Make it hold by construction: a separate entry for a start at a
+  display (`start_session/3`, or `start_display_session`) that only the keeper calls, and `start_session/2`
+  refusing both keys; start-display then becomes a call-site rule like start-callers.
 * [Low] `erx_starter_rc:read/0` treats `enoent` as a machine with no `rc.conf`. If the storage domain being down
   answers `enoent` under `/data` rather than another error, the first read finds no settings and is not tried
   again, so the manifest's rows stand until the next boot. Check what the stopgap answers.
