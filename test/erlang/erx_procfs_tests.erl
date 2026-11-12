@@ -51,6 +51,15 @@ walk_reads_scope_as_no_entry_test() ->
     ?assertEqual({ok, {dir, [groups]}}, erx_procfs_core:walk([], <<"groups">>, Unsupported)),
     ?assertEqual({error, enoent}, erx_procfs_core:walk([], <<"nothing">>, Unsupported)).
 
+%% A facet whose requests in flight are all taken answers busy: the path
+%% exists, and its status file says the query failed, never that nothing is
+%% there.
+walk_reads_busy_as_an_entry_test() ->
+    Busy = fun({exists, _}) -> {error, busy} end,
+    ?assertEqual({ok, {dir, [processes, {pid, 4, 85, 0}]}},
+                 erx_procfs_core:walk([processes], <<"4.85.0">>, Busy)),
+    ?assertEqual(<<"[error]\n">>, erx_procfs_core:status({error, busy}, development)).
+
 markers_exist_only_where_the_listing_says_test() ->
     Partial = fun({listing, Path}) -> listing(Path, {partial, [0]}) end,
     Unknown = fun({listing, _}) -> {error, unsupported} end,
@@ -66,24 +75,24 @@ markers_exist_only_where_the_listing_says_test() ->
 root_lists_what_the_scope_reaches_test() ->
     ?assertEqual([<<"status">>, <<"cpus">>, <<"groups">>, <<"budgets">>, <<"domains">>, <<"processes">>,
                   <<"kernel">>],
-                 names(erx_procfs_core:listing([], none, all))),
-    ?assertEqual([<<"status">>, <<"processes">>], names(erx_procfs_core:listing([], none, [4]))).
+                 names(erx_procfs_core:listing([], none, fun every/1))),
+    ?assertEqual([<<"status">>, <<"processes">>], names(erx_procfs_core:listing([], none, fun processes_only/1))).
 
 a_listing_lists_its_ids_and_markers_test() ->
     ?assertEqual([<<"status">>, <<"0">>, <<"1">>],
-                 names(erx_procfs_core:listing([cpus], listing([cpus], [0, 1]), all))),
+                 names(erx_procfs_core:listing([cpus], listing([cpus], [0, 1]), fun every/1))),
     ?assertEqual([<<"status">>, <<"0">>, <<".partial">>],
-                 names(erx_procfs_core:listing([cpus], listing([cpus], {partial, [0]}), all))),
+                 names(erx_procfs_core:listing([cpus], listing([cpus], {partial, [0]}), fun every/1))),
     ?assertEqual([<<"status">>, <<".unknown">>],
-                 names(erx_procfs_core:listing([groups], {error, unsupported}, all))),
+                 names(erx_procfs_core:listing([groups], {error, unsupported}, fun every/1))),
     ?assertEqual([{<<".unknown">>, {unknown, [groups]}}],
-                 tl(erx_procfs_core:listing([groups], unknown_listing([groups]), all))),
+                 tl(erx_procfs_core:listing([groups], unknown_listing([groups]), fun every/1))),
     ?assertEqual([<<"status">>, <<".unknown">>],
-                 names(erx_procfs_core:listing([domains, 4, processes], {error, unsupported}, all))),
+                 names(erx_procfs_core:listing([domains, 4, processes], {error, unsupported}, fun every/1))),
     ?assertEqual([<<"status">>, <<"budget">>, <<"group">>, <<"threads">>, <<"modules">>, <<"processes">>],
-                 names(erx_procfs_core:listing([domains, 4], none, all))),
+                 names(erx_procfs_core:listing([domains, 4], none, fun every/1))),
     ?assertEqual([<<"status">>, <<"4.85.0">>],
-                 names(erx_procfs_core:listing([processes], listing([processes], [{pid, 4, 85, 0}]), all))).
+                 names(erx_procfs_core:listing([processes], listing([processes], [{pid, 4, 85, 0}]), fun every/1))).
 
 marker_files_never_fabricate_test() ->
     ?assertEqual(<<"left_out\t[unknown]\n">>, erx_procfs_core:marker(partial, listing([cpus], {partial, [0]}))),
@@ -136,7 +145,7 @@ the_kernel_log_is_a_file_test() ->
     ?assertEqual({ok, {dir, [kernel]}}, erx_procfs_core:walk([], <<"kernel">>, Exists)),
     ?assertEqual({ok, {lines, [kernel, log]}}, erx_procfs_core:walk([kernel], <<"log">>, Exists)),
     ?assertEqual([{<<"status">>, {status, [kernel]}}, {<<"log">>, {lines, [kernel, log]}}],
-                 erx_procfs_core:listing([kernel], none, all)).
+                 erx_procfs_core:listing([kernel], none, fun every/1)).
 
 log_page(Status, Next, Entries) ->
     {ok, #{schema => 1, path => [kernel, log], kind => log, id => log, attrs => #{}, children => [],
@@ -180,16 +189,16 @@ log_lines_never_fabricate_test() ->
 
 %% A tree whose scope is not all has no /proc/kernel, as a path that names nothing.
 a_scoped_tree_has_no_kernel_log_test() ->
-    {ok, Fs} = erx_procfs:init([4]),
+    {ok, Fs} = erx_procfs:init(scoped([4])),
     ?assertEqual({error, enoent}, erx_procfs:walk(erx_procfs_core:root(), <<"kernel">>, Fs)),
-    {ok, All} = erx_procfs:init(all),
+    {ok, All} = erx_procfs:init(fun erx_inspector:inspect/2),
     {ok, Kernel, _} = erx_procfs:walk(erx_procfs_core:root(), <<"kernel">>, All),
     ?assertMatch({ok, {lines, [kernel, log]}, _}, erx_procfs:walk(Kernel, <<"log">>, All)).
 
 %%% The tree over the real inspector
 
 the_processes_directory_lists_this_process_test() ->
-    {ok, Fs} = erx_procfs:init(all),
+    {ok, Fs} = erx_procfs:init(fun erx_inspector:inspect/2),
     {ok, Processes, _} = erx_procfs:walk(erx_procfs_core:root(), <<"processes">>, Fs),
     {ok, Handle} = erx_procfs:open(Processes, 0, Fs),
     {ok, Entries} = erx_procfs:readdir(Handle, 0, 256, Fs),
@@ -205,7 +214,7 @@ the_processes_directory_lists_this_process_test() ->
     ?assertEqual({error, enoent}, erx_procfs:walk(Processes, erx_procfs_core:name(erx_inspector:proc_id(Dead)), Fs)).
 
 the_257th_snapshot_is_refused_test() ->
-    {ok, Fs} = erx_procfs:init([4]),
+    {ok, Fs} = erx_procfs:init(scoped([4])),
     Root = erx_procfs_core:root(),
     Handles = [element(2, {ok, _} = erx_procfs:open(Root, 0, Fs)) || _ <- lists:seq(1, 256)],
     ?assertEqual({error, emfile}, erx_procfs:open(Root, 0, Fs)),
@@ -214,13 +223,78 @@ the_257th_snapshot_is_refused_test() ->
     ?assertEqual({error, erofs}, erx_procfs:open(Root, 1, Fs)).
 
 a_crashing_query_answers_eio_and_keeps_its_snapshot_test() ->
-    {ok, Fs} = erx_procfs:init(all),
-    %% On stock erx_object_info's NIF is not loaded, so the machine's record, which a
+    {ok, Fs} = erx_procfs:init(scoped(all)),
+    %% The core in this process, not a worker that answers a crash `failed`: on
+    %% stock erx_object_info's NIF is not loaded, so the machine's record, which a
     %% status file asks for its build's projection, crashes.
     [?assertEqual({error, eio}, erx_procfs:open({status, [processes, erx_inspector:proc_id(self())]}, 0, Fs)) || _ <- lists:seq(1, 300)],
-    ?assertMatch({ok, _}, erx_procfs:open(erx_procfs_core:root(), 0, Fs)).
+    ?assertMatch({ok, _}, erx_procfs:open({dir, [processes]}, 0, Fs)).
+
+%% A domain that holds no inspect facet finds every path of its tree
+%% `enoent`: no name below the root, no status file and no log, and a
+%% listing of the root names nothing but its status.
+a_domain_without_the_facet_has_an_empty_tree_test() ->
+    {ok, Fs} = erx_procfs:init(fun(_Path, _Options) -> {error, no_facet} end),
+    Root = erx_procfs_core:root(),
+    ?assertEqual({error, enoent}, erx_procfs:walk(Root, <<"processes">>, Fs)),
+    ?assertEqual({error, enoent}, erx_procfs:open({status, []}, 0, Fs)),
+    ?assertEqual({error, enoent}, erx_procfs:open({lines, [kernel, log]}, 0, Fs)),
+    {ok, Handle} = erx_procfs:open(Root, 0, Fs),
+    ?assertMatch({ok, [{_, _, _, <<"status">>}]}, erx_procfs:readdir(Handle, 0, 256, Fs)).
+
+%% A tree over a facet that has ended, as a revoked one does, is the tree
+%% of a domain without one: each open after the end is `enoent`
+%% (design-live.md, "The /proc tree"). A facet that is there but has all
+%% its requests in flight answers busy, so the path exists and its status
+%% file says the query failed.
+an_ended_facet_empties_the_tree_and_a_busy_one_does_not_test() ->
+    Dead = spawn(fun() -> ok end),
+    Gone = monitor(process, Dead),
+    receive {'DOWN', Gone, process, Dead, _} -> ok end,
+    Root = erx_procfs_core:root(),
+    {ok, Revoked} = erx_procfs:init(fun(Path, Options) -> through(Dead, Path, Options) end),
+    ?assertEqual({error, enoent}, erx_procfs:walk(Root, <<"processes">>, Revoked)),
+    ?assertEqual({error, enoent}, erx_procfs:open({status, []}, 0, Revoked)),
+    Busy = spawn_link(fun Facet() -> receive {'$gen_call', From, _} -> gen:reply(From, {error, busy}), Facet() end end),
+    {ok, Full} = erx_procfs:init(fun(Path, Options) -> through(Busy, Path, Options) end),
+    ?assertMatch({ok, {dir, [processes]}, _}, erx_procfs:walk(Root, <<"processes">>, Full)),
+    {ok, Status} = erx_procfs:open({status, []}, 0, Full),
+    ?assertEqual({ok, <<"[error]\n">>}, erx_procfs:read(Status, 0, 4096, Full)),
+    unlink(Busy),
+    exit(Busy, kill).
+
+%% A query as a domain other than the system domain makes it, through Facet.
+through(Facet, Path, Options) ->
+    erx_inspector:route(false, Facet, {inspect, Path, Options}).
+
+%% The tree asks its inspector with no scope of its own: every question is
+%% a path and the query's options, never a scope.
+the_tree_asks_paths_alone_test() ->
+    Me = self(),
+    Inspect = fun(Path, Options) -> Me ! {asked, Path, Options}, {error, scope} end,
+    {ok, Fs} = erx_procfs:init(Inspect),
+    ?assertEqual({error, enoent}, erx_procfs:walk(erx_procfs_core:root(), <<"kernel">>, Fs)),
+    ?assertEqual([{asked, [kernel], #{}}], flush()).
 
 %%% Helpers
+
+%% A lookup that answers every path, as a facet of scope `all` answers the
+%% root's literal children.
+every({_Question, _Path}) -> {error, unsupported}.
+
+%% A lookup that answers only `[processes]` among the machine's paths, as a
+%% facet of a principal's scope does.
+processes_only({_Question, [processes]}) -> {error, unsupported};
+processes_only({_Question, _Path}) -> {error, scope}.
+
+%% The inspector as a facet of Scope answers it, the core at that scope.
+scoped(Scope) -> fun(Path, Options) -> erx_inspector:inspect(Path, Scope, Options) end.
+
+flush() ->
+    receive Message -> [Message | flush()]
+    after 0 -> []
+    end.
+
 
 listing(Path, Children) ->
     {ok, Record} = erx_schema:validate_record(#{schema => 1, path => Path, kind => listing,

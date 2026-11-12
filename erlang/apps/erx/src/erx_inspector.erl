@@ -6,18 +6,20 @@
 The inspector (docs/design-live.md, "Inspection"): it answers a query for
 a path of abi/inspection.txt with the record of that path, each attribute
 from its reporter, and keeps from it only what the caller's scope may see.
-erx:i/0,1 and the shell's commands ask it with the scope of the session's
-inspect facet, whose value is that scope; `/proc` and the host link ask
-it with the scope of the inspect facet they serve.
+No caller outside the system domain names a scope: erx:i/0,1, the shell's
+commands, `/proc` and the web line's views ask through inspect/1,2,
+entries/1 and overview/0, which go through the domain's inspect facet,
+whose scope the system domain fixed when it minted it
+(docs/design-live.md, "How a query travels").
 
-* inspect/1, entries/1 and overview/0 answer the caller's own domain
-  as it may see the machine, and are what erx:i/0,1 call. inspect/2
-  answers the record of one path at a given scope; entries/2 the
-  records of a listing's entries, the listing's own status beside
-  them. inspect/3
-  takes the query's options: `offset`, for a path the schema marks
-  append-only, is the sequence number its entries start from, 0 when
-  it is left out (docs/design-live.md, "Paths").
+* inspect/1,2, entries/1 and overview/0 answer the caller's own domain
+  as it may see the machine. inspect/2 takes the query's options:
+  `offset`, for a path the schema marks append-only, is the sequence
+  number its entries start from, 0 when it is left out
+  (docs/design-live.md, "Paths").
+* inspect/3 and entries/2 are the core a query worker and a domain's
+  agent run at a given scope: the record of one path, and the records of
+  a listing's entries, the listing's own status beside them.
 * A scope is `all` or a list of domain ids. A path's owner is decided by
   construction: `[domains, D | _]` and `[processes, {pid, D, N, S}]` are
   D's, and every other path is the machine's. A path the
@@ -50,8 +52,8 @@ that has no collector here is
 `{error, unsupported}`.
 """.
 
--export([inspect/1, entries/1, overview/0]).
--export([inspect/2, inspect/3, entries/2, overview/1, proc_id/1, runtime_domain/0]).
+-export([inspect/1, inspect/2, entries/1, overview/0]).
+-export([inspect/3, entries/2, route/3, proc_id/1, runtime_domain/0]).
 -export([scoped/3, declared_reachable/3, listing/2, collects_domain/2]).
 -export([page/0, page_add/2, page_full/1, page_entries/2, view/1]).
 -export_type([scope/0, query_scope/0, answer/0, entries/0, page/0]).
@@ -62,9 +64,11 @@ that has no collector here is
 %% A query's scope as an inspect facet holds it: {principal, P} is P's
 %% domains, which the query worker resolves to a scope() at each query.
 -type query_scope() :: scope() | {principal, pos_integer()}.
--type answer() :: {ok, erx_schema:record()} | {error, scope | unsupported | invalid | failed | no_facet | badarg}.
+-type answer() :: {ok, erx_schema:record()}
+                  | {error, scope | unsupported | invalid | failed | no_facet | busy | badarg}.
 -type options() :: #{offset => non_neg_integer()}.
--type entries() :: {ok | partial, [erx_schema:record()]} | {error, scope | unsupported | failed | no_facet | badarg}.
+-type entries() :: {ok | partial, [erx_schema:record()]}
+                   | {error, scope | unsupported | failed | no_facet | busy | badarg}.
 %% Whose a path is: the machine's, or a domain's by its id.
 -type owner() :: machine | {domain, non_neg_integer()}.
 %% A listing's page while it is built: its records, newest first, their
@@ -96,13 +100,23 @@ asks other domains' agents for what only their runtimes know, and a worker
 that fails, at its heap limit for one, is `{error, failed}`. In any other
 runtime it calls the domain's inspect facet (erx:cap(inspect)), whose
 scope the system domain fixed when it minted the facet, and returns its
-answer: `{error, no_facet}` when the domain holds none, and `{error,
-failed}` when the facet does not answer within inspect_query_max and a
-margin or has ended.
+answer: `{error, no_facet}` when the domain holds none or its facet has
+ended, revoked with its grant, and `{error, failed}` when the facet does
+not answer within inspect_query_max and a margin. A query the facet holds
+as it ends follows the facet's exit reason: `no_facet` for `noproc`,
+`failed` for any other.
 """.
 -spec inspect(term()) -> answer().
 inspect(Path) ->
-    query({inspect, Path, #{}}).
+    inspect(Path, #{}).
+
+-doc """
+The record of Path as inspect/1 asks for it, for the query's Options,
+which only an append-only path reads (inspect/3).
+""".
+-spec inspect(term(), options()) -> answer().
+inspect(Path, Options) ->
+    query({inspect, Path, Options}).
 
 -doc "The records of the entries of the listing at Path, as inspect/1 asks.".
 -spec entries(term()) -> entries().
@@ -110,18 +124,30 @@ entries(Path) ->
     query({entries, Path}).
 
 query(Query) ->
-    case erx_facets:domain() of
-        #{inspect := all} -> erx_inspect_worker:call(Query, all, #{view => fun view/1});
-        #{} -> through_facet(erx:cap(inspect), Query)
-    end.
+    route(erx_facets:system(), erx:cap(inspect), Query).
 
-%% The facet's answer. It decodes the request and refuses what the interface
-%% does not take, so a path that is no data is `{error, badarg}` here too.
-through_facet(undefined, _Query) ->
+-doc """
+Where a query goes: in the system domain (System true) to a local query
+worker at scope `all`; in any other runtime to the domain's inspect
+facet, Facet, or nowhere, `{error, no_facet}`, when it holds none or
+holds one that has ended: a revoked facet admits no query after its end
+(docs/design-live.md, "The /proc tree"), and a call to it exits `noproc`,
+as a call to a process of another domain that does not exist does. No
+runtime but the system domain's answers a query itself, so none decides
+a scope. The facet decodes the request and refuses what the interface
+does not take, so a path that is no data is `{error, badarg}` here too,
+and a request past its requests in flight is `{error, busy}`.
+""".
+-spec route(boolean(), pid() | undefined, term()) -> answer() | entries().
+route(true, _Facet, Query) ->
+    erx_inspect_worker:call(Query, all, #{view => fun view/1});
+route(false, undefined, _Query) ->
     {error, no_facet};
-through_facet(Facet, Query) ->
+route(false, Facet, Query) ->
     try gen_server:call(Facet, Query, ?ERX_INSPECT_QUERY_MAX + ?FACET_MARGIN)
-    catch exit:_ -> {error, failed}
+    catch
+        exit:{noproc, _} -> {error, no_facet};
+        exit:_ -> {error, failed}
     end.
 
 -doc """
@@ -141,11 +167,6 @@ view(Scope) ->
         _ ->
             {ok, []}
     end.
-
--doc "The record of Path as Scope may see it.".
--spec inspect(term(), scope()) -> answer().
-inspect(Path, Scope) ->
-    inspect(Path, Scope, #{}).
 
 -doc """
 The record of Path as Scope may see it, for the query's Options, which
@@ -173,27 +194,19 @@ seen(Error, _Scope) ->
     Error.
 
 -doc """
-What erx:i/0 shows, in its order: the machine, the CPUs, the system
-domain's group and budget, its threads and the processes, each as
-inspect/2 or entries/2 answers it for Scope.
+What erx:i/0 shows, in its order: the machine, the CPUs, the group and
+budget of the domain this runtime is (runtime_domain/0), its threads and
+the processes, each section asked as inspect/1 and entries/1 ask.
 """.
--spec overview(scope()) -> [{[erx_schema:segment()], answer() | entries()}].
-overview(Scope) ->
-    sections(fun(Path) -> inspect(Path, Scope) end, fun(Path) -> entries(Path, Scope) end).
-
--doc "What erx:i/0 shows, each section asked as inspect/1 and entries/1 ask.".
 -spec overview() -> [{[erx_schema:segment()], answer() | entries()}].
 overview() ->
-    sections(fun inspect/1, fun entries/1).
-
-sections(Inspect, Entries) ->
-    Domain = erx_kernel_records:system_domain(),
-    [{[], Inspect([])},
-     {[cpus], Entries([cpus])},
-     {[domains, Domain, group], Inspect([domains, Domain, group])},
-     {[domains, Domain, budget], Inspect([domains, Domain, budget])},
-     {[domains, Domain, threads], Entries([domains, Domain, threads])},
-     {[processes], Entries([processes])}].
+    Domain = runtime_domain(),
+    [{[], inspect([])},
+     {[cpus], entries([cpus])},
+     {[domains, Domain, group], inspect([domains, Domain, group])},
+     {[domains, Domain, budget], inspect([domains, Domain, budget])},
+     {[domains, Domain, threads], entries([domains, Domain, threads])},
+     {[processes], entries([processes])}].
 
 %%% Scope: pure decisions.
 
@@ -362,7 +375,7 @@ proc_id(Pid) ->
 -doc """
 The domain this runtime is: the one its boot page names (erx_dist:boot/0)
 on erXos, and on a development host, where one trusted runtime stands for
-the system domain, the system domain's id, as erx_facets:domain/0 reads it.
+the system domain, the system domain's id, as erx_facets:system/0 reads it.
 """.
 -spec runtime_domain() -> non_neg_integer().
 runtime_domain() ->

@@ -1589,25 +1589,13 @@ it; git history is the record of completed work.
   facet-names check, and the funnel's table generated from it (`erx_facet_names.hrl`), read the manifest
   with a small parser of their own rather than `Erx::ABI::Syntax.parse`. Read it with the manifest's own
   syntax so the table and the image's manifest cannot disagree on a service's name.
-* [Medium] shell and domains, the inspect service's consumers (`erlang/apps/erx/src/erx_facets.erl`, `facets/2`;
-  `erx.erl`; `erx_cmd_top.erl`; `erlang/apps/erx_files/src/erx_procfs.erl`; `erx_log_facet.erl`;
-  `erlang/apps/erx_web_line/src/erx_web_line.erl`; `otp/lib/kernel/src/kernel.erl`): every session holds an
-  `inspect` facet and `erx_inspector:inspect/1` and `entries/1` go through it outside the system domain, but
-  other consumers pass a scope of their own
-  ([The inspect service](docs/design-live.md#the-inspect-service), [The /proc tree](docs/design-live.md#the-proc-tree)).
-  `facets/2` invents a scope of `[Id]` in the session's runtime; `top`'s header calls the inspector with that
-  scope and `overview/0`'s sections name the system domain's id; a session's `/proc` starts at scope `all` in its
-  own runtime and decides its literal children with `declared_reachable` rather than from the inspector's
-  answer; the kernel log
-  reaches root's session through a `log` facet of its own (`erx_log_facet`, granted by `erx_console`, read
-  through `erx_log_records:log/1`'s `read_fun`); and `erx_web_line` keeps a `scope` of its own that
-  `{export, Web}` widens to `all`. Make each of them call `erx_inspector` without a scope, read `{error, scope}`
-  and `{error, no_facet}` as `enoent` in `/proc`, and start every runtime's `/proc` over its facet; write V10's
-  QEMU test (read `[processes, P]` of a system-domain process through root's session facet of scope `all` and
-  find `erx:exports/1` of each pid it names unchanged) with its seed of the validation removed; then delete
-  `erx_log_facet` and its tests, the line's `scope`, the local scope of `facets/2`, `log` from `UNDECLARED`
-  (lowering `EXEMPTIONS_MAX`), and the funnel's literal `log` clause (`erx_domain_srv:facet/3`). Keep the
-  `session-dmesg` QEMU checkpoint, which tests the behaviour.
+* [Medium] shell and domains, the kernel log's `log` facet (`erlang/apps/erx/src/erx_log_facet.erl`;
+  `erx_console.erl`, `log_reader/1`; `erx_log_records.erl`, `log/1`; `erx_domain_srv:facet/3`): root's session
+  reads the kernel log as every consumer reads the inspector, through its inspect facet (`/proc/kernel/log`,
+  [The /proc tree](docs/design-live.md#the-proc-tree)), so the `log` facet the console grants a session in a
+  development build is a second path to the same records. Delete `erx_log_facet` and its tests, the read
+  through it in `erx_log_records:log/1`, `log` from `UNDECLARED` (lowering `EXEMPTIONS_MAX`), and the funnel's
+  literal `log` clause. Keep the `session-dmesg` QEMU checkpoint, which tests the behaviour.
 * [Medium] domains, the inspect facet's scope wiring (`erlang/apps/erx_domain/src/erx_domain_srv.erl`,
   `system_facet/4`; `erlang/apps/erx/src/erx_build.erl`, `shell_principals/1`): no test checks the scope a
   session's minted inspect facet holds, so a `system_facet/4` that mints `all` for every grantee passes, and
@@ -1615,13 +1603,14 @@ it; git history is the record of completed work.
   stand-in has no `owner/1`, so a request cannot go through a facet the service minted. Give it one, mint with
   `inspect_policy => #{roots => [1], development => false}` for principal 1, expect `{error, scope}` for
   `[kernel, log]`, and seed `inspect_scope/3` replaced by `all`; test `shell_principals/1` on a packed manifest.
-* [Medium] facets, a request past the limit in flight (`erlang/apps/erx/src/erx_facet.erl`, `admit/3`): it is
-  refused `{error, badarg}`, the answer of a malformed request, so once `top`, `/proc` and the web line's views
-  share a session's inspect facet (2 in flight in the default manifests), ordinary concurrency reads as a bad
-  argument. Give the refusal a reason of its own that a caller can retry or report, in design-domains.md's
-  Facets first. A request past `max_request` is dropped unanswered, so `erx_inspector`'s `through_facet/2` waits
-  `inspect_query_max` and a margin before `{error, failed}`; it can refuse such a request at once from the
-  grant's `max_request` (`erx_facet:info/1`).
+* [Low] facets, a request past `max_request` (`erlang/apps/erx/src/erx_inspector.erl`, `route/3`): the facet
+  drops it unanswered, so the inspector waits `inspect_query_max` and a margin before `{error, failed}`. It can
+  refuse such a request at once from the grant's `max_request` (`erx_facet:info/1`).
+* [Low] inspection consumers, a busy facet (`erlang/apps/erx/src/erx_inspector.erl`, `route/3`): a request past
+  the inspect facet's `in_flight` answers `{error, busy}` at once and no consumer retries it, so a browser with
+  many views open can make the same session's `top` print `[inspector busy]` and its `/proc` files `[error]`.
+  A facet that crashes, through a fault in its callback (`erx_facet:loop/1`), reads as one revoked: `no_facet`,
+  so the session's `/proc` is `enoent` and `top` prints `[no inspect facet]` while its grant still names inspect.
 * [Medium] inspection schema, `abi/inspection.txt`: design-live.md's path table and
   [The runtime agent](docs/design-live.md#the-runtime-agent) name `[processes, Pid, source]`, the source lines
   around a process's location from `erx_source`, but the schema declares no such path, so the inspector, and a
@@ -1641,7 +1630,10 @@ it; git history is the record of completed work.
 * [Medium] inspect agent, `erlang/apps/erx/src/erx_inspect_agent.erl`: a session's agent does not relay its
   programs' and pipes' attributes ([The runtime agent](docs/design-live.md#the-runtime-agent),
   `[domains, Id, programs]`), and below `[domains, Self]` it asks `erx_inspector`, whose `collects_domain/2`
-  collects a domain's paths only in the system domain, so those paths answer `{error, scope}`.
+  collects a domain's paths only in the system domain, so those paths answer `{error, scope}`. In the
+  session_domain QEMU cell, `top` in root's session (domain 8) prints
+  `Domain 8 budget [not in scope]: - Used, - Guarantee, - Cap`, because the agent answers `[domains, 8, budget]`
+  `{error, scope}`.
 * [Medium] shell, the session_domain QEMU cell of session P6 (`tools/lib/erx/qemu_suites/session_domain.rb`, which
   session P5 brings with the session domain): `ifconfig` typed in a session prints `ifconfig: no_facet`
   and sets the status `no_facet`, and in the system shell lists the interfaces; `ps` lists the session's
@@ -2467,11 +2459,10 @@ it; git history is the record of completed work.
   `/proc/processes/<pid>` in the browser, which names it; `[domains, Id, processes]`, declared with paginated
   entries rather than children, needs the web client's entries view (W3) before a browser shows it. `runtime_domain/0`
   reads the boot page beside `erx_facets:domain/0`, and `collect/2` calls it after the scope decision; read the
-  domain once at the edge (one exported reader) and pass it in. The system domain's runtime is not yet the node
-  `system@<host>` (SV2), so it runs at creation 0: `erx_process_records:proc_id/2` names a local pid by the
-  runtime's domain rather than its creation, and the system domain's `self()`, `pid_to_list/1` and `ps` print
-  `<0.N.S>` beside `/proc/processes/4.N.S` (design-domains, Text); with creation 4, `proc_id/2` reads every
-  pid's creation and the production image's `PROC_EXPRESSION` drops its written `4`. The browser shows a
+  domain once at the edge (one exported reader) and pass it in. The system domain's runtime is the node
+  `system@<host>` at creation 4 (`tools/lib/erx/system_domain.rb`), yet `erx_process_records:proc_id/2` still
+  names a pid of its own runtime by the runtime's domain rather than by the creation the pid carries; drop that
+  special case wherever the creation already is the domain. The browser shows a
   process's links and monitors, lists of `proc_id()`, as tuples (`erx_web_value`), not as pid presentations.
   The listing page (1,000) and the scoped machine paths (`[]`, `[processes]`) are written
   in `erx_inspector`; have `erx_schema` export the page and the schema mark which machine paths a scoped facet
@@ -2480,11 +2471,10 @@ it; git history is the record of completed work.
   and paginated `[domains, Id, processes]`; `erx:inspect/2`, and `erx:ps/0` and `erx:domains/0` with their
   `shell_default` shortcuts, which `test/erlang/erx_shortcut_tests.erl` lists as pending.
 * [Medium] /proc (`erlang/apps/erx_files/src/erx_procfs.erl`, `erx_procfs_core.erl`; design-live's
-  [The /proc tree](docs/design-live.md#the-proc-tree)): `kernel_safe_sup` starts one tree of scope `all` and mounts
-  it at `/proc` in every runtime, a session's included; each runtime's tree should read through its domain's inspect
-  facet (the inspect service item under Bugs), and the system shell's tree start with the console, presenting the
-  system-shell facet. A pid's directory is its pid's text, `0.N.S` in the system domain until its runtime runs as a node (the inspector item above),
-  so M5's exit check of `4.N.S` in plan.md waits for them. The design leaves open: a text entry spelled `status`, a module of that
+  [The /proc tree](docs/design-live.md#the-proc-tree)): `kernel_safe_sup` starts the tree at boot in every
+  runtime, in the system domain over a local query worker at scope `all`; the system shell's tree should instead
+  start with the console, presenting the system-shell facet, and be mounted only in the system shell's namespace.
+  The design leaves open: a text entry spelled `status`, a module of that
   name, which the directory's `status` file shadows; how many entries `.partial` says were left out, which the
   inspector does not count (the file says `left_out [unknown]`); and what the `status` file of a path the inspector
   answers `{error, unsupported}` holds (one line, `[unsupported]`). Not built: `source`, `crash`

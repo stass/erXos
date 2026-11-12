@@ -875,7 +875,7 @@ module Erx
          console_point('top-states', /\A[1-9][0-9]* processes: /n),
          console_point('top-memory', /\AMem \(root pool\): [1-9][0-9]{0,3}[KMG] Total, [0-9]{1,4}[KMG] Free\r*\n\z/n),
          console_point('top-budget',
-                       /\ADomain 4 budget \(root pool\): [1-9][0-9]{0,3}[KMG] Used, - Guarantee, - Cap\r*\n\z/n)].freeze
+                       /\ADomain 4 budget \(root pool\): [1-9][0-9]{0,3}[KMG] Used, - Guarantee \[unsupported\], - Cap \[unsupported\]\r*\n\z/n)].freeze
       end
 
       # A line of the console's transcript, what the person types once it is seen, and the

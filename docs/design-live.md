@@ -1209,13 +1209,20 @@ otherwise each partial figure names its own after it, so an `ok`
 number beside it never reads as partial. On the stopgap kernel the
 memory figures and `used` are the `liberx` pool's partial counts, so
 the header reads `Mem (root pool): 118M Total, 74M Free` and `Domain
-4 budget (root pool): 44M Used, - Guarantee, - Cap`; on erXos's
+4 budget (root pool): 44M Used, - Guarantee [unsupported], - Cap
+[unsupported]`; on erXos's
 kernel, which reports them whole, it reads `Mem: 118M Total, 74M
 Free`. A line with partial figures of two reporters reads `Mem: 118M
-Total (kernel), 74M Free (root pool)`. Any other status (unknown,
-unsupported, timed out, error), and every figure in a session
-without an inspect facet, prints `-`, so the header never shows as
-exact a number nobody reported whole. Naming a reporter is the
+Total (kernel), 74M Free (root pool)`. Any other figure prints `-`
+and says why in brackets: its status as `erx_render` writes it
+(`[unknown]`, `[unsupported]`, `[timeout 500]`, `[error]`), `[not
+reported]` for a figure its record does not hold, or the inspector's
+refusal of its path, `[not in scope]`, `[no inspect facet]`,
+`[inspector busy]` or `[failed]`. When every figure of a line is
+missing for one reason, the line's label says it once, `Domain 8
+budget [not in scope]: - Used, - Guarantee, - Cap`. So the header
+never shows as exact a number nobody reported whole, and no `-` hides
+why it is there. Naming a reporter and a reason is the
 header's alone, the one exception to the command shell's rule for
 values it does not have
 ([design-shell.md](design-shell.md#invariants) SH3): the header's

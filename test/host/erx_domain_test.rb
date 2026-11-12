@@ -137,7 +137,13 @@ class ErxDomainTest < Minitest::Test
               file: File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
               from: 'loop(replied(Monitor, {error, failed}, State));',
               to: 'loop(State#{forwards := maps:remove(Monitor, Forwards)});',
-              tests: 'erx_facet_tests', caught_by: 'a_forwards_service_that_ends_answers_failed_test')
+              tests: 'erx_facet_tests', caught_by: 'a_forwards_service_that_ends_answers_failed_test'),
+    # A request past the limit in flight answered as a malformed one: the grantee cannot
+    # tell a full facet, which a retry may pass, from a request it must not repeat.
+    Fault.new(name: 'a request past the limit in flight refused as badarg',
+              file: File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
+              from: 'refuse(From, busy, State);', to: 'refuse(From, badarg, State);',
+              tests: 'erx_facet_tests', caught_by: 'limits_its_forwards_test')
   ].freeze
 
   def test_the_cases_catch_each_seeded_fault

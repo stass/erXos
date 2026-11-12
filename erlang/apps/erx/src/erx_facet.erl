@@ -39,7 +39,8 @@ What arrives is sorted by its shape before the callback sees a request:
   so the reply goes to the grantee and never to a third domain. Anything
   else is dropped and counted, with no answer, since an answer would go to
   a name the sender chose. A request past the grant's limit in flight is
-  refused with {error, badarg} and counted, as is one the callback refuses.
+  refused with {error, busy}, which the grantee may retry, and one the
+  callback refuses with its reason; each is counted.
   admit/3 decides the rest: a reply, a refusal, or a forward, which the
   behaviour sends itself as a gen_server call with a fresh alias as its tag;
 * a message of the grantee's in no call's shape, {erx_origin, Grantee, Message},
@@ -291,7 +292,7 @@ message(Message, #{max_request := MaxRequest, forwards := Forwards, in_flight :=
 
 admit(_Request, From, #{forwards := Forwards, in_flight := InFlight} = State)
   when map_size(Forwards) >= InFlight ->
-    refuse(From, badarg, State);
+    refuse(From, busy, State);
 admit(Request, {Pid, _Tag} = From, #{callback := Callback, cb_state := CbState} = State) ->
     case Callback:admit(Request, Pid, CbState) of
         {forward, Service, Request1, CbState1} when is_pid(Service) ->

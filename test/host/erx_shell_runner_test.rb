@@ -22,7 +22,7 @@ class ErxShellRunnerTest < Minitest::Test
   APPLICATION = File.join(ROOT, 'erlang/apps/erx_shell/src')
   # erx_cmd first, so that the commands find their behaviour.
   SOURCES = [File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl'), File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/erx_facets.erl'),
+             File.join(ROOT, 'erlang/apps/erx/src/erx_facets.erl'), File.join(ROOT, 'test/erlang/stand_in/erx_inspector.erl'),
              File.join(APPLICATION, 'erx_cmd.erl'),
              *Dir[File.join(APPLICATION, '*.erl')].sort,
              File.join(ROOT, 'test/erlang/erx_shell_runner_tests.erl')].uniq.freeze

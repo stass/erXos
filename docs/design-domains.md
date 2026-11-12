@@ -2525,7 +2525,9 @@ unanswered: an answer would go to the reply target, a name the sender
 chose, so answering would let any domain have the facet send to a third
 party, and an oversized request is dropped before it is decoded. A request
 that passes those and fails any other check is refused with
-`{error, badarg}` and counted. Either way a
+`{error, badarg}` and counted, except one past the grant's requests in
+flight, which is refused with `{error, busy}`, an answer the grantee may
+retry, and counted. Either way a
 service behind a facet cannot be made a confused deputy: a domain that has
 learnt a facet's pid, its grantee's pids and a reply alias of its grantee's
 gets nothing from the facet.

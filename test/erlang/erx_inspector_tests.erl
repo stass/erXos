@@ -144,29 +144,29 @@ domain_paths_need_their_domain_test() ->
 unknown_and_unreachable_paths_answer_as_scope_test() ->
     ?assertEqual(error, reachable([nothing], all)),
     ?assertEqual(error, reachable([processes, {pid, 0, 1 bsl 32, 0}], all)),
-    ?assertEqual({error, scope}, erx_inspector:inspect([processes, {pid, 9, 1, 0}], all)),
-    ?assertEqual({error, scope}, erx_inspector:inspect([processes, self()], all)),
+    ?assertEqual({error, scope}, erx_inspector:inspect([processes, {pid, 9, 1, 0}], all, #{})),
+    ?assertEqual({error, scope}, erx_inspector:inspect([processes, self()], all, #{})),
     %% A caller of domain 5 that writes 5 for this runtime's domain in a process's
     %% proc_id() reaches no process of this runtime.
     {pid, ?SYSTEM, N, S} = me(),
-    ?assertEqual({error, scope}, erx_inspector:inspect([processes, {pid, 5, N, S}], [5])),
-    ?assertEqual({error, scope}, erx_inspector:inspect([cpus], [?SYSTEM])),
-    ?assertEqual({error, scope}, erx_inspector:inspect([domains, 9, budget], all)),
-    ?assertEqual({error, scope}, erx_inspector:inspect([nothing], all)).
+    ?assertEqual({error, scope}, erx_inspector:inspect([processes, {pid, 5, N, S}], [5], #{})),
+    ?assertEqual({error, scope}, erx_inspector:inspect([cpus], [?SYSTEM], #{})),
+    ?assertEqual({error, scope}, erx_inspector:inspect([domains, 9, budget], all, #{})),
+    ?assertEqual({error, scope}, erx_inspector:inspect([nothing], all, #{})).
 
 dead_process_answers_as_scope_test() ->
     {Pid, Ref} = spawn_monitor(fun() -> ok end),
     receive {'DOWN', Ref, process, Pid, _} -> ok end,
-    ?assertEqual({error, scope}, erx_inspector:inspect([processes, erx_inspector:proc_id(Pid)], all)).
+    ?assertEqual({error, scope}, erx_inspector:inspect([processes, erx_inspector:proc_id(Pid)], all, #{})).
 
 uncollected_path_is_unsupported_test() ->
-    ?assertEqual({error, unsupported}, erx_inspector:inspect([groups], all)),
+    ?assertEqual({error, unsupported}, erx_inspector:inspect([groups], all, #{})),
     ?assertEqual({error, unsupported}, erx_inspector:entries([domains], all)).
 
 process_paths_test() ->
-    {ok, #{kind := process, id := Me}} = erx_inspector:inspect([processes, me()], all),
+    {ok, #{kind := process, id := Me}} = erx_inspector:inspect([processes, me()], all, #{}),
     ?assertEqual(me(), Me),
-    {ok, #{kind := listing, children := Children}} = erx_inspector:inspect([processes], all),
+    {ok, #{kind := listing, children := Children}} = erx_inspector:inspect([processes], all, #{}),
     ?assert(lists:member(me(), Children)),
     {ok, Records} = erx_inspector:entries([processes], all),
     ?assert(lists:any(fun(#{id := Id}) -> Id =:= me() end, Records)),
@@ -322,38 +322,52 @@ overview_fits_80_columns_test() ->
 
 %%% The session's facet and the domain record
 
-%% The system domain's inspect facet, which a development host's runtime
-%% holds too, has as its value the inspector's scope: erx:i/0,1 and the
-%% shell's commands hand it to the inspector as it is.
-session_facet_is_an_inspector_scope_test() ->
-    #{inspect := Scope} = erx_facets:domain(),
-    ?assertEqual({ok, {domain, ?SYSTEM}}, reachable([domains, ?SYSTEM, budget], Scope)),
-    ?assertEqual(9, map_size(maps:get(attrs, erx_inspector:scoped(machine(), machine, Scope)))).
+%% A development host's runtime stands for the system domain, which is
+%% handed no facet and asks its own query worker at scope `all`.
+a_development_host_is_the_system_domain_test() ->
+    ?assert(erx_facets:system()),
+    ?assertEqual(#{}, erx_facets:domain()),
+    ?assertMatch({ok, #{kind := domain}}, erx_inspector:inspect([domains, ?SYSTEM])).
 
-%% A domain's facets: the system domain's are the inspect facet of scope
-%% `all` alone, since it may hold no `net` (docs/design-system.md, property
-%% 15); another domain's are
-%% the local scope of its own id and the facets it was handed, and an
-%% inspect facet handed to it never widens that scope.
-facets_test() ->
-    Net = spawn(fun() -> ok end),
-    ?assertEqual(#{inspect => all}, erx_facets:facets(system, #{})),
-    ?assertEqual(#{inspect => [7]}, erx_facets:facets({domain, 7}, #{})),
-    ?assertEqual(#{inspect => [7], net => Net}, erx_facets:facets({domain, 7}, #{net => Net})),
-    ?assertEqual(#{inspect => [7]}, erx_facets:facets({domain, 7}, #{inspect => Net})).
+%% Outside the system domain a query goes to the domain's inspect facet as
+%% it is, never to a local core at a scope of the runtime's own: a domain
+%% without the facet is answered `no_facet`, even for a path of its own,
+%% and one with the facet gets the facet's answer.
+a_domain_asks_only_through_its_facet_test() ->
+    Own = [domains, ?SYSTEM],
+    ?assertEqual({error, no_facet}, erx_inspector:route(false, undefined, {inspect, Own, #{}})),
+    ?assertEqual({error, no_facet}, erx_inspector:route(false, undefined, {entries, [processes]})),
+    Facet = spawn_link(fun() -> receive {'$gen_call', From, Query} -> gen:reply(From, {asked, Query}) end end),
+    Ended = monitor(process, Facet),
+    ?assertEqual({asked, {inspect, Own, #{offset => 3}}},
+                 erx_inspector:route(false, Facet, {inspect, Own, #{offset => 3}})),
+    receive {'DOWN', Ended, process, Facet, _} -> ok end,
+    ?assertEqual({error, no_facet}, erx_inspector:route(false, Facet, {entries, [processes]})).
+
+%% A facet that has ended, as a revoked one does, admits no query: the
+%% domain holds no facet from then on (design-live.md, "The /proc tree").
+%% One that ends while it holds a query, and so never answers it, fails
+%% that query alone.
+an_ended_facet_is_no_facet_test() ->
+    Dead = spawn(fun() -> ok end),
+    Gone = monitor(process, Dead),
+    receive {'DOWN', Gone, process, Dead, _} -> ok end,
+    ?assertEqual({error, no_facet}, erx_inspector:route(false, Dead, {inspect, [], #{}})),
+    Ending = spawn(fun() -> receive {'$gen_call', _From, _Query} -> exit(revoked) end end),
+    ?assertEqual({error, failed}, erx_inspector:route(false, Ending, {inspect, [], #{}})).
 
 %% The system domain's record carries this runtime's figures, its run queue
 %% among them, and the domain service's and the kernel's, which have no
 %% collector here, as unsupported; a scope without the domain gets nothing.
 domain_record_test() ->
-    {ok, #{kind := domain, attrs := Attrs, children := Children}} = erx_inspector:inspect([domains, ?SYSTEM], all),
+    {ok, #{kind := domain, attrs := Attrs, children := Children}} = erx_inspector:inspect([domains, ?SYSTEM], all, #{}),
     ?assertMatch({runtime, {ok, N}} when is_integer(N), maps:get(run_queue, Attrs)),
     ?assertMatch({runtime, {ok, P}} when P > 0, maps:get(processes, Attrs)),
     ?assertEqual({service, unsupported}, maps:get(name, Attrs)),
     ?assertEqual({kernel, unsupported}, maps:get(threads, Attrs)),
     ?assert(lists:member(budget, Children)),
-    ?assertEqual({error, scope}, erx_inspector:inspect([domains, ?SYSTEM], [5])),
-    ?assertEqual({error, scope}, erx_inspector:inspect([domains, 9], all)).
+    ?assertEqual({error, scope}, erx_inspector:inspect([domains, ?SYSTEM], [5], #{})),
+    ?assertEqual({error, scope}, erx_inspector:inspect([domains, 9], all, #{})).
 
 domain_record_core_test() ->
     Figures = #{atoms => 10, ets_tables => 2, modules => 30, processes => 40, run_queue => 3},
@@ -412,8 +426,8 @@ log_refusals_are_named_test() ->
 kernel_paths_need_scope_all_test() ->
     ?assertEqual({ok, #{schema => 1, path => [kernel], kind => listing, id => kernel, attrs => #{},
                         children => [log]}},
-                 erx_inspector:inspect([kernel], all)),
-    ?assertEqual({error, scope}, erx_inspector:inspect([kernel], [?SYSTEM])),
+                 erx_inspector:inspect([kernel], all, #{})),
+    ?assertEqual({error, scope}, erx_inspector:inspect([kernel], [?SYSTEM], #{})),
     ?assertEqual({error, scope}, erx_inspector:inspect([kernel, log], [?SYSTEM], #{offset => 0})),
     %% The offset is the caller's: one that is no sequence number is refused before any read.
     ?assertEqual({error, invalid}, erx_inspector:inspect([kernel, log], all, #{offset => -1})),

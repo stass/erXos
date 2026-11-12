@@ -90,8 +90,8 @@ module Erx
     # Runs the visit against the guest whose host link socket is socket; root is the tree
     # whose tools/erx serves its build/web, build the boot image's build identifier in
     # hexadecimal or nil for any, web_hash the web protocol's (HostlinkGuest.web_hash),
-    # foreign the id of a domain whose records root's session's runtime does not collect
-    # (erx_inspector:collects_domain/2), at scope `all` as at any other. The front end's
+    # foreign the id of a domain that does not exist, whose path answers `scope` at root's
+    # scope `all` as a path outside a scope does. The front end's
     # output goes to web-front-end.log beside the socket. Returns the machine's update's
     # first bytes in hexadecimal.
     def call(socket, root:, build:, web_hash:, foreign:)

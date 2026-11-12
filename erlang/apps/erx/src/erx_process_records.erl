@@ -101,8 +101,9 @@ the three numbers of a pid's text `<D.N.S>` (docs/design-domains.md,
   domain's id: a peer domain's pid, or a pid of an earlier run of this
   node, which is not the process of this runtime with the same numbers.
 
-This runtime is special because the system domain runs at creation 0
-until its node is the system domain's own id (TODO.md, inspector). The
+This runtime is special because its creation need not be its domain's
+id, as on a host runtime that stands for the system domain (TODO.md,
+inspector). The
 numbers are read from the pid's external format, NEW_PID_EXT, whose last
 12 bytes they are, so they do not depend on how this runtime prints a pid.
 """.

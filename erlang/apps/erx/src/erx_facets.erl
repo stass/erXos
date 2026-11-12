@@ -3,55 +3,41 @@
 
 -module(erx_facets).
 -moduledoc """
-The facets the code of a domain acts with, by name, each the value its
-holder hands the service behind it (docs/design-live.md, "Scopes";
-docs/design-shell.md, "Interfaces"): the command shell's session facets,
-which its commands get in their context, and an `inspect` scope, of
-which erx_inspector reads only `all`, the system domain's, to run a query
-in a local worker rather than through the inspect facet. domain/0 reads which domain this is and what it was
-handed; facets/2 is the pure decision.
+What the code of a domain acts with (docs/design-live.md, "The inspect
+service"; docs/design-shell.md, "Interfaces"): domain/0 is the facets the
+domain was handed, by name, which the command shell gives its commands in
+their context, and system/0 whether this runtime is the system domain's,
+the one runtime whose inspector queries run in a local query worker
+rather than through an inspect facet. No scope is decided here: an
+inspect facet's scope is the one the system domain fixed when it minted
+the facet.
 """.
 
--export([domain/0, facets/2]).
+-export([domain/0, system/0]).
 
 -export_type([facets/0]).
 
--type facets() :: #{inspect := erx_inspector:scope(), atom() => term()}.
+-type facets() :: #{atom() => pid()}.
 
 -doc """
-The facets of the domain this runtime is: facets/2 for the domain its
-boot page names (erx_dist:boot/0), with the facets it was handed
-(erx:caps/0). The system domain is the one with the system domain's id
-and no system connection; a runtime with only one of the two is another
-domain, so a misread boot page never widens a domain to the system
-domain's facets. A runtime that is not erXos's, as on a development
-host, is one trusted runtime and gets the system domain's.
+The facets this domain was handed (erx:caps/0). The system domain is
+handed none.
 """.
 -spec domain() -> facets().
 domain() ->
-    case erlang:system_info(os_type) of
-        {unix, erxos} ->
-            System = erx_kernel_records:system_domain(),
-            case erx_dist:boot() of
-                {System, none} -> facets(system, #{});
-                {Id, _SystemConnection} -> facets({domain, Id}, erx:caps())
-            end;
-        _ ->
-            facets(system, #{})
-    end.
+    erx:caps().
 
 -doc """
-A domain's facets from what it is and what it was handed. The system
-domain is handed none. It holds the inspect facet of scope `all`, and
-no `net`, which it may not hold (docs/design-system.md, property 15), so
-the system shell refuses the network commands with `no_facet`; they run
-in a session. Any other domain holds the facets it was handed, each a
-pid, and the inspect facet of the local scope `[Id]`, its own; a handed facet
-named `inspect` never replaces it, so nothing the domain was handed
-widens its scope.
+Whether this runtime is the system domain's: on erXos, the one whose boot
+page (erx_dist:boot/0) names the system domain's id and no system
+connection, so a runtime with only one of the two, a misread boot page,
+is another domain and never reaches the inspector without a facet. A
+runtime that is not erXos's, as on a development host, is one trusted
+runtime standing for the system domain.
 """.
--spec facets(system | {domain, pos_integer()}, #{atom() => pid()}) -> facets().
-facets(system, _Held) ->
-    #{inspect => all};
-facets({domain, Id}, Held) when is_map(Held) ->
-    Held#{inspect => [Id]}.
+-spec system() -> boolean().
+system() ->
+    case erlang:system_info(os_type) of
+        {unix, erxos} -> erx_dist:boot() =:= {erx_kernel_records:system_domain(), none};
+        _ -> true
+    end.

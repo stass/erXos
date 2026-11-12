@@ -122,7 +122,7 @@ record(#{children := Children} = Record, Build) ->
      notes([Record])].
 
 -doc """
-What erx:i/0 prints, from erx_inspector:overview/1's sections: each under
+What erx:i/0 prints, from erx_inspector:overview/0's sections: each under
 its path, a record as erx:i/1 shows it but without its children, each CPU
 as such a record, and threads and processes as tables of a row each,
 with a line under the header (`by`) naming each column's reporter; a cell

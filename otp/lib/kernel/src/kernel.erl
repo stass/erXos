@@ -275,9 +275,11 @@ init(safe) ->
             shutdown => infinity,
             type => supervisor,
             modules => [erx_ramfs_sup]},
-    %% erXos: the system shell's /proc, the inspector's tree at scope all
-    %% (design-live.md, The /proc tree); every Phase 1 runtime is the system
-    %% domain's.
+    %% erXos: the domain's /proc, the inspector's tree (design-live.md, The
+    %% /proc tree): in every other domain over that domain's inspect facet;
+    %% in the system domain over a local query worker at scope all, standing
+    %% for the system shell's tree, which the console is to start with the
+    %% shell (TODO.md, /proc).
     Proc = #{id => erx_procfs,
              start => {erx_procfs, start_link, []},
              restart => permanent,

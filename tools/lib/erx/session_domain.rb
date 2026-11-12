@@ -67,11 +67,10 @@ module Erx
     # and 7, at boot, so the login's is 8; each later start of a session or of a configured
     # domain takes the next, a refused one too, since admission spends the id.
     FIRST_SESSION = 8
-    # The system domain's id (erx_kernel_records' ?SYSTEM_DOMAIN), whose records root's
-    # session's runtime does not collect, even at the web line's scope `all`: its kernel
-    # records are its own, so a session that collected them would show its own group and
-    # counters as the system domain's (erx_inspector:collects_domain/2).
-    SYSTEM_DOMAIN = 4
+    # A domain id no domain takes in a boot of this cell, which starts far fewer: a path
+    # that names it answers `scope` at every scope, root's `all` among them, as a domain
+    # outside the scope does (docs/design-live.md, "The /proc tree").
+    NEVER_USED_DOMAIN = 4000
     # Typed at the last session's Erlang shell: WebGuest::IDLE_PROCESSES processes that
     # wait for ever.
     IDLE_PROCESSES = "[spawn(timer, sleep, [infinity]) || _ <- lists:seq(1, #{WebGuest::IDLE_PROCESSES})], ok.\r".freeze
@@ -165,14 +164,53 @@ module Erx
     # the session's `ps` counts 0 of it and the system's 1.
     COUNT_SERVICE = "ps | grep -c erx_domain_srv\r"
     # Typed at root's session's command shell: the kernel log's line for the storage domain's
-    # volume, which the session reads through the `log` facet the console hands root's session
-    # in a development build (erx_log_facet), as the system shell reads it (MediumBoot).
+    # volume. dmesg reads /proc/kernel/log, which the session's /proc tree answers through the
+    # session's inspect facet at the facet's scope, `all` for root in a development build, as
+    # the system shell reads it through its own tree (MediumBoot).
     KERNEL_LOG = "dmesg | grep 'erx_lfs: volume mounted'\r"
     KERNEL_LOG_LINE = /\A#[0-9]+ [0-9]+\.[0-9]{6} debug space [0-9]+: erx_lfs: volume mounted\r*\n\z/n
     # `uname -b` at the session's command shell: the boot image's build identifier, which
     # the domain library gives every domain it starts, as the root gives the system domain.
     # A library that never set the identifier would give 0, which is no build's.
     BUILD_ID = /\A(?!0{16})[0-9a-f]{16}\r*\n\z/n
+    # `top -b` at root_1's command shell: one display, whose header reads the machine's
+    # figures and the session domain's through the session's inspect facet.
+    TOP = "top -b\r"
+    TOP_FIRST = /\Arun queue: [0-9]+;  up [0-9]+\+[0-9]{2}:[0-9]{2}:[0-9]{2}    /n
+    TOP_MEMORY = /\AMem \(root pool\): [0-9]+[KMG] Total, [0-9]+[KMG] Free\r*\n\z/n
+    TOP_BUDGET = /\ADomain #{FIRST_SESSION} budget(?: \([^)]+\)| \[[a-z ]+\])?: /n
+    # `cat /proc/status` at root_1's command shell: the machine's record through the
+    # session's /proc tree, its uptime line first.
+    PROC_STATUS = "cat /proc/status\r"
+    PROC_UPTIME = /\Auptime\t[0-9]+\tkernel\r*\n\z/n
+    # erx:i([]) at root_1's Erlang shell: the machine's record through the session's facet.
+    MACHINE = "erx:i([]).\r"
+    MACHINE_UPTIME = /\A +uptime +kernel +[0-9]+\r*\n\z/n
+    # V10 across the session's facet (docs/design-live.md, Invariants): the records of the
+    # system domain's processes <4.N.0> below N = V10_PROCESSES, each a query of its own, as
+    # either domain asks for them (V10_RECORDS). The system domain's Erlang shell notes
+    # erx:exports/1 of every process those records name as a group leader, a link or a
+    # monitor; root's session reads the same records through its facet, at scope `all`; and
+    # the system shell then finds each of those names, of a process still alive, exported
+    # exactly as before, so the answers handed root's domain no name.
+    V10_PROCESSES = 100
+    V10_RECORDS = "V10Rs = [V10R || V10N <- lists:seq(0, #{V10_PROCESSES - 1}), " \
+                  '{ok, V10R} <- [erx_inspector:inspect([processes, {pid, 4, V10N, 0}])]], '
+    V10_BEFORE = 'V10Pid = fun({pid, V10D, V10N, V10S}) -> ' \
+                 'list_to_pid(lists:flatten(io_lib:format("<~b.~b.~b>", [V10D, V10N, V10S]))) end, ' \
+                 "#{V10_RECORDS}" \
+                 'V10Names = lists:usort([V10Pid(V10I) || #{attrs := V10A} <- V10Rs, ' \
+                 'V10K <- [group_leader, links, monitors], {_, {ok, V10V}} <- [maps:get(V10K, V10A, none)], ' \
+                 'V10I <- lists:flatten([V10V]), element(2, V10I) =:= 4]), ' \
+                 'V10Before = [{V10X, erx:exports(V10X)} || V10X <- V10Names, is_process_alive(V10X)], ' \
+                 'io:format("~0p~n", [{v10_names, length(V10Names) > 10, ' \
+                 "[V10M || \#{attrs := \#{monitors := {_, {ok, [_ | _] = V10M}}}} <- V10Rs] =/= []}]).\r"
+    V10_BEFORE_ANSWER = '{v10_names,true,true}'
+    V10_READ = "#{V10_RECORDS}io:format(\"~0p~n\", [{v10_read, length(V10Rs) > 10}]).\r"
+    V10_READ_ANSWER = '{v10_read,true}'
+    V10_AFTER = 'io:format("~0p~n", [{v10_changed, [{V10X, V10E, erx:exports(V10X)} || ' \
+                "{V10X, V10E} <- V10Before, is_process_alive(V10X), erx:exports(V10X) =/= V10E]}]).\r"
+    V10_AFTER_ANSWER = '{v10_changed,[]}'
 
     module_function
 
@@ -234,9 +272,14 @@ module Erx
        { name: 'session-ps', pattern: line('0'), seconds: 60, type: KERNEL_LOG }.freeze,
        { name: 'session-dmesg', pattern: KERNEL_LOG_LINE, seconds: 60, type: "uname -a\r" }.freeze,
        { name: 'session-uname', pattern: MediumBoot::UNAME_A, seconds: 60, type: "uname -b\r" }.freeze,
-       { name: 'session-build', pattern: BUILD_ID, seconds: 60, type: ERL }.freeze,
+       { name: 'session-build', pattern: BUILD_ID, seconds: 60, type: TOP }.freeze,
+       { name: 'session-top', pattern: TOP_FIRST, seconds: 60 }.freeze,
+       { name: 'session-top-memory', pattern: TOP_MEMORY, seconds: 30 }.freeze,
+       { name: 'session-top-budget', pattern: TOP_BUDGET, seconds: 30, type: PROC_STATUS }.freeze,
+       { name: 'session-proc-status', pattern: PROC_UPTIME, seconds: 60, type: ERL }.freeze,
        shell.merge(name: 'root_1-erlang-shell', type: "node().\r").freeze,
-       { name: 'root_1-node', pattern: answer('root_1@erxos'), seconds: 60, type: PROGRAM_REFUSED }.freeze,
+       { name: 'root_1-node', pattern: answer('root_1@erxos'), seconds: 60, type: MACHINE }.freeze,
+       { name: 'root_1-machine', pattern: MACHINE_UPTIME, seconds: 60, type: PROGRAM_REFUSED }.freeze,
        { name: 'program-refused', pattern: answer('{{error,einval},{error,einval}}'), seconds: 60,
          type: PIPES }.freeze,
        { name: 'session-pipes', pattern: answer(PIPES_ANSWER), seconds: 120, type: PIPES_LOST }.freeze,
@@ -267,7 +310,18 @@ module Erx
          type: ESC }.freeze,
        { name: 'killed-relogin-left', pattern: MENU_LEFT, seconds: 30, type: ERL }.freeze,
        shell.merge(name: 'relogin-erlang-shell', type: with_data(READ_ACROSS)).freeze,
-       { name: 'relogin-data', pattern: answer(ACROSS_READ), seconds: 180, type: IDLE_PROCESSES }.freeze,
+       { name: 'relogin-data', pattern: answer(ACROSS_READ), seconds: 180, type: CTRL_G }.freeze,
+       { name: 'v10-menu', pattern: CTRL_G_MENU, seconds: 30, type: 's' }.freeze,
+       { name: 'v10-system', pattern: MENU_LEFT, seconds: 30, type: V10_BEFORE }.freeze,
+       { name: 'v10-before', pattern: answer(V10_BEFORE_ANSWER), seconds: 120, type: CTRL_G }.freeze,
+       { name: 'v10-session-menu', pattern: CTRL_G_MENU, seconds: 30, type: '1' }.freeze,
+       { name: 'v10-session', pattern: MENU_LEFT, seconds: 30, type: V10_READ }.freeze,
+       { name: 'v10-read', pattern: answer(V10_READ_ANSWER), seconds: 120, type: CTRL_G }.freeze,
+       { name: 'v10-after-menu', pattern: CTRL_G_MENU, seconds: 30, type: 's' }.freeze,
+       { name: 'v10-after-system', pattern: MENU_LEFT, seconds: 30, type: V10_AFTER }.freeze,
+       { name: 'v10-unchanged', pattern: answer(V10_AFTER_ANSWER), seconds: 120, type: CTRL_G }.freeze,
+       { name: 'v10-back-menu', pattern: CTRL_G_MENU, seconds: 30, type: '1' }.freeze,
+       { name: 'v10-back', pattern: MENU_LEFT, seconds: 30, type: IDLE_PROCESSES }.freeze,
        { name: 'idle-processes', pattern: answer('ok'), seconds: 60 }.freeze].freeze
     end
 
@@ -338,7 +392,7 @@ module Erx
         { directory: File.join(@root, 'build/qemu', "sd-#{accel}-#{Process.pid}"),
           link: lambda do |socket|
             { machine: HostlinkGuest.machine(socket, build: built.build_id, web_hash: hash),
-              front_end: WebGuest.call(socket, root: @root, build: built.build_id, web_hash: hash, foreign: SYSTEM_DOMAIN) }
+              front_end: WebGuest.call(socket, root: @root, build: built.build_id, web_hash: hash, foreign: NEVER_USED_DOMAIN) }
           end,
           link_seconds: (HostlinkGuest::WEB_SECONDS * 2) + WebGuest::SECONDS }
       end

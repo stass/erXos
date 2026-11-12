@@ -27,7 +27,7 @@ source(Target) ->
 %%% The inspector: erx:i/0,1.
 
 -doc """
-Prints the machine (erx_inspector:overview/1): the machine's record, the
+Prints the machine (erx_inspector:overview/0): the machine's record, the
 CPUs, the system domain's group, budget and threads, and the processes,
 each value with its reporter, at most 80 columns wide.
 """.
@@ -44,7 +44,8 @@ reporter; a pid alone is its process's path. A pid in Path becomes its
 data"), so the question holds no name. `{error, scope}` for a path that
 names nothing the caller may see, `{error, unsupported}` for one the
 inspector cannot collect, `{error, failed}` when the query failed,
-`{error, no_facet}` in a domain that holds no inspect facet, and `{error,
+`{error, no_facet}` in a domain that holds no inspect facet or whose
+facet has ended, and `{error,
 badarg}` for a request the facet refuses (erx_inspector:inspect/1).
 """.
 -spec i([erx_schema:segment() | pid()] | pid()) -> ok | {error, scope | unsupported | invalid | failed | no_facet | badarg}.

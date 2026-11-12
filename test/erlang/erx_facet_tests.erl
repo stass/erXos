@@ -111,12 +111,12 @@ forwards_its_grantees_messages_test() ->
     ?assertEqual(none, receive {'$erx_facet_message', _, _, M3} -> M3 after 300 -> none end),
     ?assertMatch(#{grantee := ?GRANTEE, dropped := 3, refused := 0, outstanding := 2}, erx_facet:info(Facet)).
 
-%% Past the grant's limit in flight a request is refused with {error, badarg}, and a
+%% Past the grant's limit in flight a request is refused with {error, busy}, and a
 %% reply that names no outstanding forward reaches no one.
 limits_its_forwards_test() ->
     Facet = facet(echo(), domain_pid(), #{in_flight => 1}),
     ?assertEqual(none, call(Facet, hold)),
-    ?assertEqual({error, badarg}, call(Facet, ping)),
+    ?assertEqual({error, busy}, call(Facet, ping)),
     Facet ! {[alias | make_ref()], forged},
     ?assertMatch(#{dropped := 1, refused := 1, outstanding := 1}, erx_facet:info(Facet)).
 

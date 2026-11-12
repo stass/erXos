@@ -35,8 +35,8 @@ every decision is tested with made-up answers.
   end and ends with a `[partial]` line.
 """.
 
--export([root/0, name/1, child/2, walk/3, listing/3, lists_entries/1, status/2, lines/1, marker/2,
-         cut/1]).
+-export([root/0, name/1, child/2, walk/3, named/1, listing/3, lists_entries/1, status/2, lines/1,
+         marker/2, cut/1]).
 -export_type([node_/0, entry/0]).
 
 -type path() :: [erx_schema:segment()].
@@ -87,11 +87,11 @@ resolved(_Depth, _Answer) -> error.
 
 -doc """
 What the name Name in the directory Dir names. Lookup answers the
-inspector for a path: `{exists, Path}` whether Path names something
-(`{error, scope}` when it does not), `{listing, Path}` the record of the
-listing at Path. A directory below exists unless the inspector answers
-it `{error, scope}`, as it answers a path that names nothing. `status` is
-always there, and a marker only where the listing is partial or unknown.
+inspector for a path: `{exists, Path}` whether Path names something,
+`{listing, Path}` the record of the listing at Path. A directory below
+exists unless the inspector answers it as a path that names nothing
+(named/1). `status` is always there, and a marker only where the listing
+is partial or unknown.
 """.
 -spec walk(path(), binary(), fun((term()) -> erx_inspector:answer())) ->
           {ok, node_()} | {error, enoent}.
@@ -108,10 +108,22 @@ walk(Dir, Name, Lookup) ->
     end.
 
 exists(Path, Lookup) ->
-    case Lookup({exists, Path}) of
-        {error, scope} -> {error, enoent};
-        _Answer -> {ok, path_node(Path)}
+    case named(Lookup({exists, Path})) of
+        true -> {ok, path_node(Path)};
+        false -> {error, enoent}
     end.
+
+-doc """
+Whether the inspector's answer for a path says the path names something
+the tree shows: every answer but `{error, scope}`, the answer of a path
+outside the facet's scope or that names nothing, and `{error,
+no_facet}`, a domain that holds no inspect facet or whose facet has
+ended, whose whole tree is `enoent`. Any other failure names a path whose `status` says why.
+""".
+-spec named(erx_inspector:answer()) -> boolean().
+named({error, scope}) -> false;
+named({error, no_facet}) -> false;
+named(_Answer) -> true.
 
 %% The node of a path below the root: the file of its lines for a path the
 %% schema marks append-only, a directory for every other.
@@ -132,24 +144,24 @@ marker_present(_Marker, _Dir, _Children) -> {error, enoent}.
 
 -doc """
 The entries of the directory at Path, in order: `status`, then the paths
-below it. A path whose children the schema names lists those that Scope
-reaches (erx_inspector:declared_reachable/3); a listing lists the ids of the
-inspector's answer for it, ListingAnswer, then `.partial` when the
-inspector gave only part of them, or holds only `.unknown` when it gave
-none.
+below it. A path whose children the schema names lists each that a walk
+finds, asked of Lookup as walk/3 asks it, so the inspector's answers alone
+decide which literal children a tree shows and a listing never names one
+a walk refuses; a listing lists the ids of the inspector's answer for it,
+ListingAnswer, then `.partial` when the inspector gave only part of them,
+or holds only `.unknown` when it gave none.
 """.
--spec listing(path(), erx_inspector:answer() | none, erx_inspector:scope()) -> [entry()].
-listing(Path, ListingAnswer, Scope) ->
-    [{<<"status">>, {status, Path}} | below(Path, ListingAnswer, Scope)].
+-spec listing(path(), erx_inspector:answer() | none, fun((term()) -> erx_inspector:answer())) -> [entry()].
+listing(Path, ListingAnswer, Lookup) ->
+    [{<<"status">>, {status, Path}} | below(Path, ListingAnswer, Lookup)].
 
-below(Path, ListingAnswer, Scope) ->
+below(Path, ListingAnswer, Lookup) ->
     case lists_entries(Path) of
         true ->
             listed(Path, children(ListingAnswer));
         false ->
             {literals, Literals} = declaration_children(Path),
-            [{name(Literal), path_node(Path ++ [Literal])}
-             || Literal <- Literals, reachable(Path ++ [Literal], Scope)]
+            [{name(Literal), Node} || Literal <- Literals, {ok, Node} <- [exists(Path ++ [Literal], Lookup)]]
     end.
 
 listed(Path, {ok, Ids}) -> ids(Path, Ids);
@@ -157,9 +169,6 @@ listed(Path, {partial, Ids}) -> ids(Path, Ids) ++ [{<<".partial">>, {partial, Pa
 listed(Path, {unknown, _}) -> [{<<".unknown">>, {unknown, Path}}].
 
 ids(Path, Ids) -> [{name(Id), {dir, Path ++ [Id]}} || Id <- Ids].
-
-reachable(Path, Scope) ->
-    erx_inspector:declared_reachable(Path, erx_schema:resolve(Path), Scope) =/= error.
 
 -doc """
 Whether the directory at Path lists the inspector's entries: a path whose

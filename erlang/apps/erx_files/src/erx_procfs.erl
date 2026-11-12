@@ -4,16 +4,18 @@
 -module(erx_procfs).
 -moduledoc """
 `/proc`, the inspector's paths as a read-only file tree (docs/design-live.md,
-"The /proc tree"): the `erx_fs` callback module, one grant per inspect
-scope. The tree decides nothing itself: a walk, an open and a listing each
-ask erx_inspector for the path through the grant's scope, and
-erx_procfs_core turns the answers into nodes, entries and text. A path the
-inspector answers `{error, scope}` reads as `enoent`, so the tree shows
-nothing that erx:i/1 with the same scope does not.
+"The /proc tree"): the `erx_fs` callback module. The tree holds no scope
+and decides nothing itself: a walk, an open and a listing each ask
+erx_inspector:inspect/2 for the path, which outside the system domain
+goes through the domain's inspect facet, and erx_procfs_core turns the
+answers into nodes, entries and text. A path the inspector answers
+`{error, scope}`, and every path of a domain that holds no inspect facet
+or whose facet has ended (`{error, no_facet}`), reads as `enoent`, so the tree shows nothing that
+erx:i/1 in the same domain does not.
 
-* **Handle.** init/1 takes the scope and answers `Fs`, the scope and a
-  counter of the grant's open snapshots, shared by the grant and its file
-  processes.
+* **Handle.** init/1 takes the inspector to ask, erx_inspector:inspect/2
+  or a host test's stand-in, and answers `Fs`, it and a counter of the
+  grant's open snapshots, shared by the grant and its file processes.
 * **Snapshots.** An open runs the inspector's query once: a `status` file
   holds its rendered record and a directory its entries, and reads see that
   snapshot until the clunk. The file of an append-only path, such as
@@ -24,9 +26,10 @@ nothing that erx:i/1 with the same scope does not.
 * **Attributes.** Every node is read-only, owned by uid 0, size 0 as a
   Linux `/proc` file is, so a reader reads to the end of the file.
 
-In Phase 1 every runtime is the system domain's, and the kernel's safe
-supervisor starts one grant of scope `all` with start_link/0, mounted at
-`/proc` (docs/design-live.md: the system shell's tree).
+The kernel's safe supervisor starts one grant in every runtime with
+start_link/0, mounted at `/proc`: in the system domain its queries run
+in a local query worker at scope `all`, and in every other domain they
+go through that domain's inspect facet.
 """.
 
 -behaviour(erx_fs).
@@ -59,12 +62,12 @@ supervisor starts one grant of scope `all` with start_link/0, mounted at
                         bor ?ERX_P9_GETATTR_MASK_BLOCKS)).
 
 -doc """
-Starts the system shell's tree, a grant of scope `all`, and mounts it at
-`/proc`, after removing any entry an earlier instance left there.
+Starts this domain's tree, a grant over erx_inspector:inspect/2, and mounts
+it at `/proc`, after removing any entry an earlier instance left there.
 """.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    {ok, Grant} = erx_fs:start_link(?MODULE, all, ro),
+    {ok, Grant} = erx_fs:start_link(?MODULE, fun erx_inspector:inspect/2, ro),
     _ = erx_ns:unmount(?POINT),
     case erx_ns:mount(Grant, ?POINT, [{tree, ?TREE}, ro]) of
         ok ->
@@ -81,8 +84,8 @@ start_link() ->
 %% ---------------------------------------------------------------------------
 
 -doc false.
-init(Scope) when Scope =:= all; is_list(Scope) ->
-    {ok, #{scope => Scope, snapshots => counters:new(1, [atomics])}}.
+init(Inspect) when is_function(Inspect, 2) ->
+    {ok, #{inspect => Inspect, snapshots => counters:new(1, [atomics])}}.
 
 -doc false.
 root(_Fs) ->
@@ -90,8 +93,8 @@ root(_Fs) ->
     {ok, ?TREE, Root, qid(Root)}.
 
 -doc false.
-walk({dir, Dir}, Name, #{scope := Scope}) ->
-    case erx_procfs_core:walk(Dir, Name, fun(Question) -> ask(Question, Scope) end) of
+walk({dir, Dir}, Name, #{inspect := Inspect}) ->
+    case erx_procfs_core:walk(Dir, Name, fun(Question) -> ask(Question, Inspect) end) of
         {ok, Node} -> {ok, Node, qid(Node)};
         {error, _} = Error -> Error
     end;
@@ -112,9 +115,9 @@ getattr(Node, _Fs) ->
            gen => 0, data_version => 0}}.
 
 -doc false.
-open(Node, Flags, #{scope := Scope, snapshots := Snapshots}) ->
+open(Node, Flags, #{inspect := Inspect, snapshots := Snapshots}) ->
     case Flags band ?ERX_P9_O_ACCMODE of
-        0 -> counted(Snapshots, fun() -> snapshot(Node, Scope) end);
+        0 -> counted(Snapshots, fun() -> snapshot(Node, Inspect) end);
         _ -> {error, erofs}
     end.
 
@@ -145,33 +148,36 @@ taken(TakeSnapshot) ->
         _:_ -> {error, eio}
     end.
 
-snapshot({dir, Path}, Scope) ->
-    Entries = erx_procfs_core:listing(Path, listing_answer(Path, Scope), Scope),
+snapshot({dir, Path}, Inspect) ->
+    Lookup = fun(Question) -> ask(Question, Inspect) end,
+    Entries = erx_procfs_core:listing(Path, listing_answer(Path, Inspect), Lookup),
     {ok, {entries, [{qid(Child), Index, dirent_type(Child), Name}
                     || {Index, {Name, Child}} <- lists:enumerate(1, Entries)]}};
-snapshot({status, Path}, Scope) ->
-    case erx_inspector:inspect(Path, Scope) of
-        {error, scope} -> {error, enoent};
-        Answer -> {ok, {bytes, erx_procfs_core:status(Answer, build(Scope))}}
+snapshot({status, Path}, Inspect) ->
+    Answer = Inspect(Path, #{}),
+    case erx_procfs_core:named(Answer) of
+        true -> {ok, {bytes, erx_procfs_core:status(Answer, build(Inspect))}};
+        false -> {error, enoent}
     end;
-snapshot({lines, Path}, Scope) ->
-    case pages(Path, 0, Scope, ?MAX_PAGES, 0) of
-        [{error, scope}] -> {error, enoent};
-        Answers -> {ok, {bytes, erx_procfs_core:lines(Answers)}}
+snapshot({lines, Path}, Inspect) ->
+    [First | _] = Answers = pages(Path, 0, Inspect, ?MAX_PAGES, 0),
+    case erx_procfs_core:named(First) of
+        true -> {ok, {bytes, erx_procfs_core:lines(Answers)}};
+        false -> {error, enoent}
     end;
-snapshot({Marker, Path}, Scope) ->
-    {ok, {bytes, erx_procfs_core:marker(Marker, ask({listing, Path}, Scope))}}.
+snapshot({Marker, Path}, Inspect) ->
+    {ok, {bytes, erx_procfs_core:marker(Marker, ask({listing, Path}, Inspect))}}.
 
 %% The inspector's answers for an append-only path's pages from Offset on:
 %% the next page is asked from where a partial one stopped, up to Left
 %% pages, and only while the entries so far, Bytes of values, fit the
 %% file, since each entry's line is at least its value's bytes.
-pages(Path, Offset, Scope, Left, Bytes) ->
-    case erx_inspector:inspect(Path, Scope, #{offset => Offset}) of
+pages(Path, Offset, Inspect, Left, Bytes) ->
+    case Inspect(Path, #{offset => Offset}) of
         {ok, #{entries := {partial, Next, Entries}}} = Answer when Left > 1 ->
             Held = Bytes + lists:sum([byte_size(Value) || {_Sequence, Value} <- Entries]),
             case Held < ?MAX_FILE of
-                true -> [Answer | pages(Path, Next, Scope, Left - 1, Held)];
+                true -> [Answer | pages(Path, Next, Inspect, Left - 1, Held)];
                 false -> [Answer]
             end;
         Answer ->
@@ -180,9 +186,9 @@ pages(Path, Offset, Scope, Left, Bytes) ->
 
 %% The inspector's answer for a directory's listing, asked only of a
 %% directory that lists the inspector's entries.
-listing_answer(Path, Scope) ->
+listing_answer(Path, Inspect) ->
     case erx_procfs_core:lists_entries(Path) of
-        true -> ask({listing, Path}, Scope);
+        true -> ask({listing, Path}, Inspect);
         false -> none
     end.
 
@@ -220,27 +226,17 @@ read_mode() -> immediate.
 %% The inspector's answers
 %% ---------------------------------------------------------------------------
 
-%% Whether a path names something: a listing, and an append-only path,
-%% exists wherever the scope reaches it, so neither is collected for a walk;
-%% any other path is asked.
-ask({exists, Path}, Scope) ->
-    case erx_schema:resolve(Path) of
-        {ok, #{kind := Kind, append_only := AppendOnly} = Declaration}
-          when Kind =:= listing; AppendOnly =:= true ->
-            case erx_inspector:declared_reachable(Path, {ok, Declaration}, Scope) of
-                {ok, _Owner} -> {ok, listing};
-                error -> {error, scope}
-            end;
-        _ ->
-            erx_inspector:inspect(Path, Scope)
-    end;
-ask({listing, Path}, Scope) ->
-    erx_inspector:inspect(Path, Scope).
+%% The inspector's answer for a path, whether a walk asks if it names
+%% something or a directory asks for its listing: the tree keeps no scope
+%% and decides nothing itself, so both are the path's record as the
+%% domain's inspect facet answers it.
+ask({Question, Path}, Inspect) when Question =:= exists; Question =:= listing ->
+    Inspect(Path, #{}).
 
 %% Which build's projection a status file shows: development only when
 %% the kernel reports the machine as a development build, as erx:i/1 does.
-build(Scope) ->
-    case erx_inspector:inspect([], Scope) of
+build(Inspect) ->
+    case Inspect([], #{}) of
         {ok, #{attrs := #{development := {kernel, {ok, true}}}}} -> development;
         _ -> release
     end.

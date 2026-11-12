@@ -147,15 +147,15 @@ system() ->
       guarantee => {kernel, {ok, 256}},
       cap => {kernel, unsupported}}.
 
-%% Without figures, as for a session with no inspect facet, every value of
-%% the header is `-`.
+%% Without figures every value of the header is `-`, and each line says
+%% that nobody reported its figures.
 display_test() ->
     Rows = [row(3, #{state => <<"R">>, time => 61000000, pcpu => 12.5}), row(12, #{rss => 20000}),
             row(5, #{state => missing, rss => missing, comm => missing}), row(7, #{state => <<"T">>})],
-    ?assertEqual(<<"run queue: -;  up -    01:02:03\n",
+    ?assertEqual(<<"run queue [not reported]: -;  up [not reported] -    01:02:03\n",
                    "4 processes:   1 running, 1 sleeping, 1 stopped\n",
-                   "Mem: - Total, - Free\n",
-                   "Domain budget: - Used, - Guarantee, - Cap\n",
+                   "Mem [not reported]: - Total, - Free\n",
+                   "Domain budget [not reported]: - Used, - Guarantee, - Cap\n",
                    "\n",
                    "    PID    RES STATE    TIME    WCPU COMMAND\n",
                    "<0.3.0>    12K RUN      1:01  12.50% p3\n",
@@ -166,20 +166,35 @@ display_test() ->
 
 %% The header shows each figure the inspector answers ok in FreeBSD's
 %% format, a partial one with its reporter named after it where the line
-%% has numbers of other reporters or statuses, and `-` for every other
-%% status, so a partial count never reads as exact; the budget line names
-%% its domain.
+%% has numbers of other reporters or statuses, and `-` with its status for
+%% every other status, so a partial count never reads as exact; the budget
+%% line names its domain.
 display_system_test() ->
     [First, _States, Mem, Budget, <<>> | _] = lines(display([row(1, #{})], system(), layout(0, infinity))),
     ?assertEqual(<<"run queue: 3;  up 2+03:04:05    01:02:03">>, First),
     ?assertEqual(<<"Mem: 2048M Total, 4K Free (root pool)">>, Mem),
-    ?assertEqual(<<"Domain 4 budget: 120K Used (root pool), 1024K Guarantee, - Cap">>, Budget),
+    ?assertEqual(<<"Domain 4 budget: 120K Used (root pool), 1024K Guarantee, - Cap [unsupported]">>, Budget),
     Other = (system())#{run_queue := {runtime, unknown}, uptime := {kernel, {timeout, 500}},
                         memory_free := {kernel, unsupported}, used := {{stopgap, liberx_pool}, {error, gone}}},
     [Missing, _, NoMem, NoBudget | _] = lines(display([], Other, layout(0, infinity))),
-    ?assertEqual(<<"run queue: -;  up -    01:02:03">>, Missing),
-    ?assertEqual(<<"Mem: 2048M Total, - Free">>, NoMem),
-    ?assertEqual(<<"Domain 4 budget: - Used, 1024K Guarantee, - Cap">>, NoBudget).
+    ?assertEqual(<<"run queue [unknown]: -;  up [timeout 500] -    01:02:03">>, Missing),
+    ?assertEqual(<<"Mem: 2048M Total, - Free [unsupported]">>, NoMem),
+    ?assertEqual(<<"Domain 4 budget: - Used [error], 1024K Guarantee, - Cap [unsupported]">>, NoBudget).
+
+%% A figure whose path the inspector refused says the refusal, once in the
+%% line's label when every figure of the line shares it.
+display_refusals_test() ->
+    Refused = fun(Reason) -> {missing, {error, Reason}} end,
+    System = (system())#{memory_total := Refused(busy), memory_free := Refused(busy),
+                         used := Refused(scope), guarantee := Refused(scope), cap := Refused(scope),
+                         run_queue := {missing, not_reported}, uptime := Refused(no_facet)},
+    [First, _, Mem, Budget | _] = lines(display([], System, layout(0, infinity))),
+    ?assertEqual(<<"run queue [not reported]: -;  up [no inspect facet] -    01:02:03">>, First),
+    ?assertEqual(<<"Mem [inspector busy]: - Total, - Free">>, Mem),
+    ?assertEqual(<<"Domain 4 budget [not in scope]: - Used, - Guarantee, - Cap">>, Budget),
+    Mixed = System#{memory_free := Refused(failed)},
+    ?assertEqual(<<"Mem: - Total [inspector busy], - Free [failed]">>,
+                 lists:nth(3, lines(display([], Mixed, layout(0, infinity))))).
 
 %% A line whose every number is partial under one reporter names it once,
 %% in its label, and marks no figure; `-` figures do not count.
@@ -189,18 +204,22 @@ display_line_reporter_test() ->
                        guarantee := {kernel, unsupported}},
     [_, _, Mem, Budget | _] = lines(display([], Pool, layout(0, infinity))),
     ?assertEqual(<<"Mem (root pool): 118M Total, 74M Free">>, Mem),
-    ?assertEqual(<<"Domain 4 budget (root pool): 120K Used, - Guarantee, - Cap">>, Budget).
+    ?assertEqual(<<"Domain 4 budget (root pool): 120K Used, - Guarantee [unsupported], - Cap [unsupported]">>, Budget).
 
 %% Each header figure in turn under each status: unknown, unsupported,
-%% timed out and failed print as an absent figure does, and partial names
-%% its reporter exactly once, beside an `ok` number of the same reporter.
+%% timed out and failed print as an absent figure does, `-` with the
+%% status in place of `[not reported]`, and partial names its reporter
+%% exactly once, beside an `ok` number of the same reporter.
 display_every_status_test() ->
     Exact = #{uptime => {kernel, {ok, 0}}, run_queue => {kernel, {ok, 3}}, memory_total => {kernel, {ok, 1024}},
               memory_free => {kernel, {ok, 1024}}, domain => 4, used => {kernel, {ok, 1}},
               guarantee => {kernel, {ok, 1}}, cap => {kernel, {ok, 1}}},
-    Header = fun(System) -> lists:sublist(lines(display([], System, layout(0, infinity))), 4) end,
-    [?assertEqual(Header(maps:remove(Key, Exact)), Header(Exact#{Key := {kernel, Status}}))
-     || Key <- maps:keys(Exact), Key =/= domain, Status <- [unknown, unsupported, {timeout, 500}, {error, gone}]],
+    Header = fun(System) -> iolist_to_binary(lists:join($\n, lists:sublist(lines(display([], System, layout(0, infinity))), 4))) end,
+    [?assertEqual(binary:replace(Header(maps:remove(Key, Exact)), <<"[not reported]">>, Said),
+                  Header(Exact#{Key := {kernel, Status}}))
+     || Key <- maps:keys(Exact), Key =/= domain,
+        {Status, Said} <- [{unknown, <<"[unknown]">>}, {unsupported, <<"[unsupported]">>},
+                           {{timeout, 500}, <<"[timeout 500]">>}, {{error, gone}, <<"[error]">>}]],
     [?assertEqual(1, length(binary:matches(iolist_to_binary(Header(Exact#{Key := {kernel, {partial, 2}}})),
                                            <<"(kernel)">>)))
      || Key <- maps:keys(Exact), Key =/= domain].
@@ -273,14 +292,39 @@ top_batch_test() ->
     {Status, Out, Err} = run_line(<<"top -b">>, #{}),
     ?assertEqual({<<>>, <<>>}, {Status, Err}),
     [First, States, Mem, Budget, <<>>, Header | Rows] = lines(Out),
-    ?assertMatch({match, _}, re:run(First, <<"^run queue: -;  up -    \\d\\d:\\d\\d:\\d\\d$">>)),
-    ?assertEqual({<<"Mem: - Total, - Free">>, <<"Domain budget: - Used, - Guarantee, - Cap">>}, {Mem, Budget}),
+    ?assertMatch({match, _}, re:run(First, <<"^run queue \\[no inspect facet\\]: -;  up \\[no inspect facet\\] -    "
+                                              "\\d\\d:\\d\\d:\\d\\d$">>)),
+    ?assertEqual({<<"Mem [no inspect facet]: - Total, - Free">>,
+                  <<"Domain budget [no inspect facet]: - Used, - Guarantee, - Cap">>}, {Mem, Budget}),
     ?assertMatch({match, _}, re:run(States, <<"^\\d+ processes: +\\d+ ">>)),
     ?assertMatch({match, _}, re:run(Header, <<"^ +PID    RES STATE    TIME    WCPU COMMAND$">>)),
     ?assertEqual(18, length(Rows)),
     ?assertEqual(nomatch, binary:match(Out, <<27>>)),
     {<<>>, Two, <<>>} = run_line(<<"top -b -d 2 -s 0.01 1">>, #{}),
     ?assertMatch([_, _, _, _, <<>>, _, _, <<>>, _, _, _, _, <<>>, _, _], lines(Two)).
+
+%% The header asks the session's facet for the machine's record, top's own
+%% process's, and its domain's and that domain's budget, and says why each
+%% figure it did not get is missing: here the budget's path is out of the
+%% facet's scope and the domain's record holds no run queue.
+top_header_reads_the_facet_test() ->
+    Answers = fun([]) -> {ok, #{attrs => #{uptime => {kernel, {ok, 61000000000}},
+                                           memory_total => {kernel, {ok, 2048 * 1048576}},
+                                           memory_free => {{stopgap, liberx_pool}, {partial, 1048576}}}}};
+                 ([processes, _Self]) -> {ok, #{attrs => #{domain => {kernel, {ok, 8}}}}};
+                 ([domains, 8]) -> {ok, #{attrs => #{}}};
+                 ([domains, 8, budget]) -> {error, scope}
+              end,
+    persistent_term:put(erx_inspector, Answers),
+    try
+        {<<>>, Out, <<>>} = run_line(<<"top -b">>, #{}),
+        [First, _States, Mem, Budget | _] = lines(Out),
+        ?assertMatch({match, _}, re:run(First, <<"^run queue \\[not reported\\]: -;  up 0\\+00:01:01    ">>)),
+        ?assertEqual(<<"Mem: 2048M Total, 1024K Free (root pool)">>, Mem),
+        ?assertEqual(<<"Domain 8 budget [not in scope]: - Used, - Guarantee, - Cap">>, Budget)
+    after
+        persistent_term:erase(erx_inspector)
+    end.
 
 %% At a terminal each display starts with home and clear and fills the
 %% terminal's height, less the cursor's line, each line within its width.

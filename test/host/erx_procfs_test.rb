@@ -28,6 +28,9 @@ class ErxProcfsTest < Minitest::Test
     erlang/apps/erx/src/erx_object_info.erl
     erlang/apps/erx/src/erx_kernel_records.erl
     erlang/apps/erx/src/erx_process_records.erl
+    erlang/apps/erx/src/erx.erl
+    erlang/apps/erx/src/erx_facets.erl
+    erlang/apps/erx/src/erx_inspect_worker.erl
     erlang/apps/erx/src/erx_inspector.erl
     erlang/apps/erx_shell/src/erx_render.erl
     erlang/apps/erx_files/src/erx_procfs_core.erl
@@ -57,8 +60,14 @@ class ErxProcfsTest < Minitest::Test
               to: "status({error, unsupported}, _Build) ->\n    <<>>;",
               caught_by: 'an_answer_without_a_record_says_why_test'),
     Fault.new(name: 'a path outside the scope walked into', file: CORE,
-              from: '{error, scope} -> {error, enoent};', to: '{error, scope} -> {ok, {dir, Path}};',
+              from: 'named({error, scope}) -> false;', to: 'named({error, scope}) -> true;',
               caught_by: 'walk_reads_scope_as_no_entry_test'),
+    Fault.new(name: 'a domain without the facet shown a tree', file: CORE,
+              from: 'named({error, no_facet}) -> false;', to: 'named({error, no_facet}) -> true;',
+              caught_by: 'a_domain_without_the_facet_has_an_empty_tree_test'),
+    Fault.new(name: 'a literal child listed without asking the inspector', file: CORE,
+              from: '{ok, Node} <- [exists(Path ++ [Literal], Lookup)]]', to: 'Node <- [path_node(Path ++ [Literal])], Lookup =/= none]',
+              caught_by: 'root_lists_what_the_scope_reaches_test'),
     Fault.new(name: 'a partial listing shown whole', file: CORE,
               from: "listed(Path, {partial, Ids}) -> ids(Path, Ids) ++ [{<<\".partial\">>, {partial, Path}}];",
               to: 'listed(Path, {partial, Ids}) -> ids(Path, Ids);',
@@ -98,8 +107,10 @@ class ErxProcfsTest < Minitest::Test
       assert_equal 1, original.scan(fault.from).size, "#{fault.name}: passage not found once"
       output, status = eunit({ fault.file => original.sub(fault.from) { fault.to } })
       refute status.success?, "#{fault.name}: the tests passed\n#{output}"
-      # EUnit's verbose line for one test: its name, then its verdict on the same line.
-      assert_match(/#{Regexp.escape(fault.caught_by)}[^\n]*\*(?:failed|timed out)\*/, output, fault.name)
+      # EUnit's verbose report of one test: its name, then its verdict before the next
+      # test's name; a process's error report may come between them.
+      assert_match(/#{Regexp.escape(fault.caught_by)}\.\.\.(?:(?!erx_procfs_tests: ).)*?\*(?:failed|timed out)\*/m,
+                   output, fault.name)
     end
   end
 

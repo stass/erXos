@@ -176,7 +176,7 @@ facets_are_read_at_each_command_test() ->
     State = runner_state(fun() -> persistent_term:get(Key) end, null),
     try
         ?assertEqual(<<"no_facet">>, run_status([<<"needy">>], State)),
-        persistent_term:put(Key, #{inspect => [7]}),
+        persistent_term:put(Key, #{inspect => self()}),
         ?assertNotEqual(<<"no_facet">>, run_status([<<"needy">>], State))
     after
         persistent_term:erase(Key)
@@ -271,7 +271,7 @@ session_commands_without_facets_test() ->
     {Table, []} = erx_shell_namespace:build(
                     [{Module, Module:module_info(attributes), Module:module_info(exports)} || Module <- Modules]),
     Session = erx_shell_runner:state(#{cwd => <<"/">>, fds => #{0 => null, 1 => null, 2 => Err},
-                                       table => Table, facets => fun() -> erx_facets:facets({domain, 7}, #{}) end}),
+                                       table => Table, facets => fun() -> #{} end}),
     Needy = [[<<"ifconfig">>], [<<"ping">>], [<<"host">>]],
     ?assertEqual([<<"no_facet">>, <<"no_facet">>, <<"no_facet">>], [run_status(Argv, Session) || Argv <- Needy]),
     ?assertEqual(<<"ifconfig: no_facet\nping: no_facet\nhost: no_facet\n">>, drain(<<>>)),
@@ -279,7 +279,7 @@ session_commands_without_facets_test() ->
     ?assertNotEqual(<<"no_facet">>, run_status([<<"dmesg">>], Session)),
     _ = drain(<<>>).
 
-%% The system domain holds the inspect facet alone and no `net`, which it
+%% The system domain is handed no facet, and no `net`, which it
 %% may not hold (docs/design-system.md, property 15), so the system shell
 %% refuses exactly the commands that need `net`, and no command needs any
 %% other facet it lacks.
@@ -289,7 +289,7 @@ system_facets_refuse_only_the_network_commands_test() ->
     {Table, []} = erx_shell_namespace:build(
                     [{Module, Module:module_info(attributes), Module:module_info(exports)} || Module <- Modules]),
     ?assert(lists:member(erx_cmd_ifconfig, Modules)),
-    System = erx_facets:facets(system, #{}),
+    System = #{},
     Missing = [{Name, Need} || {erlang, #{name := Name, needs := Needs}} <- maps:values(Table),
                                Need <- Needs, not is_map_key(Need, System)],
     ?assertEqual([{<<"host">>, net}, {<<"ifconfig">>, net}, {<<"ping">>, net}], lists:usort(Missing)).

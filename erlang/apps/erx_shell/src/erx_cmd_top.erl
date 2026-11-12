@@ -16,15 +16,21 @@ the domain's, `Domain 4 budget: 812K Used, 1024M Guarantee, 2048M Cap`.
 The run queue is the domain's runtime's count of processes and ports
 waiting for a scheduler, an instant's count, never a load average.
 Every figure is read
-through the inspector with the scope of the session's inspect facet
-(docs/design-live.md, "System values: one tree, many views"). An `ok`
+through the inspector, which outside the system domain asks the session's
+inspect facet (docs/design-live.md, "System values: one tree, many views"). An `ok`
 figure prints its number. A partial one prints its number with its
 reporter named by the inspection schema's label: in the line's label
 when every number of the line is partial under that one reporter, `Mem
 (root pool): 118M Total, 74M Free`, and otherwise after the figure,
-`118M Total (root pool)`. Any other status, and every figure of a
-session without the facet, prints `-`, so the header never shows as
-exact a number nobody reported whole. The table has the columns of
+`118M Total (root pool)`. Any other figure prints `-` and says why in
+brackets: its status as the inspector's printers write it, `[unknown]`,
+`[unsupported]`, `[timeout 500]` or `[error]`; `[not reported]` for a
+figure its record does not hold; or the inspector's refusal of its path,
+`[not in scope]`, `[no inspect facet]`, `[inspector busy]` or
+`[failed]`. When every figure of a line is missing for one reason, the
+line's label says it once, `Domain 8 budget [not in scope]: - Used, -
+Guarantee, - Cap`. So the header never shows as exact a number nobody
+reported whole, nor a bare `-` that hides why. The table has the columns of
 FreeBSD's that the table has values for, `PID RES STATE TIME WCPU
 COMMAND`, ordered by `WCPU`, largest first, the rows without one after
 them in pid order.
@@ -77,14 +83,17 @@ around them.
 -type layout() :: #{max_rows := non_neg_integer() | infinity, width := pos_integer() | infinity,
                     clock := calendar:time()}.
 
-%% The figures of a display's header, each as the inspector answered it,
-%% `{Reporter, Value}`; a figure the session cannot read is absent. The
-%% budget's figures and the domain's run queue are of `domain`, the domain
-%% top runs in, also absent when the inspector did not say which.
+%% The figures of a display's header, each as the inspector answered it.
+%% The budget's figures and the domain's run queue are of `domain`, the
+%% domain top runs in, absent when the inspector did not say which. A
+%% figure absent from the map is one nobody reported.
 -type system() :: #{uptime => figure(), memory_total => figure(), memory_free => figure(),
                     domain => non_neg_integer(), run_queue => figure(),
                     used => figure(), guarantee => figure(), cap => figure()}.
--type figure() :: erx_schema:attr().
+%% A figure: its attribute, `{Reporter, Value}`, or why there is none, the
+%% inspector's refusal of the figure's path or `not_reported` for a record
+%% that does not hold it.
+-type figure() :: erx_schema:attr() | {missing, {error, atom()} | not_reported}.
 
 %% The CPU times of a sample, by pid, and when it was read, in
 %% microseconds of monotonic time.
@@ -121,7 +130,7 @@ run(Args, Ctx) ->
 loop(Ctx, #{screen := Screen, delay_ms := Delay} = Plan, Left, Previous) ->
     Now = erlang:monotonic_time(microsecond),
     Rows = erx_cmd_ps:session_table(),
-    Display = display(shares(Previous, {Now, Rows}), system(Ctx), layout(Ctx, Plan)),
+    Display = display(shares(Previous, {Now, Rows}), system(), layout(Ctx, Plan)),
     erx_cmd:write(Ctx, [lead(Screen, Previous), Display]),
     case remaining(Left) of
         0 ->
@@ -140,34 +149,33 @@ lead(true, _Previous) -> ?CLEAR;
 lead(false, none) -> <<>>;
 lead(false, _Previous) -> <<"\n">>.
 
-%% The header's figures, read through the inspector with the session's
-%% inspect facet's scope: the machine's from its record, and the run queue
-%% and budget of the domain top runs in, which the record of top's own
-%% process names. Without the facet there are none.
-system(Ctx) ->
-    case erx_cmd:facet(Ctx, inspect) of
-        {ok, Scope} -> system_figures(Scope);
-        {error, no_facet} -> #{}
-    end.
-
-system_figures(Scope) ->
-    Machine = maps:with([uptime, memory_total, memory_free], attrs([], Scope)),
-    case attrs([processes, erx_inspector:proc_id(self())], Scope) of
-        #{domain := {_Reporter, {ok, Domain}}} ->
-            Budget = maps:with([used, guarantee, cap], attrs([domains, Domain, budget], Scope)),
-            Runtime = maps:with([run_queue], attrs([domains, Domain], Scope)),
+%% The header's figures, read through the inspector as the domain top runs
+%% in may see them (erx_inspector:inspect/1, through its inspect facet
+%% outside the system domain): the machine's from its record, and the run
+%% queue and budget of the domain top runs in, which the record of top's
+%% own process names. A figure the inspector did not answer is missing
+%% with the reason it gave.
+system() ->
+    Machine = figures([uptime, memory_total, memory_free], erx_inspector:inspect([])),
+    Domains = [run_queue, used, guarantee, cap],
+    case erx_inspector:inspect([processes, erx_inspector:proc_id(self())]) of
+        {ok, #{attrs := #{domain := {_Reporter, {ok, Domain}}}}} ->
+            Budget = figures([used, guarantee, cap], erx_inspector:inspect([domains, Domain, budget])),
+            Runtime = figures([run_queue], erx_inspector:inspect([domains, Domain])),
             maps:merge(Machine, maps:merge(Runtime, Budget#{domain => Domain}));
-        #{} ->
-            Machine
+        {error, _Reason} = Refused ->
+            maps:merge(Machine, figures(Domains, Refused));
+        {ok, _NoDomain} ->
+            maps:merge(Machine, figures(Domains, {ok, #{attrs => #{}}}))
     end.
 
-%% The attributes of a path's record as the scope sees them, none when the
-%% inspector answers no record.
-attrs(Path, Scope) ->
-    case erx_inspector:inspect(Path, Scope) of
-        {ok, #{attrs := Attrs}} -> Attrs;
-        {error, _Reason} -> #{}
-    end.
+%% The figures Keys of the inspector's answer for a path: each attribute of
+%% its record, `not_reported` where the record lacks it, and every one
+%% missing with the inspector's refusal when it answered no record.
+figures(Keys, {ok, #{attrs := Attrs}}) ->
+    maps:from_list([{Key, maps:get(Key, Attrs, {missing, not_reported})} || Key <- Keys]);
+figures(Keys, {error, _Reason} = Refused) ->
+    maps:from_list([{Key, {missing, Refused}} || Key <- Keys]).
 
 layout(Ctx, #{screen := true, topn := TopN}) ->
     screen_layout(Ctx, TopN);
@@ -398,36 +406,59 @@ budget(System) ->
 %% A label and its figures, `Label: N Word, N Word`, each figure given as
 %% `{Key, Format, Word}`. A figure the inspector answered `ok` prints its
 %% number in its format, a partial one its number with its reporter named,
-%% and any other `-`, so no partial, unknown, unsupported or late value is
-%% shown as exact. When every number of the group is partial under one
-%% reporter, the label names it once, `Mem (root pool): 118M Total, 74M
-%% Free`; otherwise each partial figure names its own after it, `118M Total
-%% (root pool)`, so an `ok` number beside it never reads as partial.
+%% and any other `-` with why in brackets, so no partial, unknown,
+%% unsupported or late value is shown as exact and no `-` hides its
+%% reason. When every number of the group is partial under one reporter,
+%% the label names it once, `Mem (root pool): 118M Total, 74M Free`, and
+%% when every figure is missing for one reason, the label says it once,
+%% `Mem [not in scope]: - Total, - Free`; otherwise each figure names its
+%% own after it, `118M Total (root pool)`, so an `ok` number beside a
+%% partial one never reads as partial.
 group(Label, Separator, Figures, System) ->
     Values = [{Format, Word, answer(Key, System)} || {Key, Format, Word} <- Figures],
-    Naming = case lists:usort([{Status, Reporter} || {_, _, {Status, Reporter, _}} <- Values]) of
-                 [{partial, Reporter}] -> {label, Reporter};
+    Naming = case {lists:usort([{Status, Reporter} || {_, _, {Status, Reporter, _}} <- Values]),
+                   lists:usort([Why || {_, _, {missing, Why}} <- Values])} of
+                 {[], [Why]} -> {label_why, Why};
+                 {[{partial, Reporter}], _Whys} -> {label, Reporter};
                  _Mixed -> each
              end,
     Head = case Naming of
                {label, Named} -> [Label, <<" (">>, reporter_label(Named), <<")">>];
+               {label_why, Said} -> [Label, <<" ">>, Said];
                each -> Label
            end,
     iolist_to_binary([Head, Separator,
                       lists:join(<<", ">>, [figure(Value, Naming) || Value <- Values])]).
 
-%% A figure's status, reporter and value as the inspector answered it,
-%% `missing` for any status but `ok` and `partial`.
+%% A figure's status, reporter and value as the inspector answered it, or
+%% `{missing, Why}` for any status but `ok` and `partial`, Why the reason
+%% in brackets: the status as erx_render prints it, or why the figure has
+%% no attribute at all.
 answer(Key, System) ->
-    case System of
-        #{Key := {Reporter, {ok, Value}}} -> {ok, Reporter, Value};
-        #{Key := {Reporter, {partial, Value}}} -> {partial, Reporter, Value};
-        #{} -> missing
+    case maps:get(Key, System, {missing, not_reported}) of
+        {missing, Missing} -> {missing, why(Missing)};
+        {Reporter, {ok, Value}} -> {ok, Reporter, Value};
+        {Reporter, {partial, Value}} -> {partial, Reporter, Value};
+        Attr -> {missing, erx_render:value(Attr)}
     end.
 
+%% Why a figure has no attribute: its record does not hold it, or the
+%% inspector refused its path, out of the facet's scope, without a facet,
+%% with the facet's requests in flight all taken, or for any other reason.
+why(not_reported) -> <<"[not reported]">>;
+why({error, scope}) -> <<"[not in scope]">>;
+why({error, no_facet}) -> <<"[no inspect facet]">>;
+why({error, busy}) -> <<"[inspector busy]">>;
+why({error, unsupported}) -> <<"[unsupported]">>;
+why({error, failed}) -> <<"[failed]">>;
+why({error, _Reason}) -> <<"[error]">>.
+
 %% A figure's text under its group's naming: under `{label, _}` every
-%% partial figure is of the reporter the label names, so none repeats it.
-figure({_Format, Word, missing}, _Naming) -> [<<"-">>, Word];
+%% partial figure is of the reporter the label names, so none repeats it,
+%% and under `{label_why, _}` every figure is missing for the reason the
+%% label says.
+figure({_Format, Word, {missing, _Why}}, {label_why, _Said}) -> [<<"-">>, Word];
+figure({_Format, Word, {missing, Why}}, _Naming) -> [<<"-">>, Word, <<" ">>, Why];
 figure({Format, Word, {ok, _Reporter, Value}}, _Naming) -> [Format(Value), Word];
 figure({Format, Word, {partial, _Reporter, Value}}, {label, _Named}) -> [Format(Value), Word];
 figure({Format, Word, {partial, Reporter, Value}}, each) ->

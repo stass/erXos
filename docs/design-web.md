@@ -344,7 +344,7 @@ From the machine:
 | --- | --- | --- |
 | `welcome` | principal name, build identifier | answers `hello` |
 | `update` | view, body | the view's answer to one `open` or `next` |
-| `ended` | view, reason (an atom's name, at most 255 bytes) | the view is over; the reason is the `Reason` of the inspector's or the tracer's `{error, Reason}` (`scope`, `no_facet` and the rest [Interfaces](design-live.md#erlang-in-every-domain) lists), or one of the web's own: `closed`, the view or what it shows ended; `busy`, a bound refused it; `too_large`, one record does not fit an update |
+| `ended` | view, reason (an atom's name, at most 255 bytes) | the view is over; the reason is the `Reason` of the inspector's `{error, Reason}` when it is `scope` or `unsupported`, `failed` for any other refusal of the inspector's (`no_facet`, and `busy` from a facet whose requests in flight are all taken, among them), the `Reason` of the tracer's `{error, Reason}`, or one of the web's own: `closed`, the view or what it shows ended; `busy`, a bound refused it; `too_large`, one record does not fit an update |
 | `bye` | reason | the connection is about to close: `mismatch`, `protocol`, `limit`, `logout`, `expired`, `shutdown` |
 
 An update's body is one of: `record`, a record (below); `entries`, a list
@@ -520,7 +520,9 @@ reports ready, and the line is the application's one process, so the
 ready report can name the line and the line and the session domain end
 together. A view is one process with one query or one trace at
 a time, so the line's inspector queries in flight are at most its open
-views.
+views, and the session's inspect facet admits at most its grant's
+`in_flight` of them at once: past that a query is refused `busy` and
+its view ends `failed`.
 
 * **A record view** (`path`). On `next`, the view queries
   `erx:inspect(Path, #{})` through the session's inspect facet, so scope,
