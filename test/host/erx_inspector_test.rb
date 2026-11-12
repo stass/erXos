@@ -9,7 +9,8 @@ require_relative '../../tools/lib/erx/generated'
 
 # Runs the EUnit cases of the inspector on stock's emulator (ERX_ERL and ERX_ERLC, which
 # make check supplies): erx_kernel_records' pure core (test/erlang/erx_kernel_records_tests.erl),
-# the process records, scopes and renderers (test/erlang/erx_inspector_tests.erl), the runtime
+# the process records, scopes and renderers (test/erlang/erx_inspector_tests.erl), the start
+# table's records (test/erlang/erx_app_records_tests.erl), the runtime
 # agent and the query worker
 # (test/erlang/erx_inspect_agent_tests.erl, erx_inspect_worker_tests.erl), against
 # the sources, the generated ones from build/gen. erx_object_info is compiled but its NIF is
@@ -23,11 +24,12 @@ class ErxInspectorTest < Minitest::Test
   SOURCES = [*%w[generated/erx_schema erx_text_tables]
                .map { |name| Erx::Generated.path("erlang/apps/erx/src/#{name}.erl", root: ROOT) },
              *%w[erx_text erx_object_info erx_kernel_records erx_process_records erx_inspector
-                 erx_log_records erx_runtime_records erx_facets erx erx_inspect_agent
+                 erx_log_records erx_runtime_records erx_app_records erx_facets erx erx_inspect_agent
                  erx_inspect_worker erx_facet erx_inspect_query erx_inspect_facet].map { |name| File.join(ERX, "src/#{name}.erl") },
              *%w[erx_render].map { |name| File.join(ROOT, "erlang/apps/erx_shell/src/#{name}.erl") },
              File.join(ROOT, 'test/erlang/erx_kernel_records_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_inspector_tests.erl'),
+             File.join(ROOT, 'test/erlang/erx_app_records_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_inspect_agent_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_inspect_worker_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_inspect_facet_tests.erl')].freeze
@@ -39,6 +41,7 @@ class ErxInspectorTest < Minitest::Test
   INSPECTOR = File.join(ERX, 'src/erx_inspector.erl')
   QUERY = File.join(ERX, 'src/erx_inspect_query.erl')
   FACET = File.join(ERX, 'src/erx_inspect_facet.erl')
+  APP_RECORDS = File.join(ERX, 'src/erx_app_records.erl')
   # The logger's default handler is configured to write to standard error, so a report a case
   # provokes, such as a process's crash at its maximum heap size, cannot land inside EUnit's
   # line for that case, which names the case and ends with its verdict.
@@ -47,6 +50,13 @@ class ErxInspectorTest < Minitest::Test
   # whole text, both streams, for messages.
   EunitRun = Data.define(:passed, :report, :text)
   FAULTS = [
+    Fault.new(name: 'a down row shown with no reason', file: APP_RECORDS,
+              from: 'state(enabled, down) -> {down, unknown};', to: 'state(enabled, down) -> {down, {ok, <<>>}};',
+              tests: 'erx_app_records_tests', caught_by: 'a_down_rows_reason_is_unknown_test'),
+    Fault.new(name: 'a refused row shown with no reason', file: APP_RECORDS,
+              from: 'state({refused, Refusal}, _Run) -> {refused, {ok, refusal(Refusal)}};',
+              to: 'state({refused, _Refusal}, _Run) -> _ = fun refusal/1, {refused, {ok, <<>>}};',
+              tests: 'erx_app_records_tests', caught_by: 'each_state_is_shown_test_'),
     Fault.new(name: 'an agent that answers any origin', file: AGENT,
               from: 'handle({erx_origin, SystemId, {erx_inspect_ask, Alias, Query}}, Self, SystemId) when',
               to: 'handle({erx_origin, _Origin, {erx_inspect_ask, Alias, Query}}, Self, _SystemId) when',
@@ -105,6 +115,10 @@ class ErxInspectorTest < Minitest::Test
 
   def test_inspector_cases_pass_under_eunit
     eunit('erx_inspector_tests')
+  end
+
+  def test_start_table_record_cases_pass_under_eunit
+    eunit('erx_app_records_tests')
   end
 
   def test_runtime_agent_cases_pass_under_eunit

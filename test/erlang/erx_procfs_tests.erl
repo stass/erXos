@@ -74,7 +74,7 @@ markers_exist_only_where_the_listing_says_test() ->
 
 root_lists_what_the_scope_reaches_test() ->
     ?assertEqual([<<"status">>, <<"cpus">>, <<"groups">>, <<"budgets">>, <<"domains">>, <<"processes">>,
-                  <<"kernel">>],
+                  <<"apps">>, <<"kernel">>],
                  names(erx_procfs_core:listing([], none, fun every/1))),
     ?assertEqual([<<"status">>, <<"processes">>], names(erx_procfs_core:listing([], none, fun processes_only/1))).
 

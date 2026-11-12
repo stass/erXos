@@ -20,7 +20,8 @@ manifest() ->
                #{principal => <<"kiosk">>, enable => true, display => none, restarts => 2, period => 60},
                #{principal => <<"logger">>, enable => true, display => none, restarts => 5, period => 600}],
       grants => #{},
-      principals => #{<<"clock">> => 1, <<"kiosk">> => 2, <<"logger">> => 3}}.
+      principals => #{<<"clock">> => 1, <<"kiosk">> => 2, <<"logger">> => 3},
+      boot_order => [<<"storage">>, <<"net">>]}.
 
 -define(CLOCK, 1).
 -define(KIOSK, 2).
@@ -50,7 +51,8 @@ starter_test_() ->
       fun the_next_table_completes_a_stop_cut_short/1,
       fun an_unchanged_text_is_not_recorded_again/1,
       fun a_new_text_is_recorded_before_the_old_is_dropped/1,
-      fun a_restarted_table_takes_the_newer_of_two_recorded_texts/1]}.
+      fun a_restarted_table_takes_the_newer_of_two_recorded_texts/1,
+      fun a_row_neither_held_nor_marked_is_starting/1]}.
 
 %% A first read of rc.conf that fails: the file is a directory until the case
 %% replaces it.
@@ -243,6 +245,22 @@ stop_ends_the_session_and_start_starts_it_again(_) ->
             ?assertEqual(ok, erx_starter:command({start, <<"kiosk">>, #{}})),
             ?assertNotEqual(Kiosk, started(?KIOSK)),
             ?assertEqual({error, {undeclared, <<"nobody">>}}, erx_starter:command({stop, <<"nobody">>, #{}}))
+    end.
+
+%% A row whose supervisor ended with no stopped mark, as when a table ends
+%% between recording rc.conf's text and starting the row, is `starting`, not
+%% `stopped`: only the mark makes a row stopped (/proc/apps tells them apart).
+a_row_neither_held_nor_marked_is_starting(_) ->
+    fun() ->
+            ok = watch(),
+            Kiosk = started(?KIOSK),
+            ok = wait_until(fun() -> run(<<"kiosk">>) =:= running end),
+            ok = erx_starter_sup:stop(<<"kiosk">>),
+            receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(session_outlived_stop) end,
+            ?assertEqual(starting, run(<<"kiosk">>)),
+            ?assertEqual(ok, erx_starter:command({stop, <<"kiosk">>, #{}})),
+            ?assertEqual(stopped, run(<<"kiosk">>)),
+            ?assertMatch(#{boot_order := [<<"storage">>, <<"net">>]}, erx_starter:rows())
     end.
 
 start_of_a_row_not_enabled_starts_one_session(_) ->

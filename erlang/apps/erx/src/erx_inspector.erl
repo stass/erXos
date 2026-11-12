@@ -44,7 +44,9 @@ runtime attributes from the agent and every other attribute
 `unsupported`. Kernel objects, through
 erx_kernel_records on the root's own capabilities, and the domain record,
 through erx_runtime_records, are the system domain's only; the kernel
-log, through erx_log_records, is read in the system domain only. To the
+log, through erx_log_records, is read in the system domain only, and the
+start table, through erx_app_records, from the start service of the
+system domain, `{error, unsupported}` where none runs. To the
 scoped core, a process of another runtime, and any other domain's path,
 name nothing it can
 reach and are answered `{error, scope}`; a path the schema declares
@@ -321,6 +323,8 @@ collect([domains, Domain | Rest] = Path, Scope) ->
     end;
 collect([kernel] = Path, _Scope) ->
     literals(Path);
+collect([apps | _] = Path, _Scope) ->
+    erx_app_records:collect(Path);
 collect(Path, Scope) ->
     listing(Path, enumerate(Path, Scope)).
 

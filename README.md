@@ -316,9 +316,11 @@ Error in process <0.150.0> with exit value:
   read or write on a pipe end waits until the other side is ready. The
   musl seam that lets a C program use them is not built, so no C program
   uses pipes yet.
-* **The start table has its first pieces.** The manifest has `start` rows,
-  and the `rc.conf` parser and its merge with the manifest exist. Nothing
-  starts an app from them yet.
+* **The start table runs.** The start service merges the manifest's
+  `start` rows with `/apps/rc.conf` and keeps each enabled row's session
+  under a supervisor of its own. `service` enables, disables, starts and
+  stops rows as FreeBSD's does, `service -e` lists what starts, and
+  `/proc/apps` shows each row's state.
 * **The Raspberry Pi 4 boots on QEMU's `raspi4b` model.** TF-A BL31 hands
   off to Fiasco, and the system boots to the serial shell on the mini
   UART. It runs under TCG only, because QEMU cannot run this model under

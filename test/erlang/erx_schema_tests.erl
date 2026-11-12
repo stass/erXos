@@ -13,7 +13,8 @@
 
 schema_test() ->
     ?assertEqual(1, erx_schema:schema()),
-    ?assertEqual([machine, cpu, group, budget, domain, thread, process, log, module, listing], erx_schema:kinds()).
+    ?assertEqual([machine, cpu, group, budget, domain, thread, process, log, module, start_table, app,
+                  listing], erx_schema:kinds()).
 
 %% An attribute each reporter may report, and one it may not. The collector names the
 %% reporter, so a frame's own tag is never read.
@@ -96,7 +97,7 @@ match(_, _) -> false.
 
 every_path_resolves_to_exactly_one_declaration_test() ->
     Declarations = erx_schema:declarations(),
-    ?assertEqual(20, length(Declarations)),
+    ?assertEqual(22, length(Declarations)),
     [begin
          {Path, Texts} = samples(Pattern),
          ?assertEqual([Declaration], matching(Path)),

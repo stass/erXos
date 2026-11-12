@@ -414,12 +414,12 @@ the packaging design's, written when track A reaches it
 | --- | --- |
 | `service NAME enable [display=D] [restarts=N] [period=S]` | sets the row's settings in `rc.conf`, enables it and starts it; refused for a name with no manifest row, a display another enabled row holds (with that row's name), and a display the principal's template is not granted |
 | `service NAME disable` | stops the row and sets it disabled |
-| `service NAME start`, `stop`, `restart`, `status` | acts on an enabled row; `start` on a row that is not enabled answers as FreeBSD's does and names `onestart` |
-| `service NAME onestart [display=D]`, `onestop` | starts the row's principal once, with no supervisor; stops it |
-| `service -e` | prints the configured domains in boot order, then the enabled rows |
+| `service NAME start`, `stop`, `restart`, `status` | acts on an enabled row; on a row that is not enabled each answers as rc.subr(8) does, names its `one` form and does nothing |
+| `service NAME onestart [display=D]`, `onestop`, `onerestart`, `onestatus` | as above on any row: `onestart` starts the row's principal once, with no supervisor, and `onestop` stops it |
+| `service -e` | prints the configured domains in boot order, then the enabled rows that are not refused |
 
-For a configured domain, `service` prints its state and answers every
-other request that it is configured in the system manifest.
+For a configured domain, `service` answers every request that it is
+configured in the system manifest; its state is at `[domains, Id]`.
 
 **The `apps` tree**, a service of the system domain and an instance of
 `files`, which `erx_starter` serves with `erx_fs` and a session mounts at
@@ -435,11 +435,17 @@ development build, an administrator's in a release build. A session
 whose template holds no `apps` grant has no `/apps` at all.
 
 **Inspection**, in `abi/inspection.txt`, reported by the start service
-and shown at `/proc/apps`: `[apps]` lists the rows by principal, and
-`[apps, Name]` gives `state` (`disabled`, `stopped`, `starting`,
-`running`, `down` or `refused`), `reason`, `domain`, `enabled`,
-`display`, which settings come from `rc.conf`, and the ends within the
-row's period. An app's sessions are domains like any other at
+and shown at `/proc/apps`, to an inspect facet of scope `all`: `[apps]`,
+of kind `start_table`, gives `boot_order`, the configured domains in
+boot order, and `rc_conf`, whether `rc.conf` has been read, and lists
+the rows by principal; `[apps, Name]` gives `state`, `reason`, `domain`,
+`enabled`, `display`, which settings come from `rc.conf`, and the ends
+within the row's period. The state is `refused`, with its refusal as the
+reason, `disabled`, or for an enabled row where the keepers' branch says
+its session stands: `running`, `down`, `stopped`, marked so by `service
+NAME stop`, or `starting`, neither kept nor marked, which the table
+starts when it next reconciles. A session `onestart` started belongs to
+no row and is not shown. An app's sessions are domains like any other at
 `[domains, Id]`.
 
 **Manifest rows**: `start`. Its packed record and the reader's bounds

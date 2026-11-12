@@ -49,6 +49,14 @@ inspection 1
   atoms process_state exiting garbage_collecting waiting running runnable suspended
   atoms priority low normal high max
   atoms module_origin boot_image overlay loaded
+  atoms rc_conf_state read unread
+  atoms app_state disabled stopped starting running down refused
+  atoms app_field enable display restarts period
+  list app_fields app_field 4
+  list domain_names name 1000
+  # Why a start row is refused, as `/proc/apps` prints it: the refusal and
+  # the display, the row or the field it names, such as "no_grant display".
+  text app_reason 512 utf8
   list urgency_counts count 64
   list proc_ids proc_id 1000
   tuple location module_name name arity file_name line_number
@@ -141,6 +149,23 @@ inspection 1
     attr origin module_origin reporters runtime visible owner build all projections shell,host,proc,web
     attr source_in_image boolean reporters runtime visible owner build all projections shell,host,proc,web
 
+  # The start table (docs/design-apps.md, "Interfaces"): the configured
+  # domains in boot order, whether rc.conf has been read, and a record per
+  # start row of the manifest. A row's display is the empty text when it
+  # names none, and its reason the empty text unless it is refused.
+  kind start_table
+    attr boot_order domain_names reporters service visible all build all projections shell,host,proc,web
+    attr rc_conf rc_conf_state reporters service visible all build all projections shell,host,proc,web
+
+  kind app
+    attr state app_state reporters service visible all build all projections shell,host,proc,web
+    attr reason app_reason reporters service visible all build all projections shell,host,proc,web
+    attr domain domain_id reporters service visible all build all projections shell,host,proc,web
+    attr enabled boolean reporters service visible all build all projections shell,host,proc,web
+    attr display name reporters service visible all build all projections shell,host,proc,web
+    attr local app_fields reporters service visible all build all projections shell,host,proc,web
+    attr ends count reporters service visible all build all projections shell,host,proc,web
+
   path machine
   path listing cpus
     visible all
@@ -168,6 +193,9 @@ inspection 1
   path listing processes
   path process processes *proc_id
     present pid
+  path start_table apps
+    visible all
+  path app apps *name
   path listing kernel
     visible all
   # The kernel log from any sequence number on; its ring holds fewer than

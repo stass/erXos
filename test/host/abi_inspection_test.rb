@@ -403,7 +403,8 @@ class AbiInspectionTest < Minitest::Test
     assert_equal %w[kernel liberx_pool], used.reporters
     stopgap = inspection.stopgaps.fetch('liberx_pool')
     assert_equal %w[kernel root\ pool], [stopgap.category, stopgap.label]
-    assert_equal %w[machine cpu group budget domain thread process log module], inspection.kinds.keys
+    assert_equal %w[machine cpu group budget domain thread process log module start_table app],
+                 inspection.kinds.keys
     derived = inspection.kinds.fetch('budget').reject { |attr| attr.derived.empty? }.map(&:key)
     assert_equal %w[spending borrowing room deficit give_back], derived
     assert_equal({ 'erts' => 'runtime', 'backend' => 'liberx_trace', 'kernel' => 'kernel' },

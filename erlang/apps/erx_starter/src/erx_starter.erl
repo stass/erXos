@@ -48,15 +48,16 @@ erx_start_table's; this process carries them out.
 -include("generated/erx_abi.hrl").
 
 -export([start_link/2, command/1, rows/0, rc_conf/0]).
--export_type([source/0, answer/0]).
+-export_type([source/0, answer/0, run/0]).
 -export([manifest_table/1]).
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2]).
 
 %% The manifest's part of the table: its start rows in order, the services
-%% each principal's session template is granted, and each principal's
-%% number, its manifest index plus one, by its name.
+%% each principal's session template is granted, each principal's number,
+%% its manifest index plus one, by its name, and the configured domains'
+%% names in boot order, which `/proc/apps` shows beside the rows.
 -type manifest() :: #{rows := [erx_start_table:row()], grants := #{binary() => [binary()]},
-                      principals := #{binary() => pos_integer()}}.
+                      principals := #{binary() => pos_integer()}, boot_order := [binary()]}.
 
 %% Where the table reads the manifest from: the system manifest, or a
 %% manifest table made beforehand, for the tests.
@@ -65,6 +66,13 @@ erx_start_table's; this process carries them out.
 %% `{failed, Reason}` for a command the table admitted that could not be
 %% carried out: rc.conf's write, or the supervisor's start, failed.
 -type answer() :: ok | {error, erx_start_table:ctl_error() | rc_conf_unread | {failed, term()}}.
+%% Where an enabled row's session stands, from the keepers' branch alone
+%% (erx_starter_sup:held/0): `running`, its supervisor alive; `down`, its
+%% supervisor ended at its intensity; `stopped`, marked so by `stop`; or
+%% `starting`, neither held nor marked, which the table starts at its next
+%% reconciling, as at boot before rc.conf's read answers. A row that is not
+%% enabled is `none`.
+-type run() :: running | down | stopped | starting | none.
 
 -doc "The table over Source's rows, with rc.conf in Directory.".
 -spec start_link(source(), binary()) -> gen_server:start_ret().
@@ -84,15 +92,16 @@ command(Command) ->
     gen_server:call(?MODULE, {command, Command}, infinity).
 
 -doc """
-The table: each manifest row merged, with the key `run`: `running`, `down`
-or `stopped` for an enabled row and `none` for any other, or `unmade`
-before the table is first made; the lines of
-rc.conf that were skipped; and `rc_conf`, `read` once this process's read
-of rc.conf has answered, `unread` before. While it is unread the rows are
+The table: each manifest row merged, with the key `run` (run()), or
+`unmade` before the table is first made; the lines of rc.conf that were
+skipped; `rc_conf`, `read` once this process's read of rc.conf has
+answered, `unread` before; and `boot_order`, the configured domains'
+names in the manifest's boot order. While rc.conf is unread the rows are
 those of the text the keepers' branch recorded, or of the manifest alone,
 and may not be what the file sets.
 """.
--spec rows() -> #{rows := [map()] | unmade, skipped := [erx_start_table:local()], rc_conf := read | unread}.
+-spec rows() -> #{rows := [map()] | unmade, skipped := [erx_start_table:local()], rc_conf := read | unread,
+                  boot_order := [binary()]}.
 rows() ->
     gen_server:call(?MODULE, rows).
 
@@ -121,6 +130,8 @@ manifest_table({ok, Manifest}) ->
         {ok, Sessions} ?= collect(View, sessions),
         {ok, Facets} ?= collect(View, facets),
         {ok, Starts} ?= collect(View, starts),
+        {ok, Domains} ?= strings(View, domains),
+        {ok, Order} ?= collect(View, boot_order),
         Name = fun(Index) -> lists:nth(Index + 1, Names) end,
         Service = fun(Index) -> lists:nth(Index + 1, Services) end,
         Template = fun(Session) -> Name(maps:get(principal, lists:nth(Session + 1, Sessions))) end,
@@ -132,7 +143,8 @@ manifest_table({ok, Manifest}) ->
                    || #{grantee_kind := ?ERX_MF_GRANTEE_SESSION, grantee := Session, service := Index} <- Facets],
         {ok, #{rows => Rows,
                grants => maps:groups_from_list(fun({P, _}) -> P end, fun({_, S}) -> S end, Granted),
-               principals => #{Principal => Number || {Number, Principal} <- lists:enumerate(Names)}}}
+               principals => #{Principal => Number || {Number, Principal} <- lists:enumerate(Names)},
+               boot_order => [lists:nth(Domain + 1, Domains) || #{domain := Domain} <- Order]}}
     else
         _ -> error
     end;
@@ -169,7 +181,7 @@ init({system, Directory}) ->
                        Table;
                    error ->
                        logger:error("erx_starter: the system manifest's start rows cannot be read; no row starts"),
-                       #{rows => [], grants => #{}, principals => #{}}
+                       #{rows => [], grants => #{}, principals => #{}, boot_order => []}
                end,
     init({Manifest, Directory});
 init({#{} = Manifest, Directory}) ->
@@ -366,12 +378,13 @@ row(_Name, #{merged := none}) ->
 kept(#{start := Start, restarts := Restarts, period := Period}) ->
     #{display => maps:get(display, Start, none), restarts => Restarts, period => Period}.
 
-table(#{merged := none, skipped := Skipped, local := Local}) ->
-    #{rows => unmade, skipped => Skipped, rc_conf => reading(Local)};
-table(#{merged := Merged, skipped := Skipped, local := Local}) ->
-    {Rows, _Stopped} = erx_starter_sup:held(),
+table(#{merged := none, skipped := Skipped, local := Local, boot_order := Order}) ->
+    #{rows => unmade, skipped => Skipped, rc_conf => reading(Local), boot_order => Order};
+table(#{merged := Merged, skipped := Skipped, local := Local, boot_order := Order}) ->
+    {Rows, Stopped} = erx_starter_sup:held(),
     Runs = #{Name => running_or_down(Run) || {Name, Run, _Row} <- Rows},
-    #{rows => [Row#{run => run_state(Row, Runs)} || Row <- Merged], skipped => Skipped, rc_conf => reading(Local)}.
+    #{rows => [Row#{run => run_state(Row, Runs, Stopped)} || Row <- Merged], skipped => Skipped,
+      rc_conf => reading(Local), boot_order => Order}.
 
 reading(read) -> read;
 reading({unread, _Failures}) -> unread.
@@ -379,8 +392,16 @@ reading({unread, _Failures}) -> unread.
 running_or_down(Pid) when is_pid(Pid) -> running;
 running_or_down(down) -> down.
 
-%% An enabled row with no supervisor is stopped: marked so, or not started.
-run_state(#{status := enabled, principal := Name}, Runs) ->
-    maps:get(Name, Runs, stopped);
-run_state(_Row, _Runs) ->
+%% An enabled row's run(): held, marked stopped, or neither, which is a row
+%% the table has yet to start.
+run_state(#{status := enabled, principal := Name}, Runs, Stopped) ->
+    case Runs of
+        #{Name := Run} -> Run;
+        #{} ->
+            case lists:member(Name, Stopped) of
+                true -> stopped;
+                false -> starting
+            end
+    end;
+run_state(_Row, _Runs, _Stopped) ->
     none.
