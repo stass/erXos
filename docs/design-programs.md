@@ -423,6 +423,9 @@ carries what a sub-space needs:
 %%            | {dir, Open}
 %%            | {socket, Open}
 %%            | {dup, Fd :: 0..1023}
+%%            | {mem, Address :: non_neg_integer(), Bytes :: pos_integer()}
+%%                                  % memory the session mapped into the
+%%                                  % program while building it
 %%            | null
 %% Open = 0..16#ffff           % an entry of the program's open table in its handler
 %% PipeEnd, EndValues = a pipe end's numbers and the values in the program's
@@ -461,7 +464,18 @@ description's access mode ([Descriptors and files](#descriptors-and-files));
 a `tty` descriptor is the same for a terminal, a `dir` an open directory,
 through which `openat` resolves, and a `socket` an open of a socket's
 open-file description; a `dup` makes its number name the same object as another
-descriptor of the message, which is not itself a `dup`. `sigmask` and
+descriptor of the message, which is not itself a `dup`. A `mem`
+descriptor names memory the session mapped into the program's sub-space
+while it built it, read-write, at `Address` for `Bytes`, both multiples
+of the page size: the pages of a window's buffer, for a program that
+renders into its window
+([design-display.md](design-display.md#the-pixel-area)). The program
+holds no capability to that memory. `mmap` of the descriptor with
+`MAP_SHARED`, offset 0 and a length of at most `Bytes` returns
+`Address`, `fstat` reports `Bytes` as its size, and `read`, `write` and
+`lseek` on it fail with `ESPIPE`. It names a mapping of this one
+sub-space, so a spawn's `Start` cannot name one, `fork` does not copy
+it and `erx_exec` closes it. `sigmask` and
 `sigignore` follow POSIX's rule for `posix_spawn`: the program starts with
 its parent's mask and ignores what its parent ignores, unless the spawn's
 attributes set them, and every other signal starts with its default

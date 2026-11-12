@@ -252,9 +252,10 @@ The **manifest** is the machine's configuration, and its only one. It is
 one file, which the build packs into the boot image among the files of
 the system release, so only the system domain can slice it
 ([design-kernel.md](design-kernel.md#the-boot-image)). Its source is a
-checked-in text file per configuration, `config/<name>.txt`, one for each
-platform and build kind; the packer, `tools/erx pack`, parses it, runs the
-check below over it, and packs the result. The manifest holds:
+checked-in text file per configuration, `config/manifest/<name>.txt`,
+one for each platform and build kind; the packer, `tools/erx pack`,
+parses it, runs the check below over it, and packs the result. The
+manifest holds:
 
 * **The machine:** its host name, an identifier that is the host part of
   every domain's node name ([Identifiers](#identifiers)); `root_memory`,
@@ -299,9 +300,23 @@ check below over it, and packs the result. The manifest holds:
   naming a service that the system release or another configured domain
   serves, with the grant's limits; and its **introductions**, each naming
   another configured domain.
+* **Each display:** a record named after the `windows` service it
+  describes, whose server is the display domain, so the display's name
+  is that service's everywhere; its policy, idle policy and reserved
+  chord. Who may draw on it, and how much, are the facet rows of its
+  service; which session is its own, the start row that names it. The
+  entry names no session and no application
+  ([design-display.md](design-display.md#a-displays-session)).
 * **Each read-only image** a configured domain boots from: its extents,
   root hash, salt and tree layout, which the packer computes as it builds
   the image ([design-storage.md](design-storage.md#data-model)).
+* **The start rows** ([design-apps.md](design-apps.md#the-start-table)):
+  each names a principal whose session starts at boot with no login,
+  whether it is enabled, optionally a display, and its restart
+  intensity. They are the start table's defaults, which the machine's
+  `rc.conf` overrides. An app is a principal of the manifest with a
+  session template today; principals added at run time are the
+  packaging design's ([design-apps.md](design-apps.md#packaging)).
 * **The boot order**, the configured domains in an order in which every
   domain follows every configured domain whose service its facets name,
   which the check computes, breaking ties by stable name order.
@@ -331,7 +346,7 @@ native pointer from the file.
 
 The records cover principals, configured domains, named domain and
 runtime limits, lane classes, units and devices, role-based partition
-windows, services, facets with typed bounded scope parameters,
+windows, displays, services, facets with typed bounded scope parameters,
 introductions, read-only image extents and hash-tree metadata, boot order,
 liveness, system-shell principals, the console lines' `secure`
 attributes and partial-boot programs. A unit owns its devices' one
@@ -357,6 +372,7 @@ content, so both readers have a fuzz target
 | the device service | each device's holder, unit and confinement mark, each domain's windows by role, the image records, an unconfined device's memory size, and the console's and the host link's paths |
 | the resource policy | the principals' budgets, shares and quotas; the lane size per class; `system_reserve`, which bounds the service grants it sets |
 | the principal service | the principals, and which of them are system-shell principals, which it tells the console with each login it confirms |
+| the start service | the `start` rows, the principals with a session template, and the `windows` services each template is granted, by which it checks a row's display ([design-apps.md](design-apps.md#the-start-table)) |
 | the console service | the `secure` attribute of the UART and the host link, its only lines; the console grants the system-shell facet only at a secure line |
 | the watchdog process | the services it asks for liveness |
 
@@ -496,7 +512,9 @@ violation fails the build with the property, the record and the field:
     The key gives a principal at most one; the template names a principal
     that exists, and its limits enable `SPACES`, since a session's programs
     are its sub-spaces. It has no restart intensity, boot flag or place:
-    the boot order, the plans of property 12 and every unit, window,
+    a session that starts with no one asking takes its restart intensity
+    from its start row (property 17), and the boot order, the plans of
+    property 12 and every unit, window,
     service and introduction resolve through the domain table, which holds
     no template, so none of them reaches one. A facet alone may name a
     template as its grantee, written `@session.PRINCIPAL`, for a service a
@@ -553,6 +571,27 @@ violation fails the build with the property, the record and the field:
     `inspect` with a `max_frame` below its floor; and a check of
     `max_frame` alone, which admits a template whose `max_message_heap`
     is below `inspect_message_heap_min`.
+17. **Start rows are well formed:** every `start` row names a principal
+    with a session template, at most one row for each principal; at most
+    one enabled row names each display; a display a row names is a
+    `windows` service that a facet row grants the principal's template;
+    and the sessions of the enabled rows can all be built beside the
+    configured domains, which the planner of property 12 decides by
+    planning each in the boot view
+    ([design-apps.md](design-apps.md#the-start-table)).
+18. **A display's pixel areas fit its budget:** every `display` record
+    names a service of the `windows` interface, at most one record for
+    each; for each display, the `pixels` of every facet row of its
+    service, each rounded up to pages, counted once for a configured
+    domain and, for a session template, as many times as its principal's
+    `domains` quota lets sessions of it live at once, sum within the
+    display domain's outer budget beside the sides it reads, since the
+    display pays for every pixel area it maps; and no facet row sets the
+    `session` parameter, which the domain service alone sets
+    ([design-display.md](design-display.md#the-pixel-area)). Seeded
+    violations: a check that counts a template's row once, which admits
+    a template whose sessions together pass the budget; and a facet row
+    that sets `session`.
 
 Each property has a test that seeds one violation into a manifest and
 expects the build to fail with that property's diagnostic.
@@ -706,6 +745,11 @@ typedef struct erx_dom_connection {
 					 * TRIGGER alone; charged to budget_a, or
 					 * to budget_b when a is 4 */
 	erx_cap_t	bell_b;		/* bound to b's group; charged to budget_b */
+	erx_cap_t	area;		/* the connection's pixel area, or ERX_CAP_NULL:
+					 * one memory object that area_reader maps
+					 * read-only and the other party writes;
+					 * charged to area_reader's child budget */
+	uint32_t	area_reader;	/* a or b; 0 without an area */
 	bool		closing;	/* connection_down told; the child budgets
 					 * are destroyed once each party has
 					 * unmapped the objects or ended, never
@@ -920,11 +964,16 @@ and 6 give way to the partial boot below.
    ([A session takes the console](#a-session-takes-the-console)); the system shell stays one menu
    key away, and when the session ends the console logs `root` in again
    ([design-live.md](design-live.md#the-console)).
-5. **Each display's session.** For each display domain whose manifest
-   entry names a session principal, the domain service starts that
-   principal's session domain once the display domain runs, with no
-   login, and the system domain introduces it to the display
-   ([design-display.md](design-display.md#a-displays-session)).
+5. **The start table.** Once the configured domains of the boot order
+   run, the start service starts each enabled row of the start table,
+   the manifest's `start` rows with the machine's `rc.conf` over them
+   ([design-apps.md](design-apps.md#the-start-table)): the session of
+   the principal the row names, with no login, and for a row that names
+   a display, once that display's domain runs, on that display, to
+   which the system domain introduces it and whose session it becomes
+   ([design-display.md](design-display.md#a-displays-session)). Each
+   row's keeper starts its session again when it ends, within the row's
+   intensity ([design-apps.md](design-apps.md#keeping-a-session)).
 
 **A reset loop ends in rescue.** The **reset count** counts the
 machine's consecutive unordered ends, a fault of the system domain, its
@@ -941,7 +990,9 @@ and set it to zero at an ordered end, before the storage services freeze,
 and at the first successful login at any line, typed or automatic: at
 the UART, the host link or the web, and in a
 development build the console's own logins of `root` at the UART at boot
-and at the host link's `console` line. A development build's automatic
+and at the host link's `console` line, and when the first session a
+start row keeps reports ready, which counts as an automatic login
+([design-apps.md](design-apps.md#keeping-a-session)). A development build's automatic
 login comes early in every boot, so there rescue catches only a fault
 before the console's first login. When the
 count it read is past three, the system release boots its **rescue
@@ -1107,7 +1158,7 @@ NIFs, since none of them waits:
 | `erx_dom_resize(id, memory)` | resizes a running domain's own budget with `erx_budget_resize`, guarantee and cap together, within its principal's budget ([Resource policy](#resource-policy)); refuses a configured domain, whose sizes are the manifest's (A10) | `ERX_OK`; `ERX_EINVAL` for an unknown, ended or configured id; `ERX_ENOMEM` when the principal's budget cannot cover the growth, after which nothing changes |
 | `erx_dom_destroy(id)` | destroys the stopped domain's own budget, which deletes at once every object charged to it and to every budget carved from it; the fault thread calls it at the exit record | `ERX_OK`; `ERX_EINVAL` unless the domain has stopped |
 | `erx_dom_retire(id)` | releases an ended domain: destroys its crash area, frees its record and gives its principal back the domain and its own budget's bytes; destroys its outer budget when no connection names the domain, and otherwise keeps the outer budget as the domain's remains, which the disconnect of its last connection destroys; the domain service calls it once the crash area is read and the system connection disconnected, without waiting for any other connection | `ERX_OK`; `ERX_EINVAL` unless the domain has ended; `ERX_EBUSY` while its system connection stands |
-| `erx_dom_connect(a, b, a_reads, b_reads)` | creates a connection between two built or running domains: carves from each domain's outer budget a child budget for the connection; creates two sides, `b`'s sized `a_reads` and charged to `a`'s child, since `a` reads it, and `a`'s sized `b_reads` and charged to `b`'s child; and two bells, each charged to the child of the domain whose group it is bound to; gives each domain its share ([Authority](#authority)) | the connection's number and each domain's values; `ERX_ENOMEM` when a reader's outer budget cannot cover its child; `ERX_ELIMIT` for a full table; `ERX_EINVAL` for a domain outside built or running, or for `a == b` |
+| `erx_dom_connect(a, b, a_reads, b_reads, area, area_reader)` | creates a connection between two built or running domains: carves from each domain's outer budget a child budget for the connection; creates two sides, `b`'s sized `a_reads` and charged to `a`'s child, since `a` reads it, and `a`'s sized `b_reads` and charged to `b`'s child; two bells, each charged to the child of the domain whose group it is bound to; and, when `area` is not 0, a pixel area of `area` bytes, charged to the child of `area_reader`, which maps it read-only while the other party writes it ([design-display.md](design-display.md#the-pixel-area)); gives each domain its share ([Authority](#authority)) | the connection's number and each domain's values; `ERX_ENOMEM` when a reader's outer budget cannot cover its child; `ERX_ELIMIT` for a full table; `ERX_EINVAL` for a domain outside built or running, for `a == b`, or for an `area` whose `area_reader` is neither |
 | `erx_dom_disconnect(number)` | destroys the connection's child budgets, which deletes its sides and bells at once, and the remains of each retired party that no other connection names; the domain service asks it only once each party has unmapped them or ended; a capability to them fails with `ERX_ESTALE` from then on | `ERX_OK`; `ERX_EINVAL` for an unknown number |
 | `erx_dom_code_object(session, size)` | creates a paged object with an execute ceiling from the session's budget through the system domain's own capability to it, which carries `CODE`, and gives the session a copy with `SUPPLY`, `READ`, `MAP`, `CHILD`, `DUP`, `GIVE` and `EXEC`; the kernel refuses an executable mapping of it until it is sealed (K8) | the object's number and the session's value; `ERX_ENOMEM`; `ERX_ELIMIT` beyond `file_objects` for the session |
 | `erx_dom_code_drop(session, number)` | deletes a session's code object, after which every mapping of it faults | `ERX_OK`; `ERX_EINVAL` |
@@ -1131,7 +1182,7 @@ supplied profile index nor relies on a second default table in Erlang.
 **The one installer.** Only a space's creator installs into its table
 (A1), so the domain library is the one party that installs into a
 domain's table, and what it installs is fixed: the domain's own budget,
-group and boot objects; its connections, lanes and doorbells; the
+group and boot objects; its connections, lanes, pixel areas and doorbells; the
 resources of the devices it holds; and, for the vault, the sealing page.
 It never installs an IPC gate of another domain, so no domain holds a gate
 to another domain, no rendezvous joins two domains, and memory crosses a
@@ -1477,13 +1528,22 @@ lists, and at the introductions the manifest lists. An explicit
 introduction needs the `introduce` right on both domain pids, which an
 inspector listing or a `connection_up` that names a domain never conveys
 ([Authority](#authority)). The domain service calls `erx_dom_connect(A, B,
-a_reads, b_reads)`: every page of a connection is charged to the party
+a_reads, b_reads, area, area_reader)`: every page of a connection is charged to the party
 that reads it, on a child budget of its outer budget that the library
 carves for that connection, so the side `A` reads is charged to `A`'s
 child and sized by `A`'s own spec, likewise `B`'s, and each bell to the
 child of the party that waits on it; a sender never makes a receiver pay
 for what it is willing to receive, and the receiver's policy chooses the
-lane size. A side goes to the reader's outer budget, not its own, because
+lane size. A connection between a display and a client the manifest
+grants its window tree carries one more object, a **pixel area**: the
+client writes it and the display maps it read-only, it is sized by the
+`pixels` of the facet row that grants the client the display, a
+configured domain's own row or its session template's, which the
+manifest states for the pair whichever introduction makes their
+connection, and it is charged to the display's
+child with the side the display reads
+([design-display.md](design-display.md#the-pixel-area)). No call grows
+or adds an area afterwards. A side goes to the reader's outer budget, not its own, because
 its writer maps it until it has answered `connection_down`, and a side on
 the reader's own budget would be deleted at the reader's end under the
 writer's mapping, faulting the writer; it goes to a child of the outer
@@ -1573,8 +1633,9 @@ the domain's admission:
   or, in a session, its programs;
 * its **outer budget** pays for everything another party maps or reads
   after the domain is gone: through a **child budget** carved from it for
-  each connection, the side of that connection the domain reads and the
-  bell it waits on, or for its connection to the system domain both
+  each connection, the side of that connection the domain reads, the
+  pixel area it reads and the bell it waits on, or for its connection to
+  the system domain both
   sides and both bells; and directly, its crash area, which no other
   party maps. The domain library has no entry that maps one domain's
   memory into another but `erx_dom_connect`, which makes a connection,
@@ -1931,6 +1992,17 @@ pair, so each operation is bound to both incarnations by construction:
 | `installed` | the grantee acknowledged; the grant holds the facet's pid |
 | `failed` | the operation for this pair failed, and was logged; nothing is retried for the pair |
 
+Beside its state, the record of a session's grant carries the
+**session mark**, a boolean fixed when the record is made and never
+changed: it is true for the grant on the display that the session's
+start names with `display`, which only a start row's keeper names
+([design-apps.md](design-apps.md#starting-a-session)), and false for
+every other grant. Every mint of the record carries it as the `session`
+parameter, the first and each one after the server's restart, so a
+display domain's new incarnation mints the display's session's grant as
+the display's session again, and no other grant ever carries it
+([design-display.md](design-display.md#a-displays-session)).
+
 The record moves on these events, and on nothing else:
 
 * **a session's ready report**, which adds a record for each of its
@@ -1950,7 +2022,12 @@ The record moves on these events, and on nothing else:
   service never reuses, and a **deadline** of 10 seconds from its start,
   for the whole of its introduction, mint and installation;
 * **the introduction's result**: `ok` sends the mint
-  `{erx_facet_mint, Tag, Name, Grantee, Limits}` through the server's
+  `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}`, where
+  `Principal` is the name of the grantee's principal, a configured
+  domain's row's or a session's template's, from which a server scopes
+  the grant by principal, and `Limits` is the facet row's limits, with
+  the `session` parameter added where the grant's record carries the
+  session mark (below), through the server's
   domain pid, which the server's domain already holds, since a send
   exports its sender's pid to the receiving domain; the request names no
   process to reply to. An error fails the operation;
@@ -2063,7 +2140,7 @@ Who holds what, with the rights each capability carries:
 | Holder | Holds |
 | --- | --- |
 | the system domain | the initial capabilities, the root budget (`ALLOC`, `SPACES`, `CODE`, `CARVE`), the root resource (`CARVE`, `POWER`, `TRACE`, `ENTROPY`, `INSPECT`) and the boot image (`SYSTEM`) among them; every principal's budget and every domain's space, own and outer budgets and group with every right; every object it created for a domain; every connection's objects and child budgets, with the only `DESTROY`; every device's objects until it gives them, and their `DESTROY` always; every unconfined device's memory; the fault gate (bound to the fault thread); the sealing page; the time page; `CONFIGURE` on the `system` group, the `users` group, every principal group and every domain group; on another domain's processes, only what that domain's runtime exports to it, as any peer ([design-domains.md](design-domains.md#authority)) |
-| a domain | its own objects; its own budget (`ALLOC`, and `SPACES` only where the system domain allows it, [Sub-spaces](#sub-spaces)); its group (`ATTACH`, `SIGNAL`) and the group's shared areas; for each of its connections: its own side (`READ`, `WRITE`, `MAP`), the peer's side (`READ`, `MAP`) and the peer's bell (`TRIGGER`), and no capability to its own bell, which the system domain bound to the domain's group and whose label the domain knows; the time page (`READ`, `MAP`); its release slice; its crash area; its boot information page |
+| a domain | its own objects; its own budget (`ALLOC`, and `SPACES` only where the system domain allows it, [Sub-spaces](#sub-spaces)); its group (`ATTACH`, `SIGNAL`) and the group's shared areas; for each of its connections: its own side (`READ`, `WRITE`, `MAP`), the peer's side (`READ`, `MAP`), the peer's bell (`TRIGGER`) and, where the connection has a pixel area, the area (`READ`, `WRITE`, `MAP` for the party that writes it, `READ`, `MAP` for its reader), and no capability to its own bell, which the system domain bound to the domain's group and whose label the domain knows; the time page (`READ`, `MAP`); its release slice; its crash area; its boot information page |
 | a domain that holds a device | as a domain, plus the IRQ objects of the device's lines or MSIs (`BIND`, `ACK`), which its driver binds to the domain's group; its DMA window (`MAP`, `BIND`), or for an unconfined device its contiguous memory (`READ`, `WRITE`, `MAP`, `PHYS`); its register windows' memory objects (`READ`, `WRITE`, `MAP`); for the block device's domain and the slot writer, a read-only view of the machine page; all as the domain's creation gave them |
 | a session domain | as a domain holding `SPACES`, plus each code object the domain library made for it (`SUPPLY`, `READ`, `MAP`, `CHILD`, `DUP`, `GIVE`, `EXEC`), and every object it creates for its programs, their channels, pipes and shared mappings of files, with every right, since it is their creator ([design-programs.md](design-programs.md#a-program-is-a-port), [design-pipes.md](design-pipes.md#making-a-pipe), [design-files.md](design-files.md#shared-mappings)) |
 | a domain holding `SPACES` | as its kind of domain, with `CARVE`, `DUP` and `GIVE` also on its own budget; its sub-space group, a child of its group with a grant of its own (`CONFIGURE`, `ATTACH`, `SIGNAL`, `DUP`, `GIVE`); each sub-space it created, with every right, and what it put in them |
@@ -2357,7 +2434,9 @@ domain, holding both of that connection's lanes, the one it reads at its
 lane size with the control table and the one the system domain reads at
 `system_lane`, with both bells; a child budget for each connection its
 `connections` quota allows, holding the lane it reads at its lane size
-and its bell; each child's own records; and its crash area
+and its bell; for a display, the pixel areas its clients can make it
+hold, the sum property 18 computes over the facet rows of its
+`windows` services; each child's own records; and its crash area
 ([Ending a domain](#ending-a-domain)). An
 introduction carves a child from the reader's outer budget, which the
 policy sized for it, so an introduction fails with `ERX_ENOMEM` only
@@ -2945,6 +3024,7 @@ manifest lists: the vault.
 | host link, `erx_hostlink` | sessions with the development host | [design-live.md](design-live.md#the-host-link) |
 | code service, `erx_code` | the code store, code facets, overlays, the install facet | [design-live.md](design-live.md#the-code-store) |
 | update service, `erx_update` | system updates, through the slot writer: writing the spare slot, the trial, the commit and the fallback | [design-storage.md](design-storage.md#system-updates) |
+| start service, `erx_start` | the start table, the manifest's `start` rows with the machine's `rc.conf` over them, and the supervisor and keeper of each row; the `apps` tree | [design-apps.md](design-apps.md) |
 | file trees, `erx_procfs` and the device service's tree | the system domain's own `/proc`, the system shell's and the host link's, as every domain runs one for itself; `/dev` for administrators | [design-live.md](design-live.md#the-proc-tree), [Devices](#devices) |
 | web login, `erx_web_login` | the web domain's facet with two operations: `login`, which checks a login with the vault as the console does, starts a session and introduces it to the web domain, and `logout`, which ends a session a login through it started; the sessions it started end with it | [design-web.md](design-web.md#logging-in-and-the-line) |
 | vault, `erx_vault`, in a domain of its own | principals' keys and secrets; logins; signatures for key facets, by purpose; its sealing backend, and that backend's driver where it has one | [The vault](#the-vault) |

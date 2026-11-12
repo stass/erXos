@@ -743,7 +743,7 @@ every property it takes at its bound, exceeds `web_ui_op_max`, the room
 one web update leaves for an operation
 ([design-web.md](design-web.md#the-protocol)), a root limit of
 `web.txt` ([Web protocol](#web-protocol)); and beside it `ui.txt`'s own
-`ui_pixels_max` and `ui_children`, the most children one
+`ui_children`, the most children one
 node of a tree has, 1,024, which bounds the difference of two trees and
 keeps every `insert`'s and `move`'s index within its `u16`.
 
@@ -806,20 +806,23 @@ from the protocol's kinds. Integers are little-endian. Each message is a
 | `screen`, tag 7 | width `u16`, height `u16`, and the target's channel as Plan 9's `u32` channel descriptor |
 | `input`, tag 8 | a `u8` form and its fields: pointer 1, with x `u16`, y `u16` and buttons `u8`; key 2, with down 1 or up 0 as a `u8`, code `u16` and rune `u32`, 0xffffffff for none; wheel 3, with steps as a signed `u8` |
 | `repaint`, tag 9 | none |
-| `pixels`, tag 10 | x `u16`, y `u16`, width `u16`, height `u16`, and the rectangle's pixels, its rows of `bytesperline` bytes in the channel of the last `screen` record |
+| `damage`, tag 10 | a `u8` count, 1 to 16, and that many rectangles, each x `u16`, y `u16`, width `u16` and height `u16`: what the renderer drew in its window's buffer since its last report |
+| `presented`, tag 11 | none |
 
-`insert` to `commit`, `screen`, `input` and `repaint` go from the server
-to a renderer; `event` and `pixels` from a renderer to the server. Only a
-native renderer's pipes carry `screen`, `input`, `repaint` and `pixels`
+`insert` to `commit`, `screen`, `input`, `repaint` and `presented` go
+from the server to a renderer; `event` and `damage` from a renderer to
+the server. Only a native renderer's pipes carry `screen`, `input`,
+`repaint`, `presented` and `damage`
 ([The widget server](design-display.md#the-widget-server)); the web
-protocol carries none of them, and its readers refuse their tags. A
-`pixels` message is the one longer than `web_ui_op_max`: its length is at
-most `ui_pixels_max`, a root limit of `ui.txt` of 65,536 bytes of pixels
-and the header, and a renderer whose flushed area is larger splits it
-into bands of rows. The reader frames the pixels by the message's length
-alone; that their count is the rectangle's at the channel's depth, and
-that the rectangle lies within the target, is checked by the process
-that consumes them, which knows the target.
+protocol carries none of them, and its readers refuse their tags. No
+message carries pixels: a native renderer draws into its window's
+buffer, which its session mapped into it
+([The pixel area](design-display.md#the-pixel-area)), reports the
+rectangles it drew in one `damage` message for each refresh, and draws
+again only after the `presented` that answers it. The reader refuses a
+count of 0 or above 16 and a rectangle of no width or height; that each
+rectangle lies within the window is checked by the process that
+consumes the report, which knows the window.
 
 Properties are a `u8` count and, for each, its number and its value: a
 boolean as a `u8` of 0 or 1; an integer as a signed 32-bit value; an enum or an
@@ -853,26 +856,25 @@ timeout of 0 with `timeout` or a non-zero one with any other status; a key
 presentation name or a text that is not valid UTF-8.
 
 The generator emits `erx_ui_wire`, the Erlang encoder of every message,
-its reader of `event` and `pixels` and its reader of the server's
+its reader of `event` and `damage` and its reader of the server's
 messages; `web/src/generated/ui_wire.ts`, the same readers and writers in
 TypeScript, whose reader of the server's messages hands every text out as
 a `MachineText` ([The client](design-web.md#the-client)); and `erx/ui_wire.h` with its
 freestanding C source, the reader of `insert` to `commit`, `screen`,
-`input` and `repaint` and the writer of `event` and `pixels` that a
-native renderer links. The C code allocates nothing: texts read point
-into the caller's buffer, and a list's texts are walked from its encoded
-bytes; a record is written into the caller's buffer, refused whole when
-it does not fit or breaks a rule a reader checks, and the writer's
-pixels may already sit where the record puts them, so a renderer can
-draw into the record itself. The encoder takes the canonical
+`input`, `repaint` and `presented` and the writer of `event` and
+`damage` that a native renderer links. The C code allocates nothing:
+texts read point into the caller's buffer, and a list's texts are walked
+from its encoded bytes; a record is written into the caller's buffer and
+refused whole when it does not fit or breaks a rule a reader checks. The
+encoder takes the canonical
 text of a `present` value as a function, `erx_present:text/2` in the
 widget server, so the generated module depends on no presentation table.
 In Erlang, `screen` is `{screen, Width, Height, Chan}`, `input` is
 `{input, {pointer, X, Y, Buttons}}`, `{input, {key, down | up, Code,
-Rune | none}}` or `{input, {wheel, Steps}}`, `repaint` is the atom, an
-event is `{event, Node, Event, Detail}` with the detail `none`, a
-boolean, an integer or a binary, and a report is `{pixels, X, Y, Width,
-Height, Pixels}`. The Erlang reader of the server's messages returns them
+Rune | none}}` or `{input, {wheel, Steps}}`, `repaint` and `presented`
+are the atoms, an event is `{event, Node, Event, Detail}` with the detail
+`none`, a boolean, an integer or a binary, and a report is `{damage,
+[{X, Y, Width, Height}]}`. The Erlang reader of the server's messages returns them
 as the encoder takes them, with what the binary form carries of each
 value: an event property as `true`, a presentation as `{Name, Text}`, two
 binaries, since a name read from input makes no atom, and an `error`

@@ -325,21 +325,32 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 
 * **The PL011 console driver sends a byte at a time** (`erlang/apps/erx_uart/src/erx_pl011.erl`, `send`): each byte costs two register BIF calls, a read of `FR.TXFF` and a write of `DR`, and a full transmit FIFO waits a whole millisecond before it looks again. The command shell's `cat` of `/NOTICES` reached the host's terminal at about 256 KB/s (769,610 bytes in 3 s; Apple M3 Max, macOS, HVF, QEMU 11.1.3, one guest CPU, the development boot image of `tools/erx boot`, the serial line on a pseudo-terminal), so a 16 MB file takes about a minute. Settled by timing the console transcript's 20,000-byte output under HVF against a send that waits for `FR.TXFE` and then writes a whole FIFO's worth without reading `FR` between bytes.
 
-* **[Medium] display, a full-screen pixel load across domains**
-  ([design-display.md](design-display.md#performance)): a `y` load crosses
-  the lane, the funnel, the file server and `erx_memdraw`. Settled by
-  MB/s on HVF at 1920x1080; the fix on the table is a pixel object made by
-  the system domain and installed in both domains, as shared mappings are.
-* **[Low] display, the copy from the screen image to the framebuffer pool**
-  per dirty rectangle (`erx_device:fill/3`). Settled by frame times on a
-  full-screen redraw; the fix on the table is an `erx_memdraw` image over
-  the pool buffer.
+* **[Medium] display, the copy path's rate**
+  ([design-display.md](design-display.md#performance)): `erx_screen`
+  copies the changed rectangles from a client's mapped pixel area into
+  the screen image. Settled by MB/s at 1920x1080 on HVF and under TCG;
+  the fix on the table is the direct path, on which the device reads the
+  client's buffer.
+* **[Medium] display, a present's round trip**
+  ([design-display.md](design-display.md#performance)): from the client's
+  write of `ctl` to its answer, through the lane, the funnel, `erx_winfs`,
+  the window process, `erx_screen` and the driver. Settled by round trips
+  a second against the device's frame time on HVF; the fix on the table
+  is a shorter way for a present than a file write.
+* **[Medium] display, pixel areas reserved and unused**
+  ([design-display.md](design-display.md#the-pixel-area)): an area is
+  charged whole when its connection is made. Settled by the bytes
+  `erx_pixels` has handed out against each area's size on a desktop in
+  ordinary use; the fix on the table is areas that grow on request.
+* **[Low] display, the direct path against the copy path on a confined
+  virtio-gpu**, once erXos's kernel runs the device behind the IOMMU.
+  Settled by the frame time of a full-screen redraw on each.
 * **[Low] display, `erx_draw_core:plan/2` over its worst writes**: a
   write of `i 4096` messages allocates about 200 MB in all, `l` copies its
   font cache's records (up to 64 KiB) on each glyph, and one `s` of 32,000
   indices plans 32,000 draws, about 7 MB of terms. Settled by the plan's
   time and allocation for each of those writes at 64 KiB; the fix on the
-  table is a mutable record table in the window process.
+  table is a mutable record table in the draw connection.
 * **[Low] display, the dirty-scheduler threshold for draw operations**
   (64 KiB of destination pixels proposed). Settled by latency of small and
   large draws on and off dirty schedulers.
@@ -354,27 +365,23 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   on every word and of wide characters, against libvterm on the same
   corpus.
 * **[Low] display, virtio-gpu transfer and flush latency per rectangle**
-  under TCG, and how `erx_screen` gathers waiting flushes into one push. Settled by flushes per
+  under TCG, and how `erx_screen` gathers waiting presents into one frame. Settled by presents per
   second and latency per rectangle size.
-* **[Medium] display, a terminal's draws cross domains**
-  ([design-display.md](design-display.md#performance)): `erx_term` runs in
-  the session and sends every draw batch across the lane, the funnel and
-  the file server. Settled by the scrolling of a large `cat` at 80x24 and
-  at full screen on HVF; the fix on the table is the pixel object above.
-* **[Low] display, the display domain's own clients go through `erx_winfs`**
-  ([design-display.md](design-display.md#performance)): the menu and the
-  Erlang renderer send every draw batch through the file server. Settled
-  by renderer frame times against a direct hand-off.
-* **[Low] display, composes run one at a time in `erx_screen`**, and a
-  window waits in its flush call. Settled by several animating windows and
-  a kiosk's flush latency.
-* **[Low] display, a kiosk under LVGL copies each dirty rectangle twice**
-  ([design-display.md](design-display.md#kiosks-and-glasses)): once through
-  the LVGL program's standard output into the display domain, once into
-  the framebuffer. Settled by a full-screen redraw's time on a 240 by 240
-  panel and at QEMU `virt`'s screen size under HVF; the fix on the table
-  is the scan-out buffer mapped into the program's sub-space, which
-  design-display rejects until a number asks for it.
+* **[Low] display, a terminal's scrolling through its own draw
+  connection** ([design-display.md](design-display.md#performance)):
+  `erx_term` draws in its session into its window's buffer and presents.
+  Settled by the scrolling of a large `cat` at 80x24 and at full screen
+  on HVF.
+* **[Low] display, copies run one at a time in `erx_screen`**, and a
+  client waits in its present. Settled by several animating windows and
+  a kiosk's present latency.
+* **[Low] display, a kiosk's frame under LVGL**
+  ([design-display.md](design-display.md#kiosks-and-glasses)): LVGL's
+  render into the mapped buffer, the `damage` report's pipe round trip,
+  the present and the `presented` record back. Settled by a full-screen
+  redraw's time on a 240 by 240 panel and at 800 by 480 and 1920 by 1080
+  under HVF; the fix on the table is a second buffer, so that the program
+  renders the next frame while the display shows the last.
 * **[Low] web, gate GW on a board's UART**
   ([design-web.md](design-web.md#risks-and-open-questions)): GW's UART
   numbers come from a host-side pacer at 11,520 bytes a second each way,

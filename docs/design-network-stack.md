@@ -3842,7 +3842,7 @@ the runtime seam nor the facet machinery changes them:
   its buffers, and the grant's counts) are admitted only without an
   envelope and from a process of the grant's node. The mint has the same
   path, `erx_net_admit:mint/2`, which takes only `{erx_facet_mint, Tag,
-  net, Grantee, Limits}` in the system domain's envelope
+  net, Grantee, Principal, Limits}` in the system domain's envelope
   ([design-system.md](design-system.md#facets-a-configured-domain-serves)),
   and refuses and counts one whose `Grantee` is the system domain's id
   (**The system domain never holds the grant**, in [The grant](#the-grant)).

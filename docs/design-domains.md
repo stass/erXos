@@ -323,7 +323,7 @@ call ([design-runtime.md](design-runtime.md#liberx)).
 | **D9.** Signals from one process to another arrive in the order sent, but for a domain pid's connection-control records about different peer node names | a runtime writes each sending process's frames for one peer into one lane in send order; a domain pid's records travel in its domain's control table, outside the lane, and at most one per peer node name is outstanding ([Connections](#connections)); a lane is a single-producer, single-consumer ring, read in order; `erts_net_message` keeps order per connection; every answer about a process comes from its own runtime, on the same lane behind what it sent before | a path that reorders one pair's frames; an answer about a process written by anyone but its runtime | a property test that interleaves sends, links, monitors of dead and unexported processes, links to processes held without `link`, and exits between three domains and checks per-pair order |
 | **D12.** What a peer can make a runtime hold is bounded by the runtime's own limits, and what a domain can make the system domain hold is a sum fixed when the domain is admitted | the lane a receiver reads is sized by its own `lane`; an open record's private buffer grows as its bytes arrive, up to the receiver's own `max_frame`, never allocated whole on a header's word; a decoded term by its `max_message_heap`, or by the target process's own request limit; what its processes keep queued and undecoded by their queue quotas, past which the funnel leaves the next frame for them in the lane, and, for a process without one, by its own `max_heap_size`; the links and monitors it holds with a peer's processes, and the signals it queues for them, by its `peer_held`, past which it ends the connection; its queue to a peer that does not drain by ERTS's busy limit, past which its senders wait or, sending with `nosuspend`, are refused and told when to try again, plus one frame for each process caught between the busy check and its enqueue ([Flow control](#flow-control)), and in the system domain by `system_queue`, past which a message is dropped and any other signal ends the connection; a process with stock OTP's `async_dist` set queues past the busy limit in its own domain's memory, so a process that must be refused is spawned with the flag cleared; its export table by its `exports`; atoms, funs and exports by its `foreign_atoms`; the system domain's sum per domain is [Flow control](#flow-control)'s | a delivery path that skips a check; a buffer the receiver allocates on a peer's say-so without a bound of its own; a queue in the system domain that grows while a domain does not drain; a funnel that queues a frame on a process at its quota | floods past every limit from many peers at once, and records whose bytes trickle in; the receiver's memory stays within its budget, and the system domain's within the sum per admitted domain |
 | **D13.** A stale export costs nothing to find | an export's holders live on its name's own record, the process or the active alias, and go with it, at the transition that ends the process or deactivates the alias; a peer's holders end when the connection goes down; a pid names its process by number and serial, so a lookup that finds no live record finds no holder | holders kept anywhere but on their name's own record; an entry keyed in a way a later process can match | a soak test of a million alias exports and deactivations from one live process, with every OTP alias mode, and of pids handed out by processes that then exit; the export table stays at its live names |
-| **D16.** Every page of a connection has one writer, is charged to a child budget of an outer budget, one child per connection, that the system domain destroys only once both parties have let go: the reader's outer budget for a connection between domains, the domain's for its system connection; and only the system domain deletes it | each party writes exactly one memory object of a connection and maps the other's read-only; the system domain carves the connection's children and creates both sides and both bells from them, and gives each party its capabilities without `DESTROY` ([Connections](#connections)); it deletes a connection's objects and destroys its children only once each party has unmapped them or ended, never on a timer while a party lives, and destroys an ended domain's outer budget only once none of its children remains, keeping it meanwhile as the domain's remains, charged to its principal, while the domain itself is released at its end | a page both parties write; a capability with the delete right in a party's table; a lane charged to its writer, to the budget its reader alone maps, to the system domain's own budget, or to an outer budget directly; a deletion while a party that has not answered still maps it | a test that each party's table holds no delete right on a connection's objects; budgets return to their baselines after every test; a hostile peer that rewrites its pages while the other reads them disturbs nothing but its own frames; a survivor that never answers `connection_down` keeps the connection's objects, counted against its own `connections`, never faults on them, and keeps of the ended domain's outer budget only that connection's child, which a test that reads the budget's charge after the end checks, while the ended domain, a configured one, restarts at once; seeded failure: a connection charged to the outer budget directly, under which the survivor keeps the whole outer budget |
+| **D16.** Every page of a connection has one writer, is charged to a child budget of an outer budget, one child per connection, that the system domain destroys only once both parties have let go: the reader's outer budget for a connection between domains, the domain's for its system connection; and only the system domain deletes it | each memory object of a connection is written by one party and mapped read-only by the other: each party's side, and the pixel area of a connection that has one; the system domain carves the connection's children and creates both sides, both bells and the area from them, and gives each party its capabilities without `DESTROY` ([Connections](#connections)); it deletes a connection's objects and destroys its children only once each party has unmapped them or ended, never on a timer while a party lives, and destroys an ended domain's outer budget only once none of its children remains, keeping it meanwhile as the domain's remains, charged to its principal, while the domain itself is released at its end | a page both parties write; a capability with the delete right in a party's table; a lane charged to its writer, to the budget its reader alone maps, to the system domain's own budget, or to an outer budget directly; a deletion while a party that has not answered still maps it | a test that each party's table holds no delete right on a connection's objects; budgets return to their baselines after every test; a hostile peer that rewrites its pages while the other reads them disturbs nothing but its own frames; a survivor that never answers `connection_down` keeps the connection's objects, counted against its own `connections`, never faults on them, and keeps of the ended domain's outer budget only that connection's child, which a test that reads the budget's charge after the end checks, while the ended domain, a configured one, restarts at once; seeded failure: a connection charged to the outer budget directly, under which the survivor keeps the whole outer budget |
 | **D17.** A domain's end reaches each peer behind everything the domain published on their lane | the kernel posts a space's exit record only when no thread of it can run, so the dead domain's write position is final; a runtime told that a connection is down first drains that lane to the position it reads then, waiting on nothing the dead domain would have to do, and only then fires its links and monitors with the peer's processes | a runtime that acts on a connection down before draining; a stop reported while a thread can still run | a test that kills a domain mid-burst on every CPU and checks that each peer sees the burst, then the death |
 | **D18.** No process acts on a message from another domain that the owner of its protocol did not admit | the peer delivers every message from another domain, to a pid or to an alias, as `{erx_origin, D, Msg}`, `D` the domain of the lane it arrived on, with no flag and no exception (edit 16 of [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)), so such a message never has the shape of one from the receiver's own domain; only the owner of a protocol that crosses domains takes the envelope off, in its own receive and only for its own shapes: `erts_internal` for a spawn's argument list, which ERTS queues as the child's first message, `gen` for call replies, `io` for io replies, `erx_file_remote` for a file server's replies, the io servers for io requests, and `gen_server` and `gen_statem` for calls and casts to a server started with `{erx_serve, any}`; each unwrap of a request admits it only when the names its reply goes to are of `D`, and an unwrap of a reply takes it at the request's own alias whatever `D` ([The peer](#the-peer)); everything else reaches its process as an unknown message that carries its origin, and `sys` takes nothing apart | a delivery path that skips the wrap; an OTP module outside the list that matches the envelope, `sys` or `proc_lib` above all; a served unwrap without the check of `From` | the source check of [design.md](design.md#chokepoint-checks) on OTP's modules, with a seeded extra site; every `sys` call from another domain on a `gen_server`, a `gen_statem`, a `gen_event` and a plain `sys` loop times out, the process runs on and its state is unchanged, with the seeded failure of edit 16 delivering raw ([Verification and testing](#verification-and-testing)) |
 
@@ -514,7 +514,8 @@ node's creation, delegated once when the domain is created.
 ### Connections
 
 A **connection** joins two domains that the system domain has introduced. It
-is two **lanes**, one in each direction, and nothing else: no record of it
+is two **lanes**, one in each direction, and, between a display and a
+client of it, the client's **pixel area** (below), and nothing else: no record of it
 exists anywhere but in the system domain, which made it, and in the two
 runtimes, which use it.
 
@@ -571,7 +572,8 @@ own once it has unbound the object, and neither half runs out
 ([design-runtime.md](design-runtime.md#the-event-table)).
 
 The two lanes of a connection share their memory objects pairwise, so that
-each party writes exactly one object and reads exactly one. Party X's
+the lanes are two objects, of which each party writes one and reads the
+other. Party X's
 **side** of a connection is one memory object:
 
 ```text
@@ -609,6 +611,19 @@ Per object:
 | Y's side | ring header and data area of Y -> X; reader page of X -> Y | Y | X | X's child for the connection |
 | X's bell | none: an IRQ object bound to X's group | rung by Y | taken by X | X's child for the connection |
 | Y's bell | none: an IRQ object bound to Y's group | rung by X | taken by Y | Y's child for the connection |
+| the pixel area, where the connection has one | the pixels of the client's windows | the client | the display | the display's child for the connection |
+
+**A pixel area** is a connection's fifth object, on the connection
+between a display and a domain granted its window tree: one memory
+object of the size the manifest gives that grant, which the client alone
+writes and the display maps read-only, charged as every page of a
+connection is to its reader's child, and created and deleted with the
+connection's other objects
+([design-display.md](design-display.md#the-pixel-area)). It carries
+pixels and no frame: nothing in it is a length, an offset, a pid or a
+capability that its reader acts on, the funnel never reads it, and so
+the lanes stay the only way a signal crosses. No call makes, grows or
+shrinks one after its connection is made.
 
 A domain's connection to the system domain is the one exception to
 charging the reader: both sides and both bells are charged to the domain's
@@ -618,13 +633,16 @@ domain, which its own `system_lane` sizes, is the domain's to pay for
 ([Flow control](#flow-control)), as is the control table on the system
 domain's side (**The control table**, below).
 
-The system domain carves a connection's children and creates all four
-objects of a connection, two sides and two bells, with `ALLOC` on the
+The system domain carves a connection's children and creates every
+object of a connection, two sides, two bells and its pixel area where it
+has one, with `ALLOC` on the
 children, from the two domains' outer budgets, which it holds as their
 creator; binds each bell to its consumer's group, on which it holds
 `SIGNAL` as the group's creator; and gives each party three capabilities:
 its own side with `READ`, `WRITE` and `MAP`; the peer's side with `READ`
-and `MAP`; the peer's bell with `TRIGGER`. No capability it gives carries
+and `MAP`; the peer's bell with `TRIGGER`. A pixel area adds one to
+each: `READ`, `WRITE` and `MAP` for the client, `READ` and `MAP` for the
+display. No capability it gives carries
 `DESTROY`, which no pass conveys anyway
 ([design-kernel.md](design-kernel.md#passing-capabilities)), so neither
 party can delete anything of the connection and neither can make the other
@@ -1650,8 +1668,7 @@ and drivers](#native-processes-and-drivers)).
   stock messages, bare
   ([design-network-stack.md](design-network-stack.md#the-socket-process));
   the connection agent checks `D` against the system domain, the domain
-  pid against its own domain, and an application takes the display's
-  events as `{erx_origin, D, {ui, Window, Term, Detail}}`.
+  pid against its own domain.
 * **What it holds for other domains.** A runtime also holds state because of
   another domain's processes: the links and monitors they hold with its
   processes, and the signals ERTS queues for them on behalf of no running
@@ -1900,16 +1917,18 @@ anything is applied
 ([design-system.md](design-system.md#the-domain-library)): it carves a
 child for the connection from each domain's outer budget, or from the
 domain's alone on its connection to the system domain; creates both sides,
-each from the reader's child and sized by the reader's `lane`, and both
+each from the reader's child and sized by the reader's `lane`, both
 bells, each from the child of the domain that waits on it, or all four
-from the domain's child on its system connection; binds each bell to that
+from the domain's child on its system connection, and, for a display and
+a client of it, the pixel area, from the display's child and sized by the
+manifest; binds each bell to that
 domain's group with the next label below `ERX_LABEL_SPLIT` from the
 counter the domain service keeps for that domain
-([Connections](#connections)); gives each party its three capabilities,
+([Connections](#connections)); gives each party its capabilities,
 without `DESTROY`; and only then the domain service records the
 connection and tells each party `connection_up`, through the party's
-domain pid, naming the peer's id and node name, the slots, the label and
-the two sizes, in the order of **The control table**
+domain pid, naming the peer's id and node name, the slots, the label,
+the two sizes and the pixel area if any, in the order of **The control table**
 ([Connections](#connections)) for that party and peer name, in the slot
 the domain service gives the connection. It tells a domain nothing before the domain's init has
 reported ready, since only that report gives the domain pid the agent's
@@ -2555,7 +2574,8 @@ that end with the grant.
 **The facet table.** Every facet is an instance of an interface that
 `abi/services` declares: the system manifest's service row names the
 interface, its server and the name grantees hold it under, and its
-facet rows name the grantees, so `data` is an instance of `files`, and
+facet rows name the grantees, so `data` is an instance of `files`, a
+display's tree one of `windows`, and
 `storage_ctl` and `network_ctl` are instances of `driver_control`. The
 build generates from the manifest the table of service names, and the
 domain service's one funnel for a domain's facets,
@@ -2735,14 +2755,14 @@ A **session** is what a principal starts by a login at a console line
 (the UART or the host link,
 [design-live.md](design-live.md#the-console)), by a login through the web
 front end ([design-web.md](design-web.md)), or from the menu of a line
-that has the principal; the domain service also starts, with no login,
-the session a display's manifest entry names
-([design-display.md](design-display.md#a-displays-session)). A session
+that has the principal; a row of the start table also starts one, with
+no login, an app's session and a display's session among them
+([design-apps.md](design-apps.md#the-start-table)). A session
 is its facets and its session domain, created when it starts, in which
 the principal's shells run, at its own line and in its terminals on a
 display, and whose sub-spaces are the principal's programs.
 The domain service starts it with `erx_domain:start_session(Principal,
-Facets)`, from the principal's session template alone: the domain library
+Start)`, from the principal's session template alone: the domain library
 builds the domain from the template's runtime, release, arguments,
 environment and limits record (the origin `ERX_DOM_SESSION`, whose record is
 the template's index) and judges it as any domain of the principal, against
@@ -2753,10 +2773,15 @@ session of the principal holds (`root_1`, and `root_2` beside it, in a
 development build), so a refused or ended session's name is taken again
 and the names a principal binds are bounded by its living sessions; each
 new binding counts against the domain service's names quota of 64 per
-principal. The facets' `console` names the line the session starts at.
+principal. `Start` is a map: its `console` names the line a login's
+session starts at, and its `display` or `default_display`, which only
+the start service passes, names the display a start row's session
+starts on ([design-apps.md](design-apps.md#starting-a-session)).
 The domain service restarts no session: an ended session's domain is
-gone, and a login at a line asks for a new session, with a new id
-([design-live.md](design-live.md#the-console)).
+gone, and whoever started it asks for a new session, with a new id: a
+login at a line ([design-live.md](design-live.md#the-console)), or a
+start row's keeper
+([design-apps.md](design-apps.md#keeping-a-session)).
 Every domain belongs to one principal, and its budgets are children of
 that principal's budget. A requested domain's CPU group is a child of
 its principal's group under `users`; a configured service domain's group
@@ -2950,7 +2975,7 @@ messages in the system connection's ring, outside the domain pid.
 
 | Message | Direction | Meaning |
 | --- | --- | --- |
-| `{erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize}` | domain pid to agent | a connection to domain `Peer`, node `PeerNode`, exists: the capability slots of the domain's side, the peer's side and the peer's bell, the label the domain's own bell is bound with, and the data areas' sizes, the domain's own lane first; the agent maps, opens the port, brings the entry up and answers `connection_mapped` |
+| `{erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize, Area}` | domain pid to agent | a connection to domain `Peer`, node `PeerNode`, exists: the capability slots of the domain's side, the peer's side and the peer's bell, the label the domain's own bell is bound with, the data areas' sizes, the domain's own lane first, and `Area`, which is `none` or `{writes | reads, Slot, Bytes}` for the connection's pixel area ([design-display.md](design-display.md#the-pixel-area)); the agent maps the sides and the area, the area read-write when it writes it and read-only when it reads it, opens the port, brings the entry up and answers `connection_mapped` |
 | `{erx_connection_mapped, Peer}` | agent to domain pid | the domain has mapped the connection's objects and its entry is up |
 | `{erx_connection_down, Peer, Reason}` | domain pid to agent | the connection is going away, `Reason` being `{domain_down, D, Info}` or `noconnection`; the agent has the port finish at the lane's current position, ends it with `Reason`, which fires its links and monitors with it, unmaps, closes and answers `connection_unmapped`; about a connection the domain has already lost, which it ended from its side while the record was on its way, the agent answers `connection_unmapped` at once, since it has unmapped |
 | `{erx_connection_unmapped, Peer}` | agent to domain pid | the domain has unmapped the connection's objects and closed its capabilities |

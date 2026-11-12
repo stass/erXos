@@ -52,21 +52,23 @@ Decisions every reader of this document needs:
   through that session's own inspect and trace facets, so a browser sees
   exactly what that principal's `erx:i/1` shows, by construction; the web
   domain holds no inspect or trace facet and knows nothing of inspection.
-* **A browser is a display of its own medium.** The web domain serves the
-  display service of `abi/services/display.txt`, the same declaration the
-  display domain serves: `open_ui`, `ui_tree` and `close_ui`, the same
-  `tree()`, the same `{ui, Window, Term, Detail}` events. Its widget
-  server is the display's `erx_ui_server` with a renderer for browsers.
-  The tree states what the widgets are, their values and their events,
-  and the browser renders each kind as a web page renders it; nothing
-  requires it to match the native display's pixels or layout, and scroll
-  position, focus and similar presentation state stay in the browser.
-* **An application names its display.** A session holds a display facet
-  for each display it was introduced to, the web's under the name `web`;
-  `erx_ui:open/1` opens on the display its options name, or on the
-  session's default, and fails at once with `{error, no_display}` when
-  there is none ([Choosing a
-  display](design-display.md#choosing-a-display)). The browser is a
+* **A browser is a display of its own medium.** A UI on the web is its
+  application's own widget server, `erx_ui_server` in the application's
+  session, with a renderer for browsers, as a UI in a window is the same
+  server with a renderer that draws: the same `tree()`, the same
+  `{ui, Window, Term, Detail}` events. The web domain runs no widget
+  server and serves no display interface; a UI is one more kind of view
+  that the session's line serves. The tree states what the widgets are,
+  their values and their events, and the browser renders each kind as a
+  web page renders it; nothing requires it to match the native display's
+  pixels or layout, and scroll position, focus and similar presentation
+  state stay in the browser.
+* **An application names its display.** `erx_ui:open/1` opens on the
+  display its options name, or on the session's default: `web` names
+  the session's line to the web domain, and any other name a display
+  whose window tree the session is granted. It fails at once with
+  `{error, no_display}` when the session has none of that name ([Choosing
+  a display](design-display.md#choosing-a-display)). The browser is a
   second display, never a mirror of the first.
 * **Every view is pulled.** The machine sends a view's next update only
   after the browser asks for it with `next`, which the client sends once
@@ -170,29 +172,32 @@ inspection schema `abi/inspection.txt` and to the pinned fetch step (`tools/erx 
 | browser: the client       |         | erx_hostlink       |      | erx_web_conn: pure core, one |
 |  (TypeScript, React)      |         |   web facet:       |      |   per browser connection     |
 |      | HTTP + WebSocket   |         |   relays message   |----->| lines and logins             |
-| erx web (Ruby):           |--host---|   bytes            |      | erx_ui_server + the browser  |
-|   files from build/web,   |  link   | erx_web_login:     |      |   renderer, one per open UI  |
+| erx web (Ruby):           |--host---|   bytes            |      | relays whole messages; runs  |
+|   files from build/web,   |  link   | erx_web_login:     |      |   no widget server           |
 |   token, cookie, Origin,  |         |   login, logout    |<-----| erx_web_cowboy: network      |
-|   WebSocket relay         |         | display facets     |      |   front end, same core       |
+|   WebSocket relay         |         |                    |      |   front end, same core       |
 +---------------------------+         +--------------------+      +---------------+--------------+
-                                                                    views |  ^ display service
- browser on the network --TLS--> erx_web_cowboy                           v  |
+                                                                    views |
+ browser on the network --TLS--> erx_web_cowboy                           v
                                                                   +------------------------------+
                                                                   | session domain               |
                                                                   | erx_web_line: one view       |
-                                                                  |   process per path or trace, |
+                                                                  |   process per path, trace or |
+                                                                  |   UI; paths and traces       |
                                                                   |   through the session's own  |
                                                                   |   inspect and trace facets   |
-                                                                  | applications: erx_ui on the  |
-                                                                  |   facet named web            |
+                                                                  | applications: erx_ui_server  |
+                                                                  |   with the browser renderer, |
+                                                                  |   one per open UI            |
                                                                   +------------------------------+
 ```
 
 The **web domain** is a configured domain of the manifest, named `web`.
-Its release runs the connection core `erx_web_conn`, one widget server
-with the browser renderer per open UI, the display service those servers
-answer behind, and the network front end `erx_web_cowboy` where the
-manifest gives the domain a network facet; it carries the client's files.
+Its release runs the connection core `erx_web_conn` and the network
+front end `erx_web_cowboy` where the manifest gives the domain a network
+facet; it carries the client's files. It runs no widget server: a UI's
+server and its browser renderer are processes of the application's
+session.
 It holds a **login facet** of the system domain's `erx_web_login`, whose
 two operations are `login` and `logout`. It holds no inspect, trace,
 console or shell facet.
@@ -206,17 +211,18 @@ domain and W8's charge to the principal: budgets are records, so W8's
 bounds hold as the web domain's own limits but nothing is charged
 ([design-domains.md](design-domains.md#on-the-stopgap)).
 
-**A browser is a display.** The display domain owns screens and input
-devices and serves windows; the web domain owns browser connections and
-serves the same widget service. Both serve `abi/services/display.txt`
-through the server dispatch the generator emits from it, behind the
-display facets the system domain mints; both run `erx_ui_server` with
-`erx_ui_schema`, `erx_ui_model` and the state rule; they differ in the
-renderer, as the panel and the desktop do. They are two domains because
-they hold different things: the display domain sees local pixels and
-keystrokes, passphrases typed at the machine included, and the web domain
-parses hostile network bytes, and a domain that parses hostile input
-holds nothing else ([Trust placement](design.md#trust-placement)).
+**A browser is a display.** A UI is a widget server in its application's
+session, whatever shows it: `erx_ui_server` with `erx_ui_schema`,
+`erx_ui_model` and the state rule, and a renderer for the medium
+([The widget server](design-display.md#the-widget-server)). For a screen
+the renderer draws into a window's buffer, which a display domain shows;
+for a browser the renderer, `erx_ui_browser`, hands the tree's changes
+to the session's line, which the web domain relays. Neither domain runs
+a widget server or sees an application's terms. They are two domains
+because they hold different things: the display domain sees local pixels
+and keystrokes, passphrases typed at the machine included, and the web
+domain parses hostile network bytes, and a domain that parses hostile
+input holds nothing else ([Trust placement](design.md#trust-placement)).
 
 **The medium.** A widget tree says that a node is a button labelled
 "Stop" that takes `on_click`, that an input holds a text, that a list has
@@ -230,15 +236,14 @@ tree, the values and the events, and that is what their tests compare.
 The **line** is the web domain's connection to one session domain: the
 session's process `erx_web_line`, exported to the web domain when the
 system domain first introduces the session to it, which opens the views
-of paths and traces; and, minted at the same introduction, the session's
-**display facet named `web`**, through which the session's applications
-open UIs on the web. A session has at most one line, and its line and its
-`web` facet end with the session domain, so neither has a lifetime of its
-own to track. The line itself is not a facet and has no row in the facet
-table: it is a name that an operation of a declared facet hands out,
-`login` of the login facet or the host link's `web` root, which is how
-every route between domains begins
-([design.md](design.md#decisions)); what travels on it is the web
+of paths, traces and UIs. A session with a line has the display named
+`web`: its applications' `erx_ui:open/1` opens there with the browser
+renderer. A session has at most one line, which ends with the session
+domain, so it has no lifetime of its own to track. The line itself is
+not a facet and has no row in the facet table: it is a name that an
+operation of a declared facet hands out, `login` of the login facet or
+the host link's `web` root, which is how every route between domains
+begins ([design.md](design.md#decisions)); what travels on it is the web
 relay's conversation, the protocol's types as Erlang terms. Its views
 read through the session's own inspect facet, at that facet's scope,
 and the line holds no scope of its own.
@@ -265,7 +270,7 @@ opens one view per thing on its screen.
 | **W5.** Both front ends carry the same protocol | each front end's job is to authenticate, terminate the WebSocket and hand whole messages to `erx_web_conn`, a pure core both drive; neither reads a message's contents | a front end that answers, filters or caches a message | a differential test: one scripted client through the host tool and through cowboy against the same machine state receives byte-identical message sequences |
 | **W6.** Opening a URL changes nothing on the machine | the targets a URL names (a path, a UI, the UI list) are queries; a trace starts only by the `trace` target, which the client opens only from a user's action on the trace page, never from a URL and never on a reconnect; UI events come only from user input | a target that starts or selects something; a client route, or a reconnect, that opens `trace` | a headless test that loads every URL form and reconnects with a trace page open, and finds no trace started and no event delivered, with a seeded route that opens a trace failing it |
 | **W7.** Never fabricate | a value whose status is not `ok` carries its status on the wire and shows its token, as `erx_render` prints it; a listing cut at the inspector's page limit is marked partial; a log tail that missed entries shows a gap with its count; a view whose connection is lost shows "stale since" its last update; a view the machine ended shows why | a client that prints a status as a value; a reconnect that shows old data as current | status tests over `unknown`, `timeout` and `partial` values in the browser; a test that stops the guest and finds every view marked stale within the ping interval |
-| **W8.** What one browser can make the machine hold or do is bounded and charged to its principal | a view is sent one update per `next`, so the web domain holds at most one update of at most 64 KiB per open view, 16 views per connection; the line's views are processes within its bound; every query runs through the session's facets, within their shares; every UI within the session's display grant on the web | an unbounded table; a view that answers twice for one `next`; a query on the web domain's own account | tests at each bound with the next request refused; a test that a client which never sends `next` receives one update per view while the web domain's memory for it stays under 1 MiB |
+| **W8.** What one browser can make the machine hold or do is bounded and charged to its principal | a view is sent one update per `next`, so the web domain holds at most one update of at most 64 KiB per open view, 16 views per connection; the line's views are processes within its bound; every query runs through the session's facets, within their shares; every UI is a widget server of the session's own, on the session's budget and share, at most `web_uis_max` of them on the web | an unbounded table; a view that answers twice for one `next`; a query on the web domain's own account | tests at each bound with the next request refused; a test that a client which never sends `next` receives one update per view while the web domain's memory for it stays under 1 MiB |
 
 ## Data model
 
@@ -330,8 +335,8 @@ Targets:
 | --- | --- | --- |
 | `path` | segments (at most 16, each at most 256 bytes) | the line: a record, or a log when the schema marks the path append-only |
 | `trace` | selection: at most 16 pid or domain presentations, and flags for their frames and for kernel events | the line: a trace through the session's trace facet |
-| `ui` | number (`u32`) | the web domain: attaches to the session's open UI of that number |
-| `uis` | none | the web domain: the session's open UIs on the web, by number and label |
+| `ui` | number (`u32`) | the line: attaches to the session's open UI of that number |
+| `uis` | none | the line: the session's open UIs on the web, by number and label |
 
 From the machine:
 
@@ -444,30 +449,31 @@ WebSocket, and, on the network front end, `POST /login` and
 %% Input:  {in, Bytes} | {text, Bytes} | {opened, View, Pid} | {update, View, Body}
 %%       | {ended, View, Reason} | tick
 %% Action: {send, Bytes} | {close, Reason} | {open, View, Target} | {next, Pid}
-%%       | {stop, Pid} | {event, Pid, Record}
+%%       | {stop, Pid} | {event, Pid, Event}
 ```
 
 `{in, Bytes}` and `{text, Bytes}` are a binary and a text WebSocket
 message; `{opened, View, Pid}` reports the process `perform/2` started for
 an `open`; `tick` reports that `web_idle_ms` passed with no frame from the
-browser. An `event` action carries the event's `ui.txt` record as the
-browser sent it, for the renderer to decode ([UIs: the browser
-renderer](#uis-the-browser-renderer)).
+browser. An `event` action carries the event that `step/2` decoded from
+the message's `ui.txt` record with the generated reader, the term
+`{event, Node, Event, Detail}`, to the UI's view on the line ([UIs: the
+browser renderer](#uis-the-browser-renderer)), so a browser's bytes are
+parsed in the web domain and nowhere else.
 
 A front end owns the process that drives it: cowboy's WebSocket handler
 calls `step/2` from its callbacks; for the host link, the web domain runs
 one process per relayed connection that does the same. Both perform the
-actions with one function, `erx_web_conn:perform/2`, which sends `open`
-for a `path` or `trace` target to the line, for a `ui` target to the UI's
-renderer and for `uis` to the line's table of UIs in the web domain, so
-the front ends differ in how bytes arrive and leave and in nothing else
-(W5).
+actions with one function, `erx_web_conn:perform/2`, which sends every
+`open` to the line, whatever its target, so the front ends differ in how
+bytes arrive and leave and in nothing else (W5).
 
 `step/2`:
 
 1. **decodes** an incoming message with the generated `erx_web_proto`,
    which refuses one over 64 KiB, of an unknown tag or outside its
-   bounds; a refused message, a text message or anything before `hello`
+   bounds, and the record of an `event` with the generated reader of
+   `ui.txt`; a refused message, a text message or anything before `hello`
    closes the connection with `bye protocol` and is counted;
 2. **opens and closes views**: at most 16 open at once per connection, a
    17th `ended busy`, which uses its number; view numbers only grow, so an
@@ -485,7 +491,7 @@ the front ends differ in how bytes arrive and leave and in nothing else
    sends the answer as one `update`; an answer no request is waiting for
    is dropped, and one the codec refuses as too long ends the view
    `too_large`;
-4. **forwards events** of a UI view to its renderer.
+4. **forwards events** of a UI view, decoded, to that view on the line.
 
 So the web domain holds at most one update for each open view, 16 times
 64 KiB, 1 MiB for a connection, whatever its views produce, and a browser
@@ -503,7 +509,8 @@ and closes it without a `bye`, since nothing is listening.
 ### Views on the line
 
 `erx_web_line`, its own application in every session domain's release,
-is the parent of the session's views and nothing else: `{open, Target}` from the web
+is the parent of the session's views and the keeper of the table of the
+session's open UIs on the web, and nothing else: `{open, Target}` from the web
 domain starts a view process under it and answers `{ok, View}`, the view's
 pid, exported to the web domain with the reply, or `{error, busy}` past
 64 views. A view's crash ends that view alone, which the web domain sees
@@ -539,6 +546,13 @@ views.
   trace, and the facet ends a trace whose receiver ends, so a view that
   crashes leaves none behind. A session without a trace facet gets
   `ended no_facet`.
+* **A UI view** (`ui`) attaches to the open UI of its number in the
+  line's table, or is `ended closed` when the table has none. On `next`
+  it asks the UI's `erx_ui_browser` for the next operations and answers
+  with them, and it hands that renderer each event the web domain sends
+  it ([UIs: the browser renderer](#uis-the-browser-renderer)).
+* **The UI list** (`uis`) answers with the table's numbers and labels,
+  and again when the table changes.
 
 The line's views answer the web domain with Erlang terms of the
 protocol's types; the web domain's funnel admits them by their grammar,
@@ -562,47 +576,54 @@ A session's application calls `erx_ui:open(Options)`, `erx_ui:tree/2`
 and `erx_ui:close/1` exactly as for a window; with `display => web` in
 `Options`, or with `web` as the session's default display, the UI opens
 on the web ([Choosing a display](design-display.md#choosing-a-display)).
-On `open_ui` through the session's `web` facet the web domain starts
-`erx_ui_server`, the display's widget server, against the grant's
-`windows` quota and at most `web_uis_max` open UIs of the session, with
-`erx_ui_browser` as its renderer, and replies `{ok, Window}`. The UI's number, its `/ui/N`, counts the session's UIs on
-the web and is never reused; its `label`, the same option that is a
-window's title on a display, names it in the `uis` list.
+`erx_ui` starts the widget server, `erx_ui_server`, in the application's
+own runtime, as it does for every display, with `erx_ui_browser` as its
+renderer and the session's line as the renderer's target, and replies
+`{ok, Window}`. A session without a line, one that no browser has
+reached, gets `{error, no_display}`, and one with `web_uis_max` UIs open
+on the web gets `{error, enomem}`. The line gives the UI its number: a
+UI's `/ui/N` counts the session's UIs on the web and is never reused;
+its `label`, the same option that is a window's title on a display,
+names it in the `uis` list.
 
-`ui_tree` runs as in the display: validate the whole tree with
-`erx_ui_schema`, number it with `erx_ui_model:pair/3`, which keeps the
-values the tree does not set under the node's identity, and hand the
-renderer the operations of `erx_ui_model:delta/2`. Validation and the diff run inside the request, on the
-grantee's share; the tree is bounded by the grant's `ui_nodes` and
-`max_request` ([The widget server](design-display.md#the-widget-server)).
+`erx_ui:tree/2` runs as for a window: the server validates the whole
+tree with `erx_ui_schema`, numbers it with `erx_ui_model:pair/3`, which
+keeps the values the tree does not set under the node's identity, and
+hands the renderer the operations of `erx_ui_model:delta/2`. All of it
+runs in the application's session, on the session's share and budget;
+the tree is bounded by the toolkit's `ui_nodes`
+([The widget server](design-display.md#the-widget-server)).
 
 The operations travel in `ui.txt`'s binary form, written by the generated
-encoder in the web domain. That form carries an `on_*` property as the
-flag that the node takes the event, never the application's term, and a
-`present` property as its type, its canonical text from
-`erx_present:text/2` and its status, so the application's terms stay in
-the widget server and the browser parses no Erlang.
+encoder in the session and relayed by the web domain as bytes. That form
+carries an `on_*` property as the flag that the node takes the event,
+never the application's term, and a `present` property as its type, its
+canonical text from `erx_present:text/2` and its status, so the
+application's terms stay in the widget server, and neither the web
+domain nor the browser parses Erlang.
 
 `erx_ui_browser` is a process per open UI, linked to its server; the
-behaviour's `start/3` receives the renderer target `{web, N}`, the UI's
-entry in the web domain's table of open UIs, where a window's renderer
-receives its window's directory. It keeps two models of the realised
-tree, both keyed by the server's node numbers: **sent**, what the
-attached browser has, and **pending**, what the server has applied. The
-renderer's `apply/2` callback hands it the operations, which it applies
-to pending and nothing else. A connection attaches with a `ui` view;
-attaching sets sent to the empty tree, and a second attachment replaces
-the first, whose view ends `closed`. On a request from the attached view,
-when sent and pending differ, it answers with the first operations of
-`erx_ui_model:delta(Sent, Pending)`, the display's one difference, whose
-operations turn sent into pending
-([Widget trees](design-display.md#widget-trees)), as many as fit one update, ending with `commit`
-when they are the last, and applies what it sent to sent. A long change
-thus reaches the browser over several updates, which the client keeps
-and applies at `commit`; no operation of a valid tree exceeds one
-update, since `ui.txt` bounds an image's bytes. So a reload, a reconnect and a
-new tab are one case, attach, and a browser that falls behind receives
-the newest tree's difference, never a backlog.
+behaviour's `start/3` receives the renderer target `{web, Line}`, the
+session's line, where a window's renderer receives its window, and
+enters the UI in the line's table of open UIs. It keeps two models of
+the realised tree, both keyed by the server's node numbers: **sent**,
+what the attached browser has, and **pending**, what the server has
+applied. The renderer's `apply/2` callback hands it the operations,
+which it applies to pending and nothing else. A connection attaches with
+a `ui` view, which the line starts as it starts every view ([Views on
+the line](#views-on-the-line)); attaching sets sent to the empty tree,
+and a second attachment replaces the first, whose view ends `closed`. On
+a request from the attached view, when sent and pending differ, it
+answers with the first operations of `erx_ui_model:delta(Sent,
+Pending)`, the display's one difference, whose operations turn sent into
+pending ([Widget trees](design-display.md#widget-trees)), as many as fit
+one update, ending with `commit` when they are the last, and applies
+what it sent to sent. A long change thus reaches the browser over
+several updates, which the client keeps and applies at `commit`; no
+operation of a valid tree exceeds one update, since `ui.txt` bounds an
+image's bytes. So a reload, a reconnect and a new tab are one case,
+attach, and a browser that falls behind receives the newest tree's
+difference, never a backlog.
 
 **Rendering for the browser.** The client renders each kind as a web
 page renders it: containers as flex and grid boxes in the page's flow,
@@ -615,18 +636,20 @@ browser's, kept in the page and never sent to the machine; a UI looks
 like a web page, not like the window the same tree makes on a display,
 and two browsers may lay it out differently.
 
-The browser sends `event` messages in `ui.txt`'s binary event form; the
-renderer process decodes each with the generated Erlang reader, passes it
-through `erx_ui_model:hit/4` against pending, which drops a report for a
-node that is gone or a value outside the node's bounds and records the
-state value (an `input`'s text, a `checkbox`'s state, a `slider`'s value,
-a `list`'s selection) into pending, so a tab that attaches later shows
-it, records it into sent as well, since the browser shows it already, and
-sends the server `{ui_hit, Node, Event, Value}` as the behaviour defines. The
-server fires only the events the tree declares and keeps the values as
-the display's does, so a browser makes an application receive only what
-it asked for (G4 of the display). An event for a node that is gone is
-dropped and counted.
+The browser sends `event` messages in `ui.txt`'s binary event form. The
+connection core decodes each with the generated Erlang reader, in the
+web domain, and sends the event, a term, to the UI's view on the line,
+which hands it to the renderer. The renderer passes it through
+`erx_ui_model:hit/4` against pending, which drops a report for a node
+that is gone or a value outside the node's bounds and records the state
+value (an `input`'s text, a `checkbox`'s state, a `slider`'s value, a
+`list`'s selection) into pending, so a tab that attaches later shows it,
+records it into sent as well, since the browser shows it already, and
+sends the server `{ui_hit, Node, Event, Value}` as the behaviour
+defines. The server fires only the events the tree declares and keeps
+the values as it does for a window, so a browser makes an application
+receive only what it asked for (G4 of the display). An event for a node
+that is gone is dropped and counted.
 
 An `input` with `secret => true` shows its text as marks, in the browser
 as a password input. Its text is never kept: not in pending, so a new
@@ -634,15 +657,19 @@ attachment shows it empty, and not in the server's state. It reaches the
 application as `{erx_secret, Text}` in the event's detail, which
 `erx_render`, the trace relay and the logger's formatter print as
 `[secret]` ([Attributed text](design-live.md#attributed-text)); the web
-domain's processes that hold message bytes drop them from crash reports
-with `format_status/1`.
+domain's processes that hold message bytes, and the session's view and
+renderer that hold the event, drop them from crash reports with
+`format_status/1`.
 
-A UI ends with `close_ui`, with the session's end, or when its opener
-exits; its views end `closed` and it leaves the `uis` list. A browser that
-closes ends no UI: the UI stays with its application, as a window stays
-when nobody looks at it, and the next attachment shows its newest tree.
-When the web domain itself ends, each opener receives `{ui_down, Window,
-display_down}` from its `web` facet, as from any display that goes away.
+A UI ends with `erx_ui:close/1`, with the session's end, or when its
+opener exits; its views end `closed` and it leaves the `uis` list. A
+browser that closes ends no UI: the UI stays with its application, as a
+window stays when nobody looks at it, and the next attachment shows its
+newest tree. The web domain's end ends no UI either, since no part of a
+UI runs there: a session that outlives the web domain, `root`'s reached
+over the host link, keeps its UIs for the next browser, and the sessions
+the web domain's logins started end as at a log-out, their UIs with
+them ([Logging in and the line](#logging-in-and-the-line)).
 
 ### Logging in and the line
 
@@ -656,11 +683,11 @@ that has not enrolled gets `no_match`, the same answer as a wrong
 passphrase, since enrolment is at the UART only. On a match the domain
 service starts a session for the principal, as a console login does; the
 session's environment sets `display` to `web`; and the system domain
-introduces the session to the web domain, exporting its `erx_web_line`
-and minting its `web` display facet, and the reply names the line.
+introduces the session to the web domain, exporting its `erx_web_line`,
+and the reply names the line.
 `logout(Line)` ends a session that a login through this facet started, as
 a console's log-out ends the sessions started there, and is refused for
-any other line; the session's end ends its line, its `web` facet and its
+any other line; the session's end ends its line and its
 applications' UIs. When the web domain ends, its login facet ends with
 it, and the sessions its logins started end as at a log-out. The web
 domain never stores a passphrase.
@@ -670,8 +697,8 @@ development build, the system domain introduces `root`'s session to the
 web domain, as the host link's `console` reaches it, unless it is already;
 the session's environment is unchanged, so an application of `root`'s
 opens on the web when it names `web` or when the user sets `display` to
-it. Closing the facet closes its connections and leaves the line, the
-`web` facet and their UIs with the session.
+it. Closing the facet closes its connections and leaves the line and its
+UIs with the session.
 
 ### The client
 
@@ -874,12 +901,15 @@ messages of at most 64 KiB (`max_frame_size`) and no compression.
   cookie's line.
 * **What cowboy parses** is hostile. Every connection is a process of the
   web domain, so a malformed request crashes at most that process; what
-  the web domain holds of another domain is its lines and the display
-  services it answers, whose requests are admitted by each session's own
-  bounds. cowboy, cowlib and ranch are fetched unmodified and carry no
-  fuzz target of erXos's: their parsers rest on their own tests, and what
-  reaches erXos's code from them is whole messages, which
-  `erx_web_proto` bounds and has its own fuzz target.
+  the web domain holds of another domain is its lines, whose requests are
+  admitted by each session's own bounds. cowboy, cowlib and ranch are
+  fetched unmodified, and their HTTP and WebSocket parsing, as the front
+  end configures and uses it, has a fuzz target of erXos's: the front
+  end's listener driven over an in-memory transport with random and
+  mutated requests and frames, which asserts that each connection
+  process ends or answers within its bounds and that nothing reaches
+  `erx_web_conn` but whole messages within `web.txt`'s limits, which
+  `erx_web_proto` bounds again with its own fuzz target.
 
 ## Interfaces
 
@@ -895,8 +925,7 @@ binary form of `diff_op()` and events, and the content types an `image`
 may carry; the generator emits a reader and a writer of both directions
 in TypeScript, as in Erlang and C.
 
-**`abi/services/display.txt`**: served by the web domain as by a display
-domain. **`abi/services/web.txt`**: `erx_web_login`'s `login` and
+**`abi/services/web.txt`**: `erx_web_login`'s `login` and
 `logout`, and the host link's `web` facet's `connect`, `data` and
 `close`.
 
@@ -907,8 +936,9 @@ the table does not name.
 
 **Erlang**: `erx_web_conn:step/2` and `perform/2`;
 `erx_web_value:project/1`; `erx_ui_model`'s `delta/2` and `hit/4`; the
-`erx_ui_renderer` behaviour, implemented by `erx_ui_browser`;
-`erx_ui:open/1`, `tree/2` and `close/1` of the display.
+`erx_ui_renderer` behaviour, implemented by `erx_ui_browser` in the
+application's session, with the target `{web, Line}`; `erx_ui:open/1`,
+`tree/2` and `close/1` of the display.
 
 **The client**: the files of `build/web/` and their inventory; the routes
 above.
@@ -925,8 +955,8 @@ facets ([Inspection](design-live.md#inspection),
 [Tracing](design-live.md#tracing)); `erx_present` and the inspection
 schema name a presentation's path
 ([Presentations](design-display.md#presentations)); the display's widget
-server, schema, diff and state rule serve UIs, and its display facets and
-default display choose where a UI opens
+server, schema, diff and state rule serve UIs in the application's
+session, and its default display chooses where a UI opens
 ([The widget server](design-display.md#the-widget-server)); the network
 service gives the web domain its network facet
 ([Networking](design.md#networking)); the manifest check refuses the
@@ -951,11 +981,11 @@ them, and the protocol hash in `hello` refuses a client of another build.
 | a view process crashes | the web domain's monitor of it | that view ends `closed`, counted; other views run on | the client reopens it |
 | the session domain ends | the line's exit, which the web domain monitors | every view of the line ends `closed`; its connections receive `bye expired`; its cookie is dropped; its UIs on the web end with the session's applications | the user logs in again; on the host the next opening of `web` introduces `root`'s session again |
 | an application exits | the widget server monitors its opener | the UI's views end `closed`; it leaves `uis` | none needed |
-| a tree fails validation | `erx_ui_schema` | `ui_tree` answers `{error, Reason}`; the UI keeps its tree | the application's bug, logged with the reason |
+| a tree fails validation | `erx_ui_schema` | `erx_ui:tree/2` answers `{error, Reason}`; the UI keeps its tree | the application's bug, logged with the reason |
 | an `erx_ui_browser` crashes | its link to the server | the server and its UI end, the opener receives `{ui_down, Window, Reason}` | the application's own supervisor |
 | a connection process or cowboy crashes | the web domain's supervisor | the browser's WebSocket closes; its views go stale | the client reconnects and reopens its views but `trace`; lines and logins live under a separate supervisor and keep their cookies and UIs |
 | the host link is busy, retrying or down | the host tool's calls fail or time out | every WebSocket closes with 1011; views go stale | the tool's session recovers as [the host link](design-live.md#the-host-link) describes; the client reconnects |
-| the web domain ends | the system domain | every opener of a UI on the web receives `{ui_down, Window, display_down}`; the login facet ends and the sessions its logins started end; `root`'s session runs on | the domain restarts under its manifest policy; browsers log in again; the host tool reopens `web` |
+| the web domain ends | the system domain | every view goes stale; the login facet ends and the sessions its logins started end, their UIs with them; `root`'s session runs on and keeps its UIs, which no browser shows until one attaches again | the domain restarts under its manifest policy; browsers log in again; the host tool reopens `web` |
 | a protocol error from the browser | `erx_web_proto` or the core's view rules | `bye protocol`, the connection closes, counted | the client reloads |
 
 Every refusal and every count (protocol errors, dropped events, busy
@@ -966,8 +996,8 @@ own view; no counter or log line carries a message's contents.
 ## Security
 
 * **Authority** (W1). The web domain holds its network facet, the login
-  facet, its lines and the display services behind the session's `web`
-  facets; no inspect, trace, console or shell facet. The login facet's
+  facet and its lines; no inspect, trace, console or shell facet, and no
+  application's widget tree but as bytes it relays. The login facet's
   two operations name no session, so the web domain reaches a session only
   through a login or, in a development build while the host's `web` facet
   is open, `root`'s. Views are fetched in the principal's session with
@@ -1020,7 +1050,7 @@ own view; no counter or log line carries a message's contents.
   by the generated grammar before any code reads it; a connection has at
   most 16 views, each answered once per `next`; a line at most four
   connections and 64 views; a trace runs on the session's trace facet; a
-  UI within the session's display grant. On the network, cowboy parses
+  UI is the session's own process, at most `web_uis_max` of them. On the network, cowboy parses
   hostile HTTP and WebSocket frames in the web domain, a domain of its
   own; as a domain that parses hostile input, a release manifest that
   gives it an unconfined DMA device fails the manifest check ([The
@@ -1081,6 +1111,7 @@ WebSocket routing and the generated encoder; the end-to-end tests run
 | W2 types | `tsc --noEmit` passes | a seeded component rendering a `MachineText` directly fails to type-check |
 | W3 policy | the headers on every file; the client works under them | a seeded inline script and a seeded `eval` are blocked and reported |
 | host tool HTTP and WebSocket fuzz target (Ruby) | random and mutated requests and frames; no exception escapes; every answer is a file, a refusal or a relay | a deframer without the length check before reading fails on a declared 2^40-byte frame |
+| cowboy front end HTTP and WebSocket fuzz target (Erlang) | random and mutated requests and frames into the front end's listener over an in-memory transport; every connection process answers, refuses or ends, and only whole messages within `web.txt`'s limits reach `erx_web_conn` | the front end with its request-size limit removed lets a request past the limit reach the handler |
 | W4 refusals | no cookie, wrong `Host`, foreign `Origin`, wrong token, a path outside the inventory: each refused or answered with `index.html`; the token in no response; a WebSocket open past 10 s | the server with that check removed upgrades or answers a host file; a server that sets the token as the cookie fails |
 | W5 parity | a scripted client through the host tool and through cowboy receives byte-identical messages | a front end that answers `hello` itself fails |
 | W1 over the host link | in a development build, every view `tools/erx web` opens through the host link's `web` facet (records, `/proc`, a trace, the kernel log, which both answer alike, and the machine's crash record, which both refuse) equals what `root`'s session reads through its own facets at the same moment, compared view by view against the same reads made from that session's console line; a view of a domain `root`'s session cannot see is `ended scope` in both | a `web` facet bound to the system domain's authority instead of `root`'s session shows a record the session cannot read and fails |
@@ -1093,7 +1124,7 @@ WebSocket routing and the generated encoder; the end-to-end tests run
 | UI attach | a UI attached, detached, changed and re-attached shows the newest tree; `apply_ops(delta(A, B), A) == {ok, B}` over random trees; a tree whose delta exceeds one update arrives over several and is applied at `commit` | a renderer that resends the backlog fails on the bound |
 | UI parity of meaning | the display's parity corpus of trees and input sequences, through the browser renderer in Playwright, delivers the same events and values to the application and holds the same set of nodes as the Erlang renderer; no pixel or layout is compared | a seeded swap of two event names in the client fails |
 | presentation state stays in the browser | scrolling a `scroll`, moving focus and selecting text in the browser sends no message to the machine and changes no server state | a client that reports scroll offsets fails |
-| choosing the web display | a session holding `web` opens a UI there with `display => web`; with no display facet `erx_ui:open/1` answers `{error, no_display}` at once; stopping the web domain sends each opener `{ui_down, Window, display_down}`; closing every browser ends no UI | an `erx_ui` that ignores the option opens on the wrong display; a facet without the down report leaves the test's opener waiting past its deadline |
+| choosing the web display | a session with a line opens a UI there with `display => web`; without a line `erx_ui:open/1` answers `{error, no_display}` at once; stopping the web domain ends no UI of `root`'s session, and a browser that attaches after the restart shows the newest tree; closing every browser ends no UI | an `erx_ui` that ignores the option opens on the wrong display; a widget server started in the web domain ends with it and fails the restart case |
 | secrets | a `secret` input's text reaches the application as `{erx_secret, _}`, appears in no counter, log, trace or crash report, and is empty after a re-attach | a renderer that folds the secret into its model fails |
 | build | `make web` from the packages the fetch installed, with the network disabled, twice gives byte-identical files and inventory | a seeded package missing from the lockfile fails the frozen-lockfile install; a seeded local package whose install script writes a file leaves no file; a Node.js of another version than `web/package.json` records is refused |
 
@@ -1194,7 +1225,8 @@ table per platform.
 | a browser renderer that reproduces the native window's layout and look | the browser would need the Erlang renderer's box model, fonts and metrics, and would still differ by browser; a tree that states meaning lets each medium render well, and the tests compare meaning |
 | the browser as a mirror of a native display | one UI on two screens with two sets of presentation state and two sources of events; left out: the browser is a display of its own, and an application chooses where a UI opens |
 | Erlang's external term format on the wire, decoded in the client | the host link's grammar is a starting point, but the client would parse Erlang terms and print them; a declared protocol with a closed value set is smaller, checked by its own generated codec, and fixes what the client must handle |
-| a web front end inside the display domain | one domain fewer and one place for the widget server; but the display domain sees local pixels and keystrokes, passphrases typed at the machine included, and a network parser bug there would reach them. The two domains serve one service declaration and run one widget server, so applications see one service |
+| a web front end inside the display domain | one domain fewer; but the display domain sees local pixels and keystrokes, passphrases typed at the machine included, and a network parser bug there would reach them |
+| the widget server and the browser renderer in the web domain, behind a display interface the web domain serves | every application's tree and events then pass through the domain that parses hostile network bytes, which holds them, runs the schema and the diff on its own budget, and ends every UI when it restarts; with the server in the application's session the web domain relays bytes it cannot read into terms, a UI is charged to its principal, and the same server serves a window and a browser |
 | pages or the client served by the machine over the host link | the developer's browser would run code the machine chose; serving the build tree's files keeps the host's browser free of machine code, and the protocol hash binds them to the build |
 | the web domain holds inspect facets and answers views itself | one hop fewer; every browser would act with the web domain's authority, and bounding a principal would be checks in the web domain; fetching in the session makes W1 hold by construction |
 | `erx_web` in the system domain until cowboy exists | the component that relays hostile input would start in the trusted base; a domain is a manifest entry and a release |
@@ -1217,7 +1249,7 @@ table per platform.
 | cowboy's version does not fit erXos's OTP | low | the network front end waits | cowboy is plain Erlang; a patched copy enters as erXos's code |
 | `ui.txt`'s widget set lacks what a browser UI wants | medium | plainer UIs | the tree gains a kind for every display, never a browser-only one |
 | an attribute type of the schema projects outside `datum()`'s bounds (tuple width, depth 8) | low | such values arrive printed | the generator checks every attribute type of `abi/inspection.txt` against `datum()` and refuses one that does not fit |
-| the owner is rethinking login, and that covers the network front end's `erx_web_login` as well as the console's and the display's | certain | this document's login may change | the login question is open in [design-display.md](design-display.md#risks-and-open-questions); nothing here depends on the display's terminals or the console's lines beyond the vault's limits |
+| the owner is rethinking login, and that covers the network front end's `erx_web_login` as well as the console's and the display's | certain | this document's login may change | login is designed once for every place a person meets the system ([design-display.md](design-display.md#risks-and-decisions), 14); nothing here depends on the display's terminals or the console's lines beyond the vault's limits |
 | no browser view of a terminal exists: W1 gives the web domain no shell facet, and the views are records, logs and traces | certain | a terminal is reachable only at the serial console and over the host link, not in a browser | a browser terminal is a design of its own, with its own authority question, since it would put a shell facet behind the web domain; it waits for the login rethink, which decides how a person reaches a shell from anywhere |
 
 Decided by the owner: TLS on the network front end, with plain HTTP only

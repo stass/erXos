@@ -8,6 +8,52 @@ it; git history is the record of completed work.
 
 ## Major initiatives
 
+* [High] apps, [design-apps.md](docs/design-apps.md#packaging): design app packaging when Track A starts
+  ([plan.md](docs/plan.md#track-a-apps), part 2): how an app reaches a machine after its image is built, as one
+  file a person or developer adds, through the seam design-apps.md keeps (the start table keys on a principal with a
+  session template and a `start` row, so a package adds those and nothing below changes). Its inputs:
+  * an earlier design of **app classes**, cut from design-apps.md as premature, which this design may take up: the
+    manifest declares classes (a session template, its principal and the facet rows granted to it); an app joins a
+    class with a declaration (`class`, `needs` naming services of the class's rows, an EROFS `image` mounted at
+    `/app` by an `erx_app` application of an `app` release, `applications` or `program`, `env`); one pure admission
+    function, `erx_app_admit`, written in Erlang for the machine and in Ruby for the packer and tested on one corpus,
+    answers the grants as set inclusion, so the build's proof over the classes covers every app and no checker runs on
+    the machine; the principal service registers each admitted app with `register_app/1` and `unregister_app/1`;
+    a session of an app is a session of its class's template, filtered to the declared grants in the domain service's
+    one facet funnel;
+  * the **pool**, part of that design: a domain record names the principal it acts for (the app's) and its pool (the
+    class's principal), which pays; the domain library and the resource policy read the pool, and every scope by
+    principal (mint, inspect scope, storage root, death record) reads the principal. Its review found that the
+    inspect scope (design-live.md, "The inspect service") is computed from the grantee template's principal, so
+    every app of a class saw the others' domains, and that the domain service added a grant record for every
+    template row, not only the declared ones: both must read the app's principal and its declared grants;
+  * **per-app identity**: two apps sharing a pool must still see nothing of each other: neither reads the other's
+    directory, and neither's `/proc` shows the other's processes; test with two apps of one pool as the two
+    principals;
+  * **the atom bound**: an app's session name, `<app>_<n>`, is an atom in the system domain; with apps from
+    packages, names come from untrusted declarations, so their count needs a bound that survives install and removal
+    (a quota on the pool, or names recycled from a fixed set), not only the manifest-summed `names` quotas;
+  * an earlier draft of packaging itself, whose external review found HIGH and MEDIUM gaps:
+  * a code overlay persisted for an app's principal lets a storage domain that a crafted partition took over run
+    unsigned code under the app; overlays of apps stay in memory, or are authenticated;
+  * signer continuity: if an app's identity is its name alone, a storage domain can remove every package of signer A
+    and put back one of the same name signed by B, which a scan then admits as the same principal with A's data;
+    bind persistent identity to name and signer (for example a data directory keyed by both), or keep a record of
+    signers where storage cannot rewrite it;
+  * removal is several deletions (versions, start row, data directory); a crash between them resurrects an older
+    version or leaves half an app; mark the removal durably first, finish it at the next boot, and keep the name
+    reserved until every owner of the app's state is done;
+  * an install must make the package file's data durable before the rename that publishes it, then sync the
+    directories, so a crash never leaves a valid header over an incomplete image;
+  * an app needs a grant of its own package to read it; make that grant implicit or required in every declaration,
+    and fix the example and the admission tests to match;
+  * fuzz the whole verification entry point (locating the header, key and signature in attacker-controlled bytes,
+    truncations, bad lengths and bad signatures), not only the header's decoder;
+  * a version floor holds only for an ordinary install, not for rollback or a scan's fallback, against a storage
+    domain that puts back an older signed package; state it so.
+  The owner's decisions on that draft that apply here: `pkg delete` removes an app's data; the administrator
+  approves an app's grants by installing it, within what the build proved, with no prompt; no fetch by name (a fetcher
+  is a command in a person's session that holds `net` and hands the file to the installer).
 * [Medium] runtime, `docs/design-shared-code.md`: build shared loaded code, one prepared copy of the
   preloaded modules and the applications every domain boots, mapped read-only into every domain that runs
   the interpreter. The owner wants it long term. Its trigger, three adopting domains at once, is met: the
@@ -484,21 +530,74 @@ it; git history is the record of completed work.
   enough for QEMU `virt`'s virtio-mmio. A non-coherent device, the Raspberry Pi's, needs the record's coherence flag
   (from the device service) and the envelope's clean and invalidate, and an outer-shareable barrier behind the
   architecture layer.
-* [Medium] `docs/design-display.md`: the display's `flush` copies into a framebuffer with `erx_device:fill/3`, which
-  the device NIF does not have: requests go through `post/4`, which owns its buffers. A framebuffer or a virtio-gpu
-  resource's backing is a long-lived region the device reads again and again, not a request's buffer; the device NIF
-  needs a region call of its own (made once, filled by rectangle, never posted) before the display driver.
-* [Medium] `docs/design-display.md`, "Windows and connections": the design does not say how a window's image 0 is
-  placed on the screen. A window reallocates image 0 only when its size changes, so after a move without a resize the
-  image keeps its old rectangle, and `ctl` reports the new one. `erx_screen_core` works in screen coordinates and takes
-  the image's rectangle as placed; `erx_screen` and `erx_window` need the rule (image 0's top-left corner at the
-  window's, as Plan 9's `getwindow` leaves it, or image 0 always at the origin) and the coordinates of an expose.
+* [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
+  a display driver's screen image is an `erx_memdraw` image over memory the device reads again and again (a virtio-gpu
+  resource's backing, a framebuffer), and on the direct path the driver maps a client's pixel area read-only into its
+  device's DMA window. The device NIF has neither: requests go through `post/4`, which owns its buffers. It needs a
+  region of the device's record (made once, wrapped by `erx_memdraw:wrap/4`, never posted) and the mapping of an area
+  into the DMA window, before the display driver.
+* [High] [design-apps.md](docs/design-apps.md): the code the design asks for, in the order
+  [Track A](docs/plan.md#track-a-apps) builds it; nothing of it is built. The `start` row in `abi/manifest.txt` and
+  property 17; `erx_start` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and
+  `ctl`'s parsers with their fuzz targets; the `apps` tree and `service`; `erx_domain:start_session/2` with `display`
+  and `default_display`; the session mark in the domain service's grant records, carried as `session` by every mint;
+  the mint request `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint
+  that matches the old shape (`erlang/apps/erx_storage/src/erx_lfs_mint.erl`, `erx_net_admit`); the reset count
+  cleared by the first kept session.
+* [High] [design-display.md](docs/design-display.md): the code the design asks for that the tree does not have, in the
+  order [Track D](docs/plan.md#track-d-windows-widgets-and-the-web) builds it. Nothing below is built; the cores named
+  as landed are kept and changed as listed.
+  * **The pixel area** ([The pixel area](docs/design-display.md#the-pixel-area)): `erx_dom_connect` with `area` and
+    `area_reader`, the connection record's `area`, the grant-table rows and the Fiasco backend's row for an object two
+    tasks map (`liberx/system`); `connection_up`'s `Area` and `ERX_LANE_CTL_SLOT`'s pinned length; the connection
+    agent's mapping and unmapping of an area; the `erx_area` NIF and `erx_memdraw:wrap/4`, an image over memory the
+    NIF did not allocate, which the agent unmaps only after the last image over it is gone.
+  * **The manifest** ([A display's session](docs/design-display.md#a-displays-session)): the `display` record in
+    `abi/manifest.txt`, named after the `windows` service it describes, and its reader; property 18 of the manifest
+    check (a template's `pixels` counted by its principal's `domains` quota, no facet row setting `session`) with its
+    seeded violations; `abi/services/windows.txt` with the parameters `windows`, `pixels`, `snarf` and `session`; the
+    display's session from a start row ([Track A](docs/plan.md#track-a-apps), part 1), with `session` carried by
+    every mint of its grant from the session mark the domain service alone sets. A window's buffer at the screen's
+    size, allocated once by `erx_win:open/2`, with `resized/1` allocating nothing; the grant defaults of 8 windows,
+    64 MiB and `snarf` off.
+  * **The screen and the allocator** ([The screen](docs/design-display.md#the-screen-and-its-one-path-to-the-device),
+    [The pixel area](docs/design-display.md#the-pixel-area)): `erx_screen` sends frames with
+    `gen_server:send_request/2` and keeps only pending state (the newest layout, one waiting present per live window,
+    dropped at the window's end); `erx_pixels` hands out zeroed ranges owned by the asking process and takes them back
+    only when it exits, with no `free`; presents and `erx_memdraw:wrap/4` refuse an offset off a page boundary.
+  * **The display domain**: split `erlang/apps/erx_display` so that the display's release holds `erx_winfs`,
+    `erx_window`, `erx_screen`, `erx_screen_core`, the policies, `erx_wm_menu`, the drivers and `erx_memdraw`, and the
+    session's holds `erx_win`, `erx_pixels`, `erx_draw`, `erx_draw_conn`, `erx_draw_core`, `erx_draw_codec`,
+    `erx_draw_image`, `erx_font`, `erx_memdraw`, `erx_term` with `erx_vt`, and `erx_ui` with its servers and
+    renderers; re-scope the chokepoint checks to the two releases (G9: no draw decoder, widget code or font reader in
+    the display's). New: `erx_winctl` with its fuzz target, `erx_pixels_core`, `erx_win`, `erx_draw_conn`.
+    `erx_screen_core` keeps its plan and takes the design's names: a present for a flush, and no expose, since
+    `erx_screen` copies what a layout change uncovers from the windows' buffers.
+  * **The widget format** ([Widget format](docs/design-abi.md#widget-format)): in `abi/formats/ui.txt` the report
+    `pixels` becomes `damage`, the record `presented` is added and `ui_pixels_max` goes; the generators
+    (`tools/lib/erx/abi_emit_ui_*.rb`), the Erlang, C and TypeScript readers and writers and their parity and fuzz
+    tests follow.
+  * **`erx-lvgl`** (`display/lvgl/erx_lvgl.c`, `test/erlang/erx_lvgl_screen.erl`): LVGL's direct mode into the buffer
+    mapped as descriptor 3 in place of partial mode with `pixels` reports; every flush but a refresh's last answered at once
+    and its area added to the refresh's damage, one `damage` report at the last, which stays open until `presented`
+    and is waited on through LVGL's flush-wait callback; `erx_ui_lvgl` writes the program nothing but `presented` while
+    a report is unanswered; the host model screen maps a file both sides share and plays `erx_ui_lvgl` and
+    the display, where it plays `erx_ui_kiosk` today.
+  * **Programs** ([The startup message](docs/design-programs.md#the-startup-message)): the `mem` descriptor in the
+    startup message's profile, `liberx`'s decoder and its fuzz target, `mmap` and `fstat` of it in the personality,
+    and the session's mapping of a buffer's pages into a program's sub-space while it builds it.
+  * **Input from another domain** ([The display device](docs/design-display.md#the-display-device)):
+    `abi/formats/input.txt`, its generated reader and writer and their fuzz target.
+  * **The web** ([UIs: the browser renderer](docs/design-web.md#uis-the-browser-renderer)): `erx_ui_server` and
+    `erx_ui_browser` start in the application's session; `erx_web_line` keeps the table of open UIs and serves the
+    `ui` and `uis` targets as views; `erx_web_conn` decodes an event's record and sends every `open` to the line,
+    where it answers `ui`, `uis` and `event` as unsupported today.
 * [Low] `tools/lib/erx/abi_emit_ui_wire.rb` and `abi_emit_ui_wire_ts.rb`, [Widget format](docs/design-abi.md#widget-format):
   the server's records are declared in `abi/formats/ui.txt` and their code generated, but the two reports' fields
   (event's node, event number and detail; pixels' rectangle and bytes) and the report reader's six reasons are
   still fixed text in the Erlang encoder and `read/1`, the C writers and the TypeScript `readReport`, `writeEvent`
-  and `writePixels`, tied by the parity test. Give `report` lines fields (a `detail` and a `rest` type) and
-  generate them as the records are.
+  and `writePixels`, tied by the parity test. Give `report` lines fields (a `detail` and a list of rectangles, for
+  the `damage` report that takes the place of `pixels`) and generate them as the records are.
 * [Medium] `tools/lib/erx/abi_emit_ui_fields.rb`, [Widget format](docs/design-abi.md#widget-format): a field type's
   code is spread beyond its `UIFields::CODE` row (the Erlang `read_props`/`read_removed`, the C `erx_ui_props`/
   `erx_ui_removed`, `kind_number/1`, the `input()` type, the TypeScript `nodeId`/`kindName`/`rune`/`writeRune`
@@ -730,9 +829,8 @@ it; git history is the record of completed work.
   `end` have no LVGL flex equivalent per child; the program gives such a node its own size at the start of the cross
   axis, so the parity test will differ there. (3) No source declares Plan 9 channel descriptors (`draw.txt` declares only
   the messages); the program computes the four it renders in (`r5g6b5`, `r8g8b8`, `x8r8g8b8`, `a8r8g8b8`) with draw(2)'s
-  `CHAN` packing, and should take them from the generated table once it exists. (4) A screen row must fit one
-  `pixels` report (at most 16,381 pixels at 32 bits); design-abi.md should say a `screen` wider than that is refused.
-  (5) A `present` property is shown as LVGL glyphs without the line escape the design asks for, since no C twin of
+  `CHAN` packing, and should take them from the generated table once it exists.
+  (4) A `present` property is shown as LVGL glyphs without the line escape the design asks for, since no C twin of
   `erx_text:escape_line/1` is generated. Glyph rendering cannot inject terminal controls, but bidirectional overrides
   and invisible format characters still mislead, and LVGL's font draws U+F000-U+F8FF as its built-in icons; the
   simplest fix is for the widget server to escape the canonical text before encoding it.
@@ -4682,6 +4780,19 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] apps, the reset count ([design-apps.md](docs/design-apps.md#keeping-a-session)): the first session a
+  start row keeps clears the count when it reports ready, which can come before its applications have done any
+  work, so a system fault that follows every boot by a little never reaches the rescue configuration. Move the
+  clearing to a point after the app has started, or after it has run a while, and test resets on both sides of it.
+* [Medium] apps, `rc.conf` on the stopgap ([design-apps.md](docs/design-apps.md#phase-1)): `data` grants are not
+  yet rooted by principal, so every domain holding `data` reaches the system domain's directory and can rewrite
+  `start/rc.conf`, enabling or disabling declared rows and moving a display among rows whose templates are granted
+  it. It cannot add a row or widen a grant. Closed by rooting each `data` grant at its principal's or service's
+  directory, with the test that a session holding `data` finds no `start/rc.conf`.
+* [Low] login at a display, the enrolment gap ([design-display.md](docs/design-display.md#risks-and-decisions), 14):
+  a principal that a start row names, an app's or a person's, and that never enrolled can be enrolled by whoever
+  first reaches a secure console line, as any principal can, and then logged in to with its authority. Settle it in
+  the login design, which covers every place a person meets the system.
 - [Low] erx_program credit (`otp/erts/emulator/sys/erxos/erx_program_core.c`): the credit holds reply slots only, so every `{closed}` and `{drained}` notice is refused with SIGSYS. The frame that first hands a program a pipe end must add notice credit (docs/design-programs.md, "Credit").
 - [Low] program channel on the stopgap (`liberx/backend/fiasco/object.c`): the Fiasco backend records no rights per handle, so a program can map the session's lane side read-write. It can bind or unbind only IRQ objects it holds in its own group: it holds no handle to its channel doorbell, and `irq_group_allowed` refuses the session's doorbell, which is also the gate worker's IRQ for the program's port. A program also holds `TRIGGER` copies of its own pipe ends' doorbells, bound in its own group, and can rebind them to any label, label 1 included; that costs it only its own wakes. Any task can create IRQ objects up to the machine-wide 256 (`ERX_FIASCO_IRQS_MAX`) and starve every other domain's doorbells. erXos's kernel enforces the rights the install grants (`erx_program_core.c` `install_rights`).
 
@@ -4960,9 +5071,9 @@ to the corpus and follow rc
   windows with four border rectangles each (about 4,300 tiles) costs about
   90 ms per move, 128 windows about 430 ms, 256 about 2 s (Homebrew OTP 28
   JIT on the Apple Silicon development host, 4096x4096 screen; an
-  unrecorded spot measurement). Have `erx_screen` keep only the newest
-  pending layout, so layouts cost at most one per compose, and cap the
-  rectangles of a layout or charge them to the grant that placed them.
+  unrecorded spot measurement). `erx_screen` keeps only the newest pending
+  layout, so layouts cost at most one per frame; cap the rectangles of a
+  layout or charge them to the grant that placed them.
   `flush/4` also costs a window's visible tiles times its 16 dirty
   rectangles.
 
@@ -5195,7 +5306,7 @@ document's "residual risks accepted" paragraph.
 ## Planned features
 
 * [Medium] erx_domain boot order (`erlang/apps/erx_domain/src/erx_domain_srv.erl`, `handle_continue/2`;
-  [design-system.md](docs/design-system.md#booting)): the domain service starts every configured domain at once
+  [design-system.md](docs/design-system.md#boot)): the domain service starts every configured domain at once
   in the manifest's boot order, so on one CPU the runtimes slow each other and the login waits for the slowest.
   Two rules of the boot-order proposal are deferred: (A) a start waits for the
   configured domains serving its `files` grants to settle, each bounded by its row's boot timeout, and (B)
