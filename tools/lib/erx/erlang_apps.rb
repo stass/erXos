@@ -114,6 +114,55 @@ module Erx
       end
     end
 
+    # An application's files as a build and the source check read them: the root-relative
+    # paths of its modules (see modules), its .app.src text, the module names that file
+    # lists, and the names of the modules in erxos/ and in src/.
+    Sources = Data.define(:paths, :resource, :listed, :erxos, :src)
+
+    # Refuses a directory of erlang/apps/ or test/erlang/apps/ that the lists above do not
+    # name, so none is left out of a build, or out of the check, unseen.
+    def self.refuse_unlisted(root:)
+      [[SOURCE, [*APPLICATIONS, *UNRELEASED]], [TEST_SOURCE, TEST_ONLY]].each do |directory, listed|
+        next unless File.directory?(File.join(root, directory))
+
+        unlisted = Dir.children(File.join(root, directory)).sort - listed
+        raise Error, "#{directory} holds applications ErlangApps does not list: #{unlisted.join(' ')}" unless unlisted.empty?
+      end
+    end
+
+    # Reads an application's sources, refusing an .app.src whose list differs from the
+    # src/ modules, in the tree and the generated tree: each module compiled is listed and
+    # each one listed exists.
+    def self.read_sources(root:, application:)
+      resource_path = File.join(root, source(application), 'src', "#{application}.app.src")
+      raise Error, "#{source(application)}/src holds no #{application}.app.src" unless File.file?(resource_path)
+
+      paths = modules(root: root, application: application)
+      resource = File.read(resource_path)
+      listed = modules_of(resource, label: "#{application}.app.src")
+      erxos, src = erxos_and_src(application, paths)
+      check_modules(application, listed: listed, compiled: src)
+      Sources.new(paths: paths, resource: resource, listed: listed, erxos: erxos, src: src)
+    end
+
+    # What the source check runs ahead of any build: refuse_unlisted, then read_sources
+    # over every application of the lists whose directory is present, those the build
+    # does not compile (UNRELEASED) included, so a module missing from an .app.src fails
+    # here as it does in a build. The generated tree must be current.
+    def self.check_sources(root:)
+      refuse_unlisted(root: root)
+      [*APPLICATIONS, *UNRELEASED, *TEST_ONLY].select { |application| File.directory?(File.join(root, source(application))) }
+                                              .each { |application| read_sources(root: root, application: application) }
+    end
+
+    def self.check_modules(application, listed:, compiled:)
+      return if listed.sort == compiled.sort
+
+      raise Error, "#{application}.app.src lists #{listed.sort.join(' ')} but #{application}'s src/ modules, in " \
+                   "#{source(application)}/src and #{generated(application)}/src, hold #{compiled.sort.join(' ')}"
+    end
+    private_class_method :check_modules
+
     def initialize(root:, runner:, erlc:)
       @root = root
       @runner = runner
@@ -123,10 +172,7 @@ module Erx
     # Compiles every application into otp/lib/<application>/ebin, then holds /tmp's
     # serving set to what the built beams reach (ServingSet).
     def build(otp:)
-      unlisted = Dir.children(File.join(@root, SOURCE)).sort - APPLICATIONS - UNRELEASED
-      raise Error, "#{SOURCE} holds applications ErlangApps does not list: #{unlisted.join(' ')}" unless unlisted.empty?
-      tests = Dir.children(File.join(@root, TEST_SOURCE)).sort - TEST_ONLY
-      raise Error, "#{TEST_SOURCE} holds applications ErlangApps does not list: #{tests.join(' ')}" unless tests.empty?
+      self.class.refuse_unlisted(root: @root)
 
       [*APPLICATIONS, *TEST_ONLY].each { |application| build_application(application, otp: otp) }
       ServingSet.check(runner: @runner, erl: File.join(File.dirname(@erlc), 'erl'),
@@ -136,12 +182,8 @@ module Erx
     private
 
     def build_application(application, otp:)
-      source = self.class.source(application)
-      modules = self.class.modules(root: @root, application: application)
-      resource = File.read(File.join(@root, source, 'src', "#{application}.app.src"))
-      listed = self.class.modules_of(resource, label: "#{application}.app.src")
-      erxos, src = self.class.erxos_and_src(application, modules)
-      check_modules(application, listed: listed, compiled: src)
+      sources = self.class.read_sources(root: @root, application: application)
+      modules = sources.paths
       ebin = File.join(otp, 'lib', application, 'ebin')
       FileUtils.rm_rf(File.dirname(ebin))
       FileUtils.mkdir_p(ebin)
@@ -152,19 +194,11 @@ module Erx
                             .flat_map { |other| ['-pa', File.join(otp, 'lib', other, 'ebin')] }
       @runner.run([@erlc, *FLAGS, *includes, *earlier, '-pa', ebin, '-o', ebin, *modules], name: "erlang-app-#{application}",
                                                                    deadline: DEADLINE, chdir: @root, env: Oracle::CLEAN_ERLANG_ENV)
-      File.write(File.join(ebin, "#{application}.app"), self.class.with_modules(resource, [*listed, *erxos]))
+      File.write(File.join(ebin, "#{application}.app"), self.class.with_modules(sources.resource, [*sources.listed, *sources.erxos]))
     end
 
     # Every application's include directory, so one application can include another's
     # generated headers by name.
     def includes = self.class.include_flags(root: @root)
-
-    def check_modules(application, listed:, compiled:)
-      return if listed.sort == compiled.sort
-
-      raise Error, "#{application}.app.src lists #{listed.sort.join(' ')} but #{application}'s src/ modules, in " \
-                   "#{self.class.source(application)}/src and #{self.class.generated(application)}/src, hold " \
-                   "#{compiled.sort.join(' ')}"
-    end
   end
 end

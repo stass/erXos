@@ -59,4 +59,48 @@ class ErlangAppsTest < Minitest::Test
     twice = ErlangApps.modules(root: @root, application: 'erx_net')
     assert_raises(Erx::Error) { ErlangApps.erxos_and_src('erx_net', twice) }
   end
+
+  def app_src(modules) = "{application, erx, [{modules, [#{modules.join(', ')}]}]}.\n"
+
+  # The source check runs ahead of any build, over every application directory.
+  def test_the_source_check_refuses_a_module_the_application_file_does_not_list
+    write('erlang/apps/erx/src/erx.app.src', app_src(%w[erx_text]))
+    write('erlang/apps/erx/src/erx_text.erl')
+    ErlangApps.check_sources(root: @root)
+    write('erlang/apps/erx/src/erx_new.erl')
+    error = assert_raises(Erx::Error) { ErlangApps.check_sources(root: @root) }
+    assert_match(/erx\.app\.src lists erx_text but .* hold erx_new erx_text/, error.message)
+  end
+
+  def test_the_source_check_refuses_a_listed_module_that_does_not_exist
+    write('erlang/apps/erx/src/erx.app.src', app_src(%w[erx_gone erx_text]))
+    write('erlang/apps/erx/src/erx_text.erl')
+    error = assert_raises(Erx::Error) { ErlangApps.check_sources(root: @root) }
+    assert_match(/erx\.app\.src lists erx_gone erx_text but .* hold erx_text/, error.message)
+  end
+
+  def test_the_source_check_reads_an_unreleased_and_a_test_only_application
+    write('erlang/apps/erx_display/src/erx_display.app.src', app_src(%w[erx_wm]))
+    write('test/erlang/apps/erx_echo_test/src/erx_echo_test.app.src', app_src(%w[erx_echo]))
+    write('test/erlang/apps/erx_echo_test/src/erx_echo.erl')
+    error = assert_raises(Erx::Error) { ErlangApps.check_sources(root: @root) }
+    assert_match(/erx_display\.app\.src lists erx_wm but .* hold \s*$/, error.message)
+    write('erlang/apps/erx_display/src/erx_wm.erl')
+    ErlangApps.check_sources(root: @root)
+    write('test/erlang/apps/erx_echo_test/src/erx_extra.erl')
+    error = assert_raises(Erx::Error) { ErlangApps.check_sources(root: @root) }
+    assert_match(/erx_echo_test\.app\.src lists erx_echo but .* hold erx_echo erx_extra/, error.message)
+  end
+
+  # What the build refuses before compiling, so the check refuses it too: an application
+  # directory no list names, and one with no application file.
+  def test_the_source_check_refuses_an_unlisted_directory_and_a_missing_application_file
+    write('erlang/apps/erx_new/src/erx_new.erl')
+    error = assert_raises(Erx::Error) { ErlangApps.check_sources(root: @root) }
+    assert_match(%r{erlang/apps holds applications ErlangApps does not list: erx_new}, error.message)
+    FileUtils.rm_rf(File.join(@root, 'erlang/apps/erx_new'))
+    write('erlang/apps/erx/src/erx_text.erl')
+    error = assert_raises(Erx::Error) { ErlangApps.check_sources(root: @root) }
+    assert_match(%r{erlang/apps/erx/src holds no erx\.app\.src}, error.message)
+  end
 end

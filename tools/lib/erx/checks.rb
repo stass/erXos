@@ -6,6 +6,7 @@ require 'set'
 require_relative 'bounded_file'
 require_relative 'chokepoint_rules'
 require_relative 'device_callers'
+require_relative 'erlang_apps'
 require_relative 'dependencies'
 require_relative 'device_posters'
 require_relative 'pipe_makers'
@@ -179,6 +180,9 @@ module Erx
       # build tree. Generated.ensure refuses a file of the tree at a
       # generated file's path, so no listed file shares a name with one.
       generated = generated_sources
+      # Each application's .app.src lists the modules its src/ holds, generated ones included,
+      # which generated_sources has just brought up to date.
+      ErlangApps.check_sources(root: @root)
       Chokepoints.enforce(@chokepoints, root: @root, names: (listed | generated.keys).sort,
                                         imported: method(:chokepoint_upstream?), sources: generated)
       true

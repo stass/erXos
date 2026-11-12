@@ -77,6 +77,22 @@ class ChecksTest < Minitest::Test
     assert_match(%r{at the paths of generated files.*include/erx/made.h}, error.message)
   end
 
+  # make check runs ErlangApps' module-list check, the harness's, so a module missing from
+  # an .app.src fails before any image is built; a generated module counts, once generated.
+  def test_an_application_file_must_list_the_modules_of_its_src_and_generated_src
+    write('.gitignore', "/build/\n")
+    src = 'test/erlang/apps/erx_echo_test/src'
+    write("#{src}/erx_echo_test.app.src", "{application, erx_echo_test, [{modules, [erx_text, erx_made]}]}.\n")
+    write("#{src}/erx_text.erl", "-module(erx_text).\n")
+    plan = Erx::GenerationPlan.new(files: { "#{src}/erx_made.erl" => "-module(erx_made).\n" }, reads: {})
+    generator = Erx::Generated::Generator.new(name: 'fixture', code: {}, plan: ->(_root) { plan })
+    assert checks(generators: [generator]).run
+    write("#{src}/erx_new.erl", "-module(erx_new).\n")
+    error = assert_raises(Erx::Error) { checks(generators: [generator]).run }
+    assert_match(/erx_echo_test\.app\.src lists erx_made erx_text but erx_echo_test's src\/ modules/, error.message)
+    assert_match(/hold erx_made erx_new erx_text/, error.message)
+  end
+
   # An import below kernel/ is linked into the kernel with the cores, so the
   # rules read it as they read kernel/core; an import elsewhere reaches only
   # the rules whose globs name it.
