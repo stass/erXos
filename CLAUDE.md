@@ -145,8 +145,8 @@ Third-party components are allowed when they pay for themselves.
   `TODO.md` item to replace it. A stopgap under any license other than a
   permissive one (LGPL included) blocks any distribution outside the
   project, in source or binary form, until it is replaced. The one
-  exception is the website's demo image, distributed with its source
-  offered.
+  exception is the images the website offers (the browser demo and the
+  board cards), each distributed with its source offered.
 * **Design first, then fit what exists.** Assume every dependency can be
   modified. Arrive at the elegant, clear design first, unconstrained by what
   existing code does or assumes; only then work out how to reach it with as
