@@ -277,16 +277,19 @@ typedef struct erx_pipe_rlane {
 } erx_pipe_rlane_t;
 
 /*
- * A read end.  rix, nonblock, lost, known, batches and the lanes are the
- * end's: lanes holds nlanes lanes, which the event executor appends as
- * reports name write ends, raising known, its count of the write ends it
- * knows (compared with the lock page's wends); batches is at most
- * ERX_PIPE_BATCHES (a model scales it down).  The rest belongs to the call
- * in progress, grouped by the reader's stage that uses it
+ * A read end.  rix, taken, nonblock, lost, known, batches and the lanes are
+ * the end's: rix is its index, which only erx_pipe_rtake gives it, setting
+ * taken, so a read state made any other way, a zeroed one included, has no
+ * index erx_pipe_rrun accepts; lanes holds nlanes lanes, which the event
+ * executor appends as reports name write ends, raising known, its count of
+ * the write ends it knows (compared with the lock page's wends); batches is
+ * at most ERX_PIPE_BATCHES (a model scales it down).  The rest belongs to
+ * the call in progress, grouped by the reader's stage that uses it
  * (liberx/erx_pipe_core.c).
  */
 typedef struct erx_pipe_rstate {
 	uint32_t	 rix;
+	bool		 taken;		/* erx_pipe_rtake gave rix */
 	bool		 nonblock;
 	bool		 lost;
 	uint32_t	 known;

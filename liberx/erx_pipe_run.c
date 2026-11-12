@@ -351,6 +351,7 @@ erx_pipe_rtake(erx_pipe_rstate_t *r, uint32_t rix, const erx_pipe_rmap_t *maps,
 	if (rix >= ERX_PIPE_READERS_MAX)
 		return (false);
 	r->rix = rix;
+	r->taken = true;
 	keep = ~(UINT64_C(1) << rix);
 	(void)atomic_fetch_and_explicit(&lock->waiters, keep,
 	    memory_order_seq_cst);
@@ -368,7 +369,7 @@ erx_pipe_rrun(erx_pipe_rstate_t *r, const erx_pipe_rmap_t *maps,
 	erx_pipe_act_t act;
 	erx_pipe_in_t in;
 
-	if (r->rix >= ERX_PIPE_READERS_MAX)
+	if (!r->taken || r->rix >= ERX_PIPE_READERS_MAX)
 		return (run_fail());
 	memset(&in, 0, sizeof(in));
 	for (;;) {

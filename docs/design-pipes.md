@@ -422,35 +422,47 @@ A pipe end is one of the descriptor kinds of a program's descriptor table
 
 ```c
 typedef struct erx_pipe_end {
+	erx_prog_obj_t	 obj;		/* the descriptor table's head: the
+					 * kind, the count of references */
+	pthread_mutex_t	 lock;		/* the end's lock */
 	erx_pipe_kind_t	 kind;		/* ERX_PIPE_READ or ERX_PIPE_WRITE */
 	uint32_t	 pipe;		/* the pipe server's names */
 	uint32_t	 end;
-	bool		 nonblock;	/* O_NONBLOCK: this program's own */
-	bool		 lost;		/* the pipe server ended */
+	uint64_t	 peers[64];	/* the trigger right on each read end's
+					 * doorbell, by index: every read
+					 * end's for a write end, the other
+					 * read ends' for a read end */
 	union {
-		erx_pipe_wend_t	 w;	/* its lane, mapped; its private write
-					 * position; its count of read ends;
-					 * the read ends' doorbells by index,
-					 * at most 64 */
-		erx_pipe_rend_t	 r;	/* its index and the lock page; per
-					 * write end, by number: the lane,
-					 * whether its writer is open or
-					 * gone, the writer's doorbell while
-					 * it is open, and the lane's
-					 * batches; the other read
-					 * ends' doorbells by index */
+		erx_pipe_wend_t	 w;	/* the core's write state, with its
+					 * private write position, its count
+					 * of read ends, O_NONBLOCK and lost;
+					 * its lane, mapped */
+		erx_pipe_rend_t	 r;	/* the core's read state, with its
+					 * index, O_NONBLOCK and lost; the
+					 * lock page; per write end, by
+					 * number: the lane, whether its
+					 * writer is open or gone, the
+					 * writer's doorbell while it is
+					 * open, the lane's batches, and a
+					 * {drained} owed */
 	} u;
 } erx_pipe_end_t;
 ```
 
-The `kind` selects the member, and only accessors that check it touch the
+The `kind` selects the member, and only code that checks it touches the
 union. A program's `dup` makes two descriptors of one end object; the end
 object lives while a descriptor or a call in progress holds it, and its
 mappings and capabilities close with its last reference, after which
 `liberx` sends its handler the notice `{closed, Pipe, End}`. An end's own
 tables are guarded by the end object's lock, which a call holds while it
 uses them and the event executor holds while it applies a report, never
-across a wait.
+across a wait. The event executor holds no reference: it finds the end a
+report names under the descriptor table's lock and takes the end's lock
+before it lets the table's go, and the last reference's release takes the
+end's lock once before it lets anything go, so it waits out a report in
+progress. A read end gets its index only from `erx_pipe_rtake`, which
+clears the index's bits that an earlier holder left, so a read state
+made any other way has no index a read accepts.
 
 ### The pipe server's records
 
@@ -1248,7 +1260,7 @@ ssize_t	erx_pipe_read(erx_pipe_end_t *end, void *buf, size_t len);
 /* The POLL* bits the end reports; never waits. */
 short	erx_pipe_poll(erx_pipe_end_t *end);
 
-/* Drop a reference; the last releases the end's mappings and capabilities. */
+/* The end's last reference went: release its mappings and capabilities, send {closed}. */
 void	erx_pipe_release(erx_pipe_end_t *end);
 ```
 

@@ -41,7 +41,10 @@ class PipeRunTest < Minitest::Test
     'a drained lane is not reported' =>
       ['gone drained once', "\t\tfx->drained(fx->ctx, a->lane);\n", ''],
     'a taken index keeps the bits its last holder left' =>
-      ['take clears bits', 'keep = ~(UINT64_C(1) << rix);', 'keep = ~UINT64_C(0);']
+      ['take clears bits', 'keep = ~(UINT64_C(1) << rix);', 'keep = ~UINT64_C(0);'],
+    'a read runs with an index rtake never gave' =>
+      ['untaken read refused', 'if (!r->taken || r->rix >= ERX_PIPE_READERS_MAX)',
+       'if (r->rix >= ERX_PIPE_READERS_MAX)']
   }.freeze
 
   def test_seeded_faults_are_caught

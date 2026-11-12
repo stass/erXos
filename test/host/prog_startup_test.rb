@@ -14,7 +14,7 @@ require_relative '../fixtures/prog_profile_frames'
 # test/fixtures/prog_startup_driver.c: the hand-encoded start frames of
 # test/fixtures/prog_profile_frames.rb, and frames built here from their pieces, plan to the
 # argv, env and cwd written by hand, or end with status 127 for the check's refusal or a
-# descriptor other than null
+# descriptor other than null or a pipe's end
 # (docs/design-programs.md#the-startup-message, docs/design-abi.md#program-protocol, Startup).
 class ProgStartupTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
@@ -64,6 +64,8 @@ class ProgStartupTest < Minitest::Test
                  sigignore: format('%032x', 1 << 12))],
     cwd_past_max: [F.start(BASE.merge(cwd: E.binary('/' + ('c' * PATH_MAX)))), %w[refused check length cwd]],
     relative_cwd: [F.start(BASE.merge(cwd: E.binary('home'))), %w[refused check text cwd]],
+    # A pipe's write end at 0 and its read end at 1, which liberx sets up (liberx/program/pipe.h).
+    pipes: [F.start(BASE.merge(fds: F.pipes)), go(argv: ['prog'], env: ['HOME=/'], cwd: '/', fds: %w[0 1])],
     tty_after_null: [F.start(BASE.merge(fds: E.list([E.tuple(E.small(0), E.atom('null')),
                                                      E.tuple(E.small(3), E.tuple(E.atom('tty'), E.small(1),
                                                                                  E.atom('read')))]))),
@@ -123,11 +125,13 @@ class ProgStartupTest < Minitest::Test
     return ['refused', 'check', *fixture.verdict.split] unless fixture.verdict == 'accept'
 
     fields = fixture.fields.items.last
-    other = fields.fetch(:fds).find { |entry| entry.items.last != :null }
+    other = fields.fetch(:fds).find { |entry| entry.items.last != :null && !pipe_end?(entry.items.last) }
     return ['refused', 'descriptor', other.items.first.to_s] if other
 
     { argv: fields.fetch(:argv), env: fields.fetch(:env), cwd: fields.fetch(:cwd) }
   end
+
+  def pipe_end?(descriptor) = descriptor.respond_to?(:items) && descriptor.items.first(2).then { |head| head in [:pipe, :read | :write] }
 
   # An answer line as the words of a refusal, without its offset, or the go line's
   # argv, env and cwd with its other fields, each text decoded from hex.

@@ -10,10 +10,12 @@
  * inbound lane's one reader: it takes the startup message's record as it is published,
  * into a run of pages sized by the record's header, ringing the session's doorbell
  * whenever its read position crosses what the session waits for, and once the record is
- * whole it plans the start-up. A refused plan stops the program's space with status 127
- * before main and without a line; an accepted one sets the verdict and wakes the first
- * thread, which alone reads the plan from then on. The executor stays the lane's reader:
- * every later frame is a report, which it copies whole, reads and applies. What each
+ * whole it plans the start-up and builds the descriptor table (fd.h), setting up each pipe
+ * end the message gives. A refused plan stops the program's space with status 127 before
+ * main and without a line; an accepted one sets the verdict and wakes the first thread,
+ * which alone reads the plan from then on. The executor stays the lane's reader: every
+ * later frame is a report, which it copies whole, reads and applies to the ends it names
+ * (pipe.h). What each
  * record's header admits, and whether a report reads, is inbound.c's pure decision; a
  * record it refuses stops the program the same way.
  *
@@ -34,7 +36,10 @@
 #include "erx/lane.h"
 #include "liberx/backend/api.h"
 #include "liberx/program/channel.h"
+#include "liberx/program/fd.h"
 #include "liberx/program/inbound.h"
+#include "liberx/program/pages.h"
+#include "liberx/program/pipe.h"
 #include "liberx/program/program.h"
 #include "liberx/pthread_executor.h"
 
@@ -92,47 +97,6 @@ stop(int status)
 		(void)erx_umtx_wait((uint64_t)(uintptr_t)&never, 0, ERX_WAIT_FOREVER);
 }
 
-/* bytes rounded up to whole pages, or 0 when the rounding overflows. */
-static uint64_t
-page_round(uint64_t bytes)
-{
-	uint64_t rounded;
-
-	if (__builtin_add_overflow(bytes, ERX_PAGE_SIZE - 1, &rounded))
-		return (0);
-	return (rounded & ~(uint64_t)(ERX_PAGE_SIZE - 1));
-}
-
-/* A run of size bytes of fresh committed pages, size a non-zero multiple of the page, or NULL. */
-static void *
-pages_take(uint64_t size)
-{
-	uint64_t addr = 0;
-
-	if (size == 0 || erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, &addr) != ERX_OK)
-		return (NULL);
-	if (erx_vm_commit(ERX_CAP_SELF, addr, size) != ERX_OK) {
-		(void)erx_vm_release(ERX_CAP_SELF, addr, size);
-		return (NULL);
-	}
-	return ((void *)(uintptr_t)addr);
-}
-
-/* The first size bytes of the memory object mem, mapped at fresh addresses with prot, or NULL. */
-static void *
-object_map(uint64_t mem, uint64_t size, uint32_t prot)
-{
-	uint64_t addr = 0;
-
-	if (size == 0 || erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, &addr) != ERX_OK)
-		return (NULL);
-	if (erx_vm_map(ERX_CAP_SELF, addr, size, mem, 0, prot) != ERX_OK) {
-		(void)erx_vm_release(ERX_CAP_SELF, addr, size);
-		return (NULL);
-	}
-	return ((void *)(uintptr_t)addr);
-}
-
 /*
  * Maps the channel's two sides, the program's own read-write and the session's read-only,
  * and readies the inbound lane's reader and the outbound lane's send (channel.h) over
@@ -142,8 +106,8 @@ static bool
 channel_open(void)
 {
 	const uint64_t bytes = erx_lane_side_bytes(ERX_PROGRAM_LANE);
-	void *const own = object_map(self.regs[ERX_PROGRAM_ARG_OWN_SIDE], bytes, ERX_PROT_RW);
-	const void *const peer = object_map(self.regs[ERX_PROGRAM_ARG_PEER_SIDE], bytes, ERX_PROT_R);
+	void *const own = erx_prog_object_map(self.regs[ERX_PROGRAM_ARG_OWN_SIDE], bytes, ERX_PROT_RW);
+	const void *const peer = erx_prog_object_map(self.regs[ERX_PROGRAM_ARG_PEER_SIDE], bytes, ERX_PROT_R);
 
 	return (own != NULL && peer != NULL && erx_lane_reader_init(&inbound, peer, own, ERX_PROGRAM_LANE) &&
 	    erx_prog_channel_open(own, peer, self.regs[ERX_PROGRAM_ARG_DOORBELL]));
@@ -183,49 +147,47 @@ static void
 message_open(uint32_t len)
 {
 	const size_t scratch = erx_prog_scratch_bytes(len);
-	const uint64_t body = page_round(len), rest = page_round(scratch);
+	const uint64_t body = erx_prog_page_round(len), rest = erx_prog_page_round(scratch);
 
 	if (rest == 0 || __builtin_add_overflow(body, rest, &message_run))
 		stop(ERX_PROG_STATUS_REFUSED);
-	message = pages_take(message_run);
+	message = erx_prog_pages_take(message_run);
 	if (message == NULL)
 		stop(ERX_PROG_STATUS_REFUSED);
 	message_len = len;
 }
 
-/* The startup message is whole: plans the start-up, and stops the program or lets it run. */
+/*
+ * The startup message is whole: plans the start-up and builds the descriptor table from
+ * it, before any report, which may name its ends, is read; then stops the program or lets
+ * it run.
+ */
 static void
 message_close(void)
 {
-	const uint64_t body = page_round(message_len);
+	const uint64_t body = erx_prog_page_round(message_len);
 
 	if (erx_prog_startup_plan(message, message_len, message + body, message_run - body, &plan) != 0)
 		stop(plan.status);
-	report_scratch_len = page_round(erx_prog_scratch_bytes(ERX_PROG_REPORT_BYTES));
-	report_scratch = pages_take(report_scratch_len);
+	if (erx_prog_fd_setup(plan.fds) != ERX_OK)
+		stop(ERX_PROG_STATUS_REFUSED);
+	report_scratch_len = erx_prog_page_round(erx_prog_scratch_bytes(ERX_PROG_REPORT_BYTES));
+	report_scratch = erx_prog_pages_take(report_scratch_len);
 	if (report_scratch == NULL)
 		stop(ERX_PROG_STATUS_REFUSED);
 	atomic_store_explicit(&verdict, VERDICT_GO, memory_order_release);
 	(void)erx_umtx_wake((uint64_t)(uintptr_t)&verdict, 1);
 }
 
-/*
- * A report is whole: reads it, or stops the program. No end of the program is set up
- * yet (startup.c refuses every pipe descriptor), so every report names an end the
- * program does not hold, and the executor closes the capabilities it installed.
- */
+/* A report is whole: reads it and applies it to the ends it names (pipe.h), or stops the program. */
 static void
 report_apply(void)
 {
-	uint64_t caps[ERX_PROG_REPORT_CAPS];
 	erx_prog_report_t got;
-	size_t ncaps;
 
 	if (!erx_prog_report_read(report, record_len, report_scratch, report_scratch_len, &got))
 		stop(ERX_PROG_STATUS_REFUSED);
-	ncaps = erx_prog_report_caps(&got, caps);
-	for (size_t at = 0; at < ncaps; at++)
-		(void)erx_cap_close(caps[at]);
+	erx_pipe_report(&got);
 }
 
 /* A record opened: what its header admits decides where its body goes. */
@@ -372,7 +334,7 @@ main_run(void)
 	char **argv, **envp, *text;
 	void *data;
 
-	data = object_map(plan.data_area, data_bytes, ERX_PROT_RW);
+	data = erx_prog_object_map(plan.data_area, data_bytes, ERX_PROT_RW);
 	if (data == NULL)
 		stop(ERX_PROG_STATUS_REFUSED);
 	/* argv and env, each with its NULL, then their strings; args_max bounds the strings. */
@@ -380,7 +342,7 @@ main_run(void)
 	    __builtin_mul_overflow(pointers, sizeof(char *), &bytes) ||
 	    __builtin_add_overflow(bytes, plan.argv_bytes, &bytes) ||
 	    __builtin_add_overflow(bytes, plan.env_bytes, &bytes) ||
-	    (argv = pages_take(page_round(bytes))) == NULL)
+	    (argv = erx_prog_pages_take(erx_prog_page_round(bytes))) == NULL)
 		stop(ERX_PROG_STATUS_REFUSED);
 	envp = argv + plan.argc + 1;
 	text = (char *)(envp + plan.envc + 1);
@@ -399,7 +361,7 @@ main_run(void)
 	self.data_bytes = data_bytes;
 	environ = envp;
 	/* Nothing reads the message from here on: the strings are copied and the executor is past it. */
-	(void)erx_vm_release(ERX_CAP_SELF, (uint64_t)(uintptr_t)message, message_run);
+	erx_prog_pages_give(message, message_run);
 	return (main((int)plan.argc, argv, envp));
 }
 

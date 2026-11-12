@@ -14,9 +14,10 @@
  * sides, starts the event executor and waits.  The executor copies the
  * startup message out of the inbound lane as it is published, ringing the
  * session's doorbell as it frees room, and checks it whole
- * (erx_prog_startup_plan).  A refused message stops the program's space
- * with ERX_PROG_STATUS_REFUSED before main and without a line; an accepted
- * one wakes the first thread, which maps the data area, copies argv, env
+ * (erx_prog_startup_plan), then sets up the descriptor table it gives
+ * (fd.h).  A refused message, or a descriptor that cannot be set up, stops
+ * the program's space with ERX_PROG_STATUS_REFUSED before main and without
+ * a line; an accepted one wakes the first thread, which maps the data area, copies argv, env
  * and cwd into NUL-terminated strings and calls main.  Every later frame
  * is a report (inbound.h), which the executor reads and applies, and one
  * it refuses stops the program the same way.

@@ -1811,10 +1811,19 @@ it; git history is the record of completed work.
   checks only what the program receives. Give the core one row per side (index, session
   protection, program rights) with a host check.
 * [Medium] liberx program layer, `liberx/program/startup.c` (`erx_prog_startup_plan`): a startup
-  message with any descriptor other than `null` ends the program with status 127 before `main`,
-  because liberx sets up no pipe end, file, tty, directory, socket or `dup` yet, and the session
-  sends only `fds => []`. Each case replaces the refusal with its set-up when the file
-  descriptors arrive (docs/design-programs.md, "Descriptors and files").
+  message with a descriptor other than `null` or a pipe's read or write end ends the program with
+  status 127 before `main`, because liberx sets up no socketpair, file, tty, directory, socket or
+  `dup` yet. Each case replaces the refusal with its set-up when the file descriptors arrive
+  (docs/design-programs.md, "Descriptors and files"). The table's slots keep no `FD_CLOEXEC` yet,
+  which `exec` and `fcntl`'s `F_SETFD` need.
+* [Low] liberx program layer, `liberx/program/fd.c` and `pipe.c`: a handler bug is trusted rather
+  than refused. Two descriptors of one startup message naming the same pipe end make two end
+  objects, the reports reach only one, and the second `{closed}` ends the program with `SIGSYS`;
+  reports can add lanes to a read end without bound, each costing two mappings. Refuse a second
+  descriptor of one end in `erx_prog_fd_setup`, and bound joins by the pipe's write-end quota.
+  `erx_pipe_open` closes on failure only the capabilities it kept, which is enough while only the
+  set-up calls it and stops the program; a `{pipe}` reply that opens ends in a running program
+  must close the descriptor's other capabilities and say whether it owes `{closed}`.
 * [Low] erx_program driver: each program costs the session about 304 KiB of its own budget (two
   24 KiB lane sides, the data area at 64 KiB a slot, 256 KiB by default, two IRQ objects) with no session-side bound, since
   `PROGRAM_POOL` is unbounded; many starts can exhaust the session's own budget.

@@ -792,9 +792,13 @@ socketpair end, the read end of one pipe and the write end of another
 ([Passing descriptors](#passing-descriptors)); and a socket, an open of
 a socket's open-file description. Each operation is a `switch` on the kind with no
 default arm, so adding a kind makes the compiler name every operation
-that must handle it. The table has one lock, which guards its slots and is
+that must handle it. The table has one lock, which guards its slots, each
+object's count of references and the list of the objects alive, which an
+object joins with its first reference and leaves with its last, and is
 never held across a wait: a call takes a counted reference to its object
-under the lock and works on the object after releasing it. So `close` of
+under the lock and works on the object after releasing it. The event
+executor finds the object a report names in that list, so an end that a
+call still holds after its descriptor closed still takes its reports. So `close` of
 a descriptor that another thread is reading empties the slot at once, and
 the object goes with its last reference, a pipe end's mappings and
 capabilities closed and its `{closed}` notice sent, or a file's open closed
@@ -1080,7 +1084,7 @@ reserved:
 | 6 | the program's handler, through the port driver: **build** | hands the port driver one plan, which it validates whole and then applies. The plan first creates the channel and the data area from the session's own budget, since the session maps both and deletes them only after the program's budget. It then carves the program's budget from the session's pool for programs, with the floor as its guarantee and the cap the spec gives it, creates its group under the programs group, and creates the anchor, with the starter's anchor or the session's space as parent, the session's fault gate and a label of its own, and the image below it under another; the driver allocates both labels and never reuses them. It then maps the image, a program command's slices from the boot image with `erx_image_map`, or the loader `erx_exec` from the boot image for an executable file; installs into the image's table the budget, the group, the channel's two sides and the session's doorbell, the data area, each pipe end's copies as the pipe server handed them, and the code object for `erx_exec`; binds the program's doorbell to its group; and creates the first thread, stopped, with the values of the budget, the group, the channel's two sides and the session's doorbell in its argument registers | the plan is undone, the anchor stopped and released, which releases the image, and then step 5's reservations as there; `EAGAIN` for a program nested deeper than the kernel's 64 levels of spaces allow, about 60 generations of programs, `ENOMEM` for the session's budget |
 | 7 | the program's handler | writes the startup message into the image's inbound lane, with the program's `pid`, `ppid` and `pgid`, the data area's value, each descriptor's values in the program's table, and for `erx_exec` the code object's value as `image` | none: the lane is the session's own memory |
 | 8 | the session's job table, then the program's handler | when the program's starter is paused for its job, or the shell starts it for a job it has stopped, the port driver pauses the image first ([Job control](#job-control)); the handler then has the port driver start the first thread | `ERX_EDEAD` when the program was stopped first, by a kill or by its parent's or session's end: the starter still gets `{ok, Pid}`, then the child's end as `SIGKILL` |
-| 9 | the starter's handler, then the program | the handler answers `{ok, Pid}`, before any report about the child, so the reply that introduces a child always precedes the child's states. `liberx`'s start-up runs on the first thread, a worker: it maps the channel, starts the event executor and waits on a umtx word; the event executor takes the startup message from the inbound lane, copying it out as it is published and checking it, and wakes the first thread, which maps the data area and its pipe ends, builds the descriptor table, sets its mask, arms itself for vCPU upcalls with its signal IRQ object and calls `main` | a malformed message ends the program with status 127 before `main` and without a line, since its descriptors come only from a message `liberx` accepted ([design-abi.md](design-abi.md#program-protocol)) |
+| 9 | the starter's handler, then the program | the handler answers `{ok, Pid}`, before any report about the child, so the reply that introduces a child always precedes the child's states. `liberx`'s start-up runs on the first thread, a worker: it maps the channel, starts the event executor and waits on a umtx word; the event executor takes the startup message from the inbound lane, copying it out as it is published and checking it, builds the descriptor table from it, mapping its pipe ends, before it reads the reports that follow, which may name those ends, and wakes the first thread, which maps the data area, sets its mask, arms itself for vCPU upcalls with its signal IRQ object and calls `main` | a malformed message ends the program with status 127 before `main` and without a line, since its descriptors come only from a message `liberx` accepted ([design-abi.md](design-abi.md#program-protocol)) |
 
 The startup message is written into the lane before the program's first
 thread starts, as much of it as the lane holds and the rest as the program
@@ -1325,6 +1329,9 @@ in the program's group, the **event executor**, before anything else, and
 it is the only thread that reads the inbound lane and the group's ready
 list:
 
+* it builds the descriptor table from the startup message, setting up
+  each pipe end it gives, before it reads the reports that follow, which
+  may name those ends ([Descriptors and files](#descriptors-and-files));
 * every request a worker sends names its reply slot, one of 15, each
   holding one request at a time, the 16th being the event executor's own
   ([The program protocol](#the-program-protocol)); the worker waits on a

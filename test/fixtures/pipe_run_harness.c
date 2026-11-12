@@ -124,7 +124,6 @@ world_init(world_t *wd)
 	wd->w.readers = 1;
 	wd->lane.wend = 1;
 	wd->lane.size = SIZE;
-	wd->r.rix = 0;
 	wd->r.known = 1;
 	wd->r.batches = ERX_PIPE_BATCHES;
 	wd->r.lanes = &wd->lane;
@@ -133,6 +132,8 @@ world_init(world_t *wd)
 	wd->rmap = (erx_pipe_rmap_t){ wd->hdr, wd->area, wd->rpage };
 	fx = (erx_pipe_fx_t){ wd, fx_clock, fx_ring_reader, fx_ring_writer,
 	    fx_drained, fx_broken };
+	if (!erx_pipe_rtake(&wd->r, 0, &wd->rmap, wd->lock))
+		abort();
 }
 
 static void
@@ -330,6 +331,27 @@ case_take_clears_bits(void)
 	world_free(&wd);
 }
 
+/*
+ * A read state gets its index only from erx_pipe_rtake: one whose index
+ * was never taken, as a zeroed state's is not, reads nothing and fails
+ * with EIO, whatever its rix holds.
+ */
+static void
+case_untaken_refused(void)
+{
+	world_t wd;
+	char out[8];
+
+	world_init(&wd);
+	CHECK("untaken write", done(do_write(&wd, "x", 1), 1));
+	wd.r.taken = false;
+	CHECK("untaken read refused", done(do_read(&wd, out, sizeof(out)),
+	    -EIO));
+	CHECK("taken read", erx_pipe_rtake(&wd.r, 0, &wd.rmap, wd.lock) &&
+	    done(do_read(&wd, out, sizeof(out)), 1) && out[0] == 'x');
+	world_free(&wd);
+}
+
 static void
 case_record_whole(void)
 {
@@ -429,6 +451,7 @@ main(void)
 	case_bytes_pass();
 	case_join_keeps_copied_bytes();
 	case_take_clears_bits();
+	case_untaken_refused();
 	case_empty_waits_and_is_rung();
 	case_wait_ends_with_next_read();
 	case_wait_ends_with_empty_read();

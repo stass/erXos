@@ -43,7 +43,7 @@ typedef struct erx_prog_sigset {
 typedef enum erx_prog_startup_cause {
 	ERX_PROG_STARTUP_GO,		/* none: the program runs */
 	ERX_PROG_STARTUP_CHECK,		/* the check refused; refusal says why */
-	ERX_PROG_STARTUP_DESCRIPTOR,	/* a descriptor other than null, at fd */
+	ERX_PROG_STARTUP_DESCRIPTOR,	/* a descriptor liberx cannot set up, at fd */
 	ERX_PROG_STARTUP_BOUND,		/* past the plan's bounds; the check's exclude it */
 } erx_prog_startup_cause_t;
 
@@ -53,11 +53,12 @@ typedef enum erx_prog_startup_cause {
  * refusal is the check's when cause is ERX_PROG_STARTUP_CHECK.  Nothing
  * else of a refused plan is meaningful.
  *
- * argv, env and fds are the check's iterators, fresh, which the first
- * thread walks to copy each string and to build its descriptor table; they
- * borrow the frame, which the caller keeps unchanged while it uses them.
- * Walk a copy: next advances the iterator it is handed.  Every descriptor
- * fds holds is null.  argc and envc count their strings, and
+ * argv, env and fds are the check's iterators, fresh: the first thread
+ * walks argv and env to copy each string, and the event executor fds to
+ * build the descriptor table (fd.h); they borrow the frame, which the
+ * caller keeps unchanged while it uses them.  Walk a copy: next advances
+ * the iterator it is handed.  Every descriptor fds holds is null or a
+ * pipe's read or write end.  argc and envc count their strings, and
  * argv_bytes and env_bytes their lengths with one NUL each, which size the
  * copies; the check's args total bounds the two sums together by
  * ERX_PROG_ARGS_MAX.  cwd is the working directory's copy, NUL-terminated,
@@ -97,8 +98,8 @@ typedef struct erx_prog_startup {
  * bytes of scratch; with erx_prog_scratch_bytes(len) bytes the check never
  * refuses for scratch.  Returns out->status.  The check bounds every view
  * it fills to the frame, and the plan keeps those views.  Every descriptor
- * must be null: liberx refuses a descriptor it cannot set up rather than
- * start the program without it.
+ * must be null or a pipe's read or write end: liberx refuses a descriptor it
+ * cannot set up rather than start the program without it.
  */
 int	erx_prog_startup_plan(const uint8_t *frame, size_t len, void *scratch,
 	    size_t scratch_len, erx_prog_startup_t *out);
