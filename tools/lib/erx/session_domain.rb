@@ -44,7 +44,9 @@ module Erx
   # domain quota, which the storage, network and web domains and the session fill, and gives the line to
   # the system shell, whose `ps` lists the domain service and whose `cat` reads
   # /data/across through the system domain's own `data` facet. Its Erlang shell answers
-  # node() as system@erxos and ends the storage domain with exit(DomainPid, kill); once
+  # node() as system@erxos, shows root_1's init process with its runtime attributes, which
+  # the session's agent answers to the system domain's query worker (SESSION_PROCESS), and
+  # ends the storage domain with exit(DomainPid, kill); once
   # the domain's restart has installed a new `data` grant, a new read of /data/across
   # answers the line the session wrote (RESTART_STORAGE). exit(DomainPid, kill) of the
   # session then ends it as halt does, the next login's session takes the line, and its
@@ -111,6 +113,12 @@ module Erx
     # node is storage@erxos, ended through its domain pid, and the file read again once the domain's restart has
     # installed a `data` grant other than the one the registry held before; a read before
     # that reaches the dead grant and answers eio.
+    # Typed at the system domain's Erlang shell: the record of root_1's init process, the
+    # first process of every runtime, in the session's second domain (relogin-listed).
+    SESSION_PROCESS = "erx:i([processes, {pid, #{FIRST_SESSION + 1}, 0, 0}]).\r".freeze
+    # erx:i/1's reductions line, whose value only the session's runtime reports; a
+    # missed or refused answer shows a status in its place.
+    SESSION_REDUCTIONS = /\A +reductions +runtime +[0-9]+\r*\n\z/n
     RESTART_STORAGE = '[S] = [Pid || #{origin := {configured, _}, node := storage@erxos, pid := Pid} <- ' \
                       'erx_domain_core:domains(maps:get(core, sys:get_state(erx_domain_srv)))], ' \
                       'Old = erx:cap(data), exit(S, kill), '
@@ -206,7 +214,8 @@ module Erx
        { name: 'system-ps', pattern: line('1'), seconds: 60, type: CAT_ACROSS }.freeze,
        { name: 'system-data', pattern: line('across'), seconds: 60, type: ERL }.freeze,
        shell.merge(name: 'system-erlang-shell', type: "node().\r").freeze,
-       { name: 'system-node', pattern: answer('system@erxos'), seconds: 60,
+       { name: 'system-node', pattern: answer('system@erxos'), seconds: 60, type: SESSION_PROCESS }.freeze,
+       { name: 'session-process', pattern: SESSION_REDUCTIONS, seconds: 60,
          type: RESTART_STORAGE + with_data(READ_ACROSS, guard: 'Grant =/= Old') }.freeze,
        { name: 'storage-regranted', pattern: answer(ACROSS_READ), seconds: 180, type: KILL_SESSION }.freeze,
        { name: 'session-killed', pattern: answer('true'), seconds: 60 }.freeze,

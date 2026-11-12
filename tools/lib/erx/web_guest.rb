@@ -36,7 +36,9 @@ module Erx
     PRINTED = %r{^web: open (http://127\.0\.0\.1:\d+/\?token=\h+)$}
     SCRIPT = %r{<script type="module" src="(/client-\h+\.js)">}
     # The idle processes root's session holds for the GW measurement's fixture: more than
-    # the inspector's page, so the listing of its processes is a page of this many pids.
+    # the inspector's page holds, so the listing of its processes is a partial page, cut
+    # at this many entries or at inspect_reply_max encoded bytes of their records,
+    # whichever comes first (erx_inspector:page_add/2).
     IDLE_PROCESSES = 1000
 
     module_function
@@ -68,11 +70,18 @@ module Erx
     end
 
     # The start of the update of view that answers the open of /proc/processes, through
-    # its first child's text: the listing's id, the atom `processes`, no attributes, and
-    # a partial page of IDLE_PROCESSES children.
+    # its partial page's tag: the listing's id, the atom `processes` and no attributes.
     def processes_update(view)
       (record_update(view, ['processes'], 'listing') + tag(DATUM_ATOM) + text('processes') + u32(0) +
-       tag(CHILDREN_PARTIAL) + u32(IDLE_PROCESSES) + tag(DATUM_TEXT)).b
+       tag(CHILDREN_PARTIAL)).b
+    end
+
+    # Whether update answers the open of /proc/processes in view with a partial page of
+    # the idle processes, at most IDLE_PROCESSES children, the first of them text.
+    def processes_page?(update, view)
+      at = processes_update(view).bytesize
+      update.start_with?(processes_update(view)) && update.byteslice(at, 4).unpack1('V').to_i.between?(1, IDLE_PROCESSES) &&
+        update.byteslice(at + 4, 1) == tag(DATUM_TEXT)
     end
 
     # A view's end, `scope`.
@@ -175,16 +184,17 @@ module Erx
       answers = Array.new(3) { frames.binary('the path views') }.to_h { |answer| [answer.byteslice(1, 4).unpack1('V'), answer] }
       processes = answers.fetch(2) { fail_with(log, "view 2 was not answered: #{answers.keys}") }
       fail_with(log, "the session's processes are #{processes.byteslice(0, 96).unpack1('H*')}") unless
-        processes.start_with?(processes_update(2))
+        processes_page?(processes, 2)
       fail_with(log, "/proc/kernel's record is #{answers[3].to_s.byteslice(0, 96).unpack1('H*')}") unless
         answers[3].to_s.start_with?(record_update(3, ['kernel'], 'listing'))
       fail_with(log, "domain #{foreign}'s record is #{answers[4].to_s.unpack1('H*')}") unless answers[4] == ended_scope(4)
       process_view(io, frames, first_child(processes), log)
     end
 
-    # The text of the first child of the processes listing's update.
+    # The text of the first child of the processes listing's update, past the page's
+    # count and the child's tag (processes_page?).
     def first_child(update)
-      at = processes_update(2).bytesize
+      at = processes_update(2).bytesize + 5
       update.byteslice(at + 4, update.byteslice(at, 4).unpack1('V')).to_s
     end
 

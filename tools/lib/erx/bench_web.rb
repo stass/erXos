@@ -258,12 +258,15 @@ module Erx
       end
     end
 
-    # The update is target's record: the listing of processes is a page of
-    # WebGuest::IDLE_PROCESSES children, so the workload is the one the gate names.
+    # The update is target's record: the listing of processes is a partial page of the
+    # idle processes (WebGuest.processes_page?), so the workload is the one the gate names.
     def check_update(update, target, view, log)
-      start = target.kind == 'listing' ? WebGuest.processes_update(view) : WebGuest.record_update(view, target.names, target.kind)
-      WebGuest.fail_with(log, "view #{view}'s update is #{update.byteslice(0, 96).unpack1('H*')}") unless
-        update.start_with?(start)
+      whole = if target.kind == 'listing'
+                WebGuest.processes_page?(update, view)
+              else
+                update.start_with?(WebGuest.record_update(view, target.names, target.kind))
+              end
+      WebGuest.fail_with(log, "view #{view}'s update is #{update.byteslice(0, 96).unpack1('H*')}") unless whole
     end
 
     def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)

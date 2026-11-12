@@ -45,6 +45,7 @@ or stopped.
 """.
 
 -export([create/1, start_session/2, info/1, introduce/2, web_line/2, stop/2, id/1, node/1, pid/1]).
+-export([inspect_view/1]).
 -export_type([domain/0, spec/0]).
 
 -opaque domain() :: {erx_domain, Id :: pos_integer(), Node :: node(), Pid :: pid()}.
@@ -103,6 +104,17 @@ else.
 -spec start_session(pos_integer(), #{atom() => term()}) -> {ok, domain()} | {error, term()}.
 start_session(Principal, Facets) when is_integer(Principal), Principal > 0 ->
     gen_server:call(erx_domain_srv, {start_session, Principal, Facets}, infinity).
+
+-doc """
+The domains Scope covers, `all` or `{principal, P}`, each with its
+inspection agent, `none` or `ended` (erx_domain_core:inspect_view/2), for
+the inspector's query worker in the system domain. It waits at most
+500 ms, an agent's wait, and exits like gen_server:call/3 when the
+service does not answer.
+""".
+-spec inspect_view(all | {principal, pos_integer()}) -> [{pos_integer(), pid() | none | ended}].
+inspect_view(Scope) ->
+    gen_server:call(erx_domain_srv, {inspect_view, Scope}, 500).
 
 -doc "Introduces domains A and B: ok once their connection is up at both ends.".
 -spec introduce(domain(), domain()) -> ok | {error, term()}.

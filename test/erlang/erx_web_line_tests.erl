@@ -102,7 +102,8 @@ refused_views_end_test() ->
 %% processes of the domain the runtime is, on a development host the system domain
 %% (erx_inspector:runtime_domain/0). The open of their listing's path, as /proc
 %% entry names, is answered with the listing, and with 1,000 idle processes beside
-%% the test's own it holds a page of 1,000 children within one update.
+%% the test's own it holds one partial page within one update: cut at 1,000
+%% entries or at inspect_reply_max encoded bytes, whichever comes first.
 session_processes_test() ->
     Idle = [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, 1000)],
     try
@@ -115,7 +116,7 @@ session_processes_test() ->
                 ?assertEqual({{atom, <<"processes">>}, []}, {Id, Attrs}),
                 ?assertEqual(<<"listing">>, Kind),
                 ?assertEqual(partial, Completeness),
-                ?assertEqual(1000, length(Children));
+                ?assert(length(Children) >= 1 andalso length(Children) =< 1000);
             {web_view_ended, View, Reason} ->
                 error({ended, Reason})
         after 5000 -> error(no_update)

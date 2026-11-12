@@ -23,5 +23,5 @@ service inspect 7
 limit inspect_reply_max u32 262144
 limit inspect_max_frame_min u32 524288
 limit inspect_message_heap_min u32 131072
-limit inspect_worker_heap u32 524288
+limit inspect_worker_heap u32 2097152
 limit inspect_query_max u32 5000

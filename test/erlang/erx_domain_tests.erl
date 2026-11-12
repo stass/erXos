@@ -1013,3 +1013,17 @@ inspect_agent_of_another_incarnation_test() ->
          ?assertEqual({Named, Kept, {ok, #{connections => Own, inspect => Kept, dropped => Dropped}}},
                       {Named, Got, Info})
      end || {Named, Kept, Dropped} <- Cases].
+
+%% The inspect view (erx_domain_core:inspect_view/2): scope `all` gives every
+%% living domain with its agent or `none` and every kept death `ended`; a
+%% principal's gives its own only; a kept death of an id that lives again is
+%% listed living, never ended.
+inspect_view_test() ->
+    Agent = self(),
+    State = #{domains => #{9 => #{principal => 1, inspect => Agent},
+                           11 => #{principal => 2, inspect => none}},
+              deaths => #{1 => [#{id => 8}, #{id => 9}], 2 => [#{id => 10}]}},
+    ?assertEqual([{8, ended}, {9, Agent}, {10, ended}, {11, none}], erx_domain_core:inspect_view(all, State)),
+    ?assertEqual([{8, ended}, {9, Agent}], erx_domain_core:inspect_view({principal, 1}, State)),
+    ?assertEqual([{10, ended}, {11, none}], erx_domain_core:inspect_view({principal, 2}, State)),
+    ?assertEqual([], erx_domain_core:inspect_view({principal, 3}, State)).

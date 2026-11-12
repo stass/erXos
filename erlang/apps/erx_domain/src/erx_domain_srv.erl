@@ -238,6 +238,9 @@ handle_call({web_line, Id}, _From, #{web_lines := Lines} = State) ->
         #{Id := Line} -> {reply, {ok, Line}, State};
         #{} -> {reply, {error, no_line}, State}
     end;
+handle_call({inspect_view, Scope}, _From, #{core := Core} = State)
+  when Scope =:= all; is_tuple(Scope), tuple_size(Scope) =:= 2, element(1, Scope) =:= principal ->
+    {reply, erx_domain_core:inspect_view(Scope, Core), State};
 handle_call(mints, _From, #{mints := Mints, mint_counts := Counts} = State) ->
     %% Each grant's state, configured and per session, and how many of each refusal and drop were counted.
     {reply, #{grants => erx_domain_mints:grants(Mints), counts => Counts}, State};

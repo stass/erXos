@@ -40,6 +40,7 @@
              erx_facet,
              erx_facets,
              erx_inspect_agent,
+             erx_inspect_worker,
              erx_inspector,
              erx_kernel_records,
              erx_log,

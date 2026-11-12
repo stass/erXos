@@ -34,7 +34,7 @@ each value with its reporter, at most 80 columns wide.
 """.
 -spec i() -> ok.
 i() ->
-    Sections = erx_inspector:overview(inspect_scope()),
+    Sections = erx_inspector:overview(),
     io:put_chars(erx_render:overview(Sections, build(Sections))).
 
 -doc """
@@ -44,16 +44,16 @@ reporter; a pid alone is its process's path. A pid in Path becomes its
 `proc_id()` in this runtime (docs/design-live.md, "Names travel as
 data"), so the question holds no name. `{error, scope}` for a path that
 names nothing the caller may see, `{error, unsupported}` for one the
-inspector cannot collect.
+inspector cannot collect, and `{error, failed}` when the query failed
+(erx_inspector:inspect/1).
 """.
--spec i([erx_schema:segment() | pid()] | pid()) -> ok | {error, scope | unsupported}.
+-spec i([erx_schema:segment() | pid()] | pid()) -> ok | {error, scope | unsupported | invalid | failed}.
 i(Pid) when is_pid(Pid) ->
     i([processes, Pid]);
 i(Path) ->
-    case erx_inspector:inspect(as_data(Path), inspect_scope()) of
+    case erx_inspector:inspect(as_data(Path)) of
         {ok, Record} ->
-            {ok, Machine} = erx_inspector:inspect([], inspect_scope()),
-            io:put_chars(erx_render:record(Record, build([{[], {ok, Machine}}])));
+            io:put_chars(erx_render:record(Record, build([{[], erx_inspector:inspect([])}])));
         {error, _Reason} = Error ->
             Error
     end.
@@ -63,13 +63,6 @@ i(Path) ->
 as_data([Pid | Rest]) when is_pid(Pid) -> [erx_inspector:proc_id(Pid) | as_data(Rest)];
 as_data([Segment | Rest]) -> [Segment | as_data(Rest)];
 as_data(Tail) -> Tail.
-
-%% The scope of the inspect facet of the domain the caller runs in, the
-%% facet's own value (erx_facets:domain/0): `all` in the system domain and
-%% the domain's own id in any other.
-inspect_scope() ->
-    #{inspect := Scope} = erx_facets:domain(),
-    Scope.
 
 %% Which build's projection to show: development only when the kernel
 %% reports the machine as a development build.

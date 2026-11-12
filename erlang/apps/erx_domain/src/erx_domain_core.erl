@@ -37,7 +37,7 @@ state is a bug of the caller and fails with a badmatch.
 
 -export([new/1, host/1, admit/4, built/5, running/2, ready/3, stopping/2, failed/2, ended/5,
          restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1, session_name/3]).
--export([inspect_scope/3]).
+-export([inspect_scope/3, inspect_view/2]).
 -export_type([state/0, domain/0, origin/0, info/0, slogan/0, inspect_scope/0]).
 
 -define(SYSTEM_ID, 4).
@@ -259,6 +259,26 @@ inspect_scope(Principal, Roots, Development)
         true -> all;
         false -> {principal, Principal}
     end.
+
+-doc """
+The domains Scope covers, for the inspector's query worker
+(docs/design-live.md, "The inspect service"), in id order: each living
+domain of the scope with the inspection agent its ready report named,
+`none` while it has none, and each domain whose death record is kept,
+`ended`. `{principal, P}` covers P's domains, living and ended, so the
+inspector resolves a principal's scope from these records at each query.
+""".
+-spec inspect_view(inspect_scope(), state()) -> [{pos_integer(), pid() | none | ended}].
+inspect_view(Scope, #{domains := Domains, deaths := Deaths}) ->
+    Living = [{Id, Agent} || Id := #{principal := Principal, inspect := Agent} <- Domains,
+                             covers(Scope, Principal)],
+    Ended = [{Id, ended} || Principal := Kept <- Deaths, covers(Scope, Principal),
+                            #{id := Id} <- Kept, not is_map_key(Id, Domains)],
+    lists:usort(Living ++ Ended).
+
+covers(all, _Principal) -> true;
+covers({principal, Principal}, Principal) -> true;
+covers({principal, _Other}, _Principal) -> false.
 
 %% Only a crash's death carries a slogan.
 death(#{info := crash} = Death, Slogan) when Slogan =/= none -> Death#{slogan => Slogan};

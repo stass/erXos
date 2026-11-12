@@ -1482,7 +1482,11 @@ starts"), linked to the facet, so revoking the grant ends it:
   within `inspect_message_heap_min`, the frames queued on it, at most
   `system_queue` and one frame of the system domain's `max_frame`, which
   count toward `max_heap_size` with shared binaries, and room for the
-  collectors. A worker that passes it is ended by OTP, and the facet,
+  collectors. OTP checks `max_heap_size` during a major collection
+  against both semispaces of its copying collector, and grows the heap
+  in steps, so the bound sits far above the live data: a worker holding
+  one answer of 81,000 words and its page peaks at 833,000 words of old
+  and new heap. A worker that passes it is ended by OTP, and the facet,
   which traps the exit of each worker it is linked to, answers the
   request `{error, failed}`.
 * **Its reservation.** The grant's limit in flight times
@@ -1495,9 +1499,11 @@ The answer bound, the floors and the worker's heap are provisional,
 sized for the trusted workloads of Phase 1: `inspect_reply_max` 256 KiB;
 `inspect_max_frame_min` 512 KiB, an answer and its envelope in one
 frame; `inspect_message_heap_min` 1 MiB, four times the answer bound;
-`inspect_worker_heap` 4 MiB, twice the decoded floor with the queued
-frames and the collectors' room; and a reservation of 8 MiB per holder at the default
-limit of 2 in flight. The measurement of the encoded and decoded sizes
+`inspect_worker_heap` 16 MiB, which holds an answer at the decoded
+floor with the page through the collector's growth step from 514,838 to
+832,040 words, measured on a worker holding an 81,000-word answer under
+OTP's growth policy; and a reservation of 32 MiB per holder at the
+default limit of 2 in flight. The measurement of the encoded and decoded sizes
 of records and pages, and of the peak memory of the workers together
 ([todo-performance.md](todo-performance.md)), sets them: the decoded
 floor from the largest decoded answer, the frame floor from the largest
@@ -2762,7 +2768,8 @@ determinism test of the generated tree.
     creation alone, which takes the second.
   * A query worker stays within its bounds: `[processes]` at scope `all`
     over eight domains of 1,000 processes each arrives `partial` at
-    1,000 entries with the worker's peak heap below
+    whichever cut comes first, 1,000 entries or `inspect_reply_max`
+    encoded bytes, with the worker's peak heap below
     `inspect_worker_heap`; a domain that floods the worker's pid while
     it answers leaves the answer whole and the worker's message queue
     never longer than one message; a query over domains

@@ -23,10 +23,13 @@ only this runtime knows, its processes and the paths below them.
   the schema declares below a process included; and the listing
   `{entries, [processes]}`, its own processes. Every other question is
   `{error, scope}`: a runtime describes only itself. Within that, the
-  answer is its collectors' whole record, scope `all`: the system
-  domain's query worker, not the agent, applies the asker's scope.
+  answer is its collectors' record at scope `all`, with only the
+  attributes `runtime` reports: the system domain's query worker
+  (erx_inspect_worker), not the agent, gives the rest and applies the
+  asker's scope.
 * It takes questions one at a time, in arrival order. Its listing is the
-  inspector's page of at most 1,000 entries. A question whose collector
+  inspector's page: at most 1,000 entries, and an encoding within
+  inspect_reply_max. A question whose collector
   raises is answered `{error, failed}`, so no question ends the agent.
 * The domain record keeps the pid the one ready report named, for the
   domain's life, so a second agent would be one nobody can reach: kernel
@@ -89,7 +92,7 @@ system domain, SystemId, asked, to its alias; drop anything else.
 """.
 -spec handle(term(), non_neg_integer(), non_neg_integer()) -> {reply, reference(), answer()} | drop.
 handle({erx_origin, SystemId, {erx_inspect_ask, Alias, Query}}, Self, SystemId) when is_reference(Alias) ->
-    Answer = try answer(Query, Self) catch _:_ -> {error, failed} end,
+    Answer = try reported(answer(Query, Self)) catch _:_ -> {error, failed} end,
     {reply, Alias, Answer};
 handle(_Message, _Self, _SystemId) ->
     drop.
@@ -115,6 +118,19 @@ answer({entries, Path}, Self) ->
     end;
 answer(_Query, _Self) ->
     {error, scope}.
+
+%% The answer as this runtime reports it: only the attributes the schema
+%% lets `runtime` report, since the query worker takes no other from an
+%% agent and gives the rest itself.
+reported({ok, Record}) when is_map(Record) -> {ok, runtime_only(Record)};
+reported({Status, Records}) when is_list(Records) -> {Status, [runtime_only(Record) || Record <- Records]};
+reported(Error) -> Error.
+
+runtime_only(#{kind := Kind, attrs := Attrs} = Record) ->
+    Record#{attrs := maps:filter(fun(Key, _Attr) ->
+                                         {ok, #{reporters := Reporters}} = erx_schema:attribute(Kind, Key),
+                                         lists:member(runtime, Reporters)
+                                 end, Attrs)}.
 
 -doc """
 Whether domain Self owns Path: its own domain's paths, and a process of

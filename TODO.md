@@ -1470,9 +1470,18 @@ it; git history is the record of completed work.
   [The runtime agent](docs/design-live.md#the-runtime-agent) name `[processes, Pid, source]`, the source lines
   around a process's location from `erx_source`, but the schema declares no such path, so the inspector, and a
   domain's `erx_inspect_agent` through it, answer it `{error, scope}`. Declare the path and its collector.
-* [Medium] inspect agent, `erlang/apps/erx/src/erx_inspect_agent.erl`: it does not cut an answer at
-  `inspect_reply_max`, which `abi/services/inspect.txt` declares; the inspector, whose rules the agent follows,
-  cuts a listing only at its page of 1,000 entries. Cut by encoded bytes in the inspector, and so in the agent.
+* [Medium] query worker, `erlang/apps/erx/src/erx_inspect_worker.erl` (`given/2`): `[domains, D]` of a domain
+  other than the system domain gives its runtime attributes from D's agent and every domain-service and kernel
+  attribute `unsupported`, because the domain service's view (`erx_domain:inspect_view/1`) carries only each
+  domain's agent. Carry those attributes in the view, or collect them in the worker from the domain service
+  and the root's capabilities, as the system domain's own record is.
+* [Medium] query worker, `erlang/apps/erx/src/erx_inspect_worker.erl`: an agent's answer the worker refuses is
+  dropped but not counted where an operator can read it, which design-live.md ("The runtime agent") asks; a
+  `{principal, P}` query whose view the domain service does not give answers `{error, scope}` for P's
+  domains' paths rather than an unknown or failed status; `[domains, D]` of a domain the view lists as ended
+  answers `{error, scope}` while its record is kept; an agent's `{error, scope | unsupported}` for its own
+  `[domains, D]` becomes the whole answer rather than its runtime attributes' status; and `await/1` waits for
+  the worker with no deadline of its own, trusting the worker's `inspect_query_max`.
 * [Medium] inspect agent, `erlang/apps/erx/src/erx_inspect_agent.erl`: a session's agent does not relay its
   programs' and pipes' attributes ([The runtime agent](docs/design-live.md#the-runtime-agent),
   `[domains, Id, programs]`), and below `[domains, Self]` it asks `erx_inspector`, whose `collects_domain/2`
@@ -1757,7 +1766,9 @@ it; git history is the record of completed work.
   authority: no admission by the grantee's measured share of reductions, no queue quota and
   no heap limit, so a grantee can fill its facet's mailbox and the facet's heap as fast as its
   lane delivers; `max_request` is checked by the facet once the message is decoded and
-  queued, not by the funnel before; and admission is hand-written, not the generated path
+  queued, not by the funnel before, and likewise a query worker (`erx_inspect_worker.erl`)
+  drops an agent's answer past `inspect_message_heap_min` words by its decoded size once it
+  is queued, not the funnel before it; and admission is hand-written, not the generated path
   from the service's operation schema. Missing: the domain service's grant records, the check
   that a facet handed on is granted to the starter (every creator is a process of the system
   domain, whose own processes stand behind every facet it names), `erx_domain:grant/4`, and
@@ -1945,7 +1956,9 @@ it; git history is the record of completed work.
   `inspect`'s frame floor, makes each connection's term of it (a record buffer and a funnel scratch
   kept at its high-water mark, about twice the frame) four times what 128 KiB made it, and a
   `max_request` up to 512 KiB is not held to its server's `max_frame`; an `inspect` holder adds
-  `in_flight` times `inspect_worker_heap` (design-live.md, "The query worker").
+  `in_flight` times `inspect_worker_heap`, 32 MiB per holder at `in_flight` 2 (design-live.md, "The query worker");
+  nothing reserves it, and the enforced bounds are the worker's `max_heap_size`, `in_flight` 2 and
+  `inspect_query_max`.
 * [Medium] manifest check, `tools/lib/erx/manifest.rb` (`Stopgap#normalize_domains`): a
   configured domain's limits record (memory, outer, lane, connections, crash, flags,
   peer-held bounds) is not held to its principal's `ceiling_limits`, which design-abi.md
