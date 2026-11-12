@@ -12,17 +12,25 @@ require_relative '../../tools/lib/erx/generated'
 # run on stock's emulator (ERX_ERL and ERX_ERLC) with the generated grammar
 # erx_prog_grammar. start/1 builds the message before it opens the port, so every refusal
 # here comes back before any driver is named; a spec it accepts goes on to open_port,
-# which stock refuses with badarg, since it has no erx_program driver. The E2BIG bound is
-# exact (docs/design-abi.md, "Program protocol"): one argument of prog_args_max bytes is
-# within its own maximum but past the args total by its NUL, and one byte less is not.
+# which stock refuses with badarg, since it has no erx_program driver. The E2BIG bounds
+# are exact (docs/design-abi.md, "Program protocol"): one argument of prog_args_max bytes
+# is within its own maximum but past the args total by its NUL, and one byte less is not;
+# a message whose frame, with every capability value at its longest encoding, is
+# prog_frame_max bytes reaches the driver, and one a byte longer does not. The module is
+# compiled with export_all, so AtBound can size that frame with erx_program:message/3.
 class ErxProgramStartTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   GRAMMAR = File.join(ROOT, 'build/gen/otp/erts/preloaded/src/erx_prog_grammar.erl')
   MODULE = File.join(ROOT, 'otp/erts/preloaded/src/erx_program.erl')
-  ARGS_MAX = 131_072
+  LIMITS = File.foreach(File.join(ROOT, 'abi/protocols/prog.txt')).filter_map do |line|
+    line.match(/\Alimit (\w+) u32 (\d+)$/)&.captures
+  end.to_h.transform_values { |value| Integer(value, 10) }.freeze
+  ARGS_MAX = LIMITS.fetch('prog_args_max')
+  FRAME_MAX = LIMITS.fetch('prog_frame_max')
 
-  # Each case: an Erlang expression over Base, the spec every case starts from, and what it must print.
+  # Each case: a spec, an Erlang expression over Base (the spec every case starts from) and
+  # AtBound, and what start/1 must print for it.
   CASES = {
     'one argument past the total by its NUL' => ["Base#{'#'}{argv => [binary:copy(<<\"a\">>, #{ARGS_MAX})]}", '{error,e2big}'],
     'one argument at the total with its NUL' => ["Base#{'#'}{argv => [binary:copy(<<\"a\">>, #{ARGS_MAX - 1})]}", 'driver'],
@@ -33,15 +41,33 @@ class ErxProgramStartTest < Minitest::Test
     'a missing argv' => ['maps:remove(argv, Base)', '{error,einval}'],
     'a descriptor' => ["Base#{'#'}{fds => [{0, null}]}", 'badarg'],
     'slots past the data area' => ["Base#{'#'}{slots => 17}", '{error,einval}'],
+    'a message at the frame bound' => ['AtBound(0)', 'driver'],
+    'a message a byte past the frame bound' => ['AtBound(1)', '{error,e2big}'],
     'the base spec' => ['Base', 'driver']
   }.freeze
 
   BASE = '#{image => <<"bin/args">>, pid => 5, ppid => 1, pgid => 5, argv => [<<"args">>], env => [], ' \
          'cwd => <<"/">>, spawn => false, sigmask => [], sigignore => [], umask => 8#022}'
 
+  # AtBound(Over): Base with argv grown until its frame, with the data area's value at its
+  # longest encoding (the largest u64), is Over bytes past prog_frame_max. Empty arguments,
+  # five bytes of frame for one of the args total each, take it past the total's reach; the
+  # last argument pads it, adding its length and five bytes. The 4 slots stand for any slot
+  # count, which all encode alike, so the frame is the one start/1 checks.
+  AT_BOUND = <<~ERLANG
+    AtBound = fun(Over) ->
+                  Argv = [<<"args">> | lists:duplicate(30000, <<>>)],
+                  Filled = Base\#{argv => Argv},
+                  {ok, Frame} = erx_prog_grammar:build_start(erx_program:message(Filled, 16#ffffffffffffffff, 4)),
+                  Pad = #{FRAME_MAX} + Over - byte_size(term_to_binary(Frame)) - 5,
+                  Filled\#{argv => Argv ++ [binary:copy(<<"a">>, Pad)]}
+              end,
+  ERLANG
+
   def test_the_builder_refuses_before_the_port_opens
     Dir.mktmpdir('erx-program-start-') do |dir|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', dir, GRAMMAR, MODULE, stdin_data: '')
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '+export_all', '+nowarn_export_all', '-o', dir,
+                                       GRAMMAR, MODULE, stdin_data: '')
       assert status.success?, output
       got = CASES.to_h { |name, (expression, _)| [name, answer(dir, expression)] }
       want = CASES.transform_values(&:last)
@@ -56,6 +82,7 @@ class ErxProgramStartTest < Minitest::Test
   def answer(dir, expression)
     erlang = <<~ERLANG
       Base = #{BASE},
+      #{AT_BOUND}
       R = try erx_program:start(#{expression}) of
             Result -> io_lib:format("~0p", [Result])
           catch

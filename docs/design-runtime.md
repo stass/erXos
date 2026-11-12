@@ -1532,7 +1532,7 @@ applied in this order, each step undoing the ones before it on failure:
    program's anchor; the pipe ends and descriptors the program inherits;
    what its startup message carries, which `erx_program:start/1` checks
    with the program protocol's generated grammar before it opens the
-   port, with the largest encoding of each capability value standing in
+   port, with the longest encoding of each capability value standing in
    for the values the install makes; the size of its data area; and the
    guarantee and cap of its budget and the limits of its group, which lie
    within the session's pool for programs and the session's grant.

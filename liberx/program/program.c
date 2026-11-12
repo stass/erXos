@@ -38,6 +38,10 @@ int	main(int, char **, char **);
 
 extern char **environ;
 
+/* program_arg's last value, the session's doorbell, is its highest index. */
+_Static_assert(ERX_PROGRAM_ARG_DOORBELL < ERX_ARCH_START_ARGS,
+    "a program's values fit the argument registers it starts with");
+
 /* The verdict word: the first thread waits while it is VERDICT_WAIT. */
 enum { VERDICT_WAIT, VERDICT_GO };
 
@@ -53,7 +57,7 @@ static erx_prog_startup_t plan;
 static _Atomic uint32_t verdict = VERDICT_WAIT;
 
 void
-erx_prog_enter(const uint64_t regs[ERX_PROG_START_REGS])
+erx_prog_enter(const uint64_t regs[ERX_ARCH_START_ARGS])
 {
 	memcpy(self.regs, regs, sizeof(self.regs));
 }

@@ -35,11 +35,9 @@
 
 #include "liberx/program/startup.h"
 
-/* The argument registers a program's first thread starts with. */
-#define ERX_PROG_START_REGS	8
-
 /*
- * What liberx keeps of the program's start: the registers' values by
+ * What liberx keeps of the program's start: the values of the
+ * ERX_ARCH_START_ARGS argument registers its first thread starts with, by
  * program_arg index (every register past the doorbell's is 0), and, once
  * main is called, the startup message's process ids, signal state, file
  * mode creation mask, working directory and data area.  rings counts the
@@ -47,7 +45,7 @@
  * program's peer side's value; strays counts those that carried another.
  */
 typedef struct erx_prog_self {
-	uint64_t		 regs[ERX_PROG_START_REGS];
+	uint64_t		 regs[ERX_ARCH_START_ARGS];
 	uint32_t		 pid;
 	uint32_t		 ppid;
 	uint32_t		 pgid;
@@ -63,7 +61,7 @@ typedef struct erx_prog_self {
 } erx_prog_self_t;
 
 /* Stores the first thread's registers; the backend's task entry calls it once, first. */
-void	erx_prog_enter(const uint64_t regs[ERX_PROG_START_REGS]);
+void	erx_prog_enter(const uint64_t regs[ERX_ARCH_START_ARGS]);
 /* What musl's start calls: the start-up above, then main's return. */
 int	liberx_program_main(int argc, char **argv, char **envp);
 /* The program's start, as main sees it; rings and strays move while the executor runs. */

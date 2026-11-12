@@ -55,6 +55,8 @@ _Static_assert(offsetof(erx_fiasco_thread_record_t, start) + offsetof(erx_regs_t
     ERX_FIASCO_RECORD_OFF_ARGS, "the trampoline's arguments");
 _Static_assert(ERX_FIASCO_START_ARGS * sizeof(uint64_t) <= sizeof(((erx_regs_t *)0)->gpr),
     "the trampoline's arguments are general registers");
+_Static_assert(ERX_FIASCO_START_ARGS == ERX_ARCH_START_ARGS,
+    "the trampoline loads each argument register a thread starts with");
 _Static_assert(offsetof(erx_fiasco_thread_record_t, start) + offsetof(erx_regs_t, sp) ==
     ERX_FIASCO_RECORD_OFF_SP, "the trampoline's stack");
 _Static_assert(offsetof(erx_fiasco_thread_record_t, start) + offsetof(erx_regs_t, pc) ==

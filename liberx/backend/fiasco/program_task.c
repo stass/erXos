@@ -21,8 +21,6 @@
 #include "liberx/backend/fiasco/task_start.h"
 #include "liberx/program/program.h"
 
-_Static_assert(ERX_PROG_START_REGS == ERX_FIASCO_START_ARGS, "the program layer keeps every argument register");
-
 void
 erx_fiasco_libc_write(const void *bytes, size_t length)
 {

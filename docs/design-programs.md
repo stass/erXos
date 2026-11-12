@@ -497,7 +497,11 @@ The bounds: `argv` and `env` together at most 128 KiB, the `ARG_MAX` that
 string a non-empty name without `=`, an `=`, and a value; `cwd` a valid
 path of at most 4,096 bytes; at most 1,024 descriptors, each number once,
 each capability value once; each signal at most once in each set; and at
-most 192 KiB in all. A spawn whose strings pass 128 KiB fails with `E2BIG`
+most 192 KiB in all, counted with every capability value at its longest
+encoding (distinct values, each as long as any value's), so that whether
+a spawn fits depends on its spec alone and
+never on the values the install makes. A spawn whose strings pass 128 KiB,
+or whose message so counted passes 192 KiB, fails with `E2BIG`
 in its planner. The grammar and bounds are a frame profile of the ABI
 file ([design-files.md](design-files.md#interfaces)), from which `liberx`'s
 decoder is generated; the decoder has a fuzz target

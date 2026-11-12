@@ -32,9 +32,12 @@ each step ended.
 -define(DEFAULT_CAP, 4096).
 %% The data area's 64 KiB slots when the spec names none (docs/design-programs.md).
 -define(DEFAULT_SLOTS, 4).
-%% The largest encoding of a capability value: the builder's first check bounds the
-%% message's size with it, before the driver gives the data area's real value.
--define(LARGEST_CAP, 16#ffffffffffffffff).
+%% The data area's value the check builds the message with, before the driver gives
+%% the real one: the largest capability value, whose encoding is the longest any value
+%% has. The frame bound counts every capability at its longest encoding
+%% (docs/design-programs.md), so the verdict depends on the spec alone, and the
+%% message built with the real value is never larger than the one checked.
+-define(LONGEST_CAP, 16#ffffffffffffffff).
 %% What the startup message takes from the spec as it is.
 -define(MESSAGE_KEYS, [ppid, pgid, argv, env, cwd, spawn, sigmask, sigignore, umask]).
 
@@ -80,17 +83,18 @@ start(#{image := Image, pid := Pid} = Spec) when is_binary(Image), is_integer(Pi
         false -> erlang:error(badarg, [Spec])
     end,
     %% The message is checked whole before anything is made.
-    case erx_prog_grammar:build_start(message(Spec, ?LARGEST_CAP, Slots)) of
+    case frame(Spec, ?LONGEST_CAP, Slots) of
         {ok, _} -> open(Spec, Image, Pid, Guarantee, Cap, Slots);
-        {error, Refusal} -> {error, refusal(Refusal)}
+        {error, _} = Refused -> Refused
     end;
 start(Spec) ->
     erlang:error(badarg, [Spec]).
 
 %% The driver's command is "erx_program Pid Guarantee Cap Slots Image", the image
-%% last since it is the one field that may hold a space; a port whose start failed
-%% is open with nothing made, and is closed here, as is one whose message or run
-%% the driver refused, which kills the program.
+%% last since it is the one field that may hold a space. A port whose start failed
+%% is open with nothing made, and is closed here. A data area's value of cap_null,
+%% which the grammar refuses, closes the port as a refusal of the driver's does,
+%% which kills the program.
 open(Spec, Image, Pid, Guarantee, Cap, Slots) ->
     Command = iolist_to_binary([<<"erx_program ">>, integer_to_binary(Pid), $\s,
                                 integer_to_binary(Guarantee), $\s, integer_to_binary(Cap), $\s,
@@ -98,15 +102,19 @@ open(Spec, Image, Pid, Guarantee, Cap, Slots) ->
     Port = open_port({spawn_driver, Command}, [binary]),
     case port_control(Port, ?CONTROL_STARTED, []) of
         <<"ok", Data:64>> ->
-            run(Port, message(Spec, Data, Slots));
+            case frame(Spec, Data, Slots) of
+                {ok, Frame} -> run(Port, Frame);
+                {error, _} = Refused ->
+                    port_close(Port),
+                    Refused
+            end;
         Refused ->
             refused(Port, Refused)
     end.
 
 %% Writes the startup message with the data area's value, then starts the first
-%% thread. The message was checked with the largest value, so it is within its bounds.
-run(Port, Message) ->
-    {ok, Frame} = erx_prog_grammar:build_start(Message),
+%% thread.
+run(Port, Frame) ->
     case port_control(Port, ?CONTROL_SEND, term_to_binary(Frame)) of
         <<"ok">> ->
             case port_control(Port, ?CONTROL_RUN, []) of
@@ -129,6 +137,14 @@ refused(Port, <<$e, _/binary>> = Status) ->
 message(#{pid := Pid} = Spec, Data, Slots) ->
     maps:merge(maps:with(?MESSAGE_KEYS, Spec),
                #{pid => Pid, data_area => {Data, Slots}, fds => []}).
+
+%% The startup message's frame with the data area's value Data, or its refusal's
+%% status.
+frame(Spec, Data, Slots) ->
+    case erx_prog_grammar:build_start(message(Spec, Data, Slots)) of
+        {ok, _} = Built -> Built;
+        {error, Refusal} -> {error, refusal(Refusal)}
+    end.
 
 %% E2BIG for every refusal that the strings' size causes (docs/design-abi.md,
 %% Program protocol), EINVAL for the rest.

@@ -11,7 +11,7 @@
  * thread.c pins each one to the structure it names, so a drift fails the build.
  */
 #define ERX_FIASCO_RECORD_OFF_ARGS	1024	/* start.regs.gpr[0], the first of the argument registers */
-#define ERX_FIASCO_START_ARGS		8	/* the trampoline loads gpr[0] to gpr[7] */
+#define ERX_FIASCO_START_ARGS		8	/* the trampoline loads gpr[0] to gpr[7], ERX_ARCH_START_ARGS */
 #define ERX_FIASCO_RECORD_OFF_SP	1272	/* start.regs.sp */
 #define ERX_FIASCO_RECORD_OFF_PC	1280	/* start.regs.pc */
 #define ERX_FIASCO_RECORD_OFF_TLS	1296	/* start.tls */

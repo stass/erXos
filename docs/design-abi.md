@@ -1200,7 +1200,11 @@ check still refuses it, then checks the frame and its encoded size and
 returns it or the refusal. A spawn's planner answers with `E2BIG` every
 refusal of a startup message that the strings' size causes: `size`;
 `length` of an `arg`, an `env_var` or a list of them; and `total` of
-`args`.
+`args`. It builds the message with every capability value at its
+longest encoding, distinct values each as long as any value's, so its
+verdict depends on the spec alone, and the
+message built later with the values the install makes is never larger
+than the one it checked.
 
 **Refusals.** Both checks name a refusal by the same `Reason` and `Kind`,
 the kind being the profile's name of the type being checked: `size`, a

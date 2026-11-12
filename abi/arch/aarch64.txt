@@ -4,6 +4,10 @@ arch aarch64
 limit arch_user_limit u64 0x1000000000000
 limit arch_elf_machine u16 183
 limit arch_asid_bits u32 16
+# The argument registers a new thread starts with, x0 to x7, the
+# procedure call standard's argument registers (AAPCS64): a program's
+# first thread finds its session's values in them (program_arg).
+limit arch_start_args u32 8
 # The machine type and the processor architecture uname(1) and uname(3)
 # report, FreeBSD's MACHINE and MACHINE_ARCH: "arm64" and "aarch64".
 bytes arch_machine 5 value 61726d3634

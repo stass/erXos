@@ -232,6 +232,10 @@ class ErxProgramCoreTest < Minitest::Test
       [:broken_guarantees, 'return (end->answered && end->phase', 'return ((end->answered || 1) && end->phase'],
     'a send while a frame is written writes again' =>
       [:broken_guarantees, 'if (!alive(end) || end->writing)', 'if (!alive(end))'],
+    'a second run starts the first thread again' =>
+      [:broken_guarantees, 'if (!alive(end) || end->ran)', 'if (!alive(end))'],
+    "a broken channel ends the program with another signal's status" =>
+      [:end_differences, 'ERX_EXIT_SIGNAL + ERX_SIGSYS :', 'ERX_EXIT_SIGNAL + ERX_SIGSEGV :'],
     'the port closes before the start answer is read' =>
       [:broken_guarantees, 'if (!closing && end->answered)', 'if (!closing)'],
     "the image's and the anchor's exits are swapped" =>

@@ -30,11 +30,11 @@ int	main(int, char **, char **);
 
 /* Whether the registers hold five distinct capabilities, then zeros, and the budget allocates. */
 static int
-registers_hold_the_install(const uint64_t regs[ERX_PROG_START_REGS])
+registers_hold_the_install(const uint64_t regs[ERX_ARCH_START_ARGS])
 {
 	uint64_t mem;
 
-	for (size_t at = 0; at < ERX_PROG_START_REGS; at++) {
+	for (size_t at = 0; at < ERX_ARCH_START_ARGS; at++) {
 		if ((at <= ERX_PROGRAM_ARG_DOORBELL) != (regs[at] != ERX_CAP_NULL))
 			return (0);
 		for (size_t other = 0; other < at && at <= ERX_PROGRAM_ARG_DOORBELL; other++) {
