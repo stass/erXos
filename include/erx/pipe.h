@@ -203,7 +203,13 @@ typedef struct erx_pipe_in {
  * chunk is ERX_PIPE_BUF (a model scales it down with its rings), and
  * readers and lost are what the event executor keeps from the handler's
  * reports (PI3).  wpos is the end's private write position, which it only
- * ever stores.  The rest belongs to the call in progress.
+ * ever stores.  armed and need, the end's lasting state, are kept apart
+ * from published, the call's own store of need, as the read end's armed
+ * is from its published.  armed and need last from call to
+ * call: whether a call of the end has published a need, and the last one
+ * published, which the calls of one end waiting at once share
+ * (docs/design-pipes.md, "Ends in liberx").  The rest belongs to the call
+ * in progress, valid only while the call holds the end.
  */
 typedef struct erx_pipe_wstate {
 	uint64_t	 size;		/* the data area, a power of two */
@@ -216,9 +222,14 @@ typedef struct erx_pipe_wstate {
 	uint64_t	 len;		/* bytes the call writes */
 	uint64_t	 done;		/* bytes it published */
 	uint32_t	 rec;		/* the record being written */
-	bool		 armed;		/* need published and fenced */
+	bool		 published;	/* this call stored need and fenced */
+	bool		 wake_local;	/* this call stored a need and then found
+					 * room: its caller wakes the end's
+					 * other waiting calls */
 	uint64_t	 stamp;
 	uint64_t	 wake;		/* the copy of wake */
+	bool		 armed;		/* a need is published and fenced */
+	uint64_t	 need;		/* the need last published */
 } erx_pipe_wstate_t;
 
 /*
@@ -283,9 +294,13 @@ typedef struct erx_pipe_rlane {
  * index erx_pipe_rrun accepts; lanes holds nlanes lanes, which the event
  * executor appends as reports name write ends, raising known, its count of
  * the write ends it knows (compared with the lock page's wends); batches is
- * at most ERX_PIPE_BATCHES (a model scales it down).  The rest belongs to
- * the call in progress, grouped by the reader's stage that uses it
- * (liberx/erx_pipe_core.c).
+ * at most ERX_PIPE_BATCHES (a model scales it down).  armed and waiting
+ * are the end's too, lasting from call to call: the bits a wait of the
+ * end published, which the calls of one end waiting at once share, and
+ * which a call clears only when it ends every such wait, setting
+ * wake_local (docs/design-pipes.md, "Ends in liberx").  The rest belongs
+ * to the call in progress, valid only while the call holds the end,
+ * grouped by the reader's stage that uses it (liberx/erx_pipe_core.c).
  */
 typedef struct erx_pipe_rstate {
 	uint32_t	 rix;
@@ -296,13 +311,20 @@ typedef struct erx_pipe_rstate {
 	uint32_t	 batches;
 	erx_pipe_rlane_t *lanes;
 	uint32_t	 nlanes;
+	bool		 armed;		/* its sleepers bits and wake are published
+					 * and fenced, for a wait for data */
+	bool		 waiting;	/* its waiters bit is published */
 	/* Where the call is. */
 	uint32_t	 stage;		/* the design step the read is in */
 	uint32_t	 phase;		/* the action the stage waits on */
 	uint32_t	 at;		/* the lane a loop over the lanes is at */
 	uint64_t	 len;		/* bytes wanted */
 	uint64_t	 done;		/* bytes copied */
-	bool		 armed;		/* sleepers and wake published, fenced */
+	bool		 published;	/* this call armed: the pick that follows
+					 * decides whether it waits */
+	bool		 wake_local;	/* this call cleared armed or waiting:
+					 * its caller wakes the end's other
+					 * waiting calls */
 	/* The settle: what its table reads, as far as it is copied. */
 	erx_pipe_cur_copy_t settle;
 	uint32_t	 settle_at;	/* the lane of settle.cur, when held */
@@ -326,15 +348,20 @@ typedef struct erx_pipe_rstate {
 	int64_t		 result;
 } erx_pipe_rstate_t;
 
-/* Starts a write of len bytes, one record per chunk, in order. */
+/*
+ * Starts a write of len bytes, one record per chunk, in order.  A call
+ * that waited starts afresh with the bytes it has not written, which is
+ * what the step after its wait does too.
+ */
 void		erx_pipe_wstart(erx_pipe_wstate_t *w, uint64_t len);
 erx_pipe_act_t	erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in);
 
 /*
- * Starts a read of at most len bytes.  A read started while the end's last
- * call is still in a wait, as the session's pipe NIF starts its next call,
- * first ends that wait as a woken one does, clearing the sleepers or
- * waiters bit it published; a read of 0 bytes does only that.
+ * Starts a read of at most len bytes.  A call that waited starts afresh,
+ * which is what the step after its wait does too; a read never waits with
+ * bytes copied.  A read started while another call of the end waits
+ * shares the bits that wait published, and a read of 0 bytes clears them,
+ * ending every wait of the end; either sets wake_local when it clears.
  */
 void		erx_pipe_rstart(erx_pipe_rstate_t *r, uint64_t len);
 erx_pipe_act_t	erx_pipe_rstep(erx_pipe_rstate_t *r, const erx_pipe_in_t *in);

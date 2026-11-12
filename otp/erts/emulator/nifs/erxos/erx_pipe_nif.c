@@ -925,9 +925,11 @@ send_drained(ErlNifEnv *env, pipe_end_t *e)
 /*
  * read(End, Max) -> Bin | eof | would_block | {error, eio}.  A read that
  * returned would_block left its wait in progress, with its bits set so its
- * peers ring it; the next read ends that wait first (erx_pipe_rstart), and a
- * read of 0 bytes, which an owner makes when it stops waiting, does only
- * that and returns <<>>, on a closed end too.
+ * peers ring it; the next read starts afresh and clears them once it
+ * returns, and a read of 0 bytes, which an owner makes when it stops
+ * waiting, only clears them and returns <<>>, on a closed end too.  One
+ * owner makes every call of an end, so no other call of it waits and
+ * wake_local wakes no one.
  */
 static ERL_NIF_TERM
 nif_read(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])

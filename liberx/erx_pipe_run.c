@@ -352,6 +352,8 @@ erx_pipe_rtake(erx_pipe_rstate_t *r, uint32_t rix, const erx_pipe_rmap_t *maps,
 		return (false);
 	r->rix = rix;
 	r->taken = true;
+	r->armed = false;
+	r->waiting = false;
 	keep = ~(UINT64_C(1) << rix);
 	(void)atomic_fetch_and_explicit(&lock->waiters, keep,
 	    memory_order_seq_cst);

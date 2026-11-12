@@ -17,10 +17,16 @@
  * pages the end has mapped, one action at a time, and hands each copy back
  * to the next step, until a step returns ERX_PIPE_OP_WAIT or
  * ERX_PIPE_OP_DONE, which the run returns to its caller.  The run never
- * waits: a program's worker waits for the end's doorbell and runs again,
- * which resumes the call where it stopped, and the session's pipe NIF
- * returns would_block and starts its next call afresh (a step that waits
- * holds neither the reader lock nor an unpublished record).
+ * waits, and a wait ends the call: a program's worker lets go of the end,
+ * waits for its doorbell and starts a fresh call with the bytes it has
+ * not yet written or read, and the session's pipe NIF returns would_block
+ * and starts its next call afresh (a step that waits holds neither the
+ * reader lock nor an unpublished record).  A call whose wake_local is set
+ * when the run returns, DONE or WAIT, changed what other calls of the end
+ * may wait on, and its caller wakes them before it lets go of the end
+ * (docs/design-pipes.md, "Ends in liberx"); a caller that steps past a
+ * wait instead of returning reads it first, since the call after a wait
+ * starts afresh.
  *
  * Every load of a page another party writes goes through erx_shm_copy, but
  * the published positions' acquire loads; stores go through the generated

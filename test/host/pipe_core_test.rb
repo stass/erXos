@@ -85,8 +85,9 @@ class PipeCoreTest < Minitest::Test
       ['flow', 'PI3', 'if (w->lost || w->readers == 0)', 'if (w->lost || w->readers <= 1)'],
     'a read that armed and then found bytes keeps its sleepers bits' =>
       ['flow', 'PI7', 'if (r->armed && r->after != R_AFTER_DATA)', 'if (false)'],
-    'a read started during a wait starts afresh' =>
-      ['flow', 'PI7', 'bool waiting = pipe_rwaiting(r);', 'bool waiting = pipe_rwaiting(r) && false;'],
+    'a read of 0 bytes that leaves the sleepers bits of a wait it gives up' =>
+      ['flow', 'PI7', "\t\treturn (pipe_rreleased(r));\n\t}\n\tr->phase = LOCK_TRIED;",
+       "\t\treturn (pipe_done(0));\n\t}\n\tr->phase = LOCK_TRIED;"],
     "a read that copied bytes waits for a join's report" =>
       ['join', 'PI5', 'if (after != R_AFTER_DONE && r->done > 0) {', 'if (false) {']
   }.freeze

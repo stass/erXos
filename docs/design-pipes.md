@@ -464,6 +464,34 @@ progress. A read end gets its index only from `erx_pipe_rtake`, which
 clears the index's bits that an earlier holder left, so a read state
 made any other way has no index a read accepts.
 
+**Several threads on one end.** A program's threads may read or write
+one end at once, through one descriptor or `dup`s of it, and nothing
+marks an end busy. A call holds the end's lock from its start until the
+core's steps return their result or a wait, as FreeBSD's `pipelock`
+covers a pipe's I/O, so the core's state for a call in progress is the
+call's scratch, valid only under the lock. At a wait the call lets go of
+the lock and sleeps; when it wakes it starts a fresh call with the bytes
+it has not yet written or read (a read never waits with bytes copied, so
+it starts over whole), and its count adds to what it had written. What a
+wait publishes outlasts the call and belongs to the end: a write end's
+`need` and whether one is published, and a read end's sleepers bits with
+their `wake`, and its waiters bit. Every call of the end that waits at
+once relies on them, so a call never clears them on the way in. A write
+end keeps the smallest need any of its waiting calls waits for: a call
+stores its own need only when none is published, when its own is
+smaller, or when the reader has crossed the published one; the crossing
+that frees room for any waiting call crosses that need first, and rings
+the end. A read end's bits are cleared only when no wait of the end
+needs them: the waiters bit once a call holds the reader lock, and the
+sleepers bits when a call that published or found them returns or waits
+for a report instead, or a read of 0 bytes gives every wait up. Whoever
+clears them, and a write call that stored a need and then found room
+without waiting on it, wakes the end's other waiting calls, which start
+afresh and publish again what they still wait for. A doorbell wakes
+every waiting call of its end. Since only a call that holds the lock,
+writes or returns does so, two calls of one end waiting for the same
+thing never wake each other back and forth.
+
 ### The pipe server's records
 
 ```erlang
@@ -554,7 +582,8 @@ lock page's `owner` word:
    `1 + rix`. While another read end holds it, the reader sets its bit in
    `waiters` with an atomic or, executes a full fence and tries again; if
    the lock is still held, it waits for its doorbell and starts over,
-   clearing its bit when it wakes. It waits even under `O_NONBLOCK`, as
+   leaving its bit set until a call of the end holds the lock, which
+   clears it ([Ends in `liberx`](#ends-in-liberx)). It waits even under `O_NONBLOCK`, as
    Linux waits for its pipe's mutex, since the lock is held only for a copy
    or a redemption.
 2. **Bring the lane set up to date.** Under the end's lock it takes the
@@ -605,9 +634,10 @@ lock page's `owner` word:
    `O_NONBLOCK` end fails with `EAGAIN`, and a blocking one sets its bit
    in `sleepers` and stores `wake = rpos + 1` in every open lane's reader
    page, executes a full fence and picks again; if still nothing is
-   readable, it releases the lock, waits for its doorbell, clears its bits
-   when it wakes, and starts again. One that finds something on the second
-   pick clears its bits once it has released the lock
+   readable, it releases the lock, waits for its doorbell, and starts
+   again, keeping its bits set and publishing them again. A call that
+   finds something, or returns or waits for a report, clears them once it
+   has released the lock
    ([Waiting and doorbells](#waiting-and-doorbells)).
 8. **Release the lock** by storing 0 in `owner` with release order; then,
    after a full fence, it copies `waiters` and rings the doorbell of each
@@ -736,12 +766,15 @@ before it waits; the other party makes its change, executes a full fence,
 reads what the waiter published, and rings only when its change reached
 it: a store of a position that crossed the published one, or a release of
 the lock with a waiter's bit set. A read end's bits are set only for a
-wait in progress, and whoever ends the wait clears them: the read end
-when it wakes; the read that armed its lanes and then found bytes, the
-end of the stream or a write end to wait for the report of, before it
-returns or waits for the report; and, for the session's pipe NIF, the
-end's next read, its read of 0 bytes when its owner stops waiting, or its
-release ([The session's pipe NIF](#the-sessions-pipe-nif)). So an idle
+wait in progress, and whoever ends the wait clears them. The call of the
+end that takes the reader lock clears the waiters bit. A read that finds
+bytes, the end of the stream, `EAGAIN` or a write end to wait for the
+report of clears the sleepers bits before it returns or waits for the
+report. A read of 0 bytes, which the session's pipe NIF makes when its
+owner stops waiting ([The session's pipe NIF](#the-sessions-pipe-nif)),
+and the end's release clear both. A woken read keeps its bits and
+publishes them again, since the calls of one end waiting at once share
+them ([Ends in `liberx`](#ends-in-liberx)). So an idle
 end is never rung by its co-readers' waits, which would otherwise ring it
 without bound. A published position needs no clearing, since a position
 already crossed is never rung again. Since only the waiter writes what it
@@ -1086,11 +1119,11 @@ The NIF and a program's ends run the one pipe runner, `liberx`'s
 the pipe core, performs each step's copies, stores, fences and rings on
 the pages the end has mapped, checked against those mappings and the
 call's buffer, and returns at the first wait or at the call's end. A
-program's worker waits on its doorbell and runs again; the NIF returns
-`would_block`, and its next call on the end resumes that wait as woken
-(`erx_pipe_rstart`): it clears the bit the wait published and starts
-over with the call's own length, which is safe because a step that waits
-holds neither the reader lock nor an unpublished record. An owner that
+program's worker waits on its doorbell and starts a fresh call; the NIF
+returns `would_block`, and its next call on the end starts afresh with
+the call's own length, keeping the bits the wait published until it
+returns, which is safe because a step that waits holds neither the
+reader lock nor an unpublished record. An owner that
 stops waiting, when its timeout passes, reads 0 bytes, which ends the
 wait and reads nothing, and an end that goes ends its wait as it lets go
 of its pages, so no bit of a wait outlives it.
