@@ -248,7 +248,7 @@ The scope of the inspect facet the service mints for a domain of Principal
 in a development build, and otherwise `{principal, Principal}`, the
 principal's own domains, which the inspector resolves at each query. Root is
 any of Roots, the system manifest's system-shell principals, and Development
-is the manifest's development flag (erx:development_build/0); the caller
+is the manifest's development flag (erx_build:development/0); the caller
 reads both, so no principal number is root by itself. This is the one
 decision of an inspect facet's scope.
 """.

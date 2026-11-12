@@ -87,7 +87,7 @@ serve(_Request) ->
 -doc """
 The facets the console hands a session beside its console facet, where
 Development is whether this is a development build
-(erx:development_build/0): `log`, in front of Reader with erx_facet's
+(erx_build:development/0): `log`, in front of Reader with erx_facet's
 default limits, in a development build, and none in a release build or one
 whose manifest could not be read.
 """.

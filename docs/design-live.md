@@ -2397,7 +2397,6 @@ grant's rights and bounds (V3).
 | `erx:trace(Spec) -> {ok, reference()} \| {error, Reason}` | starts a trace of processes, frames or kernel events, `Spec` as in [Tracing](#tracing), that prints in the shell; `Reason` is `badarg`, `no_facet` or `scope` for a refusal, and `{failed, Why}` when the trace process ends before it has started the trace, `Why` its exit reason; `erx:trace_stop(Ref)` ends it |
 | `erx:attach(Domain) -> ok \| {error, Reason}` | a console session with a shell inside `Domain`, through its console facet, which the caller holds for its own principal's domains; the shell has that domain's authority, never the system shell's ([The console](#the-console)) |
 | `erx:console_size(Width, Height) -> ok` | system domain only |
-| `erx:development_build() -> boolean()` | system domain only: the system manifest's development flag, false when the manifest cannot be read or does not parse |
 | `erx_code:history(DomainId, Module) -> {ok, [{Hash, Time}]} \| {error, scope}` | the hashes loaded into a domain for a module, newest first, at most 16, through the caller's inspect facet ([The code store](#the-code-store)) |
 
 **Shortcuts.** The shell commands of the vision work without the `erx:`

@@ -121,7 +121,7 @@ web_facet_needs_the_relay_test() ->
 
 %% The web front end logs every browser in as root, so the root offers the web facet only
 %% on a development build: any other, a release build or one whose manifest cannot be
-%% read (erx:development_build/0), is refused with the relay held, no facet starts and
+%% read (erx_build:development/0), is refused with the relay held, no facet starts and
 %% root's line is not reached, so no session is exported to the web domain.
 web_facet_needs_a_development_build_test() ->
     Relay = spawn(fun() -> receive stop -> ok end end),

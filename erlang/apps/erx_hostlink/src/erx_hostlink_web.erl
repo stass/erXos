@@ -59,7 +59,7 @@ with it, and the host opens the facet again.
 The root's answer to `{open, web}`, with the facets it opened. The facet
 opens, and ends with `Link`, when all three hold:
 
-* this is a development build (erx:development_build/0), since the host's front
+* this is a development build (erx_build:development/0), since the host's front
   end logs every browser in as `root`, which only a development build's
   host may do (docs/design-web.md, "The host tool's front end");
 * this domain holds the web domain's relay, the facet of service `web`
@@ -82,7 +82,7 @@ logged in.
 """.
 -spec open(pid()) -> {{ok, pid()} | {error, unsupported}, [pid()]}.
 open(Link) ->
-    open(Link, erx:cap(web), erx_build:id(), erx:development_build(), fun root_line/1).
+    open(Link, erx:cap(web), erx_build:id(), erx_build:development(), fun root_line/1).
 
 -doc """
 open/1 on the relay, build identifier and development flag given, and

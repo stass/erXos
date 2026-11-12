@@ -1469,13 +1469,11 @@ it; git history is the record of completed work.
   `inspect_worker_heap` and `inspect_query_max`; make records name processes as `proc_id()` data, never pids
   (V10); start the facet with the session's ready answer as a system-service grant of its template, with
   `erx_domain_core:inspect_scope/3`, its arguments the grantee's principal, the manifest's system-shell
-  principals and `erx:development_build/0`;
+  principals and `erx_build:development/0`;
   `inspect_worker_heap` and `inspect_query_max`; write V10's test (read `[processes, P]` and
   `[domains, 4, exports]` through a session's facet of scope `all` and find `erx:exports/1` unchanged) with its
   seed of a validation removed, and validate every answer once where it leaves `erx_inspector` (`inspect/3`,
-  `entries/2`, `seen/2`) rather than in each collector, so a new collector cannot skip it; start the facet with the session's ready answer as a system-service grant of its template, with
-  `erx_domain_core:inspect_scope/2` (one
-  `development_build/0` in `erx` replacing `erx_hostlink_files:build_flags/0` and its copy in `erx_log_facet`);
+  `entries/2`, `seen/2`) rather than in each collector, so a new collector cannot skip it;
   route `erx_inspector`'s calls without a scope through the facet, each request in a bounded query worker;
   start `erx_procfs` over the facet rather
   than at scope `all` (`otp/lib/kernel/src/kernel.erl`); then delete `erx_log_facet` and its tests, the
@@ -4654,7 +4652,7 @@ to the corpus and follow rc
   in a development build) a `log` facet in front of the system domain's log reader (`erlang/apps/erx/src/erx_log_facet.erl`, `grant/2`),
   through which the session's `/proc/kernel/log`, its `dmesg` and its web views read the whole kernel log; a
   narrowing removes that grant with the scope. Its gate is the manifest's development flag alone
-  (`erx:development_build/0`): `grant/2` should check root's principal, not rely on a development build having
+  (`erx_build:development/0`): `grant/2` should check root's principal, not rely on a development build having
   no other; a session keeps a dead
   facet after a console restart, as its console facet. The facet exists only in a
   development build, which runs trusted code only. The owner accepted the wide scope; narrowing it to root's own
