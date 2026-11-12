@@ -97,6 +97,14 @@ module ErxManifestFuzz
   end
 
   def c_verdicts(work, corpus)
+    program = c_program(work)
+    output, error, status = Open3.capture3('gtimeout', '-k', '10', DEADLINE_SECONDS, program, corpus, stdin_data: '')
+    abort("the C reader failed (#{status}):\n#{error}") unless status.success? && error.empty?
+    output.lines
+  end
+
+  # The C verdict program, built in work under AddressSanitizer and UBSan; returns its path.
+  def c_program(work)
     program = File.join(work, 'manifest-verdicts')
     output, status = Open3.capture2e(ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-Wall', '-Wextra', '-Werror',
                                      '-pedantic', '-O1', '-g', '-fsanitize=address,undefined',
@@ -108,9 +116,7 @@ module ErxManifestFuzz
                                      stdin_data: '')
     raise output unless status.success?
 
-    output, error, status = Open3.capture3('gtimeout', '-k', '10', DEADLINE_SECONDS, program, corpus, stdin_data: '')
-    abort("the C reader failed:\n#{error}") unless status.success? && error.empty?
-    output.lines
+    program
   end
 
   # The Erlang reader's verdicts, from module_text compiled in a directory of its own.

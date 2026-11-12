@@ -41,20 +41,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 #define VIEW_TABLES_MAX	((size_t)64 << 20)
 
 /*
- * What a view the library admits holds: an entry per device row, each in one
- * unit and on that unit's holder, with a record of its own index; no two units
- * on one register page; each configured row's words with room for both
- * node names; and every service and facet row, each server a configured row
- * or the system domain and each grantee one the boot may grant (grantee_admitted),
- * no grantee taking two facets of one service name, and no facet naming an
- * operation or parameter, which the domain service would otherwise grant
- * unchecked.
- */
-/*
  * Whether the view admitted facet's grantee as the boot may grant it: the
  * system domain, with index 0, for a configured domain's service; a
- * configured row other than the server; or a session template, for a
- * configured domain's service.
+ * configured row other than the server; or a session template, of any
+ * service (property 14): a configured domain's, which the server grants
+ * each session, or the system domain's, whose facet the domain service
+ * starts for each session.
  */
 static bool
 grantee_admitted(const erx_dom_view_t *dom, const erx_dom_facet_t *facet)
@@ -67,12 +59,22 @@ grantee_admitted(const erx_dom_view_t *dom, const erx_dom_facet_t *facet)
 	case ERX_MF_GRANTEE_DOMAIN:
 		return (facet->grantee < dom->nconfigured && facet->grantee != server);
 	case ERX_MF_GRANTEE_SESSION:
-		return (facet->grantee < dom->ntemplates && server != ERX_MF_NONE);
+		return (facet->grantee < dom->ntemplates);
 	default:
 		return (false);
 	}
 }
 
+/*
+ * What a view the library admits holds: an entry per device row, each in one
+ * unit and on that unit's holder, with a record of its own index; no two units
+ * on one register page; each configured row's words with room for both
+ * node names; and every service and facet row, each server a configured row
+ * or the system domain and each grantee one the boot may grant (grantee_admitted),
+ * no grantee taking two facets of one service name, and no facet naming an
+ * operation or parameter, which the domain service would otherwise grant
+ * unchecked.
+ */
 static void
 view_check(const erx_manifest_view_t *view, const erx_dom_lib_t *lib)
 {

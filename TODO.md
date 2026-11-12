@@ -1144,12 +1144,11 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [Medium] manifest fuzz harness (`tools/fuzz/manifest_fuzz.c`, `tools/fuzz/erx_manifest.rb`): the domain
-  library check that `LLVMFuzzerTestOneInput` runs after the reader accepts a manifest aborts on the
-  unmodified QEMU virt development manifest seed, so `tools/fuzz/erx_manifest.rb` stops with "the C reader
-  failed" before comparing any verdict, on master as well. The reader itself accepts the seed; the abort is
-  in `view_check` or `erx_dom_boot_layout`. Find which check the development manifest breaks, fix the side
-  that is wrong, and keep the seed in the corpus.
+* [Medium] manifest fuzz harness (`tools/fuzz/manifest_fuzz.c`, `tools/fuzz/manifest_verdicts.c`): `view_build`
+  runs `view_check` only when the domain library admits the manifest, and a refusal is silent, so the library
+  refusing a valid seed (the development manifest) leaves the target and `test/host/manifest_fuzz_test.rb` passing
+  with nothing checked. Print whether the library viewed each accepted manifest (`ok viewed`, `ok refused REASON`;
+  `erx_manifest.rb` compares only the first word) and require `viewed` for the valid seeds.
 * [Low] host tests, EUnit runs (`test/host/*_test.rb`): each test file starts `erl` for `eunit:test` on its
   own, and a logger report a case provokes can split EUnit's verbose line for that case on standard output.
   `erx_inspector_test.rb` sends the logger to standard error and matches verdicts on standard output alone;
