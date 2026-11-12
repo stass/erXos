@@ -82,7 +82,11 @@ class PipeCoreTest < Minitest::Test
       ['flow', 'PI2', "\tif (r->gone) {\n\t\tlane->ring = ERX_PIPE_RING_DRAINED;",
        "\tif (true) {\n\t\tlane->ring = ERX_PIPE_RING_DRAINED;"],
     'EPIPE while a read end remains' =>
-      ['flow', 'PI3', 'if (w->lost || w->readers == 0)', 'if (w->lost || w->readers <= 1)']
+      ['flow', 'PI3', 'if (w->lost || w->readers == 0)', 'if (w->lost || w->readers <= 1)'],
+    'a read that armed and then found bytes keeps its sleepers bits' =>
+      ['flow', 'PI7', 'if (r->armed && r->after != R_AFTER_DATA)', 'if (false)'],
+    'a read started during a wait starts afresh' =>
+      ['flow', 'PI7', 'bool waiting = pipe_rwaiting(r);', 'bool waiting = pipe_rwaiting(r) && false;']
   }.freeze
 
   def test_seeded_faults_are_caught

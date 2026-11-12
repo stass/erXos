@@ -25,7 +25,9 @@
  * start of a write of the scenario's next length or of a read, the write
  * end's close, either holder's death or close where the scenario allows
  * it, each party's event executor applying the report of the other's
- * going (which wakes the party), and in a hostile scenario one rewrite of
+ * going (which wakes the party), the reader's call made afresh while it
+ * waits, as the session's pipe NIF makes it, to read again or, of 0 bytes,
+ * to give the wait up, and in a hostile scenario one rewrite of
  * a shared field by the other party.  The exploration is depth first over
  * every interleaving, with each state's 64-bit fingerprint kept so a
  * state is explored once.  After every event it checks:
@@ -44,7 +46,9 @@
  *        idle with no store left to make; and a state from which no event
  *        can follow has both calls finished:
  *        the writer closed or dead and the reader at the end of the stream
- *        or gone; a party asleep there lost a wakeup.
+ *        or gone; a party asleep there lost a wakeup; and an idle reader
+ *        holds no sleepers or waiters bit, which only a wait in progress
+ *        may hold.
  *
  * A hostile scenario checks only what the honest party must keep: no
  * loop, no error but its own (a broken lane, EAGAIN, EPIPE), and no access
@@ -131,7 +135,8 @@ typedef struct world {
 	uint8_t		 eof;
 	uint8_t		 drained;
 	uint8_t		 hostile;	/* the rewrite happened */
-	uint8_t		 pad[5];
+	uint8_t		 quit;		/* the read is a wait given up */
+	uint8_t		 pad[4];
 } world_t;
 
 typedef struct scenario {
@@ -467,6 +472,13 @@ writer_done(world_t *wd, int depth, int64_t result)
 static void
 reader_done(world_t *wd, int depth, int64_t result)
 {
+	if (wd->quit) {
+		if (result != 0)
+			fail(depth, "PI2", "a read of 0 bytes returned something");
+		wd->quit = 0;
+		wd->r.state = IDLE;
+		return;
+	}
 	if (result > 0 && wd->eof)
 		fail(depth, "PI2", "bytes after the end of the stream");
 	if (result == 0) {
@@ -743,6 +755,26 @@ check_asleep(int depth)
 		fail(depth, "PI7", "the writer sleeps with room free (a lost wakeup)");
 }
 
+/*
+ * The reader's sleepers and waiters bits are set only for a wait in
+ * progress: an idle reader whose stores have landed holds neither, or
+ * every co-reader's wait would ring it.  A lane closed once drained is
+ * let go of and rung by no writer, so its sleepers bit no longer counts.
+ */
+static void
+check_idle_bits(int depth)
+{
+	const world_t *wd = &worlds[depth];
+	uint64_t bit = UINT64_C(1) << wd->rs.rix;
+
+	if (sc->hostile != 0 || wd->r.state != IDLE || wd->r.nbuf != 0)
+		return;
+	if (wd->lane.ring == ERX_PIPE_RING_LIVE && (wd->mem.sleepers & bit) != 0)
+		fail(depth, "PI7", "an idle reader left its sleepers bit set");
+	if ((wd->mem.waiters & bit) != 0)
+		fail(depth, "PI7", "an idle reader left its waiters bit set");
+}
+
 static void
 explore(int depth)
 {
@@ -755,6 +787,7 @@ explore(int depth)
 	if (depth + 1 >= DEPTH_MAX)
 		fail(depth, "depth", "the model's depth bound was reached");
 	check_asleep(depth);
+	check_idle_bits(depth);
 	for (i = 0; i < 2; i++) {
 		/* The step decides apart from the action, so reports land between. */
 		if (parties[i]->state == CALL && !parties[i]->decided) {
@@ -805,6 +838,25 @@ explore(int depth)
 		next_action(nw, &nw->r);
 		visit(depth + 1);
 		events++;
+	}
+	/*
+	 * The session's pipe NIF does not sleep at a wait: it returns, and its
+	 * owner calls again, on a ring or a stray message, or, once its wait
+	 * times out, with a read of 0 bytes.  Either call starts the read
+	 * afresh while the wait is still in progress.
+	 */
+	if (cur->r.state == CALL && cur->r.decided &&
+	    cur->r.act.op == ERX_PIPE_OP_WAIT) {
+		for (k = 0; k < 2; k++) {
+			nw = successor(depth, k == 0 ? "R reads again" :
+			    "R gives up its wait", "");
+			erx_pipe_rstart(&nw->rs, k == 0 ? sc->read_len : 0);
+			nw->quit = k == 1;
+			nw->r.steps = 0;
+			next_action(nw, &nw->r);
+			visit(depth + 1);
+			events++;
+		}
 	}
 	if ((sc->reader_closes && cur->r.state == IDLE && cur->eof == 0) ||
 	    (sc->reader_dies && cur->r.state == CALL)) {

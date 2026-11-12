@@ -662,12 +662,22 @@ open_read(ErlNifEnv *env, pipe_end_t *e, ERL_NIF_TERM m)
 	    list_each(env, e, readers, peer_add));
 }
 
-/* Lets go of every mapping and object of an end; the caller holds its mutex. */
+/*
+ * Lets go of every mapping and object of an end; the caller holds its mutex.
+ * A read end first ends the wait its last read left in progress, by a read
+ * of 0 bytes, so no bit of its index stays set for the next holder.
+ */
 static void
 end_release(pipe_end_t *e)
 {
+	erx_pipe_fx_t fx;
 	uint32_t i;
 
+	if (!e->write && e->lock != NULL) {
+		erx_pipe_rstart(&e->r, 0);
+		(void)erx_pipe_rrun(&e->r, e->maps,
+		    (erx_pipe_lock_t *)(uintptr_t)e->lock_map, NULL, end_fx(e, &fx));
+	}
 	if (e->write) {
 		if (e->ring != NULL)
 			unmap_object(&e->ring_map, e->ring->size);
@@ -910,7 +920,13 @@ send_drained(ErlNifEnv *env, pipe_end_t *e)
 	e->ndrained = 0;
 }
 
-/* read(End, Max) -> Bin | eof | would_block | {error, eio} */
+/*
+ * read(End, Max) -> Bin | eof | would_block | {error, eio}.  A read that
+ * returned would_block left its wait in progress, with its bits set so its
+ * peers ring it; the next read ends that wait first (erx_pipe_rstart), and a
+ * read of 0 bytes, which an owner makes when it stops waiting, does only
+ * that and returns <<>>, on a closed end too.
+ */
 static ERL_NIF_TERM
 nif_read(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
@@ -923,7 +939,7 @@ nif_read(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 
 	(void)argc;
 	if (!get_owned_end(env, argv[0], &e) || e->write ||
-	    !enif_get_uint(env, argv[1], &max) || max == 0)
+	    !enif_get_uint(env, argv[1], &max))
 		return (enif_make_badarg(env));
 	if (max > PIPE_READ_MAX)
 		max = PIPE_READ_MAX;
@@ -932,6 +948,8 @@ nif_read(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	enif_mutex_lock(e->mutex);
 	if (e->closed) {
 		enif_mutex_unlock(e->mutex);
+		if (max == 0)
+			return (enif_make_binary(env, &bin));
 		enif_release_binary(&bin);
 		return (enif_make_badarg(env));
 	}
@@ -945,6 +963,8 @@ nif_read(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		enif_release_binary(&bin);
 		return (atom_would_block);
 	}
+	if (max == 0 && act.result == 0)
+		return (enif_make_binary(env, &bin));
 	if (act.result == 0) {
 		enif_release_binary(&bin);
 		return (atom_eof);

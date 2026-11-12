@@ -188,6 +188,86 @@ case_empty_waits_and_is_rung(void)
 	world_free(&wd);
 }
 
+/*
+ * Read end 1 arms the lane as a co-reader does, its sleepers bit and wake
+ * one past rpos, and a write crosses that wake: only read ends still
+ * waiting may be rung.
+ */
+static void
+co_reader_armed_and_crossed(world_t *wd)
+{
+	uint64_t rpos = 0;
+
+	(void)erx_pipe_rpage_rpos_load(wd->rpage, &rpos);
+	(void)atomic_fetch_or(&wd->rpage->sleepers, UINT64_C(2));
+	(void)erx_pipe_rpage_wake_store(wd->rpage, rpos + 1);
+	(void)do_write(wd, "y", 1);
+}
+
+/*
+ * A wait ends with the read that follows it, whatever that read returns: a
+ * read that waited, was rung and then read the data leaves no sleepers bit,
+ * so a co-reader's later wait does not ring this end.
+ */
+static void
+case_wait_ends_with_next_read(void)
+{
+	world_t wd;
+	char out[16];
+
+	world_init(&wd);
+	(void)do_read(&wd, out, sizeof(out));
+	(void)do_write(&wd, "x", 1);
+	CHECK("ended read gets data", done(do_read(&wd, out, sizeof(out)), 1));
+	CHECK("ended sleeper cleared", atomic_load(&wd.rpage->sleepers) == 0);
+	co_reader_armed_and_crossed(&wd);
+	CHECK("ended not rung again", wd.reader_rings == 1);
+	world_free(&wd);
+}
+
+/*
+ * A read of 0 bytes, which the NIF's owner makes when its wait times out,
+ * ends the wait without reading: no sleepers bit is left, and a
+ * co-reader's later wait does not ring this end.
+ */
+static void
+case_wait_ends_with_empty_read(void)
+{
+	world_t wd;
+	char out[16];
+
+	world_init(&wd);
+	(void)do_read(&wd, out, sizeof(out));
+	CHECK("timeout ends wait", done(do_read(&wd, out, 0), 0));
+	CHECK("timeout sleeper cleared", atomic_load(&wd.rpage->sleepers) == 0);
+	co_reader_armed_and_crossed(&wd);
+	CHECK("timeout not rung", wd.reader_rings == 0);
+	world_free(&wd);
+}
+
+/*
+ * A wait for the reader lock ends the same way: once read end 1 lets the
+ * lock go, the next read takes it and leaves no waiters bit, so read end
+ * 1's later releases do not ring this end.
+ */
+static void
+case_lock_wait_ends_with_next_read(void)
+{
+	world_t wd;
+	char out[16];
+
+	world_init(&wd);
+	(void)do_write(&wd, "x", 1);
+	(void)erx_pipe_lock_owner_store(wd.lock, 2);
+	CHECK("lock waits", do_read(&wd, out, sizeof(out)).op ==
+	    ERX_PIPE_OP_WAIT);
+	CHECK("lock waiter published", atomic_load(&wd.lock->waiters) == 1);
+	(void)erx_pipe_lock_owner_store(wd.lock, 0);
+	CHECK("lock read after release", done(do_read(&wd, out, sizeof(out)), 1));
+	CHECK("lock waiter cleared", atomic_load(&wd.lock->waiters) == 0);
+	world_free(&wd);
+}
+
 static void
 case_record_whole(void)
 {
@@ -286,6 +366,9 @@ main(void)
 {
 	case_bytes_pass();
 	case_empty_waits_and_is_rung();
+	case_wait_ends_with_next_read();
+	case_wait_ends_with_empty_read();
+	case_lock_wait_ends_with_next_read();
 	case_record_whole();
 	case_full_ring();
 	case_writer_gone();

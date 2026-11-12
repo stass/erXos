@@ -592,7 +592,9 @@ lock page's `owner` word:
    in `sleepers` and stores `wake = rpos + 1` in every open lane's reader
    page, executes a full fence and picks again; if still nothing is
    readable, it releases the lock, waits for its doorbell, clears its bits
-   when it wakes, and starts again.
+   when it wakes, and starts again. One that finds something on the second
+   pick clears its bits once it has released the lock
+   ([Waiting and doorbells](#waiting-and-doorbells)).
 8. **Release the lock** by storing 0 in `owner` with release order; then,
    after a full fence, it copies `waiters` and rings the doorbell of each
    read end whose bit is set.
@@ -719,13 +721,21 @@ publishes what it waits for, executes a full fence and checks again
 before it waits; the other party makes its change, executes a full fence,
 reads what the waiter published, and rings only when its change reached
 it: a store of a position that crossed the published one, or a release of
-the lock with a waiter's bit set. A read end clears its bits when it
-wakes; a published position needs no clearing, since a position already
-crossed is never rung again. Since only the waiter writes what it
-publishes, each party writes only its own page. A bit still set after its
-waiter woke costs at most one needless trigger, and triggers that come
-before a wait count once, so a peer that rings needlessly costs the
-holder at most one wake for each of its waits. A read end that takes an
+the lock with a waiter's bit set. A read end's bits are set only for a
+wait in progress, and whoever ends the wait clears them: the read end
+when it wakes; the read that armed its lanes and then found bytes, the
+end of the stream or a write end to wait for the report of, before it
+returns or waits for the report; and, for the session's pipe NIF, the
+end's next read, its read of 0 bytes when its owner stops waiting, or its
+release ([The session's pipe NIF](#the-sessions-pipe-nif)). So an idle
+end is never rung by its co-readers' waits, which would otherwise ring it
+without bound. A published position needs no clearing, since a position
+already crossed is never rung again. Since only the waiter writes what it
+publishes, each party writes only its own page. A ring that lands between
+a wait's end and its clearing costs at most one needless trigger, and
+triggers that come before a wait count once, so a peer that rings
+needlessly costs the holder at most one wake for each of its waits. A
+read end that takes an
 index first clears its bits in every lane's `sleepers` and in `waiters`,
 since a read end that held the index before may have ended with them set.
 
@@ -1055,8 +1065,13 @@ the pipe core, performs each step's copies, stores, fences and rings on
 the pages the end has mapped, checked against those mappings and the
 call's buffer, and returns at the first wait or at the call's end. A
 program's worker waits on its doorbell and runs again; the NIF returns
-`would_block` and starts its next call afresh, which is safe because a
-step that waits holds neither the reader lock nor an unpublished record.
+`would_block`, and its next call on the end resumes that wait as woken
+(`erx_pipe_rstart`): it clears the bit the wait published and starts
+over with the call's own length, which is safe because a step that waits
+holds neither the reader lock nor an unpublished record. An owner that
+stops waiting, when its timeout passes, reads 0 bytes, which ends the
+wait and reads nothing, and an end that goes ends its wait as it lets go
+of its pages, so no bit of a wait outlives it.
 Both stamp records with the time page's monotonic clock, `erx_clock_ns`,
 never ERTS's monotonic time, which may carry an offset of its own, since a
 reader merges records from both by their stamps.

@@ -327,7 +327,12 @@ typedef struct erx_pipe_rstate {
 void		erx_pipe_wstart(erx_pipe_wstate_t *w, uint64_t len);
 erx_pipe_act_t	erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in);
 
-/* Starts a read of at most len bytes; len is at least 1. */
+/*
+ * Starts a read of at most len bytes.  A read started while the end's last
+ * call is still in a wait, as the session's pipe NIF starts its next call,
+ * first ends that wait as a woken one does, clearing the sleepers or
+ * waiters bit it published; a read of 0 bytes does only that.
+ */
 void		erx_pipe_rstart(erx_pipe_rstate_t *r, uint64_t len);
 erx_pipe_act_t	erx_pipe_rstep(erx_pipe_rstate_t *r, const erx_pipe_in_t *in);
 

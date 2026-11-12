@@ -1719,12 +1719,17 @@ it; git history is the record of completed work.
   `erx_prog_handler`, which forwards a program's requests and notices to the pipe server and installs
   into its program (docs/design-pipes.md, "The pipe server"); until it lands, no program holds an end
   of a session's pipe.
-* [Medium] session, `erx_pipe_nif.c` (`nif_read`): a read that returned `would_block` and then data or
-  a timeout leaves its sleeper bit set in every live lane, and its waiter bit too if it never reads
-  again, since only the core's `R_DATA_WOKE` clears them and a fresh start never reaches it. Each
-  co-reader's arm and cross then rings the idle end, whose owner collects `{erx_pipe_ready, _, _}`
-  messages without bound, and a reused `rix` inherits the bit. Clear the end's bits on a fresh start
-  after a wait and in `end_release`.
+* [Low] session, `erx_pipe_nif.c` (`open_read`), and P7's program read ends: a read end that takes an
+  index does not first clear that index's bits in every lane's `sleepers` and in `waiters`, as
+  docs/design-pipes.md ("Waiting and doorbells") requires. The NIF's ends clear theirs when they go,
+  so only an end that died mid-wait without that release (a killed program's, once P7 lands) can hand
+  its bits on, and they cost the new holder stray `{erx_pipe_ready, _, _}` messages until a read of its
+  arms and clears them.
+* [Medium] session, `erx_pipe_nif.c` and `erx_event.c`: each ring of a session end's doorbell is one
+  `{erx_pipe_ready, _, _}` message, uncoalesced, so while an end waits (bits set for that wait only) a
+  co-reader that loops on the lock or a writer's repeated crossings can queue many messages before the
+  owner reads again, and `erx_pipe_srv:retry/2` leaves the extras in the mailbox. Coalesce per end (a
+  ready-sent flag the next `nif_read` re-arms), as a program's doorbell counts triggers once.
 * [Low] session, `erx_pipe_nif.c`: when `enif_alloc_env` fails, a `closed`, `drained` or
   `pipe_server_lost` notice is dropped, so a closed end never reaches the server (no eof or `EPIPE`
   follows) or a drained lane is never forgotten. Out of memory only; retry from the next call or

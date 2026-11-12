@@ -249,7 +249,9 @@ erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
  *	R_FINISH	step 6: retire a record read to its end, ring its writer
  *	R_ARM		step 7: publish sleepers and wake, then pick again
  *	R_RELEASE	step 8: release the lock and ring its waiters
- *	R_WAIT		wait for data or for a report, then start over
+ *	R_WAIT		wait for data or for a report
+ *	R_DISARM	clear the sleepers bits arming set, then return, wait
+ *			for a report or, after a wait for data, start over
  *
  * A stage begins in its pipe_r*_begin function, which returns the stage's
  * first action; erx_pipe_rstep hands what each action copied to the
@@ -262,10 +264,13 @@ erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
  * The pick, copy and finish repeat until the buffer is full or nothing
  * is readable; then pipe_rnothing_readable gives the count, the end of
  * the stream, EAGAIN, or a wait.  Every way out of the lock goes through the
- * release, which r->after follows: the call's result, or a wait.
+ * release, which r->after follows: the call's result, or a wait.  The
+ * sleepers bits are set only for a wait for data in progress: arming sets
+ * them, and the disarm clears them once that wait ends, or at the release
+ * when the call returns or waits for a report instead.
  *
  * The loops over the lanes (the take-up's, the looks, arming's and
- * the clearing of sleepers bits after a wait) each keep their place in
+ * the disarm's) each keep their place in
  * r->at, which each loop's begin sets to 0; no two run at once.
  */
 enum {
@@ -277,7 +282,8 @@ enum {
 	R_FINISH,
 	R_ARM,
 	R_RELEASE,
-	R_WAIT
+	R_WAIT,
+	R_DISARM
 };
 
 /*
@@ -338,22 +344,44 @@ enum {
 	RELEASE_RUNG,		/* the other waiters were rung */
 
 	/* The wait's. */
-	WAIT_DATA,		/* woken: clear the sleepers bits, start over */
-	WAIT_REPORT		/* woken by the report wends named: start over */
+	WAIT_DATA,		/* woken: disarm, start over */
+	WAIT_REPORT,		/* woken by the report wends named: start over */
+
+	/* The disarm's. */
+	DISARM_CLEARED		/* the sleepers bit of lane r->at - 1 is clear */
 };
 
 /* What follows step 8, the release of the reader lock. */
 enum {
 	R_AFTER_DONE = 0,	/* return result */
-	R_AFTER_DATA,		/* wait for data, then clear sleepers bits */
+	R_AFTER_DATA,		/* wait for data, disarm, start over */
 	R_AFTER_REPORT		/* wait for the report wends names */
 };
 
+/*
+ * Whether the end's last call stopped in a wait: for data or a report, or
+ * for the reader lock, whose waiters bit is still set.
+ */
+static bool
+pipe_rwaiting(const erx_pipe_rstate_t *r)
+{
+	return (r->stage == R_WAIT ||
+	    (r->stage == R_LOCK && r->phase == LOCK_WOKE));
+}
+
+/*
+ * A call started while the last one waits resumes that wait as woken, so
+ * the wait's own step clears what it published and the call starts over
+ * at step 1 with the new length; every other field starts afresh.
+ */
 void
 erx_pipe_rstart(erx_pipe_rstate_t *r, uint64_t len)
 {
-	r->stage = R_LOCK;
-	r->phase = LOCK_START;
+	bool waiting = pipe_rwaiting(r);
+	uint32_t stage = r->stage, phase = r->phase, after = r->after;
+
+	r->stage = waiting ? stage : R_LOCK;
+	r->phase = waiting ? phase : LOCK_START;
 	r->at = 0;
 	r->len = len;
 	r->done = 0;
@@ -371,7 +399,7 @@ erx_pipe_rstart(erx_pipe_rstate_t *r, uint64_t len)
 	r->cur_pos = 0;
 	r->cur_len = 0;
 	r->claim = 0;
-	r->after = R_AFTER_DONE;
+	r->after = waiting ? after : R_AFTER_DONE;
 	r->result = 0;
 }
 
@@ -386,6 +414,7 @@ static erx_pipe_act_t pipe_rrelease_begin(erx_pipe_rstate_t *, uint32_t,
     int64_t);
 static erx_pipe_act_t pipe_rnothing_readable(erx_pipe_rstate_t *);
 static erx_pipe_act_t pipe_rwait_begin(erx_pipe_rstate_t *);
+static erx_pipe_act_t pipe_rdisarm_begin(erx_pipe_rstate_t *);
 
 /*
  * Step 1: take the lock with one compare-and-swap of owner; while another
@@ -396,9 +425,10 @@ static erx_pipe_act_t pipe_rwait_begin(erx_pipe_rstate_t *);
 static erx_pipe_act_t
 pipe_rlock_begin(erx_pipe_rstate_t *r)
 {
+	r->stage = R_LOCK;
+	r->phase = LOCK_START;
 	if (r->len == 0)
 		return (pipe_done(0));
-	r->stage = R_LOCK;
 	r->phase = LOCK_TRIED;
 	return (pipe_act(ERX_PIPE_OP_TAKE_LOCK));
 }
@@ -1044,9 +1074,16 @@ pipe_rrelease_begin(erx_pipe_rstate_t *r, uint32_t after, int64_t result)
 	return (pipe_act(ERX_PIPE_OP_RELEASE_LOCK));
 }
 
+/*
+ * After the release: a wait for data keeps the sleepers bits arming set,
+ * which the disarm clears once the wait ends; a call that armed and then
+ * returns or waits for a report clears them first.
+ */
 static erx_pipe_act_t
 pipe_rreleased(erx_pipe_rstate_t *r)
 {
+	if (r->armed && r->after != R_AFTER_DATA)
+		return (pipe_rdisarm_begin(r));
 	if (r->after == R_AFTER_DONE)
 		return (pipe_done(r->result));
 	return (pipe_rwait_begin(r));
@@ -1079,45 +1116,69 @@ pipe_rrelease_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
 }
 
 /*
- * The wait after step 8: for the doorbell, and then, after a wait for
- * data, the clearing of the end's sleepers bit in every lane it reads;
- * then the read starts over at step 1, unarmed.
+ * The wait after step 8, for the doorbell; once woken, a wait for data
+ * disarms and a wait for a report starts over at step 1.  A call started
+ * while the wait is in progress resumes here too (erx_pipe_rstart).
  */
 static erx_pipe_act_t
 pipe_rwait_begin(erx_pipe_rstate_t *r)
 {
 	r->stage = R_WAIT;
-	if (r->after == R_AFTER_DATA) {
-		r->at = 0;
-		r->phase = WAIT_DATA;
-	} else {
-		r->armed = false;
-		r->phase = WAIT_REPORT;
-	}
+	r->phase = r->after == R_AFTER_DATA ? WAIT_DATA : WAIT_REPORT;
 	return (pipe_act(ERX_PIPE_OP_WAIT));
 }
 
 static erx_pipe_act_t
 pipe_rwait_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
 {
-	erx_pipe_act_t act;
-
 	(void)in;
 	switch (r->phase) {
 	case WAIT_DATA:
-		for (; r->at < r->nlanes; r->at++) {
-			if (r->lanes[r->at].ring == ERX_PIPE_RING_LIVE) {
-				act = pipe_lane_act(ERX_PIPE_OP_CLEAR_SLEEPER,
-				    r->at);
-				r->at++;
-				return (act);
-			}
-		}
-		r->armed = false;
-		return (pipe_rlock_begin(r));
+		return (pipe_rdisarm_begin(r));
 	case WAIT_REPORT:
 		return (pipe_rlock_begin(r));
 	}
+	return (pipe_done(-EIO));
+}
+
+/*
+ * Clears the end's sleepers bit in every lane it reads, then does what
+ * after says: return the result, wait for a report, or, the wait for data
+ * over, start over at step 1, unarmed.
+ */
+static erx_pipe_act_t
+pipe_rdisarm_next(erx_pipe_rstate_t *r)
+{
+	for (; r->at < r->nlanes; r->at++) {
+		if (r->lanes[r->at].ring == ERX_PIPE_RING_LIVE) {
+			r->phase = DISARM_CLEARED;
+			return (pipe_lane_act(ERX_PIPE_OP_CLEAR_SLEEPER, r->at++));
+		}
+	}
+	r->armed = false;
+	switch (r->after) {
+	case R_AFTER_DONE:
+		return (pipe_done(r->result));
+	case R_AFTER_REPORT:
+		return (pipe_rwait_begin(r));
+	}
+	return (pipe_rlock_begin(r));
+}
+
+static erx_pipe_act_t
+pipe_rdisarm_begin(erx_pipe_rstate_t *r)
+{
+	r->stage = R_DISARM;
+	r->at = 0;
+	return (pipe_rdisarm_next(r));
+}
+
+static erx_pipe_act_t
+pipe_rdisarm_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
+{
+	(void)in;
+	if (r->phase == DISARM_CLEARED)
+		return (pipe_rdisarm_next(r));
 	return (pipe_done(-EIO));
 }
 
@@ -1143,6 +1204,8 @@ erx_pipe_rstep(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
 		return (pipe_rrelease_step(r, in));
 	case R_WAIT:
 		return (pipe_rwait_step(r, in));
+	case R_DISARM:
+		return (pipe_rdisarm_step(r, in));
 	}
 	return (pipe_done(-EIO));
 }

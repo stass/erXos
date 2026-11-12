@@ -98,7 +98,15 @@ lost, or `{error, timeout}`.
 """.
 -spec read(term(), pos_integer(), timeout()) -> binary() | eof | {error, eio | timeout}.
 read(End, Max, Timeout) ->
-    retry(fun() -> erx_pipe_nif:read(End, Max) end, Timeout).
+    case retry(fun() -> erx_pipe_nif:read(End, Max) end, Timeout) of
+        {error, timeout} ->
+            %% A read of 0 bytes ends the wait the last call left in
+            %% progress, so the end's peers stop ringing it.
+            _ = erx_pipe_nif:read(End, 0),
+            {error, timeout};
+        Result ->
+            Result
+    end.
 
 -doc """
 Writes `Bin` to a write end the calling process holds, waiting for room
