@@ -25,7 +25,8 @@ number is a late repeat and is ignored.
 It holds at most ?MAX_HELD bytes, the outstanding output among them. A
 write takes what room there is, in arrival order, and its writer is told
 it is done once all its bytes are held; until then the writer and every
-writer after it wait. A write nobody waits on (`none`, a line editor's
+writer after it wait. An empty write is done at once and changes nothing.
+A write nobody waits on (`none`, a line editor's
 redraw) may not wait unboundedly: past ?MAX_WAITING bytes waiting it is
 dropped and counted. A tty whose master takes no output is stopped in
 that state, and nothing piles up.

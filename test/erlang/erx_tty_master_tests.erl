@@ -14,6 +14,8 @@ lost exactly the outputs whose first send was lost.
 
 -define(RUNS, 400).
 -define(STEPS, 60).
+%% Timer rounds the drain may take before the run fails as never settling.
+-define(DRAIN_ROUNDS, 1000).
 
 %%% The receiver checks
 
@@ -163,7 +165,7 @@ run() ->
 
 event() ->
     case rand:uniform(9) of
-        1 -> {write, binary:copy(<<(rand:uniform(26) + $a - 1)>>, rand:uniform(3000))};
+        1 -> {write, binary:copy(<<(rand:uniform(26) + $a - 1)>>, write_size())};
         2 -> deliver_to_master;
         3 -> deliver_to_tty;
         4 -> lose;
@@ -174,16 +176,36 @@ event() ->
         9 -> deliver_to_master
     end.
 
-%% After the run: connected, nothing lost, until nothing moves.
-drain(S0) ->
-    S1 = step(connect, S0),
-    drain(S1, 0).
+%% A write of up to 3000 bytes, empty one time in four: an empty write is done at
+%% once, and the run checks that no byte is lost or reordered around it.
+write_size() ->
+    case rand:uniform(4) of
+        1 -> 0;
+        _ -> rand:uniform(3000)
+    end.
 
-drain(S, 200) ->
+%% After the run: connected, nothing lost, until nothing moves. Each round delivers
+%% every message and finishes every write before the next timer fires, as a tty and
+%% its master answer in far less than the tty's one-second timer; one message each
+%% way per timer would let the master's answers to resends pile up ahead of the tty.
+%% A link that never settles fails the run, and a settled link holds nothing.
+drain(S0) ->
+    End = #{tty := Tty} = drain(step(connect, S0), 0),
+    ?assertEqual({0, 0}, {erx_tty_link:held(Tty), erx_tty_link:waiting(Tty)}),
+    End.
+
+drain(S = #{to_master := [], to_tty := [], writing := [], timers := []}, _Round) ->
     S;
-drain(S, Count) ->
-    Next = lists:foldl(fun step/2, S, [deliver_to_master, written, deliver_to_tty, timer]),
-    drain(Next, Count + 1).
+drain(S = #{tty := Tty}, ?DRAIN_ROUNDS) ->
+    error({drain_did_not_settle, maps:with([to_master, to_tty, writing, timers], S),
+           {held, erx_tty_link:held(Tty)}, {waiting, erx_tty_link:waiting(Tty)}});
+drain(S, Round) ->
+    drain(step(timer, deliver(S)), Round + 1).
+
+deliver(S = #{to_master := [], to_tty := [], writing := []}) ->
+    S;
+deliver(S) ->
+    deliver(lists:foldl(fun step/2, S, [deliver_to_master, written, deliver_to_tty])).
 
 step({write, Bytes}, S = #{tty := Tty, wrote := Wrote}) ->
     %% A writer that waits, so no write is dropped.
