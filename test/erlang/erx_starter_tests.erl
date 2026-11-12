@@ -52,7 +52,8 @@ starter_test_() ->
       fun an_unchanged_text_is_not_recorded_again/1,
       fun a_new_text_is_recorded_before_the_old_is_dropped/1,
       fun a_restarted_table_takes_the_newer_of_two_recorded_texts/1,
-      fun a_row_neither_held_nor_marked_is_starting/1]}.
+      fun a_row_neither_held_nor_marked_is_starting/1,
+      fun a_write_of_an_ended_table_lands_before_the_next_table_reads/1]}.
 
 %% A first read of rc.conf that fails: the file is a directory until the case
 %% replaces it.
@@ -80,6 +81,25 @@ a_one_for_one_supervisor_keeps_a_spec_with_no_pid_test() ->
                  lists:sort(supervisor:which_children(Sup))),
     unlink(Sup),
     ok = gen_server:stop(Sup, shutdown, ?WAIT_MS).
+
+%% The rc.conf process carries out the writes of the process whose read came
+%% last alone: an earlier reader's write is refused and changes nothing.
+a_write_from_a_process_that_did_not_read_last_is_refused_test() ->
+    Dir = list_to_binary(filename:absname("rc-" ++ integer_to_list(erlang:unique_integer([positive])))),
+    {ok, Rc} = erx_starter_rc:start_link(),
+    Ask = fun(Request) -> {reply, Reply} = gen_server:receive_response(Request, ?WAIT_MS), Reply end,
+    try
+        ?assertEqual(absent, Ask(erx_starter_rc:read(Dir))),
+        Test = self(),
+        _ = spawn_link(fun() -> Test ! {other, Ask(erx_starter_rc:read(Dir)), Ask(erx_starter_rc:write(Dir, <<"b">>))} end),
+        ?assertEqual({other, absent, ok}, receive {other, _, _} = Other -> Other after ?WAIT_MS -> error(no_other) end),
+        ?assertEqual({error, superseded}, Ask(erx_starter_rc:write(Dir, <<"a">>))),
+        ?assertEqual({ok, <<"b">>}, file:read_file(filename:join(Dir, <<"rc.conf">>)))
+    after
+        unlink(Rc),
+        ok = gen_server:stop(Rc, shutdown, ?WAIT_MS),
+        _ = file:del_dir_r(Dir)
+    end.
 
 %% ---------------------------------------------------------------------------
 %% The stub domain service
@@ -512,6 +532,27 @@ a_restarted_table_takes_the_newer_of_two_recorded_texts(Setup) ->
             ?assertEqual({ok, Newer}, erx_starter_sup:recorded())
     end.
 
+%% The table ends while its write of rc.conf is held at the rc.conf process,
+%% and the next table's read waits behind it: the next table is made from the
+%% written text, so its own write keeps the change.
+a_write_of_an_ended_table_lands_before_the_next_table_reads(Setup) ->
+    fun() ->
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ok = sys:suspend(erx_starter_rc),
+            %% The table's end leaves the command with no answer.
+            _ = spawn(fun() ->
+                              try erx_starter:command({enable, <<"clock">>, #{}}) catch exit:_ -> ok end
+                      end),
+            ok = wait_until(fun() -> queued(erx_starter_rc) =:= 1 end),
+            ok = restart_table(),
+            ok = wait_until(fun() -> queued(erx_starter_rc) =:= 2 end),
+            ok = sys:resume(erx_starter_rc),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(<<"clock_enable=\"YES\"\n">>, erx_starter:rc_conf()),
+            ?assertEqual(ok, erx_starter:command({disable, <<"logger">>, #{}})),
+            ?assertEqual({ok, <<"clock_enable=\"YES\"\nlogger_enable=\"NO\"\n">>}, file:read_file(rc_path(Setup)))
+    end.
+
 a_failed_read_starts_the_manifest_rows_and_reads_again(Setup) ->
     fun() ->
             ok = watch(),
@@ -535,6 +576,11 @@ rc_path(#{dir := Dir}) ->
 
 rc_conf() ->
     maps:get(rc_conf, erx_starter:rows()).
+
+%% The requests waiting at the registered process Name.
+queued(Name) ->
+    {message_queue_len, Length} = process_info(whereis(Name), message_queue_len),
+    Length.
 
 %% The calls of supervisor:start_child/2, terminate_child/2 and delete_child/2
 %% process Pid makes while Act runs, in order, each as {Function, Id}, Id the

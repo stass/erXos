@@ -570,10 +570,10 @@ it; git history is the record of completed work.
   grants from the system manifest, has no host test over a packed manifest with a `start` row; the QEMU suite of
   Track A's A8b is its first check. Its grants are every service a template is granted, not only `windows`
   services, as the domain service's own check is.
-* [Low] `erx_starter` review residuals (A5): no deadline on its file workers, so a hung storage operation queues
-    every later command; workers of a crashed table may race on `rc.conf.new`, and one may finish its rename
-    after the restarted table read the old text, so the table and the file differ until the next write, which is
-    made from the old text and so undoes the change; a refused start and a row going down log no line naming the row; the keepers' branch has OTP's default intensity and
+* [Low] `erx_starter` review residuals (A5): no deadline on the `rc.conf` process's file operations
+    (`erx_starter_rc`), so a hung storage operation queues every later command and holds a restart of the keepers'
+    branch and the application's stop, which wait for the operation in progress (a deadline needs a way to cancel a rename already sent,
+    such as 9P's `Tflush`); a refused start and a row going down log no line naming the row; the keepers' branch has OTP's default intensity and
     `held/0` reads `restarting` as down; the one-off keeper is a temporary child of the keepers' branch, which
     design-apps.md calls "under no supervisor"; the rescue configuration starting no row is not checked (it is not
     built).

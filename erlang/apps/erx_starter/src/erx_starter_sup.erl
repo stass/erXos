@@ -5,21 +5,27 @@
 -moduledoc """
 The start service's supervision tree (docs/design-apps.md,
 "Concurrency"), rest_for_one over the `apps` tree's grants (erx_starter_fs),
-which the system's table alone serves, and two children:
+which the system's table alone serves, and three children:
 
 1. the keepers' branch, erx_starter_keepers, a one_for_one supervisor of
    one erx_starter_row per enabled row that runs or is down, one keeper
    per session started once (`start` of a row that is not enabled), and
    the table's records below;
-2. the table, erx_starter, which owns the merged table.
+2. the rc.conf process, erx_starter_rc, which does every file operation
+   on rc.conf, one at a time;
+3. the table, erx_starter, which owns the merged table.
 
 A crash of the table restarts the table alone: it finds the table it had
-and the rows it kept in the keepers' branch, so no session ends. A crash
-of the keepers' branch ends every session it kept and every record, and
-rest_for_one restarts the table after it, which makes the table as at
-boot. The end of the `apps` tree's grants supervisor ends every grant
-to the tree, and rest_for_one restarts the keepers' branch and the
-table after it, so every session the keepers kept ends, and those
+and the rows it kept in the keepers' branch, so no session ends, and the
+rc.conf process carries on with any write the table asked for, which
+lands before the restarted table's read of rc.conf or not at all
+(erx_starter_rc). A crash of the rc.conf process restarts it and the
+table. A crash of the keepers' branch ends every session it kept and
+every record, and rest_for_one restarts the rc.conf process and the
+table after it, which makes the table as at boot. The end of the `apps`
+tree's grants supervisor ends every grant to the tree, and rest_for_one
+restarts the keepers' branch, the rc.conf process and the table after
+it, so every session the keepers kept ends, and those
 started again receive new grants. A session no keeper kept, root's
 console session among them, keeps running with no `/apps` until it
 restarts (TODO.md). One grant's end ends that grant alone: grants are
@@ -214,8 +220,10 @@ run_state(_Undefined) -> down.
 init({top, Manifest, Directory}) ->
     Keepers = #{id => keepers, start => {supervisor, start_link, [{local, ?KEEPERS}, ?MODULE, keepers]},
                 type => supervisor, shutdown => infinity},
+    %% Its shutdown waits for the file operation in progress (erx_starter_rc).
+    Rc = #{id => rc, start => {erx_starter_rc, start_link, []}, shutdown => infinity},
     Table = #{id => table, start => {erx_starter, start_link, [Manifest, Directory]}},
-    {ok, {#{strategy => rest_for_one}, apps(Manifest) ++ [Keepers, Table]}};
+    {ok, {#{strategy => rest_for_one}, apps(Manifest) ++ [Keepers, Rc, Table]}};
 init(keepers) ->
     {ok, {#{strategy => one_for_one}, []}}.
 

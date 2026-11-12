@@ -469,10 +469,27 @@ name a display.
 ## Concurrency
 
 The start service is one process that owns the merged table. It does no
-file operation itself: a change of `rc.conf` runs in a worker and hands
-the service the finished result to commit, so a slow storage domain
-delays that one command and nothing else. Reads of `/proc/apps` and
-`rc.conf` are answered from the process's own state.
+file operation itself: every read and write of `rc.conf` runs, one at a
+time, in a process of its own, `erx_starter_rc`, which answers each
+request when it is done, and the table commits a write's text only once
+it succeeded, so a slow storage domain delays the commands waiting
+for it, not the table's answers. A write that fails makes the table
+read `rc.conf` again, since its rename may have landed. Reads of `/proc/apps` and `rc.conf` are answered from the
+table's own state.
+
+The `rc.conf` process is the table's elder sibling in the start
+service's `rest_for_one` tree, so a crash of the table leaves it
+running, with the write the table asked for in progress or queued. It
+carries out the writes only of the process whose read came last, and
+refuses any other's, and a restarted table reads `rc.conf` before it
+writes: every write of a table that ended either lands before its
+successor's read, which then finds its text, or is refused. So the text
+a table is made from is the file's until the table itself writes it,
+and no write made from an older text undoes a newer one. The process
+traps exits, so a restart of the tree before it waits for the operation
+in progress to end: a rename already sent to the storage domain lands
+whatever became of the process that sent it, and cutting the process
+short would let it land after the next read.
 
 The keepers are a separate branch of the application's supervision
 tree, so a crash of the table's process restarts it and no session ends.

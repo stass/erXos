@@ -99,7 +99,17 @@ class ErxStarterTest < Minitest::Test
     Fault.new(name: 'a table that leaves a held row that is marked stopped',
               file: "#{APP}/erx_start_table.erl",
               from: 'decide({_Run, _Kept}, true, _Is) -> stop;', to: 'decide({_Run, _Kept}, true, _Is) -> keep;',
-              caught_by: 'the_next_table_completes_a_stop_cut_short')
+              caught_by: 'the_next_table_completes_a_stop_cut_short'),
+    Fault.new(name: 'an rc.conf process that carries out the write of a process that did not read last',
+              file: "#{APP}/erx_starter_rc.erl",
+              from: "handle_call({write, _Directory, _Text}, _From, State) ->\n    {reply, {error, superseded}, State}.",
+              to: "handle_call({write, Directory, Text}, _From, State) ->\n    {reply, write_file(Directory, Text), State}.",
+              caught_by: 'a_write_from_a_process_that_did_not_read_last_is_refused'),
+    Fault.new(name: "a table's read of rc.conf in a process of its own, beside the ended table's write",
+              file: "#{APP}/erx_starter_rc.erl",
+              from: 'gen_server:send_request(?MODULE, {read, Directory})',
+              to: 'gen_server:send_request(element(2, gen_server:start(?MODULE, [], [])), {read, Directory})',
+              caught_by: 'a_write_of_an_ended_table_lands_before_the_next_table_reads')
   ].freeze
 
   def setup

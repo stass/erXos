@@ -14,8 +14,10 @@ erx_start_table's; this process carries them out.
   from the system manifest (manifest_table/1), as erx_build reads its
   tables. A manifest with no start row makes an empty table, and nothing
   more happens: no rc.conf is read.
-* **rc.conf.** The process does no file operation itself. A worker reads
-  rc.conf (erx_starter_rc), and erx_start_table:read_answered/3 decides
+* **rc.conf.** The process does no file operation itself. The rc.conf
+  process (erx_starter_rc) reads and writes rc.conf for it and answers
+  each request as a reply the process takes as a message, and
+  erx_start_table:read_answered/3 decides
   what each answer leads to: a text, or no file, makes the table; a
   failure reads again after a backoff that never gives up, and the first
   one, when no table has been made, makes it from the manifest's rows
@@ -32,16 +34,20 @@ erx_start_table's; this process carries them out.
 * **Commands.** Until the table is first made every command is refused
   with `rc_conf_unread`. command/1 takes a command parse_ctl/1 made
   (erx_start_table:apply_ctl/4 decides it). A command that writes rc.conf
-  hands the new text to a worker, which writes it to a temporary file and
-  renames that over rc.conf; the table commits the text only once the
-  write succeeded, and answers commands in order, one write at a time.
+  hands the new text to the rc.conf process, which writes it to a
+  temporary file and renames that over rc.conf; the table commits the
+  text only once the write succeeded, and answers commands in order, one
+  write at a time.
   `stop` of an enabled row marks it stopped, and `start` or `enable` of
   the row clears the mark as it starts the row.
 * **Restart.** A restarted process makes the table from the text the
   keepers' branch recorded, and changes nothing the branch holds until
   its own read of rc.conf answers: a row rc.conf enabled is not stopped
   because the file cannot be read, and a row that is down or stopped
-  stays so. With no record, it starts as at boot.
+  stays so. With no record, it starts as at boot. A write the ended
+  process asked for lands before this read or not at all, as the rc.conf
+  process serves only the process whose read came last, so the text the
+  read finds is the file's until this process writes it.
 """.
 -behaviour(gen_server).
 
@@ -210,29 +216,43 @@ handle_call(rc_conf, _From, #{text := Text} = State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info({'DOWN', Ref, process, _, Result}, #{reader := Ref} = State) ->
-    {noreply, read_answered(Result, State#{reader := none})};
-handle_info({'DOWN', Ref, process, _, Result}, #{writer := {Ref, From, Command, Text}} = State) ->
-    {noreply, next(written(Result, From, Command, Text, State#{writer := none}))};
 handle_info(read, #{reader := none} = State) ->
     {noreply, read(State)};
-handle_info(_Message, State) ->
-    {noreply, State}.
+handle_info(Message, #{reader := Reader, writer := Writer} = State) ->
+    {noreply, case {response(Message, Reader), response(Message, request(Writer))} of
+                  {{answer, Read}, none} ->
+                      read_answered(Read, State#{reader := none});
+                  {none, {answer, Written}} ->
+                      {_Request, From, Command, Text} = Writer,
+                      next(written(Written, From, Command, Text, State#{writer := none}));
+                  {none, none} ->
+                      State
+              end}.
 
 %% ---------------------------------------------------------------------------
 %% rc.conf
 
 read(#{directory := Directory} = State) ->
-    {_, Ref} = spawn_monitor(fun() -> exit({read, erx_starter_rc:read(Directory)}) end),
-    State#{reader := Ref}.
+    State#{reader := erx_starter_rc:read(Directory)}.
 
-%% Carries out what erx_start_table:read_answered/3 decides for the reader's
-%% end, Result.
-read_answered(Result, #{local := Local, merged := Merged} = State) ->
-    Answer = case Result of
-                 {read, Read} -> Read;
-                 Crash -> {error, Crash}
-             end,
+%% The rc.conf process's answer to Request that Message carries, its end
+%% before it answered taken as {error, Why}, or none for a message that is
+%% not Request's answer.
+response(_Message, none) ->
+    none;
+response(Message, Request) ->
+    case gen_server:check_response(Message, Request) of
+        {reply, Reply} -> {answer, Reply};
+        {error, {Why, _Server}} -> {answer, {error, Why}};
+        no_reply -> none
+    end.
+
+request({Request, _From, _Command, _Text}) -> Request;
+request(none) -> none.
+
+%% Carries out what erx_start_table:read_answered/3 decides for the read's
+%% Answer.
+read_answered(Answer, #{local := Local, merged := Merged} = State) ->
     {Reading, Effects} = erx_start_table:read_answered(Answer, Local, Merged =/= none),
     lists:foldl(fun effect/2, State#{local := Reading}, Effects).
 
@@ -292,9 +312,8 @@ run(Command, From, #{text := Text, rows := Rows, grants := Grants, local := Loca
             gen_server:reply(From, {error, rc_conf_unread}),
             next(State);
         {rc_conf, Written} ->
-            Directory = maps:get(directory, State),
-            {_, Ref} = spawn_monitor(fun() -> exit({written, erx_starter_rc:write(Directory, Written)}) end),
-            State#{writer := {Ref, From, Command, Written}};
+            Request = erx_starter_rc:write(maps:get(directory, State), Written),
+            State#{writer := {Request, From, Command, Written}};
         Action ->
             gen_server:reply(From, act(Action, State)),
             next(State)
@@ -314,19 +333,19 @@ act({error, _} = Refused, _State) ->
 
 %% A write that succeeded commits its text, and the table made from it
 %% starts an enabled row that is neither held nor marked.
-written({written, ok}, From, Command, Text, State) ->
+written(ok, From, Command, Text, State) ->
     ok = clear_for_enable(Command),
     Applied = apply_text(Text, State),
     gen_server:reply(From, ok),
     Applied;
-written(Failed, From, _Command, _Text, State) ->
-    Reason = case Failed of
-                 {written, {error, Error}} -> Error;
-                 Crash -> Crash
-             end,
+%% A write that failed may still have renamed its text over rc.conf (a
+%% storage domain that ended after the rename and before its answer), so the
+%% table reads rc.conf again, as at a restart, rather than keep a text the
+%% file may no longer hold.
+written({error, Reason}, From, _Command, _Text, State) ->
     logger:warning("erx_starter: rc.conf cannot be written: ~0P", [Reason, 8]),
     gen_server:reply(From, {error, {failed, Reason}}),
-    State.
+    read(State#{local := {unread, 0}}).
 
 %% An `enable`, once its write of rc.conf succeeded, clears its row's stopped
 %% mark and the spec of a row that is down (erx_starter_sup:clear/1) before
