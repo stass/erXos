@@ -559,6 +559,9 @@ it; git history is the record of completed work.
     `held/0` reads `restarting` as down; the one-off keeper is a temporary child of the keepers' branch, which
     design-apps.md calls "under no supervisor"; the rescue configuration starting no row is not checked (it is not
     built).
+* [Medium] Start table (`erx_starter`, `docs/plan.md` M12): the table owes the reset count, cleared by the first
+  kept session, and the rescue configuration starting no row, with their tests, once M12 builds the reset count and the
+  rescue configuration; Track A's exit criteria no longer carry them.
 * [Medium] The start table's display key (`tools/lib/erx/start_callers.rb`, start-display): the check that only
   `erx_starter` passes `display` or `default_display` to `erx_domain:start_session/2` reads the atoms in the
   calling module only, so a start map built in a helper module that never starts a session passes unseen (the

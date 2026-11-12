@@ -3,7 +3,7 @@
 The staged roadmap from an empty tree to protected Erlang domains, users
 and a release build on QEMU `virt`, and then to storage, networking and
 the first boards. Each milestone ends in a demonstration that a QEMU
-transcript test, or on a board the board rig of 1b-I, reproduces, and has
+transcript test, or on a board the owner's hand test of 1b-I, reproduces, and has
 exit criteria that tests check. Where the design rests on a number nobody
 has measured, or on a choice the user has not made, a decision gate
 measures or asks, and decides. The architecture is
@@ -188,7 +188,7 @@ The order reaches a usable system first:
 * Beside that path: BeamAsm beside 1b-A, and erXos's F2FS on QEMU (1b-H)
   at the lowest priority, whenever capacity is idle. The Raspberry Pi 4
   on the stopgap (1b-I) starts its serial shell on QEMU's `raspi4b` model
-  once Phase 1 is done, passes it once on a board when a rig exists, and
+  once Phase 1 is done, passes it once on the owner's board by hand, and
   brings each later stage to the board once the
   QEMU item it rests on has landed: storage after 1b-E, the network after
   1b-G, the display after 1b-C's part 3. The network stack's
@@ -1507,7 +1507,12 @@ check; a release manifest that gives the display domain an unconfined
 DMA device fails the manifest check (design-display's confinement test),
 while a development build's manifest with the stopgap's virtio-mmio
 devices passes the Phase 1 manifest check; each chokepoint check catches
-its seeded violation.
+its seeded violation. With a kiosk running, the display domain killed
+and restarted gives the kiosk's session its screen back, where a
+re-mint that drops the session mark fails; `service enable` of a row
+whose display another enabled row holds, or whose template is not
+granted the display, is refused, and a kiosk's session starts at boot
+with its display through the start table.
 
 **Exit criteria, a kiosk on QEMU `virt`.** The parity test runs one
 corpus of trees and input sequences through LVGL and the browser
@@ -1637,15 +1642,14 @@ design and its implementation, which adds apps at run time.
 1. **The start table**, in 1b, after 1b-A, 1b-B's session domain and
    M6's data partition, on which `rc.conf` lies. `start` rows in
    `abi/manifest.txt` and its reader; property 17; `erx_starter` with
-   one supervisor and keeper per enabled row, boot step 5 and the rescue
-   configuration's empty table; `erx_domain:start_session/2` with its
-   two forms of display; the session mark in the domain service's grant
+   one supervisor and keeper per enabled row, boot step 5; `erx_domain:start_session/2` with its
+   two forms of display, which this part lands as data, with host tests of
+   the mark and the merge and no display domain; the session mark in the domain service's grant
    records, carried by every mint; `rc.conf`'s parser with its fuzz
    target and the merge, which sets only rows the manifest declares and
    refuses a display the row's template is not granted or another
    enabled row holds; the `apps` tree with `ctl` and its fuzz target;
-   `service`; `/proc/apps`; the reset count cleared by the first kept
-   session. An app is a principal of the manifest with its own template
+   `service`; `/proc/apps`. An app is a principal of the manifest with its own template
    and release.
 2. **Packaging**, designed when this part starts and built after M6's
    data partition and 1b-E's storage domain: how an app reaches a
@@ -1663,16 +1667,18 @@ keeper that does not monitor its session) fail as designed; a manifest
 with an enabled start row boots to that row's session with no login,
 holding exactly its template's grants, and one with none to the
 console's alone; a session killed is started again, and past the row's
-intensity the row is `down` at `/proc/apps`; with a kiosk running, the
-display domain killed and restarted gives the kiosk's session its
-screen back, where a re-mint that drops the session mark fails;
-`service enable` and `disable` survive a reboot, and an enable on a
-display another row holds or the template is not granted is refused; a
+intensity the row is `down` at `/proc/apps`;
+`service enable` and `disable` survive a reboot; a
 session whose template holds no `apps` grant cannot reach `/apps`;
-`rc.conf`'s and `ctl`'s fuzz targets run their budgets clean; the
-rescue configuration starts no row; each seeded violation of property
+`rc.conf`'s and `ctl`'s fuzz targets run their budgets clean; each seeded violation of property
 17 fails the manifest check; each chokepoint check catches its seeded
-violation. That a session holding `data` cannot rewrite `rc.conf` is
+violation. The kiosk tests, the display domain restarted giving the
+kiosk's session its screen back, and the refusal of an enable on a
+display another row holds or the template is not granted wait for
+Track D's part 3, which builds the display domain. The rescue
+configuration starting no row and the reset count cleared by the first
+kept session wait for M12, which builds the reset count and the rescue
+configuration. That a session holding `data` cannot rewrite `rc.conf` is
 not an exit criterion: until `data` grants are rooted by principal it
 can, a residual recorded in `TODO.md`.
 
@@ -2202,7 +2208,7 @@ items of M12, the hardware watchdog, the crash region, trial boot, the
 device secret and the random generator, are deferred as Phase 1
 residuals ([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)).
 
-**Parts.** Each ends in a demo the board rig reproduces; stage (a)'s
+**Parts.** Each ends in a demo the owner reproduces on the board by hand; stage (a)'s
 also runs on QEMU's `raspi4b` model. Part (a) comes first; (b), (c) and
 (d) each need only (a) on the board, and may go in any order or side by
 side.
@@ -2270,11 +2276,13 @@ side.
      windows and lines against the board's device tree, as the
      production image suite checks QEMU's; and the `raspi4b` suite,
      below, which proves the stage on the model.
-  5. **The board.** The board rig, below; the boot probe of
+  5. **The board.** The manual board pass, below; the boot probe of
      [design-platforms.md](design-platforms.md#verification-and-testing)
      on the stopgap, recorded in a research record before anything
-     depends on its results; and the board's boot suite, which runs
-     stage (a)'s demo once on the board, with the host link on UART3.
+     depends on its results; and the board's boot suite, which the build packs into the SD card's
+     boot partition. The owner puts the card in the board and runs the
+     suite's transcript checks by hand, stage (a)'s demo once, with the
+     host link on UART3.
 * **(b) Storage on the SD controller.** An Erlang driver for the Pi's
   SD host controller (`brcm,bcm2711-emmc2`, an SDHCI controller) as the
   block driver's device process, the part
@@ -2312,7 +2320,7 @@ side.
 **Dependencies.**
 
 * (a): Phase 1's shell; QEMU's `raspi4b` model, which the local QEMU
-  11.1.3 has; for its board pass, a board and the rig (gate GR).
+  11.1.3 has; for its board pass, the owner's 4 GB board.
 * (b): (a); 1b-E's storage domain; the block driver's split into
   transport and service; for DMA, the device NIF's cache maintenance for
   a device that is not coherent (`TODO.md`, `erx_device.c`, queues).
@@ -2351,13 +2359,11 @@ side.
   commit, under the same harness, deadlines and transcripts as QEMU's;
   agents iterate on host tests, the hosted backend, QEMU `virt` and, for
   stage (a), `raspi4b`.
-* **The board rig**: a serial capture of the console and of the host
-  link, a power relay, and from (b) on an SD card switch, so the host
-  writes the card and the board boots it unattended. The firmware's
-  network boot, from the rig's host over TFTP, is the fast loop: a new
-  image needs no card. A run ends as a QEMU run ends, by its transcript
-  or its deadline, and the relay then cycles the board, since the Pi
-  cannot turn itself off.
+* **The manual board pass.** The board is a 4 GB Raspberry Pi 4. There
+  is no automated rig: the build produces the SD card's boot partition,
+  and the owner runs the transcript checks by hand on the board. An
+  automated rig (serial capture, power relay, SD card switch) is not part
+  of 1b-I.
 * Every parser of what a Pi device writes (the SD controller's responses
   and status, GENET's receive status and descriptors) lands with its fuzz
   target, as the ground rules require.
@@ -2369,8 +2375,8 @@ side.
   `raspi4b`, the Pi's image boots to the shell on the mini UART and
   passes the console transcript, and fails it with the seeded driver;
   the host test of the record against the board's device tree passes,
-  and fails on a record with one window moved; then, once, through the
-  rig, the Pi boots from its firmware to the shell on the mini UART with
+  and fails on a record with one window moved; then, once, by hand
+  on the board, the Pi boots from its firmware to the shell on the mini UART with
   the development banner, the host tool reaches it over UART3, and the
   boot probe's research record is written.
 * (b): QEMU's block suites pass unchanged after the split; on the board
@@ -2387,18 +2393,12 @@ side.
   driver, equals the frame the same kiosk draws on QEMU `virt`; a
   display driver killed and restarted repaints the screen.
 
-**Gate GR, before the first board boot.** Asks the user the two open
-questions, and records the answers in
-[design-platforms.md](design-platforms.md): the board's RAM, where 4 GB
-is recommended: every stage fits in 1 GB, but 4 GB leaves room for
-OTP's suites on the board later and keeps all its RAM below 4 GiB,
-where 8 GB puts half of it above, beyond some devices' reach; and the board
-rig, its parts and the host it hangs from. Nothing above depends on the
-answer: the platform record names the smallest RAM the port boots on,
-at most the 2 GiB of the `raspi4b` model, so one image boots on the
-model and on every board; a board with more boots the same image, and
-the rig is any serial capture, relay and SD card switch the harness
-drives. Measures, through the boot probe, where the firmware places the
+**Gate GR, before the first board boot.** The owner chose a 4 GB
+board, and no automated rig; the answers are recorded in
+[design-platforms.md](design-platforms.md). Nothing above depends on
+the RAM size: the platform record names the smallest RAM the port boots
+on, at most the 2 GiB of the `raspi4b` model, so one image boots on the
+model and on every board. Measures, through the boot probe, where the firmware places the
 bootable file and the device tree, the entry state, the memory map,
 whether `stdout-path` names the mini UART, where the framebuffer lies,
 and the time to the system runtime's first pet.
@@ -2637,7 +2637,9 @@ sections of design.md. The network service and its stack come from
 and synced survives a power cut; a system update arrives over the network,
 its trial boot loses power and the old system comes back, and the next
 trial commits after a healthy boot; the system domain killed during a
-trial boots the committed slot.
+trial boots the committed slot. The start table's reset count, cleared
+by the first kept session, and the rescue configuration, which starts
+no row, are built here and tested here.
 
 **Scope.**
 
@@ -2682,7 +2684,7 @@ trial boots the committed slot.
   and per-interface ingress budget enforced by erXos's kernel, and
   confirms the packet path's numbers on the Pi 4 at gate GN-board.
 * **Boards.** The Raspberry Pi 4 Model B, whose platform record, boot
-  files, Erlang drivers and board rig come from
+  files and Erlang drivers come from
   [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap) on the stopgap, then the
   Raspberry Pi 5, as [design-platforms.md](design-platforms.md) describes
   them: each board's
@@ -2720,7 +2722,7 @@ trial boots the committed slot.
   board's entries in its DMA contract confirmed, and its
   asynchronous-error injection test run, before drivers run on it
   ([design-platforms.md](design-platforms.md#dma)); and the board rig of
-  1b-I for both boards. QEMU's `raspi4b` model, under TCG, serves the
+  M12 for both boards. QEMU's `raspi4b` model, under TCG, serves the
   kernel's early bring-up, booted as 1b-I's stage (a) boots it; it has no PCIe or Ethernet, and QEMU has no Pi
   5 model.
 
@@ -2931,7 +2933,7 @@ their numbers.
 | GQ | track Q | `fork` of 10, 100 and 1,000 MiB against Linux in a guest; a dynamically linked program's start against a static one's; the fill and the write-back cost of the session's shared mappings, files of 64 KiB to 1 GiB, with `tools/erx bench mmap`, against descriptor reads and writes; on CPUs with hardware dirty-bit management, the fold of dirty bits into the object's stored marks at `munmap` and `exec` over large shared mappings, with `tools/erx bench mmap` | whether `fork` grows a copy-on-write path; whether the shared mappings' fill and write-back points meet the corpus |
 | G12 | M12 | throughput and commit latency on the Pi 4's SD card, against G6's on QEMU; boot time to the shell and to the first pet on both boards; the trial path's timings; slot images' sizes | the default trial deadline; the watchdog's boot deadline per board; whether images need compression |
 | GN-QEMU | 1b-G, on the stopgap | the packet-path prototype's UDP echo and TCP bulk transfer on QEMU under HVF, against a Linux peer and line rate, recorded with the stopgap named | nothing; it records the baseline GK3 repeats on erXos's kernel |
-| GR | 1b-I, before the first board boot | the boot probe on the Pi 4 under the stopgap; asks the board's RAM and the board rig | the RAM the Pi 4's platform record names, and the rig |
+| GR | 1b-I, before the first board boot | the boot probe on the Pi 4 under the stopgap; the board is a 4 GB Pi 4 and the board pass is manual | the RAM the Pi 4's platform record names |
 | GN-board | M12 | the same on the Pi 4, against Linux's stack on the board and line rate | GK3's decision on TCP's fast path confirmed or reopened |
 | G13 | M13: 1b-H on QEMU, the Pi 4 at M12 | erXos's F2FS against littlefs over the file-semantics corpus and against Linux's F2FS and `fsck.f2fs`; the power-cut harness; throughput, commit latency and the cleaner's overhead, on the stopgap a baseline; the Pi 4's SD card at M12 | the replacement of littlefs, on QEMU, from the corpus, the oracle guest and the power cuts; the Pi 4's numbers may reopen it |
 | G14 | M14: 1b-G on QEMU, the boards at M12 | erXos's stack against FreeBSD's over the network test corpus and the packet scripts; throughput, latency and memory on QEMU, a baseline on the stopgap, and on both boards | the acceptance of erXos's stack, on QEMU; the boards confirm it |
@@ -3008,7 +3010,7 @@ Phase 2:   M7 --> M2 --> M5's and M9's kernel parts --> G6 --> M8 --> M10 --> M1
   after 1b-D. 1b-A comes first because every other item is a domain or
   runs in one. BeamAsm runs beside 1b-A, and 1b-H whenever capacity is
   idle. 1b-I's serial shell follows Phase 1 on QEMU's `raspi4b`, and
-  passes once on a board when a rig exists; each
+  passes once on the owner's board by hand; each
   of its later stages follows the QEMU item it brings to the board.
 * Track K's pilot starts before Phase 1 is complete and runs beside
   Phase 1b, since its cores are host-built C17
