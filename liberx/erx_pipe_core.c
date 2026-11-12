@@ -103,7 +103,9 @@ pipe_count_or(uint64_t done, int error)
 /*
  * The writer (design "Writing"), one record per chunk: check the read
  * side, find room or publish need and wait, write the stamped record,
- * publish wpos, and ring the read ends that sleep past wake.
+ * publish wpos, and ring the read ends that sleep past wake.  A call that
+ * published a record waits for the clock to pass its publication before
+ * it returns or waits (pipe_wfinish).
  */
 enum {
 	W_SIDE = 0,	/* the next record: check the read side, copy rpos */
@@ -115,7 +117,8 @@ enum {
 	W_PUBLISHED,	/* wpos stored: fence */
 	W_FENCED,	/* copy wake */
 	W_WAKE,		/* in.value: wake; copy sleepers */
-	W_SLEEPERS	/* in.value: sleepers; ring, next record */
+	W_SLEEPERS,	/* in.value: sleepers; ring, next record */
+	W_PASSED	/* the clock has passed the call's publications: end */
 };
 
 void
@@ -129,6 +132,34 @@ erx_pipe_wstart(erx_pipe_wstate_t *w, uint64_t len)
 	w->wake_local = false;
 	w->stamp = 0;
 	w->wake = 0;
+	w->outcome = pipe_act(ERX_PIPE_OP_DONE);
+}
+
+/*
+ * The call's outcome, a result or a wait, once the clock has moved past
+ * everything the call published (design "Writing", PI6).  A clock may
+ * return one reading for up to a tick, so a write that begins just after
+ * this one returns could stamp its records with the reading this call's
+ * last record carries, and the merge, which breaks a tie by write end
+ * number, could read the later record first.  So a call that published a
+ * record has its caller read the clock, after the fence that followed its
+ * last store of wpos, and read it again until it reads more
+ * (ERX_PIPE_OP_PASS_CLOCK); a write that begins once this one returns or
+ * waits stamps above every stamp of this call and every mark a reader
+ * took before a copy that missed its records.  The wait is at most a tick
+ * of a clock that advances, which the backends promise (erx_clock_ns).
+ */
+static erx_pipe_act_t
+pipe_wfinish(erx_pipe_wstate_t *w, erx_pipe_act_t outcome)
+{
+	if (w->done > 0) {
+		w->outcome = outcome;
+		w->phase = W_PASSED;
+		return (pipe_act(ERX_PIPE_OP_PASS_CLOCK));
+	}
+	/* After a wait the call starts afresh; after its result nothing follows. */
+	w->phase = W_WOKE;
+	return (outcome);
 }
 
 /* The record at wpos: its header, stamped, and its payload. */
@@ -153,9 +184,9 @@ static erx_pipe_act_t
 pipe_write_next(erx_pipe_wstate_t *w)
 {
 	if (w->done == w->len)
-		return (pipe_done((int64_t)w->done));
+		return (pipe_wfinish(w, pipe_done((int64_t)w->done)));
 	if (w->lost || w->readers == 0)
-		return (pipe_done(pipe_count_or(w->done, EPIPE)));
+		return (pipe_wfinish(w, pipe_done(pipe_count_or(w->done, EPIPE))));
 	w->rec = w->len - w->done < w->chunk ?
 	    (uint32_t)(w->len - w->done) : w->chunk;
 	w->phase = W_ROOM;
@@ -204,6 +235,7 @@ pipe_wmay_wait(const erx_pipe_wstate_t *w, uint64_t need, uint64_t rpos)
 erx_pipe_act_t
 erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
 {
+	erx_pipe_act_t outcome;
 	uint64_t need, old, span;
 
 	switch (w->phase) {
@@ -222,17 +254,16 @@ erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
 			return (pipe_act(ERX_PIPE_OP_CLOCK));
 		}
 		if (w->nonblock)
-			return (pipe_done(pipe_count_or(w->done, EAGAIN)));
+			return (pipe_wfinish(w,
+			    pipe_done(pipe_count_or(w->done, EAGAIN))));
 		/*
 		 * The read position at which span bytes are free.  Below it
 		 * a ring this end never filled has room, so a smaller one
 		 * means a bad rpos, which no store of a reader crosses.
 		 */
 		need = w->wpos + span > w->size ? w->wpos + span - w->size : 0;
-		if (pipe_wmay_wait(w, need, in->value)) {
-			w->phase = W_WOKE;
-			return (pipe_act(ERX_PIPE_OP_WAIT));
-		}
+		if (pipe_wmay_wait(w, need, in->value))
+			return (pipe_wfinish(w, pipe_act(ERX_PIPE_OP_WAIT)));
 		/*
 		 * Replacing a published need wakes the calls waiting on it.
 		 * armed is never cleared: it means a need was ever published.
@@ -274,6 +305,11 @@ erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
 			return (pipe_value_act(ERX_PIPE_OP_RING_READERS,
 			    ERX_PIPE_LANE_NONE, in->value));
 		return (pipe_write_next(w));
+	case W_PASSED:
+		outcome = w->outcome;
+		w->outcome = pipe_act(ERX_PIPE_OP_DONE);
+		w->phase = W_WOKE;
+		return (outcome);
 	}
 	return (pipe_done(-EIO));
 }

@@ -36,6 +36,8 @@ class PipeRunTest < Minitest::Test
     'the readers a write crossed are not rung' =>
       ['empty reader rung', "for (bits = a->value; bits != 0; bits &= bits - 1)\n",
        "for (bits = 0; bits != 0; bits &= bits - 1)\n"],
+    "a write's wait for the clock that stops on an equal reading" =>
+      ['clock passes the stamp', 'fx->clock(fx->ctx) <= from;)', 'fx->clock(fx->ctx) < from;)'],
     'the write position is never published' =>
       ['bytes read', 'return (erx_lane_hdr_wpos_store(map->hdr, a->value));', 'return (true);'],
     'a drained lane is not reported' =>

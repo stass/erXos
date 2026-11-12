@@ -42,6 +42,9 @@ typedef struct world {
 	erx_pipe_rmap_t	 rmap;
 	uint64_t	 clock;
 	uint64_t	 join_at;	/* the clock at which a write end joins */
+	uint32_t	 repeats;	/* each reading is given this many times
+					 * more, as a counter gives within a tick */
+	uint32_t	 repeated;
 	int		 reader_rings;
 	int		 writer_rings;
 	int		 drained;
@@ -52,12 +55,18 @@ typedef struct world {
  * The clock, copied once each look at a lane: at join_at a second write
  * end joins, as the pipe server stores wends in the lock page while a
  * read is under way, before the reader's executor applies its report.
+ * With repeats, each reading is given repeats times more before the next.
  */
 static uint64_t
 fx_clock(void *ctx)
 {
 	world_t *wd = ctx;
 
+	if (wd->clock != 0 && wd->repeated < wd->repeats) {
+		wd->repeated++;
+		return (wd->clock);
+	}
+	wd->repeated = 0;
 	if (++wd->clock == wd->join_at)
 		(void)erx_pipe_lock_wends_store(wd->lock, 2);
 	return (wd->clock);
@@ -178,6 +187,25 @@ case_bytes_pass(void)
 	CHECK("bytes read", done(do_read(&wd, out, sizeof(out)), 5) &&
 	    memcmp(out, "hello", 5) == 0);
 	CHECK("bytes owner free", atomic_load(&wd.lock->owner) == 0);
+	world_free(&wd);
+}
+
+/*
+ * On a clock that gives each reading three times, a write returns only
+ * once the clock has read more than its record's stamp (PI6), so a write
+ * that begins after it stamps above it.
+ */
+static void
+case_clock_passes_the_stamp(void)
+{
+	world_t wd;
+	uint64_t stamp;
+
+	world_init(&wd);
+	wd.repeats = 2;
+	CHECK("clock write", done(do_write(&wd, "x", 1), 1));
+	memcpy(&stamp, wd.area + 8, sizeof(stamp));
+	CHECK("clock passes the stamp", stamp != 0 && wd.clock > stamp);
 	world_free(&wd);
 }
 
@@ -449,6 +477,7 @@ int
 main(void)
 {
 	case_bytes_pass();
+	case_clock_passes_the_stamp();
 	case_join_keeps_copied_bytes();
 	case_take_clears_bits();
 	case_untaken_refused();

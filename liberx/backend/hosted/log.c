@@ -167,12 +167,34 @@ erx_effect_console_write(const char *line, size_t length)
  * wall clock, so it can step back. Stock OTP takes CLOCK_UPTIME on FreeBSD and
  * CLOCK_MONOTONIC on Linux, neither of which steps back. The hosted backend builds only
  * on macOS (tools/lib/erx/runtime.rb), so the other branches are not yet compiled.
+ *
+ * Each reads the CPU's counter in user mode, and a read of the counter is not ordered by
+ * loads or memory barriers, so the read is fenced on both sides as Fiasco's is
+ * (liberx/backend/fiasco/arch/aarch64/clock.c): a pipe writer's stamp must not be taken
+ * before the load that told it its earlier write finished, and a reader's mark must not
+ * be taken after the copy of wpos that follows it (docs/design-pipes.md, PI6). Whether
+ * the library's own read carries such fences is not documented, so they are added here.
  */
+static inline void
+counter_fence(void)
+{
+#if defined(__aarch64__)
+	__asm__ volatile("isb" : : : "memory");
+#elif defined(__x86_64__)
+	__asm__ volatile("lfence" : : : "memory");
+#else
+#error "no fence orders this host's counter read"
+#endif
+}
+
 uint64_t
 erx_effect_clock_ns(void)
 {
+	uint64_t ns;
+
+	counter_fence();
 #ifdef __APPLE__
-	return (clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
+	ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 #else
 	struct timespec now;
 
@@ -181,8 +203,10 @@ erx_effect_clock_ns(void)
 #else
 	(void)clock_gettime(CLOCK_MONOTONIC, &now);
 #endif
-	return ((uint64_t)now.tv_sec * 1000000000u + (uint64_t)now.tv_nsec);
+	ns = (uint64_t)now.tv_sec * 1000000000u + (uint64_t)now.tv_nsec;
 #endif
+	counter_fence();
+	return (ns);
 }
 
 void

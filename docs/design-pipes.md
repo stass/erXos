@@ -219,7 +219,7 @@ last mappings go.
 | **PI3.** A writer gets `EPIPE` once, and only once, no read end remains | a read end's close or its holder's death reaches the pipe server, which tells every writer `{pipe_reader_gone, ...}`, and each writer counts its read ends from those reports alone; read ends are made only for a child, a deposit or a redeemer of a read end its requester holds, so none appears once none remains; a writer fails with `EPIPE` only on a count of zero or when the pipe is lost, both from its handler's reports, which no reader can write | a read end made from nothing; a count lowered while its read end remains; `EPIPE` taken from a field a reader can write | the pipe core's exploration; domain tests: a reader that faults while its writer waits for room, `yes \| head -1`, and a co-reader that rewrites a lane's read position, which stops its writer but never sends it `SIGPIPE` |
 | **PI4.** Writers never share memory, no reader can write a writer's records, and nothing in shared memory makes a party crash, loop or touch memory out of bounds | each write end writes only its own ring, which every read end maps read-only; a write end maps its lane's reader page read-only and nothing else of the pipe; every party copies each field it reads from a page others write once into private memory and validates the copy with checked arithmetic before use; every loop is bounded by the pipe's limits and the party's own records, never by a value read from shared memory | a reader with a writable mapping of a ring; a field used twice from shared memory; a check after use; a loop bounded by a value read from a page | the ring checks' fuzz targets; a hostile-writer domain test that rewrites its header and records at random while a reader reads; a reader that tries to write a ring, which faults on its read-only mapping |
 | **PI5.** A write of at most `PIPE_BUF` bytes reaches the readers contiguously | it is one record, published by one store of the write position; a read that takes part of a record leaves the rest as the lock page's current record, and every reader finishes the current record before it takes another | a record split before its publication; a reader that switches lanes inside a record | the exploration with 4,096-byte writes; a domain test with 100 writers writing 4,096-byte lines, whose lines all arrive whole |
-| **PI6.** One writer's bytes arrive in the order written; of two writes by different writers, one that happened before the other is read first; and no writer delays another's record without bound | each writer has its own lane, read in order; the pipe server stores a write end's number in the lock page's `wends` before it installs the end anywhere, and a reader that finds a record copies `wends` and, when it names a write end whose report the reader has not applied, waits for that report, which is already on its own channel, before it picks, so it picks only with every lane that existed before the record it found; the reader merges the lanes by an order key that puts every record after each record that happened before it; and a batch never grows, so another writer's later bytes delay a record by at most two lanes' capacity for each read end ([Reading and merging](#reading-and-merging)) | a reader that misses a lane which became readable before the record it picked; a write end installed before its number is in `wends`; a reader that picks while `wends` names a write end it has not applied; a mark taken after a look that did not include its record; a batch that grows after it opens | the exploration, which checks the bound after every event; domain tests: `{date; uname} \| cat`, whose lines arrive in that order every time; a child writer that writes a line and exits, after which its parent writes one, while the reader's event executor is held back from applying the child's lane, whose lines arrive in that order, with a seeded reader that ignores the lock page's `wends`, which the test catches; and a writer that stamps every record 0 and never lets its ring empty while another writer's records arrive within the bound |
+| **PI6.** One writer's bytes arrive in the order written; of two writes by different writers, a record whose write returned before the other write began is read first; and no writer delays another's record without bound | each writer has its own lane, read in order; a write that published a record reads the clock after its last store of `wpos` and reads it again until the clock has passed that reading before it returns or waits, so a write that begins after it stamps its records above every stamp of the earlier write and every mark a reader took before a copy that missed its records, even on a clock that returns one reading for a whole tick; the pipe server stores a write end's number in the lock page's `wends` before it installs the end anywhere, and a reader that finds a record copies `wends` and, when it names a write end whose report the reader has not applied, waits for that report, which is already on its own channel, before it picks, so it picks only with every lane that existed before the record it found; the reader merges the lanes by an order key that puts every record after each record that happened before it; and a batch never grows, so another writer's later bytes delay a record by at most two lanes' capacity for each read end ([Reading and merging](#reading-and-merging)) | a reader that misses a lane which became readable before the record it picked; a write that returns before the clock has passed its last publication, after which a later write can stamp the same reading and win the tie by its write end number; a write end installed before its number is in `wends`; a reader that picks while `wends` names a write end it has not applied; a mark taken after a look that did not include its record; a batch that grows after it opens | the exploration, which checks the bound after every event, and, with a clock that may repeat a reading, the order of writes that returned before others began, with a seeded writer that returns without waiting for the clock, which it catches; domain tests: `{date; uname} \| cat`, whose lines arrive in that order every time; a child writer that writes a line and exits, after which its parent writes one, while the reader's event executor is held back from applying the child's lane, whose lines arrive in that order, with a seeded reader that ignores the lock page's `wends`, which the test catches; and a writer that stamps every record 0 and never lets its ring empty while another writer's records arrive within the bound |
 | **PI7.** No wakeup is lost | a waiter publishes the position or bit it waits for, fences and checks again before it sleeps; a party that publishes data, room or the lock fences and then rings each waiter whose published position its store crossed or whose bit it finds set ([design-domains.md](design-domains.md#connections)); every peer holds the trigger right on an end's doorbell from before the end's holder can wait on it, since the session installs the end and its peers' trigger rights before the holder runs or before it answers the request that made the end. A peer learns the new end's doorbell only from its handler's report, so a waiter may publish before the peer can ring it; the peer therefore rings the new end's doorbell once as it applies the report, and the waiter wakes and checks again. The session's reports of a gone end reach the holder through its channel, whose doorbell wakes the event executor, which wakes the end's waiters ([Waiting and doorbells](#waiting-and-doorbells)) | a check before what the waiter published is visible; a doorbell that forgets a ring; an end whose holder can run before its peers hold its doorbell; a report of a new end applied without its ring; a report of a gone end that wakes no waiter | the exploration over the memory model's orders, with reports of new ends interleaved and, as a seeded failure, the ring on a report removed; a stress test of a writer and a reader that sleep on every turn, which never stalls; a read end that joins and sleeps before its writer applies the report of it, and one that waits for the reader lock before a co-reader applies the report of it, each of which wakes |
 | **PI8.** The pipe server never trusts shared memory | its records of pipes, ends and holders live in Erlang, and it decides from them and from events alone: requests and notices on channels, which arrive in order from one writer each, and end records from the kernel; it touches a page others write only to free the reader lock a gone read end held, by one compare-and-swap of `owner`, which no waiter writes, and to store a new write end's number in the lock page's `wends`, which it never reads | a decision taken from a field of a ring, a reader page or the lock page | review of `erx_pipe:step/2`, which takes no shared field as input; the model's tests |
 
@@ -591,6 +591,18 @@ doorbell and forgets the write end.
    its store moved `wpos` from below `wake` to `wake` or past it, it rings
    the doorbell of each read end whose bit in `sleepers` is set.
 
+When it has written every chunk, or before it returns early or waits, a
+call that published a record **waits for the clock to pass**: it reads
+the clock, after the full fence of its last publication, and reads it
+again until it reads more. A clock may return one reading for a whole
+tick of its counter, and two writes stamped with one reading would be
+merged by write end number rather than in the order they were made; with
+the wait, a write that begins after this one returns stamps above
+everything this one published (PI6). It costs at least two clock reads
+and at most one tick. A backend's clock advances, as `erx_clock_ns` promises: on
+Fiasco the root refuses to start when the counter reports no frequency,
+since that clock would read 0 for ever.
+
 So a record is visible whole or not at all, and a writer that ends between
 steps 3 and 4 leaves nothing a reader sees. A writer rings only the read
 ends its handler has reported to it; a read end that joined and set its
@@ -730,10 +742,14 @@ skipped is let go of once. A record's kind is in its header, which only
 its own writer's ring carries, so no bytes a writer writes as data are
 ever taken for tickets.
 
-**Why the order key keeps write order.** Of two writes where one happened
-before the other, say the last line of `date` and the first of `uname` in
-`{date; uname} | cat`, the first was published before the second was
-written, so its stamp is smaller. The earlier record's write end had its
+**Why the order key keeps write order.** Of two writes where one returned
+before the other began, say the last line of `date` and the first of
+`uname` in `{date; uname} | cat`, the first was published before the
+second was written, and its writer waited, before returning, for the
+clock to pass a reading taken after the publication, so its stamp is
+smaller than the second's. The strictness comes from that wait, not from
+the clock: two readings of the clock may be equal, and two records with
+one key go by write end number. The earlier record's write end had its
 number stored in `wends` before its holder could run, so before the later
 record existed; a reader that sees the later record has acquired its
 lane's `wpos`, so its copy of `wends` reaches the earlier write end, and it
@@ -741,11 +757,17 @@ picks only once it holds that lane, which it then loads with every lane it
 found empty; so a first look that finds the later record is followed by
 a second look that finds the earlier one. A second look can find a later
 record and miss the earlier one, but only after the first look found some
-record, and that record's key is below the later record's stamp, so the
-later record is not picked; the next pick looks at every lane again. A raised stamp stays below the stamp of every write made after its
-record was published, since the reader read the clock before a copy that
-did not yet see the record, so writes that happened one after the other
-keep their order.
+record, and that record's key is below the later record's stamp: the
+found record's key is no more than the clock at the look's copy of its
+lane, since its stamp and its mark were both read before that copy; the
+earlier record was not in that look's copies, so it was
+published after them; and the later write began only once the clock had
+passed a reading its writer took after that publication. So the later
+record is not picked, and the next pick looks at every lane again. A raised stamp stays below the stamp of every write that began
+after its record's write returned, since the reader read the clock before
+a copy that did not yet see the record, which was before the writer's
+reading after its publication, and the later write stamps above that
+reading; so writes made one after the other keep their order.
 
 **Why no writer starves another.** With one read end, a record stamped
 when it was written waits behind at most two lanes' capacity of each other
@@ -1291,8 +1313,8 @@ interleaving of writes, reads, inherited ends, closes, holders' deaths,
 drained reports, deposits, redemptions and withdrawals, reports applied
 late by a reader's event executor while `wends` already names their write
 ends, hostile
-rewrites of shared fields, the pipe server's crash, and the reorderings
-the fences allow, up to 14 events (an estimate of what fits `make check`'s
+rewrites of shared fields, the pipe server's crash, a clock that may
+return one reading twice, and the reorderings the fences allow, up to 14 events (an estimate of what fits `make check`'s
 budget), and checks PI2 to PI7 and the service bound after every event.
 `erx_pipe:step/2` is explored the same way over its events, with PI1 and
 PI8 added, and its collector is checked against a model of reachability
@@ -1572,8 +1594,9 @@ readers, which any pipe has.
   `erx_pipe_rstep` and `erx_pipe:step/2`, explored as
   [The pipe core](#the-pipe-core) describes, under ASan and UBSan, with
   properties: no byte lost, duplicated or reordered within a writer; every
-  record of at most `PIPE_BUF` bytes read contiguously; writes that
-  happened one after the other read in that order; the end of the stream
+  record of at most `PIPE_BUF` bytes read contiguously; of two writes,
+  one that returned before the other began read first, on a clock that
+  may repeat a reading; the end of the stream
   and `EPIPE` exactly when PI2 and PI3 say; no wakeup lost; no field read
   twice from shared memory, checked by an instrumented accessor. Each
   property has a seeded failure: a model with one fence removed, a reader
@@ -1667,7 +1690,9 @@ readers, which any pipe has.
 
 **Cost model.** A write of `n` bytes, at most `PIPE_BUF`, while no reader
 sleeps costs a clock read, a copy of `n + 16` bytes rounded up to 16, two
-copies of shared fields and a store around a full fence, with no kernel
+copies of shared fields and a store around a full fence, and, once per
+call, the wait for the clock to pass its publication: two or more clock
+reads within at most one tick of the counter, with no kernel
 call; when a reader sleeps it adds one trigger of each sleeping read end's
 doorbell. A read costs the reader lock, a clock read and a copy of each
 lane's write position and first record header, one cache line per open

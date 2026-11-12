@@ -12,7 +12,8 @@ require_relative '../fixtures/generated_tree'
 # The pipe core's writer and reader steps (liberx/erx_pipe_core.c) through every
 # interleaving of test/fixtures/pipe_explore.c, a model of one pipe under delayed stores
 # (docs/design-pipes.md, "The pipe core"): one write end and one read end, two write ends
-# merged by one read end, or one write end read by two co-readers, and one end called by
+# merged by one read end, on a clock that advances at every reading or one that may repeat
+# a reading, or one write end read by two co-readers, and one end called by
 # two threads at once. Every scenario
 # runs to its end under the address and undefined sanitizers with the landing gate's write
 # lengths, or with ERX_PIPE_EXPLORE=full the milestone gate's, as tools/erx check-fuzz runs
@@ -33,7 +34,7 @@ class PipeCoreTest < Minitest::Test
   SMALL = %w[flow partial nonblock writer-dies reader-closes reader-dies lost join merge coread
              coread-dies-empty coread-lost-dies rcalls wcalls hostile-writer hostile-reader
              hostile-coreader hostile-wcalls].freeze
-  LARGE = %w[merge-join coread-dies coread-lost].freeze
+  LARGE = %w[merge-join merge-repeat coread-dies coread-lost].freeze
   SCENARIOS = FULL ? LARGE + SMALL : SMALL
   # Scenarios explored at once: each runs alone in one process.
   PARALLEL = 8
@@ -115,6 +116,8 @@ class PipeCoreTest < Minitest::Test
     'the merge picking from the first look alone' =>
       ['merge', 'PI6', "\t\tr->phase = LOOK_WENDS;\n\t\treturn (pipe_act(ERX_PIPE_OP_COPY_WENDS));",
        "\t\tr->second = true;\n\t\treturn (pipe_rlooked(r));"],
+    'a write that returns before the clock has passed its publication' =>
+      ['merge-repeat', 'PI6', "\tif (w->done > 0) {\n\t\tw->outcome = outcome;", "\tif (false) {\n\t\tw->outcome = outcome;"],
     'a batch marked with the clock of the copy that opened it' =>
       ['merge', 'PI6', 'mark = lane->looked ? lane->look : 0;', 'mark = r->clock;'],
     'a co-reader that releases the lock without clearing its owner' =>

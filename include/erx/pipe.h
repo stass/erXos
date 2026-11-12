@@ -141,6 +141,8 @@ erx_pipe_settle_t erx_pipe_settle(const erx_pipe_cur_copy_t *copy);
 typedef enum erx_pipe_op {
 	ERX_PIPE_OP_DONE = 0,	/* the call returns result */
 	ERX_PIPE_OP_CLOCK,	/* in.value = the time page's monotonic clock */
+	ERX_PIPE_OP_PASS_CLOCK,	/* read the clock, then read it again until
+				 * it reads more */
 	ERX_PIPE_OP_LOAD_RPOS,	/* in.value = lane's rpos, the acquire load */
 	ERX_PIPE_OP_LOAD_WPOS,	/* in.value = lane's wpos, the acquire load */
 	ERX_PIPE_OP_COPY_NEED,	/* in.value = lane's ring header need */
@@ -228,6 +230,8 @@ typedef struct erx_pipe_wstate {
 					 * waiting calls */
 	uint64_t	 stamp;
 	uint64_t	 wake;		/* the copy of wake */
+	erx_pipe_act_t	 outcome;	/* what the call returns once the
+					 * clock has passed its publications */
 	bool		 armed;		/* a need is published and fenced */
 	uint64_t	 need;		/* the need last published */
 } erx_pipe_wstate_t;

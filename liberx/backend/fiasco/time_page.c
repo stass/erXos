@@ -54,7 +54,14 @@ erx_fiasco_time_init(void)
 	time_handle = handle;
 	time_record = record;
 
+	/*
+	 * A counter without a frequency reads as time 0 for ever (erx_fiasco_clock_ns), and a
+	 * clock that never advances would hold every pipe write in its wait for the clock to
+	 * pass its publication (docs/design-pipes.md, "Writing").
+	 */
 	hz = erx_fiasco_counter_hz();
+	if (hz == 0)
+		return ("time: the counter reports no frequency, so the clock would not advance");
 	scale = erx_fiasco_time_scale(hz);
 	atomic_store_explicit(&time_page->version, ERX_TIME_PAGE_VERSION, memory_order_relaxed);
 	atomic_store_explicit(&time_page->counter_hz, hz, memory_order_relaxed);

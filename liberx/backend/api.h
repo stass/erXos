@@ -84,7 +84,11 @@ int	erx_ipc_reply_wait(uint64_t tag, uint64_t wait_by) ERX_WARN_UNUSED_RESULT;
 int	erx_umtx_wait(uint64_t addr, uint32_t expected, uint64_t deadline);
 /* How many it woke. */
 int	erx_umtx_wake(uint64_t addr, uint32_t count);
-/* Monotonic nanoseconds: a thread's later read is never below its earlier one, on any CPU. */
+/*
+ * Monotonic nanoseconds: a thread's later read is never below its earlier one, on any CPU,
+ * and the clock advances, so a thread that keeps reading it reads more within a tick of its
+ * counter. Two reads within a tick may be equal.
+ */
 uint64_t	erx_clock_ns(void);
 
 /* The deadline ns from now. One too far to add to the clock is no deadline. */

@@ -110,6 +110,12 @@ run_wperform(const erx_pipe_wstate_t *w, const erx_pipe_wmap_t *map,
 	case ERX_PIPE_OP_CLOCK:
 		in->value = fx->clock(fx->ctx);
 		return (true);
+	case ERX_PIPE_OP_PASS_CLOCK:
+		/* At most a tick: the backends' clocks advance (erx_clock_ns). */
+		for (const uint64_t from = fx->clock(fx->ctx);
+		    fx->clock(fx->ctx) <= from;)
+			;
+		return (true);
 	case ERX_PIPE_OP_LOAD_RPOS:
 		return (erx_pipe_rpage_rpos_load(map->rpage, &in->value));
 	case ERX_PIPE_OP_COPY_WAKE:

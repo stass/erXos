@@ -51,16 +51,26 @@
  * makes it, to read again or, of 0 bytes, to give the wait up; in a join
  * scenario the pipe server's store of wends, which installs the joining
  * write end; in a lost scenario the pipe's loss; and in a hostile scenario
- * one rewrite of a shared field.  The clock advances at every reading in
- * the shapes with two write ends, and reads 0 with one, whose order needs
- * no clock.  The exploration is depth first over every interleaving, with
+ * one rewrite of a shared field.  The clock reads 0 in the shapes with one
+ * write end, whose order needs no clock.  In the shapes with two it
+ * advances at every reading, or, where the scenario says so, a reading
+ * may also return the last one again, so that at most two readings in a
+ * row are equal; the model explores each such reading both ways.  On that
+ * clock a writer's wait for the clock to pass its publication is an event
+ * of its own, after which every reading is above every earlier one.  The
+ * exploration is depth first over every interleaving, with
  * each state's 64-bit fingerprint kept so a state is explored once.
  *
  * The model keeps a record of every record each write end wrote: its
  * stream offset and length, the bytes readers claimed of it in the lock
- * page, and, for PI6, the records of every write end that were published
- * before its stamp was read (the relation `before` gathers for each write
- * end at its last stamp and `after` keeps per record).  After every event
+ * page, and, for PI6, the records of every other write end that happened
+ * before it (the relation `before` gathers for each write end and `after`
+ * keeps per record).  With a clock that advances at every reading, those
+ * are the records published before its stamp was read, a stronger order
+ * than PI6 promises, which the merge gives on such a clock; with a clock
+ * that may repeat a reading, they are the records whose write returned
+ * before its write began, PI6's own order, which holds only through the
+ * writer's wait for the clock to pass its publication.  After every event
  * it checks:
  *
  *   PI2  a read returns 0 only once every write end installed has gone
@@ -84,8 +94,8 @@
  *        a read copies is the claimed byte of its write end's stream, and
  *        no read waits with bytes copied, since rpos is past them and the
  *        session's pipe NIF answers a wait with would_block;
- *   PI6  of two records of different write ends, one whose wpos landed
- *        before the other's stamp was read is claimed first;
+ *   PI6  of two records of different write ends, one that happened
+ *        before the other, as above, is claimed first;
  *   PI7  no party sleeps with what it waits for ready while every other
  *        party is idle or asleep with no store left to make and no report
  *        or server event pending; a state from which no event can follow
@@ -225,11 +235,12 @@ typedef struct party {
 
 /*
  * A record a write end wrote, at lane position pos: after[o] holds the
- * records of write end o published before its stamp was read, which
- * happened before it and must be read first (PI6).
+ * records of write end o that happened before it and must be read first
+ * (PI6).
  */
 #define G_WRITTEN	1u
 #define G_PUBLISHED	2u
+#define G_RETURNED	4u	/* the write that wrote it returned */
 typedef struct ghost {
 	uint8_t		 flags;
 	uint8_t		 len;
@@ -247,8 +258,8 @@ typedef struct world {
 	erx_pipe_rstate_t rs[NR_MAX];
 	erx_pipe_rlane_t lane[NR_MAX][NW_MAX];
 	ghost_t		 rec[NW_MAX][RECS_MAX];
-	/* before[w][o]: write end o's records published when write end w
-	 * last read the clock for a stamp; copied to the record as after. */
+	/* before[w][o]: write end o's records that happened before write
+	 * end w's next record; copied to the record as after. */
 	uint8_t		 before[NW_MAX][NW_MAX];
 	uint64_t	 streamed[NW_MAX];	/* bytes each write end put in records */
 	uint64_t	 published[NW_MAX];	/* bytes behind its committed wpos */
@@ -279,11 +290,17 @@ typedef struct world {
 	/* needs[w]: the needs write end w stored since its wpos or the rpos
 	 * of its lane last moved (PI4) */
 	uint8_t		 needs[NW_MAX];
-	uint8_t		 pad2[4];
+	uint8_t		 repeated;	/* the last reading was a repeat */
+	uint8_t		 pad2[3];
 } world_t;
 
 _Static_assert(sizeof(world_t) % sizeof(uint64_t) == 0,
     "the fingerprint reads the world in words");
+
+/* The clock: it reads 0, advances at every reading, or may repeat one. */
+#define CLOCK_ZERO	0
+#define CLOCK_ADVANCES	1
+#define CLOCK_REPEATS	2
 
 typedef struct scenario {
 	const char	*name;
@@ -302,7 +319,8 @@ typedef struct scenario {
 	bool		 joins;		/* the last write end joins mid-stream */
 	bool		 lost;
 	bool		 nif;		/* reads made afresh during a wait */
-	bool		 clock;		/* the clock advances at every reading */
+	int		 clock;		/* CLOCK_ZERO, CLOCK_ADVANCES or
+					 * CLOCK_REPEATS */
 	/* The reads read end 0 makes before it closes, at the landing gate
 	 * and deep; 0 for no bound. */
 	uint8_t		 calls[2];
@@ -336,10 +354,15 @@ static const scenario_t scenarios[] = {
 	  .deep = { { 40, 33 }, { 0 } }, .read_len = 24, .joins = true,
 	  .nif = true },
 	{ .name = "merge", .nw = 2, .nr = 1, .writes = { { 3 }, { 2 } },
-	  .deep = { { 9, 3 }, { 5 } }, .read_len = 24, .clock = true },
+	  .deep = { { 9, 3 }, { 5 } }, .read_len = 24,
+	  .clock = CLOCK_ADVANCES },
+	/* Two writes one after the other on a clock that repeats a reading. */
+	{ .name = "merge-repeat", .nw = 2, .nr = 1, .writes = { { 3 }, { 2 } },
+	  .deep = { { 9, 3 }, { 5 } }, .read_len = 24,
+	  .clock = CLOCK_REPEATS },
 	{ .name = "merge-join", .nw = 2, .nr = 1, .writes = { { 2 }, { 1 } },
 	  .deep = { { 3, 5 }, { 4 } }, .read_len = 24, .joins = true,
-	  .clock = true },
+	  .clock = CLOCK_ADVANCES },
 	{ .name = "coread", .nw = 1, .nr = 2, .writes = { { 7 } },
 	  .deep = { { 9, 3 } }, .read_len = 5, .calls = { 1, 3 } },
 	{ .name = "coread-dies", .nw = 1, .nr = 2, .writes = { { 6 } },
@@ -473,7 +496,7 @@ first_visit(const world_t *wd)
 }
 
 static const char *const op_names[] = {
-	"DONE", "CLOCK", "LOAD_RPOS", "LOAD_WPOS", "COPY_NEED", "COPY_WAKE",
+	"DONE", "CLOCK", "PASS_CLOCK", "LOAD_RPOS", "LOAD_WPOS", "COPY_NEED", "COPY_WAKE",
 	"COPY_SLEEPERS", "COPY_REC", "COPY_CUR", "COPY_WENDS", "COPY_WAITERS",
 	"COPY_DATA", "WRITE_REC", "STORE_WPOS", "STORE_NEED", "STORE_RPOS",
 	"STORE_WAKE", "STORE_CUR", "SET_SLEEPER", "CLEAR_SLEEPER", "SET_WAITER",
@@ -809,6 +832,37 @@ ring_end(party_t *p)
 		p->bell = 1;
 }
 
+/*
+ * On a clock that may repeat a reading, PI6's own order.  A write of write
+ * end w returns, or waits after publishing, as the NIF's returns: every
+ * record of the end published so far belongs to a write that returned,
+ * since a scenario with this clock has one caller on each write end
+ * (main).
+ */
+static void
+returned(world_t *wd, int w)
+{
+	int k;
+
+	for (k = 0; k < RECS_MAX; k++)
+		if ((wd->rec[w][k].flags & G_PUBLISHED) != 0)
+			wd->rec[w][k].flags |= G_RETURNED;
+}
+
+/* A write of write end w begins: the records of writes returned precede it. */
+static void
+begun(world_t *wd, int w)
+{
+	int o, k;
+
+	for (o = 0; o < NW_MAX; o++) {
+		wd->before[w][o] = 0;
+		for (k = 0; o != w && k < RECS_MAX; k++)
+			if ((wd->rec[o][k].flags & G_RETURNED) != 0)
+				wd->before[w][o] |= (uint8_t)(1u << k);
+	}
+}
+
 static void
 writer_done(world_t *wd, int w, int depth, int64_t result)
 {
@@ -823,6 +877,8 @@ writer_done(world_t *wd, int w, int depth, int64_t result)
 	if (result >= 0 && (uint64_t)result != ws->len && !sc->nonblock &&
 	    ws->readers != 0 && !ws->lost)
 		fail(depth, "PI3", "a blocking write returned short");
+	if (sc->clock == CLOCK_REPEATS)
+		returned(wd, w);
 }
 
 /* Whether every byte published has been claimed. */
@@ -1063,7 +1119,10 @@ ring_readers(world_t *wd, uint64_t bits)
 			ring_end(&wd->r[r]);
 }
 
-/* Write end w reads its stamp: the records published so far precede it. */
+/*
+ * On a clock that advances at every reading: write end w reads its
+ * stamp, and the records published so far precede it.
+ */
 static void
 stamped(world_t *wd, int w)
 {
@@ -1089,8 +1148,18 @@ wperform(world_t *wd, int w, int depth, const erx_pipe_act_t *a)
 		writer_done(wd, w, depth, a->result);
 		break;
 	case ERX_PIPE_OP_CLOCK:
-		p->in.value = sc->clock ? ++wd->now : 0;
-		stamped(wd, w);
+		if (sc->clock == CLOCK_ADVANCES)
+			stamped(wd, w);
+		break;
+	case ERX_PIPE_OP_PASS_CLOCK:
+		/*
+		 * The wait's last reading, one above every reading before;
+		 * the next reading may give it again.
+		 */
+		if (sc->clock == CLOCK_REPEATS) {
+			wd->now++;
+			wd->repeated = 0;
+		}
 		break;
 	case ERX_PIPE_OP_LOAD_RPOS:
 		p->in.value = load(wd, p, L_RPOS, (uint8_t)w);
@@ -1120,6 +1189,12 @@ wperform(world_t *wd, int w, int depth, const erx_pipe_act_t *a)
 		ring_readers(wd, a->value);
 		break;
 	case ERX_PIPE_OP_WAIT:
+		/*
+		 * The session's pipe NIF returns what a call published before
+		 * a wait to its Erlang caller, so such a wait is a return.
+		 */
+		if (sc->clock == CLOCK_REPEATS && wd->ws[w].done > 0)
+			returned(wd, w);
 		/* What the call published is written; the fresh call writes the rest. */
 		p->left[p->run] -= (uint32_t)wd->ws[w].done;
 		p->wait_span[p->run] = (uint32_t)erx_ring_span(wd->ws[w].rec);
@@ -1146,7 +1221,6 @@ rperform(world_t *wd, int r, int depth, const erx_pipe_act_t *a)
 		reader_done(wd, r, depth, a->result);
 		break;
 	case ERX_PIPE_OP_CLOCK:
-		p->in.value = sc->clock ? ++wd->now : 0;
 		break;
 	case ERX_PIPE_OP_LOAD_RPOS:
 		p->in.value = load(wd, p, L_RPOS, w);
@@ -1250,9 +1324,34 @@ rperform(world_t *wd, int r, int depth, const erx_pipe_act_t *a)
 	}
 }
 
-/* Performs the party's pending action. */
+/*
+ * A reading of the clock: 0 where the order needs none, else the next
+ * reading, or, when repeat, the last one again, as a clock gives within a
+ * tick.
+ */
+static uint64_t
+clock_read(world_t *wd, bool repeat)
+{
+	if (sc->clock == CLOCK_ZERO)
+		return (0);
+	wd->repeated = repeat;
+	if (!repeat)
+		wd->now++;
+	return (wd->now);
+}
+
+/* Whether the party's pending reading may repeat the last: once a reading
+ * exists that no reading has repeated yet. */
+static bool
+may_repeat(const world_t *wd, const party_t *p)
+{
+	return (sc->clock == CLOCK_REPEATS && p->act.op == ERX_PIPE_OP_CLOCK &&
+	    wd->now != 0 && !wd->repeated);
+}
+
+/* Performs the party's pending action; a reading of the clock repeats when repeat. */
 static void
-perform(world_t *wd, party_t *p, int depth)
+perform(world_t *wd, party_t *p, int depth, bool repeat)
 {
 	const erx_pipe_act_t a = p->act;
 	bool writer;
@@ -1260,6 +1359,8 @@ perform(world_t *wd, party_t *p, int depth)
 
 	memset(&p->in, 0, sizeof(p->in));
 	p->steps++;
+	if (a.op == ERX_PIPE_OP_CLOCK)
+		p->in.value = clock_read(wd, repeat);
 	if (writer)
 		wperform(wd, i, depth, &a);
 	else
@@ -1336,7 +1437,10 @@ successor(int depth, const char *what, int who)
 /*
  * Whether the party's pending action touches only its own state: a store
  * into its own buffer (a flush is what others see), a fence with the
- * buffer drained, a clock that reads 0, or a wait, which only lets go of
+ * buffer drained, a clock that reads 0, a writer's wait for the clock
+ * where it changes nothing (on a clock that advances at every reading,
+ * every later reading passes it anyway, and on one that reads 0 the order
+ * needs no clock), or a wait, which only lets go of
  * the end: a ring before it reaches the call as surely as one after.
  * Performed at once or later, such an action leaves every other party's
  * view the same, so the model performs it at once, except for a party
@@ -1352,7 +1456,9 @@ local_act(const world_t *wd, const party_t *p)
 		return (false);
 	switch (p->act.op) {
 	case ERX_PIPE_OP_CLOCK:
-		return (!sc->clock);
+		return (sc->clock == CLOCK_ZERO);
+	case ERX_PIPE_OP_PASS_CLOCK:
+		return (sc->clock != CLOCK_REPEATS);
 	case ERX_PIPE_OP_FENCE:
 		return (p->nbuf == 0);
 	case ERX_PIPE_OP_WAIT:
@@ -1407,7 +1513,7 @@ static void
 perform_shown(world_t *wd, party_t *p, int i, int depth)
 {
 	note(depth, i, op_names[p->act.op]);
-	perform(wd, p, depth);
+	perform(wd, p, depth, false);
 }
 
 /*
@@ -1604,7 +1710,7 @@ static void
 visit(int depth)
 {
 	advance(&worlds[depth], depth);
-	if (sc->clock)
+	if (sc->clock != CLOCK_ZERO)
 		renumber(&worlds[depth]);
 	if (first_visit(&worlds[depth]))
 		explore(depth);
@@ -1855,11 +1961,13 @@ explore_parties(int depth)
 			visit(depth + 1);
 			events++;
 		}
-		if (ready(p)) {
+		for (j = 0; ready(p) && j < (may_repeat(cur, p) ? 2 : 1); j++) {
 			nw = successor(depth, writer ? "W " : "R ", k);
-			snprintf(trace[depth + 1], sizeof(trace[0]), "%c%d %s",
-			    writer ? 'W' : 'R', k, op_names[p->act.op]);
-			perform(nw, writer ? &nw->w[k] : &nw->r[k], depth + 1);
+			snprintf(trace[depth + 1], sizeof(trace[0]), "%c%d %s%s",
+			    writer ? 'W' : 'R', k, op_names[p->act.op],
+			    j == 1 ? " (repeats)" : "");
+			perform(nw, writer ? &nw->w[k] : &nw->r[k], depth + 1,
+			    j == 1);
 			visit(depth + 1);
 			events++;
 		}
@@ -1943,6 +2051,8 @@ explore_writers(int depth)
 			nw = call_event(depth, "write", w, c);
 			start_call(nw, &nw->w[w], c, next_len(nw, w));
 			nw->writes[w]++;
+			if (sc->clock == CLOCK_REPEATS)
+				begun(nw, w);
 			visit(depth + 1);
 			events++;
 		}
@@ -2176,6 +2286,12 @@ main(int argc, char **argv)
 			sc = &scenarios[i];
 	if (sc == NULL) {
 		fprintf(stderr, "pipe_explore: no scenario %s\n", argv[1]);
+		return (2);
+	}
+	/* returned() takes every published record of an end as returned. */
+	if (sc->clock == CLOCK_REPEATS && sc->wcalls) {
+		fprintf(stderr, "pipe_explore: %s: a repeating clock needs one caller on each write end\n",
+		    sc->name);
 		return (2);
 	}
 	memcpy(lengths, strcmp(argv[2], "deep") == 0 ? sc->deep : sc->writes,
