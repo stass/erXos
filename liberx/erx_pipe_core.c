@@ -474,16 +474,18 @@ pipe_rlocked(erx_pipe_rstate_t *r)
  * is still held, wait.  The bit stays set until a call of the end holds
  * the lock, so it serves every call of the end waiting for it.  A read of
  * 0 bytes takes no lock: it gives up every wait of the end, clearing the
- * waiters and sleepers bits, and returns 0.
+ * waiters and sleepers bits, and returns 0.  A read of a lost pipe does
+ * the same and fails with EIO: the ended pipe server frees no lock a gone
+ * read end held, so a read that waited for the lock could wait for ever.
  */
 static erx_pipe_act_t
 pipe_rlock_begin(erx_pipe_rstate_t *r)
 {
 	r->stage = R_LOCK;
-	if (r->len == 0) {
+	if (r->len == 0 || r->lost) {
 		/* No lock is held: the release's tail only disarms and returns. */
 		r->after = R_AFTER_DONE;
-		r->result = 0;
+		r->result = r->len == 0 ? 0 : -EIO;
 		if (r->waiting)
 			return (pipe_rclear_waiter(r, LOCK_GIVEN_UP));
 		return (pipe_rreleased(r));
@@ -527,7 +529,8 @@ pipe_rlock_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
  * the reports, appending lanes and marking writers gone; a broken lane
  * whose writer has gone is closed now, by one {drained}, as a lane found
  * empty after its writer went is closed by the look that finds it.  A
- * lost pipe fails the read with EIO.
+ * lost pipe fails the read at step 1: the event executor applies reports
+ * only between runs, under the end's lock.
  */
 static erx_pipe_act_t
 pipe_rtakeup_next(erx_pipe_rstate_t *r)
@@ -535,8 +538,6 @@ pipe_rtakeup_next(erx_pipe_rstate_t *r)
 	erx_pipe_rlane_t *lane;
 	erx_pipe_act_t act;
 
-	if (r->lost)
-		return (pipe_rrelease_begin(r, R_AFTER_DONE, -EIO));
 	for (; r->at < r->nlanes; r->at++) {
 		lane = &r->lanes[r->at];
 		if (lane->writer == ERX_PIPE_WRITER_GONE &&

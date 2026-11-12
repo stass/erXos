@@ -12,7 +12,8 @@ require_relative '../fixtures/generated_tree'
 # The pipe core's writer and reader steps (liberx/erx_pipe_core.c) through every
 # interleaving of test/fixtures/pipe_explore.c, a model of one pipe under delayed stores
 # (docs/design-pipes.md, "The pipe core"): one write end and one read end, two write ends
-# merged by one read end, or one write end read by two co-readers. Every scenario
+# merged by one read end, or one write end read by two co-readers, and one end called by
+# two threads at once. Every scenario
 # runs to its end under the address and undefined sanitizers with the landing gate's write
 # lengths, or with ERX_PIPE_EXPLORE=full the milestone gate's, as tools/erx check-fuzz runs
 # it. Each seeded fault of the steps, or of the pipe server as the model plays it, must fail
@@ -30,7 +31,8 @@ class PipeCoreTest < Minitest::Test
   # The landing gate explores the small shapes; the milestone gate adds the large ones, whose
   # seeded faults the landing gate still catches at landing lengths.
   SMALL = %w[flow partial nonblock writer-dies reader-closes reader-dies lost join merge coread
-             coread-dies-empty hostile-writer hostile-reader hostile-coreader].freeze
+             coread-dies-empty coread-lost-dies rcalls hostile-writer hostile-reader
+             hostile-coreader].freeze
   LARGE = %w[merge-join coread-dies coread-lost].freeze
   SCENARIOS = FULL ? LARGE + SMALL : SMALL
   # Scenarios explored at once: each runs alone in one process.
@@ -130,10 +132,20 @@ class PipeCoreTest < Minitest::Test
       ['coread', 'PI5', "\t\tpipe_make_current(r, at, copy.cur_pos, copy.len,\n\t\t    copy.cur_off);\n\t\treturn (pipe_rcopy_begin(r));",
        "\t\tpipe_make_current(r, at, copy.cur_pos, copy.len,\n\t\t    0);\n\t\treturn (pipe_rcopy_begin(r));"],
     'a lost pipe read on' =>
-      ['lost', 'PI7', "\tif (r->lost)\n\t\treturn (pipe_rrelease_begin(r, R_AFTER_DONE, -EIO));", ''],
+      ['lost', 'PI7', 'if (r->len == 0 || r->lost) {', 'if (r->len == 0) {'],
     'a pipe server that forgets to tell one reader of a gone writer' =>
       ['coread', 'PI7', "\tfor (r = 0; r < sc->nr; r++)\n\t\tif (alive(&wd->r[r]))",
-       "\tfor (r = 0; r < sc->nr - 1; r++)\n\t\tif (alive(&wd->r[r]))", EXPLORER]
+       "\tfor (r = 0; r < sc->nr - 1; r++)\n\t\tif (alive(&wd->r[r]))", EXPLORER],
+    'a co-reader that keeps its waiters bit once it holds the lock' =>
+      ['coread', 'PI7', "\tif (r->waiting)\n\t\treturn (pipe_rclear_waiter(r, LOCK_TAKEN));",
+       "\tif (false)\n\t\treturn (pipe_rclear_waiter(r, LOCK_TAKEN));"],
+    'a read of a lost pipe that waits for the reader lock a dead co-reader holds' =>
+      ['coread-lost-dies', 'PI7', 'if (r->len == 0 || r->lost) {', 'if (r->len == 0) {'],
+    # Two calls on one read end: one clears the sleepers bits the other waits on.
+    "a read that clears the sleepers bits without waking the end's other calls" =>
+      ['rcalls', 'PI7', "\tr->armed = false;\n\tr->wake_local = true;", "\tr->armed = false;"],
+    "liberx's read that ignores wake_local" =>
+      ['rcalls', 'PI7', "\tif (local)\n\t\twake_asleep(p);", "\tif (local && writer)\n\t\twake_asleep(p);", EXPLORER]
   }.freeze
 
   def test_seeded_faults_are_caught

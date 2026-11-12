@@ -7,7 +7,8 @@
  * The pipe core's exploration (docs/design-pipes.md, "The pipe core"), run
  * by test/host/pipe_core_test.rb over the real steps of
  * liberx/erx_pipe_core.c: one pipe with up to NW_MAX write ends and NR_MAX
- * read ends, rings of 128 bytes and records of at most 16 bytes.  Each
+ * read ends, rings of 128 bytes and records of at most 16 bytes, or 32
+ * where a scenario says so.  Each
  * scenario picks a shape: one write end and one read end; two write ends
  * merged by one read end, the second of them joining mid-stream in some
  * scenarios; or one write end read by two co-readers that share the reader
@@ -24,6 +25,18 @@
  * compare-and-swap waits for the party's buffered stores to the lock word.
  * Loads are not reordered: the acquire loads' pairing with release stores
  * is what the check-litmus suite covers (test/litmus/pipe-*.litmus).
+ *
+ * A party is an end, with one store buffer and one core state, called by
+ * one thread or, in the scenarios that say so, by two, as liberx's read
+ * and write loops call it (docs/design-pipes.md, "Several threads on one
+ * end"): a call holds the end from its start to its result or a wait,
+ * then sleeps on the end's waiters; a ring of the end's doorbell or a
+ * report wakes every caller asleep on the end, and a run that set
+ * wake_local wakes the end's other callers; a woken caller starts a fresh
+ * call with what it has left.  A record holds up to the scenario's chunk,
+ * so records of different lengths span different numbers of grains.  The
+ * pipe's loss is the pipe server's end: from then on it handles no end's
+ * going and frees no reader lock.
  *
  * The events are: a step of any party, asked for its next action, and the
  * action's performance, apart so that a report can land between them; a
@@ -105,12 +118,14 @@
 #include "erx/pipe.h"
 
 #define RING		128u
-#define CHUNK		16u
+#define CHUNK		16u		/* a write end's chunk unless the
+					 * scenario names a larger one */
 #define GRAIN		16u
-#define SPAN		(2 * GRAIN)	/* every model record: header, payload */
 #define SLOTS		(RING / GRAIN)
 #define NW_MAX		2
 #define NR_MAX		2
+#define CALLERS_MAX	2		/* threads calling one end */
+#define NO_CALLER	0xffu
 #define RECS_MAX	8		/* records a write end writes */
 #define BUFFERED_MAX	6
 #define WRITES_MAX	4
@@ -132,7 +147,8 @@ typedef struct store {
 	uint8_t		 rmw;
 	uint8_t		 slot;		/* L_AREA */
 	uint8_t		 lane;		/* the write end whose lane it is */
-	uint8_t		 pad[3];
+	uint8_t		 header;	/* L_AREA: the header of record value */
+	uint8_t		 pad[2];
 	uint32_t	 a;		/* L_CUR: cur_off; L_WPOS: stream end */
 	uint32_t	 b;		/* L_CUR: cur */
 	uint64_t	 value;
@@ -151,7 +167,15 @@ typedef struct mem {
 	uint32_t	 owner, wends, cur, cur_off;
 } mem_t;
 
+/* An end's state: CALL while any of its callers is in a call. */
 enum pstate { ABSENT = 0, IDLE, CALL, CLOSED, DEAD, ENDED, HOSTILE };
+
+/*
+ * A caller's state, as liberx's read and write loops make it: READY wants
+ * the end's lock, to start a fresh call; RUN holds it, from the call's
+ * start to its result or a wait; ASLEEP is on the end's waiters.
+ */
+enum cstate { C_IDLE = 0, C_READY, C_RUN, C_ASLEEP };
 
 /* The reports a party's event executor has still to apply. */
 #define REP_WGONE(w)	(1u << (w))		/* write end w went */
@@ -159,36 +183,49 @@ enum pstate { ABSENT = 0, IDLE, CALL, CLOSED, DEAD, ENDED, HOSTILE };
 #define REP_JOIN	(1u << 8)		/* the joining write end */
 #define REP_LOST	(1u << 9)		/* the pipe is lost */
 
-/* A holder: its pending action, its reports and its store buffer. */
+/*
+ * An end: its callers, the running call's pending action, its reports and
+ * its store buffer (one per end, which every call of it shares).
+ */
 typedef struct party {
 	uint8_t		 state;
-	uint8_t		 bell;		/* a ring latched until a wait */
+	uint8_t		 bell;		/* the running call was rung: it does
+					 * not sleep at its wait */
 	uint8_t		 nbuf;
 	uint8_t		 decided;	/* act is the step's answer to in */
 	uint16_t	 reports;
-	uint8_t		 pad[2];
+	uint8_t		 run;		/* the caller holding the end, or
+					 * NO_CALLER */
+	uint8_t		 pad;
+	uint8_t		 call[CALLERS_MAX];	/* each caller's cstate */
+	uint8_t		 pad2[2];
 	uint32_t	 steps;		/* since the last wait or call's end */
-	uint32_t	 pad2;
-	uint64_t	 base;		/* the stream offset of the call's buffer */
+	uint32_t	 left[CALLERS_MAX];	/* a writer's bytes still to
+						 * write; a reader's length */
+	uint32_t	 wait_span[CALLERS_MAX];	/* the record an asleep
+							 * writer waits to fit */
+	uint64_t	 base;		/* a write call's stream offset: its
+					 * end's bytes in records at its start */
 	erx_pipe_act_t	 act;
 	erx_pipe_in_t	 in;
 	store_t		 buf[BUFFERED_MAX];
 } party_t;
 
 /*
- * A record a write end wrote, at lane position SPAN * its index: after[o]
- * holds the records of write end o published before its stamp was read,
- * which happened before it and must be read first (PI6).
+ * A record a write end wrote, at lane position pos: after[o] holds the
+ * records of write end o published before its stamp was read, which
+ * happened before it and must be read first (PI6).
  */
 #define G_WRITTEN	1u
 #define G_PUBLISHED	2u
-#define G_LANDED	4u	/* its header is in the area */
 typedef struct ghost {
 	uint8_t		 flags;
 	uint8_t		 len;
 	uint8_t		 claimed;	/* payload bytes claimed in the lock page */
 	uint8_t		 after[NW_MAX];
+	uint8_t		 pad;
 	uint16_t	 off;		/* the stream offset of its first byte */
+	uint16_t	 pos;
 } ghost_t;
 
 typedef struct world {
@@ -201,7 +238,7 @@ typedef struct world {
 	/* before[w][o]: write end o's records published when write end w
 	 * last read the clock for a stamp; copied to the record as after. */
 	uint8_t		 before[NW_MAX][NW_MAX];
-	uint64_t	 written[NW_MAX];	/* bytes each write end's calls took */
+	uint64_t	 streamed[NW_MAX];	/* bytes each write end put in records */
 	uint64_t	 published[NW_MAX];	/* bytes behind its committed wpos */
 	uint64_t	 taken[NW_MAX];		/* bytes of it claimed */
 	uint64_t	 received[NR_MAX];	/* bytes each read end's reads returned */
@@ -209,7 +246,13 @@ typedef struct world {
 	uint32_t	 pend_n[NR_MAX];
 	uint8_t		 pend_w[NR_MAX];
 	uint8_t		 writes[NW_MAX];	/* writes started */
+	uint8_t		 nrec[NW_MAX];		/* records written */
+	/* 1 + the record whose header is the last store to land in a slot of
+	 * the lane's area, or 0 for a payload's */
+	uint8_t		 head[NW_MAX][SLOTS];
 	uint8_t		 eof[NR_MAX];
+	uint8_t		 over[NR_MAX];		/* no further read: EIO, or the
+						 * end of the stream twice */
 	uint8_t		 quit[NR_MAX];		/* the read is a wait given up */
 	uint8_t		 drained[NR_MAX][NW_MAX];
 	uint8_t		 going;		/* read ends whose going the server has
@@ -234,6 +277,9 @@ typedef struct scenario {
 	uint32_t	 writes[NW_MAX][WRITES_MAX];
 	uint32_t	 deep[NW_MAX][WRITES_MAX];
 	uint32_t	 read_len;
+	uint32_t	 chunk;		/* 0 for CHUNK */
+	/* Two callers on write end 0, on read end 0 */
+	bool		 wcalls, rcalls;
 	bool		 nonblock;
 	bool		 writer_dies;	/* write end 0 */
 	bool		 reader_closes;	/* read end 0 */
@@ -294,6 +340,28 @@ static const scenario_t scenarios[] = {
 	{ .name = "coread-lost", .nw = 1, .nr = 2, .writes = { { 0 } },
 	  .deep = { { 0 } }, .read_len = 5, .lost = true,
 	  .calls = { 1, 2 } },
+	/* The loss while a co-reader that died holds the reader lock, which
+	 * the ended pipe server never frees: the other waits for it. */
+	{ .name = "coread-lost-dies", .nw = 1, .nr = 2, .writes = { { 0 } },
+	  .deep = { { 0 } }, .read_len = 1, .reader_dies = true, .lost = true,
+	  .calls = { 1, 1 } },
+	/*
+	 * Two calls on one write end.  The first two writes fill the ring
+	 * with records of 32, 48 and 48 bytes; then a write of one 48-byte
+	 * record and one of a 32-byte record wait, and the second may lower
+	 * the need the first published and find room.  It fails PI7, so
+	 * test/host/pipe_core_test.rb leaves it out (TODO.md, the pipe core's
+	 * lost wakeup between two write calls): a call
+	 * that replaces a need the reader has crossed can hide the crossing
+	 * from the reader, and the call that waits on the crossed need is
+	 * never rung.
+	 */
+	{ .name = "wcalls", .nw = 1, .nr = 1, .writes = { { 16, 64, 32, 16 } },
+	  .deep = { { 16, 64, 32, 16 } }, .read_len = 16, .chunk = 32,
+	  .wcalls = true },
+	/* Two calls on one read end, each of which may wait for data. */
+	{ .name = "rcalls", .nw = 1, .nr = 1, .writes = { { 4, 4 } },
+	  .deep = { { 4, 4, 4 } }, .read_len = 4, .rcalls = true },
 	{ .name = "hostile-writer", .nw = 1, .nr = 1, .writes = { { 16, 9 } },
 	  .deep = { { 40, 9 } }, .read_len = 24, .hostile = 'w', .nif = true },
 	{ .name = "hostile-reader", .nw = 1, .nr = 1, .writes = { { 16, 9 } },
@@ -393,13 +461,13 @@ static const char *const op_names[] = {
 _Static_assert(sizeof(op_names) / sizeof(op_names[0]) == ERX_PIPE_OP_BROKEN + 1,
     "every op is named");
 
-/* The stores the action buffers. */
+/* The stores the action buffers: a record's are its header and each grain of its payload. */
 static unsigned
-stores_of(erx_pipe_op_t op)
+stores_of(const erx_pipe_act_t *a)
 {
-	switch (op) {
+	switch (a->op) {
 	case ERX_PIPE_OP_WRITE_REC:
-		return (2);
+		return (1 + (unsigned)((a->n + GRAIN - 1) / GRAIN));
 	case ERX_PIPE_OP_STORE_WPOS:
 	case ERX_PIPE_OP_STORE_NEED:
 	case ERX_PIPE_OP_STORE_RPOS:
@@ -431,17 +499,15 @@ buffers(const party_t *p, uint8_t loc)
 static bool
 ready(const party_t *p)
 {
-	if (p->state != CALL || !p->decided)
+	if (p->run == NO_CALLER || !p->decided)
 		return (false);
 	switch (p->act.op) {
 	case ERX_PIPE_OP_FENCE:
 		return (p->nbuf == 0);
-	case ERX_PIPE_OP_WAIT:
-		return (p->bell != 0);
 	case ERX_PIPE_OP_TAKE_LOCK:
 		return (!buffers(p, L_OWNER));
 	default:
-		return (p->nbuf + stores_of(p->act.op) <= BUFFERED_MAX);
+		return (p->nbuf + stores_of(&p->act) <= BUFFERED_MAX);
 	}
 }
 
@@ -502,11 +568,15 @@ mem_word(mem_t *m, uint8_t loc, uint8_t lane)
 static void
 published(world_t *wd, int w, uint64_t wpos, uint32_t end)
 {
-	uint64_t k;
+	ghost_t *g;
+	int k;
 
 	wd->published[w] = end;
-	for (k = 0; k < RECS_MAX && (k + 1) * SPAN <= wpos; k++)
-		wd->rec[w][k].flags |= G_PUBLISHED;
+	for (k = 0; k < wd->nrec[w]; k++) {
+		g = &wd->rec[w][k];
+		if (g->pos + erx_ring_span(g->len) <= wpos)
+			g->flags |= G_PUBLISHED;
+	}
 }
 
 static void
@@ -519,8 +589,8 @@ commit(world_t *wd, party_t *p, int j)
 	case L_AREA:
 		memcpy(&wd->mem.lane[s->lane].area[s->slot * GRAIN], s->bytes,
 		    GRAIN);
-		if (s->slot % 2 == 0 && s->value < RECS_MAX)
-			wd->rec[s->lane][s->value].flags |= G_LANDED;
+		wd->head[s->lane][s->slot] = s->header && s->value < RECS_MAX ?
+		    (uint8_t)(s->value + 1) : 0;
 		break;
 	case L_OWNER:
 		wd->mem.owner = (uint32_t)s->value;
@@ -624,6 +694,32 @@ party_index(const world_t *wd, const party_t *p, bool *writer)
 	return ((int)(*writer ? p - wd->w : p - wd->r));
 }
 
+/* Whether the scenario lets the end die in a call: write end 0, or read end 0. */
+static bool
+may_die(const world_t *wd, const party_t *p)
+{
+	bool writer;
+	int i = party_index(wd, p, &writer);
+
+	return (i == 0 && (writer ? sc->writer_dies : sc->reader_dies));
+}
+
+/* The threads calling the end: two on the end the scenario names, else one. */
+static int
+callers(const world_t *wd, const party_t *p)
+{
+	bool writer;
+	int i = party_index(wd, p, &writer);
+
+	return (i == 0 && (writer ? sc->wcalls : sc->rcalls) ? 2 : 1);
+}
+
+static uint32_t
+chunk(void)
+{
+	return (sc->chunk != 0 ? sc->chunk : CHUNK);
+}
+
 static void
 next_action(world_t *wd, party_t *p)
 {
@@ -641,6 +737,55 @@ next_action(world_t *wd, party_t *p)
 	p->decided = 1;
 }
 
+/*
+ * Caller c takes the free end and starts a fresh call with what it has
+ * left, as liberx's read and write loops start one at a call's beginning
+ * and after each wait.
+ */
+static void
+take(world_t *wd, party_t *p, int c)
+{
+	bool writer;
+	int i = party_index(wd, p, &writer);
+
+	p->run = (uint8_t)c;
+	p->call[c] = C_RUN;
+	p->state = CALL;
+	p->bell = 0;
+	p->steps = 0;
+	p->base = writer ? wd->streamed[i] : 0;
+	if (writer)
+		erx_pipe_wstart(&wd->ws[i], p->left[c]);
+	else
+		erx_pipe_rstart(&wd->rs[i], p->left[c]);
+	next_action(wd, p);
+}
+
+/* Every caller asleep on the end wakes; a caller ready already stays so. */
+static void
+wake_asleep(party_t *p)
+{
+	int c;
+
+	for (c = 0; c < CALLERS_MAX; c++)
+		if (p->call[c] == C_ASLEEP)
+			p->call[c] = C_READY;
+}
+
+/*
+ * A ring of the end's doorbell, or a report its executor applied: the
+ * executor wakes the end's waiters once no call holds the end, so the
+ * running call, if it then waits, is among them.  A ring of an end with no
+ * call in progress wakes nobody.
+ */
+static void
+ring_end(party_t *p)
+{
+	wake_asleep(p);
+	if (p->run != NO_CALLER)
+		p->bell = 1;
+}
+
 static void
 writer_done(world_t *wd, int w, int depth, int64_t result)
 {
@@ -655,9 +800,6 @@ writer_done(world_t *wd, int w, int depth, int64_t result)
 	if (result >= 0 && (uint64_t)result != ws->len && !sc->nonblock &&
 	    ws->readers != 0 && !ws->lost)
 		fail(depth, "PI3", "a blocking write returned short");
-	if (result > 0)
-		wd->written[w] = wd->w[w].base + (uint64_t)result;
-	wd->w[w].state = IDLE;
 }
 
 /* Whether every byte published has been claimed. */
@@ -675,13 +817,10 @@ all_taken(const world_t *wd)
 static void
 reader_done(world_t *wd, int r, int depth, int64_t result)
 {
-	party_t *p = &wd->r[r];
-
 	if (wd->quit[r]) {
 		if (result != 0)
 			fail(depth, "PI2", "a read of 0 bytes returned something");
 		wd->quit[r] = 0;
-		p->state = IDLE;
 		return;
 	}
 	if (result > 0 && wd->eof[r])
@@ -702,9 +841,56 @@ reader_done(world_t *wd, int r, int depth, int64_t result)
 		fail(depth, "PI2", "a read failed with another error");
 	if (result > 0)
 		wd->received[r] += (uint64_t)result;
-	p->state = wd->eof[r] >= 2 || result == -EIO ? ENDED : IDLE;
+	if (wd->eof[r] >= 2 || result == -EIO)
+		wd->over[r] = 1;
+}
+
+/*
+ * The running call returns its result (DONE) or waits (WAIT), and its
+ * caller lets go of the end.  As liberx's read and write loops do, a run
+ * that set wake_local first wakes the end's other waiting calls; a caller
+ * that waits then joins the end's waiters, and one rung during its run
+ * wakes at once.  An end with no call left in progress is idle, or ended
+ * once its reads are over.
+ */
+static void
+run_ends(world_t *wd, party_t *p, bool waits)
+{
+	bool writer, local;
+	int i = party_index(wd, p, &writer), c;
+
+	local = writer ? wd->ws[i].wake_local : wd->rs[i].wake_local;
+	if (local)
+		wake_asleep(p);
+	p->call[p->run] = !waits ? C_IDLE : p->bell ? C_READY : C_ASLEEP;
+	p->run = NO_CALLER;
+	p->bell = 0;
+	p->steps = 0;
+	p->decided = 0;
+	memset(&p->act, 0, sizeof(p->act));
+	for (c = 0; c < CALLERS_MAX; c++)
+		if (p->call[c] != C_IDLE)
+			return;
+	p->state = !writer && wd->over[i] ? ENDED : IDLE;
 	if (p->state == ENDED)
 		p->reports = 0;
+}
+
+/*
+ * The end closes (CLOSED) or its holder dies in a call (DEAD): no call of
+ * it acts again and its executor applies nothing; only the stores still
+ * in its buffer land.
+ */
+static void
+end_goes(party_t *p, uint8_t state)
+{
+	p->state = state;
+	p->reports = 0;
+	p->run = NO_CALLER;
+	p->bell = 0;
+	p->decided = 0;
+	memset(p->call, C_IDLE, sizeof(p->call));
+	memset(&p->act, 0, sizeof(p->act));
 }
 
 /* The write end whose lane is read end r's lane at, or a failure. */
@@ -716,13 +902,16 @@ lane_writer(const world_t *wd, int r, int depth, uint32_t at)
 	return ((int)wd->lane[r][at].wend - 1);
 }
 
-/* A record's model entry at lane position pos, or NULL past the model's. */
+/* The model's entry of the record write end w wrote at lane position pos, or NULL. */
 static ghost_t *
 ghost(world_t *wd, int w, uint64_t pos)
 {
-	if (pos % SPAN != 0 || pos / SPAN >= RECS_MAX)
-		return (NULL);
-	return (&wd->rec[w][pos / SPAN]);
+	int k;
+
+	for (k = 0; k < wd->nrec[w]; k++)
+		if (wd->rec[w][k].pos == pos)
+			return (&wd->rec[w][k]);
+	return (NULL);
 }
 
 /*
@@ -747,7 +936,7 @@ claim(world_t *wd, int r, int w, int depth, const erx_pipe_act_t *a)
 	if (n == 0 || a->n > g->len)
 		fail(depth, "PI4", "a claim outside its record");
 	if (wd->open_w != NO_REC && (wd->open_w != w ||
-	    wd->open_k != a->pos / SPAN))
+	    wd->open_k != g - wd->rec[w]))
 		fail(depth, "PI5", "a record partly read was split by another");
 	if (from != g->claimed || wd->taken[w] != g->off + from)
 		fail(depth, "PI5", "bytes claimed twice or skipped");
@@ -760,7 +949,7 @@ claim(world_t *wd, int r, int w, int depth, const erx_pipe_act_t *a)
 	g->claimed = (uint8_t)a->n;
 	wd->taken[w] += n;
 	wd->open_w = a->n < g->len ? (uint8_t)w : NO_REC;
-	wd->open_k = a->n < g->len ? (uint8_t)(a->pos / SPAN) : NO_REC;
+	wd->open_k = a->n < g->len ? (uint8_t)(g - wd->rec[w]) : NO_REC;
 	wd->pend_w[r] = (uint8_t)w;
 	wd->pend_off[r] = g->off + from;
 	wd->pend_n[r] = n;
@@ -770,13 +959,14 @@ claim(world_t *wd, int r, int w, int depth, const erx_pipe_act_t *a)
 static void
 retire(world_t *wd, int r, int w, int depth, const erx_pipe_act_t *a)
 {
-	const ghost_t *g = ghost(wd, w, a->value - SPAN);
+	const ghost_t *g;
 
 	if (wd->hostile)
 		return;
-	if (a->value != load(wd, &wd->r[r], L_RPOS, (uint8_t)w) + SPAN)
+	g = ghost(wd, w, load(wd, &wd->r[r], L_RPOS, (uint8_t)w));
+	if (g == NULL || a->value != g->pos + erx_ring_span(g->len))
 		fail(depth, "PI5", "rpos moved by other than one record");
-	if (g == NULL || g->claimed != g->len || g->len == 0)
+	if (g->claimed != g->len || g->len == 0)
 		fail(depth, "PI5", "a record retired with bytes unclaimed");
 	if (wd->mem.owner != 1u + wd->rs[r].rix)
 		fail(depth, "PI5", "a record retired outside the reader lock");
@@ -787,7 +977,7 @@ copy_data(world_t *wd, int r, int w, int depth, const erx_pipe_act_t *a)
 {
 	uint64_t i;
 
-	if (a->off + a->n > sc->read_len || a->n == 0 || a->n > CHUNK)
+	if (a->off + a->n > sc->read_len || a->n == 0 || a->n > chunk())
 		fail(depth, "PI4", "a copy outside the lane or the buffer");
 	if (wd->hostile)
 		return;
@@ -804,29 +994,39 @@ static void
 write_rec(world_t *wd, int w, int depth, const erx_pipe_act_t *a)
 {
 	party_t *p = &wd->w[w];
-	ghost_t *g = ghost(wd, w, a->pos);
+	const uint64_t off = p->base + a->off;
+	const uint8_t k = wd->nrec[w];
+	ghost_t *g;
 	store_t *s;
 	uint64_t i;
 
-	if (a->n == 0 || a->n > CHUNK || a->off + a->n > wd->ws[w].len ||
+	if (a->n == 0 || a->n > chunk() || a->off + a->n > wd->ws[w].len ||
 	    a->pos % GRAIN != 0)
 		fail(depth, "PI4", "a record outside the chunk or the buffer");
-	if (g == NULL && !wd->hostile)
+	if (k == RECS_MAX && !wd->hostile)
 		fail(depth, "model", "a write end wrote more records than RECS_MAX");
-	if (g != NULL)
+	if (k < RECS_MAX) {
+		g = &wd->rec[w][k];
 		*g = (ghost_t){ .flags = G_WRITTEN, .len = (uint8_t)a->n,
-		    .off = (uint16_t)(p->base + a->off) };
-	if (g != NULL)
+		    .off = (uint16_t)off, .pos = (uint16_t)a->pos };
 		memcpy(g->after, wd->before[w], sizeof(g->after));
-	s = push(p, L_AREA, (uint8_t)w, false, PLAIN, a->pos / SPAN);
+		wd->nrec[w]++;
+	}
+	/* streamed counts the end's bytes in records, from which the next call starts. */
+	wd->streamed[w] += a->n;
+	s = push(p, L_AREA, (uint8_t)w, false, PLAIN, k);
+	s->header = 1;
 	s->slot = (uint8_t)((a->pos % RING) / GRAIN);
 	put_le(s->bytes, a->n, 4);
 	put_le(s->bytes + 4, ERX_REC_DATA, 4);
 	put_le(s->bytes + 8, a->value, 8);
-	s = push(p, L_AREA, (uint8_t)w, false, PLAIN, 0);
-	s->slot = (uint8_t)(((a->pos + GRAIN) % RING) / GRAIN);
-	for (i = 0; i < a->n; i++)
-		s->bytes[i] = pattern(w, p->base + a->off + i);
+	for (i = 0; i < a->n; i++) {
+		if (i % GRAIN == 0) {
+			s = push(p, L_AREA, (uint8_t)w, false, PLAIN, k);
+			s->slot = (uint8_t)(((a->pos + GRAIN + i) % RING) / GRAIN);
+		}
+		s->bytes[i % GRAIN] = pattern(w, off + i);
+	}
 }
 
 /* Rings every read end whose bit is in bits. */
@@ -837,7 +1037,7 @@ ring_readers(world_t *wd, uint64_t bits)
 
 	for (r = 0; r < sc->nr; r++)
 		if ((bits & UINT64_C(1) << wd->rs[r].rix) != 0)
-			wd->r[r].bell = 1;
+			ring_end(&wd->r[r]);
 }
 
 /* Write end w reads its stamp: the records published so far precede it. */
@@ -863,9 +1063,8 @@ wperform(world_t *wd, int w, int depth, const erx_pipe_act_t *a)
 
 	switch (a->op) {
 	case ERX_PIPE_OP_DONE:
-		p->steps = 0;
 		writer_done(wd, w, depth, a->result);
-		return;
+		break;
 	case ERX_PIPE_OP_CLOCK:
 		p->in.value = sc->clock ? ++wd->now : 0;
 		stamped(wd, w);
@@ -895,8 +1094,9 @@ wperform(world_t *wd, int w, int depth, const erx_pipe_act_t *a)
 		ring_readers(wd, a->value);
 		break;
 	case ERX_PIPE_OP_WAIT:
-		p->bell = 0;
-		p->steps = 0;
+		/* What the call published is written; the fresh call writes the rest. */
+		p->left[p->run] -= (uint32_t)wd->ws[w].done;
+		p->wait_span[p->run] = (uint32_t)erx_ring_span(wd->ws[w].rec);
 		break;
 	default:
 		fail(depth, "PI4", "a writer asked for a reader's action");
@@ -917,9 +1117,8 @@ rperform(world_t *wd, int r, int depth, const erx_pipe_act_t *a)
 		w = (uint8_t)lane_writer(wd, r, depth, a->lane);
 	switch (a->op) {
 	case ERX_PIPE_OP_DONE:
-		p->steps = 0;
 		reader_done(wd, r, depth, a->result);
-		return;
+		break;
 	case ERX_PIPE_OP_CLOCK:
 		p->in.value = sc->clock ? ++wd->now : 0;
 		break;
@@ -1000,11 +1199,15 @@ rperform(world_t *wd, int r, int depth, const erx_pipe_act_t *a)
 		ring_readers(wd, a->value);
 		break;
 	case ERX_PIPE_OP_RING_WRITER:
-		wd->w[w].bell = 1;
+		ring_end(&wd->w[w]);
 		break;
 	case ERX_PIPE_OP_WAIT:
-		p->bell = 0;
-		p->steps = 0;
+		/*
+		 * rpos is already past what the read copied, and the fresh
+		 * call, or the session's pipe NIF's would_block, drops it.
+		 */
+		if (wd->rs[r].done > 0)
+			fail(depth, "PI5", "a read waits with bytes copied (they are lost)");
 		break;
 	case ERX_PIPE_OP_DRAINED:
 		if (!gone(&wd->w[w]) || wd->drained[r][w]++ != 0 ||
@@ -1034,8 +1237,10 @@ perform(world_t *wd, party_t *p, int depth)
 		wperform(wd, i, depth, &a);
 	else
 		rperform(wd, i, depth, &a);
-	if (a.op == ERX_PIPE_OP_DONE)
+	if (a.op == ERX_PIPE_OP_DONE || a.op == ERX_PIPE_OP_WAIT) {
+		run_ends(wd, p, a.op == ERX_PIPE_OP_WAIT);
 		return;
+	}
 	if (p->steps > STEPS_MAX)
 		fail(depth, "PI4", "a step loops without waiting or ending");
 	p->decided = 0;
@@ -1078,7 +1283,7 @@ rewrite(world_t *wd, int k)
 			return (true);
 		case 3: m->cur = 1; m->cur_off = 200; m->cur_pos = l->rpos;
 			return (true);
-		case 4: m->cur = 1; m->cur_pos = l->rpos - SPAN; return (true);
+		case 4: m->cur = 1; m->cur_pos = l->rpos - 2 * GRAIN; return (true);
 		case 5: m->cur = 7; return (true);
 		case 6: m->wends = 9; return (true);
 		case 7: m->waiters = UINT64_MAX; return (true);
@@ -1102,10 +1307,11 @@ successor(int depth, const char *what, int who)
 /*
  * Whether the party's pending action touches only its own state: a store
  * into its own buffer (a flush is what others see), a fence with the
- * buffer drained, or a clock that reads 0.  Performed at once or later,
- * such an action leaves every other party's view the same, so the model
- * performs it at once, except for a party that may die, whose death
- * between two stores leaves one of them unmade.
+ * buffer drained, a clock that reads 0, or a wait, which only lets go of
+ * the end: a ring before it reaches the call as surely as one after.
+ * Performed at once or later, such an action leaves every other party's
+ * view the same, so the model performs it at once, except for a party
+ * that may die, whose death between two stores leaves one of them unmade.
  */
 static bool
 local_act(const world_t *wd, const party_t *p)
@@ -1113,14 +1319,15 @@ local_act(const world_t *wd, const party_t *p)
 	bool writer;
 	int i = party_index(wd, p, &writer);
 
-	if (i == 0 && ((writer && sc->writer_dies) ||
-	    (!writer && sc->reader_dies)))
+	if (may_die(wd, p))
 		return (false);
 	switch (p->act.op) {
 	case ERX_PIPE_OP_CLOCK:
 		return (!sc->clock);
 	case ERX_PIPE_OP_FENCE:
 		return (p->nbuf == 0);
+	case ERX_PIPE_OP_WAIT:
+		return (true);
 	/*
 	 * Under the reader lock, rpos and the current record change only by
 	 * the holder's own stores: the last holder's landed before its
@@ -1135,20 +1342,42 @@ local_act(const world_t *wd, const party_t *p)
 	case ERX_PIPE_OP_COPY_WENDS:
 		return (!sc->joins && sc->hostile == 0);
 	default:
-		return (stores_of(p->act.op) != 0 &&
-		    p->nbuf + stores_of(p->act.op) <= BUFFERED_MAX);
+		return (stores_of(&p->act) != 0 &&
+		    p->nbuf + stores_of(&p->act) <= BUFFERED_MAX);
 	}
+}
+
+/*
+ * Whether the end's one caller, woken, takes the free end at once: with
+ * no other caller to race it for the end and no report to land first,
+ * when it does so is not a choice.
+ * The session's pipe NIF's end instead chooses how it calls again.
+ */
+static bool
+lone_ready(const world_t *wd, const party_t *p)
+{
+	bool writer;
+
+	(void)party_index(wd, p, &writer);
+	return (p->run == NO_CALLER && callers(wd, p) == 1 &&
+	    p->call[0] == C_READY && !(sc->nif && !writer) && p->reports == 0);
+}
+
+/* Adds what party i (write ends first, then read ends) did at once to the event's trace line. */
+static void
+note(int depth, int i, const char *what)
+{
+	size_t n = strlen(trace[depth]);
+
+	snprintf(trace[depth] + n, sizeof(trace[0]) - n, "; %c%d %s",
+	    i < NW_MAX ? 'W' : 'R', i < NW_MAX ? i : i - NW_MAX, what);
 }
 
 /* Performs a party's action at once, adding it to the event's trace line. */
 static void
 perform_shown(world_t *wd, party_t *p, int i, int depth)
 {
-	size_t n = strlen(trace[depth]);
-
-	snprintf(trace[depth] + n, sizeof(trace[0]) - n, "; %c%d %s",
-	    i < NW_MAX ? 'W' : 'R', i < NW_MAX ? i : i - NW_MAX,
-	    op_names[p->act.op]);
+	note(depth, i, op_names[p->act.op]);
 	perform(wd, p, depth);
 }
 
@@ -1172,7 +1401,14 @@ advance(world_t *wd, int depth)
 
 	for (i = 0; i < NW_MAX + NR_MAX; i++) {
 		p = i < NW_MAX ? &wd->w[i] : &wd->r[i - NW_MAX];
-		while (p->state == CALL && p->reports == 0) {
+		for (;;) {
+			if (lone_ready(wd, p)) {
+				note(depth, i, "takes the end");
+				take(wd, p, 0);
+				continue;
+			}
+			if (p->run == NO_CALLER || p->reports != 0)
+				break;
 			if (!p->decided && p->act.op == ERX_PIPE_OP_COPY_WENDS &&
 			    sc->joins && !wd->joined)
 				break;
@@ -1241,7 +1477,9 @@ readings_of(world_t *wd, uint64_t (*f)(uint64_t))
 	wd->now = (uint16_t)f(wd->now);
 	for (i = 0; i < NW_MAX; i++) {
 		wd->ws[i].stamp = f(wd->ws[i].stamp);
-		for (k = 0; k < (int)SLOTS; k += 2) {
+		for (k = 0; k < (int)SLOTS; k++) {
+			if (wd->head[i][k] == 0)
+				continue;
 			h = &wd->mem.lane[i].area[k * GRAIN];
 			put_le(h + 8, f(get_le(h, 8, 8)), 8);
 		}
@@ -1269,7 +1507,7 @@ readings_of(world_t *wd, uint64_t (*f)(uint64_t))
 		if (!p->decided && p->act.op == ERX_PIPE_OP_COPY_REC)
 			p->in.stamp = f(p->in.stamp);
 		for (j = 0; j < p->nbuf; j++)
-			if (p->buf[j].loc == L_AREA && p->buf[j].slot % 2 == 0)
+			if (p->buf[j].loc == L_AREA && p->buf[j].header)
 				put_le(p->buf[j].bytes + 8,
 				    f(get_le(p->buf[j].bytes, 8, 8)), 8);
 	}
@@ -1293,18 +1531,16 @@ static void
 forget(world_t *wd)
 {
 	const party_t *p;
-	int i, j, k, top;
+	const ghost_t *g;
+	int i, j;
 
 	for (i = 0; i < NW_MAX; i++) {
 		wd->ws[i].stamp = 0;
-		for (j = 0; j < (int)SLOTS; j += 2) {
-			/* The newest record whose header landed in slot j. */
-			for (k = top = -1; ++k < RECS_MAX;)
-				if (k * SPAN % RING == (unsigned)j * GRAIN &&
-				    (wd->rec[i][k].flags & G_LANDED) != 0)
-					top = k;
-			if (top >= 0 && (uint64_t)(top + 1) * SPAN <=
-			    wd->mem.lane[i].rpos)
+		for (j = 0; j < (int)SLOTS; j++) {
+			if (wd->head[i][j] == 0)
+				continue;
+			g = &wd->rec[i][wd->head[i][j] - 1];
+			if (g->pos + erx_ring_span(g->len) <= wd->mem.lane[i].rpos)
 				put_le(&wd->mem.lane[i].area[j * GRAIN + 8], 0, 8);
 		}
 	}
@@ -1345,11 +1581,18 @@ visit(int depth)
 		explore(depth);
 }
 
+/* Whether every call in progress on the end is asleep: none runs, none is woken. */
 static bool
 asleep(const party_t *p)
 {
-	return (p->state == CALL && p->decided && p->bell == 0 &&
-	    p->act.op == ERX_PIPE_OP_WAIT);
+	int c;
+
+	if (p->state != CALL || p->run != NO_CALLER)
+		return (false);
+	for (c = 0; c < CALLERS_MAX; c++)
+		if (p->call[c] == C_READY)
+			return (false);
+	return (true);
 }
 
 /* A state from which no event follows must have every call finished. */
@@ -1407,7 +1650,7 @@ check_asleep(int depth)
 	const erx_pipe_rlane_t *l;
 	const party_t *p;
 	bool data;
-	int i, j, w;
+	int c, i, j, w;
 
 	if (sc->hostile != 0)
 		return;
@@ -1429,12 +1672,13 @@ check_asleep(int depth)
 	}
 	for (i = 0; i < sc->nw; i++) {
 		p = &wd->w[i];
-		if (!asleep(p) || !quiet(wd, p))
+		if (!asleep(p) || !quiet(wd, p) || wd->ws[i].readers == 0 ||
+		    wd->ws[i].lost)
 			continue;
-		if (wd->ws[i].readers != 0 && !wd->ws[i].lost &&
-		    erx_ring_room(RING, wd->ws[i].wpos, wd->mem.lane[i].rpos) >=
-		    erx_ring_span(wd->ws[i].rec))
-			fail(depth, "PI7", "a writer sleeps with room free (a lost wakeup)");
+		for (c = 0; c < CALLERS_MAX; c++)
+			if (p->call[c] == C_ASLEEP && erx_ring_room(RING,
+			    wd->ws[i].wpos, wd->mem.lane[i].rpos) >= p->wait_span[c])
+				fail(depth, "PI7", "a writer sleeps with room free (a lost wakeup)");
 	}
 }
 
@@ -1473,23 +1717,6 @@ check_idle(int depth)
 	}
 }
 
-/*
- * A read waits only with nothing copied: rpos is already past what it
- * copied, and the session's pipe NIF answers a wait with would_block and
- * drops its buffer, so a wait with bytes copied loses them.
- */
-static void
-check_wait_empty(int depth)
-{
-	const world_t *wd = &worlds[depth];
-	int i;
-
-	for (i = 0; i < sc->nr; i++)
-		if (wd->r[i].state == CALL && wd->r[i].decided &&
-		    wd->r[i].act.op == ERX_PIPE_OP_WAIT && wd->rs[i].done > 0)
-			fail(depth, "PI5", "a read waits with bytes copied (they are lost)");
-}
-
 /* Posts report bits to every living read end. */
 static void
 tell_readers(world_t *wd, uint16_t bits)
@@ -1501,12 +1728,38 @@ tell_readers(world_t *wd, uint16_t bits)
 			wd->r[r].reports |= bits;
 }
 
-/* Read end r's executor applies one report; each wakes the end. */
+/* The write end whose going report bit is, or -1 for another report. */
+static int
+wgone_of(uint16_t bit)
+{
+	int w;
+
+	for (w = 0; w < NW_MAX; w++)
+		if (bit == REP_WGONE(w))
+			return (w);
+	return (-1);
+}
+
+/*
+ * Whether read end r's executor can apply report bit yet, in its
+ * channel's order: a write end's going travels after that end's stores,
+ * and after its join's report.
+ */
 static bool
+report_due(const world_t *wd, int r, uint16_t bit)
+{
+	int w = wgone_of(bit);
+
+	return (w < 0 || (wd->w[w].nbuf == 0 &&
+	    (wd->r[r].reports & REP_JOIN) == 0));
+}
+
+/* Read end r's executor applies one report that is due; each wakes the end. */
+static void
 rapply(world_t *wd, int r, uint16_t bit)
 {
 	erx_pipe_rstate_t *rs = &wd->rs[r];
-	int w;
+	int w = wgone_of(bit);
 
 	if (bit == REP_JOIN) {
 		w = sc->nw - 1;
@@ -1516,20 +1769,13 @@ rapply(world_t *wd, int r, uint16_t bit)
 		rs->known = (uint32_t)sc->nw;
 	} else if (bit == REP_LOST) {
 		rs->lost = true;
-	} else if (bit < REP_RGONE(0)) {
-		/* A write end's going travels after its stores, and after
-		 * its join's report, on one channel. */
-		for (w = 0; REP_WGONE(w) != bit; w++)
-			;
-		if (wd->w[w].nbuf != 0 || (wd->r[r].reports & REP_JOIN) != 0)
-			return (false);
+	} else if (w >= 0) {
 		for (uint32_t at = 0; at < rs->nlanes; at++)
 			if (wd->lane[r][at].wend == (uint32_t)w + 1)
 				wd->lane[r][at].writer = ERX_PIPE_WRITER_GONE;
 	}
 	wd->r[r].reports &= (uint16_t)~bit;
-	wd->r[r].bell = 1;
-	return (true);
+	ring_end(&wd->r[r]);
 }
 
 /* Write end w's executor applies one report; each wakes the end. */
@@ -1541,7 +1787,7 @@ wapply(world_t *wd, int w, uint16_t bit)
 	else
 		wd->ws[w].readers--;
 	wd->w[w].reports &= (uint16_t)~bit;
-	wd->w[w].bell = 1;
+	ring_end(&wd->w[w]);
 }
 
 /* The events of the holders' own: steps, actions, flushes. */
@@ -1550,15 +1796,31 @@ explore_parties(int depth)
 {
 	world_t *cur = &worlds[depth], *nw;
 	party_t *p;
-	int events = 0, i, j;
+	int c, events = 0, i, j;
 
 	for (i = 0; i < NW_MAX + NR_MAX; i++) {
 		bool writer = i < NW_MAX;
 		int k = writer ? i : i - NW_MAX;
 
 		p = writer ? &cur->w[k] : &cur->r[k];
+		/*
+		 * Of two callers ready, either may take the free end first; a
+		 * lone one takes it as an event while a report may land first.
+		 */
+		for (c = 0; p->run == NO_CALLER && c < callers(cur, p); c++) {
+			if (p->call[c] != C_READY || lone_ready(cur, p) ||
+			    (callers(cur, p) == 1 && sc->nif && !writer))
+				continue;
+			nw = successor(depth, "", -1);
+			snprintf(trace[depth + 1], sizeof(trace[0]),
+			    "%c%d takes the end for caller %d", writer ? 'W' : 'R',
+			    k, c);
+			take(nw, writer ? &nw->w[k] : &nw->r[k], c);
+			visit(depth + 1);
+			events++;
+		}
 		/* The step decides apart from the action, so reports land between. */
-		if (p->state == CALL && !p->decided) {
+		if (p->run != NO_CALLER && !p->decided) {
 			nw = successor(depth, writer ? "W step " : "R step ", k);
 			next_action(nw, writer ? &nw->w[k] : &nw->r[k]);
 			visit(depth + 1);
@@ -1591,33 +1853,76 @@ next_len(const world_t *wd, int w)
 	return (wd->writes[w] < WRITES_MAX ? writes[w][wd->writes[w]] : 0);
 }
 
+/*
+ * Caller c of the end starts a call of left bytes: it takes the end if no
+ * call holds it, and otherwise waits for the end's lock.  Taking a free
+ * end at once loses no order, since the other caller, if ready, may take
+ * the end in an event of its own before c starts.
+ */
+static void
+start_call(world_t *wd, party_t *p, int c, uint32_t left)
+{
+	p->left[c] = left;
+	p->state = CALL;
+	if (p->run == NO_CALLER)
+		take(wd, p, c);
+	else
+		p->call[c] = C_READY;
+}
+
+/* A successor in which caller c of the end starts a call, traced with what. */
+static world_t *
+call_event(int depth, const char *what, int i, int c)
+{
+	world_t *nw = successor(depth, "", -1);
+
+	snprintf(trace[depth + 1], sizeof(trace[0]), "%c%d %s%s",
+	    i < NW_MAX ? 'W' : 'R', i < NW_MAX ? i : i - NW_MAX, what,
+	    c == 0 ? "" : " (caller 1)");
+	return (nw);
+}
+
+/*
+ * The going of an end the pipe server must handle; the ended server
+ * handles none after the pipe's loss.
+ */
+static void
+tell_gone(world_t *wd, bool writer, int i)
+{
+	if (wd->lost)
+		return;
+	if (writer)
+		tell_readers(wd, (uint16_t)REP_WGONE(i));
+	else
+		wd->going |= (uint8_t)(1u << i);
+}
+
 /* The writers' calls, closes and deaths, and their reports applied. */
 static int
 explore_writers(int depth)
 {
 	world_t *cur = &worlds[depth], *nw;
-	int events = 0, w, b;
+	int c, events = 0, w, b;
 
 	for (w = 0; w < sc->nw; w++) {
 		const party_t *p = &cur->w[w];
 
-		if (p->state == IDLE && next_len(cur, w) != 0) {
-			nw = successor(depth, "W write ", w);
-			erx_pipe_wstart(&nw->ws[w], next_len(nw, w));
+		for (c = 0; alive(p) && c < callers(cur, p) &&
+		    next_len(cur, w) != 0; c++) {
+			if (p->call[c] != C_IDLE)
+				continue;
+			nw = call_event(depth, "write", w, c);
+			start_call(nw, &nw->w[w], c, next_len(nw, w));
 			nw->writes[w]++;
-			nw->w[w].base = nw->written[w];
-			nw->w[w].state = CALL;
-			next_action(nw, &nw->w[w]);
 			visit(depth + 1);
 			events++;
 		}
 		if ((p->state == IDLE && next_len(cur, w) == 0) ||
-		    (sc->writer_dies && w == 0 && p->state == CALL)) {
+		    (may_die(cur, p) && p->state == CALL)) {
 			nw = successor(depth, p->state == IDLE ? "W close " :
 			    "W dies ", w);
-			nw->w[w].state = p->state == IDLE ? CLOSED : DEAD;
-			nw->w[w].reports = 0;
-			tell_readers(nw, (uint16_t)REP_WGONE(w));
+			end_goes(&nw->w[w], p->state == IDLE ? CLOSED : DEAD);
+			tell_gone(nw, true, w);
 			visit(depth + 1);
 			events++;
 		}
@@ -1638,19 +1943,20 @@ static int
 explore_readers(int depth)
 {
 	world_t *cur = &worlds[depth], *nw;
-	int events = 0, r, b, k, w;
+	int c, events = 0, r, b, k, w;
 
 	for (r = 0; r < sc->nr; r++) {
 		const party_t *p = &cur->r[r];
+		const bool bounded = r == 0 && calls_max != 0 &&
+		    cur->calls == calls_max;
 
-		if (p->state == IDLE && !(r == 0 && calls_max != 0 &&
-		    cur->calls == calls_max)) {
-			nw = successor(depth, "R read ", r);
+		for (c = 0; alive(p) && !cur->over[r] && !bounded &&
+		    c < callers(cur, p); c++) {
+			if (p->call[c] != C_IDLE)
+				continue;
+			nw = call_event(depth, "read", NW_MAX + r, c);
 			nw->calls += r == 0 && calls_max != 0;
-			erx_pipe_rstart(&nw->rs[r], sc->read_len);
-			nw->r[r].base = nw->received[r];
-			nw->r[r].state = CALL;
-			next_action(nw, &nw->r[r]);
+			start_call(nw, &nw->r[r], c, sc->read_len);
 			visit(depth + 1);
 			events++;
 		}
@@ -1658,44 +1964,40 @@ explore_readers(int depth)
 		 * The session's pipe NIF does not sleep at a wait: it returns,
 		 * and its owner calls again, on a ring or a stray message,
 		 * or, once its wait times out, with a read of 0 bytes.
-		 * Either call starts the read afresh while the wait is still
-		 * in progress.
+		 * Either call starts the read afresh, woken or not.
 		 */
-		if (sc->nif && p->state == CALL && p->decided &&
-		    p->act.op == ERX_PIPE_OP_WAIT) {
+		if (sc->nif && alive(p) && (p->call[0] == C_ASLEEP ||
+		    p->call[0] == C_READY)) {
 			for (k = 0; k < 2; k++) {
 				nw = successor(depth, k == 0 ? "R reads again " :
 				    "R gives up its wait ", r);
-				erx_pipe_rstart(&nw->rs[r], k == 0 ? sc->read_len : 0);
 				nw->quit[r] = k == 1;
-				nw->r[r].steps = 0;
-				next_action(nw, &nw->r[r]);
+				nw->r[r].left[0] = k == 0 ? sc->read_len : 0;
+				take(nw, &nw->r[r], 0);
 				visit(depth + 1);
 				events++;
 			}
 		}
 		if ((r == 0 && ((sc->reader_closes && p->state == IDLE &&
-		    cur->eof[r] == 0) || (sc->reader_dies && p->state == CALL))) ||
-		    (r == 0 && p->state == IDLE && calls_max != 0 &&
-		    cur->calls == calls_max)) {
+		    cur->eof[r] == 0) || (may_die(cur, p) && p->state == CALL))) ||
+		    (bounded && p->state == IDLE)) {
 			nw = successor(depth, p->state == IDLE ? "R close " :
 			    "R dies ", r);
-			nw->r[r].state = p->state == IDLE ? CLOSED : DEAD;
-			nw->r[r].reports = 0;
-			nw->going |= (uint8_t)(1u << r);
+			end_goes(&nw->r[r], p->state == IDLE ? CLOSED : DEAD);
+			tell_gone(nw, false, r);
 			/* A co-reader that closes leaves its stream to the others. */
 			nw->cut |= p->state == CALL || sc->nr == 1;
 			visit(depth + 1);
 			events++;
 		}
 		for (b = 0; alive(p) && b < 16; b++) {
-			if ((p->reports & 1u << b) == 0)
+			if ((p->reports & 1u << b) == 0 ||
+			    !report_due(cur, r, (uint16_t)(1u << b)))
 				continue;
 			nw = successor(depth, "R applies a report ", r);
-			if (rapply(nw, r, (uint16_t)(1u << b))) {
-				visit(depth + 1);
-				events++;
-			}
+			rapply(nw, r, (uint16_t)(1u << b));
+			visit(depth + 1);
+			events++;
 		}
 	}
 	/*
@@ -1748,9 +2050,15 @@ explore_server(int depth)
 		visit(depth + 1);
 		events++;
 	}
+	/*
+	 * The pipe server ends (pipe_server_lost): every end hears of it, and
+	 * the server handles no going from then on, so it frees no reader lock
+	 * a gone read end held.
+	 */
 	if (sc->lost && !cur->lost) {
 		nw = successor(depth, "the pipe is lost", -1);
 		nw->lost = 1;
+		nw->going = 0;
 		tell_readers(nw, REP_LOST);
 		for (w = 0; w < sc->nw; w++)
 			if (alive(&nw->w[w]))
@@ -1781,7 +2089,6 @@ explore(int depth)
 		fail(depth, "depth", "the model's depth bound was reached");
 	check_asleep(depth);
 	check_idle(depth);
-	check_wait_empty(depth);
 	events = explore_parties(depth);
 	events += explore_writers(depth);
 	events += explore_readers(depth);
@@ -1798,10 +2105,14 @@ start(world_t *wd)
 
 	memset(wd, 0, sizeof(*wd));
 	wd->open_w = wd->open_k = NO_REC;
+	for (w = 0; w < NW_MAX; w++)
+		wd->w[w].run = NO_CALLER;
+	for (r = 0; r < NR_MAX; r++)
+		wd->r[r].run = NO_CALLER;
 	wd->mem.wends = (uint32_t)(sc->joins ? sc->nw - 1 : sc->nw);
 	for (w = 0; w < sc->nw; w++) {
 		wd->ws[w].size = RING;
-		wd->ws[w].chunk = CHUNK;
+		wd->ws[w].chunk = chunk();
 		wd->ws[w].readers = sc->nr;
 		wd->ws[w].nonblock = sc->nonblock;
 		wd->w[w].state = sc->joins && w == sc->nw - 1 ? ABSENT : IDLE;

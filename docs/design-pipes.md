@@ -585,15 +585,15 @@ lock page's `owner` word:
    leaving its bit set until a call of the end holds the lock, which
    clears it ([Ends in `liberx`](#ends-in-liberx)). It waits even under `O_NONBLOCK`, as
    Linux waits for its pipe's mutex, since the lock is held only for a copy
-   or a redemption.
+   or a redemption. A read of a lost pipe takes no lock and fails with
+   `EIO`, since the ended pipe server frees no lock a gone read end held.
 2. **Bring the lane set up to date.** Under the end's lock it takes the
    changes the event executor applied from the handler's reports: a lane
    that joined, which it maps if it has not yet; a writer that is gone,
    whose lane it will drain; and a lane it found broken whose writer is
    gone, which it unmaps and closes, sending the handler
    `{drained, Pipe, End, Writer}` once, as step 4 does for a lane it finds
-   empty after its writer went. A lost pipe fails the read with
-   `EIO`.
+   empty after its writer went.
 3. **Settle the current record** as [The lock page](#the-lock-page) says:
    the read continues it from `cur_off`, or retires it, or finds none.
 4. **Pick the next record.** Otherwise, for every lane it holds, it copies
@@ -714,8 +714,11 @@ number stored in `wends` before its holder could run, so before the later
 record existed; a reader that sees the later record has acquired its
 lane's `wpos`, so its copy of `wends` reaches the earlier write end, and it
 picks only once it holds that lane, which it then loads with every lane it
-found empty; so it finds the earlier record whenever it finds the later
-one. A raised stamp stays below the stamp of every write made after its
+found empty; so a first look that finds the later record is followed by
+a second look that finds the earlier one. A second look can find a later
+record and miss the earlier one, but only after the first look found some
+record, and that record's key is below the later record's stamp, so the
+later record is not picked; the next pick looks at every lane again. A raised stamp stays below the stamp of every write made after its
 record was published, since the reader read the clock before a copy that
 did not yet see the record, so writes that happened one after the other
 keep their order.
