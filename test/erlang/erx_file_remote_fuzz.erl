@@ -36,7 +36,7 @@
 %% erx_9p_grammar's errors: one it drops makes the model and the client disagree.
 -define(ERRORS, [enoent, eacces, eperm, eexist, enotdir, eisdir, enotempty, erofs, enospc,
                  efbig, einval, ebadf, emfile, enfile, eio, enametoolong, enotsup, eloop,
-                 enxio, exdev, enomem, eagain, enodata, erange, enolck]).
+                 enxio, exdev, enomem, eagain, enodata, erange, enolck, ebusy]).
 -define(OUTCOMES, [ok, enoent, enotdir, server, malformed, past_a_file, later_chunk_ok,
                    later_chunk_stop]).
 -define(EXCHANGES, 20000).

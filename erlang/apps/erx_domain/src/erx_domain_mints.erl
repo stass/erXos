@@ -161,15 +161,18 @@ service's name, its server row and the grant's limits. A grantee
 {template, T} grants each session made from template T. Files names the
 services of the files interface, whose grants a namespace mounts; none by
 default. A grant of a
-service its server does not declare, a grant to its own server, or two
-grants of one name to one grantee is a bug of the caller, which the manifest
-check rules out, and fails with badarg.
+service its server does not declare, a grant to its own server, two
+grants of one name to one grantee, or a service whose server is no row (the
+system domain's, which the ready answers serve) is a bug of the caller,
+which the manifest check and the caller's filter rule out, and fails with
+badarg.
 """.
 -spec new(config()) -> state().
 new(#{services := Services, grants := Grants, owner := Owner} = Config) when is_function(Owner, 1) ->
     Declared = maps:groups_from_list(fun({Row, _}) -> Row end, fun({_, Name}) -> Name end, Services),
     Keys = [{Grantee, Name} || {Grantee, Name, _, _} <- Grants],
-    Valid = length(lists:usort(Keys)) =:= length(Grants)
+    Valid = lists:all(fun({Row, _Name}) -> is_integer(Row) andalso Row >= 0 end, Services)
+        andalso length(lists:usort(Keys)) =:= length(Grants)
         andalso lists:all(fun({Grantee, Name, Server, Limits}) ->
                                   Grantee =/= Server andalso is_map(Limits)
                                       andalso lists:member(Name, maps:get(Server, Declared, []))

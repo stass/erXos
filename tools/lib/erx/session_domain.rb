@@ -183,6 +183,11 @@ module Erx
     # session's /proc tree, its uptime line first.
     PROC_STATUS = "cat /proc/status\r"
     PROC_UPTIME = /\Auptime\t[0-9]+\tkernel\r*\n\z/n
+    # The start service's tree at root_1's command shell (docs/design-apps.md,
+    # "Interfaces"): root's template holds the apps grant, so rc.conf reads, and a ctl
+    # write naming no manifest row is refused with an errno.
+    APPS_RC_CONF = "cat /apps/rc.conf && echo apps-read\r"
+    APPS_CTL_REFUSED = "echo enable ghost > /apps/ctl || echo ctl-refused\r"
     # erx:i([]) at root_1's Erlang shell: the machine's record through the session's facet.
     MACHINE = "erx:i([]).\r"
     MACHINE_UPTIME = /\A +uptime +kernel +[0-9]+\r*\n\z/n
@@ -276,7 +281,9 @@ module Erx
        { name: 'session-top', pattern: TOP_FIRST, seconds: 60 }.freeze,
        { name: 'session-top-memory', pattern: TOP_MEMORY, seconds: 30 }.freeze,
        { name: 'session-top-budget', pattern: TOP_BUDGET, seconds: 30, type: PROC_STATUS }.freeze,
-       { name: 'session-proc-status', pattern: PROC_UPTIME, seconds: 60, type: ERL }.freeze,
+       { name: 'session-proc-status', pattern: PROC_UPTIME, seconds: 60, type: APPS_RC_CONF }.freeze,
+       { name: 'session-apps-rc-conf', pattern: line('apps-read'), seconds: 60, type: APPS_CTL_REFUSED }.freeze,
+       { name: 'session-apps-ctl-refused', pattern: line('ctl-refused'), seconds: 60, type: ERL }.freeze,
        shell.merge(name: 'root_1-erlang-shell', type: "node().\r").freeze,
        { name: 'root_1-node', pattern: answer('root_1@erxos'), seconds: 60, type: MACHINE }.freeze,
        { name: 'root_1-machine', pattern: MACHINE_UPTIME, seconds: 60, type: PROGRAM_REFUSED }.freeze,

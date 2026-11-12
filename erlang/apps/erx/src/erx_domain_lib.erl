@@ -196,10 +196,11 @@ disconnect(Number) ->
 
 -doc """
 What the domain service reads of the system manifest at boot: the machine's
-host name, the configured domains, in row order, the services configured
-domains serve, each its server's row, its name and the abi/services number
-of the interface it serves (erx_abi.hrl's ERX_SERVICE_* macros, so a
-holder's driver-control facet is found by ?ERX_SERVICE_DRIVER_CONTROL),
+host name, the configured domains, in row order, the services, each its
+server, a configured domain's row or system, its name and the abi/services
+number of the interface it serves (erx_abi.hrl's ERX_SERVICE_* macros, so
+a holder's driver-control facet is found by ?ERX_SERVICE_DRIVER_CONTROL,
+and a files service the system domain serves by ?ERX_SERVICE_FILES),
 and the facet rows, each
 its grantee, a configured row, system, or {template, Template} for the
 sessions made from session template Template, the service's name, its server, a
@@ -207,7 +208,7 @@ configured row or system, and the grant's limits (docs/design-system.md,
 "Facets a configured domain serves").
 """.
 -spec configured() -> {ok, #{host := binary(), domains := [configured()],
-                             services := [{non_neg_integer(), atom(), non_neg_integer()}],
+                             services := [{non_neg_integer() | system, atom(), non_neg_integer()}],
                              grants := [{non_neg_integer() | system | {template, non_neg_integer()}, atom(),
                                          non_neg_integer() | system, map()}]}}
                     | error().

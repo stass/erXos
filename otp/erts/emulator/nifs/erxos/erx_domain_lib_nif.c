@@ -381,7 +381,8 @@ created_term(ErlNifEnv *env, const erx_dom_created_t *created)
 }
 
 /*
- * The services configured domains serve, [{ServerRow, Name, Interface}],
+ * The services, [{Server, Name, Interface}], Server a configured domain's
+ * row or, for a service the system domain serves, the atom system,
  * Interface the abi/services number of the interface it serves (an
  * ERX_SERVICE_* value), and the facet
  * rows, [{Grantee, Name, Server, Limits}], Grantee a configured row, the
@@ -391,7 +392,8 @@ created_term(ErlNifEnv *env, const erx_dom_created_t *created)
  * or, for a service the system domain serves, the atom system, and Limits
  * the grant's limits by name, each list in manifest order
  * (docs/design-system.md, "Facets a configured domain serves"). The
- * services list leaves out the system domain's own, which no mint serves.
+ * domain service hands only the configured domains' services to its mint
+ * core, and reads the system domain's for their interface.
  * A name is a checked identifier of at most 63 bytes from the manifest,
  * never from a request, so the atoms are bounded by the manifest's rows.
  */
@@ -407,11 +409,10 @@ served_terms(ErlNifEnv *env, ERL_NIF_TERM *services, ERL_NIF_TERM *grants)
 	*services = enif_make_list(env, 0);
 	for (index = lib->view.nservices; index-- > 0;) {
 		service = &lib->view.services[index];
-		if (service->server == ERX_MF_NONE)
-			continue;
+		server = service->server == ERX_MF_NONE ? atom(env, "system") : enif_make_uint(env, service->server);
 		name = enif_make_atom_len(env, service->name, service->name_len);
-		*services = enif_make_list_cell(env, enif_make_tuple3(env, enif_make_uint(env, service->server),
-		    name, enif_make_uint(env, service->interface)), *services);
+		*services = enif_make_list_cell(env, enif_make_tuple3(env, server, name,
+		    enif_make_uint(env, service->interface)), *services);
 	}
 	*grants = enif_make_list(env, 0);
 	for (index = lib->view.nfacets; index-- > 0;) {

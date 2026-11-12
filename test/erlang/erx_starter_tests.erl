@@ -287,7 +287,7 @@ a_failed_write_answers_its_error_and_changes_nothing(Setup) ->
             ok = wait_until(fun() -> rc_conf() =:= read end),
             %% The temporary file cannot be made.
             ok = file:make_dir(<<(rc_path(Setup))/binary, ".new">>),
-            ?assertMatch({error, _}, erx_starter:command({enable, <<"clock">>, #{}})),
+            ?assertMatch({error, {failed, _}}, erx_starter:command({enable, <<"clock">>, #{}})),
             ?assertEqual(none, run(<<"clock">>)),
             ?assertEqual({error, enoent}, file:read_file(rc_path(Setup))),
             ?assertEqual(none, started_within(?CLOCK, 200))

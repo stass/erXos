@@ -536,19 +536,37 @@ it; git history is the record of completed work.
   region of the device's record (made once, wrapped by `erx_memdraw:wrap/4`, never posted) and the mapping of an area
   into the DMA window, before the display driver.
 * [High] [design-apps.md](docs/design-apps.md): the code the design asks for, in the order
-  [Track A](docs/plan.md#track-a-apps) builds it. Built: the `start` rows and property 17's structural clauses;
+  [Track A](docs/plan.md#track-a-apps) builds it. Built: the `start` rows and property 17's structural clauses and
+  its planning clause (each enabled row's session planned by the domain library beside the configured domains);
   `erx_start_table` (`merge/3`, `rc.conf`'s and `ctl`'s parsers with their fuzz targets, `set/3`, the command check
   `apply_ctl/4`); `erx_starter` with its table, a supervisor and keeper per enabled row, and `rc.conf` read and
-  written under `/data`; `erx_domain:start_session/2` with `display` and `default_display`, and the session mark.
-  Not built: property 17's planner clause (the enabled rows' sessions planned beside the configured domains) and
-  the accepting path of its display check with its seeds once `abi/services` declares `windows`; the `apps` tree
-  and `service`; the session's default display handed on with the ready answer and its `display` variable
+  written under `/data`; the `apps` tree (`erx_starter_fs`), which a session mounts at `/apps`;
+  `erx_domain:start_session/2` with `display` and `default_display`, and the session mark.
+  Not built: the accepting path of property 17's display check with its seeds once `abi/services` declares
+  `windows`; `service` and
+  `/proc/apps`; the session's default display handed on with the ready answer and its `display` variable
   (design-apps.md, "Starting a session", step 3), which the domain service keeps in the session's record and
   hands to nothing; a row that names a display started only once that display's domain has reported ready
   ("Keeping a session"), which waits for a `windows` service to exist; the mint request
   `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint that matches the
   old shape (`erlang/apps/erx_storage/src/erx_lfs_mint.erl`, `erx_net_admit`); the reset count cleared by the first
   kept session.
+* [Low] The `apps` tree (`erx_starter_fs`) is served once `erx_starter` starts, after `erx_domain`, whose start
+  has the console ask for root's session: root's session gets `/apps` only because its boot outlasts the next
+  application's start. A session that reported ready before then has no `/apps` until it restarts. Serving the
+  start service's tree before the login (or the login after every application) makes it hold by construction.
+  The grants of `apps` also end with a crash of `erx_starter_sup` itself, or of the tree's grants supervisor,
+  and nothing grants a session no keeper kept (root's console session among them) a new one, as for every service
+  the system domain serves.
+* [Low] `apps` tree review residuals (A6, `erx_starter_fs`): the grant's heap bound in the development manifests
+  (131,072 words) is not sized against its fids, each open of `rc.conf` holding the text (up to 64 KiB) until its
+  clunk, so enough concurrent opens end the grant at its bound and the session has no `/apps` until it restarts;
+  each refused `ctl` write logs a line with no rate bound, so a session writing refused lines in a loop fills the
+  system log; and the QEMU checkpoint `session-apps-ctl-refused` (`tools/lib/erx/session_domain.rb`) passes on any
+  failed write, so it cannot tell the `einval` it expects from `eacces` or `eio` (the shell prints no errno);
+  `erx_start_table:ctl_errno/1` has a clause per refusal and no catch-all, but nothing checks it against
+  `ctl_error()` (no dialyzer runs), so a new refusal without a clause ends the session's grant on its first
+  write: returning the errno with the refusal from `apply_ctl/4` makes it hold by construction.
 * [Medium] `erx_starter:manifest_table/1`, which reads the start rows, the principals and each session template's
   grants from the system manifest, has no host test over a packed manifest with a `start` row; the QEMU suite of
   Track A's A8b is its first check. Its grants are every service a template is granted, not only `windows`
@@ -568,7 +586,6 @@ it; git history is the record of completed work.
   keeper already passes a map built elsewhere). Make it hold by construction: a separate entry for a start at a
   display (`start_session/3`, or `start_display_session`) that only the keeper calls, and `start_session/2`
   refusing both keys; start-display then becomes a call-site rule like start-callers.
-* [Low] `erx_starter_rc:read/0` treats `enoent` as a machine with no `rc.conf`. If the storage domain being down
 * [Medium] `erx_starter` review residuals (A5b): whether a held row changed rests on `erx_starter:kept/1` undoing
     `row/2` exactly, and no process test has a row with a display; comparing the stored `erx_starter_row:row()`
     with the one the table would start would make it hold by construction and delete both `kept/1`s.
@@ -584,17 +601,6 @@ it; git history is the record of completed work.
   or `disable` writes a file made from no settings over the real one once storage is back, losing its other
   settings. An absent `data` grant answers `eio` (`erx_path`), which is retried; check what a live but failing
   storage domain answers.
-  [Track A](docs/plan.md#track-a-apps) builds it. Built: the `start` row in `abi/manifest.txt` with property 17's
-  structural clauses and its planning clause (each enabled row's session planned by the domain library beside the
-  configured domains), `erx_domain:start_session/2`'s `display` and `default_display`, and the session mark. Not
-  built: the accepting path of property 17's display check with its seeds once `abi/services` declares `windows`;
-  `erx_starter` with a supervisor and keeper per enabled row; `erx_start_table:merge/3`; `rc.conf`'s and `ctl`'s
-  parsers with their fuzz targets; the `apps` tree and `service`; the session's default display handed on with the
-  ready answer and its `display` variable (design-apps.md, "Starting a session", step 3), which the domain service
-  keeps in the session's record (`start`) and hands to nothing; the mint request
-  `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint that matches the old
-  shape (`erlang/apps/erx_storage/src/erx_lfs_mint.erl`, `erx_net_admit`); the reset count cleared by the first kept
-  session.
 * [High] [design-display.md](docs/design-display.md): the code the design asks for that the tree does not have, in the
   order [Track D](docs/plan.md#track-d-windows-widgets-and-the-web) builds it. Nothing below is built; the cores named
   as landed are kept and changed as listed.
@@ -1250,7 +1256,7 @@ it; git history is the record of completed work.
   for every request it stops waiting on, or have each grant end unless the grantee claims
   it within the deadline.
 * [Medium] storage, `erx_lfs_mint` loop (`mint/3`): no host test drives the loop itself.
-  `test/erlang/erx_lfs_mint_tests.erl` covers `mint_request/3`, `grant_options/1` and the
+  `test/erlang/erx_lfs_mint_tests.erl` covers `mint_request/3`, `erx_fs_grants:grant_options/1` and the
   answers `grant/5` gives, refusals included, but not that the loop (`mint/3`,
   `mint_one/3`) sends each through `erx_facet:minted/2`; drive it with a stand-in of
   `erx_facet`, as the network mint's item below asks.

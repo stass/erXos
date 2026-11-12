@@ -356,4 +356,23 @@ facet inspect
   reductions 100000
   period_ns 1000000000
   max_heap_size 65536
+# apps: the start service's tree, /apps/ctl and /apps/rc.conf (docs/design-apps.md,
+# "Interfaces"), for each session made from root's template: one erx_fs grant served by
+# the system domain, bound to the session and ending with it, so it travels on the
+# session's system connection and takes none of max_connections. Its max_request is
+# files_max_frame_min (property 16), as for every files grant; a ctl write is one line of at most
+# 4 KiB and rc.conf at most 64 KiB, so in_flight is small; max_heap_size, in words
+# (1 MiB), bounds the grant's process, which holds rc.conf's text while it answers.
+service apps
+  server system
+  interface files
+facet apps
+  grantee @session.system
+  service @service.apps
+  operations none
+  max_request 131072
+  in_flight 4
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 131072
 shell_principal @principal.system

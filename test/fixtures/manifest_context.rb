@@ -112,9 +112,7 @@ module ManifestContextFixture
   # The development manifest's own configured domains, storage, network and web, with
   # the profiles and runtime limits only they name, their services (storage's
   # driver-control and data, network's driver-control and net, web's relay) and the
-  # system domain's facets of them, root's session template's facets of data and net
-  # (which a sessionless source, ProductionImage.without_sessions, does not hold), and
-  # the holder lines naming them.
+  # system domain's facets of them, and the holder lines naming them.
   DOMAIN_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/,
                  /^service storage_ctl\n(?:  .*\n)*/, /^facet storage_ctl\n(?:  .*\n)*/,
                  /^service data\n(?:  .*\n)*/, /^facet data\n(?:  .*\n)*/,
@@ -123,18 +121,27 @@ module ManifestContextFixture
                  /^service net\n(?:  .*\n)*/,
                  /^runtime_limits web\n(?:  .*\n)*/, /^limits web\n(?:  .*\n)*/, /^domain web\n(?:  .*\n)*/,
                  /^service web\n(?:  .*\n)*/, /^facet web\n(?:  .*\n)*/].freeze
-  SESSION_FACETS = [/^facet data_session\n(?:  .*\n)*/, /^facet net\n(?:  .*\n)*/, /^facet inspect\n(?:  .*\n)*/].freeze
-  # The inspect service, which the system domain serves to session templates alone.
-  INSPECT_SERVICE = /^service inspect\n(?:  .*\n)*/
+  # Root's session template's facets, of data, net, inspect and apps, which a sessionless
+  # source (ProductionImage.without_sessions) does not hold.
+  SESSION_FACETS = [/^facet data_session\n(?:  .*\n)*/, /^facet net\n(?:  .*\n)*/, /^facet inspect\n(?:  .*\n)*/,
+                    /^facet apps\n(?:  .*\n)*/].freeze
+  # The services the system domain serves to session templates alone, inspect and apps.
+  SESSION_SERVICES = [/^service inspect\n(?:  .*\n)*/, /^service apps\n(?:  .*\n)*/].freeze
   DOMAIN_HOLDER = /^  holder @domain\.(?:storage|network)$/
 
   # The development manifest as the domain tests start from it: without its session
   # template, since they write their own, without its own configured domain, so the
   # domains a test adds are the only ones, and with no domain quota or max_domains,
-  # since they set what their rows need. The inspect service goes with the template,
-  # the one grantee of its facet.
+  # since they set what their rows need. The services only sessions are granted go
+  # with the template, the one grantee of their facets.
   def sessionless(source)
-    with_quota(substitute(substitute(domainless(source), SESSION_TEMPLATE, ''), INSPECT_SERVICE, ''), 0)
+    templateless = substitute(domainless(source), SESSION_TEMPLATE, '')
+    with_quota(without_session_services(templateless), 0)
+  end
+
+  # source without SESSION_SERVICES, for a source whose session facets are gone.
+  def without_session_services(source)
+    SESSION_SERVICES.reduce(source) { |text, service| substitute(text, service, '') }
   end
 
   # source without its configured domains, storage, network and web: their rows removed

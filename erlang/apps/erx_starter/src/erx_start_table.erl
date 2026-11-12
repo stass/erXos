@@ -61,9 +61,9 @@ a literal of this module.
 -include("generated/erx_abi.hrl").
 
 -export([parse_rc_conf/1, merge/3, parse_ctl/1, set/3]).
--export([apply_ctl/4, reconcile/2, kept/1, read_answered/3, rc_conf_limit/0]).
+-export([apply_ctl/4, ctl_errno/1, reconcile/2, kept/1, read_answered/3, rc_conf_limit/0]).
 
--export_type([row/0, field/0, value/0, local/0, merged/0, command/0, action/0, kept/0]).
+-export_type([row/0, field/0, value/0, local/0, merged/0, command/0, action/0, ctl_error/0, kept/0]).
 -export_type([reading/0, read_answer/0, read_effect/0]).
 
 %% The largest rc.conf read or written (design-apps.md, "Where the file is").
@@ -422,6 +422,22 @@ command({start, Name, Settings}, Text, Rows, Grants) ->
     end;
 command({stop, Name, _Settings}, _Text, _Rows, _Grants) ->
     {stop, Name}.
+
+-doc """
+The errno a write to `ctl` answers for apply_ctl/4's refusal Reason
+(docs/design-apps.md, "Interfaces"): `ebusy` for a display another enabled
+row holds, `eperm` for a display the row's template is not granted, and
+`einval` for every other refusal. One clause per ctl_error(), with no
+catch-all, so a new refusal fails here until it is given its errno.
+""".
+-spec ctl_errno(ctl_error()) -> einval | ebusy | eperm.
+ctl_errno({display_held, _Holder}) -> ebusy;
+ctl_errno({no_grant, _Display}) -> eperm;
+ctl_errno({undeclared, _Name}) -> einval;
+ctl_errno({past_ceiling, _Field}) -> einval;
+ctl_errno(enabled) -> einval;
+ctl_errno(too_large) -> einval;
+ctl_errno(bad_setting) -> einval.
 
 %% The merged rows rc.conf's Text makes; text past the bound sets nothing.
 table(Text, Rows, Grants) ->

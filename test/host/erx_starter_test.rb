@@ -16,10 +16,13 @@ class ErxStarterTest < Minitest::Test
   APP = 'erlang/apps/erx_starter/src'
   # The application's modules, erx_ident (the core reads names with it), erx_domain (the
   # keeper's client of the domain service) and the suite.
-  SOURCES = [*%w[erx_start_table erx_starter erx_starter_sup erx_starter_row erx_starter_keeper erx_starter_rc]
+  # Compiled before the rest: erx_starter_fs names it as its behaviour.
+  BEHAVIOUR = 'erlang/apps/erx_files/src/erx_fs.erl'
+  SOURCES = [*%w[erx_start_table erx_starter erx_starter_sup erx_starter_row erx_starter_keeper erx_starter_rc
+                 erx_starter_fs]
               .map { |name| "#{APP}/#{name}.erl" },
              'erlang/apps/erx_domain/src/erx_ident.erl', 'erlang/apps/erx_domain/src/erx_domain.erl',
-             'test/erlang/erx_starter_tests.erl'].freeze
+             'test/erlang/erx_starter_tests.erl', 'test/erlang/erx_starter_fs_tests.erl'].freeze
 
   Fault = Data.define(:name, :file, :from, :to, :caught_by)
 
@@ -61,6 +64,12 @@ class ErxStarterTest < Minitest::Test
     assert_match(/All \d+ tests passed/, output)
   end
 
+  def test_the_apps_tree_cases_pass
+    output, status = eunit({}, mod: 'erx_starter_fs_tests')
+    assert status.success?, output
+    assert_match(/All \d+ tests passed/, output)
+  end
+
   FAULTS.each_with_index do |fault, index|
     define_method(:"test_seeded_fault_#{index}_is_caught") do
       original = File.read(File.join(ROOT, fault.file))
@@ -76,8 +85,8 @@ class ErxStarterTest < Minitest::Test
 
   private
 
-  # Compiles the sources, each of replaced by its text there, and runs the suite.
-  def eunit(replaced)
+  # Compiles the sources, each of replaced by its text there, and runs the suite mod.
+  def eunit(replaced, mod: 'erx_starter_tests')
     Dir.mktmpdir('erx-starter-test') do |work|
       sources = SOURCES.map do |source|
         next File.join(ROOT, source) unless replaced.key?(source)
@@ -85,11 +94,13 @@ class ErxStarterTest < Minitest::Test
         File.join(work, File.basename(source)).tap { |copy| File.write(copy, replaced.fetch(source)) }
       end
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', include, '-o', work, *sources,
-                                       stdin_data: '')
-      assert status.success?, output
+      [[File.join(ROOT, BEHAVIOUR)], sources].each do |batch|
+        output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', include, '-pa', work, '-o', work,
+                                         *batch, stdin_data: '')
+        assert status.success?, output
+      end
       Open3.capture2e('gtimeout', '-k', '10', '180', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
-                      'halt(case eunit:test(erx_starter_tests, [verbose]) of ok -> 0; _ -> 1 end)',
+                      "halt(case eunit:test(#{mod}, [verbose]) of ok -> 0; _ -> 1 end)",
                       chdir: work, stdin_data: '')
     end
   end

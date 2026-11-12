@@ -23,6 +23,7 @@ class ErxFsTest < Minitest::Test
     build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
     erlang/apps/erx_files/src/erx_fs_grant.erl
     erlang/apps/erx_files/src/erx_fs.erl
+    erlang/apps/erx_files/src/erx_fs_grants.erl
     erlang/apps/erx_files/src/erx_fs_version.erl
     erlang/apps/erx_storage/src/erx_lfs_mint.erl
   ].freeze
@@ -107,8 +108,8 @@ class ErxFsTest < Minitest::Test
               to: 'mint_request(_System, Service, {erx_origin, _Origin,',
               caught_by: 'only_the_system_domains_mint_request_is_granted_test'),
     Fault.new(name: 'a minted grant serves another domain than its grantee', file: MINT,
-              from: '[Options#{client => Grantee, ends_with',
-              to: '[Options#{client => Grantee + 1, ends_with',
+              from: '#{client => Grantee, ends_with => Connection',
+              to: '#{client => Grantee + 1, ends_with => Connection',
               caught_by: 'an_enveloped_exchange_is_served_test'),
     Fault.new(name: "the mint ties no grantee's grant to its connection", file: MINT,
               from: 'connection_to(_System, Grantee) -> erx_connections:connection(Grantee).',

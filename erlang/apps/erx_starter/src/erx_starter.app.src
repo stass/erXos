@@ -8,8 +8,8 @@
 {application, erx_starter,
  [{description, "erXos start service"},
   {vsn, "1"},
-  {modules, [erx_start_table, erx_starter, erx_starter_app, erx_starter_keeper, erx_starter_rc,
-             erx_starter_row, erx_starter_sup]},
+  {modules, [erx_start_table, erx_starter, erx_starter_app, erx_starter_fs, erx_starter_keeper,
+             erx_starter_rc, erx_starter_row, erx_starter_sup]},
   {registered, [erx_starter, erx_starter_sup, erx_starter_keepers]},
   {mod, {erx_starter_app, []}},
-  {applications, [kernel, stdlib, erx, erx_domain]}]}.
+  {applications, [kernel, stdlib, erx, erx_files, erx_domain]}]}.

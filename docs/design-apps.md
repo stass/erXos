@@ -426,11 +426,12 @@ other request that it is configured in the system manifest.
 
 | File | Read | Write |
 | --- | --- | --- |
-| `ctl` | nothing | one command a write, a line of at most 4,096 bytes: `enable NAME [display=D] [restarts=N] [period=S]`, `disable NAME`, `start NAME [display=D]`, which starts a row that is stopped or down, or, for a row that is not enabled, one session that no supervisor keeps, and `stop NAME`. The write's answer is the command's: `ok`, or its error |
+| `ctl` | nothing | one command a write, a line of at most 4,096 bytes: `enable NAME [display=D] [restarts=N] [period=S]`, `disable NAME`, `start NAME [display=D]`, which starts a row that is stopped or down, or, for a row that is not enabled, one session that no supervisor keeps, and `stop NAME`. The write succeeds when the command does; a 9P write carries no text back, so a refusal answers an errno: `einval` for a line that does not parse, a name with no manifest row or any other refused command, `ebusy` for a display another enabled row holds, `eperm` for a display the template is not granted, `eagain` while `rc.conf` is unread, and `eio` for a failed write of `rc.conf` or start, or a start service that ended during the command. The reason goes to the log, and a row's own reason is shown at `/proc/apps` |
 | `rc.conf` | the machine's settings | nothing |
 
 Which templates hold the `apps` grant is the manifest's: `root`'s in a
-development build, an administrator's in a release build.
+development build, an administrator's in a release build. A session
+whose template holds no `apps` grant has no `/apps` at all.
 
 **Inspection**, in `abi/inspection.txt`, reported by the start service
 and shown at `/proc/apps`: `[apps]` lists the rows by principal, and

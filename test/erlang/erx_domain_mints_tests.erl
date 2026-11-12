@@ -251,7 +251,8 @@ invalid_configuration_is_refused_test() ->
     Bad = [#{services => [], grants => [{?G, data, ?S, #{}}], owner => Owner},
            #{services => [{?S, data}], grants => [{?S, data, ?S, #{}}], owner => Owner},
            #{services => [{?S, data}], grants => [{?G, data, ?S, #{}}, {?G, data, ?S, #{}}], owner => Owner},
-           #{services => [{?T, data}], grants => [{?G, data, ?S, #{}}], owner => Owner}],
+           #{services => [{?T, data}], grants => [{?G, data, ?S, #{}}], owner => Owner},
+           #{services => [{?S, data}, {system, apps}], grants => [{?G, data, ?S, #{}}], owner => Owner}],
     [?assertError(badarg, erx_domain_mints:new(Config)) || Config <- Bad].
 
 %% Sessions: template 0's sessions are granted data. A session's id is never reused

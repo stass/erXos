@@ -4,7 +4,8 @@
 -module(erx_starter_sup).
 -moduledoc """
 The start service's supervision tree (docs/design-apps.md,
-"Concurrency"), rest_for_one over two children:
+"Concurrency"), rest_for_one over the `apps` tree's grants (erx_starter_fs),
+which the system's table alone serves, and two children:
 
 1. the keepers' branch, erx_starter_keepers, a one_for_one supervisor of
    one erx_starter_row per enabled row that runs or is down, one keeper
@@ -16,7 +17,13 @@ A crash of the table restarts the table alone: it finds the table it had
 and the rows it kept in the keepers' branch, so no session ends. A crash
 of the keepers' branch ends every session it kept and every record, and
 rest_for_one restarts the table after it, which makes the table as at
-boot.
+boot. The end of the `apps` tree's grants supervisor ends every grant
+to the tree, and rest_for_one restarts the keepers' branch and the
+table after it, so every session the keepers kept ends, and those
+started again receive new grants. A session no keeper kept, root's
+console session among them, keeps running with no `/apps` until it
+restarts (TODO.md). One grant's end ends that grant alone: grants are
+temporary children.
 
 **The records.** The keepers' branch is where the table's state outlives
 the table's process, as child specs OTP keeps:
@@ -145,6 +152,14 @@ init({top, Manifest, Directory}) ->
     Keepers = #{id => keepers, start => {supervisor, start_link, [{local, ?KEEPERS}, ?MODULE, keepers]},
                 type => supervisor, shutdown => infinity},
     Table = #{id => table, start => {erx_starter, start_link, [Manifest, Directory]}},
-    {ok, {#{strategy => rest_for_one}, [Keepers, Table]}};
+    {ok, {#{strategy => rest_for_one}, apps(Manifest) ++ [Keepers, Table]}};
 init(keepers) ->
     {ok, {#{strategy => one_for_one}, []}}.
+
+%% The `apps` tree's grants (erx_starter_fs), first, so they are served before any row
+%% starts a session and a restart of the table ends no grant; the system's table alone
+%% serves them, and a test's table, made from its own manifest, serves none.
+apps(system) ->
+    [#{id => apps, start => {erx_starter_fs, start_link, []}, type => supervisor, shutdown => infinity}];
+apps(_Manifest) ->
+    [].

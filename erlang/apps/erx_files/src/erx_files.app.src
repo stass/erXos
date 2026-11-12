@@ -9,6 +9,7 @@
  [{description, "erXos file servers"},
   {vsn, "1"},
   {modules, [erx_fs,
+             erx_fs_grants,
              erx_fs_grant,
              erx_fs_version,
              erx_procfs,

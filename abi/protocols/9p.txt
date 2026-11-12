@@ -146,6 +146,7 @@ protocol erx_9p
     error enodata 61
     error erange 34
     error enolck 37
+    error ebusy 16
   integer fid u32 except @p9_nofid
   integer io_count u32 max @p9_io_max
   integer xattr_size u64 max @p9_xattr_max

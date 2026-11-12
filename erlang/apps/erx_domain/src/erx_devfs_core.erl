@@ -103,11 +103,12 @@ command(_Bytes) ->
 
 -doc """
 The name of the holder's driver-control facet for Device, from the
-manifest's services, `{ServerRow, Name, Interface}` as
-erx_domain_lib:configured/0 gives them; `{error, enxio}` when no domain of
-a configured row holds the device or that row serves no such facet.
+manifest's services, `{Server, Name, Interface}` as
+erx_domain_lib:configured/0 gives them, Server a configured row or
+`system`; `{error, enxio}` when no domain of a configured row holds the
+device or that row serves no such facet.
 """.
--spec facet(erx_domain_lib:device(), [{non_neg_integer(), atom(), non_neg_integer()}]) ->
+-spec facet(erx_domain_lib:device(), [{non_neg_integer() | system, atom(), non_neg_integer()}]) ->
           {ok, atom()} | {error, enxio}.
 facet(#{row := Row, holder := Holder}, Services) when is_integer(Row), is_integer(Holder) ->
     case [Name || {Server, Name, ?ERX_SERVICE_DRIVER_CONTROL} <- Services, Server =:= Row] of

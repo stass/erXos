@@ -120,8 +120,8 @@ class MediumBootTest < Minitest::Test
     refute_match(/^session /, sessionless)
     refute_match(/^  grantee @session\./, sessionless)
     # The session template's 5 lines, and the facets granted to it: the 10 of data_session,
-    # the 9 of net and the 9 of inspect.
-    assert_equal 5 + 10 + 9 + 9, site.lines.size - sessionless.lines.size
+    # the 9 of net, the 9 of inspect and the 9 of apps.
+    assert_equal 5 + 10 + 9 + 9 + 9, site.lines.size - sessionless.lines.size
     assert_equal 4, sessionless.lines.zip(grown.lines).count { |left, right| left != right }
     assert_equal sessionless.lines.size, grown.lines.size - Boot::DOMAIN_ROW.lines.size
     assert grown.end_with?(Boot::DOMAIN_ROW)

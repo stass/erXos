@@ -590,7 +590,8 @@ Posix}`, with an atom of OTP's `file:posix()` that names the same error
 `erofs`, `enospc`, `efbig`, `einval`, `ebadf`, `emfile`, `enfile`, `eio`,
 `enametoolong`, `enotsup`, `eloop`, `enxio`, `exdev`, `enomem`, `eagain`,
 `enodata` for a missing extended attribute, `erange` for a buffer too
-small for one, and `enolck`); an atom outside that list is refused by the
+small for one, `enolck`, and `ebusy` for something another holder has, such
+as a display); an atom outside that list is refused by the
 grammar. The wire carries Linux's numbering, and the codec reads an error
 number outside the list as `eio`, which also covers a server that answers
 in another system's numbering, as QEMU's does on a macOS host
@@ -2339,10 +2340,16 @@ recovers a value's exact bytes
   the client domain (`client`, `own` or the domain's id), the grant's
   pool (`pool`), its bounds on requests in flight and message size
   (`in_flight`, `msize`) and its process's heap (`max_heap_size`), and
-  for another domain the port of the connection the grant ends with
-  (`ends_with`) and the export table it exports itself through before
-  its start returns (`exports`);
-  every file server is one. `erx_fs_version:init/0` makes the domain's
+  for another domain what the grant ends with (`ends_with`: the port of
+  the connection to the client or, in the system domain, which holds no
+  such port, the client's domain pid, or `none` for a grant that lives as
+  long as the server's domain) and the export table it exports
+  itself through before its start returns (`exports`);
+  every file server is one. `erx_fs_grants` supervises the grants of one
+  tree that a files service hands to other domains: `start_link/2`, and
+  `grant/3`, which starts one grant bound to a client with the options
+  a facet row's limits give it (`grant_options/1`).
+  `erx_fs_version:init/0` makes the domain's
   file version counter and `erx_fs_version:draw/0` draws from it
   ([Identity and version](#identity-and-version)).
 * **The file protocol**, 9P2000.L, as a **frame profile** of

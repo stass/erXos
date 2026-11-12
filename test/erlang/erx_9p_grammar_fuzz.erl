@@ -118,7 +118,7 @@ mutated(Request) ->
 random_reply() ->
     case rand:uniform(6) of
         1 -> ok;
-        2 -> {error, pick([enoent, eio, ebusy, enolck, 2, "eio"])};
+        2 -> {error, pick([enoent, eio, ebusy, enolck, etimedout, 2, "eio"])};
         3 -> {ok, random_field()};
         4 -> {ok, random_field(), random_field()};
         5 -> {ok, random_field(), random_field(), random_field(), random_field(), random_field()};

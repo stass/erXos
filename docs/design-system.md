@@ -2111,7 +2111,12 @@ pure function gives for the grantee where the service has scopes, as
 and sends it in the ready answer with any other facet the domain gets
 there. So these facets reach every incarnation and every session with
 its ready answer, before any installation, and end with it, or with the
-process behind them. A
+process behind them. For a service of the `files` interface the process
+behind it is the supervisor of its tree's grants (`erx_fs_grants`), and
+the domain service asks it for an `erx_fs` grant bound to the grantee and
+ending with its domain pid, in place of a facet in front of it, as a
+files service's mint does for its grantees (`apps`, served by the start
+service, is one). A
 service that has named no living process by then is left out and logged; the domain finds the name absent, as it
 finds any unavailable service, until it restarts. The domain service
 creates the configured domains as it starts, so a service whose facets

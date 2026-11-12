@@ -13,6 +13,7 @@
 %% its one end.
 -module(erx_domain_mints_srv_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 %% The service's deadline for each mint operation, and for each introduction an
 %% operation asks for: an hour, so that no case reaches either deadline by waiting,
@@ -361,6 +362,71 @@ inspect_setup(Grants) ->
 
 inspect_cleanup(Started) ->
     served_cleanup(Started).
+
+%% A session's template granted apps, a service of the files interface the system domain
+%% serves, finds in its ready answer an erx_fs grant that the service's erx_fs_grants
+%% supervisor started, exported to the session alone and ending with its domain pid;
+%% no facet stands in front of it (docs/design-system.md, "Facets of the system
+%% domain's services").
+session_files_grant_test() ->
+    Started = {_, _, Grants} = files_setup([{{template, 0}, apps, system, #{max_request => 131072, in_flight => 4}}]),
+    try
+        {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
+        DomainPid = domain_pid(Id),
+        #{apps := Grant} = Facets = maps:get(DomainPid, answers([DomainPid], #{})),
+        ?assertEqual([apps], maps:keys(Facets)),
+        ?assertEqual([Grant], [Child || {_, Child, _, _} <- supervisor:which_children(Grants)]),
+        %% The grant exports itself to the session, after the session's start.
+        ok = await_call({start, Id}),
+        ?assertEqual({export, Id, [send]}, erx_domain_fake_lib:next_call()),
+        Ref = monitor(process, Grant),
+        exit(DomainPid, kill),
+        receive {'DOWN', Ref, process, Grant, Reason} -> ?assertEqual({shutdown, connection_ended}, Reason)
+        after 2000 -> error(grant_outlived_its_domain)
+        end
+    after
+        files_cleanup(Started)
+    end.
+
+%% A session whose template the manifest does not grant apps finds no grant, though
+%% another template holds one, and the service starts none.
+session_without_files_grant_test() ->
+    Started = {_, _, Grants} = files_setup([{{template, 1}, apps, system, #{max_request => 131072}}]),
+    try
+        {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
+        ?assertEqual(#{}, maps:get(domain_pid(Id), answers([domain_pid(Id)], #{}))),
+        ?assertEqual([], supervisor:which_children(Grants))
+    after
+        files_cleanup(Started)
+    end.
+
+%% No configured domain, apps a files service of the system domain with a test tree's
+%% grants behind it, and a trace of the domain pids' receives to this process, with
+%% Grants the manifest's.
+files_setup(Grants) ->
+    persistent_term:put({erx_domain_fake_lib, boot},
+                        #{domains => [], services => [{system, apps, ?ERX_SERVICE_FILES}], grants => Grants}),
+    {ok, Tree} = erx_fs_grants:start_link(erx_fs_test_tree, []),
+    unlink(Tree),
+    ok = erx_facet:serve(apps, Tree),
+    erlang:trace(new_processes, true, ['receive', {tracer, self()}]),
+    Fake = erx_domain_fake_lib:start_log(),
+    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
+                                                 mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
+    unlink(Service),
+    {Fake, Service, Tree}.
+
+files_cleanup(Started) ->
+    served_cleanup(Started).
+
+%% Takes the library's calls up to and including Call.
+await_call(Call) ->
+    case erx_domain_fake_lib:next_call() of
+        Call -> ok;
+        timeout -> error({never_called, Call});
+        _Earlier -> await_call(Call)
+    end.
 
 %% A session of template 0 (7) gets its own echo grant: it is introduced to a, a's mint
 %% is asked for the session's id with the template's limits, the facet is installed

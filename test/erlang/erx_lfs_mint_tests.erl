@@ -45,15 +45,15 @@ only_the_system_domains_mint_request_is_granted_test() ->
 %% A row's limits become the grant's bounds, capped at erx_fs_grant's; a row below 9P's
 %% least message size, or with a bound that is not positive, is refused.
 grant_options_test() ->
-    ?assertEqual({ok, #{in_flight => 64, msize => 65560}}, erx_lfs_mint:grant_options(#{})),
+    ?assertEqual({ok, #{in_flight => 64, msize => 65560}}, erx_fs_grants:grant_options(#{})),
     ?assertEqual({ok, #{in_flight => 16, msize => 65560, max_heap_size => 262144}},
-                 erx_lfs_mint:grant_options(#{in_flight => 16, max_request => 65560,
+                 erx_fs_grants:grant_options(#{in_flight => 16, max_request => 65560,
                                               max_heap_size => 262144, reductions => 100})),
     ?assertEqual({ok, #{in_flight => 64, msize => 65560}},
-                 erx_lfs_mint:grant_options(#{in_flight => 1000, max_request => 131072})),
+                 erx_fs_grants:grant_options(#{in_flight => 1000, max_request => 131072})),
     ?assertEqual({ok, #{in_flight => 1, msize => 4096}},
-                 erx_lfs_mint:grant_options(#{in_flight => 1, max_request => 4096})),
-    [?assertEqual({error, einval}, erx_lfs_mint:grant_options(Limits))
+                 erx_fs_grants:grant_options(#{in_flight => 1, max_request => 4096})),
+    [?assertEqual({error, einval}, erx_fs_grants:grant_options(Limits))
      || Limits <- [#{max_request => 4095}, #{in_flight => 0}, #{max_heap_size => 0}, #{max_heap_size => 100},
                    #{in_flight => many}, #{max_request => -1}, #{max_heap_size => big}]].
 
@@ -149,7 +149,7 @@ only_the_system_domains_grant_has_no_connection_test() ->
 with_grants(Fun) ->
     persistent_term:put({?MODULE, test}, self()),
     persistent_term:put({?MODULE, export}, ok),
-    {ok, Grants} = erx_lfs_mint:start_grants(erx_fs_test_tree, []),
+    {ok, Grants} = erx_fs_grants:start_link(erx_fs_test_tree, []),
     try
         Fun(Grants)
     after

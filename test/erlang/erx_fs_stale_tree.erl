@@ -9,7 +9,7 @@ module that keeps its tree as a value would: with a next state appended to
 each answer, `ok` as `{ok, Fs}` and `{ok, ...}` as `{ok, ..., Fs}`. Those
 named in `{malformed, Callbacks}` answer in their own shape with a value
 the grammar refuses: root, walk and make a qid whose path is negative,
-readdir a listing whose tail is not a list, unlink the error `ebusy`, which
+readdir a listing whose tail is not a list, unlink the error `etimedout`, which
 9P2000.L does not carry; a callback named in both lists is stale. erx_fs must
 answer each request that reaches one `eio` and go on serving.
 Every other callback, and every error, is erx_fs_test_tree's unchanged.
@@ -59,7 +59,7 @@ spoiled(walk, {ok, Node, Qid}) -> {ok, Node, bad_qid(Qid)};
 spoiled(make, {ok, Node, Qid, Handle}) -> {ok, Node, bad_qid(Qid), Handle};
 spoiled(make, {ok, Node, Qid}) -> {ok, Node, bad_qid(Qid)};
 spoiled(readdir, {ok, [Entry | _]}) -> {ok, [Entry | not_a_list]};
-spoiled(unlink, ok) -> {error, ebusy};
+spoiled(unlink, ok) -> {error, etimedout};
 spoiled(_, Answer) -> Answer.
 
 %% A qid of the node's type whose path no u64 holds.

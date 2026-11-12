@@ -46,8 +46,8 @@ erx_start_table's; this process carries them out.
 
 -include("generated/erx_abi.hrl").
 
--export([start_link/2, command/1, rows/0]).
--export_type([source/0]).
+-export([start_link/2, command/1, rows/0, rc_conf/0]).
+-export_type([source/0, answer/0]).
 -export([manifest_table/1]).
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -60,6 +60,10 @@ erx_start_table's; this process carries them out.
 %% Where the table reads the manifest from: the system manifest, or a
 %% manifest table made beforehand, for the tests.
 -type source() :: system | manifest().
+%% command/1's answer: ok, a refusal of the command as the table stands, or
+%% `{failed, Reason}` for a command the table admitted that could not be
+%% carried out: rc.conf's write, or the supervisor's start, failed.
+-type answer() :: ok | {error, erx_start_table:ctl_error() | rc_conf_unread | {failed, term()}}.
 
 -doc "The table over Source's rows, with rc.conf in Directory.".
 -spec start_link(source(), binary()) -> gen_server:start_ret().
@@ -68,11 +72,13 @@ start_link(Source, Directory) ->
 
 -doc """
 Carries out Command, from erx_start_table:parse_ctl/1: ok, or {error,
-Reason}, with erx_start_table:apply_ctl/4's reasons, `rc_conf_unread`
-before rc.conf has been read, a write's error, and, for a start, the
-supervisor's refusal.
+Reason}, with erx_start_table:apply_ctl/4's refusals, `rc_conf_unread`
+before rc.conf has been read, and `{failed, Why}` for a write's error or,
+for a start, the supervisor's refusal (answer()). An `enable` answers ok
+once rc.conf is written, as the setting then stands, even when the start
+of its row that follows fails.
 """.
--spec command(erx_start_table:command()) -> ok | {error, term()}.
+-spec command(erx_start_table:command()) -> answer().
 command(Command) ->
     gen_server:call(?MODULE, {command, Command}, infinity).
 
@@ -88,6 +94,15 @@ and may not be what the file sets.
 -spec rows() -> #{rows := [map()] | unmade, skipped := [erx_start_table:local()], rc_conf := read | unread}.
 rows() ->
     gen_server:call(?MODULE, rows).
+
+-doc """
+The text of rc.conf the table is made from, which `/apps/rc.conf` shows: the
+text of the last read or write, the text the keepers' branch recorded while
+rc.conf is unread, or the empty text before either.
+""".
+-spec rc_conf() -> binary().
+rc_conf() ->
+    gen_server:call(?MODULE, rc_conf).
 
 %% ---------------------------------------------------------------------------
 %% The manifest
@@ -175,7 +190,9 @@ handle_call({command, Command}, From, #{writer := none, queue := Queue} = State)
 handle_call({command, Command}, From, #{queue := Queue} = State) ->
     {noreply, State#{queue := queue:in({Command, From}, Queue)}};
 handle_call(rows, _From, State) ->
-    {reply, table(State), State}.
+    {reply, table(State), State};
+handle_call(rc_conf, _From, #{text := Text} = State) ->
+    {reply, Text, State}.
 
 handle_cast(_Request, State) ->
     {noreply, State}.
@@ -297,7 +314,7 @@ written(Failed, From, _Command, _Text, State) ->
                  Crash -> Crash
              end,
     logger:warning("erx_starter: rc.conf cannot be written: ~0P", [Reason, 8]),
-    gen_server:reply(From, {error, Reason}),
+    gen_server:reply(From, {error, {failed, Reason}}),
     State.
 
 %% The next queued command, once no write is in progress.
@@ -318,7 +335,7 @@ start_row(Name, State) ->
 
 started({ok, _Pid}) -> ok;
 started({error, {already_started, _}}) -> ok;
-started({error, _} = Refused) -> Refused.
+started({error, Why}) -> {error, {failed, Why}}.
 
 %% What enabled row Name's supervisor keeps (erx_starter_row:row()), or none
 %% for a row that is not enabled.

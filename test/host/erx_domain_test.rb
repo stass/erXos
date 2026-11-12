@@ -39,6 +39,12 @@ class ErxDomainTest < Minitest::Test
              Erx::Generated.path('erlang/apps/erx/src/erx_text_tables.erl', root: ROOT),
              File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
              File.join(ROOT, 'test/erlang/erx_devfs_tests.erl'),
+             # A files service of the system domain: its grants and a test tree.
+             Erx::Generated.path('otp/erts/preloaded/src/erx_9p_grammar.erl', root: ROOT),
+             File.join(ROOT, 'erlang/apps/erx_files/src/erx_fs_grant.erl'),
+             File.join(ROOT, 'erlang/apps/erx_files/src/erx_fs_grants.erl'),
+             File.join(ROOT, 'erlang/apps/erx_files/src/erx_fs_version.erl'),
+             File.join(ROOT, 'test/erlang/erx_fs_test_tree.erl'),
              File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
              File.join(ROOT, 'erlang/apps/erx/src/erx_inspect_facet.erl'),
              File.join(ROOT, 'erlang/apps/erx/src/erx_inspect_query.erl'),
@@ -130,6 +136,26 @@ class ErxDomainTest < Minitest::Test
               from: 'grantee({session, Template}) -> {template, Template};',
               to: 'grantee({session, _Template}) -> none;',
               tests: 'erx_domain_mints_srv_tests', caught_by: 'session_inspect'),
+    # The grant check of a system domain's service (R3): a ready answer that takes every
+    # grantee's grants, so a session whose template holds no apps grant gets one.
+    Fault.new(name: "a ready answer that ignores whose grant a system service's grant is", file: SERVICE,
+              from: 'end, maps:get(Grantee, Served, []))).',
+              to: 'end, lists:append(maps:values(Served)))).',
+              tests: 'erx_domain_mints_srv_tests', caught_by: 'session_without_files_grant'),
+    # A files grant of a system domain's service bound to another domain than its
+    # grantee: the grant exports itself to that domain, not to the session.
+    Fault.new(name: 'a files grant bound to another client', file: SERVICE,
+              from: 'Binding = #{client => Id, ends_with => DomainPid, exports => Exports},',
+              to: 'Binding = #{client => Id + 1, ends_with => DomainPid, exports => Exports},',
+              tests: 'erx_domain_mints_srv_tests', caught_by: 'session_files_grant'),
+    # The boot's services list names the system domain's services with the server
+    # `system`, which the mint core, keyed by configured rows, refuses with badarg so
+    # that no such entry is ever kept there: this seed guards the filter and the
+    # refusal as a pair (without the filter the domain service does not boot).
+    Fault.new(name: "a mint core handed the system domain's services", file: SERVICE,
+              from: '<- maps:get(services, Boot, []), Server =/= system],',
+              to: '<- maps:get(services, Boot, [])],',
+              tests: 'erx_domain_mints_srv_tests', caught_by: 'session_files_grant'),
     # The session mark (docs/design-system.md, "Facets a configured domain serves"): a
     # server's end that drops the grants' marks, so its new incarnation's re-mint of the
     # display's session's grant carries none.

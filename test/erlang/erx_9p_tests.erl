@@ -134,7 +134,7 @@ flush_and_clunk_test() ->
 %% share; ENOTSUP is EOPNOTSUPP.
 linux_errors() ->
     [{eperm, 1}, {enoent, 2}, {eio, 5}, {enxio, 6}, {ebadf, 9}, {eagain, 11},
-     {enomem, 12}, {eacces, 13}, {eexist, 17}, {exdev, 18}, {enotdir, 20}, {eisdir, 21},
+     {enomem, 12}, {eacces, 13}, {ebusy, 16}, {eexist, 17}, {exdev, 18}, {enotdir, 20}, {eisdir, 21},
      {einval, 22}, {enfile, 23}, {emfile, 24}, {efbig, 27}, {enospc, 28}, {erofs, 30},
      {erange, 34}, {enametoolong, 36}, {enolck, 37}, {enotempty, 39}, {eloop, 40},
      {enodata, 61}, {enotsup, 95}].

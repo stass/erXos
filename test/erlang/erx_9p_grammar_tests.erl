@@ -201,8 +201,8 @@ errors_test() ->
     lists:foreach(fun(Posix) -> reply_ok(Request, {error, Posix}) end,
                   [enoent, eacces, eperm, eexist, enotdir, eisdir, enotempty, erofs, enospc,
                    efbig, einval, ebadf, emfile, enfile, eio, enametoolong, enotsup, eloop,
-                   enxio, exdev, enomem, eagain, enodata, erange, enolck]),
-    reply_bad(Request, {error, ebusy}),
+                   enxio, exdev, enomem, eagain, enodata, erange, enolck, ebusy]),
+    reply_bad(Request, {error, etimedout}),
     reply_bad(Request, {error, "enoent"}),
     reply_bad(Request, {error, 2}),
     reply_bad(Request, {error, enoent, extra}).
@@ -349,4 +349,4 @@ builders_test() ->
     ?assertError(badarg, ?G:walk_request(1, 2, [<<"..">>, <<".">>])),
     ?assertError(badarg, ?G:mkdir_request(1, bytes(256), 0, 0)),
     ?assertError(badarg, ?G:read_reply(bytes(65537))),
-    ?assertError(badarg, ?G:error_reply(ebusy)).
+    ?assertError(badarg, ?G:error_reply(etimedout)).

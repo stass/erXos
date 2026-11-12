@@ -140,12 +140,21 @@ provide(_Name, _Mint) ->
 
 -doc """
 Names Pid, a process of the system domain, as the one behind the service Name,
-which the system domain serves (docs/design-system.md, "Facets a configured
-domain serves"): for each configured domain the manifest grants Name, the
-domain service starts a facet in front of Pid in that domain's ready answer, and
-the facet ends with Pid. Call it while the service's application starts,
-before the domain service starts; a second call for Name replaces the first.
-{error, badarg} for a Name that is no atom or a Pid that is no local process.
+which the system domain serves (docs/design-system.md, "Facets of the system
+domain's services"): for each configured domain or session the manifest grants
+Name, the domain service starts a facet in front of Pid in that domain's ready
+answer, and the facet ends with Pid; for a service of the `files` interface Pid
+is an erx_fs_grants supervisor, which starts an erx_fs grant bound to the domain
+instead.
+
+A ready answer carries only the services named by then. A service the
+manifest grants a configured domain is named while its application starts,
+before the domain service starts, which creates those domains. A service granted
+only to session templates may be named later, by an application started after
+the domain service, as the start service's `apps` is; a session that reported
+ready before then has none of it until it restarts (TODO.md). A second call for
+Name replaces the first. {error, badarg} for a Name that is no atom or a Pid
+that is no local process.
 """.
 -spec serve(atom(), pid()) -> ok | {error, badarg}.
 serve(Name, Pid) when is_atom(Name), is_pid(Pid), node(Pid) =:= node() ->
