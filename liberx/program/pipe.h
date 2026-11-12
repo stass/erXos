@@ -149,8 +149,15 @@ ssize_t	erx_pipe_write(erx_pipe_end_t *e, const void *buf, size_t len);
 
 /*
  * A poll's registration on an end it watches, and its removal (wake.h): a
- * poll watches every end it waits on before it checks any of them, and
- * unwatches them all before it returns.
+ * poll watches every end it polls before it checks any of them, a zero
+ * timeout included, and unwatches them all before it returns.  The removal that leaves no thread
+ * waiting on a read end gives up what the end's polls published, as a read
+ * of 0 bytes does, so a poll that answered 0 and is given up (a timeout, or
+ * another descriptor ready) leaves no sleepers or waiters bit for writers
+ * and co-readers to ring the idle end for.  A write end's need stays: other
+ * waiting writes may rely on it, and the reader rings the end once as it
+ * crosses it, and never again.  Each {drained} the read owes is sent, which
+ * may wait for room on the session channel.
  */
 void	erx_pipe_watch(erx_pipe_end_t *e, erx_prog_waiter_t *w);
 void	erx_pipe_unwatch(erx_pipe_end_t *e, erx_prog_waiter_t *w);

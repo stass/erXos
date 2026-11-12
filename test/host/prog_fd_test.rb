@@ -67,6 +67,7 @@ class ProgFdTest < Minitest::Test
   # The read end's doorbell, 103, and the write end's, 107, come up as their labels, (7 << 32) | End.
   BOUND = [*SET_UP, ["bind 103 #{(7 << 32) | 1}", 'bound'], ["bind 107 #{(7 << 32) | 2}", 'bound']].freeze
   WRITER_GONE = "report #{report(E.atom('pipe_writer_gone'), int(7), int(1), int(1))}".freeze
+  READER_GONE = "report #{report(E.atom('pipe_reader_gone'), int(7), int(2), int(0))}".freeze
   WRITE_STATE = 'write 7 2 refs=1 readers=1 lost=0 size=65536 peers=1'
 
   # Calls that wait, on real threads; these run under the thread sanitizer as well.
@@ -118,10 +119,16 @@ class ProgFdTest < Minitest::Test
                                 ['bits sleepers 102', '0'], ['notices', 'closed:7:1']],
     # A poll answers without copying: room for PIPE_BUF bytes is POLLOUT (4); an empty read end
     # arms its sleepers bit and reports nothing, then POLLIN (1) once a record is there, which a
-    # read still returns whole; once the writer goes and the record is read, POLLHUP (16).
+    # read still returns whole.
+    # As FreeBSD's pipe_poll reports, the end of the stream is POLLIN|POLLHUP (17), and a write
+    # end with no read end POLLOUT|POLLHUP (20), so a writer wakes and meets EPIPE.
     'poll' => [*SET_UP, ['poll 1', '4'], ['poll 0', '0'], ['bits sleepers 102', '1'], ['write 1 x', '1'],
                ['poll 0', '1'], ['bits sleepers 102', '0'], ['read 0 8', '1 x'], [WRITER_GONE, 'applied'],
-               ['poll 0', '16']],
+               ['poll 0', '17'], [READER_GONE, 'applied'], ['poll 1', '20']],
+    # A poll that answered 0 and stops watching the end, the last to wait on it, withdraws the
+    # sleepers bit it published, so the idle end is rung by no write.
+    'a poll given up' => [*SET_UP, ['poll 0', '0'], ['bits sleepers 102', '1'], ['unwatch 0', 'unwatched'],
+                          ['bits sleepers 102', '0'], ['unwatch 1', 'unwatched']],
     'take clears bits' => [['alias 105 101', 'alias'], ['alias 106 102', 'alias'],
                            ['setbits waiters 104 5', 'set'], ['setbits sleepers 102 1', 'set'],
                            ["start #{START}", 'setup 0'], ['bits waiters 104', '4'], ['bits sleepers 102', '0'],
@@ -207,6 +214,8 @@ class ProgFdTest < Minitest::Test
       ['a write waits for room', PIPE, "\t\twritten += w->st.done;\n", ''],
     'a read keeps its {drained}' => ['a report wakes a read', PIPE, "\tif (owes)\n\t\tdrained_send(e);\n\treturn (",
                                     "\tif (owes && false)\n\t\tdrained_send(e);\n\treturn ("],
+    "an unwatch that leaves a read end idle with its poll's sleepers bit" =>
+      ['a poll given up', PIPE, 'if (last && e->kind == ERX_PIPE_READ)', 'if (false && last)'],
     'a poll stays on an end it unwatched' =>
       ['a poll watches two ends', PIPE, "\terx_pipe_end_lock(e);\n\terx_prog_waitq_leave(&e->waiters, w);\n",
        "\terx_pipe_end_lock(e);\n\t(void)w;\n"],

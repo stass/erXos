@@ -32,8 +32,8 @@ class PipeCoreTest < Minitest::Test
   # The landing gate explores the small shapes; the milestone gate adds the large ones, whose
   # seeded faults the landing gate still catches at landing lengths.
   SMALL = %w[flow partial nonblock writer-dies reader-closes reader-dies lost join merge coread
-             coread-dies-empty coread-lost-dies rcalls wcalls wpoll rpoll hostile-writer hostile-reader
-             hostile-coreader hostile-wcalls].freeze
+             coread-dies-empty coread-lost-dies rcalls wcalls wpoll rpoll wpoll-gone wpoll-lost rpoll-lost
+             hostile-writer hostile-reader hostile-coreader hostile-wcalls].freeze
   LARGE = %w[merge-join merge-repeat coread-dies coread-lost].freeze
   SCENARIOS = FULL ? LARGE + SMALL : SMALL
   # Scenarios explored at once: each runs alone in one process.
@@ -107,6 +107,22 @@ class PipeCoreTest < Minitest::Test
        'if (w->poll || pipe_wmay_wait(w, need, in->value))'],
     'a read poll waits without arming' =>
       ['rpoll', 'PI7', "\tif (r->published)\n", "\tif (r->published || r->poll)\n"],
+    # A poll reports every bit the end's state requires: POLLHUP (with POLLOUT) on a write end
+    # whose read end has gone, POLLERR on a read end of a lost pipe.
+    'a write poll that drops POLLHUP once no read end remains' =>
+      ['wpoll-gone', 'POLL', "\t\tevents |= POLLOUT | POLLHUP;", "\t\tevents |= POLLOUT;"],
+    'a read poll of a lost pipe that drops POLLERR' =>
+      ['rpoll-lost', 'POLL', "\t\treturn (POLLHUP | POLLERR);", "\t\treturn (POLLHUP);"],
+    # poll stops watching a read end its poll left waiting: unless it withdraws, the end is idle
+    # with its sleepers bits set, and each write rings it.
+    # A poll that waits when its end is ready sleeps for good unless poll gives it up; the give-up
+    # must not hide it.
+    'a read poll that waits at the end of the stream' =>
+      ['rpoll', 'PI7', 'if (pipe_ended(r))', 'if (pipe_ended(r) && !r->poll)'],
+    'a write poll that waits for room with no read end left' =>
+      ['wpoll-gone', 'PI7', "if (readers == 0 || lost)\n\t\tevents |= POLLOUT | POLLHUP;", "if ((readers == 0 || lost) && events != 0)\n\t\tevents |= POLLOUT | POLLHUP;"],
+    'a poll given up without withdrawing what it published' =>
+      ['rpoll', 'PI7', 'const bool withdraws = reader;', 'const bool withdraws = false;', EXPLORER],
     'a read that armed and then found bytes keeps its sleepers bits' =>
       ['flow', 'PI7', 'if (r->armed && r->after != R_AFTER_DATA)', 'if (false)'],
     'a read of 0 bytes that leaves the sleepers bits of a wait it gives up' =>

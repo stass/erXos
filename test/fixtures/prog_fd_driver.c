@@ -940,6 +940,15 @@ main(int argc, char **argv)
 
 			printf("%d\n", erx_pipe_poll(e));
 			erx_prog_obj_put(&e->obj);
+		} else if (strcmp(word, "unwatch") == 0 && sscanf(line, "%*s %d", &fd) == 1) {
+			/* A poll that watches the end and stops at once, as at a timeout. */
+			erx_pipe_end_t *e = end_get(fd);
+			erx_prog_waiter_t w;
+
+			erx_pipe_watch(e, &w);
+			erx_pipe_unwatch(e, &w);
+			printf("unwatched\n");
+			erx_prog_obj_put(&e->obj);
 		} else if (strcmp(word, "bind") == 0 && sscanf(line, "%*s %llu %llu", &a, &b) == 2) {
 			cap_of(a)->label = b;
 			printf("bound\n");

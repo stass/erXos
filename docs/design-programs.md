@@ -2818,9 +2818,12 @@ define it.
   pages ([design-pipes.md](design-pipes.md#readiness-poll-and-select)), so
   a read or write the program made since the executor's last look never
   leaves a stale `POLLIN` or `POLLOUT`: a read end is readable while a
-  lane holds a record and reports `POLLHUP` once no write end remains, a
-  write end is writable while its ring has room and reports `POLLERR`
-  once no read end remains, as Linux reports them. A regular file is
+  lane holds a record and reports `POLLIN` with `POLLHUP` once no write
+  end remains, a write end is writable while its ring has room and
+  reports `POLLOUT` with `POLLHUP` once no read end remains, as FreeBSD
+  reports them. `poll` watches each pipe end it polls, a zero timeout
+  included, and the unwatch that leaves no thread waiting on a read end
+  gives up what its polls published. A regular file is
   always ready, a terminal and a socket by their `{ready}` reports. The
   ready list has no fixed size, so `poll` has no limit on the number of
   descriptors but the table's.

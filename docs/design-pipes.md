@@ -1058,8 +1058,8 @@ whose reports it applied
 
 | End | `POLLIN` | `POLLOUT` | `POLLHUP` | `POLLERR` |
 | --- | --- | --- | --- | --- |
-| read | a lane holds a data record | never | no write end is open, or the pipe is lost | the pipe is lost |
-| write | never | its ring has room for a record of `PIPE_BUF` bytes | never | no read end remains, or the pipe is lost |
+| read | the pipe is not lost, and a lane holds a data record or no write end is open | never | no write end is open, or the pipe is lost | the pipe is lost |
+| write | never | its ring has room for a record of `PIPE_BUF` bytes, or no read end remains, or the pipe is lost | no read end remains, or the pipe is lost | the pipe is lost |
 
 A poll is a call of the end, under its lock like a read or a write, that
 looks and publishes but never copies (a read end's poll may still retire
@@ -1078,12 +1078,35 @@ for the reader lock or for a report waits the same way. A poll ignores
 is the end's, shared with the end's waiting calls under the rules of
 [several threads on one end](#ends-in-liberx), and rings the end's
 doorbell when the answer may change. `poll` and `select` watch every end
-they wait on before they poll any of them, so that ring, or a report,
-wakes the thread, which polls afresh.
+they poll before they poll any of them, a zero timeout included, and
+unwatch each before they return, so that ring, or a report, wakes the
+thread, which polls afresh, and the unwatch gives up what a poll left
+published.
 
-`POLLHUP` comes with `POLLIN` while records remain after the last writer
-went, and alone once they are read, and a write end with no read end
-reports `POLLERR`, as Linux's `pipe_poll` does. `FIONREAD` walks the
+The bits follow FreeBSD's `pipe_poll`, where UNIX systems differ. Once
+the last writer has gone, a read end reports `POLLIN` with `POLLHUP`,
+whether records remain or not, since a read then returns without
+waiting, with bytes or with the end of the stream; Linux reports
+`POLLHUP` alone once the records are read. A write end with no read end
+reports `POLLOUT` with `POLLHUP`, so that a writer waiting for room wakes
+and meets `EPIPE`; Linux reports `POLLERR`. A lost pipe, which neither
+has, is `POLLHUP` with `POLLERR` on a read end, without `POLLIN` even
+while records remain, since its read fails with `EIO`, and `POLLOUT`,
+`POLLHUP` and `POLLERR` on a write end, whose write fails with `EPIPE`.
+
+A poll that answered "nothing ready" leaves published what it waits for.
+`poll` and `select` give it up when they stop watching the end without
+polling it again (the timeout passes, or another descriptor is ready),
+through the unwatch every poll makes, so no exit path can leave it: the
+unwatch that leaves no thread waiting on a read end makes a read of 0
+bytes, as the session's pipe NIF gives up a wait, which clears the end's
+sleepers and waiters bits and wakes any call that started waiting
+meanwhile, so an idle read end holds no bit for writers and co-readers to
+ring. A write end withdraws nothing: its other waiting writes may rely on
+the need the poll published, and the reader rings the end once as it
+crosses that need, and never again.
+
+`FIONREAD` walks the
 records of the read end's lanes under the reader lock and reports the
 payload bytes of their data records, less what the current record has
 given.
@@ -1918,6 +1941,12 @@ answer the design follows:
   https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/fs/pipe.c?h=v6.17
   (read 2026-10-31, SHA-256
   `6d6d680a3109980cba6f34fe8710173dbf18e7c4bf3780c2000cc742bd91e5a6`).
+* FreeBSD, `sys/kern/sys_pipe.c`, `pipe_poll`: `POLLIN` on a read end
+  with bytes buffered or at `PIPE_EOF`; `POLLOUT` on a write end whose
+  peer is gone or at `PIPE_EOF`, or with `PIPE_BUF` bytes free; `POLLHUP`
+  at `PIPE_EOF` once the peer is gone; never `POLLERR`,
+  https://github.com/freebsd/freebsd-src/blob/main/sys/kern/sys_pipe.c
+  (main, read 2026-11-12).
 * FreeBSD, `sys/sys/pipe.h`: `PIPE_SIZE` 16384, `BIG_PIPE_SIZE` 65536,
   https://github.com/freebsd/freebsd-src/blob/main/sys/sys/pipe.h (main,
   read 2026-10-31).

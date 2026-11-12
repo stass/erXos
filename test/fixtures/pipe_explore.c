@@ -48,7 +48,9 @@
  * pipe's loss), each of which wakes the party; the pipe server freeing the
  * reader lock a gone read end held, once that end's stores have landed;
  * a read made afresh while the last one waits, as the session's pipe NIF
- * makes it, to read again or, of 0 bytes, to give the wait up; in a join
+ * makes it, to read again or, of 0 bytes, to give the wait up; a poll
+ * that answered 0 given up, as poll gives it up when it stops watching
+ * the end without polling it again; in a join
  * scenario the pipe server's store of wends, which installs the joining
  * write end; in a lost scenario the pipe's loss; and in a hostile scenario
  * one rewrite of a shared field.  The clock reads 0 in the shapes with one
@@ -103,12 +105,16 @@
  *        and an idle read end holds no sleepers bit on a live lane, no
  *        waiters bit and not the reader lock;
  *   POLL a poll answers as the readiness table says, never with nothing
- *        ready: POLLOUT only with room for a record of a chunk, POLLIN only
- *        with unclaimed bytes in a live lane, POLLHUP only once every write
- *        end has gone, alone only once every byte is claimed, and POLLERR
- *        only once no read end remains or the loss has been applied; a
- *        poll that waits is asleep as a write of a chunk or a read is, so
- *        PI7 covers what it published;
+ *        ready.  Each bit it reports holds: a write end's POLLOUT only
+ *        with room for a record of a chunk or no read end left, its
+ *        POLLHUP only with no read end left; a read end's POLLIN only
+ *        with unclaimed bytes in a live lane or every write end gone, its
+ *        POLLHUP only with every write end gone, and alone only after the
+ *        loss; POLLERR only once the loss has been applied.  And each bit
+ *        the end's state required when the poll began is reported
+ *        (wpoll_expected, rpoll_expected).  A poll that waits is asleep as
+ *        a write of a chunk or a read is, so PI7 covers what it published,
+ *        and one given up leaves an idle read end holding no bit;
  *
  * and, at the end of a scenario in which no read end ended early, that the
  * reads returned every byte published.  The service bound of PI6 is not
@@ -285,7 +291,8 @@ typedef struct world {
 	uint8_t		 eof[NR_MAX];
 	uint8_t		 over[NR_MAX];		/* no further read: EIO, or the
 						 * end of the stream twice */
-	uint8_t		 quit[NR_MAX];		/* the read is a wait given up */
+	/* quit[r]: bit c, caller c's read of 0 bytes gives its wait up */
+	uint8_t		 quit[NR_MAX];
 	uint8_t		 drained[NR_MAX][NW_MAX];
 	uint8_t		 going;		/* read ends whose going the server has
 					 * still to handle */
@@ -301,7 +308,10 @@ typedef struct world {
 	uint8_t		 needs[NW_MAX];
 	uint8_t		 repeated;	/* the last reading was a repeat */
 	uint8_t		 polls;		/* polls started */
-	uint8_t		 pad2[2];
+	/* The POLL* bits the running poll of each end must report, from what
+	 * the end's state held when the poll began (POLL's completeness) */
+	uint8_t		 expect_w[NW_MAX], expect_r[NR_MAX];
+	uint8_t		 pad2[6];
 } world_t;
 
 _Static_assert(sizeof(world_t) % sizeof(uint64_t) == 0,
@@ -421,6 +431,20 @@ static const scenario_t scenarios[] = {
 	  .wpoll = true },
 	{ .name = "rpoll", .nw = 1, .nr = 1, .writes = { { 4, 4 } },
 	  .deep = { { 4, 4, 4 } }, .read_len = 4, .rpoll = true },
+	/*
+	 * Polls that meet the other side gone: a write end's poll once the read
+	 * end has closed, a write end's and a read end's poll of a lost pipe.
+	 * Each path has a scenario of its own, since a loss that may still come
+	 * keeps every state with a sleeping poll from being final.
+	 */
+	{ .name = "wpoll-gone", .nw = 1, .nr = 1, .writes = { { 64 } },
+	  .deep = { { 16, 64 } }, .read_len = 16, .chunk = 32,
+	  .wpoll = true, .reader_closes = true },
+	{ .name = "wpoll-lost", .nw = 1, .nr = 1, .writes = { { 64 } },
+	  .deep = { { 16, 64 } }, .read_len = 16, .chunk = 32,
+	  .wpoll = true, .lost = true },
+	{ .name = "rpoll-lost", .nw = 1, .nr = 1, .writes = { { 4 } },
+	  .deep = { { 4, 4 } }, .read_len = 4, .rpoll = true, .lost = true },
 	{ .name = "hostile-writer", .nw = 1, .nr = 1, .writes = { { 16, 9 } },
 	  .deep = { { 40, 9 } }, .read_len = 24, .hostile = 'w', .nif = true },
 	{ .name = "hostile-reader", .nw = 1, .nr = 1, .writes = { { 16, 9 } },
@@ -818,6 +842,58 @@ next_action(world_t *wd, party_t *p)
 	p->decided = 1;
 }
 
+static bool unread(const world_t *, int);
+
+/* Whether caller c's call of read end r is a read of 0 bytes giving its wait up. */
+static bool
+quitting(const world_t *wd, int r, int c)
+{
+	return ((wd->quit[r] & 1u << c) != 0);
+}
+
+/*
+ * The bits a write end's poll must report, from facts that only grow
+ * while it runs: the loss applied, no read end left (both POLLOUT and
+ * POLLHUP, as FreeBSD's pipe_poll gives, so a writer wakes and meets
+ * EPIPE), and room for a chunk's record behind the committed rpos, which
+ * no one but the reader moves, and only forward unless a rewrite of a
+ * hostile scenario moves it.
+ */
+static uint8_t
+wpoll_expected(const world_t *wd, int w)
+{
+	const erx_pipe_wstate_t *ws = &wd->ws[w];
+
+	if (ws->lost)
+		return (POLLOUT | POLLHUP | POLLERR);
+	if (ws->readers == 0)
+		return (POLLOUT | POLLHUP);
+	if (sc->hostile == 0 && erx_ring_room(RING, ws->wpos,
+	    wd->mem.lane[w].rpos) >= erx_ring_span(chunk()))
+		return (POLLOUT);
+	return (0);
+}
+
+/*
+ * The bits a read end's poll must report, from facts that hold through
+ * its run: the loss applied; every write end gone, with no report left
+ * for the end to apply, which is POLLIN and POLLHUP whether bytes remain
+ * or not, as FreeBSD's pipe_poll gives; or unclaimed bytes in a live lane
+ * when the pipe has this one read end, so no co-reader claims them while
+ * the poll holds the end.
+ */
+static uint8_t
+rpoll_expected(const world_t *wd, int r)
+{
+	if (wd->rs[r].lost)
+		return (POLLHUP | POLLERR);
+	if (writers_gone(wd) && wd->r[r].reports == 0)
+		return (POLLIN | POLLHUP);
+	if (sc->nr == 1 && unread(wd, r))
+		return (POLLIN);
+	return (0);
+}
+
 /*
  * Caller c takes the free end and starts a fresh call with what it has
  * left, as liberx's read and write loops start one at a call's beginning
@@ -835,14 +911,18 @@ take(world_t *wd, party_t *p, int c)
 	p->bell = 0;
 	p->steps = 0;
 	p->base = writer ? wd->streamed[i] : 0;
-	if (writer && poller(wd, p, c))
+	if (writer && poller(wd, p, c)) {
+		wd->expect_w[i] = wpoll_expected(wd, i);
 		erx_pipe_wpoll_start(&wd->ws[i]);
-	else if (writer)
+	} else if (writer) {
 		erx_pipe_wstart(&wd->ws[i], p->left[c]);
-	else if (poller(wd, p, c))
+	} else if (poller(wd, p, c) && !quitting(wd, i, c)) {
+		/* A poller giving its poll up makes a plain read of left[c], 0. */
+		wd->expect_r[i] = rpoll_expected(wd, i);
 		erx_pipe_rpoll_start(&wd->rs[i]);
-	else
+	} else {
 		erx_pipe_rstart(&wd->rs[i], p->left[c]);
+	}
 	next_action(wd, p);
 }
 
@@ -933,23 +1013,38 @@ unread(const world_t *wd, int r)
 
 /*
  * A write end's poll answered: POLLOUT only with room for a chunk's record
- * behind the committed rpos, which only grows past the copy the poll took.
+ * behind the committed rpos, which only grows past the copy the poll took,
+ * or with no read end left; POLLHUP only with no read end left; POLLERR
+ * only once the loss is applied; and every bit the end's state required
+ * when the poll began.
  */
 static void
 poll_written(const world_t *wd, int w, int depth, int64_t bits)
 {
 	const erx_pipe_wstate_t *ws = &wd->ws[w];
+	const bool hup = ws->readers == 0 || ws->lost;
 
 	if (bits <= 0)
 		fail(depth, "POLL", "a poll returned with nothing ready");
-	if ((bits & POLLOUT) != 0 && erx_ring_room(RING, ws->wpos,
+	if ((bits & POLLOUT) != 0 && !hup && erx_ring_room(RING, ws->wpos,
 	    wd->mem.lane[w].rpos) < erx_ring_span(chunk()))
 		fail(depth, "POLL", "a poll reported room for less than a chunk");
-	if ((bits & POLLERR) != 0 && ws->readers != 0 && !ws->lost)
-		fail(depth, "POLL", "a poll reported POLLERR while a read end remains");
+	if ((bits & POLLHUP) != 0 && !hup)
+		fail(depth, "POLL", "a poll reported POLLHUP while a read end remains");
+	if ((bits & POLLERR) != 0 && !ws->lost)
+		fail(depth, "POLL", "a poll reported POLLERR before the loss was applied");
+	if ((bits & wd->expect_w[w]) != wd->expect_w[w])
+		fail(depth, "POLL", "a poll left out a bit the end's state required");
 }
 
-/* A read end's poll answered; no other call of the end claims meanwhile. */
+/*
+ * A read end's poll answered; no other call of the end claims meanwhile.
+ * POLLIN only with unclaimed bytes in a live lane or once every write end
+ * has gone (a read returns without waiting either way); POLLHUP only once
+ * every write end has gone or the loss is applied, and alone only after
+ * the loss; POLLERR only after the loss; and every bit the end's state
+ * required when the poll began.
+ */
 static void
 poll_read(const world_t *wd, int r, int depth, int64_t bits)
 {
@@ -957,14 +1052,16 @@ poll_read(const world_t *wd, int r, int depth, int64_t bits)
 
 	if (bits <= 0)
 		fail(depth, "POLL", "a poll returned with nothing ready");
-	if ((bits & POLLIN) != 0 && !unread(wd, r))
+	if ((bits & POLLIN) != 0 && !unread(wd, r) && !writers_gone(wd))
 		fail(depth, "POLL", "a poll reported POLLIN with nothing to read");
 	if ((bits & POLLHUP) != 0 && !lost && !writers_gone(wd))
 		fail(depth, "POLL", "a poll reported POLLHUP while a writer is open");
-	if ((bits & (POLLIN | POLLHUP)) == POLLHUP && !lost && !all_taken(wd))
-		fail(depth, "POLL", "a poll reported the end of the stream before every byte was read");
+	if ((bits & (POLLIN | POLLHUP)) == POLLHUP && !lost)
+		fail(depth, "POLL", "a poll reported the end of the stream without POLLIN");
 	if ((bits & POLLERR) != 0 && !lost)
 		fail(depth, "POLL", "a poll reported POLLERR before the loss was applied");
+	if ((bits & wd->expect_r[r]) != wd->expect_r[r])
+		fail(depth, "POLL", "a poll left out a bit the end's state required");
 }
 
 static void
@@ -997,10 +1094,10 @@ reader_done(world_t *wd, int r, int depth, int64_t result)
 		poll_read(wd, r, depth, result);
 		return;
 	}
-	if (wd->quit[r]) {
+	if (quitting(wd, r, wd->r[r].run)) {
 		if (result != 0)
 			fail(depth, "PI2", "a read of 0 bytes returned something");
-		wd->quit[r] = 0;
+		wd->quit[r] &= (uint8_t)~(1u << wd->r[r].run);
 		return;
 	}
 	if (result > 0 && wd->eof[r])
@@ -1025,19 +1122,34 @@ reader_done(world_t *wd, int r, int depth, int64_t result)
 		wd->over[r] = 1;
 }
 
+/* An end with no call left in progress is idle, or ended once its reads are over. */
+static void
+end_settles(world_t *wd, party_t *p)
+{
+	bool writer;
+	int i = party_index(wd, p, &writer), c;
+
+	for (c = 0; c < CALLERS_MAX; c++)
+		if (p->call[c] != C_IDLE)
+			return;
+	p->state = !writer && wd->over[i] ? ENDED : IDLE;
+	if (p->state == ENDED)
+		p->reports = 0;
+}
+
 /*
  * The running call returns its result (DONE) or waits (WAIT), and its
  * caller lets go of the end.  As liberx's read and write loops do, a run
  * that set wake_local first wakes the end's other waiting calls; a caller
  * that waits then joins the end's waiters, and one rung during its run
  * wakes at once.  An end with no call left in progress is idle, or ended
- * once its reads are over.
+ * once its reads are over (end_settles).
  */
 static void
 run_ends(world_t *wd, party_t *p, bool waits)
 {
 	bool writer, local;
-	int i = party_index(wd, p, &writer), c;
+	int i = party_index(wd, p, &writer);
 
 	local = writer ? wd->ws[i].wake_local : wd->rs[i].wake_local;
 	if (local)
@@ -1048,12 +1160,7 @@ run_ends(world_t *wd, party_t *p, bool waits)
 	p->steps = 0;
 	p->decided = 0;
 	memset(&p->act, 0, sizeof(p->act));
-	for (c = 0; c < CALLERS_MAX; c++)
-		if (p->call[c] != C_IDLE)
-			return;
-	p->state = !writer && wd->over[i] ? ENDED : IDLE;
-	if (p->state == ENDED)
-		p->reports = 0;
+	end_settles(wd, p);
 }
 
 /*
@@ -1896,11 +2003,23 @@ check_asleep(int depth)
 			fail(depth, "PI7", "a reader sleeps past published bytes (a lost wakeup)");
 		if (wd->rs[i].lost)
 			fail(depth, "PI7", "a reader sleeps past the pipe's loss (a lost wakeup)");
+		/*
+		 * A poll asleep while its end is ready lost its wakeup, whether
+		 * or not poll would give it up later: a give-up is an event
+		 * that may always come, so check_end never sees such a poll.
+		 */
+		if (p->call[1] == C_ASLEEP && poller(wd, p, 1) &&
+		    rpoll_expected(wd, i) != 0)
+			fail(depth, "PI7", "a poll sleeps with its read end ready (a lost wakeup)");
 	}
 	for (i = 0; i < sc->nw; i++) {
 		p = &wd->w[i];
-		if (!asleep(p) || !quiet(wd, p) || wd->ws[i].readers == 0 ||
-		    wd->ws[i].lost)
+		if (!asleep(p) || !quiet(wd, p))
+			continue;
+		if (p->call[1] == C_ASLEEP && poller(wd, p, 1) &&
+		    wpoll_expected(wd, i) != 0)
+			fail(depth, "PI7", "a poll sleeps with its write end ready (a lost wakeup)");
+		if (wd->ws[i].readers == 0 || wd->ws[i].lost)
 			continue;
 		for (c = 0; c < CALLERS_MAX; c++)
 			if (p->call[c] == C_ASLEEP && erx_ring_room(RING,
@@ -2126,15 +2245,54 @@ tell_gone(world_t *wd, bool writer, int i)
 		wd->going |= (uint8_t)(1u << i);
 }
 
-/* Caller 1 of end i starts a poll, while the scenario's polls last. */
+/*
+ * Caller 1 of end i, whose poll answered 0, stops waiting on it without
+ * polling the end again (a timeout, or another descriptor ready), as poll
+ * does through erx_pipe_unwatch: a read end withdraws what the poll
+ * published with a read of 0 bytes, and a write end withdraws nothing,
+ * since the reader rings once for the need left published, as it crosses
+ * it, and never again.  liberx withdraws only once no other thread waits
+ * on the end; the model withdraws whatever caller 0 does, which a waiting
+ * caller 0 survives as it survives a co-caller's read of 0 bytes.
+ */
+static int
+explore_poll_given_up(int depth, int i)
+{
+	world_t *cur = &worlds[depth], *nw;
+	const bool reader = i >= NW_MAX;
+	const party_t *p = reader ? &cur->r[i - NW_MAX] : &cur->w[i];
+	const bool withdraws = reader;
+	party_t *np;
+
+	/* A poll asleep, or woken and not yet polling again; not a give-up already made. */
+	if (p->call[1] != C_ASLEEP && (p->call[1] != C_READY ||
+	    (reader && quitting(cur, i - NW_MAX, 1))))
+		return (0);
+	nw = call_event(depth, "gives up its poll", i, 1);
+	np = reader ? &nw->r[i - NW_MAX] : &nw->w[i];
+	if (withdraws) {
+		nw->quit[i - NW_MAX] |= 1u << 1;
+		start_call(nw, np, 1, 0);
+	} else {
+		np->call[1] = C_IDLE;
+		end_settles(nw, np);
+	}
+	visit(depth + 1);
+	return (1);
+}
+
+/* Caller 1 of end i starts a poll, while the scenario's polls last, or gives one up. */
 static int
 explore_poll(int depth, int i)
 {
 	world_t *cur = &worlds[depth], *nw;
 	const party_t *p = i < NW_MAX ? &cur->w[i] : &cur->r[i - NW_MAX];
 
-	if (!alive(p) || !poller(cur, p, 1) || p->call[1] != C_IDLE ||
-	    cur->polls == POLLS_MAX)
+	if (!alive(p) || !poller(cur, p, 1))
+		return (0);
+	if (p->call[1] != C_IDLE)
+		return (explore_poll_given_up(depth, i));
+	if (cur->polls == POLLS_MAX)
 		return (0);
 	nw = call_event(depth, "poll", i, 1);
 	nw->polls++;
@@ -2221,7 +2379,10 @@ explore_readers(int depth)
 			for (k = 0; k < 2; k++) {
 				nw = successor(depth, k == 0 ? "R reads again " :
 				    "R gives up its wait ", r);
-				nw->quit[r] = k == 1;
+				if (k == 1)
+					nw->quit[r] |= 1u;
+				else
+					nw->quit[r] &= (uint8_t)~1u;
 				nw->r[r].left[0] = k == 0 ? sc->read_len : 0;
 				take(nw, &nw->r[r], 0);
 				visit(depth + 1);

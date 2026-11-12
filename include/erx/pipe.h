@@ -383,15 +383,20 @@ erx_pipe_act_t	erx_pipe_rstep(erx_pipe_rstate_t *r, const erx_pipe_in_t *in);
  * bits; otherwise it arms as a waiting read does, and waits.  A poll
  * ignores O_NONBLOCK.  Its wait is the caller's "nothing ready": the bits
  * it published ring the end's doorbell when that may have changed, and the
- * caller polls afresh then.  A poll's result is never 0.
+ * caller polls afresh then.  A poll's result is never 0.  Once no call
+ * waits on a read end, a read of 0 bytes (erx_pipe_rstart with len 0)
+ * withdraws what its polls published; a write end's need stays, and the
+ * reader rings for it once, as it crosses it.
  */
 void		erx_pipe_wpoll_start(erx_pipe_wstate_t *w);
 void		erx_pipe_rpoll_start(erx_pipe_rstate_t *r);
 
 /*
- * The POLL* bits of an end (docs/design-pipes.md, "Readiness"): a read
- * end's from whether a lane holds a data record and its count of open
- * writers, a write end's from its ring's room and its count of read ends.
+ * The POLL* bits of an end (docs/design-pipes.md, "Readiness"), as
+ * FreeBSD's pipe_poll gives them: a read end's from whether a lane holds a
+ * data record and its count of open writers, POLLIN|POLLHUP once none is
+ * open; a write end's from its ring's room and its count of read ends,
+ * POLLOUT|POLLHUP once none is left.  A lost pipe adds POLLERR to POLLHUP.
  */
 short	erx_pipe_ready_read(bool data, uint32_t writers_open, bool lost);
 short	erx_pipe_ready_write(uint64_t room, uint32_t chunk, uint32_t readers,

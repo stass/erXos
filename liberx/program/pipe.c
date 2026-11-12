@@ -907,9 +907,20 @@ erx_pipe_watch(erx_pipe_end_t *e, erx_prog_waiter_t *w)
 void
 erx_pipe_unwatch(erx_pipe_end_t *e, erx_prog_waiter_t *w)
 {
+	bool last;
+
 	erx_pipe_end_lock(e);
 	erx_prog_waitq_leave(&e->waiters, w);
+	last = e->waiters.head == NULL;
 	erx_pipe_end_unlock(e);
+	/*
+	 * No thread waits on the end any more, so nothing it published is
+	 * needed: a read of 0 bytes, which never waits or copies, gives every
+	 * wait up.  A thread that starts waiting meanwhile is woken by it and
+	 * publishes afresh.
+	 */
+	if (last && e->kind == ERX_PIPE_READ)
+		(void)erx_pipe_read(e, NULL, 0);
 }
 
 bool

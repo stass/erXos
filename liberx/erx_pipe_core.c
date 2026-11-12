@@ -1155,8 +1155,8 @@ pipe_ended(const erx_pipe_rstate_t *r)
  * count; one that copied nothing returns 0 at the end of the stream, else
  * fails with EAGAIN when non-blocking.  A blocking read arms every open
  * lane and picks once more; having armed and still finding nothing, it
- * waits.  A poll reports the end of the stream as POLLHUP and, whatever
- * O_NONBLOCK says, arms and waits as a blocking read does.
+ * waits.  A poll reports the end of the stream as POLLIN|POLLHUP and,
+ * whatever O_NONBLOCK says, arms and waits as a blocking read does.
  */
 static erx_pipe_act_t
 pipe_rnothing_readable(erx_pipe_rstate_t *r)
@@ -1385,20 +1385,31 @@ erx_pipe_rstep(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
 	return (pipe_done(-EIO));
 }
 
+/*
+ * As FreeBSD's pipe_poll: once no write end is open, a read returns without
+ * waiting, so POLLIN comes with POLLHUP whether records remain or not.  A
+ * lost pipe, which FreeBSD has no counterpart of, is POLLHUP|POLLERR: its
+ * read fails with EIO.
+ */
 short
 erx_pipe_ready_read(bool data, uint32_t writers_open, bool lost)
 {
 	short events = 0;
 
-	if (data)
-		events |= POLLIN;
-	if (writers_open == 0 || lost)
-		events |= POLLHUP;
 	if (lost)
-		events |= POLLERR;
+		return (POLLHUP | POLLERR);
+	if (data || writers_open == 0)
+		events |= POLLIN;
+	if (writers_open == 0)
+		events |= POLLHUP;
 	return (events);
 }
 
+/*
+ * As FreeBSD's pipe_poll: with no read end left, POLLOUT comes with
+ * POLLHUP, so a writer waiting for room wakes and meets EPIPE.  A lost
+ * pipe adds POLLERR.
+ */
 short
 erx_pipe_ready_write(uint64_t room, uint32_t chunk, uint32_t readers,
     bool lost)
@@ -1408,6 +1419,8 @@ erx_pipe_ready_write(uint64_t room, uint32_t chunk, uint32_t readers,
 	if (room >= erx_ring_span(chunk))
 		events |= POLLOUT;
 	if (readers == 0 || lost)
+		events |= POLLOUT | POLLHUP;
+	if (lost)
 		events |= POLLERR;
 	return (events);
 }
