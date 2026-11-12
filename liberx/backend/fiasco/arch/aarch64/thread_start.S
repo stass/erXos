@@ -9,10 +9,15 @@
  * no thread pointer, so the service starts every thread here with the stack
  * pointer holding its record. This stores the record where erx_utcb_self finds
  * it, sets the marker that says the kernel holds this UTCB, and takes the stack,
- * thread pointer and argument from the record's starting registers.
+ * thread pointer and the argument registers x0 to x7 from the record's starting
+ * registers.
  */
 
 #include "liberx/backend/fiasco/thread_offsets.h"
+
+	.if	ERX_FIASCO_START_ARGS != 8
+	.error	"the trampoline loads x0 to x7, ERX_FIASCO_START_ARGS of them"
+	.endif
 
 	.text
 	.global	erx_fiasco_thread_trampoline
@@ -27,7 +32,11 @@ erx_fiasco_thread_trampoline:
 	mov	sp, x11
 	ldr	x11, [x9, #ERX_FIASCO_RECORD_OFF_TLS]
 	msr	tpidr_el0, x11
-	ldr	x0, [x9, #ERX_FIASCO_RECORD_OFF_ARG]
+	add	x12, x9, #ERX_FIASCO_RECORD_OFF_ARGS
+	ldp	x0, x1, [x12]
+	ldp	x2, x3, [x12, #16]
+	ldp	x4, x5, [x12, #32]
+	ldp	x6, x7, [x12, #48]
 	ldr	x11, [x9, #ERX_FIASCO_RECORD_OFF_PC]
 	br	x11
 	.size	erx_fiasco_thread_trampoline, . - erx_fiasco_thread_trampoline

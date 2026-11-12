@@ -188,6 +188,20 @@ enum exit_kind i64
   value nothread -9223372036854775805
   value crash -9223372036854775804
   value signal 256
+# Which argument register of a program's first thread carries the value
+# of each object its session installed in the image's table
+# (docs/design-programs.md, "The channel"; docs/design-runtime.md,
+# "Programs as ports", step 5): its budget, its group, the inbound lane's
+# ring and reader page, the outbound lane's, and the session's doorbell,
+# which the program triggers.
+enum program_arg u32
+  value budget 0
+  value group 1
+  value in_ring 2
+  value in_reader 3
+  value out_ring 4
+  value out_reader 5
+  value doorbell 6
 # The fault table: the signal whose number, added to ERX_EXIT_SIGNAL, a
 # program's space stops with when one of its threads faults with each
 # kind. Every fault kind but exit, which marks a space's exit record, has

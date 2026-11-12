@@ -26,7 +26,11 @@
 
 ERX_DECLARE_ABI_NOTE(erx_task_abi_note);
 
-void erx_fiasco_task_main(uint64_t);
+void erx_fiasco_task_main(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+
+_Static_assert(ERX_FIASCO_START_ARGS == 8, "erx_fiasco_task_main takes each argument register the trampoline loads");
+/* program_arg's last value, the session's doorbell, is its highest index. */
+_Static_assert(ERX_PROGRAM_ARG_DOORBELL < ERX_FIASCO_START_ARGS, "a program's values fit the argument registers");
 
 uint64_t
 erx_fiasco_service_gate(void)
@@ -60,15 +64,18 @@ erx_time_page(void)
 	return ((const erx_time_page_t *)(uintptr_t)ERX_FIASCO_TIME_PAGE_ADDR);
 }
 
+/* The trampoline's eight argument registers, as the task's starter wrote them. */
 void
-erx_fiasco_task_main(uint64_t argument)
+erx_fiasco_task_main(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5,
+    uint64_t arg6, uint64_t arg7)
 {
+	const uint64_t args[ERX_FIASCO_START_ARGS] = { arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7 };
 	int64_t status = ERX_FIASCO_TASK_STATUS_UP;
 	uint64_t dispatcher;
 
 	erx_fiasco_thread_first_init();
 	if (erx_fiasco_reaper_start() == NULL && erx_fiasco_dispatcher_start(ERX_CAP_NULL, &dispatcher) == ERX_OK)
-		status = erx_task_main(argument);
+		status = erx_task_main(args);
 	(void)erx_space_stop(ERX_CAP_SELF, status);
 	erx_fiasco_sleep_forever();
 }

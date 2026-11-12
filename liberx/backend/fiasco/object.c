@@ -263,9 +263,10 @@ object_unheld(uint32_t index)
 }
 
 /*
- * The items are copied out of the caller's public UTCB once, since its task can write
- * them while the service reads, and each is checked and passed from that copy before
- * its result is written back.
+ * The creator's case, from any task: to's handle is in the caller's table only if the
+ * caller created that space, since no space handle passes. The items are copied out of
+ * the caller's public UTCB once, since its task can write them while the service reads,
+ * and each is checked and passed from that copy before its result is written back.
  */
 int
 erx_fiasco_cap_pass_body(uint32_t task, uint32_t caller, const erx_fiasco_cap_pass_request_t *request)
@@ -275,7 +276,7 @@ erx_fiasco_cap_pass_body(uint32_t task, uint32_t caller, const erx_fiasco_cap_pa
 	uint32_t target;
 	int status;
 
-	if (task != ERX_FIASCO_TASK_ROOT || request->from != ERX_CAP_SELF || request->to == ERX_CAP_SELF)
+	if (request->from != ERX_CAP_SELF || request->to == ERX_CAP_SELF)
 		return (ERX_ENOTSUP);
 	if (thread == NULL || request->count > ERX_MSG_CAPS)
 		return (ERX_EINVAL);

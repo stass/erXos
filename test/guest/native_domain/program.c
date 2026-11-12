@@ -17,9 +17,8 @@
 
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/fiasco/task_start.h"
 #include "test/guest/native_domain/modes.h"
-
-int64_t	erx_task_main(uint64_t);
 
 /* Whether the release slice, mapped at the boot page's address, begins with RELEASE_TEXT. */
 static bool
@@ -47,8 +46,9 @@ word_is(const char *word, const char *text)
 }
 
 int64_t
-erx_task_main(uint64_t argument)
+erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 {
+	const uint64_t argument = args[0];
 	const erx_boot_info_t *info = (const erx_boot_info_t *)(uintptr_t)argument;
 	const char *word = (const char *)(uintptr_t)(argument + info->args_off);
 	static _Atomic uint32_t never;

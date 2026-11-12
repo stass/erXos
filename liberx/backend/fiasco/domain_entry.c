@@ -74,13 +74,14 @@ log_line(void *context, const char *line, size_t length)
 }
 
 /*
- * argument is the page's address. An address that names no page is refused before
+ * The first argument is the page's address. An address that names no page is refused before
  * anything reads through it; the reader then checks the copy's every field and string.
  * The view it fills is not kept: erx_runtime_main reads the copy again for ERTS.
  */
 int64_t
-erx_task_main(uint64_t argument)
+erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 {
+	const uint64_t argument = args[0];
 	const unsigned char *const page = (const unsigned char *)(uintptr_t)argument;
 	erx_boot_view_t view;
 	erx_boot_info_status_t status;

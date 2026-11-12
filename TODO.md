@@ -1110,7 +1110,7 @@ it; git history is the record of completed work.
   a create from a task other than the root is not refused, though the call table and the
   deferred table say `ERX_ENOTSUP` in 1b-A (docs/design-stopgap.md, `erx_space_create`), so a task with a fault
   gate of its own makes Fiasco tasks and spends the service's task rows; the child stays
-  inert, since a thread, an image map or a pass into it is root only. Refuse it and add a
+  inert, since a thread or an image map into it is root only. Refuse it and add a
   `native_task` case. More widely, "root only" is a check in each body (`cap_pass`,
   `image_map`, `slice_create`, `task_join`, the thread and IRQ bodies, the physical and
   contiguous creates), and this one was missed: give each call a caller class in

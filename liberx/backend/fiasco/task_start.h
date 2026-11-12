@@ -8,6 +8,8 @@
 
 #include <stdint.h>
 
+#include "liberx/backend/fiasco/thread_offsets.h"
+
 /* The status of a task whose reaper would not start: no program ran. */
 #define ERX_FIASCO_TASK_STATUS_UP	INT64_C(-2)
 /* The status of a program linked with musl whose start came back, which it never should. */
@@ -15,7 +17,11 @@
 /* The status of a domain's runtime whose boot information page the reader refused: no program ran. */
 #define ERX_FIASCO_TASK_STATUS_BOOT_PAGE	INT64_C(-4)
 
-/* The program's entry, on the task's first thread. Its result stops the task. */
-int64_t	erx_task_main(uint64_t argument);
+/*
+ * The program's entry, on the task's first thread, with the argument registers its
+ * starter wrote: a program's in the order of the ABI's program_arg, a domain's runtime
+ * its boot information page's address in the first. Its result stops the task.
+ */
+int64_t	erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS]);
 
 #endif /* ERX_FIASCO_TASK_START_H */

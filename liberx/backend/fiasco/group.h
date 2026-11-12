@@ -78,8 +78,9 @@ int	erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t s
  * its deliveries report, and lets a line deliver. A bind waits until the group has a
  * home with a dispatcher. Binding a bound object to its group again moves its label; to
  * another group, ERX_ENOTSUP. A group's 65th object is ERX_ELIMIT. A group of ERX_CAP_NULL
- * unbinds it. A task other than the root names only the group it is the home of, as the
- * target and as the group a bound object is in, and any other is ERX_ETYPE.
+ * unbinds it. A task other than the root names only the group it is the home of or a
+ * group it created, as the target and as the group a bound object is in, and any other
+ * is ERX_ETYPE.
  */
 int	erx_irq_bind(uint64_t irq, uint64_t group, uint64_t label) ERX_WARN_UNUSED_RESULT;
 /* From any task holding the object. An ack lets a line deliver again, which it does not after a delivery until then. */

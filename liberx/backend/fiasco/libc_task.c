@@ -28,9 +28,9 @@ erx_fiasco_libc_write(const void *bytes, size_t length)
 }
 
 int64_t
-erx_task_main(uint64_t argument)
+erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 {
-	(void)argument;
+	(void)args;
 	erx_fiasco_libc_start(main);
 	return (ERX_FIASCO_TASK_STATUS_LIBC);
 }

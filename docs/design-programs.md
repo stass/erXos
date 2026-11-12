@@ -305,7 +305,8 @@ its own budget, never the program's, since the session maps them too, and
 binds the doorbells, installs into the program's table its copies, each
 without `DUP`, `GIVE` or `DESTROY`, and tells the program their values in
 the first thread's argument registers, together with the values of its
-budget and its group; `liberx` maps the four pages before anything else.
+budget and its group, in the registers `abi/erx_abi.txt`'s `program_arg`
+names; `liberx` maps the four pages before anything else.
 The session holds the only `DESTROY` on the channel's objects and deletes
 them only after the program's budget is destroyed, so the program never
 faults on its own channel; a program that unmaps or closes its channel

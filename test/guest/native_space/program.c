@@ -21,6 +21,7 @@
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/park.h"
 #include "liberx/backend/fiasco/service.h"
+#include "liberx/backend/fiasco/task_start.h"
 #include "liberx/backend/fiasco/time.h"
 #include "liberx/backend/fiasco/thread.h"
 #include "liberx/backend/fiasco/vm.h"
@@ -30,7 +31,8 @@
 /* The handle table of each space the creator makes. */
 #define CREATED_CAP_LIMIT	16u
 
-int64_t	erx_task_main(uint64_t);
+_Static_assert(PROGRAM_TAG_ARG > ERX_PROGRAM_ARG_DOORBELL && PROGRAM_TAG_ARG < ERX_FIASCO_START_ARGS,
+    "the tag's register is an argument register no program value uses");
 
 /* A word of the program's writable data, of which each task has its own copy. */
 static volatile uint64_t data_word = DATA_PATTERN;
@@ -207,10 +209,12 @@ mode_time(void)
 
 static _Alignas(16) uint8_t bell_stack[BELL_STACK_BYTES];
 static _Atomic int64_t bell_result = BELL_RUNNING;
+/* The label the executor waits for, written before it starts. */
+static uint64_t bell_label;
 
 /*
- * An executor of the task's home group: parks until a take gives its bell's label, then
- * acks the bell and rings the back object, if the argument names one, from this task's
+ * An executor of the task's home group: parks until a take gives bell_label, then acks
+ * the bell and rings the back object, each if the argument names one, from this task's
  * own handles to both.
  */
 static void
@@ -232,15 +236,16 @@ bell_executor(uint64_t argument)
 		if (taken == 0 && erx_park(group_epoch, own, deadline) == ERX_ETIMEDOUT)
 			break;
 	}
-	if (taken == 1 && erx_utcb_mr_load(erx_utcb_self(), 0, &label) && label == BELL_LABEL)
-		result = erx_irq_ack(bell) == ERX_OK && (back == ERX_CAP_NULL || erx_irq_trigger(back) == ERX_OK) ? 0 : 62;
+	if (taken == 1 && erx_utcb_mr_load(erx_utcb_self(), 0, &label) && label == bell_label)
+		result = (bell == ERX_CAP_NULL || erx_irq_ack(bell) == ERX_OK) &&
+		    (back == ERX_CAP_NULL || erx_irq_trigger(back) == ERX_OK) ? 0 : 62;
 	atomic_store_explicit(&bell_result, result, memory_order_release);
 	erx_thread_exit();
 }
 
-/* From the first thread, a worker, once: starts the executor, and returns its result once it has one. */
+/* From the first thread, a worker, once: starts the executor for label, and returns its result once it has one. */
 static int64_t
-bell_run(uint64_t argument)
+bell_run(uint64_t argument, uint64_t label)
 {
 	erx_fiasco_start_t start = { 0 };
 	const uint64_t *const words = (const uint64_t *)(const void *)&start;
@@ -248,6 +253,7 @@ bell_run(uint64_t argument)
 	int64_t result;
 	uint64_t thread;
 
+	bell_label = label;
 	start.regs.gpr[0] = argument;
 	start.regs.sp = (uint64_t)(uintptr_t)(bell_stack + sizeof(bell_stack));
 	start.regs.pc = (uint64_t)(uintptr_t)bell_executor;
@@ -263,30 +269,137 @@ bell_run(uint64_t argument)
 	return (result == BELL_RUNNING ? 63 : result);
 }
 
+/* A word of the channel's ring, where this task mapped it. */
+static _Atomic uint64_t *
+channel_word(uint64_t word)
+{
+	return ((_Atomic uint64_t *)(uintptr_t)(CHANNEL_ADDR + word * sizeof(uint64_t)));
+}
+
+/* Maps the ring at CHANNEL_ADDR in this task's own space. */
+static bool
+channel_map(uint64_t ring)
+{
+	return (erx_vm_reserve(ERX_CAP_SELF, CHANNEL_ADDR, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) == ERX_OK &&
+	    erx_vm_map(ERX_CAP_SELF, CHANNEL_ADDR, PAGE, ring, 0, ERX_PROT_RW) == ERX_OK);
+}
+
+/* One erx_cap_pass item in the calling thread's public UTCB: a copy of handle with the rights mask. */
+static void
+item_put(size_t item, uint64_t handle, uint32_t mask)
+{
+	uint64_t desc = 0;
+
+	(void)erx_msg_item_desc_rights_set(&desc, mask);
+	(void)erx_utcb_mr_store(erx_utcb_self(), 2 * item, desc);
+	(void)erx_utcb_mr_store(erx_utcb_self(), 2 * item + 1, handle);
+}
+
+/* What erx_cap_pass made of one item: the handle's value in the target's table. */
+static uint64_t
+item_value(size_t item)
+{
+	uint64_t value = ERX_CAP_NULL;
+
+	(void)erx_utcb_mr_load(erx_utcb_self(), 2 * item + 1, &value);
+	return (value);
+}
+
+/* What the maker installs into its child, in order: each without DUP, GIVE or DESTROY, the session's bell TRIGGER alone. */
+enum { INSTALL_BUDGET, INSTALL_GROUP, INSTALL_RING, INSTALL_SESSION_BELL, INSTALL_OTHER, INSTALL_ITEMS };
+#define INSTALL_RIGHTS	(UINT32_MAX & ~(ERX_HR_DUP | ERX_HR_GIVE | ERX_HR_DESTROY))
+/* What MODE_MAKER adds to its child's status when the child ends with another than PROGRAM_STATUS. */
+#define CHILD_FAILED	INT64_C(1000)
+
+/*
+ * Installs the program's handles into child as a session does, after the passes a
+ * task may not make: of a space or gate handle, into its own space, or into a handle
+ * that names no space. Fills values with what the pass made of each item.
+ */
+static int64_t
+maker_install(uint64_t child, uint64_t gate, const uint64_t handles[INSTALL_ITEMS], uint64_t values[INSTALL_ITEMS])
+{
+	item_put(0, child, INSTALL_RIGHTS);
+	if (erx_cap_pass(ERX_CAP_SELF, child, 1) != ERX_ENOTSUP)
+		return (100);
+	item_put(0, gate, INSTALL_RIGHTS);
+	if (erx_cap_pass(ERX_CAP_SELF, child, 1) != ERX_ENOTSUP)
+		return (101);
+	item_put(0, handles[INSTALL_RING], INSTALL_RIGHTS);
+	if (erx_cap_pass(ERX_CAP_SELF, ERX_CAP_SELF, 1) != ERX_ENOTSUP)
+		return (102);
+	if (erx_cap_pass(ERX_CAP_SELF, handles[INSTALL_RING], 1) != ERX_ETYPE)
+		return (103);
+	/* At most ERX_MSG_CAPS items a call. */
+	for (size_t first = 0; first < INSTALL_ITEMS; first += ERX_MSG_CAPS) {
+		const size_t count = INSTALL_ITEMS - first < ERX_MSG_CAPS ? INSTALL_ITEMS - first : ERX_MSG_CAPS;
+
+		for (size_t item = 0; item < count; item++)
+			item_put(item, handles[first + item],
+			    first + item == INSTALL_SESSION_BELL ? ERX_HR_TRIGGER : INSTALL_RIGHTS);
+		if (erx_cap_pass(ERX_CAP_SELF, child, (uint32_t)count) != ERX_OK)
+			return (104);
+		for (size_t item = 0; item < count; item++)
+			values[first + item] = item_value(item);
+	}
+	return (0);
+}
+
+/*
+ * The child's starting registers, as a session writes a program's: the installed
+ * values where program_arg puts them, PROGRAM_MARK with its index in the lane
+ * registers this test leaves without a value, and PROGRAM_TAG in the last.
+ */
+static void
+program_registers(uint64_t pc, const uint64_t values[INSTALL_ITEMS])
+{
+	erx_fiasco_start_t start = { 0 };
+	const uint64_t *const words = (const uint64_t *)(const void *)&start;
+
+	start.regs.pc = pc;
+	for (uint32_t index = 0; index < ERX_FIASCO_START_ARGS; index++)
+		start.regs.gpr[index] = PROGRAM_MARK | index;
+	start.regs.gpr[ERX_PROGRAM_ARG_BUDGET] = values[INSTALL_BUDGET];
+	start.regs.gpr[ERX_PROGRAM_ARG_GROUP] = values[INSTALL_GROUP];
+	start.regs.gpr[ERX_PROGRAM_ARG_OUT_RING] = values[INSTALL_RING];
+	start.regs.gpr[ERX_PROGRAM_ARG_DOORBELL] = values[INSTALL_SESSION_BELL];
+	start.regs.gpr[PROGRAM_TAG_ARG] = PROGRAM_TAG;
+	for (size_t word = 0; word < sizeof(start) / sizeof(uint64_t); word++)
+		atomic_store_explicit(&erx_utcb_self()->mr[word], words[word], memory_order_relaxed);
+}
+
 /*
  * What a session makes for each program, from this task's own authority (MODE_MAKER):
  * a budget carved from the one its own space is charged to, a budget carved from that,
- * a group and a bell charged to them, and a child below its own space, charged to the
- * first budget, running index 0 of the slice the root passed in the new group. A task
- * resizes no budget and makes no line. The bell binds only into this task's own home
- * group, not into the child's, and its ring reaches this task's executor. The child's
- * first thread ends with FIRST_STATUS, and the first budget's destroy takes everything
+ * a group, another group and a bell charged to them, and a child below its own space,
+ * charged to the first budget, that will run index 0 of the slice the root passed in
+ * the new group. A task resizes no budget and makes no line. From its own budget it
+ * makes the channel: a ring and the program's doorbell (program_bell), which it binds into the new
+ * group, its creator's to bind into though the child becomes its home, and it binds
+ * the bell, the session's doorbell, into its own home group. It installs the budget,
+ * the group, the ring, the bell and the other group into the child (maker_install),
+ * leaves the other group's value in the ring, and starts the child with the values in
+ * its argument registers (mode_program). The child's first thread ends with
+ * PROGRAM_STATUS, and its ring of the bell, made before, reaches this task's executor
+ * with the child's pattern in the ring. The first budget's destroy takes everything
  * charged to either budget, the bell included.
  */
 static int64_t
 mode_maker(uint64_t argument)
 {
 	const uint64_t slice = argument >> MAKER_SLICE_SHIFT & HANDLE_MASK;
-	uint64_t budget, carved, group, bell, refused, gate, child, pc, thread, label;
+	uint64_t budget, carved, group, other, bell, ring, program_bell, refused, gate, child, pc, thread, label;
+	uint64_t handles[INSTALL_ITEMS], values[INSTALL_ITEMS];
 	erx_fault_t record;
-	int64_t rung;
+	int64_t step;
 
 	if (erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_WALL, MAKER_PAGES, MAKER_PAGES, &budget) != ERX_OK ||
 	    erx_budget_create(budget, ERX_BUDGET_ELASTIC, 1, 2, &carved) != ERX_OK)
 		return (70);
 	if (erx_budget_resize(budget, 1, 1) != ERX_ENOTSUP)
 		return (71);
-	if (erx_group_create(budget, 0, &group) != ERX_OK || erx_irq_create(carved, 0, ERX_IRQ_SOFT, 0, &bell) != ERX_OK)
+	if (erx_group_create(budget, 0, &group) != ERX_OK || erx_group_create(budget, 0, &other) != ERX_OK ||
+	    erx_irq_create(carved, 0, ERX_IRQ_SOFT, 0, &bell) != ERX_OK)
 		return (72);
 	if (erx_irq_create(budget, 0, ERX_IRQ_LINE, 0, &refused) != ERX_ENOTSUP)
 		return (73);
@@ -294,23 +407,79 @@ mode_maker(uint64_t argument)
 	    erx_space_create(budget, ERX_CAP_SELF, gate, MAKER_LABEL, 0, CREATED_CAP_LIMIT, &child) != ERX_OK ||
 	    erx_image_map(child, slice, 0, &pc) != ERX_OK)
 		return (74);
-	first_registers(pc, FIRST_TAG << SLOT_SHIFT | MODE_FIRST);
-	if (erx_thread_create(0, child, group, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK)
+	if (erx_mem_create(0, PAGE, 0, &ring) != ERX_OK ||
+	    erx_irq_create(0, 0, ERX_IRQ_SOFT, 0, &program_bell) != ERX_OK || !channel_map(ring))
 		return (75);
-	/* The child is the new group's home, so the group is not this task's to bind into. */
-	if (erx_irq_bind(bell, group, BELL_LABEL) != ERX_ETYPE)
+	if (erx_irq_bind(program_bell, group, CHANNEL_LABEL) != ERX_OK)
 		return (76);
-	if (erx_irq_bind(bell, ERX_CAP_SELF, BELL_LABEL) != ERX_OK || erx_irq_trigger(bell) != ERX_OK)
+	if (erx_irq_bind(bell, ERX_CAP_SELF, BELL_LABEL) != ERX_OK)
 		return (77);
-	rung = bell_run(bell << BELL_SHIFT | ERX_CAP_NULL << BACK_SHIFT);
-	if (rung != 0)
-		return (rung);
-	if (erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) != ERX_OK || erx_thread_start(thread) != ERX_OK)
+	handles[INSTALL_BUDGET] = budget;
+	handles[INSTALL_GROUP] = group;
+	handles[INSTALL_RING] = ring;
+	handles[INSTALL_SESSION_BELL] = bell;
+	handles[INSTALL_OTHER] = other;
+	step = maker_install(child, gate, handles, values);
+	if (step != 0)
+		return (step);
+	atomic_store_explicit(channel_word(CHANNEL_OTHER_WORD), values[INSTALL_OTHER], memory_order_release);
+	program_registers(pc, values);
+	if (erx_thread_create(0, child, group, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK)
 		return (78);
-	if (!record_take(&record, &label) || record.kind != ERX_FAULT_EXIT || label != MAKER_LABEL ||
-	    record.status != FIRST_STATUS)
+	/* Rung before the child runs: the kernel keeps the ring for the bind its home's dispatcher makes. */
+	if (erx_irq_trigger(program_bell) != ERX_OK || erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) != ERX_OK ||
+	    erx_thread_start(thread) != ERX_OK)
 		return (79);
-	return (erx_object_destroy(budget) == ERX_OK && erx_irq_trigger(bell) == ERX_ESTALE ? 0 : 80);
+	/* The child's own status names the step it failed at, above CHILD_FAILED. */
+	if (!record_take(&record, &label) || record.kind != ERX_FAULT_EXIT || label != MAKER_LABEL)
+		return (80);
+	if (record.status != PROGRAM_STATUS)
+		return (CHILD_FAILED + record.status);
+	step = bell_run(bell << BELL_SHIFT | ERX_CAP_NULL << BACK_SHIFT, BELL_LABEL);
+	if (step != 0)
+		return (step);
+	if (atomic_load_explicit(channel_word(0), memory_order_acquire) != WRITER_PATTERN)
+		return (81);
+	/* The channel's objects go after the program's budget, as a session deletes them. */
+	if (erx_object_destroy(budget) != ERX_OK || erx_irq_trigger(bell) != ERX_ESTALE)
+		return (82);
+	return (erx_object_destroy(program_bell) == ERX_OK && erx_object_destroy(ring) == ERX_OK ? 0 : 83);
+}
+
+/*
+ * The child MODE_MAKER starts (PROGRAM_TAG): checks each marked register, maps the
+ * ring and finds the other group's value there, makes a doorbell of its own from the
+ * passed budget, which the other group, neither its home nor its own, refuses, and
+ * may neither unbind nor move the session's doorbell out of the maker's group. Writes
+ * WRITER_PATTERN, and, once its executor took the program's doorbell under
+ * CHANNEL_LABEL, rings the session's doorbell. Ends with PROGRAM_STATUS.
+ */
+static int64_t
+mode_program(const uint64_t args[ERX_FIASCO_START_ARGS])
+{
+	static const uint32_t marked[] = {
+		ERX_PROGRAM_ARG_IN_RING, ERX_PROGRAM_ARG_IN_READER, ERX_PROGRAM_ARG_OUT_READER
+	};
+	uint64_t own, other;
+	int64_t step;
+
+	for (size_t at = 0; at < sizeof(marked) / sizeof(marked[0]); at++)
+		if (args[marked[at]] != (PROGRAM_MARK | marked[at]))
+			return (130 + (int64_t)at);
+	if (args[ERX_PROGRAM_ARG_BUDGET] == ERX_CAP_NULL || args[ERX_PROGRAM_ARG_GROUP] == ERX_CAP_NULL ||
+	    !channel_map(args[ERX_PROGRAM_ARG_OUT_RING]))
+		return (133);
+	if (erx_irq_create(args[ERX_PROGRAM_ARG_BUDGET], 0, ERX_IRQ_SOFT, 0, &own) != ERX_OK)
+		return (134);
+	other = atomic_load_explicit(channel_word(CHANNEL_OTHER_WORD), memory_order_acquire);
+	if (erx_irq_bind(own, other, BELL_LABEL) != ERX_ETYPE)
+		return (135);
+	if (erx_irq_bind(args[ERX_PROGRAM_ARG_DOORBELL], ERX_CAP_NULL, 0) != ERX_ETYPE ||
+	    erx_irq_bind(args[ERX_PROGRAM_ARG_DOORBELL], ERX_CAP_SELF, BELL_LABEL) != ERX_ETYPE)
+		return (136);
+	atomic_store_explicit(channel_word(0), WRITER_PATTERN, memory_order_release);
+	step = bell_run(ERX_CAP_NULL << BELL_SHIFT | args[ERX_PROGRAM_ARG_DOORBELL] << BACK_SHIFT, CHANNEL_LABEL);
+	return (step == 0 ? PROGRAM_STATUS : step);
 }
 
 static bool
@@ -381,8 +550,12 @@ mode_code_write(void)
 }
 
 int64_t
-erx_task_main(uint64_t argument)
+erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 {
+	const uint64_t argument = args[0];
+
+	if (args[PROGRAM_TAG_ARG] == PROGRAM_TAG)
+		return (mode_program(args));
 	switch (argument & MODE_MASK) {
 	case MODE_WRITER:
 		return (mode_writer());
@@ -401,7 +574,7 @@ erx_task_main(uint64_t argument)
 	case MODE_TIME:
 		return (mode_time());
 	case MODE_BELL:
-		return (bell_run(argument));
+		return (bell_run(argument, BELL_LABEL));
 	case MODE_MAKER:
 		return (mode_maker(argument));
 	case MODE_RELEASE:

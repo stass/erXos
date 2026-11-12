@@ -22,7 +22,7 @@
 #define MODE_DATA	11	/* finds DATA_PATTERN in its own writable data and writes WRITER_PATTERN there: ends with 0 */
 #define MODE_CODE_READ	12	/* ends with the first word of its own code as its status */
 #define MODE_CODE_WRITE	13	/* writes the first word of its own code, which faults at its gate */
-#define MODE_MAKER	14	/* in its domain group: makes a program's budget, group and bell, runs the child: ends with 0 */
+#define MODE_MAKER	14	/* in its domain group: makes and installs a program's handles, runs it: ends with 0 */
 #define MODE_MASK	UINT64_C(0xff)
 #define SLOT_SHIFT	8u
 
@@ -87,5 +87,21 @@
 #define MAKER_SLICE_SHIFT	8u
 #define MAKER_LABEL	UINT64_C(7)
 #define MAKER_PAGES	UINT64_C(64)
+
+/*
+ * The program MODE_MAKER starts, as a session starts one: its first thread finds
+ * PROGRAM_TAG in its last argument register, which no mode's argument reaches, the
+ * values the maker installed in the registers the ABI's program_arg names, and
+ * PROGRAM_MARK with its index in each register the maker leaves without a value. The
+ * program's doorbell rings under CHANNEL_LABEL, and the maker leaves the value of a
+ * group the program may not bind into at CHANNEL_OTHER_WORD of the ring.
+ */
+#define PROGRAM_TAG_ARG	7u
+#define PROGRAM_TAG	UINT64_C(0x9e0a9e0a9e0a9e0a)
+#define PROGRAM_MARK	UINT64_C(0x3a3a3a3a00000000)
+#define PROGRAM_STATUS	57
+#define CHANNEL_ADDR	UINT64_C(0x4000a00000)
+#define CHANNEL_LABEL	UINT64_C(0xc4a1000000000001)
+#define CHANNEL_OTHER_WORD	1u
 
 #endif /* ERX_NATIVE_SPACE_MODES_H */

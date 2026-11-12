@@ -52,7 +52,9 @@ _Static_assert(ERX_FIASCO_THREAD_TABLE_BYTES == 64 * ERX_PAGE_SIZE, "the table i
 _Static_assert(ERX_BACKEND_PARK_OBJECTS_MAX * sizeof(uint64_t) <= ERX_PAGE_SIZE, "the labels fill one page at most");
 _Static_assert(L4_UTCB_OFFSET << 7 == UINT64_C(1) << ERX_FIASCO_UTCB_AREA_ORDER, "128 slots fill the area");
 _Static_assert(offsetof(erx_fiasco_thread_record_t, start) + offsetof(erx_regs_t, gpr) ==
-    ERX_FIASCO_RECORD_OFF_ARG, "the trampoline's argument");
+    ERX_FIASCO_RECORD_OFF_ARGS, "the trampoline's arguments");
+_Static_assert(ERX_FIASCO_START_ARGS * sizeof(uint64_t) <= sizeof(((erx_regs_t *)0)->gpr),
+    "the trampoline's arguments are general registers");
 _Static_assert(offsetof(erx_fiasco_thread_record_t, start) + offsetof(erx_regs_t, sp) ==
     ERX_FIASCO_RECORD_OFF_SP, "the trampoline's stack");
 _Static_assert(offsetof(erx_fiasco_thread_record_t, start) + offsetof(erx_regs_t, pc) ==

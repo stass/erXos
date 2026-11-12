@@ -186,8 +186,9 @@ executor_start(void)
 }
 
 int64_t
-erx_task_main(uint64_t argument)
+erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 {
+	const uint64_t argument = args[0];
 	int64_t status;
 
 	for (uint32_t index = 0; index < HOLDER_HANDLES; index++)

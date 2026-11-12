@@ -205,6 +205,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_space/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_space/program.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_domain/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_domain/program.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_vm_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/boot_info_driver.c'),
                   Chokepoints::Site.new(glob: 'tools/fuzz/boot_args_fuzz.c'),

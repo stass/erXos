@@ -10,8 +10,8 @@
  * and any holder's to trigger, ack and bind; its kernel object sits in one of the root's
  * slots, kept here with its bind. The root binds
  * into any group it holds, as the domain library binds a domain's bell, and the root's own
- * drivers their lines; another holder binds only within the group it is the home of
- * (irq_group_allowed).
+ * drivers their lines; another holder binds only within the group it is the home of or
+ * a group it created (irq_group_allowed).
  *
  * A bind gives the object a free entry of its group, one of the 64 the group's home
  * task has labels for, stores the caller's label on the home's label page through the
@@ -195,15 +195,20 @@ erx_fiasco_irq_create_body(uint32_t task, const erx_fiasco_irq_create_request_t 
 
 /*
  * Whether the task may bind into the group record, or move or unbind an object bound
- * there: the root in any group it holds, and any other task only in the group it is the
- * home of (docs/design-stopgap.md, "Device records"), so a holder's driver binds the
- * line it was given to its own group and reaches no other domain's. A task's row names
- * the one group it is the home of (group.c), and the caller's row is live.
+ * there: the root in any group it holds; any other task in the group it is the home of
+ * (docs/design-stopgap.md, "Device records"), so a holder's driver binds the line it was
+ * given to its own group and reaches no other domain's; and in a group it created, so a
+ * session binds a program's doorbell into the program's group, whose home is the
+ * program (docs/design-programs.md, "The channel"). A group's home is its creator or a
+ * space below it, since group handles pass only down and a thread is created only in
+ * its caller's own space or one the caller created. A task's row names the one group
+ * it is the home of (group.c), the group's record its creator, and both are live.
  */
 static bool
 irq_group_allowed(uint32_t task, uint32_t group)
 {
-	return (task == ERX_FIASCO_TASK_ROOT || erx_fiasco_task(task)->group == group + 1);
+	return (task == ERX_FIASCO_TASK_ROOT || erx_fiasco_task(task)->group == group + 1 ||
+	    erx_fiasco_object_at(group)->creator == task);
 }
 
 /* ERX_CAP_SELF names the caller's home group, which the root's first group is for the root. */

@@ -297,7 +297,7 @@ service_main(void)
 /*
  * The IRQ calls (irq.c): any task makes a doorbell and the root a line, and any task holding its handle
  * triggers, acks, binds and unbinds it, a task other than the root only within the group
- * it is the home of.
+ * it is the home of or a group it created.
  */
 static int
 service_irq(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)

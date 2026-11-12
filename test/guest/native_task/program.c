@@ -425,8 +425,9 @@ mode_write(void)
 }
 
 int64_t
-erx_task_main(uint64_t argument)
+erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 {
+	const uint64_t argument = args[0];
 	int64_t step;
 
 	switch (argument) {

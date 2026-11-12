@@ -806,8 +806,9 @@ case_doorbells(void)
 
 /*
  * A task makes a program's records from its own authority, as a session does (MODE_MAKER
- * in program.c): budgets, a group, a bell and a child that runs, from a slice of the
- * program's entry the root passed it, in the new group. The root starts the task in a
+ * in program.c): budgets, groups, a channel and a child that runs, from a slice of the
+ * program's entry the root passed it, in the new group, with the handles the task
+ * passed it and their values in its argument registers. The root starts the task in a
  * domain group, its home, into which the task binds its bell. The task's end takes the
  * domain group with it, and the pages come back. After case_doorbells, as the root
  * already has a group of its own.
