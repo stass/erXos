@@ -39,10 +39,12 @@
 # "ascending"; a map's "field" keys must be present and its "optional"
 # keys may be; a union's "case ATOM [=ATOM...] [KIND...]" is its atom, or
 # a tuple of its atom, its literal atoms and its fields. "boolean" and
-# "signal" are built in. A capability is a value of an integer kind
-# "except @cap_null"; for a union a frame to the program carries, the
-# generator walks each case's capabilities and refuses one nested inside
-# another kind.
+# "signal" are built in. "capability NAME" declares a capability handle:
+# a u64 other than cap_null; no two capabilities of a frame are equal.
+# A handle is 64 bits, so every other u64 kind or field fails, as does an
+# integer excepting cap_null. For a union a frame to the program carries,
+# the generator walks each case's capabilities and refuses one nested
+# inside another kind.
 
 limit prog_frame_max u32 196608
 limit prog_args_max u32 131072
@@ -72,7 +74,7 @@ protocol erx_prog
   integer parent_id u32 in 1 0x7fffffff
   integer fd u16 in 0 1023
   integer dup_target u16 in 0 1023 refers fds
-  integer cap u64 except @cap_null unique
+  capability cap
   integer open u16 in 0 0xffff
   integer umask u16 in 0 511
   integer data_slots u8 in 1 @prog_data_slots_max

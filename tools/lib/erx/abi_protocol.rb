@@ -39,6 +39,9 @@ LIST_MAX = 1 << 24
       # An error reply is a reply of no operation, and the codec carries a reply as
       # {reply, Operation, Reply}, so neither word may name an operation.
       RESERVED_OPERATIONS = %w[error reply].freeze
+      # The limit (abi/kernel.txt) naming the null capability, which a
+      # capability kind excludes.
+      CAP_NULL = 'cap_null'
       LENGTHS = { 'u16' => 65_535, 'u32' => 65_536 }.freeze
       # Names become Erlang atoms and functions: no reserved word, no dot, and no
       # kind whose check would clash with a BIF or a helper of the generated module.
@@ -83,7 +86,7 @@ LIST_MAX = 1 << 24
             line.fail!('expected errors type N') unless words.size == 2 && words.first == 'type'
             error_type = number(words[1], 255, line, constants).fetch(:value)
             errors = error_numbers(children, line, constants)
-          when 'integer', 'text', 'tuple', 'list', 'map', 'union'
+          when 'integer', 'capability', 'text', 'tuple', 'list', 'map', 'union'
             kind_name = atom_name(words.first, line: line)
             line.fail!("reserved kind name #{kind_name}") if RESERVED_KINDS.include?(kind_name)
             if kinds.key?(kind_name) || BASE_KINDS.include?(kind_name) || totals.key?(kind_name)
@@ -136,6 +139,7 @@ LIST_MAX = 1 << 24
       def kind(form, words, children, line, kinds, constants)
         case form
         when 'integer' then integer_kind(words, line, constants)
+        when 'capability' then capability_kind(words, line, constants)
         when 'text' then text_kind(words, line, constants)
         when 'tuple'
           line.fail!('a tuple has 1 to 32 elements') unless words.size.between?(1, MAX_FIELDS)
@@ -219,7 +223,23 @@ LIST_MAX = 1 << 24
           end
         end
         line.fail!('only an integer with or ATOM may be local') if result[:local] && !result[:atom]
+        if result.dig(:except, :constant) == CAP_NULL
+          line.fail!('an integer excepting cap_null is a capability: declare it capability NAME')
+        end
         result.freeze
+      end
+
+      # "capability NAME": a capability handle (docs/design-abi.md, "Program
+      # protocol"). It reads as a u64 other than cap_null; it is unique, so
+      # no two capabilities of one frame are equal; and capability: true is
+      # what the profile's walk reads. A frame protocol takes no other u64
+      # (Profile.u64_rule!), so a handle has no other spelling there.
+      def capability_kind(words, line, constants)
+        line.fail!('a capability takes no options') unless words.empty?
+        line.fail!("a capability needs the limit #{CAP_NULL}") unless constants.key?(CAP_NULL)
+        { form: 'integer', base: 'u64'.b, local: false,
+          except: number("@#{CAP_NULL}", (1 << 64) - 1, line, constants),
+          unique: true, capability: true }.freeze
       end
 
       # max N, then "utf8", "refuse" and its refusals, "assign", "path",

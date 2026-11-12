@@ -1932,12 +1932,14 @@ it; git history is the record of completed work.
   put, the whole-record need and the refusal of a record larger than the area.
 * [Low] `abi/erx_abi.txt` (`program_arg`): the generator emits no count, so
   `ERX_PROGRAM_INSTALL_DATA` (`erx_program_core.h`) assumes `doorbell` is the last index.
-* [Medium] ABI generator, `tools/lib/erx/abi_profile.rb` (`capability?`): the generated walk that
-  names a report's capabilities, which the executor closes for an end it no longer holds, knows a
-  capability only as an integer kind written `except @cap_null`. A capability field of another
-  kind (one that may be null, or `except 0`) is neither walked nor refused, and leaks. Make a
-  capability a declared property of a kind that the walk reads, or refuse an unmarked `u64` field
-  in a union a frame to the program carries.
+* [Medium] ABI generator, `tools/lib/erx/abi_profile.rb` (`capability_fields`): the generated
+  capability walk covers only a union a frame to the program carries. A capability in a
+  to-program frame of another kind (a tuple, a map) is neither walked nor refused, which is
+  right only for the startup message, since a refused start ends the program. A second
+  to-program union holding capabilities would get a walk that no executor code calls, because
+  `liberx/program/pipe.c` calls `erx_prog_report_caps` by name. Mark the startup frame, refuse a
+  capability in any other to-program frame that is not a union, and refuse a second walked
+  union until the executor dispatches walks by frame.
 * [Medium] liberx program layer, `liberx/program/inbound.c` (`ERX_PROG_REPORT_MAX`): every frame
   after the startup message is bounded by `prog.txt`'s `prog_report_max`, 512 bytes, which
   `erx_program:send/2` does not enforce. A reply to a worker's request

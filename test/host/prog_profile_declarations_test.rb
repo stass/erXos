@@ -24,6 +24,7 @@ class ProgProfileDeclarationsTest < Minitest::Test
     "  union probe\n    case a fd fd\n    case a =b fd" => /two cases are selected by the same arity and leading atoms/,
     "  union probe\n    case a_b fd\n    case a =b" => /two cases share a C name/,
     "  list probe cwd max 2 ascending" => /an ascending list needs an integer or atom key/,
+    # A capability is unique, so a list of capabilities is refused as well.
     "  list probe cap max 4" => /a unique kind is never a list's element/,
     "  integer probe u16 in 0 10 refers argv" => /refers names a list whose elements are not tuples/,
     "  integer wide u32 in 0 5000\n  tuple wide_entry wide\n  list wides wide_entry max 4\n  " \
@@ -37,12 +38,24 @@ class ProgProfileDeclarationsTest < Minitest::Test
     "  frame probe2 to erx_prog report\n" => /two frames of one direction share a tag and slot form/,
     "  frame probe2 from erx_prog notice\n" => /two frames of one direction share a tag and slot form/,
     '  text probe max 8 length u16' => /describe 9P2000\.L and fail in a frame protocol/,
-    "  integer cap2 u64 unique\n  tuple probe cap2" => /a protocol has at most one unique kind/,
+    "  integer twice u32 unique\n  tuple probe twice" => /a protocol has at most one unique kind/,
     '  text probe max 8 refuse nul slash' => /a frame protocol's text refuses only nul/,
     "  integer probe u16 in 0 1023 refers fds unique\n  tuple probe2 probe\n  frame probe from erx_probe probe2\n" =>
       /a kind is unique or refers, not both/,
     "  union probe\n    case a =b" => /a case without fields has no literal atoms/,
     "  union probe\n    case a writer_state\n  frame probe to erx_probe probe\n" => /union probe's case a holds a capability inside writer_state/,
+    "  tuple boxed cap\n  union probe\n    case a boxed\n  frame probe to erx_probe probe\n" =>
+      /union probe's case a holds a capability inside boxed/,
+    # A capability has one spelling, so the walk cannot miss one written as an integer.
+    "  integer cap2 u64 except @cap_null\n  tuple probe cap2" => /an integer excepting cap_null is a capability/,
+    "  integer cap2 u64 except 0\n  tuple probe cap2" => /kind cap2: a frame protocol's u64 is a capability/,
+    "  integer handle u64\n  tuple probe handle" => /kind handle: a frame protocol's u64 is a capability/,
+    "  integer handle u64 in 1 0xffffffffffffffff\n  tuple probe handle" =>
+      /kind handle: a frame protocol's u64 is a capability/,
+    "  union probe\n    case a pipe_id u64\n  frame probe to erx_probe probe\n" =>
+      /kind probe: a frame protocol's u64 is a capability/,
+    "  capability cap2 unique\n  tuple probe cap2" => /a capability takes no options/,
+    "  capability cap2\n  tuple probe cap2" => /a protocol has at most one unique kind/,
     "#{TOTALS}\n  tuple probe #{(1..9).map { |n| "x#{n}" }.join(' ')}" => /at most 8 totals/
   }.freeze
 

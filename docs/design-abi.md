@@ -1020,6 +1020,7 @@ before its check has accepted all of it.
 | `reader c` | the generator also emits the C check and accessors; the members that describe 9P2000.L's bytes (`length`, `packed`, `local`, `errors`, `operation`, `writes`, `check`) fail in such a protocol |
 | `frame NAME to\|from TAG [slot] KIND` | a frame to the program or from it: `{TAG, Version, Value}`, or `{TAG, Version, Slot, Value}` with `slot`, `Slot` from 0 to 15 |
 | `integer NAME BASE [in MIN MAX \| values N...] [except N] [unique] [refers LIST]` | an integer of `u8`, `u16`, `u32` or `u64` within the range or among the values given; `unique`: no two values of the kind in one frame are equal, for a kind that is never itself a list's element; `refers LIST`: the value is the first field of an element of the frame's `LIST` that holds no `refers` value itself |
+| `capability NAME` | a capability handle: a `u64` other than `cap_null`, unique as an integer marked `unique` is. The capability walk below, and every reader that must know a value is a capability, reads this declaration. A handle is 64 bits, so a frame protocol refuses every other `u64`, an `integer` kind or a bare field, and every protocol refuses an `integer` excepting `cap_null`: a handle has no other spelling to escape the walk. A protocol has at most one unique kind, so it declares one capability kind and uses it wherever a capability appears; a file protocol takes none |
 | `text NAME max N [utf8] [refuse nul] [assign] [path] [sum TOTAL]` | a binary of at most N bytes; `utf8`, valid UTF-8 as RFC 3629 defines it; `refuse nul`, no zero byte; `assign`, at least one byte before its first `=`; `path`, absolute and normalised: a leading `/`, no empty, `.` or `..` component, and a trailing `/` only in `/` itself; `sum TOTAL`, its length plus one counts towards `TOTAL` |
 | `total NAME MAX` | at most MAX in one frame over the texts marked `sum NAME`: for `argv` and `env`, their bytes with the NUL that C adds to each, as FreeBSD counts `ARG_MAX` |
 | `tuple NAME KIND...` | a tuple of the kinds in order |
@@ -1034,7 +1035,8 @@ because each list that names them is `ascending`, a signal set in the
 order of its atoms' spelling, not of the signals' numbers: no uniqueness rule and
 no table of seen keys is needed, and the generated builders, which sort
 those lists, keep the session from having to. Only a capability value,
-which appears in many places of one frame, needs `unique`, and only
+which appears in many places of one frame, needs `unique`, which its
+declaration implies, and only
 `{dup, Fd}` needs `refers`, which refuses a `dup` of a `dup` and a `dup`
 of a number the message lacks.
 
@@ -1075,7 +1077,7 @@ protocol erx_prog
   reader c
   integer fd u16 in 0 1023
   integer dup_target u16 in 0 1023 refers fds
-  integer cap u64 except @cap_null unique
+  capability cap
   integer open u16
   integer lane_size u32 values 16384 65536
   total args @prog_args_max
@@ -1143,7 +1145,7 @@ const char *erx_prog_kind_name(uint16_t kind);
 ```
 
 For each union a frame to the program carries whose cases hold capabilities, values of
-an integer kind that excludes `cap_null`, it also emits the most
+the kind declared `capability`, it also emits the most
 capabilities one case holds and the walk that names them, for the
 report `ERX_PROG_REPORT_CAPS` and `erx_prog_report_caps`, so the executor
 closes what a report for an end it no longer holds installed without a

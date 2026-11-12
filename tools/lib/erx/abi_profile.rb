@@ -35,7 +35,7 @@ module Erx
                            if %i[max values atom except].count { |option| kind[option] } > 1
                              declaration.fail!("kind #{name}: a file protocol's integer takes one of max, values, or ATOM and except")
                            end
-                           kind[:unique] || kind[:refers] || kind[:min]
+                           kind[:capability] || kind[:unique] || kind[:refers] || kind[:min]
                          when 'text'
                            if kind.fetch(:max).fetch(:value) > LENGTHS.fetch(kind.fetch(:length))
                              declaration.fail!("kind #{name}: max past its #{kind.fetch(:length)} length")
@@ -58,6 +58,7 @@ module Erx
           unused = kinds.keys - used
           declaration.fail!("unused kinds #{unused.join(' ')}") unless unused.empty?
           kinds.each { |kind_name, kind| kind_rules!(declaration, kind_name, kind, kinds, totals) }
+          u64_rule!(declaration, kinds)
           summed = kinds.values.filter_map { |kind| kind[:sum] }.uniq
           declaration.fail!("unused totals #{(totals.keys - summed).join(' ')}") unless (totals.keys - summed).empty?
           frame_limit = "#{name.delete_prefix('erx_')}_frame_max"
@@ -75,14 +76,15 @@ module Erx
             kinds: kinds.freeze, totals: totals.freeze,
             frames: frames.map { |frame| frame.except(:line).freeze }.freeze,
             frame_max: { value: constants.fetch(frame_limit).value, constant: frame_limit }.freeze,
-            depth: depth, unique: unique.first, refers: refers.freeze, cap_null: constants['cap_null']&.value,
+            depth: depth, unique: unique.first, refers: refers.freeze,
             capabilities: capabilities }.freeze
         end
 
-        # A capability is a value of an integer kind that excludes cap_null, as
-        # prog.txt's cap does.
+        # A capability is a value of a kind declared "capability NAME"
+        # (Protocols.capability_kind); u64_rule! leaves a frame protocol no
+        # other 64-bit kind that could hold a handle.
         def capability?(kinds, name)
-          kinds.dig(name, :form) == 'integer' && kinds.dig(name, :except, :constant) == 'cap_null'
+          kinds.dig(name, :capability) == true
         end
 
         # Whether a value of kind name holds a capability anywhere within it.
@@ -92,9 +94,13 @@ module Erx
           kind = kinds[name]
           return false unless kind
 
-          inner = [*kind.fetch(:elements, []), kind[:element], *kind.fetch(:fields, []).map(&:last),
-                   *kind.fetch(:cases, []).flat_map { |item| item.fetch(:fields) }].compact
-          inner.any? { |item| holds_capability?(kinds, item) }
+          inner_kinds(kind).any? { |item| holds_capability?(kinds, item) }
+        end
+
+        # The kinds a kind's elements, fields or cases' fields name directly.
+        def inner_kinds(kind)
+          [*kind.fetch(:elements, []), kind[:element], *kind.fetch(:fields, []).map(&:last),
+           *kind.fetch(:cases, []).flat_map { |item| item.fetch(:fields) }].compact
         end
 
         # For each union a frame to the program carries whose cases hold
@@ -118,6 +124,21 @@ module Erx
             end
             [union, cases.freeze] if cases.values.any?(&:any?)
           end.to_h.freeze
+        end
+
+        # A capability handle is 64 bits (erx_abi.txt's scalar cap), so a
+        # frame protocol's every u64 is a capability: an integer kind of base
+        # u64 that is not one, or u64 itself as an element or field, fails.
+        # A handle spelled any other way, null or not, is then refused, not
+        # left for the walk to miss.
+        def u64_rule!(declaration, kinds)
+          offender, = kinds.find do |_, kind|
+            plain = kind.fetch(:form) == 'integer' && kind.fetch(:base) == 'u64' && !kind[:capability]
+            plain || inner_kinds(kind).include?('u64')
+          end
+          return unless offender
+
+          declaration.fail!("kind #{offender}: a frame protocol's u64 is a capability: declare it capability NAME")
         end
 
         def nine_p_kinds?(kinds)
