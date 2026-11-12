@@ -514,7 +514,7 @@ it; git history is the record of completed work.
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
 * [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`, `wait_idle`: a boot that leaves the UART or its transmitter disabled with bytes in the transmit FIFO keeps `FR.BUSY` set, and the driver exits `pl011_busy` where clearing `FEN` would flush the FIFO (DDI 0183G 3-16); the wait is bounded by a count of reads, not a time.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a window overlap and memory held by another record are told by comparing handle values, so one object given under two handles (a give that installs it twice, or the root's own `-erx given` records over slots it holds otherwise) passes, and two records carve the same pages of one memory. Compare the objects the backend resolves, or make one handle per object a promise of the domain library that the NIF states.
-* [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a second record whose window shares a page with another's is `ERX_EBUSY`, where `docs/design-runtime.md`, "Windows smaller than a page", has such records share that page's one mapping; a unit of two transports in one page, given over one window object, cannot open its second. Share the mapping, or have the design give each device a window object of its own.
+* [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a second record whose window shares a page with another's is `ERX_EBUSY`, where `docs/design-runtime.md`, "Windows smaller than a page", has such records share that page's one mapping; a unit of two transports in one page, given over one window object, cannot open its second. Share the mapping, each record naming its unit's page run, as [design-shared-devices.md](docs/design-shared-devices.md#pages-inside-a-domain) has it.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.h`: the physical form is the zero value of `erx_device_form_t`, so a spec whose form no decoder set makes physical objects; give 0 to a refused `ERX_DEVICE_FORM_NONE` and set the physical form explicitly in `decode_window`.
 * [Low] `test/fixtures/erx_device_dma_harness.c`: nothing shows that `open` and `queue_create` read nothing from kept memory (`mprotect` it `PROT_NONE` until `negotiate` in `next_record`), and the harness's `erx_vm_map` takes offset 0 only, so a given window at a nonzero page of its object is not exercised.
 * [Low] `tools/lib/erx/manifest.rb`, `check_device`: an unconfined device's `dma_memory` is not held to `mem_contiguous_max` (`abi/erx_abi.txt`), though the domain library gives it as one contiguous object, so a platform record over the limit passes the check and fails only at the give. Refuse it in the check, with the limit from the ABI model.
@@ -1145,7 +1145,8 @@ it; git history is the record of completed work.
   page, whoever the object is for. On the Raspberry Pi 4 that page also holds the auxiliary SPI
   controllers, so a root-side driver or given record of an SPI there would hand the log over before
   the console starts. Tie the handoff to the console itself (its first `erx_log_take`, or a role its
-  driver's open names) rather than to an address.
+  driver's open names) rather than to an address: [design-stopgap.md](docs/design-stopgap.md#the-console) ties it to
+  the console's first take, which `erx_console` makes before it starts its driver.
 * [Medium] erx_uart, `erx_pl011:console_uart/1` and `erx_mini_uart:console_uart/1`: the parse of
   `-erx console_uart` is copied in each driver, as are their fuzz targets. One parse of the four
   numbers, with each driver checking only its clock rule, and one fuzz target.
@@ -2484,8 +2485,9 @@ it; git history is the record of completed work.
   transports, 0x200 apart) cannot be given to a configured domain: each
   entry's window covers the shared page and the give refuses overlapping
   entries, so the boot view, and with it the build, refuses such a unit on a
-  configured row. Make the catalogue's entry the unit, its ranges the
-  union of its devices' pages and its lines theirs, before a board places
+  configured row. Make the give the unit's, with one window per page run and
+  one IRQ object per distinct line, as
+  [design-shared-devices.md](docs/design-shared-devices.md#the-unit-rule) has it, before a board places
   such a unit outside the system domain.
 * [Low] domain library, `dom_core.c` request planning: a requested
   domain's args and env are checked against `ERX_BOOT_STRINGS_MAX` alone,
@@ -6191,10 +6193,18 @@ document's "residual risks accepted" paragraph.
   QEMU `virt`'s eight virtio-mmio slots per page can be driven at a time (the QEMU plan's second disk, on
   `virtio-mmio-bus.30`, shares the first one's page, so its open would be refused). The console handoff
   (`liberx/backend/fiasco/service_task.c`, `erx_fiasco_task_mem_physical_body`) compares the request's base with the
-  console's exactly, which holds for a page-aligned UART only; test containment instead. design-platforms.md's
-  virtio-mmio rows give each device a domain of its own, which PL2's one-unit-per-page rule rules out on `virt`. Let records whose windows share a page share its one mapping, each still
-  reaching only its own window through the register table, and test two slots of one page in
+  console's exactly, which holds for a page-aligned UART only; test containment instead. Let records whose windows share a page share its one mapping, each still
+  reaching only its own window through the register table
+  ([design-shared-devices.md](docs/design-shared-devices.md#pages-inside-a-domain)), and test two slots of one page in
   `test/fixtures/erx_device_harness.c`.
+* [Low] runtime and drivers, shared interrupt lines
+  ([design-shared-devices.md](docs/design-shared-devices.md#lines-inside-a-domain)): the device NIF makes one IRQ
+  object per record line (`erx_device.c`, `take_lines`) and keeps one binding per record line (`erx_device_nif.c`,
+  `bindings`), so two records on one line fail at the second create; the boot view relates units by page only
+  (`dom_boot_view.c`, `boot_devices`); `erx_irq_line`, its owner and the check that only it binds or acknowledges a
+  line do not exist, and drivers call `irq_bind/2` and `irq_ack/2` themselves. No supported board runs two drivers on
+  one line. Residual once built: a line owner keeps no deadline per firing, so a hung driver holds its sharers
+  masked until the unit is restarted.
 * [Medium] erx_blk, the block driver: the device process's backlog, reply and reset decisions
   (`erlang/apps/erx_blk/src/erx_blk.erl`, `submit/3`, `resume/1`, `recover/2`) are tested only end to end, by the
   `block_device` QEMU suite's good path; they should move into a pure module whose full, held and broken cases are

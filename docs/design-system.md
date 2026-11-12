@@ -433,7 +433,10 @@ violation fails the build with the property, the record and the field:
    the slot writer holds the windows on the slots, the boot-selection
    record and the reset count; only storage domains hold windows on data,
    FAT and vault's partitions; the units of the UARTs that `console` and
-   `hostlink` name are the system domain's, and the two paths differ; only
+   `hostlink` name are the system domain's, the two paths differ, and the
+   two UARTs do not share an interrupt line, since each of the system
+   domain's UART drivers binds its line itself
+   ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)); only
    the storage domain that serves the vault holds the vault's partition,
    and only the vault holds a facet of that domain's tree; only the
    network domain holds a network device; and only the system domain
@@ -2569,17 +2572,21 @@ through `erx_object_info` and builds a catalogue: path, compatible string,
 register ranges, interrupt lines, and whether a device is confined
 ([design-kernel.md](design-kernel.md#resources-dma-windows-and-consoles)).
 Each device goes to the one domain the manifest names for it, as part of
-that domain's creation: for each catalogue entry whose unit the manifest
-places on the configured row, `erx_dom_plan_configured` adds a **give**,
-planned by `erx_dom_plan_device_give` and applied whole by one step of the
-creation's plan. A give carves the device's resource, creates its
-register windows as physical memory objects with device attributes, its
-IRQ objects and, for a confined device, its DMA window, all from the
-holder's own budget; for an unconfined device it gives the device's
-contiguous memory instead (below); and it gives the holder its
-capabilities ([Authority](#authority)). A give is its own plan, not
-steps in the creation's, because every device's objects use the same
-object numbers and so cannot share the creation's object namespace; a
+that domain's creation: for each unit the manifest places on the
+configured row, `erx_dom_plan_configured` adds a **give**, planned by
+`erx_dom_plan_device_give` and applied whole by one step of the
+creation's plan. A give carves the resources of the unit's devices and
+creates, all from the holder's own budget, the unit's register windows
+as physical memory objects with device attributes, one over each run of
+consecutive pages its register ranges cover, its IRQ objects, one for
+each distinct line its devices name, and, for each confined device, its
+DMA window; devices that share a page or a line share that window or
+that IRQ object, which the domain library installs under one handle
+([design-shared-devices.md](design-shared-devices.md#the-unit-rule)). For
+an unconfined device it gives the device's contiguous memory instead
+(below); and it gives the holder its capabilities
+([Authority](#authority)). A give is its own plan, not steps in the
+creation's, because every unit's objects use the same object numbers and so cannot share the creation's object namespace; a
 creation holds up to eight. No device service has to give at the right
 moment. The planner gives a device only to a domain of the row its unit
 is placed on, and refuses a give with `ERX_EBUSY` while a living domain
@@ -2660,8 +2667,9 @@ bytes without reading them
 ([design-live.md](design-live.md#the-console)). So no domain can read a
 passphrase typed at the login prompt, and a domain writes to the operator
 only through a connected session's tty. On the Raspberry Pi 4 the
-console's unit is the mini UART's, which shares its page with the
-auxiliary SPI controllers, and the host link's is the PL011s' unit; both
+console's unit is the mini UART's, which shares its page and its line
+with the auxiliary SPI controllers, and the host link's is the PL011s'
+unit, which share a page and a line; both
 go to the system domain, which drives neither the auxiliary SPI
 controllers nor the PL011s the host link does not use
 ([design-platforms.md](design-platforms.md#raspberry-pi-4-model-b)). The
@@ -2673,8 +2681,8 @@ a panic or the machine's end, and the driver owns it otherwise
 
 **On the stopgap.** The device service, the manifest's placement, the
 drivers and their supervisors are the same code. In a give, the domain
-library creates a device's register window, its line's IRQ object and, at
-the first give, its contiguous memory, all in the root, from the catalogue
+library creates the unit's register windows, its lines' IRQ objects and,
+at the first give, each device's contiguous memory, all in the root, from the catalogue
 entry at the give's index, which is the manifest's device row (neither
 backend has a resource object, so the give's resource step makes
 nothing), and passes them to the holding domain, whose
@@ -2688,11 +2696,9 @@ unconfined device. QEMU `virt`, as the harness starts it, has no IOMMU
 and attaches its devices over virtio-mmio, so every DMA device on the
 stopgap is unconfined. The catalogue is the manifest's device table:
 the domain library's boot view builds an entry per device, placed on its
-unit's holder, derives the units from the devices' register pages, and
-refuses the whole view when devices that share a page are in two unit
-rows, when devices of one unit that a configured row holds share a page,
-since a give windows one device and the library refuses a window over a
-page another entry's window meets, or when a device is marked confined,
+unit's holder, checks the units against the devices' register pages and
+lines, and refuses the whole view when devices that share a page or a
+line are in two unit rows, or when a device is marked confined,
 since the stopgap lists no IOMMU stream; the manifest check builds the same view, so such a
 manifest fails the build, and no domain is created from a placement the
 view did not admit. The development manifest gives the block and network devices each
@@ -2769,7 +2775,14 @@ Through the NIF:
   which unmasks the line
   ([design-kernel.md](design-kernel.md#irq-objects)). A process's exit
   unbinds only the lines still bound under its own label, so a late exit
-  never undoes a successor's binding. No dirty scheduler blocks in an
+  never undoes a successor's binding. A line that two of a unit's drivers
+  use is bound once, by the line's **owner**, a supervised Erlang process
+  that tells each driver on the line of every firing and acknowledges the
+  line once all of them have answered or exited; the drivers join it
+  instead of binding and report done instead of acknowledging, through
+  `erx_irq_line`, the one module that binds or acknowledges a line
+  ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)).
+  No dirty scheduler blocks in an
   interrupt wait, and interrupt-to-handler latency passes through the
   runtime's scheduler, so gate G9 decides batching per device class
   ([plan.md](plan.md)).
@@ -2826,7 +2839,10 @@ to the domain the manifest names for it, the library plans the give with
 windows after checking that each lies inside the bridge's windows from
 the device tree and overlaps no other device, creates its MSIs as IRQ
 objects on the MSI frame, whose doorbell address and data the result
-names, and creates its DMA window on the stream that the device tree's
+names (functions interrupt by MSI or MSI-X only: a bridge's INTx lines,
+which the functions behind it share, go to no domain, and a function that
+offers neither is given with no interrupt,
+[design-shared-devices.md](design-shared-devices.md#the-unit-rule)), and creates its DMA window on the stream that the device tree's
 `iommu-map` gives its requester id, when the function lies on one of the
 machine's fixed buses
 ([design-kernel.md](design-kernel.md#resources-dma-windows-and-consoles));
@@ -2850,14 +2866,21 @@ platform build fixes, at boot and at a panic or an end.
 
 **Units.** Devices that cannot be given apart form one **unit**: those
 whose register ranges share a page, since a page has at most one MMIO
-object, and those behind one PCIe function, as the Raspberry Pi 5's I/O
-controller's are ([design-platforms.md](design-platforms.md#pcie-bridges)).
+object, those whose interrupts arrive on one line, since a line has at
+most one IRQ object, and those behind one PCIe function, as the Raspberry
+Pi 5's I/O controller's are
+([design-platforms.md](design-platforms.md#pcie-bridges)). A unit is
+closed under sharing a page and sharing a line, so no page and no line
+is ever held by two domains; a sub-device never crosses a domain as
+registers or a line, and another domain reaches what it does only through
+a file tree or a facet its holder serves
+([design-shared-devices.md](design-shared-devices.md)).
 The manifest gives devices by unit, and the check proves each unit given
 whole to one domain (property 1). At boot the device service computes the
-units from the catalogue's register ranges and the kernel's listing, so
-no list of units is trusted unchecked, and gives a unit that the machine's
-listing splits across the manifest's domains to no domain, with a
-diagnostic; a manifest whose own units split a page never gets that far,
+units from the catalogue's register ranges and lines and the kernel's
+listing, so no list of units is trusted unchecked, and gives a unit that
+the machine's listing splits across the manifest's domains to no domain,
+with a diagnostic; a manifest whose own units split a page or a line never gets that far,
 since the domain library's boot view, which the manifest check runs too,
 refuses it whole. A unit goes to one
 domain, whose drivers reset its devices together. The domain library

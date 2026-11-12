@@ -2464,7 +2464,15 @@ peripheral, at an offset below its window's size. Every device of a
 shared page belongs to one domain, since devices whose registers share a
 page form one unit ([design-platforms.md](design-platforms.md#invariants),
 PL2), so the mapping reaches no other domain's device. Records whose
-windows share a page share that page's one mapping.
+windows share a page share that page's one mapping: a record names the
+run of pages its unit's windows cover around its own, as the window
+object a give made for the run, which the domain library installs under
+one handle, or for a physical record as the run's base and length; the
+NIF maps a run at the first open of any record in it and keeps the
+mapping for the boot, and each later record of the run takes its window
+at its offset there. A record whose run meets a mapped run without being
+it is `{error, ebusy}`: its writer and the unit disagree
+([design-shared-devices.md](design-shared-devices.md#pages-inside-a-domain)).
 
 **Registers by name.** `erx_device:read(Dev, Reg)` and
 `erx_device:write(Dev, Reg, Value)`, with `erx_device:read_field/3` and
@@ -2636,7 +2644,8 @@ driver process that used the device exits, the NIF refuses `post/4` on
 the device until `negotiate/2`. The queues and their memory stay in the
 device's record, so a driver's start and its restart are one sequence:
 `open/1`; `queue_create/4` for each queue, which finds a queue its
-predecessor made; `negotiate/2`; then `irq_bind/2` and the reads of the
+predecessor made; `negotiate/2`; then the line's attach through
+`erx_irq_line` and the reads of the
 device's configuration. A queue created after `negotiate/2` is not on the
 device until the next one. The queue's size is the driver's bound on what
 the device may hold at once.
@@ -2658,7 +2667,15 @@ group under a label the event table registers to the calling
 process, the lowest free one, so a hint already taken under a label just given up can reach this sink, records the label as the line's binding in the device's record,
 and acknowledges the line once, so a line that a former driver left
 masked is unmasked for the new one, and a level still asserted fires at
-once. A line another process holds moves to the caller. The process receives `{erx_irq, Dev, Line}` at the next safe point
+once. The NIF keeps one entry per line of the domain, its IRQ object and
+its one binding, and records that name the same line, by its object's
+handle or by its number, share that entry. A bind through the record the
+line is bound through moves the line to the caller; through another
+record of a bound line it is `{error, ebusy}`, so a line has one binder.
+`erx_device:irq_holder(Dev, Line)` names that binder. Drivers bind and
+acknowledge only through `erx_irq_line`, which binds a line two drivers
+of a unit use once, in the line's owner, and tells each driver of each
+firing ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)). The process receives `{erx_irq, Dev, Line}` at the next safe point
 after the line fires; it services the device and calls
 `erx_device:irq_ack(Dev, Line)`, which unmasks the line as its kind
 requires
@@ -2694,7 +2711,12 @@ quoted atom or a string, with a seeded violation in
 `test/host/device_callers_test.rb`. It reads text, so it catches a slip,
 not code that spells the atom with escapes or builds it from pieces; what
 keeps a device from every other domain is that its capabilities are
-installed only in its driver's domain.
+installed only in its driver's domain. `erx_irq_line`, beside `erx_device` in `erx`, is the one other
+module the check allows, and the only caller of `irq_bind/2` and
+`irq_ack/2`: a check over the driver applications' BEAM files with the
+compiler's call graph fails the build on any other caller, with a seeded
+driver that binds its line directly
+([design-shared-devices.md](design-shared-devices.md#invariants), SD3).
 
 ### Per-byte primitives
 

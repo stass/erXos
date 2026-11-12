@@ -161,7 +161,7 @@ belong to the driver table of
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
 | **PL1.** Platforms differ only in data and in the early console's kind and address | the kernel discovers devices from the device tree and drives only the devices of `hw/kernel_devices.txt`, each by its compatible string; each platform's manifest is data the build packs; each platform's kernel build differs only in the early console's kind and address, and the boot stops unless the device tree's `/chosen/stdout-path` names that UART | a board check in generic code; a driver chosen by board name | a source check that generic code names no platform; the same conformance suite on every platform |
-| **PL2.** No driver reaches the firmware, and only the system domain holds the console's UART | the kernel keeps the register pages of the devices it drives, the mailbox among them, and no other node whose registers touch a kept page enters the root resource; devices whose registers share a page form one unit, which goes whole to the one domain the manifest places it on; every manifest places the console's UART unit in the system domain, and the build's manifest check fails on one that does not | a device table without the mailbox; a resource carved across a kept page; a unit split between two domains; a manifest that places the console's unit in another domain | the boot log names every node left out; a test that the left-out nodes appear in no resource; the boot test in which a manifest that splits a unit is refused for that unit; the manifest test that seeds the console's unit into the devices domain and expects the build to fail |
+| **PL2.** No driver reaches the firmware, and only the system domain holds the console's UART | the kernel keeps the register pages of the devices it drives, the mailbox among them, and no other node whose registers touch a kept page enters the root resource; devices whose registers share a page or whose interrupts arrive on one line form one unit, which goes whole to the one domain the manifest places it on, so no page and no line is held by two domains ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)); every manifest places the console's UART unit in the system domain, and the build's manifest check fails on one that does not | a device table without the mailbox; a resource carved across a kept page; a unit split between two domains; a manifest that places the console's unit in another domain | the boot log names every node left out; a test that the left-out nodes appear in no resource; the boot test in which a manifest that splits a unit is refused for that unit; the build's refusal of a seeded manifest whose two units share only a line; the manifest test that seeds the console's unit into the devices domain and expects the build to fail |
 | **PL3.** Every platform ends the machine and starts CPUs through PSCI | QEMU provides PSCI; the Pi 5's firmware carries BL31; the Pi 4's boot partition adds it; the kernel stops a boot that finds no PSCI node | a platform whose firmware lacks PSCI | the boot's PSCI check; the end tests of each platform |
 | **PL4.** On a board with a hardware watchdog, a kernel that stops running resets the machine | the platform layer reloads the hardware watchdog only from the kernel's timer, for as long as the kernel runs, and never stops it, so a kernel that stops taking interrupts, or has halted after a crash record, stops reloading it | a reload from anywhere but the timer; a path that stops the watchdog; a timeout shorter than the timer's period | on each board, a kernel hung with interrupts masked resets and boots again; the chokepoint check that the watchdog's registers are written only in its driver, with a seeded second writer |
 
@@ -277,13 +277,16 @@ and `gpio=5=a4,pu` lines put the pins in UART3's function; UART2, the other PL01
 with pins of its own, sits on GPIO 0 and 1, the bus of a HAT's
 identification EEPROM, which the firmware reads at boot. The manifest
 names the host link by its device-tree path, so no `serialN` alias ever
-makes it the console's UART. The PL011s
-share one register page, and the mini UART shares its page with the
-auxiliary SPI controllers, so each page is one unit. The manifest gives
-both units whole to the system domain: the mini UART's because it is the
-console's, the PL011s' because the host-link service there reads it, and
-the system domain runs no driver for the auxiliary SPI controllers or the
-other PL011s that ride along. The VideoCore's message interface shares the
+makes it the console's UART. The five PL011s
+share one register page and one interrupt line, and the mini UART shares
+its page and its line with the auxiliary SPI controllers and the
+auxiliary block's enable and interrupt-status registers, so each group is
+one unit ([design-shared-devices.md](design-shared-devices.md#context)).
+The manifest gives each unit whole to the domain of the UART it carries:
+the system domain, for the console and for the host link. There each
+unit has one driver, the mini UART's and UART3's, each on a line no other
+driver of the domain names, and the system domain runs no driver for the
+auxiliary SPI controllers or the other PL011s. The VideoCore's message interface shares the
 mailbox's page, which the kernel keeps, so it goes to no driver (PL2,
 [research](research-boards-storage.md#checks-against-local-copies)). The
 devices erXos drives use wired interrupts. No IOMMU is described, so its
@@ -369,9 +372,10 @@ The device table above lists them. A device whose registers share a page
 with one of them stays out of the root resource and the boot log names it
 (PL2); on the Raspberry Pi 4 that is the VideoCore's message interface
 beside the mailbox. Devices whose registers share a page with each other,
-and none with a kept device, form one unit that goes to one domain, as
-the Raspberry Pi 4's PL011s do, and its mini UART with the auxiliary SPI
-controllers.
+and none with a kept device, or whose interrupts arrive on one line, form
+one unit that goes to one domain, as the Raspberry Pi 4's PL011s do, and
+its mini UART with the auxiliary SPI controllers
+([design-shared-devices.md](design-shared-devices.md#the-unit-rule)).
 
 ### UARTs
 
@@ -506,7 +510,7 @@ Raspberry Pi has one.
 | Interrupts and MSI writers | MSIs through the GICv2m frame, which takes the line from the value written, so the functions that share it share one trust boundary for interrupts; wired lines for virtio-mmio | wired lines through the GIC-400; no MSI used | RP1's MSI-X through the MIP block, which takes the line from the value written, so RP1's devices share one trust boundary for interrupts |
 | Reset boundary | a function's reset, or its link's, which the PCIe enumerator applies at the device service's request before the function's next window; which of QEMU's devices offer a function reset is *to confirm* | each device's own reset, *to confirm*; the firmware's power control is not used, since only the kernel reaches the mailbox, for the trial request and the boot-time key read alone, and no kernel call controls a device's power | RP1 as a whole, whose link erXos inherits from the bootloader (`pciex4_reset=0`), so RP1's devices share a reset boundary; the other masters *to confirm* |
 | Asynchronous errors | no error records read; the CPU's severity reports as TCG's model or the host's CPU gives them, *to confirm* | a Cortex-A72, without the RAS extension: no severity, no error records ([design-arch-aarch64.md](design-arch-aarch64.md#asynchronous-errors)) | a Cortex-A76, with the RAS extension's severity; no error records read until the board's error-injection test shows what they report |
-| What follows | the drivers of root-bus PCIe functions are confined and share domains as the manifest says; each virtio-mmio device is unconfined and has a domain of its own in a release build | every DMA device unconfined: in a release build the SD controller, Ethernet and each DMA engine the manifest names have a domain of its own, holding nothing else, and the firmware is in the trusted base always | every DMA device unconfined: in a release build each SD controller, RP1 and a function on the external connector have a domain of its own, and the firmware is in the trusted base always; RP1's devices share one reset and one interrupt boundary, so RP1 is one unit and a reset of one of its devices is a reset of all; confining all of RP1 as one group through a BCM2712 IOMMU may be possible, untested |
+| What follows | the drivers of root-bus PCIe functions are confined and share domains as the manifest says; each virtio-mmio device is unconfined, and in a release build each unit of them, the transports of one page, has a domain of its own | every DMA device unconfined: in a release build the SD controller, Ethernet and each DMA engine the manifest names have a domain of its own, holding nothing else, and the firmware is in the trusted base always | every DMA device unconfined: in a release build each SD controller, RP1 and a function on the external connector have a domain of its own, and the firmware is in the trusted base always; RP1's devices share one reset and one interrupt boundary, so RP1 is one unit and a reset of one of its devices is a reset of all; confining all of RP1 as one group through a BCM2712 IOMMU may be possible, untested |
 
 A release image for a board allows unconfined DMA only for the devices
 its manifest names, whatever the profile asked for
@@ -606,7 +610,7 @@ reads the marks instead of keeping a list of device classes
 | PCIe domain | the ECAM bridge's configuration window | none: no PCIe bridge is driven | the root complex's configuration window |
 | System domain | the console's PL011 and the host link's PL011 | the mini UART's unit, the console's, with the auxiliary SPI controllers, which it leaves undriven; the PL011s' unit, with the host link | the debug PL011, the console |
 | Devices domain | the remaining slow devices | GPIO, I2C and the SPI controllers outside the mini UART's unit | the slow devices outside RP1 other than the console |
-| Domains of their own in a release build | each virtio-mmio device the manifest names | the SD controller; Ethernet; each DMA engine the manifest names | each SD controller; RP1, one unit with its Ethernet, USB hosts and slow devices; a function on the external connector |
+| Domains of their own in a release build | each unit of virtio-mmio devices the manifest names, the transports of one page | the SD controller; Ethernet; each DMA engine the manifest names | each SD controller; RP1, one unit with its Ethernet, USB hosts and slow devices; a function on the external connector |
 | Left out of every resource | none | the VideoCore's message interface, beside the mailbox (PL2) | none |
 
 The manifest marks each DMA device confined or unconfined, and each device

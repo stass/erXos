@@ -7152,7 +7152,10 @@ one DMA window, a register page at most one MMIO object (a second fails
 with `ERX_EBUSY`), no MMIO object covers a page of a device the kernel
 drives, and the memory attributes are fixed at boot (normal write-back and
 the binding's two device attributes), so no object can change what another
-relies on. The system domain's device service creates every IRQ object of
+relies on. Devices that share a page or a line form one unit, which goes whole
+to one domain, so the kernel never shares a page's object or fans a line
+out between domains; sharing among a unit's devices is the holder's
+([design-shared-devices.md](design-shared-devices.md#the-unit-rule)). The system domain's device service creates every IRQ object of
 a device and every window, and gives the domain that the system
 configuration names for the device a masked capability of its own: an
 IRQ object with `BIND` and `ACK`, which the driver binds to its group so
