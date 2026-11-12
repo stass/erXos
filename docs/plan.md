@@ -2280,7 +2280,8 @@ side.
   5. **The board.** The manual board pass, below; the boot probe of
      [design-platforms.md](design-platforms.md#verification-and-testing)
      on the stopgap, recorded in a research record before anything
-     depends on its results; and the board's boot suite, which the build packs into the SD card's
+     depends on its results
+     ([research-rpi4-board-pass.md](research-rpi4-board-pass.md)); and the board's boot suite, which the build packs into the SD card's
      boot partition. The owner puts the card in the board and runs the
      suite's transcript checks by hand, stage (a)'s demo once, with the
      host link on UART3.

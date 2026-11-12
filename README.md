@@ -324,8 +324,12 @@ Error in process <0.150.0> with exit value:
 * **The Raspberry Pi 4 boots on QEMU's `raspi4b` model.** TF-A BL31 hands
   off to Fiasco, and the system boots to the serial shell on the mini
   UART. It runs under TCG only, because QEMU cannot run this model under
-  HVF. The packed card's device tree, whose `serial0` is the mini UART,
-  boots on a 4 GB board.
+  HVF. On a 4 GB Raspberry Pi 4 the card `make pack PLATFORM=raspi4b`
+  builds boots, by the owner's hand test, from the firmware through
+  BL31, Fiasco and the root task to the command shell's `%` prompt on
+  the serial console ([the record](docs/research-rpi4-board-pass.md)).
+  The board has no SD controller driver yet, so `/data` fails with an
+  I/O error.
 * **The machine is an object** (M4). A host link over the second serial
   line lets `tools/erx load` and `watch` replace modules in the running
   system, and `tools/erx files` read the guest's files over 9P2000.L; `tools/erx boot
