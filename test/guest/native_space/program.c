@@ -391,6 +391,87 @@ program_registers(uint64_t pc, const uint64_t values[INSTALL_ITEMS])
 }
 
 /*
+ * Waits until the child has written its side. The child's dispatcher registers before
+ * the child's own code runs (erx_fiasco_task_main), and that registration makes the
+ * waiting bind of the child's doorbell, so a ring from then on is delivered live.
+ */
+static bool
+child_running(void)
+{
+	const uint64_t deadline = erx_fiasco_clock_ns() + BELL_WAIT_NS;
+
+	while (atomic_load_explicit(channel_word(PROGRAM_SIDE_ADDR, 0), memory_order_acquire) != WRITER_PATTERN) {
+		if (erx_fiasco_clock_ns() >= deadline)
+			return (false);
+		erx_yield();
+	}
+	return (true);
+}
+
+/*
+ * Starts the ringer (MODE_RINGER), a second program of the session: a space below this
+ * task's own, charged to this task's budget, reporting to gate, that runs index 0 of the
+ * slice. The one handle it gets is a copy of the child's doorbell, passed with TRIGGER
+ * alone, as the pass reports. The stopgap records no rights per handle, so what refuses
+ * the ringer's other calls on the doorbell is each call's group check, not the mask.
+ */
+static int64_t
+ringer_start(uint64_t slice, uint64_t gate, uint64_t program_bell)
+{
+	uint64_t ringer, pc, desc = 0, thread;
+
+	if (erx_space_create(0, ERX_CAP_SELF, gate, RINGER_LABEL, 0, CREATED_CAP_LIMIT, &ringer) != ERX_OK ||
+	    erx_image_map(ringer, slice, 0, &pc) != ERX_OK)
+		return (85);
+	item_put(0, program_bell, ERX_HR_TRIGGER);
+	if (erx_cap_pass(ERX_CAP_SELF, ringer, 1) != ERX_OK || !erx_utcb_mr_load(erx_utcb_self(), 0, &desc) ||
+	    erx_msg_item_desc_type_get(desc) != ERX_K_IRQ || erx_msg_item_desc_rights_get(desc) != ERX_HR_TRIGGER ||
+	    item_value(0) == ERX_CAP_NULL)
+		return (86);
+	first_registers(pc, MODE_RINGER | item_value(0) << SLOT_SHIFT);
+	if (erx_thread_create(0, ringer, 0, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK ||
+	    erx_thread_start(thread) != ERX_OK)
+		return (87);
+	return (0);
+}
+
+/* What MODE_MAKER adds to the ringer's status when the ringer ends with another than 0. */
+#define RINGER_FAILED	INT64_C(2000)
+
+/*
+ * Takes both programs' exit records, in either order: the child's with PROGRAM_STATUS
+ * and the ringer's with 0. Each program's own status names the step it failed at, above
+ * CHILD_FAILED or RINGER_FAILED. No record is 80, a fault record 88, and a label taken
+ * twice or unknown 81.
+ */
+static int64_t
+maker_ends(void)
+{
+	erx_fault_t record;
+	uint64_t label;
+	bool child_ended = false, ringer_ended = false;
+
+	while (!child_ended || !ringer_ended) {
+		if (!record_take(&record, &label))
+			return (80);
+		if (record.kind != ERX_FAULT_EXIT)
+			return (88);
+		if (label == MAKER_LABEL && !child_ended) {
+			if (record.status != PROGRAM_STATUS)
+				return (CHILD_FAILED + record.status);
+			child_ended = true;
+		} else if (label == RINGER_LABEL && !ringer_ended) {
+			if (record.status != 0)
+				return (RINGER_FAILED + record.status);
+			ringer_ended = true;
+		} else {
+			return (81);
+		}
+	}
+	return (0);
+}
+
+/*
  * What a session makes for each program, from this task's own authority (MODE_MAKER):
  * a budget carved from the one its own space is charged to, a budget carved from that,
  * a group, another group and a bell charged to them, and a child below its own space,
@@ -402,19 +483,20 @@ program_registers(uint64_t pc, const uint64_t values[INSTALL_ITEMS])
  * the bell, the session's doorbell, into its own home group. It installs the budget,
  * the group, both sides, the bell and the other group into the child (maker_install),
  * leaves the other group's value in its own side, and starts the child with the values
- * in its argument registers (mode_program). The child's first thread ends with
- * PROGRAM_STATUS, and its ring of the bell, made before, reaches this task's executor
- * with the child's pattern in the program's side. The first budget's destroy takes
- * everything charged to either budget, the bell included.
+ * in its argument registers (mode_program). Once the child has written its side
+ * (child_running), a second program of the session, the ringer, rings the child's
+ * doorbell through a copy of the handle passed to it (ringer_start). The child's first
+ * thread ends with PROGRAM_STATUS and the ringer's with 0 (maker_ends), and the ring of
+ * the bell the child made before it ended reaches this task's executor. The first
+ * budget's destroy takes everything charged to either budget, the bell included.
  */
 static int64_t
 mode_maker(uint64_t argument)
 {
 	const uint64_t slice = argument >> MAKER_SLICE_SHIFT & HANDLE_MASK;
 	uint64_t budget, carved, group, other, bell, program_side, session_side, program_bell, refused, gate, child, pc,
-	    thread, label;
+	    thread;
 	uint64_t handles[INSTALL_ITEMS], values[INSTALL_ITEMS];
-	erx_fault_t record;
 	int64_t step;
 
 	if (erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_WALL, MAKER_PAGES, MAKER_PAGES, &budget) != ERX_OK ||
@@ -453,20 +535,18 @@ mode_maker(uint64_t argument)
 	program_registers(pc, values);
 	if (erx_thread_create(0, child, group, ERX_THREAD_CLASS_WORKER, &thread) != ERX_OK)
 		return (78);
-	/* Rung before the child runs: the kernel keeps the ring for the bind its home's dispatcher makes. */
-	if (erx_irq_trigger(program_bell) != ERX_OK || erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) != ERX_OK ||
-	    erx_thread_start(thread) != ERX_OK)
+	if (erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) != ERX_OK || erx_thread_start(thread) != ERX_OK)
 		return (79);
-	/* The child's own status names the step it failed at, above CHILD_FAILED. */
-	if (!record_take(&record, &label) || record.kind != ERX_FAULT_EXIT || label != MAKER_LABEL)
-		return (80);
-	if (record.status != PROGRAM_STATUS)
-		return (CHILD_FAILED + record.status);
+	if (!child_running())
+		return (84);
+	step = ringer_start(slice, gate, program_bell);
+	if (step == 0)
+		step = maker_ends();
+	if (step != 0)
+		return (step);
 	step = bell_run(bell << BELL_SHIFT | ERX_CAP_NULL << BACK_SHIFT, BELL_LABEL);
 	if (step != 0)
 		return (step);
-	if (atomic_load_explicit(channel_word(PROGRAM_SIDE_ADDR, 0), memory_order_acquire) != WRITER_PATTERN)
-		return (81);
 	/* The channel's objects go after the program's budget, as a session deletes them. */
 	if (erx_object_destroy(budget) != ERX_OK || erx_irq_trigger(bell) != ERX_ESTALE)
 		return (82);
@@ -506,6 +586,20 @@ mode_program(const uint64_t args[ERX_FIASCO_START_ARGS])
 	atomic_store_explicit(channel_word(PROGRAM_SIDE_ADDR, 0), WRITER_PATTERN, memory_order_release);
 	step = bell_run(ERX_CAP_NULL << BELL_SHIFT | args[ERX_PROGRAM_ARG_DOORBELL] << BACK_SHIFT, CHANNEL_LABEL);
 	return (step == 0 ? PROGRAM_STATUS : step);
+}
+
+/*
+ * The ringer MODE_MAKER starts beside its child, holding the child's doorbell, which the
+ * maker bound into the child's group: it may not unbind it from a group it neither
+ * created nor is the home of, and its ring reaches the child's executor under
+ * CHANNEL_LABEL. Ends with 0.
+ */
+static int64_t
+mode_ringer(uint64_t doorbell)
+{
+	if (erx_irq_bind(doorbell, ERX_CAP_NULL, 0) != ERX_ETYPE)
+		return (140);
+	return (erx_irq_trigger(doorbell) == ERX_OK ? 0 : 141);
 }
 
 static bool
@@ -603,6 +697,8 @@ erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 		return (bell_run(argument, BELL_LABEL));
 	case MODE_MAKER:
 		return (mode_maker(argument));
+	case MODE_RINGER:
+		return (mode_ringer(argument >> SLOT_SHIFT));
 	case MODE_RELEASE:
 		return (mode_release(argument >> SLOT_SHIFT));
 	case MODE_DATA:

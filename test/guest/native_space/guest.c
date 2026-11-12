@@ -808,11 +808,16 @@ case_doorbells(void)
  * A task makes a program's records from its own authority, as a session does (MODE_MAKER
  * in program.c): budgets, groups, a channel and a child that runs, from a slice of the
  * program's entry the root passed it, in the new group, with the handles the task
- * passed it and their values in its argument registers. The root starts the task in a
- * domain group, its home, into which the task binds its bell. The task's end takes the
- * domain group with it, and the pages come back. After case_doorbells, as the root
- * already has a group of its own.
+ * passed it and their values in its argument registers, and a second program that rings
+ * the child's doorbell through a copy passed with TRIGGER alone. The root starts the
+ * task in a domain group, its home, into which the task binds its bell, and waits for it
+ * up to MADE_WAIT_NS, longer than the task's own nested waits, so the transcript shows
+ * the step at which a failed task stopped. The task's end takes the domain group with it,
+ * and the pages come back. After case_doorbells, as the root already has a group of its
+ * own.
  */
+#define MADE_WAIT_NS	(3 * WAIT_NS)
+
 static void
 case_made(void)
 {
@@ -825,7 +830,7 @@ case_made(void)
 	item_put(0, slice, ERX_HR_READ, false);
 	passed = passed && erx_cap_pass(ERX_CAP_SELF, task, 1) == ERX_OK;
 	if (passed && group_start(task, domain, MODE_MAKER | (item_word(0, 1) & HANDLE_MASK) << MAKER_SLICE_SHIFT)) {
-		if (erx_fiasco_task_join_until(task, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK)
+		if (erx_fiasco_task_join_until(task, erx_fiasco_clock_ns() + MADE_WAIT_NS, &status) != ERX_OK)
 			status = INT64_MIN;
 	} else if (task != 0) {
 		task_drop(task);
