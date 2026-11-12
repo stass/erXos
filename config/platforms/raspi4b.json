@@ -1,0 +1,57 @@
+{
+  "name": "raspi4b",
+  "cpuset": 15,
+  "console": "/soc/serial@7e215040",
+  "hostlink": "/soc/serial@7e201600",
+  "ram_first": 0,
+  "ram_bytes": 994050048,
+  "fiasco_reserve": 16777216,
+  "root_withheld": 4718592,
+  "units": [
+    {
+      "key": "console-uart",
+      "devices": [
+        {
+          "selector": "dt",
+          "role": "uart",
+          "path": "/soc/serial@7e215040",
+          "bridge": "",
+          "base": 4263596096,
+          "size": 64,
+          "line": 125,
+          "compatible": "brcm,bcm2835-aux-uart",
+          "bus": 0,
+          "device": 0,
+          "function": 0,
+          "dma": "none",
+          "flags": 0,
+          "dma_memory": 0,
+          "placement_key": "console-uart"
+        }
+      ]
+    },
+    {
+      "key": "hostlink-uart",
+      "devices": [
+        {
+          "selector": "dt",
+          "role": "uart",
+          "path": "/soc/serial@7e201600",
+          "bridge": "",
+          "base": 4263515648,
+          "size": 512,
+          "line": 153,
+          "clock": 48000000,
+          "compatible": "arm,pl011",
+          "bus": 0,
+          "device": 0,
+          "function": 0,
+          "dma": "none",
+          "flags": 0,
+          "dma_memory": 0,
+          "placement_key": "hostlink-uart"
+        }
+      ]
+    }
+  ]
+}

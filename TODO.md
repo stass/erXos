@@ -274,18 +274,6 @@ it; git history is the record of completed work.
   ([design.md](docs/design.md#dependencies)). The import also records
   the link closure of L4Re's `bootstrap` and `sigma0`, their `drivers-frst`
   UART support, and the licence of each library in it.
-* [Medium] Raspberry Pi 4 BL31 (`docs/research-rpi4-bl31-qemu.md`): the fetch step
-  pins TF-A 2.15.0's tarball by SHA-256, checked against a second source
-  (the experiment's download hashed to `67b772aa...1a10`, unchecked; the
-  tree so far records only the tag commit `da738d5e`). GNU sed is a build tool
-  of that build on macOS (README host setup).
-* [Low] Raspberry Pi 4 BL31 (1b-I package 3): build BL31 with
-  `ERRATA_A72_1319367=1`. TF-A's Pi 4 port does not set it, though TF-A
-  applies the workaround to every Cortex-A72 revision and its debug build
-  warns that it is missing. It guards BL31's own switch of the lower
-  translation regimes against a speculative address translation, costs a
-  few instructions on that path, and asks nothing of the kernel, so
-  turning it on is cheaper than deciding that no kernel ever needs it.
 * [Medium] kernel, Track K, shelved Phase 1 work: three pieces of code
   written for the earlier plan, which put erXos's kernel semantics inside
   the Fiasco fork, stay on branch `shelved-phase2-cores` for Track K: the capability
@@ -1036,6 +1024,18 @@ it; git history is the record of completed work.
   device-path step, so a wrong `ram_first` or PL011 clock in a Raspberry Pi record is never checked against
   the board's tree. Pi package 3 writes `config.txt`'s `init_uart_clock` from the record; check the Pi's
   record against its device tree (nodes under `/soc`, the firmware's clocks) there.
+* [Medium] tooling, `tools/lib/erx/fiasco_provenance.rb` (`image_objects`, `MAPS`): the provenance audit
+  covers the main build's bootstrap only and skips `build/fiasco/users-*`, so the Raspberry Pi 4's bootstrap
+  (`Fiasco#build_board_bootstrap`) and the 16550 and BCM2835 UART drivers it links have no build record. Make the
+  audit take a users directory and run it once per bootstrap build, its object lookup scoped to that directory.
+* [Low] tooling, the Raspberry Pi 4's boot files (`Erx::BootPartition.lay_out`, `Erx::Bl31`, `Erx::BoardTree`,
+  `Fiasco#build_board_bootstrap`): only their tests call them. Give them a `tools/erx` command when Pi package 4's
+  harness or package 5's rig needs one; `Bl31`'s build record then names the compiler by its identity
+  (`BuildMemo.program_identity`), not its path.
+* [Medium] platform record, `config/platforms/raspi4b.json`: `root_withheld` is QEMU virt's measured
+  4.5 MiB, an estimate for the Pi; Pi package 4 measures what the Pi's boot withholds and writes that. Its units
+  name the mini UART and UART3 alone, each by its own registers; package 4 makes them the shared register pages
+  its manifest gives the system domain.
 * [Low] liberx, `liberx/backend/fiasco/vm.h`, `vm.c`, `thread.c`: the backend's fixed addresses
   (`ERX_FIASCO_KIP_WINDOW`, the device window, the UTCB area, the VM window, the area start) are spread over
   three files, and only the KIP window's place below the device window is asserted. Gather them in one layout

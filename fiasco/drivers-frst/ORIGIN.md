@@ -171,19 +171,7 @@ Third-party notices remain in their original files.
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
     {
-      "path": "uart/include/uart_16550.h",
-      "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
-    },
-    {
-      "path": "uart/include/uart_16550_dw.h",
-      "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
-    },
-    {
       "path": "uart/include/uart_apb.h",
-      "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
-    },
-    {
-      "path": "uart/include/uart_bcm2835.h",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
     {
@@ -263,19 +251,7 @@ Third-party notices remain in their original files.
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
     {
-      "path": "uart/src/uart_16550.cc",
-      "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
-    },
-    {
-      "path": "uart/src/uart_16550_dw.cc",
-      "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
-    },
-    {
       "path": "uart/src/uart_apb.cc",
-      "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
-    },
-    {
-      "path": "uart/src/uart_bcm2835.cc",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
     {
@@ -462,6 +438,26 @@ Third-party notices remain in their original files.
 
       ]
     },
+    "uart/include/uart_16550.h": {
+      "license": "MIT",
+      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
+      "reviewed": true,
+      "sha256": "4b657f8a6fda9f7741670d4d36563fdaf979b485a7531b64eeae1c6f01f962b1",
+      "kind": "file",
+      "non_ascii_lines": [
+        "8e2f99f2cdf8382937fcfb622bcaad9063f2ecf559a5e786c0324896b36ba58a"
+      ]
+    },
+    "uart/include/uart_16550_dw.h": {
+      "license": "MIT",
+      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
+      "reviewed": true,
+      "sha256": "c8c15d4673d75d1a2bc81535a9cbaa3b9d4c27d67c37148645750251e11066a8",
+      "kind": "file",
+      "non_ascii_lines": [
+        "b658f1bfc86b1eabef8368219631bc98bc001bbdec39fa9de9781da71cf785f9"
+      ]
+    },
     "uart/include/uart_base.h": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -470,6 +466,16 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": [
         "85e3af0cc18338a2ecfc7614f5e335f654e8348e53ee713bb8716398f3632db2"
+      ]
+    },
+    "uart/include/uart_bcm2835.h": {
+      "license": "MIT",
+      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
+      "reviewed": true,
+      "sha256": "567caeb0b984e271e3ab8d0fe20b368012b2c0b72bd1ba165fb4594ce480f6a9",
+      "kind": "file",
+      "non_ascii_lines": [
+
       ]
     },
     "uart/include/uart_pl011.h": {
@@ -492,6 +498,36 @@ Third-party notices remain in their original files.
 
       ]
     },
+    "uart/src/uart_16550.cc": {
+      "license": "MIT",
+      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
+      "reviewed": true,
+      "sha256": "bf1e8c134a769e8402d97df835ba25134460ad5380c5ad4c5e57b8fa4cbbfad7",
+      "kind": "file",
+      "non_ascii_lines": [
+        "46104e6a96da380a17a0d0265505baf63458bbeceb0a4a862100e4c0122ef862"
+      ]
+    },
+    "uart/src/uart_16550_dw.cc": {
+      "license": "MIT",
+      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
+      "reviewed": true,
+      "sha256": "52a862c273d757ed6d83bf421619f4dbc6c89dd199f756304b0cc828df8cfd5d",
+      "kind": "file",
+      "non_ascii_lines": [
+        "b658f1bfc86b1eabef8368219631bc98bc001bbdec39fa9de9781da71cf785f9"
+      ]
+    },
+    "uart/src/uart_bcm2835.cc": {
+      "license": "MIT",
+      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
+      "reviewed": true,
+      "sha256": "fa286a95532553fcbdc20d2c5d7d55c290436ae6667cfda3e43657fb993ee026",
+      "kind": "file",
+      "non_ascii_lines": [
+
+      ]
+    },
     "uart/src/uart_pl011.cc": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -503,7 +539,6 @@ Third-party notices remain in their original files.
       ]
     }
   },
-  "changes": {
-  }
+  "changes": {}
 }
 ```

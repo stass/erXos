@@ -1022,7 +1022,8 @@ release, at address 0 and starts CPU 0 there (`cpu-num=0`); puts the
 bootable file at the address BL31 enters; and puts the board's device
 tree where BL31 expects it, with `config.txt`'s overlays applied on the
 host and with what the firmware writes into the tree written on the host
-too. The chain is the board's: BL31 at EL3 enters the bootable file
+too: the memory node, `/chosen/stdout-path`, and the `serial0` alias
+naming the console, which is what BL31 points `/chosen/stdout-path` at. The chain is the board's: BL31 at EL3 enters the bootable file
 at EL2 (`SPSR` `0x3c9`, MMU off, the device tree's address in `x0`), the
 kernel starts the other three CPUs with PSCI's `CPU_ON` and ends them
 with `CPU_OFF`, and resets the machine through BL31

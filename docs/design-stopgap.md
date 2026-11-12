@@ -1764,19 +1764,30 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   device tree. BL31's PSCI starts the other CPUs, and `l4_platform_ctl_system_shutdown` reaches its `SYSTEM_OFF` and
   `SYSTEM_RESET` ([The end path](#the-end-path)). `SYSTEM_OFF` leaves the board halted in the firmware, which cannot
   turn it off, so an end by `ERX_END_OFF`, a missed pet's included, lasts until the board rig's power relay cycles it.
+* **Boot files.** One directory serves as the firmware's network boot root and as an SD card's boot partition
+  (`tools/lib/erx/boot_partition.rb`): the firmware and its licence; `config.txt`, written from the platform record;
+  BL31 and its licence; the bootable file as `kernel8.img`; Linux's device tree for the board, compiled unmodified
+  from its pinned source, with that source beside it; and the overlays `config.txt` names, which the firmware applies.
+  Mainline Linux has no overlays, so erXos keeps their sources in `hw/dts`, and the board's tree, its overlays and
+  the model's tree are built by `tools/lib/erx/board_tree.rb`.
 * **Under QEMU.** The same image, device tree and BL31 also boot on QEMU's `raspi4b` model under TCG, where QEMU's
   generic loader places them in place of the firmware and the harness gives the model's second serial port, the mini
   UART's, to the console; what the model checks and what it cannot is in
   [Bring-up under QEMU](design-platforms.md#bring-up-under-qemu). If BL31 does not run there, the model boots the
   image on one CPU through QEMU's own kernel loader, without PSCI.
 * **Bootstrap.** The Pi has a `bootstrap` build of its own, for Fiasco's generic platform (`arm_gen`), whose RAM
-  starts at 0 and which reads the memory map, the console's UART and PSCI's calling method from the device tree; that
-  platform requires `bootstrap` built position-independent. QEMU `virt` keeps its `arm_virt` build
+  starts at 0 and which reads the memory map, the console's UART and PSCI's calling method from the device tree.
+  Upstream links that platform's `bootstrap` position-independent; erXos's `bootstrap` runs only at its link address,
+  so the Pi's is linked static at `0x200000`, where the firmware loads a 64-bit image with the boot protocol's header
+  ([research](research-boards-storage.md)) and where BL31's stub header sends it, above BL31's reserved first 512 KiB, as QEMU
+  `virt`'s is linked at RAM's base plus 2 MiB. QEMU `virt` keeps its `arm_virt` build
   (`config/fiasco/user.defconfig`), whose RAM starts at `0x40000000`. Fiasco's `rpi` platform, which asks the
   firmware's mailbox for memory and tells the boards apart by their CPU, is not used. The firmware enters the bootable
   file in a higher privilege mode than the kernel's, and `bootstrap` drops to the kernel's before it starts Fiasco;
   the boot probe confirms the entry state. The console is the mini UART (`brcm,bcm2835-aux-uart`), which `bootstrap`
-  and Fiasco find by `/chosen/stdout-path`. The kernel build already carries Fiasco's driver for it
+  and Fiasco find by `/chosen/stdout-path`. BL31 rewrites that property to `serial0`, the alias the firmware points
+  at the console (TF-A's `plat/rpi/rpi4/rpi4_setup.c`), so on the model, where no firmware runs, the host writes
+  that alias into the tree as the firmware does. The kernel build already carries Fiasco's driver for it
   (`fiasco/kernel/src/lib/uart/uart_bcm2835.cc`, built under `CONFIG_PF_ARM_GEN_SELECT_UART_16550`, on by default);
   `bootstrap`'s UART library (`fiasco/drivers-frst/uart`) holds only the PL011 driver, so the Pi's `bootstrap` build
   imports Fiasco's 16550 and BCM2835 drivers into it and turns on `CONFIG_DRIVERS_FRST_UART_DRV_8250`. Both keep the

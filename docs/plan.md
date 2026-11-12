@@ -2240,24 +2240,26 @@ side.
      no behaviour on QEMU `virt`: the QEMU suites it touches pass as
      before.
   3. **Fiasco on the Pi.** The Pi's `bootstrap` build, for Fiasco's
-     generic platform with RAM at 0, built position-independent, with
-     the mini UART as its console: Fiasco's 16550 and BCM2835 UART
+     generic platform with RAM at 0, linked static at `0x200000`, where
+     the firmware loads it, with the mini UART as its console: Fiasco's 16550 and BCM2835 UART
      drivers imported into `bootstrap`'s UART library, which holds only
      the PL011's, and `CONFIG_DRIVERS_FRST_UART_DRV_8250` on; the kernel
      build QEMU uses, which already carries the mini UART's driver; TF-A
-     2.15.0's BL31 built from its pinned source; the board's device tree
-     with the overlays of `config.txt` applied on the host, and for the
-     model with the firmware's edits (the memory node and
-     `/chosen/stdout-path`) written on the host too; and the boot files
+     2.15.0's BL31 built from its pinned source; the board's device tree,
+     compiled unmodified with its source beside it, and for the model
+     with the overlays of `config.txt` and the firmware's edits (the
+     memory node, `/chosen/stdout-path` and the serial aliases) applied
+     on the host; and the boot files
      (the firmware, `config.txt` with `enable_uart=1` and
      `dtoverlay=uart3`, the board's device tree, BL31 and the bootable
      file) laid out by a host tool for the firmware's network boot and
      for an SD card
-     ([design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)).
-     The host tool writes `config.txt`'s `init_uart_clock` from the platform
-     record's PL011 clock, so the record stays the one source of that clock.
-  4. **The serial shell on the model.** The Pi's platform record and
-     development manifest, with the system domain alone, holding the
+     ([design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)); and
+     the Pi's platform record. The host tool writes `config.txt`'s
+     `init_uart_clock` from the record's PL011 clock, so the record stays
+     the one source of that clock.
+  4. **The serial shell on the model.** The Pi's development manifest,
+     with the system domain alone, holding the
      mini UART's unit, the console's, which shares its register page
      with the auxiliary SPI controllers, and the PL011s' unit, the host
      link's; a small Erlang driver for the mini UART in `erx_uart`,

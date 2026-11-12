@@ -54,7 +54,15 @@ module Erx
       @bytes = {}
       @archive_listings = {}
       @snapshot_bytes = 0
-      @objects = Dir.glob(File.join(@build, '**/*.o')).group_by { |path| File.basename(path) }
+      @objects = image_objects
+    end
+
+    # The objects of the build the image is made of, by name. A board's own bootstrap,
+    # built in users-NAME (Fiasco::BOARD_BOOTSTRAPS), is not part of it.
+    def image_objects
+      Dir.glob(File.join(@build, '**/*.o'))
+         .reject { |path| path.start_with?(File.join(@build, 'users-')) }
+         .group_by { |path| File.basename(path) }
     end
 
     def audit
@@ -68,7 +76,7 @@ module Erx
       @bytes = {}
       @archive_listings = {}
       @snapshot_bytes = 0
-      @objects = Dir.glob(File.join(@build, '**/*.o')).group_by { |path| File.basename(path) }
+      @objects = image_objects
       load_build_inputs
       load_generation_profiles
       archive_tool = tool_identity(@archive_requested || cross_toolchain.program('ar'), role: 'archive')

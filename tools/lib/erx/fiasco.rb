@@ -67,7 +67,14 @@ module Erx
       uart/Makefile uart/include/Makefile
       uart/include/device.h uart/include/uart_base.h uart/include/uart_pl011.h
       uart/src/Makefile uart/src/uart_pl011.cc
+      uart/include/uart_16550.h uart/include/uart_16550_dw.h uart/include/uart_bcm2835.h
+      uart/src/uart_16550.cc uart/src/uart_16550_dw.cc uart/src/uart_bcm2835.cc
     ].freeze
+    # The boards whose bootstrap is a build of its own, by platform record name, and the
+    # configuration of each (docs/design-stopgap.md, "The Raspberry Pi 4"). The Pi's is
+    # Fiasco's generic platform, linked static at 2 MiB, with RAM at 0 and the mini UART's
+    # 16550 driver; QEMU virt's is the main build's (user.defconfig).
+    BOARD_BOOTSTRAPS = { 'raspi4b' => 'user-raspi4b.defconfig' }.freeze
     # Fiasco's own options, which bootstrap passes to the kernel. None: without
     # -serial_esc or -serial_input the kernel leaves the UART's interrupt free
     # for the console driver (docs/design-stopgap.md, "The console").
@@ -173,6 +180,22 @@ module Erx
       File.write(marker, inputs)
       File.join(directory, 'fiasco')
     end
+
+    # A board's own bootstrap (BOARD_BOOTSTRAPS): built from the same imported sources
+    # and boot cores as the main one, in users-NAME, and copied out as
+    # images/bootstrap-NAME.raw. The kernel and sigma0 stay the main build's, which
+    # must have run.
+    def build_board_bootstrap(name, jobs: 4)
+      config = BOARD_BOOTSTRAPS.fetch(name) { raise Error, "platform #{name} has no bootstrap build of its own" }
+      raise Error, 'jobs must be between 1 and 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
+
+      prepare_source_cache
+      users = build_users(jobs: jobs, boot_cores: build_boot_cores,
+                          directory: File.join(@build, "users-#{name}"), config: config)
+      build_image(users: users, output: board_image_path(name))
+    end
+
+    def board_image_path(name) = File.join(@build, "images/bootstrap-#{name}.raw")
 
     # The first stage as built: bootstrap's flat image, with neither locator
     # field written (docs/design-kernel.md, "The bootable file"). What boots is
@@ -407,12 +430,11 @@ module Erx
                              output: File.join(@build, 'boot-cores'))
     end
 
-    def build_users(jobs:, boot_cores:)
+    def build_users(jobs:, boot_cores:, directory: File.join(@build, 'users'), config: 'user.defconfig')
       source = assemble_user_source
-      directory = File.join(@build, 'users')
       configure(source: source, directory: directory,
-                input: @inputs.configuration('user.defconfig'),
-                output: '.kconfig', name: 'fiasco-users-config')
+                input: @inputs.configuration(config),
+                output: '.kconfig', name: "fiasco-#{File.basename(directory)}-config")
       # Image tools clear MAKEFLAGS when querying the configuration. Keep the
       # compiler prefix and the host compilers in the build's own configuration as well as argv.
       local = File.join(directory, 'Makeconf.local')
@@ -420,7 +442,7 @@ module Erx
       File.write(local, settings) unless File.file?(local) && File.read(local) == settings
       @runner.run(['gmake', '-C', directory, "-j#{jobs}", *toolchain_variables,
                    "ERX_BOOT_ARCHIVE=#{boot_cores.archive}", "ERX_BOOT_INCLUDE=#{boot_cores.seam}"],
-                  name: 'fiasco-users-build', deadline: 600, env: build_environment)
+                  name: "fiasco-#{File.basename(directory)}-build", deadline: 600, env: build_environment)
       directory
     end
 
@@ -478,14 +500,14 @@ module Erx
       output
     end
 
-    def build_image(users:)
+    def build_image(users:, output: image_path)
       directory = File.join(@build, 'images')
       OutputDirectory.prepare(root: @root, path: directory)
       built = File.join(users, BOOTSTRAP_OBJECTS, 'bootstrap.raw')
       raise Error, 'bootstrap flat image was not produced' unless File.file?(built)
 
-      File.binwrite(image_path, BoundedFile.read(built, maximum: BootFile::FIRST_STAGE_MAX))
-      image_path
+      File.binwrite(output, BoundedFile.read(built, maximum: BootFile::FIRST_STAGE_MAX))
+      output
     end
 
     def build_environment

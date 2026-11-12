@@ -1,0 +1,15 @@
+// Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+// SPDX-License-Identifier: BSD-2-Clause
+//
+// UART3, the Raspberry Pi 4's host link, on GPIO 4 and 5: what `dtoverlay=uart3` in
+// config.txt asks for (docs/design-platforms.md, "Raspberry Pi 4 Model B"). Linux's
+// mainline tree has no overlays, so erXos keeps this one; tools/lib/erx/board_tree.rb
+// compiles it and applies it to the board's tree on the host.
+/dts-v1/;
+/plugin/;
+
+&uart3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart3_gpio4>;
+	status = "okay";
+};

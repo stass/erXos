@@ -240,9 +240,10 @@ $(BOOTSTRAP_RAW): $(BOOTSTRAP_ELF_NAME)
 
 $(TARGET): $(LDSCRIPT) $(OBJS_$(TARGET)) $(ERX_BOOT_ARCHIVE)
 
-# Link address of the bootstrap binary - for arm_gen we set it to 0 such
-# that it is DT_DYN. PIE build is enforced through PLATFORM_TYPE selection
-bootstrap_link_address = $(if $(filter arm_gen,$(PLATFORM_TYPE)),0,$(call default_reloc,$(ARCH)))
+# Link address of the bootstrap binary: RAM's base plus the platform's
+# offset, for every platform. bootstrap links static and runs only there, the
+# generic platform's included (Makefile.platform).
+bootstrap_link_address = $(call default_reloc,$(ARCH))
 
 
 %.ld: %.ld.in $(GENERAL_D_LOC) $(BOOTSTRAP_LD_dep)
