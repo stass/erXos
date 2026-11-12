@@ -302,11 +302,26 @@ Error in process <0.150.0> with exit value:
   it from the console and marks the records it cannot show, overwritten or
   unreadable, as `[missing N]`. `top` shows
   the process table under a header of uptime, memory and run queue, read
-  from the one tree of system values that `/proc` also serves; a figure
-  the stopgap kernel measures only in part says so and names its source. Its language is checked against
+  from the one tree of system values that `/proc` also serves. Every
+  runtime's `/proc`, `top` and `dmesg` read through the inspect facet, and
+  the kernel log's old `log` facet is gone. A figure
+  the stopgap kernel measures only in part says so and names its source.
+  Its language is checked against
   plan9port's rc, built on the host as the oracle. Job control works for
   Erlang commands: `&`, `Ctrl-Z`, `jobs`, `fg`, `bg` and `kill`. Running
   programs is not on master yet.
+* **Programs have pipes, but nothing runs them yet.** A program has a
+  descriptor table and pipe ends set up from its startup message, and a
+  read or write on a pipe end waits until the other side is ready. The
+  musl seam that lets a C program use them is not built, so no C program
+  uses pipes yet.
+* **The start table has its first pieces.** The manifest has `start` rows,
+  and the `rc.conf` parser and its merge with the manifest exist. Nothing
+  starts an app from them yet.
+* **The Raspberry Pi 4 boots on QEMU's `raspi4b` model.** TF-A BL31 hands
+  off to Fiasco, and the system boots to the serial shell on the mini
+  UART. It runs under TCG only, because QEMU cannot run this model under
+  HVF.
 * **The machine is an object** (M4). A host link over the second serial
   line lets `tools/erx load` and `watch` replace modules in the running
   system, and `tools/erx files` read the guest's files over 9P2000.L; `tools/erx boot
