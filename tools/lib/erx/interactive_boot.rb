@@ -7,7 +7,6 @@ require 'optparse'
 require 'shellwords'
 require_relative 'error'
 require_relative 'fiasco'
-require_relative 'medium_boot'
 require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu'
@@ -31,6 +30,9 @@ module Erx
   # empty at every boot.
   module InteractiveBoot
     DIRECTORY = 'build/production-image/interactive'
+    # Where --without-web builds the website's image, apart from DIRECTORY, so a later
+    # development boot never replaces the image tools/build_site.rb publishes.
+    SITE_DIRECTORY = 'build/production-image/site'
     QUIT_HINT = 'quit QEMU with Ctrl-A then X'
     # How long QEMU has to exit after SIGTERM before it is killed.
     STOP_SECONDS = 10
@@ -57,7 +59,7 @@ module Erx
         flags.on('--cpus N', Integer, 'Guest CPUs') { |value| options[:cpus] = value }
         flags.on('--jobs N', Integer, 'Build jobs') { |value| options[:jobs] = value }
         flags.on('--hostlink', 'Host link socket and data medium') { options[:hostlink] = true }
-        flags.on('--without-web', 'Leave the web domain out of the image, as the website\'s image does') { options[:without_web] = true }
+        flags.on('--without-web', 'Build the website\'s image, from its manifest without the web domain') { options[:without_web] = true }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       if options.fetch(:hostlink) && options.fetch(:without_web)
@@ -91,28 +93,31 @@ module Erx
     # view; program is tools/erx's own path, so it runs from any directory.
     def web_command(program, socket) = Shellwords.join([program, 'web', '--socket', socket])
 
+    # The directory under the tree's root an image builds into: SITE_DIRECTORY for the
+    # website's image, else DIRECTORY.
+    def image_directory(without_web:) = without_web ? SITE_DIRECTORY : DIRECTORY
+
     # Builds the kernel and the image into DIRECTORY under root, replacing the
     # image an earlier boot left there, and returns the path of its boot file.
     def build_image(root:, runner:, jobs:, **tools) = build(root: root, runner: runner, jobs: jobs, hostlink: false, **tools).image
 
-    # The system manifest the image is built from: the development manifest, without
-    # its web domain when without_web.
+    # The system manifest the image is built from, as checked in: the website's
+    # manifest, which has no web domain, when without_web, else the development manifest.
     def manifest_source(root:, without_web:)
-      source = File.binread(File.join(root, ProductionImage::MANIFEST))
-      without_web ? MediumBoot.without_web(source) : source
+      File.binread(File.join(root, without_web ? ProductionImage::SITE_MANIFEST : ProductionImage::MANIFEST))
     end
 
-    # Builds the kernel and the image into DIRECTORY under root, replacing the
+    # Builds the kernel and the image into its directory under root, replacing the
     # image an earlier boot left there. With hostlink, the image's release
     # medium is written beside it, and HOSTLINK_DIRECTORY under root is first
     # emptied of any socket an earlier boot left, made owner-only, and its
     # socket path checked, so a path QEMU cannot take fails before the build.
-    # With without_web the image has no web domain (manifest_source).
+    # With without_web the image is the website's (manifest_source).
     def build(root:, runner:, jobs:, hostlink:, without_web: false, compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
       socket = hostlink_socket(root) if hostlink
       fiasco = Fiasco.new(root: root, runner: runner, compiler: compiler)
       fiasco.build(jobs: jobs)
-      directory = ProductionImage.clear_directory(root: root, path: File.join(root, DIRECTORY))
+      directory = ProductionImage.clear_directory(root: root, path: File.join(root, image_directory(without_web: without_web)))
       image_builder = ProductionImage.new(root: root, runner: runner, compiler: compiler, linker: linker, fiasco: fiasco)
       source = manifest_source(root: root, without_web: without_web)
       return Boot.new(image: image_builder.build(directory: directory, manifest_source: source).single, link: nil) unless socket

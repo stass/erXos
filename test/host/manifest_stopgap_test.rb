@@ -99,6 +99,19 @@ class ManifestStopgapTest < Minitest::Test
     assert_equal 1, view.count('images')
   end
 
+  # The website's manifest passes the same check: its storage and network domains, without
+  # the web domain, hold the same devices, windows and image.
+  def test_the_real_site_manifest_is_admitted
+    site = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
+    result = admit(site)
+    assert result.matches?(@context)
+    view = @codec.open('manifest', result.bytes)
+    assert_equal 2, view.count('domains')
+    assert_equal 4, view.count('devices')
+    assert_equal 6, view.count('windows')
+    assert_equal 1, view.count('images')
+  end
+
   def test_the_report_claims_only_what_was_checked
     report = admit.report
     assert_equal 'stopgap', report.fetch('mode')

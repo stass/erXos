@@ -12,18 +12,19 @@ require 'optparse'
 require_relative 'lib/erx/runner'
 require 'tmpdir'
 require_relative 'lib/erx/data_volume'
+require_relative 'lib/erx/interactive_boot'
 require_relative 'lib/erx/output_directory'
 require_relative 'lib/erx/site'
 
 root = File.expand_path('..', __dir__)
-options = { image: File.join(root, 'build/production-image/interactive/image.boot'),
+options = { image: File.join(root, Erx::InteractiveBoot::SITE_DIRECTORY, 'image.boot'),
             out: File.join(root, 'build/site'), v64: nil, serve: nil, source: nil }
 parser = OptionParser.new do |flags|
   flags.banner = 'Usage: ruby tools/build_site.rb [--v64 DIR] [--image PATH] [--source REF] [--out DIR] [--serve PORT]'
   flags.on('--v64 DIR', "a v64 tree an earlier run built (default: build the fetched, pinned v64 in #{Erx::SiteV64::STAGING})") do |path|
     options[:v64] = File.expand_path(path)
   end
-  flags.on('--image PATH', 'erXos boot image (default: the interactive production image)') do |path|
+  flags.on('--image PATH', "erXos boot image (default: the website's, which tools/erx boot --without-web builds)") do |path|
     options[:image] = File.expand_path(path)
   end
   flags.on('--source REF', 'release tag or commit the image was built from (default: this tree\'s HEAD)') do |ref|

@@ -691,8 +691,10 @@ QEMU monitor and back. The first build of ERTS takes a while.
 `build/production-image/hostlink/`, for `tools/erx load`, `files` and
 `web`, and gives it a fresh data medium for `/data`; the boot prints the
 `tools/erx web --socket PATH` line to run in another terminal.
-`--without-web` leaves the web domain out of the image, as the website's
-image does; it cannot be combined with `--hostlink`, which the web domain serves.
+`--without-web` builds the website's image instead, from its own manifest,
+`config/manifest/qemu-virt-site.txt`, which has no web domain, into
+`build/production-image/site/`, where `tools/build_site.rb` takes it; it
+cannot be combined with `--hostlink`, which the web domain serves.
 
 ## Guest and stock oracle
 

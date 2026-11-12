@@ -826,13 +826,15 @@ module Erx
     # The development boot image in QEMU with its serial line on this terminal,
     # for a person to type at (InteractiveBoot); with --hostlink, also its host
     # link on a socket and a data medium, and the `tools/erx web` line to run
-    # next; with --without-web, an image without the web domain (the website's).
+    # next; with --without-web, the website's image, from its own manifest, which has
+    # no web domain.
     # The arguments are read whole before anything is built or run.
     def self.boot(arguments, runner_class: Runner)
       request = InteractiveBoot.request(arguments)
       runner = runner_class.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       accel = request.accel || InteractiveBoot.default_accel(QemuGate.available_accelerators(runner: runner))
-      Terminal.puts("building the development boot image into #{InteractiveBoot::DIRECTORY}")
+      kind = request.without_web ? 'website' : 'development'
+      Terminal.puts("building the #{kind} boot image into #{InteractiveBoot.image_directory(without_web: request.without_web)}")
       boot = InteractiveBoot.build(root: ROOT, runner: runner, jobs: request.jobs, hostlink: request.hostlink,
                                     without_web: request.without_web)
       argv = InteractiveBoot.argv(accel: accel, cpus: request.cpus, image: boot.image, link: boot.link)

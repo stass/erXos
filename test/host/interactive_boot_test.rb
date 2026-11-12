@@ -7,6 +7,7 @@ require 'rbconfig'
 require 'set'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/interactive_boot'
+require_relative '../../tools/lib/erx/medium_boot'
 
 # The pure half of `tools/erx boot` (its arguments, the accelerator it picks
 # and the QEMU argument vector it plans) and the child handling of its run,
@@ -70,20 +71,40 @@ class InteractiveBootTest < Minitest::Test
     assert_raises(OptionParser::ParseError) { Erx::InteractiveBoot.request(%w[--hostlink /tmp/socket]) }
   end
 
-  # --without-web asks for the development manifest minus its web domain: no record
-  # of it and no reference to it remain, and the domain count shrinks by one. It
-  # cannot be combined with --hostlink, whose web view the web domain serves.
-  def test_without_web_asks_for_the_development_manifest_without_the_web_domain
+  # --without-web builds the website's image from the checked-in site manifest as it
+  # stands, so the image's manifest check runs over the file the site ships, into a
+  # directory of its own, which a development boot never replaces; without the option
+  # the image is the development manifest's. It cannot be combined with --hostlink,
+  # whose web view the web domain serves.
+  def test_without_web_builds_from_the_site_manifest
     root = File.expand_path('../..', __dir__)
     refute Erx::InteractiveBoot.request([]).without_web
     assert Erx::InteractiveBoot.request(%w[--without-web]).without_web
     assert_raises(OptionParser::ParseError) { Erx::InteractiveBoot.request(%w[--without-web --hostlink]) }
-    with = Erx::InteractiveBoot.manifest_source(root: root, without_web: false)
-    without = Erx::InteractiveBoot.manifest_source(root: root, without_web: true)
-    assert_match(/^domain web$/, with)
-    refute_match(/^(?:share|runtime_limits|limits|domain|service|facet) web$|@(?:share|domain|service)\.web$/, without)
+    assert_equal File.binread(File.join(root, Erx::ProductionImage::MANIFEST)),
+                 Erx::InteractiveBoot.manifest_source(root: root, without_web: false)
+    assert_equal File.binread(File.join(root, Erx::ProductionImage::SITE_MANIFEST)),
+                 Erx::InteractiveBoot.manifest_source(root: root, without_web: true)
+    assert_equal 'config/manifest/qemu-virt-site.txt', Erx::ProductionImage::SITE_MANIFEST
+    assert_equal Erx::InteractiveBoot::DIRECTORY, Erx::InteractiveBoot.image_directory(without_web: false)
+    assert_equal 'build/production-image/site', Erx::InteractiveBoot.image_directory(without_web: true)
+  end
+
+  # The site manifest is the development manifest without its web domain, record for
+  # record: no record of the web domain and no reference to it remain, the domain count
+  # shrinks by one, and every other record is the development manifest's, so the site
+  # grants nothing the development image does not and moves with it. Comments may differ.
+  def test_the_site_manifest_is_the_development_manifest_without_the_web_domain
+    root = File.expand_path('../..', __dir__)
+    development = File.binread(File.join(root, Erx::ProductionImage::MANIFEST))
+    site = File.binread(File.join(root, Erx::ProductionImage::SITE_MANIFEST))
+    records = ->(text) { text.lines.reject { |line| line.start_with?('#') } }
+    assert_match(/^domain web$/, development)
+    refute_match(/^(?:share|runtime_limits|limits|domain|service|facet) web$|@(?:share|domain|service)\.web$/, site)
     domains = ->(text) { Integer(text[/^  max_domains ([0-9]+)$/, 1], 10) }
-    assert_equal domains.(with) - 1, domains.(without)
+    assert_equal domains.(development) - 1, domains.(site)
+    assert_equal records.(Erx::MediumBoot.without_web(development)), records.(site),
+                 'config/manifest/qemu-virt-site.txt differs from the development manifest without its web domain'
   end
 
   # With a link, the second serial line listens on its socket without waiting

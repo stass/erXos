@@ -379,7 +379,10 @@ hold the manifest. Phase 1's EROFS windows pass blocks through unchecked; the
 hash check is a stopgap residual recorded in `TODO.md`. QEMU `virt`'s record is
 [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json) and its
 manifest
-[config/manifest/qemu-virt-development.txt](../config/manifest/qemu-virt-development.txt).
+[config/manifest/qemu-virt-development.txt](../config/manifest/qemu-virt-development.txt);
+the website's image has a manifest of its own,
+[config/manifest/qemu-virt-site.txt](../config/manifest/qemu-virt-site.txt),
+the same without the web domain, which the same check admits.
 Its scope, against
 [design-system.md](design-system.md)'s properties, each kept property with a
 seeded violation and each refusal with a seeded record:
@@ -1530,7 +1533,7 @@ that, `/virtio_mmio@a001e00`, which QEMU leaves without a device: the developmen
 leaves it unplaced, and the `device_give` QEMU suite places it on a configured row, whose
 domain reads the transport's magic, is halted, and reads it again from what the row's
 restart gave it. The website's machine, v64,
-which boots the same image, has no setting for a device's transport, so `site/terminal.js`
+which boots the website's image, has no setting for a device's transport, so `site/terminal.js`
 fills the rest of the disks' page with blank read-only disks and the network device falls
 on its transport ([site/README.md](../site/README.md#the-network)). The production image suite checks each
 path, base and line against QEMU's own device tree, as it checks every recorded path. The

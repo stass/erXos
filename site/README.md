@@ -44,14 +44,21 @@ ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
   states a licence `Erx::SiteV64` does not list, so a new third-party
   input cannot ship without its notice.
 * `--image` is the erXos boot image, by default
-  `build/production-image/interactive/image.boot`. It is stored
-  gzip-compressed as `image-<digest>.boot.gz`. The page needs no web
-  domain, which only the host link serves, and the domain costs boot time,
-  so the site's image is built with
-  `tools/erx boot --without-web`, which builds it into that directory and
-  boots it once on the terminal (quit QEMU with Ctrl-A then X). A later
-  `tools/erx boot` without the option replaces it with the development
-  image, web domain included.
+  `build/production-image/site/image.boot`. It is stored
+  gzip-compressed as `image-<digest>.boot.gz`. The site's image is built
+  with `tools/erx boot --without-web`, which builds it into that directory
+  from the website's own system manifest,
+  [`config/manifest/qemu-virt-site.txt`](../config/manifest/qemu-virt-site.txt),
+  and boots it once on the terminal (quit QEMU with Ctrl-A then X). That
+  manifest is the development manifest without the web domain, which only
+  the host link serves and which would cost boot time; the image's build
+  runs the same manifest check over it as over the development manifest,
+  so the check proves what the site ships. `test/host/interactive_boot_test.rb`
+  fails when the two manifests' records differ in anything but the web
+  domain's rows and the room they take, so a change to the development
+  manifest is made to the site's too. The development image of a plain
+  `tools/erx boot` builds into `build/production-image/interactive/`, so
+  it never replaces the website's.
 * The machine's disk is made by the build, not taken: a boot medium laid
   out by `abi/medium.txt` with the data partition at its minimum length
   and every window blank but for the data partition, which holds a fresh

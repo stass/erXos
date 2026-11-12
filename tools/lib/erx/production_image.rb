@@ -43,6 +43,9 @@ module Erx
   class ProductionImage
     PLATFORM = 'config/platforms/qemu-virt.json'
     MANIFEST = 'config/manifest/qemu-virt-development.txt'
+    # The website's manifest: the development manifest without its web domain, which
+    # `tools/erx boot --without-web` builds the site's image from (InteractiveBoot).
+    SITE_MANIFEST = 'config/manifest/qemu-virt-site.txt'
     # The kind of build every image is, which the archive header's development bit
     # records and uname -i names (BuildFacts.configuration).
     BUILD_KIND = 'development'
