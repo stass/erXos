@@ -2,13 +2,14 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% Terms near the program protocol's grammar through erx_prog_grammar
-%% (docs/design-abi.md#program-protocol): valid start frames with one subterm
-%% replaced, random terms as frames of either direction, and start frames whose
-%% cwd is drawn near its bound and its rules. Whatever arrives, every check
-%% answers ok or {error, {Reason, Kind}} and never raises; a frame a builder
-%% returns passes its check; no round makes an atom; and each cwd is judged as
-%% reference_cwd/1, which shares no code with the grammar, judges it. The seed
-%% comes from make check-fuzz.
+%% (docs/design-abi.md#program-protocol): valid start frames, notices and reports
+%% with one subterm replaced, random terms as frames of either direction, and start
+%% frames whose cwd is drawn near its bound and its rules. Whatever arrives, every
+%% check answers ok or {error, {Reason, Kind}} and never raises; a notice or a
+%% report draws the same answer from its direction's dispatch as from its own check;
+%% a frame a builder returns passes its check; no round makes an atom; and each cwd
+%% is judged as reference_cwd/1, which shares no code with the grammar, judges it.
+%% The seed comes from make check-fuzz.
 
 -module(erx_prog_grammar_fuzz).
 -export([run/1]).
@@ -35,6 +36,10 @@ rounds(N) ->
                           start_round(mutated(start())),
                           start_round(random_term(?DEPTH)),
                           request_round(random_term(?DEPTH), random_term(?DEPTH)),
+                          notice_round(mutated(pick(notices()))),
+                          notice_round(random_term(?DEPTH)),
+                          report_round(mutated(pick(reports()))),
+                          report_round(random_term(?DEPTH)),
                           cwd_round(random_cwd())
                   end, lists:seq(1, N)).
 
@@ -53,6 +58,28 @@ request_round(Slot, Value) ->
     answer(?G:check_request({erx_prog, 1, Slot, Value})),
     case ?G:build_request(Slot, Value) of
         {ok, Built} -> ok = ?G:check_request(Built);
+        Refused -> answer(Refused)
+    end.
+
+%% A notice goes through the dispatch of frames from the program to its own check.
+notice_round(Value) ->
+    Frame = {erx_prog, 1, Value},
+    Verdict = ?G:check_notice(Frame),
+    answer(Verdict),
+    Verdict = ?G:check_from_program(Frame),
+    case ?G:build_notice(Value) of
+        {ok, Built} -> ok = ?G:check_notice(Built);
+        Refused -> answer(Refused)
+    end.
+
+%% A report goes through the dispatch of frames to the program to its own check.
+report_round(Value) ->
+    Frame = {erx_prog, 1, Value},
+    Verdict = ?G:check_report(Frame),
+    answer(Verdict),
+    Verdict = ?G:check_to_program(Frame, []),
+    case ?G:build_report(Value) of
+        {ok, Built} -> ok = ?G:check_report(Built);
         Refused -> answer(Refused)
     end.
 
@@ -123,6 +150,16 @@ start() ->
               {5, {file, 7, read_write}}, {6, {dir, 8}}, {7, {socket, 9}}, {8, null}],
       image => {object, 16#ffffffffffffff00}}.
 
+%% A notice of each case (docs/design-pipes.md#the-program-protocol).
+notices() ->
+    [{closed, 1, 2}, {drained, 1, 2, 3}].
+
+%% A report of each case.
+reports() ->
+    [{pipe_writer, 1, 2, 3, 101, 102, 16384, 103, open}, {pipe_writer_gone, 1, 2, 3},
+     {pipe_reader, 1, 2, 63, 101, gone}, {pipe_reader_gone, 1, 2, 0}, {pipe_lost, 1, 2},
+     pipe_server_lost].
+
 %% Term with one subterm, at a random depth, replaced by a random term, or a map's key
 %% removed or added.
 mutated(Term) ->
@@ -177,6 +214,7 @@ random_leaf() ->
 random_atom() ->
     pick([read, write, read_write, pipe, socketpair, file, tty, dir, socket, dup, null, object, open, gone,
           true, false, erx_start, erx_prog, sigint, sigterm, sigkill, pid, cwd, fds, wend, readers, writers,
-          erlang, ok, undefined, error]).
+          closed, drained, pipe_writer, pipe_writer_gone, pipe_reader, pipe_reader_gone, pipe_lost,
+          pipe_server_lost, erlang, ok, undefined, error]).
 
 pick(List) -> lists:nth(rand:uniform(length(List)), List).

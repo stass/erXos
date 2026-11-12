@@ -1254,11 +1254,11 @@ code under test ran:
   builders make from values drawn up to every bound; the mutations
   `test/fixtures/prog_profile_mutations.rb` generates from the
   protocol's model, one for each rule of each kind at the kind's last
-  value in a base frame, each meeting that rule first in stream order,
-  with the frame-wide rules, a map key repeated in each map and a
-  truncated frame (a list maximum no frame within the bound reaches
-  first, and a kind the base frame does not hold, are named as
-  skipped); hand-written boundary mutations (one
+  value in each base value of a frame (the start message and one notice
+  or report of each case), each meeting that rule first in stream order,
+  with the frame-wide rules, a map key repeated in each map and each
+  frame truncated (a list maximum no frame within the bound reaches
+  first, and a kind no base value holds, are named as skipped); hand-written boundary mutations (one
   past a maximum, a missing, unknown or repeated key, two keys out of
   order, `erlang`, an atom every runtime holds, in place of a
   descriptor's case, a repeated capability value, a `dup` of a `dup` or of a number
@@ -1273,7 +1273,9 @@ code under test ran:
   grammar, a decode failure or a `Used` short of the frame counts as
   `malformed`. Verdicts agree on every input, and `Reason` and `Kind` on
   every single-rule mutation. Seeded: the generated C table with `cwd`'s
-  maximum raised by one, the grammar with its `ascending` test removed,
+  maximum raised by one, the generated C table accepting a read end's
+  index of 64 and the grammar accepting a lane size other than 16 and
+  64 KiB, each in a report, the grammar with its `ascending` test removed,
   and the Erlang side ignoring `Used`, must each fail the test.
 * **The round trip.** A host tool reads each accepted frame through
   every generated accessor and writes it again with `erx_etf`'s writer;

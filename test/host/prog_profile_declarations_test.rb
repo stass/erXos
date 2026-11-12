@@ -34,6 +34,8 @@ class ProgProfileDeclarationsTest < Minitest::Test
     '  integer probe u16 values 1 1' => /duplicate value/,
     '  text probe max 8 sum nothing' => /sum names no total nothing/,
     "  frame probe2 from erx_prog slot request\n" => /two frames of one direction share a tag and slot form/,
+    "  frame probe2 to erx_prog report\n" => /two frames of one direction share a tag and slot form/,
+    "  frame probe2 from erx_prog notice\n" => /two frames of one direction share a tag and slot form/,
     '  text probe max 8 length u16' => /describe 9P2000\.L and fail in a frame protocol/,
     "  integer cap2 u64 unique\n  tuple probe cap2" => /a protocol has at most one unique kind/,
     '  text probe max 8 refuse nul slash' => /a frame protocol's text refuses only nul/,

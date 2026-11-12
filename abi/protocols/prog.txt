@@ -82,14 +82,14 @@ protocol erx_prog
     case read
     case write
     case read_write
-  union writer_state
+  union end_state
     case open
     case gone
   tuple pipe_end pipe_id end_id
   tuple reader rix cap
   list write_readers reader max 64 ascending
   list read_readers reader max 63 ascending
-  tuple writer wend cap cap lane_size cap writer_state
+  tuple writer wend cap cap lane_size cap end_state
   list writers writer max 8192 ascending
   map write_end
     field wend wend
@@ -133,5 +133,17 @@ protocol erx_prog
     field fds fds
     optional image image
   union request
+  union notice
+    case closed pipe_id end_id
+    case drained pipe_id end_id wend
+  union report
+    case pipe_writer pipe_id end_id wend cap cap lane_size cap end_state
+    case pipe_writer_gone pipe_id end_id wend
+    case pipe_reader pipe_id end_id rix cap end_state
+    case pipe_reader_gone pipe_id end_id rix
+    case pipe_lost pipe_id end_id
+    case pipe_server_lost
   frame start to erx_start start
   frame request from erx_prog slot request
+  frame notice from erx_prog notice
+  frame report to erx_prog report

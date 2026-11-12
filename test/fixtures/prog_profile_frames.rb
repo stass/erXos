@@ -190,7 +190,8 @@ module ProgProfileFrames
          at_frame_max(:at_frame_max, 0), at_frame_max(:past_frame_max, 1)].freeze
 
   # A frame of the C fuzz target's seeds beyond ALL (tools/fuzz/erx_prog_target.rb), which
-  # the differential corpus holds too. frame: "start" or "request"; verdict as Fixture's.
+  # the differential corpus holds too. frame: "start", "request", "notice" or "report";
+  # verdict as Fixture's.
   Seed = Data.define(:name, :frame, :bytes, :verdict)
 
   # A start frame's descriptors: a pipe's write end and its read end.
@@ -206,8 +207,27 @@ module ProgProfileFrames
           tuple(small(1), tuple(atom('pipe'), atom('read'), tuple(small(2), small(3)), read_end))])
   end
 
+  # Accepted {erx_prog, 1, Value} frames of one frame kind, named by it and each name.
+  def self.prog_seeds(kind, values)
+    values.map do |name, value|
+      Seed.new(name: "#{kind}-#{name}", frame: kind, bytes: frame(tuple(atom('erx_prog'), small(1), value)),
+               verdict: 'accept')
+    end
+  end
+
   SEEDS = [Seed.new(name: 'pipes', frame: 'start', bytes: start(BASE_PAIRS.merge(fds: pipes)), verdict: 'accept'),
            Seed.new(name: 'request', frame: 'request',
                     bytes: frame(tuple(atom('erx_prog'), small(1), small(0), atom('ok'))),
-                    verdict: 'no_case request')].freeze
+                    verdict: 'no_case request'),
+           *prog_seeds('notice', [['closed', tuple(atom('closed'), small(1), int(70_000))],
+                                  ['drained', tuple(atom('drained'), small(1), small(2), small(3))]]),
+           *prog_seeds('report', [['writer', tuple(atom('pipe_writer'), small(1), small(2), small(3),
+                                                   small_big(0xffff_ffff_ffff_ffff), small(102),
+                                                   int(65_536), small(103), atom('gone'))],
+                                  ['writer-gone', tuple(atom('pipe_writer_gone'), small(1), small(2), small(3))],
+                                  ['reader', tuple(atom('pipe_reader'), small(1), small(2), small(63), small(101),
+                                                   atom('open'))],
+                                  ['reader-gone', tuple(atom('pipe_reader_gone'), small(1), small(2), small(0))],
+                                  ['lost', tuple(atom('pipe_lost'), small(1), small(2))],
+                                  ['server-lost', atom('pipe_server_lost')]])].freeze
 end

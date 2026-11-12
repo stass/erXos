@@ -15,10 +15,10 @@
 -define(FRAME_MAX, 196608).
 -define(ARGS_MAX, 131072).
 
-%% Writes Dir/requests ("start full HEX" lines) and Dir/expected (accept, or
+%% Writes Dir/requests ("FRAME full HEX" lines) and Dir/expected (accept, or
 %% REASON KIND for a single-rule mutation).
 corpus([Dir]) ->
-    Cases = valid() ++ mutations(),
+    Cases = valid() ++ pipe_valid() ++ mutations() ++ pipe_mutations(),
     Lines = [{Frame, Bytes, Expected} || {Frame, Bytes, Expected} <- lists:map(fun encode/1, Cases)],
     ok = file:write_file(filename:join(Dir, "requests"),
                          [[atom_to_list(Frame), " full ", hex(Bytes), "\n"] || {Frame, Bytes, _} <- Lines]),
@@ -67,7 +67,9 @@ side(Frame, Bytes) ->
     end.
 
 check(start, Term) -> erx_prog_grammar:check_start(Term);
-check(request, Term) -> erx_prog_grammar:check_request(Term).
+check(request, Term) -> erx_prog_grammar:check_request(Term);
+check(notice, Term) -> erx_prog_grammar:check_notice(Term);
+check(report, Term) -> erx_prog_grammar:check_report(Term).
 
 answer(ok) -> "accepted";
 answer({error, {Reason, Kind}}) -> refused(Reason, Kind).
@@ -170,3 +172,54 @@ mutations() ->
       "malformed start"},
      {request_no_case, {frame, request, {erx_prog, 1, 0, ok}}, "no_case request"},
      {request_slot, {frame, request, {erx_prog, 1, 16, ok}}, "range slot"}].
+
+%% Notices and reports, one of each case, with each integer at its least and at its bound.
+pipe_valid() ->
+    Max = 16#ffffffff,
+    [notice(closed_least, {closed, 1, 1}),
+     notice(closed_max, {closed, Max, Max}),
+     notice(drained, {drained, 1, Max, Max}),
+     report(writer_open, {pipe_writer, 1, 1, 1, 1, 2, 16384, 3, open}),
+     report(writer_state_gone_max, {pipe_writer, Max, Max, Max, 16#ffffffffffffffff, 16#8000000000000000, 65536,
+                          16#7fffffffffffffff, gone}),
+     report(writer_gone, {pipe_writer_gone, 1, Max, Max}),
+     report(reader_least, {pipe_reader, 1, 1, 0, 1, open}),
+     report(reader_max, {pipe_reader, Max, Max, 63, 16#ffffffffffffffff, gone}),
+     report(reader_gone, {pipe_reader_gone, 1, Max, 63}),
+     report(lost, {pipe_lost, Max, 1}),
+     report(server_lost, pipe_server_lost)].
+
+notice(Name, Value) ->
+    {ok, Frame} = erx_prog_grammar:build_notice(Value),
+    {Name, {frame, notice, Frame}, "accept"}.
+
+report(Name, Value) ->
+    {ok, Frame} = erx_prog_grammar:build_report(Value),
+    {Name, {frame, report, Frame}, "accept"}.
+
+%% One mutation for each rule of the notices and reports, each with the refusal it must draw.
+pipe_mutations() ->
+    Writer = {pipe_writer, 1, 2, 3, 101, 102, 16384, 103, open},
+    [{closed_as_request, {frame, request, {erx_prog, 1, {closed, 1, 1}}}, "shape request"},
+     {closed_pipe_zero, {frame, notice, {erx_prog, 1, {closed, 0, 1}}}, "range pipe_id"},
+     {closed_end_zero, {frame, notice, {erx_prog, 1, {closed, 1, 0}}}, "range end_id"},
+     {closed_end_past_u32, {frame, notice, {erx_prog, 1, {closed, 1, 16#100000000}}}, "range end_id"},
+     {drained_writer_zero, {frame, notice, {erx_prog, 1, {drained, 1, 1, 0}}}, "range wend"},
+     {closed_arity, {frame, notice, {erx_prog, 1, {closed, 1, 1, 1, 1}}}, "no_case notice"},
+     {closed_atom, {frame, notice, {erx_prog, 1, closed}}, "no_case notice"},
+     {notice_report_case, {frame, notice, {erx_prog, 1, {pipe_lost, 1, 1}}}, "no_case notice"},
+     {notice_version, {frame, notice, {erx_prog, 2, {closed, 1, 1}}}, "version notice"},
+     {notice_slot, {frame, notice, {erx_prog, 1, 0, {closed, 1, 1}}}, "shape notice"},
+     {notice_shape, {frame, notice, {erx_prog, 1, 1}}, "shape notice"},
+     {writer_lane_size, {frame, report, {erx_prog, 1, setelement(7, Writer, 1000)}}, "range lane_size"},
+     {writer_ring_rpage, {frame, report, {erx_prog, 1, setelement(6, Writer, 101)}}, "unique cap"},
+     {writer_doorbell, {frame, report, {erx_prog, 1, setelement(8, Writer, 101)}}, "unique cap"},
+     {writer_cap_null, {frame, report, {erx_prog, 1, setelement(5, Writer, 0)}}, "range cap"},
+     {writer_end_state, {frame, report, {erx_prog, 1, setelement(9, Writer, closed)}}, "no_case end_state"},
+     {reader_rix, {frame, report, {erx_prog, 1, {pipe_reader, 1, 1, 64, 101, open}}}, "range rix"},
+     {reader_gone_rix, {frame, report, {erx_prog, 1, {pipe_reader_gone, 1, 1, 64}}}, "range rix"},
+     {reader_doorbell_null, {frame, report, {erx_prog, 1, {pipe_reader, 1, 1, 0, 0, open}}}, "range cap"},
+     {server_lost_tuple, {frame, report, {erx_prog, 1, {pipe_server_lost}}}, "no_case report"},
+     {report_notice_case, {frame, report, {erx_prog, 1, {closed, 1, 1}}}, "no_case report"},
+     {report_version, {frame, report, {erx_prog, 0, pipe_server_lost}}, "version report"},
+     {report_tag, {frame, report, {erx_start, 1, pipe_server_lost}}, "shape report"}].

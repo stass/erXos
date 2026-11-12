@@ -4,18 +4,18 @@
  */
 
 /*
- * The host driver of liberx's erx_prog C check (test/host/prog_profile_test.rb).
- * Each line of the requests file is "FRAME SCRATCH HEX": FRAME start or
- * request, SCRATCH full or half of what erx_prog_scratch_bytes promises,
- * HEX the frame's bytes.  Each answer line is "WIRE VERDICT": WIRE is
- * "wire" when erx_etf_next reads the bytes as items to their end and
- * "nowire" otherwise (the differential test's Erlang side refuses those
- * as malformed); VERDICT is "refused REASON KIND OFFSET", or for an
- * accepted start frame "accepted HEX", the frame written again from the
- * struct and every accessor with erx_etf's writer, which the test decodes
- * and compares with the frame's own term, or "accepted crossed" when
- * argv's next reads the frame's fds view.
- */
+* The host driver of liberx's erx_prog C check
+* (test/host/prog_profile_test.rb).  Each line of the requests file is
+* "FRAME SCRATCH HEX": FRAME start, request, notice or report, SCRATCH full
+* or half of what erx_prog_scratch_bytes promises, HEX the frame's bytes.
+* Each answer line is "WIRE VERDICT": WIRE is "wire" when erx_etf_next
+* reads the bytes as items to their end and "nowire" otherwise (the
+* differential test's Erlang side refuses those as malformed); VERDICT is
+* "refused REASON KIND OFFSET", or for an accepted start, notice or report
+* frame "accepted HEX", the frame written again from the struct and every
+* accessor with erx_etf's writer, which the test decodes and compares with
+* the frame's own term, or "accepted crossed" when argv's next reads the
+* frame's fds view. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -171,7 +171,7 @@ put_read_end(erx_etf_writer_t *w, const erx_prog_read_end_t *e)
 		put_u64(w, wr.cap_2);
 		put_u64(w, wr.lane_size);
 		put_u64(w, wr.cap_3);
-		put_atom(w, wr.writer_state == ERX_PROG_WRITER_STATE_OPEN ?
+		put_atom(w, wr.end_state == ERX_PROG_END_STATE_OPEN ?
 		    "open" : "gone");
 	}
 	erx_etf_put_nil(w);
@@ -319,6 +319,107 @@ put_start(const erx_prog_start_t *s, uint8_t *out, size_t cap, size_t *len)
 	return (erx_etf_writer_done(&w, len));
 }
 
+static void
+put_end_state(erx_etf_writer_t *w, uint16_t state)
+{
+	put_atom(w, state == ERX_PROG_END_STATE_OPEN ? "open" : "gone");
+}
+
+/* A frame {erx_prog, 1, Value} begun: the writer stands at Value. */
+static void
+put_prog_head(erx_etf_writer_t *w, uint8_t *out, size_t cap)
+{
+	erx_etf_writer_init(w, out, cap);
+	erx_etf_put_tuple(w, 3);
+	put_atom(w, "erx_prog");
+	put_u64(w, 1);
+}
+
+/* The notice frame again, from its struct. */
+static bool
+put_notice(const erx_prog_notice_t *n, uint8_t *out, size_t cap, size_t *len)
+{
+	erx_etf_writer_t w;
+
+	put_prog_head(&w, out, cap);
+	switch (n->which) {
+	case ERX_PROG_NOTICE_CLOSED:
+		erx_etf_put_tuple(&w, 3);
+		put_atom(&w, "closed");
+		put_u64(&w, n->u.closed.pipe_id);
+		put_u64(&w, n->u.closed.end_id);
+		break;
+	case ERX_PROG_NOTICE_DRAINED:
+		erx_etf_put_tuple(&w, 4);
+		put_atom(&w, "drained");
+		put_u64(&w, n->u.drained.pipe_id);
+		put_u64(&w, n->u.drained.end_id);
+		put_u64(&w, n->u.drained.wend);
+		break;
+	default:
+		return (false);
+	}
+	return (erx_etf_writer_done(&w, len));
+}
+
+/* The report frame again, from its struct. */
+static bool
+put_report(const erx_prog_report_t *r, uint8_t *out, size_t cap, size_t *len)
+{
+	erx_etf_writer_t w;
+
+	put_prog_head(&w, out, cap);
+	switch (r->which) {
+	case ERX_PROG_REPORT_PIPE_WRITER:
+		erx_etf_put_tuple(&w, 9);
+		put_atom(&w, "pipe_writer");
+		put_u64(&w, r->u.pipe_writer.pipe_id);
+		put_u64(&w, r->u.pipe_writer.end_id);
+		put_u64(&w, r->u.pipe_writer.wend);
+		put_u64(&w, r->u.pipe_writer.cap_1);
+		put_u64(&w, r->u.pipe_writer.cap_2);
+		put_u64(&w, r->u.pipe_writer.lane_size);
+		put_u64(&w, r->u.pipe_writer.cap_3);
+		put_end_state(&w, r->u.pipe_writer.end_state);
+		break;
+	case ERX_PROG_REPORT_PIPE_WRITER_GONE:
+		erx_etf_put_tuple(&w, 4);
+		put_atom(&w, "pipe_writer_gone");
+		put_u64(&w, r->u.pipe_writer_gone.pipe_id);
+		put_u64(&w, r->u.pipe_writer_gone.end_id);
+		put_u64(&w, r->u.pipe_writer_gone.wend);
+		break;
+	case ERX_PROG_REPORT_PIPE_READER:
+		erx_etf_put_tuple(&w, 6);
+		put_atom(&w, "pipe_reader");
+		put_u64(&w, r->u.pipe_reader.pipe_id);
+		put_u64(&w, r->u.pipe_reader.end_id);
+		put_u64(&w, r->u.pipe_reader.rix);
+		put_u64(&w, r->u.pipe_reader.cap);
+		put_end_state(&w, r->u.pipe_reader.end_state);
+		break;
+	case ERX_PROG_REPORT_PIPE_READER_GONE:
+		erx_etf_put_tuple(&w, 4);
+		put_atom(&w, "pipe_reader_gone");
+		put_u64(&w, r->u.pipe_reader_gone.pipe_id);
+		put_u64(&w, r->u.pipe_reader_gone.end_id);
+		put_u64(&w, r->u.pipe_reader_gone.rix);
+		break;
+	case ERX_PROG_REPORT_PIPE_LOST:
+		erx_etf_put_tuple(&w, 3);
+		put_atom(&w, "pipe_lost");
+		put_u64(&w, r->u.pipe_lost.pipe_id);
+		put_u64(&w, r->u.pipe_lost.end_id);
+		break;
+	case ERX_PROG_REPORT_PIPE_SERVER_LOST:
+		put_atom(&w, "pipe_server_lost");
+		break;
+	default:
+		return (false);
+	}
+	return (erx_etf_writer_done(&w, len));
+}
+
 static bool
 wire(const uint8_t *b, size_t len)
 {
@@ -360,6 +461,8 @@ main(int argc, char **argv)
 	erx_profile_refusal_t refusal;
 	uint16_t request;
 	erx_prog_start_t start;
+	erx_prog_notice_t notice;
+	erx_prog_report_t report;
 	FILE *in, *answers;
 	size_t len, need, have, out_len, i;
 	uint8_t *scratch, slot;
@@ -388,6 +491,12 @@ main(int argc, char **argv)
 		if (strcmp(kind, "start") == 0)
 			ok = erx_prog_check_start(frame, len, scratch + 3, have, &start,
 			    &refusal);
+		else if (strcmp(kind, "notice") == 0)
+			ok = erx_prog_check_notice(frame, len, scratch + 3, have,
+			    &notice, &refusal);
+		else if (strcmp(kind, "report") == 0)
+			ok = erx_prog_check_report(frame, len, scratch + 3, have,
+			    &report, &refusal);
 		else
 			ok = erx_prog_check_request(frame, len, scratch + 3, have,
 			    &slot, &request, &refusal);
@@ -403,8 +512,15 @@ main(int argc, char **argv)
 			fprintf(answers, "accepted crossed\n");
 			continue;
 		}
-		if (strcmp(kind, "start") != 0 ||
-		    !put_start(&start, out, sizeof(out), &out_len)) {
+		if (strcmp(kind, "start") == 0)
+			ok = put_start(&start, out, sizeof(out), &out_len);
+		else if (strcmp(kind, "notice") == 0)
+			ok = put_notice(&notice, out, sizeof(out), &out_len);
+		else if (strcmp(kind, "report") == 0)
+			ok = put_report(&report, out, sizeof(out), &out_len);
+		else
+			ok = false;
+		if (!ok) {
 			fprintf(answers, "accepted -\n");
 			continue;
 		}

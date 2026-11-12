@@ -720,7 +720,7 @@ which the program does not answer:
 | `{stopped, N, Pid, Signal}`, `{continued, N, Pid}` | in the second tier, a child stopped by a stop signal or continued by `SIGCONT` ([The terminal](#the-terminal)); kept in the child table for `waitpid`'s `WUNTRACED` and `WCONTINUED` |
 | `{ready, Open, Events}` | a terminal or a socket the program watches is ready for the events named ([The terminal](#the-terminal)) |
 | `{server_gone, Open}` | the server of an open ended: the open's requests fail with `EIO` from then on |
-| `{pipe_writer, ...}`, `{pipe_writer_gone, ...}`, `{pipe_reader, ...}`, `{pipe_reader_gone, ...}`, `{pipe_lost, ...}`, `{pipe_server_lost}` | the pipe reports of [design-pipes.md](design-pipes.md#the-program-protocol) |
+| `{pipe_writer, ...}`, `{pipe_writer_gone, ...}`, `{pipe_reader, ...}`, `{pipe_reader_gone, ...}`, `{pipe_lost, ...}`, `pipe_server_lost` | the pipe reports of [design-pipes.md](design-pipes.md#the-program-protocol) |
 
 A report of a child's state carries that child's count of state changes,
 `N`, from 1, so a `{waited, Pid, N}` names one state; a signal report

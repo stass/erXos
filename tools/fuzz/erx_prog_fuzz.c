@@ -5,8 +5,9 @@
 
 /*
  * liberx's erx_prog check over hostile frames (docs/design-abi.md#program-protocol).
- * The first input byte chooses the frame: bit 0 clear a start frame, set a
- * request frame; bits 1-3 the scratch's offset from an aligned address.
+ * The first input byte chooses the frame: bits 0-1 a start (0), request (1),
+ * notice (2) or report (3) frame; bits 2-4 the scratch's offset from an
+ * aligned address.
  * The rest is the frame's bytes.
  *
  * For every input the harness checks the frame twice: with all the scratch
@@ -16,7 +17,11 @@
  * names a reason, a kind and an offset within the frame.  An accepted start
  * frame is read through every accessor: each list's iterator yields exactly
  * the elements its view counts and then stops, and every text lies within
- * the frame.
+ * the frame.  An accepted notice or report holds a known case, and every
+ * field of it lies within its kind's range: pipe and end numbers from 1, a
+ * read end's index to 63, a lane size of 16 or 64 KiB, capabilities other
+ * than the null one and distinct within the frame, and an end state open or
+ * gone.
  *
  * The start-up plan of liberx/program/startup.h runs on every start frame
  * and must agree with the check: a refused frame is refused with status 127
@@ -304,14 +309,107 @@ plan_start(const uint8_t *frame, size_t len, size_t need, bool accepted,
 	abort();
 }
 
+/* The frame kinds the first input byte chooses. */
+enum frame_kind {
+	FRAME_START,
+	FRAME_REQUEST,
+	FRAME_NOTICE,
+	FRAME_REPORT
+};
+
+static void
+check_ids(uint32_t pipe_id, uint32_t end_id)
+{
+	if (pipe_id == 0 || end_id == 0)
+		abort();
+}
+
+static void
+check_cap(uint64_t cap)
+{
+	if (cap == ERX_CAP_NULL)
+		abort();
+}
+
+static void
+check_state(uint16_t state)
+{
+	if (state != ERX_PROG_END_STATE_OPEN && state != ERX_PROG_END_STATE_GONE)
+		abort();
+}
+
+static void
+read_notice(const erx_prog_notice_t *n)
+{
+	switch (n->which) {
+	case ERX_PROG_NOTICE_CLOSED:
+		check_ids(n->u.closed.pipe_id, n->u.closed.end_id);
+		return;
+	case ERX_PROG_NOTICE_DRAINED:
+		check_ids(n->u.drained.pipe_id, n->u.drained.end_id);
+		if (n->u.drained.wend == 0)
+			abort();
+		return;
+	}
+	abort();
+}
+
+static void
+read_report(const erx_prog_report_t *r)
+{
+	switch (r->which) {
+	case ERX_PROG_REPORT_PIPE_WRITER:
+		check_ids(r->u.pipe_writer.pipe_id, r->u.pipe_writer.end_id);
+		check_cap(r->u.pipe_writer.cap_1);
+		check_cap(r->u.pipe_writer.cap_2);
+		check_cap(r->u.pipe_writer.cap_3);
+		check_state(r->u.pipe_writer.end_state);
+		if (r->u.pipe_writer.wend == 0 ||
+		    (r->u.pipe_writer.lane_size != 16384 &&
+		    r->u.pipe_writer.lane_size != 65536) ||
+		    r->u.pipe_writer.cap_1 == r->u.pipe_writer.cap_2 ||
+		    r->u.pipe_writer.cap_1 == r->u.pipe_writer.cap_3 ||
+		    r->u.pipe_writer.cap_2 == r->u.pipe_writer.cap_3)
+			abort();
+		return;
+	case ERX_PROG_REPORT_PIPE_WRITER_GONE:
+		check_ids(r->u.pipe_writer_gone.pipe_id,
+		    r->u.pipe_writer_gone.end_id);
+		if (r->u.pipe_writer_gone.wend == 0)
+			abort();
+		return;
+	case ERX_PROG_REPORT_PIPE_READER:
+		check_ids(r->u.pipe_reader.pipe_id, r->u.pipe_reader.end_id);
+		check_cap(r->u.pipe_reader.cap);
+		check_state(r->u.pipe_reader.end_state);
+		if (r->u.pipe_reader.rix > 63)
+			abort();
+		return;
+	case ERX_PROG_REPORT_PIPE_READER_GONE:
+		check_ids(r->u.pipe_reader_gone.pipe_id,
+		    r->u.pipe_reader_gone.end_id);
+		if (r->u.pipe_reader_gone.rix > 63)
+			abort();
+		return;
+	case ERX_PROG_REPORT_PIPE_LOST:
+		check_ids(r->u.pipe_lost.pipe_id, r->u.pipe_lost.end_id);
+		return;
+	case ERX_PROG_REPORT_PIPE_SERVER_LOST:
+		return;
+	}
+	abort();
+}
+
 /*
  * The check's answer with scratch_len bytes of scratch at offset bytes into a
  * buffer that ends where the scratch does.
  */
 static bool
-check(bool request, const uint8_t *frame, size_t len, size_t offset,
+check(enum frame_kind kind, const uint8_t *frame, size_t len, size_t offset,
     size_t scratch_len, erx_prog_start_t *start, erx_profile_refusal_t *refusal)
 {
+	erx_prog_notice_t notice;
+	erx_prog_report_t report;
 	uint16_t operation;
 	uint8_t slot;
 	uint8_t *scratch;
@@ -320,12 +418,30 @@ check(bool request, const uint8_t *frame, size_t len, size_t offset,
 	scratch = malloc(offset + scratch_len);
 	if (scratch == NULL)
 		abort();
-	if (request)
-		ok = erx_prog_check_request(frame, len, scratch + offset, scratch_len,
-		    &slot, &operation, refusal);
-	else
-		ok = erx_prog_check_start(frame, len, scratch + offset, scratch_len,
-		    start, refusal);
+	switch (kind) {
+	case FRAME_START:
+		ok = erx_prog_check_start(frame, len, scratch + offset,
+		    scratch_len, start, refusal);
+		break;
+	case FRAME_REQUEST:
+		ok = erx_prog_check_request(frame, len, scratch + offset,
+		    scratch_len, &slot, &operation, refusal);
+		break;
+	case FRAME_NOTICE:
+		ok = erx_prog_check_notice(frame, len, scratch + offset,
+		    scratch_len, &notice, refusal);
+		if (ok)
+			read_notice(&notice);
+		break;
+	case FRAME_REPORT:
+		ok = erx_prog_check_report(frame, len, scratch + offset,
+		    scratch_len, &report, refusal);
+		if (ok)
+			read_report(&report);
+		break;
+	default:
+		abort();
+	}
 	free(scratch);
 	if (!ok && (refusal->offset > len ||
 	    erx_profile_reason_name(refusal->reason) == NULL ||
@@ -340,26 +456,27 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	erx_profile_refusal_t full_refusal, short_refusal;
 	erx_prog_start_t start;
 	size_t need, len, offset;
-	bool request, full;
+	enum frame_kind kind;
+	bool full;
 
 	if (size < 1)
 		return (0);
-	request = (data[0] & 1) != 0;
-	offset = (data[0] >> 1) & 7;
+	kind = (enum frame_kind)(data[0] & 3);
+	offset = (data[0] >> 2) & 7;
 	frame_start = data + 1;
 	frame_len = len = size - 1;
 	need = erx_prog_scratch_bytes(len);
 	if (need == SIZE_MAX)
 		abort();
-	full = check(request, frame_start, len, offset, need, &start,
+	full = check(kind, frame_start, len, offset, need, &start,
 	    &full_refusal);
 	if (!full && full_refusal.reason == ERX_PROFILE_SCRATCH)
 		abort();
-	if (full && !request)
+	if (full && kind == FRAME_START)
 		read_start(&start);
-	if (!request)
+	if (kind == FRAME_START)
 		plan_start(frame_start, len, need, full, &start, &full_refusal);
-	if (check(request, frame_start, len, offset, need - 1, &start,
+	if (check(kind, frame_start, len, offset, need - 1, &start,
 	    &short_refusal) || (short_refusal.reason != ERX_PROFILE_SCRATCH &&
 	    short_refusal.reason != ERX_PROFILE_SIZE))
 		abort();

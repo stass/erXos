@@ -76,6 +76,24 @@ class ProgProfileTest < Minitest::Test
     assert(disagreements(File.binread(GRAMMAR), seeded).any? { |row| row.fetch(:expected) == 'length cwd' })
   end
 
+  # A read end's index past 63 in a report the C table accepts, and a lane size other
+  # than the two the grammar accepts: the reports' mutations must catch each.
+  def test_a_table_accepting_a_read_end_index_of_64_disagrees_on_a_report
+    seeded = seed(TABLE, /(\.name = "rix",.*?\.max = UINT64_C\()63\)/m, '\164)')
+    assert(disagreements(File.binread(GRAMMAR), seeded).any? do |row|
+      row.fetch(:frame) == 'report' && row.fetch(:expected) == 'range rix'
+    end)
+  end
+
+  def test_a_grammar_accepting_another_lane_size_disagrees_on_a_report
+    grammar = File.binread(GRAMMAR)
+    seeded = grammar.sub('(V =:= 16384 orelse V =:= 65536)', '(V =:= 16384 orelse V =:= 65536 orelse V < 16384)')
+    refute_equal grammar, seeded
+    assert(disagreements(seeded).any? do |row|
+      row.fetch(:frame) == 'report' && row.fetch(:expected) == 'range lane_size'
+    end)
+  end
+
   def test_a_grammar_without_its_ascending_test_disagrees
     grammar = File.binread(GRAMMAR)
     seeded = grammar.gsub(/(list\(fun k_\w+\/2, V, [^,]+, )true/, '\1false')
@@ -180,7 +198,7 @@ class ProgProfileTest < Minitest::Test
     end
   end
 
-  # Each frame's expected answer, the C verdict and the Erlang verdict, as
+  # Each frame's name, its expected answer, the C verdict and the Erlang verdict, as
   # "accepted", "accepted same|differs" or "refused REASON KIND".
   def differential(grammar, sources = {})
     corpus = corpus(grammar)
@@ -197,6 +215,8 @@ class ProgProfileTest < Minitest::Test
       frame = verdict.split.last
       verdict = "refused malformed #{frame}" if wire == 'nowire' && !verdict.start_with?('refused size')
       { expected: expected, c: c_verdict, erlang: verdict }
+    end.zip(corpus.fetch(:requests)).map do |row, request|
+      row.merge(frame: request.split.first)
     end
   end
 
@@ -208,7 +228,7 @@ class ProgProfileTest < Minitest::Test
       seeds = ProgProfileFrames::SEEDS
       hand = File.readlines(File.join(dir, 'expected'), chomp: true) + ProgProfileFrames::ALL.map(&:verdict)
       { requests: File.readlines(File.join(dir, 'requests'), chomp: true) + fixture_requests +
-          MUTATIONS.map { |mutation| "start full #{mutation.bytes.unpack1('H*')}" } +
+          MUTATIONS.map { |mutation| "#{mutation.frame} full #{mutation.bytes.unpack1('H*')}" } +
           seeds.map { |seed| "#{seed.frame} full #{seed.bytes.unpack1('H*')}" },
         expected: hand + MUTATIONS.map(&:verdict) + seeds.map(&:verdict), hand: hand }
     end

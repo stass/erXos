@@ -980,7 +980,7 @@ installed into a table other than the one it was meant for
 server's process owns, and when it exits their destructors close the pipe
 server's capabilities, deleting no memory. Each program learns of the loss
 from its own handler: every handler monitors the pipe server it forwards
-to and, when it goes, sends its program `{pipe_server_lost}` before it
+to and, when it goes, sends its program `pipe_server_lost` before it
 forwards anything to the restarted one, and `liberx` counts every pipe end
 it then holds lost and wakes every worker waiting on one. Every session
 process that holds an end gets the same message. Every party, woken, finds
@@ -1178,7 +1178,7 @@ answer; both travel on the channel in order and without loss:
 | `{pipe_reader, Pipe, End, Rix, Doorbell, State}` | report | a read end at index `Rix` joined the pipe of end `End`: `Doorbell`, its trigger right, is a value in the program's table. `State` is `open`, and the end rings `Doorbell` once as it applies the report; or `gone`, when the handler merged the read end's gone into its owed join, and the end closes its copy of `Doorbell` at once and counts no read end for it | none |
 | `{pipe_reader_gone, Pipe, End, Rix}` | report | the read end at index `Rix` of the pipe of end `End` is gone; a write end lowers its count of read ends, and every holder closes its copy of the doorbell | none |
 | `{pipe_lost, Pipe, End}` | report | an install the end needed failed: the end counts as lost, its reads failing with `EIO` and its writes with `EPIPE` from then on ([Failure handling](#failure-handling-diagnostics-and-debuggability)) | none |
-| `{pipe_server_lost}` | report | the session's pipe server ended: every pipe end the program holds is lost, and `liberx` wakes every worker waiting on one ([The pipe server](#the-pipe-server)) | none |
+| `pipe_server_lost` | report | the session's pipe server ended: every pipe end the program holds is lost, and `liberx` wakes every worker waiting on one ([The pipe server](#the-pipe-server)) | none |
 
 A spawn's or a fork's descriptors name a pipe end to inherit as
 `{pipe, End}` and a socketpair as `{socketpair, ReadEnd, WriteEnd}`, and
@@ -1316,7 +1316,7 @@ differences, each pinned by a test:
 | A reader ends holding the reader lock | the end record of its space | the lock held, a record partly claimed | the pipe server frees the lock with one compare-and-swap and tells the other read ends, whose waiters wake; the next reader continues the claimed record from `cur_off` or retires it | its co-readers go on; the bytes it was taking are lost, and none is read twice |
 | A sender fails, is killed or lies between a deposit and its publication | `sendmsg`'s failure, or the drained reports of the sender's lane | a deposit whose ticket is in no lane | `{withdraw}`, or the drained reports, close it ([Deposits](#deposits)) | nothing: what the deposit held closes, and a pipe it kept open reaches its end of stream |
 | `pipe`, or a read end beyond 64, the quota or a table | the pipe server's plan or an install | nothing: the objects made close | the steps before it undone | `EMFILE`, `ENFILE` or `ENOMEM` from `pipe` or the spawn |
-| The pipe server crashes | its supervisor, and every handler's monitor | its capabilities closed by the destructors; its memory alive while parties map it | supervisor restart; each handler sends `{pipe_server_lost}`, and its program wakes its own waiters; each pipe's memory returns as its parties close their ends | reads fail with `EIO`, writes with `EPIPE`; later pipes work |
+| The pipe server crashes | its supervisor, and every handler's monitor | its capabilities closed by the destructors; its memory alive while parties map it | supervisor restart; each handler sends `pipe_server_lost`, and its program wakes its own waiters; each pipe's memory returns as its parties close their ends | reads fail with `EIO`, writes with `EPIPE`; later pipes work |
 | An install into a running holder fails, because the holder's table or budget is full | the install's status | the end without the lane or the doorbell it needed | the pipe server closes the copy whose install failed and reports the end lost to that holder with `{pipe_lost, Pipe, End}`, after which the end counts as lost, its reads failing with `EIO` and its writes with `EPIPE`, as [Writing](#writing) says of a lost pipe | a program that exhausts its own table or budget with its own objects loses only its own end; within the `pipes` quota, pipe installs alone never exhaust it ([Inherited ends](#inherited-ends)) |
 | A program floods its handler with pipe requests or notices | the port driver, which passes on a program's frames only within its credit: 16 requests, one `{closed}` per end and one `{drained}` per writer named gone to it | none | a request on a busy slot or a notice that is not due, a repeat included, ends the program with `SIGSYS`, as a malformed record does ([design-programs.md](design-programs.md#the-program-protocol)); within its credit, the program waits for room in its own lane | the program's parent sees `SIGSYS`; the handler and the pipe server hold at most one message per credit of it, and its siblings are served |
 
