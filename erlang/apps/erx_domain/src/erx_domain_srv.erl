@@ -140,7 +140,7 @@ facet names that facets/2 checks (the generated ?ERX_FACET_NAMES by default);
 inspect_policy, #{roots, development}, the system-shell principals and
 development flag every inspect facet's scope is decided from (inspect_policy/1);
 and principals, the manifest's system principal and principal names, which
-name each principal's sessions (principals/1).
+name each principal's sessions (principals/2).
 """.
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
@@ -148,6 +148,17 @@ start_link(Opts) ->
 init(Opts) ->
     process_flag(trap_exit, true),
     Lib = library(maps:get(lib, Opts, erx_domain_lib)),
+    case principals(Lib, Opts) of
+        {ok, Principals} ->
+            {ok, state(Lib, Principals, Opts), {continue, boot}};
+        {error, Reason} ->
+            logger:error("erx_domain_srv: cannot read the principals of the system manifest "
+                         "(/manifest), which the domain library booted from: ~0p", [Reason]),
+            {stop, {system_manifest, Reason}}
+    end.
+
+%% The service's state as it starts, with Lib its library and Principals the manifest's.
+state(Lib, Principals, Opts) ->
     Agent = maps:get(agent, Opts, erx_connections),
     Exports = maps:get(exports, Opts, erx_dist),
     %% Whether the runtime is a node, as kernel's start left it, since net_kernel starts
@@ -163,16 +174,15 @@ init(Opts) ->
     %% system domain serves that the manifest grants the row or the template's sessions,
     %% each its service's name and the grant's limits.
     MintConfig = maps:merge(#{owner => fun erx_dist:owner/1}, maps:with([owner, deadline], maps:get(mints, Opts, #{}))),
-    {ok, #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
-           configured => #{}, templates => #{}, waiting => #{}, links => erx_domain_links:new(),
-           introducing => #{}, introduce_timeout => maps:get(introduce_timeout, Opts, ?INTRODUCE_TIMEOUT),
-           held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT),
-           mint_config => MintConfig, mints => erx_domain_mints:new(MintConfig#{services => [], grants => []}),
-           mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0},
-           served => #{}, web_lines => #{},
-           facet_names => maps:get(facet_names, Opts, ?ERX_FACET_NAMES),
-           inspect_policy => inspect_policy(Opts), principals => principals(Opts)},
-     {continue, boot}}.
+    #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
+      configured => #{}, templates => #{}, waiting => #{}, links => erx_domain_links:new(),
+      introducing => #{}, introduce_timeout => maps:get(introduce_timeout, Opts, ?INTRODUCE_TIMEOUT),
+      held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT),
+      mint_config => MintConfig, mints => erx_domain_mints:new(MintConfig#{services => [], grants => []}),
+      mint_timers => #{}, mint_counts => #{}, mint_log => {erlang:monotonic_time(millisecond), 0, 0},
+      served => #{}, web_lines => #{},
+      facet_names => maps:get(facet_names, Opts, ?ERX_FACET_NAMES),
+      inspect_policy => inspect_policy(Opts), principals => Principals}.
 
 %% What every inspect facet's scope is decided from (erx_domain_core:inspect_scope/3): the
 %% system manifest's system-shell principals and its development flag, read once, as the
@@ -186,19 +196,23 @@ inspect_policy(_Opts) ->
 
 %% The system manifest's system principal and principal names, which name each
 %% principal's sessions (erx_domain_core:session_prefix/3), read once, as the service
-%% starts, as inspect_policy/1 reads its policy; a host test names its own. The system
-%% principal is the one the service charges its own creates to: the packer numbers
-%% principals in name order, so it is whichever the manifest's root.system_principal
-%% names, not principal 1. A manifest the service cannot read names no principal and
-%% its system principal is unknown, so its creates are refused (create/2).
-principals(#{principals := #{system := System, names := Names} = Principals})
+%% starts, as inspect_policy/1 reads its policy. The system principal is the one the
+%% service charges its own creates to and the console logs in at the system domain's line
+%% (erx_domain:system_principal/0): the packer numbers principals in name order, so it is
+%% whichever the manifest's root.system_principal names, not principal 1.
+%%
+%% A host test, whose library is a stand-in with no manifest, names its own in Opts. A
+%% runtime with no library makes no domain, so it reads no manifest and has no system
+%% principal (none). With the library loaded the manifest must be read, since the library
+%% booted from it: one the service cannot read means the system domain is broken, and the
+%% read's error fails the service's start (init/1).
+principals(_Lib, #{principals := #{system := System, names := Names} = Principals})
   when is_integer(System), is_map(Names) ->
-    Principals;
-principals(_Opts) ->
-    case erx_build:principals() of
-        {ok, Principals} -> Principals;
-        error -> #{system => unknown, names => #{}}
-    end.
+    {ok, Principals};
+principals(none, _Opts) ->
+    {ok, #{system => none, names => #{}}};
+principals(_Lib, _Opts) ->
+    erx_build:principals().
 
 %% The library, registered with this process as the one that hears of every end, or none
 %% where the system domain has none. A module that does not load is not a missing
@@ -268,6 +282,12 @@ handle_call({introduce, A, B}, From, State) when is_integer(A), is_integer(B) ->
         {Reply, Next} ->
             {reply, Reply, Next}
     end;
+handle_call(system_principal, _From, #{principals := #{system := System}} = State) ->
+    Reply = case System of
+                none -> {error, enotsup};
+                _ -> {ok, System}
+            end,
+    {reply, Reply, State};
 handle_call({web_line, Id}, _From, #{web_lines := Lines} = State) ->
     case Lines of
         #{Id := Line} -> {reply, {ok, Line}, State};
@@ -432,8 +452,6 @@ handle_info(_Message, State) ->
 %% facets/2 checks; the domain gets a facet in front of each once it reports ready
 %% (grant_facets/3), and the library never sees them.
 create(_Spec, #{lib := none} = State) ->
-    {{error, enotsup}, State};
-create(_Spec, #{principals := #{system := unknown}} = State) ->
     {{error, enotsup}, State};
 create(#{name := Name} = Spec, State) ->
     Timeout = maps:get(boot_timeout, Spec, ?BOOT_TIMEOUT),

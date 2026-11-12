@@ -154,19 +154,21 @@ The system manifest's principals, read as development/0 reads the
 manifest: system, the system principal's number, and names, each
 principal's name by number, a principal's number being its index in the
 manifest plus one (liberx/system/dom_boot_view.c). They are what
-erx_domain_core:session_prefix/3 names a session from. error when the
-manifest cannot be read or does not parse.
+erx_domain_core:session_prefix/3 names a session from. {error, Reason}
+when the manifest cannot be read, Reason file:read_file/1's, or
+{error, malformed} when it does not parse.
 """.
--spec principals() -> {ok, principals()} | error.
+-spec principals() -> {ok, principals()} | {error, file:posix() | badarg | malformed}.
 principals() ->
     principals(system_manifest()).
 
 -doc """
-The principals of the system manifest `file:read_file/1` returned, error
-for one it could not read or parse, or one with a name it cannot read.
+The principals of the system manifest `file:read_file/1` returned: the
+read's {error, Reason} for one it could not read, and {error, malformed}
+for one it cannot parse or with a name it cannot read.
 Pure, for its tests.
 """.
--spec principals({ok, binary()} | {error, term()}) -> {ok, principals()} | error.
+-spec principals({ok, binary()} | {error, Reason}) -> {ok, principals()} | {error, Reason | malformed}.
 principals({ok, Manifest}) ->
     maybe
         {ok, View} ?= erx_manifest:open(Manifest),
@@ -176,10 +178,10 @@ principals({ok, Manifest}) ->
         true ?= lists:all(fun(Result) -> element(1, Result) =:= ok end, Read),
         {ok, #{system => System + 1, names => maps:from_list(lists:enumerate([Name || {ok, Name} <- Read]))}}
     else
-        _ -> error
+        _ -> {error, malformed}
     end;
-principals({error, _}) ->
-    error.
+principals({error, _} = Unread) ->
+    Unread.
 
 -doc """
 The development flag of the system manifest `file:read_file/1` returned,

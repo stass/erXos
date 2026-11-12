@@ -2112,14 +2112,11 @@ it; git history is the record of completed work.
   naming one display both get the mark: only `erx_starter`'s keepers pass `display`, and
   design-display.md wants one display's session, so whether the domain service refuses a
   second is a design question for Track D.
-* [Medium] domain service and system console, `erx_domain_srv:principals/1`,
-  `erx_console:line_principal/2`: each reads the system principal from the system manifest on
-  its own, and an unreadable manifest leaves it `unknown`, so creates are refused with
-  `enotsup` and the boot login starts nothing, without a line saying why, although the library
-  read the same manifest. Fail the service's start when the library is loaded and the manifest
-  cannot be read, make the service the one owner of the number (the console asks it for the
-  system principal's session), and keep the system domain's log-record principal apart from
-  the line's principal (`system_source/1`), which a release login will make a user's.
+* [Medium] system console, `erx_console:system_source/1`: the system domain's log records take
+  the line's principal, which the console learns from the domain service at its first session
+  start, so records before the service has built the boot's configured domains say `principal
+  unknown`, and a release login will make the line's principal a user's. Give the system domain's log records the system principal
+  apart from the line's principal, once the domain service has named it.
 * [Low] manifest packer, `tools/lib/erx/manifest.rb`: a principal's name is checked to fit
   `<name>_<names>` in 63 bytes, but a session name may take a number past `names` when
   another principal holds a lower one, so a long name's later start is refused with

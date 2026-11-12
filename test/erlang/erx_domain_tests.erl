@@ -6,6 +6,9 @@
 -module(erx_domain_tests).
 -include_lib("eunit/include/eunit.hrl").
 
+%% The principals a service names where its test needs no particular manifest.
+-define(PRINCIPALS, #{system => 1, names => #{1 => <<"system">>}}).
+
 ident(Name) -> erx_ident:new(Name).
 
 ident_test() ->
@@ -214,7 +217,8 @@ configured_boot_timeout_test_() ->
                                  #{domains => [Row(0, <<"late">>, 5), Row(1, <<"silent">>, 1)]}),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                          exports => erx_domain_fake_lib}),
+                                                          exports => erx_domain_fake_lib,
+                                                          principals => ?PRINCIPALS}),
              unlink(Service),
              {Log, Service}
      end,
@@ -314,6 +318,7 @@ system_principal_test_() ->
      fun create_charged_to_the_system_principal/0}.
 
 create_charged_to_the_system_principal() ->
+    ?assertEqual({ok, 2}, erx_domain:system_principal()),
     {ok, Domain} = erx_domain:create(#{boot => <<"base">>, name => <<"made">>, memory => 4096}),
     Id = erx_domain:id(Domain),
     ?assertMatch({create, #{id := Id, principal := 2}}, next_call()),
@@ -362,25 +367,32 @@ service_test_() ->
 stop_service({Log, Service}) ->
     erx_domain_fake_lib:kill_and_await([Service, Log]).
 
-%% A service that cannot read the system manifest knows no system principal, so it
-%% refuses a create rather than charge it to a principal it guessed; the host has no
-%% system manifest at the system domain's path.
-unknown_system_principal_refuses_creates_test() ->
-    persistent_term:put({erx_domain_fake_lib, boot}, #{domains => []}),
+%% A service whose domain library is loaded but which cannot read the system manifest's
+%% principals fails its start, naming the manifest and why, rather than run on with no
+%% system principal to charge its creates to: the library read the same manifest to
+%% boot. The host has no system manifest at the system domain's path, so the read fails
+%% with enoent. The start is linked, so the test traps exits around it; a failed start
+%% has taken its exit off the queue by the time start_link returns (proc_lib).
+unreadable_manifest_fails_the_start_test() ->
     Log = erx_domain_fake_lib:start_log(),
-    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                 exports => erx_domain_fake_lib}),
-    unlink(Service),
-    ?assertEqual({error, enotsup}, erx_domain:create(#{boot => <<"base">>, name => <<"made">>, memory => 4096})),
-    stop_service({Log, Service}),
-    persistent_term:erase({erx_domain_fake_lib, boot}).
+    Trapping = process_flag(trap_exit, true),
+    Started = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                          exports => erx_domain_fake_lib}),
+    process_flag(trap_exit, Trapping),
+    Running = case Started of
+                  {ok, Pid} -> unlink(Pid), [Pid];
+                  {error, _} -> []
+              end,
+    erx_domain_fake_lib:kill_and_await(Running ++ [Log]),
+    ?assertEqual({error, {system_manifest, enoent}}, Started),
+    ?assertEqual(undefined, whereis(erx_domain_srv)).
 
 %% A fixture's cleanup has ended the service and the call log by the time it returns,
 %% so the fixture after it can register erx_domain_srv and erx_domain_fake_log again.
 stop_service_frees_the_names_test() ->
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                 exports => erx_domain_fake_lib}),
+                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS}),
     unlink(Service),
     stop_service({Log, Service}),
     ?assertEqual([undefined, undefined], [whereis(Name) || Name <- [erx_domain_srv, erx_domain_fake_log]]).

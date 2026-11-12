@@ -45,6 +45,7 @@ or stopped.
 """.
 
 -export([create/1, start_session/2, info/1, introduce/2, web_line/2, stop/2, id/1, node/1, pid/1]).
+-export([system_principal/0]).
 -export([inspect_view/1]).
 -export_type([domain/0, spec/0]).
 
@@ -131,6 +132,19 @@ exits like gen_server:call/3 when the service does not answer.
 -spec inspect_view(all | {principal, pos_integer()}) -> [{pos_integer(), pid() | none | ended}].
 inspect_view(Scope) ->
     gen_server:call(erx_domain_srv, {inspect_view, Scope}, ?ERX_INSPECT_AGENT_WAIT).
+
+-doc """
+The system principal, the one the system manifest's root.system_principal
+names, which the domain service read as it started and charges its own creates
+to: the principal the system console logs in at the system domain's line
+(erx_console:login/0). {error, enotsup} in a runtime with no domain library,
+which has none. It waits, as start_session/2 does, while the service builds
+the boot's configured domains, and exits like gen_server:call/3 when the
+service is not running or ends.
+""".
+-spec system_principal() -> {ok, pos_integer()} | {error, enotsup}.
+system_principal() ->
+    gen_server:call(erx_domain_srv, system_principal, infinity).
 
 -doc "Introduces domains A and B: ok once their connection is up at both ends.".
 -spec introduce(domain(), domain()) -> ok | {error, term()}.

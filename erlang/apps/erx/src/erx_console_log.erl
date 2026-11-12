@@ -37,7 +37,8 @@ The module is pure: accept/4 takes the arrival time and returns the next state.
 -define(LEVELS, [emergency, alert, critical, error, warning, notice, info, debug]).
 
 %% Where a record arrived from: the domain's id, its principal, unknown for the system
-%% domain's own records where its manifest cannot be read, and its name.
+%% domain's own records until the domain service has named the system principal, and
+%% its name.
 -type source() :: #{id := non_neg_integer(), principal := non_neg_integer() | unknown,
                     name := unicode:chardata()}.
 %% For each domain that has sent a record: the second its count is for, the bytes of

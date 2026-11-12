@@ -126,6 +126,7 @@
 %% replaces as it replaces the export table.
 -type config() :: #{role := system | session,
                     menu => boolean(),
+                    principal => pos_integer(),
                     owner => fun((pid()) -> non_neg_integer()),
                     name := atom(),
                     driver := fun((Console :: pid()) -> {ok, pid(), Terminal :: boolean()}),
@@ -169,7 +170,8 @@
                 line = system :: erx_console_menu:owner() | {menu, erx_console_menu:menu()},
                 %% The line's principal, whose sessions its menu lists: in a development
                 %% build root, who is the system principal (docs/design-domains.md), as
-                %% the system manifest names it (line_principal/2).
+                %% the domain service names it; unknown until the service has named it
+                %% (line_principal/1, principal_and_start/3, {erx_console_principal, P}).
                 principal = unknown :: pos_integer() | unknown,
                 %% Whether a typed Ctrl-G opens the menu (config()).
                 menu :: boolean(),
@@ -353,22 +355,17 @@ init(Config = #{role := Role, name := Name, driver := Start, first_shell := Firs
                            size = ?DEFAULT_SIZE,
                            terminal = Terminal,
                            menu = maps:get(menu, Config, Role =:= system),
-                           principal = line_principal(Role, Config),
+                           principal = line_principal(Config),
                            owner = maps:get(owner, Config, fun erx:owner/1),
                            endpoint = spawn(fun() -> facet_endpoint(Console) end)})}.
 
-%% The line's principal, read once, as the console starts: the one Config names, or the
-%% system principal the system manifest names (root.system_principal; the packer numbers
-%% principals in name order, so it need not be 1) on the system domain's line, unknown
-%% where the manifest cannot be read and on a session's line.
-line_principal(_Role, #{principal := Principal}) when is_integer(Principal), Principal > 0 ->
+%% The line's principal as the console starts: the one Config names, as a host test's
+%% does, or unknown. The system domain's line takes the system principal from the domain
+%% service, its one owner, when it first starts a session (started/3), since the console
+%% starts before the service; a session's line has none.
+line_principal(#{principal := Principal}) when is_integer(Principal), Principal > 0 ->
     Principal;
-line_principal(system, _Config) ->
-    case erx_build:principals() of
-        {ok, #{system := System}} -> System;
-        error -> unknown
-    end;
-line_principal(session, _Config) ->
+line_principal(_Config) ->
     unknown.
 
 %% What user_drv writes before it starts a shell, ahead of anything the groups write.
@@ -565,6 +562,12 @@ handle_info({'DOWN', Monitor, process, _Pid, Reason}, State = #state{sessions = 
         [Domain] -> {noreply, session_ended(Domain, Reason, State)};
         [] -> {noreply, State}
     end;
+handle_info({erx_console_principal, Principal}, State = #state{principal = unknown}) ->
+    %% The system principal, as the domain service names it, which is fixed for the
+    %% system domain's life; a line keeps the first it hears.
+    {noreply, State#state{principal = Principal}};
+handle_info({erx_console_principal, _Principal}, State) ->
+    {noreply, State};
 handle_info({erx_console_started, Why, Principal, Started}, State) ->
     {noreply, session_started(Why, Principal, Started, State)};
 handle_info({erx_console_written, {caller, From}}, State) ->
@@ -956,27 +959,48 @@ menu_action(start, Menu, State) ->
 %% Starts a session of the line's principal at this line, for the boot's login and the
 %% menu's "start a session", with the line's console facet as its console. Creating a
 %% domain takes seconds, so a helper asks the domain service and the console hears
-%% {erx_console_started, Why, Principal, Started}, Started the service's answer, once
-%% the session has reported ready with its namespace in place, or the start is refused
-%% (session_started/4; docs/design-system.md, "A session takes the console").
-%% The helper never calls the console, which is not waiting for it.
-start_session(Why, #state{principal = Principal, endpoint = Endpoint}) ->
+%% {erx_console_started, Why, Principal, Started}, Principal the line's and Started the
+%% service's answer, once the session has reported ready with its namespace in place, or
+%% the start is refused (session_started/4; docs/design-system.md, "A session takes the
+%% console"). The helper never calls the console, which is not waiting for it, so it may
+%% call the domain service, which calls the console (add_session/2).
+start_session(Why, #state{role = Role, principal = Principal, endpoint = Endpoint}) ->
     Console = self(),
     ConsoleFacet = console_facet(Endpoint),
-    _ = spawn(fun() -> Console ! {erx_console_started, Why, Principal, started(Principal, ConsoleFacet)} end),
+    _ = spawn(fun() ->
+                      {Named, Started} = principal_and_start(Role, Principal, Console, ConsoleFacet),
+                      Console ! {erx_console_started, Why, Named, Started}
+              end),
     ok.
 
-%% The domain service's answer to a session's start; a runtime with no domain service, or
-%% none loaded, as a hosted one, starts none, nor does a line whose principal is unknown.
-started(unknown, _ConsoleFacet) ->
-    {error, enotsup};
-started(Principal, ConsoleFacet) ->
+%% The line's principal and the domain service's answer to a start of its session. The
+%% system domain's line asks the service for the system principal while it has none
+%% (erx_domain:system_principal/0) and tells the console at once, so the system domain's
+%% log records name it while the session boots ({erx_console_principal, P}); a session's
+%% line with none starts nothing.
+principal_and_start(system, unknown, Console, ConsoleFacet) ->
+    case ask_service(fun erx_domain:system_principal/0) of
+        {ok, System} ->
+            Console ! {erx_console_principal, System},
+            principal_and_start(system, System, Console, ConsoleFacet);
+        {error, _} = Refused ->
+            {unknown, Refused}
+    end;
+principal_and_start(session, unknown, _Console, _ConsoleFacet) ->
+    {unknown, {error, enotsup}};
+principal_and_start(_Role, Principal, _Console, ConsoleFacet) ->
+    {Principal, ask_service(fun() -> erx_domain:start_session(Principal, #{console => ConsoleFacet}) end)}.
+
+%% A call of the domain service's; a runtime with no domain service, or none loaded, as a
+%% hosted one, answers enotsup.
+ask_service(Call) ->
     try
-        erx_domain:start_session(Principal, #{console => ConsoleFacet})
+        Call()
     catch
         exit:{noproc, _} -> {error, enotsup};
         error:undef -> {error, enotsup};
-        %% The service ended during the call: the menu shows that the start failed.
+        %% The service ended during the call: the start failed, which the menu or the
+        %% login's line shows.
         exit:Reason -> {error, Reason}
     end.
 
@@ -985,8 +1009,8 @@ started(Principal, ConsoleFacet) ->
 %% itself by now (take_login_line/2), and otherwise once it does. A session whose domain
 %% pid has ended by now leaves nothing to show, and a login's is a start that failed. A
 %% refusal is a start that failed (start_failed/3). A login at a line whose principal
-%% has no session template, or in a runtime with no domain library, starts nothing and
-%% says nothing.
+%% has no session template (no_template), or in a runtime with no domain service or
+%% library (enotsup), starts nothing and says nothing.
 session_started(Why, Principal, {ok, Domain}, State) ->
     Id = erx_domain:id(Domain),
     [Name | _] = binary:split(atom_to_binary(erx_domain:node(Domain)), <<"@">>),
@@ -1164,7 +1188,8 @@ onlcr(Bytes) ->
     binary:replace(Bytes, <<"\n">>, <<"\r\n">>, [global]).
 
 %% The system domain as the source of its own log records: its id, the system
-%% domain's line principal, the system principal as the manifest names it, and its name.
+%% domain's line principal, the system principal once the domain service has named it
+%% (unknown before), and its name.
 system_source(#state{principal = Principal}) ->
     #{id => erx_kernel_records:system_domain(), principal => Principal, name => <<"system">>}.
 

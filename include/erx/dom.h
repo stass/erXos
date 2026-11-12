@@ -274,8 +274,9 @@ typedef struct erx_dom_spec {
 } erx_dom_spec_t;
 
 /*
- * A principal's view: its budget, quotas and resolved profiles. Phase 1b-A
- * has one, the built-in system principal (docs/plan.md, Phase 1b).
+ * A principal's view: its budget, quotas and resolved profiles. The library
+ * keeps one for each principal of the system manifest, by its principal
+ * index (erx_dom_view_t's principals).
  */
 typedef struct erx_dom_principal {
 	uint32_t	number;		/* 0 for none */

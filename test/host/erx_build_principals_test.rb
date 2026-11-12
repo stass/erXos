@@ -74,7 +74,7 @@ class ErxBuildPrincipalsTest < Minitest::Test
   end
 
   def test_a_manifest_that_does_not_parse_names_no_principal
-    assert_equal 'error', principals('junk'.b)
+    assert_equal '{error,malformed}', principals('junk'.b)
   end
 
   private

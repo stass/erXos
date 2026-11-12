@@ -55,9 +55,9 @@ the session creator's, and is drawn through the line escape (erx_text).
 
 -doc """
 The menu of a line whose principal is Principal, over Sessions, the console's, opened
-while Back had the line.
+while Back had the line. A line whose principal is unknown lists no session.
 """.
--spec open(pos_integer(), [session()], owner()) -> menu().
+-spec open(pos_integer() | unknown, [session()], owner()) -> menu().
 open(Principal, Sessions, Back) ->
     Live = lists:sort([{Domain, Name} || #{domain := Domain, name := Name, principal := P, live := true} <- Sessions,
                                          P =:= Principal]),
