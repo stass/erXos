@@ -26,11 +26,13 @@ Decisions every reader needs:
   still reaches only its own registers, because every access is by a
   register name of its own peripheral at an offset below its window's
   size.
-* **Inside the domain a shared line has one owner.** A line that two of a
-  unit's drivers use is bound once, by a supervised Erlang process, the
-  **line owner**, which tells every driver on the line of each firing and
-  acknowledges the line when all of them have answered or exited. A line
-  that one driver uses is bound by that driver, as any line is.
+* **Inside the domain a shared line has one owner.** A line that two
+  devices of a unit name is **shared**, and each device's record says so.
+  It is bound once, by a supervised Erlang process, the **line owner**,
+  which tells every driver joined to it of each firing, acknowledges the
+  line when all of them have answered or exited, and tells them all again
+  if the line fired in the meantime. A line that one device names is
+  **direct**: its driver binds it, as any line is bound.
 * **PCIe functions interrupt by MSI only.** A bridge's INTx lines, which
   the functions behind it share, go to no domain.
 
@@ -94,13 +96,23 @@ Each requirement follows from that one closure:
   give the boot view accepted.
 * **No domain reaches another's device through a shared page or line.**
   A domain's mapping of a page covers only devices of units it holds,
-  and its IRQ objects carry only lines no other domain's device raises.
+  and each wired line and each MSI is allocated to one domain alone, so
+  no line's IRQ object is held by two domains. Unique allocation does
+  not stop a device from raising another domain's MSI: the supported
+  platforms' MSI frames do not identify the writer, so a device that can
+  write a frame can raise any of its lines
+  ([design-platforms.md](design-platforms.md#security)), a residual that
+  [design.md](design.md#residual-risks) records and an interrupt
+  controller with per-device MSI translation closes.
 * **Sharing inside a domain is the domain's business.** The device NIF
   shares mappings and IRQ objects among the records of one domain
   ([Pages inside a domain](#pages-inside-a-domain)), and the line owner
   shares a line among drivers ([Lines inside a
   domain](#lines-inside-a-domain)). Neither crosses a domain, so neither
   needs the kernel.
+* **Whether a line is shared is a fact of the unit.** The relation that
+  makes the unit also says which of its lines two devices name, so the
+  device record carries it and no caller decides it.
 * **A sub-device's function crosses by a home.** The system domain holds
   the auxiliary block's SPI controllers because they share the console's
   page, and runs no driver for them. A board on which a domain other than
@@ -163,101 +175,151 @@ UART (`enable_uart=1`) and no driver changes the enables.
 
 ## Lines inside a domain
 
-**The plan.** The process that starts a unit's drivers, the unit's
-supervisor in a holder domain
-([design-system.md](design-system.md#the-holders-driver-control-facet)),
-knows each driver's device records before it starts any of them. A pure
-function, `erx_irq_line:plan/1`, takes the records' lines, each a line
-object's handle or, for a physical record, a line number, and answers
-which lines two or more of the drivers name. Each such line is
-**shared**: the plan adds an owner for it, and tells each driver on it
-that its line is shared. Every other line is **direct**.
+**Shared and direct lines.** A line is **shared** when two or more
+devices of its unit name it, and **direct** when one does. The relation
+is the one the boot view checks ([The unit rule](#the-unit-rule)), so
+the device service writes it into each device's record beside the line,
+for given and physical records alike, and the device NIF's entry for the
+line carries it ([Interfaces](#interfaces)). No caller says whether a
+line is shared, so no caller can say it wrongly. A shared line that one
+driver uses is still shared: on the Raspberry Pi 4 the mini UART's line
+125 is shared with the SPI controllers, which have no driver, and
+UART3's line 153 with the other PL011s.
 
 **The driver's side.** A driver attaches each of its lines with
-`erx_irq_line:attach(Dev, Line, Sharing)`, which returns a line handle,
-and acknowledges with `erx_irq_line:ack(Handle)`. For a direct line
-attach is `erx_device:irq_bind/2` and ack is `erx_device:irq_ack/2`, as
-for every line ([design-runtime.md](design-runtime.md#the-device-nif)).
-For a shared line attach is a join, a call to the line's owner, which the
-NIF names as the process bound to the line, and ack is a message to the
-owner saying the driver is done. In both cases the driver receives
+`erx_irq_line:attach(Dev, Line)`, which returns a line handle, and
+acknowledges with `erx_irq_line:ack(Handle)`. `attach` reads the line's
+mark from the record. For a direct line attach is
+`erx_device:irq_bind/2` and ack is `erx_device:irq_ack/2`, as for every
+line ([design-runtime.md](design-runtime.md#the-device-nif)). For a
+shared line attach is a join: it asks the NIF which process the line is
+bound to, `erx_device:irq_holder/2`, and calls that process, a call that
+monitors it, so an owner that ended after the lookup answers
+`{error, unbound}` instead of leaving the driver waiting or handing it a
+handle to a process that is gone. Ack on a shared line is a message to
+the owner saying the driver is done. In both cases the driver receives
 `{erx_irq, Dev, Line}`, with its own record and line, so a driver's
 receive and service code does not depend on whether its line is shared,
 and after attach it unmasks its device's interrupt and drains once, as
 it does after a bind.
 
+The NIF holds a shared line for its owner alone: `irq_bind/2` of a
+shared line is `{error, shared}`, and `erx_device:irq_bind_owner/2`, the
+owner's bind, of a direct line is `{error, direct}`. So a driver cannot
+bind a shared line directly, by mistake or by a wrong argument, and take
+its deliveries from the drivers that joined the owner.
+
 **The owner.** A line owner is an Erlang process started before the
-drivers on its line. It opens the record of the first driver on the line,
-binds the line through it once, which moves any binding a former owner
-left and acknowledges the line once, and then runs one pure state
-machine, `erx_irq_line_core`, whose next action it performs: a message to
-a driver, a monitor, or the line's acknowledgement. Its state is the set
-of joined drivers and the firing in progress, one of:
+drivers on its line. It opens the record of the first driver on the
+line, binds the line through it with `irq_bind_owner/2`, which moves any
+binding a former owner left on that record and acknowledges the line
+once, and then runs one pure state machine, `erx_irq_line_core`, whose
+next action it performs: a notice to a driver or the line's
+acknowledgement. Its state is the set of members and the round in
+progress.
+
+**A member is a monitor.** The owner answers a join by monitoring the
+joining driver first, and the monitor's reference is the member: the
+core's join event carries it, the driver's handle holds it, the driver's
+done names it, and the monitor's down message removes it. The core has
+no way to hold a member without a monitor, so a member's exit reaches
+it in every state. A driver that joins for two of its records on one
+line is two members, each told with its own record.
 
 | State | Meaning |
 | --- | --- |
-| `idle` | the line is unmasked and has not fired since the last acknowledgement |
-| `{firing, W}` | the line fired; the owner told every driver in `W`, which is not empty, and waits for each to answer or exit |
-| `held` | the line fired while no driver was joined; it stays masked |
+| `idle` | no round is in progress |
+| `{round, W, Again}` | the line fired; the owner told every member in `W`, which is not empty, and waits for each to answer or exit; `Again` says whether the line has fired since the round began |
+| `held` | the line fired while there was no member; the owner does not acknowledge it until a member has answered |
 
-| Event | In `idle` | In `{firing, W}` | In `held` |
+| Event | In `idle` | In `{round, W, Again}` | In `held` |
 | --- | --- | --- | --- |
-| the line fires | tell every joined driver and go to `{firing, joined}`; with no driver joined go to `held` | nothing: the line is masked, so this is a stray hint, and every driver in `W` is about to look | nothing |
-| driver `P` joins | add `P` and monitor it | add `P`; it is told at the next firing | add `P`, tell `P`, and go to `{firing, {P}}` |
-| driver `P` is done | nothing | remove `P` from `W`; when `W` is empty, acknowledge and go to `idle` | nothing |
-| driver `P` exits | remove `P` | remove `P` from the joined set and from `W`; when `W` is empty, acknowledge and go to `idle` | remove `P` |
+| the line fires | tell every member and go to `{round, members, false}`; with no member go to `held` | set `Again` | nothing |
+| member `M` joins | add `M` | add `M`; it is told in the next round | add `M`, tell `M`, and go to `{round, {M}, false}` |
+| member `M` is done | nothing | remove `M` from `W`; when `W` is empty, end the round | nothing |
+| member `M` goes down | remove `M` | remove `M` from the members and from `W`; when `W` is empty, end the round | remove `M` |
 
-So the line is acknowledged exactly once per firing that told anyone,
-and only when every driver told of it has answered or exited, and a
-firing nobody was told of keeps the line masked until a driver joins
-rather than acknowledging into a level that is still asserted. A driver
-that joins during a firing is not waited for; if its device asserts the
-line, the line fires again at the acknowledgement and the driver is told
-then. A delivery is a hint to look, never an event in itself
+**Ending a round.** The owner acknowledges the line and, when `Again` is
+set, then acts as on a firing in `idle`: a new round tells every member,
+those that joined during the last round included, or with no member the
+line is held.
+
+Every guarantee of the line follows from that machine:
+
+* **The line is acknowledged once per round**, and only when every
+  member told of the round has answered or gone down.
+* **No firing goes untold.** A firing starts a round, holds the line, or
+  sets `Again`, and `Again` starts a round that tells every member after
+  the acknowledgement. Take members A and B, told of a firing: A answers,
+  A's device raises the line again and the owner receives the delivery,
+  B answers; the owner acknowledges and tells A and B again, so A
+  services what its device raised.
+* **Level and edge lines need no case of their own.** A level-sensitive
+  line stays masked from its firing until the acknowledgement, so it
+  fires during a round only as a stray hint, which costs one more round
+  of looks. An edge line or an MSI, which the kernel leaves unmasked when
+  it queues a delivery ([design-kernel.md](design-kernel.md#irq-objects)),
+  can fire again during a round, and that firing gets its round.
+* **A firing with nobody to tell holds the line.** The owner
+  acknowledges nothing more until a driver joins and answers, so it does
+  not keep acknowledging into a level that is still asserted with nobody
+  looking.
+* **A late joiner misses nothing.** It is told in the next round, and it
+  drains once after attach, as every driver does.
+
+A delivery is a hint to look, never an event in itself
 ([design.md](design.md#drivers-and-dma)), so a driver told of a firing
 its device did not raise reads its status, finds nothing and answers.
 
-**A parent that knows which sub-device is pending.** Where a unit has a
-parent record with a register naming the sub-devices that are pending,
-such as the auxiliary block's interrupt-status register, the plan gives
-the line's owner a pending function from the parent's driver module, and
-the owner tells only the joined drivers it names. When it names none of
-them, the owner tells every joined driver, so a firing is never
-acknowledged unread. The parent's driver module supplies the function;
-the owner stays generic.
+**Supervision.** Whoever starts a driver on a shared line starts the
+line's owner first and stops it last: a `rest_for_one` supervisor with
+the owners of the shared lines first, then the drivers. That order is
+all the line asks for, and it is the same in every domain. A holder
+domain's unit supervisor
+([design-system.md](design-system.md#the-holders-driver-control-facet))
+is such a supervisor, with a supervisor of the unit's drivers after the
+owners, and a pure function, `erx_irq_line:owners/1`, says from the
+drivers' records which owners it starts.
 
-**Supervision.** The unit's supervisor is `rest_for_one`: the owners of
-the unit's shared lines first, then a `one_for_one` supervisor of the
-unit's drivers. A driver's crash restarts that driver alone; its exit is
-the owner's `exit` event, so the firing it held is answered for it. An
-owner's crash ends its binding, since a process's exit unbinds the lines
-bound under its label, and restarts every driver of the unit after the
-new owner has bound the line, so each restarted driver joins the new
-owner. The driver-control facet's `stop`, `start` and `restart` of the
-unit act on the unit's supervisor
+Sharing a line never changes what a failure restarts: each subsystem's
+own supervisors decide that. The owner only drops a member that went
+down, so a round it was told of ends without it. Where the subsystem
+restarts a driver, the restarted driver joins again. Where it restarts
+nothing, as the storage domain does, a block driver's end ends the
+domain whether or not its line is shared
+([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)).
+An owner's end unbinds the line, since a process's exit unbinds the
+lines bound under its label, and `rest_for_one` ends every driver after
+it, so no driver keeps a handle to an owner that is gone; whether the
+owner and the drivers then start again, or the end escalates, is again
+the subsystem's restart policy, and a new owner binds the line before
+any driver joins it. The driver-control facet's `stop`, `start` and
+`restart` of a unit act on the unit's supervisor
 ([design-system.md](design-system.md#the-holders-driver-control-facet)).
 
 **The system domain.** The system domain's UART drivers are started by
 the services they serve, the console and the host link, not by a unit
-supervisor. The manifest check refuses a manifest whose `console` and
+supervisor. Each service starts the owner of its UART's line before the
+driver when the record marks the line shared, as any starter of a driver
+does; on the Raspberry Pi 4 both lines are shared, and each owner has one
+member. The manifest check refuses a manifest whose `console` and
 `hostlink` UARTs share a line (property 8 of
-[design-system.md](design-system.md#the-manifest)), so each of the
-system domain's drivers has a direct line. Neither supported board has
-such a pair.
+[design-system.md](design-system.md#the-manifest)): the two services
+would each start an owner of the one line, and the second owner's bind
+would fail. Neither supported board has such a pair.
 
 ## The console
 
 The console's UART is a sub-device like any other: on the Raspberry Pi 4
 the mini UART is one device of the auxiliary block's unit, its driver
-opens the mini UART's record in the page's one mapping, and its line is
-direct because no other driver of the system domain names line 125. On a
-board whose console shared a line with another driver of a unit, the
-console's driver would join that line's owner as any driver does. The
-kernel's early console is separate: it writes the UART by
-polling, through a mapping of its own, during boot and at a panic or an
-end, and uses no interrupt
-([design-platforms.md](design-platforms.md#uarts)), so neither a shared
-page nor a shared line reaches it.
+opens the mini UART's record in the page's one mapping, and its line 125
+is shared, because the SPI controllers' records name it too, so the
+console service starts the line's owner before the driver and the driver
+joins it ([The system domain](#lines-inside-a-domain)). The kernel's
+early console is separate: it writes the UART by polling, through a
+mapping of its own, during boot and at a panic or an end, and uses no
+interrupt ([design-platforms.md](design-platforms.md#uarts)), so neither
+a shared page nor a shared line reaches it.
 
 On the stopgap the root hands the kernel log to the console when the
 console service first takes it, not when a page is first mapped
@@ -268,11 +330,13 @@ mapping of the console's page hands nothing over.
 
 | Interface | Contract |
 | --- | --- |
-| `erx_irq_line:plan([{Driver, [LineKey]}]) -> {Owners, #{Driver => [direct \| shared]}}` | pure; `LineKey` is a line object's handle or a physical line number from the driver's records; a key named by two or more drivers is shared and gets one entry in `Owners`, with the record of its first driver and the line's index there |
-| `erx_irq_line:attach(Dev, Line, direct \| shared) -> {ok, Handle} \| {error, Reason}` | direct: `erx_device:irq_bind/2`; shared: a join call to the line's owner, `{error, unbound}` when no process holds the line |
-| `erx_irq_line:ack(Handle) -> ok` | direct: `erx_device:irq_ack/2`; shared: `{erx_irq_done, self()}` to the owner, a message that never waits |
-| `erx_irq_line:start_owner(Spec, Line, Pending)` | opens `Spec`, binds `Line`, runs `erx_irq_line_core`; `Pending` is `all` or a function of the parent's record |
-| `erx_irq_line_core:step(Event, State) -> {[Action], State}` | pure; events `{fire, Pending}`, `{join, P}`, `{done, P}`, `{exit, P}`; actions `{notify, P}`, `{monitor, P}`, `ack` |
+| `erx_irq_line:owners([{Driver, [Dev]}]) -> [{Dev, Line}]` | pure; from the records of the drivers one supervisor starts, each shared line they name, once, with the record of its first driver and the line's index there |
+| `erx_irq_line:attach(Dev, Line) -> {ok, Handle} \| {error, Reason}` | reads the line's mark from the record; direct: `erx_device:irq_bind/2`; shared: a monitored join call to the process `irq_holder/2` names, `{error, unbound}` when no process holds the line or the holder ends before it answers |
+| `erx_irq_line:ack(Handle) -> ok` | direct: `erx_device:irq_ack/2`; shared: `{erx_irq_done, Ref}` to the owner, `Ref` the member's monitor, a message that never waits |
+| `erx_irq_line:start_owner(Dev, Line)` | opens `Dev`, binds `Line` with `irq_bind_owner/2`, runs `erx_irq_line_core` |
+| `erx_irq_line_core:step(Event, State) -> {[Action], State}` | pure; events `fire`, `{join, Ref, Pid, Dev}`, `{done, Ref}`, `{down, Ref}`; actions `{notify, Pid, Dev}` and `ack` |
+| `erx_device:irq_bind(Dev, Line)` | binds a direct line; `{error, shared}` on a shared line |
+| `erx_device:irq_bind_owner(Dev, Line)` | binds a shared line for its owner; `{error, direct}` on a direct line |
 | `erx_device:irq_holder(Dev, Line) -> {ok, pid()} \| {error, unbound}` | the process the line is bound to, read from the NIF's binding |
 
 `erx_irq_line` and `erx_irq_line_core` belong to the `erx` application,
@@ -280,14 +344,14 @@ beside `erx_device`, and are among the modules that may name
 `erx_device` ([design-system.md](design-system.md#drivers)).
 
 The device NIF keeps, for each domain, one entry per line: the line's
-IRQ object and its one binding
+IRQ object, whether it is shared, and its one binding
 ([design-runtime.md](design-runtime.md#the-device-nif)). Records that
-name the same line share the entry. `irq_bind/2` through the record the
-line is bound through moves the binding to the caller, so a restarted
-binder takes the line from its predecessor; through any other record of
-a bound line it is `{error, ebusy}`, so two binders on one line fail
-loudly at the second bind instead of one silently taking the other's
-interrupts.
+name the same line share the entry. A bind through the record the line
+is bound through moves the binding to the caller, so a restarted binder
+takes the line from its predecessor; through any other record of a bound
+line it is `{error, ebusy}`, so two owners of one line fail loudly at the
+second bind instead of one silently taking the other's interrupts. A
+direct line is named by one record, so its only binder is its driver.
 
 ## Refusals
 
@@ -298,12 +362,14 @@ interrupts.
   line (property 8).
 * `erx_device:open/1` of a record whose page run meets a mapped run
   without being it is `{error, ebusy}`.
-* `erx_device:irq_bind/2` through another record of a bound line is
-  `{error, ebusy}`.
-* A shared attach is `{error, unbound}` when no process holds the line,
-  and the owner answers `{error, badarg}` to a join for a record or line
-  that is not its own; either fails the driver's start, which its
-  supervisor sees as any failed start.
+* `erx_device:irq_bind/2` of a shared line is `{error, shared}`, and
+  `irq_bind_owner/2` of a direct line is `{error, direct}`.
+* A bind through another record of a bound line is `{error, ebusy}`.
+* A shared attach is `{error, unbound}` when no process holds the line or
+  the holder ends before it answers, and the owner answers
+  `{error, badarg}` to a join for a record or line that is not its own;
+  either fails the driver's start, which its supervisor sees as any
+  failed start.
 
 ## Invariants
 
@@ -311,18 +377,19 @@ interrupts.
 | --- | --- | --- | --- |
 | **SD1.** No register page and no interrupt line is held by two domains | units are closed under sharing a page and sharing a line; a give makes one window per page run and one IRQ object per line of the unit, in the one holder's budget; PCIe functions get MSIs only | a unit row that splits a component; a give per device; an INTx line given to a domain | the boot view's refusal, in the build and at boot, with a seeded split that shares only a line |
 | **SD2.** A record reaches only its own device's registers | every access is a register name of its own peripheral below its window size; the generator refuses a table past the window | a raw offset in the interface; a table naming a register past the window | the NIF's host tests on two records of one page; the generator's refusal with a seeded oversized table |
-| **SD3.** A line has at most one binder in a domain | the NIF keeps one entry per line, whose binding is one process; a bind through another record of a bound line is `ebusy`; only `erx_irq_line` calls `irq_bind/2` and `irq_ack/2` | a table keyed by record; a driver that binds directly | the NIF's host test with a seeded per-record table; a source check over the driver applications' BEAM files with a seeded direct bind |
-| **SD4.** A shared line is acknowledged once per firing, after every driver told of it answered or exited | `erx_irq_line_core` decides every acknowledgement; its owner performs only the actions it returns | an acknowledgement at the first answer; an exit that does not count as an answer | exhaustive exploration of the core on the host, with seeded faults |
+| **SD3.** A line has at most one binder in a domain, and a shared line's binder is its owner | the NIF keeps one entry per line, whose binding is one process; the record's mark decides which bind the NIF accepts, `irq_bind/2` for a direct line and `irq_bind_owner/2` for a shared one; a bind through another record of a bound line is `ebusy`; only `erx_irq_line` calls the binds and `irq_ack/2` | a table keyed by record; a caller that says whether a line is shared; a driver that binds directly | the NIF's host tests with a seeded per-record table and a seeded mark the bind ignores; a source check over the driver applications' BEAM files with a seeded direct bind |
+| **SD4.** A shared line is acknowledged once per round, after every member told of it answered or went down, and no firing goes untold | `erx_irq_line_core` decides every acknowledgement and every notice; a firing during a round sets `Again`, which starts another round; a member is its monitor, so every member's exit reaches the core; the owner performs only the actions the core returns | an acknowledgement at the first answer; a firing during a round dropped; a member the core holds without a monitor | exhaustive exploration of the core on the host, with seeded faults |
 
 ## Failure handling
 
 | Failure | What happens | Recovery |
 | --- | --- | --- |
-| a driver crashes while told of a firing | its exit answers for it, and the line is acknowledged once the others answer | its supervisor restarts it, and it joins again |
+| a driver crashes while told of a firing | its monitor's down message answers for it, and the line is acknowledged once the others answer | whatever its subsystem's supervisors do: a restarted driver joins again; the storage domain restarts nothing and ends |
 | a driver hangs without answering | the line stays masked, and every driver on it hears nothing | the driver-control facet's `restart` of the unit, which `/dev`'s `ctl` reaches; a residual below |
-| the owner crashes | its exit unbinds the line; drivers' answers to it are lost with it | the unit's supervisor restarts the owner, which binds and acknowledges the line once, then every driver of the unit, which join it |
-| a device of the unit that no driver serves asserts a level on the line | every firing tells the joined drivers, who find nothing; the line fires again at once | a residual below |
-| two binders on one line | the second `irq_bind/2` is `{error, ebusy}` and its driver's start fails | the manifest or the plan is corrected |
+| the owner crashes | its exit unbinds the line; drivers' answers to it are lost with it, and `rest_for_one` ends every driver after it | whatever the subsystem's supervisors do; a new owner binds and acknowledges the line once before any driver joins it |
+| the owner ends between a driver's lookup and its join | the join call's monitor fires, and attach is `{error, unbound}` | the driver's start fails, and its supervisor sees a failed start |
+| a device of the unit that no driver serves asserts a level on the line | every firing tells the members, who find nothing; the line fires again at once | a residual below |
+| two owners of one line | the second `irq_bind_owner/2` is `{error, ebusy}` and its start fails | the manifest is corrected |
 | a manifest splits a component, or pairs a `console` and `hostlink` UART on one line | the build fails, naming the devices and the property | the manifest is corrected |
 
 **Residuals, Phase 1.** The owner keeps no timeout: a driver that hangs
@@ -342,14 +409,16 @@ under test ran.
 | Test | Passes when | Seeded fault, which must fail it |
 | --- | --- | --- |
 | the boot view's unit check, on a fixture of two devices on different pages and one line, placed in two units | the view is refused, naming both devices and the line | the line comparison removed: the view is accepted |
-| the same check on the Raspberry Pi 4's record with the PL011s split across two units | refused for the shared page | the page comparison removed: accepted |
+| the same check on a fixture of two adjacent virtio-mmio transports, 0x200 apart in one page, each on a line of its own, placed in two units | refused for the shared page | the page comparison removed: accepted |
 | the NIF's host harness (`test/fixtures/erx_device_harness.c`), two physical PL011 records 0x200 apart in one page, each writing and reading back a register | both open over one physical object and one mapping, and each read returns its own record's value | the overlap refusal restored in the open: the second open is `ebusy` |
 | the same harness, two physical records naming one line, with the fake kernel refusing a second IRQ object on a line | both open, and the harness counts one IRQ object | the line table keyed by record: the second open fails |
-| a hosted test of two stand-in records on one soft line | a trigger reaches the process bound through the first; a bind through the second is `{error, ebusy}`; a rebind through the first moves the line | one binding per record: the second bind succeeds |
-| `erx_irq_line_core`, every sequence of up to eight events over four driver pids and the three states | SD4, every driver in `W` told exactly once per firing, and `held` only while no driver was told | acknowledging at the first `done`; an `exit` that leaves `W` unchanged; a firing with no driver acknowledged at once |
-| `erx_irq_line:plan/1` over units of one to four drivers and lines | exactly the lines named twice are shared, each with one owner | counting a driver's own two records as two drivers |
-| a hosted test of two stand-in drivers joined to one owner, with a call trace on `erx_device:irq_ack/2` | each trigger reaches both drivers; the trace shows the acknowledgement only after the second answer; a killed driver answers by its exit | the owner acknowledging at the first answer: the trace shows it early |
-| the source check that only `erx_irq_line` calls `erx_device:irq_bind/2` and `irq_ack/2` | passes on the tree | a driver module calling `irq_bind/2` directly |
+| the same harness, a record whose line is marked shared and one whose line is direct | `irq_bind/2` of the shared line is `{error, shared}` and `irq_bind_owner/2` binds it; the reverse holds for the direct line | the mark ignored by `irq_bind/2`: the shared line binds directly |
+| a hosted test of two stand-in records on one soft line | a trigger reaches the process bound through the first; an owner bind through the second is `{error, ebusy}`; a rebind through the first moves the line | one binding per record: the second bind succeeds |
+| `erx_irq_line_core`, every sequence of up to eight events over four members and the three states | SD4; every member in `W` told once per round; a firing during a round followed by a round that tells every member; `held` only while no member was told; and the named traces: A and B told, A done, the line fires, B done, which acknowledges and then tells A and B; a join and then that member's down, in `idle`, in a round and in `held`, which leaves no member and, from a round or `held`, acknowledges | acknowledging at the first `done`; `Again` dropped, so the named trace tells A nothing more; a `down` that leaves `W` unchanged; a join in `held` that does not add its member, so its `down` leaves the line masked; a firing with no member acknowledged at once |
+| `erx_irq_line:owners/1` over sets of one to four drivers with shared and direct lines | each shared line named by any driver gets one owner, and no direct line does | one owner per record: a driver's two records on one line give two owners |
+| a hosted test of two stand-in drivers joined to one owner, with a call trace on `erx_device:irq_ack/2` | each trigger reaches both drivers; the trace shows the acknowledgement only after the second answer; a trigger after the first answer gives both drivers a second notice after the acknowledgement; a killed driver answers by its exit | the owner acknowledging at the first answer: the trace shows it early; the owner ignoring a trigger during a round: no second notice |
+| a hosted test that kills the owner after `irq_holder/2` returns and before the join | attach returns `{error, unbound}` within the test's deadline and no handle | the join as a plain send and receive with no monitor: attach hangs past the deadline |
+| the source check that only `erx_irq_line` calls `erx_device:irq_bind/2`, `irq_bind_owner/2` and `irq_ack/2` | passes on the tree | a driver module calling `irq_bind/2` directly |
 
 QEMU `virt` gives no device a shared line, so the hosted test's stand-in
 is the line test, and the Raspberry Pi 4's PL011s and auxiliary block are
@@ -360,8 +429,10 @@ checked by hand on the board.
 A shared line costs each driver on it two messages inside the domain per
 firing, the owner's notice and the driver's answer, on top of the
 delivery the owner receives as any binder does, and the line stays masked
-until the slowest driver answers. A direct line costs nothing new. The
-cost is unmeasured and is on the watch list
+until the slowest driver answers. A firing during a round costs every
+member one more round. A direct line costs nothing new. On the Raspberry
+Pi 4 the console and the host link pay it, since both their lines are
+shared. The cost is unmeasured and is on the watch list
 ([todo-performance.md](todo-performance.md)).
 
 ## Alternatives considered
@@ -379,9 +450,23 @@ waits for its FIFO, so one UART's output would delay another's input, and
 the auxiliary block's mini UART and SPI controllers have nothing in
 common to share a driver. The owner keeps one driver per device.
 
-**An owner for every line.** It would remove the plan and the direct
-case, at two messages per interrupt for every device, the network and
-block devices included.
+**An owner for every line.** It would remove the direct case, at two
+messages per interrupt for every device, the network and block devices
+included.
+
+**Sharing decided by which drivers run.** A line two running drivers
+use is the only line that needs an owner, and computing that from the
+drivers would spare the Raspberry Pi 4's UARTs their owners. But it makes
+sharing a word callers pass along, and a driver given the wrong word
+binds the line directly and takes the others' deliveries. The record's
+mark is a fact of the unit that no caller supplies.
+
+**Telling only the pending sub-devices.** Where a unit's parent has a
+register naming its pending sub-devices, as the auxiliary block's
+interrupt-status register does, the owner could tell only those. It adds
+a second path for choosing whom to tell, and no supported board has two
+drivers on such a line, so the owner tells every member; a board that
+needs it adds it.
 
 **Sharing across domains in the kernel.** A kernel that fanned lines out
 could give sub-devices to separate domains, at the price of a mechanism
@@ -393,9 +478,9 @@ homes give another domain a sub-device's function without either.
 
 * **Console and host link on one line.** The manifest check refuses it.
   The alternative is to start the system domain's two UART drivers under
-  one unit supervisor with a line owner, changing how the console and host
-  link start their drivers. Recommendation: refuse until a board needs
-  it.
+  one supervisor with the line's one owner, changing how the console and
+  host link start their drivers. Recommendation: refuse until a board
+  needs it.
 * **A deadline per firing.** Recommendation: none in Phase 1, as above;
   revisit with erXos's kernel and hostile drivers.
 

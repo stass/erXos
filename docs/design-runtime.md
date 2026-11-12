@@ -2435,6 +2435,9 @@ less than a NIF's entry and exit, and so is `erx_device:irq_ack/2`, made once pe
 is a NIF. Its pure decisions are `erx_device_core` and, for its queues, `erx_device_queue`; its effects are `erx_device.c`, in plain C, under both. A device's record reaches
 the driver from the device service over the system connection: the slots
 of its register windows, IRQ objects and DMA window or contiguous memory,
+for each line whether another device of its unit names it too, which
+makes the line shared
+([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)),
 its peripheral's name in the CMSIS-SVD source, whether it is
 `dma-coherent`, and which queue layouts of the ABI file it uses.
 
@@ -2672,10 +2675,16 @@ its one binding, and records that name the same line, by its object's
 handle or by its number, share that entry. A bind through the record the
 line is bound through moves the line to the caller; through another
 record of a bound line it is `{error, ebusy}`, so a line has one binder.
-`erx_device:irq_holder(Dev, Line)` names that binder. Drivers bind and
-acknowledge only through `erx_irq_line`, which binds a line two drivers
-of a unit use once, in the line's owner, and tells each driver of each
-firing ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)). The process receives `{erx_irq, Dev, Line}` at the next safe point
+The entry carries the record's mark of whether the line is shared:
+`irq_bind/2` binds only a direct line and is `{error, shared}` on a shared
+one, and `erx_device:irq_bind_owner(Dev, Line)`, which binds the same way,
+binds only a shared line, for its owner, and is `{error, direct}` on a
+direct one, so a shared line's binder is always its owner.
+`erx_device:irq_holder(Dev, Line)` names the binder. Drivers bind and
+acknowledge only through `erx_irq_line`, which binds a direct line in its
+driver and a shared line once, in the line's owner, which tells each
+driver joined to it of each firing
+([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)). The process receives `{erx_irq, Dev, Line}` at the next safe point
 after the line fires; it services the device and calls
 `erx_device:irq_ack(Dev, Line)`, which unmasks the line as its kind
 requires
@@ -2712,8 +2721,8 @@ quoted atom or a string, with a seeded violation in
 not code that spells the atom with escapes or builds it from pieces; what
 keeps a device from every other domain is that its capabilities are
 installed only in its driver's domain. `erx_irq_line`, beside `erx_device` in `erx`, is the one other
-module the check allows, and the only caller of `irq_bind/2` and
-`irq_ack/2`: a check over the driver applications' BEAM files with the
+module the check allows, and the only caller of `irq_bind/2`,
+`irq_bind_owner/2` and `irq_ack/2`: a check over the driver applications' BEAM files with the
 compiler's call graph fails the build on any other caller, with a seeded
 driver that binds its line directly
 ([design-shared-devices.md](design-shared-devices.md#invariants), SD3).

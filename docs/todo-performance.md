@@ -891,6 +891,8 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **Principals whose CPU caps oversubscribe `users` contend by round robin** (`docs/design-scheduler.md`, the L1 pick function). The manifest holds each principal's grant within `users` and does not sum them, so two principals each capped at all of `users` split `users` while both are busy by round robin over their threads, not by grant, and a principal with many threads takes more than its share. Settle it with the measurement that decides the open question "Is round robin within a level enough?" (`docs/design-scheduler.md`, E-S1 and E-S9): two principals, both granted `users`, one runnable thread against many, and the CPU time each receives; if the skew matters, put a fair queue behind the pick function.
 * **[Low] drivers, a shared interrupt line adds two messages per driver per firing.** A line two of a
   unit's drivers use reaches them through its line owner (`erx_irq_line`;
+* **[Low] drivers, a shared interrupt line adds two messages per driver per firing.** A line two devices
+  of a unit name reaches its drivers through its line owner (`erx_irq_line`;
   [design-shared-devices.md](design-shared-devices.md#performance)): the owner receives the delivery, sends
   each driver a notice, waits for each answer, and only then acknowledges, so every driver pays two
   messages inside the domain and the line stays masked until the slowest answers. Settle it with a `tools/erx

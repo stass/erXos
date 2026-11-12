@@ -434,8 +434,9 @@ violation fails the build with the property, the record and the field:
    record and the reset count; only storage domains hold windows on data,
    FAT and vault's partitions; the units of the UARTs that `console` and
    `hostlink` name are the system domain's, the two paths differ, and the
-   two UARTs do not share an interrupt line, since each of the system
-   domain's UART drivers binds its line itself
+   two UARTs do not share an interrupt line, since the console and the
+   host link each start their own UART's driver, and the owner of its
+   line when the line is shared, and a line has one binder
    ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)); only
    the storage domain that serves the vault holds the vault's partition,
    and only the vault holds a facet of that domain's tree; only the
@@ -2639,15 +2640,17 @@ runs the PCIe enumerator and holds nothing else, the console's and the
 host link's UART units in the system domain (The console, below), and
 every other device the kernel does not keep (GPIO, I2C, the
 other SPI controllers, and whatever else the board offers) in one
-**devices domain**, which is not in the trusted base. On every platform, a
-device whose DMA is unconfined, so that it reaches all memory, gets a
-domain of its own in a release build's manifest, so the domains that parse
-hostile media and packets never hold a device that is the whole machine
-(property 9): on QEMU `virt`, where the IOMMU confines PCIe
-functions alone, a release build's manifest therefore gives the block and
-network devices as virtio-pci functions, and any virtio-mmio device it
-keeps a domain of its own; on the boards, which confine nothing, every DMA
-device has one ([design-platforms.md](design-platforms.md#qemu-virt)). A
+**devices domain**, which is not in the trusted base. On every platform,
+the unit of a device whose DMA is unconfined, so that it reaches all
+memory, gets a domain of its own in a release build's manifest, holding
+that unit and nothing else, so the domains that parse hostile media and
+packets never hold a device that is the whole machine (property 9): on
+QEMU `virt`, where the IOMMU confines PCIe functions alone, a release
+build's manifest therefore gives the block and network devices as
+virtio-pci functions, and each unit of virtio-mmio transports it keeps a
+domain of its own; on the boards, which confine nothing, every DMA
+device's unit has one
+([design-platforms.md](design-platforms.md#qemu-virt)). A
 development build's manifest may merge them. Each such domain is a
 configured domain like any other: created by the domain service at boot,
 restarted by it within its intensity, its devices given again as it is
@@ -2775,10 +2778,12 @@ Through the NIF:
   which unmasks the line
   ([design-kernel.md](design-kernel.md#irq-objects)). A process's exit
   unbinds only the lines still bound under its own label, so a late exit
-  never undoes a successor's binding. A line that two of a unit's drivers
-  use is bound once, by the line's **owner**, a supervised Erlang process
-  that tells each driver on the line of every firing and acknowledges the
-  line once all of them have answered or exited; the drivers join it
+  never undoes a successor's binding. A line that two devices of a unit
+  name is shared, as the devices' records say, and is bound once, by the
+  line's **owner**, a supervised Erlang process that tells each driver
+  joined to it of every firing, acknowledges the line once all of them
+  have answered or exited, and tells them again if the line fired in the
+  meantime; the drivers join it
   instead of binding and report done instead of acknowledging, through
   `erx_irq_line`, the one module that binds or acknowledges a line
   ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)).
