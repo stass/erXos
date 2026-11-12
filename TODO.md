@@ -1820,6 +1820,25 @@ it; git history is the record of completed work.
   opens every function a program may call (docs/design-programs.md, "Verification and testing")
   is not built. Decide with it whether `erx_prog_startup_plan`, a pure function the layer exports
   for its own executor, counts as exported, or moves beside `elf_plan.c`.
+* [Medium] liberx program layer, `liberx/program/channel.c` (`erx_prog_channel_send`): the send
+  writes a frame whole under the lane's lock, so it refuses with `ERX_ERANGE` a frame whose record
+  is larger than the 16 KiB outbound ring, while a spawn's arguments reach 131,072 bytes
+  (`args_max`). How a request larger than the ring reaches the session is open for the request
+  work: a frame streamed under the lock breaks the rule that the lock is never held across a wait.
+* [Medium] liberx program layer, `liberx/program/channel.c`: design-programs.md has the event
+  executor send `{waited}` reaps from slot 15 and never wait, but the channel's send may wait
+  for outbound room, which only the executor announces. The reap work must give the executor a
+  send that never waits (an owed reap it retries on the next channel label, for one).
+* [Low] liberx program layer, `liberx/program/channel.c` (`whole_put`): a sender that finds room
+  takes it even while others wait, so a large frame can wait behind a steady stream of small
+  ones for as long as the stream lasts. A queue of waiters under the lock, whose head alone
+  publishes a need, would serve them in order.
+* [Low] liberx program layer, `liberx/program/program.c` (`executor_main`): the executor takes
+  labels, and so announces outbound room, only once the inbound lane is empty, so a session that
+  keeps the inbound lane busy delays every sender waiting for room.
+* [Low] `tools/fuzz/lane_writer_fuzz.c`: the lane writer's fuzz target never puts an item marked
+  `whole`; the channel's host test (`test/host/prog_channel_test.rb`) covers the all-or-nothing
+  put, the whole-record need and the refusal of a record larger than the area.
 * [Low] `abi/erx_abi.txt` (`program_arg`): the generator emits no count, so
   `ERX_PROGRAM_INSTALL_DATA` (`erx_program_core.h`) assumes `doorbell` is the last index.
 * [Medium] liberx program layer, `liberx/program/inbound.h` (`ERX_PROG_REPORT_BYTES`): every frame

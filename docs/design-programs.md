@@ -336,8 +336,17 @@ its read position: it copies a frame's record into private memory as its
 bytes arrive, advancing the read position behind what it has copied, and
 applies the frame to the program's tables from that copy only once the
 record is whole, so a frame counts as taken only when its last byte has
-been read (P13). Any worker may write a request into the outbound lane,
-under the lane's one lock, which is never held across a wait.
+been read (P13). Any worker may write a request or a notice into the
+outbound lane through the channel's send, the lane's only writer, under
+the lane's one lock, which is never held across a wait. A frame that fits
+the ring is written whole under the lock, after an open wait for room for
+the whole frame: a sender that finds too little lets go of the lock,
+publishes the room it needs and waits, and puts again once the event
+executor, taking the channel's label, wakes the senders waiting for room.
+So the frames of two workers never interleave, and no worker holds the
+lock while it waits; a sender that leaves while others wait wakes them,
+since the room it last asked for may have been theirs to wait on. The executor never sends into the
+outbound lane, since only it announces room there.
 
 **Waking.** Each lane follows the wake handshake of every lane
 ([design-domains.md](design-domains.md#connections)): a party with
@@ -698,6 +707,13 @@ and its send never takes the notice with it:
   ([design-pipes.md](design-pipes.md#ends-and-their-holders));
 * `{drained, Pipe, End, Writer}`: a read end drained the lane of a write
   end that is gone and let it go.
+
+A read end finds a lane drained while it holds the end's lock, where it
+may not wait for room in the outbound lane, so the `{drained}` it owes is
+recorded in the end object. The call sends it once it has let go of the
+end's lock; a thread that stops before that leaves it to the end's next
+call or to its release, whichever comes first. So a stopped thread loses
+no notice: the end, which outlives it, still owes it.
 
 **Credit.** The port driver delivers a program's frames to its handler
 only within the program's credit, which it keeps from the frames it

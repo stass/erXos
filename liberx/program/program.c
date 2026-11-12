@@ -33,6 +33,7 @@
 #include "erx/abi.h"
 #include "erx/lane.h"
 #include "liberx/backend/api.h"
+#include "liberx/program/channel.h"
 #include "liberx/program/inbound.h"
 #include "liberx/program/program.h"
 #include "liberx/pthread_executor.h"
@@ -134,8 +135,8 @@ object_map(uint64_t mem, uint64_t size, uint32_t prot)
 
 /*
  * Maps the channel's two sides, the program's own read-write and the session's read-only,
- * and readies the inbound lane's reader over them; the lane's size is the ABI's, never a
- * value from a page the session writes.
+ * and readies the inbound lane's reader and the outbound lane's send (channel.h) over
+ * them; the lane's size is the ABI's, never a value from a page the session writes.
  */
 static bool
 channel_open(void)
@@ -144,13 +145,15 @@ channel_open(void)
 	void *const own = object_map(self.regs[ERX_PROGRAM_ARG_OWN_SIDE], bytes, ERX_PROT_RW);
 	const void *const peer = object_map(self.regs[ERX_PROGRAM_ARG_PEER_SIDE], bytes, ERX_PROT_R);
 
-	return (own != NULL && peer != NULL && erx_lane_reader_init(&inbound, peer, own, ERX_PROGRAM_LANE));
+	return (own != NULL && peer != NULL && erx_lane_reader_init(&inbound, peer, own, ERX_PROGRAM_LANE) &&
+	    erx_prog_channel_open(own, peer, self.regs[ERX_PROGRAM_ARG_DOORBELL]));
 }
 
 /*
  * Takes the group's ready labels and counts each: the channel's fixed label, which the
- * session bound the program's doorbell with and no pipe end's equals, or another. How many it
- * took; none or an error says there is nothing to look at.
+ * session bound the program's doorbell with and no pipe end's equals, or another. The
+ * channel's label may say the session freed outbound room, so it wakes the senders waiting
+ * for room. How many it took; none or an error says there is nothing to look at.
  */
 static int
 labels_take(void)
@@ -161,10 +164,12 @@ labels_take(void)
 		uint64_t label = 0;
 
 		(void)erx_utcb_mr_load(erx_utcb_self(), (size_t)at, &label);
-		if (label == ERX_PROG_CHANNEL_LABEL)
+		if (label == ERX_PROG_CHANNEL_LABEL) {
 			atomic_fetch_add_explicit(&self.rings, 1, memory_order_relaxed);
-		else
+			erx_prog_channel_room();
+		} else {
 			atomic_fetch_add_explicit(&self.strays, 1, memory_order_relaxed);
+		}
 	}
 	return (taken);
 }

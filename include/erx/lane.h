@@ -198,9 +198,15 @@ struct erx_lane_iov {
  * concatenation of iovcnt pieces, and the room it must leave free behind
  * it.  reserve is 0 but for an ordinary record in a lane that holds a
  * reserve for control records (the system domain's lane to a domain),
- * which never takes that room; a control record there puts with 0.  The
- * caller passes the same item to every call that writes one record, and
- * keeps the pieces and their array private while a call runs.
+ * which never takes that room; a control record there puts with 0.  whole
+ * asks for the record in one put: a put writes none of it until the room
+ * past the reserve holds all of it, an armed put waits for that room, and
+ * a record larger than the area past the reserve, or put while another
+ * record is open, is refused, so a writer
+ * whose lane several threads share writes each record whole under its
+ * lock and never pauses inside one.  The caller passes the same item to
+ * every call that writes one record, and keeps the pieces and their array
+ * private while a call runs.
  */
 struct erx_lane_item {
 	const erx_lane_iov_t	*iov;
@@ -208,6 +214,7 @@ struct erx_lane_item {
 	uint64_t		 zero;
 	uint64_t		 reserve;
 	uint32_t		 kind;
+	bool			 whole;
 };
 
 /*
@@ -262,9 +269,10 @@ bool erx_lane_writer_init(erx_lane_writer_t *, void *, const void *,
  * Returns ERX_LANE_PUT_DONE when the record's last byte is written,
  * ERX_LANE_PUT_SHORT when room ran out first (put->written may be 0),
  * ERX_LANE_PUT_REFUSED, writing nothing, for a missing piece, a body past
- * ERX_FRAME_MAX, an item other than the open record's (another length,
- * kind or zero word), a reserve that leaves no
- * room for a header, or a record that would end past the last position,
+ * ERX_FRAME_MAX, a whole record larger than the area past the reserve or
+ * put while another record is open, an item other than the open record's
+ * (another length, kind or zero word), a reserve that leaves no room for a
+ * header, or a record that would end past the last position,
  * and ERX_LANE_PUT_MALFORMED when the consumer's rpos fails a check, now or
  * before.  When put->ring is set the caller must ring the consumer's bell,
  * or a consumer waiting for the record may wait for good.
@@ -275,7 +283,8 @@ erx_lane_put_status_t erx_lane_put(erx_lane_writer_t *,
 /*
  * As erx_lane_put, after publishing in the ring header the rpos at which
  * the room past the reserve holds the rest of the record or a quarter of
- * the lane, whichever is less.  It puts again, re-publishing need, until
+ * the lane, whichever is less, or the whole record for an item marked
+ * whole.  It puts again, re-publishing need, until
  * a put writes nothing or the record is done, and *put sums what it
  * wrote.  ERX_LANE_PUT_SHORT from it means the consumer will ring the
  * producer's bell when that room returns, so the caller may pause.  A

@@ -33,9 +33,31 @@ module Erx
                       [fsv]?printf|v[fs]printf|snprintf|vsnprintf|dprintf|puts|fputs|putchar|fputc|putc|
                       fopen|fdopen|fclose|fwrite|fread|fflush|perror|getchar|fgets)\s*\(|<stdio\.h>/x,
           seed: { 'liberx/program/seeded.c' => "void *f(void) { return (malloc(16)); }\n" }
+        ),
+        # The outbound lane has one writer, the channel's send, which writes each frame
+        # whole under its one lock, so the frames of two workers never interleave and a
+        # request is an obligation from its send on. A second writer in the layer, or in a
+        # program the programs suite runs, would keep a writer state of its own over the
+        # same ring. note.c alone writes raw: its burst case writes records without ringing
+        # the session, which the send would do, and it calls no send of liberx's. The rule
+        # reads only the layer and the suite's programs: elsewhere in liberx a lane put is
+        # another lane's, and only the program layer maps a program's channel.
+        Chokepoints::Forbidden.new(
+          name: 'program-channel-send',
+          rule: "only liberx/program/channel.c, the channel's send, readies a lane writer or puts into a " \
+                "lane in liberx's program layer (liberx/program/) and the programs suite's programs " \
+                '(test/guest/programs/), where test/guest/programs/note.c writes its own records raw',
+          design: 'docs/design-programs.md#signals-in-liberx',
+          scope: Chokepoints::Scope.new(own: false, extra: ['liberx/program/**/*', 'test/guest/programs/**/*']),
+          pattern: /\berx_lane_(?:put|put_armed|writer_init)\s*\(/,
+          sites: [Chokepoints::Site.new(glob: 'liberx/program/channel.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/programs/note.c')],
+          seed: { 'liberx/program/seeded.c' => "void f(void) { (void)erx_lane_put(&writer, &item, &put); }\n",
+                  'test/guest/programs/seeded.c' => "bool f(void) { return (erx_lane_writer_init(&w, own, peer, n)); }\n" }
         )
       ],
-      unchecked_objects: %w[liberx/program/program.c liberx/program/program.h liberx/program/startup.c
+      unchecked_objects: %w[liberx/program/program.c liberx/program/program.h liberx/program/channel.c
+                            liberx/program/channel.h liberx/program/startup.c
                             liberx/program/startup.h liberx/program/inbound.c liberx/program/inbound.h]
     )
   end

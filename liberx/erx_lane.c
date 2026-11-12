@@ -53,7 +53,7 @@ static const erx_lane_hdr_t *lane_header(const erx_lane_reader_t *);
 static bool lane_item_len(const erx_lane_writer_t *, const erx_lane_item_t *,
     uint32_t *);
 static uint64_t lane_min(uint64_t, uint64_t);
-static uint64_t lane_need(uint64_t, uint64_t, uint64_t, uint64_t);
+static uint64_t lane_need(uint64_t, uint64_t, uint64_t, uint64_t, bool);
 static bool lane_publish(const erx_lane_writer_t *, uint64_t);
 static void lane_put_sum(erx_lane_put_t *, const erx_lane_put_t *, bool);
 static erx_lane_status_t lane_refuse(erx_lane_reader_t *, erx_lane_fault_t);
@@ -421,9 +421,10 @@ lane_grain_up(uint64_t value)
 /*
  * The body length of the item, when the writer can write it now: false
  * for a missing piece, a body past ERX_FRAME_MAX, a reserve that leaves no
- * room for a header, a record other than the open one (its length, kind
- * or zero word differ), or a new record
- * that would end past the last position.
+ * room for a header, a whole record larger than the area past the reserve
+ * or while another record is open, a record other than the open one (its
+ * length, kind or zero word differ), or a new record that would end past
+ * the last position.
  */
 static bool
 lane_item_len(const erx_lane_writer_t *writer, const erx_lane_item_t *item,
@@ -441,6 +442,10 @@ lane_item_len(const erx_lane_writer_t *writer, const erx_lane_item_t *item,
 	}
 	if (item->reserve > writer->size - LANE_GRAIN)
 		return (false);
+	if (item->whole && (writer->phase == ERX_LANE_IN_BODY ||
+	    LANE_GRAIN + lane_grain_up(total) >
+	    writer->size - lane_grain_up(item->reserve)))
+		return (false);
 	if (writer->phase == ERX_LANE_IN_BODY) {
 		if (total != writer->len || item->kind != writer->kind ||
 		    item->zero != writer->zero)
@@ -456,15 +461,18 @@ lane_item_len(const erx_lane_writer_t *writer, const erx_lane_item_t *item,
 /*
  * The rpos at which the room past the reserve holds the record's rest
  * bytes or a quarter of the area, whichever is less (or all the area
- * past the reserve): need = pos + reserve + wanted - size, 0 when that
- * is not positive, since every rpos then gives the room.
+ * past the reserve), or all the rest bytes of a whole record, which
+ * lane_item_len has checked fit: need = pos + reserve + wanted - size, 0
+ * when that is not positive, since every rpos then gives the room.
  */
 static uint64_t
-lane_need(uint64_t pos, uint64_t size, uint64_t reserve, uint64_t rest)
+lane_need(uint64_t pos, uint64_t size, uint64_t reserve, uint64_t rest,
+    bool whole)
 {
 	uint64_t wanted;
 
-	wanted = lane_min(reserve + lane_min(rest, size / 4), size);
+	wanted = lane_min(reserve + (whole ? rest : lane_min(rest, size / 4)),
+	    size);
 	return (pos > size - wanted ? pos - (size - wanted) : 0);
 }
 
@@ -626,7 +634,7 @@ erx_lane_put(erx_lane_writer_t *writer, const erx_lane_item_t *item,
 	    lane_grain_up(item->reserve));
 	published = writer->pos;
 	if (writer->phase == ERX_LANE_BETWEEN) {
-		if (room < LANE_GRAIN)
+		if (room < (item->whole ? lane_rest(writer, len) : LANE_GRAIN))
 			return (ERX_LANE_PUT_SHORT);
 		lane_write_header(writer, len, item->kind, item->zero);
 		writer->pos += LANE_GRAIN;
@@ -683,7 +691,8 @@ erx_lane_put_armed(erx_lane_writer_t *writer, const erx_lane_item_t *item,
 		 */
 		erx_lane_hdr_need_store(lane_writer_header(writer),
 		    lane_need(writer->pos, writer->size,
-		    lane_grain_up(item->reserve), lane_rest(writer, len)));
+		    lane_grain_up(item->reserve), lane_rest(writer, len),
+		    item->whole));
 		atomic_thread_fence(memory_order_seq_cst);
 		st = erx_lane_put(writer, item, &part);
 		lane_put_sum(put, &part, first);

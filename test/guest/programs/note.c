@@ -26,10 +26,14 @@
  * of the two ends decides the status: SIGSYS if the session read every
  * record the program wrote before it faulted, and SIGSEGV if it took the
  * fault before the refused record. The records go through a
- * writer of the program's own over its side of the channel, the test-only
- * raw put: liberx's program layer has no writer of the outbound lane, so
- * this one is the lane's only writer. A name it does not know ends the
- * program with 2, and a channel it cannot map or write with 3.
+ * writer of the program's own over its side of the channel, a raw put that
+ * the program-channel-send build check permits here alone: burst must write
+ * its records without ringing the session, which liberx's channel send
+ * (liberx/program/channel.h) does whenever its store crosses the session's
+ * wake. That send writes only when the program calls it, which note never
+ * does, so this writer is the only one that writes the lane. A name it does
+ * not know ends the program with 2, and a channel it cannot map or write
+ * with 3.
  */
 
 #include <stdbool.h>
