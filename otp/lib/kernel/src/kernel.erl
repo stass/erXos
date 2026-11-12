@@ -285,7 +285,18 @@ init(safe) ->
              type => worker,
              modules => [erx_procfs]},
 
-    {ok, {SupFlags, Boot ++ DiskLog ++ Pg ++ [Ns, Tmp, Proc]}}.
+    %% erXos: the domain's inspection agent, which init's ready report names
+    %% (design-live.md, The runtime agent); none in the system domain. Temporary:
+    %% the domain record keeps the one pid the report named, so a restarted agent
+    %% would be one the system domain cannot reach.
+    Agent = #{id => erx_inspect_agent,
+              start => {erx_inspect_agent, start_link, []},
+              restart => temporary,
+              shutdown => brutal_kill,
+              type => worker,
+              modules => [erx_inspect_agent]},
+
+    {ok, {SupFlags, Boot ++ DiskLog ++ Pg ++ [Ns, Tmp, Proc, Agent]}}.
 
 start_distribution(Part) ->
     Rpc = #{id => rex,

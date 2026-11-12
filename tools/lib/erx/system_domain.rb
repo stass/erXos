@@ -134,7 +134,7 @@ module Erx
     # of N. Answers the count and the agent's node.
     SERVICE_KILL_FORGED = 'SdForged=fun(SdI,SdN)->SdPid=hd([SdP||#{id:=SdJ,pid:=SdP}<-erx_domain_core:domains(' \
                           'maps:get(core,sys:get_state(erx_domain_srv))),SdJ=:=SdI]),' \
-                          'SdPid!{erx_ready,#{connections=>self()}},SdPid!{erx_connection_mapped,1},' \
+                          'SdPid!{erx_ready,#{connections=>self(),inspect=>self()}},SdPid!{erx_connection_mapped,1},' \
                           '{ok,#{connections:=SdAg,dropped:=SdDr}}=erx_domain:info({erx_domain,SdI,SdN,SdPid}),' \
                           '{SdDr,node(SdAg)} end'
     # SdWatch: a system-domain process that traps exits, links to and monitors process P of

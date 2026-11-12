@@ -30,8 +30,10 @@ name, as the connection agent, a pid of the domain's own node; the pid keeps
 that agent, the one process of the system domain that does, and passes on
 the report's provides, the mints the domain names for its services
 (docs/design-system.md, "Facets a configured domain serves"), as
-{domain_ready, Ref, Id, Provides}, untouched for the service to
-authenticate, and each answer as {domain_answer, Ref, Id, Answer}. Every other message, a second report, the
+{domain_ready, Ref, Id, Provides, Inspect}, untouched for the service to
+authenticate, with the inspection agent the report names as `inspect`, kept
+only when the domain's incarnation owns it, and `none` otherwise, and each
+answer as {domain_answer, Ref, Id, Answer}. Every other message, a second report, the
 creator's or any other domain's included, is dropped and counted; the
 service reads the count with {Ref, info, From}. A process of the system
 domain can write the envelope itself, so the check keeps other domains,
@@ -78,16 +80,19 @@ domain.
 -define(CONTROL_RECORD, 3).
 -define(SEND_SENDER, 22).
 
-%% What the pid knows of its domain: its service, id, node and secret, the agent its
-%% ready report named (none before the report) and how many messages it dropped.
+%% What the pid knows of its domain: its service, id, node and secret, the agent and the
+%% inspection agent its ready report named (none before the report, and none for an
+%% inspection agent it refused) and how many messages it dropped.
 -type state() :: #{service := pid(), id := pos_integer(), node := node(), ref := reference(),
-                   agent := pid() | none, port := port() | none, dropped := non_neg_integer()}.
+                   agent := pid() | none, inspect := pid() | none, port := port() | none,
+                   dropped := non_neg_integer()}.
 
 -spec start_link(pid(), pos_integer(), node(), reference()) -> pid().
 start_link(Service, Id, Node, Ref) ->
     %% Not proc_lib: a domain pid ends with {domain_down, Id, Info} at every
     %% end of its domain, which is no crash to report.
-    State = #{service => Service, id => Id, node => Node, ref => Ref, agent => none, port => none, dropped => 0},
+    State = #{service => Service, id => Id, node => Node, ref => Ref, agent => none, inspect => none,
+              port => none, dropped => 0},
     spawn_link(fun() -> init(State) end).
 
 init(State) ->
@@ -121,8 +126,8 @@ loop(#{service := Service, id := Id, ref := Ref} = State) ->
             _ = erlang:send(Mint, Request, [nosuspend]),
             loop(State);
         {Ref, info, From} ->
-            #{agent := Agent, dropped := Dropped} = State,
-            gen_server:reply(From, {ok, #{connections => Agent, dropped => Dropped}}),
+            #{agent := Agent, inspect := Inspect, dropped := Dropped} = State,
+            gen_server:reply(From, {ok, #{connections => Agent, inspect => Inspect, dropped => Dropped}}),
             loop(State);
         {'EXIT', Service, Reason} ->
             %% A trapped exit is a message, which any process here can forge;
@@ -178,8 +183,9 @@ finish(Info, #{id := Id} = State) ->
 from_domain({erx_ready, #{connections := Agent} = Report},
             #{service := Service, id := Id, node := Node, ref := Ref, agent := none} = State)
   when is_pid(Agent), node(Agent) =:= Node ->
-    Service ! {domain_ready, Ref, Id, maps:get(provides, Report, #{})},
-    State#{agent := Agent};
+    {Inspect, Checked} = inspect_agent(Report, State),
+    Service ! {domain_ready, Ref, Id, maps:get(provides, Report, #{}), Inspect},
+    Checked#{agent := Agent, inspect := Inspect};
 from_domain(_Message, #{agent := none} = State) ->
     dropped(State);
 from_domain(Answer, #{service := Service, id := Id, ref := Ref} = State) ->
@@ -189,6 +195,36 @@ from_domain(Answer, #{service := Service, id := Id, ref := Ref} = State) ->
             State;
         false ->
             dropped(State)
+    end.
+
+%% The inspection agent the report names (docs/design-live.md, "The runtime agent"),
+%% kept only when the reporting incarnation owns it: its node is the domain's node and
+%% its creation the domain's id, the check a provider's mint passes
+%% (erx_domain_mints:is_owned/3). A report that names none leaves the domain without
+%% one; any other value is refused, logged and counted, and leaves it without one too.
+inspect_agent(Report, #{id := Id} = State) ->
+    case inspect_verdict(Report, State) of
+        {kept, Inspect} ->
+            {Inspect, State};
+        absent ->
+            {none, State};
+        refused ->
+            logger:notice("erx_domain: domain ~b's ready report named an inspection agent it does not own; refused",
+                          [Id]),
+            {none, dropped(State)}
+    end.
+
+inspect_verdict(Report, #{id := Id, node := Node}) ->
+    case maps:find(inspect, Report) of
+        {ok, Inspect} when is_pid(Inspect), node(Inspect) =:= Node ->
+            case erx_dist:owner(Inspect) =:= Id of
+                true -> {kept, Inspect};
+                false -> refused
+            end;
+        {ok, _Other} ->
+            refused;
+        error ->
+            absent
     end.
 
 is_answer({erx_connection_mapped, Peer}) -> is_integer(Peer);

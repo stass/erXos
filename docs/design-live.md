@@ -1566,6 +1566,7 @@ programs and pipes, the inspector asks that domain's inspection agent:
   It answers only a path its own domain owns, `[domains, Self | _]`, and
   `[processes, Pid]` and every path the schema declares below it, such
   as `[processes, Pid, source]`, for a `Pid` whose domain is its own,
+  and the listing `{entries, [processes]}` with its own processes only,
   with the attributes
   its runtime's collectors give, and answers any other path `{error,
   scope}`: a runtime describes only itself. A session's agent relays its

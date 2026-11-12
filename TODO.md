@@ -1461,12 +1461,22 @@ it; git history is the record of completed work.
   `erx_domain_core:inspect_scope/2` (one
   `development_build/0` in `erx` replacing `erx_hostlink_files:build_flags/0` and its copy in `erx_log_facet`);
   route `erx_inspector`'s calls without a scope through the facet, each request in a bounded query worker;
-  start `erx_inspect_agent` in every domain, named in the ready report and kept only when the incarnation owns
-  it, with `collects_domain/2` as its rule; start `erx_procfs` over the facet rather
+  start `erx_procfs` over the facet rather
   than at scope `all` (`otp/lib/kernel/src/kernel.erl`); then delete `erx_log_facet` and its tests, the
   line's `scope`, the local scope of `facets/2`, and `log` from `UNDECLARED`. Keep the
   `session-dmesg` QEMU checkpoint, which tests the behaviour. Until then have `erx_domain:create/1` refuse a
   spec's facet named `inspect`.
+* [Medium] inspection schema, `abi/inspection.txt`: design-live.md's path table and
+  [The runtime agent](docs/design-live.md#the-runtime-agent) name `[processes, Pid, source]`, the source lines
+  around a process's location from `erx_source`, but the schema declares no such path, so the inspector, and a
+  domain's `erx_inspect_agent` through it, answer it `{error, scope}`. Declare the path and its collector.
+* [Medium] inspect agent, `erlang/apps/erx/src/erx_inspect_agent.erl`: it does not cut an answer at
+  `inspect_reply_max`, which `abi/services/inspect.txt` declares; the inspector, whose rules the agent follows,
+  cuts a listing only at its page of 1,000 entries. Cut by encoded bytes in the inspector, and so in the agent.
+* [Medium] inspect agent, `erlang/apps/erx/src/erx_inspect_agent.erl`: a session's agent does not relay its
+  programs' and pipes' attributes ([The runtime agent](docs/design-live.md#the-runtime-agent),
+  `[domains, Id, programs]`), and below `[domains, Self]` it asks `erx_inspector`, whose `collects_domain/2`
+  collects a domain's paths only in the system domain, so those paths answer `{error, scope}`.
 * [Medium] shell, the session_domain QEMU cell of session P6 (`tools/lib/erx/qemu_suites/session_domain.rb`, which
   session P5 brings with the session domain): `ifconfig` typed in a session prints `ifconfig: no_facet`
   and sets the status `no_facet`, and in the system shell lists the interfaces; `ps` lists the session's

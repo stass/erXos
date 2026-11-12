@@ -322,8 +322,8 @@ handle_cast(_Request, State) ->
 
 handle_info({domain_ended, Id, End, _Record}, State) ->
     {noreply, ended(Id, End, State)};
-handle_info({domain_ready, Ref, Id, Provides}, State) ->
-    {noreply, ready(Id, Ref, Provides, State)};
+handle_info({domain_ready, Ref, Id, Provides, Inspect}, State) ->
+    {noreply, ready(Id, Ref, Provides, Inspect, State)};
 handle_info({mint_introduced, Tag, Result}, State) ->
     {noreply, mints({introduced, Tag, Result}, State)};
 handle_info({timeout, Timer, {mint_deadline, Tag}}, #{mint_timers := Timers} = State) ->
@@ -545,7 +545,7 @@ build(Ident, Principal, Origin, Make, Facets, Timeout, #{core := Core} = State) 
                     Domain = {erx_domain, Id, Node, Pid},
                     case started(Id, Pid, Ref, Created#{node => Node}, Next) of
                         ok when Connection =:= 0 ->
-                            Ready = erx_domain_core:ready(Id, erx_domain_core:running(Id, Built)),
+                            Ready = erx_domain_core:ready(Id, none, erx_domain_core:running(Id, Built)),
                             {{ready, Domain}, Next#{core := Ready}};
                         ok ->
                             boot_timer(Id, Timeout),
@@ -617,7 +617,9 @@ export(Exports, Pid, Id, _Values) -> Exports:export(Pid, [send], Id).
 boot_timer(_Id, infinity) -> ok;
 boot_timer(Id, Timeout) -> _ = erlang:start_timer(Timeout, self(), {boot_timeout, Id}), ok.
 
-%% Domain Id's ready report, which its domain pid passed on with Ref: the domain is ready
+%% Domain Id's ready report, which its domain pid passed on with Ref and with the
+%% inspection agent it kept, Inspect, which the domain's record holds for its life
+%% (docs/design-live.md, "The runtime agent"): the domain is ready
 %% and its create, if any, answered, a session's start only once its namespace is in
 %% place (answer_in_place/1). A domain that ended while running, its end having
 %% overtaken a report its pid passed on before the pid's own end, reported too, and its
@@ -628,11 +630,11 @@ boot_timer(Id, Timeout) -> _ = erlang:start_timer(Timeout, self(), {boot_timeout
 %% with its template, after the answer to the report, so the answer reaches the domain
 %% before any installation the report starts. Only a running domain's report is taken, so the core hears a session's
 %% report at most once and before its end (unprovide/3).
-ready(Id, Ref, Provides, #{core := Core, waiting := Waiting} = State) ->
+ready(Id, Ref, Provides, Inspect, #{core := Core, waiting := Waiting} = State) ->
     case {erx_domain_core:fetch(Id, Core), Waiting} of
         {{ok, #{ref := Ref, state := running, origin := Origin, node := Node}}, _} ->
             {Actions, Links} = erx_domain_links:ready(Id, maps:get(links, State)),
-            Ready = State#{core := erx_domain_core:ready(Id, Core), links := Links},
+            Ready = State#{core := erx_domain_core:ready(Id, Inspect, Core), links := Links},
             Answered = answer_ready(Id, grant_facets(Id, served(Origin, Ready), perform(Actions, Ready))),
             case Origin of
                 {configured, Row} -> mints({ready, Row, Id, Node, Provides}, Answered);

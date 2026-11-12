@@ -80,7 +80,8 @@ it dropped as none its domain may send it. {error, badarg} for a domain that
 has ended. The domain pid answers itself, behind whatever its mailbox holds,
 so a caller waits at most five seconds and exits with timeout past that.
 """.
--spec info(domain()) -> {ok, #{connections := pid() | none, dropped := non_neg_integer()}} | {error, badarg}.
+-spec info(domain()) -> {ok, #{connections := pid() | none, inspect := pid() | none,
+                                         dropped := non_neg_integer()}} | {error, badarg}.
 info({erx_domain, Id, _, _}) ->
     gen_server:call(erx_domain_srv, {info, Id}, 5000).
 

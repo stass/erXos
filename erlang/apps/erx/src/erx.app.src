@@ -10,8 +10,8 @@
 %%
 %% It starts nothing of its own; kernel starts what must run, and the boot script's
 %% code path finds the modules here:
-%%   kernel's hooks   the watchdog and the namespace's writer (kernel.erl) and the
-%%                    console (user_sup.erl)
+%%   kernel's hooks   the watchdog, the namespace's writer and the inspection agent
+%%                    (kernel.erl) and the console (user_sup.erl)
 %%   net_kernel       the carrier that -proto_dist erx names, erx_dist
 %%   logger           its default handler, erx_log_h (logger.erl)
 %%
@@ -39,6 +39,7 @@
              erx_driver_ctl,
              erx_facet,
              erx_facets,
+             erx_inspect_agent,
              erx_inspector,
              erx_kernel_records,
              erx_log,
@@ -64,7 +65,7 @@
              erx_ui_wire,
              erx_watchdog,
              erx_web_proto]},
-  {registered, [erx_connections, erx_console, erx_log_h, erx_ns, erx_watchdog]},
+  {registered, [erx_connections, erx_console, erx_inspect_agent, erx_log_h, erx_ns, erx_watchdog]},
   {applications, [kernel, stdlib]},
   {runtime_dependencies, ["erx_shell-1"]},
   {env, []}]}.

@@ -466,9 +466,9 @@ ready_report() ->
     ?assertEqual({export, 15, [send]}, next_call()),
     ?assertEqual({start, 15}, next_call()),
     Agent = erx_domain_fake_lib:agent(<<"ready">>, 15),
-    ?assertEqual({ok, #{connections => Agent, dropped => 0}}, erx_domain:info(Domain)),
+    ?assertEqual({ok, #{connections => Agent, inspect => Agent, dropped => 0}}, erx_domain:info(Domain)),
     erx_domain:pid(Domain) ! {erx_origin, 15, {erx_ready, #{connections => Agent}}},
-    ?assertEqual({ok, #{connections => Agent, dropped => 1}}, erx_domain:info(Domain)),
+    ?assertEqual({ok, #{connections => Agent, inspect => Agent, dropped => 1}}, erx_domain:info(Domain)),
     ok = erx_domain:stop(Domain, shutdown),
     ?assertEqual({stop, 15}, next_call()),
     ?assertEqual({close_side, 15, {domain_down, 15, stopped}}, next_call()),
@@ -492,7 +492,7 @@ boot_timeout() ->
     Pid ! {erx_ready, #{connections => Agent}},
     Pid ! {erx_origin, 5, {erx_ready, #{connections => Agent}}},
     Pid ! {erx_origin, 16, {erx_ready, #{connections => erx_domain_fake_lib:agent(<<"a">>, 5)}}},
-    ?assertEqual({ok, #{connections => none, dropped => 3}},
+    ?assertEqual({ok, #{connections => none, inspect => none, dropped => 3}},
                  gen_server:call(erx_domain_srv, {info, 16})),
     ?assertEqual({stop, 16}, next_call()),
     ?assertEqual({close_side, 16, {domain_down, 16, stopped}}, next_call()),
@@ -985,3 +985,31 @@ service_end_ends_domain_pids() ->
     exit(Service, kill),
     ?assertEqual(killed, receive {'DOWN', Ref, process, _, Reason} -> Reason after 2000 -> timeout end).
 
+
+%% The inspection agent a ready report names is kept only when the reporting
+%% incarnation owns it, its node the domain's and its creation the domain's id
+%% (docs/design-live.md, "The runtime agent"): a pid of another domain, one with the
+%% domain's creation on another domain's node, and any other value leave the domain
+%% without one, logged and counted; a report that names none leaves it without one,
+%% uncounted.
+inspect_agent_of_another_incarnation_test() ->
+    Own = erx_domain_fake_lib:agent(<<"own">>, 16),
+    Cases = [{#{inspect => Own}, Own, 0},
+             {#{inspect => erx_domain_fake_lib:agent(<<"own">>, 5)}, none, 1},
+             {#{inspect => erx_domain_fake_lib:agent(<<"a">>, 16)}, none, 1},
+             {#{inspect => self()}, none, 1},
+             {#{inspect => undefined}, none, 1},
+             {#{}, none, 0}],
+    [begin
+         Ref = make_ref(),
+         Pid = erx_domain_pid:start_link(self(), 16, 'own@erxos', Ref),
+         Pid ! {erx_origin, 16, {erx_ready, Named#{connections => Own}}},
+         Got = receive {domain_ready, Ref, 16, #{}, Inspect} -> Inspect after 5000 -> timeout end,
+         Tag = make_ref(),
+         Pid ! {Ref, info, {self(), Tag}},
+         Info = receive {Tag, Reply} -> Reply after 5000 -> timeout end,
+         unlink(Pid),
+         exit(Pid, kill),
+         ?assertEqual({Named, Kept, {ok, #{connections => Own, inspect => Kept, dropped => Dropped}}},
+                      {Named, Got, Info})
+     end || {Named, Kept, Dropped} <- Cases].

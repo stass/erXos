@@ -1364,12 +1364,57 @@ party_forged(lane_party_t *party, const erx_etf_pid_t *eval)
 }
 
 /*
+ * Reads one key-value pair of the ready report's map at payload + *at and moves *at past
+ * it: the key connections or inspect with a pid of the domain, or provides with the empty
+ * map, each key at most once, as seen's bit for its index in keys records. False on any
+ * other key or value, on a repeated key, or on a pair that runs past len.
+ */
+static bool
+party_ready_pair(const lane_party_t *party, const uint8_t *payload, size_t len, size_t *at, unsigned *seen)
+{
+	/* provides, whose value is a map, is the last key; the others name pids */
+	static const char *const keys[] = { "connections", "inspect", "provides" };
+	const size_t provides = sizeof(keys) / sizeof(keys[0]) - 1;
+	/* MAP_EXT of no pairs */
+	static const uint8_t empty_map[] = { 116, 0, 0, 0, 0 };
+	const uint8_t *key;
+	size_t key_len, k;
+	erx_etf_pid_t pid;
+
+	/* SMALL_ATOM_UTF8_EXT: its tag, its length, its bytes */
+	if (len - *at < 2 || payload[*at] != 119 || len - *at - 2 < payload[*at + 1])
+		return (false);
+	key_len = payload[*at + 1];
+	key = payload + *at + 2;
+	*at += 2 + key_len;
+	for (k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
+		if (strlen(keys[k]) == key_len && memcmp(key, keys[k], key_len) == 0)
+			break;
+	}
+	if (k == sizeof(keys) / sizeof(keys[0]) || (*seen & (1u << k)) != 0)
+		return (false);
+	*seen |= 1u << k;
+	if (k == provides) {
+		if (len - *at < sizeof(empty_map) || memcmp(payload + *at, empty_map, sizeof(empty_map)) != 0)
+			return (false);
+		*at += sizeof(empty_map);
+		return (true);
+	}
+	if (!party_pid_read(party, payload + *at, len - *at, &pid))
+		return (false);
+	*at += PARTY_PID_LEN;
+	return (true);
+}
+
+/*
  * Whether a frame record is init's ready report (edit 65 of docs/design-runtime.md): a
  * SEND_SENDER {22, From, To} from a domain pid to the domain pid the root wrote on the
  * boot page, a pid of the system node of words BOOT_PID_NUMBER and BOOT_PID_SERIAL and
- * creation 4, of {erx_ready, #{connections => Agent, provides => #{}}}, Agent a pid of
- * the domain: nothing in the test release calls erx_facet:provide/2, so provides is the
- * empty map. The root sends no answer, so init boots on after its wait.
+ * creation 4, of {erx_ready, #{connections => Agent, inspect => Inspect, provides =>
+ * #{}}}, Agent and Inspect pids of the domain: nothing in the test release calls
+ * erx_facet:provide/2, so provides is the empty map. ERTS writes a small map's atom keys
+ * in atom-table order, which this test does not know, so the pairs are read by key. The
+ * root sends no answer, so init boots on after its wait.
  */
 static bool
 party_ready(const lane_party_t *party, const uint8_t *record, size_t len)
@@ -1379,18 +1424,13 @@ party_ready(const lane_party_t *party, const uint8_t *record, size_t len)
 	/* NEW_PID_EXT, SMALL_ATOM_UTF8_EXT of the system node; ID, Serial and Creation follow */
 	static const uint8_t to_head[] = { 88, 119, sizeof(SYSTEM_NODE) - 1 };
 	const size_t to_len = sizeof(to_head) + sizeof(SYSTEM_NODE) - 1 + 12;
-	/*
-	 * SMALL_TUPLE_EXT of 2, the atom erx_ready, MAP_EXT of two pairs, the atom
-	 * connections; Agent follows, then tail: the atom provides and an empty MAP_EXT.
-	 * ERTS writes a small map's atom keys in atom-table order, not alphabetical
-	 * order, and init.beam creates connections before provides.
-	 */
-	static const uint8_t head[] = { 104, 2, 119, 9, 'e', 'r', 'x', '_', 'r', 'e', 'a', 'd', 'y', 116, 0, 0, 0, 2,
-	    119, 11, 'c', 'o', 'n', 'n', 'e', 'c', 't', 'i', 'o', 'n', 's' };
-	static const uint8_t tail[] = { 119, 8, 'p', 'r', 'o', 'v', 'i', 'd', 'e', 's', 116, 0, 0, 0, 0 };
+	/* SMALL_TUPLE_EXT of 2, the atom erx_ready, MAP_EXT of three pairs */
+	static const uint8_t head[] = { 104, 2, 119, 9, 'e', 'r', 'x', '_', 'r', 'e', 'a', 'd', 'y', 116, 0, 0, 0, 3 };
 	party_frame_t frame;
-	erx_etf_pid_t from, agent;
+	erx_etf_pid_t from;
 	const uint8_t *to, *numbers;
+	size_t at;
+	unsigned pair, seen;
 
 	if (!party_frame_split(record, len, &frame) || !party_ctl_starts(&frame, ctl_head, sizeof(ctl_head)) ||
 	    frame.ctl_len != sizeof(ctl_head) + PARTY_PID_LEN + to_len ||
@@ -1398,13 +1438,19 @@ party_ready(const lane_party_t *party, const uint8_t *record, size_t len)
 		return (false);
 	to = frame.ctl + sizeof(ctl_head) + PARTY_PID_LEN;
 	numbers = to + sizeof(to_head) + sizeof(SYSTEM_NODE) - 1;
-	return (memcmp(to, to_head, sizeof(to_head)) == 0 &&
-	    memcmp(to + sizeof(to_head), SYSTEM_NODE, sizeof(SYSTEM_NODE) - 1) == 0 &&
-	    party_be32(numbers) == BOOT_PID_NUMBER && party_be32(numbers + 4) == BOOT_PID_SERIAL &&
-	    party_be32(numbers + 8) == 4 && frame.payload_len == sizeof(head) + PARTY_PID_LEN + sizeof(tail) &&
-	    memcmp(frame.payload, head, sizeof(head)) == 0 &&
-	    party_pid_read(party, frame.payload + sizeof(head), PARTY_PID_LEN, &agent) &&
-	    memcmp(frame.payload + sizeof(head) + PARTY_PID_LEN, tail, sizeof(tail)) == 0);
+	if (memcmp(to, to_head, sizeof(to_head)) != 0 ||
+	    memcmp(to + sizeof(to_head), SYSTEM_NODE, sizeof(SYSTEM_NODE) - 1) != 0 ||
+	    party_be32(numbers) != BOOT_PID_NUMBER || party_be32(numbers + 4) != BOOT_PID_SERIAL ||
+	    party_be32(numbers + 8) != 4 || frame.payload_len < sizeof(head) ||
+	    memcmp(frame.payload, head, sizeof(head)) != 0)
+		return (false);
+	at = sizeof(head);
+	seen = 0;
+	for (pair = 0; pair < 3; pair++) {
+		if (!party_ready_pair(party, frame.payload, frame.payload_len, &at, &seen))
+			return (false);
+	}
+	return (at == frame.payload_len);
 }
 
 /*

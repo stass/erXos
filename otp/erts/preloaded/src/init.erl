@@ -1236,9 +1236,11 @@ do_boot(Init,Flags,Start) ->
 %% erXos edit 65 (docs/design-runtime.md, "The edits outside sys/erxos"): once the boot
 %% script has started every application, and before any -s, -run or -eval, a domain's
 %% runtime reports ready to its domain pid, which the boot page names, with
-%% {erx_ready, #{connections => Agent, provides => Provides}}, naming its connection
-%% agent and the mints its services provide (below); the frame's
-%% encoding hands the agent out to the system domain with send (edit 8). The system
+%% {erx_ready, #{connections => Agent, inspect => InspectAgent, provides => Provides}},
+%% naming its connection agent, its inspection agent (docs/design-live.md, "The runtime
+%% agent"; the key is left out when none is registered) and the mints its services
+%% provide (below); the frame's encoding hands both agents out to the system domain
+%% with send (edit 8). The system
 %% domain, whose boot page names no domain pid, and a runtime that is no node, which
 %% runs no agent and has no system connection up, report nothing. The boot process,
 %% which reports, then waits for the domain service's answer, the domain's facets by
@@ -1259,7 +1261,7 @@ report_ready() ->
                 {{_Id, {_SystemId, _SystemNode, DomainPid}}, Agent} when is_pid(Agent) ->
                     Provides = persistent_term:get({erx, provides}, #{}),
                     persistent_term:put({erx, provides}, reported),
-                    DomainPid ! {erx_ready, #{connections => Agent, provides => Provides}},
+                    DomainPid ! {erx_ready, ready_report(Agent, whereis(erx_inspect_agent), Provides)},
                     receive_facets();
                 _ ->
                     ok
@@ -1267,6 +1269,13 @@ report_ready() ->
         _ ->
             ok
     end.
+
+%% The ready report's map. A runtime whose inspection agent is not registered leaves the
+%% inspect key out, so the domain pid keeps no agent and has nothing to refuse.
+ready_report(Agent, undefined, Provides) ->
+    #{connections => Agent, provides => Provides};
+ready_report(Agent, Inspect, Provides) ->
+    #{connections => Agent, inspect => Inspect, provides => Provides}.
 
 -define(FACETS_TIMEOUT, 5000).
 

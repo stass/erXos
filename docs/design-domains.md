@@ -1153,12 +1153,15 @@ The domain pid is also its domain's **correspondent**: the one process of
 the system domain the domain knows from its start, since its boot
 information names it and it exports itself to the domain with `send`
 before the domain's first thread runs. Init reports ready to it, naming
-the domain's agents, with `{erx_ready, #{connections => Agent}}` (edit 65
+the domain's agents, with `{erx_ready, #{connections => Agent, inspect =>
+InspectAgent, provides => Provides}}` (edit 65
 of [design-runtime.md](design-runtime.md#the-edits-outside-syserxos)),
 once its boot script has started every application and before any `-eval`;
 the domain pid keeps the connection agent's pid from
 that report for the domain's life, which is the agent's life too
-([design-runtime.md](design-runtime.md#connections-in-erts)), and passes
+([design-runtime.md](design-runtime.md#connections-in-erts)), keeps the
+inspection agent ([design-live.md](design-live.md#the-runtime-agent)) only
+when its node is the domain's node and its creation the domain's id, and passes
 the report on to the domain service. From then on it relays the
 connection protocol: it writes each connection-control record the
 domain service hands it, addressed to the agent, into the record's slot
@@ -2131,7 +2134,7 @@ the console facet ([design-live.md](design-live.md#the-console)); and the
 inspection agent, `erx_inspect_agent`, which answers the inspector about
 the domain's own runtime ([design-live.md](design-live.md#the-runtime-agent)).
 Init reports ready to the domain pid, naming the agents, the connection
-agent among them, and the mints its services provide ([design-system.md](design-system.md#facets-a-configured-domain-serves)), in `{erx_ready, #{connections => Agent, inspect => InspectAgent, provides => Provides}}`, a map other
+agent among them, and the mints its services provide ([design-system.md](design-system.md#facets-a-configured-domain-serves)), in `{erx_ready, #{connections => Agent, inspect => InspectAgent, provides => Provides}}`, which leaves `inspect` out when no agent is registered, a map other
 agents join as they come to exist, which exports them to the system domain by that
 message; the domain pid keeps the connection agent's pid, and the domain
 service the inspection agent's, each only when the reporting incarnation

@@ -183,14 +183,14 @@ close_side(Id, Reason) ->
 export(Pid, Rights, Peer) when is_pid(Pid) -> log({export, Peer, Rights}).
 
 %% Init's ready report from domain Id, in its envelope.
-report(Name, Id) -> {erx_origin, Id, {erx_ready, #{connections => agent(Name, Id)}}}.
+report(Name, Id) -> {erx_origin, Id, {erx_ready, #{connections => agent(Name, Id), inspect => agent(Name, Id)}}}.
 
 %% A started domain's report: its agent, and the provides that the persistent term
 %% {?MODULE, provides} makes for its name and id, if any.
 ready_report(Name, Id) ->
     case persistent_term:get({?MODULE, provides}, #{}) of
-        #{Name := Provides} -> #{connections => agent(Name, Id), provides => Provides(Id)};
-        #{} -> #{connections => agent(Name, Id)}
+        #{Name := Provides} -> #{connections => agent(Name, Id), inspect => agent(Name, Id), provides => Provides(Id)};
+        #{} -> #{connections => agent(Name, Id), inspect => agent(Name, Id)}
     end.
 
 %% A pid of domain Id's node, Name@erxos, as a frame from the domain carries one:

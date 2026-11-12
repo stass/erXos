@@ -41,6 +41,7 @@ class ErxDomainTest < Minitest::Test
              File.join(ROOT, 'erlang/apps/erx_blk/src/erx_blk_sup.erl'),
              File.join(ROOT, 'test/erlang/erx_driver_ctl_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_facet_tests.erl'),
+             File.join(ROOT, 'test/erlang/stand_in/erx_dist.erl'),
              File.join(ROOT, 'test/erlang/erx_domain_fake_lib.erl'),
              File.join(ROOT, 'test/erlang/erx_domain_tests.erl'),
              File.join(ROOT, 'test/erlang/erx_domain_links_tests.erl'),
@@ -96,7 +97,14 @@ class ErxDomainTest < Minitest::Test
               file: File.join(APPLICATION, 'erx_domain_core.erl'),
               from: 'Development andalso lists:member(Principal, Roots)',
               to: 'Development andalso is_list(Roots)',
-              tests: 'erx_domain_tests', caught_by: 'inspect_scope_test')
+              tests: 'erx_domain_tests', caught_by: 'inspect_scope_test'),
+    # The inspection agent's owner (docs/design-live.md, "The runtime agent"): a check of
+    # the creation alone keeps a pid of another domain's node that carries this domain's id.
+    Fault.new(name: 'an inspection agent checked by its creation alone',
+              file: File.join(APPLICATION, 'erx_domain_pid.erl'),
+              from: '{ok, Inspect} when is_pid(Inspect), node(Inspect) =:= Node ->',
+              to: '{ok, Inspect} when is_pid(Inspect), is_atom(Node) ->',
+              tests: 'erx_domain_tests', caught_by: 'inspect_agent_of_another_incarnation_test')
   ].freeze
 
   def test_the_cases_catch_each_seeded_fault

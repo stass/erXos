@@ -35,7 +35,7 @@ goes from building to nothing, freeing its name. A transition from any other
 state is a bug of the caller and fails with a badmatch.
 """.
 
--export([new/1, host/1, admit/4, built/5, running/2, ready/2, stopping/2, failed/2, ended/5,
+-export([new/1, host/1, admit/4, built/5, running/2, ready/3, stopping/2, failed/2, ended/5,
          restart/5, fetch/2, find_pid/2, deaths/2, domains/1, info/1, session_name/3]).
 -export([inspect_scope/3]).
 -export_type([state/0, domain/0, origin/0, info/0, slogan/0, inspect_scope/0]).
@@ -53,7 +53,7 @@ state is a bug of the caller and fails with a badmatch.
                     pid := pid() | undefined, ref := reference() | undefined,
                     connection := non_neg_integer(),
                     ctl_slots := non_neg_integer(), reader := non_neg_integer(),
-                    facets := #{atom() => {pid(), map()}}}.
+                    facets := #{atom() => {pid(), map()}}, inspect := pid() | none}.
 -type binding() :: #{principal := pos_integer(), node := node(), holder := none | pos_integer()}.
 -type death() :: #{id := pos_integer(), name := erx_ident:t(), info := info(), at := integer(),
                    slogan => slogan()}.
@@ -127,7 +127,7 @@ take(Name, #{node := Node} = Binding, Principal, Origin,
      #{next_id := Id, names := Names, domains := Domains} = State) ->
     Domain = #{id => Id, name => Name, node => Node, principal => Principal, origin => Origin,
                state => building, pid => undefined, ref => undefined, connection => 0,
-               ctl_slots => 0, reader => 0, facets => #{}},
+               ctl_slots => 0, reader => 0, facets => #{}, inspect => none},
     Next = State#{next_id := Id + 1, names := Names#{erx_ident:to_binary(Name) => Binding#{holder := Id}},
                   domains := Domains#{Id => Domain}},
     {ok, Domain, Next}.
@@ -151,10 +151,13 @@ built(Id, #{connection := Connection, ctl_slots := CtlSlots, reader := Reader} =
 running(Id, State) ->
     update(Id, built, #{state => running}, State).
 
--doc "Domain Id's init reported ready.".
--spec ready(pos_integer(), state()) -> state().
-ready(Id, State) ->
-    update(Id, running, #{state => ready}, State).
+-doc """
+Domain Id's init reported ready, naming Inspect as its inspection agent, which
+the domain's pid kept only when the domain owns it, or none.
+""".
+-spec ready(pos_integer(), pid() | none, state()) -> state().
+ready(Id, Inspect, State) ->
+    update(Id, running, #{state => ready, inspect => Inspect}, State).
 
 -doc "Domain Id's boot timeout passed before its init reported ready, and it is being stopped.".
 -spec stopping(pos_integer(), state()) -> state().
