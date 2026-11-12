@@ -107,9 +107,9 @@ These shape every design and change; the rules below apply them.
   rules as written, and build against the target interfaces of the
   design documents, so that Phase 2 changes what is behind `liberx` and
   what the kernel enforces, not what services and runtimes call. Phase
-  1's kernel carries no erXos C17 code, so the kernel stack proof and the
-  kernel-side chokepoints have no site to check until erXos's kernel;
-  their tools and tests stay.
+  1's kernel carries erXos C17 code only as the cores it links
+  (`erx_cores.a`); the kernel stack proof and the kernel-side chokepoints
+  check those cores, and the rest waits for erXos's kernel.
 * **A stopgap promises little.** Its design commits only to what the
   milestone using it needs and its tests check: no memory errors, no
   deadlock, and the results of the calls it offers, for trusted
