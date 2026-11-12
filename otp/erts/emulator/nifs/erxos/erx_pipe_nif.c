@@ -655,11 +655,13 @@ open_read(ErlNifEnv *env, pipe_end_t *e, ERL_NIF_TERM m)
 		return (false);
 	}
 	obj_keep(e->lock);
-	e->r.rix = rix;
 	e->r.known = wends;
 	e->r.batches = ERX_PIPE_BATCHES;
-	return (list_each(env, e, writers, lane_add) &&
-	    list_each(env, e, readers, peer_add));
+	if (!list_each(env, e, writers, lane_add) ||
+	    !list_each(env, e, readers, peer_add))
+		return (false);
+	return (erx_pipe_rtake(&e->r, rix, e->maps,
+	    (erx_pipe_lock_t *)(uintptr_t)e->lock_map));
 }
 
 /*

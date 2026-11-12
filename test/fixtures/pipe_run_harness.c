@@ -41,16 +41,26 @@ typedef struct world {
 	erx_pipe_wmap_t	 wmap;
 	erx_pipe_rmap_t	 rmap;
 	uint64_t	 clock;
+	uint64_t	 join_at;	/* the clock at which a write end joins */
 	int		 reader_rings;
 	int		 writer_rings;
 	int		 drained;
 	int		 broken;
 } world_t;
 
+/*
+ * The clock, copied once each look at a lane: at join_at a second write
+ * end joins, as the pipe server stores wends in the lock page while a
+ * read is under way, before the reader's executor applies its report.
+ */
 static uint64_t
 fx_clock(void *ctx)
 {
-	return (++((world_t *)ctx)->clock);
+	world_t *wd = ctx;
+
+	if (++wd->clock == wd->join_at)
+		(void)erx_pipe_lock_wends_store(wd->lock, 2);
+	return (wd->clock);
 }
 
 static void
@@ -268,6 +278,58 @@ case_lock_wait_ends_with_next_read(void)
 	world_free(&wd);
 }
 
+/*
+ * A write end joins after a read has copied a record and before it looks
+ * for the next: the read returns what it copied, since rpos is past it
+ * and a wait would make the NIF answer would_block and drop it.  Once
+ * the join's report is applied, the next read takes the next record.
+ */
+static void
+case_join_keeps_copied_bytes(void)
+{
+	world_t wd;
+	char out[16];
+
+	world_init(&wd);
+	(void)do_write(&wd, "a", 1);
+	(void)do_write(&wd, "b", 1);
+	wd.join_at = wd.clock + 2;	/* the look after the first record */
+	memset(out, 0, sizeof(out));
+	CHECK("join read keeps copied bytes",
+	    done(do_read(&wd, out, sizeof(out)), 1) && out[0] == 'a');
+	CHECK("join read leaves no bits",
+	    atomic_load(&wd.rpage->sleepers) == 0 &&
+	    atomic_load(&wd.lock->waiters) == 0);
+	CHECK("join read waits for the report", do_read(&wd, out,
+	    sizeof(out)).op == ERX_PIPE_OP_WAIT);
+	wd.r.known = 2;		/* the join's report applied */
+	CHECK("join read after the report", done(do_read(&wd, out,
+	    sizeof(out)), 1) && out[0] == 'b');
+	world_free(&wd);
+}
+
+/*
+ * A read end that takes an index clears that index's bits, which an end
+ * that held it before and died mid-wait may have left set, and no other
+ * end's bits.
+ */
+static void
+case_take_clears_bits(void)
+{
+	world_t wd;
+
+	world_init(&wd);
+	(void)atomic_fetch_or(&wd.rpage->sleepers, UINT64_C(0x6));
+	(void)atomic_fetch_or(&wd.lock->waiters, UINT64_C(0x6));
+	CHECK("take refuses a bad index", !erx_pipe_rtake(&wd.r,
+	    ERX_PIPE_READERS_MAX, &wd.rmap, wd.lock));
+	CHECK("take clears bits", erx_pipe_rtake(&wd.r, 1, &wd.rmap, wd.lock) &&
+	    wd.r.rix == 1 &&
+	    atomic_load(&wd.rpage->sleepers) == UINT64_C(0x4) &&
+	    atomic_load(&wd.lock->waiters) == UINT64_C(0x4));
+	world_free(&wd);
+}
+
 static void
 case_record_whole(void)
 {
@@ -365,6 +427,8 @@ int
 main(void)
 {
 	case_bytes_pass();
+	case_join_keeps_copied_bytes();
+	case_take_clears_bits();
 	case_empty_waits_and_is_rung();
 	case_wait_ends_with_next_read();
 	case_wait_ends_with_empty_read();

@@ -563,9 +563,11 @@ lock page's `owner` word:
    ends ([The lock page](#the-lock-page)), takes up, as in step 2, every
    lane the event executor applied meanwhile. If `wends` is still above
    its count, the report of a write end it does not know is on its own
-   channel: it releases the lock, waits until its event executor applies
-   the report, which wakes it, even under `O_NONBLOCK`, as for the lock,
-   and starts again. It then reads the clock and copies `wpos` again for
+   channel. A read that has already copied bytes returns their count,
+   as in step 7: its `rpos` is past them, so they exist only in its buffer,
+   and no read waits holding bytes. Otherwise it releases the lock, waits
+   until its event executor applies the report, which wakes it, even
+   under `O_NONBLOCK`, as for the lock, and starts again. It then reads the clock and copies `wpos` again for
    each lane it found empty and each lane it took up. A record's
    **order key** is the larger of its stamp and its **mark**, the clock's
    reading before the last copy of its lane's `wpos` that did not include
@@ -734,7 +736,11 @@ already crossed is never rung again. Since only the waiter writes what it
 publishes, each party writes only its own page. A ring that lands between
 a wait's end and its clearing costs at most one needless trigger, and
 triggers that come before a wait count once, so a peer that rings
-needlessly costs the holder at most one wake for each of its waits. A
+needlessly costs a program's end at most one wake for each of its waits.
+The session's pipe NIF does not coalesce rings: each is one
+`{erx_pipe_ready, _, _}` message to the end's owner, so a peer that
+rings needlessly while the end waits costs the owner one message for
+each ring. A
 read end that takes an
 index first clears its bits in every lane's `sleepers` and in `waiters`,
 since a read end that held the index before may have ended with them set.
@@ -1476,7 +1482,8 @@ to a tty, which delivers them unchanged, as on UNIX
 **Residual risks accepted.** Co-readers trust each other with their shared
 stream; a holder that keeps an end delays the end of the stream or a
 broken pipe for everyone else, as on UNIX; a writer can ring its readers'
-doorbells needlessly, which costs each at most one wake per wait; a reader
+doorbells needlessly, which costs a program's end at most one wake per
+wait and a session process's end one message per ring; a reader
 that keeps a gone writer's lane mapped and never drains it holds that lane's
 memory, charged to the session, until it ends; a reader whose job is
 stopped inside the reader lock holds up its co-readers until it continues;

@@ -70,6 +70,17 @@ erx_pipe_act_t	erx_pipe_wrun(erx_pipe_wstate_t *w, const erx_pipe_wmap_t *map,
 		    const void *buf, const erx_pipe_fx_t *fx);
 
 /*
+ * Gives a read end its index rix, as every read end takes one, once its
+ * lanes are in r and mapped in maps: clears the index's bit in lock's
+ * waiters and in every mapped lane's sleepers, which an end that held the
+ * index before may have left set by dying mid-wait (docs/design-pipes.md,
+ * "Waiting and doorbells").  False, touching nothing, when rix is not
+ * below ERX_PIPE_READERS_MAX.
+ */
+bool		erx_pipe_rtake(erx_pipe_rstate_t *r, uint32_t rix,
+		    const erx_pipe_rmap_t *maps, erx_pipe_lock_t *lock);
+
+/*
  * Runs a read end's steps into buf, the call's len bytes; maps holds one
  * mapping for each of the state's nlanes lanes, and lock is the pipe's
  * lock page.  A lane the end found drained or broken may have NULL pages.

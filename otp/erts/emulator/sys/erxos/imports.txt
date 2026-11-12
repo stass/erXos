@@ -131,7 +131,7 @@ erx_cap_pass erx_thread_create erx_thread_start erx_space_stop erx_object_destro
 # (docs/design-pipes.md, "The session's pipe NIF").
 [only_erx_pipe_nif]
 erx_mem_create erx_cap_close
-erx_pipe_wstart erx_pipe_wrun erx_pipe_rstart erx_pipe_rrun
+erx_pipe_wstart erx_pipe_wrun erx_pipe_rstart erx_pipe_rrun erx_pipe_rtake
 
 # erx_stdio_nif.c alone, hosted mode's console device: the only object of the runtime
 # that may use these for a host terminal.

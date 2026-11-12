@@ -1719,12 +1719,6 @@ it; git history is the record of completed work.
   `erx_prog_handler`, which forwards a program's requests and notices to the pipe server and installs
   into its program (docs/design-pipes.md, "The pipe server"); until it lands, no program holds an end
   of a session's pipe.
-* [Low] session, `erx_pipe_nif.c` (`open_read`), and P7's program read ends: a read end that takes an
-  index does not first clear that index's bits in every lane's `sleepers` and in `waiters`, as
-  docs/design-pipes.md ("Waiting and doorbells") requires. The NIF's ends clear theirs when they go,
-  so only an end that died mid-wait without that release (a killed program's, once P7 lands) can hand
-  its bits on, and they cost the new holder stray `{erx_pipe_ready, _, _}` messages until a read of its
-  arms and clears them.
 * [Medium] session, `erx_pipe_nif.c` and `erx_event.c`: each ring of a session end's doorbell is one
   `{erx_pipe_ready, _, _}` message, uncoalesced, so while an end waits (bits set for that wait only) a
   co-reader that loops on the lock or a writer's repeated crossings can queue many messages before the

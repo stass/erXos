@@ -341,6 +341,26 @@ run_rperform(const erx_pipe_rstate_t *r, const erx_pipe_rmap_t *maps,
 	}
 }
 
+bool
+erx_pipe_rtake(erx_pipe_rstate_t *r, uint32_t rix, const erx_pipe_rmap_t *maps,
+    erx_pipe_lock_t *lock)
+{
+	uint64_t keep;
+	uint32_t i;
+
+	if (rix >= ERX_PIPE_READERS_MAX)
+		return (false);
+	r->rix = rix;
+	keep = ~(UINT64_C(1) << rix);
+	(void)atomic_fetch_and_explicit(&lock->waiters, keep,
+	    memory_order_seq_cst);
+	for (i = 0; i < r->nlanes; i++)
+		if (maps[i].rpage != NULL)
+			(void)atomic_fetch_and_explicit(&maps[i].rpage->sleepers,
+			    keep, memory_order_seq_cst);
+	return (true);
+}
+
 erx_pipe_act_t
 erx_pipe_rrun(erx_pipe_rstate_t *r, const erx_pipe_rmap_t *maps,
     erx_pipe_lock_t *lock, void *buf, const erx_pipe_fx_t *fx)

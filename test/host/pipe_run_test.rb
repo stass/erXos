@@ -13,8 +13,10 @@ require_relative '../fixtures/generated_tree'
 # ends and the session's pipe NIF share, through test/fixtures/pipe_run_harness.c under the
 # address and undefined sanitizers: bytes pass, a 4,096-byte record arrives whole, an empty
 # read waits with its sleeper bit published and is rung, a full ring waits and is rung, a
-# gone writer's lane drains once and then reads as the end, EPIPE and EIO, and a hostile
-# record breaks its lane. Each seeded fault of the runner must fail the case named beside it.
+# gone writer's lane drains once and then reads as the end, EPIPE and EIO, a hostile
+# record breaks its lane, a read that copied a record before a write end joined returns it
+# rather than wait, and a read end that takes an index clears that index's bits. Each
+# seeded fault of the runner must fail the case named beside it.
 class PipeRunTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   RUN = 'liberx/erx_pipe_run.c'
@@ -37,7 +39,9 @@ class PipeRunTest < Minitest::Test
     'the write position is never published' =>
       ['bytes read', 'return (erx_lane_hdr_wpos_store(map->hdr, a->value));', 'return (true);'],
     'a drained lane is not reported' =>
-      ['gone drained once', "\t\tfx->drained(fx->ctx, a->lane);\n", '']
+      ['gone drained once', "\t\tfx->drained(fx->ctx, a->lane);\n", ''],
+    'a taken index keeps the bits its last holder left' =>
+      ['take clears bits', 'keep = ~(UINT64_C(1) << rix);', 'keep = ~UINT64_C(0);']
   }.freeze
 
   def test_seeded_faults_are_caught

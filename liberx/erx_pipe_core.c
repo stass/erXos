@@ -264,7 +264,8 @@ erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
  * The pick, copy and finish repeat until the buffer is full or nothing
  * is readable; then pipe_rnothing_readable gives the count, the end of
  * the stream, EAGAIN, or a wait.  Every way out of the lock goes through the
- * release, which r->after follows: the call's result, or a wait.  The
+ * release, which r->after follows: the call's result, or a wait, which the
+ * release turns into the call's count once it has copied bytes.  The
  * sleepers bits are set only for a wait for data in progress: arming sets
  * them, and the disarm clears them once that wait ends, or at the release
  * when the call returns or waits for a report instead.
@@ -641,7 +642,8 @@ pipe_rsettle_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
  * Step 4: pick the next record.  The first look covers every lane; if one
  * holds a record, the reader copies wends, and when that names a write
  * end the reports have not named yet, releases the lock to wait for the
- * report.  Otherwise a second look covers the lanes found empty and the
+ * report, or to return what the call has copied.  Otherwise a second look
+ * covers the lanes found empty and the
  * lanes appended meanwhile, and the reader takes the record with the
  * smallest order key.  A look at a lane copies rpos, the clock, wpos
  * (or, while every batch is open, the newest batch's end) and the record
@@ -862,7 +864,10 @@ pipe_rpick_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
 		r->at++;
 		return (pipe_rlook_next(r));
 	case LOOK_WENDS:
-		/* A write end the reports have not named yet: wait for it. */
+		/*
+		 * A write end the reports have not named yet: wait for it, or,
+		 * once this call has copied bytes, return them (step 8).
+		 */
 		if (in->value > r->known)
 			return (pipe_rrelease_begin(r, R_AFTER_REPORT, 0));
 		return (pipe_rlook_begin(r, true));
@@ -1063,10 +1068,21 @@ pipe_rarm_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
 /*
  * Step 8: release the lock by storing 0 in owner, fence, copy waiters and
  * ring every other read end whose bit is set; then do what after says.
+ *
+ * A call that has copied bytes returns them rather than wait, for data or
+ * for a report: rpos is already past them, so they exist only in the
+ * caller's buffer, and the session's pipe NIF answers a wait with
+ * would_block and lets that buffer go.  Every wait but the lock's leaves
+ * through here, and the lock's comes only at the start of a call or after
+ * one of these waits, so no wait is ever reached with done > 0.
  */
 static erx_pipe_act_t
 pipe_rrelease_begin(erx_pipe_rstate_t *r, uint32_t after, int64_t result)
 {
+	if (after != R_AFTER_DONE && r->done > 0) {
+		after = R_AFTER_DONE;
+		result = (int64_t)r->done;
+	}
 	r->after = after;
 	r->result = result;
 	r->stage = R_RELEASE;

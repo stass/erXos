@@ -27,7 +27,9 @@
  * it, each party's event executor applying the report of the other's
  * going (which wakes the party), the reader's call made afresh while it
  * waits, as the session's pipe NIF makes it, to read again or, of 0 bytes,
- * to give the wait up, and in a hostile scenario one rewrite of
+ * to give the wait up, in the join scenario a second write end's join
+ * (the server's store of wends, then the reader's executor applying its
+ * report), and in a hostile scenario one rewrite of
  * a shared field by the other party.  The exploration is depth first over
  * every interleaving, with each state's 64-bit fingerprint kept so a
  * state is explored once.  After every event it checks:
@@ -42,6 +44,8 @@
  *        the model's memory (the address sanitizer);
  *   PI5, PI6  every byte a read copies is the next byte of the stream, so
  *        no byte is lost, repeated or reordered and no record is torn;
+ *        and no read waits with bytes copied, since rpos is past them and
+ *        the session's pipe NIF answers a wait with would_block;
  *   PI7  no party sleeps with what it waits for ready while its peer is
  *        idle with no store left to make; and a state from which no event
  *        can follow has both calls finished:
@@ -136,7 +140,8 @@ typedef struct world {
 	uint8_t		 drained;
 	uint8_t		 hostile;	/* the rewrite happened */
 	uint8_t		 quit;		/* the read is a wait given up */
-	uint8_t		 pad[4];
+	uint8_t		 joined;	/* 1: a write end joined, 2: its report applied */
+	uint8_t		 pad[3];
 } world_t;
 
 typedef struct scenario {
@@ -149,18 +154,20 @@ typedef struct scenario {
 	bool		 writer_dies;
 	bool		 reader_closes;
 	bool		 reader_dies;
+	bool		 joins;		/* a second write end joins once */
 	int		 hostile;	/* 0, or 'w' or 'r': whose rewrites */
 } scenario_t;
 
 static const scenario_t scenarios[] = {
-	{ "flow", { 40, 24 }, { 40, 33 }, 2, 24, false, false, false, false, 0 },
-	{ "partial", { 20, 7 }, { 40, 7 }, 2, 5, false, false, false, false, 0 },
-	{ "nonblock", { 40, 9 }, { 40, 40 }, 2, 24, true, false, false, false, 0 },
-	{ "writer-dies", { 24, 9 }, { 40, 33 }, 2, 24, false, true, false, false, 0 },
-	{ "reader-closes", { 40, 9 }, { 40, 40 }, 2, 24, false, false, true, false, 0 },
-	{ "reader-dies", { 24, 9 }, { 40, 40 }, 2, 24, false, false, false, true, 0 },
-	{ "hostile-writer", { 16, 9 }, { 40, 9 }, 2, 24, false, false, false, false, 'w' },
-	{ "hostile-reader", { 16, 9 }, { 40, 24 }, 2, 24, false, false, false, false, 'r' },
+	{ "flow", { 40, 24 }, { 40, 33 }, 2, 24, false, false, false, false, false, 0 },
+	{ "partial", { 20, 7 }, { 40, 7 }, 2, 5, false, false, false, false, false, 0 },
+	{ "nonblock", { 40, 9 }, { 40, 40 }, 2, 24, true, false, false, false, false, 0 },
+	{ "writer-dies", { 24, 9 }, { 40, 33 }, 2, 24, false, true, false, false, false, 0 },
+	{ "reader-closes", { 40, 9 }, { 40, 40 }, 2, 24, false, false, true, false, false, 0 },
+	{ "reader-dies", { 24, 9 }, { 40, 40 }, 2, 24, false, false, false, true, false, 0 },
+	{ "join", { 24, 9 }, { 40, 33 }, 2, 24, false, false, false, false, true, 0 },
+	{ "hostile-writer", { 16, 9 }, { 40, 9 }, 2, 24, false, false, false, false, false, 'w' },
+	{ "hostile-reader", { 16, 9 }, { 40, 24 }, 2, 24, false, false, false, false, false, 'r' },
 };
 
 static const scenario_t *sc;
@@ -732,7 +739,8 @@ check_end(int depth)
  * A party asleep that nothing will wake, though its peer is idle with no
  * store left to make: the reader with published bytes unread, or the
  * writer with room for its record.  The peer's close or a report would
- * wake it later, so this is checked in every state, not only at the end.
+ * wake it later, so this is checked in every state, not only at the end;
+ * a join's report still to apply will wake the reader too.
  */
 static void
 check_asleep(int depth)
@@ -747,7 +755,7 @@ check_asleep(int depth)
 	w_asleep = wd->w.state == CALL && wd->w.decided && wd->w.bell == 0 &&
 	    wd->w.act.op == ERX_PIPE_OP_WAIT;
 	if (r_asleep && wd->w.state == IDLE && wd->w.nbuf == 0 &&
-	    wd->published > wd->received + wd->rs.done)
+	    wd->joined != 1 && wd->published > wd->received + wd->rs.done)
 		fail(depth, "PI7", "the reader sleeps past published bytes (a lost wakeup)");
 	if (w_asleep && (wd->r.state == IDLE || r_asleep) && wd->r.nbuf == 0 &&
 	    wd->ws.readers != 0 && erx_ring_room(RING, wd->ws.wpos,
@@ -775,6 +783,21 @@ check_idle_bits(int depth)
 		fail(depth, "PI7", "an idle reader left its waiters bit set");
 }
 
+/*
+ * A read waits only with nothing copied: rpos is already past what it
+ * copied, and the session's pipe NIF answers a wait with would_block and
+ * drops its buffer, so a wait with bytes copied loses them.
+ */
+static void
+check_wait_empty(int depth)
+{
+	const world_t *wd = &worlds[depth];
+
+	if (wd->r.state == CALL && wd->r.decided &&
+	    wd->r.act.op == ERX_PIPE_OP_WAIT && wd->rs.done > 0)
+		fail(depth, "PI5", "a read waits with bytes copied (they are lost)");
+}
+
 static void
 explore(int depth)
 {
@@ -788,6 +811,7 @@ explore(int depth)
 		fail(depth, "depth", "the model's depth bound was reached");
 	check_asleep(depth);
 	check_idle_bits(depth);
+	check_wait_empty(depth);
 	for (i = 0; i < 2; i++) {
 		/* The step decides apart from the action, so reports land between. */
 		if (parties[i]->state == CALL && !parties[i]->decided) {
@@ -884,6 +908,29 @@ explore(int depth)
 		nw->r.report = 0;
 		visit(depth + 1);
 		events++;
+	}
+	/*
+	 * A second write end joins: the pipe server stores the new wends in
+	 * the lock page, then reports the end to the reader, whose executor
+	 * applies it (which wakes the reader).  The joined end's lane is not
+	 * modeled: it writes nothing, and only the reader's wait for its
+	 * report, and what that wait does to a call under way, is checked.
+	 */
+	if (sc->joins && cur->joined == 0) {
+	nw = successor(depth, "a write end joins", "");
+	nw->mem.wends = 2;
+	nw->joined = 1;
+	visit(depth + 1);
+	events++;
+	}
+	if (cur->joined == 1 &&
+	    (cur->r.state == IDLE || cur->r.state == CALL)) {
+	nw = successor(depth, "R applies the join", "");
+	nw->rs.known = 2;
+	nw->r.bell = 1;
+	nw->joined = 2;
+	visit(depth + 1);
+	events++;
 	}
 	for (k = 0; sc->hostile != 0 && !cur->hostile; k++) {
 		nw = successor(depth, "hostile rewrite", "");

@@ -22,7 +22,7 @@ class PipeCoreTest < Minitest::Test
   SANITIZED = ['-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
-  SCENARIOS = %w[flow partial nonblock writer-dies reader-closes reader-dies hostile-writer hostile-reader].freeze
+  SCENARIOS = %w[flow partial nonblock writer-dies reader-closes reader-dies join hostile-writer hostile-reader].freeze
   DEPTH = ENV['ERX_PIPE_EXPLORE'] == 'full' ? 'deep' : 'landing'
 
   def test_every_interleaving_keeps_the_invariants
@@ -86,7 +86,9 @@ class PipeCoreTest < Minitest::Test
     'a read that armed and then found bytes keeps its sleepers bits' =>
       ['flow', 'PI7', 'if (r->armed && r->after != R_AFTER_DATA)', 'if (false)'],
     'a read started during a wait starts afresh' =>
-      ['flow', 'PI7', 'bool waiting = pipe_rwaiting(r);', 'bool waiting = pipe_rwaiting(r) && false;']
+      ['flow', 'PI7', 'bool waiting = pipe_rwaiting(r);', 'bool waiting = pipe_rwaiting(r) && false;'],
+    "a read that copied bytes waits for a join's report" =>
+      ['join', 'PI5', 'if (after != R_AFTER_DONE && r->done > 0) {', 'if (false) {']
   }.freeze
 
   def test_seeded_faults_are_caught
