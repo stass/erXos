@@ -238,6 +238,12 @@ erx_boot_console_matches(const erx_boot_manifest_t *manifest, const char *stdout
 	return (true);
 }
 
+uint64_t
+erx_boot_console_page(const erx_boot_manifest_t *manifest)
+{
+	return (manifest->console.base & ~((uint64_t)ERX_PAGE_SIZE - 1));
+}
+
 /* TEXT and its NUL at words + *used, or false, writing nothing, when they do not fit. */
 static bool
 word_put(char *words, size_t capacity, size_t *used, const char *text)

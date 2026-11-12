@@ -40,6 +40,29 @@ class QemuTest < Minitest::Test
     assert_equal 'none', tcg.fetch(tcg.index('-monitor') + 1)
   end
 
+  # The Raspberry Pi 4's model boots as its firmware would (docs/design-platforms.md,
+  # "Bring-up under QEMU"): under TCG, the stub, image and tree through QEMU's loader with
+  # CPU 0 starting in the stub, the GIC with its security extensions, the console on the
+  # second serial port, and no -kernel, -m, -cpu or host link. What it cannot take raises.
+  def test_the_raspberry_pi_4_boots_through_the_loader
+    pi = Erx::Platform.load(root: File.expand_path('../..', __dir__), name: 'raspi4b')
+    plan = { platform: pi, accel: 'tcg', image: '/b/image.boot', stub: '/b/bl31.bin', dtb: '/b/model.dtb', serial: 'serial',
+             cpus: 4, hostlink: Erx::QemuPlan::NO_HOSTLINK }
+    argv = Erx::QemuPlan.argv(**plan)
+    assert_equal ['-machine', 'raspi4b'], argv[1, 2]
+    assert_equal %w[null file:serial], argv.each_cons(2).select { |flag, _| flag == '-serial' }.map(&:last)
+    assert_equal ['loader,file=/b/bl31.bin,addr=0x0,cpu-num=0', 'loader,file=/b/image.boot,addr=0x200000',
+                  'loader,file=/b/model.dtb,addr=0x3000000'],
+                 argv.each_cons(2).select { |flag, _| flag == '-device' }.map(&:last)
+    assert_includes argv.each_cons(2).to_a, ['-global', 'arm_gic.has-security-extensions=on']
+    assert_includes argv, '-no-reboot'
+    assert_empty argv & %w[-kernel -m -cpu -append -dtb]
+    [{ accel: 'hvf' }, { hostlink: nil }, { command_line: 'erx.det=1' }, { initrd: '/b/initrd' }, { image: '/b/a,b' }].each do |change|
+      assert_raises(Erx::Error, change.inspect) { Erx::QemuPlan.argv(**plan, **change) }
+    end
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', stub: '/b/bl31.bin') }
+  end
+
   def test_the_deterministic_word_counts_instructions_on_one_tcg_cpu
     plan = { accel: 'tcg', image: 'image', serial: 'serial' }
     argv = Erx::QemuPlan.argv(platform: PLATFORM, **plan, command_line: 'erx.det=1 erx.arg=-deterministic')

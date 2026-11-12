@@ -1032,10 +1032,33 @@ it; git history is the record of completed work.
   `Fiasco#build_board_bootstrap`): only their tests call them. Give them a `tools/erx` command when Pi package 4's
   harness or package 5's rig needs one; `Bl31`'s build record then names the compiler by its identity
   (`BuildMemo.program_identity`), not its path.
-* [Medium] platform record, `config/platforms/raspi4b.json`: `root_withheld` is QEMU virt's measured
-  4.5 MiB, an estimate for the Pi; Pi package 4 measures what the Pi's boot withholds and writes that. Its units
-  name the mini UART and UART3 alone, each by its own registers; package 4 makes them the shared register pages
-  its manifest gives the system domain.
+* [Medium] PL011 window, `hw/svd/pl011/pl011.svd`: its address block is 0x1000 bytes, and
+  `erx_device` refuses a window smaller than the block, but the Raspberry Pi 4's PL011s are 0x200
+  bytes apart and its record gives UART3, the host link, 0x200. Shrink the block to the registers
+  the driver uses (the ID registers at 0xfe0 are unused) before the board's host link is tried.
+* [Medium] liberx, the console handoff (`erx_fiasco_task_mem_physical_body`, `erx_boot_console_page`):
+  the root hands the log to the console at the first physical object it creates at the console's
+  page, whoever the object is for. On the Raspberry Pi 4 that page also holds the auxiliary SPI
+  controllers, so a root-side driver or given record of an SPI there would hand the log over before
+  the console starts. Tie the handoff to the console itself (its first `erx_log_take`, or a role its
+  driver's open names) rather than to an address.
+* [Medium] erx_uart, `erx_pl011:console_uart/1` and `erx_mini_uart:console_uart/1`: the parse of
+  `-erx console_uart` is copied in each driver, as are their fuzz targets. One parse of the four
+  numbers, with each driver checking only its clock rule, and one fuzz target.
+* [Medium] QEMU harness, `QemuPlan::MACHINES['raspi4b']` (`tools/lib/erx/qemu.rb`): the loader's
+  addresses for BL31 (0) and the bootable file (0x200000) are not checked against the builds that
+  fix them (TF-A's BL31 base, bootstrap's `DEFAULT_RELOC_arm64-arm_gen`); a change there hangs the
+  model's boot with no diagnostic. Check them in `Raspi4bShell#build_inputs`, or derive them.
+* [Low] erx_uart, `erx_mini_uart` and `erx_pl011`: one drain reads while the receive FIFO says it
+  holds a byte, with no bound, so a wedged device grows the binary until the system domain runs out of
+  memory; and `erx_mini_uart` does not check LCR.DLAB, with which its IER writes would change the
+  divisor. Cap a drain at a few FIFO depths and refuse to start with DLAB set.
+* [Low] production image, `ProductionImage#catalog`: the build record lists Fiasco's QEMU virt
+  bootstrap even when the image's first stage is the board's (`Fiasco#first_stage_path`), and a build
+  packs whatever board bootstrap is on disk.
+* [Low] Pi package 5 (docs/plan.md, 1b-I (a) 5), the board pass: confirm on silicon that the mini
+  UART's receive interrupt needs IER's `RX_ERRATA` bits (`hw/svd/mini_uart/mini_uart.svd`), which
+  `erx_mini_uart` sets as the BCM2835 errata asks and QEMU's model ignores, and drop them if not.
 * [Low] liberx, `liberx/backend/fiasco/vm.h`, `vm.c`, `thread.c`: the backend's fixed addresses
   (`ERX_FIASCO_KIP_WINDOW`, the device window, the UTCB area, the VM window, the area start) are spread over
   three files, and only the KIP window's place below the device window is asserted. Gather them in one layout

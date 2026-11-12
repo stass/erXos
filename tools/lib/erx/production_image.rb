@@ -326,7 +326,7 @@ module Erx
                              *added.inputs].uniq,
                     test_code: test_code, machine: machine)
       single = File.join(directory, 'image.boot')
-      BootFile.write(codec: @codec, first_stage: @fiasco.image_path, archive: archive, output: single, output_root: @root)
+      BootFile.write(codec: @codec, first_stage: @fiasco.first_stage_path(machine.platform), archive: archive, output: single, output_root: @root)
       header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
       flags = header.fetch('flags')
       marked = flags.anybits?(@codec.member('pack_flags', 'test_code'))
@@ -334,7 +334,7 @@ module Erx
       raise Error, "the archive header disagrees with the build kind #{BUILD_KIND} the build facts name" unless
         flags.anybits?(@codec.member('pack_flags', 'development')) == (BUILD_KIND == 'development')
 
-      Built.new(single: single, archive: archive, first_stage: @fiasco.image_path,
+      Built.new(single: single, archive: archive, first_stage: @fiasco.first_stage_path(machine.platform),
                 index_hash: header.fetch('index_hash').unpack1('H*'), build_id: header.fetch('build_id').unpack1('H*'),
                 flags: flags, test_code: marked, report: report, release: release, erofs: erofs)
     end

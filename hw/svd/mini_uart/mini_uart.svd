@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+     SPDX-License-Identifier: BSD-2-Clause
+
+     The BCM2711's mini UART, the auxiliary peripherals' UART1, written by erXos from
+     Raspberry Pi Ltd's "BCM2711 ARM Peripherals" (release 1), section 2.2.2 "Mini UART
+     register details", with its 8250-style interrupt bits as the BCM2835 peripherals
+     errata and Linux's 8250_bcm2835aux driver read them. The window is the device
+     tree's `brcm,bcm2835-aux-uart` node, 0x40 bytes at 0x7e215040; the auxiliary
+     block's interrupt and enable registers at 0x7e215000, shared with the auxiliary
+     SPI controllers, lie outside it, so no driver of this window can touch them.
+     The baud rate is divided from the core clock, which the firmware pins
+     (`enable_uart=1`) and sets the divisor for; a driver keeps BAUD, LCR and CNTL as
+     the firmware left them (docs/design-platforms.md, "Raspberry Pi 4 Model B"). -->
+<device schemaVersion="1.3">
+  <name>MINI_UART</name><version>1</version>
+  <description>BCM2711 auxiliary mini UART (UART1)</description>
+  <addressUnitBits>8</addressUnitBits><width>32</width>
+  <peripherals>
+    <peripheral>
+      <name>MINI_UART</name><baseAddress>0</baseAddress>
+      <addressBlock><offset>0</offset><size>0x40</size><usage>registers</usage></addressBlock>
+      <registers>
+        <register>
+          <name>IO</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_IO_REG: a read takes the next byte of the receive FIFO, a write puts a byte in the transmit FIFO</description>
+          <addressOffset>0x00</addressOffset><access>read-write</access>
+          <fields><field><name>DATA</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field></fields>
+        </register>
+        <register>
+          <name>IER</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_IER_REG: interrupt enables</description>
+          <addressOffset>0x04</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>RXIE</name><description>Interrupt while the receive FIFO holds a byte</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TXIE</name><description>Interrupt while the transmit FIFO is empty</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RX_ERRATA</name><description>Both 1 for the receive interrupt on silicon: ARM Peripherals marks them unused, the BCM2835 errata says the receive interrupt needs them; QEMU ignores them</description><bitOffset>2</bitOffset><bitWidth>2</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>IIR</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_IIR_REG: the pending interrupt; writing ID's bits 1 and 2 clears the receive and transmit FIFOs</description>
+          <addressOffset>0x08</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>NONE_PENDING</name><description>0 while an interrupt is pending</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ID</name><description>1 transmit FIFO empty, 2 receive FIFO holds a byte</description><bitOffset>1</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>FIFOS</name><description>Both FIFOs always enabled, reads 3</description><bitOffset>6</bitOffset><bitWidth>2</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>LCR</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_LCR_REG: line control</description>
+          <addressOffset>0x0c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>DATA_SIZE</name><description>3 for eight-bit characters, 0 for seven</description><bitOffset>0</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>BREAK</name><description>Hold the transmit line low</description><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DLAB</name><description>Give the first two registers to the baud rate's bytes</description><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>MCR</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_MCR_REG: modem control</description>
+          <addressOffset>0x10</addressOffset><access>read-write</access>
+          <fields><field><name>RTS</name><description>Drive the RTS line low</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field></fields>
+        </register>
+        <register>
+          <name>LSR</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_LSR_REG: line status</description>
+          <addressOffset>0x14</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>DATA_READY</name><description>The receive FIFO holds at least one byte</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RX_OVERRUN</name><description>A byte arrived to a full receive FIFO; cleared by the read</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TX_EMPTY</name><description>The transmit FIFO can take at least one byte</description><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TX_IDLE</name><description>The transmit FIFO is empty and the transmitter idle</description><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>MSR</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_MSR_REG: modem status</description>
+          <addressOffset>0x18</addressOffset><access>read-only</access>
+          <fields><field><name>CTS</name><description>The CTS line's state, inverted</description><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field></fields>
+        </register>
+        <register>
+          <name>SCRATCH</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_SCRATCH: a byte of storage</description>
+          <addressOffset>0x1c</addressOffset><access>read-write</access>
+          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field></fields>
+        </register>
+        <register>
+          <name>CNTL</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_CNTL_REG: receiver, transmitter and flow control</description>
+          <addressOffset>0x20</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>RX_ENABLE</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TX_ENABLE</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RTS_FLOW</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CTS_FLOW</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RTS_LEVEL</name><bitOffset>4</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>RTS_ASSERT</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CTS_ASSERT</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>STAT</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_STAT_REG: the FIFOs' and lines' state</description>
+          <addressOffset>0x24</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>SYMBOL_AVAILABLE</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SPACE_AVAILABLE</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RX_IDLE</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TX_IDLE</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RX_OVERRUN</name><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TX_FULL</name><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RTS</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CTS</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TX_EMPTY</name><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TX_DONE</name><bitOffset>9</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RX_LEVEL</name><bitOffset>16</bitOffset><bitWidth>4</bitWidth></field>
+            <field><name>TX_LEVEL</name><bitOffset>24</bitOffset><bitWidth>4</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>BAUD</name><ownedByNif>false</ownedByNif>
+          <description>AUX_MU_BAUD_REG: the baud divisor, core clock / (8 * (BAUD + 1))</description>
+          <addressOffset>0x28</addressOffset><access>read-write</access>
+          <fields><field><name>DIVISOR</name><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field></fields>
+        </register>
+      </registers>
+    </peripheral>
+  </peripherals>
+</device>

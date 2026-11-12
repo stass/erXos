@@ -132,7 +132,7 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 		return (reason);
 	if (!erx_boot_console_matches(&manifest, handoff->stdout_path, handoff->stdout_path_len))
 		return (console_refusal(&manifest, handoff));
-	erx_fiasco_task_console_set(manifest.console.base);
+	erx_fiasco_task_console_set(erx_boot_console_page(&manifest));
 	reason = gather_args(handoff, &manifest, &nargs);
 	if (reason != NULL)
 		return (reason);

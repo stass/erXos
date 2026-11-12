@@ -89,6 +89,7 @@ main(int argc, char **argv)
 	    manifest.limits.processes);
 	printf("console_uart %llu %llu %u %u\n", (unsigned long long)manifest.console.base,
 	    (unsigned long long)manifest.console.size, manifest.console.line, manifest.console.clock);
+	printf("console_page %llu\n", (unsigned long long)erx_boot_console_page(&manifest));
 	printf("devices %zu\n", manifest.device_count);
 	for (size_t at = 0; at < manifest.device_count; at++) {
 		const erx_boot_device_t *device = &manifest.devices[at];

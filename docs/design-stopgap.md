@@ -433,7 +433,7 @@ Boots of the development image at 112, 256 and 768 MiB (the Apple M3 Max host, H
 RAM less the reserve, the archive, the pool's pages and the root's image; `test/host/manifest_stopgap_test.rb`
 pins those boots. QEMU `virt`'s `root_withheld`, 4.5 MiB, errs high by 388 KiB, so the packer refuses an
 archive that would boot with less than that to spare, and never passes one that fails while the boot keeps
-no more than measured and `fiasco_reserve` is at least the kernel memory Fiasco takes. Neither follows
+no more than measured and `fiasco_reserve` is at least the kernel memory Fiasco takes. The Raspberry Pi 4's record states the same for its smallest board, 948 MiB: one boot of the development image on QEMU's `raspi4b` (TCG, 4 guest CPUs, an Apple M3 Max host, QEMU 11.1.3) reserved 58 MiB as kernel memory, its `fiasco_reserve`, and kept 3,837,952 bytes besides the index, so its `root_withheld` is 4 MiB, 348 KiB high. Neither follows
 Fiasco's or `liberx`'s growth by itself, so the boots check the estimate: the root's manifest line reports
 the pool's free pages and its image, what `root_memory_fits` counted, and the production image suite
 (`RootStartup.check_boot`, seeded in `test/host/production_image_test.rb`) fails a boot whose RAM less
@@ -1663,7 +1663,7 @@ the driver's writes at any byte ([design-runtime.md](design-runtime.md#the-conso
 Fiasco's own console (`glue_libc.cc`) puts a carriage return ahead of every newline, whoever writes it, as a terminal's output
 mapping does. That is the one difference between what a program writes and what the serial log holds.
 
-**The handoff.** The `erx_mem_create_physical` body for the manifest's console UART maps the UART, and on failure returns with the sink
+**The handoff.** The `erx_mem_create_physical` body for the page that holds the manifest's console UART (`erx_boot_console_page`; the device NIF maps a window's pages, and the mini UART of the Raspberry Pi 4 sits 0x40 into its page) maps the UART, and on failure returns with the sink
 unchanged; it then sets the sink to the ring and replies. The driver's first touch of a register needs that reply, so it follows the service's
 last `l4_vcon_write` of a log record; a program's output goes on as above. A partial boot never maps the entry, so its log lines reach the UART for the whole run.
 

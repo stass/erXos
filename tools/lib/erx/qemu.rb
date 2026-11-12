@@ -18,13 +18,31 @@ module Erx
   module QemuPlan
     # The guest CPU counts a plan accepts.
     CPUS = (1..8)
+    # Where QEMU's generic loader puts a board's boot stages, for a board whose firmware QEMU
+    # does not run (docs/design-platforms.md, "Bring-up under QEMU"): the boot stub (BL31,
+    # where CPU 0 starts), the bootable file, at the address the stub enters, and the device
+    # tree, at the address patched into the stub's header.
+    Loads = Data.define(:stub, :image, :dtb)
     # Each board's QEMU machine, by its platform record's name (Platform): the -machine
     # value, and the options added under TCG and in deterministic mode. QEMU virt's are
     # GICv3, an MSI controller TCG needs for PCIe, and no random seeds in its device tree.
-    Machine = Data.define(:base, :tcg_options, :deterministic_options)
+    # A board with loads boots as its firmware would (loaded_argv); globals are its -global
+    # options.
+    Machine = Data.define(:base, :tcg_options, :deterministic_options, :loads, :globals) do
+      def initialize(base:, tcg_options:, deterministic_options:, loads: nil, globals: [])
+        super
+      end
+    end
     MACHINES = {
       'qemu-virt' => Machine.new(base: 'virt-11.1,gic-version=3', tcg_options: %w[msi=gicv2m],
-                                 deterministic_options: %w[dtb-randomness=off])
+                                 deterministic_options: %w[dtb-randomness=off]),
+      # The Raspberry Pi 4's model: BL31 at 0, its link address; the bootable file at
+      # 0x200000, where the Pi firmware loads a 64-bit kernel and bootstrap is linked; the
+      # tree at 0x3000000 (docs/research-rpi4-bl31-qemu.md). The GIC with its security
+      # extensions is the board's GIC-400.
+      'raspi4b' => Machine.new(base: 'raspi4b', tcg_options: [], deterministic_options: [],
+                               loads: Loads.new(stub: 0, image: 0x200000, dtb: 0x3000000),
+                               globals: %w[arm_gic.has-security-extensions=on])
     }.freeze
     # As serial, the guest's serial line on this process's own standard input
     # and output, with QEMU's monitor multiplexed onto it: Ctrl-A C switches
@@ -124,8 +142,16 @@ module Erx
 
     def argv(platform:, accel:, image:, serial:, cpus: 1, memory_mib: memory_of(platform),
              program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil, dtb: nil,
-             disks: [], hostlink: nil, nic: nil)
+             disks: [], hostlink: nil, nic: nil, stub: nil)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
+      board = machine_of(platform)
+      if board.loads
+        return loaded_argv(board, accel: accel, image: image, serial: serial, serial_input: serial_input, cpus: cpus, program: program,
+                                  stub: stub, dtb: dtb, refused: { initrd: initrd, command_line: command_line, nic: nic,
+                                                                   disks: disks.empty? ? nil : disks,
+                                                                   hostlink: hostlink == NO_HOSTLINK ? nil : :hostlink })
+      end
+      raise Error, "platform #{platform.name} boots from no stub" if stub
       unless cpus.is_a?(Integer) && CPUS.cover?(cpus)
         raise Error, "CPU count must be between #{CPUS.min} and #{CPUS.max}"
       end
@@ -164,10 +190,37 @@ module Erx
 
     # The -machine value for platform's board under accel, in deterministic mode or not.
     def machine_line(platform, accel:, deterministic:)
+      machine = machine_of(platform)
+      [machine.base, *(accel == 'tcg' ? machine.tcg_options : []), *(deterministic ? machine.deterministic_options : [])].join(',')
+    end
+
+    def machine_of(platform)
       raise Error, 'a QEMU plan is for a Platform' unless platform.is_a?(Platform)
 
-      machine = MACHINES.fetch(platform.name) { raise Error, "QEMU has no machine for platform #{platform.name}" }
-      [machine.base, *(accel == 'tcg' ? machine.tcg_options : []), *(deterministic ? machine.deterministic_options : [])].join(',')
+      MACHINES.fetch(platform.name) { raise Error, "QEMU has no machine for platform #{platform.name}" }
+    end
+
+    # A board QEMU starts through its loader (Machine#loads), as its firmware would: under TCG,
+    # the model's own RAM and no -kernel, -m or -cpu; the stub, image and device tree where the
+    # firmware would put them, the tree carrying the kernel command line; the console on
+    # QEMU's second serial port, the first going to the null device; and no host link UART,
+    # which the Raspberry Pi 4's model does not have (UART3). refused holds what such a plan
+    # cannot take, each nil when the plan does not ask for it.
+    def loaded_argv(board, accel:, image:, serial:, serial_input:, cpus:, program:, stub:, dtb:, refused:)
+      raise Error, "#{board.base} runs under TCG alone" unless accel == 'tcg'
+      asked = refused.compact.keys
+      raise Error, "#{board.base} takes no #{asked.join(', ')}" unless asked.empty?
+      raise Error, "CPU count must be between #{CPUS.min} and #{CPUS.max}" unless cpus.is_a?(Integer) && CPUS.cover?(cpus)
+
+      [image, stub, dtb, program].each do |value|
+        raise Error, 'invalid QEMU path' unless value.is_a?(String) && !value.empty? && !value.match?(/[\0,]/)
+      end
+      loads = [[stub, board.loads.stub, ',cpu-num=0'], [image, board.loads.image, ''], [dtb, board.loads.dtb, '']]
+      [program, '-machine', board.base, '-accel', accel, '-smp', cpus.to_s,
+       *board.globals.flat_map { |global| ['-global', global] },
+       '-display', 'none', '-monitor', 'none', '-no-reboot',
+       '-serial', 'null', *serial_arguments(serial, serial_input, id: 'console'),
+       *loads.flat_map { |file, address, options| ['-device', format('loader,file=%s,addr=0x%x%s', file, address, options)] }].freeze
     end
 
     # Each disk is a drive with no front end of its own and the virtio-blk
@@ -212,9 +265,10 @@ module Erx
     end
 
     # The guest's serial line writes to a file; with serial_input, a path QEMU reads,
-    # bytes written there arrive on its receive side. CONSOLE puts both sides
+    # bytes written there arrive on its receive side, through a chardev of the given id, which
+    # must not be QEMU's own name for a serial line before it (serial0 for the first). CONSOLE puts both sides
     # on this terminal instead.
-    def serial_arguments(serial, input)
+    def serial_arguments(serial, input, id: 'serial0')
       if serial == CONSOLE
         raise Error, 'a console serial line takes no input file' if input
 
@@ -228,7 +282,7 @@ module Erx
       return ['-serial', "file:#{serial}"] unless input
       raise Error, 'invalid QEMU path' unless input.is_a?(String) && !input.empty? && !input.match?(/[\0,]/) && !serial.include?(',')
 
-      ['-chardev', "file,id=serial0,path=#{serial},input-path=#{input}", '-serial', 'chardev:serial0']
+      ['-chardev', "file,id=#{id},path=#{serial},input-path=#{input}", '-serial', "chardev:#{id}"]
     end
 
     # The accelerators `qemu-system-aarch64 -accel help` lists: one name per
@@ -396,6 +450,9 @@ module Erx
     # Without link, hostlink is QemuPlan.argv's: nil for QEMU's null device, or
     # QemuPlan::NO_HOSTLINK for a machine with no host link UART.
     #
+    # stub, on a board QEMU starts through its loader (QemuPlan::Machine#loads), is the file of
+    # its boot stub, BL31 with its header patched (Bl31.patch_stub).
+    #
     # Inside the QEMU gate (QemuReuse.active), a boot that passed before on
     # the same inputs does not start QEMU: its stored serial log is written to
     # the run's serial log and replayed, and the report names it under
@@ -406,12 +463,13 @@ module Erx
     # alone determine runs there: no disk, network device or host link session. A host
     # that cannot be reached, or refuses the boot's setup, raises QemuRemote::Unreachable.
     def run(platform:, accel:, image:, cpus: 1, memory_mib: QemuPlan.memory_of(platform), checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
-            dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil, remote: nil)
+            dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil, remote: nil, stub: nil)
       raise Error, 'a run with a host link session ends when the session does, not with machine_end' if link && machine_end
       raise Error, 'a run with a host link session takes no other host link plan' if link && hostlink
       if remote && !reusable?(link: link, nic: nic, disks: disks, hostlink: hostlink)
         raise Error, 'a remote boot takes no disk, network device or host link'
       end
+      raise Error, 'a remote boot takes no boot stub' if remote && stub
 
       checkpoints ||= self.class.boot_transcript(memory_mib: memory_mib)
       image = File.expand_path(image)
@@ -431,7 +489,7 @@ module Erx
                                      dtb: dtb && remote_boot.path('dtb'), hostlink: hostlink)
              else
                QemuPlan.argv(**plan, image: image, serial: serial, serial_input: keyboard, initrd: initrd, dtb: dtb,
-                                     disks: disks, hostlink: socket || hostlink, nic: nic)
+                                     disks: disks, hostlink: socket || hostlink, nic: nic, stub: stub)
              end
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
@@ -440,7 +498,7 @@ module Erx
       key = nil
       if reuse && reusable?(link: link, nic: nic, disks: disks, hostlink: hostlink)
         key = boot_key(reuse, plan: plan, remote_boot: remote_boot, image_sha256: report.fetch('image_sha256'), typed: matcher.types?, initrd: initrd,
-                              dtb: dtb, hostlink: hostlink, checkpoints: checkpoints, machine_end: machine_end)
+                              dtb: dtb, stub: stub, hostlink: hostlink, checkpoints: checkpoints, machine_end: machine_end)
         stored = stored_boot(reuse, key, report: report, checkpoints: checkpoints, directory: directory) if key
         return stored if stored
       end
@@ -511,15 +569,15 @@ module Erx
 
     # The boot's key. The keyed plan is the boot's own (plan, as run passes it
     # to QemuPlan.argv) with each input file by its SHA-256 and the run's own
-    # paths by fixed names. Nil, so the boot runs, when QEMU, an initrd or a
-    # device tree is not a file.
-    def boot_key(reuse, plan:, remote_boot:, image_sha256:, typed:, initrd:, dtb:, hostlink:, checkpoints:, machine_end:)
+    # paths by fixed names. Nil, so the boot runs, when QEMU, an initrd, a
+    # device tree or a boot stub is not a file.
+    def boot_key(reuse, plan:, remote_boot:, image_sha256:, typed:, initrd:, dtb:, stub:, hostlink:, checkpoints:, machine_end:)
       qemu = remote_boot ? remote_identity(remote_boot) : QemuReuse.qemu_identity(@program)
-      return nil unless qemu && [initrd, dtb].compact.all? { |path| File.file?(path) }
+      return nil unless qemu && [initrd, dtb, stub].compact.all? { |path| File.file?(path) }
 
       by_digest = ->(path) { path && "sha256:#{Digest::SHA256.file(path).hexdigest}" }
       keyed = QemuPlan.argv(**plan, image: "sha256:#{image_sha256}", serial: '/serial.log', serial_input: typed ? '/keyboard' : nil,
-                                    initrd: by_digest.call(initrd), dtb: by_digest.call(dtb), hostlink: hostlink)
+                                    initrd: by_digest.call(initrd), dtb: by_digest.call(dtb), stub: by_digest.call(stub), hostlink: hostlink)
       QemuReuse.boot_key(plan: keyed, checkpoints: checkpoints, machine_end: machine_end, qemu: qemu, harness: reuse.harness)
     end
 

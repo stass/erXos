@@ -38,7 +38,9 @@ module Erx
     SUITE_ACCELERATOR = QemuCells::LOCAL_ACCELERATOR
     # TCG runs only the deterministic-mode transcript (`erx.det=1` needs TCG
     # with instruction counting) and one boot smoke of the production image
-    # at one CPU; the production_image suite owns both, as cells of its own.
+    # at one CPU, which the production_image suite owns as cells of its own,
+    # and the raspi4b suite, whose board model HVF cannot run (its CPUs start
+    # in EL3).
     SMOKE_ACCELERATOR = 'tcg'
     # What the host's QEMU must offer for the gate to run at all; check_qemu
     # refuses a host without either before anything is built, so no suite

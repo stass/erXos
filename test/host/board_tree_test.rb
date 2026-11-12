@@ -57,11 +57,42 @@ class BoardTreeTest < Minitest::Test
     assert File.file?(built.overlays.fetch('uart3'))
   end
 
+  # The record's units, the mini UART's page and the PL011s', against the board's tree: each
+  # device's path, compatible string, base on the CPU, size and line, as the production
+  # image suite checks QEMU virt's record against QEMU's tree.
+  def test_the_records_devices_match_the_board_tree
+    runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+    built = Erx::BoardTree.build(root: ROOT, runner: runner, platform: PI, compiler: ENV.fetch('ERX_CLANG', 'clang'))
+    paths = PI.record.fetch('units').flat_map { |unit| unit.fetch('devices') }.map { |device| device.fetch('path') }
+    nodes = paths.to_h do |path|
+      [path, { compatible: fdtget(built.board, path, 'compatible').split, reg: cells(built.board, path, 'reg'),
+               interrupts: cells(built.board, path, 'interrupts') }]
+    end
+    ranges = cells(built.board, '/soc', 'ranges').each_slice(4).map { |bus, high, low, size| [bus, (high << 32) | low, size] }
+    assert_equal [], Erx::BoardTree.device_problems(PI, nodes: nodes, ranges: ranges)
+
+    # Seeded faults: a line one off, a base a page off and a path the tree lacks.
+    console = PI.record.fetch('units').first.fetch('devices').first
+    { 'line' => console.fetch('line') - 1, 'base' => console.fetch('base') + 4096, 'path' => '/soc/serial@7e215000' }
+      .each do |field, value|
+        units = PI.record.fetch('units').each_with_index.map do |unit, at|
+          at.zero? ? unit.merge('devices' => [console.merge(field => value), *unit.fetch('devices').drop(1)]) : unit
+        end
+        refute_empty Erx::BoardTree.device_problems(record(units: units), nodes: nodes, ranges: ranges), field
+      end
+  end
+
   private
 
   def fdtget(tree, node, property)
     text, status = Open3.capture2e('fdtget', '-t', property == 'reg' ? 'u' : 's', tree, node, property, stdin_data: '')
     assert status.success?, text
     text.strip
+  end
+
+  def cells(tree, node, property)
+    text, status = Open3.capture2e('fdtget', '-t', 'u', tree, node, property, stdin_data: '')
+    assert status.success?, text
+    text.split.map { |cell| Integer(cell, 10) }
   end
 end

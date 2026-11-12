@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/qemu_gate'
 require_relative '../../tools/lib/erx/production_image'
+require_relative '../../tools/lib/erx/raspi4b_shell'
 
 # The QEMU gate decides from what each suite observed and never turns an
 # absence into a pass. These tests run the real suites only where they start
@@ -62,12 +63,19 @@ class QemuGateTest < Minitest::Test
     end
   end
 
-  def test_every_suite_runs_under_hvf_and_only_the_production_image_names_tcg
-    Gate.suites.each do |entry|
+  # Every suite runs under HVF, but one: QEMU's raspi4b model, whose CPUs start in EL3 where
+  # BL31 runs, which HVF refuses (QEMU 11.1.3: "Cannot enable HVF when guest CPU has EL3
+  # enabled"), so its suite runs under TCG alone (docs/design-platforms.md, "Bring-up under
+  # QEMU"). Only the production image and that board model name TCG.
+  TCG_ONLY_SUITES = %w[raspi4b].freeze
+
+  def test_every_suite_but_raspi4b_runs_under_hvf_and_only_it_and_the_production_image_name_tcg
+    Gate.suites.reject { |entry| TCG_ONLY_SUITES.include?(entry.name) }.each do |entry|
       refute_empty entry.cells.select { |cell| cell.start_with?("#{Gate::SUITE_ACCELERATOR}-") }, entry.name
     end
     tcg = Gate.suites.to_h { |entry| [entry.name, entry.cells.grep(/\A#{Gate::SMOKE_ACCELERATOR}-/o)] }.reject { |_, cells| cells.empty? }
-    assert_equal({ 'production_image' => %w[tcg-1cpu tcg-deterministic] }, tcg)
+    assert_equal({ 'production_image' => %w[tcg-1cpu tcg-deterministic], 'raspi4b' => Erx::Raspi4bShell::CELLS }, tcg)
+    assert_empty Gate.suites.find { |entry| entry.name == 'raspi4b' }.cells.grep(/\A#{Gate::SUITE_ACCELERATOR}-/o)
   end
 
   def test_a_suite_is_judged_from_its_cells

@@ -96,6 +96,14 @@ bool	erx_boot_console_matches(const erx_boot_manifest_t *manifest, const char *s
 	    size_t stdout_len);
 
 /*
+ * The page that holds the console's registers, which its driver maps first: the device NIF
+ * maps the pages of a window, and the root hands the log to the console when a physical
+ * object starts at this page (docs/design-stopgap.md, "The console"). 0, which turns the handoff
+ * off, when no entry names the console or its registers lie in the first page.
+ */
+uint64_t	erx_boot_console_page(const erx_boot_manifest_t *manifest);
+
+/*
  * Writes a physical record's words, -erx device ROLE PERIPHERAL BASE SIZE LINE CLOCK with the
  * numbers in decimal, each word ended by NUL, into words, and returns their whole length.
  * Returns 0, having written nothing past capacity, when they do not fit. Only a device that

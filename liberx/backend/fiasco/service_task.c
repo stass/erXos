@@ -778,12 +778,12 @@ task_fill_contiguous(uint32_t object, const void *request)
  * Written by the root's entry on the root thread before its program runs, and read on the
  * service thread, so atomic. It publishes only itself.
  */
-static _Atomic uint64_t task_console_base;
+static _Atomic uint64_t task_console_page;
 
 void
-erx_fiasco_task_console_set(uint64_t base)
+erx_fiasco_task_console_set(uint64_t page)
 {
-	atomic_store_explicit(&task_console_base, base, memory_order_relaxed);
+	atomic_store_explicit(&task_console_page, page, memory_order_relaxed);
 }
 
 /*
@@ -794,14 +794,15 @@ erx_fiasco_task_console_set(uint64_t base)
  * are the only callers of task_fill_physical and task_fill_contiguous, and the service's
  * dispatch the only caller of the bodies, so the check in each covers every create.
  *
- * The handoff (docs/design-stopgap.md, "The console"): the driver's first touch of a register
+ * The handoff (docs/design-stopgap.md, "The console"): the console's driver maps the page that
+ * holds its registers (erx_boot_console_page), and its first touch of a register
  * needs this reply, so it follows the last log record the service wrote to the UART, and a
  * failed map changes nothing.
  */
 int
 erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical_request_t *request, uint64_t *mem)
 {
-	uint64_t console_base;
+	uint64_t console_page;
 	int status;
 
 	if (caller != ERX_FIASCO_TASK_ROOT)
@@ -811,8 +812,8 @@ erx_fiasco_task_mem_physical_body(uint32_t caller, const erx_fiasco_mem_physical
 	if (status != ERX_OK)
 		return (status);
 	status = erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_MEMORY, request->budget, task_fill_physical, request, mem);
-	console_base = atomic_load_explicit(&task_console_base, memory_order_relaxed);
-	if (status == ERX_OK && console_base != 0 && request->base == console_base)
+	console_page = atomic_load_explicit(&task_console_page, memory_order_relaxed);
+	if (status == ERX_OK && console_page != 0 && request->base == console_page)
 		erx_debug_log_hand_to_console();
 	return (status);
 }

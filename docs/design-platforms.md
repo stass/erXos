@@ -1047,6 +1047,9 @@ for it:
   `SYSTEM_OFF` halts instead, so the model shows a reset where the
   board halts;
 * a device tree the host supplies, since QEMU generates none;
+* TCG alone: the model's CPUs implement EL3, where BL31 runs, and HVF refuses a guest CPU with
+  EL3 enabled (QEMU 11.1.3: "Cannot enable HVF when guest CPU has EL3 enabled"), so the
+  `raspi4b` suite is the one QEMU suite that runs under TCG and not HVF;
 * BL31 built with LLVM alone, and GNU sed on the path.
 
 BL31's own console is the PL011 on the model, since its Pi 4 port picks

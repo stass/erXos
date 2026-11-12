@@ -1,0 +1,154 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# The development manifest of the Raspberry Pi 4 Model B on the stopgap
+# (config/platforms/raspi4b.json; docs/plan.md, 1b-I's stage (a)): the system domain
+# alone, with the system principal's session template, from which the console starts
+# root's session at boot (docs/design-system.md, "Booting"). It configures no domain:
+# the Pi's storage, network and display domains come with stages (b), (c) and (d).
+#
+# The system domain holds two units, each one register page of the board
+# (docs/design-platforms.md, "Raspberry Pi 4 Model B"): the console's, the mini UART's
+# page, which it shares with the auxiliary SPI controllers that no driver here drives,
+# and the host link's, the PL011s' page, of which the host link uses UART3. The console's
+# driver is erx_mini_uart, which keeps the divisor the firmware set.
+#
+# The shares, runtime limits and the session's limits are QEMU virt's development
+# manifest's (config/manifest/qemu-virt-development.txt), whose comment gives their
+# measurements. The session's network client looks for its net facet as on QEMU virt; no
+# domain serves one here, so its sockets answer enotconn. The system principal holds root's one session, 36 MiB and outer
+# 1 MiB, and 1 MiB for the outer budget of a session that has ended while the system
+# domain still holds a connection to it, as QEMU virt's comment explains. The system
+# baseline is QEMU virt's 46 MiB. root_memory, 128 MiB, admits the baseline and the
+# principal's 38 MiB with 44 MiB no one is promised, and lies well below what the
+# smallest Pi 4 the record names leaves the root.
+manifest 1
+share system
+  quota_ns 30000000
+  period_ns 10000000
+  cpuset 15
+  capacity_mcpu 3000
+  capacity_first 0
+  slice_us 1000
+  grace_us 5
+  base 24
+  ceiling 47
+  flags none
+share users
+  quota_ns 10000000
+  period_ns 10000000
+  cpuset 15
+  capacity_mcpu 1000
+  capacity_first 0
+  slice_us 1000
+  grace_us 5
+  base 16
+  ceiling 31
+  flags none
+share session
+  quota_ns 10000000
+  period_ns 10000000
+  cpuset 1
+  capacity_mcpu 1000
+  capacity_first 0
+  slice_us 1000
+  grace_us 5
+  base 16
+  ceiling 31
+  flags none
+runtime_limits system
+  max_frame 524288
+  max_message_heap 1048576
+  funnel_depth 64
+  exports 256
+  tmp 4194304
+  overlay 0
+  atoms 65536
+  foreign_atoms 1024
+  processes 4096
+runtime_limits session
+  max_frame 524288
+  max_message_heap 131072
+  funnel_depth 64
+  exports 256
+  tmp 2097152
+  overlay 0
+  atoms 16384
+  foreign_atoms 1024
+  processes 2048
+limits native
+  memory 16777216
+  outer 1048576
+  grant @share.users
+  spaces none
+  lane 4096
+  connections 0
+  crash 0
+  flags none
+  runtime_limits @runtime_limits.system
+  peer_held 4096
+  peer_held_total 4096
+limits session
+  memory 37748736
+  outer 1048576
+  grant @share.session
+  spaces @share.session
+  lane 65536
+  connections 4
+  crash 0
+  flags spaces
+  runtime_limits @runtime_limits.session
+  peer_held 4096
+  peer_held_total 4096
+principal system
+  memory 39845888
+  grant @share.users
+  domains 4
+  names 64
+  default_limits @limits.native
+  ceiling_limits @limits.native
+session system
+  limits @limits.session
+  runtime @artifact.emu
+  release @artifact.session
+  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx -erx_net_client grant {erx_net_client_erxos,grant,[]} -eval ok=application:start(erx_session)"
+machine
+  flags development
+  host "erxos"
+  console "/soc/serial@7e215040"
+  hostlink "/soc/serial@7e201600"
+  platform "raspi4b"
+  root_memory 134217728
+  system_baseline 48234496
+  system_share @share.system
+  users_share @share.users
+  system_principal @principal.system
+  max_domains 4
+  max_connections 11
+  system_lane 4096
+  system_queue 16384
+  peer_held 4096
+  system_reserve 250
+  sealing none
+  system_runtime_limits @runtime_limits.system
+  native_limits @limits.native
+  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_mini_uart -nocookie -no_epmd -proto_dist erx"
+unit console
+  placement "console-uart"
+  holder system
+unit hostlink
+  placement "hostlink-uart"
+  holder system
+service inspect
+  server system
+  interface inspect
+facet inspect
+  grantee @session.system
+  service @service.inspect
+  operations none
+  max_request 4096
+  in_flight 2
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 65536
+shell_principal @principal.system

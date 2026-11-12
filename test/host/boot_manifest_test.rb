@@ -46,8 +46,8 @@ class BootManifestTest < Minitest::Test
     output
   end
 
-  def admitted(source = @source)
-    platform = JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json')))
+  def admitted(source = @source, platform: 'qemu-virt')
+    platform = JSON.parse(File.read(File.join(ROOT, "config/platforms/#{platform}.json")))
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: platform, build_kind: 'development'))
     Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: ManifestContextFixture.accepting_planner).bytes
   end
@@ -220,5 +220,19 @@ class BootManifestTest < Minitest::Test
     output, status = read(bytes)
     assert_equal 1, status.exitstatus, output
     assert_match(/\Arefused /, output)
+  end
+  # The handoff (docs/design-stopgap.md, "The console"): the root hands the log to the console
+  # when its driver maps the console's page, the one the device NIF maps for the registers. On
+  # QEMU virt the PL011 starts its page; the Raspberry Pi 4's mini UART is 0x40 into its own,
+  # so the page, not the registers' base, is what the driver's map names.
+  def test_the_console_page_is_the_page_the_driver_maps
+    output, status = read(admitted)
+    assert status.success?, output
+    assert_includes output, "console_page 150994944\n"
+    pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
+    output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
+    assert status.success?, output
+    assert_includes output, "console_uart #{0xfe215040} 64 "
+    assert_includes output, "console_page #{0xfe215000}\n"
   end
 end

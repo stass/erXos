@@ -197,6 +197,10 @@ module Erx
 
     def board_image_path(name) = File.join(@build, "images/bootstrap-#{name}.raw")
 
+    # The first stage an image for platform boots from: its board's own bootstrap build
+    # (BOARD_BOOTSTRAPS), or the main build's for any other board.
+    def first_stage_path(platform) = BOARD_BOOTSTRAPS.key?(platform.name) ? board_image_path(platform.name) : image_path
+
     # The first stage as built: bootstrap's flat image, with neither locator
     # field written (docs/design-kernel.md, "The bootable file"). What boots is
     # this with an archive; BootImage writes both forms.

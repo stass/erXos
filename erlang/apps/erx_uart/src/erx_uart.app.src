@@ -2,12 +2,12 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% The UART device class's drivers, over erx_device (docs/design-runtime.md, "The console
-%% and standard I/O"): the Arm PrimeCell UART PL011, which the console drives when the
-%% boot's `-erx console_driver erx_pl011` names it.
+%% and standard I/O"): the Arm PrimeCell UART PL011 and the BCM2711's mini UART, either of
+%% which the console drives when the boot's `-erx console_driver` names one.
 {application, erx_uart,
  [{description, "erXos UART drivers"},
   {vsn, "1"},
-  {modules, [erx_pl011]},
+  {modules, [erx_mini_uart, erx_pl011]},
   {registered, []},
   {applications, [kernel, stdlib, erx]},
   {env, []}]}.

@@ -75,6 +75,44 @@ module Erx
       { 'serial0' => console, 'serial1' => serial1 == console ? serial0 : serial1 }
     end
 
+    # The GIC's interrupt types in a tree's interrupts cells, with the interrupt number each
+    # one's first line has (the GIC binding: SPIs from 32, PPIs from 16).
+    GIC_FIRST_LINE = { 0 => 32, 1 => 16 }.freeze
+
+    # What each device-tree device of platform's record says differently from the board's
+    # tree: a node the tree lacks, a compatible list that does not name the record's, or a
+    # base, size or line other than the node's. nodes maps a path to the node's
+    # compatible strings, reg cells (one bus address and one size) and GIC interrupts
+    # cells; ranges is the bus's ranges, each [bus address, CPU address, size], which turn
+    # the node's bus address into the CPU's, as the record states it.
+    def device_problems(platform, nodes:, ranges:)
+      devices = platform.record.fetch('units').flat_map { |unit| unit.fetch('devices') }
+      devices.select { |device| device.fetch('selector') == 'dt' }.filter_map do |device|
+        path = device.fetch('path')
+        node = nodes[path]
+        next "#{path}: not in the device tree" unless node
+        next "#{path}: compatible #{node.fetch(:compatible)} does not name #{device.fetch('compatible')}" unless
+          node.fetch(:compatible).include?(device.fetch('compatible'))
+
+        tree = window(node, ranges)
+        recorded = device.slice('base', 'size', 'line').transform_keys(&:to_sym)
+        "#{path}: base, size or line #{recorded} differ from the tree's #{tree || 'unreadable reg or interrupts'}" if
+          recorded != tree
+      end
+    end
+
+    # A node's base on the CPU, size and line, or nil when its cells are not one bus
+    # address and size and one GIC interrupt inside a range.
+    def window(node, ranges)
+      reg = node.fetch(:reg)
+      type, number, = node.fetch(:interrupts)
+      return nil unless reg.size == 2 && node.fetch(:interrupts).size == 3 && GIC_FIRST_LINE.key?(type)
+
+      bus, size = reg
+      range = ranges.find { |first, _, length| bus >= first && bus + size <= first + length }
+      range && { base: range[1] + (bus - range[0]), size: size, line: GIC_FIRST_LINE.fetch(type) + number }
+    end
+
     # Builds the board's tree, its overlays and the model's tree into build/board-tree/NAME,
     # replacing what was there.
     def build(root:, runner:, platform:, compiler: ENV.fetch('ERX_CLANG', ''))
