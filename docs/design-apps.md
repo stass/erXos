@@ -199,8 +199,9 @@ facet clock_data
 ```
 
 * **The principal** pays for the app's sessions: its budget, its group
-  under `users` and its `domains` and `names` quotas, which the manifest
-  check sums with every other principal's (property 4).
+  under `users` and its `domains` and `names` quotas. The manifest check
+  sums the budget and the two quotas with every other principal's, and
+  holds the group within `users` as a cap, not a share of it (property 4).
 * **The template** says what each session of the app is. Its `release`
   names `bin/clock.boot` in the boot image's domain release, a boot
   script whose release file lists `clock`'s applications beside

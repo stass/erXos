@@ -235,6 +235,24 @@ class ManifestStopgapTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 4, 'principals.domains', changed(@source.sub(/^(principal system\n(?:  .*\n)*?  domains )(\d+)$/) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2)) + 1}" }))
   end
 
+  # A principal row of the given name granted the share named share, small enough that
+  # the development manifest's budgets still fit.
+  def principal_row(name, share)
+    "principal #{name}\n  memory 1048576\n  grant @share.#{share}\n  domains 0\n  names 1\n" \
+      "  default_limits @limits.native\n  ceiling_limits @limits.native\n"
+  end
+
+  # A grant is a cap and promises no minimum, so principals whose caps together exceed
+  # `users` are admitted; one principal's cap above `users` is not.
+  def test_principal_grants_may_oversubscribe_users
+    assert admit(changed(@source.sub("principal system\n", "#{principal_row('guest', 'users')}principal system\n")))
+  end
+
+  def test_a_principal_grant_over_users_is_refused
+    over = @source.sub("principal system\n", "#{principal_row('guest', 'system')}principal system\n")
+    refused(Erx::Manifest::Invalid, 4, 'principal.grant', changed(over))
+  end
+
   def test_shares_over_the_root_rate_are_refused
     refused(Erx::Manifest::Invalid, 4, 'machine.shares', @source.sub('quota_ns 30000000', 'quota_ns 40000000'))
   end

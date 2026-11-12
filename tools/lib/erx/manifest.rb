@@ -739,8 +739,6 @@ module Erx
           check_limits(defaults, ceilings, cpus, rate, rows.fetch('runtime_limits'))
           values
         end
-        total = result.sum { |row| effective_share(row.fetch('grant'), parent_cpus).last }
-        invalid('principal grants exceed users', 4, 'principals.grant') if total > parent_rate
         rows['principals'] = result
       end
 

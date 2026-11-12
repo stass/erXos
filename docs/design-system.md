@@ -410,8 +410,8 @@ violation fails the build with the property, the record and the field:
    devices' memory and the domain library's tables fit within
    `root_memory`; each configured domain's two budgets fit within its
    principal's; the shares of `system` and `users` sum within the root
-   group, the configured domains' grants within `system`, the principals'
-   shares within `users`, and each sub-space grant within its domain's;
+   group, the configured domains' grants within `system`, each principal's
+   share within `users`, and each sub-space grant within its domain's;
    and the principals' quotas of domains sum within `max_domains`, every
    living domain, configured or requested, being one of its principal's.
 5. **Every name is a system identifier,** the host name included, and so

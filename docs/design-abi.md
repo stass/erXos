@@ -1722,7 +1722,7 @@ indices and the sum defining the run are checked against the already
 validated boot image before policy checking. The secret domain has no
 crash area and is the unique domain whose run carries the seal mark.
 
-The principal grant describes its share of `users`. Configured service
+The principal grant describes its CPU cap within `users`. Configured service
 domains receive their CPU grants under `system`, while their memory
 budgets remain charged to their principal, as the system contract
 specifies. A principal record therefore does not move a service's group
