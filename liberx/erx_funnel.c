@@ -40,6 +40,7 @@ typedef struct ctl_shape {
 } ctl_shape_t;
 
 static const ctl_shape_t *ctl_shape(int64_t);
+static erx_etf_rules_t channel_rules(const erx_funnel_limits_t *);
 static erx_etf_rules_t payload_rules(const erx_funnel_limits_t *);
 static erx_funnel_reason_t ctl_elements(erx_etf_reader_t *,
     erx_funnel_control_t *);
@@ -153,21 +154,41 @@ erx_funnel_channel(const uint8_t *term, size_t len,
     const erx_funnel_limits_t *limits, void *scratch, size_t scratch_len,
     erx_etf_result_t *result)
 {
+	const erx_etf_rules_t rules = channel_rules(limits);
+
 	if (len > ERX_PROG_FRAME_MAX) {
 		*result = (erx_etf_result_t){ .offset = 0,
 		    .verdict = ERX_ETF_OVER_LIMIT,
 		    .reason = ERX_ETF_ERR_TOO_LONG };
 		return (result->verdict);
 	}
-	return (erx_funnel_payload(term, len, limits, scratch, scratch_len,
-	    result));
+	return (erx_etf_check(term, len, &rules, scratch, scratch_len, result));
 }
 
 /* erx_etf's scratch grows with the input, so the longest record's is enough. */
 size_t
 erx_funnel_channel_scratch_bytes(const erx_funnel_limits_t *limits)
 {
-	return (erx_funnel_payload_scratch_bytes(limits, ERX_PROG_FRAME_MAX));
+	const erx_etf_rules_t rules = channel_rules(limits);
+
+	return (erx_etf_scratch_bytes(&rules, ERX_PROG_FRAME_MAX));
+}
+
+/*
+ * A channel record's rules: the receiver's word limit and depth, in the
+ * host grammar whatever the receiver's own (docs/design-domains.md,
+ * "Channel mode", says why).  The host grammar has no pid or reference, so
+ * the rules name no host.
+ */
+static erx_etf_rules_t
+channel_rules(const erx_funnel_limits_t *limits)
+{
+	return ((erx_etf_rules_t){
+		.max_words = limits->max_words,
+		.max_depth = limits->depth,
+		.grammar = ERX_ETF_HOST,
+		.accept = false,
+	});
 }
 
 /*

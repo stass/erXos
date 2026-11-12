@@ -19,8 +19,11 @@ require_relative '../fixtures/funnel_wire'
 #   measured on stock OTP's distribution input (test/fixtures/funnel_oracle.erl
 #   says how), including the terms whose size ERTS overestimates;
 # * the funnel's channel mode, a program's record, judges every one of those
-#   payloads as erx_funnel_payload does, so the same oracle answers for it, and
-#   refuses a record one byte past ERX_PROG_FRAME_MAX that it accepts at the bound.
+#   payloads in the host grammar: one with no pid, reference, fun or export as
+#   erx_funnel_payload does, so the same oracle answers for it, and one with
+#   any of them refused at its tag, since ERTS's safe decode of those still
+#   adds fun-table and node-table entries; and it refuses a record one byte
+#   past ERX_PROG_FRAME_MAX that it accepts at the bound.
 #
 # One run of the driver and one of erl serve the whole class.
 class ErxFunnelOracleTest < Minitest::Test
@@ -30,6 +33,9 @@ class ErxFunnelOracleTest < Minitest::Test
   MUTATED = 1500
   PAYLOADS = 2000
   PROG_FRAME_MAX = 196_608 # abi/protocols/prog.txt's prog_frame_max
+  # Records only the domain grammar admits, each at the machine's host.
+  DOMAIN_ONLY = { fun: EtfWire.fun, pid: EtfWire.pid('web@erxos'), reference: EtfWire.ref('web@erxos'),
+            export: EtfWire.export }.transform_values { |term| "\x83".b + term }.freeze
 
   # Random control terms of every operation, each element in a random
   # encoding of a random value of its kind.
@@ -101,13 +107,15 @@ class ErxFunnelOracleTest < Minitest::Test
         [mutate(random, bytes), payload_len]
       end
       terms = EtfGenerator.new(random, Random.new(SEED + 1))
-      { controls: controls + mutated, payloads: Array.new(PAYLOADS) { "\x83".b + terms.term(1 + random.rand(4)).bytes } }
+      generated = Array.new(PAYLOADS) { terms.term(1 + random.rand(4)) }
+      { controls: controls + mutated, payloads: generated.map { |term| "\x83".b + term.bytes },
+        host_grammar: generated.map(&:host_grammar) }
     end
 
-# A binary record exactly ERX_PROG_FRAME_MAX bytes long, and one a byte longer.
-def channel_records
-  [PROG_FRAME_MAX, PROG_FRAME_MAX + 1].map { |size| "\x83\x6d".b + [size - 6].pack('N') + ("\x00".b * (size - 6)) }
-end
+    # A binary record exactly ERX_PROG_FRAME_MAX bytes long, and one a byte longer.
+    def bound_records
+      [PROG_FRAME_MAX, PROG_FRAME_MAX + 1].map { |size| "\x83\x6d".b + [size - 6].pack('N') + ("\x00".b * (size - 6)) }
+    end
 
     def mutate(random, bytes)
       out = bytes.dup
@@ -124,13 +132,16 @@ end
       runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
       driver = FunnelDriver.new(root: ROOT, runner: runner, directory: directory)
       given = inputs
-      given[:channel] = channel_records
+      payload = ->(bytes) { "payload 0 1024 100000000 #{bytes.unpack1('H*')}" }
+      channel = ->(bytes) { "channel 0 1024 100000000 #{bytes.unpack1('H*')}" }
       requests = given.fetch(:controls).map { |bytes, payload_len| "control #{payload_len} #{bytes.unpack1('H*')}" } +
-                 given.fetch(:payloads).map { |bytes| "payload 0 1024 100000000 #{bytes.unpack1('H*')}" } +
-                 (given.fetch(:payloads) + given.fetch(:channel)).map { |bytes| "channel 0 1024 100000000 #{bytes.unpack1('H*')}" }
+                 given.fetch(:payloads).map(&payload) +
+                 (given.fetch(:payloads) + DOMAIN_ONLY.values + bound_records).map(&channel) +
+                 DOMAIN_ONLY.values.map(&payload)
       checked = driver.check(requests)
       oracle = oracle_requests(given, checked)
-      { checked: checked, oracle: oracle.zip(run_oracle(directory, runner, oracle.map(&:first))) }
+      { checked: checked, host_grammar: given.fetch(:host_grammar),
+        oracle: oracle.zip(run_oracle(directory, runner, oracle.map(&:first))) }
     end
 
     # For each accepted input, what to ask stock OTP and what it must say.
@@ -182,13 +193,41 @@ end
     assert_operator words.size, :>=, PAYLOADS * 9 / 10, 'most generated payloads are accepted'
     words.each { |(request, expected), got| assert_equal expected, got, request[0, 200] }
   end
-  def test_channel_mode_judges_a_record_as_the_payload_pass_within_the_frame_bound
+
+  # A term's first refusal in stream order wins, so a payload the domain
+  # grammar refuses before its first pid, reference, fun or export keeps
+  # that refusal in channel mode.
+  def test_channel_mode_judges_a_record_in_the_host_grammar
     checked = answers.fetch(:checked)
-    controls = CONTROLS + MUTATED
-    payloads = checked[controls, PAYLOADS]
-    channel = checked[controls + PAYLOADS, PAYLOADS + 2]
-    assert_equal payloads, channel.first(PAYLOADS)
-    assert_match(/\Aaccepted /, channel[PAYLOADS], 'a record at the bound')
-    assert_equal 'over too_long', channel[PAYLOADS + 1], 'a record past the bound'
+    payloads = checked[CONTROLS + MUTATED, PAYLOADS]
+    channel = checked[CONTROLS + MUTATED + PAYLOADS, PAYLOADS]
+    named = 0
+    payloads.zip(channel, answers.fetch(:host_grammar)).each_with_index do |(payload, record, host_grammar), index|
+      if host_grammar
+        assert_equal payload, record, "payload #{index}"
+      elsif payload.start_with?('accepted ')
+        named += 1
+        assert_equal 'malformed tag', record, "payload #{index}, which holds a pid, reference, fun or export"
+      else
+        assert_includes [payload, 'malformed tag'], record, "payload #{index}, refused by the payload pass"
+      end
+    end
+    assert_operator named, :>=, PAYLOADS / 10, 'many accepted payloads hold what only the domain grammar admits'
+  end
+
+  def test_channel_mode_refuses_a_fun_pid_reference_and_export_the_domain_grammar_admits
+    first = CONTROLS + MUTATED + (2 * PAYLOADS)
+    records = answers.fetch(:checked)[first, DOMAIN_ONLY.size]
+    payloads = answers.fetch(:checked).last(DOMAIN_ONLY.size)
+    DOMAIN_ONLY.keys.zip(records, payloads).each do |name, record, payload|
+      assert_match(/\Aaccepted /, payload, "a payload holding a #{name}")
+      assert_equal 'malformed tag', record, "a record holding a #{name}"
+    end
+  end
+
+  def test_channel_mode_keeps_the_frame_bound
+    channel = answers.fetch(:checked)[CONTROLS + MUTATED + (2 * PAYLOADS) + DOMAIN_ONLY.size, 2]
+    assert_match(/\Aaccepted /, channel.first, 'a record at the bound')
+    assert_equal 'over too_long', channel.last, 'a record past the bound'
   end
 end

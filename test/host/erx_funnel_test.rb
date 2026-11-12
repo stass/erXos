@@ -15,8 +15,10 @@ require_relative '../fixtures/funnel_wire'
 # with another arity, an element of another kind or range, a payload it
 # does not take, or an option list of another shape; the control term held
 # to erx_etf's system grammar, semantic stage and ERX_FUNNEL_CTL_DEPTH; and
-# the payload's pass held to the receiver's grammar and limits. Agreement
-# with ERTS is test/integration/erx_funnel_oracle_test.rb's.
+# the payload's pass held to the receiver's grammar and limits; and channel
+# mode held to the host grammar and the program protocol's frame bound,
+# whatever the receiver's grammar and host. Agreement with ERTS is
+# test/integration/erx_funnel_oracle_test.rb's.
 class ErxFunnelTest < Minitest::Test
   include FunnelWire
 
@@ -26,6 +28,8 @@ class ErxFunnelTest < Minitest::Test
   end.to_h.transform_values { |value| Integer(value, 10) }.freeze
   CTL_MAX = LIMITS.fetch('ctl_max')
   FRAME_MAX = LIMITS.fetch('frame_max')
+  PROG_FRAME_MAX = File.read(File.expand_path('../../abi/protocols/prog.txt', __dir__))
+                      .then { |text| Integer(text[/^limit prog_frame_max u32 (\d+)$/, 1], 10) }
 
   def setup
     @root = File.expand_path('../..', __dir__)
@@ -46,6 +50,7 @@ class ErxFunnelTest < Minitest::Test
   def control(bytes, payload_len = 0) = "control #{payload_len} #{bytes.unpack1('H*')}"
   def payload(bytes, system: 0, depth: 8, words: 1000) = "payload #{system} #{depth} #{words} #{bytes.unpack1('H*')}"
   def scratch(words, held) = "scratch #{words} #{held}"
+  def channel(bytes, system: 0, depth: 8, words: 1000) = "channel #{system} #{depth} #{words} #{bytes.unpack1('H*')}"
   def answers(cases) = cases.keys.zip(@driver.check(cases.values.map(&:first)))
 
   def test_the_header_adds_up_to_the_frame
@@ -197,6 +202,26 @@ class ErxFunnelTest < Minitest::Test
       'trailing byte' => [payload("#{ten_words}\x6a"), 'malformed trailing']
     }
     answers(cases).each { |name, answer| assert_equal cases.fetch(name).last, answer, name }
+  end
+
+  # A program's record holds no fun, export, pid or reference, even to the
+  # domain grammar's receiver and at the machine's host, and is judged
+  # within the program protocol's frame bound.
+  def test_channel_mode_keeps_the_host_grammar_and_the_frame_bound
+    binary = ->(size) { "\x83\x6d".b + [size - 6].pack('N') + ("\x00".b * (size - 6)) }
+    domain_only = { 'a fun' => fun, 'an export' => export,
+                    'a pid' => pid('web@erxos'), 'a reference' => ref('web@erxos') }
+    cases = domain_only.flat_map do |name, term|
+      [["#{name} to a domain", [channel("\x83".b + term), 'malformed tag']],
+       ["#{name} to the system domain", [channel("\x83".b + term, system: 1), 'malformed tag']],
+       ["#{name} as a payload", [payload("\x83".b + term), /\Aaccepted /]]]
+    end.to_h.merge(
+      'a request' => [channel("\x83".b + tuple(atom('erx_prog'), small(1), small(0), atom('getpid'))), 'accepted 5'],
+      'past the word limit' => [channel("\x83".b + tuple(*Array.new(9) { nil_ }), words: 9), 'over words'],
+      'at the frame bound' => [channel(binary.call(PROG_FRAME_MAX), words: 1 << 20), /\Aaccepted /],
+      'past the frame bound' => [channel(binary.call(PROG_FRAME_MAX + 1), words: 1 << 20), 'over too_long']
+    )
+    answers(cases).each { |name, answer| assert_operator cases.fetch(name).last, :===, answer, name }
   end
 
   # The scratch a frame needs follows the bytes held, never max_message_heap:

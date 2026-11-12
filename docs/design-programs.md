@@ -319,10 +319,16 @@ faults on its own channel; a program that unmaps or closes its channel
 loses only its own way out.
 
 **Frames.** Each lane carries frames of the program protocol's grammar,
-each frame one record of kind `ERX_REC_FRAME`, as on a connection: the
-consumer reads a record as it is published and copies it into private
-memory up to the profile's bound
-([design-domains.md](design-domains.md#connections)). A frame larger than
+each frame one record of kind `ERX_REC_FRAME`, read as on a connection:
+the consumer reads a record as it is published and copies it into
+private memory up to the profile's bound
+([design-domains.md](design-domains.md#connections)). Unlike a
+connection's, a frame is one term with no frame header or control term.
+The session judges each frame from the program with the funnel's channel
+mode: within `ERX_PROG_FRAME_MAX` bytes and in the host grammar, which
+has no fun, export, pid or reference, whatever the session's own domain
+admits on its connections
+([design-domains.md](design-domains.md#the-funnel)). A frame larger than
 the ring, the startup message with a large environment among them, flows
 through it as the consumer frees room. The program's event executor is
 the only thread that reads the inbound lane and the only one that stores

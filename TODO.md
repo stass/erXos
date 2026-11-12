@@ -4580,7 +4580,6 @@ to the corpus and follow rc
 
 ## Security residuals
 
-- [Medium] erx_program input path (`liberx/erx_funnel.c` `erx_funnel_channel`): channel mode admits the receiving domain's grammar, so a program's frame may hold funs, and ERTS's safe decode (`external.c`, `erts_fun_entry_get_or_make_stub`) adds a fun-table entry for each that only a module purge frees; pids and references at another node add node and dist table entries until collected. A program can grow the session runtime's fun table before the grammar refuses the frame with SIGSYS. The program profile has no fun, pid or reference, so the host grammar (`ERX_ETF_HOST`) would close it; choosing it is an owner decision, needed before the input path decodes frames.
 - [Low] erx_program credit (`otp/erts/emulator/sys/erxos/erx_program_core.c`): the credit holds reply slots only, so every `{closed}` and `{drained}` notice is refused with SIGSYS. The frame that first hands a program a pipe end must add notice credit (docs/design-programs.md, "Credit").
 
 * [Low] inspect service, the runtime agent leg ([design-live.md](docs/design-live.md#the-runtime-agent)): a

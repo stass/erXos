@@ -280,7 +280,7 @@ payload_request(FILE *out, const char *args, uint8_t *bytes)
 		    etf_reasons[result.reason]);
 }
 
-/* A channel record: payload's limits and answer, with channel mode's frame bound. */
+/* A channel record: payload's answer, in channel mode's grammar and frame bound. */
 static void
 channel_request(FILE *out, const char *args, uint8_t *bytes)
 {

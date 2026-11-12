@@ -37,7 +37,7 @@ class ErxEtfOracleTest < Minitest::Test
     EtfWire.map([EtfWire.map(*Array.new(200) { [EtfWire.nil_, EtfWire.nil_] }), EtfWire.nil_]),
     EtfWire.map([EtfWire.map(*Array.new(200) { |key| [EtfWire.small(key), EtfWire.nil_] }), EtfWire.nil_]),
     EtfWire.record(Array.new(200) { |field| EtfWire.atom(field.to_s) }, Array.new(200) { EtfWire.nil_ })
-  ].map { |bytes| EtfGenerator::Encoded.new(bytes, false, 0) }.freeze
+  ].map { |bytes| EtfGenerator::Encoded.new(bytes: bytes, exact: false, exports: 0, host_grammar: true) }.freeze
 
   class << self
     def inputs

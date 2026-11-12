@@ -6,12 +6,15 @@
  * through the funnel's channel mode (erx_funnel_channel), each record it
  * accepts through the shape reader (erx_program_frame_shape), and the shape
  * into the program's credit (erx_program_credit_take), with the handler's
- * replies between them. Input: a mode byte choosing the receiver's limits,
- * then a sequence of steps: a byte with the top bit set is a reply on the slot
- * its low five bits name; any other byte is followed by a 16-bit
+ * replies between them. Input: a mode byte choosing the receiver's limits
+ * (its word limit, depth, whether it is the system domain, and its host or
+ * none, the last two of which channel mode ignores), then a sequence of
+ * steps: a byte with the top bit set is a reply on the slot its low five
+ * bits name; any other byte is followed by a 16-bit
  * little-endian length and that many record bytes (fewer at the end of the
  * input). Properties: no crash, an accepted record within ERX_PROG_FRAME_MAX
- * and the receiver's word limit, a request's slot within the sixteen, and at
+ * and the receiver's word limit and holding no fun, export, pid or reference
+ * (the host grammar), a request's slot within the sixteen, and at
  * most one delivery per credit: never two requests delivered on a slot
  * without a reply taken between them, and a request on a free slot never
  * refused. The shape reader also reads every record, accepted or not.
@@ -30,6 +33,38 @@ int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 static const uint32_t depths[] = { 0, 2, 16, 64 };
 static const uint64_t words[] = { 0, 64, 4096, UINT64_MAX };
 static const char host[] = "erxos";
+
+/*
+ * Whether an accepted record holds a fun, an export, a pid or a reference,
+ * the kinds only the domain and system grammars admit.  The record is one
+ * whole term, so the walk ends at its end.  The walk reads tags with the
+ * tokenizer the check uses, so it catches a grammar rule that admits one
+ * of these kinds, not a tokenizer that misnames a tag; the funnel's
+ * stock-OTP oracle test covers that.
+ */
+static bool
+holds_domain_only(const uint8_t *bytes, size_t len)
+{
+	erx_etf_reader_t r;
+	erx_etf_item_t item;
+	erx_etf_reason_t reason;
+
+	if (!erx_etf_reader_init(&r, bytes, len))
+		abort();
+	for (;;) {
+		switch (erx_etf_next(&r, &item, &reason)) {
+		case ERX_ETF_STEP_END:
+			return (false);
+		case ERX_ETF_STEP_ERROR:
+			abort();
+		case ERX_ETF_STEP_ITEM:
+			break;
+		}
+		if (item.kind == ERX_ETF_FUN || item.kind == ERX_ETF_EXPORT ||
+		    item.kind == ERX_ETF_PID || item.kind == ERX_ETF_REF)
+			return (true);
+	}
+}
 
 /* One record: channel mode, then the shape and the credit for one it accepts. */
 static void
@@ -50,7 +85,8 @@ record(const uint8_t *bytes, size_t len, const erx_funnel_limits_t *limits,
 		abort();
 	if (verdict != ERX_ETF_ACCEPTED)
 		return;	/* the driver ends the program with SIGSYS */
-	if (len > ERX_PROG_FRAME_MAX || result.words > limits->max_words)
+	if (len > ERX_PROG_FRAME_MAX || result.words > limits->max_words ||
+	    holds_domain_only(bytes, len))
 		abort();
 	frame = erx_program_frame_shape(bytes, len);
 	if (frame.kind == ERX_PROGRAM_FRAME_REQUEST &&
@@ -80,7 +116,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	if (size < 1)
 		return (0);
 	limits = (erx_funnel_limits_t){ .host = host,
-	    .host_len = sizeof(host) - 1,
+	    .host_len = (data[0] & 0x20) != 0 ? 0 : sizeof(host) - 1,
 	    .max_words = words[data[0] & 3],
 	    .depth = depths[(data[0] >> 2) & 3],
 	    .system = (data[0] & 0x10) != 0 };

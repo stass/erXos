@@ -262,8 +262,12 @@ size_t erx_funnel_payload_scratch_bytes(const erx_funnel_limits_t *limits,
  * carries no name with authority.  It is erx_funnel_payload with the
  * channel's limits: at most ERX_PROG_FRAME_MAX bytes, the program
  * protocol's frame bound, refused as ERX_ETF_ERR_TOO_LONG before a byte
- * is read, then the receiving domain's grammar, word limit and
- * funnel_depth.  A record it refuses ends the program with SIGSYS.
+ * is read, then the host grammar (no fun, export, pid or reference, none
+ * of which the program protocol carries; docs/design-domains.md, "Channel
+ * mode", says why the receiving domain's own grammar is not used) with
+ * the receiving domain's word limit and funnel_depth.  Of limits it reads
+ * only max_words and depth.  A record it refuses ends the program with
+ * SIGSYS.
  * erx_funnel_channel_scratch_bytes(limits) bytes, fixed for a domain,
  * suffice for every record.
  */

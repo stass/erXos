@@ -1400,7 +1400,8 @@ Three cases are not malformed:
 
 ```text
 term      = integer / float / atom / binary / bitstring / tuple / list / map
-          / record / pid / reference / fun / export   ; fun, export: domain grammar only
+          / record / pid / reference / fun / export   ; fun, export: domain grammar only;
+                                                       pid, reference: not the host grammar
 integer   = SMALL_INTEGER_EXT (97) / INTEGER_EXT (98)
           / SMALL_BIG_EXT (110) / LARGE_BIG_EXT (111), at most ERTS's
             BIG_ARITY_MAX digits
@@ -1429,9 +1430,10 @@ Excluded by construction: ports of every format, old pid, reference, fun and
 float formats, `LOCAL_EXT`, compressed terms, distribution headers,
 atom-cache references and ERTS's internal tags. The system grammar also
 excludes `fun` and `export`, and the system domain's peer decodes atoms
-without creating them, which is invariant D5. Fixing the integer fields of
-`fun` and `export` as integers keeps ERTS's decoder, which reads each of
-them with a nested call, one level deep. The funnel checks that a record's
+without creating them, which is invariant D5. The host grammar, the host
+link's and a program's channel's, excludes `pid` and `reference` as well.
+Fixing the integer fields of `fun` and `export` as integers keeps ERTS's
+decoder, which reads each of them with a nested call, one level deep. The funnel checks that a record's
 field names are distinct by sorting an index of them, at most 65,535 entries
 of 4 bytes, in the connection's scratch, as ERTS's decoder refuses
 duplicates (`beam/external.c:5338-5348`).
@@ -1483,6 +1485,33 @@ the system domain lacks is a safe-mode refusal, not a malformed term: a
 message is dropped and counted, and an exit reason becomes
 `{erx_foreign_reason, Bin}`. No decoder failure may panic the runtime or
 enter an unchecked allocator failure path.
+
+**Channel mode.** A program's channel
+([design-programs.md](design-programs.md#the-channel)) is a pair of lanes
+too, and the session's port driver reads it through `erx_lane_take`, but
+it carries no distribution: each record is one term of the program
+protocol, version byte first, with no frame header and no control term,
+since a channel carries no name with authority. The funnel judges such a
+record in its channel mode, `erx_funnel_channel`. A record longer than
+`ERX_PROG_FRAME_MAX` bytes, the program protocol's frame bound
+(`prog_frame_max` in `abi/protocols/prog.txt`), is over a limit before a
+byte of it is read. The rest is step 6's structural pass, with the
+receiving domain's word limit and `funnel_depth`, in the host grammar
+whatever the receiving domain: no `fun`, `export`, `pid` or `reference`.
+The program protocol carries none of them, and ERTS's safe decode of them
+reaches past the receiving process. A fun adds a fun-table entry that only
+a module purge frees, and a pid or reference of another node adds a
+node-table entry. A record is decoded with no connection, so a reference
+of the session's own node whose words match a live one becomes that
+alias, table or resource, its shared count raised; reference numbers
+are counters, not secrets, so a program could forge one, and the host grammar is
+what stops it. With them refused, decoding a record the funnel accepts
+changes nothing outside the receiving process, since the safe decode
+makes no atom and a record only looks its definition up. The channel's
+scratch is fixed for the domain, what the longest record needs. A program
+has no connection to end: a record the channel mode refuses, malformed or
+over a limit, ends the program with `SIGSYS`
+([design-programs.md](design-programs.md#the-channel)).
 
 ### The peer
 

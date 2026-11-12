@@ -16,9 +16,10 @@ require_relative 'etf_wire'
 #
 # Each term reports whether ERTS's size pass counts it exactly (bigs, maps
 # over 32 pairs, records, funs and binaries over 64 bytes it
-# overestimates) and how many exports it holds: an export decodes to its
+# overestimates), how many exports it holds (an export decodes to its
 # entry's fun, a literal that takes no heap, though erts_debug:flat_size/1
-# counts it as 2 words.
+# counts it as 2 words) and whether the host grammar admits it, that is,
+# whether it holds no pid, reference, fun or export.
 class EtfGenerator
   include EtfWire
 
@@ -26,7 +27,7 @@ class EtfGenerator
   NAMES = ['ok', 'a', 'b', 'error', '', "\u00e9t\u00e9", "\u{1F600}", 'x' * 255].freeze
   INTEGERS = [0, 1, 255, 256, -1, (2**31) - 1, -(2**31), 2**31, (2**59) - 1, 2**59, 2**63, -(2**63), 2**64].freeze
 
-  Encoded = Data.define(:bytes, :exact, :exports)
+  Encoded = Data.define(:bytes, :exact, :exports, :host_grammar)
 
   def initialize(values, encodings, key_seeds = [])
     @values = values
@@ -46,9 +47,11 @@ class EtfGenerator
 
   def value_pick(list) = list[@values.rand(list.size)]
   def encoding_pick(list) = list[@encodings.rand(list.size)]
-  def leaf(bytes, exact: true, exports: 0) = Encoded.new(bytes, exact, exports)
+  def leaf(bytes, exact: true, exports: 0, host_grammar: true) = Encoded.new(bytes, exact, exports, host_grammar)
   def children(depth, count) = Array.new(count) { term(depth - 1) }
-  def container(bytes, parts, exact: true) = Encoded.new(bytes, exact && parts.all?(&:exact), parts.sum(&:exports))
+  def container(bytes, parts, exact: true, host_grammar: true)
+    Encoded.new(bytes, exact && parts.all?(&:exact), parts.sum(&:exports), host_grammar && parts.all?(&:host_grammar))
+  end
 
   # An integer in one of the encodings that hold it, and whether ERTS's
   # size pass counts that encoding exactly.
@@ -72,8 +75,15 @@ class EtfGenerator
   def atom_bytes(name) = @encodings.rand(2).zero? ? atom(name) : long_atom(name)
   def atom_term(_depth) = leaf(atom_bytes(value_pick(NAMES)))
   def nil_term(_depth) = leaf(encoding_pick([nil_, string(''), list([])]))
-  def pid_term(_depth) = leaf(pid(value_pick(NODES), @values.rand(2**32), @values.rand(2**32), @values.rand(2**32)))
-  def ref_term(_depth) = leaf(ref(value_pick(NODES), @values.rand(2**32), Array.new(4) { @values.rand(2**32) }))
+
+  def pid_term(_depth)
+    leaf(pid(value_pick(NODES), @values.rand(2**32), @values.rand(2**32), @values.rand(2**32)), host_grammar: false)
+  end
+
+  def ref_term(_depth)
+    leaf(ref(value_pick(NODES), @values.rand(2**32), Array.new(4) { @values.rand(2**32) }), host_grammar: false)
+  end
+
   def string_term(_depth) = leaf(string(@values.bytes(@values.rand(40))))
 
   def binary_term(_depth)
@@ -138,12 +148,13 @@ class EtfGenerator
     bytes = fun(module_name: atom_bytes(value_pick(NAMES)), old_index: small(@encodings.rand(256)),
                 old_uniq: int(@encodings.rand(2**31)), creator: pid(encoding_pick(NODES)), free: free.map(&:bytes),
                 uniq: @values.bytes(16), index: @values.rand(4), arity: @values.rand(3))
-    container(bytes, free, exact: false)
+    container(bytes, free, exact: false, host_grammar: false)
   end
 
   def export_term(_depth)
     arity, exact = integer_bytes(@values.rand(256))
-    leaf(export(atom_bytes(value_pick(NAMES)), atom_bytes(value_pick(NAMES)), arity), exact: exact, exports: 1)
+    bytes = export(atom_bytes(value_pick(NAMES)), atom_bytes(value_pick(NAMES)), arity)
+    leaf(bytes, exact: exact, exports: 1, host_grammar: false)
   end
 
   def record_term(depth)

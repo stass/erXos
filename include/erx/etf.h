@@ -81,8 +81,8 @@ typedef struct erx_etf_writer erx_etf_writer_t;
 /*
  * The grammars, each the one above it less some kinds: the domain grammar
  * for frames to a domain, the system grammar for frames to the system
- * domain (no funs or exports), the host grammar for the host link (no
- * pids or references either).
+ * domain (no funs or exports), the host grammar for the host link and a
+ * program's channel (no pids or references either).
  */
 typedef enum erx_etf_grammar {
 	ERX_ETF_DOMAIN,
