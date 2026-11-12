@@ -47,11 +47,31 @@ bounded_measure_test_() ->
       ?_assertMatch({error, {failed, {function_clause, _}}}, erx_hostlink:bounded_measure(not_a_payload)),
       ?_assertMatch({ok, _}, erx_hostlink:bounded_measure(term_to_binary(ok)))]}.
 
+%% Monitors Facet and returns only once the monitor is in effect, so that a test may then
+%% end the process Facet ends with and expect Facet's own exit reason.
+%%
+%% Erlang orders signals only between one sender and one receiver (Reference Manual,
+%% "Signal Delivery"), and ERTS holds a process monitor back, sending it ahead of the
+%% monitoring process's next signal to the same process, or when that process creates
+%% another monitor or is scheduled out. A signal this process then sends a third process
+%% can overtake it: the third process ends, Facet ends with it, and the monitor arrives
+%% after Facet's end and reports noproc. process_info/2 for monitored_by is answered by
+%% Facet itself, through a request signal to Facet that the held monitor is sent ahead of
+%% (unlike is_process_alive/1, whose answer ERTS may give without one), so its answer
+%% shows the monitor in effect.
+monitor_in_effect(Facet) ->
+    Ref = erlang:monitor(process, Facet),
+    case process_info(Facet, monitored_by) of
+        {monitored_by, By} -> ?assert(lists:member(self(), By));
+        undefined -> error(facet_ended_before_its_monitor)
+    end,
+    Ref.
+
 %% An install facet is a process the root reports as opened, and it ends with its link.
 install_facet_ends_with_its_link_test() ->
     Link = spawn(fun() -> receive stop -> ok end end),
     {{ok, Facet}, [Facet]} = erx_hostlink:root({open, install}, Link),
-    Ref = erlang:monitor(process, Facet),
+    Ref = monitor_in_effect(Facet),
     Link ! stop,
     receive {'DOWN', Ref, process, Facet, Reason} -> ?assertEqual(shutdown, Reason)
     after 5000 -> error(facet_outlived_its_link)
@@ -181,7 +201,7 @@ web_facet_ends_with_the_relay_test() ->
     Test = self(),
     Relay = spawn(fun() -> relay(Test) end),
     {{ok, Facet}, [Facet]} = open_web(Relay),
-    Ref = erlang:monitor(process, Facet),
+    Ref = monitor_in_effect(Facet),
     exit(Relay, kill),
     receive {'DOWN', Ref, process, Facet, Reason} -> ?assertEqual(shutdown, Reason)
     after 5000 -> error(facet_outlived_its_relay)

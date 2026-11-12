@@ -980,6 +980,22 @@ it; git history is the record of completed work.
   select a search instead. `beam_SUITE:select_val_mixed/1` is skipped on stock's JIT, and the generator of
   `erx_prog:status/1` (`tools/lib/erx/abi_emit_erlang.rb`) keeps its signal clauses in a function of their own,
   since the host tests run that module on stock. Report it upstream.
+* [Low] upstream, ERTS signals (`otp/erts/emulator/beam/erl_bif_info.c`, `is_process_alive_1`): a
+  process monitor is held as its scheduler's pending signal until the monitoring process sends
+  that target another signal, creates another process monitor or is scheduled out
+  (`proc_queue_signal` in `erl_proc_sig_queue.c`), and `is_process_alive/1`'s fast path answers
+  without sending it. `erlang:monitor(process, P)` followed by `is_process_alive(P)` can answer
+  `true` and the monitor then report `noproc`, against the guarantee `is_process_alive/1`
+  documents (every earlier signal from the caller reaches P before the check); seen on the stock
+  OTP 29.1.2 oracle build. When the caller's pending signal is to P, take the trap path or send
+  it first (`erts_proc_sig_send_pending`), and report it upstream.
+* [Low] tests, EUnit cases under `test/erlang/` of this shape: after `monitor(process, P)` the
+  case sends a third process a message or exit signal, with no signal to P, no other monitor and
+  no blocking receive between, and then asserts P's exit reason. As in `erx_hostlink_tests`, P
+  can end before the held monitor reaches it, and the case sees `noproc`. Candidates:
+  `erx_console_master_tests.erl` (around line 330), `erx_domain_tests.erl` (around lines 179
+  and 338). Wait for the monitor first, as `erx_hostlink_tests:monitor_in_effect/1` does; move
+  that helper to a shared test module if more than one module needs it.
 * [Low] tooling, `tools/lib/erx/erlang_apps.rb` (`check_modules`): an application's `.app.src`
   module list is compared with its `src/` only when a release is built, so `make check` passes a
   module added without its `.app.src` entry and every QEMU suite and `make check-boot-image`
