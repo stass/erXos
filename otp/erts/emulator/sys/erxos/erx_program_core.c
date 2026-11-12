@@ -10,27 +10,36 @@
 
 #include "erx_program_core.h"
 
-/* A step that made nothing of its own: a map dies with its space, and the start is last. */
+/* A step that made nothing of its own: a map and an install die with their space, and the start is last. */
 #define NO_UNDO	ERX_PROGRAM_DONE
 
 /*
  * The start's one order, and what undoes each step. A release is this table read
  * backwards, so a failed start and a program's end free the same things the same way.
+ * What the session keeps and maps of the program's channel comes before the program's
+ * budget, so every release deletes it only after that budget is destroyed, by this order
+ * alone (docs/design-programs.md, "The channel").
  */
 static const struct {
 	erx_program_act_t	step;
 	erx_program_act_t	undo;
 } plan[] = {
-	{ ERX_PROGRAM_BUDGET_CREATE, ERX_PROGRAM_BUDGET_DESTROY },
-	{ ERX_PROGRAM_GROUP_CREATE, ERX_PROGRAM_GROUP_CLOSE },
+	{ ERX_PROGRAM_CHANNEL_CREATE, ERX_PROGRAM_CHANNEL_DESTROY },
+	{ ERX_PROGRAM_CHANNEL_MAP, ERX_PROGRAM_CHANNEL_UNMAP },
+	{ ERX_PROGRAM_BELL_CREATE, ERX_PROGRAM_BELL_DESTROY },
+	{ ERX_PROGRAM_DATA_CREATE, ERX_PROGRAM_DATA_DESTROY },
 	{ ERX_PROGRAM_IRQ_CREATE, ERX_PROGRAM_IRQ_CLOSE },
 	{ ERX_PROGRAM_SINK_REGISTER, ERX_PROGRAM_SINK_UNREGISTER },
 	{ ERX_PROGRAM_IRQ_BIND, ERX_PROGRAM_IRQ_UNBIND },
+	{ ERX_PROGRAM_BUDGET_CREATE, ERX_PROGRAM_BUDGET_DESTROY },
+	{ ERX_PROGRAM_GROUP_CREATE, ERX_PROGRAM_GROUP_CLOSE },
 	{ ERX_PROGRAM_GATE_REGISTER_ANCHOR, ERX_PROGRAM_GATE_UNREGISTER_ANCHOR },
 	{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },
 	{ ERX_PROGRAM_ANCHOR_CREATE, ERX_PROGRAM_ANCHOR_DESTROY },
 	{ ERX_PROGRAM_IMAGE_CREATE, ERX_PROGRAM_IMAGE_CLOSE },
 	{ ERX_PROGRAM_IMAGE_MAP, NO_UNDO },
+	{ ERX_PROGRAM_INSTALL, NO_UNDO },
+	{ ERX_PROGRAM_BELL_BIND, ERX_PROGRAM_BELL_UNBIND },
 	{ ERX_PROGRAM_THREAD_CREATE, ERX_PROGRAM_THREAD_CLOSE },
 	{ ERX_PROGRAM_THREAD_START, NO_UNDO },
 };
@@ -108,6 +117,37 @@ erx_program_start_next(erx_program_start_t *run, int result)
 	}
 	run->over = 1;
 	return (ERX_PROGRAM_DONE);
+}
+
+/*
+ * Each copy's rights, from docs/design-programs.md's tables: the budget to allocate from;
+ * the group to create threads in and bind IRQ objects to; each side of a lane writable only
+ * by the party that writes it, the inbound ring and the outbound reader page read-only; the
+ * session's doorbell to trigger alone; the data area to read, write and map.
+ */
+static const uint32_t install_rights[ERX_PROGRAM_INSTALLS] = {
+	[ERX_PROGRAM_ARG_BUDGET] = ERX_HR_ALLOC,
+	[ERX_PROGRAM_ARG_GROUP] = ERX_HR_ATTACH | ERX_HR_SIGNAL,
+	[ERX_PROGRAM_ARG_IN_RING] = ERX_HR_READ | ERX_HR_MAP,
+	[ERX_PROGRAM_ARG_IN_READER] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP,
+	[ERX_PROGRAM_ARG_OUT_RING] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP,
+	[ERX_PROGRAM_ARG_OUT_READER] = ERX_HR_READ | ERX_HR_MAP,
+	[ERX_PROGRAM_ARG_DOORBELL] = ERX_HR_TRIGGER,
+	[ERX_PROGRAM_INSTALL_DATA] = ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP,
+};
+
+uint32_t
+erx_program_install_rights(uint32_t index)
+{
+	return (index < ERX_PROGRAM_INSTALLS ? install_rights[index] : 0);
+}
+
+uint32_t
+erx_program_install_batch(uint32_t first)
+{
+	if (first >= ERX_PROGRAM_INSTALLS)
+		return (0);
+	return (ERX_PROGRAM_INSTALLS - first < ERX_MSG_CAPS ? ERX_PROGRAM_INSTALLS - first : ERX_MSG_CAPS);
 }
 
 erx_program_end_t

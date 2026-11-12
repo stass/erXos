@@ -33,4 +33,20 @@ class ChokepointsProgramTest < Minitest::Test
       end
     end
   end
+
+  # The driver alone passes handles into a program's table in ERTS; liberx's domain library
+  # and a comment naming the call are not ERTS's passes.
+  def test_only_the_program_driver_passes_handles_in_erts
+    installs = [rule('program-installs')]
+    pass = "\tstatus = erx_cap_pass(ERX_CAP_SELF, program->image, count);\n"
+    allowed = {
+      Rules::PROGRAM_DRIVER => pass,
+      'liberx/system/dom_install.c' => "\tstatus = erx_cap_pass(ERX_CAP_SELF, recipient, 1);\n",
+      'otp/erts/emulator/sys/erxos/erx_program_core.h' => "/* the install's erx_cap_pass from index first */\n"
+    }
+    assert_empty evaluate(installs, allowed, imported: allowed.keys.grep(/\Aotp/))
+    %w[otp/erts/emulator/sys/erxos/erx_gate.c otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c].each do |path|
+      refute_empty evaluate(installs, { path => pass }, imported: [path]), "#{path} may pass"
+    end
+  end
 end

@@ -31,6 +31,23 @@ module Erx
                     "\t(void)erx_space_create(0, ERX_CAP_SELF, gate, 2, 0, 16, &space);\n",
                   'otp/erts/emulator/nifs/erxos/erx_domain_lib_nif.c' =>
                     "\t(void)erx_space_stop(space, 0);\n" }
+        ),
+        # The driver alone passes handles into a program's table
+        # (docs/design-programs.md, "The channel"), each copy with the rights
+        # the program core gives its index and none with DUP, GIVE or
+        # DESTROY, so the session keeps the only DESTROY on what it made. A
+        # pass anywhere else in ERTS would hand a program what that table
+        # does not list.
+        Chokepoints::Forbidden.new(
+          name: 'program-installs',
+          rule: "only #{PROGRAM_DRIVER} calls erx_cap_pass in ERTS",
+          design: 'docs/design-programs.md#the-channel',
+          scope: Chokepoints::Scope.new(own: false, extra: %w[otp/erts/**/*],
+                                        except: ['otp/erts/emulator/asmjit/**/*']),
+          pattern: /.*\berx_cap_pass\s*\(.*/,
+          sites: [Chokepoints::Site.new(glob: PROGRAM_DRIVER)],
+          seed: { 'otp/erts/emulator/sys/erxos/erx_gate.c' =>
+                    "\t(void)erx_cap_pass(ERX_CAP_SELF, space, 1);\n" }
         )
       ]
     )

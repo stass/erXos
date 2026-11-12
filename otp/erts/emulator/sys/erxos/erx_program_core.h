@@ -10,10 +10,12 @@
  * and everything it held released once. It knows nothing of ERTS and calls no kernel, so a
  * host test drives every path (test/host/erx_program_core_test.rb).
  *
- * The start is a spec checked whole, then the steps below in order. The IRQ object, its
- * event-table sink, its bind and the gate registration come before the spaces that carry
- * the label, as erx_gate.h and erx_event.h require; a release undoes the steps in reverse,
- * so the gate registration ends before the object closes and the bind before the sink.
+ * The start is a spec checked whole, then the steps below in order. What the session keeps
+ * of a program's channel comes first, so a release, which undoes the steps in reverse,
+ * deletes it only after the program's budget. The session's doorbell, its event-table
+ * sink, its bind and the gate registrations come before the spaces that carry the labels,
+ * as erx_gate.h and erx_event.h require, so the gate registrations end before the doorbell
+ * closes and the bind before the sink.
  *
  * The end reads the records of the program's two spaces: its image, the space its threads
  * run in, and its anchor, the space above it. Each space carries a label of its own, which
@@ -44,36 +46,53 @@
  * A bound on the actions one input of the end returns: a report, a stop, the whole release
  * (one undo per step at most) and a close. erx_program_core.c asserts the plan fits.
  */
-#define ERX_PROGRAM_ACTIONS_MAX	15
+#define ERX_PROGRAM_ACTIONS_MAX	21
 
 typedef enum {
 	ERX_PROGRAM_DONE = 0,		/* the start's run is over; see erx_program_start_t.error */
 
-	/* The start's steps, in the order they are applied. */
+	/*
+	 * The start's steps, in the order they are applied. What the session keeps and maps, the
+	 * channel, both doorbells and the data area, all from its own budget, comes before the
+	 * program's budget, so every release, last step first, deletes it after that budget is
+	 * destroyed and the program never faults on its own channel (docs/design-programs.md,
+	 * "The channel").
+	 */
+	ERX_PROGRAM_CHANNEL_CREATE,	/* the channel's four memory objects: each lane's ring and reader page */
+	ERX_PROGRAM_CHANNEL_MAP,	/* all four into the session's space: what it writes writable, the rest read-only */
+	ERX_PROGRAM_BELL_CREATE,	/* the program's doorbell, which the driver triggers */
+	ERX_PROGRAM_DATA_CREATE,	/* the program's data area */
+	ERX_PROGRAM_IRQ_CREATE,		/* the session's doorbell, the port's own IRQ object, which the program triggers */
+	ERX_PROGRAM_SINK_REGISTER,	/* the port's sink in the event table, which gives the bind's label */
+	ERX_PROGRAM_IRQ_BIND,		/* the session's doorbell into the session's group under that label */
 	ERX_PROGRAM_BUDGET_CREATE,	/* carve the program's budget from the session's pool */
 	ERX_PROGRAM_GROUP_CREATE,	/* its group, a child of the session's programs group */
-	ERX_PROGRAM_IRQ_CREATE,		/* the port's own IRQ object, from the session's budget */
-	ERX_PROGRAM_SINK_REGISTER,	/* the port's sink in the event table, which gives the bind's label */
-	ERX_PROGRAM_IRQ_BIND,		/* the object into the session's group under that label */
-	ERX_PROGRAM_GATE_REGISTER_ANCHOR, /* the anchor's label with the gate worker, for the object */
+	ERX_PROGRAM_GATE_REGISTER_ANCHOR, /* the anchor's label with the gate worker, for the session's doorbell */
 	ERX_PROGRAM_GATE_REGISTER_IMAGE, /* the image's label, likewise */
 	ERX_PROGRAM_ANCHOR_CREATE,	/* parent the session's space, its fault gate, the anchor's label */
 	ERX_PROGRAM_IMAGE_CREATE,	/* below the anchor, the same gate, the image's label */
 	ERX_PROGRAM_IMAGE_MAP,		/* the boot image's program, with erx_image_map */
+	ERX_PROGRAM_INSTALL,		/* the program's copies into the image's table (erx_program_install_rights) */
+	ERX_PROGRAM_BELL_BIND,		/* the program's doorbell into its group, labelled with the inbound ring's value */
 	ERX_PROGRAM_THREAD_CREATE,	/* the image's first thread, stopped, in the program's group */
 	ERX_PROGRAM_THREAD_START,
 
 	/* The undos of the steps that made something; a release is all of them in this order. */
 	ERX_PROGRAM_THREAD_CLOSE,
+	ERX_PROGRAM_BELL_UNBIND,	/* a bind to ERX_CAP_NULL */
 	ERX_PROGRAM_IMAGE_CLOSE,
 	ERX_PROGRAM_ANCHOR_DESTROY,	/* erx_object_destroy, which ends the tree, then close */
 	ERX_PROGRAM_GATE_UNREGISTER_IMAGE,
 	ERX_PROGRAM_GATE_UNREGISTER_ANCHOR,
+	ERX_PROGRAM_GROUP_CLOSE,
+	ERX_PROGRAM_BUDGET_DESTROY,	/* erx_object_destroy, which ends all charged to it, then close */
 	ERX_PROGRAM_IRQ_UNBIND,		/* a bind to ERX_CAP_NULL */
 	ERX_PROGRAM_SINK_UNREGISTER,
 	ERX_PROGRAM_IRQ_CLOSE,
-	ERX_PROGRAM_GROUP_CLOSE,
-	ERX_PROGRAM_BUDGET_DESTROY,	/* erx_object_destroy, which ends all charged to it, then close */
+	ERX_PROGRAM_DATA_DESTROY,
+	ERX_PROGRAM_BELL_DESTROY,
+	ERX_PROGRAM_CHANNEL_UNMAP,	/* erx_vm_release of the session's four mappings */
+	ERX_PROGRAM_CHANNEL_DESTROY,
 
 	/* The end's own. */
 	ERX_PROGRAM_REPORT,		/* {Port, {exit_status, status}} to the owner */
@@ -194,7 +213,7 @@ erx_program_input_t erx_program_input_of(const erx_fault_t *record, erx_program_
  *   - REPORT comes at most once, only from the image's exit record, and carries that
  *     record's status, or the fault's status when the record says the image ended by the
  *     anchor's stop the fault asked for (ERX_EXIT_PARENT);
- *   - the release (ERX_PROGRAM_THREAD_CLOSE to ERX_PROGRAM_BUDGET_DESTROY, in that order)
+ *   - the release (ERX_PROGRAM_THREAD_CLOSE to ERX_PROGRAM_CHANNEL_DESTROY, in that order)
  *     comes exactly once: once both spaces' exit records arrived, at a close, or at a
  *     loss; after it comes nothing but the port's held close;
  *   - the anchor is stopped at most once, and never after its exit record arrived: at the
@@ -206,5 +225,26 @@ erx_program_input_t erx_program_input_of(const erx_fault_t *record, erx_program_
  */
 size_t	erx_program_end_next(erx_program_end_t *end, erx_program_input_t input,
 	    erx_program_action_t actions[ERX_PROGRAM_ACTIONS_MAX]);
+
+/*
+ * What ERX_PROGRAM_INSTALL passes into the image's table, by index: at each of program_arg's
+ * indices the object whose value the first thread's argument register of that index carries
+ * (abi/erx_abi.txt), then the data area, whose value the startup message carries. The
+ * session keeps the only DESTROY, and no copy carries DUP or GIVE, so on erXos's kernel the
+ * program cannot end, copy or hand on what the session made; on the stopgap the rights are
+ * the session's discipline only (docs/design-programs.md, "A program is a port" and "The
+ * channel"; docs/design-stopgap.md).
+ */
+#define ERX_PROGRAM_INSTALL_DATA	((uint32_t)ERX_PROGRAM_ARG_DOORBELL + 1)
+#define ERX_PROGRAM_INSTALLS		(ERX_PROGRAM_INSTALL_DATA + 1)
+
+/* The rights the program's copy at index carries: 0 past the last index. */
+uint32_t	erx_program_install_rights(uint32_t index);
+/*
+ * How many copies the install's erx_cap_pass from index first passes: at most ERX_MSG_CAPS,
+ * and 0 once first is past the last, so passes from 0, each starting where the last ended,
+ * pass every index once.
+ */
+uint32_t	erx_program_install_batch(uint32_t first);
 
 #endif /* ERX_PROGRAM_CORE_H */

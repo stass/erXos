@@ -1533,7 +1533,18 @@ applied in this order, each step undoing the ones before it on failure:
    its startup message; and the guarantee and cap of its budget and the
    limits of its group, which lie within the session's pool for programs
    and the session's grant.
-2. **Create the program's spaces** as
+2. **Create the channel and the data area**: two rings, two reader pages
+   and two doorbells, in the lane layout every lane has
+   ([design-domains.md](design-domains.md#connections)), from the
+   session's budget, with the session's mappings of the four pages; the
+   session's doorbell bound to the session's group under the port's
+   label, registered as the port's sink in the event table; and the
+   program's data area, from the session's budget as the channel is
+   ([design-programs.md](design-programs.md#the-channel)). They come
+   first, before the program's budget, so the undo, last step first,
+   deletes them only after that budget is destroyed, and the program
+   never faults on its own channel.
+3. **Create the program's spaces** as
    [design-programs.md](design-programs.md#a-program-is-a-port) lays them
    out: carve the program's budget from the session's pool for programs; create its group,
    a child of the session's programs group with the limits the spec
@@ -1547,11 +1558,11 @@ applied in this order, each step undoing the ones before it on failure:
    session, ends the program's children with it, and keeps it within the
    session's budget and grant
    ([design-system.md](design-system.md#sub-spaces)). Before the anchor,
-   the driver makes the session's doorbell of step 4, registers it as the
-   port's sink, binds it, and registers the process id with the gate
-   worker under it, so no record of the program's spaces arrives before a
-   port listens for it ([The event table](#the-event-table)).
-3. **Map the image.** A program of the boot image is mapped from its
+   the driver registers the anchor's and the image's labels with the gate
+   worker under the session's doorbell of step 2, so no record of the program's spaces
+   arrives before a port listens for it
+   ([The event table](#the-event-table)).
+4. **Map the image.** A program of the boot image is mapped from its
    slices with `erx_image_map`, its code shared with every program that
    runs it; an executable file runs the boot image's loader, `erx_exec`,
    mapped the same way, which once it runs in the image checks the file
@@ -1560,22 +1571,15 @@ applied in this order, each step undoing the ones before it on failure:
    ([design-programs.md](design-programs.md#what-a-program-can-start)).
    The three chokepoints stay the only readers of headers, copiers of
    code and mappers of code ([design.md](design.md#chokepoint-checks)).
-4. **Create the channel and the data area**: two rings, two reader pages
-   and two doorbells, in the lane layout every lane has
-   ([design-domains.md](design-domains.md#connections)), from the
-   session's budget; bind the program's doorbell to the program's group
-   with the channel as its label, and the session's doorbell to the
-   session's group under the port's label, registered as the port's sink
-   in the event table; and create the program's data area from the
-   session's budget, as the channel is
-   ([design-programs.md](design-programs.md#the-channel)).
 5. **Install** into the image's table the budget, the group, the
    channel's objects, the data area, the pipe ends the spec names, as the
    session's pipe server made them
    ([design-pipes.md](design-pipes.md#making-a-pipe)), and the code
-   object of an executable file; and create the image's first thread,
-   stopped, with the values of the budget, the group and the channel's
-   objects in its argument registers.
+   object of an executable file; bind the program's doorbell to the
+   program's group with the channel as its label, the inbound ring's
+   value in the program's table, which both sides know from the install;
+   and create the image's first thread, stopped, with the values of the
+   budget, the group and the channel's objects in its argument registers.
 6. **Write the startup message** as the first frame of the image's
    inbound lane, in the form the programs design defines: the program's
    process ids, arguments, environment, working directory, signal state,
@@ -1652,8 +1656,9 @@ catches, ignores or blocks it, since the session never sees the program's
 dispositions ([design-programs.md](design-programs.md#job-control)).
 
 **Fork.** `erx_program:fork(Port, Spec)` makes a child of the program:
-its budget, its group and its anchor below the parent's anchor, as step
-2 does, and its image, empty; pauses the parent's image with
+its channel and data area, as step 2 does, then its budget, its group
+and its anchor below the parent's anchor, as step 3 does, and its image,
+empty; pauses the parent's image with
 `erx_space_pause` and has a **copier**, a worker of the session's space
 in the parent's group, wait for its threads to finish their calls with
 `erx_space_quiesce` under that hold and copy it into the child's with
@@ -1661,14 +1666,14 @@ in the parent's group, wait for its threads to finish their calls with
 copy runs on the parent's grant, and resumes the hold by its ticket
 with `erx_space_resume` when the copier reports, or earlier to give the
 fork up, which ends the copier's quiesce or copy with `ERX_EBUSY` and
-touches no other hold on the parent; and completes the child as steps 4
+touches no other hold on the parent; and completes the child as steps 5
 to 7 do, with the fork message as its startup message and its first
 thread at `liberx`'s fork entry. It returns the child's port, owned by
 the caller, the child's handler
 ([design-programs.md](design-programs.md#fork)).
 
 **Exec.** `erx_program:exec(Port, Spec)` builds the program's next image
-below the same anchor, mapped as step 3 does, with a channel of its own
+below the same anchor, mapped as step 4 does, with a channel of its own
 and its first thread stopped, while the old image runs on. Once it has
 taken the old image's `{exec_commit}`, the handler stops the old image
 with `erx_program:stop(Port, image, Status)`, and the old image's exit

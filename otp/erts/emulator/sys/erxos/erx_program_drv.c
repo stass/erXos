@@ -18,8 +18,13 @@
  * under the port's lock, so a port's start, input tasks, control calls and stop follow one
  * another, and the input task first runs after the start returned.
  *
- * This file is ERTS's one caller of erx_space_create, erx_image_map and erx_thread_create,
- * and of erx_space_stop on another space (tools/lib/erx/chokepoint_rules/program.rb).
+ * The start also makes the program's channel and data area from the session's own budget,
+ * maps the channel into the session, and installs the program's copies into its image's
+ * table (docs/design-programs.md, "The channel"); the session keeps every DESTROY.
+ *
+ * This file is ERTS's one caller of erx_space_create, erx_image_map, erx_thread_create and
+ * erx_cap_pass, and of erx_space_stop on another space
+ * (tools/lib/erx/chokepoint_rules/program.rb).
  */
 
 #ifdef HAVE_CONFIG_H
@@ -35,6 +40,7 @@
 #include "global.h"
 #include "erl_driver.h"
 #include "liberx/backend/api.h"
+#include "erx/lane.h"
 #include "erx/release.h"
 #include "erx_event.h"
 #include "erx_gate.h"
@@ -42,8 +48,17 @@
 
 /* port_control(Port, 1, []): how the start ended, "ok" or the status's e-prefixed name. */
 #define CONTROL_STARTED		1
-/* The capabilities each of a program's spaces may hold: it is given none in this package. */
+/*
+ * The capabilities each of a program's spaces may hold: the image's install takes
+ * ERX_PROGRAM_INSTALLS of them, and the rest is the program's own.
+ */
 #define PROGRAM_CAP_LIMIT	16u
+_Static_assert(ERX_PROGRAM_INSTALLS <= PROGRAM_CAP_LIMIT, "the install fits the image's table");
+/* Each lane's ring, in bytes (docs/design-programs.md, "The channel"). */
+#define PROGRAM_LANE_SIZE	UINT64_C(16384)
+/* The data area's slots, the design's default, and each slot's bytes. */
+#define PROGRAM_DATA_SLOTS	UINT64_C(4)
+#define PROGRAM_SLOT_BYTES	UINT64_C(65536)
 /*
  * The session's pool for programs, which a spec's cap must not exceed. The stopgap keeps
  * budgets as records and reports no budget's cap, so the session has no pool to read yet;
@@ -58,6 +73,23 @@
  */
 static _Atomic uint64_t labels_given;
 
+/*
+ * The channel's four memory objects, each one side of a lane's layout
+ * (erx_lane_side_bytes): the program_arg index its value takes in the program, and how
+ * the session maps it, writable where the session writes, the inbound ring and the
+ * outbound reader page, and read-only where the program does.
+ */
+#define CHANNEL_SIDES	4u
+static const struct {
+	uint32_t	arg;
+	uint32_t	prot;
+} channel_sides[CHANNEL_SIDES] = {
+	{ ERX_PROGRAM_ARG_IN_RING, ERX_PROT_RW },
+	{ ERX_PROGRAM_ARG_IN_READER, ERX_PROT_R },
+	{ ERX_PROGRAM_ARG_OUT_RING, ERX_PROT_R },
+	{ ERX_PROGRAM_ARG_OUT_READER, ERX_PROT_RW },
+};
+
 typedef struct {
 	ErlDrvPort		port;
 	erx_program_spec_t	spec;
@@ -66,15 +98,21 @@ typedef struct {
 	erx_program_end_t	end;		/* meaningful once the start answered ERX_OK */
 	uint64_t		anchor_label;	/* what the anchor's records are kept under */
 	uint64_t		image_label;	/* and the image's */
-	/* What the start made, each ERX_CAP_NULL until its step made it. */
+	/* What the start made, each ERX_CAP_NULL, or address 0, until its step made it. */
+	uint64_t		side[CHANNEL_SIDES];	/* the channel's memory objects, as channel_sides orders them */
+	uint64_t		side_addr[CHANNEL_SIDES]; /* and the session's mappings of them */
+	uint64_t		bell;		/* the program's doorbell */
+	uint64_t		data;		/* the program's data area */
 	uint64_t		budget;
 	uint64_t		group;
-	uint64_t		irq;
+	uint64_t		irq;		/* the session's doorbell, the port's own IRQ object */
 	uint32_t		sink;		/* the event table's label for the port */
 	uint64_t		anchor;
 	uint64_t		image;
 	uint64_t		thread;
 	uint64_t		pc;		/* the image's entry, from erx_image_map */
+	/* What the install made of each copy: its value in the image's table, by install index. */
+	uint64_t		installed[ERX_PROGRAM_INSTALLS];
 } program_t;
 
 extern ErlDrvEntry erx_program_driver_entry;
@@ -155,29 +193,142 @@ release_index(const program_t *program, uint64_t *index)
 	return (status == ERX_ERANGE ? ERX_EINVAL : status);
 }
 
-/* The image's entry and nothing else in the first thread's starting registers, as erx_thread_create reads them. */
+/*
+ * The first thread's starting registers, as erx_thread_create reads them: the image's entry,
+ * and in each program_arg argument register the value the install made of that index's
+ * copy (abi/erx_abi.txt), every other register 0.
+ */
 static void
-first_registers(uint64_t pc)
+first_registers(const program_t *program)
 {
 	erx_thread_start_t start;
 	uint64_t words[sizeof(start) / sizeof(uint64_t)];
 
 	memset(&start, 0, sizeof(start));
-	start.regs.pc = pc;
+	start.regs.pc = program->pc;
+	for (uint32_t arg = 0; arg < ERX_PROGRAM_INSTALL_DATA; arg++)
+		start.regs.gpr[arg] = program->installed[arg];
 	memcpy(words, &start, sizeof(words));
 	for (size_t word = 0; word < sizeof(words) / sizeof(words[0]); word++)
 		(void)erx_utcb_mr_store(erx_utcb_self(), word, words[word]);
 }
 
-/* Destroys an object the start made and closes the session's capability to it. */
+/* Destroys an object the start made, if it did, and closes the session's capability to it. */
 static int
 destroy(uint64_t *object)
 {
-	const int status = erx_object_destroy(*object);
+	int status;
 
+	if (*object == ERX_CAP_NULL)
+		return (ERX_OK);
+	status = erx_object_destroy(*object);
 	(void)erx_cap_close(*object);
 	*object = ERX_CAP_NULL;
 	return (status);
+}
+
+/* Destroys the channel's memory objects the start made. */
+static void
+channel_destroy(program_t *program)
+{
+	for (uint32_t side = 0; side < CHANNEL_SIDES; side++)
+		(void)destroy(&program->side[side]);
+}
+
+/* Releases the session's mappings of the channel the start made. */
+static void
+channel_unmap(program_t *program)
+{
+	const uint64_t bytes = erx_lane_side_bytes(PROGRAM_LANE_SIZE);
+
+	for (uint32_t side = 0; side < CHANNEL_SIDES; side++) {
+		if (program->side_addr[side] != 0)
+			(void)erx_vm_release(ERX_CAP_SELF, program->side_addr[side], bytes);
+		program->side_addr[side] = 0;
+	}
+}
+
+/*
+ * The channel's four memory objects, from the session's budget, each one lane side's
+ * bytes. A step makes all or nothing, so a failure destroys those already made.
+ */
+static int
+channel_create(program_t *program, uint64_t budget)
+{
+	for (uint32_t side = 0; side < CHANNEL_SIDES; side++) {
+		const int status = erx_mem_create(budget, erx_lane_side_bytes(PROGRAM_LANE_SIZE), 0,
+		    &program->side[side]);
+
+		if (status != ERX_OK) {
+			channel_destroy(program);
+			return (status);
+		}
+	}
+	return (ERX_OK);
+}
+
+/* The session's mappings of the channel, as channel_sides says, all or none. */
+static int
+channel_map(program_t *program)
+{
+	const uint64_t bytes = erx_lane_side_bytes(PROGRAM_LANE_SIZE);
+
+	for (uint32_t side = 0; side < CHANNEL_SIDES; side++) {
+		uint64_t addr = 0;
+		int status = erx_vm_reserve(ERX_CAP_SELF, 0, bytes, 0, &addr);
+
+		if (status == ERX_OK) {
+			status = erx_vm_map(ERX_CAP_SELF, addr, bytes, program->side[side], 0,
+			    channel_sides[side].prot);
+			if (status != ERX_OK)
+				(void)erx_vm_release(ERX_CAP_SELF, addr, bytes);
+		}
+		if (status != ERX_OK) {
+			channel_unmap(program);
+			return (status);
+		}
+		program->side_addr[side] = addr;
+	}
+	return (ERX_OK);
+}
+
+/*
+ * Passes the program's copies into the image's table, each with the rights the core gives
+ * its index, in the passes the core sizes, and keeps the value each copy took there. A
+ * pass refused partway leaves copies in the image's table, which go with the image.
+ */
+static int
+install(program_t *program)
+{
+	erx_utcb_t *const utcb = erx_utcb_self();
+	uint64_t handles[ERX_PROGRAM_INSTALLS] = {
+		[ERX_PROGRAM_ARG_BUDGET] = program->budget,
+		[ERX_PROGRAM_ARG_GROUP] = program->group,
+		[ERX_PROGRAM_ARG_DOORBELL] = program->irq,
+		[ERX_PROGRAM_INSTALL_DATA] = program->data,
+	};
+	uint32_t count;
+
+	for (uint32_t side = 0; side < CHANNEL_SIDES; side++)
+		handles[channel_sides[side].arg] = program->side[side];
+	for (uint32_t first = 0; (count = erx_program_install_batch(first)) > 0; first += count) {
+		int status;
+
+		for (uint32_t item = 0; item < count; item++) {
+			uint64_t desc = 0;
+
+			(void)erx_msg_item_desc_rights_set(&desc, erx_program_install_rights(first + item));
+			(void)erx_msg_item_desc_move_set(&desc, false);
+			(void)erx_utcb_mr_store(utcb, 2 * item, desc);
+			(void)erx_utcb_mr_store(utcb, 2 * item + 1, handles[first + item]);
+		}
+		status = erx_cap_pass(ERX_CAP_SELF, program->image, count);
+		if (status != ERX_OK)
+			return (status);
+		for (uint32_t item = 0; item < count; item++)
+			(void)erx_utcb_mr_load(utcb, 2 * item + 1, &program->installed[first + item]);
+	}
+	return (ERX_OK);
 }
 
 static int
@@ -221,6 +372,14 @@ apply(program_t *program, erx_program_action_t action)
 	int status;
 
 	switch (action.act) {
+	case ERX_PROGRAM_CHANNEL_CREATE:
+		return (channel_create(program, boot->budget.raw));
+	case ERX_PROGRAM_CHANNEL_MAP:
+		return (channel_map(program));
+	case ERX_PROGRAM_BELL_CREATE:
+		return (erx_irq_create(boot->budget.raw, 0, ERX_IRQ_SOFT, 0, &program->bell));
+	case ERX_PROGRAM_DATA_CREATE:
+		return (erx_mem_create(boot->budget.raw, PROGRAM_DATA_SLOTS * PROGRAM_SLOT_BYTES, 0, &program->data));
 	case ERX_PROGRAM_BUDGET_CREATE:
 		return (erx_budget_create(boot->budget.raw, ERX_BUDGET_ELASTIC, program->spec.guarantee,
 		    program->spec.cap, &program->budget));
@@ -247,14 +406,21 @@ apply(program_t *program, erx_program_action_t action)
 		if (status != ERX_OK)
 			return (status);
 		return (erx_image_map(program->image, boot->release.raw, index, &program->pc));
+	case ERX_PROGRAM_INSTALL:
+		return (install(program));
+	case ERX_PROGRAM_BELL_BIND:
+		/* The channel's label is the inbound ring's value, which both sides know from the install. */
+		return (erx_irq_bind(program->bell, program->group, program->installed[ERX_PROGRAM_ARG_IN_RING]));
 	case ERX_PROGRAM_THREAD_CREATE:
-		first_registers(program->pc);
+		first_registers(program);
 		return (erx_thread_create(program->budget, program->image, program->group,
 		    ERX_THREAD_CLASS_WORKER, &program->thread));
 	case ERX_PROGRAM_THREAD_START:
 		return (erx_thread_start(program->thread));
 	case ERX_PROGRAM_THREAD_CLOSE:
 		return (close_cap(&program->thread));
+	case ERX_PROGRAM_BELL_UNBIND:
+		return (erx_irq_bind(program->bell, ERX_CAP_NULL, 0));
 	case ERX_PROGRAM_IMAGE_CLOSE:
 		return (close_cap(&program->image));
 	case ERX_PROGRAM_ANCHOR_DESTROY:
@@ -277,6 +443,17 @@ apply(program_t *program, erx_program_action_t action)
 		return (close_cap(&program->group));
 	case ERX_PROGRAM_BUDGET_DESTROY:
 		return (destroy(&program->budget));
+	/* What the session made from its own budget, deleted only after the program's. */
+	case ERX_PROGRAM_DATA_DESTROY:
+		return (destroy(&program->data));
+	case ERX_PROGRAM_BELL_DESTROY:
+		return (destroy(&program->bell));
+	case ERX_PROGRAM_CHANNEL_UNMAP:
+		channel_unmap(program);
+		return (ERX_OK);
+	case ERX_PROGRAM_CHANNEL_DESTROY:
+		channel_destroy(program);
+		return (ERX_OK);
 	case ERX_PROGRAM_REPORT:
 		report(program, action.status);
 		return (ERX_OK);

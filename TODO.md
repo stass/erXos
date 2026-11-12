@@ -1546,8 +1546,26 @@ it; git history is the record of completed work.
   (`task_segment_share`), which no program of a session runs yet. Pack one as an image entry
   inside the domain release and run it.
 * [Low] hosted backend, `liberx/backend/hosted/refused.c`: a hosted runtime runs no programs; the
-  budget's carve is refused, so `erx_program:start/1` answers `{error, enotsup}`. Programs in hosted
-  mode need the hosted backend to make spaces.
+  channel's first memory object is refused, so `erx_program:start/1` answers `{error, enotsup}`.
+  Programs in hosted mode need the hosted backend to make spaces and pass handles.
+* [Low] Programs, `abi/erx_abi.txt` (`program_arg`): AArch64 and RISC-V take the 7 `program_arg`
+  indices in argument registers. An x86-64 port needs an entry stub, because x86-64 has 6 integer
+  argument registers.
+* [Low] erx_program driver, `otp/erts/emulator/sys/erxos/erx_program_drv.c`: the session makes and
+  installs the program's data area, but the session's own mapping of it waits for the handler's
+  copier, its NIF, which copies the bytes of reads and writes (docs/design-programs.md, "Descriptors
+  and files").
+* [Medium] erx_program driver and core (`erx_program_drv.c` `channel_sides`, `install()`;
+  `erx_program_core.c` `install_rights`): which channel side sits at which `program_arg` index, how
+  the session maps it and what rights the program gets are three tables joined by index, and no
+  test checks that exactly one party may write each side or what the program receives in x0-x6.
+  Give the core one row per side (index, session protection, program rights) with a host check,
+  and a `programs` guest that checks its argument registers and the doorbell label.
+* [Low] erx_program driver: each program costs the session about 352 KiB of its own budget (four
+  24 KiB lane sides, the 256 KiB data area, two IRQ objects) with no session-side bound, since
+  `PROGRAM_POOL` is unbounded; many starts can exhaust the session's own budget.
+* [Low] `abi/erx_abi.txt` (`program_arg`): the generator emits no count, so
+  `ERX_PROGRAM_INSTALL_DATA` (`erx_program_core.h`) assumes `doorbell` is the last index.
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/fault_gate.c` (`erx_fiasco_gate_fault`): a
   fault takes any free entry of its space's pool, since Fiasco's fault message names only the task, so
   its record's thread is unknown and design-stopgap.md's "a fault in its thread's record" does not

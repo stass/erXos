@@ -32,7 +32,7 @@ module Erx
         # With no other mapping of device memory in a runtime, nothing else can reach one.
         Chokepoints::Forbidden.new(
           name: 'device-memory-mapping',
-          rule: "only erx_device makes a runtime's mapping of device memory; the lane driver, the crash area and the domain library NIF map memory objects",
+          rule: "only erx_device makes a runtime's mapping of device memory; the lane and program drivers, the crash area and the domain library NIF map memory objects",
           design: DEVICE_DESIGN,
           scope: Chokepoints::Scope.new(own: false, extra: ['otp/**/*'], except: ['otp/erts/emulator/asmjit/**/*']),
           pattern: /\berx_(?:mem_create_physical|vm_map)\b/,
@@ -41,7 +41,10 @@ module Erx
           # erx_jit_memory.c maps only the JIT object it has just created, never device
           # memory, at its two aliases. erx_crash_area.c maps the domain's crash area and the
           # domain library NIF, read-only, the object it creates to copy one into.
+          # erx_program_drv.c maps the session's two sides of a program's channel, memory
+          # objects it has just created from the session's budget, never device memory.
           sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.c"),
+                  Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_program_drv.c', permits: /\Aerx_vm_map\z/),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_jit_memory.c', permits: /\Aerx_vm_map\z/),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_lane_drv.c', permits: /\Aerx_vm_map\z/),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_crash_area.c', permits: /\Aerx_vm_map\z/),

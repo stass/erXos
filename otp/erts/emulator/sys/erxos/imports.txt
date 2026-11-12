@@ -117,12 +117,12 @@ erx_gate_create erx_gate_bind erx_ipc_wait
 [only_erx_crash_area]
 erx_space_stop
 
-# erx_program_drv.c alone, the erx_program port driver: a program's budget, group, spaces,
-# image and first thread, their release, and the stop of its anchor
-# (tools/lib/erx/chokepoint_rules/program.rb).
+# erx_program_drv.c alone, the erx_program port driver: a program's channel and data
+# area, its budget, group, spaces, image and first thread, the install of its copies,
+# their release, and the stop of its anchor (tools/lib/erx/chokepoint_rules/program.rb).
 [only_erx_program_drv]
-erx_budget_create erx_group_create erx_space_create erx_image_map erx_thread_create
-erx_thread_start erx_space_stop erx_object_destroy erx_cap_close
+erx_mem_create erx_budget_create erx_group_create erx_space_create erx_image_map
+erx_cap_pass erx_thread_create erx_thread_start erx_space_stop erx_object_destroy erx_cap_close
 
 # erx_stdio_nif.c alone, hosted mode's console device: the only object of the runtime
 # that may use these for a host terminal.

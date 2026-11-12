@@ -17,8 +17,10 @@ require_relative '../fixtures/generated_tree'
 # checked against its expected answer; a start failing at each step k undoes exactly steps
 # 1..k-1, last first, whether or not the undos themselves fail; every input in every state
 # of the end reachable from a started program agrees with the model; and the guarantees
-# erx_program_core.h states hold over every sequence of up to five inputs. Seeded failures
-# of the core must each fail their check.
+# erx_program_core.h states hold over every sequence of up to five inputs; no run deletes
+# what the session keeps of the program's channel before the program's budget; and the
+# install passes each copy once, with the rights the design gives it. Seeded failures of
+# the core must each fail their check.
 class ErxProgramCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'otp/erts/emulator/sys/erxos/erx_program_core.c'
@@ -28,17 +30,32 @@ class ErxProgramCoreTest < Minitest::Test
 
   # The driver prints erx_program_act_t's and erx_program_phase_t's names, so no numbering is copied here.
 
-  # The start's steps in order: the session's budget and group records, then the port's IRQ
-  # object, sink, bind and both labels' gate registrations before any space carries a label,
-  # then the spaces, the map and the thread.
-  STEPS = %i[budget_create group_create irq_create sink_register irq_bind gate_register_anchor
-             gate_register_image anchor_create image_create image_map thread_create thread_start].freeze
-  # What undoes each step that made something; a map dies with its space, and the start is last.
-  UNDO = { budget_create: :budget_destroy, group_create: :group_close, irq_create: :irq_close,
-           sink_register: :sink_unregister, irq_bind: :irq_unbind,
+  # The start's steps in order: what the session keeps of the program's channel, from its own
+  # budget, first, so that a release deletes it only after the program's budget; the port's
+  # IRQ object, the session's doorbell, with its sink and bind; the program's budget and
+  # group; both labels' gate registrations before any space carries a label; then the
+  # spaces, the map, the install, the program's doorbell's bind, which takes its label from
+  # the install, and the thread.
+  STEPS = %i[channel_create channel_map bell_create data_create irq_create sink_register irq_bind
+             budget_create group_create gate_register_anchor gate_register_image anchor_create image_create
+             image_map install bell_bind thread_create thread_start].freeze
+  # What undoes each step that made something; a map and an install die with their space, and
+  # the start is last.
+  UNDO = { channel_create: :channel_destroy, channel_map: :channel_unmap, bell_create: :bell_destroy,
+           data_create: :data_destroy, irq_create: :irq_close, sink_register: :sink_unregister,
+           irq_bind: :irq_unbind, budget_create: :budget_destroy, group_create: :group_close,
            gate_register_anchor: :gate_unregister_anchor, gate_register_image: :gate_unregister_image,
-           anchor_create: :anchor_destroy, image_create: :image_close, thread_create: :thread_close }.freeze
+           anchor_create: :anchor_destroy, image_create: :image_close, bell_bind: :bell_unbind,
+           thread_create: :thread_close }.freeze
   RELEASE = STEPS.reverse.filter_map { UNDO[_1] }.freeze
+  # The undos that delete or unmap what the session made from its own budget for the program:
+  # docs/design-programs.md ("The channel") deletes them only after the program's budget.
+  SESSION_KEPT = %i[channel_destroy channel_unmap bell_destroy data_destroy irq_close].freeze
+  # The rights of each copy the install passes, by the names of docs/design-programs.md's tables.
+  INSTALL_RIGHTS = { 'budget' => %w[alloc], 'group' => %w[attach signal], 'in_ring' => %w[read map],
+                     'in_reader' => %w[read write map], 'out_ring' => %w[read write map],
+                     'out_reader' => %w[read map], 'doorbell' => %w[trigger],
+                     'data' => %w[read write map] }.freeze
 
   # Each spec the driver names and the status constant erx_program_spec_check answers.
   SPECS = {
@@ -129,8 +146,34 @@ class ErxProgramCoreTest < Minitest::Test
     assert_empty broken_guarantees(output), broken_guarantees(output).first(20).join("\n")
   end
 
+  def test_the_session_deletes_its_channel_only_after_the_programs_budget
+    assert_empty order_violations(output), order_violations(output).first(20).join("\n")
+  end
+
+  def test_the_install_passes_each_copy_once_with_its_rights
+    assert_empty install_differences(output), install_differences(output).join("\n")
+  end
+
+  # The core's plan rows from the channel's to the budget's, which the first seed reorders.
+  KEPT_ROWS = ['{ ERX_PROGRAM_CHANNEL_CREATE, ERX_PROGRAM_CHANNEL_DESTROY },',
+               '{ ERX_PROGRAM_CHANNEL_MAP, ERX_PROGRAM_CHANNEL_UNMAP },',
+               '{ ERX_PROGRAM_BELL_CREATE, ERX_PROGRAM_BELL_DESTROY },',
+               '{ ERX_PROGRAM_DATA_CREATE, ERX_PROGRAM_DATA_DESTROY },',
+               '{ ERX_PROGRAM_IRQ_CREATE, ERX_PROGRAM_IRQ_CLOSE },',
+               '{ ERX_PROGRAM_SINK_REGISTER, ERX_PROGRAM_SINK_UNREGISTER },',
+               '{ ERX_PROGRAM_IRQ_BIND, ERX_PROGRAM_IRQ_UNBIND },',
+               '{ ERX_PROGRAM_BUDGET_CREATE, ERX_PROGRAM_BUDGET_DESTROY },'].freeze
+
   # A seeded failure of the core, the check that must catch it, and the edit that plants it.
   MUTANTS = {
+    'the channel is made after the budget' =>
+      [:order_violations, KEPT_ROWS.join("\n\t"), ([KEPT_ROWS.last] + KEPT_ROWS[0..-2]).join("\n\t")],
+    "the channel's destroy is skipped" =>
+      [:start_differences, '{ ERX_PROGRAM_CHANNEL_CREATE, ERX_PROGRAM_CHANNEL_DESTROY },',
+       '{ ERX_PROGRAM_CHANNEL_CREATE, NO_UNDO },'],
+    'the install passes one copy fewer' =>
+      [:install_differences, 'ERX_PROGRAM_INSTALLS - first < ERX_MSG_CAPS ? ERX_PROGRAM_INSTALLS - first :',
+       'ERX_PROGRAM_INSTALLS - 1 - first < ERX_MSG_CAPS ? ERX_PROGRAM_INSTALLS - 1 - first :'],
     'an undo is skipped' =>
       [:start_differences, '{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },',
        '{ ERX_PROGRAM_GATE_REGISTER_IMAGE, NO_UNDO },'],
@@ -183,6 +226,40 @@ class ErxProgramCoreTest < Minitest::Test
     differences = expected.reject { |name, run| out[:starts][name] == run }
     differences.map { |name, run| "start #{name}: got #{out[:starts][name].inspect}, want #{run.inspect}" } +
       (out[:starts].keys - expected.keys).map { "start #{_1}: not expected" }
+  end
+
+  # Every run of actions the core returned, a start's or an end's, that destroys the program's
+  # budget and deletes or unmaps something the session kept before it.
+  def order_violations(out)
+    runs = out[:starts].map { |name, (acts, _)| ["start #{name}", acts] } +
+           out[:ends].map { |(state, input), (_, acts)| ["end #{state.to_h} #{input.inspect}", acts.map(&:first)] }
+    destroying = runs.select { |_, acts| acts.include?(:budget_destroy) }
+    return ['no run destroys the budget'] if destroying.empty?
+
+    destroying.filter_map do |name, acts|
+      early = acts.take_while { _1 != :budget_destroy } & SESSION_KEPT
+      "#{name}: #{early.inspect} before budget_destroy" unless early.empty?
+    end
+  end
+
+  # The install's copies against INSTALL_RIGHTS, and its passes against a cover of every index once.
+  def install_differences(out)
+    k = out[:constants]
+    want = INSTALL_RIGHTS.transform_values { |rights| rights.sum { k.fetch("hr_#{_1}") } }
+    got = out[:installs].reject { |name, _| name == 'past' }
+    shared = got.select { |_, rights| rights & (k.fetch('hr_dup') | k.fetch('hr_give') | k.fetch('hr_destroy')) != 0 }
+    (got == want ? [] : ["installs: got #{got.inspect}, want #{want.inspect}"]) +
+      shared.keys.map { "install #{_1}: carries DUP, GIVE or DESTROY" } +
+      (out[:installs].fetch('past', nil) == 0 ? [] : ['an index past the last has rights']) +
+      batch_differences(out[:batches], got.size, k.fetch('msg_caps'))
+  end
+
+  # Passes from 0, each where the last ended, must reach exactly count in steps of 1..caps.
+  def batch_differences(batches, count, caps)
+    first = 0
+    first += batches.fetch(first) while first < count && batches.fetch(first).between?(1, caps)
+    problems = first == count ? [] : ["passes from 0 stop at #{first}, not #{count}"]
+    problems + (count..count + 1).filter_map { "a pass from #{_1} passes #{batches[_1]}" unless batches[_1] == 0 }
   end
 
   def end_differences(out)
@@ -289,7 +366,8 @@ class ErxProgramCoreTest < Minitest::Test
   end
 
   def parse(lines)
-    out = { acts: {}, phases: {}, constants: {}, signals: {}, specs: {}, starts: {}, ends: {} }
+    out = { acts: {}, phases: {}, constants: {}, signals: {}, specs: {}, starts: {}, ends: {}, installs: {},
+            batches: {} }
     lines.each { parse_line(out, _1.split) }
     out
   end
@@ -299,6 +377,8 @@ class ErxProgramCoreTest < Minitest::Test
     in ['const', name, value] then out[:constants][name] = Integer(value)
     in ['signal', kind, signal] then out[:signals][Integer(kind)] = Integer(signal)
     in ['spec', name, status] then out[:specs][name] = Integer(status)
+    in ['install', _, name, rights] then out[:installs][name] = Integer(rights)
+    in ['batch', first, count] then out[:batches][Integer(first)] = Integer(count)
     in ['act', value, name] then out[:acts][Integer(value)] = name.to_sym
     in ['phase', value, name] then out[:phases][Integer(value)] = name.to_sym
     in ['start', name, *acts, '=', error] then out[:starts][name] = [acts.map { out[:acts].fetch(Integer(_1)) }, Integer(error)]

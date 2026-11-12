@@ -58,8 +58,8 @@ erx_ipc_wait(uint64_t wait_by, erx_msgtag_t *tag, uint64_t *label)
 
 /*
  * The erx_program driver's (sys/erxos/erx_program_drv.c): a hosted runtime runs no
- * programs, so its first step, the budget's carve, is refused and erx_program:start/1
- * answers {error, enotsup}.
+ * programs, so its first step, the channel's memory, is refused by erx_mem_create above and
+ * erx_program:start/1 answers {error, enotsup}.
  */
 int
 erx_budget_create(uint64_t parent, uint32_t kind, uint64_t guarantee, uint64_t cap, uint64_t *budget)
@@ -94,5 +94,12 @@ int
 erx_object_destroy(uint64_t object)
 {
 	(void)object;
+	return (ERX_ENOTSUP);
+}
+
+int
+erx_cap_pass(uint64_t from, uint64_t to, uint32_t n)
+{
+	(void)from, (void)to, (void)n;
 	return (ERX_ENOTSUP);
 }

@@ -8,6 +8,8 @@
  *
  *   spec NAME STATUS                   erx_program_spec_check's answer for a named spec
  *   act VALUE NAME, phase VALUE NAME   the enums' names
+ *   install INDEX NAME RIGHTS          what the program's table receives at each index
+ *   batch FIRST COUNT                  erx_program_install_batch's answer from each index, and past them
  *   start NAME ACT... = ERROR          a start's whole run, each action it returned in order
  *   end STATE INPUT... = STATE ACT:STATUS...
  *                                      one input in one state of the end, every state reachable
@@ -278,28 +280,39 @@ ends(void)
 /* Each enum value's name, by its designator, so the test copies no numbering. */
 static const char *const act_names[] = {
 	[ERX_PROGRAM_DONE] = "done",
-	[ERX_PROGRAM_BUDGET_CREATE] = "budget_create",
-	[ERX_PROGRAM_GROUP_CREATE] = "group_create",
+	[ERX_PROGRAM_CHANNEL_CREATE] = "channel_create",
+	[ERX_PROGRAM_CHANNEL_MAP] = "channel_map",
+	[ERX_PROGRAM_BELL_CREATE] = "bell_create",
+	[ERX_PROGRAM_DATA_CREATE] = "data_create",
 	[ERX_PROGRAM_IRQ_CREATE] = "irq_create",
 	[ERX_PROGRAM_SINK_REGISTER] = "sink_register",
 	[ERX_PROGRAM_IRQ_BIND] = "irq_bind",
+	[ERX_PROGRAM_BUDGET_CREATE] = "budget_create",
+	[ERX_PROGRAM_GROUP_CREATE] = "group_create",
 	[ERX_PROGRAM_GATE_REGISTER_ANCHOR] = "gate_register_anchor",
 	[ERX_PROGRAM_GATE_REGISTER_IMAGE] = "gate_register_image",
 	[ERX_PROGRAM_ANCHOR_CREATE] = "anchor_create",
 	[ERX_PROGRAM_IMAGE_CREATE] = "image_create",
 	[ERX_PROGRAM_IMAGE_MAP] = "image_map",
+	[ERX_PROGRAM_INSTALL] = "install",
+	[ERX_PROGRAM_BELL_BIND] = "bell_bind",
 	[ERX_PROGRAM_THREAD_CREATE] = "thread_create",
 	[ERX_PROGRAM_THREAD_START] = "thread_start",
 	[ERX_PROGRAM_THREAD_CLOSE] = "thread_close",
+	[ERX_PROGRAM_BELL_UNBIND] = "bell_unbind",
 	[ERX_PROGRAM_IMAGE_CLOSE] = "image_close",
 	[ERX_PROGRAM_ANCHOR_DESTROY] = "anchor_destroy",
 	[ERX_PROGRAM_GATE_UNREGISTER_IMAGE] = "gate_unregister_image",
 	[ERX_PROGRAM_GATE_UNREGISTER_ANCHOR] = "gate_unregister_anchor",
+	[ERX_PROGRAM_GROUP_CLOSE] = "group_close",
+	[ERX_PROGRAM_BUDGET_DESTROY] = "budget_destroy",
 	[ERX_PROGRAM_IRQ_UNBIND] = "irq_unbind",
 	[ERX_PROGRAM_SINK_UNREGISTER] = "sink_unregister",
 	[ERX_PROGRAM_IRQ_CLOSE] = "irq_close",
-	[ERX_PROGRAM_GROUP_CLOSE] = "group_close",
-	[ERX_PROGRAM_BUDGET_DESTROY] = "budget_destroy",
+	[ERX_PROGRAM_DATA_DESTROY] = "data_destroy",
+	[ERX_PROGRAM_BELL_DESTROY] = "bell_destroy",
+	[ERX_PROGRAM_CHANNEL_UNMAP] = "channel_unmap",
+	[ERX_PROGRAM_CHANNEL_DESTROY] = "channel_destroy",
 	[ERX_PROGRAM_REPORT] = "report",
 	[ERX_PROGRAM_STOP_ANCHOR] = "stop_anchor",
 	[ERX_PROGRAM_CLOSE_PORT] = "close_port",
@@ -327,14 +340,46 @@ constants(void)
 	    ERX_SIGKILL, ERX_PROGRAM_KILLED);
 	printf("const exit_parent %" PRId64 "\nconst exit_released %" PRId64 "\nconst exit_nothread %" PRId64 "\n",
 	    ERX_EXIT_PARENT, ERX_EXIT_RELEASED, ERX_EXIT_NOTHREAD);
+	printf("const msg_caps %" PRIu32 "\n", ERX_MSG_CAPS);
+	printf("const hr_dup %" PRIu32 "\nconst hr_give %" PRIu32 "\nconst hr_destroy %" PRIu32 "\n", ERX_HR_DUP,
+	    ERX_HR_GIVE, ERX_HR_DESTROY);
+	printf("const hr_alloc %" PRIu32 "\nconst hr_attach %" PRIu32 "\nconst hr_signal %" PRIu32 "\n", ERX_HR_ALLOC,
+	    ERX_HR_ATTACH, ERX_HR_SIGNAL);
+	printf("const hr_read %" PRIu32 "\nconst hr_write %" PRIu32 "\nconst hr_map %" PRIu32 "\nconst hr_trigger %" PRIu32 "\n",
+	    ERX_HR_READ, ERX_HR_WRITE, ERX_HR_MAP, ERX_HR_TRIGGER);
 	for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++)
 		printf("signal %" PRIu32 " %d\n", kinds[i], erx_fault_signal(kinds[i]));
+}
+
+/* The install's copies and its passes. */
+static void
+installs(void)
+{
+	static const char *const install_names[ERX_PROGRAM_INSTALLS] = {
+		[ERX_PROGRAM_ARG_BUDGET] = "budget",
+		[ERX_PROGRAM_ARG_GROUP] = "group",
+		[ERX_PROGRAM_ARG_IN_RING] = "in_ring",
+		[ERX_PROGRAM_ARG_IN_READER] = "in_reader",
+		[ERX_PROGRAM_ARG_OUT_RING] = "out_ring",
+		[ERX_PROGRAM_ARG_OUT_READER] = "out_reader",
+		[ERX_PROGRAM_ARG_DOORBELL] = "doorbell",
+		[ERX_PROGRAM_INSTALL_DATA] = "data",
+	};
+
+	for (uint32_t index = 0; index < ERX_PROGRAM_INSTALLS; index++)
+		printf("install %" PRIu32 " %s %" PRIu32 "\n", index, install_names[index],
+		    erx_program_install_rights(index));
+	printf("install %" PRIu32 " past %" PRIu32 "\n", ERX_PROGRAM_INSTALLS,
+	    erx_program_install_rights(ERX_PROGRAM_INSTALLS));
+	for (uint32_t first = 0; first <= ERX_PROGRAM_INSTALLS + 1; first++)
+		printf("batch %" PRIu32 " %" PRIu32 "\n", first, erx_program_install_batch(first));
 }
 
 int
 main(void)
 {
 	constants();
+	installs();
 	specs();
 	starts();
 	ends();
