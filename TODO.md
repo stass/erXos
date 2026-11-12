@@ -5270,20 +5270,43 @@ to the corpus and follow rc
   with the lane reader's item: the syntax-tree leg checks every load whose
   address derives from a pipe end's mapping.
 * [Medium] The pipe core's exploration (`test/fixtures/pipe_explore.c`)
-  covers one write end and one read end. Still to come: the shapes with
-  several write ends, where the merge's order key, batches and the
-  `wends` wait matter (the model's clock reads 0, which one lane's order
-  does not need), with the seeded reader that ignores `wends`; the
-  co-reader shapes and a reader's death inside the lock; a litmus test
-  in `check-litmus` for each fence pattern of the steps (the model
-  delays stores but never reorders loads, so the acquire loads are held
-  by the litmus tests alone); and the instrumented `erx_shm_copy` that
-  fails on a second read of one field in one step, which belongs to the
-  effect layers that copy (`liberx/program/pipe*`, the pipe NIF), since
-  the steps read no page. In one write end and one read end the settle
-  table's retire and finished rows are unreachable (only a reader that
-  dies inside a record leaves them, and none follows it), and the lost
-  pipe's `EIO` and `EPIPE` paths are not explored.
+  covers one write end with one or two read ends and two write ends with
+  one read end. Still to come: three write ends with one read end, where
+  the second look covers two lanes the first found empty (with one-byte
+  records it did not finish in 25 minutes at -O2 on an Apple Silicon
+  host, nor in 400 s with one read, so it needs a further reduction); the shapes with several
+  write ends and several read ends at once; the co-readers' loss with
+  bytes to read (`coread-lost` explores it with nothing written: with a
+  byte, the loss report pending at each party keeps every step of the
+  others in play, and the run did not finish in minutes); the bound of
+  PI6, that another writer delays a record by at most two lanes'
+  capacity, which the model's lengths never reach and no property
+  checks; a merge shape with a read shorter than a record, so that a
+  partly claimed record of one write end must beat a smaller key in
+  another lane; a check at each landing of a reader's `rpos` or `cur`
+  store that the reader holds the lock, which the reduction treating
+  their loads as local assumes, and claims checked against the owner as
+  the claimer sees it, its own buffered release included; renumbering
+  the steps' private clock readings in `forget` instead of zeroing them,
+  which holds only while the core reads them where it does now; the
+  look's order, the clock read before the acquire copy of `wpos`, on
+  which the mark rests: an acquire load does not hold an earlier counter
+  read before it on AArch64, so `erx_clock_ns` as `liberx/program/pipe.c`
+  calls it needs checking for the barrier, and a litmus test; and the instrumented
+  `erx_shm_copy` that fails on a second read of one field in one step,
+  which belongs to the effect layers that copy (`liberx/program/pipe*`,
+  the pipe NIF), since the steps read no page.
+* [High] pipes, PI6 and equal clock readings: the merge's argument
+  ([design-pipes.md](docs/design-pipes.md#reading-and-merging)) needs a
+  reading taken after a record's publication to exceed the stamp read
+  before it. A nanosecond clock derived from a slower counter can return
+  equal readings, and on equal keys the lower write end goes first, so a
+  record written after another's publication can be read before it, a
+  wrong order returned as a right one. The
+  exploration's clock advances at every reading and never shows it.
+  Decide whether the time page promises a strictly advancing reading
+  across a publication, or the order key breaks such ties another way,
+  and give the model a clock that may repeat a reading.
 * [High] DMA platform evidence: the SMMUv3 specification and QEMU
   v11.1.2 source audit is recorded in
   [research-hardware-contracts.md](docs/research-hardware-contracts.md).

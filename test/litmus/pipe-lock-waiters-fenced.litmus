@@ -1,0 +1,13 @@
+AArch64 pipe-lock-waiters-fenced
+"a waiter sets its waiters bit (b), fences and tries the lock again (a, held); the holder releases a with release order, fences and loads b: one sees the other"
+{
+a=1;
+0:X1=a; 0:X3=b;
+1:X1=a; 1:X3=b;
+}
+ P0           | P1 ;
+ MOV W0,#1    | MOV W0,#0 ;
+ STR W0,[X3]  | STLR W0,[X1] ;
+ DMB ISH      | DMB ISH ;
+ LDAR W2,[X1] | LDR W2,[X3] ;
+exists (0:X2=1 /\ 1:X2=0)

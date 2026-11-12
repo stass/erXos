@@ -10,26 +10,38 @@ require_relative '../../tools/lib/erx/sanitizer_environment'
 require_relative '../fixtures/generated_tree'
 
 # The pipe core's writer and reader steps (liberx/erx_pipe_core.c) through every
-# interleaving of test/fixtures/pipe_explore.c, a model of one pipe with one write end and
-# one read end under delayed stores (docs/design-pipes.md, "The pipe core"). Every scenario
+# interleaving of test/fixtures/pipe_explore.c, a model of one pipe under delayed stores
+# (docs/design-pipes.md, "The pipe core"): one write end and one read end, two write ends
+# merged by one read end, or one write end read by two co-readers. Every scenario
 # runs to its end under the address and undefined sanitizers with the landing gate's write
 # lengths, or with ERX_PIPE_EXPLORE=full the milestone gate's, as tools/erx check-fuzz runs
-# it. Each seeded fault of the steps must fail the property named beside it.
+# it. Each seeded fault of the steps, or of the pipe server as the model plays it, must fail
+# the property named beside it.
 class PipeCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'liberx/erx_pipe_core.c'
-  SOURCES = ['liberx/erx_pipe_check.c', 'test/fixtures/pipe_explore.c'].freeze
+  CHECK = 'liberx/erx_pipe_check.c'
   SANITIZED = ['-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
-  SCENARIOS = %w[flow partial nonblock writer-dies reader-closes reader-dies join hostile-writer hostile-reader].freeze
-  DEPTH = ENV['ERX_PIPE_EXPLORE'] == 'full' ? 'deep' : 'landing'
+  EXPLORER = 'test/fixtures/pipe_explore.c'
+  FULL = ENV['ERX_PIPE_EXPLORE'] == 'full'
+  DEPTH = FULL ? 'deep' : 'landing'
+  # The landing gate explores the small shapes; the milestone gate adds the large ones, whose
+  # seeded faults the landing gate still catches at landing lengths.
+  SMALL = %w[flow partial nonblock writer-dies reader-closes reader-dies lost join merge coread
+             coread-dies-empty hostile-writer hostile-reader hostile-coreader].freeze
+  LARGE = %w[merge-join coread-dies coread-lost].freeze
+  SCENARIOS = FULL ? LARGE + SMALL : SMALL
+  # Scenarios explored at once: each runs alone in one process.
+  PARALLEL = 8
 
   def test_every_interleaving_keeps_the_invariants
-    with_explorer(File.join(ROOT, CORE), SANITIZED) do |explorer|
-      SCENARIOS.each do |scenario|
-        output, status = Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: COMPILER),
-                                         explorer, scenario, DEPTH, stdin_data: '')
+    with_explorer({}, SANITIZED) do |explorer|
+      in_parallel(SCENARIOS) do |scenario|
+        [scenario, *Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: COMPILER),
+                                    explorer, scenario, DEPTH, stdin_data: '')]
+      end.each do |scenario, output, status|
         assert status.success?, "#{scenario}: #{output}"
         assert_match(/^pipe_explore #{scenario} states \d+ depth \d+$/, output)
         puts output.lines.grep(/^pipe_explore /).join
@@ -38,7 +50,7 @@ class PipeCoreTest < Minitest::Test
   end
 
   # A seeded fault of the steps, the scenario and property that must catch it, and the
-  # edit that plants it.
+  # edit that plants it in the core; a fault planted elsewhere names its file first.
   MUTANTS = {
     "the writer's fence after publishing need removed" =>
       ['flow', 'PI7', "\tcase W_ARMED:\n\t\tw->phase = W_SIDE;\n\t\treturn (pipe_act(ERX_PIPE_OP_FENCE));",
@@ -89,34 +101,76 @@ class PipeCoreTest < Minitest::Test
       ['flow', 'PI7', "\t\treturn (pipe_rreleased(r));\n\t}\n\tr->phase = LOCK_TRIED;",
        "\t\treturn (pipe_done(0));\n\t}\n\tr->phase = LOCK_TRIED;"],
     "a read that copied bytes waits for a join's report" =>
-      ['join', 'PI5', 'if (after != R_AFTER_DONE && r->done > 0) {', 'if (false) {']
+      ['join', 'PI5', 'if (after != R_AFTER_DONE && r->done > 0) {', 'if (false) {'],
+    'a reader that ignores wends' =>
+      ['merge-join', 'PI6', 'if (in->value > r->known)', 'if (false)'],
+    # Holds the window between COPY_WENDS and its step, in which a join's report can land.
+    'a reader that fails on a lane taken up after its wends copy' =>
+      ['merge-join', 'PI2', "\t\tif (in->value > r->known)\n\t\t\treturn (pipe_rrelease_begin(r, R_AFTER_REPORT, 0));",
+       "\t\tif (r->nlanes > in->value)\n\t\t\treturn (pipe_done(-EIO));\n\t\tif (in->value > r->known)\n\t\t\treturn (pipe_rrelease_begin(r, R_AFTER_REPORT, 0));"],
+    'the merge taking the largest order key' =>
+      ['merge', 'PI6', 'a->key < best->key ||', 'a->key > best->key ||'],
+    'the merge picking from the first look alone' =>
+      ['merge', 'PI6', "\t\tr->phase = LOOK_WENDS;\n\t\treturn (pipe_act(ERX_PIPE_OP_COPY_WENDS));",
+       "\t\tr->second = true;\n\t\treturn (pipe_rlooked(r));"],
+    'a batch marked with the clock of the copy that opened it' =>
+      ['merge', 'PI6', 'mark = lane->looked ? lane->look : 0;', 'mark = r->clock;'],
+    'a co-reader that releases the lock without clearing its owner' =>
+      ['coread', 'PI7', "\tr->phase = RELEASE_STORED;\n\treturn (pipe_act(ERX_PIPE_OP_RELEASE_LOCK));",
+       "\tr->phase = RELEASE_STORED;\n\treturn (pipe_act(ERX_PIPE_OP_FENCE));"],
+    'a co-reader that waits for the lock without its waiters bit' =>
+      ['coread', 'PI7', "\t\tr->phase = LOCK_WAITER_SET;\n\t\treturn (pipe_act(ERX_PIPE_OP_SET_WAITER));",
+       "\t\tr->phase = LOCK_WAITER_SET;\n\t\treturn (pipe_act(ERX_PIPE_OP_FENCE));"],
+    'the retire row read as none' =>
+      ['coread-dies', 'PI5', "\tcase ERX_PIPE_SETTLE_RETIRE:\n\t\tpipe_make_current",
+       "\tcase ERX_PIPE_SETTLE_RETIRE:\n\t\tbreak;\n\t\tpipe_make_current"],
+    'the finished row read as a retire' =>
+      ['coread-dies', 'PI5', "\t\treturn (ERX_PIPE_SETTLE_FINISHED);", "\t\treturn (ERX_PIPE_SETTLE_RETIRE);", CHECK],
+    'a continued record read from its start' =>
+      ['coread', 'PI5', "\t\tpipe_make_current(r, at, copy.cur_pos, copy.len,\n\t\t    copy.cur_off);\n\t\treturn (pipe_rcopy_begin(r));",
+       "\t\tpipe_make_current(r, at, copy.cur_pos, copy.len,\n\t\t    0);\n\t\treturn (pipe_rcopy_begin(r));"],
+    'a lost pipe read on' =>
+      ['lost', 'PI7', "\tif (r->lost)\n\t\treturn (pipe_rrelease_begin(r, R_AFTER_DONE, -EIO));", ''],
+    'a pipe server that forgets to tell one reader of a gone writer' =>
+      ['coread', 'PI7', "\tfor (r = 0; r < sc->nr; r++)\n\t\tif (alive(&wd->r[r]))",
+       "\tfor (r = 0; r < sc->nr - 1; r++)\n\t\tif (alive(&wd->r[r]))", EXPLORER]
   }.freeze
 
   def test_seeded_faults_are_caught
-    source = File.read(File.join(ROOT, CORE))
     Dir.mktmpdir('erx-pipe-core-mutant-') do |directory|
-      MUTANTS.each do |name, (scenario, property, original, replacement)|
-        assert_equal 1, source.scan(original).size, "mutant #{name} must edit exactly one place of the core"
+      in_parallel(MUTANTS.to_a) do |name, (scenario, property, original, replacement, file)|
+        file ||= CORE
+        source = File.read(File.join(ROOT, file))
         path = File.join(directory, "#{name.tr(' ', '-').delete("'")}.c")
         File.write(path, source.sub(original, replacement))
-        with_explorer(path, ['-O2']) do |explorer|
-          output, status = Open3.capture2e(explorer, scenario, 'landing', stdin_data: '')
-          refute status.success?, "seeded fault not caught: #{name}"
-          assert_match(/^FAIL #{property}:/, output, "seeded fault not caught by #{property}: #{name}")
-        end
+        [name, property, source.scan(original).size,
+         *with_explorer({ file => path }, ['-O2']) { |explorer| Open3.capture2e(explorer, scenario, 'landing', stdin_data: '') }]
+      end.each do |name, property, places, output, status|
+        assert_equal 1, places, "mutant #{name} must edit exactly one place"
+        refute status.success?, "seeded fault not caught: #{name}"
+        assert_match(/^FAIL #{property}:/, output, "seeded fault not caught by #{property}: #{name}")
       end
     end
   end
 
   private
 
-  def with_explorer(core, options)
+  # The block's results over items, PARALLEL of them running at once, in the items' order.
+  def in_parallel(items, &block)
+    items.each_slice(PARALLEL).flat_map do |slice|
+      slice.map { |item| Thread.new { block.call(item) } }.map(&:value)
+    end
+  end
+
+  # Builds the explorer from the core, the checks and the model, each from the tree unless
+  # replaced names a mutant's copy in its place.
+  def with_explorer(replaced, options)
+    sources = [CORE, CHECK, EXPLORER].map { |source| replaced.fetch(source, File.join(ROOT, source)) }
     Dir.mktmpdir('erx-pipe-core-') do |directory|
       binary = File.join(directory, 'pipe_explore')
       output, status = Open3.capture2e(COMPILER, *FLAGS, *options, *Erx::Generated.include_flags(root: ROOT),
                                        '-I', File.join(ROOT, 'include'), '-I', File.join(ROOT, 'liberx'),
-                                       core, *SOURCES.map { |source| File.join(ROOT, source) },
-                                       '-o', binary, stdin_data: '')
+                                       *sources, '-o', binary, stdin_data: '')
       assert status.success?, output
       yield binary
     end

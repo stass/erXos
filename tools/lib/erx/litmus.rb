@@ -11,9 +11,9 @@ module Erx
   # The weak-memory gate, `make check-litmus` (docs/design-domains.md,
   # "Verification and testing", weak memory): every litmus test of
   # test/litmus/ runs under herd7 with its memory model and must give its
-  # expected answer. A protocol with its fences or acquire loads must never
-  # reach the outcome its `exists` clause names; the same protocol without
-  # them must reach it, or the test would pass whatever the fences did.
+  # expected answer. A protocol with its fences, acquire loads or release
+  # stores must never reach the outcome its `exists` clause names; the same
+  # protocol without them must reach it, or the test would pass whatever the fences did.
   # herd7 is built for the host from deps.lock's herdtools7 pin (Erx::Herd),
   # whose build record ties it to that pin; asking it for its version first
   # checks that the built program still runs (a host library it links may
@@ -29,7 +29,10 @@ module Erx
       Case.new('lane-need-fenced', 'Never'), Case.new('lane-need-unfenced', 'Sometimes'),
       Case.new('lane-wpos-acquire', 'Never'), Case.new('lane-wpos-relaxed', 'Sometimes'),
       Case.new('lane-rpos-acquire', 'Never'), Case.new('lane-rpos-relaxed', 'Sometimes'),
-      Case.new('lane-wpos-acquire-c11', 'Never'), Case.new('lane-wpos-relaxed-c11', 'Sometimes')
+      Case.new('lane-wpos-acquire-c11', 'Never'), Case.new('lane-wpos-relaxed-c11', 'Sometimes'),
+      Case.new('pipe-lock-waiters-fenced', 'Never'), Case.new('pipe-lock-waiters-unfenced', 'Sometimes'),
+      Case.new('pipe-lock-cur-release', 'Never'), Case.new('pipe-lock-cur-relaxed', 'Sometimes'),
+      Case.new('pipe-wends-acquire', 'Never'), Case.new('pipe-wends-relaxed', 'Sometimes')
     ].freeze
     OBSERVATION = /^Observation (?<name>\S+) (?<answer>Always|Sometimes|Never)\b/
     MAX_TEST_BYTES = 64 * 1024

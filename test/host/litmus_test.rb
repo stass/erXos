@@ -47,7 +47,7 @@ class LitmusTest < Minitest::Test
     expects.each do |name, expect|
       next unless expect == 'Never'
 
-      broken = name.sub('-fenced', '-unfenced').sub('-acquire', '-relaxed')
+      broken = name.sub('-fenced', '-unfenced').sub('-acquire', '-relaxed').sub('-release', '-relaxed')
       assert_equal 'Sometimes', expects.fetch(broken), "#{name} has no broken twin"
     end
   end
