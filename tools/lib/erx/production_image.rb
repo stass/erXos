@@ -642,6 +642,12 @@ module Erx
       CONSOLE_LONG_BYTES = 20_000
       # A tab and an escape sequence in a debug log record, typed as byte values.
       LOG_AFTER_HANDOFF = %(erx_log:debug(<<"after",9,"handoff",27,"[1m">>).\r)
+      # The record LOG_AFTER_HANDOFF logs, as the console writes it: whole, ending in CR-LF,
+      # with the tab and the escape byte as text, never as the bytes themselves. A log line
+      # may land in the middle of the shell's output, between its "ok" and the newline after
+      # it, or after the next prompt (docs/design-live.md, "Log lines and program output"),
+      # so whatever precedes it on its line is not matched.
+      LOG_AFTER_HANDOFF_RECORD = /#[0-9]+ [0-9]+\.[0-9]+ [a-z]+ .*after\\x09handoff\\x1B\[1m\r*\n\z/n
       # Processes of the system domain, registered by name, that every booted release runs at
       # the Erlang shell: init and the console as well as children of kernel_sup.
       SYSTEM_PROCESSES = %w[init code_server file_server_2 erx_console erx_watchdog].freeze
@@ -863,10 +869,8 @@ module Erx
          console_point('edit-answer', /\A4\r*\n\z/n, type: "io:put_chars(lists:duplicate(#{CONSOLE_LONG_BYTES},$x)),io:nl().\r"),
          console_point('long-output', /x{#{CONSOLE_LONG_BYTES}}/n),
          console_point('long-answer', /\Aok\r*\n\z/n, type: LOG_AFTER_HANDOFF),
-         # A record logged once the driver owns the UART: the console reads it and writes it
-         # escaped, tab and escape byte as text, never as the bytes themselves.
-         console_point('log-after-handoff', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#[0-9]+ [0-9]+\.[0-9]+ [a-z]+ .*after\\x09handoff\\x1B\[1m\r*\n\z/n,
-                       type: PROCESSES_EXPRESSION),
+         # A record logged once the driver owns the UART: the console reads it and writes it.
+         console_point('log-after-handoff', LOG_AFTER_HANDOFF_RECORD, type: PROCESSES_EXPRESSION),
          # The echo of the line reads {processes,length, so only the answer matches.
          console_point('processes', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{processes,[0-9]/n,
                        whole: /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{processes,[1-9][0-9]*,\[\],emu\}\r*\n\z/n, type: LOAD_ONLY_EXPRESSION),

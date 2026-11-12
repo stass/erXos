@@ -42,7 +42,6 @@ module Erx
     # Under TCG a four-CPU boot takes minutes to reach the release.
     RELEASE_SECONDS = 900
     STEP_SECONDS = 180
-    PROMPT = SessionDomain::PROMPT
     SYSTEM_SHELL_KEY = 's'
     HALT = "erlang:halt().\r"
     STUB_DIRECTORY = 'build/raspi4b-stub'
@@ -77,10 +76,8 @@ module Erx
        point('edit-answer', /\A4\r*\n\z/n, type: "io:put_chars(lists:duplicate(#{long},$x)),io:nl().\r"),
        point('long-output', /x{#{long}}/n),
        point('long-answer', /\Aok\r*\n\z/n, type: ProductionImage::Run::LOG_AFTER_HANDOFF),
-       # The record the session logs reaches the console through the log, which writes it
-       # escaped: the tab and the escape byte as text, never as the bytes themselves.
-       point('log-after-handoff', /\A#{PROMPT}#[0-9]+ [0-9]+\.[0-9]+ [a-z]+ .*after\\x09handoff\\x1B\[1m\r*\n\z/n,
-             type: ProductionImage::Run::CTRL_G),
+       # The record the session logs: the console reads it from the log and writes it.
+       point('log-after-handoff', ProductionImage::Run::LOG_AFTER_HANDOFF_RECORD, type: ProductionImage::Run::CTRL_G),
        point('ctrl-g-menu', ProductionImage::Run::CTRL_G_MENU, type: SYSTEM_SHELL_KEY),
        point('system-shell', ProductionImage::Run::MENU_LEFT, type: ProductionImage::Run::ERL_LINE),
        shell.merge(name: 'system-erlang-shell', type: HALT).freeze].freeze
