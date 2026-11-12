@@ -10,6 +10,15 @@ limit mf_none u32 0xffffffff
 # bounds, and so every row a local setting can name (docs/design-apps.md, "The
 # start table").
 limit start_rows_max u32 256
+# A start row's restart intensity, more than restarts ends within period seconds
+# (docs/design-apps.md, "The start table"), from the manifest or from rc.conf. Its
+# row supervisor keeps a timestamp per end within the period, so the ceilings bound
+# that list and the restart rate of a row whose start is refused at once: at most
+# 100 ends, enough for any session that is worth keeping, within at most a day,
+# past which ends are not the same burst. The reader, the packer and the start
+# table each refuse a value past them.
+limit start_restarts_max u32 100
+limit start_period_max_s u32 86400
 # The seconds a configured domain's init has to report ready to the domain
 # service: its row's boot_timeout_s, which the manifest source may leave out
 # for the default, and which the reader bounds to 1 .. boot_timeout_max_s, so
@@ -460,4 +469,5 @@ reader manifest erx_manifest @manifest_bytes_max
   string partial_boot[].name.offset partial_boot[].name.length strings identifier 63 empty no
   index starts[].principal principals
   index starts[].display services absent 0xffffffff
-  range starts[].restart_period_s 1 4294967295
+  range starts[].restarts 0 @start_restarts_max
+  range starts[].restart_period_s 1 @start_period_max_s

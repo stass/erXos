@@ -44,26 +44,39 @@ so every decision is tested with made-up manifests.
   refused, which names that row: a command never displaces another row
   from its display. `start` and `stop` act on the running table and
   change no setting.
-* **Keeping the table.** reconcile/2 and changes/2 say which rows' keepers
-  stop and which start when the table is first made, against the rows
-  the keepers' branch already holds, and when it changes.
+* **Keeping the table.** reconcile/2 says which rows' keepers stop and
+  which start whenever the table is made from rc.conf's text, against
+  the rows the keepers' branch holds and the settings each was started
+  with: a row whose settings changed is restarted.
+* **Reading rc.conf.** read_answered/3 decides what one answer of the
+  table's read of rc.conf leads to: the table made from the text, or,
+  for a failed read, the next read after a backoff that grows to a
+  minute and never gives up, the manifest's rows alone when no table has
+  been made yet, and a log line at the 1st, 2nd, 4th, 8th... failure.
 
 No reason, value or name made from input is an atom: every atom here is
 a literal of this module.
 """.
 
--export([parse_rc_conf/1, merge/3, parse_ctl/1, set/3]).
--export([apply_ctl/4, reconcile/2, changes/2, rc_conf_limit/0]).
+-include("generated/erx_abi.hrl").
 
--export_type([row/0, field/0, value/0, local/0, merged/0, command/0, action/0]).
+-export([parse_rc_conf/1, merge/3, parse_ctl/1, set/3]).
+-export([apply_ctl/4, reconcile/2, kept/1, read_answered/3, rc_conf_limit/0]).
+
+-export_type([row/0, field/0, value/0, local/0, merged/0, command/0, action/0, kept/0]).
+-export_type([reading/0, read_answer/0, read_effect/0]).
 
 %% The largest rc.conf read or written (design-apps.md, "Where the file is").
 -define(MAX_RC_CONF, 65536).
 %% The longest write ctl reads (design-apps.md, "Interfaces").
 -define(MAX_CTL, 4096).
-%% restarts and period are u32 fields of the manifest's start row.
--define(MAX_U32, 16#FFFFFFFF).
+%% restarts and period are bounded by abi/manifest.txt's ceilings, whose
+%% digits fit in this many.
 -define(MAX_DIGITS, 10).
+%% The backoff between reads of rc.conf that fail: the first, doubling up to
+%% the last, which then repeats for as long as the file cannot be read.
+-define(FIRST_RETRY_MS, 1000).
+-define(LAST_RETRY_MS, 60000).
 %% A row's fields in the order set/3 appends them.
 -define(FIELDS, [enable, display, restarts, period]).
 
@@ -81,7 +94,8 @@ a literal of this module.
 -type local() :: {set, pos_integer(), name(), field(), value()}
                | {skipped, pos_integer(), reason()}.
 -type status() :: disabled | enabled
-                | {refused, {no_grant, name()} | {display_held, name()}}.
+                | {refused, {no_grant, name()} | {display_held, name()}
+                            | {past_ceiling, restarts | period}}.
 %% A merged row: the manifest's row with the settings applied, which fields
 %% rc.conf set, and whether the table takes it.
 -type merged() :: #{principal := name(), enable := boolean(),
@@ -95,7 +109,22 @@ a literal of this module.
 -type action() :: {rc_conf, binary()} | {start_row, name()}
                 | {start_once, name(), #{default_display => name()}} | {stop, name()}.
 -type ctl_error() :: {undeclared, name()} | {no_grant, name()} | {display_held, name()}
-                   | enabled | too_large | bad_setting.
+                   | {past_ceiling, restarts | period} | enabled | too_large | bad_setting.
+%% What an enabled row's session is kept with: the fields its keeper and
+%% its supervisor are made from. Two rows with equal kept() keep their
+%% sessions alike.
+-type kept() :: #{display := none | name(), restarts := non_neg_integer(), period := pos_integer()}.
+%% How far the table's read of rc.conf has come: read, or not yet, after
+%% that many failed reads.
+-type reading() :: read | {unread, Failures :: non_neg_integer()}.
+%% One answer of a read: the file's text, no file, or a failure, a crash of
+%% the reader included.
+-type read_answer() :: {ok, binary()} | absent | {error, term()}.
+%% What the table does on an answer, in order: make the table from a text of
+%% rc.conf, the empty text being the manifest's rows alone, read again after
+%% a delay, or log a warning.
+-type read_effect() :: {apply, binary()} | {retry, pos_integer()}
+                     | {log, io:format(), [term()]}.
 
 %% ---------------------------------------------------------------------------
 %% rc.conf
@@ -210,20 +239,20 @@ value(display, Raw) ->
         true -> {ok, Raw};
         false -> error
     end;
-value(restarts, Raw) -> decimal(Raw, 0);
-value(period, Raw) -> decimal(Raw, 1).
+value(restarts, Raw) -> decimal(Raw, 0, ?ERX_START_RESTARTS_MAX);
+value(period, Raw) -> decimal(Raw, 1, ?ERX_START_PERIOD_MAX_S).
 
-decimal(Raw, Least) when byte_size(Raw) >= 1, byte_size(Raw) =< ?MAX_DIGITS ->
+decimal(Raw, Least, Most) when byte_size(Raw) >= 1, byte_size(Raw) =< ?MAX_DIGITS ->
     Digit = fun(Byte) -> Byte >= $0 andalso Byte =< $9 end,
     case lists:all(Digit, binary_to_list(Raw)) of
         true ->
             case binary_to_integer(Raw) of
-                N when N >= Least, N =< ?MAX_U32 -> {ok, N};
+                N when N >= Least, N =< Most -> {ok, N};
                 _ -> error
             end;
         false -> error
     end;
-decimal(_Raw, _Least) -> error.
+decimal(_Raw, _Least, _Most) -> error.
 
 %% ---------------------------------------------------------------------------
 %% Merge
@@ -257,9 +286,15 @@ set_field(Name, Field, Value, #{principal := Name, from_rc_conf := Set} = Row) -
 set_field(_Name, _Field, _Value, Row) ->
     Row.
 
-%% Held maps each display to the admitted row that holds it.
+%% Held maps each display to the admitted row that holds it. rc.conf's values
+%% are within the ceilings once parsed and the manifest reader holds its rows
+%% to them, so a row past one is a made-up manifest's, refused all the same.
 admit(#{enable := false} = Row, Held, _Grants) ->
     {Row#{status => disabled}, Held};
+admit(#{restarts := Restarts} = Row, Held, _Grants) when Restarts > ?ERX_START_RESTARTS_MAX ->
+    {Row#{status => {refused, {past_ceiling, restarts}}}, Held};
+admit(#{period := Period} = Row, Held, _Grants) when Period > ?ERX_START_PERIOD_MAX_S ->
+    {Row#{status => {refused, {past_ceiling, period}}}, Held};
 admit(#{display := none} = Row, Held, _Grants) ->
     {Row#{status => enabled}, Held};
 admit(#{principal := Principal, display := Display} = Row, Held, Grants) ->
@@ -407,37 +442,57 @@ admitted(_Status) -> ok.
 %% Keeping the table
 
 -doc """
-The keepers to stop and to start when the table is first made as Merged,
-while the keepers' branch holds Held, the rows it holds a supervisor for,
-running or down: a held row that is not enabled stops, and an enabled row
-not held starts. A held enabled row is left as it is, so a row that is
-down stays down when the table's process restarts.
+The keepers to stop and to start when the table is made as Merged, while
+the keepers' branch holds Held: each row it holds a record for, running,
+down or stopped, with what its session was kept with. A held row stops
+when it is not enabled in Merged or is kept differently there (its
+display or its intensity changed), and an enabled row starts when it is
+not held or changed. A held row enabled and kept alike is left as it is,
+so a row that is down or stopped stays so. Stop lists every held name
+that stops, in Merged's order and then any Merged does not name; Start
+lists names in Merged's order.
 """.
--spec reconcile([name()], [merged()]) -> {Stop :: [name()], Start :: [name()]}.
+-spec reconcile(#{name() => kept()}, [merged()]) -> {Stop :: [name()], Start :: [name()]}.
 reconcile(Held, Merged) ->
-    Enabled = [Principal || #{principal := Principal, status := enabled} <- Merged],
-    {[Name || Name <- Held, not lists:member(Name, Enabled)],
-     [Name || Name <- Enabled, not lists:member(Name, Held)]}.
+    Is = kept(Merged),
+    Order = [Principal || #{principal := Principal} <- Merged],
+    Unnamed = lists:sort(maps:keys(Held)) -- Order,
+    {[Name || Name <- Order ++ Unnamed, maps:is_key(Name, Held), maps:find(Name, Is) =/= {ok, map_get(Name, Held)}],
+     [Name || Name <- Order, maps:is_key(Name, Is), maps:find(Name, Held) =/= {ok, map_get(Name, Is)}]}.
 
--doc """
-The keepers to stop and to start when the table changes from Before to
-After: a row enabled before stops when it is not enabled after or keeps
-its session differently (its display or its intensity changed), and a row
-enabled after starts when it was not enabled before or changed. A row
-enabled and unchanged in both is left alone, running or down.
-""".
--spec changes([merged()], [merged()]) -> {Stop :: [name()], Start :: [name()]}.
-changes(Before, After) ->
-    Was = kept(Before),
-    Is = kept(After),
-    Order = [Principal || #{principal := Principal} <- After],
-    {[Name || Name <- Order, maps:is_key(Name, Was), maps:find(Name, Is) =/= {ok, map_get(Name, Was)}],
-     [Name || Name <- Order, maps:is_key(Name, Is), maps:find(Name, Was) =/= {ok, map_get(Name, Is)}]}.
-
-%% Each enabled row's fields its keeper and supervisor are made from.
+-doc "Each enabled row of Merged by its name, with what its session is kept with.".
+-spec kept([merged()]) -> #{name() => kept()}.
 kept(Merged) ->
     #{Principal => maps:with([display, restarts, period], Row)
       || #{principal := Principal, status := enabled} = Row <- Merged}.
+
+-doc """
+What Answer, one answer of the table's read of rc.conf, leads to, when the
+read had failed Failures times before and Made says whether the table has
+been made, from a record of an earlier table or from the manifest's rows:
+the next reading() and the effects to carry out in order. A text, or no
+file, which is a machine with no settings, makes the table. A failure
+reads again after a delay that doubles from a second to a minute and then
+stays there, so the read never gives up; the first one, when no table has
+been made, makes it from the manifest's rows alone, the empty text. The 1st, 2nd, 4th,
+8th... failure logs a line, so a file that stays unreadable is reported
+without a line per minute.
+""".
+-spec read_answered(read_answer(), {unread, non_neg_integer()}, boolean()) -> {reading(), [read_effect()]}.
+read_answered({error, Reason}, {unread, Failures}, Made) ->
+    Count = Failures + 1,
+    Delay = min(?LAST_RETRY_MS, ?FIRST_RETRY_MS bsl min(Failures, 16)),
+    Log = [{log, "erx_starter: rc.conf cannot be read (failure ~b): ~0P; reading again in ~b ms",
+            [Count, Reason, 8, Delay]} || Count band (Count - 1) =:= 0],
+    Manifest = [{apply, <<>>} || not Made],
+    {{unread, Count}, Log ++ Manifest ++ [{retry, Delay}]};
+read_answered(Answer, {unread, Failures}, _Made) ->
+    Text = case Answer of
+               {ok, Read} -> Read;
+               absent -> <<>>
+           end,
+    Log = [{log, "erx_starter: rc.conf read after ~b failures", [Failures]} || Failures > 0],
+    {read, Log ++ [{apply, Text}]}.
 
 -doc "The largest rc.conf the table reads, in bytes; a longer file sets nothing.".
 -spec rc_conf_limit() -> pos_integer().
@@ -481,8 +536,8 @@ valid_settings(_) ->
 valid_value(enable, Value) -> is_boolean(Value);
 valid_value(display, none) -> true;
 valid_value(display, Value) -> is_binary(Value) andalso valid_name(Value);
-valid_value(restarts, Value) -> is_integer(Value) andalso Value >= 0 andalso Value =< ?MAX_U32;
-valid_value(period, Value) -> is_integer(Value) andalso Value >= 1 andalso Value =< ?MAX_U32.
+valid_value(restarts, Value) -> is_integer(Value) andalso Value >= 0 andalso Value =< ?ERX_START_RESTARTS_MAX;
+valid_value(period, Value) -> is_integer(Value) andalso Value >= 1 andalso Value =< ?ERX_START_PERIOD_MAX_S.
 
 %% Lines is the text split at each newline, so a text that ends in a newline
 %% ends in an empty element. The first line that assigns the variable takes

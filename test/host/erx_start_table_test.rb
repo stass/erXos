@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/generated'
 
 # The start table's pure core (docs/design-apps.md, "Verification and testing"):
 # test/erlang/erx_start_table_tests.erl runs on stock's emulator (ERX_ERL and ERX_ERLC,
@@ -38,8 +39,23 @@ class ErxStartTableTest < Minitest::Test
               caught_by: "an_enable_that_displaces_another_row_is_refused_with_its_name_test"),
     Fault.new(name: "a variable's name split at its first _",
               from: '{At, 1} = lists:last(Underscores),', to: '{At, 1} = hd(Underscores),',
-              caught_by: 'a_name_splits_at_its_last_underscore_test')
+              caught_by: 'a_name_splits_at_its_last_underscore_test'),
+    Fault.new(name: 'a reconcile that compares names only, not settings',
+              from: 'maps:find(Name, Held) =/= {ok, map_get(Name, Is)}]}',
+              to: 'not maps:is_key(Name, Held)]}',
+              caught_by: 'reconcile_restarts_a_row_whose_settings_changed_test'),
+    Fault.new(name: 'restarts read up to 2^32-1, past its ceiling',
+              from: 'decimal(Raw, 0, ?ERX_START_RESTARTS_MAX)', to: 'decimal(Raw, 0, 16#FFFFFFFF)',
+              caught_by: 'restarts_and_period_past_their_ceilings_are_refused_test'),
+    Fault.new(name: 'a read that gives up after 30 failures',
+              from: '{{unread, Count}, Log ++ Manifest ++ [{retry, Delay}]};',
+              to: '{{unread, Count}, Log ++ Manifest ++ [{retry, Delay} || Count < 30]};',
+              caught_by: 'a_failed_read_retries_with_a_growing_bounded_delay_and_never_gives_up_test')
   ].freeze
+
+  def setup
+    Erx::Generated.ensure(root: ROOT)
+  end
 
   def test_the_cases_pass
     output, status = eunit(File.read(File.join(ROOT, CORE)))
@@ -67,7 +83,8 @@ class ErxStartTableTest < Minitest::Test
     Dir.mktmpdir('erx-start-table-test') do |work|
       core = File.join(work, File.basename(CORE))
       File.write(core, core_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, core,
+      include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', include, '-o', work, core,
                                        *SOURCES.map { |source| File.join(ROOT, source) }, stdin_data: '')
       assert status.success?, output
       Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',

@@ -237,7 +237,7 @@ person:
 | principal | whose session: a principal of the manifest with a session template | |
 | `enable` | whether the row starts at boot | `YES` |
 | `display` | the display the session starts on, whose session it becomes ([design-display.md](design-display.md#a-displays-session)); a `windows` service granted to the principal's template | none |
-| `restarts`, `restart_period_s` | the intensity: more ends than `restarts` within the period leave the row down | 5 in 600 s |
+| `restarts`, `restart_period_s` | the intensity: more ends than `restarts` within the period leave the row down; at most `start_restarts_max`, 100, within at most `start_period_max_s`, a day (`abi/manifest.txt`), which the packer, the manifest reader and the table's parser each hold to | 5 in 600 s |
 
 The manifest's `start` rows declare every row the table can hold, with
 its defaults; this one declares `clock` and leaves it off:
@@ -444,7 +444,8 @@ row's period. An app's sessions are domains like any other at
 are in `abi/manifest.txt`. The start service reads the `start` rows,
 the session templates and their `windows` grants through `erx_manifest`.
 
-**The ABI source**: the limit `start_rows_max`.
+**The ABI source**: the limits `start_rows_max`, `start_restarts_max`
+and `start_period_max_s`.
 
 **Erlang**: `erx_domain:start_session/2`, whose second argument may
 name a display.
@@ -466,9 +467,20 @@ delays that one command and nothing else. Reads of `/proc/apps` and
 `rc.conf` are answered from the process's own state.
 
 The keepers are a separate branch of the application's supervision
-tree, so a crash of the table's process restarts it, it reads the table
-again, and no session ends. A crash of the keepers' branch ends every
-session it kept and starts each enabled row again.
+tree, so a crash of the table's process restarts it and no session ends.
+The keepers' branch also holds what the table must not forget, as child
+specs OTP keeps without a process: each enabled row's supervisor spec,
+with what its session is kept with, whose missing pid is a row that is
+down; a record of each row `service NAME stop` stopped; and the text of
+`rc.conf` the table was last made from. A restarted table makes its
+table from that text and changes no keeper until its own read of
+`rc.conf` answers; it then stops a held row that is no longer enabled,
+restarts one whose settings changed, and starts an enabled row it does
+not hold, so a row `rc.conf` enabled is not stopped because the file
+cannot be read, and a row that is down or stopped with its settings
+unchanged stays so. A crash of
+the keepers' branch ends every session it kept, drops its records, and
+makes the table again as at boot.
 
 ## Compatibility and migration
 
@@ -481,13 +493,13 @@ reported.
 
 | Failure | Detected by | What happens |
 | --- | --- | --- |
-| the storage domain is down at boot | the system domain's `data` grant is absent | the manifest's enabled rows start; the local settings wait for `rc.conf`, which is read when the grant arrives, and a row they change is stopped and started again |
+| the storage domain is down at boot | the system domain's `data` grant is absent | the manifest's enabled rows start; the local settings wait for `rc.conf`, which is read again after a backoff that grows to a minute and never gives up, since no notice tells the system domain that its grant arrived; a row they change is stopped and started again, and until the read answers `/proc/apps` says `rc.conf` is unread |
 | the principal has no room | the domain library's plan | the start is refused with `quota` or `no_memory`; a kept row counts it as an end |
 | a session ends more often than its row allows | the row's supervisor | the row is down, with the last reason at `/proc/apps`, until `service NAME start` |
 | a local setting names a display the template is not granted, or one another enabled row holds | the merge | the row is `refused` with `{no_grant, D}` or `{display_held, Name}` at `/proc/apps`, and starts nothing |
 | `rc.conf` is damaged, or names a row the manifest does not declare | the table's parser | bad lines are skipped and reported; the manifest's rows stand |
 | the display domain restarts under a display's session | the domain service's grant record | the grant is minted again on the new incarnation, with the session mark |
-| the start service crashes | its supervisor | it restarts and reads the table; kept sessions go on |
+| the start service crashes | its supervisor | it restarts with the table the keepers' branch recorded and reads `rc.conf` again; kept sessions go on, and stopped and down rows stay so |
 
 Every state and reason above is an attribute at `/proc/apps`, and every
 refusal is a log line that names the row or the line. Nothing is shown

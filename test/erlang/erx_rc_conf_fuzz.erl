@@ -8,16 +8,18 @@
 %% bytes, and pads an eighth of the files past 64 KiB and a sixteenth to exactly
 %% 64 KiB. Whatever arrives, the parser makes no atom and never raises; a file over
 %% 64 KiB is refused; every written line reads back as its setting at its line; the
-%% merge adds no row, admits at most one enabled row per display and none on a
+%% values read are within abi/manifest.txt's ceilings; the merge adds no row,
+%% admits at most one enabled row per display and none on a
 %% display its template is not granted; and set/3 writes what it was given, keeps
 %% every other line and writes at most 64 KiB. The seed comes from make check-fuzz.
 
 -module(erx_rc_conf_fuzz).
 -export([run/1]).
 
+-include("generated/erx_abi.hrl").
+
 -define(ROUNDS, 3000).
 -define(MAX_RC_CONF, 65536).
--define(MAX_U32, 16#FFFFFFFF).
 -define(NAMES, [<<"clock">>, <<"a_b">>, <<"kiosk">>, <<"x-1">>]).
 -define(DISPLAYS, [<<"display">>, <<"second">>]).
 -define(FIELDS, [enable, display, restarts, period]).
@@ -86,8 +88,8 @@ setting_line() ->
 
 value(enable) -> rand:uniform(2) =:= 1;
 value(display) -> pick([none | ?DISPLAYS]);
-value(restarts) -> pick([0, 1, 5, rand:uniform(1000), ?MAX_U32]);
-value(period) -> pick([1, 600, rand:uniform(100000), ?MAX_U32]).
+value(restarts) -> pick([0, 1, 5, rand:uniform(?ERX_START_RESTARTS_MAX), ?ERX_START_RESTARTS_MAX]);
+value(period) -> pick([1, 600, rand:uniform(?ERX_START_PERIOD_MAX_S), ?ERX_START_PERIOD_MAX_S]).
 
 raw(true) -> pick([<<"YES">>, <<"yes">>, <<"True">>, <<"on">>, <<"1">>]);
 raw(false) -> pick([<<"NO">>, <<"no">>, <<"FALSE">>, <<"Off">>, <<"0">>]);
@@ -174,8 +176,8 @@ valid_name(Name) ->
 
 valid_value(enable, Value) -> is_boolean(Value);
 valid_value(display, Value) -> Value =:= none orelse valid_name(Value);
-valid_value(restarts, Value) -> is_integer(Value) andalso Value >= 0 andalso Value =< ?MAX_U32;
-valid_value(period, Value) -> is_integer(Value) andalso Value >= 1 andalso Value =< ?MAX_U32.
+valid_value(restarts, Value) -> is_integer(Value) andalso Value >= 0 andalso Value =< ?ERX_START_RESTARTS_MAX;
+valid_value(period, Value) -> is_integer(Value) andalso Value >= 1 andalso Value =< ?ERX_START_PERIOD_MAX_S.
 
 mutate(<<>>) ->
     noise();

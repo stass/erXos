@@ -623,6 +623,15 @@ class ManifestDomainsTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 'source', 'start', with_session(self.class.session) + self.class.start + self.class.start)
   end
 
+  def test_a_start_row_s_intensity_past_its_ceilings_is_refused
+    base = with_session(self.class.session)
+    fields = %w[restarts restart_period_s]
+    view = @codec.open('manifest', admit(base + self.class.start('system', "  restarts 100\n  restart_period_s 86400\n")).bytes)
+    assert_equal [[100, 86_400]], rows(view, 'starts').map { |row| row.values_at(*fields) }
+    refused(Erx::Manifest::Invalid, 17, 'start.restarts', base + self.class.start('system', "  restarts 101\n"))
+    refused(Erx::Manifest::Invalid, 17, 'start.restart_period_s', base + self.class.start('system', "  restart_period_s 86401\n"))
+  end
+
   def test_a_start_row_s_enable_is_only_yes_or_no
     assert_raises(Erx::ABI::SchemaError) { admit(with_session(self.class.session) + self.class.start('system', "  enable yes\n")) }
   end

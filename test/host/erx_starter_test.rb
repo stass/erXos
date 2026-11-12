@@ -36,7 +36,19 @@ class ErxStarterTest < Minitest::Test
     Fault.new(name: "a table whose crash restarts the keepers' branch",
               file: "#{APP}/erx_starter_sup.erl",
               from: '#{strategy => rest_for_one}', to: '#{strategy => one_for_all}',
-              caught_by: 'a_crash_of_the_table_ends_no_session')
+              caught_by: 'a_crash_of_the_table_ends_no_session'),
+    Fault.new(name: 'a restarted table that ignores the recorded text and makes the manifest\'s rows',
+              file: "#{APP}/erx_starter.erl",
+              from: '{ok, Text} -> make(Text, State);', to: '{ok, _Text} -> State;',
+              caught_by: 'a_restart_while_rc_conf_is_unreadable_stops_no_row'),
+    Fault.new(name: 'a stop that leaves no record of the stopped row',
+              file: "#{APP}/erx_starter.erl",
+              from: '{ok, Row} -> erx_starter_sup:stop_row(Name, Row);', to: '{ok, _Row} -> erx_starter_sup:stop(Name);',
+              caught_by: 'a_stopped_row_stays_stopped_across_a_restart'),
+    Fault.new(name: 'a helper that leaves the session of a keeper that ended',
+              file: "#{APP}/erx_starter_keeper.erl",
+              from: "{'EXIT', Keeper, _} -> exit(Pid, abandoned)", to: "{'EXIT', Keeper, _} -> ok",
+              caught_by: 'a_keeper_stopped_while_its_start_is_pending_ends_the_session')
   ].freeze
 
   def setup

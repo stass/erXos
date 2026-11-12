@@ -14,10 +14,11 @@
 -module(erx_apps_ctl_fuzz).
 -export([run/1]).
 
+-include("generated/erx_abi.hrl").
+
 -define(ROUNDS, 20000).
 -define(MIN_ACCEPTED, ?ROUNDS div 5).
 -define(MAX_CTL, 4096).
--define(MAX_U32, 16#FFFFFFFF).
 %% Each verb and the settings it takes.
 -define(VERBS, [{enable, [display, restarts, period]}, {disable, []}, {start, [display]}, {stop, []}]).
 
@@ -83,8 +84,8 @@ bad_name() ->
     end.
 
 value(display) -> pick([none, <<"display">>, name()]);
-value(restarts) -> pick([0, 5, rand:uniform(1000), ?MAX_U32]);
-value(period) -> pick([1, 600, rand:uniform(100000), ?MAX_U32]).
+value(restarts) -> pick([0, 5, rand:uniform(?ERX_START_RESTARTS_MAX), ?ERX_START_RESTARTS_MAX]);
+value(period) -> pick([1, 600, rand:uniform(?ERX_START_PERIOD_MAX_S), ?ERX_START_PERIOD_MAX_S]).
 
 %% The command with its settings in random order and random blanks.
 spaced({Verb, Name, Settings}) ->
@@ -128,8 +129,8 @@ valid_name(Name) ->
     is_binary(Name) andalso re:run(Name, "\\A[a-z0-9][a-z0-9_-]{0,62}\\z") =/= nomatch.
 
 valid_value(display, Value) -> Value =:= none orelse valid_name(Value);
-valid_value(restarts, Value) -> is_integer(Value) andalso Value >= 0 andalso Value =< ?MAX_U32;
-valid_value(period, Value) -> is_integer(Value) andalso Value >= 1 andalso Value =< ?MAX_U32.
+valid_value(restarts, Value) -> is_integer(Value) andalso Value >= 0 andalso Value =< ?ERX_START_RESTARTS_MAX;
+valid_value(period, Value) -> is_integer(Value) andalso Value >= 1 andalso Value =< ?ERX_START_PERIOD_MAX_S.
 
 mutate(Write) when byte_size(Write) =:= 0 ->
     noise();

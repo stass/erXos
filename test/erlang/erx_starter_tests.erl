@@ -34,7 +34,19 @@ starter_test_() ->
       fun a_crash_of_the_table_ends_no_session/1,
       fun a_killed_keeper_ends_its_session/1,
       fun stop_ends_the_session_and_start_starts_it_again/1,
-      fun start_of_a_row_not_enabled_starts_one_session/1]}.
+      fun start_of_a_row_not_enabled_starts_one_session/1,
+      fun a_restart_restarts_a_row_whose_settings_changed/1,
+      fun a_restart_while_rc_conf_is_unreadable_stops_no_row/1,
+      fun a_stopped_row_stays_stopped_across_a_restart/1,
+      fun enable_writes_rc_conf_and_starts_the_row/1,
+      fun a_failed_write_answers_its_error_and_changes_nothing/1,
+      fun a_keeper_stopped_while_its_start_is_pending_ends_the_session/1]}.
+
+%% A first read of rc.conf that fails: the file is a directory until the case
+%% replaces it.
+unreadable_test_() ->
+    {foreach, fun() -> setup(fun(Dir) -> ok = file:make_dir(filename:join(Dir, "rc.conf")) end) end,
+     fun cleanup/1, [fun a_failed_read_starts_the_manifest_rows_and_reads_again/1]}.
 
 %% ---------------------------------------------------------------------------
 %% The stub domain service
@@ -43,24 +55,32 @@ starter_test_() ->
 %% stops it. EUnit runs each case in a process of its own, which takes the
 %% stub's reports, those of the starts before it included, with watch/0.
 setup() ->
+    setup(fun(_Dir) -> ok end).
+
+%% Prepare readies the case's own rc.conf directory before the tree starts.
+setup(Prepare) ->
+    Dir = filename:absname("rc-" ++ integer_to_list(erlang:unique_integer([positive]))),
+    ok = file:make_dir(Dir),
+    ok = Prepare(Dir),
     Setup = self(),
-    Stub = spawn(fun() -> register(erx_domain_srv, self()), stub(#{refuse => [], next => 1, test => none, kept => []}) end),
+    Stub = spawn(fun() -> register(erx_domain_srv, self()), stub(#{refuse => [], hold => [], held => [], next => 1, test => none, kept => []}) end),
     ok = wait_until(fun() -> whereis(erx_domain_srv) =:= Stub end),
     Holder = spawn(fun() ->
-                           {ok, Sup} = erx_starter_sup:start_link(manifest()),
+                           {ok, Sup} = erx_starter_sup:start_link(manifest(), list_to_binary(Dir)),
                            Setup ! {sup, Sup},
                            receive stop -> exit(shutdown) end
                    end),
     Sup = receive {sup, Pid} -> Pid after ?WAIT_MS -> error(no_sup) end,
-    #{stub => Stub, holder => Holder, sup => Sup}.
+    #{stub => Stub, holder => Holder, sup => Sup, dir => Dir}.
 
-cleanup(#{stub := Stub, holder := Holder, sup := Sup}) ->
+cleanup(#{stub := Stub, holder := Holder, sup := Sup, dir := Dir}) ->
     Ref = monitor(process, Sup),
     Holder ! stop,
     receive {'DOWN', Ref, _, _, _} -> ok after ?WAIT_MS -> error(sup_stuck) end,
     StubRef = monitor(process, Stub),
     exit(Stub, kill),
     receive {'DOWN', StubRef, _, _, _} -> ok end,
+    ok = file:del_dir_r(Dir),
     flush().
 
 %% The calling process takes the stub's reports from here on, and those it kept.
@@ -72,7 +92,7 @@ watch() ->
 %% a domain pid does and ends with {domain_down, Id, Info} when it is told to or
 %% when a linked process ends with any reason but normal. It reports each start,
 %% and each end, to the test.
-stub(#{refuse := Refuse, next := Id} = State) ->
+stub(#{refuse := Refuse, hold := Hold, held := Held, next := Id} = State) ->
     Stub = self(),
     receive
         {'$gen_call', From, {start_session, Principal, Start}} ->
@@ -82,9 +102,18 @@ stub(#{refuse := Refuse, next := Id} = State) ->
                     stub(State);
                 false ->
                     Session = spawn(fun() -> process_flag(trap_exit, true), session(Stub, Id, Principal) end),
-                    gen:reply(From, {ok, {erx_domain, Id, node(), Session}}),
-                    stub(report({started, Principal, Start, Session}, State#{next := Id + 1}))
+                    Reply = {ok, {erx_domain, Id, node(), Session}},
+                    Answered = case lists:member(Principal, Hold) of
+                                   true -> State#{held := [{From, Reply} | Held]};
+                                   false -> gen:reply(From, Reply), State
+                               end,
+                    stub(report({started, Principal, Start, Session}, Answered#{next := Id + 1}))
             end;
+        {hold, Principals} ->
+            stub(State#{hold := Principals});
+        release ->
+            lists:foreach(fun({From, Reply}) -> gen:reply(From, Reply) end, Held),
+            stub(State#{hold := [], held := []});
         {refuse, Principals} ->
             stub(State#{refuse := Principals});
         {watch, Test} ->
@@ -166,7 +195,7 @@ a_killed_keeper_ends_its_session(_) ->
     fun() ->
             ok = watch(),
             Kiosk = started(?KIOSK),
-            [{_, RowSup}] = [{Name, Pid} || {Name, Pid} <- erx_starter_sup:held(), Name =:= <<"kiosk">>],
+            [RowSup] = [Pid || {Name, Pid, _Row} <- erx_starter_sup:held(), Name =:= <<"kiosk">>],
             [Keeper] = [Pid || {keeper, Pid, _, _} <- supervisor:which_children(RowSup)],
             exit(Keeper, kill),
             receive {ended, ?KIOSK, Kiosk, killed} -> ok after ?WAIT_MS -> error(session_outlived_keeper) end,
@@ -197,8 +226,115 @@ start_of_a_row_not_enabled_starts_one_session(_) ->
             ?assertEqual(none, run(<<"clock">>))
     end.
 
+a_restart_restarts_a_row_whose_settings_changed(Setup) ->
+    fun() ->
+            ok = watch(),
+            Kiosk = started(?KIOSK),
+            Logger = started(?LOGGER),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            %% Edited while the table is down: kiosk is kept with three restarts now.
+            ok = file:write_file(rc_path(Setup), <<"kiosk_restarts=\"3\"\n">>),
+            ok = restart_table(),
+            receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(changed_row_kept) end,
+            ?assertNotEqual(Kiosk, started(?KIOSK)),
+            ?assertEqual(none, started_within(?LOGGER, 200)),
+            ?assert(is_process_alive(Logger))
+    end.
+
+a_restart_while_rc_conf_is_unreadable_stops_no_row(Setup) ->
+    fun() ->
+            ok = watch(),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(ok, erx_starter:command({enable, <<"clock">>, #{}})),
+            Clock = started(?CLOCK),
+            %% rc.conf, which alone enables clock, cannot be read by the next table.
+            ok = file:delete(rc_path(Setup)),
+            ok = file:make_dir(rc_path(Setup)),
+            ok = restart_table(),
+            ?assertEqual(unread, rc_conf()),
+            receive {ended, ?CLOCK, Clock, _} -> error(rc_conf_row_stopped) after 300 -> ok end,
+            ?assertEqual(running, run(<<"clock">>)),
+            ?assertEqual({error, rc_conf_unread}, erx_starter:command({disable, <<"clock">>, #{}}))
+    end.
+
+a_stopped_row_stays_stopped_across_a_restart(_) ->
+    fun() ->
+            ok = watch(),
+            Kiosk = started(?KIOSK),
+            ok = wait_until(fun() -> run(<<"kiosk">>) =:= running end),
+            ?assertEqual(ok, erx_starter:command({stop, <<"kiosk">>, #{}})),
+            receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(session_outlived_stop) end,
+            ok = restart_table(),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(none, started_within(?KIOSK, 300)),
+            ?assertEqual(stopped, run(<<"kiosk">>))
+    end.
+
+enable_writes_rc_conf_and_starts_the_row(Setup) ->
+    fun() ->
+            ok = watch(),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(ok, erx_starter:command({enable, <<"clock">>, #{restarts => 3}})),
+            ?assertEqual({ok, <<"clock_enable=\"YES\"\nclock_restarts=\"3\"\n">>}, file:read_file(rc_path(Setup))),
+            _ = started(?CLOCK),
+            ?assertEqual(running, run(<<"clock">>)),
+            ?assertEqual({error, enoent}, file:read_file_info(<<(rc_path(Setup))/binary, ".new">>))
+    end.
+
+a_failed_write_answers_its_error_and_changes_nothing(Setup) ->
+    fun() ->
+            ok = watch(),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            %% The temporary file cannot be made.
+            ok = file:make_dir(<<(rc_path(Setup))/binary, ".new">>),
+            ?assertMatch({error, _}, erx_starter:command({enable, <<"clock">>, #{}})),
+            ?assertEqual(none, run(<<"clock">>)),
+            ?assertEqual({error, enoent}, file:read_file(rc_path(Setup))),
+            ?assertEqual(none, started_within(?CLOCK, 200))
+    end.
+
+a_keeper_stopped_while_its_start_is_pending_ends_the_session(_) ->
+    fun() ->
+            ok = watch(),
+            Kiosk = started(?KIOSK),
+            erx_domain_srv ! {hold, [?KIOSK]},
+            Kiosk ! {end_session, crashed},
+            %% The stub has made the session and holds its answer.
+            Pending = started(?KIOSK),
+            ?assertEqual(ok, erx_starter:command({stop, <<"kiosk">>, #{}})),
+            erx_domain_srv ! release,
+            receive {ended, ?KIOSK, Pending, abandoned} -> ok after ?WAIT_MS -> error(abandoned_session_kept) end
+    end.
+
+a_failed_read_starts_the_manifest_rows_and_reads_again(Setup) ->
+    fun() ->
+            ok = watch(),
+            _ = started(?KIOSK),
+            Logger = started(?LOGGER),
+            ?assertEqual(unread, rc_conf()),
+            ?assertEqual({error, rc_conf_unread}, erx_starter:command({disable, <<"logger">>, #{}})),
+            ok = file:del_dir(rc_path(Setup)),
+            ok = file:write_file(rc_path(Setup), <<"logger_enable=\"NO\"\n">>),
+            receive {ended, ?LOGGER, Logger, _} -> ok after ?WAIT_MS -> error(rc_conf_not_read_again) end,
+            ?assertEqual(read, rc_conf()),
+            ?assertEqual(none, run(<<"logger">>))
+    end.
+
 %% ---------------------------------------------------------------------------
 %% Helpers
+
+%% The case's rc.conf.
+rc_path(#{dir := Dir}) ->
+    iolist_to_binary(filename:join(Dir, "rc.conf")).
+
+rc_conf() ->
+    maps:get(rc_conf, erx_starter:rows()).
+
+%% Kills the table and waits for its supervisor to start the next.
+restart_table() ->
+    Table = whereis(erx_starter),
+    exit(Table, kill),
+    wait_until(fun() -> is_pid(whereis(erx_starter)) andalso whereis(erx_starter) =/= Table end).
 
 %% The next session the stub starts for Principal.
 started(Principal) ->
@@ -211,7 +347,8 @@ started_within(Principal, Ms) ->
     receive {started, Principal, #{}, Session} -> Session after Ms -> none end.
 
 run(Name) ->
-    #{rows := Rows} = erx_starter:rows(),
+    #{rows := Made} = erx_starter:rows(),
+    Rows = case Made of unmade -> []; _ -> Made end,
     case [Run || #{principal := Principal, run := Run} <- Rows, Principal =:= Name] of
         [Run] -> Run;
         %% The table has not been made yet.

@@ -553,20 +553,8 @@ it; git history is the record of completed work.
   grants from the system manifest, has no host test over a packed manifest with a `start` row; the QEMU suite of
   Track A's A8b is its first check. Its grants are every service a template is granted, not only `windows`
   services, as the domain service's own check is.
-* [Medium] `erx_starter` review residuals (A5): a table restart reconciles held rows by name only, so a row whose
-    settings changed while the table was down keeps its old session, and a restart while rc.conf cannot be read
-    reconciles against the manifest's rows alone, stopping rows only rc.conf enabled (`erx_starter.erl`
-    `apply_text/2`, `erx_start_table:reconcile/2`); a stopped row has no record and a table restart starts it again,
-    while a down row stays down (`erx_starter_sup:stop/1`); the rc.conf read gives up after 30 attempts instead of
-    reading when the `data` grant arrives, and `rows/0` does not show that the file is unread; the read and retry
-    phases live in the process, not in a pure function of `erx_start_table`; the write path, a failed read and the
-    helper's abandoned start have no process-level test, and the suite reads the host's `/data/start/rc.conf`.
-* [Medium] `rc.conf` may set `restarts` and `period` up to 2^32-1, which OTP's supervisor takes as given: a
-    row whose start is refused at once then restarts its keeper without pause, and its restart list grows without
-    bound in the system domain. Declare ceilings in `abi/erx_abi.txt` and refuse settings past them in
-    `erx_start_table` and the packer.
 * [Low] `erx_starter` review residuals (A5): no deadline on its file workers, so a hung storage operation queues
-    every later command; workers of a crashed table may race on `rc.conf.new`; no fsync before the rename; a refused
+    every later command; workers of a crashed table may race on `rc.conf.new`; a refused
     start and a row going down log no line naming the row; the keepers' branch has OTP's default intensity and
     `held/0` reads `restarting` as down; the one-off keeper is a temporary child of the keepers' branch, which
     design-apps.md calls "under no supervisor"; the rescue configuration starting no row is not checked (it is not
@@ -578,8 +566,21 @@ it; git history is the record of completed work.
   display (`start_session/3`, or `start_display_session`) that only the keeper calls, and `start_session/2`
   refusing both keys; start-display then becomes a call-site rule like start-callers.
 * [Low] `erx_starter_rc:read/0` treats `enoent` as a machine with no `rc.conf`. If the storage domain being down
+* [Medium] `erx_starter` review residuals (A5b): whether a held row changed rests on `erx_starter:kept/1` undoing
+    `row/2` exactly, and no process test has a row with a display; comparing the stored `erx_starter_row:row()`
+    with the one the table would start would make it hold by construction and delete both `kept/1`s.
+* [Low] `erx_starter` review residuals (A5b): an enabled row with no record shows as `stopped` (a crash between
+    recording rc.conf's text and starting the row leaves one until the read answers); `enable` starting its row
+    and `stop` recording a stopped row are decided in the process, not returned by `apply_ctl/4`; the rename over
+    rc.conf is not followed by a sync of its directory; the process tests make their rc.conf directories in the
+    current directory and the failed-read case races its retry by a few microseconds; `/proc/apps` (A7) must
+    show `rows/0`'s `rc_conf` state.
+* [Low] `erx_starter_rc:read/1` treats `enoent` as a machine with no `rc.conf`. If the storage domain being down
   answers `enoent` under `/data` rather than another error, the first read finds no settings and is not tried
-  again, so the manifest's rows stand until the next boot. Check what the stopgap answers.
+  again, so the manifest's rows stand until the next boot, and the read counts as answered, so a later `enable`
+  or `disable` writes a file made from no settings over the real one once storage is back, losing its other
+  settings. An absent `data` grant answers `eio` (`erx_path`), which is retried; check what a live but failing
+  storage domain answers.
   [Track A](docs/plan.md#track-a-apps) builds it. Built: the `start` row in `abi/manifest.txt` with property 17's
   structural clauses and its planning clause (each enabled row's session planned by the domain library beside the
   configured domains), `erx_domain:start_session/2`'s `display` and `default_display`, and the session mark. Not

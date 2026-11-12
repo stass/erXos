@@ -222,13 +222,51 @@ start_and_stop_test() ->
 
 reconcile_keeps_held_rows_test() ->
     {Rows, []} = merged(<<"logger_enable=\"NO\"\n">>),
-    %% kiosk is held and stays; logger is held and no longer enabled; nothing else starts.
-    ?assertEqual({[<<"logger">>], []}, erx_start_table:reconcile([<<"kiosk">>, <<"logger">>], Rows)),
-    ?assertEqual({[], [<<"kiosk">>]}, erx_start_table:reconcile([], Rows)).
+    Held = erx_start_table:kept(element(1, merged(<<>>))),
+    %% kiosk is held alike and stays; logger is held and no longer enabled; nothing else starts.
+    ?assertEqual({[<<"logger">>], []}, erx_start_table:reconcile(Held, Rows)),
+    ?assertEqual({[], [<<"kiosk">>]}, erx_start_table:reconcile(#{}, Rows)),
+    %% A held name the table does not have stops.
+    ?assertEqual({[<<"gone">>], []}, erx_start_table:reconcile((erx_start_table:kept(Rows))#{<<"gone">> => #{}}, Rows)).
 
-changes_restart_only_changed_rows_test() ->
+reconcile_restarts_a_row_whose_settings_changed_test() ->
     {Before, []} = merged(<<>>),
     {After, []} = merged(<<"logger_restarts=\"9\"\nkiosk_enable=\"NO\"\n">>),
-    ?assertEqual({[<<"kiosk">>, <<"logger">>], [<<"logger">>]}, erx_start_table:changes(Before, After)),
-    ?assertEqual({[], []}, erx_start_table:changes(After, After)),
-    ?assertEqual({[], [<<"kiosk">>]}, erx_start_table:changes(After, element(1, merged(<<"logger_restarts=\"9\"\n">>)))).
+    ?assertEqual({[<<"kiosk">>, <<"logger">>], [<<"logger">>]},
+                 erx_start_table:reconcile(erx_start_table:kept(Before), After)),
+    ?assertEqual({[], []}, erx_start_table:reconcile(erx_start_table:kept(After), After)),
+    {Display, []} = merged(<<"kiosk_display=\"\"\n">>),
+    ?assertEqual({[<<"kiosk">>], [<<"kiosk">>]}, erx_start_table:reconcile(erx_start_table:kept(Before), Display)),
+    {Period, []} = merged(<<"kiosk_period=\"60\"\n">>),
+    ?assertEqual({[<<"kiosk">>], [<<"kiosk">>]}, erx_start_table:reconcile(erx_start_table:kept(Before), Period)).
+
+restarts_and_period_past_their_ceilings_are_refused_test() ->
+    {ok, Local} = erx_start_table:parse_rc_conf(<<"kiosk_restarts=\"100\"\nkiosk_period=\"86400\"\n"
+                                                  "kiosk_restarts=\"101\"\nkiosk_period=\"86401\"\n"
+                                                  "kiosk_restarts=\"4294967295\"\n">>),
+    ?assertMatch([{set, 1, _, restarts, 100}, {set, 2, _, period, 86400},
+                  {skipped, 3, {bad_value, restarts}}, {skipped, 4, {bad_value, period}},
+                  {skipped, 5, {bad_value, restarts}}], Local),
+    ?assertEqual({error, bad_setting}, erx_start_table:parse_ctl(<<"enable kiosk restarts=101">>)),
+    ?assertEqual({error, bad_setting}, erx_start_table:parse_ctl(<<"enable kiosk period=86401">>)),
+    ?assertEqual({error, bad_setting}, erx_start_table:set(<<>>, <<"kiosk">>, #{restarts => 101})),
+    %% A made-up manifest's row past a ceiling is refused by the merge.
+    [Row | Rows] = rows(),
+    {[Merged | _], []} = erx_start_table:merge([Row#{enable := true, period := 86401} | Rows], [], grants()),
+    ?assertEqual({refused, {past_ceiling, period}}, maps:get(status, Merged)).
+
+a_failed_read_retries_with_a_growing_bounded_delay_and_never_gives_up_test() ->
+    Fail = fun(Failures, Made) -> erx_start_table:read_answered({error, eio}, {unread, Failures}, Made) end,
+    %% The first failure, before any table, makes it from the manifest and logs.
+    ?assertMatch({{unread, 1}, [{log, _, _}, {apply, <<>>}, {retry, 1000}]}, Fail(0, false)),
+    ?assertMatch({{unread, 1}, [{log, _, _}, {retry, 1000}]}, Fail(0, true)),
+    ?assertMatch({{unread, 2}, [{log, _, _}, {retry, 2000}]}, Fail(1, true)),
+    ?assertEqual({{unread, 3}, [{retry, 4000}]}, Fail(2, true)),
+    ?assertEqual({{unread, 10}, [{retry, 60000}]}, Fail(9, true)),
+    ?assertMatch({{unread, 1024}, [{log, _, _}, {retry, 60000}]}, Fail(1023, true)),
+    ?assertEqual({{unread, 100001}, [{retry, 60000}]}, Fail(100000, true)).
+
+a_read_that_answers_makes_the_table_test() ->
+    ?assertEqual({read, [{apply, <<"x">>}]}, erx_start_table:read_answered({ok, <<"x">>}, {unread, 0}, false)),
+    ?assertEqual({read, [{apply, <<>>}]}, erx_start_table:read_answered(absent, {unread, 0}, true)),
+    ?assertMatch({read, [{log, _, [3]}, {apply, <<>>}]}, erx_start_table:read_answered(absent, {unread, 3}, true)).

@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of rc.conf, erx_start_table:parse_rc_conf/1 with merge/3 and set/3
 # over what it reads (test/erlang/erx_rc_conf_fuzz.erl), compiled from source and run
@@ -25,6 +26,7 @@ module ErxRcConfFuzz
   module_function
 
   def run(seed:)
+    Erx::Generated.ensure(root: ROOT)
     core = File.binread(File.join(ROOT, CORE))
     raise "no bound in #{CORE}" unless core.scan(BOUND).size == 1
 
@@ -41,7 +43,8 @@ module ErxRcConfFuzz
       core_path = File.join(work, File.basename(CORE))
       File.binwrite(core_path, core_text)
       sources = [core_path, *[IDENT, FUZZ].map { |source| File.join(ROOT, source) }]
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, *sources, stdin_data: '')
+      include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-o', work, *sources, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

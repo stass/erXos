@@ -1190,7 +1190,8 @@ module Erx
 
       # One start row: its principal's index, which must have a session template, and
       # each field the record states or its default. The period is at least a second,
-      # since the row's supervisor takes it as its own.
+      # since the row's supervisor takes it as its own, and neither field is past its
+      # ceiling in abi/manifest.txt, which the reader and the start table also hold to.
       def start_row(record, services, sessions)
         principal = @indices.fetch('principal')[record.name] || invalid('a start row names no principal', 17, 'start.name')
         invalid('a start row\'s principal has no session template', 17, 'start.name') unless
@@ -1202,7 +1203,15 @@ module Erx
                 'restarts' => stated.call('restarts', START_RESTARTS) { |key| number(record, key) },
                 'restart_period_s' => stated.call('restart_period_s', START_RESTART_PERIOD_S) { |key| number(record, key) } }
         invalid('a start row\'s restart period is under a second', 17, 'start.restart_period_s') if row.fetch('restart_period_s').zero?
+        check_start_ceiling(row, 'restarts', 'start_restarts_max')
+        check_start_ceiling(row, 'restart_period_s', 'start_period_max_s')
         row
+      end
+
+      # A start row's field Key is at most the ABI's limit Limit.
+      def check_start_ceiling(row, key, limit)
+        ceiling = @codec.constant(limit)
+        invalid("a start row's #{key} is over #{ceiling}", 17, "start.#{key}") if row.fetch(key) > ceiling
       end
 
       # A row's enable: YES or NO, as rc.conf(5) writes it.

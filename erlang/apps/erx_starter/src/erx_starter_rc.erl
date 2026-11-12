@@ -5,26 +5,28 @@
 -moduledoc """
 The file operations on rc.conf (docs/design-apps.md, "Where the file
 is"), which run in the table's workers, never in the table's process.
-The file is `start/rc.conf` at the root of the system domain's `data`
-grant, which erx_domain_app mounts at /data.
+The file is `rc.conf` in a directory the table names: directory/0,
+`start` at the root of the system domain's `data` grant, which
+erx_domain_app mounts at /data, or a test's own.
 
-* read/0 reads at most one byte past erx_start_table's bound, so a file of
+* read/1 reads at most one byte past erx_start_table's bound, so a file of
   any size costs no more than that, and parse_rc_conf/1 refuses one past
   it. A file that does not exist is `absent`: a machine with no settings.
-* write/1 writes the new text to a temporary file beside rc.conf and
-  renames it over rc.conf, so a reader finds the old text or the new one,
-  never part of either.
+* write/2 writes the new text to a temporary file beside rc.conf, syncs
+  it to storage and renames it over rc.conf, so a reader finds the old
+  text or the new one, never part of either.
 """.
 
--export([read/0, write/1]).
+-export([directory/0, read/1, write/2]).
 
--define(DIRECTORY, <<"/data/start">>).
--define(PATH, <<"/data/start/rc.conf">>).
--define(TEMPORARY, <<"/data/start/rc.conf.new">>).
+-doc "The directory of the system's rc.conf.".
+-spec directory() -> binary().
+directory() ->
+    <<"/data/start">>.
 
--spec read() -> {ok, binary()} | absent | {error, term()}.
-read() ->
-    case file:open(?PATH, [read, binary]) of
+-spec read(binary()) -> {ok, binary()} | absent | {error, term()}.
+read(Directory) ->
+    case file:open(path(Directory), [read, binary]) of
         {ok, File} ->
             try
                 read(File, erx_start_table:rc_conf_limit() + 1, [])
@@ -47,16 +49,35 @@ read(File, Left, Read) ->
         {error, _} = Error -> Error
     end.
 
--spec write(binary()) -> ok | {error, term()}.
-write(Text) ->
+-spec write(binary(), binary()) -> ok | {error, term()}.
+write(Directory, Text) ->
+    Temporary = filename:join(Directory, <<"rc.conf.new">>),
     maybe
-        ok ?= directory(),
-        ok ?= file:write_file(?TEMPORARY, Text),
-        file:rename(?TEMPORARY, ?PATH)
+        ok ?= make_directory(Directory),
+        ok ?= write_synced(Temporary, Text),
+        file:rename(Temporary, path(Directory))
     end.
 
-directory() ->
-    case file:make_dir(?DIRECTORY) of
+%% Writes Text as the whole of the file at Path and syncs it, so the rename
+%% that follows never puts a file whose bytes are not on storage in place.
+write_synced(Path, Text) ->
+    maybe
+        {ok, File} ?= file:open(Path, [write, binary]),
+        try
+            maybe
+                ok ?= file:write(File, Text),
+                file:sync(File)
+            end
+        after
+            _ = file:close(File)
+        end
+    end.
+
+path(Directory) ->
+    filename:join(Directory, <<"rc.conf">>).
+
+make_directory(Directory) ->
+    case file:make_dir(Directory) of
         {error, eexist} -> ok;
         Made -> Made
     end.

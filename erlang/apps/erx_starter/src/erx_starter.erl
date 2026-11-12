@@ -15,37 +15,41 @@ erx_start_table's; this process carries them out.
   tables. A manifest with no start row makes an empty table, and nothing
   more happens: no rc.conf is read.
 * **rc.conf.** The process does no file operation itself. A worker reads
-  `start/rc.conf` under the system domain's /data (erx_starter_rc); the
-  table starts its rows once the first read answers. A read that fails,
-  the storage domain not being up, makes the table from the manifest's
-  rows alone and is tried again every ?RETRY_MS milliseconds, at most
-  ?ATTEMPTS times; when a later read succeeds the table is merged again,
-  and a row the file changes is stopped and started again
-  (erx_start_table:changes/2). Until a read has answered, a command that
-  writes rc.conf is refused with `rc_conf_unread`, so it never writes over
+  rc.conf (erx_starter_rc), and erx_start_table:read_answered/3 decides
+  what each answer leads to: a text, or no file, makes the table; a
+  failure reads again after a backoff that never gives up, and the first
+  one, when no table has been made, makes it from the manifest's rows
+  alone, so they start while the storage domain is down. Until a read
+  has answered, rows/0 says rc.conf is unread, and a command that writes
+  rc.conf is refused with `rc_conf_unread`, so it never writes over
   settings it has not read.
-* **Commands.** command/1 takes a command parse_ctl/1 made
+* **Making the table.** Each time the table is made from rc.conf's text
+  the text is recorded in the keepers' branch, and the rows' keepers are
+  reconciled with it (erx_start_table:reconcile/2): a held row no longer
+  enabled stops, a row whose settings changed is restarted, an enabled
+  row not held starts, and a row that is down or stopped with its
+  settings unchanged stays so.
+* **Commands.** Until the table is first made every command is refused
+  with `rc_conf_unread`. command/1 takes a command parse_ctl/1 made
   (erx_start_table:apply_ctl/4 decides it). A command that writes rc.conf
   hands the new text to a worker, which writes it to a temporary file and
   renames that over rc.conf; the table commits the text only once the
   write succeeded, and answers commands in order, one write at a time.
-* **Restart.** A restarted process reads the manifest and rc.conf again,
-  and then stops the held rows that are no longer enabled and starts the
-  enabled rows the keepers' branch does not hold
-  (erx_start_table:reconcile/2), so no kept session ends and a row that is
-  down stays down.
+  `stop` of an enabled row records it as stopped.
+* **Restart.** A restarted process makes the table from the text the
+  keepers' branch recorded, and changes nothing the branch holds until
+  its own read of rc.conf answers: a row rc.conf enabled is not stopped
+  because the file cannot be read, and a row that is down or stopped
+  stays so. With no record, it starts as at boot.
 """.
 -behaviour(gen_server).
 
 -include("generated/erx_abi.hrl").
 
--export([start_link/1, command/1, rows/0]).
+-export([start_link/2, command/1, rows/0]).
 -export_type([source/0]).
 -export([manifest_table/1]).
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2]).
-
--define(RETRY_MS, 2000).
--define(ATTEMPTS, 30).
 
 %% The manifest's part of the table: its start rows in order, the services
 %% each principal's session template is granted, and each principal's
@@ -57,9 +61,10 @@ erx_start_table's; this process carries them out.
 %% manifest table made beforehand, for the tests.
 -type source() :: system | manifest().
 
--spec start_link(source()) -> gen_server:start_ret().
-start_link(Source) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, Source, []).
+-doc "The table over Source's rows, with rc.conf in Directory.".
+-spec start_link(source(), binary()) -> gen_server:start_ret().
+start_link(Source, Directory) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, {Source, Directory}, []).
 
 -doc """
 Carries out Command, from erx_start_table:parse_ctl/1: ok, or {error,
@@ -72,11 +77,15 @@ command(Command) ->
     gen_server:call(?MODULE, {command, Command}, infinity).
 
 -doc """
-The table: each manifest row merged, with `run`, `running`, `down` or
-`stopped` for an enabled row and `none` for any other, and the lines of
-rc.conf that were skipped.
+The table: each manifest row merged, with the key `run`: `running`, `down`
+or `stopped` for an enabled row and `none` for any other, or `unmade`
+before the table is first made; the lines of
+rc.conf that were skipped; and `rc_conf`, `read` once this process's read
+of rc.conf has answered, `unread` before. While it is unread the rows are
+those of the text the keepers' branch recorded, or of the manifest alone,
+and may not be what the file sets.
 """.
--spec rows() -> #{rows := [map()], skipped := [erx_start_table:local()]}.
+-spec rows() -> #{rows := [map()] | unmade, skipped := [erx_start_table:local()], rc_conf := read | unread}.
 rows() ->
     gen_server:call(?MODULE, rows).
 
@@ -134,10 +143,11 @@ strings(View, Table) ->
         {ok, [String || {ok, String} <- Read]}
     end.
 
+
 %% ---------------------------------------------------------------------------
 %% The process
 
-init(system) ->
+init({system, Directory}) ->
     Manifest = case manifest_table(erx_build:system_manifest()) of
                    {ok, Table} ->
                        Table;
@@ -145,15 +155,19 @@ init(system) ->
                        logger:error("erx_starter: the system manifest's start rows cannot be read; no row starts"),
                        #{rows => [], grants => #{}, principals => #{}}
                end,
-    init(Manifest);
-init(#{} = Manifest) ->
-    {ok, Manifest#{text => <<>>, local => unread, attempts => 0, merged => none, skipped => [],
+    init({Manifest, Directory});
+init({#{} = Manifest, Directory}) ->
+    {ok, Manifest#{directory => Directory, text => <<>>, local => {unread, 0}, merged => none, skipped => [],
                    reader => none, writer => none, queue => queue:new()}, {continue, read}}.
 
 handle_continue(read, #{rows := []} = State) ->
     {noreply, State#{local := read, merged := []}};
 handle_continue(read, State) ->
-    {noreply, read(State)}.
+    Recorded = case erx_starter_sup:recorded() of
+                   {ok, Text} -> make(Text, State);
+                   none -> State
+               end,
+    {noreply, read(Recorded)}.
 
 handle_call({command, Command}, From, #{writer := none, queue := Queue} = State) ->
     true = queue:is_empty(Queue),
@@ -178,35 +192,44 @@ handle_info(_Message, State) ->
 %% ---------------------------------------------------------------------------
 %% rc.conf
 
-read(#{attempts := Attempts} = State) ->
-    {_, Ref} = spawn_monitor(fun() -> exit({read, erx_starter_rc:read()}) end),
-    State#{reader := Ref, attempts := Attempts + 1}.
+read(#{directory := Directory} = State) ->
+    {_, Ref} = spawn_monitor(fun() -> exit({read, erx_starter_rc:read(Directory)}) end),
+    State#{reader := Ref}.
 
-read_answered({read, {ok, Text}}, State) ->
-    apply_text(Text, State#{local := read});
-read_answered({read, absent}, State) ->
-    apply_text(<<>>, State#{local := read});
-read_answered(Failed, #{attempts := Attempts} = State) ->
-    Reason = case Failed of
-                 {read, {error, Error}} -> Error;
-                 Crash -> Crash
+%% Carries out what erx_start_table:read_answered/3 decides for the reader's
+%% end, Result.
+read_answered(Result, #{local := Local, merged := Merged} = State) ->
+    Answer = case Result of
+                 {read, Read} -> Read;
+                 Crash -> {error, Crash}
              end,
-    logger:warning("erx_starter: rc.conf cannot be read (attempt ~b of ~b): ~0P", [Attempts, ?ATTEMPTS, Reason, 8]),
-    Started = case State of
-                  #{merged := none} -> apply_text(<<>>, State);
-                  _ -> State
-              end,
-    case Attempts < ?ATTEMPTS of
-        true ->
-            _ = erlang:send_after(?RETRY_MS, self(), read),
-            Started;
-        false ->
-            Started#{local := unavailable}
-    end.
+    {Reading, Effects} = erx_start_table:read_answered(Answer, Local, Merged =/= none),
+    lists:foldl(fun effect/2, State#{local := Reading}, Effects).
 
-%% The table rc.conf's Text makes, with the rows' keepers stopped and started
-%% to match it.
-apply_text(Text, #{rows := Rows, grants := Grants, merged := Before} = State) ->
+effect({log, Format, Args}, State) ->
+    logger:warning(Format, Args),
+    State;
+effect({apply, Text}, State) ->
+    apply_text(Text, State);
+effect({retry, Delay}, State) ->
+    _ = erlang:send_after(Delay, self(), read),
+    State.
+
+%% The table made from Text, rc.conf's text or the empty text of the manifest's
+%% rows alone, recorded in the keepers' branch first, with the rows' keepers
+%% reconciled with it.
+apply_text(Text, State) ->
+    ok = erx_starter_sup:record(Text),
+    #{merged := After} = Made = make(Text, State),
+    Held = #{Name => kept(Row) || {Name, _Run, Row} <- erx_starter_sup:held()},
+    {Stop, Start} = erx_start_table:reconcile(Held, After),
+    lists:foreach(fun erx_starter_sup:stop/1, Stop),
+    lists:foreach(fun(Name) -> start_row(Name, Made) end, Start),
+    Made.
+
+%% The table rc.conf's Text makes, with every skipped line and refused row
+%% logged; no keeper changes.
+make(Text, #{rows := Rows, grants := Grants} = State) ->
     Local = case erx_start_table:parse_rc_conf(Text) of
                 {ok, Parsed} ->
                     Parsed;
@@ -215,32 +238,31 @@ apply_text(Text, #{rows := Rows, grants := Grants, merged := Before} = State) ->
                                    [erx_start_table:rc_conf_limit()]),
                     []
             end,
-    {After, Skipped} = erx_start_table:merge(Rows, Local, Grants),
+    {Merged, Skipped} = erx_start_table:merge(Rows, Local, Grants),
     _ = [logger:warning("erx_starter: rc.conf line ~b skipped: ~0p", [Line, Reason])
          || {skipped, Line, Reason} <- Skipped],
     _ = [logger:warning("erx_starter: row ~ts refused: ~0p", [Name, Reason])
-         || #{principal := Name, status := {refused, Reason}} <- After],
-    {Stop, Start} = case Before of
-                        none -> erx_start_table:reconcile([Name || {Name, _} <- erx_starter_sup:held()], After);
-                        _ -> erx_start_table:changes(Before, After)
-                    end,
-    lists:foreach(fun erx_starter_sup:stop/1, Stop),
-    Applied = State#{text := Text, merged := After, skipped := Skipped},
-    lists:foreach(fun(Name) -> start_row(Name, Applied) end, Start),
-    Applied.
+         || #{principal := Name, status := {refused, Reason}} <- Merged],
+    State#{text := Text, merged := Merged, skipped := Skipped}.
 
 %% ---------------------------------------------------------------------------
 %% Commands
 
-%% A command that writes rc.conf before the file has been read is refused, so it
-%% never writes over settings it has not read; start and stop act on the table as it is.
+%% Before any table is made every command is refused, so none answers ok and is
+%% undone when the table is made. A command that writes rc.conf before the file
+%% has been read is refused, so it never writes over settings it has not read;
+%% start and stop act on the table as it is.
+run(_Command, From, #{merged := none} = State) ->
+    gen_server:reply(From, {error, rc_conf_unread}),
+    next(State);
 run(Command, From, #{text := Text, rows := Rows, grants := Grants, local := Local} = State) ->
     case erx_start_table:apply_ctl(Command, Text, Rows, Grants) of
         {rc_conf, _} when Local =/= read ->
             gen_server:reply(From, {error, rc_conf_unread}),
             next(State);
         {rc_conf, Written} ->
-            {_, Ref} = spawn_monitor(fun() -> exit({written, erx_starter_rc:write(Written)}) end),
+            Directory = maps:get(directory, State),
+            {_, Ref} = spawn_monitor(fun() -> exit({written, erx_starter_rc:write(Directory, Written)}) end),
             State#{writer := {Ref, From, Command, Written}};
         Action ->
             gen_server:reply(From, act(Action, State)),
@@ -251,8 +273,11 @@ act({start_row, Name}, State) ->
     start_row(Name, State);
 act({start_once, Name, Start}, #{principals := Principals}) ->
     started(erx_starter_sup:start_once(Name, map_get(Name, Principals), Start));
-act({stop, Name}, _State) ->
-    erx_starter_sup:stop(Name);
+act({stop, Name}, State) ->
+    case row(Name, State) of
+        {ok, Row} -> erx_starter_sup:stop_row(Name, Row);
+        none -> erx_starter_sup:stop(Name)
+    end;
 act({error, _} = Refused, _State) ->
     Refused.
 
@@ -285,34 +310,51 @@ next(State) ->
     State.
 
 %% Starts row Name's supervisor, if the row is enabled and not running.
-start_row(Name, #{merged := Merged, principals := Principals}) ->
-    case [Row || #{principal := Principal, status := enabled} = Row <- Merged, Principal =:= Name] of
-        [#{display := Display, restarts := Restarts, period := Period}] ->
-            Start = case Display of
-                        none -> #{};
-                        _ -> #{display => Display}
-                    end,
-            started(erx_starter_sup:start_row(Name, #{principal => map_get(Name, Principals), start => Start,
-                                                      restarts => Restarts, period => Period}));
-        [] ->
-            ok
+start_row(Name, State) ->
+    case row(Name, State) of
+        {ok, Row} -> started(erx_starter_sup:start_row(Name, Row));
+        none -> ok
     end.
 
 started({ok, _Pid}) -> ok;
 started({error, {already_started, _}}) -> ok;
 started({error, _} = Refused) -> Refused.
 
-table(#{merged := none, skipped := Skipped}) ->
-    #{rows => [], skipped => Skipped};
-table(#{merged := Merged, skipped := Skipped}) ->
-    Held = maps:from_list(erx_starter_sup:held()),
-    #{rows => [Row#{run => run_state(Row, Held)} || Row <- Merged], skipped => Skipped}.
+%% What enabled row Name's supervisor keeps (erx_starter_row:row()), or none
+%% for a row that is not enabled.
+row(Name, #{merged := Merged, principals := Principals}) when is_list(Merged) ->
+    case [Row || #{principal := Principal, status := enabled} = Row <- Merged, Principal =:= Name] of
+        [#{display := Display, restarts := Restarts, period := Period}] ->
+            Start = case Display of
+                        none -> #{};
+                        _ -> #{display => Display}
+                    end,
+            {ok, #{principal => map_get(Name, Principals), start => Start, restarts => Restarts, period => Period}};
+        [] ->
+            none
+    end;
+row(_Name, #{merged := none}) ->
+    none.
 
+%% What a row's supervisor keeps its session with, as erx_start_table:kept/1
+%% gives it for a merged row.
+kept(#{start := Start, restarts := Restarts, period := Period}) ->
+    #{display => maps:get(display, Start, none), restarts => Restarts, period => Period}.
+
+table(#{merged := none, skipped := Skipped, local := Local}) ->
+    #{rows => unmade, skipped => Skipped, rc_conf => reading(Local)};
+table(#{merged := Merged, skipped := Skipped, local := Local}) ->
+    Held = #{Name => Run || {Name, Run, _Row} <- erx_starter_sup:held()},
+    #{rows => [Row#{run => run_state(Row, Held)} || Row <- Merged], skipped => Skipped, rc_conf => reading(Local)}.
+
+reading(read) -> read;
+reading({unread, _Failures}) -> unread.
+
+%% An enabled row with no record has not been started, as one stopped.
 run_state(#{status := enabled, principal := Name}, Held) ->
-    case maps:find(Name, Held) of
-        {ok, down} -> down;
-        {ok, _Pid} -> running;
-        error -> stopped
+    case maps:get(Name, Held, stopped) of
+        Pid when is_pid(Pid) -> running;
+        Other -> Other
     end;
 run_state(_Row, _Held) ->
     none.
