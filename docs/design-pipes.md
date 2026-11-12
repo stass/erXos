@@ -472,7 +472,8 @@ covers a pipe's I/O, so the core's state for a call in progress is the
 call's scratch, valid only under the lock. At a wait the call lets go of
 the lock and sleeps; when it wakes it starts a fresh call with the bytes
 it has not yet written or read (a read never waits with bytes copied, so
-it starts over whole), and its count adds to what it had written. What a
+it starts over whole), and its count adds to what it had written; an
+error it then meets, `EPIPE` among them, is the call's result. What a
 wait publishes outlasts the call and belongs to the end: a write end's
 `need` and whether one is published, and a read end's sleepers bits with
 their `wake`, and its waiters bit. Every call of the end that waits at
@@ -566,7 +567,9 @@ doorbell and forgets the write end.
 1. **Check the read side.** It reads its own count of read ends and its
    `lost` flag, which the event executor keeps from the handler's reports
    under the end's lock. A lost pipe, or a count of zero, fails the call
-   with `EPIPE`, and `liberx`'s signal machine sends the calling thread
+   with `EPIPE`, even when earlier chunks went, as FreeBSD's `write`
+   does, which turns only `EAGAIN` and an interrupted wait into a short
+   count; `liberx`'s signal machine sends the calling thread
    `SIGPIPE`, as POSIX requires
    ([design-programs.md](design-programs.md#signals-in-liberx)).
 2. **Find room.** It copies `rpos` from the reader page and checks it; the
@@ -1058,6 +1061,26 @@ whose reports it applied
 | read | a lane holds a data record | never | no write end is open, or the pipe is lost | the pipe is lost |
 | write | never | its ring has room for a record of `PIPE_BUF` bytes | never | no read end remains, or the pipe is lost |
 
+A poll is a call of the end, under its lock like a read or a write, that
+looks and publishes but never copies (a read end's poll may still retire
+a record whose bytes were all claimed, and drain a lane, as any read
+does): `erx_pipe_poll` runs the core's
+steps as a write of one `PIPE_BUF` record, or a read of one byte, that
+stops where it would copy. A write end's poll copies `rpos` and answers
+when its ring has room for the record or no read end remains; otherwise
+it publishes that record's `need`, fences, looks again and waits, as a
+waiting write does. A read end's poll takes the reader lock, settles and
+looks as a read does, and answers at the record it would copy, at the
+end of the stream or at the pipe's loss; otherwise it arms its lanes,
+looks again and waits, as a waiting read does, and a read end that waits
+for the reader lock or for a report waits the same way. A poll ignores
+`O_NONBLOCK`. Its wait is its answer "nothing ready": what it published
+is the end's, shared with the end's waiting calls under the rules of
+[several threads on one end](#ends-in-liberx), and rings the end's
+doorbell when the answer may change. `poll` and `select` watch every end
+they wait on before they poll any of them, so that ring, or a report,
+wakes the thread, which polls afresh.
+
 `POLLHUP` comes with `POLLIN` while records remain after the last writer
 went, and alone once they are read, and a write end with no read end
 reports `POLLERR`, as Linux's `pipe_poll` does. `FIONREAD` walks the
@@ -1314,8 +1337,10 @@ drained reports, deposits, redemptions and withdrawals, reports applied
 late by a reader's event executor while `wends` already names their write
 ends, hostile
 rewrites of shared fields, the pipe server's crash, a clock that may
-return one reading twice, and the reorderings the fences allow, up to 14 events (an estimate of what fits `make check`'s
-budget), and checks PI2 to PI7 and the service bound after every event.
+return one reading twice, polls of a write end and of a read end beside
+its calls, and the reorderings the fences allow, up to 14 events (an estimate of what fits `make check`'s
+budget), and checks PI2 to PI7, every poll's answer against the readiness table,
+and the service bound after every event.
 `erx_pipe:step/2` is explored the same way over its events, with PI1 and
 PI8 added, and its collector is checked against a model of reachability
 over random holdings of ends and deposits, chains and cycles among them.
@@ -1339,7 +1364,7 @@ ssize_t	erx_pipe_write(erx_pipe_end_t *end, const void *buf, size_t len);
 /* Read at most len bytes; 0 at the end of the stream, EIO once lost. */
 ssize_t	erx_pipe_read(erx_pipe_end_t *end, void *buf, size_t len);
 
-/* The POLL* bits the end reports; never waits. */
+/* The POLL* bits the end reports, or 0 after publishing what rings the end; never waits or copies. */
 short	erx_pipe_poll(erx_pipe_end_t *end);
 
 /* The end's last reference went: release its mappings and capabilities, send {closed}. */

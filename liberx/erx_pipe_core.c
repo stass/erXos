@@ -93,11 +93,17 @@ pipe_crossed(uint64_t old, uint64_t now, uint64_t mark)
 	return (old < mark && mark <= now);
 }
 
-/* A count of bytes the call finished, or the error when it finished none. */
+/*
+ * A non-blocking write short of room: the count of bytes it wrote, or
+ * EAGAIN when it wrote none.  Only this error becomes a short count, as in
+ * FreeBSD's write, which turns only EAGAIN, EINTR and ERESTART into one;
+ * every other error, EPIPE among them, is the call's result whatever it
+ * wrote first.
+ */
 static int64_t
-pipe_count_or(uint64_t done, int error)
+pipe_count_or_again(uint64_t done)
 {
-	return (done > 0 ? (int64_t)done : -error);
+	return (done > 0 ? (int64_t)done : -EAGAIN);
 }
 
 /*
@@ -128,11 +134,20 @@ erx_pipe_wstart(erx_pipe_wstate_t *w, uint64_t len)
 	w->len = len;
 	w->done = 0;
 	w->rec = 0;
+	w->poll = false;
 	w->published = false;
 	w->wake_local = false;
 	w->stamp = 0;
 	w->wake = 0;
 	w->outcome = pipe_act(ERX_PIPE_OP_DONE);
+}
+
+/* A write of one chunk that stops where it would copy (pipe.h). */
+void
+erx_pipe_wpoll_start(erx_pipe_wstate_t *w)
+{
+	erx_pipe_wstart(w, w->chunk);
+	w->poll = true;
 }
 
 /*
@@ -178,15 +193,17 @@ pipe_write_rec(const erx_pipe_wstate_t *w)
 
 /*
  * The call's next record, at most a chunk, or the call's end: its count
- * when every byte is written, else EPIPE when no read end is left.
+ * when every byte is written, else EPIPE when no read end is left, even
+ * after records went.  A poll copies rpos whatever the read side, since
+ * its bits report room and the read side together.
  */
 static erx_pipe_act_t
 pipe_write_next(erx_pipe_wstate_t *w)
 {
 	if (w->done == w->len)
 		return (pipe_wfinish(w, pipe_done((int64_t)w->done)));
-	if (w->lost || w->readers == 0)
-		return (pipe_wfinish(w, pipe_done(pipe_count_or(w->done, EPIPE))));
+	if ((w->lost || w->readers == 0) && !w->poll)
+		return (pipe_wfinish(w, pipe_done(-EPIPE)));
 	w->rec = w->len - w->done < w->chunk ?
 	    (uint32_t)(w->len - w->done) : w->chunk;
 	w->phase = W_ROOM;
@@ -236,7 +253,8 @@ erx_pipe_act_t
 erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
 {
 	erx_pipe_act_t outcome;
-	uint64_t need, old, span;
+	uint64_t need, old, room, span;
+	short events;
 
 	switch (w->phase) {
 	case W_SIDE:
@@ -248,14 +266,22 @@ erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in)
 		return (pipe_write_next(w));
 	case W_ROOM:
 		span = erx_ring_span(w->rec);
-		if (erx_ring_room(w->size, w->wpos, in->value) >= span) {
+		room = erx_ring_room(w->size, w->wpos, in->value);
+		if (w->poll) {
+			/* Room for a chunk, or no read end: the poll is answered. */
+			events = erx_pipe_ready_write(room, w->chunk, w->readers,
+			    w->lost);
+			if (events != 0)
+				return (pipe_done(events));
+			/* Not yet: it publishes the chunk's need and waits, as a write short of room. */
+		} else if (room >= span) {
 			w->published = false;
 			w->phase = W_STAMPED;
 			return (pipe_act(ERX_PIPE_OP_CLOCK));
-		}
-		if (w->nonblock)
+		} else if (w->nonblock) {
 			return (pipe_wfinish(w,
-			    pipe_done(pipe_count_or(w->done, EAGAIN))));
+			    pipe_done(pipe_count_or_again(w->done))));
+		}
 		/*
 		 * The read position at which span bytes are free.  Below it
 		 * a ring this end never filled has room, so a smaller one
@@ -460,6 +486,7 @@ erx_pipe_rstart(erx_pipe_rstate_t *r, uint64_t len)
 	r->at = 0;
 	r->len = len;
 	r->done = 0;
+	r->poll = false;
 	r->published = false;
 	r->wake_local = false;
 	r->settle = (erx_pipe_cur_copy_t){ .cur = ERX_PIPE_NONE };
@@ -477,6 +504,14 @@ erx_pipe_rstart(erx_pipe_rstate_t *r, uint64_t len)
 	r->claim = 0;
 	r->after = R_AFTER_DONE;
 	r->result = 0;
+}
+
+/* A read of one byte that stops where it would copy (pipe.h). */
+void
+erx_pipe_rpoll_start(erx_pipe_rstate_t *r)
+{
+	erx_pipe_rstart(r, 1);
+	r->poll = true;
 }
 
 static erx_pipe_act_t pipe_rlock_begin(erx_pipe_rstate_t *);
@@ -525,6 +560,7 @@ pipe_rlocked(erx_pipe_rstate_t *r)
  * waiters and sleepers bits, and returns 0.  A read of a lost pipe does
  * the same and fails with EIO: the ended pipe server frees no lock a gone
  * read end held, so a read that waited for the lock could wait for ever.
+ * A poll of a lost pipe reports it so.
  */
 static erx_pipe_act_t
 pipe_rlock_begin(erx_pipe_rstate_t *r)
@@ -533,7 +569,10 @@ pipe_rlock_begin(erx_pipe_rstate_t *r)
 	if (r->len == 0 || r->lost) {
 		/* No lock is held: the release's tail only disarms and returns. */
 		r->after = R_AFTER_DONE;
-		r->result = r->len == 0 ? 0 : -EIO;
+		if (r->poll)
+			r->result = erx_pipe_ready_read(false, 0, true);
+		else
+			r->result = r->len == 0 ? 0 : -EIO;
 		if (r->waiting)
 			return (pipe_rclear_waiter(r, LOCK_GIVEN_UP));
 		return (pipe_rreleased(r));
@@ -983,14 +1022,25 @@ pipe_rpick_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
  * Step 5: record in the lock page the bytes of the current record this
  * copy takes, as much as is left of it and fits, then copy them.  A
  * record read to its end is finished; one that does not fit stays current
- * for the next read, and the buffer is full.
+ * for the next read, and the buffer is full.  A poll stops here, with a
+ * record to copy: it releases the lock and reports POLLIN, and POLLHUP
+ * too when no lane is live with its writer open, the rule pipe_ended
+ * reads the end of the stream by.
  */
 static erx_pipe_act_t
 pipe_rcopy_begin(erx_pipe_rstate_t *r)
 {
 	erx_pipe_act_t act;
 	uint64_t left;
+	uint32_t at, open;
 
+	if (r->poll) {
+		for (at = 0, open = 0; at < r->nlanes; at++)
+			open += r->lanes[at].ring == ERX_PIPE_RING_LIVE &&
+			    r->lanes[at].writer == ERX_PIPE_WRITER_OPEN;
+		return (pipe_rrelease_begin(r, R_AFTER_DONE,
+		    erx_pipe_ready_read(true, open, false)));
+	}
 	left = r->len - r->done;
 	r->claim = r->cur_len - r->cur_off < left ?
 	    r->cur_len - r->cur_off : (uint32_t)left;
@@ -1105,7 +1155,8 @@ pipe_ended(const erx_pipe_rstate_t *r)
  * count; one that copied nothing returns 0 at the end of the stream, else
  * fails with EAGAIN when non-blocking.  A blocking read arms every open
  * lane and picks once more; having armed and still finding nothing, it
- * waits.
+ * waits.  A poll reports the end of the stream as POLLHUP and, whatever
+ * O_NONBLOCK says, arms and waits as a blocking read does.
  */
 static erx_pipe_act_t
 pipe_rnothing_readable(erx_pipe_rstate_t *r)
@@ -1113,8 +1164,9 @@ pipe_rnothing_readable(erx_pipe_rstate_t *r)
 	if (r->done > 0)
 		return (pipe_rrelease_begin(r, R_AFTER_DONE, (int64_t)r->done));
 	if (pipe_ended(r))
-		return (pipe_rrelease_begin(r, R_AFTER_DONE, 0));
-	if (r->nonblock)
+		return (pipe_rrelease_begin(r, R_AFTER_DONE,
+		    r->poll ? erx_pipe_ready_read(false, 0, false) : 0));
+	if (r->nonblock && !r->poll)
 		return (pipe_rrelease_begin(r, R_AFTER_DONE, -EAGAIN));
 	if (r->published)
 		return (pipe_rrelease_begin(r, R_AFTER_DATA, 0));
@@ -1256,10 +1308,14 @@ pipe_rwait_begin(erx_pipe_rstate_t *r)
 static erx_pipe_act_t
 pipe_rwait_step(erx_pipe_rstate_t *r, const erx_pipe_in_t *in)
 {
+	const bool poll = r->poll;
+
 	(void)in;
 	if (r->phase != WAIT_WOKE)
 		return (pipe_done(-EIO));
+	/* A poll stays one. */
 	erx_pipe_rstart(r, r->len);
+	r->poll = poll;
 	return (pipe_rlock_begin(r));
 }
 

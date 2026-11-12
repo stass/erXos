@@ -1800,15 +1800,24 @@ it; git history is the record of completed work.
   `sigignore` names it, and a run-time `signal(SIGPIPE, SIG_IGN)` is not honoured. It fails safe,
   with a stop of the writing program, never a hang or a wrong answer; output the program would
   have written after the `EPIPE` is lost.
-* [Medium] liberx program layer, `liberx/program/pipe.c` and the pipe core: `poll` on a pipe end
-  has its registrations (`erx_pipe_watch`, `erx_pipe_unwatch`) but no readiness check, because
-  a doorbell rings only for an end that published what it waits for (a write end's `need`, a
-  read end's sleepers bits and `wake`, or its waiters bit), and only a read or a write call of
-  the core publishes them. A poll needs a core call that looks and publishes without copying:
-  a read end's first look and arm with no copy, a write end's need for one `PIPE_BUF` record;
-  it shares the end's lasting bits and `wake_local` with the end's calls, so it is explored
-  with the two-calls-on-one-end scenario (docs/design-pipes.md, "Readiness, `poll` and
-  `select`"; docs/design-programs.md, "Waiting on several descriptors").
+* [Medium] liberx program layer, `poll` and `select` (not yet written) over pipe ends: a poll
+  that answers 0 leaves published what it waits for (a read end's waiters bit, or its sleepers
+  bits and `wake`; a write end's `need`). When `poll` stops watching a read end without polling
+  it again (a timeout, another descriptor ready), the end is idle with those bits set, and each
+  co-reader's release rings it until its next read or close (docs/design-pipes.md, "Waiting
+  and doorbells": an idle end holds no bit). Give the give-up the session NIF's exit, a read
+  of 0 bytes, and model a poller that stops waiting in `test/fixtures/pipe_explore.c` so
+  `check_idle` covers it.
+* [Medium] pipe core explorer, `test/fixtures/pipe_explore.c` (`poll_written`, `poll_read`): the
+  POLL property checks only that a reported bit is true, not that a bit the readiness table
+  requires is present, and the `wpoll` and `rpoll` scenarios have no loss and no reader that
+  goes, so the POLLERR checks and the polls' lost and no-reader paths are not explored. Add the
+  completeness checks, a poll scenario with `lost` and `reader_closes`, and a seeded fault aimed
+  at POLLHUP.
+* [Low] docs/design-pipes.md, "Readiness": a write end with no read end reports `POLLERR`, as
+  Linux's `pipe_poll` does, where FreeBSD's reports `POLLHUP` and `POLLOUT`; the project follows
+  FreeBSD where UNIX systems differ, so the table (and `erx_pipe_ready_write`) awaits the
+  owner's choice.
 * [Medium] liberx program layer, `liberx/program/channel.c` (`whole_put`): the wait for outbound
   room sleeps on the channel's own `room_epoch`, not on the thread's wake word, so a pipe call
   that sends a notice (`{drained}`, `{closed}`) can wait where a signal will not reach it, which

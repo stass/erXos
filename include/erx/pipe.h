@@ -224,6 +224,7 @@ typedef struct erx_pipe_wstate {
 	uint64_t	 len;		/* bytes the call writes */
 	uint64_t	 done;		/* bytes it published */
 	uint32_t	 rec;		/* the record being written */
+	bool		 poll;		/* the call is a poll (erx_pipe_wpoll_start) */
 	bool		 published;	/* this call stored need and fenced */
 	bool		 wake_local;	/* this call replaced a published need:
 					 * its caller wakes the end's other
@@ -324,6 +325,7 @@ typedef struct erx_pipe_rstate {
 	uint32_t	 at;		/* the lane a loop over the lanes is at */
 	uint64_t	 len;		/* bytes wanted */
 	uint64_t	 done;		/* bytes copied */
+	bool		 poll;		/* the call is a poll (erx_pipe_rpoll_start) */
 	bool		 published;	/* this call armed: the pick that follows
 					 * decides whether it waits */
 	bool		 wake_local;	/* this call cleared armed or waiting:
@@ -369,6 +371,22 @@ erx_pipe_act_t	erx_pipe_wstep(erx_pipe_wstate_t *w, const erx_pipe_in_t *in);
  */
 void		erx_pipe_rstart(erx_pipe_rstate_t *r, uint64_t len);
 erx_pipe_act_t	erx_pipe_rstep(erx_pipe_rstate_t *r, const erx_pipe_in_t *in);
+
+/*
+ * Starts a poll of the end (docs/design-pipes.md, "Readiness"), a call
+ * that looks and publishes but never copies, stepped as a write or a read
+ * is.  A write end's poll runs a write of one chunk up to its copy: with
+ * room for the chunk, or with no read end, it returns the end's POLL* bits;
+ * without room it publishes the chunk's need, as a waiting write does, and
+ * waits.  A read end's poll runs a read of one byte up to its copy: a
+ * record to copy, the end of the stream or the pipe's loss returns the
+ * bits; otherwise it arms as a waiting read does, and waits.  A poll
+ * ignores O_NONBLOCK.  Its wait is the caller's "nothing ready": the bits
+ * it published ring the end's doorbell when that may have changed, and the
+ * caller polls afresh then.  A poll's result is never 0.
+ */
+void		erx_pipe_wpoll_start(erx_pipe_wstate_t *w);
+void		erx_pipe_rpoll_start(erx_pipe_rstate_t *r);
 
 /*
  * The POLL* bits of an end (docs/design-pipes.md, "Readiness"): a read

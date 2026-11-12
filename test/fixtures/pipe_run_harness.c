@@ -45,6 +45,7 @@ typedef struct world {
 	uint32_t	 repeats;	/* each reading is given this many times
 					 * more, as a counter gives within a tick */
 	uint32_t	 repeated;
+	uint64_t	 gone_at;	/* the clock at which the last read end goes */
 	int		 reader_rings;
 	int		 writer_rings;
 	int		 drained;
@@ -69,6 +70,8 @@ fx_clock(void *ctx)
 	wd->repeated = 0;
 	if (++wd->clock == wd->join_at)
 		(void)erx_pipe_lock_wends_store(wd->lock, 2);
+	if (wd->clock == wd->gone_at)
+		wd->w.readers = 0;
 	return (wd->clock);
 }
 
@@ -457,6 +460,27 @@ case_reader_gone_and_lost(void)
 	world_free(&wd);
 }
 
+/*
+ * A write whose first record went before the last read end did fails with
+ * EPIPE, not with the count it wrote, as FreeBSD's write does: only EAGAIN
+ * becomes a short count.  The read end goes in the middle of the run, which
+ * liberx never lets happen (reports apply between runs, under the end's
+ * lock); this pins the core's rule, and test/host/prog_fd_test.rb's "a
+ * write that meets a gone reader fails" covers the path that occurs.
+ */
+static void
+case_reader_gone_mid_write(void)
+{
+	world_t wd;
+	static char bytes[ERX_PIPE_BUF + 1];
+
+	world_init(&wd);
+	wd.gone_at = 1;			/* while the first record is stamped */
+	CHECK("gone mid-write epipe",
+	    done(do_write(&wd, bytes, sizeof(bytes)), -EPIPE));
+	world_free(&wd);
+}
+
 /* A hostile writer's record past the area is refused, never copied. */
 static void
 case_hostile_record(void)
@@ -489,6 +513,7 @@ main(void)
 	case_full_ring();
 	case_writer_gone();
 	case_reader_gone_and_lost();
+	case_reader_gone_mid_write();
 	case_hostile_record();
 	if (failures != 0)
 		return (1);

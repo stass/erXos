@@ -156,6 +156,19 @@ void	erx_pipe_watch(erx_pipe_end_t *e, erx_prog_waiter_t *w);
 void	erx_pipe_unwatch(erx_pipe_end_t *e, erx_prog_waiter_t *w);
 
 /*
+ * One poll of an end the caller holds a counted reference to and watches
+ * (docs/design-pipes.md, "Readiness"): its POLL* bits, or 0 when nothing is
+ * ready.  It never waits for the pipe and never copies; a 0 leaves
+ * published what makes the end's doorbell ring once the answer may change,
+ * which wakes the watching thread, and the poll that follows answers
+ * afresh.  The caller reads its wake word after erx_pipe_watch and before
+ * the first poll, as a waiting call does, so no such ring is lost.  Each
+ * {drained} the poll owes is sent after it lets go of the end, and that
+ * send may wait for room on the session channel.
+ */
+short	erx_pipe_poll(erx_pipe_end_t *e);
+
+/*
  * The event executor's: a label came up in the group's ready list.  For a
  * pipe end's label, wakes the threads waiting on the end, if the program
  * holds it, and returns true; false for any other label.

@@ -27,6 +27,7 @@
  */
 
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -852,10 +853,47 @@ erx_pipe_write(erx_pipe_end_t *e, const void *buf, size_t len)
 	erx_pipe_end_unlock(e);
 	if (act.result >= 0)
 		return ((ssize_t)(written + (uint64_t)act.result));
-	/* An error after bytes went returns their count, as the core's own calls do (pipe_count_or). */
-	if (written != 0)
+	/*
+	 * An error is the call's result whatever went before it, as in FreeBSD's
+	 * write: EPIPE after a wait too.  EAGAIN after bytes went is their count,
+	 * which the core gives within a call and this gives across a wait.
+	 */
+	if (act.result == -EAGAIN && written != 0)
 		return ((ssize_t)written);
 	return ((ssize_t)act.result);
+}
+
+short
+erx_pipe_poll(erx_pipe_end_t *e)
+{
+	const erx_pipe_fx_t fx = end_fx(e);
+	erx_pipe_act_t act;
+	bool local, owes = false;
+
+	erx_pipe_end_lock(e);
+	if (e->kind == ERX_PIPE_WRITE) {
+		erx_pipe_wpoll_start(&e->u.w.st);
+		act = erx_pipe_wrun(&e->u.w.st, &e->u.w.map, NULL, &fx);
+		local = e->u.w.st.wake_local;
+	} else {
+		erx_pipe_rpoll_start(&e->u.r.st);
+		act = erx_pipe_rrun(&e->u.r.st, e->u.r.maps, e->u.r.lockpage,
+		    NULL, &fx);
+		local = e->u.r.st.wake_local;
+		owes = e->u.r.owing != 0;
+	}
+	if (local)
+		erx_prog_waitq_wake(&e->waiters);
+	erx_pipe_end_unlock(e);
+	if (owes)
+		drained_send(e);
+	/* A wait is the poll's "nothing ready": what it published rings the end. */
+	if (act.op != ERX_PIPE_OP_DONE)
+		return (0);
+	/* A run its runner refused is an error, never "nothing ready". */
+	if (act.result <= 0)
+		return (POLLERR);
+	return ((short)act.result);
 }
 
 void

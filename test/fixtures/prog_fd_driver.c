@@ -934,6 +934,12 @@ main(int argc, char **argv)
 			do_setbits(arg, a, b);
 		} else if (strcmp(word, "bits") == 0 && sscanf(line, "%*s %15s %llu", arg, &a) == 2) {
 			do_bits(arg, a);
+		} else if (strcmp(word, "poll") == 0 && sscanf(line, "%*s %d", &fd) == 1) {
+			/* One poll of the end: its POLL* bits, 0 when nothing is ready. */
+			erx_pipe_end_t *e = end_get(fd);
+
+			printf("%d\n", erx_pipe_poll(e));
+			erx_prog_obj_put(&e->obj);
 		} else if (strcmp(word, "bind") == 0 && sscanf(line, "%*s %llu %llu", &a, &b) == 2) {
 			cap_of(a)->label = b;
 			printf("bound\n");

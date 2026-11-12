@@ -42,6 +42,7 @@ class ProgFdTest < Minitest::Test
   F = ProgProfileFrames
   E = ProgProfileFrames::Etf
   EBADF = Errno::EBADF::Errno
+  EPIPE = Errno::EPIPE::Errno
   ENOMEM = -6 # ERX_ENOMEM
 
   def self.int(value) = value < 256 ? E.small(value) : E.int(value)
@@ -90,6 +91,12 @@ class ProgFdTest < Minitest::Test
     # ring of its doorbell writes the rest from where it stopped; it returns the whole count.
     'a write waits for room' => [*BOUND, ['spawn 0 fdwriten 1 100000', 'spawned'], ['waiters 1 1', '1'],
                                  ['spawn 1 fdreadn 0 100000', 'spawned'], ['join 1', '100000'], ['join 0', '100000']],
+    # A write that published what fits and waits for room fails with EPIPE when the last read
+    # end goes, not with the count it wrote, as FreeBSD's write does.
+    'a write that meets a gone reader fails' => [*BOUND, ['spawn 0 fdwriten 1 100000', 'spawned'], ['waiters 1 1', '1'],
+                                                 ["report #{report(E.atom('pipe_reader_gone'), int(7), int(2), int(0))}",
+                                                  'applied'],
+                                                 ['join 0', "-#{EPIPE}"]],
     # A poll's registrations: one thread on both ends' lists, woken by a report to the second,
     # leaves both.
     'a poll watches two ends' => [*BOUND, ['spawn 0 watch 0 1', 'spawned'], ['waiters 0 1', '1'], ['waiters 1 1', '1'],
@@ -109,6 +116,12 @@ class ProgFdTest < Minitest::Test
                            ['notices', 'none'], ['drop', 'dropped'], ['notices', 'closed:7:1']],
     'release ends the wait' => [*SET_UP, ['read 0 64', 'WAIT'], ['bits sleepers 102', '1'], ['close 0', '0'],
                                 ['bits sleepers 102', '0'], ['notices', 'closed:7:1']],
+    # A poll answers without copying: room for PIPE_BUF bytes is POLLOUT (4); an empty read end
+    # arms its sleepers bit and reports nothing, then POLLIN (1) once a record is there, which a
+    # read still returns whole; once the writer goes and the record is read, POLLHUP (16).
+    'poll' => [*SET_UP, ['poll 1', '4'], ['poll 0', '0'], ['bits sleepers 102', '1'], ['write 1 x', '1'],
+               ['poll 0', '1'], ['bits sleepers 102', '0'], ['read 0 8', '1 x'], [WRITER_GONE, 'applied'],
+               ['poll 0', '16']],
     'take clears bits' => [['alias 105 101', 'alias'], ['alias 106 102', 'alias'],
                            ['setbits waiters 104 5', 'set'], ['setbits sleepers 102 1', 'set'],
                            ["start #{START}", 'setup 0'], ['bits waiters 104', '4'], ['bits sleepers 102', '0'],

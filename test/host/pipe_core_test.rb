@@ -32,7 +32,7 @@ class PipeCoreTest < Minitest::Test
   # The landing gate explores the small shapes; the milestone gate adds the large ones, whose
   # seeded faults the landing gate still catches at landing lengths.
   SMALL = %w[flow partial nonblock writer-dies reader-closes reader-dies lost join merge coread
-             coread-dies-empty coread-lost-dies rcalls wcalls hostile-writer hostile-reader
+             coread-dies-empty coread-lost-dies rcalls wcalls wpoll rpoll hostile-writer hostile-reader
              hostile-coreader hostile-wcalls].freeze
   LARGE = %w[merge-join merge-repeat coread-dies coread-lost].freeze
   SCENARIOS = FULL ? LARGE + SMALL : SMALL
@@ -69,11 +69,11 @@ class PipeCoreTest < Minitest::Test
        "\t\tr->phase = FINISH_FENCED;\n\t\treturn (pipe_act(ERX_PIPE_OP_CLOCK));"],
     # The model's records all span two grains, so room is off by one at a record's edge.
     'room that refuses an exact fit (off by one)' =>
-      ['flow', 'PI7', 'erx_ring_room(w->size, w->wpos, in->value) >= span',
-       'erx_ring_room(w->size, w->wpos, in->value) > span'],
+      ['flow', 'PI7', '} else if (room >= span) {',
+       '} else if (room > span) {'],
     'room counted one record too many' =>
-      ['flow', 'PI5', 'erx_ring_room(w->size, w->wpos, in->value) >= span',
-       'erx_ring_room(w->size, w->wpos, in->value) + 2 * PIPE_GRAIN >= span'],
+      ['flow', 'PI5', '} else if (room >= span) {',
+       '} else if (room + 2 * PIPE_GRAIN >= span) {'],
     'a reader that advances rpos before its copy' =>
       ['flow', 'PI5', "\tact = pipe_lane_act(ERX_PIPE_OP_STORE_CUR, r->cur);\n\tact.n = r->cur_off + r->claim;",
        "\tact = pipe_lane_act(r->cur_off + r->claim == r->cur_len ?\n\t    ERX_PIPE_OP_STORE_RPOS : " \
@@ -97,7 +97,16 @@ class PipeCoreTest < Minitest::Test
       ['flow', 'PI2', "\tif (r->gone) {\n\t\tlane->ring = ERX_PIPE_RING_DRAINED;",
        "\tif (true) {\n\t\tlane->ring = ERX_PIPE_RING_DRAINED;"],
     'EPIPE while a read end remains' =>
-      ['flow', 'PI3', 'if (w->lost || w->readers == 0)', 'if (w->lost || w->readers <= 1)'],
+      ['flow', 'PI3', '(w->lost || w->readers == 0) && !w->poll', '(w->lost || w->readers <= 1) && !w->poll'],
+    # A poll answers without copying (docs/design-pipes.md, "Readiness"): writable only with room
+    # for a whole chunk, and when nothing is ready, only after publishing what rings it.
+    'a poll reports room for less than a chunk' =>
+      ['wpoll', 'POLL', 'if (room >= erx_ring_span(chunk))', 'if (room >= erx_ring_span(chunk) / 2)'],
+    'a write poll waits without publishing its need' =>
+      ['wpoll', 'PI7', 'if (pipe_wmay_wait(w, need, in->value))',
+       'if (w->poll || pipe_wmay_wait(w, need, in->value))'],
+    'a read poll waits without arming' =>
+      ['rpoll', 'PI7', "\tif (r->published)\n", "\tif (r->published || r->poll)\n"],
     'a read that armed and then found bytes keeps its sleepers bits' =>
       ['flow', 'PI7', 'if (r->armed && r->after != R_AFTER_DATA)', 'if (false)'],
     'a read of 0 bytes that leaves the sleepers bits of a wait it gives up' =>
