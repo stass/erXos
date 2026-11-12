@@ -362,7 +362,7 @@ class ProductionImageTest < Minitest::Test
   def test_only_a_test_image_boots_a_test_only_application
     applications = [*Erx::ReleaseFiles::DOMAIN_BASE, *Erx::ErlangApps::TEST_ONLY]
     error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_boot('echo', applications: applications) }
-    assert_match(/test-only application: erx_echo_test/, error.message)
+    assert_match(/test-only application: .*\berx_echo_test\b/, error.message)
     script = Erx::ReleaseFiles.domain_boot('echo', applications: applications, test: true)
     assert_equal applications.sort, script.applications.sort
     error = assert_raises(Erx::Error) { Erx::ProductionImage.check_test_scripts([script], test_code: false) }

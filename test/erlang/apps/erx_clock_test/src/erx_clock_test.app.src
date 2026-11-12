@@ -1,0 +1,13 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% A test-only application (tools/lib/erx/erlang_apps.rb, TEST_ONLY): the app of the
+%% apps suite's manifest (tools/lib/erx/apps.rb), which a start row keeps running in a
+%% session of the principal clock. Only a test image's domain boot script boots it.
+{application, erx_clock_test,
+ [{description, "erXos test: an app a start row keeps, which reports what its session holds"},
+  {vsn, "1"},
+  {modules, [erx_clock_test, erx_clock_test_app]},
+  {registered, []},
+  {applications, [kernel, stdlib, erx]},
+  {mod, {erx_clock_test_app, []}}]}.

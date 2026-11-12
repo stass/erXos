@@ -289,22 +289,30 @@ module Erx
       on_own_board(machine)
       built = assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
                        machine: machine, domains: domain_boots(manifest_source))
-      directory = built_directory(built)
       if BootPartition.boot_partition_medium?(machine.platform)
         return [built, BootPartition.lay_out(root: @root, runner: @runner, platform: machine.platform, build_kind: BUILD_KIND,
                                              bootable: built.single,
-                                             directory: directory, compiler: @compiler, linker: @linker)]
+                                             directory: built_directory(built), compiler: @compiler, linker: @linker)]
       end
 
+      [built, release_medium(built)]
+    end
+
+    # The release medium for QEMU (ReleaseMedium) of built, an image this object packed, in
+    # the image's directory: the image's slot and a new littlefs data volume, so the
+    # storage domain serves /data. Returns a ReleaseMedium::Written: the medium's
+    # path, and the slot plan, data_sectors and volume a fresh copy is made from.
+    def release_medium(built)
+      directory = built_directory(built)
       data_sectors = MediumImage.constant('data_sectors_min')
       volume = DataVolume.format(root: @root, runner: @runner, compiler: @compiler, directory: directory, data_sectors: data_sectors)
-      [built, ReleaseMedium.write(built: built, directory: directory, volume: volume, data_sectors: data_sectors)]
+      ReleaseMedium.write(built: built, directory: directory, volume: volume, data_sectors: data_sectors)
     end
 
     # The production image with test code added to its system release, marked in its
     # archive's flags (ERX_PACK_TEST_CODE) so the kernel's banner says so and the kernel
     # refuses it in any build but a development one. Only the QEMU harnesses that boot
-    # test code, OracleQemu, BlockDevice, SystemDomain and Programs, call it, which the source check holds
+    # test code, OracleQemu, BlockDevice, SystemDomain, Programs and Apps, call it, which the source check holds
     # (Checks::TEST_IMAGE_BUILDERS). domains are the domain boot scripts it carries
     # (ReleaseFiles.domain_boot) in the one domain release, with the domain runtime image,
     # each in place of the manifest's script of its name; one of them may be a test
