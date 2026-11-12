@@ -85,6 +85,19 @@ module Erx
       binary
     end
 
+    # The built fsimg's path, refused unless it is the pinned build (locate) and reports
+    # the pinned version.
+    def checked(root:, runner:)
+      fsimg = locate(root: root)
+      identity = runner.run([fsimg, '-V'], name: 'check-fsimg-version', deadline: 30)
+      first_line = BoundedFile.read(identity.fetch('log'), maximum: 65_536).lines.first.to_s.strip
+      unless first_line == VERSION_LINE
+        raise Error, "fsimg must report #{VERSION_LINE.inspect}, as deps.lock pins it; it reports #{first_line.inspect}"
+      end
+
+      fsimg
+    end
+
     # The manifest text for entries, one line each, in the order given. A keyword
     # outside KEYWORDS or a plain value that is not a WORD is refused, so no value can
     # split a word or start a line.

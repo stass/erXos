@@ -156,13 +156,13 @@ module Erx
       ).merge(flavour_environment).freeze
     end
 
-    # The cross file's ERX_TARGET_FLAGS, the target and headers its CC and CXX compile
-    # with, expanded as configure's shell expands them, so libc++ is built with the
-    # compiler ERTS is. The value names only the two directories expanded here.
+    # The cross file's ERX_TARGET_FLAGS, the target, headers and source names its CC and
+    # CXX compile with, expanded as configure's shell expands them, so libc++ is built with the
+    # compiler ERTS is. The value names only the three directories expanded here.
     def target_flags
       text = File.read(File.join(@root, 'otp', XCOMP_FILE))
       flags = text[/^ERX_TARGET_FLAGS="([^"]*)"$/, 1] or raise Error, "#{XCOMP_FILE} sets no ERX_TARGET_FLAGS"
-      values = { 'ERX_SYSROOT' => @sysroot, 'ERX_CLANG_INCLUDE' => File.join(resource_directory, 'include') }
+      values = { 'ERX_SYSROOT' => @sysroot, 'ERX_CLANG_INCLUDE' => File.join(resource_directory, 'include'), 'ERX_TREE' => @root }
       flags.gsub(/\$([A-Z_]+)/) do
         name = Regexp.last_match(1)
         values.fetch(name) { raise Error, "ERX_TARGET_FLAGS in #{XCOMP_FILE} names $#{name}, which the build does not expand" }

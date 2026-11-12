@@ -1764,8 +1764,10 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   device tree. BL31's PSCI starts the other CPUs, and `l4_platform_ctl_system_shutdown` reaches its `SYSTEM_OFF` and
   `SYSTEM_RESET` ([The end path](#the-end-path)). `SYSTEM_OFF` leaves the board halted in the firmware, which cannot
   turn it off, so an end by `ERX_END_OFF`, a missed pet's included, lasts until the board rig's power relay cycles it.
-* **Boot files.** One directory serves as the firmware's network boot root and as an SD card's boot partition
-  (`tools/lib/erx/boot_partition.rb`): the firmware and its licence; `config.txt`, written from the platform record;
+* **Boot files.** One directory, `boot/`, serves as the firmware's network boot root and as an SD card's boot
+  partition, and `sdcard.img` beside it is the card's image of the same files; both are the production image's
+  medium for the board, written by `tools/erx pack --medium --platform raspi4b` into
+  `build/production-image/raspi4b/` (`tools/lib/erx/boot_partition.rb`): the firmware and its licence; `config.txt`, written from the platform record;
   BL31 and its licence; the bootable file as `kernel8.img`; Linux's device tree for the board, compiled unmodified
   from its pinned source, with that source beside it; and the overlays `config.txt` names, which the firmware applies.
   Mainline Linux has no overlays, so erXos keeps their sources in `hw/dts`, and the board's tree, its overlays and

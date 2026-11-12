@@ -128,16 +128,7 @@ module Erx
 
     # The built fsimg's path, refused unless it is the pinned build (Fsimg.locate) and
     # reports the pinned version.
-    def check_tools
-      fsimg = Fsimg.locate(root: @root)
-      identity = @runner.run([fsimg, '-V'], name: 'check-fsimg-version', deadline: 30)
-      first_line = BoundedFile.read(identity.fetch('log'), maximum: 65_536).lines.first.to_s.strip
-      unless first_line == Fsimg::VERSION_LINE
-        raise Error, "fsimg must report #{Fsimg::VERSION_LINE.inspect}, as deps.lock pins it; it reports #{first_line.inspect}"
-      end
-
-      fsimg
-    end
+    def check_tools = Fsimg.checked(root: @root, runner: @runner)
 
     # Writes the image of files as output, which must not exist, and returns its path.
     # The manifest and the image are written in a private directory beside output and

@@ -265,18 +265,21 @@ module Erx
       not_run.empty? ? '' : "; #{not_run.size} test files not run on this host (listed above)"
     end
 
+    # The production image and its medium, built twice and compared: QEMU virt's by
+    # default, or with --platform NAME that board's.
     def self.check_reproducible(arguments)
+      platform = platform_option(arguments)
       no_arguments(arguments)
       require_relative 'lib/erx/production_image'
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       environment = host_environment(runner: runner)
       compiler = environment.fetch('ERX_CLANG')
       fiasco = Fiasco.new(root: ROOT, runner: runner, compiler: compiler)
-      fiasco.build(jobs: 4)
+      fiasco.build_for(platform, jobs: 4)
       parent = File.join(ROOT, 'build/reproducible')
       OutputDirectory.prepare(root: ROOT, path: parent)
       report = ProductionImage.new(root: ROOT, runner: runner, compiler: compiler, linker: environment.fetch('ERX_LLD'),
-                                   machine: ProductionImage::Machine.development(Platform.development(ROOT)), fiasco: fiasco)
+                                   machine: ProductionImage::Machine.development(platform), fiasco: fiasco)
                               .check_reproducible(directory: Dir.mktmpdir('production-', parent))
       Terminal.puts("production image: byte-identical; #{report.fetch('report')}")
       claims = report.fetch('manifest')
@@ -525,36 +528,45 @@ module Erx
       end
     end
 
-    # Builds Fiasco and packs the production image into a fresh directory of build/; with
-    # --medium, also the release medium for QEMU that holds it (ReleaseMedium).
+    # Builds Fiasco and packs the production image into build/production-image/PLATFORM
+    # (ProductionImage.pack_platform), QEMU virt's by default or with --platform NAME
+    # that board's; with --medium, also the medium that holds it: the release medium for
+    # QEMU (ReleaseMedium), or a board's boot partition and SD card image (BootPartition).
     def self.pack(arguments)
       medium = false
-      OptionParser.new { |flags| flags.on('--medium') { medium = true } }.parse!(arguments)
+      platform = platform_option(arguments) { |flags| flags.on('--medium') { medium = true } }
       no_arguments(arguments)
       require_relative 'lib/erx/production_image'
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       environment = host_environment(runner: runner)
-      compiler = environment.fetch('ERX_CLANG')
-      fiasco = Fiasco.new(root: ROOT, runner: runner, compiler: compiler)
-      fiasco.build(jobs: 4)
-      parent = File.join(ROOT, 'build/production-image')
-      OutputDirectory.prepare(root: ROOT, path: parent)
-      image = ProductionImage.new(root: ROOT, runner: runner, compiler: compiler, linker: environment.fetch('ERX_LLD'),
-                                  machine: ProductionImage::Machine.development(Platform.development(ROOT)), fiasco: fiasco)
-      directory = Dir.mktmpdir('image-', parent)
-      unless medium
-        built = image.build(directory: directory)
-        Terminal.puts("production image: #{built.single}; root_startup: #{built.report.fetch('manifest').fetch('root_startup')}")
-        return 0
-      end
-
-      built, written = image.build_medium(directory: directory)
+      result = ProductionImage.pack_platform(root: ROOT, runner: runner, compiler: environment.fetch('ERX_CLANG'),
+                                             linker: environment.fetch('ERX_LLD'), platform: platform, medium: medium)
+      built, written = medium ? result : [result, nil]
       Terminal.puts("production image: #{built.single}; root_startup: #{built.report.fetch('manifest').fetch('root_startup')}")
-      extents = written.slot.images.map do |extent|
-        "#{extent.file.name} at slot byte #{extent.slot_offset}, #{extent.file.length} bytes"
+      case written
+      in nil
+        nil
+      in BootPartition::Written
+        Terminal.puts("boot partition: #{written.files}; SD card image: #{written.path}; build record: #{written.record}")
+      in ReleaseMedium::Written
+        extents = written.slot.images.map do |extent|
+          "#{extent.file.name} at slot byte #{extent.slot_offset}, #{extent.file.length} bytes"
+        end
+        Terminal.puts("release medium: #{written.path}; EROFS image: #{written.erofs}; #{extents.join('; ')}")
       end
-      Terminal.puts("release medium: #{written.path}; EROFS image: #{written.erofs}; #{extents.join('; ')}")
       0
+    end
+
+    # The platform --platform NAME names, QEMU virt's without it; the block adds the
+    # command's other flags to the same parser.
+    def self.platform_option(arguments)
+      name = nil
+      OptionParser.new do |flags|
+        flags.on('--platform NAME') { |value| name = value }
+        yield flags if block_given?
+      end.parse!(arguments)
+      require_relative 'lib/erx/platform'
+      name ? Platform.load(root: ROOT, name: name) : Platform.development(ROOT)
     end
 
     # The stack proof alone, with the toolchain make check verifies.
@@ -713,7 +725,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | build web | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | build web | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] [--platform NAME] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
       0
     end
 

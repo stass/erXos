@@ -2,28 +2,38 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest'
 require 'fileutils'
+require 'json'
 require 'tmpdir'
 require_relative 'error'
+require_relative 'fsimg'
 require_relative 'bl31'
 require_relative 'board_tree'
 require_relative 'bounded_file'
+require_relative 'build_memo'
+require_relative 'build_path'
 require_relative 'dependencies'
 require_relative 'output_directory'
 require_relative 'platform'
+require_relative 'qemu'
 
 module Erx
-  # The Raspberry Pi 4's boot files, laid out in one directory that serves both as the
-  # firmware's network boot (TFTP) root and as an SD card's FAT boot partition
-  # (docs/design-stopgap.md, "The Raspberry Pi 4"; docs/design-platforms.md, "Firmware"):
-  # the firmware, unmodified, with its licence; config.txt, written from the platform
-  # record; the board's device tree, unmodified, with its source, and the overlays
-  # config.txt names; TF-A's BL31 as the armstub, with its licence; and the bootable
-  # file as kernel8.img.
+  # The Raspberry Pi 4's medium, the production image's for a board the firmware boots
+  # (ProductionImage#build_medium): written beside the image, boot/ holds the boot
+  # partition's files and serves as the firmware's network boot (TFTP) root; sdcard.img
+  # is a disk image ready to write to a card, an MBR whose one partition, FAT32 (type
+  # 0x0c), holds the same files; and sdcard.img.receipt.json is their build record
+  # (docs/design-stopgap.md, "The Raspberry Pi 4"; docs/design-platforms.md, "Firmware").
+  # The files are the firmware, unmodified, with its licence; config.txt, written from
+  # the platform record; the board's device tree, unmodified, with its source, and the
+  # overlays config.txt names; TF-A's BL31 as the armstub, with its licence; and the
+  # production image's bootable file as kernel8.img.
   #
   # Every name in the layout is one of this module's own, so nothing a caller passes
-  # chooses where a file lands; the layout is written in a fresh directory beside the
-  # output and renamed into place whole.
+  # chooses where a file lands. The three entries are written in a fresh work directory
+  # inside the image's directory, then renamed beside the image; the image's directory
+  # must not hold any of them already.
   module BootPartition
     KERNEL = 'kernel8.img'
     ARMSTUB = 'bl31.bin'
@@ -36,21 +46,75 @@ module Erx
     # A file name of the layout: one name, or one under overlays/.
     NAME = %r{\A(?:overlays/)?[A-Za-z0-9][A-Za-z0-9_.,+-]*\z}
     MAX_FILE = 64 * 1024 * 1024
+    # The medium's three entries beside the image: the partition's files, the card's disk
+    # image, and their build record.
+    PARTITION = 'boot'
+    IMAGE = 'sdcard.img'
+    RECORD = 'sdcard.img.receipt.json'
+    ENTRIES = [PARTITION, IMAGE, RECORD].freeze
+    # The card's image, which fsimg writes and verifies: FAT32 in the one partition of an
+    # MBR, type 0x0c (FAT32 with LBA), which the firmware boots from. 512 MiB with 4 KiB
+    # clusters is the geometry of Raspberry Pi OS's own boot partition. The bytes are
+    # reproducible, with every time at 1980-01-01, FAT's first representable date.
+    CARD = %w[-F fat32/mbr -R -e 315532800 -s 512M -L ERXOS -o cluster=4096 -o mbr:type=0x0c].freeze
+    CARD_DEADLINE = 300
+    # The memory the firmware reports: total_mem makes any Pi 4 report the smallest
+    # board's 1 GB, of which gpu_mem goes to the VideoCore, so the ARM's RAM is the same
+    # on every board and on QEMU's 1 GB model, where the record's ram_bytes and
+    # fiasco_reserve were measured. A larger board runs on that 1 GB.
+    TOTAL_MEM_MIB = 1024
+    GPU_MEM_MIB = 76
+    # The pins of each overlay config.txt names. An overlay edits only the device tree,
+    # and the firmware sets pins only from config.txt, so each overlay's pins follow it as
+    # gpio lines: UART3 is GPIO 4 (TXD3) and GPIO 5 (RXD3) in function ALT4 (BCM2711 ARM
+    # Peripherals, 5.3 "Alternative Function Assignments"), the receive line pulled up as
+    # Linux's uart3_gpio4 pin group pulls it.
+    OVERLAY_PINS = { 'uart3' => %w[gpio=4=a4,pn gpio=5=a4,pu] }.freeze
+
+    # What write left in the image's directory: path, the card's image (the medium, as
+    # ReleaseMedium::Written#path is QEMU's); files, the partition's directory; record,
+    # their build record.
+    Written = Data.define(:path, :files, :record)
 
     module_function
 
-    # config.txt for platform: a 64-bit kernel from kernel8.img with BL31 as its stub,
-    # the mini UART's line pinned (enable_uart), the PL011s' clock from the record, and
-    # the overlays the board's tree carries.
+    # Whether platform's medium is a boot partition: a board whose firmware boots the
+    # image from one, which is a board with a tree of its own (BoardTree::BOARDS).
+    def boot_partition_medium?(platform) = BoardTree::BOARDS.key?(platform.name)
+
+    # config.txt for platform: a 64-bit kernel from kernel8.img, loaded where the model's
+    # loader puts it and bootstrap is linked, with BL31 as its stub; the mini UART's line
+    # set and the core clock it divides from pinned (enable_uart); the PL011s' clock from
+    # the record; the record's RAM (total_mem, gpu_mem); and the overlays the board's
+    # tree carries, each with its pins.
     def config_txt(platform, overlays:)
-      <<~CONFIG + overlays.map { |name| "dtoverlay=#{name}\n" }.join
+      <<~CONFIG + overlays.map { |name| overlay_lines(name) }.join
         # erXos boot partition for #{platform.name}, written by tools/lib/erx/boot_partition.rb.
         arm_64bit=1
         kernel=#{KERNEL}
+        kernel_address=0x#{QemuPlan::MACHINES.fetch(platform.name).loads.image.to_s(16)}
         armstub=#{ARMSTUB}
         enable_uart=1
         init_uart_clock=#{pl011_clock(platform)}
+        total_mem=#{total_mem_mib(platform)}
+        gpu_mem=#{GPU_MEM_MIB}
       CONFIG
+    end
+
+    # total_mem, once the record's ram_bytes is what it leaves the ARM; a record measured
+    # at another size is refused.
+    def total_mem_mib(platform)
+      ram = platform.record.fetch('ram_bytes')
+      unless ram == (TOTAL_MEM_MIB - GPU_MEM_MIB) * 1024 * 1024
+        raise Error, "#{platform.record_path}: ram_bytes #{ram} is not total_mem #{TOTAL_MEM_MIB} MiB less gpu_mem #{GPU_MEM_MIB} MiB"
+      end
+
+      TOTAL_MEM_MIB
+    end
+
+    def overlay_lines(name)
+      pins = OVERLAY_PINS.fetch(name) { raise Error, "boot partition: the pins of overlay #{name} are not known" }
+      ["dtoverlay=#{name}", *pins].map { |line| "#{line}\n" }.join
     end
 
     # The one clock of the record's PL011s, which config.txt's init_uart_clock sets for
@@ -79,56 +143,85 @@ module Erx
       own.merge(firmware)
     end
 
-    # Writes plan into output, which must lie under root, replacing what was there.
-    def write(root:, output:, plan:)
+    # Writes plan into directory, an existing directory under root that holds none of
+    # ENTRIES: the files under boot/, the card's image of them, written with fsimg and
+    # verified, and record, the inputs' build record, with each file's and the card's
+    # SHA-256 added.
+    def write(root:, directory:, plan:, record:, runner:, fsimg:)
       plan.each_key { |name| raise Error, "boot partition: #{name.inspect} is not a file name of the layout" unless NAME.match?(name) }
-      output = File.expand_path(output)
-      parent = OutputDirectory.prepare(root: root, path: File.dirname(output))
-      destination = File.join(parent, File.basename(output))
-      raise Error, "boot partition output is a symbolic link: #{destination}" if File.symlink?(destination)
-      raise Error, "boot partition output #{destination} holds something other than a boot partition" unless replaceable?(destination)
+      directory = OutputDirectory.check(root: root, path: directory)
+      raise Error, "boot partition: #{directory} is not a directory" unless File.directory?(directory)
 
-      Dir.mktmpdir(".#{File.basename(output)}-", parent) do |work|
-        layout = File.join(work, 'layout')
-        Dir.mkdir(layout)
-        plan.each do |name, source|
-          path = File.join(layout, name)
+      taken = ENTRIES.select { |name| File.exist?(File.join(directory, name)) || File.symlink?(File.join(directory, name)) }
+      raise Error, "boot partition: #{directory} already holds #{taken.join(', ')}" unless taken.empty?
+
+      Dir.mktmpdir('.boot-partition-', directory) do |work|
+        files = File.join(work, PARTITION)
+        written = plan.to_h do |name, source|
+          path = File.join(files, name)
           FileUtils.mkdir_p(File.dirname(path))
           bytes = source.is_a?(Text) ? source.bytes : BoundedFile.read(source, maximum: MAX_FILE)
+          host = BuildPath.find_in(bytes, root: root)
+          raise Error, "boot partition: #{name} holds the build's path #{host}" if host
           File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o644) { |file| file.write(bytes) }
+          [name, Digest::SHA256.hexdigest(bytes)]
         end
-        FileUtils.rm_rf(destination)
-        File.rename(layout, destination)
+        image = File.join(work, IMAGE)
+        runner.run([fsimg, 'cW', '-f', image, *CARD, '-C', files, '.'], name: 'fsimg-boot-partition', deadline: CARD_DEADLINE)
+        File.write(File.join(work, RECORD), JSON.pretty_generate(receipt(record, image: image, files: written)) + "\n")
+        ENTRIES.each { |name| File.rename(File.join(work, name), File.join(directory, name)) }
       end
-      destination
+      Written.new(path: File.join(directory, IMAGE), files: File.join(directory, PARTITION), record: File.join(directory, RECORD))
     end
 
-    # Whether destination may be replaced: absent, empty, or a layout this module wrote,
-    # whose config.txt opens with its own first line.
-    def replaceable?(destination)
-      return true unless File.exist?(destination)
-      return false unless File.directory?(destination)
-      return true if Dir.empty?(destination)
-
-      config = File.join(destination, CONFIG)
-      File.file?(config) && !File.symlink?(config) &&
-        BoundedFile.read(config, maximum: 4096).start_with?("# erXos boot partition for ")
+    # The card's receipt, in the shape of the image's own (ProductionImage's assembled
+    # receipts): the card as its artifact, each file of the partition as a component by
+    # its name and SHA-256, and record's inputs. Pure.
+    def receipt(record, image:, files:)
+      { 'version' => 1, 'kind' => 'assembled',
+        'artifact' => { 'path' => IMAGE, 'sha256' => Digest::SHA256.file(image).hexdigest },
+        'components' => files.sort.map { |name, sha256| { 'path' => "#{PARTITION}/#{name}", 'sha256' => sha256 } },
+        **record }
     end
 
-    # Builds BL31 and the board's tree, takes the firmware as deps.lock pins it, and
-    # writes the layout for bootable into output.
-    def lay_out(root:, runner:, platform:, bootable:, output:, compiler: ENV.fetch('ERX_CLANG', ''),
-                linker: ENV.fetch('ERX_LLD', ''))
+    # The build record of a layout: the firmware's deps.lock pins, BL31's own build
+    # record (Bl31.record) and its licence's place in TF-A's pinned tree, the board tree's
+    # pinned source, recipe, overlay sources and tools (the preprocessor and dtc, by
+    # identity), and the card's tool and arguments. The bootable file's record is the
+    # image's, in the same directory. Paths are relative to root; a tool's identity is
+    # its real path, digest and the host's release (BuildMemo.program_identity).
+    def record(root:, platform:, firmware:, compiler:, linker:)
+      board = BoardTree.board(platform)
+      { 'producer' => source_reference(root, __FILE__),
+        'inputs' => { 'platform' => platform.name, 'firmware' => firmware,
+                      'bl31' => Bl31.record(root: root, compiler: compiler, linker: linker),
+                      'bl31_licence' => { 'source' => Bl31::SOURCE_ID, 'path' => Bl31::LICENCE },
+                      'board_tree' => { 'source' => BoardTree.source_record(root: root), 'board' => board.source,
+                                        'recipe' => source_reference(root, BoardTree.recipe_path),
+                                        'overlays' => board.overlays.transform_values { |path| source_reference(root, File.join(root, path)) },
+                                        'compiler' => BuildMemo.program_identity(compiler),
+                                        'dtc' => BuildMemo.program_identity(BoardTree.dtc_path) },
+                      'card' => { 'tool' => Fsimg::VERSION_LINE, 'source' => Fsimg.source_record(root: root), 'arguments' => CARD } } }
+    end
+
+    def source_reference(root, path)
+      { 'path' => File.realpath(path).delete_prefix("#{File.realpath(root)}/"), 'sha256' => Digest::SHA256.file(path).hexdigest }
+    end
+
+    # Builds BL31 and the board's tree, takes the firmware as deps.lock pins it, verified
+    # against its pinned hashes, and writes the layout for bootable, with its build
+    # record, into directory, the production image's.
+    def lay_out(root:, runner:, platform:, bootable:, directory:, compiler:, linker:)
       dependencies = Dependencies.new(root: root, runner: runner)
-      firmware = FIRMWARE.to_h do |id|
-        source, archive = dependencies.archive_for(id)
-        [source.fetch('filename'), archive]
-      end
-      plan = plan(platform: platform, bootable: bootable, firmware: firmware,
+      pinned = FIRMWARE.map { |id| dependencies.archive_for(id) }
+      plan = plan(platform: platform, bootable: bootable,
+                  firmware: pinned.to_h { |source, archive| [source.fetch('filename'), archive] },
                   bl31_licence: Bl31.licence(root: root, runner: runner),
                   bl31: Bl31.ensure(root: root, runner: runner, compiler: compiler, linker: linker),
                   tree: BoardTree.build(root: root, runner: runner, platform: platform, compiler: compiler))
-      write(root: root, output: output, plan: plan)
+      record = record(root: root, platform: platform, firmware: pinned.map(&:first), compiler: compiler, linker: linker)
+      write(root: root, directory: directory, plan: plan, record: record, runner: runner,
+            fsimg: Fsimg.checked(root: root, runner: runner))
     end
   end
 end

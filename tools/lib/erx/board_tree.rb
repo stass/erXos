@@ -153,6 +153,22 @@ module Erx
     # The preprocessed source shipped beside the board's tree: its name with .dts.
     def source_file(board) = "#{File.basename(board.file, '.dtb')}.dts"
 
+    # deps.lock's pin of Linux's tree, and the recipe that builds from it: what a build
+    # record of the board's tree names (BootPartition.record).
+    def source_record(root:)
+      DependencySchema.parse(File.binread(File.join(root, 'deps.lock')))
+                      .find { |source| source.fetch('id') == SOURCE_ID } ||
+        raise(Error, "deps.lock has no #{SOURCE_ID} source")
+    end
+
+    def recipe_path = __FILE__
+
+    # The dtc the build runs: the first on PATH, as the runner finds it.
+    def dtc_path
+      ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).map { |directory| File.join(directory, 'dtc') }
+         .find { |path| File.file?(path) && File.executable?(path) } || raise(Error, 'the board tree needs dtc on PATH')
+    end
+
     # The commands of one build, each under the runner's deadline and log.
     Compile = Data.define(:runner) do
       # Linux's tree through the C preprocessor, as its build runs it, into one source

@@ -65,21 +65,22 @@ module Erx
     ARCHIVES = %w[libc++.a libc++abi.a].freeze
     DEADLINES = { configure: 600, build: 1_800 }.freeze
 
-    # The cache entries for a build with compiler (clang, beside clang++, llvm-ar and
+    # The cache entries for a build with compiler (clang, under any name, beside clang++, llvm-ar and
     # llvm-ranlib), whose C and C++ see exactly target_flags' headers, installing into
     # install.
     def self.cache_arguments(compiler:, target_flags:, install:)
       tools = File.dirname(compiler)
       flags = target_flags.join(' ')
       OPTIONS.merge(
-        'CMAKE_C_COMPILER' => compiler, 'CMAKE_CXX_COMPILER' => "#{compiler}++",
+        'CMAKE_C_COMPILER' => compiler, 'CMAKE_CXX_COMPILER' => File.join(tools, 'clang++'),
         'CMAKE_AR' => File.join(tools, 'llvm-ar'), 'CMAKE_RANLIB' => File.join(tools, 'llvm-ranlib'),
         'CMAKE_C_FLAGS' => flags, 'CMAKE_CXX_FLAGS' => flags, 'CMAKE_INSTALL_PREFIX' => install
       ).map { |name, value| "-D#{name}=#{value}" }
     end
 
-    # target_flags are the C compiler's target and header flags of ERTS's native build
-    # (NativeJitRuntime), so libc++ is compiled against the musl ERTS is.
+    # target_flags are the C compiler's target, header and source-name flags of ERTS's
+    # native build (NativeJitRuntime), so libc++ is compiled against the musl ERTS is and
+    # names its sources as ERTS does.
     def initialize(root:, runner:, compiler:, target_flags:, base: File.join(root, 'build/runtime/libcxx'))
       raise Error, 'set ERX_CLANG to the installed LLVM clang' if compiler.to_s.empty?
 

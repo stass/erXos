@@ -4,8 +4,8 @@
 
 require 'fileutils'
 require_relative 'bl31'
+require_relative 'boot_partition'
 require_relative 'board_tree'
-require_relative 'fiasco'
 require_relative 'output_directory'
 require_relative 'platform'
 require_relative 'production_image'
@@ -45,7 +45,6 @@ module Erx
     PROMPT = SessionDomain::PROMPT
     SYSTEM_SHELL_KEY = 's'
     HALT = "erlang:halt().\r"
-    IMAGE_DIRECTORY = 'build/raspi4b-image'
     STUB_DIRECTORY = 'build/raspi4b-stub'
 
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
@@ -102,35 +101,32 @@ module Erx
 
     def line(text) = /\A#{Regexp.escape(text)}\r*\n\z/n
 
-    # The kernel, the board's bootstrap, BL31 with its header patched, the model's tree and
-    # the image of the Pi's development manifest.
+    # The Pi's production image with its boot partition, as `tools/erx pack --medium
+    # --platform raspi4b` writes it (ProductionImage.pack_platform), booted from the
+    # partition's own kernel8.img and bl31.bin, so what the model boots is what the card
+    # holds; the model's tree stands in for the one the firmware would make from the
+    # partition's tree and overlays.
     def build_inputs(jobs:)
-      fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
-      fiasco.build(jobs: jobs)
-      fiasco.build_board_bootstrap(PLATFORM, jobs: jobs)
-      Bl31.ensure(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
-      tree = BoardTree.build(root: @root, runner: @runner, platform: @platform, compiler: @compiler)
-      directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, IMAGE_DIRECTORY))
-      built = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine, fiasco: fiasco)
-                             .build(directory: directory)
-      { image: built.single, dtb: tree.model, stub: patched_stub }
+      ProductionImage.pack_platform(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform,
+                                    medium: true, jobs: jobs)
+      located_inputs
     end
 
     def located_inputs
-      image = File.join(@root, IMAGE_DIRECTORY, 'image.boot')
+      partition = File.join(@root, ProductionImage.packed_directory(@platform), BootPartition::PARTITION)
+      image = File.join(partition, BootPartition::KERNEL)
+      bl31 = File.join(partition, BootPartition::ARMSTUB)
       dtb = File.join(@root, BoardTree::OUTPUT, PLATFORM, 'model.dtb')
-      [image, dtb].each { |path| raise Error, "raspi4b: #{path} is not built" unless File.file?(path) }
-      { image: image, dtb: dtb, stub: patched_stub }
+      [image, bl31, dtb].each { |path| raise Error, "raspi4b: #{path} is not built" unless File.file?(path) }
+      { image: image, dtb: dtb, stub: patched_stub(bl31) }
     end
 
     # BL31 with the stub header the firmware would fill: the tree's address and the
     # bootable file's entry, where the loader puts them.
-    def patched_stub
+    def patched_stub(bl31)
       loads = QemuPlan::MACHINES.fetch(PLATFORM).loads
       directory = OutputDirectory.prepare(root: @root, path: File.join(@root, STUB_DIRECTORY))
       path = File.join(directory, 'bl31-patched.bin')
-      bl31 = File.join(@root, Bl31::OUTPUT, Bl31::IMAGE)
-      raise Error, "raspi4b: #{bl31} is not built" unless File.file?(bl31)
 
       File.binwrite(path, Bl31.patch_stub(File.binread(bl31), dtb: loads.dtb, entry: loads.image))
       path

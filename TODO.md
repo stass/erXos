@@ -1086,10 +1086,18 @@ it; git history is the record of completed work.
   covers the main build's bootstrap only and skips `build/fiasco/users-*`, so the Raspberry Pi 4's bootstrap
   (`Fiasco#build_board_bootstrap`) and the 16550 and BCM2835 UART drivers it links have no build record. Make the
   audit take a users directory and run it once per bootstrap build, its object lookup scoped to that directory.
-* [Low] tooling, the Raspberry Pi 4's boot files (`Erx::BootPartition.lay_out`, `Erx::Bl31`, `Erx::BoardTree`,
-  `Fiasco#build_board_bootstrap`): only their tests call them. Give them a `tools/erx` command when Pi package 4's
-  harness or package 5's rig needs one; `Bl31`'s build record then names the compiler by its identity
-  (`BuildMemo.program_identity`), not its path.
+* [Low] tooling, the Raspberry Pi 4's medium (`BootPartition.boot_partition_medium?`, `Fiasco::BOARD_BOOTSTRAPS`,
+  `BoardTree::BOARDS`, `QemuPlan::MACHINES`, `BootPartition::OVERLAY_PINS`): a board's facts sit in four tables keyed
+  by platform name, and the medium is chosen by membership of one of them, so a board added to the others but not to
+  `BoardTree::BOARDS` gets QEMU's release medium. Declare the medium, the load address and the board's tree in the
+  platform record, checked when it loads, so a board without a medium is refused.
+* [Low] licences, the Raspberry Pi 4's card (`tools/lib/erx/boot_partition.rb`): the board's device tree is
+  GPL-2.0, and the card carries neither its licence text nor a notice of it, since `-P` preprocessing drops the SPDX
+  line and the card's files bypass the packer's licence check and `NOTICES`. Add linux-dts's `COPYING` to the
+  fetched members and the card, before any card leaves the project.
+* [Low] tooling, `tools/erx pack` and the raspi4b suite share `build/production-image/raspi4b/`, cleared before
+  each build: a suite run replaces the card the owner packed, two packs of one platform at once remove each other's
+  files, and a failed pack leaves the directory partial. Build into a sibling directory and rename it into place.
 * [Medium] PL011 window, `hw/svd/pl011/pl011.svd`: its address block is 0x1000 bytes, and
   `erx_device` refuses a window smaller than the block, but the Raspberry Pi 4's PL011s are 0x200
   bytes apart and its record gives UART3, the host link, 0x200. Shrink the block to the registers

@@ -282,8 +282,9 @@ Error in process <0.150.0> with exit value:
   its status and takes the control words `stop`, `start` and `reset`. An EROFS
   reader in Erlang (`erx_erofs`), behind its funnel `erx_verity`, mounts
   images in the namespace. CRC-32C is the first per-byte primitive.
-  `ruby tools/erx pack --medium` writes a QEMU disk image; the QEMU
-  harness boots from it, playing the firmware, which reads the
+  `make pack` (`tools/erx pack --medium`) writes a QEMU disk image into
+  `build/production-image/qemu-virt/`; the QEMU
+  harness boots one built the same way, playing the firmware, which reads the
   boot-selection record and boots the slot it names. The harness then
   reads the release's files from that slot's EROFS image at the storage
   domain; the image is not yet served to the system domain.
@@ -497,8 +498,9 @@ for what counts as evidence.
   graph. A frame over the cap, an unlisted indirect call or a cycle that
   is not a tail jump fails the build.
 * **Reproducible images** (`make check-reproducible`). Two clean builds of
-  the production boot image, both packing one build of the kernel, must be
-  byte-identical. In deterministic mode (`make check-qemu`, under TCG), two
+  the production boot image and its medium, both packing one build of the
+  kernel, must be byte-identical, for QEMU's disk image and for the
+  Raspberry Pi 4's SD card image, with BL31 built for each. In deterministic mode (`make check-qemu`, under TCG), two
   boots of the same image must write the same transcript.
 * **Target suites** (`make check-qemu`). QEMU suites boot guests and check
   the running system: threads, memory, interrupts, crash records and the
@@ -710,6 +712,24 @@ QEMU monitor and back. The first build of ERTS takes a while.
 `config/manifest/qemu-virt-site.txt`, which has no web domain, into
 `build/production-image/site/`, where `tools/build_site.rb` takes it; it
 cannot be combined with `--hostlink`, which the web domain serves.
+
+## Raspberry Pi 4 SD card
+
+```sh
+make pack PLATFORM=raspi4b
+```
+
+builds the Raspberry Pi 4's production image and its SD card, offline
+from the pinned sources `make fetch` verified, into
+`build/production-image/raspi4b/`: `sdcard.img`, a disk image to write
+to a card; `boot/`, the same files as a directory, which also serves as
+the firmware's network boot root; and `sdcard.img.receipt.json`, their
+build record, beside the image's own. The same inputs give the same
+bytes (`make check-reproducible`). The raspi4b QEMU suite packs the same
+way and boots `boot/`'s files on QEMU's model, so it replaces what
+`make pack` left there. Writing the card and what
+to expect on a board is in
+[design-platforms.md](docs/design-platforms.md#trying-a-card-on-a-board).
 
 ## Guest and stock oracle
 

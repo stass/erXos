@@ -7,8 +7,10 @@ require 'fileutils'
 require 'json'
 require_relative 'abi'
 require_relative 'boot_file'
+require_relative 'boot_partition'
 require_relative 'build_facts'
 require_relative 'build_inputs'
+require_relative 'build_path'
 require_relative 'crash_frame'
 require_relative 'deterministic_transcript'
 require_relative 'dom_planner'
@@ -260,15 +262,39 @@ module Erx
                machine: @machine, domains: domain_boots(manifest_source))
     end
 
-    # The image and the release medium for QEMU that holds it (ReleaseMedium), both in
-    # directory, which must be clean: by default the production image. A boot that creates
-    # a domain (MediumBoot) names a larger machine and a manifest with room for it, whose
-    # domain row names the release and runtime image the image then carries.
+    # Where `tools/erx pack` leaves platform's production image and its medium, replaced
+    # whole on every pack.
+    def self.packed_directory(platform) = "build/production-image/#{platform.name}"
+
+    # `tools/erx pack`'s one build: Fiasco for platform (Fiasco#build_for), then the
+    # production image of platform's development machine, with its medium when medium
+    # is set, into packed_directory, cleared first. Returns build's or build_medium's
+    # result. The raspi4b suite boots what this leaves.
+    def self.pack_platform(root:, runner:, compiler:, linker:, platform:, medium:, jobs: 4)
+      fiasco = Fiasco.new(root: root, runner: runner, compiler: compiler)
+      fiasco.build_for(platform, jobs: jobs)
+      directory = clear_directory(root: root, path: File.join(root, packed_directory(platform)))
+      image = new(root: root, runner: runner, compiler: compiler, linker: linker, machine: Machine.development(platform),
+                  fiasco: fiasco)
+      medium ? image.build_medium(directory: directory) : image.build(directory: directory)
+    end
+
+    # The image and the medium that holds it, both in directory, which must be clean: by
+    # default the production image. A board the firmware boots from a boot partition
+    # (BootPartition.boot_partition_medium?) gets that partition and the card's image of it; any other
+    # gets the release medium for QEMU (ReleaseMedium). A boot that creates a domain
+    # (MediumBoot) names a larger machine and a manifest with room for it, whose domain
+    # row names the release and runtime image the image then carries.
     def build_medium(directory:, machine: @machine, manifest_source: machine.platform.manifest_source(@root))
       on_own_board(machine)
       built = assemble(directory: directory, manifest_source: manifest_source, added: NOTHING_ADDED, test_code: false,
                        machine: machine, domains: domain_boots(manifest_source))
       directory = built_directory(built)
+      if BootPartition.boot_partition_medium?(machine.platform)
+        return [built, BootPartition.lay_out(root: @root, runner: @runner, platform: machine.platform, bootable: built.single,
+                                             directory: directory, compiler: @compiler, linker: @linker)]
+      end
+
       data_sectors = MediumImage.constant('data_sectors_min')
       volume = DataVolume.format(root: @root, runner: @runner, compiler: @compiler, directory: directory, data_sectors: data_sectors)
       [built, ReleaseMedium.write(built: built, directory: directory, volume: volume, data_sectors: data_sectors)]
@@ -327,6 +353,12 @@ module Erx
                     test_code: test_code, machine: machine)
       single = File.join(directory, 'image.boot')
       BootFile.write(codec: @codec, first_stage: @fiasco.first_stage_path(machine.platform), archive: archive, output: single, output_root: @root)
+      # image.boot holds every file of the image, the release's included, as packed, so
+      # one look at it finds a file that names the tree (BuildPath). A test image, which
+      # never leaves the build host, is not looked at.
+      host = test_code ? nil : BuildPath.find_in(File.binread(single), root: @root)
+      raise Error, "production image: #{File.basename(single)} holds the build's path #{host}" if host
+
       header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
       flags = header.fetch('flags')
       marked = flags.anybits?(@codec.member('pack_flags', 'test_code'))
@@ -350,8 +382,11 @@ module Erx
 
     # The same inputs give byte-identical images: two whole builds of the runtime, each
     # from a clean runtime directory and packed into a clean directory of its own name
-    # with its release medium, compared part by part by SHA-256, read as a stream. A path
-    # under those directories that reached an output shows; OTP and musl build at one path
+    # with its medium, compared part by part by SHA-256, read as a stream. A board whose
+    # medium is a boot partition (BootPartition) builds BL31 afresh for each image too, and
+    # its board tree is built for each; the card's image holds every file of the partition,
+    # so its digest covers them. A path under those directories that reached an output
+    # shows; OTP and musl build at one path
     # both times, so a path of theirs does not. Fiasco's own assembly has its own test
     # (test/integration/fiasco_reproducible_test.rb); both builds here pack its one result.
     # Both builds read build/gen, which the check never replaces while its inputs are
@@ -368,6 +403,7 @@ module Erx
       compared = generated_stamp
       (first, first_medium), (second, second_medium) = %w[first second].map do |name|
         @runtime.clean
+        Bl31.clean(root: @root) if BootPartition.boot_partition_medium?(@machine.platform)
         build_medium(directory: File.join(directory, name))
       end
       raise Error, 'build/gen was regenerated during the reproducibility check; run it again' unless generated_stamp == compared
@@ -1571,7 +1607,7 @@ module Erx
 
     def digests(built, medium)
       { 'archive_sha256' => built.archive, 'single_sha256' => built.single,
-        'release_erofs_sha256' => medium.erofs, 'medium_sha256' => medium.path }
+        'release_erofs_sha256' => built.erofs, 'medium_sha256' => medium.path }
         .transform_values { |path| Digest::SHA256.file(path).hexdigest }
     end
 

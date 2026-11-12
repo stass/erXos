@@ -5,6 +5,8 @@ RUBY ?= ruby
 # Empty: HVF when the host offers it, else TCG.
 ACCEL ?=
 JOBS ?= 4
+# The platform `make pack` builds for.
+PLATFORM ?= qemu-virt
 FLAVOUR ?= emu
 DOCKER_CONTEXT ?=
 
@@ -12,7 +14,7 @@ DOCKER_CONTEXT ?=
 
 .PHONY: all build run check check-sources status setup fetch check-tla check-cbmc check-litmus check-rc-oracle check-arch-terms
 .PHONY: oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
-.PHONY: generate web
+.PHONY: generate web pack
 .PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
 .PHONY: check-runtime-seam check-runtime-hosted
 .PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant check-native-seeds check-boot-image
@@ -36,8 +38,15 @@ generate:
 web:
 	$(RUBY) tools/erx build web
 
+# The production image and its medium for PLATFORM into build/production-image/PLATFORM/:
+# QEMU's release medium, or for raspi4b the SD card's boot/ and sdcard.img.
+pack:
+	$(RUBY) tools/erx pack --medium --platform $(PLATFORM)
+
+# Every platform's image and medium: QEMU's release medium and the Raspberry Pi 4's SD card.
 check-reproducible:
-	$(RUBY) tools/erx check-reproducible
+	$(RUBY) tools/erx check-reproducible --platform qemu-virt
+	$(RUBY) tools/erx check-reproducible --platform raspi4b
 
 check-fuzz:
 	$(RUBY) tools/erx check-fuzz

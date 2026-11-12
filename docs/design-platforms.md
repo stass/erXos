@@ -261,7 +261,9 @@ record carries its clock in hertz, from its node's `clocks`, and
 `erx_pl011` divides 115200 baud from it for a PL011 the firmware leaves
 unprogrammed, as it leaves UART3
 ([design-abi.md](design-abi.md#devices-and-partition-windows)). The host link is UART3, a PL011 on GPIO 4 and 5,
-whose pins `dtoverlay=uart3` in `config.txt` sets; UART2, the other PL011
+which `dtoverlay=uart3` in `config.txt` enables in the device tree; the
+firmware sets no pins from an overlay, so `config.txt`'s `gpio=4=a4,pn`
+and `gpio=5=a4,pu` lines put the pins in UART3's function; UART2, the other PL011
 with pins of its own, sits on GPIO 0 and 1, the bus of a HAT's
 identification EEPROM, which the firmware reads at boot. The manifest
 names the host link by its device-tree path, so the firmware's rewriting
@@ -1083,6 +1085,81 @@ console on the same UART, and a board's end goes through BL31's PSCI as
 it does on erXos's kernel. [design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)
 describes that shape, and M12 of [plan.md](plan.md#m12-storage-networking-boards)
 adds the kernel's items on erXos's kernel.
+
+#### Trying a card on a board
+
+One pass on a real board checks what QEMU's model cannot: the firmware,
+its device tree and its UART setup. It is done by hand, once per change
+to the boot path.
+
+**You need** a Raspberry Pi 4 (any memory size: `total_mem` makes the
+board use 1 GB; the 4 GB board is the one tested), a microSD card of at least 1 GB, and a 3.3 V
+USB-serial adapter (never a 5 V one). Wire it to the 40-pin header: the
+adapter's ground to pin 6, its receive line to pin 8 (GPIO 14, the Pi's
+transmit) and its transmit line to pin 10 (GPIO 15). Open it at 115200
+baud, 8N1, no flow control, for example `screen -L /dev/cu.usbserial-XXXX
+115200`, where `-L` logs everything it prints to `screenlog.0`. A second adapter on UART3, the
+host link, is optional: ground to pin 9, receive to pin 7 (GPIO 4),
+transmit to pin 29 (GPIO 5), also 115200 8N1.
+
+**Build** the card's image on the development host:
+
+```sh
+make pack PLATFORM=raspi4b
+```
+
+It writes `build/production-image/raspi4b/sdcard.img`.
+
+**Write the card** on macOS. Insert the card, then find it:
+
+```sh
+diskutil list
+```
+
+Pick the disk whose size is the card's, `/dev/diskN`, marked `external,
+physical`. **Writing to the wrong disk destroys what is on it, your
+Mac's own disk included: check the size and the name twice.** Then:
+
+```sh
+diskutil unmountDisk /dev/diskN
+sudo dd if=build/production-image/raspi4b/sdcard.img of=/dev/rdiskN bs=4m
+diskutil eject /dev/diskN
+```
+
+Put the card in the Pi, start logging on the adapter, then power the Pi.
+
+**Expect**, in this order, on the console adapter:
+
+1. BL31's banner, two lines: `NOTICE:  BL31: v2.15.0(release):v2.15.0`
+   and `NOTICE:  BL31: Built : erXos`.
+   BL31 writes to the UART whose pins GPIO 14 and 15 are, so the banner
+   should arrive here; if it does not, the board went on regardless and
+   BL31 used the other UART, which the pass is to find out.
+2. bootstrap's memory line, exactly
+   `  Total RAM: 948.0 MiB; available for Bootstrap/Sigma0/Kernel: 948.0 MiB`:
+   the 1024 MiB `total_mem` gives less the 76 MiB of `gpu_mem`.
+3. `Starting kernel at`, then the erXos banner art, `erXos`, Fiasco's
+   version lines and `development build: trusted code only`, then
+   Fiasco's start-up lines, `DT Platform: Raspberry Pi 4 Model B` among
+   them.
+4. After a minute or less, a line that starts `rc: the command shell`
+   and the command shell's `%` prompt. Type `erl` and Enter: the Erlang
+   shell's `(root_1@erxos)1>` prompt comes up. Type `1 + 2.` and
+   Enter: it answers `3`. Type `q().` to return to the command shell,
+   then `dmesg`, which prints the kernel's and the system's log.
+
+**What the pass settles.** Typing works, so the mini UART raises its
+receive interrupt with bits 3:2 of its interrupt-enable register set, as
+the console driver sets them although Broadcom's manual marks those bits
+reserved; anything at all after BL31 means the firmware loaded
+`kernel8.img` at `kernel_address`, where bootstrap is linked; where
+BL31's banner appeared tells which UART it chose; and the memory line and
+the shell together show that the device tree the firmware made from the
+partition's tree and `uart3` overlay is the one erXos expects.
+
+**Send back** the whole serial log of the console adapter (and of the
+second adapter, if one was wired), from power-on to `dmesg`'s output.
+If the board stops early, the log up to the stop is what tells where.
 
 ## Interfaces
 

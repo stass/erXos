@@ -505,6 +505,27 @@ admission token or enter the production publisher. The roadmap defines the
 [M0 acceptance image and M1 planner gate](plan.md#m0-the-tree-the-toolchain-and-the-oracle)
 without changing the complete target manifest or its admission rules.
 
+`tools/erx pack` (`make pack`) is the entry point for a platform's
+production image and its medium: it builds Fiasco and packs the production image of a platform's
+development machine (`--platform`, QEMU virt by default) into
+`build/production-image/PLATFORM/`, replaced whole each time, and with
+`--medium` the medium that holds it, chosen by the platform: QEMU's
+release medium (`medium.img`), or for a board the firmware boots from a
+boot partition, the Raspberry Pi 4, that partition's files in `boot/`
+and the SD card's image of them, `sdcard.img`, which fsimg writes and
+verifies ([design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)).
+The card's build record, `sdcard.img.receipt.json`, names every input
+by its pin or digest: the firmware's `deps.lock` entries, verified
+against their hashes before use; BL31's build record (TF-A's pin, the
+recipe, its options and the compiler and linker by identity) and its
+licence; the board tree's pinned Linux source, recipe and overlay
+sources; fsimg's version, source and arguments; and each file's and the
+card's SHA-256, in the shape of the image's own assembled receipts; the
+board tree's record names the preprocessor and `dtc` by identity. The
+bootable file's own record is the image's, in the same directory.
+`make check-reproducible` builds the Pi's image, BL31 and board tree
+twice and compares the card's bytes, as it does QEMU's medium.
+
 The QEMU harness uses the pinned `virt-11.1` machine, an explicit accelerator,
 serial logs, `-no-reboot` and named transcript deadlines. It terminates the
 guest once its expected transcript is complete. Unsupported acceleration,

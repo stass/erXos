@@ -197,6 +197,13 @@ module Erx
 
     def board_image_path(name) = File.join(@build, "images/bootstrap-#{name}.raw")
 
+    # What an image for platform packs: the main build and, for a board with a
+    # bootstrap of its own, that bootstrap (first_stage_path).
+    def build_for(platform, jobs: 4)
+      build(jobs: jobs)
+      build_board_bootstrap(platform.name, jobs: jobs) if BOARD_BOOTSTRAPS.key?(platform.name)
+    end
+
     # The first stage an image for platform boots from: its board's own bootstrap build
     # (BOARD_BOOTSTRAPS), or the main build's for any other board.
     def first_stage_path(platform) = BOARD_BOOTSTRAPS.key?(platform.name) ? board_image_path(platform.name) : image_path

@@ -23,6 +23,15 @@ class LibcxxTest < Minitest::Test
     assert_equal 'ON', arguments.fetch('LIBCXX_HAS_PTHREAD_API')
   end
 
+# tools/erx resolves ERX_CLANG to its real path, which Homebrew's LLVM gives as
+# clang-23; the C++ driver is clang++ beside it, not that name with ++ appended.
+def test_a_versioned_compiler_finds_clang_plus_plus_beside_it
+  versioned = Erx::Libcxx.cache_arguments(compiler: '/llvm/bin/clang-23', target_flags: FLAGS, install: '/out/install')
+                         .to_h { |argument| argument.delete_prefix('-D').split('=', 2) }
+  assert_equal '/llvm/bin/clang-23', versioned.fetch('CMAKE_C_COMPILER')
+  assert_equal '/llvm/bin/clang++', versioned.fetch('CMAKE_CXX_COMPILER')
+end
+
   def test_the_compilers_and_flags_are_the_native_builds
     assert_equal '/llvm/bin/clang', arguments.fetch('CMAKE_C_COMPILER')
     assert_equal '/llvm/bin/clang++', arguments.fetch('CMAKE_CXX_COMPILER')

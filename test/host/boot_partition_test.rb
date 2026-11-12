@@ -1,11 +1,17 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'digest'
+require 'json'
+require 'rbconfig'
+require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/boot_partition'
+require_relative '../../tools/lib/erx/runner'
 
 # The Raspberry Pi 4's boot partition (Erx::BootPartition): config.txt from the platform
-# record, the layout's names, and a writer that puts files only in its output directory.
+# record, the layout's names, its build record, and a writer that puts files only beside
+# the image, in a directory under its root that holds none of its entries.
 class BootPartitionTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   PI = Erx::Platform.load(root: ROOT, name: 'raspi4b')
@@ -13,8 +19,22 @@ class BootPartitionTest < Minitest::Test
   def test_config_txt_comes_from_the_record
     config = Erx::BootPartition.config_txt(PI, overlays: ['uart3'])
     lines = config.lines(chomp: true).reject { |line| line.start_with?('#') }
-    assert_equal %w[arm_64bit=1 kernel=kernel8.img armstub=bl31.bin enable_uart=1 init_uart_clock=48000000 dtoverlay=uart3],
+    assert_equal %w[arm_64bit=1 kernel=kernel8.img kernel_address=0x200000 armstub=bl31.bin enable_uart=1
+                    init_uart_clock=48000000 total_mem=1024 gpu_mem=76 dtoverlay=uart3 gpio=4=a4,pn gpio=5=a4,pu],
                  lines
+  end
+
+  # The board's RAM is the record's: total_mem less gpu_mem must be ram_bytes, so a
+  # record measured at another size is refused, not written into a card that disagrees.
+  def test_the_memory_config_txt_sets_is_the_records
+    error = assert_raises(Erx::Error) { Erx::BootPartition.config_txt(record(ram_bytes: PI.record.fetch('ram_bytes') + (1 << 20)), overlays: []) }
+    assert_match(/is not total_mem 1024 MiB less gpu_mem 76 MiB/, error.message)
+  end
+
+  # The firmware sets no pins from an overlay, so an overlay whose pins config.txt does
+  # not know is refused.
+  def test_an_overlay_needs_its_pins
+    assert_raises(Erx::Error) { Erx::BootPartition.config_txt(PI, overlays: ['uart5']) }
   end
 
   def test_the_pl011s_need_one_clock
@@ -24,49 +44,141 @@ class BootPartitionTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::BootPartition.pl011_clock(record(units: [])) }
   end
 
-  def test_writes_the_layout_into_its_output_alone
+  def test_writes_the_layout_beside_the_image_alone
     Dir.mktmpdir do |root|
-      output = File.join(root, 'out/boot')
-      Erx::BootPartition.write(root: root, output: output, plan: plan(root))
+      output = File.join(root, 'image')
+      Dir.mkdir(output)
+      File.write(File.join(output, 'image.boot'), 'kernel')
+      written = write(root, output, plan(root))
+      names = %w[LICENCE.broadcom LICENCE.tf-a bcm2711-rpi-4-b.dtb bcm2711-rpi-4-b.dts bl31.bin config.txt fixup4.dat
+                 kernel8.img overlays/uart3.dtbo start4.elf]
       files = Dir.glob('**/*', base: output).reject { |name| File.directory?(File.join(output, name)) }.sort
-      assert_equal %w[LICENCE.broadcom LICENCE.tf-a bcm2711-rpi-4-b.dtb bcm2711-rpi-4-b.dts bl31.bin config.txt fixup4.dat
-                      kernel8.img overlays/uart3.dtbo start4.elf], files
-      assert_equal 'kernel', File.read(File.join(output, 'kernel8.img'))
-      assert_equal %w[boot], Dir.children(File.join(root, 'out')), 'nothing is left beside the output'
+      assert_equal [*names.map { |name| "boot/#{name}" }, 'image.boot', 'sdcard.img', 'sdcard.img.receipt.json'].sort, files
+      assert_equal 'kernel', File.read(File.join(output, 'boot/kernel8.img'))
+      assert_equal File.join(File.realpath(output), 'sdcard.img'), written.path
+      assert_equal %w[boot image.boot sdcard.img sdcard.img.receipt.json], Dir.children(output).sort, 'no work directory is left'
 
-      # A layout it wrote is replaced whole.
-      File.write(File.join(output, 'stale'), 'x')
-      Erx::BootPartition.write(root: root, output: output, plan: plan(root))
-      refute File.exist?(File.join(output, 'stale'))
+      # The card's image reads back, through fsimg's own reader and checker, as the same
+      # files: its partition table and FAT verify, and config.txt and kernel8.img hold
+      # the bytes the layout gave them.
+      image = written.path
+      assert_equal 513 * 1024 * 1024, File.size(image), "a 512 MiB partition 1 MiB into the disk"
+      entry = File.binread(image, 16, 446)
+      assert_equal 0x0c, entry.getbyte(4), 'the partition is FAT32 with LBA'
+      assert_equal "\x55\xAA".b, File.binread(image, 2, 510)
+      assert_equal names.sort, fsimg('t', '-f', image).lines.map { |line| line.strip.delete('"').delete_prefix('/') }
+                                                      .reject { |name| name == 'overlays' }.sort
+      fsimg('Wd', '-f', image)
+      assert_equal File.binread(File.join(output, 'boot/config.txt')), fsimg('x', '-O', '-f', image, 'config.txt')
+      assert_equal 'kernel', fsimg('x', '-O', '-f', image, 'kernel8.img')
+
+      # The record is an assembled receipt: the card, each file of the partition by its
+      # digest, and what it was given.
+      record = JSON.parse(File.read(written.record))
+      assert_equal 'given', record.fetch('inputs')
+      assert_equal({ 'path' => 'sdcard.img', 'sha256' => Digest::SHA256.file(image).hexdigest }, record.fetch('artifact'))
+      assert_equal names.sort.map { |name| "boot/#{name}" }, record.fetch('components').map { |part| part.fetch('path') }
+      assert_includes record.fetch('components'), { 'path' => 'boot/kernel8.img', 'sha256' => Digest::SHA256.hexdigest('kernel') }
+
+      # The same layout written again is the same bytes.
+      again = File.join(root, 'again')
+      Dir.mkdir(again)
+      assert_equal Digest::SHA256.file(image).hexdigest, Digest::SHA256.file(write(root, again, plan(root)).path).hexdigest,
+                   'the card image is the same bytes on every write'
     end
   end
 
-  def test_refuses_to_write_outside_its_output
+  def test_refuses_to_write_outside_its_root
     Dir.mktmpdir do |root|
       Dir.mktmpdir do |elsewhere|
-        assert_raises(Erx::Error) { Erx::BootPartition.write(root: root, output: File.join(elsewhere, 'boot'), plan: plan(root)) }
+        assert_raises(Erx::Error) { write(root, elsewhere, plan(root)) }
+        assert_empty Dir.children(elsewhere)
+        File.symlink(elsewhere, File.join(root, 'link'))
+        assert_raises(Erx::Error) { write(root, File.join(root, 'link'), plan(root)) }
         assert_empty Dir.children(elsewhere)
       end
       ['../escape', 'overlays/../../escape', '/tmp/escape', 'a/b', 'overlays/'].each do |name|
-        assert_raises(Erx::Error, name) do
-          Erx::BootPartition.write(root: root, output: File.join(root, 'boot'), plan: { name => Erx::BootPartition::Text.new('') })
-        end
+        assert_raises(Erx::Error, name) { write(root, root, { name => Erx::BootPartition::Text.new('') }) }
       end
       refute File.exist?(File.join(root, 'escape'))
     end
   end
 
-  def test_refuses_to_replace_what_it_did_not_write
+  # A directory that already holds one of the medium's entries, or a link by its name, is
+  # refused and left as it was: the medium is written only beside a fresh image.
+  def test_refuses_a_directory_that_holds_one_of_its_entries
+    Erx::BootPartition::ENTRIES.each do |entry|
+      Dir.mktmpdir do |root|
+        output = File.join(root, 'image')
+        Dir.mkdir(output)
+        File.write(File.join(output, entry), 'keep')
+        assert_raises(Erx::Error, entry) { write(root, output, plan(root)) }
+        assert_equal [entry], Dir.children(output)
+        assert_equal 'keep', File.read(File.join(output, entry))
+      end
+    end
     Dir.mktmpdir do |root|
-      other = File.join(root, 'other')
-      Dir.mkdir(other)
-      File.write(File.join(other, 'keep'), 'x')
-      assert_raises(Erx::Error) { Erx::BootPartition.write(root: root, output: other, plan: plan(root)) }
-      assert File.file?(File.join(other, 'keep'))
+      File.symlink('/nonexistent', File.join(root, 'boot'))
+      assert_raises(Erx::Error) { write(root, root, plan(root)) }
+    end
+  end
 
-      File.symlink(other, File.join(root, 'link'))
-      assert_raises(Erx::Error) { Erx::BootPartition.write(root: root, output: File.join(root, 'link'), plan: plan(root)) }
-      assert File.file?(File.join(other, 'keep'))
+  # The record names every input by its pin or digest: the firmware as deps.lock pins
+  # it, BL31's own build record, TF-A's licence, the board tree's source, recipe and
+  # overlays, and fsimg with its arguments.
+  def test_the_record_names_the_inputs
+    firmware = Erx::BootPartition::FIRMWARE.map { |id| { 'id' => id } }
+    record = Erx::BootPartition.record(root: ROOT, platform: PI, firmware: firmware, compiler: RbConfig.ruby, linker: RbConfig.ruby)
+    assert_equal 'tools/lib/erx/boot_partition.rb', record.fetch('producer').fetch('path')
+    record = record.fetch('inputs')
+    assert_equal firmware, record.fetch('firmware')
+    assert_equal 'trusted-firmware-a', record.fetch('bl31').fetch('source').fetch('id')
+    assert_match(/\A#{Regexp.escape(File.realpath(RbConfig.ruby))} \h{64} /, record.fetch('bl31').fetch('compiler'))
+    assert_equal({ 'source' => 'trusted-firmware-a', 'path' => 'docs/license.rst' }, record.fetch('bl31_licence'))
+    tree = record.fetch('board_tree')
+    assert_equal 'linux-dts', tree.fetch('source').fetch('id')
+    assert_equal 'tools/lib/erx/board_tree.rb', tree.fetch('recipe').fetch('path')
+    assert_match(/ \h{64} /, tree.fetch('compiler'))
+    assert_match(%r{/dtc \h{64} }, tree.fetch('dtc'))
+    assert_equal({ 'path' => 'hw/dts/raspi4b-uart3.dtso',
+                   'sha256' => Digest::SHA256.file(File.join(ROOT, 'hw/dts/raspi4b-uart3.dtso')).hexdigest },
+                 tree.fetch('overlays').fetch('uart3'))
+    assert_equal Erx::Fsimg::VERSION_LINE, record.fetch('card').fetch('tool')
+  end
+
+  # A file that holds the path the tree was built at would carry the build host into the
+  # card and make its bytes depend on where it was built, so it is refused.
+  def test_refuses_a_file_that_names_the_build_path
+    Dir.mktmpdir do |root|
+      error = assert_raises(Erx::Error) do
+        write(root, root, { 'config.txt' => Erx::BootPartition::Text.new("built at #{File.realpath(root)}/x\n") })
+      end
+      assert_match(/config.txt holds the build's path/, error.message)
+      assert_empty Dir.children(root).reject { |name| name == 'logs' }
+    end
+  end
+
+  # The tree's path as the build spelled it, through a symbolic link, is refused too.
+  def test_refuses_the_build_path_spelled_through_a_link
+    Dir.mktmpdir do |scratch|
+      tree = File.join(scratch, 'tree')
+      Dir.mkdir(tree)
+      link = File.join(scratch, 'link')
+      File.symlink(tree, link)
+      error = assert_raises(Erx::Error) do
+        write(link, link, { 'config.txt' => Erx::BootPartition::Text.new("built at #{link}/x\n") })
+      end
+      assert_match(%r{config.txt holds the build's path .*/link\z}, error.message)
+    end
+  end
+
+  # The tree's path matches only where it starts a path: a tree at /src is not named by
+  # kernel/src/, nor one at /x/tree by /x/tree-old/.
+  def test_the_build_path_matches_only_as_a_whole_path
+    Dir.mktmpdir do |scratch|
+      tree = File.realpath(scratch)
+      assert_nil Erx::BuildPath.find_in("fiasco#{tree}/kernel.h\0#{tree}-old/x\0#{tree}", root: tree)
+      assert_equal tree, Erx::BuildPath.find_in("x\0#{tree}/littlefs/lfs.c\0", root: tree)
     end
   end
 
@@ -83,6 +195,21 @@ class BootPartitionTest < Minitest::Test
   end
 
   private
+
+  FSIMG = Erx::Fsimg.locate(root: ROOT)
+
+  def write(root, output, plan)
+    runner = Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'logs'))
+    Erx::BootPartition.write(root: root, directory: output, plan: plan, record: { 'inputs' => 'given' }, runner: runner,
+                             fsimg: FSIMG)
+  end
+
+  # fsimg's standard output for arguments, which must succeed.
+  def fsimg(*arguments)
+    output, status = Open3.capture2(FSIMG, *arguments, stdin_data: '', binmode: true)
+    assert status.success?, "fsimg #{arguments.join(' ')} failed"
+    output
+  end
 
   def record(**fields) = Erx::Platform.new(name: 'raspi4b', record: PI.record.merge(fields.transform_keys(&:to_s)))
 

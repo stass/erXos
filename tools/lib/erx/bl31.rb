@@ -8,6 +8,7 @@ require 'json'
 require 'tmpdir'
 require_relative 'error'
 require_relative 'bounded_file'
+require_relative 'build_memo'
 require_relative 'json_input'
 require_relative 'dependencies'
 require_relative 'output_directory'
@@ -103,9 +104,21 @@ module Erx
 
     def licence(root:, runner:) = File.join(Dependencies.new(root: root, runner: runner).fetched_tree(SOURCE_ID), LICENCE)
 
+    # What a build is of: TF-A's pin, this recipe and its options, and the compiler and
+    # linker by identity (BuildMemo.program_identity), so a changed toolchain rebuilds.
     def record(root:, compiler:, linker:)
+      raise Error, 'BL31 needs ERX_CLANG and ERX_LLD, LLVM\'s clang and ld.lld' if compiler.to_s.empty? || linker.to_s.empty?
+
       { 'source' => source_record(root: root), 'recipe' => Digest::SHA256.file(__FILE__).hexdigest,
-        'options' => OPTIONS, 'compiler' => compiler, 'linker' => linker }
+        'options' => OPTIONS, 'compiler' => BuildMemo.program_identity(compiler),
+        'linker' => BuildMemo.program_identity(linker) }
+    end
+
+    # Removes the last build, so the next ensure builds again: the reproducibility check
+    # builds BL31 once for each of its images.
+    def clean(root:)
+      destination = OutputDirectory.check(root: root, path: File.join(root, OUTPUT))
+      FileUtils.rm_rf(destination)
     end
 
     def source_record(root:)
