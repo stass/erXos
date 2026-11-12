@@ -36,6 +36,7 @@ relay_without_user() ->
     {ok, _} = await(<<"% ">>),
     echo_and_erl_return(),
     exit_starts_the_shell_again(),
+    a_taken_output_asks_nothing_more(),
     a_lost_answer_is_asked_for_again(),
     a_hangup_ends_the_relay(Shells).
 
@@ -68,12 +69,26 @@ exit_starts_the_shell_again() ->
     type(<<"echo again\r">>),
     {ok, _} = await(<<"again\r\n% ">>).
 
+%% With every output answered at once, the tty names itself again only with a resend:
+%% the timer of an output already taken sends nothing. A tty that named itself at each
+%% such timer would send a burst of tty_open a second after a burst of output, such as
+%% a line editor's echo of a pasted line, which fills the console facet's limit in
+%% flight, so the facet drops the output sent among it and the console takes that
+%% output's empty resend as its bytes lost.
+a_taken_output_asks_nothing_more() ->
+    _ = flush_opens(),
+    type(<<"echo quiet\r">>),
+    {ok, _} = await(<<"quiet\r\n% ">>),
+    {Opens, Resends} = answer_until(erlang:monotonic_time(millisecond) + 1500, 0, 0),
+    ?assert(Opens =< Resends, {opens, Opens, resends, Resends}).
+
 a_lost_answer_is_asked_for_again() ->
     type(<<"echo lost\r">>),
-    %% The first output's answer is lost: the tty sends it again, empty, and the
-    %% master answers that.
+    %% The first output's answer is lost: the tty names itself again and sends the
+    %% output again, empty, and the master answers that.
     N = receive {tty_output, Number, <<_, _/binary>>} -> Number after ?WAIT_MS -> error(no_output) end,
     Started = erlang:monotonic_time(millisecond),
+    receive {tty_open, _} -> ok after 3000 -> error(no_open) end,
     receive {tty_output, N, <<>>} -> ok after 3000 -> error(no_resend) end,
     ?assert(erlang:monotonic_time(millisecond) - Started >= 900),
     erx_session_tty ! {tty_taken, N},
@@ -83,6 +98,23 @@ a_lost_answer_is_asked_for_again() ->
 
 type(Bytes) ->
     erx_session_tty ! {tty_input, Bytes}.
+
+%% The tty_open messages waiting, which the tty sent as it named itself.
+flush_opens() ->
+    receive {tty_open, Tty} -> [Tty | flush_opens()] after 0 -> [] end.
+
+%% Answers every output until Deadline, counting the tty_open messages and the empty
+%% resends that came.
+answer_until(Deadline, Opens, Resends) ->
+    receive
+        {tty_open, _} ->
+            answer_until(Deadline, Opens + 1, Resends);
+        {tty_output, N, Bytes} ->
+            erx_session_tty ! {tty_taken, N},
+            answer_until(Deadline, Opens, Resends + case Bytes of <<>> -> 1; _ -> 0 end)
+    after max(0, Deadline - erlang:monotonic_time(millisecond)) ->
+            {Opens, Resends}
+    end.
 
 %% Takes every output until what it took contains Pattern, and returns it.
 await(Pattern) ->

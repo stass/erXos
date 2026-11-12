@@ -84,9 +84,10 @@ tty_init(Parent, Console, MasterFun) ->
            link => erx_tty_link:new()}).
 
 %% The tty names itself to its master, the console facet that tells the console whose tty
-%% it is (docs/design-live.md, "Between domains"), and again with each resend, since a
-%% message the system domain's peer drops is lost for good; the master takes the first
-%% and ignores the same again.
+%% it is (docs/design-live.md, "Between domains"), and again with each resend, which
+%% erx_tty_link asks for: the facet drops a message past its limit in flight, and a
+%% console that never had the tty's name answers none of its outputs. The master takes
+%% the first and ignores the same again.
 open(undefined) -> ok;
 open(Master) -> Master ! {tty_open, self()}, ok.
 
@@ -103,7 +104,6 @@ loop(Tty = #{link := Link, origin := Origin}) ->
         {'DOWN', _Ref, process, Console, Reason} when Console =:= map_get(console, Tty) ->
             exit(Reason);
         {erx_tty_resend, N} ->
-            ok = open(map_get(master, Tty)),
             loop(effects(erx_tty_link:timeout(N, Link), Tty));
         {erx_origin, D, Message} when Origin =:= {domain, D} ->
             loop(effects(erx_tty_link:master(Message, Link), Tty));
@@ -122,6 +122,7 @@ effects({Actions, Link}, Tty) ->
 %% With no master, nothing is sent and no timer runs: the tty stays stopped.
 effect({output, _N, _Bytes}, #{master := undefined}) -> ok;
 effect({output, N, Bytes}, #{master := Master}) -> Master ! {tty_output, N, Bytes};
+effect(open, #{master := Master}) -> open(Master);
 effect({resend_after, _N}, #{master := undefined}) -> ok;
 effect({resend_after, N}, _Tty) -> erlang:send_after(?RESEND_MS, self(), {erx_tty_resend, N});
 effect({done, From}, #{console := Console}) -> Console ! {erx_console_written, From};

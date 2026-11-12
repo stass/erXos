@@ -68,6 +68,7 @@ write(Size, W = #world{written = Written, writers = Writers, next_writer = Id}, 
                           writers = [Id | Writers], next_writer = Id + 1}, Path).
 
 apply_actions({Actions, Link}, W, Path) ->
+    ok = open_only_with_resend(Actions, Path),
     lists:foldl(fun(Action, Acc) -> act(Action, Acc, Path) end, W#world{link = Link}, Actions).
 
 act({output, N, Bytes}, W, Path) -> master_takes(N, Bytes, W, Path);
@@ -77,6 +78,7 @@ act({done, Id}, W = #world{writers = Writers}, Path) ->
     W#world{writers = lists:delete(Id, Writers)};
 act({size, 24, 80}, W, _Path) -> W;
 act(hangup, W, _Path) -> W;
+act(open, W, _Path) -> W;
 act(Action, _W, Path) -> erlang:error({unexpected_action, Action, lists:reverse(Path)}).
 
 %% The master's checks, as the console's: the next output, or the last one again
@@ -95,6 +97,13 @@ master_takes(N, Bytes, #world{expected = Expected}, Path) ->
                   lists:reverse(Path)}).
 
 %%% Checks
+
+%% The tty names itself again only together with the empty resend of its outstanding
+%% output, never at the timer of an output already taken.
+open_only_with_resend([open, {output, _N, <<>>} | Rest], Path) -> open_only_with_resend(Rest, Path);
+open_only_with_resend([open | _], Path) -> erlang:error({open_without_resend, lists:reverse(Path)});
+open_only_with_resend([_ | Rest], Path) -> open_only_with_resend(Rest, Path);
+open_only_with_resend([], _Path) -> ok.
 
 check_step(W = #world{link = Link, got = Got, written = Written}, Path) ->
     ?assert(erx_tty_link:held(Link) =< 4096, {held, erx_tty_link:held(Link), lists:reverse(Path)}),
@@ -121,6 +130,16 @@ check_drained(#world{writers = Writers, got = Got, written = Written, master_hun
     end.
 
 %%% Single cases the walk does not reach
+
+%% The timer of an outstanding output names the tty again and sends the output again,
+%% empty (docs/design-live.md, "A lost answer does not stop a tty"); the timer of an
+%% output already taken does nothing, so a burst of output is never followed a second
+%% later by a burst of messages to the master.
+resend_timer_test() ->
+    {_, L1} = erx_tty_link:write(w, <<"a">>, erx_tty_link:new()),
+    ?assertMatch({[open, {output, 0, <<>>}, {resend_after, 0}], _}, erx_tty_link:timeout(0, L1)),
+    {[], L2} = erx_tty_link:master({tty_taken, 0}, L1),
+    ?assertMatch({[], _}, erx_tty_link:timeout(0, L2)).
 
 input_and_size_checks_test() ->
     L = erx_tty_link:new(),

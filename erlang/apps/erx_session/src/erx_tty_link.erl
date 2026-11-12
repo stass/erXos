@@ -11,9 +11,15 @@ erx_session_tty carries the actions out.
 
 The tty has one output outstanding at a time, numbered from 0. It sends
 the bytes once, as `{tty_output, N, Bytes}`, and asks for a timer; when
-the timer for N fires with N still outstanding, it sends
-`{tty_output, N, <<>>}` and asks again, so a lost `{tty_taken, N}` is
-asked for once a second until it comes. A `{tty_taken, N}` for any other
+the timer for N fires with N still outstanding, it names itself again
+with `{tty_open, Tty}`, sends `{tty_output, N, <<>>}` and asks again, so a
+lost `{tty_taken, N}` is asked for once a second until it comes. The timer
+of an output already taken does nothing. So while an output is outstanding
+the tty sends its master two messages a second, and a new output follows only
+the master's `{tty_taken, N}`, which the console sends once it has acted on
+everything the tty sent before (erx_console, `erx_tty_message`): a new output
+never meets the console facet's limit in flight filled with the tty's own
+messages, past which the facet would drop it. A `{tty_taken, N}` for any other
 number is a late repeat and is ignored.
 
 It holds at most ?MAX_HELD bytes, the outstanding output among them. A
@@ -50,6 +56,7 @@ table gives; a message that fails it is dropped and counted.
                         | {tty_size, pos_integer(), pos_integer()}
                         | tty_hangup.
 -type action() :: {output, non_neg_integer(), binary()}   % send {tty_output, N, Bytes}
+                | open                                    % send {tty_open, Tty}
                 | {resend_after, non_neg_integer()}       % call timeout(N) in 1 s
                 | {done, writer()}                        % all its bytes are held
                 | {input, binary()}                       % typed input, as it came
@@ -125,10 +132,13 @@ master(tty_hangup, L = #link{waiting = Waiting}) ->
 master(_Other, L) ->
     {[], L}.
 
--doc "The timer for output N has fired: N is sent again, empty, if it is still outstanding.".
+-doc """
+The timer for output N has fired: if N is still outstanding, the tty names
+itself again and sends N again, empty; otherwise nothing.
+""".
 -spec timeout(non_neg_integer(), link()) -> {[action()], link()}.
 timeout(N, L = #link{outstanding = {N, _Size}, hung_up = false}) ->
-    {[{output, N, <<>>}, {resend_after, N}], L};
+    {[open, {output, N, <<>>}, {resend_after, N}], L};
 timeout(_N, L) ->
     {[], L}.
 
