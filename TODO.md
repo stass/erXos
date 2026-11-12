@@ -1769,11 +1769,12 @@ it; git history is the record of completed work.
   follow one rule. The explorer applies a step's copies in that step, so it cannot see this; with
   the fix it keeps each holder's copies pending until a separate install event and checks
   `names_only_live` at the install, which shows the race on the unfixed tree.
-* [Low] session, `erx_pipe:new/1` (`quota`): the `pipes` quota is a parameter, 1,024 lanes unless
-  given, until `erx_policy` sets it with M10's principals. It counts lanes, so a pipe whose write ends
-  have all gone and drained keeps its lock page and its read ends' doorbells outside it, bounded only
-  by its holders' ends; and a quota above 8,192 lanes would let one pipe's read end descriptor
-  outgrow the startup grammar's `writers` list. Settle both when `erx_policy` sets the quota.
+* [Low] session, `erx_pipe:new/1` (`quota`): the `pipes` quota is a parameter, at most and by
+  default `abi/erx_abi.txt`'s `pipes_quota` lanes, until `erx_policy` sets it with M10's principals.
+  It counts lanes, so a pipe whose write ends have all gone and drained keeps its lock page and its
+  read ends' doorbells outside it, bounded only by its holders' ends; and nothing checks that
+  `pipes_quota` stays within the startup grammar's `writers` list (8,192), past which a read end's
+  descriptor would outgrow it. Settle both when `erx_policy` sets the quota.
 * [Low] session, `test/erlang/erx_pipe_explore.erl`: the exploration of `erx_pipe:step/2` is bounded by
   depth, 7 at the landing gate and 8 at `tools/erx check-fuzz`, not run to completion: a complete run
   with a quota of one lane, numbers up to 3 and two read ends did not finish in 3 minutes. A state key
@@ -1844,18 +1845,18 @@ it; git history is the record of completed work.
   put, the whole-record need and the refusal of a record larger than the area.
 * [Low] `abi/erx_abi.txt` (`program_arg`): the generator emits no count, so
   `ERX_PROGRAM_INSTALL_DATA` (`erx_program_core.h`) assumes `doorbell` is the last index.
-* [Medium] liberx program layer, `liberx/program/inbound.h` (`ERX_PROG_REPORT_BYTES`): every frame
-  after the startup message is bounded at 512 bytes by a liberx constant that neither
-  `abi/protocols/prog.txt` nor the design names, and `erx_program:send/2` does not enforce it. A
-  reply to a worker's request (`{erx_prog, 1, Slot, Reply}`), such as `pipe`'s, can carry a read
-  end's descriptor far past it, and the header decision cannot tell a reply from a report. Make
-  the bound a `limit` of the profile, have `send/2` refuse past it with `einval`, and size the
-  executor's copy for replies before workers send requests.
-* [Medium] liberx program layer, `liberx/program/inbound.c` (`erx_prog_report_caps`): which reports
-  carry capabilities is a hand-written `switch` on a `uint16_t`, so a report kind the profile gains
-  falls through to none and its capabilities leak. Generate the per-case capability fields from
-  the profile (`tools/lib/erx/abi_emit_profile.rb`), or have the host test walk the profile's
-  report cases and fail on one it does not know.
+* [Medium] ABI generator, `tools/lib/erx/abi_profile.rb` (`capability?`): the generated walk that
+  names a report's capabilities, which the executor closes for an end it no longer holds, knows a
+  capability only as an integer kind written `except @cap_null`. A capability field of another
+  kind (one that may be null, or `except 0`) is neither walked nor refused, and leaks. Make a
+  capability a declared property of a kind that the walk reads, or refuse an unmarked `u64` field
+  in a union a frame to the program carries.
+* [Medium] liberx program layer, `liberx/program/inbound.c` (`ERX_PROG_REPORT_MAX`): every frame
+  after the startup message is bounded by `prog.txt`'s `prog_report_max`, 512 bytes, which
+  `erx_program:send/2` does not enforce. A reply to a worker's request
+  (`{erx_prog, 1, Slot, Reply}`), such as `pipe`'s, can carry a read end's descriptor far past it,
+  and the header decision cannot tell a reply from a report. Have `send/2` refuse past it with
+  `einval`, and size the executor's copy for replies before workers send requests.
 * [Medium] docs/design-pipes.md ("Ends and their holders", "The program protocol"): the design
   does not say what a program does with a report for an end it no longer holds, though a
   `{pipe_writer}` can cross the program's `{closed}`. `liberx` closes the capabilities the report
@@ -1871,14 +1872,8 @@ it; git history is the record of completed work.
 * [Low] QEMU harness, `tools/lib/erx/programs.rb`: the inbound decision
   (`liberx/program/inbound.c`) is tested on the host only; no `programs` case sends a program a
   malformed later frame (a non-frame record, a nonzero zero word, a report past
-  `ERX_PROG_REPORT_BYTES` or one the profile refuses) and expects 127. Add one when the session can
+  `ERX_PROG_REPORT_MAX` or one the profile refuses) and expects 127. Add one when the session can
   write a raw record to a program, or once `erx_prog_handler` sends reports.
-* [Low] erx_program driver, `erx_program_drv.c` (`DRAINED_MAX`): a program's credit holds at most
-  1024 due `{drained}` notices, a fixed stand-in for the session's `pipes` quota that
-  docs/design-programs.md ("Credit") names as the bound, since no session has a `pipes` quota yet.
-  A send past it is refused with `einval`, a startup message naming more than 1024 gone writers
-  among its read ends included, though the grammar admits one. Pass the session's quota to the port
-  at its open once `erx_policy` has one.
 * [Low] erx_program driver, `erx_program_drv.c`: a frame delivered as `{erx_channel, Port, Frame}`
   is queued with `erts_queue_message` and no `trace_port_send`, so a port traced for sends does not
   show it; trace it as `driver_output_term` does. `end_feed`'s answer to the owner picks the action
@@ -2998,7 +2993,6 @@ it; git history is the record of completed work.
 * [Medium] tooling, configured-domain ids in the QEMU harnesses: `MediumBoot` (`NETWORK_ID`, `STORAGE_ID`, `DOMAIN_IDS`, `FREE_ID` and the catalogue rows of `DlControl` and `DlDevices`), `SystemDomain`, `SessionDomain::FIRST_SESSION`, `Regrant` and `DeviceGive::RESTART_ID` each re-derive by hand that configured domains boot in name order and that each later create spends an id, so adding a configured domain edits six files. Derive every id and row from one helper that sorts the manifest's configured domain names with the cell's added rows.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: a domain whose pid died and whose stop the library refused never ends, so `ending/2` counts it for good and every later create and session start of its principal waits the full `release_wait` (10 s); record the refused stop and leave such a domain out of the hold.
 * [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: a login's session that has had the line and keeps ending (a shell that dies at its first input) is started again without limit, a domain build each round; throttle it as FreeBSD's init throttles a getty that keeps failing, and say so on the line.
-* [High] console, `erlang/apps/erx/src/erx_console.erl` and `erlang/apps/erx_uart/src/erx_pl011.erl`, 4-CPU HVF guests: whole writes to the line are lost before they reach the UART. In the programs suite's 4-CPU cell, about one boot in five shows an empty line where the Erlang shell's answer to `owner_gone` belongs, then the next prompt. With the case bracketed by `erlang:display/1` markers, the closing marker shows that the evaluation returned the right answer. The opening marker, kernel log record #9, is missing from the serial log, though record #10 arrives. So two writers lose a write in the same second: the session's tty, whose output goes through the console facet to `erx_console`, and the kernel log that `erx_console` polls. Both go into the system domain's console and `erx_pl011`, and both cross from another space through shared memory. Suspects: an ordering bug in the lane or debug-log ring on a weakly ordered host, `erx_tty_link`'s empty resend after a lost `{tty_output}` (which `erx_tty_master` takes as the bytes lost), or the PL011's transmit FIFO under the kernel's own writes. It is not seen in 1-CPU cells or in 40 repetitions of the case in one boot. Next: read the console facet's `dropped` count (`erx_facet:info/1`), the system domain's per-connection peer counters (`erx_connection_counters_t`, docs/design-domains.md) and `erx_log:take/0`'s lost count in a failing boot. Serial logs and reproducer loops: `~/erxos-history/flakes/owner-gone-2026-11-12/` at erxos-history 1d4305f (`suite-boot8-serial.log:158-163`, with markers; `repro4-run3-serial.log:162-165`; `flakes_suite_loop.rb`).
 * [Medium] session, `erlang/apps/erx_session/src/erx_session_sup.erl`: a restarted tty relay names itself with a new pid, which the console refuses (`tty_opened/4`), so the session is cut off from its line while its domain lives and holds the principal's one domain; make the relay's end end the session domain, or accept a new tty of the same domain once the old one is dead.
 * [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: the login's life (`none`, `starting`, `{started, D}`, `{connected, D}`) moves in eight functions on five kinds of event, and only the session_domain QEMU suite covers it; make it a pure `login_next(Event, Login) -> {Login, Actions}` tested over every event in every state.
 * [Low] runtime, `erlang/apps/erx/src/erx_console.erl`: a session whose console facet ends before its domain is dropped as ended, and the login started again is refused while the old domain lives; take only the domain pid's end as the session's, or stop the domain when its facet ends.

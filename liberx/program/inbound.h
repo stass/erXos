@@ -15,10 +15,13 @@
  * the record whole, and then plans the start-up (startup.h) or reads the
  * report with erx_prog_report_read.  Anything else, a record of another
  * kind, a header with a nonzero zero word, an empty record, a startup
- * message past ERX_PROG_FRAME_MAX, a report past ERX_PROG_REPORT_BYTES or a
+ * message past ERX_PROG_FRAME_MAX, a report past ERX_PROG_REPORT_MAX or a
  * report the profile refuses, ends the program with ERX_PROG_STATUS_REFUSED.
  *
  * Like startup.c, this reads only its arguments: no kernel call, no page.
+ * Both bounds are abi/protocols/prog.txt's limits, and the capabilities a
+ * report installs, which the executor closes for an end the program no
+ * longer holds, are named by the profile's generated erx_prog_report_caps.
  */
 
 #include <stdbool.h>
@@ -27,14 +30,6 @@
 
 #include <erx/abi.h>
 #include <erx/prog_profile.h>
-
-/*
- * The bytes the executor keeps for one report.  The profile's largest
- * report, {erx_prog, 1, {pipe_writer, ...}} with three capabilities as
- * 64-bit integers, takes about 120 bytes of ETF; a report past this bound
- * is not one the handler writes.
- */
-#define ERX_PROG_REPORT_BYTES	512
 
 /* What the executor does with a record whose header the inbound lane opened. */
 typedef enum erx_prog_inbound {
@@ -58,17 +53,5 @@ erx_prog_inbound_t erx_prog_inbound_open(bool started, uint32_t kind,
  */
 bool	erx_prog_report_read(const uint8_t *frame, size_t len, void *scratch,
 	    size_t scratch_len, erx_prog_report_t *report);
-
-/* The most capabilities one report carries: pipe_writer's ring, reader page and doorbell. */
-#define ERX_PROG_REPORT_CAPS	3
-
-/*
- * The capability values a report installed in the program's table, into
- * caps[0, n); returns n.  A report for an end the program no longer holds
- * closes each of them, so a report that comes after the end's close leaks
- * nothing.
- */
-size_t	erx_prog_report_caps(const erx_prog_report_t *report,
-	    uint64_t caps[ERX_PROG_REPORT_CAPS]);
 
 #endif /* !LIBERX_PROGRAM_INBOUND_H */

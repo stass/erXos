@@ -42,6 +42,7 @@ class ProgProfileDeclarationsTest < Minitest::Test
     "  integer probe u16 in 0 1023 refers fds unique\n  tuple probe2 probe\n  frame probe from erx_probe probe2\n" =>
       /a kind is unique or refers, not both/,
     "  union probe\n    case a =b" => /a case without fields has no literal atoms/,
+    "  union probe\n    case a writer_state\n  frame probe to erx_probe probe\n" => /union probe's case a holds a capability inside writer_state/,
     "#{TOTALS}\n  tuple probe #{(1..9).map { |n| "x#{n}" }.join(' ')}" => /at most 8 totals/
   }.freeze
 

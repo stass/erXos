@@ -31,7 +31,8 @@ class WebPresentTest < Minitest::Test
 
   def corpus
     Dir.mktmpdir('erx-web-present') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *SOURCES, stdin_data: '')
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror',
+                                       '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'), '-o', work, *SOURCES, stdin_data: '')
       assert status.success?, output
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-s', 'erx_web_present_corpus', 'run', chdir: work, stdin_data: '')

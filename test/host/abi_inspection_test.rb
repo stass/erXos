@@ -16,6 +16,7 @@ class AbiInspectionTest < Minitest::Test
     abi 1
     limit width u32 40
     limit inspect_reply_max u32 262144
+    limit inspect_path_max u32 16
     status ok 0 "success"
     status inval -1 "invalid argument"
     right read 0 "read"

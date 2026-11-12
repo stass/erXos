@@ -33,6 +33,8 @@ _Static_assert(ERX_PIPE_CONTROL_MAX % ERX_PIPE_TICKET == 0,
     "a control record holds whole tickets");
 _Static_assert(ERX_PIPE_READERS_MAX <= 64,
     "one bit per read end in a 64-bit word");
+_Static_assert(ERX_PIPE_RIX_MAX == ERX_PIPE_READERS_MAX - 1,
+    "a read end's largest index is one below the read ends a pipe may have");
 
 static bool pipe_aligned(uint64_t);
 static bool pipe_len_sound(uint32_t, uint32_t);

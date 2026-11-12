@@ -28,7 +28,7 @@ only this runtime knows, its processes and the paths below them.
   (erx_inspect_worker), not the agent, gives the rest and applies the
   asker's scope.
 * It takes questions one at a time, in arrival order. Its listing is the
-  inspector's page: at most 1,000 entries, and an encoding within
+  inspector's page: at most `inspect_page_max` entries, and an encoding within
   inspect_reply_max. A question whose collector
   raises is answered `{error, failed}`, so no question ends the agent.
 * The domain record keeps the pid the one ready report named, for the

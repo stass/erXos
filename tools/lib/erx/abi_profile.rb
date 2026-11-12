@@ -67,6 +67,7 @@ module Erx
           unique = kinds.select { |_, kind| kind[:unique] }.keys
           declaration.fail!('a protocol has at most one unique kind') if unique.size > 1
           declaration.fail!("a protocol has at most #{TOTALS_MAX} totals") if totals.size > TOTALS_MAX
+          capabilities = capability_fields(declaration, kinds, frames)
           refers = kinds.select { |_, kind| kind[:refers] }.map do |kind_name, kind|
             refers_rule(declaration, kind_name, kind, kinds, frames)
           end
@@ -74,7 +75,49 @@ module Erx
             kinds: kinds.freeze, totals: totals.freeze,
             frames: frames.map { |frame| frame.except(:line).freeze }.freeze,
             frame_max: { value: constants.fetch(frame_limit).value, constant: frame_limit }.freeze,
-            depth: depth, unique: unique.first, refers: refers.freeze, cap_null: constants['cap_null']&.value }.freeze
+            depth: depth, unique: unique.first, refers: refers.freeze, cap_null: constants['cap_null']&.value,
+            capabilities: capabilities }.freeze
+        end
+
+        # A capability is a value of an integer kind that excludes cap_null, as
+        # prog.txt's cap does.
+        def capability?(kinds, name)
+          kinds.dig(name, :form) == 'integer' && kinds.dig(name, :except, :constant) == 'cap_null'
+        end
+
+        # Whether a value of kind name holds a capability anywhere within it.
+        def holds_capability?(kinds, name)
+          return true if capability?(kinds, name)
+
+          kind = kinds[name]
+          return false unless kind
+
+          inner = [*kind.fetch(:elements, []), kind[:element], *kind.fetch(:fields, []).map(&:last),
+                   *kind.fetch(:cases, []).flat_map { |item| item.fetch(:fields) }].compact
+          inner.any? { |item| holds_capability?(kinds, item) }
+        end
+
+        # For each union a frame to the program carries whose cases hold
+        # capabilities, each case's C name and the positions of its fields that
+        # are capabilities, which the C emitter walks to name what a value
+        # installed. A frame from the program installs nothing. The walk
+        # reads a case's own fields only, so a case holding a capability inside
+        # another kind is refused rather than left for the walk to miss.
+        def capability_fields(declaration, kinds, frames)
+          to_program = frames.select { |frame| frame.fetch(:direction) == 'to' }
+          to_program.map { |frame| frame.fetch(:kind) }.uniq.filter_map do |union|
+            next unless kinds.dig(union, :form) == 'union'
+
+            cases = kinds.fetch(union).fetch(:cases).to_h do |item|
+              fields = item.fetch(:fields)
+              nested = fields.find { |field| !capability?(kinds, field) && holds_capability?(kinds, field) }
+              if nested
+                declaration.fail!("union #{union}'s case #{item.fetch(:c_name)} holds a capability inside #{nested}")
+              end
+              [item.fetch(:c_name), fields.each_index.select { |at| capability?(kinds, fields[at]) }.freeze]
+            end
+            [union, cases.freeze] if cases.values.any?(&:any?)
+          end.to_h.freeze
         end
 
         def nine_p_kinds?(kinds)

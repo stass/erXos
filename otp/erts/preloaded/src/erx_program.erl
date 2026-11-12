@@ -27,17 +27,10 @@ frame it sends gives the program's credit, and reads how each step ended.
 
 -export([start/1, send/2, stop/3]).
 
-%% The driver's port_control commands: how the start ended, followed by the data
-%% area's value; a frame to write; the first thread's start; the anchor's stop.
--define(CONTROL_STARTED, 1).
--define(CONTROL_SEND, 2).
--define(CONTROL_RUN, 3).
--define(CONTROL_STOP, 4).
-%% CONTROL_SEND's reply slot for a frame that answers no request, and each
-%% grant's kind (erx_program_drv.c, send_parse).
--define(NO_REPLY, 255).
--define(GRANT_CLOSED, 1).
--define(GRANT_DRAINED, 2).
+%% The driver's port_control commands (?ERX_PROGRAM_CONTROL_*), the reply slot
+%% of a send that answers no request (?ERX_PROGRAM_SEND_NO_REPLY) and each
+%% grant's kind (?ERX_PROGRAM_GRANT_*) are abi/erx_abi.txt's.
+-include("generated/erx_abi.hrl").
 -define(IS_NUMBER(N), (is_integer(N) andalso N >= 1 andalso N =< 16#ffffffff)).
 %% A program's budget, in pages, when the spec names none.
 -define(DEFAULT_GUARANTEE, 0).
@@ -112,7 +105,7 @@ open(Spec, Image, Pid, Guarantee, Cap, Slots) ->
                                 integer_to_binary(Guarantee), $\s, integer_to_binary(Cap), $\s,
                                 integer_to_binary(Slots), $\s, Image]),
     Port = open_port({spawn_driver, Command}, [binary]),
-    case port_control(Port, ?CONTROL_STARTED, []) of
+    case port_control(Port, ?ERX_PROGRAM_CONTROL_STARTED, []) of
         <<"ok", Data:64>> ->
             case frame(Spec, Data, Slots) of
                 {ok, Frame} -> run(Port, Frame);
@@ -130,7 +123,7 @@ open(Spec, Image, Pid, Guarantee, Cap, Slots) ->
 run(Port, Frame) ->
     case send(Port, Frame) of
         ok ->
-            case port_control(Port, ?CONTROL_RUN, []) of
+            case port_control(Port, ?ERX_PROGRAM_CONTROL_RUN, []) of
                 <<"ok">> -> Port;
                 Refused -> refused(Port, Refused)
             end;
@@ -162,7 +155,7 @@ frame's form.
 send(Port, Frame) ->
     {Reply, Grants} = grants(Frame),
     Payload = [Reply, <<(length(Grants)):32>>, [grant(G) || G <- Grants], term_to_binary(Frame)],
-    case port_control(Port, ?CONTROL_SEND, Payload) of
+    case port_control(Port, ?ERX_PROGRAM_CONTROL_SEND, Payload) of
         <<"ok">> -> ok;
         <<"busy">> -> busy;
         <<$e, _/binary>> = Status -> {error, binary_to_atom(Status)}
@@ -176,13 +169,13 @@ handler stops a program whose frame its grammar refuses with `256 + SIGSYS`.
 """.
 -spec stop(port(), anchor, 0..16#ffffffff) -> ok | {error, atom()}.
 stop(Port, anchor, Status) when is_integer(Status), Status >= 0, Status =< 16#ffffffff ->
-    case port_control(Port, ?CONTROL_STOP, <<Status:64>>) of
+    case port_control(Port, ?ERX_PROGRAM_CONTROL_STOP, <<Status:64>>) of
         <<"ok">> -> ok;
         <<$e, _/binary>> = Refused -> {error, binary_to_atom(Refused)}
     end.
 
 %% What a frame gives the program's credit (docs/design-programs.md, Credit): the
-%% reply slot it answers, ?NO_REPLY for none, and the notices it makes due, a
+%% reply slot it answers, ?ERX_PROGRAM_SEND_NO_REPLY for none, and the notices it makes due, a
 %% {closed, Pipe, End} for each pipe end it gives the program and a {drained,
 %% Pipe, End, Writer} for each writer it names gone to a read end. Each kind of
 %% descriptor a startup message carries and each kind of report has a clause of
@@ -192,10 +185,10 @@ stop(Port, anchor, Status) when is_integer(Status), Status >= 0, Status =< 16#ff
 %% walks the protocol for every kind's. A term of no frame to the program fails
 %% here too.
 grants({erx_start, _, #{fds := Fds}}) ->
-    {?NO_REPLY, lists:flatmap(fun({_Fd, Descriptor}) -> descriptor_grants(Descriptor) end, Fds)};
+    {?ERX_PROGRAM_SEND_NO_REPLY, lists:flatmap(fun({_Fd, Descriptor}) -> descriptor_grants(Descriptor) end, Fds)};
 grants({erx_prog, _, Report}) ->
-    {?NO_REPLY, report_grants(Report)};
-grants({erx_prog, _, Slot, _Reply}) when is_integer(Slot), Slot >= 0, Slot < ?NO_REPLY ->
+    {?ERX_PROGRAM_SEND_NO_REPLY, report_grants(Report)};
+grants({erx_prog, _, Slot, _Reply}) when is_integer(Slot), Slot >= 0, Slot < ?ERX_PROGRAM_SEND_NO_REPLY ->
     {Slot, []}.
 
 %% A descriptor's grants: each pipe end it gives, and each writer of a read end
@@ -238,9 +231,9 @@ gone_writers(Pipe, End, #{writers := Writers}) ->
 %% A grant as the driver reads it. A number outside 1..2^32-1, which the grammar
 %% refuses, fails here rather than be cut to 32 bits.
 grant({closed, Pipe, End}) when ?IS_NUMBER(Pipe), ?IS_NUMBER(End) ->
-    <<?GRANT_CLOSED, Pipe:32, End:32, 0:32>>;
+    <<?ERX_PROGRAM_GRANT_CLOSED, Pipe:32, End:32, 0:32>>;
 grant({drained, Pipe, End, Writer}) when ?IS_NUMBER(Pipe), ?IS_NUMBER(End), ?IS_NUMBER(Writer) ->
-    <<?GRANT_DRAINED, Pipe:32, End:32, Writer:32>>.
+    <<?ERX_PROGRAM_GRANT_DRAINED, Pipe:32, End:32, Writer:32>>.
 
 %% A refusal is "e" and the status's name, so the whole answer is the status's
 %% atom: einval, eagain, enomem.

@@ -290,6 +290,8 @@ copies_carry_the_rights_their_end_needs_test() ->
 
 options_are_checked_test() ->
     ?assertError(badarg, erx_pipe:new(#{quota => 0})),
+    %% The program port sizes a program's credit for at most pipes_quota lanes.
+    ?assertError(badarg, erx_pipe:new(#{quota => ?ERX_PIPES_QUOTA + 1})),
     ?assertError(badarg, erx_pipe:new(#{number_max => 1})),
     ?assertError(badarg, erx_pipe:new(#{number_max => 1 bsl 32})),
     ?assertError(badarg, erx_pipe:new(#{readers_max => 65})),

@@ -77,8 +77,8 @@ class ErxInspectorTest < Minitest::Test
               to: '    case is_function(IsPath) andalso Id =/= Attrs of' + "\n" + '        true -> _ = fun runtime/2, validated(Record, Domain);',
               tests: 'erx_inspect_worker_tests', caught_by: 'an_answer_must_agree_with_its_question_test'),
     Fault.new(name: 'the byte cut removed', file: INSPECTOR,
-              from: 'case Count < ?PAGE andalso Bytes + Size =< ?ERX_INSPECT_REPLY_MAX of',
-              to: 'case Count < ?PAGE andalso Bytes + Size > 0 of',
+              from: 'case Count < ?ERX_INSPECT_PAGE_MAX andalso Bytes + Size =< ?ERX_INSPECT_REPLY_MAX of',
+              to: 'case Count < ?ERX_INSPECT_PAGE_MAX andalso Bytes + Size > 0 of',
               tests: 'erx_inspect_worker_tests', caught_by: 'a_listing_is_cut_by_bytes_test'),
     Fault.new(name: 'an admission path that takes a scope from the options', file: QUERY,
               from: 'map_size(maps:without([offset, limit], Options)) =:= 0 andalso',
@@ -95,7 +95,7 @@ class ErxInspectorTest < Minitest::Test
               to: '{ok, Query} -> {reply, erx_inspect_worker:call(Query, Scope, Options), State};',
               tests: 'erx_inspect_facet_tests', caught_by: 'a_stalled_agent_holds_up_no_other_query_test'),
     Fault.new(name: 'the bound on a path\'s length removed', file: QUERY,
-              from: 'path([Segment | Rest], Count, Literals) when Count < ?MAX_SEGMENTS ->',
+              from: 'path([Segment | Rest], Count, Literals) when Count < ?ERX_INSPECT_PATH_MAX ->',
               to: 'path([Segment | Rest], Count, Literals) when is_integer(Count) ->',
               tests: 'erx_inspect_facet_tests', caught_by: 'decoder_refuses_everything_else_test')
   ].freeze

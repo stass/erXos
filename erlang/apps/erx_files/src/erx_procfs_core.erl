@@ -39,14 +39,15 @@ every decision is tested with made-up answers.
          marker/2, cut/1]).
 -export_type([node_/0, entry/0]).
 
+%% ?ERX_INSPECT_NAME_MAX, the longest entry name read, is the inspect
+%% interface's (abi/services/inspect.txt).
+-include("generated/erx_abi.hrl").
+
 -type path() :: [erx_schema:segment()].
 -type node_() :: {dir, path()} | {status, path()} | {lines, path()}
                | {partial, path()} | {unknown, path()}.
 -type entry() :: {binary(), node_()}.
 
-%% The longest entry name read: a text segment of 255 bytes, each encoded
-%% as three.
--define(MAX_NAME, 765).
 %% The most bytes of one status file (design-live.md, Snapshots).
 -define(MAX_RECORD, 65536).
 -define(CUT_LINE, <<"[partial]\n">>).
@@ -71,7 +72,7 @@ declared path's segment. The name is untrusted: it is bounded before it
 is read, and no atom is made.
 """.
 -spec child(path(), binary()) -> {ok, path()} | error.
-child(Path, Name) when is_binary(Name), byte_size(Name) > 0, byte_size(Name) =< ?MAX_NAME ->
+child(Path, Name) when is_binary(Name), byte_size(Name) > 0, byte_size(Name) =< ?ERX_INSPECT_NAME_MAX ->
     case binary:match(Name, <<"/">>) of
         nomatch -> resolved(length(Path) + 1, erx_schema:resolve_text(text(Path, Name)));
         _ -> error

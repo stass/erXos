@@ -28,3 +28,12 @@ limit inspect_message_heap_min u32 131072
 limit inspect_worker_heap u32 2097152
 limit inspect_query_max u32 5000
 limit inspect_agent_wait u32 500
+# A query's bounds (docs/design-live.md, "The inspect service", Bounds), which
+# erx_inspect_query holds a request to: a path of at most inspect_path_max
+# segments; a text segment of at most inspect_name_max bytes, the longest
+# encoded entry name (255 bytes of a name, each encoded as three), which /proc's
+# names share; and a listing's page, the most entries one listing gives and
+# the largest limit a request may ask for, of inspect_page_max.
+limit inspect_path_max u32 16
+limit inspect_name_max u32 765
+limit inspect_page_max u32 1000

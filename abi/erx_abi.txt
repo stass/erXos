@@ -211,6 +211,23 @@ enum program_arg u32
 # sides with it and liberx maps them with it, so neither reads it from the
 # other's pages.
 limit program_lane u32 16384
+# The program port's control commands, from erx_program.erl to
+# erx_program_drv.c (docs/design-runtime.md#programs-as-ports): how the
+# start ended, a frame to write, the first thread's start, the anchor's
+# stop.
+enum program_control u8
+  value started 1
+  value send 2
+  value run 3
+  value stop 4
+# The kind of each grant a send's payload carries: a {closed} or a
+# {drained} notice the frame makes due (docs/design-programs.md#the-program-protocol,
+# Credit). A send's reply slot is program_send_no_reply for a frame that
+# answers no request.
+enum program_grant u8
+  value closed 1
+  value drained 2
+limit program_send_no_reply u8 255
 # The fault table: the signal whose number, added to ERX_EXIT_SIGNAL, a
 # program's space stops with when one of its threads faults with each
 # kind. Every fault kind but exit, which marks a space's exit record, has
@@ -373,6 +390,16 @@ limit pipe_buf u32 4096
 limit pipe_ticket u32 8
 limit pipe_control_max u32 128
 limit pipe_readers_max u32 64
+# A read end's largest index, pipe_readers_max - 1, which the program
+# protocol's read ends name (protocols/prog.txt); liberx/erx_pipe_check.c
+# fails to build unless the two agree.
+limit pipe_rix_max u32 63
+# A session's pipes quota: the most lanes its pipes hold at once
+# (docs/design-pipes.md, Limits). The pipe server holds a session to it,
+# and the program port sizes a program's credit for {drained} notices by
+# it, since the gone writers of the read ends a program holds are lanes
+# of its session's pipes (docs/design-programs.md, Credit).
+limit pipes_quota u32 1024
 limit pipe_none u32 0
 limit pipe_ring_first u32 65536
 limit pipe_ring_next u32 16384

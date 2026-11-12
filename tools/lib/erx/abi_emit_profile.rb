@@ -14,7 +14,11 @@ module Erx
     # each list, and liberx/generated/P_profile.c with the table, whose
     # offsets are the compiler's own offsetof, and static asserts that the C
     # check's fixed bounds hold it. A kind's index in the table is its index in
-    # the protocol's declarations, then the built-in kinds it uses.
+    # the protocol's declarations, then the built-in kinds it uses. For each
+    # union a frame carries whose cases hold capabilities, it also emits
+    # P_UNION_CAPS, the most one case holds, and P_UNION_caps, the walk that
+    # names a value's capabilities, so a case the protocol gains is walked
+    # without a hand-written switch to forget it.
     class ProfileEmitter
       INTEGER_TYPES = { 'u8' => 'uint8_t', 'u16' => 'uint16_t', 'u32' => 'uint32_t', 'u64' => 'uint64_t' }.freeze
       BASE_MAX = { 'u8' => 0xff, 'u16' => 0xffff, 'u32' => 0xffff_ffff, 'u64' => 0xffff_ffff_ffff_ffff }.freeze
@@ -45,14 +49,14 @@ module Erx
         [banner,
          '', "#ifndef #{guard}", "#define #{guard}", '',
          "/* The #{@protocol.fetch(:name)} frame profile's C check (docs/design-abi.md#program-protocol). */",
-         '', '#include <erx/profile.h>', '', enums, types, prototypes, '', "#endif /* !#{guard} */", ''].join("\n")
+         '', '#include <erx/profile.h>', '', enums, types, prototypes, cap_prototypes, '', "#endif /* !#{guard} */", ''].join("\n")
       end
 
       def source
         [banner,
          '', '#include <stddef.h>', '#include <stdint.h>', '', "#include <erx/#{short}_profile.h>", '',
          values_tables, fields_tables, cases_tables, kinds_table, names_table, rules_tables, signals_table,
-         frames_table, profile, bounds, functions].join("\n")
+         frames_table, profile, bounds, functions, cap_functions].join("\n")
       end
 
       private
@@ -343,6 +347,45 @@ module Erx
            assertion("offsetof(#{type}, view) == 0 &&\n    sizeof(#{type}) == sizeof(erx_profile_list_t)",
                      "#{type} is its view alone")
          end, ''].join("\n")
+      end
+
+      # Each union a frame carries whose cases hold capabilities, with each case
+      # and the C members of its capabilities, from the positions the profile's
+      # validation found (Protocols::Profile.capability_fields).
+      def capability_walks
+        @protocol.fetch(:capabilities).map do |name, positions|
+          cases = @kinds.fetch(name).fetch(:cases).map do |item|
+            members = member_names(item.fetch(:fields))
+            [item, positions.fetch(item.fetch(:c_name)).map { |at| members.fetch(at) }]
+          end
+          [name, cases]
+        end
+      end
+
+      def caps_max(name) = "#{prefix}_#{name}_caps".upcase
+
+      def cap_prototypes
+        capability_walks.map do |name, cases|
+          most = cases.map { |_, members| members.size }.max
+          "\n/* The most capabilities one #{name} holds, over its cases. */\n" \
+            "#define\t#{caps_max(name)}\t#{most}\n" \
+            "/* Names the capabilities #{name} holds, into caps[0, n), in its case's order; returns n. */\n" \
+            "size_t\t#{prefix}_#{name}_caps(const #{c_type(name)} *#{name},\n\t    uint64_t caps[#{caps_max(name)}]);"
+        end.join("\n")
+      end
+
+      def cap_functions
+        capability_walks.map do |name, cases|
+          holding, none = cases.partition { |_, members| members.any? }
+          arms = holding.map do |item, members|
+            stores = members.each_with_index.map { |member, at| "\t\tcaps[#{at}] = #{name}->u.#{item.fetch(:c_name)}.#{member};" }
+            "\tcase #{enum_name(name, item.fetch(:atoms))}:\n#{stores.join("\n")}\n\t\treturn (#{members.size});"
+          end
+          empty = none.map { |item, _| "\tcase #{enum_name(name, item.fetch(:atoms))}:" }
+          arms << "#{empty.join("\n")}\n\t\treturn (0);" unless empty.empty?
+          "size_t\n#{prefix}_#{name}_caps(const #{c_type(name)} *#{name}, uint64_t caps[#{caps_max(name)}])\n{\n" \
+            "\tswitch (#{name}->which) {\n#{arms.join("\n")}\n\t}\n\treturn (0);\n}\n"
+        end.join("\n")
       end
 
       def assertion(condition, message) = "_Static_assert(#{condition},\n    \"#{message}\");"

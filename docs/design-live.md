@@ -1546,7 +1546,8 @@ that is a literal of a path `erx_schema` declares, an integer below
 2^64, a `proc_id()` of three integers each below 2^32, or a binary of
 at most 765 bytes, the longest encoded entry name; and options holding at most
 `offset`, a sequence number below 2^64, and `limit`, a page of 1 to
-1,000 (`erx:inspect/2`'s `timeout` is the caller's own wait and is not sent).
+1,000 (`erx:inspect/2`'s `timeout` is the caller's own wait and is not sent); the interface declares the three bounds as
+`inspect_path_max`, `inspect_name_max` and `inspect_page_max`.
 The funnel decodes it in safe mode, so it creates no atom, and the
 facet's one decoder, `erx_inspect_query`, a pure function, refuses
 anything else with `{error, badarg}`, a scope or any other key among the

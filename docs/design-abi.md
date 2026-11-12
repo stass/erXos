@@ -1112,7 +1112,7 @@ is refused. A pipe's number, an end's number and a write end's number,
 `pos_integer()` in the programs and pipes designs, are `u32` from 1, as
 the pipe server's C layouts hold them
 ([design-pipes.md](design-pipes.md#the-pipe-servers-records)), and a read
-end's index is 0 to 63; the file's header comment states these readings,
+end's index is 0 to `pipe_rix_max`, one below `pipe_readers_max`; the file's header comment states these readings,
 as `9p.txt`'s does.
 
 Generation fails for a cycle among a protocol's kinds or a nesting
@@ -1141,6 +1141,16 @@ bool	erx_prog_fds_next(erx_prog_fds_iter_t *it,
 	    erx_prog_fd_entry_t *entry);
 const char *erx_prog_kind_name(uint16_t kind);
 ```
+
+For each union a frame to the program carries whose cases hold capabilities, values of
+an integer kind that excludes `cap_null`, it also emits the most
+capabilities one case holds and the walk that names them, for the
+report `ERX_PROG_REPORT_CAPS` and `erx_prog_report_caps`, so the executor
+closes what a report for an end it no longer holds installed without a
+hand-written switch that a new case could miss. A case holding a
+capability inside another kind fails generation, since the walk reads a
+case's own fields only. A report is at most `prog_report_max` bytes,
+the executor's copy of it.
 
 `erx_prog_check_FRAME` walks the frame once with `erx_etf_next`, never
 recursing: its stack is a fixed array of the profile's depth, which the

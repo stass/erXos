@@ -1072,6 +1072,15 @@ module Erx
         require_relative 'abi_inspection_bounds'
         reply_max = constants['inspect_reply_max']&.value ||
                     line.fail!('an inspection schema needs the inspect interface\'s limit inspect_reply_max')
+        # Every declared path must be one a query may name (erx_inspect_query).
+        path_max = constants['inspect_path_max']&.value ||
+                   line.fail!('an inspection schema needs the inspect interface\'s limit inspect_path_max')
+        inspection.paths.each do |path|
+          next unless path.segments.size > path_max
+
+          line.fail!("path [#{InspectionBounds.path_text(path)}] has #{path.segments.size} segments, " \
+                     "past inspect_path_max #{path_max}")
+        end
         InspectionBounds.oversized_records(inspection, reply_max).each do |path, kind, bytes|
           line.fail!("kind #{kind}'s largest record at path [#{InspectionBounds.path_text(path)}] is #{bytes} bytes, " \
                      "past inspect_reply_max #{reply_max}")

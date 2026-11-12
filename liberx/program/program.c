@@ -67,7 +67,7 @@ static uint8_t *record_body;
 static size_t record_len;
 static size_t record_have;
 /* One report at a time, and the profile check's scratch for it, taken before main. */
-static uint8_t report[ERX_PROG_REPORT_BYTES];
+static uint8_t report[ERX_PROG_REPORT_MAX];
 static uint8_t *report_scratch;
 static uint64_t report_scratch_len;
 /* Written by the executor before VERDICT_GO, read by the first thread after it. */
@@ -171,7 +171,7 @@ message_close(void)
 		stop(plan.status);
 	if (erx_prog_fd_setup(plan.fds) != ERX_OK)
 		stop(ERX_PROG_STATUS_REFUSED);
-	report_scratch_len = erx_prog_page_round(erx_prog_scratch_bytes(ERX_PROG_REPORT_BYTES));
+	report_scratch_len = erx_prog_page_round(erx_prog_scratch_bytes(ERX_PROG_REPORT_MAX));
 	report_scratch = erx_prog_pages_take(report_scratch_len);
 	if (report_scratch == NULL)
 		stop(ERX_PROG_STATUS_REFUSED);

@@ -64,7 +64,7 @@ start_link() ->
 -doc """
 Starts the pipe server with options: `nif`, the module of the pipe NIF
 (erx_pipe_nif unless given, a fake in the tests), and `quota`, the
-session's `pipes` quota of lanes, which erx_pipe:new/1 defaults.
+session's `pipes` quota of lanes, which erx_pipe:new/1 defaults and bounds.
 """.
 -spec start_link(#{nif => module(), quota => pos_integer()}) -> gen_server:start_ret().
 start_link(Opts) ->

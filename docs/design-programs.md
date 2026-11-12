@@ -719,7 +719,7 @@ no notice: the end, which outlives it, still owes it.
 only within the program's credit, which it keeps from the frames it
 writes and reads and spends as it parses
 ([design-runtime.md](design-runtime.md#programs-as-ports)): a slot is
-busy from the request the driver takes on it, delivered or not, until the driver takes
+busy from the request the driver delivers on it until the driver takes
 the reply on it; a `{closed, Pipe, End}` is due once for each pipe end
 that a frame it wrote gave the program, in a startup message, a `pipe`
 reply or a redemption's reply; and a `{drained, Pipe, End, Writer}` is
@@ -734,7 +734,8 @@ the `{closed}` notices one frame makes due and those outstanding are each at
 most two for each descriptor, twice `prog_fds_max` in all, which every
 startup message fits; the `{drained}` ones outstanding are bounded by the gone
 writers of the read ends the program holds, which the session's `pipes` quota
-and the read-end bound limit. A send that would pass either bound is the
+and the read-end bound limit; the driver keeps room for `pipes_quota`
+(`abi/erx_abi.txt`), which no session's quota passes. A send that would pass either bound is the
 session's bug, refused whole with `einval`. A request on a busy slot,
 and a notice that is not due, a repeated one included, are frames
 outside the grammar and end the program with `SIGSYS`, as a malformed

@@ -77,8 +77,6 @@ that has no collector here is
 -opaque page() :: #{records := [erx_schema:record()], count := non_neg_integer(),
                     bytes := non_neg_integer(), full := boolean()}.
 
-%% The most entries one listing gives: erx_schema's page.
--define(PAGE, 1000).
 %% What an answer {partial, [...]} encodes to beyond its records' own
 %% encodings: the version byte, the tuple, the atom and the list's header
 %% and tail, rounded up. Each record's external_size/1 counts a version
@@ -384,8 +382,8 @@ runtime_domain() ->
         _ -> erx_kernel_records:system_domain()
     end.
 
-first_page(Items) when length(Items) =< ?PAGE -> {ok, Items};
-first_page(Items) -> {partial, lists:sublist(Items, ?PAGE)}.
+first_page(Items) when length(Items) =< ?ERX_INSPECT_PAGE_MAX -> {ok, Items};
+first_page(Items) -> {partial, lists:sublist(Items, ?ERX_INSPECT_PAGE_MAX)}.
 
 %%% A listing's page: the inspector's rules of cutting (docs/design-live.md,
 %%% "Bounds"), shared by this runtime's listings, a domain's agent and the
@@ -397,7 +395,7 @@ page() ->
     #{records => [], count => 0, bytes => ?ANSWER_OVERHEAD, full => false}.
 
 -doc """
-Page with Records added in order while each fits: at most 1,000 entries,
+Page with Records added in order while each fits: at most `inspect_page_max` entries,
 and an answer whose encoding stays within inspect_reply_max. The first
 record that does not fit fills the page, and it and every record after it
 are dropped, so every entry the page holds is whole.
@@ -409,7 +407,7 @@ page_add(_Records, #{full := true} = Page) ->
     Page;
 page_add([Record | Rest], #{records := Records, count := Count, bytes := Bytes} = Page) ->
     Size = erlang:external_size(Record),
-    case Count < ?PAGE andalso Bytes + Size =< ?ERX_INSPECT_REPLY_MAX of
+    case Count < ?ERX_INSPECT_PAGE_MAX andalso Bytes + Size =< ?ERX_INSPECT_REPLY_MAX of
         true -> page_add(Rest, Page#{records := [Record | Records], count := Count + 1,
                                      bytes := Bytes + Size});
         false -> Page#{full := true}
@@ -418,7 +416,7 @@ page_add([Record | Rest], #{records := Records, count := Count, bytes := Bytes} 
 -doc "Whether Page takes no more entries: one was refused, or it holds a page's count.".
 -spec page_full(page()) -> boolean().
 page_full(#{full := Full, count := Count}) ->
-    Full orelse Count >= ?PAGE.
+    Full orelse Count >= ?ERX_INSPECT_PAGE_MAX.
 
 -doc """
 The listing's answer from Page: its entries in the order they were added,

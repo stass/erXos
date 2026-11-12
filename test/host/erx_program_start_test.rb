@@ -66,7 +66,8 @@ class ErxProgramStartTest < Minitest::Test
 
   def test_the_builder_refuses_before_the_port_opens
     Dir.mktmpdir('erx-program-start-') do |dir|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '+export_all', '+nowarn_export_all', '-o', dir,
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '+export_all', '+nowarn_export_all',
+                                       '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'), '-o', dir,
                                        GRAMMAR, MODULE, stdin_data: '')
       assert status.success?, output
       got = CASES.to_h { |name, (expression, _)| [name, answer(dir, expression)] }

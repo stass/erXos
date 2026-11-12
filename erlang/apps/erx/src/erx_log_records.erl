@@ -22,7 +22,7 @@ the log holds and the read could not show. Lost and unreadable records
 are left out, and the gap in the sequence numbers, which a renderer shows
 as missing, is what says so; no line stands in for them.
 
-A query gives at most a page of entries, erx_schema's 1,000, and makes at
+A query gives at most a page of entries, the inspect interface's `inspect_page_max`, and makes at
 most a page of reads. It ends `ok` at a read that finds nothing past its
 cursor, the log's end, and `partial` when it stops before that: its page
 is full, its reads are spent, or a read after the first is refused. Every
@@ -38,8 +38,8 @@ with made-up reads.
 
 -include("generated/erx_abi.hrl").
 
-%% The most entries, and the most reads, of one query: erx_schema's page.
--define(PAGE, 1000).
+%% The most entries, and the most reads, of one query: the inspect interface's
+%% page, ?ERX_INSPECT_PAGE_MAX.
 -define(U64, 16#ffffffffffffffff).
 
 -type read() :: fun((non_neg_integer()) -> erx_log:lines()).
@@ -69,7 +69,7 @@ record(Offset, Read) when is_integer(Offset), Offset >= 0, Offset =< ?U64 ->
         {error, Status} ->
             {error, refusal(Status)};
         Answer ->
-            case fold(Offset, Answer, Read, ?PAGE, ?PAGE - 1, []) of
+            case fold(Offset, Answer, Read, ?ERX_INSPECT_PAGE_MAX, ?ERX_INSPECT_PAGE_MAX - 1, []) of
                 {ok, Entries} ->
                     {ok, _} = erx_schema:validate_record(#{schema => erx_schema:schema(),
                                                            path => [kernel, log], kind => log, id => log,

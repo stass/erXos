@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
+require_relative '../../tools/lib/erx/generated'
 
 # What each frame erx_program:send/2 writes gives the program's credit
 # (docs/design-programs.md, "Credit"), walked over the program protocol itself
@@ -19,9 +20,12 @@ require_relative '../../tools/lib/erx/abi'
 # grants, so neither side can leave a new kind's notices undue.
 class ErxProgramGrantsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  Erx::Generated.ensure(root: ROOT)
   MODULE = File.join(ROOT, 'otp/erts/preloaded/src/erx_program.erl')
-  # The reply slot send/2 names for a frame that answers no request (erx_program.erl, ?NO_REPLY).
-  NO_REPLY = 255
+  # erx_program.erl's generated/erx_abi.hrl.
+  ABI_INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
+  # The reply slot send/2 names for a frame that answers no request (prog.txt's program_send_no_reply).
+  NO_REPLY = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)).constants.fetch('program_send_no_reply').value
   # The kinds that name a pipe end, directly in a case's fields.
   PIPE_KINDS = %w[pipe_end pipe_id].freeze
   # The unions of the frames to the program that have a case naming a pipe end: a startup
@@ -180,7 +184,8 @@ class ErxProgramGrantsTest < Minitest::Test
       halt().
     ERLANG
     Dir.mktmpdir('erx-program-grants-') do |dir|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '+export_all', '+nowarn_export_all', '-o', dir, MODULE,
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '+export_all', '+nowarn_export_all', '-I', ABI_INCLUDE,
+                                       '-o', dir, MODULE,
                                        stdin_data: '')
       assert status.success?, output
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', dir,

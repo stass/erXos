@@ -32,10 +32,9 @@ creates no atom and walks at most the 16 segments it accepts.
 
 -type query() :: erx_inspect_worker:query().
 
-%% docs/design-live.md, "The inspect service", Bounds.
--define(MAX_SEGMENTS, 16).
--define(MAX_TEXT, 765).
--define(MAX_LIMIT, 1000).
+-include("generated/erx_abi.hrl").
+
+%% docs/design-live.md, "The inspect service", Bounds: abi/services/inspect.txt's limits.
 -define(U32, 16#100000000).
 -define(U64, 16#10000000000000000).
 
@@ -54,10 +53,10 @@ decode({entries, Path}) ->
 decode(_Request) ->
     {error, badarg}.
 
-%% A proper list of at most ?MAX_SEGMENTS segments, walked no further than that.
+%% A proper list of at most ?ERX_INSPECT_PATH_MAX segments, walked no further than that.
 path([], _Count, _Literals) ->
     true;
-path([Segment | Rest], Count, Literals) when Count < ?MAX_SEGMENTS ->
+path([Segment | Rest], Count, Literals) when Count < ?ERX_INSPECT_PATH_MAX ->
     segment(Segment, Literals) andalso path(Rest, Count + 1, Literals);
 path(_Path, _Count, _Literals) ->
     false.
@@ -69,7 +68,7 @@ segment(Integer, _Literals) when is_integer(Integer) ->
 segment({pid, D, N, S}, _Literals) ->
     lists:all(fun(Part) -> is_integer(Part) andalso Part >= 0 andalso Part < ?U32 end, [D, N, S]);
 segment(Text, _Literals) when is_binary(Text) ->
-    byte_size(Text) =< ?MAX_TEXT;
+    byte_size(Text) =< ?ERX_INSPECT_NAME_MAX;
 segment(_Segment, _Literals) ->
     false.
 
@@ -80,10 +79,10 @@ literals() ->
 
 options(Options) when is_map(Options) ->
     map_size(maps:without([offset, limit], Options)) =:= 0 andalso
-        offset(maps:get(offset, Options, 0)) andalso limit(maps:get(limit, Options, ?MAX_LIMIT));
+        offset(maps:get(offset, Options, 0)) andalso limit(maps:get(limit, Options, ?ERX_INSPECT_PAGE_MAX));
 options(_Options) ->
     false.
 
 offset(Offset) -> is_integer(Offset) andalso Offset >= 0 andalso Offset < ?U64.
 
-limit(Limit) -> is_integer(Limit) andalso Limit >= 1 andalso Limit =< ?MAX_LIMIT.
+limit(Limit) -> is_integer(Limit) andalso Limit >= 1 andalso Limit =< ?ERX_INSPECT_PAGE_MAX.

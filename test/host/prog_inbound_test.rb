@@ -6,6 +6,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/generated'
 require_relative '../fixtures/prog_profile_frames'
 
@@ -19,17 +20,19 @@ class ProgInboundTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   INBOUND = 'liberx/program/inbound.c'
-  SOURCES = ['liberx/erx_profile.c', 'liberx/erx_etf.c', 'kernel/crypto/blake3/blake3.c',
-             'kernel/crypto/blake3/blake3_portable.c', 'build/gen/liberx/generated/prog_profile.c',
-             'test/fixtures/prog_inbound_driver.c'].freeze
+  PROFILE = 'build/gen/liberx/generated/prog_profile.c'
+  SOURCES = [INBOUND, PROFILE, 'liberx/erx_profile.c', 'liberx/erx_etf.c', 'kernel/crypto/blake3/blake3.c',
+             'kernel/crypto/blake3/blake3_portable.c', 'test/fixtures/prog_inbound_driver.c'].freeze
   FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
   E = ProgProfileFrames::Etf
 
-  REC_FRAME = 1
-  FRAME_MAX = 196_608
-  REPORT_BYTES = 512
+  # The bounds are abi/protocols/prog.txt's limits, read from the schema the headers come from.
+  LIMITS = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)).constants
+  REC_FRAME = LIMITS.fetch('rec_frame').value
+  FRAME_MAX = LIMITS.fetch('prog_frame_max').value
+  REPORT_BYTES = LIMITS.fetch('prog_report_max').value
   KINDS = [0, REC_FRAME, 2, 3, 4, 0xffff_ffff].freeze
   ZEROS = [0, 1, 1 << 63].freeze
   LENS = [0, 1, REPORT_BYTES - 1, REPORT_BYTES, REPORT_BYTES + 1, FRAME_MAX, FRAME_MAX + 1, 0xffff_ffff].freeze
@@ -69,7 +72,7 @@ class ProgInboundTest < Minitest::Test
   }.freeze
 
   def test_every_header_decides_as_the_rule
-    answers = run_driver(File.join(ROOT, INBOUND), open_requests)
+    answers = run_driver(open_requests)
     expected = GRID.map { |started, kind, zero, len| "open #{self.class.decision(started, kind, zero, len)}" }
     assert_equal expected.size, answers.size
     GRID.zip(answers, expected).each do |(started, kind, zero, len), got, want|
@@ -78,27 +81,28 @@ class ProgInboundTest < Minitest::Test
   end
 
   def test_each_report_reads_to_its_end_and_capabilities
-    answers = run_driver(File.join(ROOT, INBOUND), report_requests)
+    answers = run_driver(report_requests)
     REPORTS.each_value.zip(answers).each_with_index do |((_, want), got), at|
       assert_equal want, got, REPORTS.keys[at].to_s
     end
   end
 
-  # A seeded fault, the requests that catch it, and the edit that plants it.
+  # A seeded fault, the requests that catch it, the source it edits and the edit that plants it.
+  # The capability walk is the profile's generated erx_prog_report_caps.
   MUTANTS = {
-    'a nonzero zero word is admitted' => [:open, 'zero != 0', '(zero & 0) != 0'],
-    'a report at the bound is refused' => [:open, 'len <= ERX_PROG_REPORT_BYTES', 'len < ERX_PROG_REPORT_BYTES'],
-    "a writer's doorbell is left open" => [:report, "\t\treturn (3);\n", "\t\treturn (2);\n"]
+    'a nonzero zero word is admitted' => [:open, INBOUND, 'zero != 0', '(zero & 0) != 0'],
+    'a report at the bound is refused' => [:open, INBOUND, 'len <= ERX_PROG_REPORT_MAX', 'len < ERX_PROG_REPORT_MAX'],
+    "a writer's doorbell is left open" => [:report, PROFILE, "\t\treturn (3);\n", "\t\treturn (2);\n"]
   }.freeze
 
   def test_seeded_faults_are_caught
-    source = File.read(File.join(ROOT, INBOUND))
     Dir.mktmpdir('erx-prog-inbound-mutant-') do |directory|
-      MUTANTS.each do |name, (requests, original, replacement)|
+      MUTANTS.each do |name, (requests, file, original, replacement)|
+        source = File.read(File.join(ROOT, file))
         assert_equal 1, source.scan(original).size, "mutant #{name} must edit exactly one place"
         path = File.join(directory, "#{name.tr(' ', '-').delete("'")}.c")
         File.write(path, source.sub(original, replacement))
-        answers = run_driver(path, requests == :open ? open_requests : report_requests)
+        answers = run_driver(requests == :open ? open_requests : report_requests, file => path)
         expected = requests == :open ? open_expected : REPORTS.values.map(&:last)
         refute_equal expected, answers, "seeded fault not caught: #{name}"
       end
@@ -111,12 +115,13 @@ class ProgInboundTest < Minitest::Test
   def open_expected = GRID.map { |started, kind, zero, len| "open #{self.class.decision(started, kind, zero, len)}" }
   def report_requests = REPORTS.values.map { |frame, _| "report #{frame.unpack1('H*')}" }
 
-  def run_driver(inbound, requests)
+  # Builds the driver from SOURCES, each path of replaced built from its replacement instead.
+  def run_driver(requests, replaced = {})
     Dir.mktmpdir('erx-prog-inbound-') do |directory|
       binary = File.join(directory, 'driver')
       input = File.join(directory, 'requests')
       File.write(input, "#{requests.join("\n")}\n")
-      sources = [inbound, *SOURCES.map { |path| File.join(ROOT, path) }]
+      sources = SOURCES.map { |path| replaced.fetch(path) { File.join(ROOT, path) } }
       includes = ['-I', ROOT, '-I', File.join(ROOT, 'include'), '-I', File.join(ROOT, 'build/gen/include'),
                   '-I', File.join(ROOT, 'kernel/crypto')]
       output, status = Open3.capture2e(COMPILER, *FLAGS, *includes, *sources, '-o', binary)

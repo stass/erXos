@@ -15,7 +15,9 @@
 # * A pipe's number, an end's number, a write end's number and a pipe's
 #   count of write ends, pos_integer() in the designs, are u32 from 1, as the
 #   pipe server's C layouts hold them (docs/design-pipes.md#the-pipe-servers-records);
-#   a read end's index is 0 to 63.
+#   a read end's index is 0 to pipe_rix_max, and a write end's list of
+#   read ends holds at most pipe_readers_max of them and a read end's,
+#   the others, at most pipe_rix_max.
 # * A read end's list of write ends holds at most 8,192 entries, more than
 #   a frame of prog_frame_max bytes can carry, so the frame bound is the
 #   one that holds it.
@@ -37,7 +39,10 @@
 # "ascending"; a map's "field" keys must be present and its "optional"
 # keys may be; a union's "case ATOM [=ATOM...] [KIND...]" is its atom, or
 # a tuple of its atom, its literal atoms and its fields. "boolean" and
-# "signal" are built in.
+# "signal" are built in. A capability is a value of an integer kind
+# "except @cap_null"; for a union a frame to the program carries, the
+# generator walks each case's capabilities and refuses one nested inside
+# another kind.
 
 limit prog_frame_max u32 196608
 limit prog_args_max u32 131072
@@ -53,6 +58,12 @@ limit prog_data_slot_bytes u32 65536
 # 2^32 because Pipe is at least 1, so no pipe end's label is the channel's.
 limit prog_channel_label u64 1
 limit pipe_label_shift u64 32
+# The bytes of a frame the session writes after the startup message, a
+# report: the executor copies each whole into a buffer of this size and
+# refuses a longer one. The profile's largest report, {erx_prog, 1,
+# {pipe_writer, ...}} with three capabilities as 64-bit integers, takes
+# about 120 bytes of ETF.
+limit prog_report_max u32 512
 
 protocol erx_prog
   version 1
@@ -69,7 +80,7 @@ protocol erx_prog
   integer end_id u32 in 1 0xffffffff
   integer wend u32 in 1 0xffffffff
   integer wend_count u32 in 1 0xffffffff
-  integer rix u8 in 0 63
+  integer rix u8 in 0 @pipe_rix_max
   integer lane_size u32 values 16384 65536
   total args @prog_args_max
   text arg max @prog_args_max utf8 refuse nul sum args
@@ -87,8 +98,8 @@ protocol erx_prog
     case gone
   tuple pipe_end pipe_id end_id
   tuple reader rix cap
-  list write_readers reader max 64 ascending
-  list read_readers reader max 63 ascending
+  list write_readers reader max @pipe_readers_max ascending
+  list read_readers reader max @pipe_rix_max ascending
   union writer_state
     case open cap
     case gone

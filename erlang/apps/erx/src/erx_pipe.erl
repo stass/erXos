@@ -74,8 +74,6 @@ actions:
 %% Pipe and end numbers are 32-bit and never wrap (docs/design-pipes.md,
 %% "The pipe server's records").
 -define(NUMBER_MAX, 16#ffffffff).
-%% The session's `pipes` quota of lanes until erx_policy sets it.
--define(QUOTA, 1024).
 
 -record(writer, {end_id :: id(),
                  holder :: holder(),
@@ -146,22 +144,24 @@ actions:
 
 -doc """
 The records of a session with no pipe. `quota` is the session's `pipes`
-quota, the lanes its pipes may hold at once, 1,024 unless given. An
+quota, the lanes its pipes may hold at once: `?ERX_PIPES_QUOTA`, 1,024, unless
+given, and never more, since the program port sizes each program's credit
+for it (abi/erx_abi.txt, pipes_quota). An
 exploration scales the design's other limits down: `number_max`, the
 largest pipe or end number given (2^32 - 1), and `readers_max`, the read
 ends a pipe may have (64).
 """.
--spec new(#{quota => pos_integer(), number_max => 2..?NUMBER_MAX,
+-spec new(#{quota => 1..?ERX_PIPES_QUOTA, number_max => 2..?NUMBER_MAX,
             readers_max => 1..?ERX_PIPE_READERS_MAX}) -> state().
 new(Opts) when is_map(Opts) ->
     case maps:keys(maps:without([quota, number_max, readers_max], Opts)) of
         [] -> ok;
         _ -> erlang:error(badarg)
     end,
-    Quota = maps:get(quota, Opts, ?QUOTA),
+    Quota = maps:get(quota, Opts, ?ERX_PIPES_QUOTA),
     Max = maps:get(number_max, Opts, ?NUMBER_MAX),
     Readers = maps:get(readers_max, Opts, ?ERX_PIPE_READERS_MAX),
-    case is_integer(Quota) andalso Quota >= 1
+    case is_integer(Quota) andalso Quota >= 1 andalso Quota =< ?ERX_PIPES_QUOTA
         andalso is_integer(Max) andalso Max >= 2 andalso Max =< ?NUMBER_MAX
         andalso is_integer(Readers) andalso Readers >= 1
         andalso Readers =< ?ERX_PIPE_READERS_MAX of

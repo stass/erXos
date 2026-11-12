@@ -72,9 +72,6 @@ domain service's (erx_domain:inspect_view/1).
 -type worker() :: {pid(), reference(), reference()}.
 -export_type([query/0, view/0, options/0]).
 
-%% The most entries one listing gives: the inspector's page.
--define(PAGE, 1000).
-
 %%% The caller's side.
 
 -doc """
@@ -404,7 +401,7 @@ entries_taken(_Domain, _Answer, _Seen, _Page) ->
 %% added; a record past the page's room is still checked, then dropped.
 taken_into([], _IsPath, _Domain, _Seen, Page, _Count) ->
     {ok, Page};
-taken_into([Record | Rest], IsPath, Domain, Seen, Page, Count) when Count < ?PAGE ->
+taken_into([Record | Rest], IsPath, Domain, Seen, Page, Count) when Count < ?ERX_INSPECT_PAGE_MAX ->
     case bound(Record, IsPath, Domain) of
         {ok, Taken} -> taken_into(Rest, IsPath, Domain, Seen, erx_inspector:page_add([Seen(Taken)], Page), Count + 1);
         invalid -> invalid
