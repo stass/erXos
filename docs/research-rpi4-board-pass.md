@@ -81,10 +81,13 @@ These agree with what
 
 * **The host link on UART3** (pins 7, 9 and 29). No second adapter was
   reported connected. Not checked.
-* **Typing at the console.** The reports say the shell's `%` prompt
-  appears. They do not say whether the owner typed commands, ran `erl`,
-  or read `dmesg`, so the mini UART's receive interrupt, the Erlang shell
-  and the `dmesg` step of the design's checklist are not checked.
+* **What each command printed.** The owner typed `erl`, `top`, `ps`,
+  `cat /proc/cpus/0/status`, `dmesg` and `ifconfig` at the console and
+  reported none failing, so typing reaches the shell through the mini
+  UART's receive path, and the Erlang shell, the process and CPU
+  inspection paths and the kernel log answer. Their output was not
+  supplied, so its content (CPU count, the interfaces `ifconfig` lists,
+  the log records) is not checked.
 * **The banner lines.** The reports do not give BL31's banner, bootstrap's
   memory line or the `rc: the command shell` line as read from the
   console, and no serial log was supplied. Not checked.
