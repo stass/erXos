@@ -513,7 +513,7 @@ it; git history is the record of completed work.
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
 * [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`, `wait_idle`: a boot that leaves the UART or its transmitter disabled with bytes in the transmit FIFO keeps `FR.BUSY` set, and the driver exits `pl011_busy` where clearing `FEN` would flush the FIFO (DDI 0183G 3-16); the wait is bounded by a count of reads, not a time.
-* [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`: a UART the boot left with a baud divisor of 0, as Fiasco leaves it on QEMU virt, gets divisors for virt's 24 MHz clock. The UART's clock belongs in the platform record, from its device tree node's `clocks`, and reaches the driver with the window and line.
+* [Medium] `erlang/apps/erx_uart/src/erx_pl011.erl`: a UART the boot left with a baud divisor of 0, as Fiasco leaves it on QEMU virt, gets divisors for virt's 24 MHz clock. The UART's clock belongs in the platform record, from its device tree node's `clocks`, and reaches the driver with the window and line. The Raspberry Pi 4's host link, UART3, a PL011 whose clock is not QEMU `virt`'s and which its firmware does not set up, needs it ([plan.md](docs/plan.md#1b-i-the-raspberry-pi-4-on-the-stopgap), part (a)).
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a window overlap and memory held by another record are told by comparing handle values, so one object given under two handles (a give that installs it twice, or the root's own `-erx given` records over slots it holds otherwise) passes, and two records carve the same pages of one memory. Compare the objects the backend resolves, or make one handle per object a promise of the domain library that the NIF states.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a second record whose window shares a page with another's is `ERX_EBUSY`, where `docs/design-runtime.md`, "Windows smaller than a page", has such records share that page's one mapping; a unit of two transports in one page, given over one window object, cannot open its second. Share the mapping, or have the design give each device a window object of its own.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.h`: the physical form is the zero value of `erx_device_form_t`, so a spec whose form no decoder set makes physical objects; give 0 to a refused `ERX_DEVICE_FORM_NONE` and set the physical form explicitly in `decode_window`.
@@ -1014,8 +1014,11 @@ it; git history is the record of completed work.
   pass, and a stopped run raises a plain `Erx::Error`, which `OracleQemu.state_of` counts as an erXos crash instead of an
   unknown result. Check `SIGNAL_STOP_LINE` whenever QEMU exited by itself, and raise a subclass that reports read `cancelled`.
 * [Low] stopgap, `ERX_ROOT_KIP_WINDOW` in `liberx/backend/fiasco/root_open.c`
-  fits QEMU `virt` only; it moves to the platform layer with the Raspberry Pi 4.
-  The root's load address already comes from the machine an image is built for
+  fits QEMU `virt` only: on the Raspberry Pi 4 RAM covers `0x10000000`. It moves
+  into the backend's address layout above all RAM, beside the device window, so no
+  platform record carries it
+  ([design-stopgap.md](docs/design-stopgap.md#the-raspberry-pi-4)). The root's load
+  address already comes from the machine an image is built for
   (`ProductionImage::Machine`).
 * [Low] tooling, `tools/lib/erx/native_root.rb` (`build_system_receipted`): the
   root's linked receipt does not name its place, the `--defsym` of
@@ -5003,7 +5006,10 @@ to the corpus and follow rc
   per-interface ingress budget, which are records on the stopgap, so a flood
   from the wire can take CPU from other domains (M5's kernel part, M8); no wall around any domain, the browser-facing
   web domain included (M5's kernel part); and nothing stopping a domain or
-  program that bypasses `liberx` (M5's kernel part, M7). Development
+  program that bypasses `liberx` (M5's kernel part, M7); and, on the
+  Raspberry Pi 4 (1b-I), the boards' platform items: no hardware watchdog
+  backs a hang of Fiasco, no crash region, no trial request, no device
+  secret and no random generator (M12). Development
   builds run trusted code only until M11.
 
 * [Medium] code service, atoms from loads (`erlang/apps/erx_code/src/erx_code.erl`):

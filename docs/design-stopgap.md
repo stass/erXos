@@ -617,7 +617,7 @@ At boot the root takes all RAM from `sigma0` with `l4sigma0_map_anypage(pager, w
 &phys, order)`: first one 2 MiB superpage for each **contiguous pool** the manifest's device entries
 ask for, recording `phys`; then everything else, at 2 MiB until refused and then 4 KiB until refused.
 `sigma0` maps RAM read, write and execute (`memmap.cc:96,125`). QEMU `virt` is coherent, so cached
-memory serves for devices.
+memory serves for devices; the Raspberry Pi 4 is not ([The Raspberry Pi 4](#the-raspberry-pi-4)).
 
 The window starts at a constant of the backend's address layout, above all RAM, and is never unmapped. The
 window's first pages hold [the range table's page index](#the-range-table), sized from how many pages the window holds,
@@ -1723,6 +1723,65 @@ moment. Before the first grant arrives, in a session whose principal the manifes
 `/data` answers `eio`; once the restarted storage domain's mint has installed a new grant, the next open reaches the volume again, while a
 descriptor opened before the restart keeps failing with `eio` and its writer opens the file again.
 
+## The Raspberry Pi 4
+
+The Raspberry Pi 4 Model B runs this backend behind the same interface, on the same Fiasco kernel build as QEMU `virt`.
+[design-platforms.md](design-platforms.md#raspberry-pi-4-model-b) describes the board, and
+[plan.md](plan.md#1b-i-the-raspberry-pi-4-on-the-stopgap) the order in which it comes up. What differs from QEMU `virt` is
+data, one `bootstrap` build, and the kernel's platform items, which this backend does not have:
+
+* **Firmware and PSCI.** The Raspberry Pi firmware loads the bootable file as `kernel8.img` and TF-A 2.15.0's BL31 as
+  the armstub, as it does for erXos's kernel ([Firmware](design-platforms.md#firmware)); no U-Boot runs. The kernel
+  build is Fiasco's generic platform with PSCI (`CONFIG_PF_ARM_GEN`, `CONFIG_ARM_PSCI` in
+  `config/fiasco/kernel.defconfig`), which finds the interrupt controller, the timer and PSCI's calling method in the
+  device tree. BL31's PSCI starts the other CPUs, and `l4_platform_ctl_system_shutdown` reaches its `SYSTEM_OFF` and
+  `SYSTEM_RESET` ([The end path](#the-end-path)). `SYSTEM_OFF` leaves the board halted in the firmware, which cannot
+  turn it off, so an end by `ERX_END_OFF`, a missed pet's included, lasts until the board rig's power relay cycles it.
+* **Under QEMU.** The same image, device tree and BL31 also boot on QEMU's `raspi4b` model under TCG, where QEMU's
+  generic loader places them in place of the firmware and the harness gives the model's second serial port, the mini
+  UART's, to the console; what the model checks and what it cannot is in
+  [Bring-up under QEMU](design-platforms.md#bring-up-under-qemu). If BL31 does not run there, the model boots the
+  image on one CPU through QEMU's own kernel loader, without PSCI.
+* **Bootstrap.** The Pi has a `bootstrap` build of its own, for Fiasco's generic platform (`arm_gen`), whose RAM
+  starts at 0 and which reads the memory map, the console's UART and PSCI's calling method from the device tree; that
+  platform requires `bootstrap` built position-independent. QEMU `virt` keeps its `arm_virt` build
+  (`config/fiasco/user.defconfig`), whose RAM starts at `0x40000000`. Fiasco's `rpi` platform, which asks the
+  firmware's mailbox for memory and tells the boards apart by their CPU, is not used. The firmware enters the bootable
+  file in a higher privilege mode than the kernel's, and `bootstrap` drops to the kernel's before it starts Fiasco;
+  the boot probe confirms the entry state. The console is the mini UART (`brcm,bcm2835-aux-uart`), which `bootstrap`
+  and Fiasco find by `/chosen/stdout-path`. The kernel build already carries Fiasco's driver for it
+  (`fiasco/kernel/src/lib/uart/uart_bcm2835.cc`, built under `CONFIG_PF_ARM_GEN_SELECT_UART_16550`, on by default);
+  `bootstrap`'s UART library (`fiasco/drivers-frst/uart`) holds only the PL011 driver, so the Pi's `bootstrap` build
+  imports Fiasco's 16550 and BCM2835 drivers into it and turns on `CONFIG_DRIVERS_FRST_UART_DRV_8250`. Both keep the
+  baud divisor the firmware set ([design-platforms.md](design-platforms.md#raspberry-pi-4-model-b)): given a base rate
+  of 0, `Uart_16550::change_mode` writes no divisor.
+* **The platform record and the machine.** The Pi's platform record and development manifest sit beside QEMU `virt`'s
+  and have their format: units, device paths, windows, lines, `ram_bytes` and `fiasco_reserve`, and RAM's first
+  address, which is 0 on the Pi and `0x40000000` on QEMU `virt`. Every tool that builds or boots an image takes the
+  record and its `ProductionImage::Machine` as a parameter, never a constant of QEMU `virt`. The record's `ram_bytes`
+  is the smallest RAM the port boots on; the manifest check proves the manifest against it, and a board with more RAM
+  boots the same image with a larger pool. The root's place follows [Boot](design-platforms.md#boot)'s arithmetic
+  from RAM's first address, clear of BL31's reserved memory, the bootable file and the device tree, as the boot probe
+  finds them. Where the root maps the kernel information page is part of the backend's address layout, above all RAM
+  beside the device window, so no platform record carries it.
+* **Devices.** The Pi's DMA devices are not coherent, so the device NIF's envelope cleans and invalidates as
+  [design-runtime.md](design-runtime.md#the-device-nif) orders for such a device; QEMU `virt`'s are coherent, and
+  their records say so. A Pi device sees RAM through its bus's `dma-ranges`: the SD controller sees the first GiB at
+  bus address `0xC0000000`. Each DMA device's entry in the platform record carries its bus offset and the end of its
+  reach, read from the board's device tree on the host; the device NIF hands the device bus addresses, and the root
+  refuses a boot whose contiguous pool for a device lies beyond that device's reach, with a diagnostic. The firmware's
+  framebuffer lies in memory the firmware keeps out of the RAM it reports, so it is a physical window of the display
+  domain's record, mapped as device memory, which its writes reach without cache maintenance; the boot probe
+  confirms where it lies.
+* **What the board does not get here.** The kernel's platform items, which M12 brings on erXos's kernel: the
+  hardware watchdog is not armed, so a hang of Fiasco or of the root's watchdog thread is caught only by the
+  harness's deadline, after which the rig cycles power; there is no crash region, so the crash record reaches the
+  console alone; there is no trial request, so the boot value is what `/chosen/bootloader` says and no update runs;
+  there is no device secret, so `sealing` stays `none`; and the random generator is not read, so entropy comes from
+  the counter, as on QEMU `virt`. Each is in [What Phase 1 defers](#what-phase-1-defers).
+* **The watchdog's numbers.** The board runs natively, so the harness gives it the design's defaults, as it gives
+  HVF, and gives the `raspi4b` model the numbers it gives TCG ([The watchdog](#the-watchdog)).
+
 ## Deterministic mode
 
 `erx.det=1` is one CPU, TCG with instruction counting, the interpreter. The harness runs QEMU with `-smp 1`, `-icount shift=0,sleep=off` (without `shift`, `-icount` counts nothing), `-rtc base=2026-01-01,clock=vm`, so the real-time clock starts at a fixed date and runs on the instruction count, and the `virt` machine's `dtb-randomness=off`, so the device tree carries no random seeds; `Erx::QemuPlan` adds them exactly when the kernel command line carries `erx.det=1`, and refuses that word under HVF or on more than one CPU. Fiasco's tick comes from
@@ -1788,6 +1847,7 @@ since no consumer calls it before then.
 | K28 | fault and exit records at the gate fixed at creation, with thread `unknown` and an exit record's `space` the space of the task that asked for the stop | Track K (the thread's identity, resume after repair) |
 | K29, K30 | vCPU upcalls over Fiasco's interface if [the source check](#open-decisions), made before 1b-D, passes; otherwise none | 1b-D (the row, if the check passes); Track K; Track P's catchable signals at M7 if the check fails |
 | K19, K31 | none | Track K; M12 (the lease, the board watchdog) |
+| the boards' platform items: the hardware watchdog, the crash region, the trial request, the device secret, the random generator | none on the Raspberry Pi 4: the root's watchdog thread, a crash record on the console alone, the boot value as the firmware reports it, `sealing` `none`, and the counter's entropy, as on QEMU `virt` ([The Raspberry Pi 4](#the-raspberry-pi-4)) | M12 |
 | K22, K23 | none | Track Q |
 | groups: C0 to C2, quotas, cohorts, charging, park in the kernel, `erx_group_configure` enforced | groups as records with readiness in their home task | M2; M8 (cooperation) |
 | umtx in the kernel, across spaces | umtx within a task; nothing shares a umtx word between tasks | Track K |

@@ -141,7 +141,7 @@ belong to the driver table of
 | Interrupt controller | GICv3 | GIC-400, a GICv2 | GIC-400, a GICv2 |
 | MSI frame | GICv2m | none used | MIP (`brcm,bcm2712-mip`) |
 | Early console, also the console | PL011 | mini UART | debug PL011 |
-| Host link | a second PL011 | a PL011 that `config.txt` routes | none |
+| Host link | a second PL011 | UART3, a PL011 that `config.txt` routes | none |
 | IOMMU | SMMUv3, for PCIe only | none described | none assigned to Ethernet, USB or the SD controllers |
 | PCIe bridge | ECAM (`pci-host-ecam-generic`) | none driven | `brcm,bcm2712-pcie` |
 | PCIe configuration space held by | the PCIe domain, alone | no domain | the PCIe domain, alone |
@@ -249,16 +249,25 @@ the harness plays the firmware's part in a trial.
 ### Raspberry Pi 4 Model B
 
 The BCM2711, with Cortex-A72 cores and a GIC-400. Its firmware makes the
-mini UART the console, so the mini UART is the Pi 4's early console. The
-host link is a PL011 whose pins the board's `config.txt` sets and which
-the manifest names by its device-tree path, so the firmware's rewriting of
-the `serialN` aliases never makes it the console's UART. The PL011s share
-one register page, and the mini UART shares its page with the auxiliary
-SPI controllers, so each page is one unit. The manifest gives both units
-whole to the system domain: the mini UART's because it is the console's,
-the PL011s' because the host-link service there reads it, and the system
-domain runs no driver for the auxiliary SPI controllers or the other
-PL011s that ride along. The VideoCore's message interface shares the
+mini UART (`brcm,bcm2835-aux-uart`) the console, so the mini UART is the
+Pi 4's early console. The mini UART's baud rate is divided from the core
+clock, which the firmware may change at run time, so the board's
+`config.txt` sets `enable_uart=1`, which has the firmware pin the core
+clock and set the mini UART's line; the early console, Fiasco's
+console on the stopgap and the Erlang mini-UART driver keep the divisor
+the firmware set and never compute one, so no core clock rate reaches
+the platform record. The host link is UART3, a PL011 on GPIO 4 and 5,
+whose pins `dtoverlay=uart3` in `config.txt` sets; UART2, the other PL011
+with pins of its own, sits on GPIO 0 and 1, the bus of a HAT's
+identification EEPROM, which the firmware reads at boot. The manifest
+names the host link by its device-tree path, so the firmware's rewriting
+of the `serialN` aliases never makes it the console's UART. The PL011s
+share one register page, and the mini UART shares its page with the
+auxiliary SPI controllers, so each page is one unit. The manifest gives
+both units whole to the system domain: the mini UART's because it is the
+console's, the PL011s' because the host-link service there reads it, and
+the system domain runs no driver for the auxiliary SPI controllers or the
+other PL011s that ride along. The VideoCore's message interface shares the
 mailbox's page, which the kernel keeps, so it goes to no driver (PL2,
 [research](research-boards-storage.md#checks-against-local-copies)). The
 devices erXos drives use wired interrupts. No IOMMU is described, so its
@@ -986,13 +995,70 @@ included.
 QEMU's `raspi4b` model, under TCG, has the GIC-400 but no PCIe or
 Ethernet, and QEMU has no Pi 5 model
 ([research](research-boards-storage.md#qemus-raspberry-pi-models)).
-Whether the model runs TF-A's BL31, which the kernel needs for PSCI, is
-not checked; if it does not, the model serves only the kernel's boot up to
-its PSCI check, and the boards are the authority for the rest. Fiasco's
-support for both boards, which uses its GICv2 driver, is the reference for
-their bring-up: the interrupt controller, the timer and the UARTs of the
-early console
+Fiasco's support for both boards, which uses its GICv2 driver, is the
+reference for their bring-up: the interrupt controller, the timer and the
+UARTs of the early console
 ([research](research-boards-storage.md#fiascos-raspberry-pi-support)).
+
+**The model's devices.** QEMU 11.1.3's model, as its monitor reports it
+(`info qtree`, and `qom-get` on the first CPU), has four Cortex-A72 cores
+that implement EL3 and EL2; a GIC-400 built without the security
+extensions (`has-security-extensions = false`); 2 GiB of RAM (board
+revision `0xb03115`); one PL011, UART0, on QEMU's first serial port; the
+mini UART (`bcm2835-aux`) on its second; the power-management block
+(`bcm2835-powermgt`), which holds the watchdog; and the SD controllers.
+The harness therefore gives the console the second `-serial` option, the
+first going to a null device. The model has no UART3, so the host link is
+not checked on it, and its mini UART takes no clock, so neither is the
+pinned core clock.
+
+**BL31 on the model.** No firmware runs on the model. QEMU's generic
+loader (`-device loader`) puts TF-A's Pi 4 BL31, built from its pinned
+release, at address 0 and starts CPU 0 there (`cpu-num=0`); puts the
+bootable file at the address BL31 enters; and puts the board's device
+tree where BL31 expects it, with `config.txt`'s overlays applied on the
+host and with what the firmware writes into the tree written on the host
+too. The chain is then the board's: BL31 at EL3 enters the bootable file
+at EL2, and the kernel starts the other three CPUs with PSCI's `CPU_ON`
+and resets the machine through BL31. Whether the chain runs on the model
+is not known, and four things about it are uncertain: the addresses at
+which BL31 expects a device tree and a kernel already loaded; how the
+other CPUs start under the generic loader, which sets only CPU 0's entry;
+whether BL31's set-up of the GIC's security groups works on a GIC-400
+modelled without them; and whether the model resets through the
+power-management watchdog, as BL31's `SYSTEM_RESET` and `SYSTEM_OFF` do.
+The Pi 4 port's first experiment, a timeboxed one, settles them. If the
+chain runs, the model checks EL2 entry, PSCI, four CPUs and reset; if it
+does not, the model runs one CPU, entered by QEMU's own kernel loader,
+and the board alone checks PSCI and the other CPUs. erXos's kernel, which
+stops a boot without PSCI, then uses the model only up to that check.
+
+**What the model never checks.** The Pi firmware runs on the VideoCore,
+which QEMU does not emulate, so nothing on the model reads `config.txt`,
+makes the firmware's edits to the device tree (the memory node,
+`/chosen/stdout-path`, the Ethernet MAC address), places the device tree
+and the bootable file as the firmware does, or accepts or refuses a
+bootable file by its size. QEMU's DMA is coherent, so a driver that
+misses a cache clean or invalidate passes on the model. The model has no
+Ethernet and no PCIe. A stage proven on the model therefore counts only
+once it has also passed on a board, and the model's runs are never
+compared with the board's numbers.
+
+### The Raspberry Pi 4 on the stopgap
+
+Before erXos's kernel exists, the Raspberry Pi 4 runs the stopgap Fiasco
+behind the same interface, booted by the same firmware and the same BL31,
+with the console, the host link, the manifest and the Erlang drivers this
+document gives it. Fiasco's generic platform takes PSCI from BL31 and its
+devices from the device tree, and its `bootstrap` is built for RAM that
+starts at 0. The kernel's platform items of this document are not there:
+no hardware watchdog backs a hang, no crash region keeps a record across
+a reset, no trial is requested, no device secret is read and the random
+generator is not read. The early console's role passes to Fiasco's own
+console on the same UART, and a board's end goes through BL31's PSCI as
+it does on erXos's kernel. [design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)
+describes that shape, and M12 of [plan.md](plan.md#m12-storage-networking-boards)
+adds the kernel's items on erXos's kernel.
 
 ## Interfaces
 
@@ -1277,7 +1343,10 @@ running (PL4).
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
 | The first Pi 4 revisions take longer than 1 s to store the trial flag | low | a trial request lost, the committed slot boots | the board port checks the timing; the watchdog resets anyway |
-| QEMU's `raspi4b` model does not run BL31 | medium | bring-up under QEMU stops at the PSCI check | the boards are the authority |
+| On QEMU's `raspi4b` model, BL31 looks for the device tree or the kernel elsewhere than the generic loader put them, since on the board the firmware loads both | medium | the model runs one CPU without PSCI, and the board alone checks PSCI and the other CPUs | the timeboxed experiment reads BL31's build options for both addresses before the first run |
+| On the model, the other CPUs do not start as BL31 expects, since the generic loader sets only CPU 0's entry | medium | the same | the experiment records where each CPU starts; the board is the authority |
+| BL31's set-up of the GIC's security groups fails on the model's GIC-400, which is built without the security extensions | medium | the same, or BL31 stops before it enters the kernel | the experiment records how far BL31 gets; the board is the authority |
+| The model does not reset through the power-management watchdog that BL31's `SYSTEM_RESET` and `SYSTEM_OFF` use | medium | an end of the machine on the model is caught by the harness's deadline, not by QEMU's exit | the experiment checks a reset under `-no-reboot`; the board is the authority |
 | The firmware places the device tree over the single file, refuses a kernel file that long, or describes `/chosen` differently than expected | low | the kernel's boot stops with a message | the boot probe confirms each board before anything depends on it |
 | The BCM2712's link drops between the PCIe enumerator's check and a configuration access | low | the PCIe domain ends and is restarted, or an asynchronous abort stops an unrelated thread | the enumerator checks the link before each access; the board port measures whether the abort is synchronous; a restart of the PCIe domain re-reads configuration space and changes no running function |
 | The crash region does not survive `SYSTEM_RESET` on a board, or the firmware clears it | medium | no crash record after a reset on that board; the early console alone | the boot probe checks it; the record's check rejects what the firmware left; the early console carries every record |

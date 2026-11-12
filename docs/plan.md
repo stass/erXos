@@ -3,7 +3,7 @@
 The staged roadmap from an empty tree to protected Erlang domains, users
 and a release build on QEMU `virt`, and then to storage, networking and
 the first boards. Each milestone ends in a demonstration that a QEMU
-transcript test, or on a board the board rig of M12, reproduces, and has
+transcript test, or on a board the board rig of 1b-I, reproduces, and has
 exit criteria that tests check. Where the design rests on a number nobody
 has measured, or on a choice the user has not made, a decision gate
 measures or asks, and decides. The architecture is
@@ -24,7 +24,7 @@ Ground rules:
   interface, with every guarantee still deferred: domains and their
   connections, programs and pipes, the POSIX-lite first part, the
   browser and the desktop, drivers in their domains, storage and
-  networking on QEMU. Each guarantee a Phase 1b item defers is a row of
+  networking on QEMU, and the Raspberry Pi 4. Each guarantee a Phase 1b item defers is a row of
   one list, [What Phase 1 defers](design-stopgap.md#what-phase-1-defers),
   naming the milestone that closes it, and `TODO.md`'s security residuals
   point to that list rather than copy it. Phase 2 builds erXos's
@@ -100,12 +100,13 @@ Ground rules:
 
 The plan has three phases. Phase 1, M0, M1, track H, M3, M4, M6 and the
 shell of track S, brings the system up on the stopgap Fiasco. Phase 1b
-carries the user-facing system further on the stopgap, in eight items
-named 1b-A to 1b-H: M5's domains (1b-A), the programs of track S (1b-B),
+carries the user-facing system further on the stopgap, in nine items
+named 1b-A to 1b-I: M5's domains (1b-A), the programs of track S (1b-B),
 track D's browser, window stack and QEMU kiosk (1b-C), track P's first part (1b-D),
 M9's drivers in their domains (1b-E), track D's desktop and Plan 9's
 programs (1b-F),
-networking on QEMU (1b-G) and M13 on QEMU (1b-H), each with the backend
+networking on QEMU (1b-G), M13 on QEMU (1b-H) and the Raspberry Pi 4
+(1b-I), each with the backend
 rows it needs and its guarantees deferred; track A's first part, the
 start table, comes with them, for track D's window stack and kiosk.
 Phase 2, track K, M7, M2, the
@@ -138,6 +139,7 @@ names; the table's order is the order.
 | 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | Phase 1: the network driver and stack run in the system domain, as M6's block driver does, until 1b-E moves them into the network domain | GN-QEMU's baseline, deciding nothing |
 | M14 erXos's network stack, on QEMU | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang from FreeBSD's, on QEMU in 1b-G; the boards follow with M12 | estimated in its design document | 1b-G's prototype | G14 |
 | 1b-H M13 erXos's F2FS on QEMU | erXos's F2FS, written in Erlang, keeps a QEMU disk's files through power cuts and its images mount in the Linux guest; on the Pi 4 with M12 | estimated in its design document | M6 | G13 |
+| 1b-I The Raspberry Pi 4 on the stopgap | the Pi 4 boots from its firmware to the shell on its console; a file synced on its SD card survives a power cut; its Ethernet carries UDP echo and a TCP transfer; the kiosk shows on its screen; every guarantee deferred | estimated per part before it starts; the designs give no figure | part (a): Phase 1; (b): 1b-E; (c): 1b-E and 1b-G; (d): 1b-C's part 3 | GR |
 | **Phase 2** | | | | |
 | Track K erXos's kernel | the pilot, then the kernel, booting Phase 1 and 1b's boot image and passing the conformance suite | 25,000 to 40,000 lines of C17, of which the capability core and the budget core exist; the pilot calibrates the figure | the pilot: M0, starting before Phase 1 is complete; the kernel in full: 1b-A | GK1, GK2, GK3 |
 | M7 The stopgap leaves | erXos's kernel boots Phase 1 and 1b's system and runs every test and benchmark it ran on the stopgap | integration | track K | GK3 |
@@ -184,7 +186,12 @@ The order reaches a usable system first:
   interface, and the guarantees they would rest on are recorded as
   residuals, not built.
 * Beside that path: BeamAsm beside 1b-A, and erXos's F2FS on QEMU (1b-H)
-  at the lowest priority, whenever capacity is idle. The network stack's
+  at the lowest priority, whenever capacity is idle. The Raspberry Pi 4
+  on the stopgap (1b-I) starts its serial shell on QEMU's `raspi4b` model
+  once Phase 1 is done, passes it once on a board when a rig exists, and
+  brings each later stage to the board once the
+  QEMU item it rests on has landed: storage after 1b-E, the network after
+  1b-G, the display after 1b-C's part 3. The network stack's
   host-first packages run beside everything, since they need no guest.
 * Track K's pilot starts before Phase 1 is complete and runs beside
   Phase 1b; erXos's kernel in full follows 1b-A, written from its design
@@ -1383,7 +1390,8 @@ land after M11 repeat M11's closure over what they add.
    pipes and its buffer's pages and nothing else
    ([design-display.md](design-display.md#kiosks-and-glasses)).
 5. **Kiosks on boards**, after part 4 and M12's boards. The firmware
-   framebuffer driver of the Raspberry Pi; a panel on a serial bus, on
+   framebuffer driver of the Raspberry Pi comes earlier, with 1b-I's
+   stage (d) on the stopgap; this part adds a panel on a serial bus, on
    the copy path and on the direct path; touch, encoder and keypad
    drivers, and the input file that an input device's domain serves the
    display where the device is in another domain, such as the devices
@@ -2153,6 +2161,250 @@ there whether TCP's fast path in erXos's stack needs native code
 ([design.md](design.md#networking)); GN-board at M12 confirms or reopens
 that decision on the Pi 4.
 
+## 1b-I: The Raspberry Pi 4 on the stopgap
+
+**Goal.** The Raspberry Pi 4 Model B runs Phase 1 and 1b's system on the
+stopgap Fiasco, so the first board is usable before erXos's kernel
+exists, along [design-platforms.md](design-platforms.md#raspberry-pi-4-model-b)
+and the stopgap's shape on the board in
+[design-stopgap.md](design-stopgap.md#the-raspberry-pi-4). A board is
+data: the Pi adds a platform record, a manifest, a `bootstrap` build, its
+boot files and Erlang drivers, and no interface changes. M12
+stays the boards' milestone on erXos's kernel: it adds the kernel's
+platform items, system updates and the guarantees to what this item
+brings.
+
+**Demo.** The Pi boots from its firmware, over the network or from its SD
+card, to the shell on its console; a file synced under `/data` on the SD
+card survives a power cut; the network domain carries UDP echo and a TCP
+bulk transfer to a peer over the Pi's Ethernet; the kiosk application of
+[1b-C](#track-d-windows-widgets-and-the-web)'s part 3 shows on the Pi's
+screen. Every guarantee is deferred, as on QEMU.
+
+**Decided.** The port runs on the stopgap Fiasco. The firmware boots the
+single bootable file directly as `kernel8.img`, with TF-A's BL31 as the
+armstub and no U-Boot, as [design-platforms.md](design-platforms.md#firmware)
+has it. The console is the mini UART, which the firmware makes the
+console, with its core clock pinned by `enable_uart=1`; the host link is
+UART3, a PL011, for the reasons
+[design-platforms.md](design-platforms.md#raspberry-pi-4-model-b) gives,
+driven by `erx_pl011` as on QEMU `virt`. Stage (a) is developed on QEMU's
+`raspi4b` model and first proven there, under TCG, and then passes once
+on a board before it counts as done; stages (b), (c) and (d) are proven
+on the board
+([design-platforms.md](design-platforms.md#bring-up-under-qemu) lists
+what the model cannot check). The Pi has no input device: no USB
+keyboard, since the Pi 4's USB host sits
+behind the PCIe bridge no domain drives, so input comes over the serial
+console or the web front end over the host link. Drivers are Erlang,
+programmed I/O first where the device allows it. The kernel's platform
+items of M12, the hardware watchdog, the crash region, trial boot, the
+device secret and the random generator, are deferred as Phase 1
+residuals ([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)).
+
+**Parts.** Each ends in a demo the board rig reproduces; stage (a)'s
+also runs on QEMU's `raspi4b` model. Part (a) comes first; (b), (c) and
+(d) each need only (a) on the board, and may go in any order or side by
+side.
+
+* **(a) A serial shell on the Pi, on QEMU's `raspi4b` first.** Its
+  packages, in order:
+  1. **BL31 on the model**, a timeboxed experiment. TF-A 2.15.0's Pi 4
+     BL31, built from its pinned source, boots under QEMU's `raspi4b`
+     with QEMU's generic loader in place of the firmware: `-device
+     loader` puts `bl31.bin` at address 0 with `cpu-num=0`, a test image
+     at the address BL31 enters, and the board's device tree where BL31
+     expects it. The chain to reach is the board's: BL31 at the
+     firmware's level, then the test image at the level the firmware
+     enters on the board, then PSCI's `CPU_ON` for all four CPUs, then a
+     reset. Its four uncertainties, BL31's addresses for a device tree
+     and a kernel already loaded, how the other CPUs start under the
+     generic loader, the model's GIC-400 without the security extensions
+     BL31 configures, and a reset through the power-management watchdog,
+     are listed in
+     [design-platforms.md](design-platforms.md#bring-up-under-qemu). The
+     result, with how far the chain got, goes in a research record. If
+     the chain runs, the model's gate for stage (a) covers the entry
+     state, PSCI, four CPUs and reset; if it does not, the model runs one
+     CPU through QEMU's own kernel loader, and the board alone covers
+     PSCI and the other CPUs.
+  2. **The platform as a parameter.** The per-board platform record and
+     `ProductionImage::Machine` are passed as a parameter through the
+     image build, the release build and the native and QEMU harnesses,
+     in place of the QEMU `virt` constants they hold: the record and
+     manifest paths of `ProductionImage` and `Release`
+     (`tools/lib/erx/production_image.rb`, `release.rb`), RAM's first
+     address in `NativeRoot` and `NativeCrash`, and the harness's machine
+     line (`qemu.rb`), which for `raspi4b` names the loader's devices of
+     package 1 and gives the console QEMU's second serial port. The
+     record gains RAM's first address and each PL011's clock, which
+     `erx_pl011` takes in place of QEMU `virt`'s 24 MHz, and
+     `ERX_ROOT_KIP_WINDOW` (`liberx/backend/fiasco/root_open.c`) moves
+     into the backend's address layout above all RAM. The package changes
+     no behaviour on QEMU `virt`: the QEMU suites it touches pass as
+     before.
+  3. **Fiasco on the Pi.** The Pi's `bootstrap` build, for Fiasco's
+     generic platform with RAM at 0, built position-independent, with
+     the mini UART as its console: Fiasco's 16550 and BCM2835 UART
+     drivers imported into `bootstrap`'s UART library, which holds only
+     the PL011's, and `CONFIG_DRIVERS_FRST_UART_DRV_8250` on; the kernel
+     build QEMU uses, which already carries the mini UART's driver; TF-A
+     2.15.0's BL31 built from its pinned source; the board's device tree
+     with the overlays of `config.txt` applied on the host, and for the
+     model with the firmware's edits (the memory node and
+     `/chosen/stdout-path`) written on the host too; and the boot files
+     (the firmware, `config.txt` with `enable_uart=1` and
+     `dtoverlay=uart3`, the board's device tree, BL31 and the bootable
+     file) laid out by a host tool for the firmware's network boot and
+     for an SD card
+     ([design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)).
+  4. **The serial shell on the model.** The Pi's platform record and
+     development manifest, with the system domain alone, holding the
+     mini UART's unit, the console's, which shares its register page
+     with the auxiliary SPI controllers, and the PL011s' unit, the host
+     link's; a small Erlang driver for the mini UART in `erx_uart`,
+     beside `erx_pl011`, which keeps the baud divisor the firmware set,
+     touches only the mini UART's registers of the shared page, and
+     leaves the page's enable register, which also enables the auxiliary
+     SPI controllers, as it found it; a host test of the record's paths,
+     windows and lines against the board's device tree, as the
+     production image suite checks QEMU's; and the `raspi4b` suite,
+     below, which proves the stage on the model.
+  5. **The board.** The board rig, below; the boot probe of
+     [design-platforms.md](design-platforms.md#verification-and-testing)
+     on the stopgap, recorded in a research record before anything
+     depends on its results; and the board's boot suite, which runs
+     stage (a)'s demo once on the board, with the host link on UART3.
+* **(b) Storage on the SD controller.** An Erlang driver for the Pi's
+  SD host controller (`brcm,bcm2711-emmc2`, an SDHCI controller) as the
+  block driver's device process, the part
+  [design-storage.md](design-storage.md) makes differ per controller:
+  the card's initialisation and reads and writes by programmed I/O
+  first, then DMA once the device NIF cleans and invalidates for a device
+  that is not coherent. It rests on the block driver's split into a
+  transport, the device process of virtio-blk or of the SD controller,
+  and the service above it, the partition and window processes and the
+  write path, so the Pi adds a device process and nothing above it
+  moves. The write path's rule (U4) holds across the split: only
+  `erx_blk_write` builds a request, the device process turns each into
+  its controller's commands, and the build check that holds the rule
+  covers the SD controller's write commands as it covers
+  `erx_device:post/4`. The storage domain holds the SD card, laid out on
+  the host as the ABI file's medium layout, with the release's EROFS
+  image read through its window and littlefs at `/data`. Each DMA
+  device's entry in the platform record carries its bus offset and
+  reach, so the SD controller's pool lies in the first GiB it sees
+  ([design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)).
+* **(c) Network on GENET.** An Erlang driver for the Pi's Ethernet
+  controller (`brcm,bcm2711-genet-v5`) and its PHY, in the network
+  domain, under 1b-G's network service and stack. GENET moves packets
+  only by DMA, so this stage needs the device NIF's cache maintenance
+  from its start. The packet path's numbers are recorded on the board as
+  a baseline that decides nothing; GN-board decides at M12.
+* **(d) Display on the firmware's framebuffer.** The display domain over
+  the `simple-framebuffer` the firmware sets up, with the firmware
+  framebuffer driver of track D's part 4 brought forward onto the
+  stopgap, and 1b-C's kiosk drawing on it. The framebuffer is a
+  long-lived region the device scans out, filled by rectangle with
+  `erx_device:fill/3`. Panels, touch, keypads and encoders stay with
+  part 4.
+
+**Dependencies.**
+
+* (a): Phase 1's shell; QEMU's `raspi4b` model, which the local QEMU
+  11.1.3 has; for its board pass, a board and the rig (gate GR).
+* (b): (a); 1b-E's storage domain; the block driver's split into
+  transport and service; for DMA, the device NIF's cache maintenance for
+  a device that is not coherent (`TODO.md`, `erx_device.c`, queues).
+* (c): (a); 1b-E's network domain and 1b-G's network service; the
+  device NIF's cache maintenance, as for (b).
+* (d): (a); 1b-C's part 3, the display domain and the kiosk; the device
+  NIF's region call, `erx_device:fill/3` (`TODO.md`,
+  `docs/design-display.md`).
+
+**Testing.**
+
+* **QEMU's `raspi4b`, under TCG, proves stage (a) first.** Agents
+  develop stage (a) on it, and its suite runs with the landing gate when
+  the Pi's image or its boot changes: the Pi's image, loaded as package
+  1 settles, boots to the shell's prompt on the mini UART with the
+  development banner, and the console transcript of the production image
+  suite's cases (a sum, a line with a mistake rubbed out, an output
+  longer than the transmit FIFO) passes there; the seeded fault, a
+  mini-UART driver that drops one received byte, fails the sum. If BL31
+  runs on the model, the suite also checks that four CPUs run, with the
+  seeded fault a device tree with one CPU's node removed, which
+  shows three, and that a reset ends QEMU under `-no-reboot`.
+* **What the model cannot check**, and the board must: the firmware
+  path, which runs on the VideoCore and which QEMU does not emulate
+  (`config.txt`, the firmware's edits to the device tree, where it
+  places the device tree and the bootable file, the entry state it
+  leaves, and the size of bootable file it accepts); PSCI and the other
+  CPUs, unless package 1 makes BL31 run on the model, so the model's
+  suite expects one CPU until it does; the host link, since the model
+  has no UART3; the mini UART's baud rate, since the model's mini UART
+  takes no clock; cache coherency, since QEMU's DMA is coherent and a
+  missing clean or invalidate passes there; and GENET and PCIe, which
+  the model lacks
+  ([design-platforms.md](design-platforms.md#bring-up-under-qemu)). So
+  stage (a) passes once on a board before it counts as done, and stages
+  (b), (c) and (d) are proven on the board alone.
+* **Board suites run once per batch and at the milestone gate**, not per
+  commit, under the same harness, deadlines and transcripts as QEMU's;
+  agents iterate on host tests, the hosted backend, QEMU `virt` and, for
+  stage (a), `raspi4b`.
+* **The board rig**: a serial capture of the console and of the host
+  link, a power relay, and from (b) on an SD card switch, so the host
+  writes the card and the board boots it unattended. The firmware's
+  network boot, from the rig's host over TFTP, is the fast loop: a new
+  image needs no card. A run ends as a QEMU run ends, by its transcript
+  or its deadline, and the relay then cycles the board, since the Pi
+  cannot turn itself off.
+* Every parser of what a Pi device writes (the SD controller's responses
+  and status, GENET's receive status and descriptors) lands with its fuzz
+  target, as the ground rules require.
+
+**Exit criteria.**
+
+* (a): after package 2 the QEMU `virt` suites pass unchanged; package
+  1's research record is written, with the chain's result; on
+  `raspi4b`, the Pi's image boots to the shell on the mini UART and
+  passes the console transcript, and fails it with the seeded driver;
+  the host test of the record against the board's device tree passes,
+  and fails on a record with one window moved; then, once, through the
+  rig, the Pi boots from its firmware to the shell on the mini UART with
+  the development banner, the host tool reaches it over UART3, and the
+  boot probe's research record is written.
+* (b): QEMU's block suites pass unchanged after the split; on the board
+  a file synced under `/data` survives a power cut by the relay at every
+  step of a scripted write load; a storage domain killed under load
+  restarts with every synced file present; the seeded write of a
+  request not built by `erx_blk_write` fails the build check; the SD
+  controller's parsers run their fuzz budgets clean.
+* (c): UDP echo and a TCP bulk transfer to a peer pass on the board; a
+  network domain killed under load restarts ending only its
+  connections; GENET's parsers run their fuzz budgets clean; the packet
+  path's numbers are recorded with the board named.
+* (d): the frame in the Pi's framebuffer, read back through the display
+  driver, equals the frame the same kiosk draws on QEMU `virt`; a
+  display driver killed and restarted repaints the screen.
+
+**Gate GR, before the first board boot.** Asks the user the two open
+questions, and records the answers in
+[design-platforms.md](design-platforms.md): the board's RAM, where 4 GB
+is recommended: every stage fits in 1 GB, but 4 GB leaves room for
+OTP's suites on the board later and keeps all its RAM below 4 GiB,
+where 8 GB puts half of it above, beyond some devices' reach; and the board
+rig, its parts and the host it hangs from. Nothing above depends on the
+answer: the platform record names the smallest RAM the port boots on,
+at most the 2 GiB of the `raspi4b` model, so one image boots on the
+model and on every board; a board with more boots the same image, and
+the rig is any serial capture, relay and SD card switch the harness
+drives. Measures, through the boot probe, where the firmware places the
+bootable file and the device tree, the entry state, the memory map,
+whether `stdout-path` names the mini UART, where the framebuffer lies,
+and the time to the system runtime's first pet.
+
 ## M10: Users without a container runtime
 
 **Goal.** Principals with budgets, CPU shares and quotas; each user's
@@ -2431,8 +2683,11 @@ trial boots the committed slot.
   over each board's network driver below, with the network domain's grant
   and per-interface ingress budget enforced by erXos's kernel, and
   confirms the packet path's numbers on the Pi 4 at gate GN-board.
-* **Boards.** The Raspberry Pi 4 Model B, then the Raspberry Pi 5, as
-  [design-platforms.md](design-platforms.md) describes them: each board's
+* **Boards.** The Raspberry Pi 4 Model B, whose platform record, boot
+  files, Erlang drivers and board rig come from
+  [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap) on the stopgap, then the
+  Raspberry Pi 5, as [design-platforms.md](design-platforms.md) describes
+  them: each board's
   interrupt controller, console UART, random generator, hardware watchdog
   and firmware mailbox, and the Pi 5's MSI frame, in the kernel's platform
   layer, with the kernel's device table; the hardware watchdog armed
@@ -2466,11 +2721,10 @@ trial boots the committed slot.
   [design-arch-aarch64.md](design-arch-aarch64.md#iommu)); each
   board's entries in its DMA contract confirmed, and its
   asynchronous-error injection test run, before drivers run on it
-  ([design-platforms.md](design-platforms.md#dma)); and the **board rig**:
-  a serial capture, a power relay and an SD-card switch under the same
-  harness and deadlines as QEMU, so a board's tests run unattended. QEMU's
-  `raspi4b` model, under TCG, serves the kernel's early bring-up; it has
-  no PCIe or Ethernet, and QEMU has no Pi 5 model.
+  ([design-platforms.md](design-platforms.md#dma)); and the board rig of
+  1b-I for both boards. QEMU's `raspi4b` model, under TCG, serves the
+  kernel's early bring-up, booted as 1b-I's stage (a) boots it; it has no PCIe or Ethernet, and QEMU has no Pi
+  5 model.
 
 **Exit criteria.** The update state machine's exhaustive test passes with
 a power cut after every write and every reset; a file synced under
@@ -2679,6 +2933,7 @@ their numbers.
 | GQ | track Q | `fork` of 10, 100 and 1,000 MiB against Linux in a guest; a dynamically linked program's start against a static one's; the fill and the write-back cost of the session's shared mappings, files of 64 KiB to 1 GiB, with `tools/erx bench mmap`, against descriptor reads and writes; on CPUs with hardware dirty-bit management, the fold of dirty bits into the object's stored marks at `munmap` and `exec` over large shared mappings, with `tools/erx bench mmap` | whether `fork` grows a copy-on-write path; whether the shared mappings' fill and write-back points meet the corpus |
 | G12 | M12 | throughput and commit latency on the Pi 4's SD card, against G6's on QEMU; boot time to the shell and to the first pet on both boards; the trial path's timings; slot images' sizes | the default trial deadline; the watchdog's boot deadline per board; whether images need compression |
 | GN-QEMU | 1b-G, on the stopgap | the packet-path prototype's UDP echo and TCP bulk transfer on QEMU under HVF, against a Linux peer and line rate, recorded with the stopgap named | nothing; it records the baseline GK3 repeats on erXos's kernel |
+| GR | 1b-I, before the first board boot | the boot probe on the Pi 4 under the stopgap; asks the board's RAM and the board rig | the RAM the Pi 4's platform record names, and the rig |
 | GN-board | M12 | the same on the Pi 4, against Linux's stack on the board and line rate | GK3's decision on TCP's fast path confirmed or reopened |
 | G13 | M13: 1b-H on QEMU, the Pi 4 at M12 | erXos's F2FS against littlefs over the file-semantics corpus and against Linux's F2FS and `fsck.f2fs`; the power-cut harness; throughput, commit latency and the cleaner's overhead, on the stopgap a baseline; the Pi 4's SD card at M12 | the replacement of littlefs, on QEMU, from the corpus, the oracle guest and the power cuts; the Pi 4's numbers may reopen it |
 | G14 | M14: 1b-G on QEMU, the boards at M12 | erXos's stack against FreeBSD's over the network test corpus and the packet scripts; throughput, latency and memory on QEMU, a baseline on the stopgap, and on both boards | the acceptance of erXos's stack, on QEMU; the boards confirm it |
@@ -2735,6 +2990,8 @@ Phase 1b, in order of its demos (backend rows, hosted backend too; BeamAsm besid
              --> 1b-C track D part 4, the QEMU kiosk (on 1b-D's first slice, with 1b-B's sub-space ports and pipes)
              --> 1b-F track D part 6 --> part 7 --> part 8
            1b-H M13 on QEMU (any time; lowest priority)
+           1b-I the Pi 4: (a) serial shell on raspi4b after Phase 1, then once on the board (GR)
+             --> (b) storage after 1b-E, (c) network after 1b-G, (d) display after 1b-C part 3
 
 Track K:   pilot (GK1), beside Phase 1b --> kernel in full (GK2), after 1b-A --> M7 (GK3, parity over Phase 1 and 1b)
 
@@ -2752,7 +3009,9 @@ Phase 2:   M7 --> M2 --> M5's and M9's kernel parts --> G6 --> M8 --> M10 --> M1
   pipes, then toybox's applets; 1b-F last, part 8
   after 1b-D. 1b-A comes first because every other item is a domain or
   runs in one. BeamAsm runs beside 1b-A, and 1b-H whenever capacity is
-  idle.
+  idle. 1b-I's serial shell follows Phase 1 on QEMU's `raspi4b`, and
+  passes once on a board when a rig exists; each
+  of its later stages follows the QEMU item it brings to the board.
 * Track K's pilot starts before Phase 1 is complete and runs beside
   Phase 1b, since its cores are host-built C17
   with no shared seam and its calibration is needed whatever the order;
