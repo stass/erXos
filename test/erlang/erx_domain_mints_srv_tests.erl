@@ -313,12 +313,91 @@ served() ->
     ?assertMatch(#{grantee := 6, max_request := 64, in_flight := 2}, erx_facet:info(Facet)),
     ?assertEqual(#{}, grants()).
 
+%% The ready answer names the facets of configured domains the manifest grants the
+%% domain, which come later by installation, so the domain mounts each it is granted:
+%% b (row 0) and a session of template 0 are granted echo and their answers name it;
+%% a, which serves echo and is granted nothing, finds none, and a session of template 1,
+%% which the manifest grants nothing, finds none, though template 0 holds a grant.
+granted_names_test_() ->
+    [{"template 0", fun() -> ?assertEqual({[], [echo], [echo]}, granted_names(0)) end},
+     {"template 1", fun() -> ?assertEqual({[], [echo], []}, granted_names(1)) end}].
+
+%% The names the ready answers of a, b and a session of principal 1 carried, with
+%% principal 1's sessions made from template Template.
+granted_names(Template) ->
+    Self = self(),
+    erlang:trace(new_processes, true, ['receive', {tracer, Self}]),
+    persistent_term:put({erx_domain_fake_lib, templates}, [#{principal => 1, template => Template}]),
+    Started = setup(),
+    try
+        [PidA, PidB] = [domain_pid(Id) || Id <- [5, 6]],
+        #{PidA := A, PidB := B} = granted_answers([PidA, PidB], #{}),
+        {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
+        #{} = Session = granted_answers([domain_pid(Id)], #{}),
+        {A, B, maps:get(domain_pid(Id), Session)}
+    after
+        erlang:trace(new_processes, false, ['receive']),
+        persistent_term:erase({erx_domain_fake_lib, templates}),
+        cleanup(Started)
+    end.
+
+%% The names each of Pids' ready answers carried, from the trace of their receives.
+granted_answers([], Answers) ->
+    Answers;
+granted_answers(Pids, Answers) ->
+    receive
+        {trace, Pid, 'receive', {_Ref, facets, _Facets, Granted}} ->
+            case lists:member(Pid, Pids) of
+                true -> granted_answers(lists:delete(Pid, Pids), Answers#{Pid => Granted});
+                false -> granted_answers(Pids, Answers)
+            end;
+        {trace, _, 'receive', _} ->
+            granted_answers(Pids, Answers)
+    after 2000 ->
+            error({no_answer, Pids})
+    end.
+
+%% The system domain mounts /data once the domain service has read the manifest, and
+%% only when the manifest grants it data: then /data is the facet's mount, which answers
+%% eio until the grant is installed; with no grant there is no mount, so /data is the
+%% root's own entry, as FreeBSD shows a mount point with nothing mounted on it.
+system_data_mount_test_() ->
+    [{"granted", fun() -> ?assertMatch([_, #{point := [<<"data">>], provider := {facet, data, <<"data">>}, rights := rw}],
+                                       system_mounts([{system, data, 1, #{}}, {0, data, 1, #{}}])) end},
+     {"not granted", fun() -> ?assertEqual([#{point => [], provider => release, root => [], rights => ro}],
+                                           system_mounts([{0, data, 1, #{}}])) end}].
+
+%% The system domain's mounts once the service has booted from a manifest whose data is
+%% a files service of a (row 1) with Grants, as start_link returns them, with no call
+%% to the service first, as the release's later applications read /data.
+system_mounts(Grants) ->
+    Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
+                                     restarts => 0, restart_period_s => 60, boot_timeout_s => 60} end,
+    persistent_term:put({erx_domain_fake_lib, boot},
+                        #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)],
+                          services => [{1, data, 5}], grants => Grants}),
+    persistent_term:erase(erx_ns),
+    {ok, Ns} = erx_ns:start_link(erx_ns_prim_stub),
+    unlink(Ns),
+    Log = erx_domain_fake_lib:start_log(),
+    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
+                                                 mints => #{owner => fun erx_domain_mints_tests:owner/1,
+                                                            deadline => ?DEADLINE}}),
+    unlink(Service),
+    try
+        erx_ns_prim_stub:erx_mounts()
+    after
+        erx_domain_fake_lib:kill_and_await([Service, Log, Ns]),
+        _ = [persistent_term:erase(Key) || Key <- [{erx_domain_fake_lib, boot}, erx_ns, {erx, facets}]]
+    end.
+
 %% The ready answer each of Pids received, from the trace of its receives.
 answers([], Answers) ->
     Answers;
 answers(Pids, Answers) ->
     receive
-        {trace, Pid, 'receive', {_Ref, facets, Facets}} ->
+        {trace, Pid, 'receive', {_Ref, facets, Facets, _Granted}} ->
             answers(lists:delete(Pid, Pids), Answers#{Pid => Facets});
         {trace, _, 'receive', _} ->
             answers(Pids, Answers)
@@ -416,9 +495,15 @@ files_setup(Grants) ->
     ok = erx_facet:serve(apps, Tree),
     erlang:trace(new_processes, true, ['receive', {tracer, self()}]),
     Fake = erx_domain_fake_lib:start_log(),
-    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
-                                                 mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
+    %% The service reads the manifest in its init, so a boot it refuses is start_link's
+    %% error, which this case's match fails on, rather than an exit that ends the case
+    %% unreported.
+    Trap = process_flag(trap_exit, true),
+    Result = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                         exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
+                                         mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
+    process_flag(trap_exit, Trap),
+    {ok, Service} = Result,
     unlink(Service),
     {Fake, Service, Tree}.
 

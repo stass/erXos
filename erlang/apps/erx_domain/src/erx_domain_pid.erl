@@ -49,8 +49,9 @@ and for a record that does not fit; the pid does not catch it, so its end
 stops the domain. A record for a side that has ended is dropped, since the
 domain's end is under way.
 
-The service's answer to the ready report, {Ref, facets, Facets}, the domain's
-facets by name, the pid sends its agent as {erx_facets, Facets}, an ordinary
+The service's answer to the ready report, {Ref, facets, Facets, Granted}, the
+domain's facets by name and the names of the facets of configured domains the
+manifest grants it, the pid sends its agent as {erx_facets, Facets, Granted}, an ordinary
 message, which the agent hands its init (edit 65), and never suspended: if the
 domain's lane is too full to take it, the pid asks the service to stop the
 domain, whose init would wait in vain. The service sends it only
@@ -109,10 +110,10 @@ loop(#{service := Service, id := Id, ref := Ref} = State) ->
         {Ref, record, Slot, Record} ->
             write(Slot, Record, State),
             loop(State);
-        {Ref, facets, Facets} when is_pid(map_get(agent, State)) ->
+        {Ref, facets, Facets, Granted} when is_pid(map_get(agent, State)) ->
             %% Never suspended behind a lane the domain leaves full: a domain that does
             %% not take its answer is stopped, as one whose boot fails.
-            case erlang:send(map_get(agent, State), {erx_facets, Facets}, [nosuspend]) of
+            case erlang:send(map_get(agent, State), {erx_facets, Facets, Granted}, [nosuspend]) of
                 ok -> ok;
                 nosuspend -> Service ! {stop_request, Ref, Id}
             end,

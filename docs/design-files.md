@@ -1229,7 +1229,10 @@ the stopgap kernel or works around a gap of it.
 entries, plus an entry of kind `directory` for every mount point directly
 below the directory that the provider does not list, so `ls /` shows
 `/data` and `/proc` whatever the provider mounted at `/` holds; a mount
-point hides a provider's entry of the same name. The client adds these
+point hides a provider's entry of the same name. Where a domain has no
+`/data` mount, because the manifest grants it no `data` facet, `ls /`
+shows `/data` from the root's own entry, the empty directory the release
+slice holds there ([A facet's mount](#building-binding-and-mounting)). The client adds these
 entries, from its own table, after the provider's last page, so a server
 never learns another's mounts.
 
@@ -1337,7 +1340,20 @@ domain's facet registry, the term `{erx, facets}` that `erx:cap/1`
 reads ([design-system.md](design-system.md#facets-a-configured-domain-serves)):
 on the grant the registry holds for `Name`, or `ended` when it holds
 none (`erx_path:with_facets/2`, which `prim_file:erx_table/0` applies
-to the term at each resolution). The authority is read at use, so
+to the term at each resolution). A domain mounts a facet only where the
+manifest grants it one: the domain service names, in a domain's ready
+answer, the facets of configured domains the manifest grants the
+domain, which arrive later by installation, and the domain mounts each
+that has a mount point, `data` at `/data`, read-write on
+the tree `data` (`erx_ns:mount_facets/1`, which a session's `erx_session`
+and the system domain's domain service, once it has read the manifest,
+call). A domain the manifest grants no `data` facet has no `/data` mount,
+so the path falls through to the root's own entry, an empty directory of
+the release slice, read-only, as FreeBSD shows the directory beneath a
+mount point with nothing mounted on it: `ls /data` lists nothing and a
+write there answers `erofs`. A facet that is mounted is never read as
+empty: until its grant is installed it answers `eio`, as below. The
+authority is read at use, so
 nothing follows the registry: when a server's domain restarts, the
 re-grant its new incarnation mints for the domain replaces the facet in
 the registry, and the next lookup reaches it, with no change to the

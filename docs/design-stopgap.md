@@ -1748,13 +1748,15 @@ nothing else, while the volume's end ends the mint and every grant, and the doma
 facet row's limits a grant applies three: `in_flight`, the most requests it holds at once (at most `erx_fs_grant`'s 64); `max_request`, the largest
 message size it agrees to at `version`, which it advertises but does not check against each frame (at most 9P's 65,560; a row below 9P's least, 4,096, is refused with `{error, einval}`); and `max_heap_size`,
 its process's heap bound in words, shared binaries included. `reductions` and `period_ns` bind no grant, as they bind no facet yet. The grantee's
-namespace reads its `data` grant at each lookup, so the mint keeps no record of what it handed out. The system domain mounts its `data` facet at
-`/data`, read-write and on the tree `data`, as its domain service's application starts (`erx_domain_app`), and every session domain does so as
-`erx_session` starts (`erx_session_app`), each with `erx_ns:mount({facet, data}, ...)` ([design-files.md](design-files.md), "A facet's mount"):
-the mount names the facet, never a grant, so every lookup under `/data` goes to the grant the domain's facet registry holds for `data` at that
-moment. Before the first grant arrives, in a session whose principal the manifest grants no `data` facet, and while the storage domain is down,
-`/data` answers `eio`; once the restarted storage domain's mint has installed a new grant, the next open reaches the volume again, while a
-descriptor opened before the restart keeps failing with `eio` and its writer opens the file again.
+namespace reads its `data` grant at each lookup, so the mint keeps no record of what it handed out. Only a domain the manifest grants `data`
+mounts its `data` facet at `/data`, read-write and on the tree `data`, with `erx_ns:mount_facets/1` ([design-files.md](design-files.md), "A
+facet's mount"): the system domain's domain service once it has read the manifest, and a session domain as `erx_session` starts
+(`erx_session_app`), from the names of its granted facets its ready answer carries. The mount names the facet, never a grant, so every lookup
+under `/data` goes to the grant the domain's facet registry holds for `data` at that moment. Before the first grant arrives and while the storage
+domain is down, `/data` answers `eio`; once the restarted storage domain's mint has installed a new grant, the next open reaches the volume
+again, while a descriptor opened before the restart keeps failing with `eio` and its writer opens the file again. A domain the manifest grants
+no `data`, such as every domain of a board with no storage driver, has no `/data` mount, and finds the root's empty, read-only `/data`
+directory there.
 
 ## The Raspberry Pi 4
 

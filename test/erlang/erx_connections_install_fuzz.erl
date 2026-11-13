@@ -87,7 +87,7 @@ nothing_else() ->
 random_message() ->
     Body = case rand:uniform(8) of
                1 -> random_term();
-               2 -> {erx_facets, #{data => pid(5)}};
+               2 -> {erx_facets, #{data => pid(5)}, [data]};
                3 -> list_to_tuple([erx_facets_install | [field() || _ <- lists:seq(1, pick([0, 1, 2, 4, 5]))]]);
                _ -> {erx_facets_install, tag(), name(), facet()}
            end,

@@ -9,7 +9,7 @@ to the module that does the work, with that module's authority and no
 authority of its own.
 """.
 
--export([i/0, i/1, source/1, trace/1, trace_stop/1, export/3, exports/1, owner/1, cap/1, caps/0]).
+-export([i/0, i/1, source/1, trace/1, trace_stop/1, export/3, exports/1, owner/1, cap/1, caps/0, granted/0]).
 
 %%% Source lines: erx:source/1.
 
@@ -156,3 +156,16 @@ facets.
 -spec caps() -> #{atom() => pid()}.
 caps() ->
     persistent_term:get({erx, facets}, #{}).
+
+-doc """
+The names of the facets of configured domains the manifest grants this
+domain, sorted, as its ready answer named them: each arrives by
+installation, so a name here may have no facet yet, and cap/1 finds it once
+installed (docs/design-system.md, "Facets a configured domain serves"). A
+domain mounts a files facet only where it is granted one
+(erx_ns:mount_facets/1). Empty in a domain that has had no ready answer, the
+system domain included, which takes its names from the manifest.
+""".
+-spec granted() -> [atom()].
+granted() ->
+    persistent_term:get({erx, granted}, []).

@@ -7,16 +7,18 @@
 
 -export([start/2, stop/1]).
 
-%% /data first: the storage domain's tree through the session's data facet, which each
-%% lookup reads afresh, so a grant installed later or re-granted after the storage
-%% domain restarts needs no remount, and a session whose principal holds no data facet
-%% finds /data answering eio (docs/design-stopgap.md, "/data for other domains").
+%% /data first, only for a session whose template the manifest grants data, which the
+%% ready answer names (erx:granted/0) before the application starts: the storage
+%% domain's tree through the session's data facet, which each lookup reads afresh, so a
+%% grant installed later or re-granted after the storage domain restarts needs no
+%% remount. A session without the grant has no /data mount and finds the root's empty
+%% /data directory (docs/design-files.md, "A facet's mount").
 %%
 %% Then /apps, the start service's tree (docs/design-apps.md, "Interfaces"), only for a
 %% session whose template the manifest grants apps: a session without the grant has no
 %% /apps at all. The grant is in the ready answer, before the application starts.
 start(_Type, _Args) ->
-    ok = erx_ns:mount({facet, data}, <<"/data">>, [{tree, <<"data">>}, rw]),
+    ok = erx_ns:mount_facets(erx:granted()),
     ok = mount_apps(erx:cap(apps)),
     erx_session_sup:start_link().
 

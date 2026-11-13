@@ -31,9 +31,12 @@ class ErxDomainTest < Minitest::Test
   # inspection modules of erx, the driver supervisor of erx_blk, and the erx_fs behaviour and
   # the grants of erx_files that /dev's tree and a test files service use.
   APPLICATIONS = %w[erx erx_files erx_blk erx_domain].freeze
-  # erx_9p_grammar is generated into the preloaded sources of OTP, outside the applications.
+  # erx_9p_grammar is generated into the preloaded sources of OTP and erx_path is preloaded, both
+  # outside the applications; erx_ns_prim_stub stands in for prim_file under the system domain's /data mount.
   TESTS = %w[
     build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
+    otp/erts/preloaded/src/erx_path.erl
+    test/erlang/erx_ns_prim_stub.erl
     test/erlang/erx_devfs_tests.erl
     test/erlang/erx_fs_test_tree.erl
     test/erlang/erx_driver_ctl_tests.erl

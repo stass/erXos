@@ -5,7 +5,8 @@
 -moduledoc """
 The start service's application (docs/design-apps.md, "Keeping a
 session"): starts erx_starter_sup. The system release starts it after
-erx_domain, whose /data mount and domain service it uses.
+erx_domain, whose domain service it uses, and which has mounted the system
+domain's /data by then where the manifest grants it.
 """.
 -behaviour(application).
 

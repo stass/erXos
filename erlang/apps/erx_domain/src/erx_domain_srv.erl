@@ -157,7 +157,7 @@ init(Opts) ->
     Lib = library(maps:get(lib, Opts, erx_domain_lib)),
     case principals(Lib, Opts) of
         {ok, Principals} ->
-            {ok, state(Lib, Principals, Opts), {continue, boot}};
+            {ok, booted(state(Lib, Principals, Opts)), {continue, boot}};
         {error, Reason} ->
             logger:error("erx_domain_srv: cannot read the principals of the system manifest "
                          "(/manifest), which the domain library booted from: ~0p", [Reason]),
@@ -233,11 +233,22 @@ library(Lib) ->
         {error, Reason} -> error({domain_library, Reason})
     end.
 
-handle_continue(boot, #{lib := Lib} = State) ->
+%% Boot step 4's first part: each configured domain starts, in its place's order, before
+%% the service takes a call.
+handle_continue(boot, #{configured := Configured} = State) ->
+    Ordered = lists:sort(fun(#{place := A}, #{place := B}) -> A =< B end, maps:values(Configured)),
+    {noreply, lists:foldl(fun start_configured/2, State, Ordered)}.
+
+%% The service's state once it has read from its library the manifest's configured
+%% domains, session templates, services and facet rows. It runs in init/1, so that what
+%% follows from the manifest is in place when start_link returns, the system domain's own
+%% /data mount among it: the applications the release starts after erx_domain read /data
+%% at once (erx_starter reads rc.conf there) and never call the service first. A library
+%% that cannot say leaves no configured domain, no grant and an empty host.
+booted(#{lib := Lib} = State) ->
     case {configured(Lib), templates(Lib)} of
         {{ok, #{host := Host, domains := Rows} = Boot}, {ok, Templates}} ->
-            Ordered = lists:sort(fun(#{place := A}, #{place := B}) -> A =< B end, Rows),
-            Configured = maps:from_list([{Row, Entry} || #{row := Row} = Entry <- Ordered]),
+            Configured = maps:from_list([{Row, Entry} || #{row := Row} = Entry <- Rows]),
             %% The manifest's service rows of configured domains and its facet rows,
             %% which the manifest check has proved consistent: a configured domain's
             %% service, and a grant to a session template's sessions, which only a
@@ -256,13 +267,16 @@ handle_continue(boot, #{lib := Lib} = State) ->
             Served = maps:groups_from_list(fun({Grantee, _, _, _}) -> Grantee end,
                                            fun({_, Name, _, Limits}) -> {Name, served_kind(Name, Files), Limits} end,
                                            System),
-            Booted = State#{core := erx_domain_core:new(Host), configured := Configured, mints := Mints, served := Served,
-                            templates := maps:from_list([{P, T} || #{principal := P} = T <- Templates])},
-            {noreply, lists:foldl(fun start_configured/2, Booted, Ordered)};
+            %% The system domain's own facets of configured domains: /data only where the
+            %% manifest grants the system domain data (docs/design-files.md, "A facet's
+            %% mount").
+            ok = erx_ns:mount_facets(erx_domain_mints:granted_names(system, Mints)),
+            State#{core := erx_domain_core:new(Host), configured := Configured, mints := Mints, served := Served,
+                   templates := maps:from_list([{P, T} || #{principal := P} = T <- Templates])};
         {{error, _}, _} ->
-            {noreply, State#{core := erx_domain_core:new(<<>>)}};
+            State#{core := erx_domain_core:new(<<>>)};
         {_, {error, _}} ->
-            {noreply, State#{core := erx_domain_core:new(<<>>)}}
+            State#{core := erx_domain_core:new(<<>>)}
     end.
 
 configured(none) -> {error, enotsup};
@@ -783,7 +797,7 @@ ready(Id, Ref, Provides, Inspect, #{core := Core, waiting := Waiting} = State) -
         {{ok, #{ref := Ref, state := running, origin := Origin, node := Node, start := Start}}, _} ->
             {Actions, Links} = erx_domain_links:ready(Id, maps:get(links, State)),
             Ready = State#{core := erx_domain_core:ready(Id, Inspect, Core), links := Links},
-            Answered = answer_ready(Id, grant_facets(Id, served(Origin, Ready), perform(Actions, Ready))),
+            Answered = answer_ready(Id, grant_facets(Id, served(Origin, Ready), granted(Origin, Ready), perform(Actions, Ready))),
             case Origin of
                 {configured, Row} -> mints({ready, Row, Id, Node, Provides}, Answered);
                 {session, Template} -> mints({session_ready, Template, Id, marked(Start)},
@@ -810,8 +824,11 @@ marked(#{}) -> none.
 %% or the one system_facet/4 picks for the service. A files service's grant is an
 %% erx_fs grant its erx_fs_grants supervisor starts, and ends with that supervisor. The answer
 %% goes to the domain pid, which hands it to the domain's agent for init (edit 65). Init
-%% waits for it, so every domain that reported is answered, with no facets too.
-grant_facets(Id, Served, #{core := Core, exports := Exports} = State) ->
+%% waits for it, so every domain that reported is answered, with no facets too. Granted,
+%% the names of the facets of configured domains the manifest grants the domain
+%% (granted/2), goes with it, so the domain mounts what it is granted before the grants
+%% are installed (docs/design-system.md, "Facets a configured domain serves").
+grant_facets(Id, Served, Granted, #{core := Core, exports := Exports} = State) ->
     {ok, #{pid := Pid, ref := Ref, facets := Facets, principal := Principal}} = erx_domain_core:fetch(Id, Core),
     Specs = maps:map(fun(_Name, {Behind, Limits}) -> {facet, erx_domain_facet, Behind, Limits#{behind => Behind}} end,
                      Facets),
@@ -819,7 +836,7 @@ grant_facets(Id, Served, #{core := Core, exports := Exports} = State) ->
     %% A spec never names a service of the table (facet/3), and the manifest grants a
     %% configured domain no spec, so the two never share a name.
     Minted = maps:filtermap(fun(Name, Facet) -> mint(Id, Pid, Name, Facet, Exports) end, maps:merge(Specs, Systems)),
-    Pid ! {Ref, facets, Minted},
+    Pid ! {Ref, facets, Minted, Granted},
     State.
 
 %% The facet of a service the system domain serves, for a domain of Principal: the
@@ -898,6 +915,15 @@ files_grant(Grants, Limits, Binding) ->
 %% its process, and nothing grants a new one when the service restarts (TODO.md).
 served(Origin, #{served := Served}) ->
     served(grantee(Origin), Served, persistent_term:get({erx, serves}, #{})).
+
+%% The names of the facets of configured domains the manifest grants a domain of
+%% Origin, its row's or its template's, and no other domain's; none for a domain created
+%% on request, which the manifest grants nothing.
+granted(Origin, #{mints := Mints}) ->
+    case grantee(Origin) of
+        none -> [];
+        Grantee -> erx_domain_mints:granted_names(Grantee, Mints)
+    end.
 
 %% The key of Served an origin's grants are under: its row, or its template's.
 grantee({configured, Row}) -> Row;

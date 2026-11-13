@@ -94,7 +94,7 @@ state of its own, and a grant with an operation is bounded by its
 deadline, a starting server by its boot timeout.
 """.
 
--export([new/1, step/2, grants/1, granted/3, in_place/3]).
+-export([new/1, step/2, grants/1, granted/3, granted_names/2, in_place/3]).
 -export_type([state/0, config/0, event/0, action/0, grant/0, key/0, pair/0]).
 
 -define(SYSTEM_ID, 4).
@@ -202,6 +202,19 @@ display (erx_domain_srv), so a start names only a grant its template has.
 -spec granted(template(), term(), state()) -> boolean().
 granted(Template, Name, #{templates := Templates}) ->
     lists:keymember(Name, 1, maps:get(Template, Templates, [])).
+
+-doc """
+The names of the services of configured domains the manifest grants
+Grantee, sorted: a configured row's, the system domain's, or, for
+{template, T}, those of every session made from template T. Only
+Grantee's own grants, so a domain's ready answer, which names them, says
+nothing of another domain's (erx_domain_srv).
+""".
+-spec granted_names(row() | system | {template, template()}, state()) -> [name()].
+granted_names({template, Template}, #{templates := Templates}) ->
+    lists:usort([Name || {Name, _Server, _Limits} <- maps:get(Template, Templates, [])]);
+granted_names(Grantee, #{grants := Grants}) ->
+    lists:usort([Name || {Holder, Name} <- maps:keys(Grants), Holder =:= Grantee]).
 
 -doc """
 Whether Grantee's namespace is in place: each of its grants of a files

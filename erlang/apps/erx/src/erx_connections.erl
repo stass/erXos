@@ -315,7 +315,9 @@ hand_over(Kernel, #{port := Port} = Connection) ->
 %%   {erx_origin, SystemId, Record}, so a peer handed the agent's pid can reach it but
 %%   not steer it;
 %% * in the same envelope, the domain service's answer to init's ready report, the
-%%   domain's facets by name, which the agent hands init (edit 65), and each later
+%%   domain's facets by name, which the agent hands init (edit 65), with the names of
+%%   the facets of configured domains the manifest grants it, which the agent keeps for
+%%   erx:granted/0 (docs/design-system.md, "Facets a configured domain serves"), and each later
 %%   installation of a facet a configured domain minted for this one (install/4);
 %% * erx_dist's word that an introduced connection's entry is up;
 %% * each introduced port's end, and net_kernel's end.
@@ -335,9 +337,12 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
             records(Env, connection_up(Env, Peer, PeerNode, Values, Held), Dropped);
         {erx_origin, SystemId, {erx_connection_down, Peer, Reason}} when is_integer(Peer) ->
             records(Env, connection_down(Env, Peer, Reason, Held), Dropped);
-        {erx_origin, SystemId, {erx_facets, Facets}} when is_map(Facets) ->
+        {erx_origin, SystemId, {erx_facets, Facets, Granted}} when is_map(Facets) ->
             Valid = #{Name => Facet || Name := Facet <- Facets, is_atom(Name), is_pid(Facet)},
             register_facets(Valid),
+            %% Kept before init hears of the facets, so the applications init then starts
+            %% find the names erx:granted/0 reads.
+            persistent_term:put({erx, granted}, lists:usort(names(Granted))),
             init ! {erx_facets, Valid},
             records(Env, Held, Dropped);
         {erx_origin, SystemId, {erx_facets_install, Tag, Name, Facet}}
@@ -374,6 +379,12 @@ install(#{domain_pid := DomainPid}, Tag, Name, Facet) ->
     register_facets(#{Name => Facet}),
     DomainPid ! {erx_facets_installed, Tag},
     ok.
+
+%% The atoms of List, the ready answer's names of the facets the manifest grants the
+%% domain, ignoring any other element and an improper tail.
+names([Name | Rest]) when is_atom(Name) -> [Name | names(Rest)];
+names([_ | Rest]) -> names(Rest);
+names(_) -> [].
 
 %% The agent is the registry's one writer in a domain, the answer to the ready report's
 %% facets and every installation, so no installation is lost to a write that read the

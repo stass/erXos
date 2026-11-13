@@ -30,6 +30,7 @@ ns_test_() ->
       fun a_malformed_request_answers_einval_and_changes_nothing/0,
       fun a_facet_mount_reads_the_registry_at_use/0,
       fun a_facet_grant_that_ends_leaves_the_table_and_survives_a_restart/0,
+      fun facets_mount_only_where_granted/0,
       fun facet_mount_refusals/0]}.
 
 start() ->
@@ -247,6 +248,19 @@ a_facet_grant_that_ends_leaves_the_table_and_survives_a_restart() ->
     {ok, Again} = erx_ns:start_link(erx_ns_prim_stub),
     unlink(Again),
     ?assertEqual(Before, settled()).
+
+%% A domain mounts a facet only where the manifest grants it (erx:granted/0, as the
+%% system domain's service and a session's application pass it): with no data facet
+%% granted there is no mount, so /data is the root's own entry, which a FreeBSD mount
+%% point with nothing mounted on it also shows; a name with no mount point mounts
+%% nothing. With data granted and its grant not yet installed, /data is the facet's
+%% mount, which answers eio, and never falls through to the root beneath it.
+facets_mount_only_where_granted() ->
+    ?assertEqual(ok, erx_ns:mount_facets([])),
+    ?assertEqual(ok, erx_ns:mount_facets([echo])),
+    ?assertEqual([?RELEASE], at_use()),
+    ?assertEqual(ok, erx_ns:mount_facets([echo, data])),
+    ?assertEqual([?RELEASE, #{point => [<<"data">>], provider => ended, root => [], rights => rw}], at_use()).
 
 %% A facet is named by an atom, and its mount takes a grant's options; a pid of another
 %% domain is never mounted directly, only through a facet.

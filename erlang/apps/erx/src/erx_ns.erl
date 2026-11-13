@@ -50,7 +50,7 @@
 
 -behaviour(gen_server).
 
--export([start_link/0, start_link/1, mount/3, unmount/1, bind/2, bind/3, tmp_limit/0, change/2]).
+-export([start_link/0, start_link/1, mount/3, mount_facets/1, unmount/1, bind/2, bind/3, tmp_limit/0, change/2]).
 -export([image_log/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 -export_type([entry/0, table/0]).
@@ -103,6 +103,24 @@ mount({erofs, Window}, To, Options) ->
     request(fun() -> {mount, text(To), {erofs, Window}, Options} end);
 mount(Pid, To, Options) ->
     request(fun() -> {mount, text(To), Pid, Options} end).
+
+%% Mounts each facet of Names, the facets of configured domains the manifest grants the
+%% domain (erx:granted/0, or the manifest itself in the system domain), where it
+%% belongs: data, the storage domain's tree, at /data, read-write on its tree data. A
+%% name with no place here mounts nothing, and a facet the domain is not granted is
+%% never mounted, so its path falls through to the root's own entry
+%% (docs/design-files.md, "A facet's mount"). Stops at the first refusal and returns it.
+-spec mount_facets([atom()]) -> ok | {error, reason()}.
+mount_facets([]) ->
+    ok;
+mount_facets([Name | Rest]) ->
+    case mount_facet(Name) of
+        ok -> mount_facets(Rest);
+        Refused -> Refused
+    end.
+
+mount_facet(data) -> mount({facet, data}, <<"/data">>, [{tree, <<"data">>}, rw]);
+mount_facet(_Name) -> ok.
 
 %% Removes the entry at exactly To.
 -spec unmount(file:name_all()) -> ok | {error, reason()}.

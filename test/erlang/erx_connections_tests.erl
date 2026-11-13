@@ -248,19 +248,28 @@ facets(Agent) ->
     %% envelope, and as a map, of which init gets the entries naming a facet's pid by an
     %% atom. One a peer sends, one sent bare, one that is not a map and one wrapped twice
     %% are dropped and counted, so no domain but the system domain names init's facets.
+    %% The answer's names of the facets the manifest grants the domain, which come later
+    %% by installation, are kept for erx:granted/0, the atoms alone, before init hears
+    %% of the facets, so a domain mounts only what it is granted; a forged answer
+    %% changes them no more than it changes the facets.
     Init = whereis(init),
     Facet = spawn(fun() -> receive stop -> ok end end),
     erlang:trace(Init, true, ['receive']),
-    Agent ! {erx_origin, ?PEER, {erx_facets, #{forged => Facet}}},
-    Agent ! {erx_facets, #{forged => Facet}},
-    Agent ! {erx_origin, ?SYSTEM, {erx_facets, [forged]}},
-    Agent ! {erx_origin, ?SYSTEM, {erx_origin, ?PEER, {erx_facets, #{forged => Facet}}}},
-    record(Agent, {erx_facets, #{echo => Facet, <<"bin">> => Facet, bad => 3}}),
-    ?assertEqual(4, erx_connections:dropped()),
-    First = init_facets(2000),
-    erlang:trace(Init, false, ['receive']),
-    ?assertEqual([#{echo => Facet}], First ++ init_facets(100)),
-    Facet ! stop.
+    try
+        Agent ! {erx_origin, ?PEER, {erx_facets, #{forged => Facet}, [forged]}},
+        Agent ! {erx_facets, #{forged => Facet}, [forged]},
+        Agent ! {erx_origin, ?SYSTEM, {erx_facets, [forged], [forged]}},
+        Agent ! {erx_origin, ?SYSTEM, {erx_origin, ?PEER, {erx_facets, #{forged => Facet}, [forged]}}},
+        record(Agent, {erx_facets, #{echo => Facet, <<"bin">> => Facet, bad => 3}, [data, <<"bin">>, 3 | tail]}),
+        ?assertEqual(4, erx_connections:dropped()),
+        First = init_facets(2000),
+        erlang:trace(Init, false, ['receive']),
+        ?assertEqual([#{echo => Facet}], First ++ init_facets(100)),
+        ?assertEqual([data], persistent_term:get({erx, granted}))
+    after
+        persistent_term:erase({erx, granted}),
+        Facet ! stop
+    end.
 
 installs(Agent) ->
     %% A facet a configured domain minted for this domain is installed in its registry,
@@ -271,7 +280,7 @@ installs(Agent) ->
     Answer = spawn(fun() -> receive stop -> ok end end),
     [Old, New] = [spawn(fun() -> receive stop -> ok end end) || _ <- [1, 2]],
     try
-        record(Agent, {erx_facets, #{echo => Answer}}),
+        record(Agent, {erx_facets, #{echo => Answer}, []}),
         Agent ! {erx_origin, ?PEER, {erx_facets_install, 1, data, Old}},
         Agent ! {erx_facets_install, 2, data, Old},
         record(Agent, {erx_facets_install, 3, <<"data">>, Old}),

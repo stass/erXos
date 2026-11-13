@@ -2106,10 +2106,17 @@ The manifest check refuses a configured grant whose name is also a facet
 the grantee's spec takes from the system domain, so an installation never
 replaces a facet of the ready answer; that answer reaches the grantee
 first, since the domain service sends it as it takes the grantee's ready
-report, which every operation for that grantee follows. Until its grant
-is installed, and while its server restarts, the grantee finds the name
-absent or its facet dead, and treats both as the service being
-unavailable.
+report, which every operation for that grantee follows. The ready answer
+also names the facets of configured domains the manifest grants the
+grantee, its row's grants or its session template's, and no other
+domain's, so the grantee knows a name is coming before its grant is
+installed: a domain mounts a files facet only where the manifest grants
+it one ([design-files.md](design-files.md#building-binding-and-mounting),
+"A facet's mount"), and the domain's agent keeps the names for
+`erx:granted/0`. The system domain, which holds the manifest, takes its
+own names from it. Until its grant is installed, and while its server
+restarts, the grantee finds the name absent or its facet dead, and
+treats both as the service being unavailable.
 
 **Failure.** A failed operation is logged, with the step it failed in: the
 introduction's error, a bad reply, or the deadline in `introducing`,

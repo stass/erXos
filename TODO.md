@@ -1225,6 +1225,14 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] release slice, an empty `/data` (`include/erx/release_fs.h`, `liberx/release_fs.c`, `liberx/release.c`,
+  `tools/lib/erx/pack.rb`, `tools/lib/erx/release_files.rb`): a domain the manifest grants no `data` facet has
+  no `/data` mount and should find the root's empty, read-only `/data` directory there (design-files.md, "A
+  facet's mount"), but the release slice cannot hold an empty directory: a directory is one only when some file
+  path is below it, and a pack entry is a file or an image. So `/data` answers `enoent` and `ls /` does not show
+  it. Give the pack index an entry kind for an empty directory (no data, prefix of no other path, which the open
+  check already refuses), have the release file system's walk, lookup and listing answer it as a directory,
+  extend the boot-image fuzz target and its corpus, and have the release write `system/data`.
 * [Medium] manifest fuzz harness (`tools/fuzz/manifest_fuzz.c`, `tools/fuzz/manifest_verdicts.c`): `view_build`
   runs `view_check` only when the domain library admits the manifest, and a refusal is silent, so the library
   refusing a valid seed (the development manifest) leaves the target and `test/host/manifest_fuzz_test.rb` passing

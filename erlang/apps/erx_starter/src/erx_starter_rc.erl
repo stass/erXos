@@ -7,7 +7,8 @@ The rc.conf process: it does every file operation on rc.conf
 (docs/design-apps.md, "Where the file is" and "Concurrency"), one at a
 time, for the table, which does none itself. The file is `rc.conf` in a
 directory the table names: directory/0, `start` at the root of the
-system domain's `data` grant, which erx_domain_app mounts at /data, or a
+system domain's `data` grant, which the domain service mounts at /data where the
+manifest grants it (with no grant the path is the root's and the file absent), or a
 test's own.
 
 The table asks with read/1 and write/2, which return at once, and takes
