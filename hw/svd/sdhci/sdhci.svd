@@ -148,7 +148,12 @@
             <field><name>CARD_DET</name><description>Card detect test level (sdhci.h:172)</description><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>FORCE_CARD</name><description>Card detect signal selection: 1 the test level (sdhci.h:173)</description><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>POWER_ON</name><description>SD bus power (sdhci.h:176)</description><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>VOLTAGE</name><description>SD bus voltage select: 5 1.8 V, 6 3.0 V, 7 3.3 V (sdhci.h:177-179)</description><bitOffset>9</bitOffset><bitWidth>3</bitWidth></field>
+            <field><name>VOLTAGE</name><description>SD bus voltage select: 5 1.8 V, 6 3.0 V, 7 3.3 V (sdhci.h:177-179)</description><bitOffset>9</bitOffset><bitWidth>3</bitWidth>
+              <enumeratedValues>
+                <enumeratedValue><name>V180</name><value>5</value></enumeratedValue>
+                <enumeratedValue><name>V300</name><value>6</value></enumeratedValue>
+                <enumeratedValue><name>V330</name><value>7</value></enumeratedValue>
+              </enumeratedValues></field>
           </fields>
         </register>
         <register>
@@ -161,7 +166,10 @@
             <field><name>CLOCK_CARD_EN</name><description>SD clock enable (sdhci.h:191)</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>DIVIDER_HI</name><description>Bits 9:8 of the 10-bit clock divider (sdhci.h:189-190)</description><bitOffset>6</bitOffset><bitWidth>2</bitWidth></field>
             <field><name>DIVIDER</name><description>Bits 7:0 of the 10-bit clock divider (sdhci.h:186-188)</description><bitOffset>8</bitOffset><bitWidth>8</bitWidth></field>
-            <field><name>TIMEOUT</name><description>Data timeout counter value: the timeout is 2^(13 + value) cycles of the timeout clock (sdhci.h:198; HC 2.2.16, p.73)</description><bitOffset>16</bitOffset><bitWidth>4</bitWidth></field>
+            <field><name>TIMEOUT</name><description>Data timeout counter value: the timeout is 2^(13 + value) cycles of the timeout clock (sdhci.h:198; HC 2.2.16, p.73)</description><bitOffset>16</bitOffset><bitWidth>4</bitWidth>
+              <enumeratedValues>
+                <enumeratedValue><name>MAX</name><value>14</value></enumeratedValue>
+              </enumeratedValues></field>
             <field><name>RESET_ALL</name><description>Software reset for all, cleared by the controller when done (sdhci.h:201)</description><bitOffset>24</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>RESET_CMD</name><description>Software reset for the command line (sdhci.h:202)</description><bitOffset>25</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>RESET_DATA</name><description>Software reset for the data lines (sdhci.h:203)</description><bitOffset>26</bitOffset><bitWidth>1</bitWidth></field>
@@ -197,6 +205,8 @@
             <field><name>ACMD12ERR</name><description>Auto CMD error (sdhci.h:230)</description><bitOffset>24</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
             <field><name>ADMAERR</name><description>ADMA error (sdhci.h:231)</description><bitOffset>25</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
             <field><name>TUNEERR</name><description>Tuning error (sdhci.h:232)</description><bitOffset>26</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>RESP_ERR</name><description>Response error, which a controller of version 4.00 or later sets when its own check of an R1 or R5 finds an error (HC 2.2.19, Figure 2-22, p.82)</description><bitOffset>27</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>VENDOR_ERR</name><description>Vendor-specific error status, four bits (HC 2.2.19, Figure 2-22, p.82)</description><bitOffset>28</bitOffset><bitWidth>4</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
           </fields>
         </register>
         <register>
@@ -228,6 +238,8 @@
             <field><name>ACMD12ERR</name><bitOffset>24</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>ADMAERR</name><bitOffset>25</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>TUNEERR</name><bitOffset>26</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RESP_ERR</name><description>Response error status enable (HC 2.2.21, Figure 2-24, p.88)</description><bitOffset>27</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>VENDOR_ERR</name><description>Vendor-specific error status enable, four bits (HC 2.2.21, Figure 2-24, p.88)</description><bitOffset>28</bitOffset><bitWidth>4</bitWidth></field>
           </fields>
         </register>
         <register>
@@ -259,6 +271,8 @@
             <field><name>ACMD12ERR</name><bitOffset>24</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>ADMAERR</name><bitOffset>25</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>TUNEERR</name><bitOffset>26</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RESP_ERR</name><description>Response error signal enable (HC 2.2.23, Figure 2-26, p.92)</description><bitOffset>27</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>VENDOR_ERR</name><description>Vendor-specific error signal enable, four bits (HC 2.2.23, Figure 2-26, p.92)</description><bitOffset>28</bitOffset><bitWidth>4</bitWidth></field>
           </fields>
         </register>
         <register>
@@ -317,7 +331,10 @@
           <addressOffset>0xfc</addressOffset><access>read-only</access>
           <fields>
             <field><name>SLOT_INT</name><description>Interrupt signal of each slot, which FreeBSD reads whole (sdhci.h:330; HC 2.3.15, p.137)</description><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field>
-            <field><name>SPEC_VER</name><description>Specification version: 2 for version 3.00 (sdhci.h:335; HC 2.3.16, p.138)</description><bitOffset>16</bitOffset><bitWidth>8</bitWidth></field>
+            <field><name>SPEC_VER</name><description>Specification version: 2 for version 3.00 (sdhci.h:335; HC 2.3.16, p.138)</description><bitOffset>16</bitOffset><bitWidth>8</bitWidth>
+              <enumeratedValues>
+                <enumeratedValue><name>V300</name><value>2</value></enumeratedValue>
+              </enumeratedValues></field>
             <field><name>VENDOR_VER</name><description>Vendor version (sdhci.h:333-334)</description><bitOffset>24</bitOffset><bitWidth>8</bitWidth></field>
           </fields>
         </register>

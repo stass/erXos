@@ -22,7 +22,8 @@ A transfer is new/1 and then step/2. Its events:
 * `{error, Name}`, an error bit of decode/1.
 
 Its actions: `{issue, transfer}`, the request's own CMD17, CMD18, CMD24 or
-CMD25, which erx_blk_write builds; `{issue, {cmd, 13, Argument}}`;
+CMD25, which erx_blk_write builds; `{issue, status}`, CMD13, which
+erx_blk_write builds too;
 `read_block`, 128 words from `data`; `{write_block, Index}`, the request's
 block Index into `data`; and at the end exactly one of `{answer, ok}`,
 `{answer, {error, {device, deadline}}}` for a request that waited past the
@@ -30,7 +31,9 @@ wait limit and was never issued, or `{fail, Detail}`, after which the
 device process ends. Times are monotonic milliseconds.
 """.
 
--export([decode/1, signalling/1, divider/2, new/1, step/2, phase/1, deadline/1]).
+-export([decode/1, ack_mask/0, enable_mask/0, signalling/1, divider/2]).
+-export([inhibited/2, dat0_high/1, base_clock/2, version/1]).
+-export([new/1, step/2, phase/1, deadline/1]).
 -export([wait_limit_ms/0, in_flight_ms/0]).
 
 -export_type([event/0, interrupt_event/0, transfer/0, request/0, action/0]).
@@ -63,18 +66,18 @@ device process ends. Times are monotonic milliseconds.
                | buffer_read_ready | buffer_write_ready | {error, error_name()}.
 -type request() :: #{op := read | write, sector := non_neg_integer(),
                      count := pos_integer(), capacity := pos_integer(),
-                     rca := 0..16#FFFF, accepted := integer()}.
--type action() :: {issue, transfer | {cmd, 13, 0..16#FFFFFFFF}} | read_block
+                     accepted := integer()}
+                 | #{op := flush, accepted := integer()}.
+-type action() :: {issue, transfer | status} | read_block
                 | {write_block, non_neg_integer()} | {answer, ok}
                 | {answer, {error, {device, deadline}}} | {fail, term()}.
 -type phase() :: waiting | command | data | status | done.
 
 %% One request: moved counts the blocks through `data` so far.
 -record(transfer, {phase = waiting :: phase(),
-                   op :: read | write,
-                   count :: pos_integer(),
-                   last :: boolean(),
-                   rca :: 0..16#FFFF,
+                   op :: read | write | flush,
+                   count = 0 :: non_neg_integer(),
+                   last = false :: boolean(),
                    accepted :: integer(),
                    issued :: undefined | integer(),
                    moved = 0 :: non_neg_integer()}).
@@ -110,11 +113,9 @@ decode(Word) when ?IS_WORD(Word) ->
 decode(_) ->
     none.
 
-%% The error bits from the lowest, each with its name. Bits 16 to 26 are the
-%% INTERRUPT fields of hw/svd/sdhci/sdhci.svd. Bit 27, response error, and the
-%% vendor bits 28 to 31 are in no field of the SVD (TODO.md), so they are
-%% numbered here (Host Controller 2.2.18-2.2.19, p.76-85, which the SVD cites
-%% for INTERRUPT).
+%% The error bits from the lowest, each with its name: the error fields of
+%% INTERRUPT in hw/svd/sdhci/sdhci.svd (Host Controller 2.2.19, p.82-85), the
+%% four vendor bits of VENDOR_ERR one by one.
 error_bits() ->
     [{?ERX_HW_SDHCI_INTERRUPT_TIMEOUT_MASK, command_timeout},
      {?ERX_HW_SDHCI_INTERRUPT_CRC_MASK, command_crc},
@@ -127,8 +128,112 @@ error_bits() ->
      {?ERX_HW_SDHCI_INTERRUPT_ACMD12ERR_MASK, auto_cmd},
      {?ERX_HW_SDHCI_INTERRUPT_ADMAERR_MASK, adma},
      {?ERX_HW_SDHCI_INTERRUPT_TUNEERR_MASK, tuning},
-     {1 bsl 27, response}
-     | [{1 bsl Bit, {vendor, Bit}} || Bit <- lists:seq(28, 31)]].
+     {?ERX_HW_SDHCI_INTERRUPT_RESP_ERR_MASK, response}
+     | [{1 bsl Bit, {vendor, Bit}}
+        || Bit <- lists:seq(?ERX_HW_SDHCI_INTERRUPT_VENDOR_ERR_SHIFT,
+                            ?ERX_HW_SDHCI_INTERRUPT_VENDOR_ERR_SHIFT + ?ERX_HW_SDHCI_INTERRUPT_VENDOR_ERR_WIDTH - 1)]].
+
+-doc """
+The bits of an `interrupt` word the device process writes back to clear
+them: every one-to-clear field of INTERRUPT. The rest (card interrupt,
+INT_A to INT_C, re-tuning and the error summary) follow their sources and
+are read-only, so erx_device:write/3 refuses a word that sets them.
+""".
+-spec ack_mask() -> 0..16#FFFFFFFF.
+ack_mask() ->
+    lists:foldl(fun(Mask, Acc) -> Mask bor Acc end, 0, [Mask || {Mask, _Name} <- clear_bits()]).
+
+-doc """
+The status and signal enable word, written to both `irpt_mask` and
+`irpt_en` at the start, whose fields lie as INTERRUPT's (Host Controller
+2.2.20-2.2.23, p.86-93): the enable of every status the device process can
+clear, the statuses decode/1 turns into events: command complete, the two
+buffer events, transfer complete and every error. Block gap, DMA and card
+insertion and removal are cleared when seen but not enabled, since the
+driver arms no DMA and forces the card present; a status that follows its
+source is never enabled, so no level the driver cannot clear holds the line.
+""".
+-spec enable_mask() -> 0..16#FFFFFFFF.
+enable_mask() ->
+    lists:foldl(fun(Mask, Acc) -> Mask bor Acc end, 0,
+                [?ERX_HW_SDHCI_IRPT_MASK_RESPONSE_MASK, ?ERX_HW_SDHCI_IRPT_MASK_DATA_END_MASK,
+                 ?ERX_HW_SDHCI_IRPT_MASK_SPACE_AVAIL_MASK, ?ERX_HW_SDHCI_IRPT_MASK_DATA_AVAIL_MASK,
+                 ?ERX_HW_SDHCI_IRPT_MASK_TIMEOUT_MASK, ?ERX_HW_SDHCI_IRPT_MASK_CRC_MASK,
+                 ?ERX_HW_SDHCI_IRPT_MASK_END_BIT_MASK, ?ERX_HW_SDHCI_IRPT_MASK_INDEX_MASK,
+                 ?ERX_HW_SDHCI_IRPT_MASK_DATA_TIMEOUT_MASK, ?ERX_HW_SDHCI_IRPT_MASK_DATA_CRC_MASK,
+                 ?ERX_HW_SDHCI_IRPT_MASK_DATA_END_BIT_MASK, ?ERX_HW_SDHCI_IRPT_MASK_BUS_POWER_MASK,
+                 ?ERX_HW_SDHCI_IRPT_MASK_ACMD12ERR_MASK, ?ERX_HW_SDHCI_IRPT_MASK_ADMAERR_MASK,
+                 ?ERX_HW_SDHCI_IRPT_MASK_TUNEERR_MASK, ?ERX_HW_SDHCI_IRPT_MASK_RESP_ERR_MASK,
+                 ?ERX_HW_SDHCI_IRPT_MASK_VENDOR_ERR_MASK]).
+
+%% INTERRUPT's one-to-clear fields: the normal ones, then error_bits/0's.
+clear_bits() ->
+    [{?ERX_HW_SDHCI_INTERRUPT_RESPONSE_MASK, command_complete},
+     {?ERX_HW_SDHCI_INTERRUPT_DATA_END_MASK, transfer_complete},
+     {?ERX_HW_SDHCI_INTERRUPT_BLOCK_GAP_MASK, block_gap},
+     {?ERX_HW_SDHCI_INTERRUPT_DMA_END_MASK, dma},
+     {?ERX_HW_SDHCI_INTERRUPT_SPACE_AVAIL_MASK, buffer_write_ready},
+     {?ERX_HW_SDHCI_INTERRUPT_DATA_AVAIL_MASK, buffer_read_ready},
+     {?ERX_HW_SDHCI_INTERRUPT_CARD_INSERT_MASK, card_insert},
+     {?ERX_HW_SDHCI_INTERRUPT_CARD_REMOVE_MASK, card_remove}
+     | error_bits()].
+
+%%% Register values the start and the issue decide on
+
+-doc """
+Whether `present` says the next command cannot issue: command inhibit, or
+for a command that uses the data lines or answers with busy, data inhibit
+as well (SDHCI_CMD_INHIBIT, SDHCI_DAT_INHIBIT, sdhci.h:148-149). A value
+that is not a word is inhibited, so it never lets a command through.
+""".
+-spec inhibited(term(), boolean()) -> boolean().
+inhibited(Present, UsesDat) when ?IS_WORD(Present) ->
+    Dat = case UsesDat of
+              true -> ?ERX_HW_SDHCI_PRESENT_DAT_INHIBIT_MASK;
+              false -> 0
+          end,
+    Present band (?ERX_HW_SDHCI_PRESENT_CMD_INHIBIT_MASK bor Dat) =/= 0;
+inhibited(_Present, _UsesDat) ->
+    true.
+
+-doc """
+Whether `present` reads DAT0 high, the end of a card's busy (Host
+Controller p.53-57): DAT_LEVEL's lowest bit.
+""".
+-spec dat0_high(term()) -> boolean().
+dat0_high(Present) when ?IS_WORD(Present) ->
+    ?ERX_HW_SDHCI_PRESENT_DAT_LEVEL_GET(Present) band 1 =:= 1;
+dat0_high(_Present) ->
+    false.
+
+-doc """
+The controller's base clock in Hz from `capabilities` (BASE_CLOCK, MHz,
+sdhci.h:278), or the platform's `clock` when the field is zero (Host
+Controller p.110); a zero field and no clock is refused, never guessed.
+""".
+-spec base_clock(term(), non_neg_integer() | undefined) -> {ok, pos_integer()} | {error, no_base_clock}.
+base_clock(Capabilities, Platform) when ?IS_WORD(Capabilities) ->
+    case ?ERX_HW_SDHCI_CAPABILITIES_BASE_CLOCK_GET(Capabilities) of
+        0 when is_integer(Platform), Platform > 0 -> {ok, Platform};
+        0 -> {error, no_base_clock};
+        Mhz -> {ok, Mhz * 1000000}
+    end;
+base_clock(_Capabilities, _Platform) ->
+    {error, no_base_clock}.
+
+-doc """
+The start's refusal of a controller older than version 3.00, from
+`slotisr_ver`'s SPEC_VER: 2 is version 3.00, each later version one more
+(sdhci.h:335; Host Controller 2.3.16, p.138).
+""".
+-spec version(term()) -> ok | {error, {version, non_neg_integer() | malformed}}.
+version(SlotIsrVer) when ?IS_WORD(SlotIsrVer) ->
+    case ?ERX_HW_SDHCI_SLOTISR_VER_SPEC_VER_GET(SlotIsrVer) of
+        Spec when Spec >= ?ERX_HW_SDHCI_SLOTISR_VER_SPEC_VER_V300 -> ok;
+        Spec -> {error, {version, Spec}}
+    end;
+version(_SlotIsrVer) ->
+    {error, {version, malformed}}.
 
 %%% Signalling
 
@@ -190,13 +295,15 @@ in_flight_ms() -> ?IN_FLIGHT_MS.
 -doc """
 A request accepted at `accepted`, not yet issued. last records whether it
 ends at the card's last sector, which only a multi-block read may report as
-out of range (Physical Layer 4.3.3, p.52).
+out of range (Physical Layer 4.3.3, p.52). A flush moves no block: it is
+CMD13 alone, issued as the status phase.
 """.
 -spec new(request()) -> transfer().
-new(#{op := Op, sector := Sector, count := Count, capacity := Capacity, rca := Rca,
-      accepted := Accepted}) ->
-    #transfer{op = Op, count = Count, last = Sector + Count =:= Capacity, rca = Rca,
-              accepted = Accepted}.
+new(#{op := flush, accepted := Accepted}) ->
+    #transfer{op = flush, accepted = Accepted};
+new(#{op := Op, sector := Sector, count := Count, capacity := Capacity,
+      accepted := Accepted}) when Op =:= read; Op =:= write ->
+    #transfer{op = Op, count = Count, last = Sector + Count =:= Capacity, accepted = Accepted}.
 
 -doc """
 When the request's one timer must next fire: its wait limit while it
@@ -226,6 +333,8 @@ step(#transfer{phase = waiting, accepted = Accepted} = T, {Offer, Now})
   when (Offer =:= start orelse Offer =:= tick), is_integer(Now),
        Now - Accepted >= ?WAIT_LIMIT_MS ->
     finish(T, {answer, {error, {device, deadline}}});
+step(#transfer{phase = waiting, op = flush} = T, {start, Now}) when is_integer(Now) ->
+    {[{issue, status}], T#transfer{phase = status, issued = Now}};
 step(#transfer{phase = waiting} = T, {start, Now}) when is_integer(Now) ->
     {[{issue, transfer}], T#transfer{phase = command, issued = Now}};
 step(#transfer{phase = waiting} = T, _Event) ->
@@ -258,7 +367,7 @@ issued(#transfer{phase = data, moved = Count, count = Count} = T, {transfer_comp
         0 when T#transfer.op =:= read ->
             finish(T, {answer, ok});
         0 ->
-            {[{issue, {cmd, 13, T#transfer.rca bsl 16}}], T#transfer{phase = status}};
+            {[{issue, status}], T#transfer{phase = status}};
         _ ->
             finish(T, {fail, {auto_cmd12, word(AutoR1)}})
     end;

@@ -3,7 +3,10 @@
 
 %% The block driver's supervisor (docs/design-storage.md, "The block driver"): the device
 %% process, registered as erx_blk and started by erx_blk:start_link/0 from the transport
-%% table (erx_blk_virtio for virtio-mmio); then the partition process, erx_blk_service,
+%% table (erx_blk_virtio for virtio-mmio, erx_blk_sd for the SD host controller), after the
+%% owners of the shared interrupt lines its record names, from erx_irq_line:owners/1 (the
+%% Pi 4's EMMC2 shares its line with the legacy SD controller, docs/design-storage.md, "The
+%% SD controller's line"), rest_for_one; then the partition process, erx_blk_service,
 %% which admits the partition table and holds the windows; then the mounts of its image
 %% windows at /images/NAME. erx_storage's supervisor starts /data on the data window once
 %% this application has started. A machine without a disk starts no device process:
@@ -28,12 +31,19 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
+    Owners = [#{id => {erx_irq_line, Line},
+                start => {erx_irq_line, start_owner, [Spec, Line]},
+                restart => permanent,
+                shutdown => 2000,
+                type => worker,
+                modules => [erx_irq_line]}
+              || {Spec, Line} <- line_owners(erx_blk:chosen())],
     Device = #{id => erx_blk,
                start => {erx_blk, start_link, []},
                restart => permanent,
                shutdown => 2000,
                type => worker,
-               modules => [erx_blk, erx_blk_virtio]},
+               modules => [erx_blk, erx_blk_virtio, erx_blk_sd]},
     Service = #{id => erx_blk_service,
                 start => {erx_blk_service, start_link, []},
                 restart => permanent,
@@ -47,4 +57,9 @@ init([]) ->
                shutdown => brutal_kill,
                type => worker,
                modules => [erx_blk_service]},
-    {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, [Device, Service, Images]}}.
+    {ok, {#{strategy => rest_for_one, intensity => 0, period => 1}, Owners ++ [Device, Service, Images]}}.
+
+%% The shared lines of the chosen record, each with the record and its index there; none
+%% when no record is chosen, so that erx_blk:start_link/0 alone reports why.
+line_owners({ok, Module, Spec}) -> erx_irq_line:owners([{Module, [Spec]}]);
+line_owners(_None) -> [].

@@ -1112,8 +1112,33 @@ it; git history is the record of completed work.
   user's actions (a click, the menu), so a client's request only raises; `decorate/2` then needs that state.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device_nif.c`: a move of a bound edge line can lose the one delivery taken under the old label just before the old sink was unregistered, while a level
   line fires again at the bind's acknowledgement. A driver of an edge line looks at its device after binding. The PL011's line is level.
+* [Medium] `erlang/apps/erx_blk/src/erx_blk_sd.erl` (`await/3`) and `erx_blk_sd_host.erl` (`issued/2`): both expect a
+  command's events in one order, command complete before the buffer events, so a controller that raises buffer write
+  ready before the response, in a separate interrupt word, fails the step and restarts the storage domain on every
+  write. QEMU's raspi4b model does not: the `tcg-sd-card` cell identifies the card and writes two blocks
+  (docs/research-sdhci-qemu-model.md, "erXos's SD driver on the model"); whether the BCM2711's EMMC2 does is
+  unverified, and the board probe should record it. The fix by construction: track
+  command done and data progress as independent facts, holding an early buffer event until command complete, and in
+  the start take the events `sd_shape/1` names as a set.
+* [Medium] `erlang/apps/erx_blk/src/erx_blk_sup.erl`: a line owner (`erx_irq_line:start_owner/2`) that fails to start
+  fails the supervisor's start, so the permanent application ends the storage domain, and the same failure repeats on
+  each restart until the domain row's intensity runs out, with no line from the driver. The owner child should refuse
+  with one line and `ignore`, after which the device process's `attach/2` fails and it refuses too.
+* [Medium] `erlang/apps/erx_blk/src/erx_blk_write.erl` (`sd_step/4`): a plan is built from the command index alone,
+  so `{acmd, 13, ...}` is CMD13 and an ACMD issued without CMD55 first is the plain command (ACMD6 becomes CMD6 with
+  any argument); that CMD55 always precedes an ACMD rests on the card core's phases. ACMD41's, CMD7's, CMD55's and
+  CMD48's arguments are not checked. Make an app command one plan that issues CMD55 with the card's address, checks
+  APP_CMD in its R1, then issues the ACMD.
+* [Low] `erlang/apps/erx_blk/src/erx_blk_sd.erl`: events left in an interrupt word after a request is answered are
+  handed to the next request, issued within the same word's fold; a stray buffer bit then fails it. Drop the rest of
+  the word once a request is answered. A refusal partway through the start also leaves `irpt_en` set; clear it
+  before `ignore`.
+* [Medium] `tools/lib/erx/raspi4b_shell.rb`, the SD model tests of docs/design-storage.md ("Verification and testing"):
+  the `tcg-sd-card` cell identifies the card, reads the partition table, mounts littlefs and writes and reads back two
+  blocks outside every partition, on the packed card only, a 2 GiB standard-capacity card. Still to come: a file
+  written and synced at `/data` and read back after the storage domain is killed and restarted, a 4 GiB
+  high-capacity card, the seeded medium whose data partition holds a different file, and the recovery test under a write load.
 * [Low] `erlang/apps/erx_blk/src/erx_blk_sd_host.erl`: OUT_OF_RANGE is type X in Physical Layer Table 4-42 (p.120), so a card may report the last-sector out of range of a CMD18 in the next command's R1 instead of Auto CMD12's; the transfer machine exempts only Auto CMD12's, so such a card would fail the next request and restart the storage domain. The board probe should record whether a card does this; if one does, exempt OUT_OF_RANGE alone in the first R1 after such a read.
-* [Low] `docs/design-storage.md`, "The start sequence" step 3: the mask of every normal status includes Card Interrupt (bit 8), which writing 1 does not clear (Host Controller 2.2.17); a card asserting it would storm the shared line. Leave bit 8 out of `irpt_mask` and `irpt_en` when the device process is written.
 * [Medium] `erlang/apps/erx_net/erxos/erx_virtio_net.erl`, `erlang/apps/erx_blk`: no test runs a real driver under a hostile device. `test/integration/runtime_device_test.rb` breaks a hosted stand-in's queue under a driver written in the test, so the drivers' own broken-queue path (`error({virtio_net, broken, rx})`), its supervision and restart, and that the crash ends only the driver process (the network driver; the block driver's crash ends the storage domain) are unchecked; plan.md's 1b-E exit criterion asks for it under QEMU. Running `erx_virtio_net` over a virtio stand-in hosted, or a hostile model device under QEMU, would settle it.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, the hosted stand-in: its virtio model (`stand_in_preset`, `stand_in_stored`, a hook in `store()`) is a second model of a virtio-mmio transport beside `test/fixtures/erx_device_dma_harness.c`'s, which sits at the access seam and leaves `erx_device.c` untouched. A hosted-only `device_access` over the fixture's model would remove the hook and the duplicate, and keep `queue_ready` per selected queue, which the stand-in's one word cannot (so one queue still ready, `ERX_EBUSY`, is not expressible hosted).
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device_queue.c`, `erx_device_genet.c`, the round functions: no fuzz
@@ -1411,10 +1436,6 @@ it; git history is the record of completed work.
   `DMA_SELECT` and `CONTROL2`'s `ADMA2_LENGTH_MODE`, `HOST_V4_ENABLE` and `ADDRESSING_64BIT`, as plain fields,
   since the generator has no field mark (the field-ownership item). Programmed I/O sets none of them; the
   field marks, or the ADMA2 mode's design, settle how the driver changes these words.
-  `INTERRUPT`'s error bits 27 (response error) and 28 to 31 (vendor) are in no field either, so
-  `erx_blk_sd_host:decode/1` numbers them by hand and a driver acknowledging `INTERRUPT` through `erx_device`
-  cannot clear them: one of them set would stay latched. Declaring them (HC 2.2.18-2.2.19) in `INTERRUPT`,
-  `IRPT_MASK` and `IRPT_EN` settles both; needed before the SD driver acknowledges interrupts.
 * [Medium] GENET, `hw/svd/genet/genet.svd` (docs/plan.md, 1b-I (c)), unnamed bits: the file names
   only the bits FreeBSD's `if_genetreg.h` names. `write/3` refuses a word with any other bit set, and
   `write_field/4` writes every other bit back as zero, while FreeBSD reads, modifies and writes back
@@ -6736,11 +6757,14 @@ document's "residual risks accepted" paragraph.
   `{error, timeout}`), and a timed-out write still lands later. design-storage.md's transport contract gives every
   request a wait limit of 10 s from its acceptance and an in-flight bound of 18 s, past which the device process ends,
   below `call/1`'s 30 s; the device process implements neither, and `call/1` should return `{error, _}`.
-* [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:write/6`, and `erx_blk:read/2` and `erx_blk:write/2`
-  still let any process of the system domain reach any sector: the block service's windows (`erx_blk_window`) check
+* [Medium] erx_blk: a virtio device that stops completing leaves its callers to time out in `gen_server:call` (an exit, not
   `{error, timeout}`), and a timed-out write still lands later; the driver needs a per-request deadline that ends the
   device process (as a broken queue does), `call/1` should return `{error, _}`, and held requests of a caller that has gone should be dropped.
-* [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:write/6`, and `erx_blk`'s reads and writes (`read/2`, `write/2`,
+* [Medium] erx_blk, SD register spacing (`erx_blk_sd_regs`; docs/design-storage.md, "The SD host controller"): the
+  6 us spacing between non-`data` writes holds only while every such write goes through `erx_blk_sd_regs` with the
+  latest handle; spacing in the device NIF for `sdhci` records, or a chokepoint check, would make it hold by
+  construction.
+* [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:write/6` or `erx_blk_write:sd_write_plan/3`, and `erx_blk`'s reads and writes (`read/2`, `write/2`,
   and their pid forms `read/3`, `write/3`) still let any process of the system domain reach any sector: the block service's windows (`erx_blk_window`) check
   their sectors, but nothing yet confines clients to them. The device service, which names each client's windows by
   role and hands their pids out as grants (PW1), replaces `erx_blk_service:window/1`, which hands any role's window to

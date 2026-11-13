@@ -330,10 +330,13 @@ Error in process <0.150.0> with exit value:
   builds boots from the firmware through
   BL31, Fiasco and the root task to the command shell's `%` prompt on
   the serial console ([the record](docs/research-rpi4-board-pass.md)).
-  The board has no SD controller driver yet, and its manifest grants no
-  `data` facet, so `/data` is an empty directory. The SD card's and the
-  Ethernet controller's decisions (card identification and transfers,
-  receive descriptors, the PHY) exist as host-tested code, with no driver
+  On the model the storage domain drives the SD card through EMMC2
+  (`erx_blk_sd`, interrupt-driven): it identifies the card, the block
+  service admits its partition table and littlefs mounts its volume, and
+  blocks written over the driver reach the card image. The manifest grants
+  no `data` facet, so `/data` is still an empty directory, and the driver
+  has not run on a real board. The Ethernet controller's decisions
+  (receive descriptors, the PHY) exist as host-tested code, with no driver
   over them yet.
 * **The machine is an object** (M4). A host link over the second serial
   line lets `tools/erx load` and `watch` replace modules in the running

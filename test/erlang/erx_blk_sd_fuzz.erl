@@ -31,7 +31,8 @@ run([Seed]) ->
                {csd, fun csd/0}, {scr, fun scr/0}, {sd_status, fun sd_status/0},
                {general_information, fun general_information/0},
                {performance_enhancement, fun performance_enhancement/0},
-               {interrupt, fun interrupt/0}],
+               {interrupt, fun interrupt/0}, {sd_command, fun sd_command/0},
+               {registers, fun registers/0}],
     Machines = [{identification, fun identification/0}, {transfer, fun transfer/0}],
     Targets = [{Name, Round, ?ROUNDS div 20} || {Name, Round} <- Parsers]
         ++ [{Name, Round, 0} || {Name, Round} <- Machines],
@@ -368,9 +369,124 @@ walk_transfer(T, Left) ->
     end.
 
 transfer_action({issue, transfer}) -> ok;
-transfer_action({issue, {cmd, 13, 7 bsl 16}}) -> ok;
+transfer_action({issue, status}) -> ok;
 transfer_action(read_block) -> ok;
 transfer_action({write_block, I}) when is_integer(I), I >= 0, I < 4 -> ok;
 transfer_action({answer, ok}) -> ok;
 transfer_action({answer, {error, {device, deadline}}}) -> ok;
 transfer_action({fail, _}) -> ok.
+
+%%% The write path's SD table and the register decisions
+
+%% The identification commands the table lists, with the data each moves: the
+%% reference the table must agree with (docs/design-storage.md, "The SD host
+%% controller"; erx_blk_sd_card's steps).
+listed({cmd, 0}) -> none;
+listed({cmd, 2}) -> none;
+listed({cmd, 3}) -> none;
+listed({cmd, 7}) -> none;
+listed({cmd, 8}) -> none;
+listed({cmd, 9}) -> none;
+listed({cmd, 16}) -> none;
+listed({cmd, 48}) -> {read, 512};
+listed({cmd, 49}) -> {write, 512};
+listed({cmd, 55}) -> none;
+listed({acmd, 6}) -> none;
+listed({acmd, 13}) -> {read, 64};
+listed({acmd, 41}) -> none;
+listed({acmd, 51}) -> {read, 8};
+listed(_) -> refused.
+
+%% A random step: admitted exactly when the reference lists its command with its
+%% data and its argument is a word; an admitted word carries its index, sets no
+%% DMA bit and is one erx_device:command/2's field mask allows (bits 0-5 and
+%% 16-29); a refused one never raises.
+sd_command() ->
+    Kind = lists:nth(rand:uniform(3), [cmd, acmd, other]),
+    Index = case rand:uniform(2) of
+                1 -> lists:nth(rand:uniform(16), [0, 2, 3, 6, 7, 8, 9, 13, 16, 17, 24, 41, 48, 49, 51, 55]);
+                2 -> rand:uniform(70) - 3
+            end,
+    Arg0 = case rand:uniform(8) of 1 -> -rand:uniform(9); 2 -> 1 bsl 32; _ -> word() end,
+    %% Half the steps carry the data the reference lists, so the admitting path is tried.
+    Data = case rand:uniform(2) =:= 1 andalso listed({Kind, Index}) of
+               {read, Size} -> {read, Size};
+               {write, Size} -> {write, rand:bytes(Size)};
+               none -> none;
+               _ -> random_data()
+           end,
+    %% CMD16 and CMD49 take fixed arguments: half of theirs are ones the rule admits.
+    {Arg, Data1} = case rand:uniform(2) =:= 1 andalso {Kind, Index, Data} of
+                       {cmd, 16, none} -> {512, Data};
+                       {cmd, 49, {write, _}} -> cache_write();
+                       _ -> {Arg0, Data}
+                   end,
+    Step = case Data1 of none -> {Kind, Index, Arg}; _ -> {Kind, Index, Arg, Data1} end,
+    Shape = case Data1 of {write, Block} -> {write, byte_size(Block)}; _ -> Data1 end,
+    Expected = is_word(Arg) andalso listed({Kind, Index}) =:= Shape andalso argument_ok({Kind, Index}, Arg, Data1),
+    case erx_blk_write:sd_command(Step) of
+        {ok, #{word := Word, argument := Arg}} when Expected ->
+            Index =:= (Word bsr 24) band 63 orelse error({index, Step, Word}),
+            Word band 1 =:= 0 orelse error({dma, Step, Word}),
+            Word band bnot 16#3FFF003F =:= 0 orelse error({unheld_bits, Step, Word}),
+            accepted;
+        {error, {sd_refused, _}} when not Expected ->
+            refused;
+        Said ->
+            error({sd_command, Step, Said})
+    end.
+
+%% One of the cache rule's two CMD49 writes, at a random function and page:
+%% Flush Cache (byte 261) to 1 or Cache Enable (byte 260) to 0, one byte.
+cache_write() ->
+    {Offset, Value} = lists:nth(rand:uniform(2), [{261, 1}, {260, 0}]),
+    Address = rand:uniform(255) * 512 + Offset,
+    {((rand:uniform(16) - 1) bsl 27) bor (Address bsl 9), {write, <<Value, 0:(511 * 8)>>}}.
+
+%% The reference of the argument rule (Physical Layer 4.3.2, p.52; 5.7.2.2,
+%% p.249; Table 5-30, p.268-269): CMD16 takes 512; CMD49 one byte of memory
+%% space without mask, 1 into Flush Cache or 0 into Cache Enable, the rest zero.
+argument_ok({cmd, 16}, Arg, _Data) ->
+    Arg =:= 512;
+argument_ok({cmd, 49}, Arg, {write, <<Value, Rest/binary>>}) when is_integer(Arg) ->
+    Byte = (Arg bsr 9) rem 512,
+    Arg bsr 31 =:= 0 andalso (Arg bsr 26) band 1 =:= 0 andalso Arg band 511 =:= 0
+        andalso Rest =:= <<0:(511 * 8)>> andalso lists:member({Byte, Value}, [{261, 1}, {260, 0}]);
+argument_ok({cmd, 49}, _Arg, _Data) ->
+    false;
+argument_ok(_Command, _Arg, _Data) ->
+    true.
+
+%% Random present, capabilities and host version words, some not words at all:
+%% each decision agrees with its bits and never raises.
+registers() ->
+    Word = case rand:uniform(10) of 1 -> -rand:uniform(9); 2 -> 1 bsl 32 + rand:uniform(9); 3 -> nonsense; _ -> word() end,
+    Valid = is_word(Word),
+    Dat = rand:uniform(2) =:= 1,
+    Inhibit = not Valid orelse Word band 1 =/= 0 orelse (Dat andalso Word band 2 =/= 0),
+    same(inhibited, Word, ?H:inhibited(Word, Dat), Inhibit),
+    same(dat0_high, Word, ?H:dat0_high(Word), Valid andalso Word band (1 bsl 20) =/= 0),
+    Base = case Valid andalso bits(Word, 15, 8) of
+               false -> {error, no_base_clock};
+               0 -> {error, no_base_clock};
+               Mhz -> {ok, Mhz * 1000000}
+           end,
+    agree(base_clock, Word, ?H:base_clock(Word, undefined), Base),
+    Version = case Valid andalso bits(Word, 23, 8) of
+                  false -> {error, {version, malformed}};
+                  Spec when Spec >= 2 -> ok;
+                  Spec -> {error, {version, Spec}}
+              end,
+    agree(version, Word, ?H:version(Word), Version),
+    verdict(Version).
+
+random_data() ->
+    case rand:uniform(5) of
+        1 -> {read, lists:nth(rand:uniform(4), [8, 64, 512, rand:uniform(600)])};
+        2 -> {write, rand:bytes(lists:nth(rand:uniform(3), [512, 8, rand:uniform(600)]))};
+        _ -> none
+    end.
+
+%% A decision that is a boolean, against its reference.
+same(_Name, _Input, Said, Said) -> ok;
+same(Name, Input, Said, Expected) -> error({disagrees_with_reference, Name, Input, Said, Expected}).

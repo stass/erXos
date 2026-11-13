@@ -25,8 +25,18 @@ no_block_record_starts_nothing_test_() ->
     [?_assertEqual(none, choose([])),
      ?_assertEqual(none, choose([["given", "net", "virtio_mmio", "5", "0", "512", "6", "direct", "7", "65536", "0", "0", "0"]]))].
 
-sdhci_record_has_no_transport_test() ->
-    ?assertEqual({error, {sdhci, no_transport}}, choose([record(sdhci)])).
+sdhci_record_starts_the_sd_process_test() ->
+    ?assertMatch({ok, erx_blk_sd, #{peripheral := sdhci, window := {object, 5, 0, 512}}},
+                 choose([record(sdhci)])).
+
+%% erx_blk_sup starts an owner for each shared line of the chosen record before the device
+%% process, and none for a direct line.
+shared_line_owner_test_() ->
+    Shared = ["given", "block", "sdhci", "5", "0", "512", "6", "shared", "7", "65536", "0", "0", "0"],
+    [?_assertMatch([{#{peripheral := sdhci}, 0}], owners(choose([Shared]))),
+     ?_assertEqual([], owners(choose([record(sdhci)])))].
+
+owners({ok, Module, Spec}) -> erx_irq_line:owners([{Module, [Spec]}]).
 
 several_block_records_are_refused_test_() ->
     [?_assertEqual({error, {block_records, [virtio_mmio, virtio_mmio]}},

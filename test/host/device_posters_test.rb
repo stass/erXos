@@ -23,6 +23,7 @@ class DevicePostersTest < Minitest::Test
     files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
     assert_empty Erx::DevicePosters.violations(files).map(&:to_s)
     assert_match Erx::DevicePosters::NAMED.fetch('post'), files.fetch(WRITE_PATH)
+    assert_match Erx::DevicePosters::NAMED.fetch('command'), files.fetch(WRITE_PATH)
   end
 
   def test_a_seeded_post_outside_the_write_path_is_refused

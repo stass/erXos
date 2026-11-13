@@ -9,7 +9,9 @@ require_relative '../raspi4b_shell'
 # Raspberry Pi 4's development image boots through QEMU's loader to root's session on the
 # mini UART, which answers a sum, a rubbed-out line, an empty /data and a long output
 # and writes a log record escaped, at four CPUs, and halts the machine; and, seeded, a
-# tree with one CPU's node removed shows three. The suite packs the Pi's production image
+# tree with one CPU's node removed shows three; and, with the packed card on EMMC2's bus, the SD
+# device process identifies the card and the system domain's probe writes two blocks that
+# the harness finds in the card's file after QEMU exits. The suite packs the Pi's production image
 # and its SD card (tools/erx pack --medium --platform raspi4b), since check_qemu builds
 # only the kernel, and boots the card's own kernel8.img and bl31.bin. Every cell
 # needs the loader's boot stub, which a remote boot does not take (Qemu#run), so it

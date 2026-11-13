@@ -161,7 +161,7 @@ oracle({Op, Count, Last, _}, transfer, {transfer_complete, Auto}) ->
     Ok = Count =:= 1 orelse (is_integer(Auto) andalso no_error(Auto band bnot Ignored)),
     case {Ok, Op} of
         {true, read} -> {continue, [{answer, ok}]};
-        {true, write} -> {continue, [{issue, {cmd, 13, ?RCA bsl 16}}]};
+        {true, write} -> {continue, [{issue, status}]};
         {false, _} -> fail
     end;
 oracle(_Shape, status, {command_complete, R1}) ->
@@ -254,3 +254,65 @@ signalling_test() ->
     ?assertEqual(ok, ?H:signalling(16#FFFFFFFF band bnot (1 bsl 19))),
     ?assertEqual(ok, ?H:signalling(0)),
     ?assertEqual({error, malformed}, ?H:signalling(1 bsl 32)).
+
+%%% The write-back, the enables and the register decisions
+
+%% Bits 0-7 and 16-31 are one to clear; 8-12 and 15 follow their sources, 13-14 are
+%% reserved (Host Controller 2.2.18-2.2.19, p.76-85).
+ack_and_enable_masks_test() ->
+    ?assertEqual(16#FFFF00FF, ?H:ack_mask()),
+    ?assertEqual(16#FFFF0033, ?H:enable_mask()).
+
+decode_response_and_vendor_bits_test() ->
+    ?assertEqual([{error, response}], ?H:decode(1 bsl 27)),
+    ?assertEqual([{error, {vendor, 28}}, {error, {vendor, 31}}], ?H:decode((1 bsl 28) bor (1 bsl 31))).
+
+inhibited_test_() ->
+    [?_assertNot(?H:inhibited(0, false)),
+     ?_assertNot(?H:inhibited(0, true)),
+     ?_assert(?H:inhibited(1, false)),
+     ?_assertNot(?H:inhibited(2, false)),
+     ?_assert(?H:inhibited(2, true)),
+     ?_assert(?H:inhibited(-1, false)),
+     ?_assert(?H:inhibited(nonsense, false))].
+
+dat0_test_() ->
+    [?_assert(?H:dat0_high(16#01ff0000)),
+     ?_assertNot(?H:dat0_high(16#01ef0000)),
+     ?_assertNot(?H:dat0_high(1 bsl 32))].
+
+base_clock_test_() ->
+    %% The model's capabilities word: base clock 52 MHz (research-sdhci-qemu-model.md).
+    [?_assertEqual({ok, 52000000}, ?H:base_clock(16#052134b4, undefined)),
+     ?_assertEqual({ok, 100000000}, ?H:base_clock(16#052100b4, 100000000)),
+     ?_assertEqual({error, no_base_clock}, ?H:base_clock(16#052100b4, undefined)),
+     ?_assertEqual({error, no_base_clock}, ?H:base_clock(16#052100b4, 0)),
+     ?_assertEqual({error, no_base_clock}, ?H:base_clock(-1, undefined))].
+
+version_test_() ->
+    %% The model's host version word reads 3.00 (research-sdhci-qemu-model.md).
+    [?_assertEqual(ok, ?H:version(16#24020000)),
+     ?_assertEqual(ok, ?H:version(16#00050000)),
+     ?_assertEqual({error, {version, 1}}, ?H:version(16#00010000)),
+     ?_assertEqual({error, {version, malformed}}, ?H:version(nonsense))].
+
+%% A flush is CMD13 alone, answered as a write's status.
+flush_test_() ->
+    New = ?H:new(#{op => flush, accepted => 0}),
+    {Issue, Issued} = ?H:step(New, {start, ?ISSUED}),
+    [?_assertEqual([{issue, status}], Issue),
+     ?_assertEqual(?ISSUED + 18000, ?H:deadline(Issued)),
+     ?_assertMatch({[{answer, ok}], _}, ?H:step(Issued, {command_complete, 16#900})),
+     ?_assertMatch({[{fail, {not_ready, _}}], _}, ?H:step(Issued, {command_complete, 16#800})),
+     ?_assertMatch({[{fail, {interrupt, command_timeout}}], _}, ?H:step(Issued, {error, command_timeout})),
+     ?_assertMatch({[{fail, {unexpected, status, buffer_read_ready}}], _}, ?H:step(Issued, buffer_read_ready))].
+
+%% spaced/2 makes its write and leaves at least 6 us between two writes.
+spaced_test() ->
+    Self = self(),
+    Write = fun() -> Self ! {wrote, erlang:monotonic_time(microsecond)}, ok end,
+    Regs = erx_blk_sd_regs:spaced(erx_blk_sd_regs:spaced(erx_blk_sd_regs:new(0), Write), Write),
+    ?assertEqual(0, erx_blk_sd_regs:device(Regs)),
+    First = receive {wrote, T1} -> T1 end,
+    Second = receive {wrote, T2} -> T2 end,
+    ?assert(Second - First >= 6).

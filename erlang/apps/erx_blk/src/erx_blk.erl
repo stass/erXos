@@ -29,7 +29,7 @@
 
 -export([start_link/0, device/0, read/2, write/2, flush/0, info/0]).
 -export([read/3, write/3, flush/1, info/1]).
--export([transports/0, choose/1]).
+-export([transports/0, choose/1, chosen/0]).
 
 -export_type([reason/0, info/0]).
 
@@ -44,7 +44,7 @@
 -spec transports() -> [{atom(), {ok, module()} | {error, term()}}].
 transports() ->
     [{virtio_mmio, {ok, erx_blk_virtio}},
-     {sdhci, {error, {sdhci, no_transport}}}].
+     {sdhci, {ok, erx_blk_sd}}].
 
 %% The device process for the domain's block record, or ignore when the domain has none it
 %% can drive. A domain with no block record has no line in the log, since a machine
@@ -53,11 +53,7 @@ transports() ->
 %% the boot, so an exception is a refusal too.
 -spec start_link() -> {ok, pid()} | ignore | {error, term()}.
 start_link() ->
-    Chosen = try choose([{Peripheral, erx_device_record:find(block, Peripheral)}
-                         || {Peripheral, _Transport} <- transports()])
-             catch Class:Raised -> {error, {Class, Raised}}
-             end,
-    case Chosen of
+    case chosen() of
         {ok, Module, Spec} ->
             Module:start_link(Spec);
         none ->
@@ -72,6 +68,16 @@ start_link() ->
 %% does not parse refuses them all, since it says the record's writer and its reader
 %% disagree, and so does more than one record, since the manifest gives a storage domain
 %% one block device.
+%% The device process's module and record for the block records the domain holds, as
+%% choose/1 decides; erx_blk_sup reads it too, to start the owners of the record's shared
+%% lines before the device process. A record the reader raises on is an error, not a raise.
+-spec chosen() -> {ok, module(), erx_device_record:spec()} | none | {error, term()}.
+chosen() ->
+    try choose([{Peripheral, erx_device_record:find(block, Peripheral)}
+                || {Peripheral, _Transport} <- transports()])
+    catch Class:Raised -> {error, {Class, Raised}}
+    end.
+
 -spec choose([{atom(), {ok, [erx_device_record:spec()]} | {error, {bad_device_record, string()}}}]) ->
           {ok, module(), erx_device_record:spec()} | none | {error, term()}.
 choose(Found) ->

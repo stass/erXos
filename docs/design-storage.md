@@ -285,13 +285,21 @@ refuses it ([design-runtime.md](design-runtime.md#the-device-nif)).
 The NIF posts reads and writes alike, and the command register issues
 reads and writes alike, so the write path holds by construction: one
 module, `erx_blk_write`, performs both acts. It builds every virtio
-header and every SD command word itself,
-from CMD0 at a card's initialisation to CMD13 at a flush, from a table
-of its own; a device process names what it wants (`{read, Sector,
-Count}`, `flush`, or a card-initialisation step such as `send_csd`),
-never a request type or a command index. Only its write functions, one
-per transport, build a type or a command that writes the medium (virtio's
-`OUT`; SD's CMD24 and CMD25), and each calls the one trial check first.
+header and every SD command word itself, from CMD0 at a card's
+initialisation to CMD13 at a flush, from the generated fields of the
+SVD source; a device process names what it wants: `{read, Sector,
+Count}`, `{write, Sector, Data}`, `flush`, or a card-identification step
+of `erx_blk_sd_card`, `{cmd | acmd, Index, Argument}` with the data
+block it moves, never a request type or a command word. One place
+decides which commands reach the card: `erx_blk_write`'s SD table, an
+allowlist of exactly the identification's commands (CMD0, 2, 3, 7, 8,
+9, 16, 48, 49 and 55; ACMD6, 13, 41 and 51), each with its response
+type and the block it moves, refuses every other index and any step
+whose data disagrees with its row; and only its read, write and flush
+functions build CMD17 and CMD18, CMD24 and CMD25, and CMD13 (SEND_STATUS). Only its
+write functions, one per transport, build a type or a command that
+writes the medium (virtio's `OUT`; SD's CMD24 and CMD25), and each
+calls the one trial check first.
 The transfer-mode half of every command word it builds leaves DMA off,
 and `erx_device:command/2` refuses a word that turns it on, so no
 command starts a DMA transfer. DMA through the controller's ADMA2 tables
@@ -722,17 +730,28 @@ block, is *to be settled by the board probe* and measured by
   buffer write ready, transfer complete, and each error bit), the
   divider, and one request's transfer as a state machine over those
   events.
-* `erx_blk_write`'s SD table, `sd_command(Step, Card) -> {Argument,
-  Word}`, which builds the argument and the `cmdtm` word of every step
-  the device process names; its write function alone adds CMD24 and
-  CMD25.
+* `erx_blk_write`'s SD builders, which make plans: an opaque `sd_plan()`
+  holds one command's argument, its `cmdtm` word, its `blksizecnt`, its
+  response type and its data phase, and only the builders make one.
+  `sd_plan/1` admits an identification step only if the SD table lists
+  its command and the step's data agrees with its row; the argument rule
+  fixes CMD16's argument to 512 and lets CMD49 make only the cache rule's
+  two one-byte writes, Flush Cache (byte 261) to 1 and Cache Enable (byte
+  260) to 0, with MIO and the mask clear and the rest of the block zero.
+  `sd_read_plan/3`, `sd_write_plan/3` and `sd_status_plan/1` are the only
+  builders of CMD17 and CMD18, CMD24 and CMD25, and CMD13. `sd_issue/2`
+  issues a plan and nothing else; `sd_feed/3` writes block `Index` of a
+  write plan's own checked bytes to the data port and refuses an index
+  outside the plan; and `sd_shape/1` gives the device process the
+  plan's response and data phase, so the count it transfers is the
+  plan's, never one it computes.
 
 `erx_blk_sd` is the effect layer around them: register reads and writes,
 the interrupt messages and the deadlines' timers.
 
 **Issuing a command.** `erx_blk_write` issues every command the same way
 (facts record, "Issuing a command"): it reads `present` and refuses with
-`{device, inhibit}` while command inhibit is set, or data inhibit for a
+`{device, inhibit}` when command inhibit is still set after 10 ms, or data inhibit for a
 command that uses the data lines or answers with busy (`SDHCI_CMD_INHIBIT`,
 `SDHCI_DAT_INHIBIT`, `sdhci.h:148-149`); for a data command it writes
 `blksizecnt`; it writes `arg`; and it issues the `cmdtm` word with
@@ -771,7 +790,12 @@ answers with busy, such as CMD7, waits for transfer complete as well.
    timeout counter at `0xE`, its largest valid value, 2^27 periods of
    the timeout clock, since `0xF` is reserved (Host Controller
    p.73); and one mask of every normal and error status written to both
-   `irpt_mask` and `irpt_en` (facts record, "Interrupts").
+   `irpt_mask` and `irpt_en` (facts record, "Interrupts"): the statuses
+   the transfer acts on, command complete, the buffer events, transfer
+   complete and every error. Block gap, DMA and card insertion and removal
+   stay disabled, since the driver arms no DMA and forces the card present,
+   and card interrupt, INT_A to INT_C and re-tuning follow their sources
+   and cannot be cleared (Host Controller 2.2.18, p.76-81).
 4. The card's identification, in FreeBSD's order (`mmc.c:2052-2108`):
    CMD0, then a wait of 1 ms (`mmc.c:563-585`); CMD8 with `0x1AA`, supply
    2.7 to 3.6 V and check pattern `0xAA` (`mmc.c:642-656`; Physical
@@ -974,8 +998,9 @@ cache flush its 1 s (4.17, p.179); and ACMD41's loop its count. An
 interrupt is handled as on virtio: the device process reads `interrupt`
 once; a word of zero or of all ones is not this controller's (facts
 record, "Interrupts"), and it answers the line as done with nothing
-handed on; otherwise it writes the same word back to clear the bits it
-read, which are cleared by writing ones, acknowledges with
+handed on; otherwise it writes back the bits of the word that are
+cleared by writing ones (`erx_blk_sd_host:ack_mask/0`, every
+one-to-clear field of INTERRUPT in the SVD source), acknowledges with
 `erx_irq_line:ack/1` and hands the word to the transfer's state
 machine. An event with no request in flight is dropped.
 
@@ -1818,6 +1843,15 @@ The SD controller, each test paired with the fault that proves it ran:
   the test fails. On a trial boot value the SD write function answers
   `erofs` and touches no register; the seeded fault removes the trial
   check, and the test fails.
+* The issuing of a plan on the host, against the same recording stand-in
+  for the device NIF: `sd_issue/2` writes `blksizecnt` (for a data
+  command only), `arg` and the command in that order, refuses with `{device, inhibit}` once inhibit
+  has stayed set for 10 ms, and keeps the spacing across consecutive
+  issues; `sd_feed/3` writes exactly the plan's checked bytes of the
+  block it names; and the argument rule admits CMD16 only with 512 and
+  CMD49 only with the cache rule's two writes. The seeded faults leave
+  CMD49's argument unchecked, let a feed run past the plan's blocks and
+  skip the wait for inhibit, and each fails its test.
 * On QEMU's `raspi4b` model (programmed I/O only: its capabilities offer
   no DMA, [design-platforms.md](design-platforms.md#bring-up-under-qemu)),
   booted with the medium as EMMC2's card: the device process identifies

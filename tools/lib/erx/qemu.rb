@@ -28,9 +28,9 @@ module Erx
     # value, and the options added under TCG and in deterministic mode. QEMU virt's are
     # GICv3, an MSI controller TCG needs for PCIe, and no random seeds in its device tree.
     # A board with loads boots as its firmware would (loaded_argv); globals are its -global
-    # options.
-    Machine = Data.define(:base, :tcg_options, :deterministic_options, :loads, :globals) do
-      def initialize(base:, tcg_options:, deterministic_options:, loads: nil, globals: [])
+    # options; card_bus is the SD bus a card plugs into, nil on a board that takes none.
+    Machine = Data.define(:base, :tcg_options, :deterministic_options, :loads, :globals, :card_bus) do
+      def initialize(base:, tcg_options:, deterministic_options:, loads: nil, globals: [], card_bus: nil)
         super
       end
     end
@@ -48,7 +48,10 @@ module Erx
       # extensions is the board's GIC-400.
       'raspi4b' => Machine.new(base: 'raspi4b', tcg_options: [], deterministic_options: [],
                                loads: Loads.new(stub: 0, image: 0x200000, dtb: 0x8000000),
-                               globals: %w[arm_gic.has-security-extensions=on])
+                               globals: %w[arm_gic.has-security-extensions=on],
+                               # EMMC2's bus, the first generic-sdhci's; the model's own card holds
+                               # the drive id sd0 (docs/research-sdhci-qemu-model.md, findings 1 and 2).
+                               card_bus: '/generic-sdhci/sd-bus')
     }.freeze
     # As serial, the guest's serial line on this process's own standard input
     # and output, with QEMU's monitor multiplexed onto it: Ctrl-A C switches
@@ -192,16 +195,17 @@ module Erx
 
     def argv(platform:, accel:, image:, serial:, cpus: 1, memory_mib: memory_of(platform),
              program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil, dtb: nil,
-             disks: [], hostlink: nil, nic: nil, stub: nil, display: nil)
+             disks: [], hostlink: nil, nic: nil, stub: nil, display: nil, card: nil)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
       board = machine_of(platform)
       if board.loads
         return loaded_argv(board, accel: accel, image: image, serial: serial, serial_input: serial_input, cpus: cpus, program: program,
-                                  stub: stub, dtb: dtb, refused: { initrd: initrd, command_line: command_line, nic: nic, display: display,
+                                  stub: stub, dtb: dtb, card: card, refused: { initrd: initrd, command_line: command_line, nic: nic, display: display,
                                                                    disks: disks.empty? ? nil : disks,
                                                                    hostlink: hostlink == NO_HOSTLINK ? nil : :hostlink })
       end
       raise Error, "platform #{platform.name} boots from no stub" if stub
+      raise Error, "platform #{platform.name} takes no SD card" if card
       unless cpus.is_a?(Integer) && CPUS.cover?(cpus)
         raise Error, "CPU count must be between #{CPUS.min} and #{CPUS.max}"
       end
@@ -262,7 +266,9 @@ module Erx
     # QEMU's second serial port, the first going to the null device; and no host link UART,
     # which the Raspberry Pi 4's model does not have (UART3). refused holds what such a plan
     # cannot take, each nil when the plan does not ask for it.
-    def loaded_argv(board, accel:, image:, serial:, serial_input:, cpus:, program:, stub:, dtb:, refused:)
+    def loaded_argv(board, accel:, image:, serial:, serial_input:, cpus:, program:, stub:, dtb:, card:, refused:)
+      raise Error, "#{board.base} takes no SD card" if card && board.card_bus.nil?
+      raise Error, 'an SD card is a QemuPlan::Disk' unless card.nil? || card.is_a?(Disk)
       raise Error, "#{board.base} runs under TCG alone" unless accel == 'tcg'
       asked = refused.compact.keys
       raise Error, "#{board.base} takes no #{asked.join(', ')}" unless asked.empty?
@@ -276,7 +282,16 @@ module Erx
        *board.globals.flat_map { |global| ['-global', global] },
        '-display', 'none', '-monitor', 'none', '-no-reboot',
        '-serial', 'null', *serial_arguments(serial, serial_input, id: 'console'),
-       *loads.flat_map { |file, address, options| ['-device', format('loader,file=%s,addr=0x%x%s', file, address, options)] }].freeze
+       *loads.flat_map { |file, address, options| ['-device', format('loader,file=%s,addr=0x%x%s', file, address, options)] },
+       *card_arguments(card, bus: board.card_bus)].freeze
+    end
+
+    # A card on the board's SD bus, its drive with no front end of its own; never the id
+    # sd0, which the model's own card holds.
+    def card_arguments(card, bus:)
+      return [] if card.nil?
+
+      ['-drive', "if=none,id=card0,file=#{card.path},format=raw", '-device', "sd-card,drive=card0,bus=#{bus}"]
     end
 
     # Each disk is a drive with no front end of its own and the virtio-blk
@@ -546,6 +561,9 @@ module Erx
     # directory passed as directory. A boot with a display is never reused: what the screen
     # showed is not in its serial log.
     #
+    # card, a QemuPlan::Disk, is an SD card on the board's SD bus (QemuPlan::Machine#card_bus),
+    # a file the guest writes, so a boot with a card is never reused and never remote.
+    #
     # Inside the QEMU gate (QemuReuse.active), a boot that passed before on
     # the same inputs does not start QEMU: its stored serial log is written to
     # the run's serial log and replayed, and the report names it under
@@ -553,14 +571,14 @@ module Erx
     #
     # With remote, a QemuRemote::Host, QEMU runs on that host (QemuRemote) and its
     # serial line reaches the run's serial log over ssh. Only a boot that QEMU's inputs
-    # alone determine runs there: no disk, network device or host link session. A host
+    # alone determine runs there: no disk, SD card, network device or host link session. A host
     # that cannot be reached, or refuses the boot's setup, raises QemuRemote::Unreachable.
     def run(platform:, accel:, image:, cpus: 1, memory_mib: QemuPlan.memory_of(platform), checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
-            dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil, remote: nil, stub: nil, display: nil)
+            dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil, remote: nil, stub: nil, display: nil, card: nil)
       raise Error, 'a run with a host link session ends when the session does, not with machine_end' if link && machine_end
       raise Error, 'a run with a host link session takes no other host link plan' if link && hostlink
-      if remote && !reusable?(link: link, nic: nic, disks: disks, hostlink: hostlink, display: display)
-        raise Error, 'a remote boot takes no disk, network device, display or host link'
+      if remote && !reusable?(link: link, nic: nic, disks: disks, card: card, hostlink: hostlink, display: display)
+        raise Error, 'a remote boot takes no disk, SD card, network device, display or host link'
       end
       raise Error, 'a remote boot takes no boot stub' if remote && stub
 
@@ -585,14 +603,14 @@ module Erx
                                      dtb: dtb && remote_boot.path('dtb'), hostlink: hostlink)
              else
                QemuPlan.argv(**plan, image: image, serial: serial, serial_input: keyboard, initrd: initrd, dtb: dtb,
-                                     disks: disks, hostlink: socket || hostlink, nic: nic, stub: stub, display: display)
+                                     disks: disks, hostlink: socket || hostlink, nic: nic, stub: stub, display: display, card: card)
              end
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
       report['remote'] = remote.destination if remote
       reuse = QemuReuse.active
       key = nil
-      if reuse && reusable?(link: link, nic: nic, disks: disks, hostlink: hostlink, display: display)
+      if reuse && reusable?(link: link, nic: nic, disks: disks, card: card, hostlink: hostlink, display: display)
         key = boot_key(reuse, plan: plan, remote_boot: remote_boot, image_sha256: report.fetch('image_sha256'), typed: matcher.types?, initrd: initrd,
                               dtb: dtb, stub: stub, hostlink: hostlink, checkpoints: checkpoints, machine_end: machine_end)
         stored = stored_boot(reuse, key, report: report, checkpoints: checkpoints, directory: directory) if key
@@ -658,10 +676,10 @@ module Erx
     private
 
     # Whether QEMU's inputs alone determine this boot (QemuReuse): no disk the
-    # guest may write, no network device, no display a checkpoint reads, and no host
-    # link a host side serves.
-    def reusable?(link:, nic:, disks:, hostlink:, display:)
-      link.nil? && nic.nil? && display.nil? && disks.empty? && (hostlink.nil? || hostlink == QemuPlan::NO_HOSTLINK)
+    # guest may write, no SD card, no network device, no display a checkpoint reads, and
+    # no host link a host side serves.
+    def reusable?(link:, nic:, disks:, card:, hostlink:, display:)
+      link.nil? && nic.nil? && display.nil? && card.nil? && disks.empty? && (hostlink.nil? || hostlink == QemuPlan::NO_HOSTLINK)
     end
 
     # The boot's key. The keyed plan is the boot's own (plan, as run passes it

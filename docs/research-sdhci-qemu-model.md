@@ -136,3 +136,35 @@ boot and replay-protected partitions, which are zero for an SD card.
      chooses the class by choosing the size: at most 2 GiB (a power of
      two) for SDSC, above 2 GiB (a multiple of 512 KiB) for SDHC/SDXC.
      For SDHC the smallest accepted size is 2 GiB + 512 KiB.
+
+## erXos's SD driver on the model: interrupt 158
+
+Checked on 2026-11-13 on the same host with Homebrew's QEMU 11.1.3,
+machine `raspi4b`, TCG, four CPUs, booting erXos's Pi image with its
+own 2 GiB card image on EMMC2's bus (the raspi4b suite's
+`tcg-sd-card` cell, `tools/lib/erx/raspi4b_shell.rb`). This settles
+finding 5 of "Findings" (the GIC line) by the driver's own behaviour,
+not by reading the GIC.
+
+1. **Interrupt 158 fires.** The storage domain's device process
+   (`erlang/apps/erx_blk/src/erx_blk_sd.erl`) takes every event of
+   identification from deliveries of the record's line, record line
+   158 ([design-platforms.md](design-platforms.md), "The model's SD
+   controller"); `await/3` has no path that reads the interrupt status
+   without a delivery. Identification completed and the process logged
+   `erx_blk: SD card, standard capacity, 4194304 sectors, 4-bit bus at
+   13000000 Hz`; 4194304 sectors of 512 bytes is the card file's
+   2147483648 bytes. The block service then admitted the partition
+   table (`partition table admitted; 5 windows`), littlefs mounted its
+   volume, and two blocks written, flushed and read back over the
+   driver matched, as did the same bytes at that sector of the card's
+   file after QEMU exited.
+2. **A single-block read raises buffer read ready.** An image whose
+   driver has the `await` of `buffer_read_ready` removed from the
+   single-block read clause of `data/6` in `erx_blk_sd.erl` refuses
+   identification at the SCR with
+   `{unexpected,transfer_complete,buffer_read_ready}`: the event queued
+   after the command's completion was buffer read ready. Whether it
+   came in the same interrupt word as transfer complete, where
+   `erx_blk_sd_host:decode/1` orders the two, or in an earlier word was
+   not recorded.
