@@ -375,17 +375,18 @@ and writes the registers, comes with the controller's own design.
 Register facts are FreeBSD's (`if_genet.c`, `if_genetreg.h`,
 `brgphy.c`, `brgphyreg.h`, `mii.h`, `miidevs`):
 
-* `erx_genet_rx` reads one receive descriptor, its status word and the
-  bytes of its 2 KiB buffer, a private copy the frame keeps alive, into a
-  frame or a drop with its reason. The
-  length field counts the two bytes of padding the controller writes
-  before the frame, so a frame is at most the buffer less those two
-  bytes; a status with the receive-error bit, without both start and
-  end of packet, or a length shorter than the padding and an Ethernet
-  header, past the buffer or past the bytes read is dropped. Every
-  descriptor handed to `batch/2` moves the consumer index by one, frame
-  or drop, so a bad frame never stalls the ring, and a producer index
-  more than a ring ahead is refused as a controller fault.
+* `erx_genet_rx` reads one receive completion of the device NIF, the
+  descriptor status's flags and the bytes the controller wrote, a
+  private copy the frame keeps alive, into a frame or a drop with its
+  reason. The length is the size of those bytes, so no length can
+  disagree with them; it counts the two bytes of padding the controller
+  writes before the frame, so a frame is at most the 2 KiB buffer less
+  those two bytes. Flags with an error bit or without both start and end
+  of packet, or fewer bytes than the padding and an Ethernet header, or
+  more than the buffer, are dropped. The NIF consumes every descriptor,
+  frame or drop, so a bad frame never stalls the ring, and refuses a
+  producer index more than a ring ahead and a length past the buffer as
+  controller faults ([design-device-dma.md, "The register ring (GENET)"](design-device-dma.md#the-three-descriptor-forms)).
 * `erx_mdio` builds the MDIO command word of a clause 22 read or write
   (busy 29, read failed 28, read 27, write 26, PHY 25:21, register
   20:16, data 15:0) and decides each poll of it: wait while busy, up to

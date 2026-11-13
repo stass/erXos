@@ -130,12 +130,12 @@ receive_completions_are_cut_at_their_boundaries_test() ->
              {{?WHOLE, frame_bytes(15)}, {[{dropped, runt}], []}},
              {{?WHOLE bor 2, frame_bytes(64)}, {[{dropped, crc_error}], []}},
              {{?SOP, frame_bytes(64)}, {[{dropped, fragment}], []}},
-             %% More bytes than the 16-bit length field holds, which would overflow the status word.
-             {{?WHOLE, frame_bytes(65536 + 64)}, {[{dropped, too_long}], []}},
+             %% Past the buffer, and more than a 16-bit length can say.
              {{?WHOLE, frame_bytes(2049)}, {[{dropped, too_long}], []}},
-             %% Flags above 16 bits are ignored, never folded into the length.
-             {{?WHOLE bor (1 bsl 20), frame_bytes(64)}, {[], [binary:part(frame_bytes(64), 2, 62)]}}],
-    [?assertEqual({C, Want}, {C, erx_genet_core:frames([C], 1500)}) || {C, Want} <- Cases].
+             {{?WHOLE, frame_bytes(65536 + 64)}, {[{dropped, too_long}], []}}],
+    [?assertEqual({C, Want}, {C, erx_genet_core:frames([C], 1500)}) || {C, Want} <- Cases],
+    %% Flags reach past the status bits below the length only if the NIF broke its contract: refused.
+    ?assertError(function_clause, erx_genet_core:frames([{?WHOLE bor (1 bsl 16), frame_bytes(64)}], 1500)).
 
 a_batch_keeps_frames_and_drops_in_order_test() ->
     A = frame_bytes(80), B = frame_bytes(90),

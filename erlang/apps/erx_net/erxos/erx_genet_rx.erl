@@ -3,50 +3,45 @@
 
 -module(erx_genet_rx).
 -moduledoc """
-The Raspberry Pi 4 Ethernet controller's receive side as pure decisions
-(docs/design-platforms.md, "Raspberry Pi 4 Model B"): what a receive
-descriptor's status word and the bytes read from its buffer mean, and how far
-the consumer index moves. It reads no register and copies nothing the caller
-did not hand it; the transport reads the producer index, each descriptor's
-status and its buffer, and writes back the consumer index this module returns.
-The bytes it hands over are its own copy, never memory the controller may
-write again, since a frame is a sub-binary of them and keeps them alive.
+The Raspberry Pi 4 Ethernet controller's receive decision as a pure function
+(docs/design-platforms.md, "Raspberry Pi 4 Model B"): what one receive
+completion of the device NIF means. It reads no register and copies nothing;
+the NIF walks the ring, moves the consumer index and copies each buffer, and
+`frame/2` judges what it handed up.
 
-Every descriptor holds one buffer of `buffer_bytes/0` (2 KiB), so a frame the
-controller accepted, at most 1,536 bytes, never spans two. The status word is
-untrusted device data. Its low 16 bits are the flags the device NIF hands up as
-each receive completion's tag (docs/design-device-dma.md, "The register ring
-(GENET)"), and `frame/2` takes them with the bytes the NIF copied. Its length field, bits 27:16, counts the two bytes of
-padding the controller writes before the frame so that the IP header lands
-aligned; the frame is the bytes after them. A descriptor whose status carries
-any of the error bits 0 to 4, lacks the start or end of packet, or whose length is
-shorter than the padding and an Ethernet header, longer than the buffer or
-longer than the bytes read is dropped with its reason. Either way the
-descriptor is consumed: `batch/2` moves the consumer index by one for every
-descriptor it is handed, frame or drop, so a bad frame never holds up the
-ring.
+A completion is the NIF's `{Flags, Bytes}` (docs/design-device-dma.md, "The
+register ring (GENET)"). `Flags` are the descriptor status word's bits below
+its length field, bits 15:0. `Bytes` are the bytes the controller wrote, as
+many as the length field, bits 31:16 (FreeBSD masks 12 of them), said. The length is the size of `Bytes`
+and nothing else, so no length can disagree with the bytes behind it or wrap
+into the flags. Both are untrusted device data. The length counts the two bytes
+of padding the controller writes before the frame so that the IP header lands
+aligned; the frame is the bytes after them, a sub-binary of `Bytes`, which are
+the NIF's own copy and never memory the controller may write again.
+
+A completion whose flags carry any of the error bits 0 to 4, or lack the start
+or end of packet, is dropped with its reason, as is one shorter than the
+padding and an Ethernet header, or longer than a 2 KiB receive buffer. The NIF
+refuses a longer length before it copies anything, so the last drop is a check
+of its contract, not a case the controller can reach.
 
 Facts from FreeBSD 975e3605ebb1, `sys/arm64/broadcom/genet/`: the status bits
 (`if_genetreg.h:169-176`; bits 0, 1, 3 and 4 from the GENET facts record,
 docs/research-genet-bcm2711.md, "The receive status word", whose rule of
-dropping on any of them the design takes), the 256-descriptor ring and its 16-bit free-running
-indexes (`if_genetreg.h:116, 131`; `if_genet.c:1384-1388`), the 2 KiB buffer
-(`if_genet.c:790-792`, `MCLBYTES` in `sys/sys/param.h:196-199`), and the padding, turned on by `GENET_RBUF_ALIGN_2B`
-and counted in the length (`if_genet.c:521-524, 1440-1443`). FreeBSD's error
-path leaves its index and the consumer index where they were
-(`if_genet.c:1406-1416`); this module consumes the descriptor instead.
+dropping on any of them the design takes), the 2 KiB buffer
+(`if_genet.c:790-792`, `MCLBYTES` in `sys/sys/param.h:196-199`), and the
+padding, turned on by `GENET_RBUF_ALIGN_2B` and counted in the length
+(`if_genet.c:521-524, 1440-1443`).
 """.
 
--export([buffer_bytes/0, ring_size/0]).
--export([frame/2, batch/2, pending/2, slot/1]).
--export_type([status/0, index/0, drop/0, result/0]).
+-export([frame/2]).
+-export_type([flags/0, drop/0, result/0]).
 
 -include("generated/erx_hw_genet.hrl").
 
 -define(BUFFER_BYTES, 2048).
--define(RING_SIZE, 256).
-%% A ring index, the INDEX field of RX_RING_PROD_INDEX and RX_RING_CONS_INDEX.
--define(INDEX_MASK, ?ERX_HW_GENET_RX_RING_CONS_INDEX_INDEX_MASK).
+%% The largest flags word: every status bit below the length field.
+-define(FLAGS_MAX, ((1 bsl ?ERX_HW_GENET_RX_DESC_STATUS_BUFLEN_SHIFT) - 1)).
 %% The padding before the frame, counted in the length field.
 -define(PAD, 2).
 -define(ETHER_HDR_LEN, 14).
@@ -65,79 +60,32 @@ path leaves its index and the consumer index where they were
                             ?ERX_HW_GENET_RX_DESC_STATUS_NON_OCTET_MASK bor
                             ?ERX_HW_GENET_RX_DESC_STATUS_LENGTH_ERROR_MASK)).
 
--define(IS_U32(V), (is_integer(V) andalso V >= 0 andalso V =< 16#ffffffff)).
-
--doc "A receive descriptor's status word, as the controller wrote it.".
--type status() :: 0..16#ffffffff.
--doc "A producer or consumer index: 16 bits, free-running past the ring's size.".
--type index() :: 0..16#ffff.
+-doc "A receive completion's flags: the descriptor status bits below its length field.".
+-type flags() :: 0..?FLAGS_MAX.
 -doc """
-Why a descriptor carried no frame: the lowest error bit set, `overflow` (bit
+Why a completion carried no frame: the lowest error bit set, `overflow` (bit
 0), `crc_error` (1), `rx_error` (2, the controller's receive-error bit),
-`non_octet` (3) or `length_error` (4); `fragment`, the start or end of packet missing; `runt`, a length shorter
-than the padding and an Ethernet header; `too_long`, a length past the
-buffer; `truncated`, a length past the bytes the caller read.
+`non_octet` (3) or `length_error` (4); `fragment`, the start or end of packet
+missing; `runt`, fewer bytes than the padding and an Ethernet header;
+`too_long`, more bytes than a receive buffer holds.
 """.
--type drop() :: overflow | crc_error | rx_error | non_octet | length_error | fragment | runt | too_long | truncated.
+-type drop() :: overflow | crc_error | rx_error | non_octet | length_error | fragment | runt | too_long.
 -type result() :: {frame, binary()} | {drop, drop()}.
 
--doc "The bytes of each descriptor's buffer.".
--spec buffer_bytes() -> pos_integer().
-buffer_bytes() -> ?BUFFER_BYTES.
-
--doc "The descriptors of the receive ring.".
--spec ring_size() -> pos_integer().
-ring_size() -> ?RING_SIZE.
-
 -doc """
-One descriptor: its status word and the bytes read from its buffer, from the
-buffer's start. A frame is a sub-binary of `Bytes`, at most
-`buffer_bytes() - 2` long.
+One receive completion: its flags and the bytes the controller wrote, the
+padding first. A frame is a sub-binary of `Bytes`, at most 2,046 bytes long.
 """.
--spec frame(status(), binary()) -> result().
-frame(Status, Bytes) when ?IS_U32(Status), is_binary(Bytes) ->
-    Length = ?ERX_HW_GENET_RX_DESC_STATUS_BUFLEN_GET(Status),
+-spec frame(flags(), binary()) -> result().
+frame(Flags, Bytes) when is_integer(Flags), Flags >= 0, Flags =< ?FLAGS_MAX, is_binary(Bytes) ->
     if
-        Status band ?STATUS_ERROR_MASK =/= 0 -> {drop, error_reason(Status)};
-        Status band ?STATUS_SOP =:= 0 -> {drop, fragment};
-        Status band ?STATUS_EOP =:= 0 -> {drop, fragment};
-        Length < ?PAD + ?ETHER_HDR_LEN -> {drop, runt};
-        Length > ?BUFFER_BYTES -> {drop, too_long};
-        Length > byte_size(Bytes) -> {drop, truncated};
-        true -> {frame, binary:part(Bytes, ?PAD, Length - ?PAD)}
+        Flags band ?STATUS_ERROR_MASK =/= 0 -> {drop, error_reason(Flags)};
+        Flags band ?STATUS_SOP =:= 0 -> {drop, fragment};
+        Flags band ?STATUS_EOP =:= 0 -> {drop, fragment};
+        byte_size(Bytes) < ?PAD + ?ETHER_HDR_LEN -> {drop, runt};
+        byte_size(Bytes) > ?BUFFER_BYTES -> {drop, too_long};
+        true -> {frame, binary:part(Bytes, ?PAD, byte_size(Bytes) - ?PAD)}
     end.
 
-error_reason(Status) ->
-    hd([Reason || {Bit, Reason} <- ?STATUS_ERRORS, Status band Bit =/= 0]).
-
--doc """
-The descriptors from consumer index `Cons` on, in ring order, each a status
-word and the bytes read from its buffer: the consumer index after all of
-them, the frames in order and the drops in order. The index moves by one per
-descriptor whatever it carried.
-""".
--spec batch(index(), [{status(), binary()}]) -> {index(), [binary()], [drop()]}.
-batch(Cons, Descriptors) when is_integer(Cons), Cons >= 0, Cons =< ?INDEX_MASK,
-                              length(Descriptors) =< ?RING_SIZE ->
-    Results = lists:map(fun({Status, Bytes}) -> frame(Status, Bytes) end, Descriptors),
-    Next = (Cons + length(Descriptors)) band ?INDEX_MASK,
-    {Next, [Frame || {frame, Frame} <- Results], [Drop || {drop, Drop} <- Results]}.
-
--doc """
-How many descriptors the controller has filled, from the producer index it
-reports (only its low 16 bits count) and the consumer index last written. More
-than the ring holds is a controller fault, refused.
-""".
--spec pending(0..16#ffffffff, index()) ->
-          {ok, 0..?RING_SIZE} | {error, {overrun, non_neg_integer()}}.
-pending(Prod, Cons) when ?IS_U32(Prod), is_integer(Cons), Cons >= 0,
-                         Cons =< ?INDEX_MASK ->
-    case (Prod - Cons) band ?INDEX_MASK of
-        Filled when Filled =< ?RING_SIZE -> {ok, Filled};
-        Filled -> {error, {overrun, Filled}}
-    end.
-
--doc "The descriptor a consumer or producer index names.".
--spec slot(index()) -> 0..(?RING_SIZE - 1).
-slot(Index) when is_integer(Index), Index >= 0, Index =< ?INDEX_MASK ->
-    Index band (?RING_SIZE - 1).
+error_reason(Flags) ->
+    hd([Reason || {Bit, Reason} <- ?STATUS_ERRORS, Flags band Bit =/= 0]).

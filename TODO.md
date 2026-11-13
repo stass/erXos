@@ -1477,10 +1477,6 @@ it; git history is the record of completed work.
   (`erx_genet_core`), so it clears every unnamed bit of each where FreeBSD keeps its reset value;
   `UMAC_CMD` alone is written 0 first by both. The board pass reads each register's reset value,
   and the file gains the bits that turn out to be set.
-* [Low] GENET, Erlang cores (`erx_mdio`, `erx_genet_rx`): both pack bits `genet.svd` names, the MDIO
-  command word's fields and the receive status's flags, by hand, since the hardware generator
-  (`tools/lib/erx/hardware.rb`) emits C alone. An Erlang header of each SVD's field offsets and widths
-  from that generator would let both take their definitions from the source.
 * [Medium] GENET, the bound on its DMA writes: the device NIF owns the descriptors and ring
   registers, but the frame length limit, the status block, the two-byte alignment and the burst
   sizes stay the driver's. The board pass confirms that a ring's buffer size bounds every byte the

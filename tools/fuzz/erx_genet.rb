@@ -8,8 +8,8 @@ require 'tmpdir'
 require_relative '../lib/erx/generated'
 
 # The fuzz targets of the Raspberry Pi 4 Ethernet driver's parsers of what its
-# devices wrote: erx_genet_rx's reading of a receive descriptor's status word and
-# buffer (test/erlang/erx_genet_rx_fuzz.erl), and erx_mdio's and erx_phy_c22's
+# devices wrote: erx_genet_rx's and erx_genet_core's reading of a receive completion's
+# flags and bytes (test/erlang/erx_genet_rx_fuzz.erl), and erx_mdio's and erx_phy_c22's
 # decoding of MDIO command words and PHY register words
 # (test/erlang/erx_phy_word_fuzz.erl). Each compiles its modules from source and
 # runs them alone on stock's emulator (ERX_ERL and ERX_ERLC, the oracle's), so it
@@ -28,13 +28,15 @@ module ErxGenetFuzz
     Target.new(name: 'erx_genet_rx_fuzz', modules: %w[erx_genet_rx erx_genet_core],
                mutants: {
                  'a frame longer than the buffer' =>
-                   ['erx_genet_rx', 'Length > ?BUFFER_BYTES -> {drop, too_long};', ''],
+                   ['erx_genet_rx', 'byte_size(Bytes) > ?BUFFER_BYTES -> {drop, too_long};', ''],
                  'the padding kept in the frame' =>
-                   ['erx_genet_rx', 'binary:part(Bytes, ?PAD, Length - ?PAD)', 'binary:part(Bytes, 0, Length - ?PAD)'],
+                   ['erx_genet_rx', 'binary:part(Bytes, ?PAD, byte_size(Bytes) - ?PAD)',
+                    'binary:part(Bytes, 0, byte_size(Bytes) - ?PAD)'],
                  'only the receive-error bit dropping a frame' =>
-                   ['erx_genet_rx', 'Status band ?STATUS_ERROR_MASK =/= 0', 'Status band 16#0004 =/= 0'],
-                 'a completion past the buffer folded into the length field' =>
-                   ['erx_genet_core', 'case byte_size(Bytes) =< erx_genet_rx:buffer_bytes() of', 'case true of']
+                   ['erx_genet_rx', 'Flags band ?STATUS_ERROR_MASK =/= 0', 'Flags band 16#0004 =/= 0'],
+                 'a frame past the MTU passed up' =>
+                   ['erx_genet_core', '{frame, _Long} -> {[{dropped, too_long} | Drops], Frames};',
+                    '{frame, Long} -> {Drops, [Long | Frames]};']
                }),
     Target.new(name: 'erx_phy_word_fuzz', modules: %w[erx_mdio erx_phy_c22],
                mutants: {

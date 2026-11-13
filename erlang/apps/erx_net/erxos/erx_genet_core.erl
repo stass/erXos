@@ -47,7 +47,7 @@ The sequences follow FreeBSD 975e3605ebb1, `sys/arm64/broadcom/genet/if_genet.c`
 -define(TBUF_SIZE, 1).
 -define(ALL_IRQS, 16#ffffffff).
 -define(RESET_US, 10).
-%% erx_genet's receive buffers, erx_genet_rx's.
+%% An Ethernet header: destination, source and type.
 -define(ETHER_HDR_LEN, 14).
 %% The device NIF's limit on a transmit post's pieces (ERX_DEVICE_GENET_PIECES_MAX,
 %% otp/erts/emulator/nifs/erxos/erx_device_genet.h).
@@ -169,29 +169,22 @@ negotiate_retry(Tries) when is_integer(Tries), Tries >= ?NEGOTIATE_TRIES ->
 
 -doc """
 The cut of a batch of receive completions into its drops and its frames, in order. Each
-completion is the device NIF's `{Flags, Bytes}`: the low 16 bits of the descriptor's
-status and the bytes the controller wrote, as many as its length field said, the 2-byte
-alignment pad first. Both are untrusted. More bytes than a receive buffer holds is
-`too_long` before anything else is judged, so no length is folded into the status's
-12-bit field; erx_genet_rx judges the rest. A frame longer than the MTU and its Ethernet
-header is `too_long` too.
+completion is the device NIF's `{Flags, Bytes}`, which erx_genet_rx:frame/2 judges: the
+descriptor status's bits below its length field and the bytes the controller wrote, as
+many as its length field said, the 2-byte alignment pad first. Both are untrusted. Its
+drops pass through, and a frame longer than the MTU and its Ethernet header is dropped
+as `too_long` as well.
 """.
--spec frames([{non_neg_integer(), binary()}], pos_integer()) ->
-          {[{dropped, atom()}], [binary()]}.
+-spec frames([{erx_genet_rx:flags(), binary()}], pos_integer()) ->
+          {[{dropped, erx_genet_rx:drop()}], [binary()]}.
 frames(Completions, Mtu) ->
     lists:foldr(fun(Completion, Acc) -> frame(Completion, Mtu, Acc) end, {[], []}, Completions).
 
-frame({Flags, Bytes}, Mtu, {Drops, Frames}) when is_integer(Flags), Flags >= 0, is_binary(Bytes) ->
-    case judge(Flags, Bytes) of
+frame({Flags, Bytes}, Mtu, {Drops, Frames}) ->
+    case erx_genet_rx:frame(Flags, Bytes) of
         {frame, Frame} when byte_size(Frame) =< Mtu + ?ETHER_HDR_LEN -> {Drops, [Frame | Frames]};
         {frame, _Long} -> {[{dropped, too_long} | Drops], Frames};
         {drop, Reason} -> {[{dropped, Reason} | Drops], Frames}
-    end.
-
-judge(Flags, Bytes) ->
-    case byte_size(Bytes) =< erx_genet_rx:buffer_bytes() of
-        true -> erx_genet_rx:frame((byte_size(Bytes) bsl 16) bor (Flags band 16#ffff), Bytes);
-        false -> {drop, too_long}
     end.
 
 -doc """
