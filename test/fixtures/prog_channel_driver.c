@@ -13,7 +13,7 @@
  * "ok CASE" and exits 0, or prints "FAIL CASE: why" and exits 1:
  *   whole	one frame is written whole, as one frame record
  *   wait	a send without room for its whole frame writes nothing and
- *		sleeps; a room bump that brought too little sends it back to
+ *		sleeps; a room announcement that brought too little sends it back to
  *		sleep; the reader's freeing of the room wakes it and the frame
  *		arrives whole
  *   two	two senders' frames, of sizes up to most of the ring, arrive

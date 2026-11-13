@@ -10,28 +10,26 @@
  * are marked whole, so a put writes all of a frame or none of it, and the
  * writer is never left inside a record that another sender would find.
  *
- * The wait for room: a sender counts itself in waiters, reads the room
- * epoch, then puts armed, which publishes the room it needs, fences and
- * looks once more.  Once the session's read crosses that need it rings
- * the doorbell, the executor takes the label and bumps the epoch, so the
- * bump comes after the sender's read of it, and the sender's umtx wait on
- * the value it read returns.  The executor reads waiters after its bump,
- * and the sender counted itself before reading the epoch, so an executor
- * that finds no waiter bumped before any sender's read and owes no wake.
- * A woken sender takes the lock and puts again, so a bump that brought too
- * little room only sends it back to wait.
+ * The wait for room is a wait on an object (wake.h): a sender reads its
+ * wake word, puts itself on the channel's waiters and puts armed, which
+ * publishes the room it needs, fences and looks once more, all under the
+ * lock.  Once the session's read crosses that need it rings the doorbell,
+ * and the executor takes the label and wakes the waiters under the same
+ * lock, so it finds the sender on the list and bumps the word the sender
+ * read, and the sender's sleep returns.  A woken sender takes the lock
+ * and puts again, so a wake that brought too little room only sends it
+ * back to wait.
  *
  * The lane has one need word, and each armed put overwrites it, so it
  * holds the need of the sender that published last.  While that sender
  * waits, its need's crossing wakes every waiter.  A sender that leaves
  * the lane, its frame written or the lane broken, may be the one whose
  * need is published, and the need of a sender still waiting then stands
- * nowhere; so a sender that leaves while others wait bumps the epoch
- * itself, and each of them publishes its need again.
+ * nowhere; so a sender that leaves while others wait wakes them itself,
+ * and each of them publishes its need again.
  */
 
 #include <pthread.h>
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -40,16 +38,15 @@
 #include "erx/lane.h"
 #include "liberx/backend/api.h"
 #include "liberx/program/channel.h"
+#include "liberx/program/wake.h"
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 /* Under lock, once erx_prog_channel_open has readied it. */
 static erx_lane_writer_t outbound;
 /* Set by erx_prog_channel_open before any thread sends. */
 static uint64_t doorbell;
-/* How many times room was announced; senders wait for it to move. */
-static _Atomic uint32_t room_epoch;
-/* Senders between counting themselves and the end of their wait. */
-static _Atomic uint32_t waiters;
+/* The senders waiting for room, under lock. */
+static erx_prog_waitq_t room_waiters;
 
 bool
 erx_prog_channel_open(void *own_side, const void *peer_side, uint64_t bell)
@@ -72,23 +69,22 @@ whole_put(const erx_lane_item_t *item, erx_lane_put_t *put)
 	/* A lane with room takes the frame without publishing a need, which would cost a ring. */
 	status = erx_lane_put(&outbound, item, put);
 	while (status == ERX_LANE_PUT_SHORT) {
-		uint32_t seen;
+		const uint32_t seen = erx_prog_wake_seen();
+		erx_prog_waiter_t me;
 
-		atomic_fetch_add(&waiters, 1);
-		seen = atomic_load(&room_epoch);
+		erx_prog_waitq_join(&room_waiters, &me);
 		status = erx_lane_put_armed(&outbound, item, put);
 		if (status == ERX_LANE_PUT_SHORT) {
 			(void)pthread_mutex_unlock(&lock);
 			/* The open wait: the sender holds nothing of the channel's here. */
-			(void)erx_umtx_wait((uint64_t)(uintptr_t)&room_epoch, seen, ERX_WAIT_FOREVER);
+			erx_prog_wake_sleep(seen);
 			(void)pthread_mutex_lock(&lock);
 		}
-		atomic_fetch_sub(&waiters, 1);
+		erx_prog_waitq_leave(&room_waiters, &me);
 	}
-	(void)pthread_mutex_unlock(&lock);
 	/* This sender leaves: a need it published stands for none of those still waiting. */
-	if (atomic_load(&waiters) != 0)
-		erx_prog_channel_room();
+	erx_prog_waitq_wake(&room_waiters);
+	(void)pthread_mutex_unlock(&lock);
 	return (status);
 }
 
@@ -116,7 +112,7 @@ erx_prog_channel_send(const erx_lane_iov_t *iov, size_t iovcnt)
 void
 erx_prog_channel_room(void)
 {
-	atomic_fetch_add(&room_epoch, 1);
-	if (atomic_load(&waiters) != 0)
-		(void)erx_umtx_wake((uint64_t)(uintptr_t)&room_epoch, UINT32_MAX);
+	(void)pthread_mutex_lock(&lock);
+	erx_prog_waitq_wake(&room_waiters);
+	(void)pthread_mutex_unlock(&lock);
 }

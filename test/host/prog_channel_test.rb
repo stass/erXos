@@ -11,7 +11,7 @@ require_relative '../../tools/lib/erx/generated'
 # The channel's send, the only writer of a program's outbound lane (liberx/program/channel.h),
 # through test/fixtures/prog_channel_driver.c, which plays the session and the backend: a frame
 # is written whole; a send without room for its whole frame writes nothing and waits until the
-# executor's room epoch brings enough; a sender still waiting when another leaves is woken to
+# executor's announcement of room brings enough; a sender still waiting when another leaves is woken to
 # publish its need again; two senders' frames never interleave; a frame larger than
 # the ring is refused with ERX_ERANGE. Every case runs under the address and undefined
 # sanitizers, and the two-sender and waiting cases under the thread sanitizer too
@@ -20,7 +20,8 @@ class ProgChannelTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   CHANNEL = 'liberx/program/channel.c'
-  SOURCES = %w[liberx/erx_lane.c build/gen/liberx/generated/abi_reader.c test/fixtures/prog_channel_driver.c].freeze
+  SOURCES = %w[liberx/erx_lane.c liberx/program/wake.c build/gen/liberx/generated/abi_reader.c
+               test/fixtures/prog_channel_driver.c].freeze
   FLAGS = ['-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g', '-pthread'].freeze
   SANITIZERS = {
     address: ['-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'],
@@ -36,7 +37,8 @@ class ProgChannelTest < Minitest::Test
     'a woken send does not look at the room again' => ['wait', 'while (status == ERX_LANE_PUT_SHORT) {',
                                                        'if (status == ERX_LANE_PUT_SHORT) {'],
     'a sender that leaves does not wake those still waiting' =>
-      ['waiters', "\tif (atomic_load(&waiters) != 0)\n\t\terx_prog_channel_room();\n", '']
+      ['waiters', "\terx_prog_waitq_wake(&room_waiters);\n\t(void)pthread_mutex_unlock(&lock);\n\treturn (status);",
+       "\t(void)pthread_mutex_unlock(&lock);\n\treturn (status);"]
   }.freeze
 
   def test_each_case_under_the_address_and_undefined_sanitizers

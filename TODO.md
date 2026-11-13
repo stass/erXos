@@ -2213,11 +2213,14 @@ it; git history is the record of completed work.
   `sigignore` names it, and a run-time `signal(SIGPIPE, SIG_IGN)` is not honoured. It fails safe,
   with a stop of the writing program, never a hang or a wrong answer; output the program would
   have written after the `EPIPE` is lost.
-* [Medium] liberx program layer, `liberx/program/channel.c` (`whole_put`): the wait for outbound
-  room sleeps on the channel's own `room_epoch`, not on the thread's wake word, so a pipe call
-  that sends a notice (`{drained}`, `{closed}`) can wait where a signal will not reach it, which
-  P6 forbids. Make the room wait a waiter list under the channel's lock (liberx/program/wake.h)
-  before signals reach programs.
+* [Low] liberx program layer, `liberx/program/wake.h`: P6 (docs/design-programs.md) says every
+  wait of `liberx` sleeps on the thread's wake word, and no build check holds it. A chokepoint
+  rule that lets only `liberx/program/wake.c` and the listed stop and startup waits of
+  `program.c` call `erx_umtx_wait`, with a seeded site in its test, would.
+* [Low] liberx program layer, signals: a waiter (`erx_prog_waiter_t`) lives on the waiting
+  thread's stack while it sleeps, on a pipe end's list or the channel's. A signal design that
+  lets a handler leave a wait without returning through it (`siglongjmp` from an upcall) would
+  leave a dangling waiter; it must forbid that or take the thread's waiters off first.
 * [Medium] session, `erx_pipe:step/2`: the second tier's events are not there: `{deposit}`, `{redeem}`,
   `{discard}`, `{withdraw}` and the collector of deposits no reader can reach
   (docs/design-pipes.md, "The second tier" and "Deposits"), and `holder()` has no

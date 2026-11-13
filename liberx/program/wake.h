@@ -10,8 +10,7 @@
  * A thread's wake word and the lists of threads waiting on an object
  * (docs/design-programs.md, "The event executor", and P6).  A wait on an
  * object is one loop: read the thread's wake word, check the call's
- * condition, and sleep on the word with the value read.  The channel's
- * wait for room does not use it yet (TODO.md).  A
+ * condition, and sleep on the word with the value read.  A
  * thread that waits on an object puts a waiter, which names its wake
  * word, on the object's list under the object's lock, before it lets that
  * lock go; whoever changes what the waiters wait for, under the same
@@ -21,8 +20,8 @@
  * it.  One thread may wait on several objects at once, as poll does, with
  * one waiter on each list, all naming its one word.
  *
- * A list is its object's lock's: every call here but erx_prog_wake_word
- * and erx_prog_wake_sleep needs it held.
+ * A list is its object's lock's: every call here but erx_prog_wake_word,
+ * erx_prog_wake_seen and erx_prog_wake_sleep needs it held.
  */
 
 #include <stdatomic.h>

@@ -335,9 +335,11 @@ been read (P13). Any worker may write a request or a notice into the
 outbound lane through the channel's send, the lane's only writer, under
 the lane's one lock, which is never held across a wait. A frame that fits
 the ring is written whole under the lock, after an open wait for room for
-the whole frame: a sender that finds too little lets go of the lock,
-publishes the room it needs and waits, and puts again once the event
-executor, taking the channel's label, wakes the senders waiting for room.
+the whole frame: a sender that finds too little publishes the room it
+needs and joins the channel's [waiters](#the-event-executor) under the
+lock, then lets go of it and waits (P6), and puts again once the event
+executor, taking the channel's label, wakes the senders waiting for room
+under the same lock.
 So the frames of two workers never interleave, and no worker holds the
 lock while it waits; a sender that leaves while others wait wakes them,
 since the room it last asked for may have been theirs to wait on. The executor never sends into the
@@ -1401,7 +1403,8 @@ objects with one waiter on each list, all naming its one word: it puts
 them all on before it checks any object, and takes them all off before
 it returns. The lock order is the descriptor table's lock, then an
 object's: a thread that holds an object's lock never takes the table's,
-and `liberx` stops a thread that tries.
+and `liberx` stops a thread that tries. The channel's lock is a leaf:
+a thread takes it holding no other lock of `liberx`'s.
 
 ### Job control
 
