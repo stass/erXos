@@ -28,7 +28,7 @@ Of a facet row's limits a grant applies three (grant_options/1):
 
 -behaviour(supervisor).
 
--export([start_link/2, grant/3, grant_options/1]).
+-export([start_link/1, start_link/2, grant/3, grant/4, grant_options/1]).
 %% The supervisor's callback and its child's start.
 -export([init/1, start_grant/3]).
 
@@ -43,6 +43,30 @@ the caller.
 -spec start_link(module(), term()) -> {ok, pid()}.
 start_link(Module, Args) when is_atom(Module) ->
     supervisor:start_link(?MODULE, {Module, Args}).
+
+-doc """
+Starts the supervisor of the grants of the tree Module serves, linked to the
+caller, where each grant names the Args its tree starts from (grant/4): a
+tree that serves each client its own part, as erx_winfs serves each client
+its own directory.
+""".
+-spec start_link(module()) -> {ok, pid()}.
+start_link(Module) when is_atom(Module) ->
+    supervisor:start_link(?MODULE, Module).
+
+-doc """
+One grant under Grants, a supervisor start_link/1 started, of the tree Args
+name, bound as grant/3 binds one, or with `client` `own` for a client of the
+server's own domain.
+""".
+-spec grant(pid(), term(), map(), #{client := pos_integer() | own,
+                                    ends_with := port() | pid() | none,
+                                    exports := module()}) -> {ok, pid()} | {error, term()}.
+grant(Grants, Args, Limits, #{client := _, ends_with := _, exports := _} = Binding) ->
+    case grant_options(Limits) of
+        {ok, Options} -> supervisor:start_child(Grants, [Args, maps:merge(Options, Binding)]);
+        {error, _} = Refused -> Refused
+    end.
 
 -doc """
 One grant under Grants with the options a facet row's Limits give it, bound by
@@ -85,11 +109,17 @@ grant_options(Limits) ->
     end.
 
 -doc false.
+init(Module) when is_atom(Module) ->
+    {ok, {grants_spec(), [grant_spec({?MODULE, start_grant, [Module]})]}};
 init({Module, Args}) ->
-    Grant = #{id => grant, start => {?MODULE, start_grant, [Module, Args]},
-              restart => temporary, shutdown => brutal_kill, type => worker,
-              modules => [erx_fs]},
-    {ok, {#{strategy => simple_one_for_one, intensity => 0, period => 1}, [Grant]}}.
+    {ok, {grants_spec(), [grant_spec({?MODULE, start_grant, [Module, Args]})]}}.
+
+grants_spec() ->
+    #{strategy => simple_one_for_one, intensity => 0, period => 1}.
+
+grant_spec(Start) ->
+    #{id => grant, start => Start, restart => temporary, shutdown => brutal_kill,
+      type => worker, modules => [erx_fs]}.
 
 -doc false.
 -spec start_grant(module(), term(), map()) -> {ok, pid()} | {error, term()}.

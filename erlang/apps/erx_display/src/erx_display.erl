@@ -27,7 +27,7 @@
 
 -module(erx_display).
 
--export([flush_request/3, power_request/2]).
+-export([flush_request/3, power_request/2, chan_format/1]).
 -export_type([chan/0, rect/0, info/0, level/0, request/0]).
 
 %% A Plan 9 channel descriptor, such as <<"x8r8g8b8">>.
@@ -52,3 +52,40 @@ flush_request(Driver, Rects, Image) ->
 -spec power_request(pid(), level()) -> gen_server:request_id().
 power_request(Driver, Level) ->
     gen_server:send_request(Driver, {power, Level}).
+
+-doc """
+The format of channel descriptor `Chan`, as draw(2)'s `strtochan` reads one:
+`{ok, Code, Depth}`, the descriptor as `erx_memdraw` takes a channel, one
+byte of type and bits for each channel, the first channel in the highest
+byte, and the bits of a pixel; `{error, einval}` for a descriptor of no
+channel, more than four, a letter outside `rgbkamx`, a channel of no bits
+or more than 8, or a depth that is not a whole divisor or multiple of 8.
+""".
+-spec chan_format(chan()) -> {ok, 0..16#ffffffff, 1..32} | {error, einval}.
+chan_format(Chan) when is_binary(Chan) ->
+    chan_format(Chan, 0, 0, 0);
+chan_format(_) ->
+    {error, einval}.
+
+%% draw(2)'s channel types: CRed 0, CGreen 1, CBlue 2, CGrey 3, CAlpha 4, CMap 5,
+%% CIgnore 6.
+chan_format(<<Letter, Bits, Rest/binary>>, Code, Depth, Count)
+  when Bits >= $1, Bits =< $8, Count < 4 ->
+    case chan_type(Letter) of
+        error -> {error, einval};
+        Type -> chan_format(Rest, (Code bsl 8) bor (Type bsl 4) bor (Bits - $0),
+                            Depth + Bits - $0, Count + 1)
+    end;
+chan_format(<<>>, Code, Depth, Count) when Count > 0, (Depth rem 8 =:= 0 orelse 8 rem Depth =:= 0) ->
+    {ok, Code, Depth};
+chan_format(_, _, _, _) ->
+    {error, einval}.
+
+chan_type($r) -> 0;
+chan_type($g) -> 1;
+chan_type($b) -> 2;
+chan_type($k) -> 3;
+chan_type($a) -> 4;
+chan_type($m) -> 5;
+chan_type($x) -> 6;
+chan_type(_) -> error.

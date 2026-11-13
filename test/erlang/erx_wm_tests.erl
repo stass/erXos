@@ -335,4 +335,21 @@ single_without_chord_withholds_nothing_test() ->
 bad_configuration_is_refused_test() ->
     ?assertError(badarg, erx_wm_single:init(not_a_map)),
     ?assertError(badarg, erx_wm_single:init(#{chord => []})),
-    ?assertError(badarg, erx_wm_single:init(#{chord => [16#10000]})).
+        ?assertError(badarg, erx_wm_single:init(#{chord => [16#10000]})),
+    ?assertError(badarg, erx_wm_single:init(#{app => ?APP})),
+    ?assertError(badarg, erx_wm_single:init(#{chord => [1], session => ?APP})).
+
+%% With no session every window is hidden and input reaches none; a session that
+%% comes later shows its oldest window, and another session's shows another's.
+single_follows_the_session_it_is_passed_test() ->
+    State = erx_wm_single:init(#{}),
+    Table = [window(1, <<"a">>), window(2, <<"b">>), window(3, <<"b">>)],
+    {None, State} = erx_wm_single:arrange(Table, screen(), none, State),
+    ?assertEqual([], erx_wm:shown(None)),
+    ?assertEqual(none, erx_wm_single:shown(none, None)),
+    ?assertMatch({drop, _}, erx_wm_single:input(key(down, 30), None, none, State)),
+    {ForB, State} = erx_wm_single:arrange(Table, screen(), <<"b">>, State),
+    ?assertMatch([#{id := 2}], erx_wm:shown(ForB)),
+    {ForA, State} = erx_wm_single:arrange(ForB, screen(), <<"a">>, State),
+    ?assertMatch([#{id := 1}], erx_wm:shown(ForA)),
+    ?assertMatch({{to, 1, _}, _}, erx_wm_single:input(key(down, 30), ForA, <<"a">>, State)).

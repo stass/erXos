@@ -11,7 +11,7 @@
  [{description, "erXos display drivers"},
   {vsn, "1"},
   {modules, [erx_fb_app, erx_fb_sup, erx_virtio_gpu, erx_virtio_gpu_core]},
-  {registered, [erx_fb, erx_fb_sup, erx_screen]},
-  {applications, [kernel, stdlib, erx, erx_memdraw, erx_display]},
+  {registered, [erx_fb, erx_fb_sup, erx_screen, erx_winfs]},
+  {applications, [kernel, stdlib, erx, erx_files, erx_memdraw, erx_display]},
   {env, []},
   {mod, {erx_fb_app, []}}]}.

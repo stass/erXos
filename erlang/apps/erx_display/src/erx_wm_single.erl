@@ -40,9 +40,14 @@ goes to the shown window.
 -doc "The policy's state, threaded by erx_winfs.".
 -type state() :: #{chord := erx_wm:chord()}.
 
--doc "The policy's state from its configuration; a bad one raises `badarg`.".
+-doc """
+The policy's state from its configuration; a bad one, or one with a key
+other than `chord`, raises `badarg`.
+""".
 -spec init(config()) -> state().
-init(Config) when is_map(Config) ->
+init(Config) when is_map(Config), map_size(Config) =:= 0 ->
+    #{chord => erx_wm:chord_init(Config)};
+init(#{chord := _} = Config) when map_size(Config) =:= 1 ->
     #{chord => erx_wm:chord_init(Config)};
 init(Config) ->
     error(badarg, [Config]).

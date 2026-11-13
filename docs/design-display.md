@@ -413,7 +413,7 @@ refuses a client module placed outside them by mistake.
 | --- | --- | --- | --- |
 | **G1.** A client reaches only its own windows' pixels and input | a client's pixels lie in its own pixel area, which only that client's domain writes and only the display maps, read-only: the display maps no client's area into another domain and writes no pixel into any client's memory, so no path carries one client's pixels to another; a `present` names a range of the presenter's own area and is checked against that area's size, so it cannot name another client's memory; a window's files are a grant rooted at the client's directory of `erx_winfs`; a program is given a mapping of its own window's buffer and fids on its own window's directory, never the area or the grant ([Narrowing](design-files.md#narrowing-for-a-program)); a draw connection names images by ids it allocated and by image 0, its window, and the protocol has no message that names another connection's image; the policy delivers each input event to one window, and under the single policy only to the one shown window | an area mapped into a second client; a present checked against another grant's area; a program handed its session's whole area; a draw message that names or attaches to another connection's image; a grant rooted above the client's directory; an event delivered to a hidden window | a client that presents every offset and size at and past the ends of its area, each one outside refused with `EINVAL` and nothing shown; two sessions whose grants list only their own windows; a program given one window that walks `..` and sibling names and reaches nothing, and whose writes outside its buffer's mapping fault in its own sub-space; a draw connection that sends every message type with every id of another connection, each refused with `ENOENT`; under the single policy with a second window of the named session and a window of another domain made, each of the two is hidden, its `kbd` receives nothing and its `wctl` write of `show` fails with `EINVAL`, where a seeded delivery to a hidden window fails it; when the shown window ends, the session's second window is shown and the other domain's stays hidden, and when that ends too the screen holds only the background until the session makes another, where a seeded policy that shows the most recent window or any domain's window fails it |
 | **G2.** Every image has one writer, no reader faults or leaves its image, and every pixel loop runs over a clipped rectangle | the screen image is written only by `erx_screen`; a client's buffer is written only by the client's domain, and in the display domain is read only by `erx_screen` and by the driver while a frame `erx_screen` handed it is outstanding, during which `erx_screen` writes no image of that frame; the display's mapping of an area is read-only, and the area is deleted only after the display has unmapped it ([The pixel area](#the-pixel-area)), so a read of it never faults, whatever the client does or however it ends; a buffer's size and layout are the display's own record, made from a checked `present`, and nothing of them is read from the area, so a client that writes while the display reads changes pixels of its own window and nothing else; an image is a NIF resource, freed by its destructor when no term refers to it, and `erx_memdraw` has no other free, so a window's end, a resize and an `f` drop a reference and never free memory another process holds; an image over an area keeps the area mapped while it lives; only `erx_memdraw:wrap/4` makes an image over memory it did not allocate, and it checks the range against the memory's size with checked arithmetic; every pixel loop of `erx_memdraw` walks a rectangle one of its checkers produced: a draw, the `erx_clip_t` that only `erx_draw_clip` produces from the operation's rectangles and the images' bounds; a load or read, a rectangle `rows_of` checked inside its image; an allocation's fill and a snapshot, the whole image `badrect` admitted | a second writer of the screen image; a read of a buffer whose area has been unmapped; a layout field read from the area; an explicit free of an image; an image over a range that passes its memory's end; a loop over an unclipped rectangle | the build checks over `erx_memdraw`'s sources and the call direction (Chokepoints); the differential test against the reference renderer with rectangles far outside every image; the display suite in hosted mode under ThreadSanitizer and ASan, with clients drawing, presenting, resizing and ending, and a client's domain killed while `erx_screen` composes from its buffer, where a seeded unmap of an area before its last image is freed makes ASan report, and a seeded `wrap/4` without its bound check fails the range cases |
-| **G3.** What a client makes the display domain spend is bounded by its grant | memory: the grant's `pixels` is the size of the client's pixel area, charged when the connection is made and never grown, and its `windows` bounds the client's window processes, each of which holds one present, at most 16 rectangles, a label and at most 4 KiB of pending `mouse` and of pending `kbd`; the display holds no image, font or tree of a client; a write carries at most the file protocol's 64 KiB, and a `ctl` or `wctl` line at most 1,024 bytes; `erx_screen` never waits on the driver, so its mailbox drains while a frame is with the device, and what it holds meanwhile is state, not a queue: the newest layout, which replaces the one before, and at most one waiting present for each live window, dropped when the window ends ([The screen](#the-screen-and-its-one-path-to-the-device)). CPU: a window has one present in flight; `erx_screen` gathers the presents that arrive while the device is busy into one frame and copies for each window at most its present's 16 rectangles, each clipped to the window's visible region, once a frame, so a client that presents as fast as it is answered costs one such copy for each frame of the device and delays no other window by more | a buffer the display allocates for a client; a window with two presents composed in one frame; an unbounded queue; a layout kept for each change instead of the newest; a waiting present kept after its window's end; a call to the driver that blocks `erx_screen`; a layout change that asks a client for work | a client that makes windows past its quota, refused with `ENOMEM`, with the domain's memory unchanged; against a driver model that never answers, a client that writes 100,000 `wctl` moves and makes and removes 100,000 windows leaves `erx_screen`'s message queue empty between messages and its heap within the bound computed from the windows quota, where a seeded `erx_screen` that calls the driver synchronously, or that keeps every layout, fails the bound; a client that floods presents from one window while another window's one present is answered within two frames, where a seeded window process that sends its next present before the last is answered fails it; the queue bounds of the data model |
+| **G3.** What a client makes the display domain spend is bounded by its grant | memory: the grant's `pixels` is the size of the client's pixel area, charged when the connection is made and never grown, and its `windows` bounds the client's window processes, each of which holds one present, at most 16 rectangles, a label and at most 4 KiB of pending `mouse` and of pending `kbd`; the display holds no image, font or tree of a client; a write carries at most the file protocol's 64 KiB, and a `ctl` or `wctl` line at most 1,024 bytes; `erx_screen` never waits on the driver, so its mailbox drains while a frame is with the device, and what it holds meanwhile is state, not a queue: the newest layout, which replaces the one before, and at most one waiting present for each live window, dropped when the window ends ([The screen](#the-screen-and-its-one-path-to-the-device)). CPU: a window has one present in flight; `erx_screen` gathers the presents that arrive while the device is busy into one frame and copies for each window at most its present's 16 rectangles, each clipped to the window's visible region, once a frame, so a client that presents as fast as it is answered costs one such copy for each frame of the device and delays no other window by more | a buffer the display allocates for a client; a window with two presents composed in one frame; an unbounded queue; a layout kept for each change instead of the newest; a waiting present kept after its window's end; a call to the driver that blocks `erx_screen`; a layout change that asks a client for work | a client that makes windows past its quota, refused with `EDQUOT`, with the domain's memory unchanged; against a driver model that never answers, a client that writes 100,000 `wctl` moves and makes and removes 100,000 windows leaves `erx_screen`'s message queue empty between messages and its heap within the bound computed from the windows quota, where a seeded `erx_screen` that calls the driver synchronously, or that keeps every layout, fails the bound; a client that floods presents from one window while another window's one present is answered within two frames, where a seeded window process that sends its next present before the last is answered fails it; the queue bounds of the data model |
 | **G4.** A presentation grants nothing | a presentation is a type and a canonical text; the terminal emulator's only actions on one are to insert its text as keyboard input and to highlight the presentations of the types an input context names; a widget's only action is the `{select, Type, Value}` event to its application; neither carries a facet, a grant or a capability, and the command that then runs is checked by the shell's facets as any typed command is ([Authority](design.md#authority)) | a terminal that calls a service for a clicked link; a widget server that performs the action a presentation names | a session without an inspect facet clicks a pid presentation and the inserted `i` command fails with `no_facet`; the link parser's fuzz target; a source check that `erx_term` and `erx_ui_server` call no facet |
 | **G5.** Attributed text in a window is displayed only through the line escape, and a program's output reaches its terminal window unchanged | a window's label, a widget's `present` text and a widget's text drawn from a record value are escaped by the displayer with `erx_text:escape_line/1` ([Attributed text](design-live.md#attributed-text)): the menu in the display domain, a renderer in the session; the terminal emulator takes its bytes from a tty, which changes nothing but what `termios` says (V1), and interprets them as a terminal does | a label drawn raw; a terminal emulator that filters a program's bytes | the attributed-text test corpus of design-live sent as a label, as a `present` text and as a record value in a widget; V1's byte test with a terminal window in place of the serial line |
 | **G6.** Nothing paints without a change | the only path to the device is `erx_screen`, which composes on a window's present and on a change of the layout, and repaints from the buffers it already maps when the driver restarts or the panel wakes; the driver pushes only the rectangles it is given; no process of the display domain has a redraw timer; no renderer has one either: the LVGL program, built with animations off, blocks on its standard input until a record arrives or its next LVGL timer is due, so it reports only what a change invalidated | a periodic repaint; a push of the whole screen for a small change; an LVGL timer that fires without a change | an idle display for one minute makes no device request, counted at the driver, on the desktop and on a kiosk under LVGL, where a seeded animation in the LVGL build fails it; a one-pixel change makes exactly one push of one rectangle; moving a window pushes exactly the area whose content changed |
@@ -887,8 +887,13 @@ window ids are spent. The `mkdir`'s
 `Owner` ([Fid owners](design-files.md#fid-owners)) is the window's
 holder: a window ends when its holder ends, when its directory is
 removed, or when its grant ends, whichever comes first, as a fid ends at
-its owner's end. `mouse`, `kbd` and
-`wctl` are the formats of Plan 9 and 9front, and a read of them is a
+its owner's end. `mouse` and
+`wctl` are the formats of Plan 9 and 9front. `kbd` is erXos's own
+format; it has not been checked against 9front's kbd(3) or its
+source, so no compatibility with 9front's `kbd` is claimed. A record is one byte naming its kind, its runes in
+UTF-8, and a NUL, so a typed rune is `c`, the rune and a NUL, at most
+6 bytes, and `k` and `K` carry the runes of the keys down. A read of
+`mouse`, `kbd` or `wctl` is a
 helper-mode read that waits for a record
 ([The `erx_fs` behaviour](design-files.md#serving-the-erx_fs-behaviour)).
 Only these names exist; `cons`, `winname`, `consctl` and `wsys` do not,
@@ -1542,7 +1547,9 @@ the client's pixel area ([The pixel area](#the-pixel-area)), which
 rectangle and a state, starts the window process, linked to the server,
 and records the window with the `mkdir`'s `Owner` as holder, monitored.
 `erx_winfs` knows every window's owner, so no field of shared memory
-decides who may do what.
+decides who may do what. A holder's pid is never shown in any file a
+client reads: `ctl`, `wctl`, `label`, the records of `mouse` and `kbd`
+and the directories' listings carry none.
 
 `erx_wm` is a pure policy module behind one behaviour, called only by
 `erx_winfs`:
@@ -1669,10 +1676,13 @@ and sweeps each band, so a layout of L rectangles costs O(L^2 log L) to
 tile and two tilings compare in time linear in their size. It is tested
 exhaustively on the host over small screens and layouts.
 
-**A present** reaches `erx_screen` as a call from a window process,
-`erx_screen:present(Buffer, Rects)`, after the window has checked the
-command ([The window tree](#the-window-tree)). The window waits for the
-answer, so a window has one present in flight.
+**A present** reaches `erx_screen` from a window process through
+`erx_screen:present_request/2`, after the window has checked the
+command ([The window tree](#the-window-tree)). The window sends the next
+only after the answer, so a window has one present in flight. The
+screen copies a present's rectangles with draw(2)'s `S`, not `SoverD`:
+nothing is kept beneath a window, so the buffer's pixels replace the
+screen's and its alpha blends with nothing stale.
 
 **A frame** is what `erx_screen` hands the driver in one
 `erx_display:flush_request/3`. `erx_screen` never waits on the driver: the request
@@ -1802,14 +1812,23 @@ pixel area ([The window tree](#the-window-tree)); it then calls
 `erx_display:flush_request/3` does, keeps at most one present in flight
 to `erx_screen` and holds its client's write until the answer, so the
 window still takes input while it waits; it then records the buffer as its last present
-and answers the write. A refused line fails the write with `EINVAL`,
+and answers the write. A second `ctl` write that arrives while a present
+is in flight is held too, and queues behind it. When `erx_screen` ends
+while a present is in flight, the held write is answered `EIO` and the
+last buffer stays as it was. A refused line fails the write with `EINVAL`,
 and the display domain's log records the window and the reason. Input
 from `erx_winfs` is encoded into `mouse` and `kbd` records and queued,
 within the bounds of the data model, until a read takes it. When
 `erx_screen` restarts, it asks every shown window to present again, as
 it asks a window that a layout newly shows and whose buffer it holds no
 image of, and
-the window presents its last buffer, whole, as if its client had. The
+the window presents its last buffer, whole, as if its client had: a
+request that arrives while a present is in flight waits for its answer
+and then goes before any queued write, and one that arrives before the
+window has a last buffer does nothing. A read of `mouse` or `kbd` takes
+one whole record, waiting for one, and one whose count cannot hold a
+record fails with `EINVAL`. A `label` write replaces the label whole,
+and one at a nonzero offset fails with `EINVAL`, erXos's choice. The
 window ends with its holder, its directory or its grant, and holds
 nothing that outlives it: its buffer is its client's memory.
 
@@ -3196,7 +3215,8 @@ domain service sets for the display's session alone; the `present`
 command of `ctl`; `wctl`'s commands
 `resize -r X0 Y0 X1 Y1`, `move -r X0 Y0 X1 Y1`, `hide`, `show`, `top`,
 which also makes the window take the keyboard, and `bottom`, each one
-line; the `mouse` and `kbd` record formats of Plan 9 and 9front. The
+line; the `mouse` record format of Plan 9 and 9front; and the `kbd`
+record format of [The window tree](#the-window-tree), erXos's own. The
 display serves no other interface to a client.
 
 **A display's manifest entry**: a `display` record named after the
@@ -4285,8 +4305,9 @@ draws attaches as [Graphics hardware](#graphics-hardware) says.
 Decisions:
 
 1. **Input formats.** `mouse` is served in Plan 9's 49-byte form and
-   `kbd` in 9front's form, which serve plan9port's programs and give key
-   up and down to widgets and games. An `input` file of `input()`
+   `kbd` in erXos's own form of `c`, `k` and `K` records
+   ([The window tree](#the-window-tree)), which serve plan9port's
+   programs and give key up and down to widgets and games. An `input` file of `input()`
    records is added only when a program needs multi-touch.
 2. **LVGL is a stopgap.** The Erlang renderer exists for the desktop
    regardless, and one renderer is the simpler system; LVGL retires on
@@ -4429,7 +4450,8 @@ Decisions:
 ## References
 
 * Plan 9 manual: draw(3), draw(2), image(6), font(6), mouse(3), rio(4),
-  wctl; 9front's kbd(3) for the `kbd` record format.
+  wctl. The `kbd` record format is erXos's own; 9front's kbd(3) and
+  its source have not been checked against it.
 * The draw messages were checked against 9front's `sys/man/3/draw`,
   `sys/src/9/port/devdraw.c`, `sys/src/libmemdraw/load.c` and
   `cload.c` and `sys/src/libdraw/badrect.c` at commit `2859ae04`, and

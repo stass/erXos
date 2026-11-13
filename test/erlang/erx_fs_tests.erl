@@ -451,6 +451,17 @@ tree_without_write_is_read_only_test() ->
 
 %% Changes on a read-write grant -------------------------------------------
 
+%% A mkdir's Owner reaches the tree as the request's own, not the grant's or the
+%% caller's: a window's holder is that Owner (docs/design-files.md, "Fid owners").
+mkdir_carries_the_requests_owner_test() ->
+    Grant = grant(rw),
+    Owner = spawn(fun() -> receive stop -> ok end end),
+    {ok, _} = attach(Grant, Owner, 1),
+    {ok, _} = call(Grant, Owner, {mkdir, 1, <<"w">>, 8#755, 0}),
+    ?assertEqual({directory, 8#755, Owner}, receive {tree_make, What} -> What after 2000 -> none end),
+    Owner ! stop,
+    stop(Grant).
+
 make_unlink_rename_setattr_test() ->
     Grant = grant(rw),
     {ok, _} = attach(Grant, 1),

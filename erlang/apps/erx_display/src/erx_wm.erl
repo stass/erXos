@@ -20,9 +20,10 @@ A policy's own state, from init/1, is threaded by erx_winfs through
 place/6, arrange/4 and input/4, which also take
 `Session`, the directory of the display's session or `none`, which
 erx_winfs derives at the call from its grants: the live grant most
-recently minted with `session` set. The configuration names no session. Every policy keeps the reserved chord's state,
-chord_init/1 and chord/2: it answers the chord with `{wm, chord}` and
-delivers it to no window.
+recently minted with `session` set. The configuration names no
+session. Every policy keeps the reserved chord's state, chord_init/1
+and chord/2: it answers the chord with `{wm, chord}` and delivers it to
+no window.
 
 Callbacks:
 

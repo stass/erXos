@@ -18,7 +18,9 @@ class ErxScreenTest < Minitest::Test
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
   MODULES = %w[erlang/apps/erx_memdraw/src/erx_memdraw.erl erlang/apps/erx_display/src/erx_screen_core.erl
                erlang/apps/erx_display/src/erx_display.erl erlang/apps/erx_display/src/erx_screen.erl
+               erlang/apps/erx_display/src/erx_winfs.erl
                test/erlang/erx_screen_tests.erl].freeze
+  INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   DEADLINE_SECONDS = '120'
 
   def setup
@@ -32,7 +34,9 @@ class ErxScreenTest < Minitest::Test
 
   def test_screen_cases
     Erx::MemdrawBuild.nif(root: ROOT, otp: OTP, directory: @directory, compiler: COMPILER)
-    Erx::MemdrawBuild.erlc(otp: OTP, directory: @directory, sources: MODULES.map { |path| File.join(ROOT, path) })
+    text, status = Open3.capture2e(Erx::MemdrawBuild::CLEAN_ENVIRONMENT, File.join(OTP, 'bin/erlc'), '-I', INCLUDE,
+                                   '-o', @directory, *MODULES.map { |path| File.join(ROOT, path) }, stdin_data: '')
+    assert status.success?, text
     environment = Erx::MemdrawBuild::CLEAN_ENVIRONMENT.merge(Erx::HostOs.nif_search_environment(@directory))
     text, status = Open3.capture2e(environment, 'gtimeout', '-k', '10', DEADLINE_SECONDS, File.join(OTP, 'bin/erl'),
                                    '-noshell', '-pa', @directory, '-eval',

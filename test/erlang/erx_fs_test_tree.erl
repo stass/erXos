@@ -271,6 +271,7 @@ or without `O_EXCL` the regular file the name already names, opened.
 """.
 make(Dir, Name, What, Fs) ->
     seen(make, Fs),
+    seen_make(What, Fs),
     apply_step(Fs, fun(T) ->
                               case node(Dir, T) of
                                   #{kind := directory, entries := #{Name := Ino}} -> answer(existing(Ino, What, T), T);
@@ -459,4 +460,11 @@ seen(Callback, #{observer := Observer}) when is_pid(Observer) ->
     Observer ! {tree_call, Callback},
     ok;
 seen(_, _) ->
+    ok.
+
+%% What a make was asked to make, to an observer.
+seen_make(What, #{observer := Observer}) when is_pid(Observer) ->
+    Observer ! {tree_make, What},
+    ok;
+seen_make(_, _) ->
     ok.

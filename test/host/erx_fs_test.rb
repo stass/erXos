@@ -42,6 +42,10 @@ class ErxFsTest < Minitest::Test
 
   # Each fault replaces one passage of one source; the test named in caught_by must fail.
   FAULTS = [
+    Fault.new(name: "a mkdir's Owner is replaced by the grant", file: GRANT,
+              from: 'make(Dfid, Name, {directory, Mode band 8#7777, Owner}, Grant);',
+              to: 'make(Dfid, Name, {directory, Mode band 8#7777, self()}, Grant);',
+              caught_by: 'mkdir_carries_the_requests_owner_test'),
     Fault.new(name: 'a walk of .. at the root asks the tree', file: GRANT,
               from: "walk_step(<<\"..\">>, [_] = Root, Grant) ->\n    {ok, Root, Grant};",
               to: "walk_step(<<\"..\">>, [{Dir, _, _}] = Root, #grant{module = M, fs = T} = Grant) ->\n" \

@@ -6,14 +6,17 @@
 %% display drivers of erx_fb implement; the screen, erx_screen over its pure
 %% core erx_screen_core, which decides what it fills, copies and
 %% pushes, and which erx_fb_sup starts behind the driver; the window policy
-%% behaviour erx_wm with erx_wm_single; and erx_wctl and erx_winctl, the text of a
-%% window's wctl and ctl files. A library application: it starts no process of its own, and
+%% behaviour erx_wm with erx_wm_single; the window system erx_winfs, the mint and
+%% tree of the windows service, which erx_fb_sup starts first, and erx_window, one
+%% process for each window; and erx_wctl and erx_winctl, the text of a window's wctl
+%% and ctl files. A library application: it starts no process of its own, and
 %% none of its modules decodes a client's draw, picture, font or widget bytes
 %% (G9).
 {application, erx_display,
  [{description, "erXos display services"},
   {vsn, "1"},
-  {modules, [erx_display, erx_screen, erx_screen_core, erx_wctl, erx_winctl, erx_wm, erx_wm_single]},
+  {modules, [erx_display, erx_screen, erx_screen_core, erx_wctl, erx_window, erx_winctl, erx_winfs,
+              erx_wm, erx_wm_single]},
   {registered, []},
-  {applications, [kernel, stdlib, erx, erx_memdraw]},
+  {applications, [kernel, stdlib, erx, erx_files, erx_memdraw]},
   {env, []}]}.

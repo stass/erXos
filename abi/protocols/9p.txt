@@ -154,6 +154,7 @@ protocol erx_9p
     error enotsup 95
     error eloop 40
     error enxio 6
+    error edquot 122
     error exdev 18
     error enomem 12
     error eagain 11
