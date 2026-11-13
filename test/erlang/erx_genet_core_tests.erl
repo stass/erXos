@@ -19,7 +19,9 @@
 
 %% --- The sequences against the SVD source ----------------------------------------------
 
-%% #{Register => {Owned, Access, #{Field => Width}}}, names lower-cased as the NIF takes them.
+%% #{Register => {Owned, Access, #{Field => Width}, Dim}}, names lower-cased as the NIF
+%% takes them, an array's without its "[%s]" and Dim its element count, 1 for a register
+%% that is not an array.
 svd() ->
     {Doc, _} = xmerl_scan:file(os:getenv("ERX_GENET_SVD"), [{quiet, true}]),
     maps:from_list([register(R) || R <- xmerl_xpath:string("//register", Doc)]).
@@ -27,9 +29,15 @@ svd() ->
 register(R) ->
     Fields = maps:from_list([{name(F), list_to_integer(text("bitWidth", F))}
                              || F <- xmerl_xpath:string("fields/field", R)]),
-    {name(R), {text("ownedByNif", R) =:= "true", text("access", R), Fields}}.
+    Dim = case xmerl_xpath:string("dim/text()", R) of
+              [] -> 1;
+              [#xmlText{value = D}] -> list_to_integer(D)
+          end,
+    {name(R), {text("ownedByNif", R) =:= "true", text("access", R), Fields, Dim}}.
 
-name(E) -> list_to_atom(string:lowercase(text("name", E))).
+name(E) ->
+    Lower = string:lowercase(text("name", E)),
+    list_to_atom(lists:flatten(string:replace(Lower, "[%s]", "", all))).
 
 text(Tag, E) ->
     [#xmlText{value = V}] = xmerl_xpath:string(Tag ++ "/text()", E),
@@ -46,14 +54,40 @@ every_step_names_a_writable_register_and_field_of_the_svd_test() ->
 check_step({wait_us, Us}, _Svd) ->
     ?assert(is_integer(Us) andalso Us > 0);
 check_step({write, Reg, Value} = Step, Svd) ->
-    {Owned, Access, _Fields} = maps:get(Reg, Svd),
+    {Owned, Access, _Fields} = lookup(Reg, Svd),
     ?assertEqual({Step, false, true, true},
                  {Step, Owned, Access =/= "read-only", Value >= 0 andalso Value =< 16#ffffffff});
 check_step({field, Reg, Field, Value} = Step, Svd) ->
-    {Owned, Access, Fields} = maps:get(Reg, Svd),
+    {Owned, Access, Fields} = lookup(Reg, Svd),
     Width = maps:get(Field, Fields),
     ?assertEqual({Step, false, true, true},
                  {Step, Owned, Access =/= "read-only", Value >= 0 andalso Value < (1 bsl Width)}).
+
+%% A plain name is a register that is not an array; {Name, Element} an element of one.
+lookup({Reg, Element}, Svd) ->
+    {Owned, Access, Fields, Dim} = maps:get(Reg, Svd),
+    ?assert(Dim > 1 andalso is_integer(Element) andalso Element >= 0 andalso Element < Dim),
+    {Owned, Access, Fields};
+lookup(Reg, Svd) ->
+    {Owned, Access, Fields, Dim} = maps:get(Reg, Svd),
+    ?assertEqual({Reg, 1}, {Reg, Dim}),
+    {Owned, Access, Fields}.
+
+%% The ring settings FreeBSD writes in gen_init_txring and gen_init_rxring that are the
+%% driver's, not the NIF's (if_genet.c:738, 752-753, 784, 798-799), with FreeBSD's
+%% values, for the ring the NIF drives: ERX_DEVICE_GENET_RING, which
+%% test/host/erx_genet_cores_test.rb reads from the NIF's header and passes as
+%% ERX_GENET_RING, so the two cannot drift apart unnoticed.
+configure_writes_freebsds_ring_settings_for_the_nifs_ring_test() ->
+    Steps = erx_genet_core:configure(<<2, 0, 0, 0, 0, 1>>),
+    Ring = list_to_integer(os:getenv("ERX_GENET_RING")),
+    [?assertEqual({S, true}, {S, lists:member(S, Steps)})
+     || S <- [{write, tx_scb_burst_size, 8},
+              {write, {tx_ring_mbuf_done_thres, Ring}, 1},
+              {write, {tx_ring_flow_period, Ring}, 0},
+              {write, rx_scb_burst_size, 8},
+              {field, {rx_ring_xon_xoff_thres, Ring}, lo, 5},
+              {field, {rx_ring_xon_xoff_thres, Ring}, hi, 256 bsr 4}]].
 
 %% FreeBSD's gen_reset order: the flush pulse, the MAC held in reset and released, the MIB
 %% cleared; CRC forward is never set, so no FCS is counted in a receive length.

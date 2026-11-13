@@ -556,8 +556,8 @@ DMA engine runs between calls, so a reset that reached its ring or
 descriptor registers would be owned; its own disable is the owned DMA
 control. The UniMAC's software reset and the receive buffer and transmit
 flushes (`if_genetreg.h:49-51, 75-77, 96`; FreeBSD's `gen_reset`,
-`if_genet.c:457-480`) sit outside the DMA block. FreeBSD makes them
-before it disables the engine (`if_genet.c:843-845`); Linux makes the
+`if_genet.c:488-514`) sit outside the DMA block. FreeBSD makes them
+before it disables the engine (`if_genet.c:286-288, 873-875`); Linux makes the
 MAC reset with the engine running but the two flushes only after a
 confirmed stop, and both drivers rewrite every ring register they use
 afterwards, so neither depends on a reset or a flush leaving the DMA

@@ -22,7 +22,14 @@ The sequences follow FreeBSD 975e3605ebb1, `sys/arm64/broadcom/genet/if_genet.c`
 2. `configure/1`, the part of `gen_init_locked` before the rings
    (`if_genet.c:915-927`, `gen_set_enaddr` `:1016-1035`, `gen_setup_rxfilter`
    `:977-1013`): the port in external gigabit PHY mode, the unicast address, and the
-   filter promiscuous with the MDF table off, as plan 1b-I (c) begins.
+   filter promiscuous with the MDF table off, as plan 1b-I (c) begins. Then the part of
+   `gen_init_txring` and `gen_init_rxring` that is the driver's, not the NIF's
+   (hw/svd/genet/genet.svd; docs/design-device-dma.md, "GENET"): both directions'
+   burst size, and ring 16's transmit done threshold, transmit flow period and receive
+   XON/XOFF thresholds, written before `negotiate/2` enables the ring and the engine.
+   FreeBSD writes them after it has stopped the engine (`if_genet.c:286-288, 873-875`);
+   here the engine is first stopped inside `negotiate/2`, so they are written with it
+   in whatever state the firmware or a previous driver left (TODO.md).
 3. `negotiate/2` installs and starts both rings (the device NIF's sequence).
 4. `start/0`: every interrupt masked and cleared first, as FreeBSD's `gen_disable_intr`
    does (`if_genet.c:538-544`), so no completion's interrupt is cleared after it lands;
@@ -46,6 +53,19 @@ The sequences follow FreeBSD 975e3605ebb1, `sys/arm64/broadcom/genet/if_genet.c`
 -define(MAX_FRAME_LEN, 1536).
 -define(TBUF_SIZE, 1).
 -define(ALL_IRQS, 16#ffffffff).
+%% The ring the device NIF drives, FreeBSD's default queue (if_genetreg.h:118;
+%% ERX_DEVICE_GENET_RING, otp/erts/emulator/nifs/erxos/erx_device_genet.h).
+-define(RING, 16).
+%% The ring settings FreeBSD writes at start (if_genet.c:738, 752-753, 784, 798-799),
+%% taken as its values: no source read gives their units or meaning beyond the
+%% register names (hw/svd/genet/genet.svd).
+-define(SCB_BURST_SIZE, 8).
+-define(TX_MBUF_DONE_THRES, 1).
+-define(TX_FLOW_PERIOD, 0).
+-define(RX_XON_XOFF_LO, 5).
+%% FreeBSD's RX_DESC_COUNT >> 4: its 256 receive descriptors (if_genet.c:89,
+%% if_genetreg.h:116) over 16.
+-define(RX_XON_XOFF_HI, (256 bsr 4)).
 -define(RESET_US, 10).
 %% An Ethernet header: destination, source and type.
 -define(ETHER_HDR_LEN, 14).
@@ -64,10 +84,11 @@ The sequences follow FreeBSD 975e3605ebb1, `sys/arm64/broadcom/genet/if_genet.c`
 -doc """
 One effect on the controller: a whole register written, one named field written (a
 read, the field replaced, a write, except on a one-to-clear field, which is one write),
-or a pause of that many microseconds.
+or a pause of that many microseconds. A register is named as erx_device names it: an
+atom, or `{Name, Element}` for one element of an array such as a ring's registers.
 """.
--type step() :: {write, atom(), 0..16#ffffffff}
-              | {field, atom(), atom(), non_neg_integer()}
+-type step() :: {write, erx_device:register_name(), 0..16#ffffffff}
+              | {field, erx_device:register_name(), atom(), non_neg_integer()}
               | {wait_us, pos_integer()}.
 
 -doc """
@@ -125,12 +146,25 @@ reset() ->
      {field, umac_mib_ctrl, reset_runt, 1}, {field, umac_mib_ctrl, reset_rx, 1},
      {field, umac_mib_ctrl, reset_tx, 1}, {write, umac_mib_ctrl, 0}].
 
--doc "The port, the address `Lladdr` and the promiscuous filter, before the rings.".
+-doc """
+The port, the address `Lladdr`, the promiscuous filter and the driver's ring settings,
+before the rings.
+""".
 -spec configure(<<_:48>>) -> [step()].
 configure(<<Mac0:32, Mac1:16>>) ->
     [{field, sys_port_ctrl, mode, ?PORT_MODE_EXT_GPHY},
      {field, umac_mac0, addr, Mac0}, {field, umac_mac1, addr, Mac1},
-     {field, umac_cmd, promisc, 1}, {write, umac_mdf_ctrl, 0}].
+     {field, umac_cmd, promisc, 1}, {write, umac_mdf_ctrl, 0}]
+        ++ ring_settings().
+
+%% gen_init_txring's (if_genet.c:738, 752-753), then gen_init_rxring's (:784, 798-799).
+ring_settings() ->
+    [{write, tx_scb_burst_size, ?SCB_BURST_SIZE},
+     {write, {tx_ring_mbuf_done_thres, ?RING}, ?TX_MBUF_DONE_THRES},
+     {write, {tx_ring_flow_period, ?RING}, ?TX_FLOW_PERIOD},
+     {write, rx_scb_burst_size, ?SCB_BURST_SIZE},
+     {field, {rx_ring_xon_xoff_thres, ?RING}, lo, ?RX_XON_XOFF_LO},
+     {field, {rx_ring_xon_xoff_thres, ?RING}, hi, ?RX_XON_XOFF_HI}].
 
 -doc "The MAC's enables and the interrupts, after the rings.".
 -spec start() -> [step()].

@@ -1477,6 +1477,17 @@ it; git history is the record of completed work.
   `DMA_SELECT` and `CONTROL2`'s `ADMA2_LENGTH_MODE`, `HOST_V4_ENABLE` and `ADDRESSING_64BIT`, as plain fields,
   since the generator has no field mark (the field-ownership item). Programmed I/O sets none of them; the
   field marks, or the ADMA2 mode's design, settle how the driver changes these words.
+* [Medium] GENET, `erlang/apps/erx_net/erxos/erx_genet_core.erl` `configure/1`: the
+  driver's ring settings (both burst sizes, ring 16's transmit done threshold and flow
+  period, its receive XON/XOFF thresholds) are written before `negotiate/2`, whose
+  install is the first place the engine is stopped, so they land on an engine in
+  whatever state the firmware or a restarted driver's predecessor left, and the two
+  XON/XOFF field writes pass through a word with the new low half and the old high
+  half. FreeBSD writes them only after `gen_dma_disable` (`if_genet.c:286-288,
+  873-875`). No source says what a change to a running engine does. If the board shows
+  it matters, the NIF takes them as owned and writes them in its install after the
+  confirmed stop (docs/design-device-dma.md, "GENET"), which also removes the driver's
+  copy of the ring index.
 * [Medium] GENET, `hw/svd/genet/genet.svd` (docs/plan.md, 1b-I (c)), unnamed bits: the file names
   only the bits FreeBSD's `if_genetreg.h` names. `write/3` refuses a word with any other bit set, and
   `write_field/4` writes every other bit back as zero, while FreeBSD reads, modifies and writes back
