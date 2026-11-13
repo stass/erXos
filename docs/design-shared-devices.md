@@ -230,7 +230,7 @@ line is two members, each told with its own record.
 | --- | --- |
 | `idle` | no round is in progress |
 | `{round, W, Again}` | the line fired; the owner told every member in `W`, which is not empty, and waits for each to answer or exit; `Again` says whether the line has fired since the round began |
-| `held` | the line fired while there was no member; the owner does not acknowledge it until a member has answered |
+| `held` | the line fired while there was no member; the owner does not acknowledge it until a member has answered or exited |
 
 | Event | In `idle` | In `{round, W, Again}` | In `held` |
 | --- | --- | --- | --- |
@@ -261,7 +261,7 @@ Every guarantee of the line follows from that machine:
   it queues a delivery ([design-kernel.md](design-kernel.md#irq-objects)),
   can fire again during a round, and that firing gets its round.
 * **A firing with nobody to tell holds the line.** The owner
-  acknowledges nothing more until a driver joins and answers, so it does
+  acknowledges nothing more until a driver joins and answers or exits, so it does
   not keep acknowledging into a level that is still asserted with nobody
   looking.
 * **A late joiner misses nothing.** It is told in the next round, and it

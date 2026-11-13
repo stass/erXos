@@ -4,10 +4,10 @@
 %% erXos's runtime services (docs/design-runtime.md): the carrier between domains and
 %% its connection agent, the console and hosted mode's console driver, the log sink's
 %% handler, the kernel log, the namespace, the watchdog's petter, a driver's view
-%% of its device and its device record, the inspector and its collectors, the tracer
-%% and its ring reader, the pipe server's decisions, erx's shell functions, and the
-%% modules tools/gen_abi.rb and tools/gen_terminal.rb generate, the 9P2000.L codec
-%% erx_9p among them.
+%% of its device and its device record, the decisions of a shared interrupt line's
+%% owner, the inspector and its collectors, the tracer and its ring reader, the pipe
+%% server's decisions, erx's shell functions, and the modules tools/gen_abi.rb and
+%% tools/gen_terminal.rb generate, the 9P2000.L codec erx_9p among them.
 %%
 %% It starts nothing of its own; kernel starts what must run, and the boot script's
 %% code path finds the modules here:
@@ -47,6 +47,7 @@
              erx_inspect_srv,
              erx_inspect_worker,
              erx_inspector,
+             erx_irq_line_core,
              erx_kernel_records,
              erx_log,
              erx_log_h,
