@@ -16,13 +16,21 @@
 # boot-selection record"); the 4 MiB before it hold the slot's FAT's boot sector,
 # reserved area and tables, which a FAT of a slot's size with 4 KiB clusters fits.
 #
-# The boot-selection record (docs/design-platforms.md, "Slots and the boot-selection
-# record") is the sector medium_record_select_start sectors from the record partition's
-# first sector, 1 MiB in, and the reset count the sector medium_record_count_start
-# sectors from it, 2 MiB in; the partition's first MiB holds its FAT. Firmware names a
-# slot by its partition's number, its entry's index in the master boot record counted
-# from 1: medium_slot_a_partition and medium_slot_b_partition. The record has exactly
-# two encodings, medium_record_a while slot A is committed and medium_record_b while
+# The record partition (docs/design-platforms.md, "Slots and the boot-selection
+# record") is one FAT16 volume laid out in MiB regions, so that the reset count and the
+# boot-selection record each have an erase unit of their own. Counted from the
+# partition's first sector: MiB 0 holds the boot sector and the start of the reserved
+# area; the reset count is the sector medium_record_count_start, the first of MiB 1,
+# inside the reserved area, which no FAT reader reads; MiB 2 holds the end of the
+# reserved area, both FATs and the root directory; and the record is the sector
+# medium_record_select_start, the first of MiB 3, where the data area starts, the one
+# 512-byte cluster of the volume's autoboot.txt. The data area fills the partition's
+# last 5 MiB, 10,240 clusters of 512 bytes, which makes the volume a FAT16 by its
+# cluster count. The partition starts 1 MiB into the medium, so it ends 9 MiB in, and
+# slot A starts 12 MiB in. Firmware names a slot by its partition's number, its entry's
+# index in the master boot record counted from 1: medium_slot_a_partition and
+# medium_slot_b_partition. The record has exactly two encodings, medium_record_a while
+# slot A is committed and medium_record_b while
 # slot B is, each followed by zeros to the end of the sector; the two have the same
 # length, since a commit rewrites the sector and never the FAT's directory entry that
 # records the file's length. Each is the Raspberry Pi firmware's autoboot.txt naming
@@ -31,26 +39,26 @@
 # "boot_partition=2", "[tryboot]", "boot_partition=3", each ended by a line feed, and
 # medium_record_b's swaps the two numbers.
 limit medium_record_start u32 2048
-limit medium_record_sectors u32 8192
+limit medium_record_sectors u32 16384
 limit medium_record_type u8 0x0e
-limit medium_record_select_start u32 2048
-limit medium_record_count_start u32 4096
+limit medium_record_select_start u32 6144
+limit medium_record_count_start u32 2048
 limit medium_slot_a_partition u32 2
 limit medium_slot_b_partition u32 3
 bytes medium_record_a 64 value 5b616c6c5d0a747279626f6f745f615f623d310a626f6f745f706172746974696f6e3d320a5b747279626f6f745d0a626f6f745f706172746974696f6e3d330a
 bytes medium_record_b 64 value 5b616c6c5d0a747279626f6f745f615f623d310a626f6f745f706172746974696f6e3d330a5b747279626f6f745d0a626f6f745f706172746974696f6e3d320a
-limit medium_slot_a_start u32 16384
-limit medium_slot_b_start u32 1064960
+limit medium_slot_a_start u32 24576
+limit medium_slot_b_start u32 1073152
 limit medium_slot_sectors u32 1048576
 limit medium_slot_type u8 0x0c
 limit medium_slot_boot_start u32 8192
-limit medium_extended_start u32 2113536
+limit medium_extended_start u32 2121728
 limit medium_extended_type u8 0x0f
 limit medium_link_type u8 0x05
-limit medium_vault_start u32 2115584
+limit medium_vault_start u32 2123776
 limit medium_vault_sectors u32 131072
 limit medium_vault_type u8 0x83
-limit medium_data_ebr u32 2246656
-limit medium_data_start u32 2248704
+limit medium_data_ebr u32 2254848
+limit medium_data_start u32 2256896
 limit medium_data_sectors_min u32 262144
 limit medium_data_type u8 0x83

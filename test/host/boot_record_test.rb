@@ -34,6 +34,25 @@ class BootRecordTest < Minitest::Test
     assert_equal [2, 3], [a, b], 'slot A and slot B are the second and third entries of the master boot record'
   end
 
+  # The record partition as docs/design-platforms.md, "Slots and the boot-selection
+  # record", lays it out in MiB regions, so that the reset count and the record each
+  # have an erase unit of their own: an 8 MiB FAT16 1 MiB into the medium, the count the
+  # first sector of its MiB 1 (the reserved area), the record the first sector of its
+  # MiB 3 (the data area's first cluster), and slot A at 12 MiB.
+  def test_the_record_partition_is_laid_out_in_the_designs_mib_regions
+    mib = (1 << 20) / SECTOR
+    in_mib = %w[record_start record_sectors record_count_start record_select_start slot_a_start].to_h do |name|
+      sectors = CODEC.constant("medium_#{name}")
+      assert_equal 0, sectors % mib, "medium_#{name} is not on a MiB boundary"
+      [name, sectors / mib]
+    end
+    assert_equal({ 'record_start' => 1, 'record_sectors' => 8, 'record_count_start' => 1, 'record_select_start' => 3,
+                   'slot_a_start' => 12 }, in_mib)
+    count, record, sectors = in_mib.values_at('record_count_start', 'record_select_start', 'record_sectors')
+    refute_equal count, record, 'the reset count and the record share an erase unit'
+    assert_operator [count, record].max, :<, sectors, 'the reset count or the record lies outside its partition'
+  end
+
   def test_only_the_two_encodings_byte_for_byte_are_a_record
     assert_equal %i[a b], %i[a b].map { |slot| Record.committed(Record.sector(slot)) }
     changed = Record.sector(:a).dup.tap { |bytes| bytes.setbyte(SECTOR - 1, 1) }

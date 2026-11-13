@@ -2303,11 +2303,10 @@ side.
   ([design-storage.md](design-storage.md#the-sd-host-controller)). The storage domain holds the SD card, laid out on
   the host as the ABI file's medium layout, with the release's EROFS
   image read through its window and littlefs at `/data`. The Pi medium
-  package moves `abi/medium.txt` and its tests to the 8 MiB record
-  partition
+  package brings fsimg's `place` option, which writes the record
+  partition's FAT16 and slot A's FAT32 with their placed files
   ([design-platforms.md](design-platforms.md#slots-and-the-boot-selection-record)),
-  every later partition 4 MiB on, and brings fsimg's `place` option and
-  the packer's check of each placed file's cluster chain with it. Each DMA
+  and the packer's check of each placed file's cluster chain. Each DMA
   device's entry in the platform record carries its bus offset and
   reach, so the SD controller's pool lies in the first GiB it sees
   ([design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)).
