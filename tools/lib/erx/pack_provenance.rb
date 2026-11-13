@@ -414,10 +414,12 @@ module Erx
       if @verified.key?(path) && @verified.fetch(path) != hash
         raise Error, "provenance source changed during admission: #{path}"
       end
+      font_data = false
       if @external.key?(path)
         external = @external.fetch(path)
         raise Error, "changed external provenance input: #{path}" unless external.fetch('sha256') == hash
         license = external.fetch('license')
+        font_data = external.fetch('font_data', false)
         label = external.fetch('label')
         evidence = external.fetch('evidence')
         status = external.fetch('status')
@@ -454,8 +456,10 @@ module Erx
         raise Error, "unresolved external provenance input: #{path}"
       end
       Attribution.validate_expression(license)
+      raise Error, 'invalid font data statement' unless [true, false].include?(font_data)
       raise Error, 'invalid dependency provenance status' unless %w[permanent stopgap].include?(status)
-      selected = LicenseExpression.select(license, allow_restricted: build_kind == 'development' && status == 'stopgap')
+      selected = LicenseExpression.select(license, allow_restricted: build_kind == 'development' && status == 'stopgap',
+                                                   font_data: font_data)
       if public_path
         unless public_path.is_a?(String) && !public_path.start_with?('/') &&
                public_path.split('/', -1).none? { |part| ['', '.', '..'].include?(part) }

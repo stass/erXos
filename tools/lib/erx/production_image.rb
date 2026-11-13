@@ -75,7 +75,10 @@ module Erx
     # One of the archives that the root or an added program links, attributed whole under the license
     # stated here, with notices the tree paths of the documents that license names.
     # TODO.md holds the gap: the boot cores hold BLAKE3 as well.
-    Archive = Data.define(:path, :label, :license, :status, :notices)
+    # font_data: true states that the OFL-1.1 content in the license is font data (LicenseExpression::FONT_DATA_ONLY).
+    Archive = Data.define(:path, :label, :license, :status, :notices, :font_data) do
+      def initialize(path:, label:, license:, status:, notices:, font_data: false) = super
+    end
 
     # flags are the archive header's, as the kernel's banner line reports them; test_code
     # is their ERX_PACK_TEST_CODE bit, set only in an image build_test_image made. release
@@ -1641,7 +1644,7 @@ module Erx
     def external_archive(archive)
       reference(archive.path).merge('path' => File.realpath(archive.path), 'label' => archive.label, 'license' => archive.license,
                                     'evidence' => 'archive built by the tree\'s own build, attributed as a whole',
-                                    'status' => archive.status,
+                                    'status' => archive.status, 'font_data' => archive.font_data,
                                     'notices' => archive.notices.map { |notice| reference(File.join(@root, notice)) })
     end
 

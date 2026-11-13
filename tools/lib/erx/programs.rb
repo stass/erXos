@@ -519,7 +519,7 @@ module Erx
                                  directory: File.join(@build, Lvgl::Program::NAME)).call
         programs = [*programs, [Lvgl::Program::NAME, lvgl]]
         library = ProductionImage::Archive.new(path: lvgl.fetch(:archive), label: 'lvgl liblvgl.a', license: Lvgl::Program::LICENSE,
-                                               status: 'stopgap', notices: Lvgl::Program::NOTICES)
+                                               status: 'stopgap', notices: Lvgl::Program::NOTICES, font_data: Lvgl::Program::FONT_DATA)
         entries = programs.map do |name, program|
           { 'path' => "#{PROGRAM_PREFIX}#{name}", 'kind' => @codec.member('entry_kind', 'file'), 'flags' => 0, 'id' => "program-#{name}",
             'artifact' => program.fetch(:program), 'receipt' => program.fetch(:receipt) }.freeze

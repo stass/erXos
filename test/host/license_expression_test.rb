@@ -6,8 +6,8 @@ require 'minitest/autorun'
 require_relative '../../tools/lib/erx/license_expression'
 
 class LicenseExpressionTest < Minitest::Test
-  def select(expression, restricted: false)
-    Erx::LicenseExpression.select(expression, allow_restricted: restricted)
+  def select(expression, restricted: false, font_data: false)
+    Erx::LicenseExpression.select(expression, allow_restricted: restricted, font_data: font_data)
   end
 
   def test_or_selects_one_permissive_branch_in_either_order
@@ -36,6 +36,26 @@ class LicenseExpressionTest < Minitest::Test
     assert_equal ['BSD-2-Clause', 'LicenseRef-DJB-public-domain'],
                  select('BSD-2-Clause AND LicenseRef-DJB-public-domain').fetch('grants')
     assert_raises(Erx::Error) { select('LicenseRef-Someone-public-domain') }
+  end
+
+  # erx-lvgl's liblvgl.a: MIT code and OFL-1.1 font data. OFL-1.1 is admitted for an input that
+  # states its OFL content is font data, and for no other input.
+  def test_ofl_is_admitted_only_for_an_input_that_states_font_data
+    lvgl = 'MIT AND OFL-1.1'
+    assert_equal ['MIT', 'OFL-1.1'], select(lvgl, font_data: true).fetch('grants')
+    assert_raises(Erx::Error) { select(lvgl) }
+    assert_raises(Erx::Error) { select('OFL-1.1') }
+    assert_raises(Erx::Error) { select('OFL-1.1', font_data: false) }
+    assert_raises(Erx::Error) { select('OFL-1.1', font_data: 'yes') }
+    assert_equal ['MIT', 'OFL-1.1'], select(lvgl, restricted: true).fetch('grants')
+  end
+
+  def test_the_font_data_statement_admits_no_other_restricted_licence
+    ['MIT AND OFL-1.1 AND GPL-2.0-only', 'GPL-3.0-or-later', 'OFL-1.1 AND MPL-2.0', 'LGPL-2.1-only AND OFL-1.1',
+     'GPL-2.0-only WITH Classpath-exception-2.0'].each do |expression|
+      assert_raises(Erx::Error, expression) { select(expression, font_data: true) }
+    end
+    assert_equal ['MIT'], select('MIT OR GPL-2.0-only', font_data: true).fetch('grants')
   end
 
   def test_unknown_and_malformed_input_remains_fail_closed

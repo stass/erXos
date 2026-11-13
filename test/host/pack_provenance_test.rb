@@ -300,6 +300,35 @@ class PackProvenanceTest < Minitest::Test
     assert_includes text, 'external MIT text'
   end
 
+  # A release pack admits an external archive's OFL-1.1 only when the archive states that content is
+  # font data, and an archive whose OFL-1.1 is not font data stays refused.
+  def resolve_external_release(license, font_data:)
+    blob = write('fonts.a', 'archive bytes')
+    notice = write('fonts-NOTICE', 'font notice text')
+    external = { 'path' => blob, 'sha256' => Digest::SHA256.file(blob).hexdigest, 'license' => license,
+                 'label' => 'ext/fonts.a', 'evidence' => 'reviewed registry', 'status' => 'stopgap',
+                 'notices' => [reference(notice)] }
+    external['font_data'] = font_data unless font_data.nil?
+    resolver = Erx::PackProvenance.new(root: @root, catalog: build_catalog, external: [external])
+    receipt = write('compiled.json', JSON.generate({ 'version' => 1, 'kind' => 'compiled', 'artifact' => reference(@artifact),
+                                                     'sources' => [reference(blob)] }))
+    resolver.instance_variable_set(:@catalog, build_catalog)
+    resolver.resolve(receipt: receipt, artifact: @artifact, build_kind: 'release')
+  end
+
+  def test_release_admits_ofl_for_font_data_and_refuses_it_otherwise
+    record = resolve_external_release('MIT AND OFL-1.1', font_data: true).first
+    assert_equal '(MIT AND OFL-1.1)', record.fetch('license')
+    [nil, false].each do |statement|
+      error = assert_raises(Erx::Error) { resolve_external_release('MIT AND OFL-1.1', font_data: statement) }
+      assert_match(/no permitted grant/, error.message)
+    end
+    error = assert_raises(Erx::Error) { resolve_external_release('MIT AND GPL-2.0-only', font_data: true) }
+    assert_match(/no permitted grant/, error.message)
+    error = assert_raises(Erx::Error) { resolve_external_release('MIT AND OFL-1.1', font_data: 'yes') }
+    assert_match(/invalid font data/, error.message)
+  end
+
   ADDITION = "/* Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n" \
              " * SPDX-License-Identifier: BSD-2-Clause */\nint added;\n"
 

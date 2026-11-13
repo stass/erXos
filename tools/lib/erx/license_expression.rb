@@ -11,20 +11,29 @@ module Erx
     # such a statement permits what the licences beside it do.
     PERMISSIVE = %w[BSD-2-Clause BSD-3-Clause MIT ISC 0BSD Apache-2.0 Zlib
                     BSL-1.0 Unicode-3.0 Unicode-DFS-2016 LicenseRef-DJB-public-domain].freeze
+    # Licences that cover font data only. A caller that states its input's OFL-1.1 content is
+    # font data (font_data: true) has them admitted for that input alone, as grants that are
+    # not permissive; every other input, and every other licence, is judged by PERMISSIVE and
+    # allow_restricted alone. Code
+    # under OFL-1.1 is not font data, and its input does not state it is.
+    FONT_DATA_ONLY = %w[OFL-1.1].freeze
     PRECEDENCE = { 'OR' => 1, 'AND' => 2 }.freeze
     module_function
 
     # SPDX grouping is bounded by Attribution's grammar. Postfix evaluation
     # avoids input-controlled recursion, including long unparenthesized chains.
-    # AND needs both grants; OR selects one, preferring a permissive grant.
-    def select(expression, allow_restricted:)
+    # AND needs both grants; OR selects one, preferring a permissive grant. font_data: true says
+    # the expression's FONT_DATA_ONLY licences cover font data in the input being judged.
+    def select(expression, allow_restricted:, font_data: false)
       Attribution.validate_expression(expression)
+      raise Error, 'font_data is true or false' unless [true, false].include?(font_data)
       stack = []
       postfix(expression).each do |item|
         if item.is_a?(String)
           permissive = PERMISSIVE.include?(item) || item == 'Apache-2.0 WITH LLVM-exception'
+          admitted = permissive || allow_restricted || (font_data && FONT_DATA_ONLY.include?(item))
           stack << { 'license' => item.freeze, 'grants' => [item].freeze,
-                     'permissive' => permissive, 'allowed' => permissive || allow_restricted }.freeze
+                     'permissive' => permissive, 'allowed' => admitted }.freeze
         else
           right = stack.pop
           left = stack.pop
