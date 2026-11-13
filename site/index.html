@@ -509,7 +509,9 @@ Error in process &lt;0.150.0&gt; with exit value:
         <div class="download-more">
           <pre tabindex="0"><code># diskN: the card in diskutil list; everything on it is erased
 diskutil unmountDisk /dev/diskN
-xz -dc {{card_file}} | sudo dd of=/dev/rdiskN bs=4m</code></pre>
+xz -dc {{card_file}} \
+  | sudo dd of=/dev/rdiskN bs=4m
+diskutil eject /dev/diskN</code></pre>
           <dl class="download-facts label">
             <dt>SHA-256</dt><dd><code>{{card_download_sha256}}</code></dd>
             <dt>Source</dt><dd><a href="{{source_url}}"><code>{{source_label}}</code></a> &middot; <a href="{{card_record}}">build record</a></dd>
