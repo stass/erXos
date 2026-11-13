@@ -14,6 +14,8 @@ module Erx
   # for arbitrary packages. Actual file SPDX notices always take precedence.
   module ImportOrigins
     MAX_PROFILE_BYTES = 1024 * 1024
+    COMPONENTS = %w[otp musl openssl].freeze
+    CHECKED_IN_PROFILES = %w[otp openssl].freeze
     module_function
 
     def musl_license_rules(root)
@@ -52,7 +54,7 @@ module Erx
     end
 
     def write(root:, component:, dependencies: Dependencies, sources: Sources)
-      raise Error, 'unsupported import component' unless %w[otp musl].include?(component)
+      raise Error, 'unsupported import component' unless COMPONENTS.include?(component)
       project = File.expand_path(root)
       directory = OutputDirectory.check(root: project, path: File.join(project, component))
       runner = Runner.new(owner_root: project, log_dir: File.join(project, 'build/logs'))
@@ -72,8 +74,8 @@ module Erx
         exclusions = profile.fetch('exclusions').dup
         if component == 'otp'
           exclusions.concat(select_otp_applications(selected, applications: profile.fetch('applications')))
-          profile.fetch('exclusions').each { |excluded| remove_exclusion(selected, excluded.fetch('path')) }
         end
+        profile.fetch('exclusions').each { |excluded| remove_exclusion(selected, excluded.fetch('path')) }
         Origin.new(root: selected).write(repository: profile.fetch('repository'),
                                          revision: profile.fetch('revision'),
                                          archive_sha256: declaration.fetch('sha256'),
@@ -83,10 +85,12 @@ module Erx
       end
     end
 
+    # OTP's and OpenSSL's profiles are checked in; musl's is derived from its
+    # notices and published beside them.
     def import_profile(project, component:, source:)
-      if component == 'otp'
-        bytes = BoundedFile.read(File.join(project, 'config/imports/otp.json'), maximum: MAX_PROFILE_BYTES)
-        return JsonInput.parse(bytes, max_bytes: MAX_PROFILE_BYTES, label: 'OTP import profile')
+      if CHECKED_IN_PROFILES.include?(component)
+        bytes = BoundedFile.read(File.join(project, "config/imports/#{component}.json"), maximum: MAX_PROFILE_BYTES)
+        return JsonInput.parse(bytes, max_bytes: MAX_PROFILE_BYTES, label: "#{component} import profile")
       end
 
       { 'repository' => 'https://git.musl-libc.org/musl', 'revision' => 'v1.2.6',
@@ -196,8 +200,8 @@ end
 if $PROGRAM_NAME == __FILE__
   options = { root: File.expand_path('..', __dir__) }
   parser = OptionParser.new do |arguments|
-    arguments.banner = 'usage: ruby tools/import_origins.rb --component otp|musl [--root DIRECTORY]'
-    arguments.on('--component NAME', %w[otp musl]) { |value| options[:component] = value }
+    arguments.banner = 'usage: ruby tools/import_origins.rb --component otp|musl|openssl [--root DIRECTORY]'
+    arguments.on('--component NAME', Erx::ImportOrigins::COMPONENTS) { |value| options[:component] = value }
     arguments.on('--root DIRECTORY') { |value| options[:root] = value }
   end
   begin

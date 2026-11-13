@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/openssl/openssl",
+  "revision": "openssl-3.5.9",
+  "default_license": "Apache-2.0",
+  "default_evidence": "reviewed LICENSE.txt and the source headers: the release is under Apache-2.0 and its sources carry the OpenSSL Project's Apache-2.0 notice; the few that also carry a co-author's BSD, CC0 or public-domain grant offer Apache-2.0 as well and keep that grant in their header",
+  "rules": [
+    {"pattern": "external/perl/Text-Template-1.56/**/*", "license": "Artistic-1.0-Perl OR GPL-1.0-or-later", "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto"}
+  ],
+  "exclusions": [
+    {"path": "test", "reason": "OpenSSL's own test suite; erXos configures no-tests, and OTP's suites test what crypto calls (docs/design-crypto.md, Verification)"},
+    {"path": "demos", "reason": "example programs, off by default in Configure"},
+    {"path": "engines", "reason": "loadable engines; erXos configures no-engine"},
+    {"path": "os-dep", "reason": "read only by other systems' configurations"},
+    {"path": "VMS", "reason": "read only by the OpenVMS configurations"},
+    {"path": "ms", "reason": "read only by the Windows configurations"},
+    {"path": "cloudflare-quiche", "reason": "an empty directory the release carries, which nothing reads"},
+    {"path": "oqs-provider", "reason": "an empty directory the release carries, which nothing reads"},
+    {"path": "pkcs11-provider", "reason": "an empty directory the release carries, which nothing reads"},
+    {"path": "python-ecdsa", "reason": "an empty directory the release carries, which nothing reads"},
+    {"path": "tlsfuzzer", "reason": "an empty directory the release carries, which nothing reads"},
+    {"path": "tlslite-ng", "reason": "an empty directory the release carries, which nothing reads"},
+    {"path": "wycheproof", "reason": "an empty directory the release carries, which nothing reads"}
+  ]
+}

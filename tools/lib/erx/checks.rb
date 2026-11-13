@@ -51,6 +51,7 @@ module Erx
       kernel/crypto/sha2
       littlefs
       musl
+      openssl
       otp
       test/oracle/common_test
       test/shell/rc/plan9port
