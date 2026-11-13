@@ -28,6 +28,7 @@
 #include "liberx/backend/core/device_check.h"
 #include "otp/erts/emulator/nifs/erxos/erx_device.h"
 #include "otp/erts/emulator/nifs/erxos/erx_dma_arch.h"
+#include "test/fixtures/erx_dma_arch_counting.h"
 
 #define CHECK(condition)							\
 	do {									\
@@ -698,6 +699,43 @@ check_given(void)
 }
 
 /*
+ * The maintenance one post issues on a given device whose record says `coherent`: a queue
+ * follows its own device's mark, so a device that is not coherent cleans the buffer it hands
+ * over and a coherent one issues none. Only the count is checked: what each clean covers is
+ * the sequencer's own host test's (test/host/erx_device_dma_test.rb).
+ */
+static uint64_t
+post_maintenance(bool coherent)
+{
+	const uint64_t memory = make_memory(SMALL_QUEUE_PAGES * ERX_PAGE_SIZE);
+	erx_device_spec_t spec = given_spec(make_memory(ERX_PAGE_SIZE), memory);
+	const erx_device_t *device;
+	uint64_t before;
+	uint32_t queue;
+
+	spec.coherent = coherent;
+	device = open_given(&spec);
+	device_offers();
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, SMALL_BUFFER, &queue) == ERX_OK);
+	CHECK(negotiate(device) == ERX_OK);
+	before = erx_dma_maintenance_count;
+	CHECK(post_one(device, queue, 1) == ERX_OK);
+	return (erx_dma_maintenance_count - before);
+}
+
+static void
+check_coherent_queue(void)
+{
+	CHECK(post_maintenance(true) == 0);
+}
+
+static void
+check_non_coherent_queue(void)
+{
+	CHECK(post_maintenance(false) > 0);
+}
+
+/*
  * A driver's restart within one record: its successor opens the same spec, finds its queue
  * with every buffer still posted, and has them all back from its negotiation.
  */
@@ -942,6 +980,8 @@ main(void)
 	passed &= run("physical", check_physical);
 	passed &= run("queue", check_queue);
 	passed &= run("given", check_given);
+	passed &= run("coherent queue", check_coherent_queue);
+	passed &= run("non-coherent queue", check_non_coherent_queue);
 	passed &= run("driver restart", check_driver_restart);
 	passed &= run("regions", check_regions);
 	kept = given_spec(make_memory(ERX_PAGE_SIZE), make_memory(SMALL_QUEUE_PAGES * ERX_PAGE_SIZE));

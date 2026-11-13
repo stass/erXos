@@ -16,8 +16,8 @@ class ErxDeviceQueueTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   NIFS = File.join(ROOT, 'otp/erts/emulator/nifs/erxos')
   CORE = File.join(NIFS, 'erx_device_queue.c')
-  # The sequencer and the host's DMA architecture layer, which erx_device.c's queues run through.
-  DMA = [File.join(NIFS, 'erx_device_dma.c'), File.join(NIFS, 'arch/host/erx_dma_arch.c')].freeze
+  # The sequencer and a host DMA architecture layer that counts its maintenance, which erx_device.c's queues run through.
+  DMA = [File.join(NIFS, 'erx_device_dma.c'), File.join(ROOT, 'test/fixtures/erx_dma_arch_counting.c')].freeze
   FLAGS = ['-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')

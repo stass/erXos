@@ -47,12 +47,18 @@ static const char	*release_read(const erx_boot_handoff_view_t *, bool, erx_boot_
 static const char	*gather_args(const erx_boot_handoff_view_t *, const erx_boot_manifest_t *, size_t *);
 static size_t		 boot_build(erx_boot_pair_t);
 static size_t		 word_append(char *, size_t, size_t, const char *);
-static const char	*library_up(const erx_manifest_view_t *, const erx_pack_view_t *, const erx_boot_handoff_view_t *);
+static const char	*library_view(const erx_manifest_view_t *, const erx_pack_view_t *);
+static const char	*library_up(const erx_boot_handoff_view_t *);
 static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
 static size_t		 line_append(char *, size_t, erx_boot_words_t);
-static const char	*device_give(const erx_boot_device_t *, char *, size_t, size_t *);
+static const char	*device_give(const erx_boot_device_t *, const erx_dom_device_entry_t *, char *, size_t, size_t *);
 static const char	*tree_accept(void);
-static const char	*device_memory(const erx_boot_device_t *, const erx_dt_device_t *, uint64_t *, const char **);
+static const char	*tree_facts(void);
+static const char	*device_memory(const erx_dom_device_entry_t *, uint64_t *, const char **);
+
+/* The system domain's one domain library and the tables its view lies in (library_view). */
+static erx_dom_lib_t library;
+static erx_dom_boot_tables_t library_tables;
 
 static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 /*
@@ -89,35 +95,38 @@ erx_boot_info(void)
 
 /*
  * The system domain's one domain library (docs/design-system.md, "The root task", step 3),
- * built from the manifest and the archive once the system's boot page holds the values the
- * library copies into every domain's. Its tables come from the root budget, mapped for the
- * root's life, and the library outlives the boot, so both are never released.
+ * in two halves. library_view builds its view from the manifest and the archive, the device
+ * catalogue among it, so the tree's facts join the catalogue's entries (tree_facts) before
+ * any device is given, the root's own included; library_up brings the library up once the
+ * system's boot page holds the values the library copies into every domain's. Its tables
+ * come from the root budget, mapped for the root's life, and the library outlives the boot,
+ * so both are never released.
  */
 static const char *
-library_up(const erx_manifest_view_t *manifest, const erx_pack_view_t *pack, const erx_boot_handoff_view_t *handoff)
+library_view(const erx_manifest_view_t *manifest, const erx_pack_view_t *pack)
 {
-	static erx_dom_lib_t lib;
 	const erx_dom_boot_sizes_t sizes = erx_dom_boot_sizes(manifest, pack);
-	erx_dom_boot_tables_t tables;
 	uint64_t addr, mem;
 	size_t bytes;
-	const char *reason;
 
-	if (!erx_dom_boot_layout(&sizes, 0, &tables, &bytes) || bytes > SIZE_MAX - ERX_PAGE_SIZE)
+	if (!erx_dom_boot_layout(&sizes, 0, &library_tables, &bytes) || bytes > SIZE_MAX - ERX_PAGE_SIZE)
 		return ("the domain library: its tables do not fit the address space");
 	bytes = (bytes + ERX_PAGE_SIZE - 1) / ERX_PAGE_SIZE * ERX_PAGE_SIZE;
 	if (erx_mem_create(ERX_CAP_NULL, bytes, 0, &mem) != ERX_OK ||
 	    erx_vm_reserve(ERX_CAP_SELF, 0, bytes, 0, &addr) != ERX_OK ||
 	    erx_vm_map(ERX_CAP_SELF, addr, bytes, mem, 0, ERX_PROT_RW) != ERX_OK ||
-	    !erx_dom_boot_layout(&sizes, (uintptr_t)addr, &tables, &bytes))
+	    !erx_dom_boot_layout(&sizes, (uintptr_t)addr, &library_tables, &bytes))
 		return ("the domain library: the backend refused its tables");
-	reason = erx_dom_boot_view(&lib, manifest, pack, &tables);
-	if (reason != NULL)
-		return (reason);
+	return (erx_dom_boot_view(&library, manifest, pack, &library_tables));
+}
+
+static const char *
+library_up(const erx_boot_handoff_view_t *handoff)
+{
 	/* A block holder's boot page carries the pair, and every domain's page the build, as the root's own does. */
-	lib.boot = handoff->boot;
-	lib.build_id = erx_boot_handoff_build_id(handoff);
-	return (erx_dom_boot_up(&lib, erx_boot_info(), ERX_FIASCO_TASK_ROOT));
+	library.boot = handoff->boot;
+	library.build_id = erx_boot_handoff_build_id(handoff);
+	return (erx_dom_boot_up(&library, erx_boot_info(), ERX_FIASCO_TASK_ROOT));
 }
 
 const char *
@@ -138,6 +147,12 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	if (!erx_boot_console_matches(&manifest, handoff->stdout_path, handoff->stdout_path_len))
 		return (console_refusal(&manifest, handoff));
 	erx_fiasco_task_console_set(erx_boot_console_page(&manifest));
+	reason = library_view(view, pack);
+	if (reason != NULL)
+		return (reason);
+	reason = tree_facts();
+	if (reason != NULL)
+		return (reason);
 	reason = gather_args(handoff, &manifest, &nargs);
 	if (reason != NULL)
 		return (reason);
@@ -168,7 +183,7 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	status = erx_boot_info_build(&inputs, boot_page, sizeof(boot_page));
 	if (status != ERX_BOOT_INFO_OK)
 		return (erx_boot_info_reason(status));
-	reason = library_up(view, pack, handoff);
+	reason = library_up(handoff);
 	if (reason != NULL)
 		return (reason);
 	erx_fiasco_libc_root_start(main);
@@ -270,14 +285,16 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	if (build_length == 0)
 		return ("the handoff: the build identifier's words outgrow their room");
 	arg_words[(*nargs)++] = (erx_boot_words_t){ build_words, build_length };
-	if ((reason = tree_accept()) != NULL)
-		return (reason);
 	for (size_t at = 0; at < manifest->device_count; at++) {
 		const erx_boot_device_t *const device = &manifest->devices[at];
 		size_t length = 0;
 
 		if (device->given) {
-			if ((reason = device_give(device, device_words[at], sizeof(device_words[at]), &length)) != NULL)
+			/* The view has one catalogue entry per manifest device row, the device's among them. */
+			if (device->index >= library.view.ndevices)
+				return ("a device record: its row has no catalogue entry");
+			if ((reason = device_give(device, &library.view.devices[device->index], device_words[at],
+			    sizeof(device_words[at]), &length)) != NULL)
 				return (reason);
 		} else {
 			length = erx_boot_device_words(device, device_words[at], sizeof(device_words[at]));
@@ -321,26 +338,67 @@ tree_accept(void)
 }
 
 /*
+ * Accepts the firmware's device tree (tree_accept) and joins its facts to the catalogue's
+ * entries once, before any device is given (docs/design-device-tree.md, "Facts into
+ * records"). A row of a kind a runtime drives (its role_word is set) that asks (erx_boot_row_asks) has its facts read from boot_tree
+ * at its node path, and every entry's DMA memory becomes what its facts admit
+ * (erx_boot_dma_memory), so a row that asked nothing gets none. The root prints the line of
+ * each asking row a holder holds; the line of a row the system domain holds waits for the
+ * root's own give, which makes its memory first (device_give). Returns NULL, or why the root
+ * cannot boot: the tree is refused, or a row that asks names a path that is not a node path.
+ */
+static const char *
+tree_facts(void)
+{
+	const char *reason;
+	size_t length;
+
+	if ((reason = tree_accept()) != NULL)
+		return (reason);
+	for (uint32_t index = 0; index < library.view.ndevices; index++) {
+		erx_dom_device_entry_t *const entry = &library_tables.devices[index];
+		const bool network = entry->role == ERX_MF_DEVICE_ROLE_NETWORK;
+		const uint64_t row_memory = entry->memory;
+		const erx_boot_words_t path = { entry->path, entry->path_len };
+
+		entry->asked = entry->role_word != NULL && erx_boot_row_asks(row_memory, network);
+		if (entry->asked) {
+			if (path.length == 0 || path.length >= sizeof(tree_path) ||
+			    !erx_boot_node_path_valid((const uint8_t *)path.bytes, path.length))
+				return ("a device record: its device-tree path is not a node path");
+			for (size_t at = 0; at < path.length; at++)
+				tree_path[at] = path.bytes[at];
+			tree_path[path.length] = '\0';
+			erx_dt_device(&boot_tree, tree_path, ERX_DT_ROW_NODE, &entry->facts);
+		}
+		entry->memory = erx_boot_dma_memory(entry->asked ? &entry->facts : NULL, row_memory);
+		if (entry->asked && entry->row != ERX_MF_NONE && (length = erx_boot_tree_line(path, row_memory, network,
+		    &entry->facts, NULL, tree_line, sizeof(tree_line))) != 0)
+			erx_fiasco_console_write(tree_line, length);
+	}
+	return (NULL);
+}
+
+/*
  * The root's own give of a device the system domain holds (docs/design-stopgap.md, "Device
- * records"). It makes in the root's own table the objects a holder's creation makes: the
- * register window over the pages of the device's registers, its line's IRQ object and,
- * for a device that does DMA, its contiguous memory for the boot (device_memory). A device
- * that asks the firmware's tree (erx_boot_device_asks) has its facts read from boot_tree,
- * and the root prints their line. It then writes the -erx given record
- * (erx_boot_device_given) into words, capacity bytes, with *length its whole length, 0 when
- * it does not fit.
+ * records"), whose catalogue entry is entry. It makes in the root's own table the objects a
+ * holder's creation makes: the register window over the pages of the device's registers,
+ * its line's IRQ object and, when the entry admits DMA memory, its contiguous memory for the
+ * boot (device_memory). A device whose entry asked the firmware's tree has the root print
+ * its facts' line. It then writes the -erx given record (erx_boot_device_given) from the
+ * entry's facts into words, capacity bytes, with *length its whole length, 0 when it does
+ * not fit.
  *
  * Nothing deletes the objects: the system domain holds the device for the boot, and a
  * fault of the system domain resets the machine. Returns NULL, or why the root cannot
- * boot: the backend refused an object, so the device would have no driver, or the
- * manifest names a device-tree path that is not a node path.
+ * boot: the backend refused an object, so the device would have no driver.
  */
 static const char *
-device_give(const erx_boot_device_t *device, char *words, size_t capacity, size_t *length)
+device_give(const erx_boot_device_t *device, const erx_dom_device_entry_t *entry, char *words, size_t capacity,
+    size_t *length)
 {
+	const erx_dt_device_t *const facts = entry->asked ? &entry->facts : NULL;
 	uint64_t window_handle, line_handle, memory_handle = ERX_CAP_NULL;
-	erx_dt_device_t facts;
-	const erx_dt_device_t *asked = NULL;
 	const char *absent = NULL, *reason;
 	erx_boot_window_t window;
 	erx_boot_given_t given;
@@ -353,48 +411,35 @@ device_give(const erx_boot_device_t *device, char *words, size_t capacity, size_
 		return ("a device record: the backend refused its register window");
 	if (erx_irq_create(ERX_CAP_NULL, ERX_CAP_NULL, ERX_IRQ_LINE, device->line, &line_handle) != ERX_OK)
 		return ("a device record: the backend refused its line");
-	if (erx_boot_device_asks(device)) {
-		if (device->path.length == 0 || device->path.length >= sizeof(tree_path) ||
-		    !erx_boot_node_path_valid((const uint8_t *)device->path.bytes, device->path.length))
-			return ("a device record: its device-tree path is not a node path");
-		for (size_t at = 0; at < device->path.length; at++)
-			tree_path[at] = device->path.bytes[at];
-		tree_path[device->path.length] = '\0';
-		erx_dt_device(&boot_tree, tree_path, ERX_DT_ROW_NODE, &facts);
-		asked = &facts;
-	}
-	/* A row with DMA memory always asks (erx_boot_device_asks), so asked is its facts. */
-	if (device->dma_memory != 0 && (reason = device_memory(device, asked, &memory_handle, &absent)) != NULL)
+	if (entry->memory != 0 && (reason = device_memory(entry, &memory_handle, &absent)) != NULL)
 		return (reason);
-	if (asked != NULL && (line_length = erx_boot_tree_line(device, asked, absent, tree_line, sizeof(tree_line))) != 0)
+	if (facts != NULL && (line_length = erx_boot_tree_line(device->path, device->dma_memory, device->network, facts,
+	    absent, tree_line, sizeof(tree_line))) != 0)
 		erx_fiasco_console_write(tree_line, line_length);
-	given = erx_boot_device_given(device, &window, asked, window_handle, line_handle, memory_handle);
+	given = erx_boot_device_given(device, &window, facts, window_handle, line_handle, memory_handle);
 	*length = erx_boot_given_words(&given, words, capacity);
 	return (NULL);
 }
 
 /*
- * A DMA device's contiguous memory, decided against its tree facts
- * (docs/design-device-tree.md, "Facts into records"): none when the facts have no range the
- * memory could lie in, asked before the memory is made; otherwise the memory, then none
- * when its device address does not lie whole inside the range. *memory is the object, or
- * ERX_CAP_NULL for none, and *absent erx_boot_dma_absent's reason for none, NULL when
- * the device has its memory. An object made and then refused stays, unused, in the root's
- * table (TODO.md). Returns NULL, or why the root cannot boot: the backend refused the
- * memory or its device address.
+ * The contiguous memory of a device whose catalogue entry admits some (tree_facts, so the
+ * entry asked and its facts have a range the memory may lie in), then none when its device
+ * address does not lie whole inside that range. *memory is the object, or ERX_CAP_NULL for
+ * none, and *absent erx_boot_dma_absent's reason for none, NULL when the device has its
+ * memory. An object made and then refused stays, unused, in the root's table (TODO.md).
+ * Returns NULL, or why the root cannot boot: the backend refused the memory or its device
+ * address.
  */
 static const char *
-device_memory(const erx_boot_device_t *device, const erx_dt_device_t *facts, uint64_t *memory, const char **absent)
+device_memory(const erx_dom_device_entry_t *entry, uint64_t *memory, const char **absent)
 {
 	uint64_t made, address;
 
-	if ((*absent = erx_boot_dma_absent(facts, 0, 0)) != NULL)
-		return (NULL);
-	if (erx_mem_create_contiguous(ERX_CAP_NULL, ERX_CAP_NULL, device->dma_memory, 0, &made) != ERX_OK)
+	if (erx_mem_create_contiguous(ERX_CAP_NULL, ERX_CAP_NULL, entry->memory, 0, &made) != ERX_OK)
 		return ("a device record: the backend refused its DMA memory");
 	if (erx_mem_dma_addr(made, 0, &address) != ERX_OK)
 		return ("a device record: the backend refused its DMA memory's device address");
-	if ((*absent = erx_boot_dma_absent(facts, address, device->dma_memory)) == NULL)
+	if ((*absent = erx_boot_dma_absent(&entry->facts, address, entry->memory)) == NULL)
 		*memory = made;
 	return (NULL);
 }

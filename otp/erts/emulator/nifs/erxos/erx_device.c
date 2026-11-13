@@ -1060,18 +1060,6 @@ static uint64_t plan_values[PLAN_STEPS_MAX];
 static erx_dma_state_t plan_between, plan_after;
 static erx_dma_effect_t plan_effects[ERX_DMA_EFFECTS_BOUND(ERX_DMA_REGIONS_MAX, PLAN_STEPS_MAX)];
 
-/*
- * Whether a queue's plans run as for a coherent device. A given device's record does not carry
- * the device tree's coherence mark yet (TODO.md, device records, COHERENT), and QEMU virt, the
- * one board whose given devices do DMA, marks every virtio-mmio node dma-coherent, so a given
- * device's queues run as coherent; a stand-in's follow its spec.
- */
-static bool
-queue_coherent(const erx_device_t *device)
-{
-	return (device->form == ERX_DEVICE_FORM_GIVEN || device->coherent);
-}
-
 /* The owned register at a window offset the check accepted, so one of the record's own. */
 static const erx_device_register_t *
 owned_register(const queue_record_t *record, uint32_t offset)
@@ -1201,7 +1189,7 @@ run_plan(queue_record_t *record, erx_dma_call_t call, uint32_t count, const erx_
 	erx_dma_effects_t effects = { .capacity = sizeof(plan_effects) / sizeof(plan_effects[0]), .effects = plan_effects };
 
 	if (!erx_device_dma_check(&record->context, &record->state, after, &plan) ||
-	    !erx_device_dma_order(&record->state, after, &plan, queue_coherent(record->device), record->context.granule,
+	    !erx_device_dma_order(&record->state, after, &plan, record->device->coherent, record->context.granule,
 	    erx_dma_line(), &effects)) {
 		record->core.broken = true;
 		return (false);

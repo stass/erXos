@@ -170,10 +170,10 @@ was written must zero the buffer beforehand to avoid leaking data
 
 **What the code does today.** The device NIF runs virtio's split ring
 through the sequencer below, with `G` and `L` from the architecture
-layer, but runs a given device's queues as coherent, since the record
-does not carry the mark yet, so on the stopgap no maintenance is issued
-(`otp/erts/emulator/nifs/erxos/erx_device.c`, `queue_coherent`; the gap
-is a `TODO.md` item). Its one lock serialises opens, binding changes and every
+layer, and with the record's coherence mark, which the root takes from
+the firmware's device tree ([design-device-tree.md](design-device-tree.md)):
+on QEMU `virt` every given device with DMA memory is marked coherent, so
+no maintenance is issued there. Its one lock serialises opens, binding changes and every
 queue call, and is held across service calls (`erx_device_nif.c:12-15`);
 register writes, which are BIFs, take no lock (`erx_device_bif.c`,
 `erx_device.c:372-420`). The manifest's device record has no

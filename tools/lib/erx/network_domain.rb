@@ -24,7 +24,10 @@ module Erx
   # the storage domain runs as on the development image. The cell boots it with a network
   # device on slirp (QemuPlan::Nic). At the system's Erlang shell it waits for the network
   # domain's DHCP lease, and checks that the system domain's boot arguments give it no
-  # network device while the network domain's give it one. Root's session then runs
+  # network device while the network domain's give it one, which says coherent: QEMU virt
+  # marks the transport's node dma-coherent, and the root reads that from the firmware's
+  # device tree into the device's catalogue entry (docs/design-device-tree.md, "Facts into
+  # records"). Root's session then runs
   # ifconfig, which shows the lease, ping -c 3 to slirp's gateway, and from its Erlang
   # shell a 1 MiB TCP echo through slirp's guest forward. Last, the system's shell kills the
   # network domain's pid and, once the domain is gone, reads the root's pool pages again:
@@ -61,7 +64,7 @@ module Erx
       '_ -> timer:sleep(500), NdW(NdK - 1) end end',
       'NdNode = NdWait(360)',
       '{nd_lease, erx_device_record:find(net, virtio_mmio), ' \
-      'case erpc:call(NdNode, erx_device_record, find, [net, virtio_mmio]) of {ok, [_ | _]} -> true; NdR -> NdR end, NdUsed()}'
+      'case erpc:call(NdNode, erx_device_record, find, [net, virtio_mmio]) of {ok, [#{coherent := true} | _]} -> true; NdR -> NdR end, NdUsed()}'
     ].join(', ') + ".\r"
     ECHOED_LINE = "{nd_echoed, NdUsed()}.\r"
     # Ends the network domain for good: kills its domain pid, which its row restarts 0

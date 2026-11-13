@@ -178,6 +178,7 @@ devices_read(const erx_manifest_view_t *view, bool hostlink, erx_boot_manifest_t
 				.line_shared = line_shared(view, index, device.line), .clock = device.clock,
 				.dma_memory = device.dma_memory, .network = kind->role == ERX_MF_DEVICE_ROLE_NETWORK,
 				.path = { (const char *)string_at(view, &device.path), device.path.length },
+				.index = index,
 			};
 		}
 	}
@@ -356,9 +357,21 @@ erx_boot_device_window(const erx_boot_device_t *device, erx_boot_window_t *windo
 }
 
 bool
-erx_boot_device_asks(const erx_boot_device_t *device)
+erx_boot_row_asks(uint64_t dma_memory, bool network)
 {
-	return (device->given && (device->dma_memory != 0 || device->network));
+	return (dma_memory != 0 || network);
+}
+
+uint64_t
+erx_boot_dma_memory(const erx_dt_device_t *facts, uint64_t dma_memory)
+{
+	return (facts != NULL && erx_boot_dma_absent(facts, 0, 0) == NULL ? dma_memory : 0);
+}
+
+bool
+erx_boot_coherent(const erx_dt_device_t *facts, uint64_t dma_memory)
+{
+	return (erx_boot_dma_memory(facts, dma_memory) != 0 && facts->coherent);
 }
 
 erx_boot_given_t
@@ -366,12 +379,11 @@ erx_boot_device_given(const erx_boot_device_t *device, const erx_boot_window_t *
     uint64_t window_handle, uint64_t line_handle, uint64_t memory_handle)
 {
 	const bool memory = device->dma_memory != 0 && memory_handle != ERX_CAP_NULL;
-	const bool dma_facts = facts != NULL && device->dma_memory != 0 && facts->dma == ERX_DT_DMA_OK;
 
 	return ((erx_boot_given_t){ .role = device->role, .peripheral = device->peripheral, .window = window_handle,
 	    .offset = window->offset, .size = device->size, .line = line_handle, .line_shared = device->line_shared,
 	    .memory = memory ? memory_handle : ERX_CAP_NULL, .memory_size = memory ? device->dma_memory : 0,
-	    .clock = device->clock, .coherent = dma_facts && facts->coherent,
+	    .clock = device->clock, .coherent = erx_boot_coherent(facts, device->dma_memory),
 	    .mac = facts != NULL && device->network ? erx_boot_mac_number(facts) : 0 });
 }
 
@@ -451,25 +463,24 @@ hex_put(char *line, size_t capacity, size_t *used, uint64_t value)
 }
 
 size_t
-erx_boot_tree_line(const erx_boot_device_t *device, const erx_dt_device_t *facts, const char *absent, char *line,
-    size_t capacity)
+erx_boot_tree_line(erx_boot_words_t path, uint64_t dma_memory, bool network, const erx_dt_device_t *facts,
+    const char *absent, char *line, size_t capacity)
 {
 	const char *const reason = absent != NULL ? absent : erx_boot_dma_absent(facts, 0, 0);
 	size_t used = 0;
-	bool fits = device->path.length != 0 &&
-	    erx_boot_node_path_valid((const uint8_t *)device->path.bytes, device->path.length) &&
+	bool fits = path.length != 0 && erx_boot_node_path_valid((const uint8_t *)path.bytes, path.length) &&
 	    string_put(line, capacity, &used, "erx: device tree: ") &&
-	    text_put(line, capacity, &used, device->path.bytes, device->path.length) &&
+	    text_put(line, capacity, &used, path.bytes, path.length) &&
 	    string_put(line, capacity, &used, ":");
 
-	if (fits && device->dma_memory != 0 && reason != NULL)
+	if (fits && dma_memory != 0 && reason != NULL)
 		fits = string_put(line, capacity, &used, " dma absent ") && string_put(line, capacity, &used, reason);
-	else if (fits && device->dma_memory != 0)
+	else if (fits && dma_memory != 0)
 		fits = string_put(line, capacity, &used, facts->coherent ? " coherent 1 range " : " coherent 0 range ") &&
 		    hex_put(line, capacity, &used, facts->cpu) && string_put(line, capacity, &used, " ") &&
 		    hex_put(line, capacity, &used, facts->bus) && string_put(line, capacity, &used, " ") &&
 		    hex_put(line, capacity, &used, facts->last);
-	if (fits && device->network)
+	if (fits && network)
 		fits = string_put(line, capacity, &used, facts->mac_status == ERX_DT_MAC_OK ? " mac present" : " mac absent");
 	return (fits && string_put(line, capacity, &used, "\n") ? used : 0);
 }

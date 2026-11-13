@@ -12,6 +12,7 @@
 
 #include "erx/abi.h"
 #include "erx/cdefs.h"
+#include "erx/core/dt.h"
 #include "erx/sched.h"
 
 /*
@@ -213,6 +214,13 @@ typedef struct erx_dom_range {
  * come from the entry at that index. Its ranges are the pages its
  * register window touches, and the view admits only a placement that
  * gives each unit whole to one holder (erx_dom_view_build).
+ *
+ * The firmware's device tree's facts join the entry once, before any
+ * give (docs/design-device-tree.md, "Facts into records"): the root
+ * reads them for each row that asks (erx_boot_row_asks) into asked and
+ * facts, and sets memory to what they admit (erx_boot_dma_memory). Every
+ * give's record and DMA memory, the root's own and each holder's, are
+ * computed from the entry, and nothing else reads the tree.
  */
 typedef struct erx_dom_device_entry {
 	uint32_t	unit;		/* the manifest's unit row it belongs to */
@@ -229,6 +237,11 @@ typedef struct erx_dom_device_entry {
 	const char	*compatible;
 	const char	*unit_name;
 	uint32_t	unit_name_len;
+	/* Its device-tree path in the manifest's strings, path_len bytes, which
+	 * the reader has not checked as a node path; 0 bytes for a row of
+	 * another selector. */
+	const char	*path;
+	uint32_t	path_len;
 	uint64_t	offset;		/* its registers' offset into ranges[0] */
 	uint64_t	size;		/* and their bytes, as the manifest gives them */
 	uint32_t	clock;		/* its clock in hertz, as the manifest gives
@@ -241,8 +254,11 @@ typedef struct erx_dom_device_entry {
 	erx_dom_range_t	ranges[ERX_DEVICE_RANGES_MAX];	/* its register ranges */
 	bool		confined;	/* it has an IOMMU stream, so a DMA window */
 	uint64_t	memory;		/* unconfined: the contiguous memory the
-					 * platform reserves for it, bytes; 0
-					 * for none */
+					 * platform reserves for it, bytes, which
+					 * the tree's facts set to what they
+					 * admit; 0 for none */
+	bool		asked;		/* the root read facts for it */
+	erx_dt_device_t	facts;		/* the tree's answer, when asked */
 } erx_dom_device_entry_t;
 
 /*

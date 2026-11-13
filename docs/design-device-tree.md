@@ -423,7 +423,9 @@ which record to write from its facts, the pool's range and the row, is a
 pure function in `liberx/backend/core/`, beside `erx_boot_device_window`,
 so its host tests reach every absence without a boot.
 
-**The `given` record.** Its `COHERENT` is the entry's `coherent`, and it
+**The `given` record.** Its `COHERENT` is the entry's `coherent` when the
+entry admits DMA memory, and 0 for a row that gets none, so no record calls
+a device coherent that has no range to use; and it
 gains a last number, `MAC`, the hardware address as a 48-bit decimal, 0
 when absent or when the row asks for none:
 `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE

@@ -260,6 +260,11 @@ class BootManifestTest < Minitest::Test
     assert_equal "asks 1 before offset after none #{window} block virtio_mmio 11 3584 512 12 direct 0 0 0 0 0 " \
                  "exact 1 short 0\nline erx: device tree: /virtio_mmio@a003e00: dma absent offset\n",
                  dma('block', 0x10000, 0, 0, 0, 0xc000_0000, 0x3fff_ffff, 0, 0x1000_0000, 0x10000)
+    # A device the tree marks coherent but that gets no range to use is not coherent either:
+    # COHERENT follows the memory the entry admits (erx_boot_coherent), for the root's own
+    # record and each holder's alike.
+    assert_match(/\Aasks 1 before offset after none .* 12 direct 0 0 0 0 0 exact.*\nline .*: dma absent offset\n\z/,
+                 dma('block', 0x10000, 0, 1, 0, 0xc000_0000, 0x3fff_ffff, 0, 0x1000_0000, 0x10000))
     assert_match(/\Aasks 1 before none after outside .* 12 direct 0 0 0 1 0 exact.*\nline .*: dma absent outside\n\z/,
                  dma('block', 0x10000, 0, 1, 0, 0, 0x3fff_ffff, 0, 0x3fff_8000, 0x10000))
     assert_match(/\Aasks 1 before none after none .* 12 direct 13 65536 0 1 0 exact.*\nline .*: coherent 1 range 0x0 0x0 0x3fffffff\n\z/,

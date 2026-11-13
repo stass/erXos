@@ -93,20 +93,23 @@ main(int argc, char **argv)
 		    .coherent = strtoul(argv[5], NULL, 0) != 0, .cpu = strtoull(argv[6], NULL, 0),
 		    .bus = strtoull(argv[7], NULL, 0), .last = strtoull(argv[8], NULL, 0) };
 		const uint64_t mac = strtoull(argv[9], NULL, 0);
-		const char *const before = device.dma_memory != 0 ? erx_boot_dma_absent(&facts, 0, 0) : NULL;
-		const char *const after = device.dma_memory != 0 && before == NULL ?
+		/* The catalogue entry's memory (tree_facts), then the give's check of the memory made. */
+		const uint64_t admitted = erx_boot_dma_memory(&facts, device.dma_memory);
+		const char *const before = device.dma_memory != 0 && admitted == 0 ? erx_boot_dma_absent(&facts, 0, 0) : NULL;
+		const char *const after = admitted != 0 ?
 		    erx_boot_dma_absent(&facts, strtoull(argv[10], NULL, 0), strtoull(argv[11], NULL, 0)) : NULL;
-		const bool memory = device.dma_memory != 0 && before == NULL && after == NULL;
+		const bool memory = admitted != 0 && after == NULL;
 		char line[ERX_BOOT_TREE_LINE_MAX];
 		size_t line_length;
 
 		facts.mac_status = mac != 0 ? ERX_DT_MAC_OK : ERX_DT_MAC_NONE;
 		for (size_t at = 0; at < ERX_DT_MAC_BYTES; at++)
 			facts.mac[at] = (uint8_t)(mac >> (8 * (ERX_DT_MAC_BYTES - 1 - at)));
-		printf("asks %d before %s after %s ", erx_boot_device_asks(&device), before != NULL ? before : "none",
-		    after != NULL ? after : "none");
+		printf("asks %d before %s after %s ", erx_boot_row_asks(device.dma_memory, device.network),
+		    before != NULL ? before : "none", after != NULL ? after : "none");
 		given_print(&device, &facts, memory ? MEMORY_HANDLE : ERX_CAP_NULL);
-		line_length = erx_boot_tree_line(&device, &facts, after, line, sizeof(line));
+		line_length = erx_boot_tree_line(device.path, device.dma_memory, device.network, &facts, after, line,
+		    sizeof(line));
 		printf("line %.*s", (int)line_length, line);
 		return (0);
 	}

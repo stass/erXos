@@ -111,9 +111,11 @@ check_the_words_fit(const erx_boot_manifest_t *manifest)
 			if (erx_boot_given_words(&given, words, ERX_BOOT_GIVEN_WORDS_MAX) == 0)
 				abort();
 			/* A device that asks has a node path, so its line fits ERX_BOOT_TREE_LINE_MAX. */
-			if (erx_boot_device_asks(device) && device->path.length != 0 && device->path.length < ERX_PATH_MAX &&
+			if (erx_boot_row_asks(device->dma_memory, device->network) && device->path.length != 0 &&
+			    device->path.length < ERX_PATH_MAX &&
 			    erx_boot_node_path_valid((const uint8_t *)device->path.bytes, device->path.length) &&
-			    erx_boot_tree_line(device, &longest, NULL, line, sizeof(line)) == 0)
+			    erx_boot_tree_line(device->path, device->dma_memory, device->network, &longest, NULL, line,
+			    sizeof(line)) == 0)
 				abort();
 		}
 	}

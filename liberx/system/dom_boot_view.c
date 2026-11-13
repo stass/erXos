@@ -367,6 +367,9 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 			entry->clock = device.clock;
 			entry->nlines = 1;
 			entry->lines[0] = device.line;
+			/* The reader checked the path against the string table. */
+			entry->path = (const char *)manifest->bytes + manifest->header.strings.offset + device.path.offset;
+			entry->path_len = device.path.length;
 			kind = boot_kind(manifest, &device);
 			if (kind != NULL) {
 				entry->role_word = kind->role_word;

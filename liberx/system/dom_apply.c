@@ -432,8 +432,34 @@ apply_give(apply_t *apply, uint32_t at)
 }
 
 /*
+ * Whether give `at`'s DMA memory may reach its holder's record: the device
+ * address of the root's object, made by this give or kept from an earlier
+ * one, lies whole inside the DMA range of the entry's tree facts
+ * (erx_boot_dma_absent). The entry admits memory only when its facts give
+ * a range (erx_boot_dma_memory), so only a pool outside that range refuses
+ * it here; the object then stays in the holder's table, unnamed (TODO.md).
+ * An entry the root asked nothing, as a library that reads no tree builds,
+ * has no range, so its record names no memory: no fact, no memory.
+ */
+static bool
+apply_memory_inside(const apply_t *apply, uint32_t at)
+{
+	const erx_dom_device_plan_t *give = &apply->plan->gives[at];
+	const erx_dom_device_entry_t *entry = &apply->lib->view.devices[give->index];
+	const uint64_t made = apply->gives[at].made[ERX_DOM_OBJ_DEV_MEMORY];
+	const uint64_t object = made != ERX_CAP_NULL ? made : apply->lib->device_records[give->index].memory.raw;
+	uint64_t address;
+
+	if (!entry->asked)
+		return (false);
+	return (erx_mem_dma_addr(object, 0, &address) == ERX_OK &&
+	    erx_boot_dma_absent(&entry->facts, address, entry->memory) == NULL);
+}
+
+/*
  * The -erx given record of give `at` (erx_boot_given_words) from the
- * values its installs took in the holder's table, and its length, or 0
+ * values its installs took in the holder's table and the facts of its
+ * catalogue entry, COHERENT and, for a network row, MAC, and its length, or 0
  * when the words do not fit, which the view's names rule out. Its line
  * is direct: the boot view refuses a configured row whose unit's
  * devices share a line (liberx/system/dom_boot_view.c), so no other
@@ -444,13 +470,17 @@ apply_given_words(apply_t *apply, uint32_t at)
 {
 	const erx_dom_device_plan_t *give = &apply->plan->gives[at];
 	const erx_dom_device_entry_t *entry = &apply->lib->view.devices[give->index];
+	const erx_dt_device_t *facts = entry->asked ? &entry->facts : NULL;
 	const uint64_t *installed = apply->gives[at].installed;
+	const uint64_t held = installed[ERX_DOM_OBJ_DEV_MEMORY] != ERX_CAP_NULL ?
+	    installed[ERX_DOM_OBJ_DEV_MEMORY] : installed[ERX_DOM_OBJ_DEV_KEPT];
+	const bool memory = entry->memory != 0 && apply_memory_inside(apply, at);
 	const erx_boot_given_t given = { .role = entry->role_word, .peripheral = entry->peripheral,
 	    .window = installed[ERX_DOM_OBJ_DEV_WINDOW], .offset = entry->offset, .size = entry->size,
 	    .line = installed[ERX_DOM_OBJ_DEV_IRQ], .line_shared = false,
-	    .memory = installed[ERX_DOM_OBJ_DEV_MEMORY] != ERX_CAP_NULL ?
-	    installed[ERX_DOM_OBJ_DEV_MEMORY] : installed[ERX_DOM_OBJ_DEV_KEPT],
-	    .memory_size = entry->memory, .clock = entry->clock };
+	    .memory = memory ? held : ERX_CAP_NULL, .memory_size = memory ? entry->memory : 0, .clock = entry->clock,
+	    .coherent = erx_boot_coherent(facts, entry->memory),
+	    .mac = facts != NULL && entry->role == ERX_MF_DEVICE_ROLE_NETWORK ? erx_boot_mac_number(facts) : 0 };
 
 	if (entry->role_word == NULL || entry->peripheral == NULL)
 		return (0);
