@@ -24,10 +24,17 @@ class ErxDeviceGenetTest < Minitest::Test
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
 
   # Each planted fault: the sequencer's (each fails a byte comparison over the model), the
-  # check's register reach, and the core's receive length bound.
+  # check's register reach, the core's receive length bound, and two bits the stand-in
+  # controller checks: a transmit descriptor's append-CRC bit (a frame sent without its
+  # Ethernet CRC) and the engine's enable in the start (rings that never run).
   SEEDS = %w[ERX_DMA_SEED_NO_CLEAN ERX_DMA_SEED_NO_TAKE_BACK ERX_DMA_SEED_STEP_BY_GRANULE
              ERX_DMA_SEED_NO_BUFFER_HANDOVER ERX_DMA_SEED_NO_ZEROING ERX_DMA_SEED_NO_REG_REACH
-             ERX_DEVICE_GENET_SEED_NO_LENGTH_BOUND].freeze
+             ERX_DEVICE_GENET_SEED_NO_LENGTH_BOUND ERX_DEVICE_GENET_SEED_NO_TX_CRC
+             ERX_DEVICE_GENET_SEED_NO_DMA_ENABLE].freeze
+  # The harness check a seed must fail where one check alone guards what it removes; any
+  # other seed may fail wherever its fault first shows.
+  CAUGHT_BY = { 'ERX_DEVICE_GENET_SEED_NO_TX_CRC' => /^FAILED .*\(status & d->regs\.crc\)$/,
+                'ERX_DEVICE_GENET_SEED_NO_DMA_ENABLE' => /^FAILED .*: running\(d\)$/ }.freeze
 
   def test_register_ring_over_a_non_coherent_cache
     output, status = run_harness
@@ -39,7 +46,7 @@ class ErxDeviceGenetTest < Minitest::Test
     define_method("test_seed_#{seed.downcase}") do
       output, status = run_harness("-D#{seed}")
       refute status.success?, "#{seed} went unnoticed:\n#{output}"
-      assert_match(/^FAILED /, output)
+      assert_match(CAUGHT_BY.fetch(seed, /^FAILED /), output)
     end
   end
 

@@ -11,11 +11,25 @@
 
 #define MASK	(ERX_DEVICE_GENET_SIZE - 1u)
 
-/* The fault test/host/erx_device_genet_test.rb plants: the receive length's bound removed. */
+/*
+ * The faults test/host/erx_device_genet_test.rb plants: the receive length's bound removed, a
+ * transmit descriptor posted without its append-CRC bit, and the start written without the
+ * engine's enable.
+ */
 #ifdef ERX_DEVICE_GENET_SEED_NO_LENGTH_BOUND
 #define SEED_NO_LENGTH_BOUND	true
 #else
 #define SEED_NO_LENGTH_BOUND	false
+#endif
+#ifdef ERX_DEVICE_GENET_SEED_NO_TX_CRC
+#define SEED_NO_TX_CRC		true
+#else
+#define SEED_NO_TX_CRC		false
+#endif
+#ifdef ERX_DEVICE_GENET_SEED_NO_DMA_ENABLE
+#define SEED_NO_DMA_ENABLE	true
+#else
+#define SEED_NO_DMA_ENABLE	false
 #endif
 
 /* -------------------------------------------------------------------------------------------
@@ -341,7 +355,8 @@ erx_device_genet_install_steps(erx_device_genet_queue_t *queue, const erx_device
 void
 erx_device_genet_start(const erx_device_genet_registers_t *regs, erx_dma_step_t *step)
 {
-	*step = register_value(regs->dma_ctrl, ring_bit(regs->dma_ring_enable, ERX_DEVICE_GENET_RING) | regs->dma_enable);
+	*step = register_value(regs->dma_ctrl, ring_bit(regs->dma_ring_enable, ERX_DEVICE_GENET_RING) |
+	    (SEED_NO_DMA_ENABLE ? 0 : regs->dma_enable));
 }
 
 /* -------------------------------------------------------------------------------------------
@@ -377,7 +392,7 @@ erx_device_genet_post(erx_device_genet_queue_t *queue, const erx_device_genet_re
 		    .reg_high = ERX_DMA_NO_REGISTER };
 	}
 	steps[made++] = register_value(regs->desc_status + buffer * regs->desc_stride,
-	    field_put(regs->buflen, length) | regs->sop | regs->eop | regs->crc);
+	    field_put(regs->buflen, length) | regs->sop | regs->eop | (SEED_NO_TX_CRC ? 0 : regs->crc));
 	queue->tags[buffer] = tag;
 	queue->software++;
 	queue->in_flight++;

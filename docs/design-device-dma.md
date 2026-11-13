@@ -964,6 +964,14 @@ ran.
   before. Seed: the idle test reads only the receive direction, and the
   stand-in's transmit engine is still running when the install writes
   its ring.
+* **GENET's start and post.** Over the model's stand-in controller,
+  which runs a direction only while its DMA control holds the engine's
+  enable and the ring's bit, and sends a descriptor only when it is a
+  whole frame with its append-CRC bit: the start leaves both rings
+  running, and every post goes out with its bytes. Seeds: the start
+  written without the engine's enable, and the rings never run; a
+  descriptor posted without its append-CRC bit, and the controller
+  refuses to send the frame without its Ethernet CRC.
 * **The forms' completions.** The fuzz target of device ring processing
   covers the register ring's and the ADMA2 table's observations and
   decisions: arbitrary index, status and interrupt values against
