@@ -334,8 +334,9 @@ Error in process <0.150.0> with exit value:
   (`erx_blk_sd`, interrupt-driven): it identifies the card, the block
   service admits its partition table and littlefs mounts its volume, and
   blocks written over the driver reach the card image; `/data` is that
-  volume, and a file written there reaches the card image too. The driver
-  has not run on a real board. The manifest configures a network domain
+  volume, and a file written there reaches the card image too. On the
+  board the driver identifies the card (4-bit bus at 25 MHz), littlefs
+  mounts `/data`, and a file written there survives a power cycle. The manifest configures a network domain
   that runs the stack over the Ethernet driver (`erx_genet`, as
   `genet0`); the model has no Ethernet, so there the domain's first
   register read faults and the domain is left down after its restarts.
