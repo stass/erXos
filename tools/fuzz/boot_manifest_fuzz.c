@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "erx/abi.h"
+#include "erx/core/boot_handoff.h"
 #include "liberx/backend/core/boot_manifest.h"
 
 #define NODE_PREFIX	"system@"
@@ -88,7 +89,12 @@ check_without_the_hostlink(const uint8_t *bytes, size_t length, const erx_boot_m
 static void
 check_the_words_fit(const erx_boot_manifest_t *manifest)
 {
+	/* The longest facts: a coherent range at the top of the address space and an address. */
+	static const erx_dt_device_t longest = { .dma = ERX_DT_DMA_OK, .coherent = true, .cpu = UINT64_MAX,
+	    .bus = UINT64_MAX, .last = UINT64_MAX, .mac_status = ERX_DT_MAC_OK,
+	    .mac = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff } };
 	char words[ERX_BOOT_GIVEN_WORDS_MAX];
+	char line[ERX_BOOT_TREE_LINE_MAX];
 	erx_boot_window_t window;
 	erx_boot_given_t given;
 
@@ -101,8 +107,13 @@ check_the_words_fit(const erx_boot_manifest_t *manifest)
 			if (erx_boot_device_words(device, words, ERX_BOOT_DEVICE_WORDS_MAX) == 0)
 				abort();
 		} else if (erx_boot_device_window(device, &window)) {
-			given = erx_boot_device_given(device, &window, UINT64_MAX, UINT64_MAX, UINT64_MAX);
+			given = erx_boot_device_given(device, &window, &longest, UINT64_MAX, UINT64_MAX, UINT64_MAX);
 			if (erx_boot_given_words(&given, words, ERX_BOOT_GIVEN_WORDS_MAX) == 0)
+				abort();
+			/* A device that asks has a node path, so its line fits ERX_BOOT_TREE_LINE_MAX. */
+			if (erx_boot_device_asks(device) && device->path.length != 0 && device->path.length < ERX_PATH_MAX &&
+			    erx_boot_node_path_valid((const uint8_t *)device->path.bytes, device->path.length) &&
+			    erx_boot_tree_line(device, &longest, NULL, line, sizeof(line)) == 0)
 				abort();
 		}
 	}

@@ -63,8 +63,9 @@ module Erx
     LICENSE = 'LICENSE'
     # The trees imported into the source tree that the root builds from: BLAKE3 for its
     # reader of the archive and the entropy generator's mixing, ChaCha20 for that
-    # generator's stream, and OTP for the release's beams.
-    IMPORTS = { 'kernel/crypto/blake3' => 'permanent', 'kernel/crypto/chacha20' => 'permanent', 'otp' => 'permanent' }.freeze
+    # generator's stream, OTP for the release's beams, and libfdt for its device-tree reader.
+    IMPORTS = { 'kernel/crypto/blake3' => 'permanent', 'kernel/crypto/chacha20' => 'permanent', 'otp' => 'permanent',
+                'fiasco/libfdt' => 'permanent' }.freeze
 
     # The emulator's archive, which holds littlefs's objects beside ERTS's own
     # (otp/erts/emulator/Makefile.in's OS_OBJS), so its attribution carries
@@ -632,10 +633,10 @@ module Erx
       # Every word of ERTS's arguments that the manifest's own words do not add.
       def self.arguments_always(root) = ARGUMENTS_FIXED + allocator_words(root).size
       # The words of -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE
-      # CLOCK, which the root adds for the device of each RECORD_UNITS unit but the host link's,
+      # CLOCK COHERENT MAC, which the root adds for the device of each RECORD_UNITS unit but the host link's,
       # and of -erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK, the host link's UART's physical record
       # (docs/design-stopgap.md, "Device records").
-      GIVEN_RECORD_WORDS = 12
+      GIVEN_RECORD_WORDS = 14
       DEVICE_RECORD_WORDS = 9
       # The manifest unit that holds the host link's UART, which gives a device record only
       # when the boot sends erx.hostlink=1.

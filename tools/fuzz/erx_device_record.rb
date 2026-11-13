@@ -13,7 +13,8 @@ require 'tmpdir'
 # reads its line as 64 bits wide shows the reference holds each field to its width, a
 # given record that keeps a memory key of 0 bytes shows it holds a device of no DMA to
 # having no memory object, and a reader that takes a shared line for a direct one shows it
-# holds each record to its line's mark.
+# holds each record to its line's mark, and one that reads a hardware address as 64 bits
+# wide shows it holds MAC to 48.
 module ErxDeviceRecordFuzz
   ROOT = File.expand_path('../..', __dir__)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/erx_device_record.erl')
@@ -22,7 +23,8 @@ module ErxDeviceRecordFuzz
   MUTANTS = {
     'reading a line as 64 bits wide' => ['number(Line, 32)', 'number(Line, 64)'],
     'keeping a memory key of 0 bytes' => ["with_memory(Spec, _Memory, 0) -> Spec;\n", ''],
-    'reading a shared line as direct' => ['marked(shared, Line) -> {shared, Line}.', 'marked(shared, Line) -> Line.']
+    'reading a shared line as direct' => ['marked(shared, Line) -> {shared, Line}.', 'marked(shared, Line) -> Line.'],
+    'reading a hardware address as 64 bits wide' => ['number(Mac, 48)', 'number(Mac, 64)']
   }.freeze
   DEADLINE_SECONDS = '120'
 

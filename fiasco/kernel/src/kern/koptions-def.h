@@ -95,6 +95,6 @@ namespace L4_kernel_options
     Unsigned32  erx_pad;
 
     /// erXos's handoff record (docs/design-stopgap.md, "Boot handoff").
-    Unsigned8   erx_handoff[2408];
+    Unsigned8   erx_handoff[2424];
   } __attribute__((packed));
 };

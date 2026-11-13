@@ -26,7 +26,13 @@ extern "C" {
 #endif
 
 /* The size of the record Fiasco's options block embeds. */
-#define ERX_BOOT_HANDOFF_RECORD_SIZE	2408
+#define ERX_BOOT_HANDOFF_RECORD_SIZE	2424
+/*
+ * The longest device-tree copy and its alignment: ERX_BOOT_TREE_MAX and
+ * ERX_PAGE_SIZE of the ABI, which bootstrap's C++ does not include.
+ */
+#define ERX_BOOT_TREE_COPY_MAX		1048576
+#define ERX_BOOT_TREE_ALIGN		4096
 
 typedef struct erx_boot_handoff_view erx_boot_handoff_view_t;
 
@@ -52,6 +58,12 @@ struct erx_boot_handoff_view {
 	uint32_t	 stdout_path_len;
 	/* The boot value and its slot bootstrap derived from /chosen/bootloader. */
 	erx_boot_pair_t	 boot;
+	/*
+	 * The packed read-only copy of the firmware's device tree bootstrap
+	 * made: page-aligned, 1 to ERX_BOOT_TREE_COPY_MAX bytes, its end inside the
+	 * address space. Its bytes are untrusted until erx_dt_accept takes them.
+	 */
+	erx_boot_range_t tree;
 };
 
 /*
@@ -91,6 +103,21 @@ erx_boot_handoff_build_id(const erx_boot_handoff_view_t *handoff)
 	for (size_t at = 0; at < sizeof(handoff->build_id); at++)
 		id = id << 8 | handoff->build_id[at];
 	return (id);
+}
+
+/*
+ * Whether a device-tree copy's range is one the handoff carries: start
+ * page-aligned, length from 1 to ERX_BOOT_TREE_COPY_MAX, end not overflowing.
+ * The writer stores only such a range and the reader accepts only one.
+ */
+static inline bool
+erx_boot_tree_range_valid(uint64_t start, uint64_t size)
+{
+	uint64_t end;
+
+	return ((start % ERX_BOOT_TREE_ALIGN) == 0 && size != 0 &&
+	    size <= ERX_BOOT_TREE_COPY_MAX &&
+	    !__builtin_add_overflow(start, size, &end));
 }
 
 /* Returns NULL when the record is good, else the check that failed. */

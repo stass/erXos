@@ -6,6 +6,7 @@
 #ifndef ERX_BACKEND_API_H
 #define ERX_BACKEND_API_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "erx/abi.h"
@@ -141,6 +142,15 @@ int	erx_irq_ack(uint64_t irq) ERX_WARN_UNUSED_RESULT;
  * label once however often its object fired. How many, or ERX_ETYPE on a worker.
  */
 int	erx_group_take_ready(uint32_t max) ERX_WARN_UNUSED_RESULT;
+
+/*
+ * The firmware's device tree, read-only, for the root's reader (docs/design-device-tree.md,
+ * "The seam"): *bytes and *size, whose bytes no one writes and whose pages stay mapped for
+ * the root's life. Natively the root's handoff range, once erx_fiasco_root_open accepted it,
+ * and ERX_ENOTSUP before that; only the root links it. Hosted, which has no devices,
+ * ERX_ENOTSUP.
+ */
+int	erx_boot_tree(const void **bytes, size_t *size) ERX_WARN_UNUSED_RESULT;
 
 /*
  * Devices' memory. A device's registers, by physical address, with the only attribute

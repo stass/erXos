@@ -22,7 +22,7 @@
  * byte less.
  */
 static void
-given_print(const erx_boot_device_t *device)
+given_print(const erx_boot_device_t *device, const erx_dt_device_t *facts, uint64_t memory_handle)
 {
 	char words[ERX_BOOT_GIVEN_WORDS_MAX];
 	erx_boot_window_t window;
@@ -33,7 +33,7 @@ given_print(const erx_boot_device_t *device)
 		printf("window refused\n");
 		return;
 	}
-	given = erx_boot_device_given(device, &window, WINDOW_HANDLE, LINE_HANDLE, MEMORY_HANDLE);
+	given = erx_boot_device_given(device, &window, facts, WINDOW_HANDLE, LINE_HANDLE, memory_handle);
 	length = erx_boot_given_words(&given, words, sizeof(words));
 	printf("window %llu %llu %llu words", (unsigned long long)window.base, (unsigned long long)window.size,
 	    (unsigned long long)window.offset);
@@ -74,7 +74,40 @@ main(int argc, char **argv)
 		const erx_boot_device_t device = { .role = "block", .peripheral = "virtio_mmio", .given = true,
 		    .base = strtoull(argv[2], NULL, 0), .size = strtoull(argv[3], NULL, 0) };
 
-		given_print(&device);
+		given_print(&device, NULL, MEMORY_HANDLE);
+		return (0);
+	}
+	/*
+	 * dma ROLE MEMORY STATUS COHERENT CPU BUS LAST MAC FIRST SIZE: the root's device step
+	 * (liberx/backend/fiasco/runtime_entry.c) for a ROLE device, net or block, of MEMORY
+	 * bytes of DMA memory and those facts: whether it asks the tree, the reason
+	 * erx_boot_dma_absent gives before the memory is made and, when that is none, again
+	 * for memory at FIRST of SIZE bytes, then its record, with memory only when both are
+	 * none, then its console line.
+	 */
+	if (argc == 12 && strcmp(argv[1], "dma") == 0) {
+		const erx_boot_device_t device = { .role = argv[2], .peripheral = "virtio_mmio", .given = true,
+		    .base = 0x0a003e00, .size = 0x200, .dma_memory = strtoull(argv[3], NULL, 0),
+		    .network = strcmp(argv[2], "net") == 0, .path = { "/virtio_mmio@a003e00", 20 } };
+		erx_dt_device_t facts = { .dma = (erx_dt_dma_status_t)strtoul(argv[4], NULL, 0),
+		    .coherent = strtoul(argv[5], NULL, 0) != 0, .cpu = strtoull(argv[6], NULL, 0),
+		    .bus = strtoull(argv[7], NULL, 0), .last = strtoull(argv[8], NULL, 0) };
+		const uint64_t mac = strtoull(argv[9], NULL, 0);
+		const char *const before = device.dma_memory != 0 ? erx_boot_dma_absent(&facts, 0, 0) : NULL;
+		const char *const after = device.dma_memory != 0 && before == NULL ?
+		    erx_boot_dma_absent(&facts, strtoull(argv[10], NULL, 0), strtoull(argv[11], NULL, 0)) : NULL;
+		const bool memory = device.dma_memory != 0 && before == NULL && after == NULL;
+		char line[ERX_BOOT_TREE_LINE_MAX];
+		size_t line_length;
+
+		facts.mac_status = mac != 0 ? ERX_DT_MAC_OK : ERX_DT_MAC_NONE;
+		for (size_t at = 0; at < ERX_DT_MAC_BYTES; at++)
+			facts.mac[at] = (uint8_t)(mac >> (8 * (ERX_DT_MAC_BYTES - 1 - at)));
+		printf("asks %d before %s after %s ", erx_boot_device_asks(&device), before != NULL ? before : "none",
+		    after != NULL ? after : "none");
+		given_print(&device, &facts, memory ? MEMORY_HANDLE : ERX_CAP_NULL);
+		line_length = erx_boot_tree_line(&device, &facts, after, line, sizeof(line));
+		printf("line %.*s", (int)line_length, line);
 		return (0);
 	}
 	if (argc < 2 || argc > 4 || (argc == 4 && strcmp(argv[3], "hostlink") != 0) || (file = fopen(argv[1], "rb")) == NULL)
@@ -118,7 +151,7 @@ main(int argc, char **argv)
 		    (unsigned long long)device->base, (unsigned long long)device->size, device->line,
 		    mark(device->line_shared), (unsigned long long)device->dma_memory, device->clock);
 		if (device->given) {
-			given_print(device);
+			given_print(device, NULL, MEMORY_HANDLE);
 			continue;
 		}
 		length = erx_boot_device_words(device, words, sizeof(words));

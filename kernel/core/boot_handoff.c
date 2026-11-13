@@ -12,6 +12,8 @@
 
 _Static_assert(ERX_BOOT_HANDOFF_RECORD_SIZE == ERX_BOOT_HANDOFF_SIZE,
     "the seam's record size is the ABI's");
+_Static_assert(ERX_BOOT_TREE_COPY_MAX == ERX_BOOT_TREE_MAX &&
+    ERX_BOOT_TREE_ALIGN == ERX_PAGE_SIZE, "the seam's tree bounds are the ABI's");
 _Static_assert(sizeof(((erx_boot_handoff_view_t *)0)->build_id) ==
     sizeof(((erx_boot_handoff_t *)0)->build_id) &&
     sizeof(((erx_boot_handoff_view_t *)0)->index_hash) ==
@@ -48,6 +50,8 @@ erx_boot_handoff_accept(const uint8_t *record, size_t length,
 		return ("stdout_path");
 	if (!erx_boot_pair_valid(handoff->boot_value, handoff->boot_slot))
 		return ("boot_value");
+	if (!erx_boot_tree_range_valid(handoff->tree_start, handoff->tree_size))
+		return ("tree_range");
 	*view = (erx_boot_handoff_view_t){
 		.flags = handoff->flags,
 		.development = (handoff->flags & ERX_PACK_DEVELOPMENT) != 0,
@@ -62,6 +66,7 @@ erx_boot_handoff_accept(const uint8_t *record, size_t length,
 		.stdout_path = (const char *)handoff->stdout_path,
 		.stdout_path_len = handoff->stdout_path_len,
 		.boot = { .value = handoff->boot_value, .slot = handoff->boot_slot },
+		.tree = { .start = handoff->tree_start, .size = handoff->tree_size },
 	};
 	for (size_t index = 0; index < sizeof(view->build_id); index++)
 		view->build_id[index] = handoff->build_id[index];

@@ -529,7 +529,7 @@ erx_boot_pair_derive(const void *partition, size_t partition_len,
 bool
 erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
     size_t bootargs_len, const char *stdout_path, size_t stdout_len,
-    erx_boot_pair_t boot, uint8_t *record, size_t size)
+    erx_boot_pair_t boot, erx_boot_range_t tree, uint8_t *record, size_t size)
 {
 	erx_boot_handoff_t *handoff;
 
@@ -539,6 +539,7 @@ erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
 	    stdout_len > ERX_BOOT_STDOUT_PATH_MAX ||
 	    (stdout_path == NULL && stdout_len != 0) ||
 	    !erx_boot_pair_valid(boot.value, boot.slot) ||
+	    !erx_boot_tree_range_valid(tree.start, tree.size) ||
 	    ((uintptr_t)record % ERX_BOOT_HANDOFF_ALIGN) != 0)
 		return (false);
 	/* A node name outside the specification's characters: the tree names no console. */
@@ -554,6 +555,8 @@ erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
 		.stdout_path_len = (uint32_t)stdout_len,
 		.boot_value = boot.value,
 		.boot_slot = boot.slot,
+		.tree_start = tree.start,
+		.tree_size = tree.size,
 	};
 	for (size_t index = 0; index < ERX_BOOT_ID_SIZE; index++)
 		handoff->build_id[index] = plan->build_id[index];

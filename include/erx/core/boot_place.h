@@ -140,12 +140,13 @@ erx_boot_pair_t erx_boot_pair_derive(const void *, size_t, const void *, size_t)
  * first bootargs_len bytes of bootargs, at most the record's bound, the
  * stdout_len bytes of the node path /chosen/stdout-path names, at most
  * ERX_BOOT_STDOUT_MAX, stored empty unless it is a node path
- * (erx_boot_node_path_valid), and the boot pair. Returns false when the
- * record does not fit or the pair is one a reader refuses
- * (erx_boot_pair_valid), and then writes nothing.
+ * (erx_boot_node_path_valid), the boot pair and the range of the device
+ * tree's copy. Returns false when the record does not fit, the pair is one a reader refuses
+ * (erx_boot_pair_valid) or the tree's range is (erx_boot_tree_range_valid),
+ * and then writes nothing.
  */
 bool erx_boot_handoff_write(const erx_boot_load_plan_t *, const char *, size_t,
-    const char *, size_t, erx_boot_pair_t, uint8_t *, size_t);
+    const char *, size_t, erx_boot_pair_t, erx_boot_range_t, uint8_t *, size_t);
 
 #ifdef __cplusplus
 }

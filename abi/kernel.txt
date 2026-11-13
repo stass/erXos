@@ -34,6 +34,10 @@ right power 29 "end the machine or pet its watchdog"
 right trace 30 "read authorized trace and log records"
 right entropy 31 "credit entropy from an authorized source"
 
+# The longest packed copy of the firmware's device tree bootstrap hands the
+# root (docs/design-device-tree.md, "On the stopgap").
+limit boot_tree_max u32 1048576
+
 # erx.watchdog=P,D,B, in seconds: P from 1 to 60, D from 2P to 600, B from D
 # to 600, and 1,5,60 when the key is absent or malformed.
 limit watchdog_period_min u32 1
@@ -733,7 +737,7 @@ layout erx_trace_record shared 8 64
 # What bootstrap tells the kernel (docs/design-stopgap.md, "Boot handoff").
 # boot_value and boot_slot are the pair bootstrap derives from /chosen/bootloader,
 # under the machine page's rule for pairs.
-layout erx_boot_handoff wire_le 8 2408
+layout erx_boot_handoff wire_le 8 2424
   field version u32 0
   field flags pack_flags 4
   field build_id u8 8 count 8
@@ -750,3 +754,5 @@ layout erx_boot_handoff wire_le 8 2408
   field boot_value boot_value 2396
   field boot_slot boot_slot 2400
   field reserved u32 2404
+  field tree_start u64 2408
+  field tree_size u64 2416

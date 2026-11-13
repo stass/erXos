@@ -15,6 +15,7 @@
 #include "erx/abi_reader.h"
 #include "erx/core/boot_handoff.h"
 #include "erx/pack.h"
+#include "liberx/backend/api.h"
 #include "kernel/crypto/blake3/blake3.h"
 #include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/root_open.h"
@@ -23,6 +24,9 @@
 /* No stack holds these: the archive's checks want them large and long-lived. */
 static erx_blake3_ctx_t root_hasher;
 static erx_pack_scratch_t root_scratch;
+/* The accepted handoff's device-tree copy, which erx_boot_tree returns; size 0 until then. */
+static const void *root_tree;
+static size_t root_tree_size;
 
 static bool
 root_bytes_equal(const uint8_t *first, const uint8_t *second, size_t length)
@@ -52,6 +56,17 @@ erx_fiasco_root_open(erx_boot_handoff_view_t *handoff, erx_pack_view_t *pack)
 	    ERX_BOOT_HANDOFF_SIZE, handoff);
 	if (reason != NULL)
 		return (reason);
+	root_tree = (const void *)(uintptr_t)handoff->tree.start;
+	root_tree_size = (size_t)handoff->tree.size;
+	/*
+	 * Touching each page of the tree's copy now, while sigma0 is still the
+	 * pager, maps it read-only by its sub-type (docs/design-stopgap.md, "Boot
+	 * handoff", step 2): once the service is the root's pager, a fault on a
+	 * page it was never given ends the root. The range is page-aligned and
+	 * bounded, as erx_boot_handoff_accept checked.
+	 */
+	for (size_t offset = 0; offset < root_tree_size; offset += ERX_PAGE_SIZE)
+		(void)*(const volatile uint8_t *)((const char *)root_tree + offset);
 
 	if (!erx_pack_open((const uint8_t *)(uintptr_t)handoff->image.start,
 	    (size_t)handoff->image.size, &root_scratch, &root_hasher, pack,
@@ -74,6 +89,16 @@ erx_fiasco_root_open(erx_boot_handoff_view_t *handoff, erx_pack_view_t *pack)
 	if (!erx_pack_file_check(pack, last, &root_hasher, &pack_error))
 		return (pack_error.reason);
 	return (NULL);
+}
+
+int
+erx_boot_tree(const void **bytes, size_t *size)
+{
+	if (root_tree_size == 0)
+		return (ERX_ENOTSUP);
+	*bytes = root_tree;
+	*size = root_tree_size;
+	return (ERX_OK);
 }
 
 const char *

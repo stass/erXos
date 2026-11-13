@@ -5,11 +5,12 @@
 %% "Device records"), one per device the domain drives, in one of two forms, each with its
 %% own word so neither is told from the other by counting:
 %%
-%% - `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK`, a given device:
-%%   the handles of the window, line and memory objects the domain library installed when it
-%%   created the domain, or the root made for itself at boot for a device the system domain
-%%   holds, the transport's offset and size in the window object, and the memory's bytes, 0
-%%   for a device that does no DMA;
+%% - `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT MAC`,
+%%   a given device: the handles of the window, line and memory objects the domain library
+%%   installed when it created the domain, or the root made for itself at boot for a device
+%%   the system domain holds, the transport's offset and size in the window object, the
+%%   memory's bytes, 0 for a device that does no DMA, and the firmware tree's coherence mark
+%%   and hardware address;
 %% - `-erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK`, the system domain's physical record
 %%   of its host link's UART, which does no DMA, built by liberx/backend/core/boot_manifest.c
 %%   from the system manifest.
@@ -36,7 +37,8 @@
 -type spec() :: #{peripheral := atom(),
                   window := {object, non_neg_integer(), non_neg_integer(), non_neg_integer()},
                   lines := [{object, non_neg_integer()} | {shared, {object, non_neg_integer()}}],
-                  memory => {object, non_neg_integer(), pos_integer()}, clock := non_neg_integer()}
+                  memory => {object, non_neg_integer(), pos_integer()}, clock := non_neg_integer(),
+                  coherent := boolean(), mac => 1..16#ffffffffffff}
               | #{peripheral := atom(), window := {physical, non_neg_integer(), non_neg_integer()},
                   lines := [non_neg_integer() | {shared, non_neg_integer()}], clock := non_neg_integer()}.
 
@@ -71,20 +73,25 @@ specs(Peripheral, [Record | Rest], Specs) ->
         {error, _} = Error -> Error
     end.
 
-spec(Peripheral, {"given", [Window, Offset, Size, Line, Mark, Memory, MemorySize, Clock | _]}) ->
-    case {numbers([Window, Offset, Size, Line, Memory, MemorySize]), number(Clock, 32), mark(Mark)} of
-        {{ok, [W, O, S, L, M, MS]}, {ok, C}, {ok, Sharing}} ->
+%% COHERENT is the firmware tree's coherence mark, 0 or 1, and MAC its hardware address,
+%% 48 bits, 0 for none (docs/design-device-tree.md, "Facts into records").
+spec(Peripheral, {"given", [Window, Offset, Size, Line, Mark, Memory, MemorySize, Clock, Coherent, Mac | _]}) ->
+    case {numbers([Window, Offset, Size, Line, Memory, MemorySize]), number(Clock, 32), mark(Mark),
+          coherent(Coherent), number(Mac, 48)} of
+        {{ok, [W, O, S, L, M, MS]}, {ok, C}, {ok, Sharing}, {ok, Co}, {ok, A}} ->
             Spec = #{peripheral => Peripheral, window => {object, W, O, S},
-                     lines => [marked(Sharing, {object, L})], clock => C},
-            {ok, with_memory(Spec, M, MS)};
-        {{ok, _}, {ok, _}, error} ->
+                     lines => [marked(Sharing, {object, L})], clock => C, coherent => Co},
+            {ok, with_mac(with_memory(Spec, M, MS), A)};
+        {{ok, _}, {ok, _}, error, _, _} ->
             bad("a given device record's line mark is neither direct nor shared");
+        {{ok, _}, {ok, _}, {ok, _}, error, _} ->
+            bad("a given device record's coherence is neither 0 nor 1");
         _ ->
-            bad("a given device record's handle, offset, size or clock is not a decimal number "
+            bad("a given device record's handle, offset, size, clock or address is not a decimal number "
                 "of its field's width")
     end;
 spec(_Peripheral, {"given", _}) ->
-    bad("a given device record has fewer than seven numbers and a line mark");
+    bad("a given device record has fewer than nine numbers and a line mark");
 spec(Peripheral, {"device", [Base, Size, Line, Mark, Clock | _]}) ->
     case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32), mark(Mark)} of
         {{ok, B}, {ok, S}, {ok, L}, {ok, C}, {ok, Sharing}} ->
@@ -97,6 +104,13 @@ spec(Peripheral, {"device", [Base, Size, Line, Mark, Clock | _]}) ->
     end;
 spec(_Peripheral, {"device", _}) ->
     bad("a device record has fewer than four numbers and a line mark").
+
+coherent("0") -> {ok, false};
+coherent("1") -> {ok, true};
+coherent(_) -> error.
+
+with_mac(Spec, 0) -> Spec;
+with_mac(Spec, Address) -> Spec#{mac => Address}.
 
 %% The line's mark word, and the line as erx_device:open/1 takes it.
 mark("direct") -> {ok, direct};

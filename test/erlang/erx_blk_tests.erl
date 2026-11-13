@@ -10,7 +10,7 @@
 
 %% A given block record of Peripheral, as the domain library writes it.
 record(Peripheral) ->
-    ["given", "block", atom_to_list(Peripheral), "5", "0", "512", "6", "direct", "7", "65536", "0"].
+    ["given", "block", atom_to_list(Peripheral), "5", "0", "512", "6", "direct", "7", "65536", "0", "0", "0"].
 
 %% erx_blk:start_link/0's lookup over Arguments in place of init's.
 choose(Arguments) ->
@@ -23,7 +23,7 @@ virtio_record_starts_the_virtio_process_test() ->
 
 no_block_record_starts_nothing_test_() ->
     [?_assertEqual(none, choose([])),
-     ?_assertEqual(none, choose([["given", "net", "virtio_mmio", "5", "0", "512", "6", "direct", "7", "65536", "0"]]))].
+     ?_assertEqual(none, choose([["given", "net", "virtio_mmio", "5", "0", "512", "6", "direct", "7", "65536", "0", "0", "0"]]))].
 
 sdhci_record_has_no_transport_test() ->
     ?assertEqual({error, {sdhci, no_transport}}, choose([record(sdhci)])).

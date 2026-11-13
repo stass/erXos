@@ -438,6 +438,24 @@ it; git history is the record of completed work.
   but code-making does not yet follow from the image.
 * [Low] stopgap, `musl/src/internal/erxos/syscall.c`: `munmap` of part of an object's mapping is `EINVAL` and
   `mprotect` over one `ENOTSUP`, where FreeBSD does both; nothing reaches it until musl maps objects.
+* [Medium] stopgap, `liberx/backend/fiasco/service_task.c` (`erx_fiasco_task_mem_dma_body`) and the contiguous
+  object of `vm.c`: the object does not record `bus - cpu`, so `erx_mem_dma_addr` gives a device the CPU address
+  of its memory, where [design-device-tree.md](docs/design-device-tree.md) ("The `given` record") and
+  [design-device-dma.md](docs/design-device-dma.md) ("Device addresses and reach") have it give the bus address.
+  Until it does, `erx_boot_dma_absent` (`liberx/backend/core/boot_manifest.c`) refuses a device whose DMA range has
+  bus addresses unlike its CPU addresses, with the reason `offset`, and the device gets no DMA memory: a row for
+  the Raspberry Pi 4's EMMC2, whose bus addresses start at 0xc0000000, would move blocks by programmed I/O. Record
+  the offset in the object the root makes from the tree's range, and drop `offset`.
+* [Medium] stopgap, `liberx/backend/fiasco/runtime_entry.c` (`tree_accept`, `device_give`): the root accepts the
+  firmware's tree and reads a device's facts when it gives the device, in step 8 of
+  [Boot handoff](docs/design-stopgap.md#boot-handoff), not in step 4, and keeps them only for that give, where
+  [design-device-tree.md](docs/design-device-tree.md) ("Facts into records") has them read once in step 4 into
+  each row's catalogue entry and read from there alone. Holders' records (`liberx/system/dom_apply.c`) need the
+  same facts: move the acceptance into `root_boot` and store the facts in the entries with that package. The
+  pages are mapped in step 2, so the later read faults nowhere.
+* [Low] stopgap, `liberx/backend/fiasco/runtime_entry.c` (`device_memory`): a contiguous object whose device
+  address the tree's DMA range refuses (`outside`) stays in the root's table, unused, for the boot's life, and the
+  device gets no memory. It fails safe; the pool's pages lie inside every range the manifests' trees give.
 * [Low] stopgap, `liberx/backend/fiasco/vm.c`: a physical object's device window pages and a contiguous object's
   run are never given back, so a driver that makes and closes such objects in a loop uses the window or the
   contiguous pool up for good; each object, not each task, now holds them.
@@ -547,9 +565,10 @@ it; git history is the record of completed work.
   the development manifest's display domain and the QEMU screenshot case come next.
 * [High] device records, `COHERENT` ([design-stopgap.md](docs/design-stopgap.md#device-records),
   [design-device-tree.md](docs/design-device-tree.md)): `erx_device:region/3` makes a region only on a device whose
-  spec says `coherent => true`, and nothing writes that yet: the root's `-erx given` writer
-  (`erx_boot_device_given`) stops at CLOCK and `erx_device_record:find/3` reads no COHERENT, so on QEMU `virt` every
-  virtio-gpu region is `{error, enotsup}` until the record carries the device tree's mark. The display (D2) needs it.
+  spec says `coherent => true`. The root writes the device tree's mark into its own devices' `-erx given` records
+  and `erx_device_record:find/3` reads it, but a holder's record (`liberx/system/dom_apply.c`, `apply_given_words`)
+  still says COHERENT 0, since the facts do not reach `erx_dom_device_entry_t`; so on QEMU `virt` every virtio-gpu
+  region, a holder's device, is `{error, enotsup}`. The display (D2) needs it.
 * [High] device NIF, a screen-sized region (`liberx/backend/core/device_check.h`): a given device's memory is one
   contiguous object of at most `ERX_MEM_CONTIGUOUS_MAX`, 1 MiB, and its queues and regions are carved from it, so
   no screen image larger than 1 MiB less the queues fits (640 by 480 at 32 bits is 1.2 MB). The virtio-gpu

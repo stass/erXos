@@ -94,13 +94,22 @@ module Erx
     # suite's. The archive's core comes from Fiasco's boot archive, which does not hold the
     # handoff record's core, since bootstrap only writes it.
     NO_PROGRAM = [*RUNTIME, *VM, *SERVICE, *LAUNCH, "#{BACKEND}/root.c", "#{BACKEND}/root_no_program.c"].freeze
+    # The device-tree reader over libfdt with every check on (docs/design-device-tree.md, "The
+    # reader"), as tools/fuzz/dt_target.rb builds it: the root accepts the firmware's tree once
+    # and reads each given device's facts from it. libfdt includes musl's string.h and
+    # stdlib.h, so these read musl's headers too.
+    LIBFDT = 'fiasco/libfdt/lib/contrib'
+    DEVICE_TREE = ['kernel/core/dt.c', *%w[fdt.c fdt_ro.c fdt_check.c fdt_addresses.c fdt_rw.c fdt_wip.c].map do |name|
+      "#{LIBFDT}/#{name}"
+    end].freeze
+    DEVICE_TREE_FLAGS = ['-I', LIBFDT, '-DFDT_ASSUME_MASK=0'].freeze
     # The system's root task, less what its link takes from musl and ERTS: musl supplies
     # the memcpy and the rest of what root_mem.c gives a freestanding root.
     SYSTEM = [*(RUNTIME - ["#{BACKEND}/root_mem.c"]), *VM, *SERVICE, *LAUNCH, "#{BACKEND}/root.c",
               'liberx/backend/core/boot_info.c', 'liberx/backend/core/boot_manifest.c', 'liberx/backend/core/refused.c',
               "#{BACKEND}/api_names.c", "#{BACKEND}/libc_start.c", "#{BACKEND}/libc_root_start.c", "#{BACKEND}/libc_root_write.c", "#{BACKEND}/runtime_entry.c",
               "#{BACKEND}/park_report.c", "#{BACKEND}/runtime_main.c", 'liberx/release.c', 'liberx/release_fs.c',
-              *DOMAIN_LIBRARY, *CONNECTION, *PIPE].freeze
+              *DOMAIN_LIBRARY, *CONNECTION, *PIPE, *DEVICE_TREE].freeze
     # A domain's runtime image: the interpreter ERTS as a task's program, at task.ld's
     # fixed addresses, since erx_image_map loads only an ERX_IMAGE_FIXED image. musl's
     # start enters ERTS's main through domain_entry.c, which first checks the boot page;
@@ -265,9 +274,10 @@ module Erx
       headers = @fiasco.user_include_directories.flat_map { |path| ['-isystem', path] }
       # musl declares the BSD memory primitives (bcmp, bcopy, bzero) only under _BSD_SOURCE,
       # which -std=c17 leaves undefined.
-      libc = LIBC_SOURCES.include?(source) ? ['-isystem', LIBC_HEADERS, '-D_BSD_SOURCE'] : []
+      libc = (LIBC_SOURCES + DEVICE_TREE).include?(source) ? ['-isystem', LIBC_HEADERS, '-D_BSD_SOURCE'] : []
+      tree = DEVICE_TREE.include?(source) ? DEVICE_TREE_FLAGS : []
       base = FP_SOURCES.include?(source) ? FLAGS - ['-mgeneral-regs-only'] : FLAGS
-      argv = [@compiler, *base, *flags, *headers, *libc, '-MMD', '-MF', "#{object}.d", '-c', source, '-o', object]
+      argv = [@compiler, *base, *flags, *headers, *libc, *tree, '-MMD', '-MF', "#{object}.d", '-c', source, '-o', object]
       memo.compile(argv, chdir: @source, object: object, depfile: "#{object}.d") do |command, environment|
         @runner.run(command, name: "native-root-#{File.basename(source).tr('.', '-').downcase}", deadline: 60, chdir: @source,
                              env: environment)

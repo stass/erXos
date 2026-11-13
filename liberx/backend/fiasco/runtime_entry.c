@@ -23,6 +23,7 @@
 #include "liberx/backend/core/boot_manifest.h"
 #include "erx/dom_lib.h"
 #include "liberx/backend/fiasco/boot_args.h"
+#include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/group.h"
 #include "liberx/backend/fiasco/park.h"
 #include "liberx/backend/fiasco/runtime_entry.h"
@@ -50,6 +51,8 @@ static const char	*library_up(const erx_manifest_view_t *, const erx_pack_view_t
 static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
 static size_t		 line_append(char *, size_t, erx_boot_words_t);
 static const char	*device_give(const erx_boot_device_t *, char *, size_t, size_t *);
+static const char	*tree_accept(void);
+static const char	*device_memory(const erx_boot_device_t *, const erx_dt_device_t *, uint64_t *, const char **);
 
 static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
 /*
@@ -61,6 +64,14 @@ static erx_boot_words_t arg_words[4 + ERX_BOOT_DEVICES_MAX + ERX_BOOT_STRINGS_MA
 static char console_uart_words[ERX_BOOT_CONSOLE_WORDS_MAX];
 /* Each device record's words: the given form's, or the host link's physical one, which is shorter. */
 static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_GIVEN_WORDS_MAX];
+/*
+ * The firmware's device tree, accepted once before the first device asks it
+ * (docs/design-device-tree.md, "Facts into records"), a device's path as the reader takes
+ * it, ended by NUL, and the line the root prints for each device that asked.
+ */
+static erx_dt_t boot_tree;
+static char tree_path[ERX_PATH_MAX];
+static char tree_line[ERX_BOOT_TREE_LINE_MAX];
 _Static_assert(ERX_BOOT_GIVEN_WORDS_MAX >= ERX_BOOT_DEVICE_WORDS_MAX, "a device record's room holds either form");
 /* -erx boot VALUE SLOT: the longest names are "unknown" and "none", each with its NUL. */
 static const char boot_prefix[] = "-erx\0boot";
@@ -240,6 +251,7 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	size_t word_len;
 	size_t boot_length;
 	size_t build_length;
+	const char *reason;
 
 	arg_words[(*nargs)++] = manifest->system_args;
 	if (manifest->console.size != 0) {
@@ -258,14 +270,14 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	if (build_length == 0)
 		return ("the handoff: the build identifier's words outgrow their room");
 	arg_words[(*nargs)++] = (erx_boot_words_t){ build_words, build_length };
+	if ((reason = tree_accept()) != NULL)
+		return (reason);
 	for (size_t at = 0; at < manifest->device_count; at++) {
 		const erx_boot_device_t *const device = &manifest->devices[at];
 		size_t length = 0;
 
 		if (device->given) {
-			const char *const reason = device_give(device, device_words[at], sizeof(device_words[at]), &length);
-
-			if (reason != NULL)
+			if ((reason = device_give(device, device_words[at], sizeof(device_words[at]), &length)) != NULL)
 				return (reason);
 		} else {
 			length = erx_boot_device_words(device, device_words[at], sizeof(device_words[at]));
@@ -283,23 +295,56 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 }
 
 /*
+ * Accepts the firmware's device tree into boot_tree, once, before any device asks it
+ * (docs/design-device-tree.md, "Facts into records"). Returns NULL, or why the root cannot
+ * boot: the handoff carries no tree, or the reader refused it, naming its fixed reason.
+ */
+static const char *
+tree_accept(void)
+{
+	static const char refused[] = "the device tree: ";
+	static char line[sizeof(refused) + ERX_BOOT_STDOUT_PATH_MAX];
+	const void *bytes;
+	const char *reason;
+	size_t size, length = 0, used;
+
+	if (erx_boot_tree(&bytes, &size) != ERX_OK)
+		return ("the device tree: the handoff carries none");
+	if ((reason = erx_dt_accept(bytes, size, &boot_tree)) == NULL)
+		return (NULL);
+	while (reason[length] != '\0')
+		length++;
+	used = line_append(line, 0, (erx_boot_words_t){ refused, sizeof(refused) - 1 });
+	used = line_append(line, used, (erx_boot_words_t){ reason, length });
+	line[used] = '\0';
+	return (line);
+}
+
+/*
  * The root's own give of a device the system domain holds (docs/design-stopgap.md, "Device
  * records"). It makes in the root's own table the objects a holder's creation makes: the
  * register window over the pages of the device's registers, its line's IRQ object and,
- * for a device that does DMA, its contiguous memory for the boot. It then writes their
- * -erx given record (erx_boot_device_given) into words, capacity bytes, with *length its
- * whole length, 0 when it does not fit.
+ * for a device that does DMA, its contiguous memory for the boot (device_memory). A device
+ * that asks the firmware's tree (erx_boot_device_asks) has its facts read from boot_tree,
+ * and the root prints their line. It then writes the -erx given record
+ * (erx_boot_device_given) into words, capacity bytes, with *length its whole length, 0 when
+ * it does not fit.
  *
  * Nothing deletes the objects: the system domain holds the device for the boot, and a
  * fault of the system domain resets the machine. Returns NULL, or why the root cannot
- * boot: the backend refused an object, so the device would have no driver.
+ * boot: the backend refused an object, so the device would have no driver, or the
+ * manifest names a device-tree path that is not a node path.
  */
 static const char *
 device_give(const erx_boot_device_t *device, char *words, size_t capacity, size_t *length)
 {
 	uint64_t window_handle, line_handle, memory_handle = ERX_CAP_NULL;
+	erx_dt_device_t facts;
+	const erx_dt_device_t *asked = NULL;
+	const char *absent = NULL, *reason;
 	erx_boot_window_t window;
 	erx_boot_given_t given;
+	size_t line_length;
 
 	if (!erx_boot_device_window(device, &window))
 		return ("a device record: its registers are empty or wrap");
@@ -308,11 +353,49 @@ device_give(const erx_boot_device_t *device, char *words, size_t capacity, size_
 		return ("a device record: the backend refused its register window");
 	if (erx_irq_create(ERX_CAP_NULL, ERX_CAP_NULL, ERX_IRQ_LINE, device->line, &line_handle) != ERX_OK)
 		return ("a device record: the backend refused its line");
-	if (device->dma_memory != 0 &&
-	    erx_mem_create_contiguous(ERX_CAP_NULL, ERX_CAP_NULL, device->dma_memory, 0, &memory_handle) != ERX_OK)
-		return ("a device record: the backend refused its DMA memory");
-	given = erx_boot_device_given(device, &window, window_handle, line_handle, memory_handle);
+	if (erx_boot_device_asks(device)) {
+		if (device->path.length == 0 || device->path.length >= sizeof(tree_path) ||
+		    !erx_boot_node_path_valid((const uint8_t *)device->path.bytes, device->path.length))
+			return ("a device record: its device-tree path is not a node path");
+		for (size_t at = 0; at < device->path.length; at++)
+			tree_path[at] = device->path.bytes[at];
+		tree_path[device->path.length] = '\0';
+		erx_dt_device(&boot_tree, tree_path, ERX_DT_ROW_NODE, &facts);
+		asked = &facts;
+	}
+	/* A row with DMA memory always asks (erx_boot_device_asks), so asked is its facts. */
+	if (device->dma_memory != 0 && (reason = device_memory(device, asked, &memory_handle, &absent)) != NULL)
+		return (reason);
+	if (asked != NULL && (line_length = erx_boot_tree_line(device, asked, absent, tree_line, sizeof(tree_line))) != 0)
+		erx_fiasco_console_write(tree_line, line_length);
+	given = erx_boot_device_given(device, &window, asked, window_handle, line_handle, memory_handle);
 	*length = erx_boot_given_words(&given, words, capacity);
+	return (NULL);
+}
+
+/*
+ * A DMA device's contiguous memory, decided against its tree facts
+ * (docs/design-device-tree.md, "Facts into records"): none when the facts have no range the
+ * memory could lie in, asked before the memory is made; otherwise the memory, then none
+ * when its device address does not lie whole inside the range. *memory is the object, or
+ * ERX_CAP_NULL for none, and *absent erx_boot_dma_absent's reason for none, NULL when
+ * the device has its memory. An object made and then refused stays, unused, in the root's
+ * table (TODO.md). Returns NULL, or why the root cannot boot: the backend refused the
+ * memory or its device address.
+ */
+static const char *
+device_memory(const erx_boot_device_t *device, const erx_dt_device_t *facts, uint64_t *memory, const char **absent)
+{
+	uint64_t made, address;
+
+	if ((*absent = erx_boot_dma_absent(facts, 0, 0)) != NULL)
+		return (NULL);
+	if (erx_mem_create_contiguous(ERX_CAP_NULL, ERX_CAP_NULL, device->dma_memory, 0, &made) != ERX_OK)
+		return ("a device record: the backend refused its DMA memory");
+	if (erx_mem_dma_addr(made, 0, &address) != ERX_OK)
+		return ("a device record: the backend refused its DMA memory's device address");
+	if ((*absent = erx_boot_dma_absent(facts, address, device->dma_memory)) == NULL)
+		*memory = made;
 	return (NULL);
 }
 

@@ -10,6 +10,7 @@
 #include <stddef.h>
 
 #include "erx/abi.h"
+#include "erx/core/dt.h"
 #include "erx/boot_words.h"
 #include "liberx/backend/core/boot_info.h"
 
@@ -59,6 +60,8 @@ typedef struct erx_boot_device {
 	bool		line_shared;	/* another device of its unit names line (docs/design-shared-devices.md) */
 	uint32_t	clock;		/* the device's clock in hertz; 0 for a device whose driver reads none */
 	uint64_t	dma_memory;	/* a given device's memory for the boot, whole pages; 0 for none */
+	bool		network;	/* a row of the network role, whose record carries the tree's MAC */
+	erx_boot_words_t path;		/* its device-tree path, into the manifest's bytes */
 } erx_boot_device_t;
 
 /*
@@ -149,6 +152,9 @@ typedef struct erx_boot_given {
 	uint64_t	memory;
 	uint64_t	memory_size;
 	uint64_t	clock;
+	/* The firmware's device tree marks its DMA cache-coherent (docs/design-device-tree.md). */
+	bool		coherent;
+	uint64_t	mac;		/* the tree's hardware address, 48 bits; 0 for none */
 } erx_boot_given_t;
 
 /*
@@ -156,19 +162,69 @@ typedef struct erx_boot_given {
  * records"): the device's names and register size, the offset of its window (from
  * erx_boot_device_window), and the handles of the objects the root made for it, its
  * register window, its line's IRQ object and its contiguous memory. A device without
- * dma_memory has no memory: the record names ERX_CAP_NULL, whatever memory_handle is.
+ * dma_memory, or whose memory_handle is ERX_CAP_NULL because erx_boot_dma_absent refused
+ * it memory, has none: the record names ERX_CAP_NULL with MEM_SIZE 0. facts are the
+ * firmware tree's for a row that asked (erx_boot_device_asks), or NULL for a row that
+ * asked nothing. COHERENT is the facts' coherence for a row with DMA memory whose facts
+ * have a DMA range, and 0 otherwise; MAC is the facts' address for a network row, and 0
+ * otherwise.
  */
 erx_boot_given_t	erx_boot_device_given(const erx_boot_device_t *device, const erx_boot_window_t *window,
-	    uint64_t window_handle, uint64_t line_handle, uint64_t memory_handle);
+	    const erx_dt_device_t *facts, uint64_t window_handle, uint64_t line_handle, uint64_t memory_handle);
 
 /*
- * Writes -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK, the
- * numbers in decimal, MARK direct or shared by line_shared, and each word ended by NUL, into
+ * Writes -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT
+ * MAC, the numbers in decimal, COHERENT 1 or 0, MARK direct or shared by line_shared, and each word ended by NUL, into
  * words, and returns their whole length; 0, having written nothing past capacity, when they
  * do not fit, which ERX_BOOT_GIVEN_WORDS_MAX bytes (erx/boot_words.h) always do for names
  * within ERX_BOOT_NAME_WORD_MAX.
  */
 size_t	erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t capacity);
+
+/*
+ * Whether the root asks the firmware's tree for a given device's facts
+ * (docs/design-device-tree.md, "What each row asks"): a row with DMA memory asks for its
+ * coherence and DMA range, a network row for its hardware address, and every other row
+ * nothing. erx_boot_device_given reads only what the row asked from the facts.
+ */
+bool	erx_boot_device_asks(const erx_boot_device_t *device);
+
+/*
+ * The longest line erx_boot_tree_line writes: its fixed words, a node path of fewer than
+ * ERX_PATH_MAX bytes, three addresses of 0x and 16 digits, and the newline.
+ */
+#define ERX_BOOT_TREE_LINE_MAX	(sizeof("erx: device tree: ") + ERX_PATH_MAX + \
+	sizeof(": coherent 1 range ") + 3u * sizeof("0x0123456789abcdef") + sizeof(" mac present\n"))
+
+/*
+ * Writes the root's console line for a device that asked the tree (erx_boot_device_asks;
+ * docs/design-device-tree.md, "The lines"), without a NUL, into line, and returns its
+ * length: "erx: device tree: PATH:", then for a row with DMA memory " coherent C range CPU
+ * BUS LAST" or " dma absent REASON", REASON being absent, the reason erx_boot_dma_absent gave
+ * once the memory was made, or when absent is NULL the facts' own (erx_boot_dma_absent with
+ * size 0), then
+ * for a network row " mac present" or " mac absent", and a newline. PATH is the manifest's;
+ * the numbers are the facts', addresses in hexadecimal; the reasons are fixed words, so no
+ * byte of the tree reaches the line. Returns 0, having written nothing past capacity, for a
+ * path that is not a node path (erx_boot_node_path_valid) or a line that does not fit, which
+ * ERX_BOOT_TREE_LINE_MAX bytes always do for a path within ERX_PATH_MAX.
+ */
+size_t	erx_boot_tree_line(const erx_boot_device_t *device, const erx_dt_device_t *facts, const char *absent,
+	    char *line, size_t capacity);
+
+/*
+ * Why a device the firmware's tree describes by facts gets no DMA memory at first, size
+ * bytes, or NULL when it may have it (docs/design-device-tree.md, "Facts into records"):
+ * the reader's reason when the facts have no DMA range ("no_node", "coherence", "cells",
+ * "malformed", "ranges"); "offset" for a range whose bus addresses are not its CPU
+ * addresses, since no memory object records the difference yet; and "outside" when the
+ * memory does not lie whole inside the range. size 0 asks before the memory is made, so
+ * only the facts are checked. Each reason is a fixed word the root may print.
+ */
+const char	*erx_boot_dma_absent(const erx_dt_device_t *facts, uint64_t first, uint64_t size);
+
+/* The tree's hardware address as a 48-bit number, its first byte highest; 0 for none. */
+uint64_t	erx_boot_mac_number(const erx_dt_device_t *facts);
 
 /*
  * Writes -erx boot VALUE SLOT by the names of include/erx/core/boot_pair.h into words, and

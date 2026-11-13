@@ -355,13 +355,14 @@ static void
 test_holder_records(void)
 {
 	static const char record[] = "-erx\0given\0block\0virtio_mmio\0" "7\0" "3584\0" "512\0" "8\0" "direct\0" "9\0" "65536\0"
-	    "24000000\0" "-erx\0boot\0trial\0b\0";
+	    "24000000\0" "1\0" "90520731923542\0" "-erx\0boot\0trial\0b\0";
 	const erx_boot_given_t given = { .role = "block", .peripheral = "virtio_mmio", .window = 7, .offset = 3584,
-	    .size = 512, .line = 8, .memory = 9, .memory_size = 65536, .clock = 24000000 };
+	    .size = 512, .line = 8, .memory = 9, .memory_size = 65536, .clock = 24000000,
+	    .coherent = true, .mac = 0x525400123456 };
 	const erx_boot_given_t longest = { .role = "ROLEROLEROLEROL", .peripheral = "PERIPHERALPERIP", .window = UINT64_MAX,
 	    .offset = UINT64_MAX, .size = UINT64_MAX, .line = UINT64_MAX, .line_shared = true, .memory = UINT64_MAX,
-	    .memory_size = UINT64_MAX, .clock = UINT64_MAX };
-	static const char shared[] = "-erx\0given\0net\0virtio_mmio\0" "1\0" "0\0" "512\0" "2\0" "shared\0" "0\0" "0\0" "0\0";
+	    .memory_size = UINT64_MAX, .clock = UINT64_MAX, .coherent = true, .mac = UINT64_MAX };
+	static const char shared[] = "-erx\0given\0net\0virtio_mmio\0" "1\0" "0\0" "512\0" "2\0" "shared\0" "0\0" "0\0" "0\0" "0\0" "0\0";
 	const erx_boot_given_t shared_given = { .role = "net", .peripheral = "virtio_mmio", .window = 1, .size = 512,
 	    .line = 2, .line_shared = true };
 	char words[ERX_BOOT_GIVEN_WORDS_MAX + ERX_BOOT_PAIR_WORDS_MAX];

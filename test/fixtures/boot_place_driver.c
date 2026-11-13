@@ -116,7 +116,7 @@ run_plan(char **argv)
 	}
 	if (!erx_boot_handoff_write(&plan, "erx.a=1", 7, "/pl011@9000000", 14,
 	    (erx_boot_pair_t){ .value = ERX_BOOT_VALUE_UNKNOWN, .slot = ERX_BOOT_SLOT_NONE },
-	    record, sizeof(record)))
+	    (erx_boot_range_t){ .start = 0x48000000, .size = 0x2000 }, record, sizeof(record)))
 		abort();
 	fwrite(record, 1, 48, stdout);
 	printf("\n");
@@ -142,10 +142,11 @@ print_accepted(size_t length)
 	range.size -= 1;
 	printf("flags %" PRIx32 " development %d test_code %d image %" PRIx64
 	    " %" PRIx64 " bootargs %.*s stdout %.*s covered %d %d boot %" PRIu32
-	    " %" PRIu32 "\n", view.flags, view.development, view.test_code,
+	    " %" PRIu32 " tree %" PRIx64 " %" PRIx64 "\n", view.flags, view.development, view.test_code,
 	    view.image.start, view.image.size, (int)view.bootargs_len, view.bootargs,
 	    (int)view.stdout_path_len, view.stdout_path, covered,
-	    erx_boot_handoff_covered(&view, &range, 1), view.boot.value, view.boot.slot);
+	    erx_boot_handoff_covered(&view, &range, 1), view.boot.value, view.boot.slot,
+	    view.tree.start, view.tree.size);
 }
 
 static int
@@ -170,7 +171,7 @@ run_write(char **argv)
 	plan.archive = (erx_boot_range_t){ .start = 0x40204000, .size = 0x8000 };
 	memset(record, 0xa5, sizeof(record));
 	if (!erx_boot_handoff_write(&plan, "erx.a=1", 7, "/pl011@9000000", 14, boot,
-	    record, sizeof(record))) {
+	    (erx_boot_range_t){ .start = 0x48000000, .size = 0x2000 }, record, sizeof(record))) {
 		/* A refused write leaves the record as it was. */
 		for (size_t index = 0; index < sizeof(record); index++)
 			if (record[index] != 0xa5)

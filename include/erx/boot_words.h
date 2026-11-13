@@ -30,11 +30,11 @@
 	2u * ERX_BOOT_NAME_WORD_MAX + 4u * ERX_BOOT_NUMBER_WORD_MAX + ERX_BOOT_MARK_WORD_MAX)
 
 /*
- * -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK, per given
- * device, a holder's or the root's own.
+ * -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT MAC, per given
+ * device, a holder's or the root's own: COHERENT is one digit, every other number a u64.
  */
 #define ERX_BOOT_GIVEN_WORDS_MAX	(sizeof("-erx") + sizeof("given") + \
-	2u * ERX_BOOT_NAME_WORD_MAX + 7u * ERX_BOOT_NUMBER_WORD_MAX + ERX_BOOT_MARK_WORD_MAX)
+	2u * ERX_BOOT_NAME_WORD_MAX + 8u * ERX_BOOT_NUMBER_WORD_MAX + sizeof("1") + ERX_BOOT_MARK_WORD_MAX)
 
 /* -erx boot VALUE SLOT: the longest names are "unknown" and "none" (include/erx/core/boot_pair.h). */
 #define ERX_BOOT_PAIR_WORDS_MAX		(sizeof("-erx") + sizeof("boot") + \

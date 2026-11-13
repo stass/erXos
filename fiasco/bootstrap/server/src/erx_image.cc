@@ -244,6 +244,35 @@ write_handoff_page(l4_uint8_t const *record)
   return page;
 }
 
+// The root's read-only copy of the firmware's device tree
+// (docs/design-device-tree.md, "On the stopgap"): opened into free RAM of the
+// tree's declared size, packed so it holds no free space, and its whole pages
+// reserved for the root to read and never write. The root, not bootstrap,
+// checks the copy's contents with erx_dt_accept; this only moves the bytes.
+static erx_boot_range_t
+copy_device_tree(void const *fdt)
+{
+  unsigned long declared = fdt_totalsize(fdt);
+  if (declared == 0 || declared > 0x7fffffffUL - L4_PAGESIZE)
+    refuse("device tree", "size");
+  unsigned long room = l4_round_page(declared);
+  l4_addr_t copy = mem_manager->find_free_ram(room);
+  if (!copy)
+    refuse("device tree", "no_free_ram");
+  void *target = reinterpret_cast<void *>(copy);
+  if (fdt_open_into(fdt, target, static_cast<int>(room)) != 0 || fdt_pack(target) != 0)
+    refuse("device tree", "copy");
+  unsigned long size = fdt_totalsize(target);
+  if (size == 0 || size > ERX_BOOT_TREE_COPY_MAX)
+    refuse("device tree", "too_long");
+  unsigned long pages = l4_round_page(size);
+  reserve({copy, pages}, ".erxtree", Region::Root, Region::Root_section_ro);
+  memset(static_cast<char *>(target) + size, 0, pages - size);
+  if (Cache::Data::enabled())
+    Cache::Data::clean(copy, pages);
+  return erx_boot_range_t{copy, size};
+}
+
 static void
 print_hex(l4_uint8_t const *bytes, unsigned length)
 {
@@ -291,6 +320,7 @@ erx_image_load(Platform_base *plat)
     refuse(error);
 
   apply();
+  erx_boot_range_t tree = copy_device_tree(fdt);
 
   auto *kip = reinterpret_cast<l4_kernel_info_t *>(plan.kip.start);
   if (kip->magic != L4_KERNEL_INFO_MAGIC)
@@ -311,7 +341,7 @@ erx_image_load(Platform_base *plat)
   static char stdout_path[ERX_BOOT_STDOUT_MAX + 1];
   size_t stdout_length = chosen_stdout_path(fdt, chosen, stdout_path);
   if (!erx_boot_handoff_write(&plan, args, args_length, stdout_path, stdout_length,
-                              chosen_boot_pair(fdt, chosen), options->erx_handoff,
+                              chosen_boot_pair(fdt, chosen), tree, options->erx_handoff,
                               sizeof(options->erx_handoff)))
     refuse("handoff record", "write");
 

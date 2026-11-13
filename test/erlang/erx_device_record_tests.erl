@@ -37,7 +37,7 @@ a_shared_line_is_marked_test() ->
                  erx_device_record:find(hostlink, pl011, [["device", "hostlink", "pl011", "4263515648", "512", "153",
                                                            "shared", "48000000"]])),
     ?assertEqual({ok, [(given_spec(12, 0, 512, 13, 0))#{lines => [{shared, {object, 13}}]}]},
-                 find([given_marked(["12", "0", "512", "13", "shared", "0", "0", "0"])])).
+                 find([given_marked(["12", "0", "512", "13", "shared", "0", "0", "0", "0", "0"])])).
 
 %% Only the two words mark a line: anything else refuses the record rather than reading
 %% it as one mark or the other.
@@ -46,7 +46,7 @@ a_bad_mark_refuses_test() ->
                   find([["device", "block", "virtio_mmio", "1", "2", "3", Mark, "4"]]))
      || Mark <- bad_marks()],
     [?assertMatch({error, {bad_device_record, "a given device record's line mark" ++ _}},
-                  find([given_marked(["1", "0", "2", "3", Mark, "0", "0", "0"])]))
+                  find([given_marked(["1", "0", "2", "3", Mark, "0", "0", "0", "0", "0"])]))
      || Mark <- bad_marks()],
     ?assertMatch({error, {bad_device_record, _}}, find([["device", "block", "virtio_mmio", "1", "2", "3", "4"]])).
 
@@ -85,7 +85,7 @@ a_short_record_refuses_even_after_a_good_one_test() ->
     ?assertMatch({error, {bad_device_record, _}}, find([["device", "block", "virtio_mmio", "1", "2", "3", "direct"]])),
     ?assertMatch({error, {bad_device_record, _}}, find([record([])])).
 
-%% A given record of the seven numbers, its line marked direct after LINE_H.
+%% A given record of the nine numbers, its line marked direct after LINE_H.
 given([Window, Offset, Size, Line | Rest]) ->
     given_marked([Window, Offset, Size, Line, "direct" | Rest]);
 given(Words) ->
@@ -96,42 +96,68 @@ given_marked(Words) ->
 
 given_spec(Window, Offset, Size, Line, Clock) ->
     #{peripheral => virtio_mmio, window => {object, Window, Offset, Size}, lines => [{object, Line}],
-      clock => Clock}.
+      clock => Clock, coherent => false}.
 
 %% The words the domain library writes for a holder of QEMU virt's block transport: the
 %% window object's handle, the transport at 0xe00 in its page, the line's handle, the
 %% device's one memory and its clock, 0 since its driver reads none.
 a_holder_s_record_test() ->
     ?assertEqual({ok, [(given_spec(12, 3584, 512, 13, 0))#{memory => {object, 14, 1048576}}]},
-                 find([given(["12", "3584", "512", "13", "14", "1048576", "0"])])).
+                 find([given(["12", "3584", "512", "13", "14", "1048576", "0", "0", "0"])])).
 
 %% A given PL011 carries its clock as the physical record does.
 a_given_uart_s_clock_test() ->
     ?assertEqual({ok, [#{peripheral => pl011, window => {object, 12, 0, 4096}, lines => [{object, 13}],
-                         clock => 24000000}]},
+                         clock => 24000000, coherent => false}]},
                  erx_device_record:find(uart, pl011, [["given", "uart", "pl011", "12", "0", "4096", "13", "direct",
-                                                       "0", "0", "24000000"]])).
+                                                       "0", "0", "24000000", "0", "0"]])).
 
 a_given_record_of_no_memory_has_no_memory_key_test() ->
-    ?assertEqual({ok, [given_spec(12, 0, 4096, 13, 0)]}, find([given(["12", "0", "4096", "13", "0", "0", "0"])])).
+    ?assertEqual({ok, [given_spec(12, 0, 4096, 13, 0)]},
+                 find([given(["12", "0", "4096", "13", "0", "0", "0", "0", "0"])])).
 
 the_two_forms_keep_their_order_and_their_own_counts_test() ->
     ?assertEqual({ok, [spec(1, 2, 3, 4), given_spec(5, 6, 7, 8, 9), spec(9, 10, 11, 12)]},
-                 find([record(["1", "2", "3", "4", "5", "6"]), given(["5", "6", "7", "8", "0", "0", "9", "word"]),
+                 find([record(["1", "2", "3", "4", "5", "6"]),
+                       given(["5", "6", "7", "8", "0", "0", "9", "0", "0", "word"]),
                        record(["9", "10", "11", "12"])])).
 
 given_field_bounds_test() ->
     ?assertEqual({ok, [(given_spec(18446744073709551615, 0, 18446744073709551615, 18446744073709551615,
                                    4294967295))
                        #{memory => {object, 18446744073709551615, 18446744073709551615}}]},
-                 find([given([?U64_MAX, "0", ?U64_MAX, ?U64_MAX, ?U64_MAX, ?U64_MAX, ?U32_MAX])])),
-    [?assertMatch({error, {bad_device_record, _}}, find([given(Numbers)]))
+                 find([given([?U64_MAX, "0", ?U64_MAX, ?U64_MAX, ?U64_MAX, ?U64_MAX, ?U32_MAX, "0", "0"])])),
+    [?assertMatch({error, {bad_device_record, _}}, find([given(Numbers ++ ["0", "0"])]))
      || Numbers <- [["18446744073709551616", "0", "1", "1", "1", "1", "0"], ["1", "0", "1", "1", "1", "-1", "0"],
                     ["1", "0x0", "1", "1", "1", "1", "0"], ["1", "0", "1", "1", "1", "018446744073709551615", "0"],
                     ["1", "0", "1", "1", "1", "1", "4294967296"], ["1", "0", "1", "1", "1", "1", "-1"]]].
 
+%% COHERENT is the tree's coherence mark: 1 is true, 0 false, and any other word refuses the
+%% record rather than reading as either.
+a_given_record_s_coherence_test() ->
+    ?assertEqual({ok, [(given_spec(12, 0, 4096, 13, 0))#{coherent => true}]},
+                 find([given(["12", "0", "4096", "13", "0", "0", "0", "1", "0"])])),
+    ?assertEqual({ok, [given_spec(12, 0, 4096, 13, 0)]},
+                 find([given(["12", "0", "4096", "13", "0", "0", "0", "0", "0"])])),
+    [?assertMatch({error, {bad_device_record, "a given device record's coherence" ++ _}},
+                  find([given(["12", "0", "4096", "13", "0", "0", "0", Coherent, "0"])]))
+     || Coherent <- ["2", "", "01", "true", "-1", "1 "]].
+
+%% MAC is the tree's 48-bit hardware address: the spec has the mac key only for a nonzero
+%% address, and an address above 2^48 - 1 refuses the record.
+a_given_record_s_hardware_address_test() ->
+    ?assertEqual({ok, [(given_spec(12, 0, 4096, 13, 0))#{mac => 16#525400123456}]},
+                 find([given(["12", "0", "4096", "13", "0", "0", "0", "0", "90520731923542"])])),
+    ?assertEqual({ok, [(given_spec(12, 0, 4096, 13, 0))#{mac => 16#ffffffffffff}]},
+                 find([given(["12", "0", "4096", "13", "0", "0", "0", "0", "281474976710655"])])),
+    [?assertMatch({error, {bad_device_record, _}},
+                  find([given(["12", "0", "4096", "13", "0", "0", "0", "0", Mac])]))
+     || Mac <- ["281474976710656", "-1", "0x1", "", "0281474976710655"]].
+
 a_short_given_record_refuses_test() ->
     ?assertMatch({error, {bad_device_record, _}}, find([given(["1", "2", "3", "4", "5", "6"])])),
-    ?assertMatch({error, {bad_device_record, _}}, find([given(["12", "3584", "512", "13", "14", "1", "0"]),
+    ?assertMatch({error, {bad_device_record, _}}, find([given(["12", "3584", "512", "13", "14", "1", "0", "0"])])),
+    ?assertMatch({error, {bad_device_record, _}}, find([given(["12", "3584", "512", "13", "14", "1", "0", "0", "0"]),
                                                         given([])])),
-    ?assertMatch({error, {bad_device_record, _}}, find([given_marked(["12", "3584", "512", "13", "14", "1", "0"])])).
+    ?assertMatch({error, {bad_device_record, _}},
+                 find([given_marked(["12", "3584", "512", "13", "14", "1", "0", "0", "0"])])).

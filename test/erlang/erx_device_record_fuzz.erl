@@ -16,6 +16,7 @@
 -define(MAX_WORDS, 6).
 -define(U64, 16#ffffffffffffffff).
 -define(U32, 16#ffffffff).
+-define(U48, 16#ffffffffffff).
 %% The fewest rounds that must find a record, so an edit to the generator cannot leave the
 %% accepting path untried.
 -define(MIN_ACCEPTED, ?ROUNDS div 100).
@@ -54,15 +55,22 @@ reference(Arguments) ->
         false -> {error, bad_device_record}
     end.
 
-spec("given", [Window, Offset, Size, Line, Mark, Memory, Bytes, Clock | _]) ->
-    case {[decimal(Word, ?U64) || Word <- [Window, Offset, Size, Line, Memory, Bytes]], decimal(Clock, ?U32)} of
-        {[W, O, S, L, M, B], C} when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M),
-                                     is_integer(B), is_integer(C), (Mark =:= "direct" orelse Mark =:= "shared") ->
+spec("given", [Window, Offset, Size, Line, Mark, Memory, Bytes, Clock, Coherent, Mac | _]) ->
+    case {[decimal(Word, ?U64) || Word <- [Window, Offset, Size, Line, Memory, Bytes]], decimal(Clock, ?U32),
+          decimal(Mac, ?U48)} of
+        {[W, O, S, L, M, B], C, A} when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M),
+                                        is_integer(B), is_integer(C), is_integer(A),
+                                        (Mark =:= "direct" orelse Mark =:= "shared"),
+                                        (Coherent =:= "0" orelse Coherent =:= "1") ->
             Spec = #{peripheral => virtio_mmio, window => {object, W, O, S}, lines => [marked({object, L}, Mark)],
-                     clock => C},
-            case B of
-                0 -> Spec;
-                _ -> Spec#{memory => {object, M, B}}
+                     clock => C, coherent => Coherent =:= "1"},
+            WithMemory = case B of
+                             0 -> Spec;
+                             _ -> Spec#{memory => {object, M, B}}
+                         end,
+            case A of
+                0 -> WithMemory;
+                _ -> WithMemory#{mac => A}
             end;
         _ ->
             bad
@@ -107,7 +115,7 @@ entry() ->
     Words = [word() || _ <- lists:seq(1, rand:uniform(?MAX_WORDS + 1) - 1)],
     Form = Pick(["device", "given"]),
     %% The numbers before the mark word and after it.
-    Count = #{"device" => {3, 1}, "given" => {4, 3}},
+    Count = #{"device" => {3, 1}, "given" => {4, 5}},
     {Before, After} = maps:get(Form, Count),
     Numbers = fun(N) -> [number() || _ <- lists:seq(1, N)] end,
     case rand:uniform(4) of
@@ -124,7 +132,8 @@ mark() ->
 
 number() ->
     Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
-    Pick(["0", "79", "512", "4294967295", "4294967296", "18446744073709551615",
+    Pick(["0", "1", "79", "512", "4294967295", "4294967296", "281474976710655", "281474976710656",
+          "18446744073709551615",
           "18446744073709551616", integer_to_list(rand:uniform(1 bsl 32) - 1)]).
 
 word() ->

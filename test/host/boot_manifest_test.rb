@@ -122,7 +122,7 @@ class BootManifestTest < Minitest::Test
     assert status.success?, output
     assert_includes output, "devices 2\n"
     assert_includes output, "device net virtio_mmio 167783936 512 71 direct 262144 0 window 167780352 4096 3584 " \
-                            "words-erx given net virtio_mmio 11 3584 512 12 direct 13 262144 0 exact 1 short 0\n"
+                            "words-erx given net virtio_mmio 11 3584 512 12 direct 13 262144 0 0 0 exact 1 short 0\n"
   end
 
   # A given device's window object covers whole pages from the one that holds its first
@@ -132,7 +132,7 @@ class BootManifestTest < Minitest::Test
   # names no memory object, whatever handle the root holds.
   def test_a_given_device_s_window_covers_the_pages_of_its_registers
     given = lambda do |window, offset, size|
-      "window #{window} #{offset} words-erx given block virtio_mmio 11 #{offset} #{size} 12 direct 0 0 0 exact 1 short 0\n"
+      "window #{window} #{offset} words-erx given block virtio_mmio 11 #{offset} #{size} 12 direct 0 0 0 0 0 exact 1 short 0\n"
     end
     {
       %w[0xa003e00 0x200] => given.call('167784448 4096', 3584, 512),
@@ -234,6 +234,59 @@ class BootManifestTest < Minitest::Test
     assert status.success?, output
     assert_includes output, "console_uart #{0xfe215040} 64 "
     assert_includes output, "console_page #{0xfe215000}\n"
+  end
+
+  def dma(role, memory, status, coherent, cpu, bus, last, mac, first, size)
+    arguments = [role, memory, status, coherent, cpu, bus, last, mac, first, size].map(&:to_s)
+    output, status_ = Open3.capture2e(@driver, 'dma', *arguments)
+    assert status_.success?, output
+    output
+  end
+
+  # The root's device step (docs/design-device-tree.md, "Facts into records"): memory only
+  # where the tree gives a range whose bus addresses are the CPU's and the memory lies whole
+  # inside it; COHERENT only from a range's facts and MAC only for a network row, and one
+  # console line of fixed words and the facts' numbers. Statuses are erx_dt_dma_status_t's
+  # order: 0 ok, 1 no_node, 2 coherence, 3 cells, 4 malformed, 5 ranges.
+  def test_the_device_step_gives_memory_only_inside_the_tree_s_range
+    all = 0xffff_ffff_ffff_ffff
+    window = 'window 167784448 4096 3584 words-erx given'
+    assert_equal "asks 1 before none after none #{window} net virtio_mmio 11 3584 512 12 direct 13 65536 0 1 0 " \
+                 "exact 1 short 0\nline erx: device tree: /virtio_mmio@a003e00: coherent 1 range 0x0 0x0 " \
+                 "0xffffffffffffffff mac absent\n",
+                 dma('net', 0x10000, 0, 1, 0, 0, all, 0, 0x4800_0000, 0x10000)
+    # The Pi model's EMMC2: a range whose bus addresses differ gets no memory, refused
+    # before the memory is made.
+    assert_equal "asks 1 before offset after none #{window} block virtio_mmio 11 3584 512 12 direct 0 0 0 0 0 " \
+                 "exact 1 short 0\nline erx: device tree: /virtio_mmio@a003e00: dma absent offset\n",
+                 dma('block', 0x10000, 0, 0, 0, 0xc000_0000, 0x3fff_ffff, 0, 0x1000_0000, 0x10000)
+    assert_match(/\Aasks 1 before none after outside .* 12 direct 0 0 0 1 0 exact.*\nline .*: dma absent outside\n\z/,
+                 dma('block', 0x10000, 0, 1, 0, 0, 0x3fff_ffff, 0, 0x3fff_8000, 0x10000))
+    assert_match(/\Aasks 1 before none after none .* 12 direct 13 65536 0 1 0 exact.*\nline .*: coherent 1 range 0x0 0x0 0x3fffffff\n\z/,
+                 dma('block', 0x10000, 0, 1, 0, 0, 0x3fff_ffff, 0, 0x3fff_0000, 0x10000))
+    assert_match(/\Aasks 1 before none after outside /, dma('block', 0x10000, 0, 1, 0x1000, 0x1000, all, 0, 0, 0x10000))
+    assert_match(/\Aasks 1 before none after outside /,
+                 dma('block', 0x10000, 0, 1, 0, 0, all, 0, 0xffff_ffff_ffff_f000, 0x10000))
+    # Without a range the facts' coherence says nothing: the record is not coherent.
+    %w[no_node coherence cells malformed ranges].each.with_index(1) do |reason, status|
+      assert_match(/\Aasks 1 before #{reason} after none .* 12 direct 0 0 0 0 0 exact.*\nline .*: dma absent #{reason}\n\z/,
+                   dma('block', 0x10000, status, 1, 0, 0, all, 0, 0, 0x10000))
+    end
+  end
+
+  # MAC is the tree's address for a network row only, 48 bits with its first byte highest;
+  # a network row without DMA memory asks for the address alone, and a block row without
+  # DMA memory asks nothing (docs/design-device-tree.md, "What each row asks").
+  def test_only_a_network_row_carries_the_tree_s_address
+    all = 0xffff_ffff_ffff_ffff
+    mac = 0xdca632_0102_03
+    assert_match(/ direct 13 65536 0 0 #{mac} exact.*\nline .*: coherent 0 range 0x0 0x0 0xffffffffffffffff mac present\n\z/,
+                 dma('net', 0x10000, 0, 0, 0, 0, all, mac, 0x4800_0000, 0x10000))
+    assert_match(/ direct 13 65536 0 0 0 exact.*\nline .*: coherent 0 range 0x0 0x0 0xffffffffffffffff\n\z/,
+                 dma('block', 0x10000, 0, 0, 0, 0, all, mac, 0x4800_0000, 0x10000))
+    assert_match(/\Aasks 1 before none after none .* 12 direct 0 0 0 0 #{mac} exact.*\nline erx: device tree: \/virtio_mmio@a003e00: mac present\n\z/,
+                 dma('net', 0, 0, 1, 0, 0, all, mac, 0, 0))
+    assert_match(/\Aasks 0 before none after none .* 12 direct 0 0 0 0 0 exact/, dma('block', 0, 0, 1, 0, 0, all, mac, 0, 0))
   end
 
   # A line is shared when another device-tree device of the manifest names it too

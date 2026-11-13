@@ -28,6 +28,14 @@ erx_mem_create(uint64_t budget, uint64_t size, uint32_t flags, uint64_t *mem)
 	return (ERX_ENOTSUP);
 }
 
+/* A hosted runtime has no devices, so no device tree (docs/design-device-tree.md, "The seam"). */
+int
+erx_boot_tree(const void **bytes, size_t *size)
+{
+	(void)bytes, (void)size;
+	return (ERX_ENOTSUP);
+}
+
 int
 erx_cap_close(uint64_t cap)
 {

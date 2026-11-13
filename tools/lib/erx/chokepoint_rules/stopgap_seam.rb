@@ -232,7 +232,7 @@ module Erx
         Chokepoints::Forbidden.new(
           name: 'fiasco-console-sink',
           rule: "only liberx's fiasco console writes to the kernel's log object, and only the root task's report, " \
-                "the root's memory effects' fixed refusals, the entropy banner line, the end path's crash frame, the service's and the reaper's fixed refusals, " \
+                "the root's memory effects' fixed refusals, the entropy banner line, the root's device-tree lines, the end path's crash frame, the service's and the reaper's fixed refusals, " \
                 "the memory, thread, crash, watchdog and interrupt transcripts, the group's report, the debug log and the standard output of the root and of " \
                 "a task, through the service, call it",
           design: "#{STOPGAP}#the-console",
@@ -243,6 +243,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/libc_root_start.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/libc_root_write.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/libc_root.c', permits: /\Aerx_fiasco_console_write\z/),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/runtime_entry.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/root_no_program.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/log.c', permits: /\Aerx_fiasco_console_write\z/),
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/vm.c', permits: /\Aerx_fiasco_console_write\z/),
