@@ -1,0 +1,555 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+     SPDX-License-Identifier: BSD-2-Clause
+
+     The BCM2711's Ethernet controller, GENET v5, written by erXos from FreeBSD's
+     driver at commit 975e3605ebb1: sys/arm64/broadcom/genet/if_genetreg.h (SHA-256
+     5af53d306f839dc4742a52201059bdeadc7a305bee77cf686b45e8df69035b6e) for each
+     register and field, cited by line, and sys/arm64/broadcom/genet/if_genet.c
+     (SHA-256 fbf5c90dd089fa759e04dd0c72f97e688bfc97e2855d65011cf42d4511cfd459) for
+     what its driver writes. No public datasheet describes the controller, so this
+     file holds only the registers and bits FreeBSD names, as FreeBSD uses them. A
+     bit FreeBSD leaves unnamed is in no field, so write/3 refuses a word that sets
+     it; where FreeBSD writes a value it does not split into bits, the field is the
+     whole word. The window is the device tree's `brcm,bcm2711-genet-v5` node,
+     0x10000 bytes (docs/design-platforms.md, "Raspberry Pi 4 Model B").
+
+     The descriptors are registers, not memory: 256 per direction, each three words
+     12 bytes apart, receive at 0x2000 and transmit at 0x4000 (if_genetreg.h:116-124,
+     168-192). Past each direction's descriptors, at 0xc00, lie the registers of its
+     17 rings, 0x40 apart (if_genetreg.h:120-121, 126, 148), and then the direction's
+     ring configuration and DMA control at 0x1040 (if_genetreg.h:209-219). FreeBSD
+     drives ring 16, the default queue (if_genetreg.h:118). The device NIF owns each
+     descriptor's three registers, every ring's indexes, buffer size and pointers,
+     and each direction's ring configuration and DMA control, which aim the
+     controller at memory and say which descriptors it takes. The thresholds, burst
+     sizes, interrupt, buffer, MAC and MDIO registers are the driver's. That leaves
+     no write of the driver's able to move DMA outside a buffer only if a ring's
+     buffer size bounds every byte the controller writes per descriptor, whatever
+     the frame length limit, the status block, the alignment padding and the burst
+     size say: unverified, and settled on the board. -->
+<device schemaVersion="1.3">
+  <name>GENET</name><version>5</version>
+  <description>BCM2711 GENET v5 Ethernet controller</description>
+  <addressUnitBits>8</addressUnitBits><width>32</width>
+  <peripherals>
+    <peripheral>
+      <name>GENET</name><baseAddress>0</baseAddress>
+      <addressBlock><offset>0</offset><size>0x10000</size><usage>registers</usage></addressBlock>
+      <registers>
+        <register>
+          <name>SYS_REV_CTRL</name><ownedByNif>false</ownedByNif>
+          <description>GENET_SYS_REV_CTRL (if_genetreg.h:38): the controller's revision; FreeBSD attaches major 6 only (if_genet.c:264-272)</description>
+          <addressOffset>0x0</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>PHY</name><description>Internal PHY revision (if_genetreg.h:46)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+            <field><name>MINOR</name><description>Minor revision (if_genetreg.h:40, 44)</description><bitOffset>16</bitOffset><bitWidth>4</bitWidth></field>
+            <field><name>MAJOR</name><description>Major revision, 6 for GENET v5 (if_genetreg.h:39, 41-43)</description><bitOffset>24</bitOffset><bitWidth>4</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>SYS_PORT_CTRL</name><ownedByNif>false</ownedByNif>
+          <description>GENET_SYS_PORT_CTRL (if_genetreg.h:47)</description>
+          <addressOffset>0x4</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>MODE</name><description>Written whole: 3 for an external gigabit PHY over RGMII, 0 otherwise (if_genetreg.h:48; if_genet.c:915-925)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>SYS_RBUF_FLUSH_CTRL</name><ownedByNif>false</ownedByNif>
+          <description>GENET_SYS_RBUF_FLUSH_CTRL (if_genetreg.h:49): FreeBSD pulses RESET and writes 0 (if_genet.c:492-501), and trusts UMAC_MAC0/1 only while it reads 0 (if_genet.c:465-468)</description>
+          <addressOffset>0x8</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>RESET</name><description>Flush the receive buffer (if_genetreg.h:50)</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>EXT_RGMII_OOB_CTRL</name><ownedByNif>false</ownedByNif>
+          <description>GENET_EXT_RGMII_OOB_CTRL (if_genetreg.h:52): set on link up (if_genet.c:1767-1775)</description>
+          <addressOffset>0x8c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>RGMII_LINK</name><description>The link is up (if_genetreg.h:56)</description><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>OOB_DISABLE</name><description>Disable out-of-band status (if_genetreg.h:55)</description><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RGMII_MODE_EN</name><description>Enable RGMII (if_genetreg.h:54)</description><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ID_MODE_DISABLE</name><description>Disable the MAC's internal delay (if_genetreg.h:53)</description><bitOffset>16</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>INTRL2_CPU_STAT</name><ownedByNif>false</ownedByNif>
+          <description>GENET_INTRL2_CPU_STAT (if_genetreg.h:57): pending interrupts, masked or not (if_genet.c:1354-1355)</description>
+          <addressOffset>0x200</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>RXDMA_DONE</name><description>A receive descriptor was filled (if_genetreg.h:65)</description><bitOffset>13</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TXDMA_DONE</name><description>A transmit descriptor was sent (if_genetreg.h:64)</description><bitOffset>16</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>MDIO_DONE</name><description>An MDIO command finished (if_genetreg.h:63)</description><bitOffset>23</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>MDIO_ERROR</name><description>An MDIO command failed (if_genetreg.h:62)</description><bitOffset>24</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>INTRL2_CPU_CLEAR</name><ownedByNif>false</ownedByNif>
+          <description>GENET_INTRL2_CPU_CLEAR (if_genetreg.h:58): a 1 bit clears that pending interrupt (if_genet.c:1356)</description>
+          <addressOffset>0x208</addressOffset><access>write-only</access>
+          <fields>
+            <field><name>IRQS</name><description>One bit per interrupt, STAT's bits</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>INTRL2_CPU_STAT_MASK</name><ownedByNif>false</ownedByNif>
+          <description>GENET_INTRL2_CPU_STAT_MASK (if_genetreg.h:59): the masked interrupts (if_genet.c:1355)</description>
+          <addressOffset>0x20c</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>IRQS</name><description>One bit per interrupt, STAT's bits</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>INTRL2_CPU_SET_MASK</name><ownedByNif>false</ownedByNif>
+          <description>GENET_INTRL2_CPU_SET_MASK (if_genetreg.h:60): a 1 bit masks that interrupt; unverified, since FreeBSD writes all ones here and then to CLEAR_MASK to disable them (if_genet.c:544-545)</description>
+          <addressOffset>0x210</addressOffset><access>write-only</access>
+          <fields>
+            <field><name>IRQS</name><description>One bit per interrupt, STAT's bits</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>INTRL2_CPU_CLEAR_MASK</name><ownedByNif>false</ownedByNif>
+          <description>GENET_INTRL2_CPU_CLEAR_MASK (if_genetreg.h:61): a 1 bit unmasks that interrupt (if_genet.c:536-537, 713-714); unverified, see SET_MASK</description>
+          <addressOffset>0x214</addressOffset><access>write-only</access>
+          <fields>
+            <field><name>IRQS</name><description>One bit per interrupt, STAT's bits</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RBUF_CTRL</name><ownedByNif>false</ownedByNif>
+          <description>GENET_RBUF_CTRL (if_genetreg.h:66)</description>
+          <addressOffset>0x300</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>STATUS_64B</name><description>Prepend a 64-byte status block to each received frame (if_genetreg.h:69; if_genet.c:572-582)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ALIGN_2B</name><description>Write two bytes of padding before each frame (if_genetreg.h:68; if_genet.c:522-524)</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BAD_DIS</name><description>if_genetreg.h:67; FreeBSD never sets it</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RBUF_CHECK_CTRL</name><ownedByNif>false</ownedByNif>
+          <description>GENET_RBUF_CHECK_CTRL (if_genetreg.h:70)</description>
+          <addressOffset>0x314</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>EN</name><description>Check received checksums (if_genetreg.h:71; if_genet.c:572-581)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SKIP_FCS</name><description>if_genetreg.h:72; FreeBSD never sets it</description><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RBUF_TBUF_SIZE_CTRL</name><ownedByNif>false</ownedByNif>
+          <description>GENET_RBUF_TBUF_SIZE_CTRL (if_genetreg.h:73)</description>
+          <addressOffset>0x3b4</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>SIZE</name><description>Written whole; FreeBSD writes 1 (if_genet.c:526)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TBUF_CTRL</name><ownedByNif>false</ownedByNif>
+          <description>GENET_TBUF_CTRL (if_genetreg.h:74)</description>
+          <addressOffset>0x600</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>STATUS_64B</name><description>Each frame sent starts with a 64-byte status block; FreeBSD sets it with GENET_RBUF_64B_EN's bit (if_genet.c:584-590)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>UMAC_CMD</name><ownedByNif>false</ownedByNif>
+          <description>GENET_UMAC_CMD (if_genetreg.h:75)</description>
+          <addressOffset>0x808</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>TXEN</name><description>Enable the transmitter (if_genetreg.h:92)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RXEN</name><description>Enable the receiver (if_genetreg.h:91)</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SPEED</name><description>0 for 10, 1 for 100, 2 for 1000 Mbit/s (if_genetreg.h:80-83)</description><bitOffset>2</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>PROMISC</name><description>Take every frame, bypassing the address filter (if_genetreg.h:78)</description><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CRC_FWD</name><description>Keep the received CRC in the frame (if_genetreg.h:89)</description><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SW_RESET</name><description>Hold the MAC in reset (if_genetreg.h:77; if_genet.c:504-508)</description><bitOffset>13</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>LCL_LOOP_EN</name><description>Local loopback, set with SW_RESET (if_genetreg.h:76)</description><bitOffset>15</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>UMAC_MAC0</name><ownedByNif>false</ownedByNif>
+          <description>GENET_UMAC_MAC0 (if_genetreg.h:93)</description>
+          <addressOffset>0x80c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ADDR</name><description>Bytes 0 to 3 of the station address, byte 0 in bits 31:24 (if_genet.c:1029-1031)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>UMAC_MAC1</name><ownedByNif>false</ownedByNif>
+          <description>GENET_UMAC_MAC1 (if_genetreg.h:94)</description>
+          <addressOffset>0x810</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ADDR</name><description>Bytes 4 and 5 of the station address, byte 4 in bits 15:8 (if_genet.c:468, 1032-1033)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>UMAC_MAX_FRAME_LEN</name><ownedByNif>false</ownedByNif>
+          <description>GENET_UMAC_MAX_FRAME_LEN (if_genetreg.h:95)</description>
+          <addressOffset>0x814</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>LENGTH</name><description>Written whole; FreeBSD writes 1536 (if_genet.c:520)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>UMAC_MIB_CTRL</name><ownedByNif>false</ownedByNif>
+          <description>GENET_UMAC_MIB_CTRL (if_genetreg.h:97): FreeBSD sets the three resets and writes 0 (if_genet.c:510-512)</description>
+          <addressOffset>0xd80</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>RESET_RX</name><description>Clear the receive counters (if_genetreg.h:100)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RESET_RUNT</name><description>Clear the runt counter (if_genetreg.h:99)</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RESET_TX</name><description>Clear the transmit counters (if_genetreg.h:98)</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>MDIO_CMD</name><ownedByNif>false</ownedByNif>
+          <description>GENET_MDIO_CMD (if_genetreg.h:101): one clause 22 command; FreeBSD polls START_BUSY 1000 times 10 us apart (if_genet.c:1680-1711)</description>
+          <addressOffset>0xe14</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>VALUE</name><description>The register value written or read (if_genetreg.h:110)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+            <field><name>REG</name><description>PHY register (if_genetreg.h:107, 109)</description><bitOffset>16</bitOffset><bitWidth>5</bitWidth></field>
+            <field><name>PMD</name><description>PHY address (if_genetreg.h:106, 108)</description><bitOffset>21</bitOffset><bitWidth>5</bitWidth></field>
+            <field><name>WRITE</name><description>A write (if_genetreg.h:105)</description><bitOffset>26</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>READ</name><description>A read (if_genetreg.h:104)</description><bitOffset>27</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>READ_FAILED</name><description>The PHY did not answer the read (if_genetreg.h:103)</description><bitOffset>28</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>START_BUSY</name><description>Start the command; reads 1 until it finishes (if_genetreg.h:102)</description><bitOffset>29</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>UMAC_MDF_CTRL</name><ownedByNif>false</ownedByNif>
+          <description>GENET_UMAC_MDF_CTRL (if_genetreg.h:111)</description>
+          <addressOffset>0xe50</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ENABLE</name><description>One bit per address filter; FreeBSD enables filter n with bit 16 - n (if_genetreg.h:114; if_genet.c:1006-1012)</description><bitOffset>0</bitOffset><bitWidth>17</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>UMAC_MDF_ADDR0[%s]</name><ownedByNif>false</ownedByNif><dim>17</dim><dimIncrement>0x8</dimIncrement>
+          <description>GENET_UMAC_MDF_ADDR0 (if_genetreg.h:112): filter n's first two address bytes</description>
+          <addressOffset>0xe54</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ADDR</name><description>Byte 0 in bits 15:8, byte 1 in bits 7:0 (if_genet.c:958)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>UMAC_MDF_ADDR1[%s]</name><ownedByNif>false</ownedByNif><dim>17</dim><dimIncrement>0x8</dimIncrement>
+          <description>GENET_UMAC_MDF_ADDR1 (if_genetreg.h:113): filter n's last four address bytes</description>
+          <addressOffset>0xe58</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ADDR</name><description>Byte 2 in bits 31:24 to byte 5 in bits 7:0 (if_genet.c:959)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_DESC_STATUS[%s]</name><ownedByNif>true</ownedByNif><dim>256</dim><dimIncrement>0xc</dimIncrement>
+          <description>GENET_RX_DESC_STATUS (if_genetreg.h:168): descriptor i's length and flags, at 12 * i</description>
+          <addressOffset>0x2000</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>RX_ERROR</name><description>The frame was received in error (if_genetreg.h:176)</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SOP</name><description>Start of packet (if_genetreg.h:175)</description><bitOffset>13</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>EOP</name><description>End of packet (if_genetreg.h:174)</description><bitOffset>14</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CKSUM_OK</name><description>if_genetreg.h:172-173 name bit 15 both OWN, marked unsure, and CKSUM_OK; unverified</description><bitOffset>15</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BUFLEN</name><description>Bytes written, the two bytes of padding before the frame and, with RBUF_CTRL.STATUS_64B, the 64-byte status block included (if_genetreg.h:169-171; if_genet.c:1435-1441)</description><bitOffset>16</bitOffset><bitWidth>12</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_DESC_ADDR_LO[%s]</name><ownedByNif>true</ownedByNif><dim>256</dim><dimIncrement>0xc</dimIncrement>
+          <description>GENET_RX_DESC_ADDRESS_LO (if_genetreg.h:177): bits 31:0 of descriptor i's buffer's bus address</description>
+          <addressOffset>0x2004</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ADDR</name><description>Low address bits</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_DESC_ADDR_HI[%s]</name><ownedByNif>true</ownedByNif><dim>256</dim><dimIncrement>0xc</dimIncrement>
+          <description>GENET_RX_DESC_ADDRESS_HI (if_genetreg.h:178): bits 63:32 of the address; DMA reaches 40 bits (if_genet.c:618)</description>
+          <addressOffset>0x2008</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ADDR</name><description>High address bits</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_WRITE_PTR_LO[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_WRITE_PTR_LO (if_genetreg.h:127)</description>
+          <addressOffset>0x2c00</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_WRITE_PTR_HI[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_WRITE_PTR_HI (if_genetreg.h:128)</description>
+          <addressOffset>0x2c04</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_PROD_INDEX[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_PROD_INDEX (if_genetreg.h:129): the controller advances it per filled descriptor</description>
+          <addressOffset>0x2c08</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>INDEX</name><description>Free-running producer index, masked 0xffff (if_genetreg.h:131)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_CONS_INDEX[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_CONS_INDEX (if_genetreg.h:130): the driver advances it per descriptor taken</description>
+          <addressOffset>0x2c0c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>INDEX</name><description>Free-running consumer index, masked 0xffff (if_genetreg.h:131)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_BUF_SIZE[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_RING_BUF_SIZE (if_genetreg.h:132)</description>
+          <addressOffset>0x2c10</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>BUF_LENGTH</name><description>Bytes of each buffer (if_genetreg.h:134; FreeBSD writes MCLBYTES, 2048)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+            <field><name>DESC_COUNT</name><description>Descriptors in the ring (if_genetreg.h:133)</description><bitOffset>16</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_START_ADDR_LO[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_START_ADDR_LO (if_genetreg.h:137)</description>
+          <addressOffset>0x2c14</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_START_ADDR_HI[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_START_ADDR_HI (if_genetreg.h:138)</description>
+          <addressOffset>0x2c18</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_END_ADDR_LO[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_END_ADDR_LO (if_genetreg.h:139)</description>
+          <addressOffset>0x2c1c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_END_ADDR_HI[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_END_ADDR_HI (if_genetreg.h:140)</description>
+          <addressOffset>0x2c20</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_XON_XOFF_THRES[%s]</name><ownedByNif>false</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_XON_XOFF_THRES (if_genetreg.h:141); FreeBSD writes 5 and 256 / 16 (if_genet.c:798-799)</description>
+          <addressOffset>0x2c28</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>HI</name><description>The high threshold (if_genetreg.h:143); which of XON and XOFF it is, FreeBSD does not say</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+            <field><name>LO</name><description>The low threshold (if_genetreg.h:142, 144)</description><bitOffset>16</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_READ_PTR_LO[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_READ_PTR_LO (if_genetreg.h:145)</description>
+          <addressOffset>0x2c2c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_RING_READ_PTR_HI[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_RX_DMA_READ_PTR_HI (if_genetreg.h:146)</description>
+          <addressOffset>0x2c30</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_DMA_RING_CFG</name><ownedByNif>true</ownedByNif>
+          <description>GENET_RX_DMA_RING_CFG (if_genetreg.h:209)</description>
+          <addressOffset>0x3040</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ENABLE</name><description>One bit per ring, ring q at bit q (if_genet.c:803)</description><bitOffset>0</bitOffset><bitWidth>17</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_DMA_CTRL</name><ownedByNif>true</ownedByNif>
+          <description>GENET_RX_DMA_CTRL (if_genetreg.h:210)</description>
+          <addressOffset>0x3044</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>EN</name><description>Run the receive engine (if_genetreg.h:212)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RBUF_EN</name><description>One bit per ring, ring q at bit q + 1 (if_genetreg.h:211)</description><bitOffset>1</bitOffset><bitWidth>17</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_SCB_BURST_SIZE</name><ownedByNif>false</ownedByNif>
+          <description>GENET_RX_SCB_BURST_SIZE (if_genetreg.h:213)</description>
+          <addressOffset>0x304c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>SIZE</name><description>Written whole; FreeBSD writes 8 (if_genet.c:784)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_DESC_STATUS[%s]</name><ownedByNif>true</ownedByNif><dim>256</dim><dimIncrement>0xc</dimIncrement>
+          <description>GENET_TX_DESC_STATUS (if_genetreg.h:180): descriptor i's length and flags, at 12 * i</description>
+          <addressOffset>0x4000</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>CKSUM</name><description>Insert the checksum the status block describes (if_genetreg.h:187)</description><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CRC</name><description>Append the Ethernet CRC (if_genetreg.h:186)</description><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>QTAG</name><description>Queue tag, mask 0x1f80 (if_genetreg.h:185, 190)</description><bitOffset>7</bitOffset><bitWidth>6</bitWidth></field>
+            <field><name>SOP</name><description>Start of packet (if_genetreg.h:184)</description><bitOffset>13</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>EOP</name><description>End of packet (if_genetreg.h:183)</description><bitOffset>14</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>OWN</name><description>Owned by the controller (if_genetreg.h:182)</description><bitOffset>15</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BUFLEN</name><description>Bytes to send: __BITS(27,16) at if_genetreg.h:181, though the mask at :189 is 0x7ff0000, bits 26:16; unverified which</description><bitOffset>16</bitOffset><bitWidth>12</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_DESC_ADDR_LO[%s]</name><ownedByNif>true</ownedByNif><dim>256</dim><dimIncrement>0xc</dimIncrement>
+          <description>GENET_TX_DESC_ADDRESS_LO (if_genetreg.h:191): bits 31:0 of descriptor i's buffer's bus address</description>
+          <addressOffset>0x4004</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ADDR</name><description>Low address bits</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_DESC_ADDR_HI[%s]</name><ownedByNif>true</ownedByNif><dim>256</dim><dimIncrement>0xc</dimIncrement>
+          <description>GENET_TX_DESC_ADDRESS_HI (if_genetreg.h:192): bits 63:32 of the address; DMA reaches 40 bits (if_genet.c:618)</description>
+          <addressOffset>0x4008</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ADDR</name><description>High address bits</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_READ_PTR_LO[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_READ_PTR_LO (if_genetreg.h:149)</description>
+          <addressOffset>0x4c00</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_READ_PTR_HI[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_READ_PTR_HI (if_genetreg.h:150)</description>
+          <addressOffset>0x4c04</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_CONS_INDEX[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_CONS_INDEX (if_genetreg.h:151): the controller advances it per descriptor sent</description>
+          <addressOffset>0x4c08</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>INDEX</name><description>Free-running consumer index, masked 0xffff (if_genetreg.h:153)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_PROD_INDEX[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_PROD_INDEX (if_genetreg.h:152): the driver advances it per descriptor posted (if_genet.c:1228)</description>
+          <addressOffset>0x4c0c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>INDEX</name><description>Free-running producer index, masked 0xffff (if_genetreg.h:153)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_BUF_SIZE[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_RING_BUF_SIZE (if_genetreg.h:154)</description>
+          <addressOffset>0x4c10</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>BUF_LENGTH</name><description>Bytes of each buffer (if_genetreg.h:156; FreeBSD writes MCLBYTES, 2048)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field>
+            <field><name>DESC_COUNT</name><description>Descriptors in the ring (if_genetreg.h:155)</description><bitOffset>16</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_START_ADDR_LO[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_START_ADDR_LO (if_genetreg.h:159)</description>
+          <addressOffset>0x4c14</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_START_ADDR_HI[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_START_ADDR_HI (if_genetreg.h:160)</description>
+          <addressOffset>0x4c18</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_END_ADDR_LO[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_END_ADDR_LO (if_genetreg.h:161)</description>
+          <addressOffset>0x4c1c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_END_ADDR_HI[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_END_ADDR_HI (if_genetreg.h:162)</description>
+          <addressOffset>0x4c20</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_MBUF_DONE_THRES[%s]</name><ownedByNif>false</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_MBUF_DONE_THRES (if_genetreg.h:163); FreeBSD writes 1 (if_genet.c:752)</description>
+          <addressOffset>0x4c24</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>The threshold, written whole</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_FLOW_PERIOD[%s]</name><ownedByNif>false</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_FLOW_PERIOD (if_genetreg.h:164); FreeBSD writes 0 (if_genet.c:753)</description>
+          <addressOffset>0x4c28</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>The period, written whole</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_WRITE_PTR_LO[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_WRITE_PTR_LO (if_genetreg.h:165)</description>
+          <addressOffset>0x4c2c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_RING_WRITE_PTR_HI[%s]</name><ownedByNif>true</ownedByNif><dim>17</dim><dimIncrement>0x40</dimIncrement>
+          <description>GENET_TX_DMA_WRITE_PTR_HI (if_genetreg.h:166)</description>
+          <addressOffset>0x4c30</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>WORD</name><description>A word index into the direction's descriptor registers, not a memory address: FreeBSD sets the end to 256 * 12 / 4 - 1 and the others to 0 (if_genet.c:740-755, 786-801)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_DMA_RING_CFG</name><ownedByNif>true</ownedByNif>
+          <description>GENET_TX_DMA_RING_CFG (if_genetreg.h:215)</description>
+          <addressOffset>0x5040</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ENABLE</name><description>One bit per ring, ring q at bit q (if_genet.c:757)</description><bitOffset>0</bitOffset><bitWidth>17</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_DMA_CTRL</name><ownedByNif>true</ownedByNif>
+          <description>GENET_TX_DMA_CTRL (if_genetreg.h:216)</description>
+          <addressOffset>0x5044</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>EN</name><description>Run the transmit engine (if_genetreg.h:218)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RBUF_EN</name><description>One bit per ring, ring q at bit q + 1 (if_genetreg.h:217)</description><bitOffset>1</bitOffset><bitWidth>17</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_SCB_BURST_SIZE</name><ownedByNif>false</ownedByNif>
+          <description>GENET_TX_SCB_BURST_SIZE (if_genetreg.h:219)</description>
+          <addressOffset>0x504c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>SIZE</name><description>Written whole; FreeBSD writes 8 (if_genet.c:738)</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+      </registers>
+    </peripheral>
+  </peripherals>
+</device>

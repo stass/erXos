@@ -6,6 +6,7 @@
 # alone, with the system principal's session template, from which the console starts
 # root's session at boot (docs/design-system.md, "Booting"). It configures no domain:
 # the Pi's storage, network and display domains come with stages (b), (c) and (d).
+# No unit record here places the platform record's Ethernet unit, net, so no domain holds GENET.
 #
 # The system domain holds two units, each one register page of the board
 # (docs/design-platforms.md, "Raspberry Pi 4 Model B"): the console's, the mini UART's

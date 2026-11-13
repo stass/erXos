@@ -30,6 +30,7 @@ typedef struct erx_device_kind {
 static const erx_device_kind_t erx_device_kinds[] = {
 	{ ERX_MF_DEVICE_ROLE_BLOCK, "virtio,mmio", "block", "virtio_mmio" },
 	{ ERX_MF_DEVICE_ROLE_NETWORK, "virtio,mmio", "net", "virtio_mmio" },
+	{ ERX_MF_DEVICE_ROLE_NETWORK, "brcm,bcm2711-genet-v5", "net", "genet" },
 };
 
 #define ERX_DEVICE_KINDS_COUNT	(sizeof(erx_device_kinds) / sizeof(erx_device_kinds[0]))

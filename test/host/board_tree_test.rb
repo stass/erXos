@@ -81,30 +81,55 @@ class BoardTreeTest < Minitest::Test
     refute_match(/\d{4}-\d\d-\d\d/, notice)
   end
 
-  # The record's units, the mini UART's page and the PL011s', against the board's tree: each
-  # device's path, compatible string, base on the CPU, size and line, as the production
-  # image suite checks QEMU virt's record against QEMU's tree.
+  # The record's units, the mini UART's page, the PL011s' and GENET's, against the board's
+  # tree: each device's path, compatible string, base on the CPU, size and line, as the
+  # production image suite checks QEMU virt's record against QEMU's tree. GENET sits on
+  # /scb, whose two address cells and ranges differ from /soc's.
   def test_the_records_devices_match_the_board_tree
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
     built = Erx::BoardTree.build(root: ROOT, runner: runner, platform: PI, compiler: ENV.fetch('ERX_CLANG', 'clang'),
                                  revision: REVISION)
     paths = PI.record.fetch('units').flat_map { |unit| unit.fetch('devices') }.map { |device| device.fetch('path') }
+    buses = paths.map { |path| File.dirname(path) }.uniq.to_h do |bus|
+      [bus, { address_cells: cells(built.board, bus, '#address-cells').first, size_cells: cells(built.board, bus, '#size-cells').first }]
+    end
     nodes = paths.to_h do |path|
       [path, { compatible: fdtget(built.board, path, 'compatible').split, reg: cells(built.board, path, 'reg'),
-               interrupts: cells(built.board, path, 'interrupts') }]
+               interrupts: cells(built.board, path, 'interrupts'), **buses.fetch(File.dirname(path)) }]
     end
-    ranges = cells(built.board, '/soc', 'ranges').each_slice(4).map { |bus, high, low, size| [bus, (high << 32) | low, size] }
+    root_cells = cells(built.board, '/', '#address-cells').first
+    ranges = buses.to_h do |bus, shape|
+      child = shape.fetch(:address_cells)
+      [bus, cells(built.board, bus, 'ranges').each_slice(child + root_cells + shape.fetch(:size_cells)).map do |row|
+        [row.take(child), row[child, root_cells], row.drop(child + root_cells)].map { |part| join_cells(part) }
+      end]
+    end
+    assert_equal %w[/scb /soc], buses.keys.sort
     assert_equal [], Erx::BoardTree.device_problems(PI, nodes: nodes, ranges: ranges)
 
-    # Seeded faults: a line one off, a base a page off and a path the tree lacks.
-    uart = PI.record.fetch('units').first.fetch('devices').first
-    { 'line' => uart.fetch('line') - 1, 'base' => uart.fetch('base') + 4096, 'path' => '/soc/serial@7e215000' }
-      .each do |field, value|
-        units = PI.record.fetch('units').each_with_index.map do |unit, at|
-          at.zero? ? unit.merge('devices' => [uart.merge(field => value), *unit.fetch('devices').drop(1)]) : unit
-        end
-        refute_empty Erx::BoardTree.device_problems(record(units: units), nodes: nodes, ranges: ranges), field
+    # Seeded faults, on the mini UART's unit and on GENET's: a line one off, a base a page off,
+    # a path the tree lacks, and GENET's second line in place of its first.
+    seeds = { 'console-uart' => [line_off_by_one, page_off, path('/soc/serial@7e215000')],
+              'net' => [line_off_by_one, page_off, path('/scb/ethernet@7d590000'), second_line] }
+    seeds.each do |key, faults|
+      faults.each do |name, fault|
+        refute_empty Erx::BoardTree.device_problems(first_device_changed(key, &fault), nodes: nodes, ranges: ranges),
+                     "#{key}: #{name}"
       end
+    end
+  end
+
+  # The cells of a bus with two address cells, as /scb has: a high cell counts, and a reg
+  # or interrupts property of the wrong length gives no window.
+  def test_a_window_reads_every_address_cell
+    scb = { address_cells: 2, size_cells: 1, compatible: [] }
+    ranges = [[0x7c000000, 0xfc000000, 0x03800000], [0x6_0000_0000, 0x6_0000_0000, 0x40000000]]
+    genet = scb.merge(reg: [0, 0x7d580000, 0x10000], interrupts: [0, 157, 4, 0, 158, 4])
+    assert_equal({ base: 0xfd580000, size: 0x10000, line: 189 }, Erx::BoardTree.window(genet, ranges))
+    assert_equal 0x6_0000_0000, Erx::BoardTree.window(genet.merge(reg: [6, 0, 0x1000]), ranges).fetch(:base)
+    assert_nil Erx::BoardTree.window(genet.merge(reg: [1, 0x7d580000, 0x10000]), ranges)
+    assert_nil Erx::BoardTree.window(genet.merge(reg: [0x7d580000, 0x10000]), ranges)
+    assert_nil Erx::BoardTree.window(genet.merge(interrupts: [0, 157, 4, 0]), ranges)
   end
 
   private
@@ -120,4 +145,24 @@ class BoardTreeTest < Minitest::Test
     assert status.success?, text
     text.split.map { |cell| Integer(cell, 10) }
   end
+
+  # Named faults for a device record, each a name and the change it makes.
+  def line_off_by_one = ['line one off', ->(device) { device.merge('line' => device.fetch('line') - 1) }]
+  def page_off = ['base a page off', ->(device) { device.merge('base' => device.fetch('base') + 4096) }]
+  def path(missing) = ["path #{missing}", ->(device) { device.merge('path' => missing) }]
+  def second_line = ['the second line', ->(device) { device.merge('line' => device.fetch('line') + 1) }]
+
+  # The Pi's record with the first device of the unit named key changed by the block.
+  def first_device_changed(key)
+    units = PI.record.fetch('units').map do |unit|
+      next unit unless unit.fetch('key') == key
+
+      first, *rest = unit.fetch('devices')
+      unit.merge('devices' => [yield(first), *rest])
+    end
+    record(units: units)
+  end
+
+  # The number a run of 32-bit cells holds, most significant first.
+  def join_cells(cells) = cells.reduce(0) { |value, cell| (value << 32) | cell }
 end

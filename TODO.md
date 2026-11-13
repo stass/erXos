@@ -1219,6 +1219,27 @@ it; git history is the record of completed work.
 * [Low] Pi package 5 (docs/plan.md, 1b-I (a) 5), the board pass: confirm on silicon that the mini
   UART's receive interrupt needs IER's `RX_ERRATA` bits (`hw/svd/mini_uart/mini_uart.svd`), which
   `erx_mini_uart` sets as the BCM2835 errata asks and QEMU's model ignores, and drop them if not.
+* [Medium] GENET, `hw/svd/genet/genet.svd` (docs/plan.md, 1b-I (c)), unnamed bits: the file names
+  only the bits FreeBSD's `if_genetreg.h` names. `write/3` refuses a word with any other bit set, and
+  `write_field/4` writes every other bit back as zero, while FreeBSD reads, modifies and writes back
+  `UMAC_CMD`, `EXT_RGMII_OOB_CTRL`, `RBUF_CTRL`, `RBUF_CHECK_CTRL`, `SYS_RBUF_FLUSH_CTRL` and
+  `TBUF_CTRL` whole, keeping them. The transport's design decides whether the file gains the other
+  bits or the driver writes these registers only whole with values it built; the board pass reads
+  each register's reset value.
+* [Medium] GENET, the bound on its DMA writes: the device NIF owns the descriptors and ring
+  registers, but the frame length limit, the status block, the two-byte alignment and the burst
+  sizes stay the driver's. The board pass confirms that a ring's buffer size bounds every byte the
+  controller writes per descriptor whatever those say; if not, the NIF owns them too.
+* [Medium] GENET, the DMA design's register-ring reset reads a DMA status register, which FreeBSD's
+  `if_genetreg.h` does not name (`0x1048` past each direction's base), so the SVD lacks it; its
+  definition needs a source that is not Linux's driver, or the reset waits another way.
+* [Low] GENET, facts the board pass settles: the transmit length's width (`__BITS(27,16)` against
+  the mask `0x7ff0000`, neither compiled by FreeBSD; until settled the transport sends less than
+  2048 bytes per descriptor), what receive status bit 15 means, the interrupt mask registers'
+  sense (FreeBSD writes all ones to set-mask and then to clear-mask to disable them), and whether
+  the firmware leaves GENET's DMA stopped when the Pi netboots, since no domain resets a GENET no
+  manifest places. The PHY's MDIO address, 1, and its RGMII mode are in no record; the transport's
+  design says where the driver takes them.
 * [Low] liberx, `liberx/backend/fiasco/vm.h`, `vm.c`, `thread.c`: the backend's fixed addresses
   (`ERX_FIASCO_KIP_WINDOW`, the device window, the UTCB area, the VM window, the area start) are spread over
   three files, and only the KIP window's place below the device window is asserted. Gather them in one layout

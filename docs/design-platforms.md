@@ -294,6 +294,22 @@ Ethernet controller (`brcm,bcm2711-genet-v5`) and its SD controller
 (`brcm,bcm2711-emmc2`) are unconfined, and a release build's system
 manifest gives each of them a domain of its own ([DMA](#dma)).
 
+**The Ethernet controller's unit.** GENET is `/scb/ethernet@7d580000`:
+`0x10000` bytes of registers at bus address `0x7d580000`, which `/scb`'s
+`ranges` put at `0xfd580000`, and two level interrupts, GIC SPIs 157 and
+158, which no other node names (Linux 6.18's `bcm2711.dtsi:545-551,
+587-594`). The platform record's unit `net` is that register page and the
+first line alone: FreeBSD's driver drives the default queue's interrupts
+on the first and only logs the second (`if_genet.c:314-322, 1526-1531`),
+so the second goes to no unit and no domain can wait on it. Its
+device-kinds row makes its record `net genet`, the CMSIS-SVD peripheral
+of `hw/svd/genet/genet.svd`, whose registers are FreeBSD's
+(`if_genetreg.h`). The record marks the controller unconfined and
+`hostile`, with 1 MiB of DMA memory: 256 receive and 256 transmit buffers
+of 2 KiB. Its PHY is at MDIO address 1, with no interrupt, on RGMII with
+the receive delay (`bcm2711-rpi-4-b.dts:198-208`); neither fact is in the
+record.
+
 **The SD controller.** The microSD slot is EMMC2,
 `/emmc2bus/mmc@7e340000`: `0x100` bytes of registers at bus address
 `0x7e340000`, which the bus's `ranges` put at `0xfe340000`, a level

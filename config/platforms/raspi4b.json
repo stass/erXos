@@ -158,6 +158,28 @@
           "placement_key": "hostlink-uart"
         }
       ]
+    },
+    {
+      "key": "net",
+      "devices": [
+        {
+          "selector": "dt",
+          "role": "network",
+          "path": "/scb/ethernet@7d580000",
+          "bridge": "",
+          "base": 4250402816,
+          "size": 65536,
+          "line": 189,
+          "compatible": "brcm,bcm2711-genet-v5",
+          "bus": 0,
+          "device": 0,
+          "function": 0,
+          "dma": "unconfined",
+          "flags": 1,
+          "dma_memory": 1048576,
+          "placement_key": "net"
+        }
+      ]
     }
   ]
 }
