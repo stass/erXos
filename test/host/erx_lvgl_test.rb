@@ -36,6 +36,8 @@ TESTS = %w[test/erlang/erx_lvgl_screen.erl].freeze
         assert_match(/events => \[\{event,3,on_click,none\}\]/, output, channel)
         # Each report left unread across a resize names the size it was drawn at and is dropped.
         assert_match(/stale => \[\{120,80\},\{60,40\}\]/, output, channel)
+        # A report open across a resize is still presented at the size it was drawn at.
+        assert_match(/open_resize => \{240,160\}/, output, channel)
       end
       { short_buffer: /does not fit the window's buffer/, stray_presented: /answers no damage report/ }.each do |name, said|
         output = run!(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',

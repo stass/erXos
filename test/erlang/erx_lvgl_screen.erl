@@ -5,8 +5,12 @@
 A model screen for erx-lvgl on the host: it plays erx_ui_lvgl, the widget
 server and the display over the program's two pipes and the window's
 buffer, a file both map (docs/design-display.md, "The widget server" and
-"Kiosks and glasses"). It starts the program with the file as descriptor 3
-through test/fixtures/erx_lvgl_buffer.rb, sends the screen record and a
+"Kiosks and glasses"). What it writes and when it presents are decided by
+erx_ui_lvgl's own core, erx_ui_lvgl_core, so the real program drives those
+decisions; only a late tree change bypasses it, written while a report is
+open as one erx_ui_lvgl wrote before it read the report. It starts the
+program with the file as descriptor 3 through
+test/fixtures/erx_lvgl_buffer.rb, sends the screen record and a
 widget tree, and answers each damage report with `presented` once it has
 checked it. It checks what erx_ui_lvgl and the display rely on:
 
@@ -33,7 +37,11 @@ checked it. It checks what erx_ui_lvgl and the display rely on:
   names the old size, so it is dropped, presented as nothing and
   answered, and the next report covers the new size: once shrinking,
   where the old report's rectangles leave the new size, and once
-  growing, where they fit it but its rows have the old stride.
+  growing, where they fit it but its rows have the old stride;
+* a resize read while a report is open has its screen record written at
+  once; the program draws nothing until `presented`, the open report is
+  presented at the size it was drawn at, and the next report covers the
+  new size.
 
 refused/2 checks that the program stops, with status 1, at a screen whose
 rows at its stride do not fit the buffer (LVGL would draw past the
@@ -89,34 +97,38 @@ run(#{program := Program, ruby := Ruby, launcher := Launcher}, Channel) ->
     ok = file:write_file(Buffer, binary:copy(<<0>>, stride(?WIDTH, Depth) * ?HEIGHT)),
     Port = open_port({spawn_executable, Ruby},
                      [binary, stream, use_stdio, exit_status, {args, [Launcher, Buffer, Program]}]),
-    Screen = #{port => Port, buffer => Buffer, depth => Depth, size => {?WIDTH, ?HEIGHT}},
-    send(Screen, [{screen, ?WIDTH, ?HEIGHT, Chan} | ops()]),
+    {Core, Start} = erx_ui_lvgl_core:start(?WIDTH, ?HEIGHT, Chan),
+    Screen0 = #{port => Port, buffer => Buffer, depth => Depth, chan => Chan, core => Core},
+    send(Screen0, [Record || {write, Records} <- Start, Record <- Records]),
+    Screen = step({apply, ops(), tree}, Screen0),
     {First, []} = settle(Screen, [], fun(Reports, _) -> Reports =/= [] end),
     true = label_drawn(Screen) orelse error(label_not_drawn),
     Y = ?PAD + ?LABEL_HEIGHT + ?BUTTON_HEIGHT div 2,
-    send(Screen, [{input, {pointer, ?WIDTH div 2, Y, 1}},
-                  {input, {pointer, ?WIDTH div 2, Y, 0}}]),
+    Screen = step({window, {input, {pointer, ?WIDTH div 2, Y, 1}}}, Screen),
+    Screen = step({window, {input, {pointer, ?WIDTH div 2, Y, 0}}}, Screen),
     {Pressed, Events} = settle(Screen, [], fun(_, Es) -> Es =/= [] end),
     [{event, ?BUTTON, on_click, none}] = Events,
-    send(Screen, [{set, Node, #{text => <<"changed">>}, []} || Node <- [?LABEL, ?MIDDLE, ?BOTTOM]] ++ [commit]),
+    Screen = step({apply, [{set, Node, #{text => <<"changed">>}, []} || Node <- [?LABEL, ?MIDDLE, ?BOTTOM]] ++ [commit],
+          three}, Screen),
     {[Three], []} = settle(Screen, [], fun(Rs, _) -> Rs =/= [] end),
     3 = length(Three),
     %% The label starts at the odd pixel PAD, so its change is an area off a
     %% word. The late change is written while the first report is open.
     Late = [{set, ?LABEL, #{text => <<"late">>}, []}, commit],
-    send(Screen, [{set, ?LABEL, #{text => <<"pressed">>}, []}, commit]),
+    Screen = step({apply, [{set, ?LABEL, #{text => <<"pressed">>}, []}, commit], pressed}, Screen),
     {Changed, []} = settle(Screen, Late, fun(Rs, _) -> length(Rs) >= 2 end),
-    send(Screen, [repaint]),
+    Screen = step({window, repaint}, Screen),
     {Repaint, []} = settle(Screen, [], fun(Rs, _) -> area(Rs) >= ?WIDTH * ?HEIGHT end),
     ?WIDTH * ?HEIGHT = area(Repaint),
-    Smaller = Screen#{size := {?WIDTH div 2, ?HEIGHT div 2}},
-    send(Smaller, [{screen, ?WIDTH div 2, ?HEIGHT div 2, Chan}]),
+    Smaller = step({resize, ?WIDTH div 2, ?HEIGHT div 2, Chan}, Screen),
     {Resized, []} = settle(Smaller, [], fun(Rs, _) -> Rs =/= [] end),
-    Stale = [stale(Smaller, {?WIDTH div 4, ?HEIGHT div 4}, Chan),
-             stale(Smaller#{size := {?WIDTH div 4, ?HEIGHT div 4}}, {?WIDTH, ?HEIGHT}, Chan)],
+    {ShrunkFrom, Shrunk} = stale(Smaller, {?WIDTH div 4, ?HEIGHT div 4}),
+    {GrownFrom, Grown} = stale(Shrunk, {?WIDTH, ?HEIGHT}),
+    {OpenDrawn, _Half} = resized_while_open(Grown, {?WIDTH div 2, ?HEIGHT div 2}),
     port_close(Port),
     #{first => First, pressed => length(Pressed), three => Three, changed => length(Changed),
-      repaint => Repaint, resized => Resized, stale => Stale, events => Events}.
+      repaint => Repaint, resized => Resized, stale => [ShrunkFrom, GrownFrom], open_resize => OpenDrawn,
+      events => Events}.
 
 -doc """
 Starts the program as run/2 does and returns its exit status after one
@@ -162,6 +174,25 @@ ops() ->
     {ok, Realised} = erx_ui_model:apply_ops(Tree, erx_ui_model:empty()),
     erx_ui_model:delta(erx_ui_model:empty(), Realised).
 
+%% Steps erx_ui_lvgl_core with Event, as erx_ui_lvgl does, and writes what
+%% it says to write; returns the screen with the core's next state. A step
+%% taken while idle leaves that state as it was, which the callers assert
+%% by matching the result against the screen they passed. The model
+%% presents nothing: step_actions/2 also returns the actions, for a
+%% caller that matches on a present.
+step(Event, Screen) ->
+    {Screen1, _Actions} = step_actions(Event, Screen),
+    Screen1.
+
+step_actions(Event, #{core := Core} = Screen) ->
+    case erx_ui_lvgl_core:step(Event, Core) of
+        {ok, Core1, Actions} ->
+            send(Screen, [Record || {write, Records} <- Actions, Record <- Records]),
+            {Screen#{core := Core1}, Actions};
+        {stop, Reason} ->
+            error({renderer_stopped, Reason})
+    end.
+
 send(#{port := Port}, Records) ->
     Present = fun(_Type, _Value) -> error(no_presentations) end,
     true = port_command(Port, [erx_ui_wire:encode(R, Present) || R <- Records]).
@@ -195,7 +226,7 @@ settle(#{port := Port} = Screen, Late, Shown, Unread, Reports, Events, Deadline)
                 {[], Es, Rest} ->
                     settle(Screen, Late, Shown, Rest, Reports, Es, Deadline);
                 {[{_Drawn, Rects} = Report], Es, Rest} ->
-                    %% Only stale/3 writes a screen record while a report is
+                    %% Only stale/2 writes a screen record while a report is
                     %% unread, so here every report names the current size.
                     {presented, Es1, Rest1} = answer(Screen, Report, Late, Rest, Es),
                     settle(Screen, [], Shown, Rest1, Reports ++ [Rects], Es1, Deadline);
@@ -219,15 +250,35 @@ settle(#{port := Port} = Screen, Late, Shown, Unread, Reports, Events, Deadline)
 %% not read it yet: it writes a screen record of Size first, as erx_ui_lvgl
 %% does when it reads a resize before the report. The report names
 %% the size it was drawn at, which is not Size, so it is dropped; the next
-%% report covers the whole new screen. Returns the dropped report's size.
-stale(#{port := Port} = Screen, {W, H} = Size, Chan) ->
-    send(Screen, [repaint]),
+%% report covers the whole new screen. Returns the dropped report's size
+%% and the resized screen.
+stale(#{port := Port, chan := Chan} = Screen, {W, H}) ->
+    Screen = step({window, repaint}, Screen),
     {{Drawn, _Rects} = Report, Rest} = await_report(Port, <<>>, erlang:monotonic_time(millisecond) + ?SETTLE_MS),
-    Resized = Screen#{size := Size},
-    send(Resized, [{screen, W, H, Chan}]),
+    Resized = step({resize, W, H, Chan}, Screen),
     {dropped, [], Rest1} = answer(Resized, Report, [], Rest, []),
     {_Next, []} = settle(Resized, [], fun(Rs, _) -> area(Rs) >= W * H end, Rest1),
-    Drawn.
+    {Drawn, Resized}.
+
+%% A resize read while a report is open: a repaint's report has been read
+%% and is being presented when the window takes a new size. Its screen
+%% record is written at once; the program, whose flush is open, applies it
+%% and draws nothing, so the buffer is unchanged until `presented`, and the
+%% report is still presented at the size it was drawn at. The next report
+%% covers the whole new screen. Returns the presented report's size and
+%% the resized screen.
+resized_while_open(#{port := Port, chan := Chan} = Screen, {W, H}) ->
+    Screen = step({window, repaint}, Screen),
+    {{{DW, DH} = Drawn, Rects}, Rest} =
+        await_report(Port, <<>>, erlang:monotonic_time(millisecond) + ?SETTLE_MS),
+    {Open, [{present, DW, DH, Rects}]} = step_actions({damage, DW, DH, Rects}, Screen),
+    Before = snapshot(Open),
+    Resized = step({resize, W, H, Chan}, Open),
+    {[], Rest1} = hold(Resized, Rest, [], erlang:monotonic_time(millisecond) + ?HOLD_MS),
+    Before =:= snapshot(Resized) orelse error(drew_while_report_open),
+    Shown = step(shown, Resized),
+    {_Next, []} = settle(Shown, [], fun(Rs, _) -> area(Rs) >= W * H end, Rest1),
+    {Drawn, Shown}.
 
 %% The program's first record, which must be a damage report, and the bytes
 %% after it, waiting up to Deadline for it to arrive whole.
@@ -249,22 +300,25 @@ never_settled(true, Reports, _Events) -> {never_idle, length(Reports)};
 never_settled(false, Reports, Events) -> {never_shown, length(Reports), length(Events)}.
 
 %% A damage report, whose rectangles the reader checked against the size
-%% the report names: held open for HOLD_MS with Late written to the
-%% program, and answered with presented unless the buffer changed meanwhile
-%% or another report came. It is `presented` when it names the size of the
-%% last screen record written, and `dropped`, shown as nothing, when it was
-%% drawn at another size, whose stride the buffer's rows no longer have.
-answer(#{size := Size} = Screen, {Drawn, _Rects}, Late, Unread, Events) ->
+%% the report names: held unanswered for HOLD_MS with Late written to the
+%% program, as records written before the report was read, failing if the
+%% buffer changed meanwhile or another report came. Then erx_ui_lvgl's core
+%% judges it: `presented`, a present the model answers at once, when it
+%% names the size of the last screen record written, and `dropped`,
+%% answered with nothing shown, when it was drawn at another size, whose
+%% stride the buffer's rows no longer have.
+answer(Screen, {{W, H}, Rects}, Late, Unread, Events) ->
     Before = snapshot(Screen),
     send(Screen, Late),
     {Es, Rest} = hold(Screen, Unread, Events, erlang:monotonic_time(millisecond) + ?HOLD_MS),
     Before =:= snapshot(Screen) orelse error(drew_while_report_open),
-    send(Screen, [presented]),
-    Outcome = case Drawn of
-                  Size -> presented;
-                  _ -> dropped
-              end,
-    {Outcome, Es, Rest}.
+    case step_actions({damage, W, H, Rects}, Screen) of
+        {Open, [{present, W, H, Rects}]} ->
+            Screen = step(shown, Open),
+            {presented, Es, Rest};
+        {_Idle, [{write, [presented]}]} ->
+            {dropped, Es, Rest}
+    end.
 
 hold(#{port := Port} = Screen, Unread, Events, Until) ->
     receive

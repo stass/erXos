@@ -32,7 +32,7 @@
  * - nothing draws in the buffer while a damage report is unanswered: from
  *   the report until its presented record, LVGL's timers do not run, so no
  *   refresh starts, though records the server wrote before it read the
- *   report are still applied to the tree;
+ *   report, and a resize's screen record, are still applied;
  * - nothing runs while idle: the program blocks in poll() with the
  *   deadline lv_timer_handler() returns, or with none when no timer is due,
  *   and LVGL pauses its refresh and input timers when nothing changes;

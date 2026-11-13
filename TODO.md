@@ -721,13 +721,24 @@ it; git history is the record of completed work.
     the display's). New: `erx_winctl` with its fuzz target, `erx_pixels_core`, `erx_win`, `erx_draw_conn`.
     `erx_screen_core` keeps its plan and takes the design's names: a present for a flush, and no expose, since
     `erx_screen` copies what a layout change uncovers from the windows' buffers.
+  * **The widget server** ([The widget server](docs/design-display.md#the-widget-server)): `erx_ui` with `open/1`,
+    `tree/2`, `close/1`, the renderer behaviour and the toolkit's supervisor, and `erx_ui_server`, which validates a
+    tree with `erx_ui_schema`, numbers it with `erx_ui_model:pair/3`, applies `delta/2` through the renderer and
+    routes its hits through `erx_ui_model:hit/4`; `pair/3` and `hit/4` themselves, with their property tests
+    ([Verification](docs/design-display.md#verification-and-testing)).
   * **`erx_ui_lvgl`** ([The widget server](docs/design-display.md#the-widget-server)): each `damage` report of
-    `erx-lvgl` turned into a present and answered with `presented`, with nothing else written to the program while a
-    report is unanswered; a report naming another size than the last `screen` record written is presented as
-    nothing and answered; a report outside the size it names, or a second one before the first is answered, ends
-    the UI.
-    The program's side, and a host model screen that plays this side over a shared buffer file, are in
-    `display/lvgl/erx_lvgl.c` and `test/erlang/erx_lvgl_screen.erl`.
+    `erx-lvgl` turned into a present and answered with `presented`: the process that starts the program in the
+    session with the window's buffer as descriptor 3, reads its output with `erx_ui_wire:read/1`, presents through
+    the window, logs a fault's position and ends the UI with `renderer_down`, performing the actions of
+    `erx_ui_lvgl_core`, which decides what is written and presented and what is a fault. The shell reads `mouse`
+    and `kbd` only while `reads_window/1` holds; it stops consulting the core once `close/1` has closed the
+    program's input, so the program's exit then is no fault; a stop while an apply waits ends the shell, which
+    fails that `apply/2`; a window grown past its buffer makes the program refuse the `screen` record and the UI
+    end as `renderer_down`, unless the shell clamps the size to the buffer (decide which); and a program that stops
+    reading its input blocks the shell's writes and so `apply/2`, a residual until writes are bounded. The program's side, the
+    core, and a host model screen that plays the renderer over a shared buffer file with the core's decisions, are
+    in `display/lvgl/erx_lvgl.c`, `erlang/apps/erx_display/src/erx_ui_lvgl_core.erl` and
+    `test/erlang/erx_lvgl_screen.erl`.
   * **Programs** ([The startup message](docs/design-programs.md#the-startup-message)): the `mem` descriptor in the
     startup message's profile, `liberx`'s decoder and its fuzz target, `mmap` and `fstat` of it in the personality,
     and the session's mapping of a buffer's pages into a program's sub-space while it builds it.

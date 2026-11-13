@@ -2403,10 +2403,11 @@ the `presented` record for the report arrives: the main loop, which
 reads it, calls `lv_display_flush_ready`. Until then the main loop runs
 no LVGL timer, so no refresh starts and LVGL never waits on the open
 flush; it still applies the records it reads before `presented`, which
-`erx_ui_lvgl` wrote before it read the report, since applying a record
-changes the tree and draws nothing. After the report `erx_ui_lvgl`
-writes the program nothing but its `presented` (below), so the wait
-ends at a record that comes. The program's flush-wait callback
+`erx_ui_lvgl` wrote before it read the report, and a resize's `screen`
+record, since applying a record changes the tree or the screen's size
+and draws nothing. After the report `erx_ui_lvgl` writes the program
+nothing but a resize's `screen` record and its `presented` (below), so
+the wait ends at a record that comes. The program's flush-wait callback
 (`lv_display_set_flush_wait_cb`) stops it with a diagnostic, since
 LVGL reaching it means a refresh began with a flush open, which would
 otherwise spin forever. So on the copy path, and on a device that reads
@@ -2425,20 +2426,26 @@ of the next tree, for which its `apply/2` does not return until the
 report is answered, so the widget server and the application wait at
 the device's pace too; the window's next `mouse` and `kbd` records,
 which it reads only after the answer, so they wait in the window's
-bounded queues ([Windows and buffers](#windows-and-buffers)); and a new
-size, which it writes as a `screen` record after the answer. A report
-is judged and presented at its own size, the width and height it
-names: a resize that `erx_ui_lvgl` reads after the report waits for
-the answer, so the report names the size of the last `screen` record
-written and is presented at that width and height, shown clipped, as
-any present for a stale size is ([The window tree](#the-window-tree)),
-and is no fault. A resize that `erx_ui_lvgl` read first has had its
-`screen` record written while the report sat unread in the program's
-output, so the report names another size than that record's, and its
+bounded queues ([Windows and buffers](#windows-and-buffers)). A new
+size, the `r` record of a `mouse` read, it writes as a `screen` record
+the moment it reads it, even while a report is open, when a read that
+was in flight as the report arrived brings one. A
+report is judged when it is read, at its own size, the width and
+height it names. When that is the size of the last `screen` record
+written, the report is presented at that width and height; a resize
+read while it is open changes no pixel of the buffer, since the
+program draws nothing until `presented`, so the report is still shown
+at the size it was judged at, clipped, as any present for a stale size
+is ([The window tree](#the-window-tree)), and is no fault. A report
+that sat unread in the program's output while a resize's `screen`
+record was written names another size than that record's, and its
 rows have a stride the buffer no longer has: `erx_ui_lvgl` presents
-nothing for it and answers `presented`, so the program continues; it
-has applied the new `screen` record, which invalidates the whole
-screen, so its next report covers the new size. It turns the window's
+nothing for it and answers `presented` at once, so the program
+continues. Either way the program has applied the new `screen` record,
+which invalidates the whole screen, so its next report covers the new
+size. These decisions, what to write, when to present and what is the
+program's fault, are a pure state machine, `erx_ui_lvgl_core`, whose
+actions `erx_ui_lvgl` performs. It turns the window's
 `mouse` and `kbd` records into `input` records. A report whose
 rectangle leaves the size it names, which the reader refuses, or one
 that arrives before the last was answered, is a fault of the program: `erx_ui_lvgl` stops
@@ -3636,12 +3643,22 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
     the refresh completes at `presented`; a program that holds every
     flush until `presented` stops at the second area, where LVGL waits
     on the first flush, and fails the model screen;
-  * a resize during a frame: the window is shrunk while a report drawn
-    at the old size is unanswered; the report is presented at the old
-    size, clipped, and the program then receives the new `screen`
-    record; an `erx_ui_lvgl` that judges the report against a `screen`
-    record it wrote after reading the report drops a frame it could
-    show, and fails;
+  * a resize during a frame: against the model screen, the window is
+    shrunk while a report drawn at the old size is open; the program
+    receives the new `screen` record at once, draws nothing until
+    `presented`, the report is presented at the old size, clipped, and
+    the next report covers the new size; an `erx_ui_lvgl` that judges
+    the report again against the `screen` record it wrote after reading
+    it fails;
+  * `erx_ui_lvgl_core`, explored exhaustively: every event in every
+    reachable state to a depth of six, over two sizes, keeping a present
+    only of a report at the last `screen` record's size, nothing but
+    `screen` records written while a present is outstanding, every
+    report answered once, and an apply's operations and the window's
+    records written in order and only after the answer; seeded faults
+    that hold a resize, write an apply while a report is open, write
+    the held records before `presented` or present a second report each
+    fail it;
   * a resize while a report is unread: against the model screen, a
     `screen` record is written after a report has arrived and before
     it is read, once smaller and once larger; the report names the old
