@@ -10,32 +10,45 @@ require_relative 'production_image'
 require_relative 'qemu'
 require_relative 'qemu_cells'
 require_relative 'qmp'
+require_relative 'release_files'
 require_relative 'runner'
 require_relative 'screen_reference'
 
 module Erx
-  # The display domain on QEMU virt (docs/design-display.md, Verification, "Drivers"): the
-  # production image boots on MediumBoot's machine with a manifest of the suite's own,
-  # the site manifest with a display domain that holds the platform's display unit
+  # The display domain and a client's window on QEMU virt (docs/design-display.md,
+  # Verification, "Drivers", and "Erlang clients"): a test image (it carries the client's
+  # test-only application) boots on MediumBoot's machine with a manifest of the suite's
+  # own, the site manifest with a display domain that holds the platform's display unit
   # (manifest), a virtio-gpu attached and QMP on an owner-only socket in the run's
   # directory. The development manifest places no display unit (TODO.md, the display
   # domain's rows), so this boot is the suite's alone. The virtio-gpu driver brings the
-  # device up and erx_screen fills the empty layout's background and flushes it, so the
-  # screen shows the background alone. Once the command shell is up, the harness reads
-  # the screen through QMP's screendump until its decoded pixels equal the reference
-  # picture's, the background colour over the whole display
-  # (test/display/reference/display-background.sha256), or the wait runs out, and the
-  # cell fails naming both digests. Then the driver's lines in the serial log must be one
+  # device up and erx_screen fills the empty layout's background. The start row client
+  # names the display, so once its server has settled the row's keeper starts the
+  # display's session, whose release (BOOT) runs erx_pattern_test: it opens a window
+  # with erx_win:open/2, which the single policy places over the whole screen, fills it
+  # with erx_pattern_test:pattern/0 and presents it. Once the command shell is up, the
+  # harness reads the screen through QMP's screendump until its decoded pixels equal the
+  # reference picture's, the pattern over the whole display
+  # (test/display/reference/display-pattern.sha256), or the wait runs out, and the cell
+  # fails naming both digests. Then the driver's lines in the serial log must be one
   # bring-up and nothing else (check_driver_lines), so a driver that failed a flush and
   # was restarted before the picture came does not pass.
   #
   # A driver that sets no scanout leaves QEMU's own picture of an inactive display; a
-  # frame never flushed leaves the device's resource black; a wrong colour or channel
-  # order gives another digest. Each fails the cell. A domain that ends after the picture
-  # came is not seen: QEMU keeps the last scanout.
+  # frame never flushed leaves the device's resource black; a session that never starts,
+  # or a window never presented, leaves the background; a wrong colour or channel order,
+  # in the client, the window's buffer or the driver, gives another digest. Each fails
+  # the cell. A domain that ends after the picture came is not seen: QEMU keeps the last
+  # scanout.
   module DisplayDomain
     REFERENCES = 'test/display/reference'
-    BACKGROUND = 'display-background'
+    PATTERN = 'display-pattern'
+    # The boot script of the client's session template: the client release's applications
+    # (ReleaseFiles::RELEASE_SCRIPTS, client), the command shell and erx_session, which
+    # the template's -eval starts, and the test-only client, erx_pattern_test.
+    CLIENT_SCRIPT = ReleaseFiles::RELEASE_SCRIPTS.fetch('client')
+    CLIENT_APPLICATIONS = [*CLIENT_SCRIPT, 'erx_shell', 'erx_session', 'erx_pattern_test'].freeze
+    BOOT = ReleaseFiles.domain_boot('pattern', applications: CLIENT_APPLICATIONS, test: true)
     # The keyboard and tablet stay off the display's register page: the display domain's
     # window is the gpu's whole page, and the domain library checks a page's sharing only
     # among the platform record's devices (TODO.md, security residuals), so the input
@@ -83,20 +96,18 @@ module Erx
           "  restarts 0\n  restart_period_s 5\n  args \"#{MediumBoot::UP_ARGS.join(' ')}\"\n" \
           "service screen\n  server @domain.display\n  interface windows\n" \
           "display screen\n  policy single\n  idle_dim_s 0\n  idle_off_s 0\n"
-    # The client: its principal and session template, the session's grant of screen, and
-    # its start row, which names screen as the session's display. The row is disabled,
-    # so the boot starts no session: no client program draws yet, and erx_starter does
-    # not wait for a display's domain before it starts a row (TODO.md, "a row that
-    # names a display").
+    # The client: its principal and session template, whose release is BOOT's, the
+    # session's grant of screen, and its start row, enabled, which names screen as the
+    # session's display, so the session the row keeps is the display's.
     CLIENT = "principal client\n  memory #{CLIENT_MEMORY}\n  grant @share.users\n  domains #{CLIENT_SESSIONS}\n" \
              "  names 1\n  default_limits @limits.native\n  ceiling_limits @limits.native\n" \
-             "session client\n  limits @limits.session\n  runtime @artifact.emu\n  release @artifact.session\n" \
+             "session client\n  limits @limits.session\n  runtime @artifact.emu\n  release @artifact.#{BOOT.name}\n" \
              "  args \"-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx " \
              "-eval ok=application:start(erx_session)\"\n" \
              "facet screen\n  grantee @session.client\n  service @service.screen\n  operations none\n" \
              "  max_request 131072\n  in_flight 16\n  reductions 100000\n  period_ns 1000000000\n" \
              "  max_heap_size 262144\n  parameter pixels #{PIXELS}\n" \
-             "start client\n  enable NO\n  display @service.screen\n"
+             "start client\n  enable YES\n  display @service.screen\n"
     UNIT = "unit #{UNIT_KEY}\n  placement \"#{UNIT_KEY}\"\n  holder @domain.display\n"
     ROOT_MEMORY_LINE = /^(  root_memory )([0-9]+)$/
     MAX_DOMAINS_LINE = /^(  max_domains )([0-9]+)$/
@@ -160,18 +171,48 @@ module Erx
       raise Error, "the display driver logged #{lines.size} lines, not one bring-up: #{lines.first(4).inspect}"
     end
 
+    # The client's outcome lines of a boot's serial log (erx_pattern_test:show/0): one
+    # "presented" and no other, or Error naming them, so a client that failed, or whose
+    # session was started again before the picture came, does not pass, and a failing
+    # cell says what the client reported.
+    CLIENT_LINE = /erx_pattern_test: (?!started)[^\r\n]*/n
+    PRESENTED = 'erx_pattern_test: presented'
+    def check_client_lines(log)
+      lines = log.b.scan(CLIENT_LINE)
+      return if lines == [PRESENTED]
+
+      raise Error, "the client logged #{lines.size} outcomes, not one presented: #{lines.first(4).inspect}"
+    end
+
+    # The serial log at serial once it holds a client's outcome line, or once wait_seconds
+    # have passed: the client logs its outcome after the display answers its present,
+    # which may reach the log after the screen shows the picture.
+    CLIENT_WAIT_SECONDS = 15
+    def await_client_line(serial, wait_seconds: CLIENT_WAIT_SECONDS)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait_seconds
+      loop do
+        log = File.binread(serial)
+        return log if log.b.match?(CLIENT_LINE) || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+        sleep POLL_SECONDS
+      end
+    end
+
     # The production checkpoints to the command shell, whose banner starts the screen's
-    # reads, then the driver's lines of the serial log at serial. points must end at the
-    # command shell.
+    # reads, then the driver's and the client's lines of the serial log at serial. points
+    # must end at the command shell.
     def checkpoints(points, socket:, references:, serial:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
       shell = points.last
       screen = lambda do |_text|
-        await_screen(socket: socket, references: references, name: BACKGROUND)
-        check_driver_lines(File.binread(serial))
+        await_screen(socket: socket, references: references, name: PATTERN)
+        log = await_client_line(serial)
+        check_driver_lines(log)
+        check_client_lines(log)
       end
-      [*points[0...-1], shell.merge(seconds: shell.fetch(:seconds) + WAIT_SECONDS + 15, verify: screen).freeze].freeze
+      [*points[0...-1], shell.merge(seconds: shell.fetch(:seconds) + WAIT_SECONDS + CLIENT_WAIT_SECONDS + 15,
+                                           verify: screen).freeze].freeze
     end
 
     # Boots the image under HVF at each CPU count, where placement puts each cell.
@@ -189,14 +230,17 @@ module Erx
         @manifest = DisplayDomain.manifest(platform.site_manifest_source(@root), platform: platform)
       end
 
-      # Packs the image once, then boots it at each CPU count.
+      # Packs the test image, which carries the client's boot script (BOOT), once, then boots
+      # it at each CPU count.
       def call(cpus:, jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
         directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/display-domain/image'))
-        built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
-                                     fiasco: fiasco)
-                                .build_medium(directory: directory, machine: @machine, manifest_source: @manifest)
+        nothing = ProductionImage::Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
+        built = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                    fiasco: fiasco)
+                               .build_test_image(directory: directory, added: nothing, machine: @machine, domains: [BOOT],
+                                                 manifest_source: @manifest)
         placement.each(accels: [QemuCells::LOCAL_ACCELERATOR], cpus: cpus) do |accel, count, remote|
           ["#{accel}-#{count}cpu", show(accel, count, remote, built)]
         end
@@ -214,7 +258,8 @@ module Erx
         socket = File.join(boot, 'qmp.sock')
         display = QemuPlan::Display.new(qmp_socket: socket, **DISPLAY_BUSES)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
-                                                         manifest_source: @manifest, memory_mib: @machine.memory_mib)
+                                                         manifest_source: @manifest, memory_mib: @machine.memory_mib,
+                                                         test_image: true)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
             .run(platform: @machine.platform, accel: accel, cpus: count, remote: remote, image: built.single,
                  memory_mib: @machine.memory_mib, directory: boot, display: display,

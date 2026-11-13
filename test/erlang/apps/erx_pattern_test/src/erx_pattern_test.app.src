@@ -1,0 +1,10 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+{application, erx_pattern_test,
+ [{description, "erXos test: a display's session that presents a known pattern in a window"},
+  {vsn, "1"},
+  {modules, [erx_pattern_test, erx_pattern_test_app]},
+  {registered, []},
+  {applications, [kernel, stdlib, erx, erx_memdraw, erx_win]},
+  {mod, {erx_pattern_test_app, []}}]}.

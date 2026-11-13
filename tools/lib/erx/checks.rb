@@ -85,10 +85,10 @@ module Erx
     # ProductionImage#build adds nothing to the system release; its test entry point adds
     # test code and marks the archive (ERX_PACK_TEST_CODE). This check enforces two things
     # only: that only the QEMU harnesses that boot test code (TEST_IMAGE_BUILDERS: the
-    # oracle's run, the block device, system domain, programs and apps suites') call that entry
-    # point, and that no other
-    # source passes a literal true for the packer's test keyword. It does not prove that every image carrying
-    # test code is marked; other packers carry unmarked test code (TODO.md). So no Ruby
+    # oracle's run, the block device, system domain, programs, apps and display domain
+    # suites') call that entry point, and that no other source passes a literal true for
+    # the packer's test keyword. It does not prove that every image carrying test code is
+    # marked; other packers carry unmarked test code (TODO.md). So no Ruby
     # source under tools/, except the module that defines the entry point and those
     # callers, may match TEST_IMAGE_ENTRY: the entry point's name, in a call, a symbol or
     # a comment, or a literal true for the packer's test_code keyword. The check reads
@@ -96,7 +96,7 @@ module Erx
     # pieces. Tests outside tools/ may name either.
     # block_device.rb lends its test image to driver_domains.rb (BlockDevice::Run#test_image_for).
     TEST_IMAGE_BUILDERS = %w[tools/lib/erx/oracle_qemu.rb tools/lib/erx/block_device.rb tools/lib/erx/system_domain.rb
-                             tools/lib/erx/programs.rb tools/lib/erx/apps.rb].freeze
+                             tools/lib/erx/programs.rb tools/lib/erx/apps.rb tools/lib/erx/display_domain.rb].freeze
     TEST_IMAGE_DEFINER = 'tools/lib/erx/production_image.rb'
     TEST_IMAGE_ENTRY = /\bbuild_test_image\b|\btest_code:\s*true\b/
 

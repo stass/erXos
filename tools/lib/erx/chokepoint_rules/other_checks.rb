@@ -45,7 +45,7 @@ module Erx
           test: 'test/host/erofs_reads_test.rb'
         ),
         Chokepoints::Elsewhere.new(
-          name: 'test-image-builder', rule: "only the oracle's QEMU run and the block device suite's harness call the " \
+          name: 'test-image-builder', rule: "only the QEMU harnesses Checks::TEST_IMAGE_BUILDERS lists call the " \
                                             "production image's test entry point, and no other tools source passes a " \
                                             "literal true for the packer's test keyword",
           design: "#{STOPGAP}#the-production-image", check: 'Checks::TEST_IMAGE_BUILDERS',

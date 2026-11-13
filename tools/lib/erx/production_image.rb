@@ -309,7 +309,7 @@ module Erx
     # The production image with test code added to its system release, marked in its
     # archive's flags (ERX_PACK_TEST_CODE) so the kernel's banner says so and the kernel
     # refuses it in any build but a development one. Only the QEMU harnesses that boot
-    # test code, OracleQemu, BlockDevice, SystemDomain, Programs and Apps, call it, which the source check holds
+    # test code, OracleQemu, BlockDevice, SystemDomain, Programs, Apps and DisplayDomain, call it, which the source check holds
     # (Checks::TEST_IMAGE_BUILDERS). domains are the domain boot scripts it carries
     # (ReleaseFiles.domain_boot) in the one domain release, with the domain runtime image,
     # each in place of the manifest's script of its name; one of them may be a test

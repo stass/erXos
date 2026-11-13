@@ -28,7 +28,7 @@ module Erx
     # OTP copy beside the others, so a test image's domain boot script can take one
     # (ReleaseFiles.domain_boot with test: true, ProductionImage's test entry point), and no
     # release lists them, so no other image carries one.
-    TEST_ONLY = %w[erx_clock_test erx_echo_test].freeze
+    TEST_ONLY = %w[erx_clock_test erx_echo_test erx_pattern_test].freeze
     TEST_SOURCE = 'test/erlang/apps'
     # OTP's applications in the tree, whose include/ headers erXos's include_lib reads.
     OTP_LIB = 'otp/lib'

@@ -602,7 +602,7 @@ it; git history is the record of completed work.
   design before the driver's update step is written.
 * [Medium] `erlang/apps/erx_fb/src/erx_virtio_gpu.erl`, [The display device](docs/design-display.md#the-display-device):
   the driver process runs on QEMU's virtio-gpu only in the `display_domain` suite, whose one boot brings the
-  device up and shows the background; its failure paths have run only as its pure core's host tests. A host test
+  device up and shows a client's window; its failure paths have run only as its pure core's host tests. A host test
   of the process on stock OTP is cheap: stub modules `erx_device`, `erx_irq_line`, `erx_memdraw` and `erx_log` that script a
   device answering out of order, refusing a post as full, firing a spurious line, returning a stray completion
   between frames and staying silent past the deadline (a `-D` macro shortening it).
@@ -653,14 +653,11 @@ it; git history is the record of completed work.
   `erx_start_table` (`merge/3`, `rc.conf`'s and `ctl`'s parsers with their fuzz targets, `set/3`, the command check
   `apply_ctl/4`); `erx_starter` with its table, a supervisor and keeper per enabled row, and `rc.conf` read and
   written under `/data`; the `apps` tree (`erx_starter_fs`), which a session mounts at `/apps`;
-  `erx_domain:start_session/2` with `display` and `default_display`, and the session mark.
+  `erx_domain:start_session/2` with `display` and `default_display`, and the session mark; a row that names a
+  display started once that display's server has settled (`erx_domain:display_settled/1`).
   Not built: the session's default display handed on with the ready answer and its `display` variable
   (design-apps.md, "Starting a session", step 3), which the domain service keeps in the session's record and
-  hands to nothing; a row that names a display started only once that display's domain has reported ready
-  ("Keeping a session"), which waits for a display domain to run, and whose wait no design names: `erx_starter`
-  learns only the system namespace (`erx_domain:system_namespace/0`), so the design must say how it learns that a
-  display's domain has reported ready before the starter can wait for it; the reset count cleared by the first
-  kept session.
+  hands to nothing; the reset count cleared by the first kept session.
 * [Low] The start table's first `rc.conf` read waits for the system domain's namespace to be in place
   (`erx_domain:system_namespace/0`), but a storage domain that ends once during boot, or misses the mint
   deadline, settles that wait as failed: the read answers an error and the manifest's enabled rows start before

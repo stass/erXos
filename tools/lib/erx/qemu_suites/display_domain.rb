@@ -7,8 +7,8 @@ require_relative '../qemu_gate'
 
 # The display domain on QEMU virt under HVF (tools/lib/erx/display_domain.rb): the
 # suite's own manifest (DisplayDomain.manifest) boots with a virtio-gpu attached, the display domain's driver brings it
-# up and erx_screen flushes the background, and the screen read through QMP equals the
-# reference picture. HVF at one CPU is its one cell. Its boot carries a display, which no
+# up, the display's session (erx_pattern_test) presents a pattern in a window, and the
+# screen read through QMP equals the reference picture. HVF at one CPU is its one cell. Its boot carries a display, which no
 # remote host serves, so it does not declare offload. check_qemu builds the kernel before
 # any suite runs, so this suite does not.
 cells = Erx::QemuGate.suite_cells([1])

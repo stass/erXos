@@ -493,10 +493,8 @@ asks for a test image's boot, and requires the kernel's
 `erx: boot image build` line to report the archive's own identity and flags. The
 source check (`Checks::TEST_IMAGE_BUILDERS`, the `test-image-builder` chokepoint rule)
 fails the build when Ruby under `tools/` other than `ProductionImage` itself and
-the QEMU harnesses that boot test code, `OracleQemu`, the oracle's run,
-`BlockDevice`, the block device suite's, `SystemDomain`, and `Programs`, the programs suite's,
-which adds the session release's test programs under `bin/`, names the test entry point or hands the
-packer a literal true for its `test_code` keyword; each harness's boot transcript
+the QEMU harnesses that boot test code, which that constant lists, names the test
+entry point or hands the packer a literal true for its `test_code` keyword; each harness's boot transcript
 checks the banner's test-image line;
 `test/host/checks_test.rb` seeds its violations.
 
