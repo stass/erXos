@@ -726,32 +726,16 @@ it; git history is the record of completed work.
 * [Medium] `erx_starter` review residuals (A5b): whether a held row changed rests on `erx_starter:kept/1` undoing
     `row/2` exactly, and no process test has a row with a display; comparing the stored `erx_starter_row:row()`
     with the one the table would start would make it hold by construction and delete both `kept/1`s.
-* [Low] `erx_starter` review residuals (A5b): an enabled row with no record shows as `stopped` (a crash between
+* [Low] `erx_starter` review residuals (A5b): an enabled row with no record shows as `starting` (a crash between
     recording rc.conf's text and starting the row leaves one until the read answers); `enable` starting its row
     and `stop` recording a stopped row are decided in the process, not returned by `apply_ctl/4`; the rename over
     rc.conf is not followed by a sync of its directory; the process tests make their rc.conf directories in the
-    current directory and the failed-read case races its retry by a few microseconds; `/proc/apps` (A7) must
-    show `rows/0`'s `rc_conf` state.
+    current directory and the failed-read case races its retry by a few microseconds.
 * [Low] `erx_starter` review residuals (A5c): a table killed while an `enable`'s write of `rc.conf` is in progress
     leaves the row's stopped mark, so the row stays stopped though the written `rc.conf` enables it, and
     `/apps/ctl` answered `eio`; another `enable` or a `start` runs it (clearing the mark before the write would
-    instead let a failed `enable` unmark the row). `/proc/apps` (A7) should show the mark, since a marked row and
-    an enabled row whose start failed both read `stopped`. A `start` of a row not enabled followed by `enable`
+    instead let a failed `enable` unmark the row). A `start` of a row not enabled followed by `enable`
     leaves its `{once, Name}` keeper beside the row's supervisor, two sessions for one principal.
-    current directory and the failed-read case races its retry by a few microseconds.
-* [Low] `erx_starter_sup:record/1` replaces the recorded text of `rc.conf` by deleting its child spec and adding
-  the new one, since OTP's supervisor has no replace. A table killed between the two leaves no record; its
-  successor then starts as at boot and, if the first read of `rc.conf` fails, reconciles with the manifest's rows
-  alone, starting rows `rc.conf` disabled and stopping rows only `rc.conf` enabled until a read answers. The window
-  opens only on a real change of the text (an unchanged text is not recorded again). Closing it needs a record
-  that is replaced in one step, such as a generation-keyed spec added before the old one is deleted.
-* [Low] `erx_starter` review residuals (A5c): `enable` of a stopped row writes `rc.conf` and only then clears the
-    mark (`start_row/2` after `apply_text/2` in `written/5`), so a table killed between the two leaves the row
-    enabled and stopped while `/apps/ctl` answered `eio`; clearing the mark and a down row's spec before
-    `apply_text/2` would let reconciling start it. No test pins that `start_row/2` clears the mark before it starts
-    the row, and no process test restarts the table after a stop cut short (held and marked). A
-    `start` of a row not enabled followed by `enable` leaves its `{once, Name}` keeper beside the row's supervisor,
-    two sessions for one principal.
 * [Low] `/proc/apps` and `service` (A7) leave out what the start service's read API does not expose: a row's
   `domain` and its `ends` within the period are `unsupported`, a down row's `reason` (its session's last end) is
   `unknown`, a session `onestart` started (an `{once, Name}` keeper) shows nowhere, so `onestatus` of a row that
@@ -3006,13 +2990,13 @@ it; git history is the record of completed work.
 * [Medium] inspector (`erlang/apps/erx/src/erx_inspector.erl`, `erx.erl`, `erx_process_records.erl`):
   the inspector run in a domain other than the system domain lists that domain's own processes
   (`runtime_domain/0`, from `erx_dist:boot/0`), but names its kernel records and domain record as the system
-  domain's (`erx_kernel_records:system_domain/0`, a constant 4), so the local scope `[Id]` a session's inspect
-  facet has (`erx_facets:facets/2`) reaches none of them: `erx:i` there answers `{error, scope}` for them and
+  domain's (`erx_kernel_records:system_domain/0`, a constant 4), so the scope `{principal, P}` of a session's inspect
+  facet, which the query worker resolves to that principal's domains, reaches none of them: `erx:i` there answers `{error, scope}` for them and
   `top`'s header prints `-`. Read the kernel records of the caller's group, budget and threads, and collect
   `[domains, Id | _]` for the runtime's own domain. A process listed in a session links to
   `/proc/processes/<pid>` in the browser, which names it; `[domains, Id, processes]`, declared with paginated
-  entries rather than children, needs the web client's entries view (W3) before a browser shows it. `runtime_domain/0`
-  reads the boot page beside `erx_facets:domain/0`, and `collect/2` calls it after the scope decision; read the
+  entries rather than children, needs the web client's entries view (W3) before a browser shows it. `erx_inspector:runtime_domain/0`
+  reads the boot page, and `collect/2`, `entries/2` and `proc_id/1` each call it, and `erx_facets:system/0` reads it too; read the
   domain once at the edge (one exported reader) and pass it in. The system domain's runtime is the node
   `system@<host>` at creation 4 (`tools/lib/erx/system_domain.rb`), yet `erx_process_records:proc_id/2` still
   names a pid of its own runtime by the runtime's domain rather than by the creation the pid carries; drop that
@@ -5520,11 +5504,10 @@ to the corpus and follow rc
   that facet's scope.
   Development builds run trusted code only. The wide scope is accepted; narrowing it to root's own
   domains, or removing it, changes design-live.md ("Scopes"), design-web.md (W1) and design-domains.md
-  (property 9) with it, and needs a test that a browser's view of `/proc/kernel` ends `scope`. The line widens
-  itself on any export the system domain sends (`{export, Web}`), and today only the host link's `web` facet
+  (property 9) with it, and needs a test that a browser's view of `/proc/kernel` ends `scope`. The line
+  exports itself to Web when the system domain calls it with `{export, Web}`, and today only the host link's `web` facet
   sends one, for root's development session: the network login (`erx_web_login`) must not export its sessions'
-  lines through the same call. The facet the session item under Bugs mints, taken by `erx_facets:facets/2`,
-  is the better source of the scope; with it the line's own `scope` goes. Not yet consistent at `all` in a
+  lines through the same call. Not yet consistent at `all` in a
   session's runtime: `[domains, 4, threads]` through `entries/2` is gated only on the domain, not on the runtime
   (`erx_inspector:collects_domain/2` covers `collect/2` alone), and `/proc/cpus` answers a partial empty
   listing where the stopgap refuses a task's `erx_object_info`, which `erx_kernel_records:listing/6` should

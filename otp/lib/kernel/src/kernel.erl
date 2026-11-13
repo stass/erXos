@@ -19,7 +19,9 @@
 %%
 %% Modified by erXos: kernel_sup starts erx_watchdog right after on_load, and
 %% kernel_safe_sup makes the domain's file version counter and starts the namespace
-%% table's writer and /tmp.
+%% table's writer, /tmp, /proc, the domain's inspection agent and the process behind
+%% the inspect facets; start_distribution false starts the local part of distribution
+%% alone.
 %%
 %% %CopyrightEnd%
 %%

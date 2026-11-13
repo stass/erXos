@@ -176,9 +176,10 @@ on QEMU `virt` every given device with DMA memory is marked coherent, so
 no maintenance is issued there. Its one lock serialises opens, binding changes and every
 queue call, and is held across service calls (`erx_device_nif.c:12-15`);
 register writes, which are BIFs, take no lock (`erx_device_bif.c`,
-`erx_device.c:372-420`). The manifest's device record has no
-coherence mark and no DMA range; its only flag is `hostile`
-(`abi/manifest.txt:77-78, 256-277`). On the stopgap, every device's DMA
+`erx_device.c:372-420`). The manifest's device record has a DMA mode
+and an amount of DMA memory but no coherence mark and no DMA address
+range; its only flag is `hostile` (`abi/manifest.txt`, `erx_mf_device` and
+`mf_device_flags`). On the stopgap, every device's DMA
 memory comes from one contiguous pool the root takes from `sigma0`
 at boot, sized for the manifest's devices' memory up to 16 MiB (`liberx/backend/fiasco/vm.c`, `erx_fiasco_vm_init`;
 `liberx/backend/fiasco/page_pool.c`, `erx_fiasco_contig_order`), an object is at most 16 MiB

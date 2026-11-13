@@ -352,7 +352,7 @@ boot_units(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries)
  * page: a give windows one device, and the library refuses a window over a
  * page another entry's window meets, so every creation of that row would
  * fail; only the system domain, whose windows the root makes, may hold
- * such a unit until the catalogue's entry is the unit (TODO.md).
+ * such a unit (TODO.md).
  * So does a device marked confined: the stopgap's catalogue lists no IOMMU
  * stream, and a confined device is given only on one; and DMA memory that is
  * not whole pages, which no give can make. Devices of a configured row's

@@ -245,9 +245,9 @@ in-flight bound, is a failure: the device process ends
 ([Failure](#the-sd-host-controller)) and issues nothing more, and the
 request's sectors are unknown, as for any failed write. The callers' deadlines sit above that sum, each
 longer than the one below it, so each layer answers before its caller
-gives up: `erx_blk:call/1` waits 30 s (`erx_blk.erl:40`), a window
-35 s (`erx_blk_window.erl:32`) and littlefs's port 60 s
-(`erx_lfs.erl:68`). The SD controller's in-flight bound covers its
+gives up: `erx_blk`'s calls wait 30 s (`CALL_TIMEOUT` in `erx_blk.erl`), a window
+35 s (`CALL_TIMEOUT` in `erx_blk_window.erl`) and littlefs's port 60 s
+(`DEADLINE_MS` in `erx_lfs.erl`). The SD controller's in-flight bound covers its
 largest request at the specification's own limits: 64 blocks written at
 250 ms of busy each, the last up to 500 ms (Physical Layer 4.6.2.2,
 p.95), is 16.25 s, and a read of 64 blocks at 100 ms each (4.6.2.1,
@@ -1731,7 +1731,7 @@ past its wait limit is answered `{error, {device, deadline}}` with no
 register touched and an issued one past its in-flight bound ends the
 process, with the seeded fault of timing the wait from the issue rather
 than the acceptance, and a check that the wait limit and the in-flight
-bound together stay below `erx_blk:call/1`'s timeout, that below the
+bound together stay below the timeout of `erx_blk`'s calls, that below the
 window's and that below littlefs's port's; a QEMU test that a trial boot's driver refuses every write but
 the record's, whatever its clients ask; a test of the same storage
 service against a local window and against one exported from a driver
