@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative 'device_callers'
+require_relative 'erlang_text'
 
 module Erx
   # The chokepoint of invariant E1 (docs/design-storage.md, "Reading EROFS images"):
@@ -13,7 +13,7 @@ module Erx
   # erx_verity's opaque handle holds the image's window, so the rule keeps every other
   # module from naming erx_verity and the reader's calls on the funnel and on BIFs that
   # reach no state. It reads the Erlang sources that can enter a
-  # release, as DeviceCallers does, and refuses:
+  # release, as ErlangText reads them, and refuses:
   #
   # * outside erx_verity.erl, any naming of erx_verity, a call, a quoted atom or a
   #   string, except in the reader's modules the call erx_verity:read( (or its
@@ -24,7 +24,7 @@ module Erx
   #
   # Like the other text rules it catches a slip, not a call built from pieces.
   module ErofsReads
-    SCOPE = DeviceCallers::SCOPE
+    SCOPE = ErlangText::SCOPE
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
     FUNNEL = 'otp/erts/preloaded/src/erx_verity.erl'
     READERS = %w[otp/erts/preloaded/src/erx_erofs.erl].freeze
@@ -48,7 +48,7 @@ module Erx
     # The violations among files, a map of path to source text.
     def violations(files)
       files.select { |path, _| covers?(path) && path != FUNNEL }.flat_map do |path, text|
-        code = DeviceCallers.code(text)
+        code = ErlangText.code(text)
         names(path, code) + (READERS.include?(path) ? reader_calls(path, atoms_only(code)) : [])
       end
     end
@@ -81,7 +81,7 @@ module Erx
     # The code with each string and character blanked and each quoted atom unquoted,
     # lines kept, so a remote call reads the same written either way.
     def atoms_only(code)
-      code.gsub(DeviceCallers::LEXEME) do
+      code.gsub(ErlangText::LEXEME) do
         lexeme = Regexp.last_match(0)
         lexeme.start_with?("'") ? lexeme[1..-2].gsub(/[^A-Za-z0-9_@\n]/, '_') : lexeme.gsub(/[^\n]/, ' ')
       end

@@ -4,9 +4,9 @@
 %% The display driver's behaviour (docs/design-display.md, "The display device"). A display
 %% driver is an Erlang process over the device NIF: a gen_server that implements the one
 %% callback, info/1, and answers in its handle_call/3 the two requests this module defines,
-%% request(). erx_screen is the one caller of both functions here, which the build check
-%% DisplayDriverCallers (tools/lib/erx/display_driver_callers.rb) holds. erx_screen hands
-%% info/1 the driver's process.
+%% request(). erx_screen is the one caller of both functions here, which the chokepoint
+%% display-driver-callers (tools/lib/erx/chokepoint_rules/display.rb) holds. erx_screen
+%% hands info/1 the driver's process.
 %%
 %% info/1 names the screen image, an erx_memdraw image of the display's size and channel
 %% over memory the driver chose, which erx_screen composes into and nothing else writes;

@@ -10,6 +10,19 @@ module Erx
     PIPE_CORE = 'liberx/erx_pipe_core.c'
     # The runner that performs the core's steps on an end's mapped pages.
     PIPE_RUN = 'liberx/erx_pipe_run.c'
+    PIPE_NIF_MODULE = 'erlang/apps/erx/src/erx_pipe_nif.erl'
+    PIPE_SERVER = 'erlang/apps/erx/src/erx_pipe_srv.erl'
+
+    # A call of one of erx_pipe_nif's names in the forms a module can write it.
+    def self.pipe_nif_calls(names)
+      nif = ErlangText::ATOM.call('erx_pipe_nif')
+      /
+          #{nif} \s* (?: : | , ) \s* (?:#{names.map { |name| ErlangText::ATOM.call(name) }.join('|')})
+        | -\s*import\s*\(\s*#{nif}
+        | -\s*define\s*\(\s*[^,()]+,\s*#{nif}\s*\)
+      /x
+    end
+
     # The generated accessors that load a field of a page a pipe lane or
     # lock uses: its reader page, lock page and ring header. The published
     # positions' acquire loads are the exception: a write end's of rpos and
@@ -87,23 +100,34 @@ module Erx
         # Only the pipe server makes a pipe's objects (PI1) and the hand-offs
         # that give them to programs; only a program's handler makes and
         # drops the holder entry it speaks for its program by; only the pipe
-        # server hears a program's gone. The Erlang sources are PipeCallers'.
-        Chokepoints::Elsewhere.new(
+        # server hears a program's gone. A call rule refuses erx_pipe_nif
+        # followed by one of its names, as a remote call or a fun and as an
+        # apply passes them, any import from erx_pipe_nif, and a macro whose
+        # body is the module. erx_pipe_srv itself calls through a variable,
+        # its nif option, which the rules do not see.
+        Chokepoints::ErlangForbidden.new(
           name: 'pipe-makers', rule: "only the session's pipe server, erx_pipe_srv, calls erx_pipe_nif's make_lock/1, " \
                                      'make_lane/1, make_bell/3 and hand_make/2, which make a pipe\'s lock, lanes and ' \
                                      'bells and the hand-offs that give them to programs',
-          design: "#{PIPES}#invariants", check: 'PipeCallers, in Checks', test: 'test/host/pipe_callers_test.rb'
+          design: "#{PIPES}#invariants", pattern: pipe_nif_calls(%w[make_lock make_lane make_bell hand_make]),
+          sites: [PIPE_SERVER, PIPE_NIF_MODULE],
+          seed: { 'erlang/apps/erx/src/seeded.erl' => "f(L) -> erx_pipe_nif:make_lane(L).\n",
+                  'erlang/apps/erx/src/seeded_import.erl' => "-import(erx_pipe_nif, [make_lock/1]).\n" }
         ),
-        Chokepoints::Elsewhere.new(
+        Chokepoints::ErlangForbidden.new(
           name: 'pipe-holders', rule: "only a program's handler, erx_prog_handler, calls erx_pipe_nif's " \
                                       'program_holder/1 and holder_drop/1, which make and let go the holder entry ' \
                                       'by which it speaks for its program',
-          design: "#{PIPES}#hand-offs", check: 'PipeCallers, in Checks', test: 'test/host/pipe_callers_test.rb'
+          design: "#{PIPES}#hand-offs", pattern: pipe_nif_calls(%w[program_holder holder_drop]),
+          sites: ['erlang/apps/erx/src/erx_prog_handler.erl', PIPE_NIF_MODULE],
+          seed: { 'erlang/apps/erx/src/seeded.erl' => "f(H) -> apply(erx_pipe_nif, holder_drop, [H]).\n" }
         ),
-        Chokepoints::Elsewhere.new(
+        Chokepoints::ErlangForbidden.new(
           name: 'pipe-holder-gone-erlang', rule: 'only erx_pipe_srv, which receives it, names the atom ' \
                                                  "erx_pipe_holder_gone, a program's gone, among the Erlang sources",
-          design: "#{PIPES}#hand-offs", check: 'PipeCallers, in Checks', test: 'test/host/pipe_callers_test.rb'
+          design: "#{PIPES}#hand-offs", pattern: Regexp.new(ErlangText::ATOM.call('erx_pipe_holder_gone')),
+          sites: [PIPE_SERVER],
+          seed: { 'erlang/apps/erx/src/seeded.erl' => "f(P) -> P ! {'erx_pipe_holder_gone', 1}.\n" }
         ),
         # The driver alone takes a hand-off and lets the port's hold on a
         # holder entry go; the NIF defines both and its header declares them.

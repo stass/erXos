@@ -2,26 +2,25 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'minitest/autorun'
-require 'tmpdir'
-require_relative '../../tools/lib/erx/checks'
-require_relative '../../tools/lib/erx/device_callers'
+require_relative 'chokepoints_helper'
 
 # The chokepoint that only erx_device and the driver applications name erx_device
 # (docs/design-runtime.md, "The device NIF"): the tree passes, and each seeded way of
 # reaching the device module from elsewhere fails.
 class DeviceCallersTest < Minitest::Test
-  ROOT = File.expand_path('../..', __dir__)
+  include ChokepointsHelper
+
   STOCK = 'otp/lib/stdlib/src/seeded.erl'
   SERVICE = 'erlang/apps/erx_files/src/seeded.erl'
 
-  def lines_of(files) = Erx::DeviceCallers.violations(files).map { |violation| [violation.path, violation.line] }
+  RULES = %w[device-callers device-line-calls].freeze
+
+  def lines_of(files) = erlang_found(RULES, files).map { |_, path, line| [path, line] }
 
   def test_the_tree_passes_and_its_driver_is_a_site
-    paths = Erx::DeviceCallers::SCOPE.flat_map { |glob| Dir.glob(glob, base: ROOT) }
-    files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
-    assert_empty Erx::DeviceCallers.violations(files).map(&:to_s)
-    assert_match Erx::DeviceCallers::NAMED, files.fetch('erlang/apps/erx_uart/src/erx_pl011.erl')
+    files = erlang_tree
+    assert_empty evaluate(RULES.map { |name| rule(name) }, files).map(&:to_s)
+    assert_match rule('device-callers').pattern, files.fetch('erlang/apps/erx_uart/src/erx_pl011.erl')
   end
 
   def test_a_remote_call_from_a_stock_module_fails
@@ -82,12 +81,7 @@ class DeviceCallersTest < Minitest::Test
 
   # The source check runs the rule over the files git lists, OTP's included.
   def test_the_source_check_refuses_a_seeded_violation
-    Dir.mktmpdir do |root|
-      FileUtils.mkdir_p(File.join(root, File.dirname(STOCK)))
-      File.write(File.join(root, STOCK), "f(D) -> erx_device:read(D, dr).\n")
-      checks = Erx::Checks.new(root: root, runner: nil)
-      error = assert_raises(Erx::Error) { checks.send(:check_device_callers, [STOCK, 'README.md']) }
-      assert_match "#{STOCK}:1", error.message
-    end
+    error = enforce_seeded(RULES, STOCK, "f(D) -> erx_device:read(D, dr).\n")
+    assert_match "#{STOCK}:1", error.message
   end
 end

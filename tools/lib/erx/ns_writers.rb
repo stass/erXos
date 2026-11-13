@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative 'device_callers'
+require_relative 'erlang_text'
 
 module Erx
   # The chokepoints of the namespace's writers (docs/design.md, "Chokepoint checks";
@@ -12,14 +12,14 @@ module Erx
   # resolution reads one table one writer made and one working directory set_cwd
   # checked.
   #
-  # The check reads the Erlang sources that can enter a release, as DeviceCallers
+  # The check reads the Erlang sources that can enter a release, as ErlangText
   # does, with comments removed and strings kept. ns-table-writer refuses a
   # persistent_term:put or erase of the key erx_ns outside erx_ns.erl. cwd-writer
   # refuses the name erx_set_cwd_nif anywhere but in prim_file.erl's set_cwd
   # function, the NIF's own stub, and a Name/1 in an attribute such as -nifs. Like the
   # other text rules it catches a slip, not a key or a call built from pieces.
   module NsWriters
-    SCOPE = DeviceCallers::SCOPE
+    SCOPE = ErlangText::SCOPE
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
     WRITER = 'erlang/apps/erx/src/erx_ns.erl'
     PRIM_FILE = 'otp/erts/preloaded/src/prim_file.erl'
@@ -41,7 +41,7 @@ module Erx
     # The violations among files, a map of path to source text.
     def violations(files)
       files.select { |path, _| covers?(path) }.flat_map do |path, text|
-        code = DeviceCallers.code(text)
+        code = ErlangText.code(text)
         table_writes(path, code) + cwd_writes(path, code)
       end
     end
@@ -85,7 +85,7 @@ module Erx
 
     # The code with every string, atom in quotes and character blanked, lines kept.
     def blanked(code)
-      code.gsub(DeviceCallers::LEXEME) { Regexp.last_match(0).gsub(/[^\n]/, ' ') }
+      code.gsub(ErlangText::LEXEME) { Regexp.last_match(0).gsub(/[^\n]/, ' ') }
     end
   end
 end

@@ -10,7 +10,7 @@
 %% ERX_VIRTIO_BLK_T_FLUSH and which moves no sectors; write/6 posts a write, whose type is
 %% ERX_VIRTIO_BLK_T_OUT, and is the only function that builds one. Nothing a caller passes
 %% chooses the type, so no other module can make the device write.
-%% tools/lib/erx/device_posters.rb holds the rule as a build check: no module but this one
+%% tools/lib/erx/chokepoint_rules/device.rb holds the rule as a build check: no module but this one
 %% calls erx_device:post/4.
 %%
 %% read_segments/3, write_segments/3 and flush_segments/0 are pure, so the requests are
@@ -20,7 +20,7 @@
 %%
 %% The SD host controller's half is the same rule for the other act: writing the command
 %% register, which issues one command to the card. Only this module calls
-%% erx_device:command/2 (tools/lib/erx/device_posters.rb), and it builds every command word
+%% erx_device:command/2 (tools/lib/erx/chokepoint_rules/device.rb), and it builds every command word
 %% itself from the generated field macros of hw/svd/sdhci/sdhci.svd. A device process names
 %% a card-identification step of erx_blk_sd_card, which the SD table admits only if it lists
 %% the command, or asks for a read, a write or a status; only sd_read_command/3,

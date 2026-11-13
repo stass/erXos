@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative 'device_callers'
+require_relative 'erlang_text'
 require_relative 'erlang_apps'
 require_relative 'error'
 require_relative 'release_files'
@@ -26,7 +26,7 @@ module Erx
   #
   # kernel and stdlib are not read: their sources lie in otp/, not erlang/apps/, so an
   # erXos edit there that named a client module would pass. Like
-  # DeviceCallers it reads names, so it catches a slip, not an atom built from pieces.
+  # the chokepoints' Erlang rules it reads names, so it catches a slip, not an atom built from pieces.
   module DisplayRelease
     # The client's module families: the draw protocol, its picture decoders erx_png and
     # erx_inflate, the widget trees and their format, the terminal and its emulator, the
@@ -86,7 +86,7 @@ module Erx
 
     # The text with comments and triple-quoted documentation blanked, every line kept.
     def code(text)
-      DeviceCallers.code(text).gsub(DeviceCallers::TRIPLE) { |doc| "\n" * doc.count("\n") }
+      ErlangText.code(text).gsub(ErlangText::TRIPLE) { |doc| "\n" * doc.count("\n") }
     end
   end
 end

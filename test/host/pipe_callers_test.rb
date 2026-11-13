@@ -2,12 +2,9 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'minitest/autorun'
-require 'tmpdir'
-require_relative '../../tools/lib/erx/checks'
-require_relative '../../tools/lib/erx/pipe_callers'
+require_relative 'chokepoints_helper'
 
-# The Erlang halves of the pipe's chokepoints (tools/lib/erx/pipe_callers.rb). pipe-makers (PI1):
+# The Erlang halves of the pipe's chokepoints (tools/lib/erx/chokepoint_rules/pipe.rb). pipe-makers (PI1):
 # a call of erx_pipe_nif's make_lock/1, make_lane/1, make_bell/3 or hand_make/2 outside
 # erx_pipe_srv fails, whether a remote call, a fun, an apply, a macro naming the module or any
 # import. pipe-holders: a call of program_holder/1 or holder_drop/1 outside erx_prog_handler
@@ -15,18 +12,20 @@ require_relative '../../tools/lib/erx/pipe_callers'
 # NIF's other calls and the tests' own modules are not refused. The seeds are the design's
 # (docs/design-pipes.md, Verification, build checks of the hand-offs).
 class PipeCallersTest < Minitest::Test
-  ROOT = File.expand_path('../..', __dir__)
+  include ChokepointsHelper
+
   SERVER = 'erlang/apps/erx/src/erx_pipe_srv.erl'
   HANDLER = 'erlang/apps/erx/src/erx_prog_handler.erl'
   SESSION = 'erlang/apps/erx/src/erx_session.erl'
   SEEDED = "l() -> erx_pipe_nif:make_lock(1).\n"
 
-  def found(files) = Erx::PipeCallers.violations(files).map { |violation| [violation.rule.name, violation.path, violation.line] }
+  RULES = %w[pipe-makers pipe-holders pipe-holder-gone-erlang].freeze
+
+  def found(files) = erlang_found(RULES, files)
 
   def test_the_tree_passes
-    paths = Erx::DeviceCallers::SCOPE.flat_map { |glob| Dir.glob(glob, base: ROOT) }
-    files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
-    assert_empty Erx::PipeCallers.violations(files).map(&:to_s)
+    files = erlang_tree
+    assert_empty evaluate(RULES.map { |name| rule(name) }, files).map(&:to_s)
   end
 
   def test_a_seeded_make_outside_the_pipe_server_is_refused
@@ -85,12 +84,7 @@ class PipeCallersTest < Minitest::Test
 
   # The source check runs the rules over the files git lists.
   def test_the_source_check_refuses_a_seeded_violation
-    Dir.mktmpdir do |root|
-      FileUtils.mkdir_p(File.join(root, File.dirname(SESSION)))
-      File.write(File.join(root, SESSION), SEEDED)
-      checks = Erx::Checks.new(root: root, runner: nil)
-      error = assert_raises(Erx::Error) { checks.send(:check_pipe_callers, [SESSION, 'README.md']) }
-      assert_match "#{SESSION}:1", error.message
-    end
+    error = enforce_seeded(RULES, SESSION, SEEDED)
+    assert_match "#{SESSION}:1", error.message
   end
 end

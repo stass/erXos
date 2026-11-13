@@ -2,30 +2,27 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'minitest/autorun'
-require 'tmpdir'
-require_relative '../../tools/lib/erx/checks'
-require_relative '../../tools/lib/erx/display_driver_callers'
+require_relative 'chokepoints_helper'
 
 # The chokepoint "only erx_screen calls erx_display:flush_request/3 and power_request/2":
 # a call of either outside erx_screen fails, in a driver's own modules too, in every form
 # that names it as a call target; erx_display's definitions, the behaviour's types and a
 # driver's own handle_call/3 pass.
 class DisplayDriverCallersTest < Minitest::Test
-  ROOT = File.expand_path('../..', __dir__)
+  include ChokepointsHelper
+
   SCREEN = 'erlang/apps/erx_display/src/erx_screen.erl'
   DISPLAY = 'erlang/apps/erx_display/src/erx_display.erl'
   DRIVER = 'erlang/apps/erx_fb/src/erx_virtio_gpu.erl'
   WM = 'erlang/apps/erx_display/src/erx_wm.erl'
   SEEDED = "f(D, I) -> erx_display:flush_request(D, [], I).\n"
 
-  def lines_of(files) = Erx::DisplayDriverCallers.violations(files).map { |violation| [violation.path, violation.line] }
+  def lines_of(files) = erlang_found(%w[display-driver-callers], files).map { |_, path, line| [path, line] }
 
   def test_the_tree_passes_and_the_screen_calls_the_driver
-    paths = Erx::DeviceCallers::SCOPE.flat_map { |glob| Dir.glob(glob, base: ROOT) }
-    files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
-    assert_empty Erx::DisplayDriverCallers.violations(files).map(&:to_s)
-    screen = Erx::StartCallers.code_without_strings(files.fetch(SCREEN))
+    files = erlang_tree
+    assert_empty evaluate([rule('display-driver-callers')], files).map(&:to_s)
+    screen = Erx::ErlangText.code_without_strings(files.fetch(SCREEN))
     assert_match(/erx_display:flush_request\(Driver, /, screen, 'erx_screen sends its frames through erx_display')
   end
 
@@ -69,12 +66,7 @@ class DisplayDriverCallersTest < Minitest::Test
 
   # The source check runs the rule over the files git lists.
   def test_the_source_check_refuses_a_seeded_violation
-    Dir.mktmpdir do |root|
-      FileUtils.mkdir_p(File.join(root, File.dirname(WM)))
-      File.write(File.join(root, WM), SEEDED)
-      checks = Erx::Checks.new(root: root, runner: nil)
-      error = assert_raises(Erx::Error) { checks.send(:check_display_driver_callers, [WM, 'README.md']) }
-      assert_match "#{WM}:1", error.message
-    end
+    error = enforce_seeded(%w[display-driver-callers], WM, SEEDED)
+    assert_match "#{WM}:1", error.message
   end
 end

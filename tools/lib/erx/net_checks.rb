@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative 'device_callers'
+require_relative 'erlang_text'
 require_relative 'origin_unwraps'
 
 module Erx
@@ -48,7 +48,7 @@ module Erx
   #   erx_sock_admit name the atom erx_origin, bare or quoted, so only they take
   #   apart the envelope of a message from another domain (D18).
   #
-  # Like DeviceCallers these read the source text with comments removed, and
+  # Like the chokepoints' Erlang rules these read the source text with comments removed, and
   # catch a slip, not a determined bypass that builds a name from pieces. The
   # atoms check keeps strings and quoted atoms, since `apply(erlang,
   # 'list_to_atom', ...)` names the function as surely as a call does; the
@@ -273,7 +273,7 @@ module Erx
 
     def atom_violations(sources)
       sources.flat_map do |path, text|
-        DeviceCallers.code(text).each_line.with_index(1).filter_map do |line, number|
+        ErlangText.code(text).each_line.with_index(1).filter_map do |line, number|
           next unless (name = line[ATOM_MAKERS, 1])
 
           Violation.new(rule: 'atoms', path: path, line: number,
@@ -345,7 +345,7 @@ module Erx
     # each quoted atom unquoted, every line kept: a call names its module as
     # an atom, quoted or not, and never inside a string such as a -moduledoc.
     def calls_text(text)
-      text.b.gsub(DeviceCallers::LEXEME) do
+      text.b.gsub(ErlangText::LEXEME) do
         lexeme = Regexp.last_match(0)
         lexeme.start_with?("'") ? lexeme.delete("'") : lexeme.gsub(/[^\n]/, ' ')
       end
@@ -354,7 +354,7 @@ module Erx
     # The text with each comment, string, quoted atom and character literal
     # blanked and every line kept.
     def blank_literals(text)
-      text.b.gsub(DeviceCallers::LEXEME) { Regexp.last_match(0).gsub(/[^\n]/, ' ') }
+      text.b.gsub(ErlangText::LEXEME) { Regexp.last_match(0).gsub(/[^\n]/, ' ') }
     end
 
     def notice_violations(sources, notice:)

@@ -1997,7 +1997,7 @@ readers, which any pipe has.
   [Hand-offs](#hand-offs) is a chokepoint check with a seeded violation
   that the check's test plants, beside `pipe-makers`, which keeps
   `erx_pipe_nif`'s `make_lock`, `make_lane` and `make_bell` to
-  `erx_pipe_srv` (PI1, `tools/lib/erx/pipe_callers.rb`):
+  `erx_pipe_srv` (PI1, `tools/lib/erx/chokepoint_rules/pipe.rb`):
   `pipe-makers` gains `hand_make`, so only `erx_pipe_srv` makes a
   hand-off (seed: a call in `erx_prog_handler.erl`); `pipe-hand-take`
   keeps `erx_pipe_hand_take` and `erx_pipe_holder_release` in ERTS to the

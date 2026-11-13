@@ -4,6 +4,7 @@
 
 require 'strscan'
 require_relative 'bounded_file'
+require_relative 'erlang_text'
 require_relative 'error'
 require_relative 'stack_graph'
 
@@ -19,6 +20,9 @@ module Erx
   # * Forbidden: a pattern that may match only at an allowed site, over the
   #   C view of each file in scope (comments removed, strings kept, so
   #   inline assembly and header names stay visible).
+  # * ErlangForbidden: a pattern that may match only in an allowed
+  #   source, over the Erlang view of each Erlang source in scope
+  #   (ErlangText: comments removed, strings kept or blanked).
   # * IncludeForm: every include directive in scope names a header by a
   #   plain path, so no computed include or included non-header can carry
   #   text past a Forbidden rule.
@@ -118,6 +122,51 @@ module Erx
             Violation.new(rule: name, path: path, line: line.number, detail: "forbidden here: #{found.strip}")
           end
         end
+      end
+    end
+
+    ERLANG_STRINGS = %i[kept blanked].freeze
+    EXCERPT_BYTES = 80
+
+    # ErlangForbidden: pattern may match only in a source of sites (globs),
+    # over the Erlang view of every Erlang source (ErlangText::SCOPE) that
+    # scope's globs name, all of them when scope is nil. The view is scanned
+    # whole, so a call split across lines is seen. allowed, when given, is
+    # tried before pattern at each place, and its matches are skipped: so
+    # pattern can refuse a name everywhere it is not part of an allowed form.
+    # strings is :kept, since a string can become an atom, or :blanked, for a
+    # rule whose names doc strings may mention. A line is reported once per
+    # rule.
+    ErlangForbidden = Data.define(:name, :rule, :design, :scope, :pattern, :sites, :allowed, :strings, :seed) do
+      include Seeded
+
+      def initialize(name:, rule:, design:, pattern:, seed:, scope: nil, sites: [], allowed: nil, strings: :kept)
+        unless ERLANG_STRINGS.include?(strings)
+          raise Error, "chokepoint #{name}: strings is one of #{ERLANG_STRINGS.join(', ')}"
+        end
+
+        super(name: name, rule: rule, design: design, scope: scope&.freeze, pattern: pattern, sites: sites.freeze,
+              allowed: allowed, strings: strings, seed: seed.freeze)
+        validate_seed!
+      end
+
+      def covers?(path)
+        ErlangText.covers?(path) && (scope.nil? || ErlangText.matches?(scope, path)) &&
+          !ErlangText.matches?(sites, path)
+      end
+
+      # The violations in code, the view of path this rule's strings select.
+      def violations(path, code)
+        scanned = allowed ? /(?<allowed>#{allowed})|#{pattern}/ : pattern
+        code.to_enum(:scan, scanned).filter_map do
+          found = Regexp.last_match
+          next if allowed && found[:allowed]
+
+          excerpt = found[0].split.join(' ')
+          excerpt = "#{excerpt[0, EXCERPT_BYTES]}..." if excerpt.bytesize > EXCERPT_BYTES
+          Violation.new(rule: name, path: path, line: ErlangText.line_at(code, found.begin(0)),
+                        detail: "forbidden here: #{excerpt}")
+        end.uniq(&:line)
       end
     end
 
@@ -395,6 +444,7 @@ module Erx
     # given read, so tests evaluate rules over files held in memory.
     def violations(rules, names:, imported:, read:)
       views = {}
+      erlang_views = {}
       view_of = lambda do |path|
         views[path] ||= CView.for(read.call(path), path: path)
       end
@@ -406,6 +456,10 @@ module Erx
             view.errors.map do |error|
               Violation.new(rule: rule.name, path: path, line: error.number, detail: "cannot read as C: #{error.text}")
             end + rule.violations(path, view)
+          end
+        in ErlangForbidden
+          names.select { |path| rule.covers?(path) }.flat_map do |path|
+            rule.violations(path, erlang_views[[path, rule.strings]] ||= ErlangText.view(read.call(path), strings: rule.strings))
           end
         in Pending | Elsewhere
           rule.violations_in(names)

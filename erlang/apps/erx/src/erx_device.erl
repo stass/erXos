@@ -22,7 +22,7 @@
 %% controller's command register, cmdtm (docs/design-runtime.md, "Issuing an SD command").
 %% It is badarg for a record whose peripheral is not sdhci and for a word that sets a bit
 %% no field of cmdtm holds or enables DMA, since no ADMA2 queue is ever armed. Only the
-%% block driver's write path, erx_blk_write, calls it (tools/lib/erx/device_posters.rb).
+%% block driver's write path, erx_blk_write, calls it (tools/lib/erx/chokepoint_rules/device.rb).
 %%
 %% irq_bind/2 makes the calling process the receiver of `{erx_irq, Dev, Line}`, once per
 %% fire of the line, at the next safe point. A level-sensitive line stays masked until

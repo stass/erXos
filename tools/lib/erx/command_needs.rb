@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative 'device_callers'
+require_relative 'erlang_text'
 
 module Erx
   # The chokepoint that only a command declaring a service's facet reaches that service
@@ -71,7 +71,7 @@ module Erx
     def violations(files)
       names = names_of(files.keys)
       files.select { |path, _| covers?(path) }.flat_map do |path, text|
-        skeleton = blanked(DeviceCallers.code(text))
+        skeleton = blanked(ErlangText.code(text))
         if skeleton.match?(COMMAND)
           undeclared(path, skeleton, names)
         elsif File.dirname(path) == SHELL
@@ -128,7 +128,7 @@ module Erx
     # The code with every string, quoted atom and character blanked, lines kept, so
     # neither a name in a string nor a quoted needs list counts.
     def blanked(code)
-      code.gsub(DeviceCallers::LEXEME) { Regexp.last_match(0).gsub(/[^\n]/, ' ') }
+      code.gsub(ErlangText::LEXEME) { Regexp.last_match(0).gsub(/[^\n]/, ' ') }
     end
   end
 end

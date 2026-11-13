@@ -5,15 +5,10 @@
 require 'set'
 require_relative 'bounded_file'
 require_relative 'chokepoint_rules'
-require_relative 'device_callers'
 require_relative 'display_release'
 require_relative 'erlang_apps'
 require_relative 'dependencies'
-require_relative 'device_posters'
-require_relative 'display_driver_callers'
-require_relative 'pipe_callers'
 require_relative 'area_mappers'
-require_relative 'start_callers'
 require_relative 'erofs_reads'
 require_relative 'web_sinks'
 require_relative 'generated'
@@ -156,12 +151,7 @@ module Erx
       own_sources.each { |relative| check_own_source(relative, listed: listed_set) }
       check_json_parsing(own_sources)
       check_test_image_builders(own_sources)
-      check_device_callers(listed)
-      check_device_posters(listed)
-      check_display_driver_callers(listed)
-      check_pipe_callers(listed)
       check_area_mappers(listed)
-      check_start_callers(listed)
       check_erofs_reads(listed)
       check_net(listed)
       check_command_needs(listed)
@@ -338,39 +328,10 @@ module Erx
       end
     end
 
-    # Imports included, as for the device callers.
-    def check_display_driver_callers(listed)
-      sources = listed.select { |relative| DisplayDriverCallers.covers?(relative) && File.file?(File.join(@root, relative)) }
-      violations = DisplayDriverCallers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
-      raise Error, violations.join("\n") unless violations.empty?
-    end
-
-    # Imports included, as for the device callers.
-    def check_device_posters(listed)
-      sources = listed.select { |relative| DevicePosters.covers?(relative) && File.file?(File.join(@root, relative)) }
-      violations = DevicePosters.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
-      raise Error, violations.join("\n") unless violations.empty?
-    end
-
-    # Imports included, as for the device callers.
-    def check_pipe_callers(listed)
-      sources = listed.select { |relative| PipeCallers.covers?(relative) && File.file?(File.join(@root, relative)) }
-      violations = PipeCallers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
-      raise Error, violations.join("\n") unless violations.empty?
-    end
-
-    # otp/ included, as for the device callers.
+    # otp/ included, as for the chokepoint rules.
     def check_area_mappers(listed)
       sources = listed.select { |relative| AreaMappers.covers?(relative) && File.file?(File.join(@root, relative)) }
       violations = AreaMappers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
-      raise Error, violations.join("\n") unless violations.empty?
-    end
-
-    # otp/ included, as for the device callers: a stock module edited to start a session
-    # is as much a violation.
-    def check_start_callers(listed)
-      sources = listed.select { |relative| StartCallers.covers?(relative) && File.file?(File.join(@root, relative)) }
-      violations = StartCallers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 
@@ -378,13 +339,6 @@ module Erx
     # the applications whole, generated modules included, so it runs after generated_sources.
     def check_display_release
       violations = DisplayRelease.check(root: @root)
-      raise Error, violations.join("\n") unless violations.empty?
-    end
-
-    # Imports included: a stock module edited to call erx_device is as much a violation.
-    def check_device_callers(listed)
-      sources = listed.select { |relative| DeviceCallers.covers?(relative) && File.file?(File.join(@root, relative)) }
-      violations = DeviceCallers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 

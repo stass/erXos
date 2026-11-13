@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative 'device_callers'
-require_relative 'device_posters'
+require_relative 'erlang_text'
 
 module Erx
   # The chokepoint over who maps a pixel area (docs/design-display.md, "The pixel area"
@@ -22,10 +21,10 @@ module Erx
   # not; erx_area as
   # an apply's module, an import's or a macro's body; and erx_area inside a list, tuple or
   # map literal or a string, the forms a caller could hand to apply/3 or list_to_atom/1.
-  # It reads the Erlang sources DeviceCallers reads, with comments removed and strings
+  # It reads the Erlang sources ErlangText::SCOPE names, with comments removed and strings
   # kept, over the whole text, so a call split across lines is seen too, and a -doc that
   # names erx_area:map/4 is refused as any string is. Tests, under test/, are outside the
-  # scope. Like PipeCallers it catches a slip, not a module that holds erx_area in a
+  # scope. Like the chokepoints' Erlang rules it catches a slip, not a module that holds erx_area in a
   # variable built at run time.
   #
   # The C half reads every C and C++ file of otp/erts/emulator with string and character
@@ -44,7 +43,7 @@ module Erx
     AGENT = 'erlang/apps/erx/src/erx_connections.erl'
     LENDER = 'erlang/apps/erx_win/src/erx_pixels.erl'
     SITES = ['erlang/apps/erx/src/erx_area.erl', AGENT].freeze
-    MODULE = DevicePosters::ATOM.call('erx_area')
+    MODULE = ErlangText::ATOM.call('erx_area')
     # open/1, which hands a held area out, and area(), the type a -spec names.
     ALLOWED = %w[open area].freeze
     LENDING = %w[lend unlend zero].freeze
@@ -52,7 +51,7 @@ module Erx
     # Scanned left to right: at each place the allowed form is tried first, so the atom
     # matches as a violation only where it is not the module of an allowed function.
     def self.forms(allowed)
-      names = allowed.map { |name| DevicePosters::ATOM.call(name) }.join('|')
+      names = allowed.map { |name| ErlangText::ATOM.call(name) }.join('|')
       /(?<allowed>#{MODULE}\s*:\s*(?:#{names})) | (?<named>#{MODULE})/x
     end
     FORMS = forms(ALLOWED)
@@ -86,7 +85,7 @@ module Erx
 
     module_function
 
-    def covers?(path) = DeviceCallers.covers?(path) || c_file?(path)
+    def covers?(path) = ErlangText.covers?(path) || c_file?(path)
 
     def c_file?(path) = File.fnmatch?(C_SCOPE, path, File::FNM_PATHNAME | File::FNM_EXTGLOB)
 
@@ -95,7 +94,7 @@ module Erx
       files.flat_map do |path, text|
         if c_file?(path)
           c_violations(path, text)
-        elsif DeviceCallers.covers?(path) && !SITES.include?(path)
+        elsif ErlangText.covers?(path) && !SITES.include?(path)
           erlang_violations(path, text)
         else
           []
@@ -104,7 +103,7 @@ module Erx
     end
 
     def erlang_violations(path, text)
-      code = DeviceCallers.code(text)
+      code = ErlangText.code(text)
       forms = path == LENDER ? LENDER_FORMS : FORMS
       code.to_enum(:scan, forms).filter_map do
         match = Regexp.last_match

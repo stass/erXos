@@ -27,18 +27,6 @@ module Erx
           design: "#{KERNEL}#chokepoint-checks", check: 'StackProof', test: 'test/host/stack_proof_test.rb'
         ),
         Chokepoints::Elsewhere.new(
-          name: 'device-callers', rule: 'only erx_device, erx_irq_line and the driver applications name erx_device, whose NIF and BIFs ' \
-                                        'reach a device',
-          design: 'docs/design-runtime.md#the-device-nif', check: 'DeviceCallers, in Checks',
-          test: 'test/host/device_callers_test.rb'
-        ),
-        Chokepoints::Elsewhere.new(
-          name: 'device-posters', rule: "only the block driver's one write path, erx_blk_write, calls erx_device:post/4, " \
-                                        'and it builds every request it posts',
-          design: 'docs/design-storage.md#data-model', check: 'DevicePosters, in Checks',
-          test: 'test/host/device_posters_test.rb'
-        ),
-        Chokepoints::Elsewhere.new(
           name: 'erofs-reads', rule: 'the EROFS reader reaches an image only through erx_verity:read/3, and only erx_verity ' \
                                      'reaches the window behind it',
           design: 'docs/design-storage.md#reading-erofs-images', check: 'ErofsReads, in Checks',

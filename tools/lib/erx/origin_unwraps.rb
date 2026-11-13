@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require_relative 'device_callers'
+require_relative 'erlang_text'
 
 module Erx
   # The chokepoint on the envelope of a message from another domain (docs/design.md,
@@ -12,7 +12,7 @@ module Erx
   # proc_lib above all must not, or a peer could steer any behaviour process.
   #
   # The check reads every Erlang source under otp/ with comments removed and strings
-  # blanked, as DeviceCallers reads them, and refuses the atom erx_origin, bare or
+  # blanked, as ErlangText reads them, and refuses the atom erx_origin, bare or
   # quoted, in any module but the owners. It refuses a mention, not only a match, so
   # a module that builds the envelope fails too; like the other text rules it catches
   # a slip, not an atom made from pieces with list_to_atom/1 or a quoted atom spelled
@@ -58,7 +58,7 @@ module Erx
     # The code with comments removed and every string and character blanked, lines
     # kept; a quoted atom stays, since 'erx_origin' is the same atom.
     def code_text(text)
-      text.b.gsub(DeviceCallers::LEXEME) do
+      text.b.gsub(ErlangText::LEXEME) do
         found = Regexp.last_match
         if found[:comment] then ''
         elsif found[:kept].start_with?("'") then found[:kept]

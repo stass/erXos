@@ -2,28 +2,27 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'minitest/autorun'
-require 'tmpdir'
-require_relative '../../tools/lib/erx/checks'
-require_relative '../../tools/lib/erx/device_posters'
+require_relative 'chokepoints_helper'
 
 # The chokepoint "only the block driver's one write path issues writes", held by
 # construction: a call of erx_device:post/4 outside erx_blk_write fails, in the driver's
 # own modules too, whether a remote call, a fun, an apply, or an import.
 class DevicePostersTest < Minitest::Test
-  ROOT = File.expand_path('../..', __dir__)
+  include ChokepointsHelper
+
   WRITE_PATH = 'erlang/apps/erx_blk/src/erx_blk_write.erl'
   DRIVER = 'erlang/apps/erx_blk/src/erx_blk_virtio.erl'
   SEEDED = "p(D, Q, T, S) -> erx_device:post(D, Q, T, S).\n"
 
-  def lines_of(files) = Erx::DevicePosters.violations(files).map { |violation| [violation.path, violation.line] }
+  RULES = %w[device-posters device-commands].freeze
+
+  def lines_of(files) = erlang_found(RULES, files).map { |_, path, line| [path, line] }
 
   def test_the_tree_passes_and_the_write_path_posts
-    paths = Erx::DeviceCallers::SCOPE.flat_map { |glob| Dir.glob(glob, base: ROOT) }
-    files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
-    assert_empty Erx::DevicePosters.violations(files).map(&:to_s)
-    assert_match Erx::DevicePosters::NAMED.fetch('post'), files.fetch(WRITE_PATH)
-    assert_match Erx::DevicePosters::NAMED.fetch('command'), files.fetch(WRITE_PATH)
+    files = erlang_tree
+    assert_empty evaluate(RULES.map { |name| rule(name) }, files).map(&:to_s)
+    assert_match rule('device-posters').pattern, files.fetch(WRITE_PATH)
+    assert_match rule('device-commands').pattern, files.fetch(WRITE_PATH)
   end
 
   def test_a_seeded_post_outside_the_write_path_is_refused
@@ -32,12 +31,14 @@ class DevicePostersTest < Minitest::Test
       'a fun' => "f() -> fun erx_device:post/4.\n",
       'a quoted atom' => "f(D, Q, T, S) -> 'erx_device':'post'(D, Q, T, S).\n",
       'an apply' => "f(A) -> erlang:apply(erx_device, post, A).\n",
-      'an import' => "-import(erx_device, [read/2, post/4]).\n",
       'a call split across lines' => "f(D, Q, T, S) ->\n    erx_device:\n        post(D, Q, T, S).\n"
     }.each do |form, source|
       line = source.lines.index { |text| text.include?('erx_device') } + 1
       assert_equal [[DRIVER, line]], lines_of(DRIVER => source), form
     end
+    # An import names every issuing call by its bare name, so each rule refuses it.
+    assert_equal [['device-posters', DRIVER, 1], ['device-commands', DRIVER, 1]],
+                 erlang_found(RULES, DRIVER => "-import(erx_device, [read/2, post/4]).\n")
     assert_equal [['erlang/apps/erx_uart/src/seeded.erl', 1]], lines_of('erlang/apps/erx_uart/src/seeded.erl' => SEEDED)
     assert_equal [['otp/lib/stdlib/src/seeded.erl', 1]], lines_of('otp/lib/stdlib/src/seeded.erl' => SEEDED)
   end
@@ -64,12 +65,7 @@ class DevicePostersTest < Minitest::Test
 
   # The source check runs the rule over the files git lists.
   def test_the_source_check_refuses_a_seeded_violation
-    Dir.mktmpdir do |root|
-      FileUtils.mkdir_p(File.join(root, File.dirname(DRIVER)))
-      File.write(File.join(root, DRIVER), SEEDED)
-      checks = Erx::Checks.new(root: root, runner: nil)
-      error = assert_raises(Erx::Error) { checks.send(:check_device_posters, [DRIVER, 'README.md']) }
-      assert_match "#{DRIVER}:1", error.message
-    end
+    error = enforce_seeded(RULES, DRIVER, SEEDED)
+    assert_match "#{DRIVER}:1", error.message
   end
 end

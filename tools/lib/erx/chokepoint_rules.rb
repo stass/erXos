@@ -82,7 +82,7 @@ module Erx
     # core's. unchecked_objects are its liberx sources that object-leg does
     # not read yet. none is the stated reason a core has no rule of its own.
     Group = Data.define(:rules, :private_headers, :private_header_tests, :unchecked_objects, :none)
-    RULE_KINDS = [Chokepoints::Forbidden, Chokepoints::IncludeForm, Chokepoints::Callers,
+    RULE_KINDS = [Chokepoints::Forbidden, Chokepoints::ErlangForbidden, Chokepoints::IncludeForm, Chokepoints::Callers,
                   Chokepoints::Elsewhere, Chokepoints::Pending, Chokepoints::Writers].freeze
     GROUP_FILES = DeclarationFiles.new('chokepoint rules')
     private_constant :GROUP_FILES
@@ -263,7 +263,8 @@ module Erx
            *PRIVATE_LAYOUTS.map { |layout| private_layout_rule(layout) },
            *PRIVATE_LAYOUTS.map { |layout| private_layout_writers(layout) }].freeze
     # Rules read from each file's text.
-    ACTIVE = ALL.grep(Chokepoints::Forbidden).concat(ALL.grep(Chokepoints::IncludeForm)).freeze
+    ACTIVE = [Chokepoints::Forbidden, Chokepoints::ErlangForbidden, Chokepoints::IncludeForm]
+             .flat_map { |kind| ALL.grep(kind) }.freeze
     # Rules read from the cores' call graph, which the stack proof builds at
     # every level it proves and checks against these before proving it.
     CALL_GRAPH = ALL.grep(Chokepoints::Callers).freeze

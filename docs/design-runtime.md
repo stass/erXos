@@ -2834,7 +2834,7 @@ pool buffers, so the rule holds over it as well.
 Only the driver's modules reference the device NIF: ERTS binds a static NIF
 only to the module of its name, and the register BIFs are that module's, so
 Erlang reaches a device only by naming `erx_device`, and a source check
-(`tools/lib/erx/device_callers.rb`, in `make check`) fails the build when any
+(`tools/lib/erx/chokepoint_rules/device.rb`, in `make check`) fails the build when any
 Erlang source under `otp/` or `erlang/` other than `erx_device` itself and
 the modules of the driver applications names it, in a call, an apply, a
 quoted atom or a string, with a seeded violation in

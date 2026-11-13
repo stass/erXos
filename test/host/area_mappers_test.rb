@@ -30,7 +30,7 @@ class AreaMappersTest < Minitest::Test
   def lines_of(files) = Erx::AreaMappers.violations(files).map { |violation| [violation.path, violation.line] }
 
   def test_the_tree_passes
-    globs = [*Erx::DeviceCallers::SCOPE, Erx::AreaMappers::C_SCOPE]
+    globs = [*Erx::ErlangText::SCOPE, Erx::AreaMappers::C_SCOPE]
     paths = globs.flat_map { |glob| Dir.glob(glob, base: ROOT) }
     files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
     assert_empty Erx::AreaMappers.violations(files).map(&:to_s)

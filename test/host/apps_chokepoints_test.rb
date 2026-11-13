@@ -2,29 +2,28 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'minitest/autorun'
-require 'tmpdir'
-require_relative '../../tools/lib/erx/checks'
-require_relative '../../tools/lib/erx/start_callers'
+require_relative 'chokepoints_helper'
 
 # The start table's chokepoints (docs/design-apps.md, AP1 and AP2): erx_starter reaches
 # erx_domain only through start_session/2, stop/2 and the handle's accessors, and calls
 # nothing through a variable module or apply; only erx_console and erx_starter_keeper call
 # start_session/2; only erx_starter names display or default_display beside a start.
 class AppsChokepointsTest < Minitest::Test
-  ROOT = File.expand_path('../..', __dir__)
+  include ChokepointsHelper
+
   STARTER = 'erlang/apps/erx_starter/src/erx_starter.erl'
   KEEPER = 'erlang/apps/erx_starter/src/erx_starter_keeper.erl'
   CONSOLE = 'erlang/apps/erx/src/erx_console.erl'
   OTHER = 'erlang/apps/erx/src/erx_session.erl'
   START = "s(P) -> erx_domain:start_session(P, \#{}).\n"
 
-  def found(files) = Erx::StartCallers.violations(files).map { |violation| [violation.rule, violation.path, violation.line] }
+  RULES = %w[starter-reach start-callers start-display].freeze
+
+  def found(files) = erlang_found(RULES, files)
 
   def test_the_tree_passes
-    paths = Erx::DeviceCallers::SCOPE.flat_map { |glob| Dir.glob(glob, base: ROOT) }
-    files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
-    assert_empty Erx::StartCallers.violations(files).map(&:to_s)
+    files = erlang_tree
+    assert_empty evaluate(RULES.map { |name| rule(name) }, files).map(&:to_s)
   end
 
   def test_the_starter_reaches_erx_domain_only_through_its_calls
@@ -98,23 +97,19 @@ class AppsChokepointsTest < Minitest::Test
     with_display = "s(P, D) -> erx_domain:start_session(P, \#{display => D}).\n"
     assert_empty found(KEEPER => with_display)
     assert_equal [['start-display', CONSOLE, 1]], found(CONSOLE => with_display)
-    assert_equal [['start-callers', OTHER, 1], ['start-display', OTHER, 1]], found(OTHER => with_display)
+    # A module outside the callers that starts a session fails start-callers, display or not.
+    assert_equal [['start-callers', OTHER, 1]], found(OTHER => with_display)
     seeded = "s(P, D) ->\n    S = maps:put('default_display', D, \#{}),\n    erx_domain:start_session(P, S).\n"
     assert_equal [['start-display', CONSOLE, 2]], found(CONSOLE => seeded)
     via_service = "s(P, D) -> gen_server:call(erx_domain_srv, {start_session, P, \#{display => D}}).\n"
-    assert_equal [['start-callers', OTHER, 1], ['start-display', OTHER, 1]], found(OTHER => via_service)
+    assert_equal [['start-callers', OTHER, 1]], found(OTHER => via_service)
     assert_empty found(CONSOLE => "#{START}d() -> erlang:display(x), display(y), fun display/1.\n")
     assert_empty found(OTHER => "d(D) -> \#{display => D}.\n")
   end
 
   # The source check runs the rules over the files git lists.
   def test_the_source_check_refuses_a_seeded_violation
-    Dir.mktmpdir do |root|
-      FileUtils.mkdir_p(File.join(root, File.dirname(STARTER)))
-      File.write(File.join(root, STARTER), "c(S) -> erx_domain:create(S).\n")
-      checks = Erx::Checks.new(root: root, runner: nil)
-      error = assert_raises(Erx::Error) { checks.send(:check_start_callers, [STARTER, 'README.md']) }
-      assert_match "chokepoint starter-reach: #{STARTER}:1", error.message
-    end
+    error = enforce_seeded(RULES, STARTER, "c(S) -> erx_domain:create(S).\n")
+    assert_match "chokepoint starter-reach: #{STARTER}:1", error.message
   end
 end

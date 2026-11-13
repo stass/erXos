@@ -4,7 +4,7 @@
 
 require 'digest'
 require 'set'
-require_relative 'device_callers'
+require_relative 'erlang_text'
 require_relative 'error'
 require_relative 'generation_plan'
 require_relative 'ns_writers'
@@ -62,7 +62,7 @@ module Erx
     SERVICES = 'abi/services/*.txt'
     MANIFESTS = 'config/manifest/*.txt'
     DOCS = 'docs/design*.md'
-    SCOPE = DeviceCallers::SCOPE
+    SCOPE = ErlangText::SCOPE
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
 
     # Facets the code uses with no abi/services interface: each one's TODO.md item,
@@ -296,7 +296,7 @@ module Erx
 
     # Each facet name path uses: [path, line, name].
     def uses(path, text)
-      skeleton = NsWriters.blanked(DeviceCallers.code(text))
+      skeleton = NsWriters.blanked(ErlangText.code(text))
       USES.flat_map do |shape|
         skeleton.to_enum(:scan, shape).flat_map do
           found = Regexp.last_match

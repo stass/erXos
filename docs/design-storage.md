@@ -311,7 +311,7 @@ the register's name, in a map, a table or a message, still cannot issue
 a command; what remains is to keep the two issuing calls in
 `erx_blk_write`. The build check over the driver applications' Erlang
 sources that holds `erx_device:post/4` there
-(`tools/lib/erx/device_posters.rb`) holds `erx_device:command/2` the
+(`tools/lib/erx/chokepoint_rules/device.rb`) holds `erx_device:command/2` the
 same way, and makes the only way to reach either a call it can see:
 outside comments and strings, in every driver module but the issuing
 sites, it fails on
@@ -331,7 +331,7 @@ sites, it fails on
 With the module's name never a value and never made from data, a
 driver module reaches `erx_device` only by literal calls, and the first
 rule sees every one that issues. Outside the driver applications no
-module names `erx_device` at all (`tools/lib/erx/device_callers.rb`).
+module names `erx_device` at all (`tools/lib/erx/chokepoint_rules/device.rb`).
 Like the source checks it extends, this one catches a slip between
 trusted modules, not a module that builds the name from pieces outside
 the driver applications and hands it in; what keeps a device from

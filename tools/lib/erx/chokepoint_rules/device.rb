@@ -8,6 +8,20 @@ module Erx
   module ChokepointRules
     DEVICE_DESIGN = 'docs/design-runtime.md#the-device-nif'
     DEVICE_NIFS = 'otp/erts/emulator/nifs/erxos'
+    ERX_DEVICE = 'erlang/apps/erx/src/erx_device.erl'
+    ERX_IRQ_LINE = 'erlang/apps/erx/src/erx_irq_line.erl'
+    BLK_WRITE = 'erlang/apps/erx_blk/src/erx_blk_write.erl'
+    # The applications whose modules drive a device class.
+    DRIVER_APPLICATIONS = %w[erx_blk erx_fb erx_uart].freeze
+
+    # A call of erx_device's issuing function name: erx_device followed by
+    # the name after a colon (a remote call or fun) or a comma (an apply),
+    # or any import from erx_device, which names it bare.
+    def self.device_issue(name)
+      device = ErlangText::ATOM.call('erx_device')
+      /#{device} \s* (?: : | , ) \s* #{ErlangText::ATOM.call(name)} | -\s*import\s*\(\s*#{device}/x
+    end
+
     DEVICE_SCOPE = Chokepoints::Scope.new(own: true, extra: ['otp/**/*'], except: ['otp/erts/emulator/asmjit/**/*'])
     # The accessors tools/gen_hw.rb writes for each SVD peripheral, and their headers, read from
     # the generator, so a new device or register is covered as it is generated. A runtime reaches
@@ -163,6 +177,61 @@ module Erx
           pattern: %r{erx/hw/device_table\.h},
           sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device_core.c")],
           seed: { 'otp/erts/emulator/beam/seeded.c' => "#include \"erx/hw/device_table.h\"\n" }
+        ),
+        # The Erlang half: ERTS binds a static NIF only to the module of its
+        # name, and erx_device's register calls are BIFs of that module, so
+        # Erlang reaches a device only by naming erx_device. Only erx_device,
+        # erx_irq_line, which binds and acknowledges lines for drivers
+        # (docs/design-shared-devices.md, "Lines inside a domain"), and the
+        # driver applications, one per device class, name it: as a call, an
+        # apply's module literal, a quoted atom or a string. What keeps a device
+        # from other domains is that its capability is installed only in its
+        # driver's domain.
+        Chokepoints::ErlangForbidden.new(
+          name: 'device-callers', rule: 'only erx_device, erx_irq_line and the driver applications name erx_device, ' \
+                                        'whose NIF and BIFs reach a device',
+          design: DEVICE_DESIGN, pattern: /(?<![A-Za-z0-9_@])erx_device(?![A-Za-z0-9_@])/,
+          sites: [ERX_DEVICE, ERX_IRQ_LINE, *DRIVER_APPLICATIONS.map { |application| "erlang/apps/#{application}/**/*" },
+                  # erXos's own directory of the network stack, whose other modules name nothing of erXos's
+                  # (docs/design-network-stack.md, "Two places, four seams").
+                  'erlang/apps/erx_net/erxos/**/*'],
+          seed: { 'otp/lib/stdlib/src/seeded.erl' => "f(D) -> erx_device:read(D, dr).\n",
+                  'erlang/apps/erx_files/src/seeded.erl' => "f() -> \"erx_device\".\n" }
+        ),
+        # No driver binds a shared line and takes its deliveries from the drivers
+        # joined to its owner, nor binds or acknowledges a line past erx_irq_line
+        # (SD3); a literal table names the function as surely as a call does.
+        Chokepoints::ErlangForbidden.new(
+          name: 'device-line-calls', rule: 'only erx_device and erx_irq_line name irq_bind, irq_bind_owner or irq_ack: ' \
+                                           'a driver attaches and acknowledges its lines through erx_irq_line',
+          design: 'docs/design-shared-devices.md#lines-inside-a-domain',
+          pattern: /(?<![A-Za-z0-9_@])irq_(?:bind|bind_owner|ack)(?![A-Za-z0-9_@])/, sites: [ERX_DEVICE, ERX_IRQ_LINE],
+          seed: { 'erlang/apps/erx_uart/src/seeded.erl' => "f(D) -> erx_device:irq_bind_owner(D, 0).\n" }
+        ),
+        # A block device reads or writes the medium only for a request a driver
+        # posts, and erx_blk_write is the one block module that posts: it builds
+        # every request, and only its write/6 one whose type writes
+        # (docs/design-storage.md, U4). The network transports post frames and
+        # the virtio-gpu driver requests its pure core built, to devices handed
+        # no medium (docs/design-display.md, "The display device"). Refused
+        # outside them: erx_device:post as a remote call or fun, erx_device with
+        # post as an apply's next argument, and any import from erx_device.
+        Chokepoints::ErlangForbidden.new(
+          name: 'device-posters', rule: "only the block driver's one write path, erx_blk_write, the network transports and the " \
+                                        'virtio-gpu driver call erx_device:post/4, and each builds every request it posts',
+          design: 'docs/design-storage.md#data-model', pattern: device_issue('post'),
+          sites: [BLK_WRITE, 'erlang/apps/erx_net/erxos/erx_virtio_net.erl', 'erlang/apps/erx_net/erxos/erx_genet.erl',
+                  'erlang/apps/erx_fb/src/erx_virtio_gpu.erl'],
+          seed: { 'erlang/apps/erx_blk/src/seeded.erl' => "f(D) -> erx_device:post(D, 0, <<>>, 0).\n",
+                  'erlang/apps/erx_blk/src/seeded_import.erl' => "-import(erx_device, [post/4]).\n" }
+        ),
+        # An SD host controller acts when its command register is written, which
+        # only erx_device:command/2 does; the SD write path builds every command
+        # word, and only its write function CMD24 or CMD25.
+        Chokepoints::ErlangForbidden.new(
+          name: 'device-commands', rule: "only the block driver's one write path, erx_blk_write, calls erx_device:command/2",
+          design: 'docs/design-storage.md#data-model', pattern: device_issue('command'), sites: [BLK_WRITE],
+          seed: { 'erlang/apps/erx_net/erxos/erx_virtio_net.erl' => "f(D) -> apply(erx_device, command, [D, 0]).\n" }
         )
       ],
       unchecked_objects: []

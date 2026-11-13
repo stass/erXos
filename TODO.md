@@ -712,7 +712,7 @@ it; git history is the record of completed work.
 * [Medium] Start table (`erx_starter`, `docs/plan.md` M12): the table owes the reset count, cleared by the first
   kept session, and the rescue configuration starting no row, with their tests, once M12 builds the reset count and the
   rescue configuration; Track A's exit criteria no longer carry them.
-* [Medium] The start table's display key (`tools/lib/erx/start_callers.rb`, start-display): the check that only
+* [Medium] The start table's display key (`tools/lib/erx/chokepoint_rules/apps.rb`, start-display): the check that only
   `erx_starter` passes `display` or `default_display` to `erx_domain:start_session/2` reads the atoms in the
   calling module only, so a start map built in a helper module that never starts a session passes unseen (the
   keeper already passes a map built elsewhere). Make it hold by construction: a separate entry for a start at a
@@ -1525,7 +1525,7 @@ it; git history is the record of completed work.
 * [Low] stopgap, `liberx/backend/fiasco/service_task.c`: no test shows that a failed create of the console UART leaves the debug log on the line, and the native console suite counts no `l4_vcon_write` of a log record after the handoff; only the host core test counts console writes. A boot whose first create of the console window fails, and a counter the root prints at its end, would close the "Console handoff" row of `docs/design-stopgap.md`.
 * [Medium] kernel design, `docs/design-kernel.md`, "Console, log and panic": the early console writes every record until the console driver carves the UART, but the design does not say how the log service's console and the early console share one position, so nothing keeps the console from printing a boot line again or missing one. On the stopgap the console's read is the drain: `erx_log_take` (`liberx/backend/api.h`) copies from the one position of what has been taken, which the early console moves as it writes, and moves it, while every other reader uses `erx_log_read` from a cursor of its own. Add the take to the section and its call table, and to `docs/design-live.md`, "Log lines and program output", which has `erx_console` read with `erx_log_read`.
 * [Medium] stopgap, `liberx/backend/fiasco/service.c` `service_log_read`, `service_log_take`: no test shows that a task's `log_read` or `log_take` is refused with `ERX_ENOTSUP`; that check alone keeps a task from having the service write log bytes at an address of the root. Add the case to `test/guest/native_task/program.c` beside `task_write`'s refusals.
-* [Medium] chokepoint, `erlang/apps/erx/src/erx_log.erl` `take/0`: only `erx_console` takes the kernel log (`docs/design-stopgap.md`, "The console"), but no build check says so, and any root process can call `erx_log:take()`; a second caller takes lines from the console for good, and no loss is counted. Add a check in the manner of `tools/lib/erx/device_callers.rb` that refuses `erx_log:take` outside `erlang/apps/erx/src/erx_console.erl`, and a C rule that keeps `erx_log_take` and `erx_debug_log_take` to the NIF, the two backends and the core, each with a seeded violation.
+* [Medium] chokepoint, `erlang/apps/erx/src/erx_log.erl` `take/0`: only `erx_console` takes the kernel log (`docs/design-stopgap.md`, "The console"), but no build check says so, and any root process can call `erx_log:take()`; a second caller takes lines from the console for good, and no loss is counted. Add a check in the manner of `tools/lib/erx/chokepoint_rules/device.rb` that refuses `erx_log:take` outside `erlang/apps/erx/src/erx_console.erl`, and a C rule that keeps `erx_log_take` and `erx_debug_log_take` to the NIF, the two backends and the core, each with a seeded violation.
 * [Low] runtime, `erlang/apps/erx/src/erx_console.erl`: the console takes one window of the kernel log per `LOG_POLL_MS`, so a burst it is still catching up on can be overwritten and cost a "records lost" line though the records were in the ring when the burst began. Take again at once while a take fills its window.
 * [Low] runtime, `erx_log_nif.c` `read_lines`: a record that fails the reader's checks ends the window, and the console's line says so without saying how many records after it were dropped.
 * [Low] stopgap, `liberx/backend/fiasco/end.c`: the watchdog's end skips the debug log's parked records, as the service may be mid-write, so a missed pet after the console handoff loses the records the console had not read. At any end, lines the console has read but its driver has not yet written are lost uncounted, and the end's own drain can interleave with the driver's bytes on the UART.
@@ -1897,7 +1897,7 @@ it; git history is the record of completed work.
   with a regex copy of Erlang's lexer and a list of literal spellings, so they miss the idiomatic wrap
   `<<D:32/signed>> = <<(A - B):32>>`, a mask defined by a macro in a non-TCP header and used in a TCP
   module, and an escaped quoted atom such as `'list\_to_atom'`. Tokenize with stock OTP's `erl_scan`
-  (integer and `bsl` tokens by value, atoms after unescaping; DeviceCallers could share it), flag `:32`
+  (integer and `bsl` tokens by value, atoms after unescaping; ErlangText could share it), flag `:32`
   bit-syntax segments outside `erx_tcp_seq` and `erx_tcp_wire`, and consider refusing `file:consult`,
   `erl_scan`, `erl_parse` and `io:read` in erx_net too. The lifted-segment record remains the real guard.
 * [Low] network, `erx_tcp_input:dropwithreset` and the connect path: only the link-cast half of
@@ -2353,7 +2353,7 @@ it; git history is the record of completed work.
   `program_holder/1` are exported, so code that does not come from the tree (an expression at a session's `erl`
   shell, an app installed at run time) can make pipe objects outside the step's `pipes` quota, or make the holder
   entry of a program whose handler has not made it yet and so speak for that program; objects are collected
-  with their terms. The build check `tools/lib/erx/pipe_callers.rb` keeps the tree's own modules from calling
+  with their terms. The build check `tools/lib/erx/chokepoint_rules/pipe.rb` keeps the tree's own modules from calling
   them; restrict them to `erx_pipe_srv`'s and the handlers' processes when `erx_policy` sets the quota.
 * [Low] session, `erx_pipe_nif.c` (`end_broken`): the broken-lane line goes to stderr, not to the
   debug log as one escaped line (docs/design-pipes.md, "Failure handling"); it carries integers only.
@@ -4785,7 +4785,7 @@ it; git history is the record of completed work.
   other process learning the driver's pid. Have the driver take output only
   from its owner (an alias the owner holds, since `From` is the console's
   reply token), which makes the rule hold for both lines by construction,
-  and add the record check beside `DevicePosters`.
+  and add the record check beside the `device-posters` chokepoint.
 * [Medium] live, host-link facets in a release build
   (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`, `root/2`): the root offers
   the install facet and takes 16 MiB messages whatever the build, where
@@ -6819,11 +6819,11 @@ document's "residual risks accepted" paragraph.
   `tools/erx bench`. Decide whether ERTS's `perf` support and
   `erlang:statistics` use it. Replaces the stopgap's direct user access
   (Stopgap replacements above).
-* [Medium] erx_blk, `tools/lib/erx/device_posters.rb`: the rule "only `erx_blk_write` calls `erx_device:post/4`" is
+* [Medium] erx_blk, `tools/lib/erx/chokepoint_rules/device.rb`: the rule "only `erx_blk_write` calls `erx_device:post/4`" is
   tree-wide, but every virtio driver will post; once a second poster joins `SITES`, the write path's argument also
   needs "only the block driver's device process (`erx_blk_virtio`) opens a block record", which no check holds. Scope the rule per device class. Rename
   `erx_blk_write`, which now posts reads too, to what it is (for example `erx_blk_post`).
-* [Low] erx_blk, `tools/lib/erx/device_posters.rb`: the check that only `erx_blk_write` posts sees only literal
+* [Low] erx_blk, `tools/lib/erx/chokepoint_rules/device.rb`: the check that only `erx_blk_write` posts sees only literal
   calls, and holds `erx_device:command/2` to `erx_blk_write` the same way: a call whose module comes from a macro,
   a variable or `apply/3` escapes it. design-storage.md's U4 extends it over the driver applications: `erx_device`
   never a value (only the module of a literal remote call), and no atom made from data, with the seeded violations
@@ -6849,7 +6849,7 @@ document's "residual risks accepted" paragraph.
   page-aligned UART only; test containment instead.
 * [Medium] drivers, shared interrupt lines, who may reach a line
   ([design-shared-devices.md](docs/design-shared-devices.md#invariants), SD3 and SD4): the line-call check
-  (`tools/lib/erx/device_callers.rb`) reads source tokens, so an atom spelled with escapes passes it; the BEAM-file
+  (`tools/lib/erx/chokepoint_rules/device.rb`) reads source tokens, so an atom spelled with escapes passes it; the BEAM-file
   pass the design names is not built. Any module may call `erx_irq_line`, so `attach/2` of a guessed record moves a
   direct line's binding, `ack/1` of a forged direct handle acknowledges a shared line behind its owner, and
   `start_owner/2` through the owner's record takes the line silently; `irq_ack/2` checks neither the caller nor
