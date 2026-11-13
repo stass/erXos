@@ -811,11 +811,11 @@ it; git history is the record of completed work.
     Verification bullets for `pair/3` and `hit/4` (keys paired across parents, every omitted property kept, the value
     taken from the report) as property tests under PropEr, which the tree does not have yet; the cases run as seeded
     EUnit in `test/erlang/erx_ui_model_tests.erl`. The opener's map from a window to its server keeps a stale
-    entry after `ui_down` until the opener calls `close/1`. `erx_ui:open/1` takes any facet the domain holds as a display, where the design
-    asks for a grant of a `windows` tree. The toolkit lives in `erx_win`, under `erx_win_sup`, where the design names
-    an application `erx_ui` in every domain that shows widgets, web-only ones included.
+    entry after `ui_down` until the opener calls `close/1`. `erx_ui:open/1` takes any facet the domain holds as a
+    display, where the design asks for a grant of a `windows` tree. Only the `client` boot row takes `erx_ui`; a
+    session's script, which the design gives widgets, and a web-only domain's do not yet.
   * **`erx_ui_lvgl`** ([The widget server](docs/design-display.md#the-widget-server)): the shell
-    (`erlang/apps/erx_win/src/erx_ui_lvgl.erl`) performs `erx_ui_lvgl_core`'s actions over a port its `open`
+    (`erlang/apps/erx_ui/src/erx_ui_lvgl.erl`) performs `erx_ui_lvgl_core`'s actions over a port its `open`
     callback starts and a `present` callback, and `test/host/erx_ui_lvgl_test.rb` drives the real `erx-lvgl` with it
     on the host. Left: `open` on erXos, which starts the program in the session with the window's buffer as its
     `mem` descriptor 3 (the Programs item below), and `present`, `window/2` and `resize/3` bound to the window, with
@@ -1017,7 +1017,7 @@ it; git history is the record of completed work.
   (scrollback, counters, decoder and parser states, the next link id), so RIS replaces the inner record with
   `new/2`'s and lists nothing. Also from the core's review: the `Wrapped` flag is set on a bottom row below the
   region that autowrap then overwrites, and ECH to the row's end leaves it set.
-* [Medium] `abi/formats/ui.txt` validity and `erlang/apps/erx_win/src/erx_ui_model.erl`, [Widget
+* [Medium] `abi/formats/ui.txt` validity and `erlang/apps/erx_ui/src/erx_ui_model.erl`, [Widget
   trees](docs/design-display.md#widget-trees): no rule bounds one node's children below the grant's `ui_nodes`, which
   has no value yet. `delta/2`'s longest kept run and its index bookkeeping, and `apply_ops/2`'s insert and move, are
   quadratic in a node's children (a reversed flat node of 16,000 children: 10 s for `delta/2`, 20 s to apply, on

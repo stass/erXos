@@ -21,9 +21,10 @@ require_relative '../../tools/lib/erx/origin'
 class ErxLvglTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   LAUNCHER = File.join(ROOT, 'test/fixtures/erx_lvgl_buffer.rb')
-# The applications the model screen runs against, compiled whole (ErlangBuild): erx holds
-# the generated erx_ui_wire, erx_win the model of the widget tree. Then the screen.
-APPLICATIONS = %w[erx erx_win].freeze
+# The applications the model screen runs against, compiled whole (ErlangBuild):
+# erx_ui holds the model of the widget tree and the generated erx_ui_wire, and erx is
+# its dependency. Then the screen.
+APPLICATIONS = %w[erx erx_ui].freeze
 TESTS = %w[test/erlang/erx_lvgl_screen.erl].freeze
 
   def test_model_screen_drives_the_program

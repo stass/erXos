@@ -383,7 +383,7 @@ What runs where:
 | a client's domain, a session or a configured domain | a grant on the display's window tree; its pixel area, writable; its own images, fonts and trees | `erx_win`; `erx_draw`, its draw connections and `erx_memdraw`; `erx_term` with `erx_vt`; `erx_ui` with its widget servers and renderers; its programs, `erx-lvgl` among them |
 | the system domain | the right to delete the pixel area | the domain library, which makes the area in the connection's plan and deletes it with the connection |
 
-The modules are three Erlang applications, and a release takes each
+The modules are four Erlang applications, and a release takes each
 whole. `erx_memdraw`, the pixel primitives, is a library application
 both sides take. `erx_display` holds the display side: the driver
 behaviour, `erx_winfs`, `erx_window`, `erx_winctl`, `erx_screen` with
@@ -392,17 +392,20 @@ application `erx_fb`, which depends on it, starts `erx_screen` behind
 the driver, so no screen runs before a driver. `erx_win` holds a
 client's side: the module `erx_win` of the same name, `erx_pixels` with
 its core, `erx_draw` with `erx_draw_conn`, the draw codec and core and
-`erx_draw_image`, `erx_font`, `erx_term` with `erx_vt` and its width
-table, and `erx_ui` with the widget model, the widget format's
-generated validator `erx_ui_schema` and codec `erx_ui_wire`, and the
-renderers; its
-application starts `erx_pixels`. The display domain's boot script takes
-`erx_memdraw`, `erx_display` and `erx_fb`, a client's takes
-`erx_memdraw` and `erx_win`, and the system release takes neither side,
-so what the display domain's boot script loads holds no module of
-`erx_win`, and the G9 check, which reads every application that script
-boots, `erx` and `erx_files` among them, refuses a client module placed
-outside `erx_win` by mistake.
+`erx_draw_image`, `erx_font`, and `erx_term` with `erx_vt` and its
+width table; its application starts `erx_pixels`. `erx_ui` holds the
+widget toolkit ([The widget server](#the-widget-server)): the client
+library `erx_ui` of the same name, the toolkit's supervisor
+`erx_ui_sup`, which its application starts, `erx_ui_server`, the
+renderer behaviour `erx_ui_renderer` and the renderers, the widget model
+`erx_ui_model`, and the widget format's generated validator
+`erx_ui_schema` and codec `erx_ui_wire`. The display domain's boot
+script takes `erx_memdraw`, `erx_display` and `erx_fb`, a client's takes
+`erx_memdraw`, `erx_win` and `erx_ui`, and the system release takes
+neither side, so what the display domain's boot script loads holds no
+module of `erx_win` or `erx_ui`, and the G9 check, which reads every
+application that script boots, `erx` and `erx_files` among them,
+refuses a client module placed outside them by mistake.
 
 ## Invariants
 
@@ -2578,8 +2581,8 @@ The corpus:
 
 ### The widget server
 
-The widget toolkit is the application `erx_ui`, a library in the release
-of every domain that shows widgets, and an application's widgets live in
+The widget toolkit is the application `erx_ui`, which the release of
+every domain that shows widgets starts, and an application's widgets live in
 its own runtime: the client library `erx_ui`, one widget server
 `erx_ui_server` for each open UI, and a renderer. Nothing of a tree, an
 event or an application's term leaves the application's domain, except
@@ -4116,7 +4119,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |
 | Only the display driver's process calls `erx_device`'s functions on the display device | the same xref check; and `device-callers` admits the display drivers' application, `erx_fb`, among the driver applications, while `device-posters` admits `erx_virtio_gpu` alone of it to call `erx_device:post/4` |
 | Only `erx_winfs` calls `erx_wm`'s callbacks | the same xref check |
-| The display release holds no draw decoder, picture or font reader, widget module or renderer, and starts no program | an xref check that the display release contains none of `erx_draw_core`, `erx_draw_codec`, `erx_draw_image`, `erx_font`, `erx_png`, `erx_inflate`, the `erx_ui` modules and any module of the client application `erx_win`, and calls no function that starts a port or a sub-space; a seeded dependency on each fails it |
+| The display release holds no draw decoder, picture or font reader, widget module or renderer, and starts no program | an xref check that the display release contains none of `erx_draw_core`, `erx_draw_codec`, `erx_draw_image`, `erx_font`, `erx_png`, `erx_inflate`, any module of the client applications `erx_win` and `erx_ui`, and calls no function that starts a port or a sub-space; a seeded dependency on each fails it |
 | Only `erx_winctl` reads a `ctl` line, and only `erx_wctl` a `wctl` line | a source check over the display release |
 | Only the generated `erx_draw_codec` decodes draw bytes, and only the generated reader decodes the native renderer's events and reports | the generated tree's determinism test, and a source check that no other module reads those bytes |
 | Only `erx_area_lease_map` maps memory into a space other than the runtime's own, and it maps only its lease's range, read-write, at the buffer place | the C half of `area-mappers`, over every C file of `otp/erts/emulator`: an `erx_vm_map` whose space is not `ERX_CAP_SELF` appears only in `erx_area_lease_map`, so no other mapper, whatever slot it is handed, maps into a program; a seeded such call in `erx_program_drv.c` fails it |

@@ -70,7 +70,7 @@ block a milestone's numbers.
   grid whose scroll does not rebuild every row.
 
 * **[Medium] display, the widget tree's difference.** `erx_ui_model:delta/2` and `apply_ops/2`
-  (`erlang/apps/erx_win/src/erx_ui_model.erl`) are quadratic in one node's children, and the
+  (`erlang/apps/erx_ui/src/erx_ui_model.erl`) are quadratic in one node's children, and the
   browser renderer recomputes `delta(Sent, Pending)` for every update of a long change. Measure
   the design's `delta/2` workload for a 1,000-node tree, flat and nested, once the children
   limit of `TODO.md` is set; the fixes are a patience-sorting longest run and an indexed

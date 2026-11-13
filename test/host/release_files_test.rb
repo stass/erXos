@@ -116,7 +116,7 @@ class ReleaseFilesTest < Minitest::Test
   def test_the_system_release_ships_no_domain_only_application
     paths = entries.map { |entry| entry.fetch('path') }
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
-    only = %w[erx_blk erx_storage erx_memdraw erx_display erx_fb erx_win erx_web erx_net erx_net_client erx_web_line]
+    only = %w[erx_blk erx_storage erx_memdraw erx_display erx_fb erx_win erx_ui erx_web erx_net erx_net_client erx_web_line]
     assert_equal Erx::ReleaseFiles::APPLICATIONS - Erx::ReleaseFiles::SYSTEM_APPLICATIONS, only
     only.each do |application|
       refute_includes release, "{#{application},"
@@ -250,18 +250,18 @@ class ReleaseFilesTest < Minitest::Test
       assert_includes paths, "domains/erxos/lib/#{application}-#{VERSION}/ebin/#{application}.app"
       assert_includes release, "{#{application},\"#{VERSION}\"}"
     end
-    %w[erx_win].each do |application|
+    %w[erx_win erx_ui].each do |application|
       refute(paths.any? { |path| path.start_with?("domains/erxos/lib/#{application}-") }, "the display release ships #{application}")
       refute_includes release, "{#{application},"
     end
     assert_match(/\{erx_fb,"#{VERSION}"\}\]\}\.\n\z/, release, 'the display script starts the drivers')
   end
 
-  # The client script takes erx_win with the pixel primitives and starts it, so its
-  # allocator runs wherever the domain holds a display's grant.
+  # The client script takes erx_win with the pixel primitives, and the toolkit erx_ui,
+  # and starts them, so its allocator runs wherever the domain holds a display's grant.
   def test_a_client_script_starts_the_client_side
     domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('client')]))
-    assert_match(/\{erx_memdraw,"#{VERSION}"\},\{erx_win,"#{VERSION}"\}\]\}\.\n\z/, boot_release_file('client'))
+    assert_match(/\{erx_memdraw,"#{VERSION}"\},\{erx_win,"#{VERSION}"\},\{erx_ui,"#{VERSION}"\}\]\}\.\n\z/, boot_release_file('client'))
   end
 
   # An application the runtime builds that neither the system release nor a script of

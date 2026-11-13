@@ -41,6 +41,16 @@ class DisplayReleaseTest < Minitest::Test
     end
   end
 
+  # The toolkit is an application of the client side, and the tree's erx_ui put into the
+  # display release fails, by its listed modules, erx_ui_app among them.
+  def test_the_toolkit_on_the_display_side_fails
+    assert_includes Erx::DisplayRelease::CLIENT, 'erx_ui'
+    toolkit = { 'erx_ui' => Erx::DisplayRelease.read_application(ROOT, 'erx_ui') }
+    where = Erx::DisplayRelease.violations(display: toolkit, client: toolkit).map(&:where)
+    assert_includes where, 'erx_ui lists erx_ui_app'
+    assert_includes where, 'erx_ui lists erx_ui_server'
+  end
+
   def test_a_display_module_that_documents_a_client_module_passes
     source = "%% erx_draw_core plans it.\n-moduledoc \"\"\"\nAs `erx_draw_image:decode/3` reads.\n\"\"\".\nf() -> ok.\n"
     assert_empty Erx::DisplayRelease.violations(display: display(source: source), client: client)

@@ -9,7 +9,7 @@ require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_ui_server_tests.erl, the EUnit cases of the widget toolkit's
 # client library and widget server (docs/design-display.md, "The widget server"), over a
-# renderer the test module plays, against erx_win compiled from source with warnings as
+# renderer the test module plays, against erx_ui compiled from source with warnings as
 # errors on stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies).
 class ErxUiServerTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
@@ -18,7 +18,7 @@ class ErxUiServerTest < Minitest::Test
 
   def test_widget_server_cases_pass_under_eunit
     Dir.mktmpdir('erx-ui-server-test') do |work|
-      ErlangBuild.compile(work, applications: %w[erx erx_win], tests: TESTS)
+      ErlangBuild.compile(work, applications: %w[erx erx_ui], tests: TESTS)
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', 'halt(case eunit:test(erx_ui_server_tests, [verbose]) of ok -> 0; _ -> 1 end).',

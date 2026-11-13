@@ -1,0 +1,25 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The widget toolkit (docs/design-display.md, "The widget server"), which
+%% the release of every domain that shows widgets starts and the display
+%% domain's release never holds. Its modules:
+%%   erx_ui            the client library: open/1, tree/2, close/1;
+%%   erx_ui_app        the application callback, which starts erx_ui_sup;
+%%   erx_ui_sup        the toolkit's supervisor of the widget servers;
+%%   erx_ui_server     the widget server of one UI;
+%%   erx_ui_renderer   the renderer behaviour;
+%%   erx_ui_lvgl       the LVGL renderer, over erx_ui_lvgl_core, its pure
+%%                     decisions about its program's pipes;
+%%   erx_ui_model      the realised widget tree and its one difference;
+%%   erx_ui_schema     the widget format's validator and
+%%   erx_ui_wire       its codec, both generated from abi/formats/ui.txt.
+{application, erx_ui,
+ [{description, "erXos widget toolkit"},
+  {vsn, "1"},
+  {modules, [erx_ui, erx_ui_app, erx_ui_lvgl, erx_ui_lvgl_core, erx_ui_model, erx_ui_renderer, erx_ui_schema,
+             erx_ui_server, erx_ui_sup, erx_ui_wire]},
+  {registered, [erx_ui_sup]},
+  {applications, [kernel, stdlib, erx]},
+  {env, []},
+  {mod, {erx_ui_app, []}}]}.

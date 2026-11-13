@@ -98,9 +98,10 @@ module Erx
     # * display: the pixel primitives, the display side of the window system and the
     #   drivers, which start the screen (docs/design-display.md, "What runs where"), so no
     #   system domain loads the driver of a device the manifest gives the display domain;
-    # * client, a domain that holds a display's grant: the pixel primitives and the
-    #   client side, erx_win, which it starts, so its allocator of pixel areas runs there
-    #   and in neither the system domain nor the display domain (G9, DisplayRelease).
+    # * client, a domain that holds a display's grant: the pixel primitives, the client
+    #   side, erx_win, and the widget toolkit, erx_ui, which it starts, so its allocator of
+    #   pixel areas and its widget servers run there and in neither the system domain nor
+    #   the display domain (G9, DisplayRelease).
     #   No manifest names it yet: it is the client side's release, which DisplayRelease
     #   reads, and a client domain's own script takes the same applications.
     RELEASE_SCRIPTS = { 'erts' => DOMAIN_BASE,
@@ -109,7 +110,7 @@ module Erx
                         'network' => [*DOMAIN_BASE, 'erx_net'].freeze,
                         'web' => [*DOMAIN_BASE, 'erx_web'].freeze,
                         'display' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_display', 'erx_fb'].freeze,
-                        'client' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_win'].freeze }.freeze
+                        'client' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_win', 'erx_ui'].freeze }.freeze
 
     # Refuses applications of which no release holds one: an application the runtime
     # builds that neither the system release (system) nor a script of the release

@@ -40,7 +40,7 @@ class ErxUISchemaTest < Minitest::Test
 
   def test_generated_schema_cases_pass_under_eunit
     Dir.mktmpdir('erx-ui-schema-test') do |work|
-      ErlangBuild.compile(work, applications: %w[erx erx_win], tests: TESTS)
+      ErlangBuild.compile(work, applications: %w[erx erx_ui], tests: TESTS)
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', 'halt(case eunit:test(erx_ui_schema_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                                        chdir: work, stdin_data: '')
