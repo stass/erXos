@@ -14,7 +14,8 @@
 # file starts medium_slot_boot_start sectors from the slot's first sector, so the QEMU
 # harness finds it without parsing the slot (docs/design-platforms.md, "Slots and the
 # boot-selection record"); the 4 MiB before it hold the slot's FAT's boot sector,
-# reserved area and tables, which a FAT of a slot's size with 4 KiB clusters fits.
+# reserved area and tables, which slot A's FAT32 of the slot's first 128 MiB with 1 KiB
+# clusters fits (tools/lib/erx/pi_medium.rb).
 #
 # The record partition (docs/design-platforms.md, "Slots and the boot-selection
 # record") is one FAT16 volume laid out in MiB regions, so that the reset count and the

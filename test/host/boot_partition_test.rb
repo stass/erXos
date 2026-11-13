@@ -83,27 +83,42 @@ class BootPartitionTest < Minitest::Test
       assert_equal File.join(File.realpath(output), 'sdcard.img'), written.path
       assert_equal %w[boot image.boot sdcard.img sdcard.img.receipt.json], Dir.children(output).sort, 'no work directory is left'
 
-      # The card's image reads back, through fsimg's own reader and checker, as the same
-      # files: its partition table and FAT verify, and config.txt and kernel8.img hold
-      # the bytes the layout gave them.
+      # The card is the ABI's medium, 2 GiB: the record partition (FAT16) first and slot A
+      # (FAT32) second. Each volume, cut out of the card, reads back through fsimg's own
+      # reader and checker: the record volume holds autoboot.txt, medium_record_a, and the
+      # slot volume the layout's files with the bytes the layout gave them. The raw
+      # sectors agree: the record at its sector, kernel8.img at the slot's boot start, the
+      # EROFS image at 128 MiB into the slot and the data volume at its partition's start.
       image = written.path
-      assert_equal 513 * 1024 * 1024, File.size(image), "a 512 MiB partition 1 MiB into the disk"
-      entry = File.binread(image, 16, 446)
-      assert_equal 0x0c, entry.getbyte(4), 'the partition is FAT32 with LBA'
+      assert_equal 1 << 31, File.size(image)
       assert_equal "\x55\xAA".b, File.binread(image, 2, 510)
-      assert_equal names.sort, fsimg('t', '-f', image).lines.map { |line| line.strip.delete('"').delete_prefix('/') }
-                                                      .reject { |name| name == 'overlays' }.sort
-      fsimg('Wd', '-f', image)
-      assert_equal File.binread(File.join(output, 'boot/config.txt')), fsimg('x', '-O', '-f', image, 'config.txt')
-      assert_equal 'kernel', fsimg('x', '-O', '-f', image, 'kernel8.img')
+      assert_equal [0x0e, 0x0c, 0x0c, 0x0f], (0..3).map { |index| File.binread(image, 1, 446 + (index * 16) + 4).ord }
+      sector = Erx::MediumImage::SECTOR_BYTES
+      slot_start = Erx::MediumImage.constant('slot_a_start') * sector
+      record_volume = cut(image, root, 'record.fat', Erx::MediumImage.constant('record_start') * sector, Erx::PiMedium::RECORD_BYTES)
+      slot_volume = cut(image, root, 'slot.fat', slot_start, Erx::PiMedium::SLOT_FAT_BYTES)
+      fsimg('Wd', '-f', record_volume)
+      assert_equal Erx::BootRecord::SLOTS.fetch(:a).text, fsimg('x', '-O', '-f', record_volume, 'autoboot.txt')
+      assert_equal names.sort, fsimg('t', '-f', slot_volume).lines.map { |line| line.strip.delete('"').delete_prefix('/') }
+                                                            .reject { |name| name == 'overlays' }.sort
+      fsimg('Wd', '-f', slot_volume)
+      assert_equal File.binread(File.join(output, 'boot/config.txt')), fsimg('x', '-O', '-f', slot_volume, 'config.txt')
+      assert_equal 'kernel', fsimg('x', '-O', '-f', slot_volume, 'kernel8.img')
+      assert_equal Erx::BootRecord.sector(:a), File.binread(image, sector, Erx::BootRecord::RECORD_OFFSET)
+      assert_equal 'kernel', File.binread(image, 6, slot_start + Erx::PiMedium::BOOT_PLACE)
+      assert_equal EROFS, File.binread(image, EROFS.bytesize, slot_start + Erx::ReleaseMedium::SLOT_IMAGES_START)
+      assert_equal VOLUME, File.binread(image, VOLUME.bytesize, Erx::MediumImage.constant('data_start') * sector)
 
       # The record is an assembled receipt: the card, each file of the partition by its
       # digest, and what it was given.
       record = JSON.parse(File.read(written.record))
       assert_equal 'given', record.fetch('inputs')
       assert_equal({ 'path' => 'sdcard.img', 'sha256' => Digest::SHA256.file(image).hexdigest }, record.fetch('artifact'))
-      assert_equal names.sort.map { |name| "boot/#{name}" }, record.fetch('components').map { |part| part.fetch('path') }
+      assert_equal [*names.sort.map { |name| "boot/#{name}" }, 'data.lfs', 'release.erofs'],
+                   record.fetch('components').map { |part| part.fetch('path') }
       assert_includes record.fetch('components'), { 'path' => 'boot/kernel8.img', 'sha256' => Digest::SHA256.hexdigest('kernel') }
+      assert_includes record.fetch('components'), { 'path' => 'release.erofs', 'sha256' => Digest::SHA256.hexdigest(EROFS) }
+      assert_includes record.fetch('components'), { 'path' => 'data.lfs', 'sha256' => Digest::SHA256.hexdigest(VOLUME) }
 
       # The same layout written again is the same bytes.
       again = File.join(root, 'again')
@@ -183,6 +198,7 @@ class BootPartitionTest < Minitest::Test
                    'sha256' => Digest::SHA256.file(File.join(ROOT, 'hw/dts/raspi4b-uart3.dtso')).hexdigest },
                  tree.fetch('overlays').fetch('uart3'))
     assert_equal Erx::Fsimg::VERSION_LINE, record.fetch('card').fetch('tool')
+    assert_equal({ 'kernel8.img' => 4 << 20 }, record.fetch('card').fetch('arguments').fetch('slot').fetch('place'))
   end
 
   # Seeded faults: an absolute path anywhere in a record, as a value, a key or inside a
@@ -212,7 +228,7 @@ class BootPartitionTest < Minitest::Test
         write(root, root, { 'config.txt' => Erx::BootPartition::Text.new("built at #{File.realpath(root)}/x\n") })
       end
       assert_match(/config.txt holds the build's path/, error.message)
-      assert_empty Dir.children(root).reject { |name| name == 'logs' }
+      assert_empty Dir.children(root).reject { |name| %w[logs pieces].include?(name) }
     end
   end
 
@@ -257,10 +273,23 @@ class BootPartitionTest < Minitest::Test
 
   FSIMG = Erx::Fsimg.locate(root: ROOT)
 
+  # Stand-ins for the release's EROFS image and the data volume's leading blocks.
+  EROFS = ('erofs' * 1000).b.ljust(8192, "\0").freeze
+  VOLUME = ('littlefs' * 100).b.freeze
+
   def write(root, output, plan)
     runner = Erx::Runner.new(owner_root: root, log_dir: File.join(root, 'logs'))
+    pieces = File.join(root, 'pieces')
+    FileUtils.mkdir_p(pieces)
+    erofs = File.join(pieces, 'release.erofs').tap { |path| File.binwrite(path, EROFS) }
+    volume = File.join(pieces, 'data.lfs').tap { |path| File.binwrite(path, VOLUME) }
     Erx::BootPartition.write(root: root, directory: output, plan: plan, record: { 'inputs' => 'given' }, runner: runner,
-                             fsimg: FSIMG)
+                             fsimg: FSIMG, erofs: erofs, volume: Erx::MediumImage::FilePiece.new(path: volume, length: VOLUME.bytesize))
+  end
+
+  # The bytes of image from offset, length long, written as name in root.
+  def cut(image, root, name, offset, length)
+    File.join(root, name).tap { |path| File.binwrite(path, File.binread(image, length, offset)) }
   end
 
   # fsimg's standard output for arguments, which must succeed.

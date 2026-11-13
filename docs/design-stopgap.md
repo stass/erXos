@@ -1844,13 +1844,15 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   slot's EROFS images start at 128 MiB (`SLOT_IMAGES_START`, `tools/lib/erx/release_medium.rb`), with `kernel8.img`
   allocated first and contiguous from `medium_slot_boot_start`, so the harness and the slot writer find it without
   parsing FAT and the firmware finds it through FAT; slot B, empty; the vault's partition; and the data partition with
-  a fresh littlefs volume. The volume's cluster size is chosen so that a volume under 128 MiB is FAT32 by the cluster count the FAT
+  a fresh littlefs volume. The volume is the slot's first 128 MiB, and its 1 KiB clusters make it FAT32 by the cluster count the FAT
   specification sets ([design-storage.md](design-storage.md#references)), as the slot's partition type
-  (`medium_slot_type`, `0x0c`) says. Both placed files are fsimg's `place` option, `-o place=NAME@SECTOR`: one
-  placed file per volume, on FAT16 and FAT32, for which fsimg pads the reserved area so that the data area starts at
+  (`medium_slot_type`, `0x0c`) says. Both placed files are fsimg's `place` option, `-o place=/PATH@OFFSET`, the file's absolute path in the
+  volume and a byte offset from the volume's start: one placed file per volume, on FAT16 and FAT32, for which fsimg pads the reserved area so that the data area starts at
   the placement sector and gives the file the clusters from the first data cluster on, in order, the FAT32 root
   directory's cluster following them; `kernel8.img` is placed at `medium_slot_boot_start` and `autoboot.txt` at
-  `medium_record_select_start`. The packer checks each placed file after fsimg writes the volume: it reads the
+  `medium_record_select_start`, each sector count times 512 bytes (`tools/lib/erx/pi_medium.rb`). The card is the
+  smallest power of two that holds the layout with its minimum data partition, 2 GiB, the data partition running
+  to its end, and every byte no piece holds is zero. The packer checks each placed file after fsimg writes the volume: it reads the
   file's directory entry, walks its whole cluster chain in the first FAT, bounded by the clusters its length needs,
   and refuses a chain that is not consecutive from the placement sector, that ends early or that runs on past the
   file's last cluster; it then compares the file read through that chain with the raw extent at the placement sector

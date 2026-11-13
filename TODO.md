@@ -6220,9 +6220,18 @@ document's "residual risks accepted" paragraph.
   image holds the release too, from which the system domain starts, until
   the boot from the medium decides which releases leave the boot image
   ([design-storage.md](docs/design-storage.md#data-model)).
-* [Medium] storage, the Pi's boot medium (fsimg, the packer): fsimg has no `place` option (`-o place=NAME@SECTOR`),
-  which the FATs of the item above need, and the packer has no check of a placed file that walks its whole cluster
-  chain and compares it with the raw extent (design-stopgap.md, "The Raspberry Pi 4"). The Pi medium package adds both.
+* [Medium] Raspberry Pi card (`tools/lib/erx/pi_medium.rb`, `boot_partition.rb`, `site.rb`): the card is 2 GiB, and
+  `.github/workflows/site.yml` takes it as a release asset, whose size limit (possibly under 2 GiB) is unchecked;
+  take the compressed card there instead if it is. The data volume is formatted for `PiMedium.data_sectors` by the
+  caller and nothing ties its length to the card's partition; the finished card is not read back through
+  `BootRecord.read` and `extract`; `release.erofs` and `data.lfs` are not scanned for the build path (the EROFS
+  files are, through `image.boot`); an oversized `kernel8.img` fails in fsimg rather than with a diagnostic;
+  `FatVolume::Layout` keeps a root offset and a root cluster for both FAT types where each means something for one.
+* [Medium] storage, the reset count's encoding (`abi/medium.txt`, `tools/lib/erx/pi_medium.rb`): no encoding of the
+  count is defined, so the Pi card's writer leaves its sector the zeros fsimg writes in the reserved area instead of
+  the count's first value (design-platforms.md, "Slots and the boot-selection record"), as the QEMU medium does.
+  Define the encodings in the layout file when M12 builds the count, preferably with an all-zero sector reading as
+  zero so a fresh medium needs no write, and have both medium writers write the first value.
 * [Low] Raspberry Pi boot, residual: a damaged record partition, or a slot without valid boot files, lets the
   bootloader's `PARTITION_WALK` boot a partition the record does not name, or leaves the card unbootable until it is
   reinstalled, as the external design review reads the bootloader documentation

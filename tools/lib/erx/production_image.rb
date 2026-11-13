@@ -282,7 +282,7 @@ module Erx
 
     # The image and the medium that holds it, both in directory, which must be clean: by
     # default the production image. A board the firmware boots from a boot partition
-    # (BootPartition.boot_partition_medium?) gets that partition and the card's image of it; any other
+    # (BootPartition.boot_partition_medium?) gets that partition's files and the card, the ABI's medium for the board (PiMedium); any other
     # gets the release medium for QEMU (ReleaseMedium). A boot that creates a domain
     # (MediumBoot) names a larger machine and a manifest with room for it, whose domain
     # row names the release and runtime image the image then carries.
@@ -292,7 +292,7 @@ module Erx
                        machine: machine, domains: domain_boots(manifest_source))
       if BootPartition.boot_partition_medium?(machine.platform)
         return [built, BootPartition.lay_out(root: @root, runner: @runner, platform: machine.platform, build_kind: BUILD_KIND,
-                                             bootable: built.single,
+                                             bootable: built.single, erofs: built.erofs,
                                              directory: built_directory(built), compiler: @compiler, linker: @linker)]
       end
 

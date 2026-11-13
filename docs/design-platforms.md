@@ -1013,7 +1013,8 @@ boot_partition=3
 and while B is, the two numbers swap. A sector that is neither encoding,
 byte for byte, is an unreadable record. The packer has fsimg write the
 partition's FAT with `autoboot.txt` placed at the record's sector
-(`-o place=autoboot.txt@6144`), a file of the text's length, 64 bytes,
+(`-o place=/autoboot.txt@3145728`, sector 6144 as a byte offset of the
+volume), a file of the text's length, 64 bytes,
 in one cluster, so the firmware reads the record through the FAT and
 every other reader, the slot writer and the QEMU harness, reads the
 sector; it then writes the reset count's first value into its sector of
@@ -1269,7 +1270,7 @@ its device tree and its UART setup. It is done by hand, once per change
 to the boot path.
 
 **You need** a Raspberry Pi 4 (any memory size: `total_mem` makes the
-board use 1 GB; the 4 GB board is the one tested), a microSD card of at least 2 GB, and a 3.3 V
+board use 1 GB; the 4 GB board is the one tested), a microSD card of at least 4 GB (the card's image is 2 GiB), and a 3.3 V
 USB-serial adapter (never a 5 V one). Wire it to the 40-pin header: the
 adapter's ground to pin 6, its receive line to pin 8 (GPIO 14, the Pi's
 transmit) and its transmit line to pin 10 (GPIO 15). Open it at 115200
@@ -1331,7 +1332,15 @@ reserved; anything at all after BL31 means the firmware loaded
 after BL31's banner means the card's `serial0` is the UART on the
 adapter; and the memory line and the shell together show that the device
 tree the firmware made from the partition's tree and `uart3` overlay is
-the one erXos expects.
+the one erXos expects. Anything at all after BL31 on this card also means
+the bootloader read `autoboot.txt` from the record's FAT16 in partition 1
+and booted slot A's FAT32 in partition 2, since partition 1 holds no boot
+files (slot A's volume covers only its partition's first 128 MiB); the
+bootloader's version, from its own log or from a running system, goes
+into the board's port as the oldest that honours `autoboot.txt`. A
+board whose bootloader stops before BL31 with this card and boots an
+older card of one FAT32 partition is one whose bootloader does not read
+`autoboot.txt`.
 
 **What a 4 GB board shows.** BL31 enters `kernel8.img` at `0x200000` in
 EL2 with the device tree's address in `x0`; the firmware leaves the

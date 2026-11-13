@@ -67,7 +67,7 @@ module Erx
     # far apart in a card; reading it back takes 65 MiB.
     XZ_ARGUMENTS = %w[xz --format=xz --check=crc64 -9 --threads=1 --stdout].freeze
     XZ_ENVIRONMENT = { 'XZ_DEFAULTS' => nil, 'XZ_OPT' => nil }.freeze
-    # Far above what xz takes for a card of a few hundred megabytes.
+    # Far above what xz takes for the 2 GiB card, most of which is zeros (unmeasured).
     XZ_DEADLINE = 900
 
     # One output file: where it goes under the site directory, where it comes

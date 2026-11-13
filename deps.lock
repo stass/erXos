@@ -87,11 +87,11 @@
     {
       "id": "fsimg",
       "kind": "git",
-      "version": "807cd027ad99b06cc1f53cecc2890f90d4158470",
+      "version": "b6c1ea25719de5cb47c686261ecd77bd711ad50f",
       "url": "https://github.com/stass/fsimg.git",
-      "commit": "807cd027ad99b06cc1f53cecc2890f90d4158470",
-      "sha256": "7febd75a37b11ca5670ce48f079d065c77e2c11e0f4ef8735696be817ff2950c",
-      "directory": "fsimg-807cd02",
+      "commit": "b6c1ea25719de5cb47c686261ecd77bd711ad50f",
+      "sha256": "b4fb0ecb0f6eeb1a6a20731a0a502d2b2b0da72891727c4ae5461f27df84d1ab",
+      "directory": "fsimg-b6c1ea2",
       "license": "BSD-2-Clause",
       "status": "permanent"
     },

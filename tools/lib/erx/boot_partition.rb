@@ -8,7 +8,8 @@ require 'json'
 require 'tmpdir'
 require_relative 'error'
 require_relative 'fsimg'
-require_relative 'fat_short_names'
+require_relative 'data_volume'
+require_relative 'pi_medium'
 require_relative 'bl31'
 require_relative 'board_tree'
 require_relative 'bounded_file'
@@ -23,8 +24,10 @@ module Erx
   # The Raspberry Pi 4's medium, the production image's for a board the firmware boots
   # (ProductionImage#build_medium): written beside the image, boot/ holds the boot
   # partition's files and serves as the firmware's network boot (TFTP) root; sdcard.img
-  # is a disk image ready to write to a card, an MBR whose one partition, FAT32 (type
-  # 0x0c), holds the same files; and sdcard.img.receipt.json is their build record
+  # is the card, ready to write, laid out as abi/medium.txt's medium (PiMedium), whose
+  # slot A holds the same files in its FAT32, the system release's EROFS image after
+  # them, and whose data partition holds a fresh littlefs volume; and
+  # sdcard.img.receipt.json is their build record
   # (docs/design-stopgap.md, "The Raspberry Pi 4"; docs/design-platforms.md, "Firmware").
   # The files are the firmware, unmodified, with its licence; config.txt, written from
   # the platform record; the board's device tree, with its one marked edit, its source
@@ -45,7 +48,7 @@ module Erx
   # inside the image's directory, then renamed beside the image; the image's directory
   # must not hold any of them already.
   module BootPartition
-    KERNEL = 'kernel8.img'
+    KERNEL = PiMedium::BOOT_FILE
     ARMSTUB = 'bl31.bin'
     CONFIG = 'config.txt'
     ARMSTUB_LICENCE = 'LICENCE.tf-a'
@@ -62,12 +65,6 @@ module Erx
     IMAGE = 'sdcard.img'
     RECORD = 'sdcard.img.receipt.json'
     ENTRIES = [PARTITION, IMAGE, RECORD].freeze
-    # The card's image, which fsimg writes and verifies: FAT32 in the one partition of an
-    # MBR, type 0x0c (FAT32 with LBA), which the firmware boots from. 512 MiB with 4 KiB
-    # clusters is the geometry of Raspberry Pi OS's own boot partition. The bytes are
-    # reproducible, with every time at 1980-01-01, FAT's first representable date.
-    CARD = %w[-F fat32/mbr -R -e 315532800 -s 512M -L ERXOS -o cluster=4096 -o mbr:type=0x0c].freeze
-    CARD_DEADLINE = 300
     # The memory the firmware reports: total_mem makes any Pi 4 report the smallest
     # board's 1 GB, of which gpu_mem goes to the VideoCore, so the ARM's RAM is the same
     # on every board and on QEMU's 1 GB model, where the record's ram_bytes and
@@ -173,11 +170,13 @@ module Erx
     end
 
     # Writes plan into directory, an existing directory under root that holds none of
-    # ENTRIES: the files under boot/, the card's image of them, written with fsimg and
-    # verified, with each root name that fits 8.3 stored as its own short name, which is
-    # all the boot ROM reads (FatShortNames), and record, the inputs' build record, with
-    # each file's and the card's SHA-256 added.
-    def write(root:, directory:, plan:, record:, runner:, fsimg:)
+    # ENTRIES: the files under boot/; the card (PiMedium), whose slot A's FAT32 holds them
+    # with each root name that fits 8.3 stored as its own short name, which is all the
+    # boot ROM reads, followed by erofs, the release's EROFS image, and whose data
+    # partition holds volume, a fresh littlefs volume of PiMedium.data_sectors sectors
+    # (DataVolume.format); and record, the inputs' build record, with the SHA-256 of
+    # each file, the EROFS image, the volume and the card added.
+    def write(root:, directory:, plan:, record:, runner:, fsimg:, erofs:, volume:)
       plan.each_key { |name| raise Error, "boot partition: #{name.inspect} is not a file name of the layout" unless NAME.match?(name) }
       directory = OutputDirectory.check(root: root, path: directory)
       raise Error, "boot partition: #{directory} is not a directory" unless File.directory?(directory)
@@ -196,10 +195,11 @@ module Erx
           File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o644) { |file| file.write(bytes) }
           [name, Digest::SHA256.hexdigest(bytes)]
         end
-        image = File.join(work, IMAGE)
-        runner.run([fsimg, 'cW', '-f', image, *CARD, '-C', files, '.'], name: 'fsimg-boot-partition', deadline: CARD_DEADLINE)
-        FatShortNames.check(image, names: plan.keys.map { |name| name.split('/').first }.uniq)
-        File.write(File.join(work, RECORD), JSON.pretty_generate(receipt(record, image: image, files: written)) + "\n")
+        image = PiMedium.write(directory: work, name: IMAGE, files: files, names: plan.keys.map { |name| name.split('/').first }.uniq,
+                               erofs: erofs, volume: volume, runner: runner, fsimg: fsimg)
+        pieces = { File.basename(erofs) => Digest::SHA256.file(erofs).hexdigest,
+                   File.basename(volume.path) => Digest::SHA256.file(volume.path).hexdigest }
+        File.write(File.join(work, RECORD), JSON.pretty_generate(receipt(record, image: image, files: written, pieces: pieces)) + "\n")
         ENTRIES.each { |name| File.rename(File.join(work, name), File.join(directory, name)) }
       end
       Written.new(path: File.join(directory, IMAGE), files: File.join(directory, PARTITION), record: File.join(directory, RECORD))
@@ -207,11 +207,13 @@ module Erx
 
     # The card's receipt, in the shape of the image's own (ProductionImage's assembled
     # receipts): the card as its artifact, each file of the partition as a component by
-    # its name and SHA-256, and record's inputs. Pure.
-    def receipt(record, image:, files:)
+    # its name and SHA-256, then pieces, the card's other inputs (the EROFS image and the
+    # data volume) by their names beside the card, and record's inputs.
+    def receipt(record, image:, files:, pieces:)
       { 'version' => 1, 'kind' => 'assembled',
         'artifact' => { 'path' => IMAGE, 'sha256' => Digest::SHA256.file(image).hexdigest },
-        'components' => files.sort.map { |name, sha256| { 'path' => "#{PARTITION}/#{name}", 'sha256' => sha256 } },
+        'components' => files.sort.map { |name, sha256| { 'path' => "#{PARTITION}/#{name}", 'sha256' => sha256 } } +
+                        pieces.sort.map { |name, sha256| { 'path' => name, 'sha256' => sha256 } },
         **record }
     end
 
@@ -236,7 +238,8 @@ module Erx
                                         'recipe' => source_reference(root, BoardTree.recipe_path),
                                         'overlays' => board.overlays.transform_values { |path| source_reference(root, File.join(root, path)) },
                                         'compiler' => version.(compiler), 'dtc' => version.(BoardTree.dtc_path) },
-                      'card' => { 'tool' => Fsimg::VERSION_LINE, 'source' => Fsimg.source_record(root: root), 'arguments' => CARD } } }
+                      'card' => { 'tool' => Fsimg::VERSION_LINE, 'source' => Fsimg.source_record(root: root),
+                                   'arguments' => PiMedium.arguments } } }
     end
 
     # An absolute path's mark in a record: a single slash that starts a string or follows
@@ -302,9 +305,10 @@ module Erx
     end
 
     # Builds BL31 and the board's tree, takes the firmware as deps.lock pins it, verified
-    # against its pinned hashes, and writes the layout for bootable, with its build
-    # record, into directory, the production image's.
-    def lay_out(root:, runner:, platform:, build_kind:, bootable:, directory:, compiler:, linker:)
+    # against its pinned hashes, formats the data partition's volume, and writes the
+    # layout for bootable and erofs, the release's EROFS image, with its build record,
+    # into directory, the production image's.
+    def lay_out(root:, runner:, platform:, build_kind:, bootable:, erofs:, directory:, compiler:, linker:)
       dependencies = Dependencies.new(root: root, runner: runner)
       pinned = FIRMWARE.map { |id| dependencies.archive_for(id) }
       # Read once, so the device tree's notice and the card's record name one revision.
@@ -317,8 +321,10 @@ module Erx
                                         revision: revision))
       record = record(root: root, runner: runner, revision: revision, platform: platform,
                       firmware: pinned.map(&:first), compiler: compiler, linker: linker)
+      volume = DataVolume.format(root: root, runner: runner, compiler: compiler, directory: directory,
+                                 data_sectors: PiMedium.data_sectors)
       write(root: root, directory: directory, plan: plan, record: record, runner: runner,
-            fsimg: Fsimg.checked(root: root, runner: runner))
+            fsimg: Fsimg.checked(root: root, runner: runner), erofs: erofs, volume: volume)
     end
   end
 end
