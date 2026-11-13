@@ -8,7 +8,8 @@
  * its reason. What it accepts names a system node and arguments inside the buffer, and goes
  * on as an entry takes it: into a page from erx_boot_info_build, which the reader must
  * accept and which must say the same. Read again without the host link, the same bytes give
- * the same records less the host link's.
+ * the same records less the host link's. Every record's words, a framebuffer row's among
+ * them, fit the room erx/boot_words.h gives its form.
  */
 
 #include <stdbool.h>
@@ -59,7 +60,7 @@ same_device(const erx_boot_device_t *a, const erx_boot_device_t *b)
 {
 	return (a->role == b->role && a->peripheral == b->peripheral && a->base == b->base && a->size == b->size &&
 	    a->line == b->line && a->line_shared == b->line_shared && a->clock == b->clock &&
-	    a->dma_memory == b->dma_memory);
+	    a->dma_memory == b->dma_memory && a->framebuffer == b->framebuffer && a->index == b->index);
 }
 
 /* Without the host link the reader accepts what it accepted with it, and gives its records less the host link's. */
@@ -73,13 +74,42 @@ check_without_the_hostlink(const uint8_t *bytes, size_t length, const erx_boot_m
 	if (!erx_boot_manifest_read(bytes, length, false, &without, &reason))
 		abort();
 	for (size_t at = 0; at < with->device_count; at++) {
-		if (strcmp(with->devices[at].role, "hostlink") == 0)
+		/* A framebuffer row has no role: it is never the host link's. */
+		if (with->devices[at].role != NULL && strcmp(with->devices[at].role, "hostlink") == 0)
 			continue;
 		if (kept == without.device_count || !same_device(&with->devices[at], &without.devices[kept]))
 			abort();
 		kept++;
 	}
 	if (kept != without.device_count)
+		abort();
+}
+
+/*
+ * A framebuffer row's record (erx_boot_framebuffer_words) and its line (erx_boot_framebuffer_line)
+ * over the longest facts: every number at its widest, a format of the longest name the room
+ * takes, which is longer than every name of the reader's table, and an outside range at the
+ * top of the address space. The row itself gives no -erx device words: it has no role.
+ */
+static void
+check_a_framebuffer_fits(const erx_boot_device_t *device)
+{
+	static const char format[ERX_BOOT_FORMAT_WORD_MAX] = "abcdefghijk";
+	const erx_dt_framebuffer_t placed = { .status = ERX_DT_FB_OK, .base = 0, .length = UINT64_MAX,
+	    .width = UINT32_MAX, .height = UINT32_MAX, .stride = UINT32_MAX };
+	const erx_dt_framebuffer_t outside = { .status = ERX_DT_FB_OUTSIDE, .base = UINT64_MAX, .length = UINT64_MAX };
+	char words[ERX_BOOT_FRAMEBUFFER_WORDS_MAX];
+	char line[ERX_BOOT_TREE_LINE_MAX];
+
+	if (erx_boot_device_words(device, words, sizeof(words)) != 0)
+		abort();
+	if (erx_boot_framebuffer_words(&placed, format, UINT64_MAX, UINT64_MAX, words, sizeof(words)) == 0)
+		abort();
+	if (device->path.length == 0 || device->path.length >= ERX_PATH_MAX ||
+	    !erx_boot_node_path_valid((const uint8_t *)device->path.bytes, device->path.length))
+		return;
+	if (erx_boot_framebuffer_line(device->path, &placed, format, line, sizeof(line)) == 0 ||
+	    erx_boot_framebuffer_line(device->path, &outside, NULL, line, sizeof(line)) == 0)
 		abort();
 }
 
@@ -104,7 +134,9 @@ check_the_words_fit(const erx_boot_manifest_t *manifest)
 	for (size_t at = 0; at < manifest->device_count; at++) {
 		const erx_boot_device_t *device = &manifest->devices[at];
 
-		if (!device->given) {
+		if (device->framebuffer) {
+			check_a_framebuffer_fits(device);
+		} else if (!device->given) {
 			if (erx_boot_device_words(device, words, ERX_BOOT_DEVICE_WORDS_MAX) == 0)
 				abort();
 		} else if (erx_boot_device_window(device, &window)) {

@@ -161,3 +161,38 @@ a_short_given_record_refuses_test() ->
                                                         given([])])),
     ?assertMatch({error, {bad_device_record, _}},
                  find([given_marked(["12", "3584", "512", "13", "14", "1", "0", "0", "0"])])).
+
+%% The framebuffer record (docs/design-device-tree.md, "Facts into records"): the window the
+%% root installed, the framebuffer's offset and bytes in it, its geometry and its format.
+framebuffer(Words) ->
+    ["framebuffer" | Words].
+
+a_framebuffer_record_is_read_test() ->
+    ?assertEqual({ok, [#{window => {object, 14, 0, 8294400}, width => 1920, height => 1080, stride => 7680,
+                         format => x8r8g8b8}]},
+                 erx_device_record:framebuffers([given(["12", "0", "4096", "13", "0", "0", "0", "0", "0"]),
+                                                 framebuffer(["14", "0", "8294400", "1920", "1080", "7680",
+                                                              "x8r8g8b8"])])),
+    ?assertEqual({ok, [#{window => {object, 9, 256, 6144}, width => 32, height => 64, stride => 96,
+                         format => r8g8b8}]},
+                 erx_device_record:framebuffers([framebuffer(["9", "256", "6144", "32", "64", "96", "r8g8b8"])])).
+
+%% No framebuffer the tree placed is no record, and no record is no framebuffer: never a
+%% made-up one.
+no_framebuffer_record_is_none_test() ->
+    ?assertEqual({ok, []}, erx_device_record:framebuffers([])),
+    ?assertEqual({ok, []}, erx_device_record:framebuffers([given(["12", "0", "4096", "13", "0", "0", "0", "0", "0"])])).
+
+%% Each malformed record ends in a stated reason: too few words, a bad number, a format
+%% outside the binding's table, and geometry the tree's reader would have refused.
+a_malformed_framebuffer_record_refuses_test() ->
+    Good = ["14", "0", "8294400", "1920", "1080", "7680", "x8r8g8b8"],
+    [?assertMatch({error, {bad_device_record, _}}, erx_device_record:framebuffers([framebuffer(Words)]))
+     || Words <- [lists:sublist(Good, 6), ["x" | tl(Good)], setelement_list(4, Good, "0"),
+                  setelement_list(4, Good, ?U64_MAX), setelement_list(7, Good, "X8R8G8B8"),
+                  setelement_list(7, Good, "rgb"), setelement_list(6, Good, "7679"),
+                  setelement_list(3, Good, "8294399"), setelement_list(3, Good, "0"),
+                  setelement_list(5, Good, "0")]].
+
+setelement_list(At, List, Value) ->
+    lists:sublist(List, At - 1) ++ [Value | lists:nthtail(At, List)].

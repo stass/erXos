@@ -351,6 +351,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 
 * **The PL011 console driver sends a byte at a time** (`erlang/apps/erx_uart/src/erx_pl011.erl`, `send`): each byte costs two register BIF calls, a read of `FR.TXFF` and a write of `DR`, and a full transmit FIFO waits a whole millisecond before it looks again. The command shell's `cat` of `/NOTICES` reached the host's terminal at about 256 KB/s (769,610 bytes in 3 s; Apple M3 Max, macOS, HVF, QEMU 11.1.3, one guest CPU, the development boot image of `tools/erx boot`, the serial line on a pseudo-terminal), so a 16 MB file takes about a minute. Settled by timing the console transcript's 20,000-byte output under HVF against a send that waits for `FR.TXFE` and then writes a whole FIFO's worth without reading `FR` between bytes.
 
+* **[Medium] display, the framebuffer mapped as device memory**
+  (`liberx/backend/fiasco/runtime_entry.c`, `framebuffer_give`): the root makes the framebuffer's object
+  with `ERX_MEM_ATTR_DEVICE`, since the kernel interface has no write-combining attribute, so every
+  store to the Pi's framebuffer is a device write, uncached and ungathered. Settled by MB/s of a
+  full-screen copy into the framebuffer on the Pi 4 against a write-combining (normal non-cacheable)
+  mapping of the same pages.
 * **[Medium] display, the copy path's rate**
   ([design-display.md](design-display.md#performance)): `erx_screen`
   copies the changed rectangles from a client's mapped pixel area into

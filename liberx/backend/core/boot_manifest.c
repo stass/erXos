@@ -168,10 +168,19 @@ devices_read(const erx_manifest_view_t *view, bool hostlink, erx_boot_manifest_t
 
 			if (!erx_manifest_devices_at(view, index, &device))
 				return ("devices");
-			if ((kind = device_kind(view, &device, hostlink)) == NULL)
+			const bool framebuffer = device.selector == ERX_MF_SELECTOR_DT && device.role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER;
+
+			if ((kind = device_kind(view, &device, hostlink)) == NULL && !framebuffer)
 				continue;
 			if (result->device_count == ERX_BOOT_DEVICES_MAX)
 				return ("device_records");
+			/* A framebuffer row has no kind: its record is made from its catalogue entry. */
+			if (framebuffer) {
+				result->devices[result->device_count++] = (erx_boot_device_t){ .framebuffer = true,
+				    .base = device.base, .size = device.size,
+				    .path = { (const char *)string_at(view, &device.path), device.path.length }, .index = index };
+				continue;
+			}
 			result->devices[result->device_count++] = (erx_boot_device_t){
 				.role = kind->role_word, .peripheral = kind->peripheral, .given = kind != &hostlink_kind,
 				.base = device.base,
@@ -287,18 +296,30 @@ word_put(char *words, size_t capacity, size_t *used, const char *text)
 	return (true);
 }
 
-static bool
-number_put(char *words, size_t capacity, size_t *used, uint64_t value)
+/* The room of the longest decimal number, 2^64 - 1, with its NUL. */
+#define DECIMAL_MAX	sizeof("18446744073709551615")
+
+/* value's decimal digits, without leading zeros and with a NUL, at the end of digits. */
+static const char *
+decimal_digits(char digits[DECIMAL_MAX], uint64_t value)
 {
-	char digits[sizeof("18446744073709551615")];
-	size_t at = sizeof(digits) - 1;
+	size_t at = DECIMAL_MAX - 1;
 
 	digits[at] = '\0';
 	do {
 		digits[--at] = (char)('0' + value % 10);
 		value /= 10;
 	} while (value != 0);
-	return (word_put(words, capacity, used, digits + at));
+	return (digits + at);
+}
+
+/* value in decimal as one word, as word_put writes it. */
+static bool
+number_put(char *words, size_t capacity, size_t *used, uint64_t value)
+{
+	char digits[DECIMAL_MAX];
+
+	return (word_put(words, capacity, used, decimal_digits(digits, value)));
 }
 
 /*
@@ -333,8 +354,8 @@ erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capac
 {
 	size_t used = 0;
 
-	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "device") &&
-	    word_put(words, capacity, &used, device->role) && word_put(words, capacity, &used, device->peripheral) &&
+	if (!device->framebuffer && word_put(words, capacity, &used, "-erx") &&
+	    word_put(words, capacity, &used, "device") && word_put(words, capacity, &used, device->role) && word_put(words, capacity, &used, device->peripheral) &&
 	    number_put(words, capacity, &used, device->base) && number_put(words, capacity, &used, device->size) &&
 	    number_put(words, capacity, &used, device->line) &&
 	    word_put(words, capacity, &used, line_mark(device->line_shared)) &&
@@ -500,6 +521,106 @@ erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t capacity
 	    number_put(words, capacity, &used, given->mac))
 		return (used);
 	return (0);
+}
+
+/*
+ * Whether format is a name the record's room holds: not NULL and not empty, and at most
+ * ERX_BOOT_FORMAT_WORD_MAX bytes with its NUL.
+ */
+static bool
+format_named(const char *format)
+{
+	size_t length = 0;
+
+	if (format == NULL)
+		return (false);
+	while (length < ERX_BOOT_FORMAT_WORD_MAX && format[length] != '\0')
+		length++;
+	return (length != 0 && length < ERX_BOOT_FORMAT_WORD_MAX);
+}
+
+bool
+erx_boot_framebuffer_place(const erx_dt_framebuffer_t *fb, const char *format, erx_dt_window_t window,
+    erx_boot_window_t *pages)
+{
+	const erx_boot_device_t over = { .base = fb->base, .size = fb->length };
+	erx_boot_window_t whole;
+
+	if (fb->status != ERX_DT_FB_OK || !format_named(format) || !erx_boot_device_window(&over, &whole))
+		return (false);
+	/* Inside the window, checked without an end that could wrap. */
+	if (whole.base < window.base || whole.size > window.size || whole.base - window.base > window.size - whole.size)
+		return (false);
+	*pages = whole;
+	return (true);
+}
+
+size_t
+erx_boot_framebuffer_words(const erx_dt_framebuffer_t *fb, const char *format, uint64_t window, uint64_t offset,
+    char *words, size_t capacity)
+{
+	size_t used = 0;
+
+	if (fb->status == ERX_DT_FB_OK && format_named(format) && word_put(words, capacity, &used, "-erx") &&
+	    word_put(words, capacity, &used, "framebuffer") && number_put(words, capacity, &used, window) &&
+	    number_put(words, capacity, &used, offset) && number_put(words, capacity, &used, fb->length) &&
+	    number_put(words, capacity, &used, fb->width) && number_put(words, capacity, &used, fb->height) &&
+	    number_put(words, capacity, &used, fb->stride) && word_put(words, capacity, &used, format))
+		return (used);
+	return (0);
+}
+
+/* value in decimal, without leading zeros, into a line. */
+static bool
+decimal_put(char *line, size_t capacity, size_t *used, uint64_t value)
+{
+	char digits[DECIMAL_MAX];
+
+	return (string_put(line, capacity, used, decimal_digits(digits, value)));
+}
+
+/*
+ * The fixed word of a framebuffer the reader found none of, one too many of or one it cannot
+ * read: status is neither ERX_DT_FB_OK nor ERX_DT_FB_OUTSIDE, whose lines carry facts.
+ */
+static const char *
+framebuffer_reason(erx_dt_fb_status_t status)
+{
+	switch (status) {
+	case ERX_DT_FB_NONE:
+		return ("none");
+	case ERX_DT_FB_AMBIGUOUS:
+		return ("ambiguous");
+	case ERX_DT_FB_UNSUPPORTED:
+		return ("unsupported");
+	default:
+		return ("malformed");
+	}
+}
+
+size_t
+erx_boot_framebuffer_line(erx_boot_words_t path, const erx_dt_framebuffer_t *fb, const char *format, char *line,
+    size_t capacity)
+{
+	size_t used = 0;
+	bool fits = path.length != 0 && erx_boot_node_path_valid((const uint8_t *)path.bytes, path.length) &&
+	    string_put(line, capacity, &used, "erx: device tree: ") &&
+	    text_put(line, capacity, &used, path.bytes, path.length) &&
+	    string_put(line, capacity, &used, ":");
+
+	if (fits && fb->status == ERX_DT_FB_OK)
+		fits = format_named(format) && string_put(line, capacity, &used, " framebuffer ") && decimal_put(line, capacity, &used, fb->width) &&
+		    string_put(line, capacity, &used, "x") && decimal_put(line, capacity, &used, fb->height) &&
+		    string_put(line, capacity, &used, " ") && decimal_put(line, capacity, &used, fb->stride) &&
+		    string_put(line, capacity, &used, " ") && string_put(line, capacity, &used, format);
+	else if (fits && fb->status == ERX_DT_FB_OUTSIDE)
+		fits = string_put(line, capacity, &used, " framebuffer absent outside ") &&
+		    hex_put(line, capacity, &used, fb->base) && string_put(line, capacity, &used, " ") &&
+		    hex_put(line, capacity, &used, fb->length);
+	else if (fits)
+		fits = string_put(line, capacity, &used, " framebuffer absent ") &&
+		    string_put(line, capacity, &used, framebuffer_reason(fb->status));
+	return (fits && string_put(line, capacity, &used, "\n") ? used : 0);
 }
 
 size_t

@@ -309,6 +309,18 @@ const char	*erx_dom_view_build(erx_dom_lib_t *, const erx_manifest_view_t *,
 		    uint32_t nfiles, const erx_dom_boot_tables_t *tables);
 
 /*
+ * Places the framebuffer of entry, a framebuffer row's catalogue entry
+ * (erx/dom.h), from the tree's facts fb and format, its format's name: the
+ * entry keeps both, and when erx_boot_framebuffer_place places the
+ * framebuffer inside the entry's window, ranges[0] becomes its pages and
+ * offset and size the framebuffer in them, so a give windows those pages
+ * and nothing else. An entry it does not place keeps no range, so its give
+ * makes no object. Pure. Returns whether it placed the framebuffer.
+ */
+bool		erx_dom_view_framebuffer(erx_dom_device_entry_t *entry, const erx_dt_framebuffer_t *fb,
+		    const char *format);
+
+/*
  * The root's view: erx_dom_view_build over every entry of the opened boot
  * image, each judged by erx_dom_boot_image from the bytes the archive holds
  * at its start (liberx/system/dom_boot.c).

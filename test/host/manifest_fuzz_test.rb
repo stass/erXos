@@ -12,13 +12,13 @@ require_relative '../../tools/fuzz/erx_manifest'
 # tools/fuzz/erx_manifest.rb through tools/fuzz/manifest_verdicts.c): over the
 # manifest seeds alone, unmutated, its checks of what the reader and the domain
 # library admit hold. A seed the manifest check admits, QEMU virt's development
-# manifest and the start-row seed among them, is a valid manifest, so an abort on
+# manifest, the Raspberry Pi 4's and the start-row seed among them, is a valid manifest, so an abort on
 # one is a wrong expectation in the target or a library that misreads a valid
 # manifest, and either stops every run of the target before its mutants.
 class ManifestFuzzTest < Minitest::Test
   # The valid seeds, each of which the C reader must accept: those the manifest
   # check admits, and the structural fixture's empty manifest.
-  ADMITTED = %w[valid domains start-row session-grantee system-args-escape empty].freeze
+  ADMITTED = %w[valid raspi4b domains start-row session-grantee system-args-escape empty].freeze
 
   def test_the_c_half_runs_clean_over_the_seeds
     seeds = Erx::ManifestSeeds.all

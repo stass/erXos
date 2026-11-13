@@ -54,6 +54,9 @@ typedef struct erx_boot_device {
 	const char	*role;		/* the record's role word: "block", "net" or "hostlink" */
 	const char	*peripheral;	/* the peripheral's name in the CMSIS-SVD source */
 	bool		given;		/* a row of erx/device_kinds.h; false for the host link's UART */
+	/* A framebuffer row: no kind, role and peripheral NULL, given false; its record is the
+	 * framebuffer record of its catalogue entry's facts (erx_boot_framebuffer_words). */
+	bool		framebuffer;
 	uint64_t	base;		/* the register window */
 	uint64_t	size;
 	uint32_t	line;		/* the interrupt, as the platform's controller numbers it */
@@ -115,8 +118,10 @@ uint64_t	erx_boot_console_page(const erx_boot_manifest_t *manifest);
  * Writes a physical record's words, -erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK with
  * the numbers in decimal and MARK direct or shared by line_shared, each word ended by NUL,
  * into words, and returns their whole length. Returns 0, having written nothing past
- * capacity, when they do not fit. Only a device that is not given has this record; a given
- * one's is -erx given (erx_boot_device_given).
+ * capacity, when they do not fit, or for a framebuffer row, which has no role or peripheral.
+ * Only a device that is not given has this record; a given one's is -erx given
+ * (erx_boot_device_given), and a framebuffer's the framebuffer record
+ * (erx_boot_framebuffer_words).
  */
 size_t	erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capacity);
 
@@ -243,6 +248,50 @@ const char	*erx_boot_dma_absent(const erx_dt_device_t *facts, uint64_t first, ui
 
 /* The tree's hardware address as a 48-bit number, its first byte highest; 0 for none. */
 uint64_t	erx_boot_mac_number(const erx_dt_device_t *facts);
+
+/*
+ * Whether the framebuffer of facts fb, whose format's name is format, is placed: the one
+ * decision of whether a framebuffer row has pages, an object over them and a record
+ * (docs/design-device-tree.md, "Facts into records"). It is placed when its status is
+ * ERX_DT_FB_OK, so the reader found it inside its row's window and outside RAM, format is a
+ * name erx_boot_framebuffer_words takes, the framebuffer is not empty and ends below the
+ * top of the address space, and its whole pages lie inside window, the row's; then *pages
+ * is those pages, which its window object covers, with its offset in the first page. The
+ * window check repeats the reader's, so no answer of the reader reaches a page outside the
+ * manifest's row. Otherwise false, writing nothing. Facts no reader wrote, all zero, read
+ * as ERX_DT_FB_OK but have length 0, and their format is NULL, so they are never placed.
+ */
+bool	erx_boot_framebuffer_place(const erx_dt_framebuffer_t *fb, const char *format, erx_dt_window_t window,
+	    erx_boot_window_t *pages);
+
+/*
+ * Writes -erx framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT into words: window
+ * the handle of the object over the framebuffer's pages in its holder's table, offset the
+ * framebuffer's in its first page (erx_boot_framebuffer_place), SIZE the reg length and
+ * FORMAT format, the name erx_dt_fb_format_name gives fb->format, which the caller looks up
+ * since this core does not link the tree reader. Returns their whole length; 0, having
+ * written nothing past capacity, for facts whose status is not ERX_DT_FB_OK, a format that is
+ * NULL, empty or longer than ERX_BOOT_FORMAT_WORD_MAX bytes with its NUL, or words that do
+ * not fit, which ERX_BOOT_FRAMEBUFFER_WORDS_MAX bytes (erx/boot_words.h) always do.
+ */
+size_t	erx_boot_framebuffer_words(const erx_dt_framebuffer_t *fb, const char *format, uint64_t window,
+	    uint64_t offset, char *words, size_t capacity);
+
+/*
+ * Writes the root's console line for a framebuffer row at path (docs/design-device-tree.md,
+ * "The lines"), without a NUL, into line, and returns its length: "erx: device tree: PATH:"
+ * then " framebuffer WIDTHxHEIGHT STRIDE FORMAT", FORMAT format as for
+ * erx_boot_framebuffer_words, " framebuffer absent outside BASE SIZE" with the reg range the
+ * reader found outside the row's window or inside RAM, or " framebuffer absent REASON",
+ * REASON one of "none", "ambiguous", "malformed" and "unsupported", then a newline.
+ * Addresses are hexadecimal, other numbers decimal, the reasons and the format's name fixed
+ * words, so no byte of the tree reaches the line. Returns 0, having written nothing past
+ * capacity, for a path that is not a node path, facts of ERX_DT_FB_OK without a format
+ * erx_boot_framebuffer_words takes, or a line that does not fit, which ERX_BOOT_TREE_LINE_MAX
+ * bytes always do.
+ */
+size_t	erx_boot_framebuffer_line(erx_boot_words_t path, const erx_dt_framebuffer_t *fb, const char *format,
+	    char *line, size_t capacity);
 
 /*
  * Writes -erx boot VALUE SLOT by the names of include/erx/core/boot_pair.h into words, and

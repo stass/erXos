@@ -302,7 +302,7 @@ task's first thread as its argument. Its `flags` carry `ERX_BOOT_DET` when the s
 domain's node name and the system node's, its `args` and `env`, and the words the library adds to its `args`, after
 the row's own: `-erx build ID` with the boot image's build identifier, as the root's own page carries it, so
 every domain names the same build; one record per device it was given, `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
-MEM_SIZE CLOCK COHERENT MAC`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), and, when it holds a
+MEM_SIZE CLOCK COHERENT MAC`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), or, for a framebuffer the root placed, `-erx framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT` ([design-device-tree.md](design-device-tree.md#facts-into-records)), and, when it holds a
 block device, `-erx boot VALUE SLOT` with the boot's pair, as the root's own page carries it ([Image
 windows](#image-windows)). WINDOW_H, LINE_H and MEM_H are the installed objects' values in the holder's own handle
 table, OFFSET and SIZE place the registers in the window page, MEM_H and MEM_SIZE are 0 for a device with no
@@ -1538,7 +1538,16 @@ transports, each with compatible `virtio,mmio` and peripheral `virtio_mmio`:
 
 A `framebuffer` row, the firmware's framebuffer on the Raspberry Pi 4, is no row of the kinds
 table: its holder's record is the root's framebuffer record
-([design-device-tree.md](design-device-tree.md#facts-into-records)), not a `given` record.
+([design-device-tree.md](design-device-tree.md#facts-into-records)), not a `given` record,
+`-erx framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT`: the handle of a physical
+memory object over the framebuffer's pages and nothing else of its row's window, mapped as
+device memory, the framebuffer's offset in the first page and its bytes, and its geometry and
+format's name from the `simple-framebuffer` node. The system domain holds it as any other
+domain does, the root making the object in its own table, and a framebuffer the root did not
+place has no record, its holder finding none, and only the root's line. The development
+manifest of the Pi places the unit with the system domain, so the board's console shows the
+root's line for it; no runtime there drives the framebuffer. `erx_device_record:framebuffers/0`
+reads the record.
 
 The development manifest places the block and network devices, in the storage and network domains,
 and no gpu or input device, since it configures no display domain.

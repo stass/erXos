@@ -11,11 +11,14 @@
 # the domain library refuses a configured domain that holds such a device (TODO.md, "the
 # Raspberry Pi 4's sd unit").
 #
-# The system domain holds two units, each one register page of the board
-# (docs/design-platforms.md, "Raspberry Pi 4 Model B"): the console's, the mini UART's
-# page, which it shares with the auxiliary SPI controllers that no driver here drives,
-# and the host link's, the PL011s' page, of which the host link uses UART3. The console's
-# driver is erx_mini_uart, which keeps the divisor the firmware set.
+# The system domain holds three units (docs/design-platforms.md, "Raspberry Pi 4 Model B"):
+# two of one register page of the board each, the console's, the mini UART's page, which
+# it shares with the auxiliary SPI controllers that no driver here drives, and the host
+# link's, the PL011s' page, of which the host link uses UART3; and the framebuffer's, so
+# the root reads the framebuffer the firmware set up and prints its line
+# (docs/design-device-tree.md, "The lines") and the system domain finds its record. No
+# runtime here drives the framebuffer. The console's driver is erx_mini_uart, which keeps
+# the divisor the firmware set.
 #
 # The shares, runtime limits and the session's limits are QEMU virt's development
 # manifest's (config/manifest/qemu-virt-development.txt), whose comment gives their
@@ -142,6 +145,9 @@ unit console
   holder system
 unit hostlink
   placement "hostlink-uart"
+  holder system
+unit framebuffer
+  placement "framebuffer"
   holder system
 service inspect
   server system

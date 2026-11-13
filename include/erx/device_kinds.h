@@ -20,7 +20,8 @@
  * the domain library's boot view (liberx/system/dom_boot_view.c) both read
  * this table, so a further kind is one more row here. A framebuffer row has
  * none: its record is the root's framebuffer record
- * (docs/design-device-tree.md, "Facts into records").
+ * (docs/design-device-tree.md, "Facts into records"), and the row names
+ * /chosen and ERX_FRAMEBUFFER_COMPATIBLE, which the manifest check proves.
  */
 typedef struct erx_device_kind {
 	uint32_t	 role;		/* ERX_MF_DEVICE_ROLE_* */
@@ -36,6 +37,8 @@ static const erx_device_kind_t erx_device_kinds[] = {
 	{ ERX_MF_DEVICE_ROLE_BLOCK, "brcm,bcm2711-emmc2", "block", "sdhci" },
 	{ ERX_MF_DEVICE_ROLE_GPU, "virtio,mmio", "gpu", "virtio_mmio" },
 };
+
+#define ERX_FRAMEBUFFER_COMPATIBLE	"simple-framebuffer"
 
 #define ERX_DEVICE_KINDS_COUNT	(sizeof(erx_device_kinds) / sizeof(erx_device_kinds[0]))
 

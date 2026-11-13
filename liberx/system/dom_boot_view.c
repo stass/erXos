@@ -46,6 +46,7 @@
 #include "erx/device_kinds.h"
 #include "erx/dom.h"
 #include "erx/dom_lib.h"
+#include "liberx/backend/core/boot_manifest.h"
 
 /*
  * Each domain's handle table. The manifest names no size for it; this is
@@ -58,6 +59,8 @@ static bool	boot_limits(const erx_manifest_view_t *, uint32_t, erx_runtime_limit
 static const char *boot_principals(erx_dom_lib_t *, const erx_manifest_view_t *,
 		    const erx_dom_boot_tables_t *);
 static bool	boot_pages(uint64_t, uint64_t, erx_dom_range_t *);
+static bool	boot_compatible_is(const erx_manifest_view_t *, const erx_mf_device_t *, const char *);
+static bool	boot_reach(const erx_dom_device_entry_t *, erx_dom_range_t *);
 static bool	boot_pages_meet(const erx_dom_device_entry_t *, const erx_dom_device_entry_t *);
 static bool	boot_lines_meet(const erx_dom_device_entry_t *, const erx_dom_device_entry_t *);
 static const char *boot_units(const erx_manifest_view_t *, erx_dom_device_entry_t *);
@@ -224,14 +227,31 @@ boot_pages(uint64_t base, uint64_t size, erx_dom_range_t *pages)
 	return (true);
 }
 
-/* Whether two entries' register pages share a page; an entry with no window shares none. */
+/*
+ * The pages an entry may reach: a framebuffer row's window, which the tree
+ * places its framebuffer in later, and any other row's register pages.
+ * False for an entry with neither, a PCIe function's.
+ */
+static bool
+boot_reach(const erx_dom_device_entry_t *entry, erx_dom_range_t *pages)
+{
+	if (entry->role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER)
+		*pages = entry->window;
+	else if (entry->nranges != 0)
+		*pages = entry->ranges[0];
+	else
+		return (false);
+	return (true);
+}
+
+/* Whether two entries may reach a page in common (boot_reach). */
 static bool
 boot_pages_meet(const erx_dom_device_entry_t *a, const erx_dom_device_entry_t *b)
 {
-	const erx_dom_range_t *x = &a->ranges[0], *y = &b->ranges[0];
+	erx_dom_range_t x, y;
 
-	return (a->nranges != 0 && b->nranges != 0 &&
-	    x->base < y->base + y->size && y->base < x->base + x->size);
+	return (boot_reach(a, &x) && boot_reach(b, &y) &&
+	    x.base < y.base + y.size && y.base < x.base + x.size);
 }
 
 /* Whether two entries name one interrupt line; an entry with no line, a PCIe function's, shares none. */
@@ -247,6 +267,16 @@ boot_lines_meet(const erx_dom_device_entry_t *a, const erx_dom_device_entry_t *b
 	return (false);
 }
 
+/* Whether a device row's compatible string is text. The reader checked it against the string table. */
+static bool
+boot_compatible_is(const erx_manifest_view_t *manifest, const erx_mf_device_t *device, const char *text)
+{
+	const char *compatible = (const char *)manifest->bytes + manifest->header.strings.offset +
+	    device->compatible.offset;
+
+	return (strlen(text) == device->compatible.length && memcmp(text, compatible, device->compatible.length) == 0);
+}
+
 /*
  * The kind of a device-tree device, erx/device_kinds.h's row of its role and
  * compatible string, whose names its holder's record carries; NULL for a
@@ -256,14 +286,10 @@ boot_lines_meet(const erx_dom_device_entry_t *a, const erx_dom_device_entry_t *b
 static const erx_device_kind_t *
 boot_kind(const erx_manifest_view_t *manifest, const erx_mf_device_t *device)
 {
-	const char *compatible = (const char *)manifest->bytes + manifest->header.strings.offset +
-	    device->compatible.offset;
-
 	for (size_t at = 0; at < ERX_DEVICE_KINDS_COUNT; at++) {
 		const erx_device_kind_t *kind = &erx_device_kinds[at];
 
-		if (kind->role == device->role && strlen(kind->compatible) == device->compatible.length &&
-		    memcmp(kind->compatible, compatible, device->compatible.length) == 0)
+		if (kind->role == device->role && boot_compatible_is(manifest, device, kind->compatible))
 			return (kind);
 	}
 	return (NULL);
@@ -359,7 +385,15 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 		entry->memory = device.dma == ERX_MF_DMA_UNCONFINED ? device.dma_memory : 0;
 		if (entry->memory % ERX_PAGE_SIZE != 0)
 			return ("manifest: a device's DMA memory is not whole pages");
-		if (device.selector == ERX_MF_SELECTOR_DT) {
+		if (device.selector == ERX_MF_SELECTOR_DT && device.role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER) {
+			/* No range and no line until the tree places the framebuffer (erx/dom.h). */
+			if (!boot_pages(device.base, device.size, &entry->window))
+				return ("manifest: a framebuffer's window is empty or wraps");
+			if (entry->memory != 0 || !boot_compatible_is(manifest, &device, ERX_FRAMEBUFFER_COMPATIBLE))
+				return ("manifest: a framebuffer row has DMA memory or is not a simple-framebuffer");
+			entry->path = (const char *)manifest->bytes + manifest->header.strings.offset + device.path.offset;
+			entry->path_len = device.path.length;
+		} else if (device.selector == ERX_MF_SELECTOR_DT) {
 			if (!boot_pages(device.base, device.size, &entry->ranges[0]))
 				return ("manifest: a device's register window is empty or wraps");
 			entry->nranges = 1;
@@ -402,6 +436,9 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 	view->ndevices = count;
 	return (NULL);
 }
+
+/* A framebuffer record takes no more room than the given record the reserve counts for it. */
+_Static_assert(ERX_BOOT_FRAMEBUFFER_WORDS_MAX <= ERX_BOOT_GIVEN_WORDS_MAX, "a framebuffer record fits a given record's room");
 
 /*
  * Whether a domain's boot page's strings hold its arguments and
@@ -484,8 +521,8 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 		for (uint32_t device = 0; device < view->ndevices; device++) {
 			if (view->devices[device].row != index)
 				continue;
-			/* Its holder opens it from its record, which names its kind. */
-			if (view->devices[device].role_word == NULL)
+			/* Its holder opens it from its record, which names its kind or is a framebuffer's. */
+			if (view->devices[device].role_word == NULL && view->devices[device].role != ERX_MF_DEVICE_ROLE_FRAMEBUFFER)
 				return ("manifest: a configured domain holds a device of a kind no runtime drives");
 			held++;
 			block = block || view->devices[device].role == ERX_MF_DEVICE_ROLE_BLOCK;
@@ -730,4 +767,22 @@ erx_dom_view_build(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest, uint
 	lib->fail_step = UINT32_MAX;
 #endif
 	return (NULL);
+}
+
+bool
+erx_dom_view_framebuffer(erx_dom_device_entry_t *entry, const erx_dt_framebuffer_t *fb, const char *format)
+{
+	const erx_dt_window_t window = { entry->window.base, entry->window.size };
+	erx_boot_window_t pages;
+
+	entry->framebuffer = *fb;
+	entry->format = format;
+	entry->nranges = 0;
+	if (!erx_boot_framebuffer_place(fb, format, window, &pages))
+		return (false);
+	entry->ranges[0] = (erx_dom_range_t){ pages.base, pages.size };
+	entry->nranges = 1;
+	entry->offset = pages.offset;
+	entry->size = fb->length;
+	return (true);
 }

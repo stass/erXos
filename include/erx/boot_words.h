@@ -36,6 +36,15 @@
 #define ERX_BOOT_GIVEN_WORDS_MAX	(sizeof("-erx") + sizeof("given") + \
 	2u * ERX_BOOT_NAME_WORD_MAX + 8u * ERX_BOOT_NUMBER_WORD_MAX + sizeof("1") + ERX_BOOT_MARK_WORD_MAX)
 
+/*
+ * -erx framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT, per framebuffer a domain
+ * holds (docs/design-device-tree.md, "Facts into records"): FORMAT is a name of the device-tree
+ * reader's table (erx_dt_fb_format_name), the longest "a2r10g10b10" and "x2r10g10b10".
+ */
+#define ERX_BOOT_FORMAT_WORD_MAX	12u
+#define ERX_BOOT_FRAMEBUFFER_WORDS_MAX	(sizeof("-erx") + sizeof("framebuffer") + \
+	6u * ERX_BOOT_NUMBER_WORD_MAX + ERX_BOOT_FORMAT_WORD_MAX)
+
 /* -erx boot VALUE SLOT: the longest names are "unknown" and "none" (include/erx/core/boot_pair.h). */
 #define ERX_BOOT_PAIR_WORDS_MAX		(sizeof("-erx") + sizeof("boot") + \
 	sizeof("unknown") + sizeof("none"))

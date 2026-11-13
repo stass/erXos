@@ -27,14 +27,16 @@ module Erx
       repository = File.expand_path('../..', __dir__)
       codec = ABI::Codec.new(ABI::Generator.plan(root: repository).schema)
       fixture = ManifestContextFixture.arguments(codec)
-      platform = JsonInput.parse(File.binread(File.join(repository, 'config/platforms/qemu-virt.json')),
-                                 max_bytes: 65_536, label: 'config/platforms/qemu-virt.json')
+      platform = platform_of(repository, 'qemu-virt')
       source = File.binread(File.join(repository, 'config/manifest/qemu-virt-development.txt'))
       context = Manifest::Context.new(**fixture, platform: platform)
       development = Manifest.admit(source: source, codec: codec, context: context, planner: ManifestContextFixture.accepting_planner)
       # A terminal escape in an argument, which the boot page's reader refuses.
       escape = Manifest.admit(source: source.sub(/^\s*system_args .*$/, '  system_args hex:2d5a1b5d323b7265766965770700'),
                               codec: codec, context: context, planner: ManifestContextFixture.accepting_planner)
+      pi = Manifest.admit(source: File.binread(File.join(repository, 'config/manifest/raspi4b-development.txt')),
+                          codec: codec, context: Manifest::Context.new(**fixture, platform: platform_of(repository, 'raspi4b')),
+                          planner: ManifestContextFixture.accepting_planner)
       empty = Manifest.structural_fixture(source: File.binread(File.join(repository, 'test/fixtures/manifest_empty.txt')),
                                           codec: codec, context: Manifest::Context.new(**fixture))
       domain_context = Manifest::Context.new(**ManifestContextFixture.domain_arguments(codec), platform: platform)
@@ -46,8 +48,14 @@ module Erx
                              context: domain_context, planner: ManifestContextFixture.accepting_planner)
       PackFuzz.prefix_seeds(development.bytes).merge('empty' => empty.bytes, 'system-args-escape' => escape.bytes,
                                                      'domains' => domains.bytes, 'session-grantee' => session.bytes,
-                                                     'start-row' => start.bytes,
+                                                     'start-row' => start.bytes, 'raspi4b' => pi.bytes,
                                                      'boot-timeout-zero' => boot_timeout(codec, domains.bytes, 0))
+    end
+
+    # The platform record config/platforms/NAME.json.
+    def platform_of(repository, name)
+      path = "config/platforms/#{name}.json"
+      JsonInput.parse(File.binread(File.join(repository, path)), max_bytes: 65_536, label: path)
     end
 
     # The manifest bytes with their first configured domain's boot_timeout_s set to seconds.

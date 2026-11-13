@@ -68,20 +68,22 @@ class DomPlannerTest < Minitest::Test
     Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner).bytes
   end
 
-  # The view's catalogue and services, or its refusal, as test/fixtures/dom_view_driver.c prints them.
-  def view_lines(manifest, name)
+  # The view's catalogue and services, or its refusal, as test/fixtures/dom_view_driver.c prints them,
+  # or with mode framebuffer its framebuffer rows' ranges before and after placement.
+  def view_lines(manifest, name, *mode)
     @view_driver ||= File.join(@directory, 'dom-view').tap do |output|
       sources = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_boot_view.c liberx/erx_lane.c
+                   liberx/backend/core/boot_manifest.c
                    tools/host/input.c test/fixtures/dom_view_driver.c].map { |path| File.join(ROOT, path) }
       @runner.run([ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror',
                    '-O1', *Erx::Generated.include_flags(root: ROOT), '-I', File.join(ROOT, 'include'),
-                   '-I', File.join(ROOT, 'tools/host'), *sources,
+                   '-I', ROOT, '-I', File.join(ROOT, 'tools/host'), *sources,
                    Erx::Generated.path('liberx/generated/abi_reader.c', root: ROOT), '-o', output],
                   name: 'dom-view-build', deadline: 120)
     end
     path = File.join(@directory, "view-#{name}.bin")
     File.binwrite(path, manifest)
-    File.readlines(@runner.run([@view_driver, path], name: "dom-view-#{name}", deadline: 30).fetch('log'), chomp: true)
+    File.readlines(@runner.run([@view_driver, path, *mode], name: "dom-view-#{name}", deadline: 30).fetch('log'), chomp: true)
   end
 
   # source with the machine's max_connections set to count; raises when the manifest
@@ -492,6 +494,42 @@ class DomPlannerTest < Minitest::Test
     assert_equal 1, admit(@source).report.fetch('child_plan_instances')
     held = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
     refused(held, 'view', /a configured domain holds share a register page/)
+  end
+
+  # A framebuffer row (docs/design-device-tree.md, "Facts into records"): /chosen and
+  # simple-framebuffer, no kind a runtime drives and no line, as the Raspberry Pi 4's
+  # record has it, here at 4 MiB clear of QEMU virt's register windows. Its holder's record
+  # is the root's framebuffer record over the framebuffer's pages, which the give windows
+  # once the root places the framebuffer, so the view admits a configured holder and the
+  # library plans the row.
+  def test_a_configured_row_holding_a_framebuffer_is_admitted
+    assert_equal 1, admit(framebuffer_held).report.fetch('child_plan_instances')
+  end
+
+  # A framebuffer row's entry has no range until the root places its framebuffer
+  # (erx_dom_view_framebuffer), so its give windows nothing; a framebuffer whose last page
+  # lies past the row's 4 MiB window is not placed and leaves none; one 0x2000 bytes 0x400
+  # into the window leaves its three whole pages as the one range, never the window; placing
+  # the first again takes that range back.
+  def test_only_a_placed_framebuffer_leaves_a_range_and_only_its_own_pages
+    lines = view_lines(admit(framebuffer_held).bytes, 'framebuffer-ranges', 'framebuffer')
+    row = lines.first[/\Aframebuffer (\d+) /, 1]
+    assert_equal ["framebuffer #{row} built ranges=", "framebuffer #{row} outside placed=0 ranges=",
+                  "framebuffer #{row} inside placed=1 ranges=0x7e000000+0x3000 offset=0x400 size=0x2000",
+                  "framebuffer #{row} again placed=0 ranges="], lines
+  end
+
+  # The development manifest with the Raspberry Pi 4's framebuffer unit added to QEMU virt's
+  # platform, at 4 MiB clear of its register windows, and held by alpha.
+  def framebuffer_held
+    platform = JSON.parse(JSON.generate(@context.platform))
+    pi = JSON.parse(File.read(File.join(ROOT, 'config/platforms/raspi4b.json')))
+    framebuffer = pi.fetch('units').find { |unit| unit.fetch('key') == 'framebuffer' }
+    framebuffer.fetch('devices').first.merge!('base' => 0x7e00_0000, 'size' => 0x40_0000)
+    platform.fetch('units') << framebuffer
+    @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
+    ManifestContextFixture.substitute(@source, /^unit net\n  placement "net"\n  holder system\n/,
+                                      "\\0unit framebuffer\n  placement \"framebuffer\"\n  holder @domain.alpha\n")
   end
 
   # What /dev and the domain service read of the root's view of the development

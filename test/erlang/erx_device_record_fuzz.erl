@@ -1,10 +1,11 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% Random argument lists through erx_device_record:find/3. Whatever arrives, it returns
-%% {ok, Specs} or {error, {bad_device_record, Text}}, and what it says agrees with
-%% reference/1, a reader that shares no code with it: it finds records by filtering and
-%% numbers by a regular expression. The words come from a small alphabet of record heads,
+%% Random argument lists through erx_device_record:find/3 and framebuffers/1. Whatever
+%% arrives, each returns {ok, Specs} or {error, {bad_device_record, Text}}, and what it says
+%% agrees with reference/1 or framebuffer_reference/1, readers that share no code with it:
+%% they find records by filtering and numbers by a regular expression, and take a format's
+%% bits from a table of their own. The words come from a small alphabet of record heads,
 %% digits near the field bounds, signs, spaces and other characters, so other roles, short
 %% records and bad numbers are common. The seed comes from make check-fuzz.
 
@@ -17,25 +18,49 @@
 -define(U64, 16#ffffffffffffffff).
 -define(U32, 16#ffffffff).
 -define(U48, 16#ffffffffffff).
-%% The fewest rounds that must find a record, so an edit to the generator cannot leave the
-%% accepting path untried.
+%% The simple-framebuffer binding's formats and their bits per pixel (kernel/core/dt.c).
+-define(FORMATS, [{"a1r5g5b5", 16}, {"a2r10g10b10", 32}, {"a8b8g8r8", 32}, {"a8r8g8b8", 32}, {"r5g6b5", 16},
+                  {"r5g5b5a1", 16}, {"r8g8b8", 24}, {"x1r5g5b5", 16}, {"x2r10g10b10", 32}, {"x8r8g8b8", 32},
+                  {"x8b8g8r8", 32}]).
+%% The fewest rounds that must find a device record, and a framebuffer record, so an edit
+%% to the generator cannot leave either accepting path untried.
 -define(MIN_ACCEPTED, ?ROUNDS div 100).
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    Accepted = length([ok || _ <- lists:seq(1, ?ROUNDS), round_of(arguments()) =:= accepted]),
-    case Accepted >= ?MIN_ACCEPTED of
-        true -> io:format("fuzz: ~p rounds ok, ~p accepted~n", [?ROUNDS, Accepted]);
-        false -> error({too_few_accepted, Accepted})
+    Verdicts = [round_of(arguments()) || _ <- lists:seq(1, ?ROUNDS)],
+    Accepted = length([ok || {accepted, _} <- Verdicts]),
+    Framebuffers = length([ok || {_, accepted} <- Verdicts]),
+    case Accepted >= ?MIN_ACCEPTED andalso Framebuffers >= ?MIN_ACCEPTED of
+        true -> io:format("fuzz: ~p rounds ok, ~p accepted, ~p framebuffers accepted~n",
+                          [?ROUNDS, Accepted, Framebuffers]);
+        false -> error({too_few_accepted, Accepted, Framebuffers})
     end.
 
+%% The verdicts of both readers on one argument list, each accepted or refused.
 round_of(Arguments) ->
+    {devices_round(Arguments), framebuffers_round(Arguments)}.
+
+devices_round(Arguments) ->
     Said = erx_device_record:find(block, virtio_mmio, Arguments),
     case Said of
         {ok, Specs} when is_list(Specs) -> ok;
         {error, {bad_device_record, Text}} when is_list(Text) -> ok
     end,
     case verdict(Said) =:= reference(Arguments) of
+        true when Said =:= {ok, []} -> refused;
+        true when element(1, Said) =:= ok -> accepted;
+        true -> refused;
+        false -> error({disagrees_with_reference, Arguments, Said})
+    end.
+
+framebuffers_round(Arguments) ->
+    Said = erx_device_record:framebuffers(Arguments),
+    case Said of
+        {ok, Specs} when is_list(Specs) -> ok;
+        {error, {bad_device_record, Text}} when is_list(Text) -> ok
+    end,
+    case verdict(Said) =:= framebuffer_reference(Arguments) of
         true when Said =:= {ok, []} -> refused;
         true when element(1, Said) =:= ok -> accepted;
         true -> refused;
@@ -86,6 +111,27 @@ spec("device", [Base, Size, Line, Mark, Clock | _]) ->
 spec(_Form, _Words) ->
     bad.
 
+framebuffer_reference(Arguments) ->
+    Specs = [framebuffer_spec(Words) || ["framebuffer" | Words] <- Arguments],
+    case lists:all(fun is_map/1, Specs) of
+        true -> {ok, Specs};
+        false -> {error, bad_device_record}
+    end.
+
+%% A record the tree's reader would have passed: whole rows of its format inside its bytes.
+framebuffer_spec([Window, Offset, Size, Width, Height, Stride, Format | _]) ->
+    case {[decimal(Word, ?U64) || Word <- [Window, Offset, Size]],
+          [decimal(Word, ?U32) || Word <- [Width, Height, Stride]], lists:keyfind(Format, 1, ?FORMATS)} of
+        {[W, O, S], [X, Y, R], {Format, Bits}}
+          when is_integer(W), is_integer(O), is_integer(S), is_integer(X), is_integer(Y), is_integer(R),
+               S > 0, X > 0, Y > 0, R > 0, R * 8 >= X * Bits, R * Y =< S ->
+            #{window => {object, W, O, S}, width => X, height => Y, stride => R, format => list_to_atom(Format)};
+        _ ->
+            bad
+    end;
+framebuffer_spec(_Words) ->
+    bad.
+
 %% A shared line is tagged; a direct one is the bare line.
 marked(Line, "shared") -> {shared, Line};
 marked(Line, "direct") -> Line.
@@ -118,12 +164,32 @@ entry() ->
     Count = #{"device" => {3, 1}, "given" => {4, 5}},
     {Before, After} = maps:get(Form, Count),
     Numbers = fun(N) -> [number() || _ <- lists:seq(1, N)] end,
-    case rand:uniform(4) of
+    case rand:uniform(5) of
+        5 -> framebuffer_entry(Words);
         1 -> [Form, "block", "virtio_mmio" | Words];
         2 -> [Form, "block", "virtio_mmio" | Numbers(Before) ++ [mark() | Numbers(After)] ++ Words];
         3 -> [Pick(["device", "given", "console_uart"]), Pick(["block", "network", ""]),
               Pick(["virtio_mmio", "sdhci", "virtio_mmio "]) | Words];
         4 -> Words
+    end.
+
+%% A framebuffer record, most with a geometry at the reader's bounds: a stride of a whole
+%% row, a byte past it or a byte short of it, and bytes of whole rows or a byte short of
+%% them; some with a format the binding does not name, words of the other alphabet, or
+%% too few fields.
+framebuffer_entry(Words) ->
+    Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
+    {Format, Bits} = Pick(?FORMATS),
+    Width = rand:uniform(4096),
+    Height = rand:uniform(4096),
+    Stride = (Width * Bits + 7) div 8 + Pick([0, 0, 0, 1, 64, -1]),
+    Size = Stride * Height + Pick([0, 0, 0, 4096, -1]),
+    Fields = [number(), number(), integer_to_list(Size), integer_to_list(Width), integer_to_list(Height),
+              integer_to_list(Stride), Pick([Format, Format, Format, "a8r8g8b8 ", "A8R8G8B8", ""])],
+    case rand:uniform(4) of
+        1 -> ["framebuffer" | [number() || _ <- lists:seq(1, 6)] ++ [Format | Words]];
+        2 -> ["framebuffer" | lists:sublist(Fields, rand:uniform(7) - 1)];
+        _ -> ["framebuffer" | Fields ++ Words]
     end.
 
 mark() ->

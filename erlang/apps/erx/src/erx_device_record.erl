@@ -15,7 +15,14 @@
 %%   of its host link's UART, which does no DMA, built by liberx/backend/core/boot_manifest.c
 %%   from the system manifest.
 %%
-%% In both forms CLOCK is the device's clock in hertz from its manifest row, 0 for a device
+%% A domain that holds a framebuffer finds a third form, `-erx framebuffer WINDOW_H OFFSET
+%% SIZE WIDTH HEIGHT STRIDE FORMAT`, read by framebuffers/0 (docs/design-device-tree.md,
+%% "Facts into records"): the handle of the object over the framebuffer's pages, the
+%% framebuffer's offset in them and its bytes, its geometry and its format's name, all from
+%% the firmware's device tree. The root writes it only for a framebuffer the tree placed in
+%% its row's window, so a domain whose firmware set none up finds `{ok, []}`.
+%%
+%% In both device forms CLOCK is the device's clock in hertz from its manifest row, 0 for a device
 %% whose driver reads none, so a driver reads its clock the same way whichever form it gets.
 %% MARK is `shared` when another device of the unit names the line and `direct` otherwise,
 %% as the record's writer found it (docs/design-shared-devices.md, "Lines inside a domain"),
@@ -29,8 +36,8 @@
 
 -module(erx_device_record).
 
--export([find/2, find/3]).
--export_type([spec/0]).
+-export([find/2, find/3, framebuffers/0, framebuffers/1]).
+-export_type([spec/0, framebuffer/0, format/0]).
 
 %% What erx_device:open/1 takes: a given device's objects, or a physical device's window and
 %% line, each with its clock for its driver.
@@ -42,14 +49,37 @@
               | #{peripheral := atom(), window := {physical, non_neg_integer(), non_neg_integer()},
                   lines := [non_neg_integer() | {shared, non_neg_integer()}], clock := non_neg_integer()}.
 
+%% A framebuffer record as its display driver takes it: the window object and the
+%% framebuffer's offset and bytes in it, as a given record's window, and its geometry.
+-type framebuffer() :: #{window := {object, non_neg_integer(), non_neg_integer(), pos_integer()},
+                         width := pos_integer(), height := pos_integer(), stride := pos_integer(),
+                         format := format()}.
+%% The simple-framebuffer binding's formats, the device-tree reader's table.
+-type format() :: a1r5g5b5 | a2r10g10b10 | a8b8g8r8 | a8r8g8b8 | r5g6b5 | r5g5b5a1 | r8g8b8 | x1r5g5b5
+                | x2r10g10b10 | x8r8g8b8 | x8b8g8r8.
+
 %% The records of Role and Peripheral among init's `-erx` arguments.
 -spec find(atom(), atom()) -> {ok, [spec()]} | {error, {bad_device_record, string()}}.
 find(Role, Peripheral) ->
-    Arguments = case init:get_argument(erx) of
-                    {ok, Found} -> Found;
-                    error -> []
-                end,
-    find(Role, Peripheral, Arguments).
+    find(Role, Peripheral, arguments()).
+
+%% The framebuffer records among init's `-erx` arguments.
+-spec framebuffers() -> {ok, [framebuffer()]} | {error, {bad_device_record, string()}}.
+framebuffers() ->
+    framebuffers(arguments()).
+
+%% Pure, as find/3 is. A record whose words do not parse, or whose geometry the reader of
+%% the tree would not have passed (a zero dimension, a stride short of a row, rows past
+%% its bytes), refuses them all, since the writer and this reader then disagree.
+-spec framebuffers([[string()]]) -> {ok, [framebuffer()]} | {error, {bad_device_record, string()}}.
+framebuffers(Arguments) ->
+    collect(fun framebuffer/1, [Words || ["framebuffer" | Words] <- Arguments], []).
+
+arguments() ->
+    case init:get_argument(erx) of
+        {ok, Found} -> Found;
+        error -> []
+    end.
 
 %% Pure, for its tests and fuzz target. A record of another role or peripheral is left
 %% alone. A plain word of the kernel command line joins the flag before it, so a record
@@ -63,15 +93,45 @@ find(Role, Peripheral, Arguments) ->
     PeripheralWord = atom_to_list(Peripheral),
     Records = [{Form, Words} || [Form, R, P | Words] <- Arguments, Form =:= "device" orelse Form =:= "given",
                                 R =:= RoleWord, P =:= PeripheralWord],
-    specs(Peripheral, Records, []).
+    collect(fun(Record) -> spec(Peripheral, Record) end, Records, []).
 
-specs(_Peripheral, [], Specs) ->
+collect(_Parse, [], Specs) ->
     {ok, lists:reverse(Specs)};
-specs(Peripheral, [Record | Rest], Specs) ->
-    case spec(Peripheral, Record) of
-        {ok, Spec} -> specs(Peripheral, Rest, [Spec | Specs]);
+collect(Parse, [Record | Rest], Specs) ->
+    case Parse(Record) of
+        {ok, Spec} -> collect(Parse, Rest, [Spec | Specs]);
         {error, _} = Error -> Error
     end.
+
+framebuffer([Window, Offset, Size, Width, Height, Stride, Format | _]) ->
+    case {numbers([Window, Offset, Size]), [number(Word, 32) || Word <- [Width, Height, Stride]], format(Format)} of
+        {{ok, [W, O, S]}, [{ok, X}, {ok, Y}, {ok, R}], {ok, F, Bits}}
+          when S > 0, X > 0, Y > 0, R > 0, R * 8 >= X * Bits, R * Y =< S ->
+            {ok, #{window => {object, W, O, S}, width => X, height => Y, stride => R, format => F}};
+        {{ok, _}, [{ok, _}, {ok, _}, {ok, _}], {ok, _, _}} ->
+            bad("a framebuffer record's geometry does not fit its bytes");
+        {{ok, _}, [{ok, _}, {ok, _}, {ok, _}], error} ->
+            bad("a framebuffer record's format is not one of the binding's");
+        _ ->
+            bad("a framebuffer record's handle, offset, size or geometry is not a decimal number "
+                "of its field's width")
+    end;
+framebuffer(_Words) ->
+    bad("a framebuffer record has fewer than six numbers and a format").
+
+%% A format's name and its bits per pixel, as kernel/core/dt.c's table has them.
+format("a1r5g5b5") -> {ok, a1r5g5b5, 16};
+format("a2r10g10b10") -> {ok, a2r10g10b10, 32};
+format("a8b8g8r8") -> {ok, a8b8g8r8, 32};
+format("a8r8g8b8") -> {ok, a8r8g8b8, 32};
+format("r5g6b5") -> {ok, r5g6b5, 16};
+format("r5g5b5a1") -> {ok, r5g5b5a1, 16};
+format("r8g8b8") -> {ok, r8g8b8, 24};
+format("x1r5g5b5") -> {ok, x1r5g5b5, 16};
+format("x2r10g10b10") -> {ok, x2r10g10b10, 32};
+format("x8r8g8b8") -> {ok, x8r8g8b8, 32};
+format("x8b8g8r8") -> {ok, x8b8g8r8, 32};
+format(_Word) -> error.
 
 %% COHERENT is the firmware tree's coherence mark, 0 or 1, and MAC its hardware address,
 %% 48 bits, 0 for none (docs/design-device-tree.md, "Facts into records").

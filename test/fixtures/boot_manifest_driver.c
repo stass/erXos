@@ -59,7 +59,8 @@ mark(bool shared)
  * with the manifest's source. A given device is printed by given_print; a physical one with
  * its words, NULs as spaces, and what erx_boot_device_words returns given exactly their room
  * and one byte less. With the arguments window BASE SIZE, it prints what given_print makes
- * of a block device of that register window and no DMA memory.
+ * of a block device of that register window and no DMA memory; the modes dma and
+ * framebuffer are described where main reads them.
  */
 int
 main(int argc, char **argv)
@@ -114,6 +115,45 @@ main(int argc, char **argv)
 		printf("line %.*s", (int)line_length, line);
 		return (0);
 	}
+	/*
+	 * framebuffer STATUS BASE LENGTH WIDTH HEIGHT STRIDE FORMAT WINDOW_BASE WINDOW_SIZE: the
+	 * root's step for a
+	 * framebuffer row at /chosen (framebuffer_facts and framebuffer_give,
+	 * liberx/backend/fiasco/runtime_entry.c) over facts of that erx_dt_fb_status_t and a
+	 * format of that name, "-" for none, in a row of that window: the pages
+	 * erx_boot_framebuffer_place places it in, or
+	 * none, then the record over them with the window handle above, NULs as spaces, and what
+	 * erx_boot_framebuffer_words returns given exactly its room and one byte less, then the
+	 * console line.
+	 */
+	if (argc == 11 && strcmp(argv[1], "framebuffer") == 0) {
+		const erx_dt_framebuffer_t fb = { .status = (erx_dt_fb_status_t)strtoul(argv[2], NULL, 0),
+		    .base = strtoull(argv[3], NULL, 0), .length = strtoull(argv[4], NULL, 0),
+		    .width = (uint32_t)strtoul(argv[5], NULL, 0), .height = (uint32_t)strtoul(argv[6], NULL, 0),
+		    .stride = (uint32_t)strtoul(argv[7], NULL, 0) };
+		const char *const format = strcmp(argv[8], "-") == 0 ? NULL : argv[8];
+		const erx_dt_window_t window = { strtoull(argv[9], NULL, 0), strtoull(argv[10], NULL, 0) };
+		const erx_boot_words_t path = { "/chosen", 7 };
+		char words[ERX_BOOT_FRAMEBUFFER_WORDS_MAX];
+		char line[ERX_BOOT_TREE_LINE_MAX];
+		erx_boot_window_t pages = { 0 };
+
+		if (erx_boot_framebuffer_place(&fb, format, window, &pages))
+			printf("pages %llu %llu %llu", (unsigned long long)pages.base, (unsigned long long)pages.size,
+			    (unsigned long long)pages.offset);
+		else
+			printf("pages none");
+		length = erx_boot_framebuffer_words(&fb, format, WINDOW_HANDLE, pages.offset, words, sizeof(words));
+		printf(" words");
+		for (size_t byte = 0; byte < length; byte++)
+			putchar(words[byte] == '\0' ? ' ' : words[byte]);
+		printf("exact %d short %zu\n", length != 0 && erx_boot_framebuffer_words(&fb, format, WINDOW_HANDLE,
+		    pages.offset, words, length) == length, length == 0 ? 0 : erx_boot_framebuffer_words(&fb, format,
+		    WINDOW_HANDLE, pages.offset, words, length - 1));
+		length = erx_boot_framebuffer_line(path, &fb, format, line, sizeof(line));
+		printf("line %.*s", (int)length, line);
+		return (0);
+	}
 	if (argc < 2 || argc > 4 || (argc == 4 && strcmp(argv[3], "hostlink") != 0) || (file = fopen(argv[1], "rb")) == NULL)
 		return (2);
 	hostlink = argc == 4;
@@ -161,6 +201,13 @@ main(int argc, char **argv)
 		char words[ERX_BOOT_DEVICE_WORDS_MAX];
 		size_t length;
 
+		/* A framebuffer row has no kind: its window, its path and that it has no physical record. */
+		if (device->framebuffer) {
+			printf("framebuffer %llu %llu %.*s words %zu\n", (unsigned long long)device->base,
+			    (unsigned long long)device->size, (int)device->path.length, device->path.bytes,
+			    erx_boot_device_words(device, words, sizeof(words)));
+			continue;
+		}
 		printf("device %s %s %llu %llu %u %s %llu %u ", device->role, device->peripheral,
 		    (unsigned long long)device->base, (unsigned long long)device->size, device->line,
 		    mark(device->line_shared), (unsigned long long)device->dma_memory, device->clock);

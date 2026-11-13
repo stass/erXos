@@ -479,8 +479,10 @@ apply_line_installed(const apply_t *apply, uint32_t at)
  * The -erx given record of give `at` (erx_boot_given_words) from the
  * values its installs took in the holder's table, and its line's from
  * apply_line_installed, marked shared as the plan says; the facts of its
- * catalogue entry, COHERENT and, for a network row, MAC; and its length,
- * or 0 when the words do not fit, which the view's names rule out.
+ * catalogue entry, COHERENT and, for a network row, MAC, or for a
+ * framebuffer row its -erx framebuffer record (erx_boot_framebuffer_words)
+ * over the window it installed; and its length, or 0 when the words do not
+ * fit, which the view's names rule out.
  */
 static size_t
 apply_given_words(apply_t *apply, uint32_t at)
@@ -499,15 +501,32 @@ apply_given_words(apply_t *apply, uint32_t at)
 	    .coherent = erx_boot_coherent(facts, entry->memory),
 	    .mac = facts != NULL && entry->role == ERX_MF_DEVICE_ROLE_NETWORK ? erx_boot_mac_number(facts) : 0 };
 
+	if (entry->role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER)
+		return (erx_boot_framebuffer_words(&entry->framebuffer, entry->format, installed[ERX_DOM_OBJ_DEV_WINDOW],
+		    entry->offset, apply->given_words[at], sizeof(apply->given_words[at])));
 	if (entry->role_word == NULL || entry->peripheral == NULL)
 		return (0);
 	return (erx_boot_given_words(&given, apply->given_words[at], sizeof(apply->given_words[at])));
 }
 
 /*
+ * Whether give `at` writes no record: a framebuffer the tree did not place
+ * in its window (erx_dom_view_framebuffer) has no range (erx/dom.h), so
+ * its give made no object and its holder finds no framebuffer record.
+ */
+static bool
+apply_unrecorded(const apply_t *apply, uint32_t at)
+{
+	const erx_dom_device_entry_t *entry = &apply->lib->view.devices[apply->plan->gives[at].index];
+
+	return (entry->role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER && entry->nranges == 0);
+}
+
+/*
  * The boot page's arguments into words, which holds 3 + ERX_DOM_GIVES_MAX
  * runs: the specification's own, -erx build with the boot image's build
- * identifier, a -erx given record per give, and, for a holder of a block
+ * identifier, a -erx given or -erx framebuffer record per give that has one
+ * (apply_unrecorded), and, for a holder of a block
  * device, -erx boot with the boot's pair, each as the root's own page
  * carries it. The number of runs, or 0 when a record does not fit.
  */
@@ -524,6 +543,8 @@ apply_args(apply_t *apply, erx_boot_words_t *words)
 		return (0);
 	words[count++] = (erx_boot_words_t){ apply->build_words, length };
 	for (uint32_t at = 0; at < apply->plan->ngives; at++) {
+		if (apply_unrecorded(apply, at))
+			continue;
 		if ((length = apply_given_words(apply, at)) == 0)
 			return (0);
 		words[count++] = (erx_boot_words_t){ apply->given_words[at], length };

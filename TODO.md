@@ -647,6 +647,8 @@ it; git history is the record of completed work.
   passages on one asynchronous request the behaviour owns (a `flush_request` callback, or an `erx_display`
   function that builds the message) and have the screen call it through the driver's module.
 * [Low] `erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
+  (`board_tree.rb`) would make the window's isolation hold by construction.
+* [Low] `erlang/apps/erx_display/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
   bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
 * [Medium] chokepoints, regions ([design-display.md](docs/design-display.md), the `wrap/4` row of the chokepoint
   table): nothing in the build limits who calls `erx_region_view` (only `erx_memdraw_nif.c`) or
@@ -1331,6 +1333,43 @@ it; git history is the record of completed work.
 * [Low] production image, `ProductionImage#catalog`: the build record lists Fiasco's QEMU virt
   bootstrap even when the image's first stage is the board's (`Fiasco#first_stage_path`), and a build
   packs whatever board bootstrap is on disk.
+* [Medium] Pi package 5 (docs/plan.md, 1b-I (a) 5), the board pass, the framebuffer
+  (`liberx/backend/fiasco/runtime_entry.c`, `framebuffer_give`): unverified is whether sigma0 grants the
+  VideoCore's memory, the `framebuffer` row's window in `config/platforms/raspi4b.json`, as I/O memory, which
+  `erx_mem_create_physical` needs; if not, the root stops with "the backend refused the framebuffer's pages".
+  The board's console shows the root's line: `framebuffer WxH STRIDE FORMAT`, or `framebuffer absent outside
+  BASE SIZE`, which says where the firmware put the framebuffer, so the row's window is moved over it.
+* [Medium] the display driver over the root's framebuffer record (`liberx/backend/fiasco/runtime_entry.c`,
+  `framebuffer_give`, and its future Erlang driver): the framebuffer's object is device memory
+  (`ERX_MEM_ATTR_DEVICE`). Unverified against the Arm Architecture Reference Manual: that an unaligned access or
+  `DC ZVA` to device memory faults, so a `memset`, `memcpy` or the compiler's zeroing of a mapped framebuffer may
+  fault where normal memory would not. Read the manual's device-memory rules before the driver writes to the
+  mapping, and keep its bulk copies aligned or map the framebuffer as normal non-cacheable memory
+  ([todo-performance.md](docs/todo-performance.md), the framebuffer mapped as device memory).
+* [Medium] the framebuffer record's target paths (`liberx/system/dom_apply.c`, `apply_given_words` and
+  `apply_unrecorded`; `liberx/backend/fiasco/runtime_entry.c`, `gather_args`, `framebuffer_facts`,
+  `framebuffer_give`): only the pure core and the view are host-tested, and no shipped manifest gives a framebuffer
+  to a configured domain. A check that a configured holder's boot page carries one `-erx framebuffer` record with a
+  non-null handle for a placed framebuffer and none for an unplaced one would catch a dropped skip or a wrong
+  installed index.
+* [Low] the framebuffer format names exist in three hand copies (`kernel/core/dt.c`'s table,
+  `erx_device_record.erl` `format/1`, the record fuzz target's `?FORMATS`), and `ERX_BOOT_FORMAT_WORD_MAX`
+  (`include/erx/boot_words.h`) is sized by hand to the longest: a new or longer name makes the Erlang reader refuse
+  every record, or the root print no line at all for an OK framebuffer. Check every `erx_dt_fb_format_name` against
+  both in a host test, or generate them from one source, and print a fixed reason when an OK framebuffer has no
+  usable format.
+* [Low] `liberx/backend/core/boot_manifest.h`, `erx_boot_device_t`: `given` and `framebuffer` are two bools for
+  one closed kind (physical, given, framebuffer), so `given && framebuffer` is representable and a consumer that
+  forgets the framebuffer case reads a NULL `role`. One enum switched on exhaustively.
+* [Low] `liberx/backend/core/boot_manifest.c`, `line_shared`: a framebuffer row is a device-tree row whose line
+  field is 0 though it has no line, so a device of another row whose line is 0 is marked shared. Skip framebuffer
+  rows.
+* [Low] `erlang/apps/erx/src/erx_device_record.erl`, the `-erx framebuffer` reader: it accepts an OFFSET of a
+  page or more, which the root never writes; refuse it, and teach the fuzz reference
+  (`test/erlang/erx_device_record_fuzz.erl`) the same bound.
+* [Low] [design-display.md](docs/design-display.md): the display design never names the root's `-erx
+  framebuffer` record ([design-device-tree.md](docs/design-device-tree.md), "Facts into records"), from which a
+  framebuffer domain's driver learns its framebuffer.
 * [Low] Pi package 5 (docs/plan.md, 1b-I (a) 5), the board pass: confirm on silicon that the mini
   UART's receive interrupt needs IER's `RX_ERRATA` bits (`hw/svd/mini_uart/mini_uart.svd`), which
   `erx_mini_uart` sets as the BCM2835 errata asks and QEMU's model ignores, and drop them if not.

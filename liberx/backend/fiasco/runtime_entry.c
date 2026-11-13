@@ -17,6 +17,7 @@
 #include "erx/abi.h"
 #include "erx/abi_reader.h"
 #include "erx/core/boot_pair.h"
+#include "erx/device_kinds.h"
 #include "erx/release.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/boot_info.h"
@@ -55,6 +56,8 @@ static const char	*device_give(const erx_boot_device_t *, const erx_dom_device_e
 static const char	*tree_accept(void);
 static const char	*tree_facts(void);
 static const char	*device_memory(const erx_dom_device_entry_t *, uint64_t *, const char **);
+static const char	*framebuffer_facts(erx_dom_device_entry_t *);
+static const char	*framebuffer_give(const erx_dom_device_entry_t *, char *, size_t, size_t *);
 
 /* The system domain's one domain library and the tables its view lies in (library_view). */
 static erx_dom_lib_t library;
@@ -79,6 +82,7 @@ static erx_dt_t boot_tree;
 static char tree_path[ERX_PATH_MAX];
 static char tree_line[ERX_BOOT_TREE_LINE_MAX];
 _Static_assert(ERX_BOOT_GIVEN_WORDS_MAX >= ERX_BOOT_DEVICE_WORDS_MAX, "a device record's room holds either form");
+_Static_assert(ERX_BOOT_GIVEN_WORDS_MAX >= ERX_BOOT_FRAMEBUFFER_WORDS_MAX, "a device record's room holds a framebuffer's");
 /* -erx boot VALUE SLOT: the longest names are "unknown" and "none", each with its NUL. */
 static const char boot_prefix[] = "-erx\0boot";
 static char boot_words[ERX_BOOT_PAIR_WORDS_MAX];
@@ -289,10 +293,18 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 		const erx_boot_device_t *const device = &manifest->devices[at];
 		size_t length = 0;
 
-		if (device->given) {
-			/* The view has one catalogue entry per manifest device row, the device's among them. */
-			if (device->index >= library.view.ndevices)
-				return ("a device record: its row has no catalogue entry");
+		/* The view has one catalogue entry per manifest device row, the device's among them. */
+		if ((device->given || device->framebuffer) && device->index >= library.view.ndevices)
+			return ("a device record: its row has no catalogue entry");
+		if (device->framebuffer) {
+			const erx_dom_device_entry_t *const entry = &library.view.devices[device->index];
+
+			/* A framebuffer the tree did not place has no object and no record (framebuffer_facts). */
+			if (entry->nranges == 0)
+				continue;
+			if ((reason = framebuffer_give(entry, device_words[at], sizeof(device_words[at]), &length)) != NULL)
+				return (reason);
+		} else if (device->given) {
 			if ((reason = device_give(device, &library.view.devices[device->index], device_words[at],
 			    sizeof(device_words[at]), &length)) != NULL)
 				return (reason);
@@ -340,12 +352,14 @@ tree_accept(void)
 /*
  * Accepts the firmware's device tree (tree_accept) and joins its facts to the catalogue's
  * entries once, before any device is given (docs/design-device-tree.md, "Facts into
- * records"). A row of a kind a runtime drives (its role_word is set) that asks (erx_boot_row_asks) has its facts read from boot_tree
- * at its node path, and every entry's DMA memory becomes what its facts admit
- * (erx_boot_dma_memory), so a row that asked nothing gets none. The root prints the line of
- * each asking row a holder holds; the line of a row the system domain holds waits for the
- * root's own give, which makes its memory first (device_give). Returns NULL, or why the root
- * cannot boot: the tree is refused, or a row that asks names a path that is not a node path.
+ * records"). A row of a kind a runtime drives (its role_word is set) that asks
+ * (erx_boot_row_asks) has its facts read from boot_tree at its node path, and every entry's
+ * DMA memory becomes what its facts admit (erx_boot_dma_memory), so a row that asked nothing
+ * gets none. The root prints the line of each asking row a holder holds; the line of a row
+ * the system domain holds waits for the root's own give, which makes its memory first
+ * (device_give). A framebuffer row always asks, and its facts and line are
+ * framebuffer_facts'. Returns NULL, or why the root cannot boot: the tree is refused, or a
+ * row that asks names a path that is not a node path.
  */
 static const char *
 tree_facts(void)
@@ -361,6 +375,11 @@ tree_facts(void)
 		const uint64_t row_memory = entry->memory;
 		const erx_boot_words_t path = { entry->path, entry->path_len };
 
+		if (entry->role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER) {
+			if ((reason = framebuffer_facts(entry)) != NULL)
+				return (reason);
+			continue;
+		}
 		entry->asked = entry->role_word != NULL && erx_boot_row_asks(row_memory, network);
 		if (entry->asked) {
 			if (path.length == 0 || path.length >= sizeof(tree_path) ||
@@ -376,6 +395,37 @@ tree_facts(void)
 		    &entry->facts, NULL, tree_line, sizeof(tree_line))) != 0)
 			erx_fiasco_console_write(tree_line, length);
 	}
+	return (NULL);
+}
+
+/*
+ * The framebuffer row entry's facts (docs/design-device-tree.md, "Facts into records"): the
+ * reader looks under the row's path for the one simple-framebuffer inside the row's window
+ * and outside RAM, and on ERX_DT_FB_OK the entry's register range becomes the framebuffer's
+ * whole pages, with its offset and size in them (erx/dom.h), so the root's own give and a
+ * holder's window those pages and nothing else of the window. The root prints the row's
+ * line whoever holds it, since no object it makes later changes the facts. Returns NULL, or
+ * why the root cannot boot: the row's path is not a node path.
+ */
+static const char *
+framebuffer_facts(erx_dom_device_entry_t *entry)
+{
+	const erx_boot_words_t path = { entry->path, entry->path_len };
+	const erx_dt_window_t window = { entry->window.base, entry->window.size };
+	erx_dt_framebuffer_t fb;
+	size_t length;
+
+	if (path.length == 0 || path.length >= sizeof(tree_path) ||
+	    !erx_boot_node_path_valid((const uint8_t *)path.bytes, path.length))
+		return ("a framebuffer record: its device-tree path is not a node path");
+	for (size_t at = 0; at < path.length; at++)
+		tree_path[at] = path.bytes[at];
+	tree_path[path.length] = '\0';
+	erx_dt_framebuffer(&boot_tree, tree_path, ERX_FRAMEBUFFER_COMPATIBLE, window, &fb);
+	(void)erx_dom_view_framebuffer(entry, &fb, fb.status == ERX_DT_FB_OK ? erx_dt_fb_format_name(fb.format) : NULL);
+	if ((length = erx_boot_framebuffer_line(path, &entry->framebuffer, entry->format, tree_line,
+	    sizeof(tree_line))) != 0)
+		erx_fiasco_console_write(tree_line, length);
 	return (NULL);
 }
 
@@ -418,6 +468,27 @@ device_give(const erx_boot_device_t *device, const erx_dom_device_entry_t *entry
 		erx_fiasco_console_write(tree_line, line_length);
 	given = erx_boot_device_given(device, &window, facts, window_handle, line_handle, memory_handle);
 	*length = erx_boot_given_words(&given, words, capacity);
+	return (NULL);
+}
+
+/*
+ * The root's own give of a framebuffer the system domain holds, whose catalogue entry is entry
+ * and which framebuffer_facts placed, so ranges[0] is its pages and offset its offset in them
+ * (erx_dom_view_framebuffer, docs/design-device-tree.md,
+ * "Facts into records"): a physical memory object over those pages and the -erx framebuffer
+ * record of its facts in words, capacity bytes, with *length its whole length, 0 when it does
+ * not fit. Nothing deletes the object, as for device_give. Returns NULL, or why the root
+ * cannot boot: the backend refused the object.
+ */
+static const char *
+framebuffer_give(const erx_dom_device_entry_t *entry, char *words, size_t capacity, size_t *length)
+{
+	uint64_t window;
+
+	if (erx_mem_create_physical(ERX_CAP_NULL, ERX_CAP_NULL, entry->ranges[0].base, entry->ranges[0].size,
+	    ERX_MEM_ATTR_DEVICE, &window) != ERX_OK)
+		return ("a framebuffer record: the backend refused the framebuffer's pages");
+	*length = erx_boot_framebuffer_words(&entry->framebuffer, entry->format, window, entry->offset, words, capacity);
 	return (NULL);
 }
 

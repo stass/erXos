@@ -263,6 +263,27 @@ typedef struct erx_dom_device_entry {
 					 * admit; 0 for none */
 	bool		asked;		/* the root read facts for it */
 	erx_dt_device_t	facts;		/* the tree's answer, when asked */
+	/*
+	 * A framebuffer row (role ERX_MF_DEVICE_ROLE_FRAMEBUFFER).
+	 *
+	 * window is the whole pages its manifest row names, which its
+	 * framebuffer must lie in. The entry has no register range and never a
+	 * line. The root reads the framebuffer's facts from the tree
+	 * (erx_dt_framebuffer) and places it with erx_dom_view_framebuffer
+	 * (erx/dom_lib.h), which keeps the facts in framebuffer and its format's
+	 * name, a fixed word of the reader's table, in format.
+	 *
+	 * A placed framebuffer (erx_boot_framebuffer_place) has ranges[0] its
+	 * pages, offset and size the framebuffer in them, so a give windows
+	 * those pages only. An unplaced one keeps no range: its give makes no
+	 * object and writes no record. Facts nothing wrote are all zero and
+	 * never placed.
+	 *
+	 * Every other row has window and framebuffer zero and format NULL.
+	 */
+	erx_dom_range_t	window;
+	erx_dt_framebuffer_t framebuffer;
+	const char	*format;
 } erx_dom_device_entry_t;
 
 /*

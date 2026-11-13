@@ -249,6 +249,16 @@ class BootManifestTest < Minitest::Test
     assert_includes output, "console_page #{0xfe215000}\n"
   end
 
+  # The Raspberry Pi 4's development manifest places its framebuffer unit with the system
+  # domain: the page keeps the row, its window and /chosen for the root's framebuffer step,
+  # and no physical record, since the row's record is the framebuffer record.
+  def test_a_framebuffer_row_the_system_domain_holds_keeps_its_window_and_path
+    pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
+    output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
+    assert status.success?, output
+    assert_includes output, "framebuffer #{0x3b40_0000} #{0x4c0_0000} /chosen words 0\n"
+  end
+
   def dma(role, memory, status, coherent, cpu, bus, last, mac, first, size)
     arguments = [role, memory, status, coherent, cpu, bus, last, mac, first, size].map(&:to_s)
     output, status_ = Open3.capture2e(@driver, 'dma', *arguments)
@@ -334,5 +344,63 @@ class BootManifestTest < Minitest::Test
     assert_match(/^console_words-erx console_uart #{0xfe215040} 64 125 shared \d+ exact 1 short 0\n/, output)
     assert_match(/^device hostlink pl011 \d+ \d+ 153 shared .*words-erx device hostlink pl011 \d+ \d+ 153 shared \d+ exact 1/,
                  output)
+  end
+
+  # window: the row's window, by default every page but the last.
+  def framebuffer(status, base, length, width, height, stride, format, window: [0, 0xffff_ffff_ffff_f000])
+    arguments = [status, base, length, width, height, stride, format, *window].map(&:to_s)
+    output, status_ = Open3.capture2e(@driver, 'framebuffer', *arguments)
+    assert status_.success?, output
+    output
+  end
+
+  # The root's framebuffer step (docs/design-device-tree.md, "Facts into records" and "The
+  # lines"): the pages a placed framebuffer lies in, its offset in the first, the record over
+  # them, and the line of fixed words and the facts' numbers. Statuses are
+  # erx_dt_fb_status_t's order: 0 ok, 1 none, 2 ambiguous, 3 malformed, 4 unsupported,
+  # 5 outside.
+  def test_a_placed_framebuffer_gives_its_pages_its_record_and_its_line
+    assert_equal "pages #{0x3e00_0000} #{0x7e_a000} 1024 words-erx framebuffer 11 1024 #{0x7e_9000} 1920 1080 7680 " \
+                 "a8r8g8b8 exact 1 short 0\nline erx: device tree: /chosen: framebuffer 1920x1080 7680 a8r8g8b8\n",
+                 framebuffer(0, 0x3e00_0400, 0x7e_9000, 1920, 1080, 7680, 'a8r8g8b8')
+    # An empty framebuffer, or one ending past the top of the address space, has no pages.
+    assert_match(/\Apages none /, framebuffer(0, 0x3e00_0000, 0, 1920, 1080, 7680, 'a8r8g8b8'))
+    assert_match(/\Apages none /, framebuffer(0, 0xffff_ffff_ffff_f000, 0x2000, 1, 1, 4, 'a8r8g8b8'))
+  end
+
+  # Placed is one decision (erx_boot_framebuffer_place): facts of ERX_DT_FB_OK with a named
+  # format whose pages lie inside the row's window. Facts nothing wrote are all zero, which
+  # reads as ERX_DT_FB_OK, and are not placed; nor is a framebuffer without a format's name,
+  # or one whose pages leave the window, even by the page its offset adds.
+  def test_only_named_facts_whose_pages_lie_in_the_window_are_placed
+    assert_match(/\Apages none /, framebuffer(0, 0, 0, 0, 0, 0, 'a8r8g8b8'))
+    assert_match(/\Apages none /, framebuffer(0, 0x3e00_0000, 0x7e_9000, 1920, 1080, 7680, '-'))
+    window = [0x3e00_0000, 0x7e_9000]
+    assert_match(/\Apages #{0x3e00_0000} #{0x7e_9000} 0 /,
+                 framebuffer(0, 0x3e00_0000, 0x7e_9000, 1920, 1080, 7680, 'a8r8g8b8', window: window))
+    assert_match(/\Apages none /, framebuffer(0, 0x3e00_0400, 0x7e_9000, 1920, 1080, 7680, 'a8r8g8b8', window: window))
+    assert_match(/\Apages none /, framebuffer(0, 0x3dff_f000, 0x1000, 1, 1, 4, 'a8r8g8b8', window: window))
+    assert_match(/\Apages none /, framebuffer(0, 0xffff_ffff_ffff_f000, 0x1000, 1, 1, 4, 'a8r8g8b8'))
+  end
+
+  # A framebuffer the reader did not place has no pages and no record, only its line.
+  def test_a_framebuffer_the_reader_did_not_place_has_only_its_line
+    %w[none ambiguous malformed unsupported].each.with_index(1) do |reason, status|
+      assert_equal "pages none wordsexact 0 short 0\nline erx: device tree: /chosen: framebuffer absent #{reason}\n",
+                   framebuffer(status, 0x3e00_0000, 0x7e_9000, 1920, 1080, 7680, 'a8r8g8b8')
+    end
+    assert_equal "pages none wordsexact 0 short 0\nline erx: device tree: /chosen: framebuffer absent outside " \
+                 "0x3e000000 0x7e9000\n", framebuffer(5, 0x3e00_0000, 0x7e_9000, 0, 0, 0, '-')
+  end
+
+  # FORMAT is a name of the reader's table, the longest eleven bytes, which the record's room
+  # holds (ERX_BOOT_FORMAT_WORD_MAX); a longer word gives no record, and no name neither record nor line.
+  def test_the_record_s_format_is_a_word_of_its_bounded_room
+    assert_match(/ 7680 a2r10g10b10 exact 1 short 0\nline .*: framebuffer 1920x1080 7680 a2r10g10b10\n\z/,
+                 framebuffer(0, 0x3e00_0000, 0x7e_9000, 1920, 1080, 7680, 'a2r10g10b10'))
+    assert_match(/ wordsexact 0 short 0\n/, framebuffer(0, 0x3e00_0000, 0x7e_9000, 1920, 1080, 7680, 'a2r10g10b10x'))
+    assert_match(/ wordsexact 0 short 0\nline \z/, framebuffer(0, 0x3e00_0000, 0x7e_9000, 1920, 1080, 7680, '-'))
+    assert_match(/ 4294967295 4294967295 4294967295 x2r10g10b10 exact 1 short 0\n/,
+                 framebuffer(0, 0x1000, 0xffff_ffff_0000, 0xffff_ffff, 0xffff_ffff, 0xffff_ffff, 'x2r10g10b10'))
   end
 end
