@@ -39,10 +39,15 @@ module Erx
                                  deterministic_options: %w[dtb-randomness=off]),
       # The Raspberry Pi 4's model: BL31 at 0, its link address; the bootable file at
       # 0x200000, where the Pi firmware loads a 64-bit kernel and bootstrap is linked; the
-      # tree at 0x3000000 (docs/research-rpi4-bl31-qemu.md). The GIC with its security
+      # tree at 0x8000000, 126 MiB past it (docs/research-rpi4-bl31-qemu.md placed it at
+      # 0x3000000, which the image reached). The image's binding limit is lower: the
+      # native root is linked at 64 MiB (NativeRoot::DEVELOPMENT_ROOT_MIB), and bootstrap
+      # refuses to place it over the archive (kernel/core/boot_place.c, place_overlap). BL31 grows the tree in place by up to 1 MiB (Bl31.patch_stub), and
+      # bootstrap holds the tree apart when it places the kernel's images behind the
+      # archive (kernel/core/boot_place.c, erx_boot_hold_apart). The GIC with its security
       # extensions is the board's GIC-400.
       'raspi4b' => Machine.new(base: 'raspi4b', tcg_options: [], deterministic_options: [],
-                               loads: Loads.new(stub: 0, image: 0x200000, dtb: 0x3000000),
+                               loads: Loads.new(stub: 0, image: 0x200000, dtb: 0x8000000),
                                globals: %w[arm_gic.has-security-extensions=on])
     }.freeze
     # As serial, the guest's serial line on this process's own standard input

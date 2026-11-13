@@ -1005,9 +1005,10 @@ gives_view(void)
 	reset_view();
 	memset(give_records, 0, sizeof(give_records));
 	give_devices[0] = (erx_dom_device_entry_t){ .unit = 0, .row = 0, .nranges = 1, .nlines = 1,
-	    .ranges = { { 0x0a003000, 0x1000 } }, .lines = { 48 }, .memory = 0x100000 };
+	    .ranges = { { 0x0a003000, 0x1000 } }, .lines = { 48 }, .memory = 0x100000,
+	    .role_word = "block", .peripheral = "virtio_mmio" };
 	give_devices[1] = (erx_dom_device_entry_t){ .unit = 1, .row = ERX_MF_NONE, .nranges = 1, .nlines = 1,
-	    .ranges = { { 0x09000000, 0x1000 } }, .lines = { 33 } };
+	    .ranges = { { 0x09000000, 0x1000 } }, .lines = { 33 }, .role_word = "uart", .peripheral = "pl011" };
 	give_records[1].index = 1;
 	view.devices = give_devices;
 	view.device_records = give_records;
@@ -1019,7 +1020,8 @@ gives_shared_view(void)
 {
 	gives_view();
 	give_devices[2] = (erx_dom_device_entry_t){ .unit = 0, .row = 0, .nranges = 1, .nlines = 1,
-	    .ranges = { { 0x0a004000, 0x1000 } }, .lines = { 48 } };
+	    .ranges = { { 0x0a004000, 0x1000 } }, .lines = { 48 },
+	    .role_word = "block", .peripheral = "virtio_mmio" };
 	give_records[2].index = 2;
 	view.ndevices = 3;
 }

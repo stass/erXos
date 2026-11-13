@@ -98,10 +98,12 @@ reset_view(void)
 	memset(device_records, 0, sizeof(device_records));
 	devices[0] = (erx_dom_device_entry_t){ .nranges = 1, .nlines = 1,
 	    .ranges = { { 0x0a003000, 0x1000 } }, .lines = { 5 },
-	    .memory = 0x100000 };
+	    .memory = 0x100000, .role_word = "block",
+	    .peripheral = "virtio_mmio" };
 	devices[1] = (erx_dom_device_entry_t){ .nranges = 2, .nlines = 2,
 	    .ranges = { { 0x10000000, 0x4000 }, { 0x10010000, 0x1000 } },
-	    .lines = { 6, 7 }, .confined = true, .unit = 1, .row = 1 };
+	    .lines = { 6, 7 }, .confined = true, .unit = 1, .row = 1,
+	    .role_word = "network", .peripheral = "virtio_mmio" };
 	for (uint32_t index = 0; index < NDEVICES; index++)
 		device_records[index].index = index;
 }
@@ -661,13 +663,24 @@ device_case(const char *name, uint32_t id, uint32_t index)
 	printf(" undo=%u\n", erx_dom_device_undo(&plan, plan.nsteps, undo));
 }
 
+/* A give's steps' kinds, after label. */
+static void
+print_steps(const char *label, const erx_dom_device_plan_t *plan)
+{
+	printf(" %s=", label);
+	for (uint32_t step = 0; step < plan->nsteps; step++)
+		printf("%s%s", step == 0 ? "" : ",",
+		    step_names[plan->steps[step].kind]);
+}
+
 /*
- * Entry 2's give to domain 5 in a creation that gave entry 0 first: its
- * status, its steps' kinds, which give's IRQ object its line 0 is ("own"
- * for one it makes) and whether each give marks its line 0 shared.
+ * The give of entry `second` to domain 5 in a creation whose first give
+ * is entry `first`'s: its status, the first give's steps' kinds and its own, which
+ * give's IRQ object its line 0 is ("own" for one it makes) and whether
+ * each give marks its line 0 shared.
  */
 static void
-shared_case(const char *name)
+shared_case(const char *name, uint32_t first, uint32_t second)
 {
 	static erx_dom_plan_t holder;
 	erx_dom_device_plan_t plan;
@@ -678,18 +691,17 @@ shared_case(const char *name)
 	holder.spec.id = 5;
 	holder.slot = 4;
 	holder.spec.origin = domains[0].origin;
-	status = erx_dom_plan_device_give(&view, &holder, 0, &holder.gives[0]);
+	status = erx_dom_plan_device_give(&view, &holder, first, &holder.gives[0]);
 	holder.ngives = status == ERX_OK ? 1 : 0;
 	if (status == ERX_OK)
-		status = erx_dom_plan_device_give(&view, &holder, 2, &plan);
+		status = erx_dom_plan_device_give(&view, &holder, second, &plan);
 	if (status != ERX_OK) {
 		printf("dev %s %d\n", name, status);
 		return;
 	}
-	printf("dev %s 0 steps=", name);
-	for (uint32_t step = 0; step < plan.nsteps; step++)
-		printf("%s%s", step == 0 ? "" : ",",
-		    step_names[plan.steps[step].kind]);
+	printf("dev %s 0", name);
+	print_steps("first", &holder.gives[0]);
+	print_steps("steps", &plan);
 	if (line->give == ERX_DOM_GIVE_OWN)
 		printf(" source=own");
 	else
@@ -741,13 +753,32 @@ device_cases(void)
 	 * another line, the give makes its own.
 	 */
 	devices[2] = (erx_dom_device_entry_t){ .nranges = 1, .nlines = 1,
-	    .ranges = { { 0x0a005000, 0x1000 } }, .lines = { 5 } };
-	shared_case("dev_shared_second");
+	    .ranges = { { 0x0a005000, 0x1000 } }, .lines = { 5 },
+	    .role_word = "block", .peripheral = "virtio_mmio" };
+	shared_case("dev_shared_second", 0, 2);
 	devices[2].unit = 2;
-	shared_case("dev_shared_other_unit");
+	shared_case("dev_shared_other_unit", 0, 2);
 	devices[2].unit = 0;
 	devices[2].lines[0] = 9;
-	shared_case("dev_shared_other_line");
+	shared_case("dev_shared_other_line", 0, 2);
+	/*
+	 * Entry 2 of no kind (docs/design-shared-devices.md, "The unit rule"):
+	 * held, not driven, so its give makes no window, DMA window or memory,
+	 * and an IRQ object only first on a line its unit shares, which
+	 * entry 0's give then names; after entry 0 on their line, or alone
+	 * on a line of its own, nothing but its resource.
+	 */
+	devices[2] = (erx_dom_device_entry_t){ .nranges = 1, .nlines = 1,
+	    .ranges = { { 0x0a005000, 0x1000 } }, .lines = { 5 } };
+	shared_case("dev_kindless_second", 0, 2);
+	shared_case("dev_kindless_first", 2, 0);
+	devices[2].lines[0] = 9;
+	devices[2].confined = true;
+	shared_case("dev_kindless_alone", 0, 2);
+	/* Unconfined with memory to give: still nothing but its resource. */
+	devices[2].confined = false;
+	devices[2].memory = 0x100000;
+	shared_case("dev_kindless_memory", 0, 2);
 	devices[2] = (erx_dom_device_entry_t){ .nranges = 1,
 	    .ranges = { { 0x0a000000, UINT64_MAX - 0x0a000000 + 1 } } };
 	device_case("dev_overlap_wrapping", 5, 0);

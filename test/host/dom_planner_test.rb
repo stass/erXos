@@ -479,6 +479,22 @@ class DomPlannerTest < Minitest::Test
     assert_equal 1, admit(held).report.fetch('child_plan_instances')
   end
 
+  # The Raspberry Pi 4's sd unit: EMMC2 and, on its line, the legacy SD controller,
+  # whose role and compatible string are in no row of erx/device_kinds.h. A configured
+  # row may hold it, as the system domain holds the auxiliary SPI controllers: the
+  # kindless device is given its objects with its unit and gets no -erx given record
+  # (docs/design-shared-devices.md, "The unit rule"). The view admits that placement.
+  def test_a_configured_row_holding_a_device_of_no_kind_is_admitted
+    platform = JSON.parse(JSON.generate(@context.platform))
+    net = platform.fetch('units').find { |unit| unit.fetch('key') == 'net' }.fetch('devices')
+    net << net.first.merge('path' => '/soc/mmc@a000e00', 'base' => 0x0a000e00, 'role' => 'ordinary',
+                           'compatible' => 'brcm,bcm2835-sdhci', 'dma' => 'none', 'dma_memory' => 0,
+                           'placement_key' => 'net-second')
+    @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
+    held = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
+    assert_equal 1, admit(held).report.fetch('child_plan_instances')
+  end
+
   # A unit of two devices that share a register page, as QEMU virt's virtio-mmio
   # transports 0x200 apart do: the root makes the system domain's windows itself, so
   # the system domain may hold it, but a give windows one device and the library

@@ -631,8 +631,8 @@ it; git history is the record of completed work.
 * [High] the root's framebuffer record (`liberx/backend/fiasco/runtime_entry.c`, `liberx/backend/core/boot_manifest.c`,
   `liberx/system/dom_boot_view.c`; [design-device-tree.md](docs/design-device-tree.md#facts-into-records)): a
   `framebuffer` row is in no row of `erx_device_kinds`, so the root asks the tree nothing for it, prints no
-  `framebuffer` line and writes no `-erx framebuffer` record, and the domain library refuses a configured domain
-  that holds one ("a device of a kind no runtime drives"). The reader, `erx_dt_framebuffer`, is built and tested;
+  `framebuffer` line and writes no `-erx framebuffer` record. A configured domain that holds one would get no record
+  and an IRQ object for line 0, which the view reads as a line (the `check_framebuffer_windows` item). The reader, `erx_dt_framebuffer`, is built and tested;
   what remains is the row's ask and line, the physical object over the framebuffer's pages, the record and its
   size in `include/erx/boot_words.h`, and its reader in `erx_device_record`.
 * [Medium] `erlang/apps/erx_display/src/erx_screen.erl`: the screen shows the empty layout only, the background
@@ -1348,18 +1348,36 @@ it; git history is the record of completed work.
 * [Low] [design-display.md](docs/design-display.md): the display design never names the root's `-erx
   framebuffer` record ([design-device-tree.md](docs/design-device-tree.md), "Facts into records"), from which a
   framebuffer domain's driver learns its framebuffer.
+* [Low] Pi board pass, the storage domain's `sd` unit (docs/design-storage.md, "The SD controller's line"): no
+  driver quiets the legacy SD controller `/soc/mmc@7e300000`, which shares EMMC2's line 158, so if the firmware
+  leaves its interrupts enabled and it asserts the line, EMMC2's line owner is woken on every delivery. Check on
+  the board that the line is quiet with EMMC2 idle; if not, the design must say who quiets the legacy controller.
+* [Low] Pi board pass, the device tree's address (`tools/lib/erx/boot_partition.rb`, `config_txt`): the card's
+  `config.txt` sets `kernel_address` from the QEMU harness's loads but no tree address, so the firmware chooses
+  where it loads the tree and writes that address into BL31's stub header. Where it chooses for a development
+  image of about 48 MB at `0x200000` is unverified; the QEMU harness loads the tree at `0x8000000`
+  (`tools/lib/erx/qemu.rb`) because at `0x3000000` the image reached it. Read the address on the board (BL31's
+  `Changed device tree` line, or `x0` at bootstrap's entry) and check it lies past the image's end; if it does
+  not, pin it in `config.txt` to the harness's address, after checking in Raspberry Pi's `config.txt`
+  documentation which setting does that.
+* [Medium] domain library, a device of no kind (`liberx/system/dom_life.c`, `erx_dom_plan_device_give`;
+  docs/design-shared-devices.md, "The unit rule"): that such a device gets no window, DMA window or memory rests
+  on `driven` guards in the planner, and `erx_dom_device_check` cannot tell an unrecorded give from a driven one,
+  so a new object kind that forgets the guard is installed. Carry the device's kind in `erx_dom_device_plan_t` and
+  have the check refuse window, DMA, memory and kept installs on a give of no kind, so the plan validator enforces
+  it; `apply_args` would then read the same flag.
+* [Low] domain library, two devices of no kind on one line (`life_line_source`): `shared` counts every device of
+  the unit, so the first of two kindless devices on a line makes and installs an IRQ object that no record names.
+  No manifest has the shape; count only recorded devices when a kindless give decides whether to make the object.
+* [Low] domain library, PCIe functions on a configured row (`liberx/system/dom_boot_view.c`, `boot_devices`): only
+  device-tree selectors get a role word and peripheral, so a PCIe function placed on a configured row would be of
+  no kind and get no record, window or memory. No manifest places one; give the kind test a PCIe arm first.
+* [Low] QEMU harness, `Raspi4bShell#check_loads` (`tools/lib/erx/raspi4b_shell.rb`): it refuses an image that
+  reaches the tree, but the native root is linked at 64 MiB (`NativeRoot::DEVELOPMENT_ROOT_MIB`), so an image past
+  about 62 MiB fails only at boot, in bootstrap's `place_overlap`. Refuse an image that reaches the root's place.
 * [Low] Pi package 5 (docs/plan.md, 1b-I (a) 5), the board pass: confirm on silicon that the mini
   UART's receive interrupt needs IER's `RX_ERRATA` bits (`hw/svd/mini_uart/mini_uart.svd`), which
   `erx_mini_uart` sets as the BCM2835 errata asks and QEMU's model ignores, and drop them if not.
-* [High] domain library, `liberx/system/dom_boot_view.c` (`boot_view`'s configured rows): the Raspberry Pi 4's sd unit,
-  EMMC2 and the legacy SD controller `/soc/mmc@7e300000` (`brcm,bcm2835-sdhci`, role `ordinary`), cannot be placed on
-  the storage domain: the legacy controller is in no row of `erx_device_kinds`, and the view refuses a configured
-  domain that holds a device of a kind no runtime drives ("a configured domain holds a device of a kind no runtime
-  drives"), since `apply_given_words` writes a record only for a device with a kind.
-  [design-storage.md](docs/design-storage.md) ("The SD controller's line") gives the unit whole to the storage domain
-  with no driver for the legacy controller. Decide whether such a device is given with its objects and no `-erx given`
-  record, as the SPI controllers on the mini UART's page are held with no driver, and then place the unit in
-  `config/manifest/raspi4b-development.txt`. Needed before the SD driver runs on the Pi.
 * [Medium] SD host controller, `hw/svd/sdhci/sdhci.svd` (docs/design-storage.md, "The SD host controller"), unnamed
   bits: the file names only the bits FreeBSD's `sdhci.h` names, so `write_field/4` writes every other bit of a word
   back as zero. In `CONTROL0` that is the block gap control byte, whose stop at block gap and continue requests

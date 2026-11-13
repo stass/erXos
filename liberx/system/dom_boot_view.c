@@ -444,8 +444,8 @@ _Static_assert(ERX_BOOT_FRAMEBUFFER_WORDS_MAX <= ERX_BOOT_GIVEN_WORDS_MAX, "a fr
  * Whether a domain's boot page's strings hold its arguments and
  * environment beside what the library writes there (docs/design-stopgap.md,
  * "Boot information"): its own node name and the system node's, -erx
- * build, a -erx given record per device it holds, and -erx boot when it holds a
- * block device. The reserve takes each at its longest, so a row the view
+ * build, a -erx given record per device of a kind it holds, and -erx boot when it holds a
+ * block device of a kind. The reserve takes each at its longest, so a row the view
  * admits never fails its creation for its strings: a node name at
  * ERX_DOM_NODE_MAX, though the system node's is at most 71 bytes, and the
  * difference also covers the NUL the page adds to args or env that lack a
@@ -453,10 +453,10 @@ _Static_assert(ERX_BOOT_FRAMEBUFFER_WORDS_MAX <= ERX_BOOT_GIVEN_WORDS_MAX, "a fr
  * constant.
  */
 static bool
-boot_strings_fit(uint64_t args_len, uint64_t env_len, uint32_t held, bool block)
+boot_strings_fit(uint64_t args_len, uint64_t env_len, uint32_t records, bool block)
 {
 	const uint64_t reserve = 2u * (uint64_t)ERX_DOM_NODE_MAX + ERX_BOOT_BUILD_WORDS_MAX +
-	    (uint64_t)held * ERX_BOOT_GIVEN_WORDS_MAX +
+	    (uint64_t)records * ERX_BOOT_GIVEN_WORDS_MAX +
 	    (block ? ERX_BOOT_PAIR_WORDS_MAX : 0);
 
 	return (args_len + env_len + reserve <= ERX_BOOT_STRINGS_MAX);
@@ -486,7 +486,9 @@ boot_places(erx_dom_configured_t *configured, uint32_t nconfigured, const erx_ma
 /*
  * Each configured-domain row, its limits resolved from its limits record and
  * its strings judged against the devices the catalogue places on it, so
- * it reads view->devices, which boot_devices builds first.
+ * it reads view->devices, which boot_devices builds first. Every device
+ * on the row is given; only a device that erx_dom_entry_recorded admits
+ * gets a -erx given record.
  */
 static const char *
 boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_configured_t *configured)
@@ -495,7 +497,7 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 	erx_mf_limits_t profile;
 	erx_dom_configured_t *row;
 	const char *strings;
-	uint32_t held;
+	uint32_t held, records;
 	bool block;
 
 	view->configured = configured;
@@ -517,19 +519,20 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 		if (domain.name.length == 0 || domain.name.length > ERX_DOM_NAME_MAX)
 			return ("manifest: a configured domain's name is not 1 to 63 bytes");
 		held = 0;
+		records = 0;
 		block = false;
 		for (uint32_t device = 0; device < view->ndevices; device++) {
 			if (view->devices[device].row != index)
 				continue;
-			/* Its holder opens it from its record, which names its kind or is a framebuffer's. */
-			if (view->devices[device].role_word == NULL && view->devices[device].role != ERX_MF_DEVICE_ROLE_FRAMEBUFFER)
-				return ("manifest: a configured domain holds a device of a kind no runtime drives");
 			held++;
+			if (!erx_dom_entry_recorded(&view->devices[device]))
+				continue;
+			records++;
 			block = block || view->devices[device].role == ERX_MF_DEVICE_ROLE_BLOCK;
 		}
 		if (held > ERX_DOM_GIVES_MAX)
 			return ("manifest: a configured domain holds more devices than its creation gives");
-		if (!boot_strings_fit(domain.args.length, domain.env.length, held, block))
+		if (!boot_strings_fit(domain.args.length, domain.env.length, records, block))
 			return ("manifest: a configured domain's arguments and environment leave the boot page's strings "
 			    "no reserve for its node names and device records");
 		/* The reader checked every string against the string table; the manifest's bytes outlive the view. */

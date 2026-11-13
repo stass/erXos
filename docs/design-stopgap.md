@@ -301,7 +301,7 @@ function and maps it read-only.
 task's first thread as its argument. Its `flags` carry `ERX_BOOT_DET` when the system's page does. Its strings hold the
 domain's node name and the system node's, its `args` and `env`, and the words the library adds to its `args`, after
 the row's own: `-erx build ID` with the boot image's build identifier, as the root's own page carries it, so
-every domain names the same build; one record per device it was given, `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
+every domain names the same build; one record per device it was given that has one, a device of no kind having no record and no window, only the IRQ object of a shared line it is first on ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)), `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
 MEM_SIZE CLOCK COHERENT MAC`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), or, for a framebuffer the root placed, `-erx framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT` ([design-device-tree.md](design-device-tree.md#facts-into-records)), and, when it holds a
 block device, `-erx boot VALUE SLOT` with the boot's pair, as the root's own page carries it ([Image
 windows](#image-windows)). WINDOW_H, LINE_H and MEM_H are the installed objects' values in the holder's own handle

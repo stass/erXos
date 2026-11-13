@@ -2,14 +2,21 @@
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # The development manifest of the Raspberry Pi 4 Model B on the stopgap
-# (config/platforms/raspi4b.json; docs/plan.md, 1b-I's stage (a)): the system domain
-# alone, with the system principal's session template, from which the console starts
-# root's session at boot (docs/design-system.md, "Booting"). It configures no domain:
-# the Pi's storage, network and display domains come with stages (b), (c) and (d).
-# No unit record here places the platform record's Ethernet unit, net, so no domain holds GENET,
-# nor its SD unit, sd: the unit's legacy SD controller is of no kind a runtime drives, and
-# the domain library refuses a configured domain that holds such a device (TODO.md, "the
-# Raspberry Pi 4's sd unit").
+# (config/platforms/raspi4b.json; docs/plan.md, 1b-I): the system domain, one configured
+# domain, storage, and the system principal's session template, from which the console
+# starts root's session at boot (docs/design-system.md, "Booting"). The storage domain is
+# QEMU virt's row (config/manifest/qemu-virt-development.txt, whose comment gives its
+# memory, restarts and storage_ctl facet): an interpreter service domain that holds the
+# platform record's sd unit, EMMC2 and the legacy SD controller that shares its line
+# (docs/design-storage.md, "The SD controller's line"). The unit is named block, as on
+# QEMU virt, because storage_ctl acts on that unit name. The legacy controller is of no
+# kind a runtime drives, so the domain holds it with the unit and is given no record of it
+# and no register window onto it, and no driver opens it (docs/design-shared-devices.md,
+# "The unit rule"). erx_blk has no transport for EMMC2's sdhci record, so the domain
+# logs that the block device is not driven and runs with no device process; with no data window, nothing is mounted
+# at /data and no data facet is granted. The network and display domains come with stages
+# (c) and (d). No unit record here places the platform record's Ethernet unit, net, so no
+# domain holds GENET.
 #
 # The system domain holds three units (docs/design-platforms.md, "Raspberry Pi 4 Model B"):
 # two of one register page of the board each, the console's, the mini UART's page, which
@@ -25,9 +32,10 @@
 # measurements. The session's network client looks for its net facet as on QEMU virt; no
 # domain serves one here, so its sockets answer enotconn. The system principal holds root's one session, 36 MiB and outer
 # 1 MiB, and 1 MiB for the outer budget of a session that has ended while the system
-# domain still holds a connection to it, as QEMU virt's comment explains. The system
-# baseline is QEMU virt's 46 MiB. root_memory, 128 MiB, admits the baseline and the
-# principal's 38 MiB with 44 MiB no one is promised, and lies well below what the
+# domain still holds a connection to it, as QEMU virt's comment explains, and the storage
+# domain, 30 MiB and outer 1 MiB: 69 MiB in all. The system baseline is QEMU virt's 46 MiB.
+# root_memory, 128 MiB, admits the baseline, the principal's 69 MiB and the SD controller's
+# 1 MiB of DMA memory with 12 MiB no one is promised, and lies well below what the
 # smallest Pi 4 the record names leaves the root.
 manifest 1
 share system
@@ -83,6 +91,16 @@ runtime_limits session
   atoms 16384
   foreign_atoms 1024
   processes 2048
+runtime_limits storage
+  max_frame 131072
+  max_message_heap 131072
+  funnel_depth 64
+  exports 256
+  tmp 0
+  overlay 0
+  atoms 16384
+  foreign_atoms 1024
+  processes 1024
 limits native
   memory 16777216
   outer 1048576
@@ -107,8 +125,20 @@ limits session
   runtime_limits @runtime_limits.session
   peer_held 4096
   peer_held_total 4096
+limits storage
+  memory 31457280
+  outer 1048576
+  grant @share.users
+  spaces none
+  lane 4096
+  connections 2
+  crash 0
+  flags none
+  runtime_limits @runtime_limits.storage
+  peer_held 4096
+  peer_held_total 4096
 principal system
-  memory 39845888
+  memory 72351744
   grant @share.users
   domains 4
   names 64
@@ -149,6 +179,31 @@ unit hostlink
 unit framebuffer
   placement "framebuffer"
   holder system
+unit block
+  placement "sd"
+  holder @domain.storage
+domain storage
+  principal @principal.system
+  limits @limits.storage
+  kind service
+  flags none
+  runtime @artifact.emu
+  release @artifact.storage
+  restarts 5
+  restart_period_s 600
+  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx"
+service storage_ctl
+  server @domain.storage
+  interface driver_control
+facet storage_ctl
+  grantee system
+  service @service.storage_ctl
+  operations none
+  max_request 256
+  in_flight 1
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 65536
 service inspect
   server system
   interface inspect

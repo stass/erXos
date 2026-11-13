@@ -482,7 +482,8 @@ apply_line_installed(const apply_t *apply, uint32_t at)
  * catalogue entry, COHERENT and, for a network row, MAC, or for a
  * framebuffer row its -erx framebuffer record (erx_boot_framebuffer_words)
  * over the window it installed; and its length, or 0 when the words do not
- * fit, which the view's names rule out.
+ * fit, which the view's names rule out, or for an entry that has no record
+ * (erx_dom_entry_recorded), which apply_args skips.
  */
 static size_t
 apply_given_words(apply_t *apply, uint32_t at)
@@ -504,7 +505,7 @@ apply_given_words(apply_t *apply, uint32_t at)
 	if (entry->role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER)
 		return (erx_boot_framebuffer_words(&entry->framebuffer, entry->format, installed[ERX_DOM_OBJ_DEV_WINDOW],
 		    entry->offset, apply->given_words[at], sizeof(apply->given_words[at])));
-	if (entry->role_word == NULL || entry->peripheral == NULL)
+	if (!erx_dom_entry_recorded(entry))
 		return (0);
 	return (erx_boot_given_words(&given, apply->given_words[at], sizeof(apply->given_words[at])));
 }
@@ -525,10 +526,13 @@ apply_unrecorded(const apply_t *apply, uint32_t at)
 /*
  * The boot page's arguments into words, which holds 3 + ERX_DOM_GIVES_MAX
  * runs: the specification's own, -erx build with the boot image's build
- * identifier, a -erx given or -erx framebuffer record per give that has one
- * (apply_unrecorded), and, for a holder of a block
- * device, -erx boot with the boot's pair, each as the root's own page
- * carries it. The number of runs, or 0 when a record does not fit.
+ * identifier, a -erx given or -erx framebuffer record per give that has one,
+ * and, for a holder of a block device of a kind, -erx boot with the boot's
+ * pair, each as the root's own page carries it. A device of no kind is held
+ * with its unit and has no record (erx_dom_entry_recorded), so no driver
+ * opens it, as the root writes none for the system domain's (devices_read);
+ * nor has a framebuffer the tree did not place (apply_unrecorded). The
+ * number of runs, or 0 when a record does not fit.
  */
 static size_t
 apply_args(apply_t *apply, erx_boot_words_t *words)
@@ -543,12 +547,14 @@ apply_args(apply_t *apply, erx_boot_words_t *words)
 		return (0);
 	words[count++] = (erx_boot_words_t){ apply->build_words, length };
 	for (uint32_t at = 0; at < apply->plan->ngives; at++) {
-		if (apply_unrecorded(apply, at))
+		const erx_dom_device_entry_t *entry = &apply->lib->view.devices[apply->plan->gives[at].index];
+
+		if (!erx_dom_entry_recorded(entry) || apply_unrecorded(apply, at))
 			continue;
 		if ((length = apply_given_words(apply, at)) == 0)
 			return (0);
 		words[count++] = (erx_boot_words_t){ apply->given_words[at], length };
-		block = block || apply->lib->view.devices[apply->plan->gives[at].index].role == ERX_MF_DEVICE_ROLE_BLOCK;
+		block = block || entry->role == ERX_MF_DEVICE_ROLE_BLOCK;
 	}
 	if (block) {
 		length = erx_boot_pair_words(apply->lib->boot.value, apply->lib->boot.slot, apply->pair_words,

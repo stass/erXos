@@ -232,8 +232,9 @@ typedef struct erx_dom_device_entry {
 					 * on; ERX_MF_NONE for the system domain */
 	uint32_t	role;		/* ERX_MF_DEVICE_ROLE_* */
 	/* Its holder's record words (erx/device_kinds.h): the ROLE and the
-	 * CMSIS-SVD PERIPHERAL; NULL for a kind no runtime drives, which no
-	 * configured row may hold. */
+	 * CMSIS-SVD PERIPHERAL; NULL for a framebuffer row, which has a record
+	 * of its own, and for a kind no runtime drives, which its holder holds
+	 * with no record and no window (erx_dom_entry_recorded). */
 	const char	*role_word, *peripheral;
 	/* Its kind's compatible string (erx/device_kinds.h), NULL exactly
 	 * when role_word is NULL; and its unit's name, an identifier of 1 to ERX_DOM_NAME_MAX
@@ -285,6 +286,22 @@ typedef struct erx_dom_device_entry {
 	erx_dt_framebuffer_t framebuffer;
 	const char	*format;
 } erx_dom_device_entry_t;
+
+/*
+ * Whether a holder's boot page carries a record of entry: a device of a
+ * kind a runtime drives has a -erx given record, and a framebuffer row a
+ * -erx framebuffer record once the tree places it; one of no kind is held with its
+ * unit and has none, so no driver opens it, and its give makes no window,
+ * DMA window or memory (docs/design-shared-devices.md, "The unit rule").
+ * The boot view's reserve, the creation's records and the device give
+ * planner (erx_dom_plan_device_give) ask this.
+ */
+static inline bool
+erx_dom_entry_recorded(const erx_dom_device_entry_t *entry)
+{
+	return ((entry->role_word != NULL && entry->peripheral != NULL) ||
+	    entry->role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER);
+}
 
 /*
  * A creation specification: the domain service's description of a domain,
@@ -641,7 +658,9 @@ typedef enum erx_dom_parent {
  */
 #define ERX_DOM_DEVICE_STEPS	(2u * (ERX_DEVICE_RANGES_MAX + ERX_DEVICE_IRQS_MAX) + 3u)
 	/* the resource, a window per range, an IRQ object per line and the
-	 * DMA window or memory, then an install of each but the resource */
+	 * DMA window or memory, at most (a device of no kind makes only the
+	 * resource and its shared lines' objects), then an install of each
+	 * but the resource */
 
 /*
  * Where a give's line finds its IRQ object. A creation makes one IRQ

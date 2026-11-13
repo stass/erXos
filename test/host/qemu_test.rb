@@ -52,7 +52,7 @@ class QemuTest < Minitest::Test
     assert_equal ['-machine', 'raspi4b'], argv[1, 2]
     assert_equal %w[null file:serial], argv.each_cons(2).select { |flag, _| flag == '-serial' }.map(&:last)
     assert_equal ['loader,file=/b/bl31.bin,addr=0x0,cpu-num=0', 'loader,file=/b/image.boot,addr=0x200000',
-                  'loader,file=/b/model.dtb,addr=0x3000000'],
+                  'loader,file=/b/model.dtb,addr=0x8000000'],
                  argv.each_cons(2).select { |flag, _| flag == '-device' }.map(&:last)
     assert_includes argv.each_cons(2).to_a, ['-global', 'arm_gic.has-security-extensions=on']
     assert_includes argv, '-no-reboot'

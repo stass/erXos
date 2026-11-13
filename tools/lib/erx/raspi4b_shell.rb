@@ -143,8 +143,9 @@ module Erx
       path
     end
 
-    # QEMU's loader refuses overlapping files, and bootstrap would write over a tree just past
-    # its image, so each file must end before the next one's address.
+    # QEMU's loader refuses overlapping files, so each file must end before the next one's
+    # address; bootstrap itself holds the tree apart (kernel/core/boot_place.c,
+    # erx_boot_hold_apart).
     def check_loads(inputs)
       loads = QemuPlan::MACHINES.fetch(PLATFORM).loads
       [[:stub, loads.stub, loads.image], [:image, loads.image, loads.dtb]].each do |name, at, limit|

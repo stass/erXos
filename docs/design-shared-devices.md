@@ -89,8 +89,9 @@ Each requirement follows from that one closure:
   objects of a whole unit in the holder's budget
   ([design-system.md](design-system.md#devices)): one register window over
   each run of consecutive pages the unit's register ranges cover, and one
-  IRQ object for each distinct line its devices name. Every page is in
-  one window and every line in one object, so the kernel's refusal of a
+  IRQ object for each distinct line its devices name, a device of no kind
+  adding no window and only a line it shares (below). Every page given is
+  in one window and every line given in one object, so the kernel's refusal of a
   second MMIO object on a page or a second IRQ object on a line
   ([design-kernel.md](design-kernel.md#dma-and-the-iommu)) never fires on a
   give the boot view accepted.
@@ -120,6 +121,20 @@ Each requirement follows from that one closure:
   of a clock controller, gets it from the holder's driver: a file tree the
   holder serves, with a `ctl` file for one-shot control, or a facet of a
   service `abi/services` declares, never the registers or the line.
+* **A device of no kind is held, not driven.** A device whose role and
+  compatible string are in no row of `include/erx/device_kinds.h` gets
+  no `-erx given` record, so no driver opens it, and no register window
+  of its own, DMA window or memory, so its holder holds no window onto
+  its registers that any of its processes could open; the planner's
+  overlap check (`life_overlaps`) keeps a driven device's window off its
+  pages. Its holder still holds
+  it with its unit, and a configured domain's creation gives it only the
+  IRQ object of each line it shares with another device of its
+  unit, when it is the first device of the unit on that line, so that the
+  line has its one object as the line rule above requires. The Raspberry
+  Pi 4's legacy SD controller, in the storage domain's `sd` unit, is such
+  a device, and the system domain's SPI controllers get no objects of
+  their own either: they lie in the mini UART's window and line.
 
 **The check.** The domain library's boot view, which the build's
 manifest check runs and the root runs again at boot, computes each
