@@ -135,7 +135,7 @@ erx_fiasco_service_boot(const erx_boot_handoff_view_t *handoff)
 }
 
 const char *
-erx_fiasco_root_up(const void *archive, size_t archive_bytes)
+erx_fiasco_root_up(const void *archive, size_t archive_bytes, uint64_t dma_bytes)
 {
 	const char *reason;
 
@@ -151,7 +151,7 @@ erx_fiasco_root_up(const void *archive, size_t archive_bytes)
 	for (size_t offset = 0; offset < archive_bytes; offset += ERX_PAGE_SIZE)
 		(void)*(const volatile uint8_t *)((const char *)archive + offset);
 
-	reason = erx_fiasco_vm_init();
+	reason = erx_fiasco_vm_init(dma_bytes);
 	if (reason != NULL)
 		return (reason);
 	reason = service_thread_table_init();

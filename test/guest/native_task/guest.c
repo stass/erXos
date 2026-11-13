@@ -171,7 +171,7 @@ erx_fiasco_root_main(void)
 	const char *reason = erx_fiasco_root_open(&handoff, &pack);
 
 	if (reason == NULL)
-		reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start, (size_t)handoff.image.size);
+		reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start, (size_t)handoff.image.size, 0);
 	if (reason != NULL) {
 		say(reason);
 		erx_fiasco_machine_off();

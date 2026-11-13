@@ -20,6 +20,7 @@
 #include "erx/abi.h"
 #include "erx/core/boot_handoff.h"
 #include "liberx/backend/core/boot_manifest.h"
+#include "liberx/backend/core/manifest_dma.h"
 
 #define NODE_PREFIX	"system@"
 
@@ -125,9 +126,15 @@ int
 LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 {
 	erx_boot_manifest_t manifest;
+	erx_manifest_view_t view;
+	erx_abi_error_t error = { 0 };
 	const char *reason = NULL;
 	const uint8_t *args;
+	uint64_t dma_total;
 
+	/* The root's contiguous pool total walks the whole device table of any manifest that opens. */
+	if (erx_manifest_open(bytes, length, &view, &error))
+		(void)erx_boot_manifest_dma_total(&view, &dma_total);
 	if (!erx_boot_manifest_read(bytes, length, true, &manifest, &reason)) {
 		if (reason == NULL || reason[0] == '\0')
 			abort();

@@ -6,7 +6,7 @@
   "ram_first": 0,
   "ram_bytes": 994050048,
   "fiasco_reserve": 60817408,
-  "root_withheld": 4194304,
+  "root_withheld": 2097152,
   "units": [
     {
       "key": "console-uart",

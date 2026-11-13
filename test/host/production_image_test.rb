@@ -608,16 +608,19 @@ class ProductionImageTest < Minitest::Test
 
   # A boot of the development image at 256 MiB (the Apple M3 Max host, HVF, 1 guest CPU,
   # QEMU 11.1.3): its archive, and the pool pages and root image its root reported. It
-  # kept 4,321,280 bytes besides the archive and the page index.
+  # kept 4,321,280 bytes besides the archive and the page index, 2,224,128 besides its
+  # 2 MiB contiguous pool too, for the 1.25 MiB of devices' memory its manifest declares.
   LOGGED_ARCHIVE = 0x2dfb000
   LOGGED_POOL_PAGES = 46_858
   LOGGED_IMAGE = 0x4dc000
+  LOGGED_DMA_MEMORY = 1_310_720
 
   def kept_verifier(machine)
     Dir.mktmpdir('erx-kept-') do |directory|
       archive = File.join(directory, 'image.pack')
       File.open(archive, 'wb') { |file| file.truncate(LOGGED_ARCHIVE) }
-      built = FakeArchiveBuilt.new(build_id: 'aa', index_hash: 'bb', flags: 1, test_code: false, archive: archive)
+      built = FakeArchiveBuilt.new(build_id: 'aa', index_hash: 'bb', flags: 1, test_code: false, archive: archive,
+                                   report: { 'manifest' => { 'dma_memory' => LOGGED_DMA_MEMORY } })
       points = Erx::ProductionImage::Run.checkpoints(built, root: ROOT, watchdog: '1,30,600', cpus: 1,
                                                      manifest_source: PLATFORM.manifest_source(ROOT),
                                                      memory_mib: machine.memory_mib)
@@ -626,7 +629,7 @@ class ProductionImageTest < Minitest::Test
                                .find { |each| each.fetch(:name) == 'root-manifest' }.fetch(:verify)
     end
   end
-  FakeArchiveBuilt = Struct.new(:build_id, :index_hash, :flags, :test_code, :archive, keyword_init: true)
+  FakeArchiveBuilt = Struct.new(:build_id, :index_hash, :flags, :test_code, :archive, :report, keyword_init: true)
 
   # The production image suite holds each boot to what the packer counts it keeps. The
   # seeded fault is a record whose root_withheld is a page less than that boot kept.
@@ -636,9 +639,9 @@ class ProductionImageTest < Minitest::Test
            "#{manifest_number(source, 'system_baseline')} units #{source.scan(/^unit /).size} " \
            "pool pages #{LOGGED_POOL_PAGES} image #{LOGGED_IMAGE}\r\n"
     kept_verifier(DEVELOPMENT).call(line)
-    short = Erx::Platform.new(name: PLATFORM.name, record: PLATFORM.record.merge('root_withheld' => 4_321_280 - 4096))
+    short = Erx::Platform.new(name: PLATFORM.name, record: PLATFORM.record.merge('root_withheld' => 2_224_128 - 4096))
     error = assert_raises(Erx::Error) { kept_verifier(DEVELOPMENT.with(platform: short)).call(line) }
-    assert_match(/the boot kept 6418432 bytes besides the archive, 4096 more than .*root_withheld 4317184 is too small/, error.message)
+    assert_match(/the boot kept 6418432 bytes besides the archive, 4096 more than .*root_withheld 2220032 is too small/, error.message)
     refute_kind_of Erx::Manifest::Invalid, error
     assert_raises(Erx::Error) { kept_verifier(DEVELOPMENT).call(line.sub("pool pages #{LOGGED_POOL_PAGES}", 'pool pages 99999999')) }
   end

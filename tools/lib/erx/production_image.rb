@@ -1045,7 +1045,8 @@ module Erx
       # Checkpoints whose one root-manifest point also holds what the boot kept besides the
       # archive to the packer's estimate (Manifest::RootStartup.check_boot): from the pool
       # pages and the root's image the line reports, the machine's RAM, fiasco_reserve and
-      # root_withheld, and the archive in whole pages. A boot that keeps more fails here,
+      # root_withheld, the archive in whole pages, and the devices' memory the manifest
+      # declares, which sized the boot's contiguous pool. A boot that keeps more fails here,
       # before an archive the packer passed fails at the root. Points without exactly one
       # root-manifest point are refused, so the check cannot silently drop out.
       def self.kept_checkpoints(points, built:, machine:)
@@ -1056,6 +1057,7 @@ module Erx
         page = Manifest::RootStartup::PAGE_BYTES
         archive_bytes = (File.size(built.archive) + page - 1) / page * page
         figures = Manifest::RootStartup.archive_machine(machine.record)
+                                       .merge(dma_memory: built.report.fetch('manifest').fetch('dma_memory'))
         points.map do |point|
           next point unless point.fetch(:name) == 'root-manifest'
 

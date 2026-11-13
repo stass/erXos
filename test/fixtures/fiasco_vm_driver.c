@@ -914,32 +914,69 @@ check_layout(void)
 static void
 check_contig_take(erx_fiasco_contig_t *pool, bool *held, uint32_t pages, uint32_t limit)
 {
-	uint32_t align = 1;
 	uint32_t first, expected = ERX_FIASCO_CONTIG_NONE;
 
-	while (align < pages)
-		align *= 2;
-	for (uint32_t candidate = 0; expected == ERX_FIASCO_CONTIG_NONE && candidate + pages <= limit; candidate += align) {
+	for (uint32_t candidate = 0; expected == ERX_FIASCO_CONTIG_NONE && candidate + pages <= limit; candidate++) {
 		bool free_run = true;
 
-		for (uint32_t page = candidate; page < candidate + pages; page++)
-			free_run = free_run && !held[page];
+		for (uint32_t page = candidate; free_run && page < candidate + pages; page++)
+			free_run = !held[page];
 		if (free_run)
 			expected = candidate;
 	}
 	first = erx_fiasco_contig_take(pool, pages, limit);
 	if (!(first == expected))
-		fail("contig: first fit, aligned, below the limit, over free pages", 0);
+		fail("contig: first fit, below the limit, over free pages", 0);
 	if (first == ERX_FIASCO_CONTIG_NONE)
 		return;
 	for (uint32_t page = first; page < first + pages; page++)
 		held[page] = true;
 }
 
+/*
+ * A pool of the smallest order holds its own pages and no more: no run longer than
+ * it, and no run past its end, whatever limit the caller gives.
+ */
+static void
+check_contig_small(void)
+{
+	const uint32_t pages = (uint32_t)((UINT64_C(1) << ERX_FIASCO_CONTIG_MIN_ORDER) / ERX_PAGE_SIZE);
+	erx_fiasco_contig_t small = { .pages = pages };
+
+	if (!(erx_fiasco_contig_take(&small, pages + 1, UINT32_MAX) == ERX_FIASCO_CONTIG_NONE))
+		fail("contig: a run longer than a small pool", 0);
+	if (!(erx_fiasco_contig_take(&small, pages - 1, UINT32_MAX) == 0))
+		fail("contig: first fit in a small pool", 0);
+	if (!(erx_fiasco_contig_take(&small, 2, UINT32_MAX) == ERX_FIASCO_CONTIG_NONE))
+		fail("contig: a run past a small pool's end", 0);
+	if (!(erx_fiasco_contig_take(&small, 1, UINT32_MAX) == pages - 1))
+		fail("contig: a small pool's last page", 0);
+}
+
+/*
+ * The pool's order for a few declared totals, which FiascoVmTest holds to the
+ * packer's Manifest::RootStartup.contiguous_pool_bytes: one line each, the total and
+ * the pool's bytes, 0 for a total no pool holds.
+ */
+static void
+print_contig_orders(void)
+{
+	static const uint64_t totals[] = { 0, 1, UINT64_C(1) << 20, UINT64_C(1310720), UINT64_C(2) << 20,
+	    (UINT64_C(2) << 20) + 1, (UINT64_C(2) << 20) + ERX_PAGE_SIZE, UINT64_C(9) << 20, UINT64_C(16) << 20,
+	    (UINT64_C(16) << 20) + 1, (UINT64_C(16) << 20) + ERX_PAGE_SIZE, UINT64_MAX };
+
+	for (size_t at = 0; at < sizeof(totals) / sizeof(totals[0]); at++) {
+		const unsigned order = erx_fiasco_contig_order(totals[at]);
+
+		printf("contig pool %llu %llu\n", (unsigned long long)totals[at],
+		    order == 0 ? 0ULL : (unsigned long long)(UINT64_C(1) << order));
+	}
+}
+
 static void
 check_contig(unsigned seed)
 {
-	erx_fiasco_contig_t pool = { { 0 } };
+	erx_fiasco_contig_t pool = { .pages = ERX_FIASCO_CONTIG_PAGES };
 	bool held[ERX_FIASCO_CONTIG_PAGES] = { false };
 
 	current_case = "contiguous pool";
@@ -950,7 +987,7 @@ check_contig(unsigned seed)
 	if (!(erx_fiasco_contig_take(&pool, 1, 0) == ERX_FIASCO_CONTIG_NONE))
 		fail("contig: a limit below every page", 0);
 	for (uint32_t pages = 1; pages <= ERX_FIASCO_CONTIG_PAGES; pages++) {
-		erx_fiasco_contig_t alone = { { 0 } };
+		erx_fiasco_contig_t alone = { .pages = ERX_FIASCO_CONTIG_PAGES };
 		bool alone_held[ERX_FIASCO_CONTIG_PAGES] = { false };
 
 		check_contig_take(&alone, alone_held, pages, ERX_FIASCO_CONTIG_PAGES);
@@ -990,6 +1027,8 @@ main(int argc, char **argv)
 		return (1);
 	check_pool();
 	check_contig(seed);
+	check_contig_small();
+	print_contig_orders();
 	check_layout();
 	check_refusals();
 	check_every_state_range_and_call();

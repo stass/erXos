@@ -203,7 +203,7 @@ start_waiter(void)
 void
 erx_fiasco_root_main(void)
 {
-	const char *reason = erx_fiasco_root_up(NULL, 0);
+	const char *reason = erx_fiasco_root_up(NULL, 0, 0);
 	uint32_t round = 0;
 	bool undisturbed, second_waits;
 

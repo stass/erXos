@@ -89,6 +89,7 @@ module Erx
         # Bootstrap reserves the archive in whole pages, which sigma0 then never offers.
         Manifest::RootStartup.check_archive(archive_bytes: round_page(File.size(temporary)),
                                             root_memory: admitted.report.fetch('root_memory'),
+                                            dma_memory: admitted.report.fetch('dma_memory'),
                                             **Manifest::RootStartup.archive_machine(platform))
         @checker.run([temporary], runner: @runner, name: 'pack-check', deadline: 300)
         hash = Digest::SHA256.file(temporary).hexdigest

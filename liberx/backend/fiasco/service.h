@@ -27,9 +27,12 @@
  * The root's first steps, on its first thread: maps its image, touches each page
  * of the archive so it maps read-only, builds the pool and thread table, starts
  * the service and makes it this thread's pager. From its return every fault of a
- * root thread ends the machine. Returns NULL, or why the boot cannot go on.
+ * root thread ends the machine. dma_bytes is the devices' memory the root will
+ * make, which sizes the contiguous pool (erx_fiasco_vm_init): the manifest's total
+ * for the program root, a test's own figure for a native test root. Returns NULL,
+ * or why the boot cannot go on.
  */
-const char	*erx_fiasco_root_up(const void *archive, size_t archive_bytes);
+const char	*erx_fiasco_root_up(const void *archive, size_t archive_bytes, uint64_t dma_bytes);
 /*
  * Keeps what bootstrap's handoff said of the machine, its build identifier and boot
  * value, for erx_object_info's machine report. It runs once, before

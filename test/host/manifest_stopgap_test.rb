@@ -288,6 +288,8 @@ class ManifestStopgapTest < Minitest::Test
   # The archive rule (RootStartup.check_archive) against boots of the development image
   # from the development logs (the Apple M3 Max host, HVF, QEMU 11.1.3): each boot's RAM,
   # Fiasco's kernel memory, the archive, root_memory, the root's pool pages and image.
+  # Each declared the development manifest's 1.25 MiB of devices' memory, so each took
+  # a 2 MiB contiguous pool.
   # The root's own rule (root.c, root_memory_fits) passed the boot when the pool's pages
   # and the image held root_memory.
   Boot = Data.define(:ram, :reserve, :archive, :root_memory, :pool_pages, :image) do
@@ -317,10 +319,12 @@ class ManifestStopgapTest < Minitest::Test
   # record's root_withheld errs high by 388 KiB, and this leaves a little more.
   TOLERANCE = 512 << 10
 
-  # The record's root_withheld, on the boot's machine.
+  BOOT_DMA_MEMORY = 1_310_720
+
+  # The record's root_withheld, on the boot's machine, with the boots' devices' memory.
   def machine(boot)
     platform = platform_with { |value| value.merge!('ram_bytes' => boot.ram, 'fiasco_reserve' => boot.reserve) }
-    Erx::Manifest::RootStartup.archive_machine(platform)
+    Erx::Manifest::RootStartup.archive_machine(platform).merge(dma_memory: BOOT_DMA_MEMORY)
   end
 
   def check_archive(boot)
@@ -370,6 +374,48 @@ class ManifestStopgapTest < Minitest::Test
       short = figures.merge(root_withheld: figures.fetch(:root_withheld) - TOLERANCE)
       assert_raises(Erx::Error, label) { Erx::Manifest::RootStartup.check_boot(**short) }
     end
+  end
+
+  # The pool is the smallest power of two that holds the devices' memory, from 2 MiB to
+  # 16 MiB, as erx_fiasco_contig_order sizes it (FiascoVmTest checks the two agree).
+  def test_the_contiguous_pool_holds_the_devices_memory_in_a_power_of_two
+    pool = ->(bytes) { Erx::Manifest::RootStartup.contiguous_pool_bytes(bytes) }
+    { 0 => 2 * MIB, BOOT_DMA_MEMORY => 2 * MIB, 2 * MIB => 2 * MIB, (2 * MIB) + 4096 => 4 * MIB,
+      9 * MIB => 16 * MIB, 16 * MIB => 16 * MIB }.each { |bytes, expected| assert_equal expected, pool.call(bytes), bytes }
+    assert_raises(Erx::Error) { pool.call((16 * MIB) + 4096) }
+  end
+
+  # A manifest whose devices ask for a 16 MiB pool
+  # keeps 14 MiB more than one whose pool is 2 MiB, and the packer counts it, so an
+  # archive that fits with the small pool is refused with the large one.
+  def test_the_packer_counts_the_pool_the_devices_memory_takes
+    boot = BOOTS.fetch(:lowered)
+    figures = { archive_bytes: boot.archive, **machine(boot) }
+    small = Erx::Manifest::RootStartup.boot_kept(**figures)
+    assert_equal 14 * MIB, Erx::Manifest::RootStartup.boot_kept(**figures, dma_memory: 9 * MIB) - small
+    assert_nil check_archive(boot)
+    assert_raises(Erx::Manifest::Invalid) do
+      Erx::Manifest::RootStartup.check_archive(archive_bytes: boot.archive, root_memory: boot.root_memory,
+                                               **machine(boot), dma_memory: 9 * MIB)
+    end
+  end
+
+  def test_the_report_states_the_devices_memory
+    assert_equal device_memory, admit.report.fetch('dma_memory')
+  end
+
+  # Each device's memory is one contiguous object, and every device's is made from one
+  # pool of at most 16 MiB.
+  def test_a_device_memory_past_mem_contiguous_max_is_refused
+    max = @codec.constant('mem_contiguous_max')
+    source, against = with_extra_device(role: 'ordinary', dma: 'unconfined', flags: 1, dma_memory: max + 4096)
+    refused(Erx::Manifest::Invalid, 4, 'devices.dma_memory', source, against, message: /mem_contiguous_max/)
+  end
+
+  def test_devices_memory_past_the_contiguous_pool_is_refused
+    over = Erx::Manifest::RootStartup::CONTIGUOUS_POOL_MAX_BYTES - device_memory + 4096
+    source, against = with_extra_device(role: 'ordinary', dma: 'unconfined', flags: 1, dma_memory: over)
+    refused(Erx::Manifest::Invalid, 4, 'devices.dma_memory', source, against, message: /contiguous pool/)
   end
 
   def test_a_platform_without_root_withheld_packs_nothing

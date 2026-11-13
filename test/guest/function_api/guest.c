@@ -42,7 +42,7 @@ function_api_group(void)
 void
 erx_fiasco_root_main(void)
 {
-	const char *const reason = erx_fiasco_root_up(NULL, 0);
+	const char *const reason = erx_fiasco_root_up(NULL, 0, ERX_MEM_CONTIGUOUS_MAX);
 
 	if (reason != NULL) {
 		function_api_say("erx: function-api: init FAILED: ");

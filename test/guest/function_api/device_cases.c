@@ -85,34 +85,38 @@ case_physical_refusals(void)
 	    erx_mem_dma_addr(mem, 0, &unused) == ERX_ETYPE);
 }
 
-/* Each run is aligned to its size rounded up and holds its pages alone, within the pool's. */
+/*
+ * Each run is aligned to a page and holds its pages alone, within the pool's. 9 MiB is
+ * more than a 1920x1080 screen's image at 4 bytes a pixel, and is one object.
+ */
 static bool
 case_contiguous_runs(void)
 {
 	const uint64_t pages_3 = 3 * (uint64_t)ERX_PAGE_SIZE;
-	uint64_t one, three, largest, again, addr_one, addr_three, addr_largest, unused;
+	const uint64_t screen = 9 * (UINT64_C(1) << 20);
+	uint64_t one, three, large, again, addr_one, addr_three, addr_large, unused;
 
 	if (erx_mem_create_contiguous(0, 0, ERX_PAGE_SIZE, 0, &one) != ERX_OK ||
 	    erx_mem_create_contiguous(0, 0, pages_3, 0, &three) != ERX_OK ||
-	    erx_mem_create_contiguous(0, 0, ERX_MEM_CONTIGUOUS_MAX, 0, &largest) != ERX_OK)
+	    erx_mem_create_contiguous(0, 0, screen, 0, &large) != ERX_OK)
 		return (false);
 	if (erx_mem_dma_addr(one, 0, &addr_one) != ERX_OK || erx_mem_dma_addr(three, 0, &addr_three) != ERX_OK ||
-	    erx_mem_dma_addr(largest, 0, &addr_largest) != ERX_OK)
+	    erx_mem_dma_addr(large, 0, &addr_large) != ERX_OK ||
+	    erx_mem_dma_addr(large, screen - ERX_PAGE_SIZE, &unused) != ERX_OK || unused != addr_large + screen - ERX_PAGE_SIZE)
 		return (false);
-	if (addr_one % ERX_PAGE_SIZE != 0 || addr_three % (4 * (uint64_t)ERX_PAGE_SIZE) != 0 ||
-	    addr_largest % ERX_MEM_CONTIGUOUS_MAX != 0)
+	if (addr_one % ERX_PAGE_SIZE != 0 || addr_three % ERX_PAGE_SIZE != 0 || addr_large % ERX_PAGE_SIZE != 0)
 		return (false);
-	if (addr_three < addr_one + ERX_PAGE_SIZE || addr_largest < addr_three + pages_3)
+	if (addr_three < addr_one + ERX_PAGE_SIZE || addr_large < addr_three + pages_3)
 		return (false);
-	/* The pool's other half holds the small runs, so nothing so large has room. */
+	/* The pool is ERX_MEM_CONTIGUOUS_MAX and holds these runs, so nothing so large has room. */
 	if (erx_mem_create_contiguous(0, 0, ERX_MEM_CONTIGUOUS_MAX, 0, &again) != ERX_ENOMEM)
 		return (false);
 	if (erx_mem_dma_addr(one, ERX_PAGE_SIZE, &unused) != ERX_ERANGE ||
 	    erx_mem_dma_addr(three, 2 * (uint64_t)ERX_PAGE_SIZE, &unused) != ERX_OK || unused != addr_three + 2 * ERX_PAGE_SIZE)
 		return (false);
-	/* A limit at the pool's lowest address leaves no room, and one above a free run does. */
+	/* A limit at the pool's lowest address leaves no room, and one a page past the large run does. */
 	return (erx_mem_create_contiguous(0, 0, ERX_PAGE_SIZE, addr_one, &again) == ERX_ENOMEM &&
-	    erx_mem_create_contiguous(0, 0, ERX_PAGE_SIZE, addr_largest, &again) == ERX_OK);
+	    erx_mem_create_contiguous(0, 0, ERX_PAGE_SIZE, addr_large + screen + ERX_PAGE_SIZE, &again) == ERX_OK);
 }
 
 /* fw_cfg reads its own request from a run and writes its signature into the run's second page. */

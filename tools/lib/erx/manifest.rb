@@ -309,13 +309,14 @@ module Erx
       #
       #   archive + root_memory <= RAM - fiasco_reserve - boot_kept,
       #
-      # with boot_kept estimated from the platform record and the archive. The estimate
+      # with boot_kept estimated from the platform record, the archive and the devices'
+      # memory the manifest declares (dma_memory, the admission report's). The estimate
       # errs high by a few hundred KiB (docs/design-stopgap.md, "The root startup
       # rule"), so an image this refuses fails at boot or comes within that margin of
       # failing. Every figure is in bytes; the platform's come from archive_machine.
-      def check_archive(archive_bytes:, root_memory:, ram_bytes:, fiasco_reserve:, root_withheld:)
+      def check_archive(archive_bytes:, root_memory:, dma_memory:, ram_bytes:, fiasco_reserve:, root_withheld:)
         kept = boot_kept(ram_bytes: ram_bytes, fiasco_reserve: fiasco_reserve, archive_bytes: archive_bytes,
-                         root_withheld: root_withheld)
+                         root_withheld: root_withheld, dma_memory: dma_memory)
         room = ram_bytes - fiasco_reserve - kept
         short = archive_bytes + root_memory - room
         return unless short.positive?
@@ -332,13 +333,14 @@ module Erx
       # estimates, the packer can pass an archive the root refuses, so the production
       # image suite holds its boots to the estimate. A report that leaves the boot keeping
       # less than the page index alone is no measurement, and is refused too. archive_bytes
-      # is the archive in whole pages, as bootstrap reserves it. The failure is the
+      # is the archive in whole pages, as bootstrap reserves it, and dma_memory the
+      # manifest's devices' memory, which sized the boot's contiguous pool. The failure is the
       # platform record's or the boot's, not the manifest's, so it is a plain Error.
-      def check_boot(archive_bytes:, pool_pages:, image_bytes:, ram_bytes:, fiasco_reserve:, root_withheld:)
+      def check_boot(archive_bytes:, pool_pages:, image_bytes:, dma_memory:, ram_bytes:, fiasco_reserve:, root_withheld:)
         kept = ram_bytes - fiasco_reserve - archive_bytes - (pool_pages * PAGE_BYTES) - image_bytes
         estimate = boot_kept(ram_bytes: ram_bytes, fiasco_reserve: fiasco_reserve, archive_bytes: archive_bytes,
-                             root_withheld: root_withheld)
-        index = estimate - root_withheld
+                             root_withheld: root_withheld, dma_memory: dma_memory)
+        index = page_index_bytes((ram_bytes - fiasco_reserve - archive_bytes) / PAGE_BYTES)
         raise Error, "the root's report leaves the boot #{kept} bytes, less than the #{index} of the page index" if kept < index
         return if kept <= estimate
 
@@ -365,18 +367,35 @@ module Erx
 
       # What a boot keeps from RAM less fiasco_reserve besides the archive: the platform
       # record's root_withheld (Fiasco's and sigma0's images, the device tree, the
-      # handoff page, liberx's 2 MiB contiguous pool, and the pool's object table, the
-      # root's range table and its thread table), and the pool's page index.
-      def boot_kept(ram_bytes:, fiasco_reserve:, archive_bytes:, root_withheld:)
-        root_withheld + page_index_bytes((ram_bytes - fiasco_reserve - archive_bytes) / PAGE_BYTES)
+      # handoff page, and the pool's object table, the root's range table and its
+      # thread table), liberx's contiguous pool for the devices' memory the manifest
+      # declares, and the pool's page index.
+      def boot_kept(ram_bytes:, fiasco_reserve:, archive_bytes:, root_withheld:, dma_memory:)
+        root_withheld + contiguous_pool_bytes(dma_memory) +
+          page_index_bytes((ram_bytes - fiasco_reserve - archive_bytes) / PAGE_BYTES)
+      end
+
+      # The contiguous pool the root takes for dma_memory bytes of devices' memory, as
+      # erx_fiasco_contig_order (liberx/backend/fiasco/page_pool.c) sizes it: the
+      # smallest power of two that holds them, at least CONTIGUOUS_POOL_MIN_BYTES. The
+      # manifest check refuses more than CONTIGUOUS_POOL_MAX_BYTES, so a total past it
+      # is the caller's error.
+      def contiguous_pool_bytes(dma_memory)
+        raise Error, "no contiguous pool holds #{dma_memory} bytes" unless
+          dma_memory.between?(0, CONTIGUOUS_POOL_MAX_BYTES)
+
+        [CONTIGUOUS_POOL_MIN_BYTES, 1 << (dma_memory - 1).bit_length].max
       end
 
       # The C sources of the copied constants: ERX_PAGE_SIZE, sizeof(erx_backend_vm_page_t)
-      # (liberx/backend/core/vm_table.h, which vm_table.c asserts) and VM_DEVICE_PAGES
-      # (liberx/backend/fiasco/vm.c).
+      # (liberx/backend/core/vm_table.h, which vm_table.c asserts), VM_DEVICE_PAGES
+      # (liberx/backend/fiasco/vm.c), and ERX_FIASCO_CONTIG_MIN_ORDER and _MAX_ORDER
+      # (liberx/backend/fiasco/page_pool.h) as bytes.
       PAGE_BYTES = 4096
       PAGE_INDEX_SLOT_BYTES = 16
       DEVICE_PAGES = 4096
+      CONTIGUOUS_POOL_MIN_BYTES = 1 << 21
+      CONTIGUOUS_POOL_MAX_BYTES = 1 << 24
 
       # erx_backend_vm_layout (liberx/backend/core/vm_table.c) sizes the index over the
       # pool's window, its contiguous pool and the device pages. The window and the
@@ -513,6 +532,10 @@ module Erx
         end
         normalize_units(rows)
         device_memory = rows.fetch('devices').sum { |device| device.fetch('dma_memory') }
+        # The stopgap's contiguous pool holds every device's memory at once (RootStartup.contiguous_pool_bytes).
+        if device_memory > RootStartup::CONTIGUOUS_POOL_MAX_BYTES
+          invalid('device memory exceeds the 16 MiB contiguous pool', 4, 'devices.dma_memory')
+        end
         if principals.sum { |row| row.fetch('memory') } + baseline + device_memory > root_memory
           invalid('principal budgets, system baseline and device memory exceed root memory', 4, 'principals.memory')
         end
@@ -557,6 +580,7 @@ module Erx
                    'policy_admission' => 'unsupported',
                    'child_plan_instances' => 0, 'dynamic_domain_reservation' => 0,
                    'root_image_private_bytes' => root_private_bytes, 'root_memory' => root_memory,
+                   'dma_memory' => device_memory,
                    'effective_system_cpuset' => system_cpus,
                    'effective_users_cpuset' => users_cpus,
                    'context_sha256' => @context.fingerprint }.merge(claims)
@@ -988,6 +1012,10 @@ module Erx
           unsupported('a confined device needs a DMA window, which M9 brings', 'devices.dma')
         when @codec.member('mf_dma', 'unconfined')
           invalid('an unconfined device needs a memory reservation', 4, 'devices.dma_memory') unless device.fetch('dma_memory').positive?
+          # The domain library gives it as one contiguous object.
+          if device.fetch('dma_memory') > @codec.constant('mem_contiguous_max')
+            invalid('a device memory reservation exceeds mem_contiguous_max', 4, 'devices.dma_memory')
+          end
         else
           invalid('non-DMA device has a DMA reservation', 4, 'devices.dma_memory') unless device.fetch('dma_memory').zero?
         end

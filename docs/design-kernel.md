@@ -1997,7 +1997,7 @@ touch it, so no object can carry a page tree and a fixed base at once.
 | --- | --- | --- | --- |
 | private | `erx_vm_commit`; `erx_image_map` for a writable segment | populated at first touch from the space's reserve's pool: copied from the object's source (a range of the boot image) where it has one, zeroed elsewhere; released when the range that maps them is decommitted or released | read-write |
 | shared | `erx_mem_create` | every page reserved, charged and backed at creation, and each page `erx_mem_grow` adds when it adds it, zero-filled at first touch from the object's own pool; released when the object is destroyed | read-write; with `ERX_MEM_JIT`, made by a thread of a JIT space, which becomes the object's owner, also execute, in its owner alone and never both in one mapping; read alone once sealed |
-| contiguous | `erx_mem_create_contiguous` with the resource entry of the unconfined device it is for; at most 1 MiB, inside one DMA range of that device, below the limit its driver gives, from the contiguous pool | allocated and zeroed at creation; `PHYS` reveals the device's address for it | read-write |
+| contiguous | `erx_mem_create_contiguous` with the resource entry of the unconfined device it is for; at most `ERX_MEM_CONTIGUOUS_MAX` (16 MiB, enough for a 1920x1080 screen's image at 4 bytes a pixel), inside one DMA range of that device, below the limit its driver gives, from the contiguous pool | allocated and zeroed at creation; `PHYS` reveals the device's address for it | read-write |
 | physical | `erx_mem_create_physical` from a resource, for MMIO and a PCIe function's BARs, and `erx_image_slice`, each charged to the budget it names; the boot image and the time page at boot; a group's shared areas | a fixed range, never freed while the object lives; a device range never overlaps RAM | MMIO: read-write, never execute, device attributes; the boot image: empty, so no mapping of it can be made; a slice: read and execute; the time page and a group's status area: read; a group's control area: read-write |
 | paged | `erx_mem_create_paged`, by the system domain | every page reserved, charged and backed at creation; filled by its supplier from its pool until sealed, and never changed after; a page never supplied reads as zeros; released when the object is destroyed | read, and with `ERX_MEM_CODE` execute; mapped only once sealed |
 | copy-on-write child | `erx_mem_child`, from an immutable object | every page reserved, charged and backed at creation; a page the child has not touched through a mapping is read from its parent through a memory window, and the first access through a mapping, a read or a write, copies it into a page of the child's pool, which the child owns from then on; released when the object is destroyed, which its parent's destruction does | read-write, never execute |
@@ -7167,6 +7167,12 @@ other than the CPU's, where a physical address would be wrong
   never to the released list. For a device that is
   not `dma-coherent` it allocates whole cache-writeback granules, whose
   size the CPU reports, so no cache line holds a byte of another object.
+  An object is at most `ERX_MEM_CONTIGUOUS_MAX`, 16 MiB, and creation
+  zeroes all of it before the call returns. Only the trusted system
+  domain's device service creates one, once per device, at the device's
+  first give (**Lifetime** below), so a driver never pays for it; how
+  that one long call meets the bounded-path rule is on the performance
+  watch list ([todo-performance.md](todo-performance.md)).
   `erx_mem_dma_addr(mem, offset)`, which needs `PHYS`, returns the
   device's address for an offset in it, through the device's range,
   which the device's record carries from the same walk over the same

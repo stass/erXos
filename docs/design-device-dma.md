@@ -179,12 +179,12 @@ register writes, which are BIFs, take no lock (`erx_device_bif.c`,
 `erx_device.c:372-420`). The manifest's device record has no
 coherence mark and no DMA range; its only flag is `hostile`
 (`abi/manifest.txt:77-78, 256-277`). On the stopgap, every device's DMA
-memory comes from one 2 MiB contiguous pool the root takes from `sigma0`
-at boot (`liberx/backend/fiasco/vm.c:228-233`;
-`liberx/backend/fiasco/page_pool.h:48`), an object is at most 1 MiB
-(`abi/erx_abi.txt:33`), its device address is its physical address
-(`vm.c:410-421`), and the create's limit is read as a physical address
-(`vm.c:388-391`). Fiasco lets user mode clean and invalidate by address
+memory comes from one contiguous pool the root takes from `sigma0`
+at boot, sized for the manifest's devices' memory up to 16 MiB (`liberx/backend/fiasco/vm.c`, `erx_fiasco_vm_init`;
+`liberx/backend/fiasco/page_pool.c`, `erx_fiasco_contig_order`), an object is at most 16 MiB
+(`abi/erx_abi.txt`, `mem_contiguous_max`) and aligned to a page, its device address is its physical address
+(`vm.c`, `erx_fiasco_vm_object_dma_addr`), and the create's limit is read as a physical address
+(`vm.c`, `erx_fiasco_vm_contiguous_create`). Fiasco lets user mode clean and invalidate by address
 and read the cache type register
 (`fiasco/kernel/src/kern/arm/64/cpu-arm-64.cpp:34-48`).
 

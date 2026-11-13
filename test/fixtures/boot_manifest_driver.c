@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "liberx/backend/core/boot_manifest.h"
+#include "liberx/backend/core/manifest_dma.h"
 
 /* The handles the driver stands in for the root's register window, line and memory objects. */
 #define WINDOW_HANDLE	11u
@@ -144,6 +145,16 @@ main(int argc, char **argv)
 		    length == 0 ? 0 : erx_boot_console_words(&manifest.console, words, length - 1));
 	}
 	printf("console_page %llu\n", (unsigned long long)erx_boot_console_page(&manifest));
+	{
+		erx_abi_error_t error = { 0 };
+		erx_manifest_view_t view;
+		uint64_t total;
+
+		if (erx_manifest_open(bytes, length, &view, &error) && erx_boot_manifest_dma_total(&view, &total))
+			printf("dma_total %llu\n", (unsigned long long)total);
+		else
+			printf("dma_total refused\n");
+	}
 	printf("devices %zu\n", manifest.device_count);
 	for (size_t at = 0; at < manifest.device_count; at++) {
 		const erx_boot_device_t *device = &manifest.devices[at];

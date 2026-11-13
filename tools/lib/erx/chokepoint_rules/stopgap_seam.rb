@@ -141,6 +141,7 @@ module Erx
         liberx/backend/core/boot_info.c
         liberx/backend/core/boot_info.h
         liberx/backend/core/boot_manifest.c
+        liberx/backend/core/manifest_dma.h
         liberx/backend/core/boot_manifest.h
         liberx/backend/hosted/start.c
         liberx/backend/runtime_entry.h

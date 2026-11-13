@@ -80,7 +80,7 @@ helper(uint64_t addr)
 void
 erx_fiasco_root_main(void)
 {
-	const char *reason = erx_fiasco_root_up(NULL, 0);
+	const char *reason = erx_fiasco_root_up(NULL, 0, 0);
 	uint64_t page;
 
 	if (reason != NULL) {

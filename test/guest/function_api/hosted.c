@@ -32,14 +32,21 @@ function_api_group(void)
 	return (ERX_CAP_SELF);
 }
 
-/* No devices: a well-formed request is refused, so nothing here can make up an address. */
+/*
+ * No devices: a well-formed request is refused, so nothing here can make up an address.
+ * 9 MiB, more than a 1920x1080 screen's image at 4 bytes a pixel, is well formed and
+ * meets that refusal; 17 MiB is past ERX_MEM_CONTIGUOUS_MAX and malformed.
+ */
 static bool
 case_mem_device_refused(void)
 {
+	const uint64_t mib = UINT64_C(1) << 20;
 	uint64_t mem, addr;
 
 	return (erx_mem_create_physical(0, 0, ERX_PAGE_SIZE, ERX_PAGE_SIZE, ERX_MEM_ATTR_DEVICE, &mem) == ERX_ENOTSUP &&
-	    erx_mem_create_contiguous(0, 0, ERX_PAGE_SIZE, 0, &mem) == ERX_ENOTSUP && erx_mem_dma_addr(0, 0, &addr) == ERX_EINVAL);
+	    erx_mem_create_contiguous(0, 0, ERX_PAGE_SIZE, 0, &mem) == ERX_ENOTSUP &&
+	    erx_mem_create_contiguous(0, 0, 9 * mib, 0, &mem) == ERX_ENOTSUP &&
+	    erx_mem_create_contiguous(0, 0, 17 * mib, 0, &mem) == ERX_EINVAL && erx_mem_dma_addr(0, 0, &addr) == ERX_EINVAL);
 }
 
 static const function_api_case_t hosted_device_cases[] = {

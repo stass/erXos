@@ -311,7 +311,7 @@ erx_fiasco_root_main(void)
 	const char *reason;
 	uint64_t free_before;
 
-	reason = erx_fiasco_root_up(NULL, 0);
+	reason = erx_fiasco_root_up(NULL, 0, 0);
 	if (reason != NULL) {
 		line_write("erx: memory: init FAILED: ");
 		line_write(reason);

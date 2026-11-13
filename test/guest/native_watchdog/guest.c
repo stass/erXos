@@ -40,7 +40,7 @@ erx_fiasco_root_main(void)
 {
 	/* erx.watchdog=P,D,B in the form the command line gives it. */
 	static const char argument[] = "1,2,2";
-	const char *reason = erx_fiasco_root_up(NULL, 0);
+	const char *reason = erx_fiasco_root_up(NULL, 0, 0);
 	erx_watchdog_config_t config;
 	uint64_t now, stop;
 

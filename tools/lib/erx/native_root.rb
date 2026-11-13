@@ -92,8 +92,10 @@ module Erx
                *PROGRAM_LAYER].freeze
     # The root that checks the handoff and the archive and has nothing to run: the boot
     # suite's. The archive's core comes from Fiasco's boot archive, which does not hold the
-    # handoff record's core, since bootstrap only writes it.
-    NO_PROGRAM = [*RUNTIME, *VM, *SERVICE, *LAUNCH, "#{BACKEND}/root.c", "#{BACKEND}/root_no_program.c"].freeze
+    # handoff record's core, since bootstrap only writes it. boot_manifest.c counts the
+    # manifest's devices' memory, which sizes the contiguous pool.
+    NO_PROGRAM = [*RUNTIME, *VM, *SERVICE, *LAUNCH, "#{BACKEND}/root.c", "#{BACKEND}/root_no_program.c",
+                  'liberx/backend/core/boot_manifest.c'].freeze
     # The device-tree reader over libfdt with every check on (docs/design-device-tree.md, "The
     # reader"), as tools/fuzz/dt_target.rb builds it: the root accepts the firmware's tree once
     # and reads each given device's facts from it. libfdt includes musl's string.h and

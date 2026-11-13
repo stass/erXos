@@ -83,6 +83,19 @@ class BootManifestTest < Minitest::Test
     assert_includes output, "limits #{system_runtime_limits.join(' ')}\n"
   end
 
+  # The root sizes its contiguous pool by the devices' memory of the whole device table,
+  # whichever domain holds each: the total the packer's admission reports and counts.
+  def test_the_devices_memory_is_the_total_the_packer_reports
+    platform = JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json')))
+    context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: platform, build_kind: 'development'))
+    admission = Erx::Manifest.admit(source: @source, codec: @codec, context: context, planner: ManifestContextFixture.accepting_planner)
+    total = admission.report.fetch('dma_memory')
+    assert_operator total, :>, 0
+    output, status = read(admission.bytes)
+    assert status.success?, output
+    assert_includes output, "dma_total #{total}\n"
+  end
+
   def system_runtime_limits
     block = @source[/^runtime_limits system\n((?:  .*\n)*)/, 1]
     flunk 'the manifest has no runtime_limits system block' unless block

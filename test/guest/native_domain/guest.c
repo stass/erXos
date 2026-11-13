@@ -2439,7 +2439,7 @@ erx_fiasco_root_main(void)
 	uint32_t program = 0, erts = 0, jit = 0;
 
 	if (reason == NULL)
-		reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start, (size_t)handoff.image.size);
+		reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff.image.start, (size_t)handoff.image.size, 0);
 	if (reason == NULL && (erx_fiasco_launcher_find(&pack, PROGRAM, &program) != ERX_OK ||
 	    erx_fiasco_launcher_find(&pack, RELEASE, &release) != ERX_OK ||
 	    erx_fiasco_launcher_find(&pack, ERTS, &erts) != ERX_OK ||

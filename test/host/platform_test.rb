@@ -59,14 +59,14 @@ class PlatformTest < Minitest::Test
     end
   end
 
-  # root_withheld is in bytes, not MiB: QEMU virt's is 4.5 MiB. A record without one, or
+  # root_withheld is in bytes, not MiB: QEMU virt's is 2.5 MiB. A record without one, or
   # with one that is not a positive number of bytes, is refused.
   def test_root_withheld_is_a_positive_number_of_bytes
-    assert_equal 4_718_592, VIRT.root_withheld
+    assert_equal 2_621_440, VIRT.root_withheld
     without = VIRT.record.reject { |key, _value| key == 'root_withheld' }
     assert_equal 'config/platforms/qemu-virt.json: no root_withheld',
                  assert_raises(Erx::Error) { Erx::Platform.new(name: 'qemu-virt', record: without) }.message
-    [0, -4096, '4718592', 4.5].each do |withheld|
+    [0, -4096, '2621440', 2.5].each do |withheld|
       assert_raises(Erx::Error, withheld.inspect) { Erx::Platform.new(name: 'qemu-virt', record: record(root_withheld: withheld)) }
     end
   end

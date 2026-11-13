@@ -32,10 +32,12 @@
  */
 
 /*
- * Takes all of sigma0's free memory into the window and readies the pool and the
- * root's range table. Returns NULL, or why the boot cannot go on.
+ * Takes the contiguous pool, sized for dma_bytes of devices' memory
+ * (erx_fiasco_contig_order), then all of sigma0's other free memory into the
+ * window, and readies the pool and the root's range table. Returns NULL, or why
+ * the boot cannot go on.
  */
-const char	*erx_fiasco_vm_init(void);
+const char	*erx_fiasco_vm_init(uint64_t dma_bytes);
 
 /* How many pages the pool holds now. */
 uint64_t	erx_fiasco_vm_free_pages(void);

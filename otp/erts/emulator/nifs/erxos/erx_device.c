@@ -749,6 +749,14 @@ virtio_registers(const erx_device_t *device, virtio_registers_t *regs)
 	    regs->failed != 0);
 }
 
+/*
+ * No queue's pool passes the largest contiguous object: the largest pool is the most buffers
+ * of the largest size, a whole number of pages, which rounding to a granule of at most a page
+ * leaves unchanged.
+ */
+_Static_assert((uint64_t)ERX_DEVICE_QUEUE_SIZE_MAX * ERX_DEVICE_BUFFER_MAX <= ERX_MEM_CONTIGUOUS_MAX &&
+    ERX_DEVICE_BUFFER_MAX % ERX_PAGE_SIZE == 0, "a queue's pool fits one contiguous object");
+
 /* `bytes` rounded up to a power of two `granule`; neither is near UINT32_MAX here. */
 static uint32_t
 granule_round(uint32_t bytes, uint32_t granule)
@@ -862,8 +870,7 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 	/* A physical device does no DMA, so it has no queue (docs/design-stopgap.md, "Device records"). */
 	if (device->form == ERX_DEVICE_FORM_PHYSICAL)
 		return (ERX_ENOTSUP);
-	if (!erx_device_queue_layout(size, granule, &layout) || buffer_size == 0 || buffer_size > ERX_DEVICE_BUFFER_MAX ||
-	    (uint64_t)size * granule_round(buffer_size, granule) > ERX_MEM_CONTIGUOUS_MAX)
+	if (!erx_device_queue_layout(size, granule, &layout) || buffer_size == 0 || buffer_size > ERX_DEVICE_BUFFER_MAX)
 		return (ERX_EINVAL);
 	for (uint32_t open = 0; open < queues_open; open++) {
 		const queue_record_t *const other = &queues[open];

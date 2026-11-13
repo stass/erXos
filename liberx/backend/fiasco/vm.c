@@ -54,11 +54,14 @@
 #define VM_AREA_END	UINT64_C(0x8000000000)
 /*
  * Below the window and above all RAM: the device window, where each physical
- * object's registers stay mapped in the root, and the contiguous pool's superpage.
+ * object's registers stay mapped in the root, and the contiguous pool, one flexpage
+ * of the order the manifest's devices ask for (erx_fiasco_contig_order). The pool
+ * starts at a place aligned to the largest order, so a flexpage of any smaller one
+ * is naturally aligned there too.
  */
 #define VM_DEVICE_BASE	UINT64_C(0xE00000000)
 #define VM_DEVICE_PAGES	4096u
-#define VM_CONTIG_BASE	(VM_WINDOW_BASE - (UINT64_C(1) << VM_SUPERPAGE_ORDER))
+#define VM_CONTIG_BASE	(VM_WINDOW_BASE - (UINT64_C(1) << ERX_FIASCO_CONTIG_MAX_ORDER))
 /* The window's two grains: sigma0 gives 2 MiB until refused, then 4 KiB until refused. */
 #define VM_SUPERPAGE_ORDER	21u
 /* An object's offsets, as addresses of its own table: page zero stays an empty key. */
@@ -72,6 +75,14 @@
 
 _Static_assert(VM_WINDOW_BASE % (UINT64_C(1) << VM_SUPERPAGE_ORDER) == 0,
     "the window starts on a superpage");
+_Static_assert(ERX_FIASCO_CONTIG_PAGES == UINT64_C(1) << (ERX_FIASCO_CONTIG_MAX_ORDER - L4_PAGESHIFT) &&
+    ERX_FIASCO_CONTIG_MIN_ORDER >= L4_PAGESHIFT && ERX_FIASCO_CONTIG_MIN_ORDER <= ERX_FIASCO_CONTIG_MAX_ORDER,
+    "the largest contiguous pool is one flexpage of whole pages");
+_Static_assert(VM_CONTIG_BASE % (UINT64_C(1) << ERX_FIASCO_CONTIG_MAX_ORDER) == 0 &&
+    VM_DEVICE_BASE + ((uint64_t)VM_DEVICE_PAGES << L4_PAGESHIFT) <= VM_CONTIG_BASE,
+    "the largest contiguous pool is aligned to its size, between the device window and the window");
+_Static_assert(ERX_MEM_CONTIGUOUS_MAX <= (uint64_t)ERX_FIASCO_CONTIG_PAGES << L4_PAGESHIFT,
+    "the largest contiguous object fits the pool");
 _Static_assert(ERX_FIASCO_KIP_WINDOW % ERX_PAGE_SIZE == 0 && ERX_FIASCO_KIP_WINDOW + ERX_PAGE_SIZE <= VM_DEVICE_BASE,
     "the kernel information page's window is a page below the device window");
 
@@ -219,22 +230,26 @@ vm_object(uint32_t object)
 }
 
 const char *
-erx_fiasco_vm_init(void)
+erx_fiasco_vm_init(uint64_t dma_bytes)
 {
+	const unsigned contig_order = erx_fiasco_contig_order(dma_bytes);
 	uint64_t cursor = VM_WINDOW_BASE;
 	uint64_t window_pages;
 	erx_backend_vm_layout_t layout;
 	l4_addr_t contig_physical;
 
-	if (l4sigma0_map_anypage(L4_BASE_PAGER_CAP, (l4_addr_t)VM_CONTIG_BASE, VM_SUPERPAGE_ORDER, &contig_physical,
-	    VM_SUPERPAGE_ORDER) != 0)
-		return ("memory: sigma0 gave no superpage for the contiguous pool");
+	if (contig_order == 0)
+		return ("memory: the devices' memory asked for is more than the 16 MiB contiguous pool");
+	if (l4sigma0_map_anypage(L4_BASE_PAGER_CAP, (l4_addr_t)VM_CONTIG_BASE, contig_order, &contig_physical,
+	    contig_order) != 0)
+		return ("memory: sigma0 gave no run for the contiguous pool");
+	vm_contig.pages = (uint32_t)(UINT64_C(1) << (contig_order - L4_PAGESHIFT));
 	vm_contig_physical = contig_physical;
 	cursor = window_grow(cursor, VM_SUPERPAGE_ORDER);
 	cursor = window_grow(cursor, L4_PAGESHIFT);
 	window_pages = (cursor - VM_WINDOW_BASE) >> L4_PAGESHIFT;
 	/* The index also holds the runs' pages: each is one distinct page, as a window page is. */
-	layout = erx_backend_vm_layout(window_pages + ERX_FIASCO_CONTIG_PAGES + VM_DEVICE_PAGES);
+	layout = erx_backend_vm_layout(window_pages + vm_contig.pages + VM_DEVICE_PAGES);
 	if (layout.index_pages >= window_pages)
 		return ("memory: sigma0 gave too little to hold the page index");
 
@@ -394,7 +409,7 @@ erx_fiasco_vm_contiguous_create(uint32_t object, uint64_t size, uint64_t limit)
 	int status;
 
 	first = erx_fiasco_contig_take(&vm_contig, (uint32_t)(size >> L4_PAGESHIFT),
-	    reach_pages < ERX_FIASCO_CONTIG_PAGES ? (uint32_t)reach_pages : ERX_FIASCO_CONTIG_PAGES);
+	    reach_pages < vm_contig.pages ? (uint32_t)reach_pages : vm_contig.pages);
 	if (first == ERX_FIASCO_CONTIG_NONE)
 		return (ERX_ENOMEM);
 	window = (uintptr_t)(VM_CONTIG_BASE + ((uint64_t)first << L4_PAGESHIFT));

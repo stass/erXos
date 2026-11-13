@@ -31,7 +31,7 @@ limit group_executors u32 64
 limit tlb_by_address_max u32 64
 limit msg_words u32 63
 limit entropy_bytes_max u32 256
-limit mem_contiguous_max u32 1048576
+limit mem_contiguous_max u32 16777216
 limit group_executors_max u32 64
 limit msg_caps u32 4
 limit utcb_brs u32 58

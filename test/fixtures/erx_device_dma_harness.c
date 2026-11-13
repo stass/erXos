@@ -379,7 +379,6 @@ check_create(const erx_device_t *device, uint32_t *queue)
 	CHECK(erx_device_queue_create(device, 0, 6, BUFFER_SIZE, queue) == ERX_EINVAL);
 	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, 0, queue) == ERX_EINVAL);
 	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, BUFFER_SIZE + 1, queue) == ERX_EINVAL);
-	CHECK(erx_device_queue_create(device, 0, 32, BUFFER_SIZE, queue) == ERX_EINVAL);
 	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, BUFFER_SIZE, queue) == ERX_OK);
 	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, BUFFER_SIZE, &again) == ERX_OK && again == *queue);
 	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE / 2, BUFFER_SIZE, &again) == ERX_EBUSY);

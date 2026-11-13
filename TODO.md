@@ -476,10 +476,21 @@ it; git history is the record of completed work.
   after its join; BK2's object records, which take over object labels, are the natural place for it.
 * [Low] stopgap, `liberx/backend/fiasco/vm.c`, `erx_fiasco_vm_contiguous_create`: a run taken by `erx_fiasco_contig_take`
   is not given back when `object_fill` then refuses (no label left, or no pool page for the object's runs), so a
-  refused create leaves the run held.
+  refused create leaves the run held. The pool is sized to the devices' declared total, so a held run leaves that
+  device's later give `ERX_ENOMEM` for the rest of the boot. No device learned the run's address, so clearing its
+  bits on the failure path is safe.
+* [Medium] erXos's kernel, [design-kernel.md](docs/design-kernel.md) (memory objects, "contiguous"): creation zeroes up to
+  16 MiB in one kernel call, and the design leaves how that meets the bounded-path rule to the performance watch list.
+  Decide it in the design: zero the `erx.dma_pool` once at boot and each range as it returns to the pool, or zero in
+  preemptible steps, and keep only the measurement in `docs/todo-performance.md`.
+* [Medium] stopgap, `liberx/backend/fiasco/vm.c`, `liberx/backend/fiasco/page_pool.h`: the contiguous pool holds exactly
+  the devices' declared memory (rounded up to a power of two), which is enough only while each device's memory is made
+  once, by `runtime_entry.c` or the domain library's `ERX_DOM_STEP_CONTIGUOUS`. `erx_mem_create_contiguous` is a root
+  call any root code may make, and no chokepoint names its callers, so a third caller would leave a later give
+  `ERX_ENOMEM`. Add the chokepoint, with its seeded violation, or a device-record funnel that refuses a second memory.
 * [Low] stopgap, `liberx/backend/fiasco/irq.c`: an IRQ object is unbound by a holder allowed in its group (the group's home, its creator or the root: `irq_group_allowed`) and freed with its last handle. Whether a restarted block driver can rebind its line through that is untested.
-* [Low] stopgap, `liberx/backend/fiasco/entropy.c`, `vm.c`: what needs the root to read the manifest. The generator starts from the
-  counter alone, not yet the manifest's seed; one contiguous pool exists whatever the device entries ask for, and it serves any device.
+* [Low] stopgap, `liberx/backend/fiasco/entropy.c`: the generator starts from the counter alone, not yet the manifest's seed,
+  though the root reads the manifest before it seeds the generator.
 * [Medium] stopgap, `liberx/backend/fiasco/vm.c`, `liberx/backend/core/vm_table.c`: the range table sees an object's mapping as uncommitted, so
   `erx_space_protect` over mapped registers or a mapped run returns `ERX_OK` and puts a fresh pool page there, and a decommit or release leaves the
   mapping reachable. No caller does either. Nothing tests a task that ends holding a physical or contiguous object, so `vm_give`'s address check and
@@ -543,7 +554,11 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a page run (`find_run`), a line entry (`find_line`) and memory held by another record are told by comparing handle values, so one object given under two handles (a give that installs it twice, or the root's own `-erx given` records over slots it holds otherwise) passes: two records carve the same pages of one memory, and one IRQ object under two handles is two entries, whose second bind takes the first binder's deliveries. Compare the objects the backend resolves, or make one handle per object a promise of the domain library that the NIF states.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.h`: the physical form is the zero value of `erx_device_form_t`, so a spec whose form no decoder set makes physical objects; give 0 to a refused `ERX_DEVICE_FORM_NONE` and set the physical form explicitly in `decode_window`.
 * [Low] `test/fixtures/erx_device_dma_harness.c`: nothing shows that `open` and `queue_create` read nothing from kept memory (`mprotect` it `PROT_NONE` until `negotiate` in `next_record`), and the harness's `erx_vm_map` takes offset 0 only, so a given window at a nonzero page of its object is not exercised.
-* [Low] `tools/lib/erx/manifest.rb`, `check_device`: an unconfined device's `dma_memory` is not held to `mem_contiguous_max` (`abi/erx_abi.txt`), though the domain library gives it as one contiguous object, so a platform record over the limit passes the check and fails only at the give. Refuse it in the check, with the limit from the ABI model.
+* [Low] stopgap, `liberx/backend/fiasco/page_pool.c` (`erx_fiasco_contig_take`): a contiguous run is aligned only to a
+  page, on the claim that no cache-writeback granule exceeds a page, which rests on "no writeback granule exceeds
+  2 KiB" ([design-device-dma.md](docs/design-device-dma.md), "Open decisions" 1), unverified against the Arm
+  Architecture Reference Manual's description of the cache type register's `CWG`. Read it and cite it in
+  `page_pool.h` and design-stopgap.md's `erx_mem_create_contiguous` row, or align runs to the largest granule.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`: a failed `erx_device_open` keeps the window's mapping and any line objects it made (in the given form, the window's mapping and the memory's reservation), a retry takes another mapping from the shared device
   window and finds the line `ERX_EBUSY`. A boot's devices are few and a failure is a misconfiguration; the record's cleanup comes with the device service.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, queues: the NIF does not yet refuse `post/4` after the exit of a

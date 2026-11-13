@@ -46,30 +46,37 @@ erx_fiasco_pool_take(erx_fiasco_pool_t *pool)
 }
 
 static bool
-contig_free(const erx_fiasco_contig_t *pool, uint32_t first, uint32_t pages)
+contig_held(const erx_fiasco_contig_t *pool, uint32_t page)
 {
-	for (uint32_t page = first; page < first + pages; page++)
-		if ((pool->used[page / 64] >> (page % 64) & 1) != 0)
-			return (false);
-	return (true);
+	return ((pool->used[page / 64] >> (page % 64) & 1) != 0);
 }
 
+unsigned
+erx_fiasco_contig_order(uint64_t bytes)
+{
+	unsigned order = ERX_FIASCO_CONTIG_MIN_ORDER;
+
+	while (order <= ERX_FIASCO_CONTIG_MAX_ORDER && (UINT64_C(1) << order) < bytes)
+		order++;
+	return (order <= ERX_FIASCO_CONTIG_MAX_ORDER ? order : 0);
+}
+
+/* One pass up the pool, keeping the length of the free run that ends at each page. */
 uint32_t
 erx_fiasco_contig_take(erx_fiasco_contig_t *pool, uint32_t pages, uint32_t limit)
 {
-	const uint32_t end = limit < ERX_FIASCO_CONTIG_PAGES ? limit : ERX_FIASCO_CONTIG_PAGES;
-	uint32_t align = 1;
+	const uint32_t end = limit < pool->pages ? limit : pool->pages;
+	uint32_t free_run = 0;
 
-	if (pages == 0 || pages > ERX_FIASCO_CONTIG_PAGES)
+	if (pages == 0 || pages > pool->pages)
 		return (ERX_FIASCO_CONTIG_NONE);
-	while (align < pages)
-		align *= 2;
-	for (uint32_t first = 0; first + pages <= end; first += align) {
-		if (!contig_free(pool, first, pages))
+	for (uint32_t last = 0; last < end; last++) {
+		free_run = contig_held(pool, last) ? 0 : free_run + 1;
+		if (free_run < pages)
 			continue;
-		for (uint32_t page = first; page < first + pages; page++)
+		for (uint32_t page = last + 1 - pages; page <= last; page++)
 			pool->used[page / 64] |= UINT64_C(1) << (page % 64);
-		return (first);
+		return (last + 1 - pages);
 	}
 	return (ERX_FIASCO_CONTIG_NONE);
 }

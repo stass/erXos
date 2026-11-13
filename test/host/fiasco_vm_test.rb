@@ -6,6 +6,7 @@
 require 'fileutils'
 require 'minitest/autorun'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/manifest'
 require_relative '../../tools/lib/erx/native_memory'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../fixtures/generated_tree'
@@ -24,9 +25,10 @@ class FiascoVmTest < Minitest::Test
   # Each edits exactly one place in its core, and the driver must name what is
   # wrong: name => [core, original, replacement, the driver's diagnostic].
   MUTANTS = {
-    'a contiguous run not aligned' => ['page_pool.c', "\t\talign *= 2;\n", "\t\talign = pages;\n", 'contig: first fit'],
-    'a contiguous run over a held page' => ['page_pool.c', 'if (!contig_free(pool, first, pages))', 'if (!contig_free(pool, first, 0))', 'contig: first fit'],
-    'a contiguous run past the limit' => ['page_pool.c', 'limit < ERX_FIASCO_CONTIG_PAGES ? limit : ERX_FIASCO_CONTIG_PAGES;', '((void)limit, ERX_FIASCO_CONTIG_PAGES);', %q(contig: a limit below every page)],
+    'a contiguous run past the first fit' => ['page_pool.c', 'if (free_run < pages)', 'if (free_run <= pages)', 'contig: first fit'],
+    'a contiguous run over a held page' => ['page_pool.c', 'contig_held(pool, last) ? 0 : free_run + 1;', 'contig_held(pool, last) ? free_run + 1 : free_run + 1;', 'contig: first fit'],
+    'a contiguous run past the limit' => ['page_pool.c', 'limit < pool->pages ? limit : pool->pages;', '((void)limit, pool->pages);', %q(contig: a limit below every page)],
+    'a contiguous run past the pool' => ['page_pool.c', 'limit < pool->pages ? limit : pool->pages;', 'limit < ERX_FIASCO_CONTIG_PAGES ? limit : ERX_FIASCO_CONTIG_PAGES;', %q(contig: a run past a small pool's end)],
     'write with execute admitted' => ['vm_table.c', "\t\tdefault:\n\t\t\treturn (ERX_EINVAL);", "\t\tdefault:\n\t\t\tplan->target = ERX_BACKEND_PAGE_RX;\n\t\t\tbreak;", 'a protection that is not one passed'],
     'zeroing skipped' => ['page_pool.c', "\tbzero((void *)page, ERX_PAGE_SIZE);\n", '', 'a taken page is not zero'],
     'a take not counted' => ['page_pool.c', "\tpool->held_pages++;\n", '', 'a take did not count the page as held'],
@@ -70,6 +72,19 @@ class FiascoVmTest < Minitest::Test
 
   def teardown
     FileUtils.remove_entry(@directory) if passed? && File.directory?(@directory)
+  end
+
+  # The root sizes its contiguous pool by erx_fiasco_contig_order and the packer counts
+  # it by Manifest::RootStartup.contiguous_pool_bytes; the two agree on every total the
+  # driver prints, and both refuse what no pool holds.
+  def test_the_pool_order_agrees_with_the_packer
+    output = run_driver(build(CORES.map { |core| File.join(ROOT, core) }, name: 'driver'))
+    pools = output.scan(/^contig pool (\d+) (\d+)$/).map { |pair| pair.map { |value| Integer(value) } }
+    assert_equal 12, pools.size, output
+    pools.each do |total, pool|
+      expected = total > Erx::Manifest::RootStartup::CONTIGUOUS_POOL_MAX_BYTES ? 0 : Erx::Manifest::RootStartup.contiguous_pool_bytes(total)
+      assert_equal expected, pool, total
+    end
   end
 
   def test_the_cores_agree_with_both_models

@@ -8,6 +8,8 @@
 
 #include <stdint.h>
 
+#include "erx/abi.h"
+
 /*
  * The pool of free pages (docs/design-stopgap.md, "The pool"). A page's identity
  * is its address in the window, and the free pages are a list threaded through
@@ -41,16 +43,35 @@ void		erx_fiasco_pool_put(erx_fiasco_pool_t *, uintptr_t);
 uintptr_t	erx_fiasco_pool_take(erx_fiasco_pool_t *);
 
 /*
- * The contiguous pool (docs/design-stopgap.md, "The pool"): one superpage's pages,
- * handed out first fit, each run aligned to its length rounded up to a power of
- * two. A run is never given back: an unconfined device may still write it.
+ * The contiguous pool (docs/design-stopgap.md, "The pool"): one flexpage's pages,
+ * handed out first fit, each run aligned to a page, on the claim, unverified against the
+ * architecture's report of its writeback granule (TODO.md), that no cache-writeback
+ * granule exceeds a page. A run is never given back: an unconfined device may still write it.
+ *
+ * The flexpage is as large as the devices' memory the manifest declares: the
+ * smallest power of two that holds the total, at least 2 MiB, at most 16 MiB
+ * (erx_fiasco_contig_order). Each device's memory is made once, so runs of that
+ * total always fit. The packer counts the same figure in what the boot keeps
+ * (Manifest::RootStartup.contiguous_pool_bytes in tools/lib/erx/manifest.rb, which
+ * copies the two orders).
  */
-#define ERX_FIASCO_CONTIG_PAGES	512u
+#define ERX_FIASCO_CONTIG_MIN_ORDER	21u
+#define ERX_FIASCO_CONTIG_MAX_ORDER	24u
+/* The pages of the largest pool. */
+#define ERX_FIASCO_CONTIG_PAGES	((uint32_t)((UINT64_C(1) << ERX_FIASCO_CONTIG_MAX_ORDER) / ERX_PAGE_SIZE))
 #define ERX_FIASCO_CONTIG_NONE	UINT32_MAX
 
 typedef struct erx_fiasco_contig {
+	uint32_t	pages;					/* the pool's pages, at most ERX_FIASCO_CONTIG_PAGES */
 	uint64_t	used[ERX_FIASCO_CONTIG_PAGES / 64];	/* bit n: page n is held */
 } erx_fiasco_contig_t;
+
+/*
+ * The order of the flexpage a pool for this many declared bytes takes: the smallest
+ * power of two at least bytes, and at least ERX_FIASCO_CONTIG_MIN_ORDER; 0 when that
+ * is past ERX_FIASCO_CONTIG_MAX_ORDER.
+ */
+unsigned	erx_fiasco_contig_order(uint64_t bytes);
 
 /* The first page of a run of this length wholly below page limit, or ERX_FIASCO_CONTIG_NONE. */
 uint32_t	erx_fiasco_contig_take(erx_fiasco_contig_t *, uint32_t pages, uint32_t limit);

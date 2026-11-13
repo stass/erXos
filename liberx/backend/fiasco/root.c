@@ -27,6 +27,7 @@
 #include "erx/abi_reader.h"
 #include "erx/core/boot_handoff.h"
 #include "erx/pack.h"
+#include "liberx/backend/core/manifest_dma.h"
 #include "liberx/backend/fiasco/console.h"
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/runtime_entry.h"
@@ -90,6 +91,7 @@ static const char *
 root_boot(erx_boot_handoff_view_t *handoff, erx_manifest_view_t *manifest, erx_boot_args_t *boot_args)
 {
 	const char *reason;
+	uint64_t dma_bytes;
 
 	reason = erx_fiasco_root_open(handoff, &root_pack);
 	if (reason != NULL)
@@ -101,8 +103,10 @@ root_boot(erx_boot_handoff_view_t *handoff, erx_manifest_view_t *manifest, erx_b
 		return (reason);
 	if (!erx_boot_args_parse(handoff->bootargs, handoff->bootargs_len, boot_args))
 		return ("the kernel command line: a word of erx. that this build refuses");
+	if (!erx_boot_manifest_dma_total(manifest, &dma_bytes))
+		return ("manifest: the devices' memory cannot be counted");
 	reason = erx_fiasco_root_up((const void *)(uintptr_t)handoff->image.start,
-	    (size_t)handoff->image.size);
+	    (size_t)handoff->image.size, dma_bytes);
 	if (reason != NULL)
 		return (reason);
 	const uint64_t free_pages = erx_fiasco_vm_free_pages();

@@ -231,7 +231,8 @@ service's bodies directly.
    numbers and deterministic mode from the second. Accepts the device tree with `erx_dt_accept`, refusing
    the boot on its reason, and stores each device row's facts from it in the row's catalogue entry
    ([design-device-tree.md](design-device-tree.md#facts-into-records)).
-5. Builds the pool window and contiguous pools ([The pool](#the-pool)). If the pool and the root's
+5. Builds the contiguous pool, sized for the devices' memory the manifest declares, and the pool window
+   ([The pool](#the-pool)). If the pool and the root's
    image together hold less than the manifest's `root_memory`, it refuses the boot.
 6. Makes its own thread table ([Thread creation](#thread-creation)); seeds `rng.c`; makes its object
    tables, then fills the time page, a pool page recorded as a memory object and kept until the
@@ -437,22 +438,30 @@ written). The root refuses the boot unless the pool's free pages and its own ima
 the archive and what the boot keeps besides. The packer checks the same inequality: archive plus
 `root_memory` at most RAM less `fiasco_reserve` less what the boot keeps.
 
-It estimates what the boot keeps as the platform record's `root_withheld` plus the pool's page index.
-`root_withheld` counts Fiasco's and `sigma0`'s images, the device tree, the handoff page, `liberx`'s 2 MiB
-contiguous pool, and the pool's object table, the root's range table and its thread table. The page index
+It estimates what the boot keeps as the platform record's `root_withheld`, plus the contiguous pool the
+manifest's devices' memory takes ([The pool](#the-pool)), plus the pool's page index. `root_withheld` counts
+Fiasco's and `sigma0`'s images, the device tree, the handoff page, and the pool's object table, the root's
+range table and its thread table. The packer sizes the contiguous pool from the admission report's
+`dma_memory` by `RootStartup.contiguous_pool_bytes`, the rule `erx_fiasco_contig_order` applies at boot to
+the same total, which `liberx/backend/core/boot_manifest.c` reads from the manifest;
+`test/host/fiasco_vm_test.rb` holds the two rules to each other and `test/host/boot_manifest_test.rb` the
+two totals. The page index
 is `erx_backend_vm_layout`'s, sized over RAM less the reserve and the archive plus the pool's device pages,
 which covers every page the pool's own sizing counts.
 
 Boots of the development image at 112, 256 and 768 MiB (the Apple M3 Max host, HVF, QEMU 11.1.3), about
 2,600 of them at 256 MiB, on 1 and 4 guest CPUs, each kept 4,321,280 bytes besides the index, counted as
-RAM less the reserve, the archive, the pool's pages and the root's image; `test/host/manifest_stopgap_test.rb`
-pins those boots. QEMU `virt`'s `root_withheld`, 4.5 MiB, errs high by 388 KiB, so the packer refuses an
+RAM less the reserve, the archive, the pool's pages and the root's image. Each took a 2 MiB contiguous pool,
+for the development manifest's 1.25 MiB of devices' memory, so each kept 2,224,128 bytes besides the index
+and the contiguous pool; `test/host/manifest_stopgap_test.rb` pins those boots. QEMU `virt`'s
+`root_withheld`, 2.5 MiB, errs high by 388 KiB, so the packer refuses an
 archive that would boot with less than that to spare, and never passes one that fails while the boot keeps
-no more than measured and `fiasco_reserve` is at least the kernel memory Fiasco takes. The Raspberry Pi 4's record states the same for its smallest board, 948 MiB: one boot of the development image on QEMU's `raspi4b` (TCG, 4 guest CPUs, an Apple M3 Max host, QEMU 11.1.3) reserved 58 MiB as kernel memory, its `fiasco_reserve`, and kept 3,837,952 bytes besides the index, so its `root_withheld` is 4 MiB, 348 KiB high. Neither follows
+no more than measured and `fiasco_reserve` is at least the kernel memory Fiasco takes. The Raspberry Pi 4's record states the same for its smallest board, 948 MiB: one boot of the development image on QEMU's `raspi4b` (TCG, 4 guest CPUs, an Apple M3 Max host, QEMU 11.1.3) reserved 58 MiB as kernel memory, its `fiasco_reserve`, and kept 3,837,952 bytes besides the index, 2 MiB of them its contiguous pool, so its `root_withheld` is 2 MiB, 348 KiB high. Neither follows
 Fiasco's or `liberx`'s growth by itself, so the boots check the estimate: the root's manifest line reports
 the pool's free pages and its image, what `root_memory_fits` counted, and the production image suite
 (`RootStartup.check_boot`, seeded in `test/host/production_image_test.rb`) fails a boot whose RAM less
-`fiasco_reserve`, the archive, those pages and the image is more than `root_withheld` and the page index.
+`fiasco_reserve`, the archive, those pages and the image is more than `root_withheld`, the contiguous pool and
+the page index.
 `root_withheld` is in bytes, and a platform record without it is refused when it is loaded. The
 `Admitted` value records `root_startup: declared` in its report, and
 `erx_root_plan` replaces the rule behind the same value in Track K.
@@ -595,7 +604,7 @@ callers as it says.
 | `erx_mem_copy` | the domain service reading a crash area; a server reading a client's memory | service: copies between the two objects' window pages, at most 64 pages a request, so the stub loops | either object gone `ERX_ESTALE`, never a fault; an offset plus length past either object, computed with checked arithmetic, `ERX_ERANGE`, before any byte moves; physical memory or a JIT object `ERX_ETYPE`; a sealed destination, or a slice, whose pages are the archive's, `ERX_ERIGHTS` | in the kernel, through its own mappings |
 | cache maintenance, the code barrier | BeamAsm | local: asmjit's and ERTS's sequences unchanged ([design-arch-aarch64.md](design-arch-aarch64.md)) | correct | none |
 | `erx_mem_create_physical` | `erx_device`: the console UART (M3) and the host link's; through a give in its holder's creation, each device's register window for its holder, and the root's own give at boot for each such device the system domain holds ([Device records](#device-records)) | service, from the root only: `l4sigma0_map_iomem` into the root's device window, over the base and size its caller reads from the manifest's device entry; each map is then `l4_task_map` from there into the space named, as for a shared object; for the console UART also [the handoff](#the-console) | RAM, which `sigma0` keeps, `ERX_ERANGE`; execute `ERX_ERIGHTS`; a full window `ERX_ENOMEM`; a create from a task other than the root `ERX_ENOTSUP`, since the domain library makes every device's objects and passes them | within rights, from a carved resource |
-| `erx_mem_create_contiguous`, `erx_mem_dma_addr` | a device's one memory for the boot, which the device NIF carves its rings and buffers from, in whichever domain holds the device | service: a create from the root only, first fit from the [contiguous pool](#the-pool), aligned to its size rounded up to a power of two, at most 1 MiB, wholly inside the DMA range the device tree gives the device it is made for ([design-device-tree.md](design-device-tree.md#facts-into-records)), cached, zeroed, and never given back; the domain library passes it to the device's holder, and the root makes one at boot for each device of a kind the system domain holds ([Device records](#device-records)). `dma_addr`, from any task holding the object, is physical address plus offset plus that device's `dma_bus - dma_cpu`, since no device on QEMU `virt` as the harness starts it or on the Pi 4 is behind an IOMMU ([design-device-dma.md](design-device-dma.md#device-addresses-and-reach)) | no such run `ERX_ENOMEM`; `dma_addr` of another kind of object `ERX_ETYPE`, past the object `ERX_ERANGE`; execute `ERX_ERIGHTS`; a create from a task other than the root `ERX_ENOTSUP`; unconfined; `erx_dma_map`, windows `ERX_ENOTSUP` | through a DMA window (M9) |
+| `erx_mem_create_contiguous`, `erx_mem_dma_addr` | a device's one memory for the boot, which the device NIF carves its rings and buffers from, in whichever domain holds the device | service: a create from the root only, first fit from the [contiguous pool](#the-pool), aligned to a page, which no cache-writeback granule exceeds, at most `ERX_MEM_CONTIGUOUS_MAX` (16 MiB), wholly inside the DMA range the device tree gives the device it is made for ([design-device-tree.md](design-device-tree.md#facts-into-records)), cached, zeroed, and never given back; the domain library passes it to the device's holder, and the root makes one at boot for each device of a kind the system domain holds ([Device records](#device-records)). `dma_addr`, from any task holding the object, is physical address plus offset plus that device's `dma_bus - dma_cpu`, since no device on QEMU `virt` as the harness starts it or on the Pi 4 is behind an IOMMU ([design-device-dma.md](design-device-dma.md#device-addresses-and-reach)) | no such run `ERX_ENOMEM`; `dma_addr` of another kind of object `ERX_ETYPE`, past the object `ERX_ERANGE`; execute `ERX_ERIGHTS`; a create from a task other than the root `ERX_ENOTSUP`; unconfined; `erx_dma_map`, windows `ERX_ENOTSUP` | through a DMA window (M9) |
 | `erx_irq_create`, `erx_irq_bind`, `erx_irq_ack`, `erx_irq_trigger` | device lines, in whichever domain holds the device; a connection's bells; a channel's and a pipe end's doorbells; ERTS's wakes | service: `l4_factory_create_irq`, from any task for a doorbell (`ERX_IRQ_SOFT`); for a line, from the root only, `l4_icu_bind`; a bind to a group, from the root into any group it holds and from another task holding the object only into the group that task is the home of or a group it created, as a session binds a program's doorbell into the program's group ([design-programs.md](design-programs.md#the-channel)), gives the object a free entry of the group, records the label and runs `l4_rcv_ep_bind_thread(irq, dispatcher, entry)` on the group's home task's dispatcher once both exist, a bind again to the same group moves the label, and an unbind runs `l4_irq_detach` ([Interrupts and readiness](#interrupts-and-readiness)); the object's destroy runs `l4_irq_detach`; `l4_irq_unmask`; `l4_irq_trigger`. Every call is a request: no IRQ capability is mapped into a task, and a delivery goes from Fiasco to the dispatcher directly | each label once, the line masked until acked; `erx_irq_route` `ERX_ENOTSUP`; a target that is not a group the caller holds `ERX_ETYPE`, or a thread, `ERX_ENOTSUP` unless [vCPU upcalls](#vcpu-upcalls-on-fiasco) are carried; a bind of a bound object to another group `ERX_ENOTSUP`; from a task other than the root, a bind to a group it neither created nor is the home of, or a bind or an unbind of an object bound to such a group, `ERX_ETYPE`; a group's 65th bound object `ERX_ELIMIT`; a line's second object `ERX_EBUSY`; a line created from a task other than the root `ERX_ENOTSUP`; the resource ignored | by capability, without the root; `BIND` and `TRIGGER` split; route applied |
 | `erx_group_create`, `_configure`, `_info`, `_take_ready` | the adapter's five changes (M3); the domain library's group and sub-space group for each domain; a session's group for each program | service for `create`, from any task under a budget it holds or its own, and for `configure` and `info`, local for `take_ready` in the group's home task: [Budgets and groups as records](#budgets-and-groups-as-records), [Interrupts and readiness](#interrupts-and-readiness). `configure` keeps only the CPU set of the grant in the caller's UTCB, and `info` writes an `erx_info_group` there, with that set as `cpuset` and the home task's status page's `parked` and `ready`, and only their bits of `reported` set, `cpuset`'s only once a set was configured ([Reporting kernel objects](#reporting-kernel-objects)) | correct readiness; everything else `unsupported`; no guarantee, quota or throttling; budget and parent recorded, and a group goes with its budget; every thread of a group runs in one task, its home, so a thread created in another task `ERX_ENOTSUP`; a task's second home group `ERX_ENOTSUP` | grants enforced, usage reported; a group's threads in any space |
 | `erx_park`, `erx_executor_wake`, `erx_yield` | ERTS's schedulers (M3) | local: [The park protocol](#the-park-protocol); `l4_thread_yield` | no lost wake; a worker `ERX_ETYPE` | in the kernel, the executor switched |
@@ -653,8 +662,15 @@ All of this runs on the service, so a page's state changes one call at a time.
 ### The pool
 
 At boot the root takes all RAM from `sigma0` with `l4sigma0_map_anypage(pager, window_cursor, order,
-&phys, order)`: first one 2 MiB superpage, the **contiguous pool**, from which every device's memory is made,
-recording `phys`; then everything else, at 2 MiB until refused and then 4 KiB until refused.
+&phys, order)`: first one run, the **contiguous pool**, from which every device's memory is made, recording `phys`;
+then everything else, at 2 MiB until refused and then 4 KiB until refused. The contiguous pool is one flexpage
+of the smallest power of two that holds the total `dma_memory` of the manifest's devices, at least 2 MiB
+(order 21) and at most 16 MiB (order 24, which `ERX_MEM_CONTIGUOUS_MAX` fills alone), at a constant of the
+address layout aligned to the largest order (`erx_fiasco_contig_order`). Each device's memory is made once and
+never given back, and every run is aligned only to a page, so runs of the declared total always fit. A native
+test root, which has no manifest, names its own total. The packer refuses a manifest whose devices declare
+more than 16 MiB together, or one device more than `ERX_MEM_CONTIGUOUS_MAX`, and counts the same pool in what
+the boot keeps ([The Phase 1 manifest check](#the-phase-1-manifest-check), "The root startup rule").
 `sigma0` maps RAM read, write and execute (`memmap.cc:96,125`). Cached memory serves for every device: for one
 that is not coherent, as the Raspberry Pi 4's are not, the device NIF's cache maintenance keeps the CPU and the
 device in agreement ([design-device-dma.md](design-device-dma.md)). The root makes each device's object from its
@@ -2171,7 +2187,7 @@ derived mapping and leaves the window's; mapping RX over RW without the drop lea
 
 * A fault never answered blocks its thread until deleted: `thread.cpp:582-584`; the fault paths not read.
 
-The gate's `function_api` suite has run `l4sigma0_map_iomem` over QEMU's `fw_cfg` and refused over RAM, the object's `l4_task_map` from the device window, `l4sigma0_map_anypage` of the contiguous pool's superpage, and `fw_cfg`'s DMA writing a run at the address `erx_mem_dma_addr` gives, which shows that the physical address `sigma0` reports is the device's. The `native_irq` suite reaches the UART through the same object, by `erx_device`'s C interface and the generated PL011 table.
+The gate's `function_api` suite has run `l4sigma0_map_iomem` over QEMU's `fw_cfg` and refused over RAM, the object's `l4_task_map` from the device window, `l4sigma0_map_anypage` of the contiguous pool's 16 MiB run, and `fw_cfg`'s DMA writing a run at the address `erx_mem_dma_addr` gives, which shows that the physical address `sigma0` reports is the device's. The `native_irq` suite reaches the UART through the same object, by `erx_device`'s C interface and the generated PL011 table.
 
 The gate's `native_irq` suite has run `l4_icu_bind` on the UART's receive line with no `-serial_esc`, which the kernel leaves free; `l4sigma0_map_iomem` of the kernel UART's own page, which `sigma0` gives; a bound IRQ object's label arriving at an open wait whole, for a device line and a software `l4_irq_trigger` alike; `l4_irq_detach` stopping deliveries, a software object's fire while detached arriving at the next bind, and a detached line opening again at its next bind; the line masked until `l4_irq_unmask`; and a semaphore up from the dispatcher waking an executor on another CPU.
 

@@ -976,7 +976,7 @@ case_indices_run_out(void)
 void
 erx_fiasco_root_main(void)
 {
-	const char *reason = erx_fiasco_root_up(NULL, 0);
+	const char *reason = erx_fiasco_root_up(NULL, 0, 0);
 
 	if (reason != NULL) {
 		say(reason);

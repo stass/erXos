@@ -8,6 +8,7 @@
 #include "erx/core/boot_pair.h"
 #include "erx/device_kinds.h"
 #include "liberx/backend/core/boot_manifest.h"
+#include "liberx/backend/core/manifest_dma.h"
 
 #define NODE_PREFIX		"system@"
 #define NODE_PREFIX_LENGTH	(sizeof(NODE_PREFIX) - 1)
@@ -525,4 +526,18 @@ erx_boot_build_words(uint64_t build_id, char *words, size_t capacity)
 	    number_put(words, capacity, &used, build_id))
 		return (used);
 	return (0);
+}
+
+bool
+erx_boot_manifest_dma_total(const erx_manifest_view_t *view, uint64_t *total)
+{
+	erx_mf_device_t device;
+	uint64_t sum = 0;
+
+	for (uint32_t at = 0; at < view->header.devices.count; at++) {
+		if (!erx_manifest_devices_at(view, at, &device) || __builtin_add_overflow(sum, device.dma_memory, &sum))
+			return (false);
+	}
+	*total = sum;
+	return (true);
 }

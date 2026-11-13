@@ -155,7 +155,7 @@ int	erx_boot_tree(const void **bytes, size_t *size) ERX_WARN_UNUSED_RESULT;
 /*
  * Devices' memory. A device's registers, by physical address, with the only attribute
  * ERX_MEM_ATTR_DEVICE; a run of memory a device can address, of at most
- * ERX_MEM_CONTIGUOUS_MAX bytes, aligned to its size rounded up to a power of two and
+ * ERX_MEM_CONTIGUOUS_MAX bytes, aligned to a page and
  * wholly below device address limit, 0 for none. resource is ignored; natively budget charges the object as
  * for every create (liberx/backend/fiasco/service.h), and hosted ignores it. Malformed
  * arguments are ERX_EINVAL on both backends, and hosted, which has no devices, refuses a
