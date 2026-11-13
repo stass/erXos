@@ -6009,8 +6009,10 @@ oracle throughout is the plain checksum, `erx_inet_sum` in C and
   must give the same bytes as `encode/4` with `sender`. A host
   transport's NIF, which runs the core over a frame's pieces as
   `post_frame/5` does, is checked over its fake ring against the
-  `sender` bytes. `post_frame/5` itself is checked end to end, below, since the hosted
-  runtime has no device with queues. *Seeded failure:* a delayed field
+  `sender` bytes. `post_frame/5` itself is checked end to end, below: the hosted
+  runtime's one stand-in that carries frames, GENET, finishes no checksums, so
+  its transport posts every frame whole with `post/4` and never reaches
+  `post_frame/5`. *Seeded failure:* a delayed field
   without the segment's length, which every comparison must catch.
 * **The interface's gate, with a lying transport.** This extends the
   gate test of [Checksums and random values](#checksums-and-random-values-the-interfaces-gate-and-the-generators).

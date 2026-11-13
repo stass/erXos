@@ -307,6 +307,40 @@ typedef struct erx_device_used_entry {
 
 int	erx_device_stand_in_used(const erx_device_t *device, uint32_t queue, const erx_device_used_entry_t *entries,
 	    uint32_t count);
+
+/* One frame a test hands a stand-in GENET to receive. */
+typedef struct erx_device_frame {
+	const uint8_t	*bytes;
+	uint32_t	length;
+} erx_device_frame_t;
+
+/*
+ * A stand-in GENET's engine, which a test runs as the controller would, through the window
+ * and the addresses the descriptors hold, and only while the ring and its DMA are enabled:
+ * a stopped controller moves nothing and both calls succeed with none. The test fires the
+ * line.
+ *
+ * erx_device_stand_in_transmitted sends every frame posted since its last run, at most a
+ * ring's worth: each descriptor's bytes go to `sink` (tag 0) and the consumer index moves
+ * past them. ERX_EINVAL for a device without that ring installed. ERX_ECORRUPT for a
+ * descriptor that is not a whole frame with its CRC (start and end of packet and CRC set),
+ * whose length is over the ring's buffer size, or whose address does not reach its bytes
+ * in the queue's memory: the frames before it are sent to `sink`, counted in `sent` and
+ * moved past, and the controller stops at it.
+ *
+ * erx_device_stand_in_receive fills free receive buffers with `frames` in order, each after
+ * the padding RBUF_CTRL's ALIGN_2B asks for, sets each descriptor's status (the length with
+ * the padding, start and end of packet) and moves the producer index past them; `taken` is
+ * how many fit, fewer than `count` when the ring is full. ERX_EINVAL for a device without
+ * that ring installed, RBUF_CTRL asking for the 64-byte status block, which the stand-in
+ * does not lay out, or a frame that with its padding is over the ring's buffer size, before
+ * anything is taken. ERX_ECORRUPT for a descriptor whose address does not reach the frame's
+ * bytes in the queue's memory, the frames before it taken.
+ */
+int	erx_device_stand_in_transmitted(const erx_device_t *device, erx_device_sink_t *sink, void *context,
+	    uint32_t *sent);
+int	erx_device_stand_in_receive(const erx_device_t *device, const erx_device_frame_t *frames, uint32_t count,
+	    uint32_t *taken);
 #endif
 
 #endif /* ERX_DEVICE_H */

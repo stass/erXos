@@ -38,7 +38,7 @@
 -export([read/2, write/3, read_field/3, write_field/4, field/4, command/2]).
 -export([irq_bind/2, irq_bind_owner/2, irq_holder/2, irq_ack/2]).
 -export([queue_create/4, negotiate/2, post/4, complete/2, region/3]).
--export([stand_in_fire/2, stand_in_used/3]).
+-export([stand_in_fire/2, stand_in_used/3, stand_in_transmitted/1, stand_in_receive/2]).
 
 -export_type([device/0, register_name/0, spec/0, queue/0, region/0, segment/0]).
 
@@ -218,4 +218,26 @@ stand_in_fire(_Dev, _Line) ->
 %% stays undef.
 -spec stand_in_used(device(), queue(), [{next | non_neg_integer(), non_neg_integer()}]) -> ok.
 stand_in_used(_Dev, _Queue, _Entries) ->
+    erlang:nif_error(undef).
+
+%% Hosted only: a stand-in GENET sends what its transmit ring holds, as its engine would,
+%% reading each descriptor and the buffer its address names: the frames posted since the last
+%% call, oldest first, without their frame check sequence, and none while its DMA is stopped.
+%% `{error, broken}` for a descriptor that is not a whole frame with its CRC, is longer than a
+%% buffer, or whose address does not reach its bytes; the frames before it are gone. badarg
+%% for a device that is not a stand-in GENET with its rings installed. Natively this stays
+%% undef.
+-spec stand_in_transmitted(device()) -> [binary()] | {error, broken}.
+stand_in_transmitted(_Dev) ->
+    erlang:nif_error(undef).
+
+%% Hosted only: a stand-in GENET takes frames off its wire into free receive buffers, in
+%% order, each after the padding the driver configured, with its descriptor's status and the
+%% producer index set as the controller sets them; the answer is how many fit, at most a
+%% ring's worth from the front of Frames, and none while its DMA is stopped. It fires no line:
+%% the test fires it with stand_in_fire/2. badarg as for stand_in_transmitted/1, for a frame
+%% longer than a buffer takes, or while RBUF_CTRL asks for the 64-byte status block. Natively
+%% this stays undef.
+-spec stand_in_receive(device(), [binary()]) -> non_neg_integer() | {error, broken}.
+stand_in_receive(_Dev, _Frames) ->
     erlang:nif_error(undef).

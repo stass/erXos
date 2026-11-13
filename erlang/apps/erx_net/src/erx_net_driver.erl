@@ -58,6 +58,7 @@ either and only checks a frame's type and length.
 -behaviour(gen_server).
 
 -export([start_link/3, attach/2, counters/1, starts_within/1]).
+-export([transport_state/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, format_status/1]).
 
 -export_type([link_info/0, finisher/0, event/0, rx_frame/0]).
@@ -164,7 +165,12 @@ starts_within(Period) ->
 -doc "The driver's drop counters, by reason.".
 -spec counters(pid()) -> #{atom() => pos_integer()}.
 counters(Driver) ->
-    gen_server:call(Driver, counters, infinity).
+gen_server:call(Driver, counters, infinity).
+
+-doc "The transport's state in a running driver, for tests that reach the transport's device.".
+-spec transport_state(pid()) -> term().
+transport_state(Driver) ->
+    (sys:get_state(Driver))#state.t.
 
 %% --- gen_server ------------------------------------------------------------------
 

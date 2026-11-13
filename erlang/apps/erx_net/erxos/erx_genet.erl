@@ -52,6 +52,7 @@ drives it.
 
 -export([interfaces/0]).
 -export([init/1, event/2, transmit/2]).
+-export([device/1]).
 
 -include("erx_net_frame.hrl").
 
@@ -92,6 +93,13 @@ interfaces() ->
             log("the network device record is malformed", []),
             []
     end.
+
+-doc """
+The device of a transport state that `erx_net_driver:transport_state/1` gave, for tests
+that drive a stand-in's engine (test/fixtures/erx_genet_hosted_run.erl).
+""".
+-spec device(term()) -> erx_device:device().
+device(#t{dev = Dev}) -> Dev.
 
 %% --- The transport ----------------------------------------------------------------
 

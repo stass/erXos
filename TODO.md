@@ -584,9 +584,8 @@ it; git history is the record of completed work.
   `pool_offset`) but `erx_device_queue_post`'s plan still computes for its tests; a register-held length
   (virtio's `QueueNum`) checked against the reaches the install publishes; a descriptor rewritten while its
   chain is posted, which no view expresses; field-level register ownership, and the ADMA2 (SDHCI)
-  descriptor form. The hosted stand-in GENET reports its DMA stopped at once and has no engine: no device side
-  sends what a post publishes or fills a receive buffer, which `erx_genet`'s hosted tests need, and its plans run on
-  plain memory, not over `erx_dma_model.c`; the register ring's effect layer is tested over a given GENET by
+  descriptor form. The hosted stand-in GENET's plans run on plain memory, not over
+  `erx_dma_model.c`, and its engine sets no receive error flags, so design-device-dma.md's receive-flags case is not run over it; the register ring's effect layer is tested over a given GENET by
   `test/fixtures/erx_device_genet_harness.c`, coherent caches only. The maintenance step `L` is read from the current CPU's CTR_EL0 at each plan, so CPUs reporting different lines
   would need the smallest taken once. Test gaps: no NIF test drives a refused
   plan; the check's fuzz target runs at granule 1 only, and chains of three

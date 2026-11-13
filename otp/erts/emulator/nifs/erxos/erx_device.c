@@ -492,10 +492,35 @@ stand_in_set(const erx_device_t *device, const char *name, uint32_t value)
 		    peripheral->registers[found].offset, value);
 }
 
-/* What a stand-in's virtio transport reads as before the driver stores anything. */
+static bool
+stand_in_genet(const erx_device_t *device)
+{
+	return (device->peripheral == erx_device_peripheral_find("genet", sizeof("genet") - 1));
+}
+
+/* A field of a register of the device's table by its name, or NULL. */
+static const erx_device_field_t *
+stand_in_field(const erx_device_t *device, const erx_device_register_t *reg, const char *name)
+{
+	const uint32_t found = erx_device_field_named(device->peripheral, reg, name);
+
+	return (found < reg->field_count ? &device->peripheral->fields[reg->first_field + found] : NULL);
+}
+
+/* GENET v5's major revision, the one erx_genet_core:identify/1 drives (if_genetreg.h:39, 41-43). */
+#define STAND_IN_GENET_MAJOR	6u
+
+/* What a stand-in's virtio transport, or its GENET's revision, reads as before the driver stores anything. */
 static void
 stand_in_preset(const erx_device_t *device)
 {
+	const erx_device_peripheral_t *const peripheral = device->peripheral;
+	const uint32_t rev = erx_device_register_named(peripheral, "sys_rev_ctrl");
+	const erx_device_field_t *major;
+
+	if (stand_in_genet(device) && rev < peripheral->register_count &&
+	    (major = stand_in_field(device, &peripheral->registers[rev], "major")) != NULL)
+		stand_in_set(device, "sys_rev_ctrl", (uint32_t)((STAND_IN_GENET_MAJOR << major->shift) & major->mask));
 	if (!stand_in_virtio(device))
 		return;
 	stand_in_set(device, "magic", ERX_VIRTIO_MMIO_MAGIC);
@@ -504,9 +529,48 @@ stand_in_preset(const erx_device_t *device)
 }
 
 /*
- * A stand-in GENET's DMA status as its engine leaves it: DMA control written with the
- * engine's enable clear shows the block and every ring stopped at once, and any other value
- * shows them running. Its descriptors and rings are plain memory with no engine behind them.
+ * The stand-in GENET's PHY: a BCM54213PE whose link is up at 1000 Mb/s full duplex, at every
+ * MDIO address. Each clause 22 register reads as listed here, 0 if not listed, and a write is
+ * taken and changes nothing, so a reset is over at once. The ID words are those
+ * erx_phy_c22:identify/2 decodes as OUI 0x18c086, model 0x0a; the status register is link
+ * and autonegotiation complete (BMSR_LINK and BMSR_ACOMP of FreeBSD's mii.h); the auxiliary
+ * status is link with 1000BASE-T full duplex resolved (BRGPHY_AUXSTS_LINK and
+ * BRGPHY_RES_1000FD of brgphyreg.h).
+ */
+static const uint16_t stand_in_phy[32] = {
+	[0x01] = 0x0024,	/* BMSR */
+	[0x02] = 0x600d,	/* PHYIDR1 */
+	[0x03] = 0x84a2,	/* PHYIDR2 */
+	[0x19] = 0x0704,	/* AUXSTS */
+};
+
+/*
+ * An MDIO command, which a store with START_BUSY set starts, finishes at once: busy clears,
+ * and a read's value field becomes the PHY's register. READ_FAILED stays clear.
+ */
+static void
+stand_in_genet_mdio(const erx_device_t *device, const erx_device_register_t *reg, uint64_t value)
+{
+	const erx_device_field_t *const busy = stand_in_field(device, reg, "start_busy");
+	const erx_device_field_t *const read = stand_in_field(device, reg, "read");
+	const erx_device_field_t *const phy_reg = stand_in_field(device, reg, "reg");
+	const erx_device_field_t *const data = stand_in_field(device, reg, "value");
+	uint64_t word;
+
+	if (busy == NULL || read == NULL || phy_reg == NULL || data == NULL || (value & busy->mask) == 0)
+		return;
+	word = value & ~busy->mask;
+	if ((value & read->mask) != 0)
+		word = (word & ~data->mask) |
+		    (((uint64_t)stand_in_phy[erx_device_field_get(phy_reg, value) % 32u] << data->shift) & data->mask);
+	erx_device_access_store32(device->windows[reg->window], reg->offset, (uint32_t)word);
+}
+
+/*
+ * A stand-in GENET's side of a store: an MDIO command finishes, and DMA control written with
+ * the engine's enable clear shows the block and every ring stopped at once, any other value
+ * running. Its engine moves frames only when a test asks (erx_device_stand_in_transmitted and
+ * erx_device_stand_in_receive, below).
  */
 static void
 stand_in_genet_stored(const erx_device_t *device, const erx_device_register_t *reg, uint64_t value)
@@ -514,6 +578,10 @@ stand_in_genet_stored(const erx_device_t *device, const erx_device_register_t *r
 	const bool rx = strcmp(reg->name, "rx_dma_ctrl") == 0;
 	erx_device_genet_registers_t regs;
 
+	if (strcmp(reg->name, "mdio_cmd") == 0) {
+		stand_in_genet_mdio(device, reg, value);
+		return;
+	}
 	if ((!rx && strcmp(reg->name, "tx_dma_ctrl") != 0) ||
 	    !erx_device_genet_registers(device->peripheral, rx ? ERX_DEVICE_GENET_RX : ERX_DEVICE_GENET_TX, &regs))
 		return;
@@ -528,7 +596,7 @@ stand_in_stored(const erx_device_t *device, const erx_device_register_t *reg, ui
 	const erx_device_register_t *const owned = device->peripheral->registers;
 	const uint32_t version_word = ERX_VIRTIO_F_VERSION_1 / 32, version_bit = ERX_VIRTIO_F_VERSION_1 % 32;
 
-	if (device->peripheral == erx_device_peripheral_find("genet", sizeof("genet") - 1)) {
+	if (stand_in_genet(device)) {
 		stand_in_genet_stored(device, reg, value);
 		return;
 	}
@@ -1965,5 +2033,185 @@ erx_device_stand_in_used(const erx_device_t *device, uint32_t queue, const erx_d
 	atomic_thread_fence(memory_order_release);
 	used->idx = (uint16_t)(idx + count);
 	return (ERX_OK);
+}
+
+/*
+ * The stand-in GENET's engine: the controller's side of the register ring that
+ * erx_device_genet.c drives, run when a test asks, under the caller's lock as every queue
+ * call is. It reads the ring as the controller does, through the window alone: the ring's
+ * two indexes, each descriptor's status and address, and the buffer size and the padding
+ * the driver configured. Each buffer is reached through the address its descriptor holds,
+ * found in the record's memory by the record's device base; it is never derived from the
+ * NIF's bookkeeping, so a wrong published address shows as a refused or misplaced frame.
+ */
+
+/* The installed register ring of a stand-in GENET in one direction, or NULL. */
+static const queue_record_t *
+stand_in_genet_ring(const erx_device_t *device, uint32_t index)
+{
+	for (uint32_t at = 0; device->form == ERX_DEVICE_FORM_STAND_IN && at < queues_open; at++) {
+		const queue_record_t *const record = &queues[at];
+
+		if (record->device == device && record->form == QUEUE_REGISTER_RING && record->index == index &&
+		    record->ready)
+			return (record);
+	}
+	return (NULL);
+}
+
+static uint32_t
+stand_in_bits(uint32_t mask, uint32_t word)
+{
+	return ((word & mask) >> __builtin_ctz(mask));
+}
+
+static uint32_t
+stand_in_place(uint32_t mask, uint32_t value)
+{
+	return ((value << __builtin_ctz(mask)) & mask);
+}
+
+/*
+ * The `length` bytes of the buffer descriptor `desc` points at, in the record's memory, or NULL
+ * when the address the descriptor holds does not reach that many bytes of it.
+ */
+static volatile uint8_t *
+stand_in_genet_buffer(const queue_record_t *record, uint32_t desc, uint32_t length)
+{
+	const erx_device_genet_registers_t *const regs = &record->genet.regs;
+	volatile uint8_t *const window = record->device->windows[0];
+	const uint64_t addr = erx_device_access_load32(window, regs->desc_addr_lo + desc * regs->desc_stride) |
+	    (uint64_t)erx_device_access_load32(window, regs->desc_addr_hi + desc * regs->desc_stride) << 32;
+
+	if (addr < record->device_base || addr - record->device_base > record->memory_size ||
+	    length > record->memory_size - (addr - record->device_base))
+		return (NULL);
+	return (record->memory + (addr - record->device_base));
+}
+
+/*
+ * Whether the controller moves frames on the ring: the default ring enabled in its
+ * configuration and in DMA control, and DMA control's EN set, as erx_device_genet.c's start
+ * leaves them. A controller whose DMA is stopped moves nothing and reports nothing wrong.
+ */
+static bool
+stand_in_genet_running(const queue_record_t *record)
+{
+	const erx_device_genet_registers_t *const regs = &record->genet.regs;
+	volatile uint8_t *const window = record->device->windows[0];
+	const uint32_t ring = UINT32_C(1) << ERX_DEVICE_GENET_RING;
+	const uint32_t ctrl = erx_device_access_load32(window, regs->dma_ctrl);
+
+	return ((ctrl & regs->dma_enable) != 0 && (ctrl & stand_in_place(regs->dma_ring_enable, ring)) != 0 &&
+	    (erx_device_access_load32(window, regs->ring_cfg) & stand_in_place(regs->ring_enable, ring)) != 0);
+}
+
+/* The bytes each descriptor's buffer holds, from the ring's size register. */
+static uint32_t
+stand_in_genet_reach(const queue_record_t *record)
+{
+	const erx_device_genet_registers_t *const regs = &record->genet.regs;
+
+	return (stand_in_bits(regs->buf_length, erx_device_access_load32(record->device->windows[0], regs->buf_size)));
+}
+
+int
+erx_device_stand_in_transmitted(const erx_device_t *device, erx_device_sink_t *sink, void *context, uint32_t *sent)
+{
+	const queue_record_t *const record = stand_in_genet_ring(device, GENET_QUEUE_TX);
+	const erx_device_genet_registers_t *regs;
+	volatile uint8_t *window;
+	uint32_t consumer, producer, reach, whole;
+
+	*sent = 0;
+	if (record == NULL)
+		return (ERX_EINVAL);
+	if (!stand_in_genet_running(record))
+		return (ERX_OK);
+	regs = &record->genet.regs;
+	window = device->windows[0];
+	reach = stand_in_genet_reach(record);
+	/* Each frame in one descriptor, which the controller ends with the Ethernet CRC. */
+	whole = regs->sop | regs->eop | regs->crc;
+	consumer = stand_in_bits(regs->index, erx_device_access_load32(window, regs->hardware_index));
+	producer = stand_in_bits(regs->index, erx_device_access_load32(window, regs->software_index));
+	atomic_thread_fence(memory_order_acquire);
+	for (; consumer != producer && *sent < ERX_DEVICE_GENET_SIZE; (*sent)++) {
+		const uint32_t desc = consumer % ERX_DEVICE_GENET_SIZE;
+		const uint32_t status = erx_device_access_load32(window, regs->desc_status + desc * regs->desc_stride);
+		const uint32_t length = stand_in_bits(regs->buflen, status);
+		volatile uint8_t *const bytes = stand_in_genet_buffer(record, desc, length);
+
+		if (bytes == NULL || length > reach || (status & whole) != whole)
+			break;
+		bcopy((const void *)(uintptr_t)bytes, sink(context, 0, length), length);
+		consumer = stand_in_bits(regs->index, consumer + 1u);
+	}
+	atomic_thread_fence(memory_order_release);
+	erx_device_access_store32(window, regs->hardware_index, stand_in_place(regs->index, consumer));
+	return (consumer == producer ? ERX_OK : ERX_ECORRUPT);
+}
+
+/* The receive buffers filled and not yet taken back by the driver. */
+static uint32_t
+stand_in_genet_filled(const erx_device_genet_registers_t *regs, uint32_t producer, uint32_t consumer)
+{
+	return (stand_in_bits(regs->index, producer - consumer));
+}
+
+int
+erx_device_stand_in_receive(const erx_device_t *device, const erx_device_frame_t *frames, uint32_t count,
+    uint32_t *taken)
+{
+	const queue_record_t *const record = stand_in_genet_ring(device, GENET_QUEUE_RX);
+	const erx_device_register_t *rbuf_ctrl;
+	const erx_device_field_t *align, *status_block;
+	const erx_device_genet_registers_t *regs;
+	volatile uint8_t *window;
+	uint32_t control, pad, reach, producer, consumer;
+
+	*taken = 0;
+	if (record == NULL || (rbuf_ctrl = plain_register(device, "rbuf_ctrl")) == NULL ||
+	    (align = stand_in_field(device, rbuf_ctrl, "align_2b")) == NULL ||
+	    (status_block = stand_in_field(device, rbuf_ctrl, "status_64b")) == NULL)
+		return (ERX_EINVAL);
+	regs = &record->genet.regs;
+	window = device->windows[0];
+	control = erx_device_access_load32(window, rbuf_ctrl->offset);
+	/* The stand-in lays out no 64-byte status block, so it takes nothing while one is asked for. */
+	if ((control & status_block->mask) != 0)
+		return (ERX_EINVAL);
+	/* ALIGN_2B: two bytes of padding before each frame, which the length counts. */
+	pad = (control & align->mask) != 0 ? 2u : 0u;
+	/* BUF_SIZE is 16 bits, as BUFLEN is, so a frame within the buffer has a length its status holds. */
+	reach = stand_in_genet_reach(record);
+	for (uint32_t frame = 0; frame < count; frame++) {
+		if (reach < pad || frames[frame].length > reach - pad)
+			return (ERX_EINVAL);
+	}
+	if (!stand_in_genet_running(record))
+		return (ERX_OK);
+	producer = stand_in_bits(regs->index, erx_device_access_load32(window, regs->hardware_index));
+	consumer = stand_in_bits(regs->index, erx_device_access_load32(window, regs->software_index));
+	atomic_thread_fence(memory_order_acquire);
+	for (; *taken < count && stand_in_genet_filled(regs, producer, consumer) < ERX_DEVICE_GENET_SIZE; (*taken)++) {
+		const uint32_t desc = producer % ERX_DEVICE_GENET_SIZE, length = pad + frames[*taken].length;
+		volatile uint8_t *const bytes = stand_in_genet_buffer(record, desc, length);
+
+		if (bytes == NULL)
+			break;
+		bzero((void *)(uintptr_t)bytes, pad);
+		bcopy(frames[*taken].bytes, (void *)(uintptr_t)(bytes + pad), frames[*taken].length);
+		atomic_thread_fence(memory_order_release);
+		erx_device_access_store32(window, regs->desc_status + desc * regs->desc_stride,
+		    stand_in_place(regs->buflen, length) | regs->sop | regs->eop);
+		producer = stand_in_bits(regs->index, producer + 1u);
+	}
+	atomic_thread_fence(memory_order_release);
+	erx_device_access_store32(window, regs->hardware_index, stand_in_place(regs->index, producer));
+	if (*taken == count)
+		return (ERX_OK);
+	/* The ring full is no fault: the rest wait for buffers the driver hands back. */
+	return (stand_in_genet_filled(regs, producer, consumer) == ERX_DEVICE_GENET_SIZE ? ERX_OK : ERX_ECORRUPT);
 }
 #endif

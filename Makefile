@@ -91,6 +91,7 @@ check-runtime-hosted:
 	$(RUBY) tools/erx build runtime --jobs $(JOBS)
 	$(RUBY) test/integration/runtime_event_test.rb
 	$(RUBY) test/integration/runtime_device_test.rb
+	$(RUBY) test/integration/runtime_genet_test.rb
 	$(RUBY) test/integration/runtime_hosted_smoke_test.rb
 	$(RUBY) test/integration/runtime_console_test.rb
 	$(RUBY) test/integration/runtime_prim_file_test.rb
