@@ -398,17 +398,15 @@ erx_boot_dma_absent(const erx_dt_device_t *facts, uint64_t first, uint64_t size)
 		[ERX_DT_DMA_MALFORMED] = "malformed",
 		[ERX_DT_DMA_RANGES] = "ranges",
 	};
-	uint64_t last;
+	uint64_t last, bus_last;
 
 	if (facts->dma != ERX_DT_DMA_OK)
 		return ((size_t)facts->dma < sizeof(status_reasons) / sizeof(status_reasons[0]) &&
 		    status_reasons[facts->dma] != NULL ? status_reasons[facts->dma] : "malformed");
-	/* erx_mem_dma_addr gives the CPU address: no object yet records bus - cpu. */
-	if (facts->bus != facts->cpu)
-		return ("offset");
 	if (size == 0)
 		return (NULL);
-	if (__builtin_add_overflow(first, size - 1, &last) || first < facts->cpu || last > facts->last)
+	if (facts->last < facts->cpu || __builtin_add_overflow(facts->bus, facts->last - facts->cpu, &bus_last) ||
+	    __builtin_add_overflow(first, size - 1, &last) || first < facts->bus || last > bus_last)
 		return ("outside");
 	return (NULL);
 }

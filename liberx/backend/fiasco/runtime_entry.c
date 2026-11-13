@@ -423,19 +423,28 @@ device_give(const erx_boot_device_t *device, const erx_dom_device_entry_t *entry
 
 /*
  * The contiguous memory of a device whose catalogue entry admits some (tree_facts, so the
- * entry asked and its facts have a range the memory may lie in), then none when its device
- * address does not lie whole inside that range. *memory is the object, or ERX_CAP_NULL for
- * none, and *absent erx_boot_dma_absent's reason for none, NULL when the device has its
- * memory. An object made and then refused stays, unused, in the root's table (TODO.md).
- * Returns NULL, or why the root cannot boot: the backend refused the memory or its device
- * address.
+ * entry asked and its facts have a range the memory may lie in). The backend places the
+ * run inside that range, and a pool the range does not cover (ERX_ERANGE) gives none, with
+ * the reason "outside". erx_boot_dma_absent then checks the device address the object
+ * gives, so a device never gets memory outside its range whatever the backend did.
+ * *memory is the object, or ERX_CAP_NULL for none, and *absent the reason for none, NULL
+ * when the device has its memory. An object made and then refused stays, unused, in the
+ * root's table (TODO.md). Returns NULL, or why the root cannot boot: the backend refused
+ * the memory otherwise, or its device address.
  */
 static const char *
 device_memory(const erx_dom_device_entry_t *entry, uint64_t *memory, const char **absent)
 {
+	const erx_mem_dma_range_t range = { .cpu = entry->facts.cpu, .bus = entry->facts.bus, .last = entry->facts.last };
 	uint64_t made, address;
+	int status;
 
-	if (erx_mem_create_contiguous(ERX_CAP_NULL, ERX_CAP_NULL, entry->memory, 0, &made) != ERX_OK)
+	status = erx_mem_create_contiguous_in(ERX_CAP_NULL, entry->memory, &range, &made);
+	if (status == ERX_ERANGE) {
+		*absent = "outside";
+		return (NULL);
+	}
+	if (status != ERX_OK)
 		return ("a device record: the backend refused its DMA memory");
 	if (erx_mem_dma_addr(made, 0, &address) != ERX_OK)
 		return ("a device record: the backend refused its DMA memory's device address");

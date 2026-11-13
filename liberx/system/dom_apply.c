@@ -384,6 +384,8 @@ apply_give_step(apply_t *apply, uint32_t at, const erx_dom_step_t *step)
 	const erx_dom_device_entry_t *entry = &apply->lib->view.devices[give->index];
 	const uint64_t budget = give_object(apply, give, at, step->budget);
 	const uint64_t resource = give_object(apply, give, at, step->target);
+	/* The device's DMA translation, which the stopgap takes in place of the resource. */
+	const erx_mem_dma_range_t range = { .cpu = entry->facts.cpu, .bus = entry->facts.bus, .last = entry->facts.last };
 	uint64_t handle = ERX_CAP_NULL;
 	int status;
 
@@ -398,7 +400,7 @@ apply_give_step(apply_t *apply, uint32_t at, const erx_dom_step_t *step)
 		status = erx_irq_create(budget, resource, ERX_IRQ_LINE, entry->lines[step->index], &handle);
 		break;
 	case ERX_DOM_STEP_CONTIGUOUS:
-		status = erx_mem_create_contiguous(budget, ERX_CAP_NULL, step->size, 0, &handle);
+		status = erx_mem_create_contiguous_in(budget, step->size, &range, &handle);
 		break;
 	case ERX_DOM_STEP_INSTALL:
 		return (erx_dom_install(step, give_object(apply, give, at, step->obj),

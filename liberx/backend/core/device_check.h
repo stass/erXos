@@ -39,6 +39,20 @@ erx_backend_contiguous_check(uint64_t size)
 	return (ERX_OK);
 }
 
+/*
+ * A device's DMA translation (erx_mem_create_contiguous_in): CPU addresses cpu through
+ * last, seen from bus, with the last bus address, bus + (last - cpu), below 2^64.
+ */
+static inline int
+erx_backend_dma_range_check(uint64_t cpu, uint64_t bus, uint64_t last)
+{
+	uint64_t bus_last;
+
+	if (last < cpu || __builtin_add_overflow(bus, last - cpu, &bus_last))
+		return (ERX_EINVAL);
+	return (ERX_OK);
+}
+
 static inline int
 erx_backend_entropy_read_check(uint32_t len)
 {

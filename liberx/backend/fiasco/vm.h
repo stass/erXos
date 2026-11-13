@@ -82,11 +82,14 @@ void	erx_fiasco_vm_object_free(uint32_t object);
  */
 int	erx_fiasco_vm_physical_create(uint32_t object, uint64_t base, uint64_t size) ERX_WARN_UNUSED_RESULT;
 /*
- * An object over a zeroed run of the contiguous pool, wholly below device address
- * limit (0 for none). No such run is ERX_ENOMEM. Its size is checked
- * already. The run stays held when the object goes: a device may still write it.
+ * An object over a zeroed run of the contiguous pool, wholly inside CPU addresses cpu
+ * through last, whose device address is its physical address less cpu plus bus
+ * (erx_mem_create_contiguous_in). A window that covers fewer of the pool's pages than
+ * the run needs is ERX_ERANGE, and no free run inside it ERX_ENOMEM. Its size and range
+ * are checked already. The run stays held when the object goes: a device may still write it.
  */
-int	erx_fiasco_vm_contiguous_create(uint32_t object, uint64_t size, uint64_t limit) ERX_WARN_UNUSED_RESULT;
+int	erx_fiasco_vm_contiguous_create(uint32_t object, uint64_t size, uint64_t cpu, uint64_t bus, uint64_t last)
+	    ERX_WARN_UNUSED_RESULT;
 /* A contiguous object's device address at an offset in it; another kind of object is ERX_ETYPE, an offset past it ERX_ERANGE. */
 int	erx_fiasco_vm_object_dma_addr(uint32_t object, uint64_t offset, uint64_t *addr) ERX_WARN_UNUSED_RESULT;
 /*

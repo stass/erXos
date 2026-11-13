@@ -398,6 +398,18 @@ erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size, uin
 	return (status != ERX_OK ? status : ERX_ENOTSUP);
 }
 
+int
+erx_mem_create_contiguous_in(uint64_t budget, uint64_t size, const erx_mem_dma_range_t *range, uint64_t *mem)
+{
+	int status = erx_backend_contiguous_check(size);
+
+	if (status == ERX_OK)
+		status = erx_backend_dma_range_check(range->cpu, range->bus, range->last);
+	(void)budget;
+	(void)mem;
+	return (status != ERX_OK ? status : ERX_ENOTSUP);
+}
+
 /* No call makes an object it answers for, so no handle names one. */
 int
 erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr)

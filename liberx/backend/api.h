@@ -162,10 +162,29 @@ int	erx_boot_tree(const void **bytes, size_t *size) ERX_WARN_UNUSED_RESULT;
  * well-formed create with ERX_ENOTSUP. erx_mem_dma_addr gives the address a device uses: a
  * handle naming no object is ERX_EINVAL, as every handle is hosted, another kind of object
  * ERX_ETYPE, and an offset past the end ERX_ERANGE.
+ *
+ * erx_mem_create_contiguous_in is the stopgap's create of a device's memory, which only the
+ * root calls, and which erXos's kernel does not have (docs/design-stopgap.md, "The pool"):
+ * the kernel finds the device's DMA
+ * window from the resource, and the stopgap, which has no resource objects, takes it as a
+ * value from the device's tree facts. The run lies wholly inside the CPU addresses the range
+ * covers, and the object records bus - cpu, so erx_mem_dma_addr gives the bus address. A
+ * range whose last is below its cpu, or whose last bus address would pass 2^64 - 1, is
+ * ERX_EINVAL; one that covers too little of the pool for the run, ERX_ERANGE; no free run
+ * inside it, ERX_ENOMEM. erx_mem_create_contiguous is the same create over the identity
+ * range below limit.
  */
+typedef struct erx_mem_dma_range {
+	uint64_t	cpu;	/* the first CPU address the device reaches */
+	uint64_t	bus;	/* the device's address for cpu */
+	uint64_t	last;	/* the last CPU address the device reaches, inclusive */
+} erx_mem_dma_range_t;
+
 int	erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint64_t size, uint32_t attr,
 	    uint64_t *mem) ERX_WARN_UNUSED_RESULT;
 int	erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size, uint64_t limit,
+	    uint64_t *mem) ERX_WARN_UNUSED_RESULT;
+int	erx_mem_create_contiguous_in(uint64_t budget, uint64_t size, const erx_mem_dma_range_t *range,
 	    uint64_t *mem) ERX_WARN_UNUSED_RESULT;
 int	erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr) ERX_WARN_UNUSED_RESULT;
 /*

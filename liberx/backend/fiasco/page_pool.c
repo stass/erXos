@@ -61,6 +61,19 @@ erx_fiasco_contig_order(uint64_t bytes)
 	return (order <= ERX_FIASCO_CONTIG_MAX_ORDER ? order : 0);
 }
 
+uint32_t
+erx_fiasco_contig_reach(uint64_t physical, uint32_t pages, uint64_t first, uint64_t last)
+{
+	uint64_t span, whole;
+
+	if (first > physical || last < physical)
+		return (0);
+	/* span + 1 bytes of the pool lie at or below last, and only whole pages count. */
+	span = last - physical;
+	whole = span == UINT64_MAX ? UINT64_MAX / ERX_PAGE_SIZE : (span + 1) / ERX_PAGE_SIZE;
+	return (whole < pages ? (uint32_t)whole : pages);
+}
+
 /* One pass up the pool, keeping the length of the free run that ends at each page. */
 uint32_t
 erx_fiasco_contig_take(erx_fiasco_contig_t *pool, uint32_t pages, uint32_t limit)

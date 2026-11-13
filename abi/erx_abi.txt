@@ -848,11 +848,13 @@ layout erx_fiasco_mem_physical_request wire_le 8 40
   field size u64 24
   field attr u64 32
 
-layout erx_fiasco_mem_contiguous_request wire_le 8 32
+layout erx_fiasco_mem_contiguous_request wire_le 8 48
   field caller u64 0
   field budget u64 8
   field size u64 16
-  field limit u64 24
+  field cpu u64 24
+  field bus u64 32
+  field last u64 40
 
 layout erx_fiasco_mem_dma_request wire_le 8 24
   field caller u64 0

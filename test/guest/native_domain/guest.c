@@ -2207,7 +2207,8 @@ given_view(uint32_t program)
 	catalogue[0] = (erx_dom_device_entry_t){ .unit = 0, .row = 0, .role = ERX_MF_DEVICE_ROLE_BLOCK,
 	    .role_word = "block", .peripheral = "virtio_mmio", .offset = 0, .size = GIVEN_SIZE,
 	    .lines = { GIVEN_LINE }, .nranges = 1, .nlines = 1,
-	    .ranges = { { .base = GIVEN_BASE, .size = ERX_PAGE_SIZE } }, .memory = GIVEN_MEMORY };
+	    .ranges = { { .base = GIVEN_BASE, .size = ERX_PAGE_SIZE } }, .memory = GIVEN_MEMORY, .asked = true,
+	    .facts = { .dma = ERX_DT_DMA_OK, .cpu = 0, .bus = 0, .last = UINT64_MAX } };
 	device_records[0] = (erx_dom_device_t){ .index = 0 };
 	lib.view.configured = configured;
 	lib.view.nconfigured = 1;

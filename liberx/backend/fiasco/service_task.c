@@ -771,7 +771,8 @@ task_fill_contiguous(uint32_t object, const void *request)
 {
 	const erx_fiasco_mem_contiguous_request_t *const contiguous = request;
 
-	return (erx_fiasco_vm_contiguous_create(object, contiguous->size, contiguous->limit));
+	return (erx_fiasco_vm_contiguous_create(object, contiguous->size, contiguous->cpu, contiguous->bus,
+	    contiguous->last));
 }
 
 /*
@@ -826,6 +827,8 @@ erx_fiasco_task_mem_contiguous_body(uint32_t caller, const erx_fiasco_mem_contig
 	if (caller != ERX_FIASCO_TASK_ROOT)
 		return (ERX_ENOTSUP);
 	status = erx_backend_contiguous_check(request->size);
+	if (status == ERX_OK)
+		status = erx_backend_dma_range_check(request->cpu, request->bus, request->last);
 	if (status != ERX_OK)
 		return (status);
 	return (erx_fiasco_object_create(caller, ERX_BACKEND_OBJECT_MEMORY, request->budget, task_fill_contiguous, request,

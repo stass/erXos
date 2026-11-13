@@ -400,16 +400,17 @@ erx_fiasco_vm_physical_create(uint32_t object, uint64_t base, uint64_t size)
 }
 
 int
-erx_fiasco_vm_contiguous_create(uint32_t object, uint64_t size, uint64_t limit)
+erx_fiasco_vm_contiguous_create(uint32_t object, uint64_t size, uint64_t cpu, uint64_t bus, uint64_t last)
 {
-	const uint64_t reach = limit == 0 ? UINT64_MAX : limit <= vm_contig_physical ? 0 : limit - vm_contig_physical;
-	const uint64_t reach_pages = reach >> L4_PAGESHIFT;
+	const uint32_t pages = (uint32_t)(size >> L4_PAGESHIFT);
+	const uint32_t reach = erx_fiasco_contig_reach(vm_contig_physical, vm_contig.pages, cpu, last);
 	uint32_t first;
 	uintptr_t window;
 	int status;
 
-	first = erx_fiasco_contig_take(&vm_contig, (uint32_t)(size >> L4_PAGESHIFT),
-	    reach_pages < vm_contig.pages ? (uint32_t)reach_pages : vm_contig.pages);
+	if (reach < pages)
+		return (ERX_ERANGE);
+	first = erx_fiasco_contig_take(&vm_contig, pages, reach);
 	if (first == ERX_FIASCO_CONTIG_NONE)
 		return (ERX_ENOMEM);
 	window = (uintptr_t)(VM_CONTIG_BASE + ((uint64_t)first << L4_PAGESHIFT));
@@ -417,7 +418,12 @@ erx_fiasco_vm_contiguous_create(uint32_t object, uint64_t size, uint64_t limit)
 	status = object_fill(object, size, &vm_run_effects, VM_OBJECT_CONTIGUOUS, window);
 	if (status != ERX_OK)
 		return (status);
-	vm_object(object)->device_base = vm_contig_physical + ((uint64_t)first << L4_PAGESHIFT);
+	/*
+	 * The run starts at or above cpu, since reach is 0 for a window that starts above the
+	 * pool, and ends at or below last; the range's last bus address is below 2^64
+	 * (erx_backend_dma_range_check). So neither step wraps.
+	 */
+	vm_object(object)->device_base = vm_contig_physical + ((uint64_t)first << L4_PAGESHIFT) - cpu + bus;
 	return (ERX_OK);
 }
 

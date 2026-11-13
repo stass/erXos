@@ -257,10 +257,10 @@ class BootManifestTest < Minitest::Test
   end
 
   # The root's device step (docs/design-device-tree.md, "Facts into records"): memory only
-  # where the tree gives a range whose bus addresses are the CPU's and the memory lies whole
-  # inside it; COHERENT only from a range's facts and MAC only for a network row, and one
-  # console line of fixed words and the facts' numbers. Statuses are erx_dt_dma_status_t's
-  # order: 0 ok, 1 no_node, 2 coherence, 3 cells, 4 malformed, 5 ranges.
+  # where the tree gives a range and the memory's device address, which FIRST is, lies whole
+  # inside the range's bus addresses; COHERENT only from a range's facts and MAC only for a
+  # network row, and one console line of fixed words and the facts' numbers. Statuses are
+  # erx_dt_dma_status_t's order: 0 ok, 1 no_node, 2 coherence, 3 cells, 4 malformed, 5 ranges.
   def test_the_device_step_gives_memory_only_inside_the_tree_s_range
     all = 0xffff_ffff_ffff_ffff
     window = 'window 167784448 4096 3584 words-erx given'
@@ -268,16 +268,24 @@ class BootManifestTest < Minitest::Test
                  "exact 1 short 0\nline erx: device tree: /virtio_mmio@a003e00: coherent 1 range 0x0 0x0 " \
                  "0xffffffffffffffff mac absent\n",
                  dma('net', 0x10000, 0, 1, 0, 0, all, 0, 0x4800_0000, 0x10000)
-    # The Pi model's EMMC2: a range whose bus addresses differ gets no memory, refused
-    # before the memory is made.
-    assert_equal "asks 1 before offset after none #{window} block virtio_mmio 11 3584 512 12 direct 0 0 0 0 0 " \
-                 "exact 1 short 0\nline erx: device tree: /virtio_mmio@a003e00: dma absent offset\n",
-                 dma('block', 0x10000, 0, 0, 0, 0xc000_0000, 0x3fff_ffff, 0, 0x1000_0000, 0x10000)
-    # A device the tree marks coherent but that gets no range to use is not coherent either:
-    # COHERENT follows the memory the entry admits (erx_boot_coherent), for the root's own
-    # record and each holder's alike.
-    assert_match(/\Aasks 1 before offset after none .* 12 direct 0 0 0 0 0 exact.*\nline .*: dma absent offset\n\z/,
-                 dma('block', 0x10000, 0, 1, 0, 0xc000_0000, 0x3fff_ffff, 0, 0x1000_0000, 0x10000))
+    # The Pi model's EMMC2, whose first GiB of CPU addresses it sees from bus address
+    # 0xc0000000: memory at CPU 0x10000000 has device address 0xd0000000 and is inside.
+    assert_equal "asks 1 before none after none #{window} block virtio_mmio 11 3584 512 12 direct 13 65536 0 0 0 " \
+                 "exact 1 short 0\nline erx: device tree: /virtio_mmio@a003e00: coherent 0 range 0x0 0xc0000000 " \
+                 "0x3fffffff\n",
+                 dma('block', 0x10000, 0, 0, 0, 0xc000_0000, 0x3fff_ffff, 0, 0xd000_0000, 0x10000)
+    # Its CPU address as if it were the device's lies below the bus addresses, and memory that
+    # runs past the last bus address, 0xffffffff, lies outside too; memory ending there is inside.
+    assert_match(/\Aasks 1 before none after outside .* 12 direct 0 0 0 0 0 exact.*\nline .*: dma absent outside\n\z/,
+                 dma('block', 0x10000, 0, 0, 0, 0xc000_0000, 0x3fff_ffff, 0, 0x1000_0000, 0x10000))
+    assert_match(/\Aasks 1 before none after outside /,
+                 dma('block', 0x10000, 0, 0, 0, 0xc000_0000, 0x3fff_ffff, 0, 0xffff_8000, 0x10000))
+    assert_match(/\Aasks 1 before none after none .* 12 direct 13 65536 0 0 0 exact/,
+                 dma('block', 0x10000, 0, 0, 0, 0xc000_0000, 0x3fff_ffff, 0, 0xffff_0000, 0x10000))
+    # A range whose bus addresses would pass 2^64 - 1, which the reader never gives, admits
+    # no memory anywhere rather than wrapping.
+    assert_match(/\Aasks 1 before none after outside /,
+                 dma('block', 0x10000, 0, 0, 0, all - 0xffff, 0x3fff_ffff, 0, all - 0xffff, 0x10000))
     assert_match(/\Aasks 1 before none after outside .* 12 direct 0 0 0 1 0 exact.*\nline .*: dma absent outside\n\z/,
                  dma('block', 0x10000, 0, 1, 0, 0, 0x3fff_ffff, 0, 0x3fff_8000, 0x10000))
     assert_match(/\Aasks 1 before none after none .* 12 direct 13 65536 0 1 0 exact.*\nline .*: coherent 1 range 0x0 0x0 0x3fffffff\n\z/,

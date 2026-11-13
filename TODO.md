@@ -453,12 +453,14 @@ it; git history is the record of completed work.
   library's view, which the program's start builds (`library_view`) and the root without a program
   (`root_no_program.c`, which shares `root.c`) never builds. Accepting in step 4 alone would only move a refused
   tree's stop earlier. Build the library's view in step 4, in `root_boot`, and accept the tree there with it.
-* [Low] stopgap, `liberx/backend/fiasco/runtime_entry.c` (`device_memory`) and `liberx/system/dom_apply.c`
-  (`apply_memory_inside`): a contiguous object whose device address the tree's DMA range refuses (`outside`)
-  stays unused for the boot's life, in the root's table for a device the system domain holds and, unnamed by its
-  record, in the holder's table for a holder's device, and the device gets no memory; a holder's root-side
-  object is kept with the device's record, so a restart makes no new one. It fails safe; the pool's pages lie
-  inside every range the manifests' trees give.
+* [Low] stopgap, `liberx/system/dom_apply.c` (`apply_give_step`): `erx_mem_create_contiguous_in` places a
+  device's run only inside its DMA range, and a holder's give whose range does not cover the pool (`ERX_ERANGE`)
+  fails, so the holder's domain is refused, where the root's own give (`device_memory` in
+  `liberx/backend/fiasco/runtime_entry.c`) gives the device no memory with the reason `outside` and
+  [design-device-tree.md](docs/design-device-tree.md) ("The `given` record") has the driver move blocks by
+  programmed I/O. It fails safe, and does not happen on a supported board: the pool is the lowest RAM `sigma0`
+  has free, inside every range the manifests' trees give. An object the check after creation still refuses
+  stays unused for the boot's life, in the root's table or, unnamed by its record, in the holder's.
 * [Medium] stopgap, `liberx/system/dom_apply.c` (`apply_memory_inside`, `apply_given_words`): a holder's
   memory refused after it is made (`outside`) prints no line, while `tree_facts` already printed the row's
   range, and a refused `erx_mem_dma_addr` reads as no memory rather than as the backend error the root's own
@@ -466,7 +468,7 @@ it; git history is the record of completed work.
   line naming the device and the reason. The holder's record is also assembled beside
   `erx_boot_device_given`, not by one pure function both gives call: move the record decision (facts, the
   memory's device address, the row) into one function in `liberx/backend/core/boot_manifest.c` with host
-  tests for `offset`, `outside`, MAC and COHERENT, and let the library report its refusal through it.
+  tests for `outside`, MAC and COHERENT, and let the library report its refusal through it.
 * [Low] stopgap, `liberx/backend/fiasco/vm.c`: a physical object's device window pages and a contiguous object's
   run are never given back, so a driver that makes and closes such objects in a loop uses the window or the
   contiguous pool up for good; each object, not each task, now holds them.

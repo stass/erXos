@@ -215,17 +215,26 @@ erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint6
 }
 
 int
-erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size, uint64_t limit, uint64_t *mem)
+erx_mem_create_contiguous_in(uint64_t budget, uint64_t size, const erx_mem_dma_range_t *range, uint64_t *mem)
 {
 	const erx_fiasco_mem_contiguous_request_t request = { .caller = erx_fiasco_thread_self()->index, .budget = budget,
-	    .size = size, .limit = limit };
+	    .size = size, .cpu = range->cpu, .bus = range->bus, .last = range->last };
 	erx_fiasco_reply_t reply;
 	const int status = erx_fiasco_service_call(ERX_FIASCO_CALL_MEM_CREATE_CONTIGUOUS, &request, sizeof(request), &reply);
 
-	(void)resource;
 	if (status == ERX_OK)
 		*mem = reply.first;
 	return (status);
+}
+
+/* Device address limit with no translation: CPU addresses 0 through limit - 1, all of them for 0. */
+int
+erx_mem_create_contiguous(uint64_t budget, uint64_t resource, uint64_t size, uint64_t limit, uint64_t *mem)
+{
+	const erx_mem_dma_range_t below = { .cpu = 0, .bus = 0, .last = limit == 0 ? UINT64_MAX : limit - 1 };
+
+	(void)resource;
+	return (erx_mem_create_contiguous_in(budget, size, &below, mem));
 }
 
 int

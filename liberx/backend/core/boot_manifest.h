@@ -231,13 +231,13 @@ size_t	erx_boot_tree_line(erx_boot_words_t path, uint64_t dma_memory, bool netwo
 	    const char *absent, char *line, size_t capacity);
 
 /*
- * Why a device the firmware's tree describes by facts gets no DMA memory at first, size
- * bytes, or NULL when it may have it (docs/design-device-tree.md, "Facts into records"):
- * the reader's reason when the facts have no DMA range ("no_node", "coherence", "cells",
- * "malformed", "ranges"); "offset" for a range whose bus addresses are not its CPU
- * addresses, since no memory object records the difference yet; and "outside" when the
- * memory does not lie whole inside the range. size 0 asks before the memory is made, so
- * only the facts are checked. Each reason is a fixed word the root may print.
+ * Why a device the firmware's tree describes by facts gets no DMA memory at device address
+ * first, size bytes, the address erx_mem_dma_addr gives, or NULL when it may have it
+ * (docs/design-device-tree.md, "Facts into records"): the reader's reason when the facts
+ * have no DMA range ("no_node", "coherence", "cells", "malformed", "ranges"), and "outside"
+ * when the memory does not lie whole inside the range's bus addresses, bus through
+ * bus + (last - cpu), or that end would pass 2^64 - 1. size 0 asks before the memory is
+ * made, so only the facts are checked. Each reason is a fixed word the root may print.
  */
 const char	*erx_boot_dma_absent(const erx_dt_device_t *facts, uint64_t first, uint64_t size);
 

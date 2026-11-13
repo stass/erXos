@@ -954,6 +954,38 @@ check_contig_small(void)
 }
 
 /*
+ * How many of a pool's first pages lie whole inside a device's DMA window: the pool at
+ * 16 MiB of 4096 pages, against windows that hold it all, end inside it (one byte short of
+ * a page leaves that page out), end below it, start inside or above it, and the widest.
+ */
+static void
+check_contig_reach(void)
+{
+	const uint64_t at = UINT64_C(16) << 20, page = ERX_PAGE_SIZE, pages = 4096;
+	static const struct {
+		uint64_t first, last;
+		uint32_t reach;
+	} cases[] = {
+		{ 0, UINT64_C(0x3fffffff), 4096 },
+		{ 0, UINT64_MAX, 4096 },
+		{ 0, (UINT64_C(16) << 20) + 10 * ERX_PAGE_SIZE - 1, 10 },
+		{ 0, (UINT64_C(16) << 20) + 10 * ERX_PAGE_SIZE - 2, 9 },
+		{ 0, (UINT64_C(16) << 20) - 1, 0 },
+		{ 0, 0, 0 },
+		{ UINT64_C(16) << 20, UINT64_MAX, 4096 },
+		{ (UINT64_C(16) << 20) + 1, UINT64_MAX, 0 },
+		{ UINT64_C(1) << 30, UINT64_MAX, 0 },
+	};
+
+	current_case = "contiguous reach";
+	for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+		if (erx_fiasco_contig_reach(at, (uint32_t)pages, cases[i].first, cases[i].last) != cases[i].reach)
+			fail("contig: the pages inside a window", i);
+	if (erx_fiasco_contig_reach(UINT64_MAX - page * pages + 1, (uint32_t)pages, 0, UINT64_MAX) != pages)
+		fail("contig: a pool ending at the top of the address space", 0);
+}
+
+/*
  * The pool's order for a few declared totals, which FiascoVmTest holds to the
  * packer's Manifest::RootStartup.contiguous_pool_bytes: one line each, the total and
  * the pool's bytes, 0 for a total no pool holds.
@@ -1028,6 +1060,7 @@ main(int argc, char **argv)
 	check_pool();
 	check_contig(seed);
 	check_contig_small();
+	check_contig_reach();
 	print_contig_orders();
 	check_layout();
 	check_refusals();

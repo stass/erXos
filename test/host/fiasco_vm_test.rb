@@ -29,6 +29,8 @@ class FiascoVmTest < Minitest::Test
     'a contiguous run over a held page' => ['page_pool.c', 'contig_held(pool, last) ? 0 : free_run + 1;', 'contig_held(pool, last) ? free_run + 1 : free_run + 1;', 'contig: first fit'],
     'a contiguous run past the limit' => ['page_pool.c', 'limit < pool->pages ? limit : pool->pages;', '((void)limit, pool->pages);', %q(contig: a limit below every page)],
     'a contiguous run past the pool' => ['page_pool.c', 'limit < pool->pages ? limit : pool->pages;', 'limit < ERX_FIASCO_CONTIG_PAGES ? limit : ERX_FIASCO_CONTIG_PAGES;', %q(contig: a run past a small pool's end)],
+    'a contiguous run past the window end' => ['page_pool.c', '(span + 1) / ERX_PAGE_SIZE;', 'span / ERX_PAGE_SIZE + 1;', 'contig: the pages inside a window'],
+    'a contiguous run below the window start' => ['page_pool.c', 'if (first > physical || last < physical)', 'if (first > last || last < physical)', 'contig: the pages inside a window'],
     'write with execute admitted' => ['vm_table.c', "\t\tdefault:\n\t\t\treturn (ERX_EINVAL);", "\t\tdefault:\n\t\t\tplan->target = ERX_BACKEND_PAGE_RX;\n\t\t\tbreak;", 'a protection that is not one passed'],
     'zeroing skipped' => ['page_pool.c', "\tbzero((void *)page, ERX_PAGE_SIZE);\n", '', 'a taken page is not zero'],
     'a take not counted' => ['page_pool.c', "\tpool->held_pages++;\n", '', 'a take did not count the page as held'],

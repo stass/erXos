@@ -73,6 +73,15 @@ typedef struct erx_fiasco_contig {
  */
 unsigned	erx_fiasco_contig_order(uint64_t bytes);
 
+/*
+ * How many of a pool's first pages, the pool starting at physical address physical and
+ * holding pages pages, lie wholly inside CPU addresses first through last: the limit
+ * erx_fiasco_contig_take takes for a device that reaches only those. 0 when the window starts above the pool's first
+ * page, so such a device gets nothing rather than a run the take cannot place; the pool
+ * is the lowest RAM sigma0 has free, and no supported board's window starts above it.
+ */
+uint32_t	erx_fiasco_contig_reach(uint64_t physical, uint32_t pages, uint64_t first, uint64_t last);
+
 /* The first page of a run of this length wholly below page limit, or ERX_FIASCO_CONTIG_NONE. */
 uint32_t	erx_fiasco_contig_take(erx_fiasco_contig_t *, uint32_t pages, uint32_t limit);
 

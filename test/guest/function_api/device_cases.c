@@ -86,6 +86,33 @@ case_physical_refusals(void)
 }
 
 /*
+ * A device that sees CPU address cpu + x at bus + x: its run, the first free page,
+ * next, has device address next + bus, and dma_addr adds the offset to it. A range
+ * whose last is below its cpu or whose bus end passes 2^64 - 1 is malformed, and one
+ * that ends below the pool, or starts past its first page at pool, holds no run.
+ */
+static bool
+contiguous_in_range(uint64_t pool, uint64_t next)
+{
+	const uint64_t bus = UINT64_C(1) << 40;
+	const erx_mem_dma_range_t offset = { .cpu = 0, .bus = bus, .last = UINT64_MAX - bus };
+	const erx_mem_dma_range_t backwards = { .cpu = UINT64_C(1) << 30, .bus = 0, .last = 0 };
+	const erx_mem_dma_range_t past_top = { .cpu = 0, .bus = UINT64_MAX - ERX_PAGE_SIZE + 1, .last = ERX_PAGE_SIZE };
+	const erx_mem_dma_range_t below = { .cpu = 0, .bus = 0, .last = pool - 1 };
+	const erx_mem_dma_range_t above = { .cpu = pool + ERX_PAGE_SIZE, .bus = 0, .last = UINT64_MAX };
+	uint64_t mem, addr, unused;
+
+	if (erx_mem_create_contiguous_in(0, ERX_PAGE_SIZE, &offset, &mem) != ERX_OK ||
+	    erx_mem_dma_addr(mem, 0, &addr) != ERX_OK || addr != next + bus ||
+	    erx_mem_dma_addr(mem, 8, &addr) != ERX_OK || addr != next + bus + 8)
+		return (false);
+	return (erx_mem_create_contiguous_in(0, ERX_PAGE_SIZE, &backwards, &unused) == ERX_EINVAL &&
+	    erx_mem_create_contiguous_in(0, ERX_PAGE_SIZE, &past_top, &unused) == ERX_EINVAL &&
+	    erx_mem_create_contiguous_in(0, ERX_PAGE_SIZE, &below, &unused) == ERX_ERANGE &&
+	    erx_mem_create_contiguous_in(0, ERX_PAGE_SIZE, &above, &unused) == ERX_ERANGE);
+}
+
+/*
  * Each run is aligned to a page and holds its pages alone, within the pool's. 9 MiB is
  * more than a 1920x1080 screen's image at 4 bytes a pixel, and is one object.
  */
@@ -115,8 +142,10 @@ case_contiguous_runs(void)
 	    erx_mem_dma_addr(three, 2 * (uint64_t)ERX_PAGE_SIZE, &unused) != ERX_OK || unused != addr_three + 2 * ERX_PAGE_SIZE)
 		return (false);
 	/* A limit at the pool's lowest address leaves no room, and one a page past the large run does. */
-	return (erx_mem_create_contiguous(0, 0, ERX_PAGE_SIZE, addr_one, &again) == ERX_ENOMEM &&
-	    erx_mem_create_contiguous(0, 0, ERX_PAGE_SIZE, addr_large + screen + ERX_PAGE_SIZE, &again) == ERX_OK);
+	if (!(erx_mem_create_contiguous(0, 0, ERX_PAGE_SIZE, addr_one, &again) == ERX_ERANGE &&
+	    erx_mem_create_contiguous(0, 0, ERX_PAGE_SIZE, addr_large + screen + ERX_PAGE_SIZE, &again) == ERX_OK))
+		return (false);
+	return (contiguous_in_range(addr_one, addr_large + screen + ERX_PAGE_SIZE));
 }
 
 /* fw_cfg reads its own request from a run and writes its signature into the run's second page. */
