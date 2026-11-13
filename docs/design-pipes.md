@@ -1431,13 +1431,15 @@ when the owner exits, by the NIF's monitor, or with
 taken by the port driver at its first take of a hand-off for the program
 and let go with `erx_pipe_holder_release` once the driver has released
 the program's anchor, and it only moves forward, from none to held to
-released, or from none to released when the port took nothing: once released it is never taken again, so a take for the
+released: once released it is never taken again, so a take for the
 program after the release is refused and no later port of the program
-holds its ends past the gone. A program has one port, which its handler
-opens once; the NIF knows no port, so it is the handler that keeps a
-second port from sharing the hold. The port's hold is let go where the
-driver returns a window's lease, so the image and every sub-space under the
-anchor have ended
+holds its ends past the gone. Only a port that took the hold lets it go,
+so a port that took nothing, a failed start under the pid of a running
+program among them, leaves that program's hold as it is. A program has one
+port, which its handler opens once; the NIF knows no port, so it is the
+handler that keeps a second port from sharing the hold. The port's hold is
+let go just before the driver returns a window's lease, so the image and
+every sub-space under the anchor have ended
 ([design-display.md](design-display.md#the-pixel-area),
 [design-programs.md](design-programs.md#a-programs-end)). When neither
 hold remains, the NIF sends the running pipe server

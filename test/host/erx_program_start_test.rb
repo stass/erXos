@@ -32,6 +32,14 @@ class ErxProgramStartTest < Minitest::Test
   MEM_PAGES = Integer(File.read(File.join(ROOT, 'abi/protocols/prog.txt'))[/^limit prog_mem_bytes u64 (\d+)$/, 1], 10) /
               Integer(File.read(File.join(ROOT, 'abi/erx_abi.txt'))[/^limit page_size u32 (\d+)$/, 1], 10)
 
+  # An fds of one pipe hand-off numbered number, a write end whose descriptor names its two
+  # copies as ring and rpage (docs/design-pipes.md, "Hand-offs"), as descriptor 3; with buffer,
+  # a window's buffer as descriptor 4 comes first, which the message lists after it.
+  def self.hand_entry(number, ring: '{hand, 1}', rpage: '{hand, 2}', size: 65_536, buffer: false)
+    "Base#{'#'}{fds => [#{buffer ? '{4, {mem, 5, 1}}, ' : ''}{3, {pipe_hand, #{number}, {pipe, write, {1, 1}, " \
+      "#{'#'}{wend => 1, ring => #{ring}, rpage => #{rpage}, size => #{size}, readers => []}}}}]}"
+  end
+
   # Each case: a spec, an Erlang expression over Base (the spec every case starts from) and
   # AtBound, and what start/1 must print for it.
   CASES = {
@@ -42,7 +50,6 @@ class ErxProgramStartTest < Minitest::Test
     'a relative working directory' => ["Base#{'#'}{cwd => <<\"home\">>}", '{error,einval}'],
     'an unknown signal' => ["Base#{'#'}{sigmask => [nosuchsignal]}", '{error,einval}'],
     'a missing argv' => ['maps:remove(argv, Base)', '{error,einval}'],
-    'a descriptor' => ["Base#{'#'}{fds => [{0, null}]}", 'badarg'],
     "a window's buffer" => ["Base#{'#'}{fds => [{3, {mem, 5, 1}}]}", 'driver'],
     'a buffer of the most pages' => ["Base#{'#'}{fds => [{3, {mem, 16#ffffffffffffffff, #{MEM_PAGES}}}]}", 'driver'],
     'a buffer past the most pages' => ["Base#{'#'}{fds => [{3, {mem, 5, #{MEM_PAGES + 1}}}]}", 'badarg'],
@@ -52,6 +59,14 @@ class ErxProgramStartTest < Minitest::Test
     'a buffer past the descriptors' => ["Base#{'#'}{fds => [{1024, {mem, 5, 1}}]}", 'badarg'],
     'two buffers' => ["Base#{'#'}{fds => [{3, {mem, 5, 1}}, {4, {mem, 6, 1}}]}", 'badarg'],
     'a buffer beside a descriptor' => ["Base#{'#'}{fds => [{0, null}, {3, {mem, 5, 1}}]}", 'badarg'],
+    'a descriptor that is no hand-off' => ["Base#{'#'}{fds => [{0, null}]}", 'badarg'],
+    'a pipe hand-off' => [hand_entry(7), 'driver'],
+    'a hand-off numbered 0' => [hand_entry(0), 'badarg'],
+    'a hand-off numbered past 64 bits' => [hand_entry(2**64), 'badarg'],
+    'a hand-off copy named twice' => [hand_entry(7, rpage: '{hand, 1}'), 'badarg'],
+    'a hand-off copy skipped' => [hand_entry(7, rpage: '{hand, 3}'), 'badarg'],
+    'a hand-off descriptor the message refuses' => [hand_entry(7, size: 4096), '{error,einval}'],
+    'a buffer beside a hand-off' => [hand_entry(7, buffer: true), 'driver'],
     'slots past the data area' => ["Base#{'#'}{slots => 17}", '{error,einval}'],
     'a message at the frame bound' => ['AtBound(0)', 'driver'],
     'a message a byte past the frame bound' => ['AtBound(1)', '{error,e2big}'],
@@ -70,7 +85,7 @@ class ErxProgramStartTest < Minitest::Test
     AtBound = fun(Over) ->
                   Argv = [<<"args">> | lists:duplicate(30000, <<>>)],
                   Filled = Base\#{argv => Argv},
-                  {ok, Frame} = erx_prog_grammar:build_start(erx_program:message(Filled, 16#ffffffffffffffff, 4, none)),
+                  {ok, Frame} = erx_prog_grammar:build_start(erx_program:message(Filled, 16#ffffffffffffffff, 4, {none, []})),
                   Pad = #{FRAME_MAX} + Over - byte_size(term_to_binary(Frame)) - 5,
                   Filled\#{argv => Argv ++ [binary:copy(<<"a">>, Pad)]}
               end,

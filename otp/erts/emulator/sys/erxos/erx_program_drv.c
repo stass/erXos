@@ -26,6 +26,28 @@
  * maps the channel into the session, and installs the program's copies into its image's
  * table (docs/design-programs.md, "The channel"); the session keeps every DESTROY.
  *
+ * A program's pipe ends reach it as hand-offs of the pipe NIF (docs/design-pipes.md,
+ * "Hand-offs"), named by number alone: at a start, each number the open command carries,
+ * which the start takes after the lease, installs after the program's own copies and binds
+ * after the program's doorbell; while the program runs, the one INSTALL names. The driver
+ * passes each copy with the rights the NIF gives it, within the most a pipe's copy carries
+ * (erx_program_hand_rights), binds the end's doorbell to the program's group with the
+ * hand-off's label, lets the hand-off go whatever the installs answered, and answers the
+ * values the copies took, in the hand-off's order. A start whose take fails partway lets go
+ * what it took and fails whole.
+ *
+ * A take answers a hand-off only for the program the open command names and only to its
+ * owner: the process opening the port at a start, and at an INSTALL the process calling
+ * port_control, which must also be the port's owner, since ERTS lets any process of the
+ * runtime call port_control on a port it names.
+ *
+ * A take also takes the port's hold on the program's holder entry, and the port keeps
+ * whether one of its takes did (held). Only then does the release let the hold go, after
+ * the anchor's destroy ended every image of the program and just before the lease's
+ * return, so the pipe server reads the program's gone only once nothing of it runs, and a
+ * port that took nothing, such as a failed start under a running program's pid, leaves
+ * that program's hold alone.
+ *
  * The input task also reads the program's frames from the channel's outbound lane: each whole
  * record passes the funnel's channel mode, then ERTS's safe decode, then the program's credit
  * (erx_program_credit_take), and goes to the owner as {erx_channel, Port, Frame}; a record that
@@ -40,7 +62,8 @@
  *
  * This file is ERTS's one caller of erx_space_create, erx_image_map, erx_thread_create and
  * erx_cap_pass, of erx_space_stop on another space, and of ERTS's decoder of a term's
- * external form, which it calls only in safe mode (tools/lib/erx/chokepoint_rules/program.rb).
+ * external form, which it calls only in safe mode (tools/lib/erx/chokepoint_rules/program.rb),
+ * and of the pipe NIF's take and holder release (tools/lib/erx/chokepoint_rules/pipe.rb).
  */
 
 #ifdef HAVE_CONFIG_H
@@ -64,6 +87,7 @@
 #include "erx_area.h"
 #include "erx_event.h"
 #include "erx_gate.h"
+#include "erx_pipe.h"
 #include "erx_program_core.h"
 
 /*
@@ -71,10 +95,14 @@
  * gives as ERX_PROGRAM_CONTROL_STARTED and so on (program_control() reads them; nothing is
  * defined here). Each answers "ok" or the refusing status's
  * e-prefixed name: STARTED how the start ended, "ok" followed by the data area's value in
- * the program's table, 8 bytes big-endian; SEND the frame it carries, which the driver
- * writes into the inbound lane as room returns, or "busy" while an earlier frame is still
- * being written (send_parse has its payload); RUN, with no payload, the first thread's
- * start; STOP, with a status of 8 bytes big-endian, the anchor's stop with that status.
+ * the program's table, 8 bytes big-endian, then for each hand-off the open command names, in
+ * its order, the count of its copies, 4 bytes, and the value each copy took, 8 bytes each;
+ * SEND the frame it carries, which the driver writes into the inbound lane as room returns,
+ * or "busy" while an earlier frame is still being written (send_parse has its payload); RUN,
+ * with no payload, the first thread's start; STOP, with a status of 8 bytes big-endian, the
+ * anchor's stop with that status; INSTALL, with a hand-off's number of 8 bytes, its install
+ * into the running program, "ok" followed by the value each copy took, 8 bytes each. Every
+ * word is big-endian.
  */
 /* What end_feed hands back for a SEND the end found busy: no status is positive. */
 #define SEND_BUSY		1
@@ -88,8 +116,16 @@
  * program holds.
  */
 #define CLOSED_MAX		(2u * ERX_PROG_FDS_MAX)
-/* Each of a program's spaces may hold at most ERX_PROGRAM_CAP_LIMIT capabilities, the install's among them. */
-_Static_assert(ERX_PROGRAM_INSTALLS <= ERX_PROGRAM_CAP_LIMIT, "the install fits the image's table");
+/*
+ * The capabilities the program's anchor may hold, ERX_PROGRAM_CAP_LIMIT, and its image's: the
+ * image's table takes the install's ERX_PROGRAM_INSTALLS, every copy of the hand-offs the start
+ * takes and of those INSTALL passes while the program runs, and the program's own, so it is
+ * made with the kernel's largest table, ERX_CAPS_MAX, which the backend grows only as it fills
+ * (abi/erx_abi.txt, program_cap_limit).
+ */
+#define PROGRAM_IMAGE_CAP_LIMIT	ERX_CAPS_MAX
+_Static_assert(ERX_PROGRAM_INSTALLS <= ERX_PROGRAM_CAP_LIMIT, "the install fits the anchor's table");
+_Static_assert(ERX_PROGRAM_INSTALLS <= PROGRAM_IMAGE_CAP_LIMIT, "the install fits the image's table");
 /*
  * The session's pool for programs, which a spec's cap must not exceed. The stopgap keeps
  * budgets as records and reports no budget's cap, so the session has no pool to read yet;
@@ -142,6 +178,25 @@ typedef struct {
 	uint64_t		pc;		/* the image's entry, from erx_image_map */
 	/* What the install made of each copy: its value in the image's table, by install index. */
 	uint64_t		installed[ERX_PROGRAM_INSTALLS];
+	/*
+	 * The pipe hand-offs the open command names, in its order: each one's number, the
+	 * hand-off taken, from its take until hands_let_go, and the count of its copies.
+	 * hand_values holds the value each of their copies took in the image's table,
+	 * hand_copies of them in the hand-offs' order, which STARTED answers. Only a HANDS_TAKE
+	 * that took every hand-off sets the counts, with hand_values made for their sum, so
+	 * every count is 0 unless hand_values holds hand_copies values. held is whether a take of
+	 * this port took the port's hold on the program's holder entry, which HOLD_RELEASE then
+	 * lets go.
+	 */
+	uint32_t		hand_count;
+	struct {
+		uint64_t	number;
+		erx_pipe_hand_t	*taken;
+		uint32_t	copies;
+	}			hand[ERX_PROG_FDS_MAX];
+	uint64_t		*hand_values;
+	size_t			hand_copies;
+	bool			held;
 	/*
 	 * The inbound lane's writer, ready once the channel is mapped, and the one frame it
 	 * writes, NULL but between a WRITE and the frame's WRITTEN or BROKEN; offered is
@@ -198,17 +253,18 @@ open_word(const char **at, uint64_t *value)
 }
 
 /*
- * "erx_program Pid Guarantee Cap Slots Lease Pages Image", as erx_program:start/1 writes it:
- * six decimal words, Lease and Pages 0 for a program given no window's buffer, then the
- * image's path, the rest of the command. Only the form is checked here;
- * the core checks the spec's values whole.
+ * "erx_program Pid Guarantee Cap Slots Lease Pages Hands Number... Image", as
+ * erx_program:start/1 writes it: decimal words, Lease and Pages 0 for a program given no
+ * window's buffer, Hands of them the numbers of the pipe hand-offs the program inherits, at
+ * most ERX_PROG_FDS_MAX, one for each descriptor, then the image's path, the rest of the
+ * command. Only the form is checked here; the core checks the spec's values whole.
  */
 static bool
 program_open_parse(const char *command, program_t *program)
 {
 	static const char name[] = "erx_program ";
 	const char *at = command;
-	uint64_t pid;
+	uint64_t pid, hands;
 	size_t len;
 
 	if (strncmp(at, name, sizeof(name) - 1) != 0)
@@ -217,8 +273,13 @@ program_open_parse(const char *command, program_t *program)
 	if (!open_word(&at, &pid) || !open_word(&at, &program->spec.guarantee) ||
 	    !open_word(&at, &program->spec.cap) || !open_word(&at, &program->spec.slots) ||
 	    !open_word(&at, &program->spec.lease) || !open_word(&at, &program->spec.lease_pages) ||
-	    pid > (uint64_t)INT64_MAX)
+	    !open_word(&at, &hands) || pid > (uint64_t)INT64_MAX || hands > ERX_PROG_FDS_MAX)
 		return (false);
+	program->hand_count = (uint32_t)hands;
+	for (uint32_t at_hand = 0; at_hand < program->hand_count; at_hand++) {
+		if (!open_word(&at, &program->hand[at_hand].number))
+			return (false);
+	}
 	len = strlen(at);
 	if (len > sizeof(program->image_path))
 		return (false);
@@ -389,6 +450,33 @@ record_drop(program_t *program)
 	program->in_len = program->in_have = 0;
 }
 
+/* Item item of the next erx_cap_pass: a copy of cap, never a move, carrying rights. */
+static void
+pass_item(uint32_t item, uint64_t cap, uint32_t rights)
+{
+	erx_utcb_t *const utcb = erx_utcb_self();
+	uint64_t desc = 0;
+
+	(void)erx_msg_item_desc_rights_set(&desc, rights);
+	(void)erx_msg_item_desc_move_set(&desc, false);
+	(void)erx_utcb_mr_store(utcb, 2 * item, desc);
+	(void)erx_utcb_mr_store(utcb, 2 * item + 1, cap);
+}
+
+/* Passes the count items pass_item stored into image's table, and reads each one's value there. */
+static int
+pass_items(uint64_t image, uint32_t count, uint64_t values[])
+{
+	erx_utcb_t *const utcb = erx_utcb_self();
+	const int status = erx_cap_pass(ERX_CAP_SELF, image, count);
+
+	if (status != ERX_OK)
+		return (status);
+	for (uint32_t item = 0; item < count; item++)
+		(void)erx_utcb_mr_load(utcb, 2 * item + 1, &values[item]);
+	return (ERX_OK);
+}
+
 /*
  * Passes the program's copies into the image's table, each with the rights the core gives
  * its index, in the passes the core sizes, and keeps the value each copy took there. A
@@ -397,7 +485,6 @@ record_drop(program_t *program)
 static int
 install(program_t *program)
 {
-	erx_utcb_t *const utcb = erx_utcb_self();
 	uint64_t handles[ERX_PROGRAM_INSTALLS] = {
 		[ERX_PROGRAM_ARG_BUDGET] = program->budget,
 		[ERX_PROGRAM_ARG_GROUP] = program->group,
@@ -408,22 +495,173 @@ install(program_t *program)
 
 	for (uint32_t side = 0; side < CHANNEL_SIDES; side++)
 		handles[channel_sides[side]] = program->side[side];
-	for (uint32_t first = 0; (count = erx_program_install_batch(first)) > 0; first += count) {
+	for (uint32_t first = 0; (count = erx_program_pass_batch(first, ERX_PROGRAM_INSTALLS)) > 0;
+	    first += count) {
+		int status;
+
+		for (uint32_t item = 0; item < count; item++)
+			pass_item(item, handles[first + item], erx_program_install_rights(first + item));
+		status = pass_items(program->image, count, &program->installed[first]);
+		if (status != ERX_OK)
+			return (status);
+	}
+	return (ERX_OK);
+}
+
+/*
+ * Passes a hand-off's copies into the image's table in its order, each with the rights the
+ * NIF gives it within what a pipe's copy may carry, and writes the value each took into
+ * values[0, count). A pass refused partway leaves the earlier copies in the image's table
+ * unnamed until the image ends (docs/design-pipes.md, "Hand-offs").
+ */
+static int
+hand_pass(uint64_t image, const erx_pipe_hand_t *hand, uint64_t values[])
+{
+	const uint32_t copies = erx_pipe_hand_count(hand);
+	uint32_t count;
+
+	for (uint32_t first = 0; (count = erx_program_pass_batch(first, copies)) > 0; first += count) {
 		int status;
 
 		for (uint32_t item = 0; item < count; item++) {
-			uint64_t desc = 0;
+			uint64_t cap;
+			uint32_t rights;
 
-			(void)erx_msg_item_desc_rights_set(&desc, erx_program_install_rights(first + item));
-			(void)erx_msg_item_desc_move_set(&desc, false);
-			(void)erx_utcb_mr_store(utcb, 2 * item, desc);
-			(void)erx_utcb_mr_store(utcb, 2 * item + 1, handles[first + item]);
+			erx_pipe_hand_copy(hand, first + item, &cap, &rights);
+			pass_item(item, cap, erx_program_hand_rights(rights));
 		}
-		status = erx_cap_pass(ERX_CAP_SELF, program->image, count);
+		status = pass_items(image, count, &values[first]);
 		if (status != ERX_OK)
 			return (status);
-		for (uint32_t item = 0; item < count; item++)
-			(void)erx_utcb_mr_load(utcb, 2 * item + 1, &program->installed[first + item]);
+	}
+	return (ERX_OK);
+}
+
+/* Binds the doorbell of the end a hand-off gives, if it gives one, to group with its label. */
+static int
+hand_bind(const erx_pipe_hand_t *hand, uint64_t group)
+{
+	uint64_t bell, label;
+
+	if (!erx_pipe_hand_bell(hand, &bell, &label))
+		return (ERX_OK);
+	return (erx_irq_bind(bell, group, label));
+}
+
+/* Lets go every hand-off the port still holds; each is the driver's to let go once. */
+static void
+hands_let_go(program_t *program)
+{
+	for (uint32_t at = 0; at < program->hand_count; at++) {
+		if (program->hand[at].taken != NULL)
+			erx_pipe_hand_release(program->hand[at].taken);
+		program->hand[at].taken = NULL;
+	}
+}
+
+/*
+ * HOLD_RELEASE, an undo just before the lease's return: lets go what the port still holds
+ * of the program's hand-offs, then, if one of its takes took it, the port's hold on the
+ * program's holder entry, after which no take for the program succeeds. A port that took
+ * nothing lets nothing go, so it never ends the hold of a program another port runs.
+ */
+static void
+hold_release(program_t *program)
+{
+	hands_let_go(program);
+	if (program->held)
+		erx_pipe_holder_release((uint64_t)program->spec.pid);
+	program->held = false;
+}
+
+/*
+ * Takes hand-off number for the program the open command names, as caller. A take that
+ * answers a hand-off also holds the port's hold on the program's holder entry, so this, the
+ * driver's one take, records that the port has it (held) for HOLD_RELEASE to let go.
+ */
+static erx_pipe_hand_t *
+hand_take(program_t *program, uint64_t number, ERL_NIF_TERM caller)
+{
+	erx_pipe_hand_t *const hand = erx_pipe_hand_take(number, (uint64_t)program->spec.pid, caller);
+
+	if (hand != NULL)
+		program->held = true;
+	return (hand);
+}
+
+/*
+ * HANDS_TAKE: takes each hand-off the open command names for the program its pid names, as
+ * the process opening the port, driver_connected while the start runs, and makes room for
+ * the value of each of their copies. ERX_EINVAL for a hand-off the NIF refuses, the same
+ * number twice among them, or one it answers with more copies than any hand-off holds;
+ * ERX_ENOMEM. A step that fails makes nothing, so this one lets go what it took, and the
+ * port's hold, itself, and records no copies.
+ */
+static int
+hands_take(program_t *program)
+{
+	const ERL_NIF_TERM opener = (ERL_NIF_TERM)driver_connected(program->port);
+	size_t copies = 0;
+	int status = ERX_OK;
+
+	for (uint32_t at = 0; status == ERX_OK && at < program->hand_count; at++) {
+		erx_pipe_hand_t *const hand = hand_take(program, program->hand[at].number, opener);
+
+		if (hand == NULL) {
+			status = ERX_EINVAL;
+			break;
+		}
+		program->hand[at].taken = hand;
+		if (erx_pipe_hand_count(hand) > ERX_PIPE_HAND_COPIES_MAX)
+			status = ERX_EINVAL;
+		else
+			copies += erx_pipe_hand_count(hand);
+	}
+	/* At most ERX_PROG_FDS_MAX hand-offs of ERX_PIPE_HAND_COPIES_MAX copies: no product overflows. */
+	if (status == ERX_OK && copies > 0 &&
+	    (program->hand_values = driver_alloc(copies * sizeof(uint64_t))) == NULL)
+		status = ERX_ENOMEM;
+	if (status != ERX_OK) {
+		hold_release(program);
+		return (status);
+	}
+	for (uint32_t at = 0; at < program->hand_count; at++)
+		program->hand[at].copies = erx_pipe_hand_count(program->hand[at].taken);
+	program->hand_copies = copies;
+	return (ERX_OK);
+}
+
+/*
+ * HANDS_INSTALL: each hand-off's copies after the program's own, in the open command's
+ * order. A hand-off of no copies passes nothing, and hand_values is NULL when none has any.
+ */
+static int
+hands_install(program_t *program)
+{
+	size_t first = 0;
+
+	for (uint32_t at = 0; at < program->hand_count; at++) {
+		int status;
+
+		if (program->hand[at].copies == 0)
+			continue;
+		status = hand_pass(program->image, program->hand[at].taken, &program->hand_values[first]);
+		if (status != ERX_OK)
+			return (status);
+		first += program->hand[at].copies;
+	}
+	return (ERX_OK);
+}
+
+/* HANDS_BIND: each hand-off's doorbell to the program's group, before its first thread runs. */
+static int
+hands_bind(program_t *program)
+{
+	for (uint32_t at = 0; at < program->hand_count; at++) {
+		const int status = hand_bind(program->hand[at].taken, program->group);
+
+		if (status != ERX_OK)
+			return (status);
 	}
 	return (ERX_OK);
 }
@@ -502,6 +740,8 @@ apply(program_t *program, erx_program_action_t action)
 	switch (action.act) {
 	case ERX_PROGRAM_LEASE_TAKE:
 		return (lease_take(program));
+	case ERX_PROGRAM_HANDS_TAKE:
+		return (hands_take(program));
 	case ERX_PROGRAM_CHANNEL_CREATE:
 		return (channel_create(program, boot->budget.raw));
 	case ERX_PROGRAM_CHANNEL_MAP:
@@ -531,7 +771,7 @@ apply(program_t *program, erx_program_action_t action)
 		    program->anchor_label, 0, ERX_PROGRAM_CAP_LIMIT, &program->anchor));
 	case ERX_PROGRAM_IMAGE_CREATE:
 		return (erx_space_create(program->budget, program->anchor, erx_gate_worker_handle(),
-		    program->image_label, 0, ERX_PROGRAM_CAP_LIMIT, &program->image));
+		    program->image_label, 0, PROGRAM_IMAGE_CAP_LIMIT, &program->image));
 	case ERX_PROGRAM_LEASE_MAP:
 		return (program->lease == NULL ? ERX_OK : erx_area_lease_map(program->lease, program->image));
 	case ERX_PROGRAM_IMAGE_MAP:
@@ -541,6 +781,10 @@ apply(program_t *program, erx_program_action_t action)
 		return (erx_image_map(program->image, boot->release.raw, index, &program->pc));
 	case ERX_PROGRAM_INSTALL:
 		return (install(program));
+	case ERX_PROGRAM_HANDS_INSTALL:
+		return (hands_install(program));
+	case ERX_PROGRAM_HANDS_BIND:
+		return (hands_bind(program));
 	case ERX_PROGRAM_BELL_BIND:
 		/* The channel's fixed label, which no pipe end's label equals (abi/protocols/prog.txt). */
 		return (erx_irq_bind(program->bell, program->group, ERX_PROG_CHANNEL_LABEL));
@@ -605,6 +849,9 @@ apply(program_t *program, erx_program_action_t action)
 		return (ERX_OK);
 	case ERX_PROGRAM_CHANNEL_DESTROY:
 		channel_destroy(program);
+		return (ERX_OK);
+	case ERX_PROGRAM_HOLD_RELEASE:
+		hold_release(program);
 		return (ERX_OK);
 	case ERX_PROGRAM_REPORT:
 		report(program, action.status);
@@ -907,6 +1154,8 @@ program_start(ErlDrvPort port, char *command, SysDriverOpts *opts)
 	erx_program_start_begin(&run, &program->spec, PROGRAM_POOL);
 	while ((act = erx_program_start_next(&run, result)) != ERX_PROGRAM_DONE)
 		result = apply(program, (erx_program_action_t){ .act = act });
+	/* Installed and bound, or undone: the hand-offs go whatever the start answered. */
+	hands_let_go(program);
 	program->start_error = run.error;
 	program->end = erx_program_end_begin();
 	return ((ErlDrvData)program);
@@ -920,6 +1169,8 @@ program_stop(ErlDrvData data)
 
 	if (program->start_error == ERX_OK)
 		(void)end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_CLOSE }, NULL);
+	if (program->hand_values != NULL)
+		driver_free(program->hand_values);
 	driver_free(program->due);
 	driver_free(program);
 }
@@ -1035,6 +1286,15 @@ word_at(const uint8_t *at, size_t size)
 	return (value);
 }
 
+/* Writes value as a big-endian word of size bytes at at: the byte after it. */
+static uint8_t *
+word_put(uint8_t *at, uint64_t value, size_t size)
+{
+	for (size_t i = 0; i < size; i++)
+		at[i] = (uint8_t)(value >> (8 * (size - 1 - i)));
+	return (at + size);
+}
+
 /*
  * Each grant of SEND's payload: its kind, ERX_PROGRAM_GRANT_CLOSED or ERX_PROGRAM_GRANT_DRAINED
  * (erx_abi.txt's program_grant), then three words.
@@ -1136,6 +1396,85 @@ frame_send(program_t *program, const char *buf, size_t len)
 }
 
 /*
+ * STARTED's answer after "ok": the data area's value, then each hand-off's count of copies
+ * and their values, into memory of its own, which the caller frees; NULL when there is none.
+ * A failed start answers no payload, so only a start that installed every copy answers
+ * hand-offs, and the counts it walks are those hand_values was made for.
+ */
+static uint8_t *
+started_values(const program_t *program, size_t *len)
+{
+	const uint64_t *value = program->hand_values;
+	const uint32_t hands = program->start_error == ERX_OK ? program->hand_count : 0;
+	uint8_t *bytes, *at;
+
+	*len = sizeof(uint64_t);
+	if (hands > 0)
+		*len += hands * sizeof(uint32_t) + program->hand_copies * sizeof(uint64_t);
+	if ((bytes = driver_alloc(*len)) == NULL)
+		return (NULL);
+	at = word_put(bytes, program->installed[ERX_PROGRAM_INSTALL_DATA], sizeof(uint64_t));
+	for (uint32_t hand = 0; hand < hands; hand++) {
+		const uint32_t copies = program->hand[hand].copies;
+
+		at = word_put(at, copies, sizeof(uint32_t));
+		for (uint32_t copy = 0; copy < copies; copy++)
+			at = word_put(at, *value++, sizeof(uint64_t));
+	}
+	return (bytes);
+}
+
+/*
+ * INSTALL: takes hand-off number for the running program as the process calling port_control,
+ * which must be the port's owner, passes its copies into the image, binds its doorbell to the
+ * program's group, lets it go whatever those answered, and writes the values its copies took
+ * into *values, *len bytes of memory of its own, which the caller frees. ERX_EINVAL for a
+ * start that failed, a caller that is not the owner, or a hand-off the NIF refuses or answers
+ * with more copies than any hand-off holds; ERX_EDEAD once the program is ending; ERX_ENOMEM;
+ * or the refusal of a pass or the bind. A failed install names nothing to the program: the
+ * owner does not send the frame that would carry the values (docs/design-pipes.md,
+ * "Hand-offs").
+ */
+static int
+hand_install(program_t *program, uint64_t number, uint8_t **values, size_t *len)
+{
+	const ErlDrvTermData caller = driver_caller(program->port);
+	erx_pipe_hand_t *hand;
+	uint64_t *copies = NULL;
+	uint32_t count;
+	int status = ERX_OK;
+
+	*values = NULL;
+	*len = 0;
+	if (program->start_error != ERX_OK || caller != driver_connected(program->port))
+		return (ERX_EINVAL);
+	if (!erx_program_end_installs(&program->end))
+		return (ERX_EDEAD);
+	hand = hand_take(program, number, (ERL_NIF_TERM)caller);
+	if (hand == NULL)
+		return (ERX_EINVAL);
+	count = erx_pipe_hand_count(hand);
+	if (count > ERX_PIPE_HAND_COPIES_MAX)
+		status = ERX_EINVAL;
+	if (status == ERX_OK && count > 0 && (copies = driver_alloc(count * sizeof(uint64_t))) == NULL)
+		status = ERX_ENOMEM;
+	if (status == ERX_OK)
+		status = hand_pass(program->image, hand, copies);
+	if (status == ERX_OK)
+		status = hand_bind(hand, program->group);
+	erx_pipe_hand_release(hand);
+	if (status == ERX_OK && count > 0 && (*values = driver_alloc((size_t)count * sizeof(uint64_t))) == NULL)
+		status = ERX_ENOMEM;
+	if (status == ERX_OK)
+		*len = (size_t)count * sizeof(uint64_t);
+	for (uint32_t copy = 0; status == ERX_OK && copy < count; copy++)
+		(void)word_put(*values + copy * sizeof(uint64_t), copies[copy], sizeof(uint64_t));
+	if (copies != NULL)
+		driver_free(copies);
+	return (status);
+}
+
+/*
  * The owner's commands. STARTED reads the start's answer, which feeds the end, and
  * the end closes the port here when the program already ended; the answer is built first,
  * since that close frees program. SEND, RUN and STOP act only on a
@@ -1146,7 +1485,8 @@ static ErlDrvSSizeT
 program_control(ErlDrvData data, unsigned int command, char *buf, ErlDrvSizeT len, char **rbuf, ErlDrvSizeT rlen)
 {
 	program_t *const program = (program_t *)data;
-	uint8_t value[sizeof(uint64_t)];
+	uint8_t *values;
+	size_t values_len;
 	ErlDrvSSizeT need;
 	uint64_t stop;
 	int status;
@@ -1154,13 +1494,20 @@ program_control(ErlDrvData data, unsigned int command, char *buf, ErlDrvSizeT le
 	(void)rlen;
 	switch (command) {
 	case ERX_PROGRAM_CONTROL_STARTED:
-		if (len != 0)
+		if (len != 0 || (values = started_values(program, &values_len)) == NULL)
 			return (-1);
-		for (size_t at = 0; at < sizeof(value); at++)
-			value[at] = (uint8_t)(program->installed[ERX_PROGRAM_INSTALL_DATA] >> (8 * (sizeof(value) - 1 - at)));
-		need = answer(program->start_error, value, sizeof(value), rbuf);
+		need = answer(program->start_error, values, values_len, rbuf);
+		driver_free(values);
 		if (need >= 0 && program->start_error == ERX_OK)
 			(void)end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_ANSWERED }, NULL);
+		return (need);
+	case ERX_PROGRAM_CONTROL_INSTALL:
+		if (len != sizeof(uint64_t))
+			return (-1);
+		status = hand_install(program, word_at((const uint8_t *)buf, sizeof(uint64_t)), &values, &values_len);
+		need = answer(status, values, values_len, rbuf);
+		if (values != NULL)
+			driver_free(values);
 		return (need);
 	case ERX_PROGRAM_CONTROL_SEND:
 		status = program->start_error == ERX_OK ? frame_send(program, buf, len) : ERX_EINVAL;

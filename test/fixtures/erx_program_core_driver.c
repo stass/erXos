@@ -9,7 +9,10 @@
  *   spec NAME STATUS                   erx_program_spec_check's answer for a named spec
  *   act VALUE NAME, phase VALUE NAME   the enums' names
  *   install INDEX NAME RIGHTS          what the program's table receives at each index
- *   batch FIRST COUNT                  erx_program_install_batch's answer from each index, and past them
+ *   batch FIRST COUNT                  erx_program_pass_batch's answer for the install from each index,
+ *                                      and past them
+ *   handbatch FIRST COUNT              and for a hand-off of ERX_PIPE_HAND_COPIES_MAX copies
+ *   handrights IN OUT                  erx_program_hand_rights's answer for each right alone and all of them
  *   start NAME ACT... = ERROR          a start's whole run, each action it returned in order
  *   end STATE INPUT... = STATE ACT:STATUS...
  *                                      one input in one state of the end, every state reachable
@@ -314,6 +317,7 @@ ends(void)
 static const char *const act_names[] = {
 	[ERX_PROGRAM_DONE] = "done",
 	[ERX_PROGRAM_LEASE_TAKE] = "lease_take",
+	[ERX_PROGRAM_HANDS_TAKE] = "hands_take",
 	[ERX_PROGRAM_CHANNEL_CREATE] = "channel_create",
 	[ERX_PROGRAM_CHANNEL_MAP] = "channel_map",
 	[ERX_PROGRAM_BELL_CREATE] = "bell_create",
@@ -330,7 +334,9 @@ static const char *const act_names[] = {
 	[ERX_PROGRAM_LEASE_MAP] = "lease_map",
 	[ERX_PROGRAM_IMAGE_MAP] = "image_map",
 	[ERX_PROGRAM_INSTALL] = "install",
+	[ERX_PROGRAM_HANDS_INSTALL] = "hands_install",
 	[ERX_PROGRAM_BELL_BIND] = "bell_bind",
+	[ERX_PROGRAM_HANDS_BIND] = "hands_bind",
 	[ERX_PROGRAM_THREAD_CREATE] = "thread_create",
 	[ERX_PROGRAM_THREAD_START] = "thread_start",
 	[ERX_PROGRAM_THREAD_CLOSE] = "thread_close",
@@ -349,6 +355,7 @@ static const char *const act_names[] = {
 	[ERX_PROGRAM_CHANNEL_UNMAP] = "channel_unmap",
 	[ERX_PROGRAM_CHANNEL_DESTROY] = "channel_destroy",
 	[ERX_PROGRAM_LEASE_RETURN] = "lease_return",
+	[ERX_PROGRAM_HOLD_RELEASE] = "hold_release",
 	[ERX_PROGRAM_REPORT] = "report",
 	[ERX_PROGRAM_STOP_ANCHOR] = "stop_anchor",
 	[ERX_PROGRAM_WRITE] = "write",
@@ -379,7 +386,7 @@ constants(void)
 	    ERX_SIGSYS, ERX_SIGKILL, ERX_PROGRAM_KILLED);
 	printf("const exit_parent %" PRId64 "\nconst exit_released %" PRId64 "\nconst exit_nothread %" PRId64 "\n",
 	    ERX_EXIT_PARENT, ERX_EXIT_RELEASED, ERX_EXIT_NOTHREAD);
-	printf("const msg_caps %" PRIu32 "\n", ERX_MSG_CAPS);
+	printf("const msg_caps %" PRIu32 "\nconst hand_copies_max %" PRIu32 "\n", ERX_MSG_CAPS, ERX_PIPE_HAND_COPIES_MAX);
 	printf("const hr_dup %" PRIu32 "\nconst hr_give %" PRIu32 "\nconst hr_destroy %" PRIu32 "\n", ERX_HR_DUP,
 	    ERX_HR_GIVE, ERX_HR_DESTROY);
 	printf("const hr_alloc %" PRIu32 "\nconst hr_attach %" PRIu32 "\nconst hr_signal %" PRIu32 "\n", ERX_HR_ALLOC,
@@ -413,7 +420,12 @@ installs(void)
 	printf("install %" PRIu32 " past %" PRIu32 "\n", ERX_PROGRAM_INSTALLS,
 	    erx_program_install_rights(ERX_PROGRAM_INSTALLS));
 	for (uint32_t first = 0; first <= ERX_PROGRAM_INSTALLS + 1; first++)
-		printf("batch %" PRIu32 " %" PRIu32 "\n", first, erx_program_install_batch(first));
+		printf("batch %" PRIu32 " %" PRIu32 "\n", first, erx_program_pass_batch(first, ERX_PROGRAM_INSTALLS));
+	for (uint32_t first = 0; first <= ERX_PIPE_HAND_COPIES_MAX + 1; first++)
+		printf("handbatch %" PRIu32 " %" PRIu32 "\n", first, erx_program_pass_batch(first, ERX_PIPE_HAND_COPIES_MAX));
+	for (uint32_t bit = 0; bit < 32; bit++)
+		printf("handrights %" PRIu32 " %" PRIu32 "\n", UINT32_C(1) << bit, erx_program_hand_rights(UINT32_C(1) << bit));
+	printf("handrights %" PRIu32 " %" PRIu32 "\n", UINT32_MAX, erx_program_hand_rights(UINT32_MAX));
 }
 
 int

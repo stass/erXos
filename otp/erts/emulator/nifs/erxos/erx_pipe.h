@@ -88,9 +88,10 @@ void		 erx_pipe_hand_release(erx_pipe_hand_t *hand);
 /*
  * Lets go the port's hold on program's holder entry: called once the
  * driver has released the program's anchor, so no image of the program
- * and no sub-space under it runs, or as the last undo of a start that
- * failed after a take.  When the owner's hold is gone too, the NIF sends
- * the running pipe server the program's gone and forgets the
+ * and no sub-space under it runs, or as an undo of a start that failed
+ * after a take, just before the lease's return; the driver calls it only
+ * when one of its takes took the hold.  When the owner's hold is gone too,
+ * the NIF sends the running pipe server the program's gone and forgets the
  * entry.  The release is final: a release before any take also refuses
  * every later take for the program, and a second release, or one for a
  * program with no entry, does nothing.

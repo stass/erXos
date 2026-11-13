@@ -1558,11 +1558,17 @@ applied in this order, each step undoing the ones before it on failure:
    the start runs, is its owner, so a start whose handler is not the
    hand-off's owner, or that names another program's hand-off, fails with
    `einval`; the first take also takes the port's hold on the program's
-   holder entry, which the driver lets go with `erx_pipe_holder_release`
-   after it releases the anchor, where it returns the lease, so the pipe
-   server reads the program's gone only once no image of it runs, and
-   after which no take for the program succeeds; the image's capability table is sized for the fixed
-   installs and every copy the hand-offs hold.
+   holder entry, which the driver, if it took the hold, lets go with
+   `erx_pipe_holder_release` after it releases the anchor, just before it
+   returns the lease, so the pipe server reads the program's gone only
+   once no image of it runs, and after which no take for the program
+   succeeds. A start whose take fails after an earlier one succeeded
+   fails whole with `einval` and lets go every hand-off it took. The
+   image's capability table may hold `caps_max` capabilities, the
+   kernel's largest table, so it takes the fixed installs, every copy the
+   hand-offs hold and those `erx_program:install/2` passes while the
+   program runs; the anchor's holds `program_cap_limit`
+   (`abi/erx_abi.txt`).
 2. **Create the channel and the data area**: two sides and two
    doorbells, in the side layout of a connection, each side written by
    one party and mapped read-only by the other

@@ -60,19 +60,22 @@
  * A bound on the actions one input of the end returns: a report, a stop, the whole release
  * (one undo per step at most) and a close. erx_program_core.c asserts the plan fits.
  */
-#define ERX_PROGRAM_ACTIONS_MAX	22
+#define ERX_PROGRAM_ACTIONS_MAX	25
 
 typedef enum {
 	ERX_PROGRAM_DONE = 0,		/* the start's run is over; see erx_program_start_t.error */
 
 	/*
-	 * The start's steps, in the order they are applied. What the session keeps and maps, the
+	 * The start's steps, in the order they are applied. The lease's take comes first and the
+	 * takes of the program's pipe hand-offs next, so their undos come last, after the anchor's
+	 * destroy (docs/design-pipes.md, "A program's gone"). What the session keeps and maps, the
 	 * channel, both doorbells and the data area, all from its own budget, comes before the
 	 * program's budget, so every release, last step first, deletes it after that budget is
 	 * destroyed and the program never faults on its own channel (docs/design-programs.md,
 	 * "The channel").
 	 */
 	ERX_PROGRAM_LEASE_TAKE,		/* erx_area_lease_take of the spec's lease, when it names one */
+	ERX_PROGRAM_HANDS_TAKE,		/* each pipe hand-off the spec names (erx_pipe_hand_take) */
 	ERX_PROGRAM_CHANNEL_CREATE,	/* the channel's two sides, the session's and the program's */
 	ERX_PROGRAM_CHANNEL_MAP,	/* both into the session's space, as erx_program_session_prot says */
 	ERX_PROGRAM_BELL_CREATE,	/* the program's doorbell, which the driver triggers */
@@ -89,7 +92,9 @@ typedef enum {
 	ERX_PROGRAM_LEASE_MAP,		/* the leased buffer at the image's buffer place, erx_area_lease_map */
 	ERX_PROGRAM_IMAGE_MAP,		/* the boot image's program, with erx_image_map */
 	ERX_PROGRAM_INSTALL,		/* the program's copies into the image's table (erx_program_install_rights) */
+	ERX_PROGRAM_HANDS_INSTALL,	/* each hand-off's copies after them (erx_program_hand_rights) */
 	ERX_PROGRAM_BELL_BIND,		/* the program's doorbell into its group, labelled with the session's side's value */
+	ERX_PROGRAM_HANDS_BIND,		/* each hand-off's doorbell into the group with the hand-off's label */
 	ERX_PROGRAM_THREAD_CREATE,	/* the image's first thread, stopped, in the program's group */
 
 	/* The undos of the steps that made something; a release is all of them in this order. */
@@ -108,6 +113,7 @@ typedef enum {
 	ERX_PROGRAM_BELL_DESTROY,
 	ERX_PROGRAM_CHANNEL_UNMAP,	/* erx_vm_release of the session's four mappings */
 	ERX_PROGRAM_CHANNEL_DESTROY,
+	ERX_PROGRAM_HOLD_RELEASE,	/* lets go any hand-off still held, then the port's hold (erx_pipe_holder_release) */
 	ERX_PROGRAM_LEASE_RETURN,	/* erx_area_lease_return, after the anchor's destroy */
 
 	/* The end's own. */
@@ -285,17 +291,31 @@ size_t	erx_program_end_next(erx_program_end_t *end, erx_program_input_t input,
 /* The rights the program's copy at index carries: 0 past the last index. */
 uint32_t	erx_program_install_rights(uint32_t index);
 /*
+ * The rights a pipe hand-off's copy is passed with: the rights the pipe NIF gives it
+ * (erx_pipe.h, erx_pipe_hand_copy) within the most any copy of a pipe carries, READ, WRITE
+ * and MAP for memory and TRIGGER for a doorbell, so no copy the driver passes carries DUP,
+ * GIVE or DESTROY whatever the NIF answers (docs/design-pipes.md, "The rights of a copy").
+ */
+uint32_t	erx_program_hand_rights(uint32_t rights);
+/*
  * How the session maps the channel's side at index: read-only the side the program's copy
  * may write, its own, and read-write the side it may only read, the session's, so each
  * side has exactly one writer by the rights above. 0, no mapping, at any other index.
  */
 uint32_t	erx_program_session_prot(uint32_t index);
 /*
- * How many copies the install's erx_cap_pass from index first passes: at most ERX_MSG_CAPS,
+ * How many of count copies one erx_cap_pass from index first passes: at most ERX_MSG_CAPS,
  * and 0 once first is past the last, so passes from 0, each starting where the last ended,
- * pass every index once.
+ * pass every index once. The install passes ERX_PROGRAM_INSTALLS copies, a hand-off its
+ * own count.
  */
-uint32_t	erx_program_install_batch(uint32_t first);
+uint32_t	erx_program_pass_batch(uint32_t first, uint32_t count);
+/*
+ * Whether a hand-off may be installed into the running program (erx_program:install/2): the
+ * start's answer was read and the image runs with its anchor, so the copies reach a live
+ * image and the port's hold is not yet let go.
+ */
+bool	erx_program_end_installs(const erx_program_end_t *end);
 
 /*
  * A program's credit (docs/design-programs.md, "Credit"): the driver delivers a frame from the

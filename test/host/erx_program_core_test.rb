@@ -38,14 +38,20 @@ class ErxProgramCoreTest < Minitest::Test
   # budget, first, so that a release deletes it only after the program's budget; the port's
   # IRQ object, the session's doorbell, with its sink and bind; the program's budget and
   # group; both labels' gate registrations before any space carries a label; then the
-  # spaces, the buffer's map into the image before the image's own, the install, the program's doorbell's bind, which takes its label from
-  # the install, and the thread, stopped until RUN.
-  STEPS = %i[lease_take channel_create channel_map bell_create data_create irq_create sink_register irq_bind
-             budget_create group_create gate_register_anchor gate_register_image anchor_create image_create
-             lease_map image_map install bell_bind thread_create].freeze
+  # spaces, the buffer's map into the image before the image's own, the install, the
+  # program's doorbell's bind, which takes its label from the install, and the thread,
+  # stopped until RUN. The lease is taken first and the pipe hand-offs next, so their undos,
+  # the port's hold on the program's holder entry and then the lease's return, are the last
+  # of every release, and the hand-offs' copies and doorbells follow the program's own
+  # (docs/design-pipes.md, "Hand-offs").
+  STEPS = %i[lease_take hands_take channel_create channel_map bell_create data_create irq_create
+             sink_register irq_bind budget_create group_create gate_register_anchor
+             gate_register_image anchor_create image_create lease_map image_map install
+             hands_install bell_bind hands_bind thread_create].freeze
   # What undoes each step that made something; a map and an install die with their space, the
   # buffer's map among them, and nothing else needs undoing.
-  UNDO = { lease_take: :lease_return, channel_create: :channel_destroy, channel_map: :channel_unmap, bell_create: :bell_destroy,
+  UNDO = { lease_take: :lease_return, hands_take: :hold_release, channel_create: :channel_destroy,
+           channel_map: :channel_unmap, bell_create: :bell_destroy,
            data_create: :data_destroy, irq_create: :irq_close, sink_register: :sink_unregister,
            irq_bind: :irq_unbind, budget_create: :budget_destroy, group_create: :group_close,
            gate_register_anchor: :gate_unregister_anchor, gate_register_image: :gate_unregister_image,
@@ -182,6 +188,18 @@ class ErxProgramCoreTest < Minitest::Test
     assert_equal :lease_return, RELEASE.last
   end
 
+  # The lease is taken first and the hand-offs next, so a release lets the port's hold go just
+  # before it returns the lease, both after the anchor's destroy (docs/design-runtime.md,
+  # "Programs as ports", step 1).
+  def test_the_hands_are_taken_after_the_lease_and_let_go_before_its_return
+    assert_equal %i[lease_take hands_take], STEPS.first(2)
+    assert_equal %i[hold_release lease_return], RELEASE.last(2)
+    every = output[:starts].map { |_name, (acts, _)| acts } + output[:ends].map { |_, (_, acts)| acts.map(&:first) }
+    both = every.select { _1.include?(:hold_release) && _1.include?(:lease_return) }
+    refute_empty both
+    both.each { |acts| assert_equal acts.index(:hold_release) + 1, acts.index(:lease_return), acts.inspect }
+  end
+
   def test_a_failed_step_undoes_exactly_the_steps_before_it
     assert_empty start_differences(output), start_differences(output).join("\n")
   end
@@ -206,6 +224,14 @@ class ErxProgramCoreTest < Minitest::Test
     assert_empty install_differences(output), install_differences(output).join("\n")
   end
 
+  def test_the_ports_hold_is_let_go_last_after_the_anchor
+    assert_empty hold_violations(output), hold_violations(output).first(20).join("\n")
+  end
+
+  def test_a_hand_offs_copies_carry_no_more_than_a_pipes_copy
+    assert_empty hand_differences(output), hand_differences(output).join("\n")
+  end
+
   # The core's plan rows from the channel's to the budget's, which the first seed reorders.
   KEPT_ROWS = ['{ ERX_PROGRAM_CHANNEL_CREATE, ERX_PROGRAM_CHANNEL_DESTROY },',
                '{ ERX_PROGRAM_CHANNEL_MAP, ERX_PROGRAM_CHANNEL_UNMAP },',
@@ -215,6 +241,14 @@ class ErxProgramCoreTest < Minitest::Test
                '{ ERX_PROGRAM_SINK_REGISTER, ERX_PROGRAM_SINK_UNREGISTER },',
                '{ ERX_PROGRAM_IRQ_BIND, ERX_PROGRAM_IRQ_UNBIND },',
                '{ ERX_PROGRAM_BUDGET_CREATE, ERX_PROGRAM_BUDGET_DESTROY },'].freeze
+
+  # The core's plan rows from the hand-offs' take to the anchor's, which a seed reorders so the
+  # port's hold is let go before the anchor is destroyed.
+  HOLD_ROWS = ['{ ERX_PROGRAM_HANDS_TAKE, ERX_PROGRAM_HOLD_RELEASE },', *KEPT_ROWS,
+               '{ ERX_PROGRAM_GROUP_CREATE, ERX_PROGRAM_GROUP_CLOSE },',
+               '{ ERX_PROGRAM_GATE_REGISTER_ANCHOR, ERX_PROGRAM_GATE_UNREGISTER_ANCHOR },',
+               '{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },',
+               '{ ERX_PROGRAM_ANCHOR_CREATE, ERX_PROGRAM_ANCHOR_DESTROY },'].freeze
 
   # A seeded failure of the core, the check that must catch it, and the edit that plants it.
   MUTANTS = {
@@ -233,8 +267,12 @@ class ErxProgramCoreTest < Minitest::Test
       [:side_differences, 'if (index != ERX_PROGRAM_ARG_OWN_SIDE && index != ERX_PROGRAM_ARG_PEER_SIDE)',
        'if (index >= ERX_PROGRAM_INSTALLS)'],
     'the install passes one copy fewer' =>
-      [:install_differences, 'ERX_PROGRAM_INSTALLS - first < ERX_MSG_CAPS ? ERX_PROGRAM_INSTALLS - first :',
-       'ERX_PROGRAM_INSTALLS - 1 - first < ERX_MSG_CAPS ? ERX_PROGRAM_INSTALLS - 1 - first :'],
+      [:install_differences, 'count - first < ERX_MSG_CAPS ? count - first :',
+       'count - 1 - first < ERX_MSG_CAPS ? count - 1 - first :'],
+    "the port's hold is let go before the anchor is destroyed" =>
+      [:hold_violations, HOLD_ROWS.join("\n\t"), (HOLD_ROWS.drop(1) + HOLD_ROWS.first(1)).join("\n\t")],
+    "a hand-off's copy keeps DUP" =>
+      [:hand_differences, 'return (rights & HAND_RIGHTS);', 'return (rights & (HAND_RIGHTS | ERX_HR_DUP));'],
     'an undo is skipped' =>
       [:start_differences, '{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },',
        '{ ERX_PROGRAM_GATE_REGISTER_IMAGE, NO_UNDO },'],
@@ -338,6 +376,37 @@ class ErxProgramCoreTest < Minitest::Test
       shared.keys.map { "install #{_1}: carries DUP, GIVE or DESTROY" } +
       (out[:installs].fetch('past', nil) == 0 ? [] : ['an index past the last has rights']) +
       batch_differences(out[:batches], got.size, k.fetch('msg_caps'))
+  end
+
+  # Every run of the core that lets the port's hold go, a failed start's or a release, lets it
+  # go after every undo but the lease's return, which comes last, and after the anchor's
+  # destroy whenever the run destroys the anchor; and a run that destroys the anchor always
+  # lets the hold go (docs/design-pipes.md, "A program's gone").
+  def hold_violations(out)
+    runs = out[:starts].map { |name, (acts, _)| ["start #{name}", acts] } +
+           out[:ends].map { |(state, input), (_, acts)| ["end #{state.to_h} #{input.inspect}", acts.map(&:first)] }
+    runs.flat_map { |name, acts| hold_problems(name, acts) }
+  end
+
+  def hold_problems(name, acts)
+    at = acts.index(:hold_release)
+    destroys = acts.index(:anchor_destroy)
+    return destroys ? ["#{name}: destroys the anchor and keeps the port's hold"] : [] if at.nil?
+
+    late = acts.drop(at + 1) & (UNDO.values - [:lease_return])
+    [("#{name}: #{late.inspect} after hold_release" unless late.empty?),
+     ("#{name}: hold_release before anchor_destroy" if destroys && destroys > at)].compact
+  end
+
+  # A hand-off's copy keeps only what a pipe's copy may carry, READ, WRITE, MAP and TRIGGER
+  # (docs/design-pipes.md, "The rights of a copy"), and the passes of the largest hand-off cover
+  # each of its copies once.
+  def hand_differences(out)
+    k = out[:constants]
+    most = %w[read write map trigger].sum { k.fetch("hr_#{_1}") }
+    wrong = out[:hand_rights].reject { |given, passed| passed == given & most }
+    wrong.map { |given, passed| "hand rights #{given}: passed #{passed}, want #{given & most}" } +
+      batch_differences(out[:hand_batches], k.fetch('hand_copies_max'), k.fetch('msg_caps'))
   end
 
   # The session maps the program's side read-only and its own read-write, so each side has
@@ -504,7 +573,7 @@ class ErxProgramCoreTest < Minitest::Test
 
   def parse(lines)
     out = { acts: {}, phases: {}, constants: {}, signals: {}, specs: {}, starts: {}, ends: {}, installs: {},
-            prots: {}, batches: {} }
+            prots: {}, batches: {}, hand_batches: {}, hand_rights: {} }
     lines.each { parse_line(out, _1.split) }
     out
   end
@@ -517,6 +586,8 @@ class ErxProgramCoreTest < Minitest::Test
     in ['install', _, name, rights] then out[:installs][name] = Integer(rights)
     in ['prot', _, name, prot] then out[:prots][name] = Integer(prot)
     in ['batch', first, count] then out[:batches][Integer(first)] = Integer(count)
+    in ['handbatch', first, count] then out[:hand_batches][Integer(first)] = Integer(count)
+    in ['handrights', given, passed] then out[:hand_rights][Integer(given)] = Integer(passed)
     in ['act', value, name] then out[:acts][Integer(value)] = name.to_sym
     in ['phase', value, name] then out[:phases][Integer(value)] = name.to_sym
     in ['start', name, *acts, '=', error] then out[:starts][name] = [acts.map { out[:acts].fetch(Integer(_1)) }, Integer(error)]

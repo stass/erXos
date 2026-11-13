@@ -49,6 +49,18 @@ module Erx
   #   (Lvgl::Program) and shipped as bin/erx-lvgl, with no descriptors: liberx takes its
   #   startup message, main runs LVGL's setup, and the map of descriptor 3, the window's
   #   buffer, which the start did not give, ends it with status 1 (display/lvgl/erx_lvgl.c).
+  # * pipe_hand and install give a program a pipe write end as the pipe NIF's hand-off
+  #   (docs/design-pipes.md, "Hand-offs"), the shell's process standing in for the program's
+  #   handler: it makes the program's holder entry, a lane and an unbound doorbell, and the
+  #   hand-off of their copies. pipe_hand names it in start/1's fds, and exit42 runs and ends
+  #   with 42 only when the driver took it for that program. install hands one to a running
+  #   spin with install/2: another process is refused, the owner gets the descriptor with
+  #   the copies' values, a second take of the number is refused, and once the port is closed
+  #   and the shell drops its own hold the entry is gone, so a new one can be made, which
+  #   only the port's release of its hold allows. hand_twice names one hand-off in two fds,
+  #   whose second take is refused, and the start fails with einval; hold_kept fails a
+  #   second start under a running program's pid, after which an install into the running
+  #   program still succeeds, since only the port that took the hold lets it go.
   # The shell then answers node() again.
   #
   # The programs are file entries, so the backend copies their segments into the space
@@ -89,16 +101,89 @@ module Erx
     # another sees. A start the driver refused, or an answer other than the one awaited,
     # shows in the case's answer instead of a timeout alone. fault_answer is fault's
     # (Run#fault_answer).
-    def cases(fault_answer:)
+    # A hand-off of a write end of pipe 9 for program pid, made by the calling process as its
+    # handler, which first makes the program's holder entry unless holder is false: its
+    # descriptor, with the copies written {hand, I}, bound to D, and its number to H, each
+    # variable's name ending in suffix. rights gives a ring's and a reader page's handle rights.
+    def hand_off(pid, rights, suffix: '', holder: true)
+      "#{holder ? "ok = erx_pipe_nif:program_holder(#{pid}), " : ''}" \
+        "{ok, Ring#{suffix}, RPage#{suffix}} = erx_pipe_nif:make_lane(65536), " \
+        "{ok, Bell#{suffix}} = erx_pipe_nif:make_bell({program, #{pid}}, 9, 1), " \
+        "{ok, [H#{suffix}]} = erx_pipe_nif:hand_make(#{pid}, [{[{Ring#{suffix}, #{rights.fetch(:ring)}}, " \
+        "{RPage#{suffix}, #{rights.fetch(:rpage)}}], {Bell#{suffix}, (9 bsl 32) bor 1}}]), " \
+        "D#{suffix} = {pipe, write, {9, 1}, \#{wend => 1, ring => {hand, 1}, rpage => {hand, 2}, size => 65536, readers => []}},"
+    end
+
+    def cases(fault_answer:, rights:)
       [Case.new(name: 'e2big', seconds: 60, answer: '{e2big,{error,e2big}}', expression: line(<<~ERLANG)),
          (fun() -> {e2big, erx_program:start(#{spec('args', 6, argv: '[binary:copy(<<"a">>, 131072)]')})} end)().
+       ERLANG
+       Case.new(name: 'pipe_hand', seconds: 60, answer: '{pipe_hand,42}', expression: line(<<~ERLANG)),
+         (fun() ->
+            #{hand_off(21, rights)}
+            P = erx_program:start((#{spec('exit42', 21)})\#{fds => [{3, {pipe_hand, H, D}}]}),
+            receive {P, {exit_status, S}} -> {pipe_hand, S} after #{WAIT_MS} -> {pipe_hand, P} end
+          end)().
+       ERLANG
+       # A start naming the same hand-off twice takes it once and is refused at the second
+       # take, so it fails whole with einval and lets go what it took.
+       Case.new(name: 'hand_twice', seconds: 60, answer: '{hand_twice,{error,einval}}', expression: line(<<~ERLANG)),
+         (fun() ->
+            #{hand_off(23, rights)}
+            Failed = erx_program:start((#{spec('exit42', 23)})\#{fds => [{3, {pipe_hand, H, D}}, {4, {pipe_hand, H, D}}]}),
+            erx_pipe_nif:holder_drop(23),
+            {hand_twice, Failed}
+          end)().
+       ERLANG
+       # A failed start of another port naming a running program's pid lets go nothing of
+       # that program's hold, which only the port that took it releases: an install into the
+       # running program still succeeds.
+       Case.new(name: 'hold_kept', seconds: 60, answer: '{hold_kept,{error,einval},ok}', expression: line(<<~ERLANG)),
+         (fun() ->
+            #{hand_off(24, rights)}
+            P = erx_program:start((#{spec('spin', 24)})\#{fds => [{3, {pipe_hand, H, D}}]}),
+            Failed = erx_program:start(#{spec('nosuch', 24)}),
+            #{hand_off(24, rights, suffix: '2', holder: false)}
+            Installed = case erx_program:install(P, {pipe_hand, H2, D2}) of
+                          {ok, _} -> ok;
+                          Refused -> Refused
+                        end,
+            R = erlang:monitor(port, P),
+            true = port_close(P),
+            receive {'DOWN', R, port, P, _} -> ok after #{WAIT_MS} -> timeout end,
+            erx_pipe_nif:holder_drop(24),
+            {hold_kept, Failed, Installed}
+          end)().
+       ERLANG
+       Case.new(name: 'install', seconds: 60, answer: '{install,{error,einval},ok,{error,einval},ok}',
+                expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec('spin', 22)}),
+            #{hand_off(22, rights)}
+            Self = self(),
+            spawn(fun() -> Self ! {other, erx_program:install(P, {pipe_hand, H, D})} end),
+            Other = receive {other, O} -> O after #{WAIT_MS} -> timeout end,
+            Owner = case erx_program:install(P, {pipe_hand, H, D}) of
+                      {ok, {pipe, write, {9, 1}, \#{ring := V1, rpage := V2}}} when is_integer(V1), is_integer(V2),
+                                                                                    V1 =/= V2 -> ok;
+                      Installed -> Installed
+                    end,
+            Again = erx_program:install(P, {pipe_hand, H, D}),
+            R = erlang:monitor(port, P),
+            true = port_close(P),
+            receive {'DOWN', R, port, P, _} -> ok after #{WAIT_MS} -> timeout end,
+            ok = erx_pipe_nif:holder_drop(22),
+            Gone = erx_pipe_nif:program_holder(22),
+            erx_pipe_nif:holder_drop(22),
+            {install, Other, Owner, Again, Gone}
+          end)().
        ERLANG
        # The raw path: start/1's steps by hand, with a relative working directory that
        # start/1's builder refuses and liberx must refuse before main. A reply on a slot
        # that holds no request is a send the driver refuses whole, with einval.
        Case.new(name: 'startup', seconds: 60, answer: '{startup,{error,einval},ok,<<"ok">>,127}', expression: line(<<~ERLANG)),
          (fun() ->
-            P = open_port({spawn_driver, "erx_program 7 0 4096 4 0 0 bin/args"}, [binary]),
+            P = open_port({spawn_driver, "erx_program 7 0 4096 4 0 0 0 bin/args"}, [binary]),
             <<"ok", D:64>> = port_control(P, 1, []),
             F = {erx_start, 1, \#{pid => 7, ppid => 1, pgid => 7, argv => [<<"args">>], env => [],
                                  cwd => <<"home/u">>, spawn => false, sigmask => [], sigignore => [],
@@ -186,7 +271,7 @@ module Erx
        Case.new(name: 'owner_gone', seconds: 60, answer: '{owner_gone,ok,<<"ok">>,ok,none,true}',
                 expression: line(<<~ERLANG)),
          (fun() ->
-            P = open_port({spawn_driver, "erx_program 14 0 4096 4 0 0 bin/note"}, [binary]),
+            P = open_port({spawn_driver, "erx_program 14 0 4096 4 0 0 0 bin/note"}, [binary]),
             <<"ok", D:64>> = port_control(P, 1, []),
             {ok, F} = erx_prog_grammar:build_start(\#{pid => 14, ppid => 1, pgid => 14,
                                                      argv => [<<"note">>, <<"request">>], env => [],
@@ -217,7 +302,7 @@ module Erx
        # so spin's liberx ends it with 127 at that later frame, which shows it arrived.
        Case.new(name: 'busy', seconds: 60, answer: '{busy,ok,busy,room,ok,127}', expression: line(<<~ERLANG)),
          (fun() ->
-            P = open_port({spawn_driver, "erx_program 12 0 4096 4 0 0 bin/spin"}, [binary]),
+            P = open_port({spawn_driver, "erx_program 12 0 4096 4 0 0 0 bin/spin"}, [binary]),
             <<"ok", D:64>> = port_control(P, 1, []),
             {ok, F} = erx_prog_grammar:build_start(\#{pid => 12, ppid => 1, pgid => 12,
                                                      argv => [<<"spin">>, binary:copy(<<"x">>, 40000)], env => [],
@@ -310,11 +395,11 @@ module Erx
     # has answered node(), its answer, then node() typed again. An answer line of the
     # case's own, or an exception, ends the cell at once, quoting the line, unless it is
     # the answer.
-    def checkpoints(points, fault_answer:)
+    def checkpoints(points, fault_answer:, rights:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
       node = ->(name) { { name: name, pattern: SessionDomain.answer(ROOT_NODE), seconds: 60 } }
-      typed = cases(fault_answer: fault_answer).flat_map do |each|
+      typed = cases(fault_answer: fault_answer, rights: rights).flat_map do |each|
         [node.call("#{each.name}-ready").merge(type: each.expression).freeze, answer_point(each)]
       end
       [*points,
@@ -408,8 +493,18 @@ module Erx
         Qemu.new(root: @root, runner: @runner, program: @qemu)
             .run(platform: @machine.platform, accel: accel, cpus: count, remote: remote, image: built.single,
                  memory_mib: @machine.memory_mib,
-                 checkpoints: Programs.checkpoints(points, fault_answer: fault_answer))
+                 checkpoints: Programs.checkpoints(points, fault_answer: fault_answer, rights: hand_rights))
         'passed'
+      end
+
+      # The handle rights of a write end's copies (docs/design-pipes.md, "The rights of a
+      # copy"), from the rights abi/kernel.txt numbers: its ring's READ, WRITE and MAP, its
+      # reader page's READ and MAP.
+      def hand_rights
+        bits = File.foreach(File.join(@root, 'abi/kernel.txt')).filter_map do |line|
+          line.match(/\Aright (\w+) (\d+) /)&.captures
+        end.to_h { |name, bit| [name, 1 << Integer(bit, 10)] }
+        { ring: bits.fetch_values('read', 'write', 'map').sum, rpage: bits.fetch_values('read', 'map').sum }
       end
 
       # fault's answer as the shell prints it: the status, ERX_EXIT_SIGNAL plus the signal the

@@ -16,7 +16,8 @@
 
 /*
  * A step that made nothing of its own: a map and an install die with their space, the
- * buffer's map into the image among them.
+ * buffer's map into the image among them, and a pipe end's doorbell, bound to the
+ * program's group, is the pipe server's to close.
  */
 #define NO_UNDO	ERX_PROGRAM_DONE
 
@@ -26,15 +27,19 @@
  * What the session keeps and maps of the program's channel comes before the program's
  * budget, so every release deletes it only after that budget is destroyed, by this order
  * alone (docs/design-programs.md, "The channel"). The lease of a window's buffer is taken
- * first, so its return is the last undo of every release, after the anchor's destroy has
- * ended the buffer's mapping (docs/design-display.md, "The pixel area"); the buffer is
- * mapped into the image before the image's own map, so an image that meets it is refused.
+ * first and the hand-offs next, so the undos that let them go are every release's last two,
+ * after the anchor's destroy: the port's hold on the program's holder entry goes after every
+ * image of the program has ended (docs/design-pipes.md, "A program's gone"), then the lease
+ * returns after the buffer's mapping has ended (docs/design-display.md, "The pixel area").
+ * The buffer is mapped into the image before the image's own map, so an image that meets it
+ * is refused.
  */
 static const struct {
 	erx_program_act_t	step;
 	erx_program_act_t	undo;
 } plan[] = {
 	{ ERX_PROGRAM_LEASE_TAKE, ERX_PROGRAM_LEASE_RETURN },
+	{ ERX_PROGRAM_HANDS_TAKE, ERX_PROGRAM_HOLD_RELEASE },
 	{ ERX_PROGRAM_CHANNEL_CREATE, ERX_PROGRAM_CHANNEL_DESTROY },
 	{ ERX_PROGRAM_CHANNEL_MAP, ERX_PROGRAM_CHANNEL_UNMAP },
 	{ ERX_PROGRAM_BELL_CREATE, ERX_PROGRAM_BELL_DESTROY },
@@ -51,7 +56,9 @@ static const struct {
 	{ ERX_PROGRAM_LEASE_MAP, NO_UNDO },
 	{ ERX_PROGRAM_IMAGE_MAP, NO_UNDO },
 	{ ERX_PROGRAM_INSTALL, NO_UNDO },
+	{ ERX_PROGRAM_HANDS_INSTALL, NO_UNDO },
 	{ ERX_PROGRAM_BELL_BIND, ERX_PROGRAM_BELL_UNBIND },
+	{ ERX_PROGRAM_HANDS_BIND, NO_UNDO },
 	{ ERX_PROGRAM_THREAD_CREATE, ERX_PROGRAM_THREAD_CLOSE },
 };
 #define PLAN_STEPS	((uint32_t)(sizeof(plan) / sizeof(plan[0])))
@@ -155,6 +162,15 @@ erx_program_install_rights(uint32_t index)
 	return (index < ERX_PROGRAM_INSTALLS ? install_rights[index] : 0);
 }
 
+/* The most a pipe's copy carries: what a memory copy is mapped with, and a doorbell's trigger. */
+#define HAND_RIGHTS	(ERX_HR_READ | ERX_HR_WRITE | ERX_HR_MAP | ERX_HR_TRIGGER)
+
+uint32_t
+erx_program_hand_rights(uint32_t rights)
+{
+	return (rights & HAND_RIGHTS);
+}
+
 uint32_t
 erx_program_session_prot(uint32_t index)
 {
@@ -164,11 +180,11 @@ erx_program_session_prot(uint32_t index)
 }
 
 uint32_t
-erx_program_install_batch(uint32_t first)
+erx_program_pass_batch(uint32_t first, uint32_t count)
 {
-	if (first >= ERX_PROGRAM_INSTALLS)
+	if (first >= count)
 		return (0);
-	return (ERX_PROGRAM_INSTALLS - first < ERX_MSG_CAPS ? ERX_PROGRAM_INSTALLS - first : ERX_MSG_CAPS);
+	return (count - first < ERX_MSG_CAPS ? count - first : ERX_MSG_CAPS);
 }
 
 erx_program_end_t
@@ -235,6 +251,12 @@ static bool
 alive(const erx_program_end_t *end)
 {
 	return (end->answered && end->phase == ERX_PROGRAM_RUNNING && !end->anchor_ended);
+}
+
+bool
+erx_program_end_installs(const erx_program_end_t *end)
+{
+	return (alive(end));
 }
 
 static size_t

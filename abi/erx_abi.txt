@@ -213,20 +213,25 @@ enum program_arg u32
 # sides with it and liberx maps them with it, so neither reads it from the
 # other's pages.
 limit program_lane u32 16384
-# The most capabilities each of a program's spaces, its anchor and its image,
-# may hold: the image's install takes ERX_PROGRAM_INSTALLS of them
+# The most capabilities a program's anchor may hold, and the least its image
+# may: the image's install takes ERX_PROGRAM_INSTALLS of them
 # (otp/erts/emulator/sys/erxos/erx_program_core.h), and the rest are the
 # program's own; erx_program_drv.c fails to build unless the install fits.
+# The image's table also takes every copy of the pipe hand-offs the program
+# is given, at its start and while it runs, so the driver makes it with
+# caps_max, which the backend grows only as it fills.
 limit program_cap_limit u32 16
 # The program port's control commands, from erx_program.erl to
 # erx_program_drv.c (docs/design-runtime.md#programs-as-ports): how the
 # start ended, a frame to write, the first thread's start, the anchor's
-# stop.
+# stop, and the install of a pipe hand-off into the running program
+# (docs/design-pipes.md#hand-offs).
 enum program_control u8
   value started 1
   value send 2
   value run 3
   value stop 4
+  value install 5
 # The kind of each grant a send's payload carries: a {closed} or a
 # {drained} notice the frame makes due (docs/design-programs.md#the-program-protocol,
 # Credit). A send's reply slot is program_send_no_reply for a frame that

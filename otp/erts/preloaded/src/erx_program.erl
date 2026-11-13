@@ -17,7 +17,8 @@ by the owner's exit, kills the program.
 The owner, the program's handler, writes later frames with `send/2` and
 receives each frame the program writes as `{erx_channel, Port, Frame}`, as
 many as the program's credit allows (docs/design-programs.md, Credit).
-`stop/3` stops the program's anchor with a status of the handler's choice.
+`install/2` installs a pipe hand-off into the running program, and `stop/3`
+stops the program's anchor with a status of the handler's choice.
 
 The driver makes every decision (erx_program_core.c); this module builds
 the startup message with the program protocol's generated grammar
@@ -25,7 +26,7 @@ the startup message with the program protocol's generated grammar
 frame it sends gives the program's credit, and reads how each step ended.
 """.
 
--export([start/1, send/2, stop/3]).
+-export([start/1, send/2, install/2, stop/3]).
 
 %% The driver's port_control commands (?ERX_PROGRAM_CONTROL_*), the reply slot
 %% of a send that answers no request (?ERX_PROGRAM_SEND_NO_REPLY) and each
@@ -60,13 +61,19 @@ parent's and its process group's; `argv` and `env`, lists of binaries, each
 `spawn`, whether a spawn started it; `sigmask` and `sigignore`, lists of
 signal names (`sigterm`); and `umask`. It may hold `guarantee` and `cap`,
 its budget in pages, `slots`, its data area's 64 KiB slots (4 by default),
-and `fds`, its descriptors: `[]`, the default, or one window's buffer,
-`[{N, {mem, Lease, Pages}}]`, a lease the caller holds of the buffer's
+and `fds`, its descriptors, `[]` by default: at most one window's buffer,
+`{N, {mem, Lease, Pages}}`, a lease the caller holds of the buffer's
 `Pages`, which the program finds as descriptor `N`, mapped at the buffer
-place (docs/design-display.md, The pixel area). The caller becomes the
-port's owner, so only a lease it holds is taken; a lease the start does not
-take stays held, for the caller to give back.
-These make the startup message the program receives before `main`
+place (docs/design-display.md, The pixel area), and pipe ends, each
+`{N, {pipe_hand, Number, Descriptor}}`, the pipe server's hand-off `Number`
+to the caller, from 1 to 2^64-1, whose `Descriptor` writes each capability
+value as `{hand, I}`, the `I` running from 1 to their count, each once
+(docs/design-pipes.md, Hand-offs). The caller becomes the port's owner, so
+only a lease it holds is taken; a lease the start does not take stays held,
+for the caller to give back. The driver takes each hand-off and installs its
+copies, and the startup message carries the descriptor with each `{hand, I}`
+replaced by the value the `I`-th copy took in the program's table. These make
+the startup message the program receives before `main`
 (docs/design-programs.md, The startup message).
 
 `Reason` is `e2big` for a message whose strings are too large, as the
@@ -74,20 +81,24 @@ grammar of the program protocol bounds them, and `einval` for any other
 value the message refuses, a pid outside 2..2^31-1 among them; otherwise it
 is the kernel status, e-prefixed, of the step that refused the program:
 `einval` for an image the session's release does not hold or a `guarantee`
-above the `cap`, `enotsup` where the backend cannot run programs. A spec of
-the wrong shape is `badarg`, as is an image holding a 0 byte, a `guarantee`,
-`cap` or `slots` that is not a natural number, or `fds` other than `[]` or one
-`mem` entry with `N` from 0 to 1023, `Lease` from 1 to 2^64-1 and `Pages`
-from 1 to the pages of `prog_mem_bytes`; a lease the start cannot take, one
-not held by the caller or of other pages, is `einval`; a
-`slots` outside 1..16 is `einval`, as the message refuses it.
+above the `cap`, `enotsup` where the backend cannot run programs, and
+`einval` for a hand-off the pipe NIF does not answer to the caller for this
+program, or whose copies do not match its descriptor. A spec of the wrong
+shape is `badarg`, as is an image holding a 0 byte, a `guarantee`, `cap` or
+`slots` that is not a natural number, or `fds` other than a list of at most
+one `mem` entry, with `N` from 0 to 1023, `Lease` from 1 to 2^64-1 and
+`Pages` from 1 to the pages of `prog_mem_bytes`, and of hand-offs of that
+form; a lease the start cannot take, one not held by the caller or of other
+pages, is `einval`; a `slots` outside 1..16 is `einval`, as the message
+refuses it.
 """.
 -spec start(#{image := binary(), pid := non_neg_integer(), ppid := pos_integer(),
               pgid := pos_integer(), argv := [binary()], env := [binary()], cwd := binary(),
               spawn := boolean(), sigmask := [atom()], sigignore := [atom()],
               umask := non_neg_integer(), guarantee => non_neg_integer(),
               cap => non_neg_integer(), slots => pos_integer(),
-              fds => [] | [{non_neg_integer(), {mem, pos_integer(), pos_integer()}}]}) ->
+              fds => [{non_neg_integer(), {mem, pos_integer(), pos_integer()} |
+                                          {pipe_hand, pos_integer(), term()}}]}) ->
           port() | {error, atom()}.
 start(#{image := Image, pid := Pid} = Spec) when is_binary(Image), is_integer(Pid), Pid >= 0 ->
     %% The command is a C string, which a 0 byte would cut short.
@@ -95,32 +106,30 @@ start(#{image := Image, pid := Pid} = Spec) when is_binary(Image), is_integer(Pi
     Guarantee = maps:get(guarantee, Spec, ?DEFAULT_GUARANTEE),
     Cap = maps:get(cap, Spec, ?DEFAULT_CAP),
     Slots = maps:get(slots, Spec, ?DEFAULT_SLOTS),
-    Buffer = case maps:get(fds, Spec, []) of
-                 [] -> none;
-                 [{N, {mem, Lease, Pages}}] when is_integer(N), N >= 0, N < ?ERX_PROG_FDS_MAX,
-                                                 ?IS_LEASE(Lease), ?IS_MEM_PAGES(Pages) ->
-                     {N, Lease, Pages};
-                 _ -> erlang:error(badarg, [Spec])
-             end,
-    case natural(Guarantee) andalso natural(Cap) andalso natural(Slots) of
+    Fds = fds(maps:get(fds, Spec, [])),
+    case natural(Guarantee) andalso natural(Cap) andalso natural(Slots) andalso Fds =/= badarg of
         true -> ok;
         false -> erlang:error(badarg, [Spec])
     end,
-    %% The message is checked whole before anything is made.
-    case frame(Spec, ?LONGEST_CAP, Slots, Buffer) of
-        {ok, _} -> open(Spec, Image, Pid, Guarantee, Cap, Slots, Buffer);
+    %% The message is checked whole before anything is made, every capability value at its
+    %% longest, each distinct, since the message refuses a value named twice.
+    {Buffer, Hands} = Fds,
+    Longest = longest(Hands, ?LONGEST_CAP - 1),
+    case frame(Spec, ?LONGEST_CAP, Slots, {Buffer, Longest}) of
+        {ok, _} -> open(Spec, Image, Pid, Guarantee, Cap, Slots, Fds);
         {error, _} = Refused -> Refused
     end;
 start(Spec) ->
     erlang:error(badarg, [Spec]).
 
-%% The driver's command is "erx_program Pid Guarantee Cap Slots Lease Pages Image",
-%% Lease and Pages 0 with no buffer, the image last since it is the one field that
-%% may hold a space. A port whose start failed
-%% is open with nothing made, and is closed here. A data area's value of cap_null,
-%% which the grammar refuses, closes the port as a refusal of the driver's does,
-%% which kills the program.
-open(Spec, Image, Pid, Guarantee, Cap, Slots, Buffer) ->
+%% The driver's command is
+%% "erx_program Pid Guarantee Cap Slots Lease Pages Hands Number... Image", Lease and
+%% Pages 0 with no buffer, Hands the count of the hand-offs' numbers that follow, the
+%% image last since it is the one field that may hold a space. A port whose start failed
+%% is open with nothing made, and is closed here. A data area's value of cap_null, which
+%% the grammar refuses, closes the port as a refusal of the driver's does, which kills the
+%% program, and so does an answer whose copies do not match the hand-offs' descriptors.
+open(Spec, Image, Pid, Guarantee, Cap, Slots, {Buffer, Hands}) ->
     {Lease, Pages} = case Buffer of
                          none -> {0, 0};
                          {_N, L, P} -> {L, P}
@@ -128,19 +137,47 @@ open(Spec, Image, Pid, Guarantee, Cap, Slots, Buffer) ->
     Command = iolist_to_binary([<<"erx_program ">>, integer_to_binary(Pid), $\s,
                                 integer_to_binary(Guarantee), $\s, integer_to_binary(Cap), $\s,
                                 integer_to_binary(Slots), $\s, integer_to_binary(Lease), $\s,
-                                integer_to_binary(Pages), $\s, Image]),
+                                integer_to_binary(Pages), $\s, integer_to_binary(length(Hands)), $\s,
+                                [[integer_to_binary(Number), $\s] || {_, Number, _, _} <- Hands],
+                                Image]),
     Port = open_port({spawn_driver, Command}, [binary]),
     case port_control(Port, ?ERX_PROGRAM_CONTROL_STARTED, []) of
-        <<"ok", Data:64>> ->
-            case frame(Spec, Data, Slots, Buffer) of
-                {ok, Frame} -> run(Port, Frame);
-                {error, _} = Refused ->
-                    port_close(Port),
-                    Refused
+        <<"ok", Data:64, Rest/binary>> ->
+            case started(Hands, Rest) of
+                {ok, Filled} -> built(Port, frame(Spec, Data, Slots, {Buffer, Filled}));
+                error -> built(Port, {error, einval})
             end;
         Refused ->
             refused(Port, Refused)
     end.
+
+%% Writes the startup message the start's answer completed, or closes the port, which
+%% kills the program, when the message refused that answer.
+built(Port, {ok, Frame}) ->
+    run(Port, Frame);
+built(Port, {error, _} = Refused) ->
+    port_close(Port),
+    Refused.
+
+%% The hand-offs with stand-ins for their copies' values, counting down from Next: below the
+%% data area's, and each of the longest encoding, as any value above 2^63 is.
+longest([{N, _, Count, Descriptor} | Hands], Next) ->
+    [{N, Count, Descriptor, lists:seq(Next, Next - Count + 1, -1)} | longest(Hands, Next - Count)];
+longest([], _) ->
+    [].
+
+%% Each hand-off of STARTED's answer after the data area's value, in the spec's order: the
+%% count of its copies, 32 bits, and each copy's value, 64 bits. Each count must be the one
+%% its descriptor names, and nothing may follow the last.
+started([{N, _, Count, Descriptor} | Hands], <<Count:32, Values:(8 * Count)/binary, Rest/binary>>) ->
+    case started(Hands, Rest) of
+        {ok, Filled} -> {ok, [{N, Count, Descriptor, words(Values)} | Filled]};
+        error -> error
+    end;
+started([], <<>>) ->
+    {ok, []};
+started(_, _) ->
+    error.
 
 %% Writes the startup message with the data area's value, then starts the first
 %% thread. The message is the channel's first frame, so the driver is never busy
@@ -185,6 +222,38 @@ send(Port, Frame) ->
         <<"busy">> -> busy;
         <<$e, _/binary>> = Status -> {error, binary_to_atom(Status)}
     end.
+
+-doc """
+Installs `Hand`, the pipe server's hand-off `{pipe_hand, Number, Term}` to the
+caller, into the running program (docs/design-pipes.md, Hand-offs): the
+driver takes it only when the caller is both the port's owner and the
+hand-off's, passes its copies into the program's table, binds the doorbell
+of the end it gives to the program's group, and lets it go. `{ok, Filled}`,
+`Term` with each `{hand, I}` replaced by the value the `I`-th copy took,
+for the caller to send in the frame that names them; `{error, einval}` for a
+caller or a hand-off the driver refuses, or copies that do not match `Term`;
+`{error, edead}` once the program is ending; `{error, enomem}`. A failed
+install names nothing to the program, and copies it passed before the
+failure stay unnamed in its table until it ends. A `Number` outside
+1..2^64-1, or a `Term` whose `{hand, I}` do not run from 1 to their count,
+each once, is `badarg`.
+""".
+-spec install(port(), {pipe_hand, pos_integer(), term()}) -> {ok, term()} | {error, atom()}.
+install(Port, {pipe_hand, Number, Term} = Hand) ->
+    Count = case hand_count(Number, Term) of
+                badarg -> erlang:error(badarg, [Port, Hand]);
+                Counted -> Counted
+            end,
+    case port_control(Port, ?ERX_PROGRAM_CONTROL_INSTALL, <<Number:64>>) of
+        <<"ok", Values/binary>> when byte_size(Values) =:= 8 * Count ->
+            {ok, fill(Term, list_to_tuple(words(Values)))};
+        <<"ok", _/binary>> ->
+            {error, einval};
+        <<$e, _/binary>> = Refused ->
+            {error, binary_to_atom(Refused)}
+    end;
+install(Port, Hand) ->
+    erlang:error(badarg, [Port, Hand]).
 
 -doc """
 Stops the program's anchor, and with it the program, with `Status`, which its
@@ -268,21 +337,23 @@ refused(Port, <<$e, _/binary>> = Status) ->
     port_close(Port),
     {error, binary_to_atom(Status)}.
 
-%% The startup message's value, with the data area's value Data, the window's
-%% buffer as a mem range at the buffer place, and the pid as the spec gives
-%% it; every other key the message needs comes from the spec, and a missing
-%% one is the builder's refusal.
-message(#{pid := Pid} = Spec, Data, Slots, Buffer) ->
+%% The startup message's value, with the data area's value Data, the window's buffer as
+%% a mem range at the buffer place, each hand-off's descriptor with its copies' values in
+%% place, in descriptor order, and the pid as the spec gives it; every other key the
+%% message needs comes from the spec, and a missing one is the builder's refusal.
+message(#{pid := Pid} = Spec, Data, Slots, {Buffer, Hands}) ->
+    Fds = buffer_fds(Buffer) ++
+        [{N, fill(Descriptor, list_to_tuple(Values))} || {N, _Count, Descriptor, Values} <- Hands],
     maps:merge(maps:with(?MESSAGE_KEYS, Spec),
-               #{pid => Pid, data_area => {Data, Slots}, fds => fds(Buffer)}).
+               #{pid => Pid, data_area => {Data, Slots}, fds => lists:keysort(1, Fds)}).
 
-fds(none) -> [];
-fds({N, _Lease, Pages}) -> [{N, {mem, ?ERX_PROG_MEM_BASE div ?ERX_PAGE_SIZE, Pages}}].
+buffer_fds(none) -> [];
+buffer_fds({N, _Lease, Pages}) -> [{N, {mem, ?ERX_PROG_MEM_BASE div ?ERX_PAGE_SIZE, Pages}}].
 
-%% The startup message's frame with the data area's value Data, or its refusal's
-%% status.
-frame(Spec, Data, Slots, Buffer) ->
-    case erx_prog_grammar:build_start(message(Spec, Data, Slots, Buffer)) of
+%% The startup message's frame with the data area's value Data, the buffer and the
+%% hand-offs' values, or its refusal's status.
+frame(Spec, Data, Slots, Fds) ->
+    case erx_prog_grammar:build_start(message(Spec, Data, Slots, Fds)) of
         {ok, _} = Built -> Built;
         {error, Refusal} -> {error, refusal(Refusal)}
     end.
@@ -295,6 +366,73 @@ refusal({total, args}) -> e2big;
 refusal(_) -> einval.
 
 natural(N) -> is_integer(N) andalso N >= 0.
+
+%% The spec's fds as {Buffer, Hands}: the window's buffer, none or {N, Lease, Pages}, and
+%% the hand-offs in order, as hands/1 gives them; badarg for fds that are not a list of at
+%% most one mem entry and of hand-offs.
+fds(Fds) when is_list(Fds) ->
+    {Mems, Pipes} = lists:partition(fun({_, {mem, _, _}}) -> true; (_) -> false end, Fds),
+    case {buffer(Mems), hands(Pipes)} of
+        {badarg, _} -> badarg;
+        {_, badarg} -> badarg;
+        Parsed -> Parsed
+    end;
+fds(_) ->
+    badarg.
+
+buffer([]) ->
+    none;
+buffer([{N, {mem, Lease, Pages}}]) when is_integer(N), N >= 0, N < ?ERX_PROG_FDS_MAX,
+                                        ?IS_LEASE(Lease), ?IS_MEM_PAGES(Pages) ->
+    {N, Lease, Pages};
+buffer(_) ->
+    badarg.
+
+%% The hand-offs a spec's fds name, in order, as {N, Number, Count, Descriptor}, or
+%% badarg for fds that are not all {N, {pipe_hand, Number, Descriptor}} entries, each of
+%% a form hand_count/2 counts.
+hands(Fds) ->
+    Hands = [hand(Fd) || Fd <- Fds],
+    case lists:member(badarg, Hands) of
+        true -> badarg;
+        false -> Hands
+    end.
+
+hand({N, {pipe_hand, Number, Descriptor}}) ->
+    case hand_count(Number, Descriptor) of
+        badarg -> badarg;
+        Count -> {N, Number, Count, Descriptor}
+    end;
+hand(_) ->
+    badarg.
+
+%% The count of a hand-off's copies: its number lies in 1..2^64-1, and the {hand, I} of
+%% its term run from 1 to their count, each once; badarg otherwise.
+hand_count(Number, Term) when is_integer(Number), Number >= 1, Number =< 16#ffffffffffffffff ->
+    Places = lists:sort(holes(Term)),
+    case Places =:= lists:seq(1, length(Places)) of
+        true -> length(Places);
+        false -> badarg
+    end;
+hand_count(_, _) ->
+    badarg.
+
+%% Every I of a {hand, I} in Term, in tuples, lists and map values.
+holes({hand, I}) -> [I];
+holes(Tuple) when is_tuple(Tuple) -> holes(tuple_to_list(Tuple));
+holes([Head | Tail]) -> holes(Head) ++ holes(Tail);
+holes(Map) when is_map(Map) -> holes(maps:values(Map));
+holes(_) -> [].
+
+%% Term with each {hand, I} replaced by element I of Values, where holes/1 finds them.
+fill({hand, I}, Values) -> element(I, Values);
+fill(Tuple, Values) when is_tuple(Tuple) -> list_to_tuple(fill(tuple_to_list(Tuple), Values));
+fill([Head | Tail], Values) -> [fill(Head, Values) | fill(Tail, Values)];
+fill(Map, Values) when is_map(Map) -> maps:map(fun(_, Value) -> fill(Value, Values) end, Map);
+fill(Other, _) -> Other.
+
+%% The 64-bit big-endian words of a driver's answer.
+words(Bytes) -> [Word || <<Word:64>> <= Bytes].
 
 %% Whether the image holds a 0 byte.
 has_nul(<<0, _/binary>>) -> true;

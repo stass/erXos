@@ -2267,6 +2267,18 @@ it; git history is the record of completed work.
   owns their uniqueness (docs/design-programs.md, a program's start, step 5) and makes it hold by
   never giving a pid twice; until it exists, a test's spec names the pid. The gate worker's 64 registrations
   (two a program) bound a session to 32 programs at once, each start past that refused with `elimit`.
+* [Medium] stopgap, `sys/erxos/erx_program_drv.c` (`PROGRAM_IMAGE_CAP_LIMIT`) and
+  `liberx/backend/fiasco/object.c` (`erx_backend_handles_init`): a program's image is made with a table
+  of `caps_max` capabilities, so it holds every copy of its pipe hand-offs, and the Fiasco backend grows
+  the table as it fills, from `erx_fiasco_vm_records`. Whether that growth is charged to the program's
+  budget is unverified; if it is not, a program that duplicates its own capabilities grows its table
+  from the backend's pool, up to `caps_max` entries. Read where `erx_fiasco_vm_records` takes its
+  pages and record the answer; erXos's kernel charges a table's growth to the space's budget.
+* [Low] ERTS, `sys/erxos/erx_program_drv.c` (`started_values`): STARTED's answer of a start with the
+  most hand-offs, `prog_fds_max` of `pipe_hand_copies_max` copies each, is about 25 MB, and when its
+  allocation fails `port_control` raises in `erx_program:start/1` with the program's spaces made, so
+  they stay until the caller's exit closes the port. Answer `enomem` from a preallocated reply, or
+  bound the copies a start takes.
 * [Low] stopgap, `liberx/backend/core/park_table.h` (`listed`) and `park_table.c`: a group holds at
   most 64 IRQ objects, since `listed` is a 64-bit map with one bit per object and the file
   asserts `ERX_BACKEND_PARK_OBJECTS_MAX <= 64`. A group that would need a 65th doorbell is refused with an error:
@@ -2298,16 +2310,15 @@ it; git history is the record of completed work.
   `{discard}`, `{withdraw}` and the collector of deposits no reader can reach
   (docs/design-pipes.md, "The second tier" and "Deposits"), and `holder()` has no
   `{deposit, Ticket}`. `test/erlang/erx_pipe_explore.erl` gains their events with them.
-* [Medium] session, `erx_program.erl`, `erx_program_drv.c`, `erx_prog_handler`: no program holds an end of a
-  session's pipe yet. The pipe NIF's hand-offs and holder entries and `erx_pipe_srv`'s side are built
-  (docs/design-pipes.md, "Hand-offs"); what remains is the program's side: `start/1`'s
-  `{N, {pipe_hand, Number, Descriptor}}` entries and the driver's take (`erx_pipe_hand_take`, erx_pipe.h, naming the program by its open command's pid),
-  install with each copy's rights, bind of the doorbell with the hand-off's label, release, and
-  `erx_pipe_holder_release` after the anchor's release; `erx_program:install/2` with its `driver_caller` check;
+* [Medium] session, `erx_prog_handler`: no program holds an end of a session's pipe yet. The pipe NIF's
+  hand-offs and holder entries, `erx_pipe_srv`'s side and the program driver's takes, installs, binds and
+  hold release (`erx_program:start/1`'s `{N, {pipe_hand, Number, Descriptor}}` entries and
+  `erx_program:install/2`) are built (docs/design-pipes.md, "Hand-offs"); what remains is
   `erx_prog_handler`, which makes the program's holder entry, asks for the ends on its starter's behalf,
   forwards the program's notices with `erx_pipe_srv:forward/1`, holds and writes its reports, and drops its
   hand-offs and hold after a failed start; and the QEMU tests of hand-offs between domains
-  (docs/design-pipes.md, "Verification and testing").
+  (docs/design-pipes.md, "Verification and testing"). The programs suite's `pipe_hand` and `install` cases
+  stand in for the handler at root_1's shell.
 * [Medium] session, `erx_pipe_nif.c` and `erx_event.c`: each ring of a session end's doorbell is one
   `{erx_pipe_ready, _, _}` message, uncoalesced, so while an end waits (bits set for that wait only) a
   co-reader that loops on the lock or a writer's repeated crossings can queue many messages before the
@@ -5616,7 +5627,7 @@ to the corpus and follow rc
   a principal that a start row names, an app's or a person's, and that never enrolled can be enrolled by whoever
   first reaches a secure console line, as any principal can, and then logged in to with its authority. Settle it in
   the login design, which covers every place a person meets the system.
-- [Low] session, a failed install into a running program (`erx_program_drv.c`, docs/design-pipes.md, "Hand-offs"): the copies the driver passed before the failure stay in the image unnamed until it ends. For a reply that fails, the ends are closed, so a hostile program that finds an unnamed `WRITE` copy of a closed write end's ring in its own table, as a failed `redeem` of a write end leaves, can append records that the pipe's readers, which read a gone writer's lane until it drains, take as data. Close the passed copies on failure if erXos's kernel gives a creator a close in a sub-space's table.
+- [Medium] session, a failed install into a running program (`erx_program_drv.c`, docs/design-pipes.md, "Hand-offs"): the copies the driver passed before the failure stay in the image unnamed until it ends. For a reply that fails, the ends are closed, so a hostile program that finds an unnamed `WRITE` copy of a closed write end's ring in its own table, as a failed `redeem` of a write end leaves, can append records that the pipe's readers, which read a gone writer's lane until it drains, take as data. Close the passed copies on failure if erXos's kernel gives a creator a close in a sub-space's table. The pipe server's records then also disagree with what the program holds: a reader can see end of stream while the program can still write the ring. A cheaper fix that holds by construction: when a pass or the bind fails after any copy reached the image, stop the program (`ERX_PROGRAM_REFUSED` through `end_feed`), so its copies die with the image; that changes docs/design-pipes.md, "Hand-offs", which names the unnamed copies as the outcome.
 - [Low] program channel on the stopgap (`liberx/backend/fiasco/object.c`): the Fiasco backend records no rights per handle, so a program can map the session's lane side read-write. It can bind or unbind only IRQ objects it holds in its own group: it holds no handle to its channel doorbell, and `irq_group_allowed` refuses the session's doorbell, which is also the gate worker's IRQ for the program's port. A program also holds `TRIGGER` copies of its own pipe ends' doorbells, bound in its own group, and can rebind them to any label, label 1 included; that costs it only its own wakes. Any task can create IRQ objects up to the machine-wide 256 (`ERX_FIASCO_IRQS_MAX`) and starve every other domain's doorbells. erXos's kernel enforces the rights the install grants (`erx_program_core.c` `install_rights`).
 
 * [Low] inspect service, the runtime agent leg ([design-live.md](docs/design-live.md#the-runtime-agent)): a
