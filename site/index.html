@@ -515,6 +515,7 @@ Error in process &lt;0.150.0&gt; with exit value:
           <h3>Raspberry Pi 4</h3>
           <p class="download-get"><a class="btn" href="{{card_file}}" download>Download card</a> <span class="label">.img.xz &middot; {{card_download_size}}</span></p>
           <p>Write it to a microSD card with <code>dd</code> or Raspberry Pi Imager.</p>
+          <p>It boots to the command shell on the serial console (GPIO 14 and 15, 115200 baud), keeps files in <code>/data</code> on the card, and brings up Ethernet with DHCP. It needs a bootloader from 2022-12-01 or later: with an older one nothing appears on the console, and Raspberry Pi Imager's bootloader image updates it.</p>
         </div>
         <div class="download-more">
           <pre tabindex="0"><code># diskN: the card in diskutil list; everything on it is erased
