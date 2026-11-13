@@ -497,13 +497,18 @@ short would let it land after the next read.
 
 The keepers are a separate branch of the application's supervision
 tree, so a crash of the table's process restarts it and no session ends.
-The keepers' branch also holds what the table must not forget, as child
-specs OTP keeps without a process: each enabled row's supervisor spec,
-with what its session is kept with, whose missing pid is a row that is
-down; a stopped mark, a bare name, for each row `service NAME stop`
-stopped while it was enabled; and the text of `rc.conf` the table was
-last made from. These records are the only store of the rows' run
-state; the table's process keeps none of its own.
+The keepers' branch also holds what the table must not forget. Each
+enabled row's supervisor is a transient child, which OTP keeps as a spec
+with no pid once it ends at its intensity: the spec holds what the
+row's session is kept with, and its missing pid is a row that is down.
+The rest is held by one plain process in the branch, the records
+process (`erx_starter_records`): a stopped mark, a bare name, for each
+row `service NAME stop` stopped while it was enabled, and the text of
+`rc.conf` the table was last made from, each replaced in one step. It is
+the branch's significant child, and the branch shuts down when it ends,
+so the records and the sessions they describe are only ever lost
+together. These records are the only store of the rows' run state; the
+table's process keeps none of its own.
 
 Each time the table is made from `rc.conf`'s text, a pure decision
 (`erx_start_table:reconcile/3`) compares every row's record with the
@@ -523,16 +528,14 @@ which starts the row: a table that ends after the clear finds the row
 enabled, unmarked and not held, and starts it once its own read answers;
 one that ends while the write is in progress leaves the mark, so the row
 stays stopped and the command answers an error (TODO.md).
-The text of `rc.conf` is recorded under a generation: the new text is
-added under the next one before the old is dropped, so a table that ends
-mid-record finds the old text or the new, takes the newest, and never
-finds none.
 
 A restarted table makes its table from the recorded text and changes no
 keeper until its own read of `rc.conf` answers, so a row `rc.conf`
 enabled is not stopped because the file cannot be read. A crash of the
-keepers' branch ends every session it kept, drops its records, stopped
-marks included, and makes the table again as at boot.
+keepers' branch or of its records process ends every session the branch
+kept, drops its records, stopped marks included, and makes the table
+again as at boot, unless a call of the table meets the branch ending its
+rows (TODO.md).
 
 ## Compatibility and migration
 

@@ -228,7 +228,7 @@ init({#{} = Manifest, Directory}) ->
 handle_continue(read, #{rows := []} = State) ->
     {noreply, State#{local := read, merged := []}};
 handle_continue(read, State) ->
-    Recorded = case erx_starter_sup:recorded() of
+    Recorded = case erx_starter_records:recorded() of
                    {ok, Text} -> make(Text, State);
                    none -> State
                end,
@@ -331,7 +331,7 @@ effect({retry, Delay}, State) ->
 %% rows alone, recorded in the keepers' branch first, with the rows' keepers
 %% reconciled with it.
 apply_text(Text, State) ->
-    ok = erx_starter_sup:record(Text),
+    ok = erx_starter_records:record(Text),
     #{merged := After} = Made = make(Text, State),
     {Rows, Stopped} = erx_starter_sup:held(),
     Held = #{Name => {running_or_down(Run), kept(Row)} || {Name, Run, Row} <- Rows},

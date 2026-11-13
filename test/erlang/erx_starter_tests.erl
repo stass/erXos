@@ -49,9 +49,8 @@ starter_test_() ->
       fun start_clears_the_mark_before_it_starts_the_row/1,
       fun enable_clears_the_mark_before_the_table_is_made/1,
       fun the_next_table_completes_a_stop_cut_short/1,
-      fun an_unchanged_text_is_not_recorded_again/1,
-      fun a_new_text_is_recorded_before_the_old_is_dropped/1,
-      fun a_restarted_table_takes_the_newer_of_two_recorded_texts/1,
+      fun a_crash_of_the_records_ends_every_session_and_record/1,
+      fun a_crash_of_the_keepers_branch_ends_every_session_and_record/1,
       fun a_row_neither_held_nor_marked_is_starting/1,
       fun a_write_of_an_ended_table_lands_before_the_next_table_reads/1]}.
 
@@ -111,26 +110,24 @@ only_a_granted_windows_service_is_a_display_test() ->
     ?assertMatch({[#{principal := <<"clock">>, display := <<"screen">>, status := enabled}], []},
                  erx_start_table:merge(Rows, Screen, Grants)).
 
-%% The two behaviours of OTP's one_for_one supervisor the keepers' branch
-%% stands on (erx_starter_sup): a transient child that ends with shutdown is
-%% not restarted and keeps its spec with no pid, and a child whose start
-%% returns ignore keeps its spec with no pid.
-a_one_for_one_supervisor_keeps_a_spec_with_no_pid_test() ->
+%% The two behaviours of the keepers' branch (erx_starter_sup) the table
+%% stands on: a transient child that ends with shutdown is not restarted and
+%% keeps its spec with no pid, which is how a row is down; and an end of the
+%% records process ends the branch, so records and sessions end together.
+the_keepers_branch_keeps_a_down_row_and_ends_with_its_records_test() ->
     {ok, Sup} = supervisor:start_link(erx_starter_sup, keepers),
-    {ok, Child} = supervisor:start_child(Sup, #{id => transient, restart => transient, type => supervisor,
-                                                start => {supervisor, start_link, [erx_starter_sup, keepers]}}),
-    ok = gen_server:stop(Child, shutdown, ?WAIT_MS),
-    ok = wait_until(fun() -> supervisor:which_children(Sup) =:= [{transient, undefined, supervisor, [supervisor]}] end),
-    ?assertMatch({ok, #{id := transient}}, supervisor:get_childspec(Sup, transient)),
-    ?assertEqual({ok, undefined},
-                 supervisor:start_child(Sup, #{id => ignored, restart => transient,
-                                               start => {erx_starter_sup, ignore, [value]}})),
-    ?assertMatch({ok, #{start := {erx_starter_sup, ignore, [value]}}}, supervisor:get_childspec(Sup, ignored)),
-    ?assertEqual(lists:sort([{transient, undefined, supervisor, [supervisor]},
-                             {ignored, undefined, worker, [erx_starter_sup]}]),
-                 lists:sort(supervisor:which_children(Sup))),
     unlink(Sup),
-    ok = gen_server:stop(Sup, shutdown, ?WAIT_MS).
+    Ref = monitor(process, Sup),
+    %% Any process that can end with shutdown stands for a row's supervisor.
+    {ok, Child} = supervisor:start_child(Sup, #{id => transient, restart => transient,
+                                                start => {gen_server, start_link, [erx_starter_records, [], []]}}),
+    ok = gen_server:stop(Child, shutdown, ?WAIT_MS),
+    ok = wait_until(fun() -> lists:keyfind(transient, 1, supervisor:which_children(Sup)) =:=
+                                 {transient, undefined, worker, [gen_server]} end),
+    Records = whereis(erx_starter_records),
+    ?assertMatch({records, Records, worker, _}, lists:keyfind(records, 1, supervisor:which_children(Sup))),
+    exit(Records, kill),
+    receive {'DOWN', Ref, process, Sup, shutdown} -> ok after ?WAIT_MS -> error(branch_outlived_records) end.
 
 %% The rc.conf process carries out the writes of the process whose read came
 %% last alone: an earlier reader's write is refused and changes nothing.
@@ -503,9 +500,9 @@ enable_starts_a_stopped_row_and_clears_its_mark(_) ->
 stop_marks_the_row_before_it_ends_it(_) ->
     fun() ->
             ok = wait_until(fun() -> run(<<"kiosk">>) =:= running end),
-            Calls = supervisor_calls(whereis(erx_starter),
+            Calls = table_calls(whereis(erx_starter),
                                      fun() -> ok = erx_starter:command({stop, <<"kiosk">>, #{}}) end),
-            Mark = {start_child, {stopped, <<"kiosk">>}},
+            Mark = {mark, <<"kiosk">>},
             End = {terminate_child, {row, <<"kiosk">>}},
             ?assertMatch([_, _], [Call || Call <- Calls, Call =:= Mark orelse Call =:= End]),
             ?assertEqual([Mark, End], [Call || Call <- Calls, Call =:= Mark orelse Call =:= End])
@@ -520,9 +517,9 @@ start_clears_the_mark_before_it_starts_the_row(_) ->
             ok = wait_until(fun() -> rc_conf() =:= read end),
             ?assertEqual(ok, erx_starter:command({stop, <<"kiosk">>, #{}})),
             receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(session_outlived_stop) end,
-            Calls = supervisor_calls(whereis(erx_starter),
+            Calls = table_calls(whereis(erx_starter),
                                      fun() -> ok = erx_starter:command({start, <<"kiosk">>, #{}}) end),
-            Clear = {delete_child, {stopped, <<"kiosk">>}},
+            Clear = {unmark, <<"kiosk">>},
             Start = {start_child, {row, <<"kiosk">>}},
             ?assertEqual([Clear, Start], [Call || Call <- Calls, Call =:= Clear orelse Call =:= Start])
     end.
@@ -539,10 +536,10 @@ enable_clears_the_mark_before_the_table_is_made(_) ->
             ok = wait_until(fun() -> rc_conf() =:= read end),
             ?assertEqual(ok, erx_starter:command({stop, <<"kiosk">>, #{}})),
             receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(session_outlived_stop) end,
-            Calls = supervisor_calls(whereis(erx_starter),
+            Calls = table_calls(whereis(erx_starter),
                                      fun() -> ok = erx_starter:command({enable, <<"kiosk">>, #{}}) end),
-            Clear = {delete_child, {stopped, <<"kiosk">>}},
-            ?assertMatch([Clear, {start_child, _} | _],
+            Clear = {unmark, <<"kiosk">>},
+            ?assertMatch([Clear, {record, _} | _],
                          [Call || Call <- Calls, Call =:= Clear orelse is_record_call(Call)])
     end.
 
@@ -554,9 +551,7 @@ the_next_table_completes_a_stop_cut_short(_) ->
             Kiosk = started(?KIOSK),
             ok = wait_until(fun() -> run(<<"kiosk">>) =:= running end),
             %% The mark erx_starter_sup:stop_row/1 writes first.
-            {ok, undefined} = supervisor:start_child(erx_starter_keepers,
-                                                     #{id => {stopped, <<"kiosk">>}, restart => transient,
-                                                       start => {erx_starter_sup, ignore, [<<"kiosk">>]}}),
+            ok = erx_starter_records:mark(<<"kiosk">>),
             ok = restart_table(),
             receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(stop_cut_short_left_running) end,
             ok = wait_until(fun() -> rc_conf() =:= read end),
@@ -564,50 +559,27 @@ the_next_table_completes_a_stop_cut_short(_) ->
             ?assertEqual(none, started_within(?KIOSK, 200))
     end.
 
-%% Recording a text unchanged leaves the record alone.
-an_unchanged_text_is_not_recorded_again(_) ->
-    fun() ->
-            ok = wait_until(fun() -> rc_conf() =:= read end),
-            {ok, Text} = erx_starter_sup:recorded(),
-            ?assertEqual([], record_calls(Text))
-    end.
+%% A crash of the records process, or of the keepers' branch it is in, ends
+%% every session the branch kept and every record: the table is made again
+%% as at boot, so a row that stop stopped runs again.
+a_crash_of_the_records_ends_every_session_and_record(_) ->
+    fun() -> a_crash_ends_every_session_and_record(erx_starter_records) end.
 
-%% A new text is recorded before the old record is dropped, so a table that
-%% ends at any step finds a text recorded.
-a_new_text_is_recorded_before_the_old_is_dropped(_) ->
-    fun() ->
-            ok = wait_until(fun() -> rc_conf() =:= read end),
-            {ok, Text} = erx_starter_sup:recorded(),
-            Edited = <<Text/binary, "# edited\n">>,
-            ?assertMatch([{start_child, _}, {delete_child, _}], record_calls(Edited)),
-            ?assertEqual({ok, Edited}, erx_starter_sup:recorded())
-    end.
+a_crash_of_the_keepers_branch_ends_every_session_and_record(_) ->
+    fun() -> a_crash_ends_every_session_and_record(erx_starter_keepers) end.
 
-%% A record cut short between its two steps leaves the old text and the new
-%% one recorded. The table restarted then is made from the newer while
-%% rc.conf is unreadable, and its read, once it answers, leaves one record.
-a_restarted_table_takes_the_newer_of_two_recorded_texts(Setup) ->
-    fun() ->
-            ok = wait_until(fun() -> rc_conf() =:= read end),
-            ?assertEqual(ok, erx_starter:command({enable, <<"clock">>, #{}})),
-            Newer = <<"clock_enable=\"NO\"\n">>,
-            [Generation] = [Id || {{rc_conf, Id}, _, _, _} <- supervisor:which_children(erx_starter_keepers)],
-            %% The new record erx_starter_sup:record/1 adds first.
-            {ok, undefined} = supervisor:start_child(erx_starter_keepers,
-                                                     #{id => {rc_conf, Generation + 1}, restart => transient,
-                                                       start => {erx_starter_sup, ignore, [Newer]}}),
-            ok = file:delete(rc_path(Setup)),
-            ok = file:make_dir(rc_path(Setup)),
-            ok = restart_table(),
-            ?assertEqual(unread, rc_conf()),
-            ?assertEqual(Newer, erx_starter:rc_conf()),
-            ?assertEqual(none, run(<<"clock">>)),
-            ok = file:del_dir(rc_path(Setup)),
-            ok = file:write_file(rc_path(Setup), Newer),
-            ok = wait_until(fun() -> rc_conf() =:= read end),
-            ?assertMatch([_], [Id || {{rc_conf, _} = Id, _, _, _} <- supervisor:which_children(erx_starter_keepers)]),
-            ?assertEqual({ok, Newer}, erx_starter_sup:recorded())
-    end.
+a_crash_ends_every_session_and_record(Crashed) ->
+    ok = watch(),
+    Kiosk = started(?KIOSK),
+    Logger = started(?LOGGER),
+    ok = wait_until(fun() -> rc_conf() =:= read end),
+    ?assertEqual(ok, erx_starter:command({stop, <<"kiosk">>, #{}})),
+    receive {ended, ?KIOSK, Kiosk, _} -> ok after ?WAIT_MS -> error(session_outlived_stop) end,
+    exit(whereis(Crashed), kill),
+    receive {ended, ?LOGGER, Logger, _} -> ok after ?WAIT_MS -> error(session_outlived_crash) end,
+    ?assertNotEqual(Logger, started(?LOGGER)),
+    ?assertNotEqual(Kiosk, started(?KIOSK)),
+    ok = wait_until(fun() -> run(<<"kiosk">>) =:= running end).
 
 %% The table ends while its write of rc.conf is held at the rc.conf process,
 %% and the next table's read waits behind it: the next table is made from the
@@ -702,17 +674,19 @@ queued(Name) ->
     {message_queue_len, Length} = process_info(whereis(Name), message_queue_len),
     Length.
 
-%% The calls of supervisor:start_child/2, terminate_child/2 and delete_child/2
-%% process Pid makes while Act runs, in order, each as {Function, Id}, Id the
-%% child's id.
-supervisor_calls(Pid, Act) ->
-    Functions = [start_child, terminate_child, delete_child],
-    _ = [erlang:trace_pattern({supervisor, Function, 2}, true, []) || Function <- Functions],
+%% The calls process Pid makes while Act runs on the keepers' branch, in
+%% order: supervisor:start_child/2, terminate_child/2 and delete_child/2,
+%% each as {Function, Id}, Id the child's id, and erx_starter_records' mark/1,
+%% unmark/1 and record/1, each as {Function, Argument}.
+table_calls(Pid, Act) ->
+    Functions = [{supervisor, start_child, 2}, {supervisor, terminate_child, 2}, {supervisor, delete_child, 2},
+                 {erx_starter_records, mark, 1}, {erx_starter_records, unmark, 1}, {erx_starter_records, record, 1}],
+    _ = [erlang:trace_pattern(Function, true, []) || Function <- Functions],
     1 = erlang:trace(Pid, true, [call]),
     try Act()
     after
         _ = erlang:trace(Pid, false, [call]),
-        _ = [erlang:trace_pattern({supervisor, Function, 2}, false, []) || Function <- Functions]
+        _ = [erlang:trace_pattern(Function, false, []) || Function <- Functions]
     end,
     Ref = erlang:trace_delivered(Pid),
     receive {trace_delivered, Pid, Ref} -> ok end,
@@ -721,29 +695,14 @@ supervisor_calls(Pid, Act) ->
 traced(Pid) ->
     receive
         {trace, Pid, call, {supervisor, Function, [_Sup, #{id := Id}]}} -> [{Function, Id} | traced(Pid)];
-        {trace, Pid, call, {supervisor, Function, [_Sup, Id]}} -> [{Function, Id} | traced(Pid)]
+        {trace, Pid, call, {supervisor, Function, [_Sup, Id]}} -> [{Function, Id} | traced(Pid)];
+        {trace, Pid, call, {erx_starter_records, Function, [Argument]}} -> [{Function, Argument} | traced(Pid)]
     after 0 -> []
     end.
 
-%% A supervisor call on a record of rc.conf's text.
-is_record_call({_Function, rc_conf}) -> true;
-is_record_call({_Function, {rc_conf, _Generation}}) -> true;
+%% A call that records rc.conf's text.
+is_record_call({record, _Text}) -> true;
 is_record_call(_Call) -> false.
-
-%% The supervisor calls of erx_starter_sup:record(Text), made in a process
-%% of its own.
-record_calls(Text) ->
-    Test = self(),
-    Recorder = spawn_link(fun() -> receive record -> Test ! {recorded, erx_starter_sup:record(Text)} end,
-                                          receive done -> ok end
-                          end),
-    Recorded = fun() ->
-                       Recorder ! record,
-                       receive {recorded, ok} -> ok after ?WAIT_MS -> error(record_stuck) end
-               end,
-    Calls = supervisor_calls(Recorder, Recorded),
-    Recorder ! done,
-    Calls.
 
 %% Kills the table and waits for its supervisor to start the next. The kill is
 %% a signal, so the old table can still hold the name for a while after

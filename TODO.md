@@ -670,6 +670,12 @@ it; git history is the record of completed work.
   The grants of `apps` also end with a crash of `erx_starter_sup` itself, or of the tree's grants supervisor,
   and nothing grants a session no keeper kept (root's console session among them) a new one, as for every service
   the system domain serves.
+* [Medium] The keepers' branch (`erx_starter_sup`) ends its rows before it exits, so between the end of its records
+  process (`erx_starter_records`) or its own intensity and the top supervisor seeing it exit, a call of the table
+  (`rows/0`, a command, an rc.conf answer) crashes the table, and the table's restart and the branch's together
+  exceed the top supervisor's intensity: `erx_starter_sup` ends, and with it the `apps` grants. Placing the records
+  process at the top, before the keepers' branch, so the top supervisor sees its end first and ends the table
+  before the rows, would close the records' half; the branch's own intensity needs the same answer.
 * [Low] `apps` tree review residuals (A6, `erx_starter_fs`): the grant's heap bound in the development manifests
   (131,072 words) is not sized against its fids, each open of `rc.conf` holding the text (up to 64 KiB) until its
   clunk, so enough concurrent opens end the grant at its bound and the session has no `/apps` until it restarts;
