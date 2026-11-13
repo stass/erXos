@@ -1545,12 +1545,14 @@ module Erx
       end
 
       # Property 18's clauses on one display's grants: its server is a configured
-      # domain, no facet row of its service sets session, and the grants' costs fit the
+      # domain, no facet row of its service grants it to the system domain, whose
+      # connections no introduction makes and so carry no pixel area, no facet row of
+      # its service sets session, and the grants' costs fit the
       # display domain's outer budget. Each grant costs its pixel area, its pixels or
       # windows_pixels_default, and the side the display reads for it, the display's own
       # lane, each rounded up to pages; a session template's grant costs that once for
       # each session its principal's domains quota lets live at once, a configured
-      # domain's or the system domain's once.
+      # domain's once.
       def check_display_grants(display, tables, facet_values)
         service = tables.fetch('services').fetch(display.fetch('service'))
         server = service.fetch('server')
@@ -1559,6 +1561,8 @@ module Erx
         limits = tables.fetch('limits').fetch(tables.fetch('domains').fetch(server).fetch('limits'))
         grants = tables.fetch('facets').zip(facet_values).select { |facet, _values| facet.fetch('service') == display.fetch('service') }
         cost = grants.sum do |facet, values|
+          invalid("facet #{facet.fetch('name')} grants a display to the system domain, whose connections carry no pixel area", 18,
+                  'facet.grantee') if facet.fetch('grantee_kind') == grantee_kind('system')
           invalid("facet #{facet.fetch('name')} sets session, which the domain service alone sets", 18, 'facet.parameter') if
             values.key?('session')
           pixels = values.fetch('pixels') { @codec.constant('windows_pixels_default') }

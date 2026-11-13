@@ -75,13 +75,15 @@ An operation has a tag, a number the core never reuses, and one deadline
 for its whole introduction, mint and installation. Introducing is skipped
 for the system domain as grantee, which every domain is connected to.
 
-The pixel area (docs/design-display.md, "The pixel area"). The
-introduction of a grant of a service of the windows interface asks for the
-connection's pixel area, read by the server: the grant's pixels, or
-windows_pixels_default where its limits state none, rounded up to whole
-pages; every other introduction asks for none (0). The library makes the
-area only with a new connection, so a pair already joined keeps the
-connection it has.
+The pixel area (docs/design-display.md, "The pixel area"). A pixel area is
+a fact of a pair of domains, not of an introduction: pair_area/3 decides it
+from the two parties' origins and the manifest's grants alone, so every
+introduction that makes the pair's connection, a grant's or
+erx_domain:introduce/2's, makes the same area. A pair one of whose parties
+serves a service of the windows interface granted to the other, a
+configured row or a session of a template, has an area read by the server:
+the grant's pixels, or windows_pixels_default where its limits state none,
+rounded up to whole pages. Every other pair has none.
 
 Replies are untrusted. A mint's reply counts only from the pair's server,
 for the operation in minting with its tag; an acknowledgement only from the
@@ -102,7 +104,7 @@ state of its own, and a grant with an operation is bounded by its
 deadline, a starting server by its boot timeout.
 """.
 
--export([new/1, step/2, grants/1, granted/3, granted_names/2, in_place/3]).
+-export([new/1, step/2, grants/1, granted/3, granted_names/2, in_place/3, pair_area/3]).
 -export_type([state/0, config/0, event/0, action/0, grant/0, key/0, pair/0]).
 
 -define(SYSTEM_ID, 4).
@@ -145,7 +147,7 @@ deadline, a starting server by its boot timeout.
                | {minted, Origin :: non_neg_integer(), Tag :: term(), Reply :: term()}
                | {installed, Origin :: non_neg_integer(), Tag :: term()}
                | {deadline, tag()}.
--type action() :: {introduce, tag(), ServerId :: id(), GranteeId :: id(), Area :: non_neg_integer()}
+-type action() :: {introduce, tag(), ServerId :: id(), GranteeId :: id()}
                 | {mint, tag(), Mint :: pid(), name(), GranteeId :: id(), Limits :: map()}
                 | {install, tag(), GranteeId :: id(), name(), Facet :: pid()}
                 | {arm, tag(), Milliseconds :: pos_integer()}
@@ -163,8 +165,13 @@ deadline, a starting server by its boot timeout.
                      next_tag := tag(),
                      owner := fun((pid()) -> non_neg_integer()),
                      files := [name()],
-                     windows := [name()],
+                     areas := [area()],
                      deadline := pos_integer()}.
+%% A party of a pair as the domain service records it: its id and its origin, a
+%% configured row's, a session's template's, or a request's.
+-type party() :: {id(), request | {configured, row()} | {session, template()}}.
+%% A windows grant's pixel area: its server row, its grantee and its bytes, whole pages.
+-type area() :: {Server :: row(), row() | {template, template()}, Bytes :: pos_integer()}.
 
 -doc """
 The state of a boot from the manifest's service rows, each a server row and a
@@ -172,8 +179,8 @@ name, and its facet rows served by configured domains, each a grantee, the
 service's name, its server row and the grant's limits. A grantee
 {template, T} grants each session made from template T. Files names the
 services of the files interface, whose grants a namespace mounts, and
-Windows those of the windows interface, whose introductions ask for a pixel
-area; none of either by default. A grant of a
+Windows those of the windows interface, whose grants size their pairs'
+pixel areas (pair_area/3); none of either by default. A grant of a
 service its server does not declare, a grant to its own server, two
 grants of one name to one grantee, or a service whose server is no row (the
 system domain's, which the ready answers serve) is a bug of the caller,
@@ -198,7 +205,7 @@ new(#{services := Services, grants := Grants, owner := Owner} = Config) when is_
                                       fun({_, Name, Server, Limits}) -> {Name, Server, Limits} end, ForTemplates),
     #{declared => Declared, grants => Entries, rows => #{}, templates => Templates, sessions => #{},
           next_tag => 1, owner => Owner, files => maps:get(files, Config, []),
-          windows => maps:get(windows, Config, []),
+          areas => areas(maps:get(windows, Config, []), Grants),
           deadline => maps:get(deadline, Config, ?DEADLINE)}.
 
 entry(Server, Limits, Mark) -> #{server => Server, limits => Limits, mark => Mark, state => idle}.
@@ -398,22 +405,46 @@ start({Grantee, _Name} = Key, {ServerId, GranteeId} = Pair, Cancel,
             {Cancel ++ [{arm, Tag, Deadline}, mint_request(Key, Pair, Tag, State)],
              set_grant(Key, {minting, Pair, Tag}, Armed)};
         _RowOrSession ->
-            {Cancel ++ [{arm, Tag, Deadline}, {introduce, Tag, ServerId, GranteeId, area(Key, State)}],
+            {Cancel ++ [{arm, Tag, Deadline}, {introduce, Tag, ServerId, GranteeId}],
              set_grant(Key, {introducing, Pair, Tag}, Armed)}
     end.
 
-%% The pixel area the introduction for the grant Key asks for, read by its server:
-%% the grant's pixels, or windows_pixels_default, in whole pages, for a service of the
-%% windows interface, and none (0) for any other. The manifest's reader bounds pixels.
-area({_, Name} = Key, #{windows := Windows} = State) ->
-    case lists:member(Name, Windows) of
-        true ->
-            #{limits := Limits} = grant_entry(Key, State),
-            Bytes = maps:get(pixels, Limits, ?ERX_WINDOWS_PIXELS_DEFAULT),
-            (Bytes + ?ERX_PAGE_SIZE - 1) div ?ERX_PAGE_SIZE * ?ERX_PAGE_SIZE;
-        false ->
-            0
+%% The pixel areas of the grants of the windows services Windows, each the grant's
+%% pixels, or windows_pixels_default, rounded up to whole pages. The manifest's reader
+%% bounds pixels, and property 18 refuses a windows grant to the system domain, whose
+%% connections no introduction makes. They are sorted by server row, so pair_area/3
+%% picks the lower server row's area for a pair two grants join.
+areas(Windows, Grants) ->
+    lists:sort([{Server, Grantee, pages(maps:get(pixels, Limits, ?ERX_WINDOWS_PIXELS_DEFAULT))}
+                || {Grantee, Name, Server, Limits} <- Grants, Grantee =/= system, lists:member(Name, Windows)]).
+
+pages(Bytes) -> (Bytes + ?ERX_PAGE_SIZE - 1) div ?ERX_PAGE_SIZE * ?ERX_PAGE_SIZE.
+
+-doc """
+The pixel area of the connection between parties A and B, each its id and its
+origin, as {Bytes, ReaderId}: the area of a windows grant whose server is one
+party's row and whose grantee is the other, that row or its session's template,
+read by the server; none for a pair no windows grant joins, a request's domain
+always among them. It reads only the manifest's grants, never which incarnation
+is ready, so every introduction of the pair, made at any time, makes the same
+area. A domain serves at most one display (property 18) and a grantee holds one
+grant of a name, so a pair has at most one area in each direction; for two
+displays granted to each other, the lower server row's is the pair's.
+""".
+-spec pair_area(party(), party(), state()) -> {Bytes :: pos_integer(), ReaderId :: id()} | none.
+pair_area({IdA, OriginA}, {IdB, OriginB}, #{areas := Areas}) ->
+    Found = [{Bytes, ReaderId} || {Server, Grantee, Bytes} <- Areas,
+                                  {ReaderId, {configured, Row}, Other} <- [{IdA, OriginA, OriginB}, {IdB, OriginB, OriginA}],
+                                  Row =:= Server, reaches(Grantee, Other)],
+    case Found of
+        [Area | _] -> Area;
+        [] -> none
     end.
+
+%% Whether a grant to Grantee reaches a party of origin Origin.
+reaches(Row, {configured, Row}) -> true;
+reaches({template, Template}, {session, Template}) -> true;
+reaches(_Grantee, _Origin) -> false.
 
 %% The request to the server's mint for the grant Key and its operation Tag, with the
 %% grant's limits as its mark has them (session_limits/2).

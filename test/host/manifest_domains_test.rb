@@ -731,6 +731,14 @@ class ManifestDomainsTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 18, 'display.name', with_windows(server: 'system'), message: /system domain/)
   end
 
+  # Seed: the system domain is connected to every domain at its creation, by no
+  # introduction, so its connection to a display has no pixel area (design-display.md,
+  # "The pixel area"); a windows grant to it would be installed without one.
+  def test_no_display_is_granted_to_the_system_domain
+    granted = with_windows + facet('ys', 'system', '@service.b') + "  parameter pixels 4096\n"
+    refused(Erx::Manifest::Invalid, 18, 'facet.grantee', granted, message: /grants a display to the system domain/)
+  end
+
   # Seed: the session parameter is the domain service's alone.
   def test_no_facet_row_sets_session
     refused(Erx::Manifest::Invalid, 18, 'facet.parameter', with_windows(sb: "  parameter pixels 4096\n  parameter session no\n"),

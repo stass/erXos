@@ -56,13 +56,46 @@ funnel_test_() ->
 stopgap_names_test_() ->
     {setup, fun() -> setup(1) end, fun cleanup/1, fun(_) -> {timeout, 20, fun stopgap_names/0} end}.
 
+%% With echo a service of the windows interface, the pair of a and b has echo's pixel
+%% area, windows_pixels_default since b's grant states no pixels, read by a: whether
+%% the grant's introduction makes their connection, or erx_domain:introduce/2 makes it
+%% before the grant is introduced, here while a's report provides nothing.
+pair_area_test_() ->
+    [{setup, fun() -> setup(?ERX_SERVICE_WINDOWS) end, fun cleanup/1, fun(_) -> {timeout, 20, fun grant_area/0} end},
+     {setup, fun() -> setup(?ERX_SERVICE_WINDOWS, #{}, fun(_Id) -> #{} end) end, fun cleanup/1,
+      fun(_) -> {timeout, 20, fun introduced_area/0} end}].
+
+grant_area() ->
+    ?assertEqual({connect, 5, 6, erx_domain_fake_lib:reader(5), erx_domain_fake_lib:reader(6),
+                  ?ERX_WINDOWS_PIXELS_DEFAULT, 5}, next_connect()).
+
+introduced_area() ->
+    poll(fun() -> sys:get_state(erx_domain_srv) end,
+         fun(#{core := Core}) -> [ok, ok] =:= [element(1, erx_domain_core:fetch(Id, Core)) || Id <- [5, 6]] end, 100),
+    Request = gen_server:send_request(erx_domain_srv, {introduce, 5, 6}),
+    ?assertEqual({connect, 5, 6, erx_domain_fake_lib:reader(5), erx_domain_fake_lib:reader(6),
+                  ?ERX_WINDOWS_PIXELS_DEFAULT, 5}, next_connect()),
+    #{{0, echo} := idle} = grants(),
+    _ = gen_server:wait_response(Request, 0).
+
+%% The library's next connect call, past every other call the service makes first.
+next_connect() ->
+    case erx_domain_fake_lib:next_call() of
+        Call when element(1, Call) =:= connect -> Call;
+        timeout -> timeout;
+        _Other -> next_connect()
+    end.
+
 setup() -> setup(1).
 
 setup(Interface) -> setup(Interface, #{}).
 
-%% With echo a service of interface Interface, and the service's start_link options
-%% merged with Opts, which may name a table of facet names for the funnel's cases.
-setup(Interface, Opts) ->
+setup(Interface, Opts) -> setup(Interface, Opts, fun(Id) -> #{echo => pid('a@erxos', Id, 1)} end).
+
+%% With echo a service of interface Interface, the service's start_link options merged
+%% with Opts, which may name a table of facet names for the funnel's cases, and a's
+%% reports providing what Provides answers for the reporting incarnation's id.
+setup(Interface, Opts, Provides) ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
                                      restarts => 3, restart_period_s => 60, boot_timeout_s => 60} end,
     persistent_term:put({erx_domain_fake_lib, boot},
@@ -70,7 +103,7 @@ setup(Interface, Opts) ->
                           services => [{1, echo, Interface}],
                           grants => [{0, echo, 1, #{max_request => 512}}, {system, echo, 1, #{}},
                                      {{template, 0}, echo, 1, #{max_request => 64}}]}),
-    provide('a@erxos'),
+    provide_a(Provides),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(Opts#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                       exports => erx_domain_fake_lib, principals => ?PRINCIPALS, introduce_timeout => ?DEADLINE,
@@ -86,9 +119,12 @@ cleanup({Log, Service}) ->
     ok.
 
 %% a's reports provide echo's mint at Node, with the reporting incarnation's id.
-provide(Node) ->
+provide(Node) -> provide_a(fun(Id) -> #{echo => pid(Node, Id, 1)} end).
+
+%% a's reports provide what Provides answers for the reporting incarnation's id.
+provide_a(Provides) ->
     persistent_term:put({erx_domain_fake_lib, provides},
-                        #{<<"a">> => fun(Id) -> #{echo => pid(Node, Id, 1)} end,
+                        #{<<"a">> => Provides,
                           <<"root_1">> => fun(Id) -> #{web_line => pid('root_1@erxos', Id, 3)} end}).
 
 %% The whole path for both grants: b is introduced to a, a's mint is asked, its reply

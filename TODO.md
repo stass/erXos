@@ -741,19 +741,15 @@ it; git history is the record of completed work.
   as landed are kept and changed as listed.
   * **The pixel area** ([The pixel area](docs/design-display.md#the-pixel-area)): the domain library makes it
     (`erx_dom_connect`'s `area`, `area_reader`), `connection_up` carries it, the connection agent maps it and
-    unmaps it after the last image over it (`erx_area`, `erx_memdraw:wrap/4`), and the domain service asks for it
-    with the introduction of each grant of a `windows` service (`erx_domain_mints`); still missing is a QEMU case in
+    unmaps it after the last image over it (`erx_area`, `erx_memdraw:wrap/4`), and the domain service makes it
+    for every pair a `windows` grant joins (`erx_domain_mints:pair_area/3`); still missing is a QEMU case in
     which one domain writes an area's pixels and the other reads them, which needs a reader in the display domain
     (`erx_winfs`).
-* [Medium] `erx_domain_mints`, the pixel area: the library makes an area only with a new connection, so a
-  grantee already connected to the display (by `erx_domain:introduce/2`, or by a grant of another of that
-  domain's services) keeps its connection without an area, and `erx_area:open/1` answers `{error, none}`; the
-  system domain as a `windows` grantee, never introduced, has none either.
-  This departs from design-system.md ("Facets a configured domain serves"), where the facet row sizes the area
-  whichever introduction makes the connection: make the area a fact of the pair (a pure `pair_area/3` of the mint
-  core, naming bytes and reader, used by every introduction), test the reader through the fake library
-  (`erx_domain_fake_lib` accepts only `connect(_, _, _, _, 0, 0)`), and have property 18 refuse a `windows` grant
-  to the system domain.
+* [Low] `erx_domain_mints:pair_area/3`: two display domains each granted the other's `windows` service share one
+  connection, which carries one area, so the pair takes the lower server row's grant and the other display's grant
+  is installed without an area it writes. A nested display, a display that is another display's client, is the
+  case; give a connection one area per direction, or have property 18
+  refuse the pair, when one is configured.
 * [Medium] `erx_connections` (`let_go/5`): a connection with an area is answered unmapped or lost only once
   every process that held the area or an image over it has collected; an idle holder that dropped it but never
   collects holds the connection, its objects and the display's budget for it. The design names only

@@ -605,8 +605,12 @@ violation fails the build with the property, the record and the field:
     grant of its service costs the display its `pixels`, or
     `windows_pixels_default` of `abi/services/windows.txt` where the
     facet row states none, rounded up to pages, and the side the display
-    reads for it, the display's own `lane` rounded up to pages; a grant
-    counts once for a configured domain or the system domain and, for a
+    reads for it, the display's own `lane` rounded up to pages; no facet
+    row grants a display to the system domain, since its connection to
+    the display is made by the display's creation, not by an
+    introduction, and so carries no pixel area, which design-display.md
+    sizes only for a configured domain or a session; a grant
+    counts once for a configured domain and, for a
     session template, as many times as its principal's `domains` quota
     lets sessions of it live at once; the costs sum within the display
     domain's outer budget, since the display pays for every pixel area it
@@ -616,9 +620,10 @@ violation fails the build with the property, the record and the field:
     violations: a check that counts a template's row once, which admits
     a template whose sessions together pass the budget; a facet row
     that sets `session`; a `windows` service with no `display`
-    record, whose grants no sum would count; and a check that sums
+    record, whose grants no sum would count; a check that sums
     each display alone, which admits a domain serving two displays
-    whose grants together pass its budget.
+    whose grants together pass its budget; and a facet row granting a
+    display to the system domain.
 
 Each property has a test that seeds one violation into a manifest and
 expects the build to fail with that property's diagnostic.

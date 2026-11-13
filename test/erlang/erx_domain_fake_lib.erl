@@ -36,6 +36,8 @@
 -export([open_side/2, close_side/2, export/3]).
 -export([agent/2, reader/1]).
 
+-include("generated/erx_abi.hrl").
+
 -define(SESSION_TEARDOWN_MS, 100).
 
 start_log() ->
@@ -138,19 +140,37 @@ retired(Id) ->
     log({retire, Id}).
 crash(Id) -> log({crash, Id}), {ok, <<"boom">>, <<"=erl_crash_dump">>, false}.
 disconnect(Number) -> erase({connection, Number}), erase({system, Number}), log({disconnect, Number}).
-%% Each party's values as the library's connect returns them, in its own table; the
-%% domain service makes no connection with a pixel area.
-connect(A, B, AReads, BReads, 0, 0) ->
-    log({connect, A, B, AReads, BReads}),
-    case [Id || Id <- [A, B], element(2, get({domain, Id})) =:= <<"ending">>] of
-        [] ->
+%% Each party's values as the library's connect returns them, in its own table. A
+%% pixel area is checked as the library checks it (docs/design-system.md, "The domain
+%% library", erx_dom_connect): a whole number of pages, read by one of the two parties,
+%% and no reader without an area; a connection with one is logged with its bytes and
+%% reader, so a test sees who reads it, and each party's area slot is 9.
+connect(A, B, AReads, BReads, Area, AreaReader) ->
+    log(case Area of
+            0 -> {connect, A, B, AReads, BReads};
+            _ -> {connect, A, B, AReads, BReads, Area, AreaReader}
+        end),
+    Ending = [Id || Id <- [A, B], element(2, get({domain, Id})) =:= <<"ending">>],
+    case area_valid(A, B, Area, AreaReader) of
+        true when Ending =:= [] ->
             Number = A * 100 + B,
             put({connection, Number}, {A, B}),
-            {ok, #{number => Number, a => #{side => 1, peer_side => 2, peer_bell => 3, label => 7, area => none},
-                   b => #{side => 4, peer_side => 5, peer_bell => 6, label => 8, area => none}}};
-        [_ | _] ->
+            {ok, #{number => Number, a => #{side => 1, peer_side => 2, peer_bell => 3, label => 7,
+                                            area => party_area(A, Area, AreaReader)},
+                   b => #{side => 4, peer_side => 5, peer_bell => 6, label => 8,
+                          area => party_area(B, Area, AreaReader)}}};
+        _ ->
             {error, einval}
     end.
+
+area_valid(_A, _B, 0, 0) -> true;
+area_valid(A, B, Area, AreaReader) ->
+    is_integer(Area) andalso Area > 0 andalso Area rem ?ERX_PAGE_SIZE =:= 0
+        andalso (AreaReader =:= A orelse AreaReader =:= B).
+
+party_area(_Id, 0, _AreaReader) -> none;
+party_area(Id, Bytes, Id) -> {9, Bytes, read};
+party_area(_Id, Bytes, _AreaReader) -> {9, Bytes, write}.
 
 %% A created domain whose control table has Slots slots, one per connection, and whose
 %% rings it reads have reader(Id) bytes of data; its system connection, Id * 10, stands

@@ -302,7 +302,7 @@ handle_call({info, Id}, From, #{core := Core} = State) ->
             {reply, {error, badarg}, State}
     end;
 handle_call({introduce, A, B}, From, State) when is_integer(A), is_integer(B) ->
-    case introduce(A, B, 0, State) of
+    case introduce(A, B, State) of
         {wait, Next} ->
             {noreply, wait_introduced(A, B, From, Next)};
         {Reply, Next} ->
@@ -1019,10 +1019,6 @@ settle(Id, #{waiting := Waiting} = State) ->
             State
     end.
 
-%% The domain the library charges a pixel area of Area bytes to: none (0) for no area.
-area_reader(0, _A) -> 0;
-area_reader(_Area, A) -> A.
-
 %% The create's answer: the refusal of a domain that was not started, or how one that
 %% was started ended before it reported, or a session before its namespace was in place.
 create_error(none, Life, Info) -> {error, unreported(Life, Info)};
@@ -1053,13 +1049,14 @@ open_side(Agent, Id, Pid, Ref, Values) ->
 %% The library's own refusals, a party at its limit or with an outer budget that cannot
 %% fund its child for the connection, are system_limit too, and its einval for a domain
 %% it has ended before the end reached the service is badarg, as for any ended domain.
-%% Area is the bytes of the connection's pixel area, which A reads, or 0 for none: a
-%% grant's of the windows interface (erx_domain_mints), made with the connection alone.
-introduce(_A, _B, _Area, #{lib := none} = State) ->
+%% The connection carries the pair's pixel area, which the mint core decides from the two
+%% domains' origins alone (erx_domain_mints:pair_area/3), so whichever introduction makes
+%% the connection, a grant's or a request's, makes the same area.
+introduce(_A, _B, #{lib := none} = State) ->
     {{error, enotsup}, State};
-introduce(A, B, Area, #{core := Core, links := Links, lib := Lib} = State) ->
+introduce(A, B, #{core := Core, links := Links, lib := Lib, mints := Mints} = State) ->
     case {introducible(A, Core), introducible(B, Core)} of
-        {{ok, ReaderA}, {ok, ReaderB}} when A =/= B ->
+        {{ok, ReaderA, OriginA}, {ok, ReaderB, OriginB}} when A =/= B ->
             case erx_domain_links:phase(A, B, Links) of
                 up ->
                     {ok, State};
@@ -1068,7 +1065,8 @@ introduce(A, B, Area, #{core := Core, links := Links, lib := Lib} = State) ->
                 none ->
                     case erx_domain_links:room(A, Links) andalso erx_domain_links:room(B, Links) of
                         true ->
-                            Made = Lib:connect(A, B, ReaderA, ReaderB, Area, area_reader(Area, A)),
+                            {Area, AreaReader} = connection_area({A, OriginA}, {B, OriginB}, Mints),
+                            Made = Lib:connect(A, B, ReaderA, ReaderB, Area, AreaReader),
                             connect(Made, A, B, ReaderA, ReaderB, State);
                         false -> {{error, system_limit}, State}
                     end;
@@ -1079,11 +1077,19 @@ introduce(A, B, Area, #{core := Core, links := Links, lib := Lib} = State) ->
             {{error, badarg}, State}
     end.
 
-%% A domain that can be introduced, with its lane: one built and not ended.
+%% The pair's pixel area as the library's connect takes it: its bytes and reader, or 0
+%% and 0 for none.
+connection_area(PartyA, PartyB, Mints) ->
+    case erx_domain_mints:pair_area(PartyA, PartyB, Mints) of
+        none -> {0, 0};
+        {_Bytes, _Reader} = Area -> Area
+    end.
+
+%% A domain that can be introduced, with its lane and its origin: one built and not ended.
 introducible(Id, Core) ->
     case erx_domain_core:fetch(Id, Core) of
-        {ok, #{state := Life, reader := Reader}} when Life =:= built; Life =:= running; Life =:= ready ->
-            {ok, Reader};
+        {ok, #{state := Life, reader := Reader, origin := Origin}} when Life =:= built; Life =:= running; Life =:= ready ->
+            {ok, Reader, Origin};
         _ ->
             none
     end.
@@ -1381,8 +1387,8 @@ principal_name(GranteeId, #{core := Core, principals := #{names := Names}}) ->
 
 %% An introduction that settles at once is answered through the service's own queue as
 %% one that settles later is (reply/2), so the core takes each in the same way.
-mint_act({introduce, Tag, ServerId, GranteeId, Area}, State) ->
-    case introduce(ServerId, GranteeId, Area, State) of
+mint_act({introduce, Tag, ServerId, GranteeId}, State) ->
+    case introduce(ServerId, GranteeId, State) of
         {wait, Next} ->
             wait_introduced(ServerId, GranteeId, {mints, Tag}, Next);
         {Result, Next} ->
