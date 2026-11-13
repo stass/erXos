@@ -15,6 +15,11 @@
 #else
 #define SEED_NO_GRANULE_CHECK	false
 #endif
+#ifdef ERX_DMA_SEED_NO_REG_REACH
+#define SEED_NO_REG_REACH	true
+#else
+#define SEED_NO_REG_REACH	false
+#endif
 #ifdef ERX_DMA_SEED_NO_CLEAN
 #define SEED_NO_CLEAN	true
 #else
@@ -202,6 +207,50 @@ descriptors_whole(const erx_dma_context_t *context)
 	return (range_end(context->descriptors, table, &end) && end <= context->memory_size);
 }
 
+/* A mask of one run of contiguous bits, which a length field is. */
+static bool
+mask_contiguous(uint32_t mask)
+{
+	return (mask != 0 && power_of_two(((uint64_t)mask >> __builtin_ctz(mask)) + 1));
+}
+
+static bool
+register_whole(const erx_dma_context_t *context, uint32_t reg);
+
+/*
+ * The register descriptors lie inside the window, each holding its address's two registers and
+ * its length register as three distinct registers, and each length is one run of bits; the
+ * other length registers lie inside the window too.
+ */
+static bool
+reg_descriptors_whole(const erx_dma_context_t *context)
+{
+	const uint32_t size = context->reg_descriptor_size;
+	uint64_t table;
+
+	if (context->length_reg_count != 0 && context->length_regs == NULL)
+		return (false);
+	for (uint32_t index = 0; index < context->length_reg_count; index++) {
+		if (!register_whole(context, context->length_regs[index].reg) ||
+		    !mask_contiguous(context->length_regs[index].mask))
+			return (false);
+	}
+	if (context->reg_descriptor_count == 0)
+		return (true);
+	if (size == 0 || size % 4 != 0 || context->reg_descriptors % 4 != 0 || context->reg_reach == 0 ||
+	    !mask_contiguous(context->reg_length_mask))
+		return (false);
+	if (context->reg_address_field % 4 != 0 || context->reg_address_high_field % 4 != 0 ||
+	    context->reg_length_field % 4 != 0 || context->reg_address_field >= size ||
+	    context->reg_address_high_field >= size || context->reg_length_field >= size ||
+	    context->reg_address_field == context->reg_address_high_field ||
+	    context->reg_address_field == context->reg_length_field ||
+	    context->reg_address_high_field == context->reg_length_field)
+		return (false);
+	table = (uint64_t)context->reg_descriptor_count * size;
+	return (context->reg_descriptors <= context->window_size && table <= context->window_size - context->reg_descriptors);
+}
+
 static bool
 context_whole(const erx_dma_context_t *context)
 {
@@ -209,7 +258,8 @@ context_whole(const erx_dma_context_t *context)
 
 	if (!power_of_two(context->granule) || context->address_bits == 0 || context->address_bits > 64 ||
 	    context->memory_size == 0 || !range_end(context->device_base, context->memory_size, &end) ||
-	    (context->owned_count != 0 && context->owned == NULL) || !descriptors_whole(context))
+	    (context->owned_count != 0 && context->owned == NULL) || !descriptors_whole(context) ||
+	    !reg_descriptors_whole(context))
 		return (false);
 	if (context->publication == ERX_DMA_NO_PUBLICATION)
 		return (true);
@@ -287,9 +337,24 @@ writers_follow(erx_dma_call_t call, const erx_dma_state_t *before, const erx_dma
 	return (true);
 }
 
+/* The part of a register descriptor a register is, and which descriptor; REG_OTHER for none. */
+typedef enum reg_part {
+	REG_OTHER = 0,
+	REG_ADDRESS_LOW,
+	REG_ADDRESS_HIGH,
+	REG_LENGTH,
+} reg_part_t;
+
+static reg_part_t	reg_part(const erx_dma_context_t *context, uint32_t reg, uint32_t *descriptor);
+
+/* A register the NIF owns: one the context lists, or a register descriptor's address or length register, which the form owns whole. */
 static bool
 owned(const erx_dma_context_t *context, uint32_t reg)
 {
+	uint32_t descriptor;
+
+	if (reg_part(context, reg, &descriptor) != REG_OTHER)
+		return (true);
 	for (uint32_t index = 0; index < context->owned_count; index++) {
 		if (context->owned[index] == reg)
 			return (true);
@@ -445,6 +510,86 @@ write_allowed(const erx_dma_context_t *context, const erx_dma_plan_t *plan, cons
 	return (fills(step) && passing_to_device(before, after, region));
 }
 
+static reg_part_t
+reg_part(const erx_dma_context_t *context, uint32_t reg, uint32_t *descriptor)
+{
+	uint32_t inside;
+
+	if (context->reg_descriptor_count == 0 || reg < context->reg_descriptors)
+		return (REG_OTHER);
+	inside = reg - context->reg_descriptors;
+	if (inside / context->reg_descriptor_size >= context->reg_descriptor_count)
+		return (REG_OTHER);
+	*descriptor = inside / context->reg_descriptor_size;
+	inside %= context->reg_descriptor_size;
+	if (inside == context->reg_address_field)
+		return (REG_ADDRESS_LOW);
+	if (inside == context->reg_address_high_field)
+		return (REG_ADDRESS_HIGH);
+	return (inside == context->reg_length_field ? REG_LENGTH : REG_OTHER);
+}
+
+/* Whether the length in the bits `mask` of `value` is within the reach every register descriptor's address was published with. */
+static bool
+length_within_reach(const erx_dma_context_t *context, uint64_t value, uint32_t mask)
+{
+	return (SEED_NO_REG_REACH || ((value & mask) >> __builtin_ctz(mask)) <= context->reg_reach);
+}
+
+/* Which of the other length registers `reg` is, or length_reg_count for none. */
+static uint32_t
+length_reg_index(const erx_dma_context_t *context, uint32_t reg)
+{
+	uint32_t index = 0;
+
+	while (index < context->length_reg_count && context->length_regs[index].reg != reg)
+		index++;
+	return (index);
+}
+
+/*
+ * A plain value published to one register: never into a register descriptor's address, and a
+ * length, at a descriptor's length register or one of the other length registers, within the
+ * reach its addresses were published with.
+ */
+static bool
+register_value_allowed(const erx_dma_context_t *context, const erx_dma_step_t *step)
+{
+	uint32_t descriptor, index;
+
+	switch (reg_part(context, step->reg, &descriptor)) {
+	case REG_ADDRESS_LOW:
+	case REG_ADDRESS_HIGH:
+		return (false);
+	case REG_LENGTH:
+		return (step->source == ERX_DMA_VALUE && length_within_reach(context, step->value, context->reg_length_mask));
+	case REG_OTHER:
+		break;
+	}
+	index = length_reg_index(context, step->reg);
+	return (index == context->length_reg_count || (step->source == ERX_DMA_VALUE &&
+	    length_within_reach(context, step->value, context->length_regs[index].mask)));
+}
+
+/*
+ * An address published over two registers: at a register descriptor, exactly its low and high
+ * registers with the descriptor's reach; elsewhere, two registers that are no descriptor's and
+ * hold no length, so no half of an address lands in a length field.
+ */
+static bool
+register_address_allowed(const erx_dma_context_t *context, const erx_dma_step_t *step)
+{
+	uint32_t low_descriptor, high_descriptor;
+	const reg_part_t low = reg_part(context, step->reg, &low_descriptor);
+	const reg_part_t high = reg_part(context, step->reg_high, &high_descriptor);
+
+	if (low == REG_OTHER && high == REG_OTHER)
+		return (length_reg_index(context, step->reg) == context->length_reg_count &&
+		    length_reg_index(context, step->reg_high) == context->length_reg_count);
+	return (low == REG_ADDRESS_LOW && high == REG_ADDRESS_HIGH && low_descriptor == high_descriptor &&
+	    step->extent == context->reg_reach);
+}
+
 static bool
 publish_allowed(const erx_dma_context_t *context, const erx_dma_state_t *before, const erx_dma_step_t *step)
 {
@@ -453,11 +598,12 @@ publish_allowed(const erx_dma_context_t *context, const erx_dma_state_t *before,
 	if (!value_whole(context, step))
 		return (false);
 	if (step->target == ERX_DMA_REGISTER && step->reg_high == ERX_DMA_NO_REGISTER)
-		return (step->width == 4 && register_whole(context, step->reg) && owned(context, step->reg));
+		return (step->width == 4 && register_whole(context, step->reg) && owned(context, step->reg) &&
+		    register_value_allowed(context, step));
 	if (step->target == ERX_DMA_REGISTER)
 		return (step->source == ERX_DMA_ADDRESS && step->width == 8 && step->reg_high != step->reg &&
 		    register_whole(context, step->reg) && register_whole(context, step->reg_high) &&
-		    owned(context, step->reg) && owned(context, step->reg_high));
+		    owned(context, step->reg) && owned(context, step->reg_high) && register_address_allowed(context, step));
 	/* A ring field published is a value: an address in memory is a descriptor's, which a write stores. */
 	if (step->target != ERX_DMA_MEMORY || step->source != ERX_DMA_VALUE || context->publication == ERX_DMA_NO_PUBLICATION ||
 	    step->offset != context->publication || step->width != context->publication_width)

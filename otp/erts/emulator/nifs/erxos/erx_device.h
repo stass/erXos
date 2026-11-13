@@ -202,7 +202,10 @@ typedef uint8_t	*erx_device_sink_t(void *context, uint64_t tag, uint32_t length)
  * buffers of `buffer_size` bytes, the size a power of two up to ERX_DEVICE_QUEUE_SIZE_MAX and
  * the pool at most ERX_MEM_CONTIGUOUS_MAX, else ERX_EINVAL. The same queue again is that queue
  * again, posted buffers and all, so a restarted driver finds it, and the same index with
- * another geometry is ERX_EBUSY. A device that is not virtio-mmio version 2 is ERX_ENOTSUP. A
+ * another geometry is ERX_EBUSY. A device that is neither virtio-mmio version 2 nor GENET is
+ * ERX_ENOTSUP. GENET has two queues, its register ring's two directions: 0 receives and 1
+ * transmits, each of ERX_DEVICE_GENET_SIZE buffers, any other index or size ERX_EINVAL, and a
+ * pool whose device addresses reach past the form's 40 bits ERX_ERANGE. A
  * given device's queue takes the next pages of its memory, and one they do not fit, or a
  * given device with no memory, is ERX_ERANGE with nothing taken. A new queue is not on the
  * device until erx_device_negotiate installs it. A physical device, a UART, has no queue:
@@ -252,6 +255,12 @@ bool	erx_device_region_memory(uint32_t region, uint8_t **base, uint64_t *bytes);
  * the device offers. Every queue of the device stops being ready at the call's start, and a
  * failure after the reset leaves the device FAILED and every queue's post and complete
  * ERX_ECORRUPT until a later negotiation succeeds.
+ *
+ * GENET's negotiation is its register ring's reset and install (docs/design-device-dma.md,
+ * "Install and reset"): both DMA engines stopped, transmit first, both idle reports read,
+ * both rings installed and both engines started, receive first. It accepts no features (0)
+ * whatever `wanted` says; ERX_EBUSY, with nothing installed, until both directions report the
+ * stop, so the driver calls again; ERX_EINVAL for a record without both its queues.
  */
 int	erx_device_negotiate(const erx_device_t *device, uint64_t wanted, uint64_t *accepted);
 
@@ -262,7 +271,9 @@ int	erx_device_negotiate(const erx_device_t *device, uint64_t wanted, uint64_t *
  * by the device. ERX_EINVAL for no such queue of the device, a count outside
  * 1..ERX_DEVICE_CHAIN_MAX, an empty piece, pieces longer than a buffer or out of order, or a
  * region the device does not have or that a piece names as bytes the device writes;
- * ERX_EWOULDBLOCK for too few free descriptors; ERX_ECORRUPT for a queue needing a reset.
+ * ERX_EWOULDBLOCK for too few free descriptors; ERX_ECORRUPT for a queue needing a reset. On
+ * GENET only the transmit queue takes posts, of pieces the device reads, laid end to end in one
+ * buffer as one frame; a post on the receive queue, which is standing, is ERX_EINVAL.
  */
 int	erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, const erx_device_piece_t *requested,
 	    uint32_t count);
@@ -272,7 +283,9 @@ int	erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, co
  * copied or ERX_DEVICE_COMPLETE_ENTRIES are completed: each one's bytes go to what `sink` gives for its tag, and its buffer back to the
  * pool. ERX_OK with how many; ERX_EINVAL for no such queue; ERX_ECORRUPT, with none, for a
  * queue needing a reset, which a device's malformed entry makes it: entries before that one
- * are still completed, and the next call reports it.
+ * are still completed, and the next call reports it. A GENET transmit completion gives each
+ * tag with no bytes; a receive completion gives each frame's bytes with its status flags, the
+ * low 16 bits of its descriptor's status, as the tag, and hands the buffers back in the same call.
  */
 int	erx_device_complete(const erx_device_t *device, uint32_t queue, erx_device_sink_t *sink, void *context,
 	    uint32_t *completed);

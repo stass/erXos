@@ -169,7 +169,35 @@ typedef struct erx_dma_context {
 	uint32_t	address_width;
 	uint32_t	length_field;
 	uint32_t	length_width;
+	/*
+	 * Where the peripheral's registers hold device addresses, for a form whose descriptors are
+	 * registers (the register ring): `reg_descriptor_count` descriptors of `reg_descriptor_size`
+	 * bytes from window offset `reg_descriptors`, each with its address over a low register at
+	 * `reg_address_field` and a high one at `reg_address_high_field`, and its length in the bits
+	 * `reg_length_mask` of the register at `reg_length_field`. The form gives each descriptor one
+	 * buffer for the life of the queue, so every descriptor's reach is the one constant
+	 * `reg_reach`: an address published at a descriptor is one step over its two registers with
+	 * that reach, no other publish names either register, and a value published at a length
+	 * register, a descriptor's or one of `length_regs`, holds a length of at most the reach. A
+	 * count of 0 says the registers hold no address.
+	 */
+	uint32_t			reg_descriptors;
+	uint32_t			reg_descriptor_count;
+	uint32_t			reg_descriptor_size;
+	uint32_t			reg_address_field;
+	uint32_t			reg_address_high_field;
+	uint32_t			reg_length_field;
+	uint32_t			reg_length_mask;
+	uint64_t			reg_reach;
+	uint32_t			length_reg_count;
+	const struct erx_dma_length_reg	*length_regs;
 } erx_dma_context_t;
+
+/* A register outside the descriptors whose bits `mask` hold a length the device moves at each descriptor's address. */
+typedef struct erx_dma_length_reg {
+	uint32_t	reg;
+	uint32_t	mask;
+} erx_dma_length_reg_t;
 
 typedef enum erx_dma_effect_kind {
 	ERX_DMA_EFFECT_ZERO,		/* store zeros over [offset, offset + length) */

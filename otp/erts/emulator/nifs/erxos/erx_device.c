@@ -10,6 +10,7 @@
 #include <stdatomic.h>
 #ifdef ERX_DEVICE_STAND_IN
 #include <stdlib.h>
+#include <string.h>
 #endif
 
 #include "erx/hw/device_access.h"
@@ -18,6 +19,7 @@
 #include "liberx/backend/core/mem.h"
 
 #include "erx_device_dma.h"
+#include "erx_device_genet.h"
 #include "erx_dma_arch.h"
 
 /* The rings are virtio's little-endian layouts, written and read through their own types. */
@@ -465,7 +467,8 @@ store(const erx_device_t *device, const erx_device_register_t *reg, uint64_t off
  * device whose queues take the largest size, offering VERSION_1 alone, and a reset lets every
  * queue go, as section 4.2.2.1 of the virtio specification has it. Its one ready word serves
  * every queue selector, so it models a device that holds all its queues ready or none. A
- * stand-in of another peripheral is plain memory only.
+ * stand-in GENET reports its DMA stopped as soon as DMA control stops it. A stand-in of
+ * another peripheral is plain memory only.
  */
 static bool
 stand_in_virtio(const erx_device_t *device)
@@ -500,6 +503,24 @@ stand_in_preset(const erx_device_t *device)
 	stand_in_set(device, "queue_num_max", ERX_DEVICE_QUEUE_SIZE_MAX);
 }
 
+/*
+ * A stand-in GENET's DMA status as its engine leaves it: DMA control written with the
+ * engine's enable clear shows the block and every ring stopped at once, and any other value
+ * shows them running. Its descriptors and rings are plain memory with no engine behind them.
+ */
+static void
+stand_in_genet_stored(const erx_device_t *device, const erx_device_register_t *reg, uint64_t value)
+{
+	const bool rx = strcmp(reg->name, "rx_dma_ctrl") == 0;
+	erx_device_genet_registers_t regs;
+
+	if ((!rx && strcmp(reg->name, "tx_dma_ctrl") != 0) ||
+	    !erx_device_genet_registers(device->peripheral, rx ? ERX_DEVICE_GENET_RX : ERX_DEVICE_GENET_TX, &regs))
+		return;
+	erx_device_access_store32(device->windows[reg->window], regs.dma_status,
+	    (value & regs.dma_enable) == 0 ? regs.dma_disabled | regs.dma_ring_disabled : 0);
+}
+
 /* The device's side of a store: the features word the selector names, and the reset. */
 static void
 stand_in_stored(const erx_device_t *device, const erx_device_register_t *reg, uint64_t value)
@@ -507,6 +528,10 @@ stand_in_stored(const erx_device_t *device, const erx_device_register_t *reg, ui
 	const erx_device_register_t *const owned = device->peripheral->registers;
 	const uint32_t version_word = ERX_VIRTIO_F_VERSION_1 / 32, version_bit = ERX_VIRTIO_F_VERSION_1 % 32;
 
+	if (device->peripheral == erx_device_peripheral_find("genet", sizeof("genet") - 1)) {
+		stand_in_genet_stored(device, reg, value);
+		return;
+	}
 	if (!stand_in_virtio(device))
 		return;
 	if (reg == &owned[ERX_DEVICE_OWNED_VIRTIO_MMIO_DEVICE_FEATURES_SEL])
@@ -644,6 +669,12 @@ erx_device_bind_check(const erx_device_t *device, uint64_t line, erx_device_bind
  * from the install at the end of a negotiation to the start of the next: a queue that is not
  * ready is one the device may have forgotten, so nothing is posted on it and nothing
  * completed from it.
+ *
+ * A record runs one of the descriptor forms (docs/design-device-dma.md, "The three descriptor
+ * forms"), which the device's peripheral fixes: virtio-mmio's split ring, whose rings lie in
+ * the queue's memory before its pool, or GENET's register ring, whose descriptors are the
+ * device's registers, so its queue's memory is its pool alone. Everything the effect layer
+ * does is common to both; only the form's core and the registers its plans publish differ.
  */
 typedef struct virtio_registers {
 	/* What the NIF reads and the driver may read too. */
@@ -671,28 +702,50 @@ typedef struct virtio_registers {
 	uint64_t			failed;
 } virtio_registers_t;
 
-/* The registers a queue's plans publish: erx_device_queue_registers_t's ten, in its order. */
+/* The registers a split ring's plans publish: erx_device_queue_registers_t's ten, in its order. */
 #define QUEUE_OWNED	10u
 _Static_assert(sizeof(erx_device_queue_registers_t) == QUEUE_OWNED * sizeof(uint32_t),
     "every register of the split ring's plans is owned");
 
-typedef struct queue_record {
-	const erx_device_t		*device;
-	uint32_t			index;		/* the device's own number for the queue */
-	bool				ready;
+/* A GENET record's queues: receive, then transmit, in virtio-net's order. */
+#define GENET_QUEUE_RX	0u
+#define GENET_QUEUE_TX	1u
+
+typedef enum queue_form {
+	QUEUE_SPLIT_RING,		/* virtio-mmio */
+	QUEUE_REGISTER_RING,		/* GENET */
+} queue_form_t;
+
+typedef struct split_ring {
 	virtio_registers_t		regs;
-	/* The registers the plans publish, and their window offsets as the builders and the check name them. */
-	const erx_device_register_t	*owned_regs[QUEUE_OWNED];
+	/* The window offsets of the registers the plans publish, as the builders and the check name them. */
 	uint32_t			owned_offsets[QUEUE_OWNED];
 	erx_device_queue_registers_t	owned;
 	erx_device_queue_layout_t	layout;
-	volatile uint8_t		*memory;	/* this domain's mapping of the queue: its rings from 0 */
+	erx_device_queue_t		core;
+} split_ring_t;
+
+typedef struct register_ring {
+	erx_device_genet_registers_t	regs;		/* the direction's, which the context's owned list points into */
+	erx_dma_length_reg_t		length_reg;	/* the ring's buffer size, which the context names as a length */
+	erx_device_genet_queue_t	core;
+} register_ring_t;
+
+typedef struct queue_record {
+	const erx_device_t		*device;
+	uint32_t			index;		/* the device's own number for the queue */
+	queue_form_t			form;
+	bool				ready;
+	volatile uint8_t		*memory;	/* this domain's mapping of the queue: its rings, if any, from 0 */
 	uint64_t			memory_size;	/* the rings, any gap, then the pool */
 	uint64_t			pool_offset;	/* the pool's first byte, a granule boundary past the rings */
 	uint64_t			device_base;	/* the device address of the queue's first byte */
 	erx_dma_context_t		context;	/* the check's facts, from the fields above and the form */
 	erx_dma_state_t			state;		/* who writes each region, as the last plan run left it */
-	erx_device_queue_t		core;
+	union {
+		split_ring_t		split;		/* QUEUE_SPLIT_RING */
+		register_ring_t		genet;		/* QUEUE_REGISTER_RING */
+	};
 } queue_record_t;
 
 static queue_record_t queues[ERX_DEVICE_QUEUES_MAX];
@@ -709,6 +762,27 @@ plain_register(const erx_device_t *device, const char *name)
 
 	return (found == peripheral->register_count || peripheral->registers[found].count != 1 ? NULL :
 	    &peripheral->registers[found]);
+}
+
+/*
+ * The register, or the element of an array, that begins at a window offset of the device's
+ * table, for one access at that offset: its width and its window. NULL for an offset where no
+ * register or element begins. Plans name registers by window offset, so this one lookup maps
+ * every register step, owned or not, to the register the table puts there.
+ */
+static const erx_device_register_t *
+register_at(const erx_device_peripheral_t *peripheral, uint32_t offset)
+{
+	for (uint32_t at = 0; at < peripheral->register_count; at++) {
+		const erx_device_register_t *const reg = &peripheral->registers[at];
+		const uint32_t past = offset - reg->offset;
+
+		if (offset < reg->offset)
+			continue;
+		if (reg->count == 1 ? past == 0 : reg->stride != 0 && past % reg->stride == 0 && past / reg->stride < reg->count)
+			return (reg);
+	}
+	return (NULL);
 }
 
 /* A plain register's one access, at its own offset. */
@@ -774,13 +848,22 @@ virtio_registers(const erx_device_t *device, virtio_registers_t *regs)
 	    regs->failed != 0);
 }
 
+/* Whether the device's queues are the register ring's: its peripheral is GENET's. */
+static bool
+register_ring_device(const erx_device_t *device)
+{
+	return (device->peripheral == erx_device_peripheral_find("genet", sizeof("genet") - 1));
+}
+
 /*
  * No queue's pool passes the largest contiguous object: the largest pool is the most buffers
  * of the largest size, a whole number of pages, which rounding to a granule of at most a page
  * leaves unchanged.
  */
 _Static_assert((uint64_t)ERX_DEVICE_QUEUE_SIZE_MAX * ERX_DEVICE_BUFFER_MAX <= ERX_MEM_CONTIGUOUS_MAX &&
+    (uint64_t)ERX_DEVICE_GENET_SIZE * ERX_DEVICE_BUFFER_MAX <= ERX_MEM_CONTIGUOUS_MAX &&
     ERX_DEVICE_BUFFER_MAX % ERX_PAGE_SIZE == 0, "a queue's pool fits one contiguous object");
+_Static_assert(ERX_DEVICE_GENET_SIZE <= ERX_DMA_REGIONS_MAX, "a register ring's buffers fit a state");
 
 /* `bytes` rounded up to a power of two `granule`; neither is near UINT32_MAX here. */
 static uint32_t
@@ -789,13 +872,35 @@ granule_round(uint32_t bytes, uint32_t granule)
 	return ((bytes + granule - 1) & ~(granule - 1));
 }
 
+/* The bytes of a queue's rings in its memory, before its pool: none for the register ring. */
+static uint64_t
+ring_bytes(const queue_record_t *record)
+{
+	return (record->form == QUEUE_SPLIT_RING ? record->split.layout.bytes : 0);
+}
+
+/*
+ * The form's core of a queue whose memory is placed: empty, with its pool at the device
+ * address its memory gives. False for a pool the form cannot address, such as one that
+ * reaches past GENET's 40 bits.
+ */
+static bool
+core_init(queue_record_t *record, uint32_t size, uint32_t buffer_size, uint32_t granule)
+{
+	const uint64_t pool = record->device_base + record->pool_offset;
+
+	if (record->form == QUEUE_REGISTER_RING)
+		return (erx_device_genet_init(&record->genet.core, &record->genet.regs, buffer_size, granule, pool));
+	return (erx_device_queue_init(&record->split.core, size, buffer_size, granule, pool));
+}
+
 /*
  * A given device's queue, in the next pages of the device's one memory object: its rings, then
  * its pool. The object is contiguous to the device, so the device address of the rings and the
  * offsets of the queue name all of it. Nothing is read from the memory, which a former record
- * and the device may have written: the install writes the rings whole. ERX_ERANGE, taking
- * nothing, for a queue the memory has no room for; the pages are taken only once everything
- * else has succeeded.
+ * and the device may have written: the install writes the rings whole and hands each buffer
+ * over afresh. ERX_ERANGE, taking nothing, for a queue the memory has no room for or the form
+ * cannot address; the pages are taken only once everything else has succeeded.
  */
 static int
 carve_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size, uint32_t granule)
@@ -806,7 +911,7 @@ carve_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size, 
 	uint64_t pool_addr;
 	int status;
 
-	if (!erx_device_carve(*taken, device->memory_size, record->layout.bytes,
+	if (!erx_device_carve(*taken, device->memory_size, ring_bytes(record),
 	    (uint64_t)size * granule_round(buffer_size, granule), &carve))
 		return (ERX_ERANGE);
 	status = erx_mem_dma_addr(device->memory, carve.rings, &record->device_base);
@@ -818,7 +923,7 @@ carve_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size, 
 		return (ERX_ERANGE);
 	record->pool_offset = carve.pool - carve.rings;
 	record->memory_size = carve.end - carve.rings;
-	if (!erx_device_queue_init(&record->core, size, buffer_size, granule, record->device_base + record->pool_offset))
+	if (!core_init(record, size, buffer_size, granule))
 		return (ERX_ERANGE);
 	record->memory = device->dma + carve.rings;
 	*taken = carve.end;
@@ -827,23 +932,27 @@ carve_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size, 
 
 /*
  * A hosted stand-in's queue, in one zeroed block of plain memory on a granule: its rings, then
- * its pool, with this process's own address as the device base, since the stand-in's device is
- * code in this process. No other build has one.
+ * its pool. The split ring's device base is this process's own address of the block, since
+ * the stand-in's device is code in this process. A register ring's is a stand-in address
+ * below GENET's 40 bits, 4 GiB apart for each record, since this process's addresses may lie
+ * above them; the device side finds the record's memory from the record, not the address. No
+ * other build has one.
  */
 static int
 stand_in_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size, uint32_t granule)
 {
 #ifdef ERX_DEVICE_STAND_IN
-	const uint64_t bytes = record->layout.bytes + (uint64_t)size * granule_round(buffer_size, granule);
+	const uint64_t bytes = ring_bytes(record) + (uint64_t)size * granule_round(buffer_size, granule);
 	uint8_t *const memory = aligned_alloc(granule, bytes);
 
 	if (memory == NULL)
 		return (ERX_ENOMEM);
 	bzero(memory, bytes);
-	record->device_base = (uintptr_t)memory;
-	record->pool_offset = record->layout.bytes;
+	record->device_base = record->form == QUEUE_REGISTER_RING ? (uint64_t)(record - queues + 1) << 32 :
+	    (uintptr_t)memory;
+	record->pool_offset = ring_bytes(record);
 	record->memory_size = bytes;
-	if (!erx_device_queue_init(&record->core, size, buffer_size, granule, record->device_base + record->pool_offset)) {
+	if (!core_init(record, size, buffer_size, granule)) {
 		free(memory);
 		return (ERX_ERANGE);
 	}
@@ -858,51 +967,143 @@ stand_in_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_siz
 #endif
 }
 
-/*
- * The registers the plans publish, and the check's facts: the queue's memory, the device's
- * window, the granule, those registers as the only ones a plan may write, and the form's own.
- */
-static void
-queue_facts(queue_record_t *record, uint32_t granule)
+static int
+place_queue(queue_record_t *record, uint32_t size, uint32_t buffer_size, uint32_t granule)
 {
-	const virtio_registers_t *const regs = &record->regs;
-	const erx_device_register_t *const owned[QUEUE_OWNED] = { regs->sel, regs->num, regs->ready, regs->notify,
-	    regs->desc[0], regs->desc[1], regs->driver[0], regs->driver[1], regs->device[0], regs->device[1] };
-	const uint32_t *const offsets = record->owned_offsets;
+	return (record->device->form == ERX_DEVICE_FORM_GIVEN ? carve_queue_memory(record, size, buffer_size, granule) :
+	    stand_in_queue_memory(record, size, buffer_size, granule));
+}
 
-	for (uint32_t reg = 0; reg < QUEUE_OWNED; reg++) {
-		record->owned_regs[reg] = owned[reg];
-		record->owned_offsets[reg] = (uint32_t)owned[reg]->offset;
+/* The check's facts every form shares: the queue's memory, the device's window and the granule. */
+static erx_dma_context_t
+common_facts(const queue_record_t *record, uint32_t granule)
+{
+	return ((erx_dma_context_t){ .memory_size = record->memory_size, .device_base = record->device_base,
+	    .window_size = record->device->peripheral->window_size, .granule = granule });
+}
+
+/*
+ * A split ring's queue: virtio-mmio version 2's registers, its memory, the registers its plans
+ * publish and the check's facts, with every region the CPU's, the state the first install's
+ * reset starts from.
+ */
+static int
+split_ring_create(queue_record_t *record, const erx_device_queue_layout_t *layout, uint32_t size, uint32_t buffer_size,
+    uint32_t granule)
+{
+	split_ring_t *const split = &record->split;
+	const virtio_registers_t *const regs = &split->regs;
+	const erx_device_register_t *owned[QUEUE_OWNED];
+	const uint32_t *const offsets = split->owned_offsets;
+	int status;
+
+	split->layout = *layout;
+	if (!virtio_registers(record->device, &split->regs) || get(record->device, regs->version) != ERX_VIRTIO_MMIO_VERSION)
+		return (ERX_ENOTSUP);
+	status = place_queue(record, size, buffer_size, granule);
+	if (status != ERX_OK)
+		return (status);
+	owned[0] = regs->sel;
+	owned[1] = regs->num;
+	owned[2] = regs->ready;
+	owned[3] = regs->notify;
+	for (uint32_t word = 0; word < 2; word++) {
+		owned[4 + word] = regs->desc[word];
+		owned[6 + word] = regs->driver[word];
+		owned[8 + word] = regs->device[word];
 	}
-	record->owned = (erx_device_queue_registers_t){ .sel = offsets[0], .num = offsets[1], .ready = offsets[2],
+	for (uint32_t reg = 0; reg < QUEUE_OWNED; reg++)
+		split->owned_offsets[reg] = (uint32_t)owned[reg]->offset;
+	split->owned = (erx_device_queue_registers_t){ .sel = offsets[0], .num = offsets[1], .ready = offsets[2],
 	    .notify = offsets[3], .desc = { offsets[4], offsets[5] }, .driver = { offsets[6], offsets[7] },
 	    .device = { offsets[8], offsets[9] } };
-	record->context = (erx_dma_context_t){ .memory_size = record->memory_size, .device_base = record->device_base,
-	    .window_size = record->device->peripheral->window_size, .granule = granule, .owned_count = QUEUE_OWNED,
-	    .owned = record->owned_offsets };
-	erx_device_queue_form(&record->layout, record->core.size, &record->context);
+	record->context = common_facts(record, granule);
+	record->context.owned_count = QUEUE_OWNED;
+	record->context.owned = split->owned_offsets;
+	erx_device_queue_form(&split->layout, split->core.size, &record->context);
+	erx_device_queue_view(&split->core, &split->layout, record->pool_offset, false, &record->state);
+	return (ERX_OK);
+}
+
+/*
+ * One direction of a GENET record, queue 0 receiving or queue 1 transmitting, of 256
+ * buffers, one for each of the direction's descriptors. Its registers come from the table, its
+ * pool from the device's memory, and the check's facts from the form; the state is the
+ * uninstalled queue's, every buffer the CPU's.
+ */
+static int
+register_ring_create(queue_record_t *record, uint32_t size, uint32_t buffer_size, uint32_t granule)
+{
+	register_ring_t *const ring = &record->genet;
+	int status;
+
+	if (!erx_device_genet_registers(record->device->peripheral,
+	    record->index == GENET_QUEUE_RX ? ERX_DEVICE_GENET_RX : ERX_DEVICE_GENET_TX, &ring->regs))
+		return (ERX_ENOTSUP);
+	/* Transmit's length field is 12 bits and receive's 16: a buffer past either is the wrong geometry. */
+	if (buffer_size > ring->regs.buflen >> __builtin_ctz(ring->regs.buflen) ||
+	    buffer_size > ring->regs.buf_length >> __builtin_ctz(ring->regs.buf_length))
+		return (ERX_EINVAL);
+	status = place_queue(record, size, buffer_size, granule);
+	if (status != ERX_OK)
+		return (status);
+	record->context = common_facts(record, granule);
+	erx_device_genet_form(&ring->core, &ring->regs, &ring->length_reg, &record->context);
+	erx_device_genet_view(&ring->core, record->pool_offset, &record->state);
+	return (ERX_OK);
+}
+
+/* A record's geometry, whichever its form. */
+static uint32_t
+queue_size(const queue_record_t *record)
+{
+	return (record->form == QUEUE_SPLIT_RING ? record->split.core.size : ERX_DEVICE_GENET_SIZE);
+}
+
+static uint32_t
+queue_buffer_size(const queue_record_t *record)
+{
+	return (record->form == QUEUE_SPLIT_RING ? record->split.core.buffer_size : record->genet.core.buffer_size);
+}
+
+/* Whether the form's core has broken the queue, which then refuses every call until the reset. */
+static bool
+queue_broken(const queue_record_t *record)
+{
+	return (record->form == QUEUE_SPLIT_RING ? record->split.core.broken : record->genet.core.broken);
+}
+
+static void
+break_queue(queue_record_t *record)
+{
+	if (record->form == QUEUE_SPLIT_RING)
+		record->split.core.broken = true;
+	else
+		record->genet.core.broken = true;
 }
 
 int
 erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t size, uint32_t buffer_size,
     uint32_t *queue)
 {
+	const queue_form_t form = register_ring_device(device) ? QUEUE_REGISTER_RING : QUEUE_SPLIT_RING;
 	const uint32_t granule = erx_dma_granule();
-	erx_device_queue_layout_t layout;
+	erx_device_queue_layout_t layout = { 0 };
 	queue_record_t *record;
 	int status;
 
 	/* A physical device does no DMA, so it has no queue (docs/design-stopgap.md, "Device records"). */
 	if (device->form == ERX_DEVICE_FORM_PHYSICAL)
 		return (ERX_ENOTSUP);
-	if (!erx_device_queue_layout(size, granule, &layout) || buffer_size == 0 || buffer_size > ERX_DEVICE_BUFFER_MAX)
+	if (buffer_size == 0 || buffer_size > ERX_DEVICE_BUFFER_MAX || (form == QUEUE_REGISTER_RING ?
+	    index > GENET_QUEUE_TX || size != ERX_DEVICE_GENET_SIZE : !erx_device_queue_layout(size, granule, &layout)))
 		return (ERX_EINVAL);
 	for (uint32_t open = 0; open < queues_open; open++) {
 		const queue_record_t *const other = &queues[open];
 
 		if (other->device != device || other->index != index)
 			continue;
-		if (other->core.size != size || other->core.buffer_size != buffer_size)
+		if (queue_size(other) != size || queue_buffer_size(other) != buffer_size)
 			return (ERX_EBUSY);
 		*queue = open;
 		return (ERX_OK);
@@ -911,19 +1112,13 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 		return (ERX_ELIMIT);
 	record = &queues[queues_open];
 	bzero(record, sizeof(*record));
-	if (!virtio_registers(device, &record->regs) ||
-	    get(device, record->regs.version) != ERX_VIRTIO_MMIO_VERSION)
-		return (ERX_ENOTSUP);
 	record->device = device;
 	record->index = index;
-	record->layout = layout;
-	status = device->form == ERX_DEVICE_FORM_GIVEN ? carve_queue_memory(record, size, buffer_size, granule) :
-	    stand_in_queue_memory(record, size, buffer_size, granule);
+	record->form = form;
+	status = form == QUEUE_REGISTER_RING ? register_ring_create(record, size, buffer_size, granule) :
+	    split_ring_create(record, &layout, size, buffer_size, granule);
 	if (status != ERX_OK)
 		return (status);
-	queue_facts(record, granule);
-	/* Every region the CPU's: the state the first install's reset starts from. */
-	erx_device_queue_view(&record->core, &record->layout, record->pool_offset, false, &record->state);
 	*queue = queues_open++;
 	return (ERX_OK);
 }
@@ -1055,53 +1250,51 @@ region_of(const erx_device_t *device, uint32_t region)
 }
 
 /*
- * The install's checks for one queue: the device has let it go, as a reset makes it, and can
- * take its size. They write only the selector, so a refusal changes nothing of any queue.
+ * The install's checks for one split-ring queue: the device has let it go, as a reset makes
+ * it, and can take its size. They write only the selector, so a refusal changes nothing of
+ * any queue.
  */
 static int
 install_check(const queue_record_t *record)
 {
 	const erx_device_t *const device = record->device;
-	const virtio_registers_t *const regs = &record->regs;
+	const virtio_registers_t *const regs = &record->split.regs;
 
 	put(device, regs->sel, record->index);
 	if (get(device, regs->ready) != 0)
 		return (ERX_EBUSY);
-	if (get(device, regs->num_max) < record->core.size)
+	if (get(device, regs->num_max) < record->split.core.size)
 		return (ERX_ERANGE);
 	return (ERX_OK);
 }
 
 /*
  * The effect layer (docs/design-device-dma.md, "Calls, observations and plans"). A queue call
- * runs in rounds, each a plan the split ring's builders made from what the core decided: the
- * plan is checked against the record's last state and the state after it, ordered by the
+ * runs in rounds, each a plan the form's builders made from what its core decided: the plan
+ * is checked against the record's last state and the state after it, ordered by the
  * sequencer, and its effects run in that order, and its `after` becomes the next plan's
- * `before`. Nothing here chooses a cache operation, a barrier or an order.
+ * `before`. Nothing here chooses a cache operation, a barrier or an order within a plan; the
+ * order of plans across the two directions of a GENET record is the negotiation's.
  *
- * One plan's steps, states, effects and report values at a time, under the caller's
- * serialisation: together far too large for a scheduler's stack. A completion's plan is the
- * largest, a copy for each range of each entry it takes.
+ * One plan's steps, states, effects, registers and report values at a time, under the
+ * caller's serialisation: together far too large for a scheduler's stack. The largest plan is
+ * GENET's install, an address for each of its 256 descriptors and the ring's registers; a
+ * split ring's completion, a copy for each range of each entry it takes, comes next.
  */
-#define PLAN_STEPS_MAX	(ERX_DEVICE_COMPLETE_ENTRIES * ERX_DEVICE_CHAIN_MAX)
+#define PLAN_MAX(a, b)	((a) > (b) ? (a) : (b))
+_Static_assert(ERX_DEVICE_BUFFER_MAX <= ERX_DEVICE_COMPLETE_BYTES, "a completion takes at least one buffer");
+#define PLAN_STEPS_MAX	PLAN_MAX(ERX_DEVICE_GENET_INSTALL_STEPS, ERX_DEVICE_COMPLETE_ENTRIES * ERX_DEVICE_CHAIN_MAX)
 _Static_assert(PLAN_STEPS_MAX >= ERX_DEVICE_QUEUE_POST_STEPS && PLAN_STEPS_MAX >= ERX_DEVICE_QUEUE_INSTALL_STEPS &&
-    PLAN_STEPS_MAX >= ERX_DEVICE_COMPLETE_ENTRIES * ERX_DEVICE_QUEUE_ENTRY_REPORTS, "a plan's steps fit");
+    PLAN_STEPS_MAX >= ERX_DEVICE_COMPLETE_ENTRIES * ERX_DEVICE_QUEUE_ENTRY_REPORTS &&
+    PLAN_STEPS_MAX >= ERX_DEVICE_GENET_POST_STEPS && PLAN_STEPS_MAX >= ERX_DEVICE_COMPLETE_ENTRIES,
+    "a plan's steps fit");
 
 static erx_dma_step_t plan_steps[PLAN_STEPS_MAX];
 static uint64_t plan_values[PLAN_STEPS_MAX];
+/* Each register step's registers in the table, low then high, found before any effect runs. */
+static const erx_device_register_t *plan_registers[PLAN_STEPS_MAX][2];
 static erx_dma_state_t plan_between, plan_after;
 static erx_dma_effect_t plan_effects[ERX_DMA_EFFECTS_BOUND(ERX_DMA_REGIONS_MAX, PLAN_STEPS_MAX)];
-
-/* The owned register at a window offset the check accepted, so one of the record's own. */
-static const erx_device_register_t *
-owned_register(const queue_record_t *record, uint32_t offset)
-{
-	uint32_t reg = 0;
-
-	while (reg + 1 < QUEUE_OWNED && record->owned_offsets[reg] != offset)
-		reg++;
-	return (record->owned_regs[reg]);
-}
 
 /* A ring field's one store or load, of the width the step names: 1, 2, 4 or 8 bytes, aligned. */
 static void
@@ -1139,23 +1332,52 @@ load_field(volatile const uint8_t *at, uint32_t width)
 }
 
 /*
- * One step of a plan: a write or a publish into the queue's memory or an owned register (an
- * address over two registers low word first), a copy out to `destinations[at]`, or a report's
- * one load into `values[at]`.
+ * The table's register for each register step of a plan the check accepted, into
+ * plan_registers; false, finding nothing more, for an offset where the table has none, which
+ * would be a bug in the form's core, or for one that is not 32 bits wide, the only width the
+ * check allows a register step. So every effect of a plan reaches the register at the offset
+ * its step names, owned or not, with the width the check saw, and a plan with a step that
+ * reaches none runs nothing.
+ */
+static bool
+resolve_registers(const queue_record_t *record, const erx_dma_plan_t *plan)
+{
+	const erx_device_peripheral_t *const peripheral = record->device->peripheral;
+
+	for (uint32_t at = 0; at < plan->count; at++) {
+		const erx_dma_step_t *const step = &plan->steps[at];
+
+		if (step->target != ERX_DMA_REGISTER)
+			continue;
+		plan_registers[at][0] = register_at(peripheral, step->reg);
+		plan_registers[at][1] = step->reg_high == ERX_DMA_NO_REGISTER ? NULL : register_at(peripheral, step->reg_high);
+		if (plan_registers[at][0] == NULL || plan_registers[at][0]->width != 32 ||
+		    (step->reg_high != ERX_DMA_NO_REGISTER && (plan_registers[at][1] == NULL || plan_registers[at][1]->width != 32)))
+			return (false);
+	}
+	return (true);
+}
+
+/*
+ * One step of a plan: a write or a publish into the queue's memory or a register at the offset
+ * the step names (an address over two registers low word first), a copy out to
+ * `destinations[at]`, or a report's one load into `values[at]`.
  */
 static void
 run_step(const queue_record_t *record, const erx_dma_step_t *step, uint32_t at, uint8_t *const *destinations,
     uint64_t *values)
 {
 	volatile uint8_t *const memory = record->memory + (step->target == ERX_DMA_MEMORY ? step->offset : 0);
+	const erx_device_register_t *const *const regs = plan_registers[at];
 
 	switch (step->kind) {
 	case ERX_DMA_WRITE:
 	case ERX_DMA_PUBLISH:
 		if (step->target == ERX_DMA_REGISTER) {
-			put(record->device, owned_register(record, step->reg), step->value & UINT32_MAX);
+			store(record->device, regs[0], step->reg, step->reg_high == ERX_DMA_NO_REGISTER ? step->value :
+			    step->value & UINT32_MAX);
 			if (step->reg_high != ERX_DMA_NO_REGISTER)
-				put(record->device, owned_register(record, step->reg_high), step->value >> 32);
+				store(record->device, regs[1], step->reg_high, step->value >> 32);
 		} else if (step->source == ERX_DMA_BYTES) {
 			bcopy(step->bytes, (void *)(uintptr_t)memory, step->length);
 		} else if (step->source == ERX_DMA_ZEROS) {
@@ -1168,7 +1390,7 @@ run_step(const queue_record_t *record, const erx_dma_step_t *step, uint32_t at, 
 		bcopy((const void *)(uintptr_t)memory, destinations[at], step->length);
 		break;
 	case ERX_DMA_REPORT:
-		values[at] = step->target == ERX_DMA_REGISTER ? get(record->device, owned_register(record, step->reg)) :
+		values[at] = step->target == ERX_DMA_REGISTER ? load(record->device, regs[0], step->reg) :
 		    load_field(memory, step->width);
 		break;
 	}
@@ -1209,9 +1431,9 @@ run_effects(const queue_record_t *record, const erx_dma_plan_t *plan, const erx_
 /*
  * One round of a queue call: `count` steps of `call` from the record's last state to `after`
  * (the record's own state for an observation), checked, ordered and run, and `after` kept.
- * False, running nothing, when the check or the sequencer refuses, which is a bug in the
- * form's core, not an input: the queue breaks, so the core's bookkeeping, which may already
- * count the call, is used again only after a reset.
+ * False, running nothing, when the check, the sequencer or the register lookup refuses, which
+ * is a bug in the form's core, not an input: the queue breaks, so the core's bookkeeping,
+ * which may already count the call, is used again only after a reset.
  */
 static bool
 run_plan(queue_record_t *record, erx_dma_call_t call, uint32_t count, const erx_dma_state_t *after,
@@ -1222,8 +1444,8 @@ run_plan(queue_record_t *record, erx_dma_call_t call, uint32_t count, const erx_
 
 	if (!erx_device_dma_check(&record->context, &record->state, after, &plan) ||
 	    !erx_device_dma_order(&record->state, after, &plan, record->device->coherent, record->context.granule,
-	    erx_dma_line(), &effects)) {
-		record->core.broken = true;
+	    erx_dma_line(), &effects) || !resolve_registers(record, &plan)) {
+		break_queue(record);
 		return (false);
 	}
 	run_effects(record, &plan, &effects, destinations, plan_values);
@@ -1232,24 +1454,35 @@ run_plan(queue_record_t *record, erx_dma_call_t call, uint32_t count, const erx_
 	return (true);
 }
 
+/* Every queue of the device stops being ready, at the start of a negotiation and when one fails. */
+static void
+unready_queues(const erx_device_t *device)
+{
+	for (uint32_t open = 0; open < queues_open; open++) {
+		if (queues[open].device == device)
+			queues[open].ready = false;
+	}
+}
+
 /*
- * The install's two decisions for one queue, after its checks: a reset, which takes every
- * region back now that the device has let the queue go, then the install, which zeroes the
- * rings whole, so no index a former driver, a former record or the device left in them is
- * ever read, and publishes the queue's size, its rings' addresses and ready. ERX_EINVAL when a
- * plan is refused, which is a bug.
+ * The install's two decisions for one split-ring queue, after its checks: a reset, which
+ * takes every region back now that the device has let the queue go, then the install, which
+ * zeroes the rings whole, so no index a former driver, a former record or the device left in
+ * them is ever read, and publishes the queue's size, its rings' addresses and ready. ERX_EINVAL
+ * when a plan is refused, which is a bug.
  */
 static int
 install_apply(queue_record_t *record)
 {
+	split_ring_t *const split = &record->split;
 	uint32_t count;
 
-	erx_device_queue_reset(&record->core);
-	erx_device_queue_view(&record->core, &record->layout, record->pool_offset, false, &plan_between);
-	erx_device_queue_view(&record->core, &record->layout, record->pool_offset, true, &plan_after);
+	erx_device_queue_reset(&split->core);
+	erx_device_queue_view(&split->core, &split->layout, record->pool_offset, false, &plan_between);
+	erx_device_queue_view(&split->core, &split->layout, record->pool_offset, true, &plan_after);
 	if (!run_plan(record, ERX_DMA_CALL_RESET, 0, &plan_between, NULL))
 		return (ERX_EINVAL);
-	count = erx_device_queue_install_steps(&record->core, &record->layout, &record->owned, record->index,
+	count = erx_device_queue_install_steps(&split->core, &split->layout, &split->owned, record->index,
 	    record->device_base, plan_steps);
 	if (!run_plan(record, ERX_DMA_CALL_INSTALL, count, &plan_after, NULL))
 		return (ERX_EINVAL);
@@ -1275,10 +1508,8 @@ install_queues(const erx_device_t *device)
 		if (queues[open].device == device)
 			status = install_apply(&queues[open]);
 	}
-	for (uint32_t open = 0; status != ERX_OK && open < queues_open; open++) {
-		if (queues[open].device == device)
-			queues[open].ready = false;
-	}
+	if (status != ERX_OK)
+		unready_queues(device);
 	return (status);
 }
 
@@ -1312,17 +1543,13 @@ accept_features(const erx_device_t *device, const virtio_registers_t *regs, uint
  * hold an old descriptor, and is ready again only after this reset. A step that fails sets
  * FAILED, so the device stays unusable until the next negotiation resets it.
  */
-int
-erx_device_negotiate(const erx_device_t *device, uint64_t wanted, uint64_t *accepted)
+static int
+split_ring_negotiate(const erx_device_t *device, uint64_t wanted, uint64_t *accepted)
 {
 	virtio_registers_t regs;
 	uint64_t device_status, taken;
 	int result = ERX_OK;
 
-	for (uint32_t open = 0; open < queues_open; open++) {
-		if (queues[open].device == device)
-			queues[open].ready = false;
-	}
 	if (!virtio_registers(device, &regs) || get(device, regs.version) != ERX_VIRTIO_MMIO_VERSION)
 		return (ERX_ENOTSUP);
 	put(device, regs.status, 0);
@@ -1350,6 +1577,95 @@ erx_device_negotiate(const erx_device_t *device, uint64_t wanted, uint64_t *acce
 	put(device, regs.status, device_status | regs.driver_ok);
 	*accepted = taken;
 	return (ERX_OK);
+}
+
+/* The device's queue of its own number `index`, or NULL. */
+static queue_record_t *
+queue_numbered(const erx_device_t *device, uint32_t index)
+{
+	for (uint32_t open = 0; open < queues_open; open++) {
+		if (queues[open].device == device && queues[open].index == index)
+			return (&queues[open]);
+	}
+	return (NULL);
+}
+
+/*
+ * GENET's reset and install (docs/design-device-dma.md, "Install and reset"), across the two
+ * directions in the order the design gives, which is why it lives here and not in the
+ * per-direction core: DMA control stopped, transmit then receive; each direction's DMA status
+ * read once through an observation; ERX_EBUSY, with nothing installed and both engines left
+ * stopped, until both show the stop, so a later call writes the stop again and reads again;
+ * then each queue reset, which takes every buffer back, and its ring installed, receive then
+ * transmit; and only once both rings are installed, each engine started, receive first. The
+ * features mean nothing to GENET: none are accepted. A record without both its queues is
+ * ERX_EINVAL; a refused plan, a bug, leaves both queues not ready.
+ */
+static int
+register_ring_negotiate(const erx_device_t *device, uint64_t *accepted)
+{
+	queue_record_t *const rings[2] = { queue_numbered(device, GENET_QUEUE_RX), queue_numbered(device, GENET_QUEUE_TX) };
+	const erx_device_peripheral_t *const peripheral = device->peripheral;
+	uint64_t status[2];
+	bool idle = true;
+
+	if (rings[0] == NULL || rings[1] == NULL)
+		return (ERX_EINVAL);
+	for (uint32_t side = 2; side-- > 0;) {
+		const erx_device_genet_registers_t *const regs = &rings[side]->genet.regs;
+		const erx_device_register_t *const ctrl = register_at(peripheral, regs->dma_ctrl);
+
+		if (ctrl == NULL)
+			return (ERX_ENOTSUP);
+		put(device, ctrl, erx_device_genet_stop(regs));
+	}
+	for (uint32_t side = 0; side < 2; side++) {
+		queue_record_t *const record = rings[side];
+
+		erx_device_genet_idle_report(&record->genet.regs, &plan_steps[0]);
+		if (!run_plan(record, ERX_DMA_CALL_OBSERVE, 1, &record->state, NULL))
+			return (ERX_EINVAL);
+		status[side] = plan_values[0];
+		idle = idle && erx_device_genet_idle(&record->genet.regs, status[side]);
+	}
+	if (!idle)
+		return (ERX_EBUSY);
+	for (uint32_t side = 0; side < 2; side++) {
+		queue_record_t *const record = rings[side];
+		register_ring_t *const ring = &record->genet;
+		uint32_t count;
+
+		if (!erx_device_genet_reset(&ring->core, &ring->regs, status[side])) {
+			break_queue(record);
+			return (ERX_EINVAL);
+		}
+		erx_device_genet_view(&ring->core, record->pool_offset, &plan_between);
+		if (!run_plan(record, ERX_DMA_CALL_RESET, 0, &plan_between, NULL))
+			return (ERX_EINVAL);
+		count = erx_device_genet_install_steps(&ring->core, &ring->regs, record->device_base + record->pool_offset,
+		    plan_steps);
+		erx_device_genet_view(&ring->core, record->pool_offset, &plan_after);
+		if (!run_plan(record, ERX_DMA_CALL_INSTALL, count, &plan_after, NULL))
+			return (ERX_EINVAL);
+	}
+	/* A start hands nothing over: a publish whose state is the install's. */
+	for (uint32_t side = 0; side < 2; side++) {
+		erx_device_genet_start(&rings[side]->genet.regs, &plan_steps[0]);
+		if (!run_plan(rings[side], ERX_DMA_CALL_POST, 1, &rings[side]->state, NULL))
+			return (ERX_EINVAL);
+	}
+	rings[0]->ready = rings[1]->ready = true;
+	*accepted = 0;
+	return (ERX_OK);
+}
+
+int
+erx_device_negotiate(const erx_device_t *device, uint64_t wanted, uint64_t *accepted)
+{
+	unready_queues(device);
+	if (register_ring_device(device))
+		return (register_ring_negotiate(device, accepted));
+	return (split_ring_negotiate(device, wanted, accepted));
 }
 
 static queue_record_t *
@@ -1384,11 +1700,10 @@ resolve_regions(const erx_device_t *device, const erx_device_piece_t *pieces, ui
 	return (true);
 }
 
-int
-erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, const erx_device_piece_t *requested,
-    uint32_t count)
+static int
+split_ring_post(queue_record_t *record, uint64_t tag, const erx_device_piece_t *requested, uint32_t count)
 {
-	queue_record_t *const record = queue_of(device, queue);
+	split_ring_t *const split = &record->split;
 	erx_virtio_gpu_mem_entry_t entries[ERX_DEVICE_CHAIN_MAX];
 	erx_device_piece_t pieces[ERX_DEVICE_CHAIN_MAX];
 	erx_device_segment_t segments[ERX_DEVICE_CHAIN_MAX];
@@ -1396,10 +1711,10 @@ erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, const 
 	erx_device_post_plan_t plan;
 	uint32_t offset = 0, steps;
 
-	if (record == NULL || count == 0 || count > ERX_DEVICE_CHAIN_MAX || !resolve_regions(device, requested, count, pieces, entries))
+	if (!resolve_regions(record->device, requested, count, pieces, entries))
 		return (ERX_EINVAL);
 	for (uint32_t step = 0; step < count; step++) {
-		if (pieces[step].length > record->core.buffer_size - offset)
+		if (pieces[step].length > split->core.buffer_size - offset)
 			return (ERX_EINVAL);
 		segments[step].offset = offset;
 		segments[step].length = pieces[step].length;
@@ -1407,25 +1722,67 @@ erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, const 
 		bytes[step] = pieces[step].data;
 		offset += pieces[step].length;
 	}
-	if (!record->ready || record->core.broken)
+	if (!record->ready || split->core.broken)
 		return (ERX_ECORRUPT);
-	if (record->core.free_count < count)
+	if (split->core.free_count < count)
 		return (ERX_EWOULDBLOCK);
-	if (!erx_device_queue_post(&record->core, segments, count, tag, &plan))
+	if (!erx_device_queue_post(&split->core, segments, count, tag, &plan))
 		return (ERX_EINVAL);
 	/*
 	 * The sequencer zeroes the head's buffer outside the bytes the device reads, so what a
 	 * completion copies is the device's bytes or zeros, never an earlier request's (a region's
 	 * entry among them).
 	 */
-	steps = erx_device_queue_post_steps(&record->core, &record->layout, record->device_base, record->pool_offset,
-	    &plan, segments, bytes, &record->owned, record->index, plan_steps);
-	erx_device_queue_view(&record->core, &record->layout, record->pool_offset, true, &plan_after);
+	steps = erx_device_queue_post_steps(&split->core, &split->layout, record->device_base, record->pool_offset,
+	    &plan, segments, bytes, &split->owned, record->index, plan_steps);
+	erx_device_queue_view(&split->core, &split->layout, record->pool_offset, true, &plan_after);
 	return (run_plan(record, ERX_DMA_CALL_POST, steps, &plan_after, NULL) ? ERX_OK : ERX_EINVAL);
+}
+
+/*
+ * A GENET transmit post: the pieces are the frame's bytes, which the device reads, laid end to
+ * end in the buffer the producer index names. A receive queue is standing, so a post on it is
+ * ERX_EINVAL, as is a piece naming a region or bytes the device writes.
+ */
+static int
+register_ring_post(queue_record_t *record, uint64_t tag, const erx_device_piece_t *requested, uint32_t count)
+{
+	register_ring_t *const ring = &record->genet;
+	erx_device_genet_piece_t pieces[ERX_DEVICE_GENET_PIECES_MAX];
+	uint32_t steps;
+	bool full;
+
+	if (record->index != GENET_QUEUE_TX || count > ERX_DEVICE_GENET_PIECES_MAX)
+		return (ERX_EINVAL);
+	for (uint32_t piece = 0; piece < count; piece++) {
+		if (requested[piece].names_region || requested[piece].device_writes)
+			return (ERX_EINVAL);
+		pieces[piece] = (erx_device_genet_piece_t){ .bytes = requested[piece].data, .length = requested[piece].length };
+	}
+	if (!record->ready || ring->core.broken)
+		return (ERX_ECORRUPT);
+	if (!erx_device_genet_post(&ring->core, &ring->regs, record->pool_offset, pieces, count, tag, plan_steps, &steps,
+	    &full))
+		return (full ? ERX_EWOULDBLOCK : ERX_EINVAL);
+	erx_device_genet_view(&ring->core, record->pool_offset, &plan_after);
+	return (run_plan(record, ERX_DMA_CALL_POST, steps, &plan_after, NULL) ? ERX_OK : ERX_EINVAL);
+}
+
+int
+erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, const erx_device_piece_t *requested,
+    uint32_t count)
+{
+	queue_record_t *const record = queue_of(device, queue);
+
+	if (record == NULL || count == 0 || count > ERX_DEVICE_CHAIN_MAX)
+		return (ERX_EINVAL);
+	return (record->form == QUEUE_SPLIT_RING ? split_ring_post(record, tag, requested, count) :
+	    register_ring_post(record, tag, requested, count));
 }
 
 /* The completions of one call, which the caller's serialisation keeps to one at a time. */
 static erx_device_completion_t completions[ERX_DEVICE_COMPLETE_ENTRIES];
+static erx_device_genet_completion_t genet_completions[ERX_DEVICE_COMPLETE_ENTRIES];
 
 /*
  * Two observations, then one decision. The used ring's index is loaded once and the core
@@ -1434,37 +1791,32 @@ static erx_device_completion_t completions[ERX_DEVICE_COMPLETE_ENTRIES];
  * malformed or ERX_DEVICE_COMPLETE_BYTES are taken; then one plan takes their buffers back and
  * copies their ranges into what the sink gave, each sink called before any effect runs.
  */
-int
-erx_device_complete(const erx_device_t *device, uint32_t queue, erx_device_sink_t *sink, void *context,
-    uint32_t *completed)
+static int
+split_ring_complete(queue_record_t *record, erx_device_sink_t *sink, void *context, uint32_t *completed)
 {
-	queue_record_t *const record = queue_of(device, queue);
-	uint8_t *destinations[PLAN_STEPS_MAX];
+	split_ring_t *const split = &record->split;
+	uint8_t *destinations[ERX_DEVICE_COMPLETE_ENTRIES * ERX_DEVICE_CHAIN_MAX];
 	uint32_t fresh, reports, copies, done = 0, made = 0;
 	uint64_t copied = 0;
 
-	if (record == NULL)
-		return (ERX_EINVAL);
-	if (!record->ready || record->core.broken)
-		return (ERX_ECORRUPT);
-	erx_device_queue_index_report(&record->layout, &plan_steps[0]);
+	erx_device_queue_index_report(&split->layout, &plan_steps[0]);
 	if (!run_plan(record, ERX_DMA_CALL_OBSERVE, 1, &record->state, NULL))
 		return (ERX_EINVAL);
-	if (!erx_device_queue_used(&record->core, (uint16_t)plan_values[0], &fresh))
+	if (!erx_device_queue_used(&split->core, (uint16_t)plan_values[0], &fresh))
 		return (ERX_ECORRUPT);
 	if (fresh > ERX_DEVICE_COMPLETE_ENTRIES)
 		fresh = ERX_DEVICE_COMPLETE_ENTRIES;
-	reports = erx_device_queue_entry_reports(&record->core, &record->layout, fresh, plan_steps);
+	reports = erx_device_queue_entry_reports(&split->core, &split->layout, fresh, plan_steps);
 	if (reports > 0 && !run_plan(record, ERX_DMA_CALL_OBSERVE, reports, &record->state, NULL))
 		return (ERX_EINVAL);
 	while (done < fresh && copied < ERX_DEVICE_COMPLETE_BYTES &&
-	    erx_device_queue_complete(&record->core, (uint32_t)plan_values[2 * done], (uint32_t)plan_values[2 * done + 1],
+	    erx_device_queue_complete(&split->core, (uint32_t)plan_values[2 * done], (uint32_t)plan_values[2 * done + 1],
 	    &completions[done])) {
 		copied += completions[done].length;
 		done++;
 	}
 	if (done > 0) {
-		copies = erx_device_queue_copy_steps(&record->core, record->pool_offset, completions, done, plan_steps);
+		copies = erx_device_queue_copy_steps(&split->core, record->pool_offset, completions, done, plan_steps);
 		for (uint32_t taken = 0; taken < done; taken++) {
 			uint8_t *const into = sink(context, completions[taken].tag, completions[taken].length);
 			uint32_t at = 0;
@@ -1474,12 +1826,107 @@ erx_device_complete(const erx_device_t *device, uint32_t queue, erx_device_sink_
 				at += completions[taken].ranges[range].length;
 			}
 		}
-		erx_device_queue_view(&record->core, &record->layout, record->pool_offset, true, &plan_after);
+		erx_device_queue_view(&split->core, &split->layout, record->pool_offset, true, &plan_after);
 		if (made != copies || !run_plan(record, ERX_DMA_CALL_COMPLETE, copies, &plan_after, destinations))
 			return (ERX_EINVAL);
 	}
 	*completed = done;
-	return (done == 0 && record->core.broken ? ERX_ECORRUPT : ERX_OK);
+	return (done == 0 && split->core.broken ? ERX_ECORRUPT : ERX_OK);
+}
+
+/*
+ * A GENET transmit completion: the consumer index loaded once, the descriptors it moved past
+ * completed in order with no bytes, each tag to the sink, and one plan with no steps that
+ * takes their buffers back.
+ */
+static int
+register_ring_tx_complete(queue_record_t *record, erx_device_sink_t *sink, void *context, uint32_t *completed)
+{
+	register_ring_t *const ring = &record->genet;
+	uint32_t done;
+
+	erx_device_genet_index_report(&ring->regs, &plan_steps[0]);
+	if (!run_plan(record, ERX_DMA_CALL_OBSERVE, 1, &record->state, NULL))
+		return (ERX_EINVAL);
+	if (!erx_device_genet_tx_complete(&ring->core, &ring->regs, plan_values[0], ERX_DEVICE_COMPLETE_ENTRIES,
+	    genet_completions, &done))
+		return (ERX_ECORRUPT);
+	if (done > 0) {
+		for (uint32_t taken = 0; taken < done; taken++)
+			(void)sink(context, genet_completions[taken].tag, 0);
+		erx_device_genet_view(&ring->core, record->pool_offset, &plan_after);
+		if (!run_plan(record, ERX_DMA_CALL_COMPLETE, 0, &plan_after, NULL))
+			return (ERX_EINVAL);
+	}
+	*completed = done;
+	return (ERX_OK);
+}
+
+/*
+ * A GENET receive completion, in one call: the producer index loaded once, then each new
+ * descriptor's status once, at most as many as keep the copies within
+ * ERX_DEVICE_COMPLETE_BYTES; the core completes them in order until a length past the buffer,
+ * which breaks the queue after the frames before it; one plan takes their buffers back and
+ * copies each frame into what the sink gave for its flags, and a last plan hands the buffers
+ * back and publishes the consumer index past them, so no frame holds the ring. A frame of no
+ * bytes has no copy, so each sink's destination follows its completion, not a step's index.
+ */
+static int
+register_ring_rx_complete(queue_record_t *record, erx_device_sink_t *sink, void *context, uint32_t *completed)
+{
+	register_ring_t *const ring = &record->genet;
+	const uint32_t by_bytes = ERX_DEVICE_COMPLETE_BYTES / ring->core.buffer_size;
+	/* buffer_size is at most ERX_DEVICE_COMPLETE_BYTES, so by_bytes is at least 1. */
+	const uint32_t max = by_bytes < ERX_DEVICE_COMPLETE_ENTRIES ? by_bytes : ERX_DEVICE_COMPLETE_ENTRIES;
+	uint8_t *destinations[ERX_DEVICE_COMPLETE_ENTRIES];
+	uint32_t reports, done, copies, gives, made = 0;
+
+	erx_device_genet_index_report(&ring->regs, &plan_steps[0]);
+	if (!run_plan(record, ERX_DMA_CALL_OBSERVE, 1, &record->state, NULL))
+		return (ERX_EINVAL);
+	if (!erx_device_genet_rx_reports(&ring->core, &ring->regs, plan_values[0], max, plan_steps, &reports))
+		return (ERX_ECORRUPT);
+	*completed = 0;
+	if (reports == 0)
+		return (ERX_OK);
+	if (!run_plan(record, ERX_DMA_CALL_OBSERVE, reports, &record->state, NULL) ||
+	    !erx_device_genet_rx_complete(&ring->core, &ring->regs, plan_values, reports, genet_completions, &done))
+		return (ERX_EINVAL);
+	if (done == 0)
+		return (ERX_ECORRUPT);
+	copies = erx_device_genet_copy_steps(&ring->core, record->pool_offset, genet_completions, done, plan_steps);
+	for (uint32_t taken = 0; taken < done; taken++) {
+		uint8_t *const into = sink(context, genet_completions[taken].tag, genet_completions[taken].length);
+
+		if (genet_completions[taken].length > 0)
+			destinations[made++] = into;
+	}
+	erx_device_genet_view(&ring->core, record->pool_offset, &plan_after);
+	if (made != copies || !run_plan(record, ERX_DMA_CALL_COMPLETE, copies, &plan_after, destinations))
+		return (ERX_EINVAL);
+	gives = erx_device_genet_rx_give(&ring->core, &ring->regs, plan_steps);
+	erx_device_genet_view(&ring->core, record->pool_offset, &plan_after);
+	if (gives > 0 && !run_plan(record, ERX_DMA_CALL_POST, gives, &plan_after, NULL))
+		return (ERX_EINVAL);
+	*completed = done;
+	return (ERX_OK);
+}
+
+int
+erx_device_complete(const erx_device_t *device, uint32_t queue, erx_device_sink_t *sink, void *context,
+    uint32_t *completed)
+{
+	queue_record_t *const record = queue_of(device, queue);
+
+	if (record == NULL)
+		return (ERX_EINVAL);
+	if (!record->ready || queue_broken(record))
+		return (ERX_ECORRUPT);
+	if (record->form == QUEUE_SPLIT_RING)
+		return (split_ring_complete(record, sink, context, completed));
+	if (record->index == GENET_QUEUE_TX)
+		return (register_ring_tx_complete(record, sink, context, completed));
+	return (register_ring_rx_complete(record, sink, context, completed));
 }
 
 #ifdef ERX_DEVICE_STAND_IN
@@ -1493,18 +1940,21 @@ erx_device_stand_in_used(const erx_device_t *device, uint32_t queue, const erx_d
     uint32_t count)
 {
 	const queue_record_t *const record = queue_of(device, queue);
+	const erx_device_queue_layout_t *layout;
 	volatile erx_virtq_ring_head_t *used;
 	volatile erx_virtq_used_elem_t *elems;
 	volatile const uint16_t *avail_ring;
 	uint32_t mask;
 	uint16_t idx;
 
-	if (record == NULL || device->form != ERX_DEVICE_FORM_STAND_IN || !record->ready || count > record->core.size)
+	if (record == NULL || device->form != ERX_DEVICE_FORM_STAND_IN || record->form != QUEUE_SPLIT_RING ||
+	    !record->ready || count > record->split.core.size)
 		return (ERX_EINVAL);
-	mask = record->core.size - 1;
-	used = (volatile erx_virtq_ring_head_t *)(record->memory + record->layout.used);
-	elems = (volatile erx_virtq_used_elem_t *)(record->memory + record->layout.used + ERX_VIRTQ_RING_HEAD_SIZE);
-	avail_ring = (volatile const uint16_t *)(record->memory + record->layout.avail + ERX_VIRTQ_RING_HEAD_SIZE);
+	layout = &record->split.layout;
+	mask = record->split.core.size - 1;
+	used = (volatile erx_virtq_ring_head_t *)(record->memory + layout->used);
+	elems = (volatile erx_virtq_used_elem_t *)(record->memory + layout->used + ERX_VIRTQ_RING_HEAD_SIZE);
+	avail_ring = (volatile const uint16_t *)(record->memory + layout->avail + ERX_VIRTQ_RING_HEAD_SIZE);
 	idx = used->idx;
 	for (uint32_t entry = 0; entry < count; entry++) {
 		const uint32_t slot = (uint32_t)(idx + entry) & mask;
@@ -1517,4 +1967,3 @@ erx_device_stand_in_used(const erx_device_t *device, uint32_t queue, const erx_d
 	return (ERX_OK);
 }
 #endif
-

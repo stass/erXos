@@ -366,7 +366,20 @@ decision before any effect:
   store covers either field, zeros cover both fields of a descriptor or
   neither, and a publication in memory is a plain value on neither field,
   so no address reaches the device as a plain value and no length passes
-  what its address was checked for.
+  what its address was checked for;
+* a form whose descriptors are registers, the register ring, declares
+  them the same way from its own constants: the descriptor registers'
+  place, count and stride, each descriptor's address over a low and a
+  high register and its length as a field of a third, and the one reach
+  every descriptor's address has, since each descriptor keeps one buffer
+  for the life of the queue; and every other register whose field holds
+  a length the device moves at those addresses, as GENET's ring buffer
+  length. An address published at a descriptor is one step naming exactly
+  its two registers, with that reach; no plain value and no half of
+  another address lands in a descriptor's address registers or in a
+  length register; and a length published in a field is at most the
+  reach. The descriptor registers are owned by the form whole, so the
+  record's list of owned registers names only the ring's.
 
 A plan that fails the check is a bug in the core, not an input, and the
 call is `badarg` with nothing applied.

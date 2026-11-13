@@ -71,7 +71,9 @@ module Erx
                   Chokepoints::Site.new(glob: 'include/erx/hw/device_access.h'),
                   # The DMA harness's device model, which stands in for the generated accesses.
                   Chokepoints::Site.new(glob: 'test/fixtures/device_model/erx/hw/device_access.h'),
-                  Chokepoints::Site.new(glob: 'test/fixtures/erx_device_dma_harness.c')],
+                  Chokepoints::Site.new(glob: 'test/fixtures/erx_device_dma_harness.c'),
+                  # GENET's harness, whose stand-in engines answer the register ring through them.
+                  Chokepoints::Site.new(glob: 'test/fixtures/erx_device_genet_harness.c')],
           seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_device_access_load32(0, 0); }\n" }
         ),
         # The generated peripheral accessors are static inline, so they leave no symbol for the

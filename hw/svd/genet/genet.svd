@@ -247,7 +247,7 @@
             <field><name>SOP</name><description>Start of packet (if_genetreg.h:175)</description><bitOffset>13</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>EOP</name><description>End of packet (if_genetreg.h:174)</description><bitOffset>14</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>CKSUM_OK</name><description>if_genetreg.h:172-173 name bit 15 both OWN, marked unsure, and CKSUM_OK; unverified</description><bitOffset>15</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>BUFLEN</name><description>Bytes written, the two bytes of padding before the frame and, with RBUF_CTRL.STATUS_64B, the 64-byte status block included (if_genetreg.h:169-171; if_genet.c:1435-1441)</description><bitOffset>16</bitOffset><bitWidth>12</bitWidth></field>
+            <field><name>BUFLEN</name><description>Bytes written, the two bytes of padding before the frame and, with RBUF_CTRL.STATUS_64B, the 64-byte status block included (if_genetreg.h:169-171; if_genet.c:1435-1441). FreeBSD masks 12 bits, 27:16; the field takes all 16, as the other published driver does (docs/research-genet-bcm2711.md, "The receive status word") and docs/design-device-dma.md reads it, so a set high bit breaks the queue rather than shortening a length</description><bitOffset>16</bitOffset><bitWidth>16</bitWidth></field>
           </fields>
         </register>
         <register>
@@ -379,6 +379,15 @@
           <fields>
             <field><name>EN</name><description>Run the receive engine (if_genetreg.h:212)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>RBUF_EN</name><description>One bit per ring, ring q at bit q + 1 (if_genetreg.h:211)</description><bitOffset>1</bitOffset><bitWidth>17</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RX_DMA_STATUS</name><ownedByNif>false</ownedByNif>
+          <description>The receive DMA block's status, block offset 0x1048, which if_genetreg.h does not name (docs/research-genet-bcm2711.md, "The DMA status register"): its bits mirror RX_DMA_CTRL's, each set once that part has stopped</description>
+          <addressOffset>0x3048</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>DISABLED</name><description>The block's DMA has stopped (the facts record, "The DMA status register")</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RING_DISABLED</name><description>One bit per ring, ring q at bit q + 1, set once ring q has stopped; inferred from the poll the facts record describes, which the board pass settles</description><bitOffset>1</bitOffset><bitWidth>17</bitWidth></field>
           </fields>
         </register>
         <register>
@@ -539,6 +548,15 @@
           <fields>
             <field><name>EN</name><description>Run the transmit engine (if_genetreg.h:218)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>RBUF_EN</name><description>One bit per ring, ring q at bit q + 1 (if_genetreg.h:217)</description><bitOffset>1</bitOffset><bitWidth>17</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>TX_DMA_STATUS</name><ownedByNif>false</ownedByNif>
+          <description>The transmit DMA block's status, block offset 0x1048, which if_genetreg.h does not name (docs/research-genet-bcm2711.md, "The DMA status register"): its bits mirror TX_DMA_CTRL's, each set once that part has stopped</description>
+          <addressOffset>0x5048</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>DISABLED</name><description>The block's DMA has stopped (the facts record, "The DMA status register")</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RING_DISABLED</name><description>One bit per ring, ring q at bit q + 1, set once ring q has stopped; inferred from the poll the facts record describes, which the board pass settles</description><bitOffset>1</bitOffset><bitWidth>17</bitWidth></field>
           </fields>
         </register>
         <register>

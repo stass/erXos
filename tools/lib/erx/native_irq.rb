@@ -23,7 +23,8 @@ module Erx
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_irq/program.c'].freeze
     SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH, 'otp/erts/emulator/nifs/erxos/erx_device_core.c',
                'otp/erts/emulator/nifs/erxos/erx_device.c',
-               'otp/erts/emulator/nifs/erxos/erx_device_queue.c', 'test/guest/native_irq/guest.c'].freeze
+               'otp/erts/emulator/nifs/erxos/erx_device_queue.c', 'otp/erts/emulator/nifs/erxos/erx_device_genet.c',
+               'test/guest/native_irq/guest.c'].freeze
     LABEL_UART = 0x55a0
     # test/guest/native_irq/holder.h's HOLDER_LABEL.
     LABEL_HOLDER = 0x55f5

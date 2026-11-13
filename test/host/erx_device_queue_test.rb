@@ -17,7 +17,7 @@ class ErxDeviceQueueTest < Minitest::Test
   NIFS = File.join(ROOT, 'otp/erts/emulator/nifs/erxos')
   CORE = File.join(NIFS, 'erx_device_queue.c')
   # The sequencer and a host DMA architecture layer that counts its maintenance, which erx_device.c's queues run through.
-  DMA = [File.join(NIFS, 'erx_device_dma.c'), File.join(ROOT, 'test/fixtures/erx_dma_arch_counting.c')].freeze
+  DMA = [File.join(NIFS, 'erx_device_dma.c'), File.join(NIFS, 'erx_device_genet.c'), File.join(ROOT, 'test/fixtures/erx_dma_arch_counting.c')].freeze
   FLAGS = ['-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
@@ -32,6 +32,28 @@ class ErxDeviceQueueTest < Minitest::Test
                          File.join(NIFS, 'erx_device.c'), File.join(NIFS, 'erx_device_core.c'), *DMA,
                          includes: [File.join(ROOT, 'test/fixtures/device_model')])
     assert_match(/^erx_device_dma done$/, output)
+  end
+
+  def test_the_register_ring_on_a_device
+    assert_match(/^erx_device_genet done$/, genet_output)
+  end
+
+  # The seeds of the register ring's effect layer, each of which fails the GENET harness: the
+  # idle test reading only the receive direction (docs/design-device-dma.md, Verification,
+  # "GENET's stop"), so the receive ring is installed while the transmit engine runs; and the
+  # register lookup narrowed to owned registers, so the idle report of DMA status, which the
+  # NIF does not own, reaches no register and the negotiation is refused.
+  GENET_SEEDS = {
+    idle_rx_only: ["\t\tidle = idle && erx_device_genet_idle(&record->genet.regs, status[side]);\n",
+                   "\t\tidle = side == 1 ? idle : erx_device_genet_idle(&record->genet.regs, status[side]);\n"],
+    owned_lookup: ["\t\tif (offset < reg->offset)\n\t\t\tcontinue;\n",
+                   "\t\tif (offset < reg->offset || !reg->owned_by_nif)\n\t\t\tcontinue;\n"]
+  }.freeze
+
+  GENET_SEEDS.each do |name, seed|
+    define_method(:"test_a_register_ring_seeded_with_#{name}_fails_the_harness") do
+      assert_match(/FAILED .*erx_device_genet_harness\.c/, genet_output(seed))
+    end
   end
 
   # The seeded faults of docs/design-runtime.md, "Regions": a region that leaves its pages to
@@ -63,6 +85,25 @@ class ErxDeviceQueueTest < Minitest::Test
   end
 
   private
+
+  GENET_HARNESS = File.join(ROOT, 'test/fixtures/erx_device_genet_harness.c')
+
+  # The GENET harness's output over erx_device.c, with `seed` applied when one is given.
+  def genet_output(seed = nil)
+    Dir.mktmpdir('erx-device-genet-') do |directory|
+      source = File.join(NIFS, 'erx_device.c')
+      if seed
+        text = File.read(source)
+        assert_includes text, seed.first
+        source = File.join(directory, 'erx_device.c')
+        File.write(source, text.sub(*seed))
+      end
+      output, status = harness_output(GENET_HARNESS, CORE, source, File.join(NIFS, 'erx_device_core.c'), *DMA,
+                                      includes: [File.join(ROOT, 'test/fixtures/device_model')])
+      assert_equal seed.nil?, status.success?, output
+      output
+    end
+  end
 
   # The DMA harness's output over erx_device.c with `seed` applied.
   def seeded_dma_output(seed)

@@ -583,10 +583,12 @@ it; git history is the record of completed work.
   the queue core's own `pool` device address, which the builders no longer use (they take the device base and
   `pool_offset`) but `erx_device_queue_post`'s plan still computes for its tests; a register-held length
   (virtio's `QueueNum`) checked against the reaches the install publishes; a descriptor rewritten while its
-  chain is posted, which no view expresses; field-level register ownership, and the register-ring (GENET) and
-  ADMA2 (SDHCI) descriptor forms. The maintenance step `L` is read from the current CPU's CTR_EL0 at each plan, so CPUs reporting different lines
-  would need the smallest taken once. A register report outside the owned list would read the wrong register
-  (`owned_register`; the check's `report_allowed` does not require ownership). Test gaps: no NIF test drives a refused
+  chain is posted, which no view expresses; field-level register ownership, and the ADMA2 (SDHCI)
+  descriptor form. The hosted stand-in GENET reports its DMA stopped at once and has no engine: no device side
+  sends what a post publishes or fills a receive buffer, which `erx_genet`'s hosted tests need, and its plans run on
+  plain memory, not over `erx_dma_model.c`; the register ring's effect layer is tested over a given GENET by
+  `test/fixtures/erx_device_genet_harness.c`, coherent caches only. The maintenance step `L` is read from the current CPU's CTR_EL0 at each plan, so CPUs reporting different lines
+  would need the smallest taken once. Test gaps: no NIF test drives a refused
   plan; the check's fuzz target runs at granule 1 only, and chains of three
   or four segments are not driven through the check.
 * [Low] `hw/sysreg/aarch64.json`, CTR_EL0: the DMA architecture layer
@@ -1350,9 +1352,16 @@ it; git history is the record of completed work.
   registers, but the frame length limit, the status block, the two-byte alignment and the burst
   sizes stay the driver's. The board pass confirms that a ring's buffer size bounds every byte the
   controller writes per descriptor whatever those say; if not, the NIF owns them too.
-* [Medium] GENET, the DMA design's register-ring reset reads a DMA status register, which FreeBSD's
-  `if_genetreg.h` does not name (`0x1048` past each direction's base), so the SVD lacks it; its
-  definition needs a source that is not Linux's driver, or the reset waits another way.
+* [Medium] GENET, `hw/svd/genet/genet.svd`, `RX_DMA_STATUS` and `TX_DMA_STATUS` (`0x1048` past each
+  direction's base), which the register ring's reset reads for its idle report: FreeBSD's
+  `if_genetreg.h` does not name them, so their definition comes from the clean-room facts record
+  alone (docs/research-genet-bcm2711.md, "The DMA status register"), its ring bit inferred. A source
+  that is not Linux's driver would confirm them; the board pass reads them in any case.
+* [Low] GENET, `test/fixtures/erx_device_genet_model_harness.c`, test gaps in the register ring's core:
+  no case fills the receive ring to exactly 256, runs the 16-bit indexes past 0xffff, or has good
+  frames before a too-long one; the stand-in's DMA status sets every ring bit at once, so a core that
+  ignored ring 16's bit would pass; and `erx_device_genet_registers` keeps its names, `found[]` and
+  `ring[]` in step by position, which one table of names and field offsets would replace.
 * [Low] GENET, facts the board pass settles: the transmit length's width (`__BITS(27,16)` against
   the mask `0x7ff0000`, neither compiled by FreeBSD; until settled the transport sends less than
   2048 bytes per descriptor), what receive status bit 15 means, the interrupt mask registers'

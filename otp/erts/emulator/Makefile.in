@@ -1335,6 +1335,7 @@ OS_OBJS = \
 	$(OBJDIR)/erx_area_lease_core.o \
 	$(OBJDIR)/erx_device_queue.o \
 	$(OBJDIR)/erx_device_dma.o \
+	$(OBJDIR)/erx_device_genet.o \
 	$(OBJDIR)/erx_dma_arch.o \
 	$(OBJDIR)/erx_crc32c.o \
 	$(ERX_NET_C_OBJS) \
