@@ -10,6 +10,7 @@ require_relative 'display_release'
 require_relative 'erlang_apps'
 require_relative 'dependencies'
 require_relative 'device_posters'
+require_relative 'display_driver_callers'
 require_relative 'pipe_callers'
 require_relative 'area_mappers'
 require_relative 'start_callers'
@@ -157,6 +158,7 @@ module Erx
       check_test_image_builders(own_sources)
       check_device_callers(listed)
       check_device_posters(listed)
+      check_display_driver_callers(listed)
       check_pipe_callers(listed)
       check_area_mappers(listed)
       check_start_callers(listed)
@@ -334,6 +336,13 @@ module Erx
           raise Error, "a test image is built only by #{TEST_IMAGE_BUILDERS.join(' and ')}: #{relative_path}:#{number}"
         end
       end
+    end
+
+    # Imports included, as for the device callers.
+    def check_display_driver_callers(listed)
+      sources = listed.select { |relative| DisplayDriverCallers.covers?(relative) && File.file?(File.join(@root, relative)) }
+      violations = DisplayDriverCallers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
     end
 
     # Imports included, as for the device callers.

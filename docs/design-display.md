@@ -1401,18 +1401,28 @@ the serial console's `vt100` entry does not
 
 ### The display device
 
-A display driver is an Erlang process over the device NIF implementing
-`erx_display`:
+A display driver is an Erlang process over the device NIF, a
+`gen_server` that implements `erx_display`'s one callback and answers
+in its `handle_call/3` the two requests the behaviour module defines:
 
 ```erlang
--callback info(State) -> #{width := pos_integer(), height := pos_integer(),
-                           chan := chan(),
-                           screen := erx_memdraw:image(), % the screen image
-                           partial := boolean(),   % whether flush takes rectangles
-                           direct := boolean()}.   % whether flush takes a client's buffer
--callback flush(Rects :: [rect()], Image :: erx_memdraw:image(), State) -> {ok, State}.
--callback power(on | dim | off, State) -> {ok, State}.
+-callback info(Driver :: pid()) -> #{width := pos_integer(), height := pos_integer(),
+                                    chan := chan(),
+                                    screen := erx_memdraw:image(), % the screen image
+                                    partial := boolean(),   % whether a frame takes rectangles
+                                    direct := boolean()}.   % whether a frame takes a client's buffer
+-spec flush_request(Driver :: pid(), Rects :: [rect()], Image :: erx_memdraw:image()) ->
+    gen_server:request_id().    % sends {flush, Rects, Image}
+-spec power_request(Driver :: pid(), Level :: on | dim | off) ->
+    gen_server:request_id().    % sends {power, Level}
 ```
+
+`erx_screen` hands `info/1` the driver's process. The two requests are
+functions of `erx_display`, not callbacks: the module builds the one
+term each sends, so every driver answers the same terms and the rule
+that `erx_screen` alone sends them is a check over calls of two named
+functions ([Chokepoints](#chokepoints)). A driver answers any other call
+with a refusal, so no process that reaches it ends it.
 
 `info/1` names the **screen image**, an `erx_memdraw` image of the
 display's size and channel over memory the driver chose: the backing of
@@ -1422,27 +1432,33 @@ Regions); the framebuffer a board's firmware set up; or, for a panel on a
 serial bus, memory of the driver's own. `erx_screen` composes into it,
 and nothing else writes it.
 
-`flush/3` takes the rectangles that changed and the image to read them
-from, and makes the device show them: a virtio-gpu driver posts a
+`erx_display:flush_request/3` sends the driver one frame, the rectangles that
+changed and the image to read them from, and returns at once with the
+request's id, as `gen_server:send_request/2` does; the driver makes the
+device show the rectangles, and its answer, `ok` or a refusal, arrives as
+a message that `gen_server:check_response/2` reads, or the request ends
+with the driver. It is the one way a frame reaches a driver, so every
+driver is driven alike, and `erx_screen` alone calls it. A driver
+answers it in its own way: a virtio-gpu driver posts a
 transfer and a flush for each rectangle on its control queue and parses
 the device's responses in Erlang with binary matching; a firmware
 framebuffer driver has nothing to post, since the device scans the
 memory out; a panel driver on a serial bus sends a window-set command
 and the rectangle's bytes, read from the image and converted to the
-panel's channel by `erx_memdraw` in the copy. It returns when the device
-has taken the rectangles, and that return is the one thing the driver
+panel's channel by `erx_memdraw` in the copy. It answers when the device
+has taken the rectangles, and that answer is the one thing the driver
 promises, since it is the point after which the device reads nothing of
 the image again until the next flush: a virtio-gpu driver sends the
-frame's last command with `VIRTIO_GPU_FLAG_FENCE` and returns at its
+frame's last command with `VIRTIO_GPU_FLAG_FENCE` and answers at its
 response, which the device sends only once it has processed every
-command before it; a panel driver returns at the last byte on the bus;
-a firmware framebuffer driver returns at once, since its device has
-scanned the screen image all along. The return is also what paces a
+command before it; a panel driver answers at the last byte on the bus;
+a firmware framebuffer driver answers at once, since its device has
+scanned the screen image all along. The answer is also what paces a
 client, so a client is paced to the device where the device has a
 completion, and to the copy where it has none: on a firmware
 framebuffer a client that presents as fast as it is answered presents
 as fast as `erx_screen` copies, unless the platform's driver can wait
-for a vertical blank, which it then does before it returns.
+for a vertical blank, which it then does before it answers.
 
 The display drivers are the display device class's driver application,
 `erx_fb`, one application per device class as every driver's is
@@ -1472,7 +1488,7 @@ and sets the scanout to it. A driver whose device reaches only memory of
 its own, an unconfined device or a firmware framebuffer, reports
 `direct` false and is handed no image but the screen image.
 
-The driver reads an image only while the callback runs. Every offset
+The driver reads an image only while it holds the frame, until it answers. Every offset
 into an image, from the stride, the row and the column, is computed with
 checked arithmetic against the image's length, and every rectangle is
 clipped to the image before it is read. The screen image's memory
@@ -1652,9 +1668,9 @@ exhaustively on the host over small screens and layouts.
 command ([The window tree](#the-window-tree)). The window waits for the
 answer, so a window has one present in flight.
 
-**A frame** is what `erx_screen` hands the driver in one `flush/3`.
-`erx_screen` never waits on the driver: it sends the frame with
-`gen_server:send_request/2` and takes the answer, or the driver's end,
+**A frame** is what `erx_screen` hands the driver in one
+`erx_display:flush_request/3`. `erx_screen` never waits on the driver: the request
+returns at once, and `erx_screen` takes the answer, or the driver's end,
 as a message, so its mailbox keeps draining while the device works.
 What arrives meanwhile changes **pending state**, of which there is a
 fixed amount and no queue:
@@ -1763,7 +1779,8 @@ client's own pixels and nothing else (G2).
 **Low power.** `erx_screen` keeps the idle clock, the time since the last
 input event `erx_winfs` told it of, and a display's manifest entry names
 its idle policy: after a stated idle time `erx_screen` asks the driver
-for `dim`, then `off`. While the panel is off, presents change their
+for `dim`, then `off`, each with `erx_display:power_request/2`, whose
+answer arrives as a frame's does. While the panel is off, presents change their
 windows' buffers and are answered without a copy, and nothing is pushed;
 the next input event turns the display `on` and repaints. The idle clock
 is a timer for power, not for drawing.
@@ -3763,7 +3780,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
     bound, and one that calls the driver synchronously fails the
     message-queue bound;
   * the answer follows the device: against a driver model that holds its
-    `flush/3`, the present stays unanswered until the model returns; an
+    frame, the present stays unanswered until the model answers; an
     `erx_screen` that answers before the flush fails;
   * pacing: against a driver model that takes 10 ms a frame, a client
     that presents as fast as it is answered is answered once a frame,
@@ -4092,7 +4109,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
 | Only an image resource's destructor frees an image a term can reach or lets go of the memory it lies over | `memdraw-free`: `erx_memdraw_free` is called only from the NIF, by `image_dtor` and by the test-only `cload` for the image it made itself |
 | A pixel area is mapped in two places, into the runtime by the connection agent, `erx_connections`, and into a program's sub-space from a lease, and a lease is a whole range of one owner, made by `erx_pixels`. So every mapping is one the agent waits for before it answers that the connection is unmapped, the display's mapping is the read-only one the agent asked for, and a program maps only its handler's buffer | `area-mappers` (tools/lib/erx/area_mappers.rb). Over the Erlang sources of `otp/` and `erlang/`: outside `erx_area` and `erx_connections`, the atom `erx_area` appears only as the module of `open/1` and of the type `area()`, and in `erx_pixels` as the module of `lend/5`, `unlend/1` and `zero/3` too, so `map/4` anywhere, or `lend/5`, `unlend/1` or `zero/3` outside `erx_pixels`, as a call, a fun, an apply's arguments, an import, a macro, a literal or a string fails the build. Over the C of `otp/erts/emulator`: `erx_area_lease_take`, `erx_area_lease_map` and `erx_area_lease_return` are called only from `erx_program_drv.c`, and a seeded call of each from another file fails it |
 | Only `erx_memdraw:wrap/4` makes an image over memory `erx_memdraw` did not allocate, and only after checking the range | a source check over the NIF: the one site that sets an image's data pointer from an area or a device's region ([design-runtime.md](design-runtime.md#the-device-nif), Regions) |
-| Only `erx_screen` writes the screen image, makes images over clients' pixel areas, and calls the display driver's `flush/3` and `power/2` | an xref check over the display release |
+| Only `erx_screen` writes the screen image, makes images over clients' pixel areas, and calls `erx_display:flush_request/3` and `erx_display:power_request/2` | the writes and the images: an xref check over the display release; the calls: `display-driver-callers` (tools/lib/erx/display_driver_callers.rb), over the Erlang sources of `otp/` and `erlang/`: outside `erx_screen`, neither function is named as a call target, as a remote call, a fun, an apply, a module and function pair, a call through a module in a variable or a macro, an import from `erx_display` or a macro defined as it |
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |
 | Only the display driver's process calls `erx_device`'s functions on the display device | the same xref check; and `device-callers` admits the display drivers' application, `erx_fb`, among the driver applications, while `device-posters` admits `erx_virtio_gpu` alone of it to call `erx_device:post/4` |
 | Only `erx_winfs` calls `erx_wm`'s callbacks | the same xref check |
@@ -4202,7 +4219,7 @@ draws attaches as [Graphics hardware](#graphics-hardware) says.
 | a display's restart rule in the session template | a template says how a principal's sessions are made, for a login as much as for a display, and has no restart intensity ([design-system.md](design-system.md#the-manifest), property 14); an intensity there would have to be ignored for every session a person logs in to |
 | a display's restart rule in the application's package | the intensity protects the machine from a session that ends at once, again and again, so it is not for the application to choose; the start row sets it, written by the image's builder or the machine's administrator |
 | a buffer freed explicitly by its window's code, as a heap block is | one call to remember on every path that ends a window or a program, and a page handed out again while a program still maps it; a range that goes back only when its owner process exits needs no call and cannot be reused under a live mapping |
-| `erx_screen` waiting in the driver's `flush/3`, with presents and layouts queued in its mailbox | a stalled device grows the display's heap with every `wctl` and every window made and ended; pending state replaced in place bounds it by construction |
+| `erx_screen` waiting on the driver's answer to a frame, with presents and layouts queued in its mailbox | a stalled device grows the display's heap with every `wctl` and every window made and ended; pending state replaced in place bounds it by construction |
 | X11 (a server, or a rootless server over draw) | the server is a large C program with its own authority model; a rootless X server over the draw protocol stays a possible compatibility layer for FreeBSD programs much later and changes nothing here |
 | wxWidgets, GTK, Qt | whole native toolkit stacks in C++ with their own event loops and renderers; against the C17-and-Erlang rule and against principle 3 |
 | Scenic (Erlang/Elixir scene graph) | a scene graph owned by the application in its own process, drawn by a native driver; its model is close to this document's widget trees, which take its idea of a declarative tree and drop its native driver protocol for the draw protocol |

@@ -23,9 +23,10 @@ image's rectangle as placed there.
 Three calls carry the decisions out:
 
 * `layout/2` takes a new layout and returns its plan: the decoration and
-  background rectangles to fill and push, and the area of each window to
-  expose, which the window's answering flush pushes. A pixel is filled or
-  exposed only when what it shows changes: two fills of one colour show the
+  background rectangles to fill, the area of each window to copy from the
+  buffer `erx_screen` already holds for it, and the rectangles to push,
+  every one filled or copied. A pixel is filled or
+  copied only when what it shows changes: two fills of one colour show the
   same thing, and a window shows the same thing only from the same window
   process at the same origin, since a moved window shows other pixels of its
   image there and a restarted one another image. Keying a window by its
@@ -33,24 +34,27 @@ Three calls carry the decisions out:
   that had it.
 * `repaint/1` is the plan of the current layout over a screen whose contents
   are unknown, which follows a driver's restart, a wake and `erx_screen`'s
-  own restart: every fill, every visible region exposed whole.
-* `flush/4` is the plan of a window's flush: the rectangles to copy from its
-  image into the screen image and push, or in direct mode the rectangles to
-  push from its image itself. Overlapping dirty rectangles give overlapping
-  copies, which write the same pixels twice, as Plan 9's do.
+  own restart: every fill, every visible region copied whole.
+* `present/4` is the plan of a window's present: the rectangles to copy from
+  its buffer into the screen image and push, or on the direct path the
+  rectangles to push from its buffer itself. Overlapping rectangles give
+  overlapping copies, which write the same pixels twice, as Plan 9's do.
 
-**Direct mode.** A layout of exactly one window whose rectangle is the
-screen's, no larger, and which has no decorations composes nothing: the
-window's flushes are pushed from its own image. The screen image then holds
-none of the window's pixels, so the layout after direct mode treats the
-screen image as unknown, and a composing layout fills and exposes
-everything. Entering direct mode compares with what the device shows, the
-screen image, so `erx_screen` pushes every rectangle it still owes the
+**Paths.** Every frame takes one of two paths. On the copy path the screen
+image is what the device shows. On the direct path, which a driver that
+reports `direct` allows, a layout of exactly one window whose rectangle is
+the screen's, no larger, and which has no decorations composes nothing:
+the window's buffer is pushed itself, and a layout's plan copies nothing
+and pushes what changed from the buffer. The screen image then holds none
+of the window's pixels, so the layout after the direct path treats the
+screen image as unknown, and a layout on the copy path fills and copies
+everything. Entering the direct path compares with what the device shows,
+the screen image, so `erx_screen` pushes every rectangle it still owes the
 driver before it enters.
 
 `add_dirty/2` keeps a window's dirty list of at most 16 rectangles, which a
 seventeenth replaces by the bounding box of all of them, as Plan 9's
-`flushimage` does with one; `flush/4` refuses a longer list.
+`flushimage` does with one; `present/4` refuses a longer list.
 
 **Cost.** The tiling works in **bands**: the horizontal edges of the screen
 and of every window and decoration rectangle cut the screen into bands, and
@@ -68,10 +72,10 @@ rectangle, a coordinate outside draw(3)'s 32 bits, or more than 16 dirty
 rectangles is refused with `{error, einval}`.
 """.
 
--export([new/2, layout/2, repaint/1, flush/4, visible/2, tiles/1, mode/1,
+-export([new/3, layout/2, repaint/1, present/4, visible/2, tiles/1, path/1,
          add_dirty/2]).
 -export_type([rect/0, color/0, window_id/0, entry/0, layout/0, source/0,
-              tile/0, mode/0, plan/0, state/0]).
+              tile/0, path/0, plan/0, state/0]).
 
 -define(COORD_MIN, -16#80000000).
 -define(COORD_MAX, 16#7fffffff).
@@ -97,15 +101,20 @@ rectangles is refused with `{error, einval}`.
 %% X0. The type is named strip because band is an Erlang operator.
 -type strip() :: {Y0 :: coord(), Y1 :: coord(), [run()]}.
 -type run() :: {X0 :: coord(), X1 :: coord(), source()}.
--type mode() :: compose | {direct, window_id()}.
+-type path() :: copy | {direct, window_id()}.
+%% push is every rectangle of fill and copy, on the copy path, or of the
+%% direct window's changed area, on the direct path, where copy is empty.
 -type plan() :: #{fill := [{rect(), color()}],
-                  expose := [{window_id(), [rect()]}],
+                  copy := [{window_id(), [rect()]}],
                   push := [rect()]}.
 
 -record(screen, {rect :: rect(),
                  background :: color(),
+                 %% Whether the driver takes a client's buffer that covers
+                 %% the screen.
+                 direct :: boolean(),
                  layout = [] :: layout(),
-                 mode = compose :: mode(),
+                 path = copy :: path(),
                  %% The tiling of the layout, as the screen will show it once
                  %% the last plan is carried out; unknown before the first.
                  bands = unknown :: unknown | [strip()],
@@ -117,19 +126,20 @@ rectangles is refused with `{error, einval}`.
 -doc """
 The state of a screen of rectangle `Screen` and background colour
 `Background`, with no window shown and its contents unknown, so that the
-first layout fills and exposes everything.
+first layout fills and copies everything. `Direct` is the driver's
+`direct` of the driver's `info/1`, whether the direct path is open.
 """.
--spec new(rect(), color()) -> {ok, state()} | {error, einval}.
-new(Screen, Background) ->
+-spec new(rect(), color(), Direct :: boolean()) -> {ok, state()} | {error, einval}.
+new(Screen, Background, Direct) ->
     case is_rect(Screen) andalso not is_empty(Screen) andalso
-        is_color(Background) of
-        true -> {ok, #screen{rect = Screen, background = Background}};
+        is_color(Background) andalso is_boolean(Direct) of
+        true -> {ok, #screen{rect = Screen, background = Background, direct = Direct}};
         false -> {error, einval}
     end.
 
 -doc """
 Takes `Layout`, the shown windows topmost first, and returns the plan that
-brings the screen from the old layout to it: the fills, the exposes and the
+brings the screen from the old layout to it: the fills, the copies and the
 pushes.
 """.
 -spec layout(layout(), state()) -> {ok, plan(), state()} | {error, einval}.
@@ -145,37 +155,37 @@ layout(Layout, #screen{} = Screen) ->
 -doc """
 The plan of the current layout over a screen whose contents are unknown:
 every decoration and the background filled, and every visible region
-exposed whole.
+copied whole.
 """.
 -spec repaint(state()) -> {plan(), state()}.
 repaint(#screen{layout = Layout} = Screen) ->
     arrange(Layout, unknown, Screen).
 
 -doc """
-The plan of a flush of window `Id` by its process `Proc`, whose image lies
-at `Bounds` on the
-screen, with at most 16 dirty rectangles `Rects` in screen coordinates.
-`{copy, Rs}`: copy `Rs` from the window's image into the screen image, then
-push them; they are the dirty rectangles clipped to the image and to the
+The plan of a present of window `Id` by its process `Proc`, whose buffer
+lies at `Bounds` on the screen, with at most 16 rectangles `Rects` that
+changed, in screen coordinates.
+`{copy, Rs}`: copy `Rs` from the window's buffer into the screen image, then
+push them; they are the rectangles clipped to the buffer and to the
 window's visible region, and empty for a window the layout does not show,
-or shows from another process. `{direct, Rs}`, in direct mode: push `Rs`
-straight from the window's image; its visible region is the screen.
+or shows from another process. `{direct, Rs}`, on the direct path: push
+`Rs` straight from the window's buffer; its visible region is the screen.
 """.
--spec flush({window_id(), pid()}, rect(), [rect()], state()) ->
+-spec present({window_id(), pid()}, rect(), [rect()], state()) ->
           {copy | direct, [rect()]} | {error, einval}.
-flush({Id, Proc}, Bounds, Rects, #screen{} = Screen) when is_pid(Proc) ->
+present({Id, Proc}, Bounds, Rects, #screen{} = Screen) when is_pid(Proc) ->
     case is_rect(Bounds) andalso every(fun is_rect/1, Rects) andalso
         length(Rects) =< ?DIRTY_MAX of
-        true -> flush_plan(Id, Proc, [intersect(R, Bounds) || R <- Rects], Screen);
+        true -> present_plan(Id, Proc, [intersect(R, Bounds) || R <- Rects], Screen);
         false -> {error, einval}
     end;
-flush(_, _, _, #screen{}) ->
+present(_, _, _, #screen{}) ->
     {error, einval}.
 
-flush_plan(Id, Proc, Rects, #screen{mode = Mode, visible = Visible}) ->
+present_plan(Id, Proc, Rects, #screen{path = Path, visible = Visible}) ->
     case Visible of
         #{Id := {Proc, Region}} ->
-            {pushed_from(Id, Mode), [Piece || Part <- Region,
+            {pushed_from(Id, Path), [Piece || Part <- Region,
                                               Piece <- clip_region(Rects, Part)]};
         #{} ->
             {copy, []}
@@ -200,12 +210,12 @@ cover the screen, each with its source; `unknown` before the first layout.
 tiles(#screen{bands = unknown}) -> unknown;
 tiles(#screen{tiles = Tiles}) -> Tiles.
 
--doc "Whether the current layout composes or is in direct mode.".
--spec mode(state()) -> mode().
-mode(#screen{mode = Mode}) -> Mode.
+-doc "The path of the current layout: `copy`, or `{direct, Id}` for window `Id`.".
+-spec path(state()) -> path().
+path(#screen{path = Path}) -> Path.
 
 -doc """
-Adds `Rect`, a rectangle the window decoded, to its dirty list, which holds
+Adds `Rect`, a rectangle that changed, to a dirty list, which holds
 at most 16 rectangles: a seventeenth replaces the list by the bounding box of
 all seventeen. An empty rectangle changes nothing.
 """.
@@ -224,11 +234,15 @@ arrange(Layout, Known, #screen{rect = Rect, background = Background} = Screen) -
     Bands = bands(Rect, Background, Layout),
     Tiles = rects_of(Bands),
     Changed = rects_of(changed(Known, Bands)),
-    Fills = [{R, Color} || {R, Source} <- Changed, {fill, Color} <- [content(Source)]],
-    Plan = #{fill => Fills,
-             expose => by_window(Layout, Changed),
-             push => [R || {R, _} <- Fills]},
-    {Plan, Screen#screen{layout = Layout, mode = mode_of(Rect, Layout),
+    Path = path_of(Layout, Screen),
+    Copies = case Path of
+                 copy -> by_window(Layout, Changed);
+                 {direct, _} -> []
+             end,
+    Plan = #{fill => [{R, Color} || {R, Source} <- Changed, {fill, Color} <- [content(Source)]],
+             copy => Copies,
+             push => [R || {R, _} <- Changed]},
+    {Plan, Screen#screen{layout = Layout, path = Path,
                          bands = Bands, tiles = Tiles,
                          visible = visible_regions(Layout, Tiles)}}.
 
@@ -239,16 +253,18 @@ visible_regions(Layout, Tiles) ->
                     || {Id, Region} <- by_window(Layout, Tiles)]).
 
 %% What the screen shows before Layout takes effect, as the new layout's
-%% mode sees it: leaving direct mode for a composing layout finds a screen
+%% path sees it: leaving the direct path for the copy path finds a screen
 %% image that holds none of the direct window's pixels.
-known(Layout, #screen{rect = Rect, mode = Old, bands = Bands}) ->
-    case {Old, mode_of(Rect, Layout)} of
-        {{direct, _}, compose} -> unknown;
+known(Layout, #screen{path = Old, bands = Bands} = Screen) ->
+    case {Old, path_of(Layout, Screen)} of
+        {{direct, _}, copy} -> unknown;
         _ -> Bands
     end.
 
-mode_of(Screen, [#{id := Id, rect := Screen, decorations := []}]) -> {direct, Id};
-mode_of(_, _) -> compose.
+path_of([#{id := Id, rect := Rect, decorations := []}], #screen{rect = Rect, direct = true}) ->
+    {direct, Id};
+path_of(_, #screen{}) ->
+    copy.
 
 %% The rectangles of Tiles that come from each window of Layout, in layout
 %% order, for the windows with any.

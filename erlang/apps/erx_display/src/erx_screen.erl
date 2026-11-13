@@ -5,8 +5,7 @@
 -moduledoc """
 The screen (docs/design-display.md, "The screen and its one path to the
 device"): the one process that writes the screen image and the one sender
-of frames to the display driver, as `{flush, Rects, Image}` requests (TODO.md, the
-flush request). Its decisions are `erx_screen_core`'s;
+of frames to the display driver, each through `erx_display:flush_request/3`. Its decisions are `erx_screen_core`'s;
 this process performs the plans the core returns, filling with
 `erx_memdraw`, and hands the driver each plan's pushed rectangles as one
 frame.
@@ -17,8 +16,8 @@ fills what the core's repaint names and flushes the result. Windows,
 presents, the overlay and the layouts of `erx_winfs` are not served yet,
 so the repaint at start is the only frame (TODO.md, the display domain).
 
-A frame is sent with `gen_server:send_request/2` and its answer, or the
-driver's end, arrives as a message, so the screen never waits on the
+A frame's request returns at once and its answer, or the driver's end,
+arrives as a message, so the screen never waits on the
 driver; while a frame is out the screen writes nothing. The driver's end
 also ends this process: the supervisor that starts both, `erx_fb_sup`,
 is `rest_for_one` with the driver first, so a restarted driver is
@@ -70,9 +69,10 @@ init({Module, Name}) ->
         undefined ->
             ignore;
         Driver ->
-            #{width := Width, height := Height, screen := Screen, partial := Partial} = Module:info(Driver),
+            #{width := Width, height := Height, screen := Screen, partial := Partial,
+              direct := Direct} = Module:info(Driver),
             Rect = {0, 0, Width, Height},
-            {ok, Core0} = erx_screen_core:new(Rect, ?BACKGROUND),
+            {ok, Core0} = erx_screen_core:new(Rect, ?BACKGROUND, Direct),
             {Plan, Core} = erx_screen_core:repaint(Core0),
             ok = fill(Screen, maps:get(fill, Plan)),
             Push = case Partial of
@@ -118,4 +118,4 @@ fill(Screen, Fills) ->
 send([], State) ->
     State;
 send(Push, State = #state{driver = Driver, screen = Screen, frame = none}) ->
-    State#state{frame = gen_server:send_request(Driver, {flush, Push, Screen})}.
+    State#state{frame = erx_display:flush_request(Driver, Push, Screen)}.

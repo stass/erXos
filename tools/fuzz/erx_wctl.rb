@@ -10,14 +10,14 @@ require 'tmpdir'
 # come from a client (docs/design-display.md, "Verification and testing"). It is compiled
 # from source and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the oracle's), as
 # the module is and then as two copies that each drop one check, which must fail: one
-# without the 128-byte bound on a line, one without the top of the coordinate range.
+# without the 1,024-byte bound on a line, one without the top of the coordinate range.
 # That shows the reference and the inputs reach both checks.
 module ErxWctlFuzz
   ROOT = File.expand_path('../..', __dir__)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_display/src/erx_wctl.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_wctl_fuzz.erl')
   SEEDED = {
-    'the 128-byte bound' => ['byte_size(Bytes) =< ?MAX_LINE', 'byte_size(Bytes) >= 0'],
+    'the 1,024-byte bound' => ['byte_size(Bytes) =< ?MAX_LINE', 'byte_size(Bytes) >= 0'],
     'the coordinate range' => ['Sign * Magnitude =< ?MAX_COORD', 'is_integer(Magnitude)']
   }.freeze
   DEADLINE_SECONDS = '300'

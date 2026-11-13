@@ -64,7 +64,7 @@ tiling_layouts() ->
 %% of its part of the screen.
 %% Window 1's decoration has the background's colour, window 2's another,
 %% so a fill of the same colour and a fill of a new one both occur. The
-%% rectangle {0, 0, 2, 2} undecorated, alone, is direct mode.
+%% rectangle {0, 0, 2, 2} undecorated, alone, is the direct path.
 pair_layouts() ->
     Rects = [{-1, -1, 3, 3} | rects([0, 1, 2], [0, 1, 2])],
     Window = fun(Id, R) -> [window(Id, R, D) || D <- pair_decorations(Id, R)] end,
@@ -111,8 +111,8 @@ direct(Screen, [#{rect := Screen, decorations := []}]) -> true;
 direct(_, _) -> false.
 
 %% What each pixel of Screen shows before New takes effect, after Old, or
-%% unknown everywhere for a fresh screen and for a composing layout after
-%% direct mode, whose screen image holds none of the window's pixels.
+%% unknown everywhere for a fresh screen and for a layout on the copy path after
+%% the direct path, whose screen image holds none of the window's pixels.
 before(_, none, _) ->
     fun(_) -> unknown end;
 before(Screen, Old, New) ->
@@ -121,22 +121,31 @@ before(Screen, Old, New) ->
         false -> fun(P) -> look(source_at(P, Old)) end
     end.
 
-%% The plan the oracle expects: per window the pixels it must expose, and
-%% the pixels to fill with their colours.
+%% The plan the oracle expects: per window the pixels to copy from its
+%% buffer, none on the direct path, the pixels to fill with their colours,
+%% and every changed pixel to push.
 expected_plan(Screen, Old, New) ->
     Shown = before(Screen, Old, New),
     Changed = [{P, source_at(P, New)} || P <- pixels(Screen),
                                          look(source_at(P, New)) =/= Shown(P)],
-    Exposes = [{Id, Ps} || #{id := Id} <- New,
+    Copies = [{Id, Ps} || #{id := Id} <- New,
                            Ps <- [lists:sort([P || {P, {window, W, _, _}} <- Changed, W =:= Id])],
                            Ps =/= []],
     Fills = lists:sort([{P, Color} || {P, Source} <- Changed, {fill, Color} <- [look(Source)]]),
-    {Exposes, Fills}.
+    Push = lists:sort([P || {P, _} <- Changed]),
+    case direct(Screen, New) of
+        true -> {[], Fills, Push};
+        false -> {Copies, Fills, Push}
+    end.
 
 %% Running the core.
 
+%% A screen whose driver takes a client's buffer, so the direct path is open.
 screen(Rect) ->
-    {ok, State} = erx_screen_core:new(Rect, ?BACKGROUND),
+    screen(Rect, true).
+
+screen(Rect, Direct) ->
+    {ok, State} = erx_screen_core:new(Rect, ?BACKGROUND, Direct),
     State.
 
 laid_out(Rect, Layouts) ->
@@ -145,8 +154,8 @@ laid_out(Rect, Layouts) ->
                         Next
                 end, screen(Rect), Layouts).
 
-plan_pixels(#{fill := Fills, expose := Exposes, push := Push}) ->
-    {[{Id, pixels_of(Rs)} || {Id, Rs} <- Exposes],
+plan_pixels(#{fill := Fills, copy := Copies, push := Push}) ->
+    {[{Id, pixels_of(Rs)} || {Id, Rs} <- Copies],
      lists:sort([{P, Color} || {R, Color} <- Fills, P <- pixels(R)]),
      pixels_of(Push)}.
 
@@ -170,9 +179,9 @@ check_tiling(Screen, Layout) ->
                   {Layout, Id, pixels_of(erx_screen_core:visible(Id, State))})
      || #{id := Id} <- Layout].
 
-%% A layout change exposes and fills exactly the pixels whose look changed.
+%% A layout change copies and fills exactly the pixels whose look changed.
 
-layout_changes_expose_and_fill_exactly_what_changed_test_() ->
+layout_changes_copy_and_fill_exactly_what_changed_test_() ->
     {timeout, ?EXHAUSTIVE_SECONDS,
      fun() ->
              Screen = {0, 0, 2, 2},
@@ -183,44 +192,38 @@ layout_changes_expose_and_fill_exactly_what_changed_test_() ->
                            end, Layouts)
      end}.
 
-first_layout_fills_and_exposes_everything_test() ->
+first_layout_fills_and_copies_everything_test() ->
     Screen = {0, 0, 2, 2},
     [check_change(Screen, none, screen(Screen), New) || New <- pair_layouts()].
 
 check_change(Screen, Old, Before, New) ->
     {ok, Plan, _} = erx_screen_core:layout(New, Before),
-    {Exposes, Fills, Push} = plan_pixels(Plan),
-    {WantExposes, WantFills} = expected_plan(Screen, Old, New),
-    ?assertEqual({Old, New, WantExposes, WantFills},
-                 {Old, New, Exposes, Fills}),
-    ?assertEqual({Old, New, [P || {P, _} <- WantFills]}, {Old, New, Push}).
+    ?assertEqual({Old, New, expected_plan(Screen, Old, New)}, {Old, New, plan_pixels(Plan)}).
 
-repaint_fills_and_exposes_everything_test() ->
+repaint_fills_and_copies_everything_test() ->
     Screen = {0, 0, 2, 2},
     lists:foreach(
       fun(Layout) ->
               {Plan, _} = erx_screen_core:repaint(laid_out(Screen, [Layout])),
-              {WantExposes, WantFills} = expected_plan(Screen, none, Layout),
-              WantPush = [P || {P, _} <- WantFills],
-              ?assertEqual({Layout, {WantExposes, WantFills, WantPush}},
+              ?assertEqual({Layout, expected_plan(Screen, none, Layout)},
                            {Layout, plan_pixels(Plan)})
       end, pair_layouts()).
 
-%% A flush copies exactly the dirty pixels the window shows, or in direct
-%% mode pushes exactly its dirty pixels on the screen.
+%% A present copies exactly the changed pixels the window shows, or on the
+%% direct path pushes exactly its changed pixels on the screen.
 
-flush_copies_exactly_the_visible_dirty_area_test_() ->
+present_copies_exactly_the_visible_dirty_area_test_() ->
     {timeout, ?EXHAUSTIVE_SECONDS,
      fun() ->
              Screen = {0, 0, 2, 2},
              Dirty = rects([-1, 0, 1, 3], [-1, 0, 1, 3]),
              Bounds = [Screen, {0, 0, 1, 1}, {1, 0, 5, 5}, {-3, -3, -1, -1}],
-             [check_flush(Screen, Layout, Id, B, Dirty)
+             [check_present(Screen, Layout, Id, B, Dirty)
               || Layout <- pair_layouts(), Id <- [3 | [I || #{id := I} <- Layout]],
                  B <- Bounds]
      end}.
 
-check_flush(Screen, Layout, Id, Bounds, DirtyRects) ->
+check_present(Screen, Layout, Id, Bounds, DirtyRects) ->
     State = laid_out(Screen, [Layout]),
     Direct = direct(Screen, Layout),
     lists:foreach(
@@ -231,49 +234,59 @@ check_flush(Screen, Layout, Id, Bounds, DirtyRects) ->
                           true -> direct;
                           false -> copy
                       end, lists:sort(Wanted)},
-              {Mode, Rects} = erx_screen_core:flush({Id, self()}, Bounds, [Dirty], State),
+              {Path, Rects} = erx_screen_core:present({Id, self()}, Bounds, [Dirty], State),
               ?assertEqual({Layout, Id, Bounds, Dirty, Want},
-                           {Layout, Id, Bounds, Dirty, {Mode, pixels_of(Rects)}})
+                           {Layout, Id, Bounds, Dirty, {Path, pixels_of(Rects)}})
       end, DirtyRects).
 
 is_window(Id, {window, Id, _, _}) -> true;
 is_window(_, _) -> false.
 
-flush_of_overlapping_rectangles_test() ->
+present_of_overlapping_rectangles_test() ->
     State = laid_out({0, 0, 4, 4}, [[window(1, {0, 0, 2, 4}, []), window(2, {0, 0, 4, 4}, [])]]),
-    {copy, Rects} = erx_screen_core:flush({2, self()}, {0, 0, 4, 4}, [{0, 0, 3, 1}, {2, 0, 4, 2}], State),
+    {copy, Rects} = erx_screen_core:present({2, self()}, {0, 0, 4, 4}, [{0, 0, 3, 1}, {2, 0, 4, 2}], State),
     ?assertEqual(lists:sort([{2, 0}, {3, 0}, {2, 0}, {2, 1}, {3, 1}]), pixels_of(Rects)).
 
-%% Direct mode.
+%% The direct path.
 
-direct_mode_is_one_undecorated_window_covering_the_screen_test() ->
+direct_path_is_one_undecorated_window_covering_the_screen_test() ->
     Screen = {0, 0, 4, 3},
-    Mode = fun(Layout) -> erx_screen_core:mode(laid_out(Screen, [Layout])) end,
-    ?assertEqual({direct, 7}, Mode([window(7, Screen, [])])),
-    ?assertEqual(compose, Mode([window(7, Screen, [{{0, 0, 1, 1}, 5}])])),
-    ?assertEqual(compose, Mode([window(7, {0, 0, 4, 2}, [])])),
-    ?assertEqual(compose, Mode([window(7, {-1, 0, 4, 3}, [])])),
-    ?assertEqual(compose, Mode([window(7, Screen, []), window(8, {0, 0, 1, 1}, [])])),
-    ?assertEqual(compose, Mode([])).
+    Path = fun(Layout) -> erx_screen_core:path(laid_out(Screen, [Layout])) end,
+    ?assertEqual({direct, 7}, Path([window(7, Screen, [])])),
+    ?assertEqual(copy, Path([window(7, Screen, [{{0, 0, 1, 1}, 5}])])),
+    ?assertEqual(copy, Path([window(7, {0, 0, 4, 2}, [])])),
+    ?assertEqual(copy, Path([window(7, {-1, 0, 4, 3}, [])])),
+    ?assertEqual(copy, Path([window(7, Screen, []), window(8, {0, 0, 1, 1}, [])])),
+    ?assertEqual(copy, Path([])).
 
-leaving_direct_mode_exposes_every_window_whole_test() ->
+leaving_direct_path_copies_every_window_whole_test() ->
     Screen = {0, 0, 4, 3},
     Direct = laid_out(Screen, [[window(7, Screen, [])]]),
     Border = {{0, 0, 4, 1}, 5},
     {ok, Plan, _} = erx_screen_core:layout([window(8, {1, 1, 3, 3}, []), window(7, Screen, [Border])],
                                            Direct),
-    #{expose := Exposes, fill := Fills} = Plan,
+    #{copy := Copies, fill := Fills} = Plan,
     ?assertEqual([{8, pixels_of([{1, 1, 3, 3}])},
                   {7, pixels_of([{0, 1, 1, 3}, {3, 1, 4, 3}])}],
-                 [{Id, pixels_of(Rs)} || {Id, Rs} <- Exposes]),
+                 [{Id, pixels_of(Rs)} || {Id, Rs} <- Copies]),
     ?assertEqual([Border], Fills).
 
-entering_direct_mode_exposes_only_what_the_screen_lacks_test() ->
+entering_direct_path_pushes_only_what_the_screen_lacks_test() ->
     Screen = {0, 0, 4, 3},
     Framed = laid_out(Screen, [[window(7, Screen, [{{0, 0, 4, 1}, 5}])]]),
     {ok, Plan, Direct} = erx_screen_core:layout([window(7, Screen, [])], Framed),
-    ?assertEqual(#{fill => [], push => [], expose => [{7, [{0, 0, 4, 1}]}]}, Plan),
-    ?assertEqual({direct, 7}, erx_screen_core:mode(Direct)).
+    ?assertEqual(#{fill => [], copy => [], push => [{0, 0, 4, 1}]}, Plan),
+    ?assertEqual({direct, 7}, erx_screen_core:path(Direct)).
+
+%% A driver that does not take a client's buffer keeps every layout on the copy
+%% path, the one window that covers the screen included, and copies it.
+a_driver_without_direct_copies_every_layout_test() ->
+    Screen = {0, 0, 4, 3},
+    {ok, Plan, State} = erx_screen_core:layout([window(7, Screen, [])], screen(Screen, false)),
+    ?assertEqual(copy, erx_screen_core:path(State)),
+    ?assertEqual(#{fill => [], copy => [{7, [Screen]}], push => [Screen]}, Plan),
+    ?assertEqual({copy, [Screen]}, erx_screen_core:present({7, self()}, Screen, [Screen], State)),
+    ?assertEqual({error, einval}, erx_screen_core:new(Screen, ?BACKGROUND, yes)).
 
 %% Targeted cases of the change rule.
 
@@ -282,21 +295,21 @@ a_decoration_of_the_background_colour_needs_no_fill_test() ->
     Before = laid_out(Screen, [[window(1, {0, 0, 2, 2}, [])]]),
     {ok, Plan, _} = erx_screen_core:layout([window(1, {0, 0, 2, 2}, [{{2, 2, 3, 3}, ?BACKGROUND}])],
                                            Before),
-    ?assertEqual(#{fill => [], expose => [], push => []}, Plan).
+    ?assertEqual(#{fill => [], copy => [], push => []}, Plan).
 
-a_moved_window_is_exposed_wherever_it_shows_other_pixels_test() ->
+a_moved_window_is_copied_wherever_it_shows_other_pixels_test() ->
     Screen = {0, 0, 4, 1},
     Before = laid_out(Screen, [[window(1, {0, 0, 2, 1}, [])]]),
     {ok, Plan, _} = erx_screen_core:layout([window(1, {1, 0, 3, 1}, [])], Before),
     ?assertEqual(#{fill => [{{0, 0, 1, 1}, ?BACKGROUND}],
-                   expose => [{1, [{1, 0, 3, 1}]}],
-                   push => [{0, 0, 1, 1}]}, Plan).
+                   copy => [{1, [{1, 0, 3, 1}]}],
+                   push => [{0, 0, 1, 1}, {1, 0, 3, 1}]}, Plan).
 
 an_unchanged_layout_plans_nothing_test() ->
     Screen = {0, 0, 4, 4},
     Layout = [window(1, {1, 1, 3, 3}, [{{1, 1, 3, 2}, 4}]), window(2, {0, 0, 4, 4}, [])],
     {ok, Plan, _} = erx_screen_core:layout(Layout, laid_out(Screen, [Layout])),
-    ?assertEqual(#{fill => [], expose => [], push => []}, Plan).
+    ?assertEqual(#{fill => [], copy => [], push => []}, Plan).
 
 %% The dirty list.
 
@@ -325,31 +338,31 @@ malformed_input_is_refused_test() ->
     ?assertEqual({error, einval}, Refused([window(1, {0, 0, 1, 1}, [{0, 0, 1, 1}])])),
     ?assertEqual({error, einval}, Refused([#{id => 1, rect => {0, 0, 1, 1}}])),
     ?assertEqual({error, einval}, Refused(not_a_list)),
-    ?assertEqual({error, einval}, erx_screen_core:flush({1, self()}, {0, 0, 1, 1}, [{0, 0, a, 1}], State)),
-    ?assertEqual({error, einval}, erx_screen_core:flush({1, self()}, {0, 0, 1}, [], State)),
-    ?assertEqual({error, einval}, erx_screen_core:flush({1, self()}, {0, 0, 1, 1}, not_a_list, State)),
-    ?assertEqual({error, einval}, erx_screen_core:new({0, 0, 0, 4}, ?BACKGROUND)),
-    ?assertEqual({error, einval}, erx_screen_core:new({0, 0, 4, 4}, 16#100000000)).
+    ?assertEqual({error, einval}, erx_screen_core:present({1, self()}, {0, 0, 1, 1}, [{0, 0, a, 1}], State)),
+    ?assertEqual({error, einval}, erx_screen_core:present({1, self()}, {0, 0, 1}, [], State)),
+    ?assertEqual({error, einval}, erx_screen_core:present({1, self()}, {0, 0, 1, 1}, not_a_list, State)),
+    ?assertEqual({error, einval}, erx_screen_core:new({0, 0, 0, 4}, ?BACKGROUND, true)),
+    ?assertEqual({error, einval}, erx_screen_core:new({0, 0, 4, 4}, 16#100000000, true)).
 
 extreme_coordinates_are_accepted_test() ->
     Edge = {-16#80000000, -16#80000000, 16#7fffffff, 16#7fffffff},
     State = laid_out({0, 0, 2, 2}, [[window(1, Edge, [])]]),
     ?assertEqual([{0, 0, 2, 2}], erx_screen_core:visible(1, State)),
-    ?assertEqual({copy, [{0, 0, 2, 2}]}, erx_screen_core:flush({1, self()}, Edge, [Edge], State)).
+    ?assertEqual({copy, [{0, 0, 2, 2}]}, erx_screen_core:present({1, self()}, Edge, [Edge], State)).
 
-a_window_id_shown_again_by_another_process_is_exposed_whole_test() ->
+a_window_id_shown_again_by_another_process_is_copied_whole_test() ->
     Screen = {0, 0, 4, 4},
     Before = laid_out(Screen, [[window(1, {0, 0, 2, 2}, [])]]),
     Other = spawn(fun() -> ok end),
     {ok, Plan, _} = erx_screen_core:layout([#{id => 1, proc => Other, rect => {0, 0, 2, 2},
                                               decorations => []}], Before),
-    ?assertEqual(#{fill => [], expose => [{1, [{0, 0, 2, 2}]}], push => []}, Plan).
+    ?assertEqual(#{fill => [], copy => [{1, [{0, 0, 2, 2}]}], push => [{0, 0, 2, 2}]}, Plan).
 
 more_than_sixteen_dirty_rectangles_are_refused_test() ->
     State = laid_out({0, 0, 4, 4}, [[window(1, {0, 0, 4, 4}, [])]]),
     Rects = fun(N) -> lists:duplicate(N, {0, 0, 1, 1}) end,
-    ?assertMatch({direct, [_ | _]}, erx_screen_core:flush({1, self()}, {0, 0, 4, 4}, Rects(16), State)),
-    ?assertEqual({error, einval}, erx_screen_core:flush({1, self()}, {0, 0, 4, 4}, Rects(17), State)).
+    ?assertMatch({direct, [_ | _]}, erx_screen_core:present({1, self()}, {0, 0, 4, 4}, Rects(16), State)),
+    ?assertEqual({error, einval}, erx_screen_core:present({1, self()}, {0, 0, 4, 4}, Rects(17), State)).
 
 improper_lists_are_refused_test() ->
     State = laid_out({0, 0, 4, 4}, [[]]),
@@ -357,7 +370,7 @@ improper_lists_are_refused_test() ->
     ?assertEqual({error, einval}, erx_screen_core:layout([W | x], State)),
     ?assertEqual({error, einval}, erx_screen_core:layout([W#{decorations := [{{0, 0, 1, 1}, 1} | x]}], State)),
     ?assertEqual({error, einval}, erx_screen_core:layout([maps:remove(proc, W)], State)),
-    ?assertEqual({error, einval}, erx_screen_core:flush({1, self()}, {0, 0, 1, 1}, [{0, 0, 1, 1} | x], State)).
+    ?assertEqual({error, einval}, erx_screen_core:present({1, self()}, {0, 0, 1, 1}, [{0, 0, 1, 1} | x], State)).
 
 a_malformed_dirty_rectangle_fails_its_window_test() ->
     ?assertError(_, erx_screen_core:add_dirty({0, 0, a, 1}, [])),
@@ -374,9 +387,9 @@ a_layout_change_costs_little_over_a_weave_test_() ->
              Screen = {0, 0, 2048, 2048},
              Weave = fun(Shift) -> [woven(I, Shift) || I <- lists:seq(1, 64)] end,
              Before = laid_out(Screen, [Weave(0)]),
-             {Micros, {ok, #{expose := Exposes}, _}} =
+             {Micros, {ok, #{copy := Copies}, _}} =
                  timer:tc(erx_screen_core, layout, [Weave(1), Before]),
-             ?assertMatch([_ | _], Exposes),
+             ?assertMatch([_ | _], Copies),
              ?assert(Micros < 2000000)
      end}.
 
@@ -405,7 +418,7 @@ strip_layouts() ->
 strip_decorations({X0, Y0, X1, Y1}) ->
     [[] | [[{{X0, Y0, X0 + 1, Y1}, C}, {{X1 - 1, Y0, X1, Y1}, C}] || C <- [1, 2]]].
 
-layout_changes_on_a_strip_expose_and_fill_exactly_what_changed_test_() ->
+layout_changes_on_a_strip_copy_and_fill_exactly_what_changed_test_() ->
     {timeout, ?EXHAUSTIVE_SECONDS,
      fun() ->
              Screen = {0, 0, 3, 1},
@@ -421,7 +434,7 @@ closing_a_window_behind_another_fills_only_what_it_showed_test() ->
     Before = laid_out(Screen, [[window(1, {3, 0, 6, 1}, []), window(2, {0, 0, 10, 1}, [])]]),
     {ok, Plan, _} = erx_screen_core:layout([window(1, {3, 0, 6, 1}, [])], Before),
     ?assertEqual(#{fill => [{{0, 0, 3, 1}, ?BACKGROUND}, {{6, 0, 10, 1}, ?BACKGROUND}],
-                   expose => [],
+                   copy => [],
                    push => [{0, 0, 3, 1}, {6, 0, 10, 1}]}, Plan).
 
 recolouring_a_border_fills_only_the_border_test() ->
@@ -429,16 +442,16 @@ recolouring_a_border_fills_only_the_border_test() ->
     Border = fun(C) -> [window(1, Screen, [{{0, 0, 1, 1}, C}, {{9, 0, 10, 1}, C}])] end,
     {ok, Plan, _} = erx_screen_core:layout(Border(6), laid_out(Screen, [Border(5)])),
     ?assertEqual(#{fill => [{{0, 0, 1, 1}, 6}, {{9, 0, 10, 1}, 6}],
-                   expose => [],
+                   copy => [],
                    push => [{0, 0, 1, 1}, {9, 0, 10, 1}]}, Plan).
 
-a_flush_by_another_process_of_the_same_id_copies_nothing_test() ->
+a_present_by_another_process_of_the_same_id_copies_nothing_test() ->
     Screen = {0, 0, 4, 4},
     Other = spawn(fun() -> ok end),
     Compose = laid_out(Screen, [[window(1, {0, 0, 2, 2}, [])]]),
     Direct = laid_out(Screen, [[window(1, Screen, [])]]),
-    ?assertEqual({copy, []}, erx_screen_core:flush({1, Other}, Screen, [Screen], Compose)),
-    ?assertEqual({copy, []}, erx_screen_core:flush({1, Other}, Screen, [Screen], Direct)),
-    ?assertEqual({direct, [Screen]}, erx_screen_core:flush({1, self()}, Screen, [Screen], Direct)),
-    ?assertEqual({error, einval}, erx_screen_core:flush({1, not_a_pid}, Screen, [], Compose)),
-    ?assertEqual({error, einval}, erx_screen_core:flush(1, Screen, [], Compose)).
+    ?assertEqual({copy, []}, erx_screen_core:present({1, Other}, Screen, [Screen], Compose)),
+    ?assertEqual({copy, []}, erx_screen_core:present({1, Other}, Screen, [Screen], Direct)),
+    ?assertEqual({direct, [Screen]}, erx_screen_core:present({1, self()}, Screen, [Screen], Direct)),
+    ?assertEqual({error, einval}, erx_screen_core:present({1, not_a_pid}, Screen, [], Compose)),
+    ?assertEqual({error, einval}, erx_screen_core:present(1, Screen, [], Compose)).

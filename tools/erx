@@ -355,6 +355,8 @@ module Erx
                    name: 'fuzz-erx-console-input', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_wctl.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-wctl', deadline: 900, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_winctl.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-winctl', deadline: 1200, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_vt.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-vt', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_ui_schema.rb'), '--seed', options.fetch(:seed).to_s],

@@ -6,7 +6,9 @@
 %% background and hands the driver one frame that covers it, no driver is no screen, a
 %% driver that cannot flush part of the screen gets the whole of it, and a driver that
 %% ends while it holds the frame leaves the screen to its supervisor. This module is
-%% also the stand-in driver's callback module, as erx_screen calls one: info/1.
+%% also the stand-in driver's callback module, as erx_screen calls one: info/1. Its
+%% process answers a frame only as erx_display:flush_request/3 sends it, so a screen that
+%% sends the driver a frame of another shape shows nothing.
 
 -module(erx_screen_tests).
 -include_lib("eunit/include/eunit.hrl").

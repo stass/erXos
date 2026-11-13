@@ -20,14 +20,15 @@
 %% no process; a device that fails any step gives one line in the kernel log and no
 %% process: init/1 returns ignore, so the domain goes on without a screen.
 %%
-%% flush/3 posts the core's flush plan as one frame, a transfer and a flush per changed
-%% rectangle with the fence on the last, and returns when every request is answered ok:
-%% from then on the device reads nothing of the image until the next flush. Any failure
-%% of the device while a frame runs (an answer that fails its check, a broken queue, a
-%% full queue with nothing in flight, no answer within the deadline) ends the process
-%% after answering its caller; the supervisor's restart resets the device and shows the
-%% scanout again, and erx_screen, which monitors the driver, repaints. The device's own
-%% memory is never posted by a client: erx_screen hands flush/3 only the screen image,
+%% A frame, which erx_screen sends with erx_display:flush_request/3, posts the core's flush
+%% plan, a transfer and a flush per changed rectangle with the fence on the last, and is
+%% answered ok when every request is answered ok: from then on the device reads nothing of
+%% the image until the next frame. Any failure of the device while a frame runs (an
+%% answer that fails its check, a broken queue, a full queue with nothing in flight, no
+%% answer within the deadline) ends the process after answering its caller; the
+%% supervisor's restart resets the device and shows the scanout again, and erx_screen,
+%% which monitors the driver, repaints. The device's own
+%% memory is never posted by a client: erx_screen hands a frame only the screen image,
 %% since the device is unconfined and reports direct false, and the driver refuses any
 %% other image.
 
@@ -36,7 +37,7 @@
 -behaviour(erx_display).
 
 -export([start_link/1]).
--export([info/1, flush/3, power/2]).
+-export([info/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -include("generated/erx_abi.hrl").
@@ -66,22 +67,10 @@
 start_link(Spec) ->
     gen_server:start_link({local, erx_fb}, ?MODULE, Spec, []).
 
-%% erx_display's callbacks, as erx_screen calls them: the driver's state there is its pid.
+%% erx_display's one callback, as erx_screen calls it with the driver's process.
 -spec info(pid()) -> erx_display:info().
 info(Driver) ->
     gen_server:call(Driver, info).
-
-%% A failed flush is answered {error, Reason}, which raises here in the caller, and the
-%% driver then ends, as the moduledoc says.
--spec flush([erx_display:rect()], erx_memdraw:image(), pid()) -> {ok, pid()}.
-flush(Rects, Image, Driver) ->
-    ok = gen_server:call(Driver, {flush, Rects, Image}, infinity),
-    {ok, Driver}.
-
-%% The 2D device has no panel to dim or turn off; the screen stays as erx_screen leaves it.
--spec power(on | dim | off, pid()) -> {ok, pid()}.
-power(_Level, Driver) ->
-    {ok, Driver}.
 
 %% Any exception of the sequence, a bug or a NIF that changed, is one line and no process as
 %% well. An empty transport is no display, a configuration and not a fault, so it has no line.
@@ -158,8 +147,15 @@ screen(#{geometry := Geometry = #{width := Width, height := Height}, region := R
 step(_Name, {ok, Value}) -> {ok, Value};
 step(Name, {error, Reason}) -> {error, {Name, Reason}}.
 
+%% erx_display's requests (erx_display:request()) and info. A frame's answer is ok, or
+%% {error, Reason} for a frame the device failed, after which the driver ends, as the
+%% moduledoc says, or for a frame that is not of the screen image. The 2D device has no
+%% panel to dim or turn off, so every power level is answered ok and the screen stays as
+%% erx_screen leaves it.
 handle_call(info, _From, State = #state{info = Info}) ->
     {reply, Info, State};
+handle_call({power, Level}, _From, State) when Level =:= on; Level =:= dim; Level =:= off ->
+    {reply, ok, State};
 handle_call({flush, Rects, Screen}, _From, State = #state{screen = Screen}) when length(Rects) >= 0 ->
     #state{geometry = Geometry, resource = Resource, fence = Fence} = State,
     {ok, Requests} = erx_virtio_gpu_core:flush_plan(Rects, Geometry, Resource, Fence),

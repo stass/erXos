@@ -7,8 +7,8 @@ require 'open3'
 require 'tmpdir'
 require_relative '../fixtures/erlang_build'
 
-# Runs test/erlang/erx_wm_tests.erl and test/erlang/erx_wctl_tests.erl, the EUnit cases
-# of the window policies and of the wctl text (docs/design-display.md, "Verification and
+# Runs test/erlang/erx_wm_tests.erl, erx_wctl_tests.erl and erx_winctl_tests.erl, the EUnit cases
+# of the window policies and of the wctl and ctl text (docs/design-display.md, "Verification and
 # testing", the window system), against the erx_display application compiled from source
 # with warnings as errors on stock's emulator (ERX_ERL and ERX_ERLC, which make check
 # supplies). Each property is then run against a copy of a policy with one rule broken,
@@ -16,7 +16,7 @@ require_relative '../fixtures/erlang_build'
 class ErxWmTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCE_DIRECTORY = 'erlang/apps/erx_display/src'
-  TESTS = %w[erx_wm_tests erx_wctl_tests].freeze
+  TESTS = %w[erx_wm_tests erx_wctl_tests erx_winctl_tests].freeze
   DEADLINE = '300'
   # A broken rule: the file, its text, what replaces it, and the property that must fail,
   # by the name the cases raise.

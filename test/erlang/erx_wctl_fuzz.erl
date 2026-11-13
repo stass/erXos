@@ -8,14 +8,14 @@
 %% regular expression with the bound and the range checked apart, which
 %% shares no code with the parser. The inputs are random bytes, valid lines
 %% with random white space and coordinates near the 32-bit edges, lines
-%% padded across the 128-byte bound, and valid lines with a byte changed,
+%% padded across the 1,024-byte bound, and valid lines with a byte changed,
 %% inserted or removed. The seed comes from make check-fuzz.
 
 -module(erx_wctl_fuzz).
 -export([run/1]).
 
 -define(ROUNDS, 20000).
--define(MAX_LINE, 128).
+-define(MAX_LINE, 1024).
 -define(GRAMMAR, "\\A[ \\t]*(?:(resize|move)[ \\t]+-r[ \\t]+(-?[0-9]+)[ \\t]+(-?[0-9]+)"
                  "[ \\t]+(-?[0-9]+)[ \\t]+(-?[0-9]+)|(hide|show|top|bottom))[ \\t]*\\n?\\z").
 

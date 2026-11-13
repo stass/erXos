@@ -17,7 +17,8 @@ class ErxScreenTest < Minitest::Test
   OTP = File.join(ROOT, 'build/oracle/jit/install/lib/erlang')
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
   MODULES = %w[erlang/apps/erx_memdraw/src/erx_memdraw.erl erlang/apps/erx_display/src/erx_screen_core.erl
-               erlang/apps/erx_display/src/erx_screen.erl test/erlang/erx_screen_tests.erl].freeze
+               erlang/apps/erx_display/src/erx_display.erl erlang/apps/erx_display/src/erx_screen.erl
+               test/erlang/erx_screen_tests.erl].freeze
   DEADLINE_SECONDS = '120'
 
   def setup

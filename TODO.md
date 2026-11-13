@@ -631,17 +631,7 @@ it; git history is the record of completed work.
 * [Medium] `erlang/apps/erx_display/src/erx_screen.erl`: the screen shows the empty layout only, the background
   repainted at its start; layouts, windows, presents, the overlay and the idle policy wait for `erx_winfs`
   ([The screen and its one path to the device](docs/design-display.md#the-screen-and-its-one-path-to-the-device)).
-* [Medium] the flush request (`erlang/apps/erx_display/src/erx_screen.erl`, `send/2`;
-  [design-display.md](docs/design-display.md), the `erx_display` behaviour and "The screen and its one path to the
-  device"): the behaviour's `flush/3` is synchronous and returns `{ok, State}`, while the screen sends each frame
-  with `gen_server:send_request/2` as `{flush, Rects, Image}`, the term `erx_virtio_gpu`'s `handle_call/3`
-  accepts; nothing calls `flush/3`, so the chokepoint "only `erx_screen` calls the driver's `flush/3`" has no
-  call to check, and another driver of the behaviour would leave the screen black. Settle the design's two
-  passages on one asynchronous request the behaviour owns (a `flush_request` callback, or an `erx_display`
-  function that builds the message) and have the screen call it through the driver's module.
 * [Low] `erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
-  (`board_tree.rb`) would make the window's isolation hold by construction.
-* [Low] `erlang/apps/erx_display/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
   bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
 * [Medium] chokepoints, regions ([design-display.md](docs/design-display.md), the `wrap/4` row of the chokepoint
   table): nothing in the build limits who calls `erx_region_view` (only `erx_memdraw_nif.c`) or
@@ -796,13 +786,16 @@ it; git history is the record of completed work.
     [The pixel area](docs/design-display.md#the-pixel-area)): `erx_screen` sends frames with
     `gen_server:send_request/2` and keeps only pending state (the newest layout, one waiting present per live window,
     dropped at the window's end); presents and `erx_memdraw:wrap/4` refuse an offset off a page boundary.
-  * **The display domain**: the display side gains `erx_winfs`, `erx_window`, `erx_winctl` with its fuzz target,
-    the policies and `erx_wm_menu`, and the client side `erx_win`'s library, `erx_draw`, `erx_draw_conn`, `erx_font`,
+  * **The display domain**: the display side gains `erx_winfs`, `erx_window`, the
+    policies and `erx_wm_menu`, and the client side `erx_win`'s library, `erx_draw`, `erx_draw_conn`, `erx_font`,
     `erx_term` and `erx_ui` with its servers and renderers (docs/design-display.md, "What runs where"). The G9 build
     check (`tools/lib/erx/display_release.rb`) reads module names in the display script's sources; the design's xref
     check over the display release's beams, with its refusal of calls that start a port or a sub-space, is not built.
-    `erx_screen_core` keeps its plan and takes the design's names: a present for a flush, and no expose, since
-    `erx_screen` copies what a layout change uncovers from the windows' buffers.
+    `erx_screen_core` knows no buffer's size: a layout entry carries only the window's rectangle, so the plan
+    cannot fill the background where a buffer smaller than its window does not reach, and the direct path's third
+    condition, a buffer of the screen's size, cannot be judged. Since that size changes with each present, the
+    path can change on a present, which `present/4`'s answer must then express (entering or leaving the direct
+    path), not only a layout.
   * **The widget server** ([The widget server](docs/design-display.md#the-widget-server)): `erx_ui` with `open/1`,
     `tree/2`, `close/1`, the renderer behaviour and the toolkit's supervisor, and `erx_ui_server`, which validates a
     tree with `erx_ui_schema`, numbers it with `erx_ui_model:pair/3`, applies `delta/2` through the renderer and

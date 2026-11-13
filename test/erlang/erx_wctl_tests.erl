@@ -3,7 +3,7 @@
 
 %% EUnit cases of erx_wctl, the text of a window's wctl file
 %% (docs/design-display.md, "Interfaces"): each command of the grammar,
-%% the white space rio's parser allows, what it refuses, the 128-byte
+%% the white space rio's parser allows, what it refuses, the 1,024-byte
 %% bound, the coordinate range, and rio's 72-byte read layout.
 
 -module(erx_wctl_tests).
@@ -36,11 +36,11 @@ coordinates_must_fit_32_bits_test() ->
     ?assertEqual({error, einval}, erx_wctl:parse(<<"move -r 2147483648 0 0 0">>)),
     ?assertEqual({ok, {move, {7, 0, 0, 0}}}, erx_wctl:parse(<<"move -r 0000007 0 0 0">>)).
 
-a_line_is_at_most_128_bytes_test() ->
+a_line_is_at_most_1024_bytes_test() ->
     Pad = fun(N) -> binary:copy(<<" ">>, N) end,
-    ?assertEqual({ok, top}, erx_wctl:parse(<<"top", (Pad(124))/binary, "\n">>)),
-    ?assertEqual({error, einval}, erx_wctl:parse(<<"top", (Pad(125))/binary, "\n">>)),
-    ?assertEqual({error, einval}, erx_wctl:parse(<<"top", (Pad(126))/binary>>)).
+    ?assertEqual({ok, top}, erx_wctl:parse(<<"top", (Pad(1020))/binary, "\n">>)),
+    ?assertEqual({error, einval}, erx_wctl:parse(<<"top", (Pad(1021))/binary, "\n">>)),
+    ?assertEqual({error, einval}, erx_wctl:parse(<<"top", (Pad(1022))/binary>>)).
 
 formats_rio_layout_test() ->
     Text = erx_wctl:format({0, -20, 640, 2147483647}, true, shown),

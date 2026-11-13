@@ -13,7 +13,7 @@ require_relative '../fixtures/erlang_build'
 # module, must fail the case named for it: a channel conversion that swaps red and blue, a
 # frame whose last request carries no fence, a transfer offset off by the pixel size, a
 # parse that takes any fence_id as the request's, and a frame done before every request is
-# answered, which would let flush/3 return while the device still reads the image.
+# answered, which would let a frame be answered while the device still reads the image.
 class ErxVirtioGpuCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The application holding the module, compiled whole with those it depends on (ErlangBuild), the module and the cases.

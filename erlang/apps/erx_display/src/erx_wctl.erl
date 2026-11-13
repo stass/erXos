@@ -8,7 +8,7 @@ parse/1 reads a write, a geometry command from the window's client, and
 format/3 writes what a read returns. Both are rio(4)'s formats, cut down
 to the commands the design names.
 
-A write is one command on one line of at most 128 bytes:
+A write is one command on one line of at most 1,024 bytes:
 
 ```text
 resize -r X0 Y0 X1 Y1
@@ -30,9 +30,9 @@ rio's does). rio's other commands (`new`, `delete`, `current`, `scroll`,
 coordinates are not part of the grammar and are refused.
 
 The bytes come from a client and are untrusted: anything outside the
-grammar, including a byte that is not ASCII, a line longer than 128
+grammar, including a byte that is not ASCII, a line longer than 1,024
 bytes or a coordinate out of range, is `{error, einval}`, and the parser
-creates no atom and does no work beyond one pass over at most 128 bytes.
+creates no atom and does no work beyond a few passes over at most 1,024 bytes.
 
 A read returns rio's layout: the rectangle's four coordinates, then
 `current` or `notcurrent` and `hidden` or `visible`, each right-aligned
@@ -50,7 +50,7 @@ in a field of 11 followed by a space, 72 bytes in all.
 -type command() :: {resize, rect()} | {move, rect()}
                  | hide | show | top | bottom.
 
--define(MAX_LINE, 128).
+-define(MAX_LINE, 1024).
 -define(MIN_COORD, -16#80000000).
 -define(MAX_COORD, 16#7fffffff).
 -define(FIELD, 11).

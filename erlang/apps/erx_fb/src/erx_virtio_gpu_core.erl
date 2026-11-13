@@ -13,7 +13,7 @@
 %% the device's answer to that expect(), and is the one parse of bytes the device wrote, so
 %% it has a fuzz target (test/erlang/erx_virtio_gpu_core_fuzz.erl).
 %%
-%% flush_plan/4 is flush/3's plan: for each rectangle, clipped to the screen, a transfer of
+%% flush_plan/4 is a frame's plan: for each rectangle, clipped to the screen, a transfer of
 %% its pixels from the resource's backing to the host and a flush of it to the scanout. The
 %% frame's last request carries the FENCE flag, as the design asks. The device has taken the
 %% frame once every one of its requests is answered and decoded ok, which the driver reaps
