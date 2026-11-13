@@ -1334,6 +1334,11 @@ it; git history is the record of completed work.
   (`erlang/apps/erx_shell/src/erx_cmd_uname.erl`) reads as init's `-sname` or `-name`, with no value of its own; `docs/design-shell.md`, "Text commands".
 * [Low] musl, `musl/src/malloc/mallocng/glue.h`: `AT_RANDOM` is absent, so mallocng's secret comes from an address alone; `erx_entropy_read`
   can supply its 16 bytes at program start.
+* [Medium] liberx, `liberx/backend/fiasco/libc_start.c` (`erx_fiasco_libc_start`): the auxiliary vector it gives musl holds
+  `AT_PHDR`, `AT_PHENT`, `AT_PHNUM` and `AT_PAGESZ` alone, so `getauxval(AT_HWCAP)` and `AT_HWCAP2` answer 0, where the C library
+  seam's table of `docs/design-runtime.md` serves them from the boot information page's `hwcap` and `hwcap2`. OpenSSL's
+  `armcap.c` reads its CPU features through them (`docs/design-crypto.md`, "Building OpenSSL"), so without them it takes its
+  software paths on every CPU. Add both entries from the boot information page, and from the startup message in a program.
 * [Medium] liberx, `erx_entropy_read` callers (`musl/src/internal/erxos/syscall.c` `entropy_take`, `otp/erts/emulator/nifs/erxos/erx_bytes_bif.c`,
   `otp/erts/emulator/beam/erl_bif_unique.c`): each copies the bytes out of the UTCB's mr and zeroes them by hand, so a caller that forgets
   leaves them in the UTCB. One liberx call that reads into a caller's buffer and erases mr would make that hold for every caller.
@@ -5655,6 +5660,29 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] SSH before the vault, stages 2 and 3, development builds only
+  ([design-ssh.md](docs/design-ssh.md#login-keys)): `erx_ssh_login`'s
+  `login_key` admits root's development key on the SSH domain's own
+  signature check and compares no host key, so a compromised SSH domain
+  logs in as root, and the host key is a file of the SSH domain's directory
+  on the data partition. Stage 4 closes both, with the system domain's
+  Ed25519 verifier and the vault's host key.
+* [Low] SSH, unauthenticated floods
+  ([design-ssh.md](docs/design-ssh.md#limits-and-who-pays)): OTP has no
+  counterpart of FreeBSD's `MaxStartups`, so a flood of unauthenticated
+  connections holds the 64 slots until their 120 s grace ends, refusing
+  others, and a flood of short connections can drop a waiting login's
+  cookie from the login facet's 128, failing that login. Both refuse;
+  neither admits anyone.
+* [Low] SSH on a weak seed ([design-ssh.md](docs/design-ssh.md#host-keys)):
+  on a boot whose `entropy_quality` is weak, as every stopgap boot's is
+  (`liberx/backend/fiasco/entropy.c` seeds from the counter alone), the
+  host key is as guessable as the seed, and the login facet's cookies are
+  only as unique across boots as the seed, so a key login that a
+  compromised SSH domain recorded opens a session again on a later boot
+  whose generator repeats that cookie, as a deterministic-mode boot does.
+  Release builds refuse a weak seed.
+
 * [Medium] `liberx/system/dom_boot_view.c`, `boot_devices`: a give windows a device's whole register page, and the
   library checks a page's sharing only among the platform record's device rows, so a device the machine has on
   that page but the record does not list is reachable through the holder's window, with no manifest row giving
@@ -6810,8 +6838,35 @@ document's "residual risks accepted" paragraph.
   principal's master key ([design-system.md](docs/design-system.md)). A
   recovery slot needs its own policy, since its protection can become the
   easiest route to the master key.
-* [Medium] logins over the network: SSH public-key logins, optionally
-  backed by a hardware key, before any password login over the network.
+* [Medium] SSH, SFTP and forwarding
+  ([design-ssh.md](docs/design-ssh.md#channel-policy)): the daemon refuses
+  the `sftp` subsystem and every forwarding request, since OTP's
+  `ssh_sftpd` and a forwarded connection would run on the SSH domain's
+  files and `net` grant. Design them to run in the principal's session, as
+  `open_job` runs a command, on the session's namespace and its own `net`
+  grant.
+* [Medium] login, one login service for front ends
+  ([design-ssh.md](docs/design-ssh.md#risks-and-open-questions),
+  [design-web.md](docs/design-web.md#risks-and-open-questions)):
+  `erx_ssh_login` and `erx_web_login` have one shape and merge into one
+  login service when login is designed for every place a person meets the
+  system. That merge also decides whether a principal's vault keys open
+  only to sessions that gave its passphrase themselves, which needs a
+  per-session unlock record in the vault and a way to give the passphrase
+  in a session after an SSH key login; until then a key login's session
+  uses the keys another session of the principal holds open
+  ([design-system.md](docs/design-system.md#the-vault)).
+* [Low] SSH, hardware-backed login keys
+  ([design-ssh.md](docs/design-ssh.md#risks-and-open-questions)): FIDO keys
+  (`sk-ssh-ed25519@openssh.com`) are not accepted; accepting them needs
+  their signed data, with its flags and counter, in the login facet's check.
+* [Low] console interface, typed-ahead input
+  ([design-ssh.md](docs/design-ssh.md#sessions-ttys-and-shells),
+  [design-live.md](docs/design-live.md#paths)): a tty drops `tty_input`
+  past its bound, so a paste over SSH larger than the bound into a program
+  that is not reading loses bytes, as at the console. An acknowledgement of
+  input in the console interface would let the channel open the client's
+  window only as the tty takes input.
 * [Medium] boot security on the Raspberry Pis: secure boot as an
   installation option with each slot's measurement; anti-rollback where a
   board offers a counter that its trust root checks before the kernel

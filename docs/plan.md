@@ -1729,7 +1729,7 @@ the guest's power cut and the next boot.
   with its fuzz target
   ([design-runtime.md](design-runtime.md#per-byte-primitives));
   read-only images in the EROFS format, one per release: the EROFS reader
-  in Erlang, preloaded in both runtime images, with its fuzz target;
+  in Erlang, preloaded in every runtime image, with its fuzz target;
   fsimg as the packer's host tool, which writes and verifies each image, and
   the packer's disk image for QEMU, laid out by the ABI file's medium
   layout.
@@ -2141,8 +2141,14 @@ the first piece of M14 and is not thrown away; then M14's first stage on
 QEMU, grown from the prototype; TCP distribution to other machines, each
 exposed domain a distribution node of its own, whose node name is
 registered and resolved as the network service's design document defines
-([design.md](design.md#networking)); and `crypto`, TLS and SSH on OpenSSL
-3.5. No stopgap stack is ported: the stack is erXos's own from the first,
+([design.md](design.md#networking)); `crypto`, `asn1`, `public_key` and TLS on OpenSSL
+3.5, in the interpreter and BeamAsm images, the system image without it
+([design-crypto.md](design-crypto.md)); and SSH's first two stages
+([design-ssh.md](design-ssh.md#stages)): OTP's daemon with its edits in
+root's development session, then the SSH domain, its login facet with
+its cookies and derived session identifiers, `erx_ssh_line` with its
+ttys and jobs, and the channel and algorithm policies and limits, for
+`root` and the development key in development builds. No stopgap stack is ported: the stack is erXos's own from the first,
 written in Erlang by translating the logic of FreeBSD's `netinet` and
 `netinet6` at one pinned release, as the network stack's design document
 specifies. Sockets are the oracle's last family that cannot
@@ -2153,7 +2159,13 @@ kernel, recorded as residuals here and checked on the boards with M12.
 **Exit criteria.** The packet path and the Internet checksum run their
 fuzz budgets clean; the oracle's socket cases run on erXos and compare
 with stock OTP 29.1.2 case by case; M14's criteria for its first stage
-hold on QEMU.
+hold on QEMU; the system image's symbol check finds no `libcrypto`, and
+fails on the seeded `crypto` entry; `crypto`'s, `public_key`'s and
+`ssh`'s suites agree with stock OTP 29.1.2 through `check-oracle`; and
+SSH's QEMU interop, algorithm-policy, jobs, limits and hangup tests of
+[design-ssh.md](design-ssh.md#verification) pass, with `ssh -p 2222
+root@localhost` from the host's OpenSSH client reaching `rc`, and the
+`erx_ssh_wire` fuzz target runs its budget clean.
 
 **Gate GN-QEMU.** Measures the packet-path prototype: UDP echo rate and
 latency, and a TCP bulk transfer's throughput and CPU time, against a
@@ -2325,7 +2337,9 @@ side.
   domain, under 1b-G's network service and stack. GENET moves packets
   only by DMA, so this stage needs the device NIF's cache maintenance
   from its start. The packet path's numbers are recorded on the board as
-  a baseline that decides nothing; GN-board decides at M12.
+  a baseline that decides nothing; GN-board decides at M12. SSH's third
+  stage, its second over the board's Ethernet
+  ([design-ssh.md](design-ssh.md#stages)), comes with this part.
 * **(d) Display on the firmware's framebuffer.** The display domain over
   the `simple-framebuffer` the firmware sets up, with the firmware
   framebuffer driver of track D's part 4 brought forward onto the
@@ -2417,7 +2431,9 @@ side.
 * (c): UDP echo and a TCP bulk transfer to a peer pass on the board; a
   network domain killed under load restarts ending only its
   connections; GENET's parsers run their fuzz budgets clean; the packet
-  path's numbers are recorded with the board named.
+  path's numbers are recorded with the board named; by hand, `ssh
+  root@` the board with the development key reaches `rc`, and a 1 MiB
+  `ssh -T board cat` passes through unchanged.
 * (d): the frame in the Pi's framebuffer, read back through the display
   driver, equals the frame the same kiosk draws on QEMU `virt`; a
   display driver killed and restarted repaints the screen.
@@ -2612,7 +2628,9 @@ principals' files and the machine keys persist across boots from here;
 sets Argon2id's parameters against a budget of about a second; the fuzz
 target of the vault's file decoder; OpenSSL 3.5 and the update
 signature's small verifier pinned and built
-([design.md](design.md#dependencies)).
+([design.md](design.md#dependencies)), the verifier only once the SSH
+login facet's tests calling it directly pass on it
+([design-ssh.md](design-ssh.md#verification)).
 
 **Exit criteria.** No open CRITICAL or HIGH finding; every residual risk
 either fixed or recorded in `TODO.md` as accepted, with its reason. Every
@@ -2697,7 +2715,12 @@ no row, are built here and tested here.
   beside the normal boot it plays from M6; and the packer's slot images.
 * **Keys.** Key facets, their exact purpose checks and their fuzz target,
   erXos's key callback module and `sign_fun`, and the daemon's host-key
-  signing added to `ssh`; the vault's partition on the boards' media; the
+  signing added to `ssh`; SSH's fourth stage
+  ([design-ssh.md](design-ssh.md#stages)): the `{ssh_host, "ssh"}` key
+  facet, the login facet's comparison of the host key and its signature
+  check with the system domain's verifier, login keys and the
+  credentials facet with `sshkeys`, the passphrase method, any enrolled
+  principal, and release builds; the vault's partition on the boards' media; the
   `device` backend on both boards (the platform layer's boot-time read of
   a provisioned OTP key, the device-secret page, the sealing page derived
   by the root-task entry); the `tpm` backend under QEMU (the TPM driver

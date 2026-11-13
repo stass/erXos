@@ -3139,7 +3139,7 @@ manifest lists: the vault.
 | Service | What it does | Detail |
 | --- | --- | --- |
 | domain service, `erx_domain_srv` | creates the manifest's domains in its boot order and every other domain; introduces, stops and destroys domains through the domain library; keeps domain pids, names, connections and death records; restarts configured domains; runs the ordered end | [Creating a domain](#creating-a-domain), [Ending a domain](#ending-a-domain) |
-| principal service, `erx_principal` | principals, credentials, sessions and quotas | [design-domains.md](design-domains.md#principals-sessions-and-quotas) |
+| principal service, `erx_principal` | principals, credentials, sessions and quotas; each session's credentials facet, with `login_keys`, `add_login_key` and `del_login_key` on that session's own principal's SSH login keys | [design-domains.md](design-domains.md#principals-sessions-and-quotas), [design-ssh.md](design-ssh.md#login-keys) |
 | facets, `erx_facet` | one process per grant of a service to a domain; admission per client | [design-domains.md](design-domains.md#facets) |
 | resource policy, `erx_policy` | the group tree, grants, capacity, budgets, lane sizes | [Resource policy](#resource-policy) |
 | device service, `erx_devices` | the device catalogue, each device given to the domain the manifest names, `/dev` | [Devices](#devices) |
@@ -3153,6 +3153,7 @@ manifest lists: the vault.
 | start service, `erx_starter` | the start table, the manifest's `start` rows with the machine's `rc.conf` over them, and the supervisor and keeper of each row; the `apps` tree | [design-apps.md](design-apps.md) |
 | file trees, `erx_procfs` and the device service's tree | the system domain's own `/proc`, the system shell's and the host link's, as every domain runs one for itself; `/dev` for administrators | [design-live.md](design-live.md#the-proc-tree), [Devices](#devices) |
 | web login, `erx_web_login` | the web domain's facet with two operations: `login`, which checks a login with the vault as the console does, starts a session and introduces it to the web domain, and `logout`, which ends a session a login through it started; the sessions it started end with it | [design-web.md](design-web.md#logging-in-and-the-line) |
+| SSH login, `erx_ssh_login` | the SSH domain's facet with five operations: `cookie`, which issues a cookie for a connection's first key exchange; `key_ok` and `login_key`, which check a principal's login keys from the vault and, for `login_key`, a signature over a session identifier the facet derives from that exchange; `login_passphrase`, which checks a passphrase with the vault as the console does; and `logout`; a login starts a session and introduces it to the SSH domain, and the sessions it started end with it | [design-ssh.md](design-ssh.md#logging-in) |
 | vault, `erx_vault`, in a domain of its own | principals' keys and secrets; logins; signatures for key facets, by purpose; its sealing backend, and that backend's driver where it has one | [The vault](#the-vault) |
 
 ### The network domain
@@ -3669,6 +3670,11 @@ as for any service ([design-domains.md](design-domains.md#facets)).
     names count alike, the limit tells nothing about who is a principal.
   * While a session of that principal lives, the vault keeps its master
     key and the opened keys, and destroys them when the last one ends.
+    The keys are the principal's, not one session's: a session started
+    by an SSH key login opens nothing, uses the keys while another
+    session of the principal holds them open, and holds them open
+    itself while it lives, as every session does
+    ([design-ssh.md](design-ssh.md#logging-in)).
 * **Machine keys**, such as an SSH host key and the secret behind the
   network domain's stable IPv6 addresses
   ([The network domain](#the-network-domain)), have no passphrase anyone
@@ -3679,6 +3685,33 @@ as for any service ([design-domains.md](design-domains.md#facets)).
   nothing, and machine keys are as readable as the medium. A fresh
   installation makes them afresh, so a machine's SSH host key changes
   once at each installation and persists across updates and reboots.
+  The SSH host key `{ssh_host, "ssh"}` is made at the first request for
+  it after an installation. Its public blob is no secret: the vault gives
+  it to its host key facet's grantee, whose daemon sends it to clients,
+  and to the system domain, whose SSH login facet reads it when it starts
+  and compares it with the host key in each key login's exchange
+  ([design-ssh.md](design-ssh.md#logging-in)).
+* **Login keys.** Each principal's SSH login keys, a list of Ed25519
+  public key blobs, live in a **login-key section** of the principal's
+  file, sealed with AES-256-GCM under a key that HKDF-SHA-256 derives from
+  the machine's master key with a label naming the principal and the
+  section, and binding as associated data the file's format version and
+  the principal. So the vault reads a principal's login keys at any time,
+  without its passphrase, and answers them to the principal service for
+  the login facet's checks; a section copied into another principal's
+  file does not open; under `device` or `tpm` nothing that writes the
+  medium can add a key, and under `none` whoever writes the medium can,
+  as machine keys are as readable as it; and the keys go with the file
+  when it is removed. The vault changes the section only through the
+  file's owner (below) and only at the principal service's request
+  through a session's credentials facet: adding a key opens the master
+  key with the passphrase the session gives, as changing a passphrase
+  does, under the limits and the queue of the terminal the session's
+  login came from, so a session left open cannot add a way in; removing
+  one needs no passphrase. The principal service decodes each blob with
+  the SSH login facet's decoder and refuses one that does not decode or
+  whose key is of small order, so the vault parses no SSH structure
+  ([design-ssh.md](design-ssh.md#login-keys)).
 * **Without its partition or its backend** the vault serves no login:
   when its partition does not mount, or the configured backend does not
   answer, it answers every login and every enrolment `unavailable`, and
@@ -3918,7 +3951,9 @@ domain.
   console's UART, where its forger could enrol the principal afresh anyway
   (Sealing). Under every backend it can put back an older copy of a file,
   which opens with the passphrase it was sealed under, so a changed
-  passphrase keeps opening a copy taken before the change. Only the
+  passphrase keeps opening a copy taken before the change, and an SSH
+  login key removed since the copy was taken logs in again. Under `none`
+  it can also add a login key to any principal's file. Only the
   storage domain that serves the vault alone writes that partition, so
   either takes the medium in hand ([design.md](design.md#residual-risks)).
 * Whoever can write the vault's partition and also reach the console's

@@ -8,9 +8,12 @@ erXos takes it apart and recombines it around the kernel's mechanisms:
 ERTS keeps its scheduler of Erlang processes, its collector, its loader,
 its JIT, its port layer and its distribution layer, and loses every layer
 that only adapts it to a hosted operating system. Every ERTS domain runs
-in user mode on one of two runtime images: the interpreter image, which
-the system domain runs, and the BeamAsm image, which ordinary domains
-run. Native code, the programs of a session and the native shims of
+in user mode on one of three runtime images, linked from ERTS's two
+builds: the system image, which the system domain alone runs and which
+holds no OpenSSL; the interpreter image, which command domains and
+deterministic mode run; and the BeamAsm image, which ordinary domains
+run ([design-crypto.md](design-crypto.md#three-runtime-images-and-openssl-in-two-of-them)).
+Native code, the programs of a session and the native shims of
 drivers, runs in sub-spaces of an ERTS domain and uses `liberx`, the
 library through which all code reaches the kernel. The architecture is
 in [design.md](design.md); the kernel in
@@ -61,15 +64,21 @@ Decisions every reader of this document needs:
   `liberx`'s DMA envelope: registers by name, buffers from a pool, posted
   and completed descriptors, acknowledged interrupts, and nothing parsed
   from what a device wrote ([The device NIF](#the-device-nif)).
-* **Two runtime images, one per execution flavour.** The system domain
-  runs the interpreter image, which holds no BeamAsm, no asmjit and no
-  C++ and makes no JIT object, so the trusted base holds no generated
-  machine code and no writable view of code. Every other ERTS domain runs
-  the BeamAsm image by default, with its code in memory objects mapped
-  writable at one address and executable at another; a domain's
-  specification may choose the interpreter image, and command domains and
-  every domain in deterministic mode run it. Each image is a file of the
-  boot image, mapped and shared by the domains that run it, and both keep
+* **Three runtime images over two execution flavours.** The system
+  domain runs the system image, a link of the interpreter build that
+  holds no BeamAsm, no asmjit, no C++ and no OpenSSL and makes no JIT
+  object, so the trusted base holds no generated machine code, no
+  writable view of code and no code of OpenSSL. The interpreter image is
+  a second link of the same build with OTP's `crypto` and `asn1rt_nif`
+  NIFs and OpenSSL's `libcrypto`; the BeamAsm image is the BeamAsm
+  build's one link, with the same two NIFs
+  ([design-crypto.md](design-crypto.md#three-runtime-images-and-openssl-in-two-of-them)).
+  Every ERTS domain other than the system domain runs the BeamAsm image by
+  default, with its code in memory objects mapped writable at one address
+  and executable at another; a domain's specification may choose the
+  interpreter image, and command domains and every domain but the system
+  domain in deterministic mode run it. Each image is a file of the boot
+  image, mapped and shared by the domains that run it, and all three keep
   ERTS's allocators as they are ([BeamAsm](#beamasm), [Memory](#memory)).
 * **No NIF blocks an executor.** A NIF or BIF that would wait in the kernel
   on a normal scheduler fails instead of stalling it, and blocking work runs
@@ -142,10 +151,11 @@ Functional requirements:
    flags.
 4. **Adapt to capacity**: change the number of active schedulers at a safe
    point when the group's capacity changes.
-5. **Two execution flavours, one image each**: the interpreter image in
-   the system domain, command domains and deterministic mode; the BeamAsm
-   image by default in every other ERTS domain, the interpreter image
-   where a domain's specification asks for it.
+5. **Two execution flavours, three images**: the system image in the
+   system domain, in every mode; the interpreter image in command domains
+   and, in deterministic mode, in every other domain; the BeamAsm image by
+   default in every other ERTS domain, the interpreter image where a
+   domain's specification asks for it.
 6. **Connections**: every cross-domain signal of Erlang's semantics (send,
    alias send, link, monitor, exit, group leader, spawn) over the domain's
    lanes, through the funnel, against the domain's export table, with stock
@@ -302,7 +312,7 @@ simplicity first, speed second. Paths are relative to `otp/`; `beam/` is
 | Operating-system adaptation | the UNIX sys layer, UNIX signals, dynamic loading | `liberx` | **dropped**; `sys/erxos` implements the little that remains (time, float conversion, the C path for standard output and error, `prim_file`'s platform layer, crash output, the adapter) | nothing to adapt to |
 | Time | the time supervisor's correction over OS clocks (`erl_time_sup.c`) | the counter and the time page | **redone**: one clock; correction for imperfect clocks deleted; Erlang's monotonic and system time semantics kept | the counter is exact |
 | Code from storage | `erl_prim_loader` through `prim_file` | boot-image slices mapped read-only | **kept**, with whole-file reads returning binaries over the slice's pages, without a copy, and an EROFS image's files read by the EROFS reader, preloaded Erlang, from blocks the hash-checking primitive returned; the code server checks the hash of every blob it fetches from the code service ([Code in the system domain](#code-in-the-system-domain)) | `init` and boot scripts need no change, and a slice's files are covered by the boot image's validation |
-| Executing Erlang code | the interpreter and BeamAsm, one per build | memory objects mapped writable at one address and executable at another | **both kept**, as two runtime images: the interpreter image for the system domain, the BeamAsm image for other domains ([BeamAsm](#beamasm)) | the interpreter keeps generated code, JIT objects and C++ out of the trusted base and is deterministic; BeamAsm is up to four times faster |
+| Executing Erlang code | the interpreter and BeamAsm, one per build | memory objects mapped writable at one address and executable at another | **both kept**, as three runtime images: the system image, of the interpreter build without OpenSSL, for the system domain; the interpreter image, the same build with OpenSSL, for command domains and deterministic mode; the BeamAsm image for other domains ([BeamAsm](#beamasm), [design-crypto.md](design-crypto.md#three-runtime-images-and-openssl-in-two-of-them)) | the interpreter keeps generated code, JIT objects and C++ out of the trusted base and is deterministic; BeamAsm is up to four times faster; OpenSSL's constructor would run in any domain that maps it, so only an image without it keeps it out of the trusted base |
 | Crash diagnostics | crash dumps to a file | a crash area handed out at domain creation | **redone**: the dump goes to the crash area, and the domain stops itself ([Crash handling](#crash-handling)) | one diagnostic path, read by the system domain |
 | Tracing | trace sessions and tracers | the kernel trace ring | **both kept, one viewer** ([design-live.md](design-live.md#tracing)) | they observe different layers |
 | Third-party code inside OTP's tree | asmjit (Zlib), PCRE2 (BSD-3-Clause WITH PCRE2-exception), zlib (Zlib), zstd (BSD-3-Clause, or GPL-2.0-only, used under BSD), Ryu (Apache-2.0 or BSL-1.0) | none | **kept**, each under its licence; asmjit only in the BeamAsm image | they serve kept features |
@@ -380,10 +390,11 @@ release holds it, where the session template's `-eval` starts it once
 the domain holds its facets; `erx_web_line` starts from the session's
 boot script, before the session reports ready, since the ready report
 names the line.
-`crypto`, `ssl`, `ssh`, `inets`
-and the rest are outside the shipped set: they depend on a network stack
-and on OpenSSL 3.5 ([design.md](design.md#dependencies)), and arrive with
-the network service ([plan.md](plan.md#m12-storage-networking-boards)).
+`crypto`, `asn1`, `public_key`, `ssh` and `ssl` ship in the releases
+that ask for them, never in the system release, and their NIFs are
+linked into the interpreter and BeamAsm images alone, with OpenSSL 3.5
+([design-crypto.md](design-crypto.md#otps-applications)). `inets` and the
+rest are outside the shipped set.
 
 NIF libraries: `socket` and `net` dropped; `prim_file` kept with erXos's
 platform layer; `zlib`, `zstd`, `erl_tracer` and `prim_buffer` kept;
@@ -393,8 +404,10 @@ erXos's own added: the per-byte primitives, the device NIF, the pipe NIF,
 the domain library's NIFs and the watchdog NIF
 ([Per-byte primitives](#per-byte-primitives),
 [The device NIF](#the-device-nif),
-[The root-task entry](#the-root-task-entry)). The build derives this
-classification from ERTS's static NIF list (`erts/emulator/Makefile.in`),
+[The root-task entry](#the-root-task-entry)); and `crypto` and
+`asn1rt_nif` kept in the interpreter and BeamAsm images alone. The
+classification names, for each NIF, the images it is linked into. The
+build derives this classification from ERTS's static NIF list (`erts/emulator/Makefile.in`),
 so a NIF added upstream is neither kept nor dropped silently: the build
 fails until the list names it.
 
@@ -462,15 +475,15 @@ of behaviour, however many lines it touches:
 | `lib/stdlib/src/io.erl` | 60. `execute_request` also takes its reply as `{erx_origin, D, {io_reply, Mref, Reply}}` |
 | `lib/kernel/src/group.erl`, `lib/kernel/src/file_io_server.erl`, `lib/kernel/src/application_master.erl` | 61. each io server's receive takes `{erx_origin, D, {io_request, From, ReplyAs, Req}}` as the request inside it when `erx_dist:owner(From)` is `D`, and drops it otherwise; an application master relays the bare request to its own group leader, which answers `From` |
 | `lib/kernel/src/inet_dns.erl` | 62. `decode_data/3`'s last clause keeps the data of every record type it has no format for raw, the types OTP names without a format included: UINFO, UID, GID and UNSPEC (100 to 103), IXFR, AXFR, MAILB, MAILA and ANY (251 to 255), and A, AAAA and WKS of a class other than IN; stock's clause takes only an integer type, so a reply carrying one of those, which any host on the path can forge, fails the whole decode with `function_clause` out of `inet_res`'s call and crashes the resolver's caller, an upstream bug ([design-network-stack.md](design-network-stack.md#name-resolution)) |
-| `lib/kernel/src/inet_db.erl` | 63. `crypto_rand_range/1`, where `crypto` is not loaded, draws eight bytes from `erx_bytes:entropy/1` and takes them modulo the range, so `inet_res`'s query IDs and the inet backend's random ports come from the kernel's generator without `crypto`, which erXos does not release, and are not inet_db's counter, one more per query, which an off-path host could guess (RFC 5452); where `erx_bytes` is not loaded (`error:undef`), as on stock OTP, it answers `undefined` and stock's counter stays, and a failed read raises in the resolver's caller, the process that called `inet_res`, rather than fall back to the counter, whose IDs an off-path host could guess ([design-network-stack.md](design-network-stack.md#name-resolution)) |
+| `lib/kernel/src/inet_db.erl` | 63. `crypto_rand_range/1`, where `crypto` is not loaded, draws eight bytes from `erx_bytes:entropy/1` and takes them modulo the range, so `inet_res`'s query IDs and the inet backend's random ports come from the kernel's generator in a domain whose release has no `crypto`, as the network domain's has none, and are not inet_db's counter, one more per query, which an off-path host could guess (RFC 5452); where `erx_bytes` is not loaded (`error:undef`), as on stock OTP, it answers `undefined` and stock's counter stays, and a failed read raises in the resolver's caller, the process that called `inet_res`, rather than fall back to the counter, whose IDs an off-path host could guess ([design-network-stack.md](design-network-stack.md#name-resolution)) |
 | `erts/preloaded/src/erlang.erl`, `lib/stdlib/src/gen.erl`, `lib/kernel/src/erpc.erl` | 64. the library calls that stock gives a node-level result when a connection's `noconnection` reaches them give the same result for edit 56's `{domain_down, D, Info}`: `spawn/4`, `spawn_link/4`, `spawn_opt/5` and `spawn_monitor/4`, and the forms that route to them, whose spawn gets it as its error reply, return a pid that exits with `noconnection`, as stock's documentation promises; `gen:call`, and so `gen_server:call` and its kin, exits `{nodedown, Node}`; and `erpc`'s calls and requests raise `{erpc, noconnection}` for it as the `DOWN` of the request's process or as its spawn's error reply, so `rpc:call/4,5`, which maps that error, returns `{badrpc, nodedown}`, `rpc:block_call` through `gen_server:call` the same, and `rpc:multicall` counts the node among its bad nodes. Raw links, monitors and `spawn_request` replies keep the reason. Each matches the shape alone: a spawn's error reply of that shape comes only from this node's ERTS, but any process can make a monitored process exit with it, as it can with `noconnection`, so the result tells a caller no more than stock's does ([Connections in ERTS](#connections-in-erts)) |
 | `erts/preloaded/src/init.erl` | 65. once the boot script has started every application, and before any `-s`, `-run` or `-eval`, a domain's runtime sends `{erx_ready, #{connections => Agent, inspect => InspectAgent, provides => Provides}}` to the domain pid that `erx_dist:boot/0` names, `Agent` being its connection agent, `erx_connections`, and `InspectAgent` its inspection agent, `erx_inspect_agent` ([design-live.md](design-live.md#the-runtime-agent)), a key left out when no agent is registered, both of which edit 8 hands out to the system domain with `send` as the frame is encoded, and `Provides` the mints its services named with `erx_facet:provide/2` ([design-system.md](design-system.md#facets-a-configured-domain-serves)), whose persistent term init then leaves as `reported`, so `provide/2` refuses a later mint: init's ready report, on which `erx_domain:create/1` returns ([design-domains.md](design-domains.md#messages-between-the-domain-service-and-a-runtime)). Further agents join the map as they come to exist. Coming before `-eval`, it is sent by a domain whose `-eval` halts it too. Init then waits, at most five seconds, for the domain service's answer, the domain's facets by name, which the connection agent keeps as the persistent term `{erx, facets}`, which `erx:cap/1` reads, and then hands it as `{erx_facets, Facets}`, so `-eval`, `-s` and `-run` find them. The agent is that term's one writer, for this answer and for every later installation, so no installation is lost to the answer; a domain whose answer does not come in time boots on without waiting for it. The system domain, whose boot page names no domain pid, and a runtime that is no node report nothing and wait for nothing |
 | `beam/jit/arm/ops.tab`, `beam/jit/x86/ops.tab` | 66. a `select_val` whose failure falls through to the next instruction, the small-integer half that `split_values` makes of a select that also matches bignums, takes a search and never a jump table, whose gaps need a failure label, as in the interpreter |
 
 Sixty-six edits outside `sys/erxos`, in seventy named files outside
 the JIT's directory, in the JIT's directory and in asmjit's `VirtMem`;
-the interpreter image is built without
-the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
+the interpreter build, and so the system and interpreter images, is
+built without the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
 ERTS allocates them. Nothing in the node table's keys, in the decoder's
 test for the own node, in channel creation or in `do_send`: every domain
 is a node of its own name, so a pid of another domain belongs to another
@@ -502,7 +515,7 @@ the work. ERTS's Erlang-visible behaviour is checked against stock OTP
 | **R7.** The export table is written at exactly three sites, each an act of the name's owner, and a holder ends with its process or alias | the holders are a field of the name's own record; the writes are the encoder's (edit 8), which adds a peer with `send` alone and only where it holds nothing yet, the spawn-into path's, which gives the spawner every right on its child, and `erx:export/3`'s, which a process of the owning domain calls to set a peer's rights on one of its own names exactly; the only clears are at process exit (edit 13), at an alias's end (edit 14), when its origin monitor leaves its monitor tree or `unalias/1` clears it, which are the one exit path ERTS has and the monitor tree's own functions, and at a connection's end | a fourth writer; an encode that widens a holder's rights; a write on a name the domain does not own; an exit path that skips the clear | a source check that only the three functions write holders, with a seeded fourth; a test that a pid encoded for a peer gives it `send` alone, and that one exported narrowly with `erx:export/3` and encoded again keeps the narrow rights; a test that a frame to an exited pid is answered as to a dead process |
 | **R8.** No device address the runtime gives a device names memory the domain does not hold, and none is reused while the device may still hold it | the device NIF builds every address from the record's memory object and an offset, checked against the object, and alone writes one: a register the SVD source marks `ownedByNif` refuses `write/3` and `write_field/4`, and every address in what `post/4` writes is one the NIF computed, since it takes only bytes, lengths, which segments the device writes and regions of the record, never an address, a descriptor field or a flag. A request's own bytes are the driver's: a device whose requests carry addresses, as virtio-gpu's do, reads where those bytes point, and only the device's DMA window bounds that, so a confined device reads only memory the domain holds. A chain's buffer is its head descriptor's, so no two chains in flight share one. Pools and queues are state of the device's record in the NIF for the boot, never of a process, so a driver's crash frees nothing; a posted buffer returns to its pool only through the device's completion or at `negotiate/2`, and after a driver's exit the NIF posts nothing on the device until `negotiate/2`; an unconfined device's memory is the system domain's for the boot and never freed, and a confined device's is freed only after the kernel unbinds it from the device's window | a raw address or offset accepted from Erlang; an address register or an addressing flag written from Erlang; a pool or queue freed with the process that made it; a posted buffer returned to its pool before its completion or a reset; a post after a driver's exit and before `negotiate/2` | the NIF's property tests over post, complete, crash and reset sequences on the hosted backend; a seeded return of a posted buffer before its completion, a seeded post before `negotiate/2`, a seeded write of an owned register and a seeded pool owned by a process each fail the test |
 | **R9.** No binary aliases memory a device can write | `complete/2` copies each buffer's returned bytes into a fresh binary and returns the buffer to its pool, and the NIF makes no binary over a pool | a resource binary over a pool buffer | a model device on the hosted backend that rewrites a buffer after its completion, after which the binary `complete/2` returned is unchanged |
-| **R10.** The system domain holds no generated machine code, no JIT object and no C++ | it runs the interpreter image, built without BeamAsm, asmjit, libc++ and libc++abi, whose manifest carries no `ERX_IMAGE_JIT`, so its space allows no JIT object and the kernel refuses it one (K8; [design-kernel.md](design-kernel.md#image-manifests)) | a symbol of BeamAsm, asmjit or libc++ linked into the interpreter image; a root image marked `ERX_IMAGE_JIT` | the build check on the interpreter image's symbols, which a seeded asmjit object linked into it fails; the packer's refusal of a root image marked for JIT, which a seeded manifest exercises; a boot test in which a NIF of the system domain asks for a JIT object and gets the kernel's refusal |
+| **R10.** The system domain holds no generated machine code, no JIT object, no C++ and no OpenSSL | it runs the system image, of the interpreter build, built without BeamAsm, asmjit, libc++ and libc++abi and linked without `libcrypto`, whose manifest carries no `ERX_IMAGE_JIT`, so its space allows no JIT object and the kernel refuses it one (K8; [design-kernel.md](design-kernel.md#image-manifests)) | a symbol of BeamAsm, asmjit, libc++ or `libcrypto` linked into the system image; a root image marked `ERX_IMAGE_JIT` | the build check on the system image's symbols, which a seeded asmjit object and a seeded `crypto` entry in its NIF table each fail ([design-crypto.md](design-crypto.md#verification)); the same check of BeamAsm, asmjit and libc++ on the interpreter image; the packer's refusal of a root image marked for JIT, which a seeded manifest exercises; a boot test in which a NIF of the system domain asks for a JIT object and gets the kernel's refusal |
 | **R11.** No call stub hands the kernel an address to read or write | every stub is generated from the ABI file, whose argument kinds are register values, UTCB fields and memory windows (a memory object's capability with an offset and a length), and the generator refuses a pointer parameter; only `liberx` issues kernel calls | a hand-written stub; an argument kind the kernel reads through | the generator's test, in which a seeded pointer argument in a test ABI file fails generation; the chokepoint check that only `liberx`'s generated stubs trap, which a seeded hand-written trap fails |
 
 ## Data model
@@ -737,8 +750,10 @@ reaches a terminal or the log only through that sink's escaping function.
 
 ### Starting a runtime
 
-The domain library maps the domain's runtime image, the BeamAsm image or
-the interpreter image as its specification chooses, a file of the boot
+The domain library maps the domain's runtime image, the system image for
+the system domain and for every other domain the BeamAsm image or the
+interpreter image as its specification and the boot's mode choose, a
+file of the boot
 image that every domain may map, and the domain's release slice, creates
 the domain's first thread as a worker with the boot information page's
 address as its argument, and starts it
@@ -1656,7 +1671,7 @@ applied in this order, each step undoing the ones before it on failure:
 task copies each frame out of the outbound lane once through
 `erx_lane_take`, runs the funnel in its channel mode, structure alone,
 since a channel carries no name with authority, and decodes the request
-in safe mode, since every atom of the protocol is in both runtime images
+in safe mode, since every atom of the protocol is in every runtime image
 and a program creates none; it then delivers each request and notice to
 the handler as `{erx_channel, Port, Request}`, within the program's
 **credit**, which the driver keeps from the frames it writes and reads: a
@@ -2059,7 +2074,7 @@ would commit its whole size at start-up, and with `false` it commits per
 carrier as `mseg_alloc` does, so it saves no page and only caps a
 domain's carrier space.
 
-**No allocator of its own.** The system domain's interpreter image keeps
+**No allocator of its own.** The system domain's system image keeps
 ERTS's allocators as every image has them, with no bookkeeping of memory
 per client inside the allocators. What the system domain holds
 for one domain is a sum fixed when the domain is admitted, which the
@@ -2142,7 +2157,7 @@ server of its own:
   image of its own rather than in the boot image: once booted from the
   small release in its slice, the domain mounts the image at the path that
   release names. For a path on it the NIF returns `{erofs, Image, Names}`,
-  and the EROFS reader, `erx_erofs`, Erlang preloaded in both runtime images,
+  and the EROFS reader, `erx_erofs`, Erlang preloaded in every runtime image,
   serves the operation in the calling process from blocks it fetches from
   the storage domain's block service through the domain's grant of it and
   hands to the hash-checking primitive, which checks them against the
@@ -2855,7 +2870,7 @@ BEAM files with the compiler's call graph is the target
 
 System code is Erlang, drivers included
 ([design.md](design.md#decisions)), and the work it does once per byte is
-not: a small set of C primitives in both runtime images does it, each with
+not: a small set of C primitives in every runtime image does it, each with
 a fuzz target and a differential test against a reference on the host. The
 primitives of `erx_bytes` are BIFs of erXos's ERTS, registered in its
 `bif.tab`; `erx_verity`, the device copies and the pipe copy are NIFs.
@@ -2949,19 +2964,25 @@ around them.
 
 BeamAsm runs in the BeamAsm image, which every ERTS domain other than the
 system domain runs unless its specification chooses the interpreter
-image. The system domain runs the interpreter image, built without BeamAsm, asmjit,
-libc++ and libc++abi, so the trusted base holds no generated machine
-code, no JIT object, no writable view of code and no C++; the system
-domain does bounded control only, so the interpreter's speed suffices
-there ([design-system.md](design-system.md#the-root-task)). Command
-domains run the interpreter image, so they make no code, as no program
-does ([Native programs](#native-programs)), and under `erx.det=1`
-every domain runs the interpreter image, whatever its specification
-names, because BeamAsm's output depends on addresses and hash order
+image. The system domain runs the system image, of the interpreter
+build, built without BeamAsm, asmjit, libc++ and libc++abi and linked
+without OpenSSL, so the trusted base holds no generated machine code, no
+JIT object, no writable view of code, no C++ and no code of OpenSSL; the
+system domain does bounded control only, so the interpreter's speed
+suffices there ([design-system.md](design-system.md#the-root-task)). The
+interpreter image is the same build linked a second time with OTP's
+`crypto` and `asn1rt_nif` NIFs and OpenSSL
+([design-crypto.md](design-crypto.md#three-runtime-images-and-openssl-in-two-of-them)).
+Command domains run the interpreter image, so they make no code, as no
+program does ([Native programs](#native-programs)), and under
+`erx.det=1` every domain but the system domain runs the interpreter
+image, whatever its specification names, because BeamAsm's output
+depends on addresses and hash order
 ([research](research-erts-internals.md#beamasm-on-aarch64)). Which image
-a domain runs follows from one field of its specification and the boot's
-mode, and which image may make code follows from the image's manifest, so no
-domain decides its flavour at run time.
+a domain runs follows from whether it is the system domain, one field of
+its specification and the boot's mode, and which image may make code
+follows from the image's manifest, so no domain decides its flavour at
+run time.
 
 * **Executable memory.** asmjit's `VirtMem` gets an erXos backend: a block
   is a memory object created with `ERX_MEM_JIT`, mapped twice into the
@@ -2969,8 +2990,8 @@ domain decides its flavour at run time.
   kernel allows this only for JIT objects and only in spaces created with
   `ERX_SPACE_JIT`, which the domain library gives every domain that runs
   the BeamAsm image, the one image whose manifest is marked
-  `ERX_IMAGE_JIT`; the interpreter image's manifest carries no such mark,
-  so neither the system domain nor a command domain gets a space that
+  `ERX_IMAGE_JIT`; the system and interpreter images' manifests carry no
+  such mark, so neither the system domain nor a command domain gets a space that
   allows JIT objects. No mapping is ever writable and executable (K8).
 * **Cache maintenance.** The kernel lets user mode read the cache geometry
   and clean and invalidate caches by address, so BeamAsm's maintenance
@@ -3300,7 +3321,7 @@ layers:
   valid order with a device's generated register accessors, and whose
   Erlang face is the device NIF ([The device NIF](#the-device-nif)).
 * **The system layer**: the root-task entry and the domain library,
-  linked only into the interpreter image, which the system domain runs,
+  linked only into the system image, which the system domain runs,
   C17 under the kernel-construction rules
   ([The root-task entry](#the-root-task-entry)).
 * **Programs**: the loader (`erx_elf_plan`, `erx_exec`), the channel
@@ -3311,7 +3332,7 @@ layers:
 ### The root-task entry
 
 The kernel starts one user-mode task, the system domain, on the root
-entry point of the interpreter image for a full boot or the native C17
+entry point of the system image for a full boot or the native C17
 root-entry image for a development partial boot, with the root capabilities at
 well-known slots of its table and the machine page mapped
 ([design-kernel.md](design-kernel.md#the-root-task)). The entry is
@@ -3398,7 +3419,7 @@ command domain makes no code, as no program does.
 
 ### Hosted mode
 
-Both runtime images, the system services and native programs build for
+Every runtime image, the system services and native programs build for
 macOS against `liberx`'s hosted backend, as one process per domain or
 all domains in one process. They run under ASan, UBSan and TSan and under `lldb`, with
 OTP's suites and erXos's own, for fast iteration. QEMU remains
@@ -3441,12 +3462,13 @@ OTP's built-in zlib, so both targets build the same zlib.
 ### The build
 
 The top-level `Makefile` and `tools/erx` are erXos's build. They invoke
-ERTS's machinery through one entry point per image, `tools/erx build
-runtime` for the interpreter image and `tools/erx build jit-runtime` for
-the BeamAsm image, each of which runs OTP's `configure` with the
+ERTS's machinery through one entry point per build, `tools/erx build
+runtime` for the interpreter build, which links the system image and the
+interpreter image, and `tools/erx build jit-runtime` for the BeamAsm
+image, each of which runs OTP's `configure` with the
 `aarch64-unknown-erxos` target and the build's cross-compilation file,
-the JIT disabled for the interpreter image and enabled for the BeamAsm
-image, then OTP's `make`. The interpreter build makes the emulator, the
+the JIT disabled for the interpreter build and enabled for the BeamAsm
+build, then OTP's `make`. The interpreter build makes the emulator, the
 preloaded modules and the applications erXos ships; the BeamAsm build
 makes only its emulator, `FLAVOR=jit`, with the preloaded modules it
 embeds, in a private copy of its own, and takes musl, `liberx` and the
@@ -3456,13 +3478,17 @@ libc++abi are built with CMake from the pinned llvm-project source, of
 which the fetch extracts only the directories its runtimes build reads,
 against the same musl headers, and BeamAsm's C++ compiles with their
 headers first. ERTS's Perl generators run as part of both. The outputs
-are the two runtime images, each a static position-independent
+are the three runtime images, each a static position-independent
 executable that the packer turns into a boot-image entry with a
 manifest, the BeamAsm image's alone marked `ERX_IMAGE_JIT`, and the
-hosted executables. An image that carries no domain release carries no
+hosted executables. The system image and the interpreter image differ
+only by their static NIF tables and the objects those NIFs pull in
+([design-crypto.md](design-crypto.md#three-runtime-images-and-openssl-in-two-of-them)).
+An image that carries no domain release carries no
 BeamAsm image and does not build it. A build check fails when the
-interpreter image links a symbol of BeamAsm, asmjit, libc++ or
-libc++abi, and when the BeamAsm image links neither BeamAsm nor asmjit.
+system or interpreter image links a symbol of BeamAsm, asmjit, libc++ or
+libc++abi, when the system image links a symbol of `libcrypto`, and when
+the BeamAsm image links neither BeamAsm nor asmjit.
 Erlang code
 is compiled with the host OTP's `erlc` of the same release, built from the
 pinned tarball ([design.md](design.md#build-and-toolchain)), which is also where
@@ -3618,7 +3644,7 @@ Everything not listed behaves as stock OTP 29.1.2.
 | `open_port({spawn_driver, Name}, _)` | only the linked-in drivers: `erx_lane` and `erx_program`, which `erx_connections` and `erx_program` open, and `ram_file_drv`, which `ram_file` opens; any other name is `badarg` |
 | `os:getenv/0,1`, `os:putenv/2` | an environment per domain, initialised from the domain's specification |
 | `os:set_signal/2` | `badarg`; there are no UNIX signals |
-| `erlang:system_info(emu_flavor)` | `emu` in a domain that runs the interpreter image, the system domain and command domains among them; `jit` in one that runs the BeamAsm image |
+| `erlang:system_info(emu_flavor)` | `emu` in a domain that runs the system or interpreter image, the system domain and command domains among them; `jit` in one that runs the BeamAsm image |
 | `erlang:system_info(schedulers)` | the normal schedulers created: the cpuset's CPU count, at most 32 |
 | `erlang:system_info(schedulers_online)` | follows the group's capacity, rounded up, within the limit Erlang code set |
 | `erlang:system_flag(schedulers_online, N)` | sets the limit and returns the previous value online; the value online is then the lower of the limit and the capacity |
@@ -3813,8 +3839,8 @@ hardware isolates the domain instead. BeamAsm's writable alias of each JIT
 object stays inside the domain; generated code is not guarded by branch
 protection, which weakens the domain's own defences against its own inputs
 and nothing else. The system domain, the most trusted runtime, runs the
-interpreter image, so it holds no generated code, no writable view of
-code and no C++, and its runtime's code is all built with branch
+system image, so it holds no generated code, no writable view of
+code, no C++ and no OpenSSL, and its runtime's code is all built with branch
 protection; it loads only installed code, and the missing bytecode
 verifier is the residual risk recorded in
 [design.md](design.md#residual-risks).
@@ -4106,9 +4132,11 @@ own domain, so a runtime that lies harms only itself.
   scheduler calls it (R4); a page-table walk after every test finds no
   writable and executable mapping; a space created without `ERX_SPACE_JIT`
   cannot map a JIT object.
-* **The two images.** The build check finds no symbol of BeamAsm, asmjit,
-  libc++ or libc++abi in the interpreter image, and fails on a seeded
-  asmjit object linked into it; the packer refuses a root image marked
+* **The three images.** The build check finds no symbol of BeamAsm, asmjit,
+  libc++ or libc++abi in the system and interpreter images and none of
+  `libcrypto` in the system image, and fails on a seeded asmjit object
+  linked into either and on `crypto` added to the system image's NIF
+  table; the packer refuses a root image marked
   `ERX_IMAGE_JIT`, shown by a seeded manifest; in a booted system
   `erlang:system_info(emu_flavor)` is `emu` in the system domain and in a
   command domain and `jit` in an ordinary domain, and a JIT object asked
@@ -4143,7 +4171,7 @@ own domain, so a runtime that lies harms only itself.
   fails to load in every domain, the system domain included.
 * **Hosted mode.** The same suites run hosted under ASan and UBSan, and the
   storm, capacity, event-table and connection tests under TSan.
-* **Determinism.** The interpreter image in deterministic mode boots to
+* **Determinism.** The system and interpreter images in deterministic mode boot to
   a shell and runs a scripted session with a byte-identical transcript.
 * **Floats.** A differential test of `float_to_list/1,2`,
   `list_to_float/1` and the float term format over millions of random
@@ -4225,8 +4253,9 @@ compared with HVF or native ones.
 
 ## Portability
 
-The interpreter image is C and Erlang above `liberx`; the BeamAsm image
-adds BeamAsm's C++. Architecture-specific parts sit in known places: the
+The system image is C and Erlang above `liberx`; the interpreter image
+adds OpenSSL's C and assembly, and the BeamAsm image adds BeamAsm's C++
+to that. Architecture-specific parts sit in known places: the
 thread pointer in
 musl's architecture layer, BeamAsm's back end for the architecture,
 `liberx`'s trap stubs, the device NIF's cache maintenance, and user-mode
@@ -4341,9 +4370,9 @@ image exercised by every domain and faster system services. erXos does
 not take it: it puts BeamAsm's translator, asmjit, a C++ runtime, JIT
 objects and a writable view of the most trusted runtime's code into the
 trusted base, for speed that bounded control does not need. The
-interpreter image is exercised in every test boot by the system domain
+interpreter build is exercised in every test boot by the system domain
 itself, command domains and deterministic mode, and the oracle runs
-every suite on both images.
+every suite on both builds.
 
 **One node name for the machine.** Every runtime would run as the
 machine's node, with its domain id as creation, each domain another
@@ -4420,7 +4449,7 @@ separate root task remains a change behind that seam
 | No busy waiting raises wake latency inside a domain | medium | medium | E-S1 compares `none` and `very_short` |
 | NIFs in OTP's applications block on normal schedulers | medium | low | E-S10 counts them; each moves to a dirty I/O scheduler |
 | An OTP application expects `global` or `pg` to span the machine's domains | medium | low | the Erlang-visible table states that they see only the local node; the oracle's distribution cases across connections list each case that depends on them |
-| The interpreter image runs in fewer domains than the BeamAsm image, so its bugs surface later, and one in the system domain resets the machine | medium | high | every suite runs on both images; the system domain, command domains and deterministic mode run it in every test boot |
+| The interpreter build runs in fewer domains than the BeamAsm image, so its bugs surface later, and one in the system domain resets the machine | medium | high | every suite runs on both builds; the system domain, command domains and deterministic mode run it in every test boot |
 | A pid of another machine's node prints with a creation equal to a domain id of this machine | low | low | the open question below |
 | An export lookup per encoded local pid shows on the cross-domain hot path | low | low | `tools/erx bench xdomain-pingpong` measures it; a per-entry cache of the sender's own pid is the fallback |
 | One connection's head-of-line blocking stalls unrelated processes of a domain toward one peer | medium | low | it is stock distribution's behaviour toward a busy distribution connection; the system domain's facets are per grantee, so no grantee stalls another's |

@@ -5381,7 +5381,7 @@ trailing dot allowed and dropped; stricter than `res_hnok`, which also
 takes an empty label, since `inet_dns` cannot encode one and would fail
 the caller's query. A domain that fails the check is dropped and the
 rest of the answer loaded. Query IDs are the kernel's random bytes, not
-`inet_db`'s counter, though erXos releases no `crypto`
+`inet_db`'s counter, in a domain whose release has no `crypto` too
 ([design-runtime.md](design-runtime.md), edit 63), so an off-path host
 must guess both the ID and the source port (RFC 5452). The `host`
 command ([design-shell.md](design-shell.md)) asks the same name servers,
@@ -5826,7 +5826,9 @@ the bytes, as the design requires ([design.md](design.md#decisions)).
   hash is per-byte work by the design's own
   list, and a SYN flood makes this one per-packet: in Erlang its 64-bit
   arithmetic would leave small integers on every round. It also keeps
-  OpenSSL out of the domain that parses hostile packets. RFC 7217's
+  the domain that parses hostile packets from calling OpenSSL, which its
+  image maps and nothing there calls
+  ([design-crypto.md](design-crypto.md#domains-that-call-no-openssl)). RFC 7217's
   HMAC-SHA-256 is computed by the vault, which holds its key
   ([IPv6, neighbour discovery and autoconfiguration](#ipv6-neighbour-discovery-and-autoconfiguration)).
 * **The entropy source,** `erx_bytes:entropy/1`: it returns up to 256
@@ -5834,8 +5836,11 @@ the bytes, as the design requires ([design.md](design.md#decisions)).
   substituting other bytes
   ([design-runtime.md](design-runtime.md#per-byte-primitives)). It is
   not per-byte work but Erlang's entry to the kernel's generator in a
-  domain without OpenSSL, as the network domain is
-  ([design.md](design.md#decisions)), and the stack calls it, through
+  domain that calls no OpenSSL, as the network domain is: its runtime
+  image maps OpenSSL, its release ships no `crypto`, and a build check
+  proves that no module of the stack calls `crypto`
+  ([Build checks](#build-checks),
+  [design-crypto.md](design-crypto.md#domains-that-call-no-openssl)). The stack calls it, through
   `erx_net_clock`, only when an owner starts and when
   `erx_net_tables` draws or rotates a secret
   ([One owner, one step](#one-owner-one-step)).
