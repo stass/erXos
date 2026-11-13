@@ -14,7 +14,8 @@ module Erx
   # no way to hand it to the device. The rule is therefore that no Erlang source but
   # erx_blk_write calls erx_device:post/4. The network stack's virtio transport,
   # erx_virtio_net, is the other site: a network device's requests carry frames, and the
-  # transport is the one module that posts them. The virtio-gpu display driver,
+  # transport is the one module that posts them, as the Raspberry Pi 4's GENET transport,
+  # erx_genet, is for its controller. The virtio-gpu display driver,
   # erx_virtio_gpu, is the third: a display device only reads the screen image and is
   # handed no medium to write, and the driver's process is the one module that posts its
   # requests, every one built by its pure core (docs/design-display.md, "The display device").
@@ -35,6 +36,7 @@ module Erx
   module DevicePosters
     WRITE_PATH = 'erlang/apps/erx_blk/src/erx_blk_write.erl'
     SITES = [WRITE_PATH, 'erlang/apps/erx_net/erxos/erx_virtio_net.erl',
+             'erlang/apps/erx_net/erxos/erx_genet.erl',
              'erlang/apps/erx_fb/src/erx_virtio_gpu.erl'].freeze
     # Each issuing call and the modules that may name it.
     ISSUERS = { 'post' => SITES, 'command' => [WRITE_PATH].freeze }.freeze

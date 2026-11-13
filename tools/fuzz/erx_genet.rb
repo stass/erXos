@@ -25,12 +25,16 @@ module ErxGenetFuzz
   # For each target: its Erlang module, the cores it compiles, and what each
   # seeded copy says, with the core, the text it replaces and the text it plants.
   TARGETS = [
-    Target.new(name: 'erx_genet_rx_fuzz', modules: %w[erx_genet_rx],
+    Target.new(name: 'erx_genet_rx_fuzz', modules: %w[erx_genet_rx erx_genet_core],
                mutants: {
                  'a frame longer than the buffer' =>
                    ['erx_genet_rx', 'Length > ?BUFFER_BYTES -> {drop, too_long};', ''],
                  'the padding kept in the frame' =>
-                   ['erx_genet_rx', 'binary:part(Bytes, ?PAD, Length - ?PAD)', 'binary:part(Bytes, 0, Length - ?PAD)']
+                   ['erx_genet_rx', 'binary:part(Bytes, ?PAD, Length - ?PAD)', 'binary:part(Bytes, 0, Length - ?PAD)'],
+                 'only the receive-error bit dropping a frame' =>
+                   ['erx_genet_rx', 'Status band ?STATUS_ERROR_MASK =/= 0', 'Status band 16#0004 =/= 0'],
+                 'a completion past the buffer folded into the length field' =>
+                   ['erx_genet_core', 'case byte_size(Bytes) =< erx_genet_rx:buffer_bytes() of', 'case true of']
                }),
     Target.new(name: 'erx_phy_word_fuzz', modules: %w[erx_mdio erx_phy_c22],
                mutants: {

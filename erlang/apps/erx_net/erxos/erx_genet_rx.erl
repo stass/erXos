@@ -14,10 +14,12 @@ write again, since a frame is a sub-binary of them and keeps them alive.
 
 Every descriptor holds one buffer of `buffer_bytes/0` (2 KiB), so a frame the
 controller accepted, at most 1,536 bytes, never spans two. The status word is
-untrusted device data. Its length field, bits 27:16, counts the two bytes of
+untrusted device data. Its low 16 bits are the flags the device NIF hands up as
+each receive completion's tag (docs/design-device-dma.md, "The register ring
+(GENET)"), and `frame/2` takes them with the bytes the NIF copied. Its length field, bits 27:16, counts the two bytes of
 padding the controller writes before the frame so that the IP header lands
 aligned; the frame is the bytes after them. A descriptor whose status carries
-the receive-error bit, lacks the start or end of packet, or whose length is
+any of the error bits 0 to 4, lacks the start or end of packet, or whose length is
 shorter than the padding and an Ethernet header, longer than the buffer or
 longer than the bytes read is dropped with its reason. Either way the
 descriptor is consumed: `batch/2` moves the consumer index by one for every
@@ -25,7 +27,9 @@ descriptor it is handed, frame or drop, so a bad frame never holds up the
 ring.
 
 Facts from FreeBSD 975e3605ebb1, `sys/arm64/broadcom/genet/`: the status bits
-(`if_genetreg.h:169-176`), the 256-descriptor ring and its 16-bit free-running
+(`if_genetreg.h:169-176`; bits 0, 1, 3 and 4 from the GENET facts record,
+docs/research-genet-bcm2711.md, "The receive status word", whose rule of
+dropping on any of them the design takes), the 256-descriptor ring and its 16-bit free-running
 indexes (`if_genetreg.h:116, 131`; `if_genet.c:1384-1388`), the 2 KiB buffer
 (`if_genet.c:790-792`, `MCLBYTES` in `sys/sys/param.h:196-199`), and the padding, turned on by `GENET_RBUF_ALIGN_2B`
 and counted in the length (`if_genet.c:521-524, 1440-1443`). FreeBSD's error
@@ -49,7 +53,17 @@ path leaves its index and the consumer index where they were
 %% The status word's bits, RX_DESC_STATUS's fields in hw/svd/genet/genet.svd.
 -define(STATUS_EOP, ?ERX_HW_GENET_RX_DESC_STATUS_EOP_MASK).
 -define(STATUS_SOP, ?ERX_HW_GENET_RX_DESC_STATUS_SOP_MASK).
--define(STATUS_RX_ERROR, ?ERX_HW_GENET_RX_DESC_STATUS_RX_ERROR_MASK).
+%% The error bits, lowest first, each with the reason it drops a frame.
+-define(STATUS_ERRORS, [{?ERX_HW_GENET_RX_DESC_STATUS_OVERFLOW_MASK, overflow},
+                        {?ERX_HW_GENET_RX_DESC_STATUS_CRC_ERROR_MASK, crc_error},
+                        {?ERX_HW_GENET_RX_DESC_STATUS_RX_ERROR_MASK, rx_error},
+                        {?ERX_HW_GENET_RX_DESC_STATUS_NON_OCTET_MASK, non_octet},
+                        {?ERX_HW_GENET_RX_DESC_STATUS_LENGTH_ERROR_MASK, length_error}]).
+-define(STATUS_ERROR_MASK, (?ERX_HW_GENET_RX_DESC_STATUS_OVERFLOW_MASK bor
+                            ?ERX_HW_GENET_RX_DESC_STATUS_CRC_ERROR_MASK bor
+                            ?ERX_HW_GENET_RX_DESC_STATUS_RX_ERROR_MASK bor
+                            ?ERX_HW_GENET_RX_DESC_STATUS_NON_OCTET_MASK bor
+                            ?ERX_HW_GENET_RX_DESC_STATUS_LENGTH_ERROR_MASK)).
 
 -define(IS_U32(V), (is_integer(V) andalso V >= 0 andalso V =< 16#ffffffff)).
 
@@ -58,12 +72,13 @@ path leaves its index and the consumer index where they were
 -doc "A producer or consumer index: 16 bits, free-running past the ring's size.".
 -type index() :: 0..16#ffff.
 -doc """
-Why a descriptor carried no frame: `rx_error`, the controller's receive-error
-bit; `fragment`, the start or end of packet missing; `runt`, a length shorter
+Why a descriptor carried no frame: the lowest error bit set, `overflow` (bit
+0), `crc_error` (1), `rx_error` (2, the controller's receive-error bit),
+`non_octet` (3) or `length_error` (4); `fragment`, the start or end of packet missing; `runt`, a length shorter
 than the padding and an Ethernet header; `too_long`, a length past the
 buffer; `truncated`, a length past the bytes the caller read.
 """.
--type drop() :: rx_error | fragment | runt | too_long | truncated.
+-type drop() :: overflow | crc_error | rx_error | non_octet | length_error | fragment | runt | too_long | truncated.
 -type result() :: {frame, binary()} | {drop, drop()}.
 
 -doc "The bytes of each descriptor's buffer.".
@@ -83,7 +98,7 @@ buffer's start. A frame is a sub-binary of `Bytes`, at most
 frame(Status, Bytes) when ?IS_U32(Status), is_binary(Bytes) ->
     Length = ?ERX_HW_GENET_RX_DESC_STATUS_BUFLEN_GET(Status),
     if
-        Status band ?STATUS_RX_ERROR =/= 0 -> {drop, rx_error};
+        Status band ?STATUS_ERROR_MASK =/= 0 -> {drop, error_reason(Status)};
         Status band ?STATUS_SOP =:= 0 -> {drop, fragment};
         Status band ?STATUS_EOP =:= 0 -> {drop, fragment};
         Length < ?PAD + ?ETHER_HDR_LEN -> {drop, runt};
@@ -91,6 +106,9 @@ frame(Status, Bytes) when ?IS_U32(Status), is_binary(Bytes) ->
         Length > byte_size(Bytes) -> {drop, truncated};
         true -> {frame, binary:part(Bytes, ?PAD, Length - ?PAD)}
     end.
+
+error_reason(Status) ->
+    hd([Reason || {Bit, Reason} <- ?STATUS_ERRORS, Status band Bit =/= 0]).
 
 -doc """
 The descriptors from consumer index `Cons` on, in ring order, each a status

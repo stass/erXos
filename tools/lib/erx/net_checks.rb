@@ -118,17 +118,17 @@ module Erx
 
     # The modules a TCP payload passes through, by file name, and the calls that
     # copy one (docs/design-network-fastpath.md, "Copies").
-    PAYLOAD_MODULE = /\A(?:erx_tcp(?:_[a-z0-9_]+)?|erx_net_(?:frame|tx|driver|if|input|pipe|loop)|erx_tap|erx_netmap|erx_virtio_net|erx_gen_tcp(?:_core)?)\.erl\z/
+    PAYLOAD_MODULE = /\A(?:erx_tcp(?:_[a-z0-9_]+)?|erx_net_(?:frame|tx|driver|if|input|pipe|loop)|erx_tap|erx_netmap|erx_virtio_net|erx_genet(?:_core)?|erx_gen_tcp(?:_core)?)\.erl\z/
     COPY_CALL = /(?<![A-Za-z0-9_@])(?:(?:erlang\s*:\s*)?(?:iolist_to_binary|list_to_binary|iolist_to_iovec)|binary\s*:\s*(?:copy|list_to_bin))(?![A-Za-z0-9_@])/
     # The functions that may copy, each with its reason: a small piece copied out
     # so that it does not keep its frame alive, the pipe's frame to a test, the
     # frame layer's finishing of a checksum for a transport that does not finish,
-    # the virtio transport's join of a frame of more binaries than a request
-    # posts, the owner's iodata made into the one binary a send carries, and the
+    # the virtio and GENET transports' join of a frame of more binaries than a
+    # request posts, the owner's iodata made into the one binary a send carries, and the
     # socket process's join of a delivery that spans pieces.
     COPY_SITES = {
       'erx_tcp_conn' => %w[compact], 'erx_tcp_reass' => %w[hold], 'erx_net_pipe' => %w[send],
-      'erx_net_frame' => %w[finish], 'erx_virtio_net' => %w[segments],
+      'erx_net_frame' => %w[finish], 'erx_virtio_net' => %w[segments], 'erx_genet_core' => %w[pieces],
       'erx_gen_tcp' => %w[send], 'erx_gen_tcp_core' => %w[split]
     }.freeze
     # The head of a function clause, which starts its line.

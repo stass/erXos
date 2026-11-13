@@ -41,7 +41,7 @@ round_of() ->
     Descriptors = [descriptor() || _ <- lists:seq(1, rand:uniform(5) - 1)],
     Said = erx_genet_rx:batch(Cons, Descriptors),
     case Said =:= reference(Cons, Descriptors) of
-        true -> shape(Said), length(element(2, Said));
+        true -> shape(Said), completions(Descriptors), length(element(2, Said));
         false -> error({disagrees_with_reference, Cons, Descriptors, Said})
     end.
 
@@ -64,13 +64,41 @@ descriptor() ->
                 1 -> rand:uniform(16#10000) - 1;
                 _ -> ?SOP bor ?EOP
             end,
-    Status = (rand:uniform(16) - 1) bsl 28 bor (Length bsl 16) bor Flags,
+    Status = (Length bsl 16) bor Flags,
     {Status, rand:bytes(Read)}.
 
 shape({Next, Frames, Drops}) when is_integer(Next), Next >= 0, Next =< 16#ffff ->
     [true = is_binary(F) andalso byte_size(F) =< ?BUFFER - ?PAD || F <- Frames],
-    [true = lists:member(D, [rx_error, fragment, runt, too_long, truncated]) || D <- Drops],
+    [true = lists:member(D, [overflow, crc_error, rx_error, non_octet, length_error, fragment, runt,
+                             too_long, truncated]) || D <- Drops],
     ok.
+
+%% erx_genet_core:frames/2 over the same descriptors as the device NIF hands them up: the
+%% low 16 bits of the status and the bytes its length says, or, as a faulty NIF or a
+%% wider length field might, more bytes than a buffer holds. Each is the reference's
+%% judgement, a frame past the MTU or a completion past the buffer too_long.
+completions(Descriptors) ->
+    [begin
+         Length = (Status bsr 16) band 16#ffff,
+         Copied = case Length =< byte_size(Bytes) of
+                      true -> binary:part(Bytes, 0, Length);
+                      false -> <<Bytes/binary, (rand:bytes(Length + 4096 - byte_size(Bytes)))/binary>>
+                  end,
+         Want = case byte_size(Copied) > ?BUFFER of
+                    true -> {[{dropped, too_long}], []};
+                    false ->
+                        case judge((byte_size(Copied) bsl 16) bor (Status band 16#ffff), Copied) of
+                            {frame, F} when byte_size(F) > 1514 -> {[{dropped, too_long}], []};
+                            {frame, F} -> {[], [F]};
+                            {drop, D} -> {[{dropped, D}], []}
+                        end
+                end,
+         Completion = {Status band 16#ffff, Copied},
+         case erx_genet_core:frames([Completion], 1500) of
+             Want -> ok;
+             Said -> error({disagrees_with_reference, core, Completion, Said, Want})
+         end
+     end || {Status, Bytes} <- Descriptors].
 
 reference(Cons, Descriptors) ->
     Judged = [judge(Status, Bytes) || {Status, Bytes} <- Descriptors],
@@ -78,9 +106,13 @@ reference(Cons, Descriptors) ->
      [F || {frame, F} <- Judged], [D || {drop, D} <- Judged]}.
 
 judge(Status, Bytes) ->
-    <<_:4, Length:12, _:1, Eop:1, Sop:1, _:10, Err:1, _:2>> = <<Status:32>>,
+    <<Length:16, _:1, Eop:1, Sop:1, _:8, Len:1, NonOctet:1, Err:1, Crc:1, Ov:1>> = <<Status:32>>,
     if
+        Ov =:= 1 -> {drop, overflow};
+        Crc =:= 1 -> {drop, crc_error};
         Err =:= 1 -> {drop, rx_error};
+        NonOctet =:= 1 -> {drop, non_octet};
+        Len =:= 1 -> {drop, length_error};
         Sop =:= 0; Eop =:= 0 -> {drop, fragment};
         Length < ?SHORTEST -> {drop, runt};
         Length > ?BUFFER -> {drop, too_long};

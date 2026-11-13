@@ -18,13 +18,16 @@
 -define(SOP, (1 bsl 13)).
 -define(EOP, (1 bsl 14)).
 -define(ERR, (1 bsl 2)).
+%% The five error bits, 0 to 4, each with the reason it drops a frame.
+-define(ERRORS, [{1 bsl 0, overflow}, {1 bsl 1, crc_error}, {1 bsl 2, rx_error},
+                 {1 bsl 3, non_octet}, {1 bsl 4, length_error}]).
 
 status(Length, Flags) -> (Length bsl 16) bor Flags.
 
 %% The bytes a buffer holds: byte I is I mod 251, so a frame's offset shows.
 buffer(Size) -> list_to_binary([I rem 251 || I <- lists:seq(0, Size - 1)]).
 
-%% The oracle: error first, then start and end, then the length against an
+%% The oracle: the lowest error bit first, then start and end, then the length against an
 %% Ethernet header after the padding, the buffer and the bytes read; a frame is
 %% the bytes from offset 2 to the length. The length is all 16 bits of 31:16, as
 %% RX_DESC_STATUS.BUFLEN in hw/svd/genet/genet.svd declares, so a set high bit
@@ -33,7 +36,8 @@ judge(Status, Bytes) ->
     Length = (Status bsr 16) band 16#ffff,
     Read = byte_size(Bytes),
     if
-        Status band ?ERR =/= 0 -> {drop, rx_error};
+        Status band 16#1f =/= 0 ->
+            {drop, hd([Reason || {Bit, Reason} <- ?ERRORS, Status band Bit =/= 0])};
         Status band (?SOP bor ?EOP) =/= (?SOP bor ?EOP) -> {drop, fragment};
         Length < 2 + 14 -> {drop, runt};
         Length > ?BUFFER -> {drop, too_long};
@@ -50,8 +54,8 @@ every_length_and_flag_combination_matches_the_oracle_test_() ->
                   ?assertEqual({Status, byte_size(Bytes), judge(Status, Bytes)},
                                {Status, byte_size(Bytes), erx_genet_rx:frame(Status, Bytes)})
               end || Bytes <- Buffers, Length <- lists:seq(0, 16#fff),
-                     Flags <- [S bor E bor R || S <- [0, ?SOP], E <- [0, ?EOP], R <- [0, ?ERR]],
-                     Noise <- [0, 16#f0009ffb band bnot (?SOP bor ?EOP bor ?ERR)]]
+                     Flags <- [S bor E bor R || S <- [0, ?SOP], E <- [0, ?EOP], R <- [0 | [Bit || {Bit, _} <- ?ERRORS]]],
+                     Noise <- [0, 16#f0009fe0 band bnot (?SOP bor ?EOP)]]
      end}.
 
 boundaries_have_their_known_answers_test() ->
@@ -68,7 +72,8 @@ boundaries_have_their_known_answers_test() ->
              {status(64, ?SOP), {drop, fragment}},
              {status(64, ?EOP), {drop, fragment}},
              {status(64, Whole bor ?ERR), {drop, rx_error}},
-             {status(15, ?ERR), {drop, rx_error}}],
+             {status(15, ?ERR), {drop, rx_error}}
+             | [{status(64, Whole bor Bit), {drop, Reason}} || {Bit, Reason} <- ?ERRORS]],
     [?assertEqual({S, Want}, {S, erx_genet_rx:frame(S, Bytes)}) || {S, Want} <- Cases],
     Full = buffer(?BUFFER),
     ?assertEqual({frame, binary:part(Full, 2, 2046)}, erx_genet_rx:frame(status(2048, Whole), Full)).

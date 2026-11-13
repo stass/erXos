@@ -111,10 +111,11 @@
         </register>
         <register>
           <name>INTRL2_CPU_CLEAR_MASK</name><ownedByNif>false</ownedByNif>
-          <description>GENET_INTRL2_CPU_CLEAR_MASK (if_genetreg.h:61): a 1 bit unmasks that interrupt (if_genet.c:536-537, 713-714); unverified, see SET_MASK</description>
+          <description>GENET_INTRL2_CPU_CLEAR_MASK (if_genetreg.h:61): a 1 bit unmasks that interrupt (if_genet.c:536-537, 713-714); unverified, see SET_MASK. Its two named fields are the interrupts erx_genet unmasks, each one write</description>
           <addressOffset>0x214</addressOffset><access>write-only</access>
           <fields>
-            <field><name>IRQS</name><description>One bit per interrupt, STAT's bits</description><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+            <field><name>RXDMA_DONE</name><description>Unmasks STAT's RXDMA_DONE</description><bitOffset>13</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>TXDMA_DONE</name><description>Unmasks STAT's TXDMA_DONE</description><bitOffset>16</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
           </fields>
         </register>
         <register>
@@ -243,7 +244,11 @@
           <description>GENET_RX_DESC_STATUS (if_genetreg.h:168): descriptor i's length and flags, at 12 * i</description>
           <addressOffset>0x2000</addressOffset><access>read-write</access>
           <fields>
+            <field><name>OVERFLOW</name><description>The receive buffer overflowed (docs/research-genet-bcm2711.md, "The receive status word")</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CRC_ERROR</name><description>The frame failed its CRC (docs/research-genet-bcm2711.md, "The receive status word")</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>RX_ERROR</name><description>The frame was received in error (if_genetreg.h:176)</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>NON_OCTET</name><description>The frame was not a whole number of octets (docs/research-genet-bcm2711.md, "The receive status word")</description><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>LENGTH_ERROR</name><description>The frame was oversize or its length wrong (docs/research-genet-bcm2711.md, "The receive status word")</description><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>SOP</name><description>Start of packet (if_genetreg.h:175)</description><bitOffset>13</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>EOP</name><description>End of packet (if_genetreg.h:174)</description><bitOffset>14</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>CKSUM_OK</name><description>if_genetreg.h:172-173 name bit 15 both OWN, marked unsure, and CKSUM_OK; unverified</description><bitOffset>15</bitOffset><bitWidth>1</bitWidth></field>
