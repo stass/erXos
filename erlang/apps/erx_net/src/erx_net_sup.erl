@@ -15,7 +15,7 @@ erx_net_sup  (one_for_one, intensity 0)
  |       |- erx_net_driver over its transport
  |       |- erx_net_if
  |       |- erx_dhcp4, when the interface is configured for DHCP
- |- the runtime's children (erx_net_runtime:children/0): the node's grant `local`, and
+ |- the runtime's children (erx_net_runtime:children/1): the node's grant `local`, and
     on erXos the mints of `net` and `network_ctl`
 ```
 
@@ -104,7 +104,7 @@ init({stack, Interfaces}) ->
                   start => {supervisor, start_link, [{local, erx_net_interfaces}, ?MODULE,
                                                      {interfaces, Interfaces}]}}
                 | [#{id => Id, start => Start, restart => permanent}
-                   || {Id, Start} <- (runtime()):children()]],
+                   || {Id, Start} <- (runtime()):children(Interfaces)]],
     {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, Children}};
 init(grants) ->
     Grant = #{id => grant, start => {runtime(), start_grant, []}, restart => temporary},

@@ -1249,7 +1249,7 @@ ended(Id, End, #{lib := Lib, core := Core, links := Links} = State) ->
             {Actions, Unlinked} = erx_domain_links:ended(Id, Info, Links),
             Told = unprovide(Origin, Id, perform(Actions, State#{core := Ended, links := Unlinked})),
             _ = retire(Lib, Id),
-            release(restart(Origin, waiter_ended(Id, Life, Info, Told)))
+            release(restart(Origin, Id, Info, waiter_ended(Id, Life, Info, Told)))
     end.
 
 %% A crash's slogan, from its crash area, which goes at the retire after it.
@@ -1283,16 +1283,27 @@ disconnect(Lib, Connection) ->
             logger:error("erx_domain: the library refused to disconnect connection ~b: ~0p", [Connection, Reason])
     end.
 
-restart(request, State) ->
+%% A configured domain's end is one log line (docs/design-system.md, "Boot failure" and
+%% the failure table): the domain's name and id, Info as in {domain_down, Id, Info}, and
+%% whether the service starts it again or, its restart intensity spent, leaves it down,
+%% which is a warning, since nothing starts it again.
+restart(request, _Id, _Info, State) ->
     State;
-restart({session, _Template}, State) ->
+restart({session, _Template}, _Id, _Info, State) ->
     State;
-restart({configured, Row}, #{core := Core, configured := Configured} = State) ->
-    #{Row := #{restarts := Restarts, restart_period_s := Period} = Entry} = Configured,
+restart({configured, Row}, Id, Info, #{core := Core, configured := Configured} = State) ->
+    #{Row := #{name := Name, restarts := Restarts, restart_period_s := Period} = Entry} = Configured,
     case erx_domain_core:restart(Row, Restarts, Period, erlang:monotonic_time(second), Core) of
-        {yes, Next} -> start_configured(Entry, State#{core := Next});
-        {no, Next} -> State#{core := Next}
+        {yes, Next} ->
+            log_end(notice, Name, Id, Info, "restarting it"),
+            start_configured(Entry, State#{core := Next});
+        {no, Next} ->
+            log_end(warning, Name, Id, Info, "left down"),
+            State#{core := Next}
     end.
+
+log_end(Level, Name, Id, Info, Then) ->
+    logger:log(Level, "erx_domain: configured domain ~ts (domain ~b) ended, ~0p; ~s", [Name, Id, Info, Then]).
 
 %% A configured domain's end, which the mint core hears before any restart: every
 %% operation of its incarnation is cancelled, and a session waiting for its grant is

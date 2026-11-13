@@ -12,7 +12,7 @@ The stack runs in the network domain, which serves each client domain its own gr
 
 -behaviour(erx_net_runtime).
 
--export([serve/1, start_grant/2, children/0, mint_counts/0]).
+-export([serve/1, start_grant/2, children/1, mint_counts/0]).
 -export([start_mint/0, mint_init/1]).
 
 -doc "Nothing to do: each grant admits its own requests (erx_net_grant).".
@@ -36,18 +36,25 @@ The mints of the two services the stack provides; the domain holds no grant of i
 * `net`, the network service's mint (start_mint/0);
 * `network_ctl`, the driver-control facet's mint (erx_driver_ctl), through which the
   system domain stops, starts or restarts the link of the network device it granted the
-  domain. Its units map the manifest's unit `net` to that link: the link supervisor of
-  `vtnet0`, the interface erx_virtio_net makes of the domain's first network device, a
-  permanent child of `erx_net_interfaces` under its interface name. A stop leaves the
-  link stopped; a start builds its driver, interface and DHCP client again; neither
+  domain. Its units map the manifest's unit `net` to that link (units/1). A stop leaves
+  the link stopped; a start builds its driver, interface and DHCP client again; neither
   touches a grant. The driver, a temporary child of the link, is not the controlled
   object: a stop would remove it for good.
 """.
--spec children() -> [{atom(), {module(), atom(), [term()]}}].
-children() ->
-    Units = #{net => {erx_net_interfaces, vtnet0}},
+-spec children([map()]) -> [{atom(), {module(), atom(), [term()]}}].
+children(Interfaces) ->
     [{net, {?MODULE, start_mint, []}},
-     {network_ctl, {erx_driver_ctl, start_mint, [network_ctl, Units]}}].
+     {network_ctl, {erx_driver_ctl, start_mint, [network_ctl, units(Interfaces)]}}].
+
+%% The unit `net`, the one unit the network domain holds, is the link supervisor of its one
+%% interface, a permanent child of `erx_net_interfaces` under the name the transport gave
+%% it, as FreeBSD names a driver's units (vtnet0 of erx_virtio_net, genet0 of erx_genet).
+%% One link stands for the unit only while the unit holds one network device, as every
+%% platform record's does. With none or several, `net` names no link, so every request is
+%% refused rather than answered for one device while another runs on (TODO.md, the
+%% driver-control facets' units tables).
+units([#{name := Name}]) -> #{net => {erx_net_interfaces, Name}};
+units(_NoneOrSeveral) -> #{}.
 
 -doc """
 Starts the network service's mint (docs/design-system.md, "Facets a configured domain

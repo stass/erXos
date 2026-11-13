@@ -18,10 +18,11 @@
 
 -behaviour(erx_net_runtime).
 
--export([serve/1, start_grant/2, children/0, export/3]).
+-export([serve/1, start_grant/2, children/1, export/3]).
 
 -define(FAR, erx_net_sup_tests_far).
 -define(GRANTEE, 7).
+-define(LINK, genet0).
 -define(MAC, <<2, 0, 0, 0, 0, 1>>).
 
 -doc false.
@@ -33,8 +34,8 @@ start_grant(Grantee, Limits) ->
     erx_net_grant:start_link(Grantee, Limits).
 
 -doc false.
-children() ->
-    erx_net_local:children().
+children(Interfaces) ->
+    erx_net_local:children(Interfaces).
 
 -doc false.
 export(_Grant, [send], ?GRANTEE) ->
@@ -50,6 +51,14 @@ stack_test_() ->
      [fun(Stack) -> {"a link's end keeps the grants", ?_test(link_end_keeps_grants(Stack))} end,
       fun(Stack) -> {"network_ctl restarts the link", ?_test(control_restart_keeps_grants(Stack))} end,
       fun(Stack) -> {"network_ctl stops and starts the link", ?_test(control_stop_then_start(Stack))} end]}.
+
+%% network_ctl's unit `net` is a link only while the stack has one interface: with none or
+%% two, a request for `net` is refused, never answered for one link while another runs on.
+units_need_one_interface_test() ->
+    [One] = interfaces(),
+    Two = [One, One#{name := genet1}],
+    [?assertEqual({refuse, badarg, Units}, erx_driver_ctl:admit({stop, net}, from, Units))
+     || Units <- [units_of([]), units_of(Two)]].
 
 %% Killing the registered child Name of erx_net_sup ends the stack once, with nothing
 %% restarted: a top-level restart would leave the minted grants dead or name a mint after
@@ -69,7 +78,7 @@ top_child_end_ends_the_stack({Stack, _Far}, Name) ->
 link_end_keeps_grants({Stack, _Far}) ->
     {ok, Grant} = mint(),
     Interfaces = whereis(erx_net_interfaces),
-    Link = vtnet0_link(),
+    Link = link_sup(),
     exit(Link, kill),
     New = until(fun() -> another_link(Link) end),
     ?assertNotEqual(Link, New),
@@ -78,17 +87,17 @@ link_end_keeps_grants({Stack, _Far}) ->
     ?assert(is_process_alive(Stack)).
 
 %% erx_driver_ctl's restart of the unit `net`, through the units map erXos's runtime gives
-%% network_ctl, rebuilds vtnet0's link, its driver included, and leaves the grant.
+%% network_ctl, rebuilds the link, its driver included, and leaves the grant.
 control_restart_keeps_grants({Stack, _Far}) ->
     Units = erxos_units(),
     {ok, Grant} = mint(),
-    Link = vtnet0_link(),
-    {ok, Driver} = erx_net_tables:driver(vtnet0),
+    Link = link_sup(),
+    {ok, Driver} = erx_net_tables:driver(?LINK),
     ?assertEqual({reply, ok, Units}, erx_driver_ctl:admit({restart, net}, from, Units)),
-    New = vtnet0_link(),
+    New = link_sup(),
     ?assert(is_pid(New)),
     ?assertNotEqual(Link, New),
-    NewDriver = until(fun() -> case erx_net_tables:driver(vtnet0) of
+    NewDriver = until(fun() -> case erx_net_tables:driver(?LINK) of
                                    {ok, Driver} -> false;
                                    {ok, Other} -> Other;
                                    none -> false
@@ -102,13 +111,13 @@ control_restart_keeps_grants({Stack, _Far}) ->
 control_stop_then_start({Stack, _Far}) ->
     Units = erxos_units(),
     {ok, Grant} = mint(),
-    {ok, Driver} = erx_net_tables:driver(vtnet0),
+    {ok, Driver} = erx_net_tables:driver(?LINK),
     ?assertEqual({reply, ok, Units}, erx_driver_ctl:admit({stop, net}, from, Units)),
-    ?assertEqual(undefined, vtnet0_link()),
+    ?assertEqual(undefined, link_sup()),
     ?assertNot(is_process_alive(Driver)),
     ?assertEqual({reply, ok, Units}, erx_driver_ctl:admit({start, net}, from, Units)),
-    ?assert(is_pid(vtnet0_link())),
-    until(fun() -> case erx_net_tables:driver(vtnet0) of
+    ?assert(is_pid(link_sup())),
+    until(fun() -> case erx_net_tables:driver(?LINK) of
                        {ok, New} -> New =/= Driver andalso is_process_alive(New);
                        none -> false
                    end end),
@@ -123,15 +132,15 @@ mint() ->
 
 %% --- The stack and its far end ----------------------------------------------------------
 
-%% The stack over one pipe interface, vtnet0 as on erXos, whose far end drops every frame.
+%% The stack over one pipe interface, ?LINK, whose far end drops every frame. The name is
+%% not erx_virtio_net's vtnet0, so a units map that names the link by anything but the
+%% interface's own name fails the control cases.
 start_stack() ->
     wait_gone(erx_net_tables),
     Test = self(),
     Far = spawn(fun() -> true = register(?FAR, self()), Test ! {far, self()}, drop() end),
     receive {far, Far} -> ok end,
-    Pipe = #{name => vtnet0, ip4 => #{addr => <<10, 0, 2, 15>>, plen => 24, gateway => <<10, 0, 2, 2>>},
-             transport => {erx_net_pipe, #{far => {process, ?FAR}, lladdr => ?MAC}}},
-    {ok, Stack} = erx_net_sup:start_link(#{interfaces => [Pipe], runtime => ?MODULE}),
+    {ok, Stack} = erx_net_sup:start_link(#{interfaces => interfaces(), runtime => ?MODULE}),
     unlink(Stack),
     {Stack, Far}.
 
@@ -145,21 +154,29 @@ stop_stack({Stack, Far}) ->
 drop() ->
     receive _ -> drop() end.
 
-%% The units map of network_ctl in erXos's runtime, read from its children, the mints of
-%% net and network_ctl; the host test's seeded fault edits this map.
+%% The stack's one interface.
+interfaces() ->
+    [#{name => ?LINK, ip4 => #{addr => <<10, 0, 2, 15>>, plen => 24, gateway => <<10, 0, 2, 2>>},
+       transport => {erx_net_pipe, #{far => {process, ?FAR}, lladdr => ?MAC}}}].
+
+%% The units map of network_ctl in erXos's runtime, read from its children for the stack's
+%% interfaces, the mints of net and network_ctl; the host test's seeded faults edit this map.
 erxos_units() ->
+    units_of(interfaces()).
+
+units_of(Interfaces) ->
     [{net, _}, {network_ctl, {erx_driver_ctl, start_mint, [network_ctl, Units]}}] =
-        erx_net_erxos:children(),
+        erx_net_erxos:children(Interfaces),
     Units.
 
-%% vtnet0's link supervisor, or undefined while it is stopped.
-vtnet0_link() ->
-    [{vtnet0, Link, supervisor, _}] = supervisor:which_children(erx_net_interfaces),
+%% The interface's link supervisor, or undefined while it is stopped.
+link_sup() ->
+    [{?LINK, Link, supervisor, _}] = supervisor:which_children(erx_net_interfaces),
     Link.
 
-%% vtnet0's link supervisor once it is a process other than Link, else false.
+%% The interface's link supervisor once it is a process other than Link, else false.
 another_link(Link) ->
-    case vtnet0_link() of
+    case link_sup() of
         Other when is_pid(Other), Other =/= Link -> Other;
         _StoppedOrSame -> false
     end.

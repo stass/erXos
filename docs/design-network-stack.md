@@ -596,12 +596,12 @@ erx_net_sup  (one_for_one, intensity 0: restarts nothing)
  |- erx_net_interfaces  (one_for_one)
  |   |- link supervisor per interface, its id the interface's name
  |       |                   (vtnet0 ...), permanent; rest_for_one
- |       |- the driver       erx_net_driver over its transport: erx_virtio_net,
+ |       |- the driver       erx_net_driver over its transport: erx_virtio_net or erx_genet,
  |       |                   erx_net_loop for loopback, or erx_net_pipe on a host
  |       |- erx_net_if       the interface process
  |       |- erx_dhcp4        when the interface is configured for DHCP
  |- erx_epmd                the port mapper for exposed domains
- |- the runtime's children  erx_net_runtime:children/0: the node's grant
+ |- the runtime's children  erx_net_runtime:children/1: the node's grant
                             `local`; on erXos also the mints of `net` and of
                             `network_ctl`, the driver-control facet
 ```
@@ -638,9 +638,14 @@ A link is also what the network domain's driver-control facet,
 `network_ctl`, stops, starts and restarts for the system domain
 ([design-system.md](design-system.md#the-holders-driver-control-facet)).
 Its units map the manifest's unit `net` to `{erx_net_interfaces,
-vtnet0}`, the link of the interface `erx_virtio_net` makes of the
-domain's network device. The link is a permanent child with a stable
-id, so a stop leaves its place and a start builds the driver, the
+Name}`, the link of the stack's one interface, which its transport
+names after the domain's network device as FreeBSD names a driver's
+units: `vtnet0` of `erx_virtio_net`, `genet0` of `erx_genet`.
+The runtime reads the name from the interfaces `children/1` is given,
+so no second list of names exists to fall out of step. One link stands
+for the unit only while the unit holds one network device; with none
+or several, `net` names no link and every request is refused. The
+link is a permanent child with a stable id, so a stop leaves its place and a start builds the driver, the
 interface and the DHCP client again in order; neither touches a grant
 or the domain. The driver is not the controlled object: it is a
 temporary child of the link, which a stop would remove for good.
@@ -2685,16 +2690,18 @@ The runtime's seam is the behaviour `erx_net_runtime`:
 -callback start_grant(Grantee :: local | {pos_integer(), port(), module()},
                       Limits :: map()) ->
     {ok, pid()} | {error, Reason :: term()}.
--callback children() -> [{Id :: atom(), Start :: {module(), atom(), [term()]}}].
+-callback children(Interfaces :: [map()]) ->
+    [{Id :: atom(), Start :: {module(), atom(), [term()]}}].
     % the runtime's own children of erx_net_sup, each made a permanent
     % worker and started after its tables,
     % grants and interfaces: the grant local, and on erXos the mints
-    % of net and network_ctl
+    % of net and network_ctl; Interfaces are the stack's, from which
+    % network_ctl's units name the link they act on
 ```
 
 A grant and every socket call `serve/1` as they start; the
 `erx_net:mint_grant/4` of [The grant's contract](#the-grants-contract)
-calls `start_grant/2`; `erx_net_sup` starts the runtime's `children/0`
+calls `start_grant/2`; `erx_net_sup` starts the runtime's `children/1`
 last ([The process tree](#the-process-tree)). The client side, `erx_net_client`, finds its
 grant through its own `grant` key, a `{Module, Function, Args}` called
 once per socket opened, which answers `{ok, Grant, Origin}` or

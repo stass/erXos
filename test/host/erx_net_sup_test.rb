@@ -26,8 +26,15 @@ class ErxNetSupTest < Minitest::Test
                      /stops and starts the link/],
     # A units map that names the driver, a child of the link, not of erx_net_interfaces:
     # erx_net_interfaces has no such child, so the stop already fails.
-    units_name_the_driver: ['erx_net_erxos', ['{erx_net_interfaces, vtnet0}', '{erx_net_interfaces, driver}'],
-                            /network_ctl (restarts|stops and starts) the link/]
+    units_name_the_driver: ['erx_net_erxos', ['units([#{name := Name}]) -> #{net => {erx_net_interfaces, Name}}',
+                                             'units([_]) -> #{net => {erx_net_interfaces, driver}}'],
+                            /network_ctl (restarts|stops and starts) the link/],
+    # A units map with a fixed interface name, erx_virtio_net's first, in place of the name
+    # the transport gave the unit's interface: the case's interface is genet0, so
+    # erx_net_interfaces has no vtnet0 child and the stop already fails.
+    fixed_name: ['erx_net_erxos', ['units([#{name := Name}]) -> #{net => {erx_net_interfaces, Name}}',
+                                  'units([_]) -> #{net => {erx_net_interfaces, vtnet0}}'],
+                 /network_ctl (restarts|stops and starts) the link/]
   }.freeze
 
   def test_stack_tree_passes_under_eunit

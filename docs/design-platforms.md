@@ -1223,7 +1223,12 @@ firmware computes it, the Ethernet MAC address), places the device tree
 and the bootable file as the firmware does, or accepts or refuses a
 bootable file by its size. QEMU's DMA is coherent, so a driver that
 misses a cache clean or invalidate passes on the model. The model has no
-Ethernet and no PCIe. A stage proven on the model therefore counts only
+Ethernet and no PCIe: nothing answers at GENET's window, so the network
+domain's first read of its registers takes a synchronous external abort,
+which ends that domain alone with a memory fault; the domain service
+logs each end and restarts it within its intensity, then leaves it down
+([design-system.md](design-system.md#boot)), and the `raspi4b` suite
+expects that end. A stage proven on the model therefore counts only
 once it has also passed on a board, and the model's runs are never
 compared with the board's numbers.
 

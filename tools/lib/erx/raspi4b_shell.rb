@@ -7,6 +7,7 @@ require_relative 'bl31'
 require_relative 'boot_partition'
 require_relative 'board_tree'
 require_relative 'generated_abi'
+require_relative 'native_root'
 require_relative 'output_directory'
 require_relative 'platform'
 require_relative 'production_image'
@@ -26,7 +27,8 @@ module Erx
   # (empty, since nothing is mounted there), an output longer than the mini UART's FIFOs, and
   # a debug log record whose tab and escape the console writes as text; then Ctrl-G's menu
   # gives the system's command shell, whose Erlang shell halts the machine, and BL31's reset
-  # ends QEMU under -no-reboot.
+  # ends QEMU under -no-reboot. Its serial log must then hold each configured domain's line
+  # (CONFIGURED_LINES).
   #
   # tcg-cpu-removed, a seeded fault: the same image on the model's tree with one CPU's node
   # removed reaches the release with three schedulers, so the four of tcg-4cpu are the
@@ -84,15 +86,37 @@ module Erx
                  "{ok, R} = erx_blk:read(#{PROBE_SECTOR}, #{PROBE_BYTES.bytesize / SECTOR_BYTES}), " \
                  "{W, F, R =:= B} end, 30000) end.\r"
     # What the system's command shell types to find a storage line in the kernel log, and
-    # the line dmesg writes for it.
+    # the pattern of the storage domain's record holding that line. The storage domain
+    # may log the record after the query has run and found nothing (under TCG the boot is
+    # slow, and slower while another domain restarts); the console, which writes the
+    # kernel log's records live, then writes it after the shell's prompt. So the pattern
+    # matches the record wherever it starts on its line, and each step takes it from
+    # dmesg's answer or the console's live line, whichever comes first; a second copy is
+    # tested against the next step's pattern and ignored. The typed query never matches:
+    # its echo holds no record header.
     def self.kernel_log(text) = "dmesg | grep '#{text}'\r"
-    def self.kernel_log_line(source) = /\A#[0-9]+ [0-9]+\.[0-9]{6} debug space [0-9]+: #{source}\r*\n\z/n
+    def self.kernel_log_line(source) = /#[0-9]+ [0-9]+\.[0-9]{6} debug space [0-9]+: #{source}\r*\n\z/n
     CARD_LINE = 'erx_blk: SD card, '
     CARD_IDENTIFIED = kernel_log_line("#{Regexp.escape(CARD_LINE)}(?:standard|high) capacity, ([0-9]+) sectors, " \
                                       '4-bit bus at [0-9]+ Hz')
     PARTITIONS = 'erx_blk_service: partition table admitted'
     PARTITIONS_ADMITTED = kernel_log_line("#{Regexp.escape(PARTITIONS)}; [0-9]+ windows")
     MOUNTED = 'erx_lfs: volume mounted'
+    # The line each configured domain of the Pi's manifest leaves on the model by the time
+    # tcg-4cpu halts. tcg-4cpu boots with no card on EMMC2's bus, so the storage domain's SD
+    # device process finds no card and logs a record of its space saying so. The model has
+    # no Ethernet (docs/design-platforms.md, "What the model never checks"), so the network
+    # domain's first read of GENET's registers takes a memory fault, which ends only that
+    # domain, and the domain service logs its end as a line of the system domain's own and
+    # restarts it within its intensity (docs/design-system.md, "Boot failure"). Any other
+    # fault kind is a bug and fails the run. The line is not anchored at its start: a
+    # restart's line can follow other output on the same serial line.
+    CONFIGURED_LINES = {
+      'storage' => /#{NativeRoot::DOMAIN_RECORD.source}erx_blk: the SD card is not driven: /n,
+      'network' => /\d+\.\d{6}\ notice\ domain\ \d+\ principal\ \S+(?:\ dropped\ \d+)?\ system:
+                    \ erx_domain:\ configured\ domain\ network\ \(domain\ \d+\)\ ended,
+                    \ \{fault,#{ABI::Generated::CODEC.member('fault_kind', 'memory')}\};\ restarting\ it\r*$/nx
+    }.freeze
 
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                    compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
@@ -108,7 +132,9 @@ module Erx
     # Each cell by name to its report; raises on the first disagreement.
     def call(jobs: 4, build: true)
       inputs = build ? build_inputs(jobs: jobs) : located_inputs
-      { 'tcg-4cpu' => boot(inputs, dtb: inputs.fetch(:dtb), points: shell_checkpoints, machine_end: true),
+      shell = boot(inputs, dtb: inputs.fetch(:dtb), points: shell_checkpoints, machine_end: true)
+      check_configured(File.binread(shell.fetch(:serial)))
+      { 'tcg-4cpu' => shell,
         'tcg-cpu-removed' => boot(inputs, dtb: removed_cpu_tree(inputs.fetch(:dtb)), points: release_checkpoints(CPUS - 1),
                                           machine_end: false),
         'tcg-sd-card' => card_boot(inputs) }
@@ -165,6 +191,18 @@ module Erx
     end
 
     private
+
+    # Raises unless the serial log holds CONFIGURED_LINES' line for each configured domain
+    # the Pi's manifest names, so a domain that never started, or a manifest row without
+    # its expected line here, fails the run.
+    def check_configured(serial)
+      configured_domains.each do |name|
+        pattern = CONFIGURED_LINES.fetch(name) { raise Error, "raspi4b: configured domain #{name} has no expected line" }
+        raise Error, "raspi4b: configured domain #{name} left no line matching #{pattern.source}" unless serial.match?(pattern)
+      end
+    end
+
+    def configured_domains = @platform.manifest_source(@root).scan(/^domain (\S+)$/n).flatten
 
     def point(name, pattern, type: nil, verify: nil, seconds: STEP_SECONDS)
       { name: name, pattern: pattern, seconds: seconds, **{ type: type, verify: verify }.compact }.freeze

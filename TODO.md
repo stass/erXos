@@ -1437,7 +1437,6 @@ it; git history is the record of completed work.
   (`erx_genet_core`), so it clears every unnamed bit of each where FreeBSD keeps its reset value;
   `UMAC_CMD` alone is written 0 first by both. The board pass reads each register's reset value,
   and the file gains the bits that turn out to be set.
-* [Medium] GENET, the Pi 4 network domain (docs/plan.md, 1b-I (c)): `config/manifest/raspi4b-development.txt` configures no network domain, so no domain holds the `net` unit and `erx_genet` drives nothing on the board. The domain needs its manifest rows (limits, release, `net` and `network_ctl` services, the unit) with `-erx_net interfaces {erx_genet,interfaces,[]}`, and `erx_net_erxos:children/0` names the controlled link `vtnet0` alone, which on the Pi is `genet0`.
 * [Low] GENET, Erlang cores (`erx_mdio`, `erx_genet_rx`): both pack bits `genet.svd` names, the MDIO
   command word's fields and the receive status's flags, by hand, since the hardware generator
   (`tools/lib/erx/hardware.rb`) emits C alone. An Erlang header of each SVD's field offsets and widths
@@ -2569,6 +2568,14 @@ it; git history is the record of completed work.
   down, so its ended record keeps its view slot and its principal's domain count, and
   `retire/1` needs an id nobody heard. Keep a reported flag per record in the view, set when
   the report is sent, and have `register/0` send every ended record not yet reported.
+* [Low] domain service, `erx_domain_srv:restart/4` and `liberx/system/dom_boot_view.c`: a
+  configured domain the manifest marks `required` (`mf_domain_flags`, `abi/manifest.txt`) is
+  left down beyond its restart intensity like any other, where design-system.md "Boot failure"
+  ends the machine. The boot view's configured row carries no flags, so `erx_domain_lib`'s
+  `configured()` cannot say `required`, and the service's `{no, Next}` answer logs "left down"
+  for every domain. No manifest marks a domain `required` yet, and leaving it down fails safe.
+  Carry the flag into the row and end the machine on it, with the end's reason in the log and a
+  host test of the decision.
 * [Low] domain service, `erx_domain_srv:session_start/3`: a start's `display` may name any
   service its template is granted, not only a display, since no `windows` service exists to
   check it against; the mint then carries `session` to a server that ignores it. Check the
@@ -3247,13 +3254,14 @@ it; git history is the record of completed work.
   process has ended (design-stopgap.md, "littlefs in the storage domain"). Decide whether the holder's
   units name what depends on each driver, so the facet refuses a stop while it is
   mounted, or remounts after the start; the block_device cell checks only a raw read.
-* [Low] storage and network, `erx_storage_sup` and `erx_net_erxos:children/0`: the
+* [Low] storage and network, `erx_storage_sup` and `erx_net_erxos:children/1`: the
   driver-control facets' units tables, `#{block => {erx_blk_sup, erx_blk}}` and
-  `#{net => {erx_net_interfaces, vtnet0}}`, repeat the manifest's unit names by hand, and
+  `#{net => {erx_net_interfaces, Name}}`, repeat the manifest's unit names by hand, and
   nothing checks them against the units the domain holds; a renamed unit is refused as
-  `badarg` while the stale name works, and the network's names `vtnet0` though the
-  device's interface name comes from erx_virtio_net's order. Derive each from the
-  domain's installed units, or check each key at start.
+  `badarg` while the stale name works. The network's link name is the transport's, and
+  `net` names a link only while the stack has one interface, so a unit of several
+  network devices cannot be stopped or started. Derive each from the domain's installed
+  units, or check each key at start.
 * [Medium] devices, `erx_devfs`: only the system domain's namespace mounts `/dev`,
   the control tree. Administrator sessions do not get the read-only tree, and no
   device-service control facet serves the control tree to a session

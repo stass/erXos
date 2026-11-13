@@ -2,21 +2,20 @@
 # SPDX-License-Identifier: BSD-2-Clause
 #
 # The development manifest of the Raspberry Pi 4 Model B on the stopgap
-# (config/platforms/raspi4b.json; docs/plan.md, 1b-I): the system domain, one configured
-# domain, storage, and the system principal's session template, from which the console
-# starts root's session at boot (docs/design-system.md, "Booting"). The storage domain is
-# QEMU virt's row (config/manifest/qemu-virt-development.txt, whose comment gives its
-# memory, restarts and storage_ctl facet): an interpreter service domain that holds the
+# (config/platforms/raspi4b.json; docs/plan.md, 1b-I): the system domain, two configured
+# domains, storage and network, and the system principal's session template, from which the
+# console starts root's session at boot (docs/design-system.md, "Booting"). The storage
+# domain is QEMU virt's row (config/manifest/qemu-virt-development.txt, whose comment gives
+# its memory, restarts and storage_ctl facet): an interpreter service domain that holds the
 # platform record's sd unit, EMMC2 and the legacy SD controller that shares its line
 # (docs/design-storage.md, "The SD controller's line"). The unit is named block, as on
 # QEMU virt, because storage_ctl acts on that unit name. The legacy controller is of no
 # kind a runtime drives, so the domain holds it with the unit and is given no record of it
 # and no register window onto it, and no driver opens it (docs/design-shared-devices.md,
-# "The unit rule"). erx_blk has no transport for EMMC2's sdhci record, so the domain
-# logs that the block device is not driven and runs with no device process; with no data window, nothing is mounted
-# at /data and no data facet is granted. The network and display domains come with stages
-# (c) and (d). No unit record here places the platform record's Ethernet unit, net, so no
-# domain holds GENET.
+# "The unit rule"). erx_blk drives EMMC2's sdhci record with its SD device process
+# (erx_blk_sd), which logs that the SD card is not driven when no card answers; with no
+# data window, nothing is mounted at /data and no data facet is granted. The network domain is
+# described with its rows below. The display domain comes with stage (d).
 #
 # The system domain holds three units (docs/design-platforms.md, "Raspberry Pi 4 Model B"):
 # two of one register page of the board each, the console's, the mini UART's page, which
@@ -29,14 +28,14 @@
 #
 # The shares, runtime limits and the session's limits are QEMU virt's development
 # manifest's (config/manifest/qemu-virt-development.txt), whose comment gives their
-# measurements. The session's network client looks for its net facet as on QEMU virt; no
-# domain serves one here, so its sockets answer enotconn. The system principal holds root's one session, 36 MiB and outer
-# 1 MiB, and 1 MiB for the outer budget of a session that has ended while the system
-# domain still holds a connection to it, as QEMU virt's comment explains, and the storage
-# domain, 30 MiB and outer 1 MiB: 69 MiB in all. The system baseline is QEMU virt's 46 MiB.
-# root_memory, 128 MiB, admits the baseline, the principal's 69 MiB and the SD controller's
-# 1 MiB of DMA memory with 12 MiB no one is promised, and lies well below what the
-# smallest Pi 4 the record names leaves the root.
+# measurements. The system principal holds root's one session, 36 MiB and outer 1 MiB,
+# and 1 MiB for the outer budget of a domain that has ended while another still holds a
+# connection to it, as QEMU virt's comment explains; the storage domain, 30 MiB and outer
+# 1 MiB; and the network domain, 36 MiB and outer 1 MiB: 106 MiB in all. The system
+# baseline is QEMU virt's 46 MiB. root_memory, 160 MiB, admits the baseline, the
+# principal's 106 MiB, the SD controller's 1 MiB of DMA memory and GENET's 1 MiB of device
+# memory with 6 MiB no one is promised, and lies well below what the smallest Pi 4 the
+# record names leaves the root: RAM less fiasco_reserve is 890 MiB there.
 manifest 1
 share system
   quota_ns 30000000
@@ -81,6 +80,16 @@ runtime_limits system
   atoms 65536
   foreign_atoms 1024
   processes 4096
+runtime_limits network
+  max_frame 131072
+  max_message_heap 1048576
+  funnel_depth 64
+  exports 256
+  tmp 0
+  overlay 0
+  atoms 16384
+  foreign_atoms 1024
+  processes 4096
 runtime_limits session
   max_frame 524288
   max_message_heap 131072
@@ -113,6 +122,18 @@ limits native
   runtime_limits @runtime_limits.system
   peer_held 4096
   peer_held_total 4096
+limits network
+  memory 37748736
+  outer 1048576
+  grant @share.users
+  spaces none
+  lane 65536
+  connections 2
+  crash 0
+  flags none
+  runtime_limits @runtime_limits.network
+  peer_held 4096
+  peer_held_total 4096
 limits session
   memory 37748736
   outer 1048576
@@ -138,7 +159,7 @@ limits storage
   peer_held 4096
   peer_held_total 4096
 principal system
-  memory 72351744
+  memory 111149056
   grant @share.users
   domains 4
   names 64
@@ -155,7 +176,7 @@ machine
   console "/soc/serial@7e215040"
   hostlink "/soc/serial@7e201600"
   platform "raspi4b"
-  root_memory 134217728
+  root_memory 167772160
   system_baseline 48234496
   system_share @share.system
   users_share @share.users
@@ -173,6 +194,9 @@ machine
 unit console
   placement "console-uart"
   holder system
+unit net
+  placement "net"
+  holder @domain.network
 unit hostlink
   placement "hostlink-uart"
   holder system
@@ -213,6 +237,61 @@ facet inspect
   operations none
   max_request 4096
   in_flight 2
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 65536
+# network: QEMU virt's network domain row for row (config/manifest/qemu-virt-development.txt,
+# whose comment explains its memory, connections and restarts), an interpreter service
+# domain that holds the net unit, the platform record's GENET (docs/design-platforms.md,
+# "The Ethernet controller's unit"), and runs the network stack
+# (docs/design-network-stack.md, "Who holds the network device") over erx_genet, whose
+# interface is genet0, as FreeBSD names genet(4)'s first unit. It serves net, a grant of
+# the stack, to the system principal's sessions, since the system domain may hold none
+# (docs/design-system.md, property 15), and network_ctl, its driver-control facet, which
+# acts on genet0's link, to the system domain alone (property 8).
+#
+# Its 36 MiB is QEMU virt's measurement of the stack over erx_virtio_net; the stack over
+# erx_genet is not measured on the Pi (docs/todo-performance.md).
+#
+# Its grant is the users share, one CPU of the 2,250 mcpu the system share's reserve
+# leaves the configured domains (dom_system_reserve, liberx/system/dom_core.c).
+#
+# Its quota of two connections holds root's session and one more while a session is
+# replaced; its system connection counts against no quota (life_connections,
+# liberx/system/dom_life.c). At rest the machine holds four of its 11: the system
+# connections of root's session and of the storage and network domains, and the
+# session's net.
+domain network
+  principal @principal.system
+  limits @limits.network
+  kind service
+  flags none
+  runtime @artifact.emu
+  release @artifact.network
+  restarts 5
+  restart_period_s 600
+  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx -erx_net interfaces {erx_genet,interfaces,[]} -erx_net runtime erx_net_erxos"
+service net
+  server @domain.network
+  interface net
+facet net
+  grantee @session.system
+  service @service.net
+  operations none
+  max_request 64
+  in_flight 16
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 65536
+service network_ctl
+  server @domain.network
+  interface driver_control
+facet network_ctl
+  grantee system
+  service @service.network_ctl
+  operations none
+  max_request 256
+  in_flight 1
   reductions 100000
   period_ns 1000000000
   max_heap_size 65536

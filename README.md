@@ -335,9 +335,11 @@ Error in process <0.150.0> with exit value:
   service admits its partition table and littlefs mounts its volume, and
   blocks written over the driver reach the card image. The manifest grants
   no `data` facet, so `/data` is still an empty directory, and the driver
-  has not run on a real board. The Ethernet controller's decisions
-  (receive descriptors, the PHY) exist as host-tested code, with no driver
-  over them yet.
+  has not run on a real board. The manifest configures a network domain
+  that runs the stack over the Ethernet driver (`erx_genet`, as
+  `genet0`); the model has no Ethernet, so there the domain's first
+  register read faults and the domain is left down after its restarts,
+  and the driver has not run on a real board.
 * **The machine is an object** (M4). A host link over the second serial
   line lets `tools/erx load` and `watch` replace modules in the running
   system, and `tools/erx files` read the guest's files over 9P2000.L; `tools/erx boot
