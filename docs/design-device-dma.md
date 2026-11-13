@@ -337,19 +337,26 @@ invalidate to write over the device's first completion.
 decision before any effect:
 
 * `after` differs from `before` only as the call allows: a post moves
-  buffers from free to posted, a completion from posted to free;
+  buffers from free to posted, a completion from posted to free, an
+  install starts from every region the CPU's and gives the rings their
+  writers and may hand buffers over, a reset after the idle report makes
+  every region the CPU's, and an observation changes nothing;
 * every `write` lands in a region of the queue whose writer in `before`
   is the CPU, a ring region or a buffer passing to the device in this
   decision;
 * every `publish` names an owned register of the record's peripheral, or
-  the ring field the form names as its publication;
+  the ring field the form names as its publication; a register is 32 bits,
+  and a 64-bit address published over a low and a high register is one
+  step naming both, so its whole value is checked;
 * every `copy` reads a buffer coming back in this decision, within the
   buffer;
 * every region lies inside the record's memory and starts and ends on a
   granule;
 * every device address the plan writes, a buffer's, a table's or a
   region's, lies inside the memory the record holds, as the device sees
-  it, and below the form's address width.
+  it, and below the form's address width, together with the bytes the
+  device may reach from it, which the step carries: a descriptor's
+  length, a ring's or a table's size.
 
 A plan that fails the check is a bug in the core, not an input, and the
 call is `badarg` with nothing applied.
@@ -735,8 +742,10 @@ refuses, since it reads back the fields the reset cleared.
 ## The architecture layer
 
 Generic code names cache maintenance and barriers only: `erx_dma_clean`
-and `erx_dma_clean_inval`, each over an address range of whole granules,
-which they step through line by line; the publish barrier, the report
+and `erx_dma_clean_inval`, each over an address range and a step, which
+issue one instruction at each multiple of the step from the range's start;
+the sequencer gives every range with the step `L`, so the choice of step
+is made once, in the pure core its host tests cover; the publish barrier, the report
 barrier and the completion barrier; and `erx_dma_granule` and
 `erx_dma_line`. Each architecture provides them in its layer
 ([design-arch-aarch64.md](design-arch-aarch64.md#cache-maintenance)); the

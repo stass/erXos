@@ -526,8 +526,13 @@ it; git history is the record of completed work.
   maintenance, and the barriers before the available index and the doorbell are C11 fences (inner shareable on AArch64),
   enough for QEMU `virt`'s virtio-mmio. [design-device-dma.md](docs/design-device-dma.md) gives what is missing: the
   coherence and DMA range the root reads from the live device tree into the `given` record
-  ([design-device-tree.md](docs/design-device-tree.md)), the handoff sequencer and
-  the architecture layer's maintenance and barriers, field-level register ownership, and the register-ring (GENET) and
+  ([design-device-tree.md](docs/design-device-tree.md)); the split ring's queue core issuing plans to the handoff
+  sequencer (`erx_device_dma.c`, with its regions on granules and its buffers at a stride rounded to the granule), the
+  effect layer running them, and the architecture layer's maintenance and barriers, with the hosted stand-in over
+  `erx_dma_model.c`, where the NIF keeps each queue's last accepted state and passes it as the next call's `before`,
+  so a form core cannot misstate who writes a region, fills the check's granule from the architecture layer's `G`, and
+  checks a descriptor's length against its address step's reach (today a form that writes an address as a plain value,
+  or a length unlike the reach it declared, passes the check); field-level register ownership, and the register-ring (GENET) and
   ADMA2 (SDHCI) descriptor forms.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
   a display driver's screen image is an `erx_memdraw` image over memory the device reads again and again (a virtio-gpu
