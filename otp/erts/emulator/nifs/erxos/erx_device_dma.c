@@ -134,6 +134,74 @@ fills(const erx_dma_step_t *step)
  * The check
  */
 
+/*
+ * Whether `width` bytes at `offset` are exactly the field at `field`, of `field_width` bytes, of
+ * a descriptor, and which one. The geometry is whole, so no product here wraps.
+ */
+static bool
+at_field(const erx_dma_context_t *context, uint64_t offset, uint32_t width, uint32_t field, uint32_t field_width,
+    uint32_t *descriptor)
+{
+	uint64_t inside;
+
+	if (context->descriptor_count == 0 || offset < context->descriptors || width != field_width)
+		return (false);
+	inside = offset - context->descriptors;
+	if (inside / context->descriptor_size >= context->descriptor_count || inside % context->descriptor_size != field)
+		return (false);
+	*descriptor = (uint32_t)(inside / context->descriptor_size);
+	return (true);
+}
+
+/* Whether [offset, offset + length) overlaps the field at `field`, of `field_width` bytes, of any descriptor. */
+static bool
+overlaps_field(const erx_dma_context_t *context, uint64_t offset, uint64_t length, uint32_t field, uint32_t field_width)
+{
+	const uint64_t table_end = context->descriptors + (uint64_t)context->descriptor_count * context->descriptor_size;
+	uint64_t end, first, last;
+
+	if (context->descriptor_count == 0 || length == 0 || !range_end(offset, length, &end) ||
+	    end <= context->descriptors || offset >= table_end)
+		return (false);
+	first = ((offset > context->descriptors ? offset : context->descriptors) - context->descriptors) /
+	    context->descriptor_size;
+	last = ((end < table_end ? end : table_end) - 1 - context->descriptors) / context->descriptor_size;
+	for (uint64_t descriptor = first; descriptor <= last; descriptor++) {
+		const uint64_t start = context->descriptors + descriptor * context->descriptor_size + field;
+
+		if (offset < start + field_width && start < end)
+			return (true);
+	}
+	return (false);
+}
+
+/*
+ * The descriptors lie inside the memory, each holding its address and its length as two
+ * disjoint fields, each field aligned to its width.
+ */
+static bool
+descriptors_whole(const erx_dma_context_t *context)
+{
+	uint64_t table, end;
+
+	if (context->descriptor_count == 0)
+		return (true);
+	if (context->descriptor_size == 0 || !width_valid(context->address_width) || !width_valid(context->length_width))
+		return (false);
+	/* Every field aligned to its width, and the size a multiple of both, so size >= each width below. */
+	if (context->address_field % context->address_width != 0 || context->length_field % context->length_width != 0 ||
+	    context->descriptors % context->address_width != 0 || context->descriptors % context->length_width != 0 ||
+	    context->descriptor_size % context->address_width != 0 || context->descriptor_size % context->length_width != 0)
+		return (false);
+	if (context->address_field > context->descriptor_size - context->address_width ||
+	    context->length_field > context->descriptor_size - context->length_width ||
+	    (context->address_field < context->length_field + context->length_width &&
+	    context->length_field < context->address_field + context->address_width))
+		return (false);
+	table = (uint64_t)context->descriptor_count * context->descriptor_size;
+	return (range_end(context->descriptors, table, &end) && end <= context->memory_size);
+}
+
 static bool
 context_whole(const erx_dma_context_t *context)
 {
@@ -141,12 +209,16 @@ context_whole(const erx_dma_context_t *context)
 
 	if (!power_of_two(context->granule) || context->address_bits == 0 || context->address_bits > 64 ||
 	    context->memory_size == 0 || !range_end(context->device_base, context->memory_size, &end) ||
-	    (context->owned_count != 0 && context->owned == NULL))
+	    (context->owned_count != 0 && context->owned == NULL) || !descriptors_whole(context))
 		return (false);
 	if (context->publication == ERX_DMA_NO_PUBLICATION)
 		return (true);
 	return (width_valid(context->publication_width) && context->publication % context->publication_width == 0 &&
-	    range_end(context->publication, context->publication_width, &end) && end <= context->memory_size);
+	    range_end(context->publication, context->publication_width, &end) && end <= context->memory_size &&
+	    !overlaps_field(context, context->publication, context->publication_width, context->address_field,
+	    context->address_width) &&
+	    !overlaps_field(context, context->publication, context->publication_width, context->length_field,
+	    context->length_width));
 }
 
 /* Both states list the same regions, each whole granules inside the memory, ascending and disjoint. */
@@ -259,9 +331,90 @@ register_whole(const erx_dma_context_t *context, uint32_t reg)
 	return (reg % 4 == 0 && context->window_size >= 4 && reg <= context->window_size - 4);
 }
 
+/*
+ * Whether zeros over [offset, offset + length) cover both fields of every descriptor whose
+ * address or length they touch, so zeros never leave an address with a length checked for
+ * another, nor a length (one that some forms read as their largest) beside an address.
+ */
 static bool
-write_allowed(const erx_dma_context_t *context, const erx_dma_state_t *before, const erx_dma_state_t *after,
-    const erx_dma_step_t *step)
+zeros_whole(const erx_dma_context_t *context, uint64_t offset, uint64_t length)
+{
+	const uint64_t table_end = context->descriptors + (uint64_t)context->descriptor_count * context->descriptor_size;
+	uint64_t end, first, last;
+
+	if (context->descriptor_count == 0 || !range_end(offset, length, &end) || end <= context->descriptors ||
+	    offset >= table_end)
+		return (true);
+	first = ((offset > context->descriptors ? offset : context->descriptors) - context->descriptors) /
+	    context->descriptor_size;
+	last = ((end < table_end ? end : table_end) - 1 - context->descriptors) / context->descriptor_size;
+	for (uint64_t descriptor = first; descriptor <= last; descriptor++) {
+		const uint64_t base = context->descriptors + descriptor * context->descriptor_size;
+		const uint64_t address = base + context->address_field, size = base + context->length_field;
+		const bool touches = (offset < address + context->address_width && address < end) ||
+		    (offset < size + context->length_width && size < end);
+		const bool covers = offset <= address && address + context->address_width <= end && offset <= size &&
+		    size + context->length_width <= end;
+
+		if (touches && !covers)
+			return (false);
+	}
+	return (true);
+}
+
+/*
+ * Whether the plan writes the descriptor's field `field` at least once, with `source`, and
+ * every such write's value (or an address's reach) equal to `expected`: a descriptor's address
+ * and its length agree whatever order the plan writes them in.
+ */
+static bool
+field_agrees(const erx_dma_context_t *context, const erx_dma_plan_t *plan, uint32_t descriptor, uint32_t field,
+    uint32_t field_width, erx_dma_source_t source, uint64_t expected)
+{
+	bool written = false;
+
+	for (uint32_t index = 0; index < plan->count; index++) {
+		const erx_dma_step_t *const other = &plan->steps[index];
+		uint32_t which;
+
+		if (other->kind != ERX_DMA_WRITE || other->target != ERX_DMA_MEMORY || other->source != source ||
+		    !at_field(context, other->offset, other->width, field, field_width, &which) || which != descriptor)
+			continue;
+		if ((source == ERX_DMA_ADDRESS ? other->extent : other->value) != expected)
+			return (false);
+		written = true;
+	}
+	return (written);
+}
+
+/*
+ * A memory write and the device addresses it holds: an address only at a descriptor's
+ * address field, with the descriptor's length its reach; a length only beside such an
+ * address; zeros over a descriptor's address and length together; and no other store over either field, so no address reaches the
+ * device as a plain value and no length goes past what its address was checked for.
+ */
+static bool
+addresses_whole(const erx_dma_context_t *context, const erx_dma_plan_t *plan, const erx_dma_step_t *step)
+{
+	uint32_t descriptor;
+
+	if (step->source == ERX_DMA_ZEROS)
+		return (zeros_whole(context, step->offset, step->length));
+	if (step->source == ERX_DMA_ADDRESS)
+		return (at_field(context, step->offset, step->width, context->address_field, context->address_width,
+		    &descriptor) && field_agrees(context, plan, descriptor, context->length_field, context->length_width,
+		    ERX_DMA_VALUE, step->extent));
+	if (step->source == ERX_DMA_VALUE &&
+	    at_field(context, step->offset, step->width, context->length_field, context->length_width, &descriptor))
+		return (field_agrees(context, plan, descriptor, context->address_field, context->address_width,
+		    ERX_DMA_ADDRESS, step->value));
+	return (!overlaps_field(context, step->offset, stored_length(step), context->address_field, context->address_width) &&
+	    !overlaps_field(context, step->offset, stored_length(step), context->length_field, context->length_width));
+}
+
+static bool
+write_allowed(const erx_dma_context_t *context, const erx_dma_plan_t *plan, const erx_dma_state_t *before,
+    const erx_dma_state_t *after, const erx_dma_step_t *step)
 {
 	const uint64_t length = stored_length(step);
 	uint32_t region;
@@ -284,7 +437,7 @@ write_allowed(const erx_dma_context_t *context, const erx_dma_state_t *before, c
 		return (false);
 	}
 	region = region_holding(before, step->offset, length);
-	if (region == before->count)
+	if (region == before->count || !addresses_whole(context, plan, step))
 		return (false);
 	if (before->regions[region].kind == ERX_DMA_RING)
 		return (before->regions[region].writer == ERX_DMA_CPU);
@@ -305,7 +458,8 @@ publish_allowed(const erx_dma_context_t *context, const erx_dma_state_t *before,
 		return (step->source == ERX_DMA_ADDRESS && step->width == 8 && step->reg_high != step->reg &&
 		    register_whole(context, step->reg) && register_whole(context, step->reg_high) &&
 		    owned(context, step->reg) && owned(context, step->reg_high));
-	if (step->target != ERX_DMA_MEMORY || context->publication == ERX_DMA_NO_PUBLICATION ||
+	/* A ring field published is a value: an address in memory is a descriptor's, which a write stores. */
+	if (step->target != ERX_DMA_MEMORY || step->source != ERX_DMA_VALUE || context->publication == ERX_DMA_NO_PUBLICATION ||
 	    step->offset != context->publication || step->width != context->publication_width)
 		return (false);
 	region = region_holding(before, step->offset, step->width);
@@ -370,7 +524,7 @@ erx_device_dma_check(const erx_dma_context_t *context, const erx_dma_state_t *be
 			return (false);
 		switch (step->kind) {
 		case ERX_DMA_WRITE:
-			allowed = write_allowed(context, before, after, step);
+			allowed = write_allowed(context, plan, before, after, step);
 			break;
 		case ERX_DMA_PUBLISH:
 			allowed = publish_allowed(context, before, step);

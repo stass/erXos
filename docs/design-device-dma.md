@@ -356,7 +356,16 @@ decision before any effect:
   region's, lies inside the memory the record holds, as the device sees
   it, and below the form's address width, together with the bytes the
   device may reach from it, which the step carries: a descriptor's
-  length, a ring's or a table's size.
+  length, a ring's or a table's size;
+* the form declares where its memory holds addresses, as a descriptor
+  table's place, count and size and each descriptor's address and length
+  fields, from its own constants; an address the plan stores in memory is
+  an address step at a descriptor's address field, and the same plan
+  stores that descriptor's length equal to the step's reach; no other
+  store covers either field, zeros cover both fields of a descriptor or
+  neither, and a publication in memory is a plain value on neither field,
+  so no address reaches the device as a plain value and no length passes
+  what its address was checked for.
 
 A plan that fails the check is a bug in the core, not an input, and the
 call is `badarg` with nothing applied.

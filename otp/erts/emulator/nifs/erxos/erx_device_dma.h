@@ -153,6 +153,22 @@ typedef struct erx_dma_context {
 	uint32_t	publication_width;
 	uint32_t	owned_count;
 	const uint32_t	*owned;		/* the window offsets of the registers the NIF owns */
+	/*
+	 * Where the form's memory holds device addresses: `descriptor_count` descriptors of
+	 * `descriptor_size` bytes from offset `descriptors`, each with an address of
+	 * `address_width` bytes at `address_field` and the length the device may reach from it, of
+	 * `length_width` bytes at `length_field`. A memory write that holds an address is an address
+	 * step at a descriptor's address field, and the same plan writes that descriptor's length
+	 * equal to the step's reach; nothing but zeros or such an address step stores over an
+	 * address field. A count of 0 says the form's memory holds no address.
+	 */
+	uint64_t	descriptors;
+	uint32_t	descriptor_count;
+	uint32_t	descriptor_size;
+	uint32_t	address_field;
+	uint32_t	address_width;
+	uint32_t	length_field;
+	uint32_t	length_width;
 } erx_dma_context_t;
 
 typedef enum erx_dma_effect_kind {

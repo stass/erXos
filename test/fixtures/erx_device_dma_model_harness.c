@@ -65,14 +65,24 @@
 
 /* virtio-mmio's registers the NIF owns (abi/formats/virtio.txt), at their window offsets. */
 enum {
-	REG_NUM = 0x38, REG_READY = 0x44, REG_NOTIFY = 0x50,
+	REG_SEL = 0x30, REG_NUM = 0x38, REG_READY = 0x44, REG_NOTIFY = 0x50,
 	REG_DESC = 0x80, REG_DESC_HIGH = 0x84, REG_DRIVER = 0x90, REG_DRIVER_HIGH = 0x94,
 	REG_DEVICE = 0xa0, REG_DEVICE_HIGH = 0xa4,
 };
-static const uint32_t owned_registers[] = { REG_NUM, REG_READY, REG_NOTIFY, REG_DESC, REG_DESC_HIGH, REG_DRIVER,
+static const uint32_t owned_registers[] = { REG_SEL, REG_NUM, REG_READY, REG_NOTIFY, REG_DESC, REG_DESC_HIGH, REG_DRIVER,
 	REG_DRIVER_HIGH, REG_DEVICE, REG_DEVICE_HIGH };
 
 #define STEPS_MAX	64u
+#ifndef HARNESS_SEED_UNROUNDED_STRIDE
+#define QUEUE_GRANULE	GRANULE
+#else
+#define QUEUE_GRANULE	1u
+#endif
+static const erx_device_queue_registers_t queue_registers = { .sel = REG_SEL, .num = REG_NUM, .ready = REG_READY,
+	.notify = REG_NOTIFY, .desc = { REG_DESC, REG_DESC_HIGH }, .driver = { REG_DRIVER, REG_DRIVER_HIGH },
+	.device = { REG_DEVICE, REG_DEVICE_HIGH } };
+/* The core's layout of the rings, which the form's builders and its view read. */
+static erx_device_queue_layout_t layout;
 #define EFFECTS_MAX	ERX_DMA_EFFECTS_BOUND(ERX_DMA_REGIONS_MAX, STEPS_MAX)
 
 /* What the driver posted on a head, and what the device is to write and report for it. */
@@ -285,13 +295,7 @@ run_step(harness_t *h, const erx_dma_step_t *step)
 static void
 view(const harness_t *h, erx_dma_state_t *state)
 {
-	state->count = 0;
-	state->regions[state->count++] = (erx_dma_region_t){ DESC, RINGS_LENGTH, ERX_DMA_RING, ERX_DMA_CPU };
-	state->regions[state->count++] = (erx_dma_region_t){ USED, USED_LENGTH, ERX_DMA_RING,
-	    h->installed ? ERX_DMA_DEVICE : ERX_DMA_CPU };
-	for (uint32_t buffer = 0; buffer < SIZE; buffer++)
-		state->regions[state->count++] = (erx_dma_region_t){ POOL + buffer * STRIDE, STRIDE, ERX_DMA_BUFFER,
-		    h->queue.chains[buffer].posted ? ERX_DMA_DEVICE : ERX_DMA_CPU };
+	erx_device_queue_view(&h->queue, &layout, POOL, h->installed, state);
 }
 
 /* A plan checked, ordered and run, with the model and the device free to act between effects. */
@@ -301,12 +305,15 @@ apply(harness_t *h, const erx_dma_state_t *before, const erx_dma_state_t *after,
 	const erx_dma_context_t context = { .memory_size = MEMORY, .device_base = DEVICE_BASE, .window_size = 0x100, .address_bits = 32,
 	    .granule = GRANULE, .publication = AVAIL_IDX, .publication_width = 2,
 	    .owned_count = sizeof(owned_registers) / sizeof(owned_registers[0]), .owned = owned_registers };
+	erx_dma_context_t form = context;
 	erx_dma_effects_t effects = { .capacity = EFFECTS_MAX, .effects = effect_storage };
 
+	erx_device_queue_form(&layout, SIZE, &form);
+	form.address_bits = 32;
 #ifndef HARNESS_SEED_UNROUNDED_STRIDE
-	CHECK(erx_device_dma_check(&context, before, after, plan));
+	CHECK(erx_device_dma_check(&form, before, after, plan));
 #else
-	(void)context;
+	(void)form;
 #endif
 	CHECK(erx_device_dma_order(before, after, plan, false, GRANULE, h->line, &effects));
 	for (uint32_t index = 0; index < effects.count; index++) {
@@ -339,21 +346,6 @@ apply(harness_t *h, const erx_dma_state_t *before, const erx_dma_state_t *after,
  * The split-ring form
  */
 
-static erx_dma_step_t
-ring_value(erx_dma_source_t source, uint64_t offset, uint32_t width, uint64_t value, uint64_t extent)
-{
-	return ((erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY, .source = source, .width = width,
-	    .offset = offset, .value = value, .extent = extent });
-}
-
-static erx_dma_step_t
-register_value(erx_dma_source_t source, uint32_t reg, uint32_t reg_high, uint64_t value, uint64_t extent)
-{
-	return ((erx_dma_step_t){ .kind = ERX_DMA_PUBLISH, .target = ERX_DMA_REGISTER, .source = source,
-	    .width = reg_high == ERX_DMA_NO_REGISTER ? 4 : 8, .reg = reg, .reg_high = reg_high, .value = value,
-	    .extent = extent });
-}
-
 /* virtio's reset and install: every region taken back, then the rings zeroed and the queue made ready. */
 static void
 negotiate(harness_t *h)
@@ -373,16 +365,7 @@ negotiate(harness_t *h)
 	view(h, &after);
 	apply(h, &before, &after, &plan);
 
-	steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY, .source = ERX_DMA_ZEROS,
-	    .offset = DESC, .length = RINGS_LENGTH };
-	steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY, .source = ERX_DMA_ZEROS,
-	    .offset = USED, .length = USED_LENGTH };
-	steps[count++] = register_value(ERX_DMA_VALUE, REG_NUM, ERX_DMA_NO_REGISTER, SIZE, 0);
-	steps[count++] = register_value(ERX_DMA_ADDRESS, REG_DESC, REG_DESC_HIGH, DEVICE_BASE + DESC, 16u * SIZE);
-	steps[count++] = register_value(ERX_DMA_ADDRESS, REG_DRIVER, REG_DRIVER_HIGH, DEVICE_BASE + AVAIL,
-	    RINGS_LENGTH - AVAIL);
-	steps[count++] = register_value(ERX_DMA_ADDRESS, REG_DEVICE, REG_DEVICE_HIGH, DEVICE_BASE + USED, USED_LENGTH);
-	steps[count++] = register_value(ERX_DMA_VALUE, REG_READY, ERX_DMA_NO_REGISTER, 1, 0);
+	count = erx_device_queue_install_steps(&h->queue, &layout, &queue_registers, 0, DEVICE_BASE, steps);
 	before = after;
 	h->installed = true;
 	view(h, &after);
@@ -398,6 +381,7 @@ post(harness_t *h)
 	erx_dma_step_t steps[STEPS_MAX];
 	erx_device_segment_t segments[2];
 	erx_device_post_plan_t queue_plan;
+	const uint8_t *bytes[2];
 	request_t request = { .live = true, .serial = ++h->serial };
 	uint32_t count = 0, segment_count = 0;
 	const uint32_t shape = draw(h, 3);
@@ -422,22 +406,9 @@ post(harness_t *h)
 	view(h, &after);
 	slot = &h->requests[queue_plan.head];
 	*slot = request;
-	if (request.out_length != 0)
-		steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY, .source = ERX_DMA_BYTES,
-		    .offset = POOL + queue_plan.head * STRIDE, .length = request.out_length, .bytes = slot->out };
-	for (uint32_t index = 0; index < queue_plan.count; index++) {
-		const erx_device_desc_write_t *const desc = &queue_plan.descs[index];
-		const uint64_t at = DESC + 16u * desc->index;
-
-		steps[count++] = ring_value(ERX_DMA_ADDRESS, at, 8, desc->addr, desc->len);
-		steps[count++] = ring_value(ERX_DMA_VALUE, at + 8, 4, desc->len, 0);
-		steps[count++] = ring_value(ERX_DMA_VALUE, at + 12, 2, desc->flags, 0);
-		steps[count++] = ring_value(ERX_DMA_VALUE, at + 14, 2, desc->next, 0);
-	}
-	steps[count++] = ring_value(ERX_DMA_VALUE, AVAIL + 4 + 2u * queue_plan.avail_slot, 2, queue_plan.head, 0);
-	steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_PUBLISH, .target = ERX_DMA_MEMORY, .source = ERX_DMA_VALUE,
-	    .width = 2, .offset = AVAIL_IDX, .value = queue_plan.avail_idx };
-	steps[count++] = register_value(ERX_DMA_VALUE, REG_NOTIFY, ERX_DMA_NO_REGISTER, 0, 0);
+	for (uint32_t segment = 0; segment < segment_count; segment++)
+		bytes[segment] = segments[segment].device_writes ? NULL : slot->out;
+	count = erx_device_queue_post_steps(&h->queue, &layout, POOL, &queue_plan, segments, bytes, &queue_registers, 0, steps);
 	apply(h, &before, &after, &(erx_dma_plan_t){ .call = ERX_DMA_CALL_POST, .count = count, .steps = steps });
 }
 
@@ -452,12 +423,6 @@ observe(harness_t *h, const erx_dma_step_t *steps, uint32_t count)
 	apply(h, &state, &state, &(erx_dma_plan_t){ .call = ERX_DMA_CALL_OBSERVE, .count = count, .steps = steps });
 }
 
-static erx_dma_step_t
-report(uint64_t offset, uint32_t width)
-{
-	return ((erx_dma_step_t){ .kind = ERX_DMA_REPORT, .target = ERX_DMA_MEMORY, .width = width, .offset = offset });
-}
-
 /*
  * virtio's completion: the used index, then each entry it covers, then the buffers taken back
  * and copied. Each completion returns the device's pattern up to its prefix and zeros to the
@@ -467,20 +432,14 @@ static uint32_t
 complete(harness_t *h)
 {
 	erx_dma_state_t before, after;
-	erx_dma_step_t steps[2 * SIZE + 1];
+	erx_dma_step_t steps[STEPS_MAX];
 	erx_device_completion_t completions[SIZE];
-	uint32_t fresh, count = 0, first;
+	uint32_t fresh, count;
 
-	steps[0] = report(USED + 2, 2);
+	erx_device_queue_index_report(&layout, &steps[0]);
 	observe(h, steps, 1);
 	CHECK(erx_device_queue_used(&h->queue, (uint16_t)h->values[0], &fresh));
-	first = erx_device_queue_used_slot(&h->queue);
-	for (uint32_t entry = 0; entry < fresh; entry++) {
-		const uint32_t slot = (first + entry) % SIZE;
-
-		steps[count++] = report(USED + 4 + 8u * slot, 4);
-		steps[count++] = report(USED + 8 + 8u * slot, 4);
-	}
+	count = erx_device_queue_entry_reports(&h->queue, &layout, fresh, steps);
 	if (fresh != 0)
 		observe(h, steps, count);
 	view(h, &before);
@@ -488,13 +447,7 @@ complete(harness_t *h)
 		CHECK(erx_device_queue_complete(&h->queue, (uint32_t)h->values[2 * entry], (uint32_t)h->values[2 * entry + 1],
 		    &completions[entry]));
 	view(h, &after);
-	count = 0;
-	for (uint32_t entry = 0; entry < fresh; entry++) {
-		for (uint32_t range = 0; range < completions[entry].range_count; range++)
-			steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_COPY, .target = ERX_DMA_MEMORY,
-			    .offset = POOL + completions[entry].buffer * STRIDE + completions[entry].ranges[range].offset,
-			    .length = completions[entry].ranges[range].length };
-	}
+	count = erx_device_queue_copy_steps(&h->queue, POOL, completions, fresh, steps);
 	h->copied_length = 0;
 	apply(h, &before, &after, &(erx_dma_plan_t){ .call = ERX_DMA_CALL_COMPLETE, .count = count, .steps = steps });
 	for (uint32_t entry = 0, at = 0; entry < fresh; entry++) {
@@ -517,7 +470,8 @@ schedule(uint32_t line, uint64_t seed, uint64_t *evictions, uint64_t *refetches,
 	uint8_t former[USED_LENGTH];
 
 	CHECK(h != NULL && erx_dma_model_init(&h->model, MEMORY, GRANULE, line, seed));
-	CHECK(erx_device_queue_init(&h->queue, SIZE, STRIDE, DEVICE_BASE + POOL));
+	CHECK(erx_device_queue_layout(SIZE, QUEUE_GRANULE, &layout));
+	CHECK(erx_device_queue_init(&h->queue, SIZE, BUFFER, QUEUE_GRANULE, DEVICE_BASE + POOL));
 	h->line = line;
 	/* Half the schedules evict rarely, so a dirty line can outlive the calls after it, as the install seed needs. */
 	if (seed % 2 != 0)

@@ -57,7 +57,9 @@ context(void)
 {
 	return ((erx_dma_context_t){ .memory_size = MEMORY, .device_base = DEVICE_BASE, .window_size = 0x100, .address_bits = 32,
 	    .granule = GRANULE, .publication = PUBLICATION, .publication_width = 2,
-	    .owned_count = sizeof(owned_registers) / sizeof(owned_registers[0]), .owned = owned_registers });
+	    .owned_count = sizeof(owned_registers) / sizeof(owned_registers[0]), .owned = owned_registers,
+	    .descriptors = RINGS, .descriptor_count = QUEUE_BUFFERS, .descriptor_size = 16, .address_field = 0,
+	    .address_width = 8, .length_field = 8, .length_width = 4 });
 }
 
 /* The queue's regions with the used ring the device's when installed, and buffer i the device's when bit i is set. */
@@ -118,6 +120,7 @@ post_steps(uint32_t fresh, erx_dma_step_t *steps)
 		steps[count++] = write_bytes(at, 10);
 		steps[count++] = write_bytes(at + 40, 24);
 		steps[count++] = write_value(ERX_DMA_ADDRESS, RINGS + 16u * buffer, 8, DEVICE_BASE + at, STRIDE);
+		steps[count++] = write_value(ERX_DMA_VALUE, RINGS + 16u * buffer + 8, 4, STRIDE, 0);
 		steps[count++] = write_value(ERX_DMA_VALUE, RINGS + 68u + 2u * buffer, 2, buffer, 0);
 	}
 	steps[count++] = publish_index(7);
@@ -136,9 +139,10 @@ install_steps(uint32_t standing, erx_dma_step_t *steps)
 	steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY, .source = ERX_DMA_ZEROS,
 	    .offset = USED, .length = USED_LENGTH };
 	for (uint32_t buffer = 0; buffer < QUEUE_BUFFERS; buffer++) {
-		if ((standing >> buffer & 1u) != 0)
-			steps[count++] = write_value(ERX_DMA_ADDRESS, RINGS + 16u * buffer, 8, DEVICE_BASE + POOL +
-			    buffer * STRIDE, STRIDE);
+		if ((standing >> buffer & 1u) == 0)
+			continue;
+		steps[count++] = write_value(ERX_DMA_ADDRESS, RINGS + 16u * buffer, 8, DEVICE_BASE + POOL + buffer * STRIDE, STRIDE);
+		steps[count++] = write_value(ERX_DMA_VALUE, RINGS + 16u * buffer + 8, 4, STRIDE, 0);
 	}
 	steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_PUBLISH, .target = ERX_DMA_REGISTER, .source = ERX_DMA_ADDRESS,
 	    .width = 8, .reg = 0x80u, .reg_high = 0x84u, .value = DEVICE_BASE + USED, .extent = USED_LENGTH };
@@ -447,6 +451,18 @@ checks(const erx_dma_state_t *before, const erx_dma_state_t *after, erx_dma_call
 	return (erx_device_dma_check(&ctx, before, after, &plan));
 }
 
+/* A post of descriptor 1: its address of reach `extent`, and its length field `length`. */
+static bool
+described(const erx_dma_context_t *ctx, const erx_dma_state_t *before, const erx_dma_state_t *after, uint64_t addr,
+    uint64_t extent, uint64_t length)
+{
+	const erx_dma_step_t steps[2] = { write_value(ERX_DMA_ADDRESS, RINGS + 16, 8, addr, extent),
+	    write_value(ERX_DMA_VALUE, RINGS + 24, 4, length, 0) };
+	const erx_dma_plan_t plan = { .call = ERX_DMA_CALL_POST, .count = 2, .steps = steps };
+
+	return (erx_device_dma_check(ctx, before, after, &plan));
+}
+
 static void
 refusals(void)
 {
@@ -526,22 +542,58 @@ refusals(void)
 	    (erx_dma_step_t){ .kind = ERX_DMA_REPORT, .target = ERX_DMA_REGISTER, .width = 4, .reg = 0x100u }));
 	/* Addresses: inside the record's memory and the width; a region of the record is accepted. */
 	view(&after, true, 0x3);
-	CHECK(checks(&before, &after, ERX_DMA_CALL_POST,
-	    write_value(ERX_DMA_ADDRESS, RINGS + 16, 8, DEVICE_BASE + RECORD_REGION, GRANULE)));
-	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST,
-	    write_value(ERX_DMA_ADDRESS, RINGS + 16, 8, DEVICE_BASE + RECORD_REGION, GRANULE + 1)));
-	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_value(ERX_DMA_ADDRESS, RINGS + 16, 8, DEVICE_BASE - 1, 1)));
-	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_value(ERX_DMA_ADDRESS, RINGS + 16, 8, DEVICE_BASE + MEMORY, 1)));
-	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_value(ERX_DMA_ADDRESS, RINGS + 16, 8, DEVICE_BASE, 0)));
+	CHECK(described(&ctx, &before, &after, DEVICE_BASE + RECORD_REGION, GRANULE, GRANULE));
+	CHECK(!described(&ctx, &before, &after, DEVICE_BASE + RECORD_REGION, GRANULE + 1, GRANULE + 1));
+	CHECK(!described(&ctx, &before, &after, DEVICE_BASE - 1, 1, 1));
+	CHECK(!described(&ctx, &before, &after, DEVICE_BASE + MEMORY, 1, 1));
+	CHECK(!described(&ctx, &before, &after, DEVICE_BASE, 0, 0));
 	ctx.address_bits = 30;
+	CHECK(!described(&ctx, &before, &after, DEVICE_BASE + POOL, STRIDE, STRIDE));
+	ctx.address_bits = 31;
+	CHECK(described(&ctx, &before, &after, DEVICE_BASE + POOL, STRIDE, STRIDE));
+	/* A descriptor's length unlike the reach its address step declared, or not written at all. */
+	CHECK(!described(&ctx, &before, &after, DEVICE_BASE + POOL, STRIDE, STRIDE + 1));
+	CHECK(!described(&ctx, &before, &after, DEVICE_BASE + POOL, STRIDE, 1));
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_value(ERX_DMA_ADDRESS, RINGS + 16, 8, DEVICE_BASE + POOL, STRIDE)));
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_value(ERX_DMA_VALUE, RINGS + 24, 4, STRIDE, 0)));
+	/* An address written as a plain value, as bytes, or half of it; zeros over it are accepted. */
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_value(ERX_DMA_VALUE, RINGS + 16, 8, DEVICE_BASE + POOL, 0)));
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_value(ERX_DMA_VALUE, RINGS + 20, 4, 0x1000u, 0)));
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_bytes(RINGS + 16, 8)));
+	CHECK(checks(&before, &after, ERX_DMA_CALL_POST, (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY,
+	    .source = ERX_DMA_ZEROS, .offset = RINGS + 16, .length = 16 }));
+	/* Zeros over part of an address, over an address but not its length, or over a length alone. */
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY,
+	    .source = ERX_DMA_ZEROS, .offset = RINGS + 20, .length = 4 }));
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY,
+	    .source = ERX_DMA_ZEROS, .offset = RINGS + 16, .length = 8 }));
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY,
+	    .source = ERX_DMA_ZEROS, .offset = RINGS + 24, .length = 4 }));
+	/* A partial store inside a length field, and an address published into memory. */
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_value(ERX_DMA_VALUE, RINGS + 24, 2, 64, 0)));
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, (erx_dma_step_t){ .kind = ERX_DMA_PUBLISH, .target = ERX_DMA_MEMORY,
+	    .source = ERX_DMA_ADDRESS, .width = 2, .offset = PUBLICATION, .value = DEVICE_BASE + POOL, .extent = 1 }));
+	/* A geometry whose fields overlap, a table past the memory, and a publication on a length field. */
 	{
-		const erx_dma_step_t step = write_value(ERX_DMA_ADDRESS, RINGS + 16, 8, DEVICE_BASE + POOL, STRIDE);
-		const erx_dma_plan_t plan = { .call = ERX_DMA_CALL_POST, .count = 1, .steps = &step };
+		erx_dma_context_t bad = ctx;
+		const erx_dma_plan_t none = { .call = ERX_DMA_CALL_POST, .count = 0, .steps = NULL };
 
-		CHECK(!erx_device_dma_check(&ctx, &before, &after, &plan));
-		ctx.address_bits = 31;
-		CHECK(erx_device_dma_check(&ctx, &before, &after, &plan));
+		bad.length_field = 4;
+		CHECK(!erx_device_dma_check(&bad, &before, &after, &none));
+		bad = ctx;
+		bad.descriptor_count = MEMORY;
+		CHECK(!erx_device_dma_check(&bad, &before, &after, &none));
+		bad = ctx;
+		bad.publication = RINGS + 24;
+		CHECK(!erx_device_dma_check(&bad, &before, &after, &none));
+		CHECK(erx_device_dma_check(&ctx, &before, &after, &none));
 	}
+	/* An address step anywhere but a descriptor's address field: the available ring, or the length field. */
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_value(ERX_DMA_ADDRESS, RINGS + 72, 8, DEVICE_BASE + POOL, 1)));
+	CHECK(!checks(&before, &after, ERX_DMA_CALL_POST, write_value(ERX_DMA_ADDRESS, RINGS + 24, 8, DEVICE_BASE + POOL, 1)));
+	/* A form that declares no descriptors writes no address into memory. */
+	ctx.descriptor_count = 0;
+	CHECK(!described(&ctx, &before, &after, DEVICE_BASE + POOL, STRIDE, STRIDE));
 }
 
 int

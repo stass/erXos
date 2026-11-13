@@ -767,7 +767,7 @@ carve_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_size)
 		status = erx_mem_dma_addr(device->memory, carve.pool, &pool);
 	if (status != ERX_OK)
 		return (status);
-	if (!erx_device_queue_init(&record->core, size, buffer_size, pool))
+	if (!erx_device_queue_init(&record->core, size, buffer_size, 1, pool))
 		return (ERX_ERANGE);
 	record->rings = device->dma + carve.rings;
 	record->buffers = device->dma + carve.pool;
@@ -788,7 +788,7 @@ stand_in_queue_memory(queue_record_t *record, uint32_t size, uint32_t buffer_siz
 	uint8_t *const buffers = calloc(size, buffer_size);
 	const uint32_t offsets[3] = { record->layout.desc, record->layout.avail, record->layout.used };
 
-	if (rings == NULL || buffers == NULL || !erx_device_queue_init(&record->core, size, buffer_size, (uintptr_t)buffers)) {
+	if (rings == NULL || buffers == NULL || !erx_device_queue_init(&record->core, size, buffer_size, 1, (uintptr_t)buffers)) {
 		free(rings);
 		free(buffers);
 		return (rings == NULL || buffers == NULL ? ERX_ENOMEM : ERX_ERANGE);
@@ -817,7 +817,7 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 	/* A physical device does no DMA, so it has no queue (docs/design-stopgap.md, "Device records"). */
 	if (device->form == ERX_DEVICE_FORM_PHYSICAL)
 		return (ERX_ENOTSUP);
-	if (!erx_device_queue_layout(size, &layout) || buffer_size == 0 || buffer_size > ERX_DEVICE_BUFFER_MAX ||
+	if (!erx_device_queue_layout(size, 1, &layout) || buffer_size == 0 || buffer_size > ERX_DEVICE_BUFFER_MAX ||
 	    (uint64_t)size * buffer_size > ERX_MEM_CONTIGUOUS_MAX)
 		return (ERX_EINVAL);
 	for (uint32_t open = 0; open < queues_open; open++) {

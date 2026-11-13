@@ -526,14 +526,20 @@ it; git history is the record of completed work.
   maintenance, and the barriers before the available index and the doorbell are C11 fences (inner shareable on AArch64),
   enough for QEMU `virt`'s virtio-mmio. [design-device-dma.md](docs/design-device-dma.md) gives what is missing: the
   coherence and DMA range the root reads from the live device tree into the `given` record
-  ([design-device-tree.md](docs/design-device-tree.md)); the split ring's queue core issuing plans to the handoff
-  sequencer (`erx_device_dma.c`, with its regions on granules and its buffers at a stride rounded to the granule), the
-  effect layer running them, and the architecture layer's maintenance and barriers, with the hosted stand-in over
-  `erx_dma_model.c`, where the NIF keeps each queue's last accepted state and passes it as the next call's `before`,
-  so a form core cannot misstate who writes a region, fills the check's granule from the architecture layer's `G`, and
-  checks a descriptor's length against its address step's reach (today a form that writes an address as a plain value,
-  or a length unlike the reach it declared, passes the check); field-level register ownership, and the register-ring (GENET) and
-  ADMA2 (SDHCI) descriptor forms.
+  ([design-device-tree.md](docs/design-device-tree.md)); the NIF running the split ring through the handoff
+  sequencer: the queue core's form builders (`erx_device_queue_view`, `_install_steps`, `_post_steps`,
+  `_index_report`, `_entry_reports`, `_copy_steps`, which the model harness already drives) checked by
+  `erx_device_dma_check` and ordered by `erx_device_dma_order`, with the layout and the pool stride on the
+  architecture layer's `G` (the NIF passes a granule of 1 today), the NIF keeping each queue's last accepted state and
+  passing it as the next call's `before`, and filling the check's granule from `G`; the effect layer running a plan;
+  the architecture layer's maintenance and barriers (`erx_dma_clean`, `erx_dma_clean_inval`, the three barriers,
+  `erx_dma_granule`, `erx_dma_line`), with the hosted stand-in over `erx_dma_model.c`; a virtio-gpu region entry,
+  which a post writes as an out segment's bytes, so the check does not see its address; the check tying a memory
+  address's reach to a buffer the plan hands to the device, and a register-published address's to the rings, with
+  the builders taking descriptor addresses from the record's device base and the view's offsets (today
+  `queue->pool`, a second source); a register-held length (virtio's `QueueNum`) checked against the reaches the
+  install publishes; a descriptor rewritten while its chain is posted, which no view expresses; field-level register
+  ownership, and the register-ring (GENET) and ADMA2 (SDHCI) descriptor forms.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
   on the direct path a display driver maps a client's pixel area read-only into its device's DMA window; the device
   NIF cannot map an area into the window yet. `erx_virtio_gpu_core` builds every request but

@@ -42,6 +42,8 @@
 #define ERX_DEVICE_CHAIN_MAX		4u
 /* A buffer's largest size, so a post's copy and a completion's stay within a call's bound. */
 #define ERX_DEVICE_BUFFER_MAX		65536u
+/* The largest cache-writeback granule a queue lays out on: one page. */
+#define ERX_DEVICE_GRANULE_MAX		4096u
 
 /* Where a queue of `size` entries puts its rings in one run of memory, and how long it is. */
 typedef struct erx_device_queue_layout {
@@ -80,6 +82,7 @@ typedef struct erx_device_chain {
 typedef struct erx_device_queue {
 	uint32_t		size;		/* a power of two, at most ERX_DEVICE_QUEUE_SIZE_MAX */
 	uint32_t		buffer_size;	/* each of the size buffers, 1..ERX_DEVICE_BUFFER_MAX */
+	uint32_t		stride;		/* buffer_size rounded up to the granule: buffer i is at pool + i * stride */
 	uint64_t		pool;		/* buffer 0's device address; the last byte is representable */
 	uint16_t		avail_idx;	/* the available ring's running index */
 	uint16_t		last_used;	/* the next used entry to complete, a running index */
@@ -132,15 +135,21 @@ typedef struct erx_device_completion {
  */
 bool	erx_device_queue_features(uint64_t wanted, uint64_t offered, uint64_t *accepted);
 
-/* False for a size that is not a power of two from 1 to ERX_DEVICE_QUEUE_SIZE_MAX. */
-bool	erx_device_queue_layout(uint32_t size, erx_device_queue_layout_t *layout);
+/*
+ * The rings of `size` entries for a CPU whose cache-writeback granule is `granule`: the used ring
+ * starts on a granule and `bytes` is whole granules. False for a size that is not a power of two
+ * from 1 to ERX_DEVICE_QUEUE_SIZE_MAX, or a granule that is not one up to ERX_DEVICE_GRANULE_MAX.
+ */
+bool	erx_device_queue_layout(uint32_t size, uint32_t granule, erx_device_queue_layout_t *layout);
 
 /*
  * An empty queue of `size` entries and `size` buffers of `buffer_size` bytes from device address
- * `pool`, as after a reset. False, touching nothing, for a bad size, a buffer size of 0 or over
- * ERX_DEVICE_BUFFER_MAX, or a pool whose end the address space cannot hold.
+ * `pool`, each at a stride of buffer_size rounded up to `granule`, so no two buffers share a
+ * granule, as after a reset. False, touching nothing, for a bad size or granule, a buffer size of 0
+ * or over ERX_DEVICE_BUFFER_MAX, or a pool whose end the address space cannot hold.
  */
-bool	erx_device_queue_init(erx_device_queue_t *queue, uint32_t size, uint32_t buffer_size, uint64_t pool);
+bool	erx_device_queue_init(erx_device_queue_t *queue, uint32_t size, uint32_t buffer_size, uint32_t granule,
+	    uint64_t pool);
 /* The reset rule's last step: every chain forgotten, the rings empty, the queue whole again. */
 void	erx_device_queue_reset(erx_device_queue_t *queue);
 
@@ -169,5 +178,70 @@ uint32_t	erx_device_queue_used_slot(const erx_device_queue_t *queue);
  */
 bool	erx_device_queue_complete(erx_device_queue_t *queue, uint32_t id, uint32_t length,
 	    erx_device_completion_t *completion);
+
+
+/*
+ * The split ring as a descriptor form of the DMA handoff sequencer (docs/design-device-dma.md,
+ * "Calls, observations and plans" and "The three descriptor forms"). Offsets are bytes from the
+ * queue's first byte: its rings from 0, its pool at `pool`, at or past the rings' end. Each
+ * builder states, as plan steps, only what the core above decided; no builder names a cache
+ * operation or a barrier, which erx_device_dma_order derives. The caller keeps the last state
+ * it applied and passes it as the next plan's `before`, so the view of the core's bookkeeping
+ * after a call is only ever the `after` the check compares with it.
+ */
+struct erx_dma_context;
+struct erx_dma_state;
+struct erx_dma_step;
+
+/* The window offsets of the registers the split ring's plans write, which the NIF owns. */
+typedef struct erx_device_queue_registers {
+	uint32_t	sel;
+	uint32_t	num;
+	uint32_t	ready;
+	uint32_t	notify;
+	uint32_t	desc[2];	/* each address: the low word's register, then the high word's */
+	uint32_t	driver[2];
+	uint32_t	device[2];
+} erx_device_queue_registers_t;
+
+/* The most steps of a post (a write and four descriptor fields per segment, the entry and two publishes) and of an install. */
+#define ERX_DEVICE_QUEUE_POST_STEPS	(5u * ERX_DEVICE_CHAIN_MAX + 3u)
+#define ERX_DEVICE_QUEUE_INSTALL_STEPS	8u
+/* The reports of one used entry: its id and its length. */
+#define ERX_DEVICE_QUEUE_ENTRY_REPORTS	2u
+
+/* The form's own facts for the check: its address width, publication and descriptors. */
+void	erx_device_queue_form(const erx_device_queue_layout_t *layout, uint32_t size, struct erx_dma_context *context);
+/*
+ * Who writes each region as the core's bookkeeping gives it: the descriptor table and the
+ * available ring the CPU, the used ring the device once installed and the CPU before, and each
+ * buffer the device while its chain is posted.
+ */
+void	erx_device_queue_view(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, uint64_t pool,
+	    bool installed, struct erx_dma_state *state);
+/*
+ * The install after a reset, for a queue whose rings' device address is `rings_addr`: both ring
+ * regions zeroed, the queue `index` selected and sized, the three ring addresses published
+ * with each ring's reach, then ready.
+ */
+uint32_t	erx_device_queue_install_steps(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
+	    const erx_device_queue_registers_t *regs, uint32_t index, uint64_t rings_addr, struct erx_dma_step *steps);
+/*
+ * A post the core decided: each readable segment's `bytes` into the head's buffer, each
+ * descriptor's address with its length as its reach and its other fields, the available entry,
+ * then the available index and the doorbell of queue `index`.
+ */
+uint32_t	erx_device_queue_post_steps(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
+	    uint64_t pool, const erx_device_post_plan_t *plan, const erx_device_segment_t *segments,
+	    const uint8_t *const *bytes, const erx_device_queue_registers_t *regs, uint32_t index,
+	    struct erx_dma_step *steps);
+/* The observation of the used ring's index. */
+void	erx_device_queue_index_report(const erx_device_queue_layout_t *layout, struct erx_dma_step *step);
+/* The observation of the next `fresh` used entries, at most the queue's size: each id, then each length. */
+uint32_t	erx_device_queue_entry_reports(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
+	    uint32_t fresh, struct erx_dma_step *steps);
+/* The copies of `count` completions, each range of each buffer in order, at most ERX_DEVICE_CHAIN_MAX per completion. */
+uint32_t	erx_device_queue_copy_steps(const erx_device_queue_t *queue, uint64_t pool,
+	    const erx_device_completion_t *completions, uint32_t count, struct erx_dma_step *steps);
 
 #endif /* ERX_DEVICE_QUEUE_H */

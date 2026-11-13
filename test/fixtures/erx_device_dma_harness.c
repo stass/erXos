@@ -464,7 +464,7 @@ check_negotiate(const erx_device_t *device, uint32_t queue)
 	CHECK(erx_device_negotiate(device, ~UINT64_C(0), &accepted) == ERX_OK && accepted == model.offered);
 
 	CHECK(*reg("queue_sel") == 0 && *reg("queue_num") == QUEUE_SIZE && *reg("queue_ready") == 1);
-	CHECK(erx_device_queue_layout(QUEUE_SIZE, &layout));
+	CHECK(erx_device_queue_layout(QUEUE_SIZE, 1, &layout));
 	rings = device_rings();
 	CHECK((uint8_t *)rings.avail == (uint8_t *)rings.desc + layout.avail);
 	CHECK((uint8_t *)rings.used == (uint8_t *)rings.desc + layout.used);
@@ -682,13 +682,13 @@ check_given(void)
 
 	/* The install leaves the second queue's registers last: its rings follow the first queue's pages, as the refusal took none. */
 	CHECK(negotiate(device) == ERX_OK);
-	CHECK(erx_device_queue_layout(QUEUE_SIZE / 2, &layout));
+	CHECK(erx_device_queue_layout(QUEUE_SIZE / 2, 1, &layout));
 	rings = device_rings();
 	CHECK((const uint8_t *)rings.desc == base + SMALL_QUEUE_PAGES * ERX_PAGE_SIZE);
 	CHECK((const uint8_t *)rings.avail == (const uint8_t *)rings.desc + layout.avail);
 	CHECK((const uint8_t *)rings.used == (const uint8_t *)rings.desc + layout.used);
 	/* The first queue's chain lies in its pool, after its rings' page and before the second queue. */
-	CHECK(erx_device_queue_layout(QUEUE_SIZE, &layout));
+	CHECK(erx_device_queue_layout(QUEUE_SIZE, 1, &layout));
 	CHECK(post_one(device, first, 1) == ERX_OK);
 	const erx_virtq_desc_t *const table = (const erx_virtq_desc_t *)(const void *)base;
 	const uint16_t head = ((const uint16_t *)(const void *)(base + layout.avail + ERX_VIRTQ_RING_HEAD_SIZE))[0];
@@ -728,7 +728,7 @@ posted_entry(const uint8_t *rings, uint32_t slot, uint32_t offset)
 	erx_device_queue_layout_t layout;
 	erx_virtio_gpu_mem_entry_t entry;
 
-	CHECK(erx_device_queue_layout(QUEUE_SIZE, &layout));
+	CHECK(erx_device_queue_layout(QUEUE_SIZE, 1, &layout));
 	const erx_virtq_desc_t *const table = (const erx_virtq_desc_t *)(const void *)rings;
 	const uint16_t head = ((const uint16_t *)(const void *)(rings + layout.avail + ERX_VIRTQ_RING_HEAD_SIZE))[slot];
 	memcpy(&entry, (const uint8_t *)(uintptr_t)table[head].addr + offset, sizeof(entry));

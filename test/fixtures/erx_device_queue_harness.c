@@ -36,18 +36,37 @@ layouts(void)
 {
 	erx_device_queue_layout_t layout;
 
-	CHECK(erx_device_queue_layout(8, &layout));
+	CHECK(erx_device_queue_layout(8, 1, &layout));
 	CHECK(layout.desc == 0 && layout.avail == 128 && layout.used == 152 && layout.bytes == 222);
 	CHECK(layout.used % ERX_VIRTQ_USED_RING_ALIGN == 0);
-	CHECK(erx_device_queue_layout(1, &layout) && erx_device_queue_layout(ERX_DEVICE_QUEUE_SIZE_MAX, &layout));
-	CHECK(!erx_device_queue_layout(0, &layout) && !erx_device_queue_layout(3, &layout));
-	CHECK(!erx_device_queue_layout(2 * ERX_DEVICE_QUEUE_SIZE_MAX, &layout));
-	CHECK(!erx_device_queue_init(&queue, 6, 1024, buffer_addr));
-	CHECK(!erx_device_queue_init(&queue, 8, 0, buffer_addr));
-	CHECK(!erx_device_queue_init(&queue, 8, ERX_DEVICE_BUFFER_MAX + 1, buffer_addr));
+	CHECK(erx_device_queue_layout(1, 1, &layout) && erx_device_queue_layout(ERX_DEVICE_QUEUE_SIZE_MAX, 1, &layout));
+	CHECK(!erx_device_queue_layout(0, 1, &layout) && !erx_device_queue_layout(3, 1, &layout));
+	CHECK(!erx_device_queue_layout(2 * ERX_DEVICE_QUEUE_SIZE_MAX, 1, &layout));
+	CHECK(!erx_device_queue_init(&queue, 6, 1024, 1, buffer_addr));
+	CHECK(!erx_device_queue_init(&queue, 8, 0, 1, buffer_addr));
+	CHECK(!erx_device_queue_init(&queue, 8, ERX_DEVICE_BUFFER_MAX + 1, 1, buffer_addr));
 	/* A pool whose last byte is the address space's last is whole; one byte further is not. */
-	CHECK(erx_device_queue_init(&queue, 8, 1024, UINT64_MAX - 8 * 1024 + 1));
-	CHECK(!erx_device_queue_init(&queue, 8, 1024, UINT64_MAX - 8 * 1024 + 2));
+	CHECK(erx_device_queue_init(&queue, 8, 1024, 1, UINT64_MAX - 8 * 1024 + 1));
+	CHECK(!erx_device_queue_init(&queue, 8, 1024, 1, UINT64_MAX - 8 * 1024 + 2));
+	/* On a granule of 64: the used ring starts on one, the rings end on one, and buffers of 200 bytes lie 256 apart. */
+	CHECK(erx_device_queue_layout(8, 64, &layout));
+	CHECK(layout.avail == 128 && layout.used == 192 && layout.bytes == 320);
+	CHECK(!erx_device_queue_layout(8, 3, &layout) && !erx_device_queue_layout(8, 0, &layout));
+	CHECK(!erx_device_queue_layout(8, 2 * ERX_DEVICE_GRANULE_MAX, &layout));
+	CHECK(erx_device_queue_init(&queue, 8, 200, 64, buffer_addr) && queue.stride == 256 && queue.buffer_size == 200);
+	CHECK(!erx_device_queue_init(&queue, 8, 200, 48, buffer_addr));
+	/* The pool's end is counted at the stride: 8 buffers of 256 bytes. */
+	CHECK(erx_device_queue_init(&queue, 8, 200, 64, UINT64_MAX - 8 * 256 + 1));
+	CHECK(!erx_device_queue_init(&queue, 8, 200, 64, UINT64_MAX - 8 * 256 + 2));
+	{
+		const erx_device_segment_t one = { 0, 10, false };
+		erx_device_post_plan_t plan;
+
+		CHECK(erx_device_queue_post(&queue, &one, 1, 1, &plan) && erx_device_queue_post(&queue, &one, 1, 2, &plan));
+		CHECK(plan.head == 1 && plan.descs[0].addr == UINT64_MAX - 8 * 256 + 1 + 256);
+		erx_device_queue_reset(&queue);
+		CHECK(queue.stride == 256);
+	}
 }
 
 static void
@@ -57,7 +76,7 @@ post_and_complete(void)
 	erx_device_completion_t done;
 	uint32_t count;
 
-	CHECK(erx_device_queue_init(&queue, 8, 1024, buffer_addr));
+	CHECK(erx_device_queue_init(&queue, 8, 1024, 1, buffer_addr));
 	CHECK(erx_device_queue_post(&queue, read_chain, 3, 77, &plan));
 	CHECK(plan.count == 3 && plan.head == 0 && plan.avail_slot == 0 && plan.avail_idx == 1);
 	CHECK(plan.descs[0].addr == buffer_addr && plan.descs[0].len == 16);
@@ -114,7 +133,7 @@ refused_posts(void)
 
 	for (uint32_t index = 0; index < ERX_DEVICE_CHAIN_MAX + 1; index++)
 		many[index] = one[0];
-	CHECK(erx_device_queue_init(&queue, 4, 1024, buffer_addr));
+	CHECK(erx_device_queue_init(&queue, 4, 1024, 1, buffer_addr));
 	before = queue;
 	CHECK(!erx_device_queue_post(&queue, outside, 1, 1, &plan));
 	CHECK(!erx_device_queue_post(&queue, empty, 1, 1, &plan));
@@ -139,7 +158,7 @@ broken_queues(void)
 	erx_device_completion_t done;
 	uint32_t count;
 
-	CHECK(erx_device_queue_init(&queue, 8, 1024, buffer_addr));
+	CHECK(erx_device_queue_init(&queue, 8, 1024, 1, buffer_addr));
 	CHECK(erx_device_queue_post(&queue, read_chain, 3, 1, &plan));
 	CHECK(!erx_device_queue_used(&queue, 2, &count) && queue.broken);
 	CHECK(!erx_device_queue_post(&queue, read_chain, 3, 2, &plan));
@@ -180,7 +199,7 @@ wrapping(void)
 	erx_device_completion_t done;
 	uint32_t count;
 
-	CHECK(erx_device_queue_init(&queue, 2, 8, buffer_addr));
+	CHECK(erx_device_queue_init(&queue, 2, 8, 1, buffer_addr));
 	for (uint32_t round = 0; round < 70000; round++) {
 		CHECK(erx_device_queue_post(&queue, one, 1, round, &plan));
 		CHECK(plan.avail_slot == round % 2 && plan.avail_idx == (uint16_t)(round + 1));

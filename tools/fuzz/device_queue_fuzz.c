@@ -227,7 +227,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	const uint32_t buffer_size = (uint32_t)take(&script, 2) + 1;
 	const uint64_t pool = (take(&script, 1) & 1) != 0 ? UINT64_MAX - (uint64_t)queue_size * buffer_size + 1 : FUZZ_BASE;
 
-	if (!erx_device_queue_init(&queue, queue_size, buffer_size, pool))
+	if (!erx_device_queue_init(&queue, queue_size, buffer_size, 1, pool))
 		abort();
 	forget_all();
 	next_tag = 0;
