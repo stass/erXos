@@ -71,6 +71,26 @@ namespace_test_() ->
 unreadable(Dir) ->
     file:make_dir(filename:join(Dir, "rc.conf")).
 
+%% AP5 over a packed manifest, which only test/host/erx_starter_test.rb packs
+%% (ERX_STARTER_MANIFEST, from the apps QEMU suite's): clock's template is
+%% granted data, a files service, and screen, a windows service, so screen is
+%% the one display clock may draw on: a row rc.conf moves to data is refused
+%% with {no_grant, <<"data">>}, and one it moves to screen starts.
+only_a_granted_windows_service_is_a_display_test() ->
+    Path = os:getenv("ERX_STARTER_MANIFEST"),
+    ?assertNotEqual(false, Path),
+    {ok, Packed} = file:read_file(Path),
+    {ok, #{rows := Rows, grants := Grants}} = erx_starter:manifest_table({ok, Packed}),
+    ?assertEqual([#{principal => <<"clock">>, enable => true, display => none, restarts => 1, period => 600}],
+                 Rows),
+    ?assertEqual(#{<<"clock">> => [<<"screen">>]}, Grants),
+    {ok, Data} = erx_start_table:parse_rc_conf(<<"clock_display=data\n">>),
+    ?assertMatch({[#{principal := <<"clock">>, status := {refused, {no_grant, <<"data">>}}}], []},
+                 erx_start_table:merge(Rows, Data, Grants)),
+    {ok, Screen} = erx_start_table:parse_rc_conf(<<"clock_display=screen\n">>),
+    ?assertMatch({[#{principal := <<"clock">>, display := <<"screen">>, status := enabled}], []},
+                 erx_start_table:merge(Rows, Screen, Grants)).
+
 %% The two behaviours of OTP's one_for_one supervisor the keepers' branch
 %% stands on (erx_starter_sup): a transient child that ends with shutdown is
 %% not restarted and keeps its spec with no pid, and a child whose start

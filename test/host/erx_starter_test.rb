@@ -5,7 +5,10 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/apps'
+require_relative '../../tools/lib/erx/manifest'
 require_relative '../fixtures/erlang_build'
+require_relative '../fixtures/manifest_context'
 
 # The start service's processes (docs/design-apps.md, "Verification and testing"):
 # test/erlang/erx_starter_tests.erl runs on stock's emulator (ERX_ERL and ERX_ERLC, which
@@ -109,8 +112,38 @@ class ErxStarterTest < Minitest::Test
               file: "#{APP}/erx_starter.erl",
               from: '{noreply, Recorded#{reader := {namespace, erx_domain:system_namespace()}}}',
               to: '{noreply, read(Recorded)}',
-              caught_by: 'no_row_starts_before_the_namespace_is_in_place')
+              caught_by: 'no_row_starts_before_the_namespace_is_in_place'),
+    Fault.new(name: 'a manifest table whose displays are every service a template is granted',
+              file: "#{APP}/erx_starter.erl",
+              from: 'Windows(Index)],', to: 'is_function(Windows)],',
+              caught_by: 'only_a_granted_windows_service_is_a_display'),
+    Fault.new(name: 'a manifest table that reads the interface of the service after the granted one',
+              file: "#{APP}/erx_starter.erl",
+              from: 'lists:nth(Index + 1, ServiceRecords)', to: 'lists:nth(Index + 2, ServiceRecords)',
+              caught_by: 'only_a_granted_windows_service_is_a_display')
   ].freeze
+
+  # A windows service of the web domain, with its display record, granted to the apps
+  # suite's template: the one display clock may name beside its data grant.
+  SCREEN = <<~ROWS
+    service screen
+      server @domain.web
+      interface windows
+    display screen
+      policy single
+      idle_dim_s 60
+      idle_off_s 600
+    facet clock_screen
+      grantee @session.#{Erx::Apps::PRINCIPAL}
+      service @service.screen
+      operations none
+      max_request 1
+      in_flight 1
+      reductions 1
+      period_ns 1
+      max_heap_size 1
+      parameter pixels 4096
+  ROWS
 
   def test_the_cases_pass
     output, status = eunit({})
@@ -137,6 +170,23 @@ class ErxStarterTest < Minitest::Test
     end
   end
 
+  # The apps QEMU suite's manifest (Erx::Apps.manifest, its kept boot) with SCREEN,
+  # admitted against the machine that suite boots and a fixture archive, for
+  # erx_starter:manifest_table/1's case: clock's template is granted data, a files
+  # service, and screen, a windows service. Packed once, since every run reads it.
+  def self.packed_manifest
+    @packed_manifest ||= begin
+      codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
+      platform = Erx::MediumBoot.machine(Erx::Platform.development(ROOT)).record
+      arguments = ManifestContextFixture.archive_arguments(codec, boots: %w[app clock network session storage web])
+      source = Erx::Apps.manifest(File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt')),
+                                  boot: :kept) + SCREEN
+      Erx::Manifest.admit(source: source, codec: codec,
+                          context: Erx::Manifest::Context.new(**arguments, platform: platform),
+                          planner: ManifestContextFixture.accepting_planner).bytes
+    end
+  end
+
   private
 
   # Compiles the applications and the suites, each source of replaced by its text there,
@@ -144,7 +194,10 @@ class ErxStarterTest < Minitest::Test
   def eunit(replaced, mod: 'erx_starter_tests')
     Dir.mktmpdir('erx-starter-test') do |work|
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
-      Open3.capture2e('gtimeout', '-k', '10', '180', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
+      manifest = File.join(work, 'manifest.bin')
+      File.binwrite(manifest, self.class.packed_manifest)
+      Open3.capture2e({ 'ERX_STARTER_MANIFEST' => manifest },
+                      'gtimeout', '-k', '10', '180', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       "halt(case eunit:test(#{mod}, [verbose]) of ok -> 0; _ -> 1 end)",
                       chdir: work, stdin_data: '')
     end

@@ -10,9 +10,9 @@ supervisors in the keepers' branch (erx_starter_sup). Every decision is
 erx_start_table's; this process carries them out.
 
 * **The manifest.** At its start the process reads the start rows, each
-  principal's number and the services each session template is granted
-  from the system manifest (manifest_table/1), as erx_build reads its
-  tables. A manifest with no start row makes an empty table, and nothing
+  principal's number and the `windows` services each session template is
+  granted, the displays its rows may name, from the system manifest
+  (manifest_table/1), as erx_build reads its tables. A manifest with no start row makes an empty table, and nothing
   more happens: no rc.conf is read.
 * **rc.conf.** The process does no file operation itself. The rc.conf
   process (erx_starter_rc) reads and writes rc.conf for it and answers
@@ -64,8 +64,9 @@ erx_start_table's; this process carries them out.
 -export([manifest_table/1]).
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2]).
 
-%% The manifest's part of the table: its start rows in order, the services
-%% each principal's session template is granted, each principal's number,
+%% The manifest's part of the table: its start rows in order, the `windows`
+%% services each principal's session template is granted (the displays its
+%% row may name), each principal's number,
 %% its manifest index plus one, by its name, and the configured domains'
 %% names in boot order, which `/proc/apps` shows beside the rows.
 -type manifest() :: #{rows := [erx_start_table:row()], grants := #{binary() => [binary()]},
@@ -138,7 +139,8 @@ manifest_table({ok, Manifest}) ->
     maybe
         {ok, View} ?= erx_manifest:open(Manifest),
         {ok, Names} ?= strings(View, principals),
-        {ok, Services} ?= strings(View, services),
+        {ok, ServiceRecords} ?= collect(View, services),
+        {ok, Services} ?= names(View, ServiceRecords),
         {ok, Sessions} ?= collect(View, sessions),
         {ok, Facets} ?= collect(View, facets),
         {ok, Starts} ?= collect(View, starts),
@@ -146,13 +148,19 @@ manifest_table({ok, Manifest}) ->
         {ok, Order} ?= collect(View, boot_order),
         Name = fun(Index) -> lists:nth(Index + 1, Names) end,
         Service = fun(Index) -> lists:nth(Index + 1, Services) end,
+        %% A display is a service of the windows interface (AP5), so a
+        %% template's grant of any other service names no display.
+        Windows = fun(Index) ->
+                          maps:get(interface, lists:nth(Index + 1, ServiceRecords)) =:= ?ERX_SERVICE_WINDOWS
+                  end,
         Template = fun(Session) -> Name(maps:get(principal, lists:nth(Session + 1, Sessions))) end,
         Rows = [#{principal => Name(Principal), enable => Flags band ?ERX_MF_START_ENABLED =/= 0,
                   display => display(Display, Service), restarts => Restarts, period => Period}
                 || #{principal := Principal, flags := Flags, display := Display, restarts := Restarts,
                      restart_period_s := Period} <- Starts],
         Granted = [{Template(Session), Service(Index)}
-                   || #{grantee_kind := ?ERX_MF_GRANTEE_SESSION, grantee := Session, service := Index} <- Facets],
+                   || #{grantee_kind := ?ERX_MF_GRANTEE_SESSION, grantee := Session, service := Index} <- Facets,
+                      Windows(Index)],
         {ok, #{rows => Rows,
                grants => maps:groups_from_list(fun({P, _}) -> P end, fun({_, S}) -> S end, Granted),
                principals => #{Principal => Number || {Number, Principal} <- lists:enumerate(Names)},
@@ -178,7 +186,12 @@ collect(View, Table) ->
 strings(View, Table) ->
     maybe
         {ok, Records} ?= collect(View, Table),
-        Read = [erx_manifest:string(View, Ref) || #{name := Ref} <- Records],
+        names(View, Records)
+    end.
+
+names(View, Records) ->
+    Read = [erx_manifest:string(View, Ref) || #{name := Ref} <- Records],
+    maybe
         true ?= lists:all(fun(Result) -> element(1, Result) =:= ok end, Read),
         {ok, [String || {ok, String} <- Read]}
     end.

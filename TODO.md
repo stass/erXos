@@ -658,10 +658,6 @@ it; git history is the record of completed work.
   quota or memory can have that login refused at run time, and the line falls back to the system shell
   ([design-live.md](docs/design-live.md#the-console)). Counting each secure line's root session (and the
   relogin overlap, as `tools/lib/erx/apps.rb` budgets two sessions per kept row) would close it.
-* [Medium] `erx_starter:manifest_table/1`, which reads the start rows, the principals and each session template's
-  grants from the system manifest, has no host test over a packed manifest with a `start` row; only the `apps`
-  QEMU suite (`tools/lib/erx/apps.rb`) reads one. Its grants are every service a template is granted, not only
-  `windows` services, as the domain service's own check is.
 * [Medium] The `apps` QEMU suite (`tools/lib/erx/apps.rb`) has no reboot cells yet: `service clock disable` and a
   reboot of the same disk leave the row stopped, and `service clock enable` survives a reboot
   (docs/design-apps.md, "Verification and testing"; docs/plan.md, Track A's demo). Its boots each take a fresh
