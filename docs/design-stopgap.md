@@ -427,11 +427,19 @@ resource dump at 512 MiB on a 4-CPU HVF boot of the fork shows 33.8 MiB it does
 not offer the root: 32 MiB of kernel memory, the kernel's image, the device
 tree's 1 MiB and `sigma0` itself; at 160 MiB the kernel memory is 10 MiB, and
 at 224 MiB it is 6% rounded up, as Fiasco rounds it, to 14 MiB (a boot log's
-"Reserved 14 MiB as kernel memory"), and at the development machine's 256 MiB
-the same rule gives 16 MiB. QEMU `virt`'s `fiasco_reserve` is 16 MiB. The rule leaves the
+"Reserved 14 MiB as kernel memory"), and at 256 MiB
+the same rule gives 16 MiB, and at QEMU `virt`'s development machine, 512 MiB, its
+`fiasco_reserve`, 32 MiB. The rule leaves the
 archive out: `bootstrap` reserves it whole and it is never released, so a
-manifest's `root_memory` must leave it room below RAM less the reserve; QEMU
-`virt`'s 180.75 MiB leaves it and the root's image 59.25 MiB. If either is wrong, the pool fails at boot with a
+manifest's `root_memory` must leave it room below RAM less the reserve. The root's place
+bounds it too: the single file loads at its first stage's link address and must end
+below the root, or `bootstrap` refuses to place the root over the archive
+(`place_overlap`), so the image build refuses a single file that reaches the root's place
+(`ProductionImage::Machine#check_single_file`). The image build prints the smaller of the
+two rooms with each image and names the one that binds. A manifest's `root_memory` is what its
+budgets promise and a margin no one is promised, never a figure lowered to make room for
+the archive: an archive that outgrows root_memory's room asks for a larger machine, and
+one that outgrows the place's, for a higher place. If either is wrong, the pool fails at boot with a
 diagnostic. A platform record without these numbers is not admitted.
 
 The packer then holds the archive to that room (`RootStartup.check_archive`, once the archive is
@@ -519,9 +527,12 @@ oracle's 2 GiB machine 192 MiB into RAM, which holds the archive to about 187 Mi
 ([Boot](design-platforms.md#boot) gives the arithmetic).
 No other line of the manifest changes, and the manifest check proves the
 grown manifest against the platform record with that RAM and reserve as it proves
-the development one. The production image always boots on the development machine,
-which is the platform record's own 256 MiB and 16 MiB: small, since the browser
-emulator's guest RAM is the tab's memory, yet with room to spare at the shell. `OracleQemu` boots on 2 GiB with a
+the development one. The production image boots on the development machine,
+which is the platform record's own RAM and `fiasco_reserve`: on QEMU `virt` 512 MiB,
+room for the test images' archives beside `root_memory`. The site image, built from the
+site manifest, is packed and checked on the site machine (`Machine.site`): 256 MiB with
+a 16 MiB reserve, the RAM the website's browser emulator gives its guest, since the
+guest's RAM is the tab's memory. `OracleQemu` boots on 2 GiB with a
 160 MiB reserve, the system domain 1 GiB larger and `/tmp`'s cap 160 MiB, since
 OTP's suites ask for more than the development baseline holds (compiler's
 `beam_ssa_check_SUITE` asks for a 98 MiB heap) and fill more of `/tmp` than its

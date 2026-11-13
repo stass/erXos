@@ -485,9 +485,7 @@ end,
         @compiler = compiler
         @linker = linker
         @qemu = qemu
-        # A medium machine: the archive below the root carries erx-lvgl, about 1 MiB of
-        # LVGL, which the development machine's room for it does not hold.
-        @machine = MediumBoot.machine(platform)
+        @machine = ProductionImage::Machine.development(platform)
         @manifest = platform.manifest_source(@root)
         @build = File.join(@root, 'build/programs')
         @schema = ABI::Generator.plan(root: @root).schema

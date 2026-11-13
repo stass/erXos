@@ -8,7 +8,7 @@ module Erx
   # (config/manifest/NAME-development.txt, and NAME-site.txt for a board the website boots): what every tool that builds or
   # boots an image takes as a parameter in place of one board's constants
   # (docs/design-stopgap.md, "The Raspberry Pi 4"). The record states the board's RAM, its
-  # first address (ram_first) and size (ram_bytes, the smallest RAM the port boots on), the
+  # first address (ram_first) and size (ram_bytes, the development machine's RAM, which the harnesses give QEMU), the
   # part of it Fiasco keeps (fiasco_reserve), what the boot keeps besides from the rest
   # (root_withheld, in bytes, which the packer's archive check reads), and its device units,
   # which Pack's manifest check reads. A record without one of these numbers, with a RAM

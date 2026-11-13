@@ -885,7 +885,9 @@ module Erx
       Terminal.puts("building the #{kind} boot image into #{InteractiveBoot.image_directory(without_web: request.without_web)}")
       boot = InteractiveBoot.build(root: ROOT, runner: runner, jobs: request.jobs, hostlink: request.hostlink,
                                     platform: platform, without_web: request.without_web)
-      argv = InteractiveBoot.argv(platform: platform, accel: accel, cpus: request.cpus, image: boot.image, link: boot.link)
+      memory_mib = InteractiveBoot.machine(platform: platform, without_web: request.without_web).memory_mib
+      argv = InteractiveBoot.argv(platform: platform, accel: accel, cpus: request.cpus, image: boot.image,
+                                  memory_mib: memory_mib, link: boot.link)
       Terminal.puts("booting: accelerator #{accel}, #{request.cpus} guest CPU(s); #{InteractiveBoot::QUIT_HINT}")
       if boot.link
         Terminal.puts("host link on #{boot.link.socket}; once root's session has started, run in another terminal:")

@@ -5,6 +5,7 @@
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'medium_boot'
+require_relative 'manifest_text'
 require_relative 'ppm'
 require_relative 'production_image'
 require_relative 'qemu'
@@ -109,9 +110,6 @@ module Erx
              "  max_heap_size 262144\n  parameter pixels #{PIXELS}\n" \
              "start client\n  enable YES\n  display @service.screen\n"
     UNIT = "unit #{UNIT_KEY}\n  placement \"#{UNIT_KEY}\"\n  holder @domain.display\n"
-    ROOT_MEMORY_LINE = /^(  root_memory )([0-9]+)$/
-    MAX_DOMAINS_LINE = /^(  max_domains )([0-9]+)$/
-    MAX_CONNECTIONS_LINE = /^(  max_connections )([0-9]+)$/
 
     module_function
 
@@ -123,14 +121,9 @@ module Erx
     # each session has its connection to the display.
     def manifest(source, platform:)
       text = MediumBoot.manifest(source, row: ROW, domains: 1, domain_memory: MEMORY + OUTER - MediumBoot::DOMAIN_OUTER)
-      growth = { ROOT_MEMORY_LINE => dma_memory(platform) + CLIENT_MEMORY, MAX_DOMAINS_LINE => CLIENT_SESSIONS,
-                 MAX_CONNECTIONS_LINE => CLIENT_SESSIONS }
-      grown = growth.reduce(text) do |manifest, (line, added)|
-        raise Error, "the manifest does not have exactly one line #{line.source}" unless manifest.scan(line).size == 1
-
-        manifest.sub(line) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + added}" }
-      end
-      grown + UNIT + CLIENT
+      ManifestText.grow(text, { %w[machine root_memory] => dma_memory(platform) + CLIENT_MEMORY,
+                                %w[machine max_domains] => CLIENT_SESSIONS,
+                                %w[machine max_connections] => CLIENT_SESSIONS }) + UNIT + CLIENT
     end
 
     # The DMA memory of the platform's display unit's devices, in bytes.

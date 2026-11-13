@@ -87,16 +87,16 @@ module Erx
         write(rows, root_entry: root_entry, build_kind: build_kind,
               path: temporary, budget: budget, test_code: test_code)
         # Bootstrap reserves the archive in whole pages, which sigma0 then never offers.
-        Manifest::RootStartup.check_archive(archive_bytes: round_page(File.size(temporary)),
-                                            root_memory: admitted.report.fetch('root_memory'),
-                                            dma_memory: admitted.report.fetch('dma_memory'),
-                                            **Manifest::RootStartup.archive_machine(platform))
+        room = Manifest::RootStartup.check_archive(archive_bytes: round_page(File.size(temporary)),
+                                                   root_memory: admitted.report.fetch('root_memory'),
+                                                   dma_memory: admitted.report.fetch('dma_memory'),
+                                                   **Manifest::RootStartup.archive_machine(platform))
         @checker.run([temporary], runner: @runner, name: 'pack-check', deadline: 300)
         hash = Digest::SHA256.file(temporary).hexdigest
         size = File.size(temporary)
         File.rename(temporary, destination)
         return { 'path' => destination, 'sha256' => hash, 'size' => size,
-                 'entries' => rows.size, 'manifest' => admitted.report,
+                 'entries' => rows.size, 'manifest' => admitted.report, 'archive_room' => room.to_h,
                  'provenance' => context.provenance }.freeze
       end
     rescue Errno::ENOENT, Errno::EACCES, Errno::ENOSPC, Errno::EISDIR => error

@@ -28,7 +28,7 @@ class PlatformTest < Minitest::Test
   def test_the_development_record_states_virts_ram
     assert_equal 'qemu-virt', VIRT.name
     assert_equal 0x4000_0000, VIRT.ram_first
-    assert_equal [256, 16], [VIRT.memory_mib, VIRT.fiasco_reserve_mib]
+    assert_equal [512, 32], [VIRT.memory_mib, VIRT.fiasco_reserve_mib]
     assert_equal 'config/manifest/qemu-virt-development.txt', VIRT.manifest_path
     assert File.file?(File.join(ROOT, VIRT.manifest_path))
     assert_equal File.binread(File.join(ROOT, 'config/manifest/qemu-virt-site.txt')), VIRT.site_manifest_source(ROOT)
@@ -54,7 +54,7 @@ class PlatformTest < Minitest::Test
 
   def test_a_ram_number_that_is_not_whole_mib_is_refused
     [{ ram_first: 0x4000_1000 }, { ram_first: -(1 << 20) }, { ram_first: '1073741824' }, { ram_bytes: 0 },
-     { fiasco_reserve: 4096 }, { fiasco_reserve: 256 << 20 }].each do |change|
+     { fiasco_reserve: 4096 }, { fiasco_reserve: VIRT.record.fetch('ram_bytes') }].each do |change|
       assert_raises(Erx::Error, change.inspect) { Erx::Platform.new(name: 'qemu-virt', record: record(**change)) }
     end
   end

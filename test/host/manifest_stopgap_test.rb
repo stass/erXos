@@ -5,6 +5,7 @@
 require 'json'
 require 'minitest/autorun'
 require_relative '../../tools/lib/erx/manifest'
+require_relative '../../tools/lib/erx/manifest_text'
 require_relative '../fixtures/manifest_context'
 
 # Phase 1's manifest check (docs/design-stopgap.md): each kept property of
@@ -132,6 +133,20 @@ class ManifestStopgapTest < Minitest::Test
     assert_equal 4, view.count('devices')
     assert_equal 6, view.count('windows')
     assert_equal 1, view.count('images')
+  end
+
+  # Each manifest's root_memory is what its budgets promise and an 8 MiB margin no one
+  # is promised, and the site's is the development one's less the web domain's budget,
+  # its memory and outer, which is all the site manifest leaves out.
+  def test_root_memory_is_the_promise_and_the_margin_in_both_manifests
+    site = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
+    [@source, site].each do |source|
+      report = admit(source).report
+      assert_equal 8 << 20, report.fetch('root_memory') - report.fetch('promised_memory')
+    end
+    web = %w[memory outer].sum { |field| Erx::ManifestText.value(@source, record: 'limits web', field: field) }
+    root_memory = ->(source) { Erx::ManifestText.value(source, record: 'machine', field: 'root_memory') }
+    assert_equal web, root_memory.call(@source) - root_memory.call(site)
   end
 
   def test_the_report_claims_only_what_was_checked
@@ -368,7 +383,7 @@ class ManifestStopgapTest < Minitest::Test
       if !boot.booted?
         assert_raises(Erx::Manifest::Invalid, label) { check_archive(boot) }
       elsif boot.offer - boot.root_memory > TOLERANCE
-        assert_nil check_archive(boot), label
+        assert_kind_of Erx::Manifest::RootStartup::ArchiveRoom, check_archive(boot), label
       end
     end
   end
@@ -403,7 +418,10 @@ class ManifestStopgapTest < Minitest::Test
     figures = { archive_bytes: boot.archive, **machine(boot) }
     small = Erx::Manifest::RootStartup.boot_kept(**figures)
     assert_equal 14 * MIB, Erx::Manifest::RootStartup.boot_kept(**figures, dma_memory: 9 * MIB) - small
-    assert_nil check_archive(boot)
+    room = check_archive(boot)
+    assert_equal machine(boot).values_at(:ram_bytes, :fiasco_reserve).reduce(:-),
+                 room.archive_max_bytes + room.root_memory + room.kept_bytes, 'the room is what the machine leaves'
+    assert_equal boot.archive, room.archive_bytes
     assert_raises(Erx::Manifest::Invalid) do
       Erx::Manifest::RootStartup.check_archive(archive_bytes: boot.archive, root_memory: boot.root_memory,
                                                **machine(boot), dma_memory: 9 * MIB)

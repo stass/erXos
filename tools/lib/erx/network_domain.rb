@@ -4,6 +4,7 @@
 
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'manifest_text'
 require_relative 'medium_boot'
 require_relative 'net_device'
 require_relative 'net_device_echo_server'
@@ -38,9 +39,8 @@ module Erx
   # runs within the development manifest's budget, so the cell also shows that the budget
   # holds the domain through the echo.
   module NetworkDomain
-    # The one edit of the development manifest: a pattern that must match exactly once,
-    # and its replacement, given the match.
-    EDIT = [/^(domain network\n(?:  .*\n)*?  restarts )[0-9]+$/, ->(m) { "#{m[1]}0" }].freeze
+    # The one edit of the development manifest: the network domain is never restarted.
+    EDIT = { ['domain network', 'restarts'] => 0 }.freeze
 
     ECHO_BYTES = 1 << 20
     RECV_PIECE = NetDevice::RECV_PIECE
@@ -85,12 +85,7 @@ module Erx
     module_function
 
     # The development manifest source with EDIT.
-    def manifest(source)
-      pattern, replace = EDIT
-      raise Error, "the manifest does not have exactly one match of #{pattern.source}" unless source.scan(pattern).size == 1
-
-      source.sub(pattern) { replace.call(Regexp.last_match) }
-    end
+    def manifest(source) = ManifestText.set(source, EDIT)
 
     def answer(source) = /\A#{PROMPT}#{source}\r*\n\z/n
 

@@ -315,17 +315,49 @@ module Erx
       # errs high by a few hundred KiB (docs/design-stopgap.md, "The root startup
       # rule"), so an image this refuses fails at boot or comes within that margin of
       # failing. Every figure is in bytes; the platform's come from archive_machine.
+      # An archive that fits returns the figures the rule derived (ArchiveRoom), which
+      # the packer reports, so no comment has to copy them.
       def check_archive(archive_bytes:, root_memory:, dma_memory:, ram_bytes:, fiasco_reserve:, root_withheld:)
         kept = boot_kept(ram_bytes: ram_bytes, fiasco_reserve: fiasco_reserve, archive_bytes: archive_bytes,
                          root_withheld: root_withheld, dma_memory: dma_memory)
         room = ram_bytes - fiasco_reserve - kept
         short = archive_bytes + root_memory - room
-        return unless short.positive?
+        unless short.positive?
+          return ArchiveRoom.new(archive_bytes: archive_bytes, root_memory: root_memory, kept_bytes: kept,
+                                 archive_max_bytes: room - root_memory)
+        end
 
         raise Invalid.new("the archive (#{mib(archive_bytes)}) and root_memory (#{mib(root_memory)}) exceed the " \
                           "#{mib(room)} this machine leaves them (RAM less fiasco_reserve and the #{mib(kept)} " \
                           "the boot keeps) by #{(short + 1023) / 1024} KiB",
                           property: 4, field: 'root_startup')
+      end
+
+      # What check_archive derived for an archive that fits, in bytes: the archive, the
+      # manifest's root_memory, what the boot keeps besides (boot_kept), and the largest
+      # archive this root_memory leaves room for on the machine. The packer's report
+      # carries it as a hash of those names.
+      ArchiveRoom = Data.define(:archive_bytes, :root_memory, :kept_bytes, :archive_max_bytes) do
+        def to_h = super.transform_keys(&:to_s)
+      end
+
+      # The line the image build prints for a pack's report: the archive; its room, the
+      # smaller of what root_memory leaves it on the machine (the report's ArchiveRoom)
+      # and what the root's place leaves it in the single file (place_bytes), naming
+      # which binds; root_memory and how much of it the manifest's budgets promise (the
+      # admission report's promised_memory); and what the boot keeps.
+      def room_line(report, place_bytes:)
+        room = report.fetch('archive_room')
+        promised = report.fetch('manifest').fetch('promised_memory')
+        memory_bytes = room.fetch('archive_max_bytes')
+        bound = if place_bytes < memory_bytes
+                  "the root's place binds; root_memory leaves #{mib(memory_bytes)}"
+                else
+                  "root_memory binds; the root's place leaves #{mib(place_bytes)}"
+                end
+        "archive #{mib(room.fetch('archive_bytes'))}, room for #{mib([memory_bytes, place_bytes].min)} (#{bound}) " \
+          "beside root_memory #{mib(room.fetch('root_memory'))}, of which budgets promise #{mib(promised)}; " \
+          "the boot keeps #{mib(room.fetch('kept_bytes'))}"
       end
 
       # The boot's side of check_archive. The root reports the pool's free pages and its
@@ -543,7 +575,8 @@ module Erx
         if device_memory > RootStartup::CONTIGUOUS_POOL_MAX_BYTES
           invalid("device memory exceeds the #{RootStartup::CONTIGUOUS_POOL_MAX_BYTES >> 20} MiB contiguous pool", 4, 'devices.dma_memory')
         end
-        if principals.sum { |row| row.fetch('memory') } + baseline + device_memory > root_memory
+        promised = principals.sum { |row| row.fetch('memory') } + baseline + device_memory
+        if promised > root_memory
           invalid('principal budgets, system baseline and device memory exceed root memory', 4, 'principals.memory')
         end
         console = text(machine, 'console')
@@ -587,7 +620,7 @@ module Erx
                    'policy_admission' => 'unsupported',
                    'child_plan_instances' => 0, 'dynamic_domain_reservation' => 0,
                    'root_image_private_bytes' => root_private_bytes, 'root_memory' => root_memory,
-                   'dma_memory' => device_memory,
+                   'dma_memory' => device_memory, 'promised_memory' => promised,
                    'effective_system_cpuset' => system_cpus,
                    'effective_users_cpuset' => users_cpus,
                    'context_sha256' => @context.fingerprint }.merge(claims)

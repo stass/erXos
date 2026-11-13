@@ -66,11 +66,12 @@ class SiteTest < Minitest::Test
                         source: Erx::Site.source(ref), disk: Erx::Site.fresh_medium(volume: VOLUME))
   end
 
-  # The page boots the production image, whose manifest's root_memory needs the
-  # development machine's RAM, so terminal.js gives the guest exactly that much.
-  def test_the_page_gives_the_guest_the_development_machines_ram
+  # The page boots the site image, which the image build packs and checks on the site
+  # machine, so terminal.js gives the guest exactly that machine's RAM.
+  def test_the_page_gives_the_guest_the_site_machines_ram
     script = File.read(File.join(REPO, 'site/terminal.js'))
-    assert_equal [Erx::Platform.development(REPO).memory_mib.to_s], script.scan(/^const RAM_MIB = ([0-9]+);$/).flatten
+    site = Erx::ProductionImage::Machine.site(Erx::Platform.development(REPO))
+    assert_equal [site.memory_mib.to_s], script.scan(/^const RAM_MIB = ([0-9]+);$/).flatten
   end
 
   def test_publish_writes_digest_named_files_notices_and_a_checked_image

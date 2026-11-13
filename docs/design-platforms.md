@@ -442,8 +442,8 @@ file QEMU puts the device tree at the next 2 MiB boundary behind the file
 is a fixed image, and its place belongs to the machine an image is built
 for (`ProductionImage::Machine`, through the one linker symbol
 `liberx/backend/fiasco/root.ld` takes from the link). The development
-machine, 256 MiB, links it 64 MiB into RAM, which bounds the single file
-to about 62 MiB and keeps the root inside small machines; below 256 MiB
+machine, 512 MiB, links it 64 MiB into RAM, below the device tree at 128 MiB,
+which bounds the single file to about 62 MiB and keeps the root inside small machines; below 256 MiB
 the device tree sits at half of RAM, so on a machine of roughly 127 to
 137 MiB it lands on the root and bootstrap refuses the boot with
 `place_overlap`. The QEMU oracle's machine, 2 GiB, links it 192 MiB into

@@ -45,7 +45,7 @@ class InteractiveBootTest < Minitest::Test
   end
 
   def test_qemu_runs_on_this_terminal_with_its_monitor_muxed_and_never_reboots
-    argv = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'hvf', cpus: 2, image: '/tree/build/image.boot')
+    argv = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'hvf', cpus: 2, image: '/tree/build/image.boot', memory_mib: 512)
     assert_equal 'qemu-system-aarch64', argv.first
     assert_equal 'mon:stdio', argv.fetch(argv.index('-serial') + 1)
     # The console is the first serial line; the second, the host link's UART, is QEMU's null device.
@@ -53,14 +53,14 @@ class InteractiveBootTest < Minitest::Test
     assert_includes argv, '-no-reboot'
     assert_equal '/tree/build/image.boot', argv.fetch(argv.index('-kernel') + 1)
     assert_equal '2', argv.fetch(argv.index('-smp') + 1)
-    assert_equal PLATFORM.memory_mib.to_s, argv.fetch(argv.index('-m') + 1)
+    assert_equal '512', argv.fetch(argv.index('-m') + 1)
     refute(argv.any? { |word| word.start_with?('file:') })
   end
 
   # The harness's line, after the word that asks for the host link the plan gives the guest.
   def test_each_accelerator_gets_the_harness_kernel_command_line
-    tcg = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'tcg', cpus: 1, image: 'image.boot')
-    hvf = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'hvf', cpus: 1, image: 'image.boot')
+    tcg = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'tcg', cpus: 1, image: 'image.boot', memory_mib: 512)
+    hvf = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'hvf', cpus: 1, image: 'image.boot', memory_mib: 512)
     word = Erx::QemuPlan::HOSTLINK_WORD
     assert_equal ['-append', "#{word} #{Erx::ProductionImage::Run::COMMAND_LINES.fetch('tcg')}"], tcg.last(2)
     assert_equal ['-append', word], hvf.last(2)
@@ -89,6 +89,9 @@ class InteractiveBootTest < Minitest::Test
     assert_equal 'config/manifest/qemu-virt-site.txt', PLATFORM.site_manifest_path
     assert_equal Erx::InteractiveBoot::DIRECTORY, Erx::InteractiveBoot.image_directory(without_web: false)
     assert_equal 'build/production-image/site', Erx::InteractiveBoot.image_directory(without_web: true)
+    # The website's image is packed for, and boots on, the RAM the website gives it.
+    assert_equal 256, Erx::InteractiveBoot.machine(platform: PLATFORM, without_web: true).memory_mib
+    assert_equal PLATFORM.memory_mib, Erx::InteractiveBoot.machine(platform: PLATFORM, without_web: false).memory_mib
   end
 
   # The site manifest is the development manifest without its web domain: the development
@@ -143,7 +146,7 @@ class InteractiveBootTest < Minitest::Test
   # this terminal.
   def test_a_link_puts_the_host_link_on_its_socket_and_attaches_the_medium
     link = Erx::InteractiveBoot::Link.new(socket: '/tree/build/link/socket', medium: '/tree/build/medium.img')
-    argv = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'hvf', cpus: 1, image: '/tree/build/image.boot', link: link)
+    argv = Erx::InteractiveBoot.argv(platform: PLATFORM, accel: 'hvf', cpus: 1, image: '/tree/build/image.boot', memory_mib: 512, link: link)
     assert_equal ['mon:stdio', 'unix:/tree/build/link/socket,server=on,wait=off'],
                  argv.each_index.select { |at| argv[at] == '-serial' }.map { |at| argv[at + 1] }
     drives = argv.each_index.select { |at| argv[at] == '-drive' }.map { |at| argv[at + 1] }

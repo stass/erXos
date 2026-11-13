@@ -208,6 +208,32 @@ module Erx
     # (BOARD_BOOTSTRAPS), or the main build's for any other board.
     def first_stage_path(platform) = BOARD_BOOTSTRAPS.key?(platform.name) ? board_image_path(platform.name) : image_path
 
+    # Where that first stage loads and runs: its link address, the entry of the ELF file
+    # its flat image was made from. Bootstrap never relocates itself
+    # (bootstrap/server/src/Make.rules), and QEMU's loader and the Pi's firmware put it
+    # there (docs/design-platforms.md, "Boot"), so the single file
+    # starts there.
+    def first_stage_address(platform)
+      users = BOARD_BOOTSTRAPS.key?(platform.name) ? "users-#{platform.name}" : 'users'
+      self.class.elf_entry(File.binread(File.join(@build, users, BOOTSTRAP_OBJECTS, 'bootstrap.elf'), 64) || '')
+    rescue SystemCallError => error
+      raise Error, "cannot read the first stage's link address: #{error.message}"
+    end
+
+    # The entry address of a 64-bit little-endian executable ELF file (type ET_EXEC), from
+    # its header's first 64 bytes. Whether the address lies in the machine's RAM is the
+    # caller's check (ProductionImage::Machine#check_single_file).
+    def self.elf_entry(header)
+      raise Error, "the first stage's ELF file has no 64-bit little-endian header" unless
+        header.bytesize == 64 && header.start_with?("\x7fELF\x02\x01".b)
+      raise Error, "the first stage's ELF file is not an executable (ET_EXEC)" unless
+        header.unpack1('S<', offset: 16) == ELF_TYPE_EXEC
+
+      header.unpack1('Q<', offset: 24)
+    end
+
+    ELF_TYPE_EXEC = 2
+
     # The first stage as built: bootstrap's flat image, with neither locator
     # field written (docs/design-kernel.md, "The bootable file"). What boots is
     # this with an archive; BootImage writes both forms.

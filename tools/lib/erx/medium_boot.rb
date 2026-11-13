@@ -10,6 +10,7 @@ require_relative 'abi_source'
 require_relative 'boot_record'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'manifest_text'
 require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu'
@@ -52,9 +53,7 @@ module Erx
     # for the medium manifest's two domains (manifest). RAM grows to 768 MiB, Fiasco keeping about
     # 6% of it, and the root moves up to 192 MiB, as on the QEMU oracle's machine, since the
     # archive below it carries the domain runtime images and the domain release; QEMU puts
-    # the device tree 128 MiB into a machine this large (docs/design-platforms.md). The
-    # programs suite boots on it too, for the room below the root its archive's erx-lvgl
-    # takes (Programs::Run).
+    # the device tree 128 MiB into a machine this large (docs/design-platforms.md).
     def self.machine(platform) = ProductionImage::Machine.development(platform).with(memory_mib: 768, fiasco_reserve_mib: 48,
                                                                                          root_mib: 192)
     # The domain's own budget and its outer one: what native_domain's ERTS domain runs in.
@@ -328,14 +327,9 @@ module Erx
     # domain quota and max_domains each by domains, and max_connections by connections; a
     # negative figure shrinks them.
     def grown(source, memory:, domains:, connections: 0)
-      { /^(principal system\n  memory )([0-9]+)$/ => memory, /^(  root_memory )([0-9]+)$/ => memory,
-        /^(principal system\n(?:  .*\n)*?  domains )([0-9]+)$/ => domains,
-        /^(  max_domains )([0-9]+)$/ => domains, /^(  max_connections )([0-9]+)$/ => connections }
-        .reduce(source) do |text, (pattern, added)|
-          raise Error, "the manifest does not have exactly one line #{pattern.source}" unless text.scan(pattern).size == 1
-
-          text.sub(pattern) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + added}" }
-        end
+      ManifestText.grow(source, { ['principal system', 'memory'] => memory, %w[machine root_memory] => memory,
+                                  ['principal system', 'domains'] => domains, %w[machine max_domains] => domains,
+                                  %w[machine max_connections] => connections })
     end
 
     # The domain's runtime images and release in the archive at path: the indexes of the
@@ -613,8 +607,6 @@ module Erx
       # has a tmp cap above 0: the pool figure must not change, since a tmp cap is charged on use.
       STEPS = [['bare', 'bare', 0], ['blk', 'blk', 0], ['net', 'net', 0],
                ['bare-tmp4', 'bare', 4 << 20]].freeze
-      # The system domain's /tmp cap: the tmp line of the runtime_limits system row.
-      TMP_LINE = /^(runtime_limits system\n(?:  .*\n)*?  tmp )[0-9]+$/
 
       PROFILE = <<~ROW
         share drivers
@@ -681,9 +673,7 @@ module Erx
       # A medium machine's manifest with room for the three domains, the configured rows, and the
       # system domain's /tmp cap at system_tmp bytes.
       def manifest(source, system_tmp:)
-        raise Error, 'the site manifest does not have exactly one tmp line in its runtime_limits system row' unless source.scan(TMP_LINE).size == 1
-
-        MediumBoot.manifest(source.sub(TMP_LINE) { "#{Regexp.last_match(1)}#{system_tmp}" }, domains: RELEASES.size, domain_memory: MEMORY,
+        MediumBoot.manifest(ManifestText.set(source, ['runtime_limits system', 'tmp'] => system_tmp), domains: RELEASES.size, domain_memory: MEMORY,
                                                                           row: PROFILE + RELEASES.keys.map { |name| domain_row(name) }.join)
       end
 

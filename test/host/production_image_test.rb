@@ -536,6 +536,53 @@ class ProductionImageTest < Minitest::Test
     end
   end
 
+  # The single file loads at its first stage's link address and must end at the root's
+  # place, or bootstrap refuses the boot (place_overlap); the image build refuses it
+  # first, naming both figures, and a file that ends exactly at the place is accepted.
+  def test_a_single_file_that_reaches_the_roots_place_is_refused
+    load = PLATFORM.ram_first + (2 << 20)
+    room = DEVELOPMENT.root_address - load
+    assert_equal room, DEVELOPMENT.check_single_file(room, load_address: load)
+    error = assert_raises(Erx::Error) { DEVELOPMENT.check_single_file(room + 4096, load_address: load) }
+    assert_match(/62\.00 MiB.*64 MiB into RAM/, error.message)
+    assert_raises(Erx::Error) { DEVELOPMENT.check_single_file(1, load_address: DEVELOPMENT.root_address) }
+  end
+
+  # A load address below RAM (an ELF entry of 0) would leave the file a room the size of
+  # everything below the root's place, so it is refused rather than measured against.
+  def test_a_load_address_outside_ram_is_refused
+    error = assert_raises(Erx::Error) { DEVELOPMENT.check_single_file(1, load_address: 0) }
+    assert_match(/load address 0 is not in RAM/, error.message)
+  end
+
+  # The first stage's load address is the entry of a 64-bit little-endian executable ELF
+  # file; a short header, another class or a file that is not an executable is refused.
+  def test_the_first_stage_address_is_an_executables_entry
+    header = ("\x7fELF\x02\x01\x01".b.ljust(16, "\0") + [2, 183, 1, 0x4020_0000].pack('S<S<L<Q<')).ljust(64, "\0")
+    assert_equal 0x4020_0000, Erx::Fiasco.elf_entry(header)
+    assert_raises(Erx::Error) { Erx::Fiasco.elf_entry(header[0, 63]) }
+    assert_raises(Erx::Error) { Erx::Fiasco.elf_entry(header.sub("\x02\x01".b, "\x01\x01".b)) }
+    assert_raises(Erx::Error) { Erx::Fiasco.elf_entry(header[0, 16] + [3].pack('S<') + header[18..]) }
+  end
+
+  # The website boots the site image on the machine terminal.js gives its guest, so the
+  # image build packs it on that machine; it is smaller than the development machine.
+  def test_the_site_machine_is_the_websites
+    site = Erx::ProductionImage::Machine.site(PLATFORM)
+    assert_equal [256, 16, DEVELOPMENT.root_mib], [site.memory_mib, site.fiasco_reserve_mib, site.root_mib]
+    assert_operator site.memory_mib, :<, DEVELOPMENT.memory_mib
+  end
+
+  # The room line prints the smaller of the two bounds on the archive and names it.
+  def test_the_room_line_names_the_bound_that_binds
+    report = { 'archive_room' => { 'archive_bytes' => 50 << 20, 'archive_max_bytes' => 280 << 20,
+                                   'root_memory' => 186 << 20, 'kept_bytes' => 8 << 20 },
+               'manifest' => { 'promised_memory' => 178 << 20 } }
+    line = ->(place) { Erx::Manifest::RootStartup.room_line(report, place_bytes: place << 20) }
+    assert_match(/room for 60\.00 MiB \(the root's place binds; root_memory leaves 280\.00 MiB\)/, line.call(60))
+    assert_match(/room for 280\.00 MiB \(root_memory binds; the root's place leaves 300\.00 MiB\)/, line.call(300))
+  end
+
   # The refusal boot means something only on a machine that cannot give root_memory:
   # one no larger than root_memory, of which Fiasco and the archive take a part first.
   # The default machine leaves room for both below RAM less fiasco_reserve.
@@ -665,6 +712,8 @@ class ProductionImageTest < Minitest::Test
   LOGGED_POOL_PAGES = 46_858
   LOGGED_IMAGE = 0x4dc000
   LOGGED_DMA_MEMORY = 1_310_720
+  # The machine that boot ran on: 256 MiB, of which Fiasco kept 16 MiB.
+  LOGGED_MACHINE = DEVELOPMENT.with(memory_mib: 256, fiasco_reserve_mib: 16)
 
   def kept_verifier(machine)
     Dir.mktmpdir('erx-kept-') do |directory|
@@ -689,9 +738,9 @@ class ProductionImageTest < Minitest::Test
     line = "erx: root task: manifest root_memory #{manifest_number(source, 'root_memory')} baseline " \
            "#{manifest_number(source, 'system_baseline')} units #{source.scan(/^unit /).size} " \
            "pool pages #{LOGGED_POOL_PAGES} image #{LOGGED_IMAGE}\r\n"
-    kept_verifier(DEVELOPMENT).call(line)
+    kept_verifier(LOGGED_MACHINE).call(line)
     short = Erx::Platform.new(name: PLATFORM.name, record: PLATFORM.record.merge('root_withheld' => 2_224_128 - 4096))
-    error = assert_raises(Erx::Error) { kept_verifier(DEVELOPMENT.with(platform: short)).call(line) }
+    error = assert_raises(Erx::Error) { kept_verifier(LOGGED_MACHINE.with(platform: short)).call(line) }
     assert_match(/the boot kept 6418432 bytes besides the archive, 4096 more than .*root_withheld 2220032 is too small/, error.message)
     refute_kind_of Erx::Manifest::Invalid, error
     assert_raises(Erx::Error) { kept_verifier(DEVELOPMENT).call(line.sub("pool pages #{LOGGED_POOL_PAGES}", 'pool pages 99999999')) }

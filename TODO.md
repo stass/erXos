@@ -615,9 +615,9 @@ it; git history is the record of completed work.
   (`DisplayDomain.manifest`: the site manifest, an eighth of a CPU, 24 MiB and the unit). The domain release has
   the display boot script (`ReleaseFiles::RELEASE_SCRIPTS`); the development manifest's row needs a CPU grant,
   which the system share's reserve has no room for (storage, network and web take its 2,250 mcpu), and on QEMU
-  virt room: the development manifest leaves 2.5 MiB of `root_memory` unpromised, the gpu's 9 MiB of DMA memory,
-  charged to the system's budget, raises the contiguous pool from 2 MiB to 16 MiB, and the domain's own budget
-  comes on top, so the machine's 256 MiB of RAM grows. The display domain holds its keyboard and tablet only
+  virt `root_memory`: the gpu's 9 MiB of DMA memory, charged to the system's budget, raises the contiguous pool
+  from 2 MiB to 16 MiB, and the domain's own budget comes on top, so the row grows `root_memory` by both, as
+  `DisplayDomain.manifest` does; the 512 MiB development machine has the RAM. The display domain holds its keyboard and tablet only
   once the give is per unit and the unit is the transport page (security residuals, `boot_devices`); QEMU
   virt's four transport pages are the spare's, the display's, the network device's and the disks'.
 * [Medium] `tools/lib/erx/manifest.rb`, `check_framebuffer_windows`: a framebuffer window is checked against the
@@ -909,20 +909,11 @@ it; git history is the record of completed work.
   build-time rule has no site yet; with the release check (M11), refuse a release manifest that grants a facet of
   the `web` interface, with a seeded violation.
 * [Medium] `config/manifest/qemu-virt-development.txt`, the web domain's row: its 24 MiB and its grant, a quarter
-  of one CPU, are estimates, and so are the 256 MiB machine's `root_memory` (180.75 MiB) and the system
+  of one CPU, are estimates, and so are the development manifest's `root_memory` and the system
   principal's 131 MiB that make room for it; no boot-time or memory figure has been recorded for a boot with the
   web domain. Measure the domain with `Footprint` at rest and with the host tool's four connections open, the
   boot's time to the shell before and after the web domain (`tools/erx bench`), and size the row and
   `root_memory` from the figures.
-* [Medium] `config/platforms/qemu-virt.json`, `config/manifest/qemu-virt-development.txt`: the boot archive
-  outgrows the 256 MiB development machine. The archive and `root_memory` must fit RAM less `fiasco_reserve`
-  less what the boot keeps (`RootStartup.check_archive`), and the programs suite's test archive, the largest on
-  that machine, grows by about 1.2 MiB a day of landings (one day's measurement). Lowering `root_memory` again
-  can take at most the 2.5 MiB it leaves unpromised before it takes memory from budgets, which the budget-sum
-  check refuses, so that cut can be made only once more. The lasting fix is more RAM for QEMU virt's
-  development machine: each 32 MiB gives the root about 30 MiB (Fiasco's kernel memory takes about 6%), so
-  `ram_bytes`, `fiasco_reserve`, `root_memory` and the measured figures in the manifest comments and
-  [design-stopgap.md](docs/design-stopgap.md#the-phase-1-manifest-check) move together.
 * [Medium] `erlang/apps/erx_hostlink/src/erx_hostlink_web.erl`, `tools/lib/erx/web_server.rb`,
   [The host tool's front end](docs/design-web.md#the-host-tools-front-end): a restart of the web domain ends the
   system domain's facet with the relay (`exit(shutdown)`), and the session drops the facet's number without
@@ -1464,9 +1455,15 @@ it; git history is the record of completed work.
 * [Low] domain library, PCIe functions on a configured row (`liberx/system/dom_boot_view.c`, `boot_devices`): only
   device-tree selectors get a role word and peripheral, so a PCIe function placed on a configured row would be of
   no kind and get no record, window or memory. No manifest places one; give the kind test a PCIe arm first.
-* [Low] QEMU harness, `Raspi4bShell#check_loads` (`tools/lib/erx/raspi4b_shell.rb`): it refuses an image that
-  reaches the tree, but the native root is linked at 64 MiB (`NativeRoot::DEVELOPMENT_ROOT_MIB`), so an image past
-  about 62 MiB fails only at boot, in bootstrap's `place_overlap`. Refuse an image that reaches the root's place.
+* [Low] image build, the Pi's single file against the root's place (`ProductionImage::Machine#check_single_file`,
+  `Fiasco#first_stage_address`): the bound starts at the entry of users-raspi4b's `bootstrap.elf`, not checked
+  against the address QEMU's raspi4b model and the firmware load it at (`QemuPlan::MACHINES` loads, 0x200000). If
+  they differ the check is off by the difference; confirm they agree on a raspi4b build, or take the load address
+  from the platform.
+* [Low] image build, the place check's reach (`ProductionImage#assemble`): only the production image's build checks
+  its single file against the root's place; `BootImage`'s images (native roots, `function_api`, `libc_test`) link
+  their roots at the same place and fail only at boot, in bootstrap's `place_overlap`. Move the check into
+  `BootFile.write`, the one writer, so every image gets it.
 * [Low] Pi package 5 (docs/plan.md, 1b-I (a) 5), the board pass: confirm on silicon that the mini
   UART's receive interrupt needs IER's `RX_ERRATA` bits (`hw/svd/mini_uart/mini_uart.svd`), which
   `erx_mini_uart` sets as the BCM2835 errata asks and QEMU's model ignores, and drop them if not.

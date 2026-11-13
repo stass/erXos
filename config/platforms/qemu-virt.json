@@ -4,8 +4,8 @@
   "console": "/pl011@9000000",
   "hostlink": "/pl011@9040000",
   "ram_first": 1073741824,
-  "ram_bytes": 268435456,
-  "fiasco_reserve": 16777216,
+  "ram_bytes": 536870912,
+  "fiasco_reserve": 33554432,
   "root_withheld": 2621440,
   "units": [
     {

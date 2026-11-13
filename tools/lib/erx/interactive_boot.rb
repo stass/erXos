@@ -78,14 +78,15 @@ module Erx
     # QemuGate.available_accelerators reads from `qemu-system-aarch64 -accel help`.
     def default_accel(available) = available.include?('hvf') ? 'hvf' : 'tcg'
 
-    # QEMU's argument vector for platform's board: the harness's own plan, with the
-    # memory and the kernel command line its boots of this image use, and the serial line on
+    # QEMU's argument vector for platform's board: the harness's own plan, with
+    # memory_mib of RAM (the machine the image was packed for, machine), the kernel
+    # command line its boots of this image use, and the serial line on
     # this terminal in place of a file. With a link, the host link's UART
     # listens on its socket, without waiting for a client, and the medium is the
     # guest's disk; without one, the UART is QEMU's null device and there is no disk.
-    def argv(platform:, accel:, cpus:, image:, link: nil)
+    def argv(platform:, accel:, cpus:, image:, memory_mib:, link: nil)
       QemuPlan.argv(platform: platform, accel: accel, cpus: cpus, image: image, serial: QemuPlan::CONSOLE,
-                    memory_mib: platform.memory_mib, command_line: ProductionImage::Run::COMMAND_LINES[accel],
+                    memory_mib: memory_mib, command_line: ProductionImage::Run::COMMAND_LINES[accel],
                     hostlink: link&.socket, disks: link ? [QemuPlan::Disk.new(path: link.medium)] : [])
     end
 
@@ -109,6 +110,13 @@ module Erx
       without_web ? platform.site_manifest_source(root) : platform.manifest_source(root)
     end
 
+    # The machine the image is packed and checked on, and boots on: the website's
+    # (Machine.site, the RAM the website gives its guest) when without_web, else the
+    # development machine.
+    def machine(platform:, without_web:)
+      without_web ? ProductionImage::Machine.site(platform) : ProductionImage::Machine.development(platform)
+    end
+
     # Builds the kernel and the image into its directory under root, replacing the
     # image an earlier boot left there. With hostlink, the image's release
     # medium is written beside it, and HOSTLINK_DIRECTORY under root is first
@@ -121,7 +129,7 @@ module Erx
       fiasco.build(jobs: jobs)
       directory = ProductionImage.clear_directory(root: root, path: File.join(root, image_directory(without_web: without_web)))
       image_builder = ProductionImage.new(root: root, runner: runner, compiler: compiler, linker: linker,
-                                          machine: ProductionImage::Machine.development(platform), fiasco: fiasco)
+                                          machine: machine(platform: platform, without_web: without_web), fiasco: fiasco)
       source = manifest_source(root: root, platform: platform, without_web: without_web)
       return Boot.new(image: image_builder.build(directory: directory, manifest_source: source).single, link: nil) unless socket
 

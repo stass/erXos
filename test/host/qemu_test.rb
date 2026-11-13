@@ -164,8 +164,9 @@ class QemuTest < Minitest::Test
   def test_a_plan_without_disks_renders_the_arguments_it_always_did
     plain = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'hvf', image: 'image', serial: 'serial')
     assert_equal plain, Erx::QemuPlan.argv(platform: PLATFORM, accel: 'hvf', image: 'image', serial: 'serial', disks: [])
-    assert_equal %w[qemu-system-aarch64 -machine virt-11.1,gic-version=3 -accel hvf -cpu host -smp 1 -m 256 -display none
-                    -monitor none -nic none -no-reboot -serial file:serial -serial null -kernel image -append erx.hostlink=1], plain
+    assert_equal %w[qemu-system-aarch64 -machine virt-11.1,gic-version=3 -accel hvf -cpu host -smp 1 -m] + [PLATFORM.memory_mib.to_s] +
+                 %w[-display none -monitor none -nic none -no-reboot -serial file:serial -serial null -kernel image
+                    -append erx.hostlink=1], plain
   end
 
   def test_a_disk_is_a_raw_drive_with_a_virtio_blk_device_on_a_non_legacy_transport
@@ -357,33 +358,37 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { transcript.consume(@serial, elapsed: 3) }
   end
 
+  # The platform record's RAM as bootstrap prints it.
+  RAM = "#{PLATFORM.memory_mib}.0 MiB"
+
   def boot_transcript(available:, warning: "development build: trusted code only\r\n",
                       art: "  \\___||_|   /_/\\_\\ \\___/ |___/\r\n")
-    "L4 Bootstrapper\r\n  RAM: 0000000040000000 - 000000004fffffff: 256.0 MiB\r\n" \
-      "  Total RAM: 256.0 MiB; available for Bootstrap/Sigma0/Kernel: #{available}\r\n" \
+    last = format('%016x', PLATFORM.ram_first + (PLATFORM.memory_mib << 20) - 1)
+    "L4 Bootstrapper\r\n  RAM: #{format('%016x', PLATFORM.ram_first)} - #{last}: #{RAM}\r\n" \
+      "  Total RAM: #{RAM}; available for Bootstrap/Sigma0/Kernel: #{available}\r\n" \
       "#{art}\e[1;32merXos\r\n#{warning}"
   end
 
   def test_boot_without_the_banner_art_fails
     qemu = Erx::Qemu.new(root: @directory,
-                         program: fake_guest(output: boot_transcript(available: '256.0 MiB', art: '')))
+                         program: fake_guest(output: boot_transcript(available: RAM, art: '')))
     assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image) }
   end
 
   def test_boot_without_the_development_warning_fails
     qemu = Erx::Qemu.new(root: @directory,
-                         program: fake_guest(output: boot_transcript(available: '256.0 MiB', warning: '')))
+                         program: fake_guest(output: boot_transcript(available: RAM, warning: '')))
     assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image) }
   end
 
   def test_a_guest_that_must_end_the_machine_may_exit_once_its_transcript_is_whole
-    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '256.0 MiB')))
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: RAM)))
     assert_equal 'passed', qemu.run(platform: PLATFORM, accel: 'tcg', image: image, machine_end: true).fetch('state')
   end
 
   def test_a_guest_that_ends_the_machine_early_fails
     qemu = Erx::Qemu.new(root: @directory,
-                         program: fake_guest(output: boot_transcript(available: '256.0 MiB', warning: '')))
+                         program: fake_guest(output: boot_transcript(available: RAM, warning: '')))
     error = assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image, machine_end: true) }
     assert_match(/before completing its transcript/, error.message)
   end
@@ -394,7 +399,7 @@ class QemuTest < Minitest::Test
     { "qemu-system-aarch64: terminating on signal 15 from pid 4242 (<unknown process>)\n" => ' from pid 4242',
       "qemu-system-aarch64: terminating on signal 2\n" => '' }.each do |line, sender|
       qemu = Erx::Qemu.new(root: @directory,
-                           program: fake_guest(output: boot_transcript(available: '256.0 MiB', warning: ''), stderr: line))
+                           program: fake_guest(output: boot_transcript(available: RAM, warning: ''), stderr: line))
       error = assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image) }
       signal = line[/signal (\d+)/, 1]
       assert_equal "QEMU was stopped by signal #{signal}#{sender} before completing its transcript", error.message
@@ -413,7 +418,7 @@ class QemuTest < Minitest::Test
   end
 
   def test_boot_with_consistent_bootstrap_memory_passes
-    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '256.0 MiB')))
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: RAM)))
     report = qemu.run(platform: PLATFORM, accel: 'tcg', image: image)
     assert_equal %w[bootstrap-memory erxos-art erxos-banner development-warning],
                  report.fetch('checkpoints').map { |entry| entry.fetch('name') }
@@ -421,7 +426,7 @@ class QemuTest < Minitest::Test
   end
 
   def test_boot_summary_must_match_guest_ram
-    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: '256.0 MiB')))
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: boot_transcript(available: RAM)))
     error = assert_raises(Erx::Error) { qemu.run(platform: PLATFORM, accel: 'tcg', image: image, memory_mib: 1024) }
     assert_match(/expected '.*Kernel: 1024\.0 MiB'/, error.message)
   end

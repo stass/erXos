@@ -25,6 +25,7 @@ require_relative 'reload_guest'
 require_relative 'code_watch'
 require_relative 'json_input'
 require_relative 'manifest'
+require_relative 'manifest_text'
 require_relative 'native_root'
 require_relative 'native_jit_runtime'
 require_relative 'native_runtime'
@@ -165,6 +166,11 @@ module Erx
             system_growth_mib: 0, tmp_growth_mib: 0, root_mib: NativeRoot::DEVELOPMENT_ROOT_MIB)
       end
 
+      # The machine the website's emulator boots the site image on: the RAM site/terminal.js
+      # gives its guest (RAM_MIB, which test/host/site_test.rb holds to this), Fiasco's
+      # part of it at 6%, rounded up, and the root at the development place.
+      def self.site(platform) = development(platform).with(memory_mib: 256, fiasco_reserve_mib: 16)
+
       def initialize(platform:, **numbers)
         raise Error, 'a machine is on a Platform' unless platform.is_a?(Platform)
 
@@ -177,6 +183,25 @@ module Erx
           root_mib.negative? || root_mib + ROOT_ROOM_MIB > memory_mib
 
         platform.ram_first + (root_mib << 20)
+      end
+
+      # The single file of bytes, loaded at load_address (its first stage's link address,
+      # Fiasco#first_stage_address), must end at or before the root's place, or bootstrap
+      # refuses to place the root over its archive (kernel/core/boot_place.c,
+      # place_overlap). Answers how much the place leaves the file; refuses a file past it,
+      # and a load address outside RAM below the root's place, which would make the bound
+      # meaningless.
+      def check_single_file(bytes, load_address:)
+        unless (platform.ram_first...root_address).cover?(load_address)
+          raise Error, "the first stage's load address #{format('%#x', load_address)} is not in RAM below the root's place " \
+                       "(#{format('%#x', platform.ram_first)} to #{format('%#x', root_address)})"
+        end
+
+        room = root_address - load_address
+        return room if bytes <= room
+
+        raise Error, "the single file is #{Manifest::RootStartup.mib(bytes)} from #{format('%#x', load_address)}, " \
+                     "but the root's place, #{root_mib} MiB into RAM, leaves it #{Manifest::RootStartup.mib([room, 0].max)}"
       end
 
       # The platform record as Pack's manifest check proves this machine's manifest against it.
@@ -193,13 +218,10 @@ module Erx
       def manifest(source)
         raise Error, "/tmp's growth is more than the system's" if tmp_growth_mib > system_growth_mib
 
-        { /^(  root_memory )([0-9]+)$/ => system_growth_mib, /^(  system_baseline )([0-9]+)$/ => system_growth_mib,
-          /^(runtime_limits system\n(?:  .*\n)*?  tmp )([0-9]+)$/ => tmp_growth_mib }
-          .reduce(ProductionImage.without_sessions(source)) do |text, (pattern, growth_mib)|
-            raise Error, "the manifest does not have exactly one line #{pattern.source}" unless text.scan(pattern).size == 1
-
-            text.sub(pattern) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + (growth_mib << 20)}" }
-          end
+        ManifestText.grow(ProductionImage.without_sessions(source),
+                          { %w[machine root_memory] => system_growth_mib << 20,
+                            %w[machine system_baseline] => system_growth_mib << 20,
+                            ['runtime_limits system', 'tmp'] => tmp_growth_mib << 20 })
       end
     end
 
@@ -363,19 +385,34 @@ module Erx
                              *added.inputs].uniq,
                     test_code: test_code, machine: machine)
       single = File.join(directory, 'image.boot')
-      BootFile.write(codec: @codec, first_stage: @fiasco.first_stage_path(machine.platform), archive: archive, output: single, output_root: @root)
-      # image.boot holds every file of the image, the release's included, as packed, so
-      # one look at it finds a file that names the tree (BuildPath). A test image, which
-      # never leaves the build host, is not looked at.
-      host = test_code ? nil : BuildPath.find_in(File.binread(single), root: @root)
-      raise Error, "production image: #{File.basename(single)} holds the build's path #{host}" if host
+      # The single file is written as unchecked and renamed to image.boot only after every
+      # check below has passed, so a refused, failed or interrupted build leaves no
+      # image.boot, its own or an earlier build's, for a later step (tools/build_site.rb) to take.
+      unchecked = "#{single}.unchecked"
+      FileUtils.rm_f(single)
+      BootFile.write(codec: @codec, first_stage: @fiasco.first_stage_path(machine.platform), archive: archive, output: unchecked, output_root: @root)
+      begin
+        # The single file is the first stage and its padding (head), then the archive whole.
+        head = File.size(unchecked) - File.size(archive)
+        room = machine.check_single_file(File.size(unchecked), load_address: @fiasco.first_stage_address(machine.platform))
+        warn "#{directory}: #{Manifest::RootStartup.room_line(report, place_bytes: room - head)}"
+        # image.boot holds every file of the image, the release's included, as packed, so
+        # one look at it finds a file that names the tree (BuildPath). A test image, which
+        # never leaves the build host, is not looked at.
+        host = test_code ? nil : BuildPath.find_in(File.binread(unchecked), root: @root)
+        raise Error, "production image: #{File.basename(single)} holds the build's path #{host}" if host
 
-      header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
-      flags = header.fetch('flags')
-      marked = flags.anybits?(@codec.member('pack_flags', 'test_code'))
-      raise Error, 'the archive header disagrees with the test-code mark asked for' unless marked == test_code
-      raise Error, "the archive header disagrees with the build kind #{BUILD_KIND} the build facts name" unless
-        flags.anybits?(@codec.member('pack_flags', 'development')) == (BUILD_KIND == 'development')
+        header = @codec.decode_layout('erx_pack_header', File.binread(archive, @codec.layout_size('erx_pack_header')))
+        flags = header.fetch('flags')
+        marked = flags.anybits?(@codec.member('pack_flags', 'test_code'))
+        raise Error, 'the archive header disagrees with the test-code mark asked for' unless marked == test_code
+        raise Error, "the archive header disagrees with the build kind #{BUILD_KIND} the build facts name" unless
+          flags.anybits?(@codec.member('pack_flags', 'development')) == (BUILD_KIND == 'development')
+
+        File.rename(unchecked, single)
+      ensure
+        FileUtils.rm_f(unchecked)
+      end
 
       Built.new(single: single, archive: archive, first_stage: @fiasco.first_stage_path(machine.platform),
                 index_hash: header.fetch('index_hash').unpack1('H*'), build_id: header.fetch('build_id').unpack1('H*'),

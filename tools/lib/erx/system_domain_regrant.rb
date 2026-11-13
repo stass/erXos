@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require_relative 'error'
+require_relative 'manifest_text'
 require_relative 'medium_boot'
 require_relative 'production_image'
 require_relative 'session_domain'
@@ -108,7 +109,6 @@ module Erx
       # (connections 1) counts its old pair row until then; the cell relies on a domain
       # boot (seconds) outlasting that release (milliseconds). Losing that race fails
       # the cell with a grant left at none, never a false pass.
-      MAX_CONNECTIONS = /^(  max_connections )([0-9]+)$/
       MORE_CONNECTIONS = 2
 
       # The manifest: MediumBoot's with ROWS, the source's session templates and
@@ -119,10 +119,8 @@ module Erx
         sessions = ProductionImage.sessions(source)
         raise Error, 'the manifest has no session template of the system principal' unless sessions.start_with?("session system\n")
 
-        text = MediumBoot.manifest(source, row: ROWS + sessions + SESSION_FACET, domains: 3)
-        raise Error, 'the manifest does not have exactly one max_connections line' unless text.scan(MAX_CONNECTIONS).size == 1
-
-        text.sub(MAX_CONNECTIONS) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + MORE_CONNECTIONS}" }
+        ManifestText.grow(MediumBoot.manifest(source, row: ROWS + sessions + SESSION_FACET, domains: 3),
+                          { %w[machine max_connections] => MORE_CONNECTIONS })
       end
 
       # The production checkpoints to the system's command shell, root_1's command shell,

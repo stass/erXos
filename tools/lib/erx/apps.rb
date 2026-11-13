@@ -6,6 +6,7 @@ require 'fileutils'
 
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'manifest_text'
 require_relative 'medium_boot'
 require_relative 'output_directory'
 require_relative 'production_image'
@@ -120,8 +121,8 @@ module Erx
     START = { kept: "start #{PRINCIPAL}\n  enable YES\n  restarts 1\n  restart_period_s 600\n",
               disabled: "start #{PRINCIPAL}\n  enable NO\n  restarts 1\n  restart_period_s 600\n",
               unlisted: '' }.freeze
-    GROWTH = { /^(  root_memory )([0-9]+)$/ => MEMORY, /^(  max_domains )([0-9]+)$/ => DOMAINS,
-               /^(  max_connections )([0-9]+)$/ => CONNECTIONS }.freeze
+    GROWTH = { %w[machine root_memory] => MEMORY, %w[machine max_domains] => DOMAINS,
+               %w[machine max_connections] => CONNECTIONS }.freeze
 
     PROMPT = SessionDomain::PROMPT
     CTRL_G = ProductionImage::Run::CTRL_G
@@ -248,18 +249,7 @@ module Erx
     # The development manifest source with clock's principal, template and data grant,
     # the start row of boot (START), and the machine grown to hold clock's sessions.
     def manifest(source, boot:)
-      grown = GROWTH.reduce(source) do |text, (pattern, growth)|
-        edit_once(text, pattern) { |match| Integer(match[2], 10) + growth }
-      end
-      grown + APP + START.fetch(boot)
-    end
-
-    # text with the one match of pattern replaced by its first group followed by what
-    # the block answers for the match; raises unless pattern matches exactly once.
-    def edit_once(text, pattern)
-      raise Error, "the manifest does not match #{pattern.source} exactly once" unless text.scan(pattern).size == 1
-
-      text.sub(pattern) { "#{Regexp.last_match(1)}#{yield Regexp.last_match}" }
+      ManifestText.grow(source, GROWTH) + APP + START.fetch(boot)
     end
 
     # The production checkpoints to the system's command shell, then, in every boot,
