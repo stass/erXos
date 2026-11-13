@@ -1136,13 +1136,14 @@ it; git history is the record of completed work.
   user's actions (a click, the menu), so a client's request only raises; `decorate/2` then needs that state.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device_nif.c`: a move of a bound edge line can lose the one delivery taken under the old label just before the old sink was unregistered, while a level
   line fires again at the bind's acknowledgement. A driver of an edge line looks at its device after binding. The PL011's line is level.
-* [High] `erlang/apps/erx_blk/src/erx_blk_sd_host.erl` (`issued/2`), the request transfer: it expects command
+* [Medium] `erlang/apps/erx_blk/src/erx_blk_sd_host.erl` (`issued/2`), the request transfer: it expects command
   complete before the buffer events and transfer complete, so a controller that raises a data event before the
   response, in a separate interrupt word, fails the request and restarts the storage domain. The start's commands
   take both orders (`command/1`, two tracks as FreeBSD's `cmd_done` and `data_done`, `sdhci.c:1921-1923,
   2057-2059`). On the Pi 4 the start was refused at CMD7 by one of two behaviours, unverified which: CMD7's
   transfer complete in a word before its command complete, or a data end in CMD9's word; the request path may
-  meet the same. One word's events can also reach the next request inside `handle_info`'s fold, after a CMD13
+  meet the same, though on the board littlefs mounted `/data` and a file written there survived a power cycle
+  with no refusal. One word's events can also reach the next request inside `handle_info`'s fold, after a CMD13
   answer starts it; feed the transfer one word at a time as the start's wait is fed. Give the transfer the same
   two tracks: command complete may come at any point before the data track ends, and the request is answered once
   both are done; the exhaustive oracle in `erx_blk_sd_host_tests.erl` then allows the command at any position.
