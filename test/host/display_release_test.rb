@@ -2,12 +2,14 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'minitest/autorun'
+require 'tmpdir'
 require_relative '../../tools/lib/erx/display_release'
 
 # G9's build check (Erx::DisplayRelease): the tree's display release holds no client
-# module, and each seeded fault, a client module in the display release or a display
-# module that names one, fails it.
+# module, and each seeded fault, a client module in the display release, erx's included,
+# or a display module that names one, fails it.
 class DisplayReleaseTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
 
@@ -23,6 +25,20 @@ class DisplayReleaseTest < Minitest::Test
 
   def test_the_tree_passes
     assert_empty Erx::DisplayRelease.check(root: ROOT)
+  end
+
+  # The check reads every application the display script boots, erx among them, so the
+  # widget schema put back into erx, which every domain boots, fails it.
+  def test_a_widget_module_in_erx_fails
+    Dir.mktmpdir('erx-display-release-') do |root|
+      { 'erx' => 'erx_ui_schema', 'erx_win' => 'erx_win_app' }.each do |name, module_name|
+        directory = File.join(root, 'erlang/apps', name, 'src')
+        FileUtils.mkdir_p(directory)
+        File.write(File.join(directory, "#{name}.app.src"), "{application, #{name}, [{modules, [#{module_name}]}]}.\n")
+        File.write(File.join(directory, "#{module_name}.erl"), "-module(#{module_name}).\n")
+      end
+      assert_includes Erx::DisplayRelease.check(root: root).map(&:where), 'erx lists erx_ui_schema'
+    end
   end
 
   def test_a_display_module_that_documents_a_client_module_passes

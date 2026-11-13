@@ -10,9 +10,11 @@ module Erx
     # Emits erx_ui_schema from the `ui` declaration: the widget format's
     # tables and validate/2, the validator of whole widget trees
     # (docs/design-display.md, "Widget trees"). The tables are clauses, one
-    # per kind and per property; the walk and the helpers are fixed text.
+    # per kind and per property; the walk and the helpers are fixed text. It is
+    # erx_win's, the client side, so the display domain's release holds no widget
+    # schema (docs/design-display.md, G9).
     module UIEmitter
-      ERLANG_PATH = 'erlang/apps/erx/src/generated/erx_ui_schema.erl'
+      ERLANG_PATH = 'erlang/apps/erx_win/src/erx_ui_schema.erl'
       WIDTH = 80
 
       module_function

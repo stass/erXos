@@ -11,26 +11,31 @@ module Erx
   # G9's build check (docs/design-display.md, G9): the display domain's release holds no
   # module of a display client, so no draw decoder, picture decoder, font reader, widget
   # module, terminal or pixel allocator reaches the display domain, and none of the
-  # display's own modules names one. The release takes whole applications, so the check
-  # is over the display side's applications, those the display script of the boot table
-  # (ReleaseFiles::DOMAIN_BOOTS) adds to every domain's, module by module:
+  # modules it loads names one. The release takes whole applications, so the check is over
+  # every application the display script of the boot table (ReleaseFiles::DOMAIN_BOOTS)
+  # boots, erx and erx_files among them, module by module:
   #
-  # * a module one of them lists is a client module when a client application
-  #   (CLIENT, what the client script adds to the display's) lists it too, or when its
-  #   name is of a client family (CLIENT_FAMILIES), so a client module moved into the display side is caught by its
-  #   name, and a client application put on the display side by its modules;
+  # * a module one of them lists is a client module when a client application (CLIENT,
+  #   what the client script adds to the display's) lists it too, or when its name is of a
+  #   client family (CLIENT_FAMILIES), so a client module moved out of the client side, to
+  #   the display side or into erx, is caught by its name, and a client application put
+  #   in the display script by its modules;
   # * a source of theirs names a client module, as a call, an apply's module literal, a
   #   quoted atom or a string, once comments and documentation are removed: the dependency
   #   that would fail at run time in the display domain, or pull the module in.
   #
-  # Like DeviceCallers it reads names, so it catches a slip, not an atom built from pieces.
+  # kernel and stdlib are not read: their sources lie in otp/, not erlang/apps/, so an
+  # erXos edit there that named a client module would pass. Like
+  # DeviceCallers it reads names, so it catches a slip, not an atom built from pieces.
   module DisplayRelease
     # The client's module families: the draw protocol, its picture decoders erx_png and
-    # erx_inflate, the widget trees, the terminal and its emulator, the pixel allocator, fonts and the client's
-    # window library (docs/design-display.md, "What runs where").
+    # erx_inflate, the widget trees and their format, the terminal and its emulator, the
+    # pixel allocator, fonts and the client's window library (docs/design-display.md,
+    # "What runs where"). A name, not an application, is what still marks a client module
+    # once it has left the client side, which no list of applications can.
     CLIENT_FAMILIES = /\Aerx_(?:draw|ui|vt|term|font|png|inflate|pixels|win)(?:_|\z)/
-    DISPLAY = (ReleaseFiles::DOMAIN_BOOTS.fetch('display') - ReleaseFiles::DOMAIN_BASE).freeze
-    CLIENT = (ReleaseFiles::DOMAIN_BOOTS.fetch('client') - ReleaseFiles::DOMAIN_BOOTS.fetch('display')).freeze
+    DISPLAY = ReleaseFiles::DOMAIN_BOOTS.fetch('display')
+    CLIENT = (ReleaseFiles::DOMAIN_BOOTS.fetch('client') - DISPLAY).freeze
     Violation = Data.define(:where, :rule) do
       def to_s = "display release (G9): #{where}: #{rule}"
     end

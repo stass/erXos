@@ -15,9 +15,11 @@ module Erx
     # renderer links. The tables (kinds, properties and their types, enums,
     # image types, stopgaps) and the server's records come from the
     # declaration, the records' code through UIFields; the framing, the
-    # per-form code and the reports' fields are fixed text.
+    # per-form code and the reports' fields are fixed text. The Erlang module is
+    # erx_win's, the client side, so the display domain's release holds no widget
+    # codec (docs/design-display.md, G9).
     module UIWireEmitter
-      ERLANG_PATH = 'erlang/apps/erx/src/generated/erx_ui_wire.erl'
+      ERLANG_PATH = 'erlang/apps/erx_win/src/erx_ui_wire.erl'
       C_HEADER_PATH = 'include/erx/ui_wire.h'
       C_SOURCE_PATH = 'display/generated/erx_ui_wire.c'
       # The status block's codes and the reporters' (docs/design-abi.md).

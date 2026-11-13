@@ -393,13 +393,16 @@ the driver, so no screen runs before a driver. `erx_win` holds a
 client's side: the module `erx_win` of the same name, `erx_pixels` with
 its core, `erx_draw` with `erx_draw_conn`, the draw codec and core and
 `erx_draw_image`, `erx_font`, `erx_term` with `erx_vt` and its width
-table, and `erx_ui` with the widget model and renderers; its
+table, and `erx_ui` with the widget model, the widget format's
+generated validator `erx_ui_schema` and codec `erx_ui_wire`, and the
+renderers; its
 application starts `erx_pixels`. The display domain's boot script takes
 `erx_memdraw`, `erx_display` and `erx_fb`, a client's takes
 `erx_memdraw` and `erx_win`, and the system release takes neither side,
 so what the display domain's boot script loads holds no module of
-`erx_win`, and the G9 check refuses a client module placed on the
-display side by mistake.
+`erx_win`, and the G9 check, which reads every application that script
+boots, `erx` and `erx_files` among them, refuses a client module placed
+outside `erx_win` by mistake.
 
 ## Invariants
 

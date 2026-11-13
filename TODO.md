@@ -806,10 +806,8 @@ it; git history is the record of completed work.
   * **The display domain**: the display side gains `erx_winfs`, `erx_window`, `erx_winctl` with its fuzz target,
     the policies and `erx_wm_menu`, and the client side `erx_win`'s library, `erx_draw`, `erx_draw_conn`, `erx_font`,
     `erx_term` and `erx_ui` with its servers and renderers (docs/design-display.md, "What runs where"). The G9 build
-    check (`tools/lib/erx/display_release.rb`) reads module names in the display side's sources; the design's xref
+    check (`tools/lib/erx/display_release.rb`) reads module names in the display script's sources; the design's xref
     check over the display release's beams, with its refusal of calls that start a port or a sub-space, is not built.
-    erx's generated widget modules `erx_ui_wire` and `erx_ui_schema` ship in every release, the display's too,
-    since every domain takes erx; G9 puts widget code on the client side, and the check reads only the display side.
     `erx_screen_core` keeps its plan and takes the design's names: a present for a flush, and no expose, since
     `erx_screen` copies what a layout change uncovers from the windows' buffers.
   * **The widget server** ([The widget server](docs/design-display.md#the-widget-server)): `erx_ui` with `open/1`,

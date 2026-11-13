@@ -226,7 +226,7 @@ class ErxUIWireTest < Minitest::Test
 
   def in_erlang
     Dir.mktmpdir('erx-ui-wire-test') do |work|
-      ErlangBuild.compile(work, applications: %w[erx], tests: TESTS)
+      ErlangBuild.compile(work, applications: %w[erx erx_win], tests: TESTS)
       yield work
     end
   end

@@ -11,14 +11,16 @@
 %% plans it, and erx_draw_image, the decoder of a Y message's compressed
 %% pixels; erx_vt, the terminal emulator's core, with its generated width
 %% table erx_vt_width, which reads erx: links through erx's erx_present;
-%% erx_ui_model, the realised widget tree and its one difference; and
+%% erx_ui_model, the realised widget tree and its one difference; the
+%% widget format's validator erx_ui_schema and its codec erx_ui_wire,
+%% both generated from abi/formats/ui.txt; and
 %% erx_ui_lvgl_core, the LVGL renderer's decisions about its program's
 %% pipes, with erx_ui_lvgl, the shell that performs them.
 {application, erx_win,
  [{description, "erXos display client"},
   {vsn, "1"},
   {modules, [erx_draw_codec, erx_draw_core, erx_draw_image, erx_pixels, erx_pixels_core, erx_ui_lvgl, erx_ui_lvgl_core,
-             erx_ui_model, erx_vt, erx_vt_width, erx_win_app, erx_win_sup]},
+             erx_ui_model, erx_ui_schema, erx_ui_wire, erx_vt, erx_vt_width, erx_win_app, erx_win_sup]},
   {registered, [erx_win_sup, erx_pixels]},
   {applications, [kernel, stdlib, erx, erx_memdraw]},
   {env, []},
