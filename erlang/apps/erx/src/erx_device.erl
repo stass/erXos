@@ -5,7 +5,7 @@
 %% Registers and fields go by name, as tools/gen_hw.rb's table has them from the
 %% CMSIS-SVD source, lower-cased: no address or offset exists here, and a name the table
 %% lacks is badarg, as is anything the table does not allow. read/2, write/3,
-%% read_field/3, write_field/4, field/4 and irq_ack/2 are BIFs in ERTS (beam/bif.tab), since a
+%% read_field/3, write_field/4, field/4, irq_ack/2 and command/2 are BIFs in ERTS (beam/bif.tab), since a
 %% driver makes them one at a time; the clauses below stand for them only in xref and
 %% documentation. open/1, irq_bind/2, irq_bind_owner/2, irq_holder/2, the queue calls and region/3 are NIFs.
 %%
@@ -15,7 +15,14 @@
 %% is one write. It is badarg where a read has a side effect: such a register is written
 %% whole with write/3. Both are badarg for a register the NIF owns, which the SVD source
 %% marks `ownedByNif` (virtio's status, features, queue setup, doorbell and ring
-%% addresses): only the NIF's own sequences write those, negotiate/2 and post/4.
+%% addresses; SDHCI's DMA addresses and command register): only the NIF's own sequences
+%% write those, negotiate/2, post/4 and command/2.
+%%
+%% command/2 issues one SD command: the one 32-bit write of Word to an SD host
+%% controller's command register, cmdtm (docs/design-runtime.md, "Issuing an SD command").
+%% It is badarg for a record whose peripheral is not sdhci and for a word that sets a bit
+%% no field of cmdtm holds or enables DMA, since no ADMA2 queue is ever armed. Only the
+%% block driver's write path, erx_blk_write, calls it (tools/lib/erx/device_posters.rb).
 %%
 %% irq_bind/2 makes the calling process the receiver of `{erx_irq, Dev, Line}`, once per
 %% fire of the line, at the next safe point. A level-sensitive line stays masked until
@@ -28,7 +35,7 @@
 -module(erx_device).
 
 -export([open/1]).
--export([read/2, write/3, read_field/3, write_field/4, field/4]).
+-export([read/2, write/3, read_field/3, write_field/4, field/4, command/2]).
 -export([irq_bind/2, irq_bind_owner/2, irq_holder/2, irq_ack/2]).
 -export([queue_create/4, negotiate/2, post/4, complete/2, region/3]).
 -export([stand_in_fire/2, stand_in_used/3]).
@@ -97,6 +104,11 @@ write_field(_Dev, _Register, _Field, _Value) ->
 %% reads DR once, which pops a byte, and decodes the data and error bits of that word.
 -spec field(device(), register_name(), atom(), non_neg_integer()) -> non_neg_integer().
 field(_Dev, _Register, _Field, _Word) ->
+    erlang:nif_error(undef).
+
+%% One SD command (above): ok, or badarg before any access.
+-spec command(device(), non_neg_integer()) -> ok.
+command(_Dev, _Word) ->
     erlang:nif_error(undef).
 
 %% Line is the index in the spec's `lines`. A bind through the record the line is bound

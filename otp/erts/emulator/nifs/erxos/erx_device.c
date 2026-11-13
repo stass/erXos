@@ -538,6 +538,31 @@ erx_device_write(const erx_device_t *device, const erx_device_register_t *reg, e
 	return (true);
 }
 
+/*
+ * The command register and its DMA enable are found by their table names in sdhci's
+ * table, so only a device of that peripheral reaches the register and the bit is the SVD
+ * source's; a table that does not mark the register owned is refused whole.
+ */
+bool
+erx_device_command(const erx_device_t *device, uint64_t word)
+{
+	const erx_device_peripheral_t *const sdhci = erx_device_peripheral_find("sdhci", sizeof("sdhci") - 1);
+	const erx_device_register_t *cmdtm;
+	uint32_t found, dma;
+
+	if (sdhci == NULL || device->peripheral != sdhci)
+		return (false);
+	found = erx_device_register_named(sdhci, "cmdtm");
+	if (found == sdhci->register_count || !sdhci->registers[found].owned_by_nif)
+		return (false);
+	cmdtm = &sdhci->registers[found];
+	dma = erx_device_field_named(sdhci, cmdtm, "trns_dma");
+	if (dma == cmdtm->field_count || !erx_device_command_allowed(cmdtm, &sdhci->fields[cmdtm->first_field + dma], word))
+		return (false);
+	store(device, cmdtm, cmdtm->offset, word);
+	return (true);
+}
+
 bool
 erx_device_read_field(const erx_device_t *device, const erx_device_register_t *reg, erx_device_element_t element,
     const erx_device_field_t *field, uint64_t *value)

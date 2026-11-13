@@ -118,6 +118,15 @@ bool	erx_device_write_field(const erx_device_t *device, const erx_device_registe
 	    const erx_device_field_t *field, uint64_t value);
 
 /*
+ * Issues one SD command (docs/design-runtime.md, "Issuing an SD command"): the one 32-bit write
+ * of `word` to an SD host controller's command register, cmdtm, which the NIF owns. False,
+ * having touched nothing, for a device whose peripheral is not sdhci and for a word that
+ * erx_device_command_allowed refuses: the NIF arms no ADMA2 queue, so no command it issues
+ * starts a DMA transfer.
+ */
+bool	erx_device_command(const erx_device_t *device, uint64_t word);
+
+/*
  * A field's value in a word already read from the register, with no access to the device.
  * A word wider than the register is refused.
  */

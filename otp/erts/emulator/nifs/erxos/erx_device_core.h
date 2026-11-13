@@ -195,6 +195,18 @@ erx_device_write_allowed(const erx_device_register_t *reg, uint64_t value)
 	return (reg->access != ERX_DEVICE_READ_ONLY && !reg->owned_by_nif && (value & ~reg->writable) == 0);
 }
 
+/*
+ * Whether `word` may be issued to an SD host controller's command register, `cmdtm`, whose
+ * transfer-mode field `dma` is the DMA enable: a word of the register's width that sets
+ * only bits its fields hold and leaves DMA off. The register is owned, so its own
+ * writable mask, which write/3 would apply, is the bound here as well.
+ */
+static inline bool
+erx_device_command_allowed(const erx_device_register_t *cmdtm, const erx_device_field_t *dma, uint64_t word)
+{
+	return (cmdtm->access != ERX_DEVICE_READ_ONLY && (word & ~cmdtm->writable) == 0 && (word & dma->mask) == 0);
+}
+
 static inline bool
 erx_device_field_read_allowed(const erx_device_register_t *reg, const erx_device_field_t *field)
 {

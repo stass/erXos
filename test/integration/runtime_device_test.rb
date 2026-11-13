@@ -59,6 +59,26 @@ class RuntimeDeviceTest < Minitest::Test
     end
   end
 
+  # An SD command goes only through command/2 (docs/design-runtime.md, "Issuing an SD
+  # command"): write/3 refuses the command register, even by a name taken from a map, and
+  # command/2 refuses a word that enables DMA, one wider than the register and a device that
+  # is not an SD host controller. 16#113A0010 is CMD17 with an R1, its checks, data and a read.
+  def test_an_sd_command_is_issued_only_by_command
+    assert_equal 'ok', evaluate(<<~'ERLANG')
+      {ok, D} = erx_device:open(#{peripheral => sdhci, window => stand_in, lines => []}),
+      {ok, U} = erx_device:open(#{peripheral => pl011, window => stand_in, lines => []}),
+      Names = #{command => cmdtm},
+      {'EXIT', {badarg, _}} = (catch erx_device:write(D, maps:get(command, Names), 16#11000000)),
+      ok = erx_device:command(D, 16#113A0010),
+      16#113A0010 = erx_device:read(D, cmdtm),
+      {'EXIT', {badarg, _}} = (catch erx_device:command(D, 16#113A0011)),
+      {'EXIT', {badarg, _}} = (catch erx_device:command(D, 1 bsl 32)),
+      {'EXIT', {badarg, _}} = (catch erx_device:command(U, 0)),
+      16#113A0010 = erx_device:read(D, cmdtm),
+      io:format("~s~n", [ok]), halt().
+    ERLANG
+  end
+
   def test_a_hosted_runtime_has_no_real_device
     assert_equal 'ok', evaluate(<<~'ERLANG')
       {error, enotsup} = erx_device:open(#{peripheral => pl011, window => {physical, 16#9000000, 4096}, lines => [33]}),

@@ -155,6 +155,18 @@ erx_device_field_4(BIF_ALIST_4)
 	BIF_RET(make_value(BIF_P, value));
 }
 
+/* command(Dev, Word): one SD command, the only write of the controller's command register. */
+BIF_RETTYPE
+erx_device_command_2(BIF_ALIST_2)
+{
+	const erx_device_t *const device = decode_device(BIF_ARG_1);
+	uint64_t word;
+
+	if (device == NULL || !decode_value(BIF_ARG_2, &word) || !erx_device_command(device, word))
+		BIF_ERROR(BIF_P, BADARG);
+	BIF_RET(am_ok);
+}
+
 /*
  * A BIF because a driver makes it once per interrupt. It is a service call on Fiasco, as a
  * NIF's would be, on the normal scheduler the design's deadlock argument allows. A bad

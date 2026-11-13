@@ -6536,10 +6536,10 @@ document's "residual risks accepted" paragraph.
   needs "only the block driver's device process (`erx_blk_virtio`) opens a block record", which no check holds. Scope the rule per device class. Rename
   `erx_blk_write`, which now posts reads too, to what it is (for example `erx_blk_post`).
 * [Low] erx_blk, `tools/lib/erx/device_posters.rb`: the check that only `erx_blk_write` posts sees only literal
-  calls: a call whose module comes from a macro, a variable or `apply/3` escapes it. design-storage.md's U4 extends
-  it over the driver applications: `erx_device:command/2` held like `post/4`, `erx_device` never a value (only the
-  module of a literal remote call), and no atom made from data; the SVD's `ownedByNif` mark on `cmdtm` makes
-  `erx_device:write/3` refuse the SD command register.
+  calls, and holds `erx_device:command/2` to `erx_blk_write` the same way: a call whose module comes from a macro,
+  a variable or `apply/3` escapes it. design-storage.md's U4 extends it over the driver applications: `erx_device`
+  never a value (only the module of a literal remote call), and no atom made from data, with the seeded violations
+  of design-storage.md's verification (`M:command/2`, `list_to_existing_atom/1`).
 * [Medium] runtime, `otp/erts/emulator/nifs/erxos/erx_device.c`: a device record maps the pages that hold its window
   (`erx_device_window_pages`), and an open of another window in one of those pages answers `ebusy`, so only one of
   QEMU `virt`'s eight virtio-mmio slots per page can be driven at a time (the QEMU plan's second disk, on

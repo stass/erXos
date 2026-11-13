@@ -22,7 +22,7 @@ class DevicePostersTest < Minitest::Test
     paths = Erx::DeviceCallers::SCOPE.flat_map { |glob| Dir.glob(glob, base: ROOT) }
     files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
     assert_empty Erx::DevicePosters.violations(files).map(&:to_s)
-    assert_match Erx::DevicePosters::POSTED, files.fetch(WRITE_PATH)
+    assert_match Erx::DevicePosters::NAMED.fetch('post'), files.fetch(WRITE_PATH)
   end
 
   def test_a_seeded_post_outside_the_write_path_is_refused
@@ -39,6 +39,19 @@ class DevicePostersTest < Minitest::Test
     end
     assert_equal [['erlang/apps/erx_uart/src/seeded.erl', 1]], lines_of('erlang/apps/erx_uart/src/seeded.erl' => SEEDED)
     assert_equal [['otp/lib/stdlib/src/seeded.erl', 1]], lines_of('otp/lib/stdlib/src/seeded.erl' => SEEDED)
+  end
+
+  # command/2 has one site, the write path: a post site of another transport may not issue
+  # an SD command either.
+  COMMANDED = "c(D, W) -> erx_device:command(D, W).\n"
+
+  def test_a_seeded_command_outside_the_write_path_is_refused
+    assert_equal [[DRIVER, 1]], lines_of(DRIVER => COMMANDED)
+    assert_equal [[DRIVER, 1]], lines_of(DRIVER => "f(A) -> erlang:apply(erx_device, command, A).\n")
+    net = 'erlang/apps/erx_net/erxos/erx_virtio_net.erl'
+    assert_equal [[net, 1]], lines_of(net => COMMANDED)
+    assert_equal [[net, 1]], lines_of(net => "-import(erx_device, [command/2]).\n")
+    assert_empty lines_of(WRITE_PATH => COMMANDED)
   end
 
   def test_other_device_calls_the_write_path_and_tests_are_not_refused

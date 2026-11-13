@@ -420,6 +420,44 @@ check_shared_page(void)
 	CHECK(erx_device_read(erx_device_get(b), ibrd, plain, &value) && value == 3);
 	return (b);
 }
+
+/*
+ * An SD command (docs/design-runtime.md, "Issuing an SD command"): write/3 refuses the owned
+ * command register, command/2 writes it, and command/2 refuses a word that enables DMA, sets
+ * a bit no field holds, or names a device that is not an SD host controller. Returns the
+ * device opened.
+ */
+static uint32_t
+check_sd_command(uint32_t uart)
+{
+	const erx_device_peripheral_t *const sdhci = erx_device_peripheral_find("sdhci", 5);
+	const erx_device_register_t *const cmdtm = register_of(sdhci, "cmdtm");
+	const uint64_t dma = field_of(sdhci, cmdtm, "trns_dma")->mask;
+	/* CMD17 with an R1, CRC and index checks, data present and a read: from the table. */
+	const uint64_t read_block = (UINT64_C(17) << field_of(sdhci, cmdtm, "cmd_index")->shift) |
+	    field_of(sdhci, cmdtm, "cmd_data")->mask | field_of(sdhci, cmdtm, "trns_read")->mask |
+	    field_of(sdhci, cmdtm, "trns_blk_cnt_en")->mask;
+	erx_device_spec_t spec = spec_of("sdhci", 0xfe340000);
+	uint32_t device = 99;
+	uint64_t value = 1;
+
+	spec.size = sdhci->window_size;
+	spec.lines[0] = 158;
+	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_OK);
+	const erx_device_t *const record = erx_device_get(device);
+
+	CHECK(cmdtm->owned_by_nif && !erx_device_write(record, cmdtm, plain, read_block));
+	CHECK(erx_device_command(record, read_block));
+	CHECK(erx_device_read(record, cmdtm, plain, &value) && value == read_block);
+	CHECK(!erx_device_command(record, read_block | dma));
+	CHECK(!erx_device_command(record, dma));
+	CHECK(!erx_device_command(record, UINT64_C(1) << 32));
+	CHECK(!erx_device_command(record, ~cmdtm->writable & UINT32_MAX));
+	CHECK(erx_device_read(record, cmdtm, plain, &value) && value == read_block);
+	CHECK(!erx_device_command(erx_device_get(uart), 0));
+	CHECK(erx_device_command(record, 0));
+	return (device);
+}
 #endif
 
 /* What open refuses makes nothing visible, and a window already open is that device again. */
@@ -493,6 +531,9 @@ check_open(const char *name, uint64_t block_bytes)
 #endif
 	next = check_shared_line(name) + 1;
 	check_binds(device, next - 1);
+#ifndef ERX_DEVICE_FIXTURE
+	next = check_sd_command(device) + 1;
+#endif
 	for (uint32_t base = next; base < ERX_DEVICE_MAX; base++) {
 		spec = spec_of(name, 0x9000000 + UINT64_C(0x1000) * base);
 		spec.lines[0] = 40 + base;

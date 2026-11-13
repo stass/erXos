@@ -53,6 +53,15 @@ class ErxDeviceTest < Minitest::Test
   PER_RECORD = ["\t\tif (find_line(spec, line, &entries[line]))\n\t\t\tcontinue;\n",
                 "\t\tif (false && find_line(spec, line, &entries[line]))\n\t\t\tcontinue;\n"].freeze
 
+  # The seeded fault of the command register (docs/design-storage.md, "Verification and
+  # testing"): command/2 without its DMA check.
+  NO_DMA_CHECK = ['!erx_device_command_allowed(cmdtm, &sdhci->fields[cmdtm->first_field + dma], word)',
+                  'false'].freeze
+
+  def test_a_command_without_its_dma_check_fails_the_harness
+    assert_match(/FAILED .*erx_device_command\(record, read_block \| dma\)/, seeded_failure(NO_DMA_CHECK))
+  end
+
   def test_a_bind_check_that_ignores_the_shared_mark_fails_the_harness
     assert_match(/FAILED .*ERX_DEVICE_BIND_SHARED/, seeded_failure(SHARED_MARK))
   end
