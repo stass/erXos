@@ -185,6 +185,7 @@ Third-party components are allowed when they pay for themselves.
   or Erlang API and permissive licenses (ISC, BSD, MIT, Apache-2.0). A
   browser-side dependency of the web client may have a TypeScript API
   instead. A permanent copyleft dependency needs explicit agreement first.
+  OFL-1.1 is allowed for font data only.
 * Record every dependency, with its purpose, license and status (`permanent`
   or `stopgap`), in the dependency table of [docs/design.md](docs/design.md).
 * External tools are invoked as subprocesses, never linked: the compilers
