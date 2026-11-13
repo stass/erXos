@@ -1024,9 +1024,9 @@ streams and capabilities: its grants and its facets, each by its name,
 from which `erx_cmd:facet(Ctx, Name)` returns the facet or
 `{error, no_facet}`. A module declares the facets it needs with
 `-erx_needs(Names)`, which the shell checks before it runs the command.
-A session's facets are its domain's (`erx_facets:domain/0`):
-each facet the domain service minted for the domain, a pid by its name
-(`erx:caps/0`), the inspect facet among them. A session's inspector
+A session's facets are its domain's (`erx:caps/0`):
+each facet the domain service minted for the domain, a pid by its name,
+the inspect facet among them. A session's inspector
 queries, of its own domain's paths included, go through that one facet,
 whose scope, its principal's domains or `root`'s `all` in a development
 build, the domain service fixed when it minted the facet and the session

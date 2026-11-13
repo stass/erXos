@@ -82,13 +82,13 @@ standard input at its end and standard output and error the terminal,
 whose write function takes a command's bytes unchanged and whose
 run_shell its commands get in their context, the command
 namespace of the shell's release and the session's facets, read for
-each command (erx_facets:domain/0).
+each command (erx:caps/0).
 """.
 -spec new(erx_shell:terminal()) -> {erx_shell_eval:runner(), state()}.
 new(Terminal = #{write := Write}) ->
     {Table, _Problems} = erx_shell_namespace:from_applications([erx_shell]),
     S = state(#{cwd => <<"/">>, fds => #{0 => null, 1 => {tty, Write}, 2 => {tty, Write}},
-                table => Table, facets => fun erx_facets:domain/0}),
+                table => Table, facets => fun erx:caps/0}),
     JobControl = case Terminal of
                      #{job_control := Shell} -> {Shell, line};
                      _ -> none

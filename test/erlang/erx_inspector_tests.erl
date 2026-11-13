@@ -325,8 +325,8 @@ overview_fits_80_columns_test() ->
 %% A development host's runtime stands for the system domain, which is
 %% handed no facet and asks its own query worker at scope `all`.
 a_development_host_is_the_system_domain_test() ->
-    ?assert(erx_facets:system()),
-    ?assertEqual(#{}, erx_facets:domain()),
+    ?assertEqual(?SYSTEM, erx_inspector:runtime_domain()),
+    ?assertEqual(#{}, erx:caps()),
     ?assertMatch({ok, #{kind := domain}}, erx_inspector:inspect([domains, ?SYSTEM])).
 
 %% Outside the system domain a query goes to the domain's inspect facet as

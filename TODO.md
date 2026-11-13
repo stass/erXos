@@ -3037,7 +3037,14 @@ it; git history is the record of completed work.
   `[domains, Id | _]` for the runtime's own domain. A process listed in a session links to
   `/proc/processes/<pid>` in the browser, which names it; `[domains, Id, processes]`, declared with paginated
   entries rather than children, needs the web client's entries view (W3) before a browser shows it. `erx_inspector:runtime_domain/0`
-  reads the boot page, and `collect/2`, `entries/2` and `proc_id/1` each call it, and `erx_facets:system/0` reads it too; read the
+  reads the boot page, and `collect/2`, `entries/2` and `proc_id/1` each call it, and `is_system_runtime/0` reads it too; read the
+  domain's (`erx_kernel_records:system_domain/0`, a constant 4), so the local scope `[Id]` a session's inspect
+  facet has (`erx:cap(inspect)`) reaches none of them: `erx:i` there answers `{error, scope}` for them and
+  `top`'s header prints `-`. Read the kernel records of the caller's group, budget and threads, and collect
+  `[domains, Id | _]` for the runtime's own domain. A process listed in a session links to
+  `/proc/processes/<pid>` in the browser, which names it; `[domains, Id, processes]`, declared with paginated
+  entries rather than children, needs the web client's entries view (W3) before a browser shows it. `runtime_domain/0`
+  reads the boot page, and `collect/2` calls it after the scope decision; read the
   domain once at the edge (one exported reader) and pass it in. The system domain's runtime is the node
   `system@<host>` at creation 4 (`tools/lib/erx/system_domain.rb`), yet `erx_process_records:proc_id/2` still
   names a pid of its own runtime by the runtime's domain rather than by the creation the pid carries; drop that
@@ -5549,6 +5556,8 @@ to the corpus and follow rc
   exports itself to Web when the system domain calls it with `{export, Web}`, and today only the host link's `web` facet
   sends one, for root's development session: the network login (`erx_web_login`) must not export its sessions'
   lines through the same call. Not yet consistent at `all` in a
+  lines through the same call. The facet the session item under Bugs mints, taken by `erx:cap(inspect)`,
+  is the better source of the scope; with it the line's own `scope` goes. Not yet consistent at `all` in a
   session's runtime: `[domains, 4, threads]` through `entries/2` is gated only on the domain, not on the runtime
   (`erx_inspector:collects_domain/2` covers `collect/2` alone), and `/proc/cpus` answers a partial empty
   listing where the stopgap refuses a task's `erx_object_info`, which `erx_kernel_records:listing/6` should

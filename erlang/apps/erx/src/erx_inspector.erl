@@ -124,7 +124,7 @@ entries(Path) ->
     query({entries, Path}).
 
 query(Query) ->
-    route(erx_facets:system(), erx:cap(inspect), Query).
+    route(is_system_runtime(), erx:cap(inspect), Query).
 
 -doc """
 Where a query goes: in the system domain (System true) to a local query
@@ -374,16 +374,23 @@ record by data: `[processes, erx_inspector:proc_id(Pid)]`.
 proc_id(Pid) ->
     erx_process_records:proc_id(Pid, runtime_domain()).
 
--doc """
-The domain this runtime is: the one its boot page names (erx_dist:boot/0)
-on erXos, and on a development host, where one trusted runtime stands for
-the system domain, the system domain's id, as erx_facets:system/0 reads it.
-""".
+-doc "The domain this runtime is, the one its boot page names (boot/0).".
 -spec runtime_domain() -> non_neg_integer().
 runtime_domain() ->
+    element(1, boot()).
+
+%% Whether this runtime is the system domain's: the one whose boot page names the system
+%% domain's id and no system connection, so a runtime with only one of the two, a misread
+%% boot page, is another domain and asks its inspect facet rather than its own worker.
+is_system_runtime() ->
+    boot() =:= {erx_kernel_records:system_domain(), none}.
+
+%% The boot page (erx_dist:boot/0) on erXos; a runtime that is not erXos's, as on a
+%% development host, is one trusted runtime standing for the system domain.
+boot() ->
     case erlang:system_info(os_type) of
-        {unix, erxos} -> element(1, erx_dist:boot());
-        _ -> erx_kernel_records:system_domain()
+        {unix, erxos} -> erx_dist:boot();
+        _ -> {erx_kernel_records:system_domain(), none}
     end.
 
 first_page(Items) when length(Items) =< ?ERX_INSPECT_PAGE_MAX -> {ok, Items};

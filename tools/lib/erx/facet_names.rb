@@ -35,7 +35,7 @@ module Erx
   #   under which its grantees hold its facets: a grant in a create spec handed to
   #   erx_domain:create/1 or in start_session/2's Start, less its display and
   #   default_display, which name services and are no facets, a lookup (erx:cap/1, erx_cmd:facet/2, a
-  #   key read from erx:caps/0 or erx_facets:domain/0), a command's -erx_needs, a
+  #   key read from erx:caps/0), a command's -erx_needs, a
   #   mount of {facet, Name}, a
   #   server's mint (erx_facet:provide/2 and serve/2, erx_driver_ctl's start_mint and
   #   mint_request) and a mint request {erx_facet_mint, Tag, Name, ...}, each with its
@@ -90,8 +90,7 @@ module Erx
       /(?<![A-Za-z0-9_@])facets\s*=>\s*\#(?<map>\{(?:[^{}]|\g<map>)*\})/,
       /(?<![A-Za-z0-9_@])erx\s*:\s*cap\s*\(\s*(?<name>#{NAME})\s*\)/,
       /(?<![A-Za-z0-9_@])erx_cmd\s*:\s*facet\s*\(\s*[A-Z_][A-Za-z0-9_@]*\s*,\s*(?<name>#{NAME})\s*\)/,
-      /(?<![A-Za-z0-9_@])maps\s*:\s*(?:get|find|is_key)\s*\(\s*(?<name>#{NAME})\s*,\s*erx_facets\s*:\s*domain\s*\(/,
-      /\#\{(?<names>[^{}]*?)\}\s*=\s*erx_facets\s*:\s*domain\s*\(/,
+      /\#\{(?<names>[^{}]*?)\}\s*=\s*erx\s*:\s*caps\s*\(/,
       /\{\s*erx_facet_mint\s*,\s*[A-Za-z_][A-Za-z0-9_@]*\s*,\s*(?<name>#{NAME})\s*,/,
       /(?<![A-Za-z0-9_@])maps\s*:\s*(?:get|find|is_key)\s*\(\s*(?<name>#{NAME})\s*,\s*erx\s*:\s*caps\s*\(/,
       /(?<![A-Za-z0-9_@])erx_facet\s*:\s*(?:provide|serve)\s*\(\s*(?<name>#{NAME})\s*,/,

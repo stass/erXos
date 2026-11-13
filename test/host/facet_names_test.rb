@@ -72,8 +72,8 @@ class FacetNamesTest < Minitest::Test
     source = <<~'ERL'
       -erx_needs([seeded, rogue]).
       a(C) -> erx_cmd:facet(C, rogue).
-      b() -> maps:get(rogue, erx_facets:domain(), undefined).
-      c() -> #{seeded := S, rogue := R} = erx_facets:domain().
+      b() -> maps:find(rogue, erx:caps()).
+      c() -> #{seeded := S, rogue := R} = erx:caps().
       d(T, G, L) -> {erx_facet_mint, T, rogue, G, L}.
       e() -> maps:get(rogue, erx:caps()).
       f() -> erx_facet:provide(rogue, self()).

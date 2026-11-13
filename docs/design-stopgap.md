@@ -1565,7 +1565,7 @@ development manifest gives it the `net` record, and its row's arguments name
 principal's sessions and `network_ctl`, its driver-control facet, to the system domain.
 The system release ships neither the stack nor its client, `erx_net_client`
 (`ReleaseFiles::SYSTEM_APPLICATIONS`), and the system domain holds no `net` facet
-(`erx_facets:domain/0`; [design-system.md](design-system.md#the-manifest), property 15),
+([design-system.md](design-system.md#the-manifest), property 15),
 so its command shell refuses `ifconfig`, `ping` and `host` with `no_facet`; they run in
 root's session, whose `erx_net_client` reaches the grant through its `grant` key.
 

@@ -17,8 +17,8 @@ service, which reads the name when it mints.
 
 -doc """
 Starts the process in the system domain, the erXos runtime whose boot page
-names the system domain's id and no system connection, as erx_facets reads
-it; `ignore` in every other runtime, which serves no facet.
+names the system domain's id and no system connection, read from
+erx_dist:boot/0; `ignore` in every other runtime, which serves no facet.
 """.
 -spec start_link() -> {ok, pid()} | ignore.
 start_link() ->
