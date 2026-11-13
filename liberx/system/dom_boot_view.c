@@ -59,6 +59,7 @@ static const char *boot_principals(erx_dom_lib_t *, const erx_manifest_view_t *,
 		    const erx_dom_boot_tables_t *);
 static bool	boot_pages(uint64_t, uint64_t, erx_dom_range_t *);
 static bool	boot_pages_meet(const erx_dom_device_entry_t *, const erx_dom_device_entry_t *);
+static bool	boot_lines_meet(const erx_dom_device_entry_t *, const erx_dom_device_entry_t *);
 static const char *boot_units(const erx_manifest_view_t *, erx_dom_device_entry_t *);
 static const char *boot_devices(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_device_entry_t *, erx_dom_device_t *);
@@ -233,6 +234,19 @@ boot_pages_meet(const erx_dom_device_entry_t *a, const erx_dom_device_entry_t *b
 	    x->base < y->base + y->size && y->base < x->base + x->size);
 }
 
+/* Whether two entries name one interrupt line; an entry with no line, a PCIe function's, shares none. */
+static bool
+boot_lines_meet(const erx_dom_device_entry_t *a, const erx_dom_device_entry_t *b)
+{
+	for (uint32_t x = 0; x < a->nlines; x++) {
+		for (uint32_t y = 0; y < b->nlines; y++) {
+			if (a->lines[x] == b->lines[y])
+				return (true);
+		}
+	}
+	return (false);
+}
+
 /*
  * The kind of a device-tree device, erx/device_kinds.h's row of its role and
  * compatible string, whose names its holder's record carries; NULL for a
@@ -302,15 +316,19 @@ boot_units(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries)
  * holder, and a record per entry with no holder and no object yet. A
  * device-tree device has its register window, as whole pages, and its
  * line; a PCIe function has neither, since configuration space gives
- * them. Units are derived from register pages, since a page has at most
- * one MMIO object: devices whose pages meet are one unit, so the manifest
+ * them. Units are closed under sharing a register page and sharing an
+ * interrupt line (docs/design-shared-devices.md, "The unit rule"), since a
+ * page has at most one MMIO object and a line one IRQ object: devices
+ * whose pages meet or that name one line are one unit, so the manifest
  * must have them in one unit row, which has one holder. A unit split
- * across two rows, two holders on one page included, refuses the view.
- * So does a unit on a configured row whose own devices share a page: a
- * give windows one device, and the library refuses a window over a page
- * another entry's window meets, so every creation of that row would fail;
- * only the system domain, whose windows the root makes, may hold such a
- * unit until the catalogue's entry is the unit (TODO.md).
+ * across two rows, two holders on one page or one line included, refuses
+ * the view. So does a unit on a configured row whose own devices share a
+ * page or a line: a give windows one device and makes an IRQ object for
+ * each of its lines, and the library refuses a window over a page another
+ * entry's window meets, as the kernel refuses a second IRQ object on a
+ * line, so every creation of that row would fail; only the system domain,
+ * whose windows and lines the root makes, may hold such a unit until the
+ * catalogue's entry is the unit (TODO.md).
  * So does a device marked confined: the stopgap's catalogue lists no IOMMU
  * stream, and a confined device is given only on one; and DMA memory that is
  * not whole pages, which no give can make.
@@ -365,13 +383,17 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 	}
 	for (uint32_t a = 0; a < count; a++) {
 		for (uint32_t b = a + 1; b < count; b++) {
-			if (!boot_pages_meet(&entries[a], &entries[b]))
+			const bool page = boot_pages_meet(&entries[a], &entries[b]);
+
+			if (!page && !boot_lines_meet(&entries[a], &entries[b]))
 				continue;
 			if (entries[a].unit != entries[b].unit)
-				return ("manifest: devices that share a register page are in two units");
+				return (page ? "manifest: devices that share a register page are in two units" :
+				    "manifest: devices that share an interrupt line are in two units");
 			/* One unit has one holder (boot_units), so a's row is b's. */
 			if (entries[a].row != ERX_MF_NONE)
-				return ("manifest: devices of a unit a configured domain holds share a register page");
+				return (page ? "manifest: devices of a unit a configured domain holds share a register page" :
+				    "manifest: devices of a unit a configured domain holds share an interrupt line");
 		}
 	}
 	view->ndevices = count;

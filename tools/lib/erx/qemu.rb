@@ -76,8 +76,10 @@ module Erx
     LAST_TRANSPORT = 31
     # The transport the network device sits on: bus .23 at 0x0a002e00, which the development
     # manifest names as the network device (config/platforms/qemu-virt.json). Eight
-    # transports share a 4 KiB page and a page is one device's (erx_device), so the disks
-    # keep the top page, buses .31 to .24, and the network device takes the page below it.
+    # transports share a 4 KiB page, and the transports of a page are one unit, which goes
+    # whole to one domain (docs/design-shared-devices.md, "The unit rule"); the disks and
+    # the network device go to different domains, so the disks keep the top page, buses
+    # .31 to .24, and the network device takes the page below it.
     NIC_TRANSPORT = 23
     # The domain slirp's DHCP server hands the guest in its lease (option 15), which the
     # guest's resolver takes as its search list.

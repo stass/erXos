@@ -849,6 +849,23 @@ module Erx
         unless @context.platform['console'] == console && (@context.platform.fetch('hostlink', '') == hostlink)
           invalid('UART paths disagree with checked platform', 8, 'machine.console')
         end
+        check_uart_lines(rows, console, hostlink)
+      end
+
+      # Property 8's line clause (docs/design-shared-devices.md, "Lines inside a domain"):
+      # the console and the host link each start their own UART's driver, and the owner of
+      # its line when the line is shared, and a line has one binder, so the two UARTs must
+      # not name one line. Both UARTs are placed device-tree devices (check_uarts).
+      def check_uart_lines(rows, console, hostlink)
+        return if hostlink.empty?
+
+        console_line, hostlink_line = [console, hostlink].map do |path|
+          rows.fetch('devices').find { |device| device['path'] == path }.fetch('line')
+        end
+        return unless console_line == hostlink_line
+
+        invalid("console #{console} and host link #{hostlink} UARTs share interrupt line #{console_line}", 8,
+                'machine.hostlink')
       end
 
       # The holder of the unit whose devices include the device at path.

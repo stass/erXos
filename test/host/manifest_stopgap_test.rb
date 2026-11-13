@@ -427,6 +427,25 @@ class ManifestStopgapTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 8, 'machine.console', source)
   end
 
+  # Property 8's line clause (docs/design-shared-devices.md, "Lines inside a domain"): the
+  # console and the host link each start the owner of their UART's line, and a line has
+  # one binder, so the host link's PL011 moved onto the console's line, and into the
+  # console's unit, which the system domain holds whole and the unit rule therefore
+  # accepts, is refused. The shipped records, whose two UARTs are on lines of their own,
+  # pass every other test here.
+  def test_a_console_and_host_link_on_one_line_are_refused
+    platform = platform_with do |value|
+      units = value.fetch('units')
+      hostlink = units.find { |unit| unit.fetch('key') == 'hostlink-uart' }
+      console = units.find { |unit| unit.fetch('key') == 'console-uart' }.fetch('devices')
+      console << hostlink.fetch('devices').first.merge('line' => console.first.fetch('line'))
+      units.delete(hostlink)
+    end
+    source = ManifestContextFixture.substitute(@source, /^unit hostlink\n  placement "hostlink-uart"\n  holder system\n/, '')
+    refused(Erx::Manifest::Invalid, 8, 'machine.hostlink', source, context(platform: platform),
+            message: /share interrupt line 33/)
+  end
+
   # The network stack runs in the system domain in Phase 1, over the device its unit
   # places there (docs/design-stopgap.md, "Device records").
   def test_a_network_device_is_admitted

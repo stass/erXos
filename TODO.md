@@ -2510,13 +2510,33 @@ it; git history is the record of completed work.
   `erx_dom_plan_device_give`: the catalogue has an entry per device, so a
   unit of several devices that share a register page (the Raspberry Pi 4's
   mini UART and auxiliary SPI controllers, two of QEMU `virt`'s virtio-mmio
-  transports, 0x200 apart) cannot be given to a configured domain: each
-  entry's window covers the shared page and the give refuses overlapping
-  entries, so the boot view, and with it the build, refuses such a unit on a
-  configured row. Make the give the unit's, with one window per page run and
-  one IRQ object per distinct line, as
-  [design-shared-devices.md](docs/design-shared-devices.md#the-unit-rule) has it, before a board places
-  such a unit outside the system domain.
+  transports, 0x200 apart), or that share a line, cannot be given to a
+  configured domain: each entry's window covers the shared page and the give
+  refuses overlapping entries, and each entry's give makes its line's IRQ
+  object, which the kernel refuses a second time, so the boot view, and with
+  it the build, refuses such a unit on a configured row. Make the give the
+  unit's, with one window per page run and one IRQ object per distinct line,
+  as [design-shared-devices.md](docs/design-shared-devices.md#the-unit-rule)
+  has it, before a board places such a unit outside the system domain.
+* [Medium] domain library, `liberx/system/dom_boot_view.c`, `boot_devices`:
+  the refusal of a split unit says which relation met (a register page or an
+  interrupt line) but not which two devices or which line, where
+  [design-shared-devices.md](docs/design-shared-devices.md#refusals) names
+  both devices. Record the pair's two entry indices in the view, print them
+  from `tools/host/dom_plan.c`, map them to device paths and the line in
+  `Manifest` `check_plans`, and have the root's log line print both paths from
+  the manifest's strings; assert the names in `test/host/dom_planner_test.rb`.
+* [Medium] device service, `erlang/apps/erx_domain/src/erx_devices.erl`: the
+  boot view relates only the devices the manifest places, and the platform
+  records list a few of the machine's devices (QEMU `virt`'s record lists 3 of
+  its 32 virtio-mmio transports), so a holder's page can cover, and its line
+  carry, devices no record names. They go to no domain, so no page or line is
+  held twice, but the device service's boot check of
+  [design-shared-devices.md](docs/design-shared-devices.md#the-unit-rule),
+  which relates the catalogue to the kernel's listing and gives a unit the
+  machine splits differently to no domain, does not exist, and
+  `Erx::Platform` does not check that a record's own units, placed or not,
+  are closed under sharing a page and a line.
 * [Low] domain library, `dom_core.c` request planning: a requested
   domain's args and env are checked against `ERX_BOOT_STRINGS_MAX` alone,
   while its boot page also holds both node names, so a request that
@@ -6227,8 +6247,7 @@ document's "residual risks accepted" paragraph.
 * [Low] runtime and drivers, shared interrupt lines
   ([design-shared-devices.md](docs/design-shared-devices.md#lines-inside-a-domain)): the device NIF makes one IRQ
   object per record line (`erx_device.c`, `take_lines`) and keeps one binding per record line (`erx_device_nif.c`,
-  `bindings`), so two records on one line fail at the second create; the boot view relates units by page only
-  (`dom_boot_view.c`, `boot_devices`); `erx_irq_line`, its owner and the check that only it binds or acknowledges a
+  `bindings`), so two records on one line fail at the second create; `erx_irq_line`, its owner and the check that only it binds or acknowledges a
   line do not exist, and drivers call `irq_bind/2` and `irq_ack/2` themselves. No supported board runs two drivers on
   one line. Residual once built: a line owner keeps no deadline per firing, so a hung driver holds its sharers
   masked until the unit is restarted.

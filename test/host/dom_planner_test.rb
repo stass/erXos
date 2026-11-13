@@ -407,21 +407,74 @@ class DomPlannerTest < Minitest::Test
     end
   end
 
-  # The platform record's units, with the network transport moved into the block
-  # transport's register page: the view derives units from pages, so two units that
-  # share one are a split unit, whether one holder takes both or two do. No view is
-  # built from such a manifest, so no row is created from it and nothing is given.
+  # The device of the platform record's unit key, the record's units having one each.
+  def device_of(platform, key) = platform.fetch('units').find { |unit| unit.fetch('key') == key }.fetch('devices').first
+
+  # Every checked-in manifest over its own board's platform record: the view relates the
+  # board's devices by page and by line (docs/design-shared-devices.md, "The unit rule"),
+  # and every unit the records list is closed under both, the Raspberry Pi 4's five
+  # PL011s on one page and line, and its mini UART and auxiliary SPI controllers, included.
+  def test_every_checked_in_manifest_keeps_its_units_whole
+    manifests = Dir[File.join(ROOT, 'config/manifest/*.txt')]
+    assert_operator manifests.size, :>=, 3
+    manifests.each do |path|
+      board = File.basename(path, '.txt').delete_suffix('-development').delete_suffix('-site')
+      platform = JSON.parse(File.read(File.join(ROOT, Erx::Platform.record_path(board))))
+      context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: platform))
+      admitted = Erx::Manifest.admit(source: File.binread(path), codec: @codec, context: context, planner: @planner)
+      refute_empty admitted.bytes, path
+    end
+  end
+
+  # The design's page fixture (docs/design-shared-devices.md, "Verification"): the network
+  # transport moved into the block transport's register page, two adjacent virtio-mmio
+  # transports 0x200 apart, each still on a line of its own. Two units that share a page
+  # are a split unit, whether one holder takes both or two do. No view is built from such
+  # a manifest, so no row is created from it and nothing is given.
   def test_units_that_share_a_register_page_fail_the_build
     platform = JSON.parse(JSON.generate(@context.platform))
-    block = platform.fetch('units').find { |unit| unit.fetch('key') == 'block' }.fetch('devices').first
-    platform.fetch('units').find { |unit| unit.fetch('key') == 'net' }.fetch('devices').first['base'] = block.fetch('base') - 0x200
+    block = device_of(platform, 'block')
+    device_of(platform, 'net')['base'] = block.fetch('base') - 0x200
+    refute_equal block.fetch('line'), device_of(platform, 'net').fetch('line')
     @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
     two = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
     [@source, two].each do |source|
       error = assert_raises(Erx::Manifest::Invalid) { admit(source) }
       assert_equal [12, 'view'], [error.property, error.field], error.message
-      assert_match(/share a register page/, error.message)
+      assert_match(/share a register page are in two units/, error.message)
     end
+  end
+
+  # The design's line fixture: the network transport moved onto the block transport's
+  # line, each on a page of its own, so the two units share only a line (PL2's seeded
+  # manifest). The kernel gives a line one IRQ object, so this too is a split unit,
+  # whether one holder takes both or two do.
+  def test_units_that_share_only_an_interrupt_line_fail_the_build
+    platform = JSON.parse(JSON.generate(@context.platform))
+    block = device_of(platform, 'block')
+    device_of(platform, 'net')['line'] = block.fetch('line')
+    @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
+    two = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
+    [@source, two].each do |source|
+      error = assert_raises(Erx::Manifest::Invalid) { admit(source) }
+      assert_equal [12, 'view'], [error.property, error.field], error.message
+      assert_match(/share an interrupt line are in two units/, error.message)
+    end
+  end
+
+  # A unit of two devices on pages of their own that share a line: the root makes the
+  # system domain's IRQ objects itself, so the system domain may hold it, but a give
+  # makes an IRQ object for each device's line and the kernel refuses a second on one
+  # line, so every creation of a configured row holding it would fail. The view refuses
+  # that placement, and so the build does.
+  def test_a_configured_row_holding_a_unit_whose_devices_share_a_line_fails_the_build
+    platform = JSON.parse(JSON.generate(@context.platform))
+    net = platform.fetch('units').find { |unit| unit.fetch('key') == 'net' }.fetch('devices')
+    net << net.first.merge('path' => '/virtio_mmio@a000e00', 'base' => 0x0a000e00, 'placement_key' => 'net-second')
+    @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
+    assert_equal 1, admit(@source).report.fetch('child_plan_instances')
+    held = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
+    refused(held, 'view', /a configured domain holds share an interrupt line/)
   end
 
   # A unit of two devices that share a register page, as QEMU virt's virtio-mmio
