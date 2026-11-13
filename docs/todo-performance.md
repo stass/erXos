@@ -963,6 +963,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   file requests per batch instead of two, at most once a second per family.
   Settled by the store's write time per batch under `tools/erx bench` on the Pi 4,
   against a writer that keeps its files open.
+* **[Low] log service, a record past the rate is escaped before it is dropped**
+  (`erx_syslog_core`, `write/4`): a domain at its rate still makes the system domain
+  escape every record it sends, up to 16 records of 4 KiB per `write`, and its name
+  with each. Since the escape never shortens text, a record whose head and raw text
+  already pass the rate could be dropped unescaped. Settled by the time of `write/4`
+  for a domain past its rate under the 256-domain flood above.
 * **[Medium] SSH, a login's latency.** Every SSH login starts a session domain from the principal's template, and a key login adds a question to the vault for the principal's login keys and an Ed25519 check in the system domain's small verifier ([design-ssh.md](design-ssh.md#risks-and-open-questions)). Settle it with `tools/erx bench ssh-login`, to be written: the time from the client's TCP connect to the first byte of `echo hi`'s output, for a key login and for a passphrase login, on QEMU `virt` under HVF and on the Pi 4, beside the time of a console login's session start as its baseline. If the session start dominates, the fix belongs to domain creation, not to SSH.
 * **[Medium] crypto, the cost of `crypto` in the interpreter image.** The interpreter image links `crypto`'s and `asn1rt_nif`'s NIFs and OpenSSL's `libcrypto`, which command domains and, in deterministic mode, every domain but the system domain map, and on the Pi 4's Cortex-A72, if it lacks the cryptographic extension (unverified), AES runs in OpenSSL's NEON code ([design-crypto.md](design-crypto.md#risks-and-open-questions)). Settle it with the interpreter image's size beside the system image's, and `tools/erx bench` numbers for SSH's bulk transfer, `ssh -T host cat` over 64 MiB with each offered cipher, in a domain of the interpreter image and of the BeamAsm image, on QEMU `virt` under HVF and on the Pi 4. If AES-GCM is slow on the Pi 4, ChaCha20-Poly1305, first in SSH's list, already serves clients that offer it.
 

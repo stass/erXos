@@ -65,6 +65,7 @@
              erx_schema,
              erx_source,
              erx_stdio,
+             erx_syslog_core,
              erx_text,
              erx_text_tables,
              erx_trace,

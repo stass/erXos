@@ -167,7 +167,7 @@ system domain's own records until the domain service has named the
 system principal; `NAME` the domain's name and `TEXT` the record's text,
 both through the line escape. Everything before `NAME` is the service's
 own text and ASCII by construction. A record's text is at most
-`log_text_max`, 4 KiB, before escaping, as `erx_console_log` admits it.
+`log_write_text_max`, 4 KiB, before escaping, as `erx_console_log` admits it.
 
 A kernel record keeps the line the kernel's log core rendered:
 
@@ -269,12 +269,12 @@ principal's data grant is rooted at its own directory
 service log 9
   operation write 1
 limit log_write_max u32 16
-limit log_text_max u32 4096
+limit log_write_text_max u32 4096
 ```
 
 `write` takes a list of at most `log_write_max` pairs `{Level, Text}`,
 each level one of the logger's eight and each text a binary of at most
-`log_text_max` bytes, and answers `ok` once the service has taken the
+`log_write_text_max` bytes, and answers `ok` once the service has taken the
 batch. The facet's decoder refuses anything else with
 `{error, badarg}`, counted. The facet row's `max_request` bounds a
 request's encoding and its `in_flight` the requests at once, as for every
@@ -385,6 +385,9 @@ later second renders `erx_syslog: domain ID: N records dropped`, at
 level `notice`, for each entry with drops, and empties the table. So
 every drop is shown on a line of its own, a domain's that has since
 ended included, and the table holds at most the domains of one second.
+A second is as the ticks divide it: a write is charged to the table of the
+last turn, so across a turn that comes late a domain can have up to twice
+the rate stored under one second's time.
 
 ### The kernel's records
 
@@ -679,7 +682,7 @@ Each test names the seeded failure that proves the code under test ran.
 
 **Fuzz target**, landing with its parser: `erx_log_facet`'s `write`
 decoder, built from the production module, admits only a list of at
-most `log_write_max` pairs of a level and a text within `log_text_max`.
+most `log_write_max` pairs of a level and a text within `log_write_text_max`.
 Nothing else here parses untrusted input: a batch's process reads one
 byte and the size of each stored file, `erx_logfs` passes bytes through
 uninterpreted, and `take/0`'s reader already has its target.
