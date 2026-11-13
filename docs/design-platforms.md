@@ -335,7 +335,19 @@ the line's owner, `erx_irq_line`, of which it is the one member, as every
 driver on a shared line does
 ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain));
 the legacy controller has no driver, as the SPI controllers on the mini
-UART's line have none. The VL805
+UART's line have none. The platform record's unit `sd` holds both
+windows, EMMC2's at `0xfe340000` and the legacy controller's,
+`/soc/mmc@7e300000` (`bcm283x.dtsi:423-429`), at `0xfe300000`, each
+`0x100` bytes on record line 158 (GIC SPI 126, at the binding's offset of 32,
+unverified on the board). Its device-kinds row makes EMMC2's record
+`block sdhci`, the CMSIS-SVD peripheral of `hw/svd/sdhci/sdhci.svd`;
+the legacy controller, the board's Wi-Fi SDIO host (`non-removable`,
+`mmc-pwrseq = <&wifi_pwrseq>` in the board's tree), matches no row and
+gets no record; whether it can master the bus is for the board probe.
+The record marks EMMC2 unconfined and `hostile`, with 1 MiB of DMA
+memory for the ADMA2 mode, as the virtio block device's. A
+manifest gives the unit to the storage domain as its unit `block`, the
+name `storage_ctl` acts on. The VL805
 USB controller sits behind the Pi 4's PCIe bridge, which no domain drives,
 so no domain holds it and the Pi 4 has no USB. Its cores have the CRC32
 instructions but not the cryptography extension, so SHA-256, which every
@@ -1209,9 +1221,10 @@ and 1.8 V, and neither SDMA nor ADMA2 (the fields,
 alone. It ORs EMMC2's interrupt with the legacy controller's into one
 GIC line (`hw/arm/bcm2838_peripherals.c:97-104`; `hw/arm/bcm2838.c:198-204`).
 Its card bus is empty unless a card is attached to it, so the harness
-attaches the medium as an `sd-card` device on EMMC2's bus; the bus's
-path for `-device sd-card,drive=...,bus=...` is the one the model's
-`info qtree` shows, which the harness's first run records. The model's
+attaches the medium as an `sd-card` device on EMMC2's bus,
+`-device sd-card,drive=...,bus=/generic-sdhci/sd-bus`, with a drive id
+other than `sd0`, which the model's own card on the legacy controller
+takes ([research-sdhci-qemu-model.md](research-sdhci-qemu-model.md)). The model's
 card is standard capacity up to 2 GiB and high capacity above, and takes
 an image of a power-of-two size up to 2 GiB and of a multiple of 512 KiB
 above (`hw/sd/sd.c:59, 595-600, 3120-3141`), so the harness pads the

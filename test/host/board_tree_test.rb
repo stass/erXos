@@ -81,10 +81,10 @@ class BoardTreeTest < Minitest::Test
     refute_match(/\d{4}-\d\d-\d\d/, notice)
   end
 
-  # The record's units, the mini UART's page, the PL011s' and GENET's, against the board's
+  # The record's units, the mini UART's page, the PL011s', GENET's and the SD controllers', against the board's
   # tree: each device's path, compatible string, base on the CPU, size and line, as the
   # production image suite checks QEMU virt's record against QEMU's tree. GENET sits on
-  # /scb, whose two address cells and ranges differ from /soc's.
+  # /scb and EMMC2 on /emmc2bus, whose two address cells and ranges differ from /soc's.
   def test_the_records_devices_match_the_board_tree
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
     built = Erx::BoardTree.build(root: ROOT, runner: runner, platform: PI, compiler: ENV.fetch('ERX_CLANG', 'clang'),
@@ -104,13 +104,14 @@ class BoardTreeTest < Minitest::Test
         [row.take(child), row[child, root_cells], row.drop(child + root_cells)].map { |part| join_cells(part) }
       end]
     end
-    assert_equal %w[/scb /soc], buses.keys.sort
+    assert_equal %w[/emmc2bus /scb /soc], buses.keys.sort
     assert_equal [], Erx::BoardTree.device_problems(PI, nodes: nodes, ranges: ranges)
 
-    # Seeded faults, on the mini UART's unit and on GENET's: a line one off, a base a page off,
-    # a path the tree lacks, and GENET's second line in place of its first.
+    # Seeded faults, on the mini UART's unit, GENET's and EMMC2's: a line one off, a base a page
+    # off, a path the tree lacks, and GENET's second line in place of its first.
     seeds = { 'console-uart' => [line_off_by_one, page_off, path('/soc/serial@7e215000')],
-              'net' => [line_off_by_one, page_off, path('/scb/ethernet@7d590000'), second_line] }
+              'net' => [line_off_by_one, page_off, path('/scb/ethernet@7d590000'), second_line],
+              'sd' => [line_off_by_one, page_off, path('/emmc2bus/mmc@7e350000')] }
     seeds.each do |key, faults|
       faults.each do |name, fault|
         refute_empty Erx::BoardTree.device_problems(first_device_changed(key, &fault), nodes: nodes, ranges: ranges),

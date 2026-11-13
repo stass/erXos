@@ -443,8 +443,9 @@ it; git history is the record of completed work.
   of its memory, where [design-device-tree.md](docs/design-device-tree.md) ("The `given` record") and
   [design-device-dma.md](docs/design-device-dma.md) ("Device addresses and reach") have it give the bus address.
   Until it does, `erx_boot_dma_absent` (`liberx/backend/core/boot_manifest.c`) refuses a device whose DMA range has
-  bus addresses unlike its CPU addresses, with the reason `offset`, and the device gets no DMA memory: a row for
-  the Raspberry Pi 4's EMMC2, whose bus addresses start at 0xc0000000, would move blocks by programmed I/O. Record
+  bus addresses unlike its CPU addresses, with the reason `offset`, and the device gets no DMA memory: the Raspberry
+  Pi 4's EMMC2 (unit `sd`, config/platforms/raspi4b.json), whose bus addresses start at 0xc0000000, gets none of
+  its 1 MiB and moves blocks by programmed I/O. Record
   the offset in the object the root makes from the tree's range, and drop `offset`.
 * [Low] stopgap, `liberx/backend/fiasco/runtime_entry.c` (`tree_facts`): the root accepts the firmware's tree
   and joins its facts to the catalogue's entries once, before any give, but after step 8 of
@@ -1297,6 +1298,22 @@ it; git history is the record of completed work.
 * [Low] Pi package 5 (docs/plan.md, 1b-I (a) 5), the board pass: confirm on silicon that the mini
   UART's receive interrupt needs IER's `RX_ERRATA` bits (`hw/svd/mini_uart/mini_uart.svd`), which
   `erx_mini_uart` sets as the BCM2835 errata asks and QEMU's model ignores, and drop them if not.
+* [High] domain library, `liberx/system/dom_boot_view.c` (`boot_view` device pass): a configured domain cannot hold a
+  unit whose devices share an interrupt line, because a give makes an IRQ object for each device's line and the kernel
+  refuses a second on one line, so the view refuses the placement ("devices of a unit a configured domain holds share
+  an interrupt line"). [design-shared-devices.md](docs/design-shared-devices.md) ("Lines inside a domain") and
+  [design-storage.md](docs/design-storage.md) ("The SD controller's line") give the Raspberry Pi 4's unit `sd`, EMMC2
+  and the legacy SD controller on line 158, whole to the storage domain, so the Pi's development manifest places no
+  storage domain until a give makes one IRQ object per distinct line of the unit and hands it to every record that
+  names the line. Needed before the SD driver runs on the Pi.
+* [Medium] SD host controller, `hw/svd/sdhci/sdhci.svd` (docs/design-storage.md, "The SD host controller"), unnamed
+  bits: the file names only the bits FreeBSD's `sdhci.h` names, so `write_field/4` writes every other bit of a word
+  back as zero. In `CONTROL0` that is the block gap control byte, whose stop at block gap and continue requests
+  the device NIF always owns: a driver's field write to `CONTROL0` clears them. The file also shows the four
+  fields the NIF owns ([design-device-dma.md](docs/design-device-dma.md), "Register ownership"), `CONTROL0`'s
+  `DMA_SELECT` and `CONTROL2`'s `ADMA2_LENGTH_MODE`, `HOST_V4_ENABLE` and `ADDRESSING_64BIT`, as plain fields,
+  since the generator has no field mark (the field-ownership item). Programmed I/O sets none of them; the
+  field marks, or the ADMA2 mode's design, settle how the driver changes these words.
 * [Medium] GENET, `hw/svd/genet/genet.svd` (docs/plan.md, 1b-I (c)), unnamed bits: the file names
   only the bits FreeBSD's `if_genetreg.h` names. `write/3` refuses a word with any other bit set, and
   `write_field/4` writes every other bit back as zero, while FreeBSD reads, modifies and writes back

@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+     SPDX-License-Identifier: BSD-2-Clause
+
+     An SD host controller with the SD Host Controller Specification's version 3.00
+     register set, the Raspberry Pi 4's EMMC2 (`brcm,bcm2711-emmc2`), written by erXos
+     from two sources. The SD Association's SD Host Controller Simplified Specification,
+     version 4.20, gives each register's layout, cited as "HC" with section and printed
+     page; it is not in the tree, whose redistribution its terms do not grant. FreeBSD's
+     sys/dev/sdhci/sdhci.h, releng/15.0 at 2b7df8c16dc77a6774a4d309477b1238fe725d93
+     (SHA-256 363ed505d9ec77603b1b0d46e689da80600e72ce5948d5b2efe70571059b2b78, the
+     same file as 14.3.0-RELEASE's), names the bits, cited by line. A bit FreeBSD leaves
+     unnamed is in no field, so write/3 refuses a word that sets it; where FreeBSD
+     reads or writes a register it does not split into bits, the field is that register,
+     narrowed to the bits HC defines (docs/design-storage.md, "The SD host controller").
+
+     The controller takes 32-bit accesses only (docs/research-sdhci-bcm2711.md,
+     "Register access: width and spacing", point 1), so this file describes it in
+     32-bit words, each named for the 8- and 16-bit registers it holds, and a driver
+     changes a narrower register with write_field/4, which writes the word's other
+     writable fields back as read and its read-only bits as zero; write/3 refuses a word
+     with a read-only bit set, such as CLOCK_INT_STABLE once the clock runs. Writing
+     CMDTM issues the command. The window is the device tree's
+     node, 0x100 bytes (docs/design-platforms.md, "Raspberry Pi 4 Model B").
+
+     The device NIF owns DMA_ADDRESS and ADMA_ADDRESS, which aim the controller at
+     memory, and CMDTM, which it writes only through erx_device:command/2. The block gap
+     control byte of CONTROL0 carries the stop at block gap and continue requests,
+     which the NIF owns too: FreeBSD names no bit of that byte, so no field holds them
+     and write/3 refuses a word that sets one. The NIF also owns four fields, which
+     change where or how the controller reads addresses or descriptors
+     (docs/design-device-dma.md, "Register ownership"): CONTROL0's DMA_SELECT and
+     CONTROL2's ADMA2_LENGTH_MODE, HOST_V4_ENABLE and ADDRESSING_64BIT. The generator
+     has no mark for a field (TODO.md), so the file shows them as plain fields; no
+     path turns DMA on while CMDTM is the NIF's. -->
+<device schemaVersion="1.3">
+  <name>SDHCI</name><version>3</version>
+  <description>SD host controller, SD Host Controller Specification version 3.00 register set</description>
+  <addressUnitBits>8</addressUnitBits><width>32</width>
+  <peripherals>
+    <peripheral>
+      <name>SDHCI</name><baseAddress>0</baseAddress>
+      <addressBlock><offset>0</offset><size>0x100</size><usage>registers</usage></addressBlock>
+      <registers>
+        <register>
+          <name>DMA_ADDRESS</name><ownedByNif>true</ownedByNif>
+          <description>SDHCI_DMA_ADDRESS (sdhci.h:102): the SDMA system address, or with host version 4 the 32-bit block count (HC 2.2.1, p.36)</description>
+          <addressOffset>0x0</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ADDRESS</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>BLKSIZECNT</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_BLOCK_SIZE and SDHCI_BLOCK_COUNT (sdhci.h:104, 115): block size and 16-bit block count (HC 2.2.2-2.2.3, p.37-39)</description>
+          <addressOffset>0x4</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>BLKSIZE</name><description>Transfer block size in bytes (sdhci.h:113)</description><bitOffset>0</bitOffset><bitWidth>12</bitWidth></field>
+            <field><name>SDMA_BNDRY</name><description>SDMA buffer boundary, 4 KiB shifted left by the value (sdhci.h:105-113)</description><bitOffset>12</bitOffset><bitWidth>3</bitWidth></field>
+            <field><name>BLKCNT</name><description>Blocks to transfer (sdhci.h:115)</description><bitOffset>16</bitOffset><bitWidth>16</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>ARG</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_ARGUMENT (sdhci.h:117): the command's argument (HC 2.2.4, p.40)</description>
+          <addressOffset>0x8</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ARGUMENT</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>CMDTM</name><ownedByNif>true</ownedByNif>
+          <description>SDHCI_TRANSFER_MODE and SDHCI_COMMAND_FLAGS (sdhci.h:119, 126): transfer mode and command; writing the word issues the command (HC 2.2.5-2.2.6, p.41-47)</description>
+          <addressOffset>0xc</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>TRNS_DMA</name><description>DMA enable (sdhci.h:120)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TRNS_BLK_CNT_EN</name><description>Block count enable (sdhci.h:121)</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TRNS_ACMD12</name><description>Auto CMD12 enable (sdhci.h:122)</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TRNS_READ</name><description>Data direction: 1 card to host (sdhci.h:123)</description><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TRNS_MULTI</name><description>Multiple block select (sdhci.h:124)</description><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CMD_RESP</name><description>Response type: 0 none, 1 136 bits, 2 48 bits, 3 48 bits with busy (sdhci.h:127-131)</description><bitOffset>16</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>CMD_CRC</name><description>Command CRC check enable (sdhci.h:132)</description><bitOffset>19</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CMD_INDEX_CHECK</name><description>Command index check enable (sdhci.h:133)</description><bitOffset>20</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CMD_DATA</name><description>Data present select (sdhci.h:134)</description><bitOffset>21</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CMD_TYPE</name><description>Command type: 0 normal, 1 suspend, 2 resume, 3 abort (sdhci.h:135-139)</description><bitOffset>22</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>CMD_INDEX</name><description>Command index, SDHCI_COMMAND (sdhci.h:141); six bits (HC 2.2.6, p.45)</description><bitOffset>24</bitOffset><bitWidth>6</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>RESP[%s]</name><ownedByNif>false</ownedByNif><dim>4</dim><dimIncrement>0x4</dimIncrement>
+          <description>SDHCI_RESPONSE (sdhci.h:143): response bits 32n to 32n+31 (HC 2.2.7, p.48)</description>
+          <addressOffset>0x10</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>DATA</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_BUFFER (sdhci.h:145): the buffer data port; a read takes the next word from the buffer (HC 2.2.8, p.49)</description>
+          <addressOffset>0x20</addressOffset><access>read-write</access><readAction>modify</readAction>
+          <fields>
+            <field><name>DATA</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>PRESENT</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_PRESENT_STATE (sdhci.h:147) (HC 2.2.9, p.50)</description>
+          <addressOffset>0x24</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>CMD_INHIBIT</name><description>Command line in use (sdhci.h:148)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DAT_INHIBIT</name><description>Data lines in use (sdhci.h:149)</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DAT_ACTIVE</name><description>Data line active (sdhci.h:150)</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RETUNE_REQUEST</name><description>Re-tuning request (sdhci.h:151)</description><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DOING_WRITE</name><description>Write transfer active (sdhci.h:152)</description><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DOING_READ</name><description>Read transfer active (sdhci.h:153)</description><bitOffset>9</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SPACE_AVAILABLE</name><description>Buffer write enable (sdhci.h:154)</description><bitOffset>10</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_AVAILABLE</name><description>Buffer read enable (sdhci.h:155)</description><bitOffset>11</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CARD_PRESENT</name><description>Card inserted (sdhci.h:156)</description><bitOffset>16</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CARD_STABLE</name><description>Card state stable (sdhci.h:157)</description><bitOffset>17</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CARD_PIN</name><description>Card detect pin level (sdhci.h:158)</description><bitOffset>18</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>WRITE_PROTECT</name><description>Write protect switch level (sdhci.h:159)</description><bitOffset>19</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DAT_LEVEL</name><description>DAT[3:0] line levels (sdhci.h:160)</description><bitOffset>20</bitOffset><bitWidth>4</bitWidth></field>
+            <field><name>CMD_LEVEL</name><description>CMD line level (sdhci.h:161)</description><bitOffset>24</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>CONTROL0</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_HOST_CONTROL, SDHCI_POWER_CONTROL, SDHCI_BLOCK_GAP_CONTROL and SDHCI_WAKE_UP_CONTROL (sdhci.h:163, 175, 181, 183): host control 1, power, block gap and wakeup (HC 2.2.11-2.2.14, p.60-67); FreeBSD names no bit of the last two</description>
+          <addressOffset>0x28</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>LED</name><description>LED control (sdhci.h:164)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BUS_4BIT</name><description>4-bit data width (sdhci.h:165)</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>HISPD</name><description>High speed enable (sdhci.h:166)</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DMA_SELECT</name><description>DMA select: 0 SDMA, 1 reserved, 2 32-bit ADMA2, 3 64-bit ADMA2 (HC 2.2.11, p.60-61; the mask, sdhci.h:170); owned by the NIF</description><bitOffset>3</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>BUS_8BIT</name><description>8-bit data width (sdhci.h:171)</description><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CARD_DET</name><description>Card detect test level (sdhci.h:172)</description><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>FORCE_CARD</name><description>Card detect signal selection: 1 the test level (sdhci.h:173)</description><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>POWER_ON</name><description>SD bus power (sdhci.h:176)</description><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>VOLTAGE</name><description>SD bus voltage select: 5 1.8 V, 6 3.0 V, 7 3.3 V (sdhci.h:177-179)</description><bitOffset>9</bitOffset><bitWidth>3</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>CONTROL1</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_CLOCK_CONTROL, SDHCI_TIMEOUT_CONTROL and SDHCI_SOFTWARE_RESET (sdhci.h:185, 198, 200): clock control, data timeout and software reset (HC 2.2.15-2.2.17, p.68-75)</description>
+          <addressOffset>0x2c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>CLOCK_INT_EN</name><description>Internal clock enable (sdhci.h:193)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CLOCK_INT_STABLE</name><description>Internal clock stable (sdhci.h:192)</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>CLOCK_CARD_EN</name><description>SD clock enable (sdhci.h:191)</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DIVIDER_HI</name><description>Bits 9:8 of the 10-bit clock divider (sdhci.h:189-190)</description><bitOffset>6</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>DIVIDER</name><description>Bits 7:0 of the 10-bit clock divider (sdhci.h:186-188)</description><bitOffset>8</bitOffset><bitWidth>8</bitWidth></field>
+            <field><name>TIMEOUT</name><description>Data timeout counter value: the timeout is 2^(13 + value) cycles of the timeout clock (sdhci.h:198; HC 2.2.16, p.73)</description><bitOffset>16</bitOffset><bitWidth>4</bitWidth></field>
+            <field><name>RESET_ALL</name><description>Software reset for all, cleared by the controller when done (sdhci.h:201)</description><bitOffset>24</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RESET_CMD</name><description>Software reset for the command line (sdhci.h:202)</description><bitOffset>25</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RESET_DATA</name><description>Software reset for the data lines (sdhci.h:203)</description><bitOffset>26</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>INTERRUPT</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_INT_STATUS (sdhci.h:205): normal and error interrupt status; a status bit is cleared by writing 1, and CARD_INT, INT_A to INT_C, RETUNE and ERROR only follow their sources (HC 2.2.18-2.2.19, p.76-85)</description>
+          <addressOffset>0x30</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>RESPONSE</name><description>Command complete (sdhci.h:208)</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>DATA_END</name><description>Transfer complete (sdhci.h:209)</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>BLOCK_GAP</name><description>Block gap event (sdhci.h:210)</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>DMA_END</name><description>DMA interrupt (sdhci.h:211)</description><bitOffset>3</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>SPACE_AVAIL</name><description>Buffer write ready (sdhci.h:212)</description><bitOffset>4</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>DATA_AVAIL</name><description>Buffer read ready (sdhci.h:213)</description><bitOffset>5</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>CARD_INSERT</name><description>Card insertion (sdhci.h:214)</description><bitOffset>6</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>CARD_REMOVE</name><description>Card removal (sdhci.h:215)</description><bitOffset>7</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>CARD_INT</name><description>Card interrupt (sdhci.h:216)</description><bitOffset>8</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>INT_A</name><description>Embedded INT_A (sdhci.h:217)</description><bitOffset>9</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>INT_B</name><description>Embedded INT_B (sdhci.h:218)</description><bitOffset>10</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>INT_C</name><description>Embedded INT_C (sdhci.h:219)</description><bitOffset>11</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>RETUNE</name><description>Re-tuning event (sdhci.h:220)</description><bitOffset>12</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>ERROR</name><description>Some error status bit is set (sdhci.h:221)</description><bitOffset>15</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+            <field><name>TIMEOUT</name><description>Command timeout error (sdhci.h:222)</description><bitOffset>16</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>CRC</name><description>Command CRC error (sdhci.h:223)</description><bitOffset>17</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>END_BIT</name><description>Command end bit error (sdhci.h:224)</description><bitOffset>18</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>INDEX</name><description>Command index error (sdhci.h:225)</description><bitOffset>19</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>DATA_TIMEOUT</name><description>Data timeout error (sdhci.h:226)</description><bitOffset>20</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>DATA_CRC</name><description>Data CRC error (sdhci.h:227)</description><bitOffset>21</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>DATA_END_BIT</name><description>Data end bit error (sdhci.h:228)</description><bitOffset>22</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>BUS_POWER</name><description>Current limit error (sdhci.h:229)</description><bitOffset>23</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>ACMD12ERR</name><description>Auto CMD error (sdhci.h:230)</description><bitOffset>24</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>ADMAERR</name><description>ADMA error (sdhci.h:231)</description><bitOffset>25</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            <field><name>TUNEERR</name><description>Tuning error (sdhci.h:232)</description><bitOffset>26</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+          </fields>
+        </register>
+        <register>
+          <name>IRPT_MASK</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_INT_ENABLE (sdhci.h:206): normal and error interrupt status enable, which events set INTERRUPT's bits; bits as INTERRUPT's (HC 2.2.20-2.2.21, p.86-89)</description>
+          <addressOffset>0x34</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>RESPONSE</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_END</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BLOCK_GAP</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DMA_END</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SPACE_AVAIL</name><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_AVAIL</name><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CARD_INSERT</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CARD_REMOVE</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CARD_INT</name><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>INT_A</name><bitOffset>9</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>INT_B</name><bitOffset>10</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>INT_C</name><bitOffset>11</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RETUNE</name><bitOffset>12</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TIMEOUT</name><bitOffset>16</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CRC</name><bitOffset>17</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>END_BIT</name><bitOffset>18</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>INDEX</name><bitOffset>19</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_TIMEOUT</name><bitOffset>20</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_CRC</name><bitOffset>21</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_END_BIT</name><bitOffset>22</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BUS_POWER</name><bitOffset>23</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ACMD12ERR</name><bitOffset>24</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ADMAERR</name><bitOffset>25</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TUNEERR</name><bitOffset>26</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>IRPT_EN</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_SIGNAL_ENABLE (sdhci.h:207): normal and error interrupt signal enable, which set bits of INTERRUPT raise the line; bits as INTERRUPT's (HC 2.2.22-2.2.23, p.90-93)</description>
+          <addressOffset>0x38</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>RESPONSE</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_END</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BLOCK_GAP</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DMA_END</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SPACE_AVAIL</name><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_AVAIL</name><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CARD_INSERT</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CARD_REMOVE</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CARD_INT</name><bitOffset>8</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>INT_A</name><bitOffset>9</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>INT_B</name><bitOffset>10</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>INT_C</name><bitOffset>11</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>RETUNE</name><bitOffset>12</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TIMEOUT</name><bitOffset>16</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CRC</name><bitOffset>17</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>END_BIT</name><bitOffset>18</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>INDEX</name><bitOffset>19</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_TIMEOUT</name><bitOffset>20</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_CRC</name><bitOffset>21</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DATA_END_BIT</name><bitOffset>22</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BUS_POWER</name><bitOffset>23</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ACMD12ERR</name><bitOffset>24</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ADMAERR</name><bitOffset>25</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>TUNEERR</name><bitOffset>26</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>CONTROL2</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_ACMD12_ERR and SDHCI_HOST_CONTROL2 (sdhci.h:247, 249): Auto CMD error status and host control 2 (HC 2.2.24-2.2.25, p.94-102)</description>
+          <addressOffset>0x3c</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ACMD12_ERR</name><description>Auto CMD error status, which FreeBSD reads whole (sdhci.h:247)</description><bitOffset>0</bitOffset><bitWidth>16</bitWidth><access>read-only</access></field>
+            <field><name>UHS_MODE</name><description>UHS mode select (sdhci.h:265-271)</description><bitOffset>16</bitOffset><bitWidth>3</bitWidth></field>
+            <field><name>S18_ENABLE</name><description>1.8 V signalling enable (sdhci.h:264)</description><bitOffset>19</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>DRIVER_TYPE</name><description>Driver strength select (sdhci.h:259-263)</description><bitOffset>20</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>EXEC_TUNING</name><description>Execute tuning (sdhci.h:258)</description><bitOffset>22</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SAMPLING_CLOCK</name><description>Sampling clock select (sdhci.h:257)</description><bitOffset>23</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>UHS2_IFACE_ENABLE</name><description>UHS-II interface enable (sdhci.h:256)</description><bitOffset>24</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ADMA2_LENGTH_MODE</name><description>ADMA2 26-bit data length mode; owned by the NIF (sdhci.h:255)</description><bitOffset>26</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CMD23_ENABLE</name><description>CMD23 enable (sdhci.h:254)</description><bitOffset>27</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>HOST_V4_ENABLE</name><description>Host version 4 enable; owned by the NIF, which keeps it clear (sdhci.h:253)</description><bitOffset>28</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ADDRESSING_64BIT</name><description>64-bit addressing; owned by the NIF (sdhci.h:252)</description><bitOffset>29</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ASYNC_INTR</name><description>Asynchronous interrupt enable (sdhci.h:251)</description><bitOffset>30</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>PRESET_VALUE</name><description>Preset value enable; the driver keeps it clear (sdhci.h:250)</description><bitOffset>31</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>CAPABILITIES</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_CAPABILITIES (sdhci.h:273): the low word of the capabilities register (HC 2.2.26, p.103-110)</description>
+          <addressOffset>0x40</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>TIMEOUT_CLK</name><description>Timeout clock frequency (sdhci.h:274-275)</description><bitOffset>0</bitOffset><bitWidth>6</bitWidth></field>
+            <field><name>TIMEOUT_CLK_UNIT</name><description>Timeout clock unit: 1 MHz, 0 kHz (sdhci.h:276)</description><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>BASE_CLOCK</name><description>Base clock frequency in MHz, version 3.00's eight bits; 0 means another source gives it (sdhci.h:278-279)</description><bitOffset>8</bitOffset><bitWidth>8</bitWidth></field>
+            <field><name>MAX_BLOCK</name><description>Maximum block length: 512 bytes shifted left by the value (sdhci.h:280-281)</description><bitOffset>16</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>CAN_DO_8BITBUS</name><description>8-bit bus support (sdhci.h:282)</description><bitOffset>18</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CAN_DO_ADMA2</name><description>ADMA2 support (sdhci.h:283)</description><bitOffset>19</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CAN_DO_HISPD</name><description>High speed support (sdhci.h:284)</description><bitOffset>21</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CAN_DO_DMA</name><description>SDMA support (sdhci.h:285)</description><bitOffset>22</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CAN_DO_SUSPEND</name><description>Suspend and resume support (sdhci.h:286)</description><bitOffset>23</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CAN_VDD_330</name><description>3.3 V support (sdhci.h:287)</description><bitOffset>24</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CAN_VDD_300</name><description>3.0 V support (sdhci.h:288)</description><bitOffset>25</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CAN_VDD_180</name><description>1.8 V support (sdhci.h:289)</description><bitOffset>26</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CAN_DO_64BIT</name><description>64-bit system bus support (sdhci.h:290)</description><bitOffset>28</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>CAN_ASYNC_INTR</name><description>Asynchronous interrupt support (sdhci.h:291)</description><bitOffset>29</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>SLOT_TYPE</name><description>Slot type: 0 removable, 1 embedded, 2 shared bus (sdhci.h:292-295)</description><bitOffset>30</bitOffset><bitWidth>2</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>ADMA_ADDRESS</name><ownedByNif>true</ownedByNif>
+          <description>SDHCI_ADMA_ADDRESS_LO (sdhci.h:324): the ADMA2 descriptor table's address, low word (HC 2.2.31, p.116)</description>
+          <addressOffset>0x58</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>ADDRESS</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>SLOTISR_VER</name><ownedByNif>false</ownedByNif>
+          <description>SDHCI_SLOT_INT_STATUS and SDHCI_HOST_VERSION (sdhci.h:330, 332): slot interrupt status and host controller version (HC 2.3.15-2.3.16, p.137-138)</description>
+          <addressOffset>0xfc</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>SLOT_INT</name><description>Interrupt signal of each slot, which FreeBSD reads whole (sdhci.h:330; HC 2.3.15, p.137)</description><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field>
+            <field><name>SPEC_VER</name><description>Specification version: 2 for version 3.00 (sdhci.h:335; HC 2.3.16, p.138)</description><bitOffset>16</bitOffset><bitWidth>8</bitWidth></field>
+            <field><name>VENDOR_VER</name><description>Vendor version (sdhci.h:333-334)</description><bitOffset>24</bitOffset><bitWidth>8</bitWidth></field>
+          </fields>
+        </register>
+      </registers>
+    </peripheral>
+  </peripherals>
+</device>

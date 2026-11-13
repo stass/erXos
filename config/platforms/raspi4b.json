@@ -180,6 +180,45 @@
           "placement_key": "net"
         }
       ]
+    },
+    {
+      "key": "sd",
+      "devices": [
+        {
+          "selector": "dt",
+          "role": "block",
+          "path": "/emmc2bus/mmc@7e340000",
+          "bridge": "",
+          "base": 4264820736,
+          "size": 256,
+          "line": 158,
+          "compatible": "brcm,bcm2711-emmc2",
+          "bus": 0,
+          "device": 0,
+          "function": 0,
+          "dma": "unconfined",
+          "flags": 1,
+          "dma_memory": 1048576,
+          "placement_key": "sd"
+        },
+        {
+          "selector": "dt",
+          "role": "ordinary",
+          "path": "/soc/mmc@7e300000",
+          "bridge": "",
+          "base": 4264558592,
+          "size": 256,
+          "line": 158,
+          "compatible": "brcm,bcm2835-sdhci",
+          "bus": 0,
+          "device": 0,
+          "function": 0,
+          "dma": "none",
+          "flags": 0,
+          "dma_memory": 0,
+          "placement_key": "sd"
+        }
+      ]
     }
   ]
 }
