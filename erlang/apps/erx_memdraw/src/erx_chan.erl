@@ -68,15 +68,16 @@ chan_type(_) -> error.
 The depth of channel code `Code`, as 9front's chantodepth reads one:
 `{ok, Depth}` when each byte, from the low one, has a type below NChan (7)
 in its high nibble and 1 to 8 bits in its low nibble, and the bits sum to
-a whole divisor or multiple of 8; `{error, einval}` otherwise, for a code
-of no channel among them.
+a whole divisor or multiple of 8, and `{error, einval}` otherwise, 0
+included.
 """.
--spec depth(integer()) -> {ok, depth()} | {error, einval}.
+-spec depth(term()) -> {ok, depth()} | {error, einval}.
 depth(Code) when is_integer(Code), Code > 0, Code =< 16#ffffffff ->
     depth(Code, 0);
 depth(_) ->
     {error, einval}.
 
+%% A depth below 8 divides 8; one of 8 or more is a multiple of 8.
 depth(0, Depth) when Depth rem 8 =:= 0; 8 rem Depth =:= 0 ->
     {ok, Depth};
 depth(0, _Depth) ->

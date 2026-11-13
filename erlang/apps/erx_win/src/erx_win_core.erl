@@ -42,6 +42,12 @@ a `wctl` resize command.
 
 %% A channel descriptor of four channels is 8 bytes; its line is 9.
 -define(MAX_CTL, 9).
+%% A field and the space after it.
+-define(CELL, (?ERX_WINDOWS_FIELD + 1)).
+%% A mouse record is its kind byte and four cells; the ABI states the sum apart.
+-if(?ERX_WINDOWS_MOUSE_RECORD =/= 1 + 4 * ?CELL).
+-error("windows_mouse_record is not a kind byte and four fields").
+-endif.
 
 -doc "A half-open rectangle `{X0, Y0, X1, Y1}`, as Plan 9's.".
 -type rect() :: {integer(), integer(), integer(), integer()}.
@@ -75,7 +81,7 @@ ctl(_) ->
 
 -doc "The window's place a read of `wctl` answers.".
 -spec wctl(binary()) -> {ok, placed()} | {error, eio}.
-wctl(<<A:12/binary, B:12/binary, C:12/binary, D:12/binary, E:12/binary, F:12/binary>>) ->
+wctl(<<A:?CELL/binary, B:?CELL/binary, C:?CELL/binary, D:?CELL/binary, E:?CELL/binary, F:?CELL/binary>>) ->
     case {[number(Field, ?ERX_WINDOWS_COORD_MIN) || Field <- [A, B, C, D]], field(E), field(F)} of
         {[{ok, X0}, {ok, Y0}, {ok, X1}, {ok, Y1}], {ok, Focus}, {ok, Shown}} ->
             placed({X0, Y0, X1, Y1}, Focus, Shown);
@@ -87,7 +93,7 @@ wctl(_) ->
 
 -doc "The record a read of `mouse` answers.".
 -spec mouse(binary()) -> {ok, pointer()} | {error, eio}.
-mouse(<<Kind, X:12/binary, Y:12/binary, Buttons:12/binary, Msec:12/binary>>)
+mouse(<<Kind, X:?CELL/binary, Y:?CELL/binary, Buttons:?CELL/binary, Msec:?CELL/binary>>)
   when Kind =:= $m; Kind =:= $r ->
     case [number(X, ?ERX_WINDOWS_COORD_MIN), number(Y, ?ERX_WINDOWS_COORD_MIN), number(Buttons, 0), number(Msec, 0)] of
         [{ok, Px}, {ok, Py}, {ok, Pb}, {ok, Pm}] -> {ok, {pointer_kind(Kind), Px, Py, Pb, Pm}};

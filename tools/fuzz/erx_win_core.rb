@@ -22,8 +22,8 @@ module ErxWinCoreFuzz
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_win_core_fuzz.erl')
   ABI_INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   SEEDED = {
-    "the mouse record's length" => ['Msec:12/binary>>)', 'Msec:12/binary, _/binary>>)'],
-    "the wctl read's length" => ['F:12/binary>>)', 'F:12/binary, _/binary>>)'],
+    "the mouse record's length" => ['Msec:?CELL/binary>>)', 'Msec:?CELL/binary, _/binary>>)'],
+    "the wctl read's length" => ['F:?CELL/binary>>)', 'F:?CELL/binary, _/binary>>)'],
     "a field's alignment" => ['byte_size(Token), byte_size(Token)) =:= Token', 'byte_size(Token), 0) =:= <<>>'],
     "the rectangle's form" => ['X0 =< X1, Y0 =< Y1, X1 - X0', 'X1 - X0'],
     'the 16,384-pixel side' => ['X1 - X0 =< ?ERX_WINDOWS_SIDE_MAX', 'X1 - X0 =< 2 * ?ERX_WINDOWS_SIDE_MAX'],

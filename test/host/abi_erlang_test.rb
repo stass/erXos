@@ -102,7 +102,7 @@ class AbiErlangTest < Minitest::Test
       -export([main/0]).
       -include("erx_abi.hrl").
       main() ->
-          io:format("~w~n~w~n", [?ERX_WINDOWS_FILE_MEMBERS, ?ERX_MF_WINDOW_ROLE_MEMBERS]),
+          io:format("~w~n~w~n~w~n", [?ERX_BOOT_SLOT_MEMBERS, ?ERX_WINDOWS_FILE_MEMBERS, ?ERX_MF_WINDOW_ROLE_MEMBERS]),
           halt().
     ERLANG
     @runner.run([File.join(@oracle, 'erlc'), '-Werror', '-I', @directory, '-o', @directory,
@@ -110,10 +110,12 @@ class AbiErlangTest < Minitest::Test
                 name: 'erlc-members', deadline: 60, env: @environment)
     record = @runner.run([File.join(@oracle, 'erl'), '-noshell', '-noinput', '-pa', @directory,
                           '-s', 'erx_abi_members', 'main'], name: 'members', deadline: 60, env: @environment)
-    roles = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: @root)).types.fetch('mf_window_role')
-                           .members.sort_by { |_name, value| value }
-                           .map { |name, value| "{#{name},#{value}}" }.join(',')
-    assert_equal "[{ctl,1},{mouse,2},{kbd,3},{wctl,4},{label,5}]\n[#{roles}]\n", File.binread(record.fetch('log'))
+    types = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: @root)).types
+    slots, roles = %w[boot_slot mf_window_role].map do |name|
+      types.fetch(name).members.sort_by { |_name, value| value }.map { |member, value| "{#{member},#{value}}" }.join(',')
+    end
+    assert_equal "[#{slots}]\n[{ctl,1},{mouse,2},{kbd,3},{wctl,4},{label,5}]\n[#{roles}]\n",
+                 File.binread(record.fetch('log'))
   end
 
   # The generated erx_abi_events gives each trace event's name and typed

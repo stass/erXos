@@ -385,7 +385,7 @@ What runs where:
 
 The modules are four Erlang applications, and a release takes each
 whole. `erx_memdraw`, the pixel primitives with `erx_chan`, the one reader of a
-channel descriptor and of a buffer's stride, is a library application
+channel descriptor and the one formula for a buffer's stride, is a library application
 both sides take. `erx_display` holds the display side: the driver
 behaviour, `erx_winfs`, `erx_window`, `erx_winctl`, `erx_screen` with
 its core, the policies with `erx_wm_menu`, and `erx_wctl`; the drivers'

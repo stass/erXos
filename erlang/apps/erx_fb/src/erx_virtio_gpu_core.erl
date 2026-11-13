@@ -180,7 +180,8 @@ attach_backing_request(ResourceId, Region) when ?IS_U32(ResourceId) ->
      Expect}.
 
 %% erx_memdraw's code of a channel descriptor, as erx_chan:parse/1 reads it. Only the
-%% channel the device can show is taken, and erx_chan reads that one.
+%% channel the device can show is taken: format/1 admits x8r8g8b8 alone, which parse/1
+%% always reads, so its match cannot fail.
 -spec chan_code(erx_display:chan()) -> {ok, 0..?U32_MAX} | {error, {chan, binary()}}.
 chan_code(Chan) ->
     case format(Chan) of
