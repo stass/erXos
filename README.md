@@ -268,9 +268,11 @@ Error in process <0.150.0> with exit value:
   development manifest configures and the domain service starts at boot.
   littlefs serves `/data` there; a file synced there survives a kill of the
   machine, and a littlefs failure ends the domain, whose restart mounts
-  `/data` afresh, both checked under HVF. A power cut on a real disk also
-  needs the device to flush its write cache, which is not built yet
-  ([TODO.md](TODO.md)). The system shell and root's session
+  `/data` afresh, both checked under HVF. The block driver is a transport
+  contract (read, write, flush, info) over its virtio transport, and
+  littlefs's `fsync` reaches the device as a virtio flush, so a synced file
+  is on the device and not only in its write cache; a failed flush fails
+  the `fsync`. The system shell and root's session
   both read and write `/data` through the storage domain's `data` facet,
   and both reach it again once the storage domain has restarted. Under HVF,
   root's session writes a file, the system shell reads it, and the file is
@@ -328,8 +330,11 @@ Error in process <0.150.0> with exit value:
   builds boots from the firmware through
   BL31, Fiasco and the root task to the command shell's `%` prompt on
   the serial console ([the record](docs/research-rpi4-board-pass.md)).
-  The board has no SD controller driver yet, so `/data` fails with an
-  I/O error.
+  The board has no SD controller driver yet, and its manifest grants no
+  `data` facet, so `/data` is an empty directory. The SD card's and the
+  Ethernet controller's decisions (card identification and transfers,
+  receive descriptors, the PHY) exist as host-tested code, with no driver
+  over them yet.
 * **The machine is an object** (M4). A host link over the second serial
   line lets `tools/erx load` and `watch` replace modules in the running
   system, and `tools/erx files` read the guest's files over 9P2000.L; `tools/erx boot
@@ -353,7 +358,13 @@ Error in process <0.150.0> with exit value:
   configured domains serve facets that the domain service mints from the
   manifest and makes anew when a domain restarts. A device's holder
   domain binds its interrupt line and opens the device in the form it was
-  given. A connection between domains costs about 132 KiB.
+  given. Devices that share an interrupt line, as the Pi's UARTs (the
+  console and the host link among them) do, each get their interrupts: one
+  owner per line acknowledges it once every driver on it has answered. A
+  domain mounts a facet only where the manifest grants it, so an ungranted
+  domain's `/data` is an empty directory, as FreeBSD shows an empty mount
+  point; a release holds such mount points as empty directory entries. A
+  connection between domains costs about 132 KiB.
 * **Hosted mode** runs the runtime as a macOS process, on Apple Silicon
   and on x86_64 Macs. There, OTP's
   compiler, stdlib, kernel and emulator suite groups are compared case by
@@ -372,6 +383,11 @@ Error in process <0.150.0> with exit value:
   hardware faults (dead, corrupt or hung disk, corrupt RAM, an interrupt
   storm, a frozen CPU, a power cut) that shows how the system meets each.
   When the machine goes down it prints a picture and its crash record.
+  The website's Downloads section offers the Raspberry Pi 4 card
+  (`sdcard-<digest>.img.xz`, with its build record and a recipe for writing
+  it) and a QEMU `virt` image (`image-<digest>.boot.gz`, with the QEMU
+  command line that boots it), each with its size, SHA-256 and a link to
+  the source commit it was built from.
 * **The build checks itself.** Generated ABI and hardware layers,
   reproducible boot images, fuzzing, ASan, UBSan, TSan, TLA+ models (of
   the lane, the connection and links among others) and herd7 litmus tests
@@ -422,7 +438,12 @@ Error in process <0.150.0> with exit value:
   and `wctl`, the widget model's deltas, `ui.txt` with its generated
   schema and binary form in Erlang, C and TypeScript, presentation types
   generated from the inspection schema, LVGL built on the host, and the
-  web client's protocol and connection core. No screen shows it yet.
+  web client's protocol and connection core. A connection can carry a pixel
+  area that its reader maps and `erx_memdraw` draws into, the manifest has a
+  display record for the windows service, `erx-lvgl` draws into its
+  window's buffer in LVGL's direct mode, and the virtio-gpu driver's
+  decisions are written; the QEMU harness can add a virtio-gpu, keyboard
+  and tablet and compare screenshots. No screen shows it yet.
 * **A browser shows the machine's records:** run `make web` first,
   which builds the client offline from pinned packages; boot with
   `tools/erx boot --hostlink`, run the `tools/erx web --socket PATH`
