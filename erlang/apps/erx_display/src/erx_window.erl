@@ -11,8 +11,8 @@ its last present, and is told its rectangle and state by `erx_winfs`.
 **ctl.** A read answers the display's channel descriptor. A write is one
 `present` line, read by `erx_winctl:parse/1` and checked against the
 client's pixel area: the offset a multiple of the page size, and the
-buffer's bytes, `stride(width, depth) * height` with stride
-`4 * ((width * depth + 31) div 32)`, ending at or before the area's end.
+buffer's bytes, `erx_chan:stride(width, depth) * height`, ending at or
+before the area's end.
 Erlang's integers do not overflow, so the sums are exact whatever the
 line's numbers. A line outside the grammar or the checks is `EINVAL`, a
 grant without an area `ENXIO`, and neither is shown.
@@ -48,9 +48,6 @@ line written whole.
 
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
-
--define(QUEUE_BYTES, 4096).
--define(MOUSE_RECORD, 49).
 
 %% A queue of records, its bytes and its count of dropped records.
 -record(records, {queue = queue:new() :: queue:queue(binary()),
@@ -98,7 +95,7 @@ handle_call({read, wctl, Offset, Count}, _From, #window{rect = Rect, state = Sta
     {reply, slice(Text, Offset, Count), W};
 handle_call({read, label, Offset, Count}, _From, #window{label = Label} = W) ->
     {reply, slice(Label, Offset, Count), W};
-handle_call({read, mouse, _Offset, Count}, _From, W) when Count < ?MOUSE_RECORD ->
+handle_call({read, mouse, _Offset, Count}, _From, W) when Count < ?ERX_WINDOWS_MOUSE_RECORD ->
     {reply, {error, einval}, W};
 handle_call({read, mouse, _Offset, _Count}, From, #window{mouse = Mouse} = W) ->
     {noreply, serve(W#window{mouse = wait(From, Mouse)})};
@@ -159,7 +156,7 @@ check(Line, #window{area = Area, depth = Depth}) ->
         {{error, einval}, _} -> {error, einval};
         {{ok, _}, none} -> {error, enxio};
         {{ok, #{offset := Offset, width := Width, height := Height} = Present}, {_, Bytes}} ->
-            Stride = 4 * ((Width * Depth + 31) div 32),
+            Stride = erx_chan:stride(Width, Depth),
             case Offset rem ?ERX_PAGE_SIZE =:= 0 andalso Offset + Stride * Height =< Bytes of
                 true -> {ok, Present};
                 false -> {error, einval}
@@ -203,11 +200,12 @@ encode(_Event, _At, W) ->
     W.
 
 record(Kind, {X, Y, Buttons, Msec}) ->
-    iolist_to_binary(io_lib:format("~c~11B ~11B ~11B ~11B ", [Kind, X, Y, Buttons, Msec])).
+    W = ?ERX_WINDOWS_FIELD,
+    iolist_to_binary(io_lib:format("~c~*B ~*B ~*B ~*B ", [Kind, W, X, W, Y, W, Buttons, W, Msec])).
 
 push(Record, #records{queue = Queue, bytes = Bytes, dropped = Dropped} = Records) ->
     Size = byte_size(Record),
-    case Bytes + Size > ?QUEUE_BYTES of
+    case Bytes + Size > ?ERX_WINDOWS_QUEUE_BYTES of
         true ->
             {{value, Oldest}, Rest} = queue:out(Queue),
             push(Record, Records#records{queue = Rest, bytes = Bytes - byte_size(Oldest),

@@ -72,16 +72,16 @@ rectangle, a coordinate outside draw(3)'s 32 bits, or more than 16 dirty
 rectangles is refused with `{error, einval}`.
 """.
 
+-include("generated/erx_abi.hrl").
+
 -export([new/3, layout/2, repaint/1, present/4, visible/2, tiles/1, path/1,
          add_dirty/2]).
 -export_type([rect/0, color/0, window_id/0, entry/0, layout/0, source/0,
               tile/0, path/0, plan/0, state/0]).
 
--define(COORD_MIN, -16#80000000).
--define(COORD_MAX, 16#7fffffff).
 -define(DIRTY_MAX, 16).
 
--type coord() :: ?COORD_MIN..?COORD_MAX.
+-type coord() :: ?ERX_WINDOWS_COORD_MIN..?ERX_WINDOWS_COORD_MAX.
 -type rect() :: {X0 :: coord(), Y0 :: coord(), X1 :: coord(), Y1 :: coord()}.
 -type color() :: 0..16#ffffffff.
 -type window_id() :: 1..16#7fffffff.
@@ -175,7 +175,7 @@ or shows from another process. `{direct, Rs}`, on the direct path: push
           {copy | direct, [rect()]} | {error, einval}.
 present({Id, Proc}, Bounds, Rects, #screen{} = Screen) when is_pid(Proc) ->
     case is_rect(Bounds) andalso every(fun is_rect/1, Rects) andalso
-        length(Rects) =< ?DIRTY_MAX of
+        length(Rects) =< ?ERX_WINDOWS_PRESENT_RECTS of
         true -> present_plan(Id, Proc, [intersect(R, Bounds) || R <- Rects], Screen);
         false -> {error, einval}
     end;
@@ -441,7 +441,7 @@ is_rect({X0, Y0, X1, Y1}) ->
 is_rect(_) ->
     false.
 
-is_coord(C) -> is_integer(C) andalso C >= ?COORD_MIN andalso C =< ?COORD_MAX.
+is_coord(C) -> is_integer(C) andalso C >= ?ERX_WINDOWS_COORD_MIN andalso C =< ?ERX_WINDOWS_COORD_MAX.
 
 is_color(C) -> is_integer(C) andalso C >= 0 andalso C =< 16#ffffffff.
 

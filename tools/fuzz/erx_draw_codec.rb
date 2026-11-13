@@ -17,7 +17,7 @@ require_relative '../lib/erx/abi'
 module ErxDrawCodecFuzz
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[erlang/apps/erx_win/src/erx_draw_image.erl erlang/apps/erx_win/src/erx_draw_core.erl
-               test/erlang/erx_draw_codec_tests.erl test/erlang/erx_draw_core_tests.erl
+               erlang/apps/erx_memdraw/src/erx_chan.erl test/erlang/erx_draw_codec_tests.erl test/erlang/erx_draw_core_tests.erl
                test/erlang/erx_draw_codec_fuzz.erl].map { |path| File.join(ROOT, path) }.freeze
   DEADLINE_SECONDS = '300'
 

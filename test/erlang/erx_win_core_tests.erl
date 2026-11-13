@@ -51,9 +51,16 @@ kbd_test() ->
      || B <- [<<"c", 0>>, <<"cab", 0>>, <<"ca">>, <<"ca", 0, 0>>, <<"xa", 0>>, <<"c", 16#ff, 0>>,
               <<"k", 16#ed, 16#a0, 16#80, 0>>, <<>>, <<"c">>]].
 
+%% erx_chan:depth/1, the draw core's and parse/1's one test of a code.
+chan_depth_test() ->
+    ?assertEqual({ok, 32}, erx_chan:depth(16#68081828)),
+    ?assertEqual({ok, 1}, erx_chan:depth(16#31)),
+    [?assertEqual({error, einval}, erx_chan:depth(C))
+     || C <- [0, 16#33, 16#78, 16#08000008, 16#100000000, -1]].
+
 layout_test() ->
-    ?assertEqual(32, erx_win_core:stride(8, 32)),
-    ?assertEqual(4, erx_win_core:stride(1, 16)),
+    ?assertEqual(32, erx_chan:stride(8, 32)),
+    ?assertEqual(4, erx_chan:stride(1, 16)),
     ?assertEqual({ok, 8294400}, erx_win_core:bytes(1920, 1080, 32)),
     ?assertEqual({ok, 1 bsl 30}, erx_win_core:bytes(16384, 16384, 32)),
     [?assertEqual({error, einval}, erx_win_core:bytes(W, H, 32))

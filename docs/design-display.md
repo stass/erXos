@@ -384,13 +384,15 @@ What runs where:
 | the system domain | the right to delete the pixel area | the domain library, which makes the area in the connection's plan and deletes it with the connection |
 
 The modules are four Erlang applications, and a release takes each
-whole. `erx_memdraw`, the pixel primitives, is a library application
+whole. `erx_memdraw`, the pixel primitives with `erx_chan`, the one reader of a
+channel descriptor and of a buffer's stride, is a library application
 both sides take. `erx_display` holds the display side: the driver
 behaviour, `erx_winfs`, `erx_window`, `erx_winctl`, `erx_screen` with
 its core, the policies with `erx_wm_menu`, and `erx_wctl`; the drivers'
 application `erx_fb`, which depends on it, starts `erx_screen` behind
 the driver, so no screen runs before a driver. `erx_win` holds a
-client's side: the module `erx_win` of the same name, `erx_pixels` with
+client's side: the module `erx_win` of the same name with its core
+`erx_win_core`, the reader of what the display answers, `erx_pixels` with
 its core, `erx_draw` with `erx_draw_conn`, the draw codec and core and
 `erx_draw_image`, `erx_font`, and `erx_term` with `erx_vt` and its
 width table; its application starts `erx_pixels`. `erx_ui` holds the

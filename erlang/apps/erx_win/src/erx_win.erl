@@ -40,15 +40,10 @@ the `windows` quota rather than before it.
 -export([open/2, image/1, present/2, mouse/1, kbd/1, resized/1, resize/2, label/2]).
 -export_type([window/0, options/0]).
 
--define(TREE, <<"windows">>).
 -define(O_RDONLY, 0).
--define(MOUSE_READ, 49).
--define(TEXT_READ, 1024).
 %% A kbd record is at most a kind byte, the runes of a read's worth and a NUL; a read
-%% this long takes any record the display's 4 KiB queue holds.
--define(KBD_READ, 4096).
--define(FILES, [{ctl, ?ERX_P9_O_RDWR}, {mouse, ?O_RDONLY}, {kbd, ?O_RDONLY},
-                {wctl, ?ERX_P9_O_RDWR}, {label, ?ERX_P9_O_RDWR}]).
+%% of the display's whole queue takes any record it holds.
+-define(KBD_READ, ?ERX_WINDOWS_QUEUE_BYTES).
 
 -doc "What `open/2` takes: `name`, the window's directory, else a name of its own.".
 -type options() :: #{name => binary()}.
@@ -77,7 +72,7 @@ error of a request it refuses, such as `eexist` for a name in use and
 open(Display, Options) when is_atom(Display), is_map(Options) ->
     case erx:cap(Display) of
         undefined -> {error, none};
-        Grant -> open_on({Grant, ?TREE, rw}, erx:owner(Grant), name(Options))
+        Grant -> open_on({Grant, ?ERX_WINDOWS_TREE_BYTES, rw}, erx:owner(Grant), name(Options))
     end.
 
 -doc "An image over the window's buffer at the window's size, clipped to the buffer.".
@@ -99,7 +94,7 @@ present(#{buffer := #{offset := Offset, width := Width, height := Height}, rect 
 -doc "Reads one `mouse` record, waiting for one.".
 -spec mouse(window()) -> {ok, erx_win_core:pointer()} | {error, atom()}.
 mouse(Window) ->
-    read_with(Window, mouse, ?MOUSE_READ, fun erx_win_core:mouse/1).
+    read_with(Window, mouse, ?ERX_WINDOWS_MOUSE_RECORD, fun erx_win_core:mouse/1).
 
 -doc "Reads one `kbd` record, waiting for one.".
 -spec kbd(window()) -> {ok, erx_win_core:key()} | {error, atom()}.
@@ -143,7 +138,7 @@ name(#{}) -> <<"w", (integer_to_binary(erlang:unique_integer([positive])))/binar
 %% of erx_pixels does, so the area is opened first.
 open_on(Tree, Peer, Name) ->
     Root = fid(),
-    case one(Tree, {attach, Root, ?ERX_P9_NOFID, <<>>, ?TREE, 0}) of
+    case one(Tree, {attach, Root, ?ERX_P9_NOFID, <<>>, ?ERX_WINDOWS_TREE_BYTES, 0}) of
         {ok, _} ->
             Answer = case one(Tree, {mkdir, Root, Name, 8#755, 0}) of
                          {ok, _} -> opened_window(Tree, Peer, Name, Root);
@@ -158,13 +153,13 @@ open_on(Tree, Peer, Name) ->
 %% The window's directory was made: open it whole or remove it.
 opened_window(Tree, Peer, Name, Root) ->
     Dir = fid(),
-    Fids = maps:from_list([{File, fid()} || {File, _} <- ?FILES]),
+    Fids = maps:from_list([{File, fid()} || {File, _} <- files()]),
     %% The handle as far as the files: what read_with/4 and placed/1 need.
     Files = #{tree => Tree, peer => Peer, name => Name, fids => Fids},
     Answer = maybe
                  ok ?= walked(one(Tree, {walk, Root, Dir, [Name]}), 1),
                  ok ?= open_files(Tree, Dir, Fids),
-                 {ok, Chan} ?= read_with(Files, ctl, ?TEXT_READ, fun erx_win_core:ctl/1),
+                 {ok, Chan} ?= read_with(Files, ctl, ?ERX_WINDOWS_LINE_MAX, fun erx_win_core:ctl/1),
                  {ok, #{rect := {X0, Y0, X1, Y1} = Rect}} ?= placed(Files),
                  {ok, Bytes} ?= sized(erx_win_core:bytes(X1 - X0, Y1 - Y0, maps:get(depth, Chan))),
                  {ok, Area, _} ?= erx_area:open(Peer),
@@ -182,9 +177,16 @@ opened_window(Tree, Peer, Name, Root) ->
             Refused
     end.
 
+%% A window's files as the ABI's windows_file lists them, each with the mode it is
+%% opened in: the display serves mouse and kbd read-only.
+files() -> [{File, open_mode(File)} || {File, _} <- ?ERX_WINDOWS_FILE_MEMBERS].
+
+open_mode(File) when File =:= mouse; File =:= kbd -> ?O_RDONLY;
+open_mode(_File) -> ?ERX_P9_O_RDWR.
+
 open_files(Tree, Dir, Fids) ->
     Requests = lists:append([[{walk, Dir, maps:get(File, Fids), [atom_to_binary(File)]},
-                              {lopen, maps:get(File, Fids), Flags}] || {File, Flags} <- ?FILES]),
+                              {lopen, maps:get(File, Fids), Flags}] || {File, Flags} <- files()]),
     Replies = erx_file_remote:exchange(Tree, Requests),
     Walks = [walked(Reply, 1) || {Reply, {walk, _, _, _}} <- lists:zip(Replies, Requests)],
     case [Error || {error, _} = Error <- Walks ++ Replies] of
@@ -213,7 +215,7 @@ fid() ->
 %% Files ----------------------------------------------------------------------
 
 placed(Window) ->
-    read_with(Window, wctl, ?TEXT_READ, fun erx_win_core:wctl/1).
+    read_with(Window, wctl, ?ERX_WINDOWS_LINE_MAX, fun erx_win_core:wctl/1).
 
 read_with(#{tree := Tree, fids := Fids}, File, Count, Reader) ->
     case one(Tree, {read, maps:get(File, Fids), 0, Count}) of

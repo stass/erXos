@@ -179,15 +179,16 @@ attach_backing_request(ResourceId, Region) when ?IS_U32(ResourceId) ->
       {out, {region, Region}}, {in, answer_size(Expect)}],
      Expect}.
 
-%% erx_memdraw's code of a channel descriptor, as Plan 9's strtochan computes it: each
-%% letter's channel type and its bits, a byte each, the first letter in the highest byte.
-%% Only the channel the device can show is taken.
+%% erx_memdraw's code of a channel descriptor, as erx_chan:parse/1 reads it. Only the
+%% channel the device can show is taken, and erx_chan reads that one.
 -spec chan_code(erx_display:chan()) -> {ok, 0..?U32_MAX} | {error, {chan, binary()}}.
 chan_code(Chan) ->
     case format(Chan) of
-        {ok, _Format} -> {ok, lists:foldl(fun({Type, Bits}, Code) -> Code bsl 8 bor (Type bsl 4) bor Bits end,
-                                          0, [{chan_type(Letter), Digit - $0} || <<Letter, Digit>> <= Chan])};
-        Refused -> Refused
+        {ok, _Format} ->
+            {ok, Code, _Depth} = erx_chan:parse(Chan),
+            {ok, Code};
+        Refused ->
+            Refused
     end.
 
 %% The bytes of the screen image's region for a mode: its rows, and the word past them
@@ -394,13 +395,3 @@ device_error(?ERX_VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID) -> {ok, invalid_resou
 device_error(?ERX_VIRTIO_GPU_RESP_ERR_INVALID_CONTEXT_ID) -> {ok, invalid_context_id};
 device_error(?ERX_VIRTIO_GPU_RESP_ERR_INVALID_PARAMETER) -> {ok, invalid_parameter};
 device_error(_Type) -> none.
-
-%% A channel letter's type, as libmemdraw's draw.h numbers them (CRed to CIgnore) and
-%% strtochan reads them.
-chan_type($r) -> 0;
-chan_type($g) -> 1;
-chan_type($b) -> 2;
-chan_type($k) -> 3;
-chan_type($a) -> 4;
-chan_type($m) -> 5;
-chan_type($x) -> 6.

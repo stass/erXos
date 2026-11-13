@@ -66,9 +66,6 @@ writes come here; every other file is its window process's
          clunk/2, write/4, make/4, unlink/4]).
 
 -define(ID_MAX, 16#7fffffff).
--define(TREE, <<"windows">>).
--define(FILES, [{<<"ctl">>, ctl, 1}, {<<"mouse">>, mouse, 2}, {<<"kbd">>, kbd, 3},
-                {<<"wctl">>, wctl, 4}, {<<"label">>, label, 5}]).
 -define(READ_ONLY, [mouse, kbd]).
 
 -type options() :: #{service := atom(),
@@ -503,7 +500,7 @@ init(#{winfs := Winfs, client := Client}) when is_pid(Winfs), is_binary(Client) 
 
 -doc false.
 root(_Fs) ->
-    {ok, ?TREE, root, qid(root)}.
+    {ok, ?ERX_WINDOWS_TREE_BYTES, root, qid(root)}.
 
 -doc false.
 walk(root, Name, #{winfs := Winfs, client := Client}) ->
@@ -512,7 +509,7 @@ walk(root, Name, #{winfs := Winfs, client := Client}) ->
         {error, _} = Error -> Error
     end;
 walk({window, Id, Proc}, Name, _Fs) ->
-    case lists:keyfind(Name, 1, ?FILES) of
+    case lists:keyfind(Name, 1, files()) of
         {Name, File, _} -> {ok, {file, Id, Proc, File}, qid({file, Id, Proc, File})};
         false -> {error, enoent}
     end;
@@ -564,7 +561,7 @@ readdir({dir, root}, Offset, Max, #{winfs := Winfs, client := Client}) ->
             Error
     end;
 readdir({dir, {window, Id, Proc}}, Offset, Max, _Fs) ->
-    entries([{qid({file, Id, Proc, File}), ?ERX_P9_DT_REG, Name} || {Name, File, _} <- ?FILES],
+    entries([{qid({file, Id, Proc, File}), ?ERX_P9_DT_REG, Name} || {Name, File, _} <- files()],
             Offset, Max);
 readdir(_Handle, _Offset, _Max, _Fs) ->
     {error, enotdir}.
@@ -620,5 +617,9 @@ unlink(_Dir, _Name, _Kind, _Fs) ->
 qid(root) -> {?ERX_P9_QTDIR, 0, 0};
 qid({window, Id, _}) -> {?ERX_P9_QTDIR, 0, Id * 8};
 qid({file, Id, _, File}) ->
-    {_, File, N} = lists:keyfind(File, 2, ?FILES),
+    {File, N} = lists:keyfind(File, 1, ?ERX_WINDOWS_FILE_MEMBERS),
     {0, 0, Id * 8 + N}.
+
+%% A window's files as the ABI's windows_file lists them: each name, the file and its
+%% number.
+files() -> [{atom_to_binary(File), File, N} || {File, N} <- ?ERX_WINDOWS_FILE_MEMBERS].

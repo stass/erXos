@@ -37,11 +37,13 @@ parser creates no atom and does no work beyond a few passes over at most
 1,024 bytes.
 """.
 
+-include("generated/erx_abi.hrl").
+
 -export([parse/1]).
 -export_type([present/0]).
 
 -doc "A coordinate: draw(3)'s 32-bit signed integer.".
--type coord() :: -16#80000000..16#7fffffff.
+-type coord() :: ?ERX_WINDOWS_COORD_MIN..?ERX_WINDOWS_COORD_MAX.
 -doc "A half-open rectangle `{X0, Y0, X1, Y1}` in the buffer's coordinates.".
 -type rect() :: {coord(), coord(), coord(), coord()}.
 -doc """
@@ -49,15 +51,10 @@ A parsed present: the buffer's offset and size, and the rectangles that
 changed, each inside the buffer and none empty.
 """.
 -type present() :: #{offset := 0..16#7fffffffffffffff,
-                     width := 1..16384, height := 1..16384,
+                     width := 1..?ERX_WINDOWS_SIDE_MAX, height := 1..?ERX_WINDOWS_SIDE_MAX,
                      rects := [rect()]}.
 
--define(MAX_LINE, 1024).
 -define(MAX_OFFSET, 16#7fffffffffffffff).
--define(MAX_SIZE, 16384).
--define(MAX_RECTS, 16).
--define(MIN_COORD, -16#80000000).
--define(MAX_COORD, 16#7fffffff).
 %% The digits of a number, leading zeros included: as many as 2^63 - 1 has,
 %% so a number of 20 digits is refused whatever its value.
 -define(MAX_DIGITS, 19).
@@ -67,11 +64,11 @@ Parses one write to `ctl`. Returns the present, or `{error, einval}` for
 anything outside the grammar or the checks.
 """.
 -spec parse(binary()) -> {ok, present()} | {error, einval}.
-parse(Bytes) when is_binary(Bytes), byte_size(Bytes) =< ?MAX_LINE ->
+parse(Bytes) when is_binary(Bytes), byte_size(Bytes) =< ?ERX_WINDOWS_LINE_MAX ->
     case words(strip_newline(Bytes)) of
         {ok, [<<"present">>, Offset, Width, Height | Coords]} ->
-            present(natural(Offset, ?MAX_OFFSET), natural(Width, ?MAX_SIZE),
-                    natural(Height, ?MAX_SIZE), rects(Coords, []));
+            present(natural(Offset, ?MAX_OFFSET), natural(Width, ?ERX_WINDOWS_SIDE_MAX),
+                    natural(Height, ?ERX_WINDOWS_SIDE_MAX), rects(Coords, []));
         _ ->
             {error, einval}
     end;
@@ -116,7 +113,7 @@ separator(Byte) -> Byte =:= $\s orelse Byte =:= $\t.
 %% line's order: at most 16, each well formed.
 rects([], Acc) ->
     {ok, lists:reverse(Acc)};
-rects(_, Acc) when length(Acc) >= ?MAX_RECTS ->
+rects(_, Acc) when length(Acc) >= ?ERX_WINDOWS_PRESENT_RECTS ->
     error;
 rects([A, B, C, D | Rest], Acc) ->
     case [coordinate(Word) || Word <- [A, B, C, D]] of
@@ -139,8 +136,8 @@ natural(Word, Max) ->
 coordinate(<<$-, Digits/binary>>) -> in_range(digits(Digits), -1);
 coordinate(Digits) -> in_range(digits(Digits), 1).
 
-in_range({ok, Magnitude}, Sign) when Sign * Magnitude >= ?MIN_COORD,
-                                     Sign * Magnitude =< ?MAX_COORD ->
+in_range({ok, Magnitude}, Sign) when Sign * Magnitude >= ?ERX_WINDOWS_COORD_MIN,
+                                     Sign * Magnitude =< ?ERX_WINDOWS_COORD_MAX ->
     {ok, Sign * Magnitude};
 in_range(_, _) ->
     error.

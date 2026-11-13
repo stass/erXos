@@ -39,28 +39,26 @@ A read returns rio's layout: the rectangle's four coordinates, then
 in a field of 11 followed by a space, 72 bytes in all.
 """.
 
+-include("generated/erx_abi.hrl").
+
 -export([parse/1, format/3]).
 -export_type([command/0]).
 
 -doc "A coordinate: draw(3)'s 32-bit signed integer.".
--type coord() :: -16#80000000..16#7fffffff.
+-type coord() :: ?ERX_WINDOWS_COORD_MIN..?ERX_WINDOWS_COORD_MAX.
 -doc "A half-open rectangle `{X0, Y0, X1, Y1}`, as Plan 9's.".
 -type rect() :: {coord(), coord(), coord(), coord()}.
 -doc "A parsed write: the request erx_wm's place/5 takes.".
 -type command() :: {resize, rect()} | {move, rect()}
                  | hide | show | top | bottom.
 
--define(MAX_LINE, 1024).
--define(MIN_COORD, -16#80000000).
--define(MAX_COORD, 16#7fffffff).
--define(FIELD, 11).
 
 -doc """
 Parses one write to `wctl`. Returns the command, or `{error, einval}` for
 anything outside the grammar.
 """.
 -spec parse(binary()) -> {ok, command()} | {error, einval}.
-parse(Bytes) when is_binary(Bytes), byte_size(Bytes) =< ?MAX_LINE ->
+parse(Bytes) when is_binary(Bytes), byte_size(Bytes) =< ?ERX_WINDOWS_LINE_MAX ->
     case words(strip_newline(Bytes)) of
         {ok, Words} -> command(Words);
         error -> {error, einval}
@@ -138,12 +136,12 @@ digits(Digits) ->
         false -> error
     end.
 
-in_range({ok, Magnitude}, Sign) when Sign * Magnitude >= ?MIN_COORD,
-                                     Sign * Magnitude =< ?MAX_COORD ->
+in_range({ok, Magnitude}, Sign) when Sign * Magnitude >= ?ERX_WINDOWS_COORD_MIN,
+                                     Sign * Magnitude =< ?ERX_WINDOWS_COORD_MAX ->
     {ok, Sign * Magnitude};
 in_range(_, _) ->
     error.
 
 field(Text) ->
-    Pad = max(0, ?FIELD - byte_size(Text)),
+    Pad = max(0, ?ERX_WINDOWS_FIELD - byte_size(Text)),
     <<(binary:copy(<<" ">>, Pad))/binary, Text/binary, " ">>.

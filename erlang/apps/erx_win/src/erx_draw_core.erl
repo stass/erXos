@@ -136,7 +136,7 @@ draw(3) knows.
 -spec new(#{r := rect(), chan := 0..16#ffffffff, quota := quota()}) -> state().
 new(#{r := R, chan := Chan, quota := #{pixels := Pixels, side := Side} = Quota})
   when is_integer(Pixels), Pixels >= 0, is_integer(Side), Side > 0 ->
-    {ok, Depth} = chan_depth(Chan),
+    {ok, Depth} = erx_chan:depth(Chan),
     #{images => #{0 => #{r => R, depth => Depth, repl => false, glyphs => none}}, bytes => 0, op => ?SOVERD,
       quota => Quota}.
 
@@ -196,7 +196,7 @@ step(State, {alloc, Id, Screen, _Refresh, Chan, Repl, R, Clipr, Color}) ->
     maybe
         ok ?= absent(State, Id),
         ok ?= check(Screen =:= 0, enoent),
-        {ok, Depth} ?= chan_depth(Chan),
+        {ok, Depth} ?= erx_chan:depth(Chan),
         ok ?= check(supported_chan(Chan, Depth), einval),
         ok ?= check_image_rect(R, quota(State)),
         Clip = alloc_clip(Repl =/= 0, R, Clipr),
@@ -481,29 +481,6 @@ signed_byte(Byte) -> Byte.
 
 check(true, _Errno) -> ok;
 check(false, Errno) -> {error, Errno}.
-
-%% 9front's chantodepth: each byte of a channel descriptor, from the low
-%% one, is a type below NChan (7) in its high nibble and 1 to 8 bits in its
-%% low nibble, and the bits sum to a valid depth.
-chan_depth(Chan) -> chan_depth(Chan, 0).
-
-chan_depth(0, Depth) ->
-    case valid_depth(Depth) of
-        true -> {ok, Depth};
-        false -> {error, einval}
-    end;
-chan_depth(Chan, Depth) ->
-    Byte = Chan band 16#ff,
-    Bits = Byte band 16#f,
-    case Byte bsr 4 < 7 andalso Bits >= 1 andalso Bits =< 8 of
-        true -> chan_depth(Chan bsr 8, Depth + Bits);
-        false -> {error, einval}
-    end.
-
-%% A depth below 8 divides 8; one of 8 or more is a multiple of 8.
-valid_depth(Depth) when Depth > 0, Depth < 8 -> 8 rem Depth =:= 0;
-valid_depth(Depth) when Depth >= 8 -> Depth rem 8 =:= 0;
-valid_depth(_Depth) -> false.
 
 %% The channels erx_memdraw draws as draw(2) defines them (design-display.md,
 %% "The pixel primitives"): no type twice but x, as memsetchan asks; below

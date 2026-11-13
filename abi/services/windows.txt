@@ -21,3 +21,28 @@ service windows 8
   parameter session 4 boolean optional boolean checked_by windows_grant
 limit windows_default u32 8
 limit windows_pixels_default u64 67108864
+# The window tree's wire (docs/design-display.md, "The window tree" and "Windows and
+# buffers"), which erx_winfs and its windows serve and erx_win reads, so both sides take
+# it from here. windows_tree is the tree's name in an attach; windows_file names a
+# window's files in the order its directory lists them, each value the file's number in
+# its qid. A window's coordinates are Plan 9's int, from windows_coord_min to
+# windows_coord_max, written in fields of windows_field digits and a space; a side is
+# from 1 to windows_side_max; a mouse record is windows_mouse_record bytes, its kind and
+# four fields; a ctl or wctl line is at most windows_line_max bytes, a present
+# names at most windows_present_rects rectangles, and each of a window's input queues
+# holds at most windows_queue_bytes of records.
+bytes windows_tree 7 value 77696e646f7773
+enum windows_file u8
+  value ctl 1
+  value mouse 2
+  value kbd 3
+  value wctl 4
+  value label 5
+limit windows_coord_min i32 -2147483648
+limit windows_coord_max i32 2147483647
+limit windows_field u32 11
+limit windows_side_max u32 16384
+limit windows_mouse_record u32 49
+limit windows_line_max u32 1024
+limit windows_present_rects u32 16
+limit windows_queue_bytes u32 4096

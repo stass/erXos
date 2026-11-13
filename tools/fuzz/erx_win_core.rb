@@ -20,13 +20,14 @@ module ErxWinCoreFuzz
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_win/src/erx_win_core.erl')
   CHAN_SOURCE = File.join(ROOT, 'erlang/apps/erx_memdraw/src/erx_chan.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_win_core_fuzz.erl')
+  ABI_INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   SEEDED = {
     "the mouse record's length" => ['Msec:12/binary>>)', 'Msec:12/binary, _/binary>>)'],
     "the wctl read's length" => ['F:12/binary>>)', 'F:12/binary, _/binary>>)'],
     "a field's alignment" => ['byte_size(Token), byte_size(Token)) =:= Token', 'byte_size(Token), 0) =:= <<>>'],
     "the rectangle's form" => ['X0 =< X1, Y0 =< Y1, X1 - X0', 'X1 - X0'],
-    'the 16,384-pixel side' => ['X1 - X0 =< ?MAX_SIDE', 'X1 - X0 =< 2 * ?MAX_SIDE'],
-    "the buttons' sign" => ['number(Buttons, 0)', 'number(Buttons, ?MIN_COORD)'],
+    'the 16,384-pixel side' => ['X1 - X0 =< ?ERX_WINDOWS_SIDE_MAX', 'X1 - X0 =< 2 * ?ERX_WINDOWS_SIDE_MAX'],
+    "the buttons' sign" => ['number(Buttons, 0)', 'number(Buttons, ?ERX_WINDOWS_COORD_MIN)'],
     'the NUL among runes' => ['case lists:member(0, Runes) of', 'case false of']
   }.freeze
   DEADLINE_SECONDS = '300'
@@ -51,7 +52,7 @@ module ErxWinCoreFuzz
     Dir.mktmpdir('erx-win-core-fuzz') do |work|
       module_path = File.join(work, 'erx_win_core.erl')
       File.binwrite(module_path, module_text)
-      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-o', work,
+      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-I', ABI_INCLUDE, '-o', work,
                                        module_path, CHAN_SOURCE, TARGET_SOURCE, stdin_data: '')
       raise output unless status.success?
 

@@ -25,8 +25,7 @@ atom or reads past its record. The formats are the window tree's:
   and a NUL: `c` and exactly one rune, or `k` or `K` and any runes, none
   of them NUL.
 
-**A buffer's layout.** `stride(Width, Depth)` is
-`4 * ((Width * Depth + 31) div 32)` bytes and `bytes/3` the stride times
+**A buffer's layout.** `bytes/3` is `erx_chan:stride(Width, Depth)` times
 the height, for a width and height from 1 to 16,384; Erlang's integers do
 not overflow, and the sides are checked before any product is taken.
 
@@ -35,17 +34,12 @@ sending the bounding box of more, as Plan 9's `flushimage` does; `resize/1`
 a `wctl` resize command.
 """.
 
+-include("generated/erx_abi.hrl").
+
 -export([ctl/1, wctl/1, mouse/1, kbd/1]).
--export([stride/2, bytes/3, image_rect/2, present/4, resize/1]).
+-export([bytes/3, image_rect/2, present/4, resize/1]).
 -export_type([rect/0, chan/0, placed/0, pointer/0, key/0]).
 
--define(MAX_SIDE, 16384).
--define(MAX_RECTS, 16).
--define(MIN_COORD, -16#80000000).
--define(MAX_COORD, 16#7fffffff).
--define(FIELD, 11).
--define(WCTL_BYTES, 72).
--define(MOUSE_BYTES, 49).
 %% A channel descriptor of four channels is 8 bytes; its line is 9.
 -define(MAX_CTL, 9).
 
@@ -82,7 +76,7 @@ ctl(_) ->
 -doc "The window's place a read of `wctl` answers.".
 -spec wctl(binary()) -> {ok, placed()} | {error, eio}.
 wctl(<<A:12/binary, B:12/binary, C:12/binary, D:12/binary, E:12/binary, F:12/binary>>) ->
-    case {[number(Field, ?MIN_COORD) || Field <- [A, B, C, D]], field(E), field(F)} of
+    case {[number(Field, ?ERX_WINDOWS_COORD_MIN) || Field <- [A, B, C, D]], field(E), field(F)} of
         {[{ok, X0}, {ok, Y0}, {ok, X1}, {ok, Y1}], {ok, Focus}, {ok, Shown}} ->
             placed({X0, Y0, X1, Y1}, Focus, Shown);
         _ ->
@@ -95,7 +89,7 @@ wctl(_) ->
 -spec mouse(binary()) -> {ok, pointer()} | {error, eio}.
 mouse(<<Kind, X:12/binary, Y:12/binary, Buttons:12/binary, Msec:12/binary>>)
   when Kind =:= $m; Kind =:= $r ->
-    case [number(X, ?MIN_COORD), number(Y, ?MIN_COORD), number(Buttons, 0), number(Msec, 0)] of
+    case [number(X, ?ERX_WINDOWS_COORD_MIN), number(Y, ?ERX_WINDOWS_COORD_MIN), number(Buttons, 0), number(Msec, 0)] of
         [{ok, Px}, {ok, Py}, {ok, Pb}, {ok, Pm}] -> {ok, {pointer_kind(Kind), Px, Py, Pb, Pm}};
         _ -> {error, eio}
     end;
@@ -115,19 +109,14 @@ kbd(_) ->
 
 %% Layout ---------------------------------------------------------------------
 
--doc "The bytes of one row of a buffer `Width` pixels wide at `Depth` bits a pixel.".
--spec stride(1..?MAX_SIDE, erx_chan:depth()) -> pos_integer().
-stride(Width, Depth) ->
-    4 * ((Width * Depth + 31) div 32).
-
 -doc """
 The bytes of a buffer of `Width` by `Height` pixels at `Depth`, or
 `{error, einval}` for a side outside 1 to 16,384.
 """.
 -spec bytes(integer(), integer(), erx_chan:depth()) -> {ok, pos_integer()} | {error, einval}.
-bytes(Width, Height, Depth) when is_integer(Width), Width >= 1, Width =< ?MAX_SIDE,
-                                 is_integer(Height), Height >= 1, Height =< ?MAX_SIDE ->
-    {ok, stride(Width, Depth) * Height};
+bytes(Width, Height, Depth) when is_integer(Width), Width >= 1, Width =< ?ERX_WINDOWS_SIDE_MAX,
+                                 is_integer(Height), Height >= 1, Height =< ?ERX_WINDOWS_SIDE_MAX ->
+    {ok, erx_chan:stride(Width, Depth) * Height};
 bytes(_, _, _) ->
     {error, einval}.
 
@@ -148,7 +137,7 @@ bounding box, and none means the whole buffer.
 """.
 -spec present(non_neg_integer(), pos_integer(), pos_integer(), [rect()]) -> binary().
 present(Offset, Width, Height, Rects) ->
-    Sent = case length(Rects) > ?MAX_RECTS of
+    Sent = case length(Rects) > ?ERX_WINDOWS_PRESENT_RECTS of
                true -> [bounding_box(Rects)];
                false -> Rects
            end,
@@ -163,9 +152,9 @@ resize({X0, Y0, X1, Y1}) ->
 %% Internal functions ---------------------------------------------------------
 
 %% A field of 12 bytes: spaces, then a token that fills the rest of 11, then one space.
-token(<<Field:?FIELD/binary, $\s>>) ->
+token(<<Field:?ERX_WINDOWS_FIELD/binary, $\s>>) ->
     case binary:split(Field, <<" ">>, [global, trim_all]) of
-        [Token] when binary_part(Field, ?FIELD - byte_size(Token), byte_size(Token)) =:= Token ->
+        [Token] when binary_part(Field, ?ERX_WINDOWS_FIELD - byte_size(Token), byte_size(Token)) =:= Token ->
             {ok, Token};
         _ ->
             error
@@ -188,7 +177,7 @@ digits(Digits) ->
         false -> error
     end.
 
-in_range({ok, Magnitude}, Sign, Min) when Sign * Magnitude >= Min, Sign * Magnitude =< ?MAX_COORD ->
+in_range({ok, Magnitude}, Sign, Min) when Sign * Magnitude >= Min, Sign * Magnitude =< ?ERX_WINDOWS_COORD_MAX ->
     {ok, Sign * Magnitude};
 in_range(_, _, _) ->
     error.
@@ -206,7 +195,7 @@ field(Field) ->
 %% place is refused.
 placed({X0, Y0, X1, Y1} = Rect, Focus, Shown)
   when is_boolean(Focus), (Shown =:= shown orelse Shown =:= hidden),
-       X0 =< X1, Y0 =< Y1, X1 - X0 =< ?MAX_SIDE, Y1 - Y0 =< ?MAX_SIDE ->
+       X0 =< X1, Y0 =< Y1, X1 - X0 =< ?ERX_WINDOWS_SIDE_MAX, Y1 - Y0 =< ?ERX_WINDOWS_SIDE_MAX ->
     {ok, #{rect => Rect, current => Focus, state => Shown}};
 placed(_, _, _) ->
     {error, eio}.

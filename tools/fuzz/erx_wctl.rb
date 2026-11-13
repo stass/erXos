@@ -14,11 +14,12 @@ require 'tmpdir'
 # That shows the reference and the inputs reach both checks.
 module ErxWctlFuzz
   ROOT = File.expand_path('../..', __dir__)
+  ABI_INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_display/src/erx_wctl.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_wctl_fuzz.erl')
   SEEDED = {
-    'the 1,024-byte bound' => ['byte_size(Bytes) =< ?MAX_LINE', 'byte_size(Bytes) >= 0'],
-    'the coordinate range' => ['Sign * Magnitude =< ?MAX_COORD', 'is_integer(Magnitude)']
+    'the 1,024-byte bound' => ['byte_size(Bytes) =< ?ERX_WINDOWS_LINE_MAX', 'byte_size(Bytes) >= 0'],
+    'the coordinate range' => ['Sign * Magnitude =< ?ERX_WINDOWS_COORD_MAX', 'is_integer(Magnitude)']
   }.freeze
   DEADLINE_SECONDS = '300'
 
@@ -42,7 +43,7 @@ module ErxWctlFuzz
     Dir.mktmpdir('erx-wctl-fuzz') do |work|
       module_path = File.join(work, 'erx_wctl.erl')
       File.binwrite(module_path, module_text)
-      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-o', work, module_path, TARGET_SOURCE, stdin_data: '')
+      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-I', ABI_INCLUDE, '-o', work, module_path, TARGET_SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

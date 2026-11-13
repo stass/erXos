@@ -18,16 +18,17 @@ require 'tmpdir'
 # That shows the reference and the inputs reach each check.
 module ErxWinctlFuzz
   ROOT = File.expand_path('../..', __dir__)
+  ABI_INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_display/src/erx_winctl.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_winctl_fuzz.erl')
   SEEDED = {
-    'the 1,024-byte bound' => ['byte_size(Bytes) =< ?MAX_LINE', 'byte_size(Bytes) >= 0'],
-    'the 16,384-pixel size' => ['natural(Width, ?MAX_SIZE)', 'natural(Width, ?MAX_OFFSET)'],
-    'the 16,384-pixel height' => ['natural(Height, ?MAX_SIZE)', 'natural(Height, ?MAX_OFFSET)'],
+    'the 1,024-byte bound' => ['byte_size(Bytes) =< ?ERX_WINDOWS_LINE_MAX', 'byte_size(Bytes) >= 0'],
+    'the 16,384-pixel size' => ['natural(Width, ?ERX_WINDOWS_SIDE_MAX)', 'natural(Width, ?MAX_OFFSET)'],
+    'the 16,384-pixel height' => ['natural(Height, ?ERX_WINDOWS_SIDE_MAX)', 'natural(Height, ?MAX_OFFSET)'],
     'the offset bound' => ['natural(Offset, ?MAX_OFFSET)', 'natural(Offset, 2 * ?MAX_OFFSET)'],
     'the well-formed rectangle' => ['when X0 =< X1, Y0 =< Y1', 'when is_integer(X0)'],
-    'the 16-rectangle bound' => ['length(Acc) >= ?MAX_RECTS', 'length(Acc) >= 64'],
-    'the coordinate range' => ['Sign * Magnitude =< ?MAX_COORD', 'is_integer(Magnitude)'],
+    'the 16-rectangle bound' => ['length(Acc) >= ?ERX_WINDOWS_PRESENT_RECTS', 'length(Acc) >= 64'],
+    'the coordinate range' => ['Sign * Magnitude =< ?ERX_WINDOWS_COORD_MAX', 'is_integer(Magnitude)'],
     'the clip' => ['[intersect(R, Buffer) || R <- Rects]', 'Rects'],
     'the 19-digit bound' => ['byte_size(Digits) > ?MAX_DIGITS', 'byte_size(Digits) < 0']
   }.freeze
@@ -53,7 +54,7 @@ module ErxWinctlFuzz
     Dir.mktmpdir('erx-winctl-fuzz') do |work|
       module_path = File.join(work, 'erx_winctl.erl')
       File.binwrite(module_path, module_text)
-      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-o', work, module_path, TARGET_SOURCE, stdin_data: '')
+      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-I', ABI_INCLUDE, '-o', work, module_path, TARGET_SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

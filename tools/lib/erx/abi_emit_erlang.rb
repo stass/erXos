@@ -71,9 +71,26 @@ module Erx
             prefix = Names.macro(type.name)
             lines << "-define(#{prefix}_SIZE, #{type.size})."
             lines << "-define(#{prefix}_BYTES, #{literal(type.fixed)})."
+          elsif type.is_a?(EnumType) && !type.flags
+            lines << enum_members(schema, type)
           end
         end
         (lines + ['', '-endif.', '']).join("\n")
+      end
+
+      # ?ERX_<ENUM>_MEMBERS: an enum's members as {Name, Value} in value order,
+      # so code that walks the whole set, such as a file tree's list of files,
+      # takes it from the ABI file instead of copying the names.
+      def enum_members(schema, type)
+        name = "#{type.name}_members"
+        raise SchemaError, "enum member list #{name} collides with a constant" if schema.constants.key?(name)
+
+        members = type.members.sort_by { |_member, value| value }
+                      .map { |member, value| "{#{literal(atom(member))}, #{value}}" }
+        compact = "-define(#{Names.macro(name)}, [#{members.join(', ')}])."
+        return compact if compact.bytesize <= 80
+
+        "-define(#{Names.macro(name)}, [\n    #{members.join(",\n    ")}\n])."
       end
 
       # erx_abi_events:describe(Enum, Value): for each enum with args

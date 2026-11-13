@@ -94,6 +94,28 @@ class AbiErlangTest < Minitest::Test
     assert_equal "checked #{corpus.size} reader inputs\n", output
   end
 
+  # erx_abi.hrl lists each enum's members in value order, on one line or
+  # wrapped, and both forms compile and read as the ABI file declares them.
+  def test_generated_enum_members_list_each_member_in_value_order
+    File.binwrite(File.join(@directory, 'erx_abi_members.erl'), <<~ERLANG)
+      -module(erx_abi_members).
+      -export([main/0]).
+      -include("erx_abi.hrl").
+      main() ->
+          io:format("~w~n~w~n", [?ERX_WINDOWS_FILE_MEMBERS, ?ERX_MF_WINDOW_ROLE_MEMBERS]),
+          halt().
+    ERLANG
+    @runner.run([File.join(@oracle, 'erlc'), '-Werror', '-I', @directory, '-o', @directory,
+                 File.join(@directory, 'erx_abi_members.erl')],
+                name: 'erlc-members', deadline: 60, env: @environment)
+    record = @runner.run([File.join(@oracle, 'erl'), '-noshell', '-noinput', '-pa', @directory,
+                          '-s', 'erx_abi_members', 'main'], name: 'members', deadline: 60, env: @environment)
+    roles = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: @root)).types.fetch('mf_window_role')
+                           .members.sort_by { |_name, value| value }
+                           .map { |name, value| "{#{name},#{value}}" }.join(',')
+    assert_equal "[{ctl,1},{mouse,2},{kbd,3},{wctl,4},{label,5}]\n[#{roles}]\n", File.binread(record.fetch('log'))
+  end
+
   # The generated erx_abi_events gives each trace event's name and typed
   # arguments, and unknown for a value trace_event does not hold.
   def test_generated_events_describe_each_trace_event
