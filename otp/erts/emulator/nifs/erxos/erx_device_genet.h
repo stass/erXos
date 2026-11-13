@@ -119,12 +119,6 @@ typedef struct erx_device_genet_completion {
 	uint64_t	tag;			/* TX: the post's; RX: the status bits below the length, its flags */
 } erx_device_genet_completion_t;
 
-/* One piece of a transmit post: bytes laid end to end in the buffer. */
-typedef struct erx_device_genet_piece {
-	const uint8_t	*bytes;
-	uint32_t	length;
-} erx_device_genet_piece_t;
-
 /*
  * The direction's registers from the device's table, the one ring's elements of each ring
  * register and descriptor 0's of each descriptor register. False for a table that lacks one,
@@ -187,7 +181,7 @@ void	erx_device_genet_start(const erx_device_genet_registers_t *regs, erx_dma_st
  * free descriptor, or pieces empty, too many or too long; *full says which of the last two.
  */
 bool	erx_device_genet_post(erx_device_genet_queue_t *queue, const erx_device_genet_registers_t *regs,
-	    uint64_t pool_offset, const erx_device_genet_piece_t *pieces, uint32_t count, uint64_t tag,
+	    uint64_t pool_offset, const erx_dma_piece_t *pieces, uint32_t count, uint64_t tag,
 	    erx_dma_step_t *steps, uint32_t *step_count, bool *full);
 
 /* The first observation of a completion: the index the controller advances. */
@@ -222,5 +216,23 @@ uint32_t	erx_device_genet_copy_steps(const erx_device_genet_queue_t *queue, uint
 /* The buffers taken back handed to the device again, and the consumer index published past them. */
 uint32_t	erx_device_genet_rx_give(erx_device_genet_queue_t *queue, const erx_device_genet_registers_t *regs,
 	    erx_dma_step_t *steps);
+
+
+/*
+ * The form's round function, the one entry the effect layer calls (erx_dma_round_t): each call
+ * of erx_dma_request_t as the functions above make its rounds, in their order.
+ *
+ *   IDLE      the DMA status observed, then the end: ERX_OK when it shows the stop, else
+ *             ERX_EBUSY, with the value read;
+ *   INSTALL   the reset from that value, the take-back of every buffer, the install, the end;
+ *             ERX_EINVAL, breaking the queue, when the value does not show the stop;
+ *   START     DMA control with the engine's enable, a publish that keeps the state;
+ *   POST      transmit only: the pieces into the buffer the producer index names;
+ *   COMPLETE  transmit: the consumer index observed, then the take-back with an answer of no
+ *             bytes per tag; receive: the producer index, the statuses, the take-back with a
+ *             copy per frame, then the hand-back and the consumer index.
+ */
+void	erx_device_genet_round(erx_device_genet_queue_t *queue, const erx_device_genet_registers_t *regs,
+	    const erx_dma_request_t *request, erx_dma_round_t *round);
 
 #endif /* ERX_DEVICE_GENET_H */

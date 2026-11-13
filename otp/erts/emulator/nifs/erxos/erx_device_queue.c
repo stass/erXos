@@ -58,13 +58,11 @@ void
 erx_device_queue_reset(erx_device_queue_t *queue)
 {
 	const uint32_t size = queue->size, buffer_size = queue->buffer_size, stride = queue->stride;
-	const uint64_t pool = queue->pool;
 
 	bzero(queue, sizeof(*queue));
 	queue->size = size;
 	queue->buffer_size = buffer_size;
 	queue->stride = stride;
-	queue->pool = pool;
 	queue->free_count = size;
 	for (uint32_t index = 0; index + 1 < size; index++)
 		queue->next[index] = (uint16_t)(index + 1);
@@ -82,7 +80,6 @@ erx_device_queue_init(erx_device_queue_t *queue, uint32_t size, uint32_t buffer_
 	queue->size = size;
 	queue->buffer_size = buffer_size;
 	queue->stride = round_up(buffer_size, granule);
-	queue->pool = pool;
 	erx_device_queue_reset(queue);
 	return (true);
 }
@@ -103,56 +100,6 @@ segments_fit(const erx_device_segment_t *segments, uint32_t count, uint32_t buff
 		if (index > 0 && segments[index - 1].device_writes && !segment->device_writes)
 			return (false);
 	}
-	return (true);
-}
-
-bool
-erx_device_queue_post(erx_device_queue_t *queue, const erx_device_segment_t *segments, uint32_t count,
-    uint64_t tag, erx_device_post_plan_t *plan)
-{
-	erx_device_chain_t chain;
-	uint64_t buffer_addr;
-	uint32_t index;
-
-	if (queue->broken || count == 0 || count > ERX_DEVICE_CHAIN_MAX || count > queue->free_count ||
-	    !segments_fit(segments, count, queue->buffer_size))
-		return (false);
-	/* Field by field over zeroed records, so no padding of the caller's reaches a completion. */
-	bzero(&chain, sizeof(chain));
-	chain.posted = true;
-	chain.count = count;
-	chain.tag = tag;
-	bzero(plan, sizeof(*plan));
-	index = queue->free_head;
-	/* Within the pool, whose last byte erx_device_queue_init checked is representable. */
-	buffer_addr = queue->pool + (uint64_t)index * queue->stride;
-	for (uint32_t step = 0; step < count; step++) {
-		const erx_device_segment_t *segment = &segments[step];
-		erx_device_desc_write_t *desc = &plan->descs[step];
-		const bool last = step + 1 == count;
-
-		desc->index = (uint16_t)index;
-		desc->addr = buffer_addr + segment->offset;
-		desc->len = segment->length;
-		desc->flags = (uint16_t)((last ? 0 : ERX_VIRTQ_DESC_F_NEXT) |
-		    (segment->device_writes ? ERX_VIRTQ_DESC_F_WRITE : 0));
-		desc->next = last ? 0 : queue->next[index];
-		chain.segments[step].offset = segment->offset;
-		chain.segments[step].length = segment->length;
-		chain.segments[step].device_writes = segment->device_writes;
-		if (segment->device_writes)
-			chain.writable += segment->length;
-		index = queue->next[index];
-	}
-	plan->count = count;
-	plan->head = plan->descs[0].index;
-	plan->avail_slot = (uint16_t)(queue->avail_idx & (queue->size - 1));
-	plan->avail_idx = (uint16_t)(queue->avail_idx + 1);
-	queue->chains[plan->head] = chain;
-	queue->free_head = index;
-	queue->free_count -= count;
-	queue->in_flight++;
-	queue->avail_idx = plan->avail_idx;
 	return (true);
 }
 
@@ -315,36 +262,62 @@ erx_device_queue_install_steps(const erx_device_queue_t *queue, const erx_device
 }
 
 uint32_t
-erx_device_queue_post_steps(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
-    uint64_t device_base, uint64_t pool_offset,
-    const erx_device_post_plan_t *plan, const erx_device_segment_t *segments, const uint8_t *const *bytes,
+erx_device_queue_post(erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, uint64_t device_base,
+    uint64_t pool_offset, const erx_device_segment_t *segments, const uint8_t *const *bytes, uint32_t count, uint64_t tag,
     const erx_device_queue_registers_t *regs, uint32_t index, erx_dma_step_t *steps)
 {
-	const uint64_t buffer = pool_offset + (uint64_t)plan->head * queue->stride;
-	uint32_t count = 0;
+	erx_device_chain_t chain;
+	uint64_t buffer;
+	uint32_t head, desc, made = 0;
+	uint16_t avail_slot;
 
-	for (uint32_t segment = 0; segment < plan->count; segment++) {
-		const erx_device_desc_write_t *const desc = &plan->descs[segment];
-		const uint64_t at = layout->desc + (uint64_t)desc->index * ERX_VIRTQ_DESC_SIZE;
+	if (queue->broken || count == 0 || count > ERX_DEVICE_CHAIN_MAX || count > queue->free_count ||
+	    !segments_fit(segments, count, queue->buffer_size))
+		return (0);
+	/* Field by field over a zeroed record, so no padding of the caller's reaches a completion. */
+	bzero(&chain, sizeof(chain));
+	chain.posted = true;
+	chain.count = count;
+	chain.tag = tag;
+	head = desc = queue->free_head;
+	buffer = pool_offset + (uint64_t)head * queue->stride;
+	for (uint32_t segment = 0; segment < count; segment++) {
+		const erx_device_segment_t *const taken = &segments[segment];
+		const bool last = segment + 1 == count;
+		const uint64_t at = layout->desc + (uint64_t)desc * ERX_VIRTQ_DESC_SIZE;
+		const uint16_t flags = (uint16_t)((last ? 0 : ERX_VIRTQ_DESC_F_NEXT) |
+		    (taken->device_writes ? ERX_VIRTQ_DESC_F_WRITE : 0));
 
-		if (!segments[segment].device_writes)
-			steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY, .source = ERX_DMA_BYTES,
-			    .reg_high = ERX_DMA_NO_REGISTER, .offset = buffer + segments[segment].offset,
-			    .length = segments[segment].length, .bytes = bytes[segment] };
+		if (!taken->device_writes)
+			steps[made++] = (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY, .source = ERX_DMA_BYTES,
+			    .reg_high = ERX_DMA_NO_REGISTER, .offset = buffer + taken->offset, .length = taken->length,
+			    .bytes = bytes[segment] };
 		/* The address from the device base and the buffer's offset, the same the view's region names. */
-		steps[count++] = ring_write(ERX_DMA_ADDRESS, at + offsetof(erx_virtq_desc_t, addr), 8,
-		    device_base + buffer + segments[segment].offset, desc->len);
-		steps[count++] = ring_write(ERX_DMA_VALUE, at + offsetof(erx_virtq_desc_t, len), 4, desc->len, 0);
-		steps[count++] = ring_write(ERX_DMA_VALUE, at + offsetof(erx_virtq_desc_t, flags), 2, desc->flags, 0);
-		steps[count++] = ring_write(ERX_DMA_VALUE, at + offsetof(erx_virtq_desc_t, next), 2, desc->next, 0);
+		steps[made++] = ring_write(ERX_DMA_ADDRESS, at + offsetof(erx_virtq_desc_t, addr), 8,
+		    device_base + buffer + taken->offset, taken->length);
+		steps[made++] = ring_write(ERX_DMA_VALUE, at + offsetof(erx_virtq_desc_t, len), 4, taken->length, 0);
+		steps[made++] = ring_write(ERX_DMA_VALUE, at + offsetof(erx_virtq_desc_t, flags), 2, flags, 0);
+		steps[made++] = ring_write(ERX_DMA_VALUE, at + offsetof(erx_virtq_desc_t, next), 2,
+		    last ? 0 : queue->next[desc], 0);
+		chain.segments[segment].offset = taken->offset;
+		chain.segments[segment].length = taken->length;
+		chain.segments[segment].device_writes = taken->device_writes;
+		if (taken->device_writes)
+			chain.writable += taken->length;
+		desc = queue->next[desc];
 	}
-	steps[count++] = ring_write(ERX_DMA_VALUE, layout->avail + ERX_VIRTQ_RING_HEAD_SIZE + 2u * plan->avail_slot, 2,
-	    plan->head, 0);
-	steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_PUBLISH, .target = ERX_DMA_MEMORY, .source = ERX_DMA_VALUE,
+	avail_slot = (uint16_t)(queue->avail_idx & (queue->size - 1));
+	queue->avail_idx = (uint16_t)(queue->avail_idx + 1);
+	steps[made++] = ring_write(ERX_DMA_VALUE, layout->avail + ERX_VIRTQ_RING_HEAD_SIZE + 2u * avail_slot, 2, head, 0);
+	steps[made++] = (erx_dma_step_t){ .kind = ERX_DMA_PUBLISH, .target = ERX_DMA_MEMORY, .source = ERX_DMA_VALUE,
 	    .width = 2, .reg_high = ERX_DMA_NO_REGISTER, .offset = layout->avail + offsetof(erx_virtq_ring_head_t, idx),
-	    .value = plan->avail_idx };
-	steps[count++] = register_publish(regs->notify, index);
-	return (count);
+	    .value = queue->avail_idx };
+	steps[made++] = register_publish(regs->notify, index);
+	queue->chains[head] = chain;
+	queue->free_head = desc;
+	queue->free_count -= count;
+	queue->in_flight++;
+	return (made);
 }
 
 void
@@ -386,4 +359,165 @@ erx_device_queue_copy_steps(const erx_device_queue_t *queue, uint64_t pool_offse
 			    .length = completion->ranges[range].length };
 	}
 	return (made);
+}
+
+/* The rounds of the split ring's calls, by the plan each makes; the round after the last plan ends the call. */
+enum {
+	INSTALL_RESET = 0,		/* every region taken back */
+	INSTALL_WRITE = 1,		/* the rings zeroed, their addresses published, the queue ready */
+};
+enum {
+	POST_WRITE = 0,			/* the chain, its available entry, the index and the doorbell */
+};
+enum {
+	COMPLETE_READ_INDEX = 0,	/* the used index observed */
+	COMPLETE_READ_ENTRIES = 1,	/* the entries it announces observed */
+	COMPLETE_TAKE_BACK = 2,		/* the completed chains' buffers taken back, a copy per range */
+};
+
+/* A plan of `count` steps of `call` from the round's steps, and the installed queue's state after it. */
+static void
+round_plan(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, const erx_dma_request_t *request,
+    erx_dma_call_t call, uint32_t count, bool installed, erx_dma_round_t *round)
+{
+	round->call = call;
+	round->count = count;
+	erx_device_queue_view(queue, layout, request->pool_offset, installed, round->after);
+}
+
+static void
+queue_post(erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, const erx_device_queue_registers_t *regs,
+    const erx_dma_request_t *request, erx_dma_round_t *round)
+{
+	erx_device_segment_t segments[ERX_DEVICE_CHAIN_MAX];
+	const uint8_t *bytes[ERX_DEVICE_CHAIN_MAX];
+	uint32_t offset = 0, count;
+
+	if (request->count == 0 || request->count > ERX_DEVICE_CHAIN_MAX) {
+		erx_dma_round_end(round, ERX_EINVAL);
+		return;
+	}
+	for (uint32_t step = 0; step < request->count; step++) {
+		const erx_dma_piece_t *const piece = &request->pieces[step];
+
+		if (piece->length > queue->buffer_size - offset) {
+			erx_dma_round_end(round, ERX_EINVAL);
+			return;
+		}
+		segments[step] = (erx_device_segment_t){ .offset = offset, .length = piece->length,
+		    .device_writes = piece->device_writes };
+		bytes[step] = piece->bytes;
+		offset += piece->length;
+	}
+	if (!request->ready || queue->broken) {
+		erx_dma_round_end(round, ERX_ECORRUPT);
+		return;
+	}
+	if (queue->free_count < request->count) {
+		erx_dma_round_end(round, ERX_EWOULDBLOCK);
+		return;
+	}
+	count = erx_device_queue_post(queue, layout, request->device_base, request->pool_offset, segments, bytes,
+	    request->count, request->tag, regs, request->queue, round->steps);
+	if (count == 0) {
+		erx_dma_round_end(round, ERX_EINVAL);
+		return;
+	}
+	/*
+	 * The sequencer zeroes the head's buffer outside the bytes the device reads, so what a
+	 * completion copies is the device's bytes or zeros, never an earlier request's (a region's
+	 * entry among them).
+	 */
+	round_plan(queue, layout, request, ERX_DMA_CALL_POST, count, true, round);
+}
+
+static void
+queue_complete(erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, const erx_dma_request_t *request,
+    erx_dma_round_t *round)
+{
+	const uint32_t max = request->answers_max < ERX_DMA_ANSWERS_MAX ? request->answers_max : ERX_DMA_ANSWERS_MAX;
+	erx_device_completion_t completion;
+	uint32_t fresh, done = 0, count = 0;
+	uint64_t copied = 0;
+
+	switch (round->round) {
+	case COMPLETE_READ_INDEX:
+		erx_device_queue_index_report(layout, &round->steps[0]);
+		erx_dma_round_observe(round, 1);
+		return;
+	case COMPLETE_READ_ENTRIES:
+		if (!erx_device_queue_used(queue, (uint16_t)round->values[0], &fresh)) {
+			erx_dma_round_end(round, ERX_ECORRUPT);
+			return;
+		}
+		count = erx_device_queue_entry_reports(queue, layout, fresh < max ? fresh : max, round->steps);
+		if (count == 0) {
+			erx_dma_round_end(round, ERX_OK);
+			return;
+		}
+		erx_dma_round_observe(round, count);
+		return;
+	case COMPLETE_TAKE_BACK:
+		/*
+		 * Each entry's two reports, its id then its length (erx_device_queue_entry_reports), at
+		 * most max entries, whatever the round's value count says.
+		 */
+		fresh = round->value_count / ERX_DEVICE_QUEUE_ENTRY_REPORTS;
+		if (fresh > max)
+			fresh = max;
+		while (done < fresh && copied < request->bytes_max && erx_device_queue_complete(queue,
+		    (uint32_t)round->values[ERX_DEVICE_QUEUE_ENTRY_REPORTS * done],
+		    (uint32_t)round->values[ERX_DEVICE_QUEUE_ENTRY_REPORTS * done + 1], &completion)) {
+			const uint32_t copies = erx_device_queue_copy_steps(queue, request->pool_offset, &completion, 1,
+			    round->steps + count);
+
+			round->answers[done++] = (erx_dma_answer_t){ .tag = completion.tag, .length = completion.length,
+			    .copies = copies };
+			copied += completion.length;
+			count += copies;
+		}
+		if (done == 0) {
+			erx_dma_round_end(round, queue->broken ? ERX_ECORRUPT : ERX_OK);
+			return;
+		}
+		round->answer_count = done;
+		round_plan(queue, layout, request, ERX_DMA_CALL_COMPLETE, count, true, round);
+		return;
+	default:
+		erx_dma_round_end(round, ERX_OK);
+		return;
+	}
+}
+
+void
+erx_device_queue_round(erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
+    const erx_device_queue_registers_t *regs, const erx_dma_request_t *request, erx_dma_round_t *round)
+{
+	switch (request->kind) {
+	case ERX_DMA_REQUEST_INSTALL:
+		if (round->round == INSTALL_RESET) {
+			erx_device_queue_reset(queue);
+			round_plan(queue, layout, request, ERX_DMA_CALL_RESET, 0, false, round);
+		} else if (round->round == INSTALL_WRITE) {
+			round_plan(queue, layout, request, ERX_DMA_CALL_INSTALL, erx_device_queue_install_steps(queue, layout,
+			    regs, request->queue, request->device_base, round->steps), true, round);
+		} else {
+			erx_dma_round_end(round, ERX_OK);
+		}
+		return;
+	case ERX_DMA_REQUEST_POST:
+		if (round->round == POST_WRITE)
+			queue_post(queue, layout, regs, request, round);
+		else
+			erx_dma_round_end(round, ERX_OK);
+		return;
+	case ERX_DMA_REQUEST_COMPLETE:
+		queue_complete(queue, layout, request, round);
+		return;
+	case ERX_DMA_REQUEST_IDLE:
+	case ERX_DMA_REQUEST_START:
+		break;
+	}
+	/* The split ring's idle report and start are virtio's status handshake, not DMA. */
+	erx_dma_round_end(round, ERX_ENOTSUP);
 }

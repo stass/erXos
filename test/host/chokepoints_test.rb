@@ -35,8 +35,8 @@ class ChokepointsTest < Minitest::Test
 
   def test_fiasco_backend_may_speak_fiasco
     text = "#include <l4/sys/ipc.h>\nint f(void) { l4_ipc_call(); __asm__(\"svc #0x4552\"); }\n"
-    assert_empty evaluate(Rules::ACTIVE, { 'liberx/backend/fiasco/trap.c' => text })
-    assert_equal %w[fiasco-headers-in-backend fiasco-symbols-in-backend one-erx-trap],
+    assert_empty evaluate(Rules::ACTIVE, { 'liberx/backend/fiasco/arch/aarch64/generated/trap.c' => text })
+    assert_equal %w[fiasco-headers-in-backend fiasco-symbols-in-backend inline-asm one-erx-trap],
                  evaluate(Rules::ACTIVE, { 'kernel/core/trap.c' => text }).map(&:rule).uniq.sort
   end
 

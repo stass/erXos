@@ -382,7 +382,7 @@ post(harness_t *h)
 {
 	direction_t *const d = &h->tx;
 	erx_dma_step_t steps[STEPS_MAX];
-	erx_device_genet_piece_t pieces[2];
+	erx_dma_piece_t pieces[2];
 	uint8_t frame[BUFFER];
 	const uint32_t length = 1 + draw(h, BUFFER), split = draw(h, length);
 	const uint32_t buffer = d->queue.software % SIZE, serial = ++h->serial;
@@ -391,8 +391,8 @@ post(harness_t *h)
 
 	for (uint32_t at = 0; at < length; at++)
 		frame[at] = pattern(serial, at);
-	pieces[0] = (erx_device_genet_piece_t){ frame, split == 0 ? length : split };
-	pieces[1] = (erx_device_genet_piece_t){ frame + split, length - split };
+	pieces[0] = (erx_dma_piece_t){ .bytes = frame, .length = split == 0 ? length : split };
+	pieces[1] = (erx_dma_piece_t){ .bytes = frame + split, .length = length - split };
 	if (!erx_device_genet_post(&d->queue, &d->regs, d->pool_offset, pieces, split == 0 ? 1 : 2, serial, steps, &count,
 	    &full)) {
 		CHECK(full && d->queue.in_flight == SIZE);

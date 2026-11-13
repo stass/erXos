@@ -12,12 +12,13 @@
  * head starts, the tag the driver wants back and the ranges of its buffer the device may
  * write. The queue owns its buffers too: buffer i, of buffer_size bytes at device address
  * pool + i * buffer_size, belongs to the chain whose head is descriptor i, so no two chains in
- * flight ever share a buffer, and none is taken without being posted. erx_device.c writes a post's plan into the rings and reads each used entry once,
- * and the core decides what that entry may mean:
+ * flight ever share a buffer, and none is taken without being posted. erx_device.c applies a
+ * post's plan to the rings and reads each used entry once, and the core decides what that
+ * entry may mean:
  *
  *   post      a chain of 1..ERX_DEVICE_CHAIN_MAX segments of the head's buffer becomes a plan of
- *             descriptors whose addresses, NEXT links and WRITE flags the core alone
- *             computes, so no descriptor aims the device at anything but the buffer;
+ *             descriptor writes whose indexes, addresses, NEXT links and WRITE flags the core
+ *             alone computes, so no descriptor aims the device at anything but the buffer;
  *   used      the used ring's index, loaded once, says how many entries are new, which
  *             cannot exceed the chains in flight;
  *   complete  each new entry names a head the core posted and a length within what the
@@ -83,7 +84,6 @@ typedef struct erx_device_queue {
 	uint32_t		size;		/* a power of two, at most ERX_DEVICE_QUEUE_SIZE_MAX */
 	uint32_t		buffer_size;	/* each of the size buffers, 1..ERX_DEVICE_BUFFER_MAX */
 	uint32_t		stride;		/* buffer_size rounded up to the granule: buffer i is at pool + i * stride */
-	uint64_t		pool;		/* buffer 0's device address; the last byte is representable */
 	uint16_t		avail_idx;	/* the available ring's running index */
 	uint16_t		last_used;	/* the next used entry to complete, a running index */
 	uint32_t		free_head;
@@ -95,27 +95,6 @@ typedef struct erx_device_queue {
 	uint16_t		next[ERX_DEVICE_QUEUE_SIZE_MAX];	/* free list and chain links */
 	erx_device_chain_t	chains[ERX_DEVICE_QUEUE_SIZE_MAX];
 } erx_device_queue_t;
-
-/* One descriptor to write: its slot in the table and its fields, little-endian on write. */
-typedef struct erx_device_desc_write {
-	uint16_t	index;
-	uint64_t	addr;
-	uint32_t	len;
-	uint16_t	flags;
-	uint16_t	next;
-} erx_device_desc_write_t;
-
-/*
- * A post, decided whole: write the descriptors, then the head into the available ring's
- * slot, then, after a barrier, the ring's index; then ring the doorbell.
- */
-typedef struct erx_device_post_plan {
-	uint32_t		count;
-	erx_device_desc_write_t	descs[ERX_DEVICE_CHAIN_MAX];
-	uint16_t		avail_slot;
-	uint16_t		head;
-	uint16_t		avail_idx;
-} erx_device_post_plan_t;
 
 /* A completed chain: its tag, its buffer, and the ranges of the buffer to copy out, in order. */
 typedef struct erx_device_completion {
@@ -154,16 +133,6 @@ bool	erx_device_queue_init(erx_device_queue_t *queue, uint32_t size, uint32_t bu
 void	erx_device_queue_reset(erx_device_queue_t *queue);
 
 /*
- * Posts a chain over the buffer of its head descriptor, whose index plan->head gives and the
- * completion hands back. False, changing nothing, for a broken queue, a count outside
- * 1..ERX_DEVICE_CHAIN_MAX, an empty segment or one outside the buffer, a segment the device
- * reads after one it writes, or too few free descriptors. The core counts the post as made,
- * so the effects apply the plan whole.
- */
-bool	erx_device_queue_post(erx_device_queue_t *queue, const erx_device_segment_t *segments, uint32_t count,
-	    uint64_t tag, erx_device_post_plan_t *plan);
-
-/*
  * How many used entries are new, given the used ring's index as one load read it. More than
  * the chains in flight breaks the queue and is false.
  */
@@ -192,6 +161,8 @@ bool	erx_device_queue_complete(erx_device_queue_t *queue, uint32_t id, uint32_t 
 struct erx_dma_context;
 struct erx_dma_state;
 struct erx_dma_step;
+struct erx_dma_request;
+struct erx_dma_round;
 
 /* The window offsets of the registers the split ring's plans write, which the NIF owns. */
 typedef struct erx_device_queue_registers {
@@ -227,14 +198,19 @@ void	erx_device_queue_view(const erx_device_queue_t *queue, const erx_device_que
 uint32_t	erx_device_queue_install_steps(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
 	    const erx_device_queue_registers_t *regs, uint32_t index, uint64_t rings_addr, struct erx_dma_step *steps);
 /*
- * A post the core decided: each readable segment's `bytes` into the head's buffer, each
- * descriptor's address, `device_base` plus its bytes' offset, with its length as its reach and its other fields, the available entry,
- * then the available index and the doorbell of queue `index`.
+ * Posts a chain over the buffer of its head descriptor, which the completion hands back, and
+ * writes the post as plan steps: per segment, a readable one's `bytes` into the head's buffer,
+ * then its descriptor's address (`device_base` plus its bytes' offset, its length as its
+ * reach), length, flags and next link; then the head into the available ring's entry, the
+ * available index and the doorbell of queue `index`. Returns the count of steps, at most
+ * ERX_DEVICE_QUEUE_POST_STEPS, or 0, writing nothing, for a broken queue, a count outside
+ * 1..ERX_DEVICE_CHAIN_MAX, an empty segment or one outside the buffer, a segment the device
+ * reads after one it writes, or too few free descriptors. The core counts the post as made,
+ * so the effects apply the plan whole.
  */
-uint32_t	erx_device_queue_post_steps(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
-	    uint64_t device_base, uint64_t pool_offset, const erx_device_post_plan_t *plan, const erx_device_segment_t *segments,
-	    const uint8_t *const *bytes, const erx_device_queue_registers_t *regs, uint32_t index,
-	    struct erx_dma_step *steps);
+uint32_t	erx_device_queue_post(erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, uint64_t device_base,
+	    uint64_t pool_offset, const erx_device_segment_t *segments, const uint8_t *const *bytes, uint32_t count,
+	    uint64_t tag, const erx_device_queue_registers_t *regs, uint32_t index, struct erx_dma_step *steps);
 /* The observation of the used ring's index. */
 void	erx_device_queue_index_report(const erx_device_queue_layout_t *layout, struct erx_dma_step *step);
 /* The observation of the next `fresh` used entries, at most the queue's size: each id, then each length. */
@@ -243,5 +219,26 @@ uint32_t	erx_device_queue_entry_reports(const erx_device_queue_t *queue, const e
 /* The copies of `count` completions, each range of each buffer in order, at most ERX_DEVICE_CHAIN_MAX per completion. */
 uint32_t	erx_device_queue_copy_steps(const erx_device_queue_t *queue, uint64_t pool_offset,
 	    const erx_device_completion_t *completions, uint32_t count, struct erx_dma_step *steps);
+
+
+/*
+ * The form's round function, the one entry the effect layer calls (erx_dma_round_t): each call
+ * of erx_dma_request_t as the functions above make its rounds, in their order.
+ *
+ *   INSTALL   the reset, whose decision takes every region back, then the install, the end;
+ *   POST      the request's pieces as segments of the head's buffer laid end to end, then the
+ *             post; ERX_EINVAL for pieces past the buffer, ERX_ECORRUPT for a queue not ready or
+ *             broken, ERX_EWOULDBLOCK for too few free descriptors, in that order, then ERX_EINVAL
+ *             for a post the core refuses (an empty piece, or one the device reads after one it
+ *             writes);
+ *   COMPLETE  the used index observed, then the entries it announces, at most answers_max;
+ *             the core completes them in order until one is malformed or bytes_max are taken,
+ *             and one decision takes their buffers back with a copy per range. ERX_ECORRUPT
+ *             when the queue broke and nothing was completed.
+ *
+ * A piece naming a region is the region's entry, which the device reads like any bytes.
+ */
+void	erx_device_queue_round(erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
+	    const erx_device_queue_registers_t *regs, const struct erx_dma_request *request, struct erx_dma_round *round);
 
 #endif /* ERX_DEVICE_QUEUE_H */

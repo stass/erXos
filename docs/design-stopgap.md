@@ -679,7 +679,14 @@ it, and gives the device no DMA memory, with a line naming the device, its range
 when the entry has no range or the object would lie outside it
 ([design-device-tree.md](design-device-tree.md#facts-into-records)). Having no resource objects, the stopgap
 takes the entry's range as a value (`erx_mem_create_contiguous_in` of `liberx/backend/api.h`) where erXos's
-kernel takes the device's resource, and places the run only where all its pages lie inside the range. The pool
+kernel takes the device's resource, and places the run only where all its pages lie inside the range. One
+pure function builds that range from the entry's facts (`erx_boot_dma_range`,
+`liberx/backend/core/boot_manifest.c`), and only its two callers make a device's memory: the root's device
+step (`device_memory`, `liberx/backend/fiasco/runtime_entry.c`) and the domain library's give
+(`apply_give_step`, `liberx/system/dom_apply.c`). No other code calls either create, the identity
+`erx_mem_create_contiguous` included, which would give a device with a bus offset its CPU addresses and
+spend pool the declared total does not hold; the chokepoint `contiguous-create-callers` fails the build on
+a new caller. The pool
 is the lowest free RAM `sigma0` has (`Mem_man::alloc_first`, `sigma0/server/src/mem_man.cc`), taken before
 anything else of the root's, so it lies inside the DMA window of every supported board's devices, the Raspberry
 Pi 4's EMMC2, which sees only the first GiB of CPU addresses, from bus address 0xc0000000, among them.

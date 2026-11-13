@@ -12,6 +12,7 @@
 #include "erx/abi.h"
 #include "erx/core/dt.h"
 #include "erx/boot_words.h"
+#include "liberx/backend/api.h"
 #include "liberx/backend/core/boot_info.h"
 
 /*
@@ -203,6 +204,15 @@ bool	erx_boot_row_asks(uint64_t dma_memory, bool network);
  * own give and every holder's give make memory from the one decision.
  */
 uint64_t	erx_boot_dma_memory(const erx_dt_device_t *facts, uint64_t dma_memory);
+
+/*
+ * The DMA translation a device's contiguous memory is made inside
+ * (erx_mem_create_contiguous_in), from the facts of its catalogue entry: CPU addresses cpu
+ * through last, which the device sees from bus. The one place a range is built from facts,
+ * so no give hands a device with a bus offset its CPU addresses. It means something only
+ * for facts that admit memory (erx_boot_dma_memory), the only ones a give makes memory for.
+ */
+erx_mem_dma_range_t	erx_boot_dma_range(const erx_dt_device_t *facts);
 
 /*
  * A given record's COHERENT: the facts' coherence for a row that gets DMA memory

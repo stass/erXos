@@ -135,6 +135,26 @@ module Erx
           seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_mem_dma_addr(0, 0, 0); }\n",
                   'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(void) { erx_dma_map(0, 0, 0, 0, 0); }\n" }
         ),
+        # The sequencer orders every clean, invalidate and barrier of a queue call, and
+        # erx_device.c's effect layer runs its plan under the device lock, so a call from anywhere
+        # else would issue maintenance outside any plan. The architecture layer's header declares
+        # them, each architecture's erx_dma_arch.c defines them, and so does the counting double
+        # the DMA harness links in place of the hosted model; the harnesses themselves reach them
+        # only through erx_device. erx_dma_granule and erx_dma_line are queries and stay free.
+        Chokepoints::Forbidden.new(
+          name: 'device-dma-maintenance',
+          rule: "only erx_device.c's effect layer calls the DMA architecture layer's cache maintenance and barriers",
+          design: 'docs/design-device-dma.md#the-architecture-layer',
+          scope: DEVICE_SCOPE,
+          pattern: /\berx_dma_(?:clean|clean_inval|publish_barrier|report_barrier|completion_barrier)\b/,
+          sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.c"),
+                  Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_dma_arch.h"),
+                  Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/arch/*/erx_dma_arch.c"),
+                  Chokepoints::Site.new(glob: 'test/fixtures/erx_dma_arch_counting.c')],
+          seed: { 'otp/erts/emulator/nifs/erxos/erx_device_bif.c' => "void f(void) { erx_dma_clean(0, 0, 64); }\n",
+                  'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_dma_completion_barrier(); }\n",
+                  'test/fixtures/erx_device_dma_harness.c' => "void f(void) { erx_dma_publish_barrier(1); }\n" }
+        ),
         Chokepoints::Forbidden.new(
           name: 'device-table-include',
           rule: 'only erx_device_core.c includes the generated table, whose static data has one owner',

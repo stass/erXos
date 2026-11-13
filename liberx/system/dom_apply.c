@@ -385,7 +385,7 @@ apply_give_step(apply_t *apply, uint32_t at, const erx_dom_step_t *step)
 	const uint64_t budget = give_object(apply, give, at, step->budget);
 	const uint64_t resource = give_object(apply, give, at, step->target);
 	/* The device's DMA translation, which the stopgap takes in place of the resource. */
-	const erx_mem_dma_range_t range = { .cpu = entry->facts.cpu, .bus = entry->facts.bus, .last = entry->facts.last };
+	const erx_mem_dma_range_t range = erx_boot_dma_range(&entry->facts);
 	uint64_t handle = ERX_CAP_NULL;
 	int status;
 

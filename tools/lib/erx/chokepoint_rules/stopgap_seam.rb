@@ -281,6 +281,38 @@ module Erx
                   Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service_task.c')],
           seed: { 'liberx/backend/fiasco/seeded.c' => "void f(void) { erx_fiasco_vm_body(0, 0, 0, 0, 0); }\n" }
         ),
+        # A device's memory is made once, inside the range erx_boot_dma_range builds from its
+        # catalogue entry's facts, by the root's device step (runtime_entry.c, device_memory) or
+        # the domain library's give (dom_apply.c, apply_give_step). The pool holds only the
+        # devices' declared total, and the identity create gives a device with a bus offset its
+        # CPU addresses, so no other code makes contiguous memory by either create. The backends
+        # define both, the identity create over the ranged one; the test guests exercise them.
+        Chokepoints::Forbidden.new(
+          name: 'contiguous-create-callers',
+          rule: "only the root's device step and the domain library's give make a device's contiguous memory, " \
+                'inside the range erx_boot_dma_range builds',
+          design: "#{STOPGAP}#the-pool",
+          scope: Chokepoints::Scope.new(own: true, extra: [GLUE, 'otp/erts/emulator/nifs/erxos/**/*',
+                                                           'otp/erts/emulator/sys/erxos/**/*']),
+          pattern: /\berx_mem_create_contiguous(?:_in)?\b/,
+          sites: [Chokepoints::Site.new(glob: 'liberx/backend/api.h'),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/service_stubs.c'),
+                  Chokepoints::Site.new(glob: 'liberx/backend/hosted/vm.c'),
+                  Chokepoints::Site.new(glob: 'liberx/backend/fiasco/runtime_entry.c',
+                                        permits: /\Aerx_mem_create_contiguous_in\z/),
+                  Chokepoints::Site.new(glob: 'liberx/system/dom_apply.c', permits: /\Aerx_mem_create_contiguous_in\z/),
+                  Chokepoints::Site.new(glob: 'test/guest/function_api/*.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_irq/guest.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_task/program.c'),
+                  # The device NIF's harness, whose stand-in for the backend defines the create.
+                  Chokepoints::Site.new(glob: 'test/fixtures/erx_device_harness.c')],
+          seed: { 'liberx/system/dom_lib.c' => "void f(void) { erx_mem_create_contiguous(0, 0, 4096, 0, &m); }\n",
+                  'liberx/backend/fiasco/runtime_entry.c' =>
+                    "void f(void) { erx_mem_create_contiguous(0, 0, 4096, 0, &m); }\n",
+                  'liberx/backend/fiasco/root.c' => "void f(void) { erx_mem_create_contiguous_in(0, 4096, &r, &m); }\n",
+                  'otp/erts/emulator/nifs/erxos/erx_device.c' =>
+                    "void f(void) { erx_mem_create_contiguous_in(0, 4096, &r, &m); }\n" }
+        ),
         Chokepoints::Forbidden.new(
           name: 'one-erx-trap',
           rule: "kernel calls only through liberx: the ABI's trap only in liberx's erx and fiasco backends, " \

@@ -105,7 +105,7 @@ static void
 post(script_t *script)
 {
 	const uint32_t length = 1 + (uint32_t)take(script, 2) % tx.queue.buffer_size;
-	const erx_device_genet_piece_t piece = { frame, length };
+	const erx_dma_piece_t piece = { .bytes = frame, .length = length };
 	const erx_device_genet_queue_t before = tx.queue;
 	uint32_t count;
 	bool full;

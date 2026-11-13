@@ -80,6 +80,19 @@ main(int argc, char **argv)
 		return (0);
 	}
 	/*
+	 * dma_range CPU BUS LAST: the translation both gives make a device's memory inside, from
+	 * facts with that range (erx_boot_dma_range), as "range CPU BUS LAST" in hexadecimal.
+	 */
+	if (argc == 5 && strcmp(argv[1], "dma_range") == 0) {
+		const erx_dt_device_t facts = { .dma = ERX_DT_DMA_OK, .cpu = strtoull(argv[2], NULL, 0),
+		    .bus = strtoull(argv[3], NULL, 0), .last = strtoull(argv[4], NULL, 0) };
+		const erx_mem_dma_range_t range = erx_boot_dma_range(&facts);
+
+		printf("range 0x%llx 0x%llx 0x%llx\n", (unsigned long long)range.cpu, (unsigned long long)range.bus,
+		    (unsigned long long)range.last);
+		return (0);
+	}
+	/*
 	 * dma ROLE MEMORY STATUS COHERENT CPU BUS LAST MAC FIRST SIZE: the root's device step
 	 * (liberx/backend/fiasco/runtime_entry.c) for a ROLE device, net or block, of MEMORY
 	 * bytes of DMA memory and those facts: whether it asks the tree, the reason

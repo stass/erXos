@@ -380,12 +380,12 @@ post(harness_t *h)
 	erx_dma_state_t before, after;
 	erx_dma_step_t steps[STEPS_MAX];
 	erx_device_segment_t segments[2];
-	erx_device_post_plan_t queue_plan;
 	const uint8_t *bytes[2];
 	request_t request = { .live = true, .serial = ++h->serial };
 	uint32_t count = 0, segment_count = 0;
 	const uint32_t shape = draw(h, 3);
-	request_t *slot;
+	/* The core takes a chain's head off its free list, so the head's slot holds the bytes it posts. */
+	request_t *const slot = &h->requests[h->queue.free_head];
 
 	request.out_length = shape == 1 ? 0 : 1 + draw(h, BUFFER / 2);
 	request.in_length = shape == 0 ? 0 : 1 + draw(h, BUFFER - request.out_length);
@@ -400,15 +400,15 @@ post(harness_t *h)
 	if (request.in_length != 0)
 		segments[segment_count++] = (erx_device_segment_t){ request.out_length, request.in_length, true };
 
-	view(h, &before);
-	if (!erx_device_queue_post(&h->queue, segments, segment_count, request.serial, &queue_plan))
-		return;
-	view(h, &after);
-	slot = &h->requests[queue_plan.head];
-	*slot = request;
 	for (uint32_t segment = 0; segment < segment_count; segment++)
 		bytes[segment] = segments[segment].device_writes ? NULL : slot->out;
-	count = erx_device_queue_post_steps(&h->queue, &layout, DEVICE_BASE, POOL, &queue_plan, segments, bytes, &queue_registers, 0, steps);
+	view(h, &before);
+	count = erx_device_queue_post(&h->queue, &layout, DEVICE_BASE, POOL, segments, bytes, segment_count, request.serial,
+	    &queue_registers, 0, steps);
+	if (count == 0)
+		return;
+	view(h, &after);
+	*slot = request;
 	apply(h, &before, &after, &(erx_dma_plan_t){ .call = ERX_DMA_CALL_POST, .count = count, .steps = steps });
 }
 

@@ -140,6 +140,114 @@ typedef struct erx_dma_plan {
 } erx_dma_plan_t;
 
 /*
+ * A queue call as every form takes it (docs/design-device-dma.md, "Calls, observations and
+ * plans"). The form's round function answers it in rounds: each round is an observation or a
+ * decision for the effect layer to run, or the call's end. The record's facts the form needs
+ * come in the request, so a form keeps only its own bookkeeping:
+ *
+ *   INSTALL   the reset's decision, which takes every region back, then the install's; for a
+ *             form that reads an idle report, `idle` is the value its IDLE call answered;
+ *   POST      `count` pieces under `tag`, on a queue that is `ready` or not;
+ *   COMPLETE  the device's completions, at most `answers_max` and, where the form copies bytes,
+ *             as many as keep the copies within `bytes_max`;
+ *   IDLE      the observation of the device's idle report, answered in `value`: ERX_OK when it
+ *             shows the device holds no descriptor, ERX_EBUSY when not (the register ring);
+ *   START     the publish that starts the device's engine after its install (the register ring).
+ */
+typedef enum erx_dma_request_kind {
+	ERX_DMA_REQUEST_INSTALL,
+	ERX_DMA_REQUEST_POST,
+	ERX_DMA_REQUEST_COMPLETE,
+	ERX_DMA_REQUEST_IDLE,
+	ERX_DMA_REQUEST_START,
+} erx_dma_request_kind_t;
+
+/*
+ * One piece of a post: `length` bytes the device reads from `bytes`, or `length` bytes it
+ * writes. `names_region` says the piece is a region's entry the effect layer resolved, which a
+ * form that takes no region refuses.
+ */
+typedef struct erx_dma_piece {
+	const uint8_t	*bytes;
+	uint32_t	length;
+	bool		device_writes;
+	bool		names_region;
+} erx_dma_piece_t;
+
+typedef struct erx_dma_request {
+	erx_dma_request_kind_t	kind;
+	uint32_t		queue;		/* the device's own number for the queue */
+	uint64_t		device_base;	/* the device address of the queue's first byte */
+	uint64_t		pool_offset;	/* the pool's first byte, past the rings */
+	bool			ready;		/* POST: the queue is installed */
+	uint64_t		tag;		/* POST */
+	uint32_t		count;		/* POST */
+	const erx_dma_piece_t	*pieces;	/* POST */
+	uint32_t		answers_max;	/* COMPLETE */
+	uint64_t		bytes_max;	/* COMPLETE */
+	uint64_t		idle;		/* INSTALL */
+} erx_dma_request_t;
+
+/*
+ * A buffer that came back, as the call answers it: its tag, the bytes the device wrote and the
+ * next `copies` copy steps of the round's plan, in order, which fill those bytes end to end.
+ */
+typedef struct erx_dma_answer {
+	uint64_t	tag;
+	uint32_t	length;
+	uint32_t	copies;
+} erx_dma_answer_t;
+
+/*
+ * One round. In: its number from 0, and the `value_count` values the last round's observation
+ * read, one per report step, by step index. Out: either `ends`, with the call's `status` (and
+ * `value` for IDLE), or a plan of `count` steps of `call` written into `steps`, the state after
+ * it written into `after` unless `keeps`, which says the plan changes no writer, and
+ * `answer_count` answers written into `answers`. The arrays are the effect layer's: `answers`
+ * holds ERX_DMA_ANSWERS_MAX, and `steps` the most steps of any form's call, which erx_device.c
+ * asserts against each form's step bound. A form writes within its own bounds, never by a
+ * count the round hands it, so no round writes more than ERX_DMA_ANSWERS_MAX answers. Each
+ * form names its calls' rounds, by the plan each one makes.
+ */
+typedef struct erx_dma_round {
+	uint32_t		round;
+	const uint64_t		*values;
+	uint32_t		value_count;
+	bool			ends;
+	int			status;
+	uint64_t		value;
+	erx_dma_call_t		call;
+	uint32_t		count;
+	erx_dma_step_t		*steps;
+	bool			keeps;
+	struct erx_dma_state	*after;
+	uint32_t		answer_count;
+	erx_dma_answer_t	*answers;
+} erx_dma_round_t;
+
+/* The most rounds of any call of any form: a receive completion's two observations, its take-back, its hand-back, its end. */
+#define ERX_DMA_ROUNDS_MAX	5u
+/* The most answers of one round, which a request's answers_max may not raise. */
+#define ERX_DMA_ANSWERS_MAX	32u
+
+/* The end of a call, with its status. */
+static inline void
+erx_dma_round_end(erx_dma_round_t *round, int status)
+{
+	round->ends = true;
+	round->status = status;
+}
+
+/* A plan of `count` report steps from the round's steps, which changes no writer. */
+static inline void
+erx_dma_round_observe(erx_dma_round_t *round, uint32_t count)
+{
+	round->call = ERX_DMA_CALL_OBSERVE;
+	round->count = count;
+	round->keeps = true;
+}
+
+/*
  * What the check needs of the record and the form, which the caller takes from the record
  * and the form's own constants, never from the plan.
  */

@@ -486,11 +486,6 @@ it; git history is the record of completed work.
   16 MiB in one kernel call, and the design leaves how that meets the bounded-path rule to the performance watch list.
   Decide it in the design: zero the `erx.dma_pool` once at boot and each range as it returns to the pool, or zero in
   preemptible steps, and keep only the measurement in `docs/todo-performance.md`.
-* [Medium] stopgap, `liberx/backend/fiasco/vm.c`, `liberx/backend/fiasco/page_pool.h`: the contiguous pool holds exactly
-  the devices' declared memory (rounded up to a power of two), which is enough only while each device's memory is made
-  once, by `runtime_entry.c` or the domain library's `ERX_DOM_STEP_CONTIGUOUS`. `erx_mem_create_contiguous` is a root
-  call any root code may make, and no chokepoint names its callers, so a third caller would leave a later give
-  `ERX_ENOMEM`. Add the chokepoint, with its seeded violation, or a device-record funnel that refuses a second memory.
 * [Low] stopgap, `liberx/backend/fiasco/irq.c`: an IRQ object is unbound by a holder allowed in its group (the group's home, its creator or the root: `irq_group_allowed`) and freed with its last handle. Whether a restarted block driver can rebind its line through that is untested.
 * [Low] stopgap, `liberx/backend/fiasco/entropy.c`: the generator starts from the counter alone, not yet the manifest's seed,
   though the root reads the manifest before it seeds the generator.
@@ -580,9 +575,7 @@ it; git history is the record of completed work.
   the NIF's non-coherent path has no host test with a cache that hides stores; a virtio-gpu region entry, which
   a post writes as an out segment's bytes, so the check does not see its address; the check tying a memory
   address's reach to a buffer the plan hands to the device, and a register-published address's to the rings;
-  the queue core's own `pool` device address, which the builders no longer use (they take the device base and
-  `pool_offset`) but `erx_device_queue_post`'s plan still computes for its tests; a register-held length
-  (virtio's `QueueNum`) checked against the reaches the install publishes; a descriptor rewritten while its
+  a register-held length (virtio's `QueueNum`) checked against the reaches the install publishes; a descriptor rewritten while its
   chain is posted, which no view expresses; field-level register ownership, and the ADMA2 (SDHCI)
   descriptor form. The hosted stand-in GENET's plans run on plain memory, not over
   `erx_dma_model.c`, and its engine sets no receive error flags, so design-device-dma.md's receive-flags case is not run over it; the register ring's effect layer is tested over a given GENET by
@@ -1123,6 +1116,25 @@ it; git history is the record of completed work.
 * [Low] `docs/design-storage.md`, "The start sequence" step 3: the mask of every normal status includes Card Interrupt (bit 8), which writing 1 does not clear (Host Controller 2.2.17); a card asserting it would storm the shared line. Leave bit 8 out of `irpt_mask` and `irpt_en` when the device process is written.
 * [Medium] `erlang/apps/erx_net/erxos/erx_virtio_net.erl`, `erlang/apps/erx_blk`: no test runs a real driver under a hostile device. `test/integration/runtime_device_test.rb` breaks a hosted stand-in's queue under a driver written in the test, so the drivers' own broken-queue path (`error({virtio_net, broken, rx})`), its supervision and restart, and that the crash ends only the driver process (the network driver; the block driver's crash ends the storage domain) are unchecked; plan.md's 1b-E exit criterion asks for it under QEMU. Running `erx_virtio_net` over a virtio stand-in hosted, or a hostile model device under QEMU, would settle it.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, the hosted stand-in: its virtio model (`stand_in_preset`, `stand_in_stored`, a hook in `store()`) is a second model of a virtio-mmio transport beside `test/fixtures/erx_device_dma_harness.c`'s, which sits at the access seam and leaves `erx_device.c` untouched. A hosted-only `device_access` over the fixture's model would remove the hook and the duplicate, and keep `queue_ready` per selected queue, which the stand-in's one word cannot (so one queue still ready, `ERX_EBUSY`, is not expressible hosted).
+* [Medium] `otp/erts/emulator/nifs/erxos/erx_device_queue.c`, `erx_device_genet.c`, the round functions: no fuzz
+  target drives `erx_device_queue_round` or `erx_device_genet_round`. `tools/fuzz/device_queue_fuzz.c` and
+  `device_genet_fuzz.c` drive the cores beneath them, so the rounds' handling of the used index, the entries,
+  GENET's statuses and `bytes_max` is tested only end to end through the stand-ins. Run each round function in a
+  loop like `run_call`'s, with fuzzed observation values, and check that its steps and answers stay within the
+  effect layer's arrays, every completion step is a copy, each answer's copies sum to its length, and the call
+  ends within `ERX_DMA_ROUNDS_MAX`.
+* [Medium] `otp/erts/emulator/nifs/erxos/erx_device_dma.h`, `erx_dma_round_t`: the round record says by flags
+  which of its outputs count (`ends` or a plan, `keeps` or `after`, answers only in a completion, `value` only at
+  IDLE's end), and its `steps` and `answers` carry no capacity: each form keeps within the effect layer's arrays
+  by its own bounds, which `erx_device.c` asserts at build time. Give the record its capacities, refused at the
+  write, or make its output a tagged variant: an end, an observation, or a plan with its answers.
+* [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, `erx_device_complete`: the rule that a queue not ready
+  answers `ERX_ECORRUPT` has two owners, the forms' posts and `erx_device_complete` before the completion's
+  round. Give it one.
+* [Low] build checks, `contiguous-create-callers` (`tools/lib/erx/chokepoint_rules/stopgap_seam.rb`): the rule
+  limits which files call `erx_mem_create_contiguous`, not where the range comes from, so a hand-built
+  `erx_mem_dma_range_t` in `runtime_entry.c` or `dom_apply.c` would pass, and `erx_boot_dma_range` is the one
+  builder by convention. Forbid the type's initialisers outside `boot_manifest.c`, the backends and the guests.
 * [Low] `tools/lib/erx/chokepoint_rules/device.rb`: "no loop over device-written bytes in the NIF" and "within `erx_device.c` only `write_address` writes a ring's address register" have no check: the first holds as `erx_device_complete` copies with `bcopy` alone, the second by reading the file; a check needs a function-level site.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, `negotiate/2`: `device_features` and `queue_num_max` stay readable through `read/2` though their selectors are the NIF's, so such a read returns whichever word or queue the NIF selected last; and a driver learns the offered features and a queue's maximum only through a negotiation, so a multi-queue device (virtio-blk with `MQ`) needs two. Refuse reads of selector-banked registers and have `negotiate/2` return the offered set, or design a read-only probe.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`, `negotiate/2`: the reset is read back once, so a device that finishes its reset asynchronously gets `{error, ebusy}`; a short bounded poll would serve it.
@@ -1809,11 +1821,6 @@ it; git history is the record of completed work.
   (integer and `bsl` tokens by value, atoms after unescaping; DeviceCallers could share it), flag `:32`
   bit-syntax segments outside `erx_tcp_seq` and `erx_tcp_wire`, and consider refusing `file:consult`,
   `erl_scan`, `erl_parse` and `io:read` in erx_net too. The lifted-segment record remains the real guard.
-* [Medium] build checks, inline assembly outside the kernel (`erlang/apps/erx_net/c_src/erx_inet_csum.c`,
-  `LOADED_ONCE`): the rule that only listed functions use inline assembly has a check for the kernel
-  alone (design-kernel's chokepoint table), so `LOADED_ONCE`'s empty `__asm__`, the first in erXos's
-  user-mode C, is guarded by review only. Extend the `asm`-keyword check to liberx, the NIFs and
-  `sys/erxos`, with `LOADED_ONCE` its one listed site, and a seeded unlisted `__asm__` that fails it.
 * [Low] network, `erx_tcp_input:dropwithreset` and the connect path: only the link-cast half of
   `tcp_dropwithreset` is translated; its IP checks (`tcp_input.c:3452-3472`) are left to the rule
   that no connection has a multicast or broadcast foreign address, which FreeBSD enforces in

@@ -282,13 +282,32 @@ the construction cannot reach, not a case it handles:
 
 A descriptor form's core is a pure state machine over the queue's state:
 its bookkeeping of free and posted buffers and, for ADMA2, whether the
-queue is idle, armed or in flight. A queue call runs in rounds. In each
-the core returns either an **observation**, a bounded list of reads it
-needs, or a **decision**, a plan and the queue's next state. The effect
-layer, `erx_device.c`, performs an observation's reads with the
-maintenance and barrier the sequencer adds and hands the values back to
-the core, which is called again; it runs a decision whole. It decides
-nothing itself. A form needs at most two observations per call: an index,
+queue is idle, armed or in flight. A queue call runs in rounds. Each form
+supplies one pure **round function** (`erx_device_queue_round` for the
+split ring, `erx_device_genet_round` for the register ring, and ADMA2's
+beside them), the form's only entry from the effect layer. It takes a
+**request**, the call (install, post, complete, and for a form that has
+them the idle report and the engine's start) with the record's facts the
+form reads (the queue's number, its device base and pool offset, whether
+it is ready, a post's pieces, a completion's bounds), the round's number
+and the values the last observation read. It returns either an
+**observation**, a bounded list of reads it needs, or a **decision**, a
+plan and the queue's next state, or the call's end with its status. A
+decision that takes buffers back carries the call's **answers**, each a
+tag, the bytes the device wrote and how many of the plan's copy steps,
+in order, fill them. The effect layer, `erx_device.c`, has one loop for
+every form, `run_call`: it asks the round function for round after round,
+performs an observation's reads with the maintenance and barrier the
+sequencer adds and hands the values to the next round, runs a decision
+whole, and gives each answer's bytes to the caller's sink, with the copy
+destinations laid end to end inside what the sink made for that answer
+and refused before any effect unless the answers cover the copies exactly.
+It decides nothing itself, and no caller strings a form's builders
+together: which observation follows which, and the state after each
+decision, are the round function's, tested on the host. A call ends
+within a fixed number of rounds, or the queue breaks. The order of calls
+across queues, such as GENET's two directions in a negotiation, is the
+device's negotiation's. A form needs at most two observations per call: an index,
 then the entries the index names. virtio's completion reads the used
 index, then each used entry it covers; GENET's receive completion reads
 the producer index, then the status of each descriptor it covers, at
@@ -599,8 +618,8 @@ here lists in full, and the design does not need it to.
 
 ## The three descriptor forms
 
-Each form is a pure core beside `erx_device_queue` and returns
-observations and decisions. `queue_create/4`, `post/4`, `post_frame/5`,
+Each form is a pure core beside `erx_device_queue` whose round function
+returns its observations and decisions. `queue_create/4`, `post/4`, `post_frame/5`,
 `complete/2` and `negotiate/2` keep their meaning and their answers for
 every form; the record names the form its peripheral uses.
 
@@ -774,7 +793,7 @@ barrier and the completion barrier; and `erx_dma_granule` and
 `erx_dma_line`. Each architecture provides them in its layer
 ([design-arch-aarch64.md](design-arch-aarch64.md#cache-maintenance)); the
 hosted build provides the model below. Only `erx_device` calls them in a
-runtime, the chokepoint the device NIF already has.
+runtime, which the `device-dma-maintenance` chokepoint rule checks, and their inline assembly is a listed site of the `inline-asm` rule.
 
 ## Concurrency
 

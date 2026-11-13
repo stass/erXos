@@ -310,6 +310,19 @@ class BootManifestTest < Minitest::Test
     end
   end
 
+  # Both gives make a device's memory inside the range erx_boot_dma_range builds from its
+  # facts, so EMMC2's window keeps its bus offset rather than becoming the identity range a
+  # create from CPU addresses would give it.
+  def test_the_memory_s_range_keeps_the_tree_s_bus_offset
+    range = lambda do |cpu, bus, last|
+      output, status = Open3.capture2e(@driver, 'dma_range', *[cpu, bus, last].map(&:to_s))
+      assert status.success?, output
+      output
+    end
+    assert_equal "range 0x0 0xc0000000 0x3fffffff\n", range.call(0, 0xc000_0000, 0x3fff_ffff)
+    assert_equal "range 0x1000 0x0 0xffffffffffffffff\n", range.call(0x1000, 0, 0xffff_ffff_ffff_ffff)
+  end
+
   # MAC is the tree's address for a network row only, 48 bits with its first byte highest;
   # a network row without DMA memory asks for the address alone, and a block row without
   # DMA memory asks nothing (docs/design-device-tree.md, "What each row asks").

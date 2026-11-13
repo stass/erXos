@@ -390,6 +390,12 @@ erx_boot_dma_memory(const erx_dt_device_t *facts, uint64_t dma_memory)
 	return (facts != NULL && erx_boot_dma_absent(facts, 0, 0) == NULL ? dma_memory : 0);
 }
 
+erx_mem_dma_range_t
+erx_boot_dma_range(const erx_dt_device_t *facts)
+{
+	return ((erx_mem_dma_range_t){ .cpu = facts->cpu, .bus = facts->bus, .last = facts->last });
+}
+
 bool
 erx_boot_coherent(const erx_dt_device_t *facts, uint64_t dma_memory)
 {

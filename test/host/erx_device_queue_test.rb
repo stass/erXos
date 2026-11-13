@@ -44,8 +44,8 @@ class ErxDeviceQueueTest < Minitest::Test
   # register lookup narrowed to owned registers, so the idle report of DMA status, which the
   # NIF does not own, reaches no register and the negotiation is refused.
   GENET_SEEDS = {
-    idle_rx_only: ["\t\tidle = idle && erx_device_genet_idle(&record->genet.regs, status[side]);\n",
-                   "\t\tidle = side == 1 ? idle : erx_device_genet_idle(&record->genet.regs, status[side]);\n"],
+    idle_rx_only: ["\t\tidle = idle && shown == ERX_OK;\n",
+                   "\t\tidle = side == 1 ? idle : shown == ERX_OK;\n"],
     owned_lookup: ["\t\tif (offset < reg->offset)\n\t\t\tcontinue;\n",
                    "\t\tif (offset < reg->offset || !reg->owned_by_nif)\n\t\t\tcontinue;\n"]
   }.freeze
@@ -80,8 +80,25 @@ class ErxDeviceQueueTest < Minitest::Test
   # The effect layer keeps each queue's last accepted state as the next plan's `before`; seeded
   # to keep none, a later post or completion is refused by the check and the harness fails.
   def test_a_queue_that_keeps_no_state_fails_the_harness
-    output = seeded_dma_output(["\tif (after != &record->state)\n\t\trecord->state = *after;\n", ""])
+    output = seeded_dma_output(["\tif (after != &record->state)\n\t\trecord->state = *after;\n", "\t(void)after;\n"])
     assert_match(/FAILED .*erx_device_dma_harness\.c/, output)
+  end
+
+  # The seeded fault of the core's post: each descriptor's address one byte past its segment.
+  # The harness reads the descriptors back from the post's ring-write steps and refuses it.
+  POST_SEED = ['device_base + buffer + taken->offset, taken->length);',
+               'device_base + buffer + taken->offset + 1, taken->length);'].freeze
+
+  def test_a_post_seeded_with_an_address_off_by_one_fails_the_harness
+    text = File.read(CORE)
+    assert_includes text, POST_SEED.first
+    Dir.mktmpdir('erx-device-queue-seed-') do |directory|
+      core = File.join(directory, 'erx_device_queue.c')
+      File.write(core, text.sub(*POST_SEED))
+      output, status = harness_output(File.join(ROOT, 'test/fixtures/erx_device_queue_harness.c'), core)
+      refute status.success?, output
+      assert_match(/erx_device_queue_harness\.c:\d+: .*\baddr\b/, output)
+    end
   end
 
   private

@@ -350,7 +350,7 @@ erx_device_genet_start(const erx_device_genet_registers_t *regs, erx_dma_step_t 
 
 bool
 erx_device_genet_post(erx_device_genet_queue_t *queue, const erx_device_genet_registers_t *regs,
-    uint64_t pool_offset, const erx_device_genet_piece_t *pieces, uint32_t count, uint64_t tag,
+    uint64_t pool_offset, const erx_dma_piece_t *pieces, uint32_t count, uint64_t tag,
     erx_dma_step_t *steps, uint32_t *step_count, bool *full)
 {
 	const uint32_t buffer = queue->software & MASK;
@@ -508,4 +508,244 @@ erx_device_genet_rx_give(erx_device_genet_queue_t *queue, const erx_device_genet
 	queue->taken = 0;
 	steps[0] = register_value(regs->software_index, field_put(regs->index, queue->software));
 	return (1);
+}
+
+/* A plan of `count` steps of `call` from the round's steps, and the state after it from the queue's bookkeeping. */
+static void
+round_plan(const erx_device_genet_queue_t *queue, const erx_dma_request_t *request, erx_dma_call_t call, uint32_t count,
+    erx_dma_round_t *round)
+{
+	round->call = call;
+	round->count = count;
+	erx_device_genet_view(queue, request->pool_offset, round->after);
+}
+
+/* The rounds of a register ring's calls, by the plan each makes; the round after the last plan ends the call. */
+enum {
+	IDLE_READ = 0,			/* the engine's idle bits observed */
+};
+enum {
+	INSTALL_RESET = 0,		/* every buffer taken back */
+	INSTALL_WRITE = 1,		/* each descriptor's address and the ring's registers */
+};
+enum {
+	START_WRITE = 0,		/* the direction's engine enabled */
+};
+enum {
+	POST_WRITE = 0,			/* the frame's descriptor and the producer index */
+};
+enum {
+	TX_READ_INDEX = 0,		/* the consumer index observed */
+	TX_TAKE_BACK = 1,		/* the descriptors it moved past taken back */
+};
+enum {
+	RX_READ_INDEX = 0,		/* the producer index observed */
+	RX_READ_STATUSES = 1,		/* each new descriptor's status observed */
+	RX_TAKE_BACK = 2,		/* the frames taken back, a copy each */
+	RX_HAND_BACK = 3,		/* the buffers handed back past the consumer index */
+};
+
+static void
+genet_install(erx_device_genet_queue_t *queue, const erx_device_genet_registers_t *regs,
+    const erx_dma_request_t *request, erx_dma_round_t *round)
+{
+	switch (round->round) {
+	case INSTALL_RESET:
+		if (!erx_device_genet_reset(queue, regs, request->idle)) {
+			queue->broken = true;
+			erx_dma_round_end(round, ERX_EINVAL);
+			return;
+		}
+		round_plan(queue, request, ERX_DMA_CALL_RESET, 0, round);
+		return;
+	case INSTALL_WRITE:
+		round_plan(queue, request, ERX_DMA_CALL_INSTALL, erx_device_genet_install_steps(queue, regs,
+		    request->device_base + request->pool_offset, round->steps), round);
+		return;
+	default:
+		erx_dma_round_end(round, ERX_OK);
+		return;
+	}
+}
+
+/*
+ * A transmit post: the pieces are the frame's bytes, which the device reads. A receive queue
+ * is standing, so a post on it is ERX_EINVAL, as is a piece naming a region or bytes the
+ * device writes.
+ */
+static void
+genet_post(erx_device_genet_queue_t *queue, const erx_device_genet_registers_t *regs, const erx_dma_request_t *request,
+    erx_dma_round_t *round)
+{
+	uint32_t count;
+	bool full;
+
+	if (round->round > POST_WRITE) {
+		erx_dma_round_end(round, ERX_OK);
+		return;
+	}
+	if (queue->direction != ERX_DEVICE_GENET_TX || request->count > ERX_DEVICE_GENET_PIECES_MAX) {
+		erx_dma_round_end(round, ERX_EINVAL);
+		return;
+	}
+	for (uint32_t piece = 0; piece < request->count; piece++) {
+		if (request->pieces[piece].names_region || request->pieces[piece].device_writes) {
+			erx_dma_round_end(round, ERX_EINVAL);
+			return;
+		}
+	}
+	if (!request->ready || queue->broken) {
+		erx_dma_round_end(round, ERX_ECORRUPT);
+		return;
+	}
+	if (!erx_device_genet_post(queue, regs, request->pool_offset, request->pieces, request->count, request->tag,
+	    round->steps, &count, &full)) {
+		erx_dma_round_end(round, full ? ERX_EWOULDBLOCK : ERX_EINVAL);
+		return;
+	}
+	round_plan(queue, request, ERX_DMA_CALL_POST, count, round);
+}
+
+/* The consumer index observed, then the descriptors it moved past taken back, each tag answered with no bytes. */
+static void
+genet_tx_complete(erx_device_genet_queue_t *queue, const erx_device_genet_registers_t *regs,
+    const erx_dma_request_t *request, erx_dma_round_t *round)
+{
+	erx_device_genet_completion_t completions[ERX_DMA_ANSWERS_MAX];
+	const uint32_t max = request->answers_max < ERX_DMA_ANSWERS_MAX ? request->answers_max : ERX_DMA_ANSWERS_MAX;
+	uint32_t done;
+
+	switch (round->round) {
+	case TX_READ_INDEX:
+		erx_device_genet_index_report(regs, &round->steps[0]);
+		erx_dma_round_observe(round, 1);
+		return;
+	case TX_TAKE_BACK:
+		if (!erx_device_genet_tx_complete(queue, regs, round->values[0], max, completions, &done)) {
+			erx_dma_round_end(round, ERX_ECORRUPT);
+			return;
+		}
+		if (done == 0) {
+			erx_dma_round_end(round, ERX_OK);
+			return;
+		}
+		for (uint32_t taken = 0; taken < done; taken++)
+			round->answers[taken] = (erx_dma_answer_t){ .tag = completions[taken].tag };
+		round->answer_count = done;
+		round_plan(queue, request, ERX_DMA_CALL_COMPLETE, 0, round);
+		return;
+	default:
+		erx_dma_round_end(round, ERX_OK);
+		return;
+	}
+}
+
+/*
+ * The producer index observed, then each new descriptor's status, at most as many as keep the
+ * copies within bytes_max; the frames before any length past the buffer taken back, each
+ * copied out under its flags, which breaks the queue after them; then the buffers handed back
+ * and the consumer index published past them, so no frame holds the ring. A frame of no bytes
+ * has no copy.
+ */
+static void
+genet_rx_complete(erx_device_genet_queue_t *queue, const erx_device_genet_registers_t *regs,
+    const erx_dma_request_t *request, erx_dma_round_t *round)
+{
+	erx_device_genet_completion_t completions[ERX_DMA_ANSWERS_MAX];
+	/* buffer_size is at least 1; the effect layer's bytes_max is at least one buffer. */
+	const uint64_t by_bytes = request->bytes_max / queue->buffer_size;
+	uint32_t max = request->answers_max < ERX_DMA_ANSWERS_MAX ? request->answers_max : ERX_DMA_ANSWERS_MAX;
+	uint32_t reports, done, count = 0;
+
+	if (by_bytes < max)
+		max = (uint32_t)by_bytes;
+	switch (round->round) {
+	case RX_READ_INDEX:
+		erx_device_genet_index_report(regs, &round->steps[0]);
+		erx_dma_round_observe(round, 1);
+		return;
+	case RX_READ_STATUSES:
+		if (!erx_device_genet_rx_reports(queue, regs, round->values[0], max, round->steps, &reports)) {
+			erx_dma_round_end(round, ERX_ECORRUPT);
+			return;
+		}
+		if (reports == 0) {
+			erx_dma_round_end(round, ERX_OK);
+			return;
+		}
+		erx_dma_round_observe(round, reports);
+		return;
+	case RX_TAKE_BACK:
+		if (!erx_device_genet_rx_complete(queue, regs, round->values, round->value_count, completions, &done)) {
+			erx_dma_round_end(round, ERX_EINVAL);
+			return;
+		}
+		if (done == 0) {
+			erx_dma_round_end(round, ERX_ECORRUPT);
+			return;
+		}
+		for (uint32_t taken = 0; taken < done; taken++) {
+			const uint32_t copies = erx_device_genet_copy_steps(queue, request->pool_offset, &completions[taken], 1,
+			    round->steps + count);
+
+			round->answers[taken] = (erx_dma_answer_t){ .tag = completions[taken].tag,
+			    .length = completions[taken].length, .copies = copies };
+			count += copies;
+		}
+		round->answer_count = done;
+		round_plan(queue, request, ERX_DMA_CALL_COMPLETE, count, round);
+		return;
+	case RX_HAND_BACK:
+		count = erx_device_genet_rx_give(queue, regs, round->steps);
+		if (count == 0) {
+			erx_dma_round_end(round, ERX_OK);
+			return;
+		}
+		round_plan(queue, request, ERX_DMA_CALL_POST, count, round);
+		return;
+	default:
+		erx_dma_round_end(round, ERX_OK);
+		return;
+	}
+}
+
+void
+erx_device_genet_round(erx_device_genet_queue_t *queue, const erx_device_genet_registers_t *regs,
+    const erx_dma_request_t *request, erx_dma_round_t *round)
+{
+	switch (request->kind) {
+	case ERX_DMA_REQUEST_IDLE:
+		if (round->round == IDLE_READ) {
+			erx_device_genet_idle_report(regs, &round->steps[0]);
+			erx_dma_round_observe(round, 1);
+			return;
+		}
+		round->value = round->values[0];
+		erx_dma_round_end(round, erx_device_genet_idle(regs, round->values[0]) ? ERX_OK : ERX_EBUSY);
+		return;
+	case ERX_DMA_REQUEST_INSTALL:
+		genet_install(queue, regs, request, round);
+		return;
+	case ERX_DMA_REQUEST_START:
+		if (round->round > START_WRITE) {
+			erx_dma_round_end(round, ERX_OK);
+			return;
+		}
+		/* A start hands nothing over: a publish whose state is the install's. */
+		erx_device_genet_start(regs, &round->steps[0]);
+		round->call = ERX_DMA_CALL_POST;
+		round->count = 1;
+		round->keeps = true;
+		return;
+	case ERX_DMA_REQUEST_POST:
+		genet_post(queue, regs, request, round);
+		return;
+	case ERX_DMA_REQUEST_COMPLETE:
+		if (queue->direction == ERX_DEVICE_GENET_TX)
+			genet_tx_complete(queue, regs, request, round);
+		else
+			genet_rx_complete(queue, regs, request, round);
+		return;
+	}
+	erx_dma_round_end(round, ERX_EINVAL);
 }

@@ -55,4 +55,22 @@ class ChokepointsDeviceTest < Minitest::Test
       assert_empty evaluate(owned, { 'otp/erts/emulator/nifs/erxos/erx_device.c' => "x = #{symbol};\n" }), symbol
     end
   end
+
+  # Every maintenance and barrier function is caught outside the effect layer, the device
+  # NIF's other files and the harnesses included; the architecture layer's definitions and the
+  # queries pass.
+  def test_dma_maintenance_outside_erx_device_fails
+    maintenance = [rule('device-dma-maintenance')]
+    calls = %w[erx_dma_clean erx_dma_clean_inval erx_dma_publish_barrier erx_dma_report_barrier
+               erx_dma_completion_barrier]
+    calls.each do |call|
+      text = "void f(void) { #{call}(); }\n"
+      assert_empty evaluate(maintenance, { 'otp/erts/emulator/nifs/erxos/erx_device.c' => text }), call
+      assert_empty evaluate(maintenance, { 'otp/erts/emulator/nifs/erxos/arch/aarch64/erx_dma_arch.c' => text }), call
+      refute_empty evaluate(maintenance, { 'otp/erts/emulator/nifs/erxos/erx_device_core.c' => text }), call
+      refute_empty evaluate(maintenance, { 'test/fixtures/erx_device_harness.c' => text }), call
+    end
+    assert_empty evaluate(maintenance, { 'test/fixtures/erx_device_dma_harness.c' =>
+                                           "unsigned g(void) { return erx_dma_granule() + erx_dma_line(); }\n" })
+  end
 end

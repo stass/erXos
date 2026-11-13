@@ -17,7 +17,8 @@ class PackToolRecipeTest < Minitest::Test
     files = (Erx::PackToolRecipe::PROGRAMS.values.flat_map { |_name, cores, main| [*cores, main] } +
              Erx::PackToolRecipe::COMMON_SOURCES + Erx::PackToolRecipe::RECIPE_SOURCES + ['tools/host/input.h'] +
              Dir.glob(%w[include/erx/**/*.h build/gen/include/erx/**/*.h kernel/crypto/blake3/*.h littlefs/*.h
-                       otp/erts/emulator/nifs/erxos/erx_littlefs.h liberx/backend/core/*.h], base: ROOT)).uniq
+                       otp/erts/emulator/nifs/erxos/erx_littlefs.h liberx/backend/core/*.h
+                       liberx/backend/api.h], base: ROOT)).uniq
     files.each do |relative|
       target = File.join(directory, relative)
       FileUtils.mkdir_p(File.dirname(target))

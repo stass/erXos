@@ -506,7 +506,7 @@ framebuffer_give(const erx_dom_device_entry_t *entry, char *words, size_t capaci
 static const char *
 device_memory(const erx_dom_device_entry_t *entry, uint64_t *memory, const char **absent)
 {
-	const erx_mem_dma_range_t range = { .cpu = entry->facts.cpu, .bus = entry->facts.bus, .last = entry->facts.last };
+	const erx_mem_dma_range_t range = erx_boot_dma_range(&entry->facts);
 	uint64_t made, address;
 	int status;
 
