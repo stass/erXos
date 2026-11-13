@@ -377,8 +377,8 @@ class ProductionImageTest < Minitest::Test
   end
 
   # A test-only application (ErlangApps::TEST_ONLY) boots only from a test script, which
-  # domain_boot makes only when asked, never from the boot table, and only an image with
-  # the test-code mark carries a test script; no release lists one.
+  # domain_boot makes only when asked, never from the release scripts table, and only
+  # an image with the test-code mark carries a test script; no release lists one.
   def test_only_a_test_image_boots_a_test_only_application
     applications = [*Erx::ReleaseFiles::DOMAIN_BASE, *Erx::ErlangApps::TEST_ONLY]
     error = assert_raises(Erx::Error) { Erx::ReleaseFiles.domain_boot('echo', applications: applications) }
@@ -390,7 +390,30 @@ class ProductionImageTest < Minitest::Test
     Erx::ProductionImage.check_test_scripts([script], test_code: true)
     Erx::ProductionImage.check_test_scripts([Erx::ProductionImage.domain_boot('session')], test_code: false)
     assert_empty Erx::ReleaseFiles::APPLICATIONS & Erx::ErlangApps::TEST_ONLY
-    refute Erx::ProductionImage.domain_boot('echo').test
+    refute(Erx::ReleaseFiles::RELEASE_SCRIPTS.keys.any? { |name| Erx::ProductionImage.domain_boot(name).test })
+  end
+
+  # A release name the release scripts table does not hold is refused, not booted as the
+  # base, so a misspelt `release @artifact.NAME` fails the build.
+  def test_a_release_the_table_does_not_hold_is_refused
+    error = assert_raises(Erx::ProductionImage::UnknownRelease) { Erx::ProductionImage.domain_boot('sesion') }
+    assert_match(/no domain boot script is named "sesion"/, error.message)
+    assert_equal Erx::ReleaseFiles::DOMAIN_BASE, Erx::ProductionImage.domain_boot('erts').applications
+  end
+
+  # A test image's own scripts stand in for the table's: a manifest row may name a script
+  # only the harness gives, and the table's scripts fill in every other name.
+  def test_a_test_image_carries_its_own_scripts_in_place_of_the_tables
+    image = Erx::ProductionImage.new(root: ROOT, runner: nil, compiler: '', linker: '', machine: DEVELOPMENT, fiasco: Object.new,
+                                     runtime: nil, jit_runtime: nil)
+    row = "domain e\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
+          "  runtime @artifact.emu\n  release @artifact.echo\n  restarts 0\n  restart_period_s 0\n"
+    source = Erx::ProductionImage.without_sessions(PLATFORM.manifest_source(ROOT)) + row
+    assert_raises(Erx::ProductionImage::UnknownRelease) { image.send(:domain_boots, source) }
+    echo = Erx::ReleaseFiles.domain_boot('echo', applications: [*Erx::ReleaseFiles::DOMAIN_BASE, 'erx_echo_test'], test: true)
+    assert_equal [echo, *%w[network storage web].map { |name| Erx::ProductionImage.domain_boot(name) }],
+                 image.send(:domain_boots, source, given: [echo])
+    assert_raises(Erx::Error) { image.send(:domain_boots, source, given: [echo, echo]) }
   end
 
   # The production image carries the domain releases its manifest's domain rows and

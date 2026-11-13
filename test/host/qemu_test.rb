@@ -63,6 +63,22 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', stub: '/b/bl31.bin') }
   end
 
+  # The Raspberry Pi 4 takes its one disk as the card on EMMC2's SD bus, never as sd0,
+  # the model's own card; a second disk raises, as a disk on a board with no SD bus would.
+  def test_the_raspberry_pi_4_takes_its_disk_as_its_sd_card
+    pi = Erx::Platform.load(root: File.expand_path('../..', __dir__), name: 'raspi4b')
+    plan = { platform: pi, accel: 'tcg', image: '/b/image.boot', stub: '/b/bl31.bin', dtb: '/b/model.dtb', serial: 'serial',
+             hostlink: Erx::QemuPlan::NO_HOSTLINK }
+    card = Erx::QemuPlan::Disk.new(path: '/b/sdcard.img')
+    argv = Erx::QemuPlan.argv(**plan, disks: [card])
+    assert_includes argv.each_cons(2).to_a, ['-drive', 'if=none,id=card0,file=/b/sdcard.img,format=raw']
+    assert_includes argv.each_cons(2).to_a, ['-device', 'sd-card,drive=card0,bus=/generic-sdhci/sd-bus']
+    refute_includes argv.join(' '), 'virtio'
+    error = assert_raises(Erx::Error) { Erx::QemuPlan.argv(**plan, disks: [card, card]) }
+    assert_equal 'raspi4b takes one disk, its SD card', error.message
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(**plan, disks: ['/b/sdcard.img']) }
+  end
+
   def test_the_deterministic_word_counts_instructions_on_one_tcg_cpu
     plan = { accel: 'tcg', image: 'image', serial: 'serial' }
     argv = Erx::QemuPlan.argv(platform: PLATFORM, **plan, command_line: 'erx.det=1 erx.arg=-deterministic')

@@ -36,7 +36,7 @@ module Erx
     # in a system image, so their read-only segments are shared by every domain that runs
     # them.
     ERTS_PATH = 'runtimes/emu'
-    ERTS_RELEASE = ReleaseFiles.domain([ReleaseFiles.domain_boot('erts', applications: ReleaseFiles::DOMAIN_BASE)])
+    ERTS_RELEASE = ReleaseFiles.domain([ReleaseFiles.domain_boot('erts', applications: ReleaseFiles::RELEASE_SCRIPTS.fetch('erts'))])
     JIT_PATH = 'runtimes/jit'
     # The modules a BeamAsm domain loads from /test/ (jit_reload.erl): the driver,
     # and jit_probe compiled once for each of the three versions it reloads.

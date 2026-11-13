@@ -52,7 +52,9 @@ module Erx
     # for the medium manifest's two domains (manifest). RAM grows to 768 MiB, Fiasco keeping about
     # 6% of it, and the root moves up to 192 MiB, as on the QEMU oracle's machine, since the
     # archive below it carries the domain runtime images and the domain release; QEMU puts
-    # the device tree 128 MiB into a machine this large (docs/design-platforms.md).
+    # the device tree 128 MiB into a machine this large (docs/design-platforms.md). The
+    # programs suite boots on it too, for the room below the root its archive's erx-lvgl
+    # takes (Programs::Run).
     def self.machine(platform) = ProductionImage::Machine.development(platform).with(memory_mib: 768, fiasco_reserve_mib: 48,
                                                                                          root_mib: 192)
     # The domain's own budget and its outer one: what native_domain's ERTS domain runs in.
@@ -60,7 +62,7 @@ module Erx
     DOMAIN_OUTER = 1 << 20
     # The boot script the domain runs, of the applications every domain boots through, as
     # the image's build defines a boot script named by a manifest row (ProductionImage).
-    DOMAIN_BOOT = ReleaseFiles.domain_boot('erts', applications: ProductionImage::DOMAIN_APPLICATIONS)
+    DOMAIN_BOOT = ProductionImage.domain_boot('erts')
     # The halt DOMAIN_ARGS evaluates: erlang:halt(N), N the digits leading its -sname,
     # plus 100 unless init:script_id() names DOMAIN_BOOT, whose release file is named
     # after it (ReleaseFiles#boot_files). Its words hold no space and no double quote,
@@ -595,9 +597,9 @@ module Erx
     # domain at rest with its modules loaded.
     module Footprint
       RELEASES = {
-        'bare' => ProductionImage::DOMAIN_APPLICATIONS,
-        'blk' => [*ProductionImage::DOMAIN_APPLICATIONS, 'erx_blk'].freeze,
-        'net' => [*ProductionImage::DOMAIN_APPLICATIONS, 'erx_net', 'erx_net_client'].freeze
+        'bare' => ReleaseFiles::DOMAIN_BASE,
+        'blk' => [*ReleaseFiles::DOMAIN_BASE, 'erx_blk'].freeze,
+        'net' => [*ReleaseFiles::DOMAIN_BASE, 'erx_net', 'erx_net_client'].freeze
       }.freeze
       # Applications a release only loads: erx_net's needs the stack's arguments and a device, and
       # erx_blk's a device. The cell loads the modules of these and of erx_net_client by hand.

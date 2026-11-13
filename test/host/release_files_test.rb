@@ -221,16 +221,15 @@ class ReleaseFilesTest < Minitest::Test
     assert_includes boot_release_file('session'), "{erx_shell,\"#{VERSION}\"}"
   end
 
-  # The boot table's session script (ReleaseFiles::DOMAIN_BOOTS) boots the command
+  # The session script (ReleaseFiles::RELEASE_SCRIPTS) boots the command
   # shell, the web line and erx_session beside what every domain boots through, and
   # starts the shell and the line, which init's ready report names, but only loads
   # erx_session, which the session template's -eval starts once init holds the domain's
-  # facets; a name the table does not hold boots the base alone.
+  # facets.
   def test_the_session_script_boots_the_shell_and_erx_session
     domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('session')]))
     assert_match(/\{erx_shell,"#{VERSION}"\},\{erx_web_line,"#{VERSION}"\},\{erx_session,"#{VERSION}",load\}\]\}\.\n\z/,
                  boot_release_file('session'), 'the session script starts the line and only loads erx_session')
-    assert_equal Erx::ReleaseFiles::DOMAIN_BASE, Erx::ProductionImage.domain_boot('erts').applications
   end
 
   # The network script starts the stack permanent, so the stack's end ends the network
@@ -247,7 +246,7 @@ class ReleaseFilesTest < Minitest::Test
   def test_the_display_script_takes_the_display_side_whole_and_no_client
     paths = domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('display')])).map { |entry| entry.fetch('path') }
     release = boot_release_file('display')
-    (Erx::ReleaseFiles::DOMAIN_BOOTS.fetch('display') - Erx::ReleaseFiles::DOMAIN_BASE).each do |application|
+    (Erx::ReleaseFiles::RELEASE_SCRIPTS.fetch('display') - Erx::ReleaseFiles::DOMAIN_BASE).each do |application|
       assert_includes paths, "domains/erxos/lib/#{application}-#{VERSION}/ebin/#{application}.app"
       assert_includes release, "{#{application},\"#{VERSION}\"}"
     end
@@ -266,8 +265,9 @@ class ReleaseFilesTest < Minitest::Test
   end
 
   # An application the runtime builds that neither the system release nor a script of
-  # the boot table names fails the load, so a release list forgotten is no application
-  # shipped to the system domain unseen; the tree's own lists passed when this file loaded.
+  # the release scripts table names fails the load, so a release list forgotten is no
+  # application shipped to the system domain unseen; the tree's own lists passed when
+  # this file loaded.
   def test_an_application_in_no_release_fails
     boots = { 'storage' => %w[kernel erx_blk] }
     error = assert_raises(Erx::Error) do

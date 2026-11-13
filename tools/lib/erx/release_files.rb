@@ -63,7 +63,7 @@ module Erx
     # application reaches the system domain only by being named here: OTP's, the base
     # every domain boots, the applications the system domain runs, and erx_session, which
     # it ships and never starts (DOMAIN_ONLY). Every other application is a domain boot
-    # script's alone (DOMAIN_BOOTS), and one in neither fails the load (check_released).
+    # script's alone (RELEASE_SCRIPTS), and one in neither fails the load (check_released).
     SYSTEM_APPLICATIONS = %w[kernel stdlib compiler runtime_tools erx erx_files erx_uart erx_shell erx_code
                              erx_hostlink erx_domain erx_starter erx_session].freeze
     raise Error, "SYSTEM_APPLICATIONS names what the runtime does not build: #{SYSTEM_APPLICATIONS - APPLICATIONS}" unless
@@ -72,11 +72,15 @@ module Erx
       SYSTEM_APPLICATIONS == APPLICATIONS & SYSTEM_APPLICATIONS
     SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: SYSTEM_APPLICATIONS, system: true,
                          boots: { 'start' => SYSTEM_APPLICATIONS }.freeze)
-    # The build's boot table: each domain boot script's applications under its name, which
-    # a domain row's `release @artifact.NAME` names (docs/design-stopgap.md, "The
-    # production image"), so two rows naming one script cannot disagree on what it boots.
+    # The build's release scripts table: each domain boot script's applications under its
+    # name, which a domain row's `release @artifact.NAME` names (docs/design-stopgap.md,
+    # "The production image"), so two rows naming one script cannot disagree on what it
+    # boots, and a name the table does not hold is refused (ProductionImage.domain_boot).
     # What a script adds to DOMAIN_BASE and the system release does not ship stays out of
     # the system domain:
+    # * erts, the base alone (DOMAIN_BASE): the script of a domain that runs only what
+    #   every domain boots, as the medium boot's configured domain and the native domain
+    #   tests' domains do (MediumBoot, NativeDomain);
     # * session, a principal's session domain (docs/design-domains.md, "Principals,
     #   sessions and quotas"): the network client, whose `grant` key the session
     #   template's arguments set; the command shell; the session's line to the web domain
@@ -99,23 +103,24 @@ module Erx
     #   and in neither the system domain nor the display domain (G9, DisplayRelease).
     #   No manifest names it yet: it is the client side's release, which DisplayRelease
     #   reads, and a client domain's own script takes the same applications.
-    DOMAIN_BOOTS = { 'session' => [*DOMAIN_BASE, 'erx_net_client', 'erx_shell', 'erx_web_line', 'erx_session'].freeze,
-                     'storage' => [*DOMAIN_BASE, 'erx_blk', 'erx_storage'].freeze,
-                     'network' => [*DOMAIN_BASE, 'erx_net'].freeze,
-                     'web' => [*DOMAIN_BASE, 'erx_web'].freeze,
-                     'display' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_display', 'erx_fb'].freeze,
-                     'client' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_win'].freeze }.freeze
+    RELEASE_SCRIPTS = { 'erts' => DOMAIN_BASE,
+                        'session' => [*DOMAIN_BASE, 'erx_net_client', 'erx_shell', 'erx_web_line', 'erx_session'].freeze,
+                        'storage' => [*DOMAIN_BASE, 'erx_blk', 'erx_storage'].freeze,
+                        'network' => [*DOMAIN_BASE, 'erx_net'].freeze,
+                        'web' => [*DOMAIN_BASE, 'erx_web'].freeze,
+                        'display' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_display', 'erx_fb'].freeze,
+                        'client' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_win'].freeze }.freeze
 
     # Refuses applications of which no release holds one: an application the runtime
-    # builds that neither the system release (system) nor a script of the boot table
-    # (boots) names would be built and booted nowhere, the sign of a release list
-    # forgotten.
+    # builds that neither the system release (system) nor a script of the release
+    # scripts table (boots) names would be built and booted nowhere, the sign of a
+    # release list forgotten.
     def self.check_released(applications, system:, boots:)
       unreleased = applications - system - boots.values.flatten
-      raise Error, "no release holds #{unreleased.join(', ')}: name each in SYSTEM_APPLICATIONS or a DOMAIN_BOOTS script" unless
+      raise Error, "no release holds #{unreleased.join(', ')}: name each in SYSTEM_APPLICATIONS or a RELEASE_SCRIPTS script" unless
         unreleased.empty?
     end
-    check_released(APPLICATIONS, system: SYSTEM_APPLICATIONS, boots: DOMAIN_BOOTS)
+    check_released(APPLICATIONS, system: SYSTEM_APPLICATIONS, boots: RELEASE_SCRIPTS)
     # Where the one domain release lies: domains/erxos/, which sorts after boot/ and
     # before system/, so it is one run of whole entries that does not split the system
     # run (docs/design-stopgap.md, "The production image").

@@ -609,7 +609,7 @@ it; git history is the record of completed work.
   (QEMU virt's virtio-gpu at `/virtio_mmio@a001e00`, 9 MiB of DMA memory) and the Pi's `framebuffer` unit, and no
   manifest of the tree places them; the `display_domain` suite boots a manifest of its own
   (`DisplayDomain.manifest`: the site manifest, an eighth of a CPU, 24 MiB and the unit). The domain release has
-  the display boot script (`ReleaseFiles::DOMAIN_BOOTS`); the development manifest's row needs a CPU grant,
+  the display boot script (`ReleaseFiles::RELEASE_SCRIPTS`); the development manifest's row needs a CPU grant,
   which the system share's reserve has no room for (storage, network and web take its 2,250 mcpu), and on QEMU
   virt room: the development manifest leaves 2.5 MiB of `root_memory` unpromised, the gpu's 9 MiB of DMA memory,
   charged to the system's budget, raises the contiguous pool from 2 MiB to 16 MiB, and the domain's own budget

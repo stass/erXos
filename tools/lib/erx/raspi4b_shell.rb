@@ -229,7 +229,7 @@ module Erx
     def card_boot(inputs)
       card = File.join(OutputDirectory.prepare(root: @root, path: File.join(@root, STUB_DIRECTORY)), BootPartition::IMAGE)
       FileUtils.cp(inputs.fetch(:card), card)
-      report = boot(inputs, dtb: inputs.fetch(:dtb), points: card_checkpoints(card), machine_end: true, card: QemuPlan::Disk.new(path: card))
+      report = boot(inputs, dtb: inputs.fetch(:dtb), points: card_checkpoints(card), machine_end: true, disks: [QemuPlan::Disk.new(path: card)])
       check_card_write!(card)
       report
     end
@@ -239,12 +239,12 @@ module Erx
       raise Error, "raspi4b: the card's sector #{PROBE_SECTOR} does not hold the probe's bytes after the run" unless found == PROBE_BYTES
     end
 
-    def boot(inputs, dtb:, points:, machine_end:, card: nil)
+    def boot(inputs, dtb:, points:, machine_end:, disks: [])
       check_loads(inputs)
       report = Qemu.new(root: @root, runner: @runner, program: @qemu)
                    .run(platform: @platform, accel: 'tcg', cpus: CPUS, image: inputs.fetch(:image), stub: inputs.fetch(:stub), dtb: dtb,
                         memory_mib: @machine.memory_mib, hostlink: QemuPlan::NO_HOSTLINK, checkpoints: points, machine_end: machine_end,
-                        card: card)
+                        disks: disks)
       { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds') }.freeze
     end
   end

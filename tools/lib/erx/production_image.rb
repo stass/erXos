@@ -97,13 +97,14 @@ module Erx
     # An image carries one domain release (ReleaseFiles.domain) with a boot script for
     # each name its manifest's domain rows and session templates give as their release
     # (domain_boots), and with it the one runtime image every domain runs. The build's
-    # boot table (ReleaseFiles::DOMAIN_BOOTS) defines a script's applications under its
-    # name; a name the table does not hold boots DOMAIN_APPLICATIONS, the applications
-    # every domain boots through. The development manifest's session template names the
-    # session script, and its storage, network and web rows the scripts of those names;
-    # medium_boot's manifest configures a domain (MediumBoot.manifest), and a test image
-    # may carry more scripts (build_test_image's domains).
-    DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
+    # release scripts table (ReleaseFiles::RELEASE_SCRIPTS) defines a script's
+    # applications under its name, and a name it does not hold is refused
+    # (UnknownRelease), so a misspelt release boots nothing. The development manifest's
+    # session template names the session script, and its storage, network and web rows
+    # the scripts of those names; medium_boot's manifest configures the erts domain
+    # (MediumBoot.manifest), and a test image may carry scripts of its own
+    # (build_test_image's domains).
+    class UnknownRelease < Error; end
 
     # Refuses a test script (ReleaseFiles::DomainBoot#test) among domains unless the image
     # is a test image, whose archive flags mark its test code, so no image without the
@@ -113,8 +114,15 @@ module Erx
       raise Error, "only a test image carries a test domain boot script: #{tests.join(', ')}" unless test_code || tests.empty?
     end
 
-    # The domain boot script named name, with the applications the boot table gives it.
-    def self.domain_boot(name) = ReleaseFiles.domain_boot(name, applications: ReleaseFiles::DOMAIN_BOOTS.fetch(name, DOMAIN_APPLICATIONS))
+    # The domain boot script named name, with the applications the release scripts table
+    # gives it; a name the table does not hold raises UnknownRelease.
+    def self.domain_boot(name)
+      applications = ReleaseFiles::RELEASE_SCRIPTS.fetch(name) do
+        raise UnknownRelease, "no domain boot script is named #{name.inspect}: the release scripts table " \
+                              "(ReleaseFiles::RELEASE_SCRIPTS) holds #{ReleaseFiles::RELEASE_SCRIPTS.keys.sort.join(', ')}"
+      end
+      ReleaseFiles.domain_boot(name, applications: applications)
+    end
     # A domain's runtime image in the archive: the interpreter's, under the flavour
     # erx_domain's spec names it by (docs/design-domains.md, "Erlang interface"), and the
     # artifact name a domain row's runtime takes. It sorts after domains/ and before
@@ -313,7 +321,7 @@ module Erx
         added.is_a?(Added) && (!added.entries.empty? || domains.any?(&:test))
 
       source = manifest_source
-      carried = (domains + domain_boots(source)).uniq(&:name)
+      carried = domain_boots(source, given: domains)
       assemble(directory: directory, manifest_source: source, added: added, test_code: true, machine: machine,
                domains: carried)
     end
@@ -1462,9 +1470,13 @@ module Erx
     # The domain boot scripts a manifest's domain rows and session templates name. Only
     # their release references are read here, so the image can carry what they name; the
     # manifest check proves the rows, each reference included, when Pack#build admits
-    # the manifest.
-    def domain_boots(manifest_source)
-      Manifest.release_names(source: manifest_source, codec: @codec).map { |name| self.class.domain_boot(name) }
+    # the manifest. Scripts given (a test image's own) stand in for the table's script of
+    # the same name; two given of one name are refused.
+    def domain_boots(manifest_source, given: [])
+      raise Error, 'two given domain boot scripts share a name' unless given.map(&:name).uniq.size == given.size
+
+      names = Manifest.release_names(source: manifest_source, codec: @codec) - given.map(&:name)
+      given + names.map { |name| self.class.domain_boot(name) }
     end
 
     # The domain release's entries, each file once under domains/erxos/ without the

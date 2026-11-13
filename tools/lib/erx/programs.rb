@@ -336,13 +336,6 @@ module Erx
     class Run
       def self.cells(cpus) = cpus.map { |count| QemuCells::Cell.new(accel: QemuCells::LOCAL_ACCELERATOR, cpus: count).name }
 
-      # The development machine, grown as a medium boot's is (MediumBoot.machine): the
-      # archive below the root carries erx-lvgl, about 1 MiB of LVGL, which the
-      # development machine's room for it does not hold. RAM grows to 768 MiB, Fiasco
-      # keeping about 6% of it, and the root moves up to 192 MiB.
-      def self.machine(platform) = ProductionImage::Machine.development(platform).with(memory_mib: 768, fiasco_reserve_mib: 48,
-                                                                                           root_mib: 192)
-
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64',
                      platform: Platform.development(root))
@@ -351,7 +344,9 @@ module Erx
         @compiler = compiler
         @linker = linker
         @qemu = qemu
-        @machine = self.class.machine(platform)
+        # A medium machine: the archive below the root carries erx-lvgl, about 1 MiB of
+        # LVGL, which the development machine's room for it does not hold.
+        @machine = MediumBoot.machine(platform)
         @manifest = platform.manifest_source(@root)
         @build = File.join(@root, 'build/programs')
         @schema = ABI::Generator.plan(root: @root).schema

@@ -12,7 +12,7 @@ module Erx
   # module of a display client, so no draw decoder, picture decoder, font reader, widget
   # module, terminal or pixel allocator reaches the display domain, and none of the
   # modules it loads names one. The release takes whole applications, so the check is over
-  # every application the display script of the boot table (ReleaseFiles::DOMAIN_BOOTS)
+  # every application the display script (ReleaseFiles::RELEASE_SCRIPTS)
   # boots, erx and erx_files among them, module by module:
   #
   # * a module one of them lists is a client module when a client application (CLIENT,
@@ -34,8 +34,8 @@ module Erx
     # "What runs where"). A name, not an application, is what still marks a client module
     # once it has left the client side, which no list of applications can.
     CLIENT_FAMILIES = /\Aerx_(?:draw|ui|vt|term|font|png|inflate|pixels|win)(?:_|\z)/
-    DISPLAY = ReleaseFiles::DOMAIN_BOOTS.fetch('display')
-    CLIENT = (ReleaseFiles::DOMAIN_BOOTS.fetch('client') - DISPLAY).freeze
+    DISPLAY = ReleaseFiles::RELEASE_SCRIPTS.fetch('display')
+    CLIENT = (ReleaseFiles::RELEASE_SCRIPTS.fetch('client') - DISPLAY).freeze
     Violation = Data.define(:where, :rule) do
       def to_s = "display release (G9): #{where}: #{rule}"
     end

@@ -59,9 +59,6 @@ module Erx
       test/oracle/common_test
       test/shell/rc/plan9port
     ].freeze
-    # The git submodules (Origin::SUBMODULES); any other nested repository is
-    # refused.
-    SUBMODULES = Origin::SUBMODULES
     LISTING_BYTES = 64 * 1024 * 1024
     LISTING_DEADLINE = 120
     LISTED_NAME = /\A[^\x00-\x1f\x7f]+\z/
@@ -125,8 +122,10 @@ module Erx
 
     # generators: what Generated.ensure computes the generated tree with,
     # whose files the chokepoint rules read beside the listed ones.
+    # submodules: the git submodules (Origin::SUBMODULES), each with an ORIGIN.md
+    # beside it; any other nested repository is refused.
     def initialize(root:, runner:, required_imports: IMPORTS, chokepoints: ChokepointRules::ALL,
-                   generators: Generated::GENERATORS, submodules: SUBMODULES)
+                   generators: Generated::GENERATORS, submodules: Origin::SUBMODULES)
       @root = File.expand_path(root)
       @runner = runner
       @required_imports = required_imports
