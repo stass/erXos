@@ -7690,12 +7690,13 @@ waits for room in the UART's transmit holding register for a bounded
 number of polls and is dropped after that, so a UART that a driver reconfigured or that hangs cannot hold the
 kernel up. It reads only the UART's status, never a received byte, and
 takes none of its interrupts. It writes it at two times: during boot,
-until the console's driver takes the UART, which is the first
-`erx_resource_carve` of the UART's device entry from the root resource,
-and at a panic or the machine's end, after it has stopped the other
-CPUs; under a partial boot, which never carves it, the kernel prints
-every log record for the whole run
-([design-system.md](design-system.md#boot)). In between the UART
+until the system domain's log service first takes the log
+(`erx_log_take`, below) or the console's driver takes the UART, the
+first `erx_resource_carve` of the UART's device entry from the root
+resource, whichever comes first, and at a panic or the machine's end,
+after it has stopped the other CPUs; under a partial boot, which neither
+takes the log nor carves the UART, the kernel prints every log record
+for the whole run ([design-system.md](design-system.md#boot)). In between the UART
 belongs to the console's driver in the system domain: the system
 manifest names the console's UART by its device-tree path, and the
 device service refuses a manifest whose console path differs from
@@ -7742,18 +7743,29 @@ the limit lines are dropped and counted, and the call still returns
 beyond the UTCB is `ERX_EINVAL`, and a log whose sequence numbers have run
 out refuses further lines with `ERX_ELIMIT` and never reuses a number.
 
-During boot every record is also written to the early console;
-afterwards the system domain's log service reads records with
-`erx_log_read(resource (TRACE), cursor, window)` into a memory window and
-renders them on the console through the console's driver, each record one
-write, whole, which can land between a program's writes or in an edited line
-([design-live.md](design-live.md#the-console)). The cursor is a sequence
+The log keeps one **taken position**, the sequence number past the last
+record handed on. During boot the early console writes each record as it
+is logged and moves the taken position past it.
+`erx_log_take(resource (TRACE), window)` copies the records past the
+taken position into a memory window and moves the position past them,
+under the same lock, and the first take ends the early console's writing
+of records. So each record is handed on once, by the early console or by
+a take, with no record written twice across the handoff and none missed,
+and nothing else to keep in step. The system domain's log service is the
+take's one caller: it renders what it takes on the console through the
+console's driver, each record one write, whole, which can land between a
+program's writes or in an edited line
+([design-live.md](design-live.md#the-console)), and appends it to the
+log's store ([design-log.md](design-log.md#the-kernels-records)).
+`erx_log_read(resource (TRACE), cursor, window)` reads from a cursor of
+the reader's own and moves nothing, for the inspector. The cursor is a sequence
 number. A reader that falls more
 than the ring behind is told how many records it lost, never shown a
-partial record, and a read returns the cursor to pass next, so each loss is
-told once. A window shorter than the longest record, or a cursor past the
-newest record, is `ERX_EINVAL`, so a read that returns nothing means nothing
-new. The bytes of a window are memory another party may reach, so its reader
+partial record, and a read or take returns the cursor to pass next, so
+each loss is told once; a take's loss is the records the ring overwrote
+before anyone took them. A window shorter than the longest record, or a
+read's cursor past the newest record, is `ERX_EINVAL`, so a read or take
+that returns nothing means nothing new. The bytes of a window are memory another party may reach, so its reader
 copies each record's text out and checks the copy before using it, and
 rendering passes everything but the newline through the escaper. A window that a party other than the log service can write could forge whole printable lines, so attribution holds only while the window stays that service's own.
 
@@ -8063,7 +8075,7 @@ errors). Calls that may wait are marked with the executor rule.
 | IRQ objects | `erx_irq_create(budget (ALLOC), resource (CARVE) or ERX_CAP_NULL, kind, selector)`, `erx_irq_bind(irq (BIND), thread (CONFIGURE) or group (SIGNAL), label)`, `erx_irq_trigger(irq (TRIGGER))`, `erx_irq_ack(irq (ACK))`, `erx_irq_route(irq (CONFIGURE), cpu)` | none waits; an MSI's creation returns its doorbell address and data ([IRQ objects](#irq-objects)) |
 | umtx | `erx_umtx_wait(addr, expected, deadline)` (executor: allow on private memory), `erx_umtx_wake(addr, count)` | [Umtx](#umtx) |
 | resources and DMA | `erx_resource_carve(budget (ALLOC), resource (CARVE), kind, selector)`, `erx_dma_create(resource (CARVE), budget (ALLOC))`, `erx_dma_map(window (MAP), iova, size, mem (MAP), offset, prot)`, `erx_dma_unmap(window (MAP), iova, size)`, `erx_dma_bind(window (BIND), irq (TRIGGER))` | none waits |
-| log and trace | `erx_debug_log(len)`, its text in the caller's UTCB, `erx_log_read(res (TRACE), cursor, window)`, `erx_trace_read(res (TRACE), cpu, cursor, window)` | none waits; each reader writes whole records into its window and returns the next cursor and the count of records lost ([Console, log and panic](#console-log-and-panic), [Trace ring](#trace-ring)) |
+| log and trace | `erx_debug_log(len)`, its text in the caller's UTCB, `erx_log_read(res (TRACE), cursor, window)`, `erx_log_take(res (TRACE), window)`, `erx_trace_read(res (TRACE), cpu, cursor, window)` | none waits; each reader writes whole records into its window and returns the next cursor and the count of records lost ([Console, log and panic](#console-log-and-panic), [Trace ring](#trace-ring)) |
 | time and entropy | `erx_time_set_wall(time_page (WRITE), wall_ns)`, `erx_entropy_read(len)`, `erx_entropy_add(res (CARVE), len, flags)`, their bytes in the caller's UTCB | crediting needs `ENTROPY` |
 | machine | `erx_machine_end(res (POWER), how)`, `erx_watchdog_pet(res (POWER))` | `how` is `ERX_END_OFF`, `ERX_END_RESET`, `ERX_END_PANIC` or `ERX_END_TRIAL`; the end returns only to fail `ERX_END_TRIAL` with `ERX_ENOTSUP`; a pet never waits and moves the deadline `D` seconds ahead ([The watchdog](#the-watchdog)) |
 

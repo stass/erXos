@@ -1379,7 +1379,8 @@ it; git history is the record of completed work.
   controllers, so a root-side driver or given record of an SPI there would hand the log over before
   the console starts. Tie the handoff to the console itself (its first `erx_log_take`, or a role its
   driver's open names) rather than to an address: [design-stopgap.md](docs/design-stopgap.md#the-console) ties it to
-  the console's first take, which `erx_console` makes before it starts its driver.
+  the log service's first take, which [design-log.md](docs/design-log.md#the-kernels-records) has `erx_syslog` make
+  before `user_sup` starts the console and its driver.
 * [Medium] erx_uart, `erx_pl011:console_uart/1` and `erx_mini_uart:console_uart/1`: the parse of
   `-erx console_uart` is copied in each driver, as are their fuzz targets. One parse of the four
   numbers, with each driver checking only its clock rule, and one fuzz target.
@@ -1523,9 +1524,8 @@ it; git history is the record of completed work.
   rate, so a fuzz crash can depend on earlier inputs. Make the log an object
   `erx_sys_caller_t` points to.
 * [Low] stopgap, `liberx/backend/fiasco/service_task.c`: no test shows that a failed create of the console UART leaves the debug log on the line, and the native console suite counts no `l4_vcon_write` of a log record after the handoff; only the host core test counts console writes. A boot whose first create of the console window fails, and a counter the root prints at its end, would close the "Console handoff" row of `docs/design-stopgap.md`.
-* [Medium] kernel design, `docs/design-kernel.md`, "Console, log and panic": the early console writes every record until the console driver carves the UART, but the design does not say how the log service's console and the early console share one position, so nothing keeps the console from printing a boot line again or missing one. On the stopgap the console's read is the drain: `erx_log_take` (`liberx/backend/api.h`) copies from the one position of what has been taken, which the early console moves as it writes, and moves it, while every other reader uses `erx_log_read` from a cursor of its own. Add the take to the section and its call table, and to `docs/design-live.md`, "Log lines and program output", which has `erx_console` read with `erx_log_read`.
 * [Medium] stopgap, `liberx/backend/fiasco/service.c` `service_log_read`, `service_log_take`: no test shows that a task's `log_read` or `log_take` is refused with `ERX_ENOTSUP`; that check alone keeps a task from having the service write log bytes at an address of the root. Add the case to `test/guest/native_task/program.c` beside `task_write`'s refusals.
-* [Medium] chokepoint, `erlang/apps/erx/src/erx_log.erl` `take/0`: only `erx_console` takes the kernel log (`docs/design-stopgap.md`, "The console"), but no build check says so, and any root process can call `erx_log:take()`; a second caller takes lines from the console for good, and no loss is counted. Add a check in the manner of `tools/lib/erx/chokepoint_rules/device.rb` that refuses `erx_log:take` outside `erlang/apps/erx/src/erx_console.erl`, and a C rule that keeps `erx_log_take` and `erx_debug_log_take` to the NIF, the two backends and the core, each with a seeded violation.
+* [Medium] chokepoint, `erlang/apps/erx/src/erx_log.erl` `take/0`: one module alone takes the kernel log, `erx_console` in the tree and the log service, `erx_syslog`, under [design-log.md](docs/design-log.md#invariants) (L4), but no build check says so, and any root process can call `erx_log:take()`; a second caller takes lines from the console for good, and no loss is counted. Add a check in the manner of `tools/lib/erx/chokepoint_rules/device.rb` that refuses `erx_log:take` outside that one module, and a C rule that keeps `erx_log_take` and `erx_debug_log_take` to the NIF, the two backends and the core, each with a seeded violation.
 * [Low] runtime, `erlang/apps/erx/src/erx_console.erl`: the console takes one window of the kernel log per `LOG_POLL_MS`, so a burst it is still catching up on can be overwritten and cost a "records lost" line though the records were in the ring when the burst began. Take again at once while a take fills its window.
 * [Low] runtime, `erx_log_nif.c` `read_lines`: a record that fails the reader's checks ends the window, and the console's line says so without saying how many records after it were dropped.
 * [Low] stopgap, `liberx/backend/fiasco/end.c`: the watchdog's end skips the debug log's parked records, as the service may be mid-write, so a missed pet after the console handoff loses the records the console had not read. At any end, lines the console has read but its driver has not yet written are lost uncounted, and the end's own drain can interleave with the driver's bytes on the UART.
@@ -3759,6 +3759,19 @@ it; git history is the record of completed work.
 * [Low] runtime, `tools/lib/erx/runtime_seam.rb`: the executable check drops an own list's names, so a library missing from the object list that calls them passes.
 * [Low] runtime, `erx_stdio_nif.c`: a fatal signal or SIGKILL leaves the terminal raw; `start_nif`'s failure paths leave what they made; a stalled standard output delays input, which one process handles; and `SIGWINCH`'s `sigaction` skips `sys_signal`'s `SA_ONSTACK`.
 * [Low] runtime, `standard_error.erl`: a failed write crashes the server with no log, which a later `set_unicode_state` carries into `erx_console`.
+* [Medium] runtime, `erlang/apps/erx/src/erx_console.erl` `init/1`: the console starts its driver (line 349) before its
+  first `erx_log:take/0`, which waits for the first `erx_log_poll`, `LOG_POLL_MS` later (line 358), so for that time
+  the root still writes records on the UART while the driver writes it too, and their bytes can interleave on the
+  line. [design-stopgap.md](docs/design-stopgap.md#the-console) puts the first take before the driver's first touch
+  of a register, and [design-log.md](docs/design-log.md#the-kernels-records) has the log service make it in its
+  `init`, before `user_sup` starts the console. Until then, take once before `Start(self())`, with a test that the
+  stopgap's `l4_vcon_write` counter stays still once the driver has started.
+* [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: nothing restarts the system console. `user_sup` starts it
+  with `gen_server:start/4` (`erx_console.erl:212`) as the child `user` of `kernel_sup`, which is `temporary`
+  (`otp/lib/kernel/src/kernel.erl:163-168`) and never restarted, so its crash leaves the machine without a console,
+  while [design-live.md](docs/design-live.md#failure-handling-diagnostics-and-debuggability) has the console restarted by its supervisor
+  with every line showing a login. Give the console a supervisor that restarts it, with a test that kills it and
+  finds a login prompt on the line.
 * [Medium] runtime, `liberx/backend/fiasco`: the native root does not read the release's manifest: its page takes
   `erx.arg=WORD` alone, with `system_args`, `limits`, `pack_flags` and `release_addr` empty, and no archive holds
   a native root with these release files. `liberx/backend/core/boot_manifest.c` is the reader to link, and
@@ -5678,6 +5691,18 @@ to the corpus and follow rc
   `start/rc.conf`, enabling or disabling declared rows and moving a display among rows whose templates are granted
   it. It cannot add a row or widen a grant. Closed by rooting each `data` grant at its principal's or service's
   directory, with the test that a session holding `data` finds no `start/rc.conf`.
+* [Medium] system log on the stopgap ([design-log.md](docs/design-log.md#the-store)): a development build's `data`
+  grant to `root`'s sessions covers the whole of `/data`, read-write, so those sessions reach the log's store at
+  `/data/log` past `erx_logfs`: they can rewrite, truncate or forge either family, the kernel's included, so the
+  store's one writer and its attribution hold only for what no such session touched. Development builds run
+  trusted code alone. Closed by rooting each `data` grant at its principal's directory, with the test that a
+  session holding `data` finds no `log`.
+* [Medium] erx_logfs ([design-log.md](docs/design-log.md#security)): `/var/log` serves the store's bytes as stored.
+  The log service stores only lines that passed the line escape, but a storage domain, or a holder of write access
+  to `/data/log`, can put terminal controls in a stored file that `cat /var/log/messages` writes to a terminal.
+  Phase 1 domains are trusted and root's whole-`/data` grant reaches the same bytes. Close it with the
+  per-principal data grants: check each byte against the line escape at read, serving `?`, or keep the store
+  where only the system domain writes.
 * [Low] login at a display, the enrolment gap ([design-display.md](docs/design-display.md#risks-and-decisions), 14):
   a principal that a start row names, an app's or a person's, and that never enrolled can be enrolled by whoever
   first reaches a secure console line, as any principal can, and then logged in to with its authority. Settle it in
@@ -6929,3 +6954,11 @@ document's "residual risks accepted" paragraph.
   against the slot images' sizes (the plan's decision gate on uncompressed slots) or the Pi firmware's needs of the
   record's and the slots' FAT partitions; each slot's signature window is not in the layout yet.
 * [Low] erx_blk_virtio: an interrupt storm costs a scheduler, bounded by the device's rate (Phase 1 residual).
+* [Low] erx_syslog ([design-log.md](docs/design-log.md#the-kernels-records)): kernel records the early console
+  wrote before the log service's first take are not in `kernel/messages`; they are on the serial line and in
+  `/proc/kernel/log`. Read them once per boot with `erx_log:read/1`, below the first take's number, if previous
+  boots' early lines are wanted.
+* [Low] erx_syslog_sup ([design-log.md](docs/design-log.md#service-lifetime-and-restart)): past its restart
+  intensity the log service stays down and the machine runs on, as without `erx_console`. Revisit at the security
+  closure ([plan.md](docs/plan.md#m11-security-closure)), where a release build may prefer ending the machine with
+  a crash record.

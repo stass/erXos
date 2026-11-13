@@ -808,9 +808,11 @@ service sends it, and nothing else.
 whole, ending in CR-LF, between whatever else is written. It can land in
 the middle of a program's line or an edited prompt, as a kernel message
 does on a UNIX serial console, and `Ctrl-L` redraws an edited line. After
-boot, kernel log records reach the console through `erx_console`, which
-reads them with `erx_log_read` and writes each as a log line
-([design-kernel.md](design-kernel.md#console-log-and-panic)).
+boot, kernel log records and every domain's log records reach the console
+through the log service, `erx_syslog`, which takes the kernel's ring with
+`erx_log:take/0` and sends `erx_console` the lines, one batch at a time
+([design-log.md](design-log.md#consumers-and-backlogs),
+[design-kernel.md](design-kernel.md#console-log-and-panic)).
 
 * **Size.** The connected tty is told its line's size as
   `{tty_size, Rows, Columns}`: on the UART 80 by 24 unless the operator
@@ -985,9 +987,9 @@ reads them with `erx_log_read` and writes each as a log line
   a domain other than the system domain is the domain's logger proxy. It formats
   each event inside the domain, on one line, so the system domain never formats
   another domain's format string, and sends it as a log record,
-  `{log, Level, Text}` with `Text` a binary of at most 4 KiB: to the domain's
-  console facet, and in the system domain to `erx_console` directly. Two stock
-  handlers remain:
+  `{log, Level, Text}` with `Text` a binary of at most 4 KiB: through the
+  domain's log facet, and in the system domain directly, to the log service
+  ([design-log.md](design-log.md#writing)). Two stock handlers remain:
   * `logger_simple_h`, which holds and prints a runtime's log events until
     `erx_log_h` is added, displays them with `erlang:display_string/2`
     (`logger_simple_h.erl:179`, `:230`). Edit 43 makes it build each event's
@@ -1000,18 +1002,18 @@ reads them with `erx_log_read` and writes each as a log line
     own tty, under no other name. The system release's configuration names it on
     no standard device, which the release check confirms.
 
-  The console accepts only that shape and at most 16 KiB of log lines per
+  The log service admits only that shape and at most 16 KiB of log lines per
   second per domain, the rate `erx_debug_log` allows a space, each record
-  charged the whole line it renders, beyond which it drops and counts
-  records. It renders each like a kernel log record,
-  stamped with the time it arrived, with the line escape, under the domain's
-  id and principal, which come from the lane the record arrived on and the
-  domain service, and then the domain's name, escaped. A name is unique
-  only within its principal, so no domain can pass for another by choosing
-  one, and no domain chooses the time its lines show. A program's log
-  lines are its session's: the handler receives them on the channel and
-  the session's proxy sends them under the session's id, with the
-  program's name in the text.
+  charged its whole line, and renders each like a kernel log record, stamped
+  with the time it arrived, under the domain's id and principal, which come
+  from the facet's grantee and the domain service, and then the domain's
+  name, with the line escape. A name is unique only within its principal, so
+  no domain can pass for another by choosing one, and no domain chooses the
+  time its lines show. The service hands each line to the console and to the
+  store, which `/var/log` serves ([design-log.md](design-log.md)). A
+  program's log lines are its session's: the handler receives them on the
+  channel and the session's proxy sends them under the session's id, with
+  the program's name in the text.
 
 ### Attributed text
 

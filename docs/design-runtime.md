@@ -359,7 +359,9 @@ a session's domain. Every domain release ships `kernel`, `stdlib`, `erx` and
 
 `erx`, `erx_files`, `erx_uart` and `erx_shell` have no application
 callback. What of theirs must run, `kernel` starts. Its hooks start the
-watchdog, the namespace's writer, `/tmp`, `/proc` and the console;
+watchdog, the log service, the namespace's writer, `/tmp`, `/proc`, the
+log's store writer and the console, the log service before the console
+([design-log.md](design-log.md#the-kernels-records));
 `net_kernel` starts the carrier that `-proto_dist erx` names; and
 `logger` adds `erx_log_h` as its default handler (edit 57). The boot
 script's code path names every application of the release before
@@ -2322,7 +2324,7 @@ depends on the domain:
 | --- | --- | --- |
 | a session's | the terminal relay | writes them to the session's tty, as any writer does, and answers when they are all in the tty ([design-live.md](design-live.md#the-tty)) |
 | the system domain | `erx_console` | writes them to the UART's driver unchanged, as UNIX writes to `/dev/console`, and answers when the driver has written them, so a service never waits on a shell's or a session's tty, nor on any other console line ([design-live.md](design-live.md#the-console)) |
-| any other, which has no terminal | the logger proxy | sends them as log records to its console facet, under its name, which the console escapes, and answers at once: a UNIX daemon's rule, that with no terminal its output goes to a log under its name |
+| any other, which has no terminal | the logger proxy | sends them as log records through its log facet, under its name, which the log service escapes ([design-log.md](design-log.md#writing)), and answers at once: a UNIX daemon's rule, that with no terminal its output goes to a log under its name |
 
 **C output never waits.** `erts_printf` and stdio to descriptors 1 and 2 have no
 process to yield and no way to wait on what their own executor must run, and the

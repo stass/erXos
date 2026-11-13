@@ -945,3 +945,21 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
 * **[Low] musl, a large getrandom costs one entropy call per 16 bytes.** `getrandom_call` in `musl/src/internal/erxos/syscall.c` reads in pieces of what one `erx_entropy_read` leaves in the UTCB's message registers, so a 1 MiB read makes tens of thousands of calls and cannot be interrupted. Settle it by timing a 1 MiB `getrandom` in the native_musl guest; if it shows, read into the caller's buffer through one liberx call (the TODO.md item on `erx_entropy_read` callers).
 
 * **[Low] shell, `mount` counts every block of /data to learn its type.** `erx_cmd_mount` sends each grant a 9P statfs for its `type`; `erx_lfs` answers with `erx_littlefs:fsstat`, `lfs_fs_size`, which traverses every block in use, so one `mount` costs a walk of the whole volume, and other requests on /data queue behind it. The request also has no deadline, so a stalled card makes `mount` wait until Ctrl-C (FreeBSD's plain `mount` uses `MNT_NOWAIT`, `sbin/mount/mount.c:296-297`). Measure: `time mount` on a `/data` of 10 and of 10,000 files on the Pi 4. Fixes: `erx_lfs` answers statfs from counts it keeps, or the grant reports its type without asking the volume.
+* **[Low] log service, the kernel ring's 100 ms poll** (`erx_syslog`,
+  [design-log.md](design-log.md#performance)): an idle machine wakes the service
+  ten times a second to take the kernel's ring. Settled by wakeups per second under
+  `tools/erx bench`, against an IRQ-object signal on erXos's kernel.
+* **[Low] log service, a flood at 256 domains' full rate** (`erx_syslog`,
+  [design-log.md](design-log.md#performance)): 4 MiB per second rendered and
+  escaped by one process. Settled by lines per second and the latency of a `write`
+  under it.
+* **[Low] log store, a sync per batch on littlefs over SD** (`erx_syslog_writer`,
+  [design-log.md](design-log.md#the-writer)): up to one append and sync a second
+  for each of the two files. Settled by the store's write time and the card's
+  write traffic under `tools/erx bench` on the Pi 4, against batches of 10 s.
+* **[Low] log store, a process per batch** (`erx_syslog_writer`,
+  [design-log.md](design-log.md#the-writer)): each batch opens, reads the last
+  byte and size of, appends to, syncs and closes each file it writes, about six
+  file requests per batch instead of two, at most once a second per family.
+  Settled by the store's write time per batch under `tools/erx bench` on the Pi 4,
+  against a writer that keeps its files open.

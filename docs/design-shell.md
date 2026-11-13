@@ -532,13 +532,16 @@ do. The text filters:
 the ring still holds, each through the field escape, with `[missing N]`
 where records are missing
 ([design-live.md](design-live.md#the-proc-tree)). `-a`, FreeBSD's
-"syslog records and console output too", is accepted and changes
-nothing, since the log holds only its lines. `-c`, which clears the
+"syslog records and console output too", then writes the system log,
+`/var/log/messages`, each line through the same escape
+([design-log.md](design-log.md#interfaces)). `-c`, which clears the
 buffer, is a usage error, since nothing in user space clears the kernel
 log, as are `-M` and `-N`, which read a crash dump's buffer, and an
 argument; the usage line is FreeBSD's, `usage: dmesg [-ac] [-M core [-N
-system]]`. `dmesg` reads only what its namespace's `/proc` shows, so it
-shows the log only where the tree's facet has scope `all`.
+system]]`. `dmesg` reads only what its namespace's `/proc` and
+`/var/log` show, so it shows the kernel's lines only where the tree's
+facet has scope `all`, and `-a` the system log only where the namespace
+mounts `/var/log`; a file it cannot read fails as `cat` fails on it.
 
 **`uname [-abiKmnoprsv]`** writes what system this is, as FreeBSD's
 `uname` does: the fields its flags select on one line, one space apart,
