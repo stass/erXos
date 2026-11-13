@@ -982,8 +982,10 @@ and 6 give way to the partial boot below.
    ([A session takes the console](#a-session-takes-the-console)); the system shell stays one menu
    key away, and when the session ends the console logs `root` in again
    ([design-live.md](design-live.md#the-console)).
-5. **The start table.** Once the configured domains of the boot order
-   run, the start service starts each enabled row of the start table,
+5. **The start table.** Once the system domain's namespace is in place,
+   by the rule a session's start waits on
+   ([A session takes the console](#a-session-takes-the-console)), the
+   start service reads `rc.conf` and starts each enabled row of the start table,
    the manifest's `start` rows with the machine's `rc.conf` over them
    ([design-apps.md](design-apps.md#the-start-table)): the session of
    the principal the row names, with no login, and for a row that names
@@ -1142,6 +1144,22 @@ in place before anyone can connect to it.
   server reports after a restart. A server that ends while the session
   waits settles its grant at once: the session does not wait for a
   restart.
+* **The system domain.** The system domain is a grantee of the same
+  rule: its namespace is in place when each `files` grant to it, `data`
+  among them, has settled. The domain service answers
+  `erx_domain:system_namespace/0` once `erx_domain_mints:in_place/3`
+  holds for the system domain, which it checks after each step of the
+  mint core and each stop for a boot timeout, or at once when it already
+  holds; the system domain holds its grants from the boot on, so they
+  are checked from the first request, and the wait is bounded as a
+  session's is. The start table waits for that answer before its first
+  read of `rc.conf` (step 5 of the boot), so on a boot whose storage
+  domain comes up on its first start and makes the grant within the mint
+  core's deadline the read finds the machine's settings before any row
+  starts. On one whose storage domain is down, ends before it reports
+  ready, or misses the deadline, the read fails and the manifest's rows
+  start alone, as a session does not wait for a restart either
+  ([design-apps.md](design-apps.md#failure-handling-diagnostics-and-debuggability)).
 * **Why it holds by construction.** The wait reads only state the mint
   core already keeps, the grant of each `files` service to the session,
   and the domain service's own record of which configured domains are

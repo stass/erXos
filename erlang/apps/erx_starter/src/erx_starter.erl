@@ -21,7 +21,13 @@ erx_start_table's; this process carries them out.
   what each answer leads to: a text, or no file, makes the table; a
   failure reads again after a backoff that never gives up, and the first
   one, when no table has been made, makes it from the manifest's rows
-  alone, so they start while the storage domain is down. Until a read
+  alone, so they start while the storage domain is down. The first read
+  follows the domain service's answer that the system domain's namespace
+  is in place (erx_domain:system_namespace/0), so a storage domain that
+  comes up on its first boot, its grant made within the grant's deadline,
+  has installed the system domain's data grant before it; a failure means
+  the storage domain is down, ended before its grant was made, or did not
+  make it in time. Until a read
   has answered, rows/0 says rc.conf is unread, and a command that writes
   rc.conf is refused with `rc_conf_unread`, so it never writes over
   settings it has not read.
@@ -194,6 +200,9 @@ init({#{} = Manifest, Directory}) ->
     {ok, Manifest#{directory => Directory, text => <<>>, local => {unread, 0}, merged => none, skipped => [],
                    reader => none, writer => none, queue => queue:new()}, {continue, read}}.
 
+%% The first read of rc.conf waits for the system domain's namespace: the
+%% table asks the domain service now and reads once it answers
+%% (namespace_answered/2).
 handle_continue(read, #{rows := []} = State) ->
     {noreply, State#{local := read, merged := []}};
 handle_continue(read, State) ->
@@ -201,7 +210,7 @@ handle_continue(read, State) ->
                    {ok, Text} -> make(Text, State);
                    none -> State
                end,
-    {noreply, read(Recorded)}.
+    {noreply, Recorded#{reader := {namespace, erx_domain:system_namespace()}}}.
 
 handle_call({command, Command}, From, #{writer := none, queue := Queue} = State) ->
     true = queue:is_empty(Queue),
@@ -216,11 +225,16 @@ handle_call(rc_conf, _From, #{text := Text} = State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
+%% The reader is the one request that comes before a table can be made from
+%% rc.conf: the wait for the system domain's namespace, {namespace, Request},
+%% before the first read, and each read after, {rc_conf, Request}.
 handle_info(read, #{reader := none} = State) ->
     {noreply, read(State)};
 handle_info(Message, #{reader := Reader, writer := Writer} = State) ->
-    {noreply, case {response(Message, Reader), response(Message, request(Writer))} of
-                  {{answer, Read}, none} ->
+    {noreply, case {reader_answer(Message, Reader), response(Message, request(Writer))} of
+                  {{namespace, Answer}, none} ->
+                      namespace_answered(Answer, State#{reader := none});
+                  {{rc_conf, Read}, none} ->
                       read_answered(Read, State#{reader := none});
                   {none, {answer, Written}} ->
                       {_Request, From, Command, Text} = Writer,
@@ -232,8 +246,31 @@ handle_info(Message, #{reader := Reader, writer := Writer} = State) ->
 %% ---------------------------------------------------------------------------
 %% rc.conf
 
+%% The domain service's answer to the wait for the system domain's namespace,
+%% after which the first read of rc.conf follows. ok: each files grant to the
+%% system domain has settled, its data grant installed if the storage domain
+%% came up and was granted it in time, so the read finds the file or its
+%% absence. An error is a domain service that ended, which ends the system
+%% domain; the read follows all the same, and read_answered/3 decides what its
+%% answer leads to.
+namespace_answered(ok, State) ->
+    read(State);
+namespace_answered({error, Why}, State) ->
+    logger:warning("erx_starter: no answer to the wait for the system domain's namespace: ~0P", [Why, 8]),
+    read(State).
+
 read(#{directory := Directory} = State) ->
-    State#{reader := erx_starter_rc:read(Directory)}.
+    State#{reader := {rc_conf, erx_starter_rc:read(Directory)}}.
+
+%% The reader's answer that Message carries, tagged with the reader's kind, or
+%% none.
+reader_answer(Message, {Kind, Request}) ->
+    case response(Message, Request) of
+        {answer, Answer} -> {Kind, Answer};
+        none -> none
+    end;
+reader_answer(_Message, none) ->
+    none.
 
 %% The rc.conf process's answer to Request that Message carries, its end
 %% before it answered taken as {error, Why}, or none for a message that is

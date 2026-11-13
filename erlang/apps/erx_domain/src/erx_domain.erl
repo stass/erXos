@@ -45,7 +45,7 @@ or stopped.
 """.
 
 -export([create/1, start_session/2, info/1, introduce/2, web_line/2, stop/2, id/1, node/1, pid/1]).
--export([system_principal/0]).
+-export([system_principal/0, system_namespace/0]).
 -export([inspect_view/1]).
 -export_type([domain/0, spec/0]).
 
@@ -145,6 +145,22 @@ service is not running or ends.
 -spec system_principal() -> {ok, pos_integer()} | {error, enotsup}.
 system_principal() ->
     gen_server:call(erx_domain_srv, system_principal, infinity).
+
+-doc """
+Asks the domain service to answer once the system domain's namespace is in
+place, by the rule a session's start waits on (docs/design-system.md, "A
+session takes the console"): each files grant to the system domain installed
+or failed, or with no operation while its server is not starting. The answer
+is ok; the grant's deadline and its server's boot timeout bound the wait. The
+request is sent, not waited on: the caller takes the answer as a message with
+gen_server:check_response/2 on the returned id, so it goes on answering its
+own callers meanwhile. The start table waits on it before its first read of
+rc.conf (docs/design-apps.md, "Failure handling, diagnostics and
+debuggability").
+""".
+-spec system_namespace() -> gen_server:request_id().
+system_namespace() ->
+    gen_server:send_request(erx_domain_srv, system_namespace).
 
 -doc "Introduces domains A and B: ok once their connection is up at both ends.".
 -spec introduce(domain(), domain()) -> ok | {error, term()}.

@@ -58,8 +58,18 @@ starter_test_() ->
 %% A first read of rc.conf that fails: the file is a directory until the case
 %% replaces it.
 unreadable_test_() ->
-    {foreach, fun() -> setup(fun(Dir) -> ok = file:make_dir(filename:join(Dir, "rc.conf")) end) end,
+    {foreach, fun() -> setup(fun unreadable/1) end,
      fun cleanup/1, [fun a_failed_read_starts_the_manifest_rows_and_reads_again/1]}.
+
+%% A first read of rc.conf that waits for the system domain's namespace: the stub
+%% holds its answer, and rc.conf is unreadable until the case replaces it, as on a
+%% boot where the system domain's data grant is not installed yet.
+namespace_test_() ->
+    {foreach, fun() -> setup(fun unreadable/1, held) end,
+     fun cleanup/1, [fun no_row_starts_before_the_namespace_is_in_place/1]}.
+
+unreadable(Dir) ->
+    file:make_dir(filename:join(Dir, "rc.conf")).
 
 %% The two behaviours of OTP's one_for_one supervisor the keepers' branch
 %% stands on (erx_starter_sup): a transient child that ends with shutdown is
@@ -110,13 +120,19 @@ a_write_from_a_process_that_did_not_read_last_is_refused_test() ->
 setup() ->
     setup(fun(_Dir) -> ok end).
 
-%% Prepare readies the case's own rc.conf directory before the tree starts.
 setup(Prepare) ->
+    setup(Prepare, answer).
+
+%% Prepare readies the case's own rc.conf directory before the tree starts;
+%% Namespace is whether the stub answers the table's wait for the system domain's
+%% namespace at once (answer) or only once the case releases it (held).
+setup(Prepare, Namespace) ->
     Dir = filename:absname("rc-" ++ integer_to_list(erlang:unique_integer([positive]))),
     ok = file:make_dir(Dir),
     ok = Prepare(Dir),
     Setup = self(),
-    Stub = spawn(fun() -> register(erx_domain_srv, self()), stub(#{refuse => [], hold => [], held => [], next => 1, test => none, kept => []}) end),
+    Stub = spawn(fun() -> register(erx_domain_srv, self()), stub(#{refuse => [], hold => [], held => [], next => 1, test => none, kept => [],
+                                                                      namespace => Namespace}) end),
     ok = wait_until(fun() -> whereis(erx_domain_srv) =:= Stub end),
     Holder = spawn(fun() ->
                            {ok, Sup} = erx_starter_sup:start_link(manifest(), list_to_binary(Dir)),
@@ -144,7 +160,9 @@ watch() ->
 %% The stub answers start_session with a session, a process that traps exits as
 %% a domain pid does and ends with {domain_down, Id, Info} when it is told to or
 %% when a linked process ends with any reason but normal. It reports each start,
-%% and each end, to the test.
+%% and each end, to the test. It answers the table's wait for the system domain's
+%% namespace (erx_domain:system_namespace/0) at once, or holds it until the test
+%% sends release_namespace.
 stub(#{refuse := Refuse, hold := Hold, held := Held, next := Id} = State) ->
     Stub = self(),
     receive
@@ -162,6 +180,15 @@ stub(#{refuse := Refuse, hold := Hold, held := Held, next := Id} = State) ->
                                end,
                     stub(report({started, Principal, Start, Session}, Answered#{next := Id + 1}))
             end;
+        {'$gen_call', From, system_namespace} ->
+            case State of
+                #{namespace := answer} -> gen:reply(From, ok), stub(State);
+                #{namespace := held} -> stub(State#{namespace := {held, From}})
+            end;
+        release_namespace ->
+            #{namespace := {held, From}} = State,
+            gen:reply(From, ok),
+            stub(State#{namespace := answer});
         {hold, Principals} ->
             stub(State#{hold := Principals});
         release ->
@@ -565,6 +592,23 @@ a_failed_read_starts_the_manifest_rows_and_reads_again(Setup) ->
             receive {ended, ?LOGGER, Logger, _} -> ok after ?WAIT_MS -> error(rc_conf_not_read_again) end,
             ?assertEqual(read, rc_conf()),
             ?assertEqual(none, run(<<"logger">>))
+    end.
+
+%% While the system domain's namespace is not in place the table does not read
+%% rc.conf, so no row starts, not even from the manifest's rows alone; once it is,
+%% the read finds the file, and a row rc.conf disables never starts.
+no_row_starts_before_the_namespace_is_in_place(Setup) ->
+    fun() ->
+            ok = watch(),
+            ?assertEqual(none, receive {started, _, _, _} = Started -> Started after 500 -> none end),
+            ?assertEqual(unread, rc_conf()),
+            ok = file:del_dir(rc_path(Setup)),
+            ok = file:write_file(rc_path(Setup), <<"logger_enable=\"NO\"\n">>),
+            erx_domain_srv ! release_namespace,
+            _ = started(?KIOSK),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(none, run(<<"logger">>)),
+            ?assertEqual(none, started_within(?LOGGER, 0))
     end.
 
 %% ---------------------------------------------------------------------------

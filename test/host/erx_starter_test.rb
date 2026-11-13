@@ -109,7 +109,12 @@ class ErxStarterTest < Minitest::Test
               file: "#{APP}/erx_starter_rc.erl",
               from: 'gen_server:send_request(?MODULE, {read, Directory})',
               to: 'gen_server:send_request(element(2, gen_server:start(?MODULE, [], [])), {read, Directory})',
-              caught_by: 'a_write_of_an_ended_table_lands_before_the_next_table_reads')
+              caught_by: 'a_write_of_an_ended_table_lands_before_the_next_table_reads'),
+    Fault.new(name: "a first read of rc.conf that does not wait for the system domain's namespace",
+              file: "#{APP}/erx_starter.erl",
+              from: '{noreply, Recorded#{reader := {namespace, erx_domain:system_namespace()}}}',
+              to: '{noreply, read(Recorded)}',
+              caught_by: 'no_row_starts_before_the_namespace_is_in_place')
   ].freeze
 
   def setup

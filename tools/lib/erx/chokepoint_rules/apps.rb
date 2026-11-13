@@ -11,8 +11,9 @@ module Erx
     declare_group(
       rules: [
         Chokepoints::Elsewhere.new(
-          name: 'starter-reach', rule: 'erx_starter reaches the domain service only through erx_domain:start_session/2 ' \
-                                       'and erx_domain:stop/2 (reading a handle with id/1 and pid/1), and calls nothing through a variable or ' \
+          name: 'starter-reach', rule: 'erx_starter reaches the domain service only through erx_domain:start_session/2, ' \
+                                       'erx_domain:stop/2 and erx_domain:system_namespace/0 (reading a handle with id/1 and pid/1), ' \
+                                       'and calls nothing through a variable or ' \
                                        'macro module or apply',
           design: "#{APPS}#invariants", check: 'StartCallers, in Checks', test: 'test/host/apps_chokepoints_test.rb'
         ),

@@ -41,6 +41,11 @@ namespace_test_() ->
 namespace_end_test_() ->
     {setup, fun() -> setup(5) end, fun cleanup/1, fun(_) -> {timeout, 20, fun namespace_end/0} end}.
 
+%% The system domain's namespace by the same rule: erx_domain:system_namespace/0 is
+%% answered only once the system domain's echo grant is installed.
+system_namespace_test_() ->
+    {setup, fun() -> setup(5) end, fun cleanup/1, fun(_) -> {timeout, 20, fun system_namespace/0} end}.
+
 %% The domain service's funnel for a domain's facets (docs/design-domains.md, "Facets"),
 %% with a table of facet names that holds echo and other, and with the table the
 %% build generates.
@@ -501,6 +506,17 @@ namespace_end() ->
     ?assertEqual(none, answer(Started, 200)),
     exit(domain_pid(7), kill),
     ?assertMatch({error, _}, answer(Started, 2000)).
+
+%% The wait is answered after the grant's mint replies and not before, and a later wait,
+%% with the namespace in place, at once.
+system_namespace() ->
+    First = erx_domain:system_namespace(),
+    #{{system, echo} := {minting, {5, 4}, Tag}} = wait(fun(#{{system, echo} := {minting, _, _}}) -> true end),
+    %% wait_response/2 keeps the request on its timeout, where receive_response/2 abandons it.
+    ?assertEqual(timeout, gen_server:wait_response(First, 200)),
+    domain_pid(5) ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 3)}}},
+    ?assertEqual({reply, ok}, gen_server:receive_response(First, 2000)),
+    ?assertEqual({reply, ok}, gen_server:receive_response(erx_domain:system_namespace(), 2000)).
 
 %% A session's start, asked of the service by a process of its own, as the console's
 %% helper asks; answer/2 takes its answer.
