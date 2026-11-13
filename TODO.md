@@ -1105,6 +1105,13 @@ it; git history is the record of completed work.
   header.
 * [Low] `display/lvgl/Makefile`: a `.c` file deleted on a fork branch stays in `liblvgl.a`.
 * [Low] `tools/lib/erx/lvgl.rb`: `git` duplicates `Checks.isolated_git_environment` instead of sharing it.
+* [Low] `tools/lib/erx/lvgl.rb`, `Lvgl::Program::LICENSE`: the archive's licence expression is hand-kept against
+  `display/lvgl/lv_conf.h` and LVGL's sources, so an option turned on there (an image decoder, another font) or a
+  third-party file no option guards (as FrogFS's `decomp_raw.c`, which the Makefile leaves out) is not attributed
+  until the expression is edited too. Per-file attribution would read blob hashes from the submodule's tree at the
+  gitlink with a small path-to-licence map, or check the archive's defining members (`llvm-nm --defined-only`)
+  against such a map. `src/misc/lv_lru.c` cites willcannings/C-LRU-Cache with no notice of its own; its upstream
+  licence is unverified.
 * [High] `erx_wm_rio` (desktop, not built; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
   the window taking the keyboard is the topmost shown one lets any client take the keyboard from another session's
   window by a `wctl` `top`, `hide` then `show`, or a `mkdir`, and so read what the user types next. Before the
@@ -1491,6 +1498,15 @@ it; git history is the record of completed work.
   anonymous memory reaches musl's own rows, which refuse only write and execute together (a protection change that
   meets a mapping, the window buffer's included, is refused by `liberx/backend/core/vm_table.c` already). Have the
   program's seam refuse `PROT_EXEC` in both with `ENOTSUP`, with a check in the programs suite's `args` program.
+* [Medium] programs, `erx-lvgl` on the target (`display/lvgl/erx_lvgl.c`, built by `tools/lib/erx/lvgl.rb`,
+  `Lvgl::Program`) needs two libc calls a program's seam does not offer: `poll(2)`, which musl makes `ppoll` and
+  `erx_fiasco_libc_fd` (`liberx/backend/fiasco/program_task.c`) answers `ENOSYS`, so the program's first wait on
+  standard input ends it with status 1; and `signal(SIGPIPE, SIG_IGN)`, whose `rt_sigaction` musl's switch
+  (`musl/src/internal/erxos/syscall.c`) has no row for, answering `ENOSYS`, which the program ignores. With
+  `erx_program:start/1` taking only a `mem` descriptor, it has no standard input or output pipe either, so the
+  programs suite's `lvgl` case (`tools/lib/erx/programs.rb`) checks only that it reaches main's map of descriptor 3.
+  When pipes reach programs and `ppoll` reaches the table, have the case give it a buffer and pipes and see it wait
+  for the screen record.
 * [Medium] programs, the descriptor seam offers a listed set of calls (`musl/src/internal/erxos/syscall.c`,
   `seam_offered`, and `liberx/backend/fiasco/program_task.c`, `erx_fiasco_libc_fd`, two lists that must agree):
   design-programs.md, "The POSIX-lite personality", says every call that names a descriptor reaches the table, but

@@ -523,14 +523,22 @@ module Erx
       label.is_a?(String) && !label.start_with?('/') && label.valid_encoding? && !label.match?(/[\x00-\x1f\x7f]/)
     end
 
+    # The import root that holds directory, or nil for erXos's own code: the
+    # nearest directory with an ORIGIN.md, or a submodule (Origin::SUBMODULES).
+    # A submodule's ORIGIN.md sits beside it, in a directory that is no import
+    # root, so the files erXos keeps there are its own.
     def find_origin(directory)
       while directory.start_with?(@root + '/') || directory == @root
-        return directory if File.file?(File.join(directory, 'ORIGIN.md'))
+        relative = directory.delete_prefix(@root).delete_prefix('/')
+        return directory if Origin::SUBMODULES.include?(relative)
+        return directory if File.file?(File.join(directory, 'ORIGIN.md')) && !holds_submodule?(relative)
         break if directory == @root
         directory = File.dirname(directory)
       end
       nil
     end
+
+    def holds_submodule?(relative) = Origin::SUBMODULES.any? { |submodule| File.dirname(submodule) == relative }
 
     def checked_file(reference)
       exact_keys(reference, %w[path sha256])

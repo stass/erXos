@@ -5,6 +5,7 @@
 require_relative 'abi'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'lvgl'
 require_relative 'medium_boot'
 require_relative 'native_root'
 require_relative 'native_runtime'
@@ -43,7 +44,11 @@ module Erx
   #   program holds two of the gate worker's 64 registrations (ERX_GATE_SINKS) while it
   #   lives, so a registration either end fails to give back makes a start past the
   #   32nd fail. What else a start makes (budget, group, IRQ object, capability slots)
-  #   must be given back too, though 2 * MANY_RUNS programs need not exhaust it.
+  #   must be given back too, though 2 * MANY_RUNS programs need not exhaust it;
+  # * lvgl starts erx-lvgl, LVGL's renderer cross-built from the submodule
+  #   (Lvgl::Program) and shipped as bin/erx-lvgl, with no descriptors: liberx takes its
+  #   startup message, main runs LVGL's setup, and the map of descriptor 3, the window's
+  #   buffer, which the start did not give, ends it with status 1 (display/lvgl/erx_lvgl.c).
   # The shell then answers node() again.
   #
   # The programs are file entries, so the backend copies their segments into the space
@@ -51,7 +56,7 @@ module Erx
   # shares, is not run here.
   module Programs
     # Each program by its name in the session's release, domains/erxos/bin/<name>, and the
-    # source it is built from.
+    # source it is built from. erx-lvgl joins them there, built from LVGL (Run#added).
     PROGRAMS = %w[exit42 fault spin args bigargs note].to_h { |name| [name, "test/guest/programs/#{name}.c"] }.freeze
     PROGRAM_PREFIX = "#{ReleaseFiles::DOMAIN_PREFIX}bin/".freeze
     # How many rounds many runs: more than the 32 programs the gate worker's 64
@@ -235,6 +240,14 @@ module Erx
              receive {P, {exit_status, S}} -> S after #{WAIT_MS} -> timeout end}
           end)().
        ERLANG
+       # A start that refused the image or its startup message would answer an error or
+       # 127, and a fault in LVGL's setup a signal's status, instead of main's 1.
+       Case.new(name: 'lvgl', seconds: 60, answer: '{lvgl,1}', expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec(Lvgl::Program::NAME, 19)}),
+            receive {P, {exit_status, S}} -> {lvgl, S} after #{WAIT_MS} -> {lvgl, timeout, P} end
+          end)().
+       ERLANG
        Case.new(name: 'exit42', seconds: 60, answer: '{exit42,42}', expression: line(<<~ERLANG)),
          (fun() ->
             P = erx_program:start(#{spec('exit42', 2)}),
@@ -323,6 +336,13 @@ module Erx
     class Run
       def self.cells(cpus) = cpus.map { |count| QemuCells::Cell.new(accel: QemuCells::LOCAL_ACCELERATOR, cpus: count).name }
 
+      # The development machine, grown as a medium boot's is (MediumBoot.machine): the
+      # archive below the root carries erx-lvgl, about 1 MiB of LVGL, which the
+      # development machine's room for it does not hold. RAM grows to 768 MiB, Fiasco
+      # keeping about 6% of it, and the root moves up to 192 MiB.
+      def self.machine(platform) = ProductionImage::Machine.development(platform).with(memory_mib: 768, fiasco_reserve_mib: 48,
+                                                                                           root_mib: 192)
+
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64',
                      platform: Platform.development(root))
@@ -331,7 +351,7 @@ module Erx
         @compiler = compiler
         @linker = linker
         @qemu = qemu
-        @machine = ProductionImage::Machine.development(platform)
+        @machine = self.class.machine(platform)
         @manifest = platform.manifest_source(@root)
         @build = File.join(@root, 'build/programs')
         @schema = ABI::Generator.plan(root: @root).schema
@@ -373,12 +393,18 @@ module Erx
           [name, native.build_task_receipted(name: name, sources: [*NativeRoot::PROGRAM, source], directory: File.join(@build, name),
                                              archives: [libc, fiasco.user_library('libgcc.a')])]
         end
+        lvgl = Lvgl::Program.new(root: @root, runner: @runner, native: native, compiler: @compiler,
+                                 archives: [libc, fiasco.user_library('libgcc.a')],
+                                 directory: File.join(@build, Lvgl::Program::NAME)).call
+        programs = [*programs, [Lvgl::Program::NAME, lvgl]]
+        library = ProductionImage::Archive.new(path: lvgl.fetch(:archive), label: 'lvgl liblvgl.a', license: Lvgl::Program::LICENSE,
+                                               status: 'stopgap', notices: Lvgl::Program::NOTICES)
         entries = programs.map do |name, program|
           { 'path' => "#{PROGRAM_PREFIX}#{name}", 'kind' => @codec.member('entry_kind', 'file'), 'flags' => 0, 'id' => "program-#{name}",
             'artifact' => program.fetch(:program), 'receipt' => program.fetch(:receipt) }.freeze
         end
         ProductionImage::Added.new(entries: entries.freeze, inputs: programs.flat_map { |_, program| program.fetch(:inputs) }.uniq.freeze,
-                                   imports: {}.freeze)
+                                   imports: {}.freeze, archives: [library].freeze)
       end
 
       def boot(accel, count, remote, built)

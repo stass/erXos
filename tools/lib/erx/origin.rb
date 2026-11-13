@@ -162,6 +162,15 @@ module Erx
   end
 
   class Origin
+    # Git submodules: upstream trees pinned by the commit the superproject
+    # records, whose text is not erXos's and is not scanned. Each records its
+    # origin in an ORIGIN.md in the directory that holds it, outside the
+    # submodule, which Checks requires. That directory is not an import root:
+    # the submodule is, and what erXos keeps beside it (display/lvgl's
+    # erx_lvgl.c and lv_conf.h) is erXos's code (PackProvenance#find_origin).
+    SUBMODULES = %w[
+      display/lvgl/lvgl
+    ].freeze
     INVENTORY_MARKER = "\n```json\n"
     PAYLOAD_FIELDS = %w[version repository revision archive_sha256 exclusions files changes].freeze
     MODIFIED_NOTICE = 'Modified by erXos'

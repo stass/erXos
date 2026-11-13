@@ -133,7 +133,8 @@ module Erx
     # The sources that read musl's headers, which NativeRuntime's sysroot holds: the boot page builder,
     # the domain library, the native_domain root and string functions that link it, a
     # program's entry, whose descriptor seam answers in errno values, and its layer, and the
-    # programs suite's programs that read what it keeps or call the seam.
+    # programs suite's programs that read what it keeps or call the seam, and erx-lvgl's own
+    # (Lvgl::Program).
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c liberx/system/dom_core.c liberx/system/dom_life.c
                       liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c liberx/system/dom_dump.c
                       liberx/erx_lane.c liberx/erx_funnel.c
@@ -144,13 +145,22 @@ module Erx
                       liberx/program/program.c liberx/program/channel.c liberx/program/startup.c
                       liberx/program/fd.c liberx/program/pipe.c liberx/program/wake.c liberx/erx_profile.c
                       build/gen/liberx/generated/prog_profile.c test/guest/programs/args.c
-                      test/guest/programs/bigargs.c test/guest/programs/note.c].freeze
+                      test/guest/programs/bigargs.c test/guest/programs/note.c
+                      display/lvgl/erx_lvgl.c build/gen/display/generated/erx_ui_wire.c].freeze
     LIBC_HEADERS = 'build/runtime/native/sysroot/include'
     # The sources that use the FP registers, which a task may (only the kernel runs no FP
     # instruction): erx_etf.c reads and writes floats.
     FP_SOURCES = %w[liberx/erx_etf.c].freeze
-    FLAGS = %w[--target=aarch64-none-elf -std=c17 -Wall -Wextra -Werror -pedantic -O2 -ffreestanding
-               -fno-stack-protector -mgeneral-regs-only -mno-outline-atomics -I build/gen -I build/gen/include -I include -I kernel/crypto -I build/gen/kernel/generated -I kernel/core -I .].freeze
+    # The sources that include LVGL's headers (Lvgl::Program), and their view of it:
+    # lv_conf.h beside them, and LVGL's headers as system headers, so -pedantic and
+    # -Werror judge erXos's code alone.
+    LVGL_SOURCES = %w[display/lvgl/erx_lvgl.c].freeze
+    LVGL_FLAGS = %w[-isystem display/lvgl/lvgl -I display/lvgl -DLV_CONF_INCLUDE_SIMPLE].freeze
+    # The code generation of every task's C, erXos's own and a third party's alike:
+    # Lvgl::Program compiles LVGL with these and the libc's headers.
+    CODE_FLAGS = %w[--target=aarch64-none-elf -std=c17 -O2 -ffreestanding -fno-stack-protector -mno-outline-atomics].freeze
+    FLAGS = [*CODE_FLAGS, *%w[-Wall -Wextra -Werror -pedantic -mgeneral-regs-only -I build/gen -I build/gen/include -I include
+                              -I kernel/crypto -I build/gen/kernel/generated -I kernel/core -I .]].freeze
     LIBRARIES = %w[libsigma0.a libl4sys.p.a].freeze
 
     # source is the tree the C comes from, which a test may seed with a fault.
@@ -280,8 +290,9 @@ module Erx
       # which -std=c17 leaves undefined.
       libc = (LIBC_SOURCES + DEVICE_TREE).include?(source) ? ['-isystem', LIBC_HEADERS, '-D_BSD_SOURCE'] : []
       tree = DEVICE_TREE.include?(source) ? DEVICE_TREE_FLAGS : []
+      lvgl = LVGL_SOURCES.include?(source) ? LVGL_FLAGS : []
       base = FP_SOURCES.include?(source) ? FLAGS - ['-mgeneral-regs-only'] : FLAGS
-      argv = [@compiler, *base, *flags, *headers, *libc, *tree, '-MMD', '-MF', "#{object}.d", '-c', source, '-o', object]
+      argv = [@compiler, *base, *flags, *headers, *libc, *tree, *lvgl, '-MMD', '-MF', "#{object}.d", '-c', source, '-o', object]
       memo.compile(argv, chdir: @source, object: object, depfile: "#{object}.d") do |command, environment|
         @runner.run(command, name: "native-root-#{File.basename(source).tr('.', '-').downcase}", deadline: 60, chdir: @source,
                              env: environment)

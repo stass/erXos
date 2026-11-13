@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../fixtures/erlang_build'
 require_relative '../../tools/lib/erx/lvgl'
+require_relative '../../tools/lib/erx/origin'
 
 # erx-lvgl end to end on the host (docs/design-display.md, "The widget
 # server"): the program, built from LVGL's submodule under ASan and UBSan, is run
@@ -117,5 +119,80 @@ class LvglSubmoduleTest < Minitest::Test
 
   def entry(xy, sub, head, index, path: Erx::Lvgl::SUBMODULE)
     "1 #{xy} #{sub} 160000 160000 160000 #{head} #{index} #{path}\n"
+  end
+end
+
+# How erx-lvgl is built for the target (Erx::Lvgl::Program), with the commands it
+# would run recorded instead of run: LVGL is compiled by the Makefile with the task
+# code generation and musl's headers into a directory its flags name, and the program
+# is linked by NativeRoot over that liblvgl.a, which the result names for the packer
+# to attribute whole, under licences whose notices are files of LVGL's tree. The cross
+# build itself runs in the programs suite, which ships it and starts it on QEMU.
+class LvglProgramTest < Minitest::Test
+  # Records each command and answers git's status with an empty log: a clean checkout.
+  class Runner
+    attr_reader :commands
+
+    def initialize(log)
+      @log = log
+      @commands = []
+    end
+
+    def run(argv, **)
+      @commands << argv
+      { 'log' => @log }
+    end
+  end
+
+  # Generates nothing: the test reads no generated file.
+  module Generated
+    def self.ensure(root:) = root
+  end
+
+  # Takes NativeRoot#build_task_receipted's arguments and answers as it does.
+  class Native
+    attr_reader :link
+
+    def build_task_receipted(**arguments)
+      @link = arguments
+      { program: 'out/erx-lvgl', receipt: 'out/erx-lvgl.receipt.json', inputs: ['out/erx-lvgl'].freeze }.freeze
+    end
+  end
+
+  def test_lvgl_is_compiled_with_the_task_flags_and_the_program_linked_over_it
+    Dir.mktmpdir('erx-lvgl-program') do |root|
+      FileUtils.mkdir_p(File.join(root, Erx::Lvgl::SUBMODULE))
+      FileUtils.touch([File.join(root, Erx::Lvgl::SUBMODULE, 'lvgl.h'), File.join(root, '.git'), log = File.join(root, 'status')])
+      runner = Runner.new(log)
+      native = Native.new
+      built = Erx::Lvgl::Program.new(root: root, runner: runner, native: native, compiler: '/llvm/clang', archives: %w[libc.a libgcc.a],
+                               directory: File.join(root, 'out'), jobs: 2,
+                                     generated: Generated).call
+
+      flags = Erx::Lvgl::Program.library_flags(root)
+      assert_equal [*Erx::NativeRoot::CODE_FLAGS, '-isystem', File.join(root, Erx::NativeRoot::LIBC_HEADERS), '-D_BSD_SOURCE'].join(' '),
+                   flags
+      refute_includes flags, '-mgeneral-regs-only'
+      make = runner.commands.find { |argv| argv.first == 'gmake' }
+      archive = make.last
+      assert_match %r{\A#{root}/build/lvgl/target/\h{16}/liblvgl\.a\z}, archive
+      assert_includes make, "FLAGS=#{flags}"
+      assert_includes make, 'CC=/llvm/clang'
+      assert_includes make, 'AR=/llvm/llvm-ar'
+      assert_includes make, 'SANITIZE='
+      assert_equal [*Erx::NativeRoot::PROGRAM, *Erx::Lvgl::Program::SOURCES], native.link.fetch(:sources)
+      assert_equal [archive, 'libc.a', 'libgcc.a'], native.link.fetch(:archives)
+      refute native.link.key?(:flags)
+      assert_equal archive, built.fetch(:archive)
+      assert_equal ['out/erx-lvgl'], built.fetch(:inputs)
+      refute_equal Erx::Lvgl::Program.library_directory(root, flags), Erx::Lvgl::Program.library_directory(root, "#{flags} -O0")
+    end
+  end
+
+  # Each notice the archive's licences need is a file of the checked-out submodule.
+  def test_the_archive_notices_are_files_of_lvgl
+    skip 'LVGL is not checked out' unless Erx::Lvgl.checked_out?(ErxLvglTest::ROOT)
+    Erx::Lvgl::Program::NOTICES.each { |notice| assert File.file?(File.join(ErxLvglTest::ROOT, notice)), notice }
+    Erx::Attribution.validate_expression(Erx::Lvgl::Program::LICENSE)
   end
 end

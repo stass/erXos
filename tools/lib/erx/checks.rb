@@ -59,14 +59,9 @@ module Erx
       test/oracle/common_test
       test/shell/rc/plan9port
     ].freeze
-    # Git submodules: upstream trees pinned by the commit the superproject
-    # records, whose text is not erXos's and is not scanned. Each records its
-    # origin in an ORIGIN.md in the directory that holds it, outside the
-    # submodule, which the check requires. Any other nested repository is
+    # The git submodules (Origin::SUBMODULES); any other nested repository is
     # refused.
-    SUBMODULES = %w[
-      display/lvgl/lvgl
-    ].freeze
+    SUBMODULES = Origin::SUBMODULES
     LISTING_BYTES = 64 * 1024 * 1024
     LISTING_DEADLINE = 120
     LISTED_NAME = /\A[^\x00-\x1f\x7f]+\z/

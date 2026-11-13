@@ -1159,7 +1159,6 @@ main(void)
 	int timeout;
 
 	signal(SIGPIPE, SIG_IGN);
-	map_buffer();
 	lv_init();
 	lv_tick_set_cb(tick_ms);
 	pointer = event_driven(LV_INDEV_TYPE_POINTER, read_pointer);
@@ -1168,6 +1167,8 @@ main(void)
 	lv_group_set_default(lv_group_create());
 	lv_indev_set_group(keypad, lv_group_get_default());
 	lv_indev_set_group(encoder, lv_group_get_default());
+	/* Last, so a start without the buffer has run the rest of the setup first. */
+	map_buffer();
 	for (;;) {
 		timeout = -1;
 		if (display != NULL && !uncommitted && !report_open) {

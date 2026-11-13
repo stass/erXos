@@ -72,7 +72,7 @@ module Erx
     # littlefs's BSD-3-Clause notice as well as OTP's.
     EMULATOR_ARCHIVE = 'libbeam.a'
 
-    # One of the archives that the root links, attributed whole under the license
+    # One of the archives that the root or an added program links, attributed whole under the license
     # stated here, with notices the tree paths of the documents that license names.
     # TODO.md holds the gap: the boot cores hold BLAKE3 as well.
     Archive = Data.define(:path, :label, :license, :status, :notices)
@@ -85,8 +85,12 @@ module Erx
 
     # What a test image adds to the system release (OracleQemu): entries for Pack#build,
     # each with its receipt, the files those receipts name, and the imported trees their
-    # sources come from, each with its status. A production image adds nothing.
-    Added = Data.define(:entries, :inputs, :imports)
+    # sources come from, each with its status, and the archives their links take members
+    # of that no receipt describes, each attributed whole (Archive): LVGL's liblvgl.a for
+    # erx-lvgl. A production image adds nothing.
+    Added = Data.define(:entries, :inputs, :imports, :archives) do
+      def initialize(entries:, inputs:, imports:, archives: [].freeze) = super
+    end
     NOTHING_ADDED = Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
     private_constant :NOTHING_ADDED
 
@@ -340,7 +344,7 @@ module Erx
       jit = domains.empty? ? nil : @jit_runtime.build(interpreter: erts)
       domain = domain_parts(domains, erts: erts, jit: jit, archives: archives, facts: facts, directory: directory)
       report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *system_release.directories, *domain.entries, *added.entries],
-                    root_task: root_task,
+                    root_task: root_task, added_archives: added.archives,
                     images: images, manifest_source: manifest_source, erts: erts, jit: jit, output: archive,
                     imports: IMPORTS.merge(added.imports),
                     inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *build_facts_sources, *domain.inputs,
@@ -1510,10 +1514,10 @@ module Erx
       named.reduce(:merge)
     end
 
-    def pack(entries:, root_task:, images:, manifest_source:, inputs:, erts:, jit:, output:, imports:, test_code:, machine:)
+    def pack(entries:, root_task:, added_archives:, images:, manifest_source:, inputs:, erts:, jit:, output:, imports:, test_code:, machine:)
       tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@root, 'build/production-image-tools'),
                               runner: @runner, compiler: @compiler, sanitizers: [])
-      provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts, jit), runner: @runner,
+      provenance = PackProvenance.new(root: @root, catalog: catalog(root_task, inputs), external: external(erts, jit, added_archives), runner: @runner,
                                       imports: imports, compiler: @compiler)
       paths = (entries.map { |entry| entry.fetch('path') } + [@codec.fixed_bytes('system_manifest_path'), NOTICES_PATH]).map(&:b).sort
       Pack.new(root: @root, output_root: @root, codec: @codec, planner: ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec),
@@ -1566,12 +1570,13 @@ module Erx
       path
     end
 
-    # The clang that built the root, and Fiasco's archives its link takes members of.
-    # jit is the BeamAsm build when the image carries its runtime image, or nil.
-    def external(erts, jit)
+    # The clang that built the root, and the archives its link and the added programs'
+    # take members of: Fiasco's and musl's, and added, the Added archives. jit is the
+    # BeamAsm build when the image carries its runtime image, or nil.
+    def external(erts, jit, added)
       resource = @runner.run([@compiler, '-print-resource-dir'], name: 'clang-resource-directory', deadline: 30)
       ToolchainProvenance.llvm(root: @root, resource_dir: File.read(resource.fetch('log')).strip) +
-        [*archives(erts), *jit_archives(jit)].map { |archive| external_archive(archive) }
+        [*archives(erts), *jit_archives(jit), *added].map { |archive| external_archive(archive) }
     end
 
     def archives(erts)

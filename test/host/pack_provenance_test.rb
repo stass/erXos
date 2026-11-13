@@ -357,6 +357,23 @@ class PackProvenanceTest < Minitest::Test
     assert_match(/unregistered imported dependency: vendor\/added\.c/, error.message)
   end
 
+  # A submodule's ORIGIN.md sits beside it (Origin::SUBMODULES), so the directory
+  # holding both is no import root: erXos's file there is its own code, and only a
+  # file inside the submodule belongs to the import, which this resolver was not
+  # given.
+  def test_the_directory_holding_a_submodule_is_erxos_code
+    submodule = Erx::Origin::SUBMODULES.first
+    holder = File.dirname(submodule)
+    FileUtils.mkdir_p(File.join(@root, submodule))
+    write("#{holder}/ORIGIN.md", "# Source origin\n\nprose, no inventory\n")
+    own = write("#{holder}/own.c", "/* SPDX-License-Identifier: BSD-2-Clause */\nint own;\n")
+    record = resolve_compiled('sources' => [reference(own)]).first
+    assert_equal ["#{holder}/own.c", 'BSD-2-Clause', 'permanent'], record.values_at('path', 'license', 'status')
+    upstream = write("#{submodule}/upstream.c", "int upstream;\n")
+    error = assert_raises(Erx::Error) { resolve_compiled('sources' => [reference(upstream)]) }
+    assert_match(%r{unregistered imported dependency: #{submodule}/upstream\.c}, error.message)
+  end
+
   def test_permissive_license_alternative_is_selected_instead_of_requiring_both
     File.write(@source, "/* SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0-only */\nint start;\n")
     @receipt.fetch('compiles').first['sources'] = [reference(@source)]
