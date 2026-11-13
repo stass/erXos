@@ -4,9 +4,9 @@
  *
  * erx_device's NIF calls (docs/design-runtime.md, "The device NIF"): opening a
  * device, which interns its table's names as atoms for the BIFs, binding a line to the
- * calling process, and a device's queues: creating one, the device's initialisation, posting a
- * chain and completing what the device returned. A binding is a resource monitoring that process: its exit unbinds the
- * line unless a later binding has moved it, so the late exit of a crashed driver never
+ * calling process and naming the process a line is bound to, and a device's queues: creating one, the device's initialisation, posting a
+ * chain and completing what the device returned. A binding is a resource monitoring that process, kept by the line's
+ * entry, which every record naming the line shares: its exit unbinds the line unless a later binding has moved it, so the late exit of a crashed driver never
  * undoes its successor's binding.
  *
  * One lock serialises opens, everything a binding changes and every queue call. It is taken before the event
@@ -34,15 +34,17 @@
  * demonitor got there first. ERTS's monitor holds no reference of its own.
  */
 typedef struct binding {
-	uint32_t	device;
+	uint32_t	device;		/* the record and its line the binding was made through */
 	uint32_t	line;
+	uint32_t	entry;
 	uint32_t	label;
+	ErlNifPid	pid;
 	ErlNifMonitor	monitor;
 } binding_t;
 
 static ErlNifMutex *device_lock;
 static ErlNifResourceType *binding_type;
-static binding_t *bindings[ERX_DEVICE_MAX][ERX_DEVICE_LINES_MAX];
+static binding_t *bindings[ERX_DEVICE_LINE_ENTRIES_MAX];
 
 static ERL_NIF_TERM
 status_error(ErlNifEnv *env, int status)
@@ -103,13 +105,19 @@ decode_window(ErlNifEnv *env, ERL_NIF_TERM term, erx_device_spec_t *spec)
 	return (true);
 }
 
-/* A given device's line is `{object, Irq}`; any other's is its selector. */
+/*
+ * A given device's line is `{object, Irq}`; any other's is its selector. A line two devices
+ * of the unit name is marked `{shared, Line}` by the record's writer.
+ */
 static bool
-decode_line(ErlNifEnv *env, ERL_NIF_TERM term, const erx_device_spec_t *spec, uint64_t *line)
+decode_line(ErlNifEnv *env, ERL_NIF_TERM term, const erx_device_spec_t *spec, uint64_t *line, bool *shared)
 {
 	const ERL_NIF_TERM *parts;
 	ErlNifUInt64 value;
 
+	*shared = tagged(env, term, "shared", 2, &parts);
+	if (*shared)
+		term = parts[1];
 	if (spec->form == ERX_DEVICE_FORM_GIVEN) {
 		if (!tagged(env, term, "object", 2, &parts))
 			return (false);
@@ -139,7 +147,7 @@ decode_memory(ErlNifEnv *env, ERL_NIF_TERM map, erx_device_spec_t *spec)
 	return (true);
 }
 
-/* #{peripheral := atom(), window := window(), lines := [line()], memory => memory()}. */
+/* #{peripheral := atom(), window := window(), lines := [line() | {shared, line()}], memory => memory()}. */
 static bool
 decode_spec(ErlNifEnv *env, ERL_NIF_TERM term, char *peripheral, erx_device_spec_t *spec)
 {
@@ -161,7 +169,7 @@ decode_spec(ErlNifEnv *env, ERL_NIF_TERM term, char *peripheral, erx_device_spec
 		return (false);
 	spec->line_count = length;
 	for (unsigned index = 0; index < length; index++) {
-		if (!enif_get_list_cell(env, list, &head, &list) || !decode_line(env, head, spec, &spec->lines[index]))
+		if (!enif_get_list_cell(env, list, &head, &list) || !decode_line(env, head, spec, &spec->lines[index], &spec->shared[index]))
 			return (false);
 	}
 	return (decode_memory(env, term, spec));
@@ -204,6 +212,7 @@ start_binding(ErlNifEnv *env, binding_t *binding, ERL_NIF_TERM message, uint64_t
 	int status;
 
 	enif_self(env, &self);
+	binding->pid = self;
 	status = erx_event_register_process(&self, message, &binding->label);
 	if (status != ERX_OK)
 		return (status);
@@ -229,43 +238,110 @@ retire_former(ErlNifEnv *env, binding_t *former)
 		enif_release_resource(former);
 }
 
+/* What a refused bind answers: badarg for a line the record lacks, a refusal for the rest. */
 static ERL_NIF_TERM
-irq_bind_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+bind_refusal(ErlNifEnv *env, erx_device_bind_t decision)
+{
+	switch (decision) {
+	case ERX_DEVICE_BIND_SHARED:	return (enif_make_tuple2(env, enif_make_atom(env, "error"), enif_make_atom(env, "shared")));
+	case ERX_DEVICE_BIND_DIRECT:	return (enif_make_tuple2(env, enif_make_atom(env, "error"), enif_make_atom(env, "direct")));
+	case ERX_DEVICE_BIND_BUSY:	return (status_error(env, ERX_EBUSY));
+	case ERX_DEVICE_BIND_OK:
+	case ERX_DEVICE_BIND_NO_LINE:
+	default:			return (enif_make_badarg(env));
+	}
+}
+
+/*
+ * irq_bind/2 and irq_bind_owner/2: the line's mark decides which of them binds it
+ * (erx_device_bind_check), and a bind through the record the line is bound through moves
+ * the binding to the caller.
+ */
+static ERL_NIF_TERM
+bind_line(ErlNifEnv *env, const ERL_NIF_TERM argv[], erx_device_binder_t binder)
 {
 	unsigned device_index, line_index;
 	const erx_device_t *device;
-	binding_t *binding;
+	erx_device_bind_t decision;
+	binding_t *binding, *former;
+	uint32_t entry;
 	uint64_t irq;
 	int status;
 
-	(void)argc;
 	if (!enif_get_uint(env, argv[0], &device_index) || !enif_get_uint(env, argv[1], &line_index))
 		return (enif_make_badarg(env));
 	device = erx_device_get(device_index);
-	if (device == NULL || !erx_device_line_irq(device, line_index, &irq))
+	if (device == NULL || !erx_device_line_irq(device, line_index, &irq) || !erx_device_line_entry(device, line_index, &entry))
 		return (enif_make_badarg(env));
 	binding = enif_alloc_resource(binding_type, sizeof(*binding));
 	if (binding == NULL)
 		return (status_error(env, ERX_ENOMEM));
 	binding->device = device_index;
 	binding->line = line_index;
+	binding->entry = entry;
 
 	const ERL_NIF_TERM message = enif_make_tuple3(env, enif_make_atom(env, "erx_irq"), argv[0], argv[1]);
 
 	enif_mutex_lock(device_lock);
+	former = bindings[entry];
+	decision = erx_device_bind_check(device, line_index, binder, former != NULL ? erx_device_get(former->device) : NULL,
+	    former != NULL ? former->line : 0);
+	if (decision != ERX_DEVICE_BIND_OK) {
+		enif_mutex_unlock(device_lock);
+		enif_release_resource(binding);
+		return (bind_refusal(env, decision));
+	}
 	status = start_binding(env, binding, message, irq);
 	if (status != ERX_OK) {
 		enif_mutex_unlock(device_lock);
 		enif_release_resource(binding);
 		return (status_error(env, status));
 	}
-	if (bindings[device_index][line_index] != NULL)
-		retire_former(env, bindings[device_index][line_index]);
-	bindings[device_index][line_index] = binding;
-	/* A line a former driver left masked opens for this one; a level still asserted fires at once. */
+	if (former != NULL)
+		retire_former(env, former);
+	bindings[entry] = binding;
+	/* A line a former binder left masked opens for this one; a level still asserted fires at once. */
 	status = erx_irq_ack(irq);
 	enif_mutex_unlock(device_lock);
 	return (status == ERX_OK ? enif_make_atom(env, "ok") : status_error(env, status));
+}
+
+static ERL_NIF_TERM
+irq_bind_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	(void)argc;
+	return (bind_line(env, argv, ERX_DEVICE_BINDER_DRIVER));
+}
+
+static ERL_NIF_TERM
+irq_bind_owner_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	(void)argc;
+	return (bind_line(env, argv, ERX_DEVICE_BINDER_OWNER));
+}
+
+/* irq_holder(Dev, Line): the process the line is bound to, through any record naming it. */
+static ERL_NIF_TERM
+irq_holder_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	unsigned device_index, line_index;
+	const erx_device_t *device;
+	ERL_NIF_TERM result;
+	uint32_t entry;
+
+	(void)argc;
+	if (!enif_get_uint(env, argv[0], &device_index) || !enif_get_uint(env, argv[1], &line_index))
+		return (enif_make_badarg(env));
+	device = erx_device_get(device_index);
+	if (device == NULL || !erx_device_line_entry(device, line_index, &entry))
+		return (enif_make_badarg(env));
+	enif_mutex_lock(device_lock);
+	if (bindings[entry] != NULL)
+		result = enif_make_tuple2(env, enif_make_atom(env, "ok"), enif_make_pid(env, &bindings[entry]->pid));
+	else
+		result = enif_make_tuple2(env, enif_make_atom(env, "error"), enif_make_atom(env, "unbound"));
+	enif_mutex_unlock(device_lock);
+	return (result);
 }
 
 /*
@@ -283,11 +359,11 @@ binding_down(ErlNifEnv *env, void *object, ErlNifPid *pid, ErlNifMonitor *monito
 	(void)pid;
 	(void)monitor;
 	enif_mutex_lock(device_lock);
-	if (bindings[binding->device][binding->line] == binding) {
+	if (bindings[binding->entry] == binding) {
 		if (erx_device_line_irq(erx_device_get(binding->device), binding->line, &irq))
 			(void)erx_irq_bind(irq, ERX_CAP_NULL, 0);
 		erx_event_unregister(binding->label);
-		bindings[binding->device][binding->line] = NULL;
+		bindings[binding->entry] = NULL;
 	}
 	enif_mutex_unlock(device_lock);
 	enif_release_resource(binding);
@@ -521,6 +597,8 @@ load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 static ErlNifFunc nif_funcs[] = {
 	{ "open", 1, open_nif, 0 },
 	{ "irq_bind", 2, irq_bind_nif, 0 },
+	{ "irq_bind_owner", 2, irq_bind_owner_nif, 0 },
+	{ "irq_holder", 2, irq_holder_nif, 0 },
 	{ "queue_create", 4, queue_create_nif, 0 },
 	{ "negotiate", 2, negotiate_nif, 0 },
 	{ "post", 4, post_nif, 0 },

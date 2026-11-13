@@ -41,18 +41,58 @@ class ErxDeviceTest < Minitest::Test
     end
   end
 
+  # The seeded fault of docs/design-shared-devices.md, "Verification": a bind check that
+  # ignores the shared mark lets a driver bind a shared line directly, and the harness fails.
+  SHARED_MARK = ["\tif (shared && binder == ERX_DEVICE_BINDER_DRIVER)\n",
+                 "\tif (false && shared && binder == ERX_DEVICE_BINDER_DRIVER)\n"].freeze
+
+  # The other seeded fault SD3 names: a line table keyed by record, where no open finds the
+  # entry another record took, so the second record on a line asks the kernel again.
+  PER_RECORD = ["\t\tif (find_line(spec, line, &entries[line]))\n\t\t\tcontinue;\n",
+                "\t\tif (false && find_line(spec, line, &entries[line]))\n\t\t\tcontinue;\n"].freeze
+
+  def test_a_bind_check_that_ignores_the_shared_mark_fails_the_harness
+    assert_match(/FAILED .*ERX_DEVICE_BIND_SHARED/, seeded_failure(SHARED_MARK))
+  end
+
+  def test_a_line_table_keyed_by_record_fails_the_harness
+    assert_match(/FAILED .*check_shared_line|FAILED .*irq_created == made \+ 1/, seeded_failure(PER_RECORD))
+  end
+
+  private
+
+  # The harness's output over erx_device.c with `seed` applied; the run must fail.
+  def seeded_failure(seed)
+    Dir.mktmpdir('erx-device-seeded-') do |directory|
+      source = File.read(File.join(NIFS, 'erx_device.c'))
+      assert_includes source, seed.first
+      seeded = File.join(directory, 'erx_device.c')
+      File.write(seeded, source.sub(*seed))
+      output, status = build_and_run(SOURCES.map { |path| path.end_with?('/erx_device.c') ? seeded : path })
+      refute status.success?, output
+      output
+    end
+  end
+
+  public
+
   private
 
   def run_harness(*flags)
+    output, status = build_and_run(SOURCES, *flags)
+    assert status.success?, output
+    output
+  end
+
+  # The harness built from `sources` and run; a build failure fails the test.
+  def build_and_run(sources, *flags)
     Dir.mktmpdir('erx-device-harness-') do |directory|
       binary = File.join(directory, 'harness')
       output, status = Open3.capture2e(COMPILER, *FLAGS, *flags, *Erx::Generated.include_flags(root: ROOT), '-I', ROOT,
                                        '-I', File.join(ROOT, 'include'), '-I', NIFS,
-                                       *SOURCES, '-o', binary, stdin_data: '')
+                                       *sources, '-o', binary, stdin_data: '')
       assert status.success?, output
-      output, status = Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: COMPILER), binary, stdin_data: '')
-      assert status.success?, output
-      output
+      Open3.capture2e(Erx::SanitizerEnvironment.call(compiler: COMPILER), binary, stdin_data: '')
     end
   end
 end

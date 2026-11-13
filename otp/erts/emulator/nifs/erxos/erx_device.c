@@ -32,10 +32,9 @@ struct erx_device {
 	uint64_t			window;		/* a given device's window object */
 	uint64_t			base;
 	uint64_t			size;
-	erx_device_pages_t		pages;
 	uint32_t			line_count;
 	uint64_t			lines[ERX_DEVICE_LINES_MAX];	/* as the spec named them */
-	uint64_t			irqs[ERX_DEVICE_LINES_MAX];
+	uint32_t			entries[ERX_DEVICE_LINES_MAX];	/* each line's in line_entries */
 	uint64_t			memory;		/* a given device's memory object */
 	uint64_t			memory_size;	/* its bytes, 0 for none */
 	uint8_t				*dma;		/* this domain's mapping of it */
@@ -45,6 +44,35 @@ struct erx_device {
 
 static erx_device_t devices[ERX_DEVICE_MAX];
 static _Atomic uint32_t devices_open;
+
+/*
+ * What records share (docs/design-shared-devices.md, "Pages inside a domain" and "Lines
+ * inside a domain"). A run is the pages a record's window covers, mapped once at the first
+ * open of any record in it; a line entry is one IRQ object, which a given record names by
+ * the object's handle and any other by its selector, with the records' mark of whether two
+ * devices of the unit name it. Both are kept for the boot, as records are, so an open that
+ * fails after making one leaves it for the next open to take. Only opens, which the caller
+ * serialises, write them, and nothing reads them through a record before the record is
+ * published in devices_open.
+ */
+typedef struct page_run {
+	erx_device_form_t	form;
+	uint64_t		window;		/* a given run's window object */
+	erx_device_pages_t	pages;		/* `offset` is 0 */
+	volatile uint8_t	*mapping;	/* its first page */
+} page_run_t;
+
+typedef struct line_entry {
+	erx_device_form_t	form;		/* whose naming `key` is */
+	uint64_t		key;		/* a given record's handle, or a selector */
+	uint64_t		irq;
+	bool			shared;
+} line_entry_t;
+
+static page_run_t runs[ERX_DEVICE_MAX];
+static uint32_t runs_mapped;
+static line_entry_t line_entries[ERX_DEVICE_LINE_ENTRIES_MAX];
+static uint32_t lines_taken;
 
 #ifdef ERX_DEVICE_STAND_IN
 /* The stand-in's device model, defined below store(), which calls it. */
@@ -78,18 +106,15 @@ stand_in_window(uint64_t size, volatile uint8_t **window)
 }
 
 /*
- * A window's mapping: the pages that hold it, with the window at its offset inside them. A
- * physical device's pages are an object made here from their addresses; a given device's
- * are the pages of its window object at their offsets in it.
+ * A run's mapping: its pages, a physical device's an object made here from their addresses
+ * and a given device's the pages of its window object at their offsets in it.
  */
 static int
-map_window(const erx_device_spec_t *spec, const erx_device_pages_t *pages, uint64_t size, volatile uint8_t **window)
+map_run(const erx_device_spec_t *spec, const erx_device_pages_t *pages, volatile uint8_t **mapping)
 {
 	uint64_t mem = spec->window, offset = pages->base, addr;
 	int status = ERX_OK;
 
-	if (spec->form == ERX_DEVICE_FORM_STAND_IN)
-		return (stand_in_window(size, window));
 	if (spec->form == ERX_DEVICE_FORM_PHYSICAL) {
 		status = erx_mem_create_physical(0, 0, pages->base, pages->size, ERX_MEM_ATTR_DEVICE, &mem);
 		offset = 0;
@@ -97,22 +122,135 @@ map_window(const erx_device_spec_t *spec, const erx_device_pages_t *pages, uint6
 	if (status == ERX_OK)
 		status = map_object(mem, offset, pages->size, &addr);
 	if (status == ERX_OK)
-		*window = (volatile uint8_t *)(uintptr_t)(addr + pages->offset);
+		*mapping = (volatile uint8_t *)(uintptr_t)addr;
 	return (status);
 }
 
-/* The lines' IRQ objects: a given device's as it was given them, any other's made from their selectors. */
+/*
+ * Whether the window's pages are a mapped run's, with the run; ERX_EBUSY when they meet a
+ * run without being it, since a run is its unit's pages and the record's writer and the unit
+ * then disagree.
+ */
 static int
-take_lines(const erx_device_spec_t *spec, uint64_t *irqs)
+find_run(const erx_device_spec_t *spec, const erx_device_pages_t *pages, bool *found, uint32_t *run)
+{
+	*found = false;
+	for (uint32_t index = 0; index < runs_mapped; index++) {
+		const page_run_t *const mapped = &runs[index];
+
+		if (mapped->form != spec->form || mapped->window != spec->window ||
+		    !erx_device_pages_overlap(&mapped->pages, pages))
+			continue;
+		if (mapped->pages.base != pages->base || mapped->pages.size != pages->size)
+			return (ERX_EBUSY);
+		*found = true;
+		*run = index;
+		return (ERX_OK);
+	}
+	return (ERX_OK);
+}
+
+/*
+ * The window inside its run's mapping, the run mapped here when this is the first open in
+ * it. A hosted stand-in's window is plain memory of its own.
+ */
+static int
+take_window(const erx_device_spec_t *spec, const erx_device_pages_t *pages, uint64_t size, volatile uint8_t **window)
+{
+	page_run_t *run;
+	uint32_t index = runs_mapped;
+	bool found;
+	int status;
+
+	if (spec->form == ERX_DEVICE_FORM_STAND_IN)
+		return (stand_in_window(size, window));
+	status = find_run(spec, pages, &found, &index);
+	if (status != ERX_OK)
+		return (status);
+	if (!found && runs_mapped == ERX_DEVICE_MAX)
+		return (ERX_ELIMIT);
+	run = &runs[index];
+	if (!found) {
+		status = map_run(spec, pages, &run->mapping);
+		if (status != ERX_OK)
+			return (status);
+		run->form = spec->form;
+		run->window = spec->window;
+		run->pages = (erx_device_pages_t){ .base = pages->base, .size = pages->size };
+		runs_mapped++;
+	}
+	/* A run is its record's pages, so the window starts at its offset in the run's first page. */
+	*window = run->mapping + pages->offset;
+	return (ERX_OK);
+}
+
+/* The entry of the spec's line, false for a line no open has taken. */
+static bool
+find_line(const erx_device_spec_t *spec, uint32_t line, uint32_t *entry)
+{
+	for (uint32_t index = 0; index < lines_taken; index++) {
+		if (line_entries[index].form == spec->form && line_entries[index].key == spec->lines[line]) {
+			*entry = index;
+			return (true);
+		}
+	}
+	return (false);
+}
+
+/* Whether one of the first `open` records names the line entry. */
+static bool
+line_named(uint32_t entry, uint32_t open)
+{
+	for (uint32_t index = 0; index < open; index++) {
+		for (uint32_t line = 0; line < devices[index].line_count; line++) {
+			if (devices[index].entries[line] == entry)
+				return (true);
+		}
+	}
+	return (false);
+}
+
+/*
+ * Whether the spec's lines agree with what is taken: a line two records name is shared, so
+ * a spec that marks a taken line otherwise than its entry, or names a direct line an open
+ * record names, disagrees with the unit. Checked before anything is made.
+ */
+static bool
+lines_agree(const erx_device_spec_t *spec, uint32_t open)
+{
+	uint32_t entry;
+
+	for (uint32_t line = 0; line < spec->line_count; line++) {
+		if (find_line(spec, line, &entry) && (line_entries[entry].shared != spec->shared[line] ||
+		    (!spec->shared[line] && line_named(entry, open))))
+			return (false);
+	}
+	return (true);
+}
+
+/*
+ * Each line's entry: the one taken already, or a new one holding the line's IRQ object, a
+ * given device's as it was given it and any other's made from its selector.
+ */
+static int
+take_lines(const erx_device_spec_t *spec, uint32_t *entries)
 {
 	const uint32_t kind = spec->form == ERX_DEVICE_FORM_STAND_IN ? ERX_IRQ_SOFT : ERX_IRQ_LINE;
+	line_entry_t *entry;
 	int status = ERX_OK;
 
 	for (uint32_t line = 0; status == ERX_OK && line < spec->line_count; line++) {
-		if (spec->form == ERX_DEVICE_FORM_GIVEN)
-			irqs[line] = spec->lines[line];
-		else
-			status = erx_irq_create(0, 0, kind, spec->lines[line], &irqs[line]);
+		if (find_line(spec, line, &entries[line]))
+			continue;
+		if (lines_taken == ERX_DEVICE_LINE_ENTRIES_MAX)
+			return (ERX_ELIMIT);
+		entry = &line_entries[lines_taken];
+		*entry = (line_entry_t){ .form = spec->form, .key = spec->lines[line], .irq = spec->lines[line],
+		    .shared = spec->shared[line] };
+		if (spec->form != ERX_DEVICE_FORM_GIVEN)
+			status = erx_irq_create(0, 0, kind, spec->lines[line], &entry->irq);
+		if (status == ERX_OK)
+			entries[line] = lines_taken++;
 	}
 	return (status);
 }
@@ -133,6 +271,19 @@ map_memory(const erx_device_spec_t *spec, uint8_t **dma)
 	return (status);
 }
 
+/* Whether the spec names each of its lines once. */
+static bool
+lines_distinct(const erx_device_spec_t *spec)
+{
+	for (uint32_t line = 0; line < spec->line_count && line < ERX_DEVICE_LINES_MAX; line++) {
+		for (uint32_t other = line + 1; other < spec->line_count && other < ERX_DEVICE_LINES_MAX; other++) {
+			if (spec->lines[line] == spec->lines[other])
+				return (false);
+		}
+	}
+	return (true);
+}
+
 /*
  * Every part of the spec the table or the record bounds, checked before anything is made,
  * and the pages a window's mapping covers. A stand-in has none. Memory is a given device's
@@ -142,7 +293,7 @@ static bool
 spec_fits(const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral, erx_device_pages_t *pages)
 {
 	*pages = (erx_device_pages_t){ 0 };
-	if (peripheral == NULL || spec->line_count > ERX_DEVICE_LINES_MAX ||
+	if (peripheral == NULL || spec->line_count > ERX_DEVICE_LINES_MAX || !lines_distinct(spec) ||
 	    (spec->form != ERX_DEVICE_FORM_GIVEN && spec->memory_size != 0) || (spec->memory_size & (ERX_PAGE_SIZE - 1)) != 0)
 		return (false);
 	return (spec->form == ERX_DEVICE_FORM_STAND_IN ||
@@ -164,7 +315,8 @@ same_spec(const erx_device_t *record, const erx_device_spec_t *spec, const erx_d
 	    record->memory != spec->memory || record->memory_size != spec->memory_size)
 		return (false);
 	for (uint32_t line = 0; line < spec->line_count; line++) {
-		if (record->lines[line] != spec->lines[line])
+		if (record->lines[line] != spec->lines[line] ||
+		    line_entries[record->entries[line]].shared != spec->shared[line])
 			return (false);
 	}
 	return (true);
@@ -172,14 +324,15 @@ same_spec(const erx_device_t *record, const erx_device_spec_t *spec, const erx_d
 
 /*
  * Whether an earlier open decides this one, and what it decides. The same window is that
- * device again, or refused if anything else differs. A window whose pages another window's
- * mapping holds is refused: one device page has one mapping, its record's. So is memory
- * another record holds, since each device's queues are carved from its own. A stand-in has no
- * window to share, so it is always a new device.
+ * device again, or refused if anything else differs. So is memory another record holds,
+ * since each device's queues are carved from its own, and a window that overlaps another
+ * record's, whose registers would then reach the other's. Another window in the same pages is
+ * a new record, which find_run places in their run. A stand-in has no window to share, so it is
+ * always a new device.
  */
 static bool
-find_open(const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral, const erx_device_pages_t *pages,
-    uint32_t open, uint32_t *device, int *status)
+find_open(const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral, uint32_t open, uint32_t *device,
+    int *status)
 {
 	for (uint32_t index = 0; index < open && spec->form != ERX_DEVICE_FORM_STAND_IN; index++) {
 		const erx_device_t *const record = &devices[index];
@@ -191,7 +344,7 @@ find_open(const erx_device_spec_t *spec, const erx_device_peripheral_t *peripher
 			*status = same_spec(record, spec, peripheral) ? ERX_OK : ERX_EBUSY;
 			return (true);
 		}
-		if ((same_space(record, spec) && erx_device_pages_overlap(&record->pages, pages)) ||
+		if ((same_space(record, spec) && record->base < spec->base + spec->size && spec->base < record->base + record->size) ||
 		    (spec->memory_size != 0 && record->memory_size != 0 && record->memory == spec->memory)) {
 			*status = ERX_EBUSY;
 			return (true);
@@ -212,14 +365,16 @@ erx_device_open(const erx_device_spec_t *spec, const uintptr_t *register_keys, c
 
 	if (!spec_fits(spec, peripheral, &pages))
 		return (ERX_EINVAL);
-	if (find_open(spec, peripheral, &pages, open, device, &status))
+	if (find_open(spec, peripheral, open, device, &status))
 		return (status);
 	if (open == ERX_DEVICE_MAX)
 		return (ERX_ELIMIT);
+	if (!lines_agree(spec, open))
+		return (ERX_EBUSY);
 	record = &devices[open];
-	status = map_window(spec, &pages, peripheral->window_size, &record->windows[0]);
+	status = take_window(spec, &pages, peripheral->window_size, &record->windows[0]);
 	if (status == ERX_OK)
-		status = take_lines(spec, record->irqs);
+		status = take_lines(spec, record->entries);
 	if (status == ERX_OK)
 		status = map_memory(spec, &record->dma);
 	if (status != ERX_OK)
@@ -229,7 +384,6 @@ erx_device_open(const erx_device_spec_t *spec, const uintptr_t *register_keys, c
 	record->window = spec->window;
 	record->base = spec->base;
 	record->size = spec->size;
-	record->pages = pages;
 	record->line_count = spec->line_count;
 	for (uint32_t line = 0; line < spec->line_count; line++)
 		record->lines[line] = spec->lines[line];
@@ -423,8 +577,35 @@ erx_device_line_irq(const erx_device_t *device, uint64_t line, uint64_t *irq)
 {
 	if (line >= device->line_count)
 		return (false);
-	*irq = device->irqs[line];
+	*irq = line_entries[device->entries[line]].irq;
 	return (true);
+}
+
+bool
+erx_device_line_entry(const erx_device_t *device, uint64_t line, uint32_t *entry)
+{
+	if (line >= device->line_count)
+		return (false);
+	*entry = device->entries[line];
+	return (true);
+}
+
+erx_device_bind_t
+erx_device_bind_check(const erx_device_t *device, uint64_t line, erx_device_binder_t binder, const erx_device_t *through,
+    uint64_t through_line)
+{
+	if (line >= device->line_count)
+		return (ERX_DEVICE_BIND_NO_LINE);
+
+	const bool shared = line_entries[device->entries[line]].shared;
+
+	if (shared && binder == ERX_DEVICE_BINDER_DRIVER)
+		return (ERX_DEVICE_BIND_SHARED);
+	if (!shared && binder == ERX_DEVICE_BINDER_OWNER)
+		return (ERX_DEVICE_BIND_DIRECT);
+	if (through != NULL && (through != device || through_line != line))
+		return (ERX_DEVICE_BIND_BUSY);
+	return (ERX_DEVICE_BIND_OK);
 }
 
 /*

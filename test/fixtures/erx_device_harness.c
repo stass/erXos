@@ -37,7 +37,9 @@ static _Alignas(8) uint8_t window_memory[ERX_DEVICE_MAX + 1][WINDOW_BYTES];
 static uint32_t next_window;
 static uint64_t last_physical_base, last_physical_size;
 static int fail_physical, fail_reserve, fail_map, fail_irq;
-static uint32_t irq_created;
+static uint32_t irq_created, physical_created;
+/* The lines the fake kernel has made an IRQ object for; as the kernel, it refuses a second. */
+static uint64_t lines_made[ERX_DEVICE_MAX * ERX_DEVICE_LINES_MAX];
 
 int
 erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint64_t size, uint32_t attr, uint64_t *mem)
@@ -46,6 +48,8 @@ erx_mem_create_physical(uint64_t budget, uint64_t resource, uint64_t base, uint6
 	(void)resource;
 	/* Both backends refuse what the kernel interface refuses: anything but whole pages. */
 	CHECK(erx_backend_physical_check(base, size, attr) == ERX_OK);
+	if (fail_physical == ERX_OK)
+		physical_created++;
 	last_physical_base = base;
 	last_physical_size = size;
 	*mem = base;
@@ -103,6 +107,12 @@ erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selec
 	CHECK(kind == ERX_IRQ_LINE || kind == ERX_IRQ_SOFT);
 	if (fail_irq != ERX_OK)
 		return (fail_irq);
+	for (uint32_t at = 0; kind == ERX_IRQ_LINE && at < irq_created; at++) {
+		if (lines_made[at] == selector)
+			return (ERX_EBUSY);
+	}
+	CHECK(irq_created < ERX_DEVICE_MAX * ERX_DEVICE_LINES_MAX);
+	lines_made[irq_created] = selector;
 	*irq = selector + 1000u * ++irq_created;
 	return (ERX_OK);
 }
@@ -269,9 +279,11 @@ check_window_pages(void)
 }
 
 /*
- * A window smaller than a page and inside one, as QEMU virt's last virtio-mmio slot is: the
- * mapping is the page that holds it, the registers are read from the window's base inside
- * that page, and another window in the same page is refused while this one is open.
+ * Windows smaller than a page and inside one, as QEMU virt's virtio-mmio slots are: the
+ * mapping is the page that holds them, made at the first open in the page and shared by every
+ * later record there, and each record's registers are read from its own window's base inside
+ * that page. A window whose pages meet the mapped page without being it is refused, and so is
+ * a direct line a second record names.
  */
 static uint32_t
 check_slot(void)
@@ -281,17 +293,31 @@ check_slot(void)
 	erx_device_spec_t spec = { .peripheral = name, .peripheral_length = strlen(name), .base = 0x0a003e00,
 	    .size = 0x200, .line_count = 1, .lines = { 79 } };
 	uint8_t *const page = window_memory[next_window];
-	const uint32_t version = 2;
-	uint32_t device = 99, again = 99;
+	const uint32_t version = 2, legacy = 1;
+	uint32_t device = 99, again = 99, second = 99;
 	uint64_t value = 0;
 
 	CHECK(peripheral != NULL && peripheral->window_size == 0x200);
 	bcopy(&version, page + 0xe00 + register_of(peripheral, "version")->offset, sizeof(version));
+	bcopy(&legacy, page + 0xc00 + register_of(peripheral, "version")->offset, sizeof(legacy));
 	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_OK);
 	CHECK(last_physical_base == 0x0a003000 && last_physical_size == ERX_PAGE_SIZE);
 	CHECK(erx_device_read(erx_device_get(device), register_of(peripheral, "version"), plain, &value) && value == 2);
 	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_OK && again == device);
+
+	const uint32_t made = physical_created, mapped = next_window;
+
 	spec.base = 0x0a003c00;
+	spec.lines[0] = 80;
+	CHECK(erx_device_open(&spec, NULL, NULL, &second) == ERX_OK && second == device + 1);
+	CHECK(physical_created == made && next_window == mapped);
+	CHECK(erx_device_read(erx_device_get(second), register_of(peripheral, "version"), plain, &value) && value == 1);
+	CHECK(erx_device_read(erx_device_get(device), register_of(peripheral, "version"), plain, &value) && value == 2);
+	spec.base = 0x0a003a00;
+	spec.lines[0] = 79;
+	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EBUSY);
+	spec.lines[0] = 81;
+	spec.base = 0x0a003d00;
 	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EBUSY);
 	spec.base = 0x0a002f00;
 	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EBUSY);
@@ -299,9 +325,102 @@ check_slot(void)
 	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EINVAL);
 	spec.base = 0x0a003e00;
 	spec.size = 0x400;
+	spec.lines[0] = 79;
 	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EBUSY);
-	return (device);
+	CHECK(physical_created == made && next_window == mapped && erx_device_get(second + 1) == NULL);
+	return (second);
 }
+
+/*
+ * Two records on pages of their own that name one shared line hold one IRQ object, as the
+ * kernel makes only one per line. A record that calls that line direct, or a direct line of
+ * another record shared, is refused before anything is made.
+ */
+static uint32_t
+check_shared_line(const char *name)
+{
+	erx_device_spec_t first = spec_of(name, 0x9100000), second = spec_of(name, 0x9200000),
+	    third = spec_of(name, 0x9300000);
+	uint32_t a = 99, b = 99, c = 99;
+	uint64_t irq_a, irq_b;
+
+	first.lines[0] = second.lines[0] = 90;
+	first.shared[0] = second.shared[0] = true;
+
+	const uint32_t made = irq_created;
+
+	CHECK(erx_device_open(&first, NULL, NULL, &a) == ERX_OK);
+	CHECK(erx_device_open(&second, NULL, NULL, &b) == ERX_OK && b == a + 1 && irq_created == made + 1);
+	CHECK(erx_device_line_irq(erx_device_get(a), 0, &irq_a) && erx_device_line_irq(erx_device_get(b), 0, &irq_b) &&
+	    irq_a == irq_b);
+
+	const uint32_t mapped = physical_created;
+
+	third.lines[0] = 90;
+	CHECK(erx_device_open(&third, NULL, NULL, &c) == ERX_EBUSY);
+	third.lines[0] = 33;
+	third.shared[0] = true;
+	CHECK(erx_device_open(&third, NULL, NULL, &c) == ERX_EBUSY);
+	third.line_count = 2;
+	third.lines[0] = third.lines[1] = 91;
+	third.shared[1] = true;
+	CHECK(erx_device_open(&third, NULL, NULL, &c) == ERX_EINVAL);
+	CHECK(physical_created == mapped && irq_created == made + 1 && erx_device_get(b + 1) == NULL);
+	return (b);
+}
+
+/*
+ * Which bind a line takes follows its record's mark: a driver's bind of a direct line, the
+ * owner's of a shared one. A bind through the record the line is bound through moves it;
+ * through any other record of the line it is busy. Records naming one line share its entry.
+ */
+static void
+check_binds(uint32_t direct_device, uint32_t shared_device)
+{
+	const erx_device_t *const direct = erx_device_get(direct_device), *const shared = erx_device_get(shared_device),
+	    *const sharer = erx_device_get(shared_device - 1);
+	uint32_t entry, sharer_entry, direct_entry;
+
+	CHECK(erx_device_bind_check(direct, 0, ERX_DEVICE_BINDER_DRIVER, NULL, 0) == ERX_DEVICE_BIND_OK);
+	CHECK(erx_device_bind_check(direct, 0, ERX_DEVICE_BINDER_OWNER, NULL, 0) == ERX_DEVICE_BIND_DIRECT);
+	CHECK(erx_device_bind_check(direct, 0, ERX_DEVICE_BINDER_DRIVER, direct, 0) == ERX_DEVICE_BIND_OK);
+	CHECK(erx_device_bind_check(shared, 0, ERX_DEVICE_BINDER_DRIVER, NULL, 0) == ERX_DEVICE_BIND_SHARED);
+	CHECK(erx_device_bind_check(shared, 0, ERX_DEVICE_BINDER_OWNER, NULL, 0) == ERX_DEVICE_BIND_OK);
+	CHECK(erx_device_bind_check(shared, 0, ERX_DEVICE_BINDER_OWNER, shared, 0) == ERX_DEVICE_BIND_OK);
+	CHECK(erx_device_bind_check(shared, 0, ERX_DEVICE_BINDER_OWNER, sharer, 0) == ERX_DEVICE_BIND_BUSY);
+	CHECK(erx_device_bind_check(shared, 1, ERX_DEVICE_BINDER_OWNER, NULL, 0) == ERX_DEVICE_BIND_NO_LINE);
+	CHECK(erx_device_line_entry(shared, 0, &entry) && erx_device_line_entry(sharer, 0, &sharer_entry) &&
+	    erx_device_line_entry(direct, 0, &direct_entry) && !erx_device_line_entry(direct, 1, &direct_entry));
+	CHECK(entry == sharer_entry && entry != direct_entry && entry < ERX_DEVICE_LINE_ENTRIES_MAX);
+}
+
+#ifndef ERX_DEVICE_FIXTURE
+/*
+ * Two PL011s 0x200 apart in one page, as the BCM2711's are: one physical object and one
+ * mapping, and each record writes and reads back its own registers.
+ */
+static uint32_t
+check_shared_page(void)
+{
+	const erx_device_peripheral_t *const uart = erx_device_peripheral_find("pl011", 5);
+	const erx_device_register_t *const ibrd = register_of(uart, "ibrd");
+	erx_device_spec_t first = spec_of("pl011", 0xfe201400), second = spec_of("pl011", 0xfe201600);
+	const uint32_t made = physical_created, mapped = next_window;
+	uint32_t a = 99, b = 99;
+	uint64_t value;
+
+	first.size = second.size = PL011_BLOCK_BYTES;
+	first.lines[0] = 153;
+	second.lines[0] = 154;
+	CHECK(erx_device_open(&first, NULL, NULL, &a) == ERX_OK);
+	CHECK(erx_device_open(&second, NULL, NULL, &b) == ERX_OK && b == a + 1);
+	CHECK(physical_created == made + 1 && next_window == mapped + 1 && last_physical_base == 0xfe201000);
+	CHECK(erx_device_write(erx_device_get(a), ibrd, plain, 26) && erx_device_write(erx_device_get(b), ibrd, plain, 3));
+	CHECK(erx_device_read(erx_device_get(a), ibrd, plain, &value) && value == 26);
+	CHECK(erx_device_read(erx_device_get(b), ibrd, plain, &value) && value == 3);
+	return (b);
+}
+#endif
 
 /* What open refuses makes nothing visible, and a window already open is that device again. */
 static uint32_t
@@ -346,7 +465,6 @@ check_open(const char *name, uint64_t block_bytes)
 	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_EBUSY);
 	fail_irq = ERX_OK;
 	CHECK(erx_device_get(0) == NULL);
-	next_window = 0;
 
 	CHECK(erx_device_open(&spec, register_keys, field_keys, &device) == ERX_OK && device == 0);
 	CHECK(last_physical_size == WINDOW_BYTES);
@@ -367,9 +485,17 @@ check_open(const char *name, uint64_t block_bytes)
 	spec.size = WINDOW_BYTES * 2;
 	CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_EBUSY);
 
-	CHECK(check_slot() == 1);
-	for (uint32_t base = 2; base < ERX_DEVICE_MAX; base++) {
+	uint32_t next = check_slot() + 1;
+
+	CHECK(next == 3);
+#ifndef ERX_DEVICE_FIXTURE
+	next = check_shared_page() + 1;
+#endif
+	next = check_shared_line(name) + 1;
+	check_binds(device, next - 1);
+	for (uint32_t base = next; base < ERX_DEVICE_MAX; base++) {
 		spec = spec_of(name, 0x9000000 + UINT64_C(0x1000) * base);
+		spec.lines[0] = 40 + base;
 		CHECK(erx_device_open(&spec, NULL, NULL, &again) == ERX_OK && again == base);
 	}
 	spec = spec_of(name, 0xa000000);

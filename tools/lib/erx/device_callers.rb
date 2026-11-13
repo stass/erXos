@@ -13,7 +13,11 @@ module Erx
   # The check reads the Erlang sources that can enter a release, everything under otp/
   # and erlang/, with comments removed and strings kept, and refuses the atom erx_device
   # anywhere else: a remote call, an apply with the module literal, a quoted atom or a
-  # string a caller could turn into one. Like the C text rules it catches a slip, not a
+  # string a caller could turn into one. erx_irq_line, which binds and acknowledges lines for
+  # drivers (docs/design-shared-devices.md, "Lines inside a domain"), is the one other module
+  # of erx that names it, and only it and erx_device name irq_bind_owner, a shared line's bind,
+  # so no driver binds a shared line and takes its deliveries from the drivers joined to its
+  # owner (SD3). Like the C text rules it catches a slip, not a
   # determined bypass that builds the atom from pieces; what keeps a device from other
   # domains is that its capability is installed only in its driver's domain.
   module DeviceCallers
@@ -25,11 +29,14 @@ module Erx
     # (docs/design-network-stack.md, "Two places, four seams").
     DRIVER_DIRECTORIES = %w[erlang/apps/erx_net/erxos].freeze
     SCOPE = %w[otp/**/*.{erl,hrl} erlang/**/*.{erl,hrl}].freeze
-    SITES = ['erlang/apps/erx/src/erx_device.erl',
+    LINE_MODULE = 'erlang/apps/erx/src/erx_irq_line.erl'
+    SITES = ['erlang/apps/erx/src/erx_device.erl', LINE_MODULE,
              *DRIVER_APPLICATIONS.map { |application| "erlang/apps/#{application}/**/*" },
              *DRIVER_DIRECTORIES.map { |directory| "#{directory}/**/*" }].freeze
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
     NAMED = /(?<![A-Za-z0-9_@])#{MODULE}(?![A-Za-z0-9_@])/
+    OWNER_BIND = /(?<![A-Za-z0-9_@])irq_bind_owner(?![A-Za-z0-9_@])/
+    OWNER_BIND_SITES = ['erlang/apps/erx/src/erx_device.erl', LINE_MODULE].freeze
     # Erlang's lexical forms that can hold a % or a quote (otp/lib/stdlib/src/erl_scan.erl):
     # a triple-quoted string, which ends at a line of only its run of quotes; a sigil,
     # ~Name and a string between one of its delimiter pairs, where the vanilla sigil, ~b
@@ -47,10 +54,12 @@ module Erx
         | "(?:[^"\\]|\\.)*" | '(?:[^'\\]|\\.)*' | \$(?:\\.|.))
       | (?<comment>%[^\n]*)
     /mx
-    Violation = Data.define(:path, :line) do
-      def to_s = "chokepoint device-callers: #{path}:#{line}: only erx_device and the driver applications " \
-                 "(#{[*DRIVER_APPLICATIONS, *DRIVER_DIRECTORIES].join(', ')}) may name #{MODULE}"
+    Violation = Data.define(:path, :line, :rule) do
+      def to_s = "chokepoint device-callers: #{path}:#{line}: #{rule}"
     end
+    NAMING_RULE = "only erx_device, erx_irq_line and the driver applications " \
+                  "(#{[*DRIVER_APPLICATIONS, *DRIVER_DIRECTORIES].join(', ')}) may name #{MODULE}".freeze
+    OWNER_BIND_RULE = "only erx_device and erx_irq_line may name irq_bind_owner, the owner's bind of a shared line"
 
     module_function
 
@@ -60,10 +69,18 @@ module Erx
     # The violations among files, a map of path to source text.
     def violations(files)
       files.flat_map do |path, text|
-        next [] if !covers?(path) || SITES.any? { |site| File.fnmatch?(site, path, GLOB_FLAGS) }
+        next [] unless covers?(path)
 
-        code(text).each_line.with_index(1).filter_map { |line, number| Violation.new(path: path, line: number) if NAMED.match?(line) }
+        lines = code(text).each_line.with_index(1).to_a
+        [*matches(path, lines, NAMED, SITES, NAMING_RULE), *matches(path, lines, OWNER_BIND, OWNER_BIND_SITES, OWNER_BIND_RULE)]
       end
+    end
+
+    # The lines of `path` that name `pattern`, unless the path is one of `sites`.
+    def matches(path, lines, pattern, sites, rule)
+      return [] if sites.any? { |site| File.fnmatch?(site, path, GLOB_FLAGS) }
+
+      lines.filter_map { |line, number| Violation.new(path: path, line: number, rule: rule) if pattern.match?(line) }
     end
 
     # The text with each comment blanked and every line kept, so line numbers still hold.

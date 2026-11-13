@@ -25,6 +25,8 @@
 
 #define ERX_DEVICE_MAX		8u
 #define ERX_DEVICE_LINES_MAX	4u
+/* The domain's lines: at most every line of every record, each its own. */
+#define ERX_DEVICE_LINE_ENTRIES_MAX	(ERX_DEVICE_MAX * ERX_DEVICE_LINES_MAX)
 
 typedef struct erx_device erx_device_t;
 
@@ -59,6 +61,7 @@ typedef struct erx_device_spec {
 	uint64_t		size;
 	uint32_t		line_count;
 	uint64_t		lines[ERX_DEVICE_LINES_MAX];
+	bool			shared[ERX_DEVICE_LINES_MAX];	/* the record's mark of each line */
 	uint64_t		memory;
 	uint64_t		memory_size;
 } erx_device_spec_t;
@@ -71,16 +74,21 @@ typedef struct erx_device_element {
 
 /*
  * ERX_OK with the device's index. The same spec again is that device again, so a restarted
- * driver finds its record, and the same window with anything else is ERX_EBUSY, as is a
- * window in a page another record's window holds and memory another record holds. A new
- * spec maps the pages that hold the window; a physical one makes them and the lines'
- * objects, and a given one maps its window object and its memory and takes its lines' objects
- * as they are. A spec that does not fit its peripheral, whose base misaligns one of its
- * registers, or whose memory is not whole pages of a given device, is ERX_EINVAL. A hosted
- * stand-in, always a new device, is plain memory of the peripheral's size with software
- * objects for lines; elsewhere one is ERX_ENOTSUP. A failure may leave a mapping and a line's
- * object made, for the boot. The keys are what the caller interned the table's names as, in
- * the table's order, and may be NULL. The caller serialises opens.
+ * driver finds its record, and the same window with anything else is ERX_EBUSY, as is memory
+ * another record holds. Records share what their unit shares
+ * (docs/design-shared-devices.md): a window in the pages of a mapped run takes its place in
+ * that run's one mapping, and a window whose pages meet a run without being it is
+ * ERX_EBUSY; a line another record names is that line's one entry, its IRQ object made
+ * once, and a spec that marks it otherwise than the entry, or names a direct line another
+ * record names, is ERX_EBUSY. A new run maps its pages, a physical one's made here and a
+ * given one's in its window object; a new line's object is made from its selector, or for a
+ * given device taken as it is. A given device's memory is mapped whole. A spec that does not
+ * fit its peripheral, whose base misaligns one of its registers, that names a line twice, or
+ * whose memory is not whole pages of a given device, is ERX_EINVAL. A hosted stand-in,
+ * always a new device, is plain memory of the peripheral's size with software objects for
+ * lines; elsewhere one is ERX_ENOTSUP. A failure may leave a run or a line made, kept for the
+ * boot and taken by the next open that names it. The keys are what the caller interned the
+ * table's names as, in the table's order, and may be NULL. The caller serialises opens.
  */
 int	erx_device_open(const erx_device_spec_t *spec, const uintptr_t *register_keys, const uintptr_t *field_keys,
 	    uint32_t *device);
@@ -117,6 +125,35 @@ bool	erx_device_field_of(const erx_device_register_t *reg, erx_device_element_t 
 
 /* The IRQ object of the device's line, false for a line it does not have. */
 bool	erx_device_line_irq(const erx_device_t *device, uint64_t line, uint64_t *irq);
+
+/*
+ * The line's entry, below ERX_DEVICE_LINE_ENTRIES_MAX, which every record naming the line
+ * shares, so its one binding is kept by entry; false for a line the device does not have.
+ */
+bool	erx_device_line_entry(const erx_device_t *device, uint64_t line, uint32_t *entry);
+
+/* Who binds: erx_device:irq_bind/2, a direct line's driver, or irq_bind_owner/2, a shared line's owner. */
+typedef enum erx_device_binder {
+	ERX_DEVICE_BINDER_DRIVER = 0,
+	ERX_DEVICE_BINDER_OWNER
+} erx_device_binder_t;
+
+typedef enum erx_device_bind {
+	ERX_DEVICE_BIND_OK = 0,
+	ERX_DEVICE_BIND_NO_LINE,	/* the device has no such line */
+	ERX_DEVICE_BIND_SHARED,		/* a driver's bind of a shared line */
+	ERX_DEVICE_BIND_DIRECT,		/* an owner's bind of a direct line */
+	ERX_DEVICE_BIND_BUSY		/* the line is bound through another record */
+} erx_device_bind_t;
+
+/*
+ * Whether `binder` may bind the device's line, which the line's mark decides and no caller
+ * says. `through` is the record and `through_line` its line that the line's entry is bound
+ * through, `through` NULL when it is unbound: a bind through that record moves the binding,
+ * and through any other it is busy, so a line has one binder.
+ */
+erx_device_bind_t erx_device_bind_check(const erx_device_t *device, uint64_t line, erx_device_binder_t binder,
+		    const erx_device_t *through, uint64_t through_line);
 
 /*
  * Queues (docs/design-runtime.md, "Queues" to "The reset rule"), for a virtio-mmio device of

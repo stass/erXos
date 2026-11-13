@@ -89,7 +89,7 @@ class RuntimeDeviceTest < Minitest::Test
 
   def test_a_line_reaches_the_process_bound_to_it
     assert_equal 'ok', evaluate(<<~'ERLANG')
-      {ok, D} = erx_device:open(#{peripheral => pl011, window => stand_in, lines => [0, 0]}),
+      {ok, D} = erx_device:open(#{peripheral => pl011, window => stand_in, lines => [0, 1]}),
       ok = erx_device:irq_bind(D, 1),
       ok = erx_device:stand_in_fire(D, 1),
       receive {erx_irq, D, 1} -> ok after 5000 -> exit(no_delivery) end,
@@ -99,6 +99,31 @@ class RuntimeDeviceTest < Minitest::Test
       ok = erx_device:irq_ack(D, 1),
       ok = erx_device:stand_in_fire(D, 0),
       receive {erx_irq, D, 0} -> exit(unbound_line_delivered) after 200 -> ok end,
+      io:format("~s~n", [ok]), halt().
+    ERLANG
+  end
+
+  # Two records on one shared soft line share its entry (docs/design-shared-devices.md,
+  # "Verification"): the owner's bind through the first takes a trigger through either, a
+  # driver's bind of the shared line is refused, an owner's bind through the second is busy,
+  # and the holder is the binder.
+  def test_records_on_one_shared_line_have_one_binder
+    assert_equal 'ok', evaluate(<<~'ERLANG')
+      {ok, A} = erx_device:open(#{peripheral => pl011, window => stand_in, lines => [{shared, 7}]}),
+      {ok, B} = erx_device:open(#{peripheral => pl011, window => stand_in, lines => [{shared, 7}]}),
+      {error, unbound} = erx_device:irq_holder(B, 0),
+      {error, shared} = erx_device:irq_bind(A, 0),
+      ok = erx_device:irq_bind_owner(A, 0),
+      Me = self(),
+      {ok, Me} = erx_device:irq_holder(B, 0),
+      {error, ebusy} = erx_device:irq_bind_owner(B, 0),
+      ok = erx_device:stand_in_fire(B, 0),
+      receive {erx_irq, A, 0} -> ok after 5000 -> exit(no_delivery) end,
+      ok = erx_device:irq_ack(A, 0),
+      ok = erx_device:irq_bind_owner(A, 0),
+      {ok, D} = erx_device:open(#{peripheral => pl011, window => stand_in, lines => [8]}),
+      {error, direct} = erx_device:irq_bind_owner(D, 0),
+      {error, ebusy} = erx_device:open(#{peripheral => pl011, window => stand_in, lines => [7]}),
       io:format("~s~n", [ok]), halt().
     ERLANG
   end

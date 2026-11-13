@@ -62,6 +62,16 @@ class DeviceCallersTest < Minitest::Test
     assert_equal [['erlang/apps/erx/src/seeded.erl', 1]], lines_of('erlang/apps/erx/src/seeded.erl' => call)
   end
 
+  # A driver that binds a shared line itself would take its deliveries from the drivers
+  # joined to the line's owner (docs/design-shared-devices.md, SD3).
+  def test_a_driver_that_binds_a_shared_line_itself_fails
+    bind = "f(D) -> erx_device:irq_bind_owner(D, 0).\n"
+    assert_equal [['erlang/apps/erx_uart/src/seeded.erl', 1]], lines_of('erlang/apps/erx_uart/src/seeded.erl' => bind)
+    assert_empty lines_of('erlang/apps/erx/src/erx_device.erl' => bind, 'erlang/apps/erx/src/erx_irq_line.erl' => bind)
+    assert_equal [['erlang/apps/erx/src/seeded.erl', 1], ['erlang/apps/erx/src/seeded.erl', 1]],
+                 lines_of('erlang/apps/erx/src/seeded.erl' => bind)
+  end
+
   # The source check runs the rule over the files git lists, OTP's included.
   def test_the_source_check_refuses_a_seeded_violation
     Dir.mktmpdir do |root|

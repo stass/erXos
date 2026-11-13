@@ -7,7 +7,7 @@
 %% lacks is badarg, as is anything the table does not allow. read/2, write/3,
 %% read_field/3, write_field/4, field/4 and irq_ack/2 are BIFs in ERTS (beam/bif.tab), since a
 %% driver makes them one at a time; the clauses below stand for them only in xref and
-%% documentation. open/1, irq_bind/2 and the queue calls are NIFs.
+%% documentation. open/1, irq_bind/2, irq_bind_owner/2, irq_holder/2 and the queue calls are NIFs.
 %%
 %% A read or a write is one volatile access and never waits. write_field/4 on an ordinary
 %% field reads the word and writes it back, so a field's update is not atomic against
@@ -20,13 +20,16 @@
 %% irq_bind/2 makes the calling process the receiver of `{erx_irq, Dev, Line}`, once per
 %% fire of the line, at the next safe point. A level-sensitive line stays masked until
 %% irq_ack/2. A delivery is a reason to look at the device: it can be spurious. The
-%% process's exit unbinds the line unless another process has bound it since.
+%% process's exit unbinds the line unless another process has bound it since. A line two
+%% devices of the unit name is shared, as the record marks it, and is bound only by its
+%% owner, with irq_bind_owner/2 (docs/design-shared-devices.md, "Lines inside a domain");
+%% erx_irq_line alone calls the binds and irq_ack/2.
 
 -module(erx_device).
 
 -export([open/1]).
 -export([read/2, write/3, read_field/3, write_field/4, field/4]).
--export([irq_bind/2, irq_ack/2]).
+-export([irq_bind/2, irq_bind_owner/2, irq_holder/2, irq_ack/2]).
 -export([queue_create/4, negotiate/2, post/4, complete/2]).
 -export([stand_in_fire/2, stand_in_used/3]).
 
@@ -39,7 +42,9 @@
 -type window() :: {object, Window :: non_neg_integer(), Offset :: non_neg_integer(), Size :: non_neg_integer()}
                 | {physical, Base :: non_neg_integer(), Size :: non_neg_integer()} | stand_in.
 -type line() :: {object, Irq :: non_neg_integer()} | non_neg_integer().
--type spec() :: #{peripheral := atom(), window := window(), lines := [line()],
+%% A line another device of the unit names too, marked by the record's writer.
+-type marked_line() :: line() | {shared, line()}.
+-type spec() :: #{peripheral := atom(), window := window(), lines := [marked_line()],
                   memory => {object, Memory :: non_neg_integer(), Bytes :: pos_integer()},
                   clock => Hertz :: non_neg_integer()}.
 -opaque queue() :: non_neg_integer().
@@ -50,8 +55,12 @@ init() ->
 
 %% The device's record, for the boot: a second open of a window names the same device, so
 %% a restarted driver finds what its predecessor had, and the same window with anything
-%% else is `{error, ebusy}`, as is a window in a page another device's window holds, or a
-%% memory object another device's record holds. Spec is what erx_device_record finds for a
+%% else is `{error, ebusy}`, as is a memory object another device's record holds. Records
+%% share what their unit shares: a window in the pages another record's window covers uses
+%% that run's one mapping, and one whose pages meet that run without being it is
+%% `{error, ebusy}`; records naming one line share its IRQ object, and a record that marks
+%% the line otherwise than the first, or names a direct line another record names, is
+%% `{error, ebusy}`. Spec is what erx_device_record finds for a
 %% driver, which does not look inside it: the peripheral's name in the SVD source, and either
 %% a given device's objects (`{object, Window, Offset, Size}`, `{object, Irq}` lines and
 %% `memory => {object, Memory, Bytes}` for a device that does DMA, whose queues are carved
@@ -88,10 +97,23 @@ write_field(_Dev, _Register, _Field, _Value) ->
 field(_Dev, _Register, _Field, _Word) ->
     erlang:nif_error(undef).
 
-%% Line is the index in the spec's `lines`. An error from the line's first acknowledgement
-%% leaves the process bound.
+%% Line is the index in the spec's `lines`. A bind through the record the line is bound
+%% through moves the line to the caller; through another record of the line it is
+%% `{error, ebusy}`. `{error, shared}` for a shared line, which only its owner binds. An
+%% error from the line's first acknowledgement leaves the process bound.
 -spec irq_bind(device(), non_neg_integer()) -> ok | {error, atom() | {status, integer()}}.
 irq_bind(_Dev, _Line) ->
+    erlang:nif_error(undef).
+
+%% The owner's bind of a shared line, as irq_bind/2 binds a direct one; `{error, direct}`
+%% for a direct line.
+-spec irq_bind_owner(device(), non_neg_integer()) -> ok | {error, atom() | {status, integer()}}.
+irq_bind_owner(_Dev, _Line) ->
+    erlang:nif_error(undef).
+
+%% The process the line is bound to, through whichever record of the line bound it.
+-spec irq_holder(device(), non_neg_integer()) -> {ok, pid()} | {error, unbound}.
+irq_holder(_Dev, _Line) ->
     erlang:nif_error(undef).
 
 -spec irq_ack(device(), non_neg_integer()) -> ok.
