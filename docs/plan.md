@@ -107,9 +107,10 @@ M9's drivers in their domains (1b-E), track D's desktop and Plan 9's
 programs (1b-F),
 networking on QEMU (1b-G), M13 on QEMU (1b-H) and the Raspberry Pi 4
 (1b-I), each with the backend
-rows it needs and its guarantees deferred; track A's first part, the
-start table, comes with them, for track D's window stack; track D's
-kiosk waits for its second part, the packaging.
+rows it needs and its guarantees deferred; track A comes with them: its
+first part, the start table, for track D's window stack, and its second
+part, the packaging, which brings `erx-lvgl` and input routed to
+windows, for track D's kiosk.
 Phase 2, track K, M7, M2, the
 kernel parts of M5 and M9, the rest of track P, M8, M10, track Q, M11,
 M12 with its boards and track D's last parts, builds erXos's kernel,
@@ -133,9 +134,10 @@ names; the table's order is the order.
 | 1b-A M5 on the stopgap | spawn into a sandbox domain with a link, crash it, get `{domain_down, D, crash}`; kill a domain mid-burst and watch its end arrive after its last messages; kill the system domain and read its crash record after the reset; every guarantee deferred | 9,000 lines of C17, 6,000 of Erlang for M5, its kernel interface carried as backend rows in the Fiasco backend, and in the hosted backend where cheap (2,000 to 4,000 lines of C17, a guess until the first rows land) | Phase 1 | G5, provisionally |
 | 1b-B Track S, programs | `find /tmp/logs -type f \| xargs tail -n 1` through toybox's applets as ports of the session, and `within` confining a program to one grant, on the stopgap | in track S's figure | 1b-A | |
 | Track A Apps, part 1 | a QEMU image boots into an app's session with no login, holding exactly its template's grants, and `service -e` prints everything that starts | estimated before it starts | 1b-A, 1b-B's session domain, and M6's data partition for `rc.conf` | |
-| 1b-C Track D, parts 1 to 4 | `tools/erx web` shows a QEMU guest's records, kernel log and the traces of `root`'s session domain in a browser over the host link, with no network or display device; one application's user interface in the browser; a QEMU `virt` display showing the window of a session that starts at boot with no login, drawn by that session into a buffer the display domain composes; and the same interface on a QEMU `virt` kiosk, drawn by LVGL as a program of the kiosk's session | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice; part 3 also 1b-E and track A's first part; part 4 also 1b-B's sub-space ports and pipes, 1b-D's first slice and track A's second part | GW |
+| 1b-C Track D, parts 1 to 4 | `tools/erx web` shows a QEMU guest's records, kernel log and the traces of `root`'s session domain in a browser over the host link, with no network or display device; one application's user interface in the browser; a QEMU `virt` display showing the window of a session that starts at boot with no login, drawn by that session into a buffer the display domain composes; and the same interface on a QEMU `virt` kiosk, drawn by LVGL as a program of the kiosk's session | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice; part 3 also 1b-E and track A's first part; part 4 also 1b-B's sub-space ports and pipes, 1b-D's first slice and track A's second part (after 1b-E) | GW |
 | 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B's session domain, sub-space ports and pipes, not toybox's applets | GP, provisionally; the G6 baseline |
 | 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; the kill ends the storage domain, whose restart resets the device and mounts `/data` again with every synced file present ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)); drivers run in the storage and network domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A | G9's measurements, deciding nothing |
+| Track A, part 2 | an app added to a running machine as one file starts from the start table as an app of the manifest does; `erx-lvgl`, LVGL as a native program, runs on erXos as an app of the image, and input reaches the program of the window it is routed to | designed when the part starts | part 1, M6's data partition and 1b-E | |
 | 1b-F Track D, parts 6 to 8 | a QEMU `virt` desktop whose terminal windows run the shell, the same user interface term as on the web, and acme and sam editing a file | estimated per part before it starts | 1b-C's part 3; part 8 also 1b-D | |
 | 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | Phase 1: the network driver and stack run in the system domain, as M6's block driver does, until 1b-E moves them into the network domain | GN-QEMU's baseline, deciding nothing |
 | M14 erXos's network stack, on QEMU | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang from FreeBSD's, on QEMU in 1b-G; the boards follow with M12 | estimated in its design document | 1b-G's prototype | G14 |
@@ -154,7 +156,6 @@ names; the table's order is the order.
 | M11 Security closure | a release build without the development banner, on erXos's kernel, with an Erlang driver behind an IOMMU window; one flipped byte of an EROFS image fails only the reads of its block | hardening | M10 | |
 | M12 Storage, networking, boards | a Raspberry Pi 4 boots erXos from its SD card, keeps its files through power cuts, and takes a system update whose trial survives a power cut | estimated in the subsystems' design documents | M11 | G12, GN-board |
 | Track D, parts 5 and 9 | a Raspberry Pi 4 kiosk; the web front end on the network | estimated per part before it starts | part 5: part 4 and M12; part 9: part 2, M10, M11 and 1b-G | GD, with part 5 |
-| Track A, part 2 | an app added to a running machine as one file starts from the start table as an app of the manifest does | designed when the part starts | part 1, M6's data partition and 1b-E | |
 
 The order reaches a usable system first:
 
@@ -1640,10 +1641,11 @@ configured domains and the start table; `service clock disable` and a
 reboot leave the app stopped; a kiosk's app killed past its row's
 intensity shows its row `down` at `/proc/apps`.
 
-**Scope.** Two parts. The first is in Phase 1b, on the stopgap, because
-track D's window stack needs it; the second is the packaging design and
-its implementation, which adds apps at run time and ships `erx-lvgl` as an
-app of the image, so track D's kiosk waits for it.
+**Scope.** Two parts. Both are in Phase 1b, on the stopgap. The first
+is the start table, which track D's window stack needs; the second is the
+packaging design and its implementation, which adds apps at run time,
+brings `erx-lvgl` (LVGL as an app of the image on erXos) and routes
+input to windows, so track D's kiosk waits for it.
 
 1. **The start table**, in 1b, after 1b-A, 1b-B's session domain and
    M6's data partition, on which `rc.conf` lies. `start` rows in
@@ -1664,7 +1666,9 @@ app of the image, so track D's kiosk waits for it.
    [design-apps.md](design-apps.md#packaging). Its design takes as
    inputs the earlier design of app classes and the review findings and
    decisions recorded in `TODO.md` ("Design app packaging when Track A
-   starts").
+   starts"). It also brings `erx-lvgl`, LVGL as a native program shipped
+   as an app of the image, and the routing of input to the program of the
+   window it is for, which track D's kiosk needs.
 
 **Exit criteria, the start table.** The merge's host tests and their
 seeded faults (a row added for an undeclared principal, the display
@@ -3008,7 +3012,8 @@ Phase 1:   M0 --> M1 --> M3 --> M4 --> M6 --> track S (shell)
 Phase 1b, in order of its demos (backend rows, hosted backend too; BeamAsm beside 1b-A):
            1b-A domains on the stopgap
              --> session domain (1b-B's first slice) --> 1b-C track D part 1 (GW) --> part 2
-             --> 1b-E M9 on the stopgap --> 1b-G network domain, GN-QEMU, M14 on QEMU
+             --> 1b-E M9 on the stopgap --> track A part 2 (on 1b-E's storage domain)
+             --> 1b-G network domain, GN-QEMU, M14 on QEMU
            1b-G's driver and stack in the system domain (from Phase 1, beside 1b-A)
              --> 1b-C track D part 3, the window stack on QEMU
              --> 1b-D track P's first part --> G6 baseline --> toybox's applets (the rest of 1b-B)
@@ -3030,8 +3035,8 @@ Phase 2:   M7 --> M2 --> M5's and M9's kernel parts --> G6 --> M8 --> M10 --> M1
   follows M4.
 * Phase 1b runs in the order of its visible demos: 1b-A; the session
   domain; 1b-E and 1b-G; 1b-C's parts 1 and 2; 1b-C's part 3; 1b-D,
-  with 1b-C's part 4 on its first slice and 1b-B's sub-space ports and
-  pipes, then toybox's applets; 1b-F last, part 8
+  with 1b-C's part 4 on its first slice, track A's part 2 and 1b-B's
+  sub-space ports and pipes, then toybox's applets; 1b-F last, part 8
   after 1b-D. 1b-A comes first because every other item is a domain or
   runs in one. BeamAsm runs beside 1b-A, and 1b-H whenever capacity is
   idle. 1b-I's serial shell follows Phase 1 on QEMU's `raspi4b`, and
