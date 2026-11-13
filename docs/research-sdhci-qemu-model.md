@@ -65,3 +65,74 @@ CPUs stopped, so the MMU was off and addresses were physical.
    with the legacy controller's on it stay as the design records them,
    unverified by observation; the SD driver's first model test, which
    binds the line and takes the command-complete interrupt, settles it.
+
+## QEMU's `sd-card` model: how it sizes a medium
+
+Read on 2026-11-13 from QEMU's `hw/sd/sd.c` at tag v11.1.3, fetched over
+HTTPS from `raw.githubusercontent.com/qemu/qemu/v11.1.3/hw/sd/sd.c`
+(3318 lines, SHA-256
+`5dbc570c20b8b2b935de0fc5a15d65e740b08d375fc9e42a1dcabb53d0b50fcc`, the
+hash [design-storage.md](design-storage.md) pins). This section was
+written by an agent that read the file as data, ran nothing from it, and
+quotes no code. Each fact was checked by reading the cited lines of that
+file only; none was run against a QEMU binary, so none is a behaviour
+observation. Line numbers refer to that file at that tag. "Image size"
+means the size of the backing drive in bytes, after subtracting the eMMC
+boot and replay-protected partitions, which are zero for an SD card.
+
+1. **The boundary is 2 GiB.** The model defines its largest standard
+   capacity as 2 GiB (2^31 bytes; line 59). A card of exactly 2 GiB or
+   less is standard capacity (SDSC); a card of more than 2 GiB is high
+   capacity (SDHC/SDXC). Every capacity decision compares against this
+   one constant (lines 414, 600, 2038, 2068, 2111, 2404, 2710).
+2. **How the card reports the class.** At power-up the card sets the
+   high-capacity bit in its operation conditions register only when the
+   size is above 2 GiB (lines 405-416; the bit's meaning, line 394).
+   The card-specific data register comes in two forms. For 2 GiB or
+   less it is the version 1 form, with a 512-byte block and the device
+   size counted in 512-byte-block multiples (lines 600-624). For more
+   than 2 GiB it is the version 2 form, whose device size counts units
+   of 512 KiB, minus one (lines 626-642). A card of exactly 2 GiB is
+   special: the model switches its reported block length to 1024 bytes
+   so that the size still fits the version 1 field (lines 594-598).
+   Addressing follows the class: SDSC uses byte addresses and SDHC uses
+   512-byte block numbers (lines 2038 and 2404 select on the same
+   boundary; lines 901 and 911 show the block-number shift).
+3. **Accepted image sizes.** Checked when the card is realized
+   (lines 3120-3141):
+   * Up to 2 GiB: the size must be a power of two. A size of zero or
+     an unreadable size skips the check (the tests are for sizes above
+     zero). The smallest size the check itself admits is therefore 1
+     byte; the CSD arithmetic assumes a real card size, so sizes below
+     one 512-byte block are not meaningful (unverified beyond the
+     check).
+   * Above 2 GiB: the size must be a multiple of 512 KiB. There is no
+     power-of-two rule there, and no upper limit in this function.
+   * An eMMC device (not the `sd-card` type) is checked differently
+     above 2 GiB: a multiple of 512 bytes. It is mentioned only because
+     the same function serves both; the SD case is the one above.
+4. **The refusal.** A size that breaks the rule makes device creation
+   fail with an error that says the SD card size is invalid and prints
+   the offending size. A hint follows: the size has to be a power of
+   two (or a multiple of 512K), gives the next valid size above the
+   given one as an example (the next power of two, or the next multiple
+   of 512 KiB), and advises resizing the image with `qemu-img resize`,
+   noting that shrinking loses data (lines 3079-3098, 3138-3142). QEMU
+   exits at start-up; no card appears.
+5. **Other facts a harness needs.**
+   * A drive that cannot be opened for writing is refused, with an
+     error saying a read-only drive cannot be used as an SD card
+     (lines 3115-3118). A harness cannot present a read-only medium
+     through this model; write protection is a separate property of the
+     controller's switch.
+   * The model asks the drive for consistent-read and write
+     permission (lines 3148-3150).
+   * The model's specification version defaults to the highest it
+     accepts, labelled in a comment as really version 4.5 (lines 3201,
+     3211-3212); values outside the accepted range are refused
+     (lines 3105-3112).
+   * Capacity is a property of the image size alone. There is no
+     property that forces SDSC or SDHC on a given size, so a harness
+     chooses the class by choosing the size: at most 2 GiB (a power of
+     two) for SDSC, above 2 GiB (a multiple of 512 KiB) for SDHC/SDXC.
+     For SDHC the smallest accepted size is 2 GiB + 512 KiB.

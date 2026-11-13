@@ -1825,7 +1825,8 @@ The SD controller, each test paired with the fault that proves it ran:
   `/data`, and a file written and synced is read back after the storage
   domain is killed and restarted. It runs on a 4 GiB image, a
   high-capacity card, and on a 2 GiB image, which the model presents as
-  standard capacity (`sd.c:595-600`). The seeded fault boots the model
+  standard capacity
+  ([research-sdhci-qemu-model.md](research-sdhci-qemu-model.md#qemus-sd-card-model-how-it-sizes-a-medium)). The seeded fault boots the model
   with a medium whose data partition holds a different known file, and
   the read-back check fails, which shows the bytes came from the card.
 * Recovery on the model: the device process is killed while a write load

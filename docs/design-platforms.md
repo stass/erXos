@@ -1242,7 +1242,7 @@ other than `sd0`, which the model's own card on the legacy controller
 takes ([research-sdhci-qemu-model.md](research-sdhci-qemu-model.md)). The model's
 card is standard capacity up to 2 GiB and high capacity above, and takes
 an image of a power-of-two size up to 2 GiB and of a multiple of 512 KiB
-above (`hw/sd/sd.c:59, 595-600, 3120-3141`), so the harness pads the
+above ([research-sdhci-qemu-model.md](research-sdhci-qemu-model.md#qemus-sd-card-model-how-it-sizes-a-medium)), so the harness pads the
 medium to 2 GiB for a standard-capacity card and to 4 GiB for a
 high-capacity one. The model's bus is not timed, so the base clock is checked on the
 board alone.
