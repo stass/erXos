@@ -183,7 +183,7 @@ bool	erx_device_queue_complete(erx_device_queue_t *queue, uint32_t id, uint32_t 
 /*
  * The split ring as a descriptor form of the DMA handoff sequencer (docs/design-device-dma.md,
  * "Calls, observations and plans" and "The three descriptor forms"). Offsets are bytes from the
- * queue's first byte: its rings from 0, its pool at `pool`, at or past the rings' end. Each
+ * queue's first byte: its rings from 0, its pool at `pool_offset`, at or past the rings' end. Each
  * builder states, as plan steps, only what the core above decided; no builder names a cache
  * operation or a barrier, which erx_device_dma_order derives. The caller keeps the last state
  * it applied and passes it as the next plan's `before`, so the view of the core's bookkeeping
@@ -217,7 +217,7 @@ void	erx_device_queue_form(const erx_device_queue_layout_t *layout, uint32_t siz
  * available ring the CPU, the used ring the device once installed and the CPU before, and each
  * buffer the device while its chain is posted.
  */
-void	erx_device_queue_view(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, uint64_t pool,
+void	erx_device_queue_view(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, uint64_t pool_offset,
 	    bool installed, struct erx_dma_state *state);
 /*
  * The install after a reset, for a queue whose rings' device address is `rings_addr`: both ring
@@ -228,11 +228,11 @@ uint32_t	erx_device_queue_install_steps(const erx_device_queue_t *queue, const e
 	    const erx_device_queue_registers_t *regs, uint32_t index, uint64_t rings_addr, struct erx_dma_step *steps);
 /*
  * A post the core decided: each readable segment's `bytes` into the head's buffer, each
- * descriptor's address with its length as its reach and its other fields, the available entry,
+ * descriptor's address, `device_base` plus its bytes' offset, with its length as its reach and its other fields, the available entry,
  * then the available index and the doorbell of queue `index`.
  */
 uint32_t	erx_device_queue_post_steps(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
-	    uint64_t pool, const erx_device_post_plan_t *plan, const erx_device_segment_t *segments,
+	    uint64_t device_base, uint64_t pool_offset, const erx_device_post_plan_t *plan, const erx_device_segment_t *segments,
 	    const uint8_t *const *bytes, const erx_device_queue_registers_t *regs, uint32_t index,
 	    struct erx_dma_step *steps);
 /* The observation of the used ring's index. */
@@ -241,7 +241,7 @@ void	erx_device_queue_index_report(const erx_device_queue_layout_t *layout, stru
 uint32_t	erx_device_queue_entry_reports(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
 	    uint32_t fresh, struct erx_dma_step *steps);
 /* The copies of `count` completions, each range of each buffer in order, at most ERX_DEVICE_CHAIN_MAX per completion. */
-uint32_t	erx_device_queue_copy_steps(const erx_device_queue_t *queue, uint64_t pool,
+uint32_t	erx_device_queue_copy_steps(const erx_device_queue_t *queue, uint64_t pool_offset,
 	    const erx_device_completion_t *completions, uint32_t count, struct erx_dma_step *steps);
 
 #endif /* ERX_DEVICE_QUEUE_H */

@@ -16,6 +16,8 @@ class ErxDeviceQueueTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   NIFS = File.join(ROOT, 'otp/erts/emulator/nifs/erxos')
   CORE = File.join(NIFS, 'erx_device_queue.c')
+  # The sequencer and the host's DMA architecture layer, which erx_device.c's queues run through.
+  DMA = [File.join(NIFS, 'erx_device_dma.c'), File.join(NIFS, 'arch/host/erx_dma_arch.c')].freeze
   FLAGS = ['-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
@@ -27,7 +29,7 @@ class ErxDeviceQueueTest < Minitest::Test
 
   def test_queues_on_a_device
     output = run_harness(File.join(ROOT, 'test/fixtures/erx_device_dma_harness.c'), CORE,
-                         File.join(NIFS, 'erx_device.c'), File.join(NIFS, 'erx_device_core.c'),
+                         File.join(NIFS, 'erx_device.c'), File.join(NIFS, 'erx_device_core.c'), *DMA,
                          includes: [File.join(ROOT, 'test/fixtures/device_model')])
     assert_match(/^erx_device_dma done$/, output)
   end
@@ -53,6 +55,13 @@ class ErxDeviceQueueTest < Minitest::Test
     end
   end
 
+  # The effect layer keeps each queue's last accepted state as the next plan's `before`; seeded
+  # to keep none, a later post or completion is refused by the check and the harness fails.
+  def test_a_queue_that_keeps_no_state_fails_the_harness
+    output = seeded_dma_output(["\tif (after != &record->state)\n\t\trecord->state = *after;\n", ""])
+    assert_match(/FAILED .*erx_device_dma_harness\.c/, output)
+  end
+
   private
 
   # The DMA harness's output over erx_device.c with `seed` applied.
@@ -63,7 +72,7 @@ class ErxDeviceQueueTest < Minitest::Test
       seeded = File.join(directory, 'erx_device.c')
       File.write(seeded, source.sub(*seed))
       output, = harness_output(File.join(ROOT, 'test/fixtures/erx_device_dma_harness.c'), CORE, seeded,
-                               File.join(NIFS, 'erx_device_core.c'), includes: [File.join(ROOT, 'test/fixtures/device_model')])
+                               File.join(NIFS, 'erx_device_core.c'), *DMA, includes: [File.join(ROOT, 'test/fixtures/device_model')])
       output
     end
   end

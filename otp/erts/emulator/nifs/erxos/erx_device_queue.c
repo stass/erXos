@@ -246,7 +246,7 @@ erx_device_queue_form(const erx_device_queue_layout_t *layout, uint32_t size, er
 }
 
 void
-erx_device_queue_view(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, uint64_t pool,
+erx_device_queue_view(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, uint64_t pool_offset,
     bool installed, erx_dma_state_t *state)
 {
 	state->count = 0;
@@ -255,7 +255,7 @@ erx_device_queue_view(const erx_device_queue_t *queue, const erx_device_queue_la
 	state->regions[state->count++] = (erx_dma_region_t){ .offset = layout->used, .length = layout->bytes - layout->used,
 	    .kind = ERX_DMA_RING, .writer = installed ? ERX_DMA_DEVICE : ERX_DMA_CPU };
 	for (uint32_t buffer = 0; buffer < queue->size; buffer++)
-		state->regions[state->count++] = (erx_dma_region_t){ .offset = pool + (uint64_t)buffer * queue->stride,
+		state->regions[state->count++] = (erx_dma_region_t){ .offset = pool_offset + (uint64_t)buffer * queue->stride,
 		    .length = queue->stride, .kind = ERX_DMA_BUFFER,
 		    .writer = queue->chains[buffer].posted ? ERX_DMA_DEVICE : ERX_DMA_CPU };
 }
@@ -315,11 +315,12 @@ erx_device_queue_install_steps(const erx_device_queue_t *queue, const erx_device
 }
 
 uint32_t
-erx_device_queue_post_steps(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout, uint64_t pool,
+erx_device_queue_post_steps(const erx_device_queue_t *queue, const erx_device_queue_layout_t *layout,
+    uint64_t device_base, uint64_t pool_offset,
     const erx_device_post_plan_t *plan, const erx_device_segment_t *segments, const uint8_t *const *bytes,
     const erx_device_queue_registers_t *regs, uint32_t index, erx_dma_step_t *steps)
 {
-	const uint64_t buffer = pool + (uint64_t)plan->head * queue->stride;
+	const uint64_t buffer = pool_offset + (uint64_t)plan->head * queue->stride;
 	uint32_t count = 0;
 
 	for (uint32_t segment = 0; segment < plan->count; segment++) {
@@ -330,7 +331,9 @@ erx_device_queue_post_steps(const erx_device_queue_t *queue, const erx_device_qu
 			steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_WRITE, .target = ERX_DMA_MEMORY, .source = ERX_DMA_BYTES,
 			    .reg_high = ERX_DMA_NO_REGISTER, .offset = buffer + segments[segment].offset,
 			    .length = segments[segment].length, .bytes = bytes[segment] };
-		steps[count++] = ring_write(ERX_DMA_ADDRESS, at + offsetof(erx_virtq_desc_t, addr), 8, desc->addr, desc->len);
+		/* The address from the device base and the buffer's offset, the same the view's region names. */
+		steps[count++] = ring_write(ERX_DMA_ADDRESS, at + offsetof(erx_virtq_desc_t, addr), 8,
+		    device_base + buffer + segments[segment].offset, desc->len);
 		steps[count++] = ring_write(ERX_DMA_VALUE, at + offsetof(erx_virtq_desc_t, len), 4, desc->len, 0);
 		steps[count++] = ring_write(ERX_DMA_VALUE, at + offsetof(erx_virtq_desc_t, flags), 2, desc->flags, 0);
 		steps[count++] = ring_write(ERX_DMA_VALUE, at + offsetof(erx_virtq_desc_t, next), 2, desc->next, 0);
@@ -368,14 +371,14 @@ erx_device_queue_entry_reports(const erx_device_queue_t *queue, const erx_device
 }
 
 uint32_t
-erx_device_queue_copy_steps(const erx_device_queue_t *queue, uint64_t pool, const erx_device_completion_t *completions,
+erx_device_queue_copy_steps(const erx_device_queue_t *queue, uint64_t pool_offset, const erx_device_completion_t *completions,
     uint32_t count, erx_dma_step_t *steps)
 {
 	uint32_t made = 0;
 
 	for (uint32_t done = 0; done < count; done++) {
 		const erx_device_completion_t *const completion = &completions[done];
-		const uint64_t buffer = pool + (uint64_t)completion->buffer * queue->stride;
+		const uint64_t buffer = pool_offset + (uint64_t)completion->buffer * queue->stride;
 
 		for (uint32_t range = 0; range < completion->range_count; range++)
 			steps[made++] = (erx_dma_step_t){ .kind = ERX_DMA_COPY, .target = ERX_DMA_MEMORY,

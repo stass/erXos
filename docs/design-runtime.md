@@ -2668,7 +2668,8 @@ descriptor against its own table and its length against what the chain
 let the device write. It copies the bytes the device wrote, in the
 order of the chain's `in` segments and cut at the length it reported,
 into a fresh binary, returns the buffer to its pool, and returns
-`{ok, [{Tag, Bytes}]}` for as many completions as are ready, stopping
+`{ok, [{Tag, Bytes}]}` for as many completions as are ready, at most 32,
+so one call's plan fits the NIF's fixed scratch, stopping
 after the one that brings what it copied to 64 KiB, so a call copies
 less than 64 KiB and one buffer and stays within a reduction slice; the
 driver calls again until it gets `{ok, []}`. That copy is the one per-byte copy of a receive path,

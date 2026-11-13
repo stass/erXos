@@ -169,6 +169,8 @@ erx_device_bind_t erx_device_bind_check(const erx_device_t *device, uint64_t lin
 #define ERX_DEVICE_QUEUES_MAX		4u
 /* What one erx_device_complete copies before it stops: the entry that crosses it is copied whole. */
 #define ERX_DEVICE_COMPLETE_BYTES	65536u
+/* The most entries one erx_device_complete reads and completes; the rest wait for the next call. */
+#define ERX_DEVICE_COMPLETE_ENTRIES	32u
 
 /*
  * One segment of a post: bytes the device reads, a length of buffer the device writes, or a
@@ -258,7 +260,7 @@ int	erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, co
 
 /*
  * Completes the entries the device has returned, in order, until ERX_DEVICE_COMPLETE_BYTES are
- * copied: each one's bytes go to what `sink` gives for its tag, and its buffer back to the
+ * copied or ERX_DEVICE_COMPLETE_ENTRIES are completed: each one's bytes go to what `sink` gives for its tag, and its buffer back to the
  * pool. ERX_OK with how many; ERX_EINVAL for no such queue; ERX_ECORRUPT, with none, for a
  * queue needing a reset, which a device's malformed entry makes it: entries before that one
  * are still completed, and the next call reports it.

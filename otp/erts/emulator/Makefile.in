@@ -1058,6 +1058,13 @@ $(ERX_NET_C_OBJS): $(OBJDIR)/%.o: $(ERX_TREE)/erlang/apps/erx_net/c_src/%.c
 $(OBJDIR)/%.o: nifs/erxos/%.c
 	$(V_CC) $(CFLAGS) -I$(ERX_GEN) -I$(ERX_GEN)/include -I$(ERX_TREE) -I$(ERX_TREE)/include $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -c $< -o $@
 
+# The DMA architecture layer of the device NIF (nifs/erxos/erx_dma_arch.h): the host build's for
+# hosted ERTS, whose devices are code in the process, and AArch64's, the one architecture
+# erXos builds ERTS for, otherwise.
+ERX_DMA_ARCH = $(if $(findstring hosted,$(TARGET)),host,aarch64)
+$(OBJDIR)/erx_dma_arch.o: nifs/erxos/arch/$(ERX_DMA_ARCH)/erx_dma_arch.c
+	$(V_CC) $(CFLAGS) $(INCLUDES) -Inifs/erxos -c $< -o $@
+
 $(OBJDIR)/%.o: nifs/$(STOCK_OSTYPE)/%.c
 	$(V_CC) $(CFLAGS) $(ESOCK_CFLAGS) -DLIBSCTP=$(LIBSCTP) $(INCLUDES) -Inifs/common -Inifs/$(STOCK_OSTYPE) -I../etc/$(STOCK_OSTYPE) -c $< -o $@
 
@@ -1326,6 +1333,8 @@ OS_OBJS = \
 	$(OBJDIR)/erx_device.o \
 	$(OBJDIR)/erx_device_core.o \
 	$(OBJDIR)/erx_device_queue.o \
+	$(OBJDIR)/erx_device_dma.o \
+	$(OBJDIR)/erx_dma_arch.o \
 	$(OBJDIR)/erx_crc32c.o \
 	$(ERX_NET_C_OBJS) \
 	$(OBJDIR)/sha256c.o \

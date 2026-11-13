@@ -540,24 +540,30 @@ it; git history is the record of completed work.
   driver process that used the device until `negotiate/2` (`docs/design-runtime.md`, "The reset rule", R8); it needs the
   device's record to monitor the processes that post, as a line's binding does. A restarted driver's sequence
   (`queue_create/4`, `negotiate/2`) does not depend on it.
-* [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, queues: every device is taken as `dma-coherent`, with no cache
-  maintenance, and the barriers before the available index and the doorbell are C11 fences (inner shareable on AArch64),
-  enough for QEMU `virt`'s virtio-mmio. [design-device-dma.md](docs/design-device-dma.md) gives what is missing: the
-  coherence and DMA range the root reads from the live device tree into the `given` record
-  ([design-device-tree.md](docs/design-device-tree.md)); the NIF running the split ring through the handoff
-  sequencer: the queue core's form builders (`erx_device_queue_view`, `_install_steps`, `_post_steps`,
-  `_index_report`, `_entry_reports`, `_copy_steps`, which the model harness already drives) checked by
-  `erx_device_dma_check` and ordered by `erx_device_dma_order`, with the layout and the pool stride on the
-  architecture layer's `G` (the NIF passes a granule of 1 today), the NIF keeping each queue's last accepted state and
-  passing it as the next call's `before`, and filling the check's granule from `G`; the effect layer running a plan;
-  the architecture layer's maintenance and barriers (`erx_dma_clean`, `erx_dma_clean_inval`, the three barriers,
-  `erx_dma_granule`, `erx_dma_line`), with the hosted stand-in over `erx_dma_model.c`; a virtio-gpu region entry,
-  which a post writes as an out segment's bytes, so the check does not see its address; the check tying a memory
-  address's reach to a buffer the plan hands to the device, and a register-published address's to the rings, with
-  the builders taking descriptor addresses from the record's device base and the view's offsets (today
-  `queue->pool`, a second source); a register-held length (virtio's `QueueNum`) checked against the reaches the
-  install publishes; a descriptor rewritten while its chain is posted, which no view expresses; field-level register
-  ownership, and the register-ring (GENET) and ADMA2 (SDHCI) descriptor forms.
+* [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, queues: the queues run through the handoff sequencer
+  ([design-device-dma.md](docs/design-device-dma.md)), but a given device's queues run as coherent
+  (`queue_coherent`) until its record carries the device tree's mark (the COHERENT item below), so no maintenance
+  runs on the stopgap; once it does, the non-coherent path's first boot under HVF also settles whether Apple's
+  hypervisor lets EL0 run `DC CVAC` and `DC CIVAC`, which is unverified. What is missing besides: the hosted
+  stand-in running its plans over `erx_dma_model.c` (its maintenance is empty, `arch/host/erx_dma_arch.c`), so
+  the NIF's non-coherent path has no host test with a cache that hides stores; a virtio-gpu region entry, which
+  a post writes as an out segment's bytes, so the check does not see its address; the check tying a memory
+  address's reach to a buffer the plan hands to the device, and a register-published address's to the rings;
+  the queue core's own `pool` device address, which the builders no longer use (they take the device base and
+  `pool_offset`) but `erx_device_queue_post`'s plan still computes for its tests; a register-held length
+  (virtio's `QueueNum`) checked against the reaches the install publishes; a descriptor rewritten while its
+  chain is posted, which no view expresses; field-level register ownership, and the register-ring (GENET) and
+  ADMA2 (SDHCI) descriptor forms. The maintenance step `L` is read from the current CPU's CTR_EL0 at each plan, so CPUs reporting different lines
+  would need the smallest taken once. A register report outside the owned list would read the wrong register
+  (`owned_register`; the check's `report_allowed` does not require ownership). Test gaps: no NIF test drives a refused
+  plan; the check's fuzz target runs at granule 1 only, and chains of three
+  or four segments are not driven through the check.
+* [Low] `hw/sysreg/aarch64.json`, CTR_EL0: the DMA architecture layer
+  (`otp/erts/emulator/nifs/erxos/arch/aarch64/erx_dma_arch.c`) and `liberx/backend/fiasco/arch/aarch64/cache.c`
+  each write CTR_EL0's field positions by hand. `tools/erx sysreg refresh` refuses CTR_EL0 ("unsupported Arm
+  field attributes": its fields are `Fields.ConstantField`, which `extract_fields` does not take), and no
+  generator makes C accessors from `aarch64.json` yet, so `clock.c`'s counter reads are written by hand too. The
+  fix is ConstantField support in the refresh and a generator of C accessors that these files include.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
   on the direct path a display driver maps a client's pixel area read-only into its device's DMA window; the device
   NIF cannot map an area into the window yet. `erx_virtio_gpu_core` builds every request but
@@ -569,6 +575,10 @@ it; git history is the record of completed work.
   and `erx_device_record:find/3` reads it, but a holder's record (`liberx/system/dom_apply.c`, `apply_given_words`)
   still says COHERENT 0, since the facts do not reach `erx_dom_device_entry_t`; so on QEMU `virt` every virtio-gpu
   region, a holder's device, is `{error, enotsup}`. The display (D2) needs it.
+  spec says `coherent => true` (while the queues of a given device ignore its mark, `queue_coherent` in `erx_device.c`,
+  which must follow it in the same change), and nothing writes that yet: the root's `-erx given` writer
+  (`erx_boot_device_given`) stops at CLOCK and `erx_device_record:find/3` reads no COHERENT, so on QEMU `virt` every
+  virtio-gpu region is `{error, enotsup}` until the record carries the device tree's mark. The display (D2) needs it.
 * [High] device NIF, a screen-sized region (`liberx/backend/core/device_check.h`): a given device's memory is one
   contiguous object of at most `ERX_MEM_CONTIGUOUS_MAX`, 1 MiB, and its queues and regions are carved from it, so
   no screen image larger than 1 MiB less the queues fits (640 by 480 at 32 bits is 1.2 MB). The virtio-gpu

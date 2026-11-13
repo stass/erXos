@@ -408,7 +408,7 @@ post(harness_t *h)
 	*slot = request;
 	for (uint32_t segment = 0; segment < segment_count; segment++)
 		bytes[segment] = segments[segment].device_writes ? NULL : slot->out;
-	count = erx_device_queue_post_steps(&h->queue, &layout, POOL, &queue_plan, segments, bytes, &queue_registers, 0, steps);
+	count = erx_device_queue_post_steps(&h->queue, &layout, DEVICE_BASE, POOL, &queue_plan, segments, bytes, &queue_registers, 0, steps);
 	apply(h, &before, &after, &(erx_dma_plan_t){ .call = ERX_DMA_CALL_POST, .count = count, .steps = steps });
 }
 
