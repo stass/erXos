@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz targets of erx_domain_mints, the domain service's pure core for facets
 # configured domains serve (test/erlang/erx_domain_mints_fuzz.erl): report drives it with
@@ -19,6 +20,8 @@ module ErxDomainMintsFuzz
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'erlang/apps/erx_domain/src/erx_domain_mints.erl'
   FUZZ = 'test/erlang/erx_domain_mints_fuzz.erl'
+  # The generated ABI header the core includes, which run makes first.
+  INCLUDE = File.join(ROOT, Erx::Generated::OUTPUT, 'erlang/apps/erx/include')
   Fault = Data.define(:what, :anchor, :replacement)
   FAULTS = {
     'report' => [Fault.new(what: 'a mint owner check without its node',
@@ -39,6 +42,7 @@ module ErxDomainMintsFuzz
   module_function
 
   def run(target:, seed:)
+    Erx::Generated.ensure(root: ROOT)
     faults = FAULTS.fetch(target)
     source = File.binread(File.join(ROOT, CORE))
     faults.each { |fault| raise "no #{fault.anchor} in #{CORE}" unless source.include?(fault.anchor) }
@@ -59,7 +63,7 @@ module ErxDomainMintsFuzz
     Dir.mktmpdir('erx-domain-mints-fuzz') do |work|
       core_path = File.join(work, File.basename(CORE))
       File.binwrite(core_path, core_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, core_path, File.join(ROOT, FUZZ),
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, core_path, File.join(ROOT, FUZZ),
                                        stdin_data: '')
       raise output unless status.success?
 
