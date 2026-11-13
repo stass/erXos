@@ -991,25 +991,48 @@ principals(void)
 
 /*
  * A configured row's gives (docs/design-system.md, "Devices"): a catalogue
- * of device 0, an unconfined transport placed on configured row 0, and
- * device 1, the system domain's. Each line names a case and its result.
+ * of device 0, an unconfined transport of unit 0 placed on configured row
+ * 0, and device 1, of unit 1, the system domain's, each on a line of its
+ * own. gives_shared_view adds device 2, of unit 0, on a page of its own
+ * and on device 0's line. Each line names a case and its result.
  */
-static erx_dom_device_entry_t give_devices[2];
-static erx_dom_device_t give_records[2];
+static erx_dom_device_entry_t give_devices[3];
+static erx_dom_device_t give_records[3];
 
 static void
 gives_view(void)
 {
 	reset_view();
 	memset(give_records, 0, sizeof(give_records));
-	give_devices[0] = (erx_dom_device_entry_t){ .row = 0, .nranges = 1, .nlines = 1,
-	    .ranges = { { 0x0a003000, 0x1000 } }, .memory = 0x100000 };
-	give_devices[1] = (erx_dom_device_entry_t){ .row = ERX_MF_NONE, .nranges = 1, .nlines = 1,
-	    .ranges = { { 0x09000000, 0x1000 } } };
+	give_devices[0] = (erx_dom_device_entry_t){ .unit = 0, .row = 0, .nranges = 1, .nlines = 1,
+	    .ranges = { { 0x0a003000, 0x1000 } }, .lines = { 48 }, .memory = 0x100000 };
+	give_devices[1] = (erx_dom_device_entry_t){ .unit = 1, .row = ERX_MF_NONE, .nranges = 1, .nlines = 1,
+	    .ranges = { { 0x09000000, 0x1000 } }, .lines = { 33 } };
 	give_records[1].index = 1;
 	view.devices = give_devices;
 	view.device_records = give_records;
 	view.ndevices = 2;
+}
+
+static void
+gives_shared_view(void)
+{
+	gives_view();
+	give_devices[2] = (erx_dom_device_entry_t){ .unit = 0, .row = 0, .nranges = 1, .nlines = 1,
+	    .ranges = { { 0x0a004000, 0x1000 } }, .lines = { 48 } };
+	give_records[2].index = 2;
+	view.ndevices = 3;
+}
+
+/* How many IRQ objects a give makes. */
+static uint32_t
+irq_steps(const erx_dom_device_plan_t *give)
+{
+	uint32_t count = 0;
+
+	for (uint32_t step = 0; step < give->nsteps; step++)
+		count += give->steps[step].kind == ERX_DOM_STEP_IRQ ? 1 : 0;
+	return (count);
 }
 
 /* The index of the step of kind in plan, or nsteps for none. */
@@ -1050,6 +1073,28 @@ gives(void)
 	SEED("other_holder", seeded.gives[0].holder = 7);
 	SEED("other_slot", seeded.gives[0].slot = plan.slot + 1);
 	SEED("window_phys", seeded.gives[0].steps[4].rights |= ERX_HR_PHYS);
+	printf("gives direct shared=%d own=%d\n", plan.gives[0].lines[0].shared,
+	    plan.gives[0].lines[0].give == ERX_DOM_GIVE_OWN);
+
+	/*
+	 * Devices 0 and 2 share a line: device 0's give makes its one IRQ
+	 * object, and device 2's makes none and names that one, so the holder
+	 * takes it once. Both records mark the line shared.
+	 */
+	gives_shared_view();
+	status = erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan);
+	printf("gives shared %d ngives=%u irqs=%u,%u source=%u.%u marks=%d,%d\n", (int)status, plan.ngives,
+	    irq_steps(&plan.gives[0]), irq_steps(&plan.gives[1]), plan.gives[1].lines[0].give,
+	    plan.gives[1].lines[0].index, plan.gives[0].lines[0].shared, plan.gives[1].lines[0].shared);
+	SEED("shared_valid", (void)0);
+	SEED("shared_from_itself", seeded.gives[1].lines[0].give = 1);
+	SEED("shared_from_unmade", seeded.gives[1].lines[0].index = 1);
+	SEED("shared_direct", seeded.gives[1].lines[0].shared = false);
+	SEED("shared_from_later", {
+		seeded.gives[0] = plan.gives[1];
+		seeded.gives[1] = plan.gives[0];
+		seeded.gives[0].lines[0].give = 1;
+	});
 #undef SEED
 
 	/* A living domain of the row holds the device: the next creation of it is refused. */

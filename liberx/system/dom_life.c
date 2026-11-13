@@ -709,6 +709,63 @@ life_overlaps(const erx_dom_view_t *view, uint32_t index)
 	return (false);
 }
 
+/*
+ * Whether entry names interrupt line number, and at which of its line
+ * indices first. The entry's lines are read within the ABI's limit
+ * whatever its count says, as another entry's ranges are.
+ */
+static bool
+life_names_line(const erx_dom_device_entry_t *entry, uint32_t number,
+    uint32_t *at)
+{
+	const uint32_t count = entry->nlines < ERX_DEVICE_IRQS_MAX ?
+	    entry->nlines : ERX_DEVICE_IRQS_MAX;
+
+	for (uint32_t line = 0; line < count; line++) {
+		if (entry->lines[line] == number) {
+			*at = line;
+			return (true);
+		}
+	}
+	return (false);
+}
+
+/*
+ * Where line `line` of entry index finds its IRQ object in holder's
+ * creation (erx_dom_give_line_t): the object of the first earlier give
+ * whose device, of the same unit, names the same line, or one of its own
+ * for a line no earlier give names. The line is shared when any other
+ * device of the unit names it, given before this one or after.
+ */
+static erx_dom_give_line_t
+life_line_source(const erx_dom_view_t *view, const erx_dom_plan_t *holder,
+    uint32_t index, uint32_t line)
+{
+	const erx_dom_device_entry_t *entry = &view->devices[index], *other;
+	const uint32_t number = entry->lines[line];
+	const uint32_t gives = holder->ngives < ERX_DOM_GIVES_MAX ?
+	    holder->ngives : ERX_DOM_GIVES_MAX;
+	erx_dom_give_line_t source = { .give = ERX_DOM_GIVE_OWN };
+	uint32_t at;
+
+	for (uint32_t each = 0; each < view->ndevices && !source.shared;
+	    each++) {
+		other = &view->devices[each];
+		source.shared = each != index && other->unit == entry->unit &&
+		    life_names_line(other, number, &at);
+	}
+	for (uint32_t give = 0; give < gives; give++) {
+		if (holder->gives[give].index >= view->ndevices)
+			continue;
+		other = &view->devices[holder->gives[give].index];
+		if (other->unit == entry->unit &&
+		    life_names_line(other, number, &at))
+			return ((erx_dom_give_line_t){ .give = give, .index = at,
+			    .shared = true });
+	}
+	return (source);
+}
+
 /* The grants row of a device object: every window shares one, every line one. */
 static erx_dom_obj_t
 life_grant_key(erx_dom_obj_t obj)
@@ -782,11 +839,18 @@ erx_dom_plan_device_give(const erx_dom_view_t *view,
 		    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
 		    .target = ERX_DOM_OBJ_DEV_RESOURCE, .index = range,
 		    .size = entry->ranges[range].size };
-	for (uint32_t line = 0; line < entry->nlines; line++)
+	for (uint32_t line = 0; line < ERX_DEVICE_IRQS_MAX; line++)
+		draft.lines[line] = (erx_dom_give_line_t){
+		    .give = ERX_DOM_GIVE_OWN };
+	for (uint32_t line = 0; line < entry->nlines; line++) {
+		draft.lines[line] = life_line_source(view, holder, index, line);
+		if (draft.lines[line].give != ERX_DOM_GIVE_OWN)
+			continue;
 		draft.steps[draft.nsteps++] = (erx_dom_step_t){
 		    .kind = ERX_DOM_STEP_IRQ, .obj = ERX_DOM_OBJ_DEV_IRQ + line,
 		    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
 		    .target = ERX_DOM_OBJ_DEV_RESOURCE, .index = line };
+	}
 	kept = !entry->confined && entry->memory != 0 &&
 	    record->memory.raw != ERX_CAP_NULL;
 	if (entry->confined)
@@ -891,6 +955,10 @@ erx_dom_device_check(const erx_dom_device_plan_t *plan)
 		    step->target >= ERX_DOM_OBJ_COUNT ||
 		    step->aux != ERX_DOM_OBJ_NONE ||
 		    !life_device_step_ok(step, made))
+			return (ERX_EINVAL);
+		/* An IRQ object only for a line no earlier give serves. */
+		if (step->kind == ERX_DOM_STEP_IRQ &&
+		    plan->lines[step->index].give != ERX_DOM_GIVE_OWN)
 			return (ERX_EINVAL);
 		if (step->kind != ERX_DOM_STEP_INSTALL)
 			made[step->obj] = true;

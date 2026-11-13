@@ -192,7 +192,11 @@ typedef struct erx_dom_device {
 	uint32_t	holder;		/* the living domain it is given to; 0 for none */
 	erx_cap_t	resource;	/* the carved resource */
 	erx_cap_t	windows[ERX_DEVICE_RANGES_MAX];	/* its register windows */
-	erx_cap_t	irqs[ERX_DEVICE_IRQS_MAX];	/* its lines' IRQ objects */
+	/* Its lines' IRQ objects that its own give made; a line it shares
+	 * with an earlier device of its unit is that device's object, in
+	 * that device's record alone, so each object has one record that
+	 * destroys it (erx_dom_give_line_t). */
+	erx_cap_t	irqs[ERX_DEVICE_IRQS_MAX];
 	erx_cap_t	dma;		/* confined: its DMA window; else ERX_CAP_NULL */
 	erx_cap_t	memory;		/* unconfined: its contiguous memory, made at
 					 * its first give, charged to the system
@@ -600,7 +604,8 @@ typedef enum erx_dom_parent {
 /*
  * A device's give (docs/design-system.md, "Devices"): its resource carved
  * from the root's, a register window per range and an IRQ object per
- * line, each charged to the holder's own budget; a DMA window for a
+ * line no earlier give of the creation has made one for (below), each
+ * charged to the holder's own budget; a DMA window for a
  * confined device, on the same budget, or for an unconfined one its
  * contiguous memory, made at its first give on the system domain's budget
  * and kept in the device record after; and the holder's share installed
@@ -617,12 +622,37 @@ typedef enum erx_dom_parent {
 	/* the resource, a window per range, an IRQ object per line and the
 	 * DMA window or memory, then an install of each but the resource */
 
+/*
+ * Where a give's line finds its IRQ object. A creation makes one IRQ
+ * object for each distinct line of the units it gives
+ * (docs/design-shared-devices.md, "The unit rule"), in the first give
+ * whose device names the line, which installs it into the holder once,
+ * under one handle; a later give whose device, of the same unit, names
+ * the line makes nothing for it and names that object. give is the index
+ * among the creation's gives of the give that makes the object, or
+ * ERX_DOM_GIVE_OWN for the give itself; for another give, index is the
+ * line's index in that give's device, and for the give itself the line's
+ * own index serves, so index is unused. shared says another device of the
+ * unit names the line, which the holder's record of the device marks, and
+ * so holds for every line another give serves.
+ */
+#define ERX_DOM_GIVE_OWN	UINT32_MAX
+
+typedef struct erx_dom_give_line {
+	uint32_t	give;
+	uint32_t	index;
+	bool		shared;
+} erx_dom_give_line_t;
+
 typedef struct erx_dom_device_plan {
 	uint32_t	index;		/* the device's entry and record */
 	uint32_t	holder;		/* the domain id it goes to */
 	uint32_t	slot;		/* the holder's record */
 	uint32_t	nsteps;
 	erx_dom_step_t	steps[ERX_DOM_DEVICE_STEPS];
+	/* Each line's IRQ object, by the device's line index; a line past
+	 * the device's is ERX_DOM_GIVE_OWN and direct. */
+	erx_dom_give_line_t lines[ERX_DEVICE_IRQS_MAX];
 } erx_dom_device_plan_t;
 
 typedef struct erx_dom_plan {
@@ -1005,7 +1035,9 @@ erx_status_t	erx_dom_plan_stop(const erx_dom_view_t *, uint32_t id,
  * ranges or lines than the ABI allows or a
  * range that is empty, unaligned, wraps, or overlaps another entry's;
  * ERX_EBUSY for a device whose record names a living holder, an earlier
- * domain of the same row included. *plan is written only on ERX_OK.
+ * domain of the same row included. A line an earlier give of holder
+ * names, for a device of the same unit, is that give's IRQ object
+ * (erx_dom_give_line_t). *plan is written only on ERX_OK.
  */
 erx_status_t	erx_dom_plan_device_give(const erx_dom_view_t *,
 		    const erx_dom_plan_t *holder, uint32_t index,
@@ -1015,8 +1047,11 @@ erx_status_t	erx_dom_plan_device_give(const erx_dom_view_t *,
  * Checks a device's plan whole: the resource is carved from the root's
  * before anything is made from it, each window, line and DMA window comes
  * from that resource and is charged to the holder's budget, contiguous
- * memory to the system domain's, and each install has its row of
- * erx_dom_grants. ERX_EINVAL otherwise.
+ * memory to the system domain's, each install has its row of
+ * erx_dom_grants, and an IRQ object is made only for a line the give
+ * itself serves. ERX_EINVAL otherwise. That a line served by another give
+ * names an earlier give that makes it is the creation's check,
+ * erx_dom_plan_check.
  */
 erx_status_t	erx_dom_device_check(const erx_dom_device_plan_t *plan);
 

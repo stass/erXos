@@ -323,15 +323,16 @@ boot_units(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries)
  * must have them in one unit row, which has one holder. A unit split
  * across two rows, two holders on one page or one line included, refuses
  * the view. So does a unit on a configured row whose own devices share a
- * page or a line: a give windows one device and makes an IRQ object for
- * each of its lines, and the library refuses a window over a page another
- * entry's window meets, as the kernel refuses a second IRQ object on a
- * line, so every creation of that row would fail; only the system domain,
- * whose windows and lines the root makes, may hold such a unit until the
- * catalogue's entry is the unit (TODO.md).
+ * page: a give windows one device, and the library refuses a window over a
+ * page another entry's window meets, so every creation of that row would
+ * fail; only the system domain, whose windows the root makes, may hold
+ * such a unit until the catalogue's entry is the unit (TODO.md).
  * So does a device marked confined: the stopgap's catalogue lists no IOMMU
  * stream, and a confined device is given only on one; and DMA memory that is
- * not whole pages, which no give can make.
+ * not whole pages, which no give can make. Devices of a configured row's
+ * unit may share a line: the row's creation makes one IRQ object for it, in
+ * the first device's give, and the others' records name that object
+ * (erx_dom_plan_device_give).
  */
 static const char *
 boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries,
@@ -394,9 +395,8 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 				return (page ? "manifest: devices that share a register page are in two units" :
 				    "manifest: devices that share an interrupt line are in two units");
 			/* One unit has one holder (boot_units), so a's row is b's. */
-			if (entries[a].row != ERX_MF_NONE)
-				return (page ? "manifest: devices of a unit a configured domain holds share a register page" :
-				    "manifest: devices of a unit a configured domain holds share an interrupt line");
+			if (page && entries[a].row != ERX_MF_NONE)
+				return ("manifest: devices of a unit a configured domain holds share a register page");
 		}
 	}
 	view->ndevices = count;

@@ -7,8 +7,9 @@
 # root's session at boot (docs/design-system.md, "Booting"). It configures no domain:
 # the Pi's storage, network and display domains come with stages (b), (c) and (d).
 # No unit record here places the platform record's Ethernet unit, net, so no domain holds GENET,
-# nor its SD unit, sd: a configured domain cannot hold a unit whose devices share a line
-# (TODO.md, "a configured domain cannot hold a unit whose devices share an interrupt line").
+# nor its SD unit, sd: the unit's legacy SD controller is of no kind a runtime drives, and
+# the domain library refuses a configured domain that holds such a device (TODO.md, "the
+# Raspberry Pi 4's sd unit").
 #
 # The system domain holds two units, each one register page of the board
 # (docs/design-platforms.md, "Raspberry Pi 4 Model B"): the console's, the mini UART's

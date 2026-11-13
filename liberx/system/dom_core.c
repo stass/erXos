@@ -1144,6 +1144,42 @@ dom_granted(const erx_dom_spec_t *spec, const erx_dom_step_t *step)
 	return (false);
 }
 
+/* Whether a give makes line index's IRQ object with a step of its own. */
+static bool
+dom_give_makes_line(const erx_dom_device_plan_t *give, uint32_t index)
+{
+	for (uint32_t step = 0; step < give->nsteps && step < ERX_DOM_DEVICE_STEPS;
+	    step++)
+		if (give->steps[step].kind == ERX_DOM_STEP_IRQ &&
+		    give->steps[step].index == index)
+			return (true);
+	return (false);
+}
+
+/*
+ * Each line of give `at` that another give's IRQ object serves
+ * (erx_dom_give_line_t) is shared and names an earlier give of the
+ * creation that makes an IRQ object at that line index, so the object is
+ * applied, and installed into the holder, before the give that names it.
+ * The plan holds no line numbers, so that the two devices name the same
+ * line is the planner's to decide (erx_dom_plan_device_give).
+ */
+static bool
+dom_give_lines_ok(const erx_dom_plan_t *plan, uint32_t at)
+{
+	const erx_dom_give_line_t *line;
+
+	for (uint32_t index = 0; index < ERX_DEVICE_IRQS_MAX; index++) {
+		line = &plan->gives[at].lines[index];
+		if (line->give != ERX_DOM_GIVE_OWN &&
+		    (line->give >= at || !line->shared ||
+		    line->index >= ERX_DEVICE_IRQS_MAX ||
+		    !dom_give_makes_line(&plan->gives[line->give], line->index)))
+			return (false);
+	}
+	return (true);
+}
+
 /*
  * One step against what the steps before it made: what it makes is new,
  * what it uses exists, and what it charges is a budget the plan carved.
@@ -1223,7 +1259,8 @@ dom_step_ok(const erx_dom_plan_t *plan, const erx_dom_step_t *step,
 		    made[ERX_DOM_OBJ_BUDGET] && made[ERX_DOM_OBJ_SPACE] &&
 		    plan->gives[step->index].holder == plan->spec.id &&
 		    plan->gives[step->index].slot == plan->slot &&
-		    erx_dom_device_check(&plan->gives[step->index]) == ERX_OK);
+		    erx_dom_device_check(&plan->gives[step->index]) == ERX_OK &&
+		    dom_give_lines_ok(plan, step->index));
 	}
 	return (false);
 }

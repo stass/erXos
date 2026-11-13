@@ -462,19 +462,19 @@ class DomPlannerTest < Minitest::Test
     end
   end
 
-  # A unit of two devices on pages of their own that share a line: the root makes the
-  # system domain's IRQ objects itself, so the system domain may hold it, but a give
-  # makes an IRQ object for each device's line and the kernel refuses a second on one
-  # line, so every creation of a configured row holding it would fail. The view refuses
-  # that placement, and so the build does.
-  def test_a_configured_row_holding_a_unit_whose_devices_share_a_line_fails_the_build
+  # A unit of two devices on pages of their own that share a line, as the Raspberry Pi
+  # 4's two SD controllers do: the system domain may hold it, and so may a configured
+  # row, since the row's creation makes one IRQ object for the line, in the first
+  # device's give, and the second device's give names it (docs/design-shared-devices.md,
+  # "The unit rule"). The view admits that placement, and so the build does.
+  def test_a_configured_row_holding_a_unit_whose_devices_share_a_line_is_admitted
     platform = JSON.parse(JSON.generate(@context.platform))
     net = platform.fetch('units').find { |unit| unit.fetch('key') == 'net' }.fetch('devices')
     net << net.first.merge('path' => '/virtio_mmio@a000e00', 'base' => 0x0a000e00, 'placement_key' => 'net-second')
     @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
     assert_equal 1, admit(@source).report.fetch('child_plan_instances')
     held = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
-    refused(held, 'view', /a configured domain holds share an interrupt line/)
+    assert_equal 1, admit(held).report.fetch('child_plan_instances')
   end
 
   # A unit of two devices that share a register page, as QEMU virt's virtio-mmio

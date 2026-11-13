@@ -1325,14 +1325,15 @@ it; git history is the record of completed work.
 * [Low] Pi package 5 (docs/plan.md, 1b-I (a) 5), the board pass: confirm on silicon that the mini
   UART's receive interrupt needs IER's `RX_ERRATA` bits (`hw/svd/mini_uart/mini_uart.svd`), which
   `erx_mini_uart` sets as the BCM2835 errata asks and QEMU's model ignores, and drop them if not.
-* [High] domain library, `liberx/system/dom_boot_view.c` (`boot_view` device pass): a configured domain cannot hold a
-  unit whose devices share an interrupt line, because a give makes an IRQ object for each device's line and the kernel
-  refuses a second on one line, so the view refuses the placement ("devices of a unit a configured domain holds share
-  an interrupt line"). [design-shared-devices.md](docs/design-shared-devices.md) ("Lines inside a domain") and
-  [design-storage.md](docs/design-storage.md) ("The SD controller's line") give the Raspberry Pi 4's unit `sd`, EMMC2
-  and the legacy SD controller on line 158, whole to the storage domain, so the Pi's development manifest places no
-  storage domain until a give makes one IRQ object per distinct line of the unit and hands it to every record that
-  names the line. Needed before the SD driver runs on the Pi.
+* [High] domain library, `liberx/system/dom_boot_view.c` (`boot_view`'s configured rows): the Raspberry Pi 4's sd unit,
+  EMMC2 and the legacy SD controller `/soc/mmc@7e300000` (`brcm,bcm2835-sdhci`, role `ordinary`), cannot be placed on
+  the storage domain: the legacy controller is in no row of `erx_device_kinds`, and the view refuses a configured
+  domain that holds a device of a kind no runtime drives ("a configured domain holds a device of a kind no runtime
+  drives"), since `apply_given_words` writes a record only for a device with a kind.
+  [design-storage.md](docs/design-storage.md) ("The SD controller's line") gives the unit whole to the storage domain
+  with no driver for the legacy controller. Decide whether such a device is given with its objects and no `-erx given`
+  record, as the SPI controllers on the mini UART's page are held with no driver, and then place the unit in
+  `config/manifest/raspi4b-development.txt`. Needed before the SD driver runs on the Pi.
 * [Medium] SD host controller, `hw/svd/sdhci/sdhci.svd` (docs/design-storage.md, "The SD host controller"), unnamed
   bits: the file names only the bits FreeBSD's `sdhci.h` names, so `write_field/4` writes every other bit of a word
   back as zero. In `CONTROL0` that is the block gap control byte, whose stop at block gap and continue requests
@@ -2775,14 +2776,30 @@ it; git history is the record of completed work.
   `erx_dom_plan_device_give`: the catalogue has an entry per device, so a
   unit of several devices that share a register page (the Raspberry Pi 4's
   mini UART and auxiliary SPI controllers, two of QEMU `virt`'s virtio-mmio
-  transports, 0x200 apart), or that share a line, cannot be given to a
-  configured domain: each entry's window covers the shared page and the give
-  refuses overlapping entries, and each entry's give makes its line's IRQ
-  object, which the kernel refuses a second time, so the boot view, and with
-  it the build, refuses such a unit on a configured row. Make the give the
-  unit's, with one window per page run and one IRQ object per distinct line,
-  as [design-shared-devices.md](docs/design-shared-devices.md#the-unit-rule)
-  has it, before a board places such a unit outside the system domain.
+  transports, 0x200 apart) cannot be given to a configured domain: each
+  entry's window covers the shared page and the give refuses overlapping
+  entries, so the boot view, and with it the build, refuses such a unit on a
+  configured row. A shared line is one IRQ object per creation, made in the
+  first give that names it, which later gives of the unit name through
+  `erx_dom_give_line_t`. Make the give the unit's, with one window per page
+  run and one IRQ object per distinct line, as
+  [design-shared-devices.md](docs/design-shared-devices.md#the-unit-rule)
+  has it, before a board places such a unit outside the system domain; that
+  deletes `erx_dom_give_line_t` and its cross-give checks.
+* [Medium] drivers, `erlang/apps/erx_blk` (and `erx_net`, `erx_fb`): no
+  configured domain's driver starter calls `erx_irq_line:start_owners/1`, so a
+  driver on a line its unit shares, which the domain library now marks
+  shared in a configured domain's records, fails its start with
+  `{error, unbound}`. `erx_blk_sup` starts the owners before the device
+  process, `rest_for_one`, as
+  [design-storage.md](docs/design-storage.md) "The SD controller's line"
+  has it; land it with the Raspberry Pi 4's SD transport, the first driver
+  on such a line.
+* [Low] fuzzing, `tools/fuzz/dom_core_fuzz.c`: `erx_dom_plan_device_give` is
+  fuzzed with an empty holder, so `life_line_source`'s walk of the earlier
+  gives never runs. Seed the holder's gives from the input and check every
+  plan the planner returns against `erx_dom_device_check` and the
+  creation's line rules (`dom_give_lines_ok`).
 * [Medium] domain library, `liberx/system/dom_boot_view.c`, `boot_devices`:
   the refusal of a split unit says which relation met (a register page or an
   interrupt line) but not which two devices or which line, where

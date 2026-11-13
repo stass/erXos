@@ -100,7 +100,9 @@ class DomLifeTest < Minitest::Test
   }.freeze
 
 # A device's give: the unconfined transport 0 and the confined device 1,
-# each kept, busy, refused or full.
+# each kept, busy, refused or full; and device 2 given after device 0, which
+# names device 0's IRQ object for a line of their unit and makes its own
+# otherwise (docs/design-shared-devices.md, "The unit rule").
 UNCONFINED_FIRST = 'RESOURCE,WINDOW,IRQ,CONTIGUOUS,INSTALL,INSTALL,INSTALL'
 UNCONFINED_KEPT = 'RESOURCE,WINDOW,IRQ,INSTALL,INSTALL,INSTALL'
 FULL = ['RESOURCE', *['WINDOW'] * 8, *['IRQ'] * 8, 'DMA', *['INSTALL'] * 17].join(',')
@@ -113,6 +115,9 @@ DEVICES = {
   'dev_adjacent' => "0 slot=4 steps=#{UNCONFINED_FIRST} undo=3",
   'dev_no_memory' => '0 slot=4 steps=RESOURCE,WINDOW,IRQ,INSTALL,INSTALL undo=3',
   'dev_full' => "0 slot=4 steps=#{FULL} undo=18",
+  'dev_shared_second' => '0 steps=RESOURCE,WINDOW,INSTALL source=0.0 marks=1,1',
+  'dev_shared_other_unit' => '0 steps=RESOURCE,WINDOW,IRQ,INSTALL,INSTALL source=own marks=0,0',
+  'dev_shared_other_line' => '0 steps=RESOURCE,WINDOW,IRQ,INSTALL,INSTALL source=own marks=0,0',
   'dev_busy' => EBUSY, 'dev_busy_self' => EBUSY,
   'dev_unknown_domain' => EINVAL, 'dev_ended_domain' => EINVAL, 'dev_building_domain' => EINVAL,
   'dev_index_past' => EINVAL, 'dev_overlap' => EINVAL, 'dev_overlap_wrapping' => EINVAL,
@@ -130,10 +135,18 @@ DEVICES = {
               dev_gate dev_install_resource dev_install_unmade dev_window_phys dev_foreign_space
               dev_resource_not_root dev_window_system_pays dev_memory_holder_pays dev_window_index
               dev_out_of_order dev_dma_and_memory dev_system_holder dev_too_many dev_kept_not_last
-              dev_record_index].freeze
+              dev_record_index dev_irq_served].freeze
 
   # One-line edits of the core, each with the driver line it must change.
   MUTANTS = {
+    'a shared line made twice' =>
+      ["\t\tif (draft.lines[line].give != ERX_DOM_GIVE_OWN)\n\t\t\tcontinue;\n", '', 'dev dev_shared_second '],
+    'a line shared across units' =>
+      ["if (other->unit == entry->unit &&\n\t\t    life_names_line(other, number, &at))",
+       'if (life_names_line(other, number, &at))', 'dev dev_shared_other_unit '],
+    'a give makes the object of a line another give serves' =>
+      ["if (step->kind == ERX_DOM_STEP_IRQ &&\n\t\t    plan->lines[step->index].give != ERX_DOM_GIVE_OWN)",
+       'if (false)', 'seeded dev_irq_served '],
     'an area charged to its writer' =>
       [".budget = area_reader == b ? ERX_DOM_OBJ_LINK_BUDGET_B :\n\t\t    ERX_DOM_OBJ_LINK_BUDGET_A",
        ".budget = area_reader == b ? ERX_DOM_OBJ_LINK_BUDGET_A :\n\t\t    ERX_DOM_OBJ_LINK_BUDGET_B",

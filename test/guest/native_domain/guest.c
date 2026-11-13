@@ -2167,28 +2167,34 @@ case_undo(uint32_t program)
 }
 
 /*
- * A configured domain's device (docs/design-system.md, "Devices"): a
- * block device on a spare page of virtio-mmio transports, which no QEMU
- * device of this test sits behind, placed on configured row 0, whose
- * domain waits to be stopped. The library gives it as part of the row's
- * creation, from this catalogue entry, the manifest's device row 0.
+ * A configured domain's unit (docs/design-system.md, "Devices"): two block
+ * devices, each on a spare page of virtio-mmio transports, which no QEMU
+ * device of this test sits behind, and both on transport 0's line, so the
+ * line is shared and the row's creation makes one IRQ object for it, in
+ * device 0's give (docs/design-shared-devices.md, "The unit rule"). The
+ * unit is placed on configured row 0, whose domain waits to be stopped.
+ * The library gives it as part of the row's creation, from these catalogue
+ * entries, the manifest's device rows 0 and 1: device 0 with contiguous
+ * memory, device 1 with none.
  */
-#define GIVEN_BASE	UINT64_C(0x0a000000)	/* transports 0 to 7 */
-#define GIVEN_LINE	48u			/* transport 0's line */
+#define GIVEN_DEVICES	2u
+#define GIVEN_BASE	UINT64_C(0x0a000000)	/* transports 0 to 7, device 0's */
+#define GIVEN_PAGE_1	UINT64_C(0x0a001000)	/* transports 8 to 15, device 1's */
+#define GIVEN_LINE	48u			/* transport 0's line, both devices' */
 #define GIVEN_SIZE	UINT64_C(0x200)		/* one transport */
 #define GIVEN_MEMORY	(UINT64_C(16) * ERX_PAGE_SIZE)
 #define GIVEN_RECORD	"-erx\0given\0block\0virtio_mmio\0"
 #define GIVEN_PAIR	"-erx\0boot\0normal\0a\0"
 #define GIVEN_NUMBERS	9u			/* WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK COHERENT MAC */
-#define GIVEN_MARK	"direct"		/* after LINE_H: a configured domain's line is never shared */
+#define GIVEN_MARK	"shared"		/* after LINE_H: both devices of the unit name the line */
 #define GIVEN_MARK_AFTER 3u			/* LINE_H's index among the numbers */
 
 static erx_dom_configured_t configured[1];
-static erx_dom_device_entry_t catalogue[1];
-static erx_dom_device_t device_records[1];
+static erx_dom_device_entry_t catalogue[GIVEN_DEVICES];
+static erx_dom_device_t device_records[GIVEN_DEVICES];
 static const char holder_args[] = "wait";
 
-/* Configured row 0 runs program, and holds catalogue entry 0. */
+/* Configured row 0 runs program, and holds catalogue entries 0 and 1, one unit. */
 static void
 given_view(uint32_t program)
 {
@@ -2209,12 +2215,16 @@ given_view(uint32_t program)
 	    .lines = { GIVEN_LINE }, .nranges = 1, .nlines = 1,
 	    .ranges = { { .base = GIVEN_BASE, .size = ERX_PAGE_SIZE } }, .memory = GIVEN_MEMORY, .asked = true,
 	    .facts = { .dma = ERX_DT_DMA_OK, .cpu = 0, .bus = 0, .last = UINT64_MAX } };
-	device_records[0] = (erx_dom_device_t){ .index = 0 };
+	catalogue[1] = catalogue[0];
+	catalogue[1].ranges[0].base = GIVEN_PAGE_1;
+	catalogue[1].memory = 0;
+	for (uint32_t index = 0; index < GIVEN_DEVICES; index++)
+		device_records[index] = (erx_dom_device_t){ .index = index };
 	lib.view.configured = configured;
 	lib.view.nconfigured = 1;
 	lib.view.devices = catalogue;
 	lib.view.device_records = device_records;
-	lib.view.ndevices = 1;
+	lib.view.ndevices = GIVEN_DEVICES;
 	lib.device_records = device_records;
 	lib.boot = (erx_boot_pair_t){ .value = ERX_BOOT_VALUE_NORMAL, .slot = ERX_BOOT_SLOT_A };
 }
@@ -2251,13 +2261,35 @@ given_decimal(const char **at, const char *end, uint64_t *value)
 }
 
 /*
- * Reads domain id's -erx given record from its boot page into numbers, and
- * whether -erx boot follows with the library's pair. False for a page with
- * no record or a record whose numbers are not GIVEN_NUMBERS decimals with
+ * The -erx given record at *at, before end, into numbers, and *at past it.
+ * False for a record whose numbers are not GIVEN_NUMBERS decimals with
  * GIVEN_MARK after LINE_H.
  */
 static bool
-given_read(uint32_t id, uint64_t *numbers, bool *pair)
+given_record(const char **at, const char *end, uint64_t *numbers)
+{
+	bool passed = (size_t)(end - *at) >= sizeof(GIVEN_RECORD) - 1 &&
+	    memcmp(*at, GIVEN_RECORD, sizeof(GIVEN_RECORD) - 1) == 0;
+
+	*at += passed ? sizeof(GIVEN_RECORD) - 1 : 0;
+	for (uint32_t number = 0; passed && number < GIVEN_NUMBERS; number++) {
+		passed = given_decimal(at, end, &numbers[number]);
+		if (passed && number == GIVEN_MARK_AFTER) {
+			passed = (size_t)(end - *at) >= sizeof(GIVEN_MARK) && memcmp(*at, GIVEN_MARK, sizeof(GIVEN_MARK)) == 0;
+			*at += passed ? sizeof(GIVEN_MARK) : 0;
+		}
+	}
+	return (passed);
+}
+
+/*
+ * Reads domain id's -erx given records from its boot page into numbers, one
+ * row per device in catalogue order, and whether -erx boot follows them
+ * with the library's pair. False for a page whose first record is missing
+ * or whose records are not GIVEN_DEVICES records, one after another.
+ */
+static bool
+given_read(uint32_t id, uint64_t numbers[GIVEN_DEVICES][GIVEN_NUMBERS], bool *pair)
 {
 	const erx_boot_info_t *info;
 	const erx_dom_handles_t *held;
@@ -2273,52 +2305,73 @@ given_read(uint32_t id, uint64_t *numbers, bool *pair)
 	end = args + (passed ? info->args_len : 0);
 	at = passed ? given_find(args, (size_t)(end - args), GIVEN_RECORD, sizeof(GIVEN_RECORD) - 1) : NULL;
 	passed = at != NULL;
-	if (passed)
-		at += sizeof(GIVEN_RECORD) - 1;
-	for (uint32_t number = 0; passed && number < GIVEN_NUMBERS; number++) {
-		passed = given_decimal(&at, end, &numbers[number]);
-		if (passed && number == GIVEN_MARK_AFTER) {
-			passed = (size_t)(end - at) >= sizeof(GIVEN_MARK) && memcmp(at, GIVEN_MARK, sizeof(GIVEN_MARK)) == 0;
-			at += passed ? sizeof(GIVEN_MARK) : 0;
-		}
-	}
+	for (uint32_t device = 0; passed && device < GIVEN_DEVICES; device++)
+		passed = given_record(&at, end, numbers[device]);
 	*pair = passed && (size_t)(end - at) >= sizeof(GIVEN_PAIR) - 1 &&
 	    memcmp(at, GIVEN_PAIR, sizeof(GIVEN_PAIR) - 1) == 0;
 	return (erx_vm_release(ERX_CAP_SELF, addr, ERX_PAGE_SIZE) == ERX_OK && passed);
 }
 
 /*
- * Domain id holds the device: the record names it and its window, line
- * and memory, and its boot page's record carries values in its own table
- * for each, the registers' place, the memory's size, a clock of 0 (a
- * transport's driver reads none), a hardware address of 0 (a block
- * device has none) and the boot's pair.
+ * One device's record in a holder's boot page: values in the holder's own
+ * table for its window and line, the registers' place, memory of `memory`
+ * bytes, named by a value of its own, or none for 0, a clock of 0 (a
+ * transport's driver reads none) and a hardware address of 0 (a block
+ * device has none).
+ */
+static bool
+given_numbers(const uint64_t *numbers, uint64_t memory)
+{
+	return (numbers[0] != ERX_CAP_NULL && numbers[1] == 0 && numbers[2] == GIVEN_SIZE &&
+	    numbers[3] != ERX_CAP_NULL && (numbers[4] != ERX_CAP_NULL) == (memory != 0) &&
+	    numbers[5] == memory && numbers[6] == 0 && numbers[8] == 0);
+}
+
+/*
+ * Domain id holds the unit: each record names it and its window, device
+ * 0's names its memory and the line's one IRQ object, which device 1's does
+ * not, so the object has one record that destroys it; and its boot page
+ * has a record of each device, with windows of their own and the line under
+ * one value, both marked shared, then the boot's pair.
  */
 static bool
 given_held(uint32_t id)
 {
-	const erx_dom_device_t *record = &device_records[0];
-	uint64_t numbers[GIVEN_NUMBERS];
+	const erx_dom_device_t *first = &device_records[0], *second = &device_records[1];
+	uint64_t numbers[GIVEN_DEVICES][GIVEN_NUMBERS];
 	bool pair = false;
 	const bool read = given_read(id, numbers, &pair);
+	const bool one_line = read && numbers[0][3] == numbers[1][3];
+	const bool records = first->holder == id && second->holder == id &&
+	    first->windows[0].raw != ERX_CAP_NULL && second->windows[0].raw != ERX_CAP_NULL &&
+	    first->irqs[0].raw != ERX_CAP_NULL && second->irqs[0].raw == ERX_CAP_NULL &&
+	    first->memory.raw != ERX_CAP_NULL && second->memory.raw == ERX_CAP_NULL &&
+	    first->resource.raw == ERX_CAP_NULL && second->resource.raw == ERX_CAP_NULL;
+	const bool words = read && given_numbers(numbers[0], GIVEN_MEMORY) && given_numbers(numbers[1], 0) &&
+	    numbers[0][0] != numbers[1][0];
 
 	say_count("given_read", read);
 	say_count("given_pair", pair);
-	return (read && pair && record->holder == id && record->windows[0].raw != ERX_CAP_NULL &&
-	    record->irqs[0].raw != ERX_CAP_NULL && record->memory.raw != ERX_CAP_NULL &&
-	    record->resource.raw == ERX_CAP_NULL && numbers[0] != ERX_CAP_NULL && numbers[1] == 0 &&
-	    numbers[2] == GIVEN_SIZE && numbers[3] != ERX_CAP_NULL && numbers[4] != ERX_CAP_NULL &&
-	    numbers[5] == GIVEN_MEMORY && numbers[6] == 0 && numbers[8] == 0);
+	say_count("given_one_line", one_line);
+	say_count("given_records", records);
+	say_count("given_words", words);
+	return (read && pair && one_line && records && words);
 }
 
-/* No domain holds the device, and its record names nothing but memory, its kept memory. */
+/* No domain holds the unit, and its records name nothing but device 0's kept memory. */
 static bool
 given_free(erx_cap_t memory)
 {
-	const erx_dom_device_t *record = &device_records[0];
+	const erx_dom_device_t *record;
 
-	return (record->holder == 0 && record->windows[0].raw == ERX_CAP_NULL && record->irqs[0].raw == ERX_CAP_NULL &&
-	    record->memory.raw == memory.raw);
+	for (uint32_t index = 0; index < GIVEN_DEVICES; index++) {
+		record = &device_records[index];
+		if (record->holder != 0 || record->windows[0].raw != ERX_CAP_NULL ||
+		    record->irqs[0].raw != ERX_CAP_NULL ||
+		    record->memory.raw != (index == 0 ? memory.raw : ERX_CAP_NULL))
+			return (false);
+	}
+	return (true);
 }
 
 /*
@@ -2353,18 +2406,18 @@ given_end(uint32_t id)
 }
 
 /*
- * The device given as part of a configured creation. First, one
- * creation refused once its give is made, which grows the service's
- * tables, leaves the device's fresh contiguous memory in its record:
+ * The unit given as part of a configured creation. First, one
+ * creation refused once its gives are made, which grows the service's
+ * tables, leaves device 0's fresh contiguous memory in its record:
  * the backend never takes a contiguous run back, so memory destroyed on
  * every refusal would leave the row no run to give after a few. Then a
  * creation refused at each step in turn, before it and once it has made
- * its object, is undone with its give: the pool, the handles and the
- * record as they were, so no device object is left and the kept memory
- * survives. Then the holder is created with that memory and its record
+ * its object, is undone with its gives: the pool, the handles and the
+ * records as they were, so no device object is left and the kept memory
+ * survives. Then the holder is created with that memory and both records
  * in its boot page; a second domain of the row while it lives is
- * ERX_EBUSY and changes nothing; at its end the record keeps only the
- * memory. The memory's pages are not the pool's, and the first holder's
+ * ERX_EBUSY and changes nothing; at its end the records keep only the
+ * memory, the line's one IRQ object destroyed once. The memory's pages are not the pool's, and the first holder's
  * run grows tables the service keeps, so the pool is counted from the
  * second: the next creation gives that same memory again, and ends with
  * the pool and the handles as after the first.
@@ -2381,7 +2434,8 @@ case_given(uint32_t program)
 
 	given_view(program);
 	id = next_id++;
-	passed = erx_dom_plan_configured(&lib.view, id, 0, (erx_dom_pid_t){ 0 }, &plan) == ERX_OK && plan.ngives == 1;
+	passed = erx_dom_plan_configured(&lib.view, id, 0, (erx_dom_pid_t){ 0 }, &plan) == ERX_OK &&
+	    plan.ngives == GIVEN_DEVICES;
 	for (uint32_t step = 0; passed && step < plan.nsteps; step++)
 		if (plan.steps[step].kind == ERX_DOM_STEP_GIVE)
 			give = step;

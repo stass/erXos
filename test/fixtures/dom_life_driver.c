@@ -40,9 +40,10 @@ static erx_dom_principal_t principals[1];
 #define SYSTEM_SPACE	UINT64_C(4000)
 static erx_dom_view_t view;
 /*
- * The catalogue: 0 an unconfined virtio-mmio transport placed on configured
- * row 0, which domain 5 was created from, and 1 a confined device placed on
- * row 1, domain 6's.
+ * The catalogue: 0 an unconfined virtio-mmio transport of unit 0 on line
+ * 5, placed on configured row 0, which domain 5 was created from, and 1 a
+ * confined device of unit 1 on lines 6 and 7, placed on row 1, domain 6's.
+ * Cases that list entry 2 set it.
  */
 #define NDEVICES	3
 static erx_dom_device_entry_t devices[NDEVICES];
@@ -96,10 +97,11 @@ reset_view(void)
 	memset(devices, 0, sizeof(devices));
 	memset(device_records, 0, sizeof(device_records));
 	devices[0] = (erx_dom_device_entry_t){ .nranges = 1, .nlines = 1,
-	    .ranges = { { 0x0a003000, 0x1000 } }, .memory = 0x100000 };
+	    .ranges = { { 0x0a003000, 0x1000 } }, .lines = { 5 },
+	    .memory = 0x100000 };
 	devices[1] = (erx_dom_device_entry_t){ .nranges = 2, .nlines = 2,
 	    .ranges = { { 0x10000000, 0x4000 }, { 0x10010000, 0x1000 } },
-	    .confined = true, .row = 1 };
+	    .lines = { 6, 7 }, .confined = true, .unit = 1, .row = 1 };
 	for (uint32_t index = 0; index < NDEVICES; index++)
 		device_records[index].index = index;
 }
@@ -659,6 +661,42 @@ device_case(const char *name, uint32_t id, uint32_t index)
 	printf(" undo=%u\n", erx_dom_device_undo(&plan, plan.nsteps, undo));
 }
 
+/*
+ * Entry 2's give to domain 5 in a creation that gave entry 0 first: its
+ * status, its steps' kinds, which give's IRQ object its line 0 is ("own"
+ * for one it makes) and whether each give marks its line 0 shared.
+ */
+static void
+shared_case(const char *name)
+{
+	static erx_dom_plan_t holder;
+	erx_dom_device_plan_t plan;
+	const erx_dom_give_line_t *line = &plan.lines[0];
+	erx_status_t status;
+
+	memset(&holder, 0, sizeof(holder));
+	holder.spec.id = 5;
+	holder.slot = 4;
+	holder.spec.origin = domains[0].origin;
+	status = erx_dom_plan_device_give(&view, &holder, 0, &holder.gives[0]);
+	holder.ngives = status == ERX_OK ? 1 : 0;
+	if (status == ERX_OK)
+		status = erx_dom_plan_device_give(&view, &holder, 2, &plan);
+	if (status != ERX_OK) {
+		printf("dev %s %d\n", name, status);
+		return;
+	}
+	printf("dev %s 0 steps=", name);
+	for (uint32_t step = 0; step < plan.nsteps; step++)
+		printf("%s%s", step == 0 ? "" : ",",
+		    step_names[plan.steps[step].kind]);
+	if (line->give == ERX_DOM_GIVE_OWN)
+		printf(" source=own");
+	else
+		printf(" source=%u.%u", line->give, line->index);
+	printf(" marks=%d,%d\n", holder.gives[0].lines[0].shared, line->shared);
+}
+
 static void
 device_cases(void)
 {
@@ -697,6 +735,19 @@ device_cases(void)
 	device_case("dev_overlap", 5, 0);
 	devices[2].ranges[0] = (erx_dom_range_t){ 0x0a004000, 0x1000 };
 	device_case("dev_adjacent", 5, 0);
+	/*
+	 * Entry 2 on its own page and on entry 0's line: of entry 0's unit,
+	 * the line's one IRQ object is entry 0's; of another unit, or on
+	 * another line, the give makes its own.
+	 */
+	devices[2] = (erx_dom_device_entry_t){ .nranges = 1, .nlines = 1,
+	    .ranges = { { 0x0a005000, 0x1000 } }, .lines = { 5 } };
+	shared_case("dev_shared_second");
+	devices[2].unit = 2;
+	shared_case("dev_shared_other_unit");
+	devices[2].unit = 0;
+	devices[2].lines[0] = 9;
+	shared_case("dev_shared_other_line");
 	devices[2] = (erx_dom_device_entry_t){ .nranges = 1,
 	    .ranges = { { 0x0a000000, UINT64_MAX - 0x0a000000 + 1 } } };
 	device_case("dev_overlap_wrapping", 5, 0);
@@ -892,6 +943,10 @@ device_seeded(void)
 	SEED("dev_dma_and_memory", plan.steps[plan.nsteps++] = dma);
 	SEED("dev_system_holder", plan.holder = ERX_DOM_SYSTEM_ID);
 	SEED("dev_too_many", plan.nsteps = ERX_DOM_DEVICE_STEPS + 1);
+	SEED("dev_irq_served", {
+		plan.lines[0].give = 0;
+		plan.lines[0].shared = true;
+	});
 	device_records[0].memory = (erx_cap_t){ 77 };
 	if (give(5, 0, &valid) != ERX_OK)
 		failures++;

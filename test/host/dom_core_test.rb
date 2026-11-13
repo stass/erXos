@@ -79,6 +79,11 @@ class DomCoreTest < Minitest::Test
   ["(step->kind == ERX_DOM_STEP_BOOTINFO && gives != plan->ngives))", "false)"],
 'a give for another holder passes the check' =>
   ["plan->gives[step->index].holder == plan->spec.id &&\n", ""],
+    'a give names a line of a later give' => ['(line->give >= at || !line->shared ||', '(!line->shared ||'],
+    'a give names a line it calls direct' => ['(line->give >= at || !line->shared ||', '(line->give >= at ||'],
+    'a give names a line no give makes' =>
+      ["line->index >= ERX_DEVICE_IRQS_MAX ||\n\t\t    !dom_give_makes_line(&plan->gives[line->give], line->index)))",
+       "line->index >= ERX_DEVICE_IRQS_MAX ||\n\t\t    (!dom_give_makes_line(&plan->gives[line->give], line->index) && false)))"],
     'request strings tail kept' => ['memset(spec->strings + used, 0, sizeof(spec->strings) - used);', '(void)used;'],
     'record forgets the principal domain count' => ["\tprincipal->domains++;\n", ''],
     'record skips the reserve' => ["\tif (spec->origin.kind == ERX_DOM_CONFIGURED &&\n\t    !dom_system_reserve(view, &spec->grant))\n\t\treturn (ERX_EINVAL);\n", ''],
@@ -227,6 +232,21 @@ class DomCoreTest < Minitest::Test
     end
     assert_includes lines, "gives busy #{EBUSY} nsteps=0", 'a refused plan is zeroed'
     assert_includes lines, 'gives again 0 ngives=1 last=DEV_KEPT'
+    assert_includes lines, 'gives direct shared=0 own=1', 'a line no other device of the unit names is direct'
+  end
+
+  # Two devices of one unit on one line (docs/design-shared-devices.md, "The unit
+  # rule"): the creation makes the line's one IRQ object in the first device's give,
+  # and the second device's give makes none and names it, both marked shared. A plan
+  # whose give names a line of its own or of a later give, a line its source does not
+  # make, or a direct line from another give, fails the check.
+  def test_devices_that_share_a_line_share_its_one_irq_object
+    lines = run_driver(driver, 'gives')
+    assert_includes lines, 'gives shared 0 ngives=2 irqs=1,0 source=0.0 marks=1,1'
+    assert_includes lines, 'gives seeded shared_valid 0'
+    %w[shared_from_itself shared_from_unmade shared_direct shared_from_later].each do |name|
+      assert_includes lines, "gives seeded #{name} #{EINVAL}", name
+    end
   end
 
   def test_each_mutant_is_caught

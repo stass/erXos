@@ -459,13 +459,28 @@ apply_memory_inside(const apply_t *apply, uint32_t at)
 }
 
 /*
+ * The value in the holder's table of give `at`'s line 0: what the give's
+ * own install took, or, for a line an earlier give of the creation serves
+ * (erx_dom_give_line_t), what that give's install took, which the plan
+ * check requires to come before this give, so every record of the line
+ * names its one IRQ object under one handle.
+ */
+static uint64_t
+apply_line_installed(const apply_t *apply, uint32_t at)
+{
+	const erx_dom_give_line_t *line = &apply->plan->gives[at].lines[0];
+
+	if (line->give == ERX_DOM_GIVE_OWN)
+		return (apply->gives[at].installed[ERX_DOM_OBJ_DEV_IRQ]);
+	return (apply->gives[line->give].installed[ERX_DOM_OBJ_DEV_IRQ + line->index]);
+}
+
+/*
  * The -erx given record of give `at` (erx_boot_given_words) from the
- * values its installs took in the holder's table and the facts of its
- * catalogue entry, COHERENT and, for a network row, MAC, and its length, or 0
- * when the words do not fit, which the view's names rule out. Its line
- * is direct: the boot view refuses a configured row whose unit's
- * devices share a line (liberx/system/dom_boot_view.c), so no other
- * device of the holder's unit names it.
+ * values its installs took in the holder's table, and its line's from
+ * apply_line_installed, marked shared as the plan says; the facts of its
+ * catalogue entry, COHERENT and, for a network row, MAC; and its length,
+ * or 0 when the words do not fit, which the view's names rule out.
  */
 static size_t
 apply_given_words(apply_t *apply, uint32_t at)
@@ -479,7 +494,7 @@ apply_given_words(apply_t *apply, uint32_t at)
 	const bool memory = entry->memory != 0 && apply_memory_inside(apply, at);
 	const erx_boot_given_t given = { .role = entry->role_word, .peripheral = entry->peripheral,
 	    .window = installed[ERX_DOM_OBJ_DEV_WINDOW], .offset = entry->offset, .size = entry->size,
-	    .line = installed[ERX_DOM_OBJ_DEV_IRQ], .line_shared = false,
+	    .line = apply_line_installed(apply, at), .line_shared = give->lines[0].shared,
 	    .memory = memory ? held : ERX_CAP_NULL, .memory_size = memory ? entry->memory : 0, .clock = entry->clock,
 	    .coherent = erx_boot_coherent(facts, entry->memory),
 	    .mac = facts != NULL && entry->role == ERX_MF_DEVICE_ROLE_NETWORK ? erx_boot_mac_number(facts) : 0 };

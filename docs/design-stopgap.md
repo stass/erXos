@@ -1636,8 +1636,10 @@ another device of the unit names the line, `direct` otherwise
 decides it from the manifest, so no driver says whether its line is shared. The root marks
 its own records shared when another device-tree device of the manifest names the line
 (`liberx/backend/core/boot_manifest.c`, the boot view's relation, since the boot view puts
-devices that share a line in one unit), and the domain library marks a holder's records
-direct, since the boot view refuses a configured domain's unit whose devices share a line.
+devices that share a line in one unit), and the domain library marks a holder's record
+shared when another device of its unit names the line: the holder's creation makes one IRQ
+object for such a line, in the first give whose device names it, and installs it once, so
+every record of the line names it under one handle (`erx_dom_plan_device_give`).
 On the Raspberry Pi 4 the console's and the host link's lines are shared; on QEMU `virt`
 every line is direct. A reader refuses a record whose MARK is any other word.
 
