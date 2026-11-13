@@ -1507,11 +1507,11 @@ it; git history is the record of completed work.
   card's layout has none beside `kernel8.img`; the production image's `NOTICES` is only inside the image
   (`system/NOTICES`). Write it into the boot partition, from the packer's notices, and have the card's test
   check it.
-* [Medium] build, the card's build record (`tools/lib/erx/source_revision.rb`, `tools/lib/erx/site.rb`): `dirty`
-  counts tracked changes alone (`--untracked-files=no`), so a card built with an untracked source file the build
-  picks up records its commit as clean, and the website links a commit that lacks some of the card's source. Count
-  untracked, non-ignored files for the card's record (and decide whether `uname`'s `-dirty` follows), after
-  checking which build steps glob directories.
+* [Low] build, `tools/lib/erx/source_revision.rb`, `tools/lib/erx/boot_partition.rb`: the `dirty` flag reads the
+  tree by git's ignore rules, so a file that the checkout's `.git/info/exclude` hides but the build globs is not
+  counted, and the card's record and the image's build facts read the revision at two times of one pack, so a
+  file removed between them can leave a clean record. Derive the flag from the pack's own input catalog, read
+  once per pack.
 * [Low] build, the website (`.github/workflows/site.yml`, `tools/lib/erx/site.rb`): the card's record is checked
   against the commit the page links, but the demo image is not, though it carries the stopgap kernel's GPL-2.0
   files; check the image's receipt against that commit the same way.
@@ -1831,11 +1831,6 @@ it; git history is the record of completed work.
   image build. Either leave such a branch out of the revision, as newvers.sh leaves out a detached
   head, or widen the shape in both `BuildFacts::SHAPES` and `erx_build`, since `uname` writes the
   revision through the field escape anyway.
-* [Medium] Image build, `tools/lib/erx/source_revision.rb` (`changes`): `-dirty` counts tracked files
-  only, as newvers.sh does, but `ErlangApps.modules` globs `src/**/*.erl`, so an untracked module is
-  packed while `uname -v` names a clean commit. Count untracked, non-ignored files as dirty, or derive
-  dirty from the pack's own input catalog.
-
 * [Medium] liberx Fiasco backend, `liberx/backend/fiasco/service.h` (`erx_ipc_wait`): the stopgap's
   open wait returns design-kernel.md's tag and label, but only for fault and exit records, the one
   message its gates carry. Decide whether BK8b's IRQ deliveries share the same open wait before

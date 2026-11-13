@@ -173,23 +173,29 @@ module Erx
 
     # Reads the inputs' sizes and digests and decides which file goes where.
     # Raises Erx::Error naming the first missing input, or for a card whose
-    # build record is not its own or not of source (card_record).
+    # build record is not its own or not of source (card_record). card and
+    # card_record are both paths or both nil; nil is a build without the
+    # Raspberry Pi 4's card, for a local preview (tools/build_site.rb
+    # --no-card), whose page has no card section and whose boot.json has no
+    # card entry.
     def inventory(root:, v64:, image:, card:, card_record:, source:, disk:)
+      raise Error, 'the card and its build record are given both or neither' unless card.nil? == card_record.nil?
+
       page = PAGE_FILES.to_h { |name| [name, File.join(root, 'site', name)] }
       emulator = SiteV64::TARGETS.transform_values { |path| File.join(v64, path) }
       notices = SiteV64::NOTICES.transform_values { |path| File.join(v64, path) }
-      missing = [*page.values, *emulator.values, *notices.values, image, card, card_record].reject { |path| File.file?(path) }
+      missing = [*page.values, *emulator.values, *notices.values, image, card, card_record].compact.reject { |path| File.file?(path) }
       raise Error, "site input missing: #{missing.first}" unless missing.empty?
 
       digest = ->(path) { Digest::SHA256.file(path).hexdigest }
       image_sha256 = digest.(image)
       disk_sha256 = Digest::SHA256.hexdigest(disk.content)
-      card_sha256 = digest.(card)
-      record = card_record(BoundedFile.read(card_record, maximum: MAX_CARD_RECORD), sha256: card_sha256, source:)
+      card_sha256 = card && digest.(card)
+      record = card && card_record(BoundedFile.read(card_record, maximum: MAX_CARD_RECORD), sha256: card_sha256, source:)
       names = { 'terminal.js' => digest_name('terminal.js', digest.(page.fetch('terminal.js'))),
-                'image' => "image-#{image_sha256[0, 16]}.boot.gz", 'disk' => "disk-#{disk_sha256[0, 16]}.bin",
-                'card' => "sdcard-#{card_sha256[0, 16]}.img.gz",
-                'card_record' => "sdcard-#{card_sha256[0, 16]}.img.receipt.json" }
+                'image' => "image-#{image_sha256[0, 16]}.boot.gz", 'disk' => "disk-#{disk_sha256[0, 16]}.bin" }
+              .merge(card ? { 'card' => "sdcard-#{card_sha256[0, 16]}.img.gz",
+                              'card_record' => "sdcard-#{card_sha256[0, 16]}.img.receipt.json" } : {})
               .merge(emulator.to_h { |name, path| [name, "v64/#{digest_name(name, digest.(path))}"] })
       entries = [Entry.new(path: 'style.css', source: page.fetch('style.css'), gzip: false),
                  Entry.new(path: 'favicon.svg', source: page.fetch('favicon.svg'), gzip: false),
@@ -197,24 +203,34 @@ module Erx
                  *emulator.map { |name, path| Entry.new(path: names.fetch(name), source: path, gzip: false) },
                  *notices.map { |name, path| Entry.new(path: "v64/#{name}", source: path, gzip: false) },
                  Entry.new(path: names.fetch('image'), source: image, gzip: true),
-                 Entry.new(path: names.fetch('card'), source: card, gzip: true)]
+                 *(Entry.new(path: names.fetch('card'), source: card, gzip: true) if card)]
       manifest = { image: names.fetch('image'), bytes: File.size(image), sha256: image_sha256,
                    emulator: { module: names.fetch('libv86.mjs'), wasm: names.fetch('v86-arm64.wasm'),
                                bytes: emulator.values.sum { |path| File.size(path) } },
                    disk: { file: names.fetch('disk'), bytes: disk.content.bytesize, sha256: disk_sha256,
                            capacity: disk.capacity, extents: disk.extents },
-                   card: { file: names.fetch('card'), bytes: File.size(card), sha256: card_sha256,
-                           record: names.fetch('card_record') },
                    source: { ref: source.ref, url: source.url } }
+      if card
+        manifest[:card] = { file: names.fetch('card'), bytes: File.size(card), sha256: card_sha256,
+                            record: names.fetch('card_record') }
+      end
       Plan.new(entries:, index: page.fetch('index.html'), names:, disk:, manifest:, card_record: record)
     end
 
+    # What index.html wraps its card section in: kept, without the markers,
+    # for a build with a card and removed with it for one without.
+    CARD_BLOCK = %r{<!--card-->(.*?)<!--/card-->\n?}m
+
     # index.html with its {{name}} placeholders filled in. card is boot.json's
-    # card entry. Every value is HTML-escaped; an unknown placeholder raises.
+    # card entry, or nil for a build without a card, which has no card
+    # placeholder to fill. Every value is HTML-escaped; an unknown
+    # placeholder raises, so a card placeholder outside the card section
+    # fails a build without a card instead of reaching the page.
     def render_index(template, terminal:, source:, card:)
-      values = { 'terminal_js' => terminal, 'source_url' => source.url, 'source_label' => source.label,
-                 'card_file' => card.fetch(:file), 'card_record' => card.fetch(:record),
-                 'card_sha256' => card.fetch(:sha256), 'card_download_sha256' => card.fetch(:compressed_sha256) }
+      values = { 'terminal_js' => terminal, 'source_url' => source.url, 'source_label' => source.label }
+      values.merge!('card_file' => card.fetch(:file), 'card_record' => card.fetch(:record),
+                    'card_sha256' => card.fetch(:sha256), 'card_download_sha256' => card.fetch(:compressed_sha256)) if card
+      template = template.gsub(CARD_BLOCK) { card ? Regexp.last_match(1) : '' }
       template.gsub(/\{\{([a-z][a-z0-9_]*)\}\}/) do
         key = Regexp.last_match(1)
         raise Error, "index.html: unknown placeholder {{#{key}}}" unless values.key?(key)
@@ -245,11 +261,9 @@ module Erx
     def assemble(plan, out:)
       plan.entries.each { |entry| write(entry, out:) }
       File.binwrite(File.join(out, plan.names.fetch('disk')), plan.disk.content)
-      File.write(File.join(out, plan.names.fetch('card_record')), "#{JSON.pretty_generate(plan.card_record)}\n")
-      download = File.join(out, plan.names.fetch('card'))
-      card = plan.manifest.fetch(:card).merge(compressed_bytes: File.size(download),
-                                              compressed_sha256: Digest::SHA256.file(download).hexdigest)
-      manifest = plan.manifest.merge(compressed_bytes: File.size(File.join(out, plan.names.fetch('image'))), card:)
+      card = plan.manifest[:card] && publish_card(plan, out:)
+      manifest = plan.manifest.merge(compressed_bytes: File.size(File.join(out, plan.names.fetch('image'))))
+      manifest[:card] = card if card
       index = render_index(File.read(plan.index), terminal: plan.names.fetch('terminal.js'),
                                                   source: Source.new(ref: plan.manifest.dig(:source, :ref)), card:)
       File.write(File.join(out, 'index.html'), index)
@@ -258,6 +272,16 @@ module Erx
       manifest
     end
     private_class_method :assemble
+
+    # The card's record beside its download, and the card's manifest entry
+    # with the download's size and digest.
+    def publish_card(plan, out:)
+      File.write(File.join(out, plan.names.fetch('card_record')), "#{JSON.pretty_generate(plan.card_record)}\n")
+      download = File.join(out, plan.names.fetch('card'))
+      plan.manifest.fetch(:card).merge(compressed_bytes: File.size(download),
+                                       compressed_sha256: Digest::SHA256.file(download).hexdigest)
+    end
+    private_class_method :publish_card
 
     def write(entry, out:)
       target = File.join(out, entry.path)

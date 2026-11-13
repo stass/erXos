@@ -12,14 +12,16 @@ and Closure Compiler, which its JavaScript build needs. None of the built
 files (v64's `libv86.mjs` and `v86-arm64.wasm`, the compressed boot image,
 the Raspberry Pi 4's card) is checked in. `tools/build_site.rb` builds v64
 and assembles it with the page, the image and the card into `build/site/`,
-so a local build needs a packed card first (`make pack PLATFORM=raspi4b`)
-from a tree with no changes, and `--source` that card's commit when `HEAD`
-has moved since:
+so a build needs a packed card first (`make pack PLATFORM=raspi4b`) from a
+tree with no changes (no modified tracked file and no untracked file that
+git does not ignore), and `--source` that card's commit when `HEAD` has
+moved since. A local preview that needs no card is built with `--no-card`:
 
 ```
 tools/erx fetch --source v64
 tools/erx fetch --source closure-compiler
 ruby tools/build_site.rb [--image IMAGE] [--card CARD] [--serve 8000]
+ruby tools/build_site.rb --no-card [--image IMAGE] [--serve 8000]
 ```
 
 * Building v64 copies the fetched tree, after checking its download
@@ -91,6 +93,12 @@ ruby tools/build_site.rb [--image IMAGE] [--card CARD] [--serve 8000]
   version line alone, and packing does not refuse a version line that
   names a path, so a self-built tool's card still serves its builder.
   The published record is the one checked, as parsed and re-written.
+* `--no-card` builds the page without the Raspberry Pi 4 section: no card
+  paragraph in `index.html`, no card entry in `boot.json` and no card files.
+  It is for local previews and cannot be combined with `--card` or
+  `--card-record`. The publishing workflow (`.github/workflows/site.yml`)
+  always passes a card and never `--no-card`, which a test checks, so a
+  published page always carries a card.
 * `--source REF` is the erXos release tag or full commit the image and
   the card were built from, by default this tree's `HEAD`. Since the
   card's record names a commit, a tag is refused; the workflow resolves

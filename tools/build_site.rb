@@ -21,9 +21,10 @@ root = File.expand_path('..', __dir__)
 options = { image: File.join(root, Erx::InteractiveBoot::SITE_DIRECTORY, 'image.boot'),
             card: File.join(root, 'build/production-image/raspi4b', Erx::BootPartition::IMAGE), card_record: nil,
             out: File.join(root, 'build/site'), v64: nil, serve: nil, source: nil }
+card_given = false
 parser = OptionParser.new do |flags|
   flags.banner = 'Usage: ruby tools/build_site.rb [--v64 DIR] [--image PATH] [--card PATH] [--card-record PATH] ' \
-                 '[--source REF] [--out DIR] [--serve PORT]'
+                 '[--no-card] [--source REF] [--out DIR] [--serve PORT]'
   flags.on('--v64 DIR', "a v64 tree an earlier run built (default: build the fetched, pinned v64 in #{Erx::SiteV64::STAGING})") do |path|
     options[:v64] = File.expand_path(path)
   end
@@ -32,9 +33,14 @@ parser = OptionParser.new do |flags|
   end
   flags.on('--card PATH', "the Raspberry Pi 4's card (default: the one make pack PLATFORM=raspi4b builds)") do |path|
     options[:card] = File.expand_path(path)
+    card_given = true
   end
   flags.on('--card-record PATH', "the card's build record (default: the card's path with .receipt.json added)") do |path|
     options[:card_record] = File.expand_path(path)
+    card_given = true
+  end
+  flags.on('--no-card', 'build the page without the Raspberry Pi 4 section, for a local preview; the site workflow never uses it') do
+    options[:no_card] = true
   end
   flags.on('--source REF', 'full commit the image and card were built from, as the card\'s record names it (default: this tree\'s HEAD)') do |ref|
     options[:source] = ref
@@ -50,6 +56,7 @@ end
 begin
   parser.parse!
   raise OptionParser::NeedlessArgument, ARGV.join(' ') unless ARGV.empty?
+  raise OptionParser::InvalidOption, '--no-card with --card or --card-record' if options[:no_card] && card_given
 rescue OptionParser::ParseError => error
   warn error.message
   warn parser.banner
@@ -67,14 +74,16 @@ begin
     volume = Erx::DataVolume.format(root:, runner:, directory:, data_sectors: Erx::Site.data_sectors)
     Erx::Site.fresh_medium(volume: File.binread(volume.path))
   end
-  card = options.fetch(:card)
-  plan = Erx::Site.inventory(root:, v64:, image: options.fetch(:image), card:,
-                             card_record: options[:card_record] || "#{card}.receipt.json", source:, disk:)
+  card = options[:no_card] ? nil : options.fetch(:card)
+  card_record = card && (options[:card_record] || "#{card}.receipt.json")
+  plan = Erx::Site.inventory(root:, v64:, image: options.fetch(:image), card:, card_record:, source:, disk:)
   manifest = Erx::Site.publish(plan, out: options.fetch(:out))
+  card_summary = manifest[:card] ? "card #{manifest.dig(:card, :compressed_bytes)} bytes compressed" : 'no card'
   puts "Site: #{options.fetch(:out)} (image #{manifest.fetch(:bytes)} bytes, " \
        "#{manifest.fetch(:compressed_bytes)} compressed; disk #{manifest.dig(:disk, :capacity)} bytes, " \
-       "#{manifest.dig(:disk, :bytes)} published; card #{manifest.dig(:card, :compressed_bytes)} bytes " \
-       "compressed; source #{source.ref})"
+       "#{manifest.dig(:disk, :bytes)} published; " \
+       "#{card_summary}; " \
+       "source #{source.ref})"
   if options[:serve]
     options[:serving] = true
     Erx::Site.serve(dir: options.fetch(:out), port: options.fetch(:serve))

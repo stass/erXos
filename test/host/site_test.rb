@@ -3,6 +3,8 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'open3'
+require 'rbconfig'
 require 'tmpdir'
 require 'yaml'
 require 'zlib'
@@ -12,6 +14,8 @@ require_relative '../../tools/lib/erx/production_image'
 class SiteTest < Minitest::Test
   REPO = File.expand_path('../..', __dir__)
   COMMIT = '0123456789abcdef0123456789abcdef01234567'
+  CARD_BLOCK = '<!--card--><p class="card">card {{card_file}} {{card_sha256}} {{card_download_sha256}} ' \
+               '<a href="{{card_record}}">r</a></p><!--/card-->'
   INDEX = '<script src="{{terminal_js}}"></script><a href="{{source_url}}">{{source_label}}</a>'
 
   # A fake tree: site/ sources, a built v64 tree with its notices, an image,
@@ -46,10 +50,10 @@ class SiteTest < Minitest::Test
     File.write(File.join(root, 'sdcard.img.receipt.json'), JSON.generate(record))
   end
 
-  def inventory(root, image, ref: COMMIT)
-    Erx::Site.inventory(root:, v64: File.join(root, 'v64'), image:, card: File.join(root, 'sdcard.img'),
-                        card_record: File.join(root, 'sdcard.img.receipt.json'), source: Erx::Site.source(ref),
-                        disk: Erx::Site.fresh_medium(volume: VOLUME))
+  def inventory(root, image, ref: COMMIT, card: File.join(root, 'sdcard.img'),
+                card_record: File.join(root, 'sdcard.img.receipt.json'))
+    Erx::Site.inventory(root:, v64: File.join(root, 'v64'), image:, card:, card_record:,
+                        source: Erx::Site.source(ref), disk: Erx::Site.fresh_medium(volume: VOLUME))
   end
 
   # The page boots the production image, whose manifest's root_memory needs the
@@ -103,6 +107,73 @@ class SiteTest < Minitest::Test
                    "<a href=\"#{card.fetch(:record)}\">r</a>", File.read(File.join(out, 'index.html'))
       assert_equal card, JSON.parse(File.read(File.join(out, 'boot.json')), symbolize_names: true).fetch(:card)
     end
+  end
+
+  # A local preview has no card: the page's card block, boot.json's card entry
+  # and the card's files are absent, and no card placeholder is left.
+  def test_a_build_without_a_card_has_no_card_section
+    with_inputs do |root, image|
+      out = File.join(root, 'build/site')
+      File.write(File.join(root, 'site/index.html'),
+                 "<p>image</p>\n#{CARD_BLOCK}\n<p>end</p>\n")
+      manifest = Erx::Site.publish(inventory(root, image, card: nil, card_record: nil), out:)
+
+      refute manifest.key?(:card)
+      refute JSON.parse(File.read(File.join(out, 'boot.json'))).key?('card')
+      assert_equal "<p>image</p>\n<p>end</p>\n", File.read(File.join(out, 'index.html'))
+      assert_empty Dir.glob(File.join(out, 'sdcard*'))
+      # With a card, the block stays, without its markers.
+      Erx::Site.publish(inventory(root, image), out:)
+      assert_match(%r{<p>image</p>\n<p class="card">card sdcard-[0-9a-f]{16}\.img\.gz [^\n]*</p><p>end</p>\n}, File.read(File.join(out, 'index.html')))
+    end
+  end
+
+  def test_the_page_without_a_card_leaves_no_placeholder
+    page = Erx::Site.render_index(File.read(File.join(REPO, 'site/index.html')), terminal: 't.js',
+                                  source: Erx::Site.source(COMMIT), card: nil)
+    refute_includes page, '{{'
+    refute_includes page, 'card-download'
+    refute_includes page, 'For a Raspberry Pi 4'
+    refute_includes page, '<!--card'
+  end
+
+  # A card placeholder outside the card block is a bug in the page, not a gap in the output.
+  def test_a_card_placeholder_outside_the_card_block_is_refused_without_a_card
+    error = assert_raises(Erx::Error) do
+      Erx::Site.render_index('<a href="{{card_file}}">x</a>', terminal: 't.js', source: Erx::Site.source(COMMIT),
+                                                               card: nil)
+    end
+    assert_match(/card_file/, error.message)
+  end
+
+  # Only an absent card (nil) is a build without one; a card that is named and
+  # missing, or whose record is not its own, is still refused.
+  def test_a_named_card_that_is_missing_is_still_refused
+    with_inputs do |root, image|
+      File.delete(File.join(root, 'sdcard.img'))
+      error = assert_raises(Erx::Error) { inventory(root, image) }
+      assert_match(/sdcard\.img/, error.message)
+      error = assert_raises(Erx::Error) { inventory(root, image, card: nil) }
+      assert_match(/both or neither/, error.message)
+    end
+  end
+
+  # --no-card is for local previews and cannot be combined with a card's options.
+  def test_build_site_refuses_no_card_with_a_card_option
+    _out, err, status = Open3.capture3(RbConfig.ruby, File.join(REPO, 'tools/build_site.rb'), '--no-card',
+                                       '--card', '/nonexistent', '--v64', '/nonexistent',
+                                       '--out', '/nonexistent/out', stdin_data: '')
+    assert_equal 2, status.exitstatus
+    assert_match(/--no-card/, err)
+  end
+
+  # The publishing workflow always passes a card and never --no-card.
+  def test_the_workflow_never_builds_without_a_card
+    workflow = File.read(File.join(REPO, '.github/workflows/site.yml'))
+    refute_match(/no-card|no_card/, workflow)
+    commands = workflow.lines.grep(/^\s*run: ruby tools\/build_site\.rb/)
+    assert_equal 1, commands.size
+    assert_match(/--card sdcard\.img --card-record sdcard\.img\.receipt\.json/, commands.first)
   end
 
   # Seeded faults: a record of another card (one digit of its SHA-256 off), one that

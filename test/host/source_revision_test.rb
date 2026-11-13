@@ -72,9 +72,28 @@ class SourceRevisionTest < Minitest::Test
     assert_match(/-dirty\z/, read.to_s)
   end
 
-  def test_an_untracked_file_leaves_the_revision_clean
+  # The packer and the build glob directories, so an untracked source file is
+  # built into the image or the card although no commit holds it.
+  def test_an_untracked_file_that_git_does_not_ignore_marks_the_revision_dirty
     checkout_of_two_commits
     File.write(File.join(@tree, 'untracked'), 'x')
+    assert read.dirty, 'an untracked file in the top directory'
+    FileUtils.rm(File.join(@tree, 'untracked'))
+    refute read.dirty
+    FileUtils.mkdir_p(File.join(@tree, 'src/deep'))
+    File.write(File.join(@tree, 'src/deep/module.erl'), 'x')
+    assert read.dirty, 'an untracked file in an untracked directory'
+    assert_match(/-dirty\z/, read.to_s)
+  end
+
+  def test_an_ignored_file_leaves_the_revision_clean
+    checkout_of_two_commits
+    File.write(File.join(@tree, '.gitignore'), "build/\n*.log\n")
+    git('add', '.gitignore')
+    git('commit', '--quiet', '-m', 'ignore')
+    FileUtils.mkdir_p(File.join(@tree, 'build'))
+    File.write(File.join(@tree, 'build/out'), 'x')
+    File.write(File.join(@tree, 'run.log'), 'x')
     refute read.dirty
   end
 
@@ -105,6 +124,10 @@ class SourceRevisionTest < Minitest::Test
 
   def test_parse_reads_a_shallow_clone_without_its_count
     assert_equal '0123456789ab', SourceRevision.parse(answers(shallow: "true\n")).to_s
+  end
+
+  def test_parse_reads_an_untracked_line_as_a_change
+    assert SourceRevision.parse(answers(changes: "?? src/new.erl\n")).dirty
   end
 
   def test_parse_refuses_an_answer_of_the_wrong_shape

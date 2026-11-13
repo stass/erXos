@@ -136,7 +136,9 @@ Error in process &lt;0.150.0&gt; with exit value:
     </div>
     <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>top</code>, <code>dmesg</code>, <code>ifconfig</code>, <code>ping -c 3 8.8.8.8</code>, or <code>erl</code> for the Erlang shell.</p>
     <p class="terminal-hint terminal-source">The image is built from the erXos source at <a href="{{source_url}}"><code>{{source_label}}</code></a>. The emulator&rsquo;s licences: <a href="v64/LICENSE.txt">v64</a>, <a href="v64/NOTICES.txt">third-party code</a>.</p>
+    <!--card-->
     <p class="terminal-hint terminal-source card-download">For a Raspberry Pi 4: the card <a href="{{card_file}}" download><code>{{card_file}}</code></a>, built from the same source (SHA-256 <code>{{card_download_sha256}}</code>; of the card image inside, <code>{{card_sha256}}</code>; its <a href="{{card_record}}">build record</a>). Write it to a microSD card with Raspberry Pi Imager (choose &ldquo;Use custom&rdquo; for the operating system), or on macOS with <code>diskutil unmountDisk /dev/diskN</code> and then <code>gunzip -c {{card_file}} | sudo dd of=/dev/rdiskN bs=4m</code>, where <code>diskN</code> is the card as <code>diskutil list</code> shows it; everything on it is erased.</p>
+    <!--/card-->
   </div>
 </section>
 

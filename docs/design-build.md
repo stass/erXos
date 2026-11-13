@@ -521,7 +521,9 @@ alias beside a long name; the build reads the card's root directory back
 with its own reader (`tools/lib/erx/fat_short_names.rb`) and refuses a
 card that breaks this.
 The card's build record, `sdcard.img.receipt.json`, names the full erXos
-commit the card was built from and whether the tree had changes, and
+commit the card was built from and whether the tree had changes (a
+modified tracked file, or an untracked file that git does not ignore, the
+same flag as `uname`'s `-dirty`), and
 every input by its pin or digest: the firmware's `deps.lock` entries,
 verified against their hashes before use; BL31's build record (TF-A's
 pin, the recipe and its options) and its licence; the board tree's

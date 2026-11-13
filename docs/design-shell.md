@@ -583,7 +583,8 @@ one configuration gives one image. Each value has one source:
   FreeBSD's `newvers.sh` form without its branch,
   `[n<count>-]<hash>[-dirty]`: the count of first-parent commits,
   left out in a shallow clone, the commit's first 12 hex digits, and
-  `-dirty` when tracked files differ from the commit;
+  `-dirty` when a tracked file differs from the commit or an untracked file
+  that git's ignore rules do not exclude exists;
 * the date is that commit's committer date, in UTC and in the layout of
   macOS's `date` (`%a %b %e %H:%M:%S %Z %Y`), never the time of the
   build, so the same tree in the same state packs the same image;
