@@ -3051,6 +3051,7 @@ at a terminal that declares `links`.
 | a window's widget server would number a node past 2^32 - 1 | the window ends; the application receives `{ui_down, Window, limit}` | the application opens a new window |
 | the LVGL program exits | the widget server ends the window and the application receives `{ui_down, Window, renderer_down}`; the session logs the exit record, as for any of its programs | the application reopens |
 | the LVGL program reports a rectangle outside the size it names, or a second report before the first is answered | `erx_ui_lvgl` stops the program and logs the report's position, and the application receives `{ui_down, Window, renderer_down}` | the application reopens |
+| the window grows past the buffer the program maps, which the handler allocated at the screen's size before the screen grew | the program refuses the `screen` record and exits, and the application receives `{ui_down, Window, renderer_down}`; `erx_ui_lvgl` does not clamp the size | the application reopens, and the new program's buffer has the new screen's size |
 | the LVGL program writes outside its buffer | the write faults in the program's own sub-space, which holds no other page of the pixel area; its exit is the row above | the application reopens |
 | an input device stops | its driver restarts and resets it | events resume |
 | a window's `mouse` or `kbd` queue is full | the oldest record is dropped and counted; a resize is never lost | the client reads |

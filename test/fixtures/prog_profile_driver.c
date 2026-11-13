@@ -243,6 +243,12 @@ put_descriptor(erx_etf_writer_t *w, const erx_prog_descriptor_t *d)
 		put_atom(w, "dup");
 		put_u64(w, d->u.dup.dup_target);
 		break;
+	case ERX_PROG_DESCRIPTOR_MEM:
+		erx_etf_put_tuple(w, 3);
+		put_atom(w, "mem");
+		put_u64(w, d->u.mem.mem_page);
+		put_u64(w, d->u.mem.mem_pages);
+		break;
 	default:
 		put_atom(w, "null");
 		break;

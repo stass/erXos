@@ -24,6 +24,10 @@
 # * The data area's Slots, its count of 64 KiB slots, is 1 to 16, the
 #   slots a request may name.
 # * An open is any u16, an entry of the program's open table.
+# * A mem descriptor's range is in pages of erx_abi.txt's page_size, a first
+#   page from 1 and a count from 1, each a u32, since every u64 of a frame
+#   is a capability: the mapping starts below 2^44 bytes and ends below 2^45, and
+#   page 0 is never mapped.
 #
 # Members (docs/design-abi.md#program-protocol has the full table):
 # "version N" is the version every frame carries; "reader c" makes the
@@ -84,6 +88,8 @@ protocol erx_prog
   integer wend_count u32 in 1 0xffffffff
   integer rix u8 in 0 @pipe_rix_max
   integer lane_size u32 values 16384 65536
+  integer mem_page u32 in 1 0xffffffff
+  integer mem_pages u32 in 1 0xffffffff
   total args @prog_args_max
   text arg max @prog_args_max utf8 refuse nul sum args
   text env_var max @prog_args_max utf8 refuse nul assign sum args
@@ -127,6 +133,7 @@ protocol erx_prog
     case tty open access
     case dir open
     case socket open
+    case mem mem_page mem_pages
     case dup dup_target
     case null
   tuple fd_entry fd descriptor

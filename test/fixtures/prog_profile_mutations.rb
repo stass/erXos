@@ -43,7 +43,8 @@ module ProgProfileMutations
                                           readers: [] })),
           t(5, t(:socketpair, t(3, 1), { rix: 1, lock: 108, wends: 2, writers: [], readers: [t(0, 109)] },
                  t(4, 1), { wend: 2, ring: 110, rpage: 111, size: 65_536, readers: [] })),
-          t(6, t(:file, 7, :read_write)), t(7, t(:dir, 8)), t(8, t(:socket, 9)), t(9, :null)],
+          t(6, t(:file, 7, :read_write)), t(7, t(:dir, 8)), t(8, t(:socket, 9)), t(9, :null),
+          t(10, t(:mem, 16, 2))],
     image: t(:object, 0xffff_ffff_ffff_ff00)
   }.freeze
 

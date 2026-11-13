@@ -43,6 +43,10 @@ class ProgFdTest < Minitest::Test
   E = ProgProfileFrames::Etf
   EBADF = Errno::EBADF::Errno
   EPIPE = Errno::EPIPE::Errno
+  EINVAL = Errno::EINVAL::Errno
+  EACCES = Errno::EACCES::Errno
+  ENODEV = Errno::ENODEV::Errno
+  ESPIPE = Errno::ESPIPE::Errno
   ENOMEM = -6 # ERX_ENOMEM
 
   def self.int(value) = value < 256 ? E.small(value) : E.int(value)
@@ -62,6 +66,9 @@ class ProgFdTest < Minitest::Test
                            readers: E::NIL))
   START = F.start(F::BASE_PAIRS.merge(fds: E.list([E.tuple(int(0), READ_END), E.tuple(int(1), WRITE_END),
                                                    E.tuple(int(2), E.atom('null'))]))).unpack1('H*')
+  MEM_START = F.start(F::BASE_PAIRS.merge(fds: E.list([E.tuple(int(0), E.atom('null')),
+                                                       E.tuple(int(3), E.tuple(E.atom('mem'), int(16), int(2)))])))
+               .unpack1('H*')
   SET_UP = [['alias 105 101', 'alias'], ['alias 106 102', 'alias'], ["start #{START}", 'setup 0']].freeze
   READ_STATE = 'read 7 1 refs=1 rix=0 known=1 lost=0 peers=0 lanes=1:open:107'
   # The read end's doorbell, 103, and the write end's, 107, come up as their labels, (7 << 32) | End.
@@ -161,6 +168,19 @@ class ProgFdTest < Minitest::Test
     # back the ring's whole mapping and the capabilities it kept.
     'failed set-up' => [['alias 105 101', 'alias'], ['alias 106 102', 'alias'], ['failmap 5', 'armed'],
                         ["start #{START}", "setup #{ENOMEM}"], ['caps', '101:1:0 102:1:0 103:1:0']],
+    # A mem range at fd 3, pages 16 and 17, which the session mapped: mmap returns its address
+    # only for MAP_SHARED alone, offset 0, a length within it and no more than read and write;
+    # fstat gives its size; it is no stream; it survives a dup and its close maps nothing.
+    'a mem range' => [["start #{MEM_START}", 'setup 0'], ['fdstat 3', '0 100600 8192'], ['fdstat 0', '0 20666 0'],
+                      ['fdmmap 3 8192 rw shared 0', '0 10000'], ['fdmmap 3 1 r shared 0', '0 10000'],
+                      ['fdmmap 3 8193 rw shared 0', "#{-EINVAL} 0"], ['fdmmap 3 0 rw shared 0', "#{-EINVAL} 0"],
+                      ['fdmmap 3 4096 rw shared 4096', "#{-EINVAL} 0"],
+                      ['fdmmap 3 4096 rw private 0', "#{-EINVAL} 0"],
+                      ['fdmmap 3 4096 rw shared+fixed 0', "#{-EINVAL} 0"],
+                      ['fdmmap 3 4096 rwx shared 0', "#{-EACCES} 0"], ['fdmmap 0 4096 rw shared 0', "#{-ENODEV} 0"],
+                      ['fdmmap 5 4096 rw shared 0', "#{-EBADF} 0"], ['fdwrite 3 ab', (-ESPIPE).to_s],
+                      ['dup 3', '1'], ['close 3', '0'], ['fdstat 1', '0 100600 8192'], ['close 1', '0'],
+                      ['fdstat 3', "#{-EBADF} 0 0"], ['maps', '0']],
     # Reports the end cannot take close what they carry, but never a value the end holds.
     'repeated reports' => [*SET_UP,
                            ["report #{report(E.atom('pipe_reader'), int(7), int(1), int(0), int(130), E.atom('open'))}",
@@ -188,6 +208,10 @@ class ProgFdTest < Minitest::Test
 
   # A seeded fault, the case that must catch it, and the edit that plants it.
   MUTANTS = {
+    'a mmap one byte past a mem range is let through' =>
+      ['a mem range', FD, 'len > mem->bytes)', 'len > mem->bytes + 1)'],
+    'a mem object is let go at its first close while a dup still holds it' =>
+      ['a mem range', FD, 'return (--obj->refs == 0);', 'return (--obj->refs < 2);'],
     'the last reference is miscounted, so {closed} is sent early and again' => ['dup and close', FD, 'if (--obj->refs != 0)', 'if (--obj->refs > 1)'],
     'a report is applied without the end lock' =>
       ['locked', FD, "\t\terx_pipe_end_lock(found);\n", ''],

@@ -427,7 +427,7 @@ carries what a sub-space needs:
 %%            | {dir, Open}
 %%            | {socket, Open}
 %%            | {dup, Fd :: 0..1023}
-%%            | {mem, Address :: non_neg_integer(), Bytes :: pos_integer()}
+%%            | {mem, Page :: 1..16#ffffffff, Pages :: 1..16#ffffffff}
 %%                                  % memory the session mapped into the
 %%                                  % program while building it
 %%            | null
@@ -470,13 +470,19 @@ through which `openat` resolves, and a `socket` an open of a socket's
 open-file description; a `dup` makes its number name the same object as another
 descriptor of the message, which is not itself a `dup`. A `mem`
 descriptor names memory the session mapped into the program's sub-space
-while it built it, read-write, at `Address` for `Bytes`, both multiples
-of the page size: the pages of a window's buffer, for a program that
+while it built it, read-write, from page `Page` for `Pages` pages of the
+ABI's `page_size`, so at the address `Page` times the page size and for
+`Pages` times it in bytes. The range is given in pages because every
+64-bit integer of the profile is a capability
+([design-abi.md](design-abi.md#program-protocol)); the session places the
+mapping at a first page below 2^32, so it starts below 2^44 bytes, and
+page 0 is never mapped. It holds the pages of a window's buffer, for a program that
 renders into its window
 ([design-display.md](design-display.md#the-pixel-area)). The program
 holds no capability to that memory. `mmap` of the descriptor with
-`MAP_SHARED`, offset 0 and a length of at most `Bytes` returns
-`Address`, `fstat` reports `Bytes` as its size, and `read`, `write` and
+`MAP_SHARED` alone, offset 0, a length of at most its bytes and no
+protection beyond read and write returns its address, `fstat` reports
+its bytes as its size, and `read`, `write` and
 `lseek` on it fail with `ESPIPE`. It names a mapping of this one
 sub-space, so a spawn's `Start` cannot name one, `fork` does not copy
 it and `erx_exec` closes it. `sigmask` and

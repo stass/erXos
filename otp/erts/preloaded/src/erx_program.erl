@@ -205,6 +205,8 @@ descriptor_grants({Kind, _Open}) when Kind =:= dir; Kind =:= socket ->
     [];
 descriptor_grants({dup, _Target}) ->
     [];
+descriptor_grants({mem, _Page, _Pages}) ->
+    [];
 descriptor_grants(null) ->
     [].
 

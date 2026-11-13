@@ -37,6 +37,9 @@
  *   bind CAP LABEL         a ring of doorbell CAP comes up as LABEL
  *   fdread FD N            erx_prog_fd_read of at most N bytes: COUNT TEXT
  *   fdwrite FD TEXT        erx_prog_fd_write of TEXT ("-" for no bytes): COUNT
+ *   fdmmap FD LEN PROT FLAGS OFF
+ *                          erx_prog_fd_mmap: STATUS ADDRESS (do_fdmmap)
+ *   fdstat FD              erx_prog_fd_fstat: STATUS MODE SIZE, the mode in octal
  *   spawn T fdread FD N    worker T makes the call; "spawned"
  *   spawn T fdwrite FD TEXT
  *   spawn T fdwriten FD N  one erx_prog_fd_write of N bytes, each its offset's
@@ -878,6 +881,26 @@ do_maps(void)
 	printf("%u\n", live);
 }
 
+/*
+ * One erx_prog_fd_mmap: its status and the address it gave, in hex (0 when
+ * it failed).  prot is r, w, rw, rwx or none; flags shared, private or
+ * shared+fixed.
+ */
+static void
+do_fdmmap(int fd, size_t len, const char *prot_word, const char *flags_word, off_t offset)
+{
+	const int prot = strcmp(prot_word, "none") == 0 ? PROT_NONE :
+	    (strchr(prot_word, 'r') != NULL ? PROT_READ : 0) |
+	    (strchr(prot_word, 'w') != NULL ? PROT_WRITE : 0) |
+	    (strchr(prot_word, 'x') != NULL ? PROT_EXEC : 0);
+	const int flags = strcmp(flags_word, "private") == 0 ? MAP_PRIVATE :
+	    strcmp(flags_word, "shared+fixed") == 0 ? MAP_SHARED | MAP_FIXED : MAP_SHARED;
+	void *addr = NULL;
+	const int status = erx_prog_fd_mmap(fd, len, prot, flags, offset, &addr);
+
+	printf("%d %" PRIxPTR "\n", status, (uintptr_t)addr);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -930,6 +953,15 @@ main(int argc, char **argv)
 			do_write(fd, arg);
 		} else if (strcmp(word, "read") == 0 && sscanf(line, "%*s %d %llu", &fd, &a) == 2) {
 			do_read(fd, (size_t)a);
+		} else if (strcmp(word, "fdmmap") == 0 && sscanf(line, "%*s %d %llu %15s %15s %llu", &fd, &a, arg,
+		    arg + 16, &b) == 5) {
+			do_fdmmap(fd, (size_t)a, arg, arg + 16, (off_t)b);
+		} else if (strcmp(word, "fdstat") == 0 && sscanf(line, "%*s %d", &fd) == 1) {
+			struct stat st;
+			const int status = erx_prog_fd_fstat(fd, &st);
+
+			printf("%d %o %lld\n", status, status == 0 ? (unsigned)st.st_mode : 0U,
+			    status == 0 ? (long long)st.st_size : 0LL);
 		} else if (strcmp(word, "setbits") == 0 && sscanf(line, "%*s %15s %llu %llx", arg, &a, &b) == 3) {
 			do_setbits(arg, a, b);
 		} else if (strcmp(word, "bits") == 0 && sscanf(line, "%*s %15s %llu", arg, &a) == 2) {

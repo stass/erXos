@@ -14,7 +14,7 @@ require_relative '../fixtures/prog_profile_frames'
 # test/fixtures/prog_startup_driver.c: the hand-encoded start frames of
 # test/fixtures/prog_profile_frames.rb, and frames built here from their pieces, plan to the
 # argv, env and cwd written by hand, or end with status 127 for the check's refusal or a
-# descriptor other than null or a pipe's end
+# descriptor other than null, a pipe's end or a mem range
 # (docs/design-programs.md#the-startup-message, docs/design-abi.md#program-protocol, Startup).
 class ProgStartupTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
@@ -31,6 +31,7 @@ class ProgStartupTest < Minitest::Test
 
   # name => [frame, expected answer]: a Hash of the go line's fields, or the refusal's words.
   def self.go(argv:, env:, cwd:, **fields) = { argv: argv, env: env, cwd: cwd, **fields }
+  def self.mem(page, pages) = E.tuple(E.atom('mem'), page, pages)
 
   BUILT = {
     base: [F.start(BASE), go(argv: ['prog'], env: ['HOME=/'], cwd: '/', pid: '2', ppid: '1', pgid: '2',
@@ -66,6 +67,20 @@ class ProgStartupTest < Minitest::Test
     relative_cwd: [F.start(BASE.merge(cwd: E.binary('home'))), %w[refused check text cwd]],
     # A pipe's write end at 0 and its read end at 1, which liberx sets up (liberx/program/pipe.h).
     pipes: [F.start(BASE.merge(fds: F.pipes)), go(argv: ['prog'], env: ['HOME=/'], cwd: '/', fds: %w[0 1])],
+    # A window's buffer as a mem range at 3, which liberx sets up; a range from page 0, of no
+    # pages, past u32 or missing its count is refused by the check.
+    mem: [F.start(BASE.merge(fds: E.list([E.tuple(E.small(3), mem(E.small(16), E.small(2)))]))),
+          go(argv: ['prog'], env: ['HOME=/'], cwd: '/', fds: %w[3])],
+    mem_page_zero: [F.start(BASE.merge(fds: E.list([E.tuple(E.small(3), mem(E.small(0), E.small(2)))]))),
+                    %w[refused check range mem_page]],
+    mem_no_pages: [F.start(BASE.merge(fds: E.list([E.tuple(E.small(3), mem(E.small(16), E.small(0)))]))),
+                   %w[refused check range mem_pages]],
+    mem_page_past_u32: [F.start(BASE.merge(fds: E.list([E.tuple(E.small(3),
+                                                                mem(E.small_big(2**32), E.small(1)))]))),
+                        %w[refused check range mem_page]],
+    mem_without_count: [F.start(BASE.merge(fds: E.list([E.tuple(E.small(3),
+                                                                E.tuple(E.atom('mem'), E.small(16)))]))),
+                        %w[refused check no_case descriptor]],
     tty_after_null: [F.start(BASE.merge(fds: E.list([E.tuple(E.small(0), E.atom('null')),
                                                      E.tuple(E.small(3), E.tuple(E.atom('tty'), E.small(1),
                                                                                  E.atom('read')))]))),
@@ -125,13 +140,13 @@ class ProgStartupTest < Minitest::Test
     return ['refused', 'check', *fixture.verdict.split] unless fixture.verdict == 'accept'
 
     fields = fixture.fields.items.last
-    other = fields.fetch(:fds).find { |entry| entry.items.last != :null && !pipe_end?(entry.items.last) }
+    other = fields.fetch(:fds).find { |entry| entry.items.last != :null && !sets_up?(entry.items.last) }
     return ['refused', 'descriptor', other.items.first.to_s] if other
 
     { argv: fields.fetch(:argv), env: fields.fetch(:env), cwd: fields.fetch(:cwd) }
   end
 
-  def pipe_end?(descriptor) = descriptor.respond_to?(:items) && descriptor.items.first(2).then { |head| head in [:pipe, :read | :write] }
+  def sets_up?(descriptor) = descriptor.respond_to?(:items) && descriptor.items.first(2).then { |head| head in [:pipe, :read | :write] | [:mem, Integer] }
 
   # An answer line as the words of a refusal, without its offset, or the go line's
   # argv, env and cwd with its other fields, each text decoded from hex.

@@ -50,7 +50,7 @@ bugs, raised as errors.
 """.
 
 -export([start/3, step/2, size/1, reads_window/1]).
--export_type([state/0, event/0, action/0, stop_reason/0]).
+-export_type([state/0, event/0, action/0, stop_reason/0, rect/0]).
 
 -type size() :: {Width :: 1..65535, Height :: 1..65535}.
 -type rect() :: {X :: 0..65535, Y :: 0..65535, Width :: 1..65535, Height :: 1..65535}.
@@ -69,8 +69,9 @@ token of the apply whose operations are among them, or `none`.
 What happens to the renderer. `apply` and `window` come from the widget
 server and the window, `resize` from the window, `damage`, `event` and
 `refused` from the generated reader of the program's output, `shown`
-from the display's answer to a present, and `exit` from the program's
-end.
+from the display's answer to a present, `exit` from the program's
+end, and `lost` from the end of its pipes without an exit status, such
+as a write that found the program gone.
 """.
 -type event() :: {apply, [erx_ui_model:diff_op()], token()}
                | {window, {input, term()} | repaint}
@@ -79,7 +80,8 @@ end.
                | {event, erx_ui_model:node_id(), atom(), term()}
                | shown
                | {refused, term()}
-               | {exit, non_neg_integer()}.
+               | {exit, non_neg_integer()}
+               | {lost, term()}.
 
 -doc """
 What erx_ui_lvgl does: write records to the program's standard input,
@@ -93,7 +95,8 @@ answer an apply by its token, or hand the widget server a hit as
                 | {hit, erx_ui_model:node_id(), atom(), term()}.
 
 -doc "Why the program is stopped, for the log; the UI ends as `renderer_down`.".
--type stop_reason() :: report_before_presented | {refused, term()} | {exit, non_neg_integer()}.
+-type stop_reason() :: report_before_presented | {refused, term()} | {exit, non_neg_integer()}
+                     | {lost, term()}.
 
 -doc """
 The renderer of a window of `Width` by `Height` in channel `Chan`, and
@@ -145,7 +148,9 @@ step({event, Node, Name, Value}, State) ->
 step({refused, Reason}, _State) ->
     {stop, {refused, Reason}};
 step({exit, Status}, _State) ->
-    {stop, {exit, Status}}.
+    {stop, {exit, Status}};
+step({lost, Reason}, _State) ->
+    {stop, {lost, Reason}}.
 
 open({idle, Size}) -> {open, Size, [], none}.
 

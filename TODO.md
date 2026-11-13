@@ -735,22 +735,26 @@ it; git history is the record of completed work.
     tree with `erx_ui_schema`, numbers it with `erx_ui_model:pair/3`, applies `delta/2` through the renderer and
     routes its hits through `erx_ui_model:hit/4`; `pair/3` and `hit/4` themselves, with their property tests
     ([Verification](docs/design-display.md#verification-and-testing)).
-  * **`erx_ui_lvgl`** ([The widget server](docs/design-display.md#the-widget-server)): each `damage` report of
-    `erx-lvgl` turned into a present and answered with `presented`: the process that starts the program in the
-    session with the window's buffer as descriptor 3, reads its output with `erx_ui_wire:read/1`, presents through
-    the window, logs a fault's position and ends the UI with `renderer_down`, performing the actions of
-    `erx_ui_lvgl_core`, which decides what is written and presented and what is a fault. The shell reads `mouse`
-    and `kbd` only while `reads_window/1` holds; it stops consulting the core once `close/1` has closed the
-    program's input, so the program's exit then is no fault; a stop while an apply waits ends the shell, which
-    fails that `apply/2`; a window grown past its buffer makes the program refuse the `screen` record and the UI
-    end as `renderer_down`, unless the shell clamps the size to the buffer (decide which); and a program that stops
-    reading its input blocks the shell's writes and so `apply/2`, a residual until writes are bounded. The program's side, the
-    core, and a host model screen that plays the renderer over a shared buffer file with the core's decisions, are
-    in `display/lvgl/erx_lvgl.c`, `erlang/apps/erx_display/src/erx_ui_lvgl_core.erl` and
-    `test/erlang/erx_lvgl_screen.erl`.
-  * **Programs** ([The startup message](docs/design-programs.md#the-startup-message)): the `mem` descriptor in the
-    startup message's profile, `liberx`'s decoder and its fuzz target, `mmap` and `fstat` of it in the personality,
-    and the session's mapping of a buffer's pages into a program's sub-space while it builds it.
+  * **`erx_ui_lvgl`** ([The widget server](docs/design-display.md#the-widget-server)): the shell
+    (`erlang/apps/erx_display/src/erx_ui_lvgl.erl`) performs `erx_ui_lvgl_core`'s actions over a port its `open`
+    callback starts and a `present` callback, and `test/host/erx_ui_lvgl_test.rb` drives the real `erx-lvgl` with it
+    on the host. Left: `open` on erXos, which starts the program in the session with the window's buffer as its
+    `mem` descriptor 3 (the Programs item below), and `present`, `window/2` and `resize/3` bound to the window, with
+    the display domain; the fault log names the window and the report's byte position, which the design asks for
+    and the shell does not count yet. A window grown past its buffer is refused by the program and ends the UI as
+    `renderer_down`, so the restart allocates a buffer at the new screen's size; the shell does not clamp. A fault
+    fails a waiting `apply/2` only by the shell's exit. A program that stops reading its input blocks the shell in
+    `port_command/2`, and with it `apply/2`, `close/1`, the window's input and the program's exit, a residual until
+    writes are bounded (`nosuspend` and a busy event for the core, or a `close/1` that kills the program itself).
+  * **Programs** ([The startup message](docs/design-programs.md#the-startup-message)): the profile, `liberx`'s
+    decoder, its fuzz targets and the descriptor table (`erx_prog_fd_mmap`, `erx_prog_fd_fstat`) take the `mem`
+    descriptor. Left: the session's mapping of a buffer's pages into a program's sub-space while it builds it, at
+    a first page below 2^32, and `erx_program:start/1` taking such a descriptor (it takes no descriptors yet); the
+    personality's `mmap`, `fstat` and `lseek` calling the table, as `read` and `write` do not yet either, where
+    `munmap` must know that every `mmap` of a mem descriptor returns the one mapping the session made, read-write
+    whatever the protection asked; `fstat`'s modes (a pipe end a FIFO of 0600, a mem range a regular file of 0600)
+    checked against FreeBSD's `pipe_stat` and `shm_stat`, unverified, and a pipe end's size, 0 where FreeBSD
+    reports the bytes readable.
   * **Input from another domain** ([The display device](docs/design-display.md#the-display-device)):
     `abi/formats/input.txt`, its generated reader and writer and their fuzz target.
   * **The web** ([UIs: the browser renderer](docs/design-web.md#uis-the-browser-renderer)): `erx_ui_server` and

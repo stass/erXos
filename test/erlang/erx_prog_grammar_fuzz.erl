@@ -149,7 +149,7 @@ start() ->
                                         readers => []}}},
               {4, {socketpair, {3, 1}, #{rix => 1, lock => 108, wends => 2, writers => [], readers => []},
                    {4, 1}, #{wend => 2, ring => 110, rpage => 111, size => 65536, readers => []}}},
-              {5, {file, 7, read_write}}, {6, {dir, 8}}, {7, {socket, 9}}, {8, null}],
+              {5, {file, 7, read_write}}, {6, {dir, 8}}, {7, {socket, 9}}, {8, null}, {9, {mem, 16, 2}}],
       image => {object, 16#ffffffffffffff00}}.
 
 %% A notice of each case (docs/design-pipes.md#the-program-protocol).
@@ -214,7 +214,7 @@ random_leaf() ->
 
 %% Atoms that exist before any round: the profile's own, and ones it does not name.
 random_atom() ->
-    pick([read, write, read_write, pipe, socketpair, file, tty, dir, socket, dup, null, object, open, gone,
+    pick([read, write, read_write, pipe, socketpair, file, tty, dir, socket, dup, mem, null, object, open, gone,
           true, false, erx_start, erx_prog, sigint, sigterm, sigkill, pid, cwd, fds, wend, readers, writers,
           closed, drained, pipe_writer, pipe_writer_gone, pipe_reader, pipe_reader_gone, pipe_lost,
           pipe_server_lost, erlang, ok, undefined, error]).

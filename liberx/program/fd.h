@@ -27,6 +27,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include <erx/prog_profile.h>
@@ -35,7 +36,8 @@ struct erx_pipe_end;
 
 typedef enum erx_prog_obj_kind {
 	ERX_PROG_OBJ_NULL,	/* null: the one object of its kind, never let go */
-	ERX_PROG_OBJ_PIPE	/* a pipe end, the head of an erx_pipe_end_t */
+	ERX_PROG_OBJ_PIPE,	/* a pipe end, the head of an erx_pipe_end_t */
+	ERX_PROG_OBJ_MEM	/* a mem range the session mapped into the program (fd.c) */
 } erx_prog_obj_kind_t;
 
 /*
@@ -52,8 +54,9 @@ typedef struct erx_prog_obj {
 
 /*
  * Builds the table from the startup message's descriptors, which the plan
- * accepted (startup.h): a null object for null, and an end object set up
- * from its descriptor for a pipe's read or write end.  The event executor
+ * accepted (startup.h): a null object for null, an end object set up from
+ * its descriptor for a pipe's read or write end, and a mem object for a mem
+ * range, which names memory the session already mapped and maps nothing.  The event executor
  * calls it before main, alone.  ERX_OK, or the status of the first
  * descriptor that could not be set up, after which the program stops.
  */
@@ -71,10 +74,28 @@ int	erx_prog_fd_close(int fd);
  * read and write on slot fd, holding a counted reference for the call: a
  * count or a negative errno, -EBADF for an empty slot and -EINVAL for a
  * len above SSIZE_MAX, as FreeBSD refuses it.  null reads as the end of
- * the stream and takes every byte written, as /dev/null does.
+ * the stream and takes every byte written, as /dev/null does.  A mem range
+ * is no stream: both fail with -ESPIPE.
  */
 ssize_t	erx_prog_fd_read(int fd, void *buf, size_t len);
 ssize_t	erx_prog_fd_write(int fd, const void *buf, size_t len);
+
+/*
+ * mmap of slot fd (docs/design-programs.md#the-startup-message).  Only a
+ * mem range maps, and it is mapped already: with flags MAP_SHARED alone,
+ * offset 0, a len of 1 to the range's bytes and prot within PROT_READ |
+ * PROT_WRITE, *addr is the address the session mapped it at.  0, or
+ * -EBADF for an empty slot, -ENODEV for an object of another kind, -EINVAL
+ * for any other flags, offset or len, and -EACCES for any other prot.
+ */
+int	erx_prog_fd_mmap(int fd, size_t len, int prot, int flags, off_t offset, void **addr);
+/*
+ * fstat of slot fd: 0, or -EBADF for an empty slot.  null is a character
+ * device of mode 0666, a pipe end a FIFO of mode 0600 and size 0, and a mem
+ * range a regular file of mode 0600 whose size is its bytes (their parity
+ * with FreeBSD is unverified, TODO.md).  Every other field is 0.
+ */
+int	erx_prog_fd_fstat(int fd, struct stat *st);
 
 /*
  * The executor's: the end a report or a doorbell's label names by pipe and

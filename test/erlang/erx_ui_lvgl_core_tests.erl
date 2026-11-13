@@ -100,7 +100,8 @@ events(#shell{serial = N}) ->
      {event, 2, on_click, none},
      shown,
      {refused, {bad_tag, 1}},
-     {exit, 1}].
+     {exit, 1},
+     {lost, epipe}].
 
 %% Steps the core with Event and checks the result. An event the shell
 %% never sends must raise.
@@ -127,6 +128,7 @@ try_step(Event, #shell{core = Core} = Shell) ->
 expected_stop({damage, _, _, _}, #shell{present = {_, _, _}}) -> report_before_presented;
 expected_stop({refused, _} = Reason, _Shell) -> Reason;
 expected_stop({exit, _} = Reason, _Shell) -> Reason;
+expected_stop({lost, _} = Reason, _Shell) -> Reason;
 expected_stop(_Event, _Shell) -> none.
 
 %% What the shell learns from the event itself, before the actions.

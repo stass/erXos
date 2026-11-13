@@ -108,7 +108,7 @@ base() ->
                                         readers => []}}},
               {5, {socketpair, {3, 1}, #{rix => 1, lock => 108, wends => 2, writers => [], readers => [{0, 109}]},
                    {4, 1}, #{wend => 2, ring => 110, rpage => 111, size => 65536, readers => []}}},
-              {6, {file, 7, read_write}}, {7, {dir, 8}}, {8, {socket, 9}}, {9, null}],
+              {6, {file, 7, read_write}}, {7, {dir, 8}}, {8, {socket, 9}}, {9, null}, {10, {mem, 16, 2}}],
       image => {object, 16#ffffffffffffff00}}.
 
 valid() ->
@@ -148,7 +148,7 @@ mutations() ->
      {signal_repeated, {value, B#{sigmask => [sigint, sigint]}}, "order signals"},
      {no_case, {value, B#{fds => lists:keyreplace(9, 1, Fds, {9, erlang})}}, "no_case descriptor"},
      {cap_repeated, {value, B#{data_area => {101, 4}}}, "unique cap"},
-     {dup_of_dup, {value, B#{fds => Fds ++ [{10, {dup, 2}}]}}, "refers dup_target"},
+     {dup_of_dup, {value, B#{fds => Fds ++ [{11, {dup, 2}}]}}, "refers dup_target"},
      {dup_of_absent, {value, B#{fds => lists:keyreplace(2, 1, Fds, {2, {dup, 11}})}}, "refers dup_target"},
      {invalid_utf8, {value, B#{argv => [<<255>>]}}, "utf8 arg"},
      {zero_byte, {value, B#{argv => [<<"a", 0>>]}}, "text arg"},

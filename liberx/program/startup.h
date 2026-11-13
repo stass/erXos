@@ -57,9 +57,9 @@ typedef enum erx_prog_startup_cause {
  * walks argv and env to copy each string, and the event executor fds to
  * build the descriptor table (fd.h); they borrow the frame, which the
  * caller keeps unchanged while it uses them.  Walk a copy: next advances
- * the iterator it is handed.  Every descriptor fds holds is null or a
- * pipe's read or write end.  argc and envc count their strings, and
- * argv_bytes and env_bytes their lengths with one NUL each, which size the
+ * the iterator it is handed.  Every descriptor fds holds is null, a
+ * pipe's read or write end, or a mem range the session mapped (fd.h).
+ * argc and envc count their strings, and argv_bytes and env_bytes their lengths with one NUL each, which size the
  * copies; the check's args total bounds the two sums together by
  * ERX_PROG_ARGS_MAX.  cwd is the working directory's copy, NUL-terminated,
  * cwd_len bytes before the NUL.
@@ -98,7 +98,7 @@ typedef struct erx_prog_startup {
  * bytes of scratch; with erx_prog_scratch_bytes(len) bytes the check never
  * refuses for scratch.  Returns out->status.  The check bounds every view
  * it fills to the frame, and the plan keeps those views.  Every descriptor
- * must be null or a pipe's read or write end: liberx refuses a descriptor it
+ * must be null, a pipe's read or write end or a mem range: liberx refuses a descriptor it
  * cannot set up rather than start the program without it.
  */
 int	erx_prog_startup_plan(const uint8_t *frame, size_t len, void *scratch,

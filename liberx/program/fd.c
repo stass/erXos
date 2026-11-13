@@ -5,9 +5,10 @@
 
 /*
  * A program's descriptor table (fd.h).  The slots, every object's refs and
- * the list of live objects are table_lock's.  An object is linked into the
- * list with its first reference and unlinked with its last, under the lock,
- * so the executor finds only objects some slot or call still holds.  The
+ * the list of live objects are table_lock's.  A pipe end, the one kind a
+ * report names, is linked into the list with its first reference and
+ * unlinked with its last, under the lock, so the executor finds only ends
+ * some slot or call still holds; null and a mem range never join it.  The
  * object's own release runs after the lock is let go: a pipe end's waits
  * out an executor that found it before the unlink by taking the end's lock
  * (pipe.c), and sends its notices without the table lock held.
@@ -24,16 +25,39 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include "erx/abi.h"
 #include "liberx/program/fd.h"
+#include "liberx/program/pages.h"
 #include "liberx/program/pipe.h"
 
 static pthread_mutex_t table_lock = PTHREAD_MUTEX_INITIALIZER;
 static erx_prog_obj_t *slots[ERX_PROG_FDS_MAX];
 static erx_prog_obj_t *live;
 static erx_prog_obj_t null_obj = { .kind = ERX_PROG_OBJ_NULL };
+
+/*
+ * A mem range of the startup message: bytes of memory at address that the
+ * session mapped read-write into the program while it built it.  The
+ * program holds no capability to it, so the object owns nothing but itself:
+ * closing its last descriptor leaves the mapping, as closing a file's does.
+ * No report names it, so it never joins the live list.
+ */
+typedef struct erx_prog_mem {
+	erx_prog_obj_t	 obj;		/* first, so a head is its object */
+	uintptr_t	 address;
+	size_t		 bytes;
+} erx_prog_mem_t;
+
+static erx_prog_mem_t *
+mem_of(erx_prog_obj_t *obj)
+{
+	return ((erx_prog_mem_t *)obj);
+}
 
 /* Takes table_lock; a thread that holds an end's lock has broken the lock order and stops. */
 static void
@@ -60,6 +84,9 @@ obj_hold(erx_prog_obj_t *obj)
 			live = obj;
 		}
 		return;
+	case ERX_PROG_OBJ_MEM:
+		obj->refs++;
+		return;
 	}
 }
 
@@ -84,6 +111,8 @@ obj_drop(erx_prog_obj_t *obj)
 			obj->next->prev = obj->prev;
 		obj->prev = obj->next = NULL;
 		return (true);
+	case ERX_PROG_OBJ_MEM:
+		return (--obj->refs == 0);
 	}
 	return (false);
 }
@@ -97,6 +126,9 @@ obj_release(erx_prog_obj_t *obj)
 		return;
 	case ERX_PROG_OBJ_PIPE:
 		erx_pipe_release(erx_pipe_end_of(obj));
+		return;
+	case ERX_PROG_OBJ_MEM:
+		erx_prog_pages_give(obj, sizeof(erx_prog_mem_t));
 		return;
 	}
 }
@@ -123,14 +155,53 @@ fd_install(int fd, erx_prog_obj_t *obj)
 	return (ok);
 }
 
+/*
+ * A mem object for the range of pages the descriptor names.  The check holds
+ * the first page and the count to u32 from 1, so the range lies within
+ * 2^45 bytes; the arithmetic is checked all the same, and the size must fit
+ * fstat's off_t.
+ */
+static int
+mem_open(const erx_prog_descriptor_t *descriptor, erx_prog_mem_t **out)
+{
+	const uint64_t page = descriptor->u.mem.mem_page;
+	const uint64_t pages = descriptor->u.mem.mem_pages;
+	uint64_t address, bytes, end;
+	erx_prog_mem_t *mem;
+
+	if (__builtin_mul_overflow(page, (uint64_t)ERX_PAGE_SIZE, &address) ||
+	    __builtin_mul_overflow(pages, (uint64_t)ERX_PAGE_SIZE, &bytes) ||
+	    __builtin_add_overflow(address, bytes, &end))
+		return (ERX_EINVAL);
+	if (end > UINTPTR_MAX || bytes > (uint64_t)INT64_MAX)
+		return (ERX_EINVAL);
+	if ((mem = erx_prog_pages_take(sizeof(*mem))) == NULL)
+		return (ERX_ENOMEM);
+	*mem = (erx_prog_mem_t){
+		.obj = { .kind = ERX_PROG_OBJ_MEM },
+		.address = (uintptr_t)address,
+		.bytes = (size_t)bytes,
+	};
+	*out = mem;
+	return (ERX_OK);
+}
+
 /* One descriptor of the startup message into slot fd. */
 static int
 fd_setup_one(const erx_prog_fd_entry_t *entry)
 {
 	erx_pipe_end_t *end;
+	erx_prog_mem_t *mem;
 	int status;
 
 	switch (entry->descriptor.which) {
+	case ERX_PROG_DESCRIPTOR_MEM:
+		if ((status = mem_open(&entry->descriptor, &mem)) != ERX_OK)
+			return (status);
+		if (fd_install(entry->fd, &mem->obj))
+			return (ERX_OK);
+		erx_prog_pages_give(mem, sizeof(*mem));
+		return (ERX_EINVAL);
 	case ERX_PROG_DESCRIPTOR_NULL:
 		return (fd_install(entry->fd, &null_obj) ? ERX_OK : ERX_EINVAL);
 	case ERX_PROG_DESCRIPTOR_PIPE_WRITE:
@@ -242,6 +313,9 @@ erx_prog_fd_read(int fd, void *buf, size_t len)
 	case ERX_PROG_OBJ_PIPE:
 		result = erx_pipe_read(erx_pipe_end_of(obj), buf, len);
 		break;
+	case ERX_PROG_OBJ_MEM:
+		result = -ESPIPE;
+		break;
 	}
 	erx_prog_obj_put(obj);
 	return (result);
@@ -263,9 +337,69 @@ erx_prog_fd_write(int fd, const void *buf, size_t len)
 	case ERX_PROG_OBJ_PIPE:
 		result = erx_pipe_write(erx_pipe_end_of(obj), buf, len);
 		break;
+	case ERX_PROG_OBJ_MEM:
+		result = -ESPIPE;
+		break;
 	}
 	erx_prog_obj_put(obj);
 	return (result);
+}
+
+/* Whether a mmap of mem may return its mapping: the one way design-programs.md gives. */
+static int
+mem_map_check(const erx_prog_mem_t *mem, size_t len, int prot, int flags, off_t offset)
+{
+	if (flags != MAP_SHARED || offset != 0 || len == 0 || len > mem->bytes)
+		return (-EINVAL);
+	if ((prot & ~(PROT_READ | PROT_WRITE)) != 0)
+		return (-EACCES);
+	return (0);
+}
+
+int
+erx_prog_fd_mmap(int fd, size_t len, int prot, int flags, off_t offset, void **addr)
+{
+	erx_prog_obj_t *obj;
+	int result = -ENODEV;
+
+	if ((obj = erx_prog_fd_get(fd)) == NULL)
+		return (-EBADF);
+	switch (obj->kind) {
+	case ERX_PROG_OBJ_NULL:
+	case ERX_PROG_OBJ_PIPE:
+		break;
+	case ERX_PROG_OBJ_MEM:
+		result = mem_map_check(mem_of(obj), len, prot, flags, offset);
+		if (result == 0)
+			*addr = (void *)mem_of(obj)->address;
+		break;
+	}
+	erx_prog_obj_put(obj);
+	return (result);
+}
+
+int
+erx_prog_fd_fstat(int fd, struct stat *st)
+{
+	erx_prog_obj_t *obj;
+
+	if ((obj = erx_prog_fd_get(fd)) == NULL)
+		return (-EBADF);
+	memset(st, 0, sizeof(*st));
+	switch (obj->kind) {
+	case ERX_PROG_OBJ_NULL:
+		st->st_mode = S_IFCHR | 0666;
+		break;
+	case ERX_PROG_OBJ_PIPE:
+		st->st_mode = S_IFIFO | 0600;
+		break;
+	case ERX_PROG_OBJ_MEM:
+		st->st_mode = S_IFREG | 0600;
+		st->st_size = (off_t)mem_of(obj)->bytes;
+		break;
+	}
+	erx_prog_obj_put(obj);
+	return (0);
 }
 
 erx_pipe_end_t *
@@ -281,6 +415,8 @@ erx_prog_fd_find_end(uint32_t pipe, uint32_t end)
 		case ERX_PROG_OBJ_PIPE:
 			if (erx_pipe_end_of(obj)->pipe == pipe && erx_pipe_end_of(obj)->end == end)
 				found = erx_pipe_end_of(obj);
+			break;
+		case ERX_PROG_OBJ_MEM:
 			break;
 		}
 	}
@@ -303,6 +439,8 @@ erx_prog_fd_each_end(void (*fn)(erx_pipe_end_t *))
 			erx_pipe_end_lock(erx_pipe_end_of(obj));
 			fn(erx_pipe_end_of(obj));
 			erx_pipe_end_unlock(erx_pipe_end_of(obj));
+			break;
+		case ERX_PROG_OBJ_MEM:
 			break;
 		}
 	}

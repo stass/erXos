@@ -21,12 +21,12 @@
  * field of it lies within its kind's range: pipe and end numbers from 1, a
  * read end's index to 63, a lane size of 16 or 64 KiB, capabilities other
  * than the null one and distinct within the frame, and an end state open or
- * gone.
+ * gone, and a mem range's first page and count from 1.
  *
  * The start-up plan of liberx/program/startup.h runs on every start frame
  * and must agree with the check: a refused frame is refused with status 127
  * for the check's own refusal; an accepted one runs unless a descriptor
- * other than null or a pipe's read or write end refuses it at that
+ * other than null, a pipe's read or write end or a mem range refuses it at that
  * descriptor's fd; and a plan that runs keeps only views inside the frame,
  * counts and sums its texts as those views hold them, copies cwd whole with
  * its NUL and carries every scalar.
@@ -204,6 +204,10 @@ read_descriptor(const erx_prog_descriptor_t *d)
 		read_read_end(&d->u.socketpair.read_end);
 		read_write_readers(d->u.socketpair.write_end.readers);
 		break;
+	case ERX_PROG_DESCRIPTOR_MEM:
+		if (d->u.mem.mem_page == 0 || d->u.mem.mem_pages == 0)
+			abort();
+		break;
 	default:
 		break;
 	}
@@ -256,7 +260,7 @@ env_bytes(erx_prog_env_iter_t it)
 
 /*
  * The fd of the first descriptor liberx cannot set up, or -1 when every one
- * is null or a pipe's read or write end, the kinds startup.h names.
+ * is null, a pipe's read or write end or a mem range, the kinds startup.h names.
  */
 static int
 first_unsupported_fd(erx_prog_fds_iter_t it)
@@ -268,6 +272,7 @@ first_unsupported_fd(erx_prog_fds_iter_t it)
 		case ERX_PROG_DESCRIPTOR_NULL:
 		case ERX_PROG_DESCRIPTOR_PIPE_WRITE:
 		case ERX_PROG_DESCRIPTOR_PIPE_READ:
+		case ERX_PROG_DESCRIPTOR_MEM:
 			break;
 		default:
 			return (entry.fd);
