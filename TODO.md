@@ -1166,9 +1166,10 @@ it; git history is the record of completed work.
   the word once a request is answered. A refusal partway through the start also leaves `irpt_en` set; clear it
   before `ignore`.
 * [Medium] `tools/lib/erx/raspi4b_shell.rb`, the SD model tests of docs/design-storage.md ("Verification and testing"):
-  the `tcg-sd-card` cell identifies the card, reads the partition table, mounts littlefs and writes and reads back two
-  blocks outside every partition, on the packed card only, a 2 GiB standard-capacity card. Still to come: a file
-  written and synced at `/data` and read back after the storage domain is killed and restarted, a 4 GiB
+  the `tcg-sd-card` cell identifies the card, reads the partition table, mounts littlefs, writes a file at root's
+  `/data` and finds its bytes in the card's data partition, and writes and reads back two
+  blocks outside every partition, on the packed card only, a 2 GiB standard-capacity card. Still to come: the
+  `/data` file read back after the storage domain is killed and restarted, a 4 GiB
   high-capacity card, the seeded medium whose data partition holds a different file, and the recovery test under a write load.
 * [Low] `erlang/apps/erx_blk/src/erx_blk_sd_host.erl`: OUT_OF_RANGE is type X in Physical Layer Table 4-42 (p.120), so a card may report the last-sector out of range of a CMD18 in the next command's R1 instead of Auto CMD12's; the transfer machine exempts only Auto CMD12's, so such a card would fail the next request and restart the storage domain. The board probe should record whether a card does this; if one does, exempt OUT_OF_RANGE alone in the first R1 after such a read.
 * [Medium] `erlang/apps/erx_net/erxos/erx_virtio_net.erl`, `erlang/apps/erx_blk`: no test runs a real driver under a hostile device. `test/integration/runtime_device_test.rb` breaks a hosted stand-in's queue under a driver written in the test, so the drivers' own broken-queue path (`error({virtio_net, broken, rx})`), its supervision and restart, and that the crash ends only the driver process (the network driver; the block driver's crash ends the storage domain) are unchecked; plan.md's 1b-E exit criterion asks for it under QEMU. Running `erx_virtio_net` over a virtio stand-in hosted, or a hostile model device under QEMU, would settle it.

@@ -24,7 +24,7 @@ module Erx
   # tcg-4cpu: the boot reaches the development banner and the release with one scheduler
   # per CPU, four; root's session takes the mini UART and its command shell starts the Erlang
   # shell, where the person types a sum, a line with a mistake rubbed out, a listing of /data
-  # (empty, since nothing is mounted there), an output longer than the mini UART's FIFOs, and
+  # (eio, since no card is on the bus to serve it), an output longer than the mini UART's FIFOs, and
   # a debug log record whose tab and escape the console writes as text; then Ctrl-G's menu
   # gives the system's command shell, whose Erlang shell halts the machine, and BL31's reset
   # ends QEMU under -no-reboot. Its serial log must then hold each configured domain's line
@@ -39,11 +39,20 @@ module Erx
   # process (erx_blk_sd, docs/design-storage.md, "The SD host controller") identifies the
   # card only through interrupts of its line, 158, so its line in the kernel log, which
   # names the card's sectors, shows the line fires and the card answered; the block
-  # service's partition table and littlefs's mount show reads of many blocks. The system
+  # service's partition table and littlefs's mount show reads of many blocks. Before
+  # that, root's session writes DATA_FILE under /data, its data facet, and reads it back
+  # (DATA_PROBE); after QEMU exits the harness finds the file's bytes in the card file's
+  # data partition (check_card_data!), so /data is the card's littlefs volume. The system
   # domain's Erlang shell then probes the storage domain over erpc, as the harness and not
   # as a client (CARD_PROBE): it writes two blocks through erx_blk at PROBE_SECTOR, which
   # no partition holds, and reads them back; after QEMU exits the harness finds the same
   # bytes at that sector of the card's file (check_card_write!).
+  #
+  # Seeded by hand, over a card file: check_card_data! refuses the card as packed, whose
+  # data partition holds a fresh volume, so the check reads the bytes from the card and
+  # not from anywhere else. A manifest that grants no data facet fails earlier, at
+  # data-written: root's /data is then its release's read-only directory, and the write
+  # answers erofs.
   #
   # Seeded by hand, in an image of its own: a device process that skips the wait for the
   # buffer's read-ready interrupt before reading a block's words fails identification at
@@ -63,10 +72,25 @@ module Erx
     STEP_SECONDS = 180
     SYSTEM_SHELL_KEY = 's'
     HALT = "erlang:halt().\r"
-    # The Pi's manifest grants root's session no data facet, so nothing is mounted at /data
-    # and the path is the session release's own empty directory (docs/design-files.md, "A
-    # facet's mount").
+    # The Pi's manifest grants root's session the data facet, mounted at /data. tcg-4cpu
+    # boots with no card, so the storage domain has no volume and provides no mint for
+    # data, and the session's facet answers eio, never an empty directory
+    # (docs/design-files.md, "A facet's mount").
     DATA_LISTING = "file:list_dir(\"/data\").\r"
+    # The file root's session writes on the card's volume, and its bytes, which nothing
+    # else on the card holds.
+    DATA_FILE = '/data/sd-probe'
+    DATA_BYTES = 'erXos /data probe: a file on the SD card\'s littlefs volume.'.b.freeze
+    # Typed at root's Erlang shell in tcg-sd-card: writes DATA_FILE and reads it back,
+    # {ok,true}. A session takes the console only once its files grants have settled
+    # (docs/design-system.md, "A session takes the console"), so the first write should
+    # succeed; the retry on eio, once a second up to DATA_TRIES times, is defensive only,
+    # and any other answer, erofs where no facet is mounted, ends the try.
+    DATA_TRIES = 150
+    DATA_PROBE = "begin B = <<\"#{DATA_BYTES}\">>, " \
+                 "W = fun Try(0) -> timeout; Try(N) -> case file:write_file(\"#{DATA_FILE}\", B) of " \
+                 '{error, eio} -> timer:sleep(1000), Try(N - 1); Other -> Other end end, ' \
+                 "R = W(#{DATA_TRIES}), {R, file:read_file(\"#{DATA_FILE}\") =:= {ok, B}} end.\r"
     STUB_DIRECTORY = 'build/raspi4b-stub'
     CODEC = ABI::Generated::CODEC
     SECTOR_BYTES = CODEC.constant('mbr_sector_size')
@@ -153,7 +177,8 @@ module Erx
       end
       [*release_checkpoints(CPUS),
        point('root_1-shell', line(SessionDomain::SESSION_SHELL_BANNER), type: run::ERL_LINE),
-       shell.merge(name: 'root_1-erlang-shell', type: run::CTRL_G).freeze,
+       shell.merge(name: 'root_1-erlang-shell', type: DATA_PROBE).freeze,
+       point('data-written', /\A\{ok,true\}\r*\n\z/n, seconds: STEP_SECONDS + DATA_TRIES, type: run::CTRL_G),
        point('ctrl-g-menu', run::CTRL_G_MENU, type: SYSTEM_SHELL_KEY),
        point('system-shell', run::MENU_LEFT, type: self.class.kernel_log(CARD_LINE)),
        point('sd-identified', CARD_IDENTIFIED, verify: sectors, type: self.class.kernel_log(PARTITIONS)),
@@ -173,7 +198,7 @@ module Erx
        point('sum-echo', /1\+1\.\r*\n\z/n),
        point('sum-answer', /\A2\r*\n\z/n, type: "1+2\x7f3.\r"),
        point('edit-answer', /\A4\r*\n\z/n, type: DATA_LISTING),
-       point('data-empty', /\A\{ok,\[\]\}\r*\n\z/n, type: "io:put_chars(lists:duplicate(#{long},$x)),io:nl().\r"),
+       point('data-unserved', /\A\{error,eio\}\r*\n\z/n, type: "io:put_chars(lists:duplicate(#{long},$x)),io:nl().\r"),
        point('long-output', /x{#{long}}/n),
        point('long-answer', /\Aok\r*\n\z/n, type: ProductionImage::Run::LOG_AFTER_HANDOFF),
        # The record the session logs: the console reads it from the log and writes it.
@@ -268,8 +293,23 @@ module Erx
       card = File.join(OutputDirectory.prepare(root: @root, path: File.join(@root, STUB_DIRECTORY)), BootPartition::IMAGE)
       FileUtils.cp(inputs.fetch(:card), card)
       report = boot(inputs, dtb: inputs.fetch(:dtb), points: card_checkpoints(card), machine_end: true, disks: [QemuPlan::Disk.new(path: card)])
+      check_card_data!(card)
       check_card_write!(card)
       report
+    end
+
+    # Raises unless the card file's data partition, from its first sector to the card's
+    # end, holds DATA_BYTES. A file that small is inline in its directory's metadata, so
+    # its bytes lie in one block; each read overlaps the next by DATA_BYTES less one byte,
+    # so bytes across two reads are found too.
+    def check_card_data!(card)
+      start = CODEC.constant('medium_data_start') * SECTOR_BYTES
+      chunk = 1 << 22
+      overlap = DATA_BYTES.bytesize - 1
+      found = File.open(card, 'rb') do |file|
+        (start...file.size).step(chunk).any? { |at| file.pread(chunk + overlap, at).include?(DATA_BYTES) }
+      end
+      raise Error, "raspi4b: the card's data partition does not hold #{DATA_FILE}'s bytes after the run" unless found
     end
 
     def check_card_write!(card)

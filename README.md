@@ -333,8 +333,8 @@ Error in process <0.150.0> with exit value:
   On the model the storage domain drives the SD card through EMMC2
   (`erx_blk_sd`, interrupt-driven): it identifies the card, the block
   service admits its partition table and littlefs mounts its volume, and
-  blocks written over the driver reach the card image. The manifest grants
-  no `data` facet, so `/data` is still an empty directory, and the driver
+  blocks written over the driver reach the card image; `/data` is that
+  volume, and a file written there reaches the card image too. The driver
   has not run on a real board. The manifest configures a network domain
   that runs the stack over the Ethernet driver (`erx_genet`, as
   `genet0`); the model has no Ethernet, so there the domain's first
@@ -769,7 +769,9 @@ bytes (`make check-reproducible`). The raspi4b QEMU suite packs the same
 way and boots `boot/`'s files on QEMU's model, so it replaces what
 `make pack` left there. Writing the card and what
 to expect on a board is in
-[design-platforms.md](docs/design-platforms.md#trying-a-card-on-a-board).
+[design-platforms.md](docs/design-platforms.md#trying-a-card-on-a-board),
+and the checklist for the SD card and Ethernet on a board
+[after it](docs/design-platforms.md#the-sd-card-and-ethernet-on-a-board).
 
 ## Guest and stock oracle
 

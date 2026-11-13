@@ -13,9 +13,10 @@
 # kind a runtime drives, so the domain holds it with the unit and is given no record of it
 # and no register window onto it, and no driver opens it (docs/design-shared-devices.md,
 # "The unit rule"). erx_blk drives EMMC2's sdhci record with its SD device process
-# (erx_blk_sd), which logs that the SD card is not driven when no card answers; with no
-# data window, nothing is mounted at /data and no data facet is granted. The network domain is
-# described with its rows below. The display domain comes with stage (d).
+# (erx_blk_sd), which logs that the SD card is not driven when no card answers. The domain
+# holds the card's data window and serves /data, littlefs on that partition, as the data
+# facet, with the rows below. The network domain is described with its rows below. The
+# display domain comes with stage (d).
 #
 # The system domain holds three units (docs/design-platforms.md, "Raspberry Pi 4 Model B"):
 # two of one register page of the board each, the console's, the mini UART's page, which
@@ -206,6 +207,15 @@ unit framebuffer
 unit block
   placement "sd"
   holder @domain.storage
+# data: the card's data partition, whose sectors the medium layout gives (partition 0,
+# abi/medium.txt), read-write for the storage domain alone, as on QEMU virt.
+window data
+  holder @domain.storage
+  device "/emmc2bus/mmc@7e340000"
+  role data
+  partition 0
+  rights read,write
+  image none
 domain storage
   principal @principal.system
   limits @limits.storage
@@ -228,6 +238,36 @@ facet storage_ctl
   reductions 100000
   period_ns 1000000000
   max_heap_size 65536
+# data: QEMU virt's rows (config/manifest/qemu-virt-development.txt, whose comment gives
+# their max_request, in_flight and max_heap_size): one erx_fs grant of /data's tree for
+# each grantee, the system domain and each session made from root's template, read-write
+# and bound to the grantee's domain id. Each grantee mounts it at /data
+# (docs/design-files.md, "A facet's mount"). A boot with no card on EMMC2 has no volume,
+# so the storage domain provides no mint for data, the grants stay idle and /data answers
+# eio. The session's grant is one of its quota of four connections and the storage
+# domain's of two; the system domain's travels on the storage domain's system connection.
+service data
+  server @domain.storage
+  interface files
+facet data
+  grantee system
+  service @service.data
+  operations none
+  max_request 131072
+  in_flight 16
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 262144
+facet data_session
+  name "data"
+  grantee @session.system
+  service @service.data
+  operations none
+  max_request 131072
+  in_flight 16
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 262144
 service inspect
   server system
   interface inspect
@@ -258,9 +298,9 @@ facet inspect
 #
 # Its quota of two connections holds root's session and one more while a session is
 # replaced; its system connection counts against no quota (life_connections,
-# liberx/system/dom_life.c). At rest the machine holds four of its 11: the system
+# liberx/system/dom_life.c). At rest the machine holds five of its 11: the system
 # connections of root's session and of the storage and network domains, and the
-# session's net.
+# session's data and net.
 domain network
   principal @principal.system
   limits @limits.network

@@ -1360,6 +1360,169 @@ writes UART0, and the root task refuses the manifest.
 second adapter, if one was wired), from power-on to `dmesg`'s output.
 If the board stops early, the log up to the stop is what tells where.
 
+#### The SD card and Ethernet on a board
+
+A second pass by hand checks the two drivers QEMU's model runs only in
+part or not at all: `erx_blk_sd` on the board's EMMC2 with a real card,
+and `erx_genet` on the board's Ethernet. It is done once per change to
+either driver, to the storage or network domain's rows of the manifest,
+or to the network stack's DHCP client.
+
+**What the model cannot check**, beside
+[what it never checks](#bring-up-under-qemu): QEMU's `raspi4b` model has
+no Ethernet controller, so `erx_genet` never runs there. Its SD card is QEMU's SD
+model on programmed I/O, a 2 GiB card it presents as standard capacity,
+so the order in which the BCM2711's controller raises its events, its
+clock, a high-capacity card of the card's own size and what a real card
+reports for a read past its end are seen only on a board. The suite's
+run also ends at the machine's halt, so `/data` across a real reset is
+checked only here.
+
+**You need** the boot pass's board, card and console adapter, and an
+Ethernet cable to a network with a DHCP server and a route to the
+internet, such as a home router.
+
+In the steps, `%` is the command shell's prompt, which the console
+opens in root's session. Type each command as shown and press Enter.
+
+1. **Write the card.** The card under test is the one built from the
+   change: `make pack PLATFORM=raspi4b`'s `sdcard.img`, written as in
+   **Write the card** above, or the same image compressed,
+   `sdcard-DIGEST.img.xz` with its build record
+   `sdcard-DIGEST.img.receipt.json`, as the website names a card, by the
+   first 16 hexadecimal digits of the card image's SHA-256. Check a
+   compressed card before writing it:
+
+   ```sh
+   xz -dc sdcard-DIGEST.img.xz | shasum -a 256
+   ```
+
+   prints the card's whole SHA-256 that its build record names, which
+   starts with `DIGEST`. Find the card as in
+   **Write the card** above (`diskutil list` on macOS; on FreeBSD,
+   `geom disk list`, where it is `/dev/daN`), check its size and name
+   twice, then on macOS:
+
+   ```sh
+   diskutil unmountDisk /dev/diskN
+   xz -dc sdcard-DIGEST.img.xz | sudo dd of=/dev/rdiskN bs=1m
+   diskutil eject /dev/diskN
+   ```
+
+   or on FreeBSD:
+
+   ```sh
+   xz -dc sdcard-DIGEST.img.xz | sudo dd of=/dev/daN bs=1m
+   ```
+
+   `dd` ends with `2147483648 bytes transferred`, the card image's 2 GiB.
+2. **Boot.** Put the card in the Pi, plug the Ethernet cable in, start
+   logging on the adapter, then power the Pi. Expect the boot pass's
+   lines 1 to 4, ending with the `%` prompt.
+3. **The card is identified.**
+
+   ```sh
+   dmesg | grep erx_blk
+   ```
+
+   prints a line that ends
+   `erx_blk: SD card, high capacity, N sectors, 4-bit bus at F Hz`,
+   where N times 512 is the card's size in bytes (about 62,500,000
+   sectors for a 32 GB card), and a line that ends
+   `erx_blk_service: partition table admitted; W windows`. Then
+   `dmesg | grep erx_lfs` prints a line that ends `erx_lfs: volume mounted`.
+   A line `erx_blk: the SD card is not driven: REASON` instead means the
+   driver refused the card, and REASON says at which step.
+4. **`/data` is the card's volume.** `mount` prints, among its lines,
+   one that starts `grant` and holds `on /data`. On a freshly written
+   card `ls /data` prints nothing. Then
+
+   ```sh
+   echo written on the board > /data/hello
+   cat /data/hello
+   ```
+
+   prints `written on the board`. A write that fails with a read-only
+   file system error (`erofs`) means `/data` is not mounted; one that
+   fails with an I/O error (`eio`) means it is mounted but the storage
+   domain does not serve it, which step 3's lines explain.
+5. **`/data` survives a reset.** Wait five seconds, then reset the
+   machine from the system's own shell: press Ctrl-G, which prints
+   `erx_console: Ctrl-G menu`; press `s`, which gives the system's
+   command shell and its `%` prompt; type `erl` and Enter, then
+   `init:reboot().` and Enter, which asks for the ordered end `reset`
+   ([design-system.md](design-system.md#shutting-down)). The board
+   resets and boots again from BL31's banner. (`erlang:halt().` asks
+   for `off` instead, and the board then halts in the firmware.) If it
+   stays silent for a minute, power it off and on, and send back the
+   log. At the `%` prompt, `cat /data/hello` prints
+   `written on the board`.
+6. **`genet0`'s link is up.**
+
+   ```sh
+   dmesg | grep erx_genet
+   ```
+
+   prints a line that ends `erx_genet: GENET v5, mtu 1500` and then one
+   that ends `erx_genet: link up, 1000 Mb/s full duplex` (100 or 10 Mb/s
+   with a slower switch port). A line `erx_genet: the network device is
+   not driven: REASON` means the driver refused the controller.
+7. **A DHCP lease.**
+
+   ```sh
+   ifconfig genet0
+   ```
+
+   prints four lines in FreeBSD's layout:
+
+   ```
+   genet0: flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
+   	ether MAC
+   	inet A netmask M broadcast B
+   	status: active
+   ```
+
+   where MAC is the board's Ethernet address and A the address the
+   network's DHCP server leased, which the router's list of leases
+   shows under that MAC. With no `inet` line there is no lease yet: run
+   the command again after 30 seconds. `status: no carrier` means the
+   link is down.
+8. **The gateway answers.** With G the router's address (its own pages
+   show it; on many home networks it is A with its last number
+   replaced by 1):
+
+   ```sh
+   ping -c 3 G
+   ```
+
+   prints three `64 bytes from G` lines and
+   `3 packets transmitted, 3 packets received, 0.0% packet loss`.
+9. **Names resolve.**
+
+   ```sh
+   host www.freebsd.org
+   ```
+
+   prints one or more lines `NAME has address X`, where NAME is
+   `www.freebsd.org` or, when that is an alias, the name a line
+   `www.freebsd.org is an alias for NAME.` gives before them (IPv6
+   lines may follow). Then `ping -c 3 X`,
+   with one of those addresses, shows replies from beyond the router.
+   `;; connection timed out; no servers could be reached` means the
+   lease named no name server that answers.
+
+**When a step fails**, send back the whole console log from power-on,
+with the failing command and what it printed, and the output of `dmesg`
+typed right after it: it holds the drivers' lines (`erx_blk`,
+`erx_blk_service`, `erx_lfs`, `erx_genet`) and, when a domain ends, the
+system's line `erx_domain: configured domain NAME (domain N) ended,
+REASON; restarting it`. While the storage domain serves no volume,
+`/data` answers `eio`, so the start service's lines
+`erx_starter: rc.conf cannot be read (failure N): eio` follow, at
+failures 1, 2, 4, 8 and so on; they are a symptom of step 3's failure,
+not a fault of their own. Name the card's make and size, and for an
+Ethernet step the switch or router the cable goes to.
+
 ## Interfaces
 
 * **`hw/kernel_devices.txt`**, the device table, read by the kernel's
