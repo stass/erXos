@@ -1053,7 +1053,8 @@ request its one-shot `tryboot` flag
   Each slot's `config.txt` leaves `kernel_watchdog_partition` unset, so a
   watchdog reset boots the slot `autoboot.txt` names, as every other reset
   does. Setting the EEPROM is part of installing erXos on a board, and
-  each board's port records the bootloader version its trial path needs.
+  each board's port records the bootloader version its trial path needs; the
+  Raspberry Pi 4's is 2022-12-01 ([the card's checklist](#trying-a-card-on-a-board)).
 * **The reset count**, the count of consecutive unordered ends
   ([design-storage.md](design-storage.md#system-updates)), is a sector of
   its own in the record partition's reserved area, alone in its MiB, which
@@ -1292,6 +1293,30 @@ make pack PLATFORM=raspi4b
 ```
 
 It writes `build/production-image/raspi4b/sdcard.img`.
+
+**The bootloader must be 2022-12-01 or later.** The card's partition 1
+holds only `autoboot.txt` with `tryboot_a_b=1`, and each slot holds its
+own `config.txt`. A bootloader older than the 2022-12-01 release does not
+know `tryboot_a_b`: the 2022-10-18 beta first loaded `config.txt` in
+that mode, and the 2022-12-01 release made it the default
+([research](research-boards-storage.md#booting-a-chosen-partition-on-the-raspberry-pi)).
+On a Pi 4 (board revision c03112) with such a bootloader the card
+showed nothing at all on the UART and the green LED stayed on, with
+or without a card, where the Raspberry Pi documentation has it flash
+during card activity; after the reflash below the same card booted. A
+card with one boot partition still boots on such a board, which tells a
+bootloader that is too old from a bad card. To read a board's bootloader build date, boot a
+Raspberry Pi OS that has it, or read
+`/proc/device-tree/chosen/bootloader/build-timestamp`; or just reflash:
+
+1. On the development host, open Raspberry Pi Imager and pick the
+   Raspberry Pi 4 as the device.
+2. As the operating system pick *Misc utility images > Bootloader > SD
+   Card Boot*, and write it to a spare card (not the erXos card).
+3. Put that card in the Pi and power it. Wait until the green LED flashes
+   in a steady pattern (the documentation adds a green screen on an HDMI
+   display), then power the Pi off.
+4. Take the spare card out. The EEPROM now holds a current bootloader.
 
 **Write the card** on macOS. Insert the card, then find it:
 

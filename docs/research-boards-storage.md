@@ -152,6 +152,24 @@ updates", and `config_txt.html`):
   On the Pi 5, a partition counts as bootable only if it holds a
   `config.txt`. The pages read state no model or bootloader version for
   `autoboot.txt` itself.
+  Note, read 2026-11-13: the release notes of the Pi 4's bootloader
+  (`firmware-2711/release-notes.md` of `raspberrypi/rpi-eeprom` at commit
+  `3831e51dba65f4493f3f88c1d049de73165c082e`, SHA-256
+  `4d02b93824cf8062283db18256e9149f86696e032e9b5f0582c2040dae12c33a`) do
+  state the version. The 2022-10-18 BETA entry, "Tryboot enhancements for
+  A/B partition booting", lists "Load config.txt instead of tryboot.txt if
+  tryboot_a_b=1 in autoboot.txt" (l.630-634), and the 2022-12-01 entry
+  promotes it to the DEFAULT release with "[tryboot] conditional statement
+  + tryboot_a_b mode" (l.603-605). A bootloader older than 2022-12-01 does
+  not know `tryboot_a_b`. A Pi 4 (board revision c03112) with such a
+  bootloader printed nothing on the UART and the card was never read when
+  it held erXos's A/B layout, while a one-partition card booted on the same
+  board. The reflash steps are in `boot-eeprom.adoc` of
+  `raspberrypi/documentation` at commit
+  `c6a64966af136da21a1e55551c5a395cb6987fce` ("Reflash the bootloader",
+  SHA-256 `57039700ff6803f9977bdd206ba2814b62618910730aa9a1fa4550b02ec6ad08`);
+  the LED's meaning is in `led_blink_warnings.adoc` of the same commit
+  (SHA-256 `e3ad992762c58b9a088684512911339cf4d580b739e429c5d0e4f9edfc268d0b`).
 * The firmware reports the flag "at `/proc/device-tree/chosen/bootloader/tryboot`"
   and "the final partition number used for booting" at
   `/chosen/bootloader/partition`.

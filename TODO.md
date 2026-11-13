@@ -6204,6 +6204,11 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Low] bootstrap, boot lines: print `/chosen/bootloader/build-timestamp` from the device tree
+  (`rpi-eeprom-update` of `raspberrypi/rpi-eeprom` at `3831e51dba65f4493f3f88c1d049de73165c082e`, l.48), so a
+  board report shows the bootloader version, which the Pi 4's A/B card needs to be 2022-12-01 or later
+  ([design-platforms.md](docs/design-platforms.md#trying-a-card-on-a-board)). It helps only once the firmware
+  has started erXos's code; an older bootloader prints nothing.
 * [Low] kernel and pipes, a pass reservation spanning a hand-off's batches
   ([design-kernel.md](docs/design-kernel.md#passing-capabilities),
   [design-pipes.md](docs/design-pipes.md#hand-offs)): `erx_cap_pass` reserves slots for its own
