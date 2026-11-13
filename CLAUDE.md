@@ -729,7 +729,8 @@ within about 20 percent of the length, write plain code.
   widget tree validator and every `ui.txt` reader, the input event
   validator, virtio-gpu responses and virtio-input events, the touch,
   keypad and encoder parsers, the web protocol codecs (Erlang and
-  TypeScript), the host tool's HTTP and WebSocket reader, and the HTTP and
+  TypeScript), the host tool's HTTP and WebSocket reader, the QEMU
+  harness's QMP reader and screenshot (PPM) decoder, and the HTTP and
   WebSocket parsing of the web front end's server (cowboy, cowlib, ranch)
   as the front end uses it. Fuzz targets build the same sources for the host;
   `make check-fuzz` runs each for its configured budget, at the milestone
