@@ -1232,6 +1232,16 @@ it; git history is the record of completed work.
   it. Give the pack index an entry kind for an empty directory (no data, prefix of no other path, which the open
   check already refuses), have the release file system's walk, lookup and listing answer it as a directory,
   extend the boot-image fuzz target and its corpus, and have the release write `system/data`.
+* [Medium] network, Pi 4 Ethernet MDIO (`erlang/apps/erx_net/erxos/erx_mdio.erl`): `poll/3` decides
+  each poll of the command register, up to 1,000 polls 10 us apart as FreeBSD does (`if_genet.c:1669,
+  1684-1692`), but an Erlang timer cannot sleep 10 us, so a transport would busy-poll a scheduler or
+  stretch the bound to a second per operation at 1 ms. The controller's transport design decides who runs
+  the loop (in the device NIF, as the SD controller's command register is, or in Erlang) before a
+  transport drives it.
+* [Low] network, Pi 4 Ethernet PHY (`erlang/apps/erx_net/erxos/erx_phy_c22.erl`): autonegotiation is
+  started once after the reset and never restarted, where FreeBSD restarts it while no link comes up
+  (`brgphy.c:356-383`), so a negotiation that sticks leaves the link down until the driver restarts.
+  Restart it every few link polls without a link if the board shows a stuck negotiation.
 * [Medium] manifest fuzz harness (`tools/fuzz/manifest_fuzz.c`, `tools/fuzz/manifest_verdicts.c`): `view_build`
   runs `view_check` only when the domain library admits the manifest, and a refusal is silent, so the library
   refusing a valid seed (the development manifest) leaves the target and `test/host/manifest_fuzz_test.rb` passing

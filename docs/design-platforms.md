@@ -323,6 +323,42 @@ instructions but not the cryptography extension, so SHA-256, which every
 EROFS block's check needs, runs in portable C on it
 ([design-storage.md](design-storage.md#performance)).
 
+**The Ethernet controller.** GENET's driver decides in three pure
+Erlang cores beside the network transports in
+`erlang/apps/erx_net/erxos/`; the transport around them, which reads
+and writes the registers, comes with the controller's own design.
+Register facts are FreeBSD's (`if_genet.c`, `if_genetreg.h`,
+`brgphy.c`, `brgphyreg.h`, `mii.h`, `miidevs`):
+
+* `erx_genet_rx` reads one receive descriptor, its status word and the
+  bytes of its 2 KiB buffer, a private copy the frame keeps alive, into a
+  frame or a drop with its reason. The
+  length field counts the two bytes of padding the controller writes
+  before the frame, so a frame is at most the buffer less those two
+  bytes; a status with the receive-error bit, without both start and
+  end of packet, or a length shorter than the padding and an Ethernet
+  header, past the buffer or past the bytes read is dropped. Every
+  descriptor handed to `batch/2` moves the consumer index by one, frame
+  or drop, so a bad frame never stalls the ring, and a producer index
+  more than a ring ahead is refused as a controller fault.
+* `erx_mdio` builds the MDIO command word of a clause 22 read or write
+  (busy 29, read failed 28, read 27, write 26, PHY 25:21, register
+  20:16, data 15:0) and decides each poll of it: wait while busy, up to
+  1,000 polls 10 us apart, then the data, `read_failed` or `timeout`.
+* `erx_phy_c22` is the PHY's state machine: a function from its state
+  and the result of its last MDIO operation to its next state, its next
+  operation and its reports. It resets the PHY, refuses any PHY but the
+  BCM54213PE (OUI `0x18c086`, model `0x0a`) with its ID, sets the
+  receive clock delay the board's `rgmii-rxid` wiring asks for
+  (`RGMII_SKEW_EN` in auxiliary control shadow 7, `GTXCLK_EN` clear in
+  shadow `0x1C`), advertises full duplex only, since the controller's
+  command register has a speed field and no duplex field (FreeBSD's
+  `if_genetreg.h:75-92`; unverified on the board), and autonegotiates. It then polls the link every
+  second, reading the status register twice because its link bit
+  latches low, and reports `{link, up, Speed}` for the auxiliary status
+  register's full-duplex resolution with that register's link bit set, `{link, down}` at every drop, and
+  `{failed, Reason}` at an MDIO error, after which the driver restarts.
+
 ### Raspberry Pi 5
 
 The BCM2712, with Cortex-A76 cores and a GIC-400, and RP1, the I/O
