@@ -287,7 +287,9 @@ class FakeMachine
       @received = opened ? 0 : @received + bytes.bytesize
       @io.write(@sender.frame(:credit, '', target: @received % (1 << 32))) if @sender && !opened
     end
-  rescue EOFError, IOError
+  # The relay hangs up when it is done with the machine, as a refused open makes it do;
+  # a credit written after that meets a closed socket.
+  rescue EOFError, IOError, Errno::EPIPE, Errno::ECONNRESET
     nil
   end
 
