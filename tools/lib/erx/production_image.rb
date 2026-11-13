@@ -93,30 +93,13 @@ module Erx
     # An image carries one domain release (ReleaseFiles.domain) with a boot script for
     # each name its manifest's domain rows and session templates give as their release
     # (domain_boots), and with it the one runtime image every domain runs. The build's
-    # boot table defines a script's applications under its name (docs/design-stopgap.md,
-    # "The production image"); the manifest only names the script, so two rows naming
-    # one cannot disagree on what it boots. The session script, which a principal's
-    # session domain boots, adds the network client (ReleaseFiles::NETWORK_ONLY), whose
-    # `grant` key the session template's arguments set, the command shell, the session's
-    # line to the web domain (ReleaseFiles::SESSION_ONLY) and erx_session
-    # (docs/design-domains.md, "Principals, sessions and quotas"); the storage script adds
-    # the block driver and littlefs's volume, which the system release does not ship
-    # (ReleaseFiles::STORAGE_ONLY; docs/design-stopgap.md, "littlefs in the storage domain"); the
-    # network script adds the network stack, which it starts permanent, so the stack's end
-    # ends the network domain (docs/design-network-stack.md, "The process tree"); the
-    # web script adds the web front end (ReleaseFiles::WEB_ONLY; docs/design-web.md); a name
-    # the table does not hold boots DOMAIN_APPLICATIONS, the applications every domain
-    # boots through. The development manifest's session template names the session
-    # script, and its storage, network and web rows the scripts of those names;
+    # boot table (ReleaseFiles::DOMAIN_BOOTS) defines a script's applications under its
+    # name; a name the table does not hold boots DOMAIN_APPLICATIONS, the applications
+    # every domain boots through. The development manifest's session template names the
+    # session script, and its storage, network and web rows the scripts of those names;
     # medium_boot's manifest configures a domain (MediumBoot.manifest), and a test image
     # may carry more scripts (build_test_image's domains).
     DOMAIN_APPLICATIONS = ReleaseFiles::DOMAIN_BASE
-    DOMAIN_BOOTS = { 'session' => [*DOMAIN_APPLICATIONS, 'erx_net_client', 'erx_shell', *ReleaseFiles::SESSION_ONLY,
-                                   'erx_session'].freeze,
-                     'storage' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::STORAGE_ONLY].freeze,
-                     'network' => [*DOMAIN_APPLICATIONS, 'erx_net'].freeze,
-                     'web' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::WEB_ONLY].freeze,
-                     'display' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::DISPLAY_ONLY].freeze }.freeze
 
     # Refuses a test script (ReleaseFiles::DomainBoot#test) among domains unless the image
     # is a test image, whose archive flags mark its test code, so no image without the
@@ -127,7 +110,7 @@ module Erx
     end
 
     # The domain boot script named name, with the applications the boot table gives it.
-    def self.domain_boot(name) = ReleaseFiles.domain_boot(name, applications: DOMAIN_BOOTS.fetch(name, DOMAIN_APPLICATIONS))
+    def self.domain_boot(name) = ReleaseFiles.domain_boot(name, applications: ReleaseFiles::DOMAIN_BOOTS.fetch(name, DOMAIN_APPLICATIONS))
     # A domain's runtime image in the archive: the interpreter's, under the flavour
     # erx_domain's spec names it by (docs/design-domains.md, "Erlang interface"), and the
     # artifact name a domain row's runtime takes. It sorts after domains/ and before

@@ -12,11 +12,12 @@ module Erx
   # module of a display client, so no draw decoder, picture decoder, font reader, widget
   # module, terminal or pixel allocator reaches the display domain, and none of the
   # display's own modules names one. The release takes whole applications, so the check
-  # is over the display side's applications (ReleaseFiles::DISPLAY_ONLY), module by module:
+  # is over the display side's applications, those the display script of the boot table
+  # (ReleaseFiles::DOMAIN_BOOTS) adds to every domain's, module by module:
   #
   # * a module one of them lists is a client module when a client application
-  #   (ReleaseFiles::CLIENT_ONLY) lists it too, or when its name is of a client family
-  #   (CLIENT_FAMILIES), so a client module moved into the display side is caught by its
+  #   (CLIENT, what the client script adds to the display's) lists it too, or when its
+  #   name is of a client family (CLIENT_FAMILIES), so a client module moved into the display side is caught by its
   #   name, and a client application put on the display side by its modules;
   # * a source of theirs names a client module, as a call, an apply's module literal, a
   #   quoted atom or a string, once comments and documentation are removed: the dependency
@@ -28,6 +29,8 @@ module Erx
     # erx_inflate, the widget trees, the terminal and its emulator, the pixel allocator, fonts and the client's
     # window library (docs/design-display.md, "What runs where").
     CLIENT_FAMILIES = /\Aerx_(?:draw|ui|vt|term|font|png|inflate|pixels|win)(?:_|\z)/
+    DISPLAY = (ReleaseFiles::DOMAIN_BOOTS.fetch('display') - ReleaseFiles::DOMAIN_BASE).freeze
+    CLIENT = (ReleaseFiles::DOMAIN_BOOTS.fetch('client') - ReleaseFiles::DOMAIN_BOOTS.fetch('display')).freeze
     Violation = Data.define(:where, :rule) do
       def to_s = "display release (G9): #{where}: #{rule}"
     end
@@ -56,7 +59,7 @@ module Erx
         names.select { |name| File.directory?(File.join(root, ErlangApps.source(name))) }
              .to_h { |name| [name, read_application(root, name)] }
       end
-      violations(display: read.call(ReleaseFiles::DISPLAY_ONLY), client: read.call(ReleaseFiles::CLIENT_ONLY))
+      violations(display: read.call(DISPLAY), client: read.call(CLIENT))
     end
 
     def read_application(root, name)

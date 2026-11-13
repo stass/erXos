@@ -74,7 +74,7 @@ class DomainImageTest < Minitest::Test
     shipped = paths.filter_map { |path| path[%r{\Adomains/erxos/lib/([a-z_]+)-}, 1] }.uniq.sort
     # The release ships each application once, of every boot script the manifest names:
     # the session template's and the storage domain's.
-    assert_equal %w[session storage].flat_map { |name| Erx::ProductionImage::DOMAIN_BOOTS.fetch(name) }.uniq.sort, shipped
+    assert_equal %w[session storage].flat_map { |name| Erx::ReleaseFiles::DOMAIN_BOOTS.fetch(name) }.uniq.sort, shipped
   end
 
   def test_the_system_run_stays_whole

@@ -616,7 +616,7 @@ it; git history is the record of completed work.
   (QEMU virt's virtio-gpu at `/virtio_mmio@a001e00`, 9 MiB of DMA memory) and the Pi's `framebuffer` unit, and no
   manifest of the tree places them; the `display_domain` suite boots a manifest of its own
   (`DisplayDomain.manifest`: the site manifest, an eighth of a CPU, 24 MiB and the unit). The domain release has
-  the display boot script (`ProductionImage::DOMAIN_BOOTS`); the development manifest's row needs a CPU grant,
+  the display boot script (`ReleaseFiles::DOMAIN_BOOTS`); the development manifest's row needs a CPU grant,
   which the system share's reserve has no room for (storage, network and web take its 2,250 mcpu), and on QEMU
   virt room: the development manifest leaves 2.5 MiB of `root_memory` unpromised, the gpu's 9 MiB of DMA memory,
   charged to the system's budget, raises the contiguous pool from 2 MiB to 16 MiB, and the domain's own budget
@@ -867,10 +867,6 @@ it; git history is the record of completed work.
   is an `exit(normal)` inside a closure; have the core own the lookup by pid (`update_from`, `ended_from`, `down`
   inputs) and make the close an explicit clause. `perform/2` also takes any pid the line answers as a view;
   require the line's domain (`erx:owner/1`).
-* [Low] build, the system release's applications (`tools/lib/erx/release_files.rb`, `SYSTEM_APPLICATIONS`): the
-  system release ships every application less three hand-kept lists (`STORAGE_ONLY`, `WEB_ONLY`, `SESSION_ONLY`),
-  so a new domain-only application left out of them starts in the system domain unseen. Derive the system set
-  from an allowlist, or the exclusions from the domain boot table.
 * [Medium] `erlang/apps/erx_web_line/src/erx_web_value.erl`, [Values](docs/design-web.md#values): a huge integer's
   `leading/1` (a power of ten and a bignum division) costs 110-160 ms for the largest bignum and is charged only
   its 4 KiB print, so about 15 of them fit one projection, about 2 s of the session's CPU per update (13 copies
@@ -1547,7 +1543,7 @@ it; git history is the record of completed work.
 * [Medium] hosted runtime test, network rows (`test/integration/runtime_hosted_smoke_test.rb`,
   `test_init_runs_from_the_archive_alone`): the rows `gen_tcp:listen(0, [])` (expects `{error,enotsup}`) and
   `gen_udp:open(0, [])` (expects an `erx_gen_udp` socket) assume the system release ships `erx_net`, but it has
-  not since the stack left the system domain (`ReleaseFiles::NETWORK_ONLY`), so the first answers `undefined
+  not since the stack left the system domain (`ReleaseFiles::SYSTEM_APPLICATIONS`), so the first answers `undefined
   function erx_gen_tcp:listen/2` and the test fails; `erx_gen_tcp` also exports `listen/2` now. Decide what
   gen_tcp and gen_udp answer in a domain that ships no network code (an undefined-function exception is no
   answer a caller can handle) and pin that, and move the backend rows to a domain that holds the network.

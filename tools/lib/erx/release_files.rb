@@ -35,8 +35,8 @@ module Erx
     # A name here that the release does not ship would leave that application started.
     raise Error, "LOAD_ONLY names what the release does not ship: #{LOAD_ONLY - APPLICATIONS}" unless
       (LOAD_ONLY - APPLICATIONS).empty?
-    # A domain's own applications: the system release ships them, so that a domain
-    # boot script can take them, and every release only loads them, so that none runs in the
+    # A domain's own applications: the system release ships them (SYSTEM_APPLICATIONS),
+    # and every release only loads them, so that none runs in the
     # system domain and none starts before its domain's facets: the session template's
     # arguments start erx_session with -eval, which runs once init has them
     # (docs/design-runtime.md, edit 65).
@@ -55,63 +55,72 @@ module Erx
     # (docs/design-kernel.md, "The boot image"), and its boot scripts: for each name,
     # bin/<name>.boot, whose release file names the applications given, in that order.
     Release = Data.define(:name, :prefix, :applications, :system, :boots)
-    # Applications only the storage domain's boot script boots (docs/design-stopgap.md,
-    # "littlefs in the storage domain"): the block driver and littlefs's volume. The system release
-    # does not ship them, so no system domain starts or loads the driver of a device the
-    # manifest gives the storage domain, and none reads its windows.
-    STORAGE_ONLY = %w[erx_blk erx_storage].freeze
-    raise Error, "STORAGE_ONLY names what the runtime does not build: #{STORAGE_ONLY - APPLICATIONS}" unless
-      (STORAGE_ONLY - APPLICATIONS).empty?
-    # The network stack and its client, which only the domains that use the network boot:
-    # the network script the stack, the session script the client
-    # (docs/design-network-stack.md, "Who holds the network device"). The system release
-    # does not ship them, so the system domain parses no network input and holds no code
-    # that reaches a `net` grant, which it may not hold (docs/design-system.md, property 15).
-    NETWORK_ONLY = %w[erx_net erx_net_client].freeze
-    raise Error, "NETWORK_ONLY names what the runtime does not build: #{NETWORK_ONLY - APPLICATIONS}" unless
-      (NETWORK_ONLY - APPLICATIONS).empty?
-    # Applications only the web domain's boot script boots (docs/design-web.md,
-    # "Overview"): the connection core and its relay. The system release does not ship
-    # them, since the system domain decodes no web protocol message.
-    WEB_ONLY = %w[erx_web].freeze
-    raise Error, "WEB_ONLY names what the runtime does not build: #{WEB_ONLY - APPLICATIONS}" unless
-      (WEB_ONLY - APPLICATIONS).empty?
-    # Applications only the session's boot script boots: the session's line to the web
-    # domain (docs/design-web.md, "Views on the line"), which must be up before init's
-    # ready report names it, so the boot script starts it, unlike erx_session (DOMAIN_ONLY).
-    # The system release does not ship it, since the system domain is no session.
-    SESSION_ONLY = %w[erx_web_line].freeze
-    raise Error, "SESSION_ONLY names what the runtime does not build: #{SESSION_ONLY - APPLICATIONS}" unless
-      (SESSION_ONLY - APPLICATIONS).empty?
-    # The display's applications, which only the display domain's boot script boots
-    # (docs/design-display.md, "The display device" and "What runs where"): the pixel
-    # primitives, the display side of the window system, the screen among it, and the
-    # drivers. The system release does not ship them, so no system domain loads the driver
-    # of a device the manifest gives the display domain.
-    DISPLAY_ONLY = %w[erx_memdraw erx_display erx_fb].freeze
-    raise Error, "DISPLAY_ONLY names what the runtime does not build: #{DISPLAY_ONLY - APPLICATIONS}" unless
-      (DISPLAY_ONLY - APPLICATIONS).empty?
-    # A display client's side of the window system, which a boot script of a domain that
-    # holds a display's grant takes with erx_memdraw and starts (docs/design-display.md,
-    # "The pixel area"). The system release does not ship it, so no allocator of pixel areas
-    # runs in the system domain, and the display domain's script does not take it, so the
-    # display release holds no draw decoder, widget, terminal or pixel allocator (G9,
-    # DisplayRelease).
-    CLIENT_ONLY = %w[erx_win].freeze
-    raise Error, "CLIENT_ONLY names what the runtime does not build: #{CLIENT_ONLY - APPLICATIONS}" unless
-      (CLIENT_ONLY - APPLICATIONS).empty?
-    SYSTEM_APPLICATIONS = (APPLICATIONS - STORAGE_ONLY - NETWORK_ONLY - WEB_ONLY - SESSION_ONLY - DISPLAY_ONLY - CLIENT_ONLY).freeze
+    # What every domain boots: kernel and stdlib, which a release boots through, and erx
+    # and erx_files, whose processes erXos's kernel_sup and kernel_safe_sup start in every
+    # domain (its watchdog's child, its namespace table, /tmp and /proc).
+    DOMAIN_BASE = %w[kernel stdlib erx erx_files].freeze
+    # The applications the system release ships, in release order: an allow-list, so an
+    # application reaches the system domain only by being named here: OTP's, the base
+    # every domain boots, the applications the system domain runs, and erx_session, which
+    # it ships and never starts (DOMAIN_ONLY). Every other application is a domain boot
+    # script's alone (DOMAIN_BOOTS), and one in neither fails the load (check_released).
+    SYSTEM_APPLICATIONS = %w[kernel stdlib compiler runtime_tools erx erx_files erx_uart erx_shell erx_code
+                             erx_hostlink erx_domain erx_starter erx_session].freeze
+    raise Error, "SYSTEM_APPLICATIONS names what the runtime does not build: #{SYSTEM_APPLICATIONS - APPLICATIONS}" unless
+      (SYSTEM_APPLICATIONS - APPLICATIONS).empty?
+    raise Error, 'SYSTEM_APPLICATIONS is not in release order (APPLICATIONS)' unless
+      SYSTEM_APPLICATIONS == APPLICATIONS & SYSTEM_APPLICATIONS
     SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: SYSTEM_APPLICATIONS, system: true,
                          boots: { 'start' => SYSTEM_APPLICATIONS }.freeze)
+    # The build's boot table: each domain boot script's applications under its name, which
+    # a domain row's `release @artifact.NAME` names (docs/design-stopgap.md, "The
+    # production image"), so two rows naming one script cannot disagree on what it boots.
+    # What a script adds to DOMAIN_BASE and the system release does not ship stays out of
+    # the system domain:
+    # * session, a principal's session domain (docs/design-domains.md, "Principals,
+    #   sessions and quotas"): the network client, whose `grant` key the session
+    #   template's arguments set; the command shell; the session's line to the web domain
+    #   (docs/design-web.md, "Views on the line"), which must be up before init's ready
+    #   report names it, so the script starts it; and erx_session (DOMAIN_ONLY);
+    # * storage: the block driver and littlefs's volume (docs/design-stopgap.md, "littlefs
+    #   in the storage domain"), so no system domain loads the driver of a device the
+    #   manifest gives the storage domain, and none reads its windows;
+    # * network: the network stack, started permanent, so the stack's end ends the network
+    #   domain (docs/design-network-stack.md, "The process tree"); the system domain parses
+    #   no network input and holds no code that reaches a `net` grant, which it may not hold
+    #   (docs/design-system.md, property 15);
+    # * web: the web front end (docs/design-web.md, "Overview"), since the system domain
+    #   decodes no web protocol message;
+    # * display: the pixel primitives, the display side of the window system and the
+    #   drivers, which start the screen (docs/design-display.md, "What runs where"), so no
+    #   system domain loads the driver of a device the manifest gives the display domain;
+    # * client, a domain that holds a display's grant: the pixel primitives and the
+    #   client side, erx_win, which it starts, so its allocator of pixel areas runs there
+    #   and in neither the system domain nor the display domain (G9, DisplayRelease).
+    #   No manifest names it yet: it is the client side's release, which DisplayRelease
+    #   reads, and a client domain's own script takes the same applications.
+    DOMAIN_BOOTS = { 'session' => [*DOMAIN_BASE, 'erx_net_client', 'erx_shell', 'erx_web_line', 'erx_session'].freeze,
+                     'storage' => [*DOMAIN_BASE, 'erx_blk', 'erx_storage'].freeze,
+                     'network' => [*DOMAIN_BASE, 'erx_net'].freeze,
+                     'web' => [*DOMAIN_BASE, 'erx_web'].freeze,
+                     'display' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_display', 'erx_fb'].freeze,
+                     'client' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_win'].freeze }.freeze
+
+    # Refuses applications of which no release holds one: an application the runtime
+    # builds that neither the system release (system) nor a script of the boot table
+    # (boots) names would be built and booted nowhere, the sign of a release list
+    # forgotten.
+    def self.check_released(applications, system:, boots:)
+      unreleased = applications - system - boots.values.flatten
+      raise Error, "no release holds #{unreleased.join(', ')}: name each in SYSTEM_APPLICATIONS or a DOMAIN_BOOTS script" unless
+        unreleased.empty?
+    end
+    check_released(APPLICATIONS, system: SYSTEM_APPLICATIONS, boots: DOMAIN_BOOTS)
     # Where the one domain release lies: domains/erxos/, which sorts after boot/ and
     # before system/, so it is one run of whole entries that does not split the system
     # run (docs/design-stopgap.md, "The production image").
     DOMAINS_PREFIX = 'domains/'
     DOMAIN_PREFIX = "#{DOMAINS_PREFIX}#{NAME}/".freeze
-    # What every domain boots: kernel and stdlib, which a release boots through, and erx
-    # and erx_files, whose processes erXos's kernel_sup and kernel_safe_sup start in every
-    # domain (its watchdog's child, its namespace table, /tmp and /proc).
-    DOMAIN_BASE = %w[kernel stdlib erx erx_files].freeze
 
     # One boot script of the domain release: its name, which a domain row's
     # `release @artifact.NAME` names, the applications it boots, and whether it is a test
@@ -122,7 +131,7 @@ module Erx
     # Every application a test image's domain boot script may take, in release order.
     TEST_APPLICATIONS = [*APPLICATIONS, *ErlangApps::TEST_ONLY].freeze
 
-    # The boot script named name, of applications, which the system release ships too,
+    # The boot script named name, of applications, which the runtime builds,
     # DOMAIN_BASE among them, since a release boots through it. A name is a manifest
     # identifier, so a domain row's @artifact.NAME names the script, and it is one path
     # component. Only a test script, test true, which only a test image carries

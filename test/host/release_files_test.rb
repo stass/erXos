@@ -101,9 +101,7 @@ class ReleaseFilesTest < Minitest::Test
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
     %w[compiler runtime_tools].each { |application| assert_includes release, "{#{application},\"#{VERSION}\",load}" }
     assert_includes release, "{erx_session,\"#{VERSION}\",load}", 'a domain\'s own application runs in no system domain'
-    started = Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::DOMAIN_ONLY - Erx::ReleaseFiles::STORAGE_ONLY -
-              Erx::ReleaseFiles::NETWORK_ONLY - Erx::ReleaseFiles::WEB_ONLY - Erx::ReleaseFiles::SESSION_ONLY -
-              Erx::ReleaseFiles::DISPLAY_ONLY - Erx::ReleaseFiles::CLIENT_ONLY
+    started = Erx::ReleaseFiles::SYSTEM_APPLICATIONS - Erx::Runtime::APPLICATIONS - Erx::ReleaseFiles::DOMAIN_ONLY
     [*%w[kernel stdlib], *started].each do |application|
       assert_includes release, "{#{application},\"#{VERSION}\"}"
     end
@@ -113,12 +111,13 @@ class ReleaseFilesTest < Minitest::Test
   # and its client in the domains that use the network, and the web line in a session
   # alone, the display's applications in the display domain alone and the client side of
   # the window system in display clients alone, so the system release neither ships nor
-  # names them.
-  def test_the_system_release_does_not_ship_the_storage_network_or_session_applications
+  # names them. They are named here, not taken from the allow-list, so that adding one to
+  # SYSTEM_APPLICATIONS fails this test.
+  def test_the_system_release_ships_no_domain_only_application
     paths = entries.map { |entry| entry.fetch('path') }
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
-    only = [*Erx::ReleaseFiles::STORAGE_ONLY, *Erx::ReleaseFiles::NETWORK_ONLY, *Erx::ReleaseFiles::SESSION_ONLY,
-            *Erx::ReleaseFiles::DISPLAY_ONLY, *Erx::ReleaseFiles::CLIENT_ONLY]
+    only = %w[erx_blk erx_storage erx_memdraw erx_display erx_fb erx_win erx_web erx_net erx_net_client erx_web_line]
+    assert_equal Erx::ReleaseFiles::APPLICATIONS - Erx::ReleaseFiles::SYSTEM_APPLICATIONS, only
     only.each do |application|
       refute_includes release, "{#{application},"
       refute(paths.any? { |path| path.start_with?("system/lib/#{application}-") }, "the system release ships #{application}")
@@ -222,7 +221,7 @@ class ReleaseFilesTest < Minitest::Test
     assert_includes boot_release_file('session'), "{erx_shell,\"#{VERSION}\"}"
   end
 
-  # The boot table's session script (ProductionImage::DOMAIN_BOOTS) boots the command
+  # The boot table's session script (ReleaseFiles::DOMAIN_BOOTS) boots the command
   # shell, the web line and erx_session beside what every domain boots through, and
   # starts the shell and the line, which init's ready report names, but only loads
   # erx_session, which the session template's -eval starts once init holds the domain's
@@ -248,23 +247,34 @@ class ReleaseFilesTest < Minitest::Test
   def test_the_display_script_takes_the_display_side_whole_and_no_client
     paths = domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('display')])).map { |entry| entry.fetch('path') }
     release = boot_release_file('display')
-    Erx::ReleaseFiles::DISPLAY_ONLY.each do |application|
+    (Erx::ReleaseFiles::DOMAIN_BOOTS.fetch('display') - Erx::ReleaseFiles::DOMAIN_BASE).each do |application|
       assert_includes paths, "domains/erxos/lib/#{application}-#{VERSION}/ebin/#{application}.app"
       assert_includes release, "{#{application},\"#{VERSION}\"}"
     end
-    Erx::ReleaseFiles::CLIENT_ONLY.each do |application|
+    %w[erx_win].each do |application|
       refute(paths.any? { |path| path.start_with?("domains/erxos/lib/#{application}-") }, "the display release ships #{application}")
       refute_includes release, "{#{application},"
     end
     assert_match(/\{erx_fb,"#{VERSION}"\}\]\}\.\n\z/, release, 'the display script starts the drivers')
   end
 
-  # A client's script takes erx_win with the pixel primitives and starts it, so its
+  # The client script takes erx_win with the pixel primitives and starts it, so its
   # allocator runs wherever the domain holds a display's grant.
   def test_a_client_script_starts_the_client_side
-    applications = [*Erx::ReleaseFiles::DOMAIN_BASE, 'erx_memdraw', *Erx::ReleaseFiles::CLIENT_ONLY]
-    domain_entries(Erx::ReleaseFiles.domain([Erx::ReleaseFiles.domain_boot('client', applications: applications)]))
+    domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('client')]))
     assert_match(/\{erx_memdraw,"#{VERSION}"\},\{erx_win,"#{VERSION}"\}\]\}\.\n\z/, boot_release_file('client'))
+  end
+
+  # An application the runtime builds that neither the system release nor a script of
+  # the boot table names fails the load, so a release list forgotten is no application
+  # shipped to the system domain unseen; the tree's own lists passed when this file loaded.
+  def test_an_application_in_no_release_fails
+    boots = { 'storage' => %w[kernel erx_blk] }
+    error = assert_raises(Erx::Error) do
+      Erx::ReleaseFiles.check_released(%w[kernel erx erx_blk erx_new], system: %w[kernel erx], boots: boots)
+    end
+    assert_match(/no release holds erx_new:/, error.message)
+    assert_nil Erx::ReleaseFiles.check_released(%w[kernel erx erx_blk], system: %w[kernel erx], boots: boots)
   end
 
   # A script's release file names the script and its applications alone, in the
