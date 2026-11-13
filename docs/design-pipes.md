@@ -951,10 +951,12 @@ passes the request to the pipe server:
 1. **Plan.** `erx_pipe:step/2` checks the session's `pipes` quota and
    returns the objects to make: the lock page, a lane of 64 KiB, and two
    doorbells.
-2. **Make.** The pipe server creates them with the session's budget and
-   binds each doorbell to the program's group with the end's label.
-3. **Install.** The handler installs into the program's table, through the
-   port driver, the copies each end needs: for the read end, the lane's
+2. **Make.** The pipe server creates them with the session's budget, the
+   doorbells unbound, and answers the handler each end as a
+   [hand-off](#hand-offs).
+3. **Install.** The handler has the port driver take each hand-off, which
+   installs into the program's table the copies each end needs and binds
+   the end's doorbell to the program's group with the end's label: for the read end, the lane's
    ring with `READ`, its reader page with `READ` and `WRITE`, the lock page
    with `READ` and `WRITE`, and `TRIGGER` on the write end's doorbell; for
    the write end, the ring with `READ` and `WRITE`, the reader page with
@@ -975,8 +977,8 @@ code. On the stopgap Fiasco each create, bind, install and map is a
 request to the backend's root service, each a row of
 [its call table](design-stopgap.md#the-call-table): the lane and the lock
 page are memory objects of the root's pool, which each holder's `liberx`
-maps into its own task; the doorbells are IRQ objects the pipe server
-binds to the program's group, whose deliveries reach the program task's
+maps into its own task; the doorbells are IRQ objects the program's port
+driver binds to the program's group, whose deliveries reach the program task's
 readiness dispatcher; and the installs are `erx_cap_pass` from the
 session's table into the program's space, which the session created.
 Budgets are records there, so `ENOMEM` comes from the root's pool rather
@@ -1003,12 +1005,12 @@ for another end or for a child's creation, so a `pipe` followed by a
 a pipe, never waits on itself:
 
 * **A write end** for the child takes the pipe's next number, a lane of 16
-  KiB and a doorbell bound to the child's group. The pipe server first
+  KiB and a doorbell for the child's group. The pipe server first
   stores the number in the lock page's `wends`, then installs into each
   read end's holder the lane and the doorbell's trigger right and tells it
   `{pipe_writer, Pipe, End, Writer, Ring, RPage, Size, Doorbell, open}`,
-  and hands the child's handler the child's copies: its lane and `TRIGGER`
-  on every read end's doorbell. The new end publishes from its first write
+  and hands the child's handler, as a [hand-off](#hand-offs), the child's
+  copies: its lane and `TRIGGER` on every read end's doorbell. The new end publishes from its first write
   and waits on no reader's event executor: a reader that meets a record
   while `wends` names a write end it has not yet been told of waits for
   that report, which is already on its own channel, before it picks
@@ -1025,24 +1027,32 @@ a pipe, never waits on itself:
   lane's mappings for every lane the `pipes` quota allows, beside the
   program's own needs, and no install into a reader fails within the quota
   ([Security](#security)).
-* **A read end** for the child takes a free index and a doorbell bound to
-  the child's group. The pipe server installs the doorbell's trigger right
+* **A read end** for the child takes a free index and a doorbell for the
+  child's group. The pipe server installs the doorbell's trigger right
   into every write end's holder and every other read end's and tells each
   `{pipe_reader, Pipe, End, Rix, Doorbell, open}`, and hands the child's
-  handler the child's copies: every lane, the lock page, and `TRIGGER` on
+  handler, as a hand-off, the child's copies: every lane, the lock page, and `TRIGGER` on
   every write end's and every other read end's doorbell, with the pipe's
   `wends` as it stands for the end's own count of write ends. A read end
   beyond 64 fails the spawn or fork with `EMFILE`.
 
 The child's copies are installed into the child's table before its first
-thread runs, among the installs of its creation, and its startup or fork
-message names their values; the pipe server records the child as the
+thread runs, among the installs of its creation, the end's doorbell is
+bound to the child's group then too, once the creation has made the group,
+and its startup or fork message names their values; the pipe server records the child as the
 end's holder when it makes the end, since the child's handler undoes the
 end if the creation fails. So every holder of an end holds, before it can
 run, every lane and doorbell its end needs, and every peer holds the new
 end's before the new end's holder can run (PI7). If the creation fails,
 the child's handler tells the pipe server the end is gone, and the other
-ends see it come and go. The shell's own pipelines need no inheritance:
+ends see it come and go. A session process starts a program with ends it
+holds the same way, as the program's starter: the program's handler asks
+for the child's ends with the starter as the holder, and once the start
+returns the starter closes its own copy of each end it gave, as a UNIX
+parent closes after a fork. So the LVGL renderer gives `erx-lvgl` the read
+end of one pipe as standard input and the write end of another as standard
+output, and keeps the other two ends
+([design-display.md](design-display.md#the-widget-server)). The shell's own pipelines need no inheritance:
 the pipe server makes each end for the program that uses it
 ([design-shell.md](design-shell.md#pipelines)).
 
@@ -1131,7 +1141,7 @@ handlers:
 | Event | Actions |
 | --- | --- |
 | `{pipe, Holder, Flags}` | within the session's `pipes` quota, make a pipe's lock page, lane and two doorbells; install each end's copies into the holder; reply |
-| `{inherit, Holder, Pipe, End, Child}` | if `Holder` holds `End` of `Pipe`: make an end of the same kind for `Child`, a write end with a lane and a doorbell, its number stored in the lock page's `wends` before any install, a read end with an index and a doorbell, or fail with `emfile` at the 65th read end; install into every peer what it needs of the new end and tell it; return the new end's copies for the child's creation; ends of one pipe never wait for each other |
+| `{inherit, Holder, Pipe, End, Child}` | if `Holder` holds `End` of `Pipe`: make an end of the same kind for `Child`, a write end with a lane and a doorbell, its number stored in the lock page's `wends` before any install, a read end with an index and a doorbell, or fail with `emfile` at the 65th read end; install into every peer what it needs of the new end and tell it; return the new end's copies for the child's creation, as a [hand-off](#hand-offs) for a program; ends of one pipe never wait for each other |
 | `{closed, Holder, Pipe, End}` | if `Holder` holds `End` of `Pipe`: the steps of [Ends and their holders](#ends-and-their-holders) |
 | `{gone, Holder}` | the same for every end `Holder` holds |
 | `{drained, Holder, Pipe, End, Writer}` | if `Holder` holds the read end `End` of `Pipe` and `Writer` is gone with `End`'s index in its list: remove the index, and when the list is empty close the capabilities to the lane and to the write end's doorbell and forget the write end |
@@ -1149,10 +1159,10 @@ objects as [the records](#the-pipe-servers-records) do:
 
 | Action | Effect |
 | --- | --- |
-| `{make_lock, Lock}`, `{make_lane, Ring, RPage, Size}`, `{make_bell, Bell, Holder, Label}` | create the objects with the session's budget, a doorbell bound to `Holder`'s group with `Label`, or with the label the session's event table registers for a process (`registered`); a step's makes come before its other actions, and when one fails the server closes what the step made, keeps its old records and answers `enomem` |
+| `{make_lock, Lock}`, `{make_lane, Ring, RPage, Size}`, `{make_bell, Bell, Holder, Label}` | create the objects with the session's budget; a doorbell for a process is bound to the session's group with the label the session's event table registers for it (`registered`), and one for a program is made unbound, with `Label` for its port driver to bind it with ([Hand-offs](#hand-offs)); a step's makes come before its other actions, and when one fails the server closes what the step made, keeps its old records and answers `enomem` |
 | `{store_wends, Lock, Wends}` | store the pipe's highest write end number in its lock page, with release order, before any install of that write end |
 | `{free_lock, Lock, Rix}` | free the reader lock if read end `Rix` held it, by one compare-and-swap of `owner` from `1 + Rix` to 0 |
-| `{report, Holder, Report}` | install into `Holder`, through its handler, the copies `erx_pipe:copies/1` lists for `Report`, then send it; an install that fails closes the copy it made and comes back as the event `install_failed` |
+| `{report, Holder, Report}` | install into `Holder` the copies `erx_pipe:copies/1` lists for `Report`, then send it: for a process, with the NIF, as [the session's pipe NIF](#the-sessions-pipe-nif) says; for a program, by sending its handler the report, as a hand-off when it lists copies; an install that fails closes the copy it made and comes back as the event `install_failed` |
 | `{reply, Reply}` | answer the event's request; the handler installs a reply's descriptors into the holder or the child, and an install that fails there undoes the ends with `closed`, or with `gone` for a child whose creation failed |
 | `{close, Object}` | close the pipe server's own capability to `Object` |
 
@@ -1162,7 +1172,8 @@ one image at a time, and the channel the frame arrived on names both, so
 no field of a frame says who asked
 ([design-programs.md](design-programs.md#the-channel)). A session process
 that calls the pipe NIF is its own holder. The pipe server installs into a
-program only through that program's handler, which installs by the
+program only through that program's handler, whose port driver takes
+the pipe server's [hand-offs](#hand-offs) and installs by the
 session's own capability to the image it serves, so no value is ever
 installed into a table other than the one it was meant for
 ([design-programs.md](design-programs.md#invariants), P11).
@@ -1251,6 +1262,95 @@ The command image, which runs an Erlang command or `rc` in a
 command domain, holds no end of a session's pipe: its standard streams are
 relayed by its session
 ([design-programs.md](design-programs.md#what-a-program-can-start)).
+
+### Hand-offs
+
+Everything a program's table gains from a pipe passes through one object
+of the pipe NIF, a **hand-off**: the copies that one descriptor or one
+report needs, held for the program's handler until the program's port
+driver takes them. The pipe server makes one wherever its records give a
+program an end or a copy: the child's end of an `inherit`, each end of a
+program's `pipe`, an end an `exec` keeps or a `redeem` takes, and a report
+that names a new peer's lane or doorbell. A hand-off holds:
+
+* the copies `erx_pipe:copies/1` lists for the descriptor or the report,
+  in that list's order, each with the rights the list gives it and each a
+  pipe NIF object kept by a reference count, as a session process's end
+  keeps it, so the pipe server's own close of an object leaves its
+  capability open until the hand-off lets it go;
+* for an end the program gains, that end's doorbell, made unbound, and the
+  end's label, `(Pipe << 32) | End`, as `erx_pipe:label/2` computes it;
+* its **owner**, the program's handler, and its number, from a counter of
+  the NIF that starts at 1 and never repeats, so no number names a
+  hand-off of an earlier pipe server.
+
+The pipe server answers the handler `{pipe_hand, Number, Term}`, where
+`Term` is the descriptor or the report with each capability value written
+`{hand, I}`, `I` its copy's place in the list. The handler names the
+hand-off to the port driver by its number alone: as the entry
+`{N, {pipe_hand, Number, Descriptor}}` among the descriptors of
+`erx_program:start/1`'s spec, and with `erx_program:install(Port, Hand)`
+for a reply or a report to a running program
+([design-runtime.md](design-runtime.md#programs-as-ports)). The driver
+takes it with `erx_pipe_hand_take(Number, Owner)`, which answers the
+hand-off once and only when its owner is the port's owner, as
+`driver_connected` names it; passes each copy into the image with its
+rights; binds the doorbell, if the hand-off has one, to the program's
+group with the hand-off's label, as it binds the channel's doorbell with
+`prog_channel_label`; lets the hand-off go, whatever the installs
+answered; and answers the values in the list's order. The handler puts
+the `I`-th value where `{hand, I}` stands and sends the frame. No term of
+Erlang names a capability to the driver: the number is all that crosses,
+and the NIF hands the driver the copies, as a window's lease reaches it
+([design-display.md](design-display.md#the-pixel-area)). A hand-off no
+driver takes is let go when its owner exits, by a monitor the NIF holds;
+the hand-off table and its lock are made when the NIF loads, and a take
+and an owner's exit serialize on that lock, so exactly one of them has
+the hand-off.
+
+**Who binds a doorbell.** A doorbell is bound by the party that holds the
+group its holder waits in: the pipe NIF binds a session process's
+doorbell to the session's group when it makes it, and a program's port
+driver binds a program's doorbell to the program's group when it takes
+the hand-off, since the driver alone holds that group. So a start needs
+no order of its own: the pipe server makes a child's end in step 5 of
+[starting a program](design-programs.md#starting-a-program), before the
+child's group exists, and the driver binds the end's doorbell in step 6,
+once it has made the group and before the first thread runs. A peer that
+rings the doorbell before the bind wakes nobody, and that loses nothing:
+the holder learns of its end only from the startup message, reply or
+report the handler writes after the take, so it has published no wait
+the ring could have ended (PI7).
+
+**Program holders at the pipe server.** Only a program's handler sends
+events that name its program. The first that names `{program, Id}`, an
+`inherit` with it as the child or its own `pipe`, records the sender as
+the program's handler, and the pipe server monitors it; it sends that
+process the program's reports as `{pipe_report, Id, Report}` and the
+replies to its requests, each a hand-off where it lists copies; an
+event naming `{program, Id}` from any other process changes nothing and
+is answered `badarg`, a fault of the session's own code. The handler's exit counts as `{gone, {program, Id}}`, so a
+handler that crashes, which closes its linked port and kills the
+program, never leaves an end held and its peers see the end of the
+stream. For a spawn, the handler asks for each of the child's ends on the
+starter's behalf, `{inherit, Starter, Pipe, End, {program, Id}}`, and the
+step checks that `Starter` holds the end, as for any inherit. The handler
+holds every report that arrives before the startup message is written,
+in order, and writes them after it
+([design-programs.md](design-programs.md#starting-a-program)); a report
+that is a hand-off waits there too, and its take follows the start.
+
+**Refusals.** A take that finds no hand-off under its number, one taken
+or let go already, or one of another owner, answers no hand-off, and the
+start or the install fails with `einval`; the hand-off, if it is held,
+stays its owner's. A start that fails after its takes lets them go with
+its other undos; the handler then tells the pipe server the program is
+gone ([Inherited ends](#inherited-ends)). An install into a running
+program that fails comes back as `install_failed`, and the end is lost to
+that program alone ([Failure handling](#failure-handling-diagnostics-and-debuggability)).
+A crash of the pipe server leaves each hand-off's references in place, so
+a take after it still installs what the hand-off held, and the handler's
+`pipe_server_lost`, which follows, counts those ends lost.
 
 ### The second tier
 
@@ -1472,7 +1572,9 @@ defines:
   table into its program's table, into a program being built before it
   runs and into a running one before the reply or report that names the
   values, through the session's own capability to that image's space,
-  which names one image; a failed install into a running program fails
+  which names one image, by the port driver's take of a
+  [hand-off](#hand-offs), which also binds the end's doorbell to the
+  program's group; a failed install into a running program fails
   the request or loses that end alone, and nothing is ever installed into
   an image that has gone, since the session's capability to a stopped
   space refuses it (`ERX_EDEAD`).
@@ -1650,6 +1752,37 @@ readers, which any pipe has.
   that advances `rpos` before its copy, a writer that publishes before its
   payload is written, and a pipe server that forgets to tell one reader of
   a gone writer, each of which the exploration must catch.
+* **Hand-offs.** Host tests of the pipe NIF's hand-off table in the
+  hosted build: the owner's take answers the hand-off once and a second
+  take answers none; a take for another owner answers none and leaves the
+  hand-off to its owner's take; an owner that exits lets its hand-off go,
+  and the pipe server's close of an object then closes its capability.
+  The seeded failure drops the owner comparison from the take, and the
+  test of a take for another owner fails. `erx_program:start/1` refuses
+  with `badarg`, before any port opens, a descriptor whose `{hand, I}`
+  are not exactly 1 to its hand-off's count, each once, and a number of 0
+  or past 2^64 - 1; a start whose driver answers another count of values
+  fails with `einval` and closes the port; the seeded failure skips the
+  count check and the test sees a startup message with a value missing.
+  The handler's decisions are one pure function, and its host test feeds
+  reports before and after the start: those before are written after the
+  startup message, in order; the seeded failure writes them at once and
+  the test fails on the order. Domain tests, each a QEMU test, in which a
+  session process starts the boot image's test program `pipe-echo` with a
+  pipe's read end as standard input and another's write end as standard
+  output: the program writes `ready` and blocks on standard input, the
+  session writes only after it reads `ready`, and the echo arrives, so the
+  doorbell was bound before the program waited (seeded failure: the driver
+  skips the bind, and the read of the echo reaches its deadline); the
+  session closes its write end, the program reads the end of the stream
+  and exits 0, and the session's read end then reads `eof` (seeded
+  failure: the pipe server drops `{gone, {program, _}}`, and the read
+  reaches its deadline); the program closes standard output and then
+  waits on standard input, and the session reads `eof` while the program
+  still runs, through the forwarded `{closed}` (seeded failure: the
+  handler drops the notice); and the handler is killed while the program
+  runs, and the session reads `eof` (seeded failure: the pipe server does
+  not monitor the handler).
 * **Fuzz targets.** The consumer's check over arbitrary header and record
   bytes and positions; the producer's check over arbitrary `rpos`; the
   lock page's checks; the decoders of the pipe requests, notices, reports
@@ -1886,6 +2019,28 @@ itself.
 server would receive every write and answer every read. It loses: every
 byte would pass through a third party, with two extra copies and a round
 trip per transfer, where shared rings need no third party on the data path.
+
+**A start split around its ends.** The port would open and make the
+program's group first; the pipe server would then make the child's ends
+with their doorbells bound to that group, the handler install them with
+`install/2`, and only then run the program. It loses: the group, or the
+right to bind on it, would have to travel from the driver to the pipe
+NIF, and the start's one validated plan would become three commands with
+failures between them. With the driver binding at its take, the start
+stays one plan and nothing travels back.
+
+**Hand-offs named by pipe and end.** The take would name `{Pipe, End}`.
+It is not adopted: a restarted pipe server numbers its pipes from 1
+again, and one end can be handed off more than once, as an `exec` keeps
+it, so a number that never repeats names each hand-off without either
+case.
+
+**Capability values in the port's command.** The handler would write the
+session's capability values into the start's command. It loses: any
+process that owns a port could then have the driver install any
+capability of the session into a program, or bind a doorbell with the
+channel's label. A hand-off's number names only what the pipe NIF holds
+for that port's owner.
 
 **Pipes as frames on the channel.** A pipe would be a protocol of data and
 credit messages through each program's handler. Rejected in

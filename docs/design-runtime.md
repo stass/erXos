@@ -1543,7 +1543,19 @@ applied in this order, each step undoing the ones before it on failure:
    Once the spec is valid and names a buffer, the start takes its lease
    with `erx_area_lease_take`, which answers it only to the port of the
    lease's holder; the take is the start's first effect, so its undo,
-   the lease's return, is the last.
+   the lease's return, is the last. A pipe end the program inherits is an
+   entry `{N, {pipe_hand, Number, Descriptor}}`, the pipe server's
+   [hand-off](design-pipes.md#hand-offs) to the handler, in whose
+   `Descriptor` each capability value is written `{hand, I}`;
+   `erx_program:start/1` checks that a descriptor's `I` run from 1 to
+   their count, each once, and that `Number` is from 1 to 2^64 - 1, refusing
+   anything else with `badarg` before it opens the port, and writes each
+   number into the open command as a decimal word, as it writes the
+   lease's. With the lease, the start takes each hand-off with
+   `erx_pipe_hand_take`, which answers it only to the port of its owner,
+   so a start whose handler is not the hand-off's owner fails with
+   `einval`; the image's capability table is sized for the fixed
+   installs and every copy the hand-offs hold.
 2. **Create the channel and the data area**: two sides and two
    doorbells, in the side layout of a connection, each side written by
    one party and mapped read-only by the other
@@ -1587,19 +1599,22 @@ applied in this order, each step undoing the ones before it on failure:
    The three chokepoints stay the only readers of headers, copiers of
    code and mappers of code ([design.md](design.md#chokepoint-checks)).
 5. **Install** into the image's table the budget, the group, the
-   channel's objects, the data area, the pipe ends the spec names, as the
-   session's pipe server made them
-   ([design-pipes.md](design-pipes.md#making-a-pipe)), and the code
-   object of an executable file; bind the program's doorbell to the
-   program's group with the channel's fixed label, `prog_channel_label`
-   (1), which no pipe end's label equals
-   ([design-pipes.md](design-pipes.md#waiting-and-doorbells));
+   channel's objects, the data area, the copies of each hand-off, in
+   its list's order, and the code object of an executable file; bind the
+   program's doorbell to the program's group with the channel's fixed
+   label, `prog_channel_label` (1), and each hand-off's doorbell with
+   its end's label, `(Pipe << 32) | End`, which never equals it
+   ([design-pipes.md](design-pipes.md#waiting-and-doorbells)); let each
+   hand-off go;
    and create the image's first thread, stopped, with the values of the
    budget, the group, the channel's two sides and the session's doorbell
    in its argument registers.
    The driver's start ends here: the port is open and its owner, linked
    to it as ERTS links every port, reads the start's answer, which carries
-   the values the install made that the startup message names.
+   the values the install made that the startup message names, each
+   hand-off's in its list's order, which `erx_program:start/1` puts
+   where each `{hand, I}` stands; an answer with another count of
+   values for a hand-off fails the start with `einval`.
 6. **Write the startup message** as the first frame of the image's
    inbound lane, in the form the programs design defines: the program's
    process ids, arguments, environment, working directory, signal state,
@@ -1646,7 +1661,10 @@ whatever the program writes. The handler acts with the session's
 authority after checking the program's own table, and installs
 what the program's table gains with `erx_program:install(Port, Caps)`,
 which goes through the session's capability to the image the port
-serves and fails with `ERX_EDEAD` once that image has stopped
+serves and fails with `ERX_EDEAD` once that image has stopped; for a
+pipe end `Caps` is a hand-off, `{pipe_hand, Number, Term}`, which the
+driver takes, installs and binds as the start does, answering
+`{ok, Term}` with each `{hand, I}` replaced by its value
 ([design-programs.md](design-programs.md#the-handler)). File data never
 crosses the channel per byte: it moves through the program's data area,
 which the handler fills and drains

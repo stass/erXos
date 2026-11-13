@@ -2093,11 +2093,13 @@ it; git history is the record of completed work.
   `{redeem}`, `{discard}`, `{withdraw}` and the collector of deposits no reader can reach
   (docs/design-pipes.md, "The second tier" and "Deposits"), and `holder()` has no
   `{deposit, Ticket}`. `test/erlang/erx_pipe_explore.erl` gains their events with them.
-* [Medium] session, `erx_pipe_srv`: it performs the actions of session processes' ends only. The
-  makes, reports, replies and installs of a program holder (`{program, _}`) belong to P8's
-  `erx_prog_handler`, which forwards a program's requests and notices to the pipe server and installs
-  into its program (docs/design-pipes.md, "The pipe server"); until it lands, no program holds an end
-  of a session's pipe.
+* [Medium] session, `erx_pipe_nif.c`, `erx_pipe_srv`, `erx_program.erl`, `erx_program_drv.c`: no program holds
+  an end of a session's pipe, since the hand-offs of docs/design-pipes.md ("Hand-offs") are not built: the NIF's
+  hand-off table and the unbound doorbells of program holders; `erx_pipe_srv`'s actions for `{program, _}`
+  holders, with the handler of record and its monitor; `start/1`'s `{N, {pipe_hand, Number, Descriptor}}` entries
+  and the driver's take, install and bind; and `erx_prog_handler`, which asks for the ends on its starter's
+  behalf, forwards the program's notices and writes its reports. `erx_program:install/2`, which reports that name
+  copies and a program's own `pipe` need, follows them.
 * [Medium] session, `erx_pipe_nif.c` and `erx_event.c`: each ring of a session end's doorbell is one
   `{erx_pipe_ready, _, _}` message, uncoalesced, so while an end waits (bits set for that wait only) a
   co-reader that loops on the lock or a writer's repeated crossings can queue many messages before the
@@ -5350,7 +5352,6 @@ to the corpus and follow rc
   a principal that a start row names, an app's or a person's, and that never enrolled can be enrolled by whoever
   first reaches a secure console line, as any principal can, and then logged in to with its authority. Settle it in
   the login design, which covers every place a person meets the system.
-- [Low] erx_program credit (`otp/erts/emulator/sys/erxos/erx_program_core.c`): the credit holds reply slots only, so every `{closed}` and `{drained}` notice is refused with SIGSYS. The frame that first hands a program a pipe end must add notice credit (docs/design-programs.md, "Credit").
 - [Low] program channel on the stopgap (`liberx/backend/fiasco/object.c`): the Fiasco backend records no rights per handle, so a program can map the session's lane side read-write. It can bind or unbind only IRQ objects it holds in its own group: it holds no handle to its channel doorbell, and `irq_group_allowed` refuses the session's doorbell, which is also the gate worker's IRQ for the program's port. A program also holds `TRIGGER` copies of its own pipe ends' doorbells, bound in its own group, and can rebind them to any label, label 1 included; that costs it only its own wakes. Any task can create IRQ objects up to the machine-wide 256 (`ERX_FIASCO_IRQS_MAX`) and starve every other domain's doorbells. erXos's kernel enforces the rights the install grants (`erx_program_core.c` `install_rights`).
 
 * [Low] inspect service, the runtime agent leg ([design-live.md](docs/design-live.md#the-runtime-agent)): a
