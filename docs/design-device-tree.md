@@ -242,28 +242,42 @@ host, where its tests and fuzz target run. It reaches the tree only
 through `libfdt` from `fiasco/libfdt/lib/contrib`, compiled with
 `-DFDT_ASSUME_MASK=0`, so no copy's default decides which checks run.
 erXos's kernel links the same file, and its `erx_dma_ranges` is the
-reader's DMA walk. Outside the stopgap's own `fiasco/` tree, only
+reader's DMA walk. On the stopgap the root task links it in user mode and
+the kernel's core archive leaves it out (`CoreArchive::ROOT_TASK_SOURCES`),
+since Fiasco reads no tree of erXos's and links its own `libfdt`. Besides
+`fdt.c`, `fdt_ro.c`, `fdt_check.c` and `fdt_addresses.c`, the reader links
+`fdt_rw.c` and `fdt_wip.c` only because `fdt_addresses.c` holds a writer;
+it writes nothing. Outside the stopgap's own `fiasco/` tree, only
 `kernel/core/dt.c` and erXos's kernel's `kernel/platform/fdt.c` include
 `libfdt.h`; a build check fails on any other includer.
 
 **Acceptance.** `erx_dt_accept(bytes, size, &tree)` returns `NULL` and a
 view, or a fixed reason:
 
-* `structure`: `fdt_check_full(bytes, size)` fails. It is the first
-  call, and the only one that sees bytes not yet accepted: it refuses a
+* `structure`: `size` is shorter than the version 17 header, 40 bytes,
+  or `fdt_check_full(bytes, size)` fails. The length test comes first
+  because `fdt_check_header` reads the strings block's size, which a
+  version 2 header lacks, whatever the version (`fdt.c:139-142`).
+  `fdt_check_full` is the first call, and the only one that sees bytes
+  not yet accepted: it refuses a
   `size` shorter than the oldest header before reading the header's
   version, one shorter than that version's header before reading the
   rest, and a `totalsize` above `size` before walking the structure
   (`fdt_check.c:24-32`), so no field of an unchecked header is read past
   the buffer or taken as its length. `fdt_check_header`, which takes no
   length (`fdt.c:89`), is never called on its own;
+  `kernel/core/dt.c` refuses to build without `FDT_ASSUME_MASK` 0;
 * `depth`: a node lies deeper than `ERX_DT_DEPTH_MAX`, 16 levels, found
   in one pass of `fdt_next_node`;
 * `memory`: the memory nodes give more than `ERX_DT_MEMORY_MAX`, 16,
   ranges, or a range whose end overflows.
 
 The view holds the bytes, their length and the memory ranges, taken from
-every node whose `device_type` is `memory`. Each later call takes the
+every child of the root whose `device_type` is `memory` and whose `status`
+is absent or `okay`, its `reg` read with the root's cell counts, which
+must be 1 or 2, in whole entries; an entry of length 0 adds no
+range, since a board's tree leaves the memory node as zeros for the
+firmware to fill. Each later call takes the
 view, so no call reads a tree that was not accepted.
 
 **Cells and addresses.** A `reg` entry is read with the cell counts of
@@ -273,7 +287,8 @@ address count (Devicetree Specification v0.4, sections 2.3.5 and 2.3.9,
 pp. 14 and 16). Counts come from `fdt_address_cells` and
 `fdt_size_cells`, whose defaults are 2 and 1 (`fdt_addresses.c:34-55`),
 as the specification's are.
-A count other than 1 or 2 gives the DMA facts the status `cells` and a
+A count other than 1 or 2, read for a non-empty `dma-ranges`, gives the
+DMA facts the status `cells`, and read for a framebuffer's `reg`, the
 framebuffer `malformed`, so every address and length read fits 64 bits,
 and every sum is checked for overflow. A PCI host
 bridge's `dma-ranges` are among them: its child addresses take three
@@ -282,9 +297,11 @@ cells, whose meaning the specification leaves to the PCI bus binding
 an unconfined PCIe function whose walk crosses such a level gets no DMA
 range. No device the manifests give DMA memory is one.
 
-**Walking up.** A walk from a node to the root takes each parent with
-`fdt_parent_offset`, a loop over the tree from its start
-(`fdt_ro.c:625-681`), at most `ERX_DT_DEPTH_MAX` times. At each level the
+**Walking up.** A walk from a node to the root takes the node's path from
+the root in one pass of `fdt_next_node` from the tree's start, keeping the
+node at each depth in an array of `ERX_DT_DEPTH_MAX + 1` entries, so a
+node's ancestors cost one pass and not one pass of `fdt_parent_offset`
+(`fdt_ro.c:625-681`) each. At each level the
 walk carries at most `ERX_DT_WINDOWS_MAX`, 16, windows, and a level whose
 translation would leave more gives the status `ranges`: 1,024 child
 entries that all map onto one parent range, under a level that splits
@@ -294,8 +311,9 @@ times its entries, and no path through the reader is longer than the
 tree's length times `ERX_DT_DEPTH_MAX` and `ERX_DT_WINDOWS_MAX`; the
 input's depth drives no recursion.
 
-**The DMA facts.** `erx_dt_device(tree, path, &facts)` finds the
-device's node and its bus. For a device-tree row the node is the one at
+**The DMA facts.** `erx_dt_device(tree, path, row, &facts)` finds the
+device's node and its bus; `row` says whether the path names a device's
+own node or a PCIe function's host bridge. For a device-tree row the node is the one at
 the row's path and the bus is that node's parent. A PCIe function has
 no node of its own; its host bridge's node stands as its node for the
 coherence marks and is itself its bus, so the walk's first level is the
@@ -306,8 +324,11 @@ host bridge's own `dma-ranges`, as
   specification defines the mark for a device, with an empty value
   (section 2.3.10, p. 17), and on AArch64 a device without it is not
   coherent. A mark with a value is `malformed`. A node with both marks,
-  or any node above it with either, gives the status `coherence`, since
-  no reading of a mark on a bus is the specification's
+  or a node above it with a mark the node does not carry itself, gives
+  the status `coherence`, since no reading of a mark on a bus is the
+  specification's; a mark above that repeats the node's own changes the
+  answer under no reading, and QEMU `virt` 11.1 marks its root
+  `dma-coherent` above every device that carries the mark itself
   ([design-device-dma.md](design-device-dma.md#device-addresses-and-reach));
 * the DMA range, `cpu`, `bus` and `last`, the device's translation, by
   the walk of `erx_dma_ranges`
@@ -317,7 +338,8 @@ host bridge's own `dma-ranges`, as
   `dma-ranges` translates the windows, and the parts no entry covers
   drop out; an empty one passes them; a level without the property
   passes them only when no level above it has a non-empty one and is
-  `malformed` otherwise. Then each window over which no memory range of
+  `malformed` otherwise. The root has no parent to map into, so a
+  non-empty `dma-ranges` on the root is `malformed`. Then each window over which no memory range of
   the view lies drops out, and the windows left are kept whole, not cut
   to RAM. A walk with no non-empty level leaves the one window, `0`, `0`
   and `2^64 - 1`. The range is present only when exactly one window
@@ -329,7 +351,9 @@ count other than 1 or 2), `malformed` (an entry not a whole number of
 cells, a coherence mark with a value, an overflow, a level without
 `dma-ranges` below a non-empty one) or `ranges` (more than
 `ERX_DT_WINDOWS_MAX` windows at a level, or no window, or more than one,
-that RAM backs). Any status but `ok` makes both DMA facts absent, so a
+that RAM backs). A row naming the root as a device's node has no bus and
+is `malformed`; a path that is not absolute, or names no node, is
+`no_node`. Any status but `ok` makes both DMA facts absent, so a
 device never has a range without its coherence.
 
 **What the reader cannot check.** The reader checks the tree's encoding
@@ -479,8 +503,12 @@ ran.
   `ProductionImage#check_device_paths` dumps it, and over the Pi 4's card
   tree and the model's tree that `tools/lib/erx/board_tree.rb` builds,
   with each device's expected facts pinned in the test: every virtio-mmio
-  transport coherent with no range; GENET not coherent, no range, no
-  address; EMMC2 not coherent, range `0`, `0xC0000000`, `0x3FFFFFFF`.
+  transport coherent with the range `0`, `0`, `2^64 - 1` of a walk with
+  no non-empty level; GENET not coherent, the same range, no address;
+  EMMC2 not coherent, range `0`, `0xC0000000`, `0x3FFFFFFF`. Those are
+  the model's tree's facts: the card's tree leaves the memory node as
+  zeros, so no window has RAM behind it and every DMA device there is
+  `ranges` until the firmware fills the node.
   A test fails on any manifest DMA device whose facts are absent in its
   platform's tree, so a board tree the reader refuses fails at build
   time. Fixtures: `dma-coherent` on the parent bus, and both marks on a

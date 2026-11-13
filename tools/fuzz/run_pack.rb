@@ -87,15 +87,16 @@ module Erx
     RUN_DEADLINE = 120
     # A seed's name becomes a file name in the target's corpus.
     SEED_NAME = /\A[a-z0-9-]+\z/
-    # A macro a target defines for its sources, such as ERX_HOST.
-    DEFINE_NAME = /\A[A-Z][A-Z0-9_]{0,63}\z/
+    # A macro a target defines for its sources, such as ERX_HOST, or with a
+    # decimal value, such as FDT_ASSUME_MASK=0.
+    DEFINE_NAME = /\A[A-Z][A-Z0-9_]{0,63}(?:=[0-9]{1,10})?\z/
     Target = Data.define(:kind, :sources, :includes, :defines, :seeds)
     TARGET_FILES = DeclarationFiles.new('native fuzz targets')
     private_constant :TARGET_FILES
 
     # Each tools/fuzz/KIND_target.rb calls this exactly once. seeds maps a
     # name to the bytes of one corpus file; defines names the macros its
-    # sources are compiled with.
+    # sources are compiled with, each NAME or NAME=DIGITS.
     def declare_target(sources:, seeds:, includes: INCLUDES, defines: [])
       unless relative_paths?(sources) && relative_paths?(includes)
         raise Error, 'native fuzz targets: sources and includes are non-empty lists of relative paths'

@@ -38,6 +38,12 @@ module Erx
     PATTERNS = [*CORE_PATTERNS, 'kernel/crypto/*/*.c', 'build/gen/kernel/generated/*.c'].freeze
     # Cores the stopgap links into bootstrap, not into the kernel.
     BOOTSTRAP_SOURCES = %w[kernel/core/boot_place.c kernel/core/pack.c].freeze
+    # Cores the stopgap's kernel does not link, which the root task links in user mode:
+    # the device-tree reader, which reaches the tree through libfdt built with every
+    # check on (docs/design-device-tree.md, "The reader"). The stopgap kernel reads
+    # no tree of erXos's and links its own libfdt, so the reader waits for erXos's
+    # kernel to be linked into one.
+    ROOT_TASK_SOURCES = %w[kernel/core/dt.c].freeze
     # What bootstrap links: those cores with what they call, and the image planner
     # the root's service reads an image entry with (NativeRoot links this archive). Translation is off
     # when they run, so every load and store must be aligned.
@@ -83,7 +89,7 @@ module Erx
       missing = BOOTSTRAP_SOURCES - found
       raise Error, "C17 cores: bootstrap source #{missing.first} is missing" unless missing.empty?
 
-      cores = found - BOOTSTRAP_SOURCES
+      cores = found - BOOTSTRAP_SOURCES - ROOT_TASK_SOURCES
       raise Error, 'C17 cores: no kernel core sources' if cores.empty?
 
       names = cores.map { |source| object_name(source) }

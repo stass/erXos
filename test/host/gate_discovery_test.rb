@@ -135,7 +135,7 @@ class GateDiscoveryTest < Minitest::Test
       'a climbing source' => "Erx::PackFuzz.declare_target(sources: ['../a.c'], seeds: { 'a' => 'b' })\n",
       'no include paths' => "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, includes: [])\n",
       'a define that is a flag' => "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, defines: ['X -O0'])\n",
-      'a define with a value' => "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, defines: ['X=1'])\n"
+      'a define with a value not decimal' => "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, defines: ['X=1 -O0'])\n"
     }.each do |label, text|
       with_files('x_fuzz.c' => '', 'x_target.rb' => text) do |directory|
         assert_raises(Erx::Error, label) { Fuzz.load_targets(directory) }
@@ -168,10 +168,11 @@ class GateDiscoveryTest < Minitest::Test
   end
 
   def test_a_fuzz_targets_defines_reach_its_compile
-    text = "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, defines: ['ERX_HOST'])\n"
+    text = "Erx::PackFuzz.declare_target(sources: ['a.c'], seeds: { 'a' => 'b' }, defines: ['ERX_HOST', 'FDT_ASSUME_MASK=0'])\n"
     with_files('x_fuzz.c' => '', 'x_target.rb' => text) do |directory|
       target = Fuzz.load_targets(directory).first
       assert_includes Fuzz.compile_command(target, root: '/r', compiler: 'cc', program: 'p'), '-DERX_HOST'
+      assert_includes Fuzz.compile_command(target, root: '/r', compiler: 'cc', program: 'p'), '-DFDT_ASSUME_MASK=0'
     end
   end
 

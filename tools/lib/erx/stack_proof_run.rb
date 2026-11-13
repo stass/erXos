@@ -28,7 +28,8 @@ module Erx
   # the kernel image references, and so a stricter proof. The cores
   # CoreArchive::BOOTSTRAP_SOURCES names are linked into bootstrap and not
   # into the kernel, so they run on no thread block and the report lists
-  # them as outside the claim.
+  # them as outside the claim, as it does the cores
+  # CoreArchive::ROOT_TASK_SOURCES names, which the kernel does not link.
   module StackProofRun
     LEVELS = ['-O0', CoreArchive::LEVEL].freeze
     BUDGET = 'kernel/stack_fiasco.txt'
@@ -67,7 +68,8 @@ module Erx
         end
       end
       bootstrap = CoreArchive::BOOTSTRAP_SOURCES.map { |source| "outside the claim: #{source}, linked into bootstrap" }
-      report = [*lines, *bootstrap]
+      root_task = CoreArchive::ROOT_TASK_SOURCES.map { |source| "outside the claim: #{source}, not linked into the kernel" }
+      report = [*lines, *bootstrap, *root_task]
       write(report, path: report_path)
       report
     end

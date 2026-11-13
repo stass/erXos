@@ -1307,6 +1307,23 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] device-tree reader, split DMA translations (`kernel/core/dt.c`, `range_read`): a translation written as
+  several adjacent `dma-ranges` entries, as a full 32-bit identity map under a one-cell `#size-cells` must be,
+  leaves several windows with RAM behind them, and the device gets `ranges` (no DMA range). It fails safe. Merge
+  windows contiguous in both bus and CPU addresses before the RAM filter, with the design's "exactly one window"
+  rule read after the merge. No tree of the manifests' devices does this.
+* [Low] libfdt, a version 2 header read past (`fiasco/libfdt/lib/contrib/fdt.c:139-142`, `fdt_check_header`):
+  the strings block's size, which version 3 added, is read and checked whatever the header's version, so
+  `fdt_check_full` on a 32-byte buffer claiming version 2 reads 4 bytes past it (found by `dt_fuzz`).
+  `erx_dt_accept` refuses a buffer shorter than the version 17 header first. Check the field only from version 3,
+  in this copy and in Fiasco's `fiasco/kernel/src/lib/libfdt`.
+* [Low] device-tree reader, duplicate sibling names (`kernel/core/dt.c`, `node_find`): `fdt_check_full` does not
+  refuse two siblings of one name, and `fdt_path_offset_namelen` takes the first, so a tree the reader could see
+  is wrong gives the first node's facts. Refuse a path that matches two nodes. The firmware is trusted.
+* [Low] device-tree reader linked into no target (`tools/lib/erx/core_archive.rb`, `ROOT_TASK_SOURCES`): only the
+  host tests and the fuzz target compile `kernel/core/dt.c`; the root task links it with the package that hands
+  the tree over, and a target-only build break surfaces only then.
+
 * [Medium] release slice, an empty `/data` (`include/erx/release_fs.h`, `liberx/release_fs.c`, `liberx/release.c`,
   `tools/lib/erx/pack.rb`, `tools/lib/erx/release_files.rb`): a domain the manifest grants no `data` facet has
   no `/data` mount and should find the root's empty, read-only `/data` directory there (design-files.md, "A

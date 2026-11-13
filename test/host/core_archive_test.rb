@@ -44,14 +44,17 @@ class CoreArchiveTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::CoreArchive.undefined_symbols("erx\e[31m U\n") }
   end
 
-  def test_the_kernel_cores_leave_out_the_bootstrap_ones
+  def test_the_kernel_cores_leave_out_the_bootstrap_and_root_task_ones
     root = File.expand_path('../..', __dir__)
     sources = Erx::CoreArchive.sources(root)
     assert_includes Erx::CoreArchive::BOOTSTRAP_SOURCES, 'kernel/core/pack.c'
     assert_empty sources & Erx::CoreArchive::BOOTSTRAP_SOURCES
+    assert_includes Erx::CoreArchive::ROOT_TASK_SOURCES, "kernel/core/dt.c"
+    assert_empty sources & Erx::CoreArchive::ROOT_TASK_SOURCES
     # Every other core and every imported primitive links with the cores.
     # gate_baseline_test.rb pins the ones in the tree against deletion.
-    expected = Dir.glob('kernel/{core,sched,crypto/*}/*.c', base: root) - Erx::CoreArchive::BOOTSTRAP_SOURCES
+    expected = Dir.glob('kernel/{core,sched,crypto/*}/*.c', base: root) - Erx::CoreArchive::BOOTSTRAP_SOURCES -
+               Erx::CoreArchive::ROOT_TASK_SOURCES
     assert_empty expected - sources
     assert_equal sources.sort, sources
   end
