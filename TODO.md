@@ -567,12 +567,12 @@ it; git history is the record of completed work.
   device's record to monitor the processes that post, as a line's binding does. A restarted driver's sequence
   (`queue_create/4`, `negotiate/2`) does not depend on it.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, queues: the queues run through the handoff sequencer
-  ([design-device-dma.md](docs/design-device-dma.md)) and follow the record's coherence mark, but no booted
-  device has run the non-coherent path: on QEMU `virt` every given device with DMA memory is coherent, and the
-  Raspberry Pi 4's given devices have no queues yet, so whether EL0 may run `DC CVAC` and `DC CIVAC` under the
-  stopgap is unverified, under HVF too; the paired boot of
-  [design-device-tree.md](docs/design-device-tree.md) ("The live tree on QEMU"), whose seeded tree drops
-  `dma-coherent` from the network transport's node, is not built and would settle it. The host tests count the
+  ([design-device-dma.md](docs/design-device-dma.md)) and follow the record's coherence mark. The
+  `net_device` suite's `noncoherent` cell runs the non-coherent path on QEMU `virt` under HVF and TCG
+  ([design-device-tree.md](docs/design-device-tree.md), "The live tree on QEMU"), so user mode runs `DC CVAC`
+  and `DC CIVAC` under the stopgap on both; QEMU's DMA is coherent, so the cell shows that the maintenance
+  runs and costs no traffic, not that it is sufficient. A device whose DMA is not coherent has not run it: the
+  Raspberry Pi 4's given devices have no queues yet. The host tests count the
   maintenance a non-coherent queue issues but do not run it. What is missing besides: the hosted
   stand-in running its plans over `erx_dma_model.c` (its maintenance is empty, `arch/host/erx_dma_arch.c`), so
   the NIF's non-coherent path has no host test with a cache that hides stores; a virtio-gpu region entry, which

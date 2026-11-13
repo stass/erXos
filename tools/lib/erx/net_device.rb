@@ -66,6 +66,16 @@ module Erx
   # client (system_checkpoints): vtnet0 must have merged the echo's bursts into units at
   # least once, and the network domain's one grant, the session's, must count that one
   # refusal and nothing left out, so no call of the steps before was refused or dropped.
+  #
+  # The suite boots twice under each accelerator. The stock boot takes the tree QEMU
+  # writes, which marks the network device's transport dma-coherent, and the root's line
+  # for that node must say `coherent 1`. The non-coherent boot takes the same tree with
+  # the mark removed from that node (ProductionImage.seed_noncoherent), the paired boot of
+  # docs/design-device-tree.md ("The live tree on QEMU"): the line must say `coherent 0`,
+  # so the device's record is not coherent and its queues issue the cache maintenance of
+  # docs/design-device-dma.md, and every step above must still pass, since maintenance
+  # changes nothing on QEMU's coherent DMA. That boot is the one that runs the maintenance
+  # instructions in user mode on a booted guest.
   module NetDevice
     GUEST_IP = [10, 0, 2, 15].freeze
     HOST_IP = [10, 0, 2, 100].freeze
@@ -135,22 +145,50 @@ module Erx
     # Typed at the system domain's Erlang shell: in the network domain, whether vtnet0's
     # interface merged any of the bursts the echo came back in, its count of merged units
     # (docs/design-network-fastpath.md, "The merge, before classification"), and the counts
-    # of the domain's one grant, the session's: {Merged, Refused, LeftOut}.
+    # of the domain's one grant, the session's; and the coherent value of each of the
+    # domain's network records that has DMA memory, the value erx_virtio_net opens the
+    # device with: {Merged, Refused, LeftOut, [Coherent]}.
     PROBE_LINE = 'begin [N] = [Nd || #{name := {erx_ident, <<"network">>}, node := Nd} <- ' \
                  'erx_domain_core:domains(maps:get(core, sys:get_state(erx_domain_srv)))], ' \
                  'erpc:call(N, fun() -> {ok, #{pid := If}} = erx_net_tables:interface(vtnet0), ' \
                  '{ok, C} = erx_net_if:admin(If, counters), ' \
                  '[G] = [P || {_, P, _, _} <- supervisor:which_children(erx_net_grants)], ' \
-                 'Counts = erx_net_grant:counts(G), ' \
-                 "{maps:get(units, C, 0) > 0, maps:get(refused, Counts), maps:get(unknown, Counts)} end, 10000) end.\r"
-    PROBE_ANSWER = '{true,1,0}'
+                 'Counts = erx_net_grant:counts(G), {ok, Specs} = erx_device_record:find(net, virtio_mmio), ' \
+                 '{maps:get(units, C, 0) > 0, maps:get(refused, Counts), maps:get(unknown, Counts), ' \
+                 "[Co || \#{memory := _, coherent := Co} <- Specs]} end, 10000) end.\r"
     # The one edit of the development manifest: the network row runs BeamAsm, as a
     # service domain does by default (docs/design-runtime.md, "BeamAsm"), so the TCP
     # line times the stack on the runtime a throughput figure assumes; the development
     # manifest runs it on the interpreter for a faster boot.
     BEAMASM_EDIT = /^(domain network\n(?:  .*\n)*?  runtime )@artifact\.emu$/
+    # A tree the suite boots on: its cell's suffix, and whether the network device's
+    # record is coherent on it. The coherent tree is QEMU's own; the other is QEMU's with
+    # the device's transport not marked dma-coherent (Run#noncoherent_tree).
+    Tree = Data.define(:suffix, :coherent)
+    TREES = { stock: Tree.new(suffix: '', coherent: true), noncoherent: Tree.new(suffix: '-noncoherent', coherent: false) }.freeze
 
     module_function
+
+    # The suite's cell that boots under accel on the tree named tree, a key of TREES.
+    def cell(accel, tree) = "#{accel}-1cpu#{TREES.fetch(tree).suffix}"
+
+    # The device-tree path of the network row the harness's virtio-net device sits on: the
+    # one device of the platform record's unit `net`.
+    def nic_node(platform)
+      unit = platform.record.fetch('units').find { |entry| entry['key'] == 'net' }
+      devices = unit&.fetch('devices')
+      raise Error, "#{platform.record_path} has no unit net with one device" unless devices&.size == 1
+
+      devices.first.fetch('path')
+    end
+
+    # The root's line for the network device's tree facts (docs/design-device-tree.md,
+    # "Facts into records"): QEMU's tree gives every transport the whole bus range and no
+    # address, so only the coherent value differs between the stock tree and the seeded one.
+    def tree_checkpoint(node, coherent:)
+      line = "erx: device tree: #{node}: coherent #{coherent ? 1 : 0} range 0x0 0x0 0xffffffffffffffff mac absent"
+      { name: 'nic-device-tree', pattern: /\A#{Regexp.escape(line)}\r*\n\z/n, seconds: SHELL_SECONDS }.freeze
+    end
 
     # The development manifest source with BEAMASM_EDIT, which must match exactly once.
     def manifest(source)
@@ -218,9 +256,13 @@ module Erx
        erl_point('grant-refusal', Regexp.escape('{error,badarg}'), type: ProductionImage::Run::CTRL_G)].freeze
     end
 
+    # The probe's answer: one merge at least, the one refusal, nothing left out, and one
+    # device with DMA memory, whose record carries coherent.
+    def probe_answer(coherent:) = "{true,1,0,[#{coherent}]}"
+
     # From the Ctrl-G menu to the system domain's command shell, whose ifconfig, ping and
     # host are refused for want of the `net` facet, then the probe at its Erlang shell.
-    def system_checkpoints
+    def system_checkpoints(coherent:)
       run = ProductionImage::Run
       [{ name: 'system-menu', pattern: run::CTRL_G_MENU, seconds: SHELL_SECONDS, type: 's' }.freeze,
        { name: 'system-shell', pattern: SessionDomain::MENU_LEFT, seconds: SHELL_SECONDS, type: IFCONFIG_LINE }.freeze,
@@ -228,7 +270,7 @@ module Erx
        shell_point('system-ping', Regexp.escape('ping: no_facet'), type: HOST_LINE),
        shell_point('system-host', Regexp.escape('host: no_facet'), type: run::ERL_LINE),
        run::ERLANG_SHELL.merge(name: 'system-erlang-shell', type: PROBE_LINE).freeze,
-       erl_point('network-probe', Regexp.escape(PROBE_ANSWER))].freeze
+       erl_point('network-probe', Regexp.escape(probe_answer(coherent: coherent)))].freeze
     end
 
     # Checks the tcp-digest line against what the echo server took, received
@@ -377,10 +419,12 @@ module Erx
       end
 
       # Boots the development image, its network row on BeamAsm (manifest), with a network
-      # device under each accelerator and runs the exchange from root's session. Returns { "<accelerator>-1cpu" => 'passed' }; a guest that
-      # misses a step raises.
-      def call(accels:, jobs: 4, build: true)
+      # device under each accelerator on each of trees (TREES) and runs the exchange from
+      # root's session. Returns { "<accelerator>-1cpu<tree suffix>" => 'passed' }; a guest
+      # that misses a step raises.
+      def call(accels:, trees: TREES.keys, jobs: 4, build: true)
         raise Error, 'the network device suite runs under tcg or hvf' unless accels.all? { |accel| %w[tcg hvf].include?(accel) }
+        raise Error, "the network device suite boots on the trees #{TREES.keys.join(', ')}" unless (trees - TREES.keys).empty?
 
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
@@ -389,7 +433,7 @@ module Erx
         image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker,
                                     machine: ProductionImage::Machine.development(@platform), fiasco: fiasco)
                                .build(directory: directory, manifest_source: manifest).single
-        accels.to_h { |accel| ["#{accel}-1cpu", boot(accel, image)] }
+        accels.product(trees).to_h { |accel, tree| [NetDevice.cell(accel, tree), boot(accel, image, TREES.fetch(tree))] }
       end
 
       def notes = @notes.dup.freeze
@@ -400,10 +444,13 @@ module Erx
 
       private
 
-      def boot(accel, image)
+      def boot(accel, image, tree)
         directory = OutputDirectory.prepare(root: @root, path: File.join(@root, 'build/net-device',
-                                                                          "#{accel}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"),
+                                                                          "#{accel}#{tree.suffix}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"),
                                             mode: 0o700)
+        node = NetDevice.nic_node(@platform)
+        command_line = ProductionImage::Run::COMMAND_LINES[accel]
+        dtb = tree.coherent ? nil : noncoherent_tree(accel: accel, image: image, node: node, command_line: command_line, directory: directory)
         link = Link.new
         server = NameServer.new(link)
         echo = EchoServer.new(limit: ECHO_LIMIT).start
@@ -416,24 +463,26 @@ module Erx
           server.start
         end
         session = SessionDomain.session_shell('root_1-shell', IFCONFIG_LINE).merge(verify: exchange).freeze
-        checkpoints = [*Qemu.boot_transcript(memory_mib: @platform.memory_mib), ProductionImage::Run::SLOGAN,
+        checkpoints = [*Qemu.boot_transcript(memory_mib: @platform.memory_mib), NetDevice.tree_checkpoint(node, coherent: tree.coherent),
+                       ProductionImage::Run::SLOGAN,
                        ProductionImage::Run::RELEASE_SHELL, session,
                        *NetDevice.shell_checkpoints(-> { answered.fetch(:mac) }),
                        *NetDevice.tcp_checkpoints(refused_port: echo.port, verify_digest: verify_digest),
-                       *NetDevice.system_checkpoints]
+                       *NetDevice.system_checkpoints(coherent: tree.coherent)]
         Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, image: image, memory_mib: @platform.memory_mib,
-                                                   directory: directory, checkpoints: checkpoints, nic: nic,
-                                                   command_line: ProductionImage::Run::COMMAND_LINES[accel])
+                                                   directory: directory, checkpoints: checkpoints, nic: nic, dtb: dtb,
+                                                   command_line: command_line)
         failed = server.stop || echo.stop
         raise failed if failed
 
-        @notes << "#{accel}: the guest at #{GUEST_IP.join('.')} (#{answered.fetch(:mac)}) answered ARP and ICMP echo, " \
+        @notes << "#{accel}, #{tree.coherent ? 'stock' : 'non-coherent'} tree: the root's line and the network domain's record said #{node} is #{tree.coherent ? '' : 'not '}coherent; " \
+                  "the guest at #{GUEST_IP.join('.')} (#{answered.fetch(:mac)}) answered ARP and ICMP echo, " \
                   'and its shell showed vtnet0 with the lease, pinged 10.0.2.2 three times and resolved www ' \
                   "in the lease's domain through the name server at #{SERVER}, with random query IDs; " \
                   "its Erlang shell sent #{TCP_BYTES} bytes over TCP to the echo server and read them back, " \
                   "and was refused the host's loopback; the session's grant admitted every call " \
                   'of these and refused one that is no operation; the system shell was refused ifconfig, ping and host'
-        @measurements << "net_device: #{accel}, 1 CPU: TCP from the guest's Erlang shell through slirp's guest forward " \
+        @measurements << "net_device: #{accel}, 1 CPU, #{tree.coherent ? 'stock' : 'non-coherent'} tree: TCP from the guest's Erlang shell through slirp's guest forward " \
                          "to the harness's echo server: #{TCP_BYTES} bytes each way in #{transfer_ms} ms " \
                          "(#{rate(transfer_ms)} each way), from the start of the send to the last byte back"
         'passed'
@@ -441,6 +490,18 @@ module Erx
         echo&.stop
         server&.stop
         link&.close
+      end
+
+      # QEMU's tree for this boot's machine, without the network device's dma-coherent mark,
+      # in the boot's directory. The dump's plan has no network device: a guest forward
+      # connects to the harness's echo server when QEMU starts, and the device adds no node,
+      # since QEMU's tree lists every virtio-mmio transport whether a device sits on it or not.
+      def noncoherent_tree(accel:, image:, node:, command_line:, directory:)
+        argv = QemuPlan.argv(platform: @platform, accel: accel, image: File.expand_path(image), serial: '/dev/null',
+                             memory_mib: @platform.memory_mib, command_line: command_line)
+        ProductionImage.seeded_tree(runner: @runner, argv: argv, path: File.join(directory, 'noncoherent.dtb')) do |listing|
+          ProductionImage.seed_noncoherent(listing, node: node)
+        end
       end
 
       def rate(ms) = ms.positive? ? format('%.1f MiB/s', TCP_BYTES * 1000.0 / ms / (1 << 20)) : 'too fast to rate'

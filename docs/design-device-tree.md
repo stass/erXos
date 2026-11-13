@@ -568,17 +568,26 @@ ran.
   length for the line. Seeds: the window test made over the unrounded
   `reg` range, and the crossing fixture is `ok`; the window test removed,
   and the register-window fixture is `ok`.
-* **The live tree on QEMU.** The production image suite boots with the
-  tree QEMU writes and expects each virtio-mmio device's line to say
-  `coherent 1 range 0x0 0x0 0xffffffffffffffff` and its traffic to pass.
-  The paired boot takes a seeded tree, made as `seeded_stdout_tree` makes
-  one (`tools/lib/erx/production_image.rb:1313-1327`), with
-  `dma-coherent` removed from the network transport's node: that
-  device's line says `coherent 0`, its record's `COHERENT` is 0, and its
-  traffic still passes, since maintenance changes nothing on QEMU's
-  coherent DMA. Seed: a root that takes coherence from the manifest row,
-  after which the seeded boot's line still says `coherent 1` and the test
-  fails.
+* **The live tree on QEMU.** The `net_device` suite
+  (`tools/lib/erx/net_device.rb`) boots twice. Its stock cell takes the
+  tree QEMU writes and expects the network device's line to say
+  `coherent 1 range 0x0 0x0 0xffffffffffffffff`, the network domain's
+  record for it to carry `coherent => true`, and its traffic to pass.
+  The paired boot, its `-noncoherent` cell, takes a seeded tree, QEMU's own
+  dumped through `ProductionImage.seeded_tree` with `dma-coherent`
+  removed from the network transport's node and from the root, whose
+  mark would otherwise stand above a node without its own and give that
+  node the status `coherence`; every other device keeps its own mark,
+  which the root's only repeated. That device's line says
+  `coherent 0`, the network domain's record for it carries
+  `coherent => false`, read there with `erx_device_record:find/2`, so
+  its queues issue the cache maintenance in user mode, and its traffic
+  still passes, since maintenance changes nothing on QEMU's coherent
+  DMA. The line prints the tree's
+  facts while the record carries `erx_boot_coherent`'s value, so the
+  suite checks both. Seed: a root that takes coherence from the
+  manifest row, after which the seeded boot's record still carries
+  `coherent => true` and the test fails.
 * **On the board.** Every Pi 4 board pass records the lines, which settle
   what this design leaves unverified: EMMC2's range on the board's
   revision, whether the firmware supplies GENET's address, and whether it

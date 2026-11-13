@@ -515,6 +515,41 @@ module Erx
       "#{aimed}\n/ {\n\taliases {\n\t\t#{alias_name} = \"#{renamed}\";\n\t};\n};\n"
     end
 
+    # A decompiled tree with the dma-coherent mark taken off node, a child of the root,
+    # and off the root: the device behind node then reads as not coherent, while QEMU's
+    # DMA stays coherent (docs/design-device-tree.md, "The live tree on QEMU"). The
+    # root's mark must go too, since a mark above a node that does not carry it itself
+    # withholds the node's DMA facts (status coherence); every other device keeps its own
+    # mark, which the root's only repeated. The root's property line is one tab deep, the
+    # node's two; the node's children's lines are deeper. Raises when the tree has no
+    # such node or the node has no mark.
+    def self.seed_noncoherent(dts, node:)
+      opening = /^\t#{Regexp.escape(node.delete_prefix('/'))} \{\n/
+      seeded = dts.sub(/(#{opening}(?:\t\t.*\n)*?)\t\tdma-coherent;\n/) { Regexp.last_match(1) }
+      raise Error, "the device tree has no node #{node} marked dma-coherent" if seeded == dts
+
+      seeded.sub(/^\tdma-coherent;\n/, '')
+    end
+
+    # QEMU's own tree for the machine argv starts, written by its dumpdtb option, decompiled,
+    # passed through the block, which returns the seeded listing, and compiled to path;
+    # returns path. -dtb hands a boot this tree in place of the one QEMU would write, so
+    # argv must be the boot's own machine: its platform, accelerator, CPUs, memory and
+    # command line.
+    def self.seeded_tree(runner:, argv:, path:)
+      raise Error, "a seeded tree's path ends in .dtb, not #{path}" unless path.end_with?('.dtb')
+
+      FileUtils.mkdir_p(File.dirname(path))
+      stock = path.sub(/\.dtb\z/, '-stock.dtb')
+      source = path.sub(/\.dtb\z/, '.dts')
+      machine = argv.index('-machine') + 1
+      runner.run([*argv[0...machine], "#{argv[machine]},dumpdtb=#{stock}", *argv[(machine + 1)..]], name: 'qemu-dumpdtb-seed', deadline: 30)
+      listing = File.read(runner.run(['dtc', '-q', '-I', 'dtb', '-O', 'dts', stock], name: 'dtc-seed', deadline: 30).fetch('log'))
+      File.write(source, yield(listing))
+      runner.run(['dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', path, source], name: 'dtc-seeded', deadline: 30)
+      path
+    end
+
     # The numbers of a property such as `reg = <0x00 0x9000000 0x00 0x1000>;`.
     def self.cells(body, property) = body[/^\t\t#{property} = <(.*?)>;/, 1].to_s.split.map { |cell| Integer(cell) }
     private_class_method :cells
@@ -1315,20 +1350,11 @@ module Erx
       # The dump's plan has the host link, as the boot that takes the tree does, so the tree has
       # the host link's UART and its /chosen/bootargs carry erx.hostlink=1.
       def seeded_stdout_tree(accel, count, built)
-        directory = File.join(@root, 'build/production-image/device-tree')
-        FileUtils.mkdir_p(directory)
-        stock = File.join(directory, "#{accel}-#{count}cpu.dtb")
-        seeded = File.join(directory, "#{accel}-#{count}cpu-stdout.dtb")
         argv = QemuPlan.argv(platform: @machine.platform, accel: accel, image: File.expand_path(built.single), serial: '/dev/null', cpus: count,
                             memory_mib: @machine.memory_mib, program: @qemu)
-        machine = argv.index('-machine') + 1
-        @runner.run([*argv[0...machine], "#{argv[machine]},dumpdtb=#{stock}", *argv[(machine + 1)..]], name: 'qemu-dumpdtb-seed', deadline: 30)
-        listing = File.read(@runner.run(['dtc', '-q', '-I', 'dtb', '-O', 'dts', stock], name: 'dtc-seed', deadline: 30).fetch('log'))
-        source = File.join(directory, "#{accel}-#{count}cpu-stdout.dts")
-        File.write(source, ProductionImage.seed_stdout_path(listing, node: '/pl011@9000000', renamed: SEEDED_STDOUT_NODE,
-                                                                    alias_name: SEEDED_STDOUT_ALIAS))
-        @runner.run(['dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', seeded, source], name: 'dtc-seeded', deadline: 30)
-        seeded
+        ProductionImage.seeded_tree(runner: @runner, argv: argv, path: File.join(@root, 'build/production-image/device-tree', "#{accel}-#{count}cpu-stdout.dtb")) do |listing|
+          ProductionImage.seed_stdout_path(listing, node: '/pl011@9000000', renamed: SEEDED_STDOUT_NODE, alias_name: SEEDED_STDOUT_ALIAS)
+        end
       end
 
       # The production image without its session template, since this suite's cells type

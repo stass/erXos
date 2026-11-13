@@ -10,6 +10,7 @@ require 'rbconfig'
 require_relative '../../tools/lib/erx/oracle_qemu'
 require_relative '../../tools/lib/erx/medium_boot'
 require_relative '../../tools/lib/erx/production_image'
+require_relative '../../tools/lib/erx/net_device'
 
 # The production image's host-side rules. Its boot is the QEMU gate's production_image suite.
 class ProductionImageTest < Minitest::Test
@@ -218,6 +219,25 @@ class ProductionImageTest < Minitest::Test
     line = "erx: root task refused the boot: manifest: the console /pl011@9000000 is not the node /chosen/stdout-path names, /uart@9000000\r\n"
     assert_match point.fetch(:pattern), line
     refute_match point.fetch(:pattern), line.sub('/uart@9000000', '(none)')
+  end
+
+  # The non-coherent boot's tree (docs/design-device-tree.md, "The live tree on QEMU"):
+  # the named node and the root lose their marks, another node and a child keep theirs,
+  # and a node without the mark refuses the seed rather than boot a stock tree as the
+  # seeded one.
+  def test_the_noncoherent_seed_and_the_checks_it_is_booted_with
+    dts = "/ {\n\tdma-coherent;\n\tvirtio_mmio@a002c00 {\n\t\tdma-coherent;\n\t\treg = <0x00 0xa002c00 0x00 0x200>;\n\t};\n\n" \
+          "\tvirtio_mmio@a002e00 {\n\t\tchild {\n\t\t\tdma-coherent;\n\t\t};\n\t\tdma-coherent;\n" \
+          "\t\treg = <0x00 0xa002e00 0x00 0x200>;\n\t};\n};\n"
+    seeded = Erx::ProductionImage.seed_noncoherent(dts, node: '/virtio_mmio@a002e00')
+    assert_equal dts.sub("\t\t};\n\t\tdma-coherent;\n", "\t\t};\n").sub("/ {\n\tdma-coherent;\n", "/ {\n"), seeded
+    assert_raises(Erx::Error) { Erx::ProductionImage.seed_noncoherent(seeded, node: '/virtio_mmio@a002e00') }
+    assert_raises(Erx::Error) { Erx::ProductionImage.seed_noncoherent(dts, node: '/virtio_mmio@a003e00') }
+    node = Erx::NetDevice.nic_node(PLATFORM)
+    assert_equal '/virtio_mmio@a002e00', node
+    line = "erx: device tree: #{node}: coherent 0 range 0x0 0x0 0xffffffffffffffff mac absent\r\n"
+    assert_match Erx::NetDevice.tree_checkpoint(node, coherent: false).fetch(:pattern), line
+    refute_match Erx::NetDevice.tree_checkpoint(node, coherent: true).fetch(:pattern), line
   end
 
   FakeBuilt = Struct.new(:build_id, :index_hash, :flags, :test_code, keyword_init: true)
