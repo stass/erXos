@@ -550,6 +550,11 @@ it; git history is the record of completed work.
   `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint that matches the
   old shape (`erlang/apps/erx_storage/src/erx_lfs_mint.erl`, `erx_net_admit`); the reset count cleared by the first
   kept session.
+* [Low] The start table's first `rc.conf` read waits for the system domain's namespace to be in place
+  (`erx_domain:system_namespace/0`), but a storage domain that ends once during boot, or misses the mint
+  deadline, settles that wait as failed: the read answers an error and the manifest's enabled rows start before
+  `rc.conf` is known, so a row `rc.conf` disables runs until the read succeeds. Waiting through a storage
+  restart within its intensity would close it (`erlang/apps/erx_starter/src/erx_starter.erl`).
 * [Low] The `apps` tree (`erx_starter_fs`) is served once `erx_starter` starts, after `erx_domain`, whose start
   has the console ask for root's session: root's session gets `/apps` only because its boot outlasts the next
   application's start. A session that reported ready before then has no `/apps` until it restarts. Serving the
