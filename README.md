@@ -438,7 +438,14 @@ Error in process <0.150.0> with exit value:
   on the same tap (its 64 KiB window variant) reaches 6,537 Mbit/s
   sending and 6,809 Mbit/s receiving, so bulk transfer is still well
   behind it. The raw data lives outside this repository.
-* **The display has host-built parts:** the screen's composition
+* **The display's window stack works on QEMU `virt`.** Once a display is
+  up, its session starts; the session's client opens a window with
+  `erx_win:open/2`, draws into the window's buffer and presents it, and
+  the `display_domain` suite compares the screen with a reference
+  picture. The window server (`erx_winfs`) serves each window as files and
+  takes its display's name from its domain's environment. The virtio-input
+  driver's event parser is a pure, fuzzed core; input is not yet routed to
+  windows. Host-built parts around it: the screen's composition
   (`erx_screen_core`), the single-window policy with its reserved chord
   and `wctl`, the widget model's deltas, `ui.txt` with its generated
   schema and binary form in Erlang, C and TypeScript, presentation types
@@ -448,7 +455,7 @@ Error in process <0.150.0> with exit value:
   display record for the windows service, `erx-lvgl` draws into its
   window's buffer in LVGL's direct mode, and the virtio-gpu driver's
   decisions are written; the QEMU harness can add a virtio-gpu, keyboard
-  and tablet and compare screenshots. No screen shows it yet.
+  and tablet and compare screenshots.
 * **A browser shows the machine's records:** run `make web` first,
   which builds the client offline from pinned packages; boot with
   `tools/erx boot --hostlink`, run the `tools/erx web --socket PATH`
@@ -461,8 +468,7 @@ Error in process <0.150.0> with exit value:
   the session's own processes, each a link to its record; a path the
   session cannot see ends with `scope`. Records are the only view so far.
 * **Designed but not built yet:** the rest of erXos's own kernel, the
-  rest of the command shell, the display on a
-  screen, the rest of the browser client, and the POSIX-lite layer. Each has a design document in
+  rest of the command shell, input to windows, the rest of the browser client, and the POSIX-lite layer. Each has a design document in
   [docs/](docs/).
 
 ## Correctness and testing
