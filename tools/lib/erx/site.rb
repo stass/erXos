@@ -9,15 +9,19 @@ require 'json'
 require 'socket'
 require 'tmpdir'
 require 'zlib'
+require_relative 'boot_partition'
+require_relative 'bounded_file'
 require_relative 'error'
+require_relative 'json_input'
 require_relative 'medium_image'
 require_relative 'site_v64'
 
 module Erx
-  # Assembles the static website in build/site from four inputs: the page
+  # Assembles the static website in build/site from five inputs: the page
   # sources in site/, a v64 tree SiteV64 built (the emulator the page runs
-  # erXos on, with its licence notices), an erXos boot image, and the
-  # source the image was built from. None of the built files is checked in.
+  # erXos on, with its licence notices), an erXos boot image, the Raspberry
+  # Pi 4's card with its build record (BootPartition), and the source both
+  # were built from. None of the built files is checked in.
   #
   # It also makes the disk the page attaches to the machine as its virtio
   # block device, on the virtio-mmio slot where the QEMU harness attaches
@@ -34,9 +38,17 @@ module Erx
   # page decompresses it with DecompressionStream, so the static host needs
   # no Content-Encoding setup.
   #
-  # The image carries the stopgap kernel's GPL-2.0 code, so the page links
-  # the erXos source it was built from, a release tag or a commit, beside
-  # the console (docs/design.md, "Licences and notices").
+  # The card is a download, gzip-compressed too: macOS, Linux and Windows
+  # open gzip with what they ship, Raspberry Pi Imager writes it as it is,
+  # and Ruby's zlib writes it without a tool the workflow would have to
+  # install. Its build record is published beside it, once card_record finds
+  # it is the card's, of the commit the page links with no changes, and
+  # names no host path.
+  #
+  # The image and the card carry GPL-2.0 code, the stopgap kernel's and the
+  # board's device tree, so the page links the erXos source they were built
+  # from, a release tag or a commit, beside the console and the download
+  # (docs/design.md, "Licences and notices").
   module Site
     PAGE_FILES = %w[index.html style.css favicon.svg terminal.js].freeze
     MANIFEST = 'boot.json'
@@ -46,6 +58,8 @@ module Erx
     TAG = /\A[A-Za-z0-9][A-Za-z0-9._-]{0,99}\z/
     COMMIT = /\A[0-9a-f]{40}\z/
     SECTOR_BYTES = MediumImage::SECTOR_BYTES
+    # A card's build record is a few kilobytes; anything far larger is not one.
+    MAX_CARD_RECORD = 1024 * 1024
 
     # One output file: where it goes under the site directory, where it comes
     # from, and whether it is stored gzip-compressed.
@@ -61,8 +75,11 @@ module Erx
     end
     # entries: the files copied as they are; index: index.html's template;
     # names: the digest names; disk: the Disk; manifest: boot.json without
-    # compressed_bytes, which only the written image gives.
-    Plan = Data.define(:entries, :index, :names, :disk, :manifest)
+    # the image's compressed_bytes and the card's compressed_bytes and
+    # compressed_sha256, which only the written files give; card_record: the
+    # card's build record as card_record checked it, which is what is
+    # published, so no byte of the file goes out unchecked.
+    Plan = Data.define(:entries, :index, :names, :disk, :manifest, :card_record)
 
     module_function
 
@@ -129,41 +146,76 @@ module Erx
       disk(pieces:, capacity: MediumImage.sectors(data_sectors:) * SECTOR_BYTES)
     end
 
+    # The card's build record, parsed from the bytes of a BootPartition
+    # receipt, once it names sha256 as its card's, names source's commit as
+    # the one the card was built from with no changes, and holds no absolute
+    # path (BootPartition.check_record). The page links source as the card's,
+    # so a record of another card or commit, of a changed tree, of a tree
+    # that was no checkout, or one that would publish a host's paths, is
+    # refused; so is a tag as source, which the record's commit cannot be
+    # checked against here (the workflow resolves its tag to the commit).
+    def card_record(bytes, sha256:, source:)
+      unless COMMIT.match?(source.ref)
+        raise Error, "the card's source must be given as its 40-hex commit, which its build record names, not #{source.ref}"
+      end
+
+      record = JsonInput.parse(bytes, max_bytes: MAX_CARD_RECORD, label: "the card's build record")
+      artifact = { 'path' => BootPartition::IMAGE, 'sha256' => sha256 }
+      unless record.is_a?(Hash) && record['artifact'] == artifact
+        raise Error, "the card's build record is not of this card, #{BootPartition::IMAGE} with SHA-256 #{sha256}"
+      end
+      unless record['source'] == { 'commit' => source.ref, 'dirty' => false }
+        raise Error, "the card's build record does not name #{source.ref}, with no changes, as the source it was built from"
+      end
+
+      BootPartition.check_record(record)
+    end
+
     # Reads the inputs' sizes and digests and decides which file goes where.
-    # Raises Erx::Error naming the first missing input.
-    def inventory(root:, v64:, image:, source:, disk:)
+    # Raises Erx::Error naming the first missing input, or for a card whose
+    # build record is not its own or not of source (card_record).
+    def inventory(root:, v64:, image:, card:, card_record:, source:, disk:)
       page = PAGE_FILES.to_h { |name| [name, File.join(root, 'site', name)] }
       emulator = SiteV64::TARGETS.transform_values { |path| File.join(v64, path) }
       notices = SiteV64::NOTICES.transform_values { |path| File.join(v64, path) }
-      missing = [*page.values, *emulator.values, *notices.values, image].reject { |path| File.file?(path) }
+      missing = [*page.values, *emulator.values, *notices.values, image, card, card_record].reject { |path| File.file?(path) }
       raise Error, "site input missing: #{missing.first}" unless missing.empty?
 
       digest = ->(path) { Digest::SHA256.file(path).hexdigest }
       image_sha256 = digest.(image)
       disk_sha256 = Digest::SHA256.hexdigest(disk.content)
+      card_sha256 = digest.(card)
+      record = card_record(BoundedFile.read(card_record, maximum: MAX_CARD_RECORD), sha256: card_sha256, source:)
       names = { 'terminal.js' => digest_name('terminal.js', digest.(page.fetch('terminal.js'))),
-                'image' => "image-#{image_sha256[0, 16]}.boot.gz", 'disk' => "disk-#{disk_sha256[0, 16]}.bin" }
+                'image' => "image-#{image_sha256[0, 16]}.boot.gz", 'disk' => "disk-#{disk_sha256[0, 16]}.bin",
+                'card' => "sdcard-#{card_sha256[0, 16]}.img.gz",
+                'card_record' => "sdcard-#{card_sha256[0, 16]}.img.receipt.json" }
               .merge(emulator.to_h { |name, path| [name, "v64/#{digest_name(name, digest.(path))}"] })
       entries = [Entry.new(path: 'style.css', source: page.fetch('style.css'), gzip: false),
                  Entry.new(path: 'favicon.svg', source: page.fetch('favicon.svg'), gzip: false),
                  Entry.new(path: names.fetch('terminal.js'), source: page.fetch('terminal.js'), gzip: false),
                  *emulator.map { |name, path| Entry.new(path: names.fetch(name), source: path, gzip: false) },
                  *notices.map { |name, path| Entry.new(path: "v64/#{name}", source: path, gzip: false) },
-                 Entry.new(path: names.fetch('image'), source: image, gzip: true)]
+                 Entry.new(path: names.fetch('image'), source: image, gzip: true),
+                 Entry.new(path: names.fetch('card'), source: card, gzip: true)]
       manifest = { image: names.fetch('image'), bytes: File.size(image), sha256: image_sha256,
                    emulator: { module: names.fetch('libv86.mjs'), wasm: names.fetch('v86-arm64.wasm'),
                                bytes: emulator.values.sum { |path| File.size(path) } },
                    disk: { file: names.fetch('disk'), bytes: disk.content.bytesize, sha256: disk_sha256,
                            capacity: disk.capacity, extents: disk.extents },
+                   card: { file: names.fetch('card'), bytes: File.size(card), sha256: card_sha256,
+                           record: names.fetch('card_record') },
                    source: { ref: source.ref, url: source.url } }
-      Plan.new(entries:, index: page.fetch('index.html'), names:, disk:, manifest:)
+      Plan.new(entries:, index: page.fetch('index.html'), names:, disk:, manifest:, card_record: record)
     end
 
-    # index.html with its {{name}} placeholders filled in. Every value is
-    # HTML-escaped; an unknown placeholder raises.
-    def render_index(template, terminal:, source:)
-      values = { 'terminal_js' => terminal, 'source_url' => source.url, 'source_label' => source.label }
-      template.gsub(/\{\{([a-z_]+)\}\}/) do
+    # index.html with its {{name}} placeholders filled in. card is boot.json's
+    # card entry. Every value is HTML-escaped; an unknown placeholder raises.
+    def render_index(template, terminal:, source:, card:)
+      values = { 'terminal_js' => terminal, 'source_url' => source.url, 'source_label' => source.label,
+                 'card_file' => card.fetch(:file), 'card_record' => card.fetch(:record),
+                 'card_sha256' => card.fetch(:sha256), 'card_download_sha256' => card.fetch(:compressed_sha256) }
+      template.gsub(/\{\{([a-z][a-z0-9_]*)\}\}/) do
         key = Regexp.last_match(1)
         raise Error, "index.html: unknown placeholder {{#{key}}}" unless values.key?(key)
 
@@ -193,10 +245,14 @@ module Erx
     def assemble(plan, out:)
       plan.entries.each { |entry| write(entry, out:) }
       File.binwrite(File.join(out, plan.names.fetch('disk')), plan.disk.content)
+      File.write(File.join(out, plan.names.fetch('card_record')), "#{JSON.pretty_generate(plan.card_record)}\n")
+      download = File.join(out, plan.names.fetch('card'))
+      card = plan.manifest.fetch(:card).merge(compressed_bytes: File.size(download),
+                                              compressed_sha256: Digest::SHA256.file(download).hexdigest)
+      manifest = plan.manifest.merge(compressed_bytes: File.size(File.join(out, plan.names.fetch('image'))), card:)
       index = render_index(File.read(plan.index), terminal: plan.names.fetch('terminal.js'),
-                                                  source: Source.new(ref: plan.manifest.dig(:source, :ref)))
+                                                  source: Source.new(ref: plan.manifest.dig(:source, :ref)), card:)
       File.write(File.join(out, 'index.html'), index)
-      manifest = plan.manifest.merge(compressed_bytes: File.size(File.join(out, plan.names.fetch('image'))))
       File.write(File.join(out, MANIFEST), "#{JSON.pretty_generate(manifest)}\n")
       File.write(File.join(out, MARKER), "built by tools/build_site.rb\n")
       manifest

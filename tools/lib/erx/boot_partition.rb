@@ -12,12 +12,12 @@ require_relative 'fat_short_names'
 require_relative 'bl31'
 require_relative 'board_tree'
 require_relative 'bounded_file'
-require_relative 'build_memo'
 require_relative 'build_path'
 require_relative 'dependencies'
 require_relative 'output_directory'
 require_relative 'platform'
 require_relative 'qemu'
+require_relative 'source_revision'
 
 module Erx
   # The Raspberry Pi 4's medium, the production image's for a board the firmware boots
@@ -27,9 +27,18 @@ module Erx
   # 0x0c), holds the same files; and sdcard.img.receipt.json is their build record
   # (docs/design-stopgap.md, "The Raspberry Pi 4"; docs/design-platforms.md, "Firmware").
   # The files are the firmware, unmodified, with its licence; config.txt, written from
-  # the platform record; the board's device tree, unmodified, with its source, and the
-  # overlays config.txt names; TF-A's BL31 as the armstub, with its licence; and the
-  # production image's bootable file as kernel8.img.
+  # the platform record; the board's device tree, with its one marked edit, its source
+  # and Linux's GPL-2.0 text (BoardTree), and the overlays config.txt names; TF-A's BL31
+  # as the armstub, with its licence; and the production image's bootable file as
+  # kernel8.img.
+  #
+  # The card and its build record are what the website offers for the board
+  # (site/README.md), so the record is fit to publish: it names the erXos commit the card
+  # was built from and whether the tree had changes, and each host tool by its version
+  # line alone, never by a path, which may carry a user's name. The website refuses a
+  # record of another commit, of a changed tree, or one that holds an absolute path
+  # (check_record); packing does not, since a self-built tool's version line may name
+  # the directory it was built in, and such a card still serves its builder.
   #
   # Every name in the layout is one of this module's own, so nothing a caller passes
   # chooses where a file lands. The three entries are written in a fresh work directory
@@ -155,6 +164,7 @@ module Erx
       own = { KERNEL => bootable, ARMSTUB => bl31, ARMSTUB_LICENCE => bl31_licence,
               CONFIG => Text.new(config_txt(platform, overlays: tree.overlays.keys, build_kind: build_kind)),
               board.file => tree.board, BoardTree.source_file(board) => tree.source,
+              BoardTree::LICENCE_FILE => tree.licence,
               **tree.overlays.to_h { |name, path| ["overlays/#{name}.dtbo", path] } }
       clash = own.keys & firmware.keys
       raise Error, "boot partition: the firmware's #{clash.join(', ')} would replace a file of the layout" unless clash.empty?
@@ -205,24 +215,86 @@ module Erx
         **record }
     end
 
-    # The build record of a layout: the firmware's deps.lock pins, BL31's own build
-    # record (Bl31.record) and its licence's place in TF-A's pinned tree, the board tree's
-    # pinned source, recipe, overlay sources and tools (the preprocessor and dtc, by
-    # identity), and the card's tool and arguments. The bootable file's record is the
-    # image's, in the same directory. Paths are relative to root; a tool's identity is
-    # its real path, digest and the host's release (BuildMemo.program_identity).
-    def record(root:, platform:, firmware:, compiler:, linker:)
+    # The build record of a layout: the erXos commit the card is of, in full, and whether
+    # the tree differed from it (nil when the tree is no git checkout); the firmware's
+    # deps.lock pins, BL31's own build record (Bl31.record) and its licence's place in
+    # TF-A's pinned tree, the board tree's pinned source, recipe, overlay sources and
+    # tools (the preprocessor and dtc), and the card's tool and arguments. The bootable
+    # file's record is the image's, in the same directory. Paths are relative to root,
+    # and each host tool is named by its version line (tool_version), not by the
+    # identity BL31's own record keys its rebuilds on.
+    def record(root:, runner:, revision:, platform:, firmware:, compiler:, linker:)
       board = BoardTree.board(platform)
-      { 'producer' => source_reference(root, __FILE__),
+      version = ->(program) { tool_version(program, runner: runner) }
+      { 'source' => (revision && { 'commit' => revision.commit, 'dirty' => revision.dirty }),
+        'producer' => source_reference(root, __FILE__),
         'inputs' => { 'platform' => platform.name, 'firmware' => firmware,
-                      'bl31' => Bl31.record(root: root, compiler: compiler, linker: linker),
+                      'bl31' => Bl31.record(root: root, compiler: compiler, linker: linker)
+                                    .merge('compiler' => version.(compiler), 'linker' => version.(linker)),
                       'bl31_licence' => { 'source' => Bl31::SOURCE_ID, 'path' => Bl31::LICENCE },
                       'board_tree' => { 'source' => BoardTree.source_record(root: root), 'board' => board.source,
                                         'recipe' => source_reference(root, BoardTree.recipe_path),
                                         'overlays' => board.overlays.transform_values { |path| source_reference(root, File.join(root, path)) },
-                                        'compiler' => BuildMemo.program_identity(compiler),
-                                        'dtc' => BuildMemo.program_identity(BoardTree.dtc_path) },
+                                        'compiler' => version.(compiler), 'dtc' => version.(BoardTree.dtc_path) },
                       'card' => { 'tool' => Fsimg::VERSION_LINE, 'source' => Fsimg.source_record(root: root), 'arguments' => CARD } } }
+    end
+
+    # An absolute path's mark in a record: a single slash that starts a string or follows
+    # a space, an opening bracket, a quote or a separator (`--sysroot=/x`, `PATH:/x`), or
+    # a triple slash (`file:///x`), or a home directory's `~/`. A URL's `://` is a double
+    # slash, and a relative path's slashes follow a name.
+    ABSOLUTE_PATH = %r{(?:\A|[\s(=:,'"\[])/(?!/)|///|~/}
+    # What every string of a publishable record is: printable ASCII, as the pins, relative
+    # paths, digests and version lines it is made of are, so it carries no control or
+    # bidirectional character to a reader's terminal or browser.
+    PRINTABLE = /\A[ -~]*\z/
+    VERSION_BYTES = 4096
+    VERSION_DEADLINE = 30
+
+    # The first line program prints for --version (`Homebrew clang version 21.1.5`),
+    # which names the tool without the path it was found at. A line that is empty or not
+    # printable ASCII is refused; one that names a path is the website's to refuse
+    # (check_record).
+    def tool_version(program, runner:)
+      log = runner.run([program, '--version'], name: 'boot-partition-tool-version', deadline: VERSION_DEADLINE).fetch('log')
+      line = BoundedFile.read(log, maximum: VERSION_BYTES).lines.first.to_s.strip
+      raise Error, "boot partition: #{File.basename(program)} --version gives no version line fit for the card's record" unless
+        line.match?(/\A[ -~]+\z/)
+
+      line
+    end
+
+    # The most of a place an error names, so a long key does not fill the log.
+    PLACE_CHARACTERS = 200
+
+    # receipt, once every string in it is printable ASCII and none names an absolute
+    # path, which would carry the build host's directories, and a user's name with
+    # them, to whoever the card is given to; the website checks a card's record with it
+    # (Site.card_record). The error names where the string is, not the string, so the
+    # website's build log does not publish it.
+    def check_record(receipt)
+      strings = record_strings(receipt)
+      odd = strings.find { |_place, text| !PRINTABLE.match?(text) }
+      raise Error, "the card's build record holds a string that is not printable ASCII in #{odd.first}" if odd
+
+      found = strings.find { |_place, text| ABSOLUTE_PATH.match?(text) }
+      raise Error, "the card's build record names an absolute path in #{found.first}" if found
+
+      receipt
+    end
+
+    # Every key and string value of a parsed record, whose nesting its parser bounds
+    # (JsonInput), each with its place: a value's keys and indices from the top, a key's
+    # its parent's. Keys come before what they hold, so a key that is a path is found
+    # before a place that would spell it.
+    def record_strings(value, keys = [])
+      place = keys.empty? ? 'the record' : keys.join('/').dump[0, PLACE_CHARACTERS]
+      case value
+      in Hash then value.flat_map { |key, item| [["a key of #{place}", key], *record_strings(item, [*keys, key])] }
+      in Array then value.each_with_index.flat_map { |item, index| record_strings(item, [*keys, index]) }
+      in String then [[place, value]]
+      else []
+      end
     end
 
     def source_reference(root, path)
@@ -235,12 +307,16 @@ module Erx
     def lay_out(root:, runner:, platform:, build_kind:, bootable:, directory:, compiler:, linker:)
       dependencies = Dependencies.new(root: root, runner: runner)
       pinned = FIRMWARE.map { |id| dependencies.archive_for(id) }
+      # Read once, so the device tree's notice and the card's record name one revision.
+      revision = SourceRevision.read(root: root, runner: runner)
       plan = plan(platform: platform, build_kind: build_kind, bootable: bootable,
                   firmware: pinned.to_h { |source, archive| [source.fetch('filename'), archive] },
                   bl31_licence: Bl31.licence(root: root, runner: runner),
                   bl31: Bl31.ensure(root: root, runner: runner, compiler: compiler, linker: linker),
-                  tree: BoardTree.build(root: root, runner: runner, platform: platform, compiler: compiler))
-      record = record(root: root, platform: platform, firmware: pinned.map(&:first), compiler: compiler, linker: linker)
+                  tree: BoardTree.build(root: root, runner: runner, platform: platform, compiler: compiler,
+                                        revision: revision))
+      record = record(root: root, runner: runner, revision: revision, platform: platform,
+                      firmware: pinned.map(&:first), compiler: compiler, linker: linker)
       write(root: root, directory: directory, plan: plan, record: record, runner: runner,
             fsimg: Fsimg.checked(root: root, runner: runner))
     end

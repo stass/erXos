@@ -9,14 +9,17 @@ The page runs erXos under [v64](https://github.com/speedyHKjournalist/v64),
 an emulator of an AArch64 virt machine compiled to WebAssembly. erXos uses
 v64 unmodified, so it stays outside the tree: `deps.lock` pins its commit,
 and Closure Compiler, which its JavaScript build needs. None of the built
-files (v64's `libv86.mjs` and `v86-arm64.wasm`, the compressed boot image)
-is checked in. `tools/build_site.rb` builds v64 and assembles it with the
-page and the image into `build/site/`:
+files (v64's `libv86.mjs` and `v86-arm64.wasm`, the compressed boot image,
+the Raspberry Pi 4's card) is checked in. `tools/build_site.rb` builds v64
+and assembles it with the page, the image and the card into `build/site/`,
+so a local build needs a packed card first (`make pack PLATFORM=raspi4b`)
+from a tree with no changes, and `--source` that card's commit when `HEAD`
+has moved since:
 
 ```
 tools/erx fetch --source v64
 tools/erx fetch --source closure-compiler
-ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
+ruby tools/build_site.rb [--image IMAGE] [--card CARD] [--serve 8000]
 ```
 
 * Building v64 copies the fetched tree, after checking its download
@@ -70,10 +73,34 @@ ruby tools/build_site.rb [--image IMAGE] [--serve 8000]
   only its partition table's three records and the volume's first blocks
   hold bytes, so it is published as `disk-<digest>.bin`, those bytes, and
   `boot.json` lists the extents they fill.
-* `--source REF` is the erXos release tag or full commit the image was
-  built from, by default this tree's `HEAD`. The image carries the
-  stopgap kernel's GPL-2.0 files, so the page links that source on
-  github.com beside the console, and `boot.json` records it.
+* `--card CARD` is the Raspberry Pi 4's card, by default
+  `build/production-image/raspi4b/sdcard.img`, which
+  `make pack PLATFORM=raspi4b` builds, and `--card-record` its build
+  record, by default the card's path with `.receipt.json` added. The page
+  offers the card as a download, `sdcard-<digest>.img.gz`, with the SHA-256
+  of the download and of the card image, the record beside it as
+  `sdcard-<digest>.img.receipt.json`, and how to write the card. It is
+  gzip-compressed because every desktop system opens gzip with what it
+  ships (xz needs a tool macOS lacks), Raspberry Pi Imager writes a `.gz`
+  as it is, and Ruby's zlib writes it in the build itself. The record
+  names the full erXos commit the card was built from and whether the
+  tree had changes. A record that does not name the card's SHA-256, that
+  names a commit other than `--source`'s or a tree with changes, or that
+  holds an absolute path, which could carry a user's name, is refused
+  (`Erx::Site.card_record`); the card's build names each host tool by its
+  version line alone, and packing does not refuse a version line that
+  names a path, so a self-built tool's card still serves its builder.
+  The published record is the one checked, as parsed and re-written.
+* `--source REF` is the erXos release tag or full commit the image and
+  the card were built from, by default this tree's `HEAD`. Since the
+  card's record names a commit, a tag is refused; the workflow resolves
+  its tag to the commit before it builds. The image
+  carries the stopgap kernel's GPL-2.0 files and the card those and the
+  board's GPL-2.0 device tree, so the page links that source on github.com
+  beside the console and the download, and `boot.json` records it. These
+  are the images CLAUDE.md lets leave the project, each with its source
+  offered. The card's device tree ships with its source, Linux's GPL-2.0
+  text and a notice of erXos's one edit, dated by the commit's date.
 * `terminal.js`, `libv86.mjs` and `v86-arm64.wasm` are published under
   names that carry their digests. `index.html` names the script and
   `boot.json`, which the page fetches past the browser's cache, names
@@ -92,19 +119,26 @@ recorded session; the Boot button needs the built site.
 
 `.github/workflows/site.yml` runs the same steps on GitHub, by hand only,
 and publishes `build/site` to GitHub Pages. It does not build the erXos
-image, which needs the whole erXos toolchain; it downloads a release
-asset's `image.boot`, named by its URL and SHA-256 as the workflow's
-inputs, and refuses one whose digest differs. Its third input names the
-release tag or commit the image was built from, for the source link.
+image or the card, which need the whole erXos toolchain; it downloads a
+release's `image.boot` and `sdcard.img`, each named by its URL and SHA-256
+as the workflow's inputs, and the card's `sdcard.img.receipt.json` by its
+URL and SHA-256 too, and refuses one whose digest differs; each download
+is capped in size. The build step then checks the record against the
+card's digest and the commit `image_source` resolves to. The
+`image_source` input names the release tag or commit both were built
+from; the page links the commit it resolves to.
 Runs share one `pages` concurrency group, so two deployments never
 overlap; a run waiting there is replaced by a newer dispatch.
 
 To publish: in the repository settings, set Pages to deploy from GitHub
-Actions; attach an `image.boot` built with `tools/erx boot --without-web`
-to a release; then run the `site` workflow with that asset's URL and SHA-256:
+Actions; attach an `image.boot` built with `tools/erx boot --without-web`,
+and the `sdcard.img` and `sdcard.img.receipt.json` that
+`make pack PLATFORM=raspi4b` builds, from the same commit, to a release;
+then run the `site` workflow with those assets' URLs and SHA-256s:
 
 ```
-gh workflow run site.yml -f image_url=URL -f image_sha256=DIGEST -f image_source=TAG
+gh workflow run site.yml -f image_url=URL -f image_sha256=DIGEST -f image_source=TAG \
+  -f card_url=URL -f card_sha256=DIGEST -f card_record_url=URL -f card_record_sha256=DIGEST
 ```
 
 `ruby test/host/site_test.rb` tests the build step.

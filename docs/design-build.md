@@ -520,15 +520,26 @@ the case flags that restore its lowercase spelling, not as a numbered
 alias beside a long name; the build reads the card's root directory back
 with its own reader (`tools/lib/erx/fat_short_names.rb`) and refuses a
 card that breaks this.
-The card's build record, `sdcard.img.receipt.json`, names every input
-by its pin or digest: the firmware's `deps.lock` entries, verified
-against their hashes before use; BL31's build record (TF-A's pin, the
-recipe, its options and the compiler and linker by identity) and its
-licence; the board tree's pinned Linux source, recipe and overlay
-sources; fsimg's version, source and arguments; and each file's and the
-card's SHA-256, in the shape of the image's own assembled receipts; the
-board tree's record names the preprocessor and `dtc` by identity. The
-bootable file's own record is the image's, in the same directory.
+The card's build record, `sdcard.img.receipt.json`, names the full erXos
+commit the card was built from and whether the tree had changes, and
+every input by its pin or digest: the firmware's `deps.lock` entries,
+verified against their hashes before use; BL31's build record (TF-A's
+pin, the recipe and its options) and its licence; the board tree's
+pinned Linux source, recipe and overlay sources; fsimg's version, source
+and arguments; and each file's and the card's SHA-256, in the shape of
+the image's own assembled receipts. The website offers the card and
+publishes this record beside it ([site/README.md](../site/README.md)),
+so it names each host tool (the compiler and linker of BL31, the board
+tree's preprocessor and `dtc`) by the first line of its `--version`
+alone, never by the path or digest of its binary, which could carry the
+build host's directories and a user's name. Packing writes the record as
+it is; the website's build refuses one that is not of the card's
+SHA-256, names another commit than the source the page links, a tree
+with changes or none (a tree that was no git checkout), or holds an
+absolute path or a string that is not printable ASCII. The board's device tree carries a notice of erXos's one edit,
+dated by the commit's date, which a tree that is no git checkout leaves
+unrecorded. The bootable file's own record is the image's, in the same
+directory.
 `make check-reproducible` builds the Pi's image, BL31 and board tree
 twice and compares the card's bytes, as it does QEMU's medium.
 

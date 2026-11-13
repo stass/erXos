@@ -12,6 +12,10 @@ class BoardTreeTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   PI = Erx::Platform.load(root: ROOT, name: 'raspi4b')
 
+  # A source revision, as SourceRevision reads one from git.
+  REVISION = Erx::SourceRevision::Revision.new(count: 42, hash: '0123456789ab', commit: "0123456789ab#{'0' * 28}",
+                                               dirty: false, committed_at: Time.utc(2026, 11, 12, 23, 30))
+
   def record(**fields) = Erx::Platform.new(name: 'raspi4b', record: PI.record.merge(fields.transform_keys(&:to_s)))
 
   def test_memory_cells_split_each_number_into_the_trees_cells
@@ -29,12 +33,13 @@ class BoardTreeTest < Minitest::Test
     pl011 = record(console: '/soc/serial@7e201000')
     assert_raises(Erx::Error) { Erx::BoardTree.console_board(pl011) }
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-    assert_raises(Erx::Error) { Erx::BoardTree.build(root: ROOT, runner: runner, platform: pl011, compiler: 'clang') }
+    assert_raises(Erx::Error) { Erx::BoardTree.build(root: ROOT, runner: runner, platform: pl011, compiler: 'clang', revision: REVISION) }
   end
 
   def test_builds_the_board_and_model_trees
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-    built = Erx::BoardTree.build(root: ROOT, runner: runner, platform: PI, compiler: ENV.fetch('ERX_CLANG', 'clang'))
+    built = Erx::BoardTree.build(root: ROOT, runner: runner, platform: PI, compiler: ENV.fetch('ERX_CLANG', 'clang'),
+                                 revision: REVISION)
 
     # The board's tree leaves the memory node to the firmware, which the model's has filled.
     assert_equal '0 0 0', fdtget(built.board, '/memory@0', 'reg')
@@ -55,8 +60,25 @@ class BoardTreeTest < Minitest::Test
     assert_includes source, 'serial@7e215040'
     assert_includes source, Erx::BoardTree.alias_source(Erx::BoardTree.board(PI)), 'the shipped source carries the alias edit'
     refute_includes source, ROOT, 'the shipped source carries no host path'
+    # GPL-2.0, section 2(a): the changed file opens with a notice of the change and its
+    # date, the commit's; it keeps Linux's licence lines, and Linux's GPL-2.0 text ships
+    # beside it.
+    assert source.start_with?(Erx::BoardTree.edit_notice(Erx::BoardTree.board(PI), revision: REVISION))
+    assert_includes source, "Changed by erXos on 2026-11-12, at erXos source revision n42-0123456789ab: this file is " \
+                            "Linux's arch/arm/boot/dts/broadcom/bcm2711-rpi-4-b.dts"
+    assert_includes source, 'SPDX-License-Identifier: GPL-2.0'
+    assert_match(/GNU GENERAL PUBLIC LICENSE\s+Version 2, June 1991/, File.read(built.licence))
+    assert_equal 'LICENCE.linux-dts', File.basename(built.licence)
     assert_equal ['uart3'], built.overlays.keys
     assert File.file?(built.overlays.fetch('uart3'))
+  end
+
+  # A tree that is no git checkout has no revision, and the notice says its date is not
+  # recorded rather than give one.
+  def test_a_build_without_a_revision_records_no_date
+    notice = Erx::BoardTree.edit_notice(Erx::BoardTree.board(PI), revision: nil)
+    assert_includes notice, 'on a date this build does not record'
+    refute_match(/\d{4}-\d\d-\d\d/, notice)
   end
 
   # The record's units, the mini UART's page and the PL011s', against the board's tree: each
@@ -64,7 +86,8 @@ class BoardTreeTest < Minitest::Test
   # image suite checks QEMU virt's record against QEMU's tree.
   def test_the_records_devices_match_the_board_tree
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-    built = Erx::BoardTree.build(root: ROOT, runner: runner, platform: PI, compiler: ENV.fetch('ERX_CLANG', 'clang'))
+    built = Erx::BoardTree.build(root: ROOT, runner: runner, platform: PI, compiler: ENV.fetch('ERX_CLANG', 'clang'),
+                                 revision: REVISION)
     paths = PI.record.fetch('units').flat_map { |unit| unit.fetch('devices') }.map { |device| device.fetch('path') }
     nodes = paths.to_h do |path|
       [path, { compatible: fdtget(built.board, path, 'compatible').split, reg: cells(built.board, path, 'reg'),

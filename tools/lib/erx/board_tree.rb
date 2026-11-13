@@ -10,6 +10,7 @@ require_relative 'dependencies'
 require_relative 'output_directory'
 require_relative 'platform'
 require_relative 'runner'
+require_relative 'source_revision'
 
 module Erx
   # A board's device tree, compiled on the host from Linux's sources at deps.lock's pin
@@ -18,7 +19,11 @@ module Erx
   #
   # * the board's tree, compiled from Linux's source with one edit, the serial aliases,
   #   and with that source, as preprocessed and edited, beside it, since the tree is
-  #   GPL-2.0 and ships as a file of its own. The firmware loads it, applies the
+  #   GPL-2.0 and ships as a file of its own. The source keeps Linux's comments, its
+  #   licence and copyright lines among them, and opens with the notice GPL-2.0's
+  #   section 2(a) asks of a changed file: that erXos changed it, how, and when, the date
+  #   of the commit it was built from (edit_notice). Linux's GPL-2.0 text ships beside
+  #   them (Built#licence). The firmware loads the tree, applies the
   #   overlays config.txt names and fills its memory node; it leaves the aliases as
   #   they are. BL31 points /chosen/stdout-path at serial0 (TF-A's
   #   plat/rpi/rpi4/rpi4_setup.c), so the board's serial0 must be the console's UART:
@@ -29,8 +34,9 @@ module Erx
   #   written from the platform record, and nothing else, so BL31 picks the console's
   #   UART on the model from the same aliases as on the board.
   #
-  # The source is run through the C preprocessor, as Linux's build does, and the alias
-  # edit appended; dtc compiles it with symbols (-@) so overlays apply; fdtoverlay
+  # The source is run through the C preprocessor, as Linux's build does but keeping
+  # comments (-C), the notice prepended and the alias edit appended; dtc compiles it
+  # with symbols (-@) so overlays apply; fdtoverlay
   # applies them and fdtput writes the memory node.
   module BoardTree
     SOURCE_ID = 'linux-dts'
@@ -51,9 +57,14 @@ module Erx
                              overlays: { 'uart3' => 'hw/dts/raspi4b-uart3.dtso' }.freeze)
     }.freeze
 
-    # board: the board's tree; source: its preprocessed source; overlays: each overlay's
-    # compiled file by its name; model: the tree the QEMU model boots with.
-    Built = Data.define(:board, :source, :overlays, :model)
+    # board: the board's tree; source: its preprocessed source; licence: Linux's GPL-2.0
+    # text, which covers both; overlays: each overlay's compiled file by its name; model:
+    # the tree the QEMU model boots with.
+    Built = Data.define(:board, :source, :licence, :overlays, :model)
+    # Linux's GPL-2.0 text in its tree (deps.lock's linux-dts members name it).
+    LICENCE = 'LICENSES/preferred/GPL-2.0'
+    # The name it ships by, beside the board's tree and source.
+    LICENCE_FILE = 'LICENCE.linux-dts'
 
     module_function
 
@@ -84,6 +95,22 @@ module Erx
       end
       ['', '/* erXos edit: the serial aliases, serial0 naming the console (tools/lib/erx/board_tree.rb). */',
        '/ {', "\taliases {", *aliases, "\t};", '};'].map { |line| "#{line}\n" }.join
+    end
+
+    # The notice that opens the edited source: that erXos changed the file, the one change
+    # (alias_source), and its date, the committer date of the source revision the build is
+    # of (SourceRevision), so one commit gives one notice. A tree that is no git checkout
+    # has no revision, and the notice says the date is not recorded rather than make one up.
+    def edit_notice(board, revision:)
+      when_changed = if revision
+                       "on #{revision.committed_at.strftime('%Y-%m-%d')}, at erXos source revision #{revision}"
+                     else
+                       'on a date this build does not record, since its erXos source is no git checkout'
+                     end
+      ['/*', " * Changed by erXos #{when_changed}: this file is Linux's #{board.source},",
+       ' * run through the C preprocessor, with the serial aliases at its end replacing',
+       " * Linux's (tools/lib/erx/board_tree.rb). It is distributed under GPL-2.0, whose",
+       " * text is #{LICENCE_FILE} beside it.", ' */', ''].map { |line| "#{line}\n" }.join
     end
 
     # The cells of the memory node's reg for RAM as the record states it, in the tree's
@@ -137,8 +164,8 @@ module Erx
     end
 
     # Builds the board's tree, its overlays and the model's tree into build/board-tree/NAME,
-    # replacing what was there.
-    def build(root:, runner:, platform:, compiler: ENV.fetch('ERX_CLANG', ''))
+    # replacing what was there, the source's notice dated from revision (edit_notice).
+    def build(root:, runner:, platform:, revision:, compiler: ENV.fetch('ERX_CLANG', ''))
       raise Error, 'the board tree needs ERX_CLANG, whose preprocessor reads Linux\'s tree' if compiler.empty?
 
       board = console_board(platform)
@@ -151,7 +178,8 @@ module Erx
         compile = Compile.new(runner: runner)
         source = compile.preprocess(compiler: compiler, linux: tree, source: File.join(tree, board.source),
                                     output: File.join(output, source_file(board)))
-        File.write(source, alias_source(board), mode: 'a')
+        File.write(source, edit_notice(board, revision: revision) + File.read(source) + alias_source(board))
+        FileUtils.cp(File.join(tree, LICENCE), File.join(output, LICENCE_FILE))
         base = compile.dtc(source, File.join(output, board.file))
         overlays = board.overlays.to_h do |name, overlay|
           [name, compile.dtc(File.join(root, overlay), File.join(output, 'overlays', "#{name}.dtbo"))]
@@ -166,7 +194,8 @@ module Erx
         FileUtils.rm_rf(destination)
         File.rename(output, destination)
       end
-      Built.new(board: File.join(destination, board.file), source: File.join(destination, source_file(board)), model: File.join(destination, 'model.dtb'),
+      Built.new(board: File.join(destination, board.file), source: File.join(destination, source_file(board)),
+                licence: File.join(destination, LICENCE_FILE), model: File.join(destination, 'model.dtb'),
                 overlays: board.overlays.keys.to_h { |name| [name, File.join(destination, 'overlays', "#{name}.dtbo")] })
     end
 
@@ -192,9 +221,10 @@ module Erx
     # The commands of one build, each under the runner's deadline and log.
     Compile = Data.define(:runner) do
       # Linux's tree through the C preprocessor, as its build runs it, into one source
-      # file. -P leaves out line markers, which would carry this host's paths.
+      # file. -P leaves out line markers, which would carry this host's paths; -C keeps
+      # the comments, so each file's licence and copyright lines reach the shipped source.
       def preprocess(compiler:, linux:, source:, output:)
-        run([compiler, '-E', '-P', '-nostdinc', '-undef', '-D__DTS__', '-x', 'assembler-with-cpp',
+        run([compiler, '-E', '-P', '-C', '-nostdinc', '-undef', '-D__DTS__', '-x', 'assembler-with-cpp',
              '-I', File.join(linux, 'include'), '-I', File.dirname(source), '-o', output, source], 'dts-cpp')
         output
       end

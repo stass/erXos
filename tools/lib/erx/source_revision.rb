@@ -21,9 +21,10 @@ module Erx
   # answers something this module cannot read, is a failure with a
   # diagnostic, never a made-up revision.
   module SourceRevision
-    # count is nil in a shallow clone, whose count would be short; committed_at
-    # is the commit's committer time, a UTC Time.
-    Revision = Data.define(:count, :hash, :dirty, :committed_at) do
+    # count is nil in a shallow clone, whose count would be short; hash is the
+    # line's 12 digits of commit, the full hash a build record names (BootPartition);
+    # committed_at is the commit's committer time, a UTC Time.
+    Revision = Data.define(:count, :hash, :commit, :dirty, :committed_at) do
       # newvers.sh's words without the branch: [n<count>-]<hash>[-dirty].
       def to_s = [count && "n#{count}", hash, ('dirty' if dirty)].compact.join('-')
     end
@@ -79,7 +80,8 @@ module Erx
     def parse(answers)
       given = QUERIES.keys.to_h { |name| [name, answer(name, answers.fetch(name))] }
       Revision.new(count: (Integer(given.fetch(:count), 10) if given.fetch(:shallow) == 'false'),
-                   hash: given.fetch(:commit)[0, HASH_DIGITS], dirty: !given.fetch(:changes).empty?,
+                   hash: given.fetch(:commit)[0, HASH_DIGITS], commit: given.fetch(:commit),
+                   dirty: !given.fetch(:changes).empty?,
                    committed_at: Time.at(Integer(given.fetch(:committed), 10)).utc)
     end
 

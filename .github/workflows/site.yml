@@ -4,12 +4,15 @@
 # deploy job publishes it; GitHub Pages must be enabled for the repository
 # with "GitHub Actions" as its source.
 #
-# The erXos image needs the full erXos toolchain (the cross compilers, the
-# OTP and Fiasco builds), which this job does not set up. It takes the image
-# from a URL instead, normally a release asset, and checks it against the
-# SHA-256 given with it. The image carries the stopgap kernel's GPL-2.0
-# files, so the page links the erXos source it was built from, the release
-# tag or commit given as image_source.
+# The erXos image and the Raspberry Pi 4's card need the full erXos toolchain
+# (the cross compilers, the OTP and Fiasco builds), which this job does not
+# set up. It takes each, and the card's build record, from a URL instead,
+# normally a release asset, and checks it against the SHA-256 given with it;
+# tools/build_site.rb then refuses a record that does not name the card's
+# SHA-256 or the commit image_source resolves to, built with no changes.
+# The image and the card carry GPL-2.0 files, so the page links the erXos
+# source both were built from: the commit image_source, a release tag or a
+# commit, resolves to.
 #
 # Each action is pinned to the commit of the tag named beside it.
 name: site
@@ -24,7 +27,19 @@ on:
         description: SHA-256 of that image.boot
         required: true
       image_source:
-        description: the erXos release tag or full commit the image was built from; the page links its source
+        description: the erXos release tag or full commit the image and the card were built from; the page links its source
+        required: true
+      card_url:
+        description: URL of the Raspberry Pi 4's sdcard.img (e.g. a release asset)
+        required: true
+      card_sha256:
+        description: SHA-256 of that sdcard.img
+        required: true
+      card_record_url:
+        description: URL of the card's build record, its sdcard.img.receipt.json
+        required: true
+      card_record_sha256:
+        description: SHA-256 of that sdcard.img.receipt.json
         required: true
 
 permissions:
@@ -45,8 +60,13 @@ jobs:
         env:
           IMAGE_SHA256: ${{ inputs.image_sha256 }}
           IMAGE_SOURCE: ${{ inputs.image_source }}
+          CARD_SHA256: ${{ inputs.card_sha256 }}
+          CARD_RECORD_SHA256: ${{ inputs.card_record_sha256 }}
         run: |
           [[ "$IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "image_sha256 must be 64 lowercase hex digits" >&2; exit 1; }
+          [[ "$CARD_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "card_sha256 must be 64 lowercase hex digits" >&2; exit 1; }
+          [[ "$CARD_RECORD_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+            { echo "card_record_sha256 must be 64 lowercase hex digits" >&2; exit 1; }
           [[ "$IMAGE_SOURCE" =~ ^[0-9a-f]{40}$ ]] ||
             { [[ "$IMAGE_SOURCE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] && [[ "$IMAGE_SOURCE" != *..* ]]; } ||
             { echo "image_source must be a release tag or a 40-hex commit" >&2; exit 1; }
@@ -82,10 +102,24 @@ jobs:
           IMAGE_URL: ${{ inputs.image_url }}
           IMAGE_SHA256: ${{ inputs.image_sha256 }}
         run: |
-          curl --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --output image.boot "$IMAGE_URL"
+          curl --fail --location --proto '=https' --proto-redir '=https' --max-time 300 --max-filesize 1073741824 \
+            --output image.boot --url "$IMAGE_URL"
           echo "$IMAGE_SHA256  image.boot" | sha256sum --check --strict
+      - name: Download the Raspberry Pi 4's card
+        env:
+          CARD_URL: ${{ inputs.card_url }}
+          CARD_SHA256: ${{ inputs.card_sha256 }}
+          CARD_RECORD_URL: ${{ inputs.card_record_url }}
+          CARD_RECORD_SHA256: ${{ inputs.card_record_sha256 }}
+        run: |
+          curl --fail --location --proto '=https' --proto-redir '=https' --max-time 600 --max-filesize 1073741824 \
+            --output sdcard.img --url "$CARD_URL"
+          echo "$CARD_SHA256  sdcard.img" | sha256sum --check --strict
+          curl --fail --location --proto '=https' --proto-redir '=https' --max-time 60 --max-filesize 1048576 \
+            --output sdcard.img.receipt.json --url "$CARD_RECORD_URL"
+          echo "$CARD_RECORD_SHA256  sdcard.img.receipt.json" | sha256sum --check --strict
       - name: Build v64 and assemble the site
-        run: ruby tools/build_site.rb --image image.boot --source "$IMAGE_COMMIT"
+        run: ruby tools/build_site.rb --image image.boot --card sdcard.img --card-record sdcard.img.receipt.json --source "$IMAGE_COMMIT"
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: build/site

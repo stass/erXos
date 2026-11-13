@@ -196,7 +196,7 @@
       "url": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.tar.xz",
       "sha256": "9106a4605da9e31ff17659d958782b815f9591ab308d03b0ee21aad6c7dced4b",
       "directory": "linux-6.18",
-      "members": "arch/arm/boot/dts/broadcom include/dt-bindings/clock include/dt-bindings/gpio include/dt-bindings/interrupt-controller include/dt-bindings/leds include/dt-bindings/pinctrl include/dt-bindings/power include/dt-bindings/reset include/dt-bindings/soc",
+      "members": "LICENSES/preferred/GPL-2.0 arch/arm/boot/dts/broadcom include/dt-bindings/clock include/dt-bindings/gpio include/dt-bindings/interrupt-controller include/dt-bindings/leds include/dt-bindings/pinctrl include/dt-bindings/power include/dt-bindings/reset include/dt-bindings/soc",
       "license": "GPL-2.0",
       "status": "permanent"
     },

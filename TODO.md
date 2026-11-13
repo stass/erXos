@@ -1140,10 +1140,6 @@ it; git history is the record of completed work.
   by platform name, and the medium is chosen by membership of one of them, so a board added to the others but not to
   `BoardTree::BOARDS` gets QEMU's release medium. Declare the medium, the load address and the board's tree in the
   platform record, checked when it loads, so a board without a medium is refused.
-* [Low] licences, the Raspberry Pi 4's card (`tools/lib/erx/boot_partition.rb`): the board's device tree is
-  GPL-2.0, and the card carries neither its licence text nor a notice of it, since `-P` preprocessing drops the SPDX
-  line and the card's files bypass the packer's licence check and `NOTICES`. Add linux-dts's `COPYING` to the
-  fetched members and the card, before any card leaves the project.
 * [Low] tooling, `tools/erx pack` and the raspi4b suite share `build/production-image/raspi4b/`, cleared before
   each build: a suite run replaces the card the owner packed, two packs of one platform at once remove each other's
   files, and a failed pack leaves the directory partial. Build into a sibling directory and rename it into place.
@@ -1497,6 +1493,27 @@ it; git history is the record of completed work.
 * [Low] network, `erx_net_input` provenance: NOTICE-freebsd's entry lacks `sys/netinet/tcp_subr.c`
   (`tcp_ctlinput`), which the design names as a source; and check whether `udp_common_ctlinput`
   looks up with `INPLOOKUP_WILDCARD`, which the design says it does not.
+* [Medium] build, the Raspberry Pi 4's card (`tools/lib/erx/boot_partition.rb`, `tools/lib/erx/bl31.rb`):
+  `LICENCE.tf-a` is TF-A's `docs/license.rst` alone, whose BSD-3-Clause text carries only TF-A's placeholder
+  copyright, and none of the notices of the third-party code BL31 links (TF-A's libc, libfdt, compiler-rt's
+  builtins). The website offers the card, so BL31's link closure needs its notices beside the armstub, as
+  the packer gathers them for the boot image (`NOTICES`).
+* [Medium] build, the Raspberry Pi 4's card (`tools/lib/erx/boot_partition.rb`): `docs/design.md` ("Licences
+  and notices") says the same `NOTICES` sits beside the boot image in each slot's boot partition, but the
+  card's layout has none beside `kernel8.img`; the production image's `NOTICES` is only inside the image
+  (`system/NOTICES`). Write it into the boot partition, from the packer's notices, and have the card's test
+  check it.
+* [Medium] build, the card's build record (`tools/lib/erx/source_revision.rb`, `tools/lib/erx/site.rb`): `dirty`
+  counts tracked changes alone (`--untracked-files=no`), so a card built with an untracked source file the build
+  picks up records its commit as clean, and the website links a commit that lacks some of the card's source. Count
+  untracked, non-ignored files for the card's record (and decide whether `uname`'s `-dirty` follows), after
+  checking which build steps glob directories.
+* [Low] build, the website (`.github/workflows/site.yml`, `tools/lib/erx/site.rb`): the card's record is checked
+  against the commit the page links, but the demo image is not, though it carries the stopgap kernel's GPL-2.0
+  files; check the image's receipt against that commit the same way.
+* [Low] build, `tools/lib/erx/boot_partition.rb` (`lay_out`) and `tools/lib/erx/build_facts.rb`: the card's record
+  and the image's build facts each read the source revision, so a commit or stash during a pack can leave them
+  naming different revisions. Read it once in `ProductionImage` and pass it to both.
 * [Medium] build, the packer's `NOTICES` and `docs/design.md` ("Licences and notices"): a file of
   erXos's counts as third-party for its notice when its SPDX line names a third-party licence, but
   `erx_tcp_cc`, `erx_tcp_cc_newreno` and `erx_tcp_cc_cubic` translate BSD-2-Clause FreeBSD files, so

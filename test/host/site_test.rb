@@ -14,8 +14,8 @@ class SiteTest < Minitest::Test
   COMMIT = '0123456789abcdef0123456789abcdef01234567'
   INDEX = '<script src="{{terminal_js}}"></script><a href="{{source_url}}">{{source_label}}</a>'
 
-  # A fake tree: site/ sources, a built v64 tree with its notices, and an
-  # image.
+  # A fake tree: site/ sources, a built v64 tree with its notices, an image,
+  # and a card with its build record.
   def with_inputs
     Dir.mktmpdir('erx-site-') do |root|
       files = Erx::Site::PAGE_FILES.to_h { |name| ["site/#{name}", name] }
@@ -28,6 +28,8 @@ class SiteTest < Minitest::Test
       end
       image = File.join(root, 'image.boot')
       File.binwrite(image, "erXos image\0" * 1000)
+      File.binwrite(File.join(root, 'sdcard.img'), "erXos card\0" * 1000)
+      write_card_record(root)
       yield root, image
     end
   end
@@ -35,8 +37,18 @@ class SiteTest < Minitest::Test
   # A stand-in for the data partition's fresh volume (DataVolume.format): whole sectors.
   VOLUME = ('erXos littlefs volume' * 400).byteslice(0, 8192)
 
+  # The card's build record in root, as BootPartition writes one: the source it was
+  # built from, the card by its SHA-256, and inputs.
+  def write_card_record(root, sha256: Digest::SHA256.file(File.join(root, 'sdcard.img')).hexdigest,
+                        source: { 'commit' => COMMIT, 'dirty' => false },
+                        inputs: { 'board_tree' => { 'dtc' => 'Version: DTC 1.7.2' } })
+    record = { 'source' => source, 'artifact' => { 'path' => 'sdcard.img', 'sha256' => sha256 }, 'inputs' => inputs }
+    File.write(File.join(root, 'sdcard.img.receipt.json'), JSON.generate(record))
+  end
+
   def inventory(root, image, ref: COMMIT)
-    Erx::Site.inventory(root:, v64: File.join(root, 'v64'), image:, source: Erx::Site.source(ref),
+    Erx::Site.inventory(root:, v64: File.join(root, 'v64'), image:, card: File.join(root, 'sdcard.img'),
+                        card_record: File.join(root, 'sdcard.img.receipt.json'), source: Erx::Site.source(ref),
                         disk: Erx::Site.fresh_medium(volume: VOLUME))
   end
 
@@ -67,6 +79,68 @@ class SiteTest < Minitest::Test
       assert_equal Digest::SHA256.file(image).hexdigest, written.fetch(:sha256)
       assert_equal File.size(File.join(out, written.fetch(:image))), written.fetch(:compressed_bytes)
       assert_equal manifest, Erx::Site.publish(inventory(root, image), out:), 'a rebuild gives the same bytes'
+    end
+  end
+
+  # The card is published gzip-compressed under its digest's name, its record beside
+  # it, and the page names both with the card's and the download's SHA-256.
+  def test_publish_offers_the_card_and_its_record
+    with_inputs do |root, image|
+      out = File.join(root, 'build/site')
+      File.write(File.join(root, 'site/index.html'),
+                 '<a href="{{card_file}}">{{card_sha256}} {{card_download_sha256}}</a><a href="{{card_record}}">r</a>')
+      card = Erx::Site.publish(inventory(root, image), out:).fetch(:card)
+      sha256 = Digest::SHA256.file(File.join(root, 'sdcard.img')).hexdigest
+
+      assert_equal "sdcard-#{sha256[0, 16]}.img.gz", card.fetch(:file)
+      assert_equal File.binread(File.join(root, 'sdcard.img')), Zlib.gunzip(File.binread(File.join(out, card.fetch(:file))))
+      assert_equal Digest::SHA256.file(File.join(out, card.fetch(:file))).hexdigest, card.fetch(:compressed_sha256)
+      # The record published is the one checked, as parsed, not a second read of its file.
+      assert_equal "#{JSON.pretty_generate(JSON.parse(File.read(File.join(root, 'sdcard.img.receipt.json'))))}\n",
+                   File.read(File.join(out, card.fetch(:record)))
+      assert_equal "sdcard-#{sha256[0, 16]}.img.receipt.json", card.fetch(:record)
+      assert_equal "<a href=\"#{card.fetch(:file)}\">#{sha256} #{card.fetch(:compressed_sha256)}</a>" \
+                   "<a href=\"#{card.fetch(:record)}\">r</a>", File.read(File.join(out, 'index.html'))
+      assert_equal card, JSON.parse(File.read(File.join(out, 'boot.json')), symbolize_names: true).fetch(:card)
+    end
+  end
+
+  # Seeded faults: a record of another card (one digit of its SHA-256 off), one that
+  # names a host's path, and one that is not JSON are refused, and nothing is built.
+  def test_a_card_whose_record_is_not_its_own_is_refused
+    with_inputs do |root, image|
+      sha256 = Digest::SHA256.file(File.join(root, 'sdcard.img')).hexdigest
+      { 'another card' => -> { write_card_record(root, sha256: sha256.sub(/\A./) { |digit| digit == '0' ? '1' : '0' }) },
+        'a host path' => -> { write_card_record(root, inputs: { 'dtc' => '/Users/someone/bin/dtc' }) },
+        'not JSON' => -> { File.write(File.join(root, 'sdcard.img.receipt.json'), '{') } }.each do |fault, seed|
+        seed.call
+        assert_raises(Erx::Error, fault) { inventory(root, image) }
+      end
+      refute File.exist?(File.join(root, 'build/site'))
+    end
+  end
+
+  # The page links the source the card was built from, so the card's record must name
+  # that commit, clean. Seeded faults: a record of another commit (one digit off), of a
+  # tree with changes, with no source (a tree that was no checkout), or with a commit
+  # that is not one, and a page that links a tag the record cannot be checked against,
+  # are refused, and nothing is built.
+  def test_a_card_not_built_from_the_linked_source_is_refused
+    with_inputs do |root, image|
+      other = COMMIT.sub(/\A./) { |digit| digit == '0' ? '1' : '0' }
+      { 'another commit' => -> { write_card_record(root, source: { 'commit' => other, 'dirty' => false }) },
+        'a dirty tree' => -> { write_card_record(root, source: { 'commit' => COMMIT, 'dirty' => true }) },
+        'dirty not false' => -> { write_card_record(root, source: { 'commit' => COMMIT }) },
+        'no source' => -> { write_card_record(root, source: nil) },
+        'a short commit' => -> { write_card_record(root, source: { 'commit' => COMMIT[0, 12], 'dirty' => false }) } }
+        .each do |fault, seed|
+        seed.call
+        assert_raises(Erx::Error, fault) { inventory(root, image) }
+      end
+      write_card_record(root)
+      error = assert_raises(Erx::Error) { inventory(root, image, ref: 'v1.0') }
+      assert_match(/40-hex commit/, error.message)
+      refute File.exist?(File.join(root, 'build/site'))
     end
   end
 
@@ -216,9 +290,19 @@ class SiteTest < Minitest::Test
     end
   end
 
+  # The page's own index.html names only placeholders render_index fills.
+  def test_the_page_fills_every_placeholder
+    page = Erx::Site.render_index(File.read(File.join(REPO, 'site/index.html')), terminal: 't.js',
+                                  source: Erx::Site.source(COMMIT),
+                                  card: { file: 'c.img.gz', record: 'r', sha256: 's', compressed_sha256: 'z' })
+    refute_includes page, '{{'
+    assert_includes page, 'href="c.img.gz"'
+  end
+
   def test_an_unknown_index_placeholder_is_refused
     error = assert_raises(Erx::Error) do
-      Erx::Site.render_index('{{nope}}', terminal: 't.js', source: Erx::Site.source(COMMIT))
+      Erx::Site.render_index('{{nope}}', terminal: 't.js', source: Erx::Site.source(COMMIT),
+                                          card: { file: 'c', record: 'r', sha256: 's', compressed_sha256: 'z' })
     end
     assert_match(/nope/, error.message)
   end
@@ -295,13 +379,20 @@ class SiteTest < Minitest::Test
     assert_equal({ 'group' => 'pages', 'cancel-in-progress' => false }, workflow.fetch('concurrency'))
     steps = workflow.dig('jobs', 'build', 'steps')
     check = steps.find { |step| step['name'] == 'Check the inputs' }.fetch('run')
-    good = { 'IMAGE_SHA256' => 'a' * 64, 'IMAGE_SOURCE' => COMMIT }
+    good = { 'IMAGE_SHA256' => 'a' * 64, 'IMAGE_SOURCE' => COMMIT, 'CARD_SHA256' => 'b' * 64,
+             'CARD_RECORD_SHA256' => 'c' * 64 }
     assert system(good, 'bash', '-e', '-c', check, out: File::NULL, err: File::NULL)
     [{ 'IMAGE_SHA256' => 'A' * 64 }, { 'IMAGE_SHA256' => "#{'a' * 64}\nb" }, { 'IMAGE_SHA256' => 'a' * 63 },
-     { 'IMAGE_SOURCE' => '../x' }, { 'IMAGE_SOURCE' => 'v1 x' }, { 'IMAGE_SOURCE' => '' }].each do |bad|
+     { 'CARD_SHA256' => 'b' * 63 }, { 'CARD_SHA256' => '' }, { 'CARD_RECORD_SHA256' => 'C' * 64 },
+     { 'CARD_RECORD_SHA256' => '' }, { 'IMAGE_SOURCE' => '../x' }, { 'IMAGE_SOURCE' => 'v1 x' }, { 'IMAGE_SOURCE' => '' }].each do |bad|
       refute system(good.merge(bad), 'bash', '-e', '-c', check, out: File::NULL, err: File::NULL), bad.inspect
     end
-    download = steps.find { |step| step['name'] == 'Download the erXos image' }.fetch('run')
-    assert_includes download, 'sha256sum --check --strict'
+    # Each download is checked against its digest, the card's record as well as the card,
+    # and capped in size.
+    { 'Download the erXos image' => 1, "Download the Raspberry Pi 4's card" => 2 }.each do |name, checked|
+      run = steps.find { |step| step['name'] == name }.fetch('run')
+      assert_equal checked, run.scan('sha256sum --check --strict').size, name
+      assert_equal run.scan('curl ').size, run.scan('--max-filesize').size, name
+    end
   end
 end

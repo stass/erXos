@@ -854,6 +854,11 @@ p:last-child {
   color: var(--ink);
 }
 
+/* Digests and the card's name are long words; they wrap rather than widen the page. */
+.card-download code {
+  overflow-wrap: anywhere;
+}
+
 /* "Try it": what runs, beside the front panel of lights. */
 .try {
   display: grid;

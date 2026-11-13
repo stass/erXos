@@ -75,7 +75,7 @@ class BootPartitionTest < Minitest::Test
       Dir.mkdir(output)
       File.write(File.join(output, 'image.boot'), 'kernel')
       written = write(root, output, plan(root))
-      names = %w[LICENCE.broadcom LICENCE.tf-a bcm2711-rpi-4-b.dtb bcm2711-rpi-4-b.dts bl31.bin config.txt fixup4.dat
+      names = %w[LICENCE.broadcom LICENCE.linux-dts LICENCE.tf-a bcm2711-rpi-4-b.dtb bcm2711-rpi-4-b.dts bl31.bin config.txt fixup4.dat
                  kernel8.img overlays/uart3.dtbo start4.elf]
       files = Dir.glob('**/*', base: output).reject { |name| File.directory?(File.join(output, name)) }.sort
       assert_equal [*names.map { |name| "boot/#{name}" }, 'image.boot', 'sdcard.img', 'sdcard.img.receipt.json'].sort, files
@@ -150,25 +150,58 @@ class BootPartitionTest < Minitest::Test
 
   # The record names every input by its pin or digest: the firmware as deps.lock pins
   # it, BL31's own build record, TF-A's licence, the board tree's source, recipe and
-  # overlays, and fsimg with its arguments.
+  # overlays, and fsimg with its arguments. It is published with the card, so it names
+  # the commit the card was built from in full, each host tool is named by its version
+  # line, and nothing in it is an absolute path.
   def test_the_record_names_the_inputs
     firmware = Erx::BootPartition::FIRMWARE.map { |id| { 'id' => id } }
-    record = Erx::BootPartition.record(root: ROOT, platform: PI, firmware: firmware, compiler: RbConfig.ruby, linker: RbConfig.ruby)
+    runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+    commit = '0123456789abcdef0123456789abcdef01234567'
+    revision = Erx::SourceRevision::Revision.new(count: 42, hash: commit[0, 12], commit: commit, dirty: true,
+                                                 committed_at: Time.utc(2026, 11, 12))
+    record = Erx::BootPartition.record(root: ROOT, runner: runner, revision: revision, platform: PI, firmware: firmware,
+                                       compiler: RbConfig.ruby, linker: RbConfig.ruby)
+    assert_same record, Erx::BootPartition.check_record(record)
+    assert_equal({ 'commit' => commit, 'dirty' => true }, record.fetch('source'))
+    assert_nil Erx::BootPartition.record(root: ROOT, runner: runner, revision: nil, platform: PI, firmware: firmware,
+                                         compiler: RbConfig.ruby, linker: RbConfig.ruby).fetch('source')
+    refute_includes JSON.generate(record), Dir.home, "the record names no path in the user's home"
     assert_equal 'tools/lib/erx/boot_partition.rb', record.fetch('producer').fetch('path')
     record = record.fetch('inputs')
     assert_equal firmware, record.fetch('firmware')
     assert_equal 'trusted-firmware-a', record.fetch('bl31').fetch('source').fetch('id')
-    assert_match(/\A#{Regexp.escape(File.realpath(RbConfig.ruby))} \h{64} /, record.fetch('bl31').fetch('compiler'))
+    ruby = "ruby #{RUBY_VERSION}"
+    assert_match(/\A#{Regexp.escape(ruby)}/, record.fetch('bl31').fetch('compiler'))
+    assert_match(/\A#{Regexp.escape(ruby)}/, record.fetch('bl31').fetch('linker'))
     assert_equal({ 'source' => 'trusted-firmware-a', 'path' => 'docs/license.rst' }, record.fetch('bl31_licence'))
     tree = record.fetch('board_tree')
     assert_equal 'linux-dts', tree.fetch('source').fetch('id')
     assert_equal 'tools/lib/erx/board_tree.rb', tree.fetch('recipe').fetch('path')
-    assert_match(/ \h{64} /, tree.fetch('compiler'))
-    assert_match(%r{/dtc \h{64} }, tree.fetch('dtc'))
+    assert_match(/\A#{Regexp.escape(ruby)}/, tree.fetch('compiler'))
+    assert_match(/DTC \d/, tree.fetch('dtc'))
     assert_equal({ 'path' => 'hw/dts/raspi4b-uart3.dtso',
                    'sha256' => Digest::SHA256.file(File.join(ROOT, 'hw/dts/raspi4b-uart3.dtso')).hexdigest },
                  tree.fetch('overlays').fetch('uart3'))
     assert_equal Erx::Fsimg::VERSION_LINE, record.fetch('card').fetch('tool')
+  end
+
+  # Seeded faults: an absolute path anywhere in a record, as a value, a key or inside a
+  # version line, after a separator or as a file URL, is refused, and the error names
+  # where it is without repeating it; a URL and a relative path are not paths of the host.
+  def test_a_record_that_names_an_absolute_path_is_refused
+    good = { 'url' => 'https://cdn.kernel.org/pub/x.tar.xz', 'path' => 'tools/lib/erx/boot_partition.rb',
+             'tool' => 'Homebrew clang version 21.1.5 (based on LLVM 21.1.5)' }
+    assert_same good, Erx::BootPartition.check_record(good)
+    [{ 'compiler' => '/Users/someone/llvm/bin/clang' }, { 'a' => [{ 'b' => 'clang version 22 (/home/someone/llvm)' }] },
+     { '/Users/someone/bin/dtc' => 'Version: DTC 1.7.2' }, { 'flags' => '--sysroot=/Users/someone/sdk' },
+     { 'path' => 'PATH:/Users/someone/bin' }, { 'url' => 'file:///Users/someone/x' },
+     { 'list' => "['/Users/someone/x']" }, { 'home' => '~/someone/llvm' }, { 'bidi' => "someone\u202e" },
+     { 'escape' => "someone\e[31m" }].each do |bad|
+      error = assert_raises(Erx::Error, bad.inspect) { Erx::BootPartition.check_record(good.merge(bad)) }
+      refute_includes error.message, 'someone', "#{bad.inspect}: the error does not repeat the path"
+    end
+    error = assert_raises(Erx::Error) { Erx::BootPartition.check_record(good.merge('a' => [{ 'b' => '/Users/x' }])) }
+    assert_match(%r{in "a/0/b"\z}, error.message)
   end
 
   # A file that holds the path the tree was built at would carry the build host into the
@@ -211,6 +244,7 @@ class BootPartitionTest < Minitest::Test
     Dir.mktmpdir do |root|
       sources = plan(root)
       tree = Erx::BoardTree::Built.new(board: sources.fetch('bcm2711-rpi-4-b.dtb'), source: sources.fetch('bcm2711-rpi-4-b.dts'),
+                                       licence: sources.fetch('LICENCE.linux-dts'),
                                        model: '', overlays: {})
       assert_raises(Erx::Error) do
         Erx::BootPartition.plan(platform: PI, build_kind: 'development', bootable: 'k', bl31: 'b', bl31_licence: 'l', tree: tree,
@@ -245,7 +279,7 @@ class BootPartitionTest < Minitest::Test
     stand_in = lambda do |name, text = name|
       File.join(sources, name).tap { |path| File.write(path, text) }
     end
-    tree = Erx::BoardTree::Built.new(board: stand_in.('tree.dtb'), source: stand_in.('tree.dts'), model: stand_in.('model.dtb'),
+    tree = Erx::BoardTree::Built.new(board: stand_in.('tree.dtb'), source: stand_in.('tree.dts'), licence: stand_in.('gpl-2.0'), model: stand_in.('model.dtb'),
                                      overlays: { 'uart3' => stand_in.('uart3.dtbo') })
     firmware = %w[start4.elf fixup4.dat LICENCE.broadcom].to_h { |name| [name, stand_in.(name)] }
     Erx::BootPartition.plan(platform: PI, build_kind: 'development', bootable: stand_in.('kernel8', 'kernel'), bl31: stand_in.('bl31'),
