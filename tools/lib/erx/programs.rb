@@ -61,6 +61,9 @@ module Erx
   #   whose second take is refused, and the start fails with einval; hold_kept fails a
   #   second start under a running program's pid, after which an install into the running
   #   program still succeeds, since only the port that took the hold lets it go.
+  #   install_refused makes an install fail at the bind, with a doorbell already bound to
+  #   another program's group: the program keeps running, and none of the refused
+  #   install's copies took a place in its table.
   # The shell then answers node() again.
   #
   # The programs are file entries, so the backend copies their segments into the space
@@ -176,6 +179,44 @@ module Erx
             Gone = erx_pipe_nif:program_holder(22),
             erx_pipe_nif:holder_drop(22),
             {install, Other, Owner, Again, Gone}
+          end)().
+       ERLANG
+       # An install whose bind is refused fails before any copy reaches the program, which
+       # keeps running: the end's doorbell, bound to spin 25's group by its install, cannot
+       # move to spin 26's. The proof that no copy went is where the next install's copies
+       # land: the table gives each copy its lowest free place, so a good install after the
+       # refused one starts just past the good install before it (Gap 1), and a refused
+       # install that left its two copies in the table pushes it two further (Gap 3).
+       Case.new(name: 'install_refused', seconds: 60, answer: '{install_refused,error,1,running}',
+                expression: line(<<~ERLANG)),
+         (fun() ->
+            P = erx_program:start(#{spec('spin', 25)}),
+            #{hand_off(25, rights)}
+            {ok, _} = erx_program:install(P, {pipe_hand, H, D}),
+            #{hand_off(26, rights, suffix: 'a')}
+            P2 = erx_program:start(#{spec('spin', 26)}),
+            receive after 200 -> ok end,
+            {ok, {pipe, write, _, \#{rpage := Before}}} = erx_program:install(P2, {pipe_hand, Ha, Da}),
+            {ok, [H2]} = erx_pipe_nif:hand_make(26, [{[{Ring, #{rights.fetch(:ring)}}, {RPage, #{rights.fetch(:rpage)}}],
+                                                      {Bell, (9 bsl 32) bor 1}}]),
+            Failed = case erx_program:install(P2, {pipe_hand, H2, D}) of
+                       {error, _} -> error;
+                       Installed -> Installed
+                     end,
+            #{hand_off(26, rights, suffix: 'b', holder: false)}
+            Gap = case erx_program:install(P2, {pipe_hand, Hb, Db}) of
+                    {ok, {pipe, write, _, \#{ring := After}}} -> After - Before;
+                    Refused -> Refused
+                  end,
+            Running = receive {P2, {exit_status, S}} -> S after 0 -> running end,
+            Close = fun(Port) ->
+                      R = erlang:monitor(port, Port),
+                      catch port_close(Port),
+                      receive {'DOWN', R, port, Port, _} -> ok after #{WAIT_MS} -> timeout end
+                    end,
+            Close(P), Close(P2),
+            erx_pipe_nif:holder_drop(25), erx_pipe_nif:holder_drop(26),
+            {install_refused, Failed, Gap, Running}
           end)().
        ERLANG
        # The raw path: start/1's steps by hand, with a relative working directory that

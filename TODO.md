@@ -2268,17 +2268,32 @@ it; git history is the record of completed work.
   never giving a pid twice; until it exists, a test's spec names the pid. The gate worker's 64 registrations
   (two a program) bound a session to 32 programs at once, each start past that refused with `elimit`.
 * [Medium] stopgap, `sys/erxos/erx_program_drv.c` (`PROGRAM_IMAGE_CAP_LIMIT`) and
-  `liberx/backend/fiasco/object.c` (`erx_backend_handles_init`): a program's image is made with a table
-  of `caps_max` capabilities, so it holds every copy of its pipe hand-offs, and the Fiasco backend grows
-  the table as it fills, from `erx_fiasco_vm_records`. Whether that growth is charged to the program's
-  budget is unverified; if it is not, a program that duplicates its own capabilities grows its table
-  from the backend's pool, up to `caps_max` entries. Read where `erx_fiasco_vm_records` takes its
-  pages and record the answer; erXos's kernel charges a table's growth to the space's budget.
-* [Low] ERTS, `sys/erxos/erx_program_drv.c` (`started_values`): STARTED's answer of a start with the
-  most hand-offs, `prog_fds_max` of `pipe_hand_copies_max` copies each, is about 25 MB, and when its
-  allocation fails `port_control` raises in `erx_program:start/1` with the program's spaces made, so
-  they stay until the caller's exit closes the port. Answer `enomem` from a preallocated reply, or
-  bound the copies a start takes.
+  `liberx/backend/fiasco/object.c` (`erx_fiasco_object_task_open`): a program's image is made with a
+  table of `caps_max` capabilities, so it holds every copy of its pipe hand-offs, and the Fiasco
+  backend grows the table as it fills from `erx_fiasco_vm_records`, whose pages come from
+  `erx_fiasco_pool_take` on the backend's shared pool (`liberx/backend/fiasco/vm.c`, `vm_record_take`),
+  charged to no budget. A program that duplicates its own capabilities therefore grows its table from
+  the shared pool, up to `caps_max` entries, past its own budget, and can empty the pool, after
+  which another program's install pass is refused and that program is stopped
+  (docs/design-pipes.md, "Hand-offs"). A Phase 1 residual, not to be rebuilt
+  in user mode: erXos's kernel charges a table's growth to the space's budget.
+* [Low] ERTS, `sys/erxos/erx_program_drv.c` (`hand_install`) and `erx_program.erl` (`install/2`):
+  an install's error answer is allocated after the refused bind or the stop, so when that allocation
+  fails `install/2` raises `badarg` instead of answering `{error, _}`. A handler that does not catch
+  it exits, which closes the port and ends a program a refused bind had left running. No copy
+  stays in a running image either way. Preallocate the error answer with the ok answer.
+* [Low] ERTS, `sys/erxos/erx_program_drv.c` (`pass_or_stop`, `frame_write`): both stop the program
+  through `end_feed` without reading the stop's answer, so a stop `erx_space_stop` refused would leave
+  the program running, with an install's copies in the first case. Read what the Fiasco backend can
+  refuse there and fail the port if it can.
+* [Medium] ERTS, `sys/erxos/erx_program_drv.c` (`started_values`, `answer`) and `erx_program.erl`
+  (`open/7`): when STARTED's answer cannot be allocated, the driver's control returns a negative
+  result and `port_control` raises in `erx_program:start/1`, which has no cleanup around the call. A
+  caller that catches the exception keeps running with a port it cannot name, which holds the program's
+  spaces, its holder hold and its window's lease until the caller exits and the port closes. The answer
+  of a start with the most hand-offs, `prog_fds_max` of `pipe_hand_copies_max` copies each, is about
+  25 MB, so the failure is not far-fetched. Answer `enomem` from a preallocated reply and stop the
+  program, or close the port in `open/8` when the call raises.
 * [Low] stopgap, `liberx/backend/core/park_table.h` (`listed`) and `park_table.c`: a group holds at
   most 64 IRQ objects, since `listed` is a 64-bit map with one bit per object and the file
   asserts `ERX_BACKEND_PARK_OBJECTS_MAX <= 64`. A group that would need a 65th doorbell is refused with an error:
@@ -2340,19 +2355,34 @@ it; git history is the record of completed work.
   read without `obj_mutex`, and a keep does not refuse a closed object; reachable only if the server
   passed an object after its own close. Check and count under `obj_mutex`, as `obj_keep_held` does
   for a hand-off.
-* [Low] session, `erx_pipe_nif.c` (`erx_pipe_hand_take`, `erx_pipe_holder_release`): the NIF knows no
-  port, so two ports of one program open at once would share the port's hold, and the first to end would
-  send the program's gone while the other still runs; the handler opening one port per program is what
-  prevents it. Pass the driver's port as an opaque token to both calls, record it at the first take,
-  and refuse a take or ignore a release with another token.
+* [Medium] session, `erx_pipe_nif.c` (`erx_pipe_hand_take`, `erx_pipe_holder_release`): the port's
+  hold names the program, not its port. An owner that starts P1, then a second port P2 under the same
+  pid whose start takes a valid hand-off and then fails, has P2's undo release the hold P1 took; the
+  owner's `holder_drop` then sends the program's gone while P1 can still touch the pipe pages, so its
+  peers read the end of the stream early. Only the handler's one port per program prevents it. Pass
+  the driver's port as an opaque token to both calls, record it at the first take, and refuse a take or
+  ignore a release with another token.
 * [Low] session, `erx_pipe.erl` (`copies/1`) and `abi/erx_abi.txt` (`pipe_hand_copies_max`): the
   build checks the limit's arithmetic, not that `copies/1` keeps to it. Add a pure test that fills a
   session's quota with one pipe's write ends and 64 read ends and checks that a read end's descriptor
-  has exactly `?ERX_PIPE_HAND_COPIES_MAX` copies.
+  has exactly `?ERX_PIPE_HAND_COPIES_MAX` copies, and that `erx_program:install/2`'s walk
+  (`hand_count/2`) takes that descriptor within `?HOLES_WALK_MAX`.
 * [Low] session, `erx_pipe_nif.c` (`holder_gone`): when `enif_alloc_env` fails, the program's gone
   is not sent and the entry is forgotten, so the pipe server keeps the program's ends until it
   restarts and their peers never read the end of the stream. Make the message's env with the entry,
   so sending it cannot fail for memory.
+* [Medium] tests, `tools/lib/erx/programs.rb` (`pipe_hand`, `install`): no program in the programs
+  suite waits on a pipe, so dropping the doorbell's bind from an install would leave every case
+  passing, and only a refused bind (`install_refused`) is injected: a pass refused partway and a start's
+  or an install's answer that cannot be allocated are not, nor is a check of what holds and copies
+  remain after them. The QEMU tests of hand-offs between domains that the `erx_prog_handler` item
+  names, with a program reading and writing its ends, establish them.
+* [Low] ERTS, `sys/erxos/erx_event.c` (`deliver`): when `enif_alloc_env` answers NULL, a process
+  sink's event is not sent, so the process misses that ring. Out of memory only; make the
+  message's env with the sink, so sending it cannot fail for memory.
+* [Low] ERTS, `nifs/erxos/erx_area_nif.c` (`finish_return`): when `enif_alloc_env` answers NULL, the
+  lender never gets the lease's `returned` message. Out of memory
+  only; make the message's env with the lease.
 * [Low] session, `erx_pipe_srv` (`retry/2`): each wake restarts the whole timeout, `write/3`'s spec
   leaves out `{error, eio}`, and a timeout after a partial write does not say how much was written.
 * [Low] liberx, `erx_pipe_run.c`: the runner relies on its caller for a lane size that is a power of
@@ -5627,7 +5657,6 @@ to the corpus and follow rc
   a principal that a start row names, an app's or a person's, and that never enrolled can be enrolled by whoever
   first reaches a secure console line, as any principal can, and then logged in to with its authority. Settle it in
   the login design, which covers every place a person meets the system.
-- [Medium] session, a failed install into a running program (`erx_program_drv.c`, docs/design-pipes.md, "Hand-offs"): the copies the driver passed before the failure stay in the image unnamed until it ends. For a reply that fails, the ends are closed, so a hostile program that finds an unnamed `WRITE` copy of a closed write end's ring in its own table, as a failed `redeem` of a write end leaves, can append records that the pipe's readers, which read a gone writer's lane until it drains, take as data. Close the passed copies on failure if erXos's kernel gives a creator a close in a sub-space's table. The pipe server's records then also disagree with what the program holds: a reader can see end of stream while the program can still write the ring. A cheaper fix that holds by construction: when a pass or the bind fails after any copy reached the image, stop the program (`ERX_PROGRAM_REFUSED` through `end_feed`), so its copies die with the image; that changes docs/design-pipes.md, "Hand-offs", which names the unnamed copies as the outcome.
 - [Low] program channel on the stopgap (`liberx/backend/fiasco/object.c`): the Fiasco backend records no rights per handle, so a program can map the session's lane side read-write. It can bind or unbind only IRQ objects it holds in its own group: it holds no handle to its channel doorbell, and `irq_group_allowed` refuses the session's doorbell, which is also the gate worker's IRQ for the program's port. A program also holds `TRIGGER` copies of its own pipe ends' doorbells, bound in its own group, and can rebind them to any label, label 1 included; that costs it only its own wakes. Any task can create IRQ objects up to the machine-wide 256 (`ERX_FIASCO_IRQS_MAX`) and starve every other domain's doorbells. erXos's kernel enforces the rights the install grants (`erx_program_core.c` `install_rights`).
 
 * [Low] inspect service, the runtime agent leg ([design-live.md](docs/design-live.md#the-runtime-agent)): a
@@ -6150,6 +6179,13 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Low] kernel and pipes, a pass reservation spanning a hand-off's batches
+  ([design-kernel.md](docs/design-kernel.md#passing-capabilities),
+  [design-pipes.md](docs/design-pipes.md#hand-offs)): `erx_cap_pass` reserves slots for its own
+  four items alone, so an install into a running program whose table or budget fills partway through
+  a hand-off stops the program. A reservation spanning a hand-off's batches would let a full table
+  lose only its own end instead of stopping the program, and would close the window in which a
+  program about to be stopped can write through a copy an earlier batch passed; needs a kernel design.
 * [Medium] `kernel/core/dt.c`, the DMA walk ([design-device-tree.md](docs/design-device-tree.md#the-reader),
   [design-kernel.md](docs/design-kernel.md#dma-and-the-iommu)): a level whose addresses take three cells, a PCI
   bus's, gives the device no DMA range, since the Devicetree Specification leaves those cells to the PCI bus

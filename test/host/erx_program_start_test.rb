@@ -67,6 +67,16 @@ class ErxProgramStartTest < Minitest::Test
     'a hand-off copy skipped' => [hand_entry(7, rpage: '{hand, 3}'), 'badarg'],
     'a hand-off descriptor the message refuses' => [hand_entry(7, size: 4096), '{error,einval}'],
     'a buffer beside a hand-off' => [hand_entry(7, buffer: true), 'driver'],
+    # A term of 64 pairs, each holding the one below twice, is 64 tuples in memory and
+    # names 2^64 {hand, 1}: the walk stops at its bound instead of visiting them.
+    'a hand-off descriptor sharing past the walk' =>
+      ["Base#{'#'}{fds => [{3, {pipe_hand, 7, lists:foldl(fun(_, T) -> {T, T} end, {hand, 1}, lists:seq(1, 64))}}]}",
+       'badarg'],
+    # A {hand, _} that is no place is refused before the driver, never met by the fill.
+    'a {hand, _} that is no place' => [hand_entry(7).sub('readers => []', 'readers => [{hand, 0}]'), 'badarg'],
+    'more fds than a program has' =>
+      ["Base#{'#'}{fds => [{N, {pipe_hand, 7, {hand, 1}}} || N <- lists:seq(0, #{LIMITS.fetch('prog_fds_max')})]}",
+       'badarg'],
     'slots past the data area' => ["Base#{'#'}{slots => 17}", '{error,einval}'],
     'a message at the frame bound' => ['AtBound(0)', 'driver'],
     'a message a byte past the frame bound' => ['AtBound(1)', '{error,e2big}'],

@@ -163,9 +163,8 @@ lease_apply(erx_area_lease_t *lease, erx_lease_event_t event, bool eligible, boo
 
 /*
  * After a return, with table_lock let go: tells the lender and drops the
- * table's reference. enif_alloc_env aborts the runtime rather than answer
- * NULL in ERTS, so the message is always sent; the check guards the host
- * build only.
+ * table's reference. When enif_alloc_env answers NULL, out of memory, the
+ * lender is not told (TODO.md, erx_area_nif.c).
  */
 static void
 finish_return(ErlNifEnv *env, erx_area_lease_t *lease)

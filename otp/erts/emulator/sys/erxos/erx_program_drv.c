@@ -100,9 +100,9 @@
  * SEND the frame it carries, which the driver writes into the inbound lane as room returns,
  * or "busy" while an earlier frame is still being written (send_parse has its payload); RUN,
  * with no payload, the first thread's start; STOP, with a status of 8 bytes big-endian, the
- * anchor's stop with that status; INSTALL, with a hand-off's number of 8 bytes, its install
- * into the running program, "ok" followed by the value each copy took, 8 bytes each. Every
- * word is big-endian.
+ * anchor's stop with that status; INSTALL, with a hand-off's number of 8 bytes and the count
+ * of copies its descriptor names, 8 bytes, its install into the running program, "ok"
+ * followed by the value each copy took, 8 bytes each. Every word is big-endian.
  */
 /* What end_feed hands back for a SEND the end found busy: no status is positive. */
 #define SEND_BUSY		1
@@ -511,8 +511,9 @@ install(program_t *program)
 /*
  * Passes a hand-off's copies into the image's table in its order, each with the rights the
  * NIF gives it within what a pipe's copy may carry, and writes the value each took into
- * values[0, count). A pass refused partway leaves the earlier copies in the image's table
- * unnamed until the image ends (docs/design-pipes.md, "Hand-offs").
+ * values[0, count). A pass refused partway leaves the earlier copies in the image's table,
+ * so its caller ends the image: a start fails whole, and an install stops the program
+ * (pass_or_stop).
  */
 static int
 hand_pass(uint64_t image, const erx_pipe_hand_t *hand, uint64_t values[])
@@ -1424,19 +1425,45 @@ started_values(const program_t *program, size_t *len)
 	return (bytes);
 }
 
+/* "ok", which starts a command's answer that succeeded. */
+#define ANSWER_OK_LEN	2
+
 /*
- * INSTALL: takes hand-off number for the running program as the process calling port_control,
- * which must be the port's owner, passes its copies into the image, binds its doorbell to the
- * program's group, lets it go whatever those answered, and writes the values its copies took
- * into *values, *len bytes of memory of its own, which the caller frees. ERX_EINVAL for a
- * start that failed, a caller that is not the owner, or a hand-off the NIF refuses or answers
- * with more copies than any hand-off holds; ERX_EDEAD once the program is ending; ERX_ENOMEM;
- * or the refusal of a pass or the bind. A failed install names nothing to the program: the
- * owner does not send the frame that would carry the values (docs/design-pipes.md,
- * "Hand-offs").
+ * Passes a hand-off's copies into the running program's image, or stops the program. A
+ * pass refused partway leaves its earlier copies in the image's table, where the program
+ * could find and use them though no frame names them, and the stopgap's table answers
+ * neither which ones went nor how much room is left, since the program's own objects fill
+ * it too and the backend grows it from a shared pool. So a refused pass, a refusal the
+ * driver cannot undo, stops the program with 256 + SIGKILL, and every copy ends with the
+ * image (TODO.md).
  */
 static int
-hand_install(program_t *program, uint64_t number, uint8_t **values, size_t *len)
+pass_or_stop(program_t *program, const erx_pipe_hand_t *hand, uint64_t copies[])
+{
+	const int status = hand_pass(program->image, hand, copies);
+
+	if (status != ERX_OK)
+		(void)end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_STOP,
+		    .status = ERX_PROGRAM_KILLED }, NULL);
+	return (status);
+}
+
+/*
+ * INSTALL: takes hand-off number for the running program as the process calling
+ * port_control, which must be the port's owner, binds its doorbell to the program's group,
+ * passes its copies into the image, and lets it go whatever those answered. Its refusals
+ * come in the order that keeps them clean. First every one that touches nothing:
+ * ERX_EINVAL for a start that failed, a caller that is not the owner, a hand-off the NIF
+ * refuses, or one whose copies are not the count expected, the {hand, I} its descriptor
+ * holds; ERX_EDEAD once the program is ending; ERX_ENOMEM for the answer or the values'
+ * room. Then the bind's, which leaves the image as it was, since no copy has gone yet.
+ * Last the pass's, which stops the program (pass_or_stop). Nothing can fail after the
+ * pass: on ERX_OK *ok is the whole answer, made before the bind, "ok" and the value each
+ * copy took, 8 bytes each; on a refusal it is NULL. A failed install names nothing to the
+ * program: the owner does not send the frame that would carry the values.
+ */
+static int
+hand_install(program_t *program, uint64_t number, uint64_t expected, ErlDrvBinary **ok)
 {
 	const ErlDrvTermData caller = driver_caller(program->port);
 	erx_pipe_hand_t *hand;
@@ -1444,8 +1471,7 @@ hand_install(program_t *program, uint64_t number, uint8_t **values, size_t *len)
 	uint32_t count;
 	int status = ERX_OK;
 
-	*values = NULL;
-	*len = 0;
+	*ok = NULL;
 	if (program->start_error != ERX_OK || caller != driver_connected(program->port))
 		return (ERX_EINVAL);
 	if (!erx_program_end_installs(&program->end))
@@ -1454,21 +1480,29 @@ hand_install(program_t *program, uint64_t number, uint8_t **values, size_t *len)
 	if (hand == NULL)
 		return (ERX_EINVAL);
 	count = erx_pipe_hand_count(hand);
-	if (count > ERX_PIPE_HAND_COPIES_MAX)
+	if (count != expected || count > ERX_PIPE_HAND_COPIES_MAX)
 		status = ERX_EINVAL;
-	if (status == ERX_OK && count > 0 && (copies = driver_alloc(count * sizeof(uint64_t))) == NULL)
+	/* At most ERX_PIPE_HAND_COPIES_MAX copies: the answer's length does not overflow. */
+	if (status == ERX_OK &&
+	    ((*ok = driver_alloc_binary(ANSWER_OK_LEN + (ErlDrvSizeT)count * sizeof(uint64_t))) == NULL ||
+	    (count > 0 && (copies = driver_alloc(count * sizeof(uint64_t))) == NULL)))
 		status = ERX_ENOMEM;
-	if (status == ERX_OK)
-		status = hand_pass(program->image, hand, copies);
 	if (status == ERX_OK)
 		status = hand_bind(hand, program->group);
-	erx_pipe_hand_release(hand);
-	if (status == ERX_OK && count > 0 && (*values = driver_alloc((size_t)count * sizeof(uint64_t))) == NULL)
-		status = ERX_ENOMEM;
 	if (status == ERX_OK)
-		*len = (size_t)count * sizeof(uint64_t);
-	for (uint32_t copy = 0; status == ERX_OK && copy < count; copy++)
-		(void)word_put(*values + copy * sizeof(uint64_t), copies[copy], sizeof(uint64_t));
+		status = pass_or_stop(program, hand, copies);
+	erx_pipe_hand_release(hand);
+	if (status == ERX_OK) {
+		uint8_t *at = (uint8_t *)(*ok)->orig_bytes;
+
+		memcpy(at, "ok", ANSWER_OK_LEN);
+		at += ANSWER_OK_LEN;
+		for (uint32_t copy = 0; copy < count; copy++)
+			at = word_put(at, copies[copy], sizeof(uint64_t));
+	} else if (*ok != NULL) {
+		driver_free_binary(*ok);
+		*ok = NULL;
+	}
 	if (copies != NULL)
 		driver_free(copies);
 	return (status);
@@ -1485,6 +1519,7 @@ static ErlDrvSSizeT
 program_control(ErlDrvData data, unsigned int command, char *buf, ErlDrvSizeT len, char **rbuf, ErlDrvSizeT rlen)
 {
 	program_t *const program = (program_t *)data;
+	ErlDrvBinary *installed;
 	uint8_t *values;
 	size_t values_len;
 	ErlDrvSSizeT need;
@@ -1502,13 +1537,14 @@ program_control(ErlDrvData data, unsigned int command, char *buf, ErlDrvSizeT le
 			(void)end_feed(program, (erx_program_input_t){ .kind = ERX_PROGRAM_ANSWERED }, NULL);
 		return (need);
 	case ERX_PROGRAM_CONTROL_INSTALL:
-		if (len != sizeof(uint64_t))
+		if (len != 2 * sizeof(uint64_t))
 			return (-1);
-		status = hand_install(program, word_at((const uint8_t *)buf, sizeof(uint64_t)), &values, &values_len);
-		need = answer(status, values, values_len, rbuf);
-		if (values != NULL)
-			driver_free(values);
-		return (need);
+		status = hand_install(program, word_at((const uint8_t *)buf, sizeof(uint64_t)),
+		    word_at((const uint8_t *)buf + sizeof(uint64_t), sizeof(uint64_t)), &installed);
+		if (status != ERX_OK)
+			return (answer(status, NULL, 0, rbuf));
+		*rbuf = (char *)installed;
+		return ((ErlDrvSSizeT)installed->orig_size);
 	case ERX_PROGRAM_CONTROL_SEND:
 		status = program->start_error == ERX_OK ? frame_send(program, buf, len) : ERX_EINVAL;
 		need = status == SEND_BUSY ? answer_text("busy", rbuf) : answer(status, NULL, 0, rbuf);

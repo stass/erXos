@@ -46,6 +46,10 @@ frame it sends gives the program's credit, and reads how each step ended.
 -define(LONGEST_CAP, 16#ffffffffffffffff).
 %% What the startup message takes from the spec as it is.
 -define(MESSAGE_KEYS, [ppid, pgid, argv, env, cwd, spawn, sigmask, sigignore, umask]).
+%% The most terms holes/1 walks in one hand-off's descriptor: sixteen for each copy a
+%% hand-off may hold, more than any descriptor the pipe server makes (erx_pipe:step/2's
+%% and erx_pipe_srv's hand_term/2) spends on each.
+-define(HOLES_WALK_MAX, 16 * ?ERX_PIPE_HAND_COPIES_MAX).
 %% A window's buffer: a lease's number, and its pages, which the buffer place holds
 %% (docs/design-display.md, The pixel area).
 -define(IS_LEASE(L), (is_integer(L) andalso L >= 1 andalso L =< 16#ffffffffffffffff)).
@@ -227,16 +231,19 @@ send(Port, Frame) ->
 Installs `Hand`, the pipe server's hand-off `{pipe_hand, Number, Term}` to the
 caller, into the running program (docs/design-pipes.md, Hand-offs): the
 driver takes it only when the caller is both the port's owner and the
-hand-off's, passes its copies into the program's table, binds the doorbell
-of the end it gives to the program's group, and lets it go. `{ok, Filled}`,
+hand-off's, binds the doorbell of the end it gives to the program's group,
+passes its copies into the program's table, and lets it go. `{ok, Filled}`,
 `Term` with each `{hand, I}` replaced by the value the `I`-th copy took,
 for the caller to send in the frame that names them; `{error, einval}` for a
 caller or a hand-off the driver refuses, or copies that do not match `Term`;
-`{error, edead}` once the program is ending; `{error, enomem}`. A failed
-install names nothing to the program, and copies it passed before the
-failure stay unnamed in its table until it ends. A `Number` outside
-1..2^64-1, or a `Term` whose `{hand, I}` do not run from 1 to their count,
-each once, is `badarg`.
+`{error, edead}` once the program is ending; `{error, enomem}`; or the
+error of the doorbell's bind, which comes before any copy is passed. Each of
+those leaves the program as it was. A pass the kernel interface refuses
+comes after copies may be in the program's table, so the driver stops the
+program with `256 + SIGKILL` and the pass's error is the answer: no copy
+outlives the failure in a running image. A failed install names nothing to
+the program. A `Number` outside 1..2^64-1, or a `Term` whose `{hand, I}` do
+not run from 1 to their count, each once, is `badarg`.
 """.
 -spec install(port(), {pipe_hand, pos_integer(), term()}) -> {ok, term()} | {error, atom()}.
 install(Port, {pipe_hand, Number, Term} = Hand) ->
@@ -244,11 +251,12 @@ install(Port, {pipe_hand, Number, Term} = Hand) ->
                 badarg -> erlang:error(badarg, [Port, Hand]);
                 Counted -> Counted
             end,
-    case port_control(Port, ?ERX_PROGRAM_CONTROL_INSTALL, <<Number:64>>) of
+    %% The driver refuses a hand-off of another count before any copy reaches the
+    %% program, so its answer holds a value for each {hand, I}; any other length is
+    %% the driver's bug, a case_clause here.
+    case port_control(Port, ?ERX_PROGRAM_CONTROL_INSTALL, <<Number:64, Count:64>>) of
         <<"ok", Values/binary>> when byte_size(Values) =:= 8 * Count ->
             {ok, fill(Term, list_to_tuple(words(Values)))};
-        <<"ok", _/binary>> ->
-            {error, einval};
         <<$e, _/binary>> = Refused ->
             {error, binary_to_atom(Refused)}
     end;
@@ -370,7 +378,7 @@ natural(N) -> is_integer(N) andalso N >= 0.
 %% The spec's fds as {Buffer, Hands}: the window's buffer, none or {N, Lease, Pages}, and
 %% the hand-offs in order, as hands/1 gives them; badarg for fds that are not a list of at
 %% most one mem entry and of hand-offs.
-fds(Fds) when is_list(Fds) ->
+fds(Fds) when is_list(Fds), length(Fds) =< ?ERX_PROG_FDS_MAX ->
     {Mems, Pipes} = lists:partition(fun({_, {mem, _, _}}) -> true; (_) -> false end, Fds),
     case {buffer(Mems), hands(Pipes)} of
         {badarg, _} -> badarg;
@@ -409,20 +417,39 @@ hand(_) ->
 %% The count of a hand-off's copies: its number lies in 1..2^64-1, and the {hand, I} of
 %% its term run from 1 to their count, each once; badarg otherwise.
 hand_count(Number, Term) when is_integer(Number), Number >= 1, Number =< 16#ffffffffffffffff ->
-    Places = lists:sort(holes(Term)),
-    case Places =:= lists:seq(1, length(Places)) of
-        true -> length(Places);
-        false -> badarg
+    case holes(Term) of
+        badarg ->
+            badarg;
+        Found ->
+            Places = lists:sort(Found),
+            case Places =:= lists:seq(1, length(Places)) of
+                true -> length(Places);
+                false -> badarg
+            end
     end;
 hand_count(_, _) ->
     badarg.
 
-%% Every I of a {hand, I} in Term, in tuples, lists and map values.
-holes({hand, I}) -> [I];
-holes(Tuple) when is_tuple(Tuple) -> holes(tuple_to_list(Tuple));
-holes([Head | Tail]) -> holes(Head) ++ holes(Tail);
-holes(Map) when is_map(Map) -> holes(maps:values(Map));
-holes(_) -> [].
+%% Every I of a {hand, I} in Term, in tuples, lists and map values, or badarg once the
+%% walk would take more than ?HOLES_WALK_MAX terms or meets a {hand, _} that is no place
+%% a hand-off has, so fill/2 meets only places it can fill. A term that shares a subterm
+%% names it at each place, more terms than its memory holds, so the walk counts the
+%% terms it takes, each tuple's and map's elements as it opens them, never the term's size.
+holes(Term) -> holes([Term], ?HOLES_WALK_MAX - 1, []).
+
+holes([], _, Found) -> Found;
+holes([{hand, I} | Rest], Left, Found) when is_integer(I), I >= 1, I =< ?ERX_PIPE_HAND_COPIES_MAX ->
+    holes(Rest, Left, [I | Found]);
+holes([{hand, _} | _], _, _) -> badarg;
+holes([Tuple | Rest], Left, Found) when is_tuple(Tuple), tuple_size(Tuple) =< Left ->
+    holes(tuple_to_list(Tuple) ++ Rest, Left - tuple_size(Tuple), Found);
+holes([[Head | Tail] | Rest], Left, Found) when Left >= 2 -> holes([Head, Tail | Rest], Left - 2, Found);
+holes([Map | Rest], Left, Found) when is_map(Map), map_size(Map) =< Left ->
+    holes(maps:values(Map) ++ Rest, Left - map_size(Map), Found);
+%% A tuple, cons or map that reaches this clause is one the clauses above did not open
+%% because its elements would take the walk past its budget.
+holes([Term | _], _, _) when is_tuple(Term); is_list(Term), Term =/= []; is_map(Term) -> badarg;
+holes([_ | Rest], Left, Found) -> holes(Rest, Left, Found).
 
 %% Term with each {hand, I} replaced by element I of Values, where holes/1 finds them.
 fill({hand, I}, Values) -> element(I, Values);

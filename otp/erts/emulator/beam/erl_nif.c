@@ -17,6 +17,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * Modified by erXos: enif_alloc_env answers NULL when its allocation fails,
+ * instead of setting up the env through the NULL it got.
+ *
  * %CopyrightEnd%
  */
 /* Erlang Native InterFace
@@ -666,10 +669,13 @@ setup_nif_env(struct enif_msg_environment_t* msg_env,
 #endif
 }
 
+/* NULL when the allocation fails, which a caller must check before using the env. */
 ErlNifEnv* enif_alloc_env(void)
 {
     struct enif_msg_environment_t* msg_env =
 	erts_alloc_fnf(ERTS_ALC_T_NIF, sizeof(struct enif_msg_environment_t));
+    if (msg_env == NULL)
+        return NULL;
     setup_nif_env(msg_env, NULL, NULL);
     return &msg_env->env;
 }

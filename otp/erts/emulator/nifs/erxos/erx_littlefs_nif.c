@@ -240,13 +240,15 @@ block_request(const struct lfs_config *c, enum req_op op, lfs_block_t block,
 		op_atom = atom_flush;
 		break;
 	}
-	msg_env = enif_alloc_env();
-	msg = enif_make_tuple5(msg_env, atom_block, op_atom,
-	    enif_make_uint64(msg_env, byte / ERX_LFS_SECTOR_SIZE),
-	    enif_make_uint(msg_env, (unsigned)(size / ERX_LFS_SECTOR_SIZE)),
-	    enif_make_resource(msg_env, req));
-	sent = enif_send(vol->env, &vol->owner, msg_env, msg);
-	enif_free_env(msg_env);
+	sent = 0;
+	if ((msg_env = enif_alloc_env()) != NULL) {
+		msg = enif_make_tuple5(msg_env, atom_block, op_atom,
+		    enif_make_uint64(msg_env, byte / ERX_LFS_SECTOR_SIZE),
+		    enif_make_uint(msg_env, (unsigned)(size / ERX_LFS_SECTOR_SIZE)),
+		    enif_make_resource(msg_env, req));
+		sent = enif_send(vol->env, &vol->owner, msg_env, msg);
+		enif_free_env(msg_env);
+	}
 
 	ok = 0;
 	if (sent) {

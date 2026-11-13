@@ -63,10 +63,14 @@ int
 erx_event_register_process(const ErlNifPid *pid, ERL_NIF_TERM term, uint32_t *label)
 {
 	ErlNifEnv *const env = enif_alloc_env();
-	const erx_event_sink_t sink = { .kind = ERX_EVENT_SINK_PROCESS, .owner = pid->pid,
-		.detail = enif_make_copy(env, term), .storage = env };
-	const int status = add_sink(&sink, label);
+	erx_event_sink_t sink;
+	int status;
 
+	if (env == NULL)
+		return (ERX_ENOMEM);
+	sink = (erx_event_sink_t){ .kind = ERX_EVENT_SINK_PROCESS, .owner = pid->pid,
+		.detail = enif_make_copy(env, term), .storage = env };
+	status = add_sink(&sink, label);
 	if (status != ERX_OK)
 		enif_free_env(env);
 	return (status);
@@ -175,6 +179,9 @@ deliver(const erx_event_sink_t *sink, void *arg)
 		ErlNifEnv *const env = enif_alloc_env();
 		ErlNifPid pid;
 
+		/* Out of memory, the event is not told (TODO.md, erx_event.c). */
+		if (env == NULL)
+			break;
 		pid.pid = (ERL_NIF_TERM)sink->owner;
 		/* A process that has exited is no one to tell, and its owner removes the entry. */
 		(void)enif_send(NULL, &pid, env, enif_make_copy(env, (ERL_NIF_TERM)sink->detail));

@@ -1466,22 +1466,52 @@ after the port's hold was released, or an install whose caller is not
 the port's owner, answers no hand-off, and the start or the install
 fails with `einval`; the hand-off, if it is held, stays its owner's. A
 start that fails after its takes lets them go with its other undos, the
-port's hold last, as the lease's return; the handler then drops the
+port's hold just before the lease's return; the handler then drops the
 hand-offs the start did not take and its own hold, so the pipe server
 reads the program's gone ([Inherited ends](#inherited-ends)).
 
 **An install into a running program that fails** names nothing to the
 program: the handler does not send the frame that would carry the
-values. For a reply, the request fails and the handler closes the ends
+values. No copy the install passed may stay in the image either, since
+a copy withheld is not a copy closed: the program could find it in its
+own table and map a write end's ring from it, which would take records
+after the handler closed that end, records its readers would read as
+data. So the driver makes every refusal it can before the pass: the
+caller, a program already ending (`ERX_EDEAD`), the take, a hand-off
+whose copies are not as many as the `{hand, I}` its descriptor holds,
+memory for the answer and the copies' values, and then the doorbell's
+bind, which changes nothing in the image. A refusal before the pass
+leaves the image as it was and the program running, and loses that end
+alone. For a reply, the request fails and the handler closes the ends
 the reply would have given, as `{closed}` would. For a report, the end it
 concerns stays the program's and is lost: the handler sends
 `install_failed`, and the program gets `{pipe_lost, Pipe, End}`
 ([Failure handling](#failure-handling-diagnostics-and-debuggability)).
-Either way the copies the driver passed before the failure stay in the
-image unnamed until the image ends, as the start's installer leaves a
-refused pass's earlier copies (`erx_program_drv.c`, `install`); each is a
-copy the program's end was owed, with the rights above, so it grants the
-program nothing its ends did not.
+
+The pass comes last, and nothing can fail after it. A refused pass,
+because the program's table or budget is full, stops the program,
+whichever of the hand-off's passes it is. By then earlier passes may
+have put copies in the image, and nothing takes them back: one
+`erx_cap_pass` carries at most four items and reserves slots for its own
+items alone ([design-kernel.md](design-kernel.md#passing-capabilities)),
+a hand-off may hold more, and the running program may already have
+mapped a ring from a copy an earlier pass put there, a mapping that
+moving the copy out would not undo. The driver does not track which of
+its passes went, so it stops on any refused pass, the first included.
+It stops the program through its ordinary stop, which ends it signaled
+`SIGKILL` as a stop by its session does
+([design-programs.md](design-programs.md#a-programs-end)), and every
+copy and every mapping ends with the program's spaces. The stop comes
+before the driver answers the install, and the handler then answers
+the failure as it answers a refusal before the pass; the stopped program
+reads neither the answer nor a `{pipe_lost, Pipe, End}`. Records the
+program wrote through such a copy before the stop stay in the lane, as
+a killed writer's do, and none follow the handler's close of the end.
+The pipe server then reads the program's gone
+([Inherited ends](#inherited-ends)). No running image ever holds a copy
+of an end the pipe server does not record as the program's. A start's
+failed pass leaves nothing either: the start fails whole, and its image
+never runs.
 
 A crash of the pipe server leaves each hand-off's references and each
 holder entry in place, so a take after it still installs what the
@@ -1659,7 +1689,7 @@ answer; both travel on the channel in order and without loss:
 | `{drained, Pipe, End, Writer}` | notice | the read end `End` drained the lane of write end `Writer`, which is gone, and unmapped and closed it; due once for each frame to the program that names `Writer` gone to `End`, a repeat ending the program with `SIGSYS` | none |
 | `{deposit, Descriptor, Stream}` | request | the second tier's `SCM_RIGHTS`: hold an end for the end of a `{pipe, End}` descriptor, one for each end of a `{socketpair, ReadEnd, WriteEnd}` descriptor, or the open of a file, terminal or directory descriptor, for whichever read end of `Stream`, a write end the requester holds, meets the ticket ([Deposits](#deposits)) | `{ok, Ticket}`; or `{error, ebadf \| emfile \| enomem \| etoomanyrefs}`, `etoomanyrefs` when 16 deposits made through `Stream` are open |
 | `{withdraw, Stream, Ticket}` | request | a `sendmsg` could not publish a ticket it was given; `Stream` is the write end the deposit was made through | `ok`, also for a deposit already closed |
-| `{redeem, Stream, Ticket}` | request | take a deposit; `Stream` is a read end the requester holds | `{ok, Descriptor}`; `{error, ebadf}` for a ticket unknown, redeemed or of another pipe; `{error, emfile \| enomem}` when the install fails |
+| `{redeem, Stream, Ticket}` | request | take a deposit; `Stream` is a read end the requester holds | `{ok, Descriptor}`; `{error, ebadf}` for a ticket unknown, redeemed or of another pipe; `{error, emfile \| enomem}` when the install is refused before the pass; a program whose pass is refused is stopped and reads no answer ([Hand-offs](#hand-offs)) |
 | `{discard, Stream, Ticket}` | request | a `read`, or a `recvmsg` without room for descriptors, skipped a deposit; `Stream` is a read end the requester holds | `ok`, also for a deposit already closed |
 | `{pipe_writer, Pipe, End, Writer, Ring, RPage, Size, Doorbell, State}` | report | a write end joined the pipe of read end `End`: `Ring`, `RPage` and `Doorbell`, the trigger right, are values in the program's table, and the read end raises its count of write ends to `Writer` ([The lock page](#the-lock-page)). `State` is `open`, and the read end rings `Doorbell` once as it applies the report ([Waiting and doorbells](#waiting-and-doorbells)); or `gone`, when the handler owed the join and merged the writer's gone into it ([design-programs.md](design-programs.md#the-channel)), and the read end closes `Doorbell`, takes the lane as gone, drains it and lets it go | none |
 | `{pipe_writer_gone, Pipe, End, Writer}` | report | the write end `Writer` of the pipe of end `End` is gone; a read end closes its copy of the writer's doorbell, drains the lane and then lets it go | none |
@@ -1720,7 +1750,9 @@ defines:
   which names one image, by the port driver's take of a
   [hand-off](#hand-offs), which also binds the end's doorbell to the
   program's group; a failed install into a running program fails
-  the request or loses that end alone, and nothing is ever installed into
+  the request or loses that end alone when it is refused before the pass,
+  and stops the program when the pass is refused, so no copy of it
+  outlives the failure in a running image; nothing is ever installed into
   an image that has gone, since the session's capability to a stopped
   space refuses it (`ERX_EDEAD`).
 * **Ends of programs.** A program's ends are gone when its holder entry
@@ -1810,7 +1842,7 @@ differences, each pinned by a test:
 | A sender fails, is killed or lies between a deposit and its publication | `sendmsg`'s failure, or the drained reports of the sender's lane | a deposit whose ticket is in no lane | `{withdraw}`, or the drained reports, close it ([Deposits](#deposits)) | nothing: what the deposit held closes, and a pipe it kept open reaches its end of stream |
 | `pipe`, or a read end beyond 64, the quota or a table | the pipe server's plan or an install | nothing: the objects made close | the steps before it undone | `EMFILE`, `ENFILE` or `ENOMEM` from `pipe` or the spawn |
 | The pipe server crashes | its supervisor, and every handler's monitor | its capabilities closed by the destructors; its memory alive while parties map it | supervisor restart; each handler sends `pipe_server_lost`, and its program wakes its own waiters; each pipe's memory returns as its parties close their ends | reads fail with `EIO`, writes with `EPIPE`; later pipes work |
-| An install into a running holder fails, because the holder's table or budget is full | the install's status | the end without the lane or the doorbell it needed | the pipe server closes the copy whose install failed and reports the end lost to that holder with `{pipe_lost, Pipe, End}`, after which the end counts as lost, its reads failing with `EIO` and its writes with `EPIPE`, as [Writing](#writing) says of a lost pipe | a program that exhausts its own table or budget with its own objects loses only its own end; within the `pipes` quota, pipe installs alone never exhaust it ([Inherited ends](#inherited-ends)) |
+| An install into a running holder fails, because the holder's table or budget is full | the install's status | for a process, the end without the lane or the doorbell it needed; for a program, the copies the install's earlier passes put in its image | for a process, the pipe server closes the copy whose install failed and reports the end lost to that holder with `{pipe_lost, Pipe, End}`, after which the end counts as lost, its reads failing with `EIO` and its writes with `EPIPE`, as [Writing](#writing) says of a lost pipe; a program the port driver stops through its ordinary stop, signaled `SIGKILL`, and every copy and mapping ends with the program's spaces ([Hand-offs](#hand-offs)) | a process that exhausts its table or budget with its own objects loses only its own end, and a program that does so is stopped alone; within the `pipes` quota, pipe installs alone never exhaust it ([Inherited ends](#inherited-ends)) |
 | A program floods its handler with pipe requests or notices | the port driver, which passes on a program's frames only within its credit: 16 requests, one `{closed}` per end and one `{drained}` per writer named gone to it | none | a request on a busy slot or a notice that is not due, a repeat included, ends the program with `SIGSYS`, as a malformed record does ([design-programs.md](design-programs.md#the-program-protocol)); within its credit, the program waits for room in its own lane | the program's parent sees `SIGSYS`; the handler and the pipe server hold at most one message per credit of it, and its siblings are served |
 
 Every pipe and end appears in `/proc` and the inspector: the pipe server
@@ -2019,8 +2051,10 @@ readers, which any pipe has.
   reader with a gone writer's lane half read, whose new image reads the
   rest; a writer that joins a pipe while a forked child that holds a read
   end of it is built but not yet started, whose lane the child holds when
-  it starts; an install into a holder whose table is full, which reports
-  the end lost to that holder alone; and a crash of the pipe server, after
+  it starts; an install into a process that fails, which reports the end
+  lost to that holder alone, and a pass refused into a program whose
+  table is full, which stops that program alone; a refused bind into a
+  running program, which loses that end and leaves the program running; and a crash of the pipe server, after
   which blocked readers and writers wake with `EIO` and `EPIPE`. The
   exploration of `erx_pipe:step/2` checks, over every order of inherit,
   closed, gone, drained, exec, deposit, redeem, discard and withdraw
