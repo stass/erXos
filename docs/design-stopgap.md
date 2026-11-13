@@ -1772,16 +1772,24 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   turn it off, so an end by `ERX_END_OFF`, a missed pet's included, lasts until its power is cycled by hand.
 * **The card.** `sdcard.img` is the medium of `abi/medium.txt`, as QEMU `virt`'s medium is, laid out as
   [Slots and the boot-selection record](design-platforms.md#slots-and-the-boot-selection-record) describes: the
-  record's partition, whose FAT holds `autoboot.txt`, one cluster at `medium_record_select_start`, and the reset count
-  alone in the next MiB; slot A, which begins with a FAT32 volume that holds the boot files below and ends before the
+  record's partition, an 8 MiB FAT16 whose data area begins with `autoboot.txt`, one cluster at
+  `medium_record_select_start`, and whose reserved area holds the reset count alone in its MiB at
+  `medium_record_count_start`; slot A, which begins with a FAT32 volume that holds the boot files below and ends before the
   slot's EROFS images start at 128 MiB (`SLOT_IMAGES_START`, `tools/lib/erx/release_medium.rb`), with `kernel8.img`
   allocated first and contiguous from `medium_slot_boot_start`, so the harness and the slot writer find it without
   parsing FAT and the firmware finds it through FAT; slot B, empty; the vault's partition; and the data partition with
   a fresh littlefs volume. The volume's cluster size is chosen so that a volume under 128 MiB is FAT32 by the cluster count the FAT
   specification sets ([design-storage.md](design-storage.md#references)), as the slot's partition type
-  (`medium_slot_type`, `0x0c`) says. Placing a file at a
-  fixed first cluster, contiguous, is a requirement on fsimg, which the packer checks by reading the written
-  directory entry back. The firmware boots this card only if the board's EEPROM bootloader reads `autoboot.txt` and
+  (`medium_slot_type`, `0x0c`) says. Both placed files are fsimg's `place` option, `-o place=NAME@SECTOR`: one
+  placed file per volume, on FAT16 and FAT32, for which fsimg pads the reserved area so that the data area starts at
+  the placement sector and gives the file the clusters from the first data cluster on, in order, the FAT32 root
+  directory's cluster following them; `kernel8.img` is placed at `medium_slot_boot_start` and `autoboot.txt` at
+  `medium_record_select_start`. The packer checks each placed file after fsimg writes the volume: it reads the
+  file's directory entry, walks its whole cluster chain in the first FAT, bounded by the clusters its length needs,
+  and refuses a chain that is not consecutive from the placement sector, that ends early or that runs on past the
+  file's last cluster; it then compares the file read through that chain with the raw extent at the placement sector
+  byte for byte, and for `autoboot.txt` checks that its length is the record's 64 bytes. Its test seeds a fragmented
+  `kernel8.img`, whose chain jumps once, and the check refuses it. The firmware boots this card only if the board's EEPROM bootloader reads `autoboot.txt` and
   honours `tryboot_a_b` and `boot_partition`; the board's port records the oldest bootloader version that does, which
   the board pass records from the bootloader's log on the console
   ([design-platforms.md](design-platforms.md#slots-and-the-boot-selection-record)). The Pi's development manifest

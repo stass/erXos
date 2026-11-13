@@ -2297,12 +2297,17 @@ side.
   write path, so the Pi adds a device process and nothing above it
   moves. The write path's rule (U4) holds across the split: only
   `erx_blk_write` hands a controller anything to do, a virtio request or
-  an SD command written to the command register, and the build check
-  that holds the rule covers the command register's name as it covers
-  `erx_device:post/4`
+  an SD command, since the device NIF owns the command register and
+  issues a command only through `erx_device:command/2`, which the build
+  check holds to `erx_blk_write` as it holds `erx_device:post/4`
   ([design-storage.md](design-storage.md#the-sd-host-controller)). The storage domain holds the SD card, laid out on
   the host as the ABI file's medium layout, with the release's EROFS
-  image read through its window and littlefs at `/data`. Each DMA
+  image read through its window and littlefs at `/data`. The Pi medium
+  package moves `abi/medium.txt` and its tests to the 8 MiB record
+  partition
+  ([design-platforms.md](design-platforms.md#slots-and-the-boot-selection-record)),
+  every later partition 4 MiB on, and brings fsimg's `place` option and
+  the packer's check of each placed file's cluster chain with it. Each DMA
   device's entry in the platform record carries its bus offset and
   reach, so the SD controller's pool lies in the first GiB it sees
   ([design-stopgap.md](design-stopgap.md#the-raspberry-pi-4)).
@@ -2396,8 +2401,9 @@ side.
   pass's record lists each cut with its mark and the files that
   survived; a storage domain killed under load restarts with every
   synced file present; the seeded write of a request not built by
-  `erx_blk_write`, a virtio post or an SD command-register write, fails
-  the build check; the SD controller's parsers run their fuzz budgets
+  `erx_blk_write`, a virtio post or an SD command, fails the build
+  check, and a write of the command register through
+  `erx_device:write/3` answers `badarg`; the SD controller's parsers run their fuzz budgets
   clean.
 * (c): UDP echo and a TCP bulk transfer to a peer pass on the board; a
   network domain killed under load restarts ending only its

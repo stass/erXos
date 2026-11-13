@@ -877,11 +877,27 @@ booted slot reported in `/chosen`.
 layout of `abi/medium.txt` fixes them, so the slot writer, which is the
 same code on every platform, writes one format; the Raspberry Pi's is
 chosen because its firmware cannot read another. The record's partition
-is the medium's first; its first MiB holds the partition's FAT, the record
-is the sector 1 MiB into it (`medium_record_select_start`, counted from the
-partition's first sector) and the reset count the sector 2 MiB into it
-(`medium_record_count_start`). Each so has a MiB of its own, the layout's
-alignment, which is the erase unit the medium assumes. The record has two
+is the medium's first, 8 MiB long (`medium_record_sectors`), one FAT16
+volume laid out in MiB regions, the layout's alignment and the erase unit
+the medium assumes, so that the record and the reset count each have an
+erase unit of their own. Counted from the partition's first sector:
+
+* MiB 0 holds the boot sector and the start of the reserved area;
+* MiB 1 is the reset count, its first sector, sector 2048
+  (`medium_record_count_start`), inside the reserved area, which no FAT
+  reader reads;
+* MiB 2 holds the end of the reserved area, both FATs and the root
+  directory;
+* the data area starts at sector 6144, 3 MiB in, with `autoboot.txt`,
+  whose one 512-byte cluster is the record (`medium_record_select_start`).
+
+The 5 MiB data area in 512-byte clusters is 10,240 clusters, a FAT16 by
+the cluster count the FAT specification sets
+([design-storage.md](design-storage.md#references)). The partition
+starts 1 MiB into the medium (`medium_record_start`), so it ends at
+9 MiB, and slot A starts at 12 MiB (`medium_slot_a_start`, sector
+24,576); `abi/medium.txt` holds these values and the later partitions'
+starts. The record has two
 encodings, `medium_record_a` while slot A, the medium's second partition,
 is committed and `medium_record_b` while slot B, its third, is. Each is
 followed by zeros to the end of the sector, and both have the same length,
@@ -898,11 +914,15 @@ boot_partition=3
 ```
 
 and while B is, the two numbers swap. A sector that is neither encoding,
-byte for byte, is an unreadable record. The packer writes the partition's
-FAT with `autoboot.txt` as a file of the text's length whose one cluster
-starts at the record's sector, so the firmware reads the record through
-the FAT and every other reader, the slot writer and the QEMU harness, reads
-the sector; and it writes `normal(A)`, `medium_record_a`, to a new medium.
+byte for byte, is an unreadable record. The packer has fsimg write the
+partition's FAT with `autoboot.txt` placed at the record's sector
+(`-o place=autoboot.txt@6144`), a file of the text's length, 64 bytes,
+in one cluster, so the firmware reads the record through the FAT and
+every other reader, the slot writer and the QEMU harness, reads the
+sector; it then writes the reset count's first value into its sector of
+the reserved area, which fsimg leaves zero, and checks the placement as
+[design-stopgap.md](design-stopgap.md#the-raspberry-pi-4) describes; and
+it writes `normal(A)`, `medium_record_a`, to a new medium.
 
 **On the Raspberry Pi** the record is the firmware's `autoboot.txt` and the
 request its one-shot `tryboot` flag
@@ -937,9 +957,8 @@ request its one-shot `tryboot` flag
   each board's port records the bootloader version its trial path needs.
 * **The reset count**, the count of consecutive unordered ends
   ([design-storage.md](design-storage.md#system-updates)), is a sector of
-  its own that the packer places as a file of its own, alone in the next
-  erase-unit-aligned region of the same partition, and that the firmware
-  never reads. So `autoboot.txt` keeps its two encodings and is rewritten
+  its own in the record partition's reserved area, alone in its MiB, which
+  neither the firmware nor any FAT reader reads. So `autoboot.txt` keeps its two encodings and is rewritten
   only at a commit, and a torn write of the count, which the slot writer
   makes at every boot, never leaves the firmware a record it cannot read.
 
@@ -1515,6 +1534,7 @@ running (PL4).
 | The firmware places the device tree over the single file, refuses a kernel file that long, or describes `/chosen` differently than expected | low | the kernel's boot stops with a message | the boot probe confirms each board before anything depends on it |
 | The BCM2712's link drops between the PCIe enumerator's check and a configuration access | low | the PCIe domain ends and is restarted, or an asynchronous abort stops an unrelated thread | the enumerator checks the link before each access; the board port measures whether the abort is synchronous; a restart of the PCIe domain re-reads configuration space and changes no running function |
 | The crash region does not survive `SYSTEM_RESET` on a board, or the firmware clears it | medium | no crash record after a reset on that board; the early console alone | the boot probe checks it; the record's check rejects what the firmware left; the early console carries every record |
+| A damaged record partition, or a slot without valid boot files, lets the bootloader's `PARTITION_WALK` boot another partition than the record names, or leaves the card unbootable | low | the wrong slot boots, or the board needs an installation | the record changes only at a commit and a torn record needs an installation ([design-storage.md](design-storage.md#risks-and-open-questions)); the board pass records the EEPROM's `BOOT_ORDER` and `PARTITION_WALK` and what a card with a damaged record partition boots |
 | A reset through the power-management watchdog boots `kernel_watchdog_partition` rather than `autoboot.txt`'s slot | low | a reset boots the wrong slot | each slot's `config.txt` leaves the setting unset; the board port checks which slot a watchdog reset boots |
 | The system runtime's first pet comes after the kernel's deadline on a board | medium | a boot loop | the board port measures the time to the first pet and checks that it fits `B` |
 | A firmware version answers the mailbox's read of the key's rows differently, or not at all | low | the board has no device secret, and a vault configured for `device` serves no login | the board port records the firmware version its read needs, as it does for the trial request |

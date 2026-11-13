@@ -156,7 +156,7 @@ commits by rewriting the record only once the trial is healthy.
 | **U1.** The slot the machine runs from, and the slot a failed trial falls back to, are never written | the slot writer allows a slot write only on `normal(C)` with the record naming `C`, and only to the other slot | a slot write allowed on any other boot value, or from a service's word | the exhaustive model of the update path |
 | **U2.** The record names only the slot first installed or a slot that passed a healthy trial | the slot writer rewrites the record only on `trial(S)` with the record naming the other slot, naming `S`, and the update service asks for that only once the trial is healthy; no other boot value, a firmware's fallback boot included, allows a record write | a record write on a normal boot | the exhaustive model, with every boot value against every record |
 | **U3.** After a power cut, a crash or a hang at any point, the machine boots the committed slot, or the spare once as a requested trial | the record changes only by one sector, the trial's request is one-shot, and a hang during a trial ends in the watchdog's reset; the firmware runs the watchdog from power-on on a board configured as [design-platforms.md](design-platforms.md#slots-and-the-boot-selection-record) describes, and on a board without that configuration a trial whose firmware stage hangs, before the kernel's first decision, needs a power cycle | a multi-sector record; a request that survives the trial | the model with a power cut after every write; runs on each board |
-| **U4.** A trial boot writes nothing but the record and the reset count | the block driver's write path, `erx_blk_write`, is the one module that hands a controller anything to do, a virtio request or an SD command, and its one trial check refuses every write but the record window's and the reset count's while the boot value is `trial(_)`, reading the boot value from the machine page through its runtime | a second write path in the driver: a module other than `erx_blk_write` that posts a virtio request or writes the SD controller's command register | the build check over the storage domain's BEAM files that no module but `erx_blk_write` imports `erx_device:post/4` or holds the SD command register's name in its atom table ([design.md](design.md#chokepoint-checks)), with a seeded violation for each; a QEMU test of every client's writes on a trial boot; a host test of the SD write function on a trial boot value |
+| **U4.** A trial boot writes nothing but the record and the reset count | the block driver's write path, `erx_blk_write`, is the one module that hands a controller anything to do, a virtio request or an SD command, and its one trial check refuses every write but the record window's and the reset count's while the boot value is `trial(_)`, reading the boot value from the machine page through its runtime | a second write path in the driver: a module other than `erx_blk_write` that posts a virtio request or issues an SD command | the device NIF's ownership of the SD command register, which `erx_device:write/3` refuses, so a command is issued only by `erx_device:command/2`; the build check that no driver module but `erx_blk_write` names `erx_device:post/4` or `erx_device:command/2`, holds `erx_device` as a value or makes an atom from data ([design.md](design.md#chokepoint-checks)), with a seeded violation of each kind; a QEMU test of every client's writes on a trial boot; a host test of the SD write function on a trial boot value |
 | **U5.** Only a complete spare is ever tried | the update service asks for a trial only after the spare has passed the check against the update manifest in its manifest window, which runs at each normal boot and after each write and records nothing; the manifest is written last, so a spare whose write was cut short has no manifest that matches it | a recorded "complete" state; a trial requested from a service's word | the model with a power cut after every write of the spare; a QEMU test that cuts a spare's write short and finds no trial requested |
 
 U1 to U5 hold on a medium that writes a sector atomically and honours a
@@ -225,12 +225,33 @@ driver's log line, never from a controller's bytes, and never reaches a
 client. A window answers its client `einval` for `bad_count`, `erofs` for
 `erofs` and `eio` for every other error. The maximum request is the
 transport's: 8 sectors on virtio, the sectors one pool buffer holds
-beside its header and status byte; 128 sectors on the SD controller,
-64 KiB, which bounds the time one request holds the controller. The
+beside its header and status byte; 64 sectors on the SD controller,
+32 KiB, the most whose write a card within its specification finishes
+inside the in-flight bound below. The
 block service reads it from `info/0` when it starts a window, and the
 window refuses a larger request with `einval`. A device process serves
 its requests one after another in the order they arrive, holding a
 bounded backlog while the controller is busy.
+
+**Every request is answered within 28 s of its acceptance**, so a
+device process never writes for a caller that has given up. The device
+process stamps each request with the time it accepted it. It issues a
+request only within 10 s of that stamp, the wait limit, and answers one
+still in the backlog after it `{error, {device, deadline}}` without
+touching the controller; the controller and the medium are as the last
+request left them, so this is no failure of the device process. An
+issued request that is not complete 18 s after it was issued, the
+in-flight bound, is a failure: the device process ends
+([Failure](#the-sd-host-controller)) and issues nothing more, and the
+request's sectors are unknown, as for any failed write. The callers' deadlines sit above that sum, each
+longer than the one below it, so each layer answers before its caller
+gives up: `erx_blk:call/1` waits 30 s (`erx_blk.erl:40`), a window
+35 s (`erx_blk_window.erl:32`) and littlefs's port 60 s
+(`erx_lfs.erl:68`). The SD controller's in-flight bound covers its
+largest request at the specification's own limits: 64 blocks written at
+250 ms of busy each, the last up to 500 ms (Physical Layer 4.6.2.2,
+p.95), is 16.25 s, and a read of 64 blocks at 100 ms each (4.6.2.1,
+p.95) 6.4 s.
 
 **Choosing the transport.** `erx_blk:start_link/0` reads the domain's
 device records (`erx_device_record`) and starts the device process of
@@ -256,10 +277,15 @@ request with `erx_device:post/4`, whose header's type says whether the
 device reads or writes; on an SD host controller, writing the command
 register, `cmdtm`, the transfer-mode and command halves of the
 controller's word at offset `0x0C`, written as one 32-bit word, which
-issues one command to the card. The NIF posts reads and writes alike,
-and the command register issues reads and writes alike, so the write
-path holds by construction: one module, `erx_blk_write`, performs both
-acts. It builds every virtio header and every SD command word itself,
+issues one command to the card. The device NIF owns both acts: it alone
+writes a virtio queue's doorbell, in `erx_device:post/4`, and it alone
+writes the SD command register, in `erx_device:command/2`, since the
+SVD source marks the register `ownedByNif` and `erx_device:write/3`
+refuses it ([design-runtime.md](design-runtime.md#the-device-nif)).
+The NIF posts reads and writes alike, and the command register issues
+reads and writes alike, so the write path holds by construction: one
+module, `erx_blk_write`, performs both acts. It builds every virtio
+header and every SD command word itself,
 from CMD0 at a card's initialisation to CMD13 at a flush, from a table
 of its own; a device process names what it wants (`{read, Sector,
 Count}`, `flush`, or a card-initialisation step such as `send_csd`),
@@ -267,15 +293,40 @@ never a request type or a command index. Only its write functions, one
 per transport, build a type or a command that writes the medium (virtio's
 `OUT`; SD's CMD24 and CMD25), and each calls the one trial check first.
 The transfer-mode half of every command word it builds leaves DMA off,
-so the act that starts a transfer is also the only place that could
-turn DMA on; DMA's design is pending. A build check over the storage
-domain's BEAM files fails on any module other than `erx_blk_write` that
-imports `erx_device:post/4` or holds the atom `cmdtm` in its atom table,
-with a seeded violation of each that it catches. The atom table holds
-every literal use of the register's name, however a call spells its
-module or passes the name on; only a name built at run time from a
-string escapes it, which no driver module does and their review checks,
-as it checks any module that holds `erx_device`'s name in a variable.
+and `erx_device:command/2` refuses a word that turns it on, so no
+command starts a DMA transfer; DMA's design is pending.
+
+Since the NIF refuses the register to `write/3`, a module that holds
+the register's name, in a map, a table or a message, still cannot issue
+a command; what remains is to keep the two issuing calls in
+`erx_blk_write`. The build check over the driver applications' Erlang
+sources that holds `erx_device:post/4` there
+(`tools/lib/erx/device_posters.rb`) holds `erx_device:command/2` the
+same way, and makes the only way to reach either a call it can see:
+outside comments and strings, in every driver module but the issuing
+sites, it fails on
+
+* `erx_device:post` or `erx_device:command`, as a call, a fun or an
+  import;
+* `erx_device` anywhere but as the module of a remote call whose
+  function is a literal name, `erx_device:read(...)`, so the name is
+  never a value: not an argument of `apply/3`, `erlang:apply/3`,
+  `spawn/3` or any other function that calls a module it is handed, not
+  in a variable, a macro, a fun, a map or a record, and a call whose
+  function is a variable, `erx_device:F(...)`, fails too; and
+* `list_to_atom/1`, `list_to_existing_atom/1`, `binary_to_atom/1,2`,
+  `binary_to_existing_atom/1,2` and `binary_to_term/1,2`, the functions
+  that make an atom from data, which a driver module has no use for.
+
+With the module's name never a value and never made from data, a
+driver module reaches `erx_device` only by literal calls, and the first
+rule sees every one that issues. Outside the driver applications no
+module names `erx_device` at all (`tools/lib/erx/device_callers.rb`).
+Like the source checks it extends, this one catches a slip between
+trusted modules, not a module that builds the name from pieces outside
+the driver applications and hands it in; what keeps a device from
+other domains is that its capability is installed only in its driver's
+domain.
 
 **The block service.** The window processes are the driver's face to
 every client, and together they are the block service: one window per
@@ -536,17 +587,22 @@ below it.
 ### The SD host controller
 
 `erx_blk_sd` drives one SD memory card through a controller with the
-register set of the SD Host Controller Simplified Specification, version
-3.00, on the card protocol of the Physical Layer Simplified
-Specification. Its first mode moves data by programmed I/O through the
-controller's data port; DMA's design is pending, and nothing below turns
-DMA on. Citations of the form `file:line` are to the sources pinned under
-[References](#references): FreeBSD's SD stack, the board's device tree
-and QEMU's model. Facts about the BCM2711's integration that those do not
-give come from the clean-room facts record,
+register set of the SD Host Controller Specification's version 3.00, on
+the card protocol of the Physical Layer Specification. Its first mode
+moves data by programmed I/O through the controller's data port at
+default speed; DMA's design is pending, and nothing below turns DMA on.
+The specifications are cited by version, section and printed page:
+"Physical Layer" is the Physical Layer Simplified Specification,
+version 9.10, and "Host Controller" the SD Host Controller Simplified
+Specification, version 4.20, whose version 3.00 register set this
+driver uses. Citations of the form `file:line` are to the sources
+pinned under [References](#references): FreeBSD's SD stack, the board's
+device tree and QEMU's model. Facts about the BCM2711's integration
+that those do not give come from the clean-room facts record,
 [research-sdhci-bcm2711.md](research-sdhci-bcm2711.md), cited by its
-section. What neither settles is marked *to be settled by the board
-probe*, and [the board probe](#the-board-probe) below lists those items.
+section. What none of them settles is marked *to be settled by the
+board probe*, and [the board probe](#the-board-probe) below lists those
+items.
 
 **What it drives.**
 
@@ -557,19 +613,29 @@ probe*, and [the board probe](#the-board-probe) below lists those items.
   board"), and no domain reaches the firmware
   ([design-platforms.md](design-platforms.md#invariants), PL2), so the
   driver can neither power-cycle the card nor move its signalling. A card
-  that an earlier stage left at 1.8 V would need both (facts record,
-  "Power and signalling voltage"). The start sequence therefore reads
-  host control 2 before it resets the controller and refuses, with one
-  line, a controller whose 1.8 V signalling enable is set; whether the
-  firmware ever leaves it so is *to be settled by the board probe*.
-* A 4-bit bus at default speed, at most 25 MHz, or high speed, at most
-  50 MHz (`SD_SDR12_MAX`, `SD_HS_MAX`, `mmcreg.h:529-531`). A card whose
-  SCR does not offer the 4-bit bus is refused, so every path the driver
-  runs is one its suites run.
+  switched to 1.8 V stays there across CMD0, and only a power cycle
+  returns it to 3.3 V (Physical Layer Figure 3-16, p.22). The
+  controller's 1.8 V signalling enable in host control 2 is the only
+  trace of such a switch the driver can read, and a reset for all clears
+  it (Host Controller p.53), so the start sequence reads it
+  before its reset and refuses, with one line saying the card needs a
+  power cycle, a controller whose enable is set. A card left at 1.8 V
+  behind a clear enable fails identification or its transfers with
+  timeouts or CRC errors, and the refusal's line says the same. Whether
+  the firmware ever leaves either is *to be settled by the board
+  probe*.
+* A 4-bit bus at default speed, at most 25 MHz (`SD_SDR12_MAX`,
+  `mmcreg.h:531`). A card whose SCR does not offer the 4-bit bus is
+  refused, so every path the driver runs is one its suites run. High
+  speed is not offered; when it is, it needs both the host's capability,
+  the capabilities register's high-speed bit (`SDHCI_CAN_DO_HISPD`,
+  `sdhci.h:284`), as FreeBSD derives it (`sdhci.c:974-975`;
+  `mmc.c:1536-1537`), and the card's, its SCR's version, command class
+  10 and the switch function's answer.
 * Cards whose CSD is structure 0, standard capacity, addressed in bytes,
   and structure 1, high and extended capacity, addressed in 512-byte
-  blocks (`mmc_decode_csd_sd`, `mmc.c:1187-1243`; the address shift,
-  `mmcsd.c:1203-1204`). Any other structure, SDUC's included, is refused.
+  blocks, admitted only as *Admitting a card* below
+  allows. Any other structure, SDUC's included, is refused.
 * One card, the boot medium, present for the machine's life. The tree
   marks the slot's card detect broken (`broken-cd`,
   `bcm2711-rpi-4-b.dts:194`), so the driver never reads the controller's
@@ -597,9 +663,14 @@ reading its word, replacing its part and writing the word back (facts
 record, "Register access: width and spacing", point 1;
 `bcm2835_sdhci.c:431-563`). Writing the word at `0x0C` issues the
 command, so the transfer mode is only ever written with its command, and
-`blksizecnt` is written just before it (point 2 and 3). The device NIF
-owns `dma_address` and `adma_address`, which a programmed-I/O driver
-never writes.
+`blksizecnt` is written just before it (points 2 and 3). The device NIF
+owns `dma_address`, `adma_address` and `cmdtm`: a programmed-I/O driver
+never writes the first two, and the third only through
+`erx_device:command/2` ([The write path](#data-model)). The driver keeps
+the version 3.00 register set on a later controller: host version 4
+enable and preset value enable stay clear, as the reset for all leaves
+them (Host Controller p.96-100), so `0x00` stays the SDMA
+address and `0x06` the 16-bit block count.
 
 Two register writes that reach this controller family within two card
 clock periods of each other can lose the first; the data port is exempt
@@ -607,34 +678,38 @@ clock periods of each other can lose the first; the data port is exempt
 facts record use, U-Boot's: at least 6 us between any two writes other
 than to `data`, at every clock, which is two periods of the 400 kHz
 identification clock and a microsecond. One function,
-`erx_blk_sd_regs:write/3`, makes every such write: it waits, spinning on
-Erlang's monotonic clock, until 6 us have passed since the last write it
-made, and returns the time of this one in the register handle that the
-device process and `erx_blk_write` pass along. Since it takes the
-register's name as an argument, the atom `cmdtm` still appears in
-`erx_blk_write` alone (U4). Whether the spacing is needed above 400 kHz,
-where a shorter rule would save a few microseconds a block, is *to be
-settled by the board probe* and measured by `tools/erx bench blk`.
+`erx_blk_sd_regs:spaced/2`, makes every such write: it waits, spinning
+on Erlang's monotonic clock, until 6 us have passed since the last write
+it made, makes the one write the fun it is given makes, and returns the
+time of this one in the register handle that the device process and
+`erx_blk_write` pass along. `erx_blk_sd_regs:write/3` is `spaced/2`
+around `erx_device:write/3`, and `erx_blk_write` passes it a fun around
+`erx_device:command/2`, so the command is spaced like every other write
+and named in `erx_blk_write` alone (U4). Whether the spacing is needed
+above 400 kHz, where a shorter rule would save a few microseconds a
+block, is *to be settled by the board probe* and measured by
+`tools/erx bench blk`.
 
 **The functional core.** Three pure parts, built and tested on the host:
 
 * `erx_blk_sd_card`, the card: its identification as a state machine,
-  `step(State, Event) -> {Action, State}`, whose events are a response,
+  `step(State, Event) -> {Actions, State}`, whose events are a response,
   a command timeout or an error and whose actions are the next step to
-  issue, a wait, a clock or bus change, the identified card or a
-  refusal; and the parsers of what the card sends: R1 (card status), R2
-  (CID and CSD, 136 bits), R3 (OCR), R6 (relative card address), R7
-  (interface condition), CSD structures 0 and 1, the SCR, and the 64-byte
-  status of the switch function. The controller stores a 136-bit response
-  without its CRC, so its four response words hold the response's bits
-  127 to 8 in their bits 119 to 0, and the R2 parser shifts them one byte
-  before reading any field, as FreeBSD does (`sdhci.c:1899-1912`; facts
-  record, "Issuing a command", step 8).
+  issue, a line reset, a wait, a clock or bus change, the identified card
+  or a refusal; and the parsers of what the card sends: R1 (card
+  status), R2 (CID and CSD, 136 bits), R3 (OCR), R6 (relative card
+  address), R7 (interface condition), CSD structures 0 and 1, the SCR,
+  the 64-byte SD status, and the extension registers' General
+  Information and Performance Enhancement register set. The controller
+  stores a 136-bit response without its CRC, so its four response words
+  hold the response's bits 127 to 8 in their bits 119 to 0, and the R2
+  parser shifts them one byte before reading any field, as FreeBSD does
+  (`sdhci.c:1899-1912`; facts record, "Issuing a command", step 8).
 * `erx_blk_sd_host`, the controller: the decode of the `interrupt` word
   into a closed set of events (command complete, buffer read ready,
   buffer write ready, transfer complete, and each error bit), the
   divider, and one request's transfer as a state machine over those
-  events and the step's deadline.
+  events.
 * `erx_blk_write`'s SD table, `sd_command(Step, Card) -> {Argument,
   Word}`, which builds the argument and the `cmdtm` word of every step
   the device process names; its write function alone adds CMD24 and
@@ -648,20 +723,26 @@ the interrupt messages and the deadlines' timers.
 `{device, inhibit}` while command inhibit is set, or data inhibit for a
 command that uses the data lines or answers with busy (`SDHCI_CMD_INHIBIT`,
 `SDHCI_DAT_INHIBIT`, `sdhci.h:148-149`); for a data command it writes
-`blksizecnt`; it writes `arg`; and it writes `cmdtm`, the transfer mode
-(block count enabled, multiple blocks and Auto CMD12 for more than one
-block, the direction, DMA off) and the command (index, response type,
-CRC and index checks as the type requires, data present), which issues
-it. The device process then waits for command complete or an error bit,
-reads the response, and for a command that answers with busy, such as
-CMD7, waits for transfer complete as well.
+`blksizecnt`; it writes `arg`; and it issues the `cmdtm` word with
+`erx_device:command/2`: the transfer mode (block count enabled, multiple
+blocks and Auto CMD12 for more than one block, the direction, DMA off)
+and the command (index, response type, CRC and index checks as the type
+requires, data present). The device process then waits for command
+complete or an error bit, reads the response, and for a command that
+answers with busy, such as CMD7, waits for transfer complete as well.
 
 **The start sequence.** Every start and every restart runs it whole:
 
 1. The device record, `erx_device:open/1` and `erx_irq_line:attach/2`
    on the record's line, which on the Pi 4 is shared and so joins the
    line's owner ([below](#the-sd-host-controller)); `control2` read and
-   a set 1.8 V signalling enable refused.
+   a set 1.8 V signalling enable refused. Then `present` is polled, for
+   at most 1 s, until DAT0 reads high (`present` bit 20, Host Controller
+   p.53-57): a card still programming holds DAT0 low (Physical Layer
+   p.51), and the CMD0 below ends its programming and may destroy
+   the data. A DAT0 still low after 1 s is past every bound the
+   specification gives a card's busy; the start goes on and its line
+   says so.
 2. The controller's reset for all (`SDHCI_RESET_ALL`, `sdhci.h:200-201`),
    polled until the bit clears, for at most 100 ms (facts record,
    "Reset"). The reset also turns the controller's bus power and card
@@ -675,49 +756,135 @@ CMD7, waits for transfer complete as well.
    400 kHz, never below the SoC's 200 kHz floor (facts record, "Quirks of
    the BCM2711 integration"), set as the controller's clock below
    describes, then a wait of 2 ms before the first command; the data
-   timeout counter at its largest value; and one mask of every normal and
-   error status written to both `irpt_mask` and `irpt_en` (facts record,
-   "Interrupts").
+   timeout counter at `0xE`, its largest valid value, 2^27 periods of
+   the timeout clock, since `0xF` is reserved (Host Controller
+   p.73); and one mask of every normal and error status written to both
+   `irpt_mask` and `irpt_en` (facts record, "Interrupts").
 4. The card's identification, in FreeBSD's order (`mmc.c:2052-2108`):
    CMD0, then a wait of 1 ms (`mmc.c:563-585`); CMD8 with `0x1AA`, supply
-   2.7 to 3.6 V and check pattern `0xAA` (`mmc.c:642-656`), where an R7
-   that echoes the argument marks a card that may be high capacity, a
-   command timeout a card that is standard capacity, and any other answer
-   a refusal; ACMD41, as CMD55 with argument 0 then ACMD41, with argument
-   0, which asks the card's voltage window without starting its
-   initialisation, and a window without 3.2 to 3.4 V (`MMC_OCR_320_330`,
-   `MMC_OCR_330_340`, `mmcreg.h:638-639`) refused; CMD0 and CMD8 again;
-   then ACMD41 offering 3.2 to 3.4 V and, after an echoed CMD8, high
-   capacity (`MMC_OCR_CCS`, `mmcreg.h:649`), repeated every 10 ms until
-   the answer's busy bit says ready (`MMC_OCR_CARD_BUSY`,
-   `mmcreg.h:650`), for at most FreeBSD's 1000 tries
-   (`mmc.c:598-607`), the answer's capacity bit choosing block addressing.
-   Then CMD2, whose CID goes only to `info/0`'s detail; CMD3, whose R6
-   gives the card's address; CMD9, whose CSD gives the capacity and the
-   command classes; CMD7, selecting the card; CMD16 with 512 on a
-   standard-capacity card (`mmc.c:1918`); ACMD51, the 8-byte SCR, read
-   through the data port; and ACMD6 with argument 2, the 4-bit bus, then
-   the 4-bit bit in `control0` (facts record, "Card initialisation",
-   steps 14 and 17).
-5. High speed, when the SCR's specification version is 1 or more and the
-   CSD's command classes include class 10 (`mmc.c:1705-1706`): CMD6 in
-   check mode for function 1 of group 1, whose 64-byte status offers high
-   speed in byte 13 (`mmc.c:1711`), then CMD6 in set mode, whose status
-   names function 1 in the low half of byte 16 (`mmc.c:922-926`); then
-   the high-speed bit in `control0` and a card clock of at most 50 MHz.
-   FreeBSD sets the high-speed bit on EMMC2, whose configuration lacks
-   the quirk that withholds it from the BCM2835's controller
-   (`bcm2835_sdhci.c:119-135`). Otherwise default speed, at most 25 MHz.
-6. One line in the log: the card's type, capacity, bus width and clock.
+   2.7 to 3.6 V and check pattern `0xAA` (`mmc.c:642-656`; Physical
+   Layer 4.3.13, p.90), where an R7 that echoes the argument marks a
+   card that may be high capacity, a command timeout a card that is
+   standard capacity (*The expected timeout* below),
+   and any other answer a refusal; ACMD41, as CMD55 with argument 0 then
+   ACMD41, with argument 0, which asks the card's voltage window without
+   starting its initialisation (Physical Layer 4.2.3.1, p.45), and a
+   window without 3.2 to 3.4 V (`MMC_OCR_320_330`, `MMC_OCR_330_340`,
+   `mmcreg.h:638-639`) refused; CMD0 and CMD8 again; then ACMD41
+   offering 3.2 to 3.4 V and, after an echoed CMD8, high capacity
+   (`MMC_OCR_CCS`, `mmcreg.h:649`), repeated every 10 ms until the
+   answer's busy bit says ready (`MMC_OCR_CARD_BUSY`, `mmcreg.h:650`),
+   for at most FreeBSD's 1000 tries (`mmc.c:598-607`), above the
+   specification's 1 s for a card's initialisation (Physical Layer
+   4.2.3, p.43). The answer's capacity bit, valid once the busy bit is
+   set (p.45), chooses the addressing. ACMD41's argument leaves XPC
+   clear, so an extended-capacity card limits itself to 0.36 W and may
+   report speed class 0 (p.45); the driver asks no more of it.
+5. CMD2, whose CID goes only to `info/0`'s detail; CMD3, whose R6 gives
+   the card's address; CMD9, whose CSD the card's admission below reads
+   with the OCR; CMD7, selecting the card, whose R1 must not say the card
+   is locked (bit 25, Physical Layer Table 4-42, p.120-122), since the
+   driver offers no CMD42 to unlock it; CMD16 with 512 on a
+   standard-capacity card (`mmc.c:1918`; Physical Layer 4.3.2, p.52);
+   ACMD51, the 8-byte SCR, read through the data port; and ACMD6 with
+   argument 2, the 4-bit bus, then the 4-bit bit in `control0` (facts
+   record, "Card initialisation", steps 14 and 17), and the card clock at
+   default speed, at most 25 MHz.
+6. The card's cache turned off, as *The card's cache* below
+   describes.
+7. One line in the log: the card's type, capacity, bus width and clock.
 
 The sequence begins with CMD0 whatever an earlier stage left, as
 FreeBSD's discovery does (`mmc.c:2052`), so it is the same whether the
-firmware, an earlier device process or nothing touched the card. That
-CMD0 brings back a card left selected or in the middle of a transfer is
-what the recovery test on the model checks, and on the board's card is
-*to be settled by the board probe*. A refusal at any step ends the start with one
-line and no device process: `init/1` returns `ignore`, so the boot goes
-on, as with a virtio device that fails its start.
+firmware, an earlier device process or nothing touched the card. CMD0
+returns a card to the idle state from every state but the inactive one
+(Physical Layer p.41; Figure 4-1, p.42), a card left selected or
+in the middle of a transfer included, which the recovery test on the
+model checks. A card in the inactive state, where a supply outside its
+range puts it, ignores CMD0 until it is power-cycled, which the driver
+cannot do, so it fails identification and stays refused. A refusal at
+any step ends the start with one line and no device process: `init/1`
+returns `ignore`, so the boot goes on, as with a virtio device that
+fails its start.
+
+**The expected timeout.** A card of the Physical Layer's version 1.x
+does not know CMD8 and does not answer it, and neither does a card that
+does not take the offered supply (Physical Layer 4.3.13, p.90), so a
+command timeout on CMD8 is the one timeout in the protocol that is an
+answer, not a failure. It is a transition of `erx_blk_sd_card` like any
+other: in the state that issued CMD8, the event `timeout` returns the
+actions `{reset, cmd}`, `{reset, dat}` and the next step, CMD55 of the
+inquiry ACMD41. The controller needs the resets: a command timeout is
+a response error (Host Controller p.30), and from version 4.10
+the controller holds command inhibit set after one until its software
+reset for the command line (p.28), so the next command could not issue.
+The device process performs each reset as it performs the reset for
+all, the bit set in `control1` and polled until it clears for at most
+100 ms (`SDHCI_RESET_CMD`, `SDHCI_RESET_DATA`, `sdhci.h:202-203`;
+`sdhci.c:1294-1306`), command line first, then data line, as FreeBSD
+resets both after every command error (`sdhci.c:1892-1893`) and the
+specification's recovery orders them (Host Controller 3.10.1,
+p.184-186). A card that did not know CMD8 reports it as an illegal
+command in the next R1, CMD55's, since that bit belongs to the previous
+command (Physical Layer 4.6.1, p.95; Table 4-42's clear condition B,
+p.120), so that one R1's illegal-command bit is not an error. Every
+other timeout, CMD8's in any other state and every timeout outside
+identification, is an error that fails the start or the request as
+[Failure](#the-sd-host-controller) below describes; a reset that does
+not clear within its bound fails the start.
+
+**Admitting a card.** The OCR's capacity bit chooses the addressing and
+the CSD gives the capacity, so the card's admission, a pure function of
+the two, requires that they agree and that the capacity it reports is
+one the addressing reaches:
+
+* structure 0 with the capacity bit clear, standard capacity addressed in
+  bytes, and structure 1 with it set, addressed in 512-byte blocks;
+  either other pairing is refused;
+* on structure 0, `READ_BL_LEN` of 9, 10 or 11, the only block lengths
+  the specification defines (Physical Layer Table 5-8, p.228), and the
+  capacity `(C_SIZE + 1) * 2^(C_SIZE_MULT + 2) * 2^READ_BL_LEN` bytes
+  (p.229);
+* on structure 1, `READ_BL_LEN` of 9, which the structure fixes, and the
+  capacity `(C_SIZE + 1) * 512 KiB` from the 22-bit `C_SIZE` of bits 69
+  to 48 (Physical Layer 5.3.3, p.233-235).
+
+These bounds are what make every address the driver sends fit the
+command's 32-bit argument, so no other check is needed: structure 0's
+largest coded capacity is 4096 * 512 * 2048 bytes, 4 GiB, so its last
+sector's byte address is below 2^32, and structure 1's is 2^22 * 1024
+sectors, 2^32, so its last sector's number is below 2^32. Every capacity
+the rule admits is a whole number of 512-byte sectors, since each block
+length is a multiple of 512. `info/0` reports the capacity in sectors,
+`(capacity in bytes) / 512`.
+
+**The card's cache.** A card may keep written data in a volatile cache,
+which is off until a host turns it on (Physical Layer 3.12, p.30;
+4.17, p.179), and the specification does not say whether CMD0 or a
+power cycle turns it off. The start therefore establishes it itself, on
+every start: after the 4-bit bus, ACMD13 reads the 64-byte SD status,
+whose bit 330 says the card supports a cache (Physical Layer 4.10.2.14,
+Table 4.10.2-2, p.133), and the SCR's bit 34 says whether it takes CMD48
+and CMD49, the reads and writes of its extension registers (Table 5-23,
+p.245). A card with neither has no cache the driver can reach, and the
+start goes on. A card with the cache bit set must take CMD48 and CMD49,
+and a card without them is refused. On a card with both, CMD48 reads the
+General Information at function 0, page 0 (Physical Layer 5.7.3,
+p.256-257; the command, 5.7.2.1, p.247), whose list of extensions,
+parsed within the length its header gives and at most 1024 bytes, names
+the Performance Enhancement function by its standard function code
+`0002h` (Table 5-27, p.261) and its register set's address. CMD48 then
+reads that register set, whose byte 260 holds Cache Enable in bit 0
+(Table 5-30, p.268-269). With the bit set, the start writes Flush Cache,
+byte 261 bit 0, with CMD49 (5.7.2.2, p.249), waits for DAT0 to rise,
+reads byte 261 with CMD48 until the card clears the bit, for at most the
+1 s the specification gives a flush (4.17, p.179), writes Cache Enable
+0 with CMD49, and reads byte 260 back: a card whose cache still reads
+enabled is refused. A General Information that names no Performance
+Enhancement function, or that does not parse, is refused on a card whose
+cache bit is set. So every card the driver writes to has its cache off,
+whatever an earlier system did, and a write the card has finished
+programming is on the medium.
 
 **The controller's clock.** The tree gives EMMC2 the SoC clock manager's
 EMMC2 clock, `<&clocks BCM2711_CLOCK_EMMC2>`, with no frequency
@@ -731,22 +898,27 @@ core reads under `SDHCI_QUIRK_MISSING_CAPS`, which EMMC2's configuration
 does not set (`bcm2835_sdhci.c:129-135, 312-318`; `sdhci.c:886-916`).
 The device process takes FreeBSD's one source, bits 15 to 8 of
 `capabilities` in MHz (`SDHCI_CLOCK_V3_BASE_MASK`, `sdhci.h:278`), read
-at every start, and refuses a field of zero rather than guess, where
-FreeBSD falls back to a default (`sdhci.c:922-927`). Whether the field is
-right is *to be settled by the board probe*: the probe reads a fixed
-number of blocks at the 400 kHz identification clock on a 1-bit bus,
-where the time on the bus dominates, times them with the generic timer,
-and compares the time with the one the field predicts. If they disagree,
-the SD unit's entry in the platform record carries a `clock`, as the
-UART entries do, and the device process takes it in place of the field.
-The divider is SDHCI 3.00's 10-bit divided clock: the base clock itself
-when the target is at least the base, otherwise the smallest even
-divisor up to 2046 whose quotient is at most the target, written as half
-the divisor, its low 8 bits in bits 15 to 8 of the clock control and its
-high 2 bits in bits 7 and 6 (`sdhci.c:463-484`; `sdhci.h:186-190`). A
-clock change stops the card clock, writes the divider, enables the
-internal clock, polls it stable for at most 10 ms, as FreeBSD does, and
-starts the card clock (facts record, "Clocks"; `sdhci.c:487-497`).
+at every start. A field of zero means the platform supplies the rate by
+another means (Host Controller p.110), and the device process
+then takes the `clock` of the SD unit's entry in the platform record,
+as the UART entries carry one, and refuses the controller if the entry
+has none, rather than guess as FreeBSD does (`sdhci.c:922-927`). Whether
+the field is right is *to be settled by the board probe*: the probe
+reads a fixed number of blocks at the 400 kHz identification clock on a
+1-bit bus, where the time on the bus dominates, times them with the
+generic timer, and compares the time with the one the field predicts. If
+they disagree, the entry carries a `clock`, which the device process
+then takes in place of the field. The divider is SDHCI 3.00's 10-bit
+divided clock: the base clock itself when the target is at least the
+base, otherwise the smallest even divisor up to 2046 whose quotient is
+at most the target, written as half the divisor, its low 8 bits in bits
+15 to 8 of the clock control and its high 2 bits in bits 7 and 6
+(`sdhci.c:463-484`; `sdhci.h:186-190`; Host Controller p.68-69).
+A clock change stops the card clock, writes the divider, enables the
+internal clock, polls it stable for at most the 150 ms the
+specification gives the loop (Host Controller 3.2.1, p.153-154; 3.2.3,
+p.155), and starts the card clock (facts record, "Clocks";
+`sdhci.c:487-497`).
 
 **Reads and writes.** The device process runs one request at a time. A
 read is CMD17 for one sector and CMD18 for more; a write is CMD24 or
@@ -754,32 +926,39 @@ CMD25; the argument is the sector, times 512 on a standard-capacity card,
 and Auto CMD12 ends a transfer of more than one block, as FreeBSD builds
 the transfer mode (`sdhci.c:1730-1743`) on a controller whose
 configuration has none of the quirks that turn Auto CMD12 off
-(`bcm2835_sdhci.c:129-135`). At command complete the device process
-checks the R1 status; at each buffer-ready event it moves one block, 128
-words with the first byte in the low byte of the first word, through
+(`bcm2835_sdhci.c:129-135`). The R1 errors are the bits the
+specification types as errors: 31 to 26, 24 to 19, 16, 15 and 3
+(Physical Layer Table 4-42, p.120-122). At command complete the device
+process checks the R1; at each buffer-ready event it moves one block,
+128 words with the first byte in the low byte of the first word, through
 `data` (facts record, "PIO data transfer"); at transfer complete the data
-phase is done. FreeBSD finishes a data command and a command with busy
-alike at that event (`sdhci.c:1932, 2243, 2326-2331`), so a write's
-transfer complete follows the card's release of busy. A write then
-issues CMD13 and answers `ok` only if the status has no error bit
-(`R1_STATUS`, `mmcreg.h:149`) and the card is in the transfer state and
-ready for data (`mmcreg.h:145, 155`), so an error the card reports after
-programming fails that write and not the next request; FreeBSD answers
-at transfer complete (`mmcsd.c:1162-1233`). A flush is the same CMD13
-alone, since every write before it has already waited for it.
+phase is done, and on a transfer of more than one block the device
+process checks the R1 of Auto CMD12, which the controller leaves in
+`resp3` (Host Controller p.48). A read by CMD18 that ends at the
+card's last sector may report out of range there, which the host is to
+ignore (Physical Layer 4.3.3, p.52), so that bit alone, on that read
+alone, is not an error. FreeBSD finishes a data command and a command
+with busy alike at transfer complete (`sdhci.c:1932, 2243, 2326-2331`),
+so a write's transfer complete follows the card's release of busy, the
+end of its programming (Physical Layer p.51; Host Controller
+p.57, p.79). A write then issues CMD13, which the controller takes
+while the data lines are busy (Host Controller p.58), and answers `ok`
+only if its R1 has no error bit and the card is in the transfer state
+and ready for data (`mmcreg.h:145, 155`; Physical Layer p.54),
+so an error the card reports after programming fails that write and not
+the next request; FreeBSD answers at transfer complete
+(`mmcsd.c:1162-1233`). A flush is the same CMD13 alone: every write
+before it has already waited for its programming, and the start turned
+the card's cache off (*The card's cache* above), so a programmed write
+is durable. FreeBSD turns a cache on only on eMMC cards, never on SD
+(`mmcsd.c:304-318, 1510-1531`), and the driver turns none on.
 
-The driver turns no card cache on, and FreeBSD turns one on and flushes
-it only on eMMC cards, never on SD (`mmcsd.c:304-318, 1510-1531`).
-Whether an SD card can keep a cache that another system turned on,
-across CMD0, is a question of the Physical Layer specification that
-neither FreeBSD's files nor the facts record answers; the power-cut
-checklist of
-[plan.md](plan.md#1b-i-the-raspberry-pi-4-on-the-stopgap) tests the flush
-on the board either way.
-
-Every step has a deadline the device process keeps with a timer: 10 s,
-Linux's default bound on a command that never completes (facts record,
-"Error recovery"), for each command and for each block of data. An
+**Deadlines and interrupts.** A request keeps the transport contract's
+wait limit and in-flight bound ([Data model](#data-model)) with one
+timer. Each command of the start sequence and its data has a deadline
+of 1 s, above the 100 ms the specification gives a read and the 250 ms
+it gives a card's busy (Physical Layer 4.6.2.1, 4.6.2.2, p.95); the
+cache flush its 1 s (4.17, p.179); and ACMD41's loop its count. An
 interrupt is handled as on virtio: the device process reads `interrupt`
 once; a word of zero or of all ones is not this controller's (facts
 record, "Interrupts"), and it answers the line as done with nothing
@@ -803,47 +982,53 @@ process, `rest_for_one`, from `erx_irq_line:owners/1` over the records.
 A delivery is a hint to look: a round the legacy controller raised finds
 EMMC2's `interrupt` empty, and the device process answers it done.
 
-**Failure.** Any error bit in `interrupt`, an error bit in an R1, an
-inhibit that does not clear, a card not ready after a write, a missed
-deadline or a response that disagrees answers the request in flight
+**Failure.** Outside the expected timeout above, any error bit in
+`interrupt`, an error bit in an R1, an inhibit that does not clear, a
+card not ready after a write, a missed in-flight bound or step deadline
+or a response that disagrees answers the request in flight
 `{error, {device, Detail}}`, and every request in the backlog the same;
 the device process ends with one line naming the step and the bits.
 `erx_blk_sup` restarts nothing, so its end ends the storage domain, and
 the domain service restarts the domain within its row's intensity
 ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)),
-whose new device process runs the start sequence: its reset for all and
-CMD0 bring controller and card back from whatever state the error left,
-and littlefs mounts `/data` afresh. FreeBSD and Linux reset the controller's command and data lines in
-place after an error (`sdhci.c:1892-1893, 2052-2053`; facts record,
-"Error recovery"); the driver does not, because the start sequence
-covers every state those resets cover and more, so there is one recovery
-path and no recovery state. Its cost is the storage domain's restart
-and a card identification, at worst the ACMD41 bound, after an error a
-healthy card makes rarely. A write
-that fails leaves its sectors unknown, as an unacknowledged write does
-for the file system above.
+whose new device process runs the start sequence: it waits for a card
+still programming, its reset for all brings the controller back from
+whatever state the error left, its CMD0 returns the card to idle, and
+littlefs mounts `/data` afresh. FreeBSD and Linux reset the
+controller's command and data lines in place after an operational error
+(`sdhci.c:1892-1893, 2052-2053`; facts record, "Error recovery"); the
+driver does not, because the start sequence covers every state those
+resets cover and more, so there is one recovery path for errors and no
+recovery state. Its cost is the storage domain's restart and a card
+identification, at worst the ACMD41 bound, after an error a healthy
+card makes rarely. A write that fails leaves its sectors unknown, as an
+unacknowledged write does for the file system above.
 
 #### The board probe
 
-Before the board pass counts, the probe reads and
-records, with no command sent to the card, the items the facts record
-leaves to the board ("What only the board can settle"): the host
-controller version and both capabilities words (base clock, timeout
-clock, voltages, high speed, SDMA, ADMA2, 64-bit, UHS); the state the
-firmware leaves in power control, clock control, host control 1 and 2
-and present state, the 1.8 V signalling enable above all; and whether
-present state's card-inserted bits follow the card. It then runs the
-start sequence on the card as the firmware left it, and again after a
-restart in the middle of a read; times the
-slow read that settles the base clock; runs the card at high speed with
-the 6 us spacing and once without it above 400 kHz, verifying every
-block read against what was written; and records whether anything else
-answers inside EMMC2's 4 KiB page. The SoC's core clock, the firmware's
-expander calls and the `dma-ranges` the firmware passes are recorded for
-DMA's design and for a driver that would power-cycle the card, which this
-one never does. The probe's results go into the board pass's research
-record, and a result that contradicts this section is a change to it
-before the board pass counts.
+Before the board pass counts, the probe reads and records, with no
+command sent to the card, the items the facts record leaves to the board
+("What only the board can settle"): the host controller version and both
+capabilities words (base clock, timeout clock, voltages, high speed,
+SDMA, ADMA2, 64-bit, UHS); the state the firmware leaves in power
+control, clock control, host control 1 and 2 and present state, the
+1.8 V signalling enable and DAT0's level above all; and whether present
+state's card-inserted bits follow the card. It then reads the card's
+Performance Enhancement register set as the firmware left it and again
+after a CMD0, recording whether Cache Enable is set in either; issues
+CMD8 offering a supply the card does not take (Physical Layer 4.3.13,
+p.90), so that it times out, and records command inhibit before and
+after the software reset for the command line; runs the start sequence
+on the card as the firmware left it, and again after a restart in the
+middle of a write; times the slow read that settles the base clock; and
+runs the card at 25 MHz with the 6 us spacing and once without it,
+verifying every block read against what was written; and records whether
+anything else answers inside EMMC2's 4 KiB page. The SoC's core clock,
+the firmware's expander calls and the `dma-ranges` the firmware passes
+are recorded for DMA's design and for a driver that would power-cycle
+the card, which this one never does. The probe's results go into the
+board pass's research record, and a result that contradicts this
+section is a change to it before the board pass counts.
 
 ### Reading EROFS images
 
@@ -1370,7 +1555,7 @@ reported as a durable checkpoint.
   call. Beneath it is the device NIF, `erx_device`
   ([design-runtime.md](design-runtime.md#the-device-nif)), which only the
   driver's modules call, and of whose calls only `erx_blk_write` posts or
-  writes the SD command register (U4).
+  issues an SD command, with `erx_device:command/2` (U4).
 * **The storage services and the FAT server** implement 9P2000.L's
   operations through `erx_fs` and facets, one grant per client, rooted at
   a principal's directory or a service's
@@ -1477,7 +1662,7 @@ a file closed and opened again may get a new qid path
 | A crafted or corrupt data partition | the file system's bounds checks and checksums | that partition, which a mount that fails never writes | the failing process ends and the storage domain with it; the domain service starts it again from its specification within its restart intensity, and a volume that fails every mount leaves it ended, never formatted ([A mount never formats](#read-write-storage)) | the domain's death record; that partition's files unavailable |
 | littlefs's C code crashes | the port's sub-space faults, and its owner sees `{exit_status, N}` | the partition as littlefs left it; an unacknowledged operation has an unknown outcome | the owner's supervisor restarts the port once the window has answered the port's outstanding requests, and the port mounts the volume afresh | affected operations fail with `eio`; the partition unavailable until the remount |
 | The block device reports an error, or the controller stops answering | the device process's completions and its deadline | the request's buffer, quarantined until the device is reset ([design-runtime.md](design-runtime.md#the-device-nif)) | the device process reports to the device service, which resets the device | `{error, eio}` on the request; the inspector's device record |
-| The SD card or its controller reports an error, or misses a deadline | the device process's interrupt decode, the card's R1 status and the step's timer ([The SD host controller](#the-sd-host-controller)) | the failed write's sectors unknown; no buffer, since programmed I/O lends the controller no memory | the device process ends, which ends the storage domain, since `erx_blk_sup` restarts nothing; the domain service restarts the domain, whose device process's start resets the controller and returns the card to idle with CMD0 | `{error, eio}` on the request in flight and on the backlog; one log line naming the step and the status bits |
+| The SD card or its controller reports an error, or misses a deadline | the device process's interrupt decode, the card's R1 status, Auto CMD12's R1, and the request's in-flight bound or the start step's deadline ([The SD host controller](#the-sd-host-controller)) | the failed write's sectors unknown; no buffer, since programmed I/O lends the controller no memory | the device process ends, which ends the storage domain, since `erx_blk_sup` restarts nothing; the domain service restarts the domain, whose device process's start waits for a card still programming, resets the controller and returns the card to idle with CMD0 | `{error, eio}` on the request in flight and on the backlog; one log line naming the step and the status bits |
 | The domain that runs the block driver ends | the domain service | every window dead; every client's reads and writes fail | the domain service starts the domain again from its specification, whose creation gives it the device again, the device service names its windows, and each client receives its window anew as a grant | `eio` on every file of every storage service until the windows return; the domain's death record |
 | A FAT volume found dirty, or a removal while mounted | the volume's dirty flag; the window's errors | the volume, read-only | none on erXos; the volume is repaired on another machine | a report naming the volume; `{error, erofs}` for writes, `{error, eio}` after a removal |
 | An update's signature or manifest fails its check | the verifier, before decoding | nothing written | none needed | the update refused, with the reason |
@@ -1520,10 +1705,22 @@ own files, are recorded in [design.md](design.md#residual-risks).
 The block driver: a host test of the device service's window derivation
 (PW1); a QEMU test that every window refuses sectors outside it with
 `erange`; the build check that only the driver's modules reference
-`erx_device`, and the one that only the driver's write path imports the
-NIF's post or names the SD command register, each with a seeded
-violation that it catches (a test module that calls `erx_device:post/4`,
-and one that passes `cmdtm` to `erx_device:write/3`); a QEMU test that a trial boot's driver refuses every write but
+`erx_device`, and the one that only the driver's write path names the
+NIF's two issuing calls, each with a seeded violation that it catches:
+a test module that calls `erx_device:command/2` directly, one that
+passes `erx_device` and `command` to `erlang:apply/3`, one that calls
+`M:command/2` with `M` bound to `erx_device`, and one that makes the
+module's name with `list_to_existing_atom/1`; the device NIF's test that
+`erx_device:write/3` answers `badarg` for `cmdtm` taken from a map, and
+that `erx_device:command/2` answers `badarg` for a word that turns DMA
+on, whose seeded faults drop the `ownedByNif` mark and the DMA check; a
+host test of the device process's deadline decision, in which a request
+past its wait limit is answered `{error, {device, deadline}}` with no
+register touched and an issued one past its in-flight bound ends the
+process, with the seeded fault of timing the wait from the issue rather
+than the acceptance, and a check that the wait limit and the in-flight
+bound together stay below `erx_blk:call/1`'s timeout, that below the
+window's and that below littlefs's port's; a QEMU test that a trial boot's driver refuses every write but
 the record's, whatever its clients ask; a test of the same storage
 service against a local window and against one exported from a driver
 domain of its own, which must pass both unchanged; a controller that
@@ -1546,31 +1743,69 @@ The SD controller, each test paired with the fault that proves it ran:
 
 * The identification state machine, a protocol state machine, is tested
   on the host exhaustively over every state and every event (each
-  response, a command timeout, each error); the seeded fault treats
-  CMD8's timeout as a refusal, and the standard-capacity path's cases
-  fail.
+  response, a command timeout, each error). CMD8's timeout returns the
+  command-line reset, the data-line reset and CMD55, in that order, and
+  CMD55's R1 with the illegal-command bit set is accepted after it and
+  refused anywhere else; a timeout in every other state is a refusal.
+  The seeded faults treat CMD8's timeout as a refusal, and the
+  standard-capacity path's cases fail; and drop the resets from its
+  actions, and its case fails.
+* The expected timeout on QEMU's `raspi4b` model, with the medium on a
+  card of the model's specification version 1 (`sd-card`'s
+  `spec_version=1`, which QEMU 11.1.3's `-device sd-card,help` lists)
+  on a 1 GiB image: the device process identifies a standard-capacity
+  card, its `info/0` detail records CMD8's timeout, and a file written
+  and synced to `/data` reads back after the storage domain restarts.
+  The seeded fault handles CMD8's timeout as an operational failure, and
+  the boot has no device process. Whether the reset is what lets the
+  next command issue on the board's controller, which holds command
+  inhibit from version 4.10, the board probe records.
+* The admission of a card, a property test over every structure,
+  capacity bit, `READ_BL_LEN`, `C_SIZE` and `C_SIZE_MULT`: a pair is
+  admitted exactly when the rule of *Admitting a card* allows it, and
+  every admitted card's capacity is the specification's formula, a whole
+  number of sectors, with its last sector's byte address below 2^32
+  when addressed in bytes and its last sector's number below 2^32 when
+  addressed in blocks. The seeded faults accept any `READ_BL_LEN`, and
+  the property fails at 15, a 64 GiB card addressed in bytes; and drop
+  the agreement check, and it fails at structure 0 with the capacity bit
+  set.
 * The parsers on known values: a CSD of each structure gives the
   capacity QEMU's model reports for a 2 GiB and a 4 GiB image, and an
-  SCR and a switch status give their fields; the seeded fault drops the
-  R2 parser's one-byte shift, and every CSD case fails.
+  SCR, an SD status, a General Information naming the Performance
+  Enhancement function and a Performance Enhancement register set give
+  their fields; the seeded fault drops the R2 parser's one-byte shift,
+  and every CSD case fails.
+* The cache step on the host, over scripted answers: a card whose SD
+  status lacks bit 330 skips it; one with bit 330 and no CMD48 in its
+  SCR is refused; one whose Cache Enable reads set is flushed, written
+  clear and read back; and one whose Cache Enable still reads set after
+  the write is refused. The seeded fault skips the read-back, and the
+  last case is admitted.
 * The divider, a property test: for every base clock and target the
   chosen clock is at most the target and the next smaller divisor would
   exceed it; the seeded fault compares with `<` in place of `=<`, and
   the property fails at the targets the base divides exactly.
 * The register spacing on the host, against a recording stand-in for the
   device NIF: no two writes other than to `data` are less than 6 us
-  apart, and writes to `data` are not delayed; the seeded fault sets the
-  spacing to zero, and the test fails.
+  apart, the command's included, and writes to `data` are not delayed;
+  the seeded fault sets the spacing to zero, and the test fails.
 * The 1.8 V check on the host: a `control2` word with 1.8 V signalling
   enabled refuses the start before any reset or command; the seeded
   fault drops the check, and the test sees the reset written.
+* The transfer's checks on the host: an Auto CMD12 R1 with an error bit
+  fails a multi-block read or write, and one with only out of range
+  fails it unless it is a CMD18 that ended at the card's last sector;
+  the seeded fault ignores out of range on every transfer, and the
+  write case passes where it must fail.
 * The write path on the host: every word `erx_blk_write`'s SD table
-  builds outside its write function is one of CMD0, 2, 3, 6, 7, 8, 9,
-  12, 13, 16, 17, 18 and 55 and ACMD6, 41 and 51; the seeded fault adds
-  CMD24 to the table under an initialisation step, and the test fails. On
-  a trial boot value the SD write function answers `erofs` and touches
-  no register; the seeded fault removes the trial check, and the test
-  fails.
+  builds outside its write function is one of CMD0, 2, 3, 7, 8, 9, 12,
+  13, 16, 17, 18, 48, 49 and 55 and ACMD6, 13, 41 and 51, CMD49 writing
+  only the card's Performance Enhancement register and no sector; the
+  seeded fault adds CMD24 to the table under an initialisation step, and
+  the test fails. On a trial boot value the SD write function answers
+  `erofs` and touches no register; the seeded fault removes the trial
+  check, and the test fails.
 * On QEMU's `raspi4b` model (programmed I/O only: its capabilities offer
   no DMA, [design-platforms.md](design-platforms.md#bring-up-under-qemu)),
   booted with the medium as EMMC2's card: the device process identifies
@@ -1589,11 +1824,13 @@ The SD controller, each test paired with the fault that proves it ran:
   fails to identify the card.
 * Fuzz targets, one per parser of what the card or the controller
   writes: the R1, R3, R6 and R7 words, the R2 words with the CSD, the
-  SCR, the switch status and the `interrupt` decode; each returns a value
-  or a refusal for every input and never raises. The seeded fault removes
-  the CSD parser's check of the structure field, and the target finds a
-  crash.
-* On the board, by hand: the card identifies at high speed, `/data`
+  SCR, the SD status, the General Information, the Performance
+  Enhancement register set and the `interrupt` decode. Each returns a
+  value or a refusal for every input and never raises, and the CSD and
+  OCR target checks the admission's properties above on every pair it
+  admits. The seeded fault accepts any `READ_BL_LEN`, and the target
+  finds an admitted card whose last byte address does not fit 32 bits.
+* On the board, by hand: the card identifies at default speed, `/data`
   mounts, and the power-cut checklist of
   [plan.md](plan.md#1b-i-the-raspberry-pi-4-on-the-stopgap) passes; the
   [board probe](#the-board-probe) records its items and its timed slow
@@ -1730,10 +1967,9 @@ images' sizes.
 
 The SD controller's programmed I/O moves each 512-byte block as 128
 register accesses through `data` and takes one interrupt per block, all
-on the device process's core; a 4-bit bus at 50 MHz carries at most
-25 MB/s and at 25 MHz half that. Whether the device process keeps up is
-unmeasured: `tools/erx bench blk` on the board measures it at both
-speeds, and a C bulk copy of the data port, a per-byte primitive of the
+on the device process's core; a 4-bit bus at default speed's 25 MHz
+carries at most 12.5 MB/s. Whether the device process keeps up is
+unmeasured: `tools/erx bench blk` on the board measures it, and a C bulk copy of the data port, a per-byte primitive of the
 device NIF, is the measured exception row of the driver table if it does
 not, before DMA's design replaces the copy altogether.
 
@@ -1863,10 +2099,10 @@ fields of the `image` record
 | A parser bug in the EROFS reader | low | low | it parses only blocks that passed the hash tree, whose root comes from the boot image; a malformed structure fails the operation with `eio`; its fuzz target; fsimg's images as its oracle |
 | A FAT volume removed or cut off while written loses files or clusters | high, for removable media | low | the dirty flag set and flushed before the first change; batches of five flushed steps, new chains allocated before they are linked and chains cut before they are freed; clusters freed in a batch allocated only in a following one; FAT12 read-only; a harness that reorders writes between flushes; a dirty volume mounts read-only; repair on another machine |
 | The SD controller's base clock in the capabilities register is wrong on the board | low: FreeBSD runs EMMC2 on it | a card clock too fast fails identification or transfers with CRC errors; too slow costs throughput | the board probe's timed slow read; the platform record's `clock` for the SD unit if the probe disagrees |
-| A fact the SD design leaves to the board probe (1.8 V signalling at hand-over, card detect, write spacing above 400 kHz, the base clock) proves different on the board | medium | the card fails identification, or a step fails its deadline; a card the firmware left at 1.8 V cannot be driven, since only the firmware switches its regulator | each is a line in the log and no device process, never a wrong answer; [the board probe](#the-board-probe) settles each before the board pass counts |
+| A fact the SD design leaves to the board probe (1.8 V signalling at hand-over, card detect, write spacing above 400 kHz, the base clock, command inhibit after a timeout, a cache the firmware left on) proves different on the board | medium | the card fails identification, or a step fails its deadline; a card the firmware left at 1.8 V cannot be driven, since only the firmware switches its regulator | each is a line in the log and no device process, never a wrong answer; [the board probe](#the-board-probe) settles each before the board pass counts |
 
 No open question remains for storage beyond the SD controller's board
-probe above and its card-cache question: the clean room's legal review, the
+probe above: the clean room's legal review, the
 refusal to convert either partition, and the custody of the release key
 outside this design are decided
 ([plan.md](plan.md#beyond-the-plan)).
@@ -1882,13 +2118,15 @@ outside this design are decided
   record checks it.
 * The SD controller's sources ([The SD host controller](#the-sd-host-controller)).
   The authority is the SD Association's Physical Layer Simplified
-  Specification, version 9.10, for the card's commands, responses, CSD
-  and SCR and its identification, and its SD Host Controller Simplified
-  Specification, version 3.00, for the controller's registers, resets,
-  divider and data port. Neither is vendored into the tree, whose
-  redistribution their terms do not grant; they are cited by version,
-  and the facts this design takes from them are cited through the
-  BSD-licensed code below, which encodes them. GPL drivers (Linux's,
+  Specification, version 9.10 (1 December 2023), for the card's
+  commands, responses, CSD, SCR, SD status, extension registers, cache
+  and identification, and its SD Host Controller Simplified
+  Specification, version 4.20, for the controller's registers, resets,
+  recovery, divider and data port, of which the driver uses the version
+  3.00 register set. Neither is vendored into the tree, whose
+  redistribution their terms do not grant; each fact taken from them is
+  cited by version, section where it has one, and printed page, beside
+  the BSD-licensed code below where that code encodes the same fact. GPL drivers (Linux's,
   U-Boot's) are used only through the facts record,
   [research-sdhci-bcm2711.md](research-sdhci-bcm2711.md), facts and
   working principles without code, written by an agent that writes no

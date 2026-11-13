@@ -2495,8 +2495,8 @@ of the rings: for virtio-mmio the status, the feature selectors and the
 driver's features, the queue selector, size, ready bit and doorbell, and
 the rings' base addresses. `write/3` and `write_field/4` refuse an owned
 register with `badarg`, so only the NIF's own sequences write one
-(`negotiate/2` and `post/4`), with values and addresses it built itself; a
-driver may still read one. Only `erx_device.c` holds the raw accessors, so
+(`negotiate/2`, `post/4` and `command/2`), with values and addresses it
+built itself; a driver may still read one. Only `erx_device.c` holds the raw accessors, so
 nothing else in C can store to an owned register either; its sequences
 name owned registers by the index `tools/gen_hw.rb` gives each in
 `erx/hw/device_owned.h`, which a chokepoint keeps in that file. A read or write is one
@@ -2586,6 +2586,17 @@ that finds fewer free heads than it has frames is posted in part;
 `{error, full}` with nothing posted; and `{error, broken}` as `post/4`
 answers it. The cut reads only what the sender passed, the stack's own
 header template and payload, never memory a device can write.
+
+**Issuing an SD command.** An SD host controller issues a command when
+its command register, `cmdtm` at `0x0C`, the transfer-mode and command
+halves of one word, is written, so the SVD source marks that register
+`ownedByNif` and `erx_device:command(Dev, Word)`, a BIF, is the one way
+to write it: one 32-bit write of `Word` to the register, `ok`, and
+`badarg` on a record whose peripheral is not `sdhci` or for a word whose
+transfer mode enables DMA (`SDHCI_TRNS_DMA`, bit 0), so no command
+starts a DMA transfer until DMA's design gives the NIF one. Which
+module may call it is the block driver's write-path rule
+([design-storage.md](design-storage.md#data-model), U4).
 
 **Completing.** `erx_device:complete(Dev, Q)` reads the used ring's index
 once and each entry's two fields once, from the slot `erx_device_queue`

@@ -2876,8 +2876,11 @@ it; git history is the record of completed work.
   slot; the owner traps exits and ignores its supervisor's abnormal end; `remove/3` ignores
   the node unlink names, so it removes whatever entry has the name now; a 65,537-byte write
   (msize 65560) and a readdir offset of 2^32 or more answer `eio`.
-* [Medium] storage, block service: a window has no `flush` (design-storage.md, Interfaces),
-  so `erx_lfs` answers littlefs's sync at once. A write is answered once the device has
+* [Medium] storage, block service: a window has no `flush` (design-storage.md, Interfaces):
+  `erx_lfs` answers littlefs's sync itself (`erlang/apps/erx_storage/src/erx_lfs.erl:249-263`) and
+  `erx_blk_window` has no `flush` handler, so nothing reaches the transport's `flush/0`; the transport
+  split's implementation forwards it (design-storage.md, "The transport contract"), and on the SD card it
+  is durable only because the start turns the card's cache off. A write is answered once the device has
   completed it, which holds across a QEMU kill but not across a power cut on a medium with a
   write cache. `erx_blk_window` answers no `flush` and the driver negotiates no
   `VIRTIO_BLK_F_FLUSH`, so a file system cannot order its writes against the medium's cache.
@@ -5920,6 +5923,18 @@ document's "residual risks accepted" paragraph.
   image holds the release too, from which the system domain starts, until
   the boot from the medium decides which releases leave the boot image
   ([design-storage.md](docs/design-storage.md#data-model)).
+* [Medium] storage, the Pi's boot medium (`abi/medium.txt`, `tools/lib/erx/release_medium.rb`, fsimg): the record
+  partition is 4 MiB with the reset count as a second placed file, where
+  [design-platforms.md](docs/design-platforms.md#slots-and-the-boot-selection-record) gives it 8 MiB, the count in
+  the FAT16's reserved area and `autoboot.txt` placed at sector 6144, and every later partition 4 MiB on; fsimg has
+  no `place` option, and the packer checks a placed file by its directory entry alone, not its whole cluster chain
+  against the raw extent (design-stopgap.md, "The Raspberry Pi 4"). The Pi medium package changes all three.
+* [Low] Raspberry Pi boot, residual: a damaged record partition, or a slot without valid boot files, lets the
+  bootloader's `PARTITION_WALK` boot a partition the record does not name, or leaves the card unbootable until it is
+  reinstalled, as the external design review reads the bootloader documentation
+  (https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#PARTITION_WALK), not yet checked. The board pass
+  records the board's EEPROM configuration (`BOOT_ORDER`, `PARTITION_WALK`) and what a card with a damaged record
+  partition boots.
 * [Low] storage, the release image across domains (`liberx/system/dom_apply.c`,
   `erlang/apps/erx_blk/src/erx_blk_service.erl`, `erx_blk_image.erl`): with the block
   unit held by the storage domain, no image window is served
@@ -6226,10 +6241,11 @@ document's "residual risks accepted" paragraph.
   tree-wide, but every virtio driver will post; once a second poster joins `SITES`, the write path's argument also
   needs "only `erx_blk` opens a block record", which no check holds. Scope the rule per device class. Rename
   `erx_blk_write`, which now posts reads too, to what it is (for example `erx_blk_post`).
-* [Low] erx_blk, `tools/lib/erx/device_posters.rb`: the check that only `erx_blk_write` posts is lexical, over Erlang
-  sources: a call whose module comes from a macro (or a variable, or `apply/3`) escapes it. The check design.md's
-  chokepoint table and design-storage.md's U4 name, over the storage domain's BEAM files with the compiler's call
-  graph, replaces it.
+* [Low] erx_blk, `tools/lib/erx/device_posters.rb`: the check that only `erx_blk_write` posts sees only literal
+  calls: a call whose module comes from a macro, a variable or `apply/3` escapes it. design-storage.md's U4 extends
+  it over the driver applications: `erx_device:command/2` held like `post/4`, `erx_device` never a value (only the
+  module of a literal remote call), and no atom made from data; the SVD's `ownedByNif` mark on `cmdtm` makes
+  `erx_device:write/3` refuse the SD command register.
 * [Medium] runtime, `otp/erts/emulator/nifs/erxos/erx_device.c`: a device record maps the pages that hold its window
   (`erx_device_window_pages`), and an open of another window in one of those pages answers `ebusy`, so only one of
   QEMU `virt`'s eight virtio-mmio slots per page can be driven at a time (the QEMU plan's second disk, on
@@ -6251,8 +6267,9 @@ document's "residual risks accepted" paragraph.
   `block_device` QEMU suite's good path; they should move into a pure module whose full, held and broken cases are
   tested on the host.
 * [Medium] erx_blk: a device that stops completing leaves its callers to time out in `gen_server:call` (an exit, not
-  `{error, timeout}`), and a timed-out write still lands later; the driver needs a per-request deadline that resets the
-  device, `call/1` should return `{error, _}`, and held requests of a caller that has gone should be dropped.
+  `{error, timeout}`), and a timed-out write still lands later. design-storage.md's transport contract gives every
+  request a wait limit of 10 s from its acceptance and an in-flight bound of 18 s, past which the device process ends,
+  below `call/1`'s 30 s; the device process implements neither, and `call/1` should return `{error, _}`.
 * [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:write/6`, and `erx_blk:read/2` and `erx_blk:write/2`
   still let any process of the system domain reach any sector: the block service's windows (`erx_blk_window`) check
   their sectors, but nothing yet confines clients to them. The device service, which names each client's windows by
