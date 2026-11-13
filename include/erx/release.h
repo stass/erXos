@@ -18,9 +18,11 @@
  * the index unmapped, changes only what is behind this call.
  */
 
+/* A file, an executable image, or an empty directory, which has size 0. */
 typedef struct erx_release_entry {
 	uint64_t	size;
 	uint64_t	offset;		/* from erx_release_addr() */
+	uint8_t		kind;		/* ERX_ENTRY_FILE, _IMAGE, _DIRECTORY */
 	size_t		path_length;
 	uint8_t		path[ERX_PACK_PATH_MAX];	/* with no `system/` and no NUL */
 } erx_release_entry_t;
@@ -33,7 +35,7 @@ typedef struct erx_release_entry {
  * check that refused it in *reason.
  */
 int		erx_release_bind(const uint8_t *, size_t, const char **);
-/* The index-th file of the release, in sorted order; past the run, ERX_ERANGE. */
+/* The index-th entry of the release, in sorted order; past it, ERX_ERANGE. */
 int		erx_release_entry(uint64_t, erx_release_entry_t *);
 const uint8_t	*erx_release_addr(void);
 /*

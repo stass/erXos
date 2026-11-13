@@ -111,7 +111,9 @@ LLVMFuzzerTestOneInput(const uint8_t *input, size_t size)
 			    entry.data_off > length ||
 			    entry.data_size > length - entry.data_off ||
 			    path < bytes || path_length > length ||
-			    path > bytes + length - path_length)
+			    path > bytes + length - path_length ||
+			    (entry.kind == ERX_ENTRY_DIRECTORY &&
+			    entry.data_size != 0))
 				abort();
 			if (!erx_pack_file_check(&view, index, &hasher, &error) &&
 			    (error.reason == NULL || error.entry != index))

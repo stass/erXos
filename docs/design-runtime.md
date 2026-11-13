@@ -2139,13 +2139,17 @@ facet ([design-storage.md](design-storage.md)).
 the archive's entries whose paths start with its prefix, `system/` for the
 system release and `domains/erxos/` for the domain release; the index is sorted, so
 they form one run, and a file's path in the namespace is its entry's path
-without that prefix. The packer and `erx_pack_open` both refuse a file that is a prefix
-of another path, so a directory needs no record of its own: `d` is a directory
-exactly when some path starts `d/`, and `/` always is. The provider's core
+without that prefix. An entry is a file or an empty directory, which a release
+holds at each mount point of [A facet's mount](design-files.md#building-binding-and-mounting),
+`data`, so a domain with nothing mounted there finds an empty directory. The packer
+and `erx_pack_open` both refuse an entry that is a prefix of another path, so a
+directory with anything in it needs no record of its own: `d` is a directory
+exactly when it is an empty directory's entry or some path starts `d/`, and `/`
+always is. The provider's core
 is pure and builds for the host: given the names an `erx_path` action holds, a
 binary search answers file, directory, not found, or a file used as a directory,
 and listing a directory walks its range and yields each next name once. An empty
-directory cannot exist, and nothing can disagree with the index.
+directory exists only as its own entry, and nothing can disagree with the index.
 
 | `prim_file` call | Result |
 | --- | --- |

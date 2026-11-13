@@ -85,10 +85,11 @@ module Erx
                               runner: @runner, compiler: @compiler, sanitizers: [])
       root_task = PackRootFixture.build(root: @root, directory: File.join(@directory, 'root'), codec: @codec,
                                         runner: @runner, compiler: @compiler, linker: @linker)
-      files = ReleaseFiles.new(root: @root, otp: @otp, directory: @directory, runner: @runner, codec: @codec, oracle: @oracle).entries
+      system_release = ReleaseFiles.new(root: @root, otp: @otp, directory: @directory, runner: @runner, codec: @codec, oracle: @oracle)
+      files = system_release.entries
       manifest_source = @platform.manifest_source(@root)
       domains = domain_entries(manifest_source, root_task)
-      entries = [root_entry(root_task), *files, *domains]
+      entries = [root_entry(root_task), *files, *system_release.directories, *domains]
       _erofs, images = ReleaseMedium.image(entries: files, directory: @directory, runner: @runner)
       catalog = root_task.fetch('catalog').merge(BuildInputs.pack(root: @root, paths: ReleaseFiles.inputs_of([*files, *domains], root: @root)))
       pack_with(tools, catalog).build(
@@ -121,8 +122,9 @@ module Erx
                    'artifact' => root_task.fetch('artifact'), 'receipt' => root_task.fetch('receipt') }
       runtimes = [stand_in.merge('path' => ProductionImage::DOMAIN_RUNTIME_PATH, 'id' => 'domain-runtime'),
                   stand_in.merge('path' => ProductionImage::JIT_RUNTIME_PATH, 'id' => 'jit-runtime', 'jit' => true)]
-      [*runtimes, *ReleaseFiles.new(root: @root, otp: @otp, directory: File.join(@directory, 'domains'), runner: @runner,
-                                    codec: @codec, oracle: @oracle, release: ReleaseFiles.domain(boots)).entries]
+      release = ReleaseFiles.new(root: @root, otp: @otp, directory: File.join(@directory, 'domains'), runner: @runner,
+                                 codec: @codec, oracle: @oracle, release: ReleaseFiles.domain(boots))
+      [*runtimes, *release.entries, *release.directories]
     end
 
     # The archive's sorted paths, which take in the two files the pack adds, and by

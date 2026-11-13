@@ -209,6 +209,7 @@ erx_fiasco_release_entry_body(uint32_t task, const erx_fiasco_release_entry_requ
 	reply->first = entry.data_size;
 	reply->second = entry.data_off - base.data_off;
 	reply->third = relative;
+	reply->fourth = entry.kind;
 	return (ERX_OK);
 }
 

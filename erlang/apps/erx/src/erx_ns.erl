@@ -119,6 +119,8 @@ mount_facets([Name | Rest]) ->
         Refused -> Refused
     end.
 
+%% Each mount point here is also an empty directory of every release, so an unmounted
+%% one lists as empty: ReleaseFiles::MOUNT_POINTS (tools/lib/erx/release_files.rb).
 mount_facet(data) -> mount({facet, data}, <<"/data">>, [{tree, <<"data">>}, rw]);
 mount_facet(_Name) -> ok.
 

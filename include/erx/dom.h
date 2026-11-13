@@ -301,7 +301,7 @@ typedef struct erx_dom_principal {
  * and ABI version passed the boot's checks.
  */
 typedef struct erx_dom_file {
-	uint8_t		kind;		/* ERX_ENTRY_FILE or ERX_ENTRY_IMAGE */
+	uint8_t		kind;		/* ERX_ENTRY_FILE, _IMAGE, _DIRECTORY */
 	uint8_t		flags;		/* ERX_ENTRY_SYSTEM, ERX_ENTRY_SEAL */
 	bool		image_ok;	/* image: manifest and ABI version accepted */
 	uint32_t	image_flags;	/* image: ERX_IMAGE_JIT */

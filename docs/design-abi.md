@@ -1473,8 +1473,9 @@ readers do not replace that image validator.
 ### File-prefix exclusion
 
 Strict byte sorting and an adjacent-prefix comparison do not alone
-exclude a file used as a directory: `a`, `a-foo`, `a/b` are strictly
-sorted. The validator uses a bounded stack of candidate file paths,
+exclude a file used as a directory, or an empty directory with an entry
+under it: `a`, `a-foo`, `a/b` are strictly
+sorted. The validator uses a bounded stack of candidate entry paths, of every kind,
 represented by their entry indices into the immutable archive.
 
 For each validated current path, compare it with the top candidate. If

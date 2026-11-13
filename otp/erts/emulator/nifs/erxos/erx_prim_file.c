@@ -51,8 +51,8 @@
 
 /*
  * An open file or directory of the release. file indexes release_fs.files only when
- * kind is ERX_RELEASE_FS_FILE: a directory, opened with [directory], has no entry of
- * its own, and every read of it is EISDIR.
+ * kind is ERX_RELEASE_FS_FILE: a directory, opened with [directory], indexes no file,
+ * an empty directory's entry included, and every read of it is EISDIR.
  */
 typedef struct erx_efile {
 	efile_data_t		common;
@@ -119,7 +119,7 @@ erx_build_table(void)
 		memcpy(strings + used, entry.path, entry.path_length);
 		files[index] = (erx_release_fs_file_t){ .path = strings + used,
 		    .length = entry.path_length, .size = entry.size,
-		    .offset = entry.offset };
+		    .offset = entry.offset, .directory = entry.kind == ERX_ENTRY_DIRECTORY };
 		erts_atomic32_init_nob(&checked[index], 0);
 		used += entry.path_length;
 	}

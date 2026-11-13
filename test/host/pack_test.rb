@@ -23,13 +23,14 @@ class PackTest < Minitest::Test
     compile(File.join(@root, 'tools/host/pack_check.c'), @checker)
   end
 
-  # Builds a host program over the validator and the image planner, the
-  # planner's source given so a test can seed a change into it.
-  def compile(main, output, planner: File.join(@root, 'liberx/image_plan.c'))
+  # Builds a host program over the validator and the image planner, each
+  # source given so a test can seed a change into it.
+  def compile(main, output, planner: File.join(@root, 'liberx/image_plan.c'),
+              validator: File.join(@root, 'kernel/core/pack.c'))
     @runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-O1', '-g',
                  *@flags, *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', File.join(@root, 'kernel/crypto'),
-                 File.join(@root, 'kernel/core/pack.c'), planner,
+                 validator, planner,
                  File.join(@root, 'kernel/crypto/blake3/blake3.c'),
                  File.join(@root, 'kernel/crypto/blake3/blake3_portable.c'),
                  Erx::Generated.path('liberx/generated/abi_reader.c', root: @root),
@@ -304,7 +305,8 @@ class PackTest < Minitest::Test
 
   def test_entry_values_and_the_string_table
     reject(mutated { |bytes| PackFixture.integer(bytes, PackFixture.entry_offset(0) + 24, 1, width: 8) }, 'entry_values')
-    reject(mutated { |bytes| PackFixture.integer(bytes, PackFixture.entry_offset(0) + 6, 3, width: 1) }, 'entry_values')
+    reject(mutated { |bytes| PackFixture.integer(bytes, PackFixture.entry_offset(0) + 6, 4, width: 1) }, 'entry_values')
+    reject(mutated { |bytes| PackFixture.integer(bytes, PackFixture.entry_offset(0) + 6, 0, width: 1) }, 'entry_values')
     reject(mutated { |bytes| PackFixture.integer(bytes, PackFixture.entry_offset(1), 1 << 31) }, 'path_extent')
     reject(mutated { |bytes| PackFixture.integer(bytes, PackFixture.entry_offset(1), 0) }, 'path_extent')
     slack = mutated { |bytes| PackFixture.integer(bytes, 48, PackFixture.field(bytes, 48, 4) + 1) }
@@ -318,6 +320,45 @@ class PackTest < Minitest::Test
     last = PackFixture.entry_offset(3)
     assert_equal bytes.bytesize, PackFixture.field(bytes, last + 8, 8)
     assert_equal 0, PackFixture.field(bytes, last + 16, 8)
+  end
+
+  # An empty directory is an entry of kind 3 with no contents: its run is empty, so it
+  # lies where the next run starts, and its hash is the empty run's.
+  def test_an_empty_directory_entry_is_valid
+    bytes = PackFixture.valid(paths: ['data', 'system/root', 'zz'], directories: %w[data zz])
+    assert_equal [0, "ok 4\n"], check(bytes)
+    assert_equal 0, PackFixture.field(bytes, PackFixture.entry_offset(0) + 16, 8)
+  end
+
+  DIRECTORY_WITH_CONTENTS = { paths: ['data', 'system/root'], directories: ['data'], files: { 'data'.b => 'x'.b } }.freeze
+  DIRECTORY_ABOVE_A_FILE = { paths: ['data', 'data/x', 'system/root'], directories: ['data'] }.freeze
+  DIRECTORY_ABOVE_A_DIRECTORY = { paths: ['data', 'data/x', 'system/root'], directories: %w[data data/x] }.freeze
+
+  # A directory holds nothing, and one with an entry under it is the implied directory
+  # written twice: both are refused, and so is a directory named twice.
+  def test_a_directory_entry_with_contents_or_with_an_entry_under_it_is_refused
+    reject(PackFixture.valid(**DIRECTORY_WITH_CONTENTS), 'entry_values')
+    reject(PackFixture.valid(**DIRECTORY_ABOVE_A_FILE), 'file_prefix')
+    reject(PackFixture.valid(**DIRECTORY_ABOVE_A_DIRECTORY), 'file_prefix')
+    reject(PackFixture.valid(paths: ['data', 'data', 'system/root'], directories: ['data']), 'path_order')
+  end
+
+  # Each seeded fault in the validator lets through the archive its check exists for.
+  def test_seeded_directory_faults_are_caught
+    source = File.read(File.join(@root, 'kernel/core/pack.c'))
+    seeds = {
+      'contents' => ['(entry->kind == ERX_ENTRY_DIRECTORY && entry->data_size != 0) ||', '', DIRECTORY_WITH_CONTENTS],
+      'prefix' => ["if (path[candidate_length] == '/')\n\t\t\t\treturn (erx_pack_fail(error, index, \"file_prefix\"));", '',
+                   DIRECTORY_ABOVE_A_FILE]
+    }
+    seeds.each do |name, (from, to, archive)|
+      assert_includes source, from, "the #{name} seed no longer applies"
+      seeded = File.join(@directory, "seeded_pack_#{name}.c")
+      File.write(seeded, source.sub(from) { to })
+      checker = File.join(@directory, "seeded-pack-check-#{name}")
+      compile(File.join(@root, 'tools/host/pack_check.c'), checker, validator: seeded)
+      assert_equal 0, run_tool(checker, PackFixture.valid(**archive)).first, "the #{name} seed went unnoticed"
+    end
   end
 
   def test_other_versions_are_refused_with_a_diagnostic

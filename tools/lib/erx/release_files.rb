@@ -181,13 +181,30 @@ module Erx
       [*application_files, *boot_files].map { |file| file_entry(file) }
     end
 
+    # Where a domain mounts a facet of another domain when the manifest grants it one
+    # (erx_ns:mount_facets/1; docs/design-files.md, "A facet's mount"). Each is an empty
+    # directory of every release, so where nothing is mounted the path is the release's
+    # own empty directory, as FreeBSD shows a mount point with nothing mounted on it.
+    # erx_ns:mount_facet/1's clauses (erlang/apps/erx/src/erx_ns.erl) name the same points,
+    # and release_files_test compares the two.
+    MOUNT_POINTS = %w[data].freeze
+
+    # Each mount point as an empty directory entry for Pack#build: no artifact, no receipt.
+    def directories
+      MOUNT_POINTS.map do |name|
+        { 'path' => "#{@release.prefix}#{name}", 'kind' => @codec.member('entry_kind', 'directory'),
+          'flags' => @release.system ? @codec.member('entry_flags', 'system') : 0 }
+      end
+    end
+
     # The files a pack's build inputs must name for these entries: each built file and its
     # receipt, and the sources the receipts name in erXos's own applications among
     # applications, the release's, test-only ones included. OTP's sources are in its
-    # imported tree's catalog already.
+    # imported tree's catalog already. An empty directory entry has no artifact.
     def self.inputs_of(entries, root:, applications: ErlangApps::APPLICATIONS)
       own = applications.select { |application| ErlangApps.own?(application) }
-      [*entries.flat_map { |entry| [entry.fetch('artifact'), entry.fetch('receipt')] }, *ErlangApps.sources(root: root, applications: own)]
+      built = entries.select { |entry| entry.key?('artifact') }
+      [*built.flat_map { |entry| [entry.fetch('artifact'), entry.fetch('receipt')] }, *ErlangApps.sources(root: root, applications: own)]
     end
 
     # What one application ships, as paths under its directory to the files they copy:

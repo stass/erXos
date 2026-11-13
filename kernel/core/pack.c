@@ -417,11 +417,12 @@ erx_index_check(const uint8_t *bytes, size_t length, erx_blake3_ctx_t *hasher,
 }
 
 /*
- * Check 5's file-prefix stack: no path begins with an earlier file's path
- * followed by '/'. A pending file can still precede a later descendant when
- * the next byte is below '/': a, a-foo, a/b. Retain that candidate; pop it
- * only after lexical order has passed its descendant run. Pending candidates
- * are strict prefixes, so depth is path-bounded.
+ * Check 5's file-prefix stack: no path begins with an earlier entry's path
+ * followed by '/', so no file is also a directory and an empty directory
+ * has nothing under it. A pending entry can still precede a later
+ * descendant when the next byte is below '/': a, a-foo, a/b. Retain that
+ * candidate; pop it only after lexical order has passed its descendant run.
+ * Pending candidates are strict prefixes, so depth is path-bounded.
  */
 static bool
 erx_prefix_step(const erx_pack_view_t *view, erx_pack_scratch_t *scratch,
@@ -454,15 +455,18 @@ erx_prefix_step(const erx_pack_view_t *view, erx_pack_scratch_t *scratch,
 /*
  * Check 6: an entry's values and its place. Each file starts at the first
  * page boundary after the previous run, the first right after the index run,
- * so every byte of the archive lies in exactly one run. On success the cursor
- * moves to where the next run starts.
+ * so every byte of the archive lies in exactly one run. An empty directory
+ * holds nothing, so its run is empty and lies where the next one starts. On
+ * success the cursor moves to where the next run starts.
  */
 static bool
 erx_entry_place(const erx_pack_entry_t *entry, uint64_t *cursor, size_t length)
 {
 	uint64_t end, next;
 
-	if ((entry->kind != ERX_ENTRY_FILE && entry->kind != ERX_ENTRY_IMAGE) ||
+	if ((entry->kind != ERX_ENTRY_FILE && entry->kind != ERX_ENTRY_IMAGE &&
+	    entry->kind != ERX_ENTRY_DIRECTORY) ||
+	    (entry->kind == ERX_ENTRY_DIRECTORY && entry->data_size != 0) ||
 	    (entry->flags & ~(ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL)) != 0 ||
 	    (entry->flags & (ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL)) ==
 	    (ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL) || entry->manifest_off != 0 ||

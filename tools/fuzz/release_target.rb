@@ -6,10 +6,12 @@ require_relative '../../test/fixtures/pack_fixture'
 
 # erx_release_bind and erx_release_entry, which must accept only what
 # a name list can name. The first input byte's bit 0 recomputes the index
-# hash. The seeds are a valid archive with its prefixes, and archives on each
-# side of the name and count limits, which are the design's: 255 bytes, 256 names.
-archive = lambda do |path|
-  "\x01".b + PackFixture.valid(paths: [path, 'system/manifest', 'system/root'].sort)
+# hash. The seeds are a valid archive with its prefixes, archives on each
+# side of the name and count limits, which are the design's: 255 bytes, 256 names,
+# and archives with an empty directory: valid, with contents, and above a file.
+archive = lambda do |path, more: [], directories: [], files: {}|
+  "\x01".b + PackFixture.valid(paths: [path, *more, 'system/manifest', 'system/root'].sort, directories: directories,
+                                files: files)
 end
 valid = archive.call('system/lib/a')
 Erx::PackFuzz.declare_target(
@@ -21,6 +23,9 @@ Erx::PackFuzz.declare_target(
     'name-too-long' => archive.call("system/#{'z' * 256}"),
     'most-names' => archive.call((['system'] + ['z'] * 256).join('/')),
     'too-many-names' => archive.call((['system'] + ['z'] * 257).join('/')),
-    'long-name-outside' => archive.call("other/#{'z' * 256}")
+    'long-name-outside' => archive.call("other/#{'z' * 256}"),
+    'empty-directory' => archive.call('system/data', more: ['system/lib/a'], directories: ['system/data']),
+    'directory-with-contents' => archive.call('system/data', directories: ['system/data'], files: { 'system/data'.b => 'x'.b }),
+    'directory-above-a-file' => archive.call('system/data', more: ['system/data/a'], directories: ['system/data'])
   )
 )

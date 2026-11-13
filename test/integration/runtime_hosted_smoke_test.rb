@@ -528,6 +528,11 @@ class RuntimeHostedSmokeTest < Minitest::Test
       'file:read_file("/etc/hosts").' => /^\{error,enoent\}$/,
       'file:write_file("/x", <<>>).' => /^\{error,erofs\}$/,
       'file:list_dir("/").' => /"bin"/,
+      # The hosted domain service has no domain library, so it never reads the manifest and
+      # never calls erx_ns:mount_facets/1: nothing is mounted at /data, and the path is the
+      # release's own empty directory, which / lists (docs/design-files.md, "A facet's mount").
+      'file:list_dir("/data").' => /^\{ok,\[\]\}$/,
+      'lists:member("data", element(2, file:list_dir("/"))).' => /^true$/,
       'erlang:system_info(emu_flavor).' => /^emu$/,
       '[element(1, C) || C <- supervisor:which_children(kernel_sup)].' => /code_server/,
       'lists:keymember(erx_watchdog, 1, supervisor:which_children(kernel_sup)).' => /^true$/,

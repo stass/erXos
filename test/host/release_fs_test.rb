@@ -30,10 +30,14 @@ class ReleaseFsTest < Minitest::Test
 
   # `-` (0x2d) and `0` (0x30) sort around `/` (0x2f), so `d`'s run sits among its neighbours.
   TREE = %w[d-x d/e/i d/g d/h d0 dd/j f].freeze
+  # Empty directories, each an entry of its own: one among `d`'s files and one at the top.
+  DIRECTORIES = %w[d/k zz].freeze
+  # The table's entries in sorted order, each a file or an empty directory.
+  ENTRIES = (TREE + DIRECTORIES).sort.freeze
   ALPHABET = ['', '.', '..', 'a/b', 'd', 'd-x', 'e', 'f', 'g', 'zz'].freeze
   DEPTH = 4
-  # The rest of the tree's names, over shorter lists, so every file is reached.
-  WIDE_ALPHABET = (ALPHABET + %w[d0 dd h i j]).freeze
+  # The rest of the tree's names, over shorter lists, so every entry is reached.
+  WIDE_ALPHABET = (ALPHABET + %w[d0 dd h i j k]).freeze
   WIDE_DEPTH = 3
 
   # accepted holds add_name's answer for each name given; the rest is the list's.
@@ -107,7 +111,9 @@ class ReleaseFsTest < Minitest::Test
                                                            'return (ERX_RELEASE_FS_MISSING);'],
       'a decoder that takes ..' => ["(length == 2 && name[0] == '.' && name[1] == '.') ||", ''],
       'a decoder that takes a slash' => ["name[index] == '/'", 'false'],
-      'a walk that passes a file' => ['if (kind != ERX_RELEASE_FS_DIRECTORY) {', 'if (kind == ERX_RELEASE_FS_MISSING) {']
+      'a walk that passes a file' => ['if (kind != ERX_RELEASE_FS_DIRECTORY) {', 'if (kind == ERX_RELEASE_FS_MISSING) {'],
+      'an empty directory answered as a file' => ["if (fs->files[found].directory)\n\t\t\treturn (ERX_RELEASE_FS_DIRECTORY);", ''],
+      'a name below an empty directory answered as below a file' => ["&&\n\t\t    !fs->files[found].directory)", ')']
     }
     mutants.each do |label, (from, to)|
       driver = build_mutant(from, to, name: label.tr(' .', '_'))
@@ -135,13 +141,25 @@ class ReleaseFsTest < Minitest::Test
   def test_the_release_is_the_run_under_system
     archive = write_archive
     lines = release_lines(archive)
-    assert_equal %w[d/g manifest root], lines.first(3).map { |line| line.split.first }
+    assert_equal %w[d/g data manifest root], lines.first(4).map { |line| line.split.first }
     assert_equal ['past 1', 'addr 1'], lines.last(2)
-    sizes = lines.first(3).map { |line| Integer(line.split[1]) }
-    assert_equal [2, 9, 4], sizes
-    offsets = lines.first(3).map { |line| Integer(line.split[2]) }
+    sizes = lines.first(4).map { |line| Integer(line.split[1]) }
+    assert_equal [2, 0, 9, 4], sizes
+    offsets = lines.first(4).map { |line| Integer(line.split[2]) }
     assert_equal 'g!', File.binread(archive, 2, offsets.first)
     assert_equal 'root', File.binread(archive, 4, offsets.last)
+  end
+
+  # A directory entry of the pack is an empty directory of the release: the entry says
+  # so, and the core answers it a directory with nothing in it, never a file.
+  def test_a_directory_entry_is_an_empty_directory_of_the_release
+    kinds = release_lines(write_archive).first(4).map { |line| line.split.last }
+    assert_equal %w[file directory file image], kinds
+    data, under = ask([['data'], %w[data x]], entries: { 'd/g' => 'F', 'data' => 'D', 'manifest' => 'F', 'root' => 'F' })
+    assert_equal [KIND_DIRECTORY, KIND_DIRECTORY, 1, []], [data.kind, data.stop, data.passed, data.listing]
+    assert_equal [KIND_MISSING, KIND_MISSING, 1], [under.kind, under.stop, under.passed]
+    top = ask([[]], entries: { 'd/g' => 'F', 'data' => 'D', 'manifest' => 'F', 'root' => 'F' }).first
+    assert_equal %w[d data manifest root], top.listing
   end
 
   # A longer name, or more names, than a name list holds is refused at bind.
@@ -194,9 +212,12 @@ class ReleaseFsTest < Minitest::Test
     flagged = codec.member('entry_flags', 'system')
     file = codec.member('entry_kind', 'file')
     rows = [['aaa/before', 'before', file, 0], ['system/d/g', 'g!', file, flagged],
+            ['system/data', nil, codec.member('entry_kind', 'directory'), flagged],
             ['system/manifest', 'manifest!', file, flagged],
             ['system/root', 'root', codec.member('entry_kind', 'image'), flagged],
             ['zzz/after', 'after', file, 0]].map do |path, bytes, kind, flags|
+      next { 'path' => path, 'kind' => kind, 'flags' => flags, 'size' => 0 } if bytes.nil?
+
       snapshot = File.join(@directory, "snapshot-#{path.tr('/', '-')}")
       File.binwrite(snapshot, bytes)
       { 'path' => path, 'kind' => kind, 'flags' => flags, 'size' => bytes.bytesize, 'snapshot' => snapshot }
@@ -204,7 +225,7 @@ class ReleaseFsTest < Minitest::Test
     archive = File.join(@directory, 'release.pack')
     writer = Erx::PackWire.new(codec: codec, hasher: Erx::PackHasher.new(helper: tools.fetch('hasher'), runner: @runner))
     File.open(archive, 'wb+') do |output|
-      writer.write(rows: rows, root_entry: 3, build_kind: 'development', output: output, budget: 1 << 20)
+      writer.write(rows: rows, root_entry: 4, build_kind: 'development', output: output, budget: 1 << 20)
     end
     archive
   end
@@ -239,8 +260,8 @@ class ReleaseFsTest < Minitest::Test
   def unhex(text) = text == '-' ? '' : [text].pack('H*')
 
   # One run: the tree, then each list built name by name and asked about.
-  def ask(lists, driver: @driver)
-    commands = TREE.map { |file| "F #{hex(file)}" } +
+  def ask(lists, driver: @driver, entries: ENTRIES.to_h { |entry| [entry, DIRECTORIES.include?(entry) ? 'D' : 'F'] })
+    commands = entries.map { |entry, kind| "#{kind} #{hex(entry)}" } +
                lists.flat_map { |names| ['R', *names.map { |name| "A #{hex(name.b)}" }, 'Q'] }
     input = File.join(@directory, 'commands')
     File.write(input, "#{commands.join("\n")}\n")
@@ -268,7 +289,7 @@ class ReleaseFsTest < Minitest::Test
     stop = passed == kept.size ? KIND_DIRECTORY : model_kind(kept.first(passed + 1).join('/'))
     kind = model_kind(joined)
     Answer.new(accepted: accepted, count: kept.size, names: joined, passed: passed, stop: stop, kind: kind,
-               file: kind == KIND_FILE ? TREE.index(joined) : -1,
+               file: kind == KIND_FILE ? ENTRIES.index(joined) : -1,
                listing: kind == KIND_DIRECTORY ? model_listing(joined) : [])
   end
 
@@ -280,7 +301,7 @@ class ReleaseFsTest < Minitest::Test
   def model_kind(names)
     return KIND_DIRECTORY if names.empty?
     return KIND_FILE if TREE.include?(names)
-    return KIND_DIRECTORY if TREE.any? { |file| file.start_with?("#{names}/") }
+    return KIND_DIRECTORY if DIRECTORIES.include?(names) || ENTRIES.any? { |entry| entry.start_with?("#{names}/") }
     return KIND_NOT_DIRECTORY if TREE.any? { |file| names.start_with?("#{file}/") }
 
     KIND_MISSING
@@ -288,7 +309,7 @@ class ReleaseFsTest < Minitest::Test
 
   def model_listing(names)
     prefix = names.empty? ? '' : "#{names}/"
-    TREE.select { |file| file.start_with?(prefix) }.map { |file| file.delete_prefix(prefix).split('/').first }.uniq
+    ENTRIES.select { |entry| entry.start_with?(prefix) }.map { |entry| entry.delete_prefix(prefix).split('/').first }.uniq
   end
 
   def all_lists

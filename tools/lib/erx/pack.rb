@@ -112,6 +112,7 @@ module Erx
       total = 0
       staged_bytes = 0
       rows = entries.each_with_index.map do |entry, index|
+        next directory_row(entry) if entry.is_a?(Hash) && entry['kind'] == @codec.member('entry_kind', 'directory')
         unless entry.is_a?(Hash) && (entry.keys - %w[path kind flags artifact receipt id jit]).empty? &&
                [nil, true].include?(entry['jit'])
           raise Error, 'invalid pack artifact fields'
@@ -171,6 +172,16 @@ module Erx
       [rows, records.values.sort_by { |record| record.fetch('path').b }.freeze]
     rescue KeyError => error
       raise Error, "missing pack artifact field: #{error.key}"
+    end
+
+    # An empty directory, a mount point with nothing under it in the archive: a path, a
+    # kind and flags, and no artifact, since it has no contents to build or attribute.
+    def directory_row(entry)
+      unless entry.keys.sort == %w[flags kind path] && entry['path'].is_a?(String) && entry['flags'].is_a?(Integer)
+        raise Error, 'an empty directory entry is its path, kind and flags'
+      end
+      { 'path' => entry.fetch('path').b.freeze, 'kind' => entry.fetch('kind'), 'flags' => entry.fetch('flags'),
+        'source' => { 'kind' => 'directory' }.freeze, 'size' => 0 }
     end
 
     # An entry that declares jit is an image the build makes JIT objects with, the

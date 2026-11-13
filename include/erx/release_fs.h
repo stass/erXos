@@ -14,10 +14,11 @@
 
 /*
  * The release file system's pure core (design-runtime.md, Files): a view of a
- * sorted list of paths. A directory has no record of its own: `d` is one
- * exactly when some path starts `d/`, and the top always is. The table must be
- * sorted by bytes and hold no path that is a prefix of another at a `/`, which
- * erx_pack_open has checked of the index it is built from.
+ * sorted list of paths, each a file or an empty directory. `d` is a directory
+ * exactly when it is an empty directory's path or some path starts `d/`, and
+ * the top always is. The table must be sorted by bytes and hold no path that
+ * is a prefix of another at a `/`, which erx_pack_open has checked of the
+ * index it is built from, so an empty directory has nothing under it.
  */
 
 typedef struct erx_release_fs_file {
@@ -25,6 +26,7 @@ typedef struct erx_release_fs_file {
 	size_t		 length;
 	uint64_t	 size;
 	uint64_t	 offset;	/* from the release's first byte */
+	bool		 directory;	/* an empty directory: size 0 */
 } erx_release_fs_file_t;
 
 typedef struct erx_release_fs {
@@ -67,7 +69,11 @@ bool		erx_release_fs_add_name(erx_release_fs_names_t *, const uint8_t *,
  */
 uint32_t	erx_release_fs_walk(const erx_release_fs_t *,
 		    const erx_release_fs_names_t *, erx_release_fs_kind_t *);
-/* names joined as a name list holds them; *file is set for ERX_RELEASE_FS_FILE. */
+/*
+ * names joined as a name list holds them; *file is set for
+ * ERX_RELEASE_FS_FILE, and only a file's entry is one: an empty
+ * directory's is ERX_RELEASE_FS_DIRECTORY.
+ */
 erx_release_fs_kind_t erx_release_fs_lookup(const erx_release_fs_t *,
 	    const uint8_t *, size_t, uint32_t *);
 /* Where a listing of the directory `names` starts. */

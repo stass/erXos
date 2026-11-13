@@ -348,13 +348,14 @@ module Erx
       archive = File.join(directory, 'image.erxpack')
       File.write(self.class.sources_path(archive), sources)
       facts = build_facts_file(directory: directory, platform: machine.platform)
-      release = [*ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec).entries,
-                 build_facts_entry(facts, release: ReleaseFiles::SYSTEM)]
+      system_release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'release'), runner: @runner, codec: @codec)
+      release = [*system_release.entries, build_facts_entry(facts, release: ReleaseFiles::SYSTEM)]
       erofs, images = ReleaseMedium.image(entries: release, directory: directory, runner: @runner)
       # Only domains run the BeamAsm image, so an image without them does not build it.
       jit = domains.empty? ? nil : @jit_runtime.build(interpreter: erts)
       domain = domain_parts(domains, erts: erts, jit: jit, archives: archives, facts: facts, directory: directory)
-      report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *domain.entries, *added.entries], root_task: root_task,
+      report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *system_release.directories, *domain.entries, *added.entries],
+                    root_task: root_task,
                     images: images, manifest_source: manifest_source, erts: erts, jit: jit, output: archive,
                     imports: IMPORTS.merge(added.imports),
                     inputs: [kernel, sigma0, *ReleaseFiles.inputs_of(release, root: @root), *build_facts_sources, *domain.inputs,
@@ -1462,9 +1463,9 @@ module Erx
       runtime = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @machine.platform,
                                fiasco: @fiasco)
                           .build_domain_runtime_receipted(directory: File.join(directory, 'domain-runtime'), archives: archives)
-      releases = [*ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'domains'), runner: @runner,
-                                    codec: @codec, release: release).entries,
-                  build_facts_entry(facts, release: release)]
+      domain_release = ReleaseFiles.new(root: @root, otp: erts.otp, directory: File.join(directory, 'domains'), runner: @runner,
+                                        codec: @codec, release: release)
+      releases = [*domain_release.entries, build_facts_entry(facts, release: release)]
       beamasm = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @machine.platform,
                                fiasco: @fiasco)
                           .build_jit_runtime_receipted(directory: File.join(directory, 'jit-runtime'),
@@ -1473,7 +1474,7 @@ module Erx
                 'id' => 'domain-runtime', 'artifact' => runtime.fetch(:program), 'receipt' => runtime.fetch(:receipt) }
       jit_image = { 'path' => JIT_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0, 'jit' => true,
                     'id' => 'jit-runtime', 'artifact' => beamasm.fetch(:program), 'receipt' => beamasm.fetch(:receipt) }
-      Added.new(entries: [image, jit_image, *releases].freeze,
+      Added.new(entries: [image, jit_image, *releases, *domain_release.directories].freeze,
                 inputs: [*runtime.fetch(:inputs), *beamasm.fetch(:inputs), *ReleaseFiles.inputs_of(releases, root: @root, applications: release.applications)].freeze,
                 imports: {}.freeze)
     end

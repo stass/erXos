@@ -21,10 +21,11 @@ module Erx
   #
   # tcg-4cpu: the boot reaches the development banner and the release with one scheduler
   # per CPU, four; root's session takes the mini UART and its command shell starts the Erlang
-  # shell, where the person types a sum, a line with a mistake rubbed out, an output longer
-  # than the mini UART's FIFOs, and a debug log record whose tab and escape the console
-  # writes as text; then Ctrl-G's menu gives the system's command shell, whose Erlang shell
-  # halts the machine, and BL31's reset ends QEMU under -no-reboot.
+  # shell, where the person types a sum, a line with a mistake rubbed out, a listing of /data
+  # (empty, since nothing is mounted there), an output longer than the mini UART's FIFOs, and
+  # a debug log record whose tab and escape the console writes as text; then Ctrl-G's menu
+  # gives the system's command shell, whose Erlang shell halts the machine, and BL31's reset
+  # ends QEMU under -no-reboot.
   #
   # tcg-cpu-removed, a seeded fault: the same image on the model's tree with one CPU's node
   # removed reaches the release with three schedulers, so the four of tcg-4cpu are the
@@ -44,6 +45,10 @@ module Erx
     STEP_SECONDS = 180
     SYSTEM_SHELL_KEY = 's'
     HALT = "erlang:halt().\r"
+    # The Pi's manifest grants root's session no data facet, so nothing is mounted at /data
+    # and the path is the session release's own empty directory (docs/design-files.md, "A
+    # facet's mount").
+    DATA_LISTING = "file:list_dir(\"/data\").\r"
     STUB_DIRECTORY = 'build/raspi4b-stub'
 
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
@@ -65,6 +70,7 @@ module Erx
                                           machine_end: false) }
     end
 
+    # Each row sends its type: once its pattern has matched, so the next row checks the answer.
     def shell_checkpoints
       shell = ProductionImage::Run::ERLANG_SHELL.merge(seconds: STEP_SECONDS)
       long = ProductionImage::Run::CONSOLE_LONG_BYTES
@@ -73,7 +79,8 @@ module Erx
        shell.merge(name: 'root_1-erlang-shell', type: "1+1.\r").freeze,
        point('sum-echo', /1\+1\.\r*\n\z/n),
        point('sum-answer', /\A2\r*\n\z/n, type: "1+2\x7f3.\r"),
-       point('edit-answer', /\A4\r*\n\z/n, type: "io:put_chars(lists:duplicate(#{long},$x)),io:nl().\r"),
+       point('edit-answer', /\A4\r*\n\z/n, type: DATA_LISTING),
+       point('data-empty', /\A\{ok,\[\]\}\r*\n\z/n, type: "io:put_chars(lists:duplicate(#{long},$x)),io:nl().\r"),
        point('long-output', /x{#{long}}/n),
        point('long-answer', /\Aok\r*\n\z/n, type: ProductionImage::Run::LOG_AFTER_HANDOFF),
        # The record the session logs: the console reads it from the log and writes it.

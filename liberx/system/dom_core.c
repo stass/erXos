@@ -372,7 +372,7 @@ dom_check_origin(const erx_dom_spec_t *spec, const erx_dom_view_t *view)
 
 /*
  * The runtime is an accepted image and the release a slice of ordinary
- * files. A partial-boot domain runs a native program with no release. A
+ * files and empty directories. A partial-boot domain runs a native program with no release. A
  * file the boot marks ERX_ENTRY_SEAL is the vault's, whose domain is
  * refused until the vault exists. *span is the bytes the release's slice
  * covers, the backend's own sum: from its first file's offset to its last
@@ -404,7 +404,8 @@ dom_check_files(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 		return (ERX_EINVAL);
 	for (uint32_t index = spec->release; index < last; index++) {
 		file = &view->files[index];
-		if (file->kind != ERX_ENTRY_FILE ||
+		if ((file->kind != ERX_ENTRY_FILE &&
+		    file->kind != ERX_ENTRY_DIRECTORY) ||
 		    (file->flags & (ERX_ENTRY_SYSTEM | ERX_ENTRY_SEAL)) != 0)
 			return (ERX_EINVAL);
 	}

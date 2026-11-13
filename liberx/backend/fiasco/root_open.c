@@ -38,7 +38,9 @@ erx_fiasco_root_open(erx_boot_handoff_view_t *handoff, erx_pack_view_t *pack)
 {
 	const l4_kernel_info_t *kip;
 	erx_pack_error_t pack_error = { 0 };
+	erx_pack_entry_t entry;
 	const char *reason;
+	uint32_t last;
 
 	kip = l4sigma0_map_kip(L4_BASE_PAGER_CAP, (void *)ERX_FIASCO_KIP_WINDOW,
 	    L4_PAGESHIFT);
@@ -60,11 +62,16 @@ erx_fiasco_root_open(erx_boot_handoff_view_t *handoff, erx_pack_view_t *pack)
 		return ("archive is not the one the record names");
 
 	/*
-	 * Entries lie in the archive in index order, so the last one's run is the
-	 * archive's end: reading it shows the whole range reached this task.
+	 * Entries lie in the archive in index order, so the last one with any
+	 * bytes ends at the archive's end: reading it shows the whole range
+	 * reached this task. An empty file or directory after it has an empty
+	 * run.
 	 */
-	if (!erx_pack_file_check(pack, pack->header.nentries - 1, &root_hasher,
-	    &pack_error))
+	last = pack->header.nentries - 1;
+	while (last > 0 && erx_pack_entry_at(pack, last, &entry) &&
+	    entry.data_size == 0)
+		last--;
+	if (!erx_pack_file_check(pack, last, &root_hasher, &pack_error))
 		return (pack_error.reason);
 	return (NULL);
 }

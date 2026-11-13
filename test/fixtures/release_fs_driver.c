@@ -8,6 +8,7 @@
  * line, each operand in hex so a name can hold any byte:
  *
  *   F <path>   a file of the release, in sorted order
+ *   D <path>   an empty directory of the release, in the same order
  *   R          empties the name list
  *   A <name>   erx_release_fs_add_name on the list; answers 1 or 0
  *   Q          answers one line for the list:
@@ -115,11 +116,12 @@ main(int argc, char **argv)
 		return (2);
 	while (fgets(line, sizeof(line), input) != NULL) {
 		operand[0] = '\0';
-		if ((line[0] == 'F' || line[0] == 'A') &&
+		if ((line[0] == 'F' || line[0] == 'D' || line[0] == 'A') &&
 		    sscanf(line + 1, "%s", operand) != 1)
 			return (2);
 		switch (line[0]) {
 		case 'F':
+		case 'D':
 			if (nfiles == DRIVER_FILES_MAX)
 				return (2);
 			length = driver_unhex(operand, bytes, sizeof(bytes));
@@ -128,6 +130,7 @@ main(int argc, char **argv)
 				return (2);
 			memcpy((void *)(uintptr_t)files[nfiles].path, bytes, length);
 			files[nfiles].length = length;
+			files[nfiles].directory = line[0] == 'D';
 			nfiles++;
 			break;
 		case 'R':

@@ -5,7 +5,7 @@
 
 /*
  * Binds an archive from a file and prints what erx_release_entry answers, one
- * entry a line: <path> <size> <offset>, then the status past the run. A refused
+ * entry a line: <path> <size> <offset> <kind>, then the status past the run. A refused
  * archive prints `refused <check>`.
  */
 
@@ -38,8 +38,10 @@ main(int argc, char **argv)
 		return (0);
 	}
 	for (index = 0; (status = erx_release_entry(index, &entry)) == 0; index++) {
-		printf("%.*s %llu %llu\n", (int)entry.path_length, (const char *)entry.path,
-		    (unsigned long long)entry.size, (unsigned long long)entry.offset);
+		printf("%.*s %llu %llu %s\n", (int)entry.path_length, (const char *)entry.path,
+		    (unsigned long long)entry.size, (unsigned long long)entry.offset,
+		    entry.kind == ERX_ENTRY_DIRECTORY ? "directory" :
+		    entry.kind == ERX_ENTRY_IMAGE ? "image" : "file");
 	}
 	printf("past %d\n", status == ERX_ERANGE ? 1 : 0);
 	printf("addr %d\n", erx_release_addr() == bytes ? 1 : 0);

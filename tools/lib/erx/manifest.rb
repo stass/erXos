@@ -143,6 +143,10 @@ module Erx
             unless source.keys.sort == %w[kind producer] && %w[manifest notices].include?(source['producer'])
               raise Invalid.new('unknown generated artifact', property: 'context', field: 'catalog.source')
             end
+          when 'directory'
+            unless source.keys == %w[kind]
+              raise Invalid.new('invalid empty directory', property: 'context', field: 'catalog.source')
+            end
           else
             raise Invalid.new('unknown catalog origin', property: 'context', field: 'catalog.source')
           end

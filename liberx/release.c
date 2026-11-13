@@ -112,6 +112,7 @@ erx_release_entry(uint64_t index, erx_release_entry_t *entry)
 		return (ERX_ERANGE);
 	entry->size = raw.data_size;
 	entry->offset = raw.data_off;
+	entry->kind = raw.kind;
 	entry->path_length = path_length - ERX_RELEASE_PREFIX_LENGTH;
 	for (size_t cursor = 0; cursor < entry->path_length; cursor++)
 		entry->path[cursor] = path[ERX_RELEASE_PREFIX_LENGTH + cursor];

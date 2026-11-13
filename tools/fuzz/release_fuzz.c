@@ -8,7 +8,10 @@
  * bit 0 recomputes the index hash, so mutations reach the checks behind it.
  * Every accepted entry must lie inside the archive and its path must pass
  * erx_release_fs_add_name name by name, so the limits of the bind and of the
- * release NIFs' decoder cannot drift apart. A refused archive names its check and lists nothing.
+ * release NIFs' decoder cannot drift apart. An empty directory holds
+ * nothing, and over the run's first entries the release file system finds
+ * each file as itself and each empty directory as a directory with nothing
+ * in it. A refused archive names its check and lists nothing.
  */
 
 #include <stddef.h>
@@ -21,6 +24,8 @@
 #include "erx/release_fs.h"
 #include "erx/pack.h"
 #include "erx/release.h"
+
+#define FUZZ_TABLE_MAX	16
 
 int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 
@@ -52,7 +57,10 @@ check_entry(const erx_release_entry_t *entry, size_t length)
 	static _Thread_local erx_release_fs_names_t names;
 	size_t start;
 
-	if (entry->offset > length || entry->size > length - entry->offset ||
+	if ((entry->kind != ERX_ENTRY_FILE && entry->kind != ERX_ENTRY_IMAGE &&
+	    entry->kind != ERX_ENTRY_DIRECTORY) ||
+	    (entry->kind == ERX_ENTRY_DIRECTORY && entry->size != 0) ||
+	    entry->offset > length || entry->size > length - entry->offset ||
 	    entry->path_length == 0 || entry->path_length >= sizeof(names.bytes))
 		abort();
 	names.count = 0;
@@ -68,6 +76,52 @@ check_entry(const erx_release_entry_t *entry, size_t length)
 	if (names.length != entry->path_length ||
 	    memcmp(names.bytes, entry->path, entry->path_length) != 0)
 		abort();
+}
+
+/*
+ * The release file system over the run's first FUZZ_TABLE_MAX entries, a
+ * sorted table in which no path is a prefix of another.
+ */
+static void
+check_table(void)
+{
+	static _Thread_local uint8_t paths[FUZZ_TABLE_MAX][ERX_PACK_PATH_MAX];
+	static _Thread_local erx_release_fs_file_t files[FUZZ_TABLE_MAX];
+	static _Thread_local erx_release_entry_t entry;
+	erx_release_fs_t fs;
+	const uint8_t *name, *path;
+	size_t name_length, length;
+	uint32_t count, cursor, file;
+
+	for (count = 0; count < FUZZ_TABLE_MAX &&
+	    erx_release_entry(count, &entry) == 0; count++) {
+		memcpy(paths[count], entry.path, entry.path_length);
+		files[count] = (erx_release_fs_file_t){ .path = paths[count],
+		    .length = entry.path_length, .size = entry.size,
+		    .offset = entry.offset,
+		    .directory = entry.kind == ERX_ENTRY_DIRECTORY };
+	}
+	fs = (erx_release_fs_t){ .files = files, .count = count };
+	for (uint32_t index = 0; index < count; index++) {
+		path = files[index].path;
+		length = files[index].length;
+		file = UINT32_MAX;
+		switch (erx_release_fs_lookup(&fs, path, length, &file)) {
+		case ERX_RELEASE_FS_FILE:
+			if (files[index].directory || file != index)
+				abort();
+			break;
+		case ERX_RELEASE_FS_DIRECTORY:
+			cursor = erx_release_fs_list_start(&fs, path, length);
+			if (!files[index].directory ||
+			    erx_release_fs_list_next(&fs, path, length, &cursor,
+			    &name, &name_length))
+				abort();
+			break;
+		default:
+			abort();
+		}
+	}
 }
 
 int
@@ -98,6 +152,7 @@ LLVMFuzzerTestOneInput(const uint8_t *input, size_t size)
 			check_entry(&entry, length);
 		if (status != ERX_ERANGE)
 			abort();
+		check_table();
 	}
 	free(bytes);
 	return (0);

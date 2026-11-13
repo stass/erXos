@@ -174,6 +174,34 @@ class ReleaseFilesTest < Minitest::Test
     assert_equal ['system'], entries.map { |entry| entry.fetch('flags') }.uniq
   end
 
+  # Each release holds an empty directory at each facet's mount point, marked as its
+  # files are, and no file of the release lies under one.
+  def test_each_release_holds_the_mount_points_as_empty_directories
+    domain = Erx::ReleaseFiles.new(root: ROOT, otp: @otp, directory: File.join(@scratch, 'domain'), runner: BootRunner.new,
+                                   codec: Codec.new, oracle: FakeOracle.new, release: Erx::ReleaseFiles.domain([base_boot]))
+    system = Erx::ReleaseFiles.new(root: ROOT, otp: @otp, directory: File.join(@scratch, 'release'), runner: BootRunner.new,
+                                   codec: Codec.new, oracle: FakeOracle.new)
+    assert_equal [{ 'path' => 'system/data', 'kind' => 'directory', 'flags' => 'system' }], system.directories
+    assert_equal [{ 'path' => 'domains/erxos/data', 'kind' => 'directory', 'flags' => 0 }], domain.directories
+    [system, domain].each do |release|
+      points = release.directories.map { |entry| "#{entry.fetch('path')}/" }
+      assert(release.entries.none? { |entry| points.any? { |point| entry.fetch('path').start_with?(point) } })
+    end
+  end
+
+  # The mount points a release holds are where erx_ns mounts a granted facet: each
+  # mount_facet/1 clause that mounts {facet, Name} at a path names one of them, and
+  # nothing else does. A clause other than the catch-all that this test cannot read fails
+  # it, so a new mount point written in another shape is never skipped.
+  def test_the_mount_points_are_where_erx_ns_mounts_facets
+    source = File.read(File.join(ROOT, 'erlang/apps/erx/src/erx_ns.erl'))
+    heads = source.scan(/^mount_facet\(([a-z][a-z0-9_]*)\)/).flatten
+    mounted = source.scan(%r{^mount_facet\(([a-z_]+)\) -> mount\(\{facet, \1\}, <<"/([a-z_]+)">>}).map(&:last)
+    refute_empty mounted, 'erx_ns.erl has no mount_facet/1 clause this test recognizes'
+    assert_equal heads.size, mounted.size, "a mount_facet/1 clause of #{heads.inspect} is not in the shape this test reads"
+    assert_equal Erx::ReleaseFiles::MOUNT_POINTS.sort, mounted.sort
+  end
+
   # One release holds every script's applications, each file once, and a script per
   # name; each script's release file is named after the script and lists only its own
   # applications, so a domain boots only what its script names and init:script_id() says which.

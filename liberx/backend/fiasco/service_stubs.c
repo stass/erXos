@@ -48,6 +48,7 @@ erx_fiasco_service_call(uint32_t number, const void *request, size_t bytes, erx_
 	reply->first = mr->mr[1];
 	reply->second = mr->mr[2];
 	reply->third = mr->mr[3];
+	reply->fourth = mr->mr[4];
 	return ((int)reply->status);
 }
 
@@ -364,8 +365,9 @@ erx_mem_copy(uint64_t dst, uint64_t dst_offset, uint64_t src, uint64_t src_offse
 
 /*
  * The path comes in pieces of at most ERX_UTCB_BYTES_MAX bytes, one request each; the
- * reply's words are the size, the offset and the path's length. Without entry, the one
- * request makes the check alone.
+ * reply's words are the size, the offset, the path's length and the entry's kind, which
+ * is a file, an image or an empty directory. Without entry, the one request makes the
+ * check alone.
  */
 int
 erx_fiasco_release_entry(uint64_t release, uint64_t index, bool check, erx_release_entry_t *entry)
@@ -385,7 +387,9 @@ erx_fiasco_release_entry(uint64_t release, uint64_t index, bool check, erx_relea
 		if (status != ERX_OK)
 			return (status);
 		path_length = reply.third;
-		if (path_length > sizeof(entry->path) || path_length < request.piece)
+		if (path_length > sizeof(entry->path) || path_length < request.piece ||
+		    (reply.fourth != ERX_ENTRY_FILE && reply.fourth != ERX_ENTRY_IMAGE &&
+		    reply.fourth != ERX_ENTRY_DIRECTORY))
 			return (ERX_ERANGE);
 		const size_t part = path_length - request.piece < ERX_UTCB_BYTES_MAX ? (size_t)(path_length - request.piece) :
 		    ERX_UTCB_BYTES_MAX;
@@ -402,6 +406,7 @@ erx_fiasco_release_entry(uint64_t release, uint64_t index, bool check, erx_relea
 	} while (request.piece < path_length);
 	entry->size = reply.first;
 	entry->offset = reply.second;
+	entry->kind = (uint8_t)reply.fourth;
 	entry->path_length = (size_t)path_length;
 	return (ERX_OK);
 }

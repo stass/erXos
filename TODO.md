@@ -1269,6 +1269,13 @@ it; git history is the record of completed work.
   started once after the reset and never restarted, where FreeBSD restarts it while no link comes up
   (`brgphy.c:356-383`), so a negotiation that sticks leaves the link down until the driver restarts.
   Restart it every few link polls without a link if the board shows a stuck negotiation.
+* [Medium] hosted runtime test, network rows (`test/integration/runtime_hosted_smoke_test.rb`,
+  `test_init_runs_from_the_archive_alone`): the rows `gen_tcp:listen(0, [])` (expects `{error,enotsup}`) and
+  `gen_udp:open(0, [])` (expects an `erx_gen_udp` socket) assume the system release ships `erx_net`, but it has
+  not since the stack left the system domain (`ReleaseFiles::NETWORK_ONLY`), so the first answers `undefined
+  function erx_gen_tcp:listen/2` and the test fails; `erx_gen_tcp` also exports `listen/2` now. Decide what
+  gen_tcp and gen_udp answer in a domain that ships no network code (an undefined-function exception is no
+  answer a caller can handle) and pin that, and move the backend rows to a domain that holds the network.
 * [Medium] manifest fuzz harness (`tools/fuzz/manifest_fuzz.c`, `tools/fuzz/manifest_verdicts.c`): `view_build`
   runs `view_check` only when the domain library admits the manifest, and a refusal is silent, so the library
   refusing a valid seed (the development manifest) leaves the target and `test/host/manifest_fuzz_test.rb` passing

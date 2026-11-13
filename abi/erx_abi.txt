@@ -144,6 +144,7 @@ flags pack_flags u32
 enum entry_kind u8
   value file 1
   value image 2
+  value directory 3
 flags entry_flags u8
   bit system 0
   bit seal 1
@@ -960,7 +961,8 @@ layout erx_fiasco_mem_copy_request wire_le 8 56
 
 # erx_release_entry in a task: the index-th entry of the slice release, its
 # file checked first when check is 1. The reply's words are the size, the
-# offset from the slice's first byte and the path's length; the path's bytes
+# offset from the slice's first byte, the path's length and the entry's
+# entry_kind; the path's bytes
 # from piece on, at most utcb_bytes_max of them, are in the caller's public
 # UTCB.
 layout erx_fiasco_release_entry_request wire_le 8 40
@@ -1006,11 +1008,12 @@ layout erx_fiasco_gate_bind_request wire_le 8 32
 layout erx_fiasco_gate_wait_request wire_le 8 8
   field caller u64 0
 
-layout erx_fiasco_reply wire_le 8 32
+layout erx_fiasco_reply wire_le 8 40
   field status i64 0
   field first u64 8
   field second u64 16
   field third u64 24
+  field fourth u64 32
 
 call debug_log 1
   waits no

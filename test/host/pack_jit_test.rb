@@ -85,6 +85,16 @@ class PackJitTest < Minitest::Test
     end
   end
 
+  # The snapshot's other entry kind without an artifact: an empty directory is its
+  # path, kind and flags, staged as an empty run with no file behind it.
+  def test_an_empty_directory_entry_is_an_empty_run_with_no_artifact
+    directory = { 'path' => 'system/data', 'kind' => @codec.member('entry_kind', 'directory'), 'flags' => 0 }
+    row = snapshot(directory).first
+    assert_equal [0, { 'kind' => 'directory' }, false], [row.fetch('size'), row.fetch('source'), row.key?('snapshot')]
+    error = assert_raises(Erx::Error) { snapshot(directory.merge('artifact' => @artifact)) }
+    assert_includes error.message, 'an empty directory entry is its path, kind and flags'
+  end
+
   private
 
   def entry(jit: nil)

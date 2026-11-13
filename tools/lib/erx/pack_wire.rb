@@ -153,6 +153,9 @@ module Erx
                row['size'].is_a?(Integer) && row.fetch('size').between?(0, budget)
           raise Error, 'invalid canonical pack row'
         end
+        if row['kind'] == @codec.member('entry_kind', 'directory') && !row.fetch('size').zero?
+          raise Error, 'an empty directory has no contents'
+        end
       end
     end
 
@@ -162,7 +165,9 @@ module Erx
       write_all(output, layout.strings)
       zero(output, layout.index_end - output.pos)
       rows.each do |row|
-        if row.key?('plan')
+        if row.fetch('kind') == @codec.member('entry_kind', 'directory')
+          next # an empty directory's run is empty
+        elsif row.key?('plan')
           write_image(row, output)
         else
           File.open(row.fetch('snapshot'), 'rb') do |input|

@@ -13,7 +13,7 @@ static int erx_release_fs_order(const erx_release_fs_file_t *, const uint8_t *,
     size_t, bool);
 static uint32_t erx_release_fs_first_at(const erx_release_fs_t *, const uint8_t *,
     size_t, bool);
-static bool erx_release_fs_is_file(const erx_release_fs_t *, const uint8_t *,
+static bool erx_release_fs_find(const erx_release_fs_t *, const uint8_t *,
     size_t, uint32_t *);
 static bool erx_release_fs_below(const erx_release_fs_file_t *, const uint8_t *,
     size_t);
@@ -58,9 +58,10 @@ erx_release_fs_first_at(const erx_release_fs_t *fs, const uint8_t *key,
 	return (low);
 }
 
+/* Whether an entry, a file or an empty directory, has exactly the path key. */
 static bool
-erx_release_fs_is_file(const erx_release_fs_t *fs, const uint8_t *key,
-    size_t length, uint32_t *file)
+erx_release_fs_find(const erx_release_fs_t *fs, const uint8_t *key,
+    size_t length, uint32_t *entry)
 {
 	uint32_t index;
 
@@ -68,7 +69,7 @@ erx_release_fs_is_file(const erx_release_fs_t *fs, const uint8_t *key,
 	if (index == fs->count ||
 	    erx_release_fs_order(&fs->files[index], key, length, false) != 0)
 		return (false);
-	*file = index;
+	*entry = index;
 	return (true);
 }
 
@@ -92,18 +93,24 @@ erx_release_fs_kind_t
 erx_release_fs_lookup(const erx_release_fs_t *fs, const uint8_t *names,
     size_t length, uint32_t *file)
 {
-	uint32_t first, ignored;
+	uint32_t first, found;
 
 	if (length == 0)
 		return (ERX_RELEASE_FS_DIRECTORY);
-	if (erx_release_fs_is_file(fs, names, length, file))
+	if (erx_release_fs_find(fs, names, length, &found)) {
+		if (fs->files[found].directory)
+			return (ERX_RELEASE_FS_DIRECTORY);
+		*file = found;
 		return (ERX_RELEASE_FS_FILE);
+	}
 	first = erx_release_fs_first_at(fs, names, length, true);
 	if (first < fs->count && erx_release_fs_below(&fs->files[first], names, length))
 		return (ERX_RELEASE_FS_DIRECTORY);
+	/* Below a file: not a directory; below an empty directory: nothing. */
 	for (size_t prefix = 1; prefix < length; prefix++) {
 		if (names[prefix] == '/' &&
-		    erx_release_fs_is_file(fs, names, prefix, &ignored))
+		    erx_release_fs_find(fs, names, prefix, &found) &&
+		    !fs->files[found].directory)
 			return (ERX_RELEASE_FS_NOT_DIRECTORY);
 	}
 	return (ERX_RELEASE_FS_MISSING);

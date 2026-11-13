@@ -244,7 +244,8 @@ release_index(const program_t *program, uint64_t *index)
 	if (entry == NULL)
 		return (ERX_ENOMEM);
 	for (uint64_t at = 0; (status = erx_release_entry(at, entry)) == ERX_OK; at++) {
-		if (entry->path_length == program->spec.image_len &&
+		if (entry->kind != ERX_ENTRY_DIRECTORY &&
+		    entry->path_length == program->spec.image_len &&
 		    memcmp(entry->path, program->spec.image, program->spec.image_len) == 0) {
 			*index = at;
 			break;

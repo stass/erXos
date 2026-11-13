@@ -3127,12 +3127,12 @@ header, 96 bytes, at offset 0
 entry, 64 bytes, sorted by path, strictly ascending as byte strings
   u32     path_off       into the string table
   u16     path_len       1 .. 4,096
-  u8      kind           1 file, 2 executable image
-  u8      flags          ERX_ENTRY_SYSTEM: a file of the system release;
-                         ERX_ENTRY_SEAL: a file of the vault's release; others zero
+  u8      kind           1 file, 2 executable image, 3 empty directory
+  u8      flags          ERX_ENTRY_SYSTEM: an entry of the system release;
+                         ERX_ENTRY_SEAL: an entry of the vault's release; others zero
   u64     data_off       a multiple of 4,096
-  u64     data_size
-  u64     manifest_off   image: the manifest's offset from data_off; file: 0
+  u64     data_size      empty directory: 0
+  u64     manifest_off   image: the manifest's offset from data_off; otherwise 0
   u8[32]  file_hash      BLAKE3 of the entry's file run: data_size bytes
                          from data_off, then zeros to the next page boundary
 ```
@@ -3179,8 +3179,10 @@ nothing and puts no input-sized array on the kernel stack:
    no byte below `0x20` and no `0x7f`, components separated by `/`, no
    leading or trailing `/`, no empty component, no `.` or `..`.
 5. Paths ascend strictly, so no path appears twice. The bounded
-   file-prefix stack rejects a path that begins with any earlier file's
-   path followed by `/`, so no file is also a directory. The comparison
+   file-prefix stack rejects a path that begins with any earlier entry's
+   path followed by `/`, so no file is also a directory, and an empty
+   directory has nothing under it: a directory with entries under it is
+   implied by them, so each directory has one representation. The comparison
    includes nonadjacent entries: byte order can place `a-foo` between
    `a` and `a/b`.
 6. Each entry's data lies inside the archive, and the entries' data appear
@@ -3190,7 +3192,10 @@ nothing and puts no input-sized array on the kernel stack:
    files share a page, no file shares a page with the index, a run of
    entries is exactly a run of pages, and the archive, which ends at the
    first page boundary at or after the last entry's data, is exactly the
-   index run followed by the file runs, each byte in one run.
+   index run followed by the file runs, each byte in one run. An empty
+   directory's data size is 0, so its run is empty and starts where the
+   next one does; its hash is the empty run's, which `erx_pack_file_check`
+   checks as it checks any run's.
 7. The entries that carry `ERX_ENTRY_SYSTEM` form one contiguous run of the
    table, `root_entry` is an executable among them, and the system
    configuration's path names a file among them; the entries that

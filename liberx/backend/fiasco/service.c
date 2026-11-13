@@ -290,7 +290,8 @@ service_main(void)
 		mr->mr[1] = reply.first;
 		mr->mr[2] = reply.second;
 		mr->mr[3] = reply.third;
-		tag = l4_ipc_reply_and_wait(utcb, l4_msgtag(0, 4, 0, 0), &label, L4_IPC_SEND_TIMEOUT_0);
+		mr->mr[4] = reply.fourth;
+		tag = l4_ipc_reply_and_wait(utcb, l4_msgtag(0, 5, 0, 0), &label, L4_IPC_SEND_TIMEOUT_0);
 	}
 }
 
