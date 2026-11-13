@@ -1433,19 +1433,26 @@ opens in root's session. Type each command as shown and press Enter.
    `dmesg | grep erx_lfs` prints a line that ends `erx_lfs: volume mounted`.
    A line `erx_blk: the SD card is not driven: REASON` instead means the
    driver refused the card, and REASON says at which step.
-4. **`/data` is the card's volume.** `mount` prints, among its lines,
-   one that starts `grant` and holds `on /data`. On a freshly written
-   card `ls /data` prints nothing. Then
+4. **`/data` is the card's volume.** `/data` is the littlefs volume on
+   the card's data partition. The storage domain serves it, and root's
+   session reaches it through a grant, an entry of its namespace that
+   names the storage domain's file service, so `mount` prints, among its
+   lines, one that starts `grant` and holds `on /data`. On a freshly
+   written card `ls /data` prints nothing. Then
 
    ```sh
    echo written on the board > /data/hello
    cat /data/hello
    ```
 
-   prints `written on the board`. A write that fails with a read-only
-   file system error (`erofs`) means `/data` is not mounted; one that
-   fails with an I/O error (`eio`) means it is mounted but the storage
-   domain does not serve it, which step 3's lines explain.
+   prints `written on the board`. Two errors mean the write never
+   reached littlefs:
+   * a read-only file system error (`erofs`): the session holds no
+     `data` grant, so `/data` is the release image's own empty directory,
+     and the release image is a read-only EROFS image;
+   * an I/O error (`eio`): the grant is there but no volume is behind it,
+     because the storage domain has no card or did not mount it, which
+     step 3's lines explain.
 5. **`/data` survives a reset.** Wait five seconds, then reset the
    machine from the system's own shell: press Ctrl-G, which prints
    `erx_console: Ctrl-G menu`; press `s`, which gives the system's
