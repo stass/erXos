@@ -1431,11 +1431,10 @@ started_values(const program_t *program, size_t *len)
 /*
  * Passes a hand-off's copies into the running program's image, or stops the program. A
  * pass refused partway leaves its earlier copies in the image's table, where the program
- * could find and use them though no frame names them, and the stopgap's table answers
- * neither which ones went nor how much room is left, since the program's own objects fill
- * it too and the backend grows it from a shared pool. So a refused pass, a refusal the
- * driver cannot undo, stops the program with 256 + SIGKILL, and every copy ends with the
- * image (TODO.md).
+ * could find and use them though no frame names them, and a mapping it made from one
+ * outlives moving the copy back out. So a refused pass, a refusal the driver cannot undo,
+ * stops the program with 256 + SIGKILL, and every copy and mapping ends with the image
+ * (docs/design-pipes.md, "Hand-offs").
  */
 static int
 pass_or_stop(program_t *program, const erx_pipe_hand_t *hand, uint64_t copies[])
