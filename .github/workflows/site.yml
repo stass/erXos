@@ -7,10 +7,13 @@
 # The erXos image and the Raspberry Pi 4's card need the full erXos toolchain
 # (the cross compilers, the OTP and Fiasco builds), which this job does not
 # set up. It takes each, and the card's build record, from a URL instead,
-# normally a release asset, and checks it against the SHA-256 given with it;
-# tools/build_site.rb then refuses a record that does not name the card's
-# SHA-256 or the commit image_source resolves to, built with no changes,
-# and publishes the card xz-compressed (Erx::Site::XZ_ARGUMENTS).
+# normally a release asset, and checks it against the SHA-256 given with it.
+# GitHub refuses a release asset of 2 GiB or more, which the card is, so the
+# release holds the card as sdcard.img.xz: the workflow checks the SHA-256 of
+# that file, unpacks it (at most CARD_MAX_BYTES), and tools/build_site.rb
+# then refuses a record that does not name the unpacked card's SHA-256 or
+# the commit image_source resolves to, built with no changes, and publishes
+# the card xz-compressed again (Erx::Site::XZ_ARGUMENTS).
 # The image and the card carry GPL-2.0 files, so the page links the erXos
 # source both were built from: the commit image_source, a release tag or a
 # commit, resolves to.
@@ -30,11 +33,11 @@ on:
       image_source:
         description: the erXos release tag or full commit the image and the card were built from; the page links its source
         required: true
-      card_url:
-        description: URL of the Raspberry Pi 4's sdcard.img (e.g. a release asset)
+      card_xz_url:
+        description: URL of the Raspberry Pi 4's sdcard.img.xz, the card xz-compressed (e.g. a release asset)
         required: true
-      card_sha256:
-        description: SHA-256 of that sdcard.img
+      card_xz_sha256:
+        description: SHA-256 of that sdcard.img.xz, not of the card inside it (the record holds that one)
         required: true
       card_record_url:
         description: URL of the card's build record, its sdcard.img.receipt.json
@@ -61,11 +64,11 @@ jobs:
         env:
           IMAGE_SHA256: ${{ inputs.image_sha256 }}
           IMAGE_SOURCE: ${{ inputs.image_source }}
-          CARD_SHA256: ${{ inputs.card_sha256 }}
+          CARD_XZ_SHA256: ${{ inputs.card_xz_sha256 }}
           CARD_RECORD_SHA256: ${{ inputs.card_record_sha256 }}
         run: |
           [[ "$IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "image_sha256 must be 64 lowercase hex digits" >&2; exit 1; }
-          [[ "$CARD_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "card_sha256 must be 64 lowercase hex digits" >&2; exit 1; }
+          [[ "$CARD_XZ_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "card_xz_sha256 must be 64 lowercase hex digits" >&2; exit 1; }
           [[ "$CARD_RECORD_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
             { echo "card_record_sha256 must be 64 lowercase hex digits" >&2; exit 1; }
           [[ "$IMAGE_SOURCE" =~ ^[0-9a-f]{40}$ ]] ||
@@ -108,17 +111,33 @@ jobs:
           echo "$IMAGE_SHA256  image.boot" | sha256sum --check --strict
       - name: Download the Raspberry Pi 4's card
         env:
-          CARD_URL: ${{ inputs.card_url }}
-          CARD_SHA256: ${{ inputs.card_sha256 }}
+          CARD_XZ_URL: ${{ inputs.card_xz_url }}
+          CARD_XZ_SHA256: ${{ inputs.card_xz_sha256 }}
           CARD_RECORD_URL: ${{ inputs.card_record_url }}
           CARD_RECORD_SHA256: ${{ inputs.card_record_sha256 }}
         run: |
           curl --fail --location --proto '=https' --proto-redir '=https' --max-time 600 --max-filesize 1073741824 \
-            --output sdcard.img --url "$CARD_URL"
-          echo "$CARD_SHA256  sdcard.img" | sha256sum --check --strict
+            --output sdcard.img.xz --url "$CARD_XZ_URL"
+          echo "$CARD_XZ_SHA256  sdcard.img.xz" | sha256sum --check --strict
           curl --fail --location --proto '=https' --proto-redir '=https' --max-time 60 --max-filesize 1048576 \
             --output sdcard.img.receipt.json --url "$CARD_RECORD_URL"
           echo "$CARD_RECORD_SHA256  sdcard.img.receipt.json" | sha256sum --check --strict
+      # The hash above pins the download, not the size of what is inside it.
+      # The size check on the unpacked file is the bound; head only stops the
+      # unpacking from running on past it, and pipefail makes xz's own errors
+      # (a damaged or cut-off file, the memory limit) fail the step. The
+      # unpacked card is untrusted until tools/build_site.rb matches its
+      # SHA-256 to the build record.
+      - name: Unpack the Raspberry Pi 4's card
+        env:
+          CARD_MAX_BYTES: "4294967296"
+        run: |
+          set -o pipefail
+          xz --decompress --stdout --format=xz --memlimit-decompress=256MiB sdcard.img.xz |
+            head -c $((CARD_MAX_BYTES + 1)) > sdcard.img ||
+            { echo "sdcard.img.xz could not be unpacked within $CARD_MAX_BYTES bytes" >&2; exit 1; }
+          [[ "$(wc -c < sdcard.img)" -le "$CARD_MAX_BYTES" ]] ||
+            { echo "sdcard.img.xz unpacks to more than $CARD_MAX_BYTES bytes" >&2; exit 1; }
       - name: Build v64 and assemble the site
         run: ruby tools/build_site.rb --image image.boot --card sdcard.img --card-record sdcard.img.receipt.json --source "$IMAGE_COMMIT"
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3

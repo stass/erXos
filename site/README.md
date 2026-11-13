@@ -132,25 +132,41 @@ recorded session; the Boot button needs the built site.
 `.github/workflows/site.yml` runs the same steps on GitHub, by hand only,
 and publishes `build/site` to GitHub Pages. It does not build the erXos
 image or the card, which need the whole erXos toolchain; it downloads a
-release's `image.boot` and `sdcard.img`, each named by its URL and SHA-256
-as the workflow's inputs, and the card's `sdcard.img.receipt.json` by its
-URL and SHA-256 too, and refuses one whose digest differs; each download
-is capped in size. The build step then checks the record against the
-card's digest and the commit `image_source` resolves to. The
-`image_source` input names the release tag or commit both were built
-from; the page links the commit it resolves to.
+release's `image.boot` and `sdcard.img.xz` (GitHub refuses a release asset
+of 2 GiB or more, and the card is 2 GiB), each named by its URL and its own
+SHA-256 as the workflow's inputs, and the card's `sdcard.img.receipt.json` by
+its URL and SHA-256 too, and refuses one whose digest differs; each download
+is capped in size (the compressed card must stay under 1 GiB). It then
+unpacks the card with `xz`, stopping at 4 GiB (`CARD_MAX_BYTES`), so a
+hostile file cannot fill the runner's disk. The build step computes the
+unpacked card's SHA-256 and refuses a record that does not name it, or does
+not name the commit `image_source` resolves to. So `card_xz_sha256` pins the
+download and the record pins the card inside it.
+The `image_source` input names the release tag or commit both were built
+from; the page links the commit it resolves to. The build compresses the card
+again for the page, with the same options every time, so the page's download
+does not depend on how the release's `sdcard.img.xz` was compressed.
 Runs share one `pages` concurrency group, so two deployments never
 overlap; a run waiting there is replaced by a newer dispatch.
 
 To publish: in the repository settings, set Pages to deploy from GitHub
-Actions; attach an `image.boot` built with `tools/erx boot --without-web`,
-and the `sdcard.img` and `sdcard.img.receipt.json` that
-`make pack PLATFORM=raspi4b` builds, from the same commit, to a release;
-then run the `site` workflow with those assets' URLs and SHA-256s:
+Actions. Attach to a release an `image.boot` built with
+`tools/erx boot --without-web`, and, from the same commit, the card that
+`make pack PLATFORM=raspi4b` builds, compressed, and its record:
+
+```
+xz --keep --check=crc64 -9 --threads=1 build/production-image/raspi4b/sdcard.img
+sha256sum build/production-image/raspi4b/sdcard.img.xz
+```
+
+The assets are `image.boot`, `sdcard.img.xz` and `sdcard.img.receipt.json`;
+the card is uploaded only compressed. Then run the `site` workflow with the
+assets' URLs and SHA-256s. `card_xz_sha256` is the `sdcard.img.xz` file's, not
+the card's (the record holds that one):
 
 ```
 gh workflow run site.yml -f image_url=URL -f image_sha256=DIGEST -f image_source=TAG \
-  -f card_url=URL -f card_sha256=DIGEST -f card_record_url=URL -f card_record_sha256=DIGEST
+  -f card_xz_url=URL -f card_xz_sha256=DIGEST -f card_record_url=URL -f card_record_sha256=DIGEST
 ```
 
 `ruby test/host/site_test.rb` tests the build step.

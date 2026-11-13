@@ -474,20 +474,48 @@ class SiteTest < Minitest::Test
     assert_equal({ 'group' => 'pages', 'cancel-in-progress' => false }, workflow.fetch('concurrency'))
     steps = workflow.dig('jobs', 'build', 'steps')
     check = steps.find { |step| step['name'] == 'Check the inputs' }.fetch('run')
-    good = { 'IMAGE_SHA256' => 'a' * 64, 'IMAGE_SOURCE' => COMMIT, 'CARD_SHA256' => 'b' * 64,
+    good = { 'IMAGE_SHA256' => 'a' * 64, 'IMAGE_SOURCE' => COMMIT, 'CARD_XZ_SHA256' => 'b' * 64,
              'CARD_RECORD_SHA256' => 'c' * 64 }
     assert system(good, 'bash', '-e', '-c', check, out: File::NULL, err: File::NULL)
     [{ 'IMAGE_SHA256' => 'A' * 64 }, { 'IMAGE_SHA256' => "#{'a' * 64}\nb" }, { 'IMAGE_SHA256' => 'a' * 63 },
-     { 'CARD_SHA256' => 'b' * 63 }, { 'CARD_SHA256' => '' }, { 'CARD_RECORD_SHA256' => 'C' * 64 },
+     { 'CARD_XZ_SHA256' => 'b' * 63 }, { 'CARD_XZ_SHA256' => '' }, { 'CARD_RECORD_SHA256' => 'C' * 64 },
      { 'CARD_RECORD_SHA256' => '' }, { 'IMAGE_SOURCE' => '../x' }, { 'IMAGE_SOURCE' => 'v1 x' }, { 'IMAGE_SOURCE' => '' }].each do |bad|
       refute system(good.merge(bad), 'bash', '-e', '-c', check, out: File::NULL, err: File::NULL), bad.inspect
     end
-    # Each download is checked against its digest, the card's record as well as the card,
-    # and capped in size.
+    # Each download is checked against its digest, the card's record as well as the compressed
+    # card, and capped in size.
     { 'Download the erXos image' => 1, "Download the Raspberry Pi 4's card" => 2 }.each do |name, checked|
       run = steps.find { |step| step['name'] == name }.fetch('run')
       assert_equal checked, run.scan('sha256sum --check --strict').size, name
       assert_equal run.scan('curl ').size, run.scan('--max-filesize').size, name
+    end
+  end
+
+  # GitHub refuses a release asset of 2 GiB or more, so the card is taken as sdcard.img.xz and
+  # unpacked by its own step, run here as the workflow runs it with a small bound. An xz that is
+  # damaged, cut short, not xz at all or unpacks past the bound fails the step.
+  def test_the_workflow_unpacks_the_card_within_a_bound
+    workflow = YAML.safe_load(File.read(File.join(REPO, '.github/workflows/site.yml')))
+    step = workflow.dig('jobs', 'build', 'steps').find { |s| s['name'] == "Unpack the Raspberry Pi 4's card" }
+    assert_equal '4294967296', step.dig('env', 'CARD_MAX_BYTES')
+    # The step needs bash (its [[ and pipefail), which is what a step without a shell runs.
+    refute step.key?('shell'), 'a step shell'
+    refute workflow.key?('defaults'), 'a default shell'
+    xz = ->(bytes) { Open3.capture2(*Erx::Site::XZ_ARGUMENTS, stdin_data: bytes, binmode: true).first }
+    whole = xz.call('card' * 250)
+    cases = { 'exactly at the bound' => [whole, true],
+              'one byte past the bound' => [xz.call('card' * 250 + 'x'), false],
+              'a bomb far past the bound' => [xz.call("\0" * 10_000_000), false],
+              'cut short' => [whole[0, whole.bytesize - 8], false],
+              'not xz' => ["\x1f\x8b#{'gzip' * 100}".b, false] }
+    cases.each do |name, (bytes, accepted)|
+      Dir.mktmpdir do |dir|
+        File.binwrite(File.join(dir, 'sdcard.img.xz'), bytes)
+        ok = system({ 'CARD_MAX_BYTES' => '1000' }, 'bash', '-e', '-c', step.fetch('run'), chdir: dir,
+                    out: File::NULL, err: File::NULL)
+        assert_equal accepted, ok, name
+        assert_equal 'card' * 250, File.binread(File.join(dir, 'sdcard.img')) if accepted
+      end
     end
   end
 end

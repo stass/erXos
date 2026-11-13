@@ -6229,9 +6229,7 @@ document's "residual risks accepted" paragraph.
   image holds the release too, from which the system domain starts, until
   the boot from the medium decides which releases leave the boot image
   ([design-storage.md](docs/design-storage.md#data-model)).
-* [Medium] Raspberry Pi card (`tools/lib/erx/pi_medium.rb`, `boot_partition.rb`, `site.rb`): the card is 2 GiB, and
-  `.github/workflows/site.yml` takes it as a release asset, whose size limit (possibly under 2 GiB) is unchecked;
-  take the compressed card there instead if it is. The data volume is formatted for `PiMedium.data_sectors` by the
+* [Medium] Raspberry Pi card (`tools/lib/erx/pi_medium.rb`, `boot_partition.rb`, `site.rb`): the data volume is formatted for `PiMedium.data_sectors` by the
   caller and nothing ties its length to the card's partition; the finished card is not read back through
   `BootRecord.read` and `extract`; `release.erofs` and `data.lfs` are not scanned for the build path (the EROFS
   files are, through `image.boot`); an oversized `kernel8.img` fails in fsimg rather than with a diagnostic;
