@@ -18,7 +18,7 @@
 -define(TABLES, [principals, domains, sessions, limits, runtime_limits, lane_classes, units, devices,
                  windows, services, facets, facet_operations, facet_parameters, introductions,
                  images, extents, boot_order, liveness, shell_principals, partial_boot,
-                 starts]).
+                 starts, displays]).
 
 run([Corpus]) ->
     {ok, Bytes} = file:read_file(Corpus),

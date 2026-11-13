@@ -491,7 +491,8 @@ connection's two sides and two bells:
   domain or for each session of a session template, and gives each
   party its capability, without the right to delete it
   ([design-system.md](design-system.md#the-domain-library)). A pair of
-  domains whose grant carries no `pixels` has a connection without one.
+  domains with no grant of a display between them has a connection
+  without one; a grant that states no `pixels` has the default area.
   No request at run time makes, grows or shrinks a pixel area, so no
   party waits on another for memory and a window's making and resizing
   involve the system domain not at all.
@@ -2729,8 +2730,8 @@ facet thermostat_display
   name "display"
   grantee @session.thermostat
   service @service.display
-  windows 2
-  pixels 3072000
+  parameter windows 2
+  parameter pixels 3072000
   ...
 facet thermostat_data
   name "data"

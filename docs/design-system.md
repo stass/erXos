@@ -595,19 +595,30 @@ violation fails the build with the property, the record and the field:
     none is planned for it. Seeded violation: a check that plans the
     enabled rows alone, which admits a system principal whose memory
     holds its start row but not root's console session beside it.
-18. **A display's pixel areas fit its budget:** every `display` record
-    names a service of the `windows` interface, at most one record for
-    each; for each display, the `pixels` of every facet row of its
-    service, each rounded up to pages, counted once for a configured
-    domain and, for a session template, as many times as its principal's
-    `domains` quota lets sessions of it live at once, sum within the
-    display domain's outer budget beside the sides it reads, since the
-    display pays for every pixel area it maps; and no facet row sets the
-    `session` parameter, which the domain service alone sets
+18. **A display's pixel areas fit its budget:** every service of the
+    `windows` interface has exactly one `display` record and every
+    `display` record names such a service, so no grant of a display
+    escapes the sum below; its server, the display domain, is a
+    configured domain, never the system domain, and serves no other
+    display, so no domain pays for two displays' grants out of one outer
+    budget; for each display, each
+    grant of its service costs the display its `pixels`, or
+    `windows_pixels_default` of `abi/services/windows.txt` where the
+    facet row states none, rounded up to pages, and the side the display
+    reads for it, the display's own `lane` rounded up to pages; a grant
+    counts once for a configured domain or the system domain and, for a
+    session template, as many times as its principal's `domains` quota
+    lets sessions of it live at once; the costs sum within the display
+    domain's outer budget, since the display pays for every pixel area it
+    maps and every side it reads; and no facet row sets the `session`
+    parameter, which the domain service alone sets
     ([design-display.md](design-display.md#the-pixel-area)). Seeded
     violations: a check that counts a template's row once, which admits
-    a template whose sessions together pass the budget; and a facet row
-    that sets `session`.
+    a template whose sessions together pass the budget; a facet row
+    that sets `session`; a `windows` service with no `display`
+    record, whose grants no sum would count; and a check that sums
+    each display alone, which admits a domain serving two displays
+    whose grants together pass its budget.
 
 Each property has a test that seeds one violation into a manifest and
 expects the build to fail with that property's diagnostic.

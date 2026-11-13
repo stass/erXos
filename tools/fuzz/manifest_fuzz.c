@@ -95,7 +95,7 @@ view_check(const erx_manifest_view_t *view, const erx_dom_lib_t *lib)
 	for (uint32_t index = 0; index < dom->nfacets; index++) {
 		facet = &dom->facets[index];
 		if (!erx_manifest_facets_at(view, index, &facet_row) || facet_row.operations.count != 0 ||
-		    facet_row.parameters.count != 0 || facet->service >= dom->nservices ||
+		    facet->service >= dom->nservices ||
 		    !grantee_admitted(dom, facet))
 			abort();
 		for (uint32_t earlier = 0; earlier < index; earlier++) {
@@ -183,6 +183,7 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	MANIFEST_TABLE(&view, shell_principals, erx_mf_shell_principal_t);
 	MANIFEST_TABLE(&view, partial_boot, erx_mf_partial_boot_t);
 	MANIFEST_TABLE(&view, starts, erx_mf_start_t);
+	MANIFEST_TABLE(&view, displays, erx_mf_display_t);
 	view_build(&view);
 	return (0);
 }

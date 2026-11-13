@@ -98,6 +98,10 @@ enum mf_parameter_kind u32
   value principal 7
   value device 8
   value bytes 9
+# A display's window policy (docs/design-display.md, "Policies").
+enum mf_display_policy u32
+  value single 1
+  value rio 2
 enum mf_image_format u32
   value erofs_verity 1
   value erofs_unchecked 2
@@ -123,7 +127,7 @@ layout erx_share wire_le 8 48
   field ceiling urgency 41
   field flags group_flags 42
   padding 44 4
-layout erx_manifest wire_le 8 392
+layout erx_manifest wire_le 8 400
   field magic u32 0
   field version u16 4
   field flags manifest_flags 6
@@ -171,6 +175,7 @@ layout erx_manifest wire_le 8 392
   field system_args erx_mf_str 368
   field sessions erx_mf_span 376
   field starts erx_mf_span 384
+  field displays erx_mf_span 392
 layout erx_mf_principal wire_le 8 80
   field name erx_mf_str 0
   field memory u64 8
@@ -214,6 +219,16 @@ layout erx_mf_start wire_le 4 24
   field restart_period_s u32 16
   field reserved u32 20
   zero reserved all
+# A display (docs/design-display.md, "A display's session"): the service of the windows
+# interface it describes, so the display's name is that service's, its window policy,
+# and the idle seconds after which erx_screen dims the panel and turns it off, 0 for
+# never. The windows table above is a medium's partition windows; it has nothing to do
+# with the windows interface.
+layout erx_mf_display wire_le 4 16
+  field service u32 0
+  field policy mf_display_policy 4
+  field idle_dim_s u32 8
+  field idle_off_s u32 12
 layout erx_mf_limits wire_le 8 160
   field name erx_mf_str 0
   field memory u64 8
@@ -349,14 +364,14 @@ reader manifest erx_manifest @manifest_bytes_max
   extent root.length
   value root.magic @manifest_magic
   value root.version @manifest_version
-  value root.header_size 392
+  value root.header_size 400
   range root.max_domains 0 65536
   range root.max_connections 1 65536
   range root.system_reserve 1 1000
   range domains[].boot_timeout_s 1 @boot_timeout_max_s
-  choice root.flags manifest_mode root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.starts.count,root.partial_boot.count
-    case release root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.starts.count
-    case development root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.starts.count
+  choice root.flags manifest_mode root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.starts.count,root.displays.count,root.partial_boot.count
+    case release root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.starts.count,root.displays.count
+    case development root.domains.count,root.sessions.count,root.services.count,root.facets.count,root.introductions.count,root.boot_order.count,root.liveness.count,root.starts.count,root.displays.count
     case partial root.partial_boot.count
   table principals erx_mf_principal root.principals.offset root.principals.count @manifest_records_max 8
   table domains erx_mf_domain root.domains.offset root.domains.count @manifest_records_max 8
@@ -379,8 +394,9 @@ reader manifest erx_manifest @manifest_bytes_max
   table shell_principals erx_mf_shell_principal root.shell_principals.offset root.shell_principals.count @manifest_records_max 4
   table partial_boot erx_mf_partial_boot root.partial_boot.offset root.partial_boot.count @manifest_records_max 8
   table starts erx_mf_start root.starts.offset root.starts.count @start_rows_max 4
+  table displays erx_mf_display root.displays.offset root.displays.count @manifest_records_max 4
   string_table strings root.strings.offset root.strings.count @manifest_strings_max
-  order principals domains sessions limits runtime_limits lane_classes units devices windows services facets facet_operations facet_parameters introductions images extents boot_order liveness shell_principals partial_boot starts strings
+  order principals domains sessions limits runtime_limits lane_classes units devices windows services facets facet_operations facet_parameters introductions images extents boot_order liveness shell_principals partial_boot starts displays strings
   index root.system_principal principals
   index root.system_runtime_limits runtime_limits
   index root.native_limits limits
@@ -471,3 +487,4 @@ reader manifest erx_manifest @manifest_bytes_max
   index starts[].display services absent 0xffffffff
   range starts[].restarts 0 @start_restarts_max
   range starts[].restart_period_s 1 @start_period_max_s
+  index displays[].service services

@@ -363,10 +363,13 @@ release's services and the configured domains need, `domain`, `window`,
 `service`, `facet`, `introduce` and `image` among them, and refuses
 `partial_boot` and `liveness` records with a diagnostic naming the milestone
 that brings them. It accepts a `facet` only of a service a configured domain
-serves, and only when it names no operation and no parameter: those resolve
-against the service's generated declarations at M5, so such a facet grants
-the whole service, and the domain library's boot view refuses one that names
-any. Its `image` records are
+serves, and only when it names no operation: operations resolve against the
+service's generated declarations at M5, so such a facet would grant the whole
+service, and the domain library's boot view refuses one that names any. A
+facet's parameters it resolves as [design-abi.md](design-abi.md) says, each
+key against its service's declaration and each value against that key's kind
+and bound, and the manifest property that consumes them holds as written, as
+property 18 does for `windows`. Its `image` records are
 format `erofs_unchecked` ([design-abi.md](design-abi.md)): the packer writes no
 hash tree, so an image's record carries its data's length and extents, which
 the packer derives from the built image, the artifact its `input` names, and
@@ -390,7 +393,7 @@ seeded violation and each refusal with a seeded record:
 | Property | Phase 1 | Whole again at |
 | --- | --- | --- |
 | 1 one holder per device and unit | kept; a holder is the system domain or a configured domain | |
-| 2 facets name servers | kept, with introductions: a facet names a service of the manifest, served by the system domain or a configured domain, and is granted to the system domain or a configured domain, which takes one facet of a service name; a facet's operations and parameters are not resolved, so a facet that names any is refused | M5 (operations and parameters) |
+| 2 facets name servers | kept, with introductions: a facet names a service of the manifest, served by the system domain or a configured domain, and is granted to the system domain or a configured domain, which takes one facet of a service name; a facet's operations are not resolved, so a facet that names any is refused; its parameters are resolved against its service's declarations | M5 (operations) |
 | 3 PCIe configuration space | QEMU `virt` drives no bridge in Phase 1, so no holder is allowed and no `pci` device is placed | M9 |
 | 4 budgets and grants sum | kept for `root_memory`, baseline, shares, the configured domains' budgets and grants and `max_domains`; the configured domains' sums are the planner's (property 12); `root_startup` by the rule below. The sums are checked at build time; nothing enforces them at run time ([Budgets and groups as records](#budgets-and-groups-as-records)) | Track K (`root_startup`, enforcement) |
 | 5 names | kept | |
@@ -400,6 +403,7 @@ seeded violation and each refusal with a seeded record:
 | 9 a release build's confinement | release builds refused. In a development build every virtio-mmio device is unconfined and allowed, whoever holds it, the display domain's gpu and input devices and the network domain's net device among them, as the property's development clause says; the display domain is reported in the trusted base. The packer sets `ERX_PACK_UNCONFINED_DMA` when the manifest gives an unconfined device, as the property says, and nothing reads it | M11 |
 | 10 boot order, 11 rescue, 12 child domains, 13 headroom | kept; 12 runs the host build of `erx_dom_plan_configured` in boot order and `erx_dom_plan_connect` over the introductions, recording each plan, as on erXos's kernel, so the configured domains' sums of 4 and 13 are the planner's; 13 is a configuration check and nothing enforces grants at run time | |
 | 14 session templates | kept: a template is a record of the session table, keyed by its principal's name, so a principal has one; its principal exists and its profile has `SPACES`; nothing that resolves through the domain table reaches it, and the domain library's boot view refuses templates out of principal order | |
+| 17 start rows, 18 a display's pixel areas | kept | |
 
 **The root startup rule** is a sanity check, not a proof: the root entry's
 loadable segments plus `system_baseline` fit `root_memory`, and `root_memory`

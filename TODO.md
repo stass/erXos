@@ -551,11 +551,10 @@ it; git history is the record of completed work.
   `apply_ctl/4`); `erx_starter` with its table, a supervisor and keeper per enabled row, and `rc.conf` read and
   written under `/data`; the `apps` tree (`erx_starter_fs`), which a session mounts at `/apps`;
   `erx_domain:start_session/2` with `display` and `default_display`, and the session mark.
-  Not built: the accepting path of property 17's display check with its seeds once `abi/services` declares
-  `windows`; the session's default display handed on with the ready answer and its `display` variable
+  Not built: the session's default display handed on with the ready answer and its `display` variable
   (design-apps.md, "Starting a session", step 3), which the domain service keeps in the session's record and
   hands to nothing; a row that names a display started only once that display's domain has reported ready
-  ("Keeping a session"), which waits for a `windows` service to exist; the mint request
+  ("Keeping a session"), which waits for a display domain to run; the mint request
   `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint that matches the
   old shape (`erlang/apps/erx_storage/src/erx_lfs_mint.erl`, `erx_net_admit`); the reset count cleared by the first
   kept session.
@@ -675,10 +674,29 @@ it; git history is the record of completed work.
     `abi/manifest.txt`, named after the `windows` service it describes, and its reader; property 18 of the manifest
     check (a template's `pixels` counted by its principal's `domains` quota, no facet row setting `session`) with its
     seeded violations; `abi/services/windows.txt` with the parameters `windows`, `pixels`, `snarf` and `session`; the
+  * **The pixel area** ([The pixel area](docs/design-display.md#the-pixel-area)): `erx_dom_connect` with `area` and
+    `area_reader`, the connection record's `area`, the grant-table rows and the Fiasco backend's row for an object two
+    tasks map (`liberx/system`); `connection_up`'s `Area` and `ERX_LANE_CTL_SLOT`'s pinned length; the connection
+    agent's mapping and unmapping of an area; the `erx_area` NIF and `erx_memdraw:wrap/4`, an image over memory the
+    NIF did not allocate, which the agent unmaps only after the last image over it is gone.
+  * **The display's session and grant** ([A display's session](docs/design-display.md#a-displays-session)): the
     display's session from a start row ([Track A](docs/plan.md#track-a-apps), part 1), with `session` carried by
-    every mint of its grant from the session mark the domain service alone sets. A window's buffer at the screen's
-    size, allocated once by `erx_win:open/2`, with `resized/1` allocating nothing; the grant defaults of 8 windows,
-    64 MiB and `snarf` off.
+    every mint of its grant from the session mark the domain service alone sets; the domain service putting the
+    `display` record's policy and idle times in the display domain's environment; each connection's pixel area sized
+    from its grant's `pixels`. A window's buffer at the screen's size, allocated once by `erx_win:open/2`, with
+    `resized/1` allocating nothing; the grant defaults of 8 windows, 64 MiB and `snarf` off at the server.
+  * **The reserved chord** ([The reserved chord](docs/design-display.md#the-reserved-chord)): its field in the
+    `display` record, its source spelling and its key encoding, which land with the login design's choice of what
+    the chord brings up ([Risks and decisions](docs/design-display.md#risks-and-decisions), 14). Until then no
+    display has a chord, so every key reaches a window.
+  * **Property 18 and the domain library** ([The pixel area](docs/design-display.md#the-pixel-area)): property 18
+    sums each display grant's pixel area and the side the display reads against the display domain's `outer`, but
+    the outer budget also pays for the crash area, bells, the system connection and every other side it reads, and
+    the grants are not compared with the `connections` quota, so a manifest at the limit passes the build and the
+    last session's connection is refused at run time. Plan the display grants' connections in the boot view of
+    property 12, so the domain library's arithmetic is the one judge. And `session` is declared as a manifest
+    parameter of `windows` that only property 18 refuses: carry the session mark only in the domain service's mint
+    request, so no manifest can spell it.
   * **The screen and the allocator** ([The screen](docs/design-display.md#the-screen-and-its-one-path-to-the-device),
     [The pixel area](docs/design-display.md#the-pixel-area)): `erx_screen` sends frames with
     `gen_server:send_request/2` and keeps only pending state (the newest layout, one waiting present per live window,

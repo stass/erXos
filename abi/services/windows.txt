@@ -1,0 +1,23 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The windows interface (docs/design-display.md, "The window tree"): an erx_fs grant of
+# one display's window tree, which erx_winfs serves and a client mounts. Its operations
+# are the file protocol's own, which no facet row names, so it declares none. A facet
+# row's parameters are the grant's quotas: windows, the windows its holder may have at
+# once; pixels, the bytes of its pixel area, which the display maps read-only and pays
+# for; and snarf, whether its tree has the display's clipboard. session marks the grant
+# of the display's session; the domain service alone sets it, from the start row that
+# names the display, so no facet row may (property 18). A row that states no windows or
+# pixels gets windows_default windows and a pixel area of windows_pixels_default bytes,
+# one 1920 by 1080 x8r8g8b8 buffer for each of 8 windows, rounded up to 64 MiB, and a
+# row that states no snarf has no clipboard. windows_grant is property 18 of the
+# manifest check (docs/design-system.md, "The manifest"): it sums each display's pixel
+# areas within its display domain's outer budget, refuses session, and holds windows
+# and snarf to their declared bounds; erx_winfs enforces windows and snarf at run time.
+service windows 8
+  parameter windows 1 u64 optional range 1 4096 checked_by windows_grant
+  parameter pixels 2 u64 optional range 4096 1099511627776 checked_by windows_grant
+  parameter snarf 3 boolean optional boolean checked_by windows_grant
+  parameter session 4 boolean optional boolean checked_by windows_grant
+limit windows_default u32 8
+limit windows_pixels_default u64 67108864

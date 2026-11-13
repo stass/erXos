@@ -1580,12 +1580,12 @@ these exact offsets and sizes.
 
 ### Machine header
 
-The header is 392 bytes with alignment 8. Its fields are:
+The header is 400 bytes with alignment 8. Its fields are:
 
 | Offset | Field | Type and meaning |
 | --- | --- | --- |
 | 0, 4, 6 | `magic`, `version`, `flags` | `u32`, `u16`, `u16`; magic/version above; development at flag bit 0, partial boot at bit 1, the UART console line secure at bit 2 and the host-link line secure at bit 3, all other bits zero |
-| 8, 12 | `length`, `header_size` | `u32`, `u32`; complete file length and exactly 392 |
+| 8, 12 | `length`, `header_size` | `u32`, `u32`; complete file length and exactly 400 |
 | 16, 24, 32, 40 | `host`, `console`, `hostlink`, `platform` | four string references; system identifier, absolute device-tree path, optional device-tree path and platform identifier |
 | 48, 56, 64 | `root_memory`, `system_baseline`, `system_reservation` | three `u64` byte counts; the root assumption, configured baseline and checked admission reservation |
 | 72, 120 | `system_share`, `users_share` | two shares, for `system` and `users` |
@@ -1597,6 +1597,7 @@ The header is 392 bytes with alignment 8. Its fields are:
 | 368 | `system_args` | string reference; the system runtime's arguments |
 | 376 | `sessions` | `span` of the session templates |
 | 384 | `starts` | `span` of the start rows ([design-apps.md](design-apps.md#the-start-table)), at most `start_rows_max` |
+| 392 | `displays` | `span` of the display records ([design-display.md](design-display.md#a-displays-session)) |
 
 The spans at 208 through 360 are `principals`, `domains`, `limits`,
 `runtime_limits`, `lane_classes`, `units`, `devices`, `windows`,
@@ -1604,7 +1605,7 @@ The spans at 208 through 360 are `principals`, `domains`, `limits`,
 `introductions`, `images`, `extents`, `boot_order`, `liveness`,
 `shell_principals`, `partial_boot` and `strings`, at offsets 208, 216
 and so on. The tables are packed in that order, with `sessions` after
-`domains` and `starts` after `partial_boot`, each at its first required
+`domains`, `starts` after `partial_boot` and `displays` after `starts`, each at its first required
 alignment boundary after the preceding table; `strings` comes last, and its span's count is bytes.
 
 `root_memory` is nonzero and page-aligned. Table capacities are 1 through
@@ -1895,6 +1896,7 @@ the kernel watchdog's period and cannot extend its deadline.
 | system-shell principal, 4 | `0: principal u32` |
 | partial-boot program, 16 | `0: name str`; `8: image u32`; `12: reserved u32` |
 | start row, 24 | `0: principal u32`; `4: flags u32` (enabled at bit 0); `8: display u32` (a service index or `mf_none`); `12: restarts u32`; `16: restart_period_s u32` (from 1); `20: reserved u32` |
+| display, 16 | `0: service u32`; `4: policy u32`; `8: idle_dim_s u32`; `12: idle_off_s u32` |
 
 Image format 1 denotes EROFS protected by the storage contract's
 dm-verity version 1 tree; hash algorithm 1 is SHA-256. Salt length is
@@ -1932,11 +1934,26 @@ and `ERX_MANIFEST_HOSTLINK_SECURE`, bit 3, for the host link, which is
 set only when `hostlink` names a path; the source names them as the
 `machine` flags `console_secure` and `hostlink_secure`, which a
 manifest's source sets by default and may clear. The console has no
-other line. A display's settings, its policy, idle policy, reserved
-chord and session principal
-([design-display.md](design-display.md#a-displays-session)), land with
-the display service's contract, as every service-specific declaration
-does.
+other line.
+
+A display record describes one service of the `windows` interface, by
+the service's index, so the display's name is the service's
+([design-display.md](design-display.md#a-displays-session)). The records
+are sorted by service, and every `windows` service has exactly one,
+whose server is a configured domain (property 18 of
+[design-system.md](design-system.md#the-manifest)). `policy` is
+`mf_display_policy`, `single` 1 or `rio` 2. `idle_dim_s` and
+`idle_off_s` are the idle times after which `erx_screen` dims the panel
+and turns it off, 0 meaning never, and `idle_off_s` is 0 or at least
+`idle_dim_s`. The record names no session, application or renderer. The
+reserved chord has no field here: the keys it names and their encoding
+belong to the login design, which decides what the chord brings up
+([design-display.md](design-display.md#risks-and-decisions), 14).
+
+The packed table `windows` holds a medium's partition windows, as the
+source's `window` records declare them; it is unrelated to the
+`windows` service interface, whose services the `displays` table
+describes.
 
 Partial-boot programs have system-identifier names and executable image
 indices. All use the machine's declared default native limits and the
@@ -1999,6 +2016,7 @@ field or computed charge is an accepted property.
 | `liveness SERVICE` | one service reference on the declaration line; no properties |
 | `shell_principal PRINCIPAL` | one principal reference on the declaration line; no properties |
 | `partial_boot NAME` | `image` artifact reference |
+| `display NAME` | the display of the service whose source alias is NAME, a service of the `windows` interface; exactly `policy`, `single` or `rio`, and `idle_dim_s` and `idle_off_s` integers |
 
 A `share` is a source value expanded by value, not another packed table
 or runtime object. Every share field is required. Flag and operation

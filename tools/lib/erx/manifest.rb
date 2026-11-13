@@ -169,7 +169,8 @@ module Erx
         'facet' => %w[name grantee service operations max_request in_flight reductions period_ns max_heap_size queue],
         'image' => %w[device input salt],
         'partial_boot' => %w[image],
-        'start' => %w[enable display restarts restart_period_s]
+        'start' => %w[enable display restarts restart_period_s],
+        'display' => %w[policy idle_dim_s idle_off_s]
       }.freeze
       OPTIONAL = { 'machine' => %w[system_args], 'domain' => %w[boot_timeout_s args env], 'session' => %w[args env], 'service' => %w[name],
                    'facet' => %w[name queue], 'image' => %w[salt],
@@ -927,7 +928,7 @@ module Erx
         %w[domain session partial_boot].each do |kind|
           unsupported('child domain planning is unavailable', kind) unless records(kind).empty?
         end
-        %w[window service facet introduce image liveness].each do |kind|
+        %w[window service facet introduce image liveness display].each do |kind|
           invalid('empty native boot has no service or child assignments', 9, kind) unless records(kind).empty?
         end
         invalid('a partial boot starts no row', 17, 'start') unless records('start').empty?
@@ -968,7 +969,7 @@ module Erx
         invalid('a partial boot configures no domains', 12, 'domain') unless records('domain').empty?
         invalid('a partial boot makes no sessions', 14, 'session') unless records('session').empty?
         invalid('a partial boot starts no row', 17, 'start') unless records('start').empty?
-        %w[service facet introduce liveness].each do |kind|
+        %w[service facet introduce liveness display].each do |kind|
           invalid('a partial boot runs no services', 2, kind) unless records(kind).empty?
         end
       end
@@ -998,8 +999,9 @@ module Erx
         invalid('two services of one server share a name', 5, 'service.name') unless
           rows['services'].map { |row| row.values_at('server', 'name') }.uniq.size == services.size
         rows['introductions'] = normalize_introductions
-        rows['facets'] = normalize_facets(services.map(&:first), rows)
+        rows['facets'], rows['facet_parameters'], facet_values = normalize_facets(services.map(&:first), rows)
         rows['starts'] = normalize_starts(services.map(&:first), rows)
+        rows['displays'] = normalize_displays(services.map(&:first), rows, facet_values)
         edges = boot_edges(rows['facets'], rows['services'])
         rows['boot_order'] = boot_order(rows['domains'], edges)
         check_rescue(rows['domains'], edges)
@@ -1189,8 +1191,7 @@ module Erx
       # by its principal's name, so the frontend gives a principal at most one, and that
       # principal has a session template; no two enabled rows name one display; and a
       # display is a service of the windows interface that a facet row grants the
-      # principal's template. While abi/services declares no windows interface no
-      # service is a display, so every row naming one is refused. Property 17's last
+      # principal's template. Property 17's last
       # clause, that the enabled rows' sessions fit beside the configured domains, is the
       # domain library's judgment, in check_plans.
       def normalize_starts(services, tables)
@@ -1283,7 +1284,10 @@ module Erx
       # driver-control interface stops and starts another domain's drivers, so only the
       # system domain holds one (property 8); the network's facets are property 15's
       # (check_network_grants), and the files and inspect receivers' floors property 16's
-      # (check_files_grants, check_inspect_grants).
+      # (check_files_grants, check_inspect_grants). Each facet's parameters are resolved
+      # against its service's declarations (facet_parameters). Answers the sorted rows, each
+      # with its parameters span, the facet_parameters table and each row's resolved
+      # parameter values, by key name, in the rows' order.
       def normalize_facets(services, tables)
         service_rows = tables.fetch('services')
         rows = records('facet').map do |record|
@@ -1292,6 +1296,7 @@ module Erx
           invalid('facet names a service the manifest does not contain', 2, 'facet.service') unless index
           facet_row(record, index, tables.fetch('sessions'))
         end
+        packed = records('facet').zip(rows).map { |record, row| facet_parameters(record, row, tables) }
         grantee = ->(row) { row.values_at('grantee_kind', 'grantee') }
         server = ->(row) { service_rows.fetch(row.fetch('service')).fetch('server') }
         none = @codec.constant('mf_none')
@@ -1307,7 +1312,178 @@ module Erx
         check_network_grants(rows, tables)
         check_files_grants(rows, tables)
         check_inspect_grants(rows, tables)
-        rows.sort_by { |row| [row.fetch('name'), *grantee.call(row)] }
+        order = rows.each_index.sort_by { |at| [rows.fetch(at).fetch('name'), *grantee.call(rows.fetch(at))] }
+        first = 0
+        facets = order.map do |at|
+          count = packed.fetch(at).last.size
+          span = { 'table' => 'facet_parameters', 'first' => first, 'count' => count }
+          first += count
+          rows.fetch(at).merge('parameters' => span)
+        end
+        [facets, order.flat_map { |at| packed.fetch(at).last }, order.map { |at| packed.fetch(at).first }]
+      end
+
+      # The checkers that consume a service's declared parameters, by the name its
+      # declarations give in checked_by, each with the keys it consumes (docs/design-abi.md,
+      # "Services, facets and their parameter schemas"): windows_grant is property 18,
+      # check_display_grants, which reads pixels and session, and range-checks windows and
+      # snarf as their declarations bound them. A service declaring a parameter that no
+      # checker here consumes is unusable: no facet of it is admitted, since nothing would
+      # check what it grants.
+      GRANT_CHECKERS = { 'windows_grant' => %w[windows pixels snarf session].freeze }.freeze
+
+      # A facet record's parameters resolved against its service's declarations: every
+      # stated key is declared, appears once and has a value of its declared kind within
+      # its bound, and every key declared one is stated. Answers the values, by key name,
+      # and their packed facet_parameters rows in key order.
+      def facet_parameters(record, row, tables)
+        interface = tables.fetch('services').fetch(row.fetch('service')).fetch('interface')
+        declared = @codec.schema.services.find { |service| service.fetch(:number) == interface }&.fetch(:parameters) || {}
+        unless declared.all? { |key, parameter| GRANT_CHECKERS.fetch(parameter.fetch(:helper), []).include?(key) }
+          unsupported("facet #{row.fetch('name')}'s service declares a parameter no grant checker consumes", 'facet.parameter')
+        end
+        values = resolve_parameters(record, declared)
+        [values.freeze, values.map { |key, value| parameter_row(declared.fetch(key), value) }.sort_by { |item| item.fetch('key') }]
+      end
+
+      # A facet record's parameter lines, KEY VALUE, as a map from key to value.
+      def resolve_parameters(record, declared)
+        values = record.parameters.each_with_object({}) do |(key_token, value_token), result|
+          key = key_token.value
+          parameter = (!key_token.quoted && declared[key]) ||
+                      invalid("facet parameter #{key} is not declared by its service", 2, 'facet.parameter')
+          invalid("facet parameter #{key} is stated twice", 2, 'facet.parameter') if result.key?(key)
+          result[key] = parameter_value(key, parameter, value_token, record.line)
+        end
+        declared.each do |key, parameter|
+          invalid("facet parameter #{key} is required", 2, 'facet.parameter') if parameter.fetch(:cardinality) == 'one' && !values.key?(key)
+        end
+        values
+      end
+
+      # One value of its declared kind: an integer within its range, yes or no for a
+      # boolean, or quoted bytes within their bound. A set and the reference kinds are
+      # refused while no service declares one, so nothing here guesses their spelling.
+      def parameter_value(key, parameter, token, line)
+        kind = parameter.fetch(:kind)
+        unsupported("facet parameter #{key} is a set, which no service declares", 'facet.parameter') if
+          parameter.fetch(:cardinality) == 'set'
+        case kind
+        when 'u64', 'i64'
+          line.fail!("parameter #{key} requires an integer") if token.quoted
+          value = ABI::Syntax.integer(token.value, line: line)
+          low, high = parameter.fetch(:bound).drop(1).map { |word| ABI::Syntax.integer(word, line: line) }
+          invalid("facet parameter #{key} is outside #{low} to #{high}", 2, 'facet.parameter') unless value.between?(low, high)
+          value
+        when 'boolean'
+          line.fail!("parameter #{key} is yes or no") if token.quoted || !%w[yes no].include?(token.value)
+          token.value == 'yes'
+        when 'identifier', 'namespace_path', 'bytes'
+          line.fail!("parameter #{key} requires quoted bytes") unless token.quoted
+          value = token.value.b
+          maximum = Integer(parameter.fetch(:bound).last)
+          invalid("facet parameter #{key} is empty or over #{maximum} bytes", 2, 'facet.parameter') unless
+            value.bytesize.between?(kind == 'bytes' ? 0 : 1, maximum)
+          value
+        else
+          unsupported("facet parameter #{key} is a #{kind} reference, which no service declares", 'facet.parameter')
+        end
+      end
+
+      # A resolved value as its packed facet_parameters row, every inactive field zero.
+      def parameter_row(parameter, value)
+        kind = parameter.fetch(:kind)
+        row = { 'key' => parameter.fetch(:number), 'kind' => @codec.member('mf_parameter_kind', kind),
+                'scalar' => 0, 'bytes' => ''.b, 'index' => 0, 'reserved' => 0 }
+        case kind
+        when 'u64' then row.merge('scalar' => value)
+        when 'i64' then row.merge('scalar' => value & ((1 << 64) - 1))
+        when 'boolean' then row.merge('scalar' => value ? 1 : 0)
+        else row.merge('bytes' => value)
+        end
+      end
+
+      # The displays (docs/design-display.md, "A display's session"), sorted by their
+      # service's index; facet_values holds each facet row's resolved parameters, by the
+      # facet table's index. A display record is keyed by its service's source alias, so
+      # a service has at most one. Property 18: every windows service has a record and
+      # every record names one; a display domain serves one display, so no domain pays
+      # for two displays' grants out of one outer budget; and each display's grants pass
+      # check_display_grants.
+      def normalize_displays(services, tables, facet_values)
+        windows = find_interface('windows')
+        rows = records('display').map do |record|
+          index = services.index { |service| service.name == record.name } ||
+                  invalid('a display record names a service the manifest does not contain', 18, 'display.name')
+          invalid('a display record names a service that is not of the windows interface', 18, 'display.name') unless
+            tables.fetch('services').fetch(index).fetch('interface') == windows
+          display_row(record, index)
+        end
+        tables.fetch('services').each_with_index do |service, index|
+          next unless service.fetch('interface') == windows
+          invalid("service #{service.fetch('name')} of the windows interface has no display record", 18, 'display.name') unless
+            rows.any? { |row| row.fetch('service') == index }
+        end
+        servers = rows.map { |row| tables.fetch('services').fetch(row.fetch('service')).fetch('server') }
+        invalid('one domain serves two displays', 18, 'display.name') unless servers.uniq.size == servers.size
+        rows.each { |row| check_display_grants(row, tables, facet_values) }
+        rows.sort_by { |row| row.fetch('service') }
+      end
+
+      # One display record: its service's index, its policy and its idle times, of
+      # which a nonzero time to turn the panel off comes no sooner than the time to dim it.
+      def display_row(record, service)
+        token = one(record, 'policy')
+        record.line.fail!('policy is single or rio') if token.quoted || !%w[single rio].include?(token.value)
+        row = { 'service' => service, 'policy' => @codec.member('mf_display_policy', token.value) }
+        %w[idle_dim_s idle_off_s].each do |key|
+          row[key] = number(record, key)
+          invalid("a display's #{key} is over #{(1 << 32) - 1}", 18, "display.#{key}") if row.fetch(key) >= (1 << 32)
+        end
+        invalid('a display turns its panel off before it dims it', 18, 'display.idle_off_s') unless
+          row.fetch('idle_off_s').zero? || row.fetch('idle_off_s') >= row.fetch('idle_dim_s')
+        row
+      end
+
+      # Property 18's clauses on one display's grants: its server is a configured
+      # domain, no facet row of its service sets session, and the grants' costs fit the
+      # display domain's outer budget. Each grant costs its pixel area, its pixels or
+      # windows_pixels_default, and the side the display reads for it, the display's own
+      # lane, each rounded up to pages; a session template's grant costs that once for
+      # each session its principal's domains quota lets live at once, a configured
+      # domain's or the system domain's once.
+      def check_display_grants(display, tables, facet_values)
+        service = tables.fetch('services').fetch(display.fetch('service'))
+        server = service.fetch('server')
+        invalid("display #{service.fetch('name')} is served by the system domain, not a display domain", 18, 'display.name') if
+          server == @codec.constant('mf_none')
+        limits = tables.fetch('limits').fetch(tables.fetch('domains').fetch(server).fetch('limits'))
+        grants = tables.fetch('facets').zip(facet_values).select { |facet, _values| facet.fetch('service') == display.fetch('service') }
+        cost = grants.sum do |facet, values|
+          invalid("facet #{facet.fetch('name')} sets session, which the domain service alone sets", 18, 'facet.parameter') if
+            values.key?('session')
+          pixels = values.fetch('pixels') { @codec.constant('windows_pixels_default') }
+          grant_instances(facet, tables) * (pages(pixels) + pages(limits.fetch('lane')))
+        end
+        return if cost <= limits.fetch('outer')
+
+        invalid("display #{service.fetch('name')}'s grants cost #{cost} bytes, past its domain's outer budget of " \
+                "#{limits.fetch('outer')}", 18, 'facet.parameter')
+      end
+
+      # How many grants a facet row makes at once: one for a domain, and for a session
+      # template its principal's domains quota, the sessions of it that can live at once.
+      def grant_instances(facet, tables)
+        return 1 unless facet.fetch('grantee_kind') == grantee_kind('session')
+
+        principal = tables.fetch('sessions').fetch(facet.fetch('grantee')).fetch('principal')
+        tables.fetch('principals').fetch(principal).fetch('domains')
+      end
+
+      # Bytes rounded up to whole pages.
+      def pages(bytes)
+        page = @codec.constant('page_size')
+        (bytes + page - 1) / page * page
       end
 
       # Property 15: the system domain holds no facet of the network domain's net or
@@ -1446,20 +1622,19 @@ module Erx
         { 'name' => name, 'grantee_kind' => kind, 'grantee' => index,
           'service' => service,
           'operations' => { 'table' => 'facet_operations', 'first' => 0, 'count' => 0 },
-          'parameters' => { 'table' => 'facet_parameters', 'first' => 0, 'count' => 0 },
           'queue' => queue }.merge(%w[max_request in_flight reductions period_ns max_heap_size].to_h { |key| [key, number(record, key)] })
       end
 
       # What the stopgap cannot honour, refused once properties 2, 10 and 11 hold: a
-      # facet that names an operation or a parameter, which resolve against its
-      # service's generated declarations and grant checker at M5, so the row would
-      # grant every operation.
+      # facet that names an operation, which resolves against its service's generated
+      # declarations at M5, so the row would grant every operation. Its parameters are
+      # resolved (facet_parameters).
       def check_facets_supported
         records('facet').each do |record|
           operations = one(record, 'operations')
-          next if record.parameters.empty? && !operations.quoted && operations.value == 'none'
+          next if !operations.quoted && operations.value == 'none'
 
-          unsupported('a facet resolves its operations and parameters against its service\'s generated declarations and grant checker, which M5 brings', 'facet')
+          unsupported('a facet resolves its operations against its service\'s generated declarations, which M5 brings', 'facet')
         end
       end
 

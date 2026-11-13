@@ -220,14 +220,11 @@ class ManifestDomainsTest < Minitest::Test
     assert_match(/interface names no service/, error.message)
   end
 
-  # A facet's operations and parameters resolve against its service's generated
-  # declarations, which the packer does not read in Phase 1, so a facet that names any
-  # is refused.
-  def test_a_facet_naming_an_operation_or_a_parameter_is_refused_naming_its_milestone
-    facet = facet('ab', '@domain.alpha', '@service.b')
-    [facet.sub('operations none', 'operations read'), facet + "  parameter root \"/\"\n"].each do |named|
-      refused(Erx::Manifest::Unsupported, 'unsupported', 'facet', @source + service('b', '@domain.beta') + named, message: /M5/)
-    end
+  # A facet's operations resolve against its service's generated declarations, which
+  # the packer does not read in Phase 1, so a facet that names any is refused.
+  def test_a_facet_naming_an_operation_is_refused_naming_its_milestone
+    named = facet('ab', '@domain.alpha', '@service.b').sub('operations none', 'operations read')
+    refused(Erx::Manifest::Unsupported, 'unsupported', 'facet', @source + service('b', '@domain.beta') + named, message: /M5/)
   end
 
   def test_introductions_are_written_once_lower_index_first
@@ -596,13 +593,30 @@ class ManifestDomainsTest < Minitest::Test
           "principal other\n  memory 1048576\n  grant @share.half\n  domains 0\n  names 1\n" \
           "  default_limits @limits.native\n  ceiling_limits @limits.native\n"
 
-  def with_display(*starts)
+  # Both templates, service b and its grants to them, and starts. The system
+  # principal's domains quota is 2 (with_domains), other's 0.
+  def with_display(*starts, served: service('b', '@domain.beta'),
+                   grants: [facet('sb', '@session.system', '@service.b'), facet('ob', '@session.other', '@service.b')])
     halved = with_session(self.class.session, self.class.session('other'))
              .sub(/^(principal system\n(?:  .*\n)*?  grant )@share.users/, '\1@share.half')
              .sub(/^(limits native\n(?:  .*\n)*?  grant )@share.users/, '\1@share.half')
-    halved + OTHER + service('b', '@domain.beta') + facet('sb', '@session.system', '@service.b') +
-      facet('ob', '@session.other', '@service.b') + starts.join
+    halved + OTHER + served + grants.join + starts.join
   end
+
+  # Property 18's display: service b of the windows interface, served by server, with
+  # record, its display record, and granted to both templates, each grant with the
+  # parameter lines of sb or ob; beta's limits give it an outer budget of 1 MiB and a
+  # lane of a page.
+  DISPLAY = "display b\n  policy single\n  idle_dim_s 60\n  idle_off_s 600\n"
+
+  def with_windows(*starts, server: '@domain.beta', record: DISPLAY, sb: "  parameter pixels 4096\n",
+                   ob: "  parameter pixels 4096\n")
+    with_display(*starts, served: "service b\n  server #{server}\n  interface windows\n#{record}",
+                          grants: [facet('sb', '@session.system', '@service.b') + sb,
+                                   facet('ob', '@session.other', '@service.b') + ob])
+  end
+
+  def service_index(view, name) = rows(view, 'services').index { |row| view.string(row.fetch('name')) == name }
 
   def test_a_start_row_is_packed_with_its_defaults_or_its_own_fields
     none = @codec.constant('mf_none')
@@ -642,27 +656,116 @@ class ManifestDomainsTest < Minitest::Test
     assert_raises(Erx::ABI::SchemaError) { admit(with_session(self.class.session) + self.class.start('system', "  enable yes\n")) }
   end
 
-  # No interface of abi/services is windows yet, so no service is a display and a
-  # row naming one is refused, granted or not.
-  def test_a_start_row_naming_a_display_is_refused_while_no_windows_interface_exists
-    refused(Erx::Manifest::Invalid, 17, 'start.display', with_display(self.class.start('system', "  display @service.b\n")),
-            message: /windows interface/)
-    refused(Erx::Manifest::Invalid, 17, 'start.display', with_display(self.class.start('system', "  display @service.c\n")),
-            message: /does not contain/)
+  # Property 17's accepting path: a row names a windows service that a facet row grants
+  # its principal's template, and the row holds the service's index.
+  def test_a_start_row_on_a_display_granted_to_its_template_is_packed
+    view = @codec.open('manifest', admit(with_windows(self.class.start('system', "  display @service.b\n"))).bytes)
+    assert_equal [service_index(view, 'b')], rows(view, 'starts').map { |row| row.fetch('display') }
   end
 
-  # Two enabled rows on one display are refused before either display is judged; a
-  # disabled row holds no display.
+  def test_a_start_row_s_display_is_a_windows_service_granted_to_its_template
+    display = "  display @service.b\n"
+    refused(Erx::Manifest::Invalid, 17, 'start.display', with_display(self.class.start('system', display)),
+            message: /not a windows service/)
+    refused(Erx::Manifest::Invalid, 17, 'start.display', with_display(self.class.start('system', "  display @service.c\n")),
+            message: /does not contain/)
+    other_only = with_display(self.class.start('system', display),
+                              served: "service b\n  server @domain.beta\n  interface windows\n#{DISPLAY}",
+                              grants: [facet('ob', '@session.other', '@service.b') + "  parameter pixels 4096\n"])
+    refused(Erx::Manifest::Invalid, 17, 'start.display', other_only, message: /not granted/)
+  end
+
+  # Two enabled rows on one display are refused; a disabled row holds no display.
   def test_two_enabled_start_rows_on_one_display_are_refused
     display = "  display @service.b\n"
     refused(Erx::Manifest::Invalid, 17, 'start.display',
-            with_display(self.class.start('system', display), self.class.start('other', display)), message: /two enabled/)
-    refused(Erx::Manifest::Invalid, 17, 'start.display',
-            with_display(self.class.start('system', display), self.class.start('other', "  enable NO\n#{display}")),
-            message: /windows interface/)
+            with_windows(self.class.start('system', display), self.class.start('other', display)), message: /two enabled/)
+    view = @codec.open('manifest', admit(with_windows(self.class.start('system', display),
+                                                      self.class.start('other', "  enable NO\n#{display}"))).bytes)
+    assert_equal 2, view.count('starts')
   end
 
   def test_a_partial_boot_starts_no_row
     refused(Erx::Manifest::Invalid, 17, 'start', @plain.sub('flags development', 'flags development,partial_boot') + self.class.start)
+    refused(Erx::Manifest::Invalid, 2, 'display', @plain.sub('flags development', 'flags development,partial_boot') + DISPLAY)
+  end
+
+  # Property 18: the display record is packed by its service's index, with its policy
+  # and idle times.
+  def test_a_display_record_is_packed_by_its_service
+    view = @codec.open('manifest', admit(with_windows).bytes)
+    fields = %w[service policy idle_dim_s idle_off_s]
+    assert_equal [[service_index(view, 'b'), @codec.member('mf_display_policy', 'single'), 60, 600]],
+                 rows(view, 'displays').map { |row| row.values_at(*fields) }
+    rio = DISPLAY.sub('single', 'rio').sub('idle_off_s 600', 'idle_off_s 0')
+    view = @codec.open('manifest', admit(with_windows(record: rio)).bytes)
+    assert_equal [[@codec.member('mf_display_policy', 'rio'), 0]], rows(view, 'displays').map { |row| row.values_at('policy', 'idle_off_s') }
+  end
+
+  def test_a_display_record_s_policy_and_idle_times_are_checked
+    assert_raises(Erx::ABI::SchemaError) { admit(with_windows(record: DISPLAY.sub('single', 'tiled'))) }
+    refused(Erx::Manifest::Invalid, 18, 'display.idle_off_s', with_windows(record: DISPLAY.sub('idle_off_s 600', 'idle_off_s 59')),
+            message: /off before it dims/)
+  end
+
+  # Seed: a windows service with no display record would have grants no sum counts.
+  def test_every_windows_service_has_a_display_record_and_every_record_one
+    refused(Erx::Manifest::Invalid, 18, 'display.name', with_windows(record: ''), message: /has no display record/)
+    refused(Erx::Manifest::Invalid, 18, 'display.name', with_display(served: service('b', '@domain.beta') + DISPLAY),
+            message: /not of the windows interface/)
+    refused(Erx::Manifest::Invalid, 18, 'display.name', with_windows + DISPLAY.sub('display b', 'display c'),
+            message: /does not contain/)
+    refused(Erx::Manifest::Invalid, 'source', 'display', with_windows + DISPLAY)
+  end
+
+  # Seed: a domain serving two displays would pay for both displays' grants out of one
+  # outer budget, which each display's sum alone admits.
+  def test_one_domain_serves_one_display
+    second = "service c\n  server @domain.beta\n  interface windows\n#{DISPLAY.sub('display b', 'display c')}" +
+             facet('sc', '@session.system', '@service.c') + "  parameter pixels 4096\n"
+    refused(Erx::Manifest::Invalid, 18, 'display.name', with_windows + second, message: /one domain serves two displays/)
+    admit(with_windows + second.gsub('@domain.beta', '@domain.alpha'))
+  end
+
+  def test_a_display_is_served_by_a_configured_domain
+    refused(Erx::Manifest::Invalid, 18, 'display.name', with_windows(server: 'system'), message: /system domain/)
+  end
+
+  # Seed: the session parameter is the domain service's alone.
+  def test_no_facet_row_sets_session
+    refused(Erx::Manifest::Invalid, 18, 'facet.parameter', with_windows(sb: "  parameter pixels 4096\n  parameter session no\n"),
+            message: /sets session/)
+  end
+
+  # Seed: a template's grant costs its pixel area and the display's side once for each
+  # session its principal's domains quota allows, 2 for the system principal and 0 for
+  # other. 127 pages and the side's page, twice, fill beta's 1 MiB outer budget; one
+  # page more each passes it, which counting the template once would admit.
+  def test_a_template_s_pixel_areas_count_once_for_each_session_it_can_have
+    admit(with_windows(sb: "  parameter pixels #{127 * 4096}\n", ob: "  parameter pixels #{1 << 30}\n"))
+    refused(Erx::Manifest::Invalid, 18, 'facet.parameter', with_windows(sb: "  parameter pixels #{128 * 4096}\n"),
+            message: /past its domain's outer budget/)
+    refused(Erx::Manifest::Invalid, 18, 'facet.parameter', with_windows(sb: ''), message: /past its domain's outer budget/)
+  end
+
+  # A facet's parameters, resolved against its service's declarations, are packed in
+  # key order, each facet's run its parameters span; facets are in name order, ob first.
+  def test_facet_parameters_are_packed_in_key_order
+    view = @codec.open('manifest', admit(with_windows(sb: "  parameter snarf yes\n  parameter pixels 4096\n  parameter windows 2\n")).bytes)
+    u64, boolean = %w[u64 boolean].map { |kind| @codec.member('mf_parameter_kind', kind) }
+    assert_equal [[2, u64, 4096], [1, u64, 2], [2, u64, 4096], [3, boolean, 1]],
+                 rows(view, 'facet_parameters').map { |row| row.values_at('key', 'kind', 'scalar') }
+    granted = rows(view, 'facets').select { |row| %w[ob sb].include?(view.string(row.fetch('name'))) }
+    assert_equal [1, 3], granted.map { |row| row.fetch('parameters').fetch('count') }
+  end
+
+  def test_a_facet_parameter_is_declared_stated_once_and_within_its_bound
+    { "  parameter root \"/\"\n" => /not declared/, "  parameter windows 2\n  parameter windows 2\n" => /twice/,
+      "  parameter windows 0\n" => /outside 1 to 4096/, "  parameter windows 4097\n" => /outside 1 to 4096/ }.each do |lines, message|
+      refused(Erx::Manifest::Invalid, 2, 'facet.parameter', with_windows(sb: "  parameter pixels 4096\n#{lines}"), message: message)
+    end
+    assert_raises(Erx::ABI::SchemaError) { admit(with_windows(sb: "  parameter pixels 4096\n  parameter snarf true\n")) }
+    undeclared = facet('ab', '@domain.alpha', '@service.b') + "  parameter root \"/\"\n"
+    refused(Erx::Manifest::Invalid, 2, 'facet.parameter', @source + service('b', '@domain.beta') + undeclared, message: /not declared/)
   end
 end

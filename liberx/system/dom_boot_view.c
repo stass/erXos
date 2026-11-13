@@ -655,8 +655,9 @@ boot_services(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom
 			return ("manifest: a facet names no service");
 		if ((reason = boot_facet_grantee(view, &facet, &services[facet.service])) != NULL)
 			return (reason);
-		if (facet.operations.count != 0 || facet.parameters.count != 0)
-			return ("manifest: a facet names operations or parameters, which the boot cannot check");
+		/* The packer resolved the parameters against the service's declarations; operations it does not resolve. */
+		if (facet.operations.count != 0)
+			return ("manifest: a facet names operations, which the boot cannot check");
 		facets[index] = (erx_dom_facet_t){ .grantee_kind = facet.grantee_kind,
 		    .grantee = facet.grantee, .service = facet.service,
 		    .max_request = facet.max_request, .in_flight = facet.in_flight,
