@@ -335,7 +335,9 @@ scripts live in `~/erxos-scratch/tools/`.
     fifteen or so landings: a Fable pass over the diff since the last one
     that lists the new concepts, which of them duplicate an existing
     abstraction or contradict a design document, and what can be deleted.
-    Its findings come to me as conform, merge or delete.
+    Its findings come to me as conform, generalization or delete. A
+    generalization folds things that do the same job into one, existing or
+    better, abstraction and deletes the copies.
 * **The common path first; the long tail goes to `TODO.md`.** Build what the
   milestone needs for the cases that occur in it. Rare failure modes, in-place
   recovery machinery and protection against hostile peer domains beyond the
