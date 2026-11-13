@@ -3,8 +3,8 @@
 
 -module(erx_memdraw).
 -moduledoc """
-The pixel primitives of the display domain (docs/design-display.md, "The
-window process"): images and the `d`, shape, `y` and `r` operations that
+The pixel primitives of both sides of the window system
+(docs/design-display.md, "The window process"): images and the `d`, shape, `y` and `r` operations that
 `erx_draw_core` plans, performed by erXos's copy of 9front's libmemdraw
 (display/libmemdraw) through the NIF display/memdraw/erx_memdraw_nif.c.
 

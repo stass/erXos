@@ -1,0 +1,15 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The pixel primitives both sides of the window system use
+%% (docs/design-display.md, "The window process"): erx_memdraw, the NIF of
+%% the images and the copies between them, which the runtime links in and
+%% binds to the module of its name. A library application: it starts no
+%% process.
+{application, erx_memdraw,
+ [{description, "erXos pixel primitives"},
+  {vsn, "1"},
+  {modules, [erx_memdraw]},
+  {registered, []},
+  {applications, [kernel, stdlib, erx]},
+  {env, []}]}.

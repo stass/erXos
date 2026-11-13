@@ -42,7 +42,7 @@ module Erx
   # no other mapper maps into a program whatever slot it is handed.
   module AreaMappers
     AGENT = 'erlang/apps/erx/src/erx_connections.erl'
-    LENDER = 'erlang/apps/erx_display/src/erx_pixels.erl'
+    LENDER = 'erlang/apps/erx_win/src/erx_pixels.erl'
     SITES = ['erlang/apps/erx/src/erx_area.erl', AGENT].freeze
     MODULE = DevicePosters::ATOM.call('erx_area')
     # open/1, which hands a held area out, and area(), the type a -spec names.

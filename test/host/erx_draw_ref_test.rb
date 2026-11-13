@@ -13,7 +13,7 @@ require_relative '../fixtures/erlang_build'
 # operation, which they must catch.
 class ErxDrawRefTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  APPLICATIONS = %w[erx_display].freeze
+  APPLICATIONS = %w[erx_win].freeze
   REFERENCE = 'test/erlang/erx_draw_ref.erl'
   TESTS = [REFERENCE, 'test/erlang/erx_draw_ref_tests.erl'].freeze
   # The seeded fault: the source's part outside the destination (SoutD) is

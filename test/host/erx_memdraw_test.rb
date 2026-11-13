@@ -56,7 +56,7 @@ class ErxMemdrawTest < Minitest::Test
   def test_seeded_glyph_row_fails_the_string_comparison
     prepare
     core = File.join(@directory, 'erx_draw_core.erl')
-    seeded = File.read(File.join(ROOT, 'erlang/apps/erx_display/src/erx_draw_core.erl'))
+    seeded = File.read(File.join(ROOT, 'erlang/apps/erx_win/src/erx_draw_core.erl'))
                  .sub('    Y0 = Y - (Ascent - MinY),', '    Y0 = Y - (Ascent - MinY) + 1,')
     File.write(core, seeded)
     erlc(core)

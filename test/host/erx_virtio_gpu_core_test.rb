@@ -16,8 +16,8 @@ require_relative '../fixtures/erlang_build'
 # answered, which would let flush/3 return while the device still reads the image.
 class ErxVirtioGpuCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The application holding the module (compiled whole, ErlangBuild), the module and the cases.
-  APPLICATIONS = %w[erx_display erx_fb].freeze
+  # The application holding the module, compiled whole with those it depends on (ErlangBuild), the module and the cases.
+  APPLICATIONS = %w[erx_fb].freeze
   MODULE = 'erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl'
   MODULE_SOURCE = File.join(ROOT, MODULE)
   TESTS = %w[test/erlang/erx_virtio_gpu_core_tests.erl].freeze

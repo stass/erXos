@@ -12,10 +12,9 @@
 %% unit the manifest gives the domain, and a manifest gives a domain at most one, so
 %% more than one record starts nothing, as no record does.
 %%
-%% erx_screen belongs to the display side of erx_display, which this release only loads,
-%% so the driver's supervisor starts it while the split of erx_display into a client-side
-%% and a display-side application is undecided (TODO.md, "The display domain: split
-%% erlang/apps/erx_display").
+%% erx_screen is a module of erx_display, a library application that starts no process,
+%% so the driver's supervisor starts it behind the driver, and no screen runs before a
+%% driver does.
 
 -module(erx_fb_sup).
 -behaviour(supervisor).

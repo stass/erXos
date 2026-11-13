@@ -18,7 +18,7 @@ live, so a lost connection's end waits for its last program's return and for
 nothing else.
 
 The allocator is never restarted over an area: its state is the only record
-of which ranges programs still map. `erx_display_sup` starts it as a
+of which ranges programs still map. `erx_win_sup` starts it as a
 temporary, significant child, so its end ends the domain, whose next start
 has new, zeroed areas.
 

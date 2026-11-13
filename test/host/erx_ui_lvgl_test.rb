@@ -16,7 +16,7 @@ require_relative '../../tools/lib/erx/lvgl'
 class ErxUiLvglTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   LAUNCHER = File.join(ROOT, 'test/fixtures/erx_lvgl_buffer.rb')
-  APPLICATIONS = %w[erx erx_display].freeze
+  APPLICATIONS = %w[erx erx_win].freeze
   TESTS = %w[test/erlang/erx_ui_lvgl_shell.erl].freeze
 
   def test_the_shell_drives_the_program

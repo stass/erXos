@@ -18,7 +18,7 @@ class ErxUiLvglCoreTest < Minitest::Test
 
   def test_protocol_cases_pass_under_eunit
     Dir.mktmpdir('erx-ui-lvgl-core-test') do |work|
-      ErlangBuild.compile(work, applications: %w[erx erx_display], tests: TESTS)
+      ErlangBuild.compile(work, applications: %w[erx erx_win], tests: TESTS)
 
       output, status = run_bounded(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                                    'halt(case eunit:test(erx_ui_lvgl_core_tests, [verbose]) of ok -> 0; _ -> 1 end).')

@@ -15,7 +15,7 @@ require_relative '../fixtures/erlang_build'
 class ErxVtTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
-  SOURCE = 'erlang/apps/erx_display/src/erx_vt.erl'
+  SOURCE = 'erlang/apps/erx_win/src/erx_vt.erl'
   CASES = %w[test/erlang/erx_vt_tests.erl].freeze
   DEADLINE = '300'
   Mutant = Data.define(:text, :broken, :property)
@@ -54,11 +54,11 @@ class ErxVtTest < Minitest::Test
     assert_match mutant.property, output
   end
 
-  # Compiles erx_display and erx with erx_vt as module_text, and the cases, into a
+  # Compiles erx_win and erx with erx_vt as module_text, and the cases, into a
   # directory of their own and runs the cases.
   def eunit(module_text)
     Dir.mktmpdir('erx-vt-test') do |work|
-      ErlangBuild.compile(work, applications: %w[erx erx_display], tests: CASES, replaced: { SOURCE => module_text })
+      ErlangBuild.compile(work, applications: %w[erx erx_win], tests: CASES, replaced: { SOURCE => module_text })
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       'halt(case eunit:test(erx_vt_tests, [verbose]) of ok -> 0; _ -> 1 end).',

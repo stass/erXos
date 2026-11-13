@@ -360,7 +360,7 @@ class RuntimeDeviceTest < Minitest::Test
   def test_an_image_wraps_a_region
     load = '{module, erx_memdraw} = code:load_binary(erx_memdraw, "memdraw", ' \
            'base64:decode(string:trim(io:get_line("")))), '
-    beam = compiled_module(File.join(ROOT, 'erlang/apps/erx_display/src/erx_memdraw.erl'))
+    beam = compiled_module(File.join(ROOT, 'erlang/apps/erx_memdraw/src/erx_memdraw.erl'))
     assert_equal 'ok', evaluate(load + OPEN_COHERENT + <<~'ERLANG', input: "#{beam}\n")
       {ok, R} = erx_device:region(D, 0, 1024), X32 = 16#68081828,
       {'EXIT', {badarg, _}} = (catch erx_memdraw:wrap(R + 1, 0, {0, 0, 16, 16}, X32)),

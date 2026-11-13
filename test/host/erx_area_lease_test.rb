@@ -29,8 +29,8 @@ class ErxAreaLeaseTest < Minitest::Test
   HARNESS = File.join(ROOT, 'test/display/erx_area_harness.c')
   AREA = 'erlang/apps/erx/src/erx_area.erl'
   CORE = File.join(NIFS, 'erx_area_lease_core.c')
-  PIXELS = 'erlang/apps/erx_display/src/erx_pixels.erl'
-  PIXELS_CORE = 'erlang/apps/erx_display/src/erx_pixels_core.erl'
+  PIXELS = 'erlang/apps/erx_win/src/erx_pixels.erl'
+  PIXELS_CORE = 'erlang/apps/erx_win/src/erx_pixels_core.erl'
   TESTS = %w[test/erlang/erx_area_lease_tests.erl test/erlang/erx_pixels_tests.erl].freeze
   SUITES = '[erx_area_lease_tests, erx_pixels_tests]'
   HARNESS_FUNCTIONS = 'take/3, give/1, map_lease/2, leases/0, peek/3, poke/3'
@@ -123,7 +123,7 @@ class ErxAreaLeaseTest < Minitest::Test
 
   def run_cases(nif: NIF, core: CORE, replaced: {})
     Dir.mktmpdir('erx-area-lease-') do |work|
-      ErlangBuild.compile(work, applications: %w[erx erx_display], tests: TESTS,
+      ErlangBuild.compile(work, applications: %w[erx erx_win], tests: TESTS,
                                 replaced: { AREA => area_with_harness }.merge(replaced))
       build_nif(work, nif, core)
       output, = Open3.capture2e(Erx::HostOs.nif_search_environment(work), 'gtimeout', '-k', '10', '120',

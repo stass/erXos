@@ -15,8 +15,8 @@ require_relative '../fixtures/erlang_build'
 # of erx_draw_core, must fail the case named for it.
 class ErxDrawCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  APPLICATIONS = %w[erx_display].freeze
-  MODULE_SOURCE = 'erlang/apps/erx_display/src/erx_draw_core.erl'
+  APPLICATIONS = %w[erx_win].freeze
+  MODULE_SOURCE = 'erlang/apps/erx_win/src/erx_draw_core.erl'
   TESTS = %w[test/erlang/erx_draw_core_tests.erl].freeze
   DEADLINE_SECONDS = '600'
 

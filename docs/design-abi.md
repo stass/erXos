@@ -2244,7 +2244,7 @@ The output families have explicit locations, shown relative to `build/gen/`:
 | `tools/generated/abi.rb` | immutable values, source-driven packer encodings and host readers |
 | `fuzz/generated/` | entry points invoking production readers |
 | `web/src/generated/` | the web client's TypeScript: `web.txt`'s types, codec, limits and hash; `ui.txt`'s tables and the reader and writer of its binary form; the inspection schema's kinds, attribute names, units, stopgap reporters and `present` marks ([design-web.md](design-web.md#the-client)) |
-| `erlang/apps/erx_display/src/erx_draw_codec.erl`, `include/erx/draw_codec.h`, `display/generated/erx_draw_codec.c` | the draw protocol's codec and its C twin |
+| `erlang/apps/erx_win/src/erx_draw_codec.erl`, `include/erx/draw_codec.h`, `display/generated/erx_draw_codec.c` | the draw protocol's codec and its C twin |
 | `otp/erts/preloaded/src/erx_prog_grammar.erl`, `include/erx/prog_profile.h`, `liberx/generated/prog_profile.c` | the program protocol's Erlang grammar, and the table and typed accessors of its C check |
 | `docs/generated/abi-reference.md` | signatures, assignments, fields, bounds and mapping tables |
 

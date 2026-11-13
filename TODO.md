@@ -803,19 +803,13 @@ it; git history is the record of completed work.
     [The pixel area](docs/design-display.md#the-pixel-area)): `erx_screen` sends frames with
     `gen_server:send_request/2` and keeps only pending state (the newest layout, one waiting present per live window,
     dropped at the window's end); presents and `erx_memdraw:wrap/4` refuse an offset off a page boundary.
-  * **The display domain**: split `erlang/apps/erx_display` so that the display's release holds `erx_winfs`,
-    `erx_window`, `erx_screen`, `erx_screen_core`, the policies, `erx_wm_menu`, the drivers and `erx_memdraw`, and the
-    session's holds `erx_win`, `erx_pixels`, `erx_draw`, `erx_draw_conn`, `erx_draw_core`, `erx_draw_codec`,
-    `erx_draw_image`, `erx_font`, `erx_memdraw`, `erx_term` with `erx_vt`, and `erx_ui` with its servers and
-    renderers; re-scope the chokepoint checks to the two releases (G9: no draw decoder, widget code or font reader in
-    the display's). The display-release xref check (docs/design-display.md, Verification) refuses `erx_draw_core`,
-    `erx_draw_codec` and `erx_draw_image` by module while the display release loads `erx_display`, which holds
-    them: the check stays by module, and this split resolves it by moving the draw modules into a session-only
-    application. New: `erx_winctl` with its fuzz target, `erx_win`, `erx_draw_conn`. Until the split the display
-    boot script ships only `ReleaseFiles::SHIPPED_MODULES` of `erx_display`, the stopgap the split deletes (`tools/lib/erx/release_files.rb`), so
-    no client's boot script can take `erx_display` from the domain release, and `erx_screen` is started by the
-    driver application's supervisor, `erx_fb_sup`, behind the driver; the split gives it the display-side
-    application's supervisor.
+  * **The display domain**: the display side gains `erx_winfs`, `erx_window`, `erx_winctl` with its fuzz target,
+    the policies and `erx_wm_menu`, and the client side `erx_win`'s library, `erx_draw`, `erx_draw_conn`, `erx_font`,
+    `erx_term` and `erx_ui` with its servers and renderers (docs/design-display.md, "What runs where"). The G9 build
+    check (`tools/lib/erx/display_release.rb`) reads module names in the display side's sources; the design's xref
+    check over the display release's beams, with its refusal of calls that start a port or a sub-space, is not built.
+    erx's generated widget modules `erx_ui_wire` and `erx_ui_schema` ship in every release, the display's too,
+    since every domain takes erx; G9 puts widget code on the client side, and the check reads only the display side.
     `erx_screen_core` keeps its plan and takes the design's names: a present for a flush, and no expose, since
     `erx_screen` copies what a layout change uncovers from the windows' buffers.
   * **The widget server** ([The widget server](docs/design-display.md#the-widget-server)): `erx_ui` with `open/1`,
@@ -824,7 +818,7 @@ it; git history is the record of completed work.
     routes its hits through `erx_ui_model:hit/4`; `pair/3` and `hit/4` themselves, with their property tests
     ([Verification](docs/design-display.md#verification-and-testing)).
   * **`erx_ui_lvgl`** ([The widget server](docs/design-display.md#the-widget-server)): the shell
-    (`erlang/apps/erx_display/src/erx_ui_lvgl.erl`) performs `erx_ui_lvgl_core`'s actions over a port its `open`
+    (`erlang/apps/erx_win/src/erx_ui_lvgl.erl`) performs `erx_ui_lvgl_core`'s actions over a port its `open`
     callback starts and a `present` callback, and `test/host/erx_ui_lvgl_test.rb` drives the real `erx-lvgl` with it
     on the host. Left: `open` on erXos, which starts the program in the session with the window's buffer as its
     `mem` descriptor 3 (the Programs item below), and `present`, `window/2` and `resize/3` bound to the window, with
@@ -1001,7 +995,7 @@ it; git history is the record of completed work.
     lost up of the chord's completing key leaves it withheld, so its next downs are dropped as repeats and the chord
     does not fire again. Give `input()` a `repeat` direction (virtio-input reports one) so a `down` of a held key
     means its up was lost, and keep held keys per device, cleared when the device goes away.
-* [Medium] `erlang/apps/erx_display/src/erx_vt.erl`, [The terminal
+* [Medium] `erlang/apps/erx_win/src/erx_vt.erl`, [The terminal
   emulator](docs/design-display.md#the-terminal-emulator): the core is built without `key/2`. The oracle test
   (`test/host/erx_vt_oracle_test.rb`, libvterm 0.3.3 with `test/vt/vterm_dump.c`) runs only the per-row cases
   and the open details of `test/vt/corpus.rb`: the exhaustive enumeration, the streams generated from the
@@ -1014,14 +1008,14 @@ it; git history is the record of completed work.
   so what DL and a resize save, and the scrollback's charge per row, are checked only by the EUnit cases.
   The terminal generator writes the width table for Erlang and `include/erx/vt_width.h`, not musl's
   `wcwidth` tables or `erx_width`.
-* [Medium] `erlang/apps/erx_display/src/erx_vt.erl`, `full_reset/1`, `soft_reset/1` and `resize/3`: what RIS,
+* [Medium] `erlang/apps/erx_win/src/erx_vt.erl`, `full_reset/1`, `soft_reset/1` and `resize/3`: what RIS,
   DECSTR and a resize keep is a list of `#vt{}` fields at each site, so a new field (the link grammar's state,
   `key/2`'s) must be remembered at each. Nest what RIS resets (grids, cursor, pen, modes, margins, tabs,
   character sets, saved cursors, links) in a record of its own beside what lives as long as the terminal
   (scrollback, counters, decoder and parser states, the next link id), so RIS replaces the inner record with
   `new/2`'s and lists nothing. Also from the core's review: the `Wrapped` flag is set on a bottom row below the
   region that autowrap then overwrites, and ECH to the row's end leaves it set.
-* [Medium] `abi/formats/ui.txt` validity and `erlang/apps/erx_display/src/erx_ui_model.erl`, [Widget
+* [Medium] `abi/formats/ui.txt` validity and `erlang/apps/erx_win/src/erx_ui_model.erl`, [Widget
   trees](docs/design-display.md#widget-trees): no rule bounds one node's children below the grant's `ui_nodes`, which
   has no value yet. `delta/2`'s longest kept run and its index bookkeeping, and `apply_ops/2`'s insert and move, are
   quadratic in a node's children (a reversed flat node of 16,000 children: 10 s for `delta/2`, 20 s to apply, on
@@ -1072,7 +1066,7 @@ it; git history is the record of completed work.
 * [Low] `display/libmemdraw/draw.c`, `alphadraw`: its per-call buffer comes from `mallocz(n, 0)`, not zeroed, as
   upstream's was not. Zero it (`mallocz(n, 1)`), or show that every byte is written before it is read and
   say so beside the call.
-* [Low] `test/erlang/erx_draw_ref.erl` and `erlang/apps/erx_display/src/erx_draw_core.erl`: `supported_chan/2` is
+* [Low] `test/erlang/erx_draw_ref.erl` and `erlang/apps/erx_win/src/erx_draw_core.erl`: `supported_chan/2` is
   copied between the core and the reference, so a change to the channels `b` refuses must be made in both. Export it
   from the core, or keep the copy as the oracle's own and say so in it.
 * [Low] `display/memdraw/erx_memdraw_nif.c`: `ERL_NIF_INIT` gives no `upgrade` callback, so reloading `erx_memdraw`

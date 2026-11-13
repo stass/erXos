@@ -1,9 +1,9 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
--module(erx_display_sup).
+-module(erx_win_sup).
 -moduledoc """
-The supervisor of `erx_display` in a client domain (docs/design-display.md,
+The supervisor of `erx_win` in a client domain (docs/design-display.md,
 "The pixel area", The allocator is not restarted over an area). Its one
 child, the allocator erx_pixels, is temporary and significant, so it is never
 restarted: its end, however it comes, shuts the supervisor down, which ends

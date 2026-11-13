@@ -21,7 +21,7 @@ require_relative '../vt/corpus'
 class ErxVtOracleTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
-  VT = 'erlang/apps/erx_display/src/erx_vt.erl'
+  VT = 'erlang/apps/erx_win/src/erx_vt.erl'
   SOURCE = File.join(ROOT, VT)
   # A CUP whose column defaults to 2, not 1, which the per-row cases must catch.
   CUP = 'move(VT1, Row, arg(tl_or_empty(Ps), 1))'
@@ -55,7 +55,7 @@ class ErxVtOracleTest < Minitest::Test
   end
 
   def self.erx_vt(script, work, module_text)
-    ErlangBuild.compile(work, applications: %w[erx erx_display], tests: TESTS, replaced: { VT => module_text })
+    ErlangBuild.compile(work, applications: %w[erx erx_win], tests: TESTS, replaced: { VT => module_text })
 
     dumped = File.join(work, 'erx_vt.dumps')
     output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

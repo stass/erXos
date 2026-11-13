@@ -6,6 +6,7 @@ require 'set'
 require_relative 'bounded_file'
 require_relative 'chokepoint_rules'
 require_relative 'device_callers'
+require_relative 'display_release'
 require_relative 'erlang_apps'
 require_relative 'dependencies'
 require_relative 'device_posters'
@@ -185,6 +186,7 @@ module Erx
       # Each application's .app.src lists the modules its src/ holds, generated ones included,
       # which generated_sources has just brought up to date.
       ErlangApps.check_sources(root: @root)
+      check_display_release
       Chokepoints.enforce(@chokepoints, root: @root, names: (listed | generated.keys).sort,
                                         imported: method(:chokepoint_upstream?), sources: generated)
       true
@@ -366,6 +368,13 @@ module Erx
     def check_start_callers(listed)
       sources = listed.select { |relative| StartCallers.covers?(relative) && File.file?(File.join(@root, relative)) }
       violations = StartCallers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    # G9: no client module in the display release, nor named by one of its modules. It reads
+    # the applications whole, generated modules included, so it runs after generated_sources.
+    def check_display_release
+      violations = DisplayRelease.check(root: @root)
       raise Error, violations.join("\n") unless violations.empty?
     end
 

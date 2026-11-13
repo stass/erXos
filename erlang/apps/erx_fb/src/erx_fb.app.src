@@ -5,15 +5,13 @@
 %% display device"): each is an Erlang process that implements the erx_display behaviour,
 %% shows a screen image and flushes the rectangles that changed. The virtio-gpu driver is
 %% erx_virtio_gpu, the process, and erx_virtio_gpu_core, its pure core; erx_fb_sup starts
-%% it and erx_screen over it. erx_display is not among the applications started first:
-%% the display domain's release only loads it (docs/design-display.md, "The pixel area"),
-%% which puts the behaviour, erx_memdraw and erx_screen on the code path and starts none
-%% of its processes.
+%% it and erx_screen over it. erx_display, the behaviour and the screen, and erx_memdraw,
+%% the pixel primitives, are library applications this one depends on.
 {application, erx_fb,
  [{description, "erXos display drivers"},
   {vsn, "1"},
   {modules, [erx_fb_app, erx_fb_sup, erx_virtio_gpu, erx_virtio_gpu_core]},
   {registered, [erx_fb, erx_fb_sup, erx_screen]},
-  {applications, [kernel, stdlib, erx]},
+  {applications, [kernel, stdlib, erx, erx_memdraw, erx_display]},
   {env, []},
   {mod, {erx_fb_app, []}}]}.

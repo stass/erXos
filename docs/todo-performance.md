@@ -56,7 +56,7 @@ block a milestone's numbers.
   the fixes (newest layout only, a rectangle cap) are in `TODO.md`'s security residual for G3.
 
 * **[Medium] display, the terminal emulator's throughput.** `erx_vt:feed/2`
-  (`erlang/apps/erx_display/src/erx_vt.erl`) copies the row tuple at least twice for every printed
+  (`erlang/apps/erx_win/src/erx_vt.erl`) copies the row tuple at least twice for every printed
   character (`write_cells/4`, then `put_row/3`), and every line feed at the bottom margin turns the
   whole grid into a list and back and trims the row it saves (`scroll_up/5`, `push_row/2`). A
   review probe on the development host's stock OTP took about 1.1 s for 1 MB of printable ASCII on
@@ -67,7 +67,7 @@ block a milestone's numbers.
   grid whose scroll does not rebuild every row.
 
 * **[Medium] display, the widget tree's difference.** `erx_ui_model:delta/2` and `apply_ops/2`
-  (`erlang/apps/erx_display/src/erx_ui_model.erl`) are quadratic in one node's children, and the
+  (`erlang/apps/erx_win/src/erx_ui_model.erl`) are quadratic in one node's children, and the
   browser renderer recomputes `delta(Sent, Pending)` for every update of a long change. Measure
   the design's `delta/2` workload for a 1,000-node tree, flat and nested, once the children
   limit of `TODO.md` is set; the fixes are a patience-sorting longest run and an indexed

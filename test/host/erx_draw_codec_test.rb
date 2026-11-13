@@ -22,7 +22,7 @@ class ErxDrawCodecTest < Minitest::Test
   Erx::Generated.ensure(root: ROOT)
   GENERATED = File.join(ROOT, Erx::Generated::OUTPUT)
   EMITTER = Erx::ABI::DrawEmitter
-  APPLICATIONS = %w[erx_display].freeze
+  APPLICATIONS = %w[erx_win].freeze
   TESTS = %w[test/erlang/erx_draw_codec_tests.erl].freeze
   HARNESS = %w[test/fixtures/erx_draw_codec_harness.c test/fixtures/erx_draw_cload.c].map { |path| File.join(ROOT, path) }
   # The seeded fault: indices take one byte more than their count's.

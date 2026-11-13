@@ -15,8 +15,8 @@ require_relative '../fixtures/erlang_build'
 # runs are independent, so they run at once.
 class ErxPixelsCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  APPLICATIONS = %w[erx_display].freeze
-  MODULE = 'erlang/apps/erx_display/src/erx_pixels_core.erl'
+  APPLICATIONS = %w[erx_win].freeze
+  MODULE = 'erlang/apps/erx_win/src/erx_pixels_core.erl'
   MODULE_SOURCE = File.join(ROOT, MODULE)
   TESTS = %w[test/erlang/erx_pixels_core_tests.erl].freeze
   DEADLINE_SECONDS = '300'

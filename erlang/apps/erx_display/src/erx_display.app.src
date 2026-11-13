@@ -1,28 +1,19 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% The display domain's services (docs/design-display.md): the screen's pure
-%% core, erx_screen_core, which decides what erx_screen composes, fills,
-%% exposes and pushes; the window policy behaviour erx_wm with
-%% erx_wm_single; erx_wctl, the text of a window's wctl file; and erx_ui_model,
-%% the realised widget tree and its one difference; erx_ui_lvgl_core, the LVGL
-%% renderer's decisions about its program's pipes, and erx_ui_lvgl, the shell that
-%% performs them; and erx_vt, the terminal
-%% emulator's core, with its generated width table erx_vt_width; the draw
-%% protocol's codec erx_draw_codec, generated from abi/formats/draw.txt, its
-%% pure core erx_draw_core, which checks a write against a connection and plans
-%% it, and erx_draw_image, the decoder of a Y message's compressed pixels;
-%% erx_memdraw, the NIF of the images and their pixel primitives; the display driver
-%% behaviour erx_display, which the display drivers of erx_fb implement;
-%% erx_vt reads erx: links through erx's erx_present; and the client's allocator of
-%% its pixel areas, erx_pixels over its pure core erx_pixels_core, which erx_display_app
-%% starts under erx_display_sup in a client domain's release.
+%% The display domain's side of the window system (docs/design-display.md,
+%% "What runs where"): the display driver behaviour erx_display, which the
+%% display drivers of erx_fb implement; the screen, erx_screen over its pure
+%% core erx_screen_core, which decides what it composes, fills, exposes and
+%% pushes, and which erx_fb_sup starts behind the driver; the window policy
+%% behaviour erx_wm with erx_wm_single; and erx_wctl, the text of a window's
+%% wctl file. A library application: it starts no process of its own, and
+%% none of its modules decodes a client's draw, picture, font or widget bytes
+%% (G9).
 {application, erx_display,
  [{description, "erXos display services"},
   {vsn, "1"},
-  {modules, [erx_display, erx_display_app, erx_display_sup, erx_draw_codec, erx_draw_core, erx_draw_image, erx_memdraw, erx_pixels, erx_pixels_core, erx_screen, erx_screen_core, erx_ui_lvgl, erx_ui_lvgl_core, erx_ui_model,
-              erx_vt, erx_vt_width, erx_wctl, erx_wm, erx_wm_single]},
-  {registered, [erx_display_sup, erx_pixels]},
-  {applications, [kernel, stdlib, erx]},
-  {env, []},
-  {mod, {erx_display_app, []}}]}.
+  {modules, [erx_display, erx_screen, erx_screen_core, erx_wctl, erx_wm, erx_wm_single]},
+  {registered, []},
+  {applications, [kernel, stdlib, erx, erx_memdraw]},
+  {env, []}]}.

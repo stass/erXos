@@ -13,7 +13,7 @@ module Erx
     # generated from the declaration, read by one fixed walk over the fields;
     # so a message is declared once and no message has code of its own.
     module DrawEmitter
-      ERLANG_PATH = 'erlang/apps/erx_display/src/erx_draw_codec.erl'
+      ERLANG_PATH = 'erlang/apps/erx_win/src/erx_draw_codec.erl'
       C_HEADER_PATH = 'include/erx/draw_codec.h'
       C_SOURCE_PATH = 'display/generated/erx_draw_codec.c'
       # Each field type's Erlang type, and its C enumerator after ERX_DRAW_F_.

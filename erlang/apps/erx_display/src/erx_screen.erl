@@ -23,10 +23,8 @@ driver; while a frame is out the screen writes nothing. The driver's end
 also ends this process: the supervisor that starts both, `erx_fb_sup`,
 is `rest_for_one` with the driver first, so a restarted driver is
 followed by a new screen whose start is the repaint the design asks for
-after a driver's restart. That supervisor is the driver application's
-only because the split of `erx_display` into a client-side and a
-display-side application is undecided (TODO.md, "The display domain:
-split erlang/apps/erx_display").
+after a driver's restart. That supervisor is the driver application's, since `erx_display` is a
+library application, so no screen runs before a driver.
 """.
 -behaviour(gen_server).
 

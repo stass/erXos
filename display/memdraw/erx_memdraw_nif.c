@@ -4,7 +4,7 @@
  */
 
 /*
- * The NIF of erx_memdraw (erlang/apps/erx_display/src/erx_memdraw.erl):
+ * The NIF of erx_memdraw (erlang/apps/erx_memdraw/src/erx_memdraw.erl):
  * terms in, erx_memdraw.h's calls, terms out. An image is a resource
  * whose destructor alone frees it, so an image lives while any process
  * holds it (G2). A draw, load or read over 64 KiB of destination bytes

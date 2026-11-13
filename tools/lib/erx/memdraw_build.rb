@@ -36,8 +36,8 @@ module Erx
     TRAP_UB = %w[-fsanitize=undefined -fsanitize-trap=undefined].freeze
     SANITIZE = %w[-fsanitize=address,undefined -fno-sanitize-recover=all].freeze
     DEADLINE = '300'
-    MODULES = %w[erlang/apps/erx_display/src/erx_draw_image.erl erlang/apps/erx_display/src/erx_draw_core.erl
-                 erlang/apps/erx_display/src/erx_memdraw.erl test/erlang/erx_draw_ref.erl
+    MODULES = %w[erlang/apps/erx_win/src/erx_draw_image.erl erlang/apps/erx_win/src/erx_draw_core.erl
+                 erlang/apps/erx_memdraw/src/erx_memdraw.erl test/erlang/erx_draw_ref.erl
                  test/erlang/erx_memdraw_tests.erl].freeze
     # The emulator ignores the caller's flags and code path.
     CLEAN_ENVIRONMENT = { 'ERL_AFLAGS' => nil, 'ERL_FLAGS' => nil, 'ERL_ZFLAGS' => nil, 'ERL_LIBS' => nil }.freeze

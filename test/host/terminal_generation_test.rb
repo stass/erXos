@@ -13,7 +13,7 @@ class TerminalGenerationTest < Minitest::Test
                         tools/lib/erx/terminal_rules.rb otp/lib/stdlib/uc_spec/UnicodeData.txt
                         otp/lib/stdlib/uc_spec/DerivedCoreProperties.txt
                         otp/lib/stdlib/uc_spec/EastAsianWidth.txt].freeze
-  WIDTH_MODULE = 'erlang/apps/erx_display/src/erx_vt_width.erl'
+  WIDTH_MODULE = 'erlang/apps/erx_win/src/erx_vt_width.erl'
   WIDTH_HEADER = 'include/erx/vt_width.h'
   FIXTURE_REVIEW = { 'rules' => [], 'default_license' => 'Unicode-3.0',
                      'default_evidence' => 'terminal generation fixture' }.freeze

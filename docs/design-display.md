@@ -383,6 +383,24 @@ What runs where:
 | a client's domain, a session or a configured domain | a grant on the display's window tree; its pixel area, writable; its own images, fonts and trees | `erx_win`; `erx_draw`, its draw connections and `erx_memdraw`; `erx_term` with `erx_vt`; `erx_ui` with its widget servers and renderers; its programs, `erx-lvgl` among them |
 | the system domain | the right to delete the pixel area | the domain library, which makes the area in the connection's plan and deletes it with the connection |
 
+The modules are three Erlang applications, and a release takes each
+whole. `erx_memdraw`, the pixel primitives, is a library application
+both sides take. `erx_display` holds the display side: the driver
+behaviour, `erx_winfs`, `erx_window`, `erx_winctl`, `erx_screen` with
+its core, the policies with `erx_wm_menu`, and `erx_wctl`; the drivers'
+application `erx_fb`, which depends on it, starts `erx_screen` behind
+the driver, so no screen runs before a driver. `erx_win` holds a
+client's side: the module `erx_win` of the same name, `erx_pixels` with
+its core, `erx_draw` with `erx_draw_conn`, the draw codec and core and
+`erx_draw_image`, `erx_font`, `erx_term` with `erx_vt` and its width
+table, and `erx_ui` with the widget model and renderers; its
+application starts `erx_pixels`. The display domain's boot script takes
+`erx_memdraw`, `erx_display` and `erx_fb`, a client's takes
+`erx_memdraw` and `erx_win`, and the system release takes neither side,
+so what the display domain's boot script loads holds no module of
+`erx_win`, and the G9 check refuses a client module placed on the
+display side by mistake.
+
 ## Invariants
 
 | Invariant | Why it holds | What would break it | How it is checked |
@@ -719,17 +737,16 @@ significant child of the client's release: its exit ends the client
 domain, and what starts it again, where its manifest asks for that,
 starts a new domain with new connections and new, zeroed areas, the
 recovery that already exists for a domain. It is a module of the
-application `erx_display`, with `erx_pixels_core`, and the application's
-supervisor, `erx_display_sup`, starts it as a `temporary`,
+client application `erx_win`, with `erx_pixels_core`, and the application's
+supervisor, `erx_win_sup`, starts it as a `temporary`,
 `significant` child with `auto_shutdown => any_significant`, as the
 system release starts the domain service
 ([design-system.md](design-system.md#system-services)). Every release
 that holds a display's grant, a session template's or a configured
-domain's, starts `erx_display` as a permanent application, so the
+domain's, starts `erx_win` as a permanent application, so the
 allocator's end ends the application and the domain
-([design-apps.md](design-apps.md#starting-a-session)); the display domain's release only
-loads it (start type `load`, `systools_make.erl`, `is_app_type/1`), so
-no allocator runs over the display's read-only mappings. A handler
+([design-apps.md](design-apps.md#starting-a-session)); the display domain's release does
+not hold it, so no allocator runs over the display's read-only mappings. A handler
 reaches the allocator by its registered name, and names the area by
 its display's `Peer`, which `erx_win`'s handle keeps with the buffer.
 `erx_win:open/2` takes `Peer` from the display's grant in the domain's
@@ -4076,7 +4093,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |
 | Only the display driver's process calls `erx_device`'s functions on the display device | the same xref check; and `device-callers` admits the display drivers' application, `erx_fb`, among the driver applications, while `device-posters` admits `erx_virtio_gpu` alone of it to call `erx_device:post/4` |
 | Only `erx_winfs` calls `erx_wm`'s callbacks | the same xref check |
-| The display release holds no draw decoder, picture or font reader, widget module or renderer, and starts no program | an xref check that the display release contains none of `erx_draw_core`, `erx_draw_codec`, `erx_draw_image`, `erx_font`, `erx_png`, `erx_inflate` and the `erx_ui` application, and calls no function that starts a port or a sub-space; a seeded dependency on each fails it |
+| The display release holds no draw decoder, picture or font reader, widget module or renderer, and starts no program | an xref check that the display release contains none of `erx_draw_core`, `erx_draw_codec`, `erx_draw_image`, `erx_font`, `erx_png`, `erx_inflate`, the `erx_ui` modules and any module of the client application `erx_win`, and calls no function that starts a port or a sub-space; a seeded dependency on each fails it |
 | Only `erx_winctl` reads a `ctl` line, and only `erx_wctl` a `wctl` line | a source check over the display release |
 | Only the generated `erx_draw_codec` decodes draw bytes, and only the generated reader decodes the native renderer's events and reports | the generated tree's determinism test, and a source check that no other module reads those bytes |
 | Only `erx_area_lease_map` maps memory into a space other than the runtime's own, and it maps only its lease's range, read-write, at the buffer place | the C half of `area-mappers`, over every C file of `otp/erts/emulator`: an `erx_vm_map` whose space is not `ERX_CAP_SELF` appears only in `erx_area_lease_map`, so no other mapper, whatever slot it is handed, maps into a program; a seeded such call in `erx_program_drv.c` fails it |
