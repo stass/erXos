@@ -12,7 +12,7 @@ require_relative 'runner'
 
 module Erx
   # Builds v64, the AArch64 machine in WebAssembly that the website boots
-  # erXos on, and collects the licence notices of everything compiled into
+  # erXos on, and collects the license notices of everything compiled into
   # the two files the site ships from it.
   #
   # v64 is used unmodified. deps.lock pins its commit and Closure Compiler,
@@ -25,7 +25,7 @@ module Erx
     STAGING = 'build/site-v64'
     # The files the site ships, as v64's Makefile writes them.
     TARGETS = { 'libv86.mjs' => 'build/libv86.mjs', 'v86-arm64.wasm' => 'build/v86-arm64.wasm' }.freeze
-    # The notices shipped beside them: v64's own licence texts, and the two
+    # The notices shipped beside them: v64's own license texts, and the two
     # files this build writes into the staged tree.
     NOTICE_FILE = 'build/NOTICES'
     RUST_NOTICE_FILE = 'build/COPYRIGHT-rust-library.html'
@@ -40,18 +40,18 @@ module Erx
     # The sources the two targets compile, as v64's Makefile names them:
     # the bundle's CORE_FILES, BROWSER_FILES and LIB_FILES, and the core's
     # src/rust crate with SoftFloat and zstd linked in. A superset is
-    # harmless: it only widens the licence check below.
+    # harmless: it only widens the license check below.
     COMPILED = %w[src/*.js src/{parallel,arm,virt,image,android,tpm,browser}/*.js
                   lib/**/*.{js,c,h} src/rust/**/*.rs].freeze
-    # A copyright line or a licence grant in a source file.
-    LICENCE_STATEMENT = /copyright\s+(?:\(c\)\s*)?\d{4}|licen[cs]ed\s+under|SPDX-License-Identifier/i
-    # Compiled sources that state v64's own licence (its LICENSE and
+    # A copyright line or a license grant in a source file.
+    LICENSE_STATEMENT = /copyright\s+(?:\(c\)\s*)?\d{4}|licen[cs]ed\s+under|SPDX-License-Identifier/i
+    # Compiled sources that state v64's own license (its LICENSE and
     # LICENSE.MIT, shipped as they are).
     V64_OWN = %w[src/floppy.js].freeze
     # Compiled third-party sources. NOTICES carries every copyright block of
-    # each, and the licence texts, from erXos's tree, that its blocks refer
+    # each, and the license texts, from erXos's tree, that its blocks refer
     # to without including. SoftFloat's blocks hold its whole BSD-3-Clause
-    # licence; zstd's point at zstd's LICENSE, which erXos's OTP carries.
+    # license; zstd's point at zstd's LICENSE, which erXos's OTP carries.
     THIRD_PARTY = {
       'lib/softfloat/softfloat.c' => [],
       'lib/zstd/zstddeclib.c' => ['otp/erts/emulator/zstd/LICENSE']
@@ -102,20 +102,20 @@ module Erx
     end
 
     # NOTICES: every copyright block of each third-party source compiled
-    # into the shipped files, and the licence texts they refer to. Raises
-    # Erx::Error naming a compiled source whose licence statement has no
+    # into the shipped files, and the license texts they refer to. Raises
+    # Erx::Error naming a compiled source whose license statement has no
     # entry above, so a new input fails the build until its notice is added.
     def notices(tree:, root:)
       unlisted = compiled_sources(tree).reject { |path| V64_OWN.include?(path) || THIRD_PARTY.key?(path) }
-                                       .select { |path| LICENCE_STATEMENT.match?(File.binread(File.join(tree, path))) }
-      raise Error, "#{unlisted.first} states a licence of its own; add its notice to Erx::SiteV64" unless unlisted.empty?
+                                       .select { |path| LICENSE_STATEMENT.match?(File.binread(File.join(tree, path))) }
+      raise Error, "#{unlisted.first} states a license of its own; add its notice to Erx::SiteV64" unless unlisted.empty?
 
-      sections = THIRD_PARTY.flat_map do |path, licences|
+      sections = THIRD_PARTY.flat_map do |path, licenses|
         blocks = copyright_blocks(File.binread(File.join(tree, path)))
         raise Error, "no copyright block found in #{path}" if blocks.empty?
 
         ["== Copyright notices in v64's #{path}\n\n#{blocks.join("\n\n")}\n",
-         *licences.map { |licence| "== The licence those notices name, from erXos's #{licence}\n\n#{File.read(File.join(root, licence))}" }]
+         *licenses.map { |license| "== The license those notices name, from erXos's #{license}\n\n#{File.read(File.join(root, license))}" }]
       end
       "Third-party code compiled into the website's v64 files, beside v64's own code\n" \
         "(LICENSE and LICENSE.MIT). The Rust standard library's notices are in\n" \

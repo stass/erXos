@@ -420,7 +420,7 @@ class SiteTest < Minitest::Test
     end
   end
 
-  def test_notices_carry_each_third_party_block_once_and_the_licence_it_names
+  def test_notices_carry_each_third_party_block_once_and_the_license_it_names
     with_v64_tree do |tree, root|
       notices = Erx::SiteV64.notices(tree:, root:)
       assert_equal 1, notices.scan('Copyright 2011 The Regents').size
@@ -447,7 +447,7 @@ class SiteTest < Minitest::Test
     end
   end
 
-  def test_the_fetched_v64_compiles_no_unlisted_licence
+  def test_the_fetched_v64_compiles_no_unlisted_license
     tree = File.join(REPO, 'build/third_party/v64/v64-87d26de')
     skip 'v64 is not fetched' unless File.directory?(tree)
 

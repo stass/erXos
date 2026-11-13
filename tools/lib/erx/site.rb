@@ -19,7 +19,7 @@ require_relative 'site_v64'
 module Erx
   # Assembles the static website in build/site from five inputs: the page
   # sources in site/, a v64 tree SiteV64 built (the emulator the page runs
-  # erXos on, with its licence notices), an erXos boot image, the Raspberry
+  # erXos on, with its license notices), an erXos boot image, the Raspberry
   # Pi 4's card with its build record (BootPartition), and the source both
   # were built from. None of the built files is checked in.
   #

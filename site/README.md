@@ -37,16 +37,16 @@ ruby tools/build_site.rb --no-card [--image IMAGE] [--serve 8000]
   tools with its own lockfile and nothing it fetches reaches an erXos
   image. `--v64 DIR` instead takes a tree an earlier run built, such as
   `build/site-v64`, and builds nothing.
-* The licence notices of what the two files contain ship beside them in
+* The license notices of what the two files contain ship beside them in
   `v64/`: v64's `LICENSE` (BSD-2-Clause) and `LICENSE.MIT`, published with a
   `.txt` suffix so a static host serves them as text; `NOTICES.txt`,
   every copyright block of the third-party C compiled into the core
   (Berkeley SoftFloat, BSD-3-Clause, and zstd, BSD-3-Clause, with zstd's
-  licence text from `otp/erts/emulator/zstd/LICENSE`, which zstd's
+  license text from `otp/erts/emulator/zstd/LICENSE`, which zstd's
   headers refer to); and `COPYRIGHT-rust-library.html`, the Rust
   toolchain's notices for the standard library the core links. The
   build scans the sources v64's Makefile compiles and fails on one that
-  states a licence `Erx::SiteV64` does not list, so a new third-party
+  states a license `Erx::SiteV64` does not list, so a new third-party
   input cannot ship without its notice.
 * `--image` is the erXos boot image, by default
   `build/production-image/site/image.boot`. It is stored
