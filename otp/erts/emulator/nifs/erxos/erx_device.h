@@ -321,8 +321,9 @@ typedef struct erx_device_frame {
  * line.
  *
  * erx_device_stand_in_transmitted sends every frame posted since its last run, at most a
- * ring's worth: each descriptor's bytes go to `sink` (tag 0) and the consumer index moves
- * past them. ERX_EINVAL for a device without that ring installed. ERX_ECORRUPT for a
+ * ring's worth: each descriptor's bytes go to `sink`, tagged with the descriptor's index,
+ * and the consumer index moves past them. ERX_EINVAL for a device without that ring
+ * installed. ERX_ECORRUPT, sending nothing, for a producer index more than a ring ahead; for a
  * descriptor that is not a whole frame with its CRC (start and end of packet and CRC set),
  * whose length is over the ring's buffer size, or whose address does not reach its bytes
  * in the queue's memory: the frames before it are sent to `sink`, counted in `sent` and

@@ -12,13 +12,12 @@
  * lines. GENET is not coherent, so every plan runs as a non-coherent device's. The register
  * offsets and field masks are the generated table's (hw/svd/genet/genet.svd).
  *
- * The stand-in controller holds its registers in a window of plain memory, the descriptors
- * among them, and reads and writes the model's memory alone. After any effect it may act: its
- * transmit engine takes each descriptor up to the producer index, reads the frame from the
- * address and length the registers hold and compares it with what the driver posted, and
- * advances the consumer index; its receive engine writes a frame into the buffer of the
- * descriptor its producer index names, sets the status's length and flags, and advances the
- * producer index. Its DMA status reports a stop only some reads after DMA control cleared it.
+ * The controller is erx_device_genet_model, the hosted runtime's stand-in too, over a window
+ * of plain memory and the cache model's device side, its DMA status reporting a stop only
+ * some reads after DMA control cleared it. After any effect it may act: its transmit engine
+ * sends each descriptor up to the producer index, each frame compared here with what the
+ * driver posted; its receive engine writes a frame of random length, prefix and flags into
+ * the next free buffer. The hostile acts that break an index or a length are the harness's.
  *
  * Every schedule installs both queues, then runs posts, completions and resets, with the line
  * equal to the granule and a quarter of it. Every posted byte reaches the controller intact,
@@ -32,6 +31,7 @@
 
 #include "otp/erts/emulator/nifs/erxos/erx_device_dma.h"
 #include "otp/erts/emulator/nifs/erxos/erx_device_genet.h"
+#include "otp/erts/emulator/nifs/erxos/erx_device_genet_model.h"
 #include "otp/erts/emulator/nifs/erxos/erx_dma_model.h"
 
 #define CHECK(condition)							\
@@ -58,20 +58,25 @@ typedef struct direction {
 	erx_device_genet_queue_t	queue;
 	erx_dma_state_t			state;		/* who writes each buffer, as the last plan left it */
 	uint64_t			pool_offset;
-	uint32_t			stop_reads;	/* status reads since DMA control stopped the engine */
-	uint32_t			ctrl;		/* the stand-in's view of DMA control */
 } direction_t;
 
 typedef struct harness {
 	erx_dma_model_t		model;
 	const erx_device_peripheral_t *genet;
 	uint32_t		*window;
+	erx_device_genet_model_t device;	/* the controller, over `window` and the model's device side */
+	erx_device_genet_memory_t memory;
 	direction_t		rx, tx;
 	uint32_t		line;
 	uint64_t		random;
 	/* What the driver posted on each transmit buffer, compared when the controller sends it. */
 	uint8_t			posted[SIZE][BUFFER];
 	uint32_t		posted_length[SIZE];
+	/* What the controller sent, in order, and the descriptor each came from. */
+	uint8_t			wire[SIZE][BUFFER];
+	uint32_t		wire_desc[SIZE];
+	uint32_t		wire_length[SIZE];
+	uint32_t		wire_count;
 	/* What the controller wrote into each receive buffer: its serial, length and flags. */
 	uint32_t		frame_serial[SIZE];
 	uint32_t		frame_length[SIZE];
@@ -127,75 +132,106 @@ place(uint32_t mask, uint32_t value)
 	return ((value << __builtin_ctz(mask)) & mask);
 }
 
-static uint64_t
-descriptor_addr(const harness_t *h, const direction_t *d, uint32_t desc)
-{
-	return (reg(h, d->regs.desc_addr_lo + desc * d->regs.desc_stride) |
-	    (uint64_t)reg(h, d->regs.desc_addr_hi + desc * d->regs.desc_stride) << 32);
-}
-
 static bool
-running(const direction_t *d)
+running(const harness_t *h, const direction_t *d)
 {
-	return ((d->ctrl & d->regs.dma_enable) != 0 &&
-	    (d->ctrl & place(d->regs.dma_ring_enable, 1u << ERX_DEVICE_GENET_RING)) != 0);
+	return (erx_device_genet_model_running(&h->device, d->regs.direction));
 }
 
 /* -------------------------------------------------------------------------------------------
- * The stand-in controller
+ * The controller: erx_device_genet_model over the cache model's device side
  */
+
+static bool
+memory_read(void *context, uint64_t addr, uint8_t *bytes, uint32_t length)
+{
+	harness_t *const h = context;
+
+	return (addr >= DEVICE_BASE && erx_dma_model_device_read(&h->model, addr - DEVICE_BASE, bytes, length));
+}
+
+static bool
+memory_write(void *context, uint64_t addr, const uint8_t *bytes, uint32_t length)
+{
+	harness_t *const h = context;
+
+	return (addr >= DEVICE_BASE && erx_dma_model_device_write(&h->model, addr - DEVICE_BASE, bytes, length));
+}
+
+static uint8_t *
+wire_sink(void *context, uint64_t tag, uint32_t length)
+{
+	harness_t *const h = context;
+
+	CHECK(h->wire_count < SIZE && tag < SIZE && length <= BUFFER);
+	h->wire_desc[h->wire_count] = (uint32_t)tag;
+	h->wire_length[h->wire_count] = length;
+	return (h->wire[h->wire_count++]);
+}
+
+/*
+ * The descriptor the controller refused, at its consumer index: the driver posts none, so the
+ * harness fails at the rule it breaks, the framing and CRC bits first.
+ */
+static void
+refused(const harness_t *h)
+{
+	const direction_t *const d = &h->tx;
+	const uint32_t desc = field(d->regs.index, reg(h, d->regs.hardware_index)) % SIZE;
+	const uint32_t status = reg(h, d->regs.desc_status + desc * d->regs.desc_stride);
+
+	CHECK((status & d->regs.sop) && (status & d->regs.eop) && (status & d->regs.crc));
+	CHECK(field(d->regs.buflen, status) <= erx_device_genet_model_buffer_bytes(&h->device, ERX_DEVICE_GENET_TX));
+	CHECK(!"the transmit descriptor's address does not reach its bytes");
+}
 
 /* The transmit engine sends every descriptor up to the producer index, each frame compared with the post. */
 static void
 transmit(harness_t *h)
 {
-	direction_t *const d = &h->tx;
-	uint16_t cons = (uint16_t)field(d->regs.index, reg(h, d->regs.hardware_index));
-	const uint16_t prod = (uint16_t)field(d->regs.index, reg(h, d->regs.software_index));
+	uint32_t sent;
 
-	for (; running(d) && cons != prod; cons++) {
-		const uint32_t desc = cons % SIZE;
-		const uint32_t status = reg(h, d->regs.desc_status + desc * d->regs.desc_stride);
-		const uint32_t length = field(d->regs.buflen, status);
-		uint8_t bytes[BUFFER];
+	h->wire_count = 0;
+	if (erx_device_genet_model_transmit(&h->device, &h->memory, wire_sink, h, &sent) != ERX_OK)
+		refused(h);
+	for (uint32_t frame = 0; frame < sent; frame++) {
+		const uint32_t desc = h->wire_desc[frame], length = h->wire_length[frame];
 
-		CHECK((status & d->regs.sop) && (status & d->regs.eop) && (status & d->regs.crc));
-		CHECK(length == h->posted_length[desc] && length <= BUFFER);
-		CHECK(erx_dma_model_device_read(&h->model, descriptor_addr(h, d, desc) - DEVICE_BASE, bytes, length));
-		CHECK(memcmp(bytes, h->posted[desc], length) == 0);
+		CHECK(length == h->posted_length[desc]);
+		CHECK(memcmp(h->wire[frame], h->posted[desc], length) == 0);
 		h->sent++;
 	}
-	set_reg(h, d->regs.hardware_index, place(d->regs.index, cons));
 }
 
-/* The receive engine fills the next free descriptor with a frame and its status, then advances the producer index. */
+/*
+ * The receive engine fills the next free buffer with a frame of random length, of which it
+ * writes a prefix, and start and end of packet set, or now and then a CRC error or a frame
+ * without its end.
+ */
 static void
 receive(harness_t *h)
 {
 	direction_t *const d = &h->rx;
-	const uint16_t prod = (uint16_t)field(d->regs.index, reg(h, d->regs.hardware_index));
-	const uint16_t cons = (uint16_t)field(d->regs.index, reg(h, d->regs.software_index));
-	const uint32_t desc = prod % SIZE;
+	const uint32_t desc = field(d->regs.index, reg(h, d->regs.hardware_index)) % SIZE;
+	erx_device_genet_model_frame_t frame;
 	uint8_t bytes[BUFFER];
-	uint32_t length, prefix, flags;
+	bool taken;
 
-	if (!running(d) || (uint16_t)(prod - cons) == SIZE)
-		return;
-	length = draw(h, BUFFER + 1);
-	prefix = draw(h, length + 1);		/* the bytes past the prefix it reports but leaves alone */
-	flags = d->regs.sop | d->regs.eop;
+	frame.length = draw(h, BUFFER + 1);
+	frame.written = draw(h, frame.length + 1);	/* the bytes past the prefix it reports but leaves alone */
+	frame.flags = d->regs.sop | d->regs.eop;
 	if (draw(h, 8) == 0)
-		flags = draw(h, 2) == 0 ? flags | CRC_ERROR : d->regs.sop;
-	h->serial++;
-	for (uint32_t at = 0; at < prefix; at++)
-		bytes[at] = pattern(h->serial, at);
-	CHECK(erx_dma_model_device_write(&h->model, descriptor_addr(h, d, desc) - DEVICE_BASE, bytes, prefix));
-	h->frame_serial[desc] = h->serial;
-	h->frame_length[desc] = prefix;
-	h->frame_flags[desc] = flags;
-	set_reg(h, d->regs.desc_status + desc * d->regs.desc_stride, place(d->regs.buflen, length) | flags);
-	set_reg(h, d->regs.hardware_index, place(d->regs.index, (uint16_t)(prod + 1)) |
-	    (reg(h, d->regs.hardware_index) & ~d->regs.index));
+		frame.flags = draw(h, 2) == 0 ? frame.flags | CRC_ERROR : d->regs.sop;
+	frame.aligned = false;
+	frame.bytes = bytes;
+	for (uint32_t at = 0; at < frame.written; at++)
+		bytes[at] = pattern(h->serial + 1, at);
+	CHECK(erx_device_genet_model_receive(&h->device, &h->memory, &frame, &taken) == ERX_OK);
+	if (!taken)
+		return;
+	h->frame_serial[desc] = ++h->serial;
+	h->frame_length[desc] = frame.written;
+	h->frame_flags[desc] = frame.flags;
 }
 
 /* A hostile act: an index or a length past its bound, which the next completion must refuse. */
@@ -236,29 +272,16 @@ device_act(harness_t *h)
 		receive(h);
 }
 
-/* A register write reaches the stand-in's window; DMA control also starts or stops its engine. */
+/* A register write reaches the window, and the controller acts on it. */
 static void
 device_register(harness_t *h, const erx_dma_step_t *step)
 {
 	set_reg(h, step->reg, (uint32_t)step->value);
-	if (step->reg_high != ERX_DMA_NO_REGISTER)
-		set_reg(h, step->reg_high, (uint32_t)(step->value >> 32));
-	for (direction_t *d = &h->rx; d <= &h->tx; d++) {
-		if (step->reg != d->regs.dma_ctrl)
-			continue;
-		d->ctrl = (uint32_t)step->value;
-		d->stop_reads = 0;
-		set_reg(h, d->regs.dma_status, 0);
-	}
-}
-
-/* A read of DMA status shows the stop only after STOP_READS reads. */
-static uint32_t
-device_status(harness_t *h, direction_t *d)
-{
-	if (!running(d) && ++d->stop_reads > STOP_READS)
-		set_reg(h, d->regs.dma_status, d->regs.dma_disabled | d->regs.dma_ring_disabled);
-	return (reg(h, d->regs.dma_status));
+	erx_device_genet_model_stored(&h->device, step->reg, (uint32_t)step->value);
+	if (step->reg_high == ERX_DMA_NO_REGISTER)
+		return;
+	set_reg(h, step->reg_high, (uint32_t)(step->value >> 32));
+	erx_device_genet_model_stored(&h->device, step->reg_high, (uint32_t)(step->value >> 32));
 }
 
 /* -------------------------------------------------------------------------------------------
@@ -284,8 +307,7 @@ run_step(harness_t *h, const erx_dma_step_t *step)
 		break;
 	case ERX_DMA_REPORT:
 		CHECK(step->target == ERX_DMA_REGISTER && h->value_count < sizeof(h->values) / sizeof(h->values[0]));
-		h->values[h->value_count++] = step->reg == h->rx.regs.dma_status ? device_status(h, &h->rx) :
-		    step->reg == h->tx.regs.dma_status ? device_status(h, &h->tx) : reg(h, step->reg);
+		h->values[h->value_count++] = erx_device_genet_model_load(&h->device, step->reg);
 		break;
 	}
 }
@@ -360,7 +382,7 @@ negotiate(harness_t *h, direction_t *d)
 		if (erx_device_genet_idle(&d->regs, h->values[0]))
 			break;
 		/* Not idle yet: the NIF answers ebusy, installs nothing and the driver retries. */
-		CHECK(++busy <= STOP_READS && !running(d));
+		CHECK(++busy <= STOP_READS && !running(h, d));
 	}
 	CHECK(busy == STOP_READS);
 	CHECK(!erx_device_genet_reset(&d->queue, &d->regs, 0));
@@ -370,11 +392,11 @@ negotiate(harness_t *h, direction_t *d)
 	CHECK(count != 0 && count <= STEPS_MAX);
 	apply(h, d, ERX_DMA_CALL_INSTALL, steps, count);
 	CHECK(erx_device_genet_install_steps(&d->queue, &d->regs, DEVICE_BASE + d->pool_offset, steps) == 0);
-	CHECK(!running(d));
+	CHECK(!running(h, d));
 	/* The start hands nothing over, so it is a publish whose state is the install's. */
 	erx_device_genet_start(&d->regs, &steps[0]);
 	apply(h, d, ERX_DMA_CALL_POST, steps, 1);
-	CHECK(running(d));
+	CHECK(running(h, d));
 }
 
 static void
@@ -537,6 +559,8 @@ harness_new(uint32_t line, uint64_t seed)
 	CHECK(h->genet != NULL && h->genet->window_size % 4 == 0);
 	h->window = calloc(h->genet->window_size / 4, sizeof(uint32_t));
 	CHECK(h->window != NULL);
+	CHECK(erx_device_genet_model_init(&h->device, h->genet, (volatile uint8_t *)(void *)h->window, STOP_READS));
+	h->memory = (erx_device_genet_memory_t){ .context = h, .read = memory_read, .write = memory_write };
 	CHECK(erx_device_genet_registers(h->genet, ERX_DEVICE_GENET_RX, &h->rx.regs));
 	CHECK(erx_device_genet_registers(h->genet, ERX_DEVICE_GENET_TX, &h->tx.regs));
 	/* One object holds both pools, receive first, as the device's one contiguous memory does. */

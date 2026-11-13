@@ -964,9 +964,10 @@ ran.
   before. Seed: the idle test reads only the receive direction, and the
   stand-in's transmit engine is still running when the install writes
   its ring.
-* **GENET's start and post.** Over the model's stand-in controller,
-  which runs a direction only while its DMA control holds the engine's
-  enable and the ring's bit, and sends a descriptor only when it is a
+* **GENET's start and post.** Over the controller model,
+  `erx_device_genet_model`, which the hosted stand-in runs too and which
+  runs a direction only while its DMA control holds the engine's enable
+  and the ring's bit and its ring configuration the ring's enable, and sends a descriptor only when it is a
   whole frame with its append-CRC bit: the start leaves both rings
   running, and every post goes out with its bytes. Seeds: the start
   written without the engine's enable, and the rings never run; a

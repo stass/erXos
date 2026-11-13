@@ -18,7 +18,7 @@ class ErxDeviceGenetTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   NIFS = File.join(ROOT, 'otp/erts/emulator/nifs/erxos')
   HARNESS = 'test/fixtures/erx_device_genet_model_harness.c'
-  SOURCES = %w[erx_device_genet.c erx_device_dma.c erx_dma_model.c erx_device_core.c].freeze
+  SOURCES = %w[erx_device_genet.c erx_device_genet_model.c erx_device_dma.c erx_dma_model.c erx_device_core.c].freeze
   FLAGS = ['-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror', '-O1', '-g',
            '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined'].freeze
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
@@ -34,7 +34,7 @@ class ErxDeviceGenetTest < Minitest::Test
   # The harness check a seed must fail where one check alone guards what it removes; any
   # other seed may fail wherever its fault first shows.
   CAUGHT_BY = { 'ERX_DEVICE_GENET_SEED_NO_TX_CRC' => /^FAILED .*\(status & d->regs\.crc\)$/,
-                'ERX_DEVICE_GENET_SEED_NO_DMA_ENABLE' => /^FAILED .*: running\(d\)$/ }.freeze
+                'ERX_DEVICE_GENET_SEED_NO_DMA_ENABLE' => /^FAILED .*: running\(h, d\)$/ }.freeze
 
   def test_register_ring_over_a_non_coherent_cache
     output, status = run_harness
