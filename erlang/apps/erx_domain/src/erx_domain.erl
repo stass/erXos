@@ -45,7 +45,7 @@ or stopped.
 """.
 
 -export([create/1, start_session/2, info/1, introduce/2, web_line/2, stop/2, id/1, node/1, pid/1]).
--export([system_principal/0, system_namespace/0]).
+-export([system_principal/0, system_namespace/0, display_settled/1]).
 -export([inspect_view/1]).
 -export_type([domain/0, spec/0]).
 
@@ -161,6 +161,22 @@ debuggability").
 -spec system_namespace() -> gen_server:request_id().
 system_namespace() ->
     gen_server:send_request(erx_domain_srv, system_namespace).
+
+-doc """
+Asks the domain service to answer once the server of display Name, a
+service name, has settled (docs/design-system.md, "A session takes the
+console", a display's row): no configured row that serves Name is
+starting, so its server is ready, was stopped for its boot timeout, ended,
+or was refused its start. The answer is ok; the server row's boot timeout
+bounds the wait, and a name no configured row serves is answered at once.
+The request is sent, not waited on, as system_namespace/0's is: the start
+table takes the answer with gen_server:check_response/2 and starts the row
+that names the display then, whether its display came up or not
+(docs/design-apps.md, "Keeping a session").
+""".
+-spec display_settled(binary()) -> gen_server:request_id().
+display_settled(Name) when is_binary(Name) ->
+    gen_server:send_request(erx_domain_srv, {display_settled, Name}).
 
 -doc "Introduces domains A and B: ok once their connection is up at both ends.".
 -spec introduce(domain(), domain()) -> ok | {error, term()}.

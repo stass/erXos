@@ -71,6 +71,26 @@ namespace_test_() ->
 unreadable(Dir) ->
     file:make_dir(filename:join(Dir, "rc.conf")).
 
+%% A row that names a display (docs/design-apps.md, "Keeping a session"): painter
+%% names screen, and the stub holds the table's wait for screen until the case
+%% answers it. The keeper names screen by its service atom, which the library
+%% makes on a real system and the setup makes here.
+display_test_() ->
+    {foreach, fun() -> screen = binary_to_atom(screen()), setup(fun(_Dir) -> ok end, answer, display_manifest()) end,
+     fun cleanup/1, [fun a_row_that_names_a_display_waits_for_its_server/1,
+                     fun a_stop_of_a_waiting_row_starts_nothing/1]}.
+
+%% The display's name, from a call, so the compiler folds no binary_to_atom/1 of it.
+screen() -> <<"screen">>.
+
+%% kiosk as in manifest/0, and painter, enabled, on display screen.
+display_manifest() ->
+    #{rows => [#{principal => <<"kiosk">>, enable => true, display => none, restarts => 2, period => 60},
+               #{principal => <<"painter">>, enable => true, display => <<"screen">>, restarts => 5, period => 600}],
+      grants => #{<<"painter">> => [<<"screen">>]},
+      principals => #{<<"kiosk">> => 1, <<"painter">> => 2},
+      boot_order => [<<"display">>]}.
+
 %% AP5 over a packed manifest, which only test/host/erx_starter_test.rb packs
 %% (ERX_STARTER_MANIFEST, from the apps QEMU suite's): clock's template is
 %% granted data, a files service, and screen, a windows service, so screen is
@@ -147,15 +167,18 @@ setup(Prepare) ->
 %% Namespace is whether the stub answers the table's wait for the system domain's
 %% namespace at once (answer) or only once the case releases it (held).
 setup(Prepare, Namespace) ->
+    setup(Prepare, Namespace, manifest()).
+
+setup(Prepare, Namespace, Manifest) ->
     Dir = filename:absname("rc-" ++ integer_to_list(erlang:unique_integer([positive]))),
     ok = file:make_dir(Dir),
     ok = Prepare(Dir),
     Setup = self(),
     Stub = spawn(fun() -> register(erx_domain_srv, self()), stub(#{refuse => [], hold => [], held => [], next => 1, test => none, kept => [],
-                                                                      namespace => Namespace}) end),
+                                                                      namespace => Namespace, display => none}) end),
     ok = wait_until(fun() -> whereis(erx_domain_srv) =:= Stub end),
     Holder = spawn(fun() ->
-                           {ok, Sup} = erx_starter_sup:start_link(manifest(), list_to_binary(Dir)),
+                           {ok, Sup} = erx_starter_sup:start_link(Manifest, list_to_binary(Dir)),
                            Setup ! {sup, Sup},
                            receive stop -> exit(shutdown) end
                    end),
@@ -182,7 +205,8 @@ watch() ->
 %% when a linked process ends with any reason but normal. It reports each start,
 %% and each end, to the test. It answers the table's wait for the system domain's
 %% namespace (erx_domain:system_namespace/0) at once, or holds it until the test
-%% sends release_namespace.
+%% sends release_namespace. It holds each wait for a display
+%% (erx_domain:display_settled/1) until the test sends {release_display, Name}.
 stub(#{refuse := Refuse, hold := Hold, held := Held, next := Id} = State) ->
     Stub = self(),
     receive
@@ -205,6 +229,12 @@ stub(#{refuse := Refuse, hold := Hold, held := Held, next := Id} = State) ->
                 #{namespace := answer} -> gen:reply(From, ok), stub(State);
                 #{namespace := held} -> stub(State#{namespace := {held, From}})
             end;
+        {'$gen_call', From, {display_settled, Name}} ->
+            stub(State#{display := {held, Name, From}});
+        {release_display, Name} ->
+            #{display := {held, Name, From}} = State,
+            gen:reply(From, ok),
+            stub(State#{display := none});
         release_namespace ->
             #{namespace := {held, From}} = State,
             gen:reply(From, ok),
@@ -629,6 +659,32 @@ no_row_starts_before_the_namespace_is_in_place(Setup) ->
             ok = wait_until(fun() -> rc_conf() =:= read end),
             ?assertEqual(none, run(<<"logger">>)),
             ?assertEqual(none, started_within(?LOGGER, 0))
+    end.
+
+%% painter starts only once the domain service answers that screen's server has
+%% settled, ready or not, and kiosk, which names no display, does not wait for it.
+a_row_that_names_a_display_waits_for_its_server(_) ->
+    fun() ->
+            ok = watch(),
+            _ = started(1),
+            ?assertEqual(none, receive {started, 2, _, _} = Early -> Early after 500 -> none end),
+            ?assertEqual(starting, run(<<"painter">>)),
+            erx_domain_srv ! {release_display, <<"screen">>},
+            ?assertMatch({started, 2, #{display := screen}, _},
+                         receive {started, 2, _, _} = Started -> Started after ?WAIT_MS -> none end)
+    end.
+
+%% A `stop` of painter while it waits for screen answers the start that waits, and
+%% the answer for screen then starts nothing.
+a_stop_of_a_waiting_row_starts_nothing(_) ->
+    fun() ->
+            ok = watch(),
+            _ = started(1),
+            ok = wait_until(fun() -> rc_conf() =:= read end),
+            ?assertEqual(ok, erx_starter:command({stop, <<"painter">>, #{}})),
+            erx_domain_srv ! {release_display, <<"screen">>},
+            ?assertEqual(none, receive {started, 2, _, _} = Started -> Started after 500 -> none end),
+            ?assertEqual(stopped, run(<<"painter">>))
     end.
 
 %% ---------------------------------------------------------------------------

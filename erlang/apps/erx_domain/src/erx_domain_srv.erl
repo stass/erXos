@@ -76,7 +76,9 @@ reported ready; the row's boot timeout bounds that. The system domain's
 namespace is in place by the same rule, for the grants to the system domain,
 and erx_domain:system_namespace/0 is answered ok once it is, which the start
 table waits on before its first read of rc.conf (docs/design-system.md, the
-boot's step 5).
+boot's step 5). erx_domain:display_settled/1 is answered ok, by the same
+checks, once no starting configured row serves the display it names, which
+the start table waits on before it starts a row that names a display.
 
 A session's ready report names its line to the web domain among its provides;
 the service keeps that pid until the session ends and hands it out only
@@ -172,7 +174,8 @@ state(Lib, Principals, Opts) ->
     %% before any application and lives as long as the runtime (close_side/4). Waiting
     %% holds, by domain id, each create or session's start not yet answered (wait_created/4),
     %% and system_waiting, newest first, each erx_domain:system_namespace/0 caller not yet
-    %% answered (answer_in_place/1).
+    %% answered (answer_in_place/1), and display_waiting, newest first, each
+    %% erx_domain:display_settled/1 caller not yet answered, with the service it named.
     %% Introducing holds, by the pair's key, each introduce/2 caller, or {mints, Tag} for the mint core (reply/2), waiting for its
     %% connection to come up, with the timer of its deadline (settle_introductions/1).
     %% Held holds, by principal and in arrival order, each start waiting for the
@@ -184,7 +187,8 @@ state(Lib, Principals, Opts) ->
     %% each its service's name, its kind (served_kind/2) and the grant's limits.
     MintConfig = maps:merge(#{owner => fun erx_dist:owner/1}, maps:with([owner, deadline], maps:get(mints, Opts, #{}))),
     #{lib => Lib, agent => Agent, exports => Exports, node => erlang:is_alive(), core => undefined,
-      configured => #{}, templates => #{}, waiting => #{}, system_waiting => [], links => erx_domain_links:new(),
+      configured => #{}, templates => #{}, waiting => #{}, system_waiting => [], display_waiting => [],
+      links => erx_domain_links:new(),
       introducing => #{}, introduce_timeout => maps:get(introduce_timeout, Opts, ?INTRODUCE_TIMEOUT),
       held => #{}, release_wait => maps:get(release_wait, Opts, ?RELEASE_WAIT),
       mint_config => MintConfig, mints => erx_domain_mints:new(MintConfig#{services => [], grants => []}),
@@ -310,6 +314,15 @@ handle_call({introduce, A, B}, From, State) when is_integer(A), is_integer(B) ->
     end;
 handle_call(system_namespace, From, #{system_waiting := System} = State) ->
     {noreply, answer_in_place(State#{system_waiting := [From | System]})};
+%% The start table names a display as the binary its rows hold, and the mint core a
+%% service by its atom, as the library makes it; a name with no atom is no service, so
+%% nothing serves it and the wait is answered at once. The atom is never made here.
+handle_call({display_settled, Name}, From, #{display_waiting := Displays} = State) when is_binary(Name) ->
+    try binary_to_existing_atom(Name) of
+        Service -> {noreply, answer_in_place(State#{display_waiting := [{Service, From} | Displays]})}
+    catch
+        error:badarg -> {reply, ok, State}
+    end;
 handle_call(system_principal, _From, #{principals := #{system := System}} = State) ->
     Reply = case System of
                 none -> {error, enotsup};
@@ -1349,10 +1362,14 @@ mints(Event, #{mints := Mints} = State) ->
 %% The system domain's own callers of erx_domain:system_namespace/0 wait in
 %% system_waiting by the same rule, for the grants to the system domain: it holds every
 %% grant it will have from the boot on, so its grants are checked from the first call.
+%%
+%% The start table's callers of erx_domain:display_settled/1 wait in display_waiting
+%% until no starting row serves the display they named (erx_domain_mints:server_settled/3).
 answer_in_place(#{core := Core, mints := Mints} = State) ->
     Starting = [Row || #{origin := {configured, Row}, state := running} <- erx_domain_core:domains(Core)],
     InPlace = fun(Grantee) -> erx_domain_mints:in_place(Grantee, Starting, Mints) end,
-    answer_system(InPlace, answer_sessions(InPlace, State)).
+    Settled = fun(Name) -> erx_domain_mints:server_settled(Name, Starting, Mints) end,
+    answer_displays(Settled, answer_system(InPlace, answer_sessions(InPlace, State))).
 
 answer_sessions(InPlace, #{waiting := Waiting, core := Core} = State) ->
     Ready = [Id || Id := #{answer_at := in_place, pid := Pid} <- Waiting, Pid =/= gone, is_ready(Id, Core)],
@@ -1368,6 +1385,11 @@ answer_system(InPlace, #{system_waiting := System} = State) ->
         false ->
             State
     end.
+
+answer_displays(Settled, #{display_waiting := Displays} = State) ->
+    {Answered, Waiting} = lists:partition(fun({Name, _From}) -> Settled(Name) end, Displays),
+    lists:foreach(fun({_Name, From}) -> gen_server:reply(From, ok) end, lists:reverse(Answered)),
+    State#{display_waiting := Waiting}.
 
 is_ready(Id, Core) ->
     case erx_domain_core:fetch(Id, Core) of

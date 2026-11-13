@@ -46,6 +46,15 @@ erx_start_table's; this process carries them out.
   write at a time.
   `stop` of an enabled row marks it stopped, and `start` or `enable` of
   the row clears the mark as it starts the row.
+* **A row that names a display.** Its supervisor starts only once the
+  domain service answers that the display's server has settled
+  (erx_domain:display_settled/1): ready, or no longer starting, so a
+  display that is down delays the row by at most its boot timeout and the
+  row then starts all the same. The table asks once per display for every
+  start waiting on it, and asks again at the next start, so it keeps no
+  view of the display of its own. Until the answer the row is `starting`;
+  a `start` command waiting on it is answered when its start is carried
+  out, and `stop` of it answers the waiting start ok and starts nothing.
 * **Restart.** A restarted process makes the table from the text the
   keepers' branch recorded, and changes nothing the branch holds until
   its own read of rc.conf answers: a row rc.conf enabled is not stopped
@@ -211,7 +220,7 @@ init({system, Directory}) ->
     init({Manifest, Directory});
 init({#{} = Manifest, Directory}) ->
     {ok, Manifest#{directory => Directory, text => <<>>, local => {unread, 0}, merged => none, skipped => [],
-                   reader => none, writer => none, queue => queue:new()}, {continue, read}}.
+                   reader => none, writer => none, queue => queue:new(), displays => #{}}, {continue, read}}.
 
 %% The first read of rc.conf waits for the system domain's namespace: the
 %% table asks the domain service now and reads once it answers
@@ -240,7 +249,10 @@ handle_cast(_Request, State) ->
 
 %% The reader is the one request that comes before a table can be made from
 %% rc.conf: the wait for the system domain's namespace, {namespace, Request},
-%% before the first read, and each read after, {rc_conf, Request}.
+%% before the first read, and each read after, {rc_conf, Request}. Any other
+%% message may be the domain service's answer to a wait for a display
+%% (display_answered/2), which drops one that is not, a stray or a stale
+%% timer's.
 handle_info(read, #{reader := none} = State) ->
     {noreply, read(State)};
 handle_info(Message, #{reader := Reader, writer := Writer} = State) ->
@@ -253,7 +265,7 @@ handle_info(Message, #{reader := Reader, writer := Writer} = State) ->
                       {_Request, From, Command, Text} = Writer,
                       next(written(Written, From, Command, Text, State#{writer := none}));
                   {none, none} ->
-                      State
+                      display_answered(Message, State)
               end}.
 
 %% ---------------------------------------------------------------------------
@@ -325,8 +337,7 @@ apply_text(Text, State) ->
     Held = #{Name => {running_or_down(Run), kept(Row)} || {Name, Run, Row} <- Rows},
     {Stop, Start} = erx_start_table:reconcile(Held, Stopped, After),
     lists:foreach(fun erx_starter_sup:stop/1, Stop),
-    lists:foreach(fun(Name) -> start_row(Name, Made) end, Start),
-    Made.
+    lists:foldl(fun(Name, Acc) -> start_row(Name, none, Acc) end, Made, Start).
 
 %% The table rc.conf's Text makes, with every skipped line and refused row
 %% logged; no keeper changes.
@@ -364,13 +375,16 @@ run(Command, From, #{text := Text, rows := Rows, grants := Grants, local := Loca
         {rc_conf, Written} ->
             Request = erx_starter_rc:write(maps:get(directory, State), Written),
             State#{writer := {Request, From, Command, Written}};
+        {start_row, Name} ->
+            next(start_row(Name, From, State));
+        {stop, Name} = Action ->
+            gen_server:reply(From, act(Action, State)),
+            next(unwait(Name, State));
         Action ->
             gen_server:reply(From, act(Action, State)),
             next(State)
     end.
 
-act({start_row, Name}, State) ->
-    start_row(Name, State);
 act({start_once, Name, Start}, #{principals := Principals}) ->
     started(erx_starter_sup:start_once(Name, map_get(Name, Principals), Start));
 act({stop, Name}, State) ->
@@ -415,12 +429,78 @@ next(#{writer := none, queue := Queue} = State) ->
 next(State) ->
     State.
 
-%% Starts row Name's supervisor, if the row is enabled and not running.
-start_row(Name, State) ->
+%% Starts row Name's supervisor, if the row is enabled and not running, and
+%% answers Reply, a `start` command's caller or none, with how the start went.
+%% A row that names a display waits for the domain service's answer that the
+%% display's server has settled (wait_display/4), and starts once it comes
+%% (display_answered/2).
+start_row(Name, Reply, State) ->
+    start_row(Name, Reply, none, State).
+
+%% Settled is the display whose answer has just come, so a row that names it
+%% starts now; a row whose display changed while it waited waits for its new one.
+%% A row whose supervisor runs is started already and waits for nothing.
+start_row(Name, Reply, Settled, State) ->
     case row(Name, State) of
-        {ok, Row} -> started(erx_starter_sup:start_row(Name, Row));
-        none -> ok
+        {ok, #{start := #{display := Display}}} when Display =/= Settled ->
+            case is_running(Name) of
+                true -> answer(Reply, ok), State;
+                false -> wait_display(Display, Name, Reply, State)
+            end;
+        {ok, Row} ->
+            answer(Reply, started(erx_starter_sup:start_row(Name, Row))),
+            State;
+        none ->
+            answer(Reply, ok),
+            State
     end.
+
+is_running(Name) ->
+    {Rows, _Stopped} = erx_starter_sup:held(),
+    lists:any(fun({Held, Run, _Row}) -> Held =:= Name andalso is_pid(Run) end, Rows).
+
+answer(none, _Answer) -> ok;
+answer(From, Answer) -> gen_server:reply(From, Answer).
+
+%% A start waiting on Display, under the one request the table has out for
+%% Display, which it sends with the first start that waits.
+wait_display(Display, Name, Reply, #{displays := Displays} = State) ->
+    Entry = case Displays of
+                #{Display := {Request, Waiting}} -> {Request, [{Name, Reply} | Waiting]};
+                #{} -> {erx_domain:display_settled(Display), [{Name, Reply}]}
+            end,
+    State#{displays := Displays#{Display => Entry}}.
+
+%% The domain service's answer that Message carries to a wait for a display:
+%% each start waiting on the display is carried out, oldest first, whether the
+%% display came up or not. An error is a domain service that ended, which ends
+%% the system domain; the rows start all the same, as the read of rc.conf
+%% follows a failed wait for the namespace.
+display_answered(Message, #{displays := Displays} = State) ->
+    case [{Display, Answer, Waiting} || Display := {Request, Waiting} <- Displays,
+                                        {answer, Answer} <- [response(Message, Request)]] of
+        [{Display, Answer, Waiting}] ->
+            ok = log_display(Display, Answer),
+            lists:foldl(fun({Name, Reply}, Acc) -> start_row(Name, Reply, Display, Acc) end,
+                        State#{displays := maps:remove(Display, Displays)}, lists:reverse(Waiting));
+        [] ->
+            State
+    end.
+
+log_display(_Display, ok) ->
+    ok;
+log_display(Display, {error, Why}) ->
+    logger:warning("erx_starter: no answer to the wait for display ~ts: ~0P", [Display, Why, 8]).
+
+%% A stop of row Name answers each start of it waiting on a display with ok,
+%% as the stop leaves the row, and the start does not follow.
+unwait(Name, #{displays := Displays} = State) ->
+    Unwaited = fun(_Display, {Request, Waiting}) ->
+                       {Stopped, Others} = lists:partition(fun({Waiter, _Reply}) -> Waiter =:= Name end, Waiting),
+                       lists:foreach(fun({_Waiter, Reply}) -> answer(Reply, ok) end, Stopped),
+                       {Request, Others}
+               end,
+    State#{displays := maps:map(Unwaited, Displays)}.
 
 started({ok, _Pid}) -> ok;
 started({error, {already_started, _}}) -> ok;

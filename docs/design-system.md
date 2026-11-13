@@ -1005,7 +1005,8 @@ and 6 give way to the partial boot below.
    the manifest's `start` rows with the machine's `rc.conf` over them
    ([design-apps.md](design-apps.md#the-start-table)): the session of
    the principal the row names, with no login, and for a row that names
-   a display, once that display's domain runs, on that display, to
+   a display, once that display's server has settled
+   ([A session takes the console](#a-session-takes-the-console)), on that display, to
    which the system domain introduces it and whose session it becomes
    ([design-display.md](design-display.md#a-displays-session)). Each
    row's keeper starts its session again when it ends, within the row's
@@ -1176,6 +1177,24 @@ in place before anyone can connect to it.
   ready, or misses the deadline, the read fails and the manifest's rows
   start alone, as a session does not wait for a restart either
   ([design-apps.md](design-apps.md#failure-handling-diagnostics-and-debuggability)).
+* **A display's row.** The start table starts a row that names a
+  display only once that display's server has settled, by the same rule
+  of starting a grant's wait reads: `erx_domain:display_settled/1`, a
+  request of the system domain's own like `system_namespace/0` (a
+  message from another domain reaches the service only in its
+  `{erx_origin, D, Msg}` envelope, which is no call it takes), is
+  answered `ok` once no starting configured row serves the display
+  (`erx_domain_mints:server_settled/3`). Its server is
+  then ready, or stopped for its boot timeout, ended, or refused its
+  start; a name no configured row serves has nothing to wait for and is
+  answered at once. The service checks the rule after each step of the
+  mint core and each stop for a boot timeout, as it does for the
+  system domain's namespace, so the wait is bounded by the display row's
+  boot timeout, and a display that is down never holds a row: the row
+  starts all the same, its session's windows grant is installed when the
+  server reports after a restart, as any grant is, and the start table
+  asks again for each start of the row
+  ([design-apps.md](design-apps.md#keeping-a-session)).
 * **Why it holds by construction.** The wait reads only state the mint
   core already keeps, the grant of each `files` service to the session,
   and the domain service's own record of which configured domains are

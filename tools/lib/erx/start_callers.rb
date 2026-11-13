@@ -12,7 +12,9 @@ module Erx
   # * starter-reach: erx_starter's modules reach the domain service only through
   #   erx_domain:start_session/2 and erx_domain:stop/2, and wait for the system domain's
   #   namespace with erx_domain:system_namespace/0, which changes nothing, before the
-  #   first read of rc.conf. They may also read a domain handle
+  #   first read of rc.conf, and for a display's server with erx_domain:display_settled/1,
+  #   which changes nothing either, before a row that names it starts. They may also
+  #   read a domain handle
   #   with erx_domain:id/1 and pid/1, which take the handle's fields apart and reach
   #   nothing. Any other mention of an erx_domain* atom (erx_domain:create/1, the
   #   erx_domain_srv server's name, an apply's module argument, an import, a macro) is
@@ -41,9 +43,10 @@ module Erx
     STARTER = 'erlang/apps/erx_starter/**/*'
     CALLERS = %w[erlang/apps/erx/src/erx_console.erl erlang/apps/erx_starter/src/erx_starter_keeper.erl].freeze
     # start_session/2 and stop/2; system_namespace/0, the wait before the first read of
-    # rc.conf, which changes nothing; the handle's accessors id/1 and pid/1, which reach
+    # rc.conf, which changes nothing; display_settled/1, the wait before a row that names
+    # a display starts, which changes nothing either; the handle's accessors id/1 and pid/1, which reach
     # nothing; and the handle's types, domain() and spec(), which a -spec names.
-    STARTER_REACHES = %w[start_session stop system_namespace id pid domain spec].freeze
+    STARTER_REACHES = %w[start_session stop system_namespace display_settled id pid domain spec].freeze
     # The domain service's registered name, which only erx_domain's own modules name.
     SERVICE = 'erx_domain_srv'
     DOMAIN_APP = 'erlang/apps/erx_domain/**/*'
@@ -80,7 +83,8 @@ module Erx
     DETAILS = {
       'starter-reach' => {
         domain: 'erx_starter reaches the domain service only through erx_domain:start_session/2, ' \
-                'erx_domain:stop/2 and erx_domain:system_namespace/0 (and reads a handle with id/1 and pid/1); ' \
+                'erx_domain:stop/2, erx_domain:system_namespace/0 and erx_domain:display_settled/1 ' \
+                '(and reads a handle with id/1 and pid/1); ' \
                 'it names no other erx_domain ' \
                 'function and no other erx_domain* module or name',
         indirect: "erx_starter's modules call no function through a module held in a variable or a macro",

@@ -46,6 +46,17 @@ namespace_end_test_() ->
 system_namespace_test_() ->
     {setup, fun() -> setup(5) end, fun cleanup/1, fun(_) -> {timeout, 20, fun system_namespace/0} end}.
 
+%% A display's row waits for its server (docs/design-system.md, "A session takes the
+%% console"): erx_domain:display_settled/1 is answered once no starting row serves the
+%% display, its server ready, ended or stopped for its boot timeout, and at once for a
+%% name no configured row serves. late (row 1, id 5) serves screen and never reports by
+%% itself.
+display_settled_test_() ->
+    [{setup, fun() -> display_setup() end, fun cleanup/1,
+      fun(_) -> {timeout, 20, {Name, Case}} end}
+     || {Name, Case} <- [{"ready", fun display_ready/0}, {"ended", fun display_ended/0},
+                         {"boot timeout", fun display_timed_out/0}]].
+
 %% The domain service's funnel for a domain's facets (docs/design-domains.md, "Facets"),
 %% with a table of facet names that holds echo and other, and with the table the
 %% build generates.
@@ -638,6 +649,52 @@ system_namespace() ->
     domain_pid(5) ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 3)}}},
     ?assertEqual({reply, ok}, gen_server:receive_response(First, 2000)),
     ?assertEqual({reply, ok}, gen_server:receive_response(erx_domain:system_namespace(), 2000)).
+
+%% The service over b (row 0) and late (row 1, id 5), which serves screen, a windows
+%% service no row is granted.
+display_setup() ->
+    Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
+                                     restarts => 3, restart_period_s => 60, boot_timeout_s => 60} end,
+    persistent_term:put({erx_domain_fake_lib, boot},
+                        #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"late">>)],
+                          services => [{1, screen, ?ERX_SERVICE_WINDOWS}], grants => []}),
+    Log = erx_domain_fake_lib:start_log(),
+    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
+                                                 mints => #{owner => fun erx_domain_mints_tests:owner/1,
+                                                            deadline => ?DEADLINE}}),
+    unlink(Service),
+    {Log, Service}.
+
+%% A wait for screen, still unanswered while late starts, and one for a name no row
+%% serves, answered at once.
+display_waits() ->
+    Wait = erx_domain:display_settled(<<"screen">>),
+    ?assertEqual({reply, ok}, gen_server:receive_response(erx_domain:display_settled(<<"other">>), 2000)),
+    %% wait_response/2 keeps the request on its timeout, where receive_response/2 abandons it.
+    ?assertEqual(timeout, gen_server:wait_response(Wait, 200)),
+    Wait.
+
+%% late's ready report answers the wait, and a later wait at once.
+display_ready() ->
+    Wait = display_waits(),
+    domain_pid(5) ! {erx_origin, 5, {erx_ready, #{connections => erx_domain_fake_lib:agent(<<"late">>, 5),
+                                                  inspect => erx_domain_fake_lib:agent(<<"late">>, 5)}}},
+    ?assertEqual({reply, ok}, gen_server:receive_response(Wait, 2000)),
+    ?assertEqual({reply, ok}, gen_server:receive_response(erx_domain:display_settled(<<"screen">>), 2000)).
+
+%% late's end answers the wait before its restart, which a later wait waits for again.
+display_ended() ->
+    Wait = display_waits(),
+    exit(domain_pid(5), kill),
+    ?assertEqual({reply, ok}, gen_server:receive_response(Wait, 2000)),
+    ?assertEqual(timeout, gen_server:wait_response(erx_domain:display_settled(<<"screen">>), 200)).
+
+%% late stopped for its boot timeout answers the wait, as its timer would.
+display_timed_out() ->
+    Wait = display_waits(),
+    erx_domain_srv ! {timeout, make_ref(), {boot_timeout, 5}},
+    ?assertEqual({reply, ok}, gen_server:receive_response(Wait, 2000)).
 
 %% A session's start, asked of the service by a process of its own, as the console's
 %% helper asks; answer/2 takes its answer.

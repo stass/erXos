@@ -101,10 +101,12 @@ the names config's files lists, has settled: installed, failed, or idle
 while its server row is not starting. in_place/3 decides it from the
 grants alone and the rows the service names as starting, so it needs no
 state of its own, and a grant with an operation is bounded by its
-deadline, a starting server by its boot timeout.
+deadline, a starting server by its boot timeout. A display's row waits
+for its server by the same rule (server_settled/3): no starting row
+serves the display's service.
 """.
 
--export([new/1, step/2, grants/1, granted/3, granted_names/2, in_place/3, pair_area/3]).
+-export([new/1, step/2, grants/1, granted/3, granted_names/2, in_place/3, server_settled/3, pair_area/3]).
 -export_type([state/0, config/0, event/0, action/0, grant/0, key/0, pair/0]).
 
 -define(SYSTEM_ID, 4).
@@ -250,6 +252,18 @@ in_place(Grantee, Starting, #{grants := Grants, files := Files}) ->
     lists:all(fun({{_, Name}, #{server := Server, state := Grant}}) ->
                       not lists:member(Name, Files) orelse settled(Grant, Server, Starting)
               end, [Entry || {{G, _}, _} = Entry <- maps:to_list(Grants), G =:= Grantee]).
+
+-doc """
+Whether the server of service Name has settled (docs/design-system.md, "A
+session takes the console", a display's row): no configured row among
+Starting, those whose domain runs without having reported ready, serves
+Name. Its server is then ready, stopped for its boot timeout, ended, or
+refused its start. A name no configured row serves, such as one the
+system domain serves, has no start to wait for and has settled.
+""".
+-spec server_settled(name(), Starting :: [row()], state()) -> boolean().
+server_settled(Name, Starting, #{declared := Declared}) ->
+    not lists:any(fun(Row) -> lists:member(Name, maps:get(Row, Declared, [])) end, Starting).
 
 settled({installed, _Pair, _Facet}, _Server, _Starting) -> true;
 settled({failed, _Pair, _Reason}, _Server, _Starting) -> true;
