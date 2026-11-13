@@ -1552,9 +1552,13 @@ applied in this order, each step undoing the ones before it on failure:
    anything else with `badarg` before it opens the port, and writes each
    number into the open command as a decimal word, as it writes the
    lease's. With the lease, the start takes each hand-off with
-   `erx_pipe_hand_take`, which answers it only to the port of its owner,
-   so a start whose handler is not the hand-off's owner fails with
-   `einval`; the image's capability table is sized for the fixed
+   `erx_pipe_hand_take`, which answers it only when the process opening
+   the port, which `driver_connected` names while the start runs, is its
+   owner, so a start whose handler is not the hand-off's owner fails with
+   `einval`; the first take also takes the port's hold on the program's
+   holder entry, which the driver lets go with `erx_pipe_holder_release`
+   after it releases the anchor, where it returns the lease, so the pipe
+   server reads the program's gone only once no image of it runs; the image's capability table is sized for the fixed
    installs and every copy the hand-offs hold.
 2. **Create the channel and the data area**: two sides and two
    doorbells, in the side layout of a connection, each side written by
@@ -1663,7 +1667,10 @@ what the program's table gains with `erx_program:install(Port, Caps)`,
 which goes through the session's capability to the image the port
 serves and fails with `ERX_EDEAD` once that image has stopped; for a
 pipe end `Caps` is a hand-off, `{pipe_hand, Number, Term}`, which the
-driver takes, installs and binds as the start does, answering
+driver takes only when the process calling `port_control`, which
+`driver_caller` names, is both the port's owner and the hand-off's,
+since ERTS lets any process call `port_control` on a port it names,
+and installs and binds as the start does, answering
 `{ok, Term}` with each `{hand, I}` replaced by its value
 ([design-programs.md](design-programs.md#the-handler)). File data never
 crosses the channel per byte: it moves through the program's data area,
