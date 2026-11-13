@@ -125,6 +125,8 @@ DEVICES = {
     '0 first=RESOURCE,IRQ,INSTALL steps=RESOURCE,WINDOW,CONTIGUOUS,INSTALL,INSTALL source=0.0 marks=1,1',
   'dev_kindless_alone' => "0 first=#{UNCONFINED_FIRST} steps=RESOURCE source=own marks=0,0",
   'dev_kindless_memory' => "0 first=#{UNCONFINED_FIRST} steps=RESOURCE source=own marks=0,0",
+  'dev_kindless_unit' => '0 first=RESOURCE steps=RESOURCE source=own marks=0,0',
+  'dev_framebuffer_placed' => '0 slot=4 steps=RESOURCE,WINDOW,INSTALL undo=2',
   'dev_busy' => EBUSY, 'dev_busy_self' => EBUSY,
   'dev_unknown_domain' => EINVAL, 'dev_ended_domain' => EINVAL, 'dev_building_domain' => EINVAL,
   'dev_index_past' => EINVAL, 'dev_overlap' => EINVAL, 'dev_overlap_wrapping' => EINVAL,
@@ -147,12 +149,14 @@ DEVICES = {
   # One-line edits of the core, each with the driver line it must change.
   MUTANTS = {
     'a shared line made twice' =>
-      ["\t\tif (draft.lines[line].give != ERX_DOM_GIVE_OWN ||\n\t\t    (!driven && !draft.lines[line].shared))\n" \
-       "\t\t\tcontinue;\n", '', 'dev dev_shared_second '],
+      ["\t\tif (draft.lines[line].give != ERX_DOM_GIVE_OWN)\n\t\t\tcontinue;\n", '', 'dev dev_shared_second '],
     'a window given to a device of no kind' =>
       ["\tif (driven)\n\t\tfor (uint32_t range", "\tif (true)\n\t\tfor (uint32_t range", 'dev dev_kindless_second '],
     'a device of no kind first on a shared line makes no line object' =>
-      ['(!driven && !draft.lines[line].shared)', '!driven', 'dev dev_kindless_first '],
+      ['if (!life_line_driven(view, index, line))', 'if (!driven || !life_line_driven(view, index, line))', 'dev dev_kindless_first '],
+    'a line object no driven device reads' =>
+      ['other->unit == entry->unit && erx_dom_entry_driven(other) &&', 'other->unit == entry->unit &&',
+       'dev dev_kindless_unit '],
     'memory given to a device of no kind' =>
       ["\telse if (driven && entry->memory != 0 && !kept)", "\telse if (entry->memory != 0 && !kept)", 'dev dev_kindless_memory '],
     'a line shared across units' =>

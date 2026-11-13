@@ -1387,10 +1387,13 @@ it; git history is the record of completed work.
   on `driven` guards in the planner, and `erx_dom_device_check` cannot tell an unrecorded give from a driven one,
   so a new object kind that forgets the guard is installed. Carry the device's kind in `erx_dom_device_plan_t` and
   have the check refuse window, DMA, memory and kept installs on a give of no kind, so the plan validator enforces
-  it; `apply_args` would then read the same flag.
-* [Low] domain library, two devices of no kind on one line (`life_line_source`): `shared` counts every device of
-  the unit, so the first of two kindless devices on a line makes and installs an IRQ object that no record names.
-  No manifest has the shape; count only recorded devices when a kindless give decides whether to make the object.
+  it; `apply_args` would then read the same flag. Simpler still: make a line's IRQ object in the first driven
+  give that names it (`life_line_source` searching driven gives only), so a give of no kind makes only its
+  resource, `life_line_driven` goes away and the check's rule is one line. Today a kindless give first on a line
+  makes the object, which rests on `life_line_driven` answering alike for every device on a (unit, line) and only
+  `dom_give_lines_ok` catches a disagreement; the change moves the native_domain `case_given` assertion that the
+  kindless device 0 holds the line's object, and needs checking that an IRQ object made from the driven device's
+  resource serves the line on Fiasco.
 * [Low] domain library, PCIe functions on a configured row (`liberx/system/dom_boot_view.c`, `boot_devices`): only
   device-tree selectors get a role word and peripheral, so a PCIe function placed on a configured row would be of
   no kind and get no record, window or memory. No manifest places one; give the kind test a PCIe arm first.

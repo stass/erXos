@@ -355,7 +355,7 @@ boot_units(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries)
  * such a unit (TODO.md).
  * So does a device marked confined: the stopgap's catalogue lists no IOMMU
  * stream, and a confined device is given only on one; and DMA memory that is
- * not whole pages, which no give can make. Devices of a configured row's
+ * not whole pages, or of a device-tree row of no kind, which no give makes. Devices of a configured row's
  * unit may share a line: the row's creation makes one IRQ object for it, in
  * the first device's give, and the others' records name that object
  * (erx_dom_plan_device_give).
@@ -406,6 +406,9 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 			entry->path = (const char *)manifest->bytes + manifest->header.strings.offset + device.path.offset;
 			entry->path_len = device.path.length;
 			kind = boot_kind(manifest, &device);
+			/* A device of no kind is held, not driven, so no give makes its memory. */
+			if (kind == NULL && entry->memory != 0)
+				return ("manifest: a device of a kind no runtime drives has DMA memory");
 			if (kind != NULL) {
 				entry->role_word = kind->role_word;
 				entry->peripheral = kind->peripheral;
@@ -487,8 +490,8 @@ boot_places(erx_dom_configured_t *configured, uint32_t nconfigured, const erx_ma
  * Each configured-domain row, its limits resolved from its limits record and
  * its strings judged against the devices the catalogue places on it, so
  * it reads view->devices, which boot_devices builds first. Every device
- * on the row is given; only a device that erx_dom_entry_recorded admits
- * gets a -erx given record.
+ * on the row is given; only a driven one (erx_dom_entry_driven) gets a
+ * record, -erx given or -erx framebuffer.
  */
 static const char *
 boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_configured_t *configured)
@@ -525,7 +528,7 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 			if (view->devices[device].row != index)
 				continue;
 			held++;
-			if (!erx_dom_entry_recorded(&view->devices[device]))
+			if (!erx_dom_entry_driven(&view->devices[device]))
 				continue;
 			records++;
 			block = block || view->devices[device].role == ERX_MF_DEVICE_ROLE_BLOCK;

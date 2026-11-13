@@ -779,6 +779,23 @@ device_cases(void)
 	devices[2].confined = false;
 	devices[2].memory = 0x100000;
 	shared_case("dev_kindless_memory", 0, 2);
+	/*
+	 * Entry 0 of no kind too, so no driven device names their line: no
+	 * record reads its IRQ object, so neither give makes one.
+	 */
+	devices[0].role_word = devices[0].peripheral = NULL;
+	devices[2] = (erx_dom_device_entry_t){ .nranges = 1, .nlines = 1,
+	    .ranges = { { 0x0a005000, 0x1000 } }, .lines = { 5 } };
+	shared_case("dev_kindless_unit", 0, 2);
+	devices[0].role_word = "block";
+	devices[0].peripheral = "virtio_mmio";
+	/*
+	 * A placed framebuffer (erx/dom.h): no role word, one range, no line;
+	 * a runtime drives it, so its give windows its pages for its record.
+	 */
+	devices[2] = (erx_dom_device_entry_t){ .role = ERX_MF_DEVICE_ROLE_FRAMEBUFFER,
+	    .nranges = 1, .ranges = { { 0x0a005000, 0x3000 } }, .unit = 2 };
+	device_case("dev_framebuffer_placed", 5, 2);
 	devices[2] = (erx_dom_device_entry_t){ .nranges = 1,
 	    .ranges = { { 0x0a000000, UINT64_MAX - 0x0a000000 + 1 } } };
 	device_case("dev_overlap_wrapping", 5, 0);

@@ -16,7 +16,9 @@
  * -erx given, in the system domain's boot page and in a holder domain's
  * (docs/design-stopgap.md, "Boot information"). ROLE is the
  * record's role word and PERIPHERAL the CMSIS-SVD peripheral the device
- * NIF opens. The root's reader (liberx/backend/core/boot_manifest.c) and
+ * NIF opens. A device with a role word is driven (erx_dom_entry_driven,
+ * erx/dom.h) and its record writes both, so every row names both, which
+ * test/host/production_image_test.rb checks. The root's reader (liberx/backend/core/boot_manifest.c) and
  * the domain library's boot view (liberx/system/dom_boot_view.c) both read
  * this table, so a further kind is one more row here. A framebuffer row has
  * none: its record is the root's framebuffer record

@@ -495,6 +495,20 @@ class DomPlannerTest < Minitest::Test
     assert_equal 1, admit(held).report.fetch('child_plan_instances')
   end
 
+  # A device of no kind is held, not driven, so no give makes DMA memory for it: a row
+  # that asks for some would be memory the platform reserves and nothing uses. The view
+  # refuses it on whichever domain holds it, the system domain included.
+  def test_a_device_of_no_kind_with_dma_memory_fails_the_build
+    platform = JSON.parse(JSON.generate(@context.platform))
+    net = platform.fetch('units').find { |unit| unit.fetch('key') == 'net' }.fetch('devices')
+    net << net.first.merge('path' => '/soc/mmc@a000e00', 'base' => 0x0a000e00, 'role' => 'ordinary',
+                           'compatible' => 'brcm,bcm2835-sdhci', 'dma' => 'unconfined', 'dma_memory' => 0x10000,
+                           'placement_key' => 'net-second')
+    @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
+    held = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
+    [@source, held].each { |source| refused(source, 'view', /a device of a kind no runtime drives has DMA memory/) }
+  end
+
   # A unit of two devices that share a register page, as QEMU virt's virtio-mmio
   # transports 0x200 apart do: the root makes the system domain's windows itself, so
   # the system domain may hold it, but a give windows one device and the library

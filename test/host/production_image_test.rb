@@ -562,12 +562,14 @@ class ProductionImageTest < Minitest::Test
   # The root gives a device record to each device that matches a row of erx/device_kinds.h's
   # erx_device_kinds table and to the host link's UART, so a row added there whose role word is
   # not in RECORD_UNITS would leave every production boot's argument count one record short.
-  # Every row is read, and a row this test cannot read fails it rather than going unseen. Rows
+  # Every row is read, and a row this test cannot read fails it rather than going unseen, as
+  # does a row that does not name both a role word and a peripheral: erx_dom_entry_driven
+  # (erx/dom.h) asks only for the role word, and the record writes both. Rows
   # of two controllers may share a role word, as virtio-mmio's and GENET's share net.
   def test_the_record_units_are_the_roots_device_kinds_and_the_host_link
     table = File.read(File.join(ROOT, 'include/erx/device_kinds.h'))[/erx_device_kinds\[\] = \{\n(.*?)^\};/m, 1]
     rows = table.lines.grep(/\A\s*\{/)
-    words = rows.map { |row| row[/\A\s*\{\s*ERX_MF_DEVICE_ROLE_\w+,\s*"[^"]*",\s*"(\w+)"/, 1] }
+    words = rows.map { |row| row[/\A\s*\{\s*ERX_MF_DEVICE_ROLE_\w+,\s*"[^"]*",\s*"(\w+)",\s*"\w+"\s*\}/, 1] }
     refute_empty words
     refute_includes words, nil
     assert_equal [*words.uniq, Erx::ProductionImage::Run::HOSTLINK_UNIT].sort, Erx::ProductionImage::Run::RECORD_UNITS.sort

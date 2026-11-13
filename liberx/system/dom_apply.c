@@ -482,8 +482,9 @@ apply_line_installed(const apply_t *apply, uint32_t at)
  * catalogue entry, COHERENT and, for a network row, MAC, or for a
  * framebuffer row its -erx framebuffer record (erx_boot_framebuffer_words)
  * over the window it installed; and its length, or 0 when the words do not
- * fit, which the view's names rule out, or for an entry that has no record
- * (erx_dom_entry_recorded), which apply_args skips.
+ * fit, which the view's names rule out. A device of no kind has no role
+ * word to write, so apply_given_words answers 0 for one; apply_args asks
+ * only of a driven entry (erx_dom_entry_driven), so never for one.
  */
 static size_t
 apply_given_words(apply_t *apply, uint32_t at)
@@ -505,7 +506,7 @@ apply_given_words(apply_t *apply, uint32_t at)
 	if (entry->role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER)
 		return (erx_boot_framebuffer_words(&entry->framebuffer, entry->format, installed[ERX_DOM_OBJ_DEV_WINDOW],
 		    entry->offset, apply->given_words[at], sizeof(apply->given_words[at])));
-	if (!erx_dom_entry_recorded(entry))
+	if (!erx_dom_entry_driven(entry))
 		return (0);
 	return (erx_boot_given_words(&given, apply->given_words[at], sizeof(apply->given_words[at])));
 }
@@ -529,7 +530,7 @@ apply_unrecorded(const apply_t *apply, uint32_t at)
  * identifier, a -erx given or -erx framebuffer record per give that has one,
  * and, for a holder of a block device of a kind, -erx boot with the boot's
  * pair, each as the root's own page carries it. A device of no kind is held
- * with its unit and has no record (erx_dom_entry_recorded), so no driver
+ * with its unit and has no record (erx_dom_entry_driven), so no driver
  * opens it, as the root writes none for the system domain's (devices_read);
  * nor has a framebuffer the tree did not place (apply_unrecorded). The
  * number of runs, or 0 when a record does not fit.
@@ -549,7 +550,7 @@ apply_args(apply_t *apply, erx_boot_words_t *words)
 	for (uint32_t at = 0; at < apply->plan->ngives; at++) {
 		const erx_dom_device_entry_t *entry = &apply->lib->view.devices[apply->plan->gives[at].index];
 
-		if (!erx_dom_entry_recorded(entry) || apply_unrecorded(apply, at))
+		if (!erx_dom_entry_driven(entry) || apply_unrecorded(apply, at))
 			continue;
 		if ((length = apply_given_words(apply, at)) == 0)
 			return (0);

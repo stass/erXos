@@ -234,7 +234,7 @@ typedef struct erx_dom_device_entry {
 	/* Its holder's record words (erx/device_kinds.h): the ROLE and the
 	 * CMSIS-SVD PERIPHERAL; NULL for a framebuffer row, which has a record
 	 * of its own, and for a kind no runtime drives, which its holder holds
-	 * with no record and no window (erx_dom_entry_recorded). */
+	 * with no record and no window (erx_dom_entry_driven). */
 	const char	*role_word, *peripheral;
 	/* Its kind's compatible string (erx/device_kinds.h), NULL exactly
 	 * when role_word is NULL; and its unit's name, an identifier of 1 to ERX_DOM_NAME_MAX
@@ -288,18 +288,20 @@ typedef struct erx_dom_device_entry {
 } erx_dom_device_entry_t;
 
 /*
- * Whether a holder's boot page carries a record of entry: a device of a
- * kind a runtime drives has a -erx given record, and a framebuffer row a
- * -erx framebuffer record once the tree places it; one of no kind is held with its
- * unit and has none, so no driver opens it, and its give makes no window,
- * DMA window or memory (docs/design-shared-devices.md, "The unit rule").
- * The boot view's reserve, the creation's records and the device give
- * planner (erx_dom_plan_device_give) ask this.
+ * Whether a runtime drives entry: a device of a kind (erx/device_kinds.h,
+ * whose every row names a role word and a peripheral, set together) or a
+ * framebuffer row. A driven device's give makes its windows and memory,
+ * and its holder's boot page carries its record, -erx given or -erx
+ * framebuffer; an unplaced framebuffer is driven but has no range yet, so
+ * its give makes no window and writes no record. A device of no kind is
+ * held with its unit, not driven: no record, so no driver opens it, and
+ * no window, DMA window or memory (docs/design-shared-devices.md, "The
+ * unit rule").
  */
 static inline bool
-erx_dom_entry_recorded(const erx_dom_device_entry_t *entry)
+erx_dom_entry_driven(const erx_dom_device_entry_t *entry)
 {
-	return ((entry->role_word != NULL && entry->peripheral != NULL) ||
+	return (entry->role_word != NULL ||
 	    entry->role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER);
 }
 
@@ -659,7 +661,7 @@ typedef enum erx_dom_parent {
 #define ERX_DOM_DEVICE_STEPS	(2u * (ERX_DEVICE_RANGES_MAX + ERX_DEVICE_IRQS_MAX) + 3u)
 	/* the resource, a window per range, an IRQ object per line and the
 	 * DMA window or memory, at most (a device of no kind makes only the
-	 * resource and its shared lines' objects), then an install of each
+	 * resource and the objects of lines a driven device names), then an install of each
 	 * but the resource */
 
 /*
@@ -672,9 +674,12 @@ typedef enum erx_dom_parent {
  * among the creation's gives of the give that makes the object, or
  * ERX_DOM_GIVE_OWN for the give itself; for another give, index is the
  * line's index in that give's device, and for the give itself the line's
- * own index serves, so index is unused. shared says another device of the
- * unit names the line, which the holder's record of the device marks, and
- * so holds for every line another give serves.
+ * own index serves, so index is unused. For a line a driven device of the
+ * unit names, shared says another device of the unit names it, which the
+ * holder's record of the device marks, and so holds for every line another
+ * give serves. A line no driven device of the unit names has no reader, so
+ * a device of no kind leaves it ERX_DOM_GIVE_OWN, unshared, and makes
+ * nothing for it.
  */
 #define ERX_DOM_GIVE_OWN	UINT32_MAX
 

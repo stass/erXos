@@ -90,7 +90,8 @@ Each requirement follows from that one closure:
   ([design-system.md](design-system.md#devices)): one register window over
   each run of consecutive pages the unit's register ranges cover, and one
   IRQ object for each distinct line its devices name, a device of no kind
-  adding no window and only a line it shares (below). Every page given is
+  adding no window and only a line a device of a kind in its unit
+  names (below). Every page given is
   in one window and every line given in one object, so the kernel's refusal of a
   second MMIO object on a page or a second IRQ object on a line
   ([design-kernel.md](design-kernel.md#dma-and-the-iommu)) never fires on a
@@ -127,11 +128,13 @@ Each requirement follows from that one closure:
   of its own, DMA window or memory, so its holder holds no window onto
   its registers that any of its processes could open; the planner's
   overlap check (`life_overlaps`) keeps a driven device's window off its
-  pages. Its holder still holds
+  pages. Since no give makes its memory, the boot view refuses a row of
+  no kind that asks for DMA memory. Its holder still holds
   it with its unit, and a configured domain's creation gives it only the
-  IRQ object of each line it shares with another device of its
-  unit, when it is the first device of the unit on that line, so that the
-  line has its one object as the line rule above requires. The Raspberry
+  IRQ object of each line that a device of a kind in its unit also
+  names, when it is the first device of the unit on that line, so that the
+  line has its one object as the line rule above requires. A line that
+  only devices of no kind name has no reader, so no give makes its object. The Raspberry
   Pi 4's legacy SD controller, in the storage domain's `sd` unit, is such
   a device, and the system domain's SPI controllers get no objects of
   their own either: they lie in the mini UART's window and line.

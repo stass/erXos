@@ -766,6 +766,26 @@ life_line_source(const erx_dom_view_t *view, const erx_dom_plan_t *holder,
 	return (source);
 }
 
+/*
+ * Whether a driven device of entry index's unit (erx_dom_entry_driven),
+ * index itself included, names its line `line`: only then does a record
+ * read the line's IRQ object, so only then does a give make it.
+ */
+static bool
+life_line_driven(const erx_dom_view_t *view, uint32_t index, uint32_t line)
+{
+	const erx_dom_device_entry_t *entry = &view->devices[index], *other;
+	uint32_t at;
+
+	for (uint32_t each = 0; each < view->ndevices; each++) {
+		other = &view->devices[each];
+		if (other->unit == entry->unit && erx_dom_entry_driven(other) &&
+		    life_names_line(other, entry->lines[line], &at))
+			return (true);
+	}
+	return (false);
+}
+
 /* The grants row of a device object: every window shares one, every line one. */
 static erx_dom_obj_t
 life_grant_key(erx_dom_obj_t obj)
@@ -831,10 +851,10 @@ erx_dom_plan_device_give(const erx_dom_view_t *view,
 	/*
 	 * A device of no kind is held, not driven (docs/design-shared-devices.md,
 	 * "The unit rule"): no window, DMA window or memory, and an IRQ object
-	 * only for a line that another device of its unit names and no earlier
-	 * give serves, so that the later device's give finds the line's object.
+	 * only for a line that a driven device of its unit names and no earlier
+	 * give serves, so that the driven device's give finds the line's object.
 	 */
-	driven = erx_dom_entry_recorded(entry);
+	driven = erx_dom_entry_driven(entry);
 	draft.steps[draft.nsteps++] = (erx_dom_step_t){
 	    .kind = ERX_DOM_STEP_RESOURCE, .obj = ERX_DOM_OBJ_DEV_RESOURCE,
 	    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
@@ -851,9 +871,10 @@ erx_dom_plan_device_give(const erx_dom_view_t *view,
 		draft.lines[line] = (erx_dom_give_line_t){
 		    .give = ERX_DOM_GIVE_OWN };
 	for (uint32_t line = 0; line < entry->nlines; line++) {
+		if (!life_line_driven(view, index, line))
+			continue;
 		draft.lines[line] = life_line_source(view, holder, index, line);
-		if (draft.lines[line].give != ERX_DOM_GIVE_OWN ||
-		    (!driven && !draft.lines[line].shared))
+		if (draft.lines[line].give != ERX_DOM_GIVE_OWN)
 			continue;
 		draft.steps[draft.nsteps++] = (erx_dom_step_t){
 		    .kind = ERX_DOM_STEP_IRQ, .obj = ERX_DOM_OBJ_DEV_IRQ + line,
