@@ -50,34 +50,76 @@ module Erx
     # ERX_DOM_STEP_CONTIGUOUS), so root_memory grows by it (manifest).
     MEMORY = 24 << 20
     UNIT_KEY = 'display'
+    # The display's client (docs/design-display.md, "A display's session"): principal
+    # client, whose session template is granted the display's window tree, service
+    # screen, with a pixel area of PIXELS bytes, enough for a 1920 by 1080 screen of
+    # 32-bit pixels (8,294,400 bytes). Its domains quota, CLIENT_SESSIONS, is how many
+    # sessions of the template can live at once, each a grant the display pays for.
+    PIXELS = 8 << 20
+    CLIENT_SESSIONS = 1
+    LANE = 4096
+    # The display domain's outer budget: MediumBoot's, and property 18's sum on top
+    # (docs/design-system.md, "The manifest", property 18): for each of the client's
+    # sessions, its pixel area and the side the display reads for it, its own lane.
+    OUTER = MediumBoot::DOMAIN_OUTER + CLIENT_SESSIONS * (PIXELS + LANE)
+    # The client's principal holds one session of the site manifest's session limits,
+    # its memory and its outer budget, on the users share.
+    CLIENT_MEMORY = (36 << 20) + MediumBoot::DOMAIN_OUTER
     # The display domain: MediumBoot's eighth of a CPU, which the site manifest's free
     # 250 mcpu of the system share's reserve holds, and the display boot script on the
     # interpreter, as a node over the erx carrier, with no restart, in a runtime limits
-    # profile of its own: storage's figures, with no /tmp.
+    # profile of its own: storage's figures, with no /tmp. It serves screen, of the
+    # windows interface, with its display record, and has room for a connection to each
+    # of the client's sessions.
     ROW = MediumBoot::EIGHTH_SHARE +
           "runtime_limits display\n  max_frame 131072\n  max_message_heap 131072\n  funnel_depth 64\n" \
           "  exports 256\n  tmp 0\n  overlay 0\n  atoms 16384\n  foreign_atoms 1024\n  processes 1024\n" +
-          "limits display\n  memory #{MEMORY}\n  outer #{MediumBoot::DOMAIN_OUTER}\n  grant @share.eighth\n" \
-          "  spaces none\n  lane 4096\n  connections 0\n  crash 0\n  flags none\n" \
+          "limits display\n  memory #{MEMORY}\n  outer #{OUTER}\n  grant @share.eighth\n" \
+          "  spaces none\n  lane #{LANE}\n  connections #{CLIENT_SESSIONS}\n  crash 0\n  flags none\n" \
           "  runtime_limits @runtime_limits.display\n  peer_held 4096\n  peer_held_total 4096\n" \
           "domain display\n  principal @principal.system\n  limits @limits.display\n  kind service\n  flags none\n" \
           "  runtime @artifact.#{ProductionImage::DOMAIN_RUNTIME_ARTIFACT}\n" \
           "  release @artifact.#{ProductionImage.domain_boot('display').name}\n" \
-          "  restarts 0\n  restart_period_s 5\n  args \"#{MediumBoot::UP_ARGS.join(' ')}\"\n"
+          "  restarts 0\n  restart_period_s 5\n  args \"#{MediumBoot::UP_ARGS.join(' ')}\"\n" \
+          "service screen\n  server @domain.display\n  interface windows\n" \
+          "display screen\n  policy single\n  idle_dim_s 0\n  idle_off_s 0\n"
+    # The client: its principal and session template, the session's grant of screen, and
+    # its start row, which names screen as the session's display. The row is disabled,
+    # so the boot starts no session: no client program draws yet, and erx_starter does
+    # not wait for a display's domain before it starts a row (TODO.md, "a row that
+    # names a display").
+    CLIENT = "principal client\n  memory #{CLIENT_MEMORY}\n  grant @share.users\n  domains #{CLIENT_SESSIONS}\n" \
+             "  names 1\n  default_limits @limits.native\n  ceiling_limits @limits.native\n" \
+             "session client\n  limits @limits.session\n  runtime @artifact.emu\n  release @artifact.session\n" \
+             "  args \"-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx " \
+             "-eval ok=application:start(erx_session)\"\n" \
+             "facet screen\n  grantee @session.client\n  service @service.screen\n  operations none\n" \
+             "  max_request 131072\n  in_flight 16\n  reductions 100000\n  period_ns 1000000000\n" \
+             "  max_heap_size 262144\n  parameter pixels #{PIXELS}\n" \
+             "start client\n  enable NO\n  display @service.screen\n"
     UNIT = "unit #{UNIT_KEY}\n  placement \"#{UNIT_KEY}\"\n  holder @domain.display\n"
     ROOT_MEMORY_LINE = /^(  root_memory )([0-9]+)$/
+    MAX_DOMAINS_LINE = /^(  max_domains )([0-9]+)$/
+    MAX_CONNECTIONS_LINE = /^(  max_connections )([0-9]+)$/
 
     module_function
 
     # The manifest: the site manifest (MediumBoot.manifest) with ROW and room for its one
-    # domain, the display unit placed on it, and root_memory grown by the unit's DMA
-    # memory as the platform record gives it.
+    # domain, whose outer budget is OUTER, not MediumBoot's, the display unit placed on
+    # it, CLIENT, root_memory grown by the unit's DMA memory as the platform record gives
+    # it and by the client principal's memory, and max_domains and max_connections each
+    # by the client's sessions: the principals' domains quotas sum within max_domains, and
+    # each session has its connection to the display.
     def manifest(source, platform:)
-      text = MediumBoot.manifest(source, row: ROW, domains: 1, domain_memory: MEMORY)
-      raise Error, 'the manifest does not have exactly one root_memory line' unless text.scan(ROOT_MEMORY_LINE).size == 1
+      text = MediumBoot.manifest(source, row: ROW, domains: 1, domain_memory: MEMORY + OUTER - MediumBoot::DOMAIN_OUTER)
+      growth = { ROOT_MEMORY_LINE => dma_memory(platform) + CLIENT_MEMORY, MAX_DOMAINS_LINE => CLIENT_SESSIONS,
+                 MAX_CONNECTIONS_LINE => CLIENT_SESSIONS }
+      grown = growth.reduce(text) do |manifest, (line, added)|
+        raise Error, "the manifest does not have exactly one line #{line.source}" unless manifest.scan(line).size == 1
 
-      grown = text.sub(ROOT_MEMORY_LINE) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + dma_memory(platform)}" }
-      grown + UNIT
+        manifest.sub(line) { "#{Regexp.last_match(1)}#{Integer(Regexp.last_match(2), 10) + added}" }
+      end
+      grown + UNIT + CLIENT
     end
 
     # The DMA memory of the platform's display unit's devices, in bytes.
