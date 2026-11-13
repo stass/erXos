@@ -61,7 +61,7 @@
  */
 #define VM_DEVICE_BASE	UINT64_C(0xE00000000)
 #define VM_DEVICE_PAGES	4096u
-#define VM_CONTIG_BASE	(VM_WINDOW_BASE - (UINT64_C(1) << ERX_FIASCO_CONTIG_MAX_ORDER))
+#define VM_CONTIG_BASE	(VM_WINDOW_BASE - (UINT64_C(1) << ERX_FIASCO_CONTIG_ORDER_MAX))
 /* The window's two grains: sigma0 gives 2 MiB until refused, then 4 KiB until refused. */
 #define VM_SUPERPAGE_ORDER	21u
 /* An object's offsets, as addresses of its own table: page zero stays an empty key. */
@@ -75,10 +75,10 @@
 
 _Static_assert(VM_WINDOW_BASE % (UINT64_C(1) << VM_SUPERPAGE_ORDER) == 0,
     "the window starts on a superpage");
-_Static_assert(ERX_FIASCO_CONTIG_PAGES == UINT64_C(1) << (ERX_FIASCO_CONTIG_MAX_ORDER - L4_PAGESHIFT) &&
-    ERX_FIASCO_CONTIG_MIN_ORDER >= L4_PAGESHIFT && ERX_FIASCO_CONTIG_MIN_ORDER <= ERX_FIASCO_CONTIG_MAX_ORDER,
+_Static_assert(ERX_FIASCO_CONTIG_PAGES == UINT64_C(1) << (ERX_FIASCO_CONTIG_ORDER_MAX - L4_PAGESHIFT) &&
+    ERX_FIASCO_CONTIG_ORDER_MIN >= L4_PAGESHIFT && ERX_FIASCO_CONTIG_ORDER_MIN <= ERX_FIASCO_CONTIG_ORDER_MAX,
     "the largest contiguous pool is one flexpage of whole pages");
-_Static_assert(VM_CONTIG_BASE % (UINT64_C(1) << ERX_FIASCO_CONTIG_MAX_ORDER) == 0 &&
+_Static_assert(VM_CONTIG_BASE % (UINT64_C(1) << ERX_FIASCO_CONTIG_ORDER_MAX) == 0 &&
     VM_DEVICE_BASE + ((uint64_t)VM_DEVICE_PAGES << L4_PAGESHIFT) <= VM_CONTIG_BASE,
     "the largest contiguous pool is aligned to its size, between the device window and the window");
 _Static_assert(ERX_MEM_CONTIGUOUS_MAX <= (uint64_t)ERX_FIASCO_CONTIG_PAGES << L4_PAGESHIFT,

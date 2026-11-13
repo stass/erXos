@@ -42,12 +42,6 @@ and `erx_ramfs_sup` restarts `/tmp` whole.
 
 %% The tree's name, which a mount's {tree, Name} and attach's Aname name.
 -define(TREE, <<"tmp">>).
-%% statfs's type: Linux's TMPFS_MAGIC.
--define(TMPFS_MAGIC, 16#01021994).
-%% A listing's entry types, Linux's DT_ values as readdir carries them.
--define(DT_DIR, 4).
--define(DT_REG, 8).
--define(DT_LNK, 10).
 %% What getattr answers: every basic field, and the data version.
 -define(GETATTR_VALID, (?ERX_P9_GETATTR_MASK_MODE bor ?ERX_P9_GETATTR_MASK_NLINK
                         bor ?ERX_P9_GETATTR_MASK_UID bor ?ERX_P9_GETATTR_MASK_GID
@@ -207,7 +201,7 @@ readlink(Ino, Server) ->
 -doc false.
 statfs(Server) ->
     {ok, Statfs} = call(Server, statfs),
-    {ok, Statfs#{type => ?TMPFS_MAGIC, fsid => 0}}.
+    {ok, Statfs#{type => ?ERX_P9_MAGIC_TMPFS, fsid => 0}}.
 
 -doc false.
 clunk(Handle, Server) ->
@@ -262,9 +256,9 @@ qid_type(directory) -> ?ERX_P9_QTDIR;
 qid_type(symlink) -> ?ERX_P9_QTSYMLINK;
 qid_type(file) -> 0.
 
-dirent_type(directory) -> ?DT_DIR;
-dirent_type(symlink) -> ?DT_LNK;
-dirent_type(file) -> ?DT_REG.
+dirent_type(directory) -> ?ERX_P9_DT_DIR;
+dirent_type(symlink) -> ?ERX_P9_DT_LNK;
+dirent_type(file) -> ?ERX_P9_DT_REG.
 
 mode_type(directory) -> ?ERX_P9_S_IFDIR;
 mode_type(symlink) -> ?ERX_P9_S_IFLNK;

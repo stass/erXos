@@ -46,10 +46,6 @@ shell's. Nothing mounts the read-only tree yet.
 %% The tree's name, which a mount's {tree, Name} and attach's Aname name.
 -define(TREE, <<"dev">>).
 -define(POINT, <<"/dev">>).
-%% statfs's type: Linux's DEVFS_SUPER_MAGIC.
--define(DEVFS_SUPER_MAGIC, 16#1373).
--define(DT_DIR, 4).
--define(DT_REG, 8).
 -define(GETATTR_VALID, (?ERX_P9_GETATTR_MASK_MODE bor ?ERX_P9_GETATTR_MASK_NLINK
                         bor ?ERX_P9_GETATTR_MASK_UID bor ?ERX_P9_GETATTR_MASK_GID
                         bor ?ERX_P9_GETATTR_MASK_RDEV bor ?ERX_P9_GETATTR_MASK_ATIME
@@ -132,7 +128,7 @@ getattr(Node, _Fs) ->
                           end,
     {ok, #{valid => ?GETATTR_VALID, qid => qid(Node), mode => Type bor Mode,
            uid => 0, gid => 0, nlink => Nlink, rdev => 0, size => 0,
-           blksize => 4096, blocks => 0,
+           blksize => ?ERX_PAGE_SIZE, blocks => 0,
            atime_sec => 0, atime_nsec => 0, mtime_sec => 0, mtime_nsec => 0,
            ctime_sec => 0, ctime_nsec => 0, btime_sec => 0, btime_nsec => 0,
            gen => 0, data_version => 0}}.
@@ -254,7 +250,7 @@ readdir(_Handle, _Offset, _Max, _Fs) ->
 
 -doc false.
 statfs(_Fs) ->
-    {ok, #{type => ?DEVFS_SUPER_MAGIC, bsize => 4096, blocks => 0, bfree => 0, bavail => 0,
+    {ok, #{type => ?ERX_P9_MAGIC_DEVFS, bsize => ?ERX_PAGE_SIZE, blocks => 0, bfree => 0, bavail => 0,
            files => 0, ffree => 0, fsid => 0, namelen => 255}}.
 
 -doc false.
@@ -305,6 +301,6 @@ qid_type(root) -> ?ERX_P9_QTDIR;
 qid_type({device, _}) -> ?ERX_P9_QTDIR;
 qid_type(_File) -> 0.
 
-dirent_type(root) -> ?DT_DIR;
-dirent_type({device, _}) -> ?DT_DIR;
-dirent_type(_File) -> ?DT_REG.
+dirent_type(root) -> ?ERX_P9_DT_DIR;
+dirent_type({device, _}) -> ?ERX_P9_DT_DIR;
+dirent_type(_File) -> ?ERX_P9_DT_REG.

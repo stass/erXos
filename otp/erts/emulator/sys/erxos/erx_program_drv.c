@@ -88,12 +88,8 @@
  * program holds.
  */
 #define CLOSED_MAX		(2u * ERX_PROG_FDS_MAX)
-/*
- * The capabilities each of a program's spaces may hold: the image's install takes
- * ERX_PROGRAM_INSTALLS of them, and the rest is the program's own.
- */
-#define PROGRAM_CAP_LIMIT	16u
-_Static_assert(ERX_PROGRAM_INSTALLS <= PROGRAM_CAP_LIMIT, "the install fits the image's table");
+/* Each of a program's spaces may hold at most ERX_PROGRAM_CAP_LIMIT capabilities, the install's among them. */
+_Static_assert(ERX_PROGRAM_INSTALLS <= ERX_PROGRAM_CAP_LIMIT, "the install fits the image's table");
 /*
  * The session's pool for programs, which a spec's cap must not exceed. The stopgap keeps
  * budgets as records and reports no budget's cap, so the session has no pool to read yet;
@@ -532,10 +528,10 @@ apply(program_t *program, erx_program_action_t action)
 		return (erx_gate_worker_register(program->image_label, program->irq));
 	case ERX_PROGRAM_ANCHOR_CREATE:
 		return (erx_space_create(program->budget, ERX_CAP_SELF, erx_gate_worker_handle(),
-		    program->anchor_label, 0, PROGRAM_CAP_LIMIT, &program->anchor));
+		    program->anchor_label, 0, ERX_PROGRAM_CAP_LIMIT, &program->anchor));
 	case ERX_PROGRAM_IMAGE_CREATE:
 		return (erx_space_create(program->budget, program->anchor, erx_gate_worker_handle(),
-		    program->image_label, 0, PROGRAM_CAP_LIMIT, &program->image));
+		    program->image_label, 0, ERX_PROGRAM_CAP_LIMIT, &program->image));
 	case ERX_PROGRAM_LEASE_MAP:
 		return (program->lease == NULL ? ERX_OK : erx_area_lease_map(program->lease, program->image));
 	case ERX_PROGRAM_IMAGE_MAP:

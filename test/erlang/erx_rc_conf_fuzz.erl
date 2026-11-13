@@ -19,7 +19,6 @@
 -include("generated/erx_abi.hrl").
 
 -define(ROUNDS, 3000).
--define(MAX_RC_CONF, 65536).
 -define(NAMES, [<<"clock">>, <<"a_b">>, <<"kiosk">>, <<"x-1">>]).
 -define(DISPLAYS, [<<"display">>, <<"second">>]).
 -define(FIELDS, [enable, display, restarts, period]).
@@ -43,7 +42,7 @@ round_of() ->
     Name = pick(?NAMES),
     Set = erx_start_table:set(Text, Name, Settings),
     erlang:system_info(atom_count) =:= Atoms orelse error({atoms_made, Text}),
-    case {Said, byte_size(Text) > ?MAX_RC_CONF} of
+    case {Said, byte_size(Text) > ?ERX_START_RC_CONF_MAX} of
         {{error, too_large}, true} ->
             Set =:= {error, too_large} orelse error({accepted_over_bound, set, byte_size(Text)}),
             0;
@@ -103,8 +102,8 @@ settings() ->
 %% An eighth of the files just over the bound, a sixteenth exactly at it.
 padded(Text) ->
     case rand:uniform(16) of
-        N when N =< 2 -> pad(Text, ?MAX_RC_CONF + rand:uniform(64));
-        3 -> pad(Text, ?MAX_RC_CONF);
+        N when N =< 2 -> pad(Text, ?ERX_START_RC_CONF_MAX + rand:uniform(64));
+        3 -> pad(Text, ?ERX_START_RC_CONF_MAX);
         _ -> Text
     end.
 
@@ -143,7 +142,7 @@ last_setting(#{principal := Name} = Row, Local) ->
                                                                   N =:= Name, F =:= Field]), 1)].
 
 written(Text, Name, Settings, {ok, Out}) ->
-    byte_size(Out) =< ?MAX_RC_CONF orelse error({accepted_over_bound, written, byte_size(Out)}),
+    byte_size(Out) =< ?ERX_START_RC_CONF_MAX orelse error({accepted_over_bound, written, byte_size(Out)}),
     {ok, Local} = erx_start_table:parse_rc_conf(Out),
     [error({set_misread, Name, Field, Value, Local})
      || {Field, Value} <- maps:to_list(Settings),
@@ -153,7 +152,7 @@ written(Text, Name, Settings, {ok, Out}) ->
                              not lists:any(fun(V) -> assigns(L, V) end, Variables)] end,
     Kept(Text) =:= Kept(Out) orelse error({set_lost_line, Text, Out});
 written(Text, _Name, _Settings, {error, too_large}) ->
-    byte_size(Text) + 200 > ?MAX_RC_CONF orelse error({set_refused_in_bound, byte_size(Text)}).
+    byte_size(Text) + 200 > ?ERX_START_RC_CONF_MAX orelse error({set_refused_in_bound, byte_size(Text)}).
 
 assigns(Line, Variable) ->
     Size = byte_size(Variable),

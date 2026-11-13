@@ -49,16 +49,15 @@ uintptr_t	erx_fiasco_pool_take(erx_fiasco_pool_t *);
  * granule exceeds a page. A run is never given back: an unconfined device may still write it.
  *
  * The flexpage is as large as the devices' memory the manifest declares: the
- * smallest power of two that holds the total, at least 2 MiB, at most 16 MiB
- * (erx_fiasco_contig_order). Each device's memory is made once, so runs of that
- * total always fit. The packer counts the same figure in what the boot keeps
- * (Manifest::RootStartup.contiguous_pool_bytes in tools/lib/erx/manifest.rb, which
- * copies the two orders).
+ * smallest power of two that holds the total, of an order from
+ * ERX_FIASCO_CONTIG_ORDER_MIN to ERX_FIASCO_CONTIG_ORDER_MAX (abi/erx_abi.txt), 2 MiB
+ * to 16 MiB (erx_fiasco_contig_order). Each device's memory is made once, so runs
+ * of that total always fit. The packer counts the same figure in what the boot
+ * keeps (Manifest::RootStartup.contiguous_pool_bytes in tools/lib/erx/manifest.rb,
+ * which reads the two orders from the generated ABI).
  */
-#define ERX_FIASCO_CONTIG_MIN_ORDER	21u
-#define ERX_FIASCO_CONTIG_MAX_ORDER	24u
 /* The pages of the largest pool. */
-#define ERX_FIASCO_CONTIG_PAGES	((uint32_t)((UINT64_C(1) << ERX_FIASCO_CONTIG_MAX_ORDER) / ERX_PAGE_SIZE))
+#define ERX_FIASCO_CONTIG_PAGES	((uint32_t)((UINT64_C(1) << ERX_FIASCO_CONTIG_ORDER_MAX) / ERX_PAGE_SIZE))
 #define ERX_FIASCO_CONTIG_NONE	UINT32_MAX
 
 typedef struct erx_fiasco_contig {
@@ -68,8 +67,8 @@ typedef struct erx_fiasco_contig {
 
 /*
  * The order of the flexpage a pool for this many declared bytes takes: the smallest
- * power of two at least bytes, and at least ERX_FIASCO_CONTIG_MIN_ORDER; 0 when that
- * is past ERX_FIASCO_CONTIG_MAX_ORDER.
+ * power of two at least bytes, and at least ERX_FIASCO_CONTIG_ORDER_MIN; 0 when that
+ * is past ERX_FIASCO_CONTIG_ORDER_MAX.
  */
 unsigned	erx_fiasco_contig_order(uint64_t bytes);
 

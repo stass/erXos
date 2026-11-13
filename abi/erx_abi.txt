@@ -213,6 +213,11 @@ enum program_arg u32
 # sides with it and liberx maps them with it, so neither reads it from the
 # other's pages.
 limit program_lane u32 16384
+# The most capabilities each of a program's spaces, its anchor and its image,
+# may hold: the image's install takes ERX_PROGRAM_INSTALLS of them
+# (otp/erts/emulator/sys/erxos/erx_program_core.h), and the rest are the
+# program's own; erx_program_drv.c fails to build unless the install fits.
+limit program_cap_limit u32 16
 # The program port's control commands, from erx_program.erl to
 # erx_program_drv.c (docs/design-runtime.md#programs-as-ports): how the
 # start ended, a frame to write, the first thread's start, the anchor's
@@ -572,6 +577,16 @@ layout erx_dump_header wire_le 8 256
 enum end u32
   value off 1
   value reset 2
+
+# The stopgap's contiguous pool, from which every device's memory is made
+# (docs/design-stopgap.md, "The pool"): one run of the smallest power of two
+# that holds the manifest's devices' memory, at least 2 ** fiasco_contig_order_min
+# bytes and at most 2 ** fiasco_contig_order_max. The root sizes it with these and
+# the packer counts it in what the boot keeps (tools/lib/erx/manifest.rb);
+# liberx/backend/fiasco/vm.c fails to build unless the largest pool holds an
+# object of mem_contiguous_max.
+limit fiasco_contig_order_min u32 21
+limit fiasco_contig_order_max u32 24
 
 # The Phase 1 root service's wire, in a native UTCB's message registers
 # (docs/design-stopgap.md, "The root service"). A request's tag label is its

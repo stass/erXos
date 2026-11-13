@@ -42,6 +42,8 @@ nothing, as a full tree answers.
 
 -behaviour(erx_fs).
 
+-include("generated/erx_abi.hrl").
+
 -export([init/1, root/1, walk/3, getattr/2, open/3, read/4, readdir/4,
          readlink/2, statfs/1, clunk/2, write/4, make/4, setattr/3, unlink/4,
          rename/5]).
@@ -56,9 +58,6 @@ nothing, as a full tree answers.
 -define(O_APPEND, 8#2000).
 -define(ATTR_MODE, 1).
 -define(ATTR_SIZE, 8).
--define(DT_DIR, 4).
--define(DT_REG, 8).
--define(DT_LNK, 10).
 %% The largest file the tree keeps; a write past it answers efbig.
 -define(FILE_MAX, 1 bsl 20).
 
@@ -451,9 +450,9 @@ type_bits(file) -> 8#100000.
 
 dirent_type(Ino, T) ->
     case node(Ino, T) of
-        #{kind := directory} -> ?DT_DIR;
-        #{kind := symlink} -> ?DT_LNK;
-        #{kind := file} -> ?DT_REG
+        #{kind := directory} -> ?ERX_P9_DT_DIR;
+        #{kind := symlink} -> ?ERX_P9_DT_LNK;
+        #{kind := file} -> ?ERX_P9_DT_REG
     end.
 
 seen(Callback, #{observer := Observer}) when is_pid(Observer) ->

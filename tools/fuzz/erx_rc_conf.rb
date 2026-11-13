@@ -18,8 +18,8 @@ module ErxRcConfFuzz
   # erx_ident, the identifier rule the core reads names with.
   IDENT = 'erlang/apps/erx_domain/src/erx_ident.erl'
   FUZZ = 'test/erlang/erx_rc_conf_fuzz.erl'
-  BOUND = '-define(MAX_RC_CONF, 65536).'
-  NO_BOUND = '-define(MAX_RC_CONF, 1 bsl 30).'
+  BOUND = '?ERX_START_RC_CONF_MAX'
+  NO_BOUND = '(1 bsl 30)'
   DEADLINE_SECONDS = '120'
   VERDICT = 'accepted_over_bound'
 
@@ -28,11 +28,11 @@ module ErxRcConfFuzz
   def run(seed:)
     Erx::Generated.ensure(root: ROOT)
     core = File.binread(File.join(ROOT, CORE))
-    raise "no bound in #{CORE}" unless core.scan(BOUND).size == 1
+    raise "no bound in #{CORE}" if core.scan(BOUND).empty?
 
     output, status = fuzz(core, seed: seed)
     abort(output) unless status.success? && output.match?(/^fuzz: \d+ rounds ok, \d+ [a-z ]+$/)
-    output, status = fuzz(core.sub(BOUND, NO_BOUND), seed: seed)
+    output, status = fuzz(core.gsub(BOUND, NO_BOUND), seed: seed)
     abort("an input past the bound passed:\n#{output}") if status.success? || !output.include?(VERDICT)
     puts 'erx_start_table reads rc.conf within its 64 KiB bound, and a file past it does not pass'
   end

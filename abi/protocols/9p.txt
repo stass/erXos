@@ -90,6 +90,20 @@ limit p9_s_ifreg u32 0x8000
 limit p9_s_iflnk u32 0xa000
 limit p9_s_ifchr u32 0x2000
 limit p9_s_ifblk u32 0x6000
+# A readdir entry's type byte, Linux's DT_ values as 9P2000.L carries them.
+limit p9_dt_dir u8 4
+limit p9_dt_reg u8 8
+limit p9_dt_lnk u8 10
+# The type each of erXos's file servers answers in statfs, a different one
+# for each kind of tree, which 9P2000.L leaves to the server: Linux's
+# RAMFS_MAGIC (the start service's tree), TMPFS_MAGIC (/tmp), PROC_SUPER_MAGIC
+# and DEVFS_SUPER_MAGIC, and littlefs's superblock magic, "littlefs" read as
+# its first word.
+limit p9_magic_ramfs u32 0x858458f6
+limit p9_magic_tmpfs u32 0x01021994
+limit p9_magic_proc u32 0x9fa0
+limit p9_magic_devfs u32 0x1373
+limit p9_magic_littlefs u32 0x7366656c
 
 # setattr's valid: which of its fields the request sets.
 flags p9_setattr_valid u32

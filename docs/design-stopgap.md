@@ -665,7 +665,7 @@ At boot the root takes all RAM from `sigma0` with `l4sigma0_map_anypage(pager, w
 &phys, order)`: first one run, the **contiguous pool**, from which every device's memory is made, recording `phys`;
 then everything else, at 2 MiB until refused and then 4 KiB until refused. The contiguous pool is one flexpage
 of the smallest power of two that holds the total `dma_memory` of the manifest's devices, at least 2 MiB
-(order 21) and at most 16 MiB (order 24, which `ERX_MEM_CONTIGUOUS_MAX` fills alone), at a constant of the
+(order 21, `fiasco_contig_order_min` in `abi/erx_abi.txt`) and at most 16 MiB (order 24, `fiasco_contig_order_max`, which `ERX_MEM_CONTIGUOUS_MAX` fills alone), at a constant of the
 address layout aligned to the largest order (`erx_fiasco_contig_order`). Each device's memory is made once and
 never given back, and every run is aligned only to a page, so runs of the declared total always fit. A native
 test root, which has no manifest, names its own total. The packer refuses a manifest whose devices declare

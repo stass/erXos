@@ -4,6 +4,7 @@
 
 require 'digest'
 require_relative 'abi_binary'
+require_relative 'generated_abi'
 
 module Erx
   module Manifest
@@ -387,15 +388,16 @@ module Erx
         [CONTIGUOUS_POOL_MIN_BYTES, 1 << (dma_memory - 1).bit_length].max
       end
 
-      # The C sources of the copied constants: ERX_PAGE_SIZE, sizeof(erx_backend_vm_page_t)
-      # (liberx/backend/core/vm_table.h, which vm_table.c asserts), VM_DEVICE_PAGES
-      # (liberx/backend/fiasco/vm.c), and ERX_FIASCO_CONTIG_MIN_ORDER and _MAX_ORDER
-      # (liberx/backend/fiasco/page_pool.h) as bytes.
-      PAGE_BYTES = 4096
+      # A page and the contiguous pool's smallest and largest sizes, from the ABI
+      # (page_size, fiasco_contig_order_min and fiasco_contig_order_max). The other two
+      # are liberx's own and copied: sizeof(erx_backend_vm_page_t)
+      # (liberx/backend/core/vm_table.h, which vm_table.c asserts) and VM_DEVICE_PAGES
+      # (liberx/backend/fiasco/vm.c).
+      PAGE_BYTES = ABI::Generated.constant('page_size')
       PAGE_INDEX_SLOT_BYTES = 16
       DEVICE_PAGES = 4096
-      CONTIGUOUS_POOL_MIN_BYTES = 1 << 21
-      CONTIGUOUS_POOL_MAX_BYTES = 1 << 24
+      CONTIGUOUS_POOL_MIN_BYTES = 1 << ABI::Generated.constant('fiasco_contig_order_min')
+      CONTIGUOUS_POOL_MAX_BYTES = 1 << ABI::Generated.constant('fiasco_contig_order_max')
 
       # erx_backend_vm_layout (liberx/backend/core/vm_table.c) sizes the index over the
       # pool's window, its contiguous pool and the device pages. The window and the
@@ -539,7 +541,7 @@ module Erx
         device_memory = rows.fetch('devices').sum { |device| device.fetch('dma_memory') }
         # The stopgap's contiguous pool holds every device's memory at once (RootStartup.contiguous_pool_bytes).
         if device_memory > RootStartup::CONTIGUOUS_POOL_MAX_BYTES
-          invalid('device memory exceeds the 16 MiB contiguous pool', 4, 'devices.dma_memory')
+          invalid("device memory exceeds the #{RootStartup::CONTIGUOUS_POOL_MAX_BYTES >> 20} MiB contiguous pool", 4, 'devices.dma_memory')
         end
         if principals.sum { |row| row.fetch('memory') } + baseline + device_memory > root_memory
           invalid('principal budgets, system baseline and device memory exceed root memory', 4, 'principals.memory')

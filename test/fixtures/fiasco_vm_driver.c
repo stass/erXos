@@ -940,7 +940,7 @@ check_contig_take(erx_fiasco_contig_t *pool, bool *held, uint32_t pages, uint32_
 static void
 check_contig_small(void)
 {
-	const uint32_t pages = (uint32_t)((UINT64_C(1) << ERX_FIASCO_CONTIG_MIN_ORDER) / ERX_PAGE_SIZE);
+	const uint32_t pages = (uint32_t)((UINT64_C(1) << ERX_FIASCO_CONTIG_ORDER_MIN) / ERX_PAGE_SIZE);
 	erx_fiasco_contig_t small = { .pages = pages };
 
 	if (!(erx_fiasco_contig_take(&small, pages + 1, UINT32_MAX) == ERX_FIASCO_CONTIG_NONE))

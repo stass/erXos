@@ -10,6 +10,11 @@ limit mf_none u32 0xffffffff
 # bounds, and so every row a local setting can name (docs/design-apps.md, "The
 # start table").
 limit start_rows_max u32 256
+# The largest rc.conf the start service reads or writes, and the longest
+# write the apps tree's ctl file reads (docs/design-apps.md, "Where the file
+# is" and "Interfaces").
+limit start_rc_conf_max u32 65536
+limit start_ctl_max u32 4096
 # A start row's restart intensity, more than restarts ends within period seconds
 # (docs/design-apps.md, "The start table"), from the manifest or from rc.conf. Its
 # row supervisor keeps a timestamp per end within the period, so the ceilings bound

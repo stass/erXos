@@ -54,11 +54,11 @@ contig_held(const erx_fiasco_contig_t *pool, uint32_t page)
 unsigned
 erx_fiasco_contig_order(uint64_t bytes)
 {
-	unsigned order = ERX_FIASCO_CONTIG_MIN_ORDER;
+	unsigned order = ERX_FIASCO_CONTIG_ORDER_MIN;
 
-	while (order <= ERX_FIASCO_CONTIG_MAX_ORDER && (UINT64_C(1) << order) < bytes)
+	while (order <= ERX_FIASCO_CONTIG_ORDER_MAX && (UINT64_C(1) << order) < bytes)
 		order++;
-	return (order <= ERX_FIASCO_CONTIG_MAX_ORDER ? order : 0);
+	return (order <= ERX_FIASCO_CONTIG_ORDER_MAX ? order : 0);
 }
 
 uint32_t

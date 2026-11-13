@@ -50,10 +50,6 @@ go through that domain's inspect facet.
 %% The most bytes of one file (design-live.md, Snapshots): once the entries
 %% asked for hold that many, the file is cut there anyway.
 -define(MAX_FILE, 65536).
-%% statfs's type: Linux's PROC_SUPER_MAGIC.
--define(PROC_SUPER_MAGIC, 16#9fa0).
--define(DT_DIR, 4).
--define(DT_REG, 8).
 -define(GETATTR_VALID, (?ERX_P9_GETATTR_MASK_MODE bor ?ERX_P9_GETATTR_MASK_NLINK
                         bor ?ERX_P9_GETATTR_MASK_UID bor ?ERX_P9_GETATTR_MASK_GID
                         bor ?ERX_P9_GETATTR_MASK_RDEV bor ?ERX_P9_GETATTR_MASK_ATIME
@@ -109,7 +105,7 @@ getattr(Node, _Fs) ->
                           end,
     {ok, #{valid => ?GETATTR_VALID, qid => qid(Node), mode => Type bor Mode,
            uid => 0, gid => 0, nlink => Nlink, rdev => 0, size => 0,
-           blksize => 4096, blocks => 0,
+           blksize => ?ERX_PAGE_SIZE, blocks => 0,
            atime_sec => 0, atime_nsec => 0, mtime_sec => 0, mtime_nsec => 0,
            ctime_sec => 0, ctime_nsec => 0, btime_sec => 0, btime_nsec => 0,
            gen => 0, data_version => 0}}.
@@ -210,7 +206,7 @@ readdir({bytes, _}, _Offset, _Max, _Fs) ->
 
 -doc false.
 statfs(_Fs) ->
-    {ok, #{type => ?PROC_SUPER_MAGIC, bsize => 4096, blocks => 0, bfree => 0, bavail => 0,
+    {ok, #{type => ?ERX_P9_MAGIC_PROC, bsize => ?ERX_PAGE_SIZE, blocks => 0, bfree => 0, bavail => 0,
            files => 0, ffree => 0, fsid => 0, namelen => 255}}.
 
 -doc false.
@@ -251,5 +247,5 @@ qid(Node) ->
 qid_type({dir, _}) -> ?ERX_P9_QTDIR;
 qid_type(_File) -> 0.
 
-dirent_type({dir, _}) -> ?DT_DIR;
-dirent_type(_File) -> ?DT_REG.
+dirent_type({dir, _}) -> ?ERX_P9_DT_DIR;
+dirent_type(_File) -> ?ERX_P9_DT_REG.

@@ -18,7 +18,6 @@
 
 -define(ROUNDS, 20000).
 -define(MIN_ACCEPTED, ?ROUNDS div 5).
--define(MAX_CTL, 4096).
 %% Each verb and the settings it takes.
 -define(VERBS, [{enable, [display, restarts, period]}, {disable, []}, {start, [display]}, {stop, []}]).
 
@@ -36,7 +35,7 @@ round_of({Write, Expected}) ->
     Atoms = erlang:system_info(atom_count),
     Said = erx_start_table:parse_ctl(Write),
     erlang:system_info(atom_count) =:= Atoms orelse error({atoms_made, Write}),
-    byte_size(Write) =< ?MAX_CTL orelse Said =:= {error, too_long}
+    byte_size(Write) =< ?ERX_START_CTL_MAX orelse Said =:= {error, too_long}
         orelse error({accepted_over_bound, byte_size(Write), Said}),
     case {Said, Expected} of
         {{ok, Command}, _} when Expected =:= none; Expected =:= Command ->
@@ -59,8 +58,8 @@ case_of() ->
     Write = spaced(Command),
     case rand:uniform(8) of
         N when N =< 3 -> {Write, Command};
-        4 -> {pad(Write, ?MAX_CTL), Command};
-        5 -> {pad(Write, ?MAX_CTL + rand:uniform(64)), too_long};
+        4 -> {pad(Write, ?ERX_START_CTL_MAX), Command};
+        5 -> {pad(Write, ?ERX_START_CTL_MAX + rand:uniform(64)), too_long};
         6 -> {mutate(Write), none};
         7 -> {noise(), none};
         8 -> {<<(atom_to_binary(element(1, Command)))/binary, " ", (bad_name())/binary>>, none}

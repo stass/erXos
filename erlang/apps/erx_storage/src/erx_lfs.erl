@@ -59,8 +59,6 @@ only on a request that carries the reference.
 
 -define(TREE, <<"data">>).
 -define(ROOT, <<"/">>).
-%% statfs's type: littlefs's superblock magic, "littlefs" read as its first word.
--define(LFS_MAGIC, 16#7366656c).
 -define(BLOCK_SIZE, 4096).
 -define(SECTOR_SIZE, 512).
 -define(MIN_BLOCKS, 8).
@@ -77,8 +75,6 @@ only on a request that carries the reference.
 -define(LFS_O_EXCL, 16#0200).
 -define(LFS_O_TRUNC, 16#0400).
 -define(LFS_O_APPEND, 16#0800).
--define(DT_DIR, 4).
--define(DT_REG, 8).
 -define(GETATTR_VALID, (?ERX_P9_GETATTR_MASK_MODE bor ?ERX_P9_GETATTR_MASK_NLINK
                         bor ?ERX_P9_GETATTR_MASK_UID bor ?ERX_P9_GETATTR_MASK_GID
                         bor ?ERX_P9_GETATTR_MASK_RDEV bor ?ERX_P9_GETATTR_MASK_ATIME
@@ -357,7 +353,7 @@ plan(statfs, _State) ->
     {run, fun(V) -> erx_littlefs:fsstat(V) end,
      fun({ok, Bsize, Blocks, Used}, S) ->
              Free = max(0, Blocks - Used),
-             {{ok, #{type => ?LFS_MAGIC, fsid => 0, bsize => Bsize, blocks => Blocks,
+             {{ok, #{type => ?ERX_P9_MAGIC_LITTLEFS, fsid => 0, bsize => Bsize, blocks => Blocks,
                      bfree => Free, bavail => Free, files => Free, ffree => Free,
                      namelen => ?NAME_MAX}}, S};
         (Error, S) -> {Error, S}
@@ -563,8 +559,8 @@ version(Path, #owner{paths = Paths}) ->
 qid_type(directory) -> ?ERX_P9_QTDIR;
 qid_type(file) -> 0.
 
-dirent_type(directory) -> ?DT_DIR;
-dirent_type(file) -> ?DT_REG.
+dirent_type(directory) -> ?ERX_P9_DT_DIR;
+dirent_type(file) -> ?ERX_P9_DT_REG.
 
 attr(Kind, Size, Qid, State, Path) ->
     {Mode, Nlink} = case Kind of
@@ -630,7 +626,7 @@ readdir(Handle, Offset, Max, Server) -> call(Server, {readdir, Handle, Offset, M
 statfs(Server) ->
     case call(Server, statfs) of
         {ok, _} = Reply -> Reply;
-        _ -> {ok, #{type => ?LFS_MAGIC, fsid => 0, bsize => ?BLOCK_SIZE, blocks => 0,
+        _ -> {ok, #{type => ?ERX_P9_MAGIC_LITTLEFS, fsid => 0, bsize => ?BLOCK_SIZE, blocks => 0,
                     bfree => 0, bavail => 0, files => 0, ffree => 0, namelen => ?NAME_MAX}}
     end.
 -doc false.

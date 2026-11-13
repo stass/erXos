@@ -67,10 +67,6 @@ a literal of this module.
 -export_type([row/0, field/0, value/0, local/0, merged/0, command/0, action/0, ctl_error/0, kept/0, held/0]).
 -export_type([reading/0, read_answer/0, read_effect/0]).
 
-%% The largest rc.conf read or written (design-apps.md, "Where the file is").
--define(MAX_RC_CONF, 65536).
-%% The longest write ctl reads (design-apps.md, "Interfaces").
--define(MAX_CTL, 4096).
 %% restarts and period are bounded by abi/manifest.txt's ceilings, whose
 %% digits fit in this many.
 -define(MAX_DIGITS, 10).
@@ -136,7 +132,7 @@ a literal of this module.
 
 -doc "Reads rc.conf's text into its settings and skipped lines, in file order.".
 -spec parse_rc_conf(binary()) -> {ok, [local()]} | {error, too_large}.
-parse_rc_conf(Text) when byte_size(Text) > ?MAX_RC_CONF ->
+parse_rc_conf(Text) when byte_size(Text) > ?ERX_START_RC_CONF_MAX ->
     {error, too_large};
 parse_rc_conf(Text) when is_binary(Text) ->
     Lines = binary:split(Text, <<"\n">>, [global]),
@@ -319,7 +315,7 @@ One write to ctl as a command, or why it is refused; the start service
 answers every refusal `einval`. One trailing newline is allowed.
 """.
 -spec parse_ctl(binary()) -> {ok, command()} | {error, atom()}.
-parse_ctl(Write) when byte_size(Write) > ?MAX_CTL ->
+parse_ctl(Write) when byte_size(Write) > ?ERX_START_CTL_MAX ->
     {error, too_long};
 parse_ctl(Write) when is_binary(Write) ->
     Line = without_newline(Write),
@@ -540,7 +536,7 @@ read_answered(Answer, {unread, Failures}, _Made) ->
 
 -doc "The largest rc.conf the table reads, in bytes; a longer file sets nothing.".
 -spec rc_conf_limit() -> pos_integer().
-rc_conf_limit() -> ?MAX_RC_CONF.
+rc_conf_limit() -> ?ERX_START_RC_CONF_MAX.
 
 %% ---------------------------------------------------------------------------
 %% Writing rc.conf
@@ -552,7 +548,7 @@ it was; refused when the text read or the text written is over 64 KiB.
 """.
 -spec set(binary(), name(), #{field() => value()}) ->
           {ok, binary()} | {error, too_large | bad_setting}.
-set(Text, _Name, _Settings) when byte_size(Text) > ?MAX_RC_CONF ->
+set(Text, _Name, _Settings) when byte_size(Text) > ?ERX_START_RC_CONF_MAX ->
     {error, too_large};
 set(Text, Name, Settings) when is_binary(Text) ->
     case valid_name(Name) andalso valid_settings(Settings) of
@@ -562,7 +558,7 @@ set(Text, Name, Settings) when is_binary(Text) ->
             Fields = [Field || Field <- ?FIELDS, maps:is_key(Field, Settings)],
             Written = lists:foldl(Assign, Lines, Fields),
             case iolist_to_binary(lists:join(<<"\n">>, Written)) of
-                Out when byte_size(Out) > ?MAX_RC_CONF -> {error, too_large};
+                Out when byte_size(Out) > ?ERX_START_RC_CONF_MAX -> {error, too_large};
                 Out -> {ok, Out}
             end;
         false ->
