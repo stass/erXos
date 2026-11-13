@@ -594,7 +594,7 @@ class DomPlannerTest < Minitest::Test
   # fixture's archive with a planner that places nothing, with source's edit applied.
   def display_manifest(edit = ->(source) { source })
     platform = Erx::Platform.load(root: ROOT, name: 'qemu-virt')
-    arguments = ManifestContextFixture.archive_arguments(@codec, boots: %w[display network session storage web])
+    arguments = ManifestContextFixture.archive_arguments(@codec, boots: [*%w[display network session storage web], Erx::DisplayDomain::BOOT.name])
     context = Erx::Manifest::Context.new(**arguments.merge(platform: @context.platform))
     planner = ->(view) { %w[domains introductions sessions].to_h { |key| [key, view.fetch(key == 'domains' ? 'order' : key).map { 0 }] } }
     source = edit.call(Erx::DisplayDomain.manifest(platform.site_manifest_source(ROOT), platform: platform))
