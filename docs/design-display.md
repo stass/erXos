@@ -877,6 +877,7 @@ client's directory, so the client sees:
 /N/kbd      read: records 'c' runes typed, 'k' keys down, 'K' keys down after a release
 /N/wctl     read: the window's rectangle and state; write: a geometry command
 /N/label    read and write: the window's title
+/screen     read: the screen's rectangle and channel
 /snarf      the display's clipboard, read and write; present only when the grant carries snarf
 ```
 
@@ -890,16 +891,41 @@ window ids are spent. The `mkdir`'s
 holder: a window ends when its holder ends, when its directory is
 removed, or when its grant ends, whichever comes first, as a fid ends at
 its owner's end. `mouse` and
-`wctl` are the formats of Plan 9 and 9front. `kbd` is erXos's own
-format; it has not been checked against 9front's kbd(3) or its
-source, so no compatibility with 9front's `kbd` is claimed. A record is one byte naming its kind, its runes in
-UTF-8, and a NUL, so a typed rune is `c`, the rune and a NUL, at most
-6 bytes, and `k` and `K` carry the runes of the keys down. A read of
+`wctl` are the formats of Plan 9 and 9front, and `kbd` is the format of
+9front's `kbd` file as kbdfs(8) describes it (9front, commit
+`eb49f1f8788c`, `sys/man/8/kbdfs`, lines 208-236). A record is one byte
+naming its kind, its runes in UTF-8, and a NUL: `k` when a key goes
+down and `K` when one goes up, each followed by the runes of every key
+then held for the window, modifiers included, in unshifted form; and
+`c`, the one rune the key types, at most 6 bytes, which is sent again
+at the repeat rate while the key is held. Arrows, function keys,
+modifiers and the other keys that type no character are runes of
+9front's private-use range ([Input events](#input-events)). Because
+every `k` and `K` record carries the whole set, a reader that lost
+records to the queue's bound has the right set again at the next one. A read of
 `mouse`, `kbd` or `wctl` is a
 helper-mode read that waits for a record
 ([The `erx_fs` behaviour](design-files.md#serving-the-erx_fs-behaviour)).
 Only these names exist; `cons`, `winname`, `consctl` and `wsys` do not,
 since a terminal is a program's choice and attachment by name is gone.
+
+**`screen`.** A read answers one line: the screen's rectangle, as the
+four numbers that open a `wctl` read and in their form, and the
+display's channel descriptor, as `ctl` answers it. It lies at the
+client's root, beside its windows' directories and `snarf`, so a
+client reads it before it has a window. Each read answers the screen
+as it is at the read, so after a change of the screen's size the next
+read answers the new rectangle; a read while the display has no screen
+fails with `EIO`, as a `mkdir` then does, and opening it for writing
+fails with `EACCES`. `screen` and `snarf` are the tree's own names, so
+a `mkdir` of either fails with `EEXIST`. `erx_win:open/2` reads
+`screen` first, allocates the window's buffer at that size in the
+client's pixel area, where a full area answers `enomem`, and only then
+makes the window, where a client at its `windows` quota gets
+`EDQUOT`, freeing the buffer if the `mkdir` fails; so a full area is
+refused before the quota is touched, as [Windows and
+buffers](#windows-and-buffers) asks. A client re-reads `screen` at an
+`r` record of any of its windows, to size the next window it opens.
 
 **`ctl`.** A read answers one line, the display's channel descriptor. A
 write is one command of one line:
@@ -1127,27 +1153,130 @@ a write that fails.
 
 ### Input events
 
-Inside the display domain an input event is one record, whatever device
-made it, and it travels only from the drivers to the display's one
-input router, the window system:
+Input has two forms, one on each side of the display's one input
+router, `erx_winfs` ([The input router](#the-input-router)). A driver
+sends **records** in its device's terms, so it needs nothing of the
+display: not the screen's size, not the layout of the keyboard and not
+which window takes it. The router turns them into **`input()`**, the
+one form the policy and a window see.
 
 ```erlang
+-type record() :: {pointer, rel, DX :: -16#80000000..16#7fffffff, DY :: -16#80000000..16#7fffffff}
+                | {pointer, abs, X :: 0..65535, Y :: 0..65535}
+                | {touch, Slot :: 0..9, down | move | up, X :: 0..65535, Y :: 0..65535}
+                | {key, down | up, Code :: 0..?ERX_EVDEV_KEY_MAX}
+                | {wheel, Steps :: -128..127}
+                | release.
+
 -type input() :: #{device := binary(),        % the device's name in the device table
                    at := integer(),           % milliseconds, the runtime's monotonic clock
                    event := {pointer, X :: coord(), Y :: coord(), Buttons :: 0..255}
                           | {touch, Slot :: 0..9, down | move | up, X :: coord(), Y :: coord()}
-                          | {key, down | up, Code :: 0..16#ffff,
-                             Rune :: 0..16#d7ff | 16#e000..16#10ffff | none}
+                          | {key, down | repeat | up, Code :: 0..?ERX_EVDEV_KEY_MAX,
+                             Typed :: rune() | none, Unshifted :: rune() | none}
                           | {wheel, Steps :: -128..127}}.
+-type rune() :: 0..16#d7ff | 16#e000..16#10ffff.
 ```
 
-The window system delivers each event to one window, which a window
-reads as 49-byte `mouse` records and `kbd` records; that is the one input
-form a window has, for every client. A touch is a pointer with button 1
-down; a wheel step is buttons 8 and 16, as Plan 9 reports a scroll
-wheel. An encoder's driver emits its steps as wheel steps and its press
-as a key, and a keypad's driver emits keys, so no window policy maps
-devices.
+A record's relative move is in the device's own units; an absolute
+position, a touch's included, is normalized across the device's own
+axis range, 0 at its minimum and 65535 at its maximum. A key is an
+evdev code, and so is a pointer's button (`BTN_LEFT`, `BTN_MIDDLE`,
+`BTN_RIGHT`, `BTN_TOUCH`). A driver sends each key's down once and its
+up once, edges only: a device's own repeat is dropped, and repeat is
+the router's. `release` says that the device lost track of its own
+state: every key, button and touch it holds is to be taken as up. A
+record carries no time and no device name: the router stamps each with
+its own clock when it arrives and knows its **source**, the process
+that sent it, which is a driver's, or for a device in another domain the
+display's reader of that device's file ([The display
+device](#the-display-device)).
+
+In `input()` a position is the screen's, inside it; `Buttons` are
+Plan 9's, bit 0 the left button, bit 1 the middle and bit 2 the right
+(plan9port, commit `1f1396913fb5`, `man/man3/mouse.3`, lines 66 and
+76-78), and a wheel step is buttons 8 and 16, as Plan 9 reports a scroll
+wheel. A key keeps its evdev code; `Typed` is the rune it types at the
+layer its modifiers select, and `Unshifted` the rune of its unshifted
+layer, which `k` and `K` records carry. The window system delivers each
+event to one window, which reads it as 49-byte `mouse` records and `kbd`
+records; that is the one input form a window has, for every client. A
+touch is a pointer with button 1 down. An encoder's driver sends its
+steps as wheel steps and its press as a key, and a keypad's driver sends
+keys, each by its evdev code, so no window policy maps devices.
+
+**evdev's codes have one home**, `abi/formats/evdev.txt`: the event
+types, the codes of keys and buttons, the relative and absolute axes,
+`SYN_REPORT` and `SYN_DROPPED`, and the key states, each under its name
+in FreeBSD's `sys/dev/evdev/input-event-codes.h` at release/14.1.0 and
+with its value from there. The virtio-input core, the keymap's
+generator and the bus drivers of touch controllers, keypads and
+encoders read the names the build generates from it, and
+`abi/formats/virtio.txt` keeps only virtio's own layouts.
+
+**Special keys are 9front's runes.** A key that types no character, an
+arrow, a function key, Home, End, Page Up and Page Down, Insert, Print,
+Scroll Lock and Break, and each modifier and lock (Shift, Control, Alt,
+AltGr, Mod4, Caps Lock and Num Lock) is the rune 9front's
+`sys/include/keyboard.h` gives it (9front, commit `eb49f1f8788c`, MIT
+under `lib/legal/NOTICE`): `KF|1` to `KF|0xC` for F1 to F12, `Khome`,
+`Kup`, `Kdown`, `Kleft`, `Kright`, `Kpgup`, `Kpgdown`, `Kins`, `Kend`,
+`Kprint`, `Kscroll`, `Kbreak`, `Kshift`, `Kctl`, `Kalt`, `Kaltgr`,
+`Kmod4`, `Kcaps` and `Knum`; Backspace, Delete and Escape are the
+header's `Kbs`, `Kdel` and `Kesc`. `abi/formats/input.txt` holds them by
+those names, with the values taken from that header, so a client, the
+keymap and `erx_vt` read one table. Each is in the private-use range
+but `Kbs`, `Kdel` and `Kesc`, which are ASCII; plan9port's
+`include/keyboard.h` gives `Kdown` the value 0x80 instead and names
+fewer keys, so it is not the source. A key the header names nothing for
+has no rune and reaches a window only in the `k` and `K` sets, when its
+row gives it one.
+
+**The keymap.** A layout is one checked-in text file,
+`abi/keymaps/NAME.txt`, keyed by evdev code, and `us` is the one layout
+the tree has. A display's manifest entry names its layout
+([A display's session](#a-displays-session)), `us` by default. A file
+reads, for example:
+
+```text
+# us: the United States layout.
+keymap us
+#        code            none    shift   ctl     altgr   shiftaltgr
+key      KEY_A           a       A       U+0001  a       A        caps
+key      KEY_UP          Kup     Kup     Kup     Kup     Kup
+modifier KEY_LEFTSHIFT   Kshift  shift
+modifier KEY_RIGHTALT    Kalt    alt
+lock     KEY_CAPSLOCK    Kcaps   caps
+button   BTN_LEFT        1
+```
+
+The columns of a `key` row are the layers of 9front's keyboard map,
+`none`, `shift`, `ctl`, `altgr` and `shiftaltgr` (kbdfs(8), lines
+265-318), without its escaped layers, which an evdev code never needs,
+and without its `mod4` layers. Each entry is a printable ASCII character
+other than `#`, a code point as `U+` and four to six hexadecimal digits,
+or a special rune's name; `U+0000` means the key types nothing at that
+layer, as a zero does in 9front's map. A trailing `caps` marks a key
+that Caps Lock shifts. A `modifier` row names a key's rune and the
+modifier it holds, one of `shift`, `ctl`, `alt` and `altgr`; a `lock`
+row the rune and the lock its down toggles, `caps` alone; a `button` row
+the Plan 9 button bit a key holds. The layer a key types at follows from
+the modifiers held: `shiftaltgr` with AltGr and Shift, `altgr` with
+AltGr, `ctl` with Control, `shift` with Shift, or, for a `caps` key,
+with Shift or Caps Lock but not both, and `none` otherwise. Alt selects
+no layer: a client sees it in the `k` set, and `erx_vt` sends ESC before
+the key. A code with no row is dropped by the router and counted.
+
+`tools/gen_keymap.rb` reads every layout and generates `erx_keymap`, one
+table for each, which the router alone calls, and the list of layout
+names the manifest check holds a display entry's layout to. It refuses
+a layout whose `keymap` line differs from its file's name, a code
+named twice, a name `evdev.txt` does not have, a special rune
+`input.txt` does not have, a row of the wrong width, a surrogate or a
+code point past U+10FFFF, and a byte above 0x7f. Nothing reads a layout
+at run time, so, as for termcap, it is no input to fuzz. Another layout
+is one more file; dead keys and compose sequences are not in the format,
+and a layout that needs them extends it.
 
 ### Widget trees
 
@@ -1507,21 +1636,36 @@ survives the driver's crash; the driver's restart resets the device and
 creates the scanout again, and `erx_screen`, which monitors the driver,
 repaints the screen from its windows' buffers.
 
-Input drivers are Erlang processes over the device NIF too: the
-virtio-input driver parses the device's event records in Erlang, in its
-pure core `erx_virtio_input_core`, which also tells a keyboard, a mouse
-and a tablet apart by the event codes its configuration space reports,
-and emits `input()`; a touch controller's, an encoder's and a keypad's
-drivers do the same from their buses. Each is a row of the device table
-and sends its events to the input router, `erx_winfs`. A device in
-another domain, such as a touch controller on a bus the devices domain
-holds, is served by its driver there as a file of `input()` records, in
-the binary form `abi/formats/input.txt` declares, in a tree of that
-domain which the manifest grants the display domain read-only, an
-instance of `files`. The display's reader of that file holds each record
-to the bounds of `input()` and drops and counts one outside them. Such a
-domain has the reach of a person at the display, and the trust table of
-[design.md](design.md) gives it a row of its own.
+Input drivers are Erlang processes over the device NIF too, and each
+sends its device's records to the input router, `erx_winfs`
+([Input events](#input-events)). The virtio-input driver's pure core,
+`erx_virtio_input_core`, parses the device's event records and its
+configuration space, and reads from the configuration the one fact the
+driver's fold needs: the ranges of the device's two absolute axes, or
+`none` when it has none. It does not decide what kind of device it
+drives: a device with keys and axes sends both. The fold turns each
+update, the events up to `SYN_REPORT`, into records: each key's edge in
+the order the device sent it, evdev's repeat value dropped; the
+update's relative moves summed into one move; its last absolute
+position, each axis clamped to its range and normalized across it as
+`(V - Min) * 65535 div (Max - Min)`; and its wheel steps, clamped to a
+record's range. An absolute event of a device with no axes, and every
+event the core does not use, is dropped and counted. At `SYN_DROPPED`
+the fold discards the update in progress and sends `release`. A touch
+controller's, an encoder's and a keypad's drivers send the same
+records from their buses, with evdev's codes. Each driver is a row of
+the device table.
+
+A device in another domain, such as a touch controller on a bus the
+devices domain holds, is served by its driver there as a file of
+records, in the binary form `abi/formats/input.txt` declares, in a tree
+of that domain which the manifest grants the display domain read-only,
+an instance of `files`. The display's reader of that file is the
+source of its records: it holds each to the bounds of `record()`,
+drops and counts one outside them, and ends when the file ends or a
+read fails, so the router releases what that device held. Such a
+domain has the reach of a person at the display, and the trust table
+of [design.md](design.md) gives it a row of its own.
 
 ### Windows and the window system
 
@@ -1578,9 +1722,12 @@ window already in the table, its rectangle and state the policy's to
 set. `erx_winfs` calls `arrange/4` after every change it makes itself,
 a window's end or a change of the screen's size, so the table always
 holds the policy's answer. The policy's state, from the manifest's configuration, which names no session, is threaded
-by `erx_winfs`: the overlapping policy keeps, for example, the buttons
-last seen and the drag in progress, and every policy keeps the reserved
-chord's keys held. `{windows, Table}` answers an
+by `erx_winfs` and by its routing core, `erx_input`, which alone calls
+`input/4`: the overlapping policy keeps, for example, the buttons last
+seen and the drag in progress. `input/4` is asked only about what
+starts something, a key's down, a pointer event, a touch's down and a
+wheel step; a key's repeats and up and a touch's moves and up go where
+their down went ([The input router](#the-input-router)). `{windows, Table}` answers an
 event that rearranges the table, such as a click that raises a window.
 
 The **overlapping** policy, `erx_wm_rio`, keeps windows in a stacking
@@ -1622,20 +1769,22 @@ is shown. While the display has no session, or its session has no live
 window, the screen shows only the background `erx_screen` fills.
 
 The policy refuses every `wctl` request with `EINVAL`, so no window
-takes the screen by asking, and it delivers every event but the
-reserved chord to the shown window. A
+takes the screen by asking, and it delivers every event the router
+asks it about to the shown window. A
 `wctl` write is a `place` request, so a program can resize or hide its
 window under a policy that allows it and gets `EINVAL` under one that
 does not.
 
 **The reserved chord.** A display's manifest entry may name a key chord,
-the **secure attention chord**. Every policy keeps it, answering
-`input/4` for it with `{wm, chord}`, and delivers it to no window, so no
-client can read it or wait for it, and no client comes to depend on
-receiving it. The chord is the set of keys the entry names; it fires
-on the key down that makes the keys held include that set, whatever
-other keys are held, and that down, its repeats and its up reach no
-window. It opens nothing: which trusted screen it brings up, a
+the **secure attention chord**. The router keeps it, before any policy
+is asked ([The input router](#the-input-router)), answering
+`{wm, chord}` and delivering it to no window, so no client can read it
+or wait for it, and no client comes to depend on receiving it. The
+chord is the set of keys the entry names, by evdev code; it fires on
+the down of one of its keys that makes the keys held, over every
+device of the display, include that set, whatever other keys are held,
+and that down, its repeats and its up reach no window. It opens
+nothing: which trusted screen it brings up, a
 login or a lock, is the login design's ([Risks and
 decisions](#risks-and-decisions), 14).
 
@@ -1653,6 +1802,117 @@ never a wait.
 
 Before it routes an input event, `erx_winfs` tells `erx_screen` of it,
 which keeps the idle clock (Low power, below).
+
+### The input router
+
+`erx_winfs` routes input through one pure step, `erx_input`, the
+router's functional core. It holds everything about input that outlives
+one record: the pointer, the keys held, the locks, the repeat and the
+reserved chord. `erx_winfs` performs what it answers: it monitors a
+source at its first record, delivers to window processes, and keeps one
+timer. A driver, or a reader of another domain's device, calls
+`erx_winfs:input(Device, Record)`, which sends the record from the
+caller's own process, so the router knows each record's source.
+
+```erlang
+-spec step(in(), view(), state()) -> {[out()], PolicyState :: term(), state()}.
+-type in() :: {record, Source :: pid(), Device :: binary(), At :: integer(), record()}
+            | {gone, Source :: pid()}             % the source's process ended
+            | {tick, At :: integer()}             % the timer fired
+            | {screen, erx_wm:rect()}.            % the screen's rectangle changed
+-type view() :: #{windows := [erx_wm:window()], session := erx_wm:session(),
+                  policy := module(), policy_state := term()}.
+-type out() :: {to, window_id(), input()} | {wm, term()} | {windows, [erx_wm:window()]}
+             | {wake, At :: integer() | none}.
+```
+
+Its state, made by `new/1` from the manifest entry's layout, repeat
+times and chord and from the screen's rectangle:
+
+* the screen's rectangle and the **pointer**, one position for the
+  display;
+* for each source, its device's name and what it holds: each key with
+  the runes of its down and the window its down went to, or none; each
+  touch slot with its window; its buttons;
+* the locks that are on;
+* the **repeating key**, its source and code and the time it next
+  repeats, or none.
+
+The buttons a pointer event carries are the union of the buttons every
+source holds, and the modifiers that select a layer the union of the
+modifier rows of the keys every source holds; both are derived at each
+step, never stored, so a source's end changes them with nothing to
+clear. There is one modifier state for the display, whichever keyboard
+holds the key.
+
+The step's rules, by input:
+
+* **A pointer record** moves the pointer: a relative move adds its
+  deltas and clamps the result to the screen, `X0` to `X1 - 1` and `Y0`
+  to `Y1 - 1`; an absolute position scales to the screen, `X0 + X * (X1
+  - X0 - 1) div 65535`, which lies inside it for every `X`. A button's
+  edge changes the source's buttons. Either answers a pointer event,
+  which the policy routes. A touch's down is a pointer at its scaled
+  position with button 1, routed by the policy; its moves and its up go
+  to the window its down went to.
+* **A key's down** of a code with no keymap row, or of a key its source
+  already holds, is dropped and counted, so a window never sees a key go
+  down twice. Otherwise its runes come from the keymap at the layer the
+  modifiers held select, and a lock's down toggles its lock. When the
+  down makes the keys held, over every source, include every key of the
+  reserved chord, the answer is `{wm, chord}`; otherwise the policy's
+  `input/4` routes it. Either way the step records where the down went,
+  `{to, W, _}` as the window `W` and anything else as none, and the key
+  becomes the repeating key when it types a rune, at its time plus the
+  delay, as FreeBSD's evdev starts repeat at every down
+  (`sys/dev/evdev/evdev.c`, release/14.1.0, lines 692-698).
+* **A key's up** of a key its source does not hold is dropped and
+  counted. Otherwise the key leaves the source's state and its up goes
+  to the window its down went to, whatever that window's state or which
+  window takes the keyboard now; a down that went nowhere has no up to
+  send. Every up stops the repeat, as evdev's does (the same lines).
+* **A wheel step** is routed by the policy.
+* **A tick** at or after the repeating key's time sends that key's
+  repeat, with the runes of its down, to the window its down went to
+  while that window is shown, and sets the next time one period on; a
+  tick before that time, from a timer the step has since moved, does
+  nothing.
+* **`release`, and the source's end**, send an up for every key and
+  touch the source holds to the window its down went to, clear its
+  buttons, with a pointer event when the union changed, and stop the
+  repeat when the key was the source's; the end also forgets the source.
+  FreeBSD's evdev releases stuck keys the same way, with an up for every
+  key held (`evdev.c`, lines 915-919).
+* **A change of the screen** clamps the pointer into the new rectangle.
+
+Whenever the repeating key's time changes, the answer carries `{wake,
+At}`, or `{wake, none}`, and `erx_winfs` replaces its one timer with it.
+
+So the policy is asked only about what starts something, a key's down,
+a pointer event, a touch's down and a wheel step, and what follows a
+down goes where the down went. From this each guarantee holds by
+construction:
+
+* **The pointer lies inside the screen**: it is written only by the
+  clamp and the scaling above, whose ranges are the screen.
+* **Every down a window receives has one up, to that window**: an up
+  follows the record of its down, not the policy; a held key leaves the
+  state only by its up, by `release` or by its source's end, and each of
+  them sends the up; and a doubled down or an unmatched up is dropped. A
+  driver's restart is a new process, so a new source, and the old one's
+  end releases what it held. Window ids are never reused, so an up for
+  a window that ended names no other.
+* **Repeat goes only to the window that received the down**, and only
+  while it is shown, because the repeating key's window is the one its
+  down recorded.
+* **The reserved chord reaches no window**: it is decided before the
+  policy is asked, so no policy can deliver it, and its key's repeats
+  and up follow a down that went to no window.
+* **The state is bounded**: each source holds at most
+  `ERX_EVDEV_KEY_MAX` + 1 keys and 10 touches, and the sources are the
+  display domain's input drivers and its readers of other domains'
+  devices, one for each row of the device table and each granted device
+  file.
 
 ### The screen and its one path to the device
 
@@ -2480,10 +2740,15 @@ design-live's `size/3` says.
 
 #### Keys and paste
 
-`erx_vt:key(State, Key)` returns the bytes a key sends, from the modes
-in the state: printable keys as UTF-8, Return as CR, Backspace as DEL
-(FreeBSD's default `VERASE`), Tab as HT, control and a letter as its C0
-control, and Alt with a key as ESC before it; the arrows as `CSI A` to
+`erx_vt:key(State, Key)` returns the bytes a key sends. `Key` is the
+rune of a `kbd` record's `c` with the window's `k` set at that record,
+the unshifted runes of the keys held, so it names both the key and its
+modifiers: Backspace is `Kbs` with `Kbs` held, and Control-H is the
+same rune with `h` and `Kctl` held ([Input events](#input-events)).
+From the modes in the state it sends printable keys as UTF-8, Return
+as CR, Backspace as DEL (FreeBSD's default `VERASE`), Tab as HT, a
+control character as the keymap's `ctl` layer typed it, and Alt with a
+key as ESC before it; the arrows as `CSI A` to
 `CSI D`, or `ESC O A` to `ESC O D` with DECCKM set, Home and End as
 `CSI H` and `CSI F`, or their `ESC O` forms with DECCKM, Insert, Delete,
 Page Up and Page Down as `CSI 2 ~`, `CSI 3 ~`, `CSI 5 ~` and `CSI 6 ~`,
@@ -2824,12 +3089,20 @@ on a display edits nothing of the board's:
 * **The manifest says what the display is.** A display's manifest entry
   names the `windows` service whose tree its display domain serves,
   whose name is the display's name, and gives the display's policy,
-  `rio` or `single`, its idle policy and its reserved chord, which the
-  domain service puts in the display domain's environment when it
-  creates the domain: `display` is the name of the display it serves,
-  `display_policy` its policy, and
+  `rio` or `single`, its idle policy, its keyboard's layout and repeat,
+  and its reserved chord, which the domain service puts in the display
+  domain's environment when it creates the domain: `display` is the name
+  of the display it serves, `display_policy` its policy,
   `display_idle_dim_s` and `display_idle_off_s` its idle times in
-  seconds; the domain's own manifest row sets none of them. It names
+  seconds, `display_keymap` its layout, `us` unless the entry names
+  another the tree has ([Input events](#input-events)), and
+  `display_repeat_delay_ms` and `display_repeat_period_ms` the time a
+  key is held before it repeats and the time between repeats, each a
+  positive number of milliseconds, 500 and 126 unless the entry says
+  otherwise, the `normal` rate of FreeBSD's kbdcontrol(1)
+  (`usr.sbin/kbdcontrol/kbdcontrol.1`, release/14.1.0, lines 115-121;
+  `kbdcontrol.c`, lines 1064-1068); the domain's own manifest row sets
+  none of them. It names
   no session, no application and no renderer.
 * **Facet rows say who may draw there, and how much.** A facet row of
   the display's service grants its tree to a configured domain or to a
@@ -3116,7 +3389,9 @@ What every display of this kind shares:
 * **Input.** A touch panel's events are pointer events with button 1;
   the renderer's hit testing turns them into `on_click`, drags into
   scrolling. An encoder's steps arrive as wheel steps and its press as a
-  key, and a keypad's keys as keys; the renderer keeps a **focus ring**
+  key, and a keypad's keys as keys, each by its evdev code and with the
+  runes the display's layout gives it, an arrow as 9front's `Kup` and
+  the rest; the renderer keeps a **focus ring**
   over the focusable nodes in tree order, moves it on wheel steps and
   arrow keys, activates on enter or the encoder's press, and shows focus
   with a mark of its own, so a tree written for touch works from an
@@ -3219,15 +3494,17 @@ domain service sets for the display's session alone; the `present`
 command of `ctl`; `wctl`'s commands
 `resize -r X0 Y0 X1 Y1`, `move -r X0 Y0 X1 Y1`, `hide`, `show`, `top`,
 which also makes the window take the keyboard, and `bottom`, each one
-line; the `mouse` record format of Plan 9 and 9front; and the `kbd`
-record format of [The window tree](#the-window-tree), erXos's own. The
-display serves no other interface to a client.
+line; the `mouse` record format of Plan 9 and 9front; the `kbd` record
+format of 9front's kbdfs(8), with the special runes of
+`abi/formats/input.txt`; and the read-only `screen` file. The display
+serves no other interface to a client.
 
 **A display's manifest entry**: a `display` record named after the
 `windows` service it describes, whose server is the display domain and
 whose name is the display's everywhere: in every grantee's registry and
 in a start row; its policy, `rio` or
-`single`; its idle policy; the reserved chord. The entry names no
+`single`; its idle policy; its keyboard's layout and repeat delay and
+period; the reserved chord, by evdev code. The entry names no
 session, no renderer and no application.
 
 **The display's session**: the start row that names the display
@@ -3294,9 +3571,13 @@ generated `erx_termcap`; `erx_vt`'s `new/2`, `feed/2`, `resize/3`,
 sequence tables and bounds of [The terminal
 emulator](#the-terminal-emulator).
 
-**Drivers**: the `erx_display` behaviour; the `input()` record and its
-binary form in `abi/formats/input.txt`, for an input device another
-domain holds.
+**Drivers**: the `erx_display` behaviour; an input driver's records,
+`record()` of [Input events](#input-events), with evdev's codes from
+`abi/formats/evdev.txt`, and their binary form in
+`abi/formats/input.txt`, for an input device another domain holds.
+
+**Keyboard layouts**: the files `abi/keymaps/NAME.txt` in the format
+of [Input events](#input-events), and the generated `erx_keymap`.
 
 **Interaction with other subsystems.** The display domain's creation
 gives it the devices the manifest places on its row
@@ -3407,7 +3688,10 @@ at a terminal that declares `links`.
 | the LVGL program reports a rectangle outside the size it names, or a second report before the first is answered | `erx_ui_lvgl` stops the program and logs the report's position, and the application receives `{ui_down, Window, renderer_down}` | the application reopens |
 | the window grows past the buffer the program maps, which the handler allocated at the screen's size before the screen grew | the program refuses the `screen` record and exits, and the application receives `{ui_down, Window, renderer_down}`; `erx_ui_lvgl` does not clamp the size | the application reopens, and the new program's buffer has the new screen's size |
 | the LVGL program writes outside its buffer | the write faults in the program's own sub-space, which holds no other page of the pixel area; its exit is the row above | the application reopens |
-| an input device stops | its driver restarts and resets it | events resume |
+| an input device stops | its driver restarts and resets it; the router takes the old process's end as its source's end and sends an up for every key and touch it held, to the window each down went to, and releases its buttons | events resume, and no key stays held or repeats |
+| an input device reports dropped events (`SYN_DROPPED`) | its driver discards the update in progress and sends `release`, which the router handles as above | a key still pressed is pressed again to be seen |
+| another domain's input device file ends or fails a read | the display's reader of it ends, and the router releases what it held, as above | the reader starts again when the file is granted again |
+| a record names a key the layout has no row for, a key its source already holds or one it does not hold | dropped and counted, nothing else changes | none needed |
 | a window's `mouse` or `kbd` queue is full | the oldest record is dropped and counted; a resize is never lost | the client reads |
 | the panel is off and a client presents | the present changes the window's buffer and is answered without a copy | the next input turns the panel on and repaints |
 
@@ -3509,10 +3793,23 @@ the window and the reason.
   IOMMU on erXos's kernel
   changes their device records and DMA profiles, not their drivers
   ([design-system.md](design-system.md#devices)).
-* **Input** is routed by the policy to one window per event, and nothing
-  lets a client write another window's input. The reserved chord reaches
-  no window under any policy. A domain that serves the display an input
-  device's events has the reach of a person at the display, and no more.
+* **Input** is routed to one window per event, by the policy for what
+  starts something and to the down's window for what follows it, and
+  nothing lets a client write another window's input. The reserved
+  chord reaches no window under any policy, since the router decides it
+  before a policy is asked. A key's up reaches the window its down
+  reached even when that window has since been hidden, which tells it
+  only when a key it saw go down went up; its repeats do not. A domain
+  that serves the display an input device's records has the reach of a
+  person at the display, and no more: its records can move the pointer
+  within the screen, press and release keys and buttons, hold a key so
+  that it repeats to the window its down reached, as a person holding it
+  would, touch, scroll and type the chord. They cannot name a window or
+  a time, since a record carries neither; move the pointer off the
+  screen; make a window receive an up it did not see go down, or a down
+  twice; make another source's keys go up; or grow the router's state
+  past one entry for each key code and touch slot, since a doubled down
+  is dropped. When its file ends, every key it held goes up.
 * **A kiosk's authority** is its app's: its template's grants, the
   display's among them, and nothing else
   ([design-apps.md](design-apps.md#security)). Its grant of the display
@@ -3861,11 +4158,47 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
   tested over sequences of place requests and input events; a property
   test that the single policy shows at most one window and delivers every
   event to it, and that every rectangle lies within the screen under
-  both; a seeded unchecked move fails it. The reserved chord, typed while
-  each window of either policy has the keyboard, reaches no window's
-  `kbd`; a seeded policy that delivers it fails it. The menu, drawn as
+  both; a seeded unchecked move fails it. The menu, drawn as
   an overlay, lies above every window and reaches the screen only
   through `erx_screen:overlay/2`.
+* **The input router.** `erx_input` is a pure state machine and is
+  tested as one, with both policies and the keymap `us`. Exhaustively,
+  every sequence of up to eight inputs over two sources, three keys (a
+  letter, Shift and a chord key, with a one-key chord), two windows, a
+  change of the window that takes the keyboard, a hide, `release`, a
+  source's end and a tick: after each, every window's key events, per
+  source and code, are a down, its repeats and one up, in that order,
+  with no up before its down; once every source has ended, no key is
+  held and no timer is set; repeats reach only the window of their down,
+  and only while it is shown; the chord's key reaches no window. A
+  property test over long random sequences with pointer records of
+  both kinds and screen changes checks that the pointer lies inside the
+  screen after every step, and that the layer a key types at follows
+  from the keys held alone. Each property has its seeded fault: a clamp
+  to `X1` instead of `X1 - 1`, a source's end that forgets its keys
+  without their ups, an up routed by the policy instead of to its down's
+  window, a repeat sent to the window that takes the keyboard, and a
+  modifier kept as a flag instead of derived; each fails its property.
+  The repeat's delay and period are checked against the manifest
+  entry's values, and a tick before its time sends nothing.
+* **The keymap.** `gen_keymap.rb`'s tests feed it a layout with each
+  refusal its section names, a code named twice, an unknown evdev name,
+  an unknown special rune, a row of the wrong width, a surrogate and a
+  byte above 0x7f, and each is refused; a seeded generator that keeps
+  the first of two rows for one code fails the duplicate case. A table
+  of every key of the US layout, with the rune each layer types, is
+  checked against the generated `erx_keymap`. Through the terminal, an
+  Up arrow typed at a terminal window reaches its program as `CSI A`,
+  and `ESC O A` with DECCKM set, and F5 as `CSI 15 ~`; a seeded layout
+  without the arrow's row fails it.
+* **The `screen` file.** A read answers the screen's rectangle and
+  channel, and after a change of the screen's size the new rectangle; a
+  seeded server that answers the rectangle at the grant's mint fails
+  it. A client whose pixel area has no room for another buffer gets
+  `enomem` from `erx_win:open/2` and holds the same number of windows
+  as before, its `windows` quota untouched; a seeded `open/2` that
+  makes the window first fails it. A `mkdir` of `screen` or `snarf`
+  fails with `EEXIST`.
 * **Draw connections.** The same bytes written by a program to
   `/dev/draw` and handed over by `erx_draw` leave the same pixels in the
   window's buffer; a `v` presents exactly the rectangles the write's
@@ -4011,9 +4344,14 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
   byte boundary; the input context highlights exactly the types the
   catalog declares for a command.
 * **Drivers.** The virtio-gpu driver's response parser, the
-  virtio-input event parser, and the touch controller's, the keypad's and
-  the encoder's bus parsers have fuzz targets, as does the reader of the
-  `input()` records another domain serves; a driver's reads of an image
+  virtio-input event and configuration parsers and its update fold, and
+  the touch controller's, the keypad's and the encoder's bus parsers have
+  fuzz targets, as does the reader of the records another domain serves,
+  whose every accepted record lies within `record()`'s bounds; the fold's
+  tests check that a device's repeat value sends nothing, that
+  `SYN_DROPPED` sends `release`, and that an axis's minimum and maximum
+  normalize to 0 and 65535, where a seeded fold that forwards repeats
+  fails the first; a driver's reads of an image
   run under UBSan with strides, rows and columns at their bounds, where a
   seeded unchecked offset fails it; the harness runs the display suite
   under QEMU `virt` with a virtio-gpu and virtio-input attached and
@@ -4153,7 +4491,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
 | Only `erx_screen` writes the screen image, makes images over clients' pixel areas, and calls `erx_display:flush_request/3` and `erx_display:power_request/2` | the writes and the images: an xref check over the display release; the calls: `display-driver-callers` (tools/lib/erx/chokepoint_rules/display.rb), over the Erlang sources of `otp/` and `erlang/`: outside `erx_screen`, neither function is named as a call target, as a remote call, a fun, an apply, a module and function pair, a call through a module in a variable or a macro, an import from `erx_display` or a macro defined as it |
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |
 | Only the display driver's process calls `erx_device`'s functions on the display device | the same xref check; and `device-callers` admits the display drivers' application, `erx_fb`, among the driver applications, while `device-posters` admits `erx_virtio_gpu` alone of it to call `erx_device:post/4` |
-| Only `erx_winfs` calls `erx_wm`'s callbacks | the same xref check |
+| Only `erx_winfs` calls `erx_wm`'s callbacks, and only its routing core `erx_input` calls `input/4` and `erx_keymap` | the same xref check |
 | The display release holds no draw decoder, picture or font reader, widget module or renderer, and starts no program | an xref check that the display release contains none of `erx_draw_core`, `erx_draw_codec`, `erx_draw_image`, `erx_font`, `erx_png`, `erx_inflate`, any module of the client applications `erx_win` and `erx_ui`, and calls no function that starts a port or a sub-space; a seeded dependency on each fails it |
 | Only `erx_winctl` reads a `ctl` line, and only `erx_wctl` a `wctl` line | a source check over the display release |
 | Only the generated `erx_draw_codec` decodes draw bytes, and only the generated reader decodes the native renderer's events and reports | the generated tree's determinism test, and a source check that no other module reads those bytes |
@@ -4220,7 +4558,7 @@ rows of the device table per platform: virtio-gpu and virtio-input on
 QEMU `virt`; the firmware framebuffer and a touch controller, keypad or
 encoder on the boards' buses; panels on serial buses on small devices.
 A device that shows pixels is a driver behind `erx_display`, a device
-that makes input a producer of `input()`, and a device that composes or
+that makes input a producer of input records, and a device that composes or
 draws attaches as [Graphics hardware](#graphics-hardware) says.
 
 ## Dependencies
@@ -4311,7 +4649,9 @@ Decisions:
 1. **Input formats.** `mouse` is served in Plan 9's 49-byte form and
    `kbd` in erXos's own form of `c`, `k` and `K` records
    ([The window tree](#the-window-tree)), which serve plan9port's
-   programs and give key up and down to widgets and games. An `input` file of `input()`
+   programs and give key up and down to widgets and games. The `kbd`
+   format is 9front's, from kbdfs(8), and its special keys are 9front's
+   runes. An `input` file of `input()`
    records is added only when a program needs multi-touch.
 2. **LVGL is a stopgap.** The Erlang renderer exists for the desktop
    regardless, and one renderer is the simpler system; LVGL retires on
@@ -4451,11 +4791,48 @@ Decisions:
     which rows exist; the machine's `rc.conf` only sets them
     ([design-apps.md](design-apps.md#the-start-table)).
 
+23. **Input is translated once, by the router.** Drivers send records in
+    their devices' terms, keys by evdev code and as edges only, and
+    `erx_input` alone keeps the pointer, applies the layout and makes
+    repeat, because only the display knows the screen, the layout and
+    the window a key went to: a driver in another domain could know
+    none of them. evdev's codes are the key codes because virtio-input
+    and FreeBSD's evdev already speak them and every bus driver can
+    produce them. The layout is erXos's own table, keyed by evdev code
+    and generated from a text file in the shape of 9front's keyboard
+    map; FreeBSD's keymaps are not imported.
+    Repeat's defaults are kbdcontrol(1)'s `normal` rate. The reserved
+    chord is the router's, not each policy's, since the router holds the
+    keys every device has down.
+
 ## References
 
 * Plan 9 manual: draw(3), draw(2), image(6), font(6), mouse(3), rio(4),
-  wctl. The `kbd` record format is erXos's own; 9front's kbd(3) and
-  its source have not been checked against it.
+  wctl.
+* Input was checked against these files, read at the pinned commits
+  with the SHA-256 of each: 9front at commit
+  `eb49f1f8788ccbb2f86ce5767d2f046c3593162e`, `sys/man/8/kbdfs`
+  (`239f0bbc2ee2a52eb79d4704d0ef0f33d587c30ffdba73bf99bdc0a4825012af`),
+  the `kbd` file's records at lines 208-236 and the keyboard map's
+  layers at lines 265-318; `sys/man/4/rio`
+  (`ef5be2f7e0f9bd0c8eb4a0c377dc4a30d946484cd0ee2a8c609c32ae4e6cd538`);
+  `sys/include/keyboard.h`
+  (`efbf86fb35c47d8fd59abe51bb1746a8ed46250bccaed364ac8bae3cb8e1654f`);
+  and `lib/legal/NOTICE`
+  (`8daa82fb04eb56344e06902609a580e8fe40cf900043945288fa58bf1ebb3e6c`),
+  which puts them under the MIT license. plan9port at commit
+  `1f1396913fb5372408f442ed26933f5ae4b399cd`, `include/keyboard.h`
+  (`547c06986e3c7fc77d1ed8b253ab86d6fab423771938a6abe3c26f6adf9a0c08`)
+  and `man/man3/mouse.3`
+  (`5e1f4c8913ca17a71490e1da2a210c994e09dad13ce0da5e9071338b332216db`).
+  FreeBSD at release/14.1.0: `sys/dev/evdev/evdev.c`
+  (`de9e1ad9079711abee07710642c612f07fefa40c7a3eace9f267d8a22a44e0ed`),
+  `sys/dev/evdev/input-event-codes.h`
+  (`3790eafbe569582ca918554c4305a9f49f418b2e597c51a1f0db76da6cb98db6`),
+  `usr.sbin/kbdcontrol/kbdcontrol.1`
+  (`e0988b793caf7c61a70ba2a3eec207074cc56612af914a88962679be8a76a47c`)
+  and `usr.sbin/kbdcontrol/kbdcontrol.c`
+  (`c9f993353564a2681ee2eb359eb2af1b267048bce3356cf8f9fe0a68c1bdd025`).
 * The draw messages were checked against 9front's `sys/man/3/draw`,
   `sys/src/9/port/devdraw.c`, `sys/src/libmemdraw/load.c` and
   `cload.c` and `sys/src/libdraw/badrect.c` at commit `2859ae04`, and
