@@ -2139,29 +2139,20 @@ it; git history is the record of completed work.
   that sends a notice (`{drained}`, `{closed}`) can wait where a signal will not reach it, which
   P6 forbids. Make the room wait a waiter list under the channel's lock (liberx/program/wake.h)
   before signals reach programs.
-* [Medium] session, `erx_pipe:step/2`: the second tier's events are not there: `{exec}`, `{deposit}`,
-  `{redeem}`, `{discard}`, `{withdraw}` and the collector of deposits no reader can reach
+* [Medium] session, `erx_pipe:step/2`: the second tier's events are not there: `{deposit}`, `{redeem}`,
+  `{discard}`, `{withdraw}` and the collector of deposits no reader can reach
   (docs/design-pipes.md, "The second tier" and "Deposits"), and `holder()` has no
   `{deposit, Ticket}`. `test/erlang/erx_pipe_explore.erl` gains their events with them.
-* [Medium] session, `erx_pipe_nif.c`, `erx_pipe_srv`, `erx_program.erl`, `erx_program_drv.c`: no program holds
-  an end of a session's pipe, since the hand-offs of docs/design-pipes.md ("Hand-offs") are not built: the NIF's
-  hand-off table with `hand_make`, `hand_drop` and the take checked against the caller (`driver_caller` for
-  `install/2`), and the unbound doorbells of program holders; the holder entries (`program_holder`, `holder_drop`,
-  the port's hold and `erx_pipe_holder_release` after the anchor's release, and `{erx_pipe_holder_gone, Pid}`);
-  `erx_pipe_srv`'s actions for `{program, _}` holders and its check that an event's sender speaks for the holder
-  it names; `make_lock` taking the pipe's number and `pipes_made/0`, so a restarted pipe server numbers above
-  its predecessor; `{exec, Program, Kept}`, which closes the ends the old image drops; `start/1`'s
-  `{N, {pipe_hand, Number, Descriptor}}` entries and the driver's take, install and bind; `erx_prog_handler`,
-  which asks for the ends on its starter's behalf, forwards the program's notices and writes its reports; and the
-  chokepoint checks `pipe-hand-take`, `pipe-holders` and `pipe-holder-gone`, with `hand_make` added to
-  `pipe-makers` (docs/design-pipes.md, "Verification and testing"). `erx_program:install/2`, which reports that
-  name copies and a program's own `pipe` need, follows them.
-* [High] session, `erx_pipe:copies/1` (`erlang/apps/erx/src/erx_pipe.erl`, `copies/1` and `lane_copies/2`): no
-  memory copy carries `ERX_HR_MAP`, so every ring, reader page and lock page a program is given would fail
-  `erx_vm_map` on erXos's kernel, which needs `MAP` on the memory object (docs/design-kernel.md, "Kernel calls";
-  docs/design-pipes.md, "Hand-offs", the rights of a copy). Add `MAP` to each memory copy, as
-  `erx_program_core.c`'s `install_rights` gives the channel's sides and data area, with the host test the design
-  names. The stopgap Fiasco records no rights per handle, so nothing fails today.
+* [Medium] session, `erx_program.erl`, `erx_program_drv.c`, `erx_prog_handler`: no program holds an end of a
+  session's pipe yet. The pipe NIF's hand-offs and holder entries and `erx_pipe_srv`'s side are built
+  (docs/design-pipes.md, "Hand-offs"); what remains is the program's side: `start/1`'s
+  `{N, {pipe_hand, Number, Descriptor}}` entries and the driver's take (`erx_pipe_hand_take`, erx_pipe.h, naming the program by its open command's pid),
+  install with each copy's rights, bind of the doorbell with the hand-off's label, release, and
+  `erx_pipe_holder_release` after the anchor's release; `erx_program:install/2` with its `driver_caller` check;
+  `erx_prog_handler`, which makes the program's holder entry, asks for the ends on its starter's behalf,
+  forwards the program's notices with `erx_pipe_srv:forward/1`, holds and writes its reports, and drops its
+  hand-offs and hold after a failed start; and the QEMU tests of hand-offs between domains
+  (docs/design-pipes.md, "Verification and testing").
 * [Medium] session, `erx_pipe_nif.c` and `erx_event.c`: each ring of a session end's doorbell is one
   `{erx_pipe_ready, _, _}` message, uncoalesced, so while an end waits (bits set for that wait only) a
   co-reader that loops on the lock or a writer's repeated crossings can queue many messages before the
@@ -2171,16 +2162,31 @@ it; git history is the record of completed work.
   `pipe_server_lost` notice is dropped, so a closed end never reaches the server (no eof or `EPIPE`
   follows) or a drained lane is never forgotten. Out of memory only; retry from the next call or
   preallocate one environment per end.
-* [Low] session, `erx_pipe_nif.erl`: `make_lock/0`, `make_lane/1` and `make_bell/3` are exported, so code that
-  does not come from the tree (an expression at a session's `erl` shell, an app installed at run time) can make pipe
-  objects outside the step's `pipes` quota; they are collected with their terms. The build check
-  `tools/lib/erx/pipe_makers.rb` keeps the tree's own modules from calling them; restrict them to `erx_pipe_srv`'s
-  process when `erx_policy` sets the quota.
+* [Low] session, `erx_pipe_nif.erl`: `make_lock/1`, `make_lane/1`, `make_bell/3`, `hand_make/2` and
+  `program_holder/1` are exported, so code that does not come from the tree (an expression at a session's `erl`
+  shell, an app installed at run time) can make pipe objects outside the step's `pipes` quota, or make the holder
+  entry of a program whose handler has not made it yet and so speak for that program; objects are collected
+  with their terms. The build check `tools/lib/erx/pipe_callers.rb` keeps the tree's own modules from calling
+  them; restrict them to `erx_pipe_srv`'s and the handlers' processes when `erx_policy` sets the quota.
 * [Low] session, `erx_pipe_nif.c` (`end_broken`): the broken-lane line goes to stderr, not to the
   debug log as one escaped line (docs/design-pipes.md, "Failure handling"); it carries integers only.
-* [Low] session, `erx_pipe_nif.c` (`get_obj`, `obj_keep`): `closed` is read without `obj_mutex`, and
-  a keep does not refuse a closed object; reachable only if the server passed an object after its own
-  close. Check and count under `obj_mutex`.
+* [Low] session, `erx_pipe_nif.c` (`get_obj`, `obj_keep`): for a session process's end, `closed` is
+  read without `obj_mutex`, and a keep does not refuse a closed object; reachable only if the server
+  passed an object after its own close. Check and count under `obj_mutex`, as `obj_keep_held` does
+  for a hand-off.
+* [Low] session, `erx_pipe_nif.c` (`erx_pipe_hand_take`, `erx_pipe_holder_release`): the NIF knows no
+  port, so two ports of one program open at once would share the port's hold, and the first to end would
+  send the program's gone while the other still runs; the handler opening one port per program is what
+  prevents it. Pass the driver's port as an opaque token to both calls, record it at the first take,
+  and refuse a take or ignore a release with another token.
+* [Low] session, `erx_pipe.erl` (`copies/1`) and `abi/erx_abi.txt` (`pipe_hand_copies_max`): the
+  build checks the limit's arithmetic, not that `copies/1` keeps to it. Add a pure test that fills a
+  session's quota with one pipe's write ends and 64 read ends and checks that a read end's descriptor
+  has exactly `?ERX_PIPE_HAND_COPIES_MAX` copies.
+* [Low] session, `erx_pipe_nif.c` (`holder_gone`): when `enif_alloc_env` fails, the program's gone
+  is not sent and the entry is forgotten, so the pipe server keeps the program's ends until it
+  restarts and their peers never read the end of the stream. Make the message's env with the entry,
+  so sending it cannot fail for memory.
 * [Low] session, `erx_pipe_srv` (`retry/2`): each wake restarts the whole timeout, `write/3`'s spec
   leaves out `{error, eio}`, and a timeout after a partial write does not say how much was written.
 * [Low] liberx, `erx_pipe_run.c`: the runner relies on its caller for a lane size that is a power of

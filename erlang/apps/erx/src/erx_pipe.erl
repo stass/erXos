@@ -21,8 +21,8 @@ Reports and descriptors name objects where the program protocol has a
 capability value; the handler installs the copies copies/1 lists and
 puts the values it installed in their place.
 
-The events are the first tier's (the second tier's exec, deposits and
-collector are not here):
+The events are the first tier's and the second tier's exec (deposits and
+the collector are not here):
 
 * `{pipe, Holder, Flags}`: make a pipe whose two ends `Holder` holds;
 * `{inherit, Holder, Pipe, End, Child}`: make an end of the same kind as
@@ -33,7 +33,10 @@ collector are not here):
 * `{drained, Holder, Pipe, End, Writer}`: `Holder`'s read end `End`
   drained the lane of the gone write end `Writer` and let it go;
 * `{install_failed, Holder, Pipe, End}`: an install `Holder`'s end
-  `End` needed failed.
+  `End` needed failed;
+* `{exec, Program, Kept}`: at the old image's exit record, the new image
+  of `Program` keeps each end `{Key, Pipe, End}` of `Kept` names, and
+  every other end of `Program` is closed.
 
 A request is answered by one `{reply, Reply}` action; a notice from a
 holder of no such end, or one that is not due, changes nothing and
@@ -108,7 +111,8 @@ actions:
                | {closed, holder(), term(), term()}
                | {gone, holder()}
                | {drained, holder(), term(), term(), term()}
-               | {install_failed, holder(), term(), term()}.
+               | {install_failed, holder(), term(), term()}
+               | {exec, {program, pos_integer()}, [{term(), term(), term()}]}.
 -type descriptor() :: {pipe, write, {id(), id()},
                        #{wend := id(), ring := object(),
                          rpage := object(), size := lane_size(),
@@ -132,6 +136,7 @@ actions:
                 | {report, holder(), report()}
                 | {reply, {ok, descriptor(), descriptor()}
                         | {ok, descriptor()}
+                        | {ok, [{term(), descriptor()}]}
                         | {error, enfile | emfile | ebadf}}
                 | {close, object()}.
 
@@ -149,23 +154,32 @@ given, and never more, since the program port sizes each program's credit
 for it (abi/erx_abi.txt, pipes_quota). An
 exploration scales the design's other limits down: `number_max`, the
 largest pipe or end number given (2^32 - 1), and `readers_max`, the read
-ends a pipe may have (64).
+ends a pipe may have (64). `first_pipe` is the number of the first pipe
+made, 1 unless given: a pipe server restarted over the same pipe NIF
+starts one past the highest number the NIF has made
+(erx_pipe_nif:pipes_made/0), so no pipe number repeats while the
+session's runtime runs, and past `number_max` every `pipe` fails with
+`enfile`.
 """.
 -spec new(#{quota => 1..?ERX_PIPES_QUOTA, number_max => 2..?NUMBER_MAX,
-            readers_max => 1..?ERX_PIPE_READERS_MAX}) -> state().
+            readers_max => 1..?ERX_PIPE_READERS_MAX,
+            first_pipe => pos_integer()}) -> state().
 new(Opts) when is_map(Opts) ->
-    case maps:keys(maps:without([quota, number_max, readers_max], Opts)) of
+    case maps:keys(maps:without([quota, number_max, readers_max, first_pipe], Opts)) of
         [] -> ok;
         _ -> erlang:error(badarg)
     end,
     Quota = maps:get(quota, Opts, ?ERX_PIPES_QUOTA),
     Max = maps:get(number_max, Opts, ?NUMBER_MAX),
     Readers = maps:get(readers_max, Opts, ?ERX_PIPE_READERS_MAX),
+    First = maps:get(first_pipe, Opts, 1),
     case is_integer(Quota) andalso Quota >= 1 andalso Quota =< ?ERX_PIPES_QUOTA
         andalso is_integer(Max) andalso Max >= 2 andalso Max =< ?NUMBER_MAX
         andalso is_integer(Readers) andalso Readers >= 1
-        andalso Readers =< ?ERX_PIPE_READERS_MAX of
-        true -> #state{quota = Quota, number_max = Max, readers_max = Readers};
+        andalso Readers =< ?ERX_PIPE_READERS_MAX
+        andalso is_integer(First) andalso First >= 1 andalso First =< Max + 1 of
+        true -> #state{quota = Quota, number_max = Max, readers_max = Readers,
+                       next_pipe = First};
         false -> erlang:error(badarg)
     end.
 
@@ -189,11 +203,8 @@ step(S, {closed, Holder, PipeId, End}) when ?IS_HOLDER(Holder) ->
         Found -> end_gone(S, Found)
     end;
 step(S, {gone, Holder}) when ?IS_HOLDER(Holder) ->
-    {S1, Actions} = lists:foldl(fun({PipeId, End}, {Acc, Done}) ->
-                                        Found = find_end(Acc, Holder, PipeId, End),
-                                        {Next, More} = end_gone(Acc, Found),
-                                        {Next, Done ++ More}
-                                end, {S, []}, held_by(S, Holder)),
+    Held = held_by(S, Holder),
+    {S1, Actions} = ends_gone(S, Holder, Held),
     %% The holder is gone: nothing reaches it.
     {S1, [A || A <- Actions, not is_report_to(Holder, A)]};
 step(S, {drained, Holder, PipeId, End, Wend}) when ?IS_HOLDER(Holder) ->
@@ -205,7 +216,9 @@ step(S, {install_failed, Holder, PipeId, End}) when ?IS_HOLDER(Holder) ->
     case find_end(S, Holder, PipeId, End) of
         none -> {S, []};
         _ -> {S, [{report, Holder, {pipe_lost, PipeId, End}}]}
-    end.
+    end;
+step(S, {exec, {program, _} = Program, Kept}) when is_list(Kept) ->
+    exec(S, Program, Kept).
 
 -doc """
 The records as plain terms, for the inspector and the tests: the lanes
@@ -227,17 +240,19 @@ view(#state{lanes = Lanes, next_pipe = Next, pipes = Pipes}) ->
 -doc """
 The copies a descriptor or a report needs installed into its holder,
 each an object with the handle rights of its copy
-(docs/design-pipes.md, "Making a pipe"): a write end writes its own ring
-and reads its reader page; a read end reads every ring and writes their
-reader pages and the lock page; a doorbell is only rung. No copy carries
-more, and none carries `DUP` or `GIVE`.
+(docs/design-pipes.md, "Hand-offs", the rights of a copy): a write end
+writes its own ring and reads its reader page; a read end reads every
+ring and writes their reader pages and the lock page; every memory copy
+carries `MAP`, since `liberx` maps it and `erx_vm_map` needs `MAP` on the
+object; a doorbell is only rung. No copy carries more, and none carries
+`DUP`, `GIVE` or `DESTROY`.
 """.
 -spec copies(descriptor() | report()) -> [{object(), pos_integer()}].
 copies({pipe, write, _, #{ring := Ring, rpage := RPage, readers := Readers}}) ->
-    [{Ring, ?ERX_HR_READ bor ?ERX_HR_WRITE}, {RPage, ?ERX_HR_READ}
+    [{Ring, ?ERX_HR_READ bor ?ERX_HR_WRITE bor ?ERX_HR_MAP}, {RPage, ?ERX_HR_READ bor ?ERX_HR_MAP}
      | [{Bell, ?ERX_HR_TRIGGER} || {_, Bell} <- Readers]];
 copies({pipe, read, _, #{lock := Lock, writers := Writers, readers := Readers}}) ->
-    [{Lock, ?ERX_HR_READ bor ?ERX_HR_WRITE}
+    [{Lock, ?ERX_HR_READ bor ?ERX_HR_WRITE bor ?ERX_HR_MAP}
      | lists:append([lane_copies(Ring, RPage) ++ bell_copies(State)
                      || {_, Ring, RPage, _, State} <- Writers])
      ++ [{Bell, ?ERX_HR_TRIGGER} || {_, Bell} <- Readers]];
@@ -284,10 +299,13 @@ make_pipe(#state{next_pipe = Id, pipes = Pipes} = S, Holder) ->
                                           size = ?ERX_PIPE_RING_FIRST}},
                  readers = #{0 => #reader{end_id = 1, holder = Holder}},
                  next_wend = 2, next_end = 3},
-    Actions = [{make_lock, {lock, Id}},
-               {make_lane, {ring, Id, 1}, {rpage, Id, 1}, ?ERX_PIPE_RING_FIRST},
+    %% The lock is the last make: the NIF takes the pipe's number only when
+    %% its lock is made, so a step whose other make fails takes no number
+    %% and the next step makes the same pipe.
+    Actions = [{make_lane, {ring, Id, 1}, {rpage, Id, 1}, ?ERX_PIPE_RING_FIRST},
                make_bell(Id, 1, Holder),
                make_bell(Id, 2, Holder),
+               {make_lock, {lock, Id}},
                {store_wends, {lock, Id}, 1},
                {reply, {ok, read_descriptor(Pipe, 0), write_descriptor(Pipe, 1)}}],
     {S#state{lanes = S#state.lanes + 1, next_pipe = Id + 1,
@@ -380,8 +398,59 @@ read_descriptor(#pipe{id = Id, next_wend = Next} = Pipe, Rix) ->
 writer_state(open, Bell) -> {open, Bell};
 writer_state({gone, _}, _) -> gone.
 
+%% docs/design-pipes.md, "The second tier", exec: the step runs at the
+%% old image's exit record, so no image of Program runs during it. Each
+%% kept end's descriptor is made from the records as they stand, with
+%% fresh copies of everything the end holds and, for a read end, the
+%% pipe's wends, and Program stays its holder, so a kept end is never
+%% gone and its peers see nothing change. Every other end of Program is
+%% then closed, as {closed} closes it. The reply comes first, so each
+%% report of those closes to a kept end reaches the handler after the
+%% descriptors it amends; a report to an end being closed reaches no one.
+%% A Kept that is not a list of at most ?ERX_PROG_FDS_MAX {Key, Pipe, End},
+%% each Key once, as one exec's descriptors are, is refused with badarg, a
+%% fault of the handler; one that names an end Program does not hold, or
+%% one end twice, with ebadf. Either is refused whole.
+exec(S, Program, Kept) ->
+    case is_kept(Kept, 0, #{}) of
+        true -> keep(S, Program, Kept);
+        false -> {S, [{reply, {error, badarg}}]}
+    end.
+
+%% Kept's shape, element by element, so an improper list is refused too.
+is_kept([], _, _) ->
+    true;
+is_kept([{Key, _, _} | Rest], N, Keys) when N < ?ERX_PROG_FDS_MAX, not is_map_key(Key, Keys) ->
+    is_kept(Rest, N + 1, Keys#{Key => []});
+is_kept(_, _, _) ->
+    false.
+
+keep(S, Program, Kept) ->
+    Ids = [{PipeId, End} || {_, PipeId, End} <- Kept],
+    Found = [{Key, find_end(S, Program, PipeId, End)} || {Key, PipeId, End} <- Kept],
+    case lists:keymember(none, 2, Found) orelse length(lists:usort(Ids)) =/= length(Ids) of
+        true ->
+            {S, [{reply, {error, ebadf}}]};
+        false ->
+            Descriptors = [{Key, descriptor(F)} || {Key, F} <- Found],
+            Dropped = [Id || Id <- held_by(S, Program), not lists:member(Id, Ids)],
+            {S1, Closes} = ends_gone(S, Program, Dropped),
+            {S1, [{reply, {ok, Descriptors}}
+                  | [A || A <- Closes, not is_report_to_end(Program, Dropped, A)]]}
+    end.
+
+descriptor({write, Pipe, Wend}) -> write_descriptor(Pipe, Wend);
+descriptor({read, Pipe, Rix}) -> read_descriptor(Pipe, Rix).
+
 %% ---------------------------------------------------------------------
 %% Ends going
+
+%% Each of the ends Ids that Holder holds goes, in order, as {closed}.
+ends_gone(S, Holder, Ids) ->
+    lists:foldl(fun({PipeId, End}, {Acc, Done}) ->
+                        {Next, More} = end_gone(Acc, find_end(Acc, Holder, PipeId, End)),
+                        {Next, Done ++ More}
+                end, {S, []}, Ids).
 
 %% docs/design-pipes.md, "Ends and their holders". A write end goes gone,
 %% kept until every read end drains its lane, or is forgotten at once
@@ -507,6 +576,13 @@ held_by(#state{pipes = Pipes}, Holder) ->
 is_report_to(Holder, {report, Holder, _}) -> true;
 is_report_to(_, _) -> false.
 
+%% A report to one of Holder's ends Ids: element 2 and 3 of every report
+%% name the pipe and the end it is for.
+is_report_to_end(Holder, Ids, {report, Holder, Report}) ->
+    lists:member({element(2, Report), element(3, Report)}, Ids);
+is_report_to_end(_, _, _) ->
+    false.
+
 lane(Id, Wend) ->
     {{ring, Id, Wend}, {rpage, Id, Wend}}.
 
@@ -518,8 +594,11 @@ readers(#pipe{readers = Readers}) -> lists:sort(maps:to_list(Readers)).
 put_pipe(#state{pipes = Pipes} = S, #pipe{id = Id} = Pipe) ->
     S#state{pipes = Pipes#{Id => Pipe}}.
 
+%% A read end's copies of one lane: it reads the ring and writes the
+%% reader page, and maps both.
 lane_copies(Ring, RPage) ->
-    [{Ring, ?ERX_HR_READ}, {RPage, ?ERX_HR_READ bor ?ERX_HR_WRITE}].
+    [{Ring, ?ERX_HR_READ bor ?ERX_HR_MAP},
+     {RPage, ?ERX_HR_READ bor ?ERX_HR_WRITE bor ?ERX_HR_MAP}].
 
 bell_copies({open, Bell}) -> [{Bell, ?ERX_HR_TRIGGER}];
 bell_copies(gone) -> [].

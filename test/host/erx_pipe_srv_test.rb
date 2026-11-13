@@ -35,7 +35,14 @@ class ErxPipeSrvTest < Minitest::Test
     'the objects of a failed step left open' =>
       ['failed_make_undoes_the_step', 'lists:foreach(fun(Obj) -> (S#srv.nif):close(Obj) end, Made),', '_ = Made,'],
     'an end forgotten on another process\'s notice' =>
-      ['forged_notice_changes_nothing', '#{{Pipe, End} := {Pid, _}} ->', '_ when is_pid(Pid) ->']
+      ['forged_notice_changes_nothing', '#{{Pipe, End} := {Pid, _}} ->', '_ when is_pid(Pid) ->'],
+    # docs/design-pipes.md, Verification, program holders: the speaks-for check skipped.
+    'an event run for a process that does not speak for its program' =>
+      ['an_event_from_a_non_speaker_is_refused', "{ok, Caller} -> forwarded(Event, Program, From, S);",
+       "_ -> forwarded(Event, Program, From, S); % seeded"],
+    # The same: a restarted server that numbers from 1, refused by the NIF.
+    'a restarted server numbering from 1' =>
+      ['a_restarted_server_numbers_above_its_predecessor', 'First = Nif:pipes_made() + 1,', 'First = 1,']
   }.freeze
 
   def test_seeded_faults_are_caught

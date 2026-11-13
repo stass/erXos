@@ -56,8 +56,8 @@ pthread_cond_broadcast pthread_cond_destroy pthread_cond_init pthread_cond_signa
 pthread_cond_wait pthread_create pthread_detach pthread_exit
 pthread_getname_np pthread_getspecific pthread_join pthread_key_create
 pthread_key_delete pthread_mutex_destroy pthread_mutex_init pthread_mutex_lock
-pthread_mutex_trylock pthread_mutex_unlock pthread_self pthread_setname_np
-pthread_setspecific sched_yield
+pthread_mutex_trylock pthread_mutex_unlock pthread_once pthread_self
+pthread_setname_np pthread_setspecific sched_yield
 
 # The page size, which takes no argument (edit 40).
 [page_size]

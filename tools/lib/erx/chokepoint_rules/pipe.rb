@@ -21,6 +21,9 @@ module Erx
     # only through erx_shm_copy (include/erx/shm.h).
     RAW_ATOMIC_LOAD = /\b(?:atomic_load(?:_explicit)?|__atomic_load(?:_n)?|__c11_atomic_load)\b/
     PIPES = 'docs/design-pipes.md'
+    # The pipe NIF's entries for the program driver, and the driver.
+    PIPE_HAND_HEADER = 'otp/erts/emulator/nifs/erxos/erx_pipe.h'
+    PIPE_HAND_DRIVER = 'otp/erts/emulator/sys/erxos/erx_program_drv.c'
 
     declare_group(
       unchecked_objects: [PIPE_CHECK, PIPE_CORE, PIPE_RUN],
@@ -81,12 +84,51 @@ module Erx
                   'liberx/erx_pipe_core.c' => "if (copy.kind == ERX_REC_FRAME)\n",
                   PIPE_NIF => "kind = ERX_REC_FRAME;\n" }
         ),
-        # Only the pipe server makes an end (PI1): no Erlang module but erx_pipe_srv
-        # calls the NIF's make_lock/0, make_lane/1 or make_bell/3.
+        # Only the pipe server makes a pipe's objects (PI1) and the hand-offs
+        # that give them to programs; only a program's handler makes and
+        # drops the holder entry it speaks for its program by; only the pipe
+        # server hears a program's gone. The Erlang sources are PipeCallers'.
         Chokepoints::Elsewhere.new(
-          name: 'pipe-makers', rule: "only the session's pipe server, erx_pipe_srv, calls erx_pipe_nif's make_lock/0, " \
-                                     'make_lane/1 and make_bell/3, which make a pipe\'s lock, lanes and bells',
-          design: "#{PIPES}#invariants", check: 'PipeMakers, in Checks', test: 'test/host/pipe_makers_test.rb'
+          name: 'pipe-makers', rule: "only the session's pipe server, erx_pipe_srv, calls erx_pipe_nif's make_lock/1, " \
+                                     'make_lane/1, make_bell/3 and hand_make/2, which make a pipe\'s lock, lanes and ' \
+                                     'bells and the hand-offs that give them to programs',
+          design: "#{PIPES}#invariants", check: 'PipeCallers, in Checks', test: 'test/host/pipe_callers_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
+          name: 'pipe-holders', rule: "only a program's handler, erx_prog_handler, calls erx_pipe_nif's " \
+                                      'program_holder/1 and holder_drop/1, which make and let go the holder entry ' \
+                                      'by which it speaks for its program',
+          design: "#{PIPES}#hand-offs", check: 'PipeCallers, in Checks', test: 'test/host/pipe_callers_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
+          name: 'pipe-holder-gone-erlang', rule: 'only erx_pipe_srv, which receives it, names the atom ' \
+                                                 "erx_pipe_holder_gone, a program's gone, among the Erlang sources",
+          design: "#{PIPES}#hand-offs", check: 'PipeCallers, in Checks', test: 'test/host/pipe_callers_test.rb'
+        ),
+        # The driver alone takes a hand-off and lets the port's hold on a
+        # holder entry go; the NIF defines both and its header declares them.
+        Chokepoints::Forbidden.new(
+          name: 'pipe-hand-take',
+          rule: "only #{PIPE_HAND_DRIVER} calls erx_pipe_hand_take and erx_pipe_holder_release in ERTS",
+          design: "#{PIPES}#hand-offs",
+          scope: Chokepoints::Scope.new(own: false, extra: %w[otp/erts/**/*],
+                                        except: ['otp/erts/emulator/asmjit/**/*']),
+          pattern: /\berx_pipe_(?:hand_take|holder_release)\s*\(/,
+          sites: [PIPE_HAND_DRIVER, PIPE_NIF, PIPE_HAND_HEADER].map { |glob| Chokepoints::Site.new(glob: glob) },
+          seed: { 'otp/erts/emulator/sys/erxos/erx_gate.c' => "\thand = erx_pipe_hand_take(number, program, owner);\n" }
+        ),
+        # The NIF alone says a program is gone: no C file of ERTS or liberx
+        # names the atom erx_pipe_holder_gone but erx_pipe_nif.c, which sends
+        # it once neither hold of a holder entry remains.
+        Chokepoints::Forbidden.new(
+          name: 'pipe-holder-gone',
+          rule: "only #{PIPE_NIF} sends erx_pipe_holder_gone, a program's gone: no other C file names the atom",
+          design: "#{PIPES}#hand-offs",
+          scope: Chokepoints::Scope.new(own: false, extra: %w[otp/erts/**/* liberx/**/*],
+                                        except: ['otp/erts/emulator/asmjit/**/*']),
+          pattern: /\berx_pipe_holder_gone\b/,
+          sites: [Chokepoints::Site.new(glob: PIPE_NIF)],
+          seed: { PIPE_HAND_DRIVER => "\tatom = driver_mk_atom(\"erx_pipe_holder_gone\");\n" }
         )
       ]
     )

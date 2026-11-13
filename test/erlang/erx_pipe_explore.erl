@@ -39,7 +39,9 @@ property is not vacuous.
 
 -include("generated/erx_abi.hrl").
 
--define(R, ?ERX_HR_READ).
+%% Every memory copy is mapped, so each one that reads carries MAP too
+%% (docs/design-pipes.md, "Hand-offs", the rights of a copy).
+-define(R, (?ERX_HR_READ bor ?ERX_HR_MAP)).
 -define(W, ?ERX_HR_WRITE).
 -define(T, ?ERX_HR_TRIGGER).
 

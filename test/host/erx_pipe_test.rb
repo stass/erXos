@@ -116,7 +116,30 @@ TESTS = %w[erx_pipe_tests erx_pipe_explore erx_pipe_explore_tests].map { |name| 
 
   # Plants `faulty` in place of `exact`, which must occur once, and expects
   # the exploration to fail on `property`.
-  def assert_caught(exact, faulty, property)
+  # docs/design-pipes.md, Verification, hand-offs: a read end's lane copies
+# without MAP, which erXos's kernel refuses to map.
+def test_a_lane_copy_without_map_is_caught
+  assert_case_fails("[{Ring, ?ERX_HR_READ bor ?ERX_HR_MAP},\n", "[{Ring, ?ERX_HR_READ},\n",
+                    'copies_carry_the_rights_their_end_needs_test')
+end
+
+# docs/design-pipes.md, Verification, program holders: exec closes every
+# end before it hands off the kept one, so the kept write end is gone.
+def test_an_exec_that_closes_the_kept_end_is_caught
+  assert_case_fails('Dropped = [Id || Id <- held_by(S, Program), not lists:member(Id, Ids)],',
+                    'Dropped = held_by(S, Program),', 'exec_keeps_an_end_and_closes_the_others_test')
+end
+
+# A seeded fault that one EUnit case, named by case, must fail.
+def assert_case_fails(exact, faulty, case_name)
+  source = File.read(File.join(ROOT, MODULE))
+  assert_equal 1, source.scan(exact).size, "seed site not found once: #{exact}"
+  output = run_eunit(source.sub(exact) { faulty }, depth: SEED_DEPTH)
+  refute output.success?, output.text
+  assert_match(/#{case_name}[^\n]*\*failed\*/, output.text)
+end
+
+def assert_caught(exact, faulty, property)
     source = File.read(File.join(ROOT, MODULE))
     assert_equal 1, source.scan(exact).size, "seed site not found once: #{exact}"
     output = run_eunit(source.sub(exact) { faulty }, depth: SEED_DEPTH)

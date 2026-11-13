@@ -36,7 +36,7 @@ module Erx
   # The rules read the Erlang sources DeviceCallers reads, with comments and strings
   # (doc strings included) blanked and line breaks kept, over the whole text, so a call
   # split across lines is seen too. Tests, under test/, are outside the scope. Like
-  # PipeMakers they catch a slip, not an atom built at run time (list_to_atom/1).
+  # PipeCallers they catch a slip, not an atom built at run time (list_to_atom/1).
   module StartCallers
     STARTER = 'erlang/apps/erx_starter/**/*'
     CALLERS = %w[erlang/apps/erx/src/erx_console.erl erlang/apps/erx_starter/src/erx_starter_keeper.erl].freeze

@@ -1151,7 +1151,7 @@ handlers:
 | `{gone, Holder}` | the same for every end `Holder` holds; a program's gone comes only from the pipe NIF, once its holder entry has no hold left ([Hand-offs](#hand-offs)) |
 | `{drained, Holder, Pipe, End, Writer}` | if `Holder` holds the read end `End` of `Pipe` and `Writer` is gone with `End`'s index in its list: remove the index, and when the list is empty close the capabilities to the lane and to the write end's doorbell and forget the write end |
 | `{install_failed, Holder, Pipe, End}` | if `Holder` holds `End` of `Pipe`: report `{pipe_lost, Pipe, End}` to it ([Failure handling](#failure-handling-diagnostics-and-debuggability)); the end stays `Holder`'s until it is closed or `Holder` is gone |
-| `{exec, Program, Kept}` | sent by `Program`'s handler at the old image's exit record, so no image of `Program` runs during the step: for each end of `Program` that `Kept` names by descriptor, make a hand-off of fresh copies of everything the end holds, from the pipe server's own capabilities, with the pipe's `wends` for a read end, and return them for the new image's startup message; then close every other end `Program` holds, as `{closed}` does; `Program` stays the holder of each kept end, which is never gone, so its peers see nothing change; the old image's copies go with its table ([The second tier](#the-second-tier)) |
+| `{exec, Program, Kept}` | sent by `Program`'s handler at the old image's exit record, so no image of `Program` runs during the step: for each end of `Program` that `Kept` names by descriptor, make a hand-off of fresh copies of everything the end holds, from the pipe server's own capabilities, with the pipe's `wends` for a read end, and return them for the new image's startup message; then close every other end `Program` holds, as `{closed}` does; `Program` stays the holder of each kept end, which is never gone, so its peers see nothing change; the old image's copies go with its table ([The second tier](#the-second-tier)); a `Kept` that is not a list of at most `prog_fds_max` descriptors, each named once, is refused with `badarg` |
 | `{deposit, Holder, Descriptor, Stream}` | if `Holder` holds the write end `Stream`, and fewer than 16 deposits made through `Stream` are open (`etoomanyrefs` otherwise): for `{pipe, End}`, an end `Holder` holds, make an end of the same kind, held by the deposit, telling the pipe's other holders as for an inherited end; for `{socketpair, ReadEnd, WriteEnd}`, one of each; for a file, terminal or directory descriptor, keep the open it names; hold them as one deposit under a fresh ticket of 64 random bits, made through `Stream`, and reply with the ticket |
 | `{redeem, Holder, Stream, Ticket}` | if `Holder` holds the read end `Stream` of the pipe `Ticket` was deposited on and the ticket is unredeemed: install the deposit's end into `Holder`, with every lane and doorbell the end needs and, for a read end, the pipe's `wends`, and record `Holder` as its holder, or hand on the held open, and reply with the descriptor; an install that fails fails the request, and the end is gone |
 | `{discard, Holder, Stream, Ticket}` | if `Holder` holds the read end `Stream` of the pipe `Ticket` was deposited on: close the deposit if it is open; reply `ok` either way |
@@ -1198,6 +1198,8 @@ The supervisor restarts the pipe server for later pipes, numbered above
 every pipe an earlier one made: `make_lock` takes the pipe's number and
 refuses one that is not above every number the NIF has taken, and a
 pipe server starts its numbering one past `erx_pipe_nif:pipes_made/0`.
+A pipe's lock is its step's last make, so a step whose other make fails
+takes no number and the next step makes the same pipe.
 So no pipe number repeats while the session's runtime runs, a lost end
 never shares its `(Pipe, End)`, its label or its reports with a later
 end, and a lost end's `{closed}` reaches a pipe server that holds no
@@ -1299,6 +1301,16 @@ that names a new peer's lane or doorbell. A hand-off holds:
   when the NIF loads and never repeats, so no number names a hand-off of
   an earlier pipe server.
 
+A hand-off carries at most `pipe_hand_copies_max` copies
+(`abi/erx_abi.txt`), a read end's most: its lock page, three for each
+write end, of which a session's pipes hold at most `pipes_quota`, and the
+doorbells of the other read ends, at most `pipe_rix_max`; a build check
+fails unless the limit is `1 + 3 * pipes_quota + pipe_rix_max`. One
+`hand_make` makes at most `prog_fds_max` hand-offs, since one reply names
+at most one end for each descriptor of the program. The NIF refuses a
+longer list with `badarg`, so the driver may size its answer by the
+limit.
+
 **The rights of a copy.** A copy carries what its holder does with it and
 nothing more. `liberx` maps every memory copy, and `erx_vm_map` needs
 `MAP` on the memory object as well as on the space
@@ -1326,9 +1338,12 @@ alone: as the entry `{N, {pipe_hand, Number, Descriptor}}` among the
 descriptors of `erx_program:start/1`'s spec, and with
 `erx_program:install(Port, Hand)` for a reply or a report to a running
 program ([design-runtime.md](design-runtime.md#programs-as-ports)). The
-driver takes it with `erx_pipe_hand_take(Number, Caller)`, which answers
-the hand-off once and only when `Caller` is its owner. `Caller` is the
-process that made the call: at a start, the process opening the port,
+driver takes it with `erx_pipe_hand_take(Number, Program, Caller)`, which
+answers the hand-off once and only when it is for `Program`, the program
+whose port the driver runs, named by the pid of the port's open command,
+and `Caller` is its owner; a hand-off for another program is refused
+before the take touches the port's hold. `Caller` is the process that
+made the call: at a start, the process opening the port,
 which `driver_connected` names while the start runs; for `install/2`, the
 process calling `port_control`, which `driver_caller` names, and the
 driver refuses the install unless that process is also the port's owner,
@@ -1354,8 +1369,9 @@ drops every hand-off its spec named without knowing how far the start
 went, and at the switch of an `exec` it drops the hand-off of each report
 it drops ([The second tier](#the-second-tier)). An owner's exit lets go
 every hand-off it still holds, by a monitor the NIF holds. The hand-off
-table and its lock are made when the NIF loads; a take, a drop and an
-owner's exit serialize on that lock, so exactly one of them has the
+table's lock is made at its first use, which may be a take by the driver
+before the NIF has loaded and then finds the table empty; a take, a drop
+and an owner's exit serialize on that lock, so exactly one of them has the
 hand-off.
 
 **Who binds a doorbell.** A doorbell is bound by the party that holds the
@@ -1413,8 +1429,13 @@ when the owner exits, by the NIF's monitor, or with
 `erx_pipe_nif:holder_drop(Pid)` after a start that failed. The port's is
 taken by the port driver at its first take of a hand-off for the program
 and let go with `erx_pipe_holder_release` once the driver has released
-the program's anchor, where it
-returns a window's lease, so the image and every sub-space under the
+the program's anchor, and it only moves forward, from none to held to
+released, or from none to released when the port took nothing: once released it is never taken again, so a take for the
+program after the release is refused and no later port of the program
+holds its ends past the gone. A program has one port, which its handler
+opens once; the NIF knows no port, so it is the handler that keeps a
+second port from sharing the hold. The port's hold is let go where the
+driver returns a window's lease, so the image and every sub-space under the
 anchor have ended
 ([design-display.md](design-display.md#the-pixel-area),
 [design-programs.md](design-programs.md#a-programs-end)). When neither
@@ -1437,8 +1458,9 @@ server drops that action, since the gone it is about to read covers the
 end.
 
 **Refusals.** A take that finds no hand-off under its number, one taken
-or let go already, one of another owner, or an install whose caller is
-not the port's owner, answers no hand-off, and the start or the install
+or let go already, one for another program, one of another owner, one
+after the port's hold was released, or an install whose caller is not
+the port's owner, answers no hand-off, and the start or the install
 fails with `einval`; the hand-off, if it is held, stays its owner's. A
 start that fails after its takes lets them go with its other undos, the
 port's hold last, as the lease's return; the handler then drops the
@@ -1901,7 +1923,13 @@ readers, which any pipe has.
   port's holds are gone, in either order, and a second
   `program_holder(Pid)` is refused; the seeded failure sends it at the
   owner's exit, and the test that lets the owner go first sees it while
-  the port still holds. The driver's end machine, a pure core, lets the
+  the port still holds. A take of a hand-off for another program, and a
+  take after the port's hold was released, answer no hand-off and leave
+  the hold as it was; each seeded failure drops one of the two checks,
+  and its test takes the hand-off. `hand_make` takes
+  `pipe_hand_copies_max` copies and `prog_fds_max` hand-offs and refuses
+  one more of either with `badarg`; each seeded failure drops one bound.
+  The driver's end machine, a pure core, lets the
   port's hold go only after the anchor's release; the seeded failure
   swaps the two, and its host test fails on the order. `erx_pipe_srv`
   answers `badarg` to an event naming a program from a process that is
@@ -1934,7 +1962,7 @@ readers, which any pipe has.
   [Hand-offs](#hand-offs) is a chokepoint check with a seeded violation
   that the check's test plants, beside `pipe-makers`, which keeps
   `erx_pipe_nif`'s `make_lock`, `make_lane` and `make_bell` to
-  `erx_pipe_srv` (PI1, `tools/lib/erx/pipe_makers.rb`):
+  `erx_pipe_srv` (PI1, `tools/lib/erx/pipe_callers.rb`):
   `pipe-makers` gains `hand_make`, so only `erx_pipe_srv` makes a
   hand-off (seed: a call in `erx_prog_handler.erl`); `pipe-hand-take`
   keeps `erx_pipe_hand_take` and `erx_pipe_holder_release` in ERTS to the

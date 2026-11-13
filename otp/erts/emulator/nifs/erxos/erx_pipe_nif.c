@@ -32,21 +32,29 @@
  * the server's report for the end.
  */
 
+#ifndef ERX_PIPE_NIF_LOADABLE
 #define STATIC_ERLANG_NIF 1
+#endif
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <string.h>
 
 #include "erl_nif.h"
 #include "erx_event.h"
+#include "erx_pipe.h"
 
 #include "erx/pipe_run.h"
 #include "liberx/backend/api.h"
+
+#ifdef ERX_PIPE_HARNESS
+#include "erx_pipe_harness.h"
+#endif
 
 /* Every page of a pipe but a ring's data area is one page. */
 #define PIPE_PAGE	4096u
@@ -71,7 +79,8 @@ typedef struct pipe_obj {
 	uint64_t	 cap;
 	uint64_t	 size;
 	uint64_t	 map;		/* the server's mapping of the lock page */
-	uint32_t	 label;		/* a doorbell's registered label */
+	uint32_t	 label;		/* a session process's doorbell's registered label */
+	bool		 registered;	/* label is in the event table: a session process's doorbell */
 	unsigned	 holds;
 	bool		 server;	/* the server still holds it */
 	bool		 closed;
@@ -119,10 +128,15 @@ typedef struct pipe_end {
 static ErlNifResourceType *obj_type;
 static ErlNifResourceType *end_type;
 static ErlNifMutex *obj_mutex;
+/* make_lock's check and take of a pipe number. */
+static ErlNifMutex *made_mutex;
+static unsigned pipes_made;	/* under made_mutex */
 
 static ERL_NIF_TERM atom_ok, atom_error, atom_enomem, atom_eof, atom_eio,
     atom_epipe, atom_would_block, atom_closed, atom_drained, atom_process,
-    atom_lost, atom_ready, atom_write, atom_read, atom_open, atom_gone;
+    atom_lost, atom_ready, atom_write, atom_read, atom_open, atom_gone,
+    atom_program, atom_einval, atom_eexist, atom_none, atom_holder_gone,
+    atom_server;
 
 static ERL_NIF_TERM
 error_term(ErlNifEnv *env, ERL_NIF_TERM reason)
@@ -164,7 +178,8 @@ obj_close_locked(pipe_obj_t *obj)
 	obj->closed = true;
 	if (obj->kind == OBJ_BELL) {
 		(void)erx_irq_bind(obj->cap, ERX_CAP_NULL, 0);
-		erx_event_unregister(obj->label);
+		if (obj->registered)
+			erx_event_unregister(obj->label);
 	}
 	unmap_object(&obj->map, obj->size);
 	(void)erx_cap_close(obj->cap);
@@ -177,6 +192,26 @@ obj_keep(pipe_obj_t *obj)
 	obj->holds++;
 	enif_mutex_unlock(obj_mutex);
 	enif_keep_resource(obj);
+}
+
+/*
+ * Keeps an object the server still holds and has not closed, checked and
+ * counted under obj_mutex so that no close comes between the two; false,
+ * keeping nothing, otherwise.
+ */
+static bool
+obj_keep_held(pipe_obj_t *obj)
+{
+	bool held;
+
+	enif_mutex_lock(obj_mutex);
+	held = obj->server && !obj->closed;
+	if (held)
+		obj->holds++;
+	enif_mutex_unlock(obj_mutex);
+	if (held)
+		enif_keep_resource(obj);
+	return (held);
 }
 
 static void
@@ -252,22 +287,59 @@ mem_new(pipe_obj_kind_t kind, uint64_t size, pipe_obj_t **obj)
 	return (true);
 }
 
+/*
+ * make_lock(Pipe) -> {ok, Lock} | {error, einval | enomem}: pipe Pipe's lock
+ * page.  Pipe must be above every number a make_lock has taken while the
+ * runtime runs, so a pipe server restarted over this NIF never repeats a
+ * pipe's number (docs/design-pipes.md, "The pipe server", a crash of the
+ * pipe server).  The number is taken only when the make succeeds, so a
+ * step that failed for memory makes the same pipe again.  made_mutex
+ * serializes the check with the take; no other lock is taken under it, so
+ * a lock page that could not be mapped is let go after it.
+ */
 static ERL_NIF_TERM
 make_lock(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	pipe_obj_t *lock;
+	pipe_obj_t *lock, *unmapped = NULL;
+	unsigned pipe;
+	ERL_NIF_TERM result;
+
+	(void)argc;
+	if (!enif_get_uint(env, argv[0], &pipe) || pipe == 0)
+		return (enif_make_badarg(env));
+	enif_mutex_lock(made_mutex);
+	if (pipe <= pipes_made) {
+		result = error_term(env, atom_einval);
+	} else if (!mem_new(OBJ_LOCK, PIPE_PAGE, &lock)) {
+		result = error_term(env, atom_enomem);
+	} else if (map_object(lock->cap, PIPE_PAGE, ERX_PROT_RW, &lock->map) != ERX_OK) {
+		/* The server stores wends and frees the lock through its own mapping. */
+		lock->map = 0;
+		unmapped = lock;
+		result = error_term(env, atom_enomem);
+	} else {
+		pipes_made = pipe;
+		result = enif_make_tuple2(env, atom_ok, obj_term(env, lock));
+	}
+	enif_mutex_unlock(made_mutex);
+	/* Its destructor closes the capability under obj_mutex. */
+	if (unmapped != NULL)
+		enif_release_resource(unmapped);
+	return (result);
+}
+
+/* pipes_made() -> N: the highest pipe number a make_lock has taken, 0 for none. */
+static ERL_NIF_TERM
+nif_pipes_made(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	unsigned made;
 
 	(void)argc;
 	(void)argv;
-	if (!mem_new(OBJ_LOCK, PIPE_PAGE, &lock))
-		return (error_term(env, atom_enomem));
-	/* The server stores wends and frees the lock through its own mapping. */
-	if (map_object(lock->cap, PIPE_PAGE, ERX_PROT_RW, &lock->map) != ERX_OK) {
-		lock->map = 0;
-		enif_release_resource(lock);
-		return (error_term(env, atom_enomem));
-	}
-	return (enif_make_tuple2(env, atom_ok, obj_term(env, lock)));
+	enif_mutex_lock(made_mutex);
+	made = pipes_made;
+	enif_mutex_unlock(made_mutex);
+	return (enif_make_uint(env, made));
 }
 
 static ERL_NIF_TERM
@@ -290,18 +362,30 @@ make_lane(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	    obj_term(env, rpage)));
 }
 
-/* A doorbell bound to the session's group, delivered to Pid as {erx_pipe_ready, Pipe, End}. */
+/*
+ * make_bell(Holder, Pipe, End) -> {ok, Bell} | {error, enomem}: end End's
+ * doorbell.  For a session process Pid, bound to the session's group with
+ * the label the event table registers for {erx_pipe_ready, Pipe, End}; for
+ * {program, _}, made unbound, for the program's port driver to bind with
+ * the end's label when it takes the hand-off that carries it
+ * (docs/design-pipes.md, "Hand-offs", who binds a doorbell).
+ */
 static ERL_NIF_TERM
 make_bell(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
+	const ERL_NIF_TERM *holder;
 	ErlNifPid pid;
 	pipe_obj_t *bell;
 	uint64_t cap;
 	unsigned pipe, end;
 	ERL_NIF_TERM message;
+	int arity;
+	bool program;
 
 	(void)argc;
-	if (!enif_get_local_pid(env, argv[0], &pid) ||
+	program = enif_get_tuple(env, argv[0], &arity, &holder) && arity == 2 &&
+	    enif_is_identical(holder[0], atom_program);
+	if ((!program && !enif_get_local_pid(env, argv[0], &pid)) ||
 	    !enif_get_uint(env, argv[1], &pipe) ||
 	    !enif_get_uint(env, argv[2], &end))
 		return (enif_make_badarg(env));
@@ -311,6 +395,8 @@ make_bell(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		(void)erx_cap_close(cap);
 		return (error_term(env, atom_enomem));
 	}
+	if (program)
+		return (enif_make_tuple2(env, atom_ok, obj_term(env, bell)));
 	message = enif_make_tuple3(env, atom_ready, argv[1], argv[2]);
 	if (erx_event_register_process(&pid, message, &bell->label) != ERX_OK) {
 		bell->closed = true;
@@ -318,6 +404,7 @@ make_bell(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		enif_release_resource(bell);
 		return (error_term(env, atom_enomem));
 	}
+	bell->registered = true;
 	if (erx_irq_bind(cap, ERX_CAP_SELF, bell->label) != ERX_OK) {
 		enif_release_resource(bell);	/* the destructor unregisters */
 		return (error_term(env, atom_enomem));
@@ -1092,8 +1179,616 @@ nif_apply(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (ok ? atom_ok : error_term(env, atom_enomem));
 }
 
+/* ---------------------------------------------------------------------
+ * Hand-offs and holder entries (docs/design-pipes.md, "Hand-offs")
+ *
+ * A hand-off is everything one descriptor or report gives a program's
+ * table: the copies, each one of the pipe server's objects kept by
+ * obj_keep_held with the rights its copy carries, and for an end the
+ * program gains, the end's unbound doorbell and its label.  hand_make/2
+ * lists it under a fresh number for the owner of the program's holder entry, the
+ * program's handler; the program driver takes it (erx_pipe_hand_take,
+ * erx_pipe.h) and releases it after its installs.  A held hand-off leaves
+ * the table exactly once: by the take, by its owner's hand_drop/1, or when
+ * its owner's hold on the entry goes, at the owner's exit or its
+ * holder_drop/1.  So a hand-off is held only while its owner holds its
+ * program's entry.
+ *
+ * A holder entry, made by program_holder/1, has two holds: its owner's,
+ * from the make until the owner exits or calls holder_drop/1, and the
+ * port's, from the driver's first take of one of the program's hand-offs
+ * until erx_pipe_holder_release, after the driver has released the
+ * program's anchor; once released it is never taken again.  When neither
+ * remains the entry leaves the table and the NIF sends the running pipe
+ * server {erx_pipe_holder_gone, Program}, the program's gone: no image of
+ * the program can touch an end's pages any more.  No other party says a
+ * program is gone.
+ *
+ * One lock, hand_lock, covers the table of hand-offs, the table of entries
+ * and both holds.  Each decision is made under it; what follows, the
+ * release of a hand-off's objects and the gone message, runs after it is
+ * let go, so no destructor runs under it, and no other lock of the NIF is
+ * taken while it is held: obj_keep_held runs before a hand-off is listed.
+ */
+
+struct erx_pipe_hand {
+	erx_pipe_hand_t	*next;		/* the table's list, under hand_lock */
+	uint64_t	 number;	/* from 1, never repeated while the NIF is loaded */
+	uint64_t	 program;	/* the n of {program, n} */
+	ErlNifPid	 owner;		/* the owner of the program's entry when made */
+	unsigned	 ncopies;
+	pipe_obj_t	**objs;		/* each kept until the hand-off is let go */
+	uint32_t	*rights;
+	pipe_obj_t	*bell;		/* the end's own doorbell, kept, or NULL */
+	uint64_t	 label;
+};
+
+/*
+ * The port's hold on a holder entry moves only forward: none until the
+ * driver's first take, held until erx_pipe_holder_release, then released
+ * for good, so no take after a release reaches the program, whether or
+ * not the port took anything before it.
+ */
+typedef enum pipe_port_hold {
+	PORT_NONE,
+	PORT_HELD,
+	PORT_RELEASED
+} pipe_port_hold_t;
+
+typedef struct pipe_holder {
+	struct pipe_holder *next;	/* the table's list, under hand_lock */
+	uint64_t	 program;
+	ErlNifPid	 owner;		/* the program's handler */
+	ErlNifMonitor	 monitor;	/* of the owner, while it holds */
+	bool		 owner_held;	/* under hand_lock; true only while listed */
+	pipe_port_hold_t port_hold;	/* under hand_lock */
+} pipe_holder_t;
+
+static ErlNifResourceType *holder_type;
+static pthread_once_t hand_once = PTHREAD_ONCE_INIT;
+static ErlNifMutex *hand_lock;		/* made once, at its first use */
+static erx_pipe_hand_t *hands;		/* the held hand-offs */
+static pipe_holder_t *holders;		/* the entries, each keeping its resource */
+static uint64_t last_hand;		/* 2^64 - 1 hand-offs would take centuries: no wrap */
+
+static void
+hand_lock_make(void)
+{
+	hand_lock = enif_mutex_create("erx_pipe_hands");
+}
+
+/*
+ * The hand-off lock, made at its first use, which may be a take by the
+ * driver before the NIF has loaded: the tables are empty until then, so
+ * the take finds nothing.  NULL only when it could not be made, and then
+ * the NIF does not load.
+ */
+static ErlNifMutex *
+hands_lock(void)
+{
+	(void)pthread_once(&hand_once, hand_lock_make);
+	return (hand_lock);
+}
+
+/* Under hand_lock: the listed entry of program, or NULL. */
+static pipe_holder_t *
+holder_find(uint64_t program)
+{
+	pipe_holder_t *h;
+
+	for (h = holders; h != NULL; h = h->next)
+		if (h->program == program)
+			return (h);
+	return (NULL);
+}
+
+/* Under hand_lock: the link to the held hand-off number, or NULL. */
+static erx_pipe_hand_t **
+hand_link(uint64_t number)
+{
+	erx_pipe_hand_t **link;
+
+	for (link = &hands; *link != NULL; link = &(*link)->next)
+		if ((*link)->number == number)
+			return (link);
+	return (NULL);
+}
+
+/* Under hand_lock: moves every held hand-off of program onto *out. */
+static void
+hands_of(uint64_t program, erx_pipe_hand_t **out)
+{
+	erx_pipe_hand_t **link = &hands, *hand;
+
+	while ((hand = *link) != NULL) {
+		if (hand->program == program) {
+			*link = hand->next;
+			hand->next = *out;
+			*out = hand;
+		} else {
+			link = &hand->next;
+		}
+	}
+}
+
+/* With hand_lock let go: lets a hand-off out of the table go, and what it kept. */
+static void
+hand_free(erx_pipe_hand_t *hand)
+{
+	unsigned i;
+
+	for (i = 0; i < hand->ncopies; i++)
+		obj_drop(&hand->objs[i]);
+	obj_drop(&hand->bell);
+	enif_free(hand->objs);
+	enif_free(hand->rights);
+	enif_free(hand);
+}
+
+static void
+hands_free(erx_pipe_hand_t *list)
+{
+	erx_pipe_hand_t *next;
+
+	for (; list != NULL; list = next) {
+		next = list->next;
+		hand_free(list);
+	}
+}
+
+/*
+ * Under hand_lock: when neither hold of a listed entry remains, it leaves
+ * the table, and the caller, with the lock let go, owes holder_gone.
+ */
+static bool
+holder_left(pipe_holder_t *h)
+{
+	pipe_holder_t **link;
+
+	if (h->owner_held || h->port_hold == PORT_HELD)
+		return (false);
+	for (link = &holders; *link != h; link = &(*link)->next)
+		;
+	*link = h->next;
+	h->next = NULL;
+	return (true);
+}
+
+/*
+ * Under hand_lock: the owner's hold goes, and with it every hand-off the
+ * owner still holds for the program; they are put on *dropped for the
+ * caller to free with the lock let go.  True when the entry left.
+ */
+static bool
+holder_owner_lets_go(pipe_holder_t *h, erx_pipe_hand_t **dropped)
+{
+	if (!h->owner_held)
+		return (false);
+	h->owner_held = false;
+	hands_of(h->program, dropped);
+	return (holder_left(h));
+}
+
+/*
+ * With hand_lock let go, for an entry that left: the program's gone to the
+ * running pipe server, then the table's reference dropped.  A server that
+ * is not running holds no record of the program, so there is no one to
+ * tell.  env is NULL when the driver calls.
+ */
+static void
+holder_gone(ErlNifEnv *env, pipe_holder_t *h)
+{
+	ErlNifPid server;
+	ErlNifEnv *msg;
+
+	if (enif_whereis_pid(env, atom_server, &server) &&
+	    (msg = enif_alloc_env()) != NULL) {
+		(void)enif_send(env, &server, msg, enif_make_tuple2(msg,
+		    atom_holder_gone, enif_make_uint64(msg, h->program)));
+		enif_free_env(msg);
+	}
+	enif_release_resource(h);
+}
+
+/* The owner has exited: its hold goes, with the hand-offs it still held. */
+static void
+holder_down(ErlNifEnv *env, void *data, ErlNifPid *pid, ErlNifMonitor *mon)
+{
+	pipe_holder_t *h = data;
+	erx_pipe_hand_t *dropped = NULL;
+	bool gone;
+
+	(void)pid;
+	(void)mon;
+	enif_mutex_lock(hands_lock());
+	gone = holder_owner_lets_go(h, &dropped);
+	enif_mutex_unlock(hands_lock());
+	hands_free(dropped);
+	if (gone)
+		holder_gone(env, h);
+}
+
+/*
+ * program_holder(Program) -> ok | {error, eexist | enomem}: the holder
+ * entry of {program, Program}, owned by the caller, its handler, which
+ * then speaks for the program; eexist when the program has an entry.
+ */
+static ERL_NIF_TERM
+program_holder(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	ErlNifUInt64 program;
+	pipe_holder_t *h;
+	ErlNifPid self;
+	bool listed = false;
+
+	(void)argc;
+	if (!enif_get_uint64(env, argv[0], &program) || program == 0 ||
+	    enif_self(env, &self) == NULL)
+		return (enif_make_badarg(env));
+	if ((h = enif_alloc_resource(holder_type, sizeof(*h))) == NULL)
+		return (error_term(env, atom_enomem));
+	memset(h, 0, sizeof(*h));
+	h->program = program;
+	h->owner = self;
+	/* The caller runs, so the monitor holds and its down cannot come yet. */
+	if (enif_monitor_process(env, h, &self, &h->monitor) != 0) {
+		enif_release_resource(h);
+		return (error_term(env, atom_enomem));
+	}
+	enif_mutex_lock(hands_lock());
+	if (holder_find(program) == NULL) {
+		h->owner_held = true;
+		h->next = holders;
+		holders = h;
+		listed = true;
+	}
+	enif_mutex_unlock(hands_lock());
+	if (!listed) {
+		(void)enif_demonitor_process(env, h, &h->monitor);
+		enif_release_resource(h);
+		return (error_term(env, atom_eexist));
+	}
+	/* The table keeps the allocation's reference until the entry leaves. */
+	return (atom_ok);
+}
+
+/*
+ * holder_drop(Program) -> ok: the caller's hold on the program's entry
+ * goes, after a start that failed, with every hand-off it still holds for
+ * the program.  Nothing for an entry the caller does not hold.
+ */
+static ERL_NIF_TERM
+holder_drop(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	ErlNifUInt64 program;
+	erx_pipe_hand_t *dropped = NULL;
+	pipe_holder_t *h;
+	ErlNifPid self;
+	bool gone = false;
+
+	(void)argc;
+	if (!enif_get_uint64(env, argv[0], &program) || program == 0 ||
+	    enif_self(env, &self) == NULL)
+		return (enif_make_badarg(env));
+	enif_mutex_lock(hands_lock());
+	h = holder_find(program);
+	if (h != NULL && h->owner_held &&
+	    enif_compare_pids(&h->owner, &self) == 0) {
+		/* The owner is the caller, so its down cannot be running. */
+		(void)enif_demonitor_process(env, h, &h->monitor);
+		gone = holder_owner_lets_go(h, &dropped);
+	}
+	enif_mutex_unlock(hands_lock());
+	hands_free(dropped);
+	if (gone)
+		holder_gone(env, h);
+	return (atom_ok);
+}
+
+/*
+ * holder_owner(Program) -> {ok, Pid} | none: the process that speaks for
+ * {program, Program}, the owner of its entry while the owner holds it, so
+ * the pipe server refuses an event from anyone else.
+ */
+static ERL_NIF_TERM
+holder_owner(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	ErlNifUInt64 program;
+	pipe_holder_t *h;
+	ErlNifPid owner;
+	bool held = false;
+
+	(void)argc;
+	if (!enif_get_uint64(env, argv[0], &program) || program == 0)
+		return (enif_make_badarg(env));
+	enif_mutex_lock(hands_lock());
+	if ((h = holder_find(program)) != NULL && h->owner_held) {
+		owner = h->owner;
+		held = true;
+	}
+	enif_mutex_unlock(hands_lock());
+	return (held ? enif_make_tuple2(env, atom_ok, enif_make_pid(env, &owner)) :
+	    atom_none);
+}
+
+/*
+ * The rights a copy may carry (docs/design-pipes.md, "Hand-offs", the
+ * rights of a copy): TRIGGER alone on a doorbell; on memory READ and MAP,
+ * since liberx maps every memory copy, and WRITE where the end writes.
+ * Never DUP, GIVE or DESTROY.
+ */
+static bool
+copy_rights_ok(pipe_obj_kind_t kind, unsigned rights)
+{
+	const unsigned mapped = ERX_HR_READ | ERX_HR_MAP;
+
+	if (kind == OBJ_BELL)
+		return (rights == ERX_HR_TRIGGER);
+	return ((rights & ~(mapped | ERX_HR_WRITE)) == 0 &&
+	    (rights & mapped) == mapped);
+}
+
+/*
+ * One hand-off from {Copies, Bell}: Copies a list of at most
+ * ERX_PIPE_HAND_COPIES_MAX {Object, Rights}, Bell none or {Object, Label},
+ * an unbound doorbell and its label in the program's group,
+ * (Pipe << 32) | End.  Every object must be one the server still holds.
+ * 0 with the hand-off in *out; EINVAL for a malformed term and ENOMEM when
+ * memory ran out, keeping nothing.
+ */
+static int
+hand_new(ErlNifEnv *env, ERL_NIF_TERM term, erx_pipe_hand_t **out)
+{
+	const ERL_NIF_TERM *t, *c;
+	ERL_NIF_TERM list, head;
+	erx_pipe_hand_t *hand;
+	ErlNifUInt64 label;
+	pipe_obj_t *obj;
+	unsigned n, rights;
+	int arity;
+
+	if (!enif_get_tuple(env, term, &arity, &t) || arity != 2 ||
+	    !enif_get_list_length(env, t[0], &n) ||
+	    n > ERX_PIPE_HAND_COPIES_MAX)
+		return (EINVAL);
+	if ((hand = enif_alloc(sizeof(*hand))) == NULL)
+		return (ENOMEM);
+	memset(hand, 0, sizeof(*hand));
+	/* One slot more than n, so a hand-off of no copies allocates too. */
+	hand->objs = enif_alloc(((size_t)n + 1) * sizeof(*hand->objs));
+	hand->rights = enif_alloc(((size_t)n + 1) * sizeof(*hand->rights));
+	if (hand->objs == NULL || hand->rights == NULL) {
+		hand_free(hand);
+		return (ENOMEM);
+	}
+	for (list = t[0]; enif_get_list_cell(env, list, &head, &list);) {
+		if (!enif_get_tuple(env, head, &arity, &c) || arity != 2 ||
+		    !enif_get_resource(env, c[0], obj_type, (void **)&obj) ||
+		    !enif_get_uint(env, c[1], &rights) ||
+		    !copy_rights_ok(obj->kind, rights) || !obj_keep_held(obj)) {
+			hand_free(hand);
+			return (EINVAL);
+		}
+		hand->objs[hand->ncopies] = obj;
+		hand->rights[hand->ncopies++] = rights;
+	}
+	if (!enif_is_identical(t[1], atom_none)) {
+		/* The end's own doorbell: a program's, unbound, labelled as label/2. */
+		if (!enif_get_tuple(env, t[1], &arity, &c) || arity != 2 ||
+		    !enif_get_resource(env, c[0], obj_type, (void **)&obj) ||
+		    obj->kind != OBJ_BELL || obj->registered ||
+		    !enif_get_uint64(env, c[1], &label) || (label >> 32) == 0 ||
+		    (label & 0xffffffffu) == 0 || !obj_keep_held(obj)) {
+			hand_free(hand);
+			return (EINVAL);
+		}
+		hand->bell = obj;
+		hand->label = label;
+	}
+	*out = hand;
+	return (0);
+}
+
+/*
+ * hand_make(Program, [{Copies, Bell}]) -> {ok, [Number]} | none |
+ * {error, enomem}: one hand-off for each element, in order, for the owner
+ * of {program, Program}'s entry, all or none.  The list holds 1 to
+ * ERX_PROG_FDS_MAX elements, since one reply names at most one end for
+ * each descriptor of the program, and badarg answers a longer one.  none,
+ * making nothing, when the program has no entry its owner holds: its gone
+ * is on its way to the pipe server, and covers every end the hand-offs
+ * would have given.
+ */
+static ERL_NIF_TERM
+hand_make(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_pipe_hand_t *made = NULL, **tail = &made, *hand, *next;
+	ERL_NIF_TERM list, head, numbers;
+	ErlNifUInt64 program;
+	pipe_holder_t *h;
+	uint64_t *assigned;
+	unsigned n, i;
+	bool listed = false;
+	int error;
+
+	(void)argc;
+	if (!enif_get_uint64(env, argv[0], &program) || program == 0 ||
+	    !enif_get_list_length(env, argv[1], &n) || n == 0 ||
+	    n > ERX_PROG_FDS_MAX)
+		return (enif_make_badarg(env));
+	if ((assigned = enif_alloc((size_t)n * sizeof(*assigned))) == NULL)
+		return (error_term(env, atom_enomem));
+	for (list = argv[1]; enif_get_list_cell(env, list, &head, &list);) {
+		if ((error = hand_new(env, head, &hand)) != 0) {
+			hands_free(made);
+			enif_free(assigned);
+			return (error == EINVAL ? enif_make_badarg(env) :
+			    error_term(env, atom_enomem));
+		}
+		hand->program = program;
+		*tail = hand;
+		tail = &hand->next;
+	}
+	enif_mutex_lock(hands_lock());
+	h = holder_find(program);
+	if (h != NULL && h->owner_held) {
+		for (hand = made, i = 0; hand != NULL; hand = next, i++) {
+			next = hand->next;
+			hand->number = ++last_hand;
+			hand->owner = h->owner;
+			hand->next = hands;
+			hands = hand;
+			assigned[i] = hand->number;
+		}
+		listed = true;
+	}
+	enif_mutex_unlock(hands_lock());
+	if (!listed) {
+		hands_free(made);
+		enif_free(assigned);
+		return (atom_none);
+	}
+	numbers = enif_make_list(env, 0);
+	for (i = n; i > 0; i--)
+		numbers = enif_make_list_cell(env,
+		    enif_make_uint64(env, assigned[i - 1]), numbers);
+	enif_free(assigned);
+	return (enif_make_tuple2(env, atom_ok, numbers));
+}
+
+/*
+ * hand_drop(Number) -> ok: lets go the caller's held hand-off Number, and
+ * does nothing to one taken, let go, never made or of another owner.
+ */
+static ERL_NIF_TERM
+hand_drop(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_pipe_hand_t **link, *hand = NULL;
+	ErlNifUInt64 number;
+	ErlNifPid self;
+
+	(void)argc;
+	if (!enif_get_uint64(env, argv[0], &number) || number == 0 ||
+	    enif_self(env, &self) == NULL)
+		return (enif_make_badarg(env));
+	enif_mutex_lock(hands_lock());
+	link = hand_link(number);
+	if (link != NULL && enif_compare_pids(&(*link)->owner, &self) == 0) {
+		hand = *link;
+		*link = hand->next;
+	}
+	enif_mutex_unlock(hands_lock());
+	if (hand != NULL)
+		hand_free(hand);
+	return (atom_ok);
+}
+
+/*
+ * Each refusal is decided before anything changes: a hand-off for another
+ * program, one of another owner, an entry its owner no longer holds, or a
+ * port's hold already released leaves the hand-off held and the hold as
+ * it was.
+ */
+erx_pipe_hand_t *
+erx_pipe_hand_take(uint64_t number, uint64_t program, ERL_NIF_TERM caller)
+{
+	ErlNifMutex *lock = hands_lock();
+	erx_pipe_hand_t **link, *hand = NULL;
+	pipe_holder_t *h;
+
+	if (lock == NULL)
+		return (NULL);
+	enif_mutex_lock(lock);
+	link = hand_link(number);
+	if (link != NULL && (*link)->program == program &&
+	    enif_is_identical((*link)->owner.pid, caller) &&
+	    (h = holder_find(program)) != NULL && h->owner_held &&
+	    h->port_hold != PORT_RELEASED) {
+		hand = *link;
+		*link = hand->next;
+		hand->next = NULL;
+		h->port_hold = PORT_HELD;
+	}
+	enif_mutex_unlock(lock);
+	return (hand);
+}
+
+uint64_t
+erx_pipe_hand_program(const erx_pipe_hand_t *hand)
+{
+	return (hand->program);
+}
+
+unsigned
+erx_pipe_hand_count(const erx_pipe_hand_t *hand)
+{
+	return (hand->ncopies);
+}
+
+void
+erx_pipe_hand_copy(const erx_pipe_hand_t *hand, unsigned i, uint64_t *cap,
+    uint32_t *rights)
+{
+	*cap = hand->objs[i]->cap;
+	*rights = hand->rights[i];
+}
+
+bool
+erx_pipe_hand_bell(const erx_pipe_hand_t *hand, uint64_t *cap, uint64_t *label)
+{
+	if (hand->bell == NULL)
+		return (false);
+	*cap = hand->bell->cap;
+	*label = hand->label;
+	return (true);
+}
+
+void
+erx_pipe_hand_release(erx_pipe_hand_t *hand)
+{
+	hand_free(hand);
+}
+
+void
+erx_pipe_holder_release(uint64_t program)
+{
+	ErlNifMutex *lock = hands_lock();
+	pipe_holder_t *h;
+	bool gone = false;
+
+	if (lock == NULL)
+		return;
+	enif_mutex_lock(lock);
+	if ((h = holder_find(program)) != NULL && h->port_hold != PORT_RELEASED) {
+		h->port_hold = PORT_RELEASED;
+		gone = holder_left(h);
+	}
+	enif_mutex_unlock(lock);
+	if (gone)
+		holder_gone(NULL, h);
+}
+
+#ifdef ERX_PIPE_HARNESS
+/*
+ * The host harness's one view into the objects (test/fixtures/
+ * erx_pipe_harness.h): the capability of an object term.  Built only with
+ * ERX_PIPE_HARNESS.
+ */
+bool
+erx_pipe_harness_obj_cap(ErlNifEnv *env, ERL_NIF_TERM term, uint64_t *cap)
+{
+	pipe_obj_t *obj;
+
+	if (!enif_get_resource(env, term, obj_type, (void **)&obj))
+		return (false);
+	*cap = obj->cap;
+	return (true);
+}
+#endif
+
 static ErlNifFunc nif_funcs[] = {
-	{"make_lock", 0, make_lock, 0},
+	{"make_lock", 1, make_lock, 0},
+	{"pipes_made", 0, nif_pipes_made, 0},
 	{"make_lane", 1, make_lane, 0},
 	{"make_bell", 3, make_bell, 0},
 	{"store_wends", 2, store_wends, 0},
@@ -1102,7 +1797,16 @@ static ErlNifFunc nif_funcs[] = {
 	{"open_end", 3, open_end, 0},
 	{"apply", 2, nif_apply, 0},
 	{"read", 2, nif_read, 0},
-	{"write", 2, nif_write, 0}
+	{"write", 2, nif_write, 0},
+	{"hand_make", 2, hand_make, 0},
+	{"hand_drop", 1, hand_drop, 0},
+	{"program_holder", 1, program_holder, 0},
+	{"holder_drop", 1, holder_drop, 0},
+	{"holder_owner", 1, holder_owner, 0},
+#ifdef ERX_PIPE_HARNESS
+	/* test/fixtures/erx_pipe_harness.c: the driver's calls, for the host tests. */
+	ERX_PIPE_HARNESS_FUNCTIONS
+#endif
 };
 
 static int
@@ -1110,10 +1814,13 @@ load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 {
 	static const ErlNifResourceTypeInit end_init = {
 		.dtor = end_dtor, .down = end_down, .members = 3 };
+	static const ErlNifResourceTypeInit holder_init = {
+		.down = holder_down, .members = 3 };
 
 	(void)priv;
 	(void)info;
 	obj_mutex = enif_mutex_create("erx_pipe_obj");
+	made_mutex = enif_mutex_create("erx_pipe_made");
 	obj_type = enif_open_resource_type(env, NULL, "erx_pipe_obj", obj_dtor,
 	    ERL_NIF_RT_CREATE, NULL);
 	end_type = enif_init_resource_type(env, "erx_pipe_end", &end_init,
@@ -1134,7 +1841,18 @@ load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 	atom_read = enif_make_atom(env, "read");
 	atom_open = enif_make_atom(env, "open");
 	atom_gone = enif_make_atom(env, "gone");
-	return (obj_mutex == NULL || obj_type == NULL || end_type == NULL);
+	atom_program = enif_make_atom(env, "program");
+	atom_einval = enif_make_atom(env, "einval");
+	atom_eexist = enif_make_atom(env, "eexist");
+	atom_none = enif_make_atom(env, "none");
+	atom_holder_gone = enif_make_atom(env, "erx_pipe_holder_gone");
+	atom_server = enif_make_atom(env, "erx_pipe_srv");
+	holder_type = enif_init_resource_type(env, "erx_pipe_holder", &holder_init,
+	    ERL_NIF_RT_CREATE, NULL);
+	if (obj_mutex == NULL || made_mutex == NULL || obj_type == NULL ||
+	    end_type == NULL || holder_type == NULL || hands_lock() == NULL)
+		return (1);
+	return (0);
 }
 
 ERL_NIF_INIT(erx_pipe_nif, nif_funcs, load, NULL, NULL, NULL)

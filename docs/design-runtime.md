@@ -1552,13 +1552,16 @@ applied in this order, each step undoing the ones before it on failure:
    anything else with `badarg` before it opens the port, and writes each
    number into the open command as a decimal word, as it writes the
    lease's. With the lease, the start takes each hand-off with
-   `erx_pipe_hand_take`, which answers it only when the process opening
-   the port, which `driver_connected` names while the start runs, is its
-   owner, so a start whose handler is not the hand-off's owner fails with
+   `erx_pipe_hand_take`, naming the program by the pid of its open
+   command, which answers it only when the hand-off is for that program
+   and the process opening the port, which `driver_connected` names while
+   the start runs, is its owner, so a start whose handler is not the
+   hand-off's owner, or that names another program's hand-off, fails with
    `einval`; the first take also takes the port's hold on the program's
    holder entry, which the driver lets go with `erx_pipe_holder_release`
    after it releases the anchor, where it returns the lease, so the pipe
-   server reads the program's gone only once no image of it runs; the image's capability table is sized for the fixed
+   server reads the program's gone only once no image of it runs, and
+   after which no take for the program succeeds; the image's capability table is sized for the fixed
    installs and every copy the hand-offs hold.
 2. **Create the channel and the data area**: two sides and two
    doorbells, in the side layout of a connection, each side written by

@@ -35,6 +35,10 @@ _Static_assert(ERX_PIPE_READERS_MAX <= 64,
     "one bit per read end in a 64-bit word");
 _Static_assert(ERX_PIPE_RIX_MAX == ERX_PIPE_READERS_MAX - 1,
     "a read end's largest index is one below the read ends a pipe may have");
+_Static_assert(ERX_PIPE_HAND_COPIES_MAX ==
+    1 + 3 * ERX_PIPES_QUOTA + ERX_PIPE_RIX_MAX,
+    "a hand-off carries a read end's lock page, three copies for each write "
+    "end the quota allows, and every other read end's doorbell");
 
 static bool pipe_aligned(uint64_t);
 static bool pipe_len_sound(uint32_t, uint32_t);

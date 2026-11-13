@@ -57,10 +57,10 @@ pipe_makes_both_ends_test() ->
     Write = {pipe, write, {1, 2},
              #{wend => 1, ring => {ring, 1, 1}, rpage => {rpage, 1, 1}, size => 65536,
                readers => [{0, {bell, 1, 1}}]}},
-    ?assertEqual([{make_lock, {lock, 1}},
-                  {make_lane, {ring, 1, 1}, {rpage, 1, 1}, 65536},
+    ?assertEqual([{make_lane, {ring, 1, 1}, {rpage, 1, 1}, 65536},
                   {make_bell, {bell, 1, 1}, ?A, erx_pipe:label(1, 1)},
                   {make_bell, {bell, 1, 2}, ?A, erx_pipe:label(1, 2)},
+                  {make_lock, {lock, 1}},
                   {store_wends, {lock, 1}, 1},
                   {reply, {ok, Read, Write}}], Actions),
     ?assertEqual(#{lanes => 1, next_pipe => 2,
@@ -268,9 +268,11 @@ a_label_names_its_pipe_and_end_test() ->
     ?assertError(function_clause, erx_pipe:label_end(1)),
     ?assertError(function_clause, erx_pipe:label_end(1 bsl 32)).
 
+%% docs/design-pipes.md, "Hand-offs", the rights of a copy: liberx maps
+%% every memory copy, and erx_vm_map needs MAP on the memory object.
 copies_carry_the_rights_their_end_needs_test() ->
-    R = ?ERX_HR_READ,
-    RW = ?ERX_HR_READ bor ?ERX_HR_WRITE,
+    R = ?ERX_HR_READ bor ?ERX_HR_MAP,
+    RW = ?ERX_HR_READ bor ?ERX_HR_WRITE bor ?ERX_HR_MAP,
     T = ?ERX_HR_TRIGGER,
     {S, Actions} = step(erx_pipe:new(#{}), {pipe, ?A, []}),
     {ok, Read, Write} = reply(Actions),
@@ -286,7 +288,11 @@ copies_carry_the_rights_their_end_needs_test() ->
     [{?A, ToWriter} | _] = reports(Reader),
     ?assertEqual([{{bell, 1, 4}, T}], erx_pipe:copies(ToWriter)),
     ?assertEqual([], erx_pipe:copies({pipe_writer_gone, 1, 1, 1})),
-    ?assertEqual([], erx_pipe:copies({pipe_lost, 1, 1})).
+?assertEqual([], erx_pipe:copies({pipe_lost, 1, 1})),
+Copies = lists:append([erx_pipe:copies(D) || D <- [Read, Write, Writer, ToWriter]]),
+[?assertEqual(?ERX_HR_MAP, Rights band ?ERX_HR_MAP) || {{Kind, _, _}, Rights} <- Copies, Kind =/= bell],
+[?assertEqual(?ERX_HR_MAP, Rights band ?ERX_HR_MAP) || {{lock, _}, Rights} <- Copies],
+[?assertEqual(0, Rights band (?ERX_HR_DUP bor ?ERX_HR_GIVE bor ?ERX_HR_DESTROY)) || {_, Rights} <- Copies].
 
 options_are_checked_test() ->
     ?assertError(badarg, erx_pipe:new(#{quota => 0})),
@@ -296,3 +302,38 @@ options_are_checked_test() ->
     ?assertError(badarg, erx_pipe:new(#{number_max => 1 bsl 32})),
     ?assertError(badarg, erx_pipe:new(#{readers_max => 65})),
     ?assertError(badarg, erx_pipe:new(#{other => 1})).
+
+first_pipe_continues_a_predecessors_numbering_test() ->
+    {_, Actions} = step(erx_pipe:new(#{first_pipe => 5}), {pipe, ?A, []}),
+    ?assertMatch({ok, {pipe, read, {5, 1}, _}, {pipe, write, {5, 2}, _}}, reply(Actions)),
+    %% Past the last number every pipe is refused.
+    refused(erx_pipe:new(#{number_max => 4, first_pipe => 5}), {pipe, ?A, []}, enfile),
+    ?assertError(badarg, erx_pipe:new(#{first_pipe => 0})),
+    ?assertError(badarg, erx_pipe:new(#{number_max => 4, first_pipe => 6})).
+
+%% docs/design-pipes.md, Verification, program holders: a program holding
+%% two write ends of one pipe keeps one across exec, and its reader is
+%% told the other is gone and never counts zero write ends.
+exec_keeps_an_end_and_closes_the_others_test() ->
+    S0 = pipe(?B),
+    {S1, _} = step(S0, {inherit, ?B, 1, 2, ?A}),
+    {S2, _} = step(S1, {inherit, ?A, 1, 3, ?A}),
+    {S3, _} = step(S2, {closed, ?B, 1, 2}),
+    {S4, Actions} = step(S3, {exec, ?A, [{fd1, 1, 3}]}),
+    %% The reply comes first, from the records before the closes.
+    ?assertMatch([{reply, {ok, [{fd1, {pipe, write, {1, 3}, #{wend := 2}}}]}} | _], Actions),
+    ?assertEqual([{?B, {pipe_writer_gone, 1, 1, 3}}], reports(Actions)),
+    #{pipes := #{1 := #{writers := Writers}}} = erx_pipe:view(S4),
+    ?assertEqual([{2, ?A}], [{W, H} || W := #{holder := H, state := open} <- Writers]).
+
+exec_of_an_end_not_held_is_refused_test() ->
+    S = pipe(?A),
+    refused(S, {exec, ?A, [{fd0, 1, 3}]}, ebadf),
+    refused(S, {exec, ?A, [{fd0, 1, 1}, {fd1, 1, 1}]}, ebadf),
+    refused(S, {exec, ?A, [{fd0, 1, 1}, {fd1, 1}]}, badarg),
+    refused(S, {exec, ?A, [{fd0, 1, 1}, {fd0, 1, 2}]}, badarg),
+    refused(S, {exec, ?A, [{fd0, 1, 1} | {fd1, 1, 2}]}, badarg),
+    refused(S, {exec, ?A, [{Fd, 1, 1} || Fd <- lists:seq(0, ?ERX_PROG_FDS_MAX)]}, badarg),
+    {S1, Actions} = step(S, {exec, ?A, []}),
+    ?assertEqual({ok, []}, reply(Actions)),
+    ?assertEqual(#{}, maps:get(pipes, erx_pipe:view(S1))).

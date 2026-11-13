@@ -36,6 +36,31 @@ class ChokepointsPipeTest < Minitest::Test
                                  'liberx/erx_lane.c' => "x = atomic_load_explicit(p, memory_order_acquire);\n" })
   end
 
+  # docs/design-pipes.md, Verification, build checks of the hand-offs: the
+  # rule refuses its seed and admits the driver, the NIF and its header.
+  def test_only_the_program_driver_takes_a_hand_off
+    take = [rule('pipe-hand-take')]
+    gate = 'otp/erts/emulator/sys/erxos/erx_gate.c'
+    driver = 'otp/erts/emulator/sys/erxos/erx_program_drv.c'
+    refute_empty evaluate(take, { gate => "\thand = erx_pipe_hand_take(number, program, owner);\n" }, imported: [gate])
+    refute_empty evaluate(take, { gate => "\terx_pipe_holder_release(program);\n" }, imported: [gate])
+    assert_empty evaluate(take, { driver => "\thand = erx_pipe_hand_take(number, program, owner);\n" \
+                                            "\terx_pipe_holder_release(program);\n",
+                                  NIF => "erx_pipe_hand_take(uint64_t number, uint64_t program, ERL_NIF_TERM caller)\n" },
+                          imported: [driver, NIF])
+  end
+
+  # The C half of pipe-holder-gone: the NIF alone names the atom it sends; the seed
+  # is the program driver sending it.
+  def test_only_the_pipe_nif_says_a_program_is_gone
+    gone = [rule('pipe-holder-gone')]
+    driver = 'otp/erts/emulator/sys/erxos/erx_program_drv.c'
+    refute_empty evaluate(gone, { driver => "\tatom = driver_mk_atom(\"erx_pipe_holder_gone\");\n" }, imported: [driver])
+    refute_empty evaluate(gone, { 'liberx/program/pipe.c' => "#define GONE \"erx_pipe_holder_gone\"\n" })
+    assert_empty evaluate(gone, { NIF => "\tatom_holder_gone = enif_make_atom(env, \"erx_pipe_holder_gone\");\n" },
+                          imported: [NIF])
+  end
+
   # A pipe lane is the lane layout: the pipe's files name its ring header and record, and
   # wpos's acquire load, but not the reader page or control table of a connection lane;
   # any other file outside the lane reader still names none of them.

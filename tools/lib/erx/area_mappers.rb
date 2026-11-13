@@ -25,7 +25,7 @@ module Erx
   # It reads the Erlang sources DeviceCallers reads, with comments removed and strings
   # kept, over the whole text, so a call split across lines is seen too, and a -doc that
   # names erx_area:map/4 is refused as any string is. Tests, under test/, are outside the
-  # scope. Like PipeMakers it catches a slip, not a module that holds erx_area in a
+  # scope. Like PipeCallers it catches a slip, not a module that holds erx_area in a
   # variable built at run time.
   #
   # The C half reads every C and C++ file of otp/erts/emulator with string and character
