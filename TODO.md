@@ -628,9 +628,9 @@ it; git history is the record of completed work.
   and an IRQ object for line 0, which the view reads as a line (the `check_framebuffer_windows` item). The reader, `erx_dt_framebuffer`, is built and tested;
   what remains is the row's ask and line, the physical object over the framebuffer's pages, the record and its
   size in `include/erx/boot_words.h`, and its reader in `erx_device_record`.
-* [Medium] `erlang/apps/erx_display/src/erx_screen.erl`: the screen shows the empty layout only, the background
-  repainted at its start; layouts, windows, presents, the overlay and the idle policy, whose times are the display domain's
-  `display_idle_dim_s` and `display_idle_off_s` variables, wait for `erx_winfs`
+* [Medium] `erlang/apps/erx_display/src/erx_screen.erl`: the overlay and the idle policy, whose times are the display
+  domain's `display_idle_dim_s` and `display_idle_off_s` variables, are not built; the screen receives the input notice
+  from `erx_winfs` and ignores it, so no idle clock runs
   ([The screen and its one path to the device](docs/design-display.md#the-screen-and-its-one-path-to-the-device)).
 * [Low] `erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
   bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
@@ -1538,6 +1538,30 @@ it; git history is the record of completed work.
   runs under `erx_net_local`'s loop.
 
 ## Bugs by subsystem
+
+* [Medium] `erlang/apps/erx_display/src/erx_winfs.erl`: `start_link/1` given a service starts the single policy with an
+  empty configuration; the window policy and its chord come from the display domain's manifest entry
+  ([design-display.md](docs/design-display.md#windows-and-the-window-system)).
+* [Medium] `erx_fs` and `erx_window` (`erlang/apps/erx_files/src/erx_fs.erl`): a waiting `mouse` or `kbd` read cannot
+  be cancelled by the client's flush, since `erx_fs` has no helper mode, so the file's owner blocks and the flush
+  waits; a client reading `kbd` on a hidden window hangs. design-display.md says these reads are helper-mode reads that
+  wait for a record.
+* [Medium] `erlang/apps/erx_display/src/erx_window.erl`: a `wctl` read answers at once; design-display.md ("The window
+  tree") says it waits for a record.
+* [Medium] `erlang/apps/erx_display/src/erx_window.erl`: held `ctl` writes and `mouse` and `kbd` readers are bounded
+  only by `erx_fs`'s one request per open file; give them a cap of their own.
+* [Low] `erlang/apps/erx_files/src/erx_fs_grants.erl`: the per-grant `Args` (`start_link/2`, `grant/4`) are not named by
+  design-files.md; name them there or fold them into the grant's options.
+* [Low] `erlang/apps/erx_display/src/erx_winfs.erl`: `/snarf` is not served, and the mint reads no `snarf` limit.
+* [Low] `erlang/apps/erx_display/src/erx_window.erl`: `kbd` gives only `c` records; `k` and `K` are not produced.
+* [Low] `erlang/apps/erx_display/src/erx_winfs.erl`: the window table carries no label, so a decorating policy cannot
+  see it.
+* [Low] `erlang/apps/erx_display/src/erx_screen.erl`: a present the core refuses (a rectangle past the coordinate limit
+  once the window's origin is added) is answered ok and shows nothing.
+* [Low] `erlang/apps/erx_display/src/erx_winfs.erl`: `readdir` offsets are positions, so an `rmdir` between reads can
+  skip a window.
+* [Low] `abi/protocols/9p.txt`: `error edquot 122` follows 9P2000.L and musl; check the POSIX layer's mapping if it
+  follows FreeBSD's numbering (69).
 
 * [Medium] programs, `PROT_EXEC` in a program's `mmap` or `mprotect` (`musl/src/internal/erxos/syscall.c`, `mmap_call`
   and `mprotect_call`; `liberx/backend/fiasco/program_task.c`, `erx_fiasco_libc_fd`): design-programs.md, "The
