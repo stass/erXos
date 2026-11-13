@@ -61,8 +61,9 @@ module Erx
     def manifest_path = "config/manifest/#{name}-development.txt"
     def manifest_source(root) = File.binread(File.join(root, manifest_path))
     # The website's manifest, which only a board the website boots has: the development
-    # manifest without its web domain, which `tools/erx boot --without-web` builds the
-    # site's image from (InteractiveBoot) and the medium boots start from (MediumBoot).
+    # manifest without its web and display domains, which `tools/erx boot --without-web`
+    # builds the site's image from (InteractiveBoot) and the medium boots start from
+    # (MediumBoot).
     # A board without one is refused on use, never handed its development manifest.
     def site_manifest_path = "config/manifest/#{name}-site.txt"
 

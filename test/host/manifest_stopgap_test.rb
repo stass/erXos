@@ -116,14 +116,15 @@ class ManifestStopgapTest < Minitest::Test
     assert result.matches?(@context)
     assert result.bytes.frozen?
     view = @codec.open('manifest', result.bytes)
-    assert_equal 3, view.count('domains')
-    assert_equal 4, view.count('devices')
+    assert_equal 4, view.count('domains')
+    assert_equal 5, view.count('devices')
     assert_equal 6, view.count('windows')
     assert_equal 1, view.count('images')
   end
 
   # The website's manifest passes the same check: its storage and network domains, without
-  # the web domain, hold the same devices, windows and image.
+  # the web and display domains, hold the same windows and image and every device but the
+  # display's gpu.
   def test_the_real_site_manifest_is_admitted
     site = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
     result = admit(site)
@@ -136,17 +137,22 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   # Each manifest's root_memory is what its budgets promise and an 8 MiB margin no one
-  # is promised, and the site's is the development one's less the web domain's budget,
-  # its memory and outer, which is all the site manifest leaves out.
+  # is promised, and the site's is the development one's less the web and display
+  # domains' budgets, each its memory and outer, and the display unit's DMA memory, which
+  # the domain library charges to the system's budget: all the site manifest leaves out.
   def test_root_memory_is_the_promise_and_the_margin_in_both_manifests
     site = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
     [@source, site].each do |source|
       report = admit(source).report
       assert_equal 8 << 20, report.fetch('root_memory') - report.fetch('promised_memory')
     end
-    web = %w[memory outer].sum { |field| Erx::ManifestText.value(@source, record: 'limits web', field: field) }
+    budgets = ['limits web', 'limits display'].product(%w[memory outer]).sum do |record, field|
+      Erx::ManifestText.value(@source, record: record, field: field)
+    end
+    display = @platform.fetch('units').find { |unit| unit.fetch('key') == 'display' }
+    dma = display.fetch('devices').sum { |device| device.fetch('dma_memory') }
     root_memory = ->(source) { Erx::ManifestText.value(source, record: 'machine', field: 'root_memory') }
-    assert_equal web, root_memory.call(@source) - root_memory.call(site)
+    assert_equal budgets + dma, root_memory.call(@source) - root_memory.call(site)
   end
 
   def test_the_report_claims_only_what_was_checked
@@ -156,7 +162,7 @@ class ManifestStopgapTest < Minitest::Test
     assert_equal 'supplied_catalog', report.fetch('executable')
     assert_equal 'supplied_context', report.fetch('provenance')
     assert_equal 'unsupported', report.fetch('policy_admission')
-    assert_equal 3, report.fetch('child_plan_instances')
+    assert_equal 4, report.fetch('child_plan_instances')
     assert_equal 0, report.fetch('dynamic_domain_reservation')
     assert_equal @platform.fetch('fiasco_reserve'), report.fetch('fiasco_reserve')
     assert_equal @platform.fetch('ram_bytes'), report.fetch('ram_bytes')
@@ -185,9 +191,9 @@ class ManifestStopgapTest < Minitest::Test
 
   def test_admitted_services_reach_the_encoded_manifest
     view = @codec.open('manifest', admit(@source + SERVICE).bytes)
-    # The development manifest's own, apps, data, inspect, net, network_ctl, storage_ctl
-    # and web, and this one.
-    assert_equal %w[apps data inspect log net network_ctl storage_ctl web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
+    # The development manifest's own, apps, data, display, inspect, net, network_ctl,
+    # storage_ctl and web, and this one.
+    assert_equal %w[apps data display inspect log net network_ctl storage_ctl web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
     assert_equal 0, view.count('liveness')
   end
 

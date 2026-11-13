@@ -417,30 +417,30 @@ class ProductionImageTest < Minitest::Test
     source = Erx::ProductionImage.without_sessions(PLATFORM.manifest_source(ROOT)) + row
     assert_raises(Erx::ProductionImage::UnknownRelease) { image.send(:domain_boots, source) }
     echo = Erx::ReleaseFiles.domain_boot('echo', applications: [*Erx::ReleaseFiles::DOMAIN_BASE, 'erx_echo_test'], test: true)
-    assert_equal [echo, *%w[network storage web].map { |name| Erx::ProductionImage.domain_boot(name) }],
+    assert_equal [echo, *%w[display network storage web].map { |name| Erx::ProductionImage.domain_boot(name) }],
                  image.send(:domain_boots, source, given: [echo])
     assert_raises(Erx::Error) { image.send(:domain_boots, source, given: [echo, echo]) }
   end
 
   # The production image carries the domain releases its manifest's domain rows and
-  # session templates name. The development manifest configures the storage, network and
-  # web domains and has a session template, so it carries the network, session, storage
-  # and web releases, and the network, storage and web releases without the template; a
-  # manifest with domain rows names each release once, and a reference of another form
-  # names nothing, for the manifest check to refuse.
+  # session templates name. The development manifest configures the storage, network,
+  # web and display domains and has a session template, so it carries the display,
+  # network, session, storage and web releases, and all but the session's without the
+  # template; a manifest with domain rows names each release once, and a reference of
+  # another form names nothing, for the manifest check to refuse.
   def test_the_production_image_carries_the_releases_its_domain_rows_name
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     source = PLATFORM.manifest_source(ROOT)
-    assert_equal %w[network session storage web], Erx::Manifest.release_names(source: source, codec: codec)
+    assert_equal %w[display network session storage web], Erx::Manifest.release_names(source: source, codec: codec)
     source = Erx::ProductionImage.without_sessions(source)
-    assert_equal %w[network storage web], Erx::Manifest.release_names(source: source, codec: codec)
+    assert_equal %w[display network storage web], Erx::Manifest.release_names(source: source, codec: codec)
     rows = %w[zeta beta zeta].each_with_index.map do |release, index|
       "domain d#{index}\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
         "  runtime @artifact.emu\n  release @artifact.#{release}\n  restarts 0\n  restart_period_s 0\n"
     end
     quoted = "domain q\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
              "  runtime @artifact.emu\n  release \"other\"\n  restarts 0\n  restart_period_s 0\n"
-    assert_equal %w[beta network storage web zeta], Erx::Manifest.release_names(source: source + rows.join + quoted, codec: codec)
+    assert_equal %w[beta display network storage web zeta], Erx::Manifest.release_names(source: source + rows.join + quoted, codec: codec)
   end
 
   # A domain row's runtime names the domain runtime image and its release a boot script
@@ -594,6 +594,40 @@ class ProductionImageTest < Minitest::Test
     assert_operator root_memory, :<, (machine.memory_mib - machine.fiasco_reserve_mib) << 20
   end
 
+  # Fiasco's kernel memory on this build (64-bit, CONFIG_KMEM_SIZE_AUTO, no -kmemsize):
+  # 6% of the free memory it counts, at most RAM, rounded up to its 2 MiB superpage
+  # (fiasco/kernel/src/kern/config.cpp, Config::kmem_size; arm/kmem_alloc-arm.cpp,
+  # Kmem_alloc::Kmem_alloc, which passes SUPERPAGE_SIZE and takes the top of the highest
+  # free region). A model of Fiasco's rule, not an oracle: the hand-kept fiasco_reserve
+  # figures of the development and site machines are held to it below.
+  FIASCO_KMEM_PER_CENT = 6
+  FIASCO_SUPERPAGE = 2 << 20
+
+  def fiasco_kmem_bound(memory_mib)
+    kmem = (memory_mib << 20) / 100 * FIASCO_KMEM_PER_CENT
+    (kmem + FIASCO_SUPERPAGE - 1) / FIASCO_SUPERPAGE * FIASCO_SUPERPAGE
+  end
+
+  # The refusal boot proves root_memory_fits, which the root reaches only once it holds the
+  # contiguous pool: one run, aligned to its own size, of up to CONTIGUOUS_POOL_MAX_BYTES.
+  # The run is sought only above the root's room: below it lie the archive, which may grow
+  # to the root's place, and the device tree. Fiasco's kernel memory takes the top of RAM,
+  # so the run must fit between the two. A machine without such a run refuses the boot at
+  # the pool, and the root_memory refusal never shows.
+  def test_the_refusal_machine_leaves_the_largest_contiguous_pool_its_run
+    assert_equal DEVELOPMENT.fiasco_reserve_mib << 20, fiasco_kmem_bound(DEVELOPMENT.memory_mib)
+    site = Erx::ProductionImage::Machine.site(PLATFORM)
+    assert_equal site.fiasco_reserve_mib << 20, fiasco_kmem_bound(site.memory_mib)
+    pool = Erx::Manifest::RootStartup::CONTIGUOUS_POOL_MAX_BYTES
+    memory_mib = Erx::ProductionImage::TOO_LITTLE_MEMORY_MIB
+    kmem_start = PLATFORM.ram_first + (memory_mib << 20) - fiasco_kmem_bound(memory_mib)
+    past_root = DEVELOPMENT.root_address + (Erx::ProductionImage::ROOT_ROOM_MIB << 20)
+    run_start = (past_root + pool - 1) / pool * pool
+    assert_operator run_start + pool, :<=, kmem_start,
+                    "#{memory_mib} MiB leaves no #{pool >> 20} MiB run for the contiguous pool " \
+                    "between the root's room and Fiasco's kernel memory"
+  end
+
   # A root that drops system_args, or an erx.arg word, says fewer arguments than the page should hold.
   def test_the_erts_line_must_count_the_manifests_arguments_and_the_command_lines
     system_args = PLATFORM.manifest_source(ROOT)[/^\s*system_args "(.*)"$/, 1].split.size
@@ -698,10 +732,12 @@ class ProductionImageTest < Minitest::Test
     verify = checkpoint_verifier('root-manifest')
     source = PLATFORM.manifest_source(ROOT)
     memory, baseline = manifest_number(source, 'root_memory'), manifest_number(source, 'system_baseline')
-    verify.call("erx: root task: manifest root_memory #{memory} baseline #{baseline} units 4 pool pages 12 image 4096\n")
-    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline #{baseline} units 4 pool pages 12 image 4096\n") }
-    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory #{memory} baseline 1 units 4 pool pages 12 image 4096\n") }
-    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory #{memory} baseline #{baseline} units 4 pool pages 12\n") }
+    units = source.scan(/^unit /).size
+    verify.call("erx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units} pool pages 12 image 4096\n")
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory 1 baseline #{baseline} units #{units} pool pages 12 image 4096\n") }
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory #{memory} baseline 1 units #{units} pool pages 12 image 4096\n") }
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units + 1} pool pages 12 image 4096\n") }
+    assert_raises(Erx::Error) { verify.call("erx: root task: manifest root_memory #{memory} baseline #{baseline} units #{units} pool pages 12\n") }
   end
 
   # A boot of the development image at 256 MiB (the Apple M3 Max host, HVF, 1 guest CPU,

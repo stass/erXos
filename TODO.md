@@ -57,7 +57,7 @@ it; git history is the record of completed work.
 * [Medium] runtime, `docs/design-shared-code.md`: build shared loaded code, one prepared copy of the
   preloaded modules and the applications every domain boots, mapped read-only into every domain that runs
   the interpreter. It is wanted long term. Its trigger, three adopting domains at once, is met: the
-  development manifest runs root's session and the storage, network and web domains on the interpreter. Each
+  development manifest runs root's session and the storage, network, web and display domains on the interpreter. Each
   domain loads its own `kernel` and `stdlib` at boot, and on one CPU an image that runs everything in the
   system domain still reaches root's shell about 3.2 times sooner under TCG (the measurement and the order
   of work are in [todo-performance.md](docs/todo-performance.md), "every domain loads its own kernel and
@@ -615,18 +615,22 @@ it; git history is the record of completed work.
   from a bound that does not change between restarts and show any mode that fits it. The driver also acknowledges a
   configuration-change interrupt without reading `events_read` or writing `events_clear` (virtio 1.2, 5.7.4.2),
   so a change of display size is not followed.
-* [High] the display domain's rows (`config/manifest/qemu-virt-development.txt`, `raspi4b-development.txt`;
-  [design-stopgap.md](docs/design-stopgap.md#device-records)): the platform records carry the display unit
-  (QEMU virt's virtio-gpu at `/virtio_mmio@a001e00`, 9 MiB of DMA memory) and the Pi's `framebuffer` unit, and no
-  manifest of the tree places them; the `display_domain` suite boots a manifest of its own
-  (`DisplayDomain.manifest`: the site manifest, an eighth of a CPU, 24 MiB and the unit). The domain release has
-  the display boot script (`ReleaseFiles::RELEASE_SCRIPTS`); the development manifest's row needs a CPU grant,
-  which the system share's reserve has no room for (storage, network and web take its 2,250 mcpu), and on QEMU
-  virt `root_memory`: the gpu's 9 MiB of DMA memory, charged to the system's budget, raises the contiguous pool
-  from 2 MiB to 16 MiB, and the domain's own budget comes on top, so the row grows `root_memory` by both, as
-  `DisplayDomain.manifest` does; the 512 MiB development machine has the RAM. The display domain holds its keyboard and tablet only
-  once the give is per unit and the unit is the transport page (security residuals, `boot_devices`); QEMU
-  virt's four transport pages are the spare's, the display's, the network device's and the disks'.
+* [High] the Raspberry Pi 4's display domain row (`config/manifest/raspi4b-development.txt`;
+  [design-stopgap.md](docs/design-stopgap.md#device-records)): the Pi's platform record carries the
+  `framebuffer` unit, which the board's development manifest gives the system domain, and no display domain
+  drives it, since no driver of the firmware's framebuffer exists. QEMU virt's development manifest has the
+  row: the display domain holds the virtio-gpu unit on the `display` share's 100 mcpu, taken from the web
+  share, with 24 MiB, the `display_domain` suite's unmeasured figure; size both from a measurement of the
+  domain driving a screen. No boot of the development image attaches a gpu (`tools/erx boot` included), so the
+  domain runs there without a screen, and no session is granted the display. The display domain holds its
+  keyboard and tablet only once the give is per unit and the unit is the transport page (security residuals,
+  `boot_devices`); QEMU virt's four transport pages are the spare's, the display's, the network device's and
+  the disks'.
+* [Medium] `tools/lib/erx/display_domain.rb`, `DisplayDomain::ROW`: the `display_domain` suite's display row is
+  a hand-kept copy of the development manifest's (its runtime limits and 24 MiB budget), with the service named
+  `screen`, and no test holds the two equal, so the suite can pass on a row the development image does not
+  ship. Build the suite's manifest from the development manifest's display records (`ManifestText`), changing
+  only what its client needs: the outer budget's pixel area and lane, a connection, and `restarts 0`.
 * [Medium] `tools/lib/erx/manifest.rb`, `check_framebuffer_windows`: a framebuffer window is checked against the
   platform record's register windows and RAM, not against the board tree's every `reg` and `ranges` (the GIC, the
   local peripherals, PCIe windows), which the record does not list; checking it against the board's own tree
@@ -3764,7 +3768,7 @@ it; git history is the record of completed work.
 * [Low] tests, `test/integration/runtime_console_test.rb` (`make check-runtime-hosted`): the cases that start the Erlang shell wait for `1> ` at the start of a line, but the hosted system domain is a named node and its shell prompts `(system@erxos)1> `, so every `with_erxos` case times out before it begins. Match the prompt with its node name, or make the patterns node-agnostic as the `Ctrl-G` case is.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names quota is the constant `NAMES_QUOTA`, 64, for every principal; the manifest's per-principal `names` is read by no one. Take each principal's from its row, as the domain quota is.
 * [Low] session memory, `config/manifest/qemu-virt-development.txt`: re-measure one session at its command shell under the lane driver's frame-sized funnel scratch (at most about 132 KiB a connection) and lower the session's 36 MiB budget, the principal's memory and its `max_message_heap` of 131,072 words if the numbers allow; they were sized for a scratch of 16 bytes a word of `max_message_heap`.
-* [Medium] CPU grants, `config/manifest/qemu-virt-development.txt`: the storage and network domains each take a whole CPU of the users share, 2,000 of the 2,250 mcpu that the system share's reserve leaves configured domains (`dom_system_reserve`, `liberx/system/dom_core.c`), so a third configured domain (a web domain) has 250 mcpu of room. Size each service domain's grant from its measured use, or grow the reserve's bound, before a third configured domain is added.
+* [Medium] CPU grants, `config/manifest/qemu-virt-development.txt`: the storage and network domains each take a whole CPU of the users share, 2,000 of the 2,250 mcpu that the system share's reserve leaves configured domains (`dom_system_reserve`, `liberx/system/dom_core.c`), and the web and display domains the other 250, 150 and 100, none of them measured, so no further configured domain has room. Size each service domain's grant from its measured use, or grow the reserve's bound, before another configured domain is added.
 * [Medium] tooling, configured-domain ids in the QEMU harnesses: `MediumBoot` (`NETWORK_ID`, `STORAGE_ID`, `DOMAIN_IDS`, `FREE_ID` and the catalogue rows of `DlControl` and `DlDevices`), `SystemDomain`, `SessionDomain::FIRST_SESSION`, `Regrant` and `DeviceGive::RESTART_ID` each re-derive by hand that configured domains boot in name order and that each later create spends an id, so adding a configured domain edits six files. Derive every id and row from one helper that sorts the manifest's configured domain names with the cell's added rows.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: a domain whose pid died and whose stop the library refused never ends, so `ending/2` counts it for good and every later create and session start of its principal waits the full `release_wait` (10 s); record the refused stop and leave such a domain out of the hold.
 * [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: a login's session that has had the line and keeps ending (a shell that dies at its first input) is started again without limit, a domain build each round; throttle it as FreeBSD's init throttles a getty that keeps failing, and say so on the line.
@@ -5711,7 +5715,9 @@ to the corpus and follow rc
   it. On QEMU virt, `QemuPlan::Display` by default puts the virtio-keyboard and virtio-tablet on the gpu's page
   (`DISPLAY_TRANSPORTS`, buses .14 and .13), so a manifest that places the display unit gives the display
   domain both input devices unseen, each able to drive unconfined DMA; the `display_domain` suite moves them to
-  the unplaced spare's page (`DisplayDomain::DISPLAY_BUSES`). Make the record's unit on QEMU virt the transport
+  the unplaced spare's page (`DisplayDomain::DISPLAY_BUSES`). The development manifest places the unit, and
+  no boot of its image attaches a display yet; one that attaches `QemuPlan::Display` with its defaults gives
+  the display domain both input devices. Make the record's unit on QEMU virt the transport
   page, with every transport the board's tree has on it, so what a window reaches is what the unit lists by
   construction.
 * [Medium] [The pixel area](docs/design-display.md#the-pixel-area), zero before reuse: an `erx_memdraw:wrap/4` image

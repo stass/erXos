@@ -4,26 +4,34 @@
 # The website's manifest of QEMU virt: the system the erXos website boots in v64,
 # the browser's emulator of an AArch64 virt machine (site/README.md), from the image
 # `tools/erx boot --without-web` builds. It is the development manifest,
-# config/manifest/qemu-virt-development.txt, without the web domain: the page has no
-# host link, whose web facet is all the web domain serves, and the domain would only
-# cost boot time on the emulator's one core. Every other record is the development
-# manifest's, whose comments give each row's reasons; where they reckon root_memory
-# and the web domain's share of it, take the figures below instead.
+# config/manifest/qemu-virt-development.txt, without the web and display domains: the
+# page has no host link, whose web facet is all the web domain serves, and no gpu for
+# the display domain to drive, and each domain would only cost boot time on the
+# emulator's one core. Every other record is the development manifest's, whose
+# comments give each row's reasons; where they reckon root_memory and the two domains'
+# shares of it, take the figures below instead.
 #
 # Leaving the web domain out removes its share, runtime limits, limits and domain
-# records, its relay service and the system domain's facet of it, and shrinks what
+# records, its relay service and the system domain's facet of it; leaving the display
+# domain out removes its share, runtime limits, limits and domain records, its window
+# tree's service and display record, and the display unit it holds. That shrinks what
 # the system principal holds by the room they took: its memory and root_memory each
-# lose the web limits' 24 MiB and outer 1 MiB; its domain quota and max_domains each
-# lose one domain; and max_connections loses the web domain's system connection. The
-# 25 MiB root_memory gives up stays outside the root's memory; no domain gains it.
+# lose the web and display limits' 24 MiB and outer 1 MiB each, and root_memory the
+# display unit's 9 MiB of DMA memory as well, which the domain library charges to the
+# system's budget; its domain quota and max_domains each lose two domains; and
+# max_connections loses the two domains' system connections. The 59 MiB root_memory
+# gives up stays outside the root's memory; no domain gains it. The 250 mcpu the two
+# shares took is what the system share's reserve leaves free for the medium boots' test
+# rows (MediumBoot::EIGHTH_SHARE).
 # The image is packed and checked on the site machine (ProductionImage::Machine.site),
 # the RAM site/terminal.js gives the website's guest, less than the development machine.
 #
 # The image's build admits this file with the same manifest check as the development
 # manifest, so the check proves what the website ships.
 # test/host/interactive_boot_test.rb holds its records equal to the development
-# manifest's less the web domain's six and the room they took, so a change to the
-# development manifest fails that test until this file takes it too.
+# manifest's less the web domain's six, the display domain's seven and the room they
+# took, so a change to the development manifest fails that test until this file takes
+# it too.
 #
 manifest 1
 share system

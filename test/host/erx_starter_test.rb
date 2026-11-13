@@ -170,7 +170,7 @@ class ErxStarterTest < Minitest::Test
     @packed_manifest ||= begin
       codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
       platform = Erx::MediumBoot.machine(Erx::Platform.development(ROOT)).record
-      arguments = ManifestContextFixture.archive_arguments(codec, boots: %w[app clock network session storage web])
+      arguments = ManifestContextFixture.archive_arguments(codec, boots: %w[app clock display network session storage web])
       source = Erx::Apps.manifest(File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt')),
                                   boot: :kept) + SCREEN
       Erx::Manifest.admit(source: source, codec: codec,

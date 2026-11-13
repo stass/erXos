@@ -36,14 +36,14 @@ module ManifestContextFixture
 
   # The archive the development manifest names, as both packs carry it: the domain
   # release under domains/erxos/ with the session boot script its session template
-  # names and the storage, network and web boot scripts its domain rows name, the domain
+  # names and the display, storage, network and web boot scripts its domain rows name, the domain
   # runtime images, runtimes/emu and runtimes/jit, and the system release's generated
   # files and root.
-  def arguments(codec) = archive_arguments(codec, boots: %w[network session storage web])
+  def arguments(codec) = archive_arguments(codec, boots: %w[display network session storage web])
 
   # The same archive with the boot script app beside session, which domain_source's
   # domains name.
-  def domain_arguments(codec) = archive_arguments(codec, boots: %w[app network session storage web])
+  def domain_arguments(codec) = archive_arguments(codec, boots: %w[app display network session storage web])
 
   # An archive of the domain release, with a boot script for each of boots and one
   # library file, then runtimes/emu, then system/, the order the archive's sorted paths
@@ -109,10 +109,12 @@ module ManifestContextFixture
   SYSTEM_QUOTA = /^(principal system\n(?:  .*\n)*?  domains )\d+$/
   MAX_DOMAINS = /^(  max_domains )\d+$/
 
-  # The development manifest's own configured domains, storage, network and web, with
-  # the profiles and runtime limits only they name, their services (storage's
-  # driver-control and data, network's driver-control and net, web's relay) and the
-  # system domain's facets of them, and the holder lines naming them.
+  # The development manifest's own configured domains, storage, network, web and display,
+  # with the profiles and runtime limits only they name, their services (storage's
+  # driver-control and data, network's driver-control and net, web's relay, the display's
+  # window tree with its display record) and the system domain's facets of them, and the
+  # display unit, which only a display domain holds (docs/design-stopgap.md, "Device
+  # records"), so a manifest without one places none.
   DOMAIN_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/,
                  /^service storage_ctl\n(?:  .*\n)*/, /^facet storage_ctl\n(?:  .*\n)*/,
                  /^service data\n(?:  .*\n)*/, /^facet data\n(?:  .*\n)*/,
@@ -120,7 +122,9 @@ module ManifestContextFixture
                  /^service network_ctl\n(?:  .*\n)*/, /^facet network_ctl\n(?:  .*\n)*/,
                  /^service net\n(?:  .*\n)*/,
                  /^runtime_limits web\n(?:  .*\n)*/, /^limits web\n(?:  .*\n)*/, /^domain web\n(?:  .*\n)*/,
-                 /^service web\n(?:  .*\n)*/, /^facet web\n(?:  .*\n)*/].freeze
+                 /^service web\n(?:  .*\n)*/, /^facet web\n(?:  .*\n)*/,
+                 /^runtime_limits display\n(?:  .*\n)*/, /^limits display\n(?:  .*\n)*/, /^domain display\n(?:  .*\n)*/,
+                 /^service display\n(?:  .*\n)*/, /^display display\n(?:  .*\n)*/, /^unit display\n(?:  .*\n)*/].freeze
   # Root's session template's facets, of data, net, inspect and apps, which a sessionless
   # source (ProductionImage.without_sessions) does not hold.
   SESSION_FACETS = [/^facet data_session\n(?:  .*\n)*/, /^facet net\n(?:  .*\n)*/, /^facet inspect\n(?:  .*\n)*/,
@@ -144,9 +148,9 @@ module ManifestContextFixture
     SESSION_SERVICES.reduce(source) { |text, service| substitute(text, service, '') }
   end
 
-  # source without its configured domains, storage, network and web: their rows removed
-  # and what they hold held by the system domain, as a manifest that configures no domain
-  # holds them. A session facet is removed where the source still has it.
+  # source without its configured domains, storage, network, web and display: their rows
+  # removed and what they hold but the display unit held by the system domain, as a
+  # manifest that configures no domain holds them. A session facet is removed where the source still has it.
   def domainless(source)
     raise ArgumentError, 'the manifest has no configured domain holder' unless source.match?(DOMAIN_HOLDER)
 

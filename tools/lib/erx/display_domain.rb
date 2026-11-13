@@ -21,9 +21,9 @@ module Erx
   # test-only application) boots on MediumBoot's machine with a manifest of the suite's
   # own, the site manifest with a display domain that holds the platform's display unit
   # (manifest), a virtio-gpu attached and QMP on an owner-only socket in the run's
-  # directory. The development manifest places no display unit (TODO.md, the display
-  # domain's rows), so this boot is the suite's alone. The virtio-gpu driver brings the
-  # device up and erx_screen fills the empty layout's background. The start row client
+  # directory. The development manifest's display row has no client and its boots attach
+  # no gpu, so a client's window on a screen is this boot's alone. The virtio-gpu driver
+  # brings the device up and erx_screen fills the empty layout's background. The start row client
   # names the display, so once its server has settled the row's keeper starts the
   # display's session, whose release (BOOT) runs erx_pattern_test: it opens a window
   # with erx_win:open/2, which the single policy places over the whole screen, fills it

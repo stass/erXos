@@ -128,7 +128,9 @@ class MediumBootTest < Minitest::Test
     assert_raises(Erx::Error) { Boot.manifest(site.sub(/^  max_domains [0-9]+\n/, '')) }
     development = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
     error = assert_raises(Erx::Error) { Boot.manifest(development) }
-    assert_equal 'a medium boot starts from the site manifest, which has no web domain', error.message
+    assert_equal 'a medium boot starts from the site manifest, which has no web or display domain', error.message
+    displayed = site + development[/^domain display\n(?:  .*\n)*/]
+    assert_raises(Erx::Error) { Boot.manifest(displayed) }
   end
 
   # The footprint cell's manifest has room for its three domains and sets the system domain's

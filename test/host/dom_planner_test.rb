@@ -105,24 +105,26 @@ class DomPlannerTest < Minitest::Test
 
   # The development manifest as it ships, with its session template and its own
   # configured domains, storage, which holds the block unit, network, which holds the net
-  # unit, and web: the library plans all three, and the system domain's arguments start
-  # no stack.
+  # unit, web, and display, which holds the display unit: the library plans all four, and
+  # the system domain's arguments start no stack.
   def test_the_library_plans_the_development_manifests_domains
     source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
-    assert_equal 3, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
+    assert_equal 4, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
                                  .report.fetch('child_plan_instances')
     refute_includes source[/^  system_args .*$/], '-erx_net'
     assert_includes source, "unit net\n  placement \"net\"\n  holder @domain.network\n"
+    assert_includes source, "unit display\n  placement \"display\"\n  holder @domain.display\n"
   end
 
   # The production image's narrow manifest (ProductionImage::Run.narrow_manifest), which
-  # its 4-CPU cells boot: the system share on two CPUs, and the storage and web domains'
-  # grants, which must fit the system share, on them too, so the library plans them.
+  # its 4-CPU cells boot: the system share on two CPUs, and the storage, web and display
+  # domains' grants, which must fit the system share, on them too, so the library plans
+  # them.
   def test_the_library_plans_the_narrow_images_domain
     source = Erx::ProductionImage::Run.narrow_manifest(ROOT, platform: PLATFORM)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
-    assert_equal 2, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
+    assert_equal 3, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
                                  .report.fetch('child_plan_instances')
   end
 
@@ -148,7 +150,7 @@ class DomPlannerTest < Minitest::Test
                                                                 .merge(platform: Erx::MediumBoot.machine(PLATFORM).record))
     admitted = Erx::Manifest.admit(source: Erx::NetworkDomain.manifest(source), codec: @codec, context: context,
                                    planner: @planner)
-    assert_equal 3, admitted.report.fetch('child_plan_instances')
+    assert_equal 4, admitted.report.fetch('child_plan_instances')
   end
 
   # The net_device suite's manifest (NetDevice.manifest), the development manifest with
@@ -163,7 +165,7 @@ class DomPlannerTest < Minitest::Test
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec)
                                                                 .merge(platform: Erx::ProductionImage::Machine.development(PLATFORM).record))
     admitted = Erx::Manifest.admit(source: edited, codec: @codec, context: context, planner: @planner)
-    assert_equal 3, admitted.report.fetch('child_plan_instances')
+    assert_equal 4, admitted.report.fetch('child_plan_instances')
   end
 
   # Two principals' session templates (property 14), each its principal's, of the
@@ -571,22 +573,24 @@ class DomPlannerTest < Minitest::Test
   def test_the_view_keeps_what_dev_shows
     lines = view_lines(development_manifest, 'dev')
     page = /ranges=0x[0-9a-f]+000\+0x1000 lines=\d+ confined=0/
-    { 'console' => 'none', 'hostlink' => 'none', 'block' => 'virtio,mmio', 'net' => 'virtio,mmio' }
+    { 'console' => 'none', 'hostlink' => 'none', 'block' => 'virtio,mmio', 'net' => 'virtio,mmio',
+      'display' => 'virtio,mmio' }
       .each do |unit, compatible|
         assert(lines.any? { |line| line.match?(/\Adevice \d+ unit=#{unit} compatible=#{compatible} #{page}\z/) },
                "no #{unit} entry in #{lines.inspect}")
       end
     interface = ->(name) { @codec.schema.services.find { |service| service.fetch(:name) == name }.fetch(:number) }
-    # The services, in name order, each with its server's index in boot order (network 0,
-    # storage 1, web 2) or none for the system domain: apps, of files, data, of files,
-    # inspect, net, network_ctl, storage_ctl and web.
+    # The services, in name order, each with its server's index in boot order (display 0,
+    # network 1, storage 2, web 3) or none for the system domain: apps, of files, data, of
+    # files, display, of windows, inspect, net, network_ctl, storage_ctl and web.
     assert_equal ["service 0 name=apps server=none interface=#{interface.call('files')}",
-                  "service 1 name=data server=1 interface=#{interface.call('files')}",
-                  "service 2 name=inspect server=none interface=#{interface.call('inspect')}",
-                  "service 3 name=net server=0 interface=#{interface.call('net')}",
-                  "service 4 name=network_ctl server=0 interface=#{interface.call('driver_control')}",
-                  "service 5 name=storage_ctl server=1 interface=#{interface.call('driver_control')}",
-                  "service 6 name=web server=2 interface=#{interface.call('web')}"],
+                  "service 1 name=data server=2 interface=#{interface.call('files')}",
+                  "service 2 name=display server=0 interface=#{interface.call('windows')}",
+                  "service 3 name=inspect server=none interface=#{interface.call('inspect')}",
+                  "service 4 name=net server=1 interface=#{interface.call('net')}",
+                  "service 5 name=network_ctl server=1 interface=#{interface.call('driver_control')}",
+                  "service 6 name=storage_ctl server=2 interface=#{interface.call('driver_control')}",
+                  "service 7 name=web server=3 interface=#{interface.call('web')}"],
                  lines.grep(/\Aservice /)
   end
 

@@ -59,7 +59,7 @@ module Erx
         flags.on('--cpus N', Integer, 'Guest CPUs') { |value| options[:cpus] = value }
         flags.on('--jobs N', Integer, 'Build jobs') { |value| options[:jobs] = value }
         flags.on('--hostlink', 'Host link socket and data medium') { options[:hostlink] = true }
-        flags.on('--without-web', 'Build the website\'s image, from its manifest without the web domain') { options[:without_web] = true }
+        flags.on('--without-web', 'Build the website\'s image, from its manifest without the web and display domains') { options[:without_web] = true }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       if options.fetch(:hostlink) && options.fetch(:without_web)
@@ -105,7 +105,8 @@ module Erx
     end
 
     # The system manifest the image is built from, as checked in for platform's board:
-    # the website's manifest, which has no web domain, when without_web, else the development manifest.
+    # the website's manifest, which has no web or display domain, when without_web, else the
+    # development manifest.
     def manifest_source(root:, platform:, without_web:)
       without_web ? platform.site_manifest_source(root) : platform.manifest_source(root)
     end

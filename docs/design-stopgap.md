@@ -1575,8 +1575,11 @@ manifest of the Pi places the unit with the system domain, so the board's consol
 root's line for it; no runtime there drives the framebuffer. `erx_device_record:framebuffers/0`
 reads the record.
 
-The development manifest places the block and network devices, in the storage and network domains,
-and no gpu or input device, since it configures no display domain.
+The development manifest of QEMU `virt` places the block and network devices, in the storage and
+network domains, and the gpu, in the display domain, which holds the platform record's `display`
+unit. It places no input device, since the record's `display` unit lists the gpu alone. A boot of the
+development image that attaches no gpu leaves the gpu's transport empty, and the display domain
+runs without a screen.
 
 The network domain runs the network stack, `erx_net`, and its virtio-net driver: the
 development manifest gives it the `net` record, and its row's arguments name

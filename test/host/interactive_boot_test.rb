@@ -94,30 +94,38 @@ class InteractiveBootTest < Minitest::Test
     assert_equal PLATFORM.memory_mib, Erx::InteractiveBoot.machine(platform: PLATFORM, without_web: false).memory_mib
   end
 
-  # The site manifest is the development manifest without its web domain: the development
-  # manifest's records less the web domain's six (its share, runtime limits, limits and
-  # domain, its relay service and the system domain's facet of it) are the site's, line
-  # for line, except the room the web domain took: the system principal's memory and
-  # domains less the web limits' budget and outer one and less one, and the root's
-  # root_memory, max_domains and max_connections less the same budget, one domain and its
-  # system connection's row. No reference to the web domain remains, so the site grants
-  # nothing the development image does not and moves with it. Comments and blank lines
-  # may differ.
-  def test_the_site_manifest_is_the_development_manifest_without_the_web_domain
+  # The site manifest is the development manifest without its web and display domains:
+  # the development manifest's records less the web domain's six (its share, runtime
+  # limits, limits and domain, its relay service and the system domain's facet of it) and
+  # the display domain's seven (its share, runtime limits, limits and domain, its window
+  # tree's service and display record, and the display unit it holds) are the site's,
+  # line for line, except the room the two domains took: the system principal's memory
+  # and domains less the two limits' budgets and outer ones and less two, and the root's
+  # root_memory, max_domains and max_connections less the same budgets and the display
+  # unit's DMA memory, two domains and their system connections' rows. No reference to
+  # either domain remains, so the site grants nothing the development image does not and
+  # moves with it. Comments and blank lines may differ.
+  def test_the_site_manifest_is_the_development_manifest_without_the_web_and_display_domains
     root = File.expand_path('../..', __dir__)
     development = manifest_records(File.binread(File.join(root, PLATFORM.manifest_path)))
     site = manifest_records(File.binread(File.join(root, PLATFORM.site_manifest_path)))
-    web, kept = development.partition { |record| record.first.match?(/\A[a-z_]+ web\n\z/) }
-    assert_equal %w[share runtime_limits limits domain service facet], web.map { |record| record.first[/\A[a-z_]+/] }
-    refute_match(/@(?:share|domain|service)\.web$/, site.join)
-    limits = web.find { |record| record.first == "limits web\n" }.join
-    room = Integer(limits[/^  memory ([0-9]+)$/, 1], 10) + Integer(limits[/^  outer ([0-9]+)$/, 1], 10)
+    left_out, kept = development.partition { |record| record.first.match?(/\A[a-z_]+ (?:web|display)\n\z/) }
+    kinds = ->(name) { left_out.map(&:first).grep(/ #{name}\n\z/).map { |header| header[/\A[a-z_]+/] } }
+    assert_equal %w[share runtime_limits limits domain service facet], kinds.call('web')
+    assert_equal %w[share runtime_limits limits unit domain service display], kinds.call('display')
+    refute_match(/@(?:share|domain|service)\.(?:web|display)$/, site.join)
+    room = %w[web display].sum do |name|
+      limits = left_out.find { |record| record.first == "limits #{name}\n" }.join
+      Integer(limits[/^  memory ([0-9]+)$/, 1], 10) + Integer(limits[/^  outer ([0-9]+)$/, 1], 10)
+    end
+    dma = PLATFORM.record.fetch('units').find { |unit| unit.fetch('key') == 'display' }
+                  .fetch('devices').sum { |device| device.fetch('dma_memory') }
     assert_equal kept.map(&:first), site.map(&:first), 'config/manifest/qemu-virt-site.txt has other records'
     root = kept.find { |record| record.any?(/\A  max_domains /) }.first
-    assert_equal [["principal system\n", 'domains', -1], ["principal system\n", 'memory', -room],
-                  [root, 'max_connections', -1],
-                  [root, 'max_domains', -1],
-                  [root, 'root_memory', -room]].sort,
+    assert_equal [["principal system\n", 'domains', -2], ["principal system\n", 'memory', -room],
+                  [root, 'max_connections', -2],
+                  [root, 'max_domains', -2],
+                  [root, 'root_memory', -(room + dma)]].sort,
                  figure_changes(kept, site).sort
   end
 

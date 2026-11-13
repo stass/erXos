@@ -56,10 +56,13 @@ module Erx
     ROOT_ENTRY_PATH = 'system/root'
     NOTICES_PATH = 'system/NOTICES'
     # No more RAM than root_memory, of which Fiasco and the archive take their part first,
-    # so the pool falls short and the root must refuse the boot. The development machine's
+    # so the root's page pool falls short and the root must refuse the boot. The development machine's
     # root, 64 MiB into RAM, ends inside it, and QEMU's device tree, at half of RAM below
-    # 256 MiB, lies below the root there, so the root, not bootstrap, refuses.
-    TOO_LITTLE_MEMORY_MIB = 96
+    # 256 MiB, lies below the root there, so the root, not bootstrap, refuses. Between the
+    # root's room and the kernel memory Fiasco keeps at the top of RAM there is still a run
+    # for the largest contiguous pool, which the root takes before it counts root_memory,
+    # so the refusal is root_memory's (test/host/production_image_test.rb holds this).
+    TOO_LITTLE_MEMORY_MIB = 112
     # What a machine keeps for the root's image past its place: the image is about 5 MiB.
     ROOT_ROOM_MIB = 8
     LICENSE = 'LICENSE'
@@ -105,8 +108,8 @@ module Erx
     # release scripts table (ReleaseFiles::RELEASE_SCRIPTS) defines a script's
     # applications under its name, and a name it does not hold is refused
     # (UnknownRelease), so a misspelt release boots nothing. The development manifest's
-    # session template names the session script, and its storage, network and web rows
-    # the scripts of those names; medium_boot's manifest configures the erts domain
+    # session template names the session script, and its storage, network, web and
+    # display rows the scripts of those names; medium_boot's manifest configures the erts domain
     # (MediumBoot.manifest), and a test image may carry scripts of its own
     # (build_test_image's domains).
     class UnknownRelease < Error; end
@@ -1407,8 +1410,9 @@ module Erx
       # on a larger machine tells a scheduler count taken from the share and the online CPUs
       # together from one taken from the online CPUs alone, which the manifest's own cpuset,
       # every CPU the runs have, cannot. Every share is narrowed (Run.narrow_share), so the
-      # configured domains' grants, the storage domain's of users and the web domain's of
-      # web, still fit the system share, as the domain library requires
+      # configured domains' grants, the storage domain's of users, the web domain's of web
+      # and the display domain's of display, still fit the system share, as the domain
+      # library requires
       # (docs/design-system.md, "The domain library").
       # Two CPUs' system share less its reserve holds one grant of users, not two, so the
       # narrow manifest leaves out the network domain (NARROW_DROPPED), whose net unit the
