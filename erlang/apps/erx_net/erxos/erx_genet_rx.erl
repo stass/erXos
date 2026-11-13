@@ -37,17 +37,19 @@ path leaves its index and the consumer index where they were
 -export([frame/2, batch/2, pending/2, slot/1]).
 -export_type([status/0, index/0, drop/0, result/0]).
 
+-include("generated/erx_hw_genet.hrl").
+
 -define(BUFFER_BYTES, 2048).
 -define(RING_SIZE, 256).
--define(INDEX_MASK, 16#ffff).
+%% A ring index, the INDEX field of RX_RING_PROD_INDEX and RX_RING_CONS_INDEX.
+-define(INDEX_MASK, ?ERX_HW_GENET_RX_RING_CONS_INDEX_INDEX_MASK).
 %% The padding before the frame, counted in the length field.
 -define(PAD, 2).
 -define(ETHER_HDR_LEN, 14).
--define(STATUS_EOP, 16#4000).
--define(STATUS_SOP, 16#2000).
--define(STATUS_RX_ERROR, 16#0004).
--define(BUFLEN_SHIFT, 16).
--define(BUFLEN_MASK, 16#fff).
+%% The status word's bits, RX_DESC_STATUS's fields in hw/svd/genet/genet.svd.
+-define(STATUS_EOP, ?ERX_HW_GENET_RX_DESC_STATUS_EOP_MASK).
+-define(STATUS_SOP, ?ERX_HW_GENET_RX_DESC_STATUS_SOP_MASK).
+-define(STATUS_RX_ERROR, ?ERX_HW_GENET_RX_DESC_STATUS_RX_ERROR_MASK).
 
 -define(IS_U32(V), (is_integer(V) andalso V >= 0 andalso V =< 16#ffffffff)).
 
@@ -79,7 +81,7 @@ buffer's start. A frame is a sub-binary of `Bytes`, at most
 """.
 -spec frame(status(), binary()) -> result().
 frame(Status, Bytes) when ?IS_U32(Status), is_binary(Bytes) ->
-    Length = (Status bsr ?BUFLEN_SHIFT) band ?BUFLEN_MASK,
+    Length = ?ERX_HW_GENET_RX_DESC_STATUS_BUFLEN_GET(Status),
     if
         Status band ?STATUS_RX_ERROR =/= 0 -> {drop, rx_error};
         Status band ?STATUS_SOP =:= 0 -> {drop, fragment};

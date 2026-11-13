@@ -35,6 +35,8 @@ device process ends. Times are monotonic milliseconds.
 
 -export_type([event/0, interrupt_event/0, transfer/0, request/0, action/0]).
 
+-include("generated/erx_hw_sdhci.hrl").
+
 %% The transport contract (docs/design-storage.md, "Data model"): a request
 %% is issued only within 10 s of its acceptance, and one issued must be
 %% complete 18 s after it was issued.
@@ -43,8 +45,9 @@ device process ends. Times are monotonic milliseconds.
 %% SDHCI 3.00's largest divisor of the 10-bit divided clock (Host
 %% Controller p.68-69; SDHCI_300_MAX_DIVIDER).
 -define(MAX_DIVISOR, 2046).
+-define(SIGNALLING_1V8, ?ERX_HW_SDHCI_CONTROL2_S18_ENABLE_MASK).
+%% Card status bits of an R1 response, which the card sends and no register holds.
 -define(R1_OUT_OF_RANGE, 16#80000000).
--define(SIGNALLING_1V8, 16#00080000).
 -define(R1_STATE_TRAN, 4).
 -define(R1_READY_FOR_DATA, 16#100).
 -define(IS_WORD(W), (is_integer(W) andalso W >= 0 andalso W =< 16#FFFFFFFF)).
@@ -96,28 +99,36 @@ decode(0) ->
 decode(16#FFFFFFFF) ->
     none;
 decode(Word) when ?IS_WORD(Word) ->
-    Errors = [{error, error_name(Bit)} || Bit <- lists:seq(16, 31), Word band (1 bsl Bit) =/= 0],
-    Summary = [{error, error_interrupt} || Errors =:= [], Word band 16#8000 =/= 0],
-    Normal = [Event || {Bit, Event} <- [{0, command_complete}, {4, buffer_write_ready},
-                                        {5, buffer_read_ready}, {1, transfer_complete}],
-                       Word band (1 bsl Bit) =/= 0],
+    Errors = [{error, Name} || {Mask, Name} <- error_bits(), Word band Mask =/= 0],
+    Summary = [{error, error_interrupt} || Errors =:= [], Word band ?ERX_HW_SDHCI_INTERRUPT_ERROR_MASK =/= 0],
+    Normal = [Event || {Mask, Event} <- [{?ERX_HW_SDHCI_INTERRUPT_RESPONSE_MASK, command_complete},
+                                         {?ERX_HW_SDHCI_INTERRUPT_SPACE_AVAIL_MASK, buffer_write_ready},
+                                         {?ERX_HW_SDHCI_INTERRUPT_DATA_AVAIL_MASK, buffer_read_ready},
+                                         {?ERX_HW_SDHCI_INTERRUPT_DATA_END_MASK, transfer_complete}],
+                       Word band Mask =/= 0],
     Errors ++ Summary ++ Normal;
 decode(_) ->
     none.
 
-error_name(16) -> command_timeout;
-error_name(17) -> command_crc;
-error_name(18) -> command_end_bit;
-error_name(19) -> command_index;
-error_name(20) -> data_timeout;
-error_name(21) -> data_crc;
-error_name(22) -> data_end_bit;
-error_name(23) -> current_limit;
-error_name(24) -> auto_cmd;
-error_name(25) -> adma;
-error_name(26) -> tuning;
-error_name(27) -> response;
-error_name(Bit) -> {vendor, Bit}.
+%% The error bits from the lowest, each with its name. Bits 16 to 26 are the
+%% INTERRUPT fields of hw/svd/sdhci/sdhci.svd. Bit 27, response error, and the
+%% vendor bits 28 to 31 are in no field of the SVD (TODO.md), so they are
+%% numbered here (Host Controller 2.2.18-2.2.19, p.76-85, which the SVD cites
+%% for INTERRUPT).
+error_bits() ->
+    [{?ERX_HW_SDHCI_INTERRUPT_TIMEOUT_MASK, command_timeout},
+     {?ERX_HW_SDHCI_INTERRUPT_CRC_MASK, command_crc},
+     {?ERX_HW_SDHCI_INTERRUPT_END_BIT_MASK, command_end_bit},
+     {?ERX_HW_SDHCI_INTERRUPT_INDEX_MASK, command_index},
+     {?ERX_HW_SDHCI_INTERRUPT_DATA_TIMEOUT_MASK, data_timeout},
+     {?ERX_HW_SDHCI_INTERRUPT_DATA_CRC_MASK, data_crc},
+     {?ERX_HW_SDHCI_INTERRUPT_DATA_END_BIT_MASK, data_end_bit},
+     {?ERX_HW_SDHCI_INTERRUPT_BUS_POWER_MASK, current_limit},
+     {?ERX_HW_SDHCI_INTERRUPT_ACMD12ERR_MASK, auto_cmd},
+     {?ERX_HW_SDHCI_INTERRUPT_ADMAERR_MASK, adma},
+     {?ERX_HW_SDHCI_INTERRUPT_TUNEERR_MASK, tuning},
+     {1 bsl 27, response}
+     | [{1 bsl Bit, {vendor, Bit}} || Bit <- lists:seq(28, 31)]].
 
 %%% Signalling
 
@@ -155,8 +166,11 @@ divider(Base, Target) when is_integer(Base), Base > 0, is_integer(Target), Targe
     %% Base / Divisor is at most Target exactly when Base =< Target * Divisor.
     case [D || D <- lists:seq(2, ?MAX_DIVISOR, 2), Base =< Target * D] of
         [Divisor | _] ->
+            %% CONTROL1's DIVIDER takes half the divisor's low bits, DIVIDER_HI the rest.
             Half = Divisor div 2,
-            {ok, Divisor, ((Half band 16#FF) bsl 8) bor (((Half bsr 8) band 3) bsl 6)};
+            Low = Half band ((1 bsl ?ERX_HW_SDHCI_CONTROL1_DIVIDER_WIDTH) - 1),
+            High = Half bsr ?ERX_HW_SDHCI_CONTROL1_DIVIDER_WIDTH,
+            {ok, Divisor, ?ERX_HW_SDHCI_CONTROL1_DIVIDER_PUT(Low) bor ?ERX_HW_SDHCI_CONTROL1_DIVIDER_HI_PUT(High)};
         [] ->
             {error, too_slow}
     end;

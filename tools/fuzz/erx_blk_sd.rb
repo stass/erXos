@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz targets of the SD host controller's pure cores, one per parser of what the card
 # or the controller writes and one per state machine (test/erlang/erx_blk_sd_fuzz.erl),
@@ -17,6 +18,9 @@ module ErxBlkSdFuzz
   CARD = File.join(ROOT, 'erlang/apps/erx_blk/src/erx_blk_sd_card.erl')
   HOST = File.join(ROOT, 'erlang/apps/erx_blk/src/erx_blk_sd_host.erl')
   FUZZ = File.join(ROOT, 'test/erlang/erx_blk_sd_fuzz.erl')
+  # erx_blk_sd_host includes the generated erx_hw_sdhci.hrl, in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   BOUNDED = 'when Len >= 9, Len =< 11 ->'
   UNBOUNDED = 'when Len >= 9 ->'
   DEADLINE_SECONDS = '240'
@@ -41,7 +45,8 @@ module ErxBlkSdFuzz
     Dir.mktmpdir('erx-blk-sd-fuzz') do |work|
       card_path = File.join(work, 'erx_blk_sd_card.erl')
       File.binwrite(card_path, card_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, card_path, HOST, FUZZ, stdin_data: '')
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, card_path, HOST, FUZZ,
+                                       stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

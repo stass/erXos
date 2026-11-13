@@ -131,7 +131,10 @@ class GeneratedTest < Minitest::Test
     Erx::Generated.generate_one('hardware', root: ROOT, output: output)
     stamp = JSON.parse(File.read(File.join(output, Erx::Generated::STAMP)))
     assert_equal ['hardware'], stamp.fetch('generators')
-    assert(stamp.fetch('outputs').keys.all? { |relative| relative.start_with?('include/erx/') })
+    assert(stamp.fetch('outputs').keys.all? do |relative|
+      relative.start_with?('include/erx/', 'erlang/apps/erx/include/generated/erx_hw_')
+    end)
+    assert_includes stamp.fetch('outputs').keys, 'erlang/apps/erx/include/generated/erx_hw_sdhci.hrl'
     assert_includes stamp.fetch('outputs').keys, 'include/erx/mmio.h'
     build_tree = File.join(@directory, 'tree')
     FileUtils.mkdir_p(build_tree)

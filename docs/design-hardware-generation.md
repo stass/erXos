@@ -51,6 +51,21 @@ width. No peripheral may take one of those names. A bit the source does not decl
 is written as zero, by a field's update too, so a register's source declares every bit
 the hardware implements.
 
+An Erlang driver takes its peripheral's fields from the same model, so it never
+packs a register's bits by hand or copies a mask:
+`erlang/apps/erx/include/generated/erx_hw_<peripheral>.hrl`, which a module
+includes as `-include("generated/erx_hw_<peripheral>.hrl")`, defines for each
+field of each register, as `ERX_HW_<PERIPHERAL>_<REGISTER>_<FIELD>_*`, its shift,
+width and mask in place, a macro taking the field from a word, a guard that a
+value fits it, a macro placing a value in a word, which fails with `badfield`
+on a value that does not fit rather than spilling into the neighbouring
+fields, and each value the source names for it. These are arithmetic on a
+word only: a driver still reads and writes a register through `erx_device` by
+name, which refuses what the register does not allow. The macro names share
+one namespace, read from the headers themselves and checked like the C
+symbols, so a value named for a macro suffix or two paths meeting at one name
+are refused.
+
 The system-register extractor consumes the pinned Arm register package
 and a checked selection/attribute file. Encodings, widths and field ranges
 come only from that package. erXos declares allowed read/write operations,

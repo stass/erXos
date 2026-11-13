@@ -1342,6 +1342,10 @@ it; git history is the record of completed work.
   `DMA_SELECT` and `CONTROL2`'s `ADMA2_LENGTH_MODE`, `HOST_V4_ENABLE` and `ADDRESSING_64BIT`, as plain fields,
   since the generator has no field mark (the field-ownership item). Programmed I/O sets none of them; the
   field marks, or the ADMA2 mode's design, settle how the driver changes these words.
+  `INTERRUPT`'s error bits 27 (response error) and 28 to 31 (vendor) are in no field either, so
+  `erx_blk_sd_host:decode/1` numbers them by hand and a driver acknowledging `INTERRUPT` through `erx_device`
+  cannot clear them: one of them set would stay latched. Declaring them (HC 2.2.18-2.2.19) in `INTERRUPT`,
+  `IRPT_MASK` and `IRPT_EN` settles both; needed before the SD driver acknowledges interrupts.
 * [Medium] GENET, `hw/svd/genet/genet.svd` (docs/plan.md, 1b-I (c)), unnamed bits: the file names
   only the bits FreeBSD's `if_genetreg.h` names. `write/3` refuses a word with any other bit set, and
   `write_field/4` writes every other bit back as zero, while FreeBSD reads, modifies and writes back

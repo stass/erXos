@@ -78,11 +78,23 @@
             <field><name>TRNS_ACMD12</name><description>Auto CMD12 enable (sdhci.h:122)</description><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>TRNS_READ</name><description>Data direction: 1 card to host (sdhci.h:123)</description><bitOffset>4</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>TRNS_MULTI</name><description>Multiple block select (sdhci.h:124)</description><bitOffset>5</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>CMD_RESP</name><description>Response type: 0 none, 1 136 bits, 2 48 bits, 3 48 bits with busy (sdhci.h:127-131)</description><bitOffset>16</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>CMD_RESP</name><description>Response type: 0 none, 1 136 bits, 2 48 bits, 3 48 bits with busy (sdhci.h:127-131)</description><bitOffset>16</bitOffset><bitWidth>2</bitWidth>
+              <enumeratedValues>
+                <enumeratedValue><name>NONE</name><value>0</value></enumeratedValue>
+                <enumeratedValue><name>BITS136</name><value>1</value></enumeratedValue>
+                <enumeratedValue><name>BITS48</name><value>2</value></enumeratedValue>
+                <enumeratedValue><name>BITS48_BUSY</name><value>3</value></enumeratedValue>
+              </enumeratedValues></field>
             <field><name>CMD_CRC</name><description>Command CRC check enable (sdhci.h:132)</description><bitOffset>19</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>CMD_INDEX_CHECK</name><description>Command index check enable (sdhci.h:133)</description><bitOffset>20</bitOffset><bitWidth>1</bitWidth></field>
             <field><name>CMD_DATA</name><description>Data present select (sdhci.h:134)</description><bitOffset>21</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>CMD_TYPE</name><description>Command type: 0 normal, 1 suspend, 2 resume, 3 abort (sdhci.h:135-139)</description><bitOffset>22</bitOffset><bitWidth>2</bitWidth></field>
+            <field><name>CMD_TYPE</name><description>Command type: 0 normal, 1 suspend, 2 resume, 3 abort (sdhci.h:135-139)</description><bitOffset>22</bitOffset><bitWidth>2</bitWidth>
+              <enumeratedValues>
+                <enumeratedValue><name>NORMAL</name><value>0</value></enumeratedValue>
+                <enumeratedValue><name>SUSPEND</name><value>1</value></enumeratedValue>
+                <enumeratedValue><name>RESUME</name><value>2</value></enumeratedValue>
+                <enumeratedValue><name>ABORT</name><value>3</value></enumeratedValue>
+              </enumeratedValues></field>
             <field><name>CMD_INDEX</name><description>Command index, SDHCI_COMMAND (sdhci.h:141); six bits (HC 2.2.6, p.45)</description><bitOffset>24</bitOffset><bitWidth>6</bitWidth></field>
           </fields>
         </register>

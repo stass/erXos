@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz targets of the Raspberry Pi 4 Ethernet driver's parsers of what its
 # devices wrote: erx_genet_rx's reading of a receive descriptor's status word and
@@ -17,6 +18,9 @@ require 'tmpdir'
 module ErxGenetFuzz
   ROOT = File.expand_path('../..', __dir__)
   CORES = File.join(ROOT, 'erlang/apps/erx_net/erxos')
+  # The cores include the generated erx_hw_genet.hrl, in build/gen.
+  Erx::Generated.ensure(root: ROOT)
+  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   Target = Data.define(:name, :modules, :mutants)
   # For each target: its Erlang module, the cores it compiles, and what each
   # seeded copy says, with the core, the text it replaces and the text it plants.
@@ -64,7 +68,7 @@ module ErxGenetFuzz
       paths = sources.map do |name, text|
         File.join(work, "#{name}.erl").tap { |path| File.binwrite(path, text) }
       end
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, *paths,
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, *paths,
                                        File.join(ROOT, 'test/erlang', "#{target}.erl"), stdin_data: '')
       raise output unless status.success?
 

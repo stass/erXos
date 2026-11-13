@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require 'open3'
 require_relative '../../tools/lib/erx/hardware'
 require_relative '../fixtures/sanitizer_environment'
 
@@ -116,6 +117,65 @@ class HardwareTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::Hardware.output_plan(root: @root) }
   end
 
+  # CMDTM's fields as the SD Host Controller Specification lays them out (HC 2.2.6,
+  # p.45-47), written here rather than read from the SVD, so a field the source moves
+  # fails the check. check/0 answers ok, or each fact with what the header gave instead.
+  CMDTM_CHECK = <<~ERLANG
+    -module(cmdtm_check).
+    -export([check/0]).
+    -include("generated/erx_hw_sdhci.hrl").
+
+    check() ->
+        Facts = [{shift, 24, ?ERX_HW_SDHCI_CMDTM_CMD_INDEX_SHIFT},
+                 {width, 6, ?ERX_HW_SDHCI_CMDTM_CMD_INDEX_WIDTH},
+                 {mask, 16#3f000000, ?ERX_HW_SDHCI_CMDTM_CMD_INDEX_MASK},
+                 {put, 16#11000000, index(17)},
+                 {get, 17, ?ERX_HW_SDHCI_CMDTM_CMD_INDEX_GET(16#d1000000)},
+                 {response, 16#20000, ?ERX_HW_SDHCI_CMDTM_CMD_RESP_PUT(?ERX_HW_SDHCI_CMDTM_CMD_RESP_BITS48)},
+                 {busy, 3, ?ERX_HW_SDHCI_CMDTM_CMD_RESP_BITS48_BUSY},
+                 {data, 16#200000, ?ERX_HW_SDHCI_CMDTM_CMD_DATA_MASK},
+                 {too_large, 64, refused(64)}, {negative, -1, refused(-1)}, {atom, one, refused(one)},
+                 {fits, [true, false, false], [fits(63), fits(64), fits(-1)]}],
+        case [Fact || {_, Expected, Actual} = Fact <- Facts, Expected =/= Actual] of
+            [] -> ok;
+            Wrong -> {wrong, Wrong}
+        end.
+
+    index(Value) -> ?ERX_HW_SDHCI_CMDTM_CMD_INDEX_PUT(Value).
+
+    refused(Value) ->
+        try index(Value) of
+            _ -> accepted
+        catch
+            error:{badfield, {sdhci, cmdtm, cmd_index}, Refused} -> Refused
+        end.
+
+    fits(Value) when ?ERX_HW_SDHCI_CMDTM_CMD_INDEX_FITS(Value) -> true;
+    fits(_) -> false.
+  ERLANG
+
+  def test_erlang_fields_match_the_specification
+    assert_equal 'ok', cmdtm_check(File.binread(File.join(@repository, 'hw/svd/sdhci/sdhci.svd')))
+  end
+
+  # The seeded fault: CMD_INDEX one bit higher in the source, which the generator accepts
+  # (bits 30 and 31 are free) and the check must refuse.
+  def test_erlang_field_check_catches_a_field_shifted_by_one
+    source = File.binread(File.join(@repository, 'hw/svd/sdhci/sdhci.svd'))
+    shifted = source.sub(%r{(<name>CMD_INDEX</name>.*?<bitOffset>)24(</bitOffset>)}, '\125\2')
+    refute_equal source, shifted
+    assert_includes cmdtm_check(shifted), '{shift,24,25}'
+  end
+
+  # An enumerated value named for one of a field's macros would define that macro twice.
+  def test_erlang_names_cannot_collide
+    collide = @source.sub(%r{(<name>DATA</name>.*?</bitWidth>)},
+                          '\1<enumeratedValues><enumeratedValue><name>MASK</name><value>1</value>' \
+                          '</enumeratedValue></enumeratedValues>')
+    refute_equal @source, collide
+    assert_raises(Erx::Error) { Erx::Hardware.parse_svd(collide) }
+  end
+
   def test_generated_accessors_compile_and_preserve_neighbor_bits
     Erx::Hardware.output_plan(root: @root).each do |relative, bytes|
       FileUtils.mkdir_p(File.dirname(File.join(@root, relative)))
@@ -156,5 +216,29 @@ class HardwareTest < Minitest::Test
                 '-o', program], name: 'compile-hardware', deadline: 60)
     result = runner.run([program], name: 'hardware-accessors', deadline: 30)
     assert_equal 'succeeded', result.fetch('state')
+  end
+
+  private
+
+  # What CMDTM_CHECK returns against the Erlang header generated from svd, compiled with
+  # warnings as errors on stock's emulator (ERX_ERLC and ERX_ERL, which make check
+  # supplies): 'ok', or the error it failed with.
+  def cmdtm_check(svd)
+    FileUtils.mkdir_p(File.join(@root, 'hw/svd/sdhci'))
+    File.binwrite(File.join(@root, 'hw/svd/sdhci/sdhci.svd'), svd)
+    include_dir = File.join(@root, 'erlang/apps/erx/include')
+    Erx::Hardware.output_plan(root: @root).each do |relative, bytes|
+      FileUtils.mkdir_p(File.dirname(File.join(@root, relative)))
+      File.binwrite(File.join(@root, relative), bytes)
+    end
+    File.binwrite(File.join(@root, 'cmdtm_check.erl'), CMDTM_CHECK)
+    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', include_dir, '-o', @root,
+                                     File.join(@root, 'cmdtm_check.erl'), stdin_data: '')
+    assert status.success?, output
+    output, status = Open3.capture2e(ENV.fetch('ERX_ERL'), '-noshell', '-pa', @root, '-eval',
+                                     'io:format("~p", [cmdtm_check:check()]), halt().',
+                                     chdir: @root, stdin_data: '')
+    assert status.success?, output
+    output
   end
 end

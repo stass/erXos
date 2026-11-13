@@ -8227,6 +8227,10 @@ on the development host on 2026-10-29), and emits one C header per device:
   `vendorExtensions` element in erXos's own
   namespace and emitted as one function per sequence, with its barriers.
 
+It also emits one Erlang header per device, each field's shift, width, mask
+and enumerated values for the device's Erlang driver
+([hardware generation](design-hardware-generation.md#register-inputs)).
+
 The generator refuses a register outside its address block, overlapping
 fields, a field beyond its register's width, an enumerated value wider than
 its field, a duplicate name, and an unknown element in erXos's namespace.

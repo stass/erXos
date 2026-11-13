@@ -26,9 +26,11 @@ buffer(Size) -> list_to_binary([I rem 251 || I <- lists:seq(0, Size - 1)]).
 
 %% The oracle: error first, then start and end, then the length against an
 %% Ethernet header after the padding, the buffer and the bytes read; a frame is
-%% the bytes from offset 2 to the length.
+%% the bytes from offset 2 to the length. The length is all 16 bits of 31:16, as
+%% RX_DESC_STATUS.BUFLEN in hw/svd/genet/genet.svd declares, so a set high bit
+%% makes a length too long instead of a shorter one.
 judge(Status, Bytes) ->
-    Length = (Status bsr 16) band 16#fff,
+    Length = (Status bsr 16) band 16#ffff,
     Read = byte_size(Bytes),
     if
         Status band ?ERR =/= 0 -> {drop, rx_error};

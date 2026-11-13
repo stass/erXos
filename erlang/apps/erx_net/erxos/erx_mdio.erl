@@ -12,11 +12,11 @@ with `Polls` 1, until it answers anything but `{wait, Next}`, polling again
 with `Next` after `poll_interval_us/0`. The count comes back from `poll/3`,
 so the bound holds as long as the transport passes back what it returned.
 
-The register's fields (FreeBSD 975e3605ebb1,
-`sys/arm64/broadcom/genet/if_genetreg.h:101-110`): busy and start, bit 29;
-read failed, bit 28; read, bit 27; write, bit 26; the PHY address, bits
-25:21; the register, bits 20:16; the data, bits 15:0. The controller clears
-busy when the operation ends. A read whose read-failed bit is set returns an
+The register's fields are MDIO_CMD's in hw/svd/genet/genet.svd (FreeBSD
+975e3605ebb1, `sys/arm64/broadcom/genet/if_genetreg.h:101-110`), through the
+generated erx_hw_genet.hrl: busy and start, read failed, read, write, the PHY
+address, the register and the data. The controller clears busy when the
+operation ends. A read whose read-failed bit is set returns an
 error, where FreeBSD returns 0 (`if_genet.c:1687-1688`); a poll still busy
 after `max_polls/0` polls, FreeBSD's bound of 1,000 polls 10 us apart
 (`if_genet.c:1669, 1684-1692`), returns `timeout`.
@@ -26,18 +26,15 @@ after `max_polls/0` polls, FreeBSD's bound of 1,000 polls 10 us apart
 -export([command/1, start/1, poll/3, decode/1]).
 -export_type([op/0, phy/0, reg/0, value/0, word/0, fields/0]).
 
--define(BUSY, (1 bsl 29)).
--define(READ_FAILED, (1 bsl 28)).
--define(READ, (1 bsl 27)).
--define(WRITE, (1 bsl 26)).
--define(PHY_SHIFT, 21).
--define(REG_SHIFT, 16).
--define(FIELD_MASK, 16#1f).
--define(VALUE_MASK, 16#ffff).
+-include("generated/erx_hw_genet.hrl").
+
+-define(BUSY, ?ERX_HW_GENET_MDIO_CMD_START_BUSY_MASK).
+-define(READ_FAILED, ?ERX_HW_GENET_MDIO_CMD_READ_FAILED_MASK).
+-define(READ, ?ERX_HW_GENET_MDIO_CMD_READ_MASK).
+-define(WRITE, ?ERX_HW_GENET_MDIO_CMD_WRITE_MASK).
 -define(MAX_POLLS, 1000).
 -define(POLL_INTERVAL_US, 10).
 
--define(IS_FIELD(V), (is_integer(V) andalso V >= 0 andalso V =< ?FIELD_MASK)).
 -define(IS_U32(V), (is_integer(V) andalso V >= 0 andalso V =< 16#ffffffff)).
 
 -type phy() :: 0..31.
@@ -61,11 +58,12 @@ poll_interval_us() -> ?POLL_INTERVAL_US.
 
 -doc "The command word of an operation, busy clear.".
 -spec command(op()) -> word().
-command({read, Phy, Reg}) when ?IS_FIELD(Phy), ?IS_FIELD(Reg) ->
-    ?READ bor (Phy bsl ?PHY_SHIFT) bor (Reg bsl ?REG_SHIFT);
-command({write, Phy, Reg, Value}) when ?IS_FIELD(Phy), ?IS_FIELD(Reg), is_integer(Value),
-                                       Value >= 0, Value =< ?VALUE_MASK ->
-    ?WRITE bor (Phy bsl ?PHY_SHIFT) bor (Reg bsl ?REG_SHIFT) bor Value.
+command({read, Phy, Reg}) when ?ERX_HW_GENET_MDIO_CMD_PMD_FITS(Phy), ?ERX_HW_GENET_MDIO_CMD_REG_FITS(Reg) ->
+    ?READ bor ?ERX_HW_GENET_MDIO_CMD_PMD_PUT(Phy) bor ?ERX_HW_GENET_MDIO_CMD_REG_PUT(Reg);
+command({write, Phy, Reg, Value}) when ?ERX_HW_GENET_MDIO_CMD_PMD_FITS(Phy), ?ERX_HW_GENET_MDIO_CMD_REG_FITS(Reg),
+                                       ?ERX_HW_GENET_MDIO_CMD_VALUE_FITS(Value) ->
+    ?WRITE bor ?ERX_HW_GENET_MDIO_CMD_PMD_PUT(Phy) bor ?ERX_HW_GENET_MDIO_CMD_REG_PUT(Reg)
+        bor ?ERX_HW_GENET_MDIO_CMD_VALUE_PUT(Value).
 
 -doc """
 The word that starts the operation a command word names: the command word
@@ -87,7 +85,7 @@ poll(Op, Word, Polls) when ?IS_U32(Word), is_integer(Polls), Polls >= 1 ->
         {true, _} when Polls < ?MAX_POLLS -> {wait, Polls + 1};
         {true, _} -> {error, timeout};
         {false, {read, _, _}} when Word band ?READ_FAILED =/= 0 -> {error, read_failed};
-        {false, {read, _, _}} -> {ok, Word band ?VALUE_MASK};
+        {false, {read, _, _}} -> {ok, ?ERX_HW_GENET_MDIO_CMD_VALUE_GET(Word)};
         {false, {write, _, _, _}} -> ok
     end.
 
@@ -98,6 +96,6 @@ decode(Word) when ?IS_U32(Word) ->
       read_failed => Word band ?READ_FAILED =/= 0,
       read => Word band ?READ =/= 0,
       write => Word band ?WRITE =/= 0,
-      phy => (Word bsr ?PHY_SHIFT) band ?FIELD_MASK,
-      reg => (Word bsr ?REG_SHIFT) band ?FIELD_MASK,
-      data => Word band ?VALUE_MASK}.
+      phy => ?ERX_HW_GENET_MDIO_CMD_PMD_GET(Word),
+      reg => ?ERX_HW_GENET_MDIO_CMD_REG_GET(Word),
+      data => ?ERX_HW_GENET_MDIO_CMD_VALUE_GET(Word)}.
