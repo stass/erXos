@@ -11,13 +11,14 @@ require_relative '../fixtures/erlang_build'
 # core, against erx_virtio_gpu_core compiled from source on stock's emulator (ERX_ERL and
 # ERX_ERLC, which make check supplies). Then each seeded fault, applied to a copy of the
 # module, must fail the case named for it: a channel conversion that swaps red and blue, a
-# frame whose last request carries no fence, a transfer offset off by the pixel size, and a
-# parse that takes any fence_id as the request's.
+# frame whose last request carries no fence, a transfer offset off by the pixel size, a
+# parse that takes any fence_id as the request's, and a frame done before every request is
+# answered, which would let flush/3 return while the device still reads the image.
 class ErxVirtioGpuCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The application holding the module (compiled whole, ErlangBuild), the module and the cases.
-  APPLICATIONS = %w[erx_display].freeze
-  MODULE = 'erlang/apps/erx_display/src/erx_virtio_gpu_core.erl'
+  APPLICATIONS = %w[erx_display erx_fb].freeze
+  MODULE = 'erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl'
   MODULE_SOURCE = File.join(ROOT, MODULE)
   TESTS = %w[test/erlang/erx_virtio_gpu_core_tests.erl].freeze
   DEADLINE_SECONDS = '120'
@@ -40,7 +41,11 @@ class ErxVirtioGpuCoreTest < Minitest::Test
     Seed.new(fault: "any fence_id taken as a fenced request's",
              anchor: 'fence_check({fence, FenceId}, Flags, FenceId, Result) when',
              replacement: 'fence_check({fence, _Want}, Flags, _FenceId, Result) when',
-             catching_case: 'decode_holds_the_fence_to_the_request_test')
+             catching_case: 'decode_holds_the_fence_to_the_request_test'),
+    Seed.new(fault: 'a frame done while a request is still in flight',
+             anchor: 'case map_size(Inflight) of',
+             replacement: 'case 0 of',
+             catching_case: 'frame_posts_waits_and_finishes_test')
   ].freeze
 
   def test_virtio_gpu_core_cases_pass_under_eunit

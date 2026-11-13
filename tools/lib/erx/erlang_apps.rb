@@ -26,7 +26,7 @@ module Erx
     # Applications of another domain's image, written and tested on the host ahead of
     # the milestone that builds that image (docs/plan.md, "Critical path and parallel
     # tracks"): the host tests compile them, and no release holds them yet.
-    UNRELEASED = %w[erx_display].freeze
+    UNRELEASED = %w[erx_display erx_fb].freeze
     SOURCE = 'erlang/apps'
     # Test-only applications, in test/erlang/apps: the runtime build compiles them into the
     # OTP copy beside the others, so a test image's domain boot script can take one

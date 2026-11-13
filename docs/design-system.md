@@ -2777,7 +2777,7 @@ A **driver** is an Erlang process under a supervisor in the domain that
 holds its device, written against the **device NIF**, `erx_device`, the
 one C beneath it ([design-runtime.md](design-runtime.md#the-device-nif)).
 Drivers come in one application per device class under `erlang/apps/`,
-`erx_uart` for the UARTs; only their modules and `erx_device` itself
+`erx_uart` for the UARTs and `erx_fb` for the displays; only their modules and `erx_device` itself
 name `erx_device`, which a source check with a seeded violation enforces.
 Through the NIF:
 

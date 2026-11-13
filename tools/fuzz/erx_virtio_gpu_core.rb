@@ -13,12 +13,13 @@ require_relative '../lib/erx/generated'
 # runs the module as it is, then each seeded copy, which must fail with its marker: one
 # that takes a fenced answer to an unfenced request (the reference holds the fence), and one
 # that clips a rectangle a pixel past the screen's right edge (the plan's check holds every
-# transfer inside the image).
+# transfer inside the image), and one whose frame is done with a request still in flight
+# (the frame's driver counts the answers).
 module ErxVirtioGpuCoreFuzz
   ROOT = File.expand_path('../..', __dir__)
   # The generated header named here is in build/gen.
   Erx::Generated.ensure(root: ROOT)
-  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_display/src/erx_virtio_gpu_core.erl')
+  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl')
   FUZZ_SOURCE = File.join(ROOT, 'test/erlang/erx_virtio_gpu_core_fuzz.erl')
   INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   Seed = Data.define(:fault, :anchor, :replacement, :marker)
@@ -28,7 +29,9 @@ module ErxVirtioGpuCoreFuzz
              replacement: 'fence_check(none, _Flags, _FenceId, Result) -> Result;',
              marker: 'disagrees_with_reference'),
     Seed.new(fault: "a rectangle clipped a pixel past the screen's right edge",
-             anchor: 'min(X1, Width)', replacement: 'min(X1, Width + 1)', marker: 'plan_wrong')
+             anchor: 'min(X1, Width)', replacement: 'min(X1, Width + 1)', marker: 'plan_wrong'),
+    Seed.new(fault: 'a frame done while a request is still in flight',
+             anchor: 'case map_size(Inflight) of', replacement: 'case 0 of', marker: 'done_early')
   ].freeze
   DEADLINE_SECONDS = '120'
 

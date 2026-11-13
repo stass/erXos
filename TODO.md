@@ -594,14 +594,22 @@ it; git history is the record of completed work.
   fix is ConstantField support in the refresh and a generator of C accessors that these files include.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
   on the direct path a display driver maps a client's pixel area read-only into its device's DMA window; the device
-  NIF cannot map an area into the window yet. `erx_virtio_gpu_core` builds every request but
-  `RESOURCE_ATTACH_BACKING`, which names the screen image's region with `{out, {region, R}}`; the driver process,
-  the development manifest's display domain and the QEMU screenshot case come next.
-* [High] device NIF, a screen-sized region (`liberx/backend/core/device_check.h`): a given device's memory is one
-  contiguous object of at most `ERX_MEM_CONTIGUOUS_MAX`, 1 MiB, and its queues and regions are carved from it, so
-  no screen image larger than 1 MiB less the queues fits (640 by 480 at 32 bits is 1.2 MB). The virtio-gpu
-  device's memory needs a larger bound, or a region its own object.
-* [Low] `erlang/apps/erx_display/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
+  NIF cannot map an area into the window yet.
+* [Medium] `erlang/apps/erx_fb/src/erx_virtio_gpu.erl`, [The display device](docs/design-display.md#the-display-device):
+  the virtio-gpu driver process has run only its pure core's host tests. Nothing starts it yet: the development
+  manifest has no display domain (a manifest row giving the virtio-gpu needs a device role and kind that
+  `mf_device_role` and the device kinds do not have), and no QEMU case attaches a virtio-gpu and compares a
+  screenshot. Those come next, with a run of the driver on the device. Before then, a host test of the process
+  on stock OTP is cheap: stub modules `erx_device`, `erx_irq_line`, `erx_memdraw` and `erx_log` that script a
+  device answering out of order, refusing a post as full, firing a spurious line, returning a stray completion
+  between frames and staying silent past the deadline (a `-D` macro shortening it).
+* [Medium] `erlang/apps/erx_fb/src/erx_virtio_gpu.erl`: the screen image's region is sized from the display size
+  the device reports at each bring-up, and `erx_device:region/3` refuses the same index with other bytes, so a
+  restart after the display's size changed leaves the domain without a screen until the next boot. Size the region
+  from a bound that does not change between restarts and show any mode that fits it. The driver also acknowledges a
+  configuration-change interrupt without reading `events_read` or writing `events_clear` (virtio 1.2, 5.7.4.2),
+  so a change of display size is not followed.
+* [Low] `erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
   bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
 * [Medium] chokepoints, regions ([design-display.md](docs/design-display.md), the `wrap/4` row of the chokepoint
   table): nothing in the build limits who calls `erx_region_view` (only `erx_memdraw_nif.c`) or

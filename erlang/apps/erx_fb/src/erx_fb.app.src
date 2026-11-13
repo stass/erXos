@@ -1,0 +1,14 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% The display device class's drivers, over erx_device (docs/design-display.md, "The
+%% display device"): each is an Erlang process that implements the erx_display behaviour,
+%% shows a screen image and flushes the rectangles that changed. The virtio-gpu driver is
+%% erx_virtio_gpu, the process, and erx_virtio_gpu_core, its pure core.
+{application, erx_fb,
+ [{description, "erXos display drivers"},
+  {vsn, "1"},
+  {modules, [erx_virtio_gpu, erx_virtio_gpu_core]},
+  {registered, [erx_fb]},
+  {applications, [kernel, stdlib, erx, erx_display]},
+  {env, []}]}.

@@ -23,7 +23,7 @@ module Erx
   module DeviceCallers
     MODULE = 'erx_device'
     # Applications whose modules drive a device class.
-    DRIVER_APPLICATIONS = %w[erx_blk erx_uart].freeze
+    DRIVER_APPLICATIONS = %w[erx_blk erx_fb erx_uart].freeze
     # erXos's own directory of an application that also runs outside erXos, whose other
     # modules name nothing of erXos's: the network stack's virtio transport
     # (docs/design-network-stack.md, "Two places, four seams").

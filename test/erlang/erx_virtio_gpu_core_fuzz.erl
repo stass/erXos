@@ -5,7 +5,10 @@
 %% what the device wrote, and random rectangles through flush_plan/4. Whatever arrives,
 %% decode/2 agrees with reference/2, which reads the header's words by position and judges
 %% them in the order the specification gives them meaning; every plan keeps each transfer
-%% inside the screen image and fences its last request alone. Types, flags, fence ids and
+%% inside the screen image and fences its last request alone; and every frame of a plan,
+%% driven with refusals of the queue and the device's answers in any order, is done only
+%% when each of its requests was answered with what reference/2 accepts, and otherwise
+%% stops on the answer reference/2 refuses or the tag that was not in flight. Types, flags, fence ids and
 %% sizes cluster at the values that matter, so every path is common. The seed comes from
 %% make check-fuzz.
 
@@ -31,6 +34,7 @@ run([Seed]) ->
 
 round_of() ->
     check_plan(),
+    check_frame(),
     Expect = case rand:uniform(3) of
                  1 -> display_info;
                  2 -> {nodata, none};
@@ -133,6 +137,87 @@ inside({[{out, <<Type:32/little, _:20/binary, X:32/little, Y:32/little, W:32/lit
     end;
 inside(_Request, _Width, _Height, _Stride, _Length) ->
     false.
+
+%% A frame of a random plan, driven until it is done or stops, or 400 steps, which a frame
+%% that forgot an answer would reach.
+check_frame() ->
+    Width = rand:uniform(40),
+    Height = rand:uniform(40),
+    Geometry = #{width => Width, height => Height, stride => Width * 4, length => Width * 4 * Height},
+    {ok, Requests} = erx_virtio_gpu_core:flush_plan([rect(Width, Height) || _ <- lists:seq(1, rand:uniform(4))],
+                                                    Geometry, 1, rand:uniform(1 bsl 64) - 1),
+    Tag = pick([0, rand:uniform(1 bsl 64) - 1, (1 bsl 64) - 1 - rand:uniform(4)]),
+    Frame = erx_virtio_gpu_core:frame_start(Requests, Tag),
+    drive(erx_virtio_gpu_core:frame_step(Frame, next), Requests, #{}, 0, 400).
+
+%% Posted maps each tag in flight to its request's expect(); Answered counts the answers
+%% reference/2 accepted.
+drive(_Action, Requests, _Posted, _Answered, 0) ->
+    error({frame_never_ends, Requests});
+drive({{post, Tag, Segments}, Frame}, Requests, Posted, Answered, Steps) ->
+    {Segments, Expect} = lists:keyfind(Segments, 1, Requests),
+    case rand:uniform(6) of
+        1 -> after_full(erx_virtio_gpu_core:frame_step(Frame, {full, Tag}), Requests, Posted, Answered, Steps - 1);
+        _ -> drive(erx_virtio_gpu_core:frame_step(Frame, next), Requests, Posted#{Tag => Expect}, Answered, Steps - 1)
+    end;
+drive({wait, Frame}, Requests, Posted, Answered, Steps) when map_size(Posted) > 0 ->
+    %% Now and then an empty batch, as a spurious delivery of the line drains nothing.
+    Batch = [answer_to(Tag, Posted) || Tag <- lists:sublist(shuffle(maps:keys(Posted)), rand:uniform(map_size(Posted) + 1) - 1)],
+    {Taken, Outcome} = judge(Batch, Posted, Answered),
+    Next = erx_virtio_gpu_core:frame_step(Frame, {answers, Batch}),
+    case {Outcome, Next} of
+        {{stop, Why}, {{stop, Why}, _}} -> ok;
+        {continue, _} -> drive(Next, Requests, maps:without(Taken, Posted), Answered + length(Taken), Steps - 1);
+        _ -> error({frame_disagrees_with_reference, Batch, Outcome, Next})
+    end;
+drive({{done, Answers, _Tag}, _Frame}, Requests, Posted, Answered, _Steps) ->
+    case map_size(Posted) =:= 0 andalso Answered =:= length(Requests) andalso length(Answers) =:= Answered of
+        true -> ok;
+        false -> error({done_early, Requests, Posted, Answered})
+    end;
+drive(Other, Requests, Posted, Answered, _Steps) ->
+    error({frame_wrong, Other, Requests, Posted, Answered}).
+
+%% After a refused post: the frame waits when something else is in flight, and stops when
+%% nothing is.
+after_full({wait, Frame}, Requests, Posted, Answered, Steps) when map_size(Posted) > 0 ->
+    drive({wait, Frame}, Requests, Posted, Answered, Steps);
+after_full({{stop, {queue, full}}, _Frame}, _Requests, Posted, _Answered, _Steps) when map_size(Posted) =:= 0 ->
+    ok;
+after_full(Other, Requests, Posted, _Answered, _Steps) ->
+    error({full_wrong, Other, Requests, Posted}).
+
+%% An answer to a tag in flight: mostly the exact answer, so frames are often done, else
+%% one near it; now and then an answer to a tag that is not in flight.
+answer_to(Tag, Posted) ->
+    case rand:uniform(30) of
+        1 -> {(Tag + map_size(Posted)) band ((1 bsl 64) - 1), answer({nodata, none})};
+        N when N < 28 -> {Tag, exact(maps:get(Tag, Posted))};
+        _ -> {Tag, answer(maps:get(Tag, Posted))}
+    end.
+
+exact({nodata, none}) -> <<?NODATA:32/little, 0:32, 0:64, 0:64>>;
+exact({nodata, {fence, Id}}) -> <<?NODATA:32/little, 1:32/little, Id:64/little, 0:64>>.
+
+%% What the frame must make of a batch, judged by reference/2: the first answer to a tag not
+%% in flight or that reference/2 refuses stops it; otherwise it goes on.
+judge(Batch, Posted, _Answered) ->
+    judge(Batch, Posted, [], continue).
+
+judge([], _Posted, Taken, Outcome) ->
+    {Taken, Outcome};
+judge([{Tag, Bytes} | Rest], Posted, Taken, continue) ->
+    case maps:find(Tag, Posted) of
+        error ->
+            {Taken, {stop, {tag, Tag}}};
+        {ok, Expect} ->
+            case reference(Expect, Bytes) of
+                {error, Reason} -> {Taken, {stop, {answer, Tag, Reason}}};
+                _Accepted -> judge(Rest, maps:remove(Tag, Posted), [Tag | Taken], continue)
+            end
+    end.
+
+shuffle(List) -> [Item || {_, Item} <- lists:sort([{rand:uniform(), Item} || Item <- List])].
 
 rect(Width, Height) ->
     X0 = rand:uniform(Width + 20) - 11,

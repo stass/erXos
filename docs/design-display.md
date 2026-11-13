@@ -1407,6 +1407,23 @@ framebuffer a client that presents as fast as it is answered presents
 as fast as `erx_screen` copies, unless the platform's driver can wait
 for a vertical blank, which it then does before it returns.
 
+The display drivers are the display device class's driver application,
+`erx_fb`, one application per device class as every driver's is
+([design.md](design.md), the tree layout). The virtio-gpu driver is the
+process `erx_virtio_gpu`, registered as `erx_fb`, over its pure core
+`erx_virtio_gpu_core`, which builds every request, holds every answer to
+its request and decides the conversation: the bring-up asks one request
+at a time, as FreeBSD's `vtgpu_attach` does (the display's size, the
+screen image's region, a 2D resource of that size, its backing, which is
+the region, and scanout 0), and each flush and each request of the
+bring-up runs as a frame, posted in order and done only when every
+request is answered and checked. The process performs what the core
+asks and keeps the state between calls. During a flush, an answer that
+fails its check, a broken queue or a frame that the device does not
+finish within its deadline ends the process, and its restart resets
+the device. A failure during the bring-up leaves no process, so the
+domain runs without a screen.
+
 The image is the screen image, or, for a driver whose `info/1` reports
 `direct`, a client's buffer that covers the screen ([The screen and its
 one path to the device](#the-screen-and-its-one-path-to-the-device)). A
@@ -4035,7 +4052,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
 | Only `erx_memdraw:wrap/4` makes an image over memory `erx_memdraw` did not allocate, and only after checking the range | a source check over the NIF: the one site that sets an image's data pointer from an area or a device's region ([design-runtime.md](design-runtime.md#the-device-nif), Regions) |
 | Only `erx_screen` writes the screen image, makes images over clients' pixel areas, and calls the display driver's `flush/3` and `power/2` | an xref check over the display release |
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |
-| Only the display driver's process calls `erx_device`'s functions on the display device | the same xref check |
+| Only the display driver's process calls `erx_device`'s functions on the display device | the same xref check; and `device-callers` admits the display drivers' application, `erx_fb`, among the driver applications, while `device-posters` admits `erx_virtio_gpu` alone of it to call `erx_device:post/4` |
 | Only `erx_winfs` calls `erx_wm`'s callbacks | the same xref check |
 | The display release holds no draw decoder, picture or font reader, widget module or renderer, and starts no program | an xref check that the display release contains none of `erx_draw_core`, `erx_draw_codec`, `erx_draw_image`, `erx_font`, `erx_png`, `erx_inflate` and the `erx_ui` application, and calls no function that starts a port or a sub-space; a seeded dependency on each fails it |
 | Only `erx_winctl` reads a `ctl` line, and only `erx_wctl` a `wctl` line | a source check over the display release |

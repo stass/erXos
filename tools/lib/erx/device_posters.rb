@@ -14,7 +14,10 @@ module Erx
   # no way to hand it to the device. The rule is therefore that no Erlang source but
   # erx_blk_write calls erx_device:post/4. The network stack's virtio transport,
   # erx_virtio_net, is the other site: a network device's requests carry frames, and the
-  # transport is the one module that posts them.
+  # transport is the one module that posts them. The virtio-gpu display driver,
+  # erx_virtio_gpu, is the third: a display device only reads the screen image and is
+  # handed no medium to write, and the driver's process is the one module that posts its
+  # requests, every one built by its pure core (docs/design-display.md, "The display device").
   #
   # The check reads the Erlang sources DeviceCallers reads, with comments removed and
   # strings kept, over the whole text, so a call split across lines is seen too. It
@@ -25,7 +28,8 @@ module Erx
   # applications; within those few modules, this check catches a slip, not a module that
   # holds the module name in a variable, which their review must.
   module DevicePosters
-    SITES = %w[erlang/apps/erx_blk/src/erx_blk_write.erl erlang/apps/erx_net/erxos/erx_virtio_net.erl].freeze
+    SITES = %w[erlang/apps/erx_blk/src/erx_blk_write.erl erlang/apps/erx_net/erxos/erx_virtio_net.erl
+               erlang/apps/erx_fb/src/erx_virtio_gpu.erl].freeze
     ATOM = ->(name) { "(?<![A-Za-z0-9_@'])(?:#{name}|'#{name}')(?![A-Za-z0-9_@'])" }
     POSTED = /
       #{ATOM.call('erx_device')} \s* (?: : | , ) \s* #{ATOM.call('post')}
