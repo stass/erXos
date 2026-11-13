@@ -292,7 +292,26 @@ mailbox's page, which the kernel keeps, so it goes to no driver (PL2,
 devices erXos drives use wired interrupts. No IOMMU is described, so its
 Ethernet controller (`brcm,bcm2711-genet-v5`) and its SD controller
 (`brcm,bcm2711-emmc2`) are unconfined, and a release build's system
-manifest gives each of them a domain of its own ([DMA](#dma)). The VL805
+manifest gives each of them a domain of its own ([DMA](#dma)).
+
+**The SD controller.** The microSD slot is EMMC2,
+`/emmc2bus/mmc@7e340000`: `0x100` bytes of registers at bus address
+`0x7e340000`, which the bus's `ranges` put at `0xfe340000`, a level
+interrupt on GIC SPI 126, and a clock of the SoC's clock controller with
+no frequency in the tree (Linux 6.18's `bcm2711.dtsi:418-432`). Its
+device-kinds row makes its record `block sdhci`, and the block driver
+drives it by programmed I/O
+([design-storage.md](design-storage.md#the-sd-host-controller)), so its
+unit needs no DMA memory until DMA's design gives it some. The tree
+marks its card-detect line broken and gives the card's supply and its
+I/O voltage as regulators on the firmware's GPIO expander
+(`bcm2711-rpi-4-b.dts:26-48, 190-196`), which no domain reaches (PL2):
+the card is powered and at the signalling the firmware left. GIC SPI 126
+is also the interrupt of the legacy SD controller, `&sdhci`
+(`bcm2711.dtsi:1147-1149`), which no domain drives; whether the firmware
+leaves that controller able to raise the shared line is *to be settled
+by the board probe*: a level line held by that controller would fire
+without end, which the probe sees as deliveries while EMMC2 is idle. The VL805
 USB controller sits behind the Pi 4's PCIe bridge, which no domain drives,
 so no domain holds it and the Pi 4 has no USB. Its cores have the CRC32
 instructions but not the cryptography extension, so SHA-256, which every
@@ -1086,6 +1105,25 @@ Ethernet and no PCIe. A stage proven on the model therefore counts only
 once it has also passed on a board, and the model's runs are never
 compared with the board's numbers.
 
+**The model's SD controller.** QEMU 11.1.3 models EMMC2 as its generic
+SDHCI at the board's address, specification version 3, with the
+capabilities word `0x052134b4` (`hw/arm/bcm2838_peripherals.c:22,
+83-94`): a 52 MHz base clock and a 52 MHz timeout clock, high speed, 3.3
+and 1.8 V, and neither SDMA nor ADMA2 (the fields,
+`hw/sd/sdhci-internal.h:208-224`), so the model tests programmed I/O
+alone. It ORs EMMC2's interrupt with the legacy controller's into one
+GIC line (`hw/arm/bcm2838_peripherals.c:97-104`; `hw/arm/bcm2838.c:198-204`).
+Its card bus is empty unless a card is attached to it, so the harness
+attaches the medium as an `sd-card` device on EMMC2's bus; the bus's
+path for `-device sd-card,drive=...,bus=...` is the one the model's
+`info qtree` shows, which the harness's first run records. The model's
+card is standard capacity up to 2 GiB and high capacity above, and takes
+an image of a power-of-two size up to 2 GiB and of a multiple of 512 KiB
+above (`hw/sd/sd.c:59, 595-600, 3120-3141`), so the harness pads the
+medium to 2 GiB for a standard-capacity card and to 4 GiB for a
+high-capacity one. The model's bus is not timed, so the base clock is checked on the
+board alone.
+
 ### The Raspberry Pi 4 on the stopgap
 
 Before erXos's kernel exists, the Raspberry Pi 4 runs the stopgap Fiasco
@@ -1109,7 +1147,7 @@ its device tree and its UART setup. It is done by hand, once per change
 to the boot path.
 
 **You need** a Raspberry Pi 4 (any memory size: `total_mem` makes the
-board use 1 GB; the 4 GB board is the one tested), a microSD card of at least 1 GB, and a 3.3 V
+board use 1 GB; the 4 GB board is the one tested), a microSD card of at least 2 GB, and a 3.3 V
 USB-serial adapter (never a 5 V one). Wire it to the 40-pin header: the
 adapter's ground to pin 6, its receive line to pin 8 (GPIO 14, the Pi's
 transmit) and its transmit line to pin 10 (GPIO 15). Open it at 115200

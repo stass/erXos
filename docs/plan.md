@@ -2296,10 +2296,11 @@ side.
   and the service above it, the partition and window processes and the
   write path, so the Pi adds a device process and nothing above it
   moves. The write path's rule (U4) holds across the split: only
-  `erx_blk_write` builds a request, the device process turns each into
-  its controller's commands, and the build check that holds the rule
-  covers the SD controller's write commands as it covers
-  `erx_device:post/4`. The storage domain holds the SD card, laid out on
+  `erx_blk_write` hands a controller anything to do, a virtio request or
+  an SD command written to the command register, and the build check
+  that holds the rule covers the command register's name as it covers
+  `erx_device:post/4`
+  ([design-storage.md](design-storage.md#the-sd-host-controller)). The storage domain holds the SD card, laid out on
   the host as the ABI file's medium layout, with the release's EROFS
   image read through its window and littlefs at `/data`. Each DMA
   device's entry in the platform record carries its bus offset and
@@ -2362,10 +2363,18 @@ side.
   agents iterate on host tests, the hosted backend, QEMU `virt` and, for
   stage (a), `raspi4b`.
 * **The manual board pass.** The board is a 4 GB Raspberry Pi 4. There
-  is no automated rig: the build produces the SD card's boot partition,
-  and the transcript checks run by hand on the board. An
-  automated rig (serial capture, power relay, SD card switch) is not part
-  of 1b-I.
+  is no automated rig: the build produces the SD card's image, and the
+  transcript checks and the power-cut checklist run by hand on the
+  board, with power cut by pulling the supply. An automated rig
+  (serial capture, power relay, SD card switch) is not part of 1b-I.
+* **The power-cut checklist.** A write load on the board writes files
+  under `/data`, syncs each, and prints a numbered mark on the console
+  once each file's sync has returned, naming the files synced so far.
+  Power is pulled just after a mark, ten times, spread over
+  the load's marks from first to last, powers the board back on, and
+  lets the next boot list `/data`. For each cut the board pass's record
+  lists the mark it followed and, for each file synced before it,
+  whether the file survived whole; every synced file must.
 * Every parser of what a Pi device writes (the SD controller's responses
   and status, GENET's receive status and descriptors) lands with its fuzz
   target, as the ground rules require.
@@ -2381,12 +2390,15 @@ side.
   on the board, the Pi boots from its firmware to the shell on the mini UART with
   the development banner, the host tool reaches it over UART3, and the
   boot probe's research record is written.
-* (b): QEMU's block suites pass unchanged after the split; on the board
-  a file synced under `/data` survives a power cut by the relay at every
-  step of a scripted write load; a storage domain killed under load
-  restarts with every synced file present; the seeded write of a
-  request not built by `erx_blk_write` fails the build check; the SD
-  controller's parsers run their fuzz budgets clean.
+* (b): QEMU's block suites pass unchanged after the split; by hand on
+  the board, the power-cut checklist passes: in each of the ten cuts
+  every file synced before the cut's mark survives whole, and the board
+  pass's record lists each cut with its mark and the files that
+  survived; a storage domain killed under load restarts with every
+  synced file present; the seeded write of a request not built by
+  `erx_blk_write`, a virtio post or an SD command-register write, fails
+  the build check; the SD controller's parsers run their fuzz budgets
+  clean.
 * (c): UDP echo and a TCP bulk transfer to a peer pass on the board; a
   network domain killed under load restarts ending only its
   connections; GENET's parsers run their fuzz budgets clean; the packet

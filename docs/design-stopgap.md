@@ -1769,11 +1769,28 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   `config/fiasco/kernel.defconfig`), which finds the interrupt controller, the timer and PSCI's calling method in the
   device tree. BL31's PSCI starts the other CPUs, and `l4_platform_ctl_system_shutdown` reaches its `SYSTEM_OFF` and
   `SYSTEM_RESET` ([The end path](#the-end-path)). `SYSTEM_OFF` leaves the board halted in the firmware, which cannot
-  turn it off, so an end by `ERX_END_OFF`, a missed pet's included, lasts until the board rig's power relay cycles it.
-* **Boot files.** One directory, `boot/`, serves as the firmware's network boot root and as an SD card's boot
-  partition, and `sdcard.img` beside it is the card's image of the same files; both are the production image's
-  medium for the board, written by `tools/erx pack --medium --platform raspi4b` into
-  `build/production-image/raspi4b/` (`tools/lib/erx/boot_partition.rb`): the firmware and its licence; `config.txt`, written from the platform record, with,
+  turn it off, so an end by `ERX_END_OFF`, a missed pet's included, lasts until its power is cycled by hand.
+* **The card.** `sdcard.img` is the medium of `abi/medium.txt`, as QEMU `virt`'s medium is, laid out as
+  [Slots and the boot-selection record](design-platforms.md#slots-and-the-boot-selection-record) describes: the
+  record's partition, whose FAT holds `autoboot.txt`, one cluster at `medium_record_select_start`, and the reset count
+  alone in the next MiB; slot A, which begins with a FAT32 volume that holds the boot files below and ends before the
+  slot's EROFS images start at 128 MiB (`SLOT_IMAGES_START`, `tools/lib/erx/release_medium.rb`), with `kernel8.img`
+  allocated first and contiguous from `medium_slot_boot_start`, so the harness and the slot writer find it without
+  parsing FAT and the firmware finds it through FAT; slot B, empty; the vault's partition; and the data partition with
+  a fresh littlefs volume. The volume's cluster size is chosen so that a volume under 128 MiB is FAT32 by the cluster count the FAT
+  specification sets ([design-storage.md](design-storage.md#references)), as the slot's partition type
+  (`medium_slot_type`, `0x0c`) says. Placing a file at a
+  fixed first cluster, contiguous, is a requirement on fsimg, which the packer checks by reading the written
+  directory entry back. The firmware boots this card only if the board's EEPROM bootloader reads `autoboot.txt` and
+  honours `tryboot_a_b` and `boot_partition`; the board's port records the oldest bootloader version that does, which
+  the board pass records from the bootloader's log on the console
+  ([design-platforms.md](design-platforms.md#slots-and-the-boot-selection-record)). The Pi's development manifest
+  gives the SD controller's unit to the domain that runs the block driver and littlefs at `/data`, as QEMU `virt`'s
+  development manifest gives its block unit, and the platform record carries the unit, read from the board's device
+  tree on the host like every other.
+* **Boot files.** One directory, `boot/`, serves as the firmware's network boot root and holds the files slot A's
+  FAT holds, written by `tools/erx pack --medium --platform raspi4b` into `build/production-image/raspi4b/` beside
+  `sdcard.img` (`tools/lib/erx/boot_partition.rb`): the firmware and its licence; `config.txt`, written from the platform record, with,
   on a development card only, the firmware's boot log on the console (`uart_2ndstage=1`) and the ARM's JTAG on GPIO 22
   to 27 (`enable_jtag_gpio=1`);
   BL31 and its licence; the bootable file as `kernel8.img`; Linux's device tree for the board, compiled from its
@@ -1825,7 +1842,7 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   confirms where it lies.
 * **What the board does not get here.** The kernel's platform items, which M12 brings on erXos's kernel: the
   hardware watchdog is not armed, so a hang of Fiasco or of the root's watchdog thread is caught only by the
-  harness's deadline, after which the rig cycles power; there is no crash region, so the crash record reaches the
+  harness's deadline, after which its power is cycled by hand; there is no crash region, so the crash record reaches the
   console alone; there is no trial request, so the boot value is what `/chosen/bootloader` says and no update runs;
   there is no device secret, so `sealing` stays `none`; and the random generator is not read, so entropy comes from
   the counter, as on QEMU `virt`. Each is in [What Phase 1 defers](#what-phase-1-defers).
