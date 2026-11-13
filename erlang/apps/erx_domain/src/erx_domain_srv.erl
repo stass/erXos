@@ -262,8 +262,9 @@ booted(#{lib := Lib} = State) ->
             %% serves as erx_fs grants (served_kind/2).
             Services = [{Server, Name} || {Server, Name, _Interface} <- maps:get(services, Boot, []), Server =/= system],
             Files = [Name || {_Server, Name, ?ERX_SERVICE_FILES} <- maps:get(services, Boot, [])],
+            Windows = [Name || {_Server, Name, ?ERX_SERVICE_WINDOWS} <- maps:get(services, Boot, [])],
             Mints = erx_domain_mints:new((maps:get(mint_config, State))#{services => Services,
-                                           grants => Minted, files => Files}),
+                                           grants => Minted, files => Files, windows => Windows}),
             Served = maps:groups_from_list(fun({Grantee, _, _, _}) -> Grantee end,
                                            fun({_, Name, _, Limits}) -> {Name, served_kind(Name, Files), Limits} end,
                                            System),
@@ -301,7 +302,7 @@ handle_call({info, Id}, From, #{core := Core} = State) ->
             {reply, {error, badarg}, State}
     end;
 handle_call({introduce, A, B}, From, State) when is_integer(A), is_integer(B) ->
-    case introduce(A, B, State) of
+    case introduce(A, B, 0, State) of
         {wait, Next} ->
             {noreply, wait_introduced(A, B, From, Next)};
         {Reply, Next} ->
@@ -1018,6 +1019,10 @@ settle(Id, #{waiting := Waiting} = State) ->
             State
     end.
 
+%% The domain the library charges a pixel area of Area bytes to: none (0) for no area.
+area_reader(0, _A) -> 0;
+area_reader(_Area, A) -> A.
+
 %% The create's answer: the refusal of a domain that was not started, or how one that
 %% was started ended before it reported, or a session before its namespace was in place.
 create_error(none, Life, Info) -> {error, unreported(Life, Info)};
@@ -1048,9 +1053,11 @@ open_side(Agent, Id, Pid, Ref, Values) ->
 %% The library's own refusals, a party at its limit or with an outer budget that cannot
 %% fund its child for the connection, are system_limit too, and its einval for a domain
 %% it has ended before the end reached the service is badarg, as for any ended domain.
-introduce(_A, _B, #{lib := none} = State) ->
+%% Area is the bytes of the connection's pixel area, which A reads, or 0 for none: a
+%% grant's of the windows interface (erx_domain_mints), made with the connection alone.
+introduce(_A, _B, _Area, #{lib := none} = State) ->
     {{error, enotsup}, State};
-introduce(A, B, #{core := Core, links := Links, lib := Lib} = State) ->
+introduce(A, B, Area, #{core := Core, links := Links, lib := Lib} = State) ->
     case {introducible(A, Core), introducible(B, Core)} of
         {{ok, ReaderA}, {ok, ReaderB}} when A =/= B ->
             case erx_domain_links:phase(A, B, Links) of
@@ -1060,7 +1067,9 @@ introduce(A, B, #{core := Core, links := Links, lib := Lib} = State) ->
                     {wait, State};
                 none ->
                     case erx_domain_links:room(A, Links) andalso erx_domain_links:room(B, Links) of
-                        true -> connect(Lib:connect(A, B, ReaderA, ReaderB, 0, 0), A, B, ReaderA, ReaderB, State);
+                        true ->
+                            Made = Lib:connect(A, B, ReaderA, ReaderB, Area, area_reader(Area, A)),
+                            connect(Made, A, B, ReaderA, ReaderB, State);
                         false -> {{error, system_limit}, State}
                     end;
                 _Closing ->
@@ -1360,10 +1369,20 @@ is_ready(Id, Core) ->
         _ -> false
     end.
 
+%% The name of the principal of grantee GranteeId, which its mint carries
+%% (docs/design-system.md, "Facets a configured domain serves"): the system principal's
+%% for the system domain, and for any other the one its record names, a configured row's
+%% or a session's template's. The core mints only for a grantee that is ready.
+principal_name(?SYSTEM_ID, #{principals := #{system := System, names := Names}}) ->
+    maps:get(System, Names);
+principal_name(GranteeId, #{core := Core, principals := #{names := Names}}) ->
+    {ok, #{principal := Principal}} = erx_domain_core:fetch(GranteeId, Core),
+    maps:get(Principal, Names).
+
 %% An introduction that settles at once is answered through the service's own queue as
 %% one that settles later is (reply/2), so the core takes each in the same way.
-mint_act({introduce, Tag, ServerId, GranteeId}, State) ->
-    case introduce(ServerId, GranteeId, State) of
+mint_act({introduce, Tag, ServerId, GranteeId, Area}, State) ->
+    case introduce(ServerId, GranteeId, Area, State) of
         {wait, Next} ->
             wait_introduced(ServerId, GranteeId, {mints, Tag}, Next);
         {Result, Next} ->
@@ -1378,7 +1397,7 @@ mint_act({mint, Tag, Mint, Name, GranteeId, Limits}, #{core := Core, mint_config
     %% that domain pid (erx_facet:minted/2). The core asks only a mint its server's
     %% ready incarnation owns, so Owner(Mint) is that server, and it is ready.
     {ok, #{pid := Pid, ref := Ref}} = erx_domain_core:fetch(Owner(Mint), Core),
-    Pid ! {Ref, mint, Mint, {erx_facet_mint, Tag, Name, GranteeId, Limits}},
+    Pid ! {Ref, mint, Mint, {erx_facet_mint, Tag, Name, GranteeId, principal_name(GranteeId, State), Limits}},
     State;
 mint_act({install, Tag, ?SYSTEM_ID, Name, Facet}, State) ->
     persistent_term:put({erx, facets}, (persistent_term:get({erx, facets}, #{}))#{Name => Facet}),

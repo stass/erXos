@@ -170,15 +170,17 @@ another_domains_call_is_dropped_test() ->
 
 mint_grants_only_the_system_domain_test() ->
     Limits = #{max_request => 512},
-    Request = fun(Grantee) -> {erx_facet_mint, 3, storage_ctl, Grantee, Limits} end,
+    Request = fun(Grantee) -> {erx_facet_mint, 3, storage_ctl, Grantee, <<"system">>, Limits} end,
     ?assertEqual({grant, 3, Limits}, erx_driver_ctl:mint_request(?SYSTEM, storage_ctl, {erx_origin, ?SYSTEM, Request(?SYSTEM)})),
     ?assertEqual({refuse, 3}, erx_driver_ctl:mint_request(?SYSTEM, storage_ctl, {erx_origin, ?SYSTEM, Request(?OTHER)})),
     %% Only a request in the system domain's envelope, for this service, is one.
     [?assertEqual(unknown, erx_driver_ctl:mint_request(?SYSTEM, storage_ctl, Message))
      || Message <- [{erx_origin, ?OTHER, Request(?SYSTEM)}, Request(?SYSTEM),
-                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, network_ctl, ?SYSTEM, Limits}},
-                    {erx_origin, ?SYSTEM, {erx_facet_mint, 0, storage_ctl, ?SYSTEM, Limits}},
-                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, storage_ctl, ?SYSTEM, none}}]].
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, network_ctl, ?SYSTEM, <<"system">>, Limits}},
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 0, storage_ctl, ?SYSTEM, <<"system">>, Limits}},
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, storage_ctl, ?SYSTEM, <<"system">>, none}},
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, storage_ctl, ?SYSTEM, system, Limits}},
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, storage_ctl, ?SYSTEM, Limits}}]].
 
 %% A block driver that fails, by a crash or by the shutdown with which erx_blk_virtio ends on a
 %% broken queue, is not restarted in place: erx_blk_sup ends, and with it

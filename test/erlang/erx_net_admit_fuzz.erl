@@ -260,9 +260,10 @@ mint() ->
     System = pick([1, 2, 5]),
     Inner = case rand:uniform(14) of
                 1 -> {erx_facet_mint, 1, net, 3};
-                2 -> {erx_facet_mint, 1, net, 3, #{}, extra};
+                2 -> {erx_facet_mint, 1, net, 3, <<"user">>, #{}, extra};
                 _ -> {erx_facet_mint, pick([1, 7, 0, -1, x, 1 bsl 70]), pick([net, net, net, fs]),
-                      pick([1, 2, 5, 9, 0, -1, x]), pick([#{}, #{a => 1}, [], x])}
+                      pick([1, 2, 5, 9, 0, -1, x]), pick([<<"user">>, <<>>, user, 1]),
+                      pick([#{}, #{a => 1}, [], x])}
             end,
     Message = case rand:uniform(8) of
                   1 -> Inner;
@@ -272,8 +273,9 @@ mint() ->
               end,
     judge(mint, fun() -> erx_net_admit:mint(System, Message) end, expected_mint(System, Message), {System, Message}).
 
-expected_mint(System, {erx_origin, System, {erx_facet_mint, Tag, net, Grantee, Limits}}) ->
-    case within(Tag, 1, 1 bsl 80) andalso within(Grantee, 1, 1 bsl 80) andalso is_map(Limits) of
+expected_mint(System, {erx_origin, System, {erx_facet_mint, Tag, net, Grantee, Principal, Limits}}) ->
+    case within(Tag, 1, 1 bsl 80) andalso within(Grantee, 1, 1 bsl 80) andalso is_binary(Principal)
+         andalso is_map(Limits) of
         true when Grantee =:= System -> {refused, eperm, Tag};
         true -> {ok, Tag, Grantee, Limits};
         false -> unknown

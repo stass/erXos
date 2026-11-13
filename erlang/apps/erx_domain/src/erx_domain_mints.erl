@@ -75,6 +75,14 @@ An operation has a tag, a number the core never reuses, and one deadline
 for its whole introduction, mint and installation. Introducing is skipped
 for the system domain as grantee, which every domain is connected to.
 
+The pixel area (docs/design-display.md, "The pixel area"). The
+introduction of a grant of a service of the windows interface asks for the
+connection's pixel area, read by the server: the grant's pixels, or
+windows_pixels_default where its limits state none, rounded up to whole
+pages; every other introduction asks for none (0). The library makes the
+area only with a new connection, so a pair already joined keeps the
+connection it has.
+
 Replies are untrusted. A mint's reply counts only from the pair's server,
 for the operation in minting with its tag; an acknowledgement only from the
 pair's grantee, for the operation in installing with its tag. Anything else
@@ -100,6 +108,8 @@ deadline, a starting server by its boot timeout.
 -define(SYSTEM_ID, 4).
 -define(DEADLINE, 10000).
 
+-include("generated/erx_abi.hrl").
+
 -type row() :: non_neg_integer().
 -type id() :: pos_integer().
 -type name() :: atom().
@@ -123,6 +133,7 @@ deadline, a starting server by its boot timeout.
                                 Limits :: map()}],
                     owner := fun((pid()) -> non_neg_integer()),
                     files => [name()],
+                    windows => [name()],
                     deadline => pos_integer()}.
 %% ready carries the incarnation's node, which the service knows; the rest of the
 %% untrusted events' fields are any term a domain sent.
@@ -134,7 +145,7 @@ deadline, a starting server by its boot timeout.
                | {minted, Origin :: non_neg_integer(), Tag :: term(), Reply :: term()}
                | {installed, Origin :: non_neg_integer(), Tag :: term()}
                | {deadline, tag()}.
--type action() :: {introduce, tag(), ServerId :: id(), GranteeId :: id()}
+-type action() :: {introduce, tag(), ServerId :: id(), GranteeId :: id(), Area :: non_neg_integer()}
                 | {mint, tag(), Mint :: pid(), name(), GranteeId :: id(), Limits :: map()}
                 | {install, tag(), GranteeId :: id(), name(), Facet :: pid()}
                 | {arm, tag(), Milliseconds :: pos_integer()}
@@ -152,6 +163,7 @@ deadline, a starting server by its boot timeout.
                      next_tag := tag(),
                      owner := fun((pid()) -> non_neg_integer()),
                      files := [name()],
+                     windows := [name()],
                      deadline := pos_integer()}.
 
 -doc """
@@ -159,8 +171,9 @@ The state of a boot from the manifest's service rows, each a server row and a
 name, and its facet rows served by configured domains, each a grantee, the
 service's name, its server row and the grant's limits. A grantee
 {template, T} grants each session made from template T. Files names the
-services of the files interface, whose grants a namespace mounts; none by
-default. A grant of a
+services of the files interface, whose grants a namespace mounts, and
+Windows those of the windows interface, whose introductions ask for a pixel
+area; none of either by default. A grant of a
 service its server does not declare, a grant to its own server, two
 grants of one name to one grantee, or a service whose server is no row (the
 system domain's, which the ready answers serve) is a bug of the caller,
@@ -185,6 +198,7 @@ new(#{services := Services, grants := Grants, owner := Owner} = Config) when is_
                                       fun({_, Name, Server, Limits}) -> {Name, Server, Limits} end, ForTemplates),
     #{declared => Declared, grants => Entries, rows => #{}, templates => Templates, sessions => #{},
           next_tag => 1, owner => Owner, files => maps:get(files, Config, []),
+          windows => maps:get(windows, Config, []),
           deadline => maps:get(deadline, Config, ?DEADLINE)}.
 
 entry(Server, Limits, Mark) -> #{server => Server, limits => Limits, mark => Mark, state => idle}.
@@ -384,8 +398,21 @@ start({Grantee, _Name} = Key, {ServerId, GranteeId} = Pair, Cancel,
             {Cancel ++ [{arm, Tag, Deadline}, mint_request(Key, Pair, Tag, State)],
              set_grant(Key, {minting, Pair, Tag}, Armed)};
         _RowOrSession ->
-            {Cancel ++ [{arm, Tag, Deadline}, {introduce, Tag, ServerId, GranteeId}],
+            {Cancel ++ [{arm, Tag, Deadline}, {introduce, Tag, ServerId, GranteeId, area(Key, State)}],
              set_grant(Key, {introducing, Pair, Tag}, Armed)}
+    end.
+
+%% The pixel area the introduction for the grant Key asks for, read by its server:
+%% the grant's pixels, or windows_pixels_default, in whole pages, for a service of the
+%% windows interface, and none (0) for any other. The manifest's reader bounds pixels.
+area({_, Name} = Key, #{windows := Windows} = State) ->
+    case lists:member(Name, Windows) of
+        true ->
+            #{limits := Limits} = grant_entry(Key, State),
+            Bytes = maps:get(pixels, Limits, ?ERX_WINDOWS_PIXELS_DEFAULT),
+            (Bytes + ?ERX_PAGE_SIZE - 1) div ?ERX_PAGE_SIZE * ?ERX_PAGE_SIZE;
+        false ->
+            0
     end.
 
 %% The request to the server's mint for the grant Key and its operation Tag, with the

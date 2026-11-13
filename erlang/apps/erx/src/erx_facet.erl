@@ -117,7 +117,7 @@ the domain, as the end of a permanent application's process does, and the
 domain's restart then provides again and makes every grant anew. The domain
 service accepts a mint only for a
 service the manifest's service rows declare for this domain, and then sends
-it {erx_facet_mint, Tag, Name, Grantee, Limits} for each configured grant,
+it {erx_facet_mint, Tag, Name, Grantee, Principal, Limits} for each configured grant,
 arriving as {erx_origin, 4, Request}: the mint acts only on a request in the
 system domain's envelope, and starts the facet with start/3, bound to Grantee
 and within Limits, and replies minted(Tag, {ok, Facet}), or minted(Tag, Other)

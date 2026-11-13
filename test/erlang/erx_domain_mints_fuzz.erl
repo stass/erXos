@@ -217,7 +217,7 @@ act({arm, Tag, _Ms}, _Event, _Core, #shell{armed = Armed, ever = Ever} = Shell) 
 act({disarm, Tag}, _Event, _Core, #shell{armed = Armed} = Shell) ->
     is_map_key(Tag, Armed) orelse fail(disarmed_unarmed_tag, Tag),
     Shell#shell{armed = maps:remove(Tag, Armed)};
-act({introduce, Tag, ServerId, GranteeId}, _Event, Core, #shell{intros = Intros} = Shell) ->
+act({introduce, Tag, ServerId, GranteeId, _Area}, _Event, Core, #shell{intros = Intros} = Shell) ->
     {Key, {introducing, {ServerId, GranteeId}, Tag}} = pending(Tag, Core),
     element(1, Key) =/= system orelse fail(introduced_system, Tag),
     Shell#shell{intros = Intros#{Tag => true}};

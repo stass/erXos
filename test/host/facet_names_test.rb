@@ -74,7 +74,7 @@ class FacetNamesTest < Minitest::Test
       a(C) -> erx_cmd:facet(C, rogue).
       b() -> maps:find(rogue, erx:caps()).
       c() -> #{seeded := S, rogue := R} = erx:caps().
-      d(T, G, L) -> {erx_facet_mint, T, rogue, G, L}.
+      d(T, G, L) -> {erx_facet_mint, T, rogue, G, <<"p">>, L}.
       e() -> maps:get(rogue, erx:caps()).
       f() -> erx_facet:provide(rogue, self()).
       g(U) -> erx_driver_ctl:start_mint(rogue, U).

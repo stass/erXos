@@ -63,13 +63,14 @@ mint_one(unknown, _System, _Grants) ->
 -doc """
 What the mint of the service Service, in a domain whose system domain's id is System,
 does with Message: a mint request in the system domain's envelope, for this service,
-with a positive tag, a domain id as its grantee and a map of limits, is granted;
+with a positive tag, a domain id as its grantee, its principal's name and a map of
+limits, is granted;
 anything else is unknown and dropped.
 """.
 -spec mint_request(pos_integer(), atom(), term()) ->
           {grant, pos_integer(), pos_integer(), map()} | unknown.
-mint_request(System, Service, {erx_origin, System, {erx_facet_mint, Tag, Service, Grantee, Limits}})
-  when is_integer(Tag), Tag > 0, is_integer(Grantee), Grantee > 0, is_map(Limits) ->
+mint_request(System, Service, {erx_origin, System, {erx_facet_mint, Tag, Service, Grantee, Principal, Limits}})
+  when is_integer(Tag), Tag > 0, is_integer(Grantee), Grantee > 0, is_binary(Principal), is_map(Limits) ->
     {grant, Tag, Grantee, Limits};
 mint_request(_System, _Service, _Message) ->
     unknown.

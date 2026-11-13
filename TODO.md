@@ -648,9 +648,9 @@ it; git history is the record of completed work.
   Not built: the session's default display handed on with the ready answer and its `display` variable
   (design-apps.md, "Starting a session", step 3), which the domain service keeps in the session's record and
   hands to nothing; a row that names a display started only once that display's domain has reported ready
-  ("Keeping a session"), which waits for a display domain to run; the mint request
-  `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}` in the domain service and every mint that matches the
-  old shape (`erlang/apps/erx_storage/src/erx_lfs_mint.erl`, `erx_net_admit`); the reset count cleared by the first
+  ("Keeping a session"), which waits for a display domain to run, and whose wait no design names: `erx_starter`
+  learns only the system namespace (`erx_domain:system_namespace/0`), so the design must say how it learns that a
+  display's domain has reported ready before the starter can wait for it; the reset count cleared by the first
   kept session.
 * [Low] The start table's first `rc.conf` read waits for the system domain's namespace to be in place
   (`erx_domain:system_namespace/0`), but a storage domain that ends once during boot, or misses the mint
@@ -741,9 +741,19 @@ it; git history is the record of completed work.
   as landed are kept and changed as listed.
   * **The pixel area** ([The pixel area](docs/design-display.md#the-pixel-area)): the domain library makes it
     (`erx_dom_connect`'s `area`, `area_reader`), `connection_up` carries it, the connection agent maps it and
-    unmaps it after the last image over it (`erx_area`, `erx_memdraw:wrap/4`); still missing are the domain service
-    passing the grant's `pixels` to it (with the manifest's `display` record below), and a QEMU case in which one
-    domain writes an area's pixels and the other reads them.
+    unmaps it after the last image over it (`erx_area`, `erx_memdraw:wrap/4`), and the domain service asks for it
+    with the introduction of each grant of a `windows` service (`erx_domain_mints`); still missing is a QEMU case in
+    which one domain writes an area's pixels and the other reads them, which needs a reader in the display domain
+    (`erx_winfs`).
+* [Medium] `erx_domain_mints`, the pixel area: the library makes an area only with a new connection, so a
+  grantee already connected to the display (by `erx_domain:introduce/2`, or by a grant of another of that
+  domain's services) keeps its connection without an area, and `erx_area:open/1` answers `{error, none}`; the
+  system domain as a `windows` grantee, never introduced, has none either.
+  This departs from design-system.md ("Facets a configured domain serves"), where the facet row sizes the area
+  whichever introduction makes the connection: make the area a fact of the pair (a pure `pair_area/3` of the mint
+  core, naming bytes and reader, used by every introduction), test the reader through the fake library
+  (`erx_domain_fake_lib` accepts only `connect(_, _, _, _, 0, 0)`), and have property 18 refuse a `windows` grant
+  to the system domain.
 * [Medium] `erx_connections` (`let_go/5`): a connection with an area is answered unmapped or lost only once
   every process that held the area or an image over it has collected; an idle holder that dropped it but never
   collects holds the connection, its objects and the display's budget for it. The design names only
@@ -767,8 +777,8 @@ it; git history is the record of completed work.
   * **The display's session and grant** ([A display's session](docs/design-display.md#a-displays-session)): the
     display's session from a start row ([Track A](docs/plan.md#track-a-apps), part 1), with `session` carried by
     every mint of its grant from the session mark the domain service alone sets; the domain service putting the
-    `display` record's policy and idle times in the display domain's environment; each connection's pixel area sized
-    from its grant's `pixels`. A window's buffer at the screen's size, allocated once by `erx_win:open/2`, with
+    `display` record's policy and idle times in the display domain's environment. A window's buffer at the screen's
+    size, allocated once by `erx_win:open/2`, with
     `resized/1` allocating nothing; the grant defaults of 8 windows, 64 MiB and `snarf` off at the server.
   * **The reserved chord** ([The reserved chord](docs/design-display.md#the-reserved-chord)): its field in the
     `display` record, its source spelling and its key encoding, which land with the login design's choice of what

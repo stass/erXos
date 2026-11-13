@@ -112,8 +112,8 @@ dropped.
 """.
 -spec mint_request(pos_integer(), atom(), term()) ->
           {grant, pos_integer(), map()} | {refuse, pos_integer()} | unknown.
-mint_request(System, Name, {erx_origin, System, {erx_facet_mint, Tag, Name, Grantee, Limits}})
-  when is_integer(Tag), Tag > 0, is_integer(Grantee), Grantee > 0, is_map(Limits) ->
+mint_request(System, Name, {erx_origin, System, {erx_facet_mint, Tag, Name, Grantee, Principal, Limits}})
+  when is_integer(Tag), Tag > 0, is_integer(Grantee), Grantee > 0, is_binary(Principal), is_map(Limits) ->
     case Grantee of
         System -> {grant, Tag, Limits};
         _Other -> {refuse, Tag}

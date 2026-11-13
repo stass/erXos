@@ -22,7 +22,7 @@
 -define(DEADLINE, 3600000).
 %% The fixture's system principal, which the service charges creates to and whose
 %% sessions are root_N; the fake library's templates are principal 1's.
--define(PRINCIPALS, #{system => 1, names => #{}}).
+-define(PRINCIPALS, #{system => 1, names => #{1 => <<"system">>}}).
 
 mints_test_() ->
     {setup, fun setup/0, fun cleanup/1,
@@ -111,7 +111,7 @@ installs() ->
     #{{0, echo} := {minting, {5, 6}, Tag}} = wait(fun(#{{0, echo} := {minting, _, _}}) -> true end),
     %% The request reaches the mint through a's domain pid, never from the service.
     Mint = pid('a@erxos', 5, 1),
-    ?assertMatch({erx_facet_mint, Tag, echo, 6, #{max_request := 512}},
+    ?assertMatch({erx_facet_mint, Tag, echo, 6, <<"system">>, #{max_request := 512}},
                  receive {trace, PidA, 'receive', {_, mint, Mint, Request}} -> Request after 2000 -> none end),
     Facet = pid('a@erxos', 5, 2),
     PidB ! {erx_origin, 6, {erx_facet_minted, Tag, {ok, Facet}}},
@@ -229,7 +229,7 @@ grantee_restart() ->
     PidB ! {erx_origin, 8, {erx_connection_mapped, 7}},
     #{{0, echo} := {minting, {7, 8}, Tag}} = wait(fun(#{{0, echo} := {minting, {7, 8}, _}}) -> true end),
     Mint = pid('a@erxos', 7, 1),
-    ?assertMatch({erx_facet_mint, Tag, echo, 8, #{max_request := 512}},
+    ?assertMatch({erx_facet_mint, Tag, echo, 8, <<"system">>, #{max_request := 512}},
                  receive {trace, PidA, 'receive', {_, mint, Mint, Request}} -> Request after 2000 -> none end),
     Facet = pid('a@erxos', 7, 6),
     PidA ! {erx_origin, 7, {erx_facet_minted, Tag, {ok, Facet}}},
@@ -543,8 +543,8 @@ sessions() ->
     PidA ! {erx_origin, 5, {erx_connection_mapped, 7}},
     Pid7 ! {erx_origin, 7, {erx_connection_mapped, 5}},
     #{Key := {minting, {5, 7}, Tag}} = wait(fun(#{Key := {minting, _, _}}) -> true end),
-    ?assertMatch({erx_facet_mint, Tag, echo, 7, #{max_request := 64, session := true}},
-                 receive {trace, PidA, 'receive', {_, mint, _, {erx_facet_mint, Tag, _, _, _} = R}} -> R
+    ?assertMatch({erx_facet_mint, Tag, echo, 7, <<"system">>, #{max_request := 64, session := true}},
+                 receive {trace, PidA, 'receive', {_, mint, _, {erx_facet_mint, Tag, _, _, _, _} = R}} -> R
                  after 2000 -> none end),
     Facet = pid('a@erxos', 5, 7),
     PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, Facet}}},

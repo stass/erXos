@@ -112,19 +112,21 @@ not_a_call() ->
 %% --- erx_net_admit:mint/2 --------------------------------------------------------------
 
 mint_test() ->
-    Request = {erx_facet_mint, 3, net, ?GRANTEE, #{}},
+    Request = {erx_facet_mint, 3, net, ?GRANTEE, <<"user">>, #{}},
     ?assertEqual({ok, 3, ?GRANTEE, #{}}, erx_net_admit:mint(?SYSTEM, {erx_origin, ?SYSTEM, Request})),
     ?assertEqual({refused, eperm, 3},
-                 erx_net_admit:mint(?SYSTEM, {erx_origin, ?SYSTEM, {erx_facet_mint, 3, net, ?SYSTEM, #{}}})),
+                 erx_net_admit:mint(?SYSTEM, {erx_origin, ?SYSTEM, {erx_facet_mint, 3, net, ?SYSTEM, <<"system">>, #{}}})),
     From = {self(), make_ref()},
     ?assertEqual({counts, From}, erx_net_admit:mint(?SYSTEM, {'$gen_call', From, counts})),
     ?assertEqual(unknown, erx_net_admit:mint(?SYSTEM, {erx_origin, ?SYSTEM, {'$gen_call', From, counts}})),
     [?assertEqual(unknown, erx_net_admit:mint(?SYSTEM, Message))
      || Message <- [Request, {erx_origin, ?OTHER, Request},
-                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, storage, ?GRANTEE, #{}}},
-                    {erx_origin, ?SYSTEM, {erx_facet_mint, 0, net, ?GRANTEE, #{}}},
-                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, net, local, #{}}},
-                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, net, ?GRANTEE, []}}]].
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, storage, ?GRANTEE, <<"user">>, #{}}},
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 0, net, ?GRANTEE, <<"user">>, #{}}},
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, net, local, <<"user">>, #{}}},
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, net, ?GRANTEE, <<"user">>, []}},
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, net, ?GRANTEE, user, #{}}},
+                    {erx_origin, ?SYSTEM, {erx_facet_mint, 3, net, ?GRANTEE, #{}}}]].
 
 domain_test() ->
     ?assertEqual(?GRANTEE, erx_net_admit:domain(pid_of(?GRANTEE))),

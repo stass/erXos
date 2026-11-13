@@ -28,7 +28,7 @@ read them from a trace of the grant's calls of erlang:send/2.
 
 %% Only a mint request in the system domain's envelope, for this service, is granted.
 only_the_system_domains_mint_request_is_granted_test() ->
-    Request = {erx_facet_mint, 7, data, ?GRANTEE, #{in_flight => 16}},
+    Request = {erx_facet_mint, 7, data, ?GRANTEE, <<"user">>, #{in_flight => 16}},
     ?assertEqual({grant, 7, ?GRANTEE, #{in_flight => 16}},
                  erx_lfs_mint:mint_request(?SYSTEM, data, {erx_origin, ?SYSTEM, Request})),
     Dropped = [Request,

@@ -59,8 +59,9 @@ socket process. `Body` must be `{credit, Bytes}` with `Bytes` from 1 to 64 MiB, 
 A body of any other shape, or a request of another kind, is refused (`shape`).
 
 **The mint.** mint/2 takes a message the network service's mint received: only
-`{erx_facet_mint, Tag, net, Grantee, Limits}` in the system domain's envelope, with a
-positive `Tag`, a domain id `Grantee` and a map of limits, is a mint request; anything
+`{erx_facet_mint, Tag, net, Grantee, Principal, Limits}` in the system domain's envelope,
+with a positive `Tag`, a domain id `Grantee`, a principal's name and a map of limits, is a
+mint request; anything
 else is `unknown` (docs/design-system.md, "Facets a configured domain serves"). A
 request whose `Grantee` is the system domain's own id is refused, `{refused, eperm,
 Tag}`, for the mint to answer and count: the system domain never holds the grant
@@ -197,8 +198,9 @@ system domain as the grantee, a call of the mint's counts, or `unknown`.
 -spec mint(pos_integer(), term()) ->
           {ok, pos_integer(), pos_integer(), map()} | {refused, eperm, pos_integer()}
           | {counts, gen_server:from()} | unknown.
-mint(System, {erx_origin, D, {erx_facet_mint, Tag, net, Grantee, Limits}})
-  when D =:= System, is_integer(Tag), Tag > 0, is_integer(Grantee), Grantee > 0, is_map(Limits) ->
+mint(System, {erx_origin, D, {erx_facet_mint, Tag, net, Grantee, Principal, Limits}})
+  when D =:= System, is_integer(Tag), Tag > 0, is_integer(Grantee), Grantee > 0, is_binary(Principal),
+       is_map(Limits) ->
     case Grantee =:= System of
         true -> {refused, eperm, Tag};
         false -> {ok, Tag, Grantee, Limits}

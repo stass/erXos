@@ -107,15 +107,50 @@ in_order_test() ->
     {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), ready(?G, 6, #{}), {introduced, 1, ok},
                             {minted, 5, 1, {ok, facet(5)}}, {installed, 6, 1}], new()),
     ?assertEqual([[],
-                  [{arm, 1, 10000}, {introduce, 1, 5, 6}],
+                  [{arm, 1, 10000}, {introduce, 1, 5, 6, 0}],
                   [{mint, 1, mint(5), data, 6, ?LIMITS}],
                   [{install, 1, 6, data, facet(5)}],
                   [{disarm, 1}]], Actions),
     ?assertEqual({installed, {5, 6}, facet(5)}, grant(State)).
 
+%% A grant of a windows service asks for its pixel area, read by the server: its pixels
+%% in whole pages, or windows_pixels_default where its limits state none; a grant of
+%% any other service, or a windows grant to a session, asks for what its own limits say.
+windows(Limits) ->
+    erx_domain_mints:new(#{services => [{?S, display}], grants => [{?G, display, ?S, Limits}],
+                           owner => fun ?MODULE:owner/1, windows => [display]}).
+
+windows_grant_asks_for_its_pixels_test() ->
+    {Actions, _} = run([ready(?S, 5, #{display => mint(5)}), ready(?G, 6, #{})],
+                       windows(#{pixels => 8 * 4096})),
+    ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 5, 6, 8 * 4096}]], Actions).
+
+windows_grant_rounds_its_pixels_to_pages_test() ->
+    {Actions, _} = run([ready(?S, 5, #{display => mint(5)}), ready(?G, 6, #{})],
+                       windows(#{pixels => 4096 + 1})),
+    ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 5, 6, 2 * 4096}]], Actions).
+
+windows_grant_without_pixels_asks_for_the_default_test() ->
+    {Actions, _} = run([ready(?S, 5, #{display => mint(5)}), ready(?G, 6, #{})], windows(#{})),
+    ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 5, 6, 64 bsl 20}]], Actions).
+
+other_grant_asks_for_no_area_test() ->
+    Mints = erx_domain_mints:new(#{services => [{?S, data}], grants => [{?G, data, ?S, #{pixels => 4096}}],
+                                   owner => fun ?MODULE:owner/1, windows => [display]}),
+    {Actions, _} = run([ready(?S, 5, #{data => mint(5)}), ready(?G, 6, #{})], Mints),
+    ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 5, 6, 0}]], Actions).
+
+%% A session of a template granted the display asks for the template row's pixels.
+session_windows_grant_asks_for_its_pixels_test() ->
+    Mints = erx_domain_mints:new(#{services => [{?S, display}],
+                                   grants => [{{template, 0}, display, ?S, #{pixels => 3 * 4096}}],
+                                   owner => fun ?MODULE:owner/1, windows => [display]}),
+    {Actions, _} = run([ready(?S, 5, #{display => mint(5)}), {session_ready, 0, 9, none}], Mints),
+    ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 5, 9, 3 * 4096}]], Actions).
+
 grantee_first_test() ->
     {Actions, _} = run([ready(?G, 6, #{}), ready(?S, 7, #{data => mint(7)})], new()),
-    ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 7, 6}]], Actions).
+    ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 7, 6, 0}]], Actions).
 
 system_grantee_skips_the_introduction_test() ->
     {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), {minted, 5, 1, {ok, facet(5)}},
@@ -130,7 +165,7 @@ two_grants_keep_their_own_operations_test() ->
                             {installed, 6, 1}, {installed, 4, 1}],
                            erx_domain_mints:new(config([?G, system]))),
     ?assertEqual([[{arm, 1, 10000}, {mint, 1, mint(5), data, 4, ?LIMITS}],
-                  [{arm, 2, 10000}, {introduce, 2, 5, 6}],
+                  [{arm, 2, 10000}, {introduce, 2, 5, 6, 0}],
                   [{dropped, unexpected, {minted, 5}}],
                   [{dropped, unexpected, {installed, 6}}],
                   [{dropped, unexpected, {installed, 4}}]], Actions),
@@ -141,7 +176,7 @@ restart_installs_the_new_facet_test() ->
     {_, Installed} = run([{minted, 5, 1, {ok, facet(5)}}, {installed, 6, 1}], minting()),
     {Actions, State} = run([{ended, ?S, 5}, ready(?S, 8, #{data => mint(8)}), {introduced, 2, ok},
                             {minted, 8, 2, {ok, facet(8)}}, {installed, 6, 2}], Installed),
-    ?assertEqual([[], [{arm, 2, 10000}, {introduce, 2, 8, 6}], [{mint, 2, mint(8), data, 6, ?LIMITS}],
+    ?assertEqual([[], [{arm, 2, 10000}, {introduce, 2, 8, 6, 0}], [{mint, 2, mint(8), data, 6, ?LIMITS}],
                   [{install, 2, 6, data, facet(8)}], [{disarm, 2}]], Actions),
     ?assertEqual({installed, {8, 6}, facet(8)}, grant(State)).
 
@@ -198,7 +233,7 @@ malformed_provides_are_refused_whole_test() ->
 stale_report_provides_nothing_test() ->
     {Actions, State} = run([ready(?G, 6, #{}), {ended, ?S, 5}, ready(?S, 5, #{data => mint(5)}),
                             ready(?S, 8, #{data => mint(8)}), ready(?S, 5, #{data => mint(5)})], new()),
-    ?assertEqual([[], [], [{refused, stale_report, {?S, 5}}], [{arm, 1, 10000}, {introduce, 1, 8, 6}],
+    ?assertEqual([[], [], [{refused, stale_report, {?S, 5}}], [{arm, 1, 10000}, {introduce, 1, 8, 6, 0}],
                   [{refused, stale_report, {?S, 5}}]], Actions),
     ?assertEqual({introducing, {8, 6}, 1}, grant(State)).
 
@@ -214,7 +249,7 @@ old_reply_after_a_new_grant_is_dropped_test() ->
                             {minted, 5, 1, {ok, facet(5)}}, {minted, 5, 2, {ok, facet(5)}},
                             {minted, 8, 2, {ok, facet(8)}}, {installed, 6, 2}],
                            minting()),
-    ?assertEqual([[{disarm, 1}], [{arm, 2, 10000}, {introduce, 2, 8, 6}], [{mint, 2, mint(8), data, 6, ?LIMITS}],
+    ?assertEqual([[{disarm, 1}], [{arm, 2, 10000}, {introduce, 2, 8, 6, 0}], [{mint, 2, mint(8), data, 6, ?LIMITS}],
                   [{dropped, unknown_tag, {minted, 5}}], [{dropped, wrong_domain, {minted, 5}}],
                   [{install, 2, 6, data, facet(8)}], [{disarm, 2}]],
                  Actions),
@@ -279,7 +314,7 @@ session_ready_installs_test() ->
     {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), {session_ready, 0, 9, none}, {introduced, 1, ok},
                             {minted, 5, 1, {ok, facet(5)}}, {installed, 9, 1}], sessions()),
     ?assertEqual([[],
-                  [{arm, 1, 10000}, {introduce, 1, 5, 9}],
+                  [{arm, 1, 10000}, {introduce, 1, 5, 9, 0}],
                   [{mint, 1, mint(5), data, 9, ?LIMITS}],
                   [{install, 1, 9, data, facet(5)}],
                   [{disarm, 1}]], Actions),
@@ -319,7 +354,7 @@ namespace_waits_for_no_other_grant_test() ->
 
 session_before_its_server_waits_test() ->
     {Actions, State} = run([{session_ready, 0, 9, none}, ready(?S, 5, #{data => mint(5)})], sessions()),
-    ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 5, 9}]], Actions),
+    ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 5, 9, 0}]], Actions),
     ?assertEqual(#{{{session, 9}, data} => {introducing, {5, 9}, 1}}, session_grants(State)).
 
 session_end_cancels_and_drops_its_late_replies_test() ->
@@ -333,7 +368,7 @@ two_sessions_get_two_grants_test() ->
     {Actions, State} = run([{session_ready, 0, 10, none}, {introduced, 2, ok}, {minted, 5, 1, {ok, facet(5)}},
                             {minted, 5, 2, {ok, facet(5)}}, {installed, 10, 1}, {installed, 9, 2},
                             {installed, 9, 1}, {installed, 10, 2}], session_minting()),
-    ?assertEqual([[{arm, 2, 10000}, {introduce, 2, 5, 10}],
+    ?assertEqual([[{arm, 2, 10000}, {introduce, 2, 5, 10, 0}],
                   [{mint, 2, mint(5), data, 10, ?LIMITS}],
                   [{install, 1, 9, data, facet(5)}],
                   [{install, 2, 10, data, facet(5)}],
@@ -351,7 +386,7 @@ one_session_ending_leaves_the_other_its_grant_test() ->
 
 server_restart_regrants_every_live_session_test() ->
     {Actions, State} = run([{ended, ?S, 5}, ready(?S, 8, #{data => mint(8)})], two_sessions_installed()),
-    ?assertEqual([[], [{arm, 3, 10000}, {introduce, 3, 8, 9}, {arm, 4, 10000}, {introduce, 4, 8, 10}]], Actions),
+    ?assertEqual([[], [{arm, 3, 10000}, {introduce, 3, 8, 9, 0}, {arm, 4, 10000}, {introduce, 4, 8, 10, 0}]], Actions),
     ?assertEqual(#{{{session, 9}, data} => {introducing, {8, 9}, 3},
                    {{session, 10}, data} => {introducing, {8, 10}, 4}}, session_grants(State)).
 
@@ -393,7 +428,7 @@ marked() ->
 %% introduction they start succeeds, by grantee id and name; and the last state.
 minted_limits(Events, State) ->
     {Actions, Stepped} = run(Events, State),
-    {More, Last} = run([{introduced, Tag, ok} || {introduce, Tag, _, _} <- lists:append(Actions)], Stepped),
+    {More, Last} = run([{introduced, Tag, ok} || {introduce, Tag, _, _, _} <- lists:append(Actions)], Stepped),
     {#{{GranteeId, Name} => Limits || {mint, _, _, Name, GranteeId, Limits} <- lists:append(Actions ++ More)}, Last}.
 
 session_mark_test() ->
@@ -511,7 +546,7 @@ apply_action({arm, Tag, _}, #{armed := Armed, tags := Tags} = Env, Node, Label, 
 apply_action({disarm, Tag}, #{armed := Armed} = Env, Node, Label, Seen) ->
     lists:member(Tag, Armed) orelse violation(one_timer, Node, Label, Seen),
     Env#{armed := Armed -- [Tag]};
-apply_action({introduce, Tag, ServerId, GranteeId}, #{reqs := Reqs} = Env, Node, Label, Seen) ->
+apply_action({introduce, Tag, ServerId, GranteeId, _Area}, #{reqs := Reqs} = Env, Node, Label, Seen) ->
     (ready_id(?S, Env) =:= ServerId andalso GranteeId =/= 4 andalso is_grantee(GranteeId, Env))
         orelse violation(current_pair, Node, Label, Seen),
     Env#{reqs := lists:sort([{introduce, Tag} | Reqs])};
