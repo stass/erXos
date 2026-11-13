@@ -66,9 +66,10 @@ erx_dom_lib_stop(erx_dom_lib_t *lib, uint32_t id, int64_t status)
 
 erx_status_t
 erx_dom_lib_connect(erx_dom_lib_t *lib, uint32_t a, uint32_t b, uint32_t a_reads, uint32_t b_reads,
+    uint64_t area, uint32_t area_reader,
     erx_dom_linked_t *linked)
 {
-	(void)lib, (void)a, (void)b, (void)a_reads, (void)b_reads, (void)linked;
+	(void)lib, (void)a, (void)b, (void)a_reads, (void)b_reads, (void)area, (void)area_reader, (void)linked;
 	return (ERX_ENOTSUP);
 }
 

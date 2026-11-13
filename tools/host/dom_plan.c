@@ -320,7 +320,7 @@ main(int argc, char **argv)
 		a = in.pairs[index].a;
 		b = in.pairs[index].b;
 		status = erx_dom_plan_connect(&lib.view, ERX_DOM_SYSTEM_ID + 1 + a, ERX_DOM_SYSTEM_ID + 1 + b,
-		    lib.view.configured[in.order[a]].lane, lib.view.configured[in.order[b]].lane, &link);
+		    lib.view.configured[in.order[a]].lane, lib.view.configured[in.order[b]].lane, 0, 0, &link);
 		if (status == ERX_OK)
 			status = erx_dom_link_record(&lib.view, &link);
 		printf("introduce %" PRIu32 " %d\n", index, (int)status);

@@ -27,13 +27,13 @@ lock and fault thread live as long as the system domain.
 
 The registered process, the domain service, is also the only one that may
 change the library: create/1, configured/3, session/4, start/1, stop/2, retire/1,
-connect/4 and disconnect/1 answer {error, erights} to any other caller, and
+connect/6 and disconnect/1 answer {error, erights} to any other caller, and
 so does crash/1, which reads a domain's crash dump.
 """.
 
--export([register/0, create/1, start/1, stop/2, retire/1, crash/1, connect/4, disconnect/1,
+-export([register/0, create/1, start/1, stop/2, retire/1, crash/1, connect/6, disconnect/1,
          configured/0, configured/3, templates/0, devices/0, session/4, code_object/2, code_drop/2]).
--nifs([register_nif/0, create_nif/1, start_nif/1, stop_nif/2, retire_nif/1, crash_nif/1, connect_nif/4,
+-nifs([register_nif/0, create_nif/1, start_nif/1, stop_nif/2, retire_nif/1, crash_nif/1, connect_nif/6,
        disconnect_nif/1, configured_nif/0, configured_create_nif/3, templates_nif/0, devices_nif/0,
        session_create_nif/4]).
 -on_load(on_load/0).
@@ -181,15 +181,20 @@ crash(Id) ->
 
 -doc """
 Connects domains A and B, A reading a ring of AReads bytes and B one of
-BReads: {ok, #{number => N, a => Party, b => Party}}, each Party the
-side, peer_side, peer_bell and label in that domain's own table.
+BReads, with a pixel area of Area bytes, whole pages, that AreaReader,
+A or B, maps read-only and the other writes (docs/design-display.md,
+"The pixel area"), or none for Area and AreaReader 0:
+{ok, #{number => N, a => Party, b => Party}}, each Party the side,
+peer_side, peer_bell, label and area in that domain's own table, area
+none or {Handle, Bytes, write | read}.
 """.
--spec connect(pos_integer(), pos_integer(), non_neg_integer(), non_neg_integer()) ->
+-spec connect(pos_integer(), pos_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(),
+              non_neg_integer()) ->
           {ok, #{number := pos_integer(), a := map(), b := map()}} | error().
-connect(A, B, AReads, BReads) ->
-    connect_nif(A, B, AReads, BReads).
+connect(A, B, AReads, BReads, Area, AreaReader) ->
+    connect_nif(A, B, AReads, BReads, Area, AreaReader).
 
--doc "Destroys connection Number's child budgets, with its sides and bells.".
+-doc "Destroys connection Number's child budgets, with its sides, bells and pixel area.".
 -spec disconnect(pos_integer()) -> ok | error().
 disconnect(Number) ->
     disconnect_nif(Number).
@@ -279,7 +284,7 @@ retire_nif(_Id) ->
 crash_nif(_Id) ->
     erlang:nif_error(undef).
 
-connect_nif(_A, _B, _AReads, _BReads) ->
+connect_nif(_A, _B, _AReads, _BReads, _Area, _AreaReader) ->
     erlang:nif_error(undef).
 
 disconnect_nif(_Number) ->

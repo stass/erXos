@@ -128,6 +128,8 @@ typedef struct fuzz_input {
 	erx_dom_connection_t	conns[3];
 	erx_dom_remains_t	remains[6];
 	uint32_t		a, b, a_reads, b_reads, number, next;
+	uint64_t		area;		/* a connection's pixel area and its reader */
+	uint32_t		area_reader;
 	uint64_t		label;
 	erx_fault_t		record;
 	/* A device's give over the input's catalogue, and a principal's check. */
@@ -238,7 +240,7 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 
 	if (connect) {
 		if (erx_dom_plan_connect(&view, in->a, in->b, in->a_reads,
-		    in->b_reads, &link) != ERX_OK)
+		    in->b_reads, in->area, in->area_reader, &link) != ERX_OK)
 			return;
 		if (erx_dom_link_check(&link) != ERX_OK || link.a == link.b ||
 		    link.a_slot >= 3 || link.b_slot >= 3 || link.row >= 3 ||
@@ -255,8 +257,18 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 			    link.steps[index].budget != ERX_DOM_OBJ_LINK_BUDGET_B) ||
 			    (link.steps[index].obj == ERX_DOM_OBJ_SIDE_B &&
 			    link.steps[index].kind == ERX_DOM_STEP_MEM &&
-			    link.steps[index].budget != ERX_DOM_OBJ_LINK_BUDGET_A))
+			    link.steps[index].budget != ERX_DOM_OBJ_LINK_BUDGET_A) ||
+			    /* The pixel area: whole pages, on its reader's child. */
+			    ((link.steps[index].obj == ERX_DOM_OBJ_AREA_A ||
+			    link.steps[index].obj == ERX_DOM_OBJ_AREA_B) &&
+			    link.steps[index].kind == ERX_DOM_STEP_MEM &&
+			    (link.steps[index].size != in->area ||
+			    in->area % ERX_PAGE_SIZE != 0 ||
+			    link.steps[index].budget != (in->area_reader == in->a ?
+			    ERX_DOM_OBJ_LINK_BUDGET_A : ERX_DOM_OBJ_LINK_BUDGET_B))))
 				abort();
+		if (link.area_reader != (in->area == 0 ? 0 : in->area_reader))
+			abort();
 		/* The record is what the next plan of the pair sees. */
 		if (erx_dom_link_record(&view, &link) != ERX_OK ||
 		    conns[link.row].number != link.number ||
@@ -267,7 +279,7 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 		    link.number + 1))
 			abort();
 		if (erx_dom_plan_connect(&view, in->a, in->b, in->a_reads,
-		    in->b_reads, &again) == ERX_OK &&
+		    in->b_reads, in->area, in->area_reader, &again) == ERX_OK &&
 		    (again.row == link.row || again.number != view.next_connection))
 			abort();
 		return;
@@ -470,6 +482,7 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		    .budget_b = { 55 }, .closing = true } },
 		.remains = { { .id = 9, .principal = 1, .outer = { 92 }, .bytes = 4096 } },
 		.a = 5, .b = 7, .a_reads = 65536, .b_reads = 16384, .number = 2,
+		.area = 8192, .area_reader = 7,
 		.next = 3, .label = 5, .record = { .kind = ERX_FAULT_EXIT },
 		.devs = { { .nranges = 1, .nlines = 1,
 		    .ranges = { { 0x0a003000, 0x1000 } }, .memory = FUZZ_MIB },

@@ -656,11 +656,11 @@ it; git history is the record of completed work.
 * [High] [design-display.md](docs/design-display.md): the code the design asks for that the tree does not have, in the
   order [Track D](docs/plan.md#track-d-windows-widgets-and-the-web) builds it. Nothing below is built; the cores named
   as landed are kept and changed as listed.
-  * **The pixel area** ([The pixel area](docs/design-display.md#the-pixel-area)): `erx_dom_connect` with `area` and
-    `area_reader`, the connection record's `area`, the grant-table rows and the Fiasco backend's row for an object two
-    tasks map (`liberx/system`); `connection_up`'s `Area` and `ERX_LANE_CTL_SLOT`'s pinned length; the connection
-    agent's mapping and unmapping of an area; the `erx_area` NIF and `erx_memdraw:wrap/4`, an image over memory the
-    NIF did not allocate, which the agent unmaps only after the last image over it is gone.
+  * **The pixel area** ([The pixel area](docs/design-display.md#the-pixel-area)): the domain library makes it
+    (`erx_dom_connect`'s `area`, `area_reader`); still missing are the domain service passing the grant's `pixels`
+    to it (with the manifest's `display` record below), `connection_up`'s `Area` and `ERX_LANE_CTL_SLOT`'s pinned
+    length; the connection agent's mapping and unmapping of an area; the `erx_area` NIF and `erx_memdraw:wrap/4`, an
+    image over memory the NIF did not allocate, which the agent unmaps only after the last image over it is gone.
   * **The manifest** ([A display's session](docs/design-display.md#a-displays-session)): the `display` record in
     `abi/manifest.txt`, named after the `windows` service it describes, and its reader; property 18 of the manifest
     check (a template's `pixels` counted by its principal's `domains` quota, no facet row setting `session`) with its

@@ -74,11 +74,11 @@ typedef struct erx_dom_handles {
 
 /*
  * One connection between two domains' handles, object by object from
- * ERX_DOM_OBJ_LINK_BUDGET_A: its two child budgets, two sides and two
- * bells. A system connection's handles are its domain's, so its row's
+ * ERX_DOM_OBJ_LINK_BUDGET_A: its two child budgets, two sides, two bells
+ * and two pixel area slots, of which one at most is used. A system connection's handles are its domain's, so its row's
  * stay empty.
  */
-#define ERX_DOM_LINK_OBJS	(ERX_DOM_OBJ_BELL_B - ERX_DOM_OBJ_LINK_BUDGET_A + 1u)
+#define ERX_DOM_LINK_OBJS	(ERX_DOM_OBJ_AREA_B - ERX_DOM_OBJ_LINK_BUDGET_A + 1u)
 
 typedef struct erx_dom_link_handles {
 	uint64_t	made[ERX_DOM_LINK_OBJS];	/* ERX_CAP_NULL for none */
@@ -169,6 +169,9 @@ typedef struct erx_dom_party {
 	uint64_t	peer_side;	/* the other's side, which it reads */
 	uint64_t	peer_bell;	/* the other's bell, which it triggers */
 	uint32_t	label;		/* the label its own bell delivers to its group */
+	bool		area_writes;	/* whether it writes the pixel area or reads it */
+	uint64_t	area;		/* the pixel area; 0 for a connection without one */
+	uint64_t	area_bytes;	/* its size; 0 without one */
 } erx_dom_party_t;
 
 /* What erx_dom_lib_connect returns: the connection's number and each party's values. */
@@ -178,16 +181,18 @@ typedef struct erx_dom_linked {
 } erx_dom_linked_t;
 
 /*
- * erx_dom_connect(a, b, a_reads, b_reads), erx_dom_plan_connect's
+ * erx_dom_connect(a, b, a_reads, b_reads, area, area_reader),
+ * erx_dom_plan_connect's
  * arguments: plans, applies each step in order, and records the
  * connection in the view. On a refused step the children carved so far
- * are destroyed, which deletes the sides and bells charged to them and,
+ * are destroyed, which deletes the sides, bells and area charged to them and,
  * on erXos's kernel, clears every install of them (K25), and the step's status is returned with
  * *linked untouched: ERX_ENOMEM when a party's outer budget cannot hold
  * its child.
  */
 erx_status_t	erx_dom_lib_connect(erx_dom_lib_t *, uint32_t a, uint32_t b,
-		    uint32_t a_reads, uint32_t b_reads, erx_dom_linked_t *linked)
+		    uint32_t a_reads, uint32_t b_reads, uint64_t area,
+		    uint32_t area_reader, erx_dom_linked_t *linked)
 		    ERX_WARN_UNUSED_RESULT;
 
 /* erx_dom_disconnect and erx_dom_retire: their plans' answers. */

@@ -1060,7 +1060,7 @@ introduce(A, B, #{core := Core, links := Links, lib := Lib} = State) ->
                     {wait, State};
                 none ->
                     case erx_domain_links:room(A, Links) andalso erx_domain_links:room(B, Links) of
-                        true -> connect(Lib:connect(A, B, ReaderA, ReaderB), A, B, ReaderA, ReaderB, State);
+                        true -> connect(Lib:connect(A, B, ReaderA, ReaderB, 0, 0), A, B, ReaderA, ReaderB, State);
                         false -> {{error, system_limit}, State}
                     end;
                 _Closing ->

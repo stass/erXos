@@ -201,6 +201,18 @@ life_remains_held(const erx_dom_view_t *view, const erx_dom_teardown_t *teardown
 	return (true);
 }
 
+/*
+ * A pixel area's arguments: none (0 bytes, reader 0), or whole pages read
+ * by one of the two parties.
+ */
+static bool
+life_area_ok(uint32_t a, uint32_t b, uint64_t area, uint32_t area_reader)
+{
+	if (area == 0)
+		return (area_reader == 0);
+	return (area % ERX_PAGE_SIZE == 0 && (area_reader == a || area_reader == b));
+}
+
 /* Room for one more connection: its quota and a bell label below the split. */
 static bool
 life_room(const erx_dom_view_t *view, const erx_dom_t *dom)
@@ -212,11 +224,13 @@ life_room(const erx_dom_view_t *view, const erx_dom_t *dom)
 
 erx_status_t
 erx_dom_plan_connect(const erx_dom_view_t *view, uint32_t a, uint32_t b,
-    uint32_t a_reads, uint32_t b_reads, erx_dom_link_plan_t *plan)
+    uint32_t a_reads, uint32_t b_reads, uint64_t area, uint32_t area_reader,
+    erx_dom_link_plan_t *plan)
 {
 	const erx_dom_t *da, *db;
 	const erx_dom_grant_row_t *row;
-	erx_dom_link_plan_t draft = { .a = a, .b = b };
+	erx_dom_link_plan_t draft = { .a = a, .b = b, .area_reader = area_reader };
+	bool made[ERX_DOM_OBJ_MADE_COUNT] = { false };
 	uint64_t side_a = erx_lane_side_bytes(b_reads);
 	uint64_t side_b = erx_lane_side_bytes(a_reads);
 	uint64_t child_a, child_b;
@@ -226,7 +240,13 @@ erx_dom_plan_connect(const erx_dom_view_t *view, uint32_t a, uint32_t b,
 	if (a == b || draft.a_slot == view->max_domains ||
 	    draft.b_slot == view->max_domains || side_a == 0 || side_b == 0 ||
 	    !life_add(side_b, ERX_DOM_BELL_BYTES, &child_a) ||
-	    !life_add(side_a, ERX_DOM_BELL_BYTES, &child_b))
+	    !life_add(side_a, ERX_DOM_BELL_BYTES, &child_b) ||
+	    !life_area_ok(a, b, area, area_reader))
+		return (ERX_EINVAL);
+	/* The pixel area joins the side its reader reads on that reader's child. */
+	if (area_reader == a && !life_add(child_a, area, &child_a))
+		return (ERX_EINVAL);
+	if (area_reader == b && !life_add(child_b, area, &child_b))
 		return (ERX_EINVAL);
 	da = &view->domains[draft.a_slot];
 	db = &view->domains[draft.b_slot];
@@ -267,11 +287,25 @@ erx_dom_plan_connect(const erx_dom_view_t *view, uint32_t a, uint32_t b,
 	    .kind = ERX_DOM_STEP_BELL, .obj = ERX_DOM_OBJ_BELL_B,
 	    .budget = ERX_DOM_OBJ_LINK_BUDGET_B, .target = ERX_DOM_OBJ_GROUP_B,
 	    .label = db->labels + 1 };
-	/* Each party's share comes from erx_dom_grants alone (A7). */
+	/*
+	 * The pixel area, like a side, is named by its writer and charged to
+	 * its reader's child, so the rows of erx_dom_grants give the writer
+	 * write access and the reader read access alone.
+	 */
+	if (area != 0)
+		draft.steps[draft.nsteps++] = (erx_dom_step_t){
+		    .kind = ERX_DOM_STEP_MEM,
+		    .obj = area_reader == b ? ERX_DOM_OBJ_AREA_A : ERX_DOM_OBJ_AREA_B,
+		    .budget = area_reader == b ? ERX_DOM_OBJ_LINK_BUDGET_B :
+		    ERX_DOM_OBJ_LINK_BUDGET_A, .size = area };
+	for (uint32_t index = 0; index < draft.nsteps; index++)
+		made[draft.steps[index].obj] = true;
+	/* Each party's share comes from erx_dom_grants alone (A7), of what it made. */
 	for (size_t index = 0; index < ERX_DOM_GRANTS_ROWS; index++) {
 		row = &erx_dom_grants[index];
-		if (row->target != ERX_DOM_OBJ_SPACE_A &&
-		    row->target != ERX_DOM_OBJ_SPACE_B)
+		if ((row->target != ERX_DOM_OBJ_SPACE_A &&
+		    row->target != ERX_DOM_OBJ_SPACE_B) ||
+		    row->obj >= ERX_DOM_OBJ_MADE_COUNT || !made[row->obj])
 			continue;
 		if (draft.nsteps == ERX_DOM_LINK_STEPS)
 			return (ERX_EINVAL);
@@ -304,8 +338,9 @@ life_granted(const erx_dom_step_t *step)
 /*
  * One step of a connection against what the steps before it made. The
  * pairs below are the charging rule: each child from its own party's
- * outer budget, the side a reads (b's) and a's bell on a's child, and the
- * same for b.
+ * outer budget, the side a reads (b's), a's bell and the pixel area a reads
+ * (AREA_B) on a's child, and the same for b; a connection has one area at
+ * most.
  */
 static bool
 life_step_ok(const erx_dom_step_t *step, const bool *made)
@@ -328,6 +363,12 @@ life_step_ok(const erx_dom_step_t *step, const bool *made)
 		    ((obj == ERX_DOM_OBJ_SIDE_B &&
 		    step->budget == ERX_DOM_OBJ_LINK_BUDGET_A) ||
 		    (obj == ERX_DOM_OBJ_SIDE_A &&
+		    step->budget == ERX_DOM_OBJ_LINK_BUDGET_B) ||
+		    (obj == ERX_DOM_OBJ_AREA_B && !made[ERX_DOM_OBJ_AREA_A] &&
+		    step->size % ERX_PAGE_SIZE == 0 &&
+		    step->budget == ERX_DOM_OBJ_LINK_BUDGET_A) ||
+		    (obj == ERX_DOM_OBJ_AREA_A && !made[ERX_DOM_OBJ_AREA_B] &&
+		    step->size % ERX_PAGE_SIZE == 0 &&
 		    step->budget == ERX_DOM_OBJ_LINK_BUDGET_B)));
 	case ERX_DOM_STEP_BELL:
 		/* Label 1 is the system connection's (ERX_DOM_SYSTEM_LABEL). */
@@ -378,6 +419,10 @@ erx_dom_link_check(const erx_dom_link_plan_t *plan)
 		if (step->kind != ERX_DOM_STEP_INSTALL)
 			made[step->obj] = true;
 	}
+	/* The reader the view records is the one the area is charged to. */
+	if (plan->area_reader != (made[ERX_DOM_OBJ_AREA_A] ? plan->b :
+	    made[ERX_DOM_OBJ_AREA_B] ? plan->a : 0))
+		return (ERX_EINVAL);
 	return (ERX_OK);
 }
 
@@ -421,6 +466,7 @@ erx_dom_link_record(erx_dom_view_t *view, const erx_dom_link_plan_t *plan)
 	row->number = plan->number;
 	row->a = plan->a;
 	row->b = plan->b;
+	row->area_reader = plan->area_reader;
 	row->closing = false;
 	da->labels++;
 	db->labels++;

@@ -1067,7 +1067,7 @@ link_object(const link_t *link, erx_dom_obj_t obj)
 	const uint64_t *const a = link->lib->handles[link->plan->a_slot].made;
 	const uint64_t *const b = link->lib->handles[link->plan->b_slot].made;
 
-	if (obj >= ERX_DOM_OBJ_LINK_BUDGET_A && obj <= ERX_DOM_OBJ_BELL_B)
+	if (obj >= ERX_DOM_OBJ_LINK_BUDGET_A && obj <= ERX_DOM_OBJ_AREA_B)
 		return (link->handles.made[obj - ERX_DOM_OBJ_LINK_BUDGET_A]);
 	switch (obj) {
 	case ERX_DOM_OBJ_OUTER_A:
@@ -1089,7 +1089,8 @@ link_object(const link_t *link, erx_dom_obj_t obj)
 
 /*
  * Where an install's value goes: the party whose space it enters, as its
- * own side, the other's side or the other's bell; NULL for anything else.
+ * own side, the other's side, the other's bell or the pixel area; NULL for
+ * anything else.
  */
 static uint64_t *
 link_value(link_t *link, const erx_dom_step_t *step)
@@ -1105,6 +1106,11 @@ link_value(link_t *link, const erx_dom_step_t *step)
 		return (&party->peer_side);
 	if (step->obj == (to_a ? ERX_DOM_OBJ_BELL_B : ERX_DOM_OBJ_BELL_A))
 		return (&party->peer_bell);
+	if (step->obj == ERX_DOM_OBJ_AREA_A || step->obj == ERX_DOM_OBJ_AREA_B) {
+		/* Whether the party writes the area is the right its grant row gave it. */
+		party->area_writes = (step->rights & ERX_HR_WRITE) != 0;
+		return (&party->area);
+	}
 	return (NULL);
 }
 
@@ -1141,12 +1147,15 @@ link_view_caps(erx_dom_lib_t *lib, uint32_t row)
 	conn->side_b = CAP(ERX_DOM_OBJ_SIDE_B);
 	conn->bell_a = CAP(ERX_DOM_OBJ_BELL_A);
 	conn->bell_b = CAP(ERX_DOM_OBJ_BELL_B);
+	/* A connection has one pixel area at most; the other handle is ERX_CAP_NULL. */
+	conn->area = conn->area_reader == conn->b ? CAP(ERX_DOM_OBJ_AREA_A) :
+	    conn->area_reader == conn->a ? CAP(ERX_DOM_OBJ_AREA_B) : (erx_cap_t){ .raw = ERX_CAP_NULL };
 #undef CAP
 }
 
 erx_status_t
 erx_dom_lib_connect(erx_dom_lib_t *lib, uint32_t a, uint32_t b, uint32_t a_reads, uint32_t b_reads,
-    erx_dom_linked_t *linked)
+    uint64_t area, uint32_t area_reader, erx_dom_linked_t *linked)
 {
 	erx_dom_obj_t undo[ERX_DOM_LINK_STEPS];
 	erx_dom_link_plan_t plan;
@@ -1155,7 +1164,7 @@ erx_dom_lib_connect(erx_dom_lib_t *lib, uint32_t a, uint32_t b, uint32_t a_reads
 	erx_status_t status;
 	uint32_t applied;
 
-	status = erx_dom_plan_connect(&lib->view, a, b, a_reads, b_reads, &plan);
+	status = erx_dom_plan_connect(&lib->view, a, b, a_reads, b_reads, area, area_reader, &plan);
 	if (status != ERX_OK)
 		return (status);
 	link = (link_t){ .lib = lib, .plan = &plan };
@@ -1180,6 +1189,8 @@ erx_dom_lib_connect(erx_dom_lib_t *lib, uint32_t a, uint32_t b, uint32_t a_reads
 	lib->links[plan.row] = link.handles;
 	link_view_caps(lib, plan.row);
 	link.linked.number = plan.number;
+	link.linked.a.area_bytes = area;
+	link.linked.b.area_bytes = area;
 	*linked = link.linked;
 	return (ERX_OK);
 }

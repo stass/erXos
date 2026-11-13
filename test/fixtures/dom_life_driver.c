@@ -14,6 +14,9 @@
  *   seeded	connection plans that break the one-installer rule or the
  *		reader-pays rule, which erx_dom_link_check must refuse
  *
+ * The explore and the cases and seeds whose names start with area_ cover a
+ * connection with a pixel area (docs/design-display.md, "The pixel area").
+ *
  * Output is one line per result; the test compares them.
  */
 
@@ -121,9 +124,11 @@ reader_budget(erx_dom_obj_t obj)
 	if (obj == ERX_DOM_OBJ_LINK_BUDGET_B)
 		return (ERX_DOM_OBJ_OUTER_B);
 	/* a reads b's side and waits on its own bell. */
-	if (obj == ERX_DOM_OBJ_SIDE_B || obj == ERX_DOM_OBJ_BELL_A)
+	if (obj == ERX_DOM_OBJ_SIDE_B || obj == ERX_DOM_OBJ_BELL_A ||
+	    obj == ERX_DOM_OBJ_AREA_B)
 		return (ERX_DOM_OBJ_LINK_BUDGET_A);
-	if (obj == ERX_DOM_OBJ_SIDE_A || obj == ERX_DOM_OBJ_BELL_B)
+	if (obj == ERX_DOM_OBJ_SIDE_A || obj == ERX_DOM_OBJ_BELL_B ||
+	    obj == ERX_DOM_OBJ_AREA_A)
 		return (ERX_DOM_OBJ_LINK_BUDGET_B);
 	return (ERX_DOM_OBJ_NONE);
 }
@@ -192,8 +197,13 @@ model_left(const model_t *m)
 	return (left);
 }
 
-static int
-explore(void)
+/*
+ * Fails a connection carrying an area of `area` bytes read by `reader` at
+ * every step and checks the undo, then disconnects it whole. Prints its
+ * steps after `tag` and returns their number, 0 when it was refused.
+ */
+static uint32_t
+explore_link(uint64_t area, uint32_t reader, const char *tag)
 {
 	erx_dom_link_plan_t plan;
 	erx_dom_teardown_t teardown;
@@ -202,11 +212,12 @@ explore(void)
 	model_t m;
 
 	reset_view();
-	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, &plan) != ERX_OK) {
+	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, area, reader, &plan) != ERX_OK) {
 		printf("FAIL the valid connection was refused\n");
-		return (1);
+		failures++;
+		return (0);
 	}
-	printf("steps");
+	printf("%s", tag);
 	for (uint32_t index = 0; index < plan.nsteps; index++)
 		printf(" %s", step_names[plan.steps[index].kind]);
 	printf("\n");
@@ -238,8 +249,18 @@ explore(void)
 	if (model_left(&m) != 0 || model_in_tables(&m) != 0 ||
 	    teardown.index != plan.row)
 		fail("disconnect left an object or freed another row", plan.nsteps);
+	return (plan.nsteps);
+}
+
+static int
+explore(void)
+{
+	uint32_t nsteps = explore_link(0, 0, "steps");
+
+	(void)explore_link(2 * ERX_PAGE_SIZE, 5, "area-steps");
+	(void)explore_link(2 * ERX_PAGE_SIZE, 6, "area-b-steps");
 	device_explore();
-	printf("explore steps=%u failures=%lu\n", plan.nsteps, failures);
+	printf("explore steps=%u failures=%lu\n", nsteps, failures);
 	return (failures == 0 ? 0 : 1);
 }
 
@@ -250,7 +271,7 @@ connect_case(const char *name, uint32_t a, uint32_t b, uint32_t a_reads,
 	erx_dom_link_plan_t plan;
 	erx_status_t status;
 
-	status = erx_dom_plan_connect(&view, a, b, a_reads, b_reads, &plan);
+	status = erx_dom_plan_connect(&view, a, b, a_reads, b_reads, 0, 0, &plan);
 	if (status != ERX_OK) {
 		printf("case %s %d\n", name, status);
 		return;
@@ -283,7 +304,7 @@ link_record_cases(void)
 
 	/* The record is what the next plan sees: 6's one connection is taken. */
 	reset_view();
-	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, &plan) != ERX_OK)
+	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, 0, 0, &plan) != ERX_OK)
 		failures++;
 	link_record_case("record_ok", &plan);
 	connect_case("record_then_quota", 5, 6, 65536, 16384);
@@ -291,7 +312,7 @@ link_record_cases(void)
 
 	/* A plan that no longer fits the view leaves it as it was. */
 	reset_view();
-	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, &plan) != ERX_OK)
+	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, 0, 0, &plan) != ERX_OK)
 		failures++;
 	domains[0].id = 9;
 	link_record_case("record_stale_slot", &plan);
@@ -305,9 +326,62 @@ link_record_cases(void)
 	/* The last number spends them. */
 	reset_view();
 	view.next_connection = UINT32_MAX;
-	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, &plan) != ERX_OK)
+	if (erx_dom_plan_connect(&view, 5, 6, 65536, 16384, 0, 0, &plan) != ERX_OK)
 		failures++;
 	link_record_case("record_last_number", &plan);
+}
+
+/*
+ * A connection with a pixel area: the children, the area's object and the
+ * child it is charged to, each install of it with its rights, and the
+ * reader the record keeps.
+ */
+static void
+area_case(const char *name, uint64_t area, uint32_t reader)
+{
+	erx_dom_link_plan_t plan;
+	const erx_dom_step_t *step;
+	erx_status_t status;
+
+	reset_view();
+	status = erx_dom_plan_connect(&view, 5, 6, 65536, 16384, area, reader, &plan);
+	if (status != ERX_OK) {
+		printf("case %s %d\n", name, status);
+		return;
+	}
+	printf("case %s %d reader=%u children=%llu,%llu", name, status,
+	    plan.area_reader, (unsigned long long)plan.steps[0].size,
+	    (unsigned long long)plan.steps[1].size);
+	for (uint32_t index = 0; index < plan.nsteps; index++) {
+		step = &plan.steps[index];
+		if (step->obj != ERX_DOM_OBJ_AREA_A && step->obj != ERX_DOM_OBJ_AREA_B)
+			continue;
+		if (step->kind == ERX_DOM_STEP_MEM)
+			printf(" mem=%s,%s,%llu",
+			    step->obj == ERX_DOM_OBJ_AREA_A ? "A" : "B",
+			    step->budget == ERX_DOM_OBJ_LINK_BUDGET_A ? "a" : "b",
+			    (unsigned long long)step->size);
+		else
+			printf(" install=%s,%s", step->target == ERX_DOM_OBJ_SPACE_A ? "a" : "b",
+			    (step->rights & ERX_HR_WRITE) != 0 ? "rw" : "r");
+	}
+	if (erx_dom_link_record(&view, &plan) == ERX_OK)
+		printf(" recorded=%u", connections[plan.row].area_reader);
+	printf("\n");
+}
+
+static void
+area_cases(void)
+{
+	area_case("area_a_reads", 8192, 5);
+	area_case("area_b_reads", 8192, 6);
+	area_case("area_one_page", ERX_PAGE_SIZE, 5);
+	area_case("area_unaligned", ERX_PAGE_SIZE + 1, 5);
+	area_case("area_half_page", ERX_PAGE_SIZE / 2, 6);
+	area_case("area_no_reader", 8192, 0);
+	area_case("area_third_reader", 8192, 7);
+	area_case("area_reader_alone", 0, 5);
+	area_case("area_child_wraps", UINT64_MAX - ERX_PAGE_SIZE + 1, 5);
 }
 
 static void
@@ -712,7 +786,7 @@ seeded(void)
 	uint32_t last;
 
 	reset_view();
-	if (erx_dom_plan_connect(&view, 5, 6, 65536, 65536, &valid) != ERX_OK)
+	if (erx_dom_plan_connect(&view, 5, 6, 65536, 65536, 0, 0, &valid) != ERX_OK)
 		failures++;
 	last = valid.nsteps - 1;
 	printf("seeded valid %d\n", erx_dom_link_check(&valid));
@@ -749,6 +823,30 @@ seeded(void)
 	SEED("obj_range", plan.steps[last].budget = ERX_DOM_OBJ_COUNT);
 	SEED("same_party", plan.b = plan.a);
 	SEED("number_zero", plan.number = 0);
+
+	/* A pixel area read by a: AREA_B, charged to a's child, at step 6. */
+	reset_view();
+	if (erx_dom_plan_connect(&view, 5, 6, 65536, 65536, 8192, 5, &valid) != ERX_OK)
+		failures++;
+	printf("seeded area_valid %d\n", erx_dom_link_check(&valid));
+	SEED("area_writer_pays", plan.steps[6].budget = ERX_DOM_OBJ_LINK_BUDGET_B);
+	SEED("area_reader_unset", plan.area_reader = 0);
+	SEED("area_reader_writer", plan.area_reader = 6);
+	SEED("area_reader_writable", {
+		for (uint32_t index = 0; index < plan.nsteps; index++)
+			if (plan.steps[index].kind == ERX_DOM_STEP_INSTALL &&
+			    plan.steps[index].obj == ERX_DOM_OBJ_AREA_B &&
+			    plan.steps[index].target == ERX_DOM_OBJ_SPACE_A)
+				plan.steps[index].rights |= ERX_HR_WRITE;
+	});
+	/* A second area, with the reader the last one names: only the one-area rule refuses it. */
+	SEED("area_twice", {
+		plan.steps[7] = ((erx_dom_step_t){ .kind = ERX_DOM_STEP_MEM,
+		    .obj = ERX_DOM_OBJ_AREA_A, .budget = ERX_DOM_OBJ_LINK_BUDGET_B,
+		    .size = 8192 });
+		plan.area_reader = plan.b;
+	});
+	SEED("area_unaligned", plan.steps[6].size = ERX_PAGE_SIZE + 1);
 #undef SEED
 }
 
@@ -815,6 +913,7 @@ main(int argc, char **argv)
 		return (explore());
 	if (argc == 2 && strcmp(argv[1], "cases") == 0) {
 		connect_cases();
+		area_cases();
 		teardown_cases();
 		end_cases();
 		device_cases();

@@ -31,6 +31,8 @@ class DomLifeTest < Minitest::Test
 
   # Two carves, two sides, two bells, three installs into each party.
   LINK_STEPS = %w[CARVE CARVE MEM MEM BELL BELL INSTALL INSTALL INSTALL INSTALL INSTALL INSTALL].freeze
+  # The same with the pixel area made after the bells and installed into each party.
+  AREA_STEPS = (LINK_STEPS[0, 6] + %w[MEM] + LINK_STEPS[6..] + %w[INSTALL INSTALL]).freeze
 
   # The side a reads is b's, 64 KiB of data plus its two pages, and a's bell:
   # a's child; b reads 16 KiB.
@@ -43,6 +45,13 @@ class DomLifeTest < Minitest::Test
     'connect_numbers_spent' => ELIMIT, 'connect_labels_spent' => ELIMIT,
     'connect_labels_last' => '0 number=20 row=2 slots=0,1 labels=2147483647,4 children=77824,77824',
     'connect_labels_unset' => ELIMIT,
+    # A pixel area: whole pages, charged with the side its reader reads to
+    # that reader's child, written by the other party and read by the reader.
+    'area_a_reads' => '0 reader=5 children=86016,28672 mem=B,a,8192 install=b,rw install=a,r recorded=5',
+    'area_b_reads' => '0 reader=6 children=77824,36864 mem=A,b,8192 install=a,rw install=b,r recorded=6',
+    'area_one_page' => '0 reader=5 children=81920,28672 mem=B,a,4096 install=b,rw install=a,r recorded=5',
+    'area_unaligned' => EINVAL, 'area_half_page' => EINVAL, 'area_no_reader' => EINVAL,
+    'area_third_reader' => EINVAL, 'area_reader_alone' => EINVAL, 'area_child_wraps' => EINVAL,
     # erx_dom_link_record: row 2, the parties' labels and the next number after it.
     'record_ok' => '0 row=20,5,6 labels=2,4 next=21', 'record_then_quota' => ELIMIT,
     'record_twice' => '-1 row=20,5,6 labels=2,4 next=21',
@@ -117,6 +126,7 @@ DEVICES = {
   SEEDED = %w[foreign_gate creation_object extra_right peer_side_writable creation_space writer_pays
               child_from_peer child_from_principal bell_on_peer_group bell_label_zero bell_label_split
               out_of_order made_twice too_many obj_range same_party number_zero
+              area_writer_pays area_reader_unset area_reader_writer area_reader_writable area_twice area_unaligned
               dev_gate dev_install_resource dev_install_unmade dev_window_phys dev_foreign_space
               dev_resource_not_root dev_window_system_pays dev_memory_holder_pays dev_window_index
               dev_out_of_order dev_dma_and_memory dev_system_holder dev_too_many dev_kept_not_last
@@ -124,6 +134,20 @@ DEVICES = {
 
   # One-line edits of the core, each with the driver line it must change.
   MUTANTS = {
+    'an area charged to its writer' =>
+      [".budget = area_reader == b ? ERX_DOM_OBJ_LINK_BUDGET_B :\n\t\t    ERX_DOM_OBJ_LINK_BUDGET_A",
+       ".budget = area_reader == b ? ERX_DOM_OBJ_LINK_BUDGET_A :\n\t\t    ERX_DOM_OBJ_LINK_BUDGET_B",
+       'case area_a_reads '],
+    'the check takes an area off a page boundary' =>
+      ["(obj == ERX_DOM_OBJ_AREA_B && !made[ERX_DOM_OBJ_AREA_A] &&\n\t\t    step->size % ERX_PAGE_SIZE == 0 &&",
+       "(obj == ERX_DOM_OBJ_AREA_B && !made[ERX_DOM_OBJ_AREA_A] &&", 'seeded area_unaligned '],
+    'two areas in one connection' =>
+      ["(obj == ERX_DOM_OBJ_AREA_A && !made[ERX_DOM_OBJ_AREA_B] &&", "(obj == ERX_DOM_OBJ_AREA_A &&",
+       'seeded area_twice '],
+    'an area reader nobody checks' =>
+      ["made[ERX_DOM_OBJ_AREA_B] ? plan->a : 0))\n\t\treturn (ERX_EINVAL);",
+       "made[ERX_DOM_OBJ_AREA_B] ? plan->a : 0) && false)\n\t\treturn (ERX_EINVAL);",
+       'seeded area_reader_writer '],
     'quota counts the system connection' =>
       ['if (row->number != 0 && row->a != ERX_DOM_SYSTEM_ID &&', 'if (row->number != 0 &&', 'case connect_ok '],
     'side charged to the writer' =>
@@ -201,6 +225,8 @@ DEVICES = {
     assert_equal "explore steps=#{LINK_STEPS.size} failures=0", lines.last
     assert_includes lines, 'dev-explore 0 steps=7'
     assert_includes lines, 'dev-explore 1 steps=35'
+    assert_includes lines, "area-steps #{AREA_STEPS.join(' ')}"
+    assert_includes lines, "area-b-steps #{AREA_STEPS.join(' ')}"
   end
 
   def test_every_result_of_connect_disconnect_and_retire
@@ -221,8 +247,9 @@ DEVICES = {
     lines = run_driver(driver, 'seeded')
     assert_includes lines, 'seeded valid 0'
     assert_includes lines, 'seeded dev_valid 0'
+    assert_includes lines, 'seeded area_valid 0'
     SEEDED.each { |name| assert_includes lines, "seeded #{name} #{EINVAL}", name }
-    assert_equal SEEDED.size + 2, lines.size
+    assert_equal SEEDED.size + 3, lines.size
   end
 
   def test_each_mutant_changes_its_line

@@ -60,7 +60,7 @@
 /* The most devices one configured domain holds, each a give in its creation plan. */
 #define ERX_DOM_GIVES_MAX	8u
 /* The most steps a creation plan holds: its own and a GIVE step per device. */
-#define ERX_DOM_PLAN_STEPS_MAX	(40u + ERX_DOM_GIVES_MAX)
+#define ERX_DOM_PLAN_STEPS_MAX	(44u + ERX_DOM_GIVES_MAX)
 /* The fields of erx_runtime_limits_t a request may leave out; dom_core.c
  * pins the layout, so a new field fails the build until it is handled. */
 #define ERX_DOM_LIMITS_FIELDS	11u
@@ -170,6 +170,12 @@ typedef struct erx_dom_connection {
 	erx_cap_t	side_b;		/* b's side, which a reads */
 	erx_cap_t	bell_a;		/* bound to a's group */
 	erx_cap_t	bell_b;		/* bound to b's group */
+	erx_cap_t	area;		/* the pixel area, or ERX_CAP_NULL: area_reader
+					 * maps it read-only, the other party writes
+					 * it, and it is charged to area_reader's
+					 * child (docs/design-display.md, "The
+					 * pixel area") */
+	uint32_t	area_reader;	/* a or b; 0 without an area */
 	bool		closing;
 } erx_dom_connection_t;
 
@@ -468,6 +474,8 @@ typedef enum erx_dom_obj {
 	ERX_DOM_OBJ_SIDE_B,		/* b's side: b writes it, a reads it */
 	ERX_DOM_OBJ_BELL_A,		/* bound to a's group: a waits on it */
 	ERX_DOM_OBJ_BELL_B,		/* bound to b's group */
+	ERX_DOM_OBJ_AREA_A,		/* the pixel area a writes and b reads */
+	ERX_DOM_OBJ_AREA_B,		/* the pixel area b writes and a reads */
 	/* A device given to a domain (erx_dom_plan_device_give). */
 	ERX_DOM_OBJ_DEV_RESOURCE,	/* the device's resource, carved from the root's */
 	ERX_DOM_OBJ_DEV_WINDOW,		/* register window i is DEV_WINDOW + i */
@@ -637,7 +645,7 @@ typedef struct erx_dom_grant_row {
  * where the row of DEV_WINDOW covers every register window and the row of
  * DEV_IRQ every line.
  */
-#define ERX_DOM_GRANTS_ROWS	20u
+#define ERX_DOM_GRANTS_ROWS	24u
 extern const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS];
 
 /*
@@ -760,9 +768,10 @@ uint32_t	erx_dom_steps_undo(const erx_dom_step_t *steps, uint32_t nsteps,
 
 /*
  * A connection's plan (docs/design-system.md, "Introducing two domains"):
- * a child budget carved from each party's outer budget, the two sides and
- * the two bells, each charged to the child of the party that reads it or
- * waits on it, and each party's share installed from erx_dom_grants. The
+ * a child budget carved from each party's outer budget, the two sides, the
+ * two bells and, for a connection with one, the pixel area, each charged to
+ * the child of the party that reads it or waits on it, and each party's
+ * share installed from erx_dom_grants. The
  * held objects it names are the parties' records' (OUTER_A, GROUP_A,
  * SPACE_A and b's), which the apply phase resolves from a_slot and b_slot.
  * Every object a party is given is charged to one of the two children, so
@@ -771,35 +780,45 @@ uint32_t	erx_dom_steps_undo(const erx_dom_step_t *steps, uint32_t nsteps,
  * neither a failed connect's undo nor a disconnect leaves anything in a
  * living party's table, and no install needs a slot of its own.
  */
-#define ERX_DOM_LINK_STEPS	12u
+/* Seven objects made and eight installs: three for each party, and the area's two. */
+#define ERX_DOM_LINK_STEPS	15u
 
 typedef struct erx_dom_link_plan {
 	uint32_t	a, b;		/* the parties' domain ids */
 	uint32_t	a_slot, b_slot;	/* their records */
 	uint32_t	row;		/* the free connection row it takes */
 	uint32_t	number;		/* its number, view->next_connection */
+	uint32_t	area_reader;	/* a or b when it makes a pixel area, else 0 */
 	uint32_t	nsteps;
 	erx_dom_step_t	steps[ERX_DOM_LINK_STEPS];
 } erx_dom_link_plan_t;
 
 /*
- * Plans erx_dom_connect(a, b, a_reads, b_reads): a_reads sizes the data
- * area of the side a reads, b's, and b_reads the one b reads. ERX_OK;
+ * Plans erx_dom_connect(a, b, a_reads, b_reads, area, area_reader):
+ * a_reads sizes the data area of the side a reads, b's, and b_reads the
+ * one b reads; an area other than 0 adds a pixel area of that many bytes,
+ * which area_reader maps read-only and the other party writes, charged to
+ * area_reader's child (docs/design-display.md, "The pixel area"). ERX_OK;
  * ERX_EINVAL for a == b, a domain with no record or outside built and
- * running, or a size that is not a lane's; ERX_ELIMIT for a full table,
- * spent connection numbers, a party at its connections quota or out of
- * bell labels. *plan is written only on ERX_OK. Whether a reader's outer
- * budget covers its child is the kernel's to say, at the carve.
+ * running, a size that is not a lane's, an area that is not a whole
+ * number of pages, or an area whose
+ * area_reader is neither party (area_reader must be 0 with no area);
+ * ERX_ELIMIT for a full table, spent connection numbers, a party at its
+ * connections quota or out of bell labels. *plan is written only on
+ * ERX_OK. Whether a reader's outer budget covers its child is the
+ * kernel's to say, at the carve.
  */
 erx_status_t	erx_dom_plan_connect(const erx_dom_view_t *, uint32_t a,
 		    uint32_t b, uint32_t a_reads, uint32_t b_reads,
+		    uint64_t area, uint32_t area_reader,
 		    erx_dom_link_plan_t *plan);
 
 /*
  * Checks a connection's plan whole: each object is charged to the child of
- * the party that reads it or waits on it, each child is carved from its
- * own party's outer budget, and each install has its row of
- * erx_dom_grants. ERX_EINVAL otherwise.
+ * the party that reads it or waits on it, the pixel area too, one at most,
+ * of whole pages and read by the party area_reader names; each child is
+ * carved from its own party's outer budget, and each install has its row
+ * of erx_dom_grants. ERX_EINVAL otherwise.
  */
 erx_status_t	erx_dom_link_check(const erx_dom_link_plan_t *plan);
 
@@ -808,7 +827,8 @@ uint32_t	erx_dom_link_undo(const erx_dom_link_plan_t *plan,
 		    uint32_t applied, erx_dom_obj_t *undo);
 
 /*
- * Records a connection's plan in the view, as erx_dom_plan_record does a
+ * Records a connection's plan in the view, its area_reader included, as
+ * erx_dom_plan_record does a
  * creation's: its row holds the connection's number and parties, each
  * party's record takes the bell label the plan bound, and the view's next
  * connection number moves past it. A party's count of connections is the

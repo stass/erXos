@@ -31,7 +31,8 @@
 /*
  * A party of a connection gets its own side to write, the peer's to read
  * and the peer's bell to ring; its own bell stays the library's, bound to
- * its group, and it learns only the bell's label. A device's holder gets
+ * its group, and it learns only the bell's label. A pixel area's writer
+ * gets it to write and its reader to read, as a side. A device's holder gets
  * its windows, lines and DMA window to drive it, and PHYS on its contiguous
  * memory alone.
  */
@@ -55,6 +56,10 @@ const erx_dom_grant_row_t erx_dom_grants[ERX_DOM_GRANTS_ROWS] = {
 	{ ERX_DOM_OBJ_SIDE_B, ERX_DOM_OBJ_SPACE_B, 0, DOM_WRITER, 0 },
 	{ ERX_DOM_OBJ_SIDE_A, ERX_DOM_OBJ_SPACE_B, 0, DOM_READER, 0 },
 	{ ERX_DOM_OBJ_BELL_A, ERX_DOM_OBJ_SPACE_B, 0, ERX_HR_TRIGGER, 0 },
+	{ ERX_DOM_OBJ_AREA_A, ERX_DOM_OBJ_SPACE_A, 0, DOM_WRITER, 0 },
+	{ ERX_DOM_OBJ_AREA_A, ERX_DOM_OBJ_SPACE_B, 0, DOM_READER, 0 },
+	{ ERX_DOM_OBJ_AREA_B, ERX_DOM_OBJ_SPACE_B, 0, DOM_WRITER, 0 },
+	{ ERX_DOM_OBJ_AREA_B, ERX_DOM_OBJ_SPACE_A, 0, DOM_READER, 0 },
 	{ ERX_DOM_OBJ_DEV_WINDOW, ERX_DOM_OBJ_HOLDER_SPACE, 0, DOM_WRITER, 0 },
 	{ ERX_DOM_OBJ_DEV_IRQ, ERX_DOM_OBJ_HOLDER_SPACE, 0,
 	    ERX_HR_BIND | ERX_HR_ACK, 0 },

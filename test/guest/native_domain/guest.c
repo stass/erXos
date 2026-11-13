@@ -2069,8 +2069,8 @@ case_link(uint32_t program)
 	ids[1] = waiter(program, &system[1]);
 	pages = erx_fiasco_vm_free_pages();
 	passed = passed && ids[0] != 0 && ids[1] != 0 &&
-	    erx_dom_lib_connect(&lib, ids[0], ids[0], ERX_LANE_MIN, ERX_LANE_MIN, &linked) == ERX_EINVAL &&
-	    erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, &linked) == ERX_OK &&
+	    erx_dom_lib_connect(&lib, ids[0], ids[0], ERX_LANE_MIN, ERX_LANE_MIN, 0, 0, &linked) == ERX_EINVAL &&
+	    erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, 0, 0, &linked) == ERX_OK &&
 	    linked.number != 0 && linked.a.side != ERX_CAP_NULL && linked.a.peer_side != ERX_CAP_NULL &&
 	    linked.a.peer_bell != ERX_CAP_NULL && linked.b.side != ERX_CAP_NULL &&
 	    linked.b.peer_side != ERX_CAP_NULL && linked.b.peer_bell != ERX_CAP_NULL &&
@@ -2080,11 +2080,28 @@ case_link(uint32_t program)
 	/* The first connection takes the service's tables' pages, as the first domain does; a second takes none. */
 	warm = pages - erx_fiasco_vm_free_pages();
 	pages = erx_fiasco_vm_free_pages();
-	passed = passed && erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, &linked) == ERX_OK &&
+	passed = passed && erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, 0, 0, &linked) == ERX_OK &&
 	    linked.a.label == ERX_DOM_SYSTEM_LABEL + 2 && erx_dom_lib_disconnect(&lib, linked.number) == ERX_OK &&
 	    erx_fiasco_vm_free_pages() == pages;
 	say_count("link_warm_pages", warm);
 	say_case("link", passed);
+
+	/*
+	 * A connection with a pixel area read by ids[1]: each party holds it,
+	 * the writer to write and the reader to read, and its pages go back
+	 * with the connection's children at the disconnect.
+	 */
+	passed = passed && erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN,
+	    2 * ERX_PAGE_SIZE, ids[0] + ids[1] + 1, &linked) == ERX_EINVAL &&
+	    erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, ERX_PAGE_SIZE + 1, ids[1],
+	    &linked) == ERX_EINVAL &&
+	    erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, 2 * ERX_PAGE_SIZE, ids[1],
+	    &linked) == ERX_OK &&
+	    linked.a.area != ERX_CAP_NULL && linked.b.area != ERX_CAP_NULL && linked.a.area_writes &&
+	    !linked.b.area_writes && linked.a.area_bytes == 2 * ERX_PAGE_SIZE &&
+	    linked.b.area_bytes == 2 * ERX_PAGE_SIZE && erx_dom_lib_disconnect(&lib, linked.number) == ERX_OK &&
+	    erx_fiasco_vm_free_pages() == pages;
+	say_case("link_area", passed);
 
 	pages = erx_fiasco_vm_free_pages();
 	handles = handles_used();
@@ -2092,7 +2109,9 @@ case_link(uint32_t program)
 	for (uint32_t step = 0; passed && step < 2 * ERX_DOM_LINK_STEPS; step++) {
 		lib.fail_step = step / 2;
 		lib.fail_made = step % 2 != 0;
-		passed = erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, &linked) == ERX_ENOMEM &&
+		/* A connection with a pixel area has every step a connection can have. */
+		passed = erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, 2 * ERX_PAGE_SIZE,
+		    ids[1], &linked) == ERX_ENOMEM &&
 		    lib.failed_at == step / 2 && erx_fiasco_vm_free_pages() == pages && handles_used() == handles &&
 		    rows_used() == rows;
 		steps = passed ? step + 1 : step;
@@ -2106,7 +2125,7 @@ case_link(uint32_t program)
 	 * Both end and are retired while their connection stands: each outer
 	 * budget stays as remains, and the disconnect destroys both with it.
 	 */
-	passed = erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, &linked) == ERX_OK &&
+	passed = erx_dom_lib_connect(&lib, ids[0], ids[1], ERX_LANE_MIN, ERX_LANE_MIN, 0, 0, &linked) == ERX_OK &&
 	    passed;
 	passed = waiters_end(ids, system) && passed;
 	say_count("link_remains", remains_used());

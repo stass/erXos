@@ -32,7 +32,7 @@
 -module(erx_domain_fake_lib).
 -export([start_log/0, next_call/0, kill_and_await/1]).
 -export([register/0, configured/0, configured/3, templates/0, session/4, create/1, start/1, stop/2, retire/1, crash/1,
-         connect/4, disconnect/1]).
+         connect/6, disconnect/1]).
 -export([open_side/2, close_side/2, export/3]).
 -export([agent/2, reader/1]).
 
@@ -138,15 +138,16 @@ retired(Id) ->
     log({retire, Id}).
 crash(Id) -> log({crash, Id}), {ok, <<"boom">>, <<"=erl_crash_dump">>, false}.
 disconnect(Number) -> erase({connection, Number}), erase({system, Number}), log({disconnect, Number}).
-%% Each party's values as the library's connect returns them, in its own table.
-connect(A, B, AReads, BReads) ->
+%% Each party's values as the library's connect returns them, in its own table; the
+%% domain service makes no connection with a pixel area.
+connect(A, B, AReads, BReads, 0, 0) ->
     log({connect, A, B, AReads, BReads}),
     case [Id || Id <- [A, B], element(2, get({domain, Id})) =:= <<"ending">>] of
         [] ->
             Number = A * 100 + B,
             put({connection, Number}, {A, B}),
-            {ok, #{number => Number, a => #{side => 1, peer_side => 2, peer_bell => 3, label => 7},
-                   b => #{side => 4, peer_side => 5, peer_bell => 6, label => 8}}};
+            {ok, #{number => Number, a => #{side => 1, peer_side => 2, peer_bell => 3, label => 7, area => none},
+                   b => #{side => 4, peer_side => 5, peer_bell => 6, label => 8, area => none}}};
         [_ | _] ->
             {error, einval}
     end.

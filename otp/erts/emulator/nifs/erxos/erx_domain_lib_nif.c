@@ -856,11 +856,14 @@ crash_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (status == ERX_OK ? result : status_error(env, status));
 }
 
-/* One party's values of a connection, as a map. */
+/*
+ * One party's values of a connection, as a map; area is none for a
+ * connection without a pixel area, else {Handle, Bytes, write | read}.
+ */
 static ERL_NIF_TERM
 party_term(ErlNifEnv *env, const erx_dom_party_t *party)
 {
-	ERL_NIF_TERM keys[4], values[4], result;
+	ERL_NIF_TERM keys[5], values[5], result;
 
 	keys[0] = atom(env, "side");
 	values[0] = enif_make_uint64(env, party->side);
@@ -870,27 +873,38 @@ party_term(ErlNifEnv *env, const erx_dom_party_t *party)
 	values[2] = enif_make_uint64(env, party->peer_bell);
 	keys[3] = atom(env, "label");
 	values[3] = enif_make_uint(env, party->label);
-	if (!enif_make_map_from_arrays(env, keys, values, 4, &result))
+	keys[4] = atom(env, "area");
+	values[4] = party->area_bytes == 0 ? atom(env, "none") :
+	    enif_make_tuple3(env, enif_make_uint64(env, party->area), enif_make_uint64(env, party->area_bytes),
+	    atom(env, party->area_writes ? "write" : "read"));
+	if (!enif_make_map_from_arrays(env, keys, values, 5, &result))
 		return (enif_make_new_map(env));
 	return (result);
 }
 
-/* connect(A, B, AReads, BReads): {ok, #{number, a, b}}, each party's values in its own table. */
+/*
+ * connect(A, B, AReads, BReads, Area, AreaReader): {ok, #{number, a, b}},
+ * each party's values in its own table; Area 0 and AreaReader 0 for a
+ * connection without a pixel area.
+ */
 static ERL_NIF_TERM
 connect_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
-	unsigned int a, b, a_reads, b_reads;
+	unsigned int a, b, a_reads, b_reads, area_reader;
+	ErlNifUInt64 area;
 	erx_dom_linked_t linked;
 	erx_status_t status;
 	ERL_NIF_TERM keys[3], values[3], result;
 
-	if (argc != 4 || !enif_get_uint(env, argv[0], &a) || !enif_get_uint(env, argv[1], &b) ||
-	    !enif_get_uint(env, argv[2], &a_reads) || !enif_get_uint(env, argv[3], &b_reads))
+	if (argc != 6 || !enif_get_uint(env, argv[0], &a) || !enif_get_uint(env, argv[1], &b) ||
+	    !enif_get_uint(env, argv[2], &a_reads) || !enif_get_uint(env, argv[3], &b_reads) ||
+	    !enif_get_uint64(env, argv[4], &area) || !enif_get_uint(env, argv[5], &area_reader))
 		return (enif_make_badarg(env));
 	if (lib == NULL)
 		return (status_error(env, ERX_ENOTSUP));
 	enif_mutex_lock(lib_lock);
-	status = caller_is_service(env) ? erx_dom_lib_connect(lib, a, b, a_reads, b_reads, &linked) : ERX_ERIGHTS;
+	status = caller_is_service(env) ? erx_dom_lib_connect(lib, a, b, a_reads, b_reads, area, area_reader, &linked) :
+	    ERX_ERIGHTS;
 	enif_mutex_unlock(lib_lock);
 	if (status != ERX_OK)
 		return (status_error(env, status));
@@ -1122,7 +1136,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "stop_nif", 2, stop_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "retire_nif", 1, retire_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "crash_nif", 1, crash_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
-	{ "connect_nif", 4, connect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "connect_nif", 6, connect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "disconnect_nif", 1, disconnect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "configured_nif", 0, configured_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "templates_nif", 0, templates_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
