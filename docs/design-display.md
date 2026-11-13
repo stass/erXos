@@ -3555,8 +3555,12 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
   run under UBSan with strides, rows and columns at their bounds, where a
   seeded unchecked offset fails it; the harness runs the display suite
   under QEMU `virt` with a virtio-gpu and virtio-input attached and
-  compares screenshots taken through QEMU's monitor with reference
-  images, under HVF; a seeded wrong channel conversion fails it.
+  compares screenshots taken through QEMU's machine protocol (QMP, on an
+  owner-only UNIX socket; `-display none` stays) with reference images,
+  under HVF; a screenshot equals a reference when the SHA-256 of its
+  decoded pixels (width and height as two big-endian 32-bit numbers, then the RGB888 rows) equals the digest
+  checked in beside the reference picture; a seeded wrong channel
+  conversion fails it.
   A panel driver is tested against a model of its command set on the
   host, on the copy path and on the direct path, which must send the
   same bytes.
@@ -3566,7 +3570,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
     principal, template, facet rows and a start row naming it and the
     display, the app's session starts at boot with no login, its release
     starts the application, the application's window covers the screen,
-    and the screenshot through QEMU's monitor equals the reference image
+    and the screenshot through QMP equals the reference image
     under HVF; the start row disabled leaves the background and fails
     it;
   * the two images of the worked example differ in the app alone: the

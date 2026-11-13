@@ -9,6 +9,7 @@ require 'json'
 require_relative 'bootstrap_memory'
 require_relative 'platform'
 require_relative 'qemu_remote'
+require_relative 'qmp'
 require_relative 'qemu_reuse'
 require_relative 'runner'
 
@@ -81,6 +82,13 @@ module Erx
     # the network device go to different domains, so the disks keep the top page, buses
     # .31 to .24, and the network device takes the page below it.
     NIC_TRANSPORT = 23
+    # How many virtio-mmio transports share one 4 KiB register page: 0x1000 / 0x200.
+    TRANSPORTS_PER_PAGE = 8
+    # The display devices' transports: the page below the network device's, buses .15 to
+    # .8, at 0x0a001e00 and below. The graphics device is bus .15, the keyboard .14 and the
+    # tablet .13, so the three are one unit that goes whole to the display domain and share
+    # no register page with the disks or the network device (Display, the unit rule).
+    DISPLAY_TRANSPORTS = { gpu: 15, keyboard: 14, tablet: 13 }.freeze
     # The domain slirp's DHCP server hands the guest in its lease (option 15), which the
     # guest's resolver takes as its search list.
     NIC_DOMAIN = 'erxos.test'
@@ -106,6 +114,32 @@ module Erx
 
         super
       end
+    end
+    # A display for the guest: a virtio-gpu, a virtio-keyboard and a virtio-tablet device on
+    # their own virtio-mmio transports, and QEMU's machine protocol (QMP) on a UNIX socket at
+    # qmp_socket, which the harness reads the screen through (Qmp: screendump). QEMU still
+    # shows no window (-display none): its graphics console keeps the guest's picture for
+    # screendump. The socket's directory must be the caller's own and owner-only (mode 0700,
+    # as OutputDirectory makes it), which the plan checks before QEMU starts, because QMP
+    # gives whoever connects the developer's own power over the machine and the host files
+    # it writes; QEMU makes the socket itself. The transports are buses
+    # of virtio-mmio-bus, three distinct numbers within 0 to 31, by default DISPLAY_TRANSPORTS.
+    Display = Data.define(:qmp_socket, :gpu, :keyboard, :tablet) do
+      def initialize(qmp_socket:, gpu: DISPLAY_TRANSPORTS.fetch(:gpu), keyboard: DISPLAY_TRANSPORTS.fetch(:keyboard),
+                     tablet: DISPLAY_TRANSPORTS.fetch(:tablet))
+        buses = [gpu, keyboard, tablet]
+        unless buses.all? { |bus| bus.is_a?(Integer) && bus.between?(0, LAST_TRANSPORT) } && buses.uniq.size == buses.size
+          raise Error, "display transports are three distinct buses of virtio-mmio-bus.0 to .#{LAST_TRANSPORT}"
+        end
+        unless qmp_socket.is_a?(String) && qmp_socket.start_with?('/') && qmp_socket.bytesize <= SOCKET_PATH_MAX &&
+               !qmp_socket.match?(/[\0,]/)
+          raise Error, 'invalid QMP socket path'
+        end
+
+        super(qmp_socket: qmp_socket.dup.freeze, gpu: gpu, keyboard: keyboard, tablet: tablet)
+      end
+
+      def buses = [gpu, keyboard, tablet]
     end
     # As hostlink, no host link at all: one serial line, the console's, as on a machine
     # with one UART, such as the website's emulator (docs/design-stopgap.md, "Device paths").
@@ -144,12 +178,12 @@ module Erx
 
     def argv(platform:, accel:, image:, serial:, cpus: 1, memory_mib: memory_of(platform),
              program: 'qemu-system-aarch64', initrd: nil, serial_input: nil, command_line: nil, dtb: nil,
-             disks: [], hostlink: nil, nic: nil, stub: nil)
+             disks: [], hostlink: nil, nic: nil, stub: nil, display: nil)
       raise Error, 'accelerator must be tcg or hvf' unless %w[tcg hvf].include?(accel)
       board = machine_of(platform)
       if board.loads
         return loaded_argv(board, accel: accel, image: image, serial: serial, serial_input: serial_input, cpus: cpus, program: program,
-                                  stub: stub, dtb: dtb, refused: { initrd: initrd, command_line: command_line, nic: nic,
+                                  stub: stub, dtb: dtb, refused: { initrd: initrd, command_line: command_line, nic: nic, display: display,
                                                                    disks: disks.empty? ? nil : disks,
                                                                    hostlink: hostlink == NO_HOSTLINK ? nil : :hostlink })
       end
@@ -164,6 +198,10 @@ module Erx
         raise Error, "disks are up to #{MAX_DISKS} QemuPlan::Disk values"
       end
       raise Error, 'a network device is a QemuPlan::Nic' unless nic.nil? || nic.is_a?(Nic)
+      raise Error, 'a display is a QemuPlan::Display' unless display.nil? || display.is_a?(Display)
+      check_display_pages(display, disks: disks, nic: nic)
+      # QEMU listens on the socket as soon as it starts, so its directory is checked before.
+      Qmp.check_directory(display.qmp_socket) if display
       words = command_line.to_s.split(/ /)
       raise Error, "the plan adds #{HOSTLINK_WORD} with the host link's serial line" if words.include?(HOSTLINK_WORD)
 
@@ -183,7 +221,8 @@ module Erx
        '-cpu', accel == 'hvf' ? 'host' : 'cortex-a76',
        '-smp', cpus.to_s, *(deterministic ? DETERMINISTIC_ARGUMENTS : []), '-m', memory_mib.to_s,
        '-display', 'none', '-monitor', 'none', '-nic', 'none',
-       *(disks.empty? && nic.nil? ? [] : DISK_TRANSPORT_ARGUMENTS), *disk_arguments(disks), *nic_arguments(nic),
+       *(disks.empty? && nic.nil? && display.nil? ? [] : DISK_TRANSPORT_ARGUMENTS), *disk_arguments(disks), *nic_arguments(nic),
+       *display_arguments(display),
        '-no-reboot', *serial_arguments(serial, serial_input), *hostlink_arguments(hostlink),
        '-kernel', image,
        *(initrd ? ['-initrd', initrd] : []), *(line ? ['-append', line] : []),
@@ -249,6 +288,32 @@ module Erx
        '-netdev', 'hubport,id=nic_hub_frames,hubid=0,netdev=nic_frames',
        '-netdev', 'hubport,id=nic_hub_guest,hubid=0',
        '-device', "virtio-net-device,netdev=nic_hub_guest,bus=virtio-mmio-bus.#{NIC_TRANSPORT}"]
+    end
+
+    # The display's three devices, each pinned to its transport, and QMP on its socket, or
+    # nothing.
+    def display_arguments(display)
+      return [] if display.nil?
+
+      [['virtio-gpu-device', display.gpu], ['virtio-keyboard-device', display.keyboard],
+       ['virtio-tablet-device', display.tablet]].flat_map do |device, bus|
+        ['-device', "#{device},bus=virtio-mmio-bus.#{bus}"]
+      end + ['-qmp', "unix:#{display.qmp_socket},server=on,wait=off"]
+    end
+
+    # The unit rule (docs/design-shared-devices.md): the transports of one 4 KiB register
+    # page go whole to one domain, so the display's pages are the display's alone. Raises
+    # when a page of the display's transports holds a disk's or the network device's.
+    def check_display_pages(display, disks:, nic:)
+      return if display.nil?
+
+      others = disks.each_index.map { |index| LAST_TRANSPORT - index }
+      others << NIC_TRANSPORT if nic
+      shared = display.buses.map { |bus| bus / TRANSPORTS_PER_PAGE } & others.map { |bus| bus / TRANSPORTS_PER_PAGE }
+      return if shared.empty?
+
+      raise Error, "display transports share register page #{shared.map { |page| format('0x%08x', 0x0a000000 + (page * 0x1000)) }.join(', ')} " \
+                   'with the disks or the network device'
     end
 
     # The second serial line, after the console's, which QEMU virt places at
