@@ -783,14 +783,16 @@ it; git history is the record of completed work.
   * **The screen and the allocator** ([The screen](docs/design-display.md#the-screen-and-its-one-path-to-the-device),
     [The pixel area](docs/design-display.md#the-pixel-area)): `erx_screen` sends frames with
     `gen_server:send_request/2` and keeps only pending state (the newest layout, one waiting present per live window,
-    dropped at the window's end); `erx_pixels` hands out zeroed ranges owned by the asking process and takes them back
-    only when it exits, with no `free`; presents and `erx_memdraw:wrap/4` refuse an offset off a page boundary.
+    dropped at the window's end); presents and `erx_memdraw:wrap/4` refuse an offset off a page boundary.
   * **The display domain**: split `erlang/apps/erx_display` so that the display's release holds `erx_winfs`,
     `erx_window`, `erx_screen`, `erx_screen_core`, the policies, `erx_wm_menu`, the drivers and `erx_memdraw`, and the
     session's holds `erx_win`, `erx_pixels`, `erx_draw`, `erx_draw_conn`, `erx_draw_core`, `erx_draw_codec`,
     `erx_draw_image`, `erx_font`, `erx_memdraw`, `erx_term` with `erx_vt`, and `erx_ui` with its servers and
     renderers; re-scope the chokepoint checks to the two releases (G9: no draw decoder, widget code or font reader in
-    the display's). New: `erx_winctl` with its fuzz target, `erx_pixels_core`, `erx_win`, `erx_draw_conn`.
+    the display's). The display-release xref check (docs/design-display.md, Verification) refuses `erx_draw_core`,
+    `erx_draw_codec` and `erx_draw_image` by module while the display release loads `erx_display`, which holds
+    them: the check stays by module, and this split resolves it by moving the draw modules into a session-only
+    application. New: `erx_winctl` with its fuzz target, `erx_win`, `erx_draw_conn`.
     `erx_screen_core` keeps its plan and takes the design's names: a present for a flush, and no expose, since
     `erx_screen` copies what a layout change uncovers from the windows' buffers.
   * **The widget server** ([The widget server](docs/design-display.md#the-widget-server)): `erx_ui` with `open/1`,
@@ -5299,6 +5301,19 @@ to the corpus and follow rc
   kernel.
 
 ## Security residuals
+
+* [Medium] [The pixel area](docs/design-display.md#the-pixel-area), zero before reuse: an `erx_memdraw:wrap/4` image
+  over a range is not tied to the range, so an image handed to a process that outlives the range's owner writes the
+  range after its zero and after it is handed out again. The design takes same-client overlap as the client's own
+  affair; either tie `wrap/4` over an area to a range `erx_pixels` issued or state the limit in the design.
+* [Medium] `tools/lib/erx/chokepoint_rules/memdraw.rb`, `memdraw-pixels`: the rule names `erx_area:zero/3` as the
+  area NIF's one writer, but its pattern (`bdata`, `byteaddr`, `wordaddr`) does not see a store through an area's
+  `addr` or `erx_area_view`'s `base`; add a check that only `map_nif`, `zero_nif` and `erx_area_view` read them,
+  with a seeded violation.
+* [Low] `tools/lib/erx/area_mappers.rb`, C half: it catches a slip, not evasion. Not refused: a macro over
+  `erx_vm_map` defined inside `erx_area_lease_map`, a redefined `ERX_CAP_SELF`, token pasting, a column-0 call
+  `erx_area_lease_map(` that moves the body's start, C++ digit separators and raw strings that desync the literal
+  blanker, and `.hpp`/`.inc` files, which it does not scan.
 
 * [Medium] device NIF, virtio-gpu requests on an unconfined device
   ([design-runtime.md](docs/design-runtime.md#the-device-nif), Regions): the NIF writes the region entries a request

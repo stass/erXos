@@ -12,15 +12,17 @@ images over it. The area stays mapped while any term or image refers to it,
 and the agent answers that the connection is unmapped only after the last
 one is gone.
 
-A range of a writable area is lent to one program with `lend/4`, which only
+A range of a writable area is lent to one program with `lend/5`, which only
 `erx_pixels`, the one lender, calls: the lease keeps the area mapped until
 the program driver returns it, after the program's sub-space has ended.
+`zero/3`, which only `erx_pixels` calls too, clears a range before the
+allocator hands it out again.
 """.
 
--nifs([map/4, lend/4, unlend/1]).
+-nifs([map/4, lend/5, unlend/1, zero/3]).
 -on_load(on_load/0).
 
--export([open/1, map/4, lend/4, unlend/1]).
+-export([open/1, map/4, lend/5, unlend/1, zero/3]).
 
 -type area() :: reference().
 -export_type([area/0]).
@@ -58,19 +60,21 @@ For `erx_pixels` alone: a held lease of the Pages pages of Area from Offset,
 for Holder, the range's owner, whose own program port alone can take it
 (docs/design-display.md, "The pixel area", The lease). Answers the lease's
 number, from 1 and never given again. The caller is sent
-`{erx_area_returned, Lease}` once the lease is returned: given back with
-`unlend/1` or ended by Holder's exit while held, or returned by the program
-driver once taken.
+`{erx_area_returned, Tag, Lease}` once the lease is returned: given back
+with `unlend/1` or ended by Holder's exit while held, or returned by the
+program driver once taken. Tag is a reference the caller made: numbers
+are guessable, so the caller acts only on a return carrying a Tag it
+issued.
 
 `{error, einval}` for an Offset off a page boundary, Pages of 0 or more than
 the buffer place holds, a range past the area's end, and a read-only area;
 `{error, noproc}`, making no lease, for a Holder that has exited. Offset and
-Pages outside 0..2^64-1, a Holder that is no local pid, or an Area that is
-no area, are `badarg`.
+Pages outside 0..2^64-1, a Holder that is no local pid, a Tag that is no
+reference, or an Area that is no area, are `badarg`.
 """.
--spec lend(area(), non_neg_integer(), non_neg_integer(), pid()) ->
+-spec lend(area(), non_neg_integer(), non_neg_integer(), pid(), reference()) ->
           {ok, pos_integer()} | {error, einval | noproc | enomem}.
-lend(_Area, _Offset, _Pages, _Holder) -> erlang:nif_error(undef).
+lend(_Area, _Offset, _Pages, _Holder, _Tag) -> erlang:nif_error(undef).
 
 -doc """
 For `erx_pixels` alone: returns the lease numbered Lease if it is held, and
@@ -80,3 +84,16 @@ a term that is no integer from 1 to 2^64 - 1.
 """.
 -spec unlend(pos_integer()) -> ok.
 unlend(_Lease) -> erlang:nif_error(undef).
+
+-doc """
+For `erx_pixels` alone: stores zero over the Pages pages of Area from Offset,
+through the connection agent's mapping, on a dirty CPU scheduler, so a range
+that rejoins the allocator's free list holds nothing of its last owner
+(docs/design-display.md, "The pixel area", The allocator's core).
+
+`{error, einval}` for an Offset off a page boundary, Pages of 0, a range past
+the area's end, and a read-only area. Offset and Pages outside 0..2^64-1, or
+an Area that is no area, are `badarg`.
+""".
+-spec zero(area(), non_neg_integer(), non_neg_integer()) -> ok | {error, einval}.
+zero(_Area, _Offset, _Pages) -> erlang:nif_error(undef).

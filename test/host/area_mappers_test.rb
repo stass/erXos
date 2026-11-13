@@ -9,7 +9,7 @@ require_relative '../../tools/lib/erx/area_mappers'
 
 # The chokepoint over who maps a pixel area. Its Erlang half: outside erx_area and
 # erx_connections, erx_area is named only as the module of open/1 and of area(), and in
-# erx_pixels also of lend/4 and unlend/1; a call of map/4 in any form, an apply, an
+# erx_pixels also of lend/5, unlend/1 and zero/3; a call of map/4 in any form, an apply, an
 # import, a macro, a list, tuple or map literal or a string naming it fails, and the
 # tests' own modules are not refused. Its C half, over otp/erts/emulator: only the
 # program driver calls the lease's driver functions, and only erx_area_lease_map maps
@@ -20,7 +20,7 @@ class AreaMappersTest < Minitest::Test
   SCREEN = 'erlang/apps/erx_display/src/erx_screen.erl'
   SEEDED = "m(T) -> erx_area:map(21, 8192, read, T).\n"
   LENDER = Erx::AreaMappers::LENDER
-  LEND = "f(A, O, P, H) -> erx_area:lend(A, O, P, H), erx_area:unlend(1).\n"
+  LEND = "f(A, O, P, H, T) -> erx_area:lend(A, O, P, H, T), erx_area:unlend(1), erx_area:zero(A, O, P).\n"
   DRIVER = Erx::AreaMappers::DRIVER
   NIF = Erx::AreaMappers::NIF
   LANE = 'otp/erts/emulator/sys/erxos/erx_lane_drv.c'
@@ -68,7 +68,7 @@ class AreaMappersTest < Minitest::Test
 
   def test_only_the_lender_lends
     assert_empty lines_of(LENDER => LEND)
-    assert_equal [[SCREEN, 1], [SCREEN, 1]], lines_of(SCREEN => LEND)
+    assert_equal [[SCREEN, 1], [SCREEN, 1], [SCREEN, 1]], lines_of(SCREEN => LEND)
     assert_equal [[SCREEN, 1]], lines_of(SCREEN => "f() -> fun erx_area:unlend/1.\n")
     assert_equal [[LENDER, 1]], lines_of(LENDER => SEEDED)
   end
@@ -85,9 +85,40 @@ class AreaMappersTest < Minitest::Test
     assert_equal [[DRIVER, 4]], lines_of(DRIVER => "int\nf(void)\n{\n#{FOREIGN}}\n")
     assert_empty lines_of(DRIVER => "int\nf(void)\n{\n#{OWN}}\n")
     assert_empty lines_of(NIF => "int\nerx_area_lease_map(void)\n{\n#{FOREIGN}}\n")
-    assert_equal [[NIF, 9]], lines_of(NIF => "int\nerx_area_lease_map(void)\n{\n}\n\nint\nother(void)\n{\n#{FOREIGN}}\n")
+    assert_equal [[NIF, 9], [NIF, 1]], lines_of(NIF => "int\nerx_area_lease_map(void)\n{\n}\n\nint\nother(void)\n{\n#{FOREIGN}}\n")
     seeded = 'otp/erts/emulator/beam/seeded.c'
     assert_equal [[seeded, 1]], lines_of(seeded => "void f(void) { erx_vm_map(7, 0, 0, 0, 0, 0); }\n")
+  end
+
+  # A name of erx_vm_map not followed directly by its argument list could reach it through
+  # a pointer or a parenthesized name, whose first argument the rule cannot see.
+  def test_erx_vm_map_is_named_only_as_a_call
+    assert_equal [[DRIVER, 4]], lines_of(DRIVER => "int\nf(void)\n{\n\tstatus = (erx_vm_map)(space, addr, bytes, mem, 0, 3);\n}\n")
+    assert_equal [[DRIVER, 1]], lines_of(DRIVER => "static int (*map)(void) = erx_vm_map;\n")
+    assert_equal [[DRIVER, 4]], lines_of(DRIVER => "int\nf(void)\n{\n\tstatus = erx_vm_map (ERX_CAP_SELF, 0, 0, 0, 0, 0);\n}\n")
+  end
+
+  # The function's body ends at its closing brace, so a helper defined after it, whatever
+  # its first line looks like, is outside it; and the NIF maps into a program in one place.
+  def test_the_nif_maps_into_another_space_once_inside_the_lease_mapper
+    mapper = "int\nerx_area_lease_map(void)\n{\n#{FOREIGN}}\n"
+    assert_equal [[NIF, 8]], lines_of(NIF => "#{mapper}\nstatic int helper(void) {\n#{FOREIGN}}\n")
+    assert_equal [[NIF, 5]], lines_of(NIF => "int\nerx_area_lease_map(void)\n{\n#{FOREIGN}#{FOREIGN}}\n")
+    assert_equal [[NIF, 1]], lines_of(NIF => "int\nerx_area_lease_map(void)\n{\n#{OWN}}\n")
+  end
+
+  # Strings are blanked before comments, so a string holding a comment's opening does not
+  # hide the code after it.
+  def test_a_string_does_not_hide_a_call
+    text = "void\nf(void)\n{\n\tconst char *a = \"/*\";\n#{FOREIGN}\tconst char *b = \"*/\";\n}\n"
+    assert_equal [[DRIVER, 5]], lines_of(DRIVER => text)
+    assert_empty lines_of(DRIVER => "void\nf(void)\n{\n\tputs(\"erx_vm_map(space, 0)\");\n}\n")
+  end
+
+  def test_cpp_files_are_scanned
+    seeded = 'otp/erts/emulator/beam/jit/seeded.cpp'
+    assert Erx::AreaMappers.covers?(seeded)
+    assert_equal [[seeded, 1]], lines_of(seeded => "void f() { erx_vm_map(7, 0, 0, 0, 0, 0); }\n")
   end
 
   # The source check runs the rule over the files git lists.

@@ -14,12 +14,15 @@
 %% it, and erx_draw_image, the decoder of a Y message's compressed pixels;
 %% erx_memdraw, the NIF of the images and their pixel primitives; the display driver
 %% behaviour erx_display, which the display drivers of erx_fb implement;
-%% erx_vt reads erx: links through erx's erx_present.
+%% erx_vt reads erx: links through erx's erx_present; and the client's allocator of
+%% its pixel areas, erx_pixels over its pure core erx_pixels_core, which erx_display_app
+%% starts under erx_display_sup in a client domain's release.
 {application, erx_display,
  [{description, "erXos display services"},
   {vsn, "1"},
-  {modules, [erx_display, erx_draw_codec, erx_draw_core, erx_draw_image, erx_memdraw, erx_screen_core, erx_ui_lvgl, erx_ui_lvgl_core, erx_ui_model,
+  {modules, [erx_display, erx_display_app, erx_display_sup, erx_draw_codec, erx_draw_core, erx_draw_image, erx_memdraw, erx_pixels, erx_pixels_core, erx_screen_core, erx_ui_lvgl, erx_ui_lvgl_core, erx_ui_model,
               erx_vt, erx_vt_width, erx_wctl, erx_wm, erx_wm_single]},
-  {registered, []},
+  {registered, [erx_display_sup, erx_pixels]},
   {applications, [kernel, stdlib, erx]},
-  {env, []}]}.
+  {env, []},
+  {mod, {erx_display_app, []}}]}.

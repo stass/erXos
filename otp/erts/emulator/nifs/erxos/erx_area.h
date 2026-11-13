@@ -35,7 +35,7 @@ bool erx_area_view(ErlNifEnv *env, ERL_NIF_TERM term, erx_area_view_t *out);
 
 /*
  * A lease of a whole range of an area to one program (docs/design-display.md,
- * "The pixel area", The lease), made by erx_area:lend/4 for erx_pixels and
+ * "The pixel area", The lease), made by erx_area:lend/5 for erx_pixels and
  * kept in the area NIF's table under a number of its own. The program driver,
  * erx_program_drv.c, alone calls the three functions below, under its port's
  * lock, so the one lock order is the port's lock, then the table's. A driver
@@ -67,7 +67,7 @@ int erx_area_lease_map(const erx_area_lease_t *lease, uint64_t space);
  * Returns a taken lease: called once, after the driver has destroyed the
  * program's anchor, or as the last undo of a start that failed after the
  * take. The lease leaves the table, its lender is sent
- * {erx_area_returned, Number}, and the area's resource is let go of; the
+ * {erx_area_returned, Tag, Number}, and the area's resource is let go of; the
  * driver does not use lease afterwards.
  */
 void erx_area_lease_return(erx_area_lease_t *lease);

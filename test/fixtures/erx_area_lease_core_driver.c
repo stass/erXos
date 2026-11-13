@@ -19,7 +19,7 @@
  * holder has exited and every granted take has been returned by its
  * driver, the lease has been returned exactly once.
  *
- * range: erx_area:lend/4's check of a range against its area.
+ * range: erx_area:lend/5's check of a range against its area.
  */
 
 #include <inttypes.h>

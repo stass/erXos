@@ -27,6 +27,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <strings.h>
 
 static struct erx_area_lease *harness_taken[64];
 static struct {
@@ -140,4 +141,42 @@ erx_area_harness_leases(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 {
 	(void)argc;
 	return (enif_make_uint(env, erx_area_harness_lease_count()));
+}
+
+/*
+ * peek(Area, Offset, Length) -> Binary and poke(Area, Offset, Binary) -> ok:
+ * read and write an area's bytes through its mapping, for zero/3's cases.
+ * badarg for a range that passes the area's end, and poke's for a read-only area.
+ */
+ERL_NIF_TERM
+erx_area_harness_peek(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	ErlNifUInt64 offset, length;
+	erx_area_view_t view;
+	ERL_NIF_TERM term;
+	unsigned char *bytes;
+
+	(void)argc;
+	if (!erx_area_view(env, argv[0], &view) || !enif_get_uint64(env, argv[1], &offset) ||
+	    !enif_get_uint64(env, argv[2], &length) || offset > view.bytes || length > view.bytes - offset)
+		return (enif_make_badarg(env));
+	bytes = enif_make_new_binary(env, (size_t)length, &term);
+	bcopy(view.base + offset, bytes, (size_t)length);
+	return (term);
+}
+
+ERL_NIF_TERM
+erx_area_harness_poke(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	ErlNifUInt64 offset;
+	erx_area_view_t view;
+	ErlNifBinary data;
+
+	(void)argc;
+	if (!erx_area_view(env, argv[0], &view) || !enif_get_uint64(env, argv[1], &offset) ||
+	    !enif_inspect_binary(env, argv[2], &data) || !view.writable || offset > view.bytes ||
+	    data.size > view.bytes - offset)
+		return (enif_make_badarg(env));
+	bcopy(data.data, view.base + offset, data.size);
+	return (enif_make_atom(env, "ok"));
 }

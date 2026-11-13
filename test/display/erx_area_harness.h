@@ -31,12 +31,18 @@ ERL_NIF_TERM erx_area_harness_map_lease(ErlNifEnv *env, int argc,
     const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM erx_area_harness_leases(ErlNifEnv *env, int argc,
     const ERL_NIF_TERM argv[]);
+ERL_NIF_TERM erx_area_harness_peek(ErlNifEnv *env, int argc,
+    const ERL_NIF_TERM argv[]);
+ERL_NIF_TERM erx_area_harness_poke(ErlNifEnv *env, int argc,
+    const ERL_NIF_TERM argv[]);
 
 #define ERX_AREA_HARNESS_FUNCTIONS						\
 	{ "take", 3, erx_area_harness_take, 0 },				\
 	{ "give", 1, erx_area_harness_give, 0 },				\
 	{ "map_lease", 2, erx_area_harness_map_lease, 0 },			\
-	{ "leases", 0, erx_area_harness_leases, 0 },
+	{ "leases", 0, erx_area_harness_leases, 0 },			\
+	{ "peek", 3, erx_area_harness_peek, 0 },				\
+	{ "poke", 3, erx_area_harness_poke, 0 },
 
 /*
  * The count of leases listed in the NIF's table, read under its lock;

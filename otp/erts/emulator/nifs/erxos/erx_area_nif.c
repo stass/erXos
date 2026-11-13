@@ -28,6 +28,10 @@
  * runs after the lock is let go, so no destructor runs under it. The lock
  * order is the driver's port lock, then table_lock; the lease's down
  * callback and unlend take table_lock alone.
+ *
+ * zero/3, erx_pixels's one per-byte primitive, stores zero over a checked
+ * range of whole pages of a writable area through the agent's mapping, so
+ * a range rejoins erx_pixels's free list holding nothing of its last owner.
  */
 
 #ifndef ERX_AREA_NIF_LOADABLE
@@ -39,6 +43,7 @@
 #endif
 
 #include <stdatomic.h>
+#include <strings.h>
 
 #include "erl_nif.h"
 #include "erx_area.h"
@@ -69,7 +74,9 @@ struct erx_area_lease {
 	uint64_t offset;	/* the range, checked against the area by the lend */
 	uint64_t pages;
 	ErlNifPid holder;	/* the range's owner, whose port alone takes the lease */
-	ErlNifPid lender;	/* erx_pixels, sent {erx_area_returned, Number} */
+	ErlNifPid lender;	/* erx_pixels, sent {erx_area_returned, Tag, Number} */
+	ErlNifEnv *tag_env;	/* keeps tag for the lease's life; freed by lease_dtor */
+	ERL_NIF_TERM tag;	/* the lender's reference for this lease, set by the lend */
 	ErlNifMonitor monitor;	/* of the holder */
 };
 
@@ -104,6 +111,7 @@ lease_dtor(ErlNifEnv *env, void *object)
 	erx_area_lease_t *lease = object;
 
 	(void)env;
+	enif_free_env(lease->tag_env);
 	enif_release_resource(lease->area);
 }
 
@@ -166,7 +174,8 @@ finish_return(ErlNifEnv *env, erx_area_lease_t *lease)
 
 	if (msg != NULL) {
 		(void)enif_send(env, &lease->lender, msg,
-		    enif_make_tuple2(msg, atom_returned, enif_make_uint64(msg, lease->number)));
+		    enif_make_tuple3(msg, atom_returned, enif_make_copy(msg, lease->tag),
+		    enif_make_uint64(msg, lease->number)));
 		enif_free_env(msg);
 	}
 	enif_release_resource(lease);
@@ -259,13 +268,16 @@ map_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 }
 
 /*
- * lend(Area, Offset, Pages, Holder) -> {ok, Lease} | {error, einval | noproc
- * | enomem}: makes a held lease of Area's Pages pages from Offset for the
- * pid Holder, lent by the caller, and answers its number. einval for a
+ * lend(Area, Offset, Pages, Holder, Tag) -> {ok, Lease} | {error, einval |
+ * noproc | enomem}: makes a held lease of Area's Pages pages from Offset
+ * for the pid Holder, lent by the caller, and answers its number. Its
+ * return sends the caller {erx_area_returned, Tag, Lease}: the number
+ * counts up from 1 and is guessable, so the caller acts only on a return
+ * that carries its own reference Tag. einval for a
  * range erx_lease_range_ok refuses; noproc, making no lease, for a holder
  * that has exited before its monitor is set or before the lease is listed.
- * Offset and Pages are integers from 0 to 2^64 - 1 and Holder a local pid:
- * anything else, or an Area that is no area, is badarg.
+ * Offset and Pages are integers from 0 to 2^64 - 1, Holder a local pid and
+ * Tag a reference: anything else, or an Area that is no area, is badarg.
  *
  * The monitor is set before the lease is listed and outside table_lock,
  * since a down callback may wait for table_lock; a holder that exits in
@@ -277,21 +289,27 @@ lend_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	ErlNifMutex *lock = atomic_load_explicit(&table_lock, memory_order_acquire);
 	ErlNifUInt64 offset, pages;
 	erx_area_lease_t *lease;
+	ErlNifEnv *tag_env;
 	ErlNifPid holder;
 	area_t *area;
 	uint64_t number;
 
 	(void)argc;
 	if (!enif_get_resource(env, argv[0], area_type, (void **)&area) || !enif_get_uint64(env, argv[1], &offset) ||
-	    !enif_get_uint64(env, argv[2], &pages) || !enif_get_local_pid(env, argv[3], &holder))
+	    !enif_get_uint64(env, argv[2], &pages) || !enif_get_local_pid(env, argv[3], &holder) ||
+	    !enif_is_ref(env, argv[4]))
 		return (enif_make_badarg(env));
 	if (!erx_lease_range_ok(offset, pages, ERX_PAGE_SIZE, area->bytes, area->writable))
 		return (enif_make_tuple2(env, atom_error, atom_einval));
-	lease = enif_alloc_resource(lease_type, sizeof *lease);
-	if (lease == NULL)
+	tag_env = enif_alloc_env();
+	lease = tag_env == NULL ? NULL : enif_alloc_resource(lease_type, sizeof *lease);
+	if (lease == NULL) {
+		if (tag_env != NULL)
+			enif_free_env(tag_env);
 		return (enif_make_tuple2(env, atom_error, atom_enomem));
+	}
 	*lease = (erx_area_lease_t){ .state = ERX_LEASE_HELD, .area = area, .offset = offset, .pages = pages,
-	    .holder = holder };
+	    .holder = holder, .tag_env = tag_env, .tag = enif_make_copy(tag_env, argv[4]) };
 	enif_keep_resource(area);
 	(void)enif_self(env, &lease->lender);
 	if (enif_monitor_process(env, lease, &holder, &lease->monitor) != 0) {
@@ -338,6 +356,31 @@ unlend_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	enif_mutex_unlock(lock);
 	if (returned)
 		finish_return(env, lease);
+	return (atom_ok);
+}
+
+/*
+ * zero(Area, Offset, Pages) -> ok | {error, einval}: stores zero over Area's
+ * Pages pages from Offset, through the connection agent's mapping, on a
+ * dirty CPU scheduler. einval for a range erx_area_range_ok refuses, the
+ * read-only area among them. Offset and Pages are integers from 0 to
+ * 2^64 - 1: anything else, or an Area that is no area, is badarg. Only
+ * erx_pixels calls it, on a range nothing else holds (area-mappers).
+ */
+static ERL_NIF_TERM
+zero_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	ErlNifUInt64 offset, pages;
+	area_t *area;
+
+	(void)argc;
+	if (!enif_get_resource(env, argv[0], area_type, (void **)&area) || !enif_get_uint64(env, argv[1], &offset) ||
+	    !enif_get_uint64(env, argv[2], &pages))
+		return (enif_make_badarg(env));
+	if (!erx_area_range_ok(offset, pages, ERX_PAGE_SIZE, area->bytes, area->writable))
+		return (enif_make_tuple2(env, atom_error, atom_einval));
+	/* The range lies inside the mapping, whose bytes map/4 bounded by SIZE_MAX. */
+	bzero((void *)(uintptr_t)(area->addr + offset), (size_t)(pages * ERX_PAGE_SIZE));
 	return (atom_ok);
 }
 
@@ -438,8 +481,9 @@ erx_area_harness_lease_count(void)
 
 static ErlNifFunc functions[] = {
 	{ "map", 4, map_nif, 0 },
-	{ "lend", 4, lend_nif, 0 },
+	{ "lend", 5, lend_nif, 0 },
 	{ "unlend", 1, unlend_nif, 0 },
+	{ "zero", 3, zero_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 #ifdef ERX_AREA_HARNESS
 	/* test/display/erx_area_harness.c: the driver's calls, for the host tests. */
 	ERX_AREA_HARNESS_FUNCTIONS

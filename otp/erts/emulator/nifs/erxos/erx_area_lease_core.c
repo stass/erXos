@@ -33,15 +33,19 @@ erx_lease_step(erx_lease_state_t state, erx_lease_event_t event, bool eligible)
 }
 
 bool
-erx_lease_range_ok(uint64_t offset, uint64_t pages, uint64_t page, uint64_t area_bytes, bool writable)
+erx_area_range_ok(uint64_t offset, uint64_t pages, uint64_t page, uint64_t area_bytes, bool writable)
 {
 	uint64_t bytes, end;
 
-	if (!writable || offset % page != 0 || pages == 0 || pages > ERX_PROG_MEM_BYTES / page)
+	if (!writable || offset % page != 0 || pages == 0)
 		return (false);
-	/* pages * page is at most ERX_PROG_MEM_BYTES, so only the sum can overflow. */
-	bytes = pages * page;
-	if (__builtin_add_overflow(offset, bytes, &end))
+	if (__builtin_mul_overflow(pages, page, &bytes) || __builtin_add_overflow(offset, bytes, &end))
 		return (false);
 	return (end <= area_bytes);
+}
+
+bool
+erx_lease_range_ok(uint64_t offset, uint64_t pages, uint64_t page, uint64_t area_bytes, bool writable)
+{
+	return (pages <= ERX_PROG_MEM_BYTES / page && erx_area_range_ok(offset, pages, page, area_bytes, writable));
 }

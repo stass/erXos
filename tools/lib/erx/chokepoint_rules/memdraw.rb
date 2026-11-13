@@ -33,11 +33,13 @@ module Erx
         # memimagedraw (erx_draw_clip), load.c, unload.c and cload.c (a
         # rectangle erx_memdraw's rows_of checked inside the image),
         # alloc.c's allocation and fill (the whole image, which badrect
-        # admitted), and erx_memdraw's snapshot (a whole image). The shapes
+        # admitted), and erx_memdraw's snapshot (a whole image); and the area NIF's zero/3
+        # stores zero over a range of whole pages that erx_area_range_ok checked. The shapes
         # draw only through memdraw.
         Chokepoints::Forbidden.new(
           name: 'memdraw-pixels',
-          rule: 'only libmemdraw\'s draw, load, unload, cload and alloc and erx_memdraw\'s snapshot touch pixel memory',
+          rule: 'only libmemdraw\'s draw, load, unload, cload and alloc and erx_memdraw\'s snapshot touch pixel memory, ' \
+                'and erx_area:zero/3 stores zero over a checked range of whole pages',
           design: 'docs/design-display.md#chokepoints',
           scope: MEMDRAW_SCOPE,
           pattern: /\b(?:bdata|byteaddr|wordaddr)\b/,

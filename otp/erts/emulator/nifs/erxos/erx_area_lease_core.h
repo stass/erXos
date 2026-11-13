@@ -49,11 +49,17 @@ typedef struct {
 erx_lease_step_t	erx_lease_step(erx_lease_state_t state, erx_lease_event_t event, bool eligible);
 
 /*
- * erx_area:lend/4's check of a range against its area: true for offset on a
- * page boundary, pages from 1 to the pages of ERX_PROG_MEM_BYTES, and the
- * range's end, offset + pages * page in checked arithmetic, at or before
- * area_bytes; false for any other range and for an area that is not
- * writable. page is the area's page size, a power of two.
+ * erx_area:zero/3's check of a range against its area, which erx_area:lend/5's
+ * builds on: true for offset on a page boundary, pages from 1, and the range's
+ * end, offset + pages * page in checked arithmetic, at or before area_bytes;
+ * false for any other range and for an area that is not writable. page is the
+ * area's page size, a power of two.
+ */
+bool	erx_area_range_ok(uint64_t offset, uint64_t pages, uint64_t page, uint64_t area_bytes, bool writable);
+
+/*
+ * erx_area:lend/5's check of a range against its area: erx_area_range_ok's,
+ * with pages at most the pages of ERX_PROG_MEM_BYTES, the buffer place.
  */
 bool	erx_lease_range_ok(uint64_t offset, uint64_t pages, uint64_t page, uint64_t area_bytes, bool writable);
 

@@ -11,7 +11,7 @@ require_relative '../../tools/lib/erx/generated'
 # driver, test/fixtures/erx_area_lease_core_driver.c, under the address and undefined
 # sanitizers: every order of takes, give-backs, the holder's exit and the driver's return
 # keeps a lease taken at most once, only by its holder's port, and returned exactly once
-# (docs/design-display.md, Verification, the lease's transitions), and erx_area:lend/4's
+# (docs/design-display.md, Verification, the lease's transitions), and erx_area:lend/5's
 # range check refuses every range the design lists. Seeded failures of the core must each
 # fail their case.
 class ErxAreaLeaseCoreTest < Minitest::Test
