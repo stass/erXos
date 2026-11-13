@@ -1550,21 +1550,23 @@ decides who may do what.
 ```erlang
 -callback init(Config :: map()) -> State.
 -callback place(Request :: new | {move, rect()} | {resize, rect()} | hide | show | top | bottom,
-                Window :: window_id(), Windows :: [window()], Screen :: rect(), State) ->
+                Window :: window_id(), Windows :: [window()], Screen :: rect(),
+                Session :: binary() | none, State) ->
           {ok, [window()], State} | {error, einval}.
--callback arrange(Windows :: [window()], Screen :: rect(), State) -> {[window()], State}.
+-callback arrange(Windows :: [window()], Screen :: rect(), Session :: binary() | none, State) ->
+          {[window()], State}.
 -callback decorate(Windows :: [window()], Screen :: rect()) ->
           [{window_id(), [{rect(), color()}]}].           % borders, or []
--callback input(input(), Windows :: [window()], State) ->
+-callback input(input(), Windows :: [window()], Session :: binary() | none, State) ->
           {{to, window_id(), input()} | {wm, term()} | {windows, [window()]} | drop, State}.
 ```
 
 The table a policy sees and returns is in stacking order, topmost
 first. `new` is asked with the new
 window already in the table, its rectangle and state the policy's to
-set. `erx_winfs` calls `arrange/3` after every change it makes itself,
+set. `erx_winfs` calls `arrange/4` after every change it makes itself,
 a window's end or a change of the screen's size, so the table always
-holds the policy's answer. The policy's state, from the manifest's configuration, is threaded
+holds the policy's answer. The policy's state, from the manifest's configuration, which names no session, is threaded
 by `erx_winfs`: the overlapping policy keeps, for example, the buttons
 last seen and the drag in progress, and every policy keeps the reserved
 chord's keys held. `{windows, Table}` answers an
@@ -1584,8 +1586,9 @@ starts a program, a terminal included: the display domain has no
 authority to start one in a session, and a terminal opens its sibling
 windows itself ([The terminal](#the-terminal)). The **single** policy,
 `erx_wm_single`, shows one window at a time, gives it the screen's
-rectangle and draws no decoration. `erx_winfs` gives it the directory
-of the display's session, the live grant most recently minted with
+rectangle and draws no decoration. `erx_winfs` passes every `place`,
+`arrange` and `input` the directory of the display's session, or `none`,
+derived at the call from its grants: the live grant most recently minted with
 `session` set ([A display's session](#a-displays-session)), and which
 window it shows is derived, never stored: from every window table
 `erx_winfs` hands it, the shown window is the live window of that
@@ -1616,7 +1619,7 @@ does not.
 
 **The reserved chord.** A display's manifest entry may name a key chord,
 the **secure attention chord**. Every policy keeps it, answering
-`input/3` for it with `{wm, chord}`, and delivers it to no window, so no
+`input/4` for it with `{wm, chord}`, and delivers it to no window, so no
 client can read it or wait for it, and no client comes to depend on
 receiving it. The chord is the set of keys the entry names; it fires
 on the key down that makes the keys held include that set, whatever
@@ -1795,12 +1798,17 @@ Each window is one process, `erx_window`, which serves its `ctl`,
 its last present. A write to `ctl` reaches it as a binary, which
 `erx_winctl:parse/1` reads and `erx_window` checks against the client's
 pixel area ([The window tree](#the-window-tree)); it then calls
-`erx_screen:present/2`, waits, records the buffer as its last present
+`erx_screen:present_request/2`, which returns at once as
+`erx_display:flush_request/3` does, keeps at most one present in flight
+to `erx_screen` and holds its client's write until the answer, so the
+window still takes input while it waits; it then records the buffer as its last present
 and answers the write. A refused line fails the write with `EINVAL`,
 and the display domain's log records the window and the reason. Input
 from `erx_winfs` is encoded into `mouse` and `kbd` records and queued,
 within the bounds of the data model, until a read takes it. When
-`erx_screen` restarts, it asks every shown window to present again, and
+`erx_screen` restarts, it asks every shown window to present again, as
+it asks a window that a layout newly shows and whose buffer it holds no
+image of, and
 the window presents its last buffer, whole, as if its client had. The
 window ends with its holder, its directory or its grant, and holds
 nothing that outlives it: its buffer is its client's memory.

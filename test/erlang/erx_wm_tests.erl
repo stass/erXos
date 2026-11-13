@@ -66,7 +66,7 @@ sequence(Policy, Sequence) ->
 
 config(Policy) ->
     Base = case Policy of
-               erx_wm_single -> #{app => ?APP}
+               erx_wm_single -> #{}
            end,
     case rand:uniform(4) of
         1 -> Base;
@@ -80,7 +80,7 @@ step({new, Session}, World = #{policy := Policy, table := Table, next := Id,
     Window = #{id => Id, dir => {Session, integer_to_binary(Id)},
                rect => {0, 0, 0, 0}, state => hidden, holder => {holder, Id}},
     Given = Table ++ [Window],
-    {ok, Placed, Next} = Policy:place(new, Id, Given, Screen, State),
+    {ok, Placed, Next} = Policy:place(new, Id, Given, Screen, ?APP, State),
     same_windows(Given, Placed),
     World#{table := Placed, next := Id + 1, state := Next};
 step({remove, Id}, World = #{table := Table}) ->
@@ -89,7 +89,7 @@ step({screen, Screen}, World = #{table := Table}) ->
     arranged(Table, World#{screen := Screen});
 step({wctl, Id, Request}, World = #{policy := Policy, table := Table,
                                     screen := Screen, state := State}) ->
-    case Policy:place(Request, Id, Table, Screen, State) of
+    case Policy:place(Request, Id, Table, Screen, ?APP, State) of
         {ok, Placed, Next} ->
             same_windows(Table, Placed),
             World#{table := Placed, state := Next};
@@ -97,12 +97,12 @@ step({wctl, Id, Request}, World = #{policy := Policy, table := Table,
             World
     end;
 step({input, Input}, World = #{policy := Policy, table := Table, state := State}) ->
-    {Route, Next} = Policy:input(Input, Table, State),
+    {Route, Next} = Policy:input(Input, Table, ?APP, State),
     routed(Input, Route, World#{state := Next}).
 
 %% Asks the policy to arrange a table erx_winfs changed itself.
 arranged(Given, World = #{policy := Policy, screen := Screen, state := State}) ->
-    {Arranged, Next} = Policy:arrange(Given, Screen, State),
+    {Arranged, Next} = Policy:arrange(Given, Screen, ?APP, State),
     same_windows(Given, Arranged),
     World#{table := Arranged, state := Next}.
 
@@ -288,13 +288,13 @@ made(Policy, Config, Sessions) ->
     lists:foldl(fun({Id, Session}, {Table, State}) ->
                         {ok, Placed, Next} =
                             Policy:place(new, Id, Table ++ [window(Id, Session)],
-                                         screen(), State),
+                                         screen(), ?APP, State),
                         {Placed, Next}
                 end, {[], Policy:init(Config)},
                 lists:zip(lists:seq(1, length(Sessions)), Sessions)).
 
 single_shows_the_oldest_app_window_full_screen_test() ->
-    {Table, _} = made(erx_wm_single, #{app => ?APP}, [<<"other">>, ?APP, ?APP]),
+    {Table, _} = made(erx_wm_single, #{}, [<<"other">>, ?APP, ?APP]),
     ?assertMatch([#{id := 1, state := hidden}, #{id := 2, state := shown},
                   #{id := 3, state := hidden}], Table),
     ?assertEqual([screen()], lists:usort([R || #{rect := R} <- Table])),
@@ -303,36 +303,36 @@ single_shows_the_oldest_app_window_full_screen_test() ->
 %% No event marks a window's end: the table erx_winfs hands the policy
 %% after the shown window ended already routes input to the next oldest.
 single_next_oldest_takes_over_when_the_shown_ends_test() ->
-    {Table, State} = made(erx_wm_single, #{app => ?APP}, [<<"other">>, ?APP, ?APP]),
+    {Table, State} = made(erx_wm_single, #{}, [<<"other">>, ?APP, ?APP]),
     Ended = [W || W = #{id := Id} <- Table, Id =/= 2],
     ?assertEqual(3, erx_wm_single:shown(?APP, Ended)),
-    ?assertMatch({{to, 3, _}, _}, erx_wm_single:input(key(down, 30), Ended, State)),
+    ?assertMatch({{to, 3, _}, _}, erx_wm_single:input(key(down, 30), Ended, ?APP, State)),
     Gone = [W || W = #{id := 1} <- Ended],
     ?assertEqual(none, erx_wm_single:shown(?APP, Gone)),
-    ?assertMatch({drop, _}, erx_wm_single:input(key(down, 30), Gone, State)).
+    ?assertMatch({drop, _}, erx_wm_single:input(key(down, 30), Gone, ?APP, State)).
 
 single_refuses_every_wctl_request_test() ->
-    {Table, State} = made(erx_wm_single, #{app => ?APP}, [?APP]),
-    [?assertEqual({error, einval}, erx_wm_single:place(R, 1, Table, screen(), State))
+    {Table, State} = made(erx_wm_single, #{}, [?APP]),
+    [?assertEqual({error, einval}, erx_wm_single:place(R, 1, Table, screen(), ?APP, State))
      || R <- [hide, show, top, bottom, {move, {0, 0, 1, 1}}, {resize, screen()}]].
 
 single_chord_is_the_policys_test() ->
-    {Table, State} = made(erx_wm_single, #{app => ?APP, chord => ?CHORD}, [?APP]),
-    {{to, 1, _}, S1} = erx_wm_single:input(key(down, 1), Table, State),
-    {{wm, chord}, S2} = erx_wm_single:input(key(down, 2), Table, S1),
+    {Table, State} = made(erx_wm_single, #{chord => ?CHORD}, [?APP]),
+    {{to, 1, _}, S1} = erx_wm_single:input(key(down, 1), Table, ?APP, State),
+    {{wm, chord}, S2} = erx_wm_single:input(key(down, 2), Table, ?APP, S1),
     %% A driver repeating the held chord key: withheld, and no second chord.
-    {drop, S3} = erx_wm_single:input(key(down, 2), Table, S2),
-    {drop, S4} = erx_wm_single:input(key(up, 2), Table, S3),
-    {{to, 1, _}, S5} = erx_wm_single:input(key(up, 1), Table, S4),
-    {{to, 1, _}, S6} = erx_wm_single:input(key(down, 2), Table, S5),
-    ?assertMatch({{wm, chord}, _}, erx_wm_single:input(key(down, 1), Table, S6)).
+    {drop, S3} = erx_wm_single:input(key(down, 2), Table, ?APP, S2),
+    {drop, S4} = erx_wm_single:input(key(up, 2), Table, ?APP, S3),
+    {{to, 1, _}, S5} = erx_wm_single:input(key(up, 1), Table, ?APP, S4),
+    {{to, 1, _}, S6} = erx_wm_single:input(key(down, 2), Table, ?APP, S5),
+    ?assertMatch({{wm, chord}, _}, erx_wm_single:input(key(down, 1), Table, ?APP, S6)).
 
 single_without_chord_withholds_nothing_test() ->
-    {Table, State} = made(erx_wm_single, #{app => ?APP}, [?APP]),
-    {{to, 1, _}, S1} = erx_wm_single:input(key(down, 1), Table, State),
-    ?assertMatch({{to, 1, _}, _}, erx_wm_single:input(key(down, 2), Table, S1)).
+    {Table, State} = made(erx_wm_single, #{}, [?APP]),
+    {{to, 1, _}, S1} = erx_wm_single:input(key(down, 1), Table, ?APP, State),
+    ?assertMatch({{to, 1, _}, _}, erx_wm_single:input(key(down, 2), Table, ?APP, S1)).
 
 bad_configuration_is_refused_test() ->
-    ?assertError(badarg, erx_wm_single:init(#{})),
-    ?assertError(badarg, erx_wm_single:init(#{app => ?APP, chord => []})),
-    ?assertError(badarg, erx_wm_single:init(#{app => ?APP, chord => [16#10000]})).
+    ?assertError(badarg, erx_wm_single:init(not_a_map)),
+    ?assertError(badarg, erx_wm_single:init(#{chord => []})),
+    ?assertError(badarg, erx_wm_single:init(#{chord => [16#10000]})).

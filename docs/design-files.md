@@ -380,7 +380,7 @@ decoded on both sides by the funnel's grammar and then by the protocol's own, th
 A request travels as `{erx_9p, Alias, Owner, Request}` to a grant and its
 reply as `{erx_9p, Alias, Reply}` to `Alias`, which plays the part of 9P's
 tag; `Owner` is the process that will hold any fid the request makes
-([Fid owners](#fid-owners)). A
+([Fid owners](#fid-owners)), or, for a `mkdir`, that the tree may tie the directory to. A
 reply is `ok` for a 9P2000.L reply that has no fields, `{ok, Field...}`
 otherwise, and `{error, Posix}` for `Rlerror`: inside the machine an error
 is always OTP's `file:posix()` atom that names the Linux error (`enoent`
@@ -1479,7 +1479,7 @@ writes in Erlang form the `erx_files` application
                      unlink/4, rename/5, fsync/2, xattr/3]).
 
 -type what() :: {file, Mode :: 0..8#7777, Flags :: non_neg_integer()}
-              | {directory, Mode :: 0..8#7777}
+              | {directory, Mode :: 0..8#7777, Owner :: pid()}
               | {symlink, Target :: binary()} | {link, Node :: term()}
               | {node, Mode :: non_neg_integer(), Major :: non_neg_integer(),
                  Minor :: non_neg_integer()}.
@@ -1487,7 +1487,11 @@ writes in Erlang form the `erx_files` application
 
 `make` serves `lcreate`, `mkdir`, `symlink`, `link` and `mknod`, one
 callback for every operation that adds a name, so a module states once
-which kinds its format keeps and refuses the rest with `eperm`; `unlink`
+which kinds its format keeps and refuses the rest with `eperm`. A
+`{directory, ...}` carries the `mkdir`'s `Owner`: a `mkdir` makes no fid, so
+nothing in the grant holds its owner, and a tree whose directories live as
+long as their maker, a display's windows, monitors it itself; a tree of
+stored directories ignores it. `unlink`
 serves `remove` and `unlinkat`, and `rename` serves `rename` and
 `renameat`. Each decision POSIX makes in one step is one callback, so no
 other client's request can come between its parts:

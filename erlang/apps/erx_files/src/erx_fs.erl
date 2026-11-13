@@ -51,7 +51,7 @@ client as `eio`.
 -type statfs() :: #{atom() => non_neg_integer()}.
 -type dirent() :: {qid(), Offset :: non_neg_integer(), Type :: 0..255, Name :: binary()}.
 -type what() :: {file, Mode :: 0..8#7777, Flags :: non_neg_integer()}
-              | {directory, Mode :: 0..8#7777}
+              | {directory, Mode :: 0..8#7777, Owner :: pid()}
               | {symlink, Target :: binary()} | {link, Node :: term()}
               | {node, Mode :: non_neg_integer(), Major :: non_neg_integer(),
                  Minor :: non_neg_integer()}.

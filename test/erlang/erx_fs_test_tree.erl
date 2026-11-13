@@ -311,7 +311,7 @@ made(Dir, Name, What, #{next := Ino} = T) ->
             Error
     end.
 
-new_node({directory, Mode}) -> {ok, (directory(#{}))#{mode := Mode}};
+new_node({directory, Mode, _Owner}) -> {ok, (directory(#{}))#{mode := Mode}};
 new_node({symlink, Target}) -> {ok, #{kind => symlink, mode => 8#777, target => Target,
                                       links => 1, opens => 0}};
 new_node(_) -> {error, eperm}.

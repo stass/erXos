@@ -17,7 +17,10 @@ and `state`, may reorder the list, and keeps every other field as it
 found it.
 
 A policy's own state, from init/1, is threaded by erx_winfs through
-place/5 and input/3. Every policy keeps the reserved chord's state,
+place/6, arrange/4 and input/4, which also take
+`Session`, the directory of the display's session or `none`, which
+erx_winfs derives at the call from its grants: the live grant most
+recently minted with `session` set. The configuration names no session. Every policy keeps the reserved chord's state,
 chord_init/1 and chord/2: it answers the chord with `{wm, chord}` and
 delivers it to no window.
 
@@ -25,17 +28,17 @@ Callbacks:
 
 * init(Config) builds the policy's state from the manifest's
   configuration.
-* place(Request, Window, Windows, Screen, State) answers a geometry
+* place(Request, Window, Windows, Screen, Session, State) answers a geometry
   request about `Window`: `new` when erx_winfs has just added it to the
   table (its `rect` and `state` are the policy's to set), or a `wctl`
   command (erx_wctl:parse/1). It returns the whole new table, or
   `{error, einval}` for a request the policy refuses.
-* arrange(Windows, Screen, State) sets every window's `rect` and
+* arrange(Windows, Screen, Session, State) sets every window's `rect` and
   `state` after a change erx_winfs makes itself: a window ended or the
   screen's size changed.
 * decorate(Windows, Screen) returns each shown window's decoration as
   rectangles and colours, or none.
-* input(Input, Windows, State) routes one input event: to one window,
+* input(Input, Windows, Session, State) routes one input event: to one window,
   to the window system itself (`{wm, Term}`, such as a menu request),
   as a rearranged table (`{windows, Table}`, such as a click that
   raises a window), or nowhere.
@@ -45,7 +48,7 @@ Every rectangle a policy returns lies within the screen, within/2.
 
 -export([within/2, shown/1, fetch/2, session/1, chord_init/1, chord/2]).
 -export_type([window_id/0, coord/0, rect/0, color/0, window/0, request/0,
-              input/0, route/0, chord/0]).
+              input/0, route/0, chord/0, session/0]).
 
 -doc "A window's number, unique within a display.".
 -type window_id() :: 1..16#7fffffff.
@@ -64,8 +67,10 @@ fields named here; erx_winfs's other fields pass through unchanged.
                     rect := rect(),
                     state := shown | hidden,
                     atom() => term()}.
--doc "What erx_winfs asks of place/5.".
+-doc "What erx_winfs asks of place/6.".
 -type request() :: new | erx_wctl:command().
+-doc "The directory of the display's session, or `none` while it has none.".
+-type session() :: binary() | none.
 -doc "One input event, from any input driver.".
 -type input() :: #{device := binary(),
                    at := integer(),
@@ -89,13 +94,14 @@ chord, withheld until their up.
 
 -callback init(Config :: map()) -> State :: term().
 -callback place(request(), window_id(), Windows :: [window()], Screen :: rect(),
-                State :: term()) ->
+                Session :: session(), State :: term()) ->
     {ok, [window()], State :: term()} | {error, einval}.
--callback arrange(Windows :: [window()], Screen :: rect(), State :: term()) ->
+-callback arrange(Windows :: [window()], Screen :: rect(), Session :: session(),
+                  State :: term()) ->
     {[window()], State :: term()}.
 -callback decorate(Windows :: [window()], Screen :: rect()) ->
     [{window_id(), [{rect(), color()}]}].
--callback input(input(), Windows :: [window()], State :: term()) ->
+-callback input(input(), Windows :: [window()], Session :: session(), State :: term()) ->
     {route(), State :: term()}.
 
 -doc "Whether rectangle `Inner` is non-empty and lies within `Outer`.".

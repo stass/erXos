@@ -638,6 +638,7 @@ read_mode() -> helper.
 -doc false.
 write(Handle, Offset, Data, Server) -> call(Server, {write, Handle, Offset, Data}).
 -doc false.
+make(Dir, Name, {directory, Mode, _Owner}, Server) -> call(Server, {make, Dir, Name, {directory, Mode}});
 make(Dir, Name, What, Server) -> call(Server, {make, Dir, Name, What}).
 -doc false.
 setattr(Target, Changes, Server) -> call(Server, {setattr, Target, Changes}).

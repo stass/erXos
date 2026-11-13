@@ -181,7 +181,7 @@ failed_flush_fails_the_fsync() ->
 tree_operations() ->
     Volume = {_, _, Fs} = start_volume(fresh_disk(), lfs_tree),
     {ok, _, Root, {?ERX_P9_QTDIR, _, _}} = erx_lfs:root(Fs),
-    {ok, Dir, {?ERX_P9_QTDIR, _, DirId}} = erx_lfs:make(Root, <<"d">>, {directory, 8#755}, Fs),
+    {ok, Dir, {?ERX_P9_QTDIR, _, DirId}} = erx_lfs:make(Root, <<"d">>, {directory, 8#755, self()}, Fs),
     {ok, File, {0, _, FileId}, H} = erx_lfs:make(Dir, <<"f">>, {file, 8#644, ?ERX_P9_O_WRONLY}, Fs),
     {ok, 3, 0} = erx_lfs:write(H, 0, <<"abc">>, Fs),
     %% A write-only file refuses a read, which littlefs would assert on.
@@ -206,7 +206,7 @@ tree_operations() ->
     ok = erx_lfs:unlink(Root, <<"d">>, directory, Fs),
     {error, enoent} = erx_lfs:walk(Root, <<"d">>, Fs),
     %% A name that is not UTF-8 is bytes like any other.
-    {ok, _, _} = erx_lfs:make(Root, <<"\xff">>, {directory, 8#755}, Fs),
+    {ok, _, _} = erx_lfs:make(Root, <<"\xff">>, {directory, 8#755, self()}, Fs),
     ok = erx_lfs:rename(Root, <<"\xff">>, Root, <<"\xfe">>, Fs),
     ok = erx_lfs:unlink(Root, <<"\xfe">>, directory, Fs),
     {ok, #{bsize := 4096, blocks := 256}} = erx_lfs:statfs(Fs),
@@ -222,7 +222,7 @@ block_error_ends_the_owner() ->
     Worker = worker(Owner),
     Monitors = [erlang:monitor(process, Pid) || Pid <- [Owner, Worker]],
     Window ! {mode, fail},
-    {error, eio} = erx_lfs:make(Root, <<"x">>, {directory, 8#755}, Fs),
+    {error, eio} = erx_lfs:make(Root, <<"x">>, {directory, 8#755, self()}, Fs),
     ok = ended(Monitors),
     {error, eio} = erx_lfs:walk(Root, <<"x">>, Fs),
     stop_volume(Volume).

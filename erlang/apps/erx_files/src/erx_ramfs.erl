@@ -291,6 +291,8 @@ open_flags(Flags) ->
                         Flags band Bit =/= 0]}.
 
 what({file, Mode, Flags}) -> {file, Mode, open_flags(Flags)};
+%% The tree keeps stored directories, which outlive their maker: a mkdir's Owner is dropped.
+what({directory, Mode, _Owner}) -> {directory, Mode};
 what(What) -> What.
 
 %% setattr's valid bits name the fields set; a time without its _SET bit is

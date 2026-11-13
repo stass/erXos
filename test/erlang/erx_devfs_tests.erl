@@ -190,7 +190,7 @@ a_create_of_ctl_opens_it_for_writing_test() ->
                  erx_devfs:make(Dir, <<"ctl">>, {file, 8#644, Truncating bor ?ERX_P9_O_EXCL}, Fs)),
     ?assertEqual({error, eacces}, erx_devfs:make(Dir, <<"ctl">>, {file, 8#644, ?ERX_P9_O_RDWR}, Fs)),
     ?assertEqual({error, eacces}, erx_devfs:make(Dir, <<"status">>, {file, 8#644, Truncating}, Fs)),
-    ?assertEqual({error, eacces}, erx_devfs:make(Dir, <<"other">>, {directory, 8#755}, Fs)),
+    ?assertEqual({error, eacces}, erx_devfs:make(Dir, <<"other">>, {directory, 8#755, self()}, Fs)),
     ?assertEqual({error, eacces}, erx_devfs:make(root, <<"ctl">>, {file, 8#644, Truncating}, Fs)),
     ?assertEqual({error, erofs}, erx_devfs:make(Dir, <<"ctl">>, {file, 8#644, Truncating}, tree(ro, Facet))),
     ?assertEqual([{restart, block}], requests(Facet)).

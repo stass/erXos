@@ -553,8 +553,8 @@ dispatch(_, {readdir, Fid, Offset, Count}, Grant) ->
     on_open(Fid, Grant, fun(Handle) -> {readdir, Handle, Offset, Count} end);
 dispatch(_, {fsync, Fid, _Datasync}, Grant) ->
     on_open(Fid, Grant, fun(Handle) -> {fsync, Handle} end);
-dispatch(_, {mkdir, Dfid, Name, Mode, _Gid}, Grant) ->
-    make(Dfid, Name, {directory, Mode band 8#7777}, Grant);
+dispatch(Owner, {mkdir, Dfid, Name, Mode, _Gid}, Grant) ->
+    make(Dfid, Name, {directory, Mode band 8#7777, Owner}, Grant);
 dispatch(_, {symlink, Fid, Name, Target, _Gid}, Grant) ->
     make(Fid, Name, {symlink, Target}, Grant);
 dispatch(_, {link, Dfid, Fid, Name}, Grant) ->
