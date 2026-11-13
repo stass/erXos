@@ -5,6 +5,7 @@
 require 'fileutils'
 require 'json'
 require_relative 'boot_image'
+require_relative 'compiler_rt'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'musl'
@@ -321,7 +322,7 @@ module Erx
         libc = musl.build(directory: File.join(@build, 'musl'), jobs: jobs)
         native = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco)
         task = native.compile_all(sources: TASK_SOURCES, directory: File.join(@build, 'task'))
-        archives = [libc, fiasco.user_library('libgcc.a'), fiasco.boot_core_archive, *NativeRoot::LIBRARIES.map { |name| fiasco.user_library(name) }]
+        archives = [libc, CompilerRt.archive(root: @root, runner: @runner, compiler: @compiler), fiasco.boot_core_archive, *NativeRoot::LIBRARIES.map { |name| fiasco.user_library(name) }]
         makefile = File.join(@build, 'tests.mk')
         File.write(makefile, Makefile.text(tests: tests, source: @source, output: File.join(@build, 'tests'), compiler: @compiler,
                                            linker: @linker, cflags: [*FLAGS, *musl.include_directories(directory: File.join(@build, 'musl')).flat_map { |path| ['-isystem', path] }],

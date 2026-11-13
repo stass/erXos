@@ -132,7 +132,7 @@ module Erx
         program = native.build_task(name: 'native-domain', sources: PROGRAM_SOURCES, directory: File.join(@build, 'program'), flags: [])
         erts = NativeRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco).build
         runtime = native.build_domain_runtime_receipted(directory: File.join(@build, 'erts'),
-                                                        archives: [*erts.otp_archives, erts.libc, fiasco.user_library('libgcc.a')])
+                                                        archives: [*erts.otp_archives, erts.libc, erts.builtins])
         root_task = native.build(name: 'domain-root', sources: ROOT_SOURCES, directory: File.join(@build, 'root'), flags: ROOT_FLAGS)
         programs = { PROGRAM_PATH => program, RELEASE_PATH => File.join(@root, RELEASE_SOURCE),
                      **release(erts), **jit_modules }
@@ -147,7 +147,7 @@ module Erx
         jit = NativeJitRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco)
                               .build(interpreter: erts)
         native.build_jit_runtime_receipted(directory: File.join(@build, 'erts-jit'),
-                                           archives: jit.link_archives(libgcc: fiasco.user_library('libgcc.a')))
+                                           archives: jit.link_archives)
               .fetch(:program)
       end
 

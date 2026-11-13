@@ -369,8 +369,11 @@ package selection and final linker evidence must agree, with no `moe`,
 The inherited `sigma0` link mode also adds the selected compiler runtime.
 With the stopgap's GCC configuration, `bootstrap` uses
 `compiler-rt-pure`, resolved to `libgcc_eh-pure` and `libgcc-pure`, while
-`sigma0` uses `compiler-rt`, resolved to `libgcc_eh` and `libgcc`. Their
-headers and retained source notices are part of the closure. The minimal
+`sigma0` uses `compiler-rt`, resolved to `libgcc_eh` and `libgcc`. The
+headers and retained source notices of those four libraries are part of the
+closure. Neither link takes a member of them, and no link erXos makes names
+them: erXos's own links take LLVM compiler-rt's builtins
+(`tools/lib/erx/compiler_rt.rb`). The minimal
 libc uses the pinned `l4re-core` source selection and its bundled libc
 inputs; erXos's `musl/` is not silently substituted into that boot build.
 The import records the effective licences of these support files along

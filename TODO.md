@@ -1249,7 +1249,7 @@ it; git history is the record of completed work.
 * [Low] tooling, `make check-reproducible`: both builds of OTP and musl run at one path, so a path
   of theirs that reached the image would not show.
 * [Low] stopgap, `tools/lib/erx/native_root.rb`: musl's headers are system headers to the root's compile, so a compile record leaves them out and nothing audits them for the root's objects.
-* [Low] stopgap, `fiasco/l4re-core/libgcc`: the root links `libgcc.a` for `long double`'s helpers, under GPL-3.0-only WITH GCC-exception-3.1. Replace it with compiler-rt's builtins.
+* [Low] stopgap, `fiasco/l4re-core/compiler-rt`: Fiasco's user build names `libgcc.a` and `libgcc_eh.a` (GPL-3.0-only WITH GCC-exception-3.1) in the links of `sigma0` and `bootstrap`, as `CONFIG_COMPILER_RT_USE_LIBGCC` makes it. Neither link takes a member, so no image carries their code, but nothing checks that it stays so: point l4re-core's `compiler-rt` package at LLVM's builtins, or fail the Fiasco build on a libgcc definition in either program.
 * [Medium] stopgap, `liberx/backend/fiasco/root.c`: the root writes no `erx_boot_info` page for a test task, though [Boot handoff](docs/design-stopgap.md#boot-handoff) says it does, and it seeds no `rng.c`.
 * [Medium] tooling, `tools/lib/erx/oracle_qemu.rb`: the suites' events reach the host on the
   console's serial line, which the kernel, the root and ERTS's C output also write, at any
@@ -1331,8 +1331,6 @@ it; git history is the record of completed work.
   It should fill `struct utsname` from `erx/abi.h`'s `ERX_UNAME_SYSNAME_STRING`, `ERX_UNAME_RELEASE_STRING` and
   `ERX_ARCH_MACHINE_STRING`, and the node name from the host part of the boot information's node name, which the shell's `uname`
   (`erlang/apps/erx_shell/src/erx_cmd_uname.erl`) reads as init's `-sname` or `-name`, with no value of its own; `docs/design-shell.md`, "Text commands".
-* [Low] musl, `tools/lib/erx/native_musl.rb`: binary128 arithmetic comes from Fiasco's `libgcc.a`, built by GCC.
-  Replace it with compiler-rt's builtins, the dependency table's row, with the rest of the BeamAsm image's runtime.
 * [Low] musl, `musl/src/malloc/mallocng/glue.h`: `AT_RANDOM` is absent, so mallocng's secret comes from an address alone; `erx_entropy_read`
   can supply its 16 bytes at program start.
 * [Medium] musl, `musl/src/thread/erxos/pthread_create_executor.c`, `musl/src/internal/erxos/syscall.c`: only the boot covers them. `test/guest/native_musl` needs the hosted

@@ -258,7 +258,7 @@ module Erx
     # vouches for it: a hit needs each with the bytes the finished build left, the header
     # trees the native compiles include by content (BuildMemo#in_place).
     def memo_outputs
-      [image_path, kernel_path, sigma0_path, boot_core_archive, *%w[libgcc.a libsigma0.a libl4sys.p.a].map { |name| user_library(name) },
+      [image_path, kernel_path, sigma0_path, boot_core_archive, *%w[libsigma0.a libl4sys.p.a].map { |name| user_library(name) },
        *user_include_directories, File.join(@build, 'receipt.json'), File.join(@build, 'provenance.json')]
     end
 

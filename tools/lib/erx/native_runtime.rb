@@ -4,6 +4,7 @@
 
 require 'fileutils'
 require 'open3'
+require_relative 'compiler_rt'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'musl'
@@ -22,8 +23,9 @@ module Erx
     XCOMP_FILE = "xcomp/erl-xcomp-#{TARGET}.conf".freeze
     # configure and ERTS ask for these libraries by name, and musl keeps them all in libc.a.
     EMPTY_LIBRARIES = %w[m pthread rt dl util].freeze
-    # What the root's link takes: OTP's objects and archives, and musl's libc.a.
-    Built = Data.define(:otp_archives, :libc, :otp)
+    # What the root's link takes: OTP's objects and archives, musl's libc.a, and
+    # compiler-rt's builtins (CompilerRt).
+    Built = Data.define(:otp_archives, :libc, :builtins, :otp)
 
     BASE = 'build/runtime/native'
     # The musl sysroot, which the BeamAsm build (NativeJitRuntime) shares.
@@ -60,7 +62,7 @@ module Erx
       FileUtils.rm_f(self.class.record_path(@output))
       # Also brings build/gen up to date, which the steps below read.
       digest = self.class.source_digest(root: @root, generated: @generated)
-      libc = build_sysroot(jobs: jobs)
+      libc, builtins = build_sysroot(jobs: jobs)
       build_liberx
       copy_sources
       configure unless File.file?(in_copy('.erx-configured'))
@@ -70,7 +72,8 @@ module Erx
       check_imports
       File.write(self.class.record_path(@output), digest)
       Built.new(otp_archives: [File.join(@output.objects, 'erl_main.o'), File.join(File.dirname(@output.beam), 'libbeam.a'),
-                       *RuntimeSeam.libraries(@output, target: TARGET)].freeze, libc: libc, otp: @output.root)
+                       *RuntimeSeam.libraries(@output, target: TARGET)].freeze, libc: libc, builtins: builtins,
+                otp: @output.root)
     end
 
     # Takes away everything build made, so the next build reruns musl's and OTP's own.
@@ -78,7 +81,8 @@ module Erx
 
     private
 
-    # Builds musl and fills the sysroot with its headers and the libraries the link names; returns libc.a.
+    # Builds musl and compiler-rt's builtins and fills the sysroot with musl's headers and the
+    # libraries the link names; returns libc.a and the builtins archive.
     def build_sysroot(jobs:)
       musl = Musl.new(root: @root, runner: @runner, compiler: @compiler)
       directory = File.join(@base, 'musl')
@@ -87,10 +91,12 @@ module Erx
       lib = File.join(@sysroot, 'lib')
       FileUtils.mkdir_p(lib)
       FileUtils.cp(libc, lib)
-      %w[libgcc.a libsigma0.a libl4sys.p.a].each { |name| FileUtils.cp(@fiasco.user_library(name), lib) }
+      builtins = CompilerRt.archive(root: @root, runner: @runner, compiler: @compiler)
+      FileUtils.cp(builtins, lib)
+      %w[libsigma0.a libl4sys.p.a].each { |name| FileUtils.cp(@fiasco.user_library(name), lib) }
       FileUtils.cp(@fiasco.boot_core_archive, File.join(lib, 'libboot_cores.a'))
       EMPTY_LIBRARIES.each { |name| archive(File.join(lib, "lib#{name}.a"), []) }
-      libc
+      [libc, builtins]
     end
 
     # configure looks for headers under one directory, so musl's search order, first one

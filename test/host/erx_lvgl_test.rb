@@ -166,7 +166,7 @@ class LvglProgramTest < Minitest::Test
       FileUtils.touch([File.join(root, Erx::Lvgl::SUBMODULE, 'lvgl.h'), File.join(root, '.git'), log = File.join(root, 'status')])
       runner = Runner.new(log)
       native = Native.new
-      built = Erx::Lvgl::Program.new(root: root, runner: runner, native: native, compiler: '/llvm/clang', archives: %w[libc.a libgcc.a],
+      built = Erx::Lvgl::Program.new(root: root, runner: runner, native: native, compiler: '/llvm/clang', archives: %w[libc.a libclang_rt.builtins.a],
                                directory: File.join(root, 'out'), jobs: 2,
                                      generated: Generated).call
 
@@ -182,7 +182,7 @@ class LvglProgramTest < Minitest::Test
       assert_includes make, 'AR=/llvm/llvm-ar'
       assert_includes make, 'SANITIZE='
       assert_equal [*Erx::NativeRoot::PROGRAM, *Erx::Lvgl::Program::SOURCES], native.link.fetch(:sources)
-      assert_equal [archive, 'libc.a', 'libgcc.a'], native.link.fetch(:archives)
+      assert_equal [archive, 'libc.a', 'libclang_rt.builtins.a'], native.link.fetch(:archives)
       refute native.link.key?(:flags)
       assert_equal archive, built.fetch(:archive)
       assert_equal ['out/erx-lvgl'], built.fetch(:inputs)

@@ -11,6 +11,7 @@ require_relative 'boot_partition'
 require_relative 'build_facts'
 require_relative 'build_inputs'
 require_relative 'build_path'
+require_relative 'compiler_rt'
 require_relative 'crash_frame'
 require_relative 'deterministic_transcript'
 require_relative 'dom_planner'
@@ -338,7 +339,7 @@ module Erx
 
       sources = Runtime.source_digest(root: @root)
       erts = @runtime.build
-      archives = [*erts.otp_archives, erts.libc, @fiasco.user_library('libgcc.a')]
+      archives = [*erts.otp_archives, erts.libc, erts.builtins]
       root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: machine.platform,
                                  fiasco: @fiasco)
                             .build_system_receipted(directory: File.join(directory, 'root'), archives: archives,
@@ -1501,7 +1502,7 @@ module Erx
       beamasm = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @machine.platform,
                                fiasco: @fiasco)
                           .build_jit_runtime_receipted(directory: File.join(directory, 'jit-runtime'),
-                                                       archives: jit.link_archives(libgcc: @fiasco.user_library('libgcc.a')))
+                                                       archives: jit.link_archives)
       image = { 'path' => DOMAIN_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0,
                 'id' => 'domain-runtime', 'artifact' => runtime.fetch(:program), 'receipt' => runtime.fetch(:receipt) }
       jit_image = { 'path' => JIT_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0, 'jit' => true,
@@ -1598,8 +1599,8 @@ module Erx
       spdx = 'fiasco/l4re-core/LICENSE.spdx'
       [*otp_archives(erts.otp_archives, flavour: 'emu'),
        Archive.new(path: erts.libc, label: 'musl libc', license: 'MIT', status: 'permanent', notices: ['musl/COPYRIGHT']),
-       Archive.new(path: @fiasco.user_library('libgcc.a'), label: 'fiasco/l4re-core libgcc',
-                   license: 'GPL-3.0-only WITH GCC-exception-3.1', status: 'stopgap', notices: [spdx]),
+       Archive.new(path: erts.builtins, label: 'llvm compiler-rt builtins', license: CompilerRt::LICENSE,
+                   status: 'permanent', notices: [CompilerRt.notice(root: @root, runner: @runner)]),
        Archive.new(path: @fiasco.user_library('libl4sys.p.a'), label: 'fiasco/l4re-core libl4sys',
                    license: 'MIT', status: 'stopgap', notices: [spdx]),
        Archive.new(path: @fiasco.user_library('libsigma0.a'), label: 'fiasco/l4re-core libsigma0',

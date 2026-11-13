@@ -4,6 +4,7 @@
 
 require 'fileutils'
 require_relative 'boot_image'
+require_relative 'compiler_rt'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'musl'
@@ -82,7 +83,7 @@ module Erx
         guest = compile_guest(musl.include_directories(directory: directory))
         root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco)
                               .build(name: 'musl-root', sources: SOURCES, directory: File.join(@build, 'root'),
-                                     archives: [guest, libc, fiasco.user_library('libgcc.a')])
+                                     archives: [guest, libc, CompilerRt.archive(root: @root, runner: @runner, compiler: @compiler)])
         BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
                  .build(directory: File.join(@build, 'image'), stand_in_root: root_task)
       end

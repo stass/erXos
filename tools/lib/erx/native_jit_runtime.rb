@@ -18,10 +18,10 @@ module Erx
     BASE = 'build/runtime/native-jit'
     FLAVOR = 'jit'
     # What the BeamAsm image's link takes: this flavour's own OTP archives, the
-    # interpreter build's musl libc.a, and the C++ runtime's archives.
-    Built = Data.define(:otp_archives, :libc, :otp, :cxx_archives) do
-      # The link's archives in link order, with libgcc (Fiasco's user library) last.
-      def link_archives(libgcc:) = [*otp_archives, libc, *cxx_archives, libgcc]
+    # interpreter build's musl libc.a and compiler-rt builtins, and the C++ runtime's archives.
+    Built = Data.define(:otp_archives, :libc, :builtins, :otp, :cxx_archives) do
+      # The link's archives in link order, with the builtins last.
+      def link_archives = [*otp_archives, libc, *cxx_archives, builtins]
     end
 
     def self.output(root:) = flavour_output(root: root, base: BASE, flavour: FLAVOR)
@@ -42,7 +42,7 @@ module Erx
       File.write(self.class.record_path(@output), digest)
       Built.new(otp_archives: [File.join(@output.objects, 'erl_main.o'), File.join(File.dirname(@output.beam), 'libbeam.a'),
                                *RuntimeSeam.libraries(@output, target: TARGET)].freeze,
-                libc: interpreter.libc, otp: @output.root, cxx_archives: @libcxx.archives)
+                libc: interpreter.libc, builtins: interpreter.builtins, otp: @output.root, cxx_archives: @libcxx.archives)
     end
 
     private

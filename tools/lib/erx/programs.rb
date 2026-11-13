@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require_relative 'abi'
+require_relative 'compiler_rt'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'lvgl'
@@ -524,12 +525,13 @@ end,
       def added(fiasco, libc:)
         native = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @machine.platform,
                                 fiasco: fiasco)
+        archives = [libc, CompilerRt.archive(root: @root, runner: @runner, compiler: @compiler)]
         programs = PROGRAMS.map do |name, source|
           [name, native.build_task_receipted(name: name, sources: [*NativeRoot::PROGRAM, source], directory: File.join(@build, name),
-                                             archives: [libc, fiasco.user_library('libgcc.a')])]
+                                             archives: archives)]
         end
         lvgl = Lvgl::Program.new(root: @root, runner: @runner, native: native, compiler: @compiler,
-                                 archives: [libc, fiasco.user_library('libgcc.a')],
+                                 archives: archives,
                                  directory: File.join(@build, Lvgl::Program::NAME)).call
         programs = [*programs, [Lvgl::Program::NAME, lvgl]]
         library = ProductionImage::Archive.new(path: lvgl.fetch(:archive), label: 'lvgl liblvgl.a', license: Lvgl::Program::LICENSE,

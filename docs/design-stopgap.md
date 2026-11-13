@@ -1131,8 +1131,8 @@ which `root.ld` and `task.ld` load first so that musl finds the TLS image. On a 
 that page faults instead of overwriting `.bss`, and it ends the machine if the start comes back. A test's root that has no
 archive brings the service up in `libc_root.c`, and the system's root in `root.c`. `libc_task.c` is a task's `erx_task_main`,
 whose thread `task_start.c` has readied, and it runs on the stack `task_start.c` gave it. A program's own thread handle is its index in the root and in a task alike, so the seam is one file for both.
-The program links with `libl4sys.p.a`, which defines four symbols and needs none, and with Fiasco's `libgcc.a` for
-binary128 arithmetic.
+The program links with `libl4sys.p.a`, which defines four symbols and needs none, and with LLVM compiler-rt's builtins
+(`tools/lib/erx/compiler_rt.rb`) for binary128 arithmetic.
 
 #### musl's own tests
 
