@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_wm_tests.erl and test/erlang/erx_wctl_tests.erl, the EUnit cases
 # of the window policies and of the wctl text (docs/design-display.md, "Verification and
@@ -14,9 +15,7 @@ require 'tmpdir'
 # which must fail it under the property's name.
 class ErxWmTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  APPLICATION = File.join(ROOT, 'erlang/apps/erx_display/src')
-  # erx_wm first, so that the policies find their behaviour.
-  SOURCES = [File.join(APPLICATION, 'erx_wm.erl'), *Dir[File.join(APPLICATION, '*.erl')].sort].uniq.freeze
+  SOURCE_DIRECTORY = 'erlang/apps/erx_display/src'
   TESTS = %w[erx_wm_tests erx_wctl_tests].freeze
   DEADLINE = '300'
   # A broken rule: the file, its text, what replaces it, and the property that must fail,
@@ -71,27 +70,23 @@ class ErxWmTest < Minitest::Test
   end
 
   # Compiles the application, with the mutant's file edited when there is one, and the
-  # cases into a directory of its own, and runs the cases. The tree compiles with warnings
-  # as errors; an edited copy may leave a variable unused, which is not what it tests.
+  # cases into a directory of its own, and runs the cases.
   def eunit(mutant)
     Dir.mktmpdir('erx-wm-test') do |work|
-      sources = SOURCES.map { |path| mutant&.file == File.basename(path) ? edited(path, mutant, work) : path }
-      tests = TESTS.map { |name| File.join(ROOT, 'test/erlang', "#{name}.erl") }
-      flags = mutant ? [] : ['-Werror']
-      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERLC'), *flags, '-pa', work,
-                                       '-o', work, *sources, *tests, stdin_data: '')
-      return [output, status] unless status.success?
-
+      replaced = mutant ? { "#{SOURCE_DIRECTORY}/#{mutant.file}" => edited(mutant) } : {}
+      ErlangBuild.compile(work, applications: %w[erx_display], tests: TESTS.map { |name| "test/erlang/#{name}.erl" },
+                          replaced: replaced)
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       "halt(case eunit:test([#{TESTS.join(', ')}], [verbose]) of ok -> 0; _ -> 1 end).",
                       chdir: work, stdin_data: '')
     end
   end
 
-  def edited(path, mutant, work)
+  def edited(mutant)
+    path = File.join(ROOT, SOURCE_DIRECTORY, mutant.file)
     source = File.binread(path)
     raise "#{path} no longer holds #{mutant.text.inspect}" unless source.include?(mutant.text)
 
-    File.join(work, File.basename(path)).tap { |copy| File.binwrite(copy, source.sub(mutant.text, mutant.broken)) }
+    source.sub(mutant.text, mutant.broken)
   end
 end

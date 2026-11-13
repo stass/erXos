@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_screen_core_tests.erl, the exhaustive cases of the screen's pure
 # core, against erx_screen_core compiled from source on stock's emulator (ERX_ERL and
@@ -14,8 +15,11 @@ require 'tmpdir'
 # independent, so they run at once.
 class ErxScreenCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_display/src/erx_screen_core.erl')
-  TESTS_SOURCE = File.join(ROOT, 'test/erlang/erx_screen_core_tests.erl')
+  # The application holding the module (compiled whole, ErlangBuild), the module and the suite.
+  APPLICATIONS = %w[erx_display].freeze
+  MODULE = 'erlang/apps/erx_display/src/erx_screen_core.erl'
+  MODULE_SOURCE = File.join(ROOT, MODULE)
+  TESTS = %w[test/erlang/erx_screen_core_tests.erl].freeze
   DEADLINE_SECONDS = '600'
 
   Seed = Data.define(:fault, :anchor, :replacement, :catching_case)
@@ -100,7 +104,7 @@ class ErxScreenCoreTest < Minitest::Test
   ].freeze
 
   def test_core_cases_pass_under_eunit
-    output, status = eunit(File.binread(MODULE_SOURCE), warnings_as_errors: true)
+    output, status = eunit(File.binread(MODULE_SOURCE))
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
   end
@@ -111,7 +115,7 @@ class ErxScreenCoreTest < Minitest::Test
       assert_equal 1, source.scan(seed.anchor).size, "anchor for #{seed.fault} is not once in #{MODULE_SOURCE}"
     end
     runs = SEEDS.map do |seed|
-      Thread.new { [seed, *eunit(source.sub(seed.anchor, seed.replacement), warnings_as_errors: false)] }
+      Thread.new { [seed, *eunit(source.sub(seed.anchor, seed.replacement))] }
     end
     runs.map(&:value).each do |seed, output, status|
       refute status.success?, "#{seed.fault} passed every case:\n#{output}"
@@ -124,15 +128,9 @@ class ErxScreenCoreTest < Minitest::Test
   # EUnit names a plain case by its function and a generator's case by the fun inside it.
   def failed_case(name) = %r{#{Regexp.escape(name)}(/0-fun-\d+-)?\.\.\.(\[[^\]]*\] )?\*failed\*}
 
-  def eunit(module_text, warnings_as_errors:)
+  def eunit(module_text)
     Dir.mktmpdir('erx-screen-core-test') do |work|
-      module_path = File.join(work, 'erx_screen_core.erl')
-      File.binwrite(module_path, module_text)
-      flags = warnings_as_errors ? ['-Werror'] : []
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *flags, '-o', work, module_path, TESTS_SOURCE,
-                                       stdin_data: '')
-      return [output, status] unless status.success?
-
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: { MODULE => module_text })
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-eval', 'halt(case eunit:test(erx_screen_core_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')

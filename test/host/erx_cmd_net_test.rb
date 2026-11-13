@@ -2,11 +2,10 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_cmd_net_tests.erl, the EUnit cases of the command shell's
 # `ifconfig` and `ping` (docs/design-shell.md, "Commands"), against the erx_shell
@@ -16,52 +15,34 @@ require_relative '../../tools/lib/erx/generated'
 # matching case.
 class ErxCmdNetTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  Erx::Generated.ensure(root: ROOT)
-  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-  NET_INCLUDE = File.join(ROOT, 'erlang/apps/erx_net/include')
-  APPLICATION = File.join(ROOT, 'erlang/apps/erx_shell/src')
-  PING = File.join(APPLICATION, 'erx_cmd_ping.erl')
-  # erx_cmd first, so that the commands find their behaviour.
-  SOURCES = [File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/erx_facets.erl'),
-             File.join(APPLICATION, 'erx_cmd.erl'),
-             *Dir[File.join(APPLICATION, '*.erl')].sort,
-             # ping's loop calls the echo socket's client, a stub of the datagram socket process,
-             # whose socket process its case answers with a stand-in.
-             File.join(ROOT, 'erlang/apps/erx_net_client/src/erx_gen_icmp.erl'),
-             File.join(ROOT, 'erlang/apps/erx_net_client/src/erx_gen_udp.erl'),
-             File.join(ROOT, 'erlang/apps/erx_net_client/src/erx_sock_admit.erl'),
-             File.join(ROOT, 'test/erlang/erx_cmd_net_tests.erl')].uniq.freeze
+  PING = 'erlang/apps/erx_shell/src/erx_cmd_ping.erl'
+  # The applications the commands run in, compiled whole (ErlangBuild), and the cases. ping's
+  # loop calls the echo socket's client in erx_net_client, whose socket process the case
+  # answers with a stand-in.
+  APPLICATIONS = %w[erx erx_net_client erx_shell].freeze
+  TESTS = %w[test/erlang/erx_cmd_net_tests.erl].freeze
   SEEDED = ['#{Slot := {Seq, At, Seen}} ->', '#{Slot := {_, At, Seen}} ->'].freeze
 
   def test_net_command_cases_pass_under_eunit
-    output, status = eunit(SOURCES)
+    output, status = eunit({})
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
   end
 
   def test_seeded_slot_match_without_the_sequence_number_is_caught
-    Dir.mktmpdir('erx-cmd-net-fault') do |dir|
-      exact, faulty = SEEDED
-      text = File.read(PING)
-      assert_equal 1, text.scan(exact).size
-      faulty_ping = File.join(dir, 'erx_cmd_ping.erl')
-      File.write(faulty_ping, text.sub(exact) { faulty })
-      output, status = eunit(SOURCES.map { |source| source == PING ? faulty_ping : source })
-      refute status.success?, output
-      assert_match(/only_replies_to_remembered_requests_count_test.*failed/, output)
-    end
+    exact, faulty = SEEDED
+    text = File.read(File.join(ROOT, PING))
+    assert_equal 1, text.scan(exact).size
+    output, status = eunit({ PING => text.sub(exact) { faulty } })
+    refute status.success?, output
+    assert_match(/only_replies_to_remembered_requests_count_test.*failed/, output)
   end
 
   private
 
-  def eunit(sources)
+  def eunit(replaced)
     Dir.mktmpdir('erx-cmd-net-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE, '-I', NET_INCLUDE, '-pa', work, '-o', work,
-                                       *sources, stdin_data: '')
-      return [output, status] unless status.success?
-
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-eval', 'halt(case eunit:test(erx_cmd_net_tests) of ok -> 0; _ -> 1 end).',
                       chdir: work, stdin_data: '')

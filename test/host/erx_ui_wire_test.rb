@@ -7,6 +7,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 require_relative '../../tools/lib/erx/web_stage'
 
 # ui.txt's binary form (docs/design-abi.md, "Widget format"), generated into
@@ -28,8 +29,7 @@ class ErxUIWireTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
   GENERATED = File.join(ROOT, Erx::Generated::OUTPUT)
-  MODULES = [Erx::ABI::UIWireEmitter::ERLANG_PATH, Erx::ABI::UIEmitter::ERLANG_PATH].freeze
-  TESTS = File.join(ROOT, 'test/erlang/erx_ui_wire_tests.erl')
+  TESTS = %w[test/erlang/erx_ui_wire_tests.erl].freeze
   HARNESS = File.join(ROOT, 'test/fixtures/erx_ui_wire_harness.c')
   UI = Erx::ABI::Generator.plan(root: ROOT).schema.ui
 
@@ -226,10 +226,7 @@ class ErxUIWireTest < Minitest::Test
 
   def in_erlang
     Dir.mktmpdir('erx-ui-wire-test') do |work|
-      sources = MODULES.map do |path|
-        File.join(work, File.basename(path)).tap { |target| File.binwrite(target, File.binread(File.join(GENERATED, path))) }
-      end
-      run!(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *sources, TESTS, chdir: work)
+      ErlangBuild.compile(work, applications: %w[erx], tests: TESTS)
       yield work
     end
   end

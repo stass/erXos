@@ -8,6 +8,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 require_relative '../../tools/lib/erx/web_stage'
 
 # The web protocol's two codecs (docs/design-web.md, "Verification and
@@ -23,8 +24,7 @@ require_relative '../../tools/lib/erx/web_stage'
 class ErxWebProtoTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
-  GENERATED = File.join(ROOT, Erx::Generated::OUTPUT)
-  TESTS = File.join(ROOT, 'test/erlang/erx_web_proto_tests.erl')
+  TESTS = %w[test/erlang/erx_web_proto_tests.erl].freeze
   WEB = Erx::ABI::Generator.plan(root: ROOT).schema.web
   # The sources the protocol hash covers, listed here independently of the
   # generator, so a generator that drops one fails.
@@ -200,9 +200,7 @@ class ErxWebProtoTest < Minitest::Test
 
   def in_erlang
     Dir.mktmpdir('erx-web-proto-test') do |work|
-      source = File.join(work, 'erx_web_proto.erl')
-      File.binwrite(source, File.binread(File.join(GENERATED, Erx::ABI::WebEmitter::ERLANG_PATH)))
-      run!(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, source, TESTS, chdir: work)
+      ErlangBuild.compile(work, applications: %w[erx], tests: TESTS)
       yield work
     end
   end

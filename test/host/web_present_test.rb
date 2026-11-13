@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../fixtures/erlang_build'
 require_relative '../../tools/lib/erx/web_stage'
 
 # The client's erx: encoder and presentation path table against erx_present
@@ -18,11 +19,8 @@ require_relative '../../tools/lib/erx/web_stage'
 # text's %2E is escaped again in the link, so no link holds a dot segment.
 class WebPresentTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  Erx::Generated.ensure(root: ROOT)
-  SOURCES = %w[build/gen/erlang/apps/erx/src/generated/erx_schema.erl
-               build/gen/erlang/apps/erx/src/generated/erx_present.erl
-               erlang/apps/erx_files/src/erx_procfs_core.erl
-               test/erlang/erx_web_present_corpus.erl].map { |path| File.join(ROOT, path) }.freeze
+  APPLICATIONS = %w[erx erx_files].freeze
+  TESTS = %w[test/erlang/erx_web_present_corpus.erl].freeze
   # web.txt's web_segment_max: a longer entry name has no route (TODO.md).
   SEGMENT_MAX = 256
   ERX_KEPT = 'const ERX_KEPT = /[A-Za-z0-9_+,:=@./-]/;'
@@ -31,9 +29,7 @@ class WebPresentTest < Minitest::Test
 
   def corpus
     Dir.mktmpdir('erx-web-present') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror',
-                                       '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'), '-o', work, *SOURCES, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-s', 'erx_web_present_corpus', 'run', chdir: work, stdin_data: '')
       assert status.success?, output

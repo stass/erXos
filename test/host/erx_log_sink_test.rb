@@ -5,19 +5,21 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # The log sink on stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies):
 # test/erlang/erx_log_sink_tests.erl, the EUnit cases of erx_log_h's records and of the
 # lines erx_console_log renders for them, and logger_simple_h's early log (edit 43 of
-# docs/design-runtime.md), compiled from the tree and loaded in place of stock's, which
+# docs/design-runtime.md), compiled from the tree (outside the applications, it is a
+# test module of its own run) and loaded in place of stock's, which
 # must show an event with a tab, an escape sequence and a newline as one line of tokens.
 class ErxLogSinkTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  Erx::Generated.ensure(root: ROOT)
-  ESCAPE = %w[build/gen/erlang/apps/erx/src/erx_text_tables.erl erlang/apps/erx/src/erx_text.erl].freeze
-  SOURCES = [*ESCAPE, 'erlang/apps/erx/src/erx_console_log.erl', 'erlang/apps/erx/src/erx_log_h.erl',
-             'test/erlang/erx_log_sink_tests.erl'].freeze
+  # The application the sink lives in, compiled whole (ErlangBuild).
+  APPLICATIONS = %w[erx].freeze
+  SINK_TESTS = %w[test/erlang/erx_log_sink_tests.erl].freeze
+  # The tree's logger_simple_h, which stands on erx_text from the application.
+  SIMPLE_HANDLER = %w[otp/lib/kernel/src/logger_simple_h.erl].freeze
   # Replaces stock's logger_simple_h with the tree's, makes it the only handler, logs one
   # event and waits for the handler's process to print it.
   SIMPLE_EVAL = <<~ERLANG
@@ -32,7 +34,7 @@ class ErxLogSinkTest < Minitest::Test
 
   def test_sink_cases_pass_under_eunit
     Dir.mktmpdir('erx-log-sink-test') do |work|
-      compile(work, SOURCES)
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: SINK_TESTS)
       output = run_erl(work, 'halt(case eunit:test(erx_log_sink_tests, [verbose]) of ok -> 0; _ -> 1 end).')
       assert_match(/All \d+ tests passed/, output)
     end
@@ -40,7 +42,7 @@ class ErxLogSinkTest < Minitest::Test
 
   def test_the_early_log_shows_an_event_on_one_escaped_line
     Dir.mktmpdir('erx-log-simple-test') do |work|
-      compile(work, [*ESCAPE, 'otp/lib/kernel/src/logger_simple_h.erl'])
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: SIMPLE_HANDLER)
       output = run_erl(work, SIMPLE_EVAL)
       assert_match(/ error: tab<U\+0009>here esc<U\+001B>\[31mred nl, end\r\n/, output)
       refute_includes output, "\e"
@@ -48,12 +50,6 @@ class ErxLogSinkTest < Minitest::Test
   end
 
   private
-
-  def compile(work, sources)
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work,
-                                     *sources.map { |source| File.join(ROOT, source) }, stdin_data: '')
-    assert status.success?, output
-  end
 
   def run_erl(work, eval)
     output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

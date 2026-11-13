@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_shell_eval_tests.erl, the EUnit cases of the command shell's
 # evaluator (docs/design-shell.md, "The language"), against erx_shell_eval, the parser
@@ -13,15 +14,14 @@ require 'tmpdir'
 # with plan9port's rc is test/integration/erx_shell_corpus_test.rb's.
 class ErxShellEvalTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SOURCES = %w[erlang/apps/erx_shell/src/erx_shell_lex.erl erlang/apps/erx_shell/src/erx_shell_parse.erl
-               erlang/apps/erx_shell/src/erx_shell_glob.erl erlang/apps/erx_shell/src/erx_shell_eval.erl
-               test/erlang/erx_shell_fake_runner.erl
-               test/erlang/erx_shell_eval_tests.erl].map { |path| File.join(ROOT, path) }.freeze
+  # The application the suite exercises, compiled whole (ErlangBuild), and the suite with
+  # its fake runner.
+  APPLICATIONS = %w[erx erx_shell].freeze
+  TESTS = %w[test/erlang/erx_shell_fake_runner.erl test/erlang/erx_shell_eval_tests.erl].freeze
 
   def test_evaluator_cases_pass_under_eunit
     Dir.mktmpdir('erx-shell-eval-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *SOURCES, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', 'halt(case eunit:test(erx_shell_eval_tests) of ok -> 0; _ -> 1 end).',

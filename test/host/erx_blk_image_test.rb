@@ -8,7 +8,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/manifest'
 require_relative '../fixtures/manifest_context'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_blk_image_tests.erl, the EUnit cases of the windows on the booted
 # slot's EROFS images and an image window's refusal of writes, against erx_blk_image,
@@ -18,10 +18,9 @@ require_relative '../../tools/lib/erx/generated'
 # release image where the fixture puts it, in two extents, and with no window on it.
 class ErxBlkImageTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources and headers named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
-  SOURCES = %w[build/gen/erlang/apps/erx/src/generated/erx_manifest.erl erlang/apps/erx_blk/src/erx_blk_image.erl erlang/apps/erx_blk/src/erx_blk_window.erl erlang/apps/erx_blk/src/erx_blk_table.erl
-               test/erlang/erx_blk_image_tests.erl].freeze
+  # The applications the cases exercise, compiled whole (ErlangBuild), and the cases.
+  APPLICATIONS = %w[erx erx_blk].freeze
+  TESTS = %w[test/erlang/erx_blk_image_tests.erl].freeze
   TWO_EXTENTS = [{ 'slot_offset' => 128 << 20, 'length' => 4096 },
                  { 'slot_offset' => (128 << 20) + 8192, 'length' => 4096 }].freeze
 
@@ -37,9 +36,7 @@ class ErxBlkImageTest < Minitest::Test
   def test_image_window_cases_pass_under_eunit
     Dir.mktmpdir('erx-blk-image-test') do |work|
       manifests.each { |name, bytes| File.binwrite(File.join(work, "manifest-#{name}"), bytes) }
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'),
-                                       '-o', work, *SOURCES.map { |source| File.join(ROOT, source) }, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
       output, status = Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', 'halt(case eunit:test(erx_blk_image_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                                        chdir: work, stdin_data: '')

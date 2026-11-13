@@ -8,6 +8,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # The file protocol's 9P2000.L codec: test/erlang/erx_9p_tests.erl, the EUnit cases of
 # the generated erx_9p, run on stock's emulator (ERX_ERL and ERX_ERLC, which make check
@@ -20,11 +21,16 @@ class Erx9pTest < Minitest::Test
   Erx::Generated.ensure(root: ROOT)
   # Generated files, by the paths the generator names them; build/gen holds them there.
   CODEC = 'erlang/apps/erx/src/generated/erx_9p.erl'
-  GRAMMAR = 'otp/erts/preloaded/src/erx_9p_grammar.erl'
+  # The grammar is a module of the preloaded set, not of an application, so the suite compiles it
+  # beside the codec, which the applications hold as ErlangApps spells it.
+  GRAMMAR = File.join(Erx::Generated::OUTPUT, 'otp/erts/preloaded/src/erx_9p_grammar.erl')
+  BUILT_CODEC = File.join(Erx::Generated::OUTPUT, CODEC)
+  APPLICATIONS = %w[erx].freeze
+  TESTS = [GRAMMAR, 'test/erlang/erx_9p_tests.erl'].freeze
   TABLE = 'abi/protocols/9p.txt'
 
   def test_codec_cases_pass_under_eunit
-    output, status = eunit(File.binread(File.join(ROOT, Erx::Generated::OUTPUT, CODEC)))
+    output, status = eunit(File.binread(File.join(ROOT, BUILT_CODEC)))
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
   end
@@ -103,12 +109,7 @@ class Erx9pTest < Minitest::Test
 
   def eunit(codec_text)
     Dir.mktmpdir('erx-9p-test') do |work|
-      codec_path = File.join(work, 'erx_9p.erl')
-      File.binwrite(codec_path, codec_text)
-      output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, codec_path,
-                                       File.join(ROOT, Erx::Generated::OUTPUT, GRAMMAR), File.join(ROOT, 'test/erlang/erx_9p_tests.erl'),
-                                       stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: { BUILT_CODEC => codec_text })
       Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-eval', 'halt(case eunit:test(erx_9p_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')

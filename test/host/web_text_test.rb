@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/line_escape'
+require_relative '../fixtures/erlang_build'
 require_relative '../../tools/lib/erx/web_stage'
 
 # The web client's line escape and /proc encoder against their twins
@@ -19,10 +20,7 @@ require_relative '../../tools/lib/erx/web_stage'
 # an invalid byte with U+FFFD, must disagree on 0xC0.
 class WebTextTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  Erx::Generated.ensure(root: ROOT)
-  SOURCES = %w[build/gen/erlang/apps/erx/src/erx_text_tables.erl erlang/apps/erx/src/erx_text.erl
-               build/gen/erlang/apps/erx/src/generated/erx_schema.erl
-               erlang/apps/erx_files/src/erx_procfs_core.erl].map { |path| File.join(ROOT, path) }.freeze
+  APPLICATIONS = %w[erx erx_files].freeze
   # Reads x-prefixed hexadecimal lines and writes each input's escape and entry name the same way.
   ERLANG = <<~ERL.gsub("\n", ' ')
     {ok, In} = file:read_file("in.txt"),
@@ -48,9 +46,7 @@ class WebTextTest < Minitest::Test
 
   def erlang(inputs)
     Dir.mktmpdir('erx-web-text') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror',
-                                       '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'), '-o', work, *SOURCES, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS)
       File.write(File.join(work, 'in.txt'), lines(inputs))
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', ERLANG, chdir: work, stdin_data: '')

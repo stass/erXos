@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_source_tests.erl, the EUnit cases of erx_source, the
 # lines of source a process is at, and of erx:source/1, against the modules
@@ -14,16 +14,11 @@ require_relative '../../tools/lib/erx/generated'
 # into a directory under the working directory, a fresh one for each run.
 class ErxSourceTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
-  SOURCES = [Erx::Generated.path('erlang/apps/erx/src/erx_text_tables.erl', root: ROOT),
-             *%w[erlang/apps/erx/src/erx_text.erl erlang/apps/erx/src/erx_source.erl erlang/apps/erx/src/erx.erl
-                 test/erlang/erx_source_tests.erl].map { |path| File.join(ROOT, path) }].freeze
+  TESTS = %w[test/erlang/erx_source_tests.erl].freeze
 
   def test_source_cases_pass_under_eunit
     Dir.mktmpdir('erx-source-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *SOURCES, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: %w[erx], tests: TESTS)
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', 'halt(case eunit:test(erx_source_tests) of ok -> 0; _ -> 1 end).',

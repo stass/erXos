@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_text_tests.erl, the EUnit cases of erx_text's line
 # escape and field escape,
@@ -14,17 +14,12 @@ require_relative '../../tools/lib/erx/generated'
 # test/host/line_escape_test.rb holds the host tool's twin to.
 class ErxTextTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources and headers named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
+  TESTS = %w[test/erlang/erx_text_tests.erl].freeze
   VECTORS = File.join(ROOT, 'test/fixtures/line_escape_vectors.json')
-  SOURCES = %w[build/gen/erlang/apps/erx/src/erx_text_tables.erl erlang/apps/erx/src/erx_text.erl
-               test/erlang/erx_text_tests.erl]
-            .map { |path| File.join(ROOT, path) }.freeze
 
   def test_text_cases_pass_under_eunit
     Dir.mktmpdir('erx-text-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *SOURCES, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: %w[erx], tests: TESTS)
 
       output, status = Open3.capture2e({ 'ERX_TEXT_VECTORS' => VECTORS },
                                        'gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

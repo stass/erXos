@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_ramfs_core_tests.erl, the EUnit cases of the pure tree behind
 # /tmp, against erx_ramfs_core compiled from source on stock's emulator (ERX_ERL and
@@ -13,8 +14,11 @@ require 'tmpdir'
 # shows that case runs the code the fault breaks.
 class ErxRamfsCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_files/src/erx_ramfs_core.erl')
-  TESTS_SOURCE = File.join(ROOT, 'test/erlang/erx_ramfs_core_tests.erl')
+  # The application holding the module (compiled whole, ErlangBuild), the module and the suite.
+  APPLICATIONS = %w[erx_files].freeze
+  MODULE = 'erlang/apps/erx_files/src/erx_ramfs_core.erl'
+  MODULE_SOURCE = File.join(ROOT, MODULE)
+  TESTS = %w[test/erlang/erx_ramfs_core_tests.erl].freeze
 
   Seed = Data.define(:fault, :anchor, :replacement, :catching_case)
 
@@ -60,7 +64,7 @@ class ErxRamfsCoreTest < Minitest::Test
   ].freeze
 
   def test_core_cases_pass_under_eunit
-    output, status = eunit(File.binread(MODULE_SOURCE), warnings_as_errors: true)
+    output, status = eunit(File.binread(MODULE_SOURCE))
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
   end
@@ -69,7 +73,7 @@ class ErxRamfsCoreTest < Minitest::Test
     source = File.binread(MODULE_SOURCE)
     SEEDS.each do |seed|
       assert source.include?(seed.anchor), "no anchor for #{seed.fault} in #{MODULE_SOURCE}"
-      output, status = eunit(source.sub(seed.anchor, seed.replacement), warnings_as_errors: false)
+      output, status = eunit(source.sub(seed.anchor, seed.replacement))
       refute status.success?, "#{seed.fault} passed every case:\n#{output}"
       assert_match(/#{seed.catching_case}\.\.\.(\[[^\]]*\] )?\*failed\*/, output,
                    "#{seed.catching_case} did not catch #{seed.fault}")
@@ -78,15 +82,9 @@ class ErxRamfsCoreTest < Minitest::Test
 
   private
 
-  def eunit(module_text, warnings_as_errors:)
+  def eunit(module_text)
     Dir.mktmpdir('erx-ramfs-core-test') do |work|
-      module_path = File.join(work, 'erx_ramfs_core.erl')
-      File.binwrite(module_path, module_text)
-      flags = warnings_as_errors ? ['-Werror'] : []
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *flags, '-o', work, module_path, TESTS_SOURCE,
-                                       stdin_data: '')
-      return [output, status] unless status.success?
-
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: { MODULE => module_text })
       Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-eval', 'halt(case eunit:test(erx_ramfs_core_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')

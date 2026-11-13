@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../fixtures/erlang_build'
 
 # Runs the EUnit cases of a domain's connection agent (docs/design-runtime.md,
 # "Connections in ERTS"), test/erlang/erx_connections_tests.erl, compiled with
@@ -12,14 +13,12 @@ require 'tmpdir'
 # supplies): the agent's answers to its domain pid's records over stand-in ports,
 # its failure paths and the records it drops.
 class ErxConnectionsTest < Minitest::Test
-  ROOT = File.expand_path('../..', __dir__)
-  SOURCES = [File.join(ROOT, 'erlang/apps/erx/src/erx_connections.erl'),
-             File.join(ROOT, 'test/erlang/erx_connections_tests.erl')].freeze
+  APPLICATIONS = %w[erx].freeze
+  TESTS = %w[test/erlang/erx_connections_tests.erl].freeze
 
   def test_agent_cases_pass_under_eunit
     Dir.mktmpdir('erx-connections-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *SOURCES, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell',
                                        '-pa', work, '-eval',

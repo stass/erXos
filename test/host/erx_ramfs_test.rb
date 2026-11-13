@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_ramfs_tests.erl, the EUnit cases of /tmp's grant over its real tree,
 # on stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies) against the sources
@@ -14,15 +14,12 @@ require_relative '../../tools/lib/erx/generated'
 # it, which shows that case runs the code the fault breaks.
 class ErxRamfsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources and headers named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
   APP = 'erlang/apps/erx_files/src'
-  SOURCES = %W[
-    build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
-    #{APP}/erx_fs_grant.erl #{APP}/erx_fs.erl #{APP}/erx_fs_version.erl
-    #{APP}/erx_ramfs.erl #{APP}/erx_ramfs_core.erl
-  ].freeze
-  TESTS = 'test/erlang/erx_ramfs_tests.erl'
+  # The application the suite exercises, compiled whole (ErlangBuild).
+  APPLICATIONS = %w[erx_files].freeze
+  # The suite, after the generated 9P grammar: a preloaded module, outside every application,
+  # that erx_fs_grant calls, compiled here as a test source.
+  TESTS = %w[build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl test/erlang/erx_ramfs_tests.erl].freeze
   # EUnit's default allowance for a case is 5 seconds; each case gets this many times that.
   # It exceeds the longest wait a case makes (?REPLY_BOUND and ?CONDITION_BOUND in the
   # tests, which add up along a case), so a host starved of CPU is not read as a hang, and
@@ -83,25 +80,12 @@ class ErxRamfsTest < Minitest::Test
 
   def eunit(replaced)
     Dir.mktmpdir('erx-ramfs-test') do |work|
-      paths = SOURCES.map do |source|
-        next File.join(ROOT, source) unless replaced.key?(source)
-
-        File.join(work, File.basename(source)).tap { |path| File.write(path, replaced.fetch(source)) }
-      end
-      compile(work, paths, includes: [File.join(ROOT, 'build/gen/erlang/apps/erx/include')], strict: replaced.empty?)
-      compile(work, [File.join(ROOT, TESTS)], includes: [File.join(ROOT, 'build/gen/erlang/apps/erx/include')], strict: true)
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       Open3.capture2e('gtimeout', '-k', '10', RUN_DEADLINE.to_s, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       'logger:set_primary_config(level, none), ' \
                       "halt(case eunit:test(erx_ramfs_tests, [verbose, {scale_timeouts, #{TIMEOUT_SCALE}}]) " \
                       'of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')
     end
-  end
-
-  def compile(work, paths, includes: [], strict:)
-    output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERLC'), *(strict ? ['-Werror'] : []), '-pa', work,
-                                     *includes.flat_map { |directory| ['-I', directory] }, '-o', work, *paths,
-                                     stdin_data: '')
-    assert status.success?, "erlc exit #{status.exitstatus} (124 is the deadline)\n#{output}"
   end
 end

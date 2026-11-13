@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../fixtures/generated_tree'
+require_relative '../fixtures/erlang_build'
 
 # erx_pipe_srv, the process that performs erx_pipe:step/2's actions
 # (docs/design-pipes.md, "The pipe server"), against a fake pipe NIF:
@@ -13,15 +13,14 @@ require_relative '../fixtures/generated_tree'
 # fail the EUnit case named beside it.
 class ErxPipeSrvTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  Erx::Generated.ensure(root: ROOT)
-  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-  SERVER = File.join(ROOT, 'erlang/apps/erx/src/erx_pipe_srv.erl')
-  SOURCES = [File.join(ROOT, 'erlang/apps/erx/src/erx_pipe.erl'),
-             File.join(ROOT, 'test/erlang/erx_pipe_fake_nif.erl'),
-             File.join(ROOT, 'test/erlang/erx_pipe_srv_tests.erl')].freeze
+  # The application, compiled whole (ErlangBuild); the fake NIF and the suite; the server,
+  # whose text the seeded faults replace.
+  APPLICATIONS = %w[erx].freeze
+  TESTS = %w[test/erlang/erx_pipe_fake_nif.erl test/erlang/erx_pipe_srv_tests.erl].freeze
+  SERVER = 'erlang/apps/erx/src/erx_pipe_srv.erl'
 
   def test_the_server_performs_the_steps
-    text, ok = run_eunit(File.read(SERVER))
+    text, ok = run_eunit(File.read(File.join(ROOT, SERVER)))
     assert ok, text
     assert_match(/All \d+ tests passed/, text)
   end
@@ -40,7 +39,7 @@ class ErxPipeSrvTest < Minitest::Test
   }.freeze
 
   def test_seeded_faults_are_caught
-    source = File.read(SERVER)
+    source = File.read(File.join(ROOT, SERVER))
     MUTANTS.each do |name, (expected, original, replacement)|
       assert_equal 1, source.scan(original).size, "mutant #{name} must edit exactly one place"
       text, ok = run_eunit(source.sub(original) { replacement })
@@ -51,14 +50,10 @@ class ErxPipeSrvTest < Minitest::Test
 
   private
 
+  # The cases' text and whether they passed, with the server compiled from server's text.
   def run_eunit(server)
     Dir.mktmpdir('erx-pipe-srv-test') do |work|
-      path = File.join(work, 'erx_pipe_srv.erl')
-      File.write(path, server)
-      text, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE, '-o', work,
-                                     path, *SOURCES, stdin_data: '')
-      return [text, false] unless status.success?
-
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: { SERVER => server })
       eval_text = 'halt(case eunit:test(erx_pipe_srv_tests, [verbose]) of ok -> 0; _ -> 1 end).'
       text, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell',
                                      '-pa', work, '-eval', eval_text, chdir: work, stdin_data: '')

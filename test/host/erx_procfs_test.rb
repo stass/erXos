@@ -5,38 +5,19 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # /proc (docs/design-live.md, "The /proc tree"): test/erlang/erx_procfs_tests.erl runs on
 # stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies) against the sources as
 # they are, with the inspector and its renderer, and against each seeded fault below, where
-# the named case must fail. erx_object_info is compiled but its NIF is never loaded: no case
-# reads a kernel record.
+# the named case must fail. erx_object_info and erx_log are compiled but their NIFs are never
+# loaded: no case reads a kernel record, and a process's log record, which listing the
+# processes asks for, answers {error, failed}.
 class ErxProcfsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources and headers named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
-  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-  # The sources below that build/gen holds rather than the tree.
-  GENERATED = %w[erlang/apps/erx/src/generated/erx_schema.erl erlang/apps/erx/src/erx_text_tables.erl].freeze
-  # erx_fs first: the tree names it as its behaviour.
-  BEHAVIOUR = %w[erlang/apps/erx_files/src/erx_fs.erl].freeze
-  SOURCES = %w[
-    erlang/apps/erx/src/generated/erx_schema.erl
-    erlang/apps/erx/src/erx_text_tables.erl
-    erlang/apps/erx/src/erx_text.erl
-    erlang/apps/erx/src/erx_object_info.erl
-    erlang/apps/erx/src/erx_kernel_records.erl
-    erlang/apps/erx/src/erx_process_records.erl
-    erlang/apps/erx/src/erx.erl
-    erlang/apps/erx/src/erx_facets.erl
-    erlang/apps/erx/src/erx_inspect_worker.erl
-    erlang/apps/erx/src/erx_inspector.erl
-    erlang/apps/erx_shell/src/erx_render.erl
-    erlang/apps/erx_files/src/erx_procfs_core.erl
-    erlang/apps/erx_files/src/erx_procfs.erl
-    test/erlang/erx_procfs_tests.erl
-  ].freeze
+  # The applications the suite exercises, compiled whole (ErlangBuild), and the suite.
+  APPLICATIONS = %w[erx erx_files erx_shell].freeze
+  TESTS = %w[test/erlang/erx_procfs_tests.erl].freeze
   CORE = 'erlang/apps/erx_files/src/erx_procfs_core.erl'
   TREE = 'erlang/apps/erx_files/src/erx_procfs.erl'
 
@@ -103,7 +84,7 @@ class ErxProcfsTest < Minitest::Test
 
   FAULTS.each_with_index do |fault, index|
     define_method(:"test_seeded_fault_#{index}_is_caught") do
-      original = File.read(located(fault.file))
+      original = File.read(File.join(ROOT, fault.file))
       assert_equal 1, original.scan(fault.from).size, "#{fault.name}: passage not found once"
       output, status = eunit({ fault.file => original.sub(fault.from) { fault.to } })
       refute status.success?, "#{fault.name}: the tests passed\n#{output}"
@@ -119,27 +100,10 @@ class ErxProcfsTest < Minitest::Test
   # Compiles the sources, with any replaced by the given text, and runs the suite.
   def eunit(replaced)
     Dir.mktmpdir('erx-procfs-test') do |work|
-      compile(work, BEHAVIOUR.map { |source| File.join(ROOT, source) })
-      compile(work, SOURCES.map { |source| source_path(work, source, replaced) })
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       'halt(case eunit:test(erx_procfs_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')
     end
-  end
-
-  def source_path(work, source, replaced)
-    return located(source) unless replaced.key?(source)
-
-    File.join(work, File.basename(source)).tap { |path| File.write(path, replaced.fetch(source)) }
-  end
-
-  # Where a source of SOURCES is: build/gen for a generated one, otherwise the tree.
-  def located(source) =
-    GENERATED.include?(source) ? Erx::Generated.path(source, root: ROOT) : File.join(ROOT, source)
-
-  def compile(work, paths)
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work, '-I', INCLUDE,
-                                     '-o', work, *paths, stdin_data: '')
-    assert status.success?, output
   end
 end

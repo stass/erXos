@@ -6,7 +6,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/hostlink_frame'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # The host link's frame layer on both sides (docs/design-live.md, "Host link frames"): the
 # Ruby layer, tools/lib/erx/hostlink_frame.rb, against the shared vectors of
@@ -18,12 +18,12 @@ require_relative '../../tools/lib/erx/generated'
 # test/erlang/host_bytes/erx_bytes.erl standing in for the CRC BIF.
 class HostlinkFrameTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources and headers named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
   F = Erx::HostlinkFrame
   VECTORS = File.join(ROOT, 'test/fixtures/hostlink_frames.txt')
-  ERLANG = %w[erlang/apps/erx_hostlink/src/erx_hostlink_frame.erl erlang/apps/erx_hostlink/src/erx_hostlink_stream.erl
-              test/erlang/host_bytes/erx_bytes.erl].map { |path| File.join(ROOT, path) }.freeze
+  APPLICATIONS = %w[erx erx_hostlink].freeze
+  # The stand-in for erx's erx_bytes, whose CRC BIF is a NIF: compiled after the applications, it
+  # replaces their erx_bytes.
+  BYTES_STAND_IN = 'test/erlang/host_bytes/erx_bytes.erl'
   SESSION = (0..15).to_a.pack('C*').freeze
 
   def bytes(hex) = hex == '-' ? ''.b : [hex].pack('H*')
@@ -169,7 +169,7 @@ class HostlinkFrameTest < Minitest::Test
 
   def test_erlang_layer_passes_the_vectors_under_eunit
     Dir.mktmpdir('erx-hostlink-frame-test') do |work|
-      compile(work, File.join(ROOT, 'test/erlang/erx_hostlink_frame_tests.erl'))
+      compile(work, 'test/erlang/erx_hostlink_frame_tests.erl')
       output, status = erl(work, '-eval', 'halt(case eunit:test(erx_hostlink_frame_tests) of ok -> 0; _ -> 1 end).')
       assert status.success?, output
       assert_match(/All \d+ tests passed/, output)
@@ -189,7 +189,7 @@ class HostlinkFrameTest < Minitest::Test
     input = hello + wire.join + sender.message(:cast, 'bye', id: 0, target: 0).join
 
     answers = Dir.mktmpdir('erx-hostlink-cross') do |work|
-      compile(work, File.join(ROOT, 'test/erlang/erx_hostlink_cross.erl'))
+      compile(work, 'test/erlang/erx_hostlink_cross.erl')
       File.binwrite(File.join(work, 'in'), input)
       output, status = erl(work, '-run', 'erx_hostlink_cross', 'run', 'in', 'out', '7', '-s', 'init', 'stop')
       assert status.success?, output
@@ -215,11 +215,7 @@ class HostlinkFrameTest < Minitest::Test
 
   private
 
-  def compile(work, *extra)
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'),
-                                     '-o', work, *ERLANG, *extra, stdin_data: '')
-    assert status.success?, output
-  end
+  def compile(work, test) = ErlangBuild.compile(work, applications: APPLICATIONS, tests: [BYTES_STAND_IN, test])
 
   def erl(work, *arguments)
     Open3.capture2e({ 'ERX_HOSTLINK_VECTORS' => VECTORS }, 'gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'),

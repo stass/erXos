@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_hostlink_9p_exhaustive.erl, which enumerates every interleaving of a
 # host and a grant around the host link's 9P bridge core over a small bound, on stock's
@@ -16,13 +16,11 @@ require_relative '../../tools/lib/erx/generated'
 # machine").
 class ErxHostlink9pExhaustiveTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources and headers named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
-  SOURCES = %w[otp/erts/preloaded/src/erx_9p_grammar.erl erlang/apps/erx/src/generated/erx_9p.erl]
-            .map { |source| Erx::Generated.path(source, root: ROOT) }.freeze
-  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-  CORE = File.join(ROOT, 'erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl')
-  TARGET = File.join(ROOT, 'test/erlang/erx_hostlink_9p_exhaustive.erl')
+  # The application holding the core, compiled whole (ErlangBuild), the generated grammar
+  # (in build/gen, outside the applications) and the enumeration.
+  APPLICATIONS = %w[erx erx_hostlink].freeze
+  TESTS = %w[build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl test/erlang/erx_hostlink_9p_exhaustive.erl].freeze
+  CORE = 'erlang/apps/erx_hostlink/src/erx_hostlink_9p.erl'
   DEADLINE_SECONDS = '600'
 
   # Each fault: the property it must break, as the failures that report it, the text of the
@@ -58,14 +56,14 @@ class ErxHostlink9pExhaustiveTest < Minitest::Test
   }.freeze
 
   def test_every_interleaving_keeps_the_bridges_promises
-    output, status = enumerate(File.binread(CORE))
+    output, status = enumerate(File.binread(File.join(ROOT, CORE)))
     assert status.success?, output
     assert_equal 5, output.scan(/^exhaustive: .* traces, \d+ steps ok$/).size, output
   end
 
   FAULTS.each do |name, fault|
     define_method("test_the_enumeration_catches_#{name}") do
-      source = File.binread(CORE)
+      source = File.binread(File.join(ROOT, CORE))
       assert_includes source, fault.text
       output, status = enumerate(source.sub(fault.text, fault.broken))
       refute status.success?, "a bridge with #{name} passed:\n#{output}"
@@ -77,11 +75,7 @@ class ErxHostlink9pExhaustiveTest < Minitest::Test
 
   def enumerate(core_text)
     Dir.mktmpdir('erx-hostlink-9p-exhaustive') do |work|
-      core = File.join(work, 'erx_hostlink_9p.erl')
-      File.binwrite(core, core_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE,
-                                       '-o', work, *SOURCES, core, TARGET, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: { CORE => core_text })
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_hostlink_9p_exhaustive', 'run', '-s', 'init', 'stop', chdir: work, stdin_data: '')
     end

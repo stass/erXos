@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/vt_oracle'
 require_relative '../vt/corpus'
@@ -20,14 +21,12 @@ require_relative '../vt/corpus'
 class ErxVtOracleTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
-  SOURCE = File.join(ROOT, 'erlang/apps/erx_display/src/erx_vt.erl')
+  VT = 'erlang/apps/erx_display/src/erx_vt.erl'
+  SOURCE = File.join(ROOT, VT)
   # A CUP whose column defaults to 2, not 1, which the per-row cases must catch.
   CUP = 'move(VT1, Row, arg(tl_or_empty(Ps), 1))'
   CUP_BROKEN = 'move(VT1, Row, arg(tl_or_empty(Ps), 2))'
-  SOURCES = [*%w[erlang/apps/erx_display/src/erx_vt_width.erl erlang/apps/erx/src/generated/erx_present.erl
-                  erlang/apps/erx/src/generated/erx_schema.erl]
-               .map { |path| Erx::Generated.path(path, root: ROOT) },
-             File.join(ROOT, 'test/erlang/erx_vt_oracle.erl')].freeze
+  TESTS = %w[test/erlang/erx_vt_oracle.erl].freeze
   DIFFERENCES = File.join(ROOT, 'test/vt/differences.txt')
   KINDS = %w[documented upstream].freeze
   DEADLINE = '300'
@@ -41,8 +40,7 @@ class ErxVtOracleTest < Minitest::Test
       cases = VtCorpus.cases
       script = File.join(work, 'corpus.script')
       File.binwrite(script, VtCorpus.script(cases))
-      File.binwrite(File.join(work, 'erx_vt.erl'), module_text)
-      { names: cases.map(&:name), oracle: split(oracle(script)), erx_vt: split(erx_vt(script, work)) }
+      { names: cases.map(&:name), oracle: split(oracle(script)), erx_vt: split(erx_vt(script, work, module_text)) }
     end
   end
 
@@ -56,10 +54,8 @@ class ErxVtOracleTest < Minitest::Test
     output
   end
 
-  def self.erx_vt(script, work)
-    output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERLC'), '-Werror', '-o', work,
-                                     File.join(work, 'erx_vt.erl'), *SOURCES, stdin_data: '')
-    raise "erlc failed: #{output}" unless status.success?
+  def self.erx_vt(script, work, module_text)
+    ErlangBuild.compile(work, applications: %w[erx erx_display], tests: TESTS, replaced: { VT => module_text })
 
     dumped = File.join(work, 'erx_vt.dumps')
     output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

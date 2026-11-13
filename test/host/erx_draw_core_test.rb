@@ -5,8 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/abi'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_draw_core_tests.erl, the exploration of the draw
 # protocol's pure core and its plan/2 cases, against erx_draw_core, the
@@ -16,11 +15,9 @@ require_relative '../../tools/lib/erx/generated'
 # of erx_draw_core, must fail the case named for it.
 class ErxDrawCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  Erx::Generated.ensure(root: ROOT)
-  MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_display/src/erx_draw_core.erl')
-  OTHER_SOURCES = [File.join(ROOT, Erx::Generated::OUTPUT, Erx::ABI::DrawEmitter::ERLANG_PATH),
-                   File.join(ROOT, 'erlang/apps/erx_display/src/erx_draw_image.erl'),
-                   File.join(ROOT, 'test/erlang/erx_draw_core_tests.erl')].freeze
+  APPLICATIONS = %w[erx_display].freeze
+  MODULE_SOURCE = 'erlang/apps/erx_display/src/erx_draw_core.erl'
+  TESTS = %w[test/erlang/erx_draw_core_tests.erl].freeze
   DEADLINE_SECONDS = '600'
 
   Seed = Data.define(:fault, :anchor, :replacement, :catching_case)
@@ -41,18 +38,18 @@ class ErxDrawCoreTest < Minitest::Test
   ].freeze
 
   def test_core_cases_pass_under_eunit
-    output, status = eunit(File.binread(MODULE_SOURCE), warnings_as_errors: true)
+    output, status = eunit({})
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
   end
 
   def test_each_seeded_fault_fails_its_case
-    source = File.binread(MODULE_SOURCE)
+    source = File.binread(File.join(ROOT, MODULE_SOURCE))
     SEEDS.each do |seed|
       assert_equal 1, source.scan(seed.anchor).size, "anchor for #{seed.fault} is not once in #{MODULE_SOURCE}"
     end
     runs = SEEDS.map do |seed|
-      Thread.new { [seed, *eunit(source.sub(seed.anchor, seed.replacement), warnings_as_errors: false)] }
+      Thread.new { [seed, *eunit({ MODULE_SOURCE => source.sub(seed.anchor, seed.replacement) })] }
     end
     runs.map(&:value).each do |seed, output, status|
       refute status.success?, "#{seed.fault} passed every case:\n#{output}"
@@ -65,15 +62,10 @@ class ErxDrawCoreTest < Minitest::Test
   # EUnit names a plain case by its function and a generator's case by the fun inside it.
   def failed_case(name) = %r{#{Regexp.escape(name)}(/0-fun-\d+-)?\.\.\.(\[[^\]]*\] )?\*failed\*}
 
-  def eunit(module_text, warnings_as_errors:)
+  # The cases' output and status, over the applications with the sources of replaced in place of the tree's.
+  def eunit(replaced)
     Dir.mktmpdir('erx-draw-core-test') do |work|
-      module_path = File.join(work, 'erx_draw_core.erl')
-      File.binwrite(module_path, module_text)
-      flags = warnings_as_errors ? ['-Werror'] : []
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *flags, '-o', work, module_path, *OTHER_SOURCES,
-                                       stdin_data: '')
-      return [output, status] unless status.success?
-
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-eval', 'halt(case eunit:test(erx_draw_core_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')

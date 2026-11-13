@@ -8,6 +8,7 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/generated'
 require_relative '../../tools/lib/erx/manifest'
 require_relative '../fixtures/manifest_context'
+require_relative '../fixtures/erlang_build'
 
 # erx_build:principals/1, which names a principal's sessions (docs/design-domains.md,
 # "Principals, sessions and quotas"), over manifests the packer made: each principal's
@@ -17,6 +18,8 @@ require_relative '../fixtures/manifest_context'
 class ErxBuildPrincipalsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   FIXTURE = File.join(ROOT, 'test/fixtures/manifest_empty.txt')
+  # The application whose erx_build the cases call, compiled whole (ErlangBuild).
+  APPLICATIONS = %w[erx].freeze
   # A principal that sorts before the fixture's root, so root, the system principal, is 2,
   # a share of half the users' share that every grant of the manifest takes, and room for
   # alpha's one domain.
@@ -88,13 +91,7 @@ class ErxBuildPrincipalsTest < Minitest::Test
   # erx_build:principals({ok, Bytes}) as the oracle's emulator prints it.
   def principals(bytes)
     Dir.mktmpdir('erx-build-principals') do |work|
-      includes = %w[erlang/apps/erx/include].flat_map do |include|
-        ['-I', Erx::Generated.path(include, root: ROOT), '-I', File.join(ROOT, include)]
-      end
-      sources = [Erx::Generated.path('erlang/apps/erx/src/generated/erx_manifest.erl', root: ROOT),
-                 File.join(ROOT, 'erlang/apps/erx/src/erx_build.erl')]
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), *includes, '-o', work, *sources, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS)
       File.binwrite(File.join(work, 'manifest'), bytes)
       output, status = Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', 'io:format("~0p", [erx_build:principals(file:read_file("manifest"))]), ' \

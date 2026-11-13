@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # The start table's pure core (docs/design-apps.md, "Verification and testing"):
 # test/erlang/erx_start_table_tests.erl runs on stock's emulator (ERX_ERL and ERX_ERLC,
@@ -14,8 +14,10 @@ require_relative '../../tools/lib/erx/generated'
 class ErxStartTableTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'erlang/apps/erx_starter/src/erx_start_table.erl'
-  # erx_ident, the identifier rule the core reads names with, and the suite.
-  SOURCES = %w[erlang/apps/erx_domain/src/erx_ident.erl test/erlang/erx_start_table_tests.erl].freeze
+  # erx_domain holds erx_ident, the identifier rule the core reads names with, and
+  # implements erx_files's behaviour erx_fs.
+  APPLICATIONS = %w[erx erx_files erx_domain erx_starter].freeze
+  TESTS = %w[test/erlang/erx_start_table_tests.erl].freeze
 
   Fault = Data.define(:name, :from, :to, :caught_by)
 
@@ -61,10 +63,6 @@ class ErxStartTableTest < Minitest::Test
               caught_by: 'a_failed_read_retries_with_a_growing_bounded_delay_and_never_gives_up_test')
   ].freeze
 
-  def setup
-    Erx::Generated.ensure(root: ROOT)
-  end
-
   def test_the_cases_pass
     output, status = eunit(File.read(File.join(ROOT, CORE)))
     assert status.success?, output
@@ -89,12 +87,7 @@ class ErxStartTableTest < Minitest::Test
   # Compiles the core as core_text, and the suite, and runs the suite.
   def eunit(core_text)
     Dir.mktmpdir('erx-start-table-test') do |work|
-      core = File.join(work, File.basename(CORE))
-      File.write(core, core_text)
-      include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', include, '-o', work, core,
-                                       *SOURCES.map { |source| File.join(ROOT, source) }, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: { CORE => core_text })
       Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       'halt(case eunit:test(erx_start_table_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')

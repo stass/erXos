@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_vt_tests.erl, the EUnit cases of the terminal emulator's core
 # (docs/design-display.md, "The terminal emulator"), against erx_vt and its generated width
@@ -15,11 +15,8 @@ require_relative '../../tools/lib/erx/generated'
 class ErxVtTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
-  SOURCE = File.join(ROOT, 'erlang/apps/erx_display/src/erx_vt.erl')
-  # The width table and erx_present, by which erx_vt reads erx: links, with erx_schema.
-  GENERATED = %w[erlang/apps/erx_display/src/erx_vt_width.erl erlang/apps/erx/src/generated/erx_present.erl
-                 erlang/apps/erx/src/generated/erx_schema.erl].map { |path| Erx::Generated.path(path, root: ROOT) }.freeze
-  CASES = File.join(ROOT, 'test/erlang/erx_vt_tests.erl')
+  SOURCE = 'erlang/apps/erx_display/src/erx_vt.erl'
+  CASES = %w[test/erlang/erx_vt_tests.erl].freeze
   DEADLINE = '300'
   Mutant = Data.define(:text, :broken, :property)
   MUTANTS = {
@@ -34,7 +31,7 @@ class ErxVtTest < Minitest::Test
   }.freeze
 
   def test_the_cases_pass_under_eunit
-    output, status = eunit(File.binread(SOURCE), strict: true)
+    output, status = eunit(File.binread(File.join(ROOT, SOURCE)))
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
   end
@@ -49,24 +46,19 @@ class ErxVtTest < Minitest::Test
 
   def assert_mutant_fails(name)
     mutant = MUTANTS.fetch(name)
-    source = File.binread(SOURCE)
+    source = File.binread(File.join(ROOT, SOURCE))
     raise "erx_vt.erl no longer holds #{mutant.text.inspect}" unless source.include?(mutant.text)
 
-    output, status = eunit(source.sub(mutant.text, mutant.broken), strict: false)
+    output, status = eunit(source.sub(mutant.text, mutant.broken))
     refute status.success?, output
     assert_match mutant.property, output
   end
 
-  # Compiles the module, the width table and the cases into a directory of their own and
-  # runs the cases. An edited copy may leave a variable unused, which is not what it tests.
-  def eunit(module_text, strict:)
+  # Compiles erx_display and erx with erx_vt as module_text, and the cases, into a
+  # directory of their own and runs the cases.
+  def eunit(module_text)
     Dir.mktmpdir('erx-vt-test') do |work|
-      copy = File.join(work, 'erx_vt.erl')
-      File.binwrite(copy, module_text)
-      flags = strict ? ['-Werror'] : []
-      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERLC'), *flags, '-o', work,
-                                       *GENERATED, copy, CASES, stdin_data: '')
-      return [output, status] unless status.success?
+      ErlangBuild.compile(work, applications: %w[erx erx_display], tests: CASES, replaced: { SOURCE => module_text })
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       'halt(case eunit:test(erx_vt_tests, [verbose]) of ok -> 0; _ -> 1 end).',

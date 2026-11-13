@@ -10,6 +10,7 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/release_medium'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # The packer's disk image for QEMU: the EROFS image fsimg writes, slot A's plan, and
 # the medium MediumImage.release writes, read back three independent ways: the table by
@@ -18,7 +19,7 @@ require_relative '../../tools/lib/erx/generated'
 # fsimg, which verifies and extracts it; and every other byte by reading the file.
 class ReleaseMediumTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources and headers named here are in build/gen.
+  # The generated files the medium code reads are in build/gen.
   Erx::Generated.ensure(root: ROOT)
   Medium = Erx::MediumImage
   Release = Erx::ReleaseMedium
@@ -221,9 +222,7 @@ class ReleaseMediumTest < Minitest::Test
   # The windows erx_blk_table admits from the medium's three records.
   def admitted(path)
     Dir.mktmpdir('erx-release-medium-table-') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', File.join(ROOT, 'build/gen/erlang/apps/erx/include'),
-                                       '-o', work, File.join(ROOT, 'erlang/apps/erx_blk/src/erx_blk_table.erl'), stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: %w[erx erx_blk])
       script = 'Path = os:getenv("ERX_MEDIUM"), {ok, F} = file:open(Path, [read, raw, binary]), ' \
                'Records = [element(2, file:pread(F, S * 512, 512)) || {_, S} <- erx_blk_table:records()], ' \
                '{ok, W} = apply(erx_blk_table, admit, [filelib:file_size(Path) div 512 | Records]), ' \

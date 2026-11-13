@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_shell_jobs_tests.erl, the EUnit cases of the command shell's
 # job table (erx_shell_jobs), among them its exhaustive exploration, compiled from
@@ -13,16 +13,13 @@ require_relative '../../tools/lib/erx/generated'
 # make check supplies). Job control in a session is test/host/erx_shell_test.rb's.
 class ErxShellJobsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
-  SOURCES = [Erx::Generated.path('erlang/apps/erx/src/erx_text_tables.erl', root: ROOT),
-             *%w[erlang/apps/erx/src/erx_text.erl erlang/apps/erx_shell/src/erx_shell_jobs.erl
-                 test/erlang/erx_shell_jobs_tests.erl].map { |path| File.join(ROOT, path) }].freeze
+  # The applications the suite exercises, compiled whole (ErlangBuild), and the suite.
+  APPLICATIONS = %w[erx erx_shell].freeze
+  TESTS = %w[test/erlang/erx_shell_jobs_tests.erl].freeze
 
   def test_job_table_cases_pass_under_eunit
     Dir.mktmpdir('erx-shell-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work, '-o', work, *SOURCES, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', 'halt(case eunit:test(erx_shell_jobs_tests) of ok -> 0; _ -> 1 end).',

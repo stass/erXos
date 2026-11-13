@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs the EUnit cases of the inspector on stock's emulator (ERX_ERL and ERX_ERLC, which
 # make check supplies): erx_kernel_records' pure core (test/erlang/erx_kernel_records_tests.erl),
@@ -13,26 +13,15 @@ require_relative '../../tools/lib/erx/generated'
 # table's records (test/erlang/erx_app_records_tests.erl), the runtime
 # agent and the query worker
 # (test/erlang/erx_inspect_agent_tests.erl, erx_inspect_worker_tests.erl), against
-# the sources, the generated ones from build/gen. erx_object_info is compiled but its NIF is
+# the applications compiled whole (ErlangBuild). erx_object_info is compiled but its NIF is
 # never loaded: the cases reach the kernel only through the pure core.
 class ErxInspectorTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources and headers named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
-  ERX = File.join(ROOT, 'erlang/apps/erx')
-  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-  SOURCES = [*%w[generated/erx_schema erx_text_tables]
-               .map { |name| Erx::Generated.path("erlang/apps/erx/src/#{name}.erl", root: ROOT) },
-             *%w[erx_text erx_object_info erx_kernel_records erx_process_records erx_inspector
-                 erx_log_records erx_runtime_records erx_app_records erx_facets erx erx_inspect_agent
-                 erx_inspect_worker erx_facet erx_inspect_query erx_inspect_facet].map { |name| File.join(ERX, "src/#{name}.erl") },
-             *%w[erx_render].map { |name| File.join(ROOT, "erlang/apps/erx_shell/src/#{name}.erl") },
-             File.join(ROOT, 'test/erlang/erx_kernel_records_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_inspector_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_app_records_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_inspect_agent_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_inspect_worker_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_inspect_facet_tests.erl')].freeze
+  # The applications the suites exercise, compiled whole (ErlangBuild), and the suites.
+  APPLICATIONS = %w[erx erx_shell].freeze
+  TESTS = %w[erx_kernel_records erx_inspector erx_app_records erx_inspect_agent erx_inspect_worker
+             erx_inspect_facet].map { |name| "test/erlang/#{name}_tests.erl" }.freeze
+  ERX = 'erlang/apps/erx'
 
   # Each fault replaces one passage of one source, and the case it names must fail.
   Fault = Data.define(:name, :file, :from, :to, :tests, :caught_by)
@@ -135,32 +124,27 @@ class ErxInspectorTest < Minitest::Test
 
   def test_the_cases_catch_each_seeded_fault
     FAULTS.each do |fault|
-      source = File.read(fault.file)
+      source = File.read(File.join(ROOT, fault.file))
       assert_includes source, fault.from, fault.name
-      Dir.mktmpdir('erx-inspector-fault') do |faulted|
-        copy = File.join(faulted, File.basename(fault.file))
-        File.write(copy, source.sub(fault.from, fault.to))
-        run = eunit_run(fault.tests, SOURCES.map { |path| path == fault.file ? copy : path })
-        refute run.passed, "#{fault.name} passed:\n#{run.text}"
-        assert_match(/#{fault.caught_by}[^\n]*\*(failed|timed out)\*/, run.report, "#{fault.name}:\n#{run.text}")
-      end
+      run = eunit_run(fault.tests, replaced: { fault.file => source.sub(fault.from, fault.to) })
+      refute run.passed, "#{fault.name} passed:\n#{run.text}"
+      assert_match(/#{fault.caught_by}[^\n]*\*(failed|timed out)\*/, run.report, "#{fault.name}:\n#{run.text}")
     end
   end
 
   private
 
   def eunit(suite)
-    run = eunit_run(suite, SOURCES)
+    run = eunit_run(suite)
     assert run.passed, run.text
     assert_match(/All \d+ tests passed/, run.report)
   end
 
-  # Compiles Sources with warnings as errors and runs Suite's cases (EunitRun).
-  def eunit_run(suite, sources)
+  # Compiles the applications and the suites, with replaced as ErlangBuild.compile takes it,
+  # and runs Suite's cases (EunitRun).
+  def eunit_run(suite, replaced: {})
     Dir.mktmpdir('erx-inspector-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE,
-                                       '-o', work, *sources, stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       report, errors, status = Open3.capture3('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell',
                                               '-kernel', 'logger', LOGGER_TO_STDERR, '-pa', work,
                                               '-eval', "halt(case eunit:test(#{suite}, [verbose]) of ok -> 0; _ -> 1 end)",

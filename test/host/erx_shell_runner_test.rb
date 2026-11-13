@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_shell_runner_tests.erl, the EUnit cases of the command
 # shell's runner, its pipes, its command namespace, the renderer and the
@@ -15,23 +15,15 @@ require_relative '../../tools/lib/erx/generated'
 # agreement with plan9port's rc is test/integration/erx_shell_commands_test.rb's.
 class ErxShellRunnerTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources and headers named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
-  # The generated headers erx_shell includes, such as erx_abi.hrl.
-  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-  APPLICATION = File.join(ROOT, 'erlang/apps/erx_shell/src')
-  # erx_cmd first, so that the commands find their behaviour.
-  SOURCES = [File.join(ROOT, 'build/gen/erlang/apps/erx/src/erx_text_tables.erl'), File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/erx_facets.erl'), File.join(ROOT, 'test/erlang/stand_in/erx_inspector.erl'),
-             File.join(APPLICATION, 'erx_cmd.erl'),
-             *Dir[File.join(APPLICATION, '*.erl')].sort,
-             File.join(ROOT, 'test/erlang/erx_shell_runner_tests.erl')].uniq.freeze
+  # The applications the suite exercises, compiled whole (ErlangBuild), and the suite. The
+  # stand-in erx_inspector replaces the application's module of that name, so that no kernel
+  # record is read; it is compiled after the applications and overwrites its beam.
+  APPLICATIONS = %w[erx erx_shell].freeze
+  TESTS = %w[test/erlang/stand_in/erx_inspector.erl test/erlang/erx_shell_runner_tests.erl].freeze
 
   def test_runner_cases_pass_under_eunit
     Dir.mktmpdir('erx-shell-runner-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE, '-pa', work, '-o', work, *SOURCES,
-                                       stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
 
       output, status = Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', 'halt(case eunit:test(erx_shell_runner_tests) of ok -> 0; _ -> 1 end).',

@@ -8,6 +8,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # The erx_fs grant, the domain's file version counter and storage's data mint:
 # test/erlang/erx_fs_tests.erl, erx_fs_version_tests.erl and erx_lfs_mint_tests.erl run on
@@ -17,17 +18,12 @@ require_relative '../../tools/lib/erx/generated'
 # the grant through the grammar generated from it.
 class ErxFsTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated sources and headers named here are in build/gen.
-  Erx::Generated.ensure(root: ROOT)
-  SOURCES = %w[
-    build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
-    erlang/apps/erx_files/src/erx_fs_grant.erl
-    erlang/apps/erx_files/src/erx_fs.erl
-    erlang/apps/erx_files/src/erx_fs_grants.erl
-    erlang/apps/erx_files/src/erx_fs_version.erl
-    erlang/apps/erx_storage/src/erx_lfs_mint.erl
-  ].freeze
-  TESTS = %w[
+  GRAMMAR = 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl'
+  # The applications are compiled whole with those they declare (ErlangBuild), erx among
+  # them; the stand-ins below replace the erx modules the grant and the mint call. The grammar is generated into
+  # the preloaded sources of OTP, outside the applications, so it is compiled with the cases.
+  APPLICATIONS = %w[erx_files erx_storage].freeze
+  TESTS = [GRAMMAR] + %w[
     test/erlang/erx_fs_test_tree.erl
     test/erlang/erx_fs_stale_tree.erl
     test/erlang/erx_fs_tests.erl
@@ -39,7 +35,6 @@ class ErxFsTest < Minitest::Test
   GRANT = 'erlang/apps/erx_files/src/erx_fs_grant.erl'
   SERVER = 'erlang/apps/erx_files/src/erx_fs.erl'
   MINT = 'erlang/apps/erx_storage/src/erx_lfs_mint.erl'
-  GRAMMAR = 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl'
   VERSION = 'erlang/apps/erx_files/src/erx_fs_version.erl'
   TABLE = 'abi/protocols/9p.txt'
 
@@ -254,16 +249,10 @@ class ErxFsTest < Minitest::Test
     end
   end
 
-  # Compiles the sources, with any replaced by the given text, and runs both suites.
+  # Compiles the applications and the cases, with any source replaced by the given text, and runs the suites.
   def eunit(replaced)
     Dir.mktmpdir('erx-fs-test') do |work|
-      paths = SOURCES.map do |source|
-        next File.join(ROOT, source) unless replaced.key?(source)
-
-        File.join(work, File.basename(source)).tap { |path| File.write(path, replaced.fetch(source)) }
-      end
-      compile(work, paths, includes: [File.join(ROOT, 'build/gen/erlang/apps/erx/include')])
-      compile(work, TESTS.map { |test| File.join(ROOT, test) }, includes: [File.join(ROOT, 'build/gen/erlang/apps/erx/include')])
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       # A grant a seeded fault crashes would print a crash report into the middle of
       # EUnit's line for its test; the logger stays quiet so each verdict keeps its line.
       Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
@@ -272,12 +261,5 @@ class ErxFsTest < Minitest::Test
                       'of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')
     end
-  end
-
-  def compile(work, paths, includes: [])
-    output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-pa', work,
-                                     *includes.flat_map { |directory| ['-I', directory] }, '-o', work, *paths,
-                                     stdin_data: '')
-    assert status.success?, output
   end
 end

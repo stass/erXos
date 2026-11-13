@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/abi'
+require_relative '../fixtures/erlang_build'
 require_relative '../../tools/lib/erx/lvgl'
 
 # erx-lvgl end to end on the host (docs/design-display.md, "The widget
@@ -16,18 +16,16 @@ require_relative '../../tools/lib/erx/lvgl'
 # The model screen says what it checks.
 class ErxLvglTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  GENERATED = File.join(ROOT, Erx::Generated::OUTPUT)
-  SOURCES = [
-    File.join(GENERATED, Erx::ABI::UIWireEmitter::ERLANG_PATH),
-    File.join(ROOT, 'erlang/apps/erx_display/src/erx_ui_model.erl'),
-    File.join(ROOT, 'test/erlang/erx_lvgl_screen.erl')
-  ].freeze
+# The applications the model screen runs against, compiled whole (ErlangBuild): erx holds
+# the generated erx_ui_wire, erx_display the model of the widget tree. Then the screen.
+APPLICATIONS = %w[erx erx_display].freeze
+TESTS = %w[test/erlang/erx_lvgl_screen.erl].freeze
 
   def test_model_screen_drives_the_program
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
     program = Erx::Lvgl::Build.new(root: ROOT, runner: runner).call
     Dir.mktmpdir('erx-lvgl-test') do |work|
-      run!(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *SOURCES, chdir: work)
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
       %w[x8r8g8b8 r5g6b5].each do |channel|
         output = run!(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
                       "io:format(\"~p~n\", [erx_lvgl_screen:run(\"#{program}\", #{channel})]), halt(0)", chdir: work)

@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/dependencies'
+require_relative '../fixtures/erlang_build'
 
 # CUBIC's fixed-point arithmetic against FreeBSD's own (docs/design-network-stack.md, "The
 # send log, loss and congestion: properties and a FreeBSD oracle"): tools/fuzz/cubic_oracle.c
@@ -19,8 +20,8 @@ require_relative '../../tools/lib/erx/dependencies'
 # instead of down must disagree, which shows the comparison reaches the code it checks.
 class ErxTcpCcCubicOracleTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  CUBIC = 'erlang/apps/erx_net/src/erx_tcp_cc_cubic.erl'
   SOURCE = File.join(ROOT, 'erlang/apps/erx_net/src')
-  INCLUDE = File.join(ROOT, 'erlang/apps/erx_net/include')
   HARNESS = File.join(ROOT, 'tools/fuzz/cubic_oracle.c')
   ROUNDS = 20_000
   INT_MAX = 2**31 - 1
@@ -89,10 +90,7 @@ class ErxTcpCcCubicOracleTest < Minitest::Test
 
   def erlang(work, cubic_source)
     Dir.mktmpdir('erl', work) do |directory|
-      cubic = File.join(directory, 'erx_tcp_cc_cubic.erl')
-      File.write(cubic, cubic_source)
-      execute(*LIMIT, ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-pa', directory, '-o', directory,
-          File.join(SOURCE, 'erx_tcp_cc.erl'), cubic)
+      ErlangBuild.compile(directory, applications: %w[erx_net], replaced: { CUBIC => cubic_source })
       execute(*LIMIT, ENV.fetch('ERX_ERL'), '-noshell', '-pa', directory, '-eval', DRIVER,
           chdir: work).lines.map(&:to_i)
     end

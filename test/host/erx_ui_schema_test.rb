@@ -7,6 +7,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # The widget format (docs/design-abi.md, "Widget format"): the generator's refusals of
 # a malformed ui.txt, and the EUnit cases of erx_ui_schema, generated from
@@ -35,18 +36,11 @@ class ErxUISchemaTest < Minitest::Test
         field props props
   UI
 
-  # The validator checks a presentation with erx_present, which reads paths with erx_schema.
-  SCHEMAS = [Erx::ABI::InspectionEmitter::ERLANG_PATH, Erx::ABI::PresentEmitter::ERLANG_PATH]
-            .map { |path| File.join(ROOT, Erx::Generated::OUTPUT, path) }.freeze
+  TESTS = %w[test/erlang/erx_ui_schema_tests.erl].freeze
 
   def test_generated_schema_cases_pass_under_eunit
-    module_text = File.binread(File.join(ROOT, Erx::Generated::OUTPUT, Erx::ABI::UIEmitter::ERLANG_PATH))
     Dir.mktmpdir('erx-ui-schema-test') do |work|
-      module_path = File.join(work, 'erx_ui_schema.erl')
-      File.binwrite(module_path, module_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, module_path, *SCHEMAS,
-                                       File.join(ROOT, 'test/erlang/erx_ui_schema_tests.erl'), stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: %w[erx], tests: TESTS)
       output, status = Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', 'halt(case eunit:test(erx_ui_schema_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                                        chdir: work, stdin_data: '')

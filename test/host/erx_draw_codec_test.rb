@@ -7,6 +7,7 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # The draw codec generated from abi/formats/draw.txt (docs/design-display.md,
 # "Draw messages"): the EUnit cases of erx_draw_codec and erx_draw_image on
@@ -21,8 +22,8 @@ class ErxDrawCodecTest < Minitest::Test
   Erx::Generated.ensure(root: ROOT)
   GENERATED = File.join(ROOT, Erx::Generated::OUTPUT)
   EMITTER = Erx::ABI::DrawEmitter
-  MODULES = [File.join(GENERATED, EMITTER::ERLANG_PATH), File.join(ROOT, 'erlang/apps/erx_display/src/erx_draw_image.erl'),
-             File.join(ROOT, 'test/erlang/erx_draw_codec_tests.erl')].freeze
+  APPLICATIONS = %w[erx_display].freeze
+  TESTS = %w[test/erlang/erx_draw_codec_tests.erl].freeze
   HARNESS = %w[test/fixtures/erx_draw_codec_harness.c test/fixtures/erx_draw_cload.c].map { |path| File.join(ROOT, path) }
   # The seeded fault: indices take one byte more than their count's.
   SEED = ['value->length = *used = (size_t)value->count * 2;', 'value->length = *used = (size_t)value->count * 2 + 1;'].freeze
@@ -91,7 +92,7 @@ class ErxDrawCodecTest < Minitest::Test
 
   def in_erlang
     Dir.mktmpdir('erx-draw-codec-test') do |work|
-      run!(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, *MODULES, chdir: work)
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
       yield work
     end
   end

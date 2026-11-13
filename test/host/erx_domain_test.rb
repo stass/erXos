@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs the EUnit cases of the domain service (docs/design-system.md, "System
 # services"), compiled with warnings as errors on stock's emulator (ERX_ERL
@@ -26,40 +26,26 @@ require_relative '../../tools/lib/erx/generated'
 # or the domain service's funnel for a domain's facets), and the case it names must fail.
 class ErxDomainTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # erx_domain_srv includes the generated erx_abi.hrl and erx_facet_names.hrl, in build/gen.
-  Erx::Generated.ensure(root: ROOT)
-  INCLUDES = %w[erlang/apps/erx/include erlang/apps/erx_domain/include].flat_map do |include|
-    ['-I', Erx::Generated.path(include, root: ROOT)]
-  end.freeze
-  APPLICATION = File.join(ROOT, 'erlang/apps/erx_domain/src')
-  # Compiled before the rest: erx_devfs names it as its behaviour.
-  BEHAVIOUR = File.join(ROOT, 'erlang/apps/erx_files/src/erx_fs.erl')
-  SOURCES = [*Dir[File.join(APPLICATION, '*.erl')].sort,
-             Erx::Generated.path('erlang/apps/erx/src/generated/erx_schema.erl', root: ROOT),
-             Erx::Generated.path('erlang/apps/erx/src/erx_text_tables.erl', root: ROOT),
-             File.join(ROOT, 'erlang/apps/erx/src/erx_text.erl'),
-             File.join(ROOT, 'test/erlang/erx_devfs_tests.erl'),
-             # A files service of the system domain: its grants and a test tree.
-             Erx::Generated.path('otp/erts/preloaded/src/erx_9p_grammar.erl', root: ROOT),
-             File.join(ROOT, 'erlang/apps/erx_files/src/erx_fs_grant.erl'),
-             File.join(ROOT, 'erlang/apps/erx_files/src/erx_fs_grants.erl'),
-             File.join(ROOT, 'erlang/apps/erx_files/src/erx_fs_version.erl'),
-             File.join(ROOT, 'test/erlang/erx_fs_test_tree.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/erx_inspect_facet.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/erx_inspect_query.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/erx_build.erl'),
-             File.join(ROOT, 'erlang/apps/erx/src/erx_driver_ctl.erl'),
-             File.join(ROOT, 'erlang/apps/erx_blk/src/erx_blk_sup.erl'),
-             File.join(ROOT, 'test/erlang/erx_driver_ctl_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_facet_tests.erl'),
-             File.join(ROOT, 'test/erlang/stand_in/erx_dist.erl'),
-             File.join(ROOT, 'test/erlang/erx_domain_fake_lib.erl'),
-             File.join(ROOT, 'test/erlang/erx_domain_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_domain_links_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_domain_mints_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_domain_mints_srv_tests.erl'),
-             File.join(ROOT, 'test/erlang/erx_devices_tests.erl')].freeze
+  APPLICATION = 'erlang/apps/erx_domain/src'
+  # The applications are compiled whole (ErlangBuild): the domain service, the facet and
+  # inspection modules of erx, the driver supervisor of erx_blk, and the erx_fs behaviour and
+  # the grants of erx_files that /dev's tree and a test files service use.
+  APPLICATIONS = %w[erx erx_files erx_blk erx_domain].freeze
+  # erx_9p_grammar is generated into the preloaded sources of OTP, outside the applications.
+  TESTS = %w[
+    build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
+    test/erlang/erx_devfs_tests.erl
+    test/erlang/erx_fs_test_tree.erl
+    test/erlang/erx_driver_ctl_tests.erl
+    test/erlang/erx_facet_tests.erl
+    test/erlang/stand_in/erx_dist.erl
+    test/erlang/erx_domain_fake_lib.erl
+    test/erlang/erx_domain_tests.erl
+    test/erlang/erx_domain_links_tests.erl
+    test/erlang/erx_domain_mints_tests.erl
+    test/erlang/erx_domain_mints_srv_tests.erl
+    test/erlang/erx_devices_tests.erl
+  ].freeze
 
   def test_domain_service_cases_pass_under_eunit
     assert_eunit_passes('erx_domain_tests', deadline: 120)
@@ -169,14 +155,14 @@ class ErxDomainTest < Minitest::Test
     # grantee waiting out its own timeout, where an inspect worker OTP killed at its heap
     # limit must answer {error, failed}.
     Fault.new(name: 'a facet that drops a forward whose service ended',
-              file: File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
+              file: 'erlang/apps/erx/src/erx_facet.erl',
               from: 'loop(replied(Monitor, {error, failed}, State));',
               to: 'loop(State#{forwards := maps:remove(Monitor, Forwards)});',
               tests: 'erx_facet_tests', caught_by: 'a_forwards_service_that_ends_answers_failed_test'),
     # A request past the limit in flight answered as a malformed one: the grantee cannot
     # tell a full facet, which a retry may pass, from a request it must not repeat.
     Fault.new(name: 'a request past the limit in flight refused as badarg',
-              file: File.join(ROOT, 'erlang/apps/erx/src/erx_facet.erl'),
+              file: 'erlang/apps/erx/src/erx_facet.erl',
               from: 'refuse(From, busy, State);', to: 'refuse(From, badarg, State);',
               tests: 'erx_facet_tests', caught_by: 'limits_its_forwards_test'),
     # The system domain's namespace (docs/design-system.md, "A session takes the console"):
@@ -189,37 +175,27 @@ class ErxDomainTest < Minitest::Test
 
   def test_the_cases_catch_each_seeded_fault
     FAULTS.each do |fault|
-      source = File.read(fault.file)
+      source = File.read(File.join(ROOT, fault.file))
       assert_includes source, fault.from, fault.name
-      Dir.mktmpdir('erx-domain-fault') do |faulted|
-        copy = File.join(faulted, File.basename(fault.file))
-        File.write(copy, source.sub(fault.from, fault.to))
-        sources = SOURCES.map { |path| path == fault.file ? copy : path }
-        output = eunit_output(fault.tests, deadline: 120, sources: sources)
-        refute output.fetch(:passed), "#{fault.name} passed:\n#{output.fetch(:text)}"
-        assert_match(/#{fault.caught_by}.*\*failed\*/m, output.fetch(:text), fault.name)
-      end
+      output = eunit_output(fault.tests, deadline: 120, replaced: { fault.file => source.sub(fault.from, fault.to) })
+      refute output.fetch(:passed), "#{fault.name} passed:\n#{output.fetch(:text)}"
+      assert_match(/#{fault.caught_by}.*\*failed\*/m, output.fetch(:text), fault.name)
     end
   end
 
   private
 
   def assert_eunit_passes(mod, deadline:)
-    output = eunit_output(mod, deadline: deadline, sources: SOURCES)
+    output = eunit_output(mod, deadline: deadline)
     assert output.fetch(:passed), output.fetch(:text)
     assert_match(/[1-9][0-9]* tests passed/, output.fetch(:text))
   end
 
-  # Compiles Sources with warnings as errors and runs Mod's cases: whether they passed,
-  # and the run's text.
-  def eunit_output(mod, deadline:, sources:)
+  # Compiles the applications and tests, with any source replaced, and runs the cases of
+  # mod: whether they passed, and the run's text.
+  def eunit_output(mod, deadline:, replaced: {})
     Dir.mktmpdir('erx-domain-test') do |work|
-      [[BEHAVIOUR], sources].each do |batch|
-        output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', *INCLUDES, '-pa', work, '-o', work,
-                                         *batch, stdin_data: '')
-        assert status.success?, output
-      end
-
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       output, status = Open3.capture2e('gtimeout', '-k', '10', deadline.to_s, ENV.fetch('ERX_ERL'), '-noshell',
                                        '-pa', work, '-eval',
                                        "halt(case eunit:test(#{mod}, [verbose]) of ok -> 0; _ -> 1 end).",

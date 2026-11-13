@@ -6,7 +6,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/abi'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/erx_present_tests.erl on stock's emulator (ERX_ERL and ERX_ERLC,
 # which make check supplies) against erx_present and erx_schema generated from
@@ -15,10 +15,14 @@ require_relative '../../tools/lib/erx/generated'
 # and writer share the set of kept bytes.
 class ErxPresentTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  # The generated modules the cases run against are in build/gen.
+  # The application holding the generated modules the cases run against (compiled whole,
+  # ErlangBuild), and the suite.
+  APPLICATIONS = %w[erx].freeze
+  TESTS = %w[test/erlang/erx_present_tests.erl].freeze
+  # The generated erx_present, in build/gen, which the cases read.
   Erx::Generated.ensure(root: ROOT)
-  PRESENT = File.join(ROOT, Erx::Generated::OUTPUT, Erx::ABI::PresentEmitter::ERLANG_PATH)
-  SCHEMA = File.join(ROOT, Erx::Generated::OUTPUT, Erx::ABI::InspectionEmitter::ERLANG_PATH)
+  PRESENT_PATH = File.join(Erx::Generated::OUTPUT, Erx::ABI::PresentEmitter::ERLANG_PATH)
+  PRESENT = File.join(ROOT, PRESENT_PATH)
   KEPT = 'uri_plain(Byte) -> lists:member(Byte, "_+,:=@-./").'
   KEPT_WITHOUT_DOT = 'uri_plain(Byte) -> lists:member(Byte, "_+,:=@-/").'
 
@@ -39,11 +43,7 @@ class ErxPresentTest < Minitest::Test
 
   def eunit(present)
     Dir.mktmpdir('erx-present-test') do |work|
-      File.binwrite(File.join(work, 'erx_present.erl'), present)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-o', work, SCHEMA,
-                                       File.join(work, 'erx_present.erl'),
-                                       File.join(ROOT, 'test/erlang/erx_present_tests.erl'), stdin_data: '')
-      assert status.success?, output
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: { PRESENT_PATH => present })
       Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-eval', 'halt(case eunit:test(erx_present_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')

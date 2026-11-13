@@ -5,7 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../../tools/lib/erx/generated'
+require_relative '../fixtures/erlang_build'
 
 # Runs the pipe server's decisions, erx_pipe:step/2 (docs/design-pipes.md,
 # "The pipe server"), through their EUnit cases (test/erlang/erx_pipe_tests.erl)
@@ -17,12 +17,10 @@ require_relative '../../tools/lib/erx/generated'
 # expects the exploration to fail on the property that guards it.
 class ErxPipeTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  Erx::Generated.ensure(root: ROOT)
-  INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-  MODULE = File.join(ROOT, 'erlang/apps/erx/src/erx_pipe.erl')
-  TESTS = %w[erx_pipe_tests erx_pipe_explore erx_pipe_explore_tests].map do |name|
-    File.join(ROOT, "test/erlang/#{name}.erl")
-  end.freeze
+# The application holding erx_pipe, compiled whole (ErlangBuild), and the suites.
+APPLICATIONS = %w[erx].freeze
+MODULE = 'erlang/apps/erx/src/erx_pipe.erl'
+TESTS = %w[erx_pipe_tests erx_pipe_explore erx_pipe_explore_tests].map { |name| "test/erlang/#{name}.erl" }.freeze
 
   # The depth a seeded run explores to; each seed is caught well within it.
   SEED_DEPTH = '5'
@@ -31,7 +29,7 @@ class ErxPipeTest < Minitest::Test
   DEADLINE = ENV.key?('ERX_PIPE_EXPLORE_DEPTH') ? '800' : '280'
 
   def test_the_cases_and_the_exploration_pass
-    output = run_eunit(File.read(MODULE))
+    output = run_eunit(File.read(File.join(ROOT, MODULE)))
     assert output.success?, output.text
     assert_match(/All \d+ tests passed/, output.text)
   end
@@ -119,22 +117,17 @@ class ErxPipeTest < Minitest::Test
   # Plants `faulty` in place of `exact`, which must occur once, and expects
   # the exploration to fail on `property`.
   def assert_caught(exact, faulty, property)
-    source = File.read(MODULE)
+    source = File.read(File.join(ROOT, MODULE))
     assert_equal 1, source.scan(exact).size, "seed site not found once: #{exact}"
     output = run_eunit(source.sub(exact) { faulty }, depth: SEED_DEPTH)
     refute output.success?, output.text
     assert_match(/violation,\s*#{property}/, output.text)
   end
 
-  # Compiles `source` as erx_pipe with the tests and runs both EUnit modules.
+  # Compiles `source` in place of erx_pipe with the tests and runs both EUnit modules.
   def run_eunit(source, depth: nil)
     Dir.mktmpdir('erx-pipe-test') do |work|
-      module_path = File.join(work, 'erx_pipe.erl')
-      File.write(module_path, source)
-      text, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE, '-o', work,
-                                     module_path, *TESTS, stdin_data: '')
-      return Result.new(success?: false, text: text) unless status.success?
-
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: { MODULE => source })
       env = depth ? { 'ERX_PIPE_EXPLORE_DEPTH' => depth } : {}
       eval_text = 'halt(case eunit:test([erx_pipe_tests, erx_pipe_explore_tests]) of ok -> 0; _ -> 1 end).'
       text, status = Open3.capture2e(env, 'gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERL'), '-noshell',
