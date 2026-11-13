@@ -10,6 +10,7 @@ require_relative 'erlang_apps'
 require_relative 'dependencies'
 require_relative 'device_posters'
 require_relative 'pipe_makers'
+require_relative 'area_mappers'
 require_relative 'start_callers'
 require_relative 'erofs_reads'
 require_relative 'web_sinks'
@@ -162,6 +163,7 @@ module Erx
       check_device_callers(listed)
       check_device_posters(listed)
       check_pipe_makers(listed)
+      check_area_mappers(listed)
       check_start_callers(listed)
       check_erofs_reads(listed)
       check_net(listed)
@@ -349,6 +351,13 @@ module Erx
     def check_pipe_makers(listed)
       sources = listed.select { |relative| PipeMakers.covers?(relative) && File.file?(File.join(@root, relative)) }
       violations = PipeMakers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
+      raise Error, violations.join("\n") unless violations.empty?
+    end
+
+    # otp/ included, as for the device callers.
+    def check_area_mappers(listed)
+      sources = listed.select { |relative| AreaMappers.covers?(relative) && File.file?(File.join(@root, relative)) }
+      violations = AreaMappers.violations(sources.to_h { |relative| [relative, File.binread(File.join(@root, relative))] })
       raise Error, violations.join("\n") unless violations.empty?
     end
 

@@ -49,7 +49,8 @@ run(unit, _) ->
     lists:foreach(fun(Case) -> Case() end,
                   [fun new_image_padding_is_zero/0, fun far_draw_touches_the_clip/0,
                    fun empty_clip_draws_nothing/0, fun replicated_grey_alpha_mask/0, fun refusals/0,
-                   fun shape_limits/0]).
+                   fun shape_limits/0, fun wrap_refusals/0, fun wrap_fills_its_rows/0,
+                   fun wrap_read_only/0, fun wrap_outlives_its_area/0]).
 
 repeat(0, _Fun) -> ok;
 repeat(N, Fun) -> Fun(), repeat(N - 1, Fun).
@@ -400,3 +401,93 @@ shape_limits() ->
     {error, einval} = erx_memdraw:ellipse(Dst, {0, 0}, (1 bsl 14) + 1, 1, 1, Src, {0, 0}, 11),
     {error, einval} = erx_memdraw:arc(Dst, {0, 0}, 1, 1, (1 bsl 10) + 1, Src, {0, 0}, 0, 90, 11),
     {error, einval} = erx_memdraw:poly(Dst, [{0, 0}, {0, -(1 bsl 19) - 1}], 0, 0, 1, Src, {0, 0}, 11).
+
+%%% Images over a pixel area (erx_memdraw:wrap/4), over the bundle's stand-in area: whole
+%%% host pages with an untouchable page past them, unmapped when its last holder is gone,
+%%% so a byte read or written past the area or after its unmap faults.
+
+-define(AREA_BYTES, 65536).
+
+x32() -> erx_draw_ref:chan([{ignore, 8}, {red, 8}, {green, 8}, {blue, 8}]).
+rgb24() -> erx_draw_ref:chan([{red, 8}, {green, 8}, {blue, 8}]).
+
+wrap_refusals() ->
+    {ok, Area, Page} = erx_memdraw:test_area(?AREA_BYTES, write),
+    R = {0, 0, 16, 16},
+    {error, einval} = erx_memdraw:wrap(Area, 1, R, x32()),
+    {error, einval} = erx_memdraw:wrap(Area, Page div 2, R, x32()),
+    {error, einval} = erx_memdraw:wrap(Area, ?AREA_BYTES, R, x32()),
+    {error, einval} = erx_memdraw:wrap(Area, 0, R, erx_draw_ref:chan([{map, 4}])),
+    %% 64-byte rows: 1023 leave the word libmemdraw may load past them; 1024 do not.
+    {ok, _} = erx_memdraw:wrap(Area, 0, {0, 0, 16, 1023}, x32()),
+    {error, einval} = erx_memdraw:wrap(Area, 0, {0, 0, 16, 1024}, x32()),
+    {error, einval} = erx_memdraw:wrap(Area, Page, {0, 0, 16, 1023}, x32()),
+    {ok, _} = erx_memdraw:wrap(Area, Page, {0, 0, 16, (?AREA_BYTES - Page) div 64 - 1}, x32()),
+    ok = try erx_memdraw:wrap(make_ref(), 0, R, x32()) catch error:badarg -> ok end.
+
+%% Images that end a word short of the area's end are written and read whole, and a
+%% 24-bit one, whose reads load four bytes for each pixel, is composed from whole.
+wrap_fills_its_rows() ->
+    {ok, Area, _Page} = erx_memdraw:test_area(?AREA_BYTES, write),
+    R32 = {0, 0, 16, 1023},
+    {ok, Image} = erx_memdraw:wrap(Area, 0, R32, x32()),
+    Pixels = << <<(N rem 251)>> || N <- lists:seq(1, 64 * 1023) >>,
+    {ok, R32} = erx_memdraw:load(Image, R32, Pixels),
+    {ok, Pixels} = erx_memdraw:read(Image, R32),
+    R24 = {0, 0, 16, 1365},
+    {ok, Image24} = erx_memdraw:wrap(Area, 0, R24, rgb24()),
+    {ok, Dst} = erx_memdraw:alloc(x32(), R24, R24, false, ?NOFILL),
+    {ok, R24} = erx_memdraw:draw(Dst, R24, Image24, {0, 0}, opaque, {0, 0}, 11, dst),
+    ok.
+
+%% An image over the reader's read-only mapping is a source, never a destination.
+wrap_read_only() ->
+    {ok, Area, _Page} = erx_memdraw:test_area(?AREA_BYTES, read),
+    R = {0, 0, 16, 16},
+    {ok, Image} = erx_memdraw:wrap(Area, 0, R, x32()),
+    {ok, Zero} = erx_memdraw:read(Image, R),
+    true = Zero =:= binary:copy(<<0>>, 64 * 16),
+    {ok, Dst} = erx_memdraw:alloc(x32(), R, R, false, ?NOFILL),
+    {ok, R} = erx_memdraw:draw(Dst, R, Image, {0, 0}, opaque, {0, 0}, 11, dst),
+    ok = try erx_memdraw:load(Image, R, Zero) catch error:badarg -> ok end,
+    ok = try erx_memdraw:draw(Image, R, Dst, {0, 0}, opaque, {0, 0}, 11, dst) catch error:badarg -> ok end,
+    ok = try erx_memdraw:line(Image, {0, 0}, {8, 8}, 0, 0, 1, Dst, {0, 0}, 11) catch error:badarg -> ok end.
+
+%% The area stays mapped while an image over it lives, though no term names the area,
+%% and is unmapped once the image is gone: the holder draws into the image after the
+%% area's last term is collected, which would fault on an unmapped area.
+wrap_outlives_its_area() ->
+    flush_unmapped(),
+    Holder = image_holder(),
+    erlang:garbage_collect(),
+    Holder ! {use, self()},
+    receive used -> ok after 5000 -> error(holder_silent) end,
+    receive erx_area_unmapped -> error(unmapped_under_an_image) after 200 -> ok end,
+    Holder ! drop,
+    receive erx_area_unmapped -> ok after 5000 -> error(area_never_unmapped) end.
+
+%% A process holding the only image over a fresh area, which this process created and so
+%% hears unmapped; neither the area nor the image is left in this process.
+image_holder() ->
+    {ok, Area, _Page} = erx_memdraw:test_area(?AREA_BYTES, write),
+    R = {0, 0, 16, 16},
+    {ok, Image} = erx_memdraw:wrap(Area, 0, R, x32()),
+    spawn(fun() ->
+                  receive {use, From} -> ok end,
+                  erlang:garbage_collect(),
+                  Pixels = binary:copy(<<7>>, 64 * 16),
+                  {ok, R} = erx_memdraw:load(Image, R, Pixels),
+                  {ok, Pixels} = erx_memdraw:read(Image, R),
+                  From ! used,
+                  receive drop -> ok end
+          end).
+
+%% The earlier cases' areas, collected and their unmaps let arrive, so none is taken for
+%% this case's.
+flush_unmapped() ->
+    erlang:garbage_collect(),
+    receive after 200 -> ok end,
+    flush_unmapped(drain).
+
+flush_unmapped(drain) ->
+    receive erx_area_unmapped -> flush_unmapped(drain) after 0 -> ok end.

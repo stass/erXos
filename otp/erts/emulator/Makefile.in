@@ -1027,7 +1027,7 @@ $(OBJDIR)/erx_littlefs_nif.o: CFLAGS += $(LFS_CFLAGS)
 # display/memdraw. The imported files keep Plan 9's pragmas and USED(a, b).
 MEMDRAW_LIB = alloc arc arith badrect bytesperline chan cmap draw drawrepl ellipse fillpoly icossin icossin2 \
 	line load poly rectclip unload
-MEMDRAW_CFLAGS = -I$(ERX_TREE)/display/libmemdraw -I$(ERX_TREE)/display/memdraw \
+MEMDRAW_CFLAGS = -I$(ERX_TREE)/display/libmemdraw -I$(ERX_TREE)/display/memdraw -Inifs/erxos \
 	-Wno-unknown-pragmas -Wno-unused-value -Wno-unused-function
 MEMDRAW_OBJS = $(MEMDRAW_LIB:%=$(OBJDIR)/memdraw_%.o) $(OBJDIR)/erx_draw_clip.o $(OBJDIR)/erx_memdraw.o
 
@@ -1281,6 +1281,7 @@ NIF_OBJS = \
 	$(OBJDIR)/erx_watchdog_nif.o \
 	$(OBJDIR)/erx_device_nif.o \
 	$(OBJDIR)/erx_pipe_nif.o \
+	$(OBJDIR)/erx_area_nif.o \
 	$(OBJDIR)/erx_log_nif.o \
 	$(OBJDIR)/erx_object_info_nif.o \
 	$(OBJDIR)/erx_littlefs_nif.o \

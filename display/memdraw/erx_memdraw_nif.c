@@ -9,7 +9,11 @@
  * whose destructor alone frees it, so an image lives while any process
  * holds it (G2). A draw, load or read over 64 KiB of destination bytes
  * moves itself to a dirty CPU scheduler, so a full-screen compose never
- * holds a normal one, and a shape always runs on one.
+ * holds a normal one, and a shape always runs on one. An image wrap/4
+ * made over a connection's pixel area keeps the area's resource
+ * (erx_area.h) until its destructor has freed it, so the area is never
+ * unmapped under an image; one over the reader's read-only mapping is
+ * refused as a destination, so no operation writes to it.
  */
 #ifndef ERX_MEMDRAW_LOADABLE
 #define STATIC_ERLANG_NIF 1
@@ -19,6 +23,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "erx_area.h"
 #include "erx_memdraw.h"
 
 /* draw(3)'s colour meaning "do not fill". */
@@ -27,9 +32,20 @@
 
 typedef struct image_res {
 	erx_mdimage_t *image;
+	void *area;		/* the kept area resource of a wrapped image, or NULL */
+	bool readonly;		/* over a read-only area: never a destination */
 } image_res_t;
 
 static ErlNifResourceType *image_type;
+
+#ifdef ERX_MEMDRAW_LOADABLE
+/*
+ * Loaded into stock's emulator, which has no erx_area, the bundle links
+ * the test's stand-in area (test/display/erx_area_stand_in.c) instead.
+ */
+bool erx_area_stand_in_load(ErlNifEnv *env);
+ERL_NIF_TERM erx_area_stand_in_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
+#endif
 static ERL_NIF_TERM atom_ok, atom_error, atom_einval, atom_enomem, atom_none, atom_dst, atom_opaque, atom_true,
     atom_false, atom_fill;
 
@@ -41,6 +57,9 @@ image_dtor(ErlNifEnv *env, void *object)
 	(void)env;
 	if (res->image != NULL)
 		erx_memdraw_free(res->image);
+	/* Only now may the area go: nothing refers to its pixels any more. */
+	if (res->area != NULL)
+		enif_release_resource(res->area);
 }
 
 static bool
@@ -108,6 +127,18 @@ get_image(ErlNifEnv *env, ERL_NIF_TERM term, erx_mdimage_t **out)
 	return true;
 }
 
+/* An image an operation writes: any but one over a read-only area. */
+static bool
+get_dst(ErlNifEnv *env, ERL_NIF_TERM term, erx_mdimage_t **out)
+{
+	image_res_t *res;
+
+	if (!enif_get_resource(env, term, image_type, (void **)&res) || res->image == NULL || res->readonly)
+		return false;
+	*out = res->image;
+	return true;
+}
+
 static ERL_NIF_TERM
 make_rect(ErlNifEnv *env, erx_rect_t r)
 {
@@ -165,7 +196,47 @@ alloc_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	if (res == NULL)
 		return error(env, ERX_MEMDRAW_ENOMEM);
 	res->image = NULL;
+	res->area = NULL;
+	res->readonly = false;
 	erx_memdraw_status_t status = erx_memdraw_alloc(&res->image, chan, r, clipr, repl, color);
+	ERL_NIF_TERM term = enif_make_resource(env, res);
+	enif_release_resource(res);
+	return status == ERX_MEMDRAW_DONE ? enif_make_tuple2(env, atom_ok, term) : error(env, status);
+}
+
+/*
+ * wrap(Area, Offset, R, Chan) -> {ok, Image} | {error, einval | enomem}:
+ * an image of channel Chan over R whose pixels are Area's bytes from
+ * Offset, a multiple of the page size, so every word libmemdraw loads or
+ * stores is aligned; einval for an Offset off a page boundary or past the
+ * area, and for rows that pass the area's end (erx_memdraw_wrap).
+ */
+static ERL_NIF_TERM
+wrap_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_area_view_t area;
+	ErlNifUInt64 offset;
+	erx_rect_t r;
+	uint32_t chan;
+
+	(void)argc;
+	if (!erx_area_view(env, argv[0], &area) || !enif_get_uint64(env, argv[1], &offset) ||
+	    !get_rect(env, argv[2], &r) || !get_u32(env, argv[3], &chan))
+		return enif_make_badarg(env);
+	if (offset % area.page != 0 || offset >= area.bytes)
+		return error(env, ERX_MEMDRAW_EINVAL);
+	image_res_t *res = enif_alloc_resource(image_type, sizeof *res);
+	if (res == NULL)
+		return error(env, ERX_MEMDRAW_ENOMEM);
+	res->image = NULL;
+	res->area = NULL;
+	res->readonly = !area.writable;
+	erx_memdraw_status_t status =
+	    erx_memdraw_wrap(&res->image, chan, r, area.base + offset, area.bytes - (size_t)offset);
+	if (status == ERX_MEMDRAW_DONE) {
+		enif_keep_resource(area.resource);
+		res->area = area.resource;
+	}
 	ERL_NIF_TERM term = enif_make_resource(env, res);
 	enif_release_resource(res);
 	return status == ERX_MEMDRAW_DONE ? enif_make_tuple2(env, atom_ok, term) : error(env, status);
@@ -197,7 +268,7 @@ draw_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	const erx_rect_t *clip = NULL;
 	ERL_NIF_TERM result;
 
-	if (!get_image(env, argv[0], &dst) || !get_rect(env, argv[1], &r) || !get_image(env, argv[2], &src) ||
+	if (!get_dst(env, argv[0], &dst) || !get_rect(env, argv[1], &r) || !get_image(env, argv[2], &src) ||
 	    !get_point(env, argv[3], &sp) || !get_point(env, argv[5], &mp) || !enif_get_int(env, argv[6], &op))
 		return enif_make_badarg(env);
 	if (!enif_is_identical(argv[4], atom_opaque) && !get_image(env, argv[4], &mask))
@@ -277,7 +348,7 @@ line_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	erx_rect_t out = { 0, 0, 0, 0 };
 
 	(void)argc;
-	if (!get_image(env, argv[0], &dst) || !get_point(env, argv[1], &p0) || !get_point(env, argv[2], &p1) ||
+	if (!get_dst(env, argv[0], &dst) || !get_point(env, argv[1], &p0) || !get_point(env, argv[2], &p1) ||
 	    !get_u32(env, argv[3], &end0) || !get_u32(env, argv[4], &end1) || !get_i32(env, argv[5], &thick) ||
 	    !get_image(env, argv[6], &src) || !get_point(env, argv[7], &sp) || !enif_get_int(env, argv[8], &op))
 		return enif_make_badarg(env);
@@ -297,7 +368,7 @@ poly_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	erx_rect_t out = { 0, 0, 0, 0 };
 
 	(void)argc;
-	if (!get_image(env, argv[0], &dst) || !get_u32(env, argv[2], &end0) || !get_u32(env, argv[3], &end1) ||
+	if (!get_dst(env, argv[0], &dst) || !get_u32(env, argv[2], &end0) || !get_u32(env, argv[3], &end1) ||
 	    !get_i32(env, argv[4], &thick) || !get_image(env, argv[5], &src) || !get_point(env, argv[6], &sp) ||
 	    !enif_get_int(env, argv[7], &op) || !get_points(env, argv[1], &pts, &n))
 		return enif_make_badarg(env);
@@ -318,7 +389,7 @@ fill_poly_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	erx_rect_t out = { 0, 0, 0, 0 };
 
 	(void)argc;
-	if (!get_image(env, argv[0], &dst) || !get_i32(env, argv[2], &wind) || !get_image(env, argv[3], &src) ||
+	if (!get_dst(env, argv[0], &dst) || !get_i32(env, argv[2], &wind) || !get_image(env, argv[3], &src) ||
 	    !get_point(env, argv[4], &sp) || !enif_get_int(env, argv[5], &op) || !get_points(env, argv[1], &pts, &n))
 		return enif_make_badarg(env);
 	erx_memdraw_status_t status = erx_memdraw_fill_poly(dst, pts, n, wind, src, sp, op, &out);
@@ -337,7 +408,7 @@ ellipse_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	erx_rect_t out = { 0, 0, 0, 0 };
 
 	(void)argc;
-	if (!get_image(env, argv[0], &dst) || !get_point(env, argv[1], &c) || !get_i32(env, argv[2], &a) ||
+	if (!get_dst(env, argv[0], &dst) || !get_point(env, argv[1], &c) || !get_i32(env, argv[2], &a) ||
 	    !get_i32(env, argv[3], &b) || !get_thick(env, argv[4], &thick) || !get_image(env, argv[5], &src) ||
 	    !get_point(env, argv[6], &sp) || !enif_get_int(env, argv[7], &op))
 		return enif_make_badarg(env);
@@ -355,7 +426,7 @@ arc_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	erx_rect_t out = { 0, 0, 0, 0 };
 
 	(void)argc;
-	if (!get_image(env, argv[0], &dst) || !get_point(env, argv[1], &c) || !get_i32(env, argv[2], &a) ||
+	if (!get_dst(env, argv[0], &dst) || !get_point(env, argv[1], &c) || !get_i32(env, argv[2], &a) ||
 	    !get_i32(env, argv[3], &b) || !get_thick(env, argv[4], &thick) || !get_image(env, argv[5], &src) ||
 	    !get_point(env, argv[6], &sp) || !get_i32(env, argv[7], &alpha) || !get_i32(env, argv[8], &phi) ||
 	    !enif_get_int(env, argv[9], &op))
@@ -372,7 +443,7 @@ load_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	ErlNifBinary pixels;
 	ERL_NIF_TERM result;
 
-	if (!get_image(env, argv[0], &image) || !get_rect(env, argv[1], &r) ||
+	if (!get_dst(env, argv[0], &image) || !get_rect(env, argv[1], &r) ||
 	    !enif_inspect_binary(env, argv[2], &pixels))
 		return enif_make_badarg(env);
 	if (gone_dirty(env, erx_memdraw_rect_bytes(image, r), "load", load_nif, argc, argv, &result))
@@ -448,6 +519,10 @@ load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 	image_type = enif_open_resource_type(env, NULL, "erx_memdraw_image", image_dtor, ERL_NIF_RT_CREATE, NULL);
 	if (image_type == NULL || !erx_memdraw_init())
 		return 1;
+#ifdef ERX_MEMDRAW_LOADABLE
+	if (!erx_area_stand_in_load(env))
+		return 1;
+#endif
 	atom_ok = enif_make_atom(env, "ok");
 	atom_error = enif_make_atom(env, "error");
 	atom_einval = enif_make_atom(env, "einval");
@@ -463,6 +538,7 @@ load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 
 static ErlNifFunc functions[] = {
 	{ "alloc", 5, alloc_nif, 0 },
+	{ "wrap", 4, wrap_nif, 0 },
 	{ "clip", 3, clip_nif, 0 },
 	{ "draw", 8, draw_nif, 0 },
 	{ "load", 3, load_nif, 0 },
@@ -474,6 +550,9 @@ static ErlNifFunc functions[] = {
 	{ "arc", 10, arc_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 #ifdef ERX_MEMDRAW_CLOAD
 	{ "cload", 3, cload_nif, 0 },
+#endif
+#ifdef ERX_MEMDRAW_LOADABLE
+	{ "test_area", 2, erx_area_stand_in_nif, 0 },
 #endif
 };
 

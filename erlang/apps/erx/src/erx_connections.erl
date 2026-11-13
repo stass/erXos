@@ -18,14 +18,15 @@
 -module(erx_connections).
 -moduledoc false.
 
--export([start/2, open_side/2, close_side/2, dropped/0, connection/1]).
+-export([start/2, open_side/2, close_side/2, dropped/0, connection/1, area/1]).
 %% A domain's agent past its system connection's hand-over, and the system domain's agent,
 %% which start/2 runs and the host test (test/erlang/erx_connections_tests.erl) runs with
 %% a stand-in opener.
--export([introduced/4, system_sides/2]).
+-export([introduced/5, system_sides/2]).
 
 %% The lane driver's port_control command that finishes the port (erx_lane_drv.c).
 -define(CONTROL_FINISH, 2).
+-define(U64_MAX, 16#ffffffffffffffff).
 
 %% What erx_domain_lib:create/1 returned for a domain's system connection, with the
 %% domain's node: the slots of the two sides and of the domain's bell, the connection's
@@ -79,6 +80,12 @@ dropped() ->
 connection(Peer) when is_integer(Peer), Peer > 0 ->
     call({connection, Peer}).
 
+%% In a domain: the pixel area of this domain's connection to domain Peer, as
+%% erx_area:open/1 answers it, from the connection's open until its end.
+-spec area(pos_integer()) -> {ok, term(), pos_integer()} | {error, none | noproc | badarg}.
+area(Peer) when is_integer(Peer), Peer > 0 ->
+    call({area, Peer}).
+
 call(Request) ->
     try gen:call(?MODULE, '$gen_call', Request, infinity) of
         {ok, Reply} -> Reply
@@ -112,17 +119,19 @@ serve(Kernel, {PeerId, PeerNode, DomainPid}) ->
         exit:shutdown -> exit(shutdown);
         Class:Reason -> erx_dist:unavailable(system_connection, {Class, Reason})
     end,
-    introduced(Kernel, PeerId, DomainPid, fun lane_open/1).
+    introduced(Kernel, PeerId, DomainPid, fun lane_open/1, fun erx_area:map/4).
 
 %% A domain's agent serving the records of the system domain SystemId's domain pid
 %% DomainPid (records/3), with net_kernel Kernel taking each introduced connection's
 %% port, which Open opens from its open command. The domain pid is also where the
 %% domain's mints reply (erx_facet:minted/2), so the agent names it in the persistent
 %% term {erx, domain_pid} before it serves anything.
--spec introduced(pid(), pos_integer(), pid(), fun((string()) -> port())) -> no_return().
-introduced(Kernel, SystemId, DomainPid, Open) ->
+-spec introduced(pid(), pos_integer(), pid(), fun((string()) -> port()),
+                 fun((non_neg_integer(), pos_integer(), write | read, reference()) -> {ok, term()} | {error, term()})) ->
+          no_return().
+introduced(Kernel, SystemId, DomainPid, Open, MapArea) ->
     persistent_term:put({erx, domain_pid}, DomainPid),
-    records(#{kernel => Kernel, system => SystemId, domain_pid => DomainPid, open => Open}, #{}, 0).
+    records(#{kernel => Kernel, system => SystemId, domain_pid => DomainPid, open => Open, map_area => MapArea}, #{}, 0).
 
 %% An introduced connection's port, on the lane driver.
 lane_open(Command) ->
@@ -320,21 +329,26 @@ hand_over(Kernel, #{port := Port} = Connection) ->
 %%   erx:granted/0 (docs/design-system.md, "Facets a configured domain serves"), and each later
 %%   installation of a facet a configured domain minted for this one (install/4);
 %% * erx_dist's word that an introduced connection's entry is up;
-%% * each introduced port's end, and net_kernel's end.
+%% * each introduced port's end, and net_kernel's end;
+%% * a pixel area's unmap, and erx_area:open/1's question for a peer's area.
 %% What else arrives is dropped and counted in Dropped, so its queue stays empty
 %% (docs/design-domains.md, "Messages between the domain service and a runtime"). Held is
-%% each introduced connection by the peer's domain id, as {Phase, Port, Monitor}: mapping
-%% from the port's open until erx_dist's owner says the peer's entry is up, then up;
-%% Monitor watches the port, so a port that ends by itself is answered. The system domain
-%% sends one record about a peer at a time, each once the last is answered, so a
-%% connection_up names a peer the agent holds no port for; one that does not is dropped.
-%% Env is what the agent works with, as introduced/4 gives it.
+%% each introduced connection by the peer's domain id, as {Phase, Port, Monitor, Area}:
+%% mapping from the port's open until erx_dist's owner says the peer's entry is up, then
+%% up; Monitor watches the port, so a port that ends by itself is answered; Area is the
+%% connection's pixel area (map_area/2). Once the agent holds no port for the peer, a
+%% connection whose area is still mapped stays as {letting_go, Tag, Answer} until its
+%% area is unmapped (let_go/5). The system domain sends one record about a peer at a
+%% time, each once the last is answered, so a connection_up names a peer the agent holds
+%% nothing for; one that does not is dropped.
+%% Env is what the agent works with, as introduced/5 gives it.
 records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
     receive
-        {erx_origin, SystemId, {erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize}}
+        {erx_origin, SystemId,
+         {erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize, Area}}
           when is_integer(Peer), is_atom(PeerNode), not is_map_key(Peer, Held) ->
             Values = [Side, PeerSide, PeerBell, Label, OutSize, InSize],
-            records(Env, connection_up(Env, Peer, PeerNode, Values, Held), Dropped);
+            records(Env, connection_up(Env, Peer, PeerNode, Values, Area, Held), Dropped);
         {erx_origin, SystemId, {erx_connection_down, Peer, Reason}} when is_integer(Peer) ->
             records(Env, connection_down(Env, Peer, Reason, Held), Dropped);
         {erx_origin, SystemId, {erx_facets, Facets, Granted}} when is_map(Facets) ->
@@ -353,13 +367,26 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
             records(Env, inserted(Env, Peer, Port, Held), Dropped);
         {{connection_ended, Peer}, Monitor, port, Port, Reason} ->
             records(Env, ended_itself(Env, Peer, Monitor, Port, Reason, Held), Dropped);
+        {erx_area_unmapped, Tag} when is_reference(Tag) ->
+            records(Env, area_unmapped(Env, Tag, Held), Dropped);
+        erx_area_collect ->
+            %% Here, between records, the loop's arguments are the agent's only live
+            %% terms, so an area it let go is no longer among them.
+            erlang:garbage_collect(),
+            records(Env, Held, Dropped);
         {'$gen_call', From, dropped} ->
             gen:reply(From, Dropped),
             records(Env, Held, Dropped);
         {'$gen_call', From, {connection, Peer}} ->
             gen:reply(From, case Held of
-                                #{Peer := {up, Port, _Monitor}} -> {ok, Port};
+                                #{Peer := {up, Port, _Monitor, _Area}} -> {ok, Port};
                                 #{} -> {error, noconnection}
+                            end),
+            records(Env, Held, Dropped);
+        {'$gen_call', From, {area, Peer}} ->
+            gen:reply(From, case Held of
+                                #{Peer := {_Phase, _Port, _Monitor, {Area, Bytes, _Tag}}} -> {ok, Area, Bytes};
+                                #{} -> {error, none}
                             end),
             records(Env, Held, Dropped);
         {'$gen_call', From, _Request} ->
@@ -402,25 +429,73 @@ register_facets(Facets) ->
 %% then, so the system domain hears ok for an introduction once both entries are up
 %% (docs/design-runtime.md, "Connections in ERTS"). An open the driver refuses, or a port
 %% net_kernel does not take, is answered connection_lost with {map, refused} alone, the
-%% port gone by then.
-connection_up(#{kernel := Kernel, domain_pid := DomainPid, open := Open}, Peer, PeerNode, Values, Held) ->
-    case open_introduced(Open, Peer, PeerNode, Values) of
-        {ok, Port} ->
-            Monitor = erlang:monitor(port, Port, [{tag, {connection_ended, Peer}}]),
-            case accepted(Kernel, Port, #{port => Port, node => PeerNode, id => Peer, system => false}) of
+%% port gone by then. A connection with a pixel area has it mapped first (map_area/2), and
+%% an area the agent cannot map refuses the connection the same way.
+connection_up(#{kernel := Kernel, domain_pid := DomainPid} = Env, Peer, PeerNode, Values, AreaGrant, Held) ->
+    Refused = {erx_connection_lost, Peer, {map, refused}},
+    case map_area(Env, AreaGrant) of
+        {ok, Area} ->
+            case open_introduced(Env, Peer, PeerNode, Values) of
                 {ok, Port} ->
-                    Held#{Peer => {mapping, Port, Monitor}};
+                    Monitor = erlang:monitor(port, Port, [{tag, {connection_ended, Peer}}]),
+                    case accepted(Kernel, Port, #{port => Port, node => PeerNode, id => Peer, system => false}) of
+                        {ok, Port} ->
+                            Held#{Peer => {mapping, Port, Monitor, Area}};
+                        {error, _Refusal} ->
+                            erlang:demonitor(Monitor, [flush]),
+                            let_go(Env, Peer, Area, Refused, Held)
+                    end;
                 {error, _Refusal} ->
-                    erlang:demonitor(Monitor, [flush]),
-                    DomainPid ! {erx_connection_lost, Peer, {map, refused}},
-                    Held
+                    let_go(Env, Peer, Area, Refused, Held)
             end;
-        {error, _Refusal} ->
-            DomainPid ! {erx_connection_lost, Peer, {map, refused}},
+        error ->
+            DomainPid ! Refused,
             Held
     end.
 
-open_introduced(Open, Peer, PeerNode, Values) ->
+%% The pixel area of connection_up (docs/design-display.md, "The pixel area"): none, or
+%% the area mapped as {Area, Bytes, Tag}, read-write for write and read-only for read,
+%% where Area is erx_area's resource for the mapping and Tag the agent's name for it,
+%% which the resource's destructor sends back once the area is unmapped. error for a
+%% grant of the wrong shape or one the NIF refuses.
+map_area(_Env, none) ->
+    {ok, none};
+map_area(#{map_area := MapArea}, {Slot, Bytes, Mode})
+  when is_integer(Slot), Slot >= 0, Slot =< ?U64_MAX, is_integer(Bytes), Bytes > 0, Bytes =< ?U64_MAX,
+       (Mode =:= write orelse Mode =:= read) ->
+    Tag = make_ref(),
+    case MapArea(Slot, Bytes, Mode, Tag) of
+        {ok, Area} -> {ok, {Area, Bytes, Tag}};
+        {error, _} -> error
+    end;
+map_area(_Env, _Grant) ->
+    error.
+
+%% The agent lets Peer's connection go with Answer, connection_lost or connection_unmapped,
+%% once it holds no port for it. Without a pixel area that is at once. With one, Answer
+%% waits in Held as {letting_go, Tag, Answer} until the area's destructor has unmapped it
+%% (area_unmapped/3), which is once every image and term over it is gone, the agent's own
+%% among them, which the next collection between records drops; so the system domain
+%% deletes the area only once nothing in this runtime can read or write it.
+let_go(#{domain_pid := DomainPid}, _Peer, none, Answer, Held) ->
+    DomainPid ! Answer,
+    Held;
+let_go(_Env, Peer, {_Area, _Bytes, Tag}, Answer, Held) ->
+    self() ! erx_area_collect,
+    Held#{Peer => {letting_go, Tag, Answer}}.
+
+%% The area named Tag is unmapped: the answer that waited for it goes.
+area_unmapped(#{domain_pid := DomainPid}, Tag, Held) ->
+    case [Peer || Peer := {letting_go, Waiting, _Answer} <- Held, Waiting =:= Tag] of
+        [Peer] ->
+            {{letting_go, Tag, Answer}, Rest} = maps:take(Peer, Held),
+            DomainPid ! Answer,
+            Rest;
+        [] ->
+            Held
+    end.
+
+open_introduced(#{open := Open}, Peer, PeerNode, Values) ->
     case lists:all(fun is_integer/1, Values) of
         true ->
             Words = [integer_to_list(Word) || Word <- Values ++ [Peer]],
@@ -437,9 +512,9 @@ open_introduced(Open, Peer, PeerNode, Values) ->
 %% first and was answered connection_lost, is nothing.
 inserted(#{domain_pid := DomainPid}, Peer, Port, Held) ->
     case Held of
-        #{Peer := {mapping, Port, Monitor}} ->
+        #{Peer := {mapping, Port, Monitor, Area}} ->
             DomainPid ! {erx_connection_mapped, Peer},
-            Held#{Peer := {up, Port, Monitor}};
+            Held#{Peer := {up, Port, Monitor, Area}};
         #{} ->
             Held
     end.
@@ -448,17 +523,17 @@ inserted(#{domain_pid := DomainPid}, Peer, Port, Held) ->
 %% peer_held, erlang:disconnect_node/1, or its owner's end. ERTS has taken down the entry,
 %% if the port controlled one yet, and the driver's stop unmaps both sides (close/2 says
 %% when), so the agent tells the domain pid connection_lost with what ended it
-%% (lost_reason/1), in {map, Lost} while the entry was not yet up.
+%% (lost_reason/1), in {map, Lost} while the entry was not yet up, once the connection's
+%% pixel area, if it has one, is unmapped too (let_go/5).
 %% A port the agent ended itself is no longer monitored, so it is never answered here.
-ended_itself(#{domain_pid := DomainPid}, Peer, Monitor, Port, Reason, Held) ->
+ended_itself(Env, Peer, Monitor, Port, Reason, Held) ->
     case Held of
-        #{Peer := {Phase, Port, Monitor}} ->
+        #{Peer := {Phase, Port, Monitor, Area}} ->
             Lost = case Phase of
                        mapping -> {map, lost_reason(Reason)};
                        up -> lost_reason(Reason)
                    end,
-            DomainPid ! {erx_connection_lost, Peer, Lost},
-            maps:remove(Peer, Held);
+            let_go(Env, Peer, Area, {erx_connection_lost, Peer, Lost}, maps:remove(Peer, Held));
         #{} ->
             Held
     end.
@@ -478,17 +553,20 @@ lost_reason(_Reason) -> noconnection.
 %% connection_down: the port finishes, so every whole frame the peer published before the
 %% position it reads then is delivered, and then ends with the record's reason, which takes
 %% the peer's entry down and fires its links and monitors with it (edit 56); the driver's
-%% stop unmaps both sides; then the agent answers connection_unmapped. About a peer it holds
-%% no port for, one it never mapped or already lost, it answers at once, having nothing
-%% mapped. A port that ended by itself as the record came is gone already: its end is not
-%% answered connection_lost, since connection_unmapped answers the record.
-connection_down(#{domain_pid := DomainPid}, Peer, Reason, Held) ->
+%% stop unmaps both sides; then the agent answers connection_unmapped, once the pixel area
+%% is unmapped too (let_go/5). About a peer it holds nothing for, one it never mapped or
+%% already lost, it answers at once, having nothing mapped. A port that ended by itself as
+%% the record came is gone already: its end is not answered connection_lost, since
+%% connection_unmapped answers the record, and so does a connection whose connection_lost
+%% still waits for its area: the record's answer replaces it.
+connection_down(#{domain_pid := DomainPid} = Env, Peer, Reason, Held) ->
     case maps:take(Peer, Held) of
-        {{_Phase, Port, Monitor}, Rest} ->
+        {{letting_go, Tag, _Lost}, Rest} ->
+            Rest#{Peer => {letting_go, Tag, {erx_connection_unmapped, Peer}}};
+        {{_Phase, Port, Monitor, Area}, Rest} ->
             erlang:demonitor(Monitor, [flush]),
             finish(Port, down_reason(Reason)),
-            DomainPid ! {erx_connection_unmapped, Peer},
-            Rest;
+            let_go(Env, Peer, Area, {erx_connection_unmapped, Peer}, Rest);
         error ->
             DomainPid ! {erx_connection_unmapped, Peer},
             Held

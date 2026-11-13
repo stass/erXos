@@ -223,7 +223,7 @@ grantee_restart() ->
     erlang:trace(PidA, true, ['receive', {tracer, self()}]),
     erlang:trace(PidB, true, ['receive', {tracer, self()}]),
     PidA ! {erx_origin, 7, {erx_connection_lost, 6, noconnection}},
-    receive {trace, PidA, 'receive', {_, record, _, {erx_connection_up, 8, _, _, _, _, _, _, _}}} -> ok
+    receive {trace, PidA, 'receive', {_, record, _, {erx_connection_up, 8, _, _, _, _, _, _, _, _}}} -> ok
     after 2000 -> error(no_connection_up) end,
     PidA ! {erx_origin, 7, {erx_connection_mapped, 8}},
     PidB ! {erx_origin, 8, {erx_connection_mapped, 7}},

@@ -112,6 +112,12 @@ module Erx
                                        'and the read sits between two ISBs',
           design: 'docs/design-arch-aarch64.md#timer', check: 'CounterReads, on every NativeRoot link',
           test: 'test/host/counter_reads_test.rb'
+        ),
+        Chokepoints::Elsewhere.new(
+          name: 'area-mappers', rule: 'only the connection agent, erx_connections, calls erx_area:map/4, which maps a ' \
+                                      "connection's pixel area; elsewhere erx_area is named only as erx_area:open and erx_area:area",
+          design: 'docs/design-display.md#chokepoints', check: 'AreaMappers, in Checks',
+          test: 'test/host/area_mappers_test.rb'
         )
       ]
     )

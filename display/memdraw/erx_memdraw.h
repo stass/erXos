@@ -56,6 +56,16 @@ bool erx_memdraw_init(void);
 erx_memdraw_status_t erx_memdraw_alloc(erx_mdimage_t **out, uint32_t chan, erx_rect_t r, erx_rect_t clipr,
     bool repl, uint32_t color);
 void erx_memdraw_free(erx_mdimage_t *image);
+
+/*
+ * A new image of channel chan over r whose pixels are the n bytes at
+ * data, which the caller owns and keeps mapped until erx_memdraw_free:
+ * the image's rows, laid out as erx_memdraw_alloc lays them out, and
+ * one word past them, which libmemdraw may load from (alloc.c). Nothing
+ * is written; the clip rectangle is r. EINVAL as for erx_memdraw_alloc,
+ * and for data off a word boundary or rows and word that pass n.
+ */
+erx_memdraw_status_t erx_memdraw_wrap(erx_mdimage_t **out, uint32_t chan, erx_rect_t r, uint8_t *data, size_t n);
 bool erx_memdraw_chan_supported(uint32_t chan);
 
 /* c: the replicate bit and clip rectangle as they stand after it. */

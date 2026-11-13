@@ -32,7 +32,7 @@ module Erx
         # With no other mapping of device memory in a runtime, nothing else can reach one.
         Chokepoints::Forbidden.new(
           name: 'device-memory-mapping',
-          rule: "only erx_device makes a runtime's mapping of device memory; the lane and program drivers, the crash area and the domain library NIF map memory objects",
+          rule: "only erx_device makes a runtime's mapping of device memory; the lane and program drivers, the crash area, the domain library NIF and the pixel area NIF map memory objects",
           design: DEVICE_DESIGN,
           scope: Chokepoints::Scope.new(own: false, extra: ['otp/**/*'], except: ['otp/erts/emulator/asmjit/**/*']),
           pattern: /\berx_(?:mem_create_physical|vm_map)\b/,
@@ -45,13 +45,16 @@ module Erx
           # objects it has just created from the session's budget, never device memory.
           # erx_pipe_nif.c maps a pipe's lock page, rings and reader pages, memory objects the
           # pipe server created from the session's budget, never device memory.
+          # erx_area_nif.c maps a connection's pixel area, a memory object the system domain
+          # created with the connection, never device memory.
           sites: [Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_device.c"),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_program_drv.c', permits: /\Aerx_vm_map\z/),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_jit_memory.c', permits: /\Aerx_vm_map\z/),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_lane_drv.c', permits: /\Aerx_vm_map\z/),
                   Chokepoints::Site.new(glob: 'otp/erts/emulator/sys/erxos/erx_crash_area.c', permits: /\Aerx_vm_map\z/),
                   Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_domain_lib_nif.c", permits: /\Aerx_vm_map\z/),
-                  Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_pipe_nif.c", permits: /\Aerx_vm_map\z/)],
+                  Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_pipe_nif.c", permits: /\Aerx_vm_map\z/),
+                  Chokepoints::Site.new(glob: "#{DEVICE_NIFS}/erx_area_nif.c", permits: /\Aerx_vm_map\z/)],
           seed: { 'otp/erts/emulator/beam/seeded.c' => "void f(void) { erx_mem_create_physical(0, 0, 0, 0, 0, 0); }\n",
                   'otp/erts/emulator/nifs/erxos/seeded.c' => "void f(void) { erx_vm_map(0, 0, 0, 0, 0, 0); }\n",
                   'otp/erts/emulator/sys/common/erl_mmap.c' => "void f(void) { erx_vm_map(0, 0, 0, 0, 0, 0); }\n",

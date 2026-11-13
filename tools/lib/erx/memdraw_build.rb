@@ -22,6 +22,9 @@ module Erx
   module MemdrawBuild
     LIBMEMDRAW = 'display/libmemdraw'
     MEMDRAW = 'display/memdraw'
+    # erx_area.h, the pixel area as the NIF sees it, and the bundle's stand-in for erx_area.
+    AREA = 'otp/erts/emulator/nifs/erxos'
+    AREA_STAND_IN = 'test/display/erx_area_stand_in.c'
     # The files of 9front's libmemdraw and libdraw that erXos imported (display/libmemdraw/ORIGIN.md).
     IMPORTED = %w[alloc arc arith badrect bytesperline chan cload cmap draw drawrepl ellipse fillpoly icossin icossin2 line
                   load poly rectclip unload].freeze
@@ -45,7 +48,8 @@ module Erx
 
     # The NIF bundle erx_memdraw.so in directory, for stock OTP's headers at otp.
     def nif(root:, otp:, directory:, compiler:, seed: nil)
-      sources = sources(root: root, directory: directory, seed: seed) << File.join(root, MEMDRAW, 'erx_memdraw_nif.c')
+      sources = sources(root: root, directory: directory, seed: seed) << File.join(root, MEMDRAW, 'erx_memdraw_nif.c') <<
+                File.join(root, AREA_STAND_IN)
       compile(compiler, [*NIF_FLAGS, *TRAP_UB, '-I', File.join(otp, 'usr/include')], sources,
               File.join(directory, 'erx_memdraw.so'), root: root)
     end
@@ -140,7 +144,7 @@ module Erx
     end
 
     def compile(compiler, flags, sources, output, root:)
-      includes = ['-I', File.join(root, LIBMEMDRAW), '-I', File.join(root, MEMDRAW)]
+      includes = ['-I', File.join(root, LIBMEMDRAW), '-I', File.join(root, MEMDRAW), '-I', File.join(root, AREA)]
       command = [compiler, '-std=c17', '-g', '-O1', *WARNINGS, '-DERX_MEMDRAW_CLOAD', *flags, *includes, '-o', output,
                  *sources]
       text, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, *command, stdin_data: '')

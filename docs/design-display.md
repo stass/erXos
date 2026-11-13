@@ -527,11 +527,13 @@ maps its sides, and `erx_area:open(Peer)` answers `{ok, Area, Bytes}`,
 a NIF resource for the mapping, or `{error, none}` for a connection
 without one. `erx_memdraw:wrap(Area, Offset, Rect, Chan)` makes an image
 over a range of it, refusing an `Offset` that is not a multiple of the
-page size and a range that passes the area's end, so every word
-`libmemdraw` loads or stores in the image is aligned; the
-image refers to the area, and the agent unmaps the area, and only then
-answers that the connection is unmapped, when the last term that refers
-to it has been collected. `erx_winfs` opens a client's area when the
+page size and a range that, with the one word `libmemdraw` may load past
+an image's rows, passes the area's end, so every word `libmemdraw` loads
+or stores in the image is aligned and inside the area; an image over the
+display's read-only mapping is never a destination. The image refers to
+the area, and the agent unmaps the area, and only then answers that the
+connection is unmapped or lost, when the last term that refers to it has
+been collected. `erx_winfs` opens a client's area when the
 client's grant is minted and drops it when the grant ends, and
 `erx_screen` collects its heap when a grant's windows end, so a
 connection's end is not held by garbage.
@@ -3688,6 +3690,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
 | Only `erx_memdraw_draw` and `memdraw`, the shapes' one way to draw, call `memimagedraw`, and only `erx_draw_clip` makes the `erx_clip_t` it walks | `memdraw-clip` (tools/lib/erx/chokepoint_rules/memdraw.rb), over erXos's sources and its copy of `libmemdraw`: `memimagedraw` and `erx_clip_t` appear only in `draw.c`, `memdraw.h`, `erx_draw_clip.c` and `erx_memdraw.c` |
 | Only the functions that walk a checked rectangle touch pixel memory: `libmemdraw`'s draw, load, unload, cload and allocation, and `erx_memdraw`'s snapshot | `memdraw-pixels`: `bdata`, `byteaddr` and `wordaddr` appear only in their files, so a shape, the NIF or new code that writes pixels itself fails the build |
 | Only an image resource's destructor frees an image a term can reach or lets go of the memory it lies over | `memdraw-free`: `erx_memdraw_free` is called only from the NIF, by `image_dtor` and by the test-only `cload` for the image it made itself |
+| Only the connection agent, `erx_connections`, maps a pixel area, so every mapping is one the agent waits for before it answers that the connection is unmapped, and the display's mapping is the read-only one the agent asked for | `area-mappers` (tools/lib/erx/area_mappers.rb), over the Erlang sources of `otp/` and `erlang/`: outside `erx_area` and `erx_connections`, the atom `erx_area` appears only as the module of `open/1` and of the type `area()`, so `map/4` as a call, a fun, an apply's arguments, an import, a macro, a literal or a string fails the build |
 | Only `erx_memdraw:wrap/4` makes an image over memory `erx_memdraw` did not allocate, and only after checking the range | a source check over the NIF: the one site that sets an image's data pointer from an area or a device's region |
 | Only `erx_screen` writes the screen image, makes images over clients' pixel areas, and calls the display driver's `flush/3` and `power/2` | an xref check over the display release |
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |

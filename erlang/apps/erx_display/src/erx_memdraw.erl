@@ -16,10 +16,10 @@ process unions into its dirty list. An image is freed when no process holds
 it, and is used by one process at a time.
 """.
 
--export([alloc/5, clip/3, draw/8, line/9, poly/8, fill_poly/6, ellipse/8, arc/10, load/3, read/2,
-         cload/3]).
--nifs([alloc/5, clip/3, draw/8, line/9, poly/8, fill_poly/6, ellipse/8, arc/10, load/3, read/2,
-         cload/3]).
+-export([alloc/5, wrap/4, clip/3, draw/8, line/9, poly/8, fill_poly/6, ellipse/8, arc/10, load/3, read/2,
+         cload/3, test_area/2]).
+-nifs([alloc/5, wrap/4, clip/3, draw/8, line/9, poly/8, fill_poly/6, ellipse/8, arc/10, load/3, read/2,
+         cload/3, test_area/2]).
 -on_load(load_nif/0).
 
 -type image() :: reference().
@@ -42,6 +42,20 @@ DNofill. `einval` for a channel draw(3)'s `b` refuses or a rectangle
 -spec alloc(0..16#ffffffff, rect(), rect(), boolean(), 0..16#ffffffff) ->
           {ok, image()} | {error, einval | enomem}.
 alloc(_Chan, _R, _Clipr, _Repl, _Color) -> ?NIF.
+
+-doc """
+An image of channel Chan over R whose pixels are the bytes of Area, a
+connection's pixel area from `erx_area:open/1`, from Offset on, laid out as
+`alloc/5` lays out its own; nothing is written, and the clip rectangle is R.
+The image keeps the area mapped until it is freed. `einval` for an Offset
+that is not a multiple of the page size, a channel or rectangle `alloc/5`
+refuses, or rows that, with one word libmemdraw may load past them, pass the
+area's end. An image over the display's read-only mapping is read and never
+written: an operation that would write it fails with `badarg`.
+""".
+-spec wrap(erx_area:area(), non_neg_integer(), rect(), 0..16#ffffffff) ->
+          {ok, image()} | {error, einval | enomem}.
+wrap(_Area, _Offset, _R, _Chan) -> ?NIF.
 
 -doc "`c`: the image's replicate bit and clip rectangle as they stand after it.".
 -spec clip(image(), boolean(), rect()) -> ok.
@@ -110,3 +124,13 @@ oracle of `erx_draw_image:decode/3`.
 -spec cload(0..16#ffffffff, rect(), binary()) ->
           {ok, binary(), non_neg_integer()} | {error, einval | enomem}.
 cload(_Chan, _R, _Data) -> ?NIF.
+
+-doc """
+Test only: absent from the runtime, where it raises `undef`, and present in
+the bundle stock's emulator loads: a stand-in pixel area of
+Bytes, whole host pages, with an untouchable page past it, writable or
+read-only, and the host's page size; its unmap sends the caller
+`erx_area_unmapped` (test/display/erx_area_stand_in.c).
+""".
+-spec test_area(pos_integer(), write | read) -> {ok, erx_area:area(), pos_integer()}.
+test_area(_Bytes, _Mode) -> ?NIF.

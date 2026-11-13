@@ -666,10 +666,21 @@ it; git history is the record of completed work.
   order [Track D](docs/plan.md#track-d-windows-widgets-and-the-web) builds it. Nothing below is built; the cores named
   as landed are kept and changed as listed.
   * **The pixel area** ([The pixel area](docs/design-display.md#the-pixel-area)): the domain library makes it
-    (`erx_dom_connect`'s `area`, `area_reader`); still missing are the domain service passing the grant's `pixels`
-    to it (with the manifest's `display` record below), `connection_up`'s `Area` and `ERX_LANE_CTL_SLOT`'s pinned
-    length; the connection agent's mapping and unmapping of an area; the `erx_area` NIF and `erx_memdraw:wrap/4`, an
-    image over memory the NIF did not allocate, which the agent unmaps only after the last image over it is gone.
+    (`erx_dom_connect`'s `area`, `area_reader`), `connection_up` carries it, the connection agent maps it and
+    unmaps it after the last image over it (`erx_area`, `erx_memdraw:wrap/4`); still missing are the domain service
+    passing the grant's `pixels` to it (with the manifest's `display` record below), and a QEMU case in which one
+    domain writes an area's pixels and the other reads them.
+* [Medium] `erx_connections` (`let_go/5`): a connection with an area is answered unmapped or lost only once
+  every process that held the area or an image over it has collected; an idle holder that dropped it but never
+  collects holds the connection, its objects and the display's budget for it. The design names only
+  `erx_winfs` and `erx_screen`. A fix by construction: at let-go, the NIF replaces the area's range in place with
+  private zero memory owned by the resource and the agent answers at once.
+* [Medium] `erx_connections`: only the agent opens an `erx_lane` port over a connection's side, but no build check
+  enforces it as `area-mappers` (tools/lib/erx/area_mappers.rb) does for `erx_area:map/4`; a side another process
+  maps is not counted by the agent, which then answers unmapped while that mapping lives.
+* [Low] `erx_memdraw_nif.c`: read-only images are refused as destinations by each writing NIF calling `get_dst`;
+  carry the bit in the core or a separate resource type so a new writer cannot miss it, and cover poly,
+  fill_poly, ellipse and arc in `wrap_read_only`. The stand-in area has no guard page before the area.
   * **The manifest** ([A display's session](docs/design-display.md#a-displays-session)): the `display` record in
     `abi/manifest.txt`, named after the `windows` service it describes, and its reader; property 18 of the manifest
     check (a template's `pixels` counted by its principal's `domains` quota, no facet row setting `session`) with its

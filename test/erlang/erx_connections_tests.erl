@@ -21,14 +21,21 @@
 -define(PEER_NODE, 'peer@erxos').
 %% A connection_up's words after the peer's node: the domain's side, the peer's side
 %% and bell, the label, and the sizes of the ring the domain writes and of the one it reads.
--define(UP_WORDS, 11, 12, 13, 9, 4096, 8192).
+-define(UP_WORDS, 11, 12, 13, 9, 4096, 8192, none).
+%% A pixel area the stand-in maps, and one it refuses.
+-define(AREA, {21, 8192, write}).
+-define(BAD_AREA, {0, 8192, read}).
 
 agent_test_() ->
     [{atom_to_list(Name), fun() -> with_agent(Case) end}
      || {Name, Case} <- [{mapped_then_lost, fun mapped_then_lost/1}, {ended_before_up, fun ended_before_up/1},
                          {owner_ended, fun owner_ended/1}, {refused_hand_over, fun refused_hand_over/1},
                          {refused_open, fun refused_open/1}, {down, fun down/1}, {forged, fun forged/1},
-                         {facets, fun facets/1}, {installs, fun installs/1}, {connection, fun connection/1}]].
+                         {facets, fun facets/1}, {installs, fun installs/1}, {connection, fun connection/1},
+                         {area_down, fun area_down/1}, {area_lost, fun area_lost/1},
+                         {area_lost_then_down, fun area_lost_then_down/1}, {area_refused, fun area_refused/1}]]
+    %% area_collected starts its own agent, with erx_area:map/4 in place of the stand-in fun.
+    ++ [{"area_collected", fun area_collected/0}].
 
 %% Runs Case with an agent started from the test's own process, which plays the
 %% agent's environment, and ends the agent after.
@@ -48,14 +55,38 @@ start() ->
           end).
 
 start(Open) ->
+    start(Open, map_area(self())).
+
+start(Open, MapArea) ->
     Test = self(),
     Agent = spawn(fun() ->
                           process_flag(trap_exit, true),
                           true = register(erx_connections, self()),
                           Test ! {registered, self()},
-                          erx_connections:introduced(Test, ?SYSTEM, Test, Open)
+                          erx_connections:introduced(Test, ?SYSTEM, Test, Open, MapArea)
                   end),
     receive {registered, Agent} -> Agent end.
+
+%% The stand-in for erx_area:map/4: tells the test the mapping's tag and answers a term
+%% naming it, or refuses slot 0. The test plays the area's destructor: it sends the agent
+%% {erx_area_unmapped, Tag} when a case says the last reference is gone.
+map_area(Test) ->
+    fun(0, _Bytes, _Mode, _Tag) -> {error, einval};
+       (Slot, Bytes, Mode, Tag) -> Test ! {area_mapped, Slot, Bytes, Mode, Tag}, {ok, {area, Tag}}
+    end.
+
+area_mapped() ->
+    receive {area_mapped, 21, 8192, write, Tag} -> Tag after 2000 -> timeout end.
+
+%% A connection with ?AREA brought up as mapped/1 brings one up, and the area's tag.
+mapped_area(Agent) ->
+    record(Agent, {erx_connection_up, ?PEER, ?PEER_NODE, 11, 12, 13, 9, 4096, 8192, ?AREA}),
+    Tag = area_mapped(),
+    {_Command, Port} = opened(),
+    {Port, _Owner} = accept(Agent, owner),
+    Agent ! {erx_connection_inserted, ?PEER, Port},
+    {erx_connection_mapped, ?PEER} = answer(),
+    {Port, Tag}.
 
 %% Ends the agent and waits until its name is free for the next.
 stop(Agent) ->
@@ -389,3 +420,89 @@ side_closed_before_up(Agent) ->
     ?assertEqual(ok, erx_connections:close_side(?PEER, stopped)),
     ?assertEqual({error, noconnection}, side_answer(2000)),
     ?assertEqual(none, side_answer(200)).
+
+area_down(Agent) ->
+    %% The agent maps the area with the connection and hands it out on open; on
+    %% connection_down it ends the port at once but answers connection_unmapped only once
+    %% the area is unmapped, which here the test says in the destructor's place; open
+    %% answers none from the record on.
+    {Port, Tag} = mapped_area(Agent),
+    ?assertEqual({ok, {area, Tag}, 8192}, erx_connections:area(?PEER)),
+    ?assertEqual({error, none}, erx_connections:area(99)),
+    Watch = monitor(port, Port),
+    record(Agent, {erx_connection_down, ?PEER, noconnection}),
+    ?assertEqual(noconnection, receive {'DOWN', Watch, port, Port, R} -> R after 2000 -> timeout end),
+    ?assertEqual(none, silent()),
+    ?assertEqual({error, none}, erx_connections:area(?PEER)),
+    Agent ! {erx_area_unmapped, make_ref()},
+    ?assertEqual(none, silent()),
+    Agent ! {erx_area_unmapped, Tag},
+    ?assertEqual({erx_connection_unmapped, ?PEER}, answer()),
+    ?assertEqual(0, erx_connections:dropped()).
+
+area_lost(Agent) ->
+    %% A port that ends by itself is answered connection_lost once the area is unmapped.
+    {Port, Tag} = mapped_area(Agent),
+    exit(Port, erx_lane_malformed),
+    ?assertEqual(none, silent()),
+    Agent ! {erx_area_unmapped, Tag},
+    ?assertEqual({erx_connection_lost, ?PEER, malformed}, answer()).
+
+area_lost_then_down(Agent) ->
+    %% A connection_down that comes while connection_lost waits for the area is answered
+    %% instead of it, with connection_unmapped, once the area is unmapped.
+    {Port, Tag} = mapped_area(Agent),
+    Watch = monitor(port, Port),
+    exit(Port, erx_lane_malformed),
+    receive {'DOWN', Watch, port, Port, _} -> ok end,
+    record(Agent, {erx_connection_down, ?PEER, noconnection}),
+    ?assertEqual(none, silent()),
+    Agent ! {erx_area_unmapped, Tag},
+    ?assertEqual({erx_connection_unmapped, ?PEER}, answer()),
+    ?assertEqual(none, silent()).
+
+area_collected() ->
+    %% With erx_area:map/4 itself, over the host's stand-in NIF, the area is a real
+    %% resource and nothing here plays its destructor: connection_unmapped comes only
+    %% once the agent's collection between records has dropped the agent's own
+    %% reference. The test drops the one open gave it before the connection goes down.
+    %% The area is whole host pages, 16 KiB on some hosts.
+    Test = self(),
+    Agent = start(fun(Command) ->
+                          Port = open_port({spawn, "cat"}, [binary]),
+                          Test ! {opened, Command, Port},
+                          Port
+                  end, fun erx_area:map/4),
+    try
+        record(Agent, {erx_connection_up, ?PEER, ?PEER_NODE, 11, 12, 13, 9, 4096, 8192, {21, 65536, write}}),
+        {_Command, Port} = opened(),
+        {Port, _Owner} = accept(Agent, owner),
+        Agent ! {erx_connection_inserted, ?PEER, Port},
+        ?assertEqual({erx_connection_mapped, ?PEER}, answer()),
+        ?assertMatch({ok, _Area, 65536}, erx_connections:area(?PEER)),
+        erlang:garbage_collect(),
+        record(Agent, {erx_connection_down, ?PEER, noconnection}),
+        ?assertEqual({erx_connection_unmapped, ?PEER}, answer())
+    after
+        stop(Agent)
+    end.
+
+area_refused(Agent) ->
+    %% An area the NIF refuses, or one of the wrong shape, refuses the connection before
+    %% its port opens; one mapped before an open that fails waits for its unmap.
+    record(Agent, {erx_connection_up, ?PEER, ?PEER_NODE, 11, 12, 13, 9, 4096, 8192, ?BAD_AREA}),
+    ?assertEqual({erx_connection_lost, ?PEER, {map, refused}}, answer()),
+    record(Agent, {erx_connection_up, ?PEER, ?PEER_NODE, 11, 12, 13, 9, 4096, 8192, {21, 8192, rw}}),
+    ?assertEqual({erx_connection_lost, ?PEER, {map, refused}}, answer()),
+    ?assertEqual(timeout, opened()),
+    stop(Agent),
+    Refusing = start(fun(_Command) -> error(badarg) end),
+    try
+        record(Refusing, {erx_connection_up, ?PEER, ?PEER_NODE, 11, 12, 13, 9, 4096, 8192, ?AREA}),
+        Tag = area_mapped(),
+        ?assertEqual(none, silent()),
+        Refusing ! {erx_area_unmapped, Tag},
+        ?assertEqual({erx_connection_lost, ?PEER, {map, refused}}, answer())
+    after
+        stop(Refusing)
+    end.

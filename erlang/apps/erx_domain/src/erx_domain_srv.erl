@@ -1081,7 +1081,8 @@ introducible(Id, Core) ->
 
 %% The library's answer to connecting A and B. Each party's connection_up carries the
 %% slots of its own side, its peer's side and its peer's bell, the label of its own bell,
-%% and the data areas of the ring it writes, which its peer reads, and of the one it reads.
+%% the data areas of the ring it writes, which its peer reads, and of the one it reads, and
+%% its pixel area, none or {Slot, Bytes, write | read} as the library made it.
 connect({ok, #{number := Number, a := PartyA, b := PartyB}}, A, B, ReaderA, ReaderB, #{links := Links} = State) ->
     UpA = up_values(PartyA, ReaderB, ReaderA),
     UpB = up_values(PartyB, ReaderA, ReaderB),
@@ -1096,8 +1097,9 @@ connect({error, einval}, _A, _B, _ReaderA, _ReaderB, State) ->
 connect({error, _} = Refused, _A, _B, _ReaderA, _ReaderB, State) ->
     {Refused, State}.
 
-up_values(#{side := Side, peer_side := PeerSide, peer_bell := PeerBell, label := Label}, OutSize, InSize) ->
-    {Side, PeerSide, PeerBell, Label, OutSize, InSize}.
+up_values(#{side := Side, peer_side := PeerSide, peer_bell := PeerBell, label := Label, area := Area}, OutSize,
+          InSize) ->
+    {Side, PeerSide, PeerBell, Label, OutSize, InSize, Area}.
 
 %% A caller waits at most the service's introduce_timeout, so neither a domain that never
 %% answers its connection_up nor a caller that died first keeps an entry here for longer.
@@ -1170,8 +1172,8 @@ act({disconnect, Number}, #{lib := Lib} = State) ->
 
 %% The records as a domain's connection agent reads them (docs/design-domains.md,
 %% "Messages between the domain service and a runtime").
-wire({connection_up, Peer, PeerNode, {Side, PeerSide, PeerBell, Label, OutSize, InSize}}) ->
-    {erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize};
+wire({connection_up, Peer, PeerNode, {Side, PeerSide, PeerBell, Label, OutSize, InSize, Area}}) ->
+    {erx_connection_up, Peer, PeerNode, Side, PeerSide, PeerBell, Label, OutSize, InSize, Area};
 wire({connection_down, Peer, Reason}) ->
     {erx_connection_down, Peer, Reason}.
 

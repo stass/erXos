@@ -119,9 +119,10 @@ start() ->
     Test = self(),
     Agent = spawn(fun() ->
                           process_flag(trap_exit, true),
-                          erx_connections:introduced(Test, ?SYSTEM, Test, fun(_) -> error(no_open) end)
+                          erx_connections:introduced(Test, ?SYSTEM, Test, fun(_) -> error(no_open) end,
+                                                     fun(_, _, _, _) -> error(no_map) end)
                   end),
-    %% introduced/4 names the domain pid before it serves a message.
+    %% introduced/5 names the domain pid before it serves a message.
     0 = gen_server:call(Agent, dropped),
     Agent.
 

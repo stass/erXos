@@ -116,10 +116,44 @@ erx_memdraw_alloc(erx_mdimage_t **out, uint32_t chan, erx_rect_t r, erx_rect_t c
 	return ERX_MEMDRAW_DONE;
 }
 
+erx_memdraw_status_t
+erx_memdraw_wrap(erx_mdimage_t **out, uint32_t chan, erx_rect_t r, uint8_t *data, size_t n)
+{
+	if (!erx_memdraw_chan_supported(chan) || badrect(rect(r)) || (int64_t)r.x1 - r.x0 > ERX_MEMDRAW_MAX_WIDTH ||
+	    (uintptr_t)data % sizeof(ulong) != 0)
+		return ERX_MEMDRAW_EINVAL;
+	/* badrect bounds Dx and Dy below 2^26 and the width below 2^16, so this cannot overflow. */
+	size_t rows = (size_t)bytesperline(rect(r), chantodepth(chan)) * (size_t)Dy(rect(r));
+	if (rows > n || n - rows < sizeof(ulong))
+		return ERX_MEMDRAW_EINVAL;
+	Memdata *md = malloc(sizeof *md);
+	if (md == nil)
+		return ERX_MEMDRAW_ENOMEM;
+	*md = (Memdata){ .base = nil, .bdata = data, .ref = 1, .imref = nil, .allocd = 0 };
+	Memimage *image = allocmemimaged(rect(r), chan, md);
+	if (image == nil) {
+		free(md);
+		return ERX_MEMDRAW_ENOMEM;
+	}
+	md->imref = image;
+	*out = (erx_mdimage_t *)(void *)image;
+	return ERX_MEMDRAW_DONE;
+}
+
+/*
+ * freememimage frees the Memdata only of an image that allocated its
+ * pixels; erx_memdraw_wrap's Memdata, over the caller's pixels, is freed
+ * here and the pixels left alone.
+ */
 void
 erx_memdraw_free(erx_mdimage_t *image)
 {
+	Memdata *md = mem(image)->data;
+	bool wrapped = !md->allocd;
+
 	freememimage(mem(image));
+	if (wrapped)
+		free(md);
 }
 
 void

@@ -82,7 +82,7 @@ limit lane_side_data u32 8192
 # table"): the longest connection-control record, a connection_up naming
 # a peer of the longest node name, as one frame, rounded up to 16.
 # test/host/lane_ctl_slot_test.rb encodes that record and checks it fits.
-limit lane_ctl_slot u32 896
+limit lane_ctl_slot u32 928
 limit label_split u32 2147483648
 limit boot_version u32 1
 limit boot_strings_max u32 2048

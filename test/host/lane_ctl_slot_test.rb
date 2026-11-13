@@ -11,7 +11,8 @@ require 'open3'
 # as the domain pid encodes them with term_to_binary/1 (docs/design-
 # runtime.md, "Control records"). Stock OTP encodes that record here: a
 # connection_up whose pids and peer node name are of the longest node name,
-# and whose integers are of their widest values. The other record, a
+# whose integers are of their widest values, and whose pixel area is the
+# longer of its two forms, {Slot, Bytes, write}. The other record, a
 # connection_down, is shorter at its widest: its Reason is noconnection or
 # {domain_down, D, Info}, and every integer of Info is a 64-bit one.
 class LaneCtlSlotTest < Minitest::Test
@@ -27,7 +28,7 @@ class LaneCtlSlotTest < Minitest::Test
     Pid = binary_to_term(<<131, 88, 119, (byte_size(Name)), Name/binary, 16#7fff:32, 16#1fff:32, 16#ffffffff:32>>),
     U32 = 16#ffffffff, U64 = 16#ffffffffffffffff,
     Ctl = term_to_binary({22, Pid, Pid}),
-    Payload = term_to_binary({erx_connection_up, U32, Node, U64, U64, U64, U32, U32, U32}),
+    Payload = term_to_binary({erx_connection_up, U32, Node, U64, U64, U64, U32, U32, U32, {U64, U64, write}}),
     Down = lists:max([byte_size(term_to_binary({erx_connection_down, U32, {domain_down, U32, Info}})) ||
                       Info <- [{halt, -16#8000000000000000}, {fault, U64}, crash, stopped]]),
     io:format("~b ~b ~b~n", [byte_size(Ctl), byte_size(Payload), Down]),
