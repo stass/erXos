@@ -1368,6 +1368,35 @@ first answering any bytes the descriptor already holds, and only a new
 open reaches the re-grant, so a writer reopens its files after the
 server's domain restarts.
 
+**Showing the table.** The command shell's `mount` prints one line for
+each entry of the table `prim_file:erx_table/0` answers, in FreeBSD's
+layout (`sbin/mount/mount.c`, `prmount`, FreeBSD 15.1):
+`SOURCE on POINT (TYPE, OPTIONS)`, for instance
+
+```
+release on / (release, local, read-only)
+<5.120.0>:/data on /data (littlefs)
+```
+
+The source is `release` or `erofs` for a local provider, the server's
+pid and the tree a grant roots in, `PID:/TREE`, as NFS writes
+`host:/export`, or `ended`; a bind's root follows as a path. The type is
+FreeBSD's `f_fstypename`: a local provider's own, and a grant's from its
+server's statfs at the entry's root (`erx_file_remote:statfs/2`), whose
+`type` is the number the server chose, one of the `p9_magic_` limits of
+`abi/protocols/9p.txt` for erXos's servers. `mount` names each limit,
+FreeBSD's name where FreeBSD has the file system (`tmpfs`, `procfs`,
+`devfs`), the project's own otherwise (`littlefs`, `erofs`), and `ramfs`
+for the start service's tree, after the Linux number it answers; a
+number no limit names prints in hex,
+and a server that does not answer, or an ended grant, prints `-`. The
+options are FreeBSD's words in their order (`MNTOPT_NAMES`,
+`sys/sys/mount.h`): `local` for a provider the domain reads itself and
+`read-only` for rights other than `rw`. A tree another process serves has no
+word, as FreeBSD's NFS mounts have none: its `PID:/TREE` source shows it. The type
+is a name of `mount`'s or a number, never text a server chose, and every
+name goes through the field escape (`erx_text:escape_field/1`).
+
 ### Narrowing for a program
 
 A native program gets the namespace its starter names, by default the

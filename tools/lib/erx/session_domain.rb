@@ -28,7 +28,8 @@ module Erx
   # takes the line once its tty names itself, so the next banner is the session's own
   # command shell's. There `ls /data` lists the storage domain's tree at the first prompt, since
   # the console takes the line only with the session's namespace in place (docs/design-system.md,
-  # "A session takes the console"), `echo hi` answers, `ls /tmp` lists a file the shell wrote, and
+  # "A session takes the console"), `mount` shows /data as the storage domain's littlefs
+  # grant, `echo hi` answers, `ls /tmp` lists a file the shell wrote, and
   # `ps` lists none of the system domain's processes, and `dmesg` writes the kernel log, which
   # the session reads through the system domain (KERNEL_LOG); `uname -a` prints every field the
   # system shell's does (MediumBoot::UNAME_A), the build facts among them, and `uname -b`
@@ -167,6 +168,10 @@ module Erx
     # volume. dmesg reads /proc/kernel/log, which the session's /proc tree answers through the
     # session's inspect facet at the facet's scope, `all` for root in a development build, as
     # the system shell reads it through its own tree (MediumBoot).
+    # `mount`'s line for /data: the storage domain's grant, the tree data, and the type its
+    # server answers statfs with (docs/design-files.md, "Showing the table").
+    MOUNT_DATA = "mount | grep ' on /data '\r"
+    MOUNT_DATA_LINE = %r{\A<[0-9]+\.[0-9]+\.[0-9]+>:/data on /data \(littlefs\)\r*\n\z}n
     KERNEL_LOG = "dmesg | grep 'erx_lfs: volume mounted'\r"
     KERNEL_LOG_LINE = /\A#[0-9]+ [0-9]+\.[0-9]{6} debug space [0-9]+: erx_lfs: volume mounted\r*\n\z/n
     # `uname -b` at the session's command shell: the boot image's build identifier, which
@@ -274,7 +279,8 @@ module Erx
       shell = ProductionImage::Run::ERLANG_SHELL
       [*points,
        session_shell('root_1-shell', "ls /data && echo data-listed\r"),
-       { name: 'data-listed', pattern: line('data-listed'), seconds: 60, type: "echo hi\r" }.freeze,
+       { name: 'data-listed', pattern: line('data-listed'), seconds: 60, type: MOUNT_DATA }.freeze,
+       { name: 'session-mount', pattern: MOUNT_DATA_LINE, seconds: 60, type: "echo hi\r" }.freeze,
        { name: 'echo-hi', pattern: line('hi'), seconds: 60, type: "echo x > /tmp/session; ls /tmp\r" }.freeze,
        { name: 'ls-tmp', pattern: line('session'), seconds: 60, type: COUNT_SERVICE }.freeze,
        { name: 'session-ps', pattern: line('0'), seconds: 60, type: KERNEL_LOG }.freeze,

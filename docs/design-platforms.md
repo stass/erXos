@@ -1438,7 +1438,12 @@ opens in root's session. Type each command as shown and press Enter.
    the card's data partition. The storage domain serves it, and root's
    session reaches it through a grant, an entry of its namespace that
    names the storage domain's file service, so `mount` prints, among its
-   lines, one that starts `grant` and holds `on /data`. On a freshly
+   lines, `PID:/data on /data (littlefs)`, where PID is the file
+   service's process: the type `littlefs` is what the service answers
+   statfs with, and the `PID:/data` source marks a tree another domain
+   serves. A line `ended on /data (-)` means the service's grant has ended, and
+   a `/data` line with another type means something else is mounted
+   there. On a freshly
    written card `ls /data` prints nothing. Then
 
    ```sh

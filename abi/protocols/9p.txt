@@ -98,7 +98,8 @@ limit p9_dt_lnk u8 10
 # for each kind of tree, which 9P2000.L leaves to the server: Linux's
 # RAMFS_MAGIC (the start service's tree), TMPFS_MAGIC (/tmp), PROC_SUPER_MAGIC
 # and DEVFS_SUPER_MAGIC, and littlefs's superblock magic, "littlefs" read as
-# its first word.
+# its first word. The shell's `mount` prints each as its type's name
+# (erx_cmd_mount:type_name/1), so a new limit gets its name there.
 limit p9_magic_ramfs u32 0x858458f6
 limit p9_magic_tmpfs u32 0x01021994
 limit p9_magic_proc u32 0x9fa0
