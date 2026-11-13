@@ -546,6 +546,52 @@ p:last-child {
   margin-bottom: 12px;
 }
 
+/* ---- Status: one short card per area ----------------------------------- */
+
+.status-head {
+  font-size: 15px;
+  margin: 32px 0 12px;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.status-grid .box p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.status-tag {
+  float: right;
+  margin-left: 8px;
+  font: 500 11px/1.7 var(--mono);
+  letter-spacing: 0.08em;
+}
+
+.status-tag.on {
+  color: var(--signal);
+}
+
+.status-tag.next {
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .status-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ---- Terminal ---------------------------------------------------------- */
 
 /*

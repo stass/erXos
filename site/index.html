@@ -313,41 +313,30 @@ Error in process &lt;0.150.0&gt; with exit value:
 <section class="section" id="status" aria-labelledby="status-title">
   <header>
     <span class="label"><b>04</b> / Status</span>
-    <h2 id="status-title">Early, and it boots.</h2>
+    <h2 id="status-title">Early, but it boots.</h2>
   </header>
   <div>
     <div class="prose">
-      <p>erXos is in Phase 1 of its roadmap. The system comes up on a
-      stand-in kernel, a near-stock Fiasco behind erXos's own interface.
-      erXos's own kernel replaces it in Phase 2, and nothing above the
-      interface moves.</p>
+      <p>Phase 1: erXos runs on a stand-in kernel, a near-stock Fiasco behind
+      erXos's own interface, which erXos's own kernel replaces in Phase 2.</p>
     </div>
-    <div class="two">
-      <div>
-        <h3 class="label">Running</h3>
-        <ul class="checks">
-          <li><span class="tag on">ON</span><span>Boots to the command shell on QEMU <code>virt</code> (AArch64), on 1 to 8 CPUs.</span></li>
-          <li><span class="tag on">ON</span><span>ERTS runs in user mode as the system domain.</span></li>
-          <li><span class="tag on">ON</span><span>The serial console's driver is an Erlang process.</span></li>
-          <li><span class="tag on">ON</span><span>Files, per-domain namespaces and <code>/tmp</code> on a RAM file system written in Erlang.</span></li>
-          <li><span class="tag on">ON</span><span>Domains beyond the system domain: storage, the network stack and root's session each run in a domain of their own, with their own ERTS.</span></li>
-          <li><span class="tag on">ON</span><span>Storage: a virtio block driver, littlefs and an EROFS reader, all in Erlang. A failure ends the storage domain, and it restarts.</span></li>
-          <li><span class="tag on">ON</span><span>An rc-language command shell, written in Erlang, at the console, with job control of Erlang commands.</span></li>
-          <li><span class="tag on">ON</span><span>Networking: a virtio-net driver and a TCP/IP stack, both in Erlang. DHCP, <code>ifconfig</code>, <code>ping</code> and <code>host</code> work.</span></li>
-          <li><span class="tag on">ON</span><span>A browser view of the machine's records over the host link, in development builds through <code>tools/erx web</code>, not on this page.</span></li>
-          <li><span class="tag on">ON</span><span>OTP's own test suites compare erXos with stock OTP.</span></li>
-        </ul>
-      </div>
-      <div>
-        <h3 class="label">Designed, not built yet</h3>
-        <ul class="checks">
-          <li><span class="tag off">OFF</span><span>erXos's own kernel.</span></li>
-          <li><span class="tag off">OFF</span><span>Native programs run by the shell, and the pipes that join them.</span></li>
-          <li><span class="tag off">OFF</span><span>Network sockets for programs.</span></li>
-          <li><span class="tag off">OFF</span><span>The display and the UI on the machine itself.</span></li>
-          <li><span class="tag off">OFF</span><span>The POSIX-lite layer.</span></li>
-        </ul>
-      </div>
+    <h3 class="label status-head">Running</h3>
+    <div class="status-grid">
+      <div class="box"><span class="status-tag on">ON</span><strong>QEMU virt</strong><p>AArch64, on 1 to 8 CPUs.</p></div>
+      <div class="box"><span class="status-tag on">ON</span><strong>Raspberry Pi 4</strong><p>Serial console, SD card and Ethernet, on the board.</p></div>
+      <div class="box"><span class="status-tag on">ON</span><strong>In the browser</strong><p>The console above, on an AArch64 emulator.</p></div>
+      <div class="box"><span class="status-tag on">ON</span><strong>Domains</strong><p>Storage, network and sessions each run their own ERTS, in user mode.</p></div>
+      <div class="box"><span class="status-tag on">ON</span><strong>Drivers in Erlang</strong><p>Console, virtio block and net, SD and GENET.</p></div>
+      <div class="box"><span class="status-tag on">ON</span><strong>Files</strong><p>Per-domain namespaces, <code>/tmp</code>, littlefs on <code>/data</code>, EROFS.</p></div>
+      <div class="box"><span class="status-tag on">ON</span><strong>Network</strong><p>A TCP/IP stack in Erlang: DHCP, <code>ping</code>, <code>host</code>.</p></div>
+      <div class="box"><span class="status-tag on">ON</span><strong>Shell</strong><p>rc, written in Erlang, with job control.</p></div>
+      <div class="box"><span class="status-tag on">ON</span><strong>Checked</strong><p>OTP's own test suites, against stock OTP.</p></div>
+    </div>
+    <h3 class="label status-head">Next</h3>
+    <div class="status-grid">
+      <div class="box dash"><span class="status-tag next">NEXT</span><strong>erXos's kernel</strong><p>Begun as host-tested C cores.</p></div>
+      <div class="box dash"><span class="status-tag next">NEXT</span><strong>Programs</strong><p>Pipes are built; running programs, sockets and POSIX-lite come next.</p></div>
+      <div class="box dash"><span class="status-tag next">NEXT</span><strong>Display</strong><p>Windows work on QEMU virt; the Pi is next.</p></div>
     </div>
   </div>
 </section>
