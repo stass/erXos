@@ -78,3 +78,13 @@ decode_write_test_() ->
      ?_assertEqual({error, {status, 3}}, erx_blk_request:decode(write, <<3>>)),
      ?_assertEqual({error, {length, 0}}, erx_blk_request:decode(write, <<>>)),
      ?_assertEqual({error, {length, 2}}, erx_blk_request:decode(write, <<0, 0>>))].
+
+%% A flush is a header of type 4 naming sector 0 and a status byte, and decodes as a write.
+flush_segments_test() ->
+    ?assertEqual({ok, [{out, <<4:32/little, 0:32/little, 0:64/little>>}, {in, 1}]}, erx_blk_write:flush_segments()).
+
+decode_flush_test_() ->
+    [?_assertEqual(ok, erx_blk_request:decode(flush, <<0>>)),
+     ?_assertEqual({error, unsupp}, erx_blk_request:decode(flush, <<2>>)),
+     ?_assertEqual({error, {length, 0}}, erx_blk_request:decode(flush, <<>>)),
+     ?_assertEqual({error, {length, 2}}, erx_blk_request:decode(flush, <<0, 0>>))].

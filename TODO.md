@@ -2898,8 +2898,9 @@ it; git history is the record of completed work.
   the domain restarts, and the facet still answers `ok`. Between the stop and the start
   `erx_blk` answers `no_device`, a request it was serving exits, the window answers
   `eio`, and littlefs fails the volume on any failed block request
-  (`erx_lfs.erl`, "unavailable until reboot"). P8b's window retry covers a restart; a
-  `stop` held while `/data` is mounted still fails it. Decide whether the holder's
+  (`erx_lfs.erl`, "unavailable until reboot"). A restart fails it too, by design: each
+  window is bound to the device process it first reached and answers `eio` once that
+  process has ended (design-stopgap.md, "littlefs in the storage domain"). Decide whether the holder's
   units name what depends on each driver, so the facet refuses a stop while it is
   mounted, or remounts after the start; the block_device cell checks only a raw read.
 * [Low] storage and network, `erx_storage_sup` and `erx_net_erxos:children/0`: the
@@ -5224,9 +5225,9 @@ to the corpus and follow rc
 * [Medium] Storage domain, littlefs's and the block driver's failures end the whole domain
   (`erx_lfs.erl`, `erx_lfs_sup.erl`, `erx_storage_sup.erl`, `erx_blk_sup.erl`): any end of
   littlefs's owner, worker or `/data` grant, and any end of the block driver's device or
-  partition process, a malformed completion or a refused reset included, ends the storage
+  partition process, a malformed completion (a broken queue) included, ends the storage
   domain, the block driver and every window it serves with it, and after `restarts 5`
-  within `restart_period_s 60` the domain stays down. The system domain and root's
+  within `restart_period_s 600` the domain stays down. The system domain and root's
   session reach `/data` through the `data` facet, so a client whose requests can end
   littlefs's owner or worker, or break the volume, six times in a minute takes down
   every partition's driver, not only `/data`. The facet's design bounds what a client can make the grant do (its own lane),
@@ -6320,7 +6321,7 @@ document's "residual risks accepted" paragraph.
   (Stopgap replacements above).
 * [Medium] erx_blk, `tools/lib/erx/device_posters.rb`: the rule "only `erx_blk_write` calls `erx_device:post/4`" is
   tree-wide, but every virtio driver will post; once a second poster joins `SITES`, the write path's argument also
-  needs "only `erx_blk` opens a block record", which no check holds. Scope the rule per device class. Rename
+  needs "only the block driver's device process (`erx_blk_virtio`) opens a block record", which no check holds. Scope the rule per device class. Rename
   `erx_blk_write`, which now posts reads too, to what it is (for example `erx_blk_post`).
 * [Low] erx_blk, `tools/lib/erx/device_posters.rb`: the check that only `erx_blk_write` posts sees only literal
   calls: a call whose module comes from a macro, a variable or `apply/3` escapes it. design-storage.md's U4 extends
@@ -6360,7 +6361,7 @@ document's "residual risks accepted" paragraph.
   firing (`erlang/apps/erx/src/erx_irq_line.erl`), so a hung driver holds its sharers masked until the unit is
   restarted; a deadline after which the owner restarts the slow driver belongs with the hostile-driver work.
 * [Medium] erx_blk, the block driver: the device process's backlog, reply and reset decisions
-  (`erlang/apps/erx_blk/src/erx_blk.erl`, `submit/3`, `resume/1`, `recover/2`) are tested only end to end, by the
+  (`erlang/apps/erx_blk/src/erx_blk_virtio.erl`, `submit/3`, `resume/1`, `broken/2`) are tested only end to end, by the
   `block_device` QEMU suite's good path; they should move into a pure module whose full, held and broken cases are
   tested on the host.
 * [Medium] erx_blk: a device that stops completing leaves its callers to time out in `gen_server:call` (an exit, not
@@ -6369,6 +6370,10 @@ document's "residual risks accepted" paragraph.
   below `call/1`'s 30 s; the device process implements neither, and `call/1` should return `{error, _}`.
 * [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:write/6`, and `erx_blk:read/2` and `erx_blk:write/2`
   still let any process of the system domain reach any sector: the block service's windows (`erx_blk_window`) check
+  `{error, timeout}`), and a timed-out write still lands later; the driver needs a per-request deadline that ends the
+  device process (as a broken queue does), `call/1` should return `{error, _}`, and held requests of a caller that has gone should be dropped.
+* [Medium] erx_blk: U4's trial rule is not applied in `erx_blk_write:write/6`, and `erx_blk`'s reads and writes (`read/2`, `write/2`,
+  and their pid forms `read/3`, `write/3`) still let any process of the system domain reach any sector: the block service's windows (`erx_blk_window`) check
   their sectors, but nothing yet confines clients to them. The device service, which names each client's windows by
   role and hands their pids out as grants (PW1), replaces `erx_blk_service:window/1`, which hands any role's window to
   any caller, slot and record windows included.
@@ -6376,9 +6381,14 @@ document's "residual risks accepted" paragraph.
   to its own record, link entry relative to the extended partition and spanning the next record and its partition) is
   checked only by copies written from one reading of the format; list a `MediumImage` medium with an independent
   reader (FreeBSD's `gpart` on an md device, or util-linux `sfdisk --json`) and compare every start and length.
-* [Medium] erx_blk_window, erx_blk_service: tested only by the QEMU suite's admitted medium. Host EUnit cases over a
+* [Medium] erx_blk_window, erx_blk_service: beyond the window's binding to one device process
+  (`test/erlang/erx_blk_window_tests.erl`), tested only by the QEMU suite's admitted medium. Host EUnit cases over a
   stub `erx_blk` should cover the window's error mapping and argument checks, and the service's refused, no-device and
   failed-read paths and its restart; a QEMU medium with one corrupted entry should show "blk: no windows".
+* [Medium] docs/design-storage.md, failure handling: a device reset in the target design breaks the volumes over
+  the device, since each window is bound to one device process's life, but nothing names how a file system that
+  restarts after the reset gets a window bound to the new process: the device service would name new windows and
+  grant them again, or the reset would end what holds the old windows, as the storage domain's end does in Phase 1.
 * [Low] erx_blk_window: a request that waits in a window's mailbox behind another client's stuck request can time
   out at its caller and still be posted later, a second way into the timed-out-write item above.
 * [Low] abi/formats/mbr.txt: `erx_mbr_entry` declares alignment 4, but entries lie at 446 + 16i on the medium;
@@ -6392,6 +6402,4 @@ document's "residual risks accepted" paragraph.
   against the slot images' sizes (the plan's decision gate on uncompressed slots) or the Pi firmware's needs of the
   record's and the slots' FAT partitions; the reset count's sector, which design-platforms.md puts beside the record,
   and each slot's signature window are not in the layout yet.
-* [Low] erx_blk: `recover/2` answers held requests `broken` though they were never posted; they could be posted after
-  the reset. An interrupt storm or a device that breaks its queue on every request costs a scheduler and a log line per
-  reset, bounded by the device's rate (Phase 1 residual).
+* [Low] erx_blk_virtio: an interrupt storm costs a scheduler, bounded by the device's rate (Phase 1 residual).

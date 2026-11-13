@@ -13,7 +13,7 @@ require_relative '../../tools/lib/erx/device_posters'
 class DevicePostersTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   WRITE_PATH = 'erlang/apps/erx_blk/src/erx_blk_write.erl'
-  DRIVER = 'erlang/apps/erx_blk/src/erx_blk.erl'
+  DRIVER = 'erlang/apps/erx_blk/src/erx_blk_virtio.erl'
   SEEDED = "p(D, Q, T, S) -> erx_device:post(D, Q, T, S).\n"
 
   def lines_of(files) = Erx::DevicePosters.violations(files).map { |violation| [violation.path, violation.line] }

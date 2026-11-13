@@ -1738,10 +1738,13 @@ worker's end, the window's, or a mount that fails ends the owner. `erx_lfs_sup` 
 and their restart intensity is 0), so the end escalates to `erx_storage`, a permanent application, and ends the node and the domain. Every queued
 request answers `{error, eio}`, and nothing in the domain replays or remounts. The block driver's failures end the domain the same way, whether or
 not a request is in flight: `erx_blk_sup` restarts nothing either, so the end of its device or partition process, by a crash or by the shutdown
-with which `erx_blk` ends on a device that refuses a reset, ends the `erx_blk` application, which is permanent, and the domain; the driver never
-restarts on its own under a mounted volume. A stop, start or restart through `storage_ctl` is the system domain's, and the supervisor counts no
-restart for it, so it does not end the domain itself: a block request it interrupts, or one made while the driver is stopped, fails as at a crash
-and breaks the volume, which does, and a
+with which its device process, `erx_blk_virtio`, ends on a broken queue, ends the `erx_blk` application, which is permanent, and the domain; the driver never
+restarts on its own under a mounted volume, and a broken queue never resets the device in place, since nothing promises that a reset keeps
+writes the device's volatile cache holds and has already answered `ok`. A stop, start or restart through `storage_ctl` is the system domain's, and the supervisor counts no
+restart for it, so it does not end the domain itself. Each window of the block service is bound to the device process it first reached
+(`erx_blk_window`), calls it by pid and monitors it, and once that process has ended answers `{error, eio}` to every request that would reach
+the device, even after a new device process has reset the device: the windows the volume mounted on never vouch for a write across a reset.
+So a stop, start or restart breaks the volume at its next block request, which ends the domain, and a
 start whose device refuses the reset answers `{error, failed}` and leaves the domain up without a driver until littlefs's next request fails.
 The domain service restarts the domain within its row's intensity
 (`restarts 5`, `restart_period_s 600`): creation gives it the device again, the driver resets it, and littlefs mounts the volume afresh. The owner

@@ -54,6 +54,8 @@ module Erx
   #   blk: wrote sector I           for I in WRITE_SECTORS, in order: the driver wrote
   #                                 BlockImage.pattern(I, GUEST_TAG) and the device
   #                                 completed the request with a good status
+  #   blk: flushed                  the driver's flush, a virtio flush request,
+  #                                 completed with a good status
   #   blk: control restart block ok the system domain restarted the driver through
   #                                 storage_ctl, the storage domain's driver-control
   #                                 facet, as the system shell does with
@@ -175,6 +177,7 @@ module Erx
        *(0...SECTORS).map { |index| "blk: read sector #{index} ok" },
        "blk: read sector #{SECTORS} refused",
        *WRITE_SECTORS.map { |index| "blk: wrote sector #{index}" },
+       'blk: flushed',
        *CONTROL_LINES,
        'blk: done']
     end

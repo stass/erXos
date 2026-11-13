@@ -8,11 +8,12 @@
 %% main/0 halts 0 only when all pass.
 -module(erx_littlefs_tests).
 
--export([main/0, window/2]).
+-export([main/0, window/3]).
 -export([synced_file_survives_a_cut/0, tree_operations/0, block_error_ends_the_owner/0,
          worker_end_ends_the_owner/0, window_end_ends_the_owner/0,
          mount_failure_ends_the_owner/0, corrupt_volume_never_formats/0, blank_blocks_do_not_mount/0,
-         deadline_ends_a_request/0, refuses_bad_arguments/0]).
+         deadline_ends_a_request/0, refuses_bad_arguments/0, fsync_flushes_the_window/0,
+         failed_flush_fails_the_fsync/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -28,7 +29,8 @@ main() ->
     Cases = [synced_file_survives_a_cut, tree_operations, block_error_ends_the_owner,
              worker_end_ends_the_owner, window_end_ends_the_owner,
              mount_failure_ends_the_owner, corrupt_volume_never_formats, blank_blocks_do_not_mount,
-             deadline_ends_a_request, refuses_bad_arguments],
+             deadline_ends_a_request, refuses_bad_arguments, fsync_flushes_the_window,
+             failed_flush_fails_the_fsync],
     Results = [run(Case) || Case <- Cases],
     erlang:halt(case lists:all(fun(R) -> R end, Results) of true -> 0; false -> 1 end).
 
@@ -42,14 +44,16 @@ run(Case) ->
     end.
 
 %% ---------------------------------------------------------------------------
-%% A RAM window: answers gen_server calls as erx_blk_window does
+%% A RAM window: answers gen_server calls as erx_blk_window does, and counts the flushes
+%% it receives. Mode normal answers every request; fail answers eio to every request but
+%% info; flush_fail answers eio to a flush alone; silent answers nothing.
 %% ---------------------------------------------------------------------------
 
 start_window(Disk) ->
-    proc_lib:spawn(?MODULE, window, [Disk, normal]).
+    proc_lib:spawn(?MODULE, window, [Disk, normal, 0]).
 
 -doc false.
-window(Disk, Mode) ->
+window(Disk, Mode, Flushes) ->
     receive
         {'$gen_call', From, Request} ->
             {Reply, Disk1} = serve(Request, Disk, Mode),
@@ -57,18 +61,25 @@ window(Disk, Mode) ->
                 silent -> ok;
                 _ -> gen_server:reply(From, Reply)
             end,
-            window(Disk1, Mode);
+            window(Disk1, Mode, Flushes + case Request of flush -> 1; _ -> 0 end);
         {mode, Mode1} ->
-            window(Disk, Mode1);
+            window(Disk, Mode1, Flushes);
         {snapshot, Pid} ->
             Pid ! {snapshot, Disk},
-            window(Disk, Mode)
+            window(Disk, Mode, Flushes);
+        {flushes, Pid} ->
+            Pid ! {flushes, Flushes},
+            window(Disk, Mode, Flushes)
     end.
 
 serve(info, Disk, _) ->
     {{ok, #{role => data, sectors => byte_size(Disk) div ?SECTOR}}, Disk};
 serve(_, Disk, fail) ->
     {{error, eio}, Disk};
+serve(flush, Disk, flush_fail) ->
+    {{error, eio}, Disk};
+serve(flush, Disk, _) ->
+    {ok, Disk};
 serve({read, Sector, Count}, Disk, _) ->
     {{ok, binary:part(Disk, Sector * ?SECTOR, Count * ?SECTOR)}, Disk};
 serve({write, Sector, Bytes}, Disk, _) ->
@@ -85,6 +96,10 @@ fresh_disk() ->
 snapshot(Window) ->
     Window ! {snapshot, self()},
     receive {snapshot, Disk} -> Disk after 5000 -> error(no_snapshot) end.
+
+flushes(Window) ->
+    Window ! {flushes, self()},
+    receive {flushes, Flushes} -> Flushes after 5000 -> error(no_flushes) end.
 
 start_volume(Disk, Name) ->
     Window = start_window(Disk),
@@ -135,6 +150,32 @@ read_all(Handle, Offset, Size, Fs, Acc) ->
     {ok, Bytes} = erx_lfs:read(Handle, Offset, 4096, Fs),
     true = byte_size(Bytes) > 0,
     read_all(Handle, Offset + byte_size(Bytes), Size, Fs, <<Acc/binary, Bytes/binary>>).
+
+%% An fsync reaches the medium: littlefs's sync goes to the window as a flush, so the
+%% fsync answers only once the window has flushed.
+fsync_flushes_the_window() ->
+    Volume = {Window, _, Fs} = start_volume(fresh_disk(), lfs_flush),
+    {ok, _, Root, _} = erx_lfs:root(Fs),
+    {ok, _, _, Handle} = erx_lfs:make(Root, <<"f">>, {file, 8#644, ?ERX_P9_O_RDWR}, Fs),
+    {ok, 4, 0} = erx_lfs:write(Handle, 0, <<"data">>, Fs),
+    Before = flushes(Window),
+    ok = erx_lfs:fsync(Handle, Fs),
+    true = flushes(Window) > Before,
+    stop_volume(Volume).
+
+%% A flush the window fails fails the fsync with eio though every write succeeded, and
+%% breaks the volume: the owner and its worker end, as at any block failure.
+failed_flush_fails_the_fsync() ->
+    Volume = {Window, Owner, Fs} = start_volume(fresh_disk(), lfs_flush_fail),
+    {ok, _, Root, _} = erx_lfs:root(Fs),
+    {ok, _, _, Handle} = erx_lfs:make(Root, <<"f">>, {file, 8#644, ?ERX_P9_O_RDWR}, Fs),
+    Monitors = [erlang:monitor(process, Pid) || Pid <- [Owner, worker(Owner)]],
+    Window ! {mode, flush_fail},
+    {ok, 4, 0} = erx_lfs:write(Handle, 0, <<"data">>, Fs),
+    {error, eio} = erx_lfs:fsync(Handle, Fs),
+    ok = ended(Monitors),
+    {error, eio} = erx_lfs:getattr(<<"/">>, Fs),
+    stop_volume(Volume).
 
 %% Directories, listings, renames, removals and their refusals.
 tree_operations() ->

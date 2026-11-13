@@ -33,6 +33,10 @@ limit virtq_desc_f_next u16 1
 limit virtq_desc_f_write u16 2
 limit virtq_desc_f_indirect u16 4
 limit virtio_blk_sector_size u32 512
+# VIRTIO_BLK_F_FLUSH (5.2.3), VIRTIO_BLK_F_WCE in the legacy interface: the device takes a
+# flush request, and a device whose driver accepts the feature may hold completed writes in
+# a write-back cache until a flush (5.2.5).
+limit virtio_blk_f_flush u32 9
 limit virtio_blk_t_in u32 0
 limit virtio_blk_t_out u32 1
 limit virtio_blk_t_flush u32 4

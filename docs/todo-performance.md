@@ -291,6 +291,23 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   Also record the tree process's memory against `held` after the workload, which [Charges](design-tmp.md#data-model)
   leaves unpromised. Fixes on the table, cheapest first: the grant calling the tree directly for a file with one open; shape (b) of the design, the same core
   reached by one round trip.
+* **[Medium] storage, a device flush per littlefs commit** (`erx_lfs`,
+  `erx_blk_virtio`, [design-storage.md](design-storage.md#read-write-storage)):
+  littlefs calls its sync callback (`bd_sync`,
+  `otp/erts/emulator/nifs/erxos/erx_littlefs_nif.c:300`) at the end of every
+  metadata commit (`lfs_dir_commitcrc`, `littlefs/lfs.c:1773`, inside its
+  padding loop, so a commit may flush more than once) and before the commit
+  of a file sync whose file is not inline (`littlefs/lfs.c:3443-3446`), and `erx_lfs` sends each one to
+  its window as a flush, which the device process posts as
+  `VIRTIO_BLK_T_FLUSH`. The harness's drives run write-back, so on QEMU each
+  flush is a flush of the host's image file. Every create, rename, removal and
+  attribute change on `/data` pays at least one, and an `fsync` of a file
+  that is not inline at least two. Settled
+  by a `tools/erx bench` workload, to be written, of 1,000 small files each
+  created, written and `fsync`ed on `/data` under HVF, this tree against its
+  parent, which answered littlefs's sync at once, reporting operations a
+  second. No fix may drop a flush littlefs asks for; if the cost shows, the
+  fix on the table is fewer commits per operation in `erx_lfs`.
 * **[Low] files, reading an EROFS image without a cache** (`erx_erofs` and
   `erx_verity`, [design-storage.md](design-storage.md#reading-erofs-images)):
   every operation reads its names' inode and directory blocks through the

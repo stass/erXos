@@ -1,7 +1,7 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% The block driver's pure core (docs/design-storage.md, "The block driver"): what the
+%% The virtio transport's pure core (docs/design-storage.md, "The block driver"): what the
 %% driver checks before it touches the device and what it makes of the bytes the device
 %% wrote. Nothing here calls the device NIF, so the module builds and runs anywhere and its
 %% decisions are tested and fuzzed on the host (test/erlang/erx_blk_request_tests.erl and
@@ -31,7 +31,7 @@
 -define(STATUS_BYTES, 1).
 
 %% What a completion answers, as the device process remembers it beside the tag it posted.
--type request() :: {read, Count :: pos_integer()} | write.
+-type request() :: {read, Count :: pos_integer()} | write | flush.
 -type reason() :: out_of_range | bad_count | ioerr | unsupp | {status, 0..255}
                 | {length, non_neg_integer()}.
 
@@ -73,8 +73,8 @@ range(_Sector, _Count, _Capacity) ->
 
 %% The result of a request from the bytes the device wrote into its in segments, end to end
 %% and cut at the length it reported. A read must have written every sector and the status;
-%% a write only the status. Any other length is refused whole: the status byte is the last
-%% one written, so a short completion has no status to believe.
+%% a write or a flush only the status. Any other length is refused whole: the status byte
+%% is the last one written, so a short completion has no status to believe.
 -spec decode(request(), binary()) -> ok | {ok, binary()} | {error, reason()}.
 decode({read, Count}, Bytes) ->
     Size = Count * ?ERX_VIRTIO_BLK_SECTOR_SIZE,
@@ -87,9 +87,9 @@ decode({read, Count}, Bytes) ->
         _ ->
             {error, {length, byte_size(Bytes)}}
     end;
-decode(write, <<Status:8>>) ->
+decode(Kind, <<Status:8>>) when Kind =:= write; Kind =:= flush ->
     status(Status);
-decode(write, Bytes) ->
+decode(Kind, Bytes) when Kind =:= write; Kind =:= flush ->
     {error, {length, byte_size(Bytes)}}.
 
 status(?ERX_VIRTIO_BLK_S_OK) -> ok;

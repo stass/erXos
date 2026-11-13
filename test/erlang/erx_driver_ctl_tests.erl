@@ -34,7 +34,8 @@ init([]) ->
     {ok, {#{strategy => one_for_one, intensity => 3, period => 60},
           [Child(driver, run), Child(absent, ignore)]}};
 %% erx_blk_sup's own flags and child specs, each start replaced by a stand-in: the device
-%% process, erx_blk, and the partition process run, and the image mounts start nothing.
+%% process, registered as erx_blk, and the partition process run, and the image mounts
+%% start nothing.
 init(blk) ->
     {ok, {Flags, Children}} = erx_blk_sup:init([]),
     Stand = fun(#{id := images} = Child) -> Child#{start => {?MODULE, driver, [ignore]}};
@@ -179,12 +180,12 @@ mint_grants_only_the_system_domain_test() ->
                     {erx_origin, ?SYSTEM, {erx_facet_mint, 0, storage_ctl, ?SYSTEM, Limits}},
                     {erx_origin, ?SYSTEM, {erx_facet_mint, 3, storage_ctl, ?SYSTEM, none}}]].
 
-%% A block driver that fails, by a crash or by the shutdown with which erx_blk ends on a
-%% device that refuses a reset, is not restarted in place: erx_blk_sup ends, and with it
+%% A block driver that fails, by a crash or by the shutdown with which erx_blk_virtio ends on a
+%% broken queue, is not restarted in place: erx_blk_sup ends, and with it
 %% the storage domain, whose restart gives the device again (docs/design-stopgap.md,
 %% "littlefs in the storage domain"). So does a partition process that fails.
 a_block_driver_failure_ends_its_supervisor_test_() ->
-    Ends = [{erx_blk, kill}, {erx_blk, {shutdown, {negotiate, refused}}}, {erx_blk, crashed},
+    Ends = [{erx_blk, kill}, {erx_blk, {shutdown, broken_queue}}, {erx_blk, crashed},
             {erx_blk_service, kill}],
     [{lists:flatten(io_lib:format("~p ~p", [Child, Reason])), fun() -> fails(Child, Reason) end}
      || {Child, Reason} <- Ends].

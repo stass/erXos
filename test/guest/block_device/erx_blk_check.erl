@@ -300,12 +300,13 @@ lines() -> lists:reverse(get(lines)).
 -spec main_here() -> ok.
 main_here() ->
     case call(fun erx_blk:info/0) of
-        {ok, #{version := Version, capacity := Capacity}} ->
+        {ok, #{detail := #{version := Version}, capacity := Capacity}} ->
             line("transport version ~b", [Version]),
             line("capacity ~b sectors", [Capacity]),
             lists:foreach(fun read/1, lists:seq(0, ?SECTORS - 1)),
             refused(?SECTORS),
-            lists:foreach(fun write/1, ?WRITE_SECTORS);
+            lists:foreach(fun write/1, ?WRITE_SECTORS),
+            flush();
         _NoDriver ->
             line("no driver", []),
             timer:sleep(?LOG_DRAIN_MS)
@@ -475,6 +476,12 @@ write(Sector) ->
     case call(fun() -> erx_blk:write(Sector, pattern(Sector, ?GUEST_TAG)) end) of
         ok -> line("wrote sector ~b", [Sector]);
         _Other -> line("wrote sector ~b failed", [Sector])
+    end.
+
+flush() ->
+    case call(fun erx_blk:flush/0) of
+        ok -> line("flushed", []);
+        _Other -> line("flush failed", [])
     end.
 
 pattern(Sector, Tag) ->

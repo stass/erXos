@@ -2,18 +2,19 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% The block device class's driver, over erx_device (docs/design-storage.md, "The block
-%% driver"): virtio-mmio's block device, whose record the root hands the system domain's
-%% ERTS (erx_device_record). erx_blk is the device process, erx_blk_request its pure core,
-%% erx_blk_write the one write path,
-%% erx_blk_service the partition process, erx_blk_table and erx_blk_image its pure cores, erx_blk_window
-%% a window of the block service, and erx_blk_sd_card and erx_blk_sd_host the SD host controller's
-%% pure cores (docs/design-storage.md, "The SD host controller").
+%% driver"), for the block record the root hands the domain's ERTS
+%% (erx_device_record). erx_blk is the transport contract, which picks the device process;
+%% erx_blk_virtio is virtio-mmio's device process, erx_blk_request its pure core and
+%% erx_blk_write the one write path; erx_blk_service is the partition process,
+%% erx_blk_table and erx_blk_image its pure cores, and erx_blk_window a window of the block
+%% service; erx_blk_sd_card and erx_blk_sd_host are the SD host controller's pure cores
+%% (docs/design-storage.md, "The SD host controller").
 {application, erx_blk,
  [{description, "erXos block driver"},
   {vsn, "1"},
-  {modules, [erx_blk, erx_blk_app, erx_blk_image, erx_blk_request, erx_blk_sd_card, erx_blk_sd_host, erx_blk_service,
-              erx_blk_sup, erx_blk_table,
-              erx_blk_window, erx_blk_write]},
+  {modules, [erx_blk, erx_blk_app, erx_blk_image, erx_blk_request, erx_blk_sd_card, erx_blk_sd_host,
+              erx_blk_service, erx_blk_sup, erx_blk_table, erx_blk_virtio, erx_blk_window,
+              erx_blk_write]},
   {registered, [erx_blk, erx_blk_service, erx_blk_sup]},
   {applications, [kernel, stdlib, erx, erx_files]},
   {mod, {erx_blk_app, []}},

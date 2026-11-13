@@ -245,10 +245,10 @@ mounted({error, Reason} = Error, Parent, _State) ->
     log("mount failed: ~p; the storage domain ends", [Reason]),
     proc_lib:init_fail(Parent, Error, {exit, {?MODULE, failed}}).
 
-%% A block request from the worker's operation, sent on to the window. The
-%% window has no flush: it answers each write once the device has, so a
-%% flush has nothing left to wait for (TODO.md, storage). The NIF makes one
-%% request at a time, so a request while one is outstanding means a message
+%% A block request from the worker's operation, sent on to the window: a read,
+%% a write, or littlefs's sync as the window's flush, which answers once every
+%% write the window answered before it is durable on the medium. The NIF makes
+%% one request at a time, so a request while one is outstanding means a message
 %% the NIF did not send took the slot: it is refused, which breaks the volume.
 %% Completing a message that holds no request of the NIF changes nothing.
 block(Op, Sector, Count, Req, #owner{block = Block, window = Window} = State) ->
@@ -260,9 +260,6 @@ block(Op, Sector, Count, Req, #owner{block = Block, window = Window} = State) ->
                   _ -> refuse
               end,
     case Request of
-        flush ->
-            complete(Req, ok),
-            State;
         refuse ->
             complete(Req, error),
             State;

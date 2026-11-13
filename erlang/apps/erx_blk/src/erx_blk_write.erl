@@ -4,20 +4,23 @@
 %% The block driver's one write path (docs/design-storage.md, "The block driver", and
 %% invariant U4), held by construction: this module is the only one that posts a request
 %% to the device, and it builds every request it posts, the header's request type
-%% included. read/6 posts a read, whose type is ERX_VIRTIO_BLK_T_IN; write/6 posts a write,
-%% whose type is ERX_VIRTIO_BLK_T_OUT, and is the only function that builds one. Nothing a
-%% caller passes chooses the type, so no other module can make the device write.
+%% included, so it holds the virtio transport's request builder. The virtio device
+%% process, erx_blk_virtio, calls it for every request it hands the device. read/6 posts a
+%% read, whose type is ERX_VIRTIO_BLK_T_IN; flush/3 posts a flush, whose type is
+%% ERX_VIRTIO_BLK_T_FLUSH and which moves no sectors; write/6 posts a write, whose type is
+%% ERX_VIRTIO_BLK_T_OUT, and is the only function that builds one. Nothing a caller passes
+%% chooses the type, so no other module can make the device write.
 %% tools/lib/erx/device_posters.rb holds the rule as a build check: no module but this one
 %% calls erx_device:post/4.
 %%
-%% read_segments/3 and write_segments/3 are pure, so the requests are tested and fuzzed on
-%% the host (test/erlang/erx_blk_request_tests.erl and erx_blk_request_fuzz.erl). write/6
-%% does not apply U4's trial rule, which refuses every write but the boot-selection
-%% record's while a trial boots: TODO.md holds that gap.
+%% read_segments/3, write_segments/3 and flush_segments/0 are pure, so the requests are
+%% tested and fuzzed on the host (test/erlang/erx_blk_request_tests.erl and
+%% erx_blk_request_fuzz.erl). write/6 does not apply U4's trial rule, which refuses every
+%% write but the boot-selection record's while a trial boots: TODO.md holds that gap.
 
 -module(erx_blk_write).
 
--export([read_segments/3, write_segments/3, read/6, write/6]).
+-export([read_segments/3, write_segments/3, flush_segments/0, read/6, write/6, flush/3]).
 
 -include("generated/erx_abi.hrl").
 
@@ -54,6 +57,12 @@ write_segments(Sector, Data, Capacity) when is_binary(Data),
 write_segments(_Sector, _Data, _Capacity) ->
     {error, bad_count}.
 
+%% A flush: the header out, with sector 0, since a flush names none (section 5.2.6), and
+%% the status in.
+-spec flush_segments() -> {ok, [erx_device:segment()]}.
+flush_segments() ->
+    {ok, [{out, header(?ERX_VIRTIO_BLK_T_FLUSH, 0)}, {in, ?STATUS_BYTES}]}.
+
 %% Posts a read of Count sectors from Sector under Tag on the device's queue. A refused
 %% read touches nothing.
 -spec read(erx_device:device(), erx_device:queue(), non_neg_integer(), term(), term(),
@@ -67,6 +76,12 @@ read(Dev, Queue, Tag, Sector, Count, Capacity) ->
             non_neg_integer()) -> ok | {error, out_of_range | bad_count | full | broken}.
 write(Dev, Queue, Tag, Sector, Data, Capacity) ->
     post(Dev, Queue, Tag, write_segments(Sector, Data, Capacity)).
+
+%% Posts a flush under Tag on the device's queue. Its completion says every write the
+%% device completed before it is on the medium.
+-spec flush(erx_device:device(), erx_device:queue(), non_neg_integer()) -> ok | {error, full | broken}.
+flush(Dev, Queue, Tag) ->
+    post(Dev, Queue, Tag, flush_segments()).
 
 post(Dev, Queue, Tag, {ok, Segments}) -> erx_device:post(Dev, Queue, Tag, Segments);
 post(_Dev, _Queue, _Tag, Refused) -> Refused.
