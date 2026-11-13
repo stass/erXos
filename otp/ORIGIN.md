@@ -4,7 +4,7 @@ Repository: https://github.com/erlang/otp
 
 Revision: OTP-29.1.2
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json
@@ -16,7 +16,7 @@ Third-party notices remain in their original files.
   "exclusions": [
     {
       "path": "lib/kernel/test/zlib_SUITE_data/zipdoc",
-      "reason": "OTP .ort.yml explicitly states that this fixture's licence is unknown"
+      "reason": "OTP .ort.yml explicitly states that this fixture's license is unknown"
     },
     {
       "path": "lib/asn1",

@@ -16,11 +16,11 @@ below reads it. Neither `make setup` nor `make check` fetches it.
 `Instructions.json`, `Features.json`, the schema and the rendered
 documentation in the same archive are not used.
 
-Licence: BSD-3-Clause, Copyright 2010-2026 Arm Limited or its affiliates.
+License: BSD-3-Clause, Copyright 2010-2026 Arm Limited or its affiliates.
 Each register record of `Registers.json` declares itself "licensed under the
 BSD 3-clause license" with the notice "Copyright (c) 2010-2026 Arm Limited
 or its affiliates. All rights reserved.", which `aarch64.json` keeps as each
-register's `copyright`. `LICENSE.md` is the licence text of the archive's
+register's `copyright`. `LICENSE.md` is the license text of the archive's
 `docs/notice.html` (SHA-256
 `91e83f6178857ba3e96d69c989bee40c351b775d3a58ff6773c9ec4659ba99d3`), with
 the HTML markup removed. Purpose: the system registers erXos code reads,

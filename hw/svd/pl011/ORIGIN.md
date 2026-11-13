@@ -8,9 +8,9 @@ The UART0 peripheral of the Raspberry Pi Pico SDK's RP2040 register
 description, fetched once from
 `https://raw.githubusercontent.com/raspberrypi/pico-sdk/1.5.1/src/rp2040/hardware_regs/rp2040.svd`.
 Its SHA-256 is `5a046202808f07c660ade1a4b38ad31d10309ec1abbafea4a0342fc538f626c8`,
-the `archive_sha256` below. Licence: BSD-3-Clause, Copyright (c) 2020 Raspberry
+the `archive_sha256` below. License: BSD-3-Clause, Copyright (c) 2020 Raspberry
 Pi (Trading) Ltd.; `pl011.svd` keeps that notice in its head comment, and
-`LICENSE.TXT` is the SDK's licence text, unchanged, fetched once from
+`LICENSE.TXT` is the SDK's license text, unchanged, fetched once from
 `https://raw.githubusercontent.com/raspberrypi/pico-sdk/1.5.1/LICENSE.TXT`. Purpose: the
 register layout of the Arm PrimeCell UART PL011, which the RP2040 carries and
 which `erx_device`, the console UART's table and the generated accessors are
@@ -25,7 +25,7 @@ of the carved file as it stands in the tree. The edits, all made by that script:
 * Only the `UART0` peripheral is kept. The upstream `vendor`, `cpu`,
   `licenseText`, the peripheral's `version`, `size` and `interrupt`, and each
   register's `resetValue` are left out, because the generator's SVD profile
-  refuses them; the licence text becomes the head comment. `schemaVersion` is
+  refuses them; the license text becomes the head comment. `schemaVersion` is
   `1.3`, the version the profile accepts. The `xmlns` and schema-location
   attributes of the upstream `device` element are dropped with it.
 * The device and the peripheral are named `PL011` and the base address is `0`,
@@ -77,7 +77,7 @@ which is not redistributable and is not in the tree.
   "files": {
     "LICENSE.TXT": {
       "license": "BSD-3-Clause",
-      "evidence": "the SDK licence text, fetched from the pinned URL",
+      "evidence": "the SDK license text, fetched from the pinned URL",
       "reviewed": true,
       "sha256": "483f865953435b66c443dee7558debe3cc3cf8fcbb6a112fd9fc6a795d53f1f6",
       "kind": "file",

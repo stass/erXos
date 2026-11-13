@@ -91,8 +91,8 @@ class ProductionImageTest < Minitest::Test
   end
 
   # libbeam.a holds littlefs's objects (lfs.o and lfs_util.o, in the emulator's OS_OBJS), so
-  # its attribution names littlefs's licence beside OTP's; compiler-rt's builtins carry LLVM's
-  # licence, and nothing linked is GPL; every notice named is a tree file.
+  # its attribution names littlefs's license beside OTP's; compiler-rt's builtins carry LLVM's
+  # license, and nothing linked is GPL; every notice named is a tree file.
   def test_emulator_archive_carries_the_littlefs_notice
     fiasco = Struct.new(:boot_core_archive) { def user_library(name) = "/fiasco/#{name}" }.new('/fiasco/boot_cores.a')
     erts = Erx::NativeRuntime::Built.new(otp_archives: ['/otp/erl_main.o', '/otp/libbeam.a'], libc: '/musl/libc.a',
@@ -112,7 +112,7 @@ class ProductionImageTest < Minitest::Test
     archives.values.flat_map(&:notices).each { |notice| assert File.file?(File.join(ROOT, notice)), notice }
   end
 
-  # The dedication in each ChaCha20 file's header is the only licence statement it holds, and
+  # The dedication in each ChaCha20 file's header is the only license statement it holds, and
   # attribution keeps that header as the file's notice. erXos's changes add BSD-2-Clause, whose
   # text is erXos's own LICENSE. No source file stands in as a notice document.
   def test_chacha20_files_carry_their_own_dedication

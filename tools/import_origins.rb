@@ -10,7 +10,7 @@ require_relative 'lib/erx/json_input'
 require_relative 'lib/erx/origin'
 
 module Erx
-  # These are reviewed rules for the pinned imports, not a licence detector
+  # These are reviewed rules for the pinned imports, not a license detector
   # for arbitrary packages. Actual file SPDX notices always take precedence.
   module ImportOrigins
     MAX_PROFILE_BYTES = 1024 * 1024
@@ -36,7 +36,7 @@ module Erx
         end
         next if licenses.empty?
         selected << { 'pattern' => path, 'license' => licenses.uniq.join(' AND '),
-                      'evidence' => "reviewed licence grant in #{path}; musl COPYRIGHT identifies this exception family" }
+                      'evidence' => "reviewed license grant in #{path}; musl COPYRIGHT identifies this exception family" }
       end
       explicit = {
         'src/crypt/crypt_blowfish.c' => 'LicenseRef-musl-Solar-Designer',

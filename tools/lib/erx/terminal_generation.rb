@@ -15,7 +15,7 @@ module Erx
     # names every other input, so the files read are the complete input
     # record of every output. Of otp/ORIGIN.md generation uses only each
     # input's import row, and refuses unless the row's sha256 equals the hash
-    # of the bytes read and its licence is the one the outputs declare, so the
+    # of the bytes read and its license is the one the outputs declare, so the
     # input hashes pin everything it takes from there and ORIGIN.md itself is
     # not recorded: an unrelated OTP import does not regenerate the tree.
     def generation(root:)

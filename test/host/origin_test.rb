@@ -70,7 +70,7 @@ class OriginTest < Minitest::Test
     end
   end
 
-  def test_complete_licence_expression_is_required
+  def test_complete_license_expression_is_required
     ['MIT OR', 'MIT ISC', '(MIT OR ISC', 'MIT WITH (Exception)', 'NONE'].each do |expression|
       assert_raises(Erx::Error) { Erx::Attribution.validate_expression(expression) }
     end
@@ -177,15 +177,15 @@ class OriginTest < Minitest::Test
     assert @origin.check
   end
 
-  # A block comment that closes on its own line, as an imported licence header
+  # A block comment that closes on its own line, as an imported license header
   # does, leaves nothing of that line to read: the check answers, not crashes.
   def test_a_header_comment_closed_on_its_own_line_is_read
     write_file('source.c', "int value;\n")
     write_origin
-    write_file('source.c', "/*\n * Licence.\n */\nint changed;\n")
+    write_file('source.c', "/*\n * License.\n */\nint changed;\n")
     error = assert_raises(Erx::Error) { @origin.check }
     assert_match(/lacks its erXos change notice/, error.message)
-    write_file('source.c', "/*\n * Licence.\n */\n// Modified by erXos\nint changed;\n")
+    write_file('source.c', "/*\n * License.\n */\n// Modified by erXos\nint changed;\n")
     assert @origin.check
   end
 
@@ -207,8 +207,8 @@ class OriginTest < Minitest::Test
   end
 
   # A new file is attributed from its own header, so the file must declare the
-  # project's licence and no other, in any form a reader could take for one.
-  def test_new_source_may_declare_only_the_project_licence
+  # project's license and no other, in any form a reader could take for one.
+  def test_new_source_may_declare_only_the_project_license
     write_origin
     ["// #{HOLDER}\n/* SPDX-License-Identifier: BSD-2-Clause-Patent */\n",
      "// #{HOLDER}\n/* SPDX-License-Identifier: BSD-2-Clause AND GPL-2.0-only */\n",
@@ -226,7 +226,7 @@ class OriginTest < Minitest::Test
   end
 
   # An unedited third-party file can already declare BSD-2-Clause, and that
-  # licence requires its holder's notice kept: another holder's name, or none,
+  # license requires its holder's notice kept: another holder's name, or none,
   # means the file is not erXos's own.
   def test_new_source_may_name_only_the_project_as_copyright_holder
     write_origin
@@ -255,7 +255,7 @@ class OriginTest < Minitest::Test
   def test_excluded_path_does_not_come_back_as_an_addition
     File.write(File.join(@directory, 'kept.c'), 'int kept;')
     @origin.write(repository: 'https://example.org/upstream', revision: '1', archive_sha256: 'a' * 64, review: @review,
-                  exclusions: [{ 'path' => 'removed.c', 'reason' => 'licence' }, { 'path' => 'gone', 'reason' => 'licence' }])
+                  exclusions: [{ 'path' => 'removed.c', 'reason' => 'license' }, { 'path' => 'gone', 'reason' => 'license' }])
     FileUtils.mkdir_p(File.join(@directory, 'gone'))
     ['removed.c', 'gone/inner.c'].each do |path|
       write_file(path, "#{NOTICE}int value;\n")

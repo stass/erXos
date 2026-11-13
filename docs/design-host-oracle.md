@@ -12,7 +12,7 @@ and container timing is not compared with native macOS latency.
 The oracle uses the pinned OTP 29.1.2 archive, never the modified `otp/`
 tree. Its toolchain comes from an immutable OCI image already present in
 the selected engine. `deps.lock` records the image repository, version label,
-platform-specific manifest SHA-256, platform, licence inventory and status.
+platform-specific manifest SHA-256, platform, license inventory and status.
 The version label is descriptive; the manifest digest selects the bytes.
 An image's configuration digest and its manifest digest are different
 identities and are recorded as such. Only the explicit fetch step may pull
@@ -105,7 +105,7 @@ No stock program runs in this phase. A stopped workload and a read-only
 export mount make the input tree stable throughout inspection and copying.
 
 The exporter constructs a bounded file plan from a closed set of evidence
-roots: the guest result, event stream, runner logs, image-licence evidence
+roots: the guest result, event stream, runner logs, image-license evidence
 when requested, and the selected suite's Common Test log tree. It does not
 copy the source or installed-runtime tree wholesale. The Common Test walk
 prunes its private fixture directories, `log_private` and the pinned

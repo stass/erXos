@@ -48,7 +48,7 @@ module Erx
   # The image and the card carry GPL-2.0 code, the stopgap kernel's and the
   # board's device tree, so the page links the erXos source they were built
   # from, a release tag or a commit, beside each download (docs/design.md,
-  # "Licences and notices").
+  # "Licenses and notices").
   module Site
     PAGE_FILES = %w[index.html style.css favicon.svg terminal.js].freeze
     MANIFEST = 'boot.json'

@@ -1650,7 +1650,7 @@ module Erx
                    license: 'BSD-2-Clause', status: 'permanent', notices: [LICENSE])]
     end
 
-    # The BeamAsm build's own archives: ERTS's BeamAsm flavour, asmjit's Zlib licence
+    # The BeamAsm build's own archives: ERTS's BeamAsm flavour, asmjit's Zlib license
     # within libbeam.a's whole, and the C++ runtime. musl's libc.a is the interpreter's.
     def jit_archives(jit)
       return [] unless jit

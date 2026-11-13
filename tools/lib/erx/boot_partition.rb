@@ -29,10 +29,10 @@ module Erx
   # them, and whose data partition holds a fresh littlefs volume; and
   # sdcard.img.receipt.json is their build record
   # (docs/design-stopgap.md, "The Raspberry Pi 4"; docs/design-platforms.md, "Firmware").
-  # The files are the firmware, unmodified, with its licence; config.txt, written from
+  # The files are the firmware, unmodified, with its license; config.txt, written from
   # the platform record; the board's device tree, with its one marked edit, its source
   # and Linux's GPL-2.0 text (BoardTree), and the overlays config.txt names; TF-A's BL31
-  # as the armstub, with its licence; and the production image's bootable file as
+  # as the armstub, with its license; and the production image's bootable file as
   # kernel8.img.
   #
   # The card and its build record are what the website offers for the board
@@ -51,11 +51,11 @@ module Erx
     KERNEL = PiMedium::BOOT_FILE
     ARMSTUB = 'bl31.bin'
     CONFIG = 'config.txt'
-    ARMSTUB_LICENCE = 'LICENCE.tf-a'
+    ARMSTUB_LICENSE = 'LICENCE.tf-a'
     # A file of the layout whose bytes are given, not read from a path.
     Text = Data.define(:bytes)
     # The firmware's files, by deps.lock pin; each keeps its pinned file name.
-    FIRMWARE = %w[rpi-firmware-start4 rpi-firmware-fixup4 rpi-firmware-licence].freeze
+    FIRMWARE = %w[rpi-firmware-start4 rpi-firmware-fixup4 rpi-firmware-license].freeze
     # A file name of the layout: one name, or one under overlays/.
     NAME = %r{\A(?:overlays/)?[A-Za-z0-9][A-Za-z0-9_.,+-]*\z}
     MAX_FILE = 64 * 1024 * 1024
@@ -156,12 +156,12 @@ module Erx
     # The layout as a map from each file's name in the partition to its source path,
     # or to its Text for config.txt; firmware maps each firmware file's name to its path.
     # Pure.
-    def plan(platform:, build_kind:, bootable:, bl31:, bl31_licence:, tree:, firmware:)
+    def plan(platform:, build_kind:, bootable:, bl31:, bl31_license:, tree:, firmware:)
       board = BoardTree.board(platform)
-      own = { KERNEL => bootable, ARMSTUB => bl31, ARMSTUB_LICENCE => bl31_licence,
+      own = { KERNEL => bootable, ARMSTUB => bl31, ARMSTUB_LICENSE => bl31_license,
               CONFIG => Text.new(config_txt(platform, overlays: tree.overlays.keys, build_kind: build_kind)),
               board.file => tree.board, BoardTree.source_file(board) => tree.source,
-              BoardTree::LICENCE_FILE => tree.licence,
+              BoardTree::LICENSE_FILE => tree.license,
               **tree.overlays.to_h { |name, path| ["overlays/#{name}.dtbo", path] } }
       clash = own.keys & firmware.keys
       raise Error, "boot partition: the firmware's #{clash.join(', ')} would replace a file of the layout" unless clash.empty?
@@ -219,7 +219,7 @@ module Erx
 
     # The build record of a layout: the erXos commit the card is of, in full, and whether
     # the tree differed from it (nil when the tree is no git checkout); the firmware's
-    # deps.lock pins, BL31's own build record (Bl31.record) and its licence's place in
+    # deps.lock pins, BL31's own build record (Bl31.record) and its license's place in
     # TF-A's pinned tree, the board tree's pinned source, recipe, overlay sources and
     # tools (the preprocessor and dtc), and the card's tool and arguments. The bootable
     # file's record is the image's, in the same directory. Paths are relative to root,
@@ -233,7 +233,7 @@ module Erx
         'inputs' => { 'platform' => platform.name, 'firmware' => firmware,
                       'bl31' => Bl31.record(root: root, compiler: compiler, linker: linker)
                                     .merge('compiler' => version.(compiler), 'linker' => version.(linker)),
-                      'bl31_licence' => { 'source' => Bl31::SOURCE_ID, 'path' => Bl31::LICENCE },
+                      'bl31_license' => { 'source' => Bl31::SOURCE_ID, 'path' => Bl31::LICENSE },
                       'board_tree' => { 'source' => BoardTree.source_record(root: root), 'board' => board.source,
                                         'recipe' => source_reference(root, BoardTree.recipe_path),
                                         'overlays' => board.overlays.transform_values { |path| source_reference(root, File.join(root, path)) },
@@ -315,7 +315,7 @@ module Erx
       revision = SourceRevision.read(root: root, runner: runner)
       plan = plan(platform: platform, build_kind: build_kind, bootable: bootable,
                   firmware: pinned.to_h { |source, archive| [source.fetch('filename'), archive] },
-                  bl31_licence: Bl31.licence(root: root, runner: runner),
+                  bl31_license: Bl31.license(root: root, runner: runner),
                   bl31: Bl31.ensure(root: root, runner: runner, compiler: compiler, linker: linker),
                   tree: BoardTree.build(root: root, runner: runner, platform: platform, compiler: compiler,
                                         revision: revision))

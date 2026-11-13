@@ -21,9 +21,9 @@ sat at the top of the archive's `littlefs-2.11.3/` directory:
 | `lfs_util.h` | `548d46aa524dc7449e16739286c1a422a52f9de727ff0be0c2ffc5593f5ca981` |
 | `LICENSE.md` | `0cb4ff1daf5fdc1359c6a6ee3116092f08fc100c9d58b1b77ab17bfd801f856d` |
 
-Licence: BSD-3-Clause, whose text and copyright holders (the littlefs
+License: BSD-3-Clause, whose text and copyright holders (the littlefs
 authors and Arm Limited) are `LICENSE.md`; each source file declares it
-by SPDX in its header. erXos's changes are under the same licence.
+by SPDX in its header. erXos's changes are under the same license.
 
 Left out: the block-device emulators (`bd/`), the test and benchmark
 runners and their cases (`runners/`, `tests/`, `benches/`), the scripts,
@@ -36,7 +36,7 @@ and supplies the block device itself.
 Each file erXos changes says so in a `Modified by erXos` notice at its
 top, which lists the changes. All five are unchanged.
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json

@@ -49,7 +49,7 @@ class OracleImportsTest < Minitest::Test
     File.binwrite(File.join(project, 'build/downloads', "otp-#{hash}.tar.gz"), compressed.string)
   end
 
-  def test_nested_vendor_file_keeps_reviewed_licence
+  def test_nested_vendor_file_keeps_reviewed_license
     profile = JSON.parse(File.read(File.expand_path('../../config/imports/otp.json', __dir__)))
     attribution = Erx::Attribution.for_file('lib/stdlib/test/re_SUITE_data/old_pcre1/testoutput1',
                                            bytes: 'fixture without a header', sidecar: nil, review: profile)

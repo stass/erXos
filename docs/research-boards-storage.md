@@ -5,7 +5,7 @@ design: the first boards after QEMU (the Raspberry Pi 4 Model B, then the
 Raspberry Pi 5), A/B updates of the system on those boards, the network
 stack (lwIP first, then FreeBSD's) and the file systems (the EROFS format
 for read-only images; littlefs, then erXos's own implementation of F2FS,
-for read-write storage). It also records the licences that bear on them and
+for read-write storage). It also records the licenses that bear on them and
 on the notices erXos ships, and the checks behind the cryptography
 libraries, the toolbox, the command shell's oracle, PCIe on the Raspberry
 Pi 5, device addresses and the kernel's speculation mitigations. The record
@@ -28,10 +28,10 @@ HTTP.
 A verification pass on 2026-10-30 checked a list of claims against primary
 sources: device trees, data sheets, firmware and boot-stub sources, the
 Raspberry Pi documentation, Fiasco's board support, QEMU's machine list and
-source, the licence files and headers of each candidate, and the authors'
+source, the license files and headers of each candidate, and the authors'
 own pages. Further checks the same day: the SPDX identifiers of OTP 29.1.2
 and of FreeBSD's network stack, counted with `grep`, `sort` and `uniq -c`;
-littlefs's header and README; the Raspberry Pi firmware licence; the SPDX
+littlefs's header and README; the Raspberry Pi firmware license; the SPDX
 lines of Linux's device trees for both boards and of its F2FS header; the
 Raspberry Pi documentation of `tryboot` and `autoboot.txt`; the
 Raspberry Pi kernel's reboot path; and, in local copies, two device trees,
@@ -74,7 +74,7 @@ reading code.
   `0xd8` to `0xf0` (l.151-158, 175-191). This matches Linux v7.3's
   `Documentation/arch/arm64/booting.rst` l.82-88, 138-142, 163-165 and
   174-175.
-* **Device tree licence.** Linux's `bcm2711-rpi-4-b.dts` is `GPL-2.0` (its
+* **Device tree license.** Linux's `bcm2711-rpi-4-b.dts` is `GPL-2.0` (its
   SPDX line, master).
 
 ## Raspberry Pi 5 (BCM2712 and RP1)
@@ -123,7 +123,7 @@ reading code.
   `plat/rpi/common/rpi4_bl31_setup.c` l.152-164; `rpi3_common.c`
   l.192-200). The same document, l.10-13: "The SoC does not seem to
   feature a secure memory controller of any kind."
-* **Device tree licence.** Linux's `bcm2712-rpi-5-b.dts` is
+* **Device tree license.** Linux's `bcm2712-rpi-5-b.dts` is
   `(GPL-2.0 OR MIT)` at its top; the files it includes were not checked,
   and the compiled copy in seL4 is labelled GPL-2.0-only
   ([Checks against local copies](#checks-against-local-copies)).
@@ -235,7 +235,7 @@ Read on 2026-10-30 in copies under `~/erxos-scratch/borrow/`:
   isn't secure": "The SoC does not seem to feature a secure memory
   controller of any kind." The firmware "knows how to access the MMC
   controller and how to parse a FAT filesystem" and loads its components
-  "from the first FAT partition on the SD card". Its licence is TF-A's
+  "from the first FAT partition on the SD card". Its license is TF-A's
   BSD-3-Clause.
 * **TF-A's PSCI operations on the Pi 4.** The local copy has no `plat/`
   directory, so two files were fetched at tag `v2.15.0`:
@@ -255,7 +255,7 @@ Read on 2026-10-30 in copies under `~/erxos-scratch/borrow/`:
   `tryboot` flag, set through the mailbox before the call, survives this
   reset was not checked.
 
-## The Raspberry Pi firmware licence
+## The Raspberry Pi firmware license
 
 `boot/LICENCE.broadcom` (raspberrypi/firmware, master), copyright Broadcom
 Corporation (2006) and Raspberry Pi (Trading) Ltd (2015): redistribution and
@@ -317,7 +317,7 @@ no Pi 5; the v11.1.3 source agrees (`hw/arm/meson.build` l.29-33). The
   the FreeBSD 15 line, though its README names 11.01 and 13.0.
 * **libuinet** packaged FreeBSD 9.1's stack as a user-space library (README
   l.4-6). Its own code is BSD-2-Clause (`lib/libuinet/uinet_api.c`), with
-  no top-level licence file; its last commit is of 2017-02-08, with no
+  no top-level license file; its last commit is of 2017-02-08, with no
   releases.
 
 ## File systems
@@ -353,7 +353,7 @@ no Pi 5; the v11.1.3 source agrees (`hw/arm/meson.build` l.29-33). The
   BSD-2-Clause and the rest under GPL-2.0-or-later; XZ Utils 5.8.4's
   `COPYING`: "liblzma is under the BSD Zero Clause License (0BSD)";
   Zstandard 1.5.7 is "dual BSD OR GPLv2" (`README.md` l.8, `LICENSE`
-  BSD-3-Clause). zlib is under the Zlib licence. libdeflate was not
+  BSD-3-Clause). zlib is under the Zlib license. libdeflate was not
   checked.
 * **F2FS.** Linux's F2FS is GPL-2.0 (every top-level file in v7.3;
   `fs/f2fs/f2fs.h` on master). The superblock's feature bits name what an
@@ -412,13 +412,13 @@ no Pi 5; the v11.1.3 source agrees (`hw/arm/meson.build` l.29-33). The
 * **OpenZFS** is CDDL-1.0 (`1547ff6b`, `LICENSE` and `META`), with per-file
   exceptions such as the GPL-2.0-or-later Linux SPL.
 * **Reliance Edge** is "power-fail safe" and transactional, under GPLv2
-  (version 2 only, per its headers) or a commercial licence
+  (version 2 only, per its headers) or a commercial license
   (tuxera/reliance-edge at `da455bd5`, README l.3, 43-48, 88-96).
 * **Other Linux file systems.** Btrfs is GPL-2.0; NILFS2 is mostly
   GPL-2.0-or-later (39 of 42 files); bcachefs left Linux after v6.17 and
   ships out of tree under GPLv2.
 
-## Licences inside OTP 29.1.2
+## Licenses inside OTP 29.1.2
 
 The SPDX tags under `lib/`, `erts/`, `bootstrap/` and `make/` of the
 OTP 29.1.2 tarball: 6,254 `Apache-2.0`; 236 `Apache-2.0 AND
@@ -428,7 +428,7 @@ LicenseRef-scancode-wxwindows-free-doc-3`; 169 `Zlib`; 108 `BSD-3-Clause`;
 specifications); 8 `MIT`; 5 `MPL-1.1` (dialyzer test data); 4
 `BSD-2-Clause`; 2 `Apache-2.0 AND SGI-B-2.0`; one each of
 `LicenseRef-RSA-PKCS5v2-0`, `LicenseRef-RSA-PKCS3` and `Apache-2.0 WITH
-LLVM-exception AND BSL-1.0`. The tree has no `NOTICE` file; its licence
+LLVM-exception AND BSL-1.0`. The tree has no `NOTICE` file; its license
 texts are `LICENSE.txt` and the files under `LICENSES/` and `FILE-HEADERS/`.
 
 ## Cryptography libraries
@@ -439,7 +439,7 @@ Checked over HTTP on 2026-10-30:
   supported until 2030-04-08 (LTS)". The `LICENSE.txt` on the
   `openssl-3.5` branch is the Apache License, Version 2.0.
 * **Monocypher.** Its `LICENCE.md` on `master`: "Monocypher as a whole is
-  dual-licensed", the two licences being "a regular 2-clause BSD licence"
+  dual-licensed", the two licenses being "a regular 2-clause BSD licence"
   and "the CC-0 from Creative Commons"; "The files in `tests/externals/`
   were placed in the public domain by their respective authors." Its
   README offers SHA-512 and Ed25519 as optional code,
@@ -489,13 +489,13 @@ Checked over HTTP on 2026-10-30, with refs read from each repository:
   cask API's `plan9port.json`, each answer 404. The oracle is therefore
   built from the pinned source as a host test tool.
 * **Byron Rakitzis's rc** (`github.com/rakitzis/rc`), a reimplementation
-  of the same language under the zlib licence, carries `trip.rc`, "take a
+  of the same language under the zlib license, carries `trip.rc`, "take a
   tour of rc" (729 lines at `master`; SHA-256
   `6146d49827f3c8971cdc33e7c80387d38002f2e33f8566d1b77b75f92158b2f9`),
   which also exercises that implementation's extensions.
 * **tcsh** (`github.com/tcsh-org/tcsh`), for the later version: its
   `Copyright` file is the University of California's three-clause BSD
-  licence, and its newest tag is `TCSH6_24_16`. The development host's
+  license, and its newest tag is `TCSH6_24_16`. The development host's
   `/bin/tcsh` reports 6.21.00.
 
 ## PCIe on the Raspberry Pi 5
@@ -577,7 +577,7 @@ Every URL below was accessed on 2026-10-30.
 | seL4 | 16.0.0, local copy (`tools/dts/rpi4.dts`, `tools/dts/rpi5b.dts`) | https://github.com/seL4/seL4 |
 | OpenBSD | 8.0, local copy (`sys/dev/fdt/bcm2835_dog.c`) | https://github.com/openbsd/src |
 | RTEMS | 6.2, local copy (`bsps/aarch64/raspberrypi/start/watchdog.c`) | https://gitlab.rtems.org/rtems/rtos/rtems |
-| Raspberry Pi firmware: licence; issue 1415 | master; 2020-06-25 | https://github.com/raspberrypi/firmware/blob/master/boot/LICENCE.broadcom ; https://github.com/raspberrypi/firmware/issues/1415 |
+| Raspberry Pi firmware: license; issue 1415 | master; 2020-06-25 | https://github.com/raspberrypi/firmware/blob/master/boot/LICENCE.broadcom ; https://github.com/raspberrypi/firmware/issues/1415 |
 | BCM2711 ARM Peripherals | release 4, 2022-01-18, build `cfcff44` | https://datasheets.raspberrypi.com/bcm2711/bcm2711-peripherals.pdf |
 | F-Stack; libuinet | dev `52514377`; last commit 2017-02-08 | https://github.com/F-Stack/f-stack ; https://github.com/pkelsey/libuinet |
 | FreeBSD | 15.1-RELEASE-p6 (`sys/` subset and `COPYRIGHT`, local) | https://git.freebsd.org/src.git |

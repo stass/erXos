@@ -4,13 +4,13 @@ Repository: https://github.com/9fans/plan9port
 
 Revision: 1f1396913fb5372408f442ed26933f5ae4b399cd
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 The files are plan9port's, unchanged, from `src/cmd/rc/test.rc`,
 `src/cmd/rc/checkparse` and the top-level `LICENSE` of the commit above,
 the `plan9port` pin of `deps.lock`; `archive_sha256` is the SHA-256 of
-that pin's `git archive`. Licence: MIT, under "Copyright (c) 2021 Plan 9
+that pin's `git archive`. License: MIT, under "Copyright (c) 2021 Plan 9
 Foundation" with portions by Russ Cox and Google Inc.; `LICENSE` is the
 text. Purpose: the start of the command shell's test corpus
 ([design-shell.md](../../../../docs/design-shell.md#verification-and-testing)).

@@ -164,7 +164,7 @@ class BootPartitionTest < Minitest::Test
   end
 
   # The record names every input by its pin or digest: the firmware as deps.lock pins
-  # it, BL31's own build record, TF-A's licence, the board tree's source, recipe and
+  # it, BL31's own build record, TF-A's license, the board tree's source, recipe and
   # overlays, and fsimg with its arguments. It is published with the card, so it names
   # the commit the card was built from in full, each host tool is named by its version
   # line, and nothing in it is an absolute path.
@@ -188,7 +188,7 @@ class BootPartitionTest < Minitest::Test
     ruby = "ruby #{RUBY_VERSION}"
     assert_match(/\A#{Regexp.escape(ruby)}/, record.fetch('bl31').fetch('compiler'))
     assert_match(/\A#{Regexp.escape(ruby)}/, record.fetch('bl31').fetch('linker'))
-    assert_equal({ 'source' => 'trusted-firmware-a', 'path' => 'docs/license.rst' }, record.fetch('bl31_licence'))
+    assert_equal({ 'source' => 'trusted-firmware-a', 'path' => 'docs/license.rst' }, record.fetch('bl31_license'))
     tree = record.fetch('board_tree')
     assert_equal 'linux-dts', tree.fetch('source').fetch('id')
     assert_equal 'tools/lib/erx/board_tree.rb', tree.fetch('recipe').fetch('path')
@@ -260,10 +260,10 @@ class BootPartitionTest < Minitest::Test
     Dir.mktmpdir do |root|
       sources = plan(root)
       tree = Erx::BoardTree::Built.new(board: sources.fetch('bcm2711-rpi-4-b.dtb'), source: sources.fetch('bcm2711-rpi-4-b.dts'),
-                                       licence: sources.fetch('LICENCE.linux-dts'),
+                                       license: sources.fetch('LICENCE.linux-dts'),
                                        model: '', overlays: {})
       assert_raises(Erx::Error) do
-        Erx::BootPartition.plan(platform: PI, build_kind: 'development', bootable: 'k', bl31: 'b', bl31_licence: 'l', tree: tree,
+        Erx::BootPartition.plan(platform: PI, build_kind: 'development', bootable: 'k', bl31: 'b', bl31_license: 'l', tree: tree,
                                 firmware: { 'kernel8.img' => 'x' })
       end
     end
@@ -308,11 +308,11 @@ class BootPartitionTest < Minitest::Test
     stand_in = lambda do |name, text = name|
       File.join(sources, name).tap { |path| File.write(path, text) }
     end
-    tree = Erx::BoardTree::Built.new(board: stand_in.('tree.dtb'), source: stand_in.('tree.dts'), licence: stand_in.('gpl-2.0'), model: stand_in.('model.dtb'),
+    tree = Erx::BoardTree::Built.new(board: stand_in.('tree.dtb'), source: stand_in.('tree.dts'), license: stand_in.('gpl-2.0'), model: stand_in.('model.dtb'),
                                      overlays: { 'uart3' => stand_in.('uart3.dtbo') })
     firmware = %w[start4.elf fixup4.dat LICENCE.broadcom].to_h { |name| [name, stand_in.(name)] }
     Erx::BootPartition.plan(platform: PI, build_kind: 'development', bootable: stand_in.('kernel8', 'kernel'), bl31: stand_in.('bl31'),
-                            bl31_licence: stand_in.('licence'),
+                            bl31_license: stand_in.('license'),
                             tree: tree, firmware: firmware)
   end
 end

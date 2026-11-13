@@ -65,7 +65,7 @@ module Erx
     end
 
     def receipt_seed(directory)
-      files = { 'LICENSE' => 'BSD fixture licence',
+      files = { 'LICENSE' => 'BSD fixture license',
                 'root.c' => "/* SPDX-License-Identifier: BSD-2-Clause */\n",
                 'root.o' => 'object bytes', 'root.elf' => 'artifact bytes',
                 'root.d' => "root.o: root.c\n",

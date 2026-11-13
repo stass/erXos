@@ -61,7 +61,7 @@ module Erx
 
       private
 
-      # Every generated file's head: its licence, which a program's build receipt resolves
+      # Every generated file's head: its license, which a program's build receipt resolves
       # (Erx::PackProvenance), and where it comes from.
       def banner
         ['/*', ' * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>', ' * SPDX-License-Identifier: BSD-2-Clause',

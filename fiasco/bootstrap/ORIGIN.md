@@ -4,7 +4,7 @@ Repository: https://github.com/kernkonzept/bootstrap
 
 Revision: a4f4ad182c78a97a1c50098511092dd32f05c63d
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json

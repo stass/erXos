@@ -40,8 +40,8 @@ module Erx
     # BL31 runs from address 0 in the memory the firmware keeps for the stub, the first
     # 512 KiB, which the device tree's reserved memory states.
     MAX_IMAGE = 512 * 1024
-    # TF-A's licence in its source, which ships beside the binary.
-    LICENCE = 'docs/license.rst'
+    # TF-A's license in its source, which ships beside the binary.
+    LICENSE = 'docs/license.rst'
 
     # The stub header at 0xf0 (TF-A's plat/rpi/common/aarch64/armstub8_header.S): the
     # magic, a version, the device tree's address and the kernel's entry, each a 32-bit
@@ -102,7 +102,7 @@ module Erx
         build(root: root, runner: runner, compiler: compiler, linker: linker)
     end
 
-    def licence(root:, runner:) = File.join(Dependencies.new(root: root, runner: runner).fetched_tree(SOURCE_ID), LICENCE)
+    def license(root:, runner:) = File.join(Dependencies.new(root: root, runner: runner).fetched_tree(SOURCE_ID), LICENSE)
 
     # What a build is of: TF-A's pin, this recipe and its options, and the compiler and
     # linker by identity (BuildMemo.program_identity), so a changed toolchain rebuilds.

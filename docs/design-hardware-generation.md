@@ -38,7 +38,7 @@ kernel's early-console writer, as their separate chokepoints require.
 An SVD that a vendor publishes enters the tree as an import: `hw/svd/<device>/ORIGIN.md` records its
 repository, release and SHA-256, and lists each edit the profile needed, which
 a script under `tools/` makes again from the pinned upstream file. The file keeps the
-vendor's licence notice and descriptions, and only the peripheral erXos drives
+vendor's license notice and descriptions, and only the peripheral erXos drives
 enters the tree. The PL011's is the Raspberry Pi Pico SDK's UART0.
 
 The same model produces the table `erx_device` resolves Erlang's register

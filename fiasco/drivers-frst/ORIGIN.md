@@ -4,7 +4,7 @@ Repository: https://github.com/kernkonzept/drivers-frst
 
 Revision: 6459d70997da1a2ad97775c8772b4a41284b0a9e
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json

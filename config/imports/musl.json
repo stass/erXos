@@ -32,457 +32,457 @@
     {
       "pattern": "src/complex/csqrt.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/csqrt.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/csqrt.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/__cexp.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/__cexp.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/__cexp.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/ccosh.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/ccosh.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/ccosh.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/ctanh.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/ctanh.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/ctanh.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/__cexpf.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/__cexpf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/__cexpf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/csqrtf.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/csqrtf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/csqrtf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/cexp.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/cexp.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/cexp.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/ctanhf.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/ctanhf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/ctanhf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/ccoshf.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/ccoshf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/ccoshf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/csinhf.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/csinhf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/csinhf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/catan.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/complex/catan.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/catan.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/catanf.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/complex/catanf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/catanf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/catanl.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/complex/catanl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/catanl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/csinh.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/csinh.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/csinh.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/complex/cexpf.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/cexpf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/complex/cexpf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/crypt/crypt_md5.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/crypt/crypt_md5.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/crypt/crypt_md5.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/crypt/crypt_des.c",
       "license": "BSD-3-Clause",
-      "evidence": "reviewed licence grant in src/crypt/crypt_des.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/crypt/crypt_des.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/crypt/crypt_blowfish.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/crypt/crypt_blowfish.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/crypt/crypt_blowfish.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/regex/tre-mem.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/regex/tre-mem.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/regex/tre-mem.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/regex/regexec.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/regex/regexec.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/regex/regexec.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/regex/regcomp.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/regex/regcomp.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/regex/regcomp.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/regex/tre.h",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/regex/tre.h; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/regex/tre.h; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/atan.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atan.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/atan.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/expm1l.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/expm1l.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/expm1l.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/fmaf.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/math/fmaf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/fmaf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/fmal.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/math/fmal.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/fmal.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/expm1f.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/expm1f.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/expm1f.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/cbrt.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/cbrt.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/cbrt.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/jn.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/jn.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/jn.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/log10f.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/log10f.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/log10f.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/log10l.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/log10l.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/log10l.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/log10.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/log10.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/log10.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/sincosf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/sincosf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/sincosf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/erf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/erf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/erf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/exp2l.c",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/math/exp2l.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/exp2l.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/j0.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/j0.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/j0.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/acosf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/acosf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/acosf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/cbrtf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/cbrtf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/cbrtf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/atanf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atanf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/atanf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/log1pf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/log1pf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/log1pf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/cbrtl.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/cbrtl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/cbrtl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/acosl.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/acosl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/acosl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/sin.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/sin.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/sin.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/log1pl.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/log1pl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/log1pl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/atanl.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atanl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/atanl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/expl.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/expl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/expl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/j1f.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/j1f.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/j1f.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__tan.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__tan.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__tan.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/cos.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/cos.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/cos.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/sinf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/sinf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/sinf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/lgammal.c",
       "license": "SunPro AND ISC",
-      "evidence": "reviewed licence grant in src/math/lgammal.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/lgammal.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/log2l.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/log2l.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/log2l.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/atan2.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atan2.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/atan2.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__sinl.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__sinl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__sinl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__cosdf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__cosdf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__cosdf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__rem_pio2.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__rem_pio2.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__rem_pio2.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__sindf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__sindf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__sindf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/j0f.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/j0f.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/j0f.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__tandf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__tandf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__tandf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__rem_pio2f.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__rem_pio2f.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__rem_pio2f.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__rem_pio2l.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__rem_pio2l.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__rem_pio2l.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/logl.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/logl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/logl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/lgammaf_r.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/lgammaf_r.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/lgammaf_r.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__polevll.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/__polevll.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__polevll.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/acos.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/acos.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/acos.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/sincos.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/sincos.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/sincos.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/log1p.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/log1p.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/log1p.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/scalbf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/scalbf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/scalbf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/powl.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/powl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/powl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/tgammal.c",
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/tgammal.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/tgammal.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/asin.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/asin.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/asin.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/erfl.c",
       "license": "SunPro AND ISC",
-      "evidence": "reviewed licence grant in src/math/erfl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/erfl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/erff.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/erff.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/erff.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/expm1.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/expm1.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/expm1.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/jnf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/jnf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/jnf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__cosl.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__cosl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__cosl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__tanl.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__tanl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__tanl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/scalb.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/scalb.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/scalb.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/asinf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/asinf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/asinf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/asinl.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/asinl.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/asinl.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__sin.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__sin.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__sin.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__rem_pio2_large.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__rem_pio2_large.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__rem_pio2_large.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/__cos.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__cos.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/__cos.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/j1.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/j1.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/j1.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/atan2l.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atan2l.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/atan2l.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/lgamma_r.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/lgamma_r.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/lgamma_r.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/tanf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/tanf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/tanf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/tan.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/tan.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/tan.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/atan2f.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atan2f.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/atan2f.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/math/cosf.c",
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/cosf.c; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/math/cosf.c; musl COPYRIGHT identifies this exception family"
     },
     {
       "pattern": "src/string/arm/memcpy.S",
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/string/arm/memcpy.S; musl COPYRIGHT identifies this exception family"
+      "evidence": "reviewed license grant in src/string/arm/memcpy.S; musl COPYRIGHT identifies this exception family"
     }
   ],
   "exclusions": [

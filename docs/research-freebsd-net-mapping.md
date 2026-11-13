@@ -2,7 +2,7 @@
 
 A point-in-time report, dated 2026-11-07, of how FreeBSD's network stack
 divides into what an Erlang stack translates, what it drops, how large
-each part is, which licences cover it and what FreeBSD offers as a test
+each part is, which licenses cover it and what FreeBSD offers as a test
 oracle. [design-network-stack.md](design-network-stack.md) rests on it.
 Apart from the corrections below, made before it entered the tree, its
 findings are not edited in place; a re-check gets a new record.
@@ -16,7 +16,7 @@ contrib/netbsd-tests/net, share/man/man4, release). Nothing from it was
 built or run. Paths below are relative to the source tree's root. Line
 counts come from a scratch Ruby script, not kept: "raw" is `wc -l`; "code"
 drops blank lines and comments (a crude `/* */` and `//` stripper, good to
-a few percent). The licence survey came from another scratch script that
+a few percent). The license survey came from another scratch script that
 reads each file's SPDX line.
 
 erx_net's translation, read from this source, is pinned at a FreeBSD
@@ -263,7 +263,7 @@ Seams that need a decision by the design writer (not settled by FreeBSD):
   read them for expected behaviour, or run them against our socket layer when it
   exists.
 * **FreeBSD tcp-testsuite** (github.com/freebsd-net/tcp-testsuite, default branch
-  `master`, last push 2026-05-03): BSD-3-Clause style licence text (LICENSE.md,
+  `master`, last push 2026-05-03): BSD-3-Clause style license text (LICENSE.md,
   "Copyright (c) 2016, Michael Tuexen", no SPDX tag), about
   1103 `.pkt` scripts: state-event-engine 885 files (every segment type in every TCP
   state), rcv-data-segments 219 (overlapping segments in many offsets), fast-open 156,
@@ -272,7 +272,7 @@ Seams that need a decision by the design writer (not settled by FreeBSD):
   congestion control or RACK (4 file names mention SACK); it checks the state machine,
   not loss recovery. The packetdrill version it needs is nplab's, not Google's:
   `github.com/nplab/packetdrill` (README says so); `github.com/freebsd-net/packetdrill`
-  is a fork "with UDPLite and SCTP support and bug fixes for FreeBSD" with licence
+  is a fork "with UDPLite and SCTP support and bug fixes for FreeBSD" with license
   field GPL-2.0 (GitHub API; `google/packetdrill` is GPL-2.0 too). The packetdrill tool is a GPL-2.0 test
   tool: fine as an out-of-tree oracle fetched at a pinned version (per erXos
   CLAUDE.md "tools and test oracles stay out of the tree"), never linked.
@@ -282,7 +282,7 @@ Seams that need a decision by the design writer (not settled by FreeBSD):
   hosted mode. That is a design choice for the test plan, not something in FreeBSD.
   For loss recovery, Google's own packetdrill TCP scripts (the Linux gtests) are the
   better source, not in the FreeBSD tree.
-* Not checked: Linux packetdrill test licence for those scripts (Apache-2.0 and GPL
+* Not checked: Linux packetdrill test license for those scripts (Apache-2.0 and GPL
   mix in `google/packetdrill`); verify before using any.
 
 ## 6. Features: leave out first, and features to keep
@@ -330,12 +330,12 @@ Seams that need a decision by the design writer (not settled by FreeBSD):
 | ICMP rate limiting | `ip_icmp.c`, `icmp6.c` | |
 | CC: NewReno, CUBIC | `cc/cc_newreno.c`, `cc/cc_cubic.c`; CUBIC is the default (`cc.c:83`) | |
 
-## 7. Licences
+## 7. Licenses
 
 Counts are the SPDX identifiers found in the file headers, by the scratch
-script named above. Files with no SPDX tag were read for licence text.
+script named above. Files with no SPDX tag were read for license text.
 
-| Family | Licence found | Verdict |
+| Family | License found | Verdict |
 |---|---|---|
 | `tcp_input.c`, `tcp_output.c`, `tcp_timer.c`, `tcp_subr.c`, `tcp_sack.c`, `tcp_usrreq.c`, `tcp_reass.c`, `tcp_timewait.c`, `tcp_seq.h`, `tcp_fsm.h`, `tcp_timer.h`, `tcp_var.h`, `tcp.h`, `tcp_ecn.c`, `tcp_hostcache.c` | BSD-3-Clause | translate |
 | `tcp_syncache.c`, `tcp_syncache.h` (.h is BSD-3-Clause) | BSD-2-Clause | translate |
@@ -345,20 +345,20 @@ script named above. Files with no SPDX tag were read for licence text.
 | `ip_reass.c`, `ip_id.c` | BSD text without SPDX (`ip_reass.c`) and BSD-2-Clause (`ip_id.c`) | translate |
 | netinet6: `ip6_input.c`, `ip6_output.c`, `nd6*.c`, `icmp6.c`, `frag6.c`, `in6*.c`, `scope6.c`, `udp6_usrreq.c`, `dest6.c`, `route6.c`, `raw_ip6.c`, `in6_src.c` | BSD-3-Clause (KAME code, BSD-3 with the KAME copyright) | translate |
 | `ip6_id.c` | `BSD-3-Clause AND BSD-2-Clause` (two authors) | fine, but list both |
-| `tcp_stacks/rack.c`, `bbr.c`, `rack_bbr_common.*`, `rack_pcm.c`, `sack_filter.*`, `tcp_rack.h`, `tcp_bbr.h`, `tcp_hpts.*`, `tcp_lro_hpts.c` | Netflix BSD-2 text, no SPDX tag | not proposed for first version; licence is fine |
-| **`tcp_stacks/tailq_hash.c`, `tailq_hash.h`** | **no licence header at all** (Netflix; first lines are `#include`) | **avoid copying; if RACK is ever done, re-derive from the idea or ask the file's authors** |
+| `tcp_stacks/rack.c`, `bbr.c`, `rack_bbr_common.*`, `rack_pcm.c`, `sack_filter.*`, `tcp_rack.h`, `tcp_bbr.h`, `tcp_hpts.*`, `tcp_lro_hpts.c` | Netflix BSD-2 text, no SPDX tag | not proposed for first version; license is fine |
+| **`tcp_stacks/tailq_hash.c`, `tailq_hash.h`** | **no license header at all** (Netflix; first lines are `#include`) | **avoid copying; if RACK is ever done, re-derive from the idea or ask the file's authors** |
 | **`netinet/in_cksum.c`** | **BSD-4-Clause** (original advertising clause at `in_cksum.c:17`) | **do not translate; the Internet checksum is a few lines to write fresh, and we planned it as a C primitive** |
 | `tcp_accounting.h`, `in_rmx.c`, `ip_carp_nl.h`, `icmp6.h`, `ip6.h` | no SPDX found; `netinet6/ip6.h` and `icmp6.h` are stub headers that say "obsolete, use netinet/ip6.h" | not needed |
 | `tests/sys/netinet*` ATF tests | BSD-2/BSD-3 | read only |
 | tcp-testsuite scripts | BSD-3-Clause text (LICENSE.md) | usable as oracle |
 | packetdrill (nplab, freebsd-net fork, google) | GPL-2.0 per GitHub API | tool only, fetched out of tree, never linked |
 
-No file in the proposed translation set is GPL, LGPL or has a non-BSD licence apart
+No file in the proposed translation set is GPL, LGPL or has a non-BSD license apart
 from `in_cksum.c` (BSD-4-Clause) and the header-less `tailq_hash.c`. Many BSD-3 files carry
 Berkeley and other copyright holders: a translation is a derived work, so the
-erXos tree must keep each file's copyright notice and licence text in the translated
+erXos tree must keep each file's copyright notice and license text in the translated
 module's header, as CLAUDE.md already requires for imported code. The BSD-licensed
-translation does not conflict with erXos's own licence choices, but the design writer
+translation does not conflict with erXos's own license choices, but the design writer
 should check how the project wants to record "translated from" notices.
 
 ## Recommendation

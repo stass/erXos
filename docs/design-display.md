@@ -2954,7 +2954,7 @@ differs `test/vt/differences.txt` gives the reason:
 #### The oracle
 
 `erx_vt` is compared with **libvterm** 0.3.3, Paul Evans's terminal
-emulator library in C under the MIT licence, the emulator inside Vim and
+emulator library in C under the MIT license, the emulator inside Vim and
 Neovim. It is a test oracle only, not a dependency: fetched at its pinned
 release and SHA-256 and built out of tree for the host, with a harness of
 erXos's own, `test/vt/vterm_dump.c`, that feeds it a corpus and writes
@@ -4735,7 +4735,7 @@ draws attaches as [Graphics hardware](#graphics-hardware) says.
 
 ## Dependencies
 
-| Component | Purpose | Licence | Status |
+| Component | Purpose | License | Status |
 | --- | --- | --- | --- |
 | Plan 9's `libmemdraw`, from 9front | the per-byte pixel primitives of `erx_memdraw`; its image(6) loader `cloadmemimage` is linked into no release, since the `Y` decoder is the Erlang `erx_draw_image` | MIT (9front's `lib/legal/NOTICE`, whose exceptions cover only fonts) | permanent; 9front at commit 2859ae04, imported as erXos's code into `display/libmemdraw` with an `ORIGIN.md` listing its edits |
 | the 9front build: 9front's `libmemdraw` and the parts of its `libdraw` it links, unmodified | test tool: the oracle of the shapes' pixels, of every `erx_memdraw` operation against the code it was imported from, and through `cloadmemimage` of `erx_draw_image`'s decoding and of the C twin's framing of `Y` (Verification) | MIT | tool, never part of a shipped image; fetched at the commit the import's origin file records, verified against a pinned SHA-256, and built for the host out of tree by erXos's own compiler invocations against plan9port's `lib9`, which is already fetched for rc; 9front's mkfiles never run |

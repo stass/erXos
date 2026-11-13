@@ -200,7 +200,7 @@ class SysregTest < Minitest::Test
       'bad reserved value' => ->(spec) { spec['registers'][0]['fields'][1]['reserved'] = 'RAZ' },
       'width not 64' => ->(spec) { spec['registers'][1]['width'] = 7 },
       'control byte in copyright' => ->(spec) { spec['registers'][1]['copyright'] = "\e]0;pwn\a" },
-      'other licence' => ->(spec) { spec['registers'][1]['license'] = 'MIT' },
+      'other license' => ->(spec) { spec['registers'][1]['license'] = 'MIT' },
       'other schema' => ->(spec) { spec['registers'][1]['source_version']['schema'] = '3.0' },
       'policy only' => ->(spec) { spec['registers'][1].select! { |key, _| Erx::Sysreg::POLICY_KEYS.include?(key) } },
       'unsorted' => ->(spec) { spec['registers'].reverse! }

@@ -69,7 +69,7 @@ are not implementation tasks merely because a different design is possible.
   and rights reduction in the POSIX personality. It could expose authority
   gaps that functional libc tests miss; classify differences against
   erXos's explicit authority model rather than adopting an API wholesale.
-  Review fixture licences before importing tests. Owner:
+  Review fixture licenses before importing tests. Owner:
   [native programs](design-programs.md).
 
 * **[Medium] pipes: a broker for multiple holders.** Compare a bounded

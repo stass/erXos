@@ -323,7 +323,7 @@ module Erx
 
     # The source a built file is compiled from: for erXos's applications one of the
     # modules ErlangApps compiles, generated ones included. A file with none named is a
-    # failure, so no file reaches the archive without its licence.
+    # failure, so no file reaches the archive without its license.
     def sources_of(application, name)
       source = File.join(@root, self.class.source_directory(application), 'src')
       base = File.basename(name, '.*')

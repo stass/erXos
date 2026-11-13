@@ -21,7 +21,7 @@ module Erx
                  tools/generated/terminal_tables.rb tools/generated/terminal_notices.json
                  web/src/generated/terminal_tables.ts erlang/apps/erx_win/src/erx_vt_width.erl
                  include/erx/vt_width.h].freeze
-    # The licence of the Unicode inputs, which every generated table declares.
+    # The license of the Unicode inputs, which every generated table declares.
     LICENSE = 'Unicode-3.0'
     module_function
 

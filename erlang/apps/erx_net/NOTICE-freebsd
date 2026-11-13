@@ -4,7 +4,7 @@
 # The modules of erx_net that translate FreeBSD code are derived works of the
 # FreeBSD files they translate. Each such module's header carries, after
 # erXos's own notice, one "%% FreeBSD: PATH" line per file, followed by every
-# copyright line and the licence text of that file at the pinned commit
+# copyright line and the license text of that file at the pinned commit
 # below, which are the same at the release.
 #
 # This file records the pin (tag, commit and the SHA-256 of the GitHub

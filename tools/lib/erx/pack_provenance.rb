@@ -13,7 +13,7 @@ require_relative 'cross_toolchain'
 
 module Erx
   # A receipt binds the actual output, link map and compiler dependency files.
-  # Licences are derived from those inputs, never asserted by the caller that
+  # Licenses are derived from those inputs, never asserted by the caller that
   # requests an image. External files require exact reviewed registry entries.
   class PackProvenance
     MAX_METADATA = 64 * 1024 * 1024
@@ -25,7 +25,7 @@ module Erx
       @catalog = catalog
       @external = {}
       @registered_paths = {}
-      # Each licence document a record cites, by SHA-256, over every resolve of
+      # Each license document a record cites, by SHA-256, over every resolve of
       # this resolver: a pack resolves its entries in turn and renders one
       # NOTICES from all of their records.
       @document_texts = {}
@@ -76,8 +76,8 @@ module Erx
     NOTICES_PREAMBLE = <<~TEXT
       erXos image source notices
 
-      Files that carry the same notice are listed together, with their licence,
-      how it was found, the licence documents the notice cites and the files'
+      Files that carry the same notice are listed together, with their license,
+      how it was found, the license documents the notice cites and the files'
       own notice text, which holds their copyright lines. Each cited document
       follows once, after every group, under its name.
 
@@ -85,7 +85,7 @@ module Erx
 
     # NOTICES, laid out as a FreeBSD or Debian copyright file is: one group per
     # distinct file notice, naming every file that carries it, then each
-    # licence document once. A record's own notice is the file's leading
+    # license document once. A record's own notice is the file's leading
     # comment, so every distinct copyright line appears in its group.
     def notices(records, budget: MAX_METADATA)
       raise Error, 'invalid image notice budget' unless budget.is_a?(Integer) && budget.positive?
@@ -242,7 +242,7 @@ module Erx
         resolve_fiasco(receipt, records: records, build_kind: build_kind)
       when 'compiled'
         # A file with no link to read: Erlang's, or one the build generates, such as the
-        # build facts, whose sources are the code that writes it. This attributes licences
+        # build facts, whose sources are the code that writes it. This attributes licenses
         # to the sources it names and proves nothing about what the file was made from.
         exact_keys(receipt, %w[version kind artifact sources])
         sources = receipt.fetch('sources')
@@ -488,11 +488,11 @@ module Erx
     end
 
     # The inventory row of a file in an import. nil for a file erXos added to the
-    # tree: its own header is its attribution, so it takes the licence and
+    # tree: its own header is its attribution, so it takes the license and
     # notices of erXos's other code, not the import's, and the status of the
     # tree it lives in. A catalog may hold a file captured after the tree's
     # check, so the notice is read here from the hashed bytes; a file with
-    # neither row nor notice has no licence to record.
+    # neither row nor notice has no license to record.
     def imported_item(origin_root, path, bytes:, label:, audited:)
       inventory = @catalog.find_import(origin_root)
       raise Error, 'import source is absent from its checked catalog' unless inventory || audited
@@ -502,7 +502,7 @@ module Erx
       item
     end
 
-    # Reads a licence document a record cites, checked against its hash, and
+    # Reads a license document a record cites, checked against its hash, and
     # keeps its text once for NOTICES; returns the record's reference.
     def notice_document(reference)
       text = verified_read(reference, maximum: @notice_limit)

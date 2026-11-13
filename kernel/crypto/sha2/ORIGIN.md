@@ -10,7 +10,7 @@ per-byte primitives. This directory mirrors FreeBSD's
 fetched once from
 `https://raw.githubusercontent.com/freebsd/freebsd-src/95719d8a895bf8170851e9844d9b4092b1d2b6fe/sys/crypto/sha2/<file>`:
 
-| File | Upstream path | SHA-256 of the imported bytes | Licence |
+| File | Upstream path | SHA-256 of the imported bytes | License |
 | --- | --- | --- | --- |
 | `sha256c.c` | `sys/crypto/sha2/sha256c.c` | `9eed9976f45476f7dd0dd452861416ff1f45b2a7035909171dc6fef836ba9b61` | BSD-2-Clause (Colin Percival) |
 | `sha256.h` | `sys/crypto/sha2/sha256.h` | `10f3fd28a59056ad4701c58570d55cd4de4dcebfbaa490c154b7005f8e16dabe` | BSD-2-Clause (Colin Percival) |
@@ -27,7 +27,7 @@ Each file erXos changed says so in a `Modified by erXos` notice at its
 top, which lists the changes; the original notices stay below it.
 erXos's changes are BSD-2-Clause.
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json
@@ -40,7 +40,7 @@ Third-party notices remain in their original files.
   "files": {
     "sha256.h": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed Colin Percival's notice in the file, the two-clause BSD licence text",
+      "evidence": "reviewed Colin Percival's notice in the file, the two-clause BSD license text",
       "reviewed": true,
       "sha256": "10f3fd28a59056ad4701c58570d55cd4de4dcebfbaa490c154b7005f8e16dabe",
       "kind": "file",
@@ -48,7 +48,7 @@ Third-party notices remain in their original files.
     },
     "sha256c.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed Colin Percival's notice in the file, the two-clause BSD licence text",
+      "evidence": "reviewed Colin Percival's notice in the file, the two-clause BSD license text",
       "reviewed": true,
       "sha256": "9eed9976f45476f7dd0dd452861416ff1f45b2a7035909171dc6fef836ba9b61",
       "kind": "file",

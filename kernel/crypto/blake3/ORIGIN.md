@@ -19,12 +19,12 @@ Each file was fetched once, at release tag 1.8.7, from
 | `test_vectors.json` | `test_vectors/test_vectors.json` | `dcb91ea8accc77e6d6e632af7cdc1a99a9f3ae78cf648da595c7d064db32f624` |
 | `LICENSE_A2LLVM` | `LICENSE_A2LLVM` | `a5695f57ea0c221e0e8b7d784ff774c35e88c3d3270353646a925880bb3492cc` |
 
-Licence: the BLAKE3 authors offer the code under CC0-1.0, Apache-2.0 or
+License: the BLAKE3 authors offer the code under CC0-1.0, Apache-2.0 or
 Apache-2.0 WITH LLVM-exception (`LICENSE_CC0`, `LICENSE_A2` and
 `LICENSE_A2LLVM` at the repository root); the source files carry no
 notices of their own. erXos takes it under Apache-2.0 WITH
 LLVM-exception, whose text is `LICENSE_A2LLVM` here, and erXos's
-changes are under the same licence.
+changes are under the same license.
 
 Left out: `blake3_dispatch.c` (run-time CPU-feature detection and the
 choice among SIMD paths), every SIMD implementation (SSE2, SSE4.1, AVX2,
@@ -40,7 +40,7 @@ Each file erXos changed says so in a `Modified by erXos` notice at its
 top, which lists the changes. `test_vectors.json` and `LICENSE_A2LLVM`
 are unchanged.
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json

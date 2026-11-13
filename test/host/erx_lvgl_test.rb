@@ -127,7 +127,7 @@ end
 # would run recorded instead of run: LVGL is compiled by the Makefile with the task
 # code generation and musl's headers into a directory its flags name, and the program
 # is linked by NativeRoot over that liblvgl.a, which the result names for the packer
-# to attribute whole, under licences whose notices are files of LVGL's tree. The cross
+# to attribute whole, under licenses whose notices are files of LVGL's tree. The cross
 # build itself runs in the programs suite, which ships it and starts it on QEMU.
 class LvglProgramTest < Minitest::Test
   # Records each command and answers git's status with an empty log: a clean checkout.
@@ -190,7 +190,7 @@ class LvglProgramTest < Minitest::Test
     end
   end
 
-  # Each notice the archive's licences need is a file of the checked-out submodule.
+  # Each notice the archive's licenses need is a file of the checked-out submodule.
   def test_the_archive_notices_are_files_of_lvgl
     skip 'LVGL is not checked out' unless Erx::Lvgl.checked_out?(ErxLvglTest::ROOT)
     Erx::Lvgl::Program::NOTICES.each { |notice| assert File.file?(File.join(ErxLvglTest::ROOT, notice)), notice }

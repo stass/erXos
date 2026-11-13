@@ -5,7 +5,7 @@ that could supply parts of erXos for AArch64, and on what QEMU's `virt`
 machine offers under TCG and under HVF on the primary host. The surveys
 behind it asked what each candidate offers to a kernel that runs a fork of
 ERTS (OTP 29.1.2) at EL1 as its engine and scheduler, with untrusted Erlang
-code and native C drivers in EL0 protection domains: licence, language, QEMU
+code and native C drivers in EL0 protection domains: license, language, QEMU
 and HVF evidence, SMP, memory management and EL0 support, size, build
 requirements, and how tightly the useful parts are coupled to the rest. The
 record chooses nothing; where a survey judged a candidate's fit, that
@@ -36,15 +36,15 @@ confirmed, "(inferred)" a conclusion drawn from reading code.
 For this record, load-bearing claims were re-read in the downloaded trees
 with sed, grep, wc, find and cmp, one read-only `git log` (the LK commit) and
 one `python3 -I` one-liner that averaged a benchmark record; nothing was
-built or run. Confirmed: LK's licences, SPI routing, `thread_lock`,
+built or run. Confirmed: LK's licenses, SPI routing, `thread_lock`,
 `lk_time_t`, EL0 entry, compiler flags, MSI doorbell and HVF script; Zircon's
-x20 handling, flags, licence and ffx template; seL4's licence, timer and GIC
+x20 handling, flags, license and ffx template; seL4's license, timer and GIC
 constants; Microkit's limits and boards; sDDF's seL4-free drivers;
 Chrysopolis; the A53 IPC figures (averages of the five series means in the
 sel4bench-results record of 2026-10-29T18:59:05Z); the QEMU v11.1.3 rules
 below (both surveys' copies of `virt.c` are identical); RTEMS's A72 BSP;
 NuttX's HVF recipe; rumpuser's counts; `agintc.c`; FreeBSD's flags and
-SError path; Zephyr's DTS; GRiSP's patch; seven licence texts. Corrected:
+SError path; Zephyr's DTS; GRiSP's patch; seven license texts. Corrected:
 
 * sDDF's OS layer has nine functions; the seL4 survey named eight, omitting
   `sddf_deferred_notify_curr`.
@@ -141,7 +141,7 @@ From QEMU v11.1.3 (`hw/arm/virt.c`, `hw/intc/arm_gicv3_hvf.c`,
 seL4 16.0.0 (tag commit `6e7c3b7`); the next release (seL4 issue 1831) was
 untagged on 2026-10-29.
 
-* **Licence.** Kernel GPL-2.0-only (615 files in `src/` and `include/`; a
+* **License.** Kernel GPL-2.0-only (615 files in `src/` and `include/`; a
   handful BSD-2-Clause, BSD-3-Clause, MIT or GPL-2.0-or-later). `LICENSE.md`:
   "kernel-level code is licensed under GPLv2 and user-level code under the
   2-clause BSD license", and the kernel GPL "does *not* cover user-level code
@@ -231,7 +231,7 @@ untagged on 2026-10-29.
   symbol; all drivers (15,098 lines) hold 53 `seL4_` and 50 `microkit_`
   identifiers.
 * Build: Make, Clang, dtc, Python 3.10+, Microkit SDK 2.3.0 and sdfgen
-  0.35.0 (about 8,500 lines of Zig, no declared licence). The README calls
+  0.35.0 (about 8,500 lines of Zig, no declared license). The README calls
   sDDF "largely experimental software", networking "mostly mature".
 * The survey assessed sDDF as good to borrow from through its nine-function
   OS layer.
@@ -309,7 +309,7 @@ costs 759 to 3,796 cycles across the measured AArch64 boards.
 LK master `e7cefb16` (no release tags; master reached `d3d8ddf8`, an 88-line
 thread-pinning fix, during the survey without changing a finding).
 
-* **Licence.** MIT (`LICENSE`; about 1,120 MIT-style headers). In the arm64
+* **License.** MIT (`LICENSE`; about 1,120 MIT-style headers). In the arm64
   subset, `kernel/semaphore.c` and its header are Apache-2.0 (Christopher
   Anderson, 2012) without SPDX tags; libc `strtol.c`, `strtoll.c`, `qsort.c`,
   `atof.c` and `sys/cdefs.h` are BSD-3-Clause, `bsearch.c` ISC-style;
@@ -373,7 +373,7 @@ thread-pinning fix, during the survey without changing a finding).
 Fuchsia main `78197f39`, `releases/f32` `6a563ae1`, and spot checks of
 `releases/f33` `08effcaa`.
 
-* **Licence.** MIT kernel: at main 2,349 files are MIT-style and 273
+* **License.** MIT kernel: at main 2,349 files are MIT-style and 273
   BSD-style (Fuchsia's BSD-2-Clause `/LICENSE` with `/PATENTS`), none Apache
   or GPL; external libraries (fbl, fit, zx, lockdep, others) are BSD-style.
 * **Language.** At main the kernel is one Rust crate, "a mix of C++ and Rust
@@ -431,7 +431,7 @@ FreeBSD `releng/15.1` at `95719d8a895b` (release/15.1.0-p6).
   only `options IOMMU`. FreeBSD 15 runs in text mode on an M4 Max under UTM
   4.7.5 with HVF (UTM issue 7598), 14.3 on an M4 Pro (issue 6918).
 
-| Piece | Lines | Licence | Depends on | Extraction (survey) |
+| Piece | Lines | License | Depends on | Extraction (survey) |
 | --- | --- | --- | --- | --- |
 | pmap | 10,268 + 466 | 4-clause UC text plus a 2-clause section; UC's 1999-07-22 letter in `COPYRIGHT` rescinds only UC's clause | `vm_page`, `vm_object`, `vm_map`, `vm_reserv`, UMA, vmem, locks; `pmap(9)` | very hard |
 | GICv3 and ITS | 5,728 (`gic_v3.c` 1,713, `gicv3_its.c` 2,335) | BSD-2-Clause text | newbus, KOBJ `pic_if`, `msi_if`, `gic_if`; INTRNG (1,958); OFW, ACPI | moderate |
@@ -472,7 +472,7 @@ NetBSD `netbsd-11` at `3b308647b144` (11.0_STABLE); trunk metadata
   VLAN, WireGuard, virtif), 28 file systems (ffs, msdos, ext2fs, tmpfs, nfs,
   cd9660, udf; libzfs is CDDL) and 42 device libraries (PCI, virtio, SCSI,
   USB), over 245,072 lines of networking and 40,750 of ffs, ufs and ext2fs.
-* **Licence.** BSD-2-Clause text without SPDX tags; advertising clauses
+* **License.** BSD-2-Clause text without SPDX tags; advertising clauses
   remain in 24 `sys/netinet` files (Cisco in SCTP; UC and US Naval Research
   Laboratory in TCP), 5 in `netinet6`, 5 in `sys/net` and 10 in msdosfs
   (TooLs GmbH); some files are ISC; no GPL.
@@ -518,7 +518,7 @@ NetBSD `netbsd-11` at `3b308647b144` (11.0_STABLE); trunk metadata
 
 * RTEMS 6.2 (`be446b02`; main `402de13a`) is mostly BSD-2-Clause (2,262 SPDX
   tags in cpukit and the AArch64 BSPs); 183 files keep the historical
-  GPL-2.0+ licence with linking exception (shell, libfs, old CPU ports,
+  GPL-2.0+ license with linking exception (shell, libfs, old CPU ports,
   ns16550, `sapi/src/panic.c`, `rtems/src/clockgetuptimeseconds.c`); the
   engineering manual requires BSD-2-Clause for contributions and says the
   old code is being relicensed, rewritten or removed.
@@ -581,7 +581,7 @@ NetBSD `netbsd-11` at `3b308647b144` (11.0_STABLE); trunk metadata
 
 From the broad survey; sizes in lines, with headers.
 
-| Kernel | Licence (SPDX) | Language | QEMU `virt`, GIC, SMP | HVF evidence | VM and EL0 | Size | Build |
+| Kernel | License (SPDX) | Language | QEMU `virt`, GIC, SMP | HVF evidence | VM and EL0 | Size | Build |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Unikraft 0.21.0 | BSD-3-Clause; Buildroot-derived Makefile and kconfig GPL-2.0 | C | KVM platform on `virt`; GICv2 and v3; SMP-safe locks, multicore scheduling unverified; virtio-mmio v1 and v2, PCI, 9p, virtiofs | KraftKit detects `hvf`; an arm64 guest is unverified | single address space | arch/arm 2.9k, plat 2.1k, GIC 2.8k | GNU Make, Kconfig |
 | TF-A 2.15.0 libraries | BSD-3-Clause | C | GICv3 init asserts `IS_IN_EL3()` in 14 places, its register helpers (0.85k) do not; `xlat_tables_v2` (2.75k) has TTBR0 only, no ASIDs, no locking | firmware | - | as left | Make, TF-A headers |
@@ -602,7 +602,7 @@ From the broad survey; sizes in lines, with headers.
 | NOVA | GPL-2.0 with a hypercall-API note | C++ | QEMU virt; GICv2, v3 and ITS; SMMUv2 and v3; EL2 | EL2 | - | aarch64 12.4k | Make |
 | L4Re Microkernel (Fiasco) | MIT since 2025-09-15; bundled parts BSD-3-Clause, Zlib, LGPL-2.1-or-later, GPL-2.0-only | C++ | `virt`: GICv2, v3, ITS, MSI; SMMUv2 and v3 | not checked | microkernel | src/kern 141k, arm 48k | GNU make, gcc 11+ or clang 10+, Perl |
 | Xen 4.22.0 | GPL-2.0-only | C | GICv3; SMMUv3 (tech preview); EL2 | EL2 | - | not measured | Make |
-| Linux | GPL-2.0 WITH Linux-syscall-note | - | licence note only | - | - | - | - |
+| Linux | GPL-2.0 WITH Linux-syscall-note | - | license note only | - | - | - | - |
 | OSv | BSD-3-Clause | C++ | GICv2 and v3 on master (v0.57.0: GICv2 only) | - | single address space | aarch64 8.6k | - |
 | ToaruOS | NCSA | C | `virt` and RPi 400; GICv2 only; SMP | - | processes | aarch64 5.5k | - |
 | Bao 2.0.0 | Apache-2.0 | C | `qemu-aarch64-virt`; GICv2 and v3; SMMUv2 only; EL2 | EL2 | static partitions | 36.9k | Make |
@@ -618,7 +618,7 @@ reference in C++; and the rest as poor fits or prior art.
 
 ## Libraries for later subsystems
 
-| Area | Library | Licence (SPDX) | Size (lines) | State | Needs from the OS |
+| Area | Library | License (SPDX) | Size (lines) | State | Needs from the OS |
 | --- | --- | --- | --- | --- | --- |
 | TCP/IP | lwIP 2.2.1 | BSD-3-Clause | core 34.3k, api 9.8k, netif 4.2k, headers 30k | since 2001; released | `NO_SYS=1`: raw callbacks and `sys_now()` in one context; `NO_SYS=0`: sys_arch semaphores, mutexes, mailboxes, `sys_thread_new` |
 | TCP/IP | picoTCP 1.7.0; picoTCP-NG 2.1 | GPL-2.0 or GPL-3.0 (`COPYING`); the 1.7.0 README says GPL v2 only | - | stale | - |
@@ -627,7 +627,7 @@ reference in C++; and the rest as poor fits or prior art.
 | TCP/IP | FreeRTOS-Plus-TCP 4.4.2 | MIT | 51.5k | active | FreeRTOS task, queue, semaphore and event-group API |
 | TCP/IP | NetX Duo 6.5.2 | MIT | not measured | active | ThreadX API |
 | Storage | littlefs 2.11.3 | BSD-3-Clause | 7.7k | active | read, prog, erase, sync callbacks; optional malloc and locks |
-| Storage | FatFs R0.16 | FatFs licence, 1-clause BSD style | 7.2k plus 15.6k optional tables | mature | diskio callbacks; optional time, malloc and mutex hooks |
+| Storage | FatFs R0.16 | FatFs license, 1-clause BSD style | 7.2k plus 15.6k optional tables | mature | diskio callbacks; optional time, malloc and mutex hooks |
 | Storage | lwext4 (master `58bcf89a`) | GPL-2.0 as distributed: `ext4_extent.c` and `ext4_xattr.c` GPL-2.0-or-later, the rest BSD-3-Clause | 17.6k | dormant | block device |
 | virtio | OpenAMP 2026.04.0 with libmetal | BSD-3-Clause | virtqueue 0.8k, mmio 0.36k; libmetal 8.6k | two releases a year | libmetal (a bare-metal port exists); mmio version 1 only (`virtio_mmio_drv.c:197`) |
 | virtio | NuttX `drivers/virtio` 13.1.0 | Apache-2.0 | 10k | active | NuttX and OpenAMP; mmio v1 and v2, PCI legacy and modern |
@@ -655,7 +655,7 @@ reference in C++; and the rest as poor fits or prior art.
 
 ## Comparison
 
-| Candidate | Licence (SPDX) | Language | QEMU `virt` AArch64, GICv3, HVF evidence | SMP | VM and EL0 | Size | Build and host tools | Coupling and what extraction takes |
+| Candidate | License (SPDX) | Language | QEMU `virt` AArch64, GICv3, HVF evidence | SMP | VM and EL0 | Size | Build and host tools | Coupling and what extraction takes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | seL4 16.0.0, as the kernel | kernel GPL-2.0-only; libsel4, seL4_libs, sel4runtime BSD-2-Clause; util_libs partly GPL | C, assembly; Python generators | qemu-arm-virt, GICv2 by default; GICv3 by build option, at most 8 cores, not CI-tested; 62.5 MHz compiled in; no HVF report | big lock; SMP with MCS experimental; unverified | components at EL0; VMs only in EL2 builds; user level builds page tables from untyped memory | 12,600 SLOC verified AArch64; 82,509 raw lines | CMake 3.16+, Ninja, Python 3 with `sel4-deps`, dtc, xmllint, cross compiler, QEMU; Linux host | it is the kernel: everything else runs at EL0, ERTS needs a thread layer on TCBs and notifications, and timed waits need a timer driver |
 | Microkit 2.3.1, sDDF 0.7.0, LionsOS 0.4.0, as parts | BSD-2-Clause; DTS files GPL-2.0-only; sdfgen undeclared; LionsOS dependencies MIT, Apache-2.0, LGPL-2.1-or-later (libnfs), FatFs | Microkit tool and initialiser Rust; runtime, drivers and components C; sdfgen Zig | `qemu_virt_aarch64` (EL2) and `_el1`; GICv2 DTS; no HVF report | `smp-*` configurations, 4 QEMU cores | one-thread PDs at EL0; VMs through libvmm at EL2 | tool 13,588 lines; sDDF drivers 15,098; virtio drivers 435 to 666 each | Make, Clang, dtc, Python 3.10+, sdfgen 0.35.0, Microkit SDK 2.3.0 (prebuilt for macOS and Linux) | sDDF drivers need nine OS functions, a `seL4_MessageInfo_t` header, a dispatch loop, configuration sections and `SCTLR_EL1.UCI`; LionsOS components need the Microkit API and libmicrokitco |
@@ -678,7 +678,7 @@ Every URL below was accessed on 2026-10-29.
 | QEMU documents: "Arm virt"; S. Mediouni, "HVF: Add support for platform vGIC and nested virtualisation" v21; S. Mediouni, "target/arm: hvf: add timer frequency note"; P. Maydell, "target/arm: Default to 1GHz cntfrq for 'max' and new CPUs"; issue 2665 (search summary only); Lima PR 5443; hvi-vmm issue 183 | 11.1.50; 2026-04-29; 2025-07-21; 2024-04-19; -; -; 2026-09-23 | https://www.qemu.org/docs/master/system/arm/virt.html ; https://ratatoskr.run/qemu-devel/2026/04/14444085/t ; https://www.mail-archive.com/qemu-devel@nongnu.org/msg1128672.html ; https://www.mail-archive.com/qemu-devel@nongnu.org/msg1037038.html ; https://gitlab.com/qemu-project/qemu/-/work_items/2665 ; https://github.com/lima-vm/lima/pull/5443 ; https://github.com/brig-sh/hvi-vmm/issues/183 |
 | seL4 | 16.0.0, `6e7c3b733d296cfd88d5fbf635c96e447a882374` (2026-07-22) | https://github.com/seL4/seL4/tree/16.0.0 |
 | seL4 libraries, tools, proofs, benchmarks | seL4_libs `262a34dcb2f3285be01df9e5404d911132d567a6`; sel4runtime `86489cf6efab9f314964e79468c036e9035394c7`; util_libs `ef49a397b7044fc38b609a99a8c6265a97913b8e`; musllibc (16.0.x-compatible) `b0005f86fecbd6d0257b15363a5b013446914265`; seL4_tools `6493e0c6fab360eb81a8115a49c9ca7bc280c48a`; sel4test `f27e4f4cdd020ef9b37f15ded76a3b38477761f0`; ci-actions `1d96d20092526f3d1403561a16ce9d7c1aeee397`; sel4bench `18f9d5f079bc23551eccbdc2202cae95c72c69d7`; sel4bench-results `87e0b68be832d7a9828f46a375415ae54cf349d8`; l4v master | https://github.com/seL4/ |
-| seL4 documents: release notes; issue 1831; verified configurations; QEMU Arm virt; FAQ; licence; assumptions; tools; host dependencies; CAmkES setup; tutorials; news 2026; Microkit roadmap | - | https://github.com/seL4/seL4/releases/tag/16.0.0 ; https://github.com/seL4/seL4/issues/1831 ; https://docs.sel4.systems/projects/sel4/verified-configurations.html ; https://docs.sel4.systems/Hardware/qemu-arm-virt.html ; https://sel4.systems/About/FAQ.html ; https://sel4.systems/Legal/license.html ; https://sel4.systems/Verification/assumptions.html ; https://sel4.systems/tools.html ; https://docs.sel4.systems/projects/buildsystem/host-dependencies.html ; https://docs.sel4.systems/projects/camkes/setting-up.html ; https://docs.sel4.systems/Tutorials/ ; https://sel4.systems/news/2026.html ; https://docs.sel4.systems/projects/microkit/roadmap.html |
+| seL4 documents: release notes; issue 1831; verified configurations; QEMU Arm virt; FAQ; license; assumptions; tools; host dependencies; CAmkES setup; tutorials; news 2026; Microkit roadmap | - | https://github.com/seL4/seL4/releases/tag/16.0.0 ; https://github.com/seL4/seL4/issues/1831 ; https://docs.sel4.systems/projects/sel4/verified-configurations.html ; https://docs.sel4.systems/Hardware/qemu-arm-virt.html ; https://sel4.systems/About/FAQ.html ; https://sel4.systems/Legal/license.html ; https://sel4.systems/Verification/assumptions.html ; https://sel4.systems/tools.html ; https://docs.sel4.systems/projects/buildsystem/host-dependencies.html ; https://docs.sel4.systems/projects/camkes/setting-up.html ; https://docs.sel4.systems/Tutorials/ ; https://sel4.systems/news/2026.html ; https://docs.sel4.systems/projects/microkit/roadmap.html |
 | Proofcraft news; seL4 performance page; devel list, "HVC is not supported for PSCI!"; A. Lyons, K. McLeod, H. Almatary, G. Heiser, "Scheduling-Context Capabilities", EuroSys 2018, doi:10.1145/3190508.3190539 | -; generated 2026-10-29 (manifest `655f2655`); 2025-10-23; 2018 | https://proofcraft.systems/news-2026/ ; https://proofcraft.systems/news-2025/ ; https://sel4.systems/performance.html ; http://www.mail-archive.com/devel@sel4.systems/msg04575.html ; https://trustworthy.systems/publications/full_text/Lyons_MAH_18.pdf |
 | Microkit; rust-sel4 | 2.3.1 `ec86afdcd662b5976d11d4994acf1b11a2979882` (2026-09-18); `dbe6445d56059ed9a757e53c7137892aece1d179` | https://github.com/seL4/microkit/tree/2.3.1 ; https://github.com/seL4/rust-sel4 |
 | sDDF; sdfgen; Djawula | 0.7.0 `650ace5dba984f5d9c7dd1a005648ff7b40655f7` (2026-08-19); 0.35.0 `0fdbd7429d2e8eceb599b6b4bca67cbccfaf1001`; - | https://github.com/au-ts/sddf/tree/0.7.0 ; https://github.com/au-ts/microkit_sdf_gen ; https://pypi.org/pypi/sdfgen/0.35.0/json ; https://trustworthy.systems/projects/Djawula |
@@ -690,10 +690,10 @@ Every URL below was accessed on 2026-10-29.
 | FreeBSD; 15.1 announcement and release notes; platforms; FreeBSD-SA-26:31.arm64 (2026-06-09); wiki `arm64/QEMU` (unreadable); UTM issues 7598 and 6918; smallhacks blog (2022-06-09) | releng/15.1 `95719d8a895bf8170851e9844d9b4092b1d2b6fe` (release/15.1.0-p6, 2026-10-20) | https://git.freebsd.org/src.git ; https://www.freebsd.org/releases/15.1R/announce/ ; https://www.freebsd.org/releases/15.1R/relnotes/ ; https://www.freebsd.org/platforms/ ; https://www.freebsd.org/security/advisories/FreeBSD-SA-26:31.arm64.asc ; https://wiki.freebsd.org/arm64/QEMU ; https://github.com/utmapp/UTM/issues/7598 ; https://github.com/utmapp/UTM/issues/6918 ; https://smallhacks.wordpress.com/2022/06/09/booting-freebsd-13-1-arm64-on-macos-arm64-using-qemu/ |
 | NetBSD and rump: source; 11.0 announcement, source sets (`syssrc.tgz` SHA512 `318d451e...3057`) and redistribution page; rumprun, buildrump.sh, rumpkernel.github.io; Genode `dde_rump`; ssumpf/rump; SEL4PROJ/rumprun and its announcement (2017-03-06); Hurd rumpdisk, FOSDEM 2022 (search summary only); astr0baby, NetBSD on M1 | netbsd-11 `3b308647b1447f153e80c9a6efc8a751d858ef57` (2026-10-25); trunk `4a74c4f51700599977158ed45e6d24bf20fb049d`; rumprun `b04d422` (2020-05-11); buildrump.sh `6cccd46` (2017-09-10); rumpkernel.github.io `6e209f1`; Genode master `0f275e7a`; ssumpf/rump `28945d1`; SEL4PROJ/rumprun `0be59c6` | https://github.com/NetBSD/src ; https://www.netbsd.org/releases/formal-11/NetBSD-11.0.html ; https://cdn.netbsd.org/pub/NetBSD/NetBSD-11.0/source/sets/ ; https://www.netbsd.org/about/redistribution.html ; https://github.com/rumpkernel ; https://github.com/genodelabs/genode/tree/master/repos/dde_rump ; https://github.com/ssumpf/rump ; https://github.com/SEL4PROJ/rumprun ; https://lists.sel4.systems/hyperkitty/list/devel@sel4.systems/thread/ADTORDWZUVEAWJIOT5VMKK72YJDZ7ZDU/ ; https://archive.fosdem.org/2022/schedule/event/dzammit/ ; http://astr0baby.online/M1-Apple/NetBSD-M1-Qemu/ |
 | OpenBSD; 7.8 and 7.9 changelogs; policy; astreknet, OpenBSD on M2 | 8.0 (2026-10-20), `sys.tar.gz` SHA256 `964b1aed...2aaf` | https://cdn.openbsd.org/pub/OpenBSD/8.0/ ; https://www.openbsd.org/plus78.html ; https://www.openbsd.org/plus79.html ; https://www.openbsd.org/policy.html ; https://gist.github.com/astreknet/4860e3362ad98e1116f0a970b99e2afc |
-| RTEMS; RTEMS documentation 7.5ece2a4 (A72 BSP, build system, licence requirements; 2026-06-12); GRiSP | 6.2 `be446b02d091a2a745e03405eaab4de078571532`; main `402de13a864f8876c48a8c108cc2e3541d87bd07`; GRiSP `9dfbeb5b0317f0254fa4b95a50b9abb8471dacdd` | https://gitlab.rtems.org/rtems/rtos/rtems ; https://docs.rtems.org/docs/main/user/bsps/aarch64/a72.html ; https://docs.rtems.org/docs/main/user/bld/index.html ; https://docs.rtems.org/docs/main/eng/license-requirements.html ; https://github.com/grisp/grisp |
+| RTEMS; RTEMS documentation 7.5ece2a4 (A72 BSP, build system, license requirements; 2026-06-12); GRiSP | 6.2 `be446b02d091a2a745e03405eaab4de078571532`; main `402de13a864f8876c48a8c108cc2e3541d87bd07`; GRiSP `9dfbeb5b0317f0254fa4b95a50b9abb8471dacdd` | https://gitlab.rtems.org/rtems/rtos/rtems ; https://docs.rtems.org/docs/main/user/bsps/aarch64/a72.html ; https://docs.rtems.org/docs/main/user/bld/index.html ; https://docs.rtems.org/docs/main/eng/license-requirements.html ; https://github.com/grisp/grisp |
 | NuttX and its install guide; Zephyr and its getting-started guide | nuttx-13.1.0 `2b5c0de5e933281c209f954a63b99cf10c132346`; v4.5.0 `41d10b59730406bbab4ca9f1fbbe9e96aafb4966` | https://github.com/apache/nuttx ; https://nuttx.apache.org/docs/latest/quickstart/install.html ; https://github.com/zephyrproject-rtos/zephyr ; https://docs.zephyrproject.org/latest/develop/getting_started/index.html |
 | Other kernels I; Unikraft Atlas release post (2023-05-15) | unikraft/unikraft RELEASE-0.21.0 `7351f8b563c9e6773da9fdd5bacde6ac91e32112`; unikraft/kraftkit `adc93ad6b95e5ca6dba6b51cb38178c2c09aee6b`; TrustedFirmware-A/trusted-firmware-a v2.15.0 `da738d5eae93af342fdc4995dd3c05acb4c9d757`; RT-Thread/rt-thread v5.3.0 `99428a1e7f7447955aa860f7c969273a12095b8f`; HelenOS/helenos `776168b19bf9e89b6b6162ca77e9ac593964142f`; managarm/managarm `f60c2640fb13e829b0952ff84ae12d687df74cbf`; SerenityOS/serenity `ccdd6504f91a9bbe98d84d0afbc5dd882c3b5f24`; plan9foundation/plan9 `ed1a9c21e3297d7497a48053d33683375c75fbb4`; 9front/9front `13d3301fc5887ad9dd7f2f487fb55b850eff516b`; inferno-os/inferno-os `36616fe590c21a8d04981dcce15db66639f7bbd7`; caerwynj/inferno64; BarrelfishOS/barrelfish `06a9f54721a8d96874a8939d8973178a562c342f` | https://github.com/ ; https://unikraft.org/blog/2023-05-15-unikraft-releases-atlas |
-| Other kernels II; Kernkonzept, switch to the MIT licence | nanovms/nanos 0.1.56 `aad473aad2f73a9893d5c32be333f2796725ab82`; eclipse-threadx/threadx v6.5.2.202603_rel `93387b0a60382a29579bbad5045c68328e3751df`; FreeRTOS/FreeRTOS-Kernel V11.3.2 `640d0c43705e64cd53f46b31d882de6cd8433933`; OP-TEE/optee_os 4.11.0 `f54190f22611dd5ad5d22546fd4209aa100f56bd`; Hafnium v2.15.0 `676ab03c6a3d78f10ddc0f8b96c02475da24392f`; genodelabs/genode 26.02 `24a30a049ae0f79cc52530032802f400ce594d42`; udosteinberg/NOVA `ec4a8794da5ea6057441bd7c84781ea542f37395`; kernkonzept/fiasco `50bbe8a981199e17865e8553a4eb02c387b339cf`; xen-project/xen RELEASE-4.22.0; Linux `COPYING`; cloudius-systems/osv v0.57.0 `e4854b26`, master `28c0f5a4b6687492387fca6b4f325faa4d891f93`; klange/toaruos `60b54503807a38ae1f0692d44cf8b569301febbc`; bao-project/bao-hypervisor v2.0.0 `0af4a1ab558ad60c9658af4f43756c4536dd3141` | https://github.com/ ; https://git.trustedfirmware.org/hafnium/hafnium.git ; https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/COPYING ; https://www.kernkonzept.com/press/kernkonzept-switches-to-l4re-mit-license/ |
+| Other kernels II; Kernkonzept, switch to the MIT license | nanovms/nanos 0.1.56 `aad473aad2f73a9893d5c32be333f2796725ab82`; eclipse-threadx/threadx v6.5.2.202603_rel `93387b0a60382a29579bbad5045c68328e3751df`; FreeRTOS/FreeRTOS-Kernel V11.3.2 `640d0c43705e64cd53f46b31d882de6cd8433933`; OP-TEE/optee_os 4.11.0 `f54190f22611dd5ad5d22546fd4209aa100f56bd`; Hafnium v2.15.0 `676ab03c6a3d78f10ddc0f8b96c02475da24392f`; genodelabs/genode 26.02 `24a30a049ae0f79cc52530032802f400ce594d42`; udosteinberg/NOVA `ec4a8794da5ea6057441bd7c84781ea542f37395`; kernkonzept/fiasco `50bbe8a981199e17865e8553a4eb02c387b339cf`; xen-project/xen RELEASE-4.22.0; Linux `COPYING`; cloudius-systems/osv v0.57.0 `e4854b26`, master `28c0f5a4b6687492387fca6b4f325faa4d891f93`; klange/toaruos `60b54503807a38ae1f0692d44cf8b569301febbc`; bao-project/bao-hypervisor v2.0.0 `0af4a1ab558ad60c9658af4f43756c4536dd3141` | https://github.com/ ; https://git.trustedfirmware.org/hafnium/hafnium.git ; https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/COPYING ; https://www.kernkonzept.com/press/kernkonzept-switches-to-l4re-mit-license/ |
 | Network libraries | lwIP STABLE-2_2_1_RELEASE `77dcd25a72509eb83f72b033d219b1d40cd8eb95`; tass-belgium/picotcp v1.7.0 `13c00a067190f5ec62340ed932a2bb833c366d63`; virtualsquare/picotcp v2.1 `dc9cfc0145151012cf1946774ef1795fe221079c`; butok/FNET v4.7.1 `9e2764a77582fcc5249c957f6230db589b945dee`; adamdunkels/uip `a49def743f6e5c7d0c0f2d724f0b8e0c563a4a37`; FreeRTOS/FreeRTOS-Plus-TCP V4.4.2 `b86ad086e9870099bb0ac18a75dcb7f6dd508cc7`; eclipse-threadx/netxduo v6.5.2.202603_rel | https://git.savannah.nongnu.org/git/lwip.git ; https://github.com/ |
 | Storage, virtio and device-tree libraries | littlefs-project/littlefs v2.11.3 `6cb4e86540eca0d9ba62500a298385c9d863c8be`; FatFs R0.16 (`arc/ff16.zip`); gkostka/lwext4 `58bcf89a121b72d4fb66334f1693d3b30e4cb9c5`; OpenAMP/open-amp v2026.04.0 `5bcc7c0401cace5e3d6719a06a0d1f92e30251aa`; OpenAMP/libmetal v2026.04.0 `80ab6b0d506a0d8eb4f2b87926682ababbb804b3`; dgibson/dtc v1.8.1 `8f48565e5cfedc74d3f7512f1e0188e9d85dc1de` | https://github.com/ ; https://elm-chan.org/fsw/ff/ |
 | Rust projects: Redox schemes; Hubris reference; Tock design; Theseus | - | https://doc.redox-os.org/book/schemes.html ; https://hubris.oxide.computer/reference/ ; https://book.tockos.org/doc/design ; https://github.com/theseus-os/Theseus |

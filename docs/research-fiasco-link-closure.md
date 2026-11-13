@@ -13,7 +13,7 @@ The detailed results are in `build/fiasco/link-audit.json`, produced by
 `Erx::FiascoProvenance`. This is an **incomplete source report**; the packer
 cannot accept it yet. The transformations below still need records of their
 generators and inputs before source tracking is complete. Generated files
-are not assigned a BSD or MIT licence without supporting records.
+are not assigned a BSD or MIT license without supporting records.
 
 ## Measured inputs
 
@@ -51,7 +51,7 @@ source mappings remain unresolved. Derived physical source copies must
 match their authoritative imported bytes, which are checked against their
 authentic `ORIGIN.md` inventories.
 
-## Licences
+## Licenses
 
 These executables include code covered by explicit GPL version 2 notices in
 `src/kern/jdb_object.cpp` and `src/kern/kobject_rpc.h`. Their prose notices
@@ -69,7 +69,7 @@ the measured maps come from the imported support-source build; the compiler
 executable itself is an external build tool, not linked code.
 
 The stopgap remains restricted to use inside the project. Neither the
-project's BSD licence nor a runtime exception turns the non-permissive
+project's BSD license nor a runtime exception turns the non-permissive
 Fiasco code into a permissive dependency.
 
 ## Missing source records
@@ -85,7 +85,7 @@ Nine outputs remain explicitly blocked:
 The inherited generator rules for these outputs are identifiable. The
 outstanding work is to record their exact inputs, configuration and generators,
 then produce the packer's build records. The audit does not guess those inputs
-from a directory, file suffix or assumed package licence.
+from a directory, file suffix or assumed package license.
 
 ## Verification
 
@@ -117,7 +117,7 @@ Text records normalize the project-root path and reject a literal reserved
 marker. The expected inputs include host-generated tools and configuration;
 changing those bytes requires reviewing the profile. Generator-only code
 and configuration remain build information, separate from copied program
-code and its licences.
+code and its licenses.
 
 The final-image check uses private copies of the actual linked kernel,
 bootstrap and sigma0. It reproduces sigma0's installed strip/debug-link
@@ -143,7 +143,7 @@ rejects the image because it contains non-permissive stopgap code.
 
 The host suites for this check passed: 52 tests and 126 assertions. The compiler-record
 fuzz target passed 62,858 inputs in two seconds with seed 1,234,567. The
-complete native build, fresh packer check, full licence-text checks and
+complete native build, fresh packer check, full license-text checks and
 release rejection are recorded in
 `/private/tmp/erx-fiasco-complete-validation.log`. Independent code review
 found no remaining high-severity issues after the fixes. The final ELF is

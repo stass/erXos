@@ -315,7 +315,7 @@ simplicity first, speed second. Paths are relative to `otp/`; `beam/` is
 | Executing Erlang code | the interpreter and BeamAsm, one per build | memory objects mapped writable at one address and executable at another | **both kept**, as three runtime images: the system image, of the interpreter build without OpenSSL, for the system domain; the interpreter image, the same build with OpenSSL, for command domains and deterministic mode; the BeamAsm image for other domains ([BeamAsm](#beamasm), [design-crypto.md](design-crypto.md#three-runtime-images-and-openssl-in-two-of-them)) | the interpreter keeps generated code, JIT objects and C++ out of the trusted base and is deterministic; BeamAsm is up to four times faster; OpenSSL's constructor would run in any domain that maps it, so only an image without it keeps it out of the trusted base |
 | Crash diagnostics | crash dumps to a file | a crash area handed out at domain creation | **redone**: the dump goes to the crash area, and the domain stops itself ([Crash handling](#crash-handling)) | one diagnostic path, read by the system domain |
 | Tracing | trace sessions and tracers | the kernel trace ring | **both kept, one viewer** ([design-live.md](design-live.md#tracing)) | they observe different layers |
-| Third-party code inside OTP's tree | asmjit (Zlib), PCRE2 (BSD-3-Clause WITH PCRE2-exception), zlib (Zlib), zstd (BSD-3-Clause, or GPL-2.0-only, used under BSD), Ryu (Apache-2.0 or BSL-1.0) | none | **kept**, each under its licence; asmjit only in the BeamAsm image | they serve kept features |
+| Third-party code inside OTP's tree | asmjit (Zlib), PCRE2 (BSD-3-Clause WITH PCRE2-exception), zlib (Zlib), zstd (BSD-3-Clause, or GPL-2.0-only, used under BSD), Ryu (Apache-2.0 or BSL-1.0) | none | **kept**, each under its license; asmjit only in the BeamAsm image | they serve kept features |
 
 ### Everything else
 
@@ -4274,7 +4274,7 @@ No dependency beyond those in [design.md](design.md#dependencies): OTP
 libc++ and libc++abi 23.1.x (Apache-2.0 WITH LLVM-exception) built out of
 tree from pinned source and linked into the BeamAsm image alone, the
 libraries OTP bundles under their own
-licences ([The inventory](#the-inventory)), and toybox 0.8.15 with `wak`
+licenses ([The inventory](#the-inventory)), and toybox 0.8.15 with `wak`
 (0BSD), in the tree as erXos's code. The Open POSIX Test Suite is a test
 tool, fetched and built out of tree, never part of an image.
 The reference primitive is `ctaes` (MIT), reviewed and pinned in the

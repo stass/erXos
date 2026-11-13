@@ -1906,10 +1906,10 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   tree on the host like every other.
 * **Boot files.** One directory, `boot/`, serves as the firmware's network boot root and holds the files slot A's
   FAT holds, written by `tools/erx pack --medium --platform raspi4b` into `build/production-image/raspi4b/` beside
-  `sdcard.img` (`tools/lib/erx/boot_partition.rb`): the firmware and its licence; `config.txt`, written from the platform record, with,
+  `sdcard.img` (`tools/lib/erx/boot_partition.rb`): the firmware and its license; `config.txt`, written from the platform record, with,
   on a development card only, the firmware's boot log on the console (`uart_2ndstage=1`) and the ARM's JTAG on GPIO 22
   to 27 (`enable_jtag_gpio=1`);
-  BL31 and its licence; the bootable file as `kernel8.img`; Linux's device tree for the board, compiled from its
+  BL31 and its license; the bootable file as `kernel8.img`; Linux's device tree for the board, compiled from its
   pinned source with its two serial aliases swapped, so that `serial0` names the console, with that source beside it; and the overlays `config.txt` names, which the firmware applies.
   Mainline Linux has no overlays, so erXos keeps their sources in `hw/dts`, and the board's tree, its overlays and
   the model's tree are built by `tools/lib/erx/board_tree.rb`.

@@ -8,12 +8,12 @@ module Erx
   module LicenseExpression
     # LicenseRef-DJB-public-domain is the statement "D. J. Bernstein / Public domain." in
     # ChaCha20's own files. It states no conditions; listing it here is the judgement that
-    # such a statement permits what the licences beside it do.
+    # such a statement permits what the licenses beside it do.
     PERMISSIVE = %w[BSD-2-Clause BSD-3-Clause MIT ISC 0BSD Apache-2.0 Zlib
                     BSL-1.0 Unicode-3.0 Unicode-DFS-2016 LicenseRef-DJB-public-domain].freeze
-    # Licences that cover font data only. A caller that states its input's OFL-1.1 content is
+    # Licenses that cover font data only. A caller that states its input's OFL-1.1 content is
     # font data (font_data: true) has them admitted for that input alone, as grants that are
-    # not permissive; every other input, and every other licence, is judged by PERMISSIVE and
+    # not permissive; every other input, and every other license, is judged by PERMISSIVE and
     # allow_restricted alone. Code
     # under OFL-1.1 is not font data, and its input does not state it is.
     FONT_DATA_ONLY = %w[OFL-1.1].freeze
@@ -23,7 +23,7 @@ module Erx
     # SPDX grouping is bounded by Attribution's grammar. Postfix evaluation
     # avoids input-controlled recursion, including long unparenthesized chains.
     # AND needs both grants; OR selects one, preferring a permissive grant. font_data: true says
-    # the expression's FONT_DATA_ONLY licences cover font data in the input being judged.
+    # the expression's FONT_DATA_ONLY licenses cover font data in the input being judged.
     def select(expression, allow_restricted:, font_data: false)
       Attribution.validate_expression(expression)
       raise Error, 'font_data is true or false' unless [true, false].include?(font_data)
@@ -37,7 +37,7 @@ module Erx
         else
           right = stack.pop
           left = stack.pop
-          raise Error, 'incomplete licence expression' unless left && right
+          raise Error, 'incomplete license expression' unless left && right
           if item == :and
             stack << { 'license' => "(#{left.fetch('license')} AND #{right.fetch('license')})".freeze,
                        'grants' => (left.fetch('grants') + right.fetch('grants')).uniq.freeze,
@@ -56,7 +56,7 @@ module Erx
         end
       end
       unless stack.size == 1 && stack.first.fetch('allowed')
-        raise Error, 'licence expression has no permitted grant'
+        raise Error, 'license expression has no permitted grant'
       end
       stack.first
     end

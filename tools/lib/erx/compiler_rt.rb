@@ -33,7 +33,7 @@ module Erx
   class CompilerRt
     SOURCE_ID = 'llvm-project'
     BUILTINS = 'compiler-rt/lib/builtins'
-    # The licence text the archive's attribution carries, in the fetched tree.
+    # The license text the archive's attribution carries, in the fetched tree.
     NOTICE = 'compiler-rt/LICENSE.TXT'
     LICENSE = 'Apache-2.0 WITH LLVM-exception'
     ARCHIVE = 'libclang_rt.builtins.a'
@@ -57,7 +57,7 @@ module Erx
     # same compiler, flags and source bytes: what every link site passes.
     def self.archive(root:, runner:, compiler:) = new(root: root, runner: runner, compiler: compiler).build
 
-    # The archive's attribution: its licence and the path of its notice, relative to root.
+    # The archive's attribution: its license and the path of its notice, relative to root.
     def self.notice(root:, runner:)
       tree = Dependencies.new(root: root, runner: runner).fetched_tree(SOURCE_ID)
       File.join(tree, NOTICE).delete_prefix("#{File.expand_path(root)}/")

@@ -8257,7 +8257,7 @@ checked-in input, as an SVD file is. A per-architecture refresh command
 (`tools/erx sysreg refresh` for AArch64) extracts the facts again from the
 architecture's published data, which is fetched at a pinned hash and read
 by nothing else; the binding names AArch64's source, its version and its
-licence
+license
 ([design-arch-aarch64.md](design-arch-aarch64.md#hardware-register-sources)).
 `tools/gen_hw.rb` reads only the
 checked-in file and emits an inline accessor per register, field functions
@@ -8951,7 +8951,7 @@ and its binding document; nothing above the architecture layer changes.
 
 ## Dependencies
 
-| Component | Purpose | Licence | Status |
+| Component | Purpose | License | Status |
 | --- | --- | --- | --- |
 | Fiasco kernel `50bbe8a9`, with `bootstrap` `a4f4ad18`, `sigma0` and `l4sys` from `l4re-core` `e2e2d5af`, `libfdt` `5756062b` and `mk` `22cc26e5` | the stopgap kernel behind this interface | MIT (each package's `LICENSE.spdx`), with the GPL and LGPL parts listed above excluded, except the GPL-2.0 `kobject_rpc.h` and `jdb_object.cpp`, which the kernel needs, so no stopgap build is distributed outside the project; capstone in the kernel debugger is BSD-3-Clause-Attribution; the link closure of `bootstrap` and `sigma0` recorded at import | stopgap, replaced by erXos's kernel |
 | libfdt | device-tree parsing in erXos's kernel and the root task's reader | BSD-2-Clause (dual GPL-2.0-or-later) | permanent |
@@ -9004,7 +9004,7 @@ departures. The departures that matter, by what they buy:
 What Fiasco has, and erXos's kernel must earn, is proven code. Hence the
 switch at parity: M7 replaces the stopgap only once erXos's kernel runs
 every test and benchmark Phase 1's system ran on it ([plan.md](plan.md)).
-The licence is not a reason for the new kernel. Fiasco's kernel package
+The license is not a reason for the new kernel. Fiasco's kernel package
 is MIT, as `fiasco/kernel/LICENSE.spdx` declares; its GPL and LGPL parts
 are excluded from the import, and of Fiasco's code in the stopgap build
 only two files are GPL-2.0, by their own notices: `src/kern/kobject_rpc.h`
@@ -9698,7 +9698,7 @@ Fiasco's scheduling:
 | hashing each file with portable code at its first slice lengthens the boot and each domain's first start | medium | boot time, in proportion to the bytes the boot uses | each file is hashed once per boot and only when used; the boot benchmark reports the hashing time per platform, and the boot image stays small, with the system release in EROFS images from M6 |
 | a loader places the device tree or another payload inside a large single file, because it ignores the declared image size | low | the boot stops with the locator's overlap check | the file's own extent covers the archive whatever the header says; the boot probe confirms each board's placement before anything depends on it ([design-platforms.md](design-platforms.md#boot)) |
 | the stopgap's modifications grow large (memory objects, sealed paged objects, groups, the stop core in Fiasco's C++) | medium | the stopgap takes longer than expected | the backend carries only the part of the interface that Phase 1's system uses, and every mechanism beyond it lands on erXos's kernel alone ([The current implementation](#the-current-implementation-the-modified-fiasco)); the plan's pilot calibrates the effort |
-| the stopgap carries GPL code: `kobject_rpc.h` and `jdb_object.cpp` in the kernel, and possibly a link dependency of `bootstrap` or `sigma0` | certain for the two files | nothing built on the stopgap is distributed outside the project | recorded at import; erXos's kernel takes code only from files whose effective licence is permissive, judged by Fiasco's `LICENSE.spdx`, each file's own notice and its upstream history, and needs nothing those two files do: its dispatch is generated, and it has no kernel debugger ([design.md](design.md#dependencies)) |
+| the stopgap carries GPL code: `kobject_rpc.h` and `jdb_object.cpp` in the kernel, and possibly a link dependency of `bootstrap` or `sigma0` | certain for the two files | nothing built on the stopgap is distributed outside the project | recorded at import; erXos's kernel takes code only from files whose effective license is permissive, judged by Fiasco's `LICENSE.spdx`, each file's own notice and its upstream history, and needs nothing those two files do: its dispatch is generated, and it has no kernel debugger ([design.md](design.md#dependencies)) |
 | 8 KiB kernel stacks do not hold the proven worst case with an interrupt on top | low | larger stacks, about 4 KiB more per thread | the stack proof fails the build first; Fiasco runs in 8 KiB with its thread record in the same block |
 | deleting an object that has many capabilities or mappings takes many bounded parts | low | a long call for the deleter | closing makes the object unreachable in the first part, so no other call waits for the rest, and the drain waits only for the one operation that holds the existence lock; each part is bounded and preemptible |
 | a space's existence lock serialises its range calls and maps, as Fiasco's serialises a task's maps | medium | a runtime's threads that change their space's ranges at once wait for each other | faults do not take it, and every part is bounded; if `tools/erx bench` shows contention, a shared mode for operations, with the destroy's close and drain alone exclusive, is a change behind `erx_object_lock_existence` |
@@ -9795,7 +9795,7 @@ records a call in progress keeps, which [Security](#security) bounds
   `src/Kconfig`, `src/abi/l4_types.cpp`; `LICENSE.spdx`; the full list
   behind each claim is in [L4 lineage](#l4-lineage).
 * L4Re `bootstrap` `a4f4ad18`, `l4re-core` `e2e2d5af`, `libfdt` `5756062b`,
-  `mk` `22cc26e5`, https://github.com/kernkonzept; licence declarations in
+  `mk` `22cc26e5`, https://github.com/kernkonzept; license declarations in
   each package's `LICENSE.spdx` (read 2026-10-29); `l4re_itas`'s
   `server/src/signals.cc` in the snapshot.
 * seL4, https://github.com/seL4/seL4, master:

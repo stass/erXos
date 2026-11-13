@@ -10,7 +10,7 @@ generator (`kernel/core/rng.c`). This directory mirrors FreeBSD's
 fetched once from
 `https://raw.githubusercontent.com/freebsd/freebsd-src/95719d8a895bf8170851e9844d9b4092b1d2b6fe/sys/crypto/chacha20/<file>`:
 
-| File | Upstream path | SHA-256 of the imported bytes | Licence |
+| File | Upstream path | SHA-256 of the imported bytes | License |
 | --- | --- | --- | --- |
 | `chacha.c` | `sys/crypto/chacha20/chacha.c` | `00e2b5166219cd30d747bca90b5759971a1a5855a1cc33c4550fdc32157c1321` | public domain (D. J. Bernstein, via OpenBSD) |
 | `chacha.h` | `sys/crypto/chacha20/chacha.h` | `22c2686f6060c8c6cf8fc080ab7c42e90d984fd8154318cf02e9e1cf0acc151f` | public domain (D. J. Bernstein, via OpenBSD) |
@@ -29,12 +29,12 @@ erXos's changes are BSD-2-Clause, under the repository's `LICENSE`, which
 `config/provenance/import-notices.json` names as this tree's notice
 document for that grant.
 
-The two imported files name no licence document. The dedication in each
-file's header is the only licence statement it holds, and attribution
+The two imported files name no license document. The dedication in each
+file's header is the only license statement it holds, and attribution
 keeps that header as the file's notice.
 
 In the inventory, the `files` rows record the imported bytes and their
-licence evidence, and the `changes` rows each file's licence as modified,
+license evidence, and the `changes` rows each file's license as modified,
 as its SPDX line gives it. Tooling does not compare a `changes` row's
 `sha256` with a source file; `test/host/production_image_test.rb` does for
 these two. Third-party notices remain in their original files.

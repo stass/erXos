@@ -38,13 +38,13 @@ Paths are relative to each source tree: `erts/...` and `lib/...` are OTP;
   members with `llvm-size`. Sizes, SPDX tag counts and dates are the survey's.
 * Re-checked for this record: every ERTS-side statement, against the pinned OTP
   tree; musl's thread-pointer sites, `floatscan` buffer, TLS layout, `errno`,
-  string routines, licence notices, system-call count and size, against the
+  string routines, license notices, system-call count and size, against the
   pinned musl tree; and, in the clones and downloads, picolibc's digit limit,
   `_set_tls` sites, string-routine guards, lock hooks, ports and options, LLVM
   libc's missing math functions, baremetal configuration, header list and
   vendor symbols, mlibc's `strtod`, newlib's string guards and thread pointer,
   ATfE's pins, flags and README statements, libc++'s platform table and C
-  library switch, libcxxrt's licence and guards, FreeBSD's `tls.h`, the Docker
+  library switch, libcxxrt's license and guards, FreeBSD's `tls.h`, the Docker
   official-images entry for erlang, libc.llvm.org, and musl commit `6426a515`.
 * Where a re-check disagreed with the survey, this record gives the re-checked
   fact. The differences:
@@ -65,7 +65,7 @@ Paths are relative to each source tree: `erts/...` and `lib/...` are OTP;
      hides `AT_HWCAP3` and `AT_HWCAP4`; the survey named only `AT_HWCAP`.
   8. picolibc's general-register string routines need only
      `__ARM_FEATURE_UNALIGNED`; only its SIMD routines also need `__ARM_NEON`.
-  9. libcxxrt's licence carries the "views and conclusions" paragraph, which
+  9. libcxxrt's license carries the "views and conclusions" paragraph, which
      SPDX names `BSD-2-Clause-Views`.
   10. musl's 114k lines is a count without `compat/` (114,237); with it the
       count is 115,268.
@@ -238,7 +238,7 @@ Tag release/15.1.0, `96841ea`. Sources: [F1].
    `BSD-4-Clause` files with the advertising clause, for example `thr_mutex.c`
    ("This product includes software developed by John Birrell"). msun is
    `SunPro` plus `BSD-2-Clause`, with `bsdsrc/mathimpl.h` under `BSD-4-Clause`;
-   gdtoa is under the `dtoa` licence, jemalloc `BSD-2-Clause`, tzcode public
+   gdtoa is under the `dtoa` license, jemalloc `BSD-2-Clause`, tzcode public
    domain.
 2. **Size and maintenance.** libc 213k lines, msun 40k, libthr 14k, libsys 6k,
    gdtoa 10k, jemalloc 53k. In 15.1-RELEASE for arm64, `libc.a` has 1.64 MB of
@@ -338,7 +338,7 @@ Tag commit `2ae376c`. Sources: [P1], [P2], [A1], [X1].
 Abbreviated ATfE. Sources: [A1].
 
 1. **License.** The build scripts are `Apache-2.0 WITH LLVM-exception`; each
-   shipped component keeps its own licence.
+   shipped component keeps its own license.
 2. **Size and maintenance.** Based on LLVM 23.1.0, with picolibc pinned at
    `7971005`, 75 commits before the 1.8.12 tag, and newlib at newlib-4.6.0,
    `8ba4275b` (`versions.json`). It supports Armv8-A, Armv8-R and Armv9-A and
@@ -448,7 +448,7 @@ Tag newlib-4.6.0, `8ba4275b`. Sources: [N1], [A1].
 
 Tag v7.0.0, `7c2a178`. Sources: [B1].
 
-1. **License.** `MIT`, with musl's MIT licence for the adapted parts.
+1. **License.** `MIT`, with musl's MIT license for the adapted parts.
 2. **Size and maintenance.** 124k lines, 36.5k of them about 10 OS ports.
    Active.
 3. **Freestanding.** No: a hosted C library for operating systems that need
@@ -487,7 +487,7 @@ Sources: [E1], [E2].
 * **OpenBSD libc** (OpenBSD 8.0): `ISC` and BSD, tied to the OpenBSD kernel,
   for example by `pinsyscalls(2)`.
 * **relibc:** `MIT`, but written in Rust.
-* **Excluded on licence**, all Linux-only as well: glibc (`LGPL-2.1-or-later`),
+* **Excluded on license**, all Linux-only as well: glibc (`LGPL-2.1-or-later`),
   uClibc-ng 1.0.59 (`LGPL-2.1`) and dietlibc 0.35 (`GPL-2.0`).
 
 ## Comparison
@@ -610,7 +610,7 @@ survey's findings, not a decision of this record. Two findings drive it:
      internal locks), which probably means a second C library and a second C++
      runtime configuration for the kernel (survey's judgement).
 3. **LLVM libc 23.1.x.**
-   * Why: the same licence and project as clang and libc++, the smallest
+   * Why: the same license and project as clang and libc++, the smallest
      baremetal hook set, correctly rounded math, exact printf and `strtod`,
      memory routines that follow the compile flags, and Arm's announced
      direction.

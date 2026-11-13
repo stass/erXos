@@ -50,7 +50,7 @@ class LicenseExpressionTest < Minitest::Test
     assert_equal ['MIT', 'OFL-1.1'], select(lvgl, restricted: true).fetch('grants')
   end
 
-  def test_the_font_data_statement_admits_no_other_restricted_licence
+  def test_the_font_data_statement_admits_no_other_restricted_license
     ['MIT AND OFL-1.1 AND GPL-2.0-only', 'GPL-3.0-or-later', 'OFL-1.1 AND MPL-2.0', 'LGPL-2.1-only AND OFL-1.1',
      'GPL-2.0-only WITH Classpath-exception-2.0'].each do |expression|
       assert_raises(Erx::Error, expression) { select(expression, font_data: true) }

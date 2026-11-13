@@ -357,21 +357,21 @@ generated file and finds it unchanged.
 * `deps.lock` and `make fetch`: pinned URLs and SHA-256 hashes, unpacking
   into separate directories under `build/third_party/`, plus the oracle's
   platform-specific OCI image pinned by manifest digest in the local engine.
-* Imports, each with its licence notices and an `ORIGIN.md` recording the
+* Imports, each with its license notices and an `ORIGIN.md` recording the
   repository, the release or commit, and the SHA-256 of the import and of
   every file in it:
   OTP 29.1.2 into `otp/`, musl 1.2.6 into `musl/`, and into `fiasco/` the
   frozen Fiasco set of
   [design-kernel.md](design-kernel.md#the-current-implementation-the-modified-fiasco)
-  with its excluded parts removed; a licence scan of the Fiasco set and the
+  with its excluded parts removed; a license scan of the Fiasco set and the
   link closure of `bootstrap` and `sigma0`, recorded.
-* The notices: every imported file's licence in its `ORIGIN.md`, from its
+* The notices: every imported file's license in its `ORIGIN.md`, from its
   SPDX header or, where it has none, from the import's review, marked as
   reviewed; the build check that a changed file of an imported tree
   carries erXos's change notice; the packer's provenance check and its
-  licence allowlist over each image's closure, a slot's boot partition
+  license allowlist over each image's closure, a slot's boot partition
   included; each check with its seeded-violation test; and the packer's
-  `NOTICES` file ([design.md](design.md#licences-and-notices)).
+  `NOTICES` file ([design.md](design.md#licenses-and-notices)).
 * The oracle: stock OTP 29.1.2 built from the pinned tarball with its own
   `configure`, in both flavours, and a Ruby tool that runs OTP's suites in
   the [offline Linux context](design-host-oracle.md) and records results
@@ -454,7 +454,7 @@ error and performs no network access. Generation rejects invalid schemas
 before publishing output, regenerates the tree when an input or output
 changes, and refuses a generated file checked in or edited. Independent fixtures check generated parsers and mappings.
 
-**Gate G0.** The import: the licence scan and link closure of the Fiasco
+**Gate G0.** The import: the license scan and link closure of the Fiasco
 set, which name the GPL-headed files the stopgap keeps
 ([design.md](design.md#dependencies)); since `kobject_rpc.h`, which every
 build includes, is one of them, any distribution outside the project, in
@@ -2657,7 +2657,7 @@ violation. Backend closure requires hard confinement, externally enforced
 deadlines, the declared resource-wide failure outcome and I/O
 reconciliation before reuse; a failed volume may fail its clients.
 Measure ordinary-domain, service and backend paths separately.
-The reference permutation's small AES implementation is selected, licence
+The reference permutation's small AES implementation is selected, license
 reviewed, version/hash pinned and checked against FIPS 197 vectors before
 that runtime feature is enabled; source counters, image identity, exported
 aliases and generation retirement have exhaustion tests. Host-link tests
@@ -2968,7 +2968,7 @@ their numbers.
 
 | Gate | Milestone | Measures or asks | Decides |
 | --- | --- | --- | --- |
-| G0 | M0 | the Fiasco set's licence scan and link closure; `lld` installed | what enters the tree, and the GPL-headed files the stopgap keeps |
+| G0 | M0 | the Fiasco set's license scan and link closure; `lld` installed | what enters the tree, and the GPL-headed files the stopgap keeps |
 | G3 | M3 | W1 against stock OTP; footprint; boot time to the shell | the baseline |
 | GK1 | before Phase 1 is complete, beside Phase 1b | the pilot's time and defect rate | the pace of the rest of track K and of the plan |
 | GK2 | after the pilot and 1b-A | Phase 1's and 1b-A's tests and benchmarks baselined on the stopgap, the conformance roster written from the design | the start of erXos's kernel in full |
@@ -3100,9 +3100,9 @@ Each is small, adds its tests, and leaves `make check` green.
    separate directories: the OTP 29.1.2 tarball, musl 1.2.6 and Arm's
    machine-readable specification.
 3. **Imports.** OTP 29.1.2 into `otp/`, musl 1.2.6 into `musl/`, and the
-   frozen Fiasco set into `fiasco/`, each with its licence notices and its
+   frozen Fiasco set into `fiasco/`, each with its license notices and its
    `ORIGIN.md` with every file's hash, the change-notice check, and the
-   licence scan of the Fiasco set.
+   license scan of the Fiasco set.
 4. **Oracle.** The host build of stock OTP 29.1.2 in both flavours and the
    suite runner that stores results case by case.
 5. **QEMU harness.** Guests under deadlines with serial logs and awaited

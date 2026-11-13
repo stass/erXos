@@ -190,7 +190,7 @@ class PackProvenanceTest < Minitest::Test
   def setup
     @produced = []
     @root = Dir.mktmpdir('erx-provenance-')
-    File.write(File.join(@root, 'LICENSE'), 'project BSD licence text')
+    File.write(File.join(@root, 'LICENSE'), 'project BSD license text')
     @source = write('root.c', "/* SPDX-License-Identifier: BSD-2-Clause */\nint start;\n")
     @object = write('root.o', 'object bytes')
     @artifact = write('root.elf', 'linked bytes')
@@ -261,11 +261,11 @@ class PackProvenanceTest < Minitest::Test
     records = resolve
     assert_equal ['root.c'], records.map { |record| record.fetch('path') }
     assert_equal 'BSD-2-Clause', records.first.fetch('license')
-    assert_includes @resolver.notices(records), 'project BSD licence text'
+    assert_includes @resolver.notices(records), 'project BSD license text'
     refute_includes JSON.generate(records), @root
   end
 
-  # Many files under one licence: NOTICES carries the licence document once, each
+  # Many files under one license: NOTICES carries the license document once, each
   # distinct file notice once, and every file's name, as a FreeBSD or Debian
   # copyright file does.
   def test_notices_give_each_text_once_with_the_files_it_covers
@@ -275,7 +275,7 @@ class PackProvenanceTest < Minitest::Test
       reference(write(name, "/* #{line}\n * SPDX-License-Identifier: BSD-2-Clause */\nint #{name[0]};\n"))
     end
     text = @resolver.notices(resolve_compiled('sources' => sources))
-    assert_equal 1, text.scan('project BSD licence text').size
+    assert_equal 1, text.scan('project BSD license text').size
     assert_equal 1, text.scan('First Author').size
     assert_equal 1, text.scan('Second Author').size
     assert_includes text, "Files:\n  a.c\n  b.c\nLicense: BSD-2-Clause\nEvidence: file SPDX\nDocuments: LICENSE\n" \
@@ -296,7 +296,7 @@ class PackProvenanceTest < Minitest::Test
     first = resolve_compiled('sources' => [reference(@source)])
     second = resolve_compiled('sources' => [reference(blob)])
     text = @resolver.notices((first + second).sort_by { |record| record.fetch('path').b })
-    assert_includes text, 'project BSD licence text'
+    assert_includes text, 'project BSD license text'
     assert_includes text, 'external MIT text'
   end
 
@@ -361,7 +361,7 @@ class PackProvenanceTest < Minitest::Test
     assert_equal 'BSD-2-Clause', record.fetch('declared_license')
     assert_equal 'file SPDX', record.fetch('evidence')
     assert_includes record.fetch('notice'), 'SPDX-License-Identifier: BSD-2-Clause'
-    assert_includes @resolver.notices(records), 'project BSD licence text'
+    assert_includes @resolver.notices(records), 'project BSD license text'
     assert_equal ['LICENSE'], record.fetch('notice_documents').map { |document| document.fetch('path') }
   end
 
@@ -374,7 +374,7 @@ class PackProvenanceTest < Minitest::Test
     assert_match(/unresolved imported input: vendor\/late\.c/, error.message)
   end
 
-  def test_file_captured_after_the_check_declaring_another_licence_has_no_attribution
+  def test_file_captured_after_the_check_declaring_another_license_has_no_attribution
     bytes = "// Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n" \
             "// SPDX-License-Identifier: BSD-2-Clause AND GPL-2.0-only\n"
     error = assert_raises(Erx::Error) { resolve_vendor_source(captured_after_check: bytes) }
@@ -586,7 +586,7 @@ class PackProvenanceTest < Minitest::Test
   end
 
   def test_unknown_sources_and_missing_dependency_members_fail_closed
-    File.write(@source, 'no copyright or licence')
+    File.write(@source, 'no copyright or license')
     @receipt.fetch('compiles').first['sources'] = [reference(@source)]
     assert_raises(Erx::Error) { resolve }
     @receipt.fetch('compiles').first['sources'] = []

@@ -2,7 +2,7 @@
 
 erXos's copy of Plan 9's `libmemdraw`, with the parts of `libdraw` it
 links, from 9front. It is erXos's code: edited in place, no upstream
-tracked (CLAUDE.md, Dependencies). Licence: MIT (LICENSE, 9front's
+tracked (CLAUDE.md, Dependencies). License: MIT (LICENSE, 9front's
 `lib/legal/NOTICE` and `lib/legal/mit`; the notice's exceptions cover
 only fonts and programs not imported here).
 
@@ -40,7 +40,7 @@ Imported files and the SHA-256 of each as imported, before erXos's edits:
 
 `u.h` and `libc.h` are erXos's: Plan 9's types with Plan 9's widths
 (`ulong` is 32 bits) and the few `libc` calls the copy makes. Their
-headers carry erXos's copyright and licence, which is how the origin
+headers carry erXos's copyright and license, which is how the origin
 check (tools/lib/erx/origin.rb) admits them as erXos's own.
 
 `LICENSE` is 9front's `lib/legal/NOTICE`, a blank line, then
@@ -101,7 +101,7 @@ is not obvious:
   through `erx_memdraw_nomem`, so a shape that could not draw answers
   `ENOMEM`.
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json

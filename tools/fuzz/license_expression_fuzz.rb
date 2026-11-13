@@ -10,7 +10,7 @@ module Erx
     module_function
 
     def run(iterations: 20_000, seed: 1)
-      raise Error, 'invalid licence fuzz bound' unless iterations.is_a?(Integer) && iterations.between?(1, 1_000_000)
+      raise Error, 'invalid license fuzz bound' unless iterations.is_a?(Integer) && iterations.between?(1, 1_000_000)
       random = Random.new(seed)
       seeds = ['BSD-3-Clause OR GPL-2.0-only', '(MIT OR ISC) AND Apache-2.0 WITH LLVM-exception',
                'GPL-3.0-or-later WITH GCC-exception-3.1', '('*32 + 'MIT' + ')'*32]
@@ -25,7 +25,7 @@ module Erx
         end
         begin
           result = LicenseExpression.select(bytes, allow_restricted: index.odd?)
-          raise 'licence selection has no grant' if result.fetch('grants').empty?
+          raise 'license selection has no grant' if result.fetch('grants').empty?
         rescue Error
           # Invalid declarations and disallowed grants are ordinary refusals.
         end

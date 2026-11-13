@@ -8,7 +8,7 @@ require_relative 'origin'
 module Erx
   # Reviewed document references supplement the immutable import inventory.
   # Package overrides select the legal text for the chosen grant, including
-  # nested vendored libraries; filenames have no inferred licence meaning.
+  # nested vendored libraries; filenames have no inferred license meaning.
   module ImportNotices
     module_function
 

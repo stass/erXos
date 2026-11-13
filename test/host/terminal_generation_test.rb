@@ -155,7 +155,7 @@ class TerminalGenerationTest < Minitest::Test
   end
 
   # The generated files declare Unicode-3.0 themselves, so an input imported
-  # under any other licence is refused rather than relabelled.
+  # under any other license is refused rather than relabelled.
   def test_an_input_imported_under_another_license_is_refused
     Dir.mktmpdir('erx-terminal-license-') do |directory|
       root = generation_root(directory, review: FIXTURE_REVIEW.merge('default_license' => 'MIT'))

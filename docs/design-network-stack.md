@@ -270,7 +270,7 @@ steps and carry out their actions. Beneath them:
 * **N9. Seams.** Loss detection and congestion control are replaceable
   per connection without touching the connection's other code.
 * **N10. Provenance.** Every module that translates FreeBSD code carries
-  the FreeBSD files' copyright notices and licence, and names the
+  the FreeBSD files' copyright notices and license, and names the
   functions it translates, at the pinned commit.
 * **N11. Testable on a host.** Every module of `erx_net` but the erXos
   implementations of its seams runs unchanged on stock OTP 29.1.2 on a
@@ -285,7 +285,7 @@ steps and carry out their actions. Beneath them:
   erXos's is the erXos implementation of each seam, chosen by
   configuration, and no other module names it
   ([Two places, four seams](#two-places-four-seams)). `erlang/apps/erx_net`
-  is self-contained, so that it can be released on its own: its licence
+  is self-contained, so that it can be released on its own: its license
   notices, erXos's and `NOTICE-freebsd`, and its host tests are inside
   the app directory, the tests run on stock OTP from the app alone, and
   nothing in its source refers to a path elsewhere in the erXos tree.
@@ -4033,11 +4033,11 @@ about 3,000. These are estimates for planning, not budgets.
 A module that translates FreeBSD code is a derived work of each FreeBSD
 file it translates. Its header carries, after erXos's own notice, a line
 `%% FreeBSD: PATH` for each such file, naming it by its path in the source
-tree, followed by every copyright line and the licence text of that file
-at the pinned commit, and its SPDX line names both licences, such as
+tree, followed by every copyright line and the license text of that file
+at the pinned commit, and its SPDX line names both licenses, such as
 `SPDX-License-Identifier: BSD-2-Clause AND BSD-3-Clause`, so the packer
 counts it as third-party for `NOTICES`
-([design.md](design.md#licences-and-notices)). Its `-moduledoc` names the
+([design.md](design.md#licenses-and-notices)). Its `-moduledoc` names the
 FreeBSD files and the pinned commit; each function that translates a
 FreeBSD function says so in its `-doc`, with the FreeBSD function's name,
 so a reviewer compares the two side by side.
@@ -4050,7 +4050,7 @@ from, as `kernel/NOTICE-fiasco` records the kernel's translation from
 Fiasco. A change between the release and the pin is ported when the wire
 or an interoperating peer can see it, or when it fixes a real bug;
 anything else is left as it was read ([Decisions](#decisions), 9). The
-notice and erXos's own licence notice are in the app directory, so the
+notice and erXos's own license notice are in the app directory, so the
 app carries them wherever it goes (N12). The
 FreeBSD source is a reference for readers, fetched by hand and not by the
 build: the archive is
@@ -4060,14 +4060,14 @@ build check fails when a module's header names a FreeBSD file that the
 notice file does not list for it, or the reverse.
 
 Three files are never translated.
-`netinet/in_cksum.c` carries the four-clause BSD licence with its
+`netinet/in_cksum.c` carries the four-clause BSD license with its
 advertising clause (`in_cksum.c:17`); the Internet checksum is erXos's
 own per-byte primitive. `netinet/tcp_sack.c` carries, besides the
 Regents' notice, NRL's notice with an advertising clause, which erXos
 does not take into its tree; the receiver's SACK blocks are written from
 RFC 2018 and RFC 2883, and the sender's scoreboard and recovery from RFC
 6675, each without reading it. RACK's
-`tcp_stacks/tailq_hash.c` and `.h` carry no licence header; a RACK module
+`tcp_stacks/tailq_hash.c` and `.h` carry no license header; a RACK module
 reads `rack.c` for its logic and builds its records on the send log.
 
 A translation keeps FreeBSD's decision and drops its mechanism. A
@@ -7517,7 +7517,7 @@ FreeBSD handles SYNs in the input path, and so does the stack.
 
 **Linux as the reference.** Linux's stack is the more common peer and
 stays an interoperability oracle, but erXos follows FreeBSD where UNIX
-systems differ, and FreeBSD's code can be translated under its licence.
+systems differ, and FreeBSD's code can be translated under its license.
 
 **Drop a frame when the device's queue is full.** The driver would
 drop and count the frame, as the receive side drops a refused batch,

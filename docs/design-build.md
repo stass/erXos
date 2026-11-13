@@ -227,7 +227,7 @@ the remote QEMU (`/usr/local/bin/qemu-system-aarch64`) and its GNU timeout
 
 `deps.lock` is a checked data file, with unique source identifiers, exact
 source URLs, versions or full commit identities, SHA-256 digests, archive
-root names, licences and dependency status. Unknown fields and malformed
+root names, licenses and dependency status. Unknown fields and malformed
 identities fail before fetching. Fetch is the only network operation. A
 local archive can seed the cache only after the same hash verification as
 a downloaded archive; a local path never changes the accepted identity.
@@ -244,20 +244,20 @@ source tree. Builds and checks require verified sources already present
 and never fetch them implicitly.
 
 The import plan names the pinned archive and the selected files, retaining
-their relative paths and licence texts. OTP enters `otp/`, musl enters
+their relative paths and license texts. OTP enters `otp/`, musl enters
 `musl/`, and the frozen stopgap set enters `fiasco/`. Each imported part's
 `ORIGIN.md` contains its repository, release or full commit, archive digest,
 import selection and a machine-readable inventory of the imported payload.
 Each file entry records its original hash, SPDX expression and attribution
-source: its own header, its package's licence declaration or an explicitly
+source: its own header, its package's license declaration or an explicitly
 reviewed attribution. A missing header is not evidence of a permissive
-licence. The origin document itself is erXos's metadata and is not included
+license. The origin document itself is erXos's metadata and is not included
 in its own digest inventory.
 
 The change-notice check compares the current path set and bytes with this
 inventory. A modified text file carries erXos's change notice in its header;
 an added file carries erXos's own notice and copyright line, mentions no
-other licence declaration or copyright holder, does not restore a path the
+other license declaration or copyright holder, does not restore a path the
 import excluded, and is attributed from that header as erXos's code rather
 than the import's. A copy of an imported file is upstream text and keeps its
 notices, so it is not an addition: it has its own inventory row, which repeats
@@ -281,14 +281,14 @@ Link maps identify the object files and archive members that contribute
 to an executable; compiler dependency files identify their source/header
 closure. Build records bind generated objects to those inputs and their
 tool identities. Recording an archive's name alone cannot establish the
-licences of its selected members. Every closure member resolves to an
+licenses of its selected members. Every closure member resolves to an
 origin inventory, a pinned fetched artifact or an erXos source notice;
 unknown provenance fails. The packer combines that closure with the files
-it packs, checks the appropriate licence allowlist and emits `NOTICES`.
+it packs, checks the appropriate license allowlist and emits `NOTICES`.
 It refuses a release image containing non-permissive stopgap code,
 including the Fiasco kernel, as
-[Licences and notices](design.md#licences-and-notices) requires.
-Permissive stopgaps pass the same licence allowlist as permanent dependencies.
+[Licenses and notices](design.md#licenses-and-notices) requires.
+Permissive stopgaps pass the same license allowlist as permanent dependencies.
 
 The trusted builder supplies an immutable input catalog alongside its build
 record. The catalog names the exact source files, notice documents, dependency
@@ -303,7 +303,7 @@ An explicitly registered import grants its validated `ORIGIN.md` and the
 finite files named by that inventory and its reviewed change entries. The
 existing change-notice and imported-byte checks still apply. Reviewed notice
 profiles register exact, hash-bound documents, including nested packages;
-licence filenames carry no inferred meaning. External files and their notices
+license filenames carry no inferred meaning. External files and their notices
 require exact registrations. These catalogs are constructed by build/import
 owners, not decoded from an artifact-supplied record.
 
@@ -376,7 +376,7 @@ them: erXos's own links take LLVM compiler-rt's builtins
 (`tools/lib/erx/compiler_rt.rb`). The minimal
 libc uses the pinned `l4re-core` source selection and its bundled libc
 inputs; erXos's `musl/` is not silently substituted into that boot build.
-The import records the effective licences of these support files along
+The import records the effective licenses of these support files along
 with the two executables' linker evidence.
 
 erXos's bootable file is `bootstrap` alone, built as a flat image, with the
@@ -530,7 +530,7 @@ modified tracked file, or an untracked file that git does not ignore, the
 same flag as `uname`'s `-dirty`), and
 every input by its pin or digest: the firmware's `deps.lock` entries,
 verified against their hashes before use; BL31's build record (TF-A's
-pin, the recipe and its options) and its licence; the board tree's
+pin, the recipe and its options) and its license; the board tree's
 pinned Linux source, recipe and overlay sources; fsimg's version, source
 and arguments; and each file's and the card's SHA-256, in the shape of
 the image's own assembled receipts. The website offers the card and
@@ -678,7 +678,7 @@ whole run; it answers `is_release_available` with `false` and `find_release`
 with `not_available`, because an old release runs only as a node this one
 starts, and the search for one would also fail inside the controller on a
 system with no PATH. A distributed node never reaches a guard. A checked-in copy of
-the controller retains its upstream licence and change notice, with original
+the controller retains its upstream license and change notice, with original
 and modified hashes in its source record. The original archive remains
 unchanged. The guest checks those hashes before replacing that one file;
 runtime, library and testcase sources remain the archive's exact bytes.
@@ -774,7 +774,7 @@ erXos. The first update model lands at the roadmap's declared milestone.
 Host tests cover pure plan validation separately from effects. Seeded
 violations exercise duplicate and unknown lock entries, archive hash and
 path failures, missing provenance, changed imported files without notices,
-excluded licences, stale/missing/orphaned generated outputs and unsupported
+excluded licenses, stale/missing/orphaned generated outputs and unsupported
 tools. Oracle fixtures cover repeated and grouped cases, both skip kinds,
 fixture failures, interrupted runs and inconsistent totals. Harness
 fixtures cover split serial reads, checkpoint order, early guest exit,

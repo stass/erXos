@@ -4,7 +4,7 @@ Repository: https://github.com/kernkonzept/fiasco
 
 Revision: 50bbe8a981199e17865e8553a4eb02c387b339cf
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json

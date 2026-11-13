@@ -81,7 +81,7 @@
       "platform": "linux/arm64",
       "sha256": "1b4ee3a2e4d38a7c0d31d8736133ddf76ef3bf0e9a3054c544863cbb199cdf7e",
       "config_sha256": "93f9731928321cb869b2f977598b05ce53fb213f0ed9d87ea8b84688f16c8e44",
-      "license": "Various: Ruby, BSD-2-Clause, GPL/LGPL and Debian package licences; development tools only",
+      "license": "Various: Ruby, BSD-2-Clause, GPL/LGPL and Debian package licenses; development tools only",
       "status": "permanent"
     },
     {
@@ -221,7 +221,7 @@
       "status": "permanent"
     },
     {
-      "id": "rpi-firmware-licence",
+      "id": "rpi-firmware-license",
       "kind": "file",
       "version": "1.20260915",
       "url": "https://raw.githubusercontent.com/raspberrypi/firmware/6f0881cba8bea8ec24956a5718714730e9936ec5/boot/LICENCE.broadcom",

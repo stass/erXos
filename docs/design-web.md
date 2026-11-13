@@ -706,7 +706,7 @@ UIs with the session.
 
 The client is TypeScript with React, under `web/` at the tree's root,
 built by esbuild into `build/web/`: one `index.html`, one script and one
-stylesheet with content hashes in their names, the third-party licence
+stylesheet with content hashes in their names, the third-party license
 notices, and an inventory of the files with their SHA-256,
 `inventory.txt`, one line per file in `sha256sum`'s format (the hash in
 hexadecimal, two spaces, the path). Every file but `index.html` is named
@@ -1208,7 +1208,7 @@ table per platform.
 
 ## Dependencies
 
-| Component | Purpose | Licence | Status |
+| Component | Purpose | License | Status |
 | --- | --- | --- | --- |
 | React and React DOM 19, with their `scheduler` | the client's rendering | MIT | permanent, in the client's files; fetched by pnpm at pinned versions and integrity hashes |
 | TypeScript 7, its native compiler | the client's language and type check | Apache-2.0 | permanent host tool, a native binary pinned by the lockfile |

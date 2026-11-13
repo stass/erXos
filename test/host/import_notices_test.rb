@@ -74,7 +74,7 @@ class ImportNoticesTest < Minitest::Test
     assert_equal ['otp/erts/emulator/zstd/LICENSE'], record.fetch('notice_documents').map { |doc| doc.fetch('path') }
   end
 
-  def test_unicode_test_data_carries_the_checked_unicode_licence_text
+  def test_unicode_test_data_carries_the_checked_unicode_license_text
     %w[GraphemeBreakTest.txt LineBreakTest.txt NormalizationTest.txt].each do |name|
       record, notices = record_for("otp/lib/stdlib/test/unicode_util_SUITE_data/#{name}")
       assert_equal 'Unicode-3.0', record.fetch('license'), name

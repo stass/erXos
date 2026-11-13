@@ -4,7 +4,7 @@ Repository: https://github.com/kernkonzept/libfdt
 
 Revision: 5756062b7067dd831b0ef7a7f841a3f63a8b8a22
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json

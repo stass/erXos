@@ -36,10 +36,10 @@ the design's stack.
 ## 1. License
 
 - **aloha** and **aloha_packet**: `LICENSE` in each is the 2-clause BSD
-  licence, "Copyright (c)2013 YAMAMOTO Takashi". All 24 `.erl` files in
+  license, "Copyright (c)2013 YAMAMOTO Takashi". All 24 `.erl` files in
   `aloha/src` and every `.erl`/`.hrl` in `aloha_packet` carry the same BSD-2
   header. Only `aloha/test/cover.spec` (2 lines, a cover config) has no
-  header. No file under another licence; no GPL, Apache or MIT text anywhere.
+  header. No file under another license; no GPL, Apache or MIT text anywhere.
 - **Build dependencies** (not cloned, not in the tree): `lager` (Apache-2.0,
   through a parse transform declared in `aloha/rebar.config` and
   `aloha/test/aloha_test_SUITE.erl:27`) and `eenum` (a parse transform used by
@@ -48,7 +48,7 @@ the design's stack.
 - **erlang-tcpip**: Apache-2.0 (`LICENSE`, per-file headers "erlang-tcpip,
   Copyright (C) 2004 Javier Paris ... Licensed under the Apache License,
   Version 2.0"). `EQC_CI_LICENCE.txt` is a Quviq CI agreement, not a code
-  licence. **etcpip** is the same code under GPLv3: do not use it; use the
+  license. **etcpip** is the same code under GPLv3: do not use it; use the
   Apache-2.0 repository if any of that code is wanted.
 - **msantos/pkt**: BSD-3-Clause, last pushed 2022-06-18 (checked through the
   GitHub API, not cloned).
@@ -485,5 +485,5 @@ code is consulted it must be the Apache-2.0 repository.
 - erlang-tcpip: https://github.com/javier-paris/erlang-tcpip; etcpip: https://github.com/javier-paris/etcpip
 - Paris, Gulias, Valderruten, "A high performance Erlang Tcp/Ip stack", Erlang Workshop 2005, DOI 10.1145/1088361.1088372; slides https://erlang.org/workshop/2005/tcpip_presentation.pdf
 - T. Arts, "Performance and Testing of an Open Source Erlang TCP/IP Stack", EUC 2017: https://www.erlang-factory.com/euc2017/thomas-arts, https://codesync.global/older-conferences/euc_2017/thomas-arts/
-- msantos/pkt: https://github.com/msantos/pkt (licence and module list via the GitHub API)
+- msantos/pkt: https://github.com/msantos/pkt (license and module list via the GitHub API)
 - The compile logs were kept outside the tree and are not preserved.

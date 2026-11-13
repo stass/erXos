@@ -71,7 +71,7 @@ module Erx
     # after its suite logs. The command shell's prompt, or its redraw, may start its line, so the
     # pattern is not anchored.
     RESULT = /erx-oracle-result /n
-    # Stock's files whose licence the packer cannot attribute, as no SPDX line
+    # Stock's files whose license the packer cannot attribute, as no SPDX line
     # names it. Common Test copies its jQuery files beside its HTML logs and
     # stops without them, so each gets an erXos stand-in; its tile image is
     # only named in that HTML, and SASL's deps.mk is build glue, so both are

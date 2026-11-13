@@ -24,7 +24,7 @@ to LVGL are commits on a branch of the fork; moving the recorded commit to
 one of them is how a patch lands, and this file then names the branch and
 the commit the patches start from.
 
-Licence: MIT, whose text is the submodule's `LICENCE.txt`; the copyright
+License: MIT, whose text is the submodule's `LICENCE.txt`; the copyright
 holders of bundled third-party code are listed in its `COPYRIGHTS.md`.
 
 The build compiles the C sources under `src/` with `display/lvgl/lv_conf.h`

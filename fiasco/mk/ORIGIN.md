@@ -4,7 +4,7 @@ Repository: https://github.com/kernkonzept/mk
 
 Revision: 22cc26e5c971f65a1425d8cae87d793c2573528a
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json

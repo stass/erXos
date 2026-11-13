@@ -20,10 +20,10 @@ module Erx
   # * the board's tree, compiled from Linux's source with one edit, the serial aliases,
   #   and with that source, as preprocessed and edited, beside it, since the tree is
   #   GPL-2.0 and ships as a file of its own. The source keeps Linux's comments, its
-  #   licence and copyright lines among them, and opens with the notice GPL-2.0's
+  #   license and copyright lines among them, and opens with the notice GPL-2.0's
   #   section 2(a) asks of a changed file: that erXos changed it, how, and when, the date
   #   of the commit it was built from (edit_notice). Linux's GPL-2.0 text ships beside
-  #   them (Built#licence). The firmware loads the tree, applies the
+  #   them (Built#license). The firmware loads the tree, applies the
   #   overlays config.txt names and fills its memory node; it leaves the aliases as
   #   they are. BL31 points /chosen/stdout-path at serial0 (TF-A's
   #   plat/rpi/rpi4/rpi4_setup.c), so the board's serial0 must be the console's UART:
@@ -57,14 +57,14 @@ module Erx
                              overlays: { 'uart3' => 'hw/dts/raspi4b-uart3.dtso' }.freeze)
     }.freeze
 
-    # board: the board's tree; source: its preprocessed source; licence: Linux's GPL-2.0
+    # board: the board's tree; source: its preprocessed source; license: Linux's GPL-2.0
     # text, which covers both; overlays: each overlay's compiled file by its name; model:
     # the tree the QEMU model boots with.
-    Built = Data.define(:board, :source, :licence, :overlays, :model)
+    Built = Data.define(:board, :source, :license, :overlays, :model)
     # Linux's GPL-2.0 text in its tree (deps.lock's linux-dts members name it).
-    LICENCE = 'LICENSES/preferred/GPL-2.0'
+    LICENSE = 'LICENSES/preferred/GPL-2.0'
     # The name it ships by, beside the board's tree and source.
-    LICENCE_FILE = 'LICENCE.linux-dts'
+    LICENSE_FILE = 'LICENCE.linux-dts'
 
     module_function
 
@@ -110,7 +110,7 @@ module Erx
       ['/*', " * Changed by erXos #{when_changed}: this file is Linux's #{board.source},",
        ' * run through the C preprocessor, with the serial aliases at its end replacing',
        " * Linux's (tools/lib/erx/board_tree.rb). It is distributed under GPL-2.0, whose",
-       " * text is #{LICENCE_FILE} beside it.", ' */', ''].map { |line| "#{line}\n" }.join
+       " * text is #{LICENSE_FILE} beside it.", ' */', ''].map { |line| "#{line}\n" }.join
     end
 
     # The cells of the memory node's reg for RAM as the record states it, in the tree's
@@ -191,7 +191,7 @@ module Erx
         source = compile.preprocess(compiler: compiler, linux: tree, source: File.join(tree, board.source),
                                     output: File.join(output, source_file(board)))
         File.write(source, edit_notice(board, revision: revision) + File.read(source) + alias_source(board))
-        FileUtils.cp(File.join(tree, LICENCE), File.join(output, LICENCE_FILE))
+        FileUtils.cp(File.join(tree, LICENSE), File.join(output, LICENSE_FILE))
         base = compile.dtc(source, File.join(output, board.file))
         overlays = board.overlays.to_h do |name, overlay|
           [name, compile.dtc(File.join(root, overlay), File.join(output, 'overlays', "#{name}.dtbo"))]
@@ -207,7 +207,7 @@ module Erx
         File.rename(output, destination)
       end
       Built.new(board: File.join(destination, board.file), source: File.join(destination, source_file(board)),
-                licence: File.join(destination, LICENCE_FILE), model: File.join(destination, 'model.dtb'),
+                license: File.join(destination, LICENSE_FILE), model: File.join(destination, 'model.dtb'),
                 overlays: board.overlays.keys.to_h { |name| [name, File.join(destination, 'overlays', "#{name}.dtbo")] })
     end
 
@@ -234,7 +234,7 @@ module Erx
     Compile = Data.define(:runner) do
       # Linux's tree through the C preprocessor, as its build runs it, into one source
       # file. -P leaves out line markers, which would carry this host's paths; -C keeps
-      # the comments, so each file's licence and copyright lines reach the shipped source.
+      # the comments, so each file's license and copyright lines reach the shipped source.
       def preprocess(compiler:, linux:, source:, output:)
         run([compiler, '-E', '-P', '-C', '-nostdinc', '-undef', '-D__DTS__', '-x', 'assembler-with-cpp',
              '-I', File.join(linux, 'include'), '-I', File.dirname(source), '-o', output, source], 'dts-cpp')

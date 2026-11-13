@@ -560,7 +560,7 @@ module Erx
         attribute_kernel_generated(path)
       elsif fixed_generation(path)
         # The fixed profile records input-code ancestry without inventing a
-        # licence for configuration values or generator-only implementation.
+        # license for configuration values or generator-only implementation.
       else
         @sources[path] = reference(path).merge('state' => 'unresolved')
         @unresolved << "source has no origin or generator source record: #{label(path)}"
@@ -568,7 +568,7 @@ module Erx
     end
 
     # A file erXos added to a fork part, which no import record lists: its
-    # header names its licence, by the same test Origin#check applies to it.
+    # header names its license, by the same test Origin#check applies to it.
     def erxos_addition(source)
       return nil unless Attribution.erxos_addition?(read(source))
 

@@ -2189,7 +2189,7 @@ outside this design are decided
 ## References
 
 * [research-boards-storage.md](research-boards-storage.md): file systems
-  (the EROFS format's documentation and licences, erofs-utils' licences
+  (the EROFS format's documentation and licenses, erofs-utils' licenses
   file by file, F2FS's feature bits and mount options, dm-verity's
   format, littlefs), booting a chosen partition on the Raspberry Pi, and
   cryptography libraries, each dated, with its sources.

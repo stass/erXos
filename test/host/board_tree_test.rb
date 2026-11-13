@@ -61,14 +61,14 @@ class BoardTreeTest < Minitest::Test
     assert_includes source, Erx::BoardTree.alias_source(Erx::BoardTree.board(PI)), 'the shipped source carries the alias edit'
     refute_includes source, ROOT, 'the shipped source carries no host path'
     # GPL-2.0, section 2(a): the changed file opens with a notice of the change and its
-    # date, the commit's; it keeps Linux's licence lines, and Linux's GPL-2.0 text ships
+    # date, the commit's; it keeps Linux's license lines, and Linux's GPL-2.0 text ships
     # beside it.
     assert source.start_with?(Erx::BoardTree.edit_notice(Erx::BoardTree.board(PI), revision: REVISION))
     assert_includes source, "Changed by erXos on 2026-11-12, at erXos source revision n42-0123456789ab: this file is " \
                             "Linux's arch/arm/boot/dts/broadcom/bcm2711-rpi-4-b.dts"
     assert_includes source, 'SPDX-License-Identifier: GPL-2.0'
-    assert_match(/GNU GENERAL PUBLIC LICENSE\s+Version 2, June 1991/, File.read(built.licence))
-    assert_equal 'LICENCE.linux-dts', File.basename(built.licence)
+    assert_match(/GNU GENERAL PUBLIC LICENSE\s+Version 2, June 1991/, File.read(built.license))
+    assert_equal 'LICENCE.linux-dts', File.basename(built.license)
     assert_equal ['uart3'], built.overlays.keys
     assert File.file?(built.overlays.fetch('uart3'))
   end

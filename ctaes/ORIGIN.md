@@ -17,7 +17,7 @@ from the repository; each file sat at the repository's top:
 | `ctaes.c` | `78913b0339766c3901825560aaba42f23081bd5ff20658ba4decd849c90e65e2` |
 | `ctaes.h` | `a1a62f394eda457b35d9126373d3216cebaff536ba924515162414337dc8e4db` |
 
-Licence: MIT, whose text and copyright holder (Pieter Wuille) are
+License: MIT, whose text and copyright holder (Pieter Wuille) are
 `COPYING`; each source file names it in its header.
 
 Left out: `bench.c`, `test.c` (its own vectors; erXos tests the import
@@ -36,7 +36,7 @@ by path, one `<sha256>  <file>` line each with a final newline.
 Each file erXos changes says so in a `Modified by erXos` notice at its
 top, which lists the changes. All three are unchanged.
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json

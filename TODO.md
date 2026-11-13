@@ -268,7 +268,7 @@ it; git history is the record of completed work.
   project, in source or binary form, waits for this replacement
   ([design.md](docs/design.md#dependencies)). The import also records
   the link closure of L4Re's `bootstrap` and `sigma0`, their `drivers-frst`
-  UART support, and the licence of each library in it.
+  UART support, and the license of each library in it.
 * [Medium] kernel, Track K, shelved Phase 1 work: three pieces of code
   written for the earlier plan, which put erXos's kernel semantics inside
   the Fiasco fork, stay on branch `shelved-phase2-cores` for Track K: the capability
@@ -980,7 +980,7 @@ it; git history is the record of completed work.
   its presentations are text, not links; they need the inspection schema's units in the generated tables and the
   routes of presentations served by views.
 * [Low] `tools/lib/erx/web_build.rb`, [The client](docs/design-web.md#the-client): the bundle's notices file
-  holds esbuild's legal comments, and React's say only that the MIT licence is "found in the LICENSE file", which
+  holds esbuild's legal comments, and React's say only that the MIT license is "found in the LICENSE file", which
   the bundle does not carry; add each bundled package's LICENSE text from the store before the client's files are
   distributed, by the web domain's release or the website's demo image.
 * [Medium] `test/host/web_browser_test.rb`, [Verification and testing](docs/design-web.md#verification-and-testing):
@@ -1131,13 +1131,13 @@ it; git history is the record of completed work.
   header.
 * [Low] `display/lvgl/Makefile`: a `.c` file deleted on a fork branch stays in `liblvgl.a`.
 * [Low] `tools/lib/erx/lvgl.rb`: `git` duplicates `Checks.isolated_git_environment` instead of sharing it.
-* [Low] `tools/lib/erx/lvgl.rb`, `Lvgl::Program::LICENSE`: the archive's licence expression is hand-kept against
+* [Low] `tools/lib/erx/lvgl.rb`, `Lvgl::Program::LICENSE`: the archive's license expression is hand-kept against
   `display/lvgl/lv_conf.h` and LVGL's sources, so an option turned on there (an image decoder, another font) or a
   third-party file no option guards (as FrogFS's `decomp_raw.c`, which the Makefile leaves out) is not attributed
   until the expression is edited too. Per-file attribution would read blob hashes from the submodule's tree at the
-  gitlink with a small path-to-licence map, or check the archive's defining members (`llvm-nm --defined-only`)
+  gitlink with a small path-to-license map, or check the archive's defining members (`llvm-nm --defined-only`)
   against such a map. `src/misc/lv_lru.c` cites willcannings/C-LRU-Cache with no notice of its own; its upstream
-  licence is unverified.
+  license is unverified.
 * [High] `erx_wm_rio` (desktop, not built; until it is, nothing reads the display domain's `display_policy`:
   `erx_fb_sup` starts `erx_winfs` under the single policy whatever it says, so a `rio` display boots the single policy
   without a word, where the reader should refuse a policy it does not have; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
@@ -1971,7 +1971,7 @@ it; git history is the record of completed work.
   copyright, and none of the notices of the third-party code BL31 links (TF-A's libc, libfdt, compiler-rt's
   builtins). The website offers the card, so BL31's link closure needs its notices beside the armstub, as
   the packer gathers them for the boot image (`NOTICES`).
-* [Medium] build, the Raspberry Pi 4's card (`tools/lib/erx/boot_partition.rb`): `docs/design.md` ("Licences
+* [Medium] build, the Raspberry Pi 4's card (`tools/lib/erx/boot_partition.rb`): `docs/design.md` ("Licenses
   and notices") says the same `NOTICES` sits beside the boot image in each slot's boot partition, but the
   card's layout has none beside `kernel8.img`; the production image's `NOTICES` is only inside the image
   (`system/NOTICES`). Write it into the boot partition, from the packer's notices, and have the card's test
@@ -1987,8 +1987,8 @@ it; git history is the record of completed work.
 * [Low] build, `tools/lib/erx/boot_partition.rb` (`lay_out`) and `tools/lib/erx/build_facts.rb`: the card's record
   and the image's build facts each read the source revision, so a commit or stash during a pack can leave them
   naming different revisions. Read it once in `ProductionImage` and pass it to both.
-* [Medium] build, the packer's `NOTICES` and `docs/design.md` ("Licences and notices"): a file of
-  erXos's counts as third-party for its notice when its SPDX line names a third-party licence, but
+* [Medium] build, the packer's `NOTICES` and `docs/design.md` ("Licenses and notices"): a file of
+  erXos's counts as third-party for its notice when its SPDX line names a third-party license, but
   `erx_tcp_cc`, `erx_tcp_cc_newreno` and `erx_tcp_cc_cubic` translate BSD-2-Clause FreeBSD files, so
   their SPDX line is erXos's own `BSD-2-Clause` and their FreeBSD copyright headers may be left out
   of `NOTICES`. Classify erx_net modules by their `%% FreeBSD:` header lines (or NOTICE-freebsd)
@@ -5493,7 +5493,7 @@ to the corpus and follow rc
   against it.
 * [Low] build, import inventory (`tools/lib/erx/origin.rb`, `Origin#check`,
   and `PackProvenance#imported_item`): a `changes` row whose hash no longer
-  matches still supplies the file's licence when the file has an erXos
+  matches still supplies the file's license when the file has an erXos
   header; a stale row should be refused.
 * [Medium] build, notice check (`tools/lib/erx/pack_provenance.rb`,
   `attribute`; `tools/lib/erx/import_notices.rb`, `select`): the check that
@@ -5511,7 +5511,7 @@ to the corpus and follow rc
   profile, so the checked `Unicode-3.0` document does not reach its notice.
   Unverified that these files reach a packed image's records; if they do,
   look up the profile for the selected grants other than erXos's own.
-* [Low] build, licence selection (`tools/lib/erx/license_expression.rb`,
+* [Low] build, license selection (`tools/lib/erx/license_expression.rb`,
   `PERMISSIVE`, and `PackProvenance#attribute`): the entry for ChaCha20's
   public-domain statement is global, so a file outside any import that
   declares `LicenseRef-DJB-public-domain` passes a release pack with
@@ -5526,7 +5526,7 @@ to the corpus and follow rc
   as erXos source, `BSD-2-Clause`, whenever its first eight lines carry
   the SPDX line, so FreeBSD's SHA-256 and ChaCha20 in `kernel/crypto/`
   enter the build record without their `ORIGIN.md` files, their recorded
-  licences (ChaCha20's public domain) or Colin Percival's notice, and
+  licenses (ChaCha20's public domain) or Colin Percival's notice, and
   BLAKE3 (`Apache-2.0 WITH LLVM-exception`, no BSD-2-Clause line) blocks
   the record as soon as the stopgap kernel links it. Attribute
   every file under a directory with an `ORIGIN.md` through that origin's
@@ -6411,7 +6411,7 @@ document's "residual risks accepted" paragraph.
   `c_src/`, `test/`); move the stack's tests, fuzz targets and explorer
   from `test/erlang`, and the harnesses of `c_src/`'s cores from
   `test/fixtures`, into the app's `test/`, runnable on stock OTP from the
-  app alone; drop `erx` from `erx_net.app.src`'s applications; put erXos's licence notice beside `NOTICE-freebsd`; create
+  app alone; drop `erx` from `erx_net.app.src`'s applications; put erXos's license notice beside `NOTICE-freebsd`; create
   `erlang/apps/erx_net_client`; and add the build check of N12, which
   covers `c_src/`'s `#include` lines too, with its seeded violation.
 * [Low] upstream OTP, `erlc` (stock OTP 29.1.2, the oracle's): run from a directory whose

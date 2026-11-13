@@ -4,7 +4,7 @@ Repository: https://github.com/erlang/otp
 
 Revision: OTP-29.1.2
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json

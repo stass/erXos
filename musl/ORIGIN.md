@@ -4,7 +4,7 @@ Repository: https://git.musl-libc.org/musl
 
 Revision: v1.2.6
 
-The inventory records the imported bytes and their licence evidence.
+The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
 
 ```json
@@ -7329,7 +7329,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/__cexp.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/__cexp.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/__cexp.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "ffcf569466b0ac3defff943c989b6b181c7c41dc4f9538c32944459a5272203b",
       "kind": "file",
@@ -7339,7 +7339,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/__cexpf.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/__cexpf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/__cexpf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "3cedd5c25cc80d78713bd44c53c7f3170dad26fde14ea5eb3b0028bfede24517",
       "kind": "file",
@@ -7529,7 +7529,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/catan.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/complex/catan.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/catan.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "b83556e819c8fe98e9396662b60d91377f063f7f6825a38a807303e1aa5065ef",
       "kind": "file",
@@ -7539,7 +7539,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/catanf.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/complex/catanf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/catanf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "cda26231faad4c6abcd09006255abba34bf5d1093e92b8f1bbf62f1c82af033d",
       "kind": "file",
@@ -7579,7 +7579,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/catanl.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/complex/catanl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/catanl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "b7b08a341a00ecb3e5169f648c95f30efc910a7ad0f3fc180c4345d2dd920d7f",
       "kind": "file",
@@ -7609,7 +7609,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/ccosh.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/ccosh.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/ccosh.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "9997abb272468781bc9b6b61a1550e95d1f956df109e0a646d578a3dc2c3aef9",
       "kind": "file",
@@ -7619,7 +7619,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/ccoshf.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/ccoshf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/ccoshf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "6ebf4355682268356685ba79621a47f2f955ca910bf13ca6ed32bb52e893574f",
       "kind": "file",
@@ -7649,7 +7649,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/cexp.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/cexp.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/cexp.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "30943458b19d417812e326d8a61a2413ebce139c826c997ad6598dcddb6e673d",
       "kind": "file",
@@ -7659,7 +7659,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/cexpf.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/cexpf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/cexpf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "7de06c6bebd823987c5eefe19821b8a473332ec724d6cc0a6a27955a33ba3734",
       "kind": "file",
@@ -7879,7 +7879,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/csinh.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/csinh.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/csinh.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "ed236ed0232c73d39a372a6799ba63b2eaeccc5f03aca0045fcb1504bb489489",
       "kind": "file",
@@ -7889,7 +7889,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/csinhf.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/csinhf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/csinhf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "4ed3be03188b48d701d8edaa88b0e282cb2ec88b8af1c2f0e2a3f76fba60a773",
       "kind": "file",
@@ -7919,7 +7919,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/csqrt.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/csqrt.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/csqrt.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "4f6cfa6aec61754c1ee2ea683ec00e7837eaa1993edafbc516c6c4978e3567b4",
       "kind": "file",
@@ -7929,7 +7929,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/csqrtf.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/csqrtf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/csqrtf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "8dd69a3ec2052cf54f38e61156b057c2ff74d00da9db64da63f646e30a36e8e3",
       "kind": "file",
@@ -7969,7 +7969,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/ctanh.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/ctanh.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/ctanh.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "7daa31e0831e9805934bd0e6a33816daf16c0bf1076babeb9799fe6e185ac045",
       "kind": "file",
@@ -7979,7 +7979,7 @@ Third-party notices remain in their original files.
     },
     "src/complex/ctanhf.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/complex/ctanhf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/complex/ctanhf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "1ebb7bddc872c96bf3e7c8d1a529c14f28db4cf75cc8237fdb1ad62764b405bf",
       "kind": "file",
@@ -8079,7 +8079,7 @@ Third-party notices remain in their original files.
     },
     "src/crypt/crypt_des.c": {
       "license": "BSD-3-Clause",
-      "evidence": "reviewed licence grant in src/crypt/crypt_des.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/crypt/crypt_des.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "546b4ee35446fb2a551d7414779395789f81d53aefbabd8914375686af5d228e",
       "kind": "file",
@@ -11789,7 +11789,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__cos.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__cos.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__cos.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "3f0f774aab60a18d7ef935ffdf121bcda17cbadabff14096c614da22e31a42c1",
       "kind": "file",
@@ -11799,7 +11799,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__cosdf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__cosdf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__cosdf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "0ba872cc7e26b93bb9784d19fee84b263e1fa3543a76ec3c0893aea47453a2a7",
       "kind": "file",
@@ -11809,7 +11809,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__cosl.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__cosl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__cosl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "fd644ce4ab8797b1220e2197b284212094a3b299bdf2c4faf66ead81b0fc620d",
       "kind": "file",
@@ -11999,7 +11999,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__polevll.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/__polevll.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__polevll.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "4fef0127318ba19fd5796b6b69a938030d22adb16aaab2ade3e634c8c5c93479",
       "kind": "file",
@@ -12009,7 +12009,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__rem_pio2.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__rem_pio2.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__rem_pio2.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "938329e0939cd83ee2185a52154b41242f618d4a6df1b08395f344da33d4f1e6",
       "kind": "file",
@@ -12019,7 +12019,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__rem_pio2_large.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__rem_pio2_large.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__rem_pio2_large.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "b97f19fb5951c83a0c10506fab35646caefde13bd03100ad2af55ef00af0b9fb",
       "kind": "file",
@@ -12029,7 +12029,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__rem_pio2f.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__rem_pio2f.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__rem_pio2f.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "b73a0219ba4a34e39ed904b5008126ff1b12dfa1a4a380941363c8db5088d756",
       "kind": "file",
@@ -12039,7 +12039,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__rem_pio2l.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__rem_pio2l.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__rem_pio2l.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "70f1c69285c0d211d696d5c048e269d46000e5d75fc6a80623ef45e861447a94",
       "kind": "file",
@@ -12079,7 +12079,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__sin.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__sin.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__sin.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "f3a37ef9bcfb8a2f9c809d8c7f1aa2c17c8c3319ad7fb2fe7c0a6284ea8859d2",
       "kind": "file",
@@ -12089,7 +12089,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__sindf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__sindf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__sindf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "de7026bcd159b7d06a8cbcc162df722014f3b1a3cc4183116b6b7829eef1d118",
       "kind": "file",
@@ -12099,7 +12099,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__sinl.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__sinl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__sinl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "b6dfffc327cac147a0a2b17a12e9f4ec8ff6df463733db55c316a55ef4bcdb96",
       "kind": "file",
@@ -12109,7 +12109,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__tan.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__tan.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__tan.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "e18b65b69fced8dbb2d3ed1a3dc6daea0e9f857f2762f274380bd89a6f89d2c4",
       "kind": "file",
@@ -12119,7 +12119,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__tandf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__tandf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__tandf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "60455f3cc0ac743f3eaf0017a3a4f0adbab37c0ee30d29397852d22904c40444",
       "kind": "file",
@@ -12129,7 +12129,7 @@ Third-party notices remain in their original files.
     },
     "src/math/__tanl.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/__tanl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/__tanl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "3788db7251d2e14b17e761bc2eccd0d8faa3c72c16eef7a56ca2ca75eca177df",
       "kind": "file",
@@ -12439,7 +12439,7 @@ Third-party notices remain in their original files.
     },
     "src/math/acos.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/acos.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/acos.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "cc6f9017e7e2e0ef01516fa12c68aa63865e6415c90dc039dfce9abffae09a4c",
       "kind": "file",
@@ -12449,7 +12449,7 @@ Third-party notices remain in their original files.
     },
     "src/math/acosf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/acosf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/acosf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "b20b3dcb58ce7cc55963945f8cb83efbf064b29d2da3011f2cec5d08459f2aa7",
       "kind": "file",
@@ -12489,7 +12489,7 @@ Third-party notices remain in their original files.
     },
     "src/math/acosl.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/acosl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/acosl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "ed40b99c604aa593ee2ee71c02f928cb68c1afdf8a18243b0e7b6cc9a65586c1",
       "kind": "file",
@@ -12559,7 +12559,7 @@ Third-party notices remain in their original files.
     },
     "src/math/asin.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/asin.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/asin.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "9302dd0b2f302f7b7decce82e737ed250bae1bcc65c19eaf3d7ec19010892e63",
       "kind": "file",
@@ -12569,7 +12569,7 @@ Third-party notices remain in their original files.
     },
     "src/math/asinf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/asinf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/asinf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "6bc9b2392b81efa4c6a80c8602a2c0898d3b5c77444f6d3266ac71c18df222c5",
       "kind": "file",
@@ -12609,7 +12609,7 @@ Third-party notices remain in their original files.
     },
     "src/math/asinl.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/asinl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/asinl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "4a0e729842b1bf3181bad43b2f048dd3652b73456e0a3f44f6e65c2c51765e9f",
       "kind": "file",
@@ -12619,7 +12619,7 @@ Third-party notices remain in their original files.
     },
     "src/math/atan.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atan.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/atan.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "1cffb67a65456ae0bc5f07a94df04a4f18ebc1ac0bffe3219250c4e0555ee01d",
       "kind": "file",
@@ -12629,7 +12629,7 @@ Third-party notices remain in their original files.
     },
     "src/math/atan2.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atan2.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/atan2.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "a5f94b09b10b4e72bb15d94ae403c9dfd27d7ad881ecd729000004429acfca63",
       "kind": "file",
@@ -12639,7 +12639,7 @@ Third-party notices remain in their original files.
     },
     "src/math/atan2f.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atan2f.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/atan2f.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "31a61a0a4c7b00db625b708525f24673a83df868a3e363042c9cc9dcf0aaeec8",
       "kind": "file",
@@ -12649,7 +12649,7 @@ Third-party notices remain in their original files.
     },
     "src/math/atan2l.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atan2l.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/atan2l.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "c13d4d9e1329ffcbbf3ef1dd755602c771612f2dd98f38464fc9fb0f7bdf3c68",
       "kind": "file",
@@ -12659,7 +12659,7 @@ Third-party notices remain in their original files.
     },
     "src/math/atanf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atanf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/atanf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "e0533d7b72aabce311a758a1f94fd15e5d4067be73b716cb1f425df5bc9039d6",
       "kind": "file",
@@ -12699,7 +12699,7 @@ Third-party notices remain in their original files.
     },
     "src/math/atanl.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/atanl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/atanl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "5c6f655740e6f594db8a045e529582f20613d14ac2bca8bf3f881145bf459325",
       "kind": "file",
@@ -12709,7 +12709,7 @@ Third-party notices remain in their original files.
     },
     "src/math/cbrt.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/cbrt.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/cbrt.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "af442893d4048c0eb485b93b5628792fb796d45ffc0f88c682041366c7da611d",
       "kind": "file",
@@ -12719,7 +12719,7 @@ Third-party notices remain in their original files.
     },
     "src/math/cbrtf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/cbrtf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/cbrtf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "87b7065f44ac0cef6d21385c2b453dde7e15a51e9008ae0d726cd9eaa2dc43da",
       "kind": "file",
@@ -12729,7 +12729,7 @@ Third-party notices remain in their original files.
     },
     "src/math/cbrtl.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/cbrtl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/cbrtl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "ee82c17b1a24681dfd7de0161088b45ecbd2d0346ddeda9d4594b48e4da0d3e5",
       "kind": "file",
@@ -12799,7 +12799,7 @@ Third-party notices remain in their original files.
     },
     "src/math/cos.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/cos.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/cos.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "3a74e054057d636fa494bdd76a53a40db5cee618264f6ab31cb0538ba63c6bda",
       "kind": "file",
@@ -12809,7 +12809,7 @@ Third-party notices remain in their original files.
     },
     "src/math/cosf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/cosf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/cosf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "33cf828e8e733da2b72c723b9ff20057b9a4f10df72a3923dadcb626c23d222c",
       "kind": "file",
@@ -12859,7 +12859,7 @@ Third-party notices remain in their original files.
     },
     "src/math/erf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/erf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/erf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "795f05c9388ac277ab27cb5dc63fb4f82620a0ee11eaf8403201df5bc65c0f5b",
       "kind": "file",
@@ -12869,7 +12869,7 @@ Third-party notices remain in their original files.
     },
     "src/math/erff.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/erff.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/erff.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "876ad823d25e58330628ccdc5d24a3f10cc255135046a4e2903daf33cb75c18f",
       "kind": "file",
@@ -12879,7 +12879,7 @@ Third-party notices remain in their original files.
     },
     "src/math/erfl.c": {
       "license": "SunPro AND ISC",
-      "evidence": "reviewed licence grant in src/math/erfl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/erfl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "dcce5b86a37215aee265ae27c1a00526542ab13d1dd609a560de3e3e9049a3e6",
       "kind": "file",
@@ -12969,7 +12969,7 @@ Third-party notices remain in their original files.
     },
     "src/math/exp2l.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/math/exp2l.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/exp2l.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "0eeba2725b540b0d5dd84b732d4c496d8e8d9492cf863dbb5c83fe102771352c",
       "kind": "file",
@@ -13009,7 +13009,7 @@ Third-party notices remain in their original files.
     },
     "src/math/expl.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/expl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/expl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "7218f10e56cd73c76f01a6924373dd1918730a0e793cf3c64670a34346173e68",
       "kind": "file",
@@ -13019,7 +13019,7 @@ Third-party notices remain in their original files.
     },
     "src/math/expm1.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/expm1.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/expm1.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "c4764166cea03420f2dfc1840a6a7615934192d851b96d5d2dcc321cc1e39460",
       "kind": "file",
@@ -13029,7 +13029,7 @@ Third-party notices remain in their original files.
     },
     "src/math/expm1f.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/expm1f.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/expm1f.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "a7d4e8f8b41f04d4b977deb59e6bf96067371387062a5987fcc3b4464f54f5e9",
       "kind": "file",
@@ -13039,7 +13039,7 @@ Third-party notices remain in their original files.
     },
     "src/math/expm1l.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/expm1l.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/expm1l.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "a8362abd18ef31f00a7dd74c8b618ef658a4e9c3919c456d03d65a12fe445c2f",
       "kind": "file",
@@ -13169,7 +13169,7 @@ Third-party notices remain in their original files.
     },
     "src/math/fmaf.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/math/fmaf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/fmaf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "e5baf54228b74b036da629902d811f9f57de26133a03ce290879b5ec6de04433",
       "kind": "file",
@@ -13179,7 +13179,7 @@ Third-party notices remain in their original files.
     },
     "src/math/fmal.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/math/fmal.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/fmal.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "1c7587e59b9f249bd5e8dfabb154b602978fbb490348f92af5300ee8eadce518",
       "kind": "file",
@@ -14099,7 +14099,7 @@ Third-party notices remain in their original files.
     },
     "src/math/j0.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/j0.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/j0.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "88fc190ff03d253791b9fab281caf82e5943e5d4251052c91cc29b14b39055bd",
       "kind": "file",
@@ -14109,7 +14109,7 @@ Third-party notices remain in their original files.
     },
     "src/math/j0f.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/j0f.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/j0f.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "d0721c1c30f12badb67820e33299a2db0d9cec0209f7993fddee2a40d8d296a4",
       "kind": "file",
@@ -14119,7 +14119,7 @@ Third-party notices remain in their original files.
     },
     "src/math/j1.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/j1.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/j1.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "73ec22fae7f2e3fccd2cc6ea777b296d0022a7c1d137035f1ef45cbf0c75ed4e",
       "kind": "file",
@@ -14129,7 +14129,7 @@ Third-party notices remain in their original files.
     },
     "src/math/j1f.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/j1f.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/j1f.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "1b16747ce913d4e65dec522710265bd004f923a7f33b5e88d7e4057b9c7b8d79",
       "kind": "file",
@@ -14139,7 +14139,7 @@ Third-party notices remain in their original files.
     },
     "src/math/jn.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/jn.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/jn.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "cd602fc99cea2f33d8b39462f9f0523c8bc3da646fa349de87e206eb3bb2aded",
       "kind": "file",
@@ -14149,7 +14149,7 @@ Third-party notices remain in their original files.
     },
     "src/math/jnf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/jnf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/jnf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "cab6c734e9a718a3e7c41b22e0e69893453befa805f2ebdafca3264d81dbcf71",
       "kind": "file",
@@ -14199,7 +14199,7 @@ Third-party notices remain in their original files.
     },
     "src/math/lgamma_r.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/lgamma_r.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/lgamma_r.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "df81910c12c2ba5e82295cea6bfc6f3863e367cc6043d1bf91be1fb9597b2811",
       "kind": "file",
@@ -14219,7 +14219,7 @@ Third-party notices remain in their original files.
     },
     "src/math/lgammaf_r.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/lgammaf_r.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/lgammaf_r.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "5aa1db729889e0705ef94b2cb4d7ab5fa6a615d28fd74b7bdf7579a22f6e7ed4",
       "kind": "file",
@@ -14229,7 +14229,7 @@ Third-party notices remain in their original files.
     },
     "src/math/lgammal.c": {
       "license": "SunPro AND ISC",
-      "evidence": "reviewed licence grant in src/math/lgammal.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/lgammal.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "852284cc7fb67db860bcf39a3a33c74481ef28ffa7818a16de82d7e2d534c312",
       "kind": "file",
@@ -14309,7 +14309,7 @@ Third-party notices remain in their original files.
     },
     "src/math/log10.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/log10.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/log10.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "ef9b4b1f0918cf1fcb797f9fa4d4ffe177bfa27f668d74a41d613bfbcd83850a",
       "kind": "file",
@@ -14319,7 +14319,7 @@ Third-party notices remain in their original files.
     },
     "src/math/log10f.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/log10f.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/log10f.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "b8de5c0f14be2c622eca1cb33e80e5b131576c7c229aeffb8ea9f1d61555f6b9",
       "kind": "file",
@@ -14329,7 +14329,7 @@ Third-party notices remain in their original files.
     },
     "src/math/log10l.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/log10l.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/log10l.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "d23e3d61fe4111628efdef794ae7cd614e3443a81f70742e29070f99fdd078c4",
       "kind": "file",
@@ -14339,7 +14339,7 @@ Third-party notices remain in their original files.
     },
     "src/math/log1p.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/log1p.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/log1p.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "c76bbf714cd456a9f0de6e2c94853c27e7865581a2edfdef6d1f861739bbcb46",
       "kind": "file",
@@ -14349,7 +14349,7 @@ Third-party notices remain in their original files.
     },
     "src/math/log1pf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/log1pf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/log1pf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "6c01aff9fcee1dcaca4d4581f17357e0f069643321c00288c672adc3521d0cc8",
       "kind": "file",
@@ -14359,7 +14359,7 @@ Third-party notices remain in their original files.
     },
     "src/math/log1pl.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/log1pl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/log1pl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "3846b55cbd55e3d3f90d7484216663030ec98c4c353e644ce3c4e3122080e4c4",
       "kind": "file",
@@ -14429,7 +14429,7 @@ Third-party notices remain in their original files.
     },
     "src/math/log2l.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/log2l.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/log2l.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "c3294ef6fcf96c061c4511fb3f6cd2886b2f513938deadcfb16fc19fb2a9ff03",
       "kind": "file",
@@ -14519,7 +14519,7 @@ Third-party notices remain in their original files.
     },
     "src/math/logl.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/logl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/logl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "e1612b2bb9a010c1914beb93fa242981f69f323392bd9816415cafaaec0d94b0",
       "kind": "file",
@@ -15129,7 +15129,7 @@ Third-party notices remain in their original files.
     },
     "src/math/powl.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/powl.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/powl.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "be5f736310432efadcab58189a207f79f790d35a5ad11df778711ea5570f5bba",
       "kind": "file",
@@ -15759,7 +15759,7 @@ Third-party notices remain in their original files.
     },
     "src/math/scalb.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/scalb.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/scalb.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "7f7eda8fd9d537105136d56661d70788f912b9584bb116dea185db340c78ada5",
       "kind": "file",
@@ -15769,7 +15769,7 @@ Third-party notices remain in their original files.
     },
     "src/math/scalbf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/scalbf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/scalbf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "b4a0485f7a11d994960c31947f0132c45afd47f599abbae4a9f2041f7f346a3f",
       "kind": "file",
@@ -15869,7 +15869,7 @@ Third-party notices remain in their original files.
     },
     "src/math/sin.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/sin.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/sin.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "24e53a9d85f196f66919cc19247be5480bb607ef38844b1a24bc47c4fe4974ef",
       "kind": "file",
@@ -15879,7 +15879,7 @@ Third-party notices remain in their original files.
     },
     "src/math/sincos.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/sincos.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/sincos.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "2b88cfba380b8d5aa8f8f6b9f055aee91fe112de9f967a4484807afcb5405d9d",
       "kind": "file",
@@ -15889,7 +15889,7 @@ Third-party notices remain in their original files.
     },
     "src/math/sincosf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/sincosf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/sincosf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "0196bf2ccfa370be120b917f2379bb533950ea50818d329aeee076081690c95d",
       "kind": "file",
@@ -15909,7 +15909,7 @@ Third-party notices remain in their original files.
     },
     "src/math/sinf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/sinf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/sinf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "2583af55446f07da3225186c368a7aae5a0a0a0edab268967f4122b92e222b87",
       "kind": "file",
@@ -16009,7 +16009,7 @@ Third-party notices remain in their original files.
     },
     "src/math/tan.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/tan.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/tan.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "422d411bac962a1077ae394d14e54313012a6faa3476c20b2a66d3fb3f7a923f",
       "kind": "file",
@@ -16019,7 +16019,7 @@ Third-party notices remain in their original files.
     },
     "src/math/tanf.c": {
       "license": "SunPro",
-      "evidence": "reviewed licence grant in src/math/tanf.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/tanf.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "38b39aaf03d33341e606b67b3743ee5fa436b7e8338af155994d4b794b366003",
       "kind": "file",
@@ -16089,7 +16089,7 @@ Third-party notices remain in their original files.
     },
     "src/math/tgammal.c": {
       "license": "ISC",
-      "evidence": "reviewed licence grant in src/math/tgammal.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/math/tgammal.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "b9f00584454232f6d4c6cf76b8198221a4cc047c92fa749e5f41476c9b54579f",
       "kind": "file",
@@ -19209,7 +19209,7 @@ Third-party notices remain in their original files.
     },
     "src/regex/regcomp.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/regex/regcomp.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/regex/regcomp.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "56b0a765e084a5cd3ed7113a893b50d259265ba76b6bea98889c45d7aec302a0",
       "kind": "file",
@@ -19229,7 +19229,7 @@ Third-party notices remain in their original files.
     },
     "src/regex/regexec.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/regex/regexec.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/regex/regexec.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "072e8a1092c98830b48e784fb74ce486f7c39e27207f79f1dd161e2c5d86ba77",
       "kind": "file",
@@ -19239,7 +19239,7 @@ Third-party notices remain in their original files.
     },
     "src/regex/tre-mem.c": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/regex/tre-mem.c; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/regex/tre-mem.c; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "4721979ce365a395fd7644335c847a8a97913e87f14348641f7f199b57b93e28",
       "kind": "file",
@@ -19249,7 +19249,7 @@ Third-party notices remain in their original files.
     },
     "src/regex/tre.h": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/regex/tre.h; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/regex/tre.h; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "e734e68decc33b5ee983db12cabcbdd2589c2d16088677228087b0e5dc365cf3",
       "kind": "file",
@@ -22219,7 +22219,7 @@ Third-party notices remain in their original files.
     },
     "src/string/arm/memcpy.S": {
       "license": "BSD-2-Clause",
-      "evidence": "reviewed licence grant in src/string/arm/memcpy.S; musl COPYRIGHT identifies this exception family",
+      "evidence": "reviewed license grant in src/string/arm/memcpy.S; musl COPYRIGHT identifies this exception family",
       "reviewed": true,
       "sha256": "f963aa07a7e5296c62dbe892b9e3e8383a95683bb282e68d75a3c0553ba184ee",
       "kind": "file",

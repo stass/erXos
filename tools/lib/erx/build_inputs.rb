@@ -117,7 +117,7 @@ module Erx
     end
     private_class_method :copy_value
 
-    # Fixed project licence/profile inputs are selected by the pack builder,
+    # Fixed project license/profile inputs are selected by the pack builder,
     # not by receipt fields. Every additional document is an explicit reviewed
     # profile reference whose hash must agree before the catalog is returned.
     def self.pack(root:, paths:)

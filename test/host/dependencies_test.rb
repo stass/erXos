@@ -97,7 +97,7 @@ class DependenciesTest < Minitest::Test
     { 'id' => 'image', 'kind' => 'oci', 'version' => 'fixture',
       'repository' => 'docker.io/library/ruby', 'platform' => 'linux/arm64',
       'sha256' => 'a' * 64, 'config_sha256' => 'b' * 64,
-      'license' => 'development image licences', 'status' => 'permanent' }
+      'license' => 'development image licenses', 'status' => 'permanent' }
   end
 
   def test_oci_image_requires_a_platform_manifest_and_configuration_digest

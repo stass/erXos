@@ -5,4 +5,4 @@
 // jquery-migrate.js, jquery.tablesorter.min.js) in the test image of
 // `tools/erx oracle qemu`. Common Test only copies them beside its HTML
 // logs, which stay in the guest's /tmp and are never read, and the image
-// carries no file whose licence its packer cannot attribute.
+// carries no file whose license its packer cannot attribute.

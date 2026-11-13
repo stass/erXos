@@ -10,14 +10,14 @@ require_relative 'bounded_file'
 
 module Erx
   # Import inventories record attribution decisions; they do not infer a
-  # licence merely because a file has no notice. Defaults require review.
+  # license merely because a file has no notice. Defaults require review.
   module Attribution
     ERXOS_LICENSE = 'BSD-2-Clause'
     # An XML file opens with its declaration alone on the first line, before any comment.
     XML_DECLARATION = /\A<\?xml[ \t][^<>]*\?>[ \t]*\r?\n?\z/n
     ERXOS_NOTICE = "SPDX-License-Identifier: #{ERXOS_LICENSE}".freeze
     ERXOS_COPYRIGHT = /Copyright \(c\) \d{4}(?:-\d{4})?, Stanislav Sedov <stas@deglitch\.com>/n
-    # The comment forms attribution reads a licence from. A declaration in any
+    # The comment forms attribution reads a license from. A declaration in any
     # other form is not read here; erxos_addition? refuses it by counting.
     SPDX_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--)[ \t]*)?SPDX-License-Identifier:[ \t]*([^\r\n]+)/n
     ERXOS_DECLARATION_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--|<!--)[ \t]*)?#{ERXOS_NOTICE}[ \t]*(?:(?:\*\/|-->)[ \t]*)?\r?$/n
@@ -26,11 +26,11 @@ module Erx
 
     def validate_expression(expression)
       unless expression.is_a?(String) && expression.ascii_only? && expression.bytesize.between?(1, 1024)
-        raise Error, 'invalid source licence expression'
+        raise Error, 'invalid source license expression'
       end
       tokens = expression.scan(/[A-Za-z0-9][A-Za-z0-9.+_:\-]*|[()]/)
       unless tokens.join == expression.gsub(/[ \t]/, '')
-        raise Error, 'invalid source licence tokens'
+        raise Error, 'invalid source license tokens'
       end
       depth = 0
       needs_operand = true
@@ -39,30 +39,30 @@ module Erx
       tokens.each do |token|
         case token
         when '('
-          raise Error, 'invalid licence grouping' unless needs_operand && !needs_exception && depth < 32
+          raise Error, 'invalid license grouping' unless needs_operand && !needs_exception && depth < 32
           depth += 1
         when ')'
-          raise Error, 'invalid licence grouping' if needs_operand || depth.zero?
+          raise Error, 'invalid license grouping' if needs_operand || depth.zero?
           depth -= 1
           can_take_exception = false
         when 'AND', 'OR'
-          raise Error, 'missing licence operand' if needs_operand
+          raise Error, 'missing license operand' if needs_operand
           needs_operand = true
           can_take_exception = false
         when 'WITH'
-          raise Error, 'invalid licence exception' unless !needs_operand && can_take_exception
+          raise Error, 'invalid license exception' unless !needs_operand && can_take_exception
           needs_operand = true
           needs_exception = true
           can_take_exception = false
         else
-          raise Error, 'missing licence operator' unless needs_operand
-          raise Error, 'unresolved source licence' if %w[NOASSERTION NONE].include?(token)
+          raise Error, 'missing license operator' unless needs_operand
+          raise Error, 'unresolved source license' if %w[NOASSERTION NONE].include?(token)
           needs_operand = false
           can_take_exception = !needs_exception
           needs_exception = false
         end
       end
-      raise Error, 'incomplete licence expression' if needs_operand || !depth.zero?
+      raise Error, 'incomplete license expression' if needs_operand || !depth.zero?
       expression
     end
 
@@ -103,7 +103,7 @@ module Erx
     end
 
     # Whether a file in an imported tree with no inventory row is erXos's own
-    # code: its header holds erXos's notice, and neither a licence declaration
+    # code: its header holds erXos's notice, and neither a license declaration
     # nor a copyright holder appears anywhere but in erXos's own lines. Every
     # mention of either word is counted instead of recognising forms of a second
     # declaration, so a form this test does not know fails closed. Content
@@ -195,7 +195,7 @@ module Erx
                   'files' => inventory, 'changes' => {} }
       validate_inventory(payload)
       text = "# Source origin\n\nRepository: #{repository}\n\nRevision: #{revision}\n\n" \
-             "The inventory records the imported bytes and their licence evidence.\n" \
+             "The inventory records the imported bytes and their license evidence.\n" \
              "Third-party notices remain in their original files.\n"
       File.open(output, File::WRONLY | File::CREAT | File::EXCL, 0o644) do |file|
         file.write(text + INVENTORY_MARKER + JSON.pretty_generate(payload) + "\n```\n")
@@ -373,7 +373,7 @@ module Erx
       maximum ? BoundedFile.read(path, maximum: maximum) : File.binread(path)
     end
 
-    # A copy's row repeats the row of the imported file it came from, so its licence
+    # A copy's row repeats the row of the imported file it came from, so its license
     # evidence and baseline are that file's and the ordinary checks apply to it.
     def validate_copies(files, exclusions:)
       files.each do |path, entry|
