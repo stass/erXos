@@ -1506,8 +1506,10 @@ creates the scanout again, and `erx_screen`, which monitors the driver,
 repaints the screen from its windows' buffers.
 
 Input drivers are Erlang processes over the device NIF too: the
-virtio-input driver parses the device's event records in Erlang and
-emits `input()`; a touch controller's, an encoder's and a keypad's
+virtio-input driver parses the device's event records in Erlang, in its
+pure core `erx_virtio_input_core`, which also tells a keyboard, a mouse
+and a tablet apart by the event codes its configuration space reports,
+and emits `input()`; a touch controller's, an encoder's and a keypad's
 drivers do the same from their buses. Each is a row of the device table
 and sends its events to the input router, `erx_winfs`. A device in
 another domain, such as a touch controller on a bus the devices domain

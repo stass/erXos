@@ -592,6 +592,14 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
   on the direct path a display driver maps a client's pixel area read-only into its device's DMA window; the device
   NIF cannot map an area into the window yet.
+* [Medium] `erlang/apps/erx_fb/src/erx_virtio_input_core.erl`, [Input
+  events](docs/design-display.md#input-events): the core parses event records and identifies the device, but
+  turning one update (the events up to `SYN_REPORT`) into `input()` needs three answers the design does not
+  give. A pointer event's X and Y are screen coordinates, so a mouse's relative moves need a position kept and
+  clamped to the screen, and a tablet's axes need scaling to it, yet no input driver is told the screen's size;
+  the key `Code`'s number space (evdev's codes or another) and where a `Rune` comes from (a keymap, and whose)
+  are not stated; and evdev's repeat has no `input()` form (see the lost key ups item). Settle them in the
+  design before the driver's update step is written.
 * [Medium] `erlang/apps/erx_fb/src/erx_virtio_gpu.erl`, [The display device](docs/design-display.md#the-display-device):
   the driver process runs on QEMU's virtio-gpu only in the `display_domain` suite, whose one boot brings the
   device up and shows the background; its failure paths have run only as its pure core's host tests. A host test

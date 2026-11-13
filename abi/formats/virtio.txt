@@ -3,7 +3,7 @@
 # virtio's split virtqueue and the virtio-mmio block, network and GPU devices, from the
 # OASIS Virtual I/O Device (VIRTIO) Version 1.2 specification: sections 2.7 (split
 # virtqueues), 4.2.2 (the MMIO transport's values), 5.1 (the network device), 5.2 (the
-# block device) and 5.7 (the GPU device).
+# block device), 5.7 (the GPU device) and 5.8 (the input device).
 # Every field is little-endian, as a version 1 device requires.
 limit virtio_mmio_magic u32 0x74726976
 limit virtio_mmio_version u32 2
@@ -178,3 +178,71 @@ layout erx_virtio_gpu_mem_entry wire_le 8 16
   field addr u64 0
   field length u32 8
   field padding u32 12
+
+# The input device (section 5.8), device ID 18 as FreeBSD's sys/dev/virtio/virtio_ids.h
+# at release/14.1.0 gives it. The driver posts each buffer of its event queue, queue 0, at
+# exactly the size of one erx_virtio_input_event (section 5.8.6.1 asks for at least that),
+# so the device writes one event into each; queue 1 carries status the driver sends, such as keyboard
+# LEDs. Its configuration space is one erx_virtio_input_config: the driver writes select
+# and subsel, then reads size and the first size bytes of the data that follows the header
+# (section 5.8.4). Every value the device writes is untrusted input.
+limit virtio_id_input u32 18
+limit virtio_input_queue_event u32 0
+limit virtio_input_queue_status u32 1
+limit virtio_input_cfg_unset u8 0x00
+limit virtio_input_cfg_id_name u8 0x01
+limit virtio_input_cfg_id_serial u8 0x02
+limit virtio_input_cfg_id_devids u8 0x03
+limit virtio_input_cfg_prop_bits u8 0x10
+limit virtio_input_cfg_ev_bits u8 0x11
+limit virtio_input_cfg_abs_info u8 0x12
+limit virtio_input_config_data_max u32 128
+
+# One event (section 5.8.6): an evdev type, code and value, little-endian. The value is
+# signed, as evdev's struct input_event holds it (FreeBSD sys/dev/evdev/input.h at
+# release/14.1.0), so a relative axis moves either way.
+layout erx_virtio_input_event wire_le 4 8
+  field type u16 0
+  field code u16 2
+  field value i32 4
+
+# The configuration space: the header, then the data select names, a string, a bitmap,
+# an erx_virtio_input_absinfo or an erx_virtio_input_devids.
+layout erx_virtio_input_config wire_le 1 136
+  field select u8 0
+  field subsel u8 1
+  field size u8 2
+  padding 3 5
+  field data u8 8 count 128
+
+# One absolute axis, as VIRTIO_INPUT_CFG_ABS_INFO answers it; signed, as evdev's struct
+# input_absinfo holds its bounds.
+layout erx_virtio_input_absinfo wire_le 4 20
+  field min i32 0
+  field max i32 4
+  field fuzz i32 8
+  field flat i32 12
+  field res i32 16
+
+# The evdev values the input driver reads, from FreeBSD's sys/dev/evdev/input-event-codes.h
+# at release/14.1.0: the event types, the end of one update (SYN_REPORT) and the device's
+# report that it dropped events (SYN_DROPPED), the pointer buttons and a touch (BTN_TOUCH), the end of the key
+# codes below the buttons (BTN_MISC), the relative and absolute axes a mouse and a tablet
+# report, and the last code of any type (KEY_MAX, the largest of the code ranges).
+limit evdev_ev_syn u16 0x00
+limit evdev_ev_key u16 0x01
+limit evdev_ev_rel u16 0x02
+limit evdev_ev_abs u16 0x03
+limit evdev_syn_report u16 0
+limit evdev_syn_dropped u16 3
+limit evdev_btn_misc u16 0x100
+limit evdev_btn_left u16 0x110
+limit evdev_btn_right u16 0x111
+limit evdev_btn_middle u16 0x112
+limit evdev_btn_touch u16 0x14a
+limit evdev_rel_x u16 0x00
+limit evdev_rel_y u16 0x01
+limit evdev_rel_wheel u16 0x08
+limit evdev_abs_x u16 0x00
+limit evdev_abs_y u16 0x01
+limit evdev_key_max u16 0x2ff
