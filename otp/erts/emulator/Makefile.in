@@ -1332,6 +1332,7 @@ OS_OBJS = \
 	$(OBJDIR)/ctaes.o \
 	$(OBJDIR)/erx_device.o \
 	$(OBJDIR)/erx_device_core.o \
+	$(OBJDIR)/erx_area_lease_core.o \
 	$(OBJDIR)/erx_device_queue.o \
 	$(OBJDIR)/erx_device_dma.o \
 	$(OBJDIR)/erx_dma_arch.o \

@@ -70,6 +70,14 @@ limit pipe_label_shift u64 32
 # {pipe_writer, ...}} with three capabilities as 64-bit integers, takes
 # about 120 bytes of ETF.
 limit prog_report_max u32 512
+# A program's buffer place (docs/design-display.md, "The pixel area"): a
+# window's buffer leased to a program is mapped from prog_mem_base, for at
+# most prog_mem_bytes, the largest buffer, 16,384 pixels square at 4 bytes
+# a pixel. The place's first page number is below 2^32, as the startup
+# message needs, and the place lies inside the stopgap's task range, 2^38 to
+# 2^39, above the address a program is linked at.
+limit prog_mem_base u64 0x7f00000000
+limit prog_mem_bytes u64 1073741824
 
 protocol erx_prog
   version 1

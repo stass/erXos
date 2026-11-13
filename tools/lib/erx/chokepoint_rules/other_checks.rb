@@ -114,8 +114,9 @@ module Erx
           test: 'test/host/counter_reads_test.rb'
         ),
         Chokepoints::Elsewhere.new(
-          name: 'area-mappers', rule: 'only the connection agent, erx_connections, calls erx_area:map/4, which maps a ' \
-                                      "connection's pixel area; elsewhere erx_area is named only as erx_area:open and erx_area:area",
+          name: 'area-mappers', rule: 'only the connection agent, erx_connections, calls erx_area:map/4, and only ' \
+                                      'erx_pixels erx_area:lend/4 and unlend/1; only erx_program_drv.c calls the lease functions, ' \
+                                      'and only erx_area_lease_map maps into a space other than ERX_CAP_SELF',
           design: 'docs/design-display.md#chokepoints', check: 'AreaMappers, in Checks',
           test: 'test/host/area_mappers_test.rb'
         )

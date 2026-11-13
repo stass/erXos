@@ -7,20 +7,31 @@ require 'tmpdir'
 require_relative '../../tools/lib/erx/checks'
 require_relative '../../tools/lib/erx/area_mappers'
 
-# The chokepoint "only the connection agent maps a pixel area": outside erx_area and
-# erx_connections, erx_area is named only as the module of open/1 and of area(); a call
-# of map/4 in any form, an apply, an import, a macro, a list, tuple or map literal or a
-# string naming it fails, and the tests' own modules are not refused.
+# The chokepoint over who maps a pixel area. Its Erlang half: outside erx_area and
+# erx_connections, erx_area is named only as the module of open/1 and of area(), and in
+# erx_pixels also of lend/4 and unlend/1; a call of map/4 in any form, an apply, an
+# import, a macro, a list, tuple or map literal or a string naming it fails, and the
+# tests' own modules are not refused. Its C half, over otp/erts/emulator: only the
+# program driver calls the lease's driver functions, and only erx_area_lease_map maps
+# into a space other than ERX_CAP_SELF.
 class AreaMappersTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   AGENT = 'erlang/apps/erx/src/erx_connections.erl'
   SCREEN = 'erlang/apps/erx_display/src/erx_screen.erl'
   SEEDED = "m(T) -> erx_area:map(21, 8192, read, T).\n"
+  LENDER = Erx::AreaMappers::LENDER
+  LEND = "f(A, O, P, H) -> erx_area:lend(A, O, P, H), erx_area:unlend(1).\n"
+  DRIVER = Erx::AreaMappers::DRIVER
+  NIF = Erx::AreaMappers::NIF
+  LANE = 'otp/erts/emulator/sys/erxos/erx_lane_drv.c'
+  FOREIGN = "\tstatus = erx_vm_map(space, addr, bytes, mem, 0, ERX_PROT_RW);\n"
+  OWN = "\tstatus = erx_vm_map(ERX_CAP_SELF, addr, bytes, mem, 0, ERX_PROT_RW);\n"
 
   def lines_of(files) = Erx::AreaMappers.violations(files).map { |violation| [violation.path, violation.line] }
 
   def test_the_tree_passes
-    paths = Erx::DeviceCallers::SCOPE.flat_map { |glob| Dir.glob(glob, base: ROOT) }
+    globs = [*Erx::DeviceCallers::SCOPE, Erx::AreaMappers::C_SCOPE]
+    paths = globs.flat_map { |glob| Dir.glob(glob, base: ROOT) }
     files = paths.to_h { |path| [path, File.binread(File.join(ROOT, path))] }
     assert_empty Erx::AreaMappers.violations(files).map(&:to_s)
   end
@@ -53,6 +64,30 @@ class AreaMappersTest < Minitest::Test
     assert_empty lines_of(SCREEN => "-spec f(erx_area:area()) -> ok.\nf(P) -> erx_area:open(P), fun erx_area:open/1.\n")
     assert_empty lines_of(SCREEN => "f() -> \"see erx_area : open/1\", erx_area_unmapped, x:map(1, 2, 3, 4).\n")
     assert_empty lines_of('test/erlang/seeded_tests.erl' => SEEDED)
+  end
+
+  def test_only_the_lender_lends
+    assert_empty lines_of(LENDER => LEND)
+    assert_equal [[SCREEN, 1], [SCREEN, 1]], lines_of(SCREEN => LEND)
+    assert_equal [[SCREEN, 1]], lines_of(SCREEN => "f() -> fun erx_area:unlend/1.\n")
+    assert_equal [[LENDER, 1]], lines_of(LENDER => SEEDED)
+  end
+
+  def test_only_the_driver_calls_the_lease_functions
+    %w[take map return].each do |name|
+      call = "void f(void) { (void)erx_area_lease_#{name}(0, 0, 0); }\n"
+      assert_equal [[LANE, 2]], lines_of(LANE => "/* erx_area_lease_#{name} in a comment */\n#{call}"), name
+      assert_empty lines_of(DRIVER => call), name
+    end
+  end
+
+  def test_only_the_lease_mapper_maps_into_another_space
+    assert_equal [[DRIVER, 4]], lines_of(DRIVER => "int\nf(void)\n{\n#{FOREIGN}}\n")
+    assert_empty lines_of(DRIVER => "int\nf(void)\n{\n#{OWN}}\n")
+    assert_empty lines_of(NIF => "int\nerx_area_lease_map(void)\n{\n#{FOREIGN}}\n")
+    assert_equal [[NIF, 9]], lines_of(NIF => "int\nerx_area_lease_map(void)\n{\n}\n\nint\nother(void)\n{\n#{FOREIGN}}\n")
+    seeded = 'otp/erts/emulator/beam/seeded.c'
+    assert_equal [[seeded, 1]], lines_of(seeded => "void f(void) { erx_vm_map(7, 0, 0, 0, 0, 0); }\n")
   end
 
   # The source check runs the rule over the files git lists.
