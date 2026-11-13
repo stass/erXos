@@ -15,7 +15,7 @@
 {application, erx_win,
  [{description, "erXos display client"},
   {vsn, "1"},
-  {modules, [erx_draw_codec, erx_draw_core, erx_draw_image, erx_pixels, erx_pixels_core, erx_vt, erx_vt_width, erx_win_app,
+  {modules, [erx_draw_codec, erx_draw_core, erx_draw_image, erx_pixels, erx_pixels_core, erx_vt, erx_vt_width, erx_win, erx_win_app, erx_win_core,
              erx_win_sup]},
   {registered, [erx_win_sup, erx_pixels]},
   {applications, [kernel, stdlib, erx, erx_memdraw]},

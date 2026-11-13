@@ -278,7 +278,7 @@ with_session(#winfs{grants = Grants, session = Last} = State) ->
 %% Calls ---------------------------------------------------------------------
 
 handle_call({attach, Rect, Chan}, Pid, #winfs{screen = Old} = State) ->
-    case erx_display:chan_format(Chan) of
+    case erx_chan:parse(Chan) of
         {ok, _Code, Depth} when tuple_size(Rect) =:= 4 ->
             ok = demonitor_screen(Old),
             Arranged = arrange(State#winfs{screen_rect = Rect, chan = Chan, depth = Depth,

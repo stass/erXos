@@ -1004,6 +1004,14 @@ it; git history is the record of completed work.
 * [Low] `abi/formats/ui.txt` and the generated readers: a `present` name is checked only as UTF-8 of at most 63
   bytes, while design-abi.md calls it "a presentation name of the inspection schema", which `abi/inspection.txt`
   declares: generate the name table into both readers, as `erx_ui_schema` checks it against `erx_present:marks/0`.
+* [Medium] `erlang/apps/erx_win/src/erx_win.erl`, [The window tree](docs/design-display.md#the-window-tree):
+  the window tree names no file that answers the screen's size, which [Windows and
+  buffers](docs/design-display.md#windows-and-buffers) sizes every buffer by. `erx_win:open/2` takes it from the new
+  window's `wctl` rectangle, which only the single policy sets to the screen's, so under `erx_wm_rio` a buffer would
+  be the window's default size, and the buffer is allocated after the `mkdir`, so a full area answers `enomem`
+  after the `windows` quota instead of before it. Settle in the design where a client reads the screen's size before
+  it makes a window (a window's own `ctl` comes too late; for example a file of the client's directory), then
+  allocate before the `mkdir`.
 * [Medium] `erlang/apps/erx_display/src/erx_wm*.erl`, [Windows and the window
   system](docs/design-display.md#windows-and-the-window-system): settle this when `erx_winfs` is written, with a
   property case.

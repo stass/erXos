@@ -127,7 +127,7 @@ init({Module, Name}) ->
         Driver ->
             #{width := Width, height := Height, screen := Screen, partial := Partial,
               chan := Chan} = Module:info(Driver),
-            {ok, Code, _Depth} = erx_display:chan_format(Chan),
+            {ok, Code, _Depth} = erx_chan:parse(Chan),
             Rect = {0, 0, Width, Height},
             {ok, Core} = erx_screen_core:new(Rect, ?BACKGROUND, false),
             State = #state{driver = Driver, screen = Screen, rect = Rect, partial = Partial,

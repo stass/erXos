@@ -357,6 +357,8 @@ module Erx
                    name: 'fuzz-erx-wctl', deadline: 900, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_winctl.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-winctl', deadline: 1200, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_win_core.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-win-core', deadline: 1200, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_vt.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-vt', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_ui_schema.rb'), '--seed', options.fetch(:seed).to_s],

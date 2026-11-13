@@ -57,6 +57,8 @@
 %% walk_reply/2 for the fuzz target (test/erlang/erx_file_remote_fuzz.erl), and sent/2,
 %% the exchange with a server, for it and for test/erlang/erx_file_remote_tests.erl.
 -export([walk/2, link_text/2, passed/2, refused/2, walk_reply/2, sent/2]).
+%% The exchange every request passes, for erx_win, which holds a window's fids itself.
+-export([exchange/2]).
 -export([read_file_info/3, read_link/2, list_dir/2, write_file_info/3, make_dir/2,
          del_dir/2, delete/2, rename/3, make_link/3, make_symlink/3]).
 -export([open/3, read_file/2, set_cwd/2, identity/2]).

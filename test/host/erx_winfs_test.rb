@@ -22,7 +22,7 @@ class ErxWinfsTest < Minitest::Test
   DISPLAY = %w[erx_display erx_screen erx_screen_core erx_wctl erx_window erx_winctl erx_winfs erx_wm
                erx_wm_single].map { |name| "erlang/apps/erx_display/src/#{name}.erl" }
   FILES = %w[erx_fs erx_fs_grant erx_fs_grants erx_fs_version].map { |name| "erlang/apps/erx_files/src/#{name}.erl" }
-  MODULES = (['erlang/apps/erx_memdraw/src/erx_memdraw.erl', GRAMMAR] + DISPLAY + FILES +
+  MODULES = (['erlang/apps/erx_memdraw/src/erx_memdraw.erl', 'erlang/apps/erx_memdraw/src/erx_chan.erl', GRAMMAR] + DISPLAY + FILES +
              ['erlang/apps/erx/src/erx_facet.erl', 'erlang/apps/erx_fb/src/erx_fb_sup.erl', 'test/erlang/erx_winfs_tests.erl']).freeze
   # The display's log is the debug log of erx_log's NIF, which stock's emulator has not.
   LOG_STUB = <<~ERLANG

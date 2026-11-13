@@ -9,7 +9,7 @@
 {application, erx_memdraw,
  [{description, "erXos pixel primitives"},
   {vsn, "1"},
-  {modules, [erx_memdraw]},
+  {modules, [erx_chan, erx_memdraw]},
   {registered, []},
   {applications, [kernel, stdlib, erx]},
   {env, []}]}.

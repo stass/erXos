@@ -16,7 +16,7 @@ class ErxScreenTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   OTP = File.join(ROOT, 'build/oracle/jit/install/lib/erlang')
   COMPILER = ENV.fetch('ERX_CLANG', 'clang')
-  MODULES = %w[erlang/apps/erx_memdraw/src/erx_memdraw.erl erlang/apps/erx_display/src/erx_screen_core.erl
+  MODULES = %w[erlang/apps/erx_memdraw/src/erx_memdraw.erl erlang/apps/erx_memdraw/src/erx_chan.erl erlang/apps/erx_display/src/erx_screen_core.erl
                erlang/apps/erx_display/src/erx_display.erl erlang/apps/erx_display/src/erx_screen.erl
                erlang/apps/erx_display/src/erx_winfs.erl
                test/erlang/erx_screen_tests.erl].freeze
