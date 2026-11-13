@@ -629,7 +629,8 @@ it; git history is the record of completed work.
   what remains is the row's ask and line, the physical object over the framebuffer's pages, the record and its
   size in `include/erx/boot_words.h`, and its reader in `erx_device_record`.
 * [Medium] `erlang/apps/erx_display/src/erx_screen.erl`: the screen shows the empty layout only, the background
-  repainted at its start; layouts, windows, presents, the overlay and the idle policy wait for `erx_winfs`
+  repainted at its start; layouts, windows, presents, the overlay and the idle policy, whose times are the display domain's
+  `display_idle_dim_s` and `display_idle_off_s` variables, wait for `erx_winfs`
   ([The screen and its one path to the device](docs/design-display.md#the-screen-and-its-one-path-to-the-device)).
 * [Low] `erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
   bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
@@ -772,8 +773,7 @@ it; git history is the record of completed work.
     NIF did not allocate, which the agent unmaps only after the last image over it is gone.
   * **The display's session and grant** ([A display's session](docs/design-display.md#a-displays-session)): the
     display's session from a start row ([Track A](docs/plan.md#track-a-apps), part 1), with `session` carried by
-    every mint of its grant from the session mark the domain service alone sets; the domain service putting the
-    `display` record's policy and idle times in the display domain's environment. A window's buffer at the screen's
+    every mint of its grant from the session mark the domain service alone sets. A window's buffer at the screen's
     size, allocated once by `erx_win:open/2`, with
     `resized/1` allocating nothing; the grant defaults of 8 windows, 64 MiB and `snarf` off at the server.
   * **The reserved chord** ([The reserved chord](docs/design-display.md#the-reserved-chord)): its field in the
@@ -1117,7 +1117,8 @@ it; git history is the record of completed work.
   gitlink with a small path-to-licence map, or check the archive's defining members (`llvm-nm --defined-only`)
   against such a map. `src/misc/lv_lru.c` cites willcannings/C-LRU-Cache with no notice of its own; its upstream
   licence is unverified.
-* [High] `erx_wm_rio` (desktop, not built; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
+* [High] `erx_wm_rio` (desktop, not built; until it is, `erx_fb_sup` starts `erx_winfs` under the single policy whatever
+  the display domain's `display_policy` says; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
   the window taking the keyboard is the topmost shown one lets any client take the keyboard from another session's
   window by a `wctl` `top`, `hide` then `show`, or a `mkdir`, and so read what the user types next. Before the
   overlapping policy lands, its design keeps the current window in the policy's state and moves it only on the

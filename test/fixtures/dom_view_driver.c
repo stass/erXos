@@ -11,10 +11,13 @@
  *
  *   dom-view MANIFEST [framebuffer]
  *
- * One line per catalogue entry, then one per service row:
+ * One line per catalogue entry, then one per service row, then one per
+ * configured row that serves a display, with the display its creation puts
+ * in its environment:
  *
  *   device INDEX unit=NAME compatible=STRING|none ranges=BASE+SIZE,... lines=LINE,... confined=0|1
  *   service INDEX name=NAME server=ROW|none interface=NUMBER
+ *   display ROW name=NAME policy=NUMBER idle_dim_s=SECONDS idle_off_s=SECONDS
  *
  * numbers in hexadecimal for ranges and decimal elsewhere. A view the
  * library refuses prints `refused REASON` alone. A malformed input prints
@@ -156,5 +159,13 @@ main(int argc, char **argv)
 		print_device(index, &lib.view.devices[index]);
 	for (uint32_t index = 0; index < lib.view.nservices; index++)
 		print_service(index, &lib.view.services[index]);
+	for (uint32_t index = 0; index < lib.view.nconfigured; index++) {
+		const erx_dom_display_t *display = &lib.view.configured[index].display;
+
+		if (display->name_len != 0)
+			printf("display %" PRIu32 " name=%.*s policy=%" PRIu32 " idle_dim_s=%" PRIu32 " idle_off_s=%" PRIu32 "\n",
+			    index, (int)display->name_len, display->name, display->policy, display->idle_dim_s,
+			    display->idle_off_s);
+	}
 	return (fflush(stdout) == 0 ? 0 : 2);
 }

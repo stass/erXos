@@ -67,6 +67,9 @@ static const char *boot_units(const erx_manifest_view_t *, erx_dom_device_entry_
 static const char *boot_devices(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_device_entry_t *, erx_dom_device_t *);
 static bool	boot_strings_fit(uint64_t, uint64_t, uint32_t, bool);
+static bool	boot_env_names_display(const char *, uint32_t);
+static const char *boot_display(const erx_manifest_view_t *, uint32_t, const char *, uint32_t,
+		    erx_dom_display_t *);
 static const char *boot_places(erx_dom_configured_t *, uint32_t, const erx_manifest_view_t *);
 static const char *boot_configured(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_configured_t *);
@@ -466,6 +469,76 @@ boot_strings_fit(uint64_t args_len, uint64_t env_len, uint32_t records, bool blo
 }
 
 /*
+ * Whether an environment of env_len bytes of NUL-terminated KEY=VALUE words
+ * sets one of the keys a display domain's display record gives it
+ * (ERX_DOM_DISPLAY_WORDS_MAX).
+ */
+static bool
+boot_env_names_display(const char *env, uint32_t env_len)
+{
+	static const char *const keys[] = { ERX_DOM_DISPLAY_KEY, ERX_DOM_DISPLAY_POLICY_KEY,
+	    ERX_DOM_DISPLAY_IDLE_DIM_KEY, ERX_DOM_DISPLAY_IDLE_OFF_KEY };
+	uint32_t at = 0, end;
+	size_t length;
+
+	while (at < env_len) {
+		for (end = at; end < env_len && env[end] != '\0'; end++)
+			continue;
+		for (size_t key = 0; key < sizeof(keys) / sizeof(keys[0]); key++) {
+			length = strlen(keys[key]);
+			if (end - at > length && memcmp(env + at, keys[key], length) == 0 && env[at + length] == '=')
+				return (true);
+		}
+		at = end + 1;
+	}
+	return (false);
+}
+
+/*
+ * The display configured row `row` serves, or none: the display record of
+ * the windows service whose server the row is (docs/design-display.md, "A
+ * display's session"). The reader has checked each record's service index,
+ * its policy and the service's name, and property 18 of
+ * docs/design-system.md gives each windows service one record and its
+ * server no other display; the view checks them again, as the copy's own,
+ * so no domain's environment names two displays. A display domain whose
+ * own environment (env_len bytes at env) sets one of its display's keys is
+ * refused, so each key has one value. The walk is over every display
+ * record for each row; a manifest has a display or two.
+ */
+static const char *
+boot_display(const erx_manifest_view_t *manifest, uint32_t row, const char *env, uint32_t env_len,
+      erx_dom_display_t *served)
+{
+	erx_mf_display_t display;
+	erx_mf_service_t service;
+	const char *strings;
+
+	*served = (erx_dom_display_t){ .name = NULL };
+	/* The reader checked every string against the string table; the manifest's bytes outlive the view. */
+	strings = (const char *)manifest->bytes + manifest->header.strings.offset;
+	for (uint32_t index = 0; index < manifest->header.displays.count; index++) {
+		if (!erx_manifest_displays_at(manifest, index, &display) ||
+		    !erx_manifest_services_at(manifest, display.service, &service))
+			return ("manifest: a display record names no service");
+		if (service.server != row)
+			continue;
+		if (served->name_len != 0)
+			return ("manifest: a configured domain serves two displays");
+		if (display.policy != ERX_MF_DISPLAY_POLICY_SINGLE && display.policy != ERX_MF_DISPLAY_POLICY_RIO)
+			return ("manifest: a display's policy is neither single nor rio");
+		if (service.name.length == 0 || service.name.length > ERX_DOM_NAME_MAX)
+			return ("manifest: a service's name is not 1 to 63 bytes");
+		*served = (erx_dom_display_t){ .name = strings + service.name.offset,
+		    .name_len = service.name.length, .policy = display.policy,
+		    .idle_dim_s = display.idle_dim_s, .idle_off_s = display.idle_off_s };
+	}
+	if (served->name_len != 0 && boot_env_names_display(env, env_len))
+		return ("manifest: a display domain's environment sets a key its display record gives it");
+	return (NULL);
+}
+
+/*
  * Each row's place in the boot order, which the check computed (property 10)
  * and the packer wrote: every configured row exactly once, so the domain
  * service walks the rows in that order by place.
@@ -499,7 +572,7 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 	erx_mf_domain_t domain;
 	erx_mf_limits_t profile;
 	erx_dom_configured_t *row;
-	const char *strings;
+	const char *strings, *reason;
 	uint32_t held, records;
 	bool block;
 
@@ -535,11 +608,15 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 		}
 		if (held > ERX_DOM_GIVES_MAX)
 			return ("manifest: a configured domain holds more devices than its creation gives");
-		if (!boot_strings_fit(domain.args.length, domain.env.length, records, block))
-			return ("manifest: a configured domain's arguments and environment leave the boot page's strings "
-			    "no reserve for its node names and device records");
 		/* The reader checked every string against the string table; the manifest's bytes outlive the view. */
 		strings = (const char *)manifest->bytes + manifest->header.strings.offset;
+		if ((reason = boot_display(manifest, index, strings + domain.env.offset, domain.env.length,
+		    &row->display)) != NULL)
+			return (reason);
+		if (!boot_strings_fit(domain.args.length, domain.env.length +
+		    (row->display.name_len != 0 ? ERX_DOM_DISPLAY_WORDS_MAX : 0), records, block))
+			return ("manifest: a configured domain's arguments and environment leave the boot page's strings "
+			    "no reserve for its node names, device records and display");
 		row->name = strings + domain.name.offset;
 		row->name_len = domain.name.length;
 		row->args = strings + domain.args.offset;

@@ -599,8 +599,10 @@ violation fails the build with the property, the record and the field:
     `windows` interface has exactly one `display` record and every
     `display` record names such a service, so no grant of a display
     escapes the sum below; its server, the display domain, is a
-    configured domain, never the system domain, and serves no other
-    display, so no domain pays for two displays' grants out of one outer
+    configured domain, never the system domain, whose row sets none of
+    the environment keys its display record gives it
+    ([design-display.md](design-display.md#a-displays-session)), and
+    serves no other display, so no domain pays for two displays' grants out of one outer
     budget; for each display, each
     grant of its service costs the display its `pixels`, or
     `windows_pixels_default` of `abi/services/windows.txt` where the

@@ -5,6 +5,7 @@
 require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/display_domain'
 require_relative '../../tools/lib/erx/dom_planner'
 require_relative '../../tools/lib/erx/manifest'
 require_relative '../../tools/lib/erx/net_device'
@@ -587,6 +588,47 @@ class DomPlannerTest < Minitest::Test
                   "service 5 name=storage_ctl server=1 interface=#{interface.call('driver_control')}",
                   "service 6 name=web server=2 interface=#{interface.call('web')}"],
                  lines.grep(/\Aservice /)
+  end
+
+  # The display suite's manifest (tools/lib/erx/display_domain.rb), admitted over the
+  # fixture's archive with a planner that places nothing, with source's edit applied.
+  def display_manifest(edit = ->(source) { source })
+    platform = Erx::Platform.load(root: ROOT, name: 'qemu-virt')
+    arguments = ManifestContextFixture.archive_arguments(@codec, boots: %w[display network session storage web])
+    context = Erx::Manifest::Context.new(**arguments.merge(platform: @context.platform))
+    planner = ->(view) { %w[domains introductions sessions].to_h { |key| [key, view.fetch(key == 'domains' ? 'order' : key).map { 0 }] } }
+    source = edit.call(Erx::DisplayDomain.manifest(platform.site_manifest_source(ROOT), platform: platform))
+    Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: planner).bytes
+  end
+
+  # The display domain serves screen, so its row carries screen's display record, whose
+  # words its creation puts in its environment (docs/design-display.md, "A display's
+  # session"), and no other row carries one.
+  def test_the_display_domain_s_row_carries_its_display_record
+    lines = view_lines(display_manifest, 'display')
+    server = lines.grep(/\Aservice \d+ name=screen /).first[/ server=(\d+) /, 1]
+    assert_equal ["display #{server} name=screen policy=#{@codec.member('mf_display_policy', 'single')} " \
+                  'idle_dim_s=0 idle_off_s=0'], lines.grep(/\Adisplay /)
+  end
+
+  # A display domain whose own environment sets a key of its display's is refused, so
+  # each key it reads has its display record's value: by the check (property 18), for a
+  # key in any position, and by the view as its second line, over bytes the check packed
+  # with another key that the test then renames. A key that only starts with display is
+  # the row's own.
+  def test_a_display_domain_that_sets_its_display_s_keys_is_refused
+    with_env = ->(words) { ->(source) { source.sub("domain display\n", "domain display\n  env \"#{words}\"\n") } }
+    ['display=other', 'LANG=C display_policy=rio', 'LANG=C display_idle_off_s=1'].each do |words|
+      error = assert_raises(Erx::Manifest::Invalid) { display_manifest(with_env.call(words)) }
+      assert_equal [18, 'domain.env'], [error.property, error.field], words
+    end
+    bytes = display_manifest(with_env.call('LANG=C dispXay_policy=rio'))
+    assert_equal 1, bytes.scan('dispXay_policy=rio').size
+    assert_equal ['refused manifest: a display domain\'s environment sets a key its display record gives it'],
+                 view_lines(bytes.sub('dispXay_policy=rio', 'display_policy=rio'), 'display-renamed')
+    lines = view_lines(display_manifest(with_env.call('displayed=yes display_mode=x')), 'display-own')
+    assert_empty lines.grep(/\Arefused /)
+    assert_equal 1, lines.grep(/\Adisplay \d+ name=screen /).size
   end
 
   def test_a_malformed_input_is_refused_by_the_helper

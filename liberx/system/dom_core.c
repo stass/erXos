@@ -115,6 +115,9 @@ static void	dom_spec_partial(const erx_dom_view_t *, uint32_t, uint32_t,
 static void	dom_spec_session(const erx_dom_view_t *, uint32_t, uint32_t,
 		    const char *, uint32_t, erx_dom_pid_t, erx_dom_spec_t *);
 static void	dom_decimal(uint32_t, erx_dom_spec_t *);
+static bool	dom_word_put(char *, size_t, size_t *, const char *, const char *, size_t);
+static bool	dom_number_put(char *, size_t, size_t *, const char *, uint32_t);
+static bool	dom_display_words(const erx_dom_display_t *, erx_dom_spec_t *);
 static erx_status_t dom_plan_in(const erx_dom_spec_t *, const erx_dom_view_t *,
 		    erx_dom_plan_t *, bool *, uint64_t *, uint64_t *, uint64_t *);
 static erx_status_t dom_plan_gives(const erx_dom_view_t *, erx_dom_plan_t *);
@@ -603,8 +606,9 @@ erx_dom_from_row(const erx_dom_origin_t *origin, uint32_t row)
 
 /*
  * The configured constructor: everything from the checked manifest row,
- * whose name, arguments and environment fit the spec (boot_configured holds
- * the view's rows to that). The bound on the name is checked again here, as
+ * whose name, arguments and environment, and a display domain's display
+ * words (dom_display_words), fit the spec (boot_configured holds the view's
+ * rows to that). The bound on the name is checked again here, as
  * the copy's own: a name that did not fit would be left empty, which
  * planning refuses.
  */
@@ -643,6 +647,65 @@ dom_spec_configured(const erx_dom_view_t *view, uint32_t id, uint32_t row,
 		memcpy(spec->strings, source->args, source->args_len);
 	if (source->env_len != 0)
 		memcpy(spec->strings + source->args_len, source->env, source->env_len);
+	if (source->display.name_len != 0 && !dom_display_words(&source->display, spec))
+		spec->name_len = 0;
+}
+
+/*
+ * A display domain's display words after its own environment
+ * (docs/design-display.md, "A display's session"), the keys of
+ * ERX_DOM_DISPLAY_WORDS_MAX in its order. False, with the
+ * environment unchanged, when they overrun the strings, which the view's
+ * reserve for them (ERX_DOM_DISPLAY_WORDS_MAX) rules out; the caller then
+ * leaves the name empty, which planning refuses.
+ */
+static bool
+dom_display_words(const erx_dom_display_t *display, erx_dom_spec_t *spec)
+{
+	const char *policy = display->policy == ERX_MF_DISPLAY_POLICY_RIO ? "rio" : "single";
+	const size_t start = (size_t)spec->args_len + spec->env_len;
+	size_t used = start;
+
+	if (start > sizeof(spec->strings) ||
+	    !dom_word_put(spec->strings, sizeof(spec->strings), &used, ERX_DOM_DISPLAY_KEY "=", display->name, display->name_len) ||
+	    !dom_word_put(spec->strings, sizeof(spec->strings), &used, ERX_DOM_DISPLAY_POLICY_KEY "=", policy, strlen(policy)) ||
+	    !dom_number_put(spec->strings, sizeof(spec->strings), &used, ERX_DOM_DISPLAY_IDLE_DIM_KEY "=", display->idle_dim_s) ||
+	    !dom_number_put(spec->strings, sizeof(spec->strings), &used, ERX_DOM_DISPLAY_IDLE_OFF_KEY "=", display->idle_off_s)) {
+		if (start <= sizeof(spec->strings))
+			memset(spec->strings + start, 0, sizeof(spec->strings) - start);
+		return (false);
+	}
+	spec->env_len += (uint32_t)(used - start);
+	return (true);
+}
+
+/* The word NAME VALUE and its NUL at words + *used, or false when they overrun capacity. */
+static bool
+dom_word_put(char *words, size_t capacity, size_t *used, const char *name, const char *value, size_t value_len)
+{
+	const size_t name_len = strlen(name);
+
+	if (*used > capacity || capacity - *used < name_len + value_len + 1)
+		return (false);
+	memcpy(words + *used, name, name_len);
+	memcpy(words + *used + name_len, value, value_len);
+	words[*used + name_len + value_len] = '\0';
+	*used += name_len + value_len + 1;
+	return (true);
+}
+
+/* The word NAME and value in decimal, as dom_word_put. */
+static bool
+dom_number_put(char *words, size_t capacity, size_t *used, const char *name, uint32_t value)
+{
+	char digits[10];
+	size_t count = sizeof(digits);
+
+	do {
+		digits[--count] = (char)('0' + value % 10);
+		value /= 10;
+	} while (value != 0);
+	return (dom_word_put(words, capacity, used, name, digits + count, sizeof(digits) - count));
 }
 
 /*

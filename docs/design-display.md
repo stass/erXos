@@ -2803,8 +2803,11 @@ on a display edits nothing of the board's:
   whose name is the display's name, and gives the display's policy,
   `rio` or `single`, its idle policy and its reserved chord, which the
   domain service puts in the display domain's environment when it
-  creates the domain. It names no session, no application and no
-  renderer.
+  creates the domain: `display` is the name of the display it serves,
+  `display_policy` its policy, and
+  `display_idle_dim_s` and `display_idle_off_s` its idle times in
+  seconds; the domain's own manifest row sets none of them. It names
+  no session, no application and no renderer.
 * **Facet rows say who may draw there, and how much.** A facet row of
   the display's service grants its tree to a configured domain or to a
   session template, an app's among them, with the grant's quotas,

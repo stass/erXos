@@ -45,6 +45,24 @@
 /* A domain name, an identifier (docs/design-system.md, "Identifiers"): 1 to this many bytes. */
 #define ERX_DOM_NAME_MAX	63u
 
+/*
+ * The environment a display domain gains from its display record
+ * (docs/design-display.md, "A display's session"): one word per key,
+ * KEY=VALUE with its NUL, the display's name, its policy, single or rio, and
+ * its idle times in decimal seconds. ERX_DOM_DISPLAY_WORDS_MAX is the four
+ * at their longest, the name at ERX_DOM_NAME_MAX bytes and each time at ten
+ * digits; each sizeof counts its key's '=' and the word's NUL.
+ */
+#define ERX_DOM_DISPLAY_KEY		"display"
+#define ERX_DOM_DISPLAY_POLICY_KEY	"display_policy"
+#define ERX_DOM_DISPLAY_IDLE_DIM_KEY	"display_idle_dim_s"
+#define ERX_DOM_DISPLAY_IDLE_OFF_KEY	"display_idle_off_s"
+#define ERX_DOM_DISPLAY_WORDS_MAX					\
+	(sizeof(ERX_DOM_DISPLAY_KEY "=") + ERX_DOM_NAME_MAX +		\
+	    sizeof(ERX_DOM_DISPLAY_POLICY_KEY "=single") +		\
+	    sizeof(ERX_DOM_DISPLAY_IDLE_DIM_KEY "=4294967295") +	\
+	    sizeof(ERX_DOM_DISPLAY_IDLE_OFF_KEY "=4294967295"))
+
 /* Origin kinds; zero is no origin, so a zeroed origin fails planning. */
 #define ERX_DOM_REQUEST		1u
 #define ERX_DOM_CONFIGURED	2u
@@ -369,6 +387,21 @@ typedef struct erx_dom_file {
 	uint64_t	size;		/* their count: a release slice's span */
 } erx_dom_file_t;
 
+/*
+ * The display a configured row serves: the manifest's display record of the
+ * windows service whose server the row is (property 18 of
+ * docs/design-system.md gives such a row exactly one), with the service's
+ * name, which is the display's. Each creation of the domain puts it in the
+ * domain's environment after the row's own words (ERX_DOM_DISPLAY_WORDS_MAX).
+ */
+typedef struct erx_dom_display {
+	const char	*name;		/* in the manifest's strings, which outlive */
+	uint32_t	name_len;	/* the view; 0 for a row that serves no display */
+	uint32_t	policy;		/* ERX_MF_DISPLAY_POLICY_SINGLE or _RIO */
+	uint32_t	idle_dim_s;	/* seconds idle before the panel dims, 0 never */
+	uint32_t	idle_off_s;	/* and before it turns off, 0 never */
+} erx_dom_display_t;
+
 /* A checked configured-domain row of the system manifest. */
 typedef struct erx_dom_configured {
 	uint32_t	principal;
@@ -392,6 +425,7 @@ typedef struct erx_dom_configured {
 	 * ERX_BOOT_STRINGS_MAX. A pointer is NULL only with its length 0. */
 	const char	*args, *env;
 	uint32_t	args_len, env_len;
+	erx_dom_display_t display;
 } erx_dom_configured_t;
 
 /*

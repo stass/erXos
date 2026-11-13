@@ -676,6 +676,22 @@ constructors(void)
 	printf("ctor configured_owned %d %u %u %u %.*s\n", (int)status,
 	    plan.spec.origin.kind, plan.spec.origin.record, (unsigned)plan.parent,
 	    (int)plan.spec.name_len, plan.spec.name);
+	/* A display domain's environment is its row's words, then its display's. */
+	configured.env = "LANG=C";
+	configured.env_len = sizeof("LANG=C");
+	configured.display = (erx_dom_display_t){ .name = "screen", .name_len = 6,
+	    .policy = ERX_MF_DISPLAY_POLICY_RIO, .idle_dim_s = 60, .idle_off_s = 4294967295u };
+	status = erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan);
+	printf("ctor configured_display %d ", (int)status);
+	for (uint32_t at = 0; at < plan.spec.env_len; at++) {
+		const char byte = plan.spec.strings[plan.spec.args_len + at];
+
+		putchar(byte == '\0' ? '|' : byte);
+	}
+	printf("\n");
+	configured.env = NULL;
+	configured.env_len = 0;
+	configured.display = (erx_dom_display_t){ .name = NULL };
 	/* Everything but the name, id and pid is the template's. */
 	status = erx_dom_plan_session(&view, 8, 0, "sess", 4,
 	    (erx_dom_pid_t){ 3, 1 }, &plan);

@@ -200,6 +200,9 @@ class DomCoreTest < Minitest::Test
     assert_includes lines, 'ctor request_owned 0 1 1 4294967295 16384 16384 2 0',
                     'a forged origin and library fields are overwritten; the strings tail is zeroed'
     assert_includes lines, 'ctor configured_owned 0 2 0 1 srv', 'a configured domain goes under system, named by its row'
+    assert_includes lines, 'ctor configured_display 0 LANG=C|display=screen|display_policy=rio|display_idle_dim_s=60|' \
+                           'display_idle_off_s=4294967295|',
+                    'a display domain\'s environment is its row\'s words, then its display record\'s'
     assert_includes lines, 'ctor session_owned 0 4 0 2 2 6000 4 3 sess',
                     'a session is its template: under its principal, SPACES, the template\'s limits and memory, ' \
                     'with the caller\'s pid and name'
