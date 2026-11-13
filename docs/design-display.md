@@ -542,20 +542,30 @@ connection's end is not held by garbage.
 display it holds, `erx_pixels`, a process over a pure free list of the
 area's pages, `erx_pixels_core`. `alloc(Bytes)` answers the offset of a
 range of whole pages, zeroed, or `{error, enomem}`. The range belongs to
-the process that asked, which `erx_pixels` monitors, and goes back to
-the free list when that process exits, and in no other way: there is no
-`free`. So a range is reused only once its owner is gone, and nothing
-the next owner reads was written by the last. The owners are chosen so
-that an owner's exit means no one in the client can touch the range:
+the process that asked, which `erx_pixels` monitors, and its owner may
+lend it whole to one program at a time with `lend(Offset)` (below). It
+goes back to the free list once nothing holds it: its owner has exited
+and no lease of it is outstanding. It goes back in no other way: there
+is no `free`. So a range is reused only once its owner is gone and no
+program maps it, and nothing the next owner reads was written by the
+last. The owners are chosen so that an owner's exit means no one in the
+client can touch the range once its leases are returned:
 
 * a window's buffer for drawing in the runtime belongs to the window's
   holder, the process that opened it with `erx_win` (a widget server, a
   terminal, a draw connection), whose exit ends the window too;
-* a buffer mapped into a program belongs to the program's handler,
-  which exits only once the program's port has closed, after the
-  program's image has ended and its sub-space with it
-  ([design-programs.md](design-programs.md#a-programs-end)), so no
-  program still maps a page that is handed out again;
+* a buffer mapped into a program belongs to the program's handler, and
+  the program maps it from a lease, which the program driver returns
+  only after it has destroyed the program's anchor, which ends the image
+  and its sub-space ([design-programs.md](design-programs.md#a-programs-end)).
+  The range waits for that return however the handler ends, a crash
+  included. Neither the handler's exit nor the port's marks the moment
+  the program's mapping is gone. ERTS sends a linked port its exit while
+  it cleans up a dead process and does not wait for the port's stop
+  (`erl_process.c`, `erts_proc_exit_handle_link`), and a closing port's
+  monitors fire before its driver's stop runs (`io.c`,
+  `erts_deliver_port_exit`, then `terminate_port`). The lease's return
+  does mark it, so no program still maps a page that is handed out again;
 * a client that wants a buffer apart from any one window, such as a
   renderer's second buffer, starts a process to own it.
 
@@ -598,6 +608,155 @@ program's handler allocates such a buffer and owns it (above), at the
 size of the display's screen, as every window's buffer is, so a resize
 of the window changes the width and height the program is told and
 never the mapping.
+
+**The lease.** The program's mapping rests on one object, a **lease**:
+an object of the area's NIF that names one range of the area, through
+the slot of the area's object that the area's resource records from
+`map/4`, and keeps the area's resource with `enif_keep_resource`, as an image
+over the area does (`erx_area.h`), so the connection agent, which
+unmaps the area and answers that the connection is unmapped only once
+the resource's last reference is gone, waits for the program's mapping
+as it waits for an image's. A lease has a **holder**, the process the
+range belongs to, and is in one of three states:
+
+| State | Who has it | Leaves it |
+| --- | --- | --- |
+| held | the area NIF's table of leases, under a number of its own, from 1, that is never given again | to taken, when the start of a port whose owner is the holder takes it by that number; to returned, when the holder exits, which the lease's down callback learns from its monitor of the holder, or when the holder gives it back with `erx_pixels`'s `unlend(Lease)` |
+| taken | one program port's driver | to returned, when that driver has destroyed the program's anchor, or has undone a start that failed after the take |
+| returned | no one | never |
+
+A lease is a NIF resource of its own type, opened with a down callback
+for its monitor of the holder. Each state is left by one transition
+only, decided under the table's one lock, so a lease is taken at most
+once and returned exactly once, whichever of the holder's exit, a
+give-back, a take or the driver's end comes first. The transition into
+returned also removes the lease's entry from the table, so a returned
+lease's number names nothing. What follows a return, the message and
+`enif_release_resource`, runs after the lock is let go, since a
+release that ran the destructor under the lock would take it again.
+The driver takes and returns leases under its port's lock, so the one
+lock order is the port's lock, then the table's; the down callback and
+the give-back take the table's lock alone. Its return sends the process that made it, `erx_pixels`,
+`{erx_area_returned, Lease}`, as the area's end sends the agent
+`{erx_area_unmapped, Tag}`, and lets go of the area's resource. A held
+lease that no port takes is given back by its holder, or returned when
+the holder exits, as the range itself would be.
+
+The steps, each in the one place that serializes it:
+
+1. **Lend.** The handler calls `erx_pixels`'s `lend(Offset)`. The
+   allocator checks that `Offset` starts a range it handed to the
+   caller, and makes the lease with
+   `erx_area:lend(Area, Offset, Pages, Holder)`, for the whole range and
+   with the caller as holder. While an earlier lease of the range is
+   outstanding the allocator answers nothing yet, and makes the new
+   lease when that one's return arrives, so a handler that starts a
+   program again in the same buffer waits for the last program's
+   teardown instead of racing it. It answers `{ok, Lease, Pages}`, the
+   lease's number and the range's pages. Only `erx_pixels` calls
+   `erx_area:lend/4` and `erx_area:unlend/1`, so every lease is a whole
+   range of one owner, and the allocator knows of every lease before it
+   can be returned.
+2. **Take.** The handler names the buffer among the descriptors of
+   `erx_program:start/1`'s spec as `{N, {mem, Lease, Pages}}`, at most
+   one such entry, at the number `N` the program expects (3 for
+   `erx-lvgl`), and calls `start/1` itself, so the port's owner is the
+   lease's holder; with a `mem` entry the spec's handler is its caller.
+   `start/1` takes a `Lease` from 1 to 2^64 - 1 and `Pages` from 1 to
+   the pages `prog_mem_bytes` holds, and refuses anything else with
+   `badarg` before it opens the port. It writes the number and `Pages`
+   into the port's open command, as decimal words that the driver reads
+   as it reads the command's others, refusing a word above 2^64 - 1 or a
+   number of 0, and `Pages` into the startup message's descriptor. The
+   driver's start, which runs under the port's lock inside `open_port`
+   ([design-runtime.md](design-runtime.md#programs-as-ports)), takes the
+   lease as its first effect, with `erx_area_lease_take`, which answers
+   the lease only if it is held, its holder is the port's owner, as
+   `driver_connected` names it, and it spans `Pages`. A driver never
+   reads a term of the area: the number is all that crosses from Erlang
+   to the driver, and the area NIF hands the driver the lease, not the
+   area's capability. The table and its lock are made when the area
+   NIF loads; a take before then answers no lease without touching
+   either, as no lease can exist yet.
+3. **Map.** The start maps the leased pages, read-write, at the
+   program's **buffer place**, with `erx_area_lease_map`, after it
+   creates the image's space and before it maps the image.
+4. **Return.** The driver returns the lease with
+   `erx_area_lease_return` after its release has destroyed the
+   program's anchor, which ends every image of the program and every
+   mapping in them; in a start that fails after the take, the return is
+   the last undo, after the anchor's destroy when the anchor was made.
+   A start that fails returns the lease before `open_port` answers, so
+   the port's stop, which does nothing after a failed start, owes it
+   nothing. The release runs at the program's end, at `port_close/1`
+   and at the handler's exit, which closes the linked port, so every
+   way a program ends passes the return.
+5. **Give back.** A start that fails before its take, because
+   `start/1` refused the spec or the port did not open, leaves the
+   lease held. The handler gives it back with `erx_pixels`'s
+   `unlend(Lease)`, which returns a held lease of the caller's and does
+   nothing to one taken or returned, so after any failed start the
+   handler gives back without knowing how far the start went.
+
+**The allocator is not restarted over an area.** Its free list and its
+knowledge of outstanding leases live in its own state, so a second
+allocator over the same area would hand out ranges that programs still
+map and never hear of their returns. `erx_pixels` is therefore a
+significant child of the client's release: its exit ends the client
+domain, and what starts it again, where its manifest asks for that,
+starts a new domain with new connections and new, zeroed areas, the
+recovery that already exists for a domain. Holding
+each range as a NIF resource freed by its destructor would survive the
+allocator's restart, but would move the free list into C and make every
+range's life depend on garbage collection, where the owner's exit is
+the rule a maintainer reads today.
+
+The system domain therefore never deletes an area that a program still
+maps, on erXos's kernel, where memory mapped from a deleted object
+faults, and on the stopgap, whose delete removes every mapping of the
+object (`erx_fiasco_vm_object_revoke`). A program whose display dies
+goes on writing its buffer without a fault until its session ends it.
+
+The lease's number names a lease to the driver and grants nothing by
+itself: only the holder's own port takes it, so another process of the
+session that learns the number cannot map the range.
+
+The **buffer place** is the same in every program: from
+`prog_mem_base`, 0x7f00000000, for at most `prog_mem_bytes`, 1 GiB, two
+limits of `abi/protocols/prog.txt`. It holds the largest buffer, 16,384
+pixels square at 4 bytes a pixel. Its first page is below 2^32, as the
+startup message's page number needs. It lies inside the stopgap's task
+range, from 2^38 to 2^39 (`liberx/backend/fiasco/vm.h`, `vm.c`), above
+the address `task.ld` links a program at, 0x4000100000, so one value
+serves both kernels and no image of the boot image meets it.
+`erx_area_lease_map` reserves the lent range there with
+`ERX_VM_FIXED | ERX_VM_NOREPLACE` and maps the lease over it. Because
+the buffer is mapped before the image, an image that meets it fails the
+start with the loader's refusal of a range already mapped; on the
+stopgap, whose loader takes only fixed images and places them one load
+segment at a time (`service_task.c`), a segment that meets the buffer
+fails the start with `enomem`, and an image whose segments lie on both
+sides of the buffer runs with the buffer between them.
+
+`erx_area:lend/4` answers `{ok, Lease}`, `{error, einval}` for an
+`Offset` that is not a multiple of the page size, `Pages` of 0 or more
+than `prog_mem_bytes` holds, a range that passes the area's end,
+computed with checked arithmetic, and a read-only area, which is the
+display's, and `{error, noproc}`, making no lease, for a holder whose
+monitor cannot be set because it has exited already: a lease made for a
+dead holder would stay held for ever and keep the area mapped.
+`Offset` and `Pages` are integers from 0 to 2^64 - 1 and `Holder` a
+local pid: anything else, or an `Area` that is no area, is `badarg`, as
+`map/4`'s arguments are (`erx_area_nif.c`). `erx_pixels`'s
+`lend(Offset)` answers `{error, einval}` for an `Offset` that starts no
+range of the caller's; for a caller that exited while it waited it
+makes no lease, and its own monitor frees the range as any owner's exit
+does. `erx_area:unlend/1` answers `ok` whatever the lease's state, and
+`badarg` for a term that is no integer from 1 to 2^64 - 1.
+`erx_area_lease_take` answers no lease for a
+number with no held lease, a lease taken or returned, a holder that is
+not the port's owner and a lease of another length, and the driver's
+start then fails with `einval`.
 
 ### The window tree
 
@@ -2907,7 +3066,9 @@ grant carries as the `session` parameter
 **The pixel area**: the `pixels` parameter; the area as an object of a
 connection, in the connection's plan and its control record
 ([design-domains.md](design-domains.md#connections)); `erx_area:open/1`;
-`erx_memdraw:wrap/4`; a buffer's layout; the `mem` descriptor of a
+`erx_pixels`'s `alloc(Bytes)`, `lend(Offset)` and `unlend(Lease)`;
+`erx_area:lend/4` and `unlend/1`, the lease, its message
+`{erx_area_returned, Lease}` and the buffer place; `erx_memdraw:wrap/4`; a buffer's layout; the `mem` descriptor of a
 program's startup message
 ([design-programs.md](design-programs.md#the-startup-message)).
 
@@ -3349,17 +3510,83 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
     `wrap/4` without its bound check fails the second, and one without
     its alignment check fails the misaligned cases, which also run
     under UBSan's alignment check;
-  * `erx_pixels_core` over random sequences of `alloc` and owners'
-    exits: no two live ranges overlap, every range lies within the
-    area, and once every owner has exited one `alloc` of the whole area
-    succeeds; a free list that does not join neighbours fails the last;
+  * `erx_pixels_core` over random sequences of `alloc`, `lend`, owners'
+    exits and leases' returns: no two live ranges overlap, every range
+    lies within the area, a lent range stays out while either its owner
+    lives or its lease is outstanding, in both orders of the two ends,
+    and once every owner has exited and every lease returned one `alloc`
+    of the whole area succeeds; a free list that does not join
+    neighbours fails the last, and a seeded core that frees a lent range
+    at its owner's exit fails the third;
+  * `erx_pixels`'s `lend(Offset)` from the range's owner, from another
+    process, at an offset inside the range, and twice for one range
+    before the first lease returns: the first is lent and the rest are
+    refused with `einval`; a `lend` without its owner check fails the
+    second;
   * reuse: a range whose owner wrote a pattern and exited is handed to
     the next `alloc` all zero, where a seeded allocator that skips the
     zeroing fails; a program given a buffer, whose window then ends
     while the program runs, keeps a mapping no `alloc` hands out again
-    until its handler exits, so a second window's buffer never lies
+    until its lease is returned, so a second window's buffer never lies
     under the first program's mapping, where a seeded `erx_win` that
-    gives the range back at the window's end fails.
+    gives the range back at the window's end fails;
+  * `erx_area:lend/4` over ranges that end at the area's last page, one
+    page past it, with `Offset` plus the range's bytes past 2^64, at an
+    `Offset` one byte past a page boundary, with `Pages` of 0 and one
+    page past `prog_mem_bytes`, and over a read-only area: the first is
+    lent and the rest are refused with `einval`; a `lend/4` without its
+    bound check fails the second. A negative `Offset`, a negative
+    `Pages`, an `Offset` of 2^64, a float and a `Holder` that is no pid
+    are `badarg`, where a seeded `lend/4` that reads its integers as
+    signed fails;
+  * the lease's transitions, a pure function of the area NIF explored
+    on the host over every order of a take by the holder's port, a take
+    by another owner's port, a second take, a give-back, the holder's
+    exit and the driver's return: a lease is taken at most once, only by
+    its holder's port and only while held, and returned exactly once, by
+    the holder's exit or a give-back when held and by the driver when
+    taken; a seeded holder's exit that returns a taken lease fails it, as
+    a double return. A `lend/4` for a holder that has exited answers
+    `{error, noproc}` and leaves the table empty, and the area's
+    destructor then runs once its terms are dropped; a seeded `lend/4`
+    that ignores the monitor's failure leaves a held lease and fails it;
+  * `erx_pixels`'s `lend(Offset)` for a range whose last lease is taken
+    answers only after that lease's return, with the return held back
+    in the test until the call is waiting, and a `lend` after a
+    give-back answers at once; a seeded allocator that refuses a range
+    with a lease outstanding fails the first, and so the end to end runs
+    below, which lend the same range anew for each start, wait instead
+    of racing the last program's teardown;
+  * the program driver's start core, explored on the host over a failure
+    at every step with a lease and without one, and over every way a
+    started program ends (its exit, a fault, `port_close/1` and the
+    handler's exit, which closes the port): with a lease the take is the
+    first effect and its undo the last, the buffer step comes after the
+    image's space is created and before the image is mapped, and the
+    lease is returned exactly once, after the anchor's destroy in every
+    release and every undone start that made the anchor; a seeded core
+    that returns the lease before the anchor's destroy fails it, and one
+    whose close at the handler's exit skips the return fails it too;
+  * end to end, in the display suite, since `erx_area:open/1` answers
+    `{error, none}` in the system domain and the programs suite has no
+    display connection. A client session opens a window and starts a
+    test program three times, each with the window's buffer as
+    descriptor 3, lent anew each time, and drops every term of the area
+    it holds. In the first run the program maps the descriptor, writes
+    a pattern and exits 0, and the client presents the buffer, whose
+    screenshot through QMP shows the pattern; a program build whose C
+    library seam takes no call
+    ([design-programs.md](design-programs.md#the-posix-lite-personality))
+    fails its `mmap` and this run. In the second it stores one page
+    past its buffer's end and faults in its own sub-space, with the
+    session and the display running on; a driver that maps one page
+    more fails it. In the third it writes in a loop while the display
+    domain is killed; it runs on without a fault until the session ends
+    it, and its end is the session's stop, not a fault. A seeded driver
+    that returns the lease right after mapping fails the third run: the
+    connection's end deletes the area, and the program ends with a
+    fault on the stopgap, whose delete removes its mapping, as on
+    erXos's kernel.
 * **Presents.** Each passing case beside its seeded failure:
   * `erx_winctl`'s fuzz target over arbitrary lines, which asserts that
     every accepted line is a present within the grammar's bounds, with
@@ -3709,7 +3936,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
 | Only `erx_memdraw_draw` and `memdraw`, the shapes' one way to draw, call `memimagedraw`, and only `erx_draw_clip` makes the `erx_clip_t` it walks | `memdraw-clip` (tools/lib/erx/chokepoint_rules/memdraw.rb), over erXos's sources and its copy of `libmemdraw`: `memimagedraw` and `erx_clip_t` appear only in `draw.c`, `memdraw.h`, `erx_draw_clip.c` and `erx_memdraw.c` |
 | Only the functions that walk a checked rectangle touch pixel memory: `libmemdraw`'s draw, load, unload, cload and allocation, and `erx_memdraw`'s snapshot | `memdraw-pixels`: `bdata`, `byteaddr` and `wordaddr` appear only in their files, so a shape, the NIF or new code that writes pixels itself fails the build |
 | Only an image resource's destructor frees an image a term can reach or lets go of the memory it lies over | `memdraw-free`: `erx_memdraw_free` is called only from the NIF, by `image_dtor` and by the test-only `cload` for the image it made itself |
-| Only the connection agent, `erx_connections`, maps a pixel area, so every mapping is one the agent waits for before it answers that the connection is unmapped, and the display's mapping is the read-only one the agent asked for | `area-mappers` (tools/lib/erx/area_mappers.rb), over the Erlang sources of `otp/` and `erlang/`: outside `erx_area` and `erx_connections`, the atom `erx_area` appears only as the module of `open/1` and of the type `area()`, so `map/4` as a call, a fun, an apply's arguments, an import, a macro, a literal or a string fails the build |
+| A pixel area is mapped in two places, into the runtime by the connection agent, `erx_connections`, and into a program's sub-space from a lease, and a lease is a whole range of one owner, made by `erx_pixels`. So every mapping is one the agent waits for before it answers that the connection is unmapped, the display's mapping is the read-only one the agent asked for, and a program maps only its handler's buffer | `area-mappers` (tools/lib/erx/area_mappers.rb). Over the Erlang sources of `otp/` and `erlang/`: outside `erx_area` and `erx_connections`, the atom `erx_area` appears only as the module of `open/1` and of the type `area()`, and in `erx_pixels` as the module of `lend/4` and `unlend/1` too, so `map/4` anywhere, or `lend/4` or `unlend/1` outside `erx_pixels`, as a call, a fun, an apply's arguments, an import, a macro, a literal or a string fails the build. Over the C of `otp/erts/emulator`: `erx_area_lease_take`, `erx_area_lease_map` and `erx_area_lease_return` are called only from `erx_program_drv.c`, and a seeded call of each from another file fails it |
 | Only `erx_memdraw:wrap/4` makes an image over memory `erx_memdraw` did not allocate, and only after checking the range | a source check over the NIF: the one site that sets an image's data pointer from an area or a device's region ([design-runtime.md](design-runtime.md#the-device-nif), Regions) |
 | Only `erx_screen` writes the screen image, makes images over clients' pixel areas, and calls the display driver's `flush/3` and `power/2` | an xref check over the display release |
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |
@@ -3718,7 +3945,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
 | The display release holds no draw decoder, picture or font reader, widget module or renderer, and starts no program | an xref check that the display release contains none of `erx_draw_core`, `erx_draw_codec`, `erx_draw_image`, `erx_font`, `erx_png`, `erx_inflate` and the `erx_ui` application, and calls no function that starts a port or a sub-space; a seeded dependency on each fails it |
 | Only `erx_winctl` reads a `ctl` line, and only `erx_wctl` a `wctl` line | a source check over the display release |
 | Only the generated `erx_draw_codec` decodes draw bytes, and only the generated reader decodes the native renderer's events and reports | the generated tree's determinism test, and a source check that no other module reads those bytes |
-| Only a session's program builder maps pages of a pixel area into a sub-space, and only the pages of one buffer | a source check over the session's release: one call site, whose range is a buffer's |
+| Only `erx_area_lease_map` maps memory into a space other than the runtime's own, and it maps only its lease's range, read-write, at the buffer place | the C half of `area-mappers`, over every C file of `otp/erts/emulator`: an `erx_vm_map` whose space is not `ERX_CAP_SELF` appears only in `erx_area_lease_map`, so no other mapper, whatever slot it is handed, maps into a program; a seeded such call in `erx_program_drv.c` fails it |
 | Only `erx_render` writes the link and input-context sequences | a source check for the `erx:` URI prefix |
 | `erx_term` and `erx_ui_server` call no facet | an xref check that neither module nor its callees reach `erx_facet` clients |
 | Attributed text in a window passes through `erx_text:escape_line/1` | the source check of V9 extended to `erx_wm_menu` in the display release and to `erx_ui_erlang` and `erx_ui_lvgl` in the widget application |

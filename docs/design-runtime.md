@@ -1529,13 +1529,21 @@ applied in this order, each step undoing the ones before it on failure:
 1. **Validate.** The spec names the image, a program of the boot image or
    a file object the session holds through an `rx` grant; the handler, a
    process of the session (the owner by default); the parent of the
-   program's anchor; the pipe ends and descriptors the program inherits;
+   program's anchor; the pipe ends and descriptors the program inherits,
+   a window's buffer among them as `{mem, Lease, Pages}`, the number
+   of a lease its caller holds, in which case the handler is the owner
+   and no other process
+   ([design-display.md](design-display.md#the-pixel-area));
    what its startup message carries, which `erx_program:start/1` checks
    with the program protocol's generated grammar before it opens the
    port, with the longest encoding of each capability value standing in
    for the values the install makes; the size of its data area; and the
    guarantee and cap of its budget and the limits of its group, which lie
    within the session's pool for programs and the session's grant.
+   Once the spec is valid and names a buffer, the start takes its lease
+   with `erx_area_lease_take`, which answers it only to the port of the
+   lease's holder; the take is the start's first effect, so its undo,
+   the lease's return, is the last.
 2. **Create the channel and the data area**: two sides and two
    doorbells, in the side layout of a connection, each side written by
    one party and mapped read-only by the other
@@ -1566,7 +1574,10 @@ applied in this order, each step undoing the ones before it on failure:
    worker under the session's doorbell of step 2, so no record of the program's spaces
    arrives before a port listens for it
    ([The event table](#the-event-table)).
-4. **Map the image.** A program of the boot image is mapped from its
+4. **Map the image.** A window's buffer the port took a lease of is
+   mapped first, its pages read-write at the buffer place, with
+   `erx_area_lease_map`; the port keeps the lease until the release has
+   destroyed the anchor, which ends the mapping, and then returns it. A program of the boot image is mapped from its
    slices with `erx_image_map`, its code shared with every program that
    runs it; an executable file runs the boot image's loader, `erx_exec`,
    mapped the same way, which once it runs in the image checks the file

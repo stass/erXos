@@ -475,15 +475,25 @@ ABI's `page_size`, so at the address `Page` times the page size and for
 `Pages` times it in bytes. The range is given in pages because every
 64-bit integer of the profile is a capability
 ([design-abi.md](design-abi.md#program-protocol)); the session places the
-mapping at a first page below 2^32, so it starts below 2^44 bytes, and
-page 0 is never mapped. It holds the pages of a window's buffer, for a program that
-renders into its window
-([design-display.md](design-display.md#the-pixel-area)). The program
-holds no capability to that memory. `mmap` of the descriptor with
-`MAP_SHARED` alone, offset 0, a length of at most its bytes and no
-protection beyond read and write returns its address, `fstat` reports
-its bytes as its size, and `read`, `write` and
-`lseek` on it fail with `ESPIPE`. It names a mapping of this one
+mapping at the buffer place, from `prog_mem_base`, whose first page is
+below 2^32, and page 0 is never mapped. It holds the pages of a window's
+buffer, for a program that renders into its window
+([design-display.md](design-display.md#the-pixel-area)), and a program
+has at most one. The program holds no capability to that memory. `mmap`
+of the descriptor with `MAP_SHARED` alone, offset 0, a length of at most
+its bytes and no protection beyond read and write returns its address,
+`fstat` reports its bytes as its size, and `read`, `write` and `lseek`
+on it fail with `ESPIPE`. The mapping is the session's: while the
+program holds a descriptor of it, `munmap` of a range inside it returns
+0 and unmaps nothing, where POSIX would unmap, and a `munmap`, or an
+`mmap` with `MAP_FIXED`, whose range meets it any other way fails with
+`EINVAL`, so the descriptor's `mmap` never returns an address that
+holds something else. `munmap`'s own checks come first: a length of 0,
+a length that overflows when rounded up to whole pages, an address
+not on a page boundary, and a range whose end, the address plus the
+rounded length computed with checked arithmetic, passes 2^64, fail with
+`EINVAL` as for any `munmap`, and only then is the range compared with
+the mem range. It names a mapping of this one
 sub-space, so a spawn's `Start` cannot name one, `fork` does not copy
 it and `erx_exec` closes it. `sigmask` and
 `sigignore` follow POSIX's rule for `posix_spawn`: the program starts with
@@ -791,8 +801,10 @@ file's open-file description in the session; a directory, an open;
 `null`; a terminal, an open on the session's `/dev/tty`
 or, in the second tier, on a pseudo-terminal; in the second tier, a
 socketpair end, the read end of one pipe and the write end of another
-([Passing descriptors](#passing-descriptors)); and a socket, an open of
-a socket's open-file description. Each operation is a `switch` on the kind with no
+([Passing descriptors](#passing-descriptors)); a socket, an open of
+a socket's open-file description; and a mem range, memory the session
+mapped into the image, which the object names and never unmaps ([The
+startup message](#the-startup-message)). Each operation is a `switch` on the kind with no
 default arm, so adding a kind makes the compiler name every operation
 that must handle it. The table has one lock, which guards its slots, each
 object's count of references and the list of the objects alive, which an
@@ -1083,7 +1095,7 @@ reserved:
 | 3 | the starter's handler: **validate** | checks the frame against the protocol's grammar and bounds, the requester's right to start commands, its `children` quota and its principal's `programs` quota, and that every end and open the request names is in the requester's table | nothing to undo; `EPERM` without the right, `EAGAIN` at a quota, `EBADF` for an end or open the requester does not hold |
 | 4 | the starter's handler: **resolve** | resolves `Path` through the requester's namespace to an image ([What a program can start](#what-a-program-can-start)); for an executable file, the handler makes its image check and a filler opens it for reading, and the command server makes or finds its code object ([File objects](#file-objects)) | nothing to undo, since a code object belongs to the cache; `ENOENT` for an unknown command, `EACCES` for a file without `rx`, `ETXTBSY` for a file that keeps changing while it is read |
 | 5 | the command server, the program's handler, the pipe server: **reserve** | the command server assigns the next process id, records the program in the starter's job and creates the program's handler, which builds the record: it clones at each server, with a `walk` of no names, a grant for each entry of the requester's namespace, with the requester's rights there, and gives the program an open of its own naming the open-file description of each file, directory, terminal and socket open it hands on, which asks no server anything ([design-files.md](design-files.md#narrowing-for-a-program), [Descriptors and files](#descriptors-and-files)), copies the requester's rights beyond files and its right to start commands, and has the pipe server make an end of the same kind for each pipe end the request names ([design-pipes.md](design-pipes.md#inherited-ends)) | the command server marks the id dead, never to be given again, and drops the job's record; the handler clunks the grants it made, drops the opens it made, and tells the pipe server the ends are gone; `EMFILE` beyond a pipe's read ends, a server's error for a grant it refuses |
-| 6 | the program's handler, through the port driver: **build** | hands the port driver one plan, which it validates whole and then applies. The plan first creates the channel and the data area from the session's own budget, since the session maps both and deletes them only after the program's budget. It then carves the program's budget from the session's pool for programs, with the floor as its guarantee and the cap the spec gives it, creates its group under the programs group, and creates the anchor, with the starter's anchor or the session's space as parent, the session's fault gate and a label of its own, and the image below it under another; the driver allocates both labels and never reuses them. It then maps the image, a program command's slices from the boot image with `erx_image_map`, or the loader `erx_exec` from the boot image for an executable file; installs into the image's table the budget, the group, the channel's two sides and the session's doorbell, the data area, each pipe end's copies as the pipe server handed them, and the code object for `erx_exec`; binds the program's doorbell to its group; and creates the first thread, stopped, with the values of the budget, the group, the channel's two sides and the session's doorbell in its argument registers | the plan is undone, the anchor stopped and released, which releases the image, and then step 5's reservations as there; `EAGAIN` for a program nested deeper than the kernel's 64 levels of spaces allow, about 60 generations of programs, `ENOMEM` for the session's budget |
+| 6 | the program's handler, through the port driver: **build** | hands the port driver one plan, which it validates whole and then applies. The plan first creates the channel and the data area from the session's own budget, since the session maps both and deletes them only after the program's budget. It then carves the program's budget from the session's pool for programs, with the floor as its guarantee and the cap the spec gives it, creates its group under the programs group, and creates the anchor, with the starter's anchor or the session's space as parent, the session's fault gate and a label of its own, and the image below it under another; the driver allocates both labels and never reuses them. For a program given a window's buffer, it then maps the buffer's pages, read-write, at the buffer place of the image, from the lease the spec names, which the plan takes first, so that its return is the last undo, and keeps it until the anchor is released ([design-display.md](design-display.md#the-pixel-area)). It then maps the image, a program command's slices from the boot image with `erx_image_map`, or the loader `erx_exec` from the boot image for an executable file; installs into the image's table the budget, the group, the channel's two sides and the session's doorbell, the data area, each pipe end's copies as the pipe server handed them, and the code object for `erx_exec`; binds the program's doorbell to its group; and creates the first thread, stopped, with the values of the budget, the group, the channel's two sides and the session's doorbell in its argument registers | the plan is undone, the anchor stopped and released, which releases the image and the buffer's mapping, the lease returned, and then step 5's reservations as there; `EAGAIN` for a program nested deeper than the kernel's 64 levels of spaces allow, about 60 generations of programs, `ENOMEM` for the session's budget |
 | 7 | the program's handler | writes the startup message into the image's inbound lane, with the program's `pid`, `ppid` and `pgid`, the data area's value, each descriptor's values in the program's table, and for `erx_exec` the code object's value as `image` | none: the lane is the session's own memory |
 | 8 | the session's job table, then the program's handler | when the program's starter is paused for its job, or the shell starts it for a job it has stopped, the port driver pauses the image first ([Job control](#job-control)); the handler then has the port driver start the first thread | `ERX_EDEAD` when the program was stopped first, by a kill or by its parent's or session's end: the starter still gets `{ok, Pid}`, then the child's end as `SIGKILL` |
 | 9 | the starter's handler, then the program | the handler answers `{ok, Pid}`, before any report about the child, so the reply that introduces a child always precedes the child's states. `liberx`'s start-up runs on the first thread, a worker: it maps the channel, starts the event executor and waits on a umtx word; the event executor takes the startup message from the inbound lane, copying it out as it is published and checking it, builds the descriptor table from it, mapping its pipe ends, before it reads the reports that follow, which may name those ends, and wakes the first thread, which maps the data area, sets its mask, arms itself for vCPU upcalls with its signal IRQ object and calls `main` | a malformed message ends the program with status 127 before `main` and without a line, since its descriptors come only from a message `liberx` accepted ([design-abi.md](design-abi.md#program-protocol)) |
@@ -2738,7 +2750,17 @@ define it.
   other flag at the first `F_SETFL` that changes it and keeps its locks
   on the first), `fcntl`'s record locks, which end at every close of a
   descriptor of their file, `lseek` through the description's offset,
-  and `pread` and `pwrite` at explicit offsets.
+  and `pread` and `pwrite` at explicit offsets. musl reaches the table
+  through one seam of the C library, which only a program's build fills
+  with `liberx`'s program layer: every call that names a descriptor goes
+  there, `mmap` of a descriptor and `fstat` among them, and so does every
+  `munmap` and every `mmap` with `MAP_FIXED`, which the table checks
+  against a mem range before the memory call runs. In a program the
+  table answers every descriptor call, and a descriptor it does not
+  hold is `EBADF`, never the console, so a program writes only where its
+  session gave it descriptors. ERTS, the root and the test tasks link an
+  empty seam, which takes no call
+  ([design-stopgap.md](design-stopgap.md#musl-over-the-backend)).
 * **Processes.** `posix_spawn` and `posix_spawnp` are the spawn request.
   The child inherits every descriptor without `FD_CLOEXEC`, each pipe end
   as an end the session's pipe server makes for it, and each file as an
@@ -3131,7 +3153,15 @@ terminal cases.
   that a plan's segments lie inside the file and its range, none is
   writable and executable, and no relocation writes a code segment; the
   descriptor table's `dup`, `close` and `FD_CLOEXEC` rules against a
-  model; the line discipline's state machine against a model of POSIX's
+  model; a mem range's memory rules, where a `munmap` inside the range
+  returns 0 and a pattern written before it reads back after it, a
+  `munmap` one page across either end of the range and an `mmap` with
+  `MAP_FIXED` inside it fail with `EINVAL`, as do a `munmap` inside the
+  range at an address one byte past a page boundary, one of length 0
+  and one whose end passes 2^64, and a `munmap` of the range
+  after the last descriptor of it closed releases it, with a seeded
+  table that passes the inside `munmap` on to the release failing the
+  read-back; the line discipline's state machine against a model of POSIX's
   general terminal interface; the handler's owed frames against a model
   of a program that reads its lane at random, never, or in bursts, with
   the properties that the handler never blocks, never owes more than its

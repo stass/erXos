@@ -1358,8 +1358,8 @@ land after M11 repeat M11's closure over what they add.
    an image over the memory the device shows; `erx_winfs` with the window
    tree, the `windows` interface of `abi/services/windows.txt`,
    `erx_window` and the `present` command; the single policy. The client
-   library `erx_win` with `erx_pixels`, whose ranges go back only when
-   their owner exits, zeroed. The display's session: a manifest start
+   library `erx_win` with `erx_pixels`, whose ranges go back, zeroed, only
+   once their owner has exited and every lease of them is returned. The display's session: a manifest start
    row naming a principal and the display, from track A's first part,
    whose keeper starts the session at boot step 5 and again within the
    row's intensity, and the `session` parameter the domain service sets

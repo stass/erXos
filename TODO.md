@@ -1315,6 +1315,14 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Medium] programs, a program's writes to 1 and 2 reach the system console (`liberx/backend/fiasco/program_task.c`,
+  `erx_fiasco_libc_write`; `musl/src/internal/erxos/syscall.c`, `console_write`): musl has no descriptor seam yet,
+  so a program's `write` to 1 or 2 goes to the console through the service whatever its session installed, and a
+  program that closes 1 still reaches it. The target (design-stopgap.md, "musl over the backend";
+  design-programs.md, "The POSIX-lite personality") is the seam into the program layer's table, where a descriptor
+  the table does not hold is `EBADF`, with the session installing standard output and error as pipe ends or
+  terminal opens. Remove `program_task.c`'s console stand-in when the seam lands. No test program of the programs
+  suite (`test/guest/programs`) writes to 1 or 2, so none depends on the stand-in.
 * [Medium] device-tree reader, split DMA translations (`kernel/core/dt.c`, `range_read`): a translation written as
   several adjacent `dma-ranges` entries, as a full 32-bit identity map under a one-cell `#size-cells` must be,
   leaves several windows with RAM behind them, and the device gets `ranges` (no DMA range). It fails safe. Merge
