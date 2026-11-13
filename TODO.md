@@ -702,6 +702,10 @@ it; git history is the record of completed work.
   its own test manifest (`Erx::Apps::SPLIT`: root takes three quarters, the app the last quarter). Once decided,
   record it in docs/design-apps.md or docs/design-system.md, fix the example and put the split in the board
   manifests.
+* [Medium] `erx_starter:manifest_table/1`, which reads the start rows, the principals and each session template's
+  grants from the system manifest, has no host test over a packed manifest with a `start` row; only the `apps`
+  QEMU suite (`tools/lib/erx/apps.rb`) reads one. Its grants are every service a template is granted, not only
+  `windows` services, as the domain service's own check is.
 * [Low] `erx_starter` review residuals (A5): no deadline on the `rc.conf` process's file operations
     (`erx_starter_rc`), so a hung storage operation queues every later command and holds a restart of the keepers'
     branch and the application's stop, which wait for the operation in progress (a deadline needs a way to cancel a rename already sent,

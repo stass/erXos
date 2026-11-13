@@ -41,6 +41,17 @@ module Erx
   # * unlisted: no `start` row: no session but root's console login (AP2), and
   #   /proc/apps has no clock.
   #
+  # Then the kept image boots three times from one copy of its medium (CHAIN), so what
+  # `service` wrote to rc.conf on /data is what the next boot reads:
+  #
+  # * disable: once clock's row is running and its session has reported (CLOCK_UP),
+  #   `service clock disable` at root_1's command shell says so, and
+  #   /proc/apps/clock/status gives the row disabled.
+  # * reenable: the row the manifest enables is disabled by rc.conf alone, so no session
+  #   of clock starts (NO_CLOCK); `service clock enable` then starts one.
+  # * enabled: clock's session starts again with no command, so rc.conf now enables
+  #   the row that the reenable boot found it disabling.
+  #
   # The report lines of clock's sessions arrive whenever their sessions get their
   # grants, interleaved with root's login, so they are read from the whole serial log
   # once a boot has ended (reports!) rather than as checkpoints.
@@ -68,52 +79,12 @@ module Erx
     CONNECTIONS = 4
     TEMPLATE_ARGS = '-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx ' \
                     '-eval ok=application:start(erx_session)'
-    # The principals' grants together fit within the users share (manifest property 4),
-    # which the system principal takes whole in the development manifest, and users cannot
-    # grow, since the system and users shares fill the machine's CPUs. How users is divided
-    # among principals is not settled (TODO.md), so this split is the suite's own: root is
-    # three quarters of users, and the system principal, its native profile and the session
-    # share are moved onto it, because each profile must fit within its principal's grant;
-    # app is the last quarter, clock's, on the CPU sessions run on.
-    # The configured domains' profiles (storage, network) keep users, since a configured
-    # domain's grant fits within the system share, not its principal's (dom_check_grants).
-    # SHARES follows the share web.
-    SHARES = <<~ROWS.freeze
-      share root
-        quota_ns 7500000
-        period_ns 10000000
-        cpuset 15
-        capacity_mcpu 750
-        capacity_first 0
-        slice_us 1000
-        grace_us 5
-        base 16
-        ceiling 31
-        flags none
-      share app
-        quota_ns 2500000
-        period_ns 10000000
-        cpuset 1
-        capacity_mcpu 250
-        capacity_first 0
-        slice_us 1000
-        grace_us 5
-        base 16
-        ceiling 31
-        flags none
-    ROWS
-    # Each edit of the development manifest's text for the split: a line that occurs
-    # exactly once, and what its value becomes.
-    SPLIT = { /^(limits native\n(?:  .*\n)*?  grant @share\.)users$/ => 'root',
-              /^(principal system\n(?:  .*\n)*?  grant @share\.)users$/ => 'root',
-              /^(share session\n  quota_ns )10000000$/ => '7500000',
-              /^(share session\n(?:  .*\n)*?  capacity_mcpu )1000$/ => '750' }.freeze
     APP = <<~ROWS.freeze
       limits app
         memory #{LIMITS_MEMORY}
         outer #{LIMITS_OUTER}
-        grant @share.app
-        spaces @share.app
+        grant @share.users
+        spaces @share.users
         lane 65536
         connections 4
         crash 0
@@ -123,7 +94,7 @@ module Erx
         peer_held_total 4096
       principal #{PRINCIPAL}
         memory #{MEMORY}
-        grant @share.app
+        grant @share.users
         domains #{DOMAINS}
         names 4
         default_limits @limits.app
@@ -163,7 +134,8 @@ module Erx
     # clock's sessions has a pid other than Old and answers it, `timeout` after N polls
     # 500 ms apart; CkState(Want, N) polls the same way until /proc/apps's row clock is
     # in state Want; CkLog(N) polls the kernel log the same way until a report of clock's
-    # sessions is in it.
+    # sessions is in it; CkRc() is whether the row is enabled and which of its fields
+    # rc.conf set, rather than the manifest's start row.
     HELPERS = 'CkDoms = fun() -> erx_domain_core:domains(maps:get(core, sys:get_state(erx_domain_srv))) end, ' \
               'CkPid = fun CkF(_, 0) -> timeout; CkF(CkOld, CkN) -> ' \
               'case [CkP || #{origin := {session, _}, node := CkNode, pid := CkP} <- CkDoms(), is_pid(CkP), ' \
@@ -175,7 +147,10 @@ module Erx
               '_ -> timer:sleep(500), CkS(CkWant, CkN - 1) end end, ' \
               'CkLog = fun CkL(0) -> timeout; CkL(CkN) -> case file:read_file("/proc/kernel/log") of {ok, CkB} -> ' \
               'case binary:match(CkB, <<"erx_clock_test: {clock_", "report,">>) of ' \
-              'nomatch -> timer:sleep(500), CkL(CkN - 1); _ -> reported end; CkE -> CkE end end, '
+              'nomatch -> timer:sleep(500), CkL(CkN - 1); _ -> reported end; CkE -> CkE end end, ' \
+              "CkRc = fun() -> case erx_inspector:inspect([apps, <<\"#{PRINCIPAL}\">>]) of " \
+              '{ok, #{attrs := #{enabled := {_, {ok, CkEn}}, local := {_, {ok, CkLo}}}}} -> {CkEn, CkLo}; ' \
+              'CkO -> CkO end end, '
     # The row running and its session's report in the kernel log, which the console
     # also prints (CLOCK_REPORT), so the session lived to report; the configured
     # domains' grants the domain service holds for that session, each with its state
@@ -206,26 +181,46 @@ module Erx
     # Every poll of KILL_CLOCK at its limit, 500 ms each, and a minute more, so a step
     # that times out answers `timeout` in the line rather than the checkpoint expiring.
     KILL_SECONDS = (((4 * 600) + 20 + 240) / 2) + 60
-    # The sessions the domain service holds 20 s after the start service has made its
-    # table, time enough for a kept session to get a domain, and what /proc/apps says
-    # of clock's row: the state disabled for a row left off, the error scope where no
-    # row exists.
-    NO_CLOCK = "#{HELPERS}CkMade = fun CkM(0) -> timeout; CkM(CkN) -> case erx_inspector:inspect([apps]) of " \
-               '{ok, #{children := CkC}} when is_list(CkC) -> made; _ -> timer:sleep(500), CkM(CkN - 1) end end, ' \
-               'CkMade(240) =:= made orelse exit(unmade), timer:sleep(20000), ' \
+    # The sessions the domain service holds 20 s after the start service has read
+    # rc.conf, time enough for a kept session to get a domain, and what /proc/apps says
+    # of clock's row: for a row left off, the state disabled and the fields rc.conf set,
+    # and the error scope where no row exists. It waits for rc.conf to be read, not only
+    # for the table to be made: while rc.conf cannot be read the table holds the
+    # manifest's rows alone, which would start a row that rc.conf disables.
+    NO_CLOCK = "#{HELPERS}CkRead = fun CkM(0) -> timeout; CkM(CkN) -> case erx_inspector:inspect([apps]) of " \
+               '{ok, #{attrs := #{rc_conf := {_, {ok, read}}}}} -> read; _ -> timer:sleep(500), CkM(CkN - 1) end end, ' \
+               'CkRead(240) =:= read orelse exit(unread), timer:sleep(20000), ' \
                "CkRow = case erx_inspector:inspect([apps, <<\"#{PRINCIPAL}\">>]) of " \
-               '{ok, #{attrs := #{state := {_, {ok, CkSt}}}}} -> CkSt; CkO -> CkO end, ' \
+               '{ok, #{attrs := #{state := {_, {ok, CkSt}}, local := {_, {ok, CkLo}}}}} -> {CkSt, CkLo}; ' \
+               'CkO -> CkO end, ' \
                "io:format(\"~0p~n\", [{no_clock, lists:sort([CkName || \#{origin := {session, _}, node := CkName} <- CkDoms()]), CkRow}]).\r"
-    NO_CLOCK_ANSWER = { disabled: '{no_clock,[root_1@erxos],disabled}',
+    NO_CLOCK_ANSWER = { disabled: '{no_clock,[root_1@erxos],{disabled,[]}}',
+                        reenable: '{no_clock,[root_1@erxos],{disabled,[enable]}}',
                         unlisted: '{no_clock,[root_1@erxos],{error,scope}}' }.freeze
+    # The row running and its session's report in the kernel log, polled as KILL_CLOCK
+    # polls them, and then whether the row is enabled and by what (CkRc): by the
+    # manifest alone before any `service` command, by rc.conf once `enable` has written
+    # it. CLOCK_UP_POLLS is for a shell where HELPERS is already bound, since binding
+    # its variables again to new funs would not match.
+    CLOCK_UP_POLLS = "io:format(\"~0p~n\", [{clock_up, CkState(running, 600), CkLog(600), CkRc()}]).\r"
+    CLOCK_UP = "#{HELPERS}#{CLOCK_UP_POLLS}"
+    CLOCK_IS_UP = { disable: '{clock_up,running,reported,{true,[]}}',
+                    reenable: '{clock_up,running,reported,{true,[enable]}}',
+                    enabled: '{clock_up,running,reported,{true,[enable]}}' }.freeze
+    CLOCK_UP_SECONDS = ((600 + 600) / 2) + 60
     # At root_1's command shell (docs/design-apps.md, "Interfaces").
     SERVICE_GHOST = "service ghost enable || echo ghost-refused\r"
     GHOST_WHY = 'service: ghost does not exist in the system manifest'
     SERVICE_STATUS = "service #{PRINCIPAL} status || echo status-failed\r"
     STATUS_DOWN = "#{PRINCIPAL} is not running (down)."
     # The row's record at /proc/apps/clock/status, one attribute a line (erx_procfs_core).
-    PROC_DOWN = "grep '^state' /proc/apps/#{PRINCIPAL}/status\r"
-    PROC_STATE = /\Astate\tdown\t[^\t\r\n]+\r*\n\z/n
+    PROC_GREP = "grep '^state' /proc/apps/#{PRINCIPAL}/status\r"
+    # `service NAME enable` and `disable` print the file they changed, then the echo
+    # says the command's status was 0.
+    SERVICE_DISABLE = "service #{PRINCIPAL} disable && echo disable-done\r"
+    SERVICE_ENABLE = "service #{PRINCIPAL} enable && echo enable-done\r"
+    DISABLED_IN = "#{PRINCIPAL} disabled in /apps/rc.conf"
+    ENABLED_IN = "#{PRINCIPAL} enabled in /apps/rc.conf"
     # `service -e`: the configured domains, then the enabled rows, a row that is down
     # among them, with status 0.
     SERVICE_E = "service -e && echo service-listed\r"
@@ -236,8 +231,10 @@ module Erx
     CLOCK_REPORT = /space [0-9]+: notice: erx_clock_test: \{clock_report,#{PRINCIPAL}_[0-9]+@erxos,\[data\],true,\{error,enoent\},ok\}/n
     ANY_REPORT = /space [0-9]+: notice: erx_clock_test: \{clock_report,/n
     TIMED_OUT = /space [0-9]+: notice: erx_clock_test: \{clock_report,[^,]+,timeout\}/n
-    # Any line of the app's, its start's among them.
-    ANY_LINE = /space [0-9]+: [a-z]+: erx_clock_test: /n
+    # Any line of the app's, its start's among them, or any line naming a node of
+    # clock's sessions, which a session the start service stopped before its app
+    # logged anything may still have left.
+    ANY_LINE = /space [0-9]+: [a-z]+: erx_clock_test: |#{PRINCIPAL}_[0-9]+@erxos/n
 
     module_function
 
@@ -245,12 +242,13 @@ module Erx
 
     def line(text) = SessionDomain.line(text)
 
+    # PROC_GREP's answer for a row in state, then its reporter's label.
+    def proc_state(state) = /\Astate\t#{Regexp.escape(state)}\t[^\t\r\n]+\r*\n\z/n
+
     # The development manifest source with clock's principal, template and data grant,
     # the start row of boot (START), and the machine grown to hold clock's sessions.
     def manifest(source, boot:)
-      split = SPLIT.reduce(source) { |text, (pattern, value)| edit_once(text, pattern) { value } }
-                   .then { |text| edit_once(text, /^(share web\n(?:  .*\n)*)/) { SHARES } }
-      grown = GROWTH.reduce(split) do |text, (pattern, growth)|
+      grown = GROWTH.reduce(source) do |text, (pattern, growth)|
         edit_once(text, pattern) { |match| Integer(match[2], 10) + growth }
       end
       grown + APP + START.fetch(boot)
@@ -264,63 +262,132 @@ module Erx
       text.sub(pattern) { "#{Regexp.last_match(1)}#{yield Regexp.last_match}" }
     end
 
-    # The production checkpoints to the system's command shell, then root_1's command
-    # shell, and the steps of boot.
+    # The production checkpoints to the system's command shell, then, in every boot,
+    # root_1's command shell refusing ghost and the system's Erlang shell started from
+    # the console's Ctrl-G menu, and the steps of boot from that Erlang shell on.
+    #
+    # A checkpoint's type is typed once its pattern is seen, so a step that ends at one
+    # shell types CTRL_G, and the next step, to_session or to_system, takes the menu.
     def checkpoints(points, boot:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
-      shell = ProductionImage::Run::ERLANG_SHELL
-      steps = boot == :kept ? kept_steps(shell) : no_clock_steps(shell, boot)
+      erlang = ProductionImage::Run::ERLANG_SHELL.merge(name: 'system-erlang-shell').freeze
+      steps = case boot
+              in :kept then kept_steps(erlang)
+              in :disabled | :unlisted then no_clock_steps(erlang, boot)
+              in :disable then disable_steps(erlang)
+              in :reenable then reenable_steps(erlang)
+              in :enabled then enabled_steps(erlang)
+              end
       [*points, SessionDomain.session_shell('root_1-shell', SERVICE_GHOST),
        { name: 'ghost-why', pattern: line(GHOST_WHY), seconds: 60 }.freeze,
        { name: 'ghost-refused', pattern: line('ghost-refused'), seconds: 60, type: CTRL_G }.freeze,
-       { name: 'system-menu', pattern: CTRL_G_MENU, seconds: 30, type: 's' }.freeze,
-       { name: 'system-shell', pattern: MENU_LEFT, seconds: 30, type: ERL }.freeze,
+       *to_system(ERL, name: 'system'),
        *steps].freeze
     end
 
-    def kept_steps(shell)
-      [shell.merge(name: 'system-erlang-shell', type: KILL_CLOCK).freeze,
+    def kept_steps(erlang)
+      [erlang.merge(type: KILL_CLOCK).freeze,
        { name: 'clock-killed', pattern: answer(KILLED), seconds: KILL_SECONDS, type: CTRL_G }.freeze,
-       { name: 'session-menu', pattern: CTRL_G_MENU, seconds: 30, type: '1' }.freeze,
-       { name: 'session-shell', pattern: MENU_LEFT, seconds: 30, type: SERVICE_STATUS }.freeze,
+       *to_session(SERVICE_STATUS),
        { name: 'status-down', pattern: line(STATUS_DOWN), seconds: 60 }.freeze,
-       { name: 'status-failed', pattern: line('status-failed'), seconds: 60, type: PROC_DOWN }.freeze,
-       { name: 'proc-down', pattern: PROC_STATE, seconds: 60, type: SERVICE_E }.freeze,
+       { name: 'status-failed', pattern: line('status-failed'), seconds: 60, type: PROC_GREP }.freeze,
+       { name: 'proc-down', pattern: proc_state('down'), seconds: 60, type: SERVICE_E }.freeze,
        { name: 'service-e-clock', pattern: line(PRINCIPAL), seconds: 60 }.freeze,
        { name: 'service-listed', pattern: line('service-listed'), seconds: 60 }.freeze]
     end
 
-    def no_clock_steps(shell, boot)
-      [shell.merge(name: 'system-erlang-shell', type: NO_CLOCK).freeze,
-       { name: 'no-clock', pattern: answer(NO_CLOCK_ANSWER.fetch(boot)), seconds: 240 }.freeze]
+    def no_clock_steps(erlang, boot, then_type: nil)
+      [erlang.merge(type: NO_CLOCK).freeze,
+       { name: 'no-clock', pattern: answer(NO_CLOCK_ANSWER.fetch(boot)), seconds: 240, type: then_type }.compact.freeze]
+    end
+
+    # The chain's first boot: clock up, then disabled at root_1's command shell, and
+    # its row disabled at /proc/apps.
+    def disable_steps(erlang)
+      [erlang.merge(type: CLOCK_UP).freeze, clock_up(:disable, then_type: CTRL_G),
+       *to_session(SERVICE_DISABLE),
+       { name: 'disabled-in', pattern: line(DISABLED_IN), seconds: 60 }.freeze,
+       { name: 'disable-done', pattern: line('disable-done'), seconds: 60, type: PROC_GREP }.freeze,
+       { name: 'proc-disabled', pattern: proc_state('disabled'), seconds: 60 }.freeze]
+    end
+
+    # The chain's second boot: no session of clock and the row disabled by rc.conf,
+    # then enabled at root_1's command shell, and clock up, back in the same Erlang
+    # shell, where NO_CLOCK has bound HELPERS.
+    def reenable_steps(erlang)
+      [*no_clock_steps(erlang, :reenable, then_type: CTRL_G),
+       *to_session(SERVICE_ENABLE),
+       { name: 'enabled-in', pattern: line(ENABLED_IN), seconds: 60 }.freeze,
+       { name: 'enable-done', pattern: line('enable-done'), seconds: 60, type: CTRL_G }.freeze,
+       *to_system(CLOCK_UP_POLLS, name: 'system-again'), clock_up(:reenable)]
+    end
+
+    # The chain's last boot: clock up with no command, its row enabled by rc.conf.
+    def enabled_steps(erlang) = [erlang.merge(type: CLOCK_UP).freeze, clock_up(:enabled)]
+
+    # CLOCK_UP's answer for boot, with then_type typed once it is seen.
+    def clock_up(boot, then_type: nil)
+      { name: 'clock-up', pattern: answer(CLOCK_IS_UP.fetch(boot)), seconds: CLOCK_UP_SECONDS,
+        type: then_type }.compact.freeze
+    end
+
+    # From the console's Ctrl-G menu to root_1's command shell, with typed typed there.
+    def to_session(typed)
+      [{ name: 'session-menu', pattern: CTRL_G_MENU, seconds: 30, type: '1' }.freeze,
+       { name: 'session-shell', pattern: MENU_LEFT, seconds: 30, type: typed }.freeze]
+    end
+
+    # From the console's Ctrl-G menu to the system's console job, with typed typed
+    # there; its checkpoints are name-menu and name-shell.
+    def to_system(typed, name:)
+      [{ name: "#{name}-menu", pattern: CTRL_G_MENU, seconds: 30, type: 's' }.freeze,
+       { name: "#{name}-shell", pattern: MENU_LEFT, seconds: 30, type: typed }.freeze]
     end
 
     # Raises unless the serial log's text holds the report lines boot expects: at least
-    # one, each CLOCK_REPORT, for the kept boot, and none for the others.
+    # one, each CLOCK_REPORT, for a boot where clock runs, and none for the others. In
+    # the reenable boot clock runs only from `service clock enable` on, which root_1
+    # types after NO_CLOCK has answered, so the text before that answer, which the
+    # no-clock checkpoint saw whole, holds no line of the app's.
     def reports!(text, boot:)
-      reports = text.b.lines.grep(ANY_REPORT)
-      if boot == :kept
-        raise Error, 'no session of clock reported what it holds' if reports.empty?
+      bytes = text.b
+      case boot
+      in :kept | :disable | :enabled then clock_reports!(bytes)
+      in :disabled | :unlisted then no_clock_lines!(bytes, boot)
+      in :reenable
+        answered_at = bytes.index(NO_CLOCK_ANSWER.fetch(:reenable))
+        raise Error, 'the reenable boot never answered NO_CLOCK' unless answered_at
 
-        waited = reports.grep(TIMED_OUT)
-        raise Error, "a session of clock never got its data grant: #{waited.first.inspect}" unless waited.empty?
-
-        wrong = reports.grep_v(CLOCK_REPORT)
-        raise Error, "a session of clock holds what its template does not grant: #{wrong.first.inspect}" unless wrong.empty?
-      else
-        lines = text.b.lines.grep(ANY_LINE)
-        raise Error, "a session of clock started in the #{boot} boot: #{lines.first.inspect}" unless lines.empty?
+        no_clock_lines!(bytes[0...answered_at], boot)
+        clock_reports!(bytes[answered_at..])
       end
       true
     end
 
+    def clock_reports!(text)
+      reports = text.lines.grep(ANY_REPORT)
+      raise Error, 'no session of clock reported what it holds' if reports.empty?
+
+      waited = reports.grep(TIMED_OUT)
+      raise Error, "a session of clock never got its data grant: #{waited.first.inspect}" unless waited.empty?
+
+      wrong = reports.grep_v(CLOCK_REPORT)
+      raise Error, "a session of clock holds what its template does not grant: #{wrong.first.inspect}" unless wrong.empty?
+    end
+
+    def no_clock_lines!(text, boot)
+      lines = text.lines.grep(ANY_LINE)
+      raise Error, "a session of clock started in the #{boot} boot: #{lines.first.inspect}" unless lines.empty?
+    end
+
     # Packs the three test images once, on a medium machine (MediumBoot.machine), then
     # boots each at each CPU count, where placement puts each cell, each from a fresh
-    # copy of its release medium. Returns { "<accel>-<n>cpu" => 'passed' }; any
-    # disagreement raises.
+    # copy of its release medium, and boots the kept image CHAIN's boots in order from
+    # one more copy. Returns { "<accel>-<n>cpu" => 'passed' }; any disagreement raises.
     class Run
       BOOTS = %i[kept disabled unlisted].freeze
+      CHAIN = %i[disable reenable enabled].freeze
 
       def self.cells(cpus) = cpus.map { |count| QemuCells::Cell.new(accel: QemuCells::LOCAL_ACCELERATOR, cpus: count).name }
 
@@ -342,7 +409,8 @@ module Erx
         fiasco.build(jobs: jobs) if build
         images = BOOTS.to_h { |boot| [boot, image(fiasco, boot)] }
         placement.each(accels: [QemuCells::LOCAL_ACCELERATOR], cpus: cpus) do |accel, count, remote|
-          BOOTS.each { |boot| run_boot(accel: accel, cpus: count, remote: remote, boot: boot, **images.fetch(boot)) }
+          BOOTS.each { |boot| run_boots(accel: accel, cpus: count, remote: remote, boots: [boot], **images.fetch(boot)) }
+          run_boots(accel: accel, cpus: count, remote: remote, boots: CHAIN, **images.fetch(:kept))
           ["#{accel}-#{count}cpu", 'passed']
         end
       end
@@ -358,27 +426,37 @@ module Erx
         nothing = ProductionImage::Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
         built = image.build_test_image(directory: directory, added: nothing, domains: [BOOT],
                                        manifest_source: @manifests.fetch(boot))
-        { built: built, written: image.release_medium(built) }
+        { built: built, written: image.release_medium(built), manifest: @manifests.fetch(boot) }
       end
 
-      # Boots built at cpus from a fresh copy of its release medium, which is removed
-      # once the boot ends (each is about a gigabyte), and checks its report lines.
-      def run_boot(accel:, cpus:, remote:, boot:, built:, written:)
-        run = "#{boot}-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"
+      # Boots built, packed with manifest, at cpus once for each of boots, in order, all
+      # from one fresh copy of its release medium, so each boot finds /data as the one
+      # before left it; the copy is removed once the last boot ends (each is about a
+      # gigabyte). Each boot's report lines are checked as it ends, so a boot that fails
+      # stops the rest.
+      def run_boots(accel:, cpus:, remote:, boots:, built:, written:, manifest:)
+        run = "#{boots.first}-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"
         directory = OutputDirectory.prepare(root: @root, mode: 0o700, path: File.join(@root, 'build/apps', run))
-        production = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: cpus,
-                                                             manifest_source: @manifests.fetch(boot), memory_mib: @machine.memory_mib,
-                                                             test_image: true)
-        points = Apps.checkpoints(production, boot: boot)
         medium = ReleaseMedium.medium(written.slot, directory: directory, data_sectors: written.data_sectors, volume: written.volume)
-        report = begin
-          Qemu.new(root: @root, runner: @runner, program: @qemu)
-              .run(platform: @machine.platform, accel: accel, cpus: cpus, remote: remote, image: built.single,
-                   memory_mib: @machine.memory_mib, disks: [QemuPlan::Disk.new(path: medium)],
-                   checkpoints: points, directory: File.join(directory, 'boot'))
+        begin
+          boots.each do |boot|
+            boot_once(accel: accel, cpus: cpus, remote: remote, boot: boot, built: built, manifest: manifest,
+                      medium: medium, directory: File.join(directory, boot.to_s))
+          end
         ensure
           FileUtils.rm_f(medium)
         end
+      end
+
+      # One boot of built, packed with manifest, from medium.
+      def boot_once(accel:, cpus:, remote:, boot:, built:, manifest:, medium:, directory:)
+        production = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: cpus,
+                                                             manifest_source: manifest, memory_mib: @machine.memory_mib,
+                                                             test_image: true)
+        report = Qemu.new(root: @root, runner: @runner, program: @qemu)
+                     .run(platform: @machine.platform, accel: accel, cpus: cpus, remote: remote, image: built.single,
+                          memory_mib: @machine.memory_mib, disks: [QemuPlan::Disk.new(path: medium)],
+                          checkpoints: Apps.checkpoints(production, boot: boot), directory: directory)
         Apps.reports!(File.binread(report.fetch('serial_log')), boot: boot)
       end
     end
