@@ -7,23 +7,32 @@
  * "Widget format").
  *
  * Standard input carries the widget server's records in ui.txt's binary
- * form: the screen record (the target's size and Plan 9 channel), the
- * operations of erx_ui_model:delta/2 ending in commit, input records and
- * repaint. Standard output carries what the program sends back in the same
- * form: an event record for each event on a node and each change of a
- * state value, and a pixels record for each rectangle LVGL renders.
+ * form: the screen record (the window's size and Plan 9 channel), the
+ * operations of erx_ui_model:delta/2 ending in commit, input records,
+ * repaint, and presented. Standard output carries what the program sends
+ * back in the same form: an event record for each event on a node and each
+ * change of a state value, and one damage report for each refresh.
+ * Descriptor 3 is the window's buffer, which the program maps whole and
+ * LVGL draws in directly.
  *
  * Data flow. The generated erx_ui_read() frames and checks each record;
  * apply_record() turns it into LVGL calls. A node is an LVGL object whose
  * user data is its ui_node_t, found by number through a hash table; a
  * node's entry is dropped by LVGL's delete event, so removing a subtree
- * drops every entry beneath it. LVGL renders in partial mode into a buffer
- * that sits inside the pixels record itself, at ERX_UI_PIXELS_AT, so a
- * flushed rectangle is written out with no copy.
+ * drops every entry beneath it. LVGL renders in direct mode into the
+ * buffer, at the stride the screen record's width gives, and calls flush()
+ * once for each area of a refresh. flush() answers every area but the
+ * refresh's last at once and adds it to the refresh's damage; at the last
+ * it writes the damage report and leaves that flush open, and the
+ * presented record that answers the report closes it.
  *
  * Invariants:
  * - nothing renders while a delta is open: between the first operation and
  *   its commit, LVGL's timers do not run, so no frame shows half a change;
+ * - nothing draws in the buffer while a damage report is unanswered: from
+ *   the report until its presented record, LVGL's timers do not run, so no
+ *   refresh starts, though records the server wrote before it read the
+ *   report are still applied to the tree;
  * - nothing runs while idle: the program blocks in poll() with the
  *   deadline lv_timer_handler() returns, or with none when no timer is due,
  *   and LVGL pauses its refresh and input timers when nothing changes;
@@ -31,10 +40,11 @@
  *   since the server already knows the value it set.
  *
  * Failure: a record the reader refuses, an operation that does not fit the
- * tree, an unsupported channel and a failed write each end the program
- * with a diagnostic on standard error and status 1; the widget server
- * treats the program's end as the renderer's. End of input ends it with
- * status 0.
+ * tree, an unsupported channel, a screen larger than the buffer, a
+ * presented record that answers no report, and a failed write each end
+ * the program with a diagnostic on standard error and status 1; the widget
+ * server treats the program's end as the renderer's. End of input ends it
+ * with status 0.
  */
 
 #include <errno.h>
@@ -47,6 +57,9 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 #include <erx/ui_wire.h>
 
@@ -88,18 +101,24 @@ static const struct channel {
 };
 
 /*
- * The pixels record LVGL draws into. The record starts 3 bytes into a
- * 16-byte aligned array, so its pixels, at the odd offset
- * ERX_UI_PIXELS_AT, start 16-byte aligned, which meets LV_DRAW_BUF_ALIGN.
- * LVGL's buffer is the room after the header in whole 32-bit words.
+ * The window's buffer, descriptor 3, mapped whole. Its size, which fstat()
+ * gives, bounds every screen record: a screen's rows at its stride must
+ * fit in it.
  */
-#define REPORT_SLACK	(16 - ERX_UI_PIXELS_AT % 16)
-#define PIXELS_ROOM	(ERX_UI_PIXELS_DATA_MAX & ~3U)
-#define REPORT_SIZE	(ERX_UI_PIXELS_AT + PIXELS_ROOM)
+#define BUFFER_FD	3
+static uint8_t *buffer;
+static size_t buffer_size;
 
-static _Alignas(16) uint8_t report_space[REPORT_SLACK + REPORT_SIZE];
-#define REPORT		(report_space + REPORT_SLACK)
-#define LVGL_BUFFER	(REPORT + ERX_UI_PIXELS_AT)
+/*
+ * The refresh's damage: the areas flushed since the last report, the
+ * first ERX_UI_DAMAGE_MAX of them, their count and their bounding box,
+ * which the report carries in their place when there are more.
+ */
+static erx_ui_rect_t damage[ERX_UI_DAMAGE_MAX];
+static size_t damage_count;
+static lv_area_t damage_box;
+static bool report_open;	/* a damage report awaits its presented */
+static uint8_t report[ERX_UI_DAMAGE_RECORD_MAX];
 
 /* The input: at most one whole record beyond what is consumed. */
 static uint8_t input[ERX_UI_OP_MAX + 4];
@@ -758,29 +777,28 @@ move(const erx_ui_record_t *record)
 }
 
 /*
- * Plan 9's rows of a rectangle are the 32-bit words covering it, counted
- * from the word that holds its left edge (bytesperline in draw(2)). LVGL's
- * rows are the rectangle's pixels padded to a word. The two agree when the
- * left edge starts a word, so each area LVGL invalidates, already clipped
- * to the screen, has its left edge moved down to one: to an even pixel at
- * 16 bits, a multiple of 4 at 24, any pixel at 32.
+ * LVGL waits on a flush left open before it draws in the buffer again.
+ * The one flush left open is a refresh's last, and the main loop starts no
+ * refresh until the presented record closes it, so LVGL never waits; if it
+ * did, it would spin on the flag in place of a record that cannot come.
  */
 static void
-word_align(lv_event_t *event)
+flush_wait(lv_display_t *disp)
 {
-	lv_area_t *area = lv_event_get_param(event);
-	uint32_t size = lv_color_format_get_size(
-	    lv_display_get_color_format(display));
-	int32_t pixels = size == 2 ? 2 : size == 3 ? 4 : 1;
-
-	area->x1 -= area->x1 % pixels;
+	(void)disp;
+	fatal("LVGL waits on a flush with no refresh drawing");
 }
 
-/* The target's size and channel, at start and on every change. */
+/*
+ * The window's size and channel, at start and on every change. LVGL's
+ * stride, with LV_DRAW_BUF_STRIDE_ALIGN at 4, is the buffer's: the row's
+ * bits rounded up to 32 (docs/design-display.md, "Windows and buffers").
+ */
 static void
 screen(const erx_ui_record_t *record)
 {
 	lv_color_format_t format = LV_COLOR_FORMAT_UNKNOWN;
+	uint64_t bytes;
 
 	for (size_t index = 0; index < sizeof(channels) / sizeof(channels[0]);
 	    index++)
@@ -789,28 +807,37 @@ screen(const erx_ui_record_t *record)
 	if (format == LV_COLOR_FORMAT_UNKNOWN)
 		fatal("channel 0x%08x is not one erx-lvgl renders in",
 		    record->chan);
-	if (record->width == 0 || record->height == 0 ||
-	    lv_draw_buf_width_to_stride(record->width, format) > PIXELS_ROOM)
-		fatal("a screen of %ux%u does not fit a pixels report by rows",
-		    record->width, record->height);
-	if (display != NULL) {
-		lv_display_set_color_format(display, format);
-		lv_display_set_resolution(display, record->width,
-		    record->height);
-		lv_obj_invalidate(lv_screen_active());
-		return;
+	bytes = (uint64_t)lv_draw_buf_width_to_stride(record->width, format) *
+	    record->height;
+	if (record->width == 0 || record->height == 0 || bytes > buffer_size ||
+	    bytes > UINT32_MAX)
+		fatal("a screen of %ux%u does not fit the window's buffer of "
+		    "%zu bytes", record->width, record->height, buffer_size);
+	if (display == NULL) {
+		display = lv_display_create(record->width, record->height);
+		lv_display_set_flush_cb(display, flush);
+		lv_display_set_flush_wait_cb(display, flush_wait);
+		lv_indev_set_display(pointer, display);
+		lv_indev_set_display(keypad, display);
+		lv_indev_set_display(encoder, display);
+		lv_obj_set_scrollable(lv_screen_active(), false);
 	}
-	display = lv_display_create(record->width, record->height);
 	lv_display_set_color_format(display, format);
-	lv_display_set_buffers(display, LVGL_BUFFER, NULL, PIXELS_ROOM,
-	    LV_DISPLAY_RENDER_MODE_PARTIAL);
-	lv_display_set_flush_cb(display, flush);
-	lv_display_add_event_cb(display, word_align, LV_EVENT_INVALIDATE_AREA,
-	    NULL);
-	lv_indev_set_display(pointer, display);
-	lv_indev_set_display(keypad, display);
-	lv_indev_set_display(encoder, display);
-	lv_obj_set_scrollable(lv_screen_active(), false);
+	lv_display_set_resolution(display, record->width, record->height);
+	lv_display_set_buffers(display, buffer, NULL, (uint32_t)bytes,
+	    LV_DISPLAY_RENDER_MODE_DIRECT);
+	lv_obj_invalidate(lv_screen_active());
+}
+
+/* The presented record: the report is shown, so LVGL may draw again. */
+static void
+presented(void)
+{
+	if (!report_open)
+		fatal("a presented record at byte %llu answers no damage "
+		    "report", (unsigned long long)consumed);
+	report_open = false;
+	lv_display_flush_ready(display);
 }
 
 static void
@@ -845,6 +872,9 @@ apply_record(const erx_ui_record_t *record)
 		break;
 	case ERX_UI_REPAINT:
 		lv_obj_invalidate(lv_screen_active());
+		break;
+	case ERX_UI_PRESENTED:
+		presented();
 		break;
 	default:
 		break;
@@ -998,28 +1028,92 @@ event_driven(lv_indev_type_t type, lv_indev_read_cb_t read)
 /* Output. */
 
 /*
- * LVGL renders each area into LVGL_BUFFER, which is the pixels of the
- * report record, so the record is written around them in place.
+ * The refresh's damage, written as one report, which stays open until its
+ * presented record: the screen's size, which the refresh drew at, and its
+ * areas, or their bounding box when there are more than a report carries.
+ * LVGL clips each area to the screen, whose size is a u16, so each fits a
+ * rectangle within that size.
+ */
+static void
+open_report(void)
+{
+	erx_ui_rect_t box;
+	const erx_ui_rect_t *rects = damage;
+	size_t count = damage_count, written;
+
+	if (damage_count > ERX_UI_DAMAGE_MAX) {
+		box = (erx_ui_rect_t){ .x = (uint16_t)damage_box.x1,
+		    .y = (uint16_t)damage_box.y1,
+		    .width = (uint16_t)lv_area_get_width(&damage_box),
+		    .height = (uint16_t)lv_area_get_height(&damage_box) };
+		rects = &box;
+		count = 1;
+	}
+	written = erx_ui_write_damage(report, sizeof(report),
+	    (uint16_t)lv_display_get_horizontal_resolution(display),
+	    (uint16_t)lv_display_get_vertical_resolution(display), rects, count);
+	if (written == 0)
+		fatal("a refresh's damage of %zu areas does not fit a report",
+		    damage_count);
+	write_all(report, written);
+	damage_count = 0;
+	report_open = true;
+}
+
+/*
+ * LVGL has drawn area in the buffer. Every area but the refresh's last is
+ * answered at once, since single-buffered direct mode waits on it before
+ * it draws the next; the last is answered by the presented record.
  */
 static void
 flush(lv_display_t *disp, const lv_area_t *area, uint8_t *pixels)
 {
-	uint32_t width = (uint32_t)lv_area_get_width(area);
-	uint32_t height = (uint32_t)lv_area_get_height(area);
-	size_t length = (size_t)lv_draw_buf_width_to_stride(width,
-	    lv_display_get_color_format(disp)) * height;
-	size_t written;
+	if (pixels != buffer)
+		fatal("LVGL flushed from outside the window's buffer");
+	if (area->x1 < 0 || area->y1 < 0 || area->x2 < area->x1 ||
+	    area->y2 < area->y1 ||
+	    area->x2 >= lv_display_get_horizontal_resolution(disp) ||
+	    area->y2 >= lv_display_get_vertical_resolution(disp))
+		fatal("LVGL flushed an area outside the screen");
+	if (damage_count == 0)
+		damage_box = *area;
+	else
+		damage_box = (lv_area_t){
+		    .x1 = LV_MIN(damage_box.x1, area->x1),
+		    .y1 = LV_MIN(damage_box.y1, area->y1),
+		    .x2 = LV_MAX(damage_box.x2, area->x2),
+		    .y2 = LV_MAX(damage_box.y2, area->y2) };
+	if (damage_count < ERX_UI_DAMAGE_MAX)
+		damage[damage_count] = (erx_ui_rect_t){
+		    .x = (uint16_t)area->x1, .y = (uint16_t)area->y1,
+		    .width = (uint16_t)lv_area_get_width(area),
+		    .height = (uint16_t)lv_area_get_height(area) };
+	damage_count++;
+	if (!lv_display_flush_is_last(disp)) {
+		lv_display_flush_ready(disp);
+		return;
+	}
+	open_report();
+}
 
-	if (pixels != LVGL_BUFFER)
-		fatal("LVGL flushed from outside its buffer");
-	written = erx_ui_write_pixels(REPORT, REPORT_SIZE, (uint16_t)area->x1,
-	    (uint16_t)area->y1, (uint16_t)width, (uint16_t)height, pixels,
-	    length);
-	if (written == 0)
-		fatal("a flushed area of %ux%u does not fit a pixels report",
-		    width, height);
-	write_all(REPORT, written);
-	lv_display_flush_ready(disp);
+/* The window's buffer, descriptor 3, mapped whole for LVGL to draw in. */
+static void
+map_buffer(void)
+{
+	struct stat st;
+	void *at;
+
+	if (fstat(BUFFER_FD, &st) != 0)
+		fatal("descriptor 3, the window's buffer: %s", strerror(errno));
+	if (st.st_size <= 0 || (uintmax_t)st.st_size > SIZE_MAX)
+		fatal("descriptor 3, the window's buffer, has %jd bytes",
+		    (intmax_t)st.st_size);
+	at = mmap(NULL, (size_t)st.st_size, PROT_READ | PROT_WRITE,
+	    MAP_SHARED, BUFFER_FD, 0);
+	if (at == MAP_FAILED)
+		fatal("mapping the window's buffer: %s", strerror(errno));
+	buffer = at;
+	buffer_size = (size_t)st.st_size;
 }
 
 /* The records whole in input[0..*have), applied; the rest moved first. */
@@ -1065,6 +1159,7 @@ main(void)
 	int timeout;
 
 	signal(SIGPIPE, SIG_IGN);
+	map_buffer();
 	lv_init();
 	lv_tick_set_cb(tick_ms);
 	pointer = event_driven(LV_INDEV_TYPE_POINTER, read_pointer);
@@ -1075,7 +1170,7 @@ main(void)
 	lv_indev_set_group(encoder, lv_group_get_default());
 	for (;;) {
 		timeout = -1;
-		if (display != NULL && !uncommitted) {
+		if (display != NULL && !uncommitted && !report_open) {
 			next = lv_timer_handler();
 			if (next != LV_NO_TIMER_READY)
 				timeout = next > INT_MAX ? INT_MAX : (int)next;

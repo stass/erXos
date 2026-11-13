@@ -10,13 +10,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  DAMAGE_MAX,
   EVENT_TEXT_MAX,
-  PIXELS_DATA_MAX,
   PROPERTIES,
   read,
   readReport,
+  writeDamage,
   writeEvent,
-  writePixels,
   writeRecord,
   type Prop,
   type UIRecord,
@@ -41,9 +41,16 @@ test('the writer refuses what the form cannot hold', () => {
   ];
   for (const [node, name, detail] of refused) assert.equal(writeEvent(node, name, detail), null, `${node} ${name} ${detail.tag}`);
   assert.notEqual(writeEvent(1, event, { tag: 'text', value: new Uint8Array(EVENT_TEXT_MAX).fill(0x61) }), null);
-  assert.equal(writePixels(0, 0, 1, 1, new Uint8Array(PIXELS_DATA_MAX + 1)), null);
-  assert.equal(writePixels(65536, 0, 1, 1, new Uint8Array(4)), null);
-  assert.notEqual(writePixels(0, 0, 1, 1, new Uint8Array(PIXELS_DATA_MAX)), null);
+  const rect = { x: 0, y: 0, width: 1, height: 1 };
+  assert.equal(writeDamage(1, 1, []), null);
+  assert.equal(writeDamage(1, 1, Array.from({ length: DAMAGE_MAX + 1 }, () => rect)), null);
+  assert.equal(writeDamage(65536, 1, [rect]), null);
+  assert.equal(writeDamage(65535, 1, [{ ...rect, x: 65536 }]), null);
+  assert.equal(writeDamage(1, 1, [{ ...rect, width: 0 }]), null);
+  assert.equal(writeDamage(1, 1, [{ ...rect, height: 0 }]), null);
+  assert.equal(writeDamage(1, 1, [{ ...rect, x: 1 }]), null);
+  assert.equal(writeDamage(1, 1, [{ ...rect, height: 2 }]), null);
+  assert.notEqual(writeDamage(1, 1, Array.from({ length: DAMAGE_MAX }, () => rect)), null);
 });
 
 test('the record writer refuses what a reader refuses', () => {
@@ -71,6 +78,15 @@ test('the record writer refuses what a reader refuses', () => {
 test('the fuzz seeds are records the readers accept', () => {
   for (const seed of SEEDS) assert.equal(read(seed).result, 'ok', Buffer.from(seed).toString('hex'));
   for (const seed of REPORT_SEEDS) assert.equal(readReport(seed).result, 'ok', Buffer.from(seed).toString('hex'));
+});
+
+test('a damage rectangle must lie within the size its report names', () => {
+  /* Drawn at 2 by 2: a rectangle ending on the edge, then one a column past it and one a row past it. */
+  const report = (x: number, y: number, w: number, h: number) =>
+    Uint8Array.of(14, 0, 0, 0, 10, 2, 0, 2, 0, 1, x, 0, y, 0, w, 0, h, 0);
+  assert.equal(readReport(report(1, 1, 1, 1)).result, 'ok');
+  assert.deepEqual(readReport(report(1, 0, 2, 1)), { result: 'bad', reason: 'bad body' });
+  assert.deepEqual(readReport(report(0, 1, 1, 2)), { result: 'bad', reason: 'bad body' });
 });
 
 test('the reader survives a short fuzz run', () => {

@@ -2379,7 +2379,7 @@ renderer outside Erlang parses one. The same input carries the program's
 view of its target: a `screen` record with the window's size and channel,
 at start and on every resize, the window's `input` records, a `repaint`
 record when the whole window must be drawn again, and a `presented`
-record when a frame it reported has been shown.
+record when a frame it reported has been shown or dropped.
 
 The program maps each kind to an LVGL object, sets its properties and
 renders in LVGL's direct mode into the mapped buffer, which has the
@@ -2391,18 +2391,22 @@ next area. So the program answers every callback but the refresh's last
 at once: where `lv_display_flush_is_last` is false, it adds the area to
 the refresh's damage and calls `lv_display_flush_ready` before it
 returns. At the last it adds that area, writes one `damage` report, the
-rectangles it drew, at most 16 (their bounding box when there are
-more), on its standard output, beside its events in the same format,
+screen's width and height, which the refresh drew at, and the
+rectangles it drew within them, at most 16 (their bounding box when
+there are more), on its standard output, beside its events in the same format,
 which `erx_ui_lvgl` reads with the generated Erlang reader, and returns
 without calling `lv_display_flush_ready`. That flush stays open until
-the `presented` record for the report arrives. LVGL waits on an open
-flush through the program's flush-wait callback
-(`lv_display_set_flush_wait_cb`), which reads the program's standard
-input until that record arrives; the main loop, when it reads the
-record first, calls `lv_display_flush_ready` itself. Either way the
-wait is answered by the next record on standard input, because while a
-report is unanswered `erx_ui_lvgl` writes the program nothing but its
-`presented` (below). So on the copy path, and on a device that reads
+the `presented` record for the report arrives: the main loop, which
+reads it, calls `lv_display_flush_ready`. Until then the main loop runs
+no LVGL timer, so no refresh starts and LVGL never waits on the open
+flush; it still applies the records it reads before `presented`, which
+`erx_ui_lvgl` wrote before it read the report, since applying a record
+changes the tree and draws nothing. After the report `erx_ui_lvgl`
+writes the program nothing but its `presented` (below), so the wait
+ends at a record that comes. The program's flush-wait callback
+(`lv_display_set_flush_wait_cb`) stops it with a diagnostic, since
+LVGL reaching it means a refresh began with a flush open, which would
+otherwise spin forever. So on the copy path, and on a device that reads
 the buffer only during a present, the program never draws in the
 buffer between a `damage` report and the copy that report asks for; a
 device that scans the buffer out all the time reads it while the
@@ -2411,23 +2415,30 @@ decisions](#risks-and-decisions)). The program never waits on a record
 that cannot come, and runs at the device's pace with no timer of its
 own.
 
-`erx_ui_lvgl` turns each `damage` report into a present of the window's
-buffer and, at the answer, writes `presented`. While a report is
+`erx_ui_lvgl` turns each `damage` report it can show into a present of
+the window's buffer and, at the answer, writes `presented`. While a report is
 unanswered it holds everything else it would write: the `diff_op()`s
 of the next tree, for which its `apply/2` does not return until the
 report is answered, so the widget server and the application wait at
 the device's pace too; the window's next `mouse` and `kbd` records,
 which it reads only after the answer, so they wait in the window's
 bounded queues ([Windows and buffers](#windows-and-buffers)); and a new
-size, which it writes as a `screen` record after the answer. So the
-size a report was drawn at is the size of the last `screen` record
-written before it, and `erx_ui_lvgl` presents the report with that
-width and height: a report drawn just before a resize is shown clipped,
-as any present for a stale size is ([The window
-tree](#the-window-tree)), and is no fault. It turns the window's
+size, which it writes as a `screen` record after the answer. A report
+is judged and presented at its own size, the width and height it
+names: a resize that `erx_ui_lvgl` reads after the report waits for
+the answer, so the report names the size of the last `screen` record
+written and is presented at that width and height, shown clipped, as
+any present for a stale size is ([The window tree](#the-window-tree)),
+and is no fault. A resize that `erx_ui_lvgl` read first has had its
+`screen` record written while the report sat unread in the program's
+output, so the report names another size than that record's, and its
+rows have a stride the buffer no longer has: `erx_ui_lvgl` presents
+nothing for it and answers `presented`, so the program continues; it
+has applied the new `screen` record, which invalidates the whole
+screen, so its next report covers the new size. It turns the window's
 `mouse` and `kbd` records into `input` records. A report whose
-rectangle leaves the size it was drawn at, or one that arrives before
-the last was answered, is a fault of the program: `erx_ui_lvgl` stops
+rectangle leaves the size it names, which the reader refuses, or one
+that arrives before the last was answered, is a fault of the program: `erx_ui_lvgl` stops
 it, logs the report's position, and ends the UI with `{ui_down,
 Window, renderer_down}`. The
 program's fonts are LVGL's, and it is built with animations and blinking
@@ -3028,7 +3039,7 @@ at a terminal that declares `links`.
 | a widget tree fails validation | `erx_ui:tree/2` answers `{error, {Reason, Where}}`; the realised tree is unchanged | the application's |
 | a window's widget server would number a node past 2^32 - 1 | the window ends; the application receives `{ui_down, Window, limit}` | the application opens a new window |
 | the LVGL program exits | the widget server ends the window and the application receives `{ui_down, Window, renderer_down}`; the session logs the exit record, as for any of its programs | the application reopens |
-| the LVGL program reports a rectangle outside the size it was drawn at, or a second report before the first is answered | `erx_ui_lvgl` stops the program and logs the report's position, and the application receives `{ui_down, Window, renderer_down}` | the application reopens |
+| the LVGL program reports a rectangle outside the size it names, or a second report before the first is answered | `erx_ui_lvgl` stops the program and logs the report's position, and the application receives `{ui_down, Window, renderer_down}` | the application reopens |
 | the LVGL program writes outside its buffer | the write faults in the program's own sub-space, which holds no other page of the pixel area; its exit is the row above | the application reopens |
 | an input device stops | its driver restarts and resets it | events resume |
 | a window's `mouse` or `kbd` queue is full | the oldest record is dropped and counted; a resize is never lost | the client reads |
@@ -3611,7 +3622,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
   * the Erlang reader of the program's records and the C reader of the
     server's have fuzz targets, the `damage` report among them; a reader
     without the report's count check fails its fuzz target;
-  * a `damage` rectangle outside the size the report was drawn at, and
+  * a `damage` rectangle outside the size the report names, and
     a second report before the first is answered, each stop the
     program, and the application receives `{ui_down, Window,
     renderer_down}`; an `erx_ui_lvgl` that presents them fails;
@@ -3620,13 +3631,22 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
     LVGL call the flush three times; the program answers the first two
     at once and writes one `damage` report of three rectangles, and
     the refresh completes at `presented`; a program that holds every
-    flush until `presented` hangs at the second area and fails the
-    model's deadline;
+    flush until `presented` stops at the second area, where LVGL waits
+    on the first flush, and fails the model screen;
   * a resize during a frame: the window is shrunk while a report drawn
     at the old size is unanswered; the report is presented at the old
     size, clipped, and the program then receives the new `screen`
-    record; an `erx_ui_lvgl` that writes the `screen` record at once,
-    or checks the report against the new size, ends the UI and fails;
+    record; an `erx_ui_lvgl` that judges the report against a `screen`
+    record it wrote after reading the report drops a frame it could
+    show, and fails;
+  * a resize while a report is unread: against the model screen, a
+    `screen` record is written after a report has arrived and before
+    it is read, once smaller and once larger; the report names the old
+    size, so it is presented as nothing and answered, and the next
+    report covers the new size; a model screen that judges the report
+    against the last `screen` record written refuses the smaller case
+    as outside the screen, and in the larger case would present rows
+    of the old stride as the new size's;
   * the program draws nothing between a `damage` report and its
     `presented` record: the model screen compares the buffer's bytes at
     both ends of that interval; a program that tells LVGL the last

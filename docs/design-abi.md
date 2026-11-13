@@ -806,7 +806,7 @@ from the protocol's kinds. Integers are little-endian. Each message is a
 | `screen`, tag 7 | width `u16`, height `u16`, and the target's channel as Plan 9's `u32` channel descriptor |
 | `input`, tag 8 | a `u8` form and its fields: pointer 1, with x `u16`, y `u16` and buttons `u8`; key 2, with down 1 or up 0 as a `u8`, code `u16` and rune `u32`, 0xffffffff for none; wheel 3, with steps as a signed `u8` |
 | `repaint`, tag 9 | none |
-| `damage`, tag 10 | a `u8` count, 1 to 16, and that many rectangles, each x `u16`, y `u16`, width `u16` and height `u16`: what the renderer drew in its window's buffer since its last report |
+| `damage`, tag 10 | the width `u16` and height `u16` the frame was drawn at, a `u8` count, 1 to 16 (`ui_damage_rects`), and that many rectangles, each x `u16`, y `u16`, width `u16` and height `u16`, within that width and height: what the renderer drew in its window's buffer since its last report |
 | `presented`, tag 11 | none |
 
 `insert` to `commit`, `screen`, `input`, `repaint` and `presented` go
@@ -820,9 +820,10 @@ buffer, which its session mapped into it
 ([The pixel area](design-display.md#the-pixel-area)), reports the
 rectangles it drew in one `damage` message for each refresh, and draws
 again only after the `presented` that answers it. The reader refuses a
-count of 0 or above 16 and a rectangle of no width or height; that each
-rectangle lies within the window is checked by the process that
-consumes the report, which knows the window.
+count of 0 or above 16, a rectangle of no width or height and one that
+leaves the width and height the report names; whether that size is the
+window's is decided by the process that consumes the report, which
+knows the window.
 
 Properties are a `u8` count and, for each, its number and its value: a
 boolean as a `u8` of 0 or 1; an integer as a signed 32-bit value; an enum or an
@@ -874,7 +875,7 @@ In Erlang, `screen` is `{screen, Width, Height, Chan}`, `input` is
 Rune | none}}` or `{input, {wheel, Steps}}`, `repaint` and `presented`
 are the atoms, an event is `{event, Node, Event, Detail}` with the detail
 `none`, a boolean, an integer or a binary, and a report is `{damage,
-[{X, Y, Width, Height}]}`. The Erlang reader of the server's messages returns them
+ScreenWidth, ScreenHeight, [{X, Y, Width, Height}]}`. The Erlang reader of the server's messages returns them
 as the encoder takes them, with what the binary form carries of each
 value: an event property as `true`, a presentation as `{Name, Text}`, two
 binaries, since a name read from input makes no atom, and an `error`

@@ -15,7 +15,7 @@ require_relative '../fixtures/erlang_build'
 class ErxUISchemaTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
-  LIMITS = { 'web_ui_op_max' => 65_024, 'ui_children' => 1024, 'ui_pixels_max' => 65_536 }.freeze
+  LIMITS = { 'web_ui_op_max' => 65_024, 'ui_children' => 1024, 'ui_damage_rects' => 16 }.freeze
   BASE = <<~UI
     ui 1
       text caption 4096 utf8

@@ -22,7 +22,7 @@ require_relative '../../tools/lib/erx/web_stage'
 # three must agree line for line, on the corpus and on its mutants. The
 # TypeScript writer writes each record it read back to the Erlang encoder's
 # bytes. The other way, the C and TypeScript harnesses' writers write
-# random event and pixels records and say what each means, by number from C
+# random event and damage records and say what each means, by number from C
 # and by name from TypeScript; erx_ui_wire_tests:read_corpus/2 reads them and
 # says what it read by name, and the two must agree the same way.
 class ErxUIWireTest < Minitest::Test
@@ -152,7 +152,7 @@ class ErxUIWireTest < Minitest::Test
   def refusals
     visible, placeholder, text = %w[visible placeholder text].map { |name| property(name).number }
     {
-      record('C', 11) => 'unknown tag',
+      record('C', 12) => 'unknown tag',
       record('CVCC', 6, 1, 10, 0) => 'unknown tag',
       record('CV', 2, 0) => 'bad node',
       record('CVVvCC', 1, 1, 0, 0, 255, 0) => 'unknown kind',

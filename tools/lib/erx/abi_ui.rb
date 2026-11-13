@@ -41,7 +41,7 @@ module Erx
     # One form of an input record's event: its number and its fields.
     UIInput = Struct.new(:name, :number, :fields, keyword_init: true)
     UISchema = Struct.new(:version, :images, :properties, :kinds, :records, :reports, :inputs, :insert_max,
-                          :children_max, :op_max, :pixels_max, keyword_init: true)
+                          :children_max, :op_max, :damage_max, keyword_init: true)
 
     # The reader of the one `ui VERSION` declaration (docs/design-abi.md,
     # "Widget format"). It refuses every source the grammar refuses and
@@ -102,10 +102,13 @@ module Erx
         declaration.fail!('ui version must be positive and fit 32 bits') unless version.between?(1, 0xffffffff)
         op_max = limits['web_ui_op_max'] || declaration.fail!('ui.txt needs the root limit web_ui_op_max')
         children_max = limits['ui_children'] || declaration.fail!('ui.txt needs the root limit ui_children')
-        pixels_max = limits['ui_pixels_max'] || declaration.fail!('ui.txt needs the root limit ui_pixels_max')
-        declaration.fail!('ui_pixels_max must be at least web_ui_op_max') unless pixels_max >= op_max
+        damage_max = limits['ui_damage_rects'] || declaration.fail!('ui.txt needs the root limit ui_damage_rects')
+        # A damage report's count is a u8, and the report, its tag, size and count and 8 bytes a
+        # rectangle, fits a record.
+        declaration.fail!('ui_damage_rects must lie in 1..255 and its report within web_ui_op_max') unless
+          damage_max.between?(1, 255) && 6 + (8 * damage_max) <= op_max
         declaration.fail!('ui_children must lie in 1..65536, an index being a u16') unless children_max.between?(1, 65_536)
-        Reader.new(declaration, types).schema(version, op_max: op_max, children_max: children_max, pixels_max: pixels_max)
+        Reader.new(declaration, types).schema(version, op_max: op_max, children_max: children_max, damage_max: damage_max)
       end
 
       # Validation state for one declaration: the members grouped with their
@@ -125,7 +128,7 @@ module Erx
           end
         end
 
-        def schema(version, op_max:, children_max:, pixels_max:)
+        def schema(version, op_max:, children_max:, damage_max:)
           types = {}
           images = {}
           # Value types and image types share a namespace with the built-in types.
@@ -172,7 +175,7 @@ module Erx
           UISchema.new(version: version, images: images.values, properties: properties.values,
                        kinds: kinds.values, records: records.values, reports: reports.values,
                        inputs: inputs.values, insert_max: insert_max, children_max: children_max,
-                       op_max: op_max, pixels_max: pixels_max)
+                       op_max: op_max, damage_max: damage_max)
         end
 
         private

@@ -9,7 +9,7 @@
  * stream that ends inside one.
  *
  * With the arguments "write PATH SEED", writes the other way instead: random
- * event and pixels records, with the generated writer, to PATH, and one line
+ * event and damage records, with the generated writer, to PATH, and one line
  * per record to standard output naming what it wrote, in the format of
  * erx_ui_wire_tests:read_corpus/2 with the event's number for its name. It
  * checks on the way that each record fits a buffer of exactly its size and is
@@ -116,6 +116,9 @@ print_record(const erx_ui_record_t *record)
 	case ERX_UI_REPAINT:
 		printf("repaint");
 		break;
+	case ERX_UI_PRESENTED:
+		printf("presented");
+		break;
 	case ERX_UI_SCREEN:
 		printf("screen %u %u %u", record->width, record->height,
 		    record->chan);
@@ -194,7 +197,7 @@ typedef size_t (*writer_t)(uint8_t *, size_t, const void *);
 static void
 emit(FILE *out, writer_t write_one, const void *what)
 {
-	static uint8_t record[ERX_UI_PIXELS_MAX + 4];
+	static uint8_t record[ERX_UI_OP_MAX + 4];
 	size_t size;
 
 	size = write_one(record, sizeof(record), what);
@@ -220,11 +223,12 @@ struct event {
 	uint8_t		 number;
 };
 
-typedef struct pixels pixels_t;
-struct pixels {
-	const uint8_t	*data;
-	size_t		 length;
-	uint16_t	 x, y, width, height;
+typedef struct damage damage_t;
+struct damage {
+	erx_ui_rect_t	 rects[ERX_UI_DAMAGE_MAX + 1];
+	size_t		 count;
+	uint16_t	 width;		/* the size the report was drawn at */
+	uint16_t	 height;
 };
 
 static size_t
@@ -237,19 +241,19 @@ write_event(uint8_t *buffer, size_t size, const void *what)
 }
 
 static size_t
-write_pixels(uint8_t *buffer, size_t size, const void *what)
+write_damage(uint8_t *buffer, size_t size, const void *what)
 {
-	const pixels_t *pixels = what;
+	const damage_t *damage = what;
 
-	return (erx_ui_write_pixels(buffer, size, pixels->x, pixels->y,
-	    pixels->width, pixels->height, pixels->data, pixels->length));
+	return (erx_ui_write_damage(buffer, size, damage->width,
+	    damage->height, damage->rects, damage->count));
 }
 
 /* What the writer must refuse, whatever the buffer; exits at the first not. */
 static void
 check_refusals(uint8_t event_number, uint8_t other_number)
 {
-	static uint8_t buffer[ERX_UI_PIXELS_MAX + 4], source[ERX_UI_PIXELS_MAX];
+	static uint8_t buffer[ERX_UI_OP_MAX + 4], source[ERX_UI_OP_MAX];
 	static const uint8_t bad_utf8[] = { 'a', 0xc0, 0x80 };
 	static const uint8_t surrogate[] = { 0xed, 0xa0, 0x80 };
 	const event_t refused[] = {
@@ -267,8 +271,18 @@ check_refusals(uint8_t event_number, uint8_t other_number)
 		{ .node = 1, .number = event_number,
 		    .detail = { .tag = ERX_UI_DETAIL_TEXT + 1 } }
 	};
-	const pixels_t too_long = { .data = source,
-	    .length = ERX_UI_PIXELS_DATA_MAX + 1 };
+	/*
+	 * Drawn at 2 by 2: no rectangle, one too many, one of no width or of no
+	 * height, and one that leaves the size by a column or by a row.
+	 */
+	damage_t damages[6] = {
+		{ .count = 0, .width = 2, .height = 2 },
+		{ .count = ERX_UI_DAMAGE_MAX + 1, .width = 2, .height = 2 },
+		{ .count = 2, .width = 2, .height = 2 },
+		{ .count = 1, .width = 2, .height = 2 },
+		{ .count = 1, .width = 2, .height = 2 },
+		{ .count = 1, .width = 2, .height = 2 }
+	};
 
 	memset(source, 'a', sizeof(source));
 	for (size_t index = 0; index < sizeof(refused) / sizeof(refused[0]);
@@ -278,9 +292,23 @@ check_refusals(uint8_t event_number, uint8_t other_number)
 			exit(1);
 		}
 	}
-	if (write_pixels(buffer, sizeof(buffer), &too_long) != 0) {
-		fprintf(stderr, "writer wrote pixels too long\n");
-		exit(1);
+	for (size_t index = 0; index <= ERX_UI_DAMAGE_MAX; index++)
+		damages[1].rects[index] = (erx_ui_rect_t){ .width = 1,
+		    .height = 1 };
+	damages[2].rects[0] = (erx_ui_rect_t){ .width = 1, .height = 1 };
+	damages[2].rects[1] = (erx_ui_rect_t){ .width = 0, .height = 1 };
+	damages[3].rects[0] = (erx_ui_rect_t){ .width = 1, .height = 0 };
+	damages[4].rects[0] = (erx_ui_rect_t){ .x = 1, .width = 2,
+	    .height = 1 };
+	damages[5].rects[0] = (erx_ui_rect_t){ .y = 1, .width = 1,
+	    .height = 2 };
+	for (size_t index = 0; index < sizeof(damages) / sizeof(damages[0]);
+	    index++) {
+		if (write_damage(buffer, sizeof(buffer), &damages[index]) != 0) {
+			fprintf(stderr, "writer wrote refused damage %zu\n",
+			    index);
+			exit(1);
+		}
 	}
 }
 
@@ -294,20 +322,20 @@ print_bytes(const uint8_t *data, size_t length)
 
 /*
  * Every event property, each detail tag at its bounds and at random, and
- * pixels reports from empty to the longest; the event numbers are those the
+ * damage reports of one rectangle to the most; the event numbers are those the
  * writer accepts, which the reader on the other side names.
  */
 static int
 write_corpus(const char *path, uint64_t seed)
 {
-	static uint8_t data[ERX_UI_PIXELS_DATA_MAX];
+	static uint8_t data[ERX_UI_OP_MAX];
 	static const int32_t integers[] = { 0, 1, -1, INT32_MIN, INT32_MAX };
 	const erx_ui_detail_t none = { .tag = ERX_UI_DETAIL_NONE };
 	uint8_t events[256], probe[16], refused_number;
 	uint64_t state;
 	uint32_t count, nevents, max;
 	event_t event;
-	pixels_t pixels;
+	damage_t damage;
 	FILE *out;
 
 	_Static_assert(ERX_UI_EVENT_TEXT_MAX <= sizeof(data),
@@ -330,19 +358,25 @@ write_corpus(const char *path, uint64_t seed)
 	state = seed * 0x9e3779b97f4a7c15ULL + 1;
 	for (uint32_t index = 0; index < 600; index++) {
 		if (index % 3 == 2) {
-			max = index % 50 == 2 ? ERX_UI_PIXELS_DATA_MAX : 64;
-			pixels = (pixels_t){ .data = data,
-			    .length = index % 50 == 2 ? max : below(&state, max + 1),
-			    .x = (uint16_t)next_random(&state),
-			    .y = (uint16_t)next_random(&state),
-			    .width = (uint16_t)next_random(&state),
-			    .height = (uint16_t)next_random(&state) };
-			for (size_t at = 0; at < pixels.length; at++)
-				data[at] = (uint8_t)next_random(&state);
-			emit(out, write_pixels, &pixels);
-			printf("pixels %u %u %u %u ", pixels.x, pixels.y,
-			    pixels.width, pixels.height);
-			print_bytes(pixels.data, pixels.length);
+			damage.count = index % 50 == 2 ? ERX_UI_DAMAGE_MAX :
+			    1 + below(&state, ERX_UI_DAMAGE_MAX);
+			damage.width = (uint16_t)(1 + below(&state, 65535));
+			damage.height = (uint16_t)(1 + below(&state, 65535));
+			printf("damage %u %u", damage.width, damage.height);
+			for (size_t at = 0; at < damage.count; at++) {
+				uint16_t x = (uint16_t)below(&state, damage.width);
+				uint16_t y = (uint16_t)below(&state, damage.height);
+
+				damage.rects[at] = (erx_ui_rect_t){ .x = x, .y = y,
+				    .width = (uint16_t)(1 +
+				    below(&state, damage.width - x)),
+				    .height = (uint16_t)(1 +
+				    below(&state, damage.height - y)) };
+				printf(" %u %u %u %u", damage.rects[at].x,
+				    damage.rects[at].y, damage.rects[at].width,
+				    damage.rects[at].height);
+			}
+			emit(out, write_damage, &damage);
 			putchar('\n');
 			continue;
 		}

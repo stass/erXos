@@ -29,10 +29,8 @@ module Erx
       NAME_MAX = 63
       PRESENT_MAX = 4096
       DETAILS = %w[none boolean integer text].freeze
-      # A pixels report's tag and rectangle, and an event's tag, node, number,
-      # detail tag and text length: what a record holds besides its pixels or
-      # its text.
-      PIXELS_FIELDS = 1 + 4 * 2
+      # An event's tag, node, number, detail tag and text length: what an
+      # event record holds besides its text.
       EVENT_TEXT_FIELDS = 1 + 4 + 1 + 1 + 4
 
       module_function
@@ -119,9 +117,9 @@ module Erx
           -moduledoc """
           ui.txt's binary form (docs/design-abi.md, "Widget format"). encode/2 writes
           any record; read/1 reads the records a renderer sends the server, event and
-          pixels, and refuses every other tag; read_server/1 reads the records the
-          server sends a renderer, insert to commit, screen, input and repaint, and
-          refuses event and pixels. A record is a u32 length, which counts the tag
+          damage, and refuses every other tag; read_server/1 reads the records the
+          server sends a renderer, insert to commit, screen, input, repaint and
+          presented, and refuses event and damage. A record is a u32 length, which counts the tag
           and the fields, then a u8 tag and the fields; integers are little-endian.
           The readers keep no state between records, decide nothing that depends on
           a node's kind and make no atom: every name they return comes from the
@@ -133,10 +131,10 @@ module Erx
           -define(OP_MAX, #{ui.op_max}).
           -define(NAME_MAX, #{NAME_MAX}).
           -define(PRESENT_MAX, #{PRESENT_MAX}).
-          -define(PIXELS_MAX, #{ui.pixels_max}).
+          -define(DAMAGE_MAX, #{ui.damage_max}).
           -define(PROPERTY_MAX, #{wire_properties(ui).size}).
           -define(EVENT, #{report_tag(ui, 'event')}).
-          -define(PIXELS, #{report_tag(ui, 'pixels')}).
+          -define(DAMAGE, #{report_tag(ui, 'damage')}).
           -define(IS_I8(V), (is_integer(V) andalso V >= -128 andalso V =< 127)).
           -define(IS_DIRECTION(V), (V =:= down orelse V =:= up)).
           -define(IS_U8(V), (is_integer(V) andalso V >= 0 andalso V =< 16#ff)).
@@ -150,8 +148,10 @@ module Erx
           %% erx_ui_model's diff_op()s, then the records of a native renderer's pipes.
           -type wire_record() :: #{UIFields.erlang_types(ui).fetch(:records).join("\n                     | ")}
                                | {event, node_id(), Event :: atom(), detail()}
-                               | {pixels, X :: 0..65535, Y :: 0..65535, Width :: 0..65535,
-                                  Height :: 0..65535, Pixels :: binary()}.
+                               | {damage, Width :: 0..65535, Height :: 0..65535, [rect(), ...]}.
+          %% A damage report's rectangle: its top left corner, its width and its height,
+          %% within the width and height the report was drawn at.
+          -type rect() :: {X :: 0..65535, Y :: 0..65535, Width :: 1..65535, Height :: 1..65535}.
           %% A present property's canonical text, erx_present:text/2.
           -type present() :: fun((Type :: atom(), Value :: term()) -> binary()).
           -type reason() :: bad_length | bad_tag | bad_node | bad_event | bad_detail | bad_body.
@@ -178,8 +178,7 @@ module Erx
           encode(Record, Present) ->
               Body = iolist_to_binary(body(Record, Present)),
               Size = byte_size(Body),
-              Limit = case Record of {pixels, _, _, _, _, _} -> ?PIXELS_MAX; _ -> ?OP_MAX end,
-              Size =< Limit orelse error({too_long, Size}),
+              Size =< ?OP_MAX orelse error({too_long, Size}),
               <<Size:32/little, Body/binary>>.
 
       ERLANG
@@ -187,11 +186,23 @@ module Erx
       ENCODER_REPORTS = <<~'ERLANG'
           body({event, Node, Event, Detail}, _Present) when ?IS_NODE(Node) ->
               [<<?EVENT, Node:32/little, (event_number(Event))>> | detail(Detail)];
-          body({pixels, X, Y, Width, Height, Pixels}, _Present)
-            when ?IS_U16(X), ?IS_U16(Y), ?IS_U16(Width), ?IS_U16(Height), is_binary(Pixels) ->
-              [<<?PIXELS, X:16/little, Y:16/little, Width:16/little, Height:16/little>> | Pixels];
+          body({damage, Width, Height, Rects}, _Present)
+            when ?IS_U16(Width), ?IS_U16(Height), is_list(Rects), length(Rects) >= 1, length(Rects) =< ?DAMAGE_MAX ->
+              [<<?DAMAGE, Width:16/little, Height:16/little, (length(Rects))>>
+               | [rect(Rect, Width, Height) || Rect <- Rects]];
           body(Record, _Present) ->
               error({bad_record, Record}).
+
+          %% A damage report's rectangle; one of no width or height, or not within
+          %% the report's ScreenWidth and ScreenHeight, raises {bad_rect, Rect}.
+          rect({X, Y, Width, Height} = Rect, ScreenWidth, ScreenHeight) ->
+              ?IS_U16(X) andalso ?IS_U16(Y) andalso ?IS_U16(Width) andalso ?IS_U16(Height)
+                  andalso Width > 0 andalso Height > 0
+                  andalso X + Width =< ScreenWidth andalso Y + Height =< ScreenHeight
+                  orelse error({bad_rect, Rect}),
+              <<X:16/little, Y:16/little, Width:16/little, Height:16/little>>;
+          rect(Rect, _ScreenWidth, _ScreenHeight) ->
+              error({bad_rect, Rect}).
         ERLANG
 
       ENCODER_VALUES = <<~'ERLANG'
@@ -343,19 +354,19 @@ module Erx
       def erlang_reader
         <<~'ERLANG'
           -doc """
-          The first record of Bytes, an event or a pixels report, and the bytes
+          The first record of Bytes, an event or a damage report, and the bytes
           after it; more when Bytes holds no whole record yet. A record longer
-          than its tag's limit is refused as soon as its tag is in, so a stream
-          never buffers more than ui_pixels_max bytes and the length for one record. The pixels
-          are framed by the length alone; their count and rectangle are checked
-          by the process that knows the target.
+          than web_ui_op_max is refused as soon as its length is in, so a stream
+          never buffers more than that and the length for one record. A damage
+          report names the width and height it was drawn at; its count lies in
+          1..ui_damage_rects and each rectangle has some width and height and lies
+          within that size. Whether the size is the window's is for the process
+          that knows the window to decide.
           """.
           -spec read(binary()) -> {ok, wire_record(), Rest :: binary()} | more | {error, reason()}.
           read(<<0:32, _/binary>>) ->
               {error, bad_length};
-          read(<<Length:32/little, _/binary>>) when Length > ?PIXELS_MAX ->
-              {error, bad_length};
-          read(<<Length:32/little, Tag, _/binary>>) when Tag =/= ?PIXELS, Length > ?OP_MAX ->
+          read(<<Length:32/little, _/binary>>) when Length > ?OP_MAX ->
               {error, bad_length};
           read(<<Length:32/little, Body:Length/binary, Rest/binary>>) ->
               case read_body(Body) of
@@ -372,12 +383,24 @@ module Erx
                   {_, _, error} -> {error, bad_detail};
                   {_, Event, {ok, Value}} -> {ok, {event, Node, Event, Value}}
               end;
-          read_body(<<?PIXELS, X:16/little, Y:16/little, Width:16/little, Height:16/little, Pixels/binary>>) ->
-              {ok, {pixels, X, Y, Width, Height, Pixels}};
-          read_body(<<Tag, _/binary>>) when Tag =:= ?EVENT; Tag =:= ?PIXELS ->
+          read_body(<<?DAMAGE, Width:16/little, Height:16/little, Count, Rects/binary>>)
+            when Count >= 1, Count =< ?DAMAGE_MAX, byte_size(Rects) =:= Count * 8 ->
+              read_rects(Rects, {Width, Height}, []);
+          read_body(<<Tag, _/binary>>) when Tag =:= ?EVENT; Tag =:= ?DAMAGE ->
               {error, bad_body};
           read_body(_Body) ->
               {error, bad_tag}.
+
+          %% A damage report's rectangles, each of some width and height and within
+          %% the size the report was drawn at.
+          read_rects(<<>>, {ScreenWidth, ScreenHeight}, Rects) ->
+              {ok, {damage, ScreenWidth, ScreenHeight, lists:reverse(Rects)}};
+          read_rects(<<X:16/little, Y:16/little, Width:16/little, Height:16/little, Rest/binary>>,
+                     {ScreenWidth, ScreenHeight} = Size, Rects)
+            when Width > 0, Height > 0, X + Width =< ScreenWidth, Y + Height =< ScreenHeight ->
+              read_rects(Rest, Size, [{X, Y, Width, Height} | Rects]);
+          read_rects(_Bytes, _Size, _Rects) ->
+              {error, bad_body}.
 
           %% An event's detail: none, a boolean, a signed 32-bit integer or a text.
           read_detail(<<0>>) -> {ok, none};
@@ -571,10 +594,9 @@ module Erx
         properties = wire_properties(ui)
         defines = [
           ['ERX_UI_VERSION', ui.version, "ui.txt's version"],
-          ['ERX_UI_OP_MAX', ui.op_max, 'the longest record but a pixels report, its tag and fields'],
-          ['ERX_UI_PIXELS_MAX', ui.pixels_max, 'the longest pixels report'],
-          ['ERX_UI_PIXELS_DATA_MAX', ui.pixels_max - PIXELS_FIELDS, 'the most pixel bytes one pixels report carries'],
-          ['ERX_UI_PIXELS_AT', 4 + PIXELS_FIELDS, "the offset of a pixels report's pixels, its length word counted"],
+          ['ERX_UI_OP_MAX', ui.op_max, 'the longest record, its tag and fields'],
+          ['ERX_UI_DAMAGE_MAX', ui.damage_max, 'the most rectangles one damage report carries'],
+          ['ERX_UI_DAMAGE_RECORD_MAX', 4 + 1 + 4 + 1 + (4 * 2 * ui.damage_max), 'the longest damage record, its length word counted'],
           ['ERX_UI_EVENT_TEXT_MAX', ui.op_max - EVENT_TEXT_FIELDS, 'the longest text detail of an event'],
           ['ERX_UI_PROPERTY_MAX', properties.size, 'the most properties one record carries, each at most once'],
           ['ERX_UI_RUNE_NONE', '0xffffffffU', "a key's rune when it has none"],
@@ -605,8 +627,8 @@ module Erx
            * The reader of the records the widget server writes to a native
            * renderer in ui.txt's binary form (docs/design-abi.md, "Widget
            * format"): insert, remove, set, move, commit, screen, input and
-           * repaint; and the writer of the records a renderer writes back:
-           * event and pixels. A record is a u32 length, which counts the tag
+           * repaint and presented; and the writer of the records a renderer
+           * writes back: event and damage. A record is a u32 length, which counts the tag
            * and the fields, then a u8 tag and the fields; integers are
            * little-endian. Neither allocates: the reader copies no bytes, and
            * texts point into the caller's buffer; the writer writes into the
@@ -620,7 +642,7 @@ module Erx
           #include <stddef.h>
           #include <stdint.h>
 
-          #{defines.map { |name, value, comment| "#define #{name.ljust(24)}#{value}\t/* #{comment} */" }.join("\n")}
+          #{defines.map { |name, value, comment| "#define #{name.ljust(26)}#{value}\t/* #{comment} */" }.join("\n")}
 
           #{groups.map { |comment, pairs| enum_block(comment, pairs) }.join("\n")}
           /* The reasons erx_ui_read() refuses a record for, those of the Erlang and TypeScript readers. */
@@ -728,21 +750,26 @@ module Erx
           size_t erx_ui_write_event(uint8_t *buffer, size_t size, uint32_t node,
               uint8_t event, const erx_ui_detail_t *detail);
 
+          /* A rectangle of a damage report: its top left corner and its size. */
+          typedef struct erx_ui_rect erx_ui_rect_t;
+          struct erx_ui_rect {
+          	uint16_t	 x;
+          	uint16_t	 y;
+          	uint16_t	 width;
+          	uint16_t	 height;
+          };
+
           /*
-           * Write a pixels record, its length word included, to buffer[0..size):
-           * the rectangle at x and y of width by height and its length bytes of
-           * pixels, at most ERX_UI_PIXELS_DATA_MAX. Whether length is the
-           * rectangle's size at the target's depth is for the reader to check.
-           * Pixels must not overlap the buffer, except that they may already sit
-           * at buffer + ERX_UI_PIXELS_AT, where the record puts them, and are
-           * then left in place: a renderer that draws into the record itself
-           * places the buffer so that buffer + ERX_UI_PIXELS_AT, an odd offset,
-           * meets its toolkit's alignment. Return the bytes written, or 0, with nothing written, when
-           * the pixels are too long or the buffer too small for the record.
+           * Write a damage record, its length word included, to buffer[0..size):
+           * the width and height the frame was drawn at, then the count
+           * rectangles at rects, which must not overlap the buffer. Return the
+           * bytes written, or 0, with nothing written, when the record is
+           * refused: a count of 0 or above ERX_UI_DAMAGE_MAX, a rectangle of no
+           * width or height or not within width and height, or a buffer too
+           * small for the record.
            */
-          size_t erx_ui_write_pixels(uint8_t *buffer, size_t size, uint16_t x,
-              uint16_t y, uint16_t width, uint16_t height, const uint8_t *pixels,
-              size_t length);
+          size_t erx_ui_write_damage(uint8_t *buffer, size_t size, uint16_t width,
+              uint16_t height, const erx_ui_rect_t *rects, size_t count);
 
           #endif /* !ERX_UI_WIRE_H */
         C
@@ -764,8 +791,8 @@ module Erx
            *
            * The reader of the server's records and the writer of a renderer's
            * in ui.txt's binary form; see erx/ui_wire.h. Freestanding: it calls
-           * nothing but the memset and memcpy the compiler emits to zero a
-           * record and copy pixels. Every count and length read from a record
+           * nothing but the memset and memcpy the compiler emits to zero and
+           * copy a record. Every count and length read from a record
            * is checked against what remains of it before it is used, and every
            * record written is checked against the caller's size before a byte
            * of it is.
@@ -1286,28 +1313,34 @@ module Erx
         }
 
         size_t
-        erx_ui_write_pixels(uint8_t *buffer, size_t size, uint16_t x,
-            uint16_t y, uint16_t width, uint16_t height, const uint8_t *pixels,
-            size_t length)
+        erx_ui_write_damage(uint8_t *buffer, size_t size, uint16_t width,
+            uint16_t height, const erx_ui_rect_t *rects, size_t count)
         {
         	uint8_t *at;
         	uint32_t record;
 
-        	if (length > ERX_UI_PIXELS_DATA_MAX)
+        	if (count == 0 || count > ERX_UI_DAMAGE_MAX)
         		return (0);
-        	record = 1 + 4 * 2 + (uint32_t)length;
+        	for (size_t index = 0; index < count; index++)
+        		if (rects[index].width == 0 || rects[index].height == 0 ||
+        		    (uint32_t)rects[index].x + rects[index].width > width ||
+        		    (uint32_t)rects[index].y + rects[index].height > height)
+        			return (0);
+        	/* The tag, the size, the count, and x, y, width and height of each. */
+        	record = 1 + 2 * 2 + 1 + 4 * 2 * (uint32_t)count;
         	if (size < 4 || size - 4 < record)
         		return (0);
         	erx_ui_put32(buffer, record);
-        	buffer[4] = ERX_UI_PIXELS;
-        	erx_ui_put16(buffer + 5, x);
-        	erx_ui_put16(buffer + 7, y);
-        	erx_ui_put16(buffer + 9, width);
-        	erx_ui_put16(buffer + 11, height);
-        	at = buffer + ERX_UI_PIXELS_AT;
-        	if (pixels != at) {
-        		for (size_t index = 0; index < length; index++)
-        			at[index] = pixels[index];
+        	buffer[4] = ERX_UI_DAMAGE;
+        	erx_ui_put16(buffer + 5, width);
+        	erx_ui_put16(buffer + 7, height);
+        	buffer[9] = (uint8_t)count;
+        	at = buffer + 10;
+        	for (size_t index = 0; index < count; index++, at += 4 * 2) {
+        		erx_ui_put16(at, rects[index].x);
+        		erx_ui_put16(at + 2, rects[index].y);
+        		erx_ui_put16(at + 4, rects[index].width);
+        		erx_ui_put16(at + 6, rects[index].height);
         	}
         	return (4 + (size_t)record);
         }

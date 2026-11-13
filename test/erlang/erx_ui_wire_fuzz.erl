@@ -5,7 +5,7 @@
 %% server, and read_server/1, of what the server writes to a renderer. Each
 %% round encodes a random stream of one direction's records, which must read
 %% back to the same records, then breaks it (bytes flipped, cut, spliced or
-%% replaced by random bytes), which must read as records, more or an error,
+%% replaced by random bytes or by a damage report of any count), which must read as records, more or an error,
 %% and never raise.
 -module(erx_ui_wire_fuzz).
 -export([run/1]).
@@ -44,7 +44,7 @@ server_record() ->
                                     rand:uniform(2) =:= 1]),
     pick([{insert, Node, rand:uniform(16#100000000) - 1, u16(), pick([label, button, column]), Props},
           {set, Node, Props, pick([[], [width], [width, visible]])},
-          {remove, Node}, {move, Node, u16()}, commit, repaint,
+          {remove, Node}, {move, Node, u16()}, commit, repaint, presented,
           {screen, u16(), u16(), rand:uniform(16#100000000) - 1},
           {input, {pointer, u16(), u16(), rand:uniform(256) - 1}},
           {input, {key, pick([down, up]), u16(), pick([none, $a, 16#10ffff])}},
@@ -56,7 +56,7 @@ status(Value) ->
 
 text() -> unicode:characters_to_binary([pick([$a, 0, 16#e9, 16#1f600]) || _ <- lists:seq(1, rand:uniform(20))]).
 
--define(SERVER_TAGS, [insert, set, remove, move, commit, repaint, screen, input]).
+-define(SERVER_TAGS, [insert, set, remove, move, commit, repaint, presented, screen, input]).
 -define(REFUSALS, [bad_length, unknown_tag, short_record, bytes_left_over, bad_node, unknown_kind, unknown_property,
                    property_twice, too_many_properties, bad_status, bad_value, unknown_input_form, bad_key_direction,
                    bad_rune]).
@@ -77,22 +77,40 @@ read_all_server(Bytes, Acc) ->
 
 record() ->
     case rand:uniform(3) of
-        1 -> {pixels, u16(), u16(), u16(), u16(), rand:bytes(pick([0, 1, 7, 4096, 65527]))};
+        1 -> W = rand:uniform(65535),
+             H = rand:uniform(65535),
+             {damage, W, H, [rect(W, H) || _ <- lists:seq(1, pick([1, 2, 15, 16]))]};
         _ -> {event, rand:uniform(16#ffffffff), pick(?EVENTS), detail()}
     end.
+
+%% A rectangle of some width and height within W by H.
+rect(W, H) ->
+    X = rand:uniform(W) - 1,
+    Y = rand:uniform(H) - 1,
+    {X, Y, rand:uniform(W - X), rand:uniform(H - Y)}.
 
 detail() ->
     pick([none, true, false, rand:uniform(16#100000000) - 16#80000001, text()]).
 
 break(Stream) ->
     Size = byte_size(Stream),
-    case rand:uniform(4) of
+    case rand:uniform(5) of
         1 -> flip(Stream, rand:uniform(8));
         2 -> binary:part(Stream, 0, rand:uniform(Size) - 1);
         3 -> Cut = rand:uniform(Size) - 1,
              <<(binary:part(Stream, 0, Cut))/binary, (rand:bytes(rand:uniform(16)))/binary,
                (binary:part(Stream, Cut, Size - Cut))/binary>>;
-        4 -> rand:bytes(rand:uniform(64))
+        4 -> rand:bytes(rand:uniform(64));
+        %% A damage report framed whole with any count and size, so that
+        %% only the count check refuses one of none or of more than 16
+        %% rectangles, and only the size check one that leaves its size.
+        5 -> Count = rand:uniform(21) - 1,
+             Drawn = << <<(pick([0, 1, 2, 65535])):16/little>> || _ <- [width, height] >>,
+             Corner = fun() -> pick([0, 1, 65535]) end,
+             Body = <<10, Drawn/binary, Count,
+                      << <<(Corner()):16/little, (Corner()):16/little, (pick([0, 1, 65535])):16/little,
+                           (pick([0, 1, 65535])):16/little>> || _ <- lists:seq(1, Count) >>/binary>>,
+             <<(byte_size(Body)):32/little, Body/binary>>
     end.
 
 flip(Stream, 0) -> Stream;
@@ -110,7 +128,15 @@ read_all(Bytes, Acc) ->
             true = lists:member(Event, ?EVENTS),
             true = Detail =:= none orelse is_boolean(Detail) orelse is_integer(Detail) orelse is_binary(Detail),
             read_all(Rest, [Record | Acc]);
-        {ok, {pixels, _, _, _, _, Pixels} = Record, Rest} when is_binary(Pixels), byte_size(Rest) < byte_size(Bytes) ->
+        {ok, {damage, SW, SH, Rects} = Record, Rest} when byte_size(Rest) < byte_size(Bytes) ->
+            %% The report's count and size checks: 1 to 16 rectangles, none
+            %% empty, each within the size the report names, and exactly the
+            %% bytes its count says, so it encodes to what was read.
+            Used = byte_size(Bytes) - byte_size(Rest),
+            true = erx_ui_wire:encode(Record, fun(_, _) -> <<>> end) =:= binary:part(Bytes, 0, Used),
+            true = length(Rects) >= 1 andalso length(Rects) =< 16,
+            true = lists:all(fun({X, Y, W, H}) -> W >= 1 andalso H >= 1 andalso
+                                                  X + W =< SW andalso Y + H =< SH end, Rects),
             read_all(Rest, [Record | Acc]);
         more -> {lists:reverse(Acc), Bytes};
         {error, Reason} when Reason =:= bad_length; Reason =:= bad_tag; Reason =:= bad_node;

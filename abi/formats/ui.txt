@@ -11,8 +11,8 @@
 # The most children one node of a tree has: it bounds the difference of two
 # trees and keeps every insert's and move's index within a u16.
 limit ui_children u32 1024
-# The longest pixels message, its header and its pixels.
-limit ui_pixels_max u32 65536
+# The most rectangles one damage report carries.
+limit ui_damage_rects u32 16
 
 # Placement of a node within the room it gets.
 enum ui_align u8
@@ -121,6 +121,7 @@ ui 1
   record input 8
     field input input
   record repaint 9
+  record presented 11
   # The forms of an input record's event, by number, and their fields.
   input pointer 1
     field x u16
@@ -134,4 +135,4 @@ ui 1
     field steps i8
   # The records a renderer writes back to the server.
   report event 6
-  report pixels 10
+  report damage 10

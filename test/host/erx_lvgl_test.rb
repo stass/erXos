@@ -12,10 +12,13 @@ require_relative '../../tools/lib/erx/lvgl'
 # server"): the program, built from LVGL's submodule under ASan and UBSan, is run
 # by the model screen test/erlang/erx_lvgl_screen.erl on stock's emulator
 # (ERX_ERL and ERX_ERLC), which encodes the server's records with the
-# generated erx_ui_wire and reads the program's reports and events with it.
+# generated erx_ui_wire and reads the program's reports and events with it;
+# it starts the program through test/fixtures/erx_lvgl_buffer.rb, which hands
+# it the window's buffer, a file in the test's directory, as descriptor 3.
 # The model screen says what it checks.
 class ErxLvglTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
+  LAUNCHER = File.join(ROOT, 'test/fixtures/erx_lvgl_buffer.rb')
 # The applications the model screen runs against, compiled whole (ErlangBuild): erx holds
 # the generated erx_ui_wire, erx_display the model of the widget tree. Then the screen.
 APPLICATIONS = %w[erx erx_display].freeze
@@ -28,13 +31,29 @@ TESTS = %w[test/erlang/erx_lvgl_screen.erl].freeze
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
       %w[x8r8g8b8 r5g6b5].each do |channel|
         output = run!(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
-                      "io:format(\"~p~n\", [erx_lvgl_screen:run(\"#{program}\", #{channel})]), halt(0)", chdir: work)
+                      "io:format(\"~p~n\", [erx_lvgl_screen:run(#{screen(program)}, #{channel})]), halt(0)",
+                      chdir: work)
         assert_match(/events => \[\{event,3,on_click,none\}\]/, output, channel)
+        # Each report left unread across a resize names the size it was drawn at and is dropped.
+        assert_match(/stale => \[\{120,80\},\{60,40\}\]/, output, channel)
+      end
+      { short_buffer: /does not fit the window's buffer/, stray_presented: /answers no damage report/ }.each do |name, said|
+        output = run!(ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
+                      "io:format(\"status ~p~n\", [erx_lvgl_screen:refused(#{screen(program)}, #{name})]), halt(0)",
+                      chdir: work)
+        assert_match(/^status 1$/, output, name)
+        assert_match(said, output, name)
       end
     end
   end
 
   private
+
+  # The model screen's map of the program and how to start it, as an Erlang term.
+  def screen(program)
+    pairs = { program: program, ruby: RbConfig.ruby, launcher: LAUNCHER }.map { |key, path| "#{key} => #{path.inspect}" }
+    "\#{#{pairs.join(', ')}}"
+  end
 
   def run!(*command, chdir:)
     output, status = Open3.capture2e('gtimeout', '-k', '10', '300', *command, chdir: chdir, stdin_data: '')

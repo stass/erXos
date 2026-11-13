@@ -12,7 +12,7 @@ module Erx
     # of both directions of ui.txt's binary form (docs/design-abi.md, "Widget
     # format"; docs/design-web.md, "The client"): of the records the widget
     # server writes, whose texts it reads as MachineText (rule W2), and of the
-    # event and pixels records a renderer writes back. Its reader of the
+    # event and damage records a renderer writes back. Its reader of the
     # server's records is the TypeScript twin of the C reader and of
     # erx_ui_wire:read_server/1, with the same framing, bounds and refusal
     # reasons, so one parity test covers all three readers; its reader of
@@ -38,9 +38,9 @@ module Erx
             The reader and writer of ui.txt's binary form in both directions
             (docs/design-abi.md, "Widget format"): read() and writeRecord() of the
             records the widget server writes to a renderer, insert, remove, set,
-            move, commit, screen, input and repaint; and readReport(), writeEvent()
-            and writePixels() of the records a renderer writes back, event and
-            pixels. A record is a u32 length, which counts the tag and the fields,
+            move, commit, screen, input, repaint and presented; and readReport(),
+            writeEvent() and writeDamage() of the records a renderer writes back,
+            event and damage. A record is a u32 length, which counts the tag and the fields,
             then a u8 tag and the fields; integers are little-endian. read() hands
             every text out as a MachineText. The readers never throw on what they
             are handed: they return a record, a request for more bytes or a
@@ -166,9 +166,8 @@ module Erx
       def constants(ui)
         [
           ['UI_VERSION', ui.version, "ui.txt's version"],
-          ['OP_MAX', ui.op_max, 'the longest record but a pixels report, its tag and fields'],
-          ['PIXELS_MAX', ui.pixels_max, 'the longest pixels report'],
-          ['PIXELS_DATA_MAX', ui.pixels_max - UIWireEmitter::PIXELS_FIELDS, 'the most pixel bytes one pixels report carries'],
+          ['OP_MAX', ui.op_max, 'the longest record, its tag and fields'],
+          ['DAMAGE_MAX', ui.damage_max, 'the most rectangles one damage report carries'],
           ['EVENT_TEXT_MAX', ui.op_max - UIWireEmitter::EVENT_TEXT_FIELDS, 'the longest text detail of an event'],
           ['PROPERTY_MAX', UIWireEmitter.wire_properties(ui).size, 'the most properties one record carries, each at most once'],
           ['NAME_MAX', UIWireEmitter::NAME_MAX, 'the longest stopgap or presentation name'],
@@ -458,9 +457,9 @@ module Erx
           | { readonly tag: 'integer'; readonly value: number }
           | { readonly tag: 'text'; readonly value: Uint8Array };
 
-        /* Where an event's value and a pixels report's pixels start, the length word counted. */
+        /* Where an event's value and a damage report's rectangles start, the length word counted. */
         const EVENT_VALUE_AT = 4 + 1 + 4 + 1 + 1;
-        const PIXELS_AT = 4 + 1 + 4 * 2;
+        const RECTS_AT = 4 + 1 + 2 * 2 + 1;
 
         function isUnsigned(value: number, bits: number): boolean {
           return Number.isInteger(value) && value >= 0 && value < 2 ** bits;
@@ -520,20 +519,35 @@ module Erx
         }
 
         /*
-         * The pixels record of the rectangle at X and Y of WIDTH by HEIGHT and
-         * its PIXELS, its length word included; null when a coordinate is not a
-         * u16 or the pixels exceed PIXELS_DATA_MAX bytes. Whether their length is
-         * the rectangle's size at the target's depth is for the reader to check.
+         * A damage report's rectangle: its top left corner, its width and its
+         * height, within the width and height the report was drawn at.
          */
-        export function writePixels(x: number, y: number, width: number, height: number, pixels: Uint8Array): Uint8Array | null {
-          if (![x, y, width, height].every((value) => isUnsigned(value, 16)) || pixels.length > PIXELS_DATA_MAX) return null;
-          /* After the length word and tag: x, y, width and height, then the pixels at PIXELS_AT. */
-          const [bytes, view] = frame(TAG.pixels, 4 * 2 + pixels.length);
-          view.setUint16(5, x, true);
-          view.setUint16(7, y, true);
-          view.setUint16(9, width, true);
-          view.setUint16(11, height, true);
-          bytes.set(pixels, PIXELS_AT);
+        export type Rect = { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+
+        /*
+         * The damage record of RECTS drawn at WIDTH by HEIGHT, its length word
+         * included; null when a size or coordinate is not a u16, there are no
+         * rectangles or more than DAMAGE_MAX, or a rectangle has no width or
+         * height or does not lie within WIDTH by HEIGHT.
+         */
+        export function writeDamage(width: number, height: number, rects: readonly Rect[]): Uint8Array | null {
+          const valid = (rect: Rect) =>
+            [rect.x, rect.y, rect.width, rect.height].every((value) => isUnsigned(value, 16)) &&
+            rect.width > 0 && rect.height > 0 && rect.x + rect.width <= width && rect.y + rect.height <= height;
+          if (!isUnsigned(width, 16) || !isUnsigned(height, 16)) return null;
+          if (rects.length === 0 || rects.length > DAMAGE_MAX || !rects.every(valid)) return null;
+          /* After the length word and tag: width, height, the count, then x, y, width and height of each from RECTS_AT. */
+          const [bytes, view] = frame(TAG.damage, 2 * 2 + 1 + 4 * 2 * rects.length);
+          view.setUint16(5, width, true);
+          view.setUint16(7, height, true);
+          bytes[9] = rects.length;
+          rects.forEach((rect, index) => {
+            const at = RECTS_AT + 4 * 2 * index;
+            view.setUint16(at, rect.x, true);
+            view.setUint16(at + 2, rect.y, true);
+            view.setUint16(at + 4, rect.width, true);
+            view.setUint16(at + 6, rect.height, true);
+          });
           return bytes;
         }
 
@@ -677,17 +691,10 @@ module Erx
       TS
 
       CODE_REPORTS = <<~'TS'
-        /* A record a renderer writes back: an event, or a pixels report. */
+        /* A record a renderer writes back: an event, or a damage report. */
         export type Report =
           | { readonly tag: 'event'; readonly node: number; readonly event: string; readonly detail: Detail }
-          | {
-              readonly tag: 'pixels';
-              readonly x: number;
-              readonly y: number;
-              readonly width: number;
-              readonly height: number;
-              readonly pixels: Uint8Array;
-            };
+          | { readonly tag: 'damage'; readonly width: number; readonly height: number; readonly rects: readonly Rect[] };
 
         /* What readReport() makes of a buffer's first record, as ReadResult says of read(). */
         export type ReportResult =
@@ -697,19 +704,19 @@ module Erx
 
         /*
          * Read the first record of BUFFER that a renderer writes back, as
-         * erx_ui_wire:read/1 does, with its reasons in words. A pixels report is at
-         * most PIXELS_MAX long and any other record OP_MAX, refused as soon as its
-         * tag is in, so a caller never buffers more than PIXELS_MAX + 4 bytes. The
-         * pixels are framed by the length alone; their count and rectangle are for
-         * the caller, which knows the target, to check.
+         * erx_ui_wire:read/1 does, with its reasons in words. A record is at most
+         * OP_MAX long, refused as soon as its length is in, so a caller never
+         * buffers more than OP_MAX + 4 bytes. A damage report names the width
+         * and height it was drawn at; its count lies in 1..DAMAGE_MAX and each
+         * rectangle has some width and height and lies within that size. Whether
+         * the size is the window's is for the caller, which knows the window.
          */
         export function readReport(buffer: Uint8Array): ReportResult {
           if (buffer.length < 4) return { result: 'more' };
           const size = u32At(buffer, 0);
-          if (size === 0 || size > PIXELS_MAX) return { result: 'bad', reason: 'bad length' };
+          if (size === 0 || size > OP_MAX) return { result: 'bad', reason: 'bad length' };
           if (buffer.length < 5) return { result: 'more' };
           const tag = buffer[4] as number;
-          if (tag !== TAG.pixels && size > OP_MAX) return { result: 'bad', reason: 'bad length' };
           if (size > buffer.length - 4) return { result: 'more' };
           try {
             return { result: 'ok', report: report(new Cursor(buffer, 5, 4 + size), tag), used: 4 + size };
@@ -728,10 +735,17 @@ module Erx
               if (type?.form !== 'event') refuse('bad event');
               return { tag: 'event', node, event: type.name, detail: detail(cursor) };
             }
-            case TAG.pixels: {
+            case TAG.damage: {
               const reason = 'bad body';
-              const [x, y, width, height] = [cursor.u16(reason), cursor.u16(reason), cursor.u16(reason), cursor.u16(reason)];
-              return { tag: 'pixels', x, y, width, height, pixels: cursor.take(cursor.left, reason) };
+              const [width, height] = [cursor.u16(reason), cursor.u16(reason)];
+              const count = cursor.u8(reason);
+              if (count === 0 || count > DAMAGE_MAX || cursor.left !== 4 * 2 * count) refuse(reason);
+              const rects = Array.from({ length: count }, () => {
+                const [x, y, w, h] = [cursor.u16(reason), cursor.u16(reason), cursor.u16(reason), cursor.u16(reason)];
+                if (w === 0 || h === 0 || x + w > width || y + h > height) refuse(reason);
+                return { x, y, width: w, height: h };
+              });
+              return { tag: 'damage', width, height, rects };
             }
             default:
               return refuse('bad tag');

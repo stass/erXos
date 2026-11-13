@@ -14,11 +14,11 @@ present(_Type, Value) -> iolist_to_binary(io_lib:format("~0p", [Value])).
 
 encode(Record) -> erx_ui_wire:encode(Record, fun present/2).
 
-event_and_pixels_round_trip_test() ->
+event_and_damage_round_trip_test() ->
     Records = [{event, 1, on_click, none}, {event, 7, on_change, true}, {event, 7, on_change, false},
                {event, 16#ffffffff, on_change, -16#80000000}, {event, 2, on_submit, <<"caf", 16#e9/utf8>>},
-               {event, 3, on_select, <<>>}, {pixels, 0, 1, 2, 3, <<1, 2, 3, 4, 5, 6>>},
-               {pixels, 65535, 65535, 0, 0, <<>>}],
+               {event, 3, on_select, <<>>}, {damage, 2, 4, [{0, 1, 2, 3}]},
+               {damage, 65535, 65535, [{0, 0, 65535, 65535} || _ <- lists:seq(1, 16)]}],
     Stream = iolist_to_binary([encode(Record) || Record <- Records]),
     ?assertEqual(Records, read_all(Stream)).
 
@@ -44,6 +44,23 @@ refusals_test_() ->
      ?_assertEqual({error, bad_detail}, erx_ui_wire:read(Event(24, <<3, 1:32/little, 16#ff>>))),
      ?_assertEqual({error, bad_detail}, erx_ui_wire:read(Event(24, <<4>>))),
      ?_assertEqual({error, bad_body}, erx_ui_wire:read(frame(<<10, 1, 2, 3>>))),
+     %% A damage report drawn at 2 by 2: of no rectangle, of 17, of one too few
+     %% or too many bytes, of a rectangle of no width or no height, and of one
+     %% that leaves the size by a column or a row; the same rectangle within it.
+     ?_assertEqual({error, bad_body}, erx_ui_wire:read(frame(<<10, 2:16/little, 2:16/little, 0>>))),
+     ?_assertEqual({error, bad_body}, erx_ui_wire:read(frame(<<10, 2:16/little, 2:16/little, 17,
+                                                               (binary:copy(<<0:32, 1:16/little, 1:16/little>>, 17))/binary>>))),
+     ?_assertEqual({error, bad_body}, erx_ui_wire:read(frame(<<10, 2:16/little, 2:16/little, 1, 0:32, 1:16/little, 1:8>>))),
+     ?_assertEqual({error, bad_body}, erx_ui_wire:read(frame(<<10, 2:16/little, 2:16/little, 1, 0:32, 1:16/little, 1:16/little, 0>>))),
+     ?_assertEqual({error, bad_body}, erx_ui_wire:read(frame(<<10, 2:16/little, 2:16/little, 1, 0:32, 0:16, 1:16/little>>))),
+     ?_assertEqual({error, bad_body}, erx_ui_wire:read(frame(<<10, 2:16/little, 2:16/little, 1, 0:32, 1:16/little, 0:16>>))),
+     ?_assertEqual({error, bad_body}, erx_ui_wire:read(frame(<<10, 2:16/little, 2:16/little, 1,
+                                                               1:16/little, 0:16, 2:16/little, 1:16/little>>))),
+     ?_assertEqual({error, bad_body}, erx_ui_wire:read(frame(<<10, 2:16/little, 2:16/little, 1,
+                                                               0:16, 1:16/little, 1:16/little, 2:16/little>>))),
+     ?_assertMatch({ok, {damage, 2, 2, [{1, 1, 1, 1}]}, <<>>},
+                   erx_ui_wire:read(frame(<<10, 2:16/little, 2:16/little, 1,
+                                            1:16/little, 1:16/little, 1:16/little, 1:16/little>>))),
      ?_assertEqual({error, bad_body}, erx_ui_wire:read(frame(<<6, 1:32>>)))].
 
 encoder_refuses_what_does_not_fit_test_() ->
@@ -52,7 +69,13 @@ encoder_refuses_what_does_not_fit_test_() ->
      ?_assertError({bad_kind, nothing}, encode({insert, 1, 0, 0, nothing, #{}})),
      ?_assertError({bad_record, _}, encode({move, 1, 65536})),
      ?_assertError({bad_value, 16#d800}, encode({input, {key, down, 1, 16#d800}})),
-     ?_assertError({too_long, _}, encode({pixels, 0, 0, 1, 1, binary:copy(<<0>>, 65536)}))].
+     ?_assertError({bad_record, _}, encode({damage, 1, 1, []})),
+     ?_assertError({bad_record, _}, encode({damage, 1, 1, [{0, 0, 1, 1} || _ <- lists:seq(1, 17)]})),
+     ?_assertError({bad_record, _}, encode({damage, 65536, 1, [{0, 0, 1, 1}]})),
+     ?_assertError({bad_rect, {0, 0, 0, 1}}, encode({damage, 1, 1, [{0, 0, 0, 1}]})),
+     ?_assertError({bad_rect, {65536, 0, 1, 1}}, encode({damage, 65535, 1, [{65536, 0, 1, 1}]})),
+     ?_assertError({bad_rect, {1, 0, 1, 1}}, encode({damage, 1, 1, [{1, 0, 1, 1}]})),
+     ?_assertError({bad_rect, {0, 0, 1, 2}}, encode({damage, 1, 1, [{0, 0, 1, 2}]}))].
 
 %% The key is never written, and a set's removals are in number order.
 key_is_never_written_test() ->
@@ -173,7 +196,7 @@ each(Bytes) ->
     end.
 
 fixed() ->
-    [commit, repaint, {screen, 0, 0, 0}, {screen, 65535, 65535, 16#ffffffff},
+    [commit, repaint, presented, {screen, 0, 0, 0}, {screen, 65535, 65535, 16#ffffffff},
      {input, {pointer, 65535, 0, 255}}, {input, {key, up, 0, none}}, {input, {key, down, 65535, 16#10ffff}},
      {input, {wheel, -128}}, {input, {wheel, 127}}, {remove, 16#ffffffff}, {move, 1, 65535},
      {set, 1, #{}, []}].
@@ -235,6 +258,7 @@ line({remove, Node}) -> join(["remove", integer_to_list(Node)]);
 line({move, Node, Index}) -> join(["move", integer_to_list(Node), integer_to_list(Index)]);
 line(commit) -> "commit";
 line(repaint) -> "repaint";
+line(presented) -> "presented";
 line({screen, W, H, Chan}) -> join(["screen" | [integer_to_list(N) || N <- [W, H, Chan]]]);
 line({input, {pointer, X, Y, Buttons}}) -> join(["pointer" | [integer_to_list(N) || N <- [X, Y, Buttons]]]);
 line({input, {key, Direction, Code, Rune}}) ->
@@ -279,10 +303,10 @@ value_text(event, _V) -> "-";
 value_text(presentation, {Name, Text}) -> hex(Name) ++ ":" ++ hex(Text).
 
 -doc """
-Reads the stream of event and pixels records that the C harness's writer
+Reads the stream of event and damage records that the C harness's writer
 wrote to StreamPath and writes, to OutPath, one line per record naming what
 erx_ui_wire:read/1 read: the event by name, the detail as none, true, false,
-an integer or a text in hex, and the pixels in hex. The Ruby test maps the
+an integer or a text in hex, and each damage rectangle's x, y, width and height. The Ruby test maps the
 names to numbers and compares the lines with what the writer says it wrote.
 """.
 read_corpus(StreamPath, OutPath) ->
@@ -291,8 +315,9 @@ read_corpus(StreamPath, OutPath) ->
 
 read_line({event, Node, Event, Detail}) ->
     join(["event", integer_to_list(Node), atom_to_list(Event), detail_text(Detail)]);
-read_line({pixels, X, Y, Width, Height, Pixels}) ->
-    join(["pixels" | [integer_to_list(N) || N <- [X, Y, Width, Height]]] ++ [hex(Pixels)]).
+read_line({damage, ScreenWidth, ScreenHeight, Rects}) ->
+    join(["damage", integer_to_list(ScreenWidth), integer_to_list(ScreenHeight)
+          | [integer_to_list(N) || {X, Y, Width, Height} <- Rects, N <- [X, Y, Width, Height]]]).
 
 detail_text(Detail) when is_atom(Detail) -> atom_to_list(Detail);
 detail_text(Detail) when is_integer(Detail) -> integer_to_list(Detail);

@@ -18,11 +18,11 @@
  * writeRecord() and exits 1 unless the bytes are those it read.
  *
  * With the arguments "write PATH SEED", writes the other way instead: random
- * event and pixels records, with the generated writer, to PATH, and one line
+ * event and damage records, with the generated writer, to PATH, and one line
  * per record to standard output naming what it wrote, in the format of
  * erx_ui_wire_tests:read_corpus/2. Every event property is written, each
- * detail tag at its bounds and at random, and pixels from empty to the
- * longest; the generated readReport() must read each back as written.
+ * detail tag at its bounds and at random, and damage reports of one
+ * rectangle to the most; the generated readReport() must read each back as written.
  *
  * Texts come out of read() as MachineText, whose one view is its line
  * escape; bytesOf() takes the escape's runs back to the bytes, so the
@@ -32,18 +32,19 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { BYTE_TOKEN, CODEPOINT_TOKEN, type Token } from '../src/generated/terminal_tables.ts';
 import {
+  DAMAGE_MAX,
   EVENT_TEXT_MAX,
-  PIXELS_DATA_MAX,
   PROPERTIES,
   REPORTERS,
   STATUSES,
   read,
   readReport,
+  writeDamage,
   writeEvent,
-  writePixels,
   writeRecord,
   type Detail,
   type Prop,
+  type Rect,
   type Report,
   type UIRecord,
 } from '../src/generated/ui_wire.ts';
@@ -127,6 +128,7 @@ function line(record: UIRecord<Uint8Array>): string {
       return `move ${record.node} ${record.index}`;
     case 'commit':
     case 'repaint':
+    case 'presented':
       return record.tag;
     case 'screen':
       return `screen ${record.width} ${record.height} ${record.chan}`;
@@ -203,9 +205,13 @@ function detailText(detail: Detail): string {
   }
 }
 
+function damageLine(width: number, height: number, rects: readonly Rect[]): string {
+  return ['damage', width, height, ...rects.flatMap((rect) => [rect.x, rect.y, rect.width, rect.height])].join(' ');
+}
+
 function reportLine(report: Report): string {
   if (report.tag === 'event') return `event ${report.node} ${report.event} ${detailText(report.detail)}\n`;
-  return `pixels ${report.x} ${report.y} ${report.width} ${report.height} ${hex(report.pixels)}\n`;
+  return `${damageLine(report.width, report.height, report.rects)}\n`;
 }
 
 /* The lines readReport() reads from STREAM, which it must read whole. */
@@ -228,11 +234,14 @@ function writeCorpus(path: string, seed: number): number {
   const lines: string[] = [];
   for (let index = 0; index < 600; index++) {
     if (index % 3 === 2) {
-      const length = index % 50 === 2 ? PIXELS_DATA_MAX : below(65);
-      const [x, y, width, height] = [below(65536), below(65536), below(65536), below(65536)];
-      const pixels = Uint8Array.from({ length }, () => below(256));
-      records.push(writePixels(x, y, width, height, pixels) ?? fail('writer refused valid pixels'));
-      lines.push(`pixels ${x} ${y} ${width} ${height} ${hex(pixels)}\n`);
+      const count = index % 50 === 2 ? DAMAGE_MAX : 1 + below(DAMAGE_MAX);
+      const [width, height] = [1 + below(65535), 1 + below(65535)];
+      const rects = Array.from({ length: count }, () => {
+        const [x, y] = [below(width), below(height)];
+        return { x, y, width: 1 + below(width - x), height: 1 + below(height - y) };
+      });
+      records.push(writeDamage(width, height, rects) ?? fail('writer refused valid damage'));
+      lines.push(`${damageLine(width, height, rects)}\n`);
       continue;
     }
     const node = index % 7 === 0 ? 0xffffffff : 1 + below(0xffffffff);

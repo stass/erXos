@@ -10,13 +10,13 @@
  * throws: a record whose size is what its length word says, a request for
  * more only when the buffer holds less than that, or a refusal with a
  * reason. A report readReport() accepts must also be what writeEvent() or
- * writePixels() writes back to the same bytes.
+ * writeDamage() writes back to the same bytes.
  *
  * Run as "node ui_wire_fuzz.ts SEED ROUNDS"; tools/fuzz/erx_ui_wire_ts.rb
  * runs it for make check-fuzz, and ui_wire.test.ts for a short budget.
  */
 
-import { KINDS, OP_MAX, PIXELS_MAX, PROPERTIES, read, readReport, writeEvent, writePixels } from '../src/generated/ui_wire.ts';
+import { KINDS, OP_MAX, PROPERTIES, read, readReport, writeDamage, writeEvent } from '../src/generated/ui_wire.ts';
 
 const le = (value: number, bytes: number): number[] =>
   Array.from({ length: bytes }, (_, index) => Math.floor(value / 2 ** (8 * index)) & 0xff);
@@ -26,7 +26,8 @@ const number = (name: string): number => PROPERTIES.get(name)?.number ?? 0;
 
 /*
  * Valid records: an insert of each kind with a status text and a boolean, a
- * set with removals, a move, a commit, a screen and each input form.
+ * set with removals, a move, a commit, a screen, each input form, a repaint
+ * and a presented.
  */
 export const SEEDS: readonly Uint8Array[] = [
   ...[...KINDS.values()].map((kind) =>
@@ -39,15 +40,18 @@ export const SEEDS: readonly Uint8Array[] = [
   record([8, 1, 10, 0, 20, 0, 1]),
   record([8, 2, 1, 30, 0, ...le(0x41, 4)]),
   record([8, 3, 0xff]),
+  record([9]),
+  record([11]),
 ];
 
-/* Valid reports: an event of each detail tag and a pixels report. */
+/* Valid reports: an event of each detail tag and damage reports of one rectangle and of the most. */
 export const REPORT_SEEDS: readonly Uint8Array[] = [
   record([6, ...le(5, 4), number('on_click'), 0]),
   record([6, ...le(5, 4), number('on_change'), 1, 1]),
   record([6, ...le(0xffffffff, 4), number('on_change'), 2, ...le(0x80000000, 4)]),
   record([6, ...le(9, 4), number('on_submit'), 3, ...text([0x68, 0xc3, 0xa9])]),
-  record([10, 1, 0, 2, 0, 2, 0, 1, 0, 1, 2, 3, 4, 5, 6, 7, 8]),
+  record([10, ...le(3, 2), ...le(1, 2), 1, 1, 0, 0, 0, 2, 0, 1, 0]),
+  record([10, 0xff, 0xff, 0xff, 0xff, 16, ...Array.from({ length: 16 }, () => [0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff]).flat()]),
 ];
 
 /* xorshift32. */
@@ -103,12 +107,12 @@ function checkReport(input: Uint8Array): string | null {
   const size = input.length >= 4 ? new DataView(input.buffer, input.byteOffset).getUint32(0, true) : -1;
   switch (result.result) {
     case 'ok': {
-      if (result.used !== size + 4 || size > PIXELS_MAX) return `used ${result.used} for a length word of ${size}`;
+      if (result.used !== size + 4 || size > OP_MAX) return `used ${result.used} for a length word of ${size}`;
       const report = result.report;
       const again =
         report.tag === 'event'
           ? writeEvent(report.node, report.event, report.detail)
-          : writePixels(report.x, report.y, report.width, report.height, report.pixels);
+          : writeDamage(report.width, report.height, report.rects);
       return again !== null && Buffer.from(again).equals(input.subarray(0, result.used)) ? null : 'a report written back otherwise';
     }
     case 'more':

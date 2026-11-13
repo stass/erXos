@@ -692,16 +692,13 @@ it; git history is the record of completed work.
     the display's). New: `erx_winctl` with its fuzz target, `erx_pixels_core`, `erx_win`, `erx_draw_conn`.
     `erx_screen_core` keeps its plan and takes the design's names: a present for a flush, and no expose, since
     `erx_screen` copies what a layout change uncovers from the windows' buffers.
-  * **The widget format** ([Widget format](docs/design-abi.md#widget-format)): in `abi/formats/ui.txt` the report
-    `pixels` becomes `damage`, the record `presented` is added and `ui_pixels_max` goes; the generators
-    (`tools/lib/erx/abi_emit_ui_*.rb`), the Erlang, C and TypeScript readers and writers and their parity and fuzz
-    tests follow.
-  * **`erx-lvgl`** (`display/lvgl/erx_lvgl.c`, `test/erlang/erx_lvgl_screen.erl`): LVGL's direct mode into the buffer
-    mapped as descriptor 3 in place of partial mode with `pixels` reports; every flush but a refresh's last answered at once
-    and its area added to the refresh's damage, one `damage` report at the last, which stays open until `presented`
-    and is waited on through LVGL's flush-wait callback; `erx_ui_lvgl` writes the program nothing but `presented` while
-    a report is unanswered; the host model screen maps a file both sides share and plays `erx_ui_lvgl` and
-    the display, where it plays the renderer's side of the `pixels` reports.
+  * **`erx_ui_lvgl`** ([The widget server](docs/design-display.md#the-widget-server)): each `damage` report of
+    `erx-lvgl` turned into a present and answered with `presented`, with nothing else written to the program while a
+    report is unanswered; a report naming another size than the last `screen` record written is presented as
+    nothing and answered; a report outside the size it names, or a second one before the first is answered, ends
+    the UI.
+    The program's side, and a host model screen that plays this side over a shared buffer file, are in
+    `display/lvgl/erx_lvgl.c` and `test/erlang/erx_lvgl_screen.erl`.
   * **Programs** ([The startup message](docs/design-programs.md#the-startup-message)): the `mem` descriptor in the
     startup message's profile, `liberx`'s decoder and its fuzz target, `mmap` and `fstat` of it in the personality,
     and the session's mapping of a buffer's pages into a program's sub-space while it builds it.
@@ -713,10 +710,10 @@ it; git history is the record of completed work.
     where it answers `ui`, `uis` and `event` as unsupported today.
 * [Low] `tools/lib/erx/abi_emit_ui_wire.rb` and `abi_emit_ui_wire_ts.rb`, [Widget format](docs/design-abi.md#widget-format):
   the server's records are declared in `abi/formats/ui.txt` and their code generated, but the two reports' fields
-  (event's node, event number and detail; pixels' rectangle and bytes) and the report reader's six reasons are
+  (event's node, event number and detail; damage's count and rectangles) and the report reader's six reasons are
   still fixed text in the Erlang encoder and `read/1`, the C writers and the TypeScript `readReport`, `writeEvent`
-  and `writePixels`, tied by the parity test. Give `report` lines fields (a `detail` and a list of rectangles, for
-  the `damage` report that takes the place of `pixels`) and generate them as the records are.
+  and `writeDamage`, tied by the parity test. Give `report` lines fields (a `detail`, and a width, a height and a
+  list of rectangles for `damage`) and generate them as the records are.
 * [Medium] `tools/lib/erx/abi_emit_ui_fields.rb`, [Widget format](docs/design-abi.md#widget-format): a field type's
   code is spread beyond its `UIFields::CODE` row (the Erlang `read_props`/`read_removed`, the C `erx_ui_props`/
   `erx_ui_removed`, `kind_number/1`, the `input()` type, the TypeScript `nodeId`/`kindName`/`rune`/`writeRune`
