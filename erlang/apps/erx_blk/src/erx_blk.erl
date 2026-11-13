@@ -10,7 +10,7 @@
 %% Its start and every restart run one sequence, so a restarted driver finds the device as
 %% its predecessor left it and resets it: the block device's record, erx_device:open/1,
 %% the transport's magic, version and device id, queue_create/4, negotiate/2, which resets
-%% the device and returns every buffer it held, irq_bind/2, and the capacity from the
+%% the device and returns every buffer it held, erx_irq_line:attach/2, and the capacity from the
 %% configuration space. A machine without a disk, a record the driver cannot read and a
 %% device that fails any step each give one line in the kernel log and no driver: init/1
 %% returns ignore, so the boot goes on.
@@ -45,7 +45,7 @@
 %% dev, queue, capacity and version are fixed once init/1 returns; tag is the next request's
 %% tag; pending maps each posted tag to its caller and what to decode; waiting holds the
 %% requests the full queue turned away, oldest first.
--record(state, {dev, queue, capacity :: non_neg_integer(), version :: non_neg_integer(),
+-record(state, {dev, irq, queue, capacity :: non_neg_integer(), version :: non_neg_integer(),
                 features :: non_neg_integer(), tag = 0 :: non_neg_integer(),
                 pending = #{} :: #{non_neg_integer() => {gen_server:from(), erx_blk_request:request()}},
                 waiting = queue:new() :: queue:queue({gen_server:from(), op()})}).
@@ -89,7 +89,7 @@ init([]) ->
             ignore
     end.
 
-%% The record, open, identify, queue_create, negotiate, irq_bind and capacity, in that
+%% The record, open, identify, queue_create, negotiate, attach and capacity, in that
 %% order; each step's refusal is the sequence's error and stops it.
 start_device() ->
     maybe
@@ -99,9 +99,9 @@ start_device() ->
         {ok, Queue} ?= step(queue_create, erx_device:queue_create(Dev, ?QUEUE, ?QUEUE_SIZE,
                                                                   erx_blk_request:buffer_size())),
         {ok, Features} ?= step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
-        ok ?= step(irq_bind, erx_device:irq_bind(Dev, ?IRQ_LINE)),
+        {ok, Irq} ?= step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
         {ok, Capacity} ?= capacity(Dev, ?GENERATION_TRIES),
-        {ok, #state{dev = Dev, queue = Queue, capacity = Capacity, version = Version, features = Features}}
+        {ok, #state{dev = Dev, irq = Irq, queue = Queue, capacity = Capacity, version = Version, features = Features}}
     end.
 
 record() ->
@@ -157,7 +157,7 @@ handle_cast(_Other, State) ->
 handle_info({erx_irq, Dev, ?IRQ_LINE}, State = #state{dev = Dev}) ->
     Status = erx_device:read(Dev, interrupt_status),
     ok = erx_device:write(Dev, interrupt_ack, Status band 3),
-    ok = erx_device:irq_ack(Dev, ?IRQ_LINE),
+    ok = erx_irq_line:ack(State#state.irq),
     drain(State);
 handle_info(_Other, State) ->
     {noreply, State}.

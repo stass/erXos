@@ -601,11 +601,11 @@ module Erx
       UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
       # The program's name, the twelve words of the flags erx_boot_argv_plan derives from the
       # page's limits and grant (-P, -Q, -t, -S, -SDcpu and -SDio with their values) and the node
-      # flag with its name, around the page's words, and the six words of -erx console_uart BASE
-      # SIZE LINE CLOCK, the four of -erx boot VALUE SLOT and the three of -erx build ID, which the
+      # flag with its name, around the page's words, and the seven words of -erx console_uart BASE
+      # SIZE LINE MARK CLOCK, the four of -erx boot VALUE SLOT and the three of -erx build ID, which the
       # root adds to the manifest's. The allocator flags erx_boot_argv_plan ends its flags with are
       # counted from their one copy (allocator_words).
-      ARGUMENTS_FIXED = 28
+      ARGUMENTS_FIXED = 29
       # The file whose ALLOCATOR_WORDS string holds the allocator flags of every runtime.
       BOOT_INFO = 'liberx/backend/core/boot_info.c'
 
@@ -630,12 +630,12 @@ module Erx
 
       # Every word of ERTS's arguments that the manifest's own words do not add.
       def self.arguments_always(root) = ARGUMENTS_FIXED + allocator_words(root).size
-      # The words of -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK,
-      # which the root adds for the device of each RECORD_UNITS unit but the host link's, and of
-      # -erx device ROLE PERIPHERAL BASE SIZE LINE CLOCK, the host link's UART's physical record
+      # The words of -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE
+      # CLOCK, which the root adds for the device of each RECORD_UNITS unit but the host link's,
+      # and of -erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK, the host link's UART's physical record
       # (docs/design-stopgap.md, "Device records").
-      GIVEN_RECORD_WORDS = 11
-      DEVICE_RECORD_WORDS = 8
+      GIVEN_RECORD_WORDS = 12
+      DEVICE_RECORD_WORDS = 9
       # The manifest unit that holds the host link's UART, which gives a device record only
       # when the boot sends erx.hostlink=1.
       HOSTLINK_UNIT = 'hostlink'

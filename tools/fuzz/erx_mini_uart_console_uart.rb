@@ -11,16 +11,19 @@ require 'tmpdir'
 # source and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the oracle's), so it needs
 # no hosted build. It runs the module as it is, then each seeded copy of MUTANTS, which must
 # fail: a copy that takes the first of several entries shows the reference reads
-# duplicates, and one that accepts any clock shows it refuses an entry with a clock, which
-# the mini UART's row never carries.
+# duplicates, one that accepts any clock shows it refuses an entry with a clock, which the
+# mini UART's row never carries, and one that takes a shared line for a direct one shows it
+# holds the entry to its line's mark.
 module ErxMiniUartConsoleUartFuzz
   ROOT = File.expand_path('../..', __dir__)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_uart/src/erx_mini_uart.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_mini_uart_console_uart_fuzz.erl')
   # What each seeded copy says, the text it replaces and the text it plants.
   MUTANTS = {
-    'taking the first of several entries' => ['[[Base, Size, Line, Clock | _]] ->', '[[Base, Size, Line, Clock | _] | _] ->'],
-    'accepting any clock' => ['{{ok, B}, {ok, S}, {ok, L}, {ok, 0}} ->', '{{ok, B}, {ok, S}, {ok, L}, {ok, _}} ->']
+    'taking the first of several entries' => ['[[Base, Size, Line, Mark, Clock | _]] ->', '[[Base, Size, Line, Mark, Clock | _] | _] ->'],
+    'accepting any clock' => ['{{ok, B}, {ok, S}, {ok, L}, {ok, 0}, {ok, Sharing}} ->',
+                              '{{ok, B}, {ok, S}, {ok, L}, {ok, _}, {ok, Sharing}} ->'],
+    'reading a shared line as direct' => ['marked(shared, Line) -> {shared, Line}.', 'marked(shared, Line) -> Line.']
   }.freeze
   DEADLINE_SECONDS = '120'
 

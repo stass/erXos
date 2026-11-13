@@ -10,17 +10,19 @@ require 'tmpdir'
 # the boot information carries to init's arguments, compiled from source and run alone on
 # stock's emulator (ERX_ERL and ERX_ERLC, the oracle's), so it needs no hosted build. It runs
 # the module as it is, then each seeded copy of MUTANTS, which must fail: a copy that takes
-# the first of several entries shows the reference reads duplicates, and one that accepts a
-# clock of 0 Hz shows it refuses an entry whose clock would divide nothing.
+# the first of several entries shows the reference reads duplicates, one that accepts a
+# clock of 0 Hz shows it refuses an entry whose clock would divide nothing, and one that
+# takes a shared line for a direct one shows it holds the entry to its line's mark.
 module ErxPl011ConsoleUartFuzz
   ROOT = File.expand_path('../..', __dir__)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_uart/src/erx_pl011.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_pl011_console_uart_fuzz.erl')
   # What each seeded copy says, the text it replaces and the text it plants.
   MUTANTS = {
-    'taking the first of several entries' => ['[[Base, Size, Line, Clock | _]] ->', '[[Base, Size, Line, Clock | _] | _] ->'],
-    'accepting a clock of 0 Hz' => ["{{ok, _}, {ok, _}, {ok, _}, {ok, 0}} ->\n" \
-                                    "                    {error, {bad_console_uart, \"console_uart's clock is 0 Hz\"}};\n", '']
+    'taking the first of several entries' => ['[[Base, Size, Line, Mark, Clock | _]] ->', '[[Base, Size, Line, Mark, Clock | _] | _] ->'],
+    'accepting a clock of 0 Hz' => ["{{ok, _}, {ok, _}, {ok, _}, {ok, 0}, _} ->\n" \
+                                    "                    {error, {bad_console_uart, \"console_uart's clock is 0 Hz\"}};\n", ''],
+    'reading a shared line as direct' => ['marked(shared, Line) -> {shared, Line}.', 'marked(shared, Line) -> Line.']
   }.freeze
   DEADLINE_SECONDS = '120'
 

@@ -62,11 +62,19 @@ class DeviceCallersTest < Minitest::Test
     assert_equal [['erlang/apps/erx/src/seeded.erl', 1]], lines_of('erlang/apps/erx/src/seeded.erl' => call)
   end
 
-  # A driver that binds a shared line itself would take its deliveries from the drivers
-  # joined to the line's owner (docs/design-shared-devices.md, SD3).
-  def test_a_driver_that_binds_a_shared_line_itself_fails
-    bind = "f(D) -> erx_device:irq_bind_owner(D, 0).\n"
-    assert_equal [['erlang/apps/erx_uart/src/seeded.erl', 1]], lines_of('erlang/apps/erx_uart/src/seeded.erl' => bind)
+  # Only erx_irq_line binds and acknowledges lines (docs/design-shared-devices.md, SD3): a
+  # driver that binds a shared line itself would take its deliveries from the drivers joined
+  # to the line's owner, and one that binds or acknowledges directly bypasses the mark. A
+  # dynamic call and a literal table name the function as surely as a remote call does.
+  def test_a_driver_that_binds_or_acknowledges_a_line_itself_fails
+    driver = 'erlang/apps/erx_uart/src/seeded.erl'
+    ['f(D) -> erx_device:irq_bind(D, 0).', 'f(D) -> erx_device:irq_bind_owner(D, 0).',
+     'f(D) -> erx_device:irq_ack(D, 0).', "f(D, M) -> apply(M, 'irq_bind', [D, 0]).",
+     'f() -> [irq_ack].', 'f() -> #{call => irq_bind_owner}.'].each do |call|
+      assert_equal [[driver, 1]], lines_of(driver => "#{call}\n"), call
+    end
+    assert_empty lines_of(driver => "f(D) -> erx_irq_line:attach(D, 0), irq_binder, my_irq_ack.\n")
+    bind = "f(D) -> erx_device:irq_bind_owner(D, 0), erx_device:irq_ack(D, 0).\n"
     assert_empty lines_of('erlang/apps/erx/src/erx_device.erl' => bind, 'erlang/apps/erx/src/erx_irq_line.erl' => bind)
     assert_equal [['erlang/apps/erx/src/seeded.erl', 1], ['erlang/apps/erx/src/seeded.erl', 1]],
                  lines_of('erlang/apps/erx/src/seeded.erl' => bind)

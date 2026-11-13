@@ -47,6 +47,7 @@
              erx_inspect_srv,
              erx_inspect_worker,
              erx_inspector,
+             erx_irq_line,
              erx_irq_line_core,
              erx_kernel_records,
              erx_log,

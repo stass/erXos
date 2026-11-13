@@ -4,6 +4,7 @@
 
 require 'minitest/autorun'
 require 'open3'
+require 'tmpdir'
 require_relative '../../tools/lib/erx/oracle'
 require_relative '../../tools/lib/erx/runtime'
 
@@ -127,6 +128,109 @@ class RuntimeDeviceTest < Minitest::Test
       io:format("~s~n", [ok]), halt().
     ERLANG
   end
+
+  # The line owner (docs/design-shared-devices.md, "Verification"): two stand-in drivers
+  # joined to one owner are each told of a trigger; the call trace on irq_ack/2 shows the
+  # acknowledgement only after the second answer; a trigger after the first answer gives both
+  # a second notice after the acknowledgement; a killed driver answers by its exit. A direct
+  # line attaches as a plain bind.
+  def test_an_owner_acknowledges_a_shared_line_after_every_member_answers
+    assert_equal 'ok', evaluate(OWNER_ROUNDS)
+  end
+
+  # Each seeded fault of the owner, loaded over the runtime's erx_irq_line, fails its test.
+  def test_each_seeded_owner_fault_fails_its_case
+    LINE_SEEDS.each do |seed|
+      beam = seeded_line_module(seed.anchor, seed.replacement)
+      load = '{module, erx_irq_line} = code:load_binary(erx_irq_line, "seeded", ' \
+             'base64:decode(string:trim(io:get_line("")))), '
+      output = evaluate(load + seed.expression, input: "#{beam}\n")
+      refute_equal 'ok', output, "#{seed.fault} passed"
+      assert_match seed.failure, output, seed.fault
+    end
+  end
+
+  LineSeed = Data.define(:fault, :anchor, :replacement, :expression, :failure)
+
+  OWNER_ROUNDS = <<~'ERLANG'
+      Me = self(),
+      Spec = #{peripheral => pl011, window => stand_in, lines => [{shared, 7}]},
+      [{Spec, 0}] = erx_irq_line:owners([{a, [Spec]}, {b, [Spec#{lines => [9, {shared, 7}]}]}]),
+      {ok, [Owner]} = erx_irq_line:start_owners([{a, [Spec]}]),
+      erlang:trace_pattern({erx_device, irq_ack, 2}, true, [global]),
+      1 = erlang:trace(Owner, true, [call]),
+      Driver = fun(Name) -> spawn(fun() ->
+                 {ok, D} = erx_device:open(Spec), {ok, H} = erx_irq_line:attach(D, 0), Me ! {joined, Name, D},
+                 (fun L() -> receive {erx_irq, D, 0} -> Me ! {told, Name}, receive answer -> ok = erx_irq_line:ack(H) end, L() end end)()
+               end) end,
+      Told = fun(Name) -> receive {told, Name} -> ok after 5000 -> exit({not_told, Name}) end end,
+      Acked = fun() -> receive {trace, Owner, call, {erx_device, irq_ack, _}} -> ok after 5000 -> exit(no_ack) end end,
+      Quiet = fun() -> receive {trace, Owner, call, {erx_device, irq_ack, _}} -> exit(early_ack) after 300 -> ok end end,
+      A = Driver(a), B = Driver(b),
+      DA = receive {joined, a, X} -> X after 5000 -> exit(no_join) end,
+      receive {joined, b, _} -> ok after 5000 -> exit(no_join) end,
+      ok = erx_device:stand_in_fire(DA, 0),
+      Told(a), Told(b),
+      A ! answer, Quiet(),
+      ok = erx_device:stand_in_fire(DA, 0),
+      Quiet(),
+      B ! answer, Acked(),
+      Told(a), Told(b),
+      exit(B, kill), Quiet(),
+      A ! answer, Acked(),
+      {ok, Direct} = erx_device:open(#{peripheral => pl011, window => stand_in, lines => [8]}),
+      {ok, Handle} = erx_irq_line:attach(Direct, 0),
+      {ok, Me} = erx_device:irq_holder(Direct, 0),
+      ok = erx_device:stand_in_fire(Direct, 0),
+      receive {erx_irq, Direct, 0} -> ok after 5000 -> exit(no_direct_delivery) end,
+      ok = erx_irq_line:ack(Handle),
+      io:format("~s~n", [ok]), halt().
+  ERLANG
+
+  # An owner that ends after the driver's lookup and before it answers the join: the join's
+  # monitor fires and attach is {error, unbound}, never a wait. The suspended owner is the
+  # window between irq_holder/2 and the answer; it is killed once the trace shows the join sent.
+  def test_attach_fails_when_the_owner_ends_before_the_join_answers
+    assert_equal 'ok', evaluate(ATTACH_UNBOUND)
+  end
+
+  ATTACH_UNBOUND = <<~'ERLANG'
+      Me = self(),
+      Spec = #{peripheral => pl011, window => stand_in, lines => [{shared, 5}]},
+      {ok, Early} = erx_device:open(Spec),
+      {error, unbound} = erx_irq_line:attach(Early, 0),
+      {ok, [Owner]} = erx_irq_line:start_owners([{a, [Spec]}]),
+      true = unlink(Owner),
+      true = erlang:suspend_process(Owner),
+      Driver = spawn(fun() -> receive go -> ok end, {ok, D} = erx_device:open(Spec),
+                     {ok, Owner} = erx_device:irq_holder(D, 0), Me ! {attached, erx_irq_line:attach(D, 0)} end),
+      1 = erlang:trace(Driver, true, [send]),
+      Driver ! go,
+      receive {trace, Driver, send, Join, Owner} when element(1, Join) =:= erx_irq_join -> ok
+      after 5000 -> exit(no_join) end,
+      exit(Owner, kill),
+      receive {attached, {error, unbound}} -> ok; {attached, Other} -> exit({attached, Other})
+      after 5000 -> exit(attach_hangs) end,
+      io:format("~s~n", [ok]), halt().
+  ERLANG
+
+  LINE_SEEDS = [
+    LineSeed.new(fault: 'the join as a plain send and receive with no monitor',
+                 anchor: 'Call = erlang:monitor(process, Owner, [{alias, demonitor}]),',
+                 replacement: 'Call = erlang:alias(),',
+                 expression: ATTACH_UNBOUND, failure: /attach_hangs/),
+    LineSeed.new(fault: 'the owner acknowledging at the first answer',
+                 anchor: "        {erx_irq_done, Member} when is_reference(Member) ->\n" \
+                         '            loop(step({done, Member}, Owner));',
+                 replacement: "        {erx_irq_done, Member} when is_reference(Member) ->\n" \
+                              '            perform(ack, Owner), loop(step({done, Member}, Owner));',
+                 expression: OWNER_ROUNDS, failure: /early_ack/),
+    LineSeed.new(fault: 'the owner ignoring a trigger during a round',
+                 anchor: "        {erx_irq, Dev, Line} ->\n            loop(step(fire, Owner));",
+                 replacement: "        {erx_irq, Dev, Line} ->\n            loop(case erx_irq_line_core:phase(Owner#owner.core) of " \
+                              '{round, _, _} -> Owner; _ -> step(fire, Owner) end);',
+                 expression: OWNER_ROUNDS, failure: /not_told/)
+  ].freeze
 
   # A successor's binding moves the line, so the late exit of the driver before it changes nothing.
   def test_a_late_exit_leaves_the_successors_binding
@@ -254,10 +358,24 @@ class RuntimeDeviceTest < Minitest::Test
 
   private
 
+  # erx_irq_line with one seed planted, compiled by the stock compiler, as base64 for the
+  # runtime's standard input: the command line's page has no room for it.
+  def seeded_line_module(anchor, replacement)
+    source = File.read(File.join(ROOT, 'erlang/apps/erx/src/erx_irq_line.erl'))
+    assert_equal 1, source.scan(anchor).size, "no single anchor #{anchor}"
+    Dir.mktmpdir('erx-irq-line-seed-') do |work|
+      path = File.join(work, 'erx_irq_line.erl')
+      File.write(path, source.sub(anchor, replacement))
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, path, stdin_data: '')
+      assert status.success?, output
+      [File.binread(File.join(work, 'erx_irq_line.beam'))].pack('m0')
+    end
+  end
+
   # The expression's last printed line.
-  def evaluate(expression)
+  def evaluate(expression, input: '')
     output, = Open3.capture2e(Erx::Oracle::CLEAN_ERLANG_ENV, 'gtimeout', '-k', '10', BUDGET_SECONDS.to_s,
-                              OUTPUT.beam, OUTPUT.archive, '-noshell', '-eval', expression.gsub("\n", ' '), stdin_data: '')
+                              OUTPUT.beam, OUTPUT.archive, '-noshell', '-eval', expression.gsub("\n", ' '), stdin_data: input)
     output.lines(chomp: true).last.to_s.then { |line| line == 'ok' ? line : output }
   end
 end

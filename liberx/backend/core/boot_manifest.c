@@ -119,6 +119,29 @@ unit_first_device(const erx_manifest_view_t *view, const erx_mf_unit_t *unit, ui
 }
 
 /*
+ * Whether a device-tree device other than the one at index self names line, which makes
+ * the line shared (docs/design-shared-devices.md, "Lines inside a domain"). This is the
+ * relation of the domain library's boot view, boot_lines_meet in
+ * liberx/system/dom_boot_view.c, over the manifest's own entries: each device-tree entry
+ * names exactly one line, and a PCIe function names none. The boot view refuses a manifest
+ * that puts devices sharing a line in two units, so another device of the manifest that
+ * names the line is another device of the same unit. erx_manifest_open checked every
+ * entry, so every read succeeds.
+ */
+static bool
+line_shared(const erx_manifest_view_t *view, uint32_t self, uint32_t line)
+{
+	erx_mf_device_t other;
+
+	for (uint32_t at = 0; at < view->header.devices.count; at++) {
+		if (at != self && erx_manifest_devices_at(view, at, &other) && other.selector == ERX_MF_SELECTOR_DT &&
+		    other.line == line)
+			return (true);
+	}
+	return (false);
+}
+
+/*
  * The device records of the units the system domain holds, in the order of the device
  * table. The manifest is the one source of which domain holds a device, and a unit's
  * holder is the only place that says so (docs/design-abi.md, "Devices and partition
@@ -150,7 +173,8 @@ devices_read(const erx_manifest_view_t *view, bool hostlink, erx_boot_manifest_t
 			result->devices[result->device_count++] = (erx_boot_device_t){
 				.role = kind->role_word, .peripheral = kind->peripheral, .given = kind != &hostlink_kind,
 				.base = device.base,
-				.size = device.size, .line = device.line, .clock = device.clock,
+				.size = device.size, .line = device.line,
+				.line_shared = line_shared(view, index, device.line), .clock = device.clock,
 				.dma_memory = device.dma_memory,
 			};
 		}
@@ -167,7 +191,7 @@ console_read(const erx_manifest_view_t *view)
 		if (erx_manifest_devices_at(view, at, &device) && device.selector == ERX_MF_SELECTOR_DT &&
 		    device.role == ERX_MF_DEVICE_ROLE_UART && string_equal(view, &device.path, &view->header.console))
 			return ((erx_boot_console_t){ .base = device.base, .size = device.size, .line = device.line,
-			    .clock = device.clock });
+			    .line_shared = line_shared(view, at, device.line), .clock = device.clock });
 	}
 	return ((erx_boot_console_t){ 0 });
 }
@@ -273,6 +297,33 @@ number_put(char *words, size_t capacity, size_t *used, uint64_t value)
 	return (word_put(words, capacity, used, digits + at));
 }
 
+/*
+ * The word a record writes after its line (docs/design-shared-devices.md, "Lines inside a
+ * domain"): shared when another device of the line's unit names it too, direct otherwise.
+ */
+static const char *
+line_mark(bool shared)
+{
+	return (shared ? "shared" : "direct");
+}
+
+_Static_assert(sizeof("shared") <= ERX_BOOT_MARK_WORD_MAX && sizeof("direct") <= ERX_BOOT_MARK_WORD_MAX,
+    "erx/boot_words.h's records hold either line mark");
+
+size_t
+erx_boot_console_words(const erx_boot_console_t *console, char *words, size_t capacity)
+{
+	size_t used = 0;
+
+	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "console_uart") &&
+	    number_put(words, capacity, &used, console->base) && number_put(words, capacity, &used, console->size) &&
+	    number_put(words, capacity, &used, console->line) &&
+	    word_put(words, capacity, &used, line_mark(console->line_shared)) &&
+	    number_put(words, capacity, &used, console->clock))
+		return (used);
+	return (0);
+}
+
 size_t
 erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capacity)
 {
@@ -281,7 +332,9 @@ erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capac
 	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "device") &&
 	    word_put(words, capacity, &used, device->role) && word_put(words, capacity, &used, device->peripheral) &&
 	    number_put(words, capacity, &used, device->base) && number_put(words, capacity, &used, device->size) &&
-	    number_put(words, capacity, &used, device->line) && number_put(words, capacity, &used, device->clock))
+	    number_put(words, capacity, &used, device->line) &&
+	    word_put(words, capacity, &used, line_mark(device->line_shared)) &&
+	    number_put(words, capacity, &used, device->clock))
 		return (used);
 	return (0);
 }
@@ -305,7 +358,7 @@ erx_boot_device_given(const erx_boot_device_t *device, const erx_boot_window_t *
     uint64_t line_handle, uint64_t memory_handle)
 {
 	return ((erx_boot_given_t){ .role = device->role, .peripheral = device->peripheral, .window = window_handle,
-	    .offset = window->offset, .size = device->size, .line = line_handle,
+	    .offset = window->offset, .size = device->size, .line = line_handle, .line_shared = device->line_shared,
 	    .memory = device->dma_memory != 0 ? memory_handle : ERX_CAP_NULL, .memory_size = device->dma_memory,
 	    .clock = device->clock });
 }
@@ -319,6 +372,7 @@ erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t capacity
 	    word_put(words, capacity, &used, given->role) && word_put(words, capacity, &used, given->peripheral) &&
 	    number_put(words, capacity, &used, given->window) && number_put(words, capacity, &used, given->offset) &&
 	    number_put(words, capacity, &used, given->size) && number_put(words, capacity, &used, given->line) &&
+	    word_put(words, capacity, &used, line_mark(given->line_shared)) &&
 	    number_put(words, capacity, &used, given->memory) && number_put(words, capacity, &used, given->memory_size) &&
 	    number_put(words, capacity, &used, given->clock))
 		return (used);

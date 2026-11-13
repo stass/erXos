@@ -28,6 +28,7 @@ typedef struct erx_boot_console {
 	uint64_t	base;
 	uint64_t	size;
 	uint32_t	line;
+	bool		line_shared;	/* another device-tree device of the manifest names line */
 	uint32_t	clock;		/* the UART's clock in hertz, which its driver divides from */
 } erx_boot_console_t;
 
@@ -38,10 +39,12 @@ typedef struct erx_boot_console {
  * window, line and memory objects at boot, as a holder's creation makes them, and hands
  * their handles as -erx given (erx_boot_given_words), so a device that does DMA has one
  * form in every domain. The host link's UART, which does no DMA, is the one physical
- * record, -erx device ROLE PERIPHERAL BASE SIZE LINE CLOCK (erx_boot_device_words). role and
- * peripheral point at a row's names, and the numbers are the manifest's device entry. A
- * manifest whose units hold no such device has no record: a missing disk is a normal
- * state. The host link's UART gives a record only when the boot asks for the host link,
+ * record, -erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK (erx_boot_device_words). role
+ * and peripheral point at a row's names, and the numbers are the manifest's device entry.
+ * MARK, in every form, is shared when another device of the unit names the line and direct
+ * otherwise (docs/design-shared-devices.md, "Lines inside a domain"), so no driver decides
+ * whether its line is shared. A manifest whose units hold no such device has no record: a
+ * missing disk is a normal state. The host link's UART gives a record only when the boot asks for the host link,
  * with erx.hostlink=1 on the kernel command line.
  */
 #define ERX_BOOT_DEVICES_MAX	8
@@ -53,6 +56,7 @@ typedef struct erx_boot_device {
 	uint64_t	base;		/* the register window */
 	uint64_t	size;
 	uint32_t	line;		/* the interrupt, as the platform's controller numbers it */
+	bool		line_shared;	/* another device of its unit names line (docs/design-shared-devices.md) */
 	uint32_t	clock;		/* the device's clock in hertz; 0 for a device whose driver reads none */
 	uint64_t	dma_memory;	/* a given device's memory for the boot, whole pages; 0 for none */
 } erx_boot_device_t;
@@ -104,12 +108,21 @@ bool	erx_boot_console_matches(const erx_boot_manifest_t *manifest, const char *s
 uint64_t	erx_boot_console_page(const erx_boot_manifest_t *manifest);
 
 /*
- * Writes a physical record's words, -erx device ROLE PERIPHERAL BASE SIZE LINE CLOCK with the
- * numbers in decimal, each word ended by NUL, into words, and returns their whole length.
- * Returns 0, having written nothing past capacity, when they do not fit. Only a device that
- * is not given has this record; a given one's is -erx given (erx_boot_device_given).
+ * Writes a physical record's words, -erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK with
+ * the numbers in decimal and MARK direct or shared by line_shared, each word ended by NUL,
+ * into words, and returns their whole length. Returns 0, having written nothing past
+ * capacity, when they do not fit. Only a device that is not given has this record; a given
+ * one's is -erx given (erx_boot_device_given).
  */
 size_t	erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capacity);
+
+/*
+ * Writes the console's words, -erx console_uart BASE SIZE LINE MARK CLOCK, as
+ * erx_boot_device_words writes a physical record's, into words, and returns their whole
+ * length; 0, having written nothing past capacity, when they do not fit, which
+ * ERX_BOOT_CONSOLE_WORDS_MAX bytes (erx/boot_words.h) always do.
+ */
+size_t	erx_boot_console_words(const erx_boot_console_t *console, char *words, size_t capacity);
 
 /*
  * The pages of the device's registers into *window; false, writing nothing, for registers
@@ -132,6 +145,7 @@ typedef struct erx_boot_given {
 	uint64_t	offset;
 	uint64_t	size;
 	uint64_t	line;
+	bool		line_shared;	/* the device's, which the record marks shared rather than direct */
 	uint64_t	memory;
 	uint64_t	memory_size;
 	uint64_t	clock;
@@ -148,10 +162,11 @@ erx_boot_given_t	erx_boot_device_given(const erx_boot_device_t *device, const er
 	    uint64_t window_handle, uint64_t line_handle, uint64_t memory_handle);
 
 /*
- * Writes -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK, the numbers in
- * decimal and each word ended by NUL, into words, and returns their whole length; 0, having
- * written nothing past capacity, when they do not fit, which ERX_BOOT_GIVEN_WORDS_MAX bytes
- * (erx/boot_words.h) always do for names within ERX_BOOT_NAME_WORD_MAX.
+ * Writes -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK, the
+ * numbers in decimal, MARK direct or shared by line_shared, and each word ended by NUL, into
+ * words, and returns their whole length; 0, having written nothing past capacity, when they
+ * do not fit, which ERX_BOOT_GIVEN_WORDS_MAX bytes (erx/boot_words.h) always do for names
+ * within ERX_BOOT_NAME_WORD_MAX.
  */
 size_t	erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t capacity);
 

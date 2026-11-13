@@ -18,17 +18,23 @@
 #define ERX_BOOT_NAME_WORD_MAX		16u
 /* A decimal number of at most UINT64_MAX's 20 digits. */
 #define ERX_BOOT_NUMBER_WORD_MAX	21u
+/* A line's mark, direct or shared (docs/design-shared-devices.md, "Lines inside a domain"). */
+#define ERX_BOOT_MARK_WORD_MAX		7u
 
-/* -erx device ROLE PERIPHERAL BASE SIZE LINE CLOCK, the system domain's physical record. */
+/* -erx console_uart BASE SIZE LINE MARK CLOCK, the system domain's console. */
+#define ERX_BOOT_CONSOLE_WORDS_MAX	(sizeof("-erx") + sizeof("console_uart") + \
+	4u * ERX_BOOT_NUMBER_WORD_MAX + ERX_BOOT_MARK_WORD_MAX)
+
+/* -erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK, the system domain's physical record. */
 #define ERX_BOOT_DEVICE_WORDS_MAX	(sizeof("-erx") + sizeof("device") + \
-	2u * ERX_BOOT_NAME_WORD_MAX + 4u * ERX_BOOT_NUMBER_WORD_MAX)
+	2u * ERX_BOOT_NAME_WORD_MAX + 4u * ERX_BOOT_NUMBER_WORD_MAX + ERX_BOOT_MARK_WORD_MAX)
 
 /*
- * -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK, per given device,
- * a holder's or the root's own.
+ * -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK, per given
+ * device, a holder's or the root's own.
  */
 #define ERX_BOOT_GIVEN_WORDS_MAX	(sizeof("-erx") + sizeof("given") + \
-	2u * ERX_BOOT_NAME_WORD_MAX + 7u * ERX_BOOT_NUMBER_WORD_MAX)
+	2u * ERX_BOOT_NAME_WORD_MAX + 7u * ERX_BOOT_NUMBER_WORD_MAX + ERX_BOOT_MARK_WORD_MAX)
 
 /* -erx boot VALUE SLOT: the longest names are "unknown" and "none" (include/erx/core/boot_pair.h). */
 #define ERX_BOOT_PAIR_WORDS_MAX		(sizeof("-erx") + sizeof("boot") + \

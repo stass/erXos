@@ -56,7 +56,8 @@ static bool
 same_device(const erx_boot_device_t *a, const erx_boot_device_t *b)
 {
 	return (a->role == b->role && a->peripheral == b->peripheral && a->base == b->base && a->size == b->size &&
-	    a->line == b->line && a->clock == b->clock && a->dma_memory == b->dma_memory);
+	    a->line == b->line && a->line_shared == b->line_shared && a->clock == b->clock &&
+	    a->dma_memory == b->dma_memory);
 }
 
 /* Without the host link the reader accepts what it accepted with it, and gives its records less the host link's. */
@@ -78,6 +79,33 @@ check_without_the_hostlink(const uint8_t *bytes, size_t length, const erx_boot_m
 	}
 	if (kept != without.device_count)
 		abort();
+}
+
+/*
+ * Every record's words fit the room erx/boot_words.h gives its form, whatever the manifest
+ * says, with every handle at its widest: the root sizes its buffers by that room.
+ */
+static void
+check_the_words_fit(const erx_boot_manifest_t *manifest)
+{
+	char words[ERX_BOOT_GIVEN_WORDS_MAX];
+	erx_boot_window_t window;
+	erx_boot_given_t given;
+
+	if (manifest->console.size != 0 && erx_boot_console_words(&manifest->console, words, ERX_BOOT_CONSOLE_WORDS_MAX) == 0)
+		abort();
+	for (size_t at = 0; at < manifest->device_count; at++) {
+		const erx_boot_device_t *device = &manifest->devices[at];
+
+		if (!device->given) {
+			if (erx_boot_device_words(device, words, ERX_BOOT_DEVICE_WORDS_MAX) == 0)
+				abort();
+		} else if (erx_boot_device_window(device, &window)) {
+			given = erx_boot_device_given(device, &window, UINT64_MAX, UINT64_MAX, UINT64_MAX);
+			if (erx_boot_given_words(&given, words, ERX_BOOT_GIVEN_WORDS_MAX) == 0)
+				abort();
+		}
+	}
 }
 
 int
@@ -104,5 +132,6 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	}
 	check_the_page_says_the_same(&manifest);
 	check_without_the_hostlink(bytes, length, &manifest);
+	check_the_words_fit(&manifest);
 	return (0);
 }

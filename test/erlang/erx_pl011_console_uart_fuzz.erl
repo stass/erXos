@@ -45,19 +45,24 @@ reference(Arguments) ->
     case lists:filter(fun(["console_uart" | _]) -> true; (_) -> false end, Arguments) of
         [] ->
             {error, no_console_uart};
-        [["console_uart", Base, Size, Line, Clock | _]] ->
+        [["console_uart", Base, Size, Line, Mark, Clock | _]] ->
             case {decimal(Base, 16#ffffffffffffffff), decimal(Size, 16#ffffffffffffffff),
                   decimal(Line, 16#ffffffff), decimal(Clock, 16#ffffffff)} of
                 {_, _, _, 0} ->
                     {error, bad_console_uart};
-                {B, S, L, C} when is_integer(B), is_integer(S), is_integer(L), is_integer(C) ->
-                    {ok, #{peripheral => pl011, window => {physical, B, S}, lines => [L], clock => C}};
+                {B, S, L, C} when is_integer(B), is_integer(S), is_integer(L), is_integer(C),
+                                  (Mark =:= "direct" orelse Mark =:= "shared") ->
+                    {ok, #{peripheral => pl011, window => {physical, B, S}, lines => [marked(L, Mark)], clock => C}};
                 _ ->
                     {error, bad_console_uart}
             end;
         _ ->
             {error, bad_console_uart}
     end.
+
+%% A shared line is tagged; a direct one is the bare line.
+marked(Line, "shared") -> {shared, Line};
+marked(Line, "direct") -> Line.
 
 %% Digits only, and no more of them than Max has.
 decimal(Word, Max) ->
@@ -75,15 +80,20 @@ decimal(Word, Max) ->
 arguments() ->
     [entry() || _ <- lists:seq(1, rand:uniform(?MAX_ENTRIES + 1) - 1)].
 
-%% A third of the entries start with four number words, some within their fields and some
-%% just past them, so the accepting path and the field bounds are reached often.
+%% A third of the entries start with four number words and a mark word after the line, the
+%% numbers some within their fields and some just past them and the mark mostly direct or
+%% shared, so the accepting path, both marks and the field bounds are reached often.
 entry() ->
     Words = [word() || _ <- lists:seq(1, rand:uniform(?MAX_WORDS + 1) - 1)],
     case rand:uniform(3) of
         1 -> ["console_uart" | Words];
         2 -> Words;
-        3 -> ["console_uart", number(), number(), number(), number() | Words]
+        3 -> ["console_uart", number(), number(), number(), mark(), number() | Words]
     end.
+
+mark() ->
+    Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
+    Pick(["direct", "shared", "direct", "shared", "direct", "shared", "Shared", "direct ", "", "0"]).
 
 number() ->
     Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
@@ -95,5 +105,5 @@ word() ->
     Pick([Pick(["0", "1", "33", "4096", "150994944", "4294967295", "4294967296",
                 "18446744073709551615", "18446744073709551616", "018446744073709551615"]),
           integer_to_list(rand:uniform(1 bsl 70) - 1),
-          Pick(["", "-1", "+1", " 1", "1 ", "1\n", "0x10", "1e3", "x", "console_uart", "debug"]),
+          Pick(["", "-1", "+1", " 1", "1 ", "1\n", "0x10", "1e3", "x", "console_uart", "debug", "direct", "shared"]),
           [Pick([$0, $9, $a, $-, $\s, 16#661, 16#ff10]) || _ <- lists:seq(1, rand:uniform(24))]]).

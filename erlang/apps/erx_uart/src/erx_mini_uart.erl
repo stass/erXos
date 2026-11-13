@@ -26,7 +26,7 @@
 
 -export([start_link/1]).
 -export([init/1]).
--export([console_uart/1]).
+-export([console_records/0, console_uart/1]).
 
 %% The spec's one line.
 -define(RX_LINE, 0).
@@ -40,12 +40,17 @@ start_link(Console) ->
 init(Console) ->
     {ok, Dev} = erx_device:open(spec()),
     ok = erx_device:write(Dev, ier, 0),
-    ok = erx_device:irq_bind(Dev, ?RX_LINE),
+    {ok, Irq} = erx_irq_line:attach(Dev, ?RX_LINE),
     ok = erx_device:write_field(Dev, ier, rx_errata, 3),
     ok = erx_device:write_field(Dev, ier, rxie, 1),
     proc_lib:init_ack({ok, self(), true}),
     deliver_input(Dev, Console),
-    loop(Dev, Console).
+    loop(Dev, Irq, Console).
+
+%% The console's record, for the console to start its line's owner before the driver.
+-spec console_records() -> [erx_device:spec()].
+console_records() ->
+    [spec()].
 
 spec() ->
     {ok, Arguments} = init:get_argument(erx),
@@ -54,29 +59,43 @@ spec() ->
         {error, Reason} -> exit(Reason)
     end.
 
-%% The console's device words, `-erx console_uart Base Size Line Clock`, which the root
-%% writes from the manifest's console row; words after the four are ignored. The mini UART's
-%% row carries no clock, so Clock is 0.
+%% The console's device words, `-erx console_uart Base Size Line Mark Clock`, which the root
+%% writes from the manifest's console row; words after the clock are ignored. Mark is
+%% `shared` when another device of the console's unit names its line, as the auxiliary SPI
+%% controllers name the mini UART's on the Raspberry Pi 4, which reaches erx_device:open/1
+%% as `{shared, Line}`, and `direct` otherwise; any other word refuses the entry. The mini
+%% UART's row carries no clock, so Clock is 0.
 -spec console_uart([[string()]]) -> {ok, erx_device:spec()} | {error, {atom(), string()}}.
 console_uart(Arguments) ->
     case [Words || ["console_uart" | Words] <- Arguments] of
-        [[Base, Size, Line, Clock | _]] ->
-            case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32)} of
-                {{ok, B}, {ok, S}, {ok, L}, {ok, 0}} ->
-                    {ok, #{peripheral => mini_uart, window => {physical, B, S}, lines => [L]}};
-                {{ok, _}, {ok, _}, {ok, _}, {ok, _}} ->
+        [[Base, Size, Line, Mark, Clock | _]] ->
+            case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32), mark(Mark)} of
+                {{ok, B}, {ok, S}, {ok, L}, {ok, 0}, {ok, Sharing}} ->
+                    {ok, #{peripheral => mini_uart, window => {physical, B, S}, lines => [marked(Sharing, L)]}};
+                {{ok, _}, {ok, _}, {ok, _}, {ok, 0}, error} ->
+                    {error, {bad_console_uart, "console_uart's line mark is neither direct nor shared"}};
+                {{ok, _}, {ok, _}, {ok, _}, {ok, _}, _} ->
                     {error, {bad_console_uart, "the mini UART's row carries a clock"}};
                 _ ->
                     {error, {bad_console_uart, "console_uart's base, size, line or clock is not a "
                                               "decimal number of its field's width"}}
             end;
         [_] ->
-            {error, {bad_console_uart, "console_uart has fewer than four numbers"}};
+            {error, {bad_console_uart, "console_uart has fewer than four numbers and a line mark"}};
         [] ->
             {error, {no_console_uart, "the manifest names no device entry as machine.console"}};
         [_, _ | _] ->
             {error, {bad_console_uart, "more than one console_uart entry"}}
     end.
+
+%% The line's mark word (docs/design-shared-devices.md, "Lines inside a domain"), and the
+%% line as erx_device:open/1 takes it.
+mark("direct") -> {ok, direct};
+mark("shared") -> {ok, shared};
+mark(_Word) -> error.
+
+marked(direct, Line) -> Line;
+marked(shared, Line) -> {shared, Line}.
 
 %% Digits only, at most as many as the field's largest value has, so no word builds a large
 %% integer before the range check.
@@ -93,37 +112,37 @@ number(Word, Bits) ->
             error
     end.
 
-loop(Dev, Console) ->
+loop(Dev, Irq, Console) ->
     receive
         {erx_irq, Dev, ?RX_LINE} ->
-            take_input(Dev, Console),
-            loop(Dev, Console);
+            take_input(Dev, Irq, Console),
+            loop(Dev, Irq, Console);
         {erx_console_output, From, Bytes} ->
-            send(Dev, Console, iolist_to_binary(Bytes)),
+            send(Dev, Irq, Console, iolist_to_binary(Bytes)),
             Console ! {erx_console_written, From},
-            loop(Dev, Console);
+            loop(Dev, Irq, Console);
         _Other ->
-            loop(Dev, Console)
+            loop(Dev, Irq, Console)
     end.
 
-send(_Dev, _Console, <<>>) ->
+send(_Dev, _Irq, _Console, <<>>) ->
     ok;
-send(Dev, Console, Bytes = <<Byte, Rest/binary>>) ->
+send(Dev, Irq, Console, Bytes = <<Byte, Rest/binary>>) ->
     case erx_device:read_field(Dev, lsr, tx_empty) of
         1 ->
             ok = erx_device:write(Dev, io, Byte),
-            send(Dev, Console, Rest);
+            send(Dev, Irq, Console, Rest);
         0 ->
             receive
-                {erx_irq, Dev, ?RX_LINE} -> take_input(Dev, Console)
+                {erx_irq, Dev, ?RX_LINE} -> take_input(Dev, Irq, Console)
             after ?FULL_WAIT_MS -> ok
             end,
-            send(Dev, Console, Bytes)
+            send(Dev, Irq, Console, Bytes)
     end.
 
-take_input(Dev, Console) ->
+take_input(Dev, Irq, Console) ->
     deliver_input(Dev, Console),
-    ok = erx_device:irq_ack(Dev, ?RX_LINE).
+    ok = erx_irq_line:ack(Irq).
 
 deliver_input(Dev, Console) ->
     case drain(Dev, <<>>) of

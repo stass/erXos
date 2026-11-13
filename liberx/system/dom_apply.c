@@ -434,7 +434,10 @@ apply_give(apply_t *apply, uint32_t at)
 /*
  * The -erx given record of give `at` (erx_boot_given_words) from the
  * values its installs took in the holder's table, and its length, or 0
- * when the words do not fit, which the view's names rule out.
+ * when the words do not fit, which the view's names rule out. Its line
+ * is direct: the boot view refuses a configured row whose unit's
+ * devices share a line (liberx/system/dom_boot_view.c), so no other
+ * device of the holder's unit names it.
  */
 static size_t
 apply_given_words(apply_t *apply, uint32_t at)
@@ -444,7 +447,7 @@ apply_given_words(apply_t *apply, uint32_t at)
 	const uint64_t *installed = apply->gives[at].installed;
 	const erx_boot_given_t given = { .role = entry->role_word, .peripheral = entry->peripheral,
 	    .window = installed[ERX_DOM_OBJ_DEV_WINDOW], .offset = entry->offset, .size = entry->size,
-	    .line = installed[ERX_DOM_OBJ_DEV_IRQ],
+	    .line = installed[ERX_DOM_OBJ_DEV_IRQ], .line_shared = false,
 	    .memory = installed[ERX_DOM_OBJ_DEV_MEMORY] != ERX_CAP_NULL ?
 	    installed[ERX_DOM_OBJ_DEV_MEMORY] : installed[ERX_DOM_OBJ_DEV_KEPT],
 	    .memory_size = entry->memory, .clock = entry->clock };

@@ -26,7 +26,7 @@
 
 -export([start_link/1, start_link/2]).
 -export([init/2]).
--export([console_uart/1, baud_divisors/1]).
+-export([console_records/0, console_uart/1, baud_divisors/1]).
 
 %% The spec's one line.
 -define(RX_LINE, 0).
@@ -65,12 +65,17 @@ start(Spec, Owner, Ack) ->
     {Clock, Divisors} = clock(Spec),
     {ok, Dev} = erx_device:open(Spec),
     reprogram(Dev, Clock, Divisors),
-    ok = erx_device:irq_bind(Dev, ?RX_LINE),
+    {ok, Irq} = erx_irq_line:attach(Dev, ?RX_LINE),
     ok = erx_device:write_field(Dev, imsc, rxim, 1),
     ok = erx_device:write_field(Dev, imsc, rtim, 1),
     proc_lib:init_ack(Ack),
     deliver_input(Dev, Owner),
-    loop(Dev, Owner).
+    loop(Dev, Irq, Owner).
+
+%% The console's record, for the console to start its line's owner before the driver.
+-spec console_records() -> [erx_device:spec()].
+console_records() ->
+    [spec()].
 
 %% The root's words from the manifest's device entry for the console, as the boot information
 %% carries them to init's arguments. A failure exits with a stated reason, so a malformed
@@ -82,30 +87,44 @@ spec() ->
         {error, Reason} -> exit(Reason)
     end.
 
-%% `-erx console_uart BASE SIZE LINE CLOCK`, once, each number in decimal and within its field
-%% of the boot manifest's console (64, 64, 32 and 32 bits), the clock in hertz and not 0. A
-%% plain word of the kernel command line can follow the four numbers, so an entry may be
-%% longer. A pure function, exported for its tests and fuzz target.
+%% `-erx console_uart BASE SIZE LINE MARK CLOCK`, once, each number in decimal and within its
+%% field of the boot manifest's console (64, 64, 32 and 32 bits), the clock in hertz and not
+%% 0. MARK is `shared` when another device of the console's unit names its line, which
+%% reaches erx_device:open/1 as `{shared, Line}`, and `direct` otherwise; any other word
+%% refuses the entry. A plain word of the kernel command line can follow the clock, so an
+%% entry may be longer. A pure function, exported for its tests and fuzz target.
 -spec console_uart([[string()]]) -> {ok, erx_device:spec()} | {error, {atom(), string()}}.
 console_uart(Arguments) ->
     case [Words || ["console_uart" | Words] <- Arguments] of
-        [[Base, Size, Line, Clock | _]] ->
-            case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32)} of
-                {{ok, _}, {ok, _}, {ok, _}, {ok, 0}} ->
+        [[Base, Size, Line, Mark, Clock | _]] ->
+            case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32), mark(Mark)} of
+                {{ok, _}, {ok, _}, {ok, _}, {ok, 0}, _} ->
                     {error, {bad_console_uart, "console_uart's clock is 0 Hz"}};
-                {{ok, B}, {ok, S}, {ok, L}, {ok, C}} ->
-                    {ok, #{peripheral => pl011, window => {physical, B, S}, lines => [L], clock => C}};
+                {{ok, B}, {ok, S}, {ok, L}, {ok, C}, {ok, Sharing}} ->
+                    {ok, #{peripheral => pl011, window => {physical, B, S}, lines => [marked(Sharing, L)],
+                           clock => C}};
+                {{ok, _}, {ok, _}, {ok, _}, {ok, _}, error} ->
+                    {error, {bad_console_uart, "console_uart's line mark is neither direct nor shared"}};
                 _ ->
                     {error, {bad_console_uart, "console_uart's base, size, line or clock is not a "
                                               "decimal number of its field's width"}}
             end;
         [_] ->
-            {error, {bad_console_uart, "console_uart has fewer than four numbers"}};
+            {error, {bad_console_uart, "console_uart has fewer than four numbers and a line mark"}};
         [] ->
             {error, {no_console_uart, "the manifest names no device entry as machine.console"}};
         [_, _ | _] ->
             {error, {bad_console_uart, "more than one console_uart entry"}}
     end.
+
+%% The line's mark word (docs/design-shared-devices.md, "Lines inside a domain"), and the
+%% line as erx_device:open/1 takes it.
+mark("direct") -> {ok, direct};
+mark("shared") -> {ok, shared};
+mark(_Word) -> error.
+
+marked(direct, Line) -> Line;
+marked(shared, Line) -> {shared, Line}.
 
 %% Digits only, at most as many as the field's largest value has, so no word builds a large
 %% integer before the range check.
@@ -199,37 +218,37 @@ set_divisors(Dev, 0, {Integer, Fraction}) ->
 set_divisors(_Dev, _Divisor, _Divisors) ->
     ok.
 
-loop(Dev, Owner) ->
+loop(Dev, Irq, Owner) ->
     receive
         {erx_irq, Dev, ?RX_LINE} ->
-            take_input(Dev, Owner),
-            loop(Dev, Owner);
+            take_input(Dev, Irq, Owner),
+            loop(Dev, Irq, Owner);
         {erx_console_output, From, Bytes} ->
-            send(Dev, Owner, iolist_to_binary(Bytes)),
+            send(Dev, Irq, Owner, iolist_to_binary(Bytes)),
             Owner ! {erx_console_written, From},
-            loop(Dev, Owner);
+            loop(Dev, Irq, Owner);
         _Other ->
-            loop(Dev, Owner)
+            loop(Dev, Irq, Owner)
     end.
 
-send(_Dev, _Owner, <<>>) ->
+send(_Dev, _Irq, _Owner, <<>>) ->
     ok;
-send(Dev, Owner, Bytes = <<Byte, Rest/binary>>) ->
+send(Dev, Irq, Owner, Bytes = <<Byte, Rest/binary>>) ->
     case erx_device:read_field(Dev, fr, txff) of
         0 ->
             ok = erx_device:write(Dev, dr, Byte),
-            send(Dev, Owner, Rest);
+            send(Dev, Irq, Owner, Rest);
         1 ->
             receive
-                {erx_irq, Dev, ?RX_LINE} -> take_input(Dev, Owner)
+                {erx_irq, Dev, ?RX_LINE} -> take_input(Dev, Irq, Owner)
             after ?FULL_WAIT_MS -> ok
             end,
-            send(Dev, Owner, Bytes)
+            send(Dev, Irq, Owner, Bytes)
     end.
 
-take_input(Dev, Owner) ->
+take_input(Dev, Irq, Owner) ->
     deliver_input(Dev, Owner),
-    ok = erx_device:irq_ack(Dev, ?RX_LINE).
+    ok = erx_irq_line:ack(Irq).
 
 deliver_input(Dev, Owner) ->
     ok = erx_device:write(Dev, icr, erx_device:read(Dev, mis)),

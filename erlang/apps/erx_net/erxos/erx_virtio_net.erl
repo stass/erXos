@@ -71,7 +71,7 @@ design places it in the network domain.
 %% its vtnet(4) devices. A record past the last name is left undriven.
 -define(NAMES, [vtnet0, vtnet1, vtnet2, vtnet3]).
 
--record(t, {dev :: erx_device:device(), rx :: erx_device:queue(), tx :: erx_device:queue(),
+-record(t, {dev :: erx_device:device(), irq :: erx_irq_line:handle(), rx :: erx_device:queue(), tx :: erx_device:queue(),
             features :: non_neg_integer(), mtu :: pos_integer(),
             tag = 0 :: non_neg_integer(),     % the next request's tag, of either queue
             tx_full = false :: boolean()}).   % transmit/2 last answered full
@@ -116,7 +116,7 @@ init(#{record := Spec}) ->
             ignore
     end.
 
-%% The record, open, identify, the two queues, negotiate, irq_bind, the configuration
+%% The record, open, identify, the two queues, negotiate, attach, the configuration
 %% and the receive buffers, in that order; each step's refusal stops the sequence.
 start(Spec) ->
     maybe
@@ -125,10 +125,10 @@ start(Spec) ->
         {ok, Rx} ?= step(queue_create, erx_device:queue_create(Dev, ?RXQ, ?QUEUE_SIZE, ?BUFFER)),
         {ok, Tx} ?= step(queue_create, erx_device:queue_create(Dev, ?TXQ, ?QUEUE_SIZE, ?BUFFER)),
         {ok, Features} ?= step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
-        ok ?= step(irq_bind, erx_device:irq_bind(Dev, ?IRQ_LINE)),
+        {ok, Irq} ?= step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
         {ok, Words} ?= config(Dev, ?GENERATION_TRIES),
         {ok, Mtu} ?= mtu(Features, Words),
-        T0 = #t{dev = Dev, rx = Rx, tx = Tx, features = Features, mtu = Mtu},
+        T0 = #t{dev = Dev, irq = Irq, rx = Rx, tx = Tx, features = Features, mtu = Mtu},
         {ok, T} ?= refill(?QUEUE_SIZE, T0),
         {ok, #{link => ethernet, lladdr => lladdr(Features, Words), mtu => Mtu,
                state => link_state(Features, Words), tx_limit => ?QUEUE_SIZE,
@@ -204,11 +204,12 @@ next_tag(#t{tag = Tag} = T) -> T#t{tag = (Tag + 1) band 16#ffffffffffffffff}.
 
 -doc false.
 event({erx_irq, Dev, ?IRQ_LINE}, #t{dev = Dev} = T0) ->
-    %% Acknowledge the device's interrupt, then unmask the line, before draining, so a
+    %% Acknowledge the device's interrupt, then answer the line (erx_irq_line:ack/1), before
+    %% draining, so a
     %% completion that lands after the drain fires the line again.
     Status = erx_device:read(Dev, interrupt_status),
     ok = erx_device:write(Dev, interrupt_ack, Status band 3),
-    ok = erx_device:irq_ack(Dev, ?IRQ_LINE),
+    ok = erx_irq_line:ack(T0#t.irq),
     Link = [{link, State} || Status band 2 =/= 0, {ok, Words} <- [config(Dev, ?GENERATION_TRIES)],
                              State <- [link_state(T0#t.features, Words)]],
     {Writable, T1} = reclaim(T0),

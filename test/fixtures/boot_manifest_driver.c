@@ -43,6 +43,13 @@ given_print(const erx_boot_device_t *device)
 	    length == 0 ? 0 : erx_boot_given_words(&given, words, length - 1));
 }
 
+/* The mark a record writes beside its line. */
+static const char *
+mark(bool shared)
+{
+	return (shared ? "shared" : "direct");
+}
+
 /*
  * Reads a manifest from the file named by its first argument and prints what the boot
  * page takes from it, or the check that refused it. A second argument is a stdout-path to
@@ -87,8 +94,19 @@ main(int argc, char **argv)
 	    manifest.limits.funnel_depth, manifest.limits.exports, (unsigned long long)manifest.limits.tmp,
 	    (unsigned long long)manifest.limits.overlay, manifest.limits.atoms, manifest.limits.foreign_atoms,
 	    manifest.limits.processes);
-	printf("console_uart %llu %llu %u %u\n", (unsigned long long)manifest.console.base,
-	    (unsigned long long)manifest.console.size, manifest.console.line, manifest.console.clock);
+	printf("console_uart %llu %llu %u %s %u\n", (unsigned long long)manifest.console.base,
+	    (unsigned long long)manifest.console.size, manifest.console.line, mark(manifest.console.line_shared),
+	    manifest.console.clock);
+	{
+		char words[ERX_BOOT_CONSOLE_WORDS_MAX];
+		const size_t length = erx_boot_console_words(&manifest.console, words, sizeof(words));
+
+		printf("console_words");
+		for (size_t byte = 0; byte < length; byte++)
+			putchar(words[byte] == '\0' ? ' ' : words[byte]);
+		printf("exact %d short %zu\n", length != 0 && erx_boot_console_words(&manifest.console, words, length) == length,
+		    length == 0 ? 0 : erx_boot_console_words(&manifest.console, words, length - 1));
+	}
 	printf("console_page %llu\n", (unsigned long long)erx_boot_console_page(&manifest));
 	printf("devices %zu\n", manifest.device_count);
 	for (size_t at = 0; at < manifest.device_count; at++) {
@@ -96,9 +114,9 @@ main(int argc, char **argv)
 		char words[ERX_BOOT_DEVICE_WORDS_MAX];
 		size_t length;
 
-		printf("device %s %s %llu %llu %u %llu %u ", device->role, device->peripheral,
+		printf("device %s %s %llu %llu %u %s %llu %u ", device->role, device->peripheral,
 		    (unsigned long long)device->base, (unsigned long long)device->size, device->line,
-		    (unsigned long long)device->dma_memory, device->clock);
+		    mark(device->line_shared), (unsigned long long)device->dma_memory, device->clock);
 		if (device->given) {
 			given_print(device);
 			continue;

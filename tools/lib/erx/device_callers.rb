@@ -35,8 +35,8 @@ module Erx
              *DRIVER_DIRECTORIES.map { |directory| "#{directory}/**/*" }].freeze
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
     NAMED = /(?<![A-Za-z0-9_@])#{MODULE}(?![A-Za-z0-9_@])/
-    OWNER_BIND = /(?<![A-Za-z0-9_@])irq_bind_owner(?![A-Za-z0-9_@])/
-    OWNER_BIND_SITES = ['erlang/apps/erx/src/erx_device.erl', LINE_MODULE].freeze
+    LINE_CALLS = /(?<![A-Za-z0-9_@])irq_(?:bind|bind_owner|ack)(?![A-Za-z0-9_@])/
+    LINE_CALL_SITES = ['erlang/apps/erx/src/erx_device.erl', LINE_MODULE].freeze
     # Erlang's lexical forms that can hold a % or a quote (otp/lib/stdlib/src/erl_scan.erl):
     # a triple-quoted string, which ends at a line of only its run of quotes; a sigil,
     # ~Name and a string between one of its delimiter pairs, where the vanilla sigil, ~b
@@ -59,7 +59,8 @@ module Erx
     end
     NAMING_RULE = "only erx_device, erx_irq_line and the driver applications " \
                   "(#{[*DRIVER_APPLICATIONS, *DRIVER_DIRECTORIES].join(', ')}) may name #{MODULE}".freeze
-    OWNER_BIND_RULE = "only erx_device and erx_irq_line may name irq_bind_owner, the owner's bind of a shared line"
+    LINE_CALL_RULE = 'only erx_device and erx_irq_line may name irq_bind, irq_bind_owner or irq_ack: ' \
+                     'a driver attaches and acknowledges its lines through erx_irq_line'
 
     module_function
 
@@ -72,7 +73,7 @@ module Erx
         next [] unless covers?(path)
 
         lines = code(text).each_line.with_index(1).to_a
-        [*matches(path, lines, NAMED, SITES, NAMING_RULE), *matches(path, lines, OWNER_BIND, OWNER_BIND_SITES, OWNER_BIND_RULE)]
+        [*matches(path, lines, NAMED, SITES, NAMING_RULE), *matches(path, lines, LINE_CALLS, LINE_CALL_SITES, LINE_CALL_RULE)]
       end
     end
 

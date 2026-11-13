@@ -44,10 +44,8 @@ int	main(int, char **, char **);
 
 static const char	*release_read(const erx_boot_handoff_view_t *, bool, erx_boot_manifest_t *);
 static const char	*gather_args(const erx_boot_handoff_view_t *, const erx_boot_manifest_t *, size_t *);
-static size_t		 console_uart_build(const erx_boot_console_t *);
 static size_t		 boot_build(erx_boot_pair_t);
 static size_t		 word_append(char *, size_t, size_t, const char *);
-static size_t		 console_uart_number(char *, uint64_t);
 static const char	*library_up(const erx_manifest_view_t *, const erx_pack_view_t *, const erx_boot_handoff_view_t *);
 static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
 static size_t		 line_append(char *, size_t, erx_boot_words_t);
@@ -59,12 +57,8 @@ static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
  * each erx.arg word, which takes a byte and its NUL at the least.
  */
 static erx_boot_words_t arg_words[4 + ERX_BOOT_DEVICES_MAX + ERX_BOOT_STRINGS_MAX / 2];
-/* -erx console_uart BASE SIZE LINE CLOCK: four numbers, each at most UINT64_MAX's 20 digits and its NUL. */
-#define CONSOLE_UART_NUMBER_MAX	(20 + 1)
-static const char console_uart_prefix[] = "-erx\0console_uart";
-static char console_uart_words[sizeof(console_uart_prefix) + 4 * CONSOLE_UART_NUMBER_MAX];
-_Static_assert(sizeof(console_uart_words) >= sizeof(console_uart_prefix) + 4 * CONSOLE_UART_NUMBER_MAX,
-    "the console words hold the prefix and four numbers");
+/* -erx console_uart BASE SIZE LINE MARK CLOCK (erx_boot_console_words). */
+static char console_uart_words[ERX_BOOT_CONSOLE_WORDS_MAX];
 /* Each device record's words: the given form's, or the host link's physical one, which is shorter. */
 static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_GIVEN_WORDS_MAX];
 _Static_assert(ERX_BOOT_GIVEN_WORDS_MAX >= ERX_BOOT_DEVICE_WORDS_MAX, "a device record's room holds either form");
@@ -248,9 +242,14 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 	size_t build_length;
 
 	arg_words[(*nargs)++] = manifest->system_args;
-	if (manifest->console.size != 0)
-		arg_words[(*nargs)++] = (erx_boot_words_t){ console_uart_words,
-		    console_uart_build(&manifest->console) };
+	if (manifest->console.size != 0) {
+		const size_t console_length = erx_boot_console_words(&manifest->console, console_uart_words,
+		    sizeof(console_uart_words));
+
+		if (console_length == 0)
+			return ("the console: its words outgrow their room");
+		arg_words[(*nargs)++] = (erx_boot_words_t){ console_uart_words, console_length };
+	}
 	boot_length = boot_build(handoff->boot);
 	if (boot_length == 0)
 		return ("the handoff: a boot value or slot that has no name");
@@ -352,41 +351,4 @@ word_append(char *words, size_t size, size_t used, const char *name)
 		words[used + at] = name[at];
 	} while (name[at++] != '\0');
 	return (used + at);
-}
-
-/*
- * Writes the words into console_uart_words and returns their whole length, the last NUL
- * included. The buffer holds the prefix and four numbers of at most CONSOLE_UART_NUMBER_MAX
- * bytes each, as its _Static_assert says, so no write can fail.
- */
-static size_t
-console_uart_build(const erx_boot_console_t *console)
-{
-	size_t used = sizeof(console_uart_prefix);
-
-	for (size_t at = 0; at < used; at++)
-		console_uart_words[at] = console_uart_prefix[at];
-	used += console_uart_number(console_uart_words + used, console->base);
-	used += console_uart_number(console_uart_words + used, console->size);
-	used += console_uart_number(console_uart_words + used, console->line);
-	used += console_uart_number(console_uart_words + used, console->clock);
-	return (used);
-}
-
-/* VALUE in decimal and its NUL at WORD, at most CONSOLE_UART_NUMBER_MAX bytes; returns their count. */
-static size_t
-console_uart_number(char *word, uint64_t value)
-{
-	char digits[CONSOLE_UART_NUMBER_MAX - 1];
-	size_t count = 0;
-	size_t used = 0;
-
-	do {
-		digits[count++] = (char)('0' + value % 10);
-		value /= 10;
-	} while (value != 0);
-	while (count > 0)
-		word[used++] = digits[--count];
-	word[used++] = '\0';
-	return (used);
 }

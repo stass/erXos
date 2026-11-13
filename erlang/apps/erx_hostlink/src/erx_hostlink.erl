@@ -113,11 +113,18 @@ init([]) ->
 start(Spec) ->
     case erx_build:id() of
         {ok, Build} ->
-            {ok, Driver} = erx_pl011:start_link(Spec, self()),
-            Core = erx_hostlink_session:new(#{build => Build, versions => versions(),
-                                              measure => fun bounded_measure/1}),
-            {ok, perform(erx_hostlink_session:step({entropy, entropy()}, Core),
-                         #state{driver = Driver, core = Core})};
+            %% The line's owner first, when the record marks the line shared: linked to
+            %% this process as the driver is, so either's end ends the host link.
+            case erx_irq_line:start_owners([{erx_pl011, [Spec]}]) of
+                {ok, _Owners} ->
+                    {ok, Driver} = erx_pl011:start_link(Spec, self()),
+                    Core = erx_hostlink_session:new(#{build => Build, versions => versions(),
+                                                      measure => fun bounded_measure/1}),
+                    {ok, perform(erx_hostlink_session:step({entropy, entropy()}, Core),
+                                 #state{driver = Driver, core = Core})};
+                {error, Reason} ->
+                    {stop, {hostlink_line_owner, Reason}}
+            end;
         {error, Reason} ->
             {stop, Reason}
     end.

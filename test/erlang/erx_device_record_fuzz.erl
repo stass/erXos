@@ -54,27 +54,33 @@ reference(Arguments) ->
         false -> {error, bad_device_record}
     end.
 
-spec("given", [Window, Offset, Size, Line, Memory, Bytes, Clock | _]) ->
+spec("given", [Window, Offset, Size, Line, Mark, Memory, Bytes, Clock | _]) ->
     case {[decimal(Word, ?U64) || Word <- [Window, Offset, Size, Line, Memory, Bytes]], decimal(Clock, ?U32)} of
-        {[W, O, S, L, M, 0], C} when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M),
-                                     is_integer(C) ->
-            #{peripheral => virtio_mmio, window => {object, W, O, S}, lines => [{object, L}], clock => C};
         {[W, O, S, L, M, B], C} when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M),
-                                     is_integer(B), is_integer(C) ->
-            #{peripheral => virtio_mmio, window => {object, W, O, S}, lines => [{object, L}],
-              memory => {object, M, B}, clock => C};
+                                     is_integer(B), is_integer(C), (Mark =:= "direct" orelse Mark =:= "shared") ->
+            Spec = #{peripheral => virtio_mmio, window => {object, W, O, S}, lines => [marked({object, L}, Mark)],
+                     clock => C},
+            case B of
+                0 -> Spec;
+                _ -> Spec#{memory => {object, M, B}}
+            end;
         _ ->
             bad
     end;
-spec("device", [Base, Size, Line, Clock | _]) ->
+spec("device", [Base, Size, Line, Mark, Clock | _]) ->
     case {decimal(Base, ?U64), decimal(Size, ?U64), decimal(Line, ?U32), decimal(Clock, ?U32)} of
-        {B, S, L, C} when is_integer(B), is_integer(S), is_integer(L), is_integer(C) ->
-            #{peripheral => virtio_mmio, window => {physical, B, S}, lines => [L], clock => C};
+        {B, S, L, C} when is_integer(B), is_integer(S), is_integer(L), is_integer(C),
+                          (Mark =:= "direct" orelse Mark =:= "shared") ->
+            #{peripheral => virtio_mmio, window => {physical, B, S}, lines => [marked(L, Mark)], clock => C};
         _ ->
             bad
     end;
 spec(_Form, _Words) ->
     bad.
+
+%% A shared line is tagged; a direct one is the bare line.
+marked(Line, "shared") -> {shared, Line};
+marked(Line, "direct") -> Line.
 
 %% Digits only, and no more of them than Max has.
 decimal(Word, Max) ->
@@ -93,20 +99,28 @@ arguments() ->
     [entry() || _ <- lists:seq(1, rand:uniform(?MAX_ENTRIES + 1) - 1)].
 
 %% Half of the entries are records of the asked role and peripheral, in either form, half of
-%% those with their form's count of number words, some within their fields and some just
-%% past them, so the accepting path and the field bounds are reached often.
+%% those with their form's count of number words and a mark word after the line, the numbers
+%% some within their fields and some just past them and the mark mostly direct or shared, so
+%% the accepting path, both marks and the field bounds are reached often.
 entry() ->
     Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
     Words = [word() || _ <- lists:seq(1, rand:uniform(?MAX_WORDS + 1) - 1)],
     Form = Pick(["device", "given"]),
-    Count = #{"device" => 4, "given" => 7},
+    %% The numbers before the mark word and after it.
+    Count = #{"device" => {3, 1}, "given" => {4, 3}},
+    {Before, After} = maps:get(Form, Count),
+    Numbers = fun(N) -> [number() || _ <- lists:seq(1, N)] end,
     case rand:uniform(4) of
         1 -> [Form, "block", "virtio_mmio" | Words];
-        2 -> [Form, "block", "virtio_mmio" | [number() || _ <- lists:seq(1, maps:get(Form, Count))] ++ Words];
+        2 -> [Form, "block", "virtio_mmio" | Numbers(Before) ++ [mark() | Numbers(After)] ++ Words];
         3 -> [Pick(["device", "given", "console_uart"]), Pick(["block", "network", ""]),
               Pick(["virtio_mmio", "sdhci", "virtio_mmio "]) | Words];
         4 -> Words
     end.
+
+mark() ->
+    Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
+    Pick(["direct", "shared", "direct", "shared", "direct", "shared", "Shared", "direct ", "", "0"]).
 
 number() ->
     Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
@@ -118,5 +132,5 @@ word() ->
     Pick([Pick(["0", "1", "79", "4096", "167788032", "4294967295", "4294967296",
                 "18446744073709551615", "18446744073709551616", "018446744073709551615"]),
           integer_to_list(rand:uniform(1 bsl 70) - 1),
-          Pick(["", "-1", "+1", " 1", "1 ", "1\n", "0x10", "1e3", "x", "device", "block"]),
+          Pick(["", "-1", "+1", " 1", "1 ", "1\n", "0x10", "1e3", "x", "device", "block", "direct", "shared"]),
           [Pick([$0, $9, $a, $-, $\s, 16#661, 16#ff10]) || _ <- lists:seq(1, rand:uniform(24))]]).

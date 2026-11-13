@@ -10,9 +10,10 @@ require 'tmpdir'
 # information carries to init's arguments, compiled from source and run alone on stock's
 # emulator (ERX_ERL and ERX_ERLC, the oracle's), so it needs no hosted build. It runs the
 # module as it is, then each seeded copy of MUTANTS, which must fail: a physical record that
-# reads its line as 64 bits wide shows the reference holds each field to its width, and a
+# reads its line as 64 bits wide shows the reference holds each field to its width, a
 # given record that keeps a memory key of 0 bytes shows it holds a device of no DMA to
-# having no memory object.
+# having no memory object, and a reader that takes a shared line for a direct one shows it
+# holds each record to its line's mark.
 module ErxDeviceRecordFuzz
   ROOT = File.expand_path('../..', __dir__)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/erx_device_record.erl')
@@ -20,7 +21,8 @@ module ErxDeviceRecordFuzz
   # What each seeded copy says, the text it replaces and the text it plants.
   MUTANTS = {
     'reading a line as 64 bits wide' => ['number(Line, 32)', 'number(Line, 64)'],
-    'keeping a memory key of 0 bytes' => ["with_memory(Spec, _Memory, 0) -> Spec;\n", '']
+    'keeping a memory key of 0 bytes' => ["with_memory(Spec, _Memory, 0) -> Spec;\n", ''],
+    'reading a shared line as direct' => ['marked(shared, Line) -> {shared, Line}.', 'marked(shared, Line) -> Line.']
   }.freeze
   DEADLINE_SECONDS = '120'
 

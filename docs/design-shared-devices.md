@@ -201,7 +201,12 @@ the owner saying the driver is done. In both cases the driver receives
 `{erx_irq, Dev, Line}`, with its own record and line, so a driver's
 receive and service code does not depend on whether its line is shared,
 and after attach it unmasks its device's interrupt and drains once, as
-it does after a bind.
+it does after a bind. A driver acknowledges once for each delivery and only after
+receiving it. The owner takes an answer from a member it is not waiting
+on as nothing, since the core's `done` outside a round's `W` is nothing,
+so a stray answer is ignored; a second answer to one notice would count
+for the next round, which the contract rules out as it rules out a second
+`irq_ack/2` of one delivery on a direct line.
 
 The NIF holds a shared line for its owner alone: `irq_bind/2` of a
 shared line is `{error, shared}`, and `erx_device:irq_bind_owner/2`, the
@@ -302,7 +307,10 @@ the services they serve, the console and the host link, not by a unit
 supervisor. Each service starts the owner of its UART's line before the
 driver when the record marks the line shared, as any starter of a driver
 does; on the Raspberry Pi 4 both lines are shared, and each owner has one
-member. The manifest check refuses a manifest whose `console` and
+member. The console learns its driver's record from the driver module's
+`console_records/0`, starts the owners linked to itself as the driver is,
+and takes an owner's end as the driver's, which ends the runtime; the
+host link's owner is linked to the host link as its driver is. The manifest check refuses a manifest whose `console` and
 `hostlink` UARTs share a line (property 8 of
 [design-system.md](design-system.md#the-manifest)): the two services
 would each start an owner of the one line, and the second owner's bind
@@ -334,6 +342,7 @@ mapping of the console's page hands nothing over.
 | `erx_irq_line:attach(Dev, Line) -> {ok, Handle} \| {error, Reason}` | reads the line's mark from the record; direct: `erx_device:irq_bind/2`; shared: a monitored join call to the process `irq_holder/2` names, `{error, unbound}` when no process holds the line or the holder ends before it answers |
 | `erx_irq_line:ack(Handle) -> ok` | direct: `erx_device:irq_ack/2`; shared: `{erx_irq_done, Ref}` to the owner, `Ref` the member's monitor, a message that never waits |
 | `erx_irq_line:start_owner(Dev, Line)` | opens `Dev`, binds `Line` with `irq_bind_owner/2`, runs `erx_irq_line_core` |
+| `erx_irq_line:start_owners([{Driver, [Dev]}]) -> {ok, [pid()]} \| {error, Reason}` | starts the owners `owners/1` names, in order, each linked to the caller |
 | `erx_irq_line_core:step(Event, State) -> {[Action], State}` | pure; events `fire`, `{join, Ref, Pid, Dev}`, `{done, Ref}`, `{down, Ref}`; actions `{notify, Pid, Dev}` and `ack` |
 | `erx_device:irq_bind(Dev, Line)` | binds a direct line; `{error, shared}` on a shared line |
 | `erx_device:irq_bind_owner(Dev, Line)` | binds a shared line for its owner; `{error, direct}` on a direct line |
@@ -377,7 +386,7 @@ direct line is named by one record, so its only binder is its driver.
 | --- | --- | --- | --- |
 | **SD1.** No register page and no interrupt line is held by two domains | units are closed under sharing a page and sharing a line; a give makes one window per page run and one IRQ object per line of the unit, in the one holder's budget; PCIe functions get MSIs only | a unit row that splits a component; a give per device; an INTx line given to a domain | the boot view's refusal, in the build and at boot, with a seeded split that shares only a line |
 | **SD2.** A record reaches only its own device's registers | every access is a register name of its own peripheral below its window size; the generator refuses a table past the window | a raw offset in the interface; a table naming a register past the window | the NIF's host tests on two records of one page; the generator's refusal with a seeded oversized table |
-| **SD3.** A line has at most one binder in a domain, and a shared line's binder is its owner | the NIF keeps one entry per line, whose binding is one process; the record's mark decides which bind the NIF accepts, `irq_bind/2` for a direct line and `irq_bind_owner/2` for a shared one; a bind through another record of a bound line is `ebusy`; only `erx_irq_line` calls the binds and `irq_ack/2` | a table keyed by record; a caller that says whether a line is shared; a driver that binds directly | the NIF's host tests with a seeded per-record table and a seeded mark the bind ignores; a source check over the driver applications' BEAM files with a seeded direct bind |
+| **SD3.** A line has at most one binder in a domain, and a shared line's binder is its owner | the NIF keeps one entry per line, whose binding is one process; the record's mark decides which bind the NIF accepts, `irq_bind/2` for a direct line and `irq_bind_owner/2` for a shared one; a bind through another record of a bound line is `ebusy`; only `erx_irq_line` calls the binds and `irq_ack/2` | a table keyed by record; a caller that says whether a line is shared; a driver that binds directly | the NIF's host tests with a seeded per-record table and a seeded mark the bind ignores; the device-callers source check, which reads every token of the Erlang sources, strings, quoted atoms and literal tables included, with seeded direct binds and acknowledgements; a pass over the driver applications' BEAM files, which would also see an atom spelled with escapes, is the target ([TODO.md](../TODO.md)) |
 | **SD4.** A shared line is acknowledged once per round, after every member told of it answered or went down, and no firing goes untold | `erx_irq_line_core` decides every acknowledgement and every notice; a firing during a round sets `Again`, which starts another round; a member is its monitor, so every member's exit reaches the core; the owner performs only the actions the core returns | an acknowledgement at the first answer; a firing during a round dropped; a member the core holds without a monitor | exhaustive exploration of the core on the host, with seeded faults |
 
 ## Failure handling

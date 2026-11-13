@@ -2733,9 +2733,10 @@ not code that spells the atom with escapes or builds it from pieces; what
 keeps a device from every other domain is that its capabilities are
 installed only in its driver's domain. `erx_irq_line`, beside `erx_device` in `erx`, is the one other
 module the check allows, and the only caller of `irq_bind/2`,
-`irq_bind_owner/2` and `irq_ack/2`: a check over the driver applications' BEAM files with the
-compiler's call graph fails the build on any other caller, with a seeded
-driver that binds its line directly
+`irq_bind_owner/2` and `irq_ack/2`: the same source check fails the build
+on any other module naming them, with seeded drivers that bind or
+acknowledge their line directly; a pass over the driver applications'
+BEAM files with the compiler's call graph is the target
 ([design-shared-devices.md](design-shared-devices.md#invariants), SD3).
 
 ### Per-byte primitives

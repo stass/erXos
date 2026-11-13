@@ -102,10 +102,10 @@ class BootManifestTest < Minitest::Test
   def test_the_hostlink_unit_gives_the_system_domain_s_one_device_record
     output, status = read(admitted)
     assert status.success?, output
-    assert_includes output, "console_uart 150994944 4096 33 24000000\n"
+    assert_includes output, "console_uart 150994944 4096 33 direct 24000000\n"
     assert_includes output, "devices 1\n"
-    assert_includes output, "device hostlink pl011 151257088 4096 40 0 24000000 " \
-                            "words-erx device hostlink pl011 151257088 4096 40 24000000 exact 1 short 0\n"
+    assert_includes output, "device hostlink pl011 151257088 4096 40 direct 0 24000000 " \
+                            "words-erx device hostlink pl011 151257088 4096 40 direct 24000000 exact 1 short 0\n"
     refute_match(/^device (?:block|net) /, output)
   end
 
@@ -121,8 +121,8 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted(source))
     assert status.success?, output
     assert_includes output, "devices 2\n"
-    assert_includes output, "device net virtio_mmio 167783936 512 71 262144 0 window 167780352 4096 3584 " \
-                            "words-erx given net virtio_mmio 11 3584 512 12 13 262144 0 exact 1 short 0\n"
+    assert_includes output, "device net virtio_mmio 167783936 512 71 direct 262144 0 window 167780352 4096 3584 " \
+                            "words-erx given net virtio_mmio 11 3584 512 12 direct 13 262144 0 exact 1 short 0\n"
   end
 
   # A given device's window object covers whole pages from the one that holds its first
@@ -132,7 +132,7 @@ class BootManifestTest < Minitest::Test
   # names no memory object, whatever handle the root holds.
   def test_a_given_device_s_window_covers_the_pages_of_its_registers
     given = lambda do |window, offset, size|
-      "window #{window} #{offset} words-erx given block virtio_mmio 11 #{offset} #{size} 12 0 0 0 exact 1 short 0\n"
+      "window #{window} #{offset} words-erx given block virtio_mmio 11 #{offset} #{size} 12 direct 0 0 0 exact 1 short 0\n"
     end
     {
       %w[0xa003e00 0x200] => given.call('167784448 4096', 3584, 512),
@@ -234,5 +234,26 @@ class BootManifestTest < Minitest::Test
     assert status.success?, output
     assert_includes output, "console_uart #{0xfe215040} 64 "
     assert_includes output, "console_page #{0xfe215000}\n"
+  end
+
+  # A line is shared when another device-tree device of the manifest names it too
+  # (docs/design-shared-devices.md, "Lines inside a domain"), and each record says so
+  # beside the line, so no driver decides it. On QEMU virt every line is one device's, so
+  # the console's and the host link's are direct. On the Raspberry Pi 4 the mini UART's
+  # line 125 is the auxiliary SPI controllers' too, and UART3's line 153 the other
+  # PL011s', so the console's and the host link's records both say shared.
+  def test_each_record_marks_whether_its_line_is_shared
+    output, status = read(admitted)
+    assert status.success?, output
+    assert_includes output, "console_uart 150994944 4096 33 direct 24000000\n"
+    assert_includes output, "console_words-erx console_uart 150994944 4096 33 direct 24000000 exact 1 short 0\n"
+    assert_match(/^device hostlink pl011 \d+ \d+ 40 direct .*words-erx device hostlink pl011 \d+ \d+ 40 direct \d+ exact 1/, output)
+    pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
+    output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
+    assert status.success?, output
+    assert_match(/^console_uart #{0xfe215040} 64 125 shared \d+\n/, output)
+    assert_match(/^console_words-erx console_uart #{0xfe215040} 64 125 shared \d+ exact 1 short 0\n/, output)
+    assert_match(/^device hostlink pl011 \d+ \d+ 153 shared .*words-erx device hostlink pl011 \d+ \d+ 153 shared \d+ exact 1/,
+                 output)
   end
 end

@@ -32,6 +32,7 @@
 %% so neither the shell nor its commands name the console they run on.
 %%
 %% The system console's driver is the module `-erx console_driver Module` names. It implements
+%% `Module:console_records() -> [erx_device:spec()]`, the device records it drives, and
 %% `Module:start_link(Console) -> {ok, pid(), Terminal}`, where Terminal says whether a
 %% person's terminal is on the line, and exchanges these messages:
 %%
@@ -40,6 +41,10 @@
 %%                    {erx_console_input, Bytes}, the bytes as they were read
 %%                    {erx_console_size, Columns, Rows}, when the line's size changes
 %%                    erx_console_eof, after every byte read before the end
+%%
+%% Before the driver the console starts the owners of the shared lines its records name
+%% (erx_irq_line:start_owners/1), linked to it as the driver is, and takes an owner's end
+%% as the driver's (docs/design-shared-devices.md, "Lines inside a domain").
 %%
 %% The console is also the reader that writes the kernel log on the line (docs/design-live.md,
 %% "The console"; docs/design-stopgap.md, "The console"). Every LOG_POLL_MS it takes the
@@ -130,6 +135,7 @@
                     owner => fun((pid()) -> non_neg_integer()),
                     name := atom(),
                     driver := fun((Console :: pid()) -> {ok, pid(), Terminal :: boolean()}),
+                    line_owners => fun(() -> {ok, [pid()]} | {error, term()}),
                     first_shell := first_shell() | shell()}.
 
 -define(DEFAULT_SIZE, {80, 24}).
@@ -141,6 +147,9 @@
                 name :: atom(),
                 first_shell :: first_shell() | shell(),
                 driver :: pid(),
+                %% The owners of the driver's shared lines, started before it: an owner's end is
+                %% the driver's (docs/design-shared-devices.md, "Lines inside a domain").
+                line_owners = [] :: [pid()],
                 %% The group the console started with, which the others return the input to:
                 %% the command shell's, or `user` with no shell.
                 base :: pid(),
@@ -203,6 +212,7 @@ start() ->
     gen_server:start({local, ?MODULE}, ?MODULE,
                      #{role => system, name => ?MODULE,
                        driver => fun(Console) -> (driver_module()):start_link(Console) end,
+                       line_owners => fun() -> line_owners(driver_module()) end,
                        first_shell => first_shell(shell_arguments())}, []).
 
 -doc """
@@ -335,6 +345,7 @@ init(Config = #{role := Role, name := Name, driver := Start, first_shell := Firs
     %% A domain has one line, which terminal/0 names.
     persistent_term:put({?MODULE, line}, Name),
     Console = self(),
+    {ok, LineOwners} = (maps:get(line_owners, Config, fun() -> {ok, []} end))(),
     {ok, DriverPid, Terminal} = Start(self()),
     %% As user_drv does for a line with no terminal on it: no editing, no echo and bytes
     %% as they are.
@@ -349,6 +360,7 @@ init(Config = #{role := Role, name := Name, driver := Start, first_shell := Firs
                            name = Name,
                            first_shell = FirstShell,
                            driver = DriverPid,
+                           line_owners = LineOwners,
                            base = Group,
                            user = User,
                            tty = TTY,
@@ -580,8 +592,9 @@ handle_info({'EXIT', User, Reason}, State = #state{user = User}) ->
     %% `user` ends only as the runtime stops (user_sup kills the system console's).
     {stop, Reason, State};
 handle_info({'EXIT', Pid, Reason},
-            State = #state{role = Role, driver = Driver, base = Base, shells = Shells,
+            State = #state{role = Role, driver = Driver, line_owners = LineOwners, base = Base, shells = Shells,
                            first_shell = FirstShell, terminal = Terminal, input_ended = Ended}) ->
+    LineEnded = Pid =:= Driver orelse lists:member(Pid, LineOwners),
     case lists:keytake(Pid, 1, Shells) of
         {value, {Pid, Caller, _Shell}, Others} ->
             %% A shell run_shell/1 started has ended, and its group with it, in whatever
@@ -606,9 +619,9 @@ handle_info({'EXIT', Pid, Reason},
                     erlang:halt(Status),
                     {stop, Reason, State}
             end;
-        false when Pid =:= Driver, Role =:= session ->
+        false when LineEnded, Role =:= session ->
             {stop, Reason, State};
-        false when Pid =:= Driver ->
+        false when LineEnded ->
             %% Nothing would read the terminal again, and its keys no longer signal: end
             %% the runtime, whose exit restores the terminal.
             ended_by(Reason),
@@ -689,6 +702,10 @@ from_group({Pid, Request}, State) ->
     group_request(Request, Pid, State);
 from_group(_Message, State) ->
     State.
+
+%% The owners of the shared lines of the system console's driver, linked to the console.
+line_owners(Module) ->
+    erx_irq_line:start_owners([{Module, Module:console_records()}]).
 
 %% The driver's module, from the argument the boot information page carries. The last naming
 %% wins, since the hosted entry adds its driver after the manifest's arguments, and a plain

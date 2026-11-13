@@ -9,10 +9,15 @@
 
 -module(erx_stdio).
 
--export([start_link/1]).
+-export([start_link/1, console_records/0]).
 -export([init/1]).
 
 -nifs([start_nif/0, take_nif/0, write_nif/1]).
+
+%% The terminal of a hosted runtime is no device, so it has no record.
+-spec console_records() -> [].
+console_records() ->
+    [].
 
 -spec start_link(Console :: pid()) -> {ok, pid(), Terminal :: boolean()}.
 start_link(Console) ->

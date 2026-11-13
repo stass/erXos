@@ -17,22 +17,49 @@ find(Arguments) ->
 spec(Base, Size, Line, Clock) ->
     #{peripheral => virtio_mmio, window => {physical, Base, Size}, lines => [Line], clock => Clock}.
 
-record(Numbers) ->
-    ["device", "block", "virtio_mmio" | Numbers].
+%% A physical record of Base, Size, Line and Clock, its line marked direct, as on QEMU virt.
+record([Base, Size, Line, Clock | Words]) ->
+    ["device", "block", "virtio_mmio", Base, Size, Line, "direct", Clock | Words];
+record(Words) ->
+    ["device", "block", "virtio_mmio" | Words].
 
 %% The words the root writes for QEMU virt's host link UART, its one physical record.
 the_root_s_record_test() ->
     ?assertEqual({ok, [#{peripheral => pl011, window => {physical, 151257088, 4096}, lines => [40], clock => 24000000}]},
                  erx_device_record:find(hostlink, pl011, [["device", "hostlink", "pl011", "151257088", "4096", "40",
-                                                           "24000000"]])).
+                                                           "direct", "24000000"]])).
+
+%% The Raspberry Pi 4's host link UART shares line 153 with the other PL011s, and its
+%% record says so; erx_device:open/1 takes the line marked.
+a_shared_line_is_marked_test() ->
+    ?assertEqual({ok, [#{peripheral => pl011, window => {physical, 4263515648, 512}, lines => [{shared, 153}],
+                         clock => 48000000}]},
+                 erx_device_record:find(hostlink, pl011, [["device", "hostlink", "pl011", "4263515648", "512", "153",
+                                                           "shared", "48000000"]])),
+    ?assertEqual({ok, [(given_spec(12, 0, 512, 13, 0))#{lines => [{shared, {object, 13}}]}]},
+                 find([given_marked(["12", "0", "512", "13", "shared", "0", "0", "0"])])).
+
+%% Only the two words mark a line: anything else refuses the record rather than reading
+%% it as one mark or the other.
+a_bad_mark_refuses_test() ->
+    [?assertMatch({error, {bad_device_record, "a device record's line mark" ++ _}},
+                  find([["device", "block", "virtio_mmio", "1", "2", "3", Mark, "4"]]))
+     || Mark <- bad_marks()],
+    [?assertMatch({error, {bad_device_record, "a given device record's line mark" ++ _}},
+                  find([given_marked(["1", "0", "2", "3", Mark, "0", "0", "0"])]))
+     || Mark <- bad_marks()],
+    ?assertMatch({error, {bad_device_record, _}}, find([["device", "block", "virtio_mmio", "1", "2", "3", "4"]])).
+
+bad_marks() ->
+    ["", "Shared", "DIRECT", "shared ", " direct", "share", "directly", "1", "shared\n"].
 
 a_missing_disk_is_no_record_test() ->
     ?assertEqual({ok, []}, find([])),
-    ?assertEqual({ok, []}, find([["console_uart", "1", "2", "3"], ["console_driver", "erx_pl011"]])).
+    ?assertEqual({ok, []}, find([["console_uart", "1", "2", "3", "direct", "4"], ["console_driver", "erx_pl011"]])).
 
 other_roles_and_peripherals_are_left_alone_test() ->
     ?assertEqual({ok, []}, find([["device", "network", "virtio_mmio", "x"],
-                                 ["device", "block", "sdhci", "1", "2", "3", "4"],
+                                 ["device", "block", "sdhci", "1", "2", "3", "direct", "4"],
                                  ["device", "block"], ["device"]])).
 
 several_records_keep_their_order_and_trailing_words_are_dropped_test() ->
@@ -55,10 +82,17 @@ malformed_numbers_refuse_test() ->
 
 a_short_record_refuses_even_after_a_good_one_test() ->
     ?assertMatch({error, {bad_device_record, _}}, find([record(["1", "2", "3", "4"]), record(["1", "2", "3"])])),
+    ?assertMatch({error, {bad_device_record, _}}, find([["device", "block", "virtio_mmio", "1", "2", "3", "direct"]])),
     ?assertMatch({error, {bad_device_record, _}}, find([record([])])).
 
-given(Numbers) ->
-    ["given", "block", "virtio_mmio" | Numbers].
+%% A given record of the seven numbers, its line marked direct after LINE_H.
+given([Window, Offset, Size, Line | Rest]) ->
+    given_marked([Window, Offset, Size, Line, "direct" | Rest]);
+given(Words) ->
+    given_marked(Words).
+
+given_marked(Words) ->
+    ["given", "block", "virtio_mmio" | Words].
 
 given_spec(Window, Offset, Size, Line, Clock) ->
     #{peripheral => virtio_mmio, window => {object, Window, Offset, Size}, lines => [{object, Line}],
@@ -75,8 +109,8 @@ a_holder_s_record_test() ->
 a_given_uart_s_clock_test() ->
     ?assertEqual({ok, [#{peripheral => pl011, window => {object, 12, 0, 4096}, lines => [{object, 13}],
                          clock => 24000000}]},
-                 erx_device_record:find(uart, pl011, [["given", "uart", "pl011", "12", "0", "4096", "13", "0", "0",
-                                                       "24000000"]])).
+                 erx_device_record:find(uart, pl011, [["given", "uart", "pl011", "12", "0", "4096", "13", "direct",
+                                                       "0", "0", "24000000"]])).
 
 a_given_record_of_no_memory_has_no_memory_key_test() ->
     ?assertEqual({ok, [given_spec(12, 0, 4096, 13, 0)]}, find([given(["12", "0", "4096", "13", "0", "0", "0"])])).
@@ -99,4 +133,5 @@ given_field_bounds_test() ->
 a_short_given_record_refuses_test() ->
     ?assertMatch({error, {bad_device_record, _}}, find([given(["1", "2", "3", "4", "5", "6"])])),
     ?assertMatch({error, {bad_device_record, _}}, find([given(["12", "3584", "512", "13", "14", "1", "0"]),
-                                                        given([])])).
+                                                        given([])])),
+    ?assertMatch({error, {bad_device_record, _}}, find([given_marked(["12", "3584", "512", "13", "14", "1", "0"])])).

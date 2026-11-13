@@ -6274,30 +6274,29 @@ document's "residual risks accepted" paragraph.
   reaching only its own window through the register table
   ([design-shared-devices.md](docs/design-shared-devices.md#pages-inside-a-domain)), and test two slots of one page in
   `test/fixtures/erx_device_harness.c`.
-* [Low] runtime and drivers, shared interrupt lines
-  ([design-shared-devices.md](docs/design-shared-devices.md#lines-inside-a-domain)): the device NIF makes one IRQ
-  object per record line (`erx_device.c`, `take_lines`) and keeps one binding per record line (`erx_device_nif.c`,
-  `bindings`), so two records on one line fail at the second create; `erx_irq_line`, its owner and the check that only it binds or acknowledges a
-  line do not exist, and drivers call `irq_bind/2` and `irq_ack/2` themselves. No supported board runs two drivers on
-  one line. Residual once built: a line owner keeps no deadline per firing, so a hung driver holds its sharers
-  masked until the unit is restarted.
 * [Medium] runtime, the device records' writers (`liberx/backend/core/boot_manifest.c`'s `-erx device`, the root's
   `-erx console_uart`, the domain library's and `runtime_entry.c`'s `-erx given`, and `erx_device_record`): no record
-  carries what [design-shared-devices.md](docs/design-shared-devices.md#pages-inside-a-domain) gives it, the page
-  run its unit's windows cover and each line's shared mark. The device NIF takes `{shared, Line}` in a spec's
-  `lines` and maps each record's own pages as its run (`erx_device.c`, `take_window`), so records over one page
-  share its mapping, but a record whose pages meet a run without equalling it is `ebusy`, and every line reads as
-  direct, so `irq_bind_owner/2` is `{error, direct}` on every line a record names today. Write the run and the mark
-  from the boot view's unit relation into every record form, and read them in `erx_device_record`.
+  carries the page run its unit's windows cover, which
+  [design-shared-devices.md](docs/design-shared-devices.md#pages-inside-a-domain) gives it. The device NIF maps each
+  record's own pages as its run (`erx_device.c`, `take_window`), so records over one page share its mapping, but a
+  record whose pages meet a run without equalling it is `ebusy`. Write the run from the boot view's unit relation
+  into every record form, and read it in `erx_device_record`.
 * [Low] runtime, the console handoff (`liberx/backend/fiasco/service_task.c`,
   `erx_fiasco_task_mem_physical_body`) compares the request's base with the console's exactly, which holds for a
   page-aligned UART only; test containment instead.
+* [Medium] drivers, shared interrupt lines, who may reach a line
+  ([design-shared-devices.md](docs/design-shared-devices.md#invariants), SD3 and SD4): the line-call check
+  (`tools/lib/erx/device_callers.rb`) reads source tokens, so an atom spelled with escapes passes it; the BEAM-file
+  pass the design names is not built. Any module may call `erx_irq_line`, so `attach/2` of a guessed record moves a
+  direct line's binding, `ack/1` of a forged direct handle acknowledges a shared line behind its owner, and
+  `start_owner/2` through the owner's record takes the line silently; `irq_ack/2` checks neither the caller nor
+  the mark (`erx_device_bif.c`). A forged `{erx_irq, ...}` to a driver or a forged join to an owner can likewise
+  acknowledge a line early or hold it masked. Fix by construction: `irq_ack/2` accepts only the line's binder, and
+  a naming rule holds `erx_irq_line` to drivers and their starters.
 * [Low] drivers, shared interrupt lines
-  ([design-shared-devices.md](docs/design-shared-devices.md#lines-inside-a-domain)): `erx_irq_line`, its owner and
-  the check over the driver applications' BEAM files that only it calls `erx_device:irq_bind/2` and `irq_ack/2` do
-  not exist, and drivers call both themselves; the source check holds only `irq_bind_owner/2` to `erx_irq_line`
-  (`tools/lib/erx/device_callers.rb`). No supported board runs two drivers on one line. Residual once built: a line
-  owner keeps no deadline per firing, so a hung driver holds its sharers masked until the unit is restarted.
+  ([design-shared-devices.md](docs/design-shared-devices.md#failure-handling)): a line owner keeps no deadline per
+  firing (`erlang/apps/erx/src/erx_irq_line.erl`), so a hung driver holds its sharers masked until the unit is
+  restarted; a deadline after which the owner restarts the slow driver belongs with the hostile-driver work.
 * [Medium] erx_blk, the block driver: the device process's backlog, reply and reset decisions
   (`erlang/apps/erx_blk/src/erx_blk.erl`, `submit/3`, `resume/1`, `recover/2`) are tested only end to end, by the
   `block_device` QEMU suite's good path; they should move into a pure module whose full, held and broken cases are

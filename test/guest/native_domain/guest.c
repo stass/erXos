@@ -2180,6 +2180,8 @@ case_undo(uint32_t program)
 #define GIVEN_RECORD	"-erx\0given\0block\0virtio_mmio\0"
 #define GIVEN_PAIR	"-erx\0boot\0normal\0a\0"
 #define GIVEN_NUMBERS	7u			/* WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK */
+#define GIVEN_MARK	"direct"		/* after LINE_H: a configured domain's line is never shared */
+#define GIVEN_MARK_AFTER 3u			/* LINE_H's index among the numbers */
 
 static erx_dom_configured_t configured[1];
 static erx_dom_device_entry_t catalogue[1];
@@ -2250,7 +2252,8 @@ given_decimal(const char **at, const char *end, uint64_t *value)
 /*
  * Reads domain id's -erx given record from its boot page into numbers, and
  * whether -erx boot follows with the library's pair. False for a page with
- * no record or a record whose numbers are not GIVEN_NUMBERS decimals.
+ * no record or a record whose numbers are not GIVEN_NUMBERS decimals with
+ * GIVEN_MARK after LINE_H.
  */
 static bool
 given_read(uint32_t id, uint64_t *numbers, bool *pair)
@@ -2271,8 +2274,13 @@ given_read(uint32_t id, uint64_t *numbers, bool *pair)
 	passed = at != NULL;
 	if (passed)
 		at += sizeof(GIVEN_RECORD) - 1;
-	for (uint32_t number = 0; passed && number < GIVEN_NUMBERS; number++)
+	for (uint32_t number = 0; passed && number < GIVEN_NUMBERS; number++) {
 		passed = given_decimal(&at, end, &numbers[number]);
+		if (passed && number == GIVEN_MARK_AFTER) {
+			passed = (size_t)(end - at) >= sizeof(GIVEN_MARK) && memcmp(at, GIVEN_MARK, sizeof(GIVEN_MARK)) == 0;
+			at += passed ? sizeof(GIVEN_MARK) : 0;
+		}
+	}
 	*pair = passed && (size_t)(end - at) >= sizeof(GIVEN_PAIR) - 1 &&
 	    memcmp(at, GIVEN_PAIR, sizeof(GIVEN_PAIR) - 1) == 0;
 	return (erx_vm_release(ERX_CAP_SELF, addr, ERX_PAGE_SIZE) == ERX_OK && passed);

@@ -354,13 +354,16 @@ test_header_corruption(void)
 static void
 test_holder_records(void)
 {
-	static const char record[] = "-erx\0given\0block\0virtio_mmio\0" "7\0" "3584\0" "512\0" "8\0" "9\0" "65536\0"
+	static const char record[] = "-erx\0given\0block\0virtio_mmio\0" "7\0" "3584\0" "512\0" "8\0" "direct\0" "9\0" "65536\0"
 	    "24000000\0" "-erx\0boot\0trial\0b\0";
 	const erx_boot_given_t given = { .role = "block", .peripheral = "virtio_mmio", .window = 7, .offset = 3584,
 	    .size = 512, .line = 8, .memory = 9, .memory_size = 65536, .clock = 24000000 };
 	const erx_boot_given_t longest = { .role = "ROLEROLEROLEROL", .peripheral = "PERIPHERALPERIP", .window = UINT64_MAX,
-	    .offset = UINT64_MAX, .size = UINT64_MAX, .line = UINT64_MAX, .memory = UINT64_MAX, .memory_size = UINT64_MAX,
-	    .clock = UINT64_MAX };
+	    .offset = UINT64_MAX, .size = UINT64_MAX, .line = UINT64_MAX, .line_shared = true, .memory = UINT64_MAX,
+	    .memory_size = UINT64_MAX, .clock = UINT64_MAX };
+	static const char shared[] = "-erx\0given\0net\0virtio_mmio\0" "1\0" "0\0" "512\0" "2\0" "shared\0" "0\0" "0\0" "0\0";
+	const erx_boot_given_t shared_given = { .role = "net", .peripheral = "virtio_mmio", .window = 1, .size = 512,
+	    .line = 2, .line_shared = true };
 	char words[ERX_BOOT_GIVEN_WORDS_MAX + ERX_BOOT_PAIR_WORDS_MAX];
 	erx_boot_inputs_t inputs = good_inputs();
 	erx_boot_words_t args[2];
@@ -391,6 +394,8 @@ test_holder_records(void)
 	used = erx_boot_given_words(&longest, words, sizeof(words));
 	CHECK(used == ERX_BOOT_GIVEN_WORDS_MAX, "holder: the longest given record is %zu bytes", used);
 	CHECK(erx_boot_given_words(&longest, words, used - 1) == 0, "holder: a given record past its room is written");
+	used = erx_boot_given_words(&shared_given, words, sizeof(words));
+	CHECK(used == sizeof(shared) - 1 && memcmp(words, shared, used) == 0, "holder: a shared line's record");
 	used = erx_boot_pair_words(ERX_BOOT_VALUE_UNKNOWN, ERX_BOOT_SLOT_NONE, words, sizeof(words));
 	CHECK(used == ERX_BOOT_PAIR_WORDS_MAX, "holder: the longest boot record is %zu bytes", used);
 	CHECK(erx_boot_pair_words(ERX_BOOT_VALUE_UNKNOWN, ERX_BOOT_SLOT_NONE, words, used - 1) == 0,
