@@ -112,7 +112,7 @@ Three needs go beyond that: native programs, toybox's applets among them,
 need POSIX files over storage and over a session's own files
 ([design-programs.md](design-programs.md)); the live machine's state
 should be readable with `cat`, `ls` and `grep`
-([design-live.md](design-live.md#the-proc-tree)); and the user asked that
+([design-live.md](design-live.md#the-proc-tree)); and it is required that
 a domain's file tree show what it holds, as Plan 9's per-process
 namespaces do. This design builds on mechanisms that exist:
 

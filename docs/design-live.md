@@ -78,8 +78,7 @@ Decisions every reader of this document needs:
   named by the SHA-256 of its bytes, loaded only after its bytes match;
   manifests map names to hashes, and the host sends only the blobs the
   target lacks.
-* **A command shell with rc's language, written in Erlang.** By the user's
-  decision each session can run a shell that speaks Plan 9's rc, with
+* **A command shell with rc's language, written in Erlang.** Each session can run a shell that speaks Plan 9's rc, with
   emacs-style line editing and job control added; a command is a builtin, an
   Erlang command or a program in one namespace, a command acts only through
   the capabilities it was handed, and every pipe carries text, each
@@ -3077,7 +3076,7 @@ programs write and pass an allowlist of control sequences, with a mode for
 full-screen programs. It loses: it differs from UNIX and QNX, it breaks what
 programs may rightly send, and it takes a parser, a table of sequences, a mode
 with a reset and a bounded request protocol between domains to do it. The
-user's decision is that output functions leave the data alone.
+decision is that output functions leave the data alone.
 
 **A kernel record per process, for authoritative process facts.** The
 inspector could then report a process's state and CPU time without asking

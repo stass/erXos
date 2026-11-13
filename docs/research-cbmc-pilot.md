@@ -1,7 +1,7 @@
 # The CBMC pilot
 
 A point-in-time record of the Track K pilot's CBMC harnesses on the
-pilot's finished cores, written 2026-11-08 for the owner's decision on
+pilot's finished cores, written 2026-11-08 for the decision on
 adopting CBMC (decision Q19 of the pilot's charter: adoption is decided
 from this record). The harnesses, the roster and the runner are described
 in [design-verification.md](design-verification.md#cbmc-harnesses-and-runner);

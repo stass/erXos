@@ -31,7 +31,7 @@ program's creation, its channel and its table in
 
 Decisions every reader of this document needs:
 
-* **Pipes are not kernel objects**, by the user's decision. The kernel
+* **Pipes are not kernel objects**. The kernel
   provides memory objects and IRQ objects used as doorbells; `liberx` and
   the session do the rest, and the data path makes no kernel call while
   the other side is awake.
@@ -57,8 +57,7 @@ Decisions every reader of this document needs:
 ## Context
 
 A UNIX pipe is a kernel buffer: the kernel serialises writers and readers
-and knows when the last end goes. erXos's kernel keeps no pipe object, by
-the user's decision, so the buffer, its arbitration and its end-of-stream
+and knows when the last end goes. erXos's kernel keeps no pipe object, so the buffer, its arbitration and its end-of-stream
 rule live in user space, built from the kernel's general objects
 ([design-kernel.md](design-kernel.md)):
 
@@ -1804,7 +1803,7 @@ and kernel objects that exist for other purposes.
 ## Alternatives considered
 
 **A kernel pipe object.** The kernel would own the buffer and count each
-end's holders, as UNIX kernels and Zircon's sockets do. The user chose to
+end's holders, as UNIX kernels and Zircon's sockets do. erXos chose to
 keep pipes out of the kernel; a kernel buffer also costs two kernel calls
 and bounce copies per transfer, which shared rings avoid.
 

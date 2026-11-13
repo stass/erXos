@@ -738,7 +738,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   is the fix: runs, the merge and the lean step. Settled by that design's
   bulk benchmark meeting its target. A FreeBSD-stack baseline through the same tap needs
   an address on the host's side of bridge0, a setting change on the FreeBSD test host that
-  waits for the owner's go-ahead.
+  waits for approval.
 * **[Medium] network, checksums in the copy**
   ([design-network-stack.md](design-network-stack.md#checksums-in-the-copy)). The design
   removes the separate checksum pass on each path: the TCP encoder's sum in the

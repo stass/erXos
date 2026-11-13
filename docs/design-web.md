@@ -95,12 +95,12 @@ device. A browser gives links on every value, pages that scroll, logs and
 traces that follow live, and widgets on any machine: a QEMU guest without
 virtio-gpu, a board with only a UART, a laptop.
 
-The owner's direction sets the shape: the web starts with `erx` hosting it
+The shape: the web starts with `erx` hosting it
 on the developer's host and moves to cowboy on the machine, reusing the
 display's parts; the browser UI is JavaScript that receives data over a
 WebSocket, so the machine "does not need to bother with layout/html at
 all"; React, pnpm and TypeScript are approved for it, and Node.js for the
-client's build and test tools. The owner also set that the web UI is a
+client's build and test tools. The web UI is a
 different medium: "we should not try to replicate native desktop in the
 browser: instead we should treat web ui as a different medium and render
 UI elements appropriately for that medium. It does not need to match
@@ -1251,10 +1251,10 @@ table per platform.
 | cowboy's version does not fit erXos's OTP | low | the network front end waits | cowboy is plain Erlang; a patched copy enters as erXos's code |
 | `ui.txt`'s widget set lacks what a browser UI wants | medium | plainer UIs | the tree gains a kind for every display, never a browser-only one |
 | an attribute type of the schema projects outside `datum()`'s bounds (tuple width, depth 8) | low | such values arrive printed | the generator checks every attribute type of `abi/inspection.txt` against `datum()` and refuses one that does not fit |
-| the owner is rethinking login, and that covers the network front end's `erx_web_login` as well as the console's and the display's | certain | this document's login may change | login is designed once for every place a person meets the system ([design-display.md](design-display.md#risks-and-decisions), 14); nothing here depends on the display's terminals or the console's lines beyond the vault's limits |
+| login is being rethought, and that covers the network front end's `erx_web_login` as well as the console's and the display's | certain | this document's login may change | login is designed once for every place a person meets the system ([design-display.md](design-display.md#risks-and-decisions), 14); nothing here depends on the display's terminals or the console's lines beyond the vault's limits |
 | no browser view of a terminal exists: W1 gives the web domain no shell facet, and the views are records, logs and traces | certain | a terminal is reachable only at the serial console and over the host link, not in a browser | a browser terminal is a design of its own, with its own authority question, since it would put a shell facet behind the web domain; it waits for the login rethink, which decides how a person reaches a shell from anywhere |
 
-Decided by the owner: TLS on the network front end, with plain HTTP only
+Decided: TLS on the network front end, with plain HTTP only
 where a development build's manifest lists it; the web domain as its own
 domain from the start; `secret` on the widget `input`; the Ruby standard
 library for the host tool's server; TypeScript for the client. And:

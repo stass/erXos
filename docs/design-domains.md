@@ -35,7 +35,7 @@ Decisions every reader of this document needs:
   with a number and a serial; domain ids are never reused within a boot,
   so a pid never names two processes, and a runtime allocates pids from
   its own process table with no call to anyone. The one difference in how
-  identity looks is the user's decision: a pid prints as `<D.N.S>`, with
+  identity looks is decided: a pid prints as `<D.N.S>`, with
   its owner's domain id, in every domain. A domain that other machines
   reach keeps its node name on the network
   ([design.md](design.md#networking)).
@@ -2361,7 +2361,7 @@ scaffolding come from the same declarations, with independent hostile
 fixtures checking origin, scope and reply mismatches
 ([design-generation.md](design-generation.md#service-interfaces)).
 
-**Spawners.** By the user's decision, a parent keeps over a child in another
+**Spawners.** A parent keeps over a child in another
 domain, a sandbox included, what ERTS gives it over any child: it can
 message the child, link to it and kill it.
 
@@ -2541,8 +2541,7 @@ and granting it to another domain introduces the two: the grantee gets a
 connection to the session, on which the facet is the only name the session
 exported toward it.
 
-**Handing a facet on.** Passing a facet's pid delegates nothing, by the
-user's decision: the facet acts for its grantee alone. A domain hands a
+**Handing a facet on.** Passing a facet's pid delegates nothing: the facet acts for its grantee alone. A domain hands a
 facet to a command domain it starts by naming the facet in the spec; the
 domain service mints, as it creates the command domain, a facet granted to
 it in front of the starter's, which it accepts only when that facet's
@@ -4131,7 +4130,7 @@ bound exact at the cost of a configuration step per name. The
 recommendation is binding by first use, with the configured domains' names
 held from boot.
 
-The user's decisions on every domain being a node,
+The decisions on every domain being a node,
 spawners' rights, pid text, names as exports, origins and sockets are
 recorded where they apply: every domain is a node named by its identifier at the machine's
 host, its creation its domain id ([Domain ids, pids and

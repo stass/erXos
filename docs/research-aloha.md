@@ -427,7 +427,7 @@ Neither option changes what dominates the cost: TCP's modern features, IPv6
 and NDP, and the conformance harness. Option 2 avoids an intermediate
 codebase that matches neither the design nor the rules.
 
-**If the owner still wants to try aloha**, the cheapest useful experiment is
+**To try aloha anyway**, the cheapest useful experiment is
 P0 plus measurements M1 to M5: about 1 package. It tells concretely how far
 the existing shape is from the GN-QEMU budget before anything else is
 committed to it.

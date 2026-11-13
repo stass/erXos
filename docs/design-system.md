@@ -3227,7 +3227,7 @@ of the system domain ([design.md](design.md#decisions)); the system
 domain starts it at boot and stands in front of it with the key facets,
 as for any service ([design-domains.md](design-domains.md#facets)).
 
-* **A partition of its own.** By the user's decision, the vault's files
+* **A partition of its own.** The vault's files
   live on the **vault's partition**, a partition of the boot medium's
   layout whose window the device service gives only to a storage domain
   that serves the vault alone
@@ -3238,8 +3238,7 @@ as for any service ([design-domains.md](design-domains.md#facets)).
   partition reaches no key file, and re-creating the data partition
   leaves the vault's files alone. The vault's storage domain runs the
   same release as the data partition's, erXos's F2FS with littlefs as its
-  stopgap, and nothing on the partition is ever converted: by the user's
-  decision, the installation that brings erXos's F2FS creates the
+  stopgap, and nothing on the partition is ever converted: the installation that brings erXos's F2FS creates the
   partition afresh, as any fresh installation does
   ([design-storage.md](design-storage.md#system-updates)).
 

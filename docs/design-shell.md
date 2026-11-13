@@ -1,8 +1,7 @@
 # The command shell
 
 Each session can run a **command shell** beside its Erlang shell: erXos's
-own, written in Erlang, speaking the language of rc, Plan 9's shell, by
-the user's decision. Builtins, Erlang commands and programs share one
+own, written in Erlang, speaking the language of rc, Plan 9's shell. Builtins, Erlang commands and programs share one
 command namespace; every pipe carries bytes, as on UNIX, and every
 command reads and writes text as FreeBSD's command of the same name does;
 and jobs of Erlang processes and programs stop, continue and end together.
@@ -666,7 +665,7 @@ wrote them and no program can use up another's pipe ends
 
 `rc` is also a program command, in `/bin` with toybox's applets, so a
 program can run a script: `system` and `popen` run `rc -c` with their
-command, by the user's decision
+command
 ([design-programs.md](design-programs.md#the-posix-lite-personality)), and
 `rc script` runs a file. From the session's shell, `rc file` and `. file`
 run the script in an evaluator of the session's, with the session's
@@ -1384,7 +1383,7 @@ native programs ([design-programs.md](design-programs.md#toybox)).
 run. It loses: rc's one quoting rule and its values that are never scanned
 again remove the Bourne shell's commonest traps, as Duff's paper argues;
 a conforming POSIX shell is several times the size of rc's language (an
-estimate); and the user chose rc's language, with a shell compatible with
+estimate); and erXos chose rc's language, with a shell compatible with
 tcsh as a possible addition in the roadmap
 ([plan.md](plan.md#beyond-the-plan)). toybox's own shell, which sits in
 its pending directory, and shells such as mksh or a port of tcsh need
@@ -1432,7 +1431,7 @@ pauses the space ([design-programs.md](design-programs.md#job-control)).
 | rc's oracle and the shell disagree where rc's behaviour is unspecified | medium | test noise | each difference is classified once and pinned by a test |
 | The relay's single path for terminal writes serialises a job's output through one process | low | a job of many chatty programs is bounded by the relay's throughput | the relay handles at most 4 KiB unanswered and the console is the bottleneck anyway; `tools/erx bench pipe` with a pipeline writing to the terminal |
 
-Its language, its editing and its toolbox are the user's decisions, and a
+Its language, its editing and its toolbox are decided, and a
 shell compatible with tcsh is a roadmap item
 ([plan.md](plan.md#beyond-the-plan)). For `Ctrl-T`, the line adds no
 stacks, as FreeBSD's does only with `kern.tty_info_kstacks`: `erx:source/1`

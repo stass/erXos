@@ -3,9 +3,9 @@
 The staged roadmap from an empty tree to protected Erlang domains, users
 and a release build on QEMU `virt`, and then to storage, networking and
 the first boards. Each milestone ends in a demonstration that a QEMU
-transcript test, or on a board the owner's hand test of 1b-I, reproduces, and has
+transcript test, or on a board the hand test of 1b-I, reproduces, and has
 exit criteria that tests check. Where the design rests on a number nobody
-has measured, or on a choice the user has not made, a decision gate
+has measured, or on a choice not yet made, a decision gate
 measures or asks, and decides. The architecture is
 [design.md](design.md); open work outside this plan lives in `TODO.md`.
 
@@ -188,7 +188,7 @@ The order reaches a usable system first:
 * Beside that path: BeamAsm beside 1b-A, and erXos's F2FS on QEMU (1b-H)
   at the lowest priority, whenever capacity is idle. The Raspberry Pi 4
   on the stopgap (1b-I) starts its serial shell on QEMU's `raspi4b` model
-  once Phase 1 is done, passes it once on the owner's board by hand, and
+  once Phase 1 is done, passes it once on the board by hand, and
   brings each later stage to the board once the
   QEMU item it rests on has landed: storage after 1b-E, the network after
   1b-G, the display after 1b-C's part 3. The network stack's
@@ -2210,7 +2210,7 @@ items of M12, the hardware watchdog, the crash region, trial boot, the
 device secret and the random generator, are deferred as Phase 1
 residuals ([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)).
 
-**Parts.** Each ends in a demo the owner reproduces on the board by hand; stage (a)'s
+**Parts.** Each ends in a demo reproduced on the board by hand; stage (a)'s
 also runs on QEMU's `raspi4b` model. Part (a) comes first; (b), (c) and
 (d) each need only (a) on the board, and may go in any order or side by
 side.
@@ -2282,8 +2282,8 @@ side.
      on the stopgap, recorded in a research record before anything
      depends on its results
      ([research-rpi4-board-pass.md](research-rpi4-board-pass.md)); and the board's boot suite, which the build packs into the SD card's
-     boot partition. The owner puts the card in the board and runs the
-     suite's transcript checks by hand, stage (a)'s demo once, with the
+     boot partition. The card is put in the board and the
+     suite's transcript checks are run by hand, stage (a)'s demo once, with the
      host link on UART3.
 * **(b) Storage on the SD controller.** An Erlang driver for the Pi's
   SD host controller (`brcm,bcm2711-emmc2`, an SDHCI controller) as the
@@ -2322,7 +2322,7 @@ side.
 **Dependencies.**
 
 * (a): Phase 1's shell; QEMU's `raspi4b` model, which the local QEMU
-  11.1.3 has; for its board pass, the owner's 4 GB board.
+  11.1.3 has; for its board pass, a 4 GB board.
 * (b): (a); 1b-E's storage domain; the block driver's split into
   transport and service; for DMA, the device NIF's cache maintenance for
   a device that is not coherent (`TODO.md`, `erx_device.c`, queues).
@@ -2363,7 +2363,7 @@ side.
   stage (a), `raspi4b`.
 * **The manual board pass.** The board is a 4 GB Raspberry Pi 4. There
   is no automated rig: the build produces the SD card's boot partition,
-  and the owner runs the transcript checks by hand on the board. An
+  and the transcript checks run by hand on the board. An
   automated rig (serial capture, power relay, SD card switch) is not part
   of 1b-I.
 * Every parser of what a Pi device writes (the SD controller's responses
@@ -2395,8 +2395,8 @@ side.
   driver, equals the frame the same kiosk draws on QEMU `virt`; a
   display driver killed and restarted repaints the screen.
 
-**Gate GR, before the first board boot.** The owner chose a 4 GB
-board, and no automated rig; the answers are recorded in
+**Gate GR, before the first board boot.** The board is a 4 GB
+one, with no automated rig; the answers are recorded in
 [design-platforms.md](design-platforms.md). Nothing above depends on
 the RAM size: the platform record names the smallest RAM the port boots
 on, at most the 2 GiB of the `raspi4b` model, so one image boots on the
@@ -2881,7 +2881,7 @@ two stages, the design's core and then its extensions
   Linux's stack. In this stage redirects are ignored, the multicast
   options answer `{error, enotsup}`, and `socket:open` answers
   `{error, enotsup}`, a documented difference with a test, with OTP's
-  socket suites expected failures, by the owner's decision that `socket`
+  socket suites expected failures, since `socket`
   comes after `gen_tcp`, which `ssl`, `ssh` and distribution use instead.
 * **Second stage, the extensions.** The `socket` and `net` modules over an
   Erlang `prim_socket`, and OTP's socket suites; raw ICMP sockets for
@@ -2891,7 +2891,7 @@ two stages, the design's core and then its extensions
   temporary addresses; multicast with IGMP and full MLD.
 
 Outside M14, later, behind the stack's seams: RACK-TLP as a loss module,
-deferred by the owner's decision, with the default stack as the
+deferred, with the default stack as the
 reference; BBR with pacing; DCTCP; TCP Fast Open.
 
 **Exit criteria.** For each stage: every difference between erXos's
@@ -3012,7 +3012,7 @@ Phase 2:   M7 --> M2 --> M5's and M9's kernel parts --> G6 --> M8 --> M10 --> M1
   after 1b-D. 1b-A comes first because every other item is a domain or
   runs in one. BeamAsm runs beside 1b-A, and 1b-H whenever capacity is
   idle. 1b-I's serial shell follows Phase 1 on QEMU's `raspi4b`, and
-  passes once on the owner's board by hand; each
+  passes once on the board by hand; each
   of its later stages follows the QEMU item it brings to the board.
 * Track K's pilot starts before Phase 1 is complete and runs beside
   Phase 1b, since its cores are host-built C17
@@ -3083,18 +3083,18 @@ Each is small, adds its tests, and leaves `make check` green.
 
 | Item | Why it waits | Decided |
 | --- | --- | --- |
-| An awklog form of the manifest check | it would express the manifest's relational rules (ownership, facet targets, boot order, rescue closure) as Datalog in place of Ruby, if that is simpler; nothing needs it, and awklog needs the user's approval | after Phase 1, with the user's approval of awklog, once M5 gives the manifest its rules for domains |
+| An awklog form of the manifest check | it would express the manifest's relational rules (ownership, facet targets, boot order, rescue closure) as Datalog in place of Ruby, if that is simpler; nothing needs it, and awklog needs approval | after Phase 1, with approval of awklog, once M5 gives the manifest its rules for domains |
 | Ahead-of-time translation of Erlang code | the JIT in each ordinary domain is the design; the roster keeps the triggers | on a trigger of [the options](design-runtime.md#running-erlang-code-the-options) |
 | Landing pads in BeamAsm's generated code | hardening for generated code in ordinary domains | with M11's review, or on a board with branch-target protection |
 | Direct dispatch of lightweight processes across domains, in the style of L4Re's vCPUs | an optimisation the proposal makes optional | only if E-D1 and E-S2 show the funnel's copy and the doorbell dominate |
 | A weighted fair queue within a level | round robin with quotas and capacity meets the requirements | if E-S1 and E-S9 say otherwise ([design-scheduler.md](design-scheduler.md#risks-and-open-questions)) |
 | A child group per client class inside a shared service | one capped grant per service, scheduled fairly by the service, is the design | if E-S8 shows one service's flooder starves an urgent client past the sizing rule's headroom |
 | Other runtimes (Go, Lisp, nested runtimes) | "native for now"; the contract leaves room | when a use appears |
-| A shell compatible with tcsh | the first version speaks rc's language, the user's choice | likely the command shell's next version |
-| `system` and `popen` through a POSIX `sh` | they run `rc` by the user's decision; track Q brings toybox's `sh`, over `fork` ([design-programs.md](design-programs.md#the-posix-lite-personality)) | the user's, once track Q has brought `sh` |
-| vi-style line editing in the command shell | emacs-style editing first, the user's choice | possible later |
+| A shell compatible with tcsh | the first version speaks rc's language | likely the command shell's next version |
+| `system` and `popen` through a POSIX `sh` | they run `rc`; track Q brings toybox's `sh`, over `fork` ([design-programs.md](design-programs.md#the-posix-lite-personality)) | the user's, once track Q has brought `sh` |
+| vi-style line editing in the command shell | emacs-style editing first | possible later |
 | The network as files, `/net` | the network service's own interface comes first | with the network service's design |
-| A FAT file server for removable media and exchange | booting and updates need none; the user wants it eventually ([design-storage.md](design-storage.md#removable-media-fat)) | after M13, with the first removable medium or exchange partition a board configuration names |
+| A FAT file server for removable media and exchange | booting and updates need none; it is wanted eventually ([design-storage.md](design-storage.md#removable-media-fat)) | after M13, with the first removable medium or exchange partition a board configuration names |
 | A copy-on-write `fork` | the eager copy is the first `fork`, and copy-on-write is an optimisation | at gate GQ |
 | A separate native root task that keeps configured domains alive across a restart of the system runtime | the system domain is the root task and its fault is a reset; the domain library behind one C interface keeps this a change behind a seam ([design.md](design.md#alternatives-considered)) | only if measured availability of the system domain asks for it |
 | Hosting a sub-space under a user-level kernel, through vCPU user mode | Fiasco's vCPU interface can run a sub-space's code on a thread of its creator, as L4Linux does; erXos's subset leaves that mode out | when a use appears |

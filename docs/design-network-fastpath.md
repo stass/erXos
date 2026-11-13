@@ -147,8 +147,7 @@ What the profiles and the experiments established:
 Removing every measured share from the per-segment step (option
 encoding, the send log's tree, the stages' copies of the control block,
 the loop's overhead, the checksum calls and the collections they cause)
-brings the step down perhaps twofold, not the sixfold the gap needs; in
-the owner's words, "14%+10% won't solve 10x gap". C stacks pay those
+brings the step down perhaps twofold, not the sixfold the gap needs. C stacks pay those
 costs once per batch or never. FreeBSD's TCP hands a capable interface
 one large segment that the hardware cuts (TCP segmentation offload, TSO,
 `tcp_output.c:514-565`) and takes merged segments from LRO; lwIP updates
@@ -1433,7 +1432,7 @@ order of the parts and the gain each is expected to give are kept in
 
 ## Decisions
 
-The owner settled these.
+These are settled.
 
 1. **C does per-frame work inside the copy and the merge,** cutting runs
    and grouping segments, and no TCP decision moves to C.

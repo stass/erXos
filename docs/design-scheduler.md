@@ -102,7 +102,7 @@ A machine running erXos holds three kinds of work:
   stack, as in Fiasco's preemptible kernel
   ([design-kernel.md](design-kernel.md#execution-model-and-locking)).
 
-The user's requirement is "make real kernel threads and internal light
+The requirement is "make real kernel threads and internal light
 erlang threads visible to the main scheduler and have it schedule across
 all of them", and the architecture states the means: "The kernel allocates
 CPU time to native threads and to runtime groups, and each runtime, ERTS
@@ -2215,7 +2215,7 @@ client's.**
   and Fiasco's vCPU round trip costs about 140 ns on the primary host,
   about 4.5 times a crossing with an address-space switch
   ([research](research-hierarchical-scheduling.md#fiasco-under-hvf)). The
-  user's rules exclude them for executors. erXos uses Fiasco's vCPU
+  rules exclude them for executors. erXos uses Fiasco's vCPU
   interface only where an upcall is the point: a POSIX program's signal,
   delivered to a worker that runs no lightweight processes, whose
   events-enabled flag plays the activation bit's role
@@ -2246,7 +2246,7 @@ client's.**
   moment; a kernel that is never preempted needs no helping locks, and the
   stack proof covers one stack per CPU. Every scheduling decision would
   fall at a kernel exit, where nothing of a call is in progress.
-* *Why it lost.* The user chose Fiasco's process model, and the scheduler
+* *Why it lost.* erXos chose Fiasco's process model, and the scheduler
   is simpler for it: a wait sleeps on the thread's own stack and continues
   where it stopped, so no call needs a restart protocol and no decision
   unwinds one, and erXos's kernel keeps the model the stopgap Fiasco runs. Latency favours the process

@@ -807,7 +807,7 @@ are specified in the design documents.
 * **Adopted.** The semantics of a vCPU with its events disabled: preempted
   transparently, with events left pending in a word it reads when it
   chooses. An erXos executor behaves like such a vCPU at all times.
-* **Rejected.** Upcalls, by the user's rule 2 and on cost: a vCPU round trip
+* **Rejected.** Upcalls, by rule 2 and on cost: a vCPU round trip
   costs 140 ns on the M4, about 4.5 times a crossing with an address-space
   switch.
 * **Numbers.** Measured on the M4 under HVF by the Fiasco check: round trip

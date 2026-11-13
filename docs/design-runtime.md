@@ -4135,7 +4135,7 @@ model and an oracle for drivers, nothing imported
 would be the machine's scheduler. It loses to the two-level design: the kernel
 would carry a runtime's code and its failure modes, a second runtime would
 have no place, and the kernel could account CPU time to nothing but Erlang
-processes. The user chose generic two-level scheduling.
+processes. erXos chose generic two-level scheduling.
 
 **A kernel thread per Erlang process.** Each process would be a kernel
 thread, scheduled and accounted by the kernel directly. It loses on cost

@@ -4,8 +4,8 @@ A point-in-time record of the first manual pass of
 [design-platforms.md](design-platforms.md#trying-a-card-on-a-board) on a
 real board, part (a) of
 [plan.md](plan.md#1b-i-the-raspberry-pi-4-on-the-stopgap), stage 5, "The
-board". The owner ran it by hand on 2026-11-12. This record states what
-the owner reported and what the probe runs on the same board showed. It
+board". It was run by hand on 2026-11-12. This record states what
+was reported and what the probe runs on the same board showed. It
 was written from those reports, not from a serial log: the log is not in
 the tree and this record quotes no line of it that the reports do not
 give.
@@ -28,8 +28,8 @@ give.
 ## Procedure
 
 The procedure is the one in the design document: build the card, write it
-with `dd`, put it in the board, open the adapter and power the board. The
-owner also ran probe cards, built for the occasion and not kept in the
+with `dd`, put it in the board, open the adapter and power the board. Probe
+cards were also run, built for the occasion and not kept in the
 tree, to learn what the firmware does with the UART and the device tree
 (see "Probe runs" below).
 
@@ -39,7 +39,7 @@ tree, to learn what the firmware does with the UART and the device tree
 
 * The board boots from the card through the whole chain: the firmware, TF-A
   BL31, erXos's bootstrap, Fiasco, the root task and the command shell,
-  whose `%` prompt appears on the console. The owner's verdict: "pi card
+  whose `%` prompt appears on the console. The verdict reported: "pi card
   works great".
 * The firmware's own log says `MEM GPU: 76 ARM: 948 TOTAL: 1024`, which
   matches the `total_mem` and `gpu_mem` settings of the card's
@@ -81,9 +81,9 @@ These agree with what
 
 * **The host link on UART3** (pins 7, 9 and 29). No second adapter was
   reported connected. Not checked.
-* **What each command printed.** The owner typed `erl`, `top`, `ps`,
-  `cat /proc/cpus/0/status`, `dmesg` and `ifconfig` at the console and
-  reported none failing, so typing reaches the shell through the mini
+* **What each command printed.** `erl`, `top`, `ps`,
+  `cat /proc/cpus/0/status`, `dmesg` and `ifconfig` were typed at the console and
+  none was reported failing, so typing reaches the shell through the mini
   UART's receive path, and the Erlang shell, the process and CPU
   inspection paths and the kernel log answer. Their output was not
   supplied, so its content (CPU count, the interfaces `ifconfig` lists,
@@ -101,7 +101,7 @@ These agree with what
 
 ## Sources
 
-* The owner's report of 2026-11-12 (this record's only source for the
+* The report of 2026-11-12 (this record's only source for the
   observations above).
 * [design-platforms.md](design-platforms.md#trying-a-card-on-a-board),
   [plan.md](plan.md#1b-i-the-raspberry-pi-4-on-the-stopgap) and

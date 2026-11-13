@@ -31,7 +31,7 @@ Four constructions carry the document:
 
 ## Contract
 
-The owner's rules, verbatim:
+The rules, verbatim:
 
 > Phase 1 -- bring up the system on Fiasco maybe with small modifications.
 > Get it to boot, basic filesystems work, services, shell, etc. Ignore
@@ -2132,7 +2132,7 @@ The same suite boots the image twice in deterministic mode to the shell and comp
 
 ## Open decisions
 
-**The source check of Fiasco's vCPU interface for signals.** The owner's decision is: a source check first; if Fiasco's
+**The source check of Fiasco's vCPU interface for signals.** The decision is: a source check first; if Fiasco's
 interface carries the ABI's `erx_vcpu` layout without leaking Fiasco's, the backend carries `erx_vcpu_control` and
 `erx_vcpu_resume` as [vCPU upcalls on Fiasco](#vcpu-upcalls-on-fiasco) says; otherwise programs take default signal actions
 only until M7, and catchable signals arrive with erXos's kernel. The check is one package, read in source and never run, and

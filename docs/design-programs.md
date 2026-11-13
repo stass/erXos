@@ -30,7 +30,7 @@ Decisions every reader of this document needs:
   no facet and no connection to any other domain, and it appears in
   Erlang as a port owned by its handler
   ([A program is a port](#a-program-is-a-port)).
-* **Capabilities carry authority**, by the user's decision. Starting
+* **Capabilities carry authority**. Starting
   anything, a program or an Erlang command, needs the right to start
   commands; what a started command can do comes only from the
   capabilities its starter hands it. An Erlang command a program starts
@@ -53,29 +53,26 @@ Decisions every reader of this document needs:
   thread, as a vCPU upcall, Fiasco's interface for events; `liberx` keeps
   POSIX's rules for every signal and runs a handler only outside its own
   critical sections, and no signal is lost between a check and a sleep.
-* **`system` and `popen` run `rc`**, by the user's decision.
+* **`system` and `popen` run `rc`**.
 * **Two tiers.** The first tier runs static programs, with `posix_spawn`
-  and without `fork`, whose absence fails at link time, by the user's
-  decision. The second adds `fork` by eager copy, `exec`, shared
+  and without `fork`, whose absence fails at link time. The second adds `fork` by eager copy, `exec`, shared
   libraries, mappings of files and terminals, on the kernel's sealed
   objects, copy-on-write children and copies of spaces; code a program
   runs is never writable by it, in either tier.
-* **A session serves its programs' shared mappings**, by the user's
-  decision. Every shared mapping of one file in the session's programs
+* **A session serves its programs' shared mappings**. Every shared mapping of one file in the session's programs
   maps one memory object of the session's, which the session fills and
   writes back with ordinary reads and writes of the file protocol and
   from which it serves its programs' descriptor reads and writes of the
   file; a fault on it is the faulting program's alone and the kernel
   resolves it from the object
   ([Shared libraries and mappings of files](#shared-libraries-and-mappings-of-files)).
-* **A program never outlives the program or session that started it**,
-  by the user's decision: its tree ends with it, like a job tree, and a
+* **A program never outlives the program or session that started it**: its tree ends with it, like a job tree, and a
   long-running service starts under a supervisor, never by detaching, so
   nothing is orphaned.
 
 ## Context
 
-By the user's decisions, erXos gives UNIX programs a POSIX-ish interface,
+erXos gives UNIX programs a POSIX-ish interface,
 so that they need not be ported to Erlang, without Linux binary
 compatibility or a Linux virtual machine, and grows it toward what QNX
 offers: shared libraries first static, then dynamic, `fork`, and terminals
@@ -85,7 +82,7 @@ programs run commands of their own, Erlang commands among them; and every
 one of them is code of unknown provenance relative to the session that runs
 it, so a program holds only what it was handed: a namespace of files,
 rights such as listing and signalling processes, and the right to start
-commands. Security comes from those capabilities, as the user asked, never
+commands. Security comes from those capabilities, never
 from the kind of command a program starts.
 
 Programs sit on mechanisms other documents define, and this document
@@ -134,18 +131,16 @@ Functional requirements:
    ([Starting a program](#starting-a-program)).
 2. **Capabilities, not program kinds**: starting anything needs the right
    to start commands, and a started command can do only what the
-   capabilities its starter handed it allow, by the user's decision
+   capabilities its starter handed it allow
    ([What a program can start](#what-a-program-can-start)).
-3. **A POSIX-lite personality** in every program that is a C program, by
-   the user's decision: in its first tier, descriptors over pipes, files
+3. **A POSIX-lite personality** in every program that is a C program: in its first tier, descriptors over pipes, files
    and sockets, `posix_spawn`, `wait`, `poll`, pipes, POSIX's signals,
    `system` and `popen` through `rc`, anonymous and private file
    mappings, and the session's `/dev/tty`, with `termios`
    ([The POSIX-lite personality](#the-posix-lite-personality)).
 4. **The second tier**: `fork`, the `exec` family, shared libraries
    loaded statically and with `dlopen`, `mmap` of files, pseudo-terminals
-   that programs hold, process groups and sessions, and full-screen programs,
-   by the user's decisions ([The second tier](#the-second-tier)).
+   that programs hold, process groups and sessions, and full-screen programs ([The second tier](#the-second-tier)).
 5. **Job control**: the session stops, continues, interrupts and ends a
    program and every program it started
    ([Job control](#job-control)).
@@ -1305,7 +1300,7 @@ own budget and still maps, and close the group; the handler closes the
 port and, since it serves one program, exits. So a program's whole
 tree ends with it, as a Fuchsia job's processes do, while an `exec` of its
 starter, which replaces only the starter's image, leaves it running, as
-POSIX requires. By the user's decision, a long-running service starts
+POSIX requires. A long-running service starts
 under a supervisor as a domain of its own, never as a detached program, so
 nothing is orphaned. Process ids are never reused within a session, so a
 `kill` never reaches a later program that took a dead one's id.
@@ -1707,7 +1702,7 @@ stopgap with that reason.
 
 ### Signal numbers
 
-erXos numbers its signals as FreeBSD 15.1 does, by the user's decision.
+erXos numbers its signals as FreeBSD 15.1 does.
 The command shell's `kill` takes FreeBSD's numbers and names
 ([design-shell.md](design-shell.md#job-control)), and programs built on
 musl see the same ones, so a user meets one numbering: `kill -17` stops a
@@ -2475,7 +2470,7 @@ from `erx_exec`, and a program that maps code by other means still maps
 only objects it cannot write (P10).
 
 **Shared mappings of files.** `mmap` of a file with `MAP_SHARED` maps the
-session's one object for that file: by the user's decision, a session
+session's one object for that file: a session
 serves its programs' shared mappings, under the contract of
 [design-files.md](design-files.md#shared-mappings), which this section
 follows from the program's side. The object belongs to the file's
@@ -2769,8 +2764,7 @@ define it.
   session with its process id and command
   ([A program is a port](#a-program-is-a-port)). In the first tier `fork`
   and the `exec` family are absent from the C library, so a program that
-  calls them fails to link rather than at run time, by the user's
-  decision; the second tier provides them ([Fork](#fork), [Exec](#exec)).
+  calls them fails to link rather than at run time; the second tier provides them ([Fork](#fork), [Exec](#exec)).
 * **Process groups and sessions.** A job is a session and a process group of
   its own, led by its first program, without a controlling terminal:
   `getpgrp`, `getpgid` and `getsid` return the process id of the job's first
@@ -2789,7 +2783,7 @@ define it.
   `tcsetpgrp` fail with `ENOSYS`; the second tier provides them
   ([The terminal](#the-terminal)).
 * **`system` and `popen`** hand their command to `rc`, the command
-  shell's language, by the user's decision: `system(cmd)` runs
+  shell's language: `system(cmd)` runs
   `rc -c cmd` with `posix_spawn` of `/bin/rc`, with `SIGINT` and `SIGQUIT`
   ignored and `SIGCHLD` blocked in the caller until it ends, as POSIX
   prescribes, and returns its wait status; `popen` runs it with a pipe to
@@ -2991,7 +2985,7 @@ test:
 | in the first tier, no `fork` and no `exec`: calling them fails to link | a program starts fresh, with `posix_spawn`; the second tier provides both |
 | the second tier's `fork` copies the parent's memory at the call and fails there with `ENOMEM`, never at a later write | private memory is never shared copy-on-write (K5), and the copy is charged at the call |
 | the second tier's `exec` in a program with other threads first lets them finish the calls that only they can finish, a `posix_spawn`, a `fork`, a passing of descriptors, a redemption or a stop, and runs them on meanwhile, instead of ending them at once, and fails with `E2BIG` past a 192 KiB startup message, before its point of no return | the old image hands its state to the new one and abandons nothing that another party waits on (P12), and the handover's size is checked on the quiet image ([Exec](#exec)) |
-| `system` and `popen` run rc, not sh | the user's decision; erXos ships no POSIX shell |
+| `system` and `popen` run rc, not sh | erXos ships no POSIX shell |
 | `mprotect` that gives reserved memory access fails with `ENOMEM` when the program's budget cannot cover the pages, and charges at any access, read-only included, where Linux charges a private mapping only when it becomes writable and POSIX names no out-of-memory error for `mprotect` | a readable private page is a real page from the program's reserve, since the kernel shares no zero page, and committed memory never faults for lack of memory (K6); Linux and QNX both allocate at the `mprotect` and refuse with `ENOMEM` |
 | a handler for `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGTRAP` or `SIGSYS` runs for a signal raised with `raise` or `kill`, never for a fault, which ends the program | a fault ends only the faulting space, from the kernel's record ([A program's end](#a-programs-end)) |
 | in the first tier, a program cannot stop or continue itself or another: `kill` and `raise` of `SIGSTOP` fail with `EPERM`, and `SIGTSTP`, `SIGTTIN` and `SIGTTOU` under their default action are discarded | stopping is the session's job control, and a job's process group is orphaned, for whose members POSIX discards those three; the second tier stops and continues programs within a POSIX session ([The terminal](#the-terminal)) |
@@ -3000,7 +2994,7 @@ test:
 | `kill` of a process that is neither the caller's child nor in a `signal` right's scope it holds fails with `ESRCH`, even when it exists | a process id grants nothing, and the error does not say whether it exists |
 | `kill` with a `pid` of 0, of minus the caller's group or of -1 reaches the caller's children, the processes of its `signal` right's scope and the caller itself, and no other member of its job, its parent and its siblings included | the same rule: a program reaches only its children and what its `signal` right names, so a job's other members are out of its reach unless that right names them ([The POSIX-lite personality](#the-posix-lite-personality)) |
 | process ids are unique within a session only | a session is the namespace of its process ids |
-| a program's children end with it: `daemon`, a double `fork` and `nohup` leave a child that ends with the program that started it, and a process that outlives its parent is a service under a supervisor, never a detached program | a program's anchor lies below its starter's, and the kernel ends a space's children with it (P9); the user's decision that nothing is orphaned |
+| a program's children end with it: `daemon`, a double `fork` and `nohup` leave a child that ends with the program that started it, and a process that outlives its parent is a service under a supervisor, never a detached program | a program's anchor lies below its starter's, and the kernel ends a space's children with it (P9); the decision that nothing is orphaned |
 | paths resolve as FreeBSD's do, `..` physically and symbolic links followed by the client at most 32 times, a renamed working directory is not followed, and a rename between grants, trees or rights fails with `EXDEV` | one resolver serves Erlang and native clients ([design-files.md](design-files.md#compatibility-and-migration)) |
 | arguments, environment strings and file names are valid UTF-8 | they cross the channel and the session's connections as binaries that the frame grammars require to be valid UTF-8 |
 | `O_NONBLOCK` of a pipe end is not inherited by a child, though an `exec` keeps it | a child receives ends and grants of its own, not the parent's objects, while an `exec` keeps the ends themselves ([Descriptors and files](#descriptors-and-files)) |
@@ -3759,7 +3753,7 @@ executor](#the-event-executor)).
 
 **Programs that start only programs.** A program could be refused every
 Erlang command, so that none could borrow the session's authority. It
-loses, by the user's decision: security comes from capabilities, such as
+loses: security comes from capabilities, such as
 the right to list processes, not from which kind of command runs, and
 `xargs ps` is as legitimate as `xargs grep`. Command domains give an
 Erlang command exactly its starter's capabilities.
@@ -3935,7 +3929,7 @@ server stalls its clients' threads; a claim gate per session at each
 server, through which the session takes the object's capability with a
 key;
 and objects charged to the server's cache budget, which every client
-shares. erXos does not take it, by the user's decision: the session
+shares. erXos does not take it: the session
 serves its programs' shared mappings, every fault resolves from an
 object or ends the thread, and the price is coherence that stops at the
 session's edge, a documented difference with a test
@@ -3985,7 +3979,7 @@ proves hard to adapt.
 | Ported programs rely on writes from outside their session showing in a shared mapping at once, as Linux's page cache gives | low | such a program reads stale bytes through its mapping until every program of its session has let go of the file | the documented difference and its test; programs that share a mapped file run in one session, where descriptors and mappings agree at once ([Alternatives considered](#alternatives-considered)) |
 | Ported programs hard-code Linux's signal numbers or name Linux's own signals | low | a program that sends `kill(pid, 19)` meaning a stop continues its target instead, and one that names `SIGPWR` unconditionally fails to compile | code that builds on FreeBSD and macOS names its signals and guards Linux's own names already; the oracles' documented differences ([Signal numbers](#signal-numbers)) |
 
-Decided by the user: a program is a port of its session, not a domain,
+A program is a port of its session, not a domain,
 and its whole world is its session; security comes from capabilities,
 among them the right to start commands and the rights to list and to
 signal processes, never from which kind of command a program starts; a

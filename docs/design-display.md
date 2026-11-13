@@ -2461,8 +2461,7 @@ A display may have a **session**: the one session the start table
 starts on it, with no login, which shows what the display is for, a
 person's terminals on a desktop and an app on a kiosk. How a person
 logs in at a display, locks it and leaves it is the login design's,
-which covers every place a person meets the system ([Decisions taken
-with the owner](#risks-and-decisions), 14); until it exists a
+which covers every place a person meets the system ([Decisions](#risks-and-decisions), 14); until it exists a
 display shows the session its start row names.
 
 erXos is a distribution, and the people who use it and build on it add
@@ -3821,7 +3820,7 @@ draws attaches as [Graphics hardware](#graphics-hardware) says.
 | LVGL's direct mode draws a widget differently from its partial mode | low | a misdrawn widget on a kiosk | the parity test compares meaning and the QEMU screenshot compares pixels with a reference |
 | LVGL's flush and wait behaviour changes in a later release | low | a kiosk that hangs at a refresh with several areas | the program uses only LVGL's documented calls, `lv_display_flush_is_last`, `lv_display_flush_ready` and the flush-wait callback; the several-areas test against the model screen runs with every LVGL update |
 
-Decisions taken with the owner:
+Decisions:
 
 1. **Input formats.** `mouse` is served in Plan 9's 49-byte form and
    `kbd` in 9front's form, which serve plan9port's programs and give key
@@ -3867,8 +3866,7 @@ Decisions taken with the owner:
 10. **The scrollback stays fixed** at 131,072 cells a terminal.
 11. **erXos's OTP fixes `io_ansi`'s four wrong fallback strings**, since
     erXos owns its OTP (Risks).
-12. **A kiosk's application is an app like any other.** By the owner's
-    decision a kiosk app runs like any other app on the system, with
+12. **A kiosk's application is an app like any other.** A kiosk app runs like any other app on the system, with
     whatever app privileges it holds and access to the display, and
     renders to the display. It is an app of
     [design-apps.md](design-apps.md), in a session of its own
@@ -3880,8 +3878,7 @@ Decisions taken with the owner:
     widget toolkit, its renderers and the LVGL program run in the app's
     session, and the display domain runs none of them. A kiosk is the
     single policy and a start row.
-13. **Applications are added after an image is built.** By the owner's
-    direction erXos is a distribution whose users and developers add
+13. **Applications are added after an image is built.** erXos is a distribution whose users and developers add
     their own apps, so nothing of the display depends on which app it
     shows, and nothing assumes the manifest is the only source of apps.
     The board's manifest names the display domain, its devices and its
@@ -3891,7 +3888,7 @@ Decisions taken with the owner:
     names it. An app a person starts on a desktop runs in a session of
     its own principal, beside the person's windows.
 14. **Login at a display is designed once, for every place a person
-    meets the system.** The owner is rethinking login, and one design
+    meets the system.** Login is being rethought, and one design
     covers the display, the console's logins at the UART and the host
     link ([design-live.md](design-live.md#the-console)) and the web
     front end's ([design-web.md](design-web.md#logging-in-and-the-line)),

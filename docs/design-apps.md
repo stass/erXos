@@ -697,7 +697,7 @@ compiler, flags, workload and baseline.
 | an app's ready report comes before its applications have done any work, so a system fault soon after that point does not count toward rescue | medium | a machine that faults soon after every boot never reaches the rescue configuration | recorded in `TODO.md`; a later ready point is the change |
 | every app in the manifest makes the board's manifest long | medium | adding an app is a manifest edit and a rebuild until packaging | the packaging design, which adds apps without either |
 
-Decisions taken with the owner:
+Decisions:
 
 1. **A kiosk's app is an app like any other**: it runs with whatever
    privileges its app holds and a grant of the display, and renders to

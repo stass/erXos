@@ -51,12 +51,12 @@ it; git history is the record of completed work.
     truncations, bad lengths and bad signatures), not only the header's decoder;
   * a version floor holds only for an ordinary install, not for rollback or a scan's fallback, against a storage
     domain that puts back an older signed package; state it so.
-  The owner's decisions on that draft that apply here: `pkg delete` removes an app's data; the administrator
+  The decisions on that draft that apply here: `pkg delete` removes an app's data; the administrator
   approves an app's grants by installing it, within what the build proved, with no prompt; no fetch by name (a fetcher
   is a command in a person's session that holds `net` and hands the file to the installer).
 * [Medium] runtime, `docs/design-shared-code.md`: build shared loaded code, one prepared copy of the
   preloaded modules and the applications every domain boots, mapped read-only into every domain that runs
-  the interpreter. The owner wants it long term. Its trigger, three adopting domains at once, is met: the
+  the interpreter. It is wanted long term. Its trigger, three adopting domains at once, is met: the
   development manifest runs root's session and the storage, network and web domains on the interpreter. Each
   domain loads its own `kernel` and `stdlib` at boot, and on one CPU an image that runs everything in the
   system domain still reaches root's shell about 3.2 times sooner under TCG (the measurement and the order
@@ -147,8 +147,7 @@ it; git history is the record of completed work.
      `erx_tcp:settle/3` (a waiting writer moved in after output), fixed with it (raw data:
      ~/erxos-history net-bench-freebsd-fast-p4-fix-2026-11-09, commit d5bcd46);
   5. checksums in the copy
-     ([design-network-stack.md](docs/design-network-stack.md#checksums-in-the-copy)), the
-     owner's decision to build it as part of the fast path, since the cut and the merge rest
+     ([design-network-stack.md](docs/design-network-stack.md#checksums-in-the-copy)), built as part of the fast path, since the cut and the merge rest
      on it. The receive half is in the tree: `erx_inet_copy_sum` in `erx_inet_csum.c`, whose
      two-words-a-step loop `erx_inet_sum` shares and whose loads an empty assembly statement
      keeps single, with its harness cases, mutants and the `inet_csum` fuzz target's copy
@@ -314,7 +313,7 @@ it; git history is the record of completed work.
   callers, and `cap_list_insert` is static).
 
 * [Medium] verification, Track K, the CBMC gate (`tools/lib/erx/cbmc.rb`,
-  `test/cbmc/roster.json`): if the owner adopts CBMC from the pilot's
+  `test/cbmc/roster.json`): if CBMC is adopted from the pilot's
   record, settle three things the pilot leaves open. Homebrew offers only
   the latest cbmc, so the pinned version cannot be installed on a fresh
   host once the formula moves on: fetch a pinned release or source by
@@ -327,7 +326,7 @@ it; git history is the record of completed work.
   keeping the seven single-decision harnesses in the gate and moving
   `page_funnel` and `cap_slot_list` out of it: they take about 2 h 27 min
   of the gate's 2 h 33 min and check what the fuzz targets already check.
-  Until the owner decides, the gate runs all nine. `cap_slot_list`
+  Until that is decided, the gate runs all nine. `cap_slot_list`
   checks a table whose page is cut to 4 slots, which its header argues
   checks what the ABI's 64-slot page would; on the Intel second
   development host with cbmc 6.11.0 it verifies in 214 s and its three
@@ -890,7 +889,7 @@ it; git history is the record of completed work.
   alpha buffer): the item below reports it.
 * [Low] display, `display/libmemdraw/draw.c` (`readbyte`): report the upstream bug to 9front. Under an alpha-only read
   of a replicated grey-and-alpha mask, `readbyte` wrote each pixel's grey into the alpha buffer; erXos's copy fixes it
-  (marked erXos, recorded in `display/libmemdraw/ORIGIN.md`). The owner sends the report.
+  (marked erXos, recorded in `display/libmemdraw/ORIGIN.md`).
   primitives](docs/design-display.md#verification-and-testing): the 9front build (`MemdrawBuild.oracle`) checks
   only the shapes, under `SoverD`. Run `erx_memdraw`'s draws and loads against it too, and treat each of erXos's
   edits listed in `display/libmemdraw/ORIGIN.md` as a documented difference with a test. One of those edits is an
@@ -1141,7 +1140,7 @@ it; git history is the record of completed work.
   `BoardTree::BOARDS` gets QEMU's release medium. Declare the medium, the load address and the board's tree in the
   platform record, checked when it loads, so a board without a medium is refused.
 * [Low] tooling, `tools/erx pack` and the raspi4b suite share `build/production-image/raspi4b/`, cleared before
-  each build: a suite run replaces the card the owner packed, two packs of one platform at once remove each other's
+  each build: a suite run replaces the card last packed, two packs of one platform at once remove each other's
   files, and a failed pack leaves the directory partial. Build into a sibling directory and rename it into place.
 * [Medium] liberx, the console handoff (`erx_fiasco_task_mem_physical_body`, `erx_boot_console_page`):
   the root hands the log to the console at the first physical object it creates at the console's
@@ -1649,8 +1648,8 @@ it; git history is the record of completed work.
   `getstat` and every option but `binary`, `list`, `mode`, `active` and `nodelay`; `local_peer`
   is never set, so a connection to one of the machine's own addresses keeps the full MSL; the
   connection's credit limit and buffer sizes are fixed defines, not application keys.
-* [Medium] network, `erx_tcp_conn` (`guarded/2`): a raising step must end the connection, the
-  owner's decision ([design-network-stack.md](docs/design-network-stack.md#decisions), 15): from its
+* [Medium] network, `erx_tcp_conn` (`guarded/2`): a raising step must end the connection
+  ([design-network-stack.md](docs/design-network-stack.md#decisions), 15): from its
   state before the event, with a RST, `{error, econnaborted}` to its socket process and an exit with
   the exception, for a batch of drained messages as for one. `guarded/2` instead counts the raise
   and goes on with the state it had, after the effects of the step may already have run, and a raise
@@ -3518,7 +3517,7 @@ it; git history is the record of completed work.
   OTP 29.1.2, a reference text whose six numbers each end in `.` (`"#Ref<4.1.2.3.4.5.>"`) leaves the parse loop
   with `i` at 6, so the copy into `refn` reads `ints[6]` past its six entries and writes `refn[5]` past its five:
   a stack overflow on any text a caller passes to `list_to_ref/1`. erXos's copy refuses that text with `badarg`
-  (edit 18; native_domain's connection case checks it). The owner sends the report.
+  (edit 18; native_domain's connection case checks it).
 * [Low] Domain service, `erx_domain_core.erl`, `erx_ident`, the manifest check: nothing reserves
   the name `system`, so a request or a configured row named `system` is admitted, spends an
   id and is refused only when the boot page is built (its node would be its own peer,
@@ -3843,7 +3842,7 @@ it; git history is the record of completed work.
   deletion"): a deletion below a space rests on the thread of the call that
   unlinked it, and that thread's group may be unscheduled, leaving the spaces
   below stopped but undeleted and their capabilities answering, one chain
-  per stalled call (Security states it). Owner's decision before the security
+  per stalled call (Security states it). Decision needed before the security
   closure milestone: run the rest of a begun deletion at the finishing level;
   or keep a space listed until its parts end, so a second walker shares them
   and descends, as stop walks do (recommended, since it removes the
@@ -4774,7 +4773,7 @@ to the corpus and follow rc
   table ends in an indirect branch that stays inside its function, which
   `kernel/stack_targets.txt` cannot declare (it lists functions, taken as
   tail jumps), so the first such switch in a core fails the proof or
-  invites a wrong declaration. The owner decides between
+  invites a wrong declaration. The choice is between
   `-fno-jump-tables` for every proven object (the proof's flags in
   `tools/lib/erx/stack_proof_run.rb`, the archive's in
   [design-stopgap.md](docs/design-stopgap.md) and
@@ -4788,8 +4787,8 @@ to the corpus and follow rc
 * [Low] docs/design-stopgap.md, the stack proof: the bullet names only the
   `erx_effect_*` calls as leaves of declared cost; the proof also counts
   Fiasco's `memcpy` and `memset`, the archive's two other allowed
-  undefined symbols, that way. The owner confirms the reading and the
-  bullet says so.
+  undefined symbols, that way. The reading needs confirming; the
+  bullet then says so.
 * [Medium] build, stack proof: the stopgap proof's entries are every
   exported function of the cores' archive (`tools/lib/erx/core_archive.rb`),
   a superset of the ones the kernel image references
@@ -5092,7 +5091,7 @@ to the corpus and follow rc
   (`/proc/kernel`, `/proc/cpus`, the kernel log, the machine record's `all` attributes), as the session's own
   `/proc` does: the system domain's query worker answers each of them through the session's inspect facet, at
   that facet's scope.
-  Development builds run trusted code only. The owner accepted the wide scope; narrowing it to root's own
+  Development builds run trusted code only. The wide scope is accepted; narrowing it to root's own
   domains, or removing it, changes design-live.md ("Scopes"), design-web.md (W1) and design-domains.md
   (property 9) with it, and needs a test that a browser's view of `/proc/kernel` ends `scope`. The line widens
   itself on any export the system domain sends (`{export, Web}`), and today only the host link's `web` facet
@@ -5715,14 +5714,13 @@ document's "residual risks accepted" paragraph.
   /Users/stas/erxos-scratch/a.erl` reports `-scratch/a.erl: no such file or directory`. The
   prefix test is `shorten_filename/1` in `otp/lib/compiler/src/compile.erl`: it keeps the rest
   of the name when that rest does not start with `/`, where it should keep the whole name. Fix
-  it in the tree's copy with a test, and report it upstream, which the owner sends.
-* [Low] upstream OTP, `otp/erts/emulator/beam/bif.c` (`list_to_ref_1`): report to OTP, which the owner sends, that in
+  it in the tree's copy with a test, and report it upstream.
+* [Low] upstream OTP, `otp/erts/emulator/beam/bif.c` (`list_to_ref_1`): report to OTP that in
   stock OTP 29.1.2 `list_to_ref/1` of a text whose six numbers each end in `.` (`"#Ref<4.1.2.3.4.5.>"`) leaves its
   parse loop with `i` at 6, so the copy into `refn` reads `ints[6]` past its six entries and writes `refn[5]` past
   its five: a stack overflow on any text a caller passes. erXos's copy refuses it with `badarg`. Send it with a
   reproduction run against stock OTP.
-* [Low] upstream OTP, `otp/lib/kernel/src/inet_dns.erl` (`decode_data/3`): report to OTP, which the owner
-  sends, that in stock OTP 29.1.2 a DNS reply carrying a record of type UINFO, UID, GID or UNSPEC (100 to
+* [Low] upstream OTP, `otp/lib/kernel/src/inet_dns.erl` (`decode_data/3`): report to OTP that in stock OTP 29.1.2 a DNS reply carrying a record of type UINFO, UID, GID or UNSPEC (100 to
   103), IXFR, AXFR, MAILB, MAILA or ANY (251 to 255), or an A, AAAA or WKS record of a class other than IN,
   fails `inet_dns:decode/1` with `function_clause`, since those types map to atoms that no clause of
   `decode_data/3` names and its last clause takes only an integer type; `inet_res`'s `decode_reply` does not

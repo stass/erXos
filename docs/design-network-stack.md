@@ -64,7 +64,7 @@ Decisions every reader needs:
   start,** `erx_tcp_loss` and `erx_tcp_cc`, mirroring FreeBSD's function
   block and its `struct cc_algo`, over one record of sent data that
   serves both FreeBSD's RFC 6675 recovery and RACK-TLP. The default
-  stack is the reference, by the owner's decision; RACK-TLP and BBR are
+  stack is the reference; RACK-TLP and BBR are
   left for later, each a module behind these seams.
 * **A run is the unit of TCP work, and C does only work that rides on
   bytes.** Output emits runs, segments that share one header, and the
@@ -162,7 +162,7 @@ and RACK and BBR are each a second TCP implementation that needs the
 high-precision timer system and its own input path before it sends a
 byte. Most of the default stack's volume is locking, mbuf handling,
 sysctls, logging and kernel plumbing; what is translated is its
-decisions. The owner decided to defer RACK: the default stack is the
+decisions. RACK is deferred: the default stack is the
 reference, and RACK-TLP and BBR come later behind its seams. RACK-TLP
 (RFC 8985) is then a loss-detection module over the send log, read from
 `rack.c` for its logic and needing nothing outside its module; BBR is a
@@ -2109,8 +2109,7 @@ PRR's path (RFC 6937), and "new loss" for PRR (RFC 6937 section 3) is bytes
 newly marked by `IsLost`. FreeBSD's lost-retransmission detection
 (`tcp_do_lrd`) is not built: no RFC specifies it, and its only description
 is its code in `tcp_sack.c`, which erXos does not read. It is the only
-loss module. RACK-TLP, deferred by
-the owner's decision, would be a second one, `erx_tcp_loss_rack`,
+loss module. RACK-TLP, which is deferred, would be a second one, `erx_tcp_loss_rack`,
 implementing RFC 8985 over the same log; BBR would be a congestion
 module beside CUBIC, with pacing added to output.
 
@@ -3574,10 +3573,10 @@ minimum-size frames.
   transport's callbacks. That change waits for the flood numbers
   ([todo-performance.md](todo-performance.md)).
 
-**Open decision for the owner.** *A second jail on the switch,* for the
+**Open decision.** *A second jail on the switch,* for the
 FreeBSD-to-FreeBSD baseline of measurement 4. It changes the test host's setup,
-which puts only `erxpeer0`'s `epair` on `vale0`, and so is the owner's
-to allow. Recommended: allow it; it is the one baseline that shows what
+which puts only `erxpeer0`'s `epair` on `vale0`, and so needs allowing.
+Recommended: allow it; it is the one baseline that shows what
 the switch and the emulated mode cost a kernel stack, apart from any
 user-mode stack.
 
@@ -5335,7 +5334,7 @@ as each socket's socket process, so `socket` and its `gen_tcp_socket`
 backend work over the same connection, listener and datagram processes
 as `gen_tcp` and `gen_udp`; `net`'s interface and host calls are answered
 by the grant. `gen_tcp`, `gen_udp`, `ssl`, `ssh` and distribution do not
-use `socket`, so it comes after them, by the owner's decision
+use `socket`, so it comes after them
 ([Decisions](#decisions), 5), and plan.md schedules it.
 
 ### Name resolution
@@ -5522,8 +5521,8 @@ when a socket process falls behind its pushes, and then the lane pauses
 until it catches up, which loses nothing; since no process waits in
 `receive` at its quota ([design-domains.md](design-domains.md#flow-control)),
 a pause cannot deadlock. A client domain's processes have a quota only
-where its runtime sets `-erx queue_quota`, and which domains do is the
-owner's ([Open decisions](#open-decisions), 1). Until RT8, the funnel
+where its runtime sets `-erx queue_quota`, and which domains do is an
+open decision ([Open decisions](#open-decisions), 1). Until RT8, the funnel
 delivers every authorised frame whatever its target already holds, so a
 flood that outruns a socket process grows its queue with nothing to stop
 it but the client domain's budget, the gap of the stopgap funnel that
@@ -7069,7 +7068,7 @@ behind the same processes, with no change to the core's structure:
   socket's credit.
 
 **Outside the stack,** later, behind its seams: RACK-TLP as a loss
-module, deferred by the owner's decision; BBR as a congestion module,
+module; BBR as a congestion module,
 with pacing in output; DCTCP as a congestion module over the ECN signal;
 TCP Fast Open (`tcp_fastopen.c`); and TCP-MD5 signatures (RFC 2385),
 whose option `erx_tcp_wire` records so that the syncache refuses a signed
@@ -7079,12 +7078,7 @@ it plugs into, except pacing, which BBR brings.
 
 ## Decisions
 
-The owner settled these: the first five and the seventh as the design
-recommended, the eighth, ninth, eleventh, fourteenth and fifteenth by
-direction, the sixth, the tenth, the thirteenth and the eighteenth by
-approving the design's recommendation, and the sixteenth and
-seventeenth by declining the alternatives the design laid out, until a
-measurement shows them worth it. One question remains the owner's
+These are settled. One question remains open
 ([Open decisions](#open-decisions)).
 
 1. **The grant's account covers its sockets.** Every reduction a grant's
@@ -7154,7 +7148,7 @@ measurement shows them worth it. One question remains the owner's
    (`main-n285245`), the kernel of the test host, for its more recent
    changes and so that the stack and its oracle are one FreeBSD. What
    was translated from `release/15.1.0-p6` is not translated again: the
-   owner's aim is a stack that works and interoperates, not one
+   aim is a stack that works and interoperates, not one
    equivalent to FreeBSD line by line. Of the changes between the
    release and the pin, those the wire or an interoperating peer can
    see and the fixes of real bugs are ported, each recorded with its
@@ -7167,7 +7161,7 @@ measurement shows them worth it. One question remains the owner's
     loop, which
     calls the same admission path, so the host route does not wait for
     either.
-11. **The stack is a package of its own.** The owner's direction:
+11. **The stack is a package of its own.** The aim:
     "ideally we'd even structure our network stack as a separate package
     that can be used independently from erXos e.g. with tap/tun or
     netmap/dpdk/f-stack/etc/whatever is on linux", and "We might even
@@ -7282,8 +7276,7 @@ measurement shows them worth it. One question remains the owner's
     anyway is met by the outlet's start, which spawns it with
     `{async_dist, false}`, and the build check that nothing else starts
     it or sets the flag.
-19. **The system domain never holds the grant.** The owner's decision:
-    the trusted base parses no network traffic, the manifest check
+19. **The system domain never holds the grant.** The trusted base parses no network traffic, the manifest check
     refuses a `net` grant to the system domain, and whatever in the
     system domain would need the network moves to a service domain;
     root's session holds `net`, so the network utilities and root's
@@ -7339,7 +7332,7 @@ of it ([What a naive Erlang stack gets wrong](#what-a-naive-erlang-stack-gets-wr
 
 **RACK first.** RACK is a second TCP implementation of 24,673 lines that
 needs the high-precision timer system and its own input path before the
-system sends a byte. The owner deferred it ([Decisions](#decisions), 7);
+system sends a byte. It is deferred ([Decisions](#decisions), 7);
 the send log keeps it cheap to add later as a loss module.
 
 **A process per layer.** Each layer would add a mailbox trip per packet

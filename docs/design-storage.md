@@ -37,7 +37,7 @@ Decisions every reader of this document needs:
   images hold the rest of a release, read-only and hash-checked where
   consumed, the data partition holds what changes, and FAT holds what is
   exchanged with other machines.
-* **File systems and the driver are Erlang.** By the user's decision, the
+* **File systems and the driver are Erlang.** The
   block driver, the EROFS reader, erXos's F2FS, the FAT server and the
   slot writer are Erlang; the driver touches its device through the
   device NIF, and hashing and checksums are C primitives
@@ -54,14 +54,14 @@ Decisions every reader of this document needs:
   configurations.
 * **F2FS from a clean room.** erXos implements F2FS, in Erlang, from a
   specification written in its own words, with Linux as the oracle and a
-  legal review before any distribution, by the user's decision; littlefs
+  legal review before any distribution; littlefs
   is the stopgap.
 * **A/B slots with trials, and the record is the whole state.** An update
   goes to the spare slot, boots once as a trial that writes nothing but
   the boot-selection record, and is committed only from that trial, when
   healthy; whether the spare is complete is checked against its manifest,
   never recorded (U1 to U5).
-* **No conversion.** By the user's decisions nothing erXos stores is
+* **No conversion.** Nothing erXos stores is
   converted: the data partition and the vault's partition, which littlefs
   serves until erXos's F2FS, are created afresh by the installation that
   brings erXos's F2FS, and an update never changes a partition's format.
@@ -83,8 +83,7 @@ primitives ([design-runtime.md](design-runtime.md#per-byte-primitives))
 and the device NIF
 ([design-runtime.md](design-runtime.md#the-device-nif)); and on the file
 protocol, 9P2000.L, whose operations the storage services implement
-through `erx_fs` ([design-files.md](design-files.md)). The user decided
-that system code is Erlang wherever that costs too little performance to
+through `erx_fs` ([design-files.md](design-files.md)). erXos decided that system code is Erlang wherever that costs too little performance to
 matter, drivers included, with C for the per-byte primitives and the
 device shim beneath a driver ([design.md](design.md#decisions)). The
 choices rest on the research into file systems and boot selection
@@ -893,7 +892,7 @@ which the risks cover. After the commit the update service resets the
 machine, and the committed system's first normal boot mounts the data
 partition read-write.
 
-**No conversion.** By the user's decisions, nothing erXos stores is
+**No conversion.** Nothing erXos stores is
 converted, and no release reads an earlier release's storage format. The
 data partition and the vault's partition hold littlefs until erXos's
 F2FS, and erXos's F2FS arrives by an installation, which writes the medium
@@ -1300,7 +1299,7 @@ parser to its own partition ([Invariants](#invariants), PW1).
 
 **A native block driver in a domain of its own.** The driver would be C
 in a domain that serves windows to every storage domain over a kernel
-gate. Rejected by the user's decision that drivers are Erlang: the
+gate. Rejected by the decision that drivers are Erlang: the
 Erlang driver's partition parser and completion decoder fail a process
 instead of corrupting memory, its windows are processes the inspector and
 tracer show, and it needs no native runtime of its own. A domain of its
@@ -1317,14 +1316,14 @@ construction, and its crash ends one volume's port.
 
 **Converting the partitions.** A conversion from littlefs to F2FS, in
 place or by an update whose release reads both, would keep files and
-keys across the change. Rejected by the user: a conversion needs a proof
+keys across the change. Rejected: a conversion needs a proof
 of its own, and no release owes compatibility to an earlier one's
 storage while erXos is in development, so an installation creates both
 partitions afresh.
 
 **File systems in C.** erofs-utils' library as the EROFS reader in every
 runtime, and erXos's F2FS in C in a native storage domain. Rejected by the
-user's decision that system code is Erlang: an Erlang file system's grants
+decision that system code is Erlang: an Erlang file system's grants
 and open files are processes that can be inspected, traced, supervised and
 upgraded live, and its parsing bugs fail processes instead of corrupting
 memory. The cost is per block, where the medium and the hash dominate
@@ -1384,7 +1383,7 @@ fields of the `image` record
 
 No open question remains for storage: the clean room's legal review, the
 refusal to convert either partition, and the custody of the release key
-outside this design are the user's decisions
+outside this design are decided
 ([plan.md](plan.md#beyond-the-plan)).
 
 ## References

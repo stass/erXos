@@ -173,8 +173,7 @@ Tracing and NIF loading write the code itself.
 
 ## Requirements
 
-From the owner and from the working agreement, quoted where they are
-rules:
+From the working agreement, quoted where they are rules:
 
 1. Save memory per domain on the development machine's RAM, without giving up
    behaviour.
