@@ -10,6 +10,10 @@ module Erx
     DEVICE_NIFS = 'otp/erts/emulator/nifs/erxos'
     ERX_DEVICE = 'erlang/apps/erx/src/erx_device.erl'
     ERX_IRQ_LINE = 'erlang/apps/erx/src/erx_irq_line.erl'
+    # The generated ABI header lists the stopgap backend's calls by name
+    # (?ERX_FIASCO_CALL_MEMBERS): it defines the calls and calls none, so it
+    # is a site of the line-call rule.
+    ERX_ABI_HEADER = 'erlang/apps/erx/include/generated/erx_abi.hrl'
     BLK_WRITE = 'erlang/apps/erx_blk/src/erx_blk_write.erl'
     # The applications whose modules drive a device class.
     DRIVER_APPLICATIONS = %w[erx_blk erx_fb erx_uart].freeze
@@ -205,7 +209,8 @@ module Erx
           name: 'device-line-calls', rule: 'only erx_device and erx_irq_line name irq_bind, irq_bind_owner or irq_ack: ' \
                                            'a driver attaches and acknowledges its lines through erx_irq_line',
           design: 'docs/design-shared-devices.md#lines-inside-a-domain',
-          pattern: /(?<![A-Za-z0-9_@])irq_(?:bind|bind_owner|ack)(?![A-Za-z0-9_@])/, sites: [ERX_DEVICE, ERX_IRQ_LINE],
+          pattern: /(?<![A-Za-z0-9_@])irq_(?:bind|bind_owner|ack)(?![A-Za-z0-9_@])/,
+          sites: [ERX_DEVICE, ERX_IRQ_LINE, ERX_ABI_HEADER],
           seed: { 'erlang/apps/erx_uart/src/seeded.erl' => "f(D) -> erx_device:irq_bind_owner(D, 0).\n" }
         ),
         # A block device reads or writes the medium only for a request a driver
