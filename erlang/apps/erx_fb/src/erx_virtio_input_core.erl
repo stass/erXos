@@ -4,11 +4,11 @@
 %% The virtio-input driver's pure core (docs/design-display.md, "The display device"):
 %% the parse of every byte the device writes, its event records and its configuration
 %% space, and the identification of the device as a keyboard, a mouse or a tablet from
-%% that configuration. Every value and size comes from abi/formats/virtio.txt through the
-%% generated erx_abi.hrl (OASIS Virtio 1.2, section 5.8; evdev's values from FreeBSD's
-%% sys/dev/evdev at release/14.1.0); the bit syntax lays each layout out field by field,
-%% and a compile-time check below fails the build if the generated offsets ever disagree
-%% with it.
+%% that configuration. Every value and size comes through the generated erx_abi.hrl: the
+%% layouts from abi/formats/virtio.txt (OASIS Virtio 1.2, section 5.8), and every evdev
+%% type, code and key state from abi/formats/evdev.txt. The bit syntax lays each layout
+%% out field by field, and a compile-time check below fails the build if the generated
+%% offsets ever disagree with it.
 %%
 %% Everything here reads bytes a device wrote, so it is untrusted input. Each parse
 %% matches the exact layout or answers with a tagged reason; none of them raises on any
@@ -90,11 +90,10 @@ typed(?ERX_EVDEV_EV_SYN, ?ERX_EVDEV_SYN_REPORT, _) -> {ok, {syn, report}};
 typed(?ERX_EVDEV_EV_SYN, ?ERX_EVDEV_SYN_DROPPED, _) -> {ok, {syn, dropped}};
 typed(?ERX_EVDEV_EV_SYN, Code, _) -> {drop, {syn, Code}};
 typed(?ERX_EVDEV_EV_KEY, Code, Value) when Code =< ?ERX_EVDEV_KEY_MAX ->
-    %% The key values are FreeBSD's enum evdev_key_events, sys/dev/evdev/evdev_private.h.
     case Value of
-        0 -> {ok, {key, Code, up}};
-        1 -> {ok, {key, Code, down}};
-        2 -> {ok, {key, Code, repeat}};
+        ?ERX_EVDEV_KEY_EVENT_UP -> {ok, {key, Code, up}};
+        ?ERX_EVDEV_KEY_EVENT_DOWN -> {ok, {key, Code, down}};
+        ?ERX_EVDEV_KEY_EVENT_REPEAT -> {ok, {key, Code, repeat}};
         _ -> {drop, {key, Code, Value}}
     end;
 typed(?ERX_EVDEV_EV_KEY, Code, Value) -> {drop, {key, Code, Value}};
@@ -173,7 +172,7 @@ class(Key, Rel, Abs, Read) ->
     Button = lists:member(?ERX_EVDEV_BTN_LEFT, Key) orelse lists:member(?ERX_EVDEV_BTN_TOUCH, Key),
     Tablet = Button andalso both(?ERX_EVDEV_ABS_X, ?ERX_EVDEV_ABS_Y, Abs),
     Mouse = both(?ERX_EVDEV_REL_X, ?ERX_EVDEV_REL_Y, Rel),
-    Keyboard = lists:any(fun(Code) -> Code > 0 andalso Code < ?ERX_EVDEV_BTN_MISC end, Key),
+    Keyboard = lists:any(fun keyboard_key/1, Key),
     if
         Tablet ->
             maybe
@@ -187,6 +186,9 @@ class(Key, Rel, Abs, Read) ->
     end.
 
 both(A, B, Codes) -> lists:member(A, Codes) andalso lists:member(B, Codes).
+
+%% A key a keyboard reports: a code below the buttons, KEY_RESERVED aside.
+keyboard_key(Code) -> Code > ?ERX_EVDEV_KEY_RESERVED andalso Code < ?ERX_EVDEV_BTN_MISC.
 
 ev_bits(Type, Read) ->
     maybe

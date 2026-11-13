@@ -223,26 +223,3 @@ layout erx_virtio_input_absinfo wire_le 4 20
   field fuzz i32 8
   field flat i32 12
   field res i32 16
-
-# The evdev values the input driver reads, from FreeBSD's sys/dev/evdev/input-event-codes.h
-# at release/14.1.0: the event types, the end of one update (SYN_REPORT) and the device's
-# report that it dropped events (SYN_DROPPED), the pointer buttons and a touch (BTN_TOUCH), the end of the key
-# codes below the buttons (BTN_MISC), the relative and absolute axes a mouse and a tablet
-# report, and the last code of any type (KEY_MAX, the largest of the code ranges).
-limit evdev_ev_syn u16 0x00
-limit evdev_ev_key u16 0x01
-limit evdev_ev_rel u16 0x02
-limit evdev_ev_abs u16 0x03
-limit evdev_syn_report u16 0
-limit evdev_syn_dropped u16 3
-limit evdev_btn_misc u16 0x100
-limit evdev_btn_left u16 0x110
-limit evdev_btn_right u16 0x111
-limit evdev_btn_middle u16 0x112
-limit evdev_btn_touch u16 0x14a
-limit evdev_rel_x u16 0x00
-limit evdev_rel_y u16 0x01
-limit evdev_rel_wheel u16 0x08
-limit evdev_abs_x u16 0x00
-limit evdev_abs_y u16 0x01
-limit evdev_key_max u16 0x2ff

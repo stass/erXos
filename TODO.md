@@ -596,6 +596,13 @@ it; git history is the record of completed work.
   the key `Code`'s number space (evdev's codes or another) and where a `Rune` comes from (a keymap, and whose)
   are not stated; and evdev's repeat has no `input()` form (see the lost key ups item). Settle them in the
   design before the driver's update step is written.
+* [Medium] `abi/formats/evdev.txt`, [Input events](docs/design-display.md#input-events): the table's entries are
+  plain `limit`s, so nothing marks which are key and button codes. FreeBSD's names put the key states
+  (`KEY_EVENT_DOWN` is 1, Esc's code), `KEY_RESERVED` and `KEY_MAX` under the key codes' `KEY_` prefix, and the
+  event types and axes are in the table too, so a keymap generator that refuses only "a name `evdev.txt` does
+  not have" accepts `key KEY_EVENT_DOWN` as Esc. Before `tools/gen_keymap.rb` is written, make the key and
+  button codes a closed set it can check a row against (an ABI `enum` of them, or a declared group), not a
+  list of excepted names.
 * [Medium] `erlang/apps/erx_fb/src/erx_virtio_gpu.erl`, [The display device](docs/design-display.md#the-display-device):
   the driver process runs on QEMU's virtio-gpu only in the `display_domain` suite, whose one boot brings the
   device up and shows a client's window; its failure paths have run only as its pure core's host tests. A host test

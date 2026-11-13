@@ -13,6 +13,7 @@ include services/windows.txt
 include manifest.txt
 include formats/elf64.txt
 include formats/virtio.txt
+include formats/evdev.txt
 include formats/mbr.txt
 include medium.txt
 include formats/erofs.txt

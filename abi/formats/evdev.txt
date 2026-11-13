@@ -1,0 +1,159 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# evdev's codes, the one home of every evdev value erXos reads (docs/design-display.md,
+# "Input events"): the event types, the end of one update and the report of dropped
+# events, the key states, the codes of the keys of the US layout and of the pointer's
+# buttons, and the relative and absolute axes a mouse and a tablet report. A code erXos
+# has no use for is not entered.
+#
+# Each entry is the name FreeBSD gives it, lowercased and prefixed with evdev_, so KEY_A
+# is evdev_key_a, and its value is FreeBSD's. The source is sys/dev/evdev/
+# input-event-codes.h at release/15.1.0, and for the key states enum evdev_key_events in
+# sys/dev/evdev/evdev_private.h at the same release, both under the BSD-2-Clause license.
+# FreeBSD's names put the key states, KEY_RESERVED and KEY_MAX under the KEY_ prefix of
+# the key codes, so the prefix alone does not tell a key code from them.
+
+# The event types (input-event-codes.h, lines 43-46).
+limit evdev_ev_syn u16 0x00
+limit evdev_ev_key u16 0x01
+limit evdev_ev_rel u16 0x02
+limit evdev_ev_abs u16 0x03
+
+# The codes of EV_SYN: the end of one update, and the device's report that it dropped
+# events since its last update (lines 58 and 61).
+limit evdev_syn_report u16 0
+limit evdev_syn_dropped u16 3
+
+# The value of an EV_KEY event: released, pressed and the device's own repeat
+# (evdev_private.h, lines 64-69, numbered from 0 in their order). The value is the
+# event's signed field.
+limit evdev_key_event_up i32 0
+limit evdev_key_event_down i32 1
+limit evdev_key_event_repeat i32 2
+
+# The keys of a US PC keyboard, its keypad included (lines 65-148, 152-153, 161-165,
+# 167-176, 184 and 192-193). KEY_RESERVED, code 0, is no key.
+limit evdev_key_reserved u16 0
+limit evdev_key_esc u16 1
+limit evdev_key_1 u16 2
+limit evdev_key_2 u16 3
+limit evdev_key_3 u16 4
+limit evdev_key_4 u16 5
+limit evdev_key_5 u16 6
+limit evdev_key_6 u16 7
+limit evdev_key_7 u16 8
+limit evdev_key_8 u16 9
+limit evdev_key_9 u16 10
+limit evdev_key_0 u16 11
+limit evdev_key_minus u16 12
+limit evdev_key_equal u16 13
+limit evdev_key_backspace u16 14
+limit evdev_key_tab u16 15
+limit evdev_key_q u16 16
+limit evdev_key_w u16 17
+limit evdev_key_e u16 18
+limit evdev_key_r u16 19
+limit evdev_key_t u16 20
+limit evdev_key_y u16 21
+limit evdev_key_u u16 22
+limit evdev_key_i u16 23
+limit evdev_key_o u16 24
+limit evdev_key_p u16 25
+limit evdev_key_leftbrace u16 26
+limit evdev_key_rightbrace u16 27
+limit evdev_key_enter u16 28
+limit evdev_key_leftctrl u16 29
+limit evdev_key_a u16 30
+limit evdev_key_s u16 31
+limit evdev_key_d u16 32
+limit evdev_key_f u16 33
+limit evdev_key_g u16 34
+limit evdev_key_h u16 35
+limit evdev_key_j u16 36
+limit evdev_key_k u16 37
+limit evdev_key_l u16 38
+limit evdev_key_semicolon u16 39
+limit evdev_key_apostrophe u16 40
+limit evdev_key_grave u16 41
+limit evdev_key_leftshift u16 42
+limit evdev_key_backslash u16 43
+limit evdev_key_z u16 44
+limit evdev_key_x u16 45
+limit evdev_key_c u16 46
+limit evdev_key_v u16 47
+limit evdev_key_b u16 48
+limit evdev_key_n u16 49
+limit evdev_key_m u16 50
+limit evdev_key_comma u16 51
+limit evdev_key_dot u16 52
+limit evdev_key_slash u16 53
+limit evdev_key_rightshift u16 54
+limit evdev_key_kpasterisk u16 55
+limit evdev_key_leftalt u16 56
+limit evdev_key_space u16 57
+limit evdev_key_capslock u16 58
+limit evdev_key_f1 u16 59
+limit evdev_key_f2 u16 60
+limit evdev_key_f3 u16 61
+limit evdev_key_f4 u16 62
+limit evdev_key_f5 u16 63
+limit evdev_key_f6 u16 64
+limit evdev_key_f7 u16 65
+limit evdev_key_f8 u16 66
+limit evdev_key_f9 u16 67
+limit evdev_key_f10 u16 68
+limit evdev_key_numlock u16 69
+limit evdev_key_scrolllock u16 70
+limit evdev_key_kp7 u16 71
+limit evdev_key_kp8 u16 72
+limit evdev_key_kp9 u16 73
+limit evdev_key_kpminus u16 74
+limit evdev_key_kp4 u16 75
+limit evdev_key_kp5 u16 76
+limit evdev_key_kp6 u16 77
+limit evdev_key_kpplus u16 78
+limit evdev_key_kp1 u16 79
+limit evdev_key_kp2 u16 80
+limit evdev_key_kp3 u16 81
+limit evdev_key_kp0 u16 82
+limit evdev_key_kpdot u16 83
+limit evdev_key_f11 u16 87
+limit evdev_key_f12 u16 88
+limit evdev_key_kpenter u16 96
+limit evdev_key_rightctrl u16 97
+limit evdev_key_kpslash u16 98
+limit evdev_key_sysrq u16 99
+limit evdev_key_rightalt u16 100
+limit evdev_key_home u16 102
+limit evdev_key_up u16 103
+limit evdev_key_pageup u16 104
+limit evdev_key_left u16 105
+limit evdev_key_right u16 106
+limit evdev_key_end u16 107
+limit evdev_key_down u16 108
+limit evdev_key_pagedown u16 109
+limit evdev_key_insert u16 110
+limit evdev_key_delete u16 111
+limit evdev_key_pause u16 119
+limit evdev_key_leftmeta u16 125
+limit evdev_key_rightmeta u16 126
+
+# The first button code, which ends the keys a keyboard reports (line 328); the pointer's
+# buttons (lines 341-343); and a touch (line 397).
+limit evdev_btn_misc u16 0x100
+limit evdev_btn_left u16 0x110
+limit evdev_btn_right u16 0x111
+limit evdev_btn_middle u16 0x112
+limit evdev_btn_touch u16 0x14a
+
+# The last key or button code (line 757).
+limit evdev_key_max u16 0x2ff
+
+# The relative axes of a mouse: its moves and its wheel (lines 760, 761 and 768).
+limit evdev_rel_x u16 0x00
+limit evdev_rel_y u16 0x01
+limit evdev_rel_wheel u16 0x08
+
+# The absolute axes of a tablet or a touch screen (lines 776 and 777).
+limit evdev_abs_x u16 0x00
+limit evdev_abs_y u16 0x01

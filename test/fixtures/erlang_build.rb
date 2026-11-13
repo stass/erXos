@@ -41,8 +41,10 @@ module ErlangBuild
   # root-relative paths of test modules compiled in order (a test-only stub of an
   # application's module compiled here replaces that module's beam). replaced maps a
   # root-relative source path, of an application's module (as ErlangApps.modules spells
-  # it) or of a test module, to the text compiled in its place. includes: further
-  # root-relative -I directories. Raises Error with erlc's output on a failed compile.
+  # it) or of a test module, to the text compiled in its place. includes: further -I
+  # directories, root-relative or absolute, searched first by the replaced modules and the
+  # test modules alike, so a replaced module can be compiled against a header generated
+  # from a seeded ABI source. Raises Error with erlc's output on a failed compile.
   def self.compile(work, applications:, tests: [], replaced: {}, includes: [])
     unknown = replaced.keys - tests - with_dependencies(applications).flat_map { |application| modules(application) }
     raise Error, "replaced names no module compiled here: #{unknown.join(' ')}" unless unknown.empty?
@@ -54,8 +56,9 @@ module ErlangBuild
     # A replaced application module is a seeded fault or a stand-in, which may leave a
     # variable or function unused: the build's flags less -Werror.
     own = replaced.keys - tests
-    erlc(work, [*REPLACED_FLAGS, *beside], own.map { |source| written(work, source, replaced) }) unless own.empty?
-    flags = [*TEST_FLAGS, *beside, *includes.flat_map { |directory| ['-I', directory] }]
+    searched = includes.flat_map { |directory| ['-I', directory] }
+    erlc(work, [*REPLACED_FLAGS, *searched, *beside], own.map { |source| written(work, source, replaced) }) unless own.empty?
+    flags = [*TEST_FLAGS, *searched, *beside]
     erlc(work, flags, tests.map { |source| written(work, source, replaced) }) unless tests.empty?
     work
   end

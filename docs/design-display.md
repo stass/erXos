@@ -1222,8 +1222,12 @@ keys, each by its evdev code, so no window policy maps devices.
 **evdev's codes have one home**, `abi/formats/evdev.txt`: the event
 types, the codes of keys and buttons, the relative and absolute axes,
 `SYN_REPORT` and `SYN_DROPPED`, and the key states, each under its name
-in FreeBSD's `sys/dev/evdev/input-event-codes.h` at release/14.1.0 and
-with its value from there. The virtio-input core, the keymap's
+in FreeBSD's `sys/dev/evdev/input-event-codes.h` at release/15.1.0, or
+for the key states in `enum evdev_key_events` of that release's
+`sys/dev/evdev/evdev_private.h`, and with its value from there. The
+table spells a name in lower case after `evdev_`, so `KEY_A` is
+`evdev_key_a` and the generated `ERX_EVDEV_KEY_A`, and it holds only
+the codes erXos reads. The virtio-input core, the keymap's
 generator and the bus drivers of touch controllers, keypads and
 encoders read the names the build generates from it, and
 `abi/formats/virtio.txt` keeps only virtio's own layouts.
@@ -4997,12 +5001,20 @@ Decisions:
   (`5e1f4c8913ca17a71490e1da2a210c994e09dad13ce0da5e9071338b332216db`).
   FreeBSD at release/14.1.0: `sys/dev/evdev/evdev.c`
   (`de9e1ad9079711abee07710642c612f07fefa40c7a3eace9f267d8a22a44e0ed`),
-  `sys/dev/evdev/input-event-codes.h`
-  (`3790eafbe569582ca918554c4305a9f49f418b2e597c51a1f0db76da6cb98db6`),
+  `sys/dev/evdev/input.h`
+  (`ff625eb9908e977a7ec3bb8a6b78d47753c0f2068d3d847127356aad1e7a9b0a`)
+  and `sys/dev/virtio/virtio_ids.h`
+  (`7def4e9c654b6d568a350d6c54ed7fbf24895e3739f318c15621762384f463bf`),
+  which `abi/formats/virtio.txt` cites,
   `usr.sbin/kbdcontrol/kbdcontrol.1`
   (`e0988b793caf7c61a70ba2a3eec207074cc56612af914a88962679be8a76a47c`)
   and `usr.sbin/kbdcontrol/kbdcontrol.c`
   (`c9f993353564a2681ee2eb359eb2af1b267048bce3356cf8f9fe0a68c1bdd025`).
+  FreeBSD at release/15.1.0, under the BSD-2-Clause license, for
+  `abi/formats/evdev.txt`: `sys/dev/evdev/input-event-codes.h`
+  (`fc9c4946818cefcec359ad3a619d448c4cafffa4f8f9571894516fb980b26142`)
+  and `sys/dev/evdev/evdev_private.h`
+  (`90763a96ea404d39ad7ee8e5a34f38d246a9c1908354bb95c46121332a91d65f`).
 * The draw messages were checked against 9front's `sys/man/3/draw`,
   `sys/src/9/port/devdraw.c`, `sys/src/libmemdraw/load.c` and
   `cload.c` and `sys/src/libdraw/badrect.c` at commit `2859ae04`, and
