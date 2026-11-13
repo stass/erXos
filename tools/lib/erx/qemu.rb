@@ -535,6 +535,12 @@ module Erx
     # stub, on a board QEMU starts through its loader (QemuPlan::Machine#loads), is the file of
     # its boot stub, BL31 with its header patched (Bl31.patch_stub).
     #
+    # display, a QemuPlan::Display, attaches the guest's display devices and QMP on its
+    # socket, which a checkpoint's verify may read the screen through (Qmp). Its socket must
+    # lie in an owner-only directory the caller made (Qmp.check_directory), such as the run's
+    # directory passed as directory. A boot with a display is never reused: what the screen
+    # showed is not in its serial log.
+    #
     # Inside the QEMU gate (QemuReuse.active), a boot that passed before on
     # the same inputs does not start QEMU: its stored serial log is written to
     # the run's serial log and replayed, and the report names it under
@@ -545,11 +551,11 @@ module Erx
     # alone determine runs there: no disk, network device or host link session. A host
     # that cannot be reached, or refuses the boot's setup, raises QemuRemote::Unreachable.
     def run(platform:, accel:, image:, cpus: 1, memory_mib: QemuPlan.memory_of(platform), checkpoints: nil, initrd: nil, machine_end: false, directory: nil, command_line: nil,
-            dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil, remote: nil, stub: nil)
+            dtb: nil, disks: [], link: nil, link_seconds: 0, hostlink: nil, nic: nil, remote: nil, stub: nil, display: nil)
       raise Error, 'a run with a host link session ends when the session does, not with machine_end' if link && machine_end
       raise Error, 'a run with a host link session takes no other host link plan' if link && hostlink
-      if remote && !reusable?(link: link, nic: nic, disks: disks, hostlink: hostlink)
-        raise Error, 'a remote boot takes no disk, network device or host link'
+      if remote && !reusable?(link: link, nic: nic, disks: disks, hostlink: hostlink, display: display)
+        raise Error, 'a remote boot takes no disk, network device, display or host link'
       end
       raise Error, 'a remote boot takes no boot stub' if remote && stub
 
@@ -561,6 +567,9 @@ module Erx
       directory ||= File.join(@root, 'build/qemu', "#{accel}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
       directory = OutputDirectory.prepare(root: @root, path: directory, mode: 0o700)
       serial = File.join(directory, 'serial.log')
+      # Emptied before QEMU starts, so the transcript reads this boot's lines alone, never
+      # an earlier run's in a directory the caller reuses.
+      File.write(serial, '', perm: 0o600)
       socket = link && File.join(directory, 'hostlink.sock')
       keyboard = matcher.types? ? File.join(directory, 'keyboard') : nil
       remote_boot = remote && QemuRemote::Boot.new(host: remote)
@@ -571,14 +580,14 @@ module Erx
                                      dtb: dtb && remote_boot.path('dtb'), hostlink: hostlink)
              else
                QemuPlan.argv(**plan, image: image, serial: serial, serial_input: keyboard, initrd: initrd, dtb: dtb,
-                                     disks: disks, hostlink: socket || hostlink, nic: nic, stub: stub)
+                                     disks: disks, hostlink: socket || hostlink, nic: nic, stub: stub, display: display)
              end
       report = { 'state' => 'running', 'image_sha256' => Digest::SHA256.file(image).hexdigest,
                  'argv' => argv, 'checkpoints' => matcher.observed, 'serial_log' => serial }
       report['remote'] = remote.destination if remote
       reuse = QemuReuse.active
       key = nil
-      if reuse && reusable?(link: link, nic: nic, disks: disks, hostlink: hostlink)
+      if reuse && reusable?(link: link, nic: nic, disks: disks, hostlink: hostlink, display: display)
         key = boot_key(reuse, plan: plan, remote_boot: remote_boot, image_sha256: report.fetch('image_sha256'), typed: matcher.types?, initrd: initrd,
                               dtb: dtb, stub: stub, hostlink: hostlink, checkpoints: checkpoints, machine_end: machine_end)
         stored = stored_boot(reuse, key, report: report, checkpoints: checkpoints, directory: directory) if key
@@ -644,9 +653,10 @@ module Erx
     private
 
     # Whether QEMU's inputs alone determine this boot (QemuReuse): no disk the
-    # guest may write, no network device, and no host link a host side serves.
-    def reusable?(link:, nic:, disks:, hostlink:)
-      link.nil? && nic.nil? && disks.empty? && (hostlink.nil? || hostlink == QemuPlan::NO_HOSTLINK)
+    # guest may write, no network device, no display a checkpoint reads, and no host
+    # link a host side serves.
+    def reusable?(link:, nic:, disks:, hostlink:, display:)
+      link.nil? && nic.nil? && display.nil? && disks.empty? && (hostlink.nil? || hostlink == QemuPlan::NO_HOSTLINK)
     end
 
     # The boot's key. The keyed plan is the boot's own (plan, as run passes it

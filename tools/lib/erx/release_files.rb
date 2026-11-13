@@ -83,7 +83,31 @@ module Erx
     SESSION_ONLY = %w[erx_web_line].freeze
     raise Error, "SESSION_ONLY names what the runtime does not build: #{SESSION_ONLY - APPLICATIONS}" unless
       (SESSION_ONLY - APPLICATIONS).empty?
-    SYSTEM_APPLICATIONS = (APPLICATIONS - STORAGE_ONLY - NETWORK_ONLY - WEB_ONLY - SESSION_ONLY).freeze
+    # The display's applications, which only the display domain's boot script boots
+    # (docs/design-display.md, "The display device"): the drivers and the display side of
+    # erx_display. The system release does not ship them, so no system domain loads the
+    # driver of a device the manifest gives the display domain.
+    DISPLAY_ONLY = %w[erx_display erx_fb].freeze
+    raise Error, "DISPLAY_ONLY names what the runtime does not build: #{DISPLAY_ONLY - APPLICATIONS}" unless
+      (DISPLAY_ONLY - APPLICATIONS).empty?
+    # The display side of erx_display, what the display domain runs (docs/design-display.md,
+    # the table of what runs where, and G9): the behaviour its drivers implement,
+    # erx_memdraw for the copies between images, erx_screen with its core, and the window
+    # policies with the wctl grammar. One application holds both sides until it splits
+    # (TODO.md, "The display domain: split erlang/apps/erx_display"), so the domain release
+    # ships only these of it, with an application file that lists them and names no
+    # callback module, and no draw decoder, widget, terminal or pixel-allocator module
+    # reaches the display domain. A module listed here that the build did not make fails
+    # the release (shipped_layout), and a client's boot script cannot take erx_display
+    # from this release until the split.
+    SHIPPED_MODULES = { 'erx_display' => %w[erx_display erx_memdraw erx_screen erx_screen_core erx_wctl erx_wm
+                                            erx_wm_single].freeze }.freeze
+    # Applications a boot script loads and does not start, by the script's name: the display
+    # domain's release only loads erx_display, start type load, so none of its processes,
+    # the pixel allocator among them, runs over the display's read-only mappings
+    # (docs/design-display.md, "The pixel area").
+    BOOT_LOADS = { 'display' => %w[erx_display].freeze }.freeze
+    SYSTEM_APPLICATIONS = (APPLICATIONS - STORAGE_ONLY - NETWORK_ONLY - WEB_ONLY - SESSION_ONLY - DISPLAY_ONLY).freeze
     SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: SYSTEM_APPLICATIONS, system: true,
                          boots: { 'start' => SYSTEM_APPLICATIONS }.freeze)
     # Where the one domain release lies: domains/erxos/, which sorts after boot/ and
@@ -282,11 +306,46 @@ module Erx
     def application_files
       @release.applications.flat_map do |application|
         directory = "#{@release.prefix}lib/#{application}-#{version(application)}"
-        self.class.application_layout(root: @root, otp: @otp, application: application).map do |path, artifact|
+        shipped_layout(application).map do |path, artifact|
           sources = path.start_with?('include/') ? [artifact] : sources_of(application, File.basename(path))
           ReleaseFile.new(path: "#{directory}/#{path}", artifact: artifact, sources: sources)
         end
       end
+    end
+
+    # What application ships: its whole layout, or for one of SHIPPED_MODULES the beams
+    # of the modules named, its headers and the application file shipped_app writes.
+    def shipped_layout(application)
+      whole = self.class.application_layout(root: @root, otp: @otp, application: application)
+      modules = SHIPPED_MODULES[application]
+      return whole unless modules
+
+      beams = modules.map { |name| "ebin/#{name}.beam" }
+      missing = beams - whole.map(&:first)
+      raise Error, "#{application} ships modules the build did not make: #{missing.join(', ')}" unless missing.empty?
+
+      kept = whole.select { |path, _| beams.include?(path) || path.start_with?('include/') }
+      [*kept, ["ebin/#{application}.app", shipped_app(application, modules)]].sort_by(&:first)
+    end
+
+    # The application file of application as the release ships it, in a directory of its
+    # own (ebin_of): the built one with only modules listed, no callback module, so that
+    # starting it would start nothing, and no registered name, since none of its
+    # processes is shipped.
+    def shipped_app(application, modules)
+      FileUtils.mkdir_p(ebin_of(application))
+      built = File.read(File.join(@otp, 'lib', application, 'ebin', "#{application}.app"))
+      text = ErlangApps.with_modules(built, modules).sub(/,\s*\{mod,\s*\{[^{}]*\}\}/, '')
+                       .sub(/\{registered,\s*\[[^\]]*\]\}/, '{registered, []}')
+      File.join(ebin_of(application), "#{application}.app").tap { |path| File.write(path, text) }
+    end
+
+    # Where the boot script generator finds application's application file: the build's
+    # ebin, or shipped_app's directory for one of SHIPPED_MODULES.
+    def ebin_of(application)
+      return File.join(@otp, 'lib', application, 'ebin') unless SHIPPED_MODULES.key?(application)
+
+      File.join(@directory, 'shipped', application, 'ebin')
     end
 
     # The source a built file is compiled from: for erXos's applications one of the
@@ -329,21 +388,22 @@ module Erx
         FileUtils.mkdir_p(directory)
         boot = self.class.make_boot_script(
           erl: @oracle.erl_path(Runtime::HOST_OTP_FLAVOUR), directory: directory, runner: @runner,
-          paths: applications.map { |application| File.join(@otp, 'lib', application, 'ebin') },
+          paths: applications.map { |application| ebin_of(application) },
           release: "{release,{\"#{@release.system ? @release.name : name}\",\"1\"},{erts,\"#{erts_version}\"}," \
-                   "[#{applications.map { |application| release_entry(application) }.join(',')}]}.\n"
+                   "[#{applications.map { |application| release_entry(application, boot: name) }.join(',')}]}.\n"
         )
         sources = applications.map { |application| File.join(@root, self.class.source_directory(application), 'src', "#{application}.app.src") }
         ReleaseFile.new(path: "#{@release.prefix}bin/#{name}.boot", artifact: boot, sources: sources)
       end
     end
 
-    # An application's term in the release file: its name and version, and the start
-    # type load for one only loaded, DOMAIN_ONLY's among them in every release; the
-    # others take systools' default, permanent.
-    def release_entry(application)
+    # An application's term in the boot script's release file: its name and version, and
+    # the start type load for one only loaded, DOMAIN_ONLY's among them in every release
+    # and BOOT_LOADS' in the boot script it names; the others take systools' default,
+    # permanent.
+    def release_entry(application, boot:)
       term = "#{application},\"#{version(application)}\""
-      if LOAD_ONLY.include?(application) || DOMAIN_ONLY.include?(application)
+      if [*LOAD_ONLY, *DOMAIN_ONLY, *BOOT_LOADS.fetch(boot, [])].include?(application)
         "{#{term},load}"
       else "{#{term}}"
       end

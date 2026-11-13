@@ -26,7 +26,7 @@ module ErlangBuild
   ROOT = File.expand_path('../..', __dir__)
   # Every application ErlangApps knows, in its dependency order, so an application's
   # behaviours are compiled before the modules of a later one that implement them.
-  ORDER = [*Erx::ErlangApps::APPLICATIONS, *Erx::ErlangApps::UNRELEASED, *Erx::ErlangApps::TEST_ONLY].freeze
+  ORDER = [*Erx::ErlangApps::APPLICATIONS, *Erx::ErlangApps::TEST_ONLY].freeze
   # Test modules are not held to the build's deprecation warnings; -Werror still holds.
   TEST_FLAGS = %w[-Werror +debug_info].freeze
   REPLACED_FLAGS = (Erx::ErlangApps::FLAGS - %w[-Werror]).freeze

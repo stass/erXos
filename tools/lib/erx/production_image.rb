@@ -115,7 +115,8 @@ module Erx
                                    'erx_session'].freeze,
                      'storage' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::STORAGE_ONLY].freeze,
                      'network' => [*DOMAIN_APPLICATIONS, 'erx_net'].freeze,
-                     'web' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::WEB_ONLY].freeze }.freeze
+                     'web' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::WEB_ONLY].freeze,
+                     'display' => [*DOMAIN_APPLICATIONS, *ReleaseFiles::DISPLAY_ONLY].freeze }.freeze
 
     # Refuses a test script (ReleaseFiles::DomainBoot#test) among domains unless the image
     # is a test image, whose archive flags mark its test code, so no image without the

@@ -601,11 +601,9 @@ it; git history is the record of completed work.
   on the direct path a display driver maps a client's pixel area read-only into its device's DMA window; the device
   NIF cannot map an area into the window yet.
 * [Medium] `erlang/apps/erx_fb/src/erx_virtio_gpu.erl`, [The display device](docs/design-display.md#the-display-device):
-  the virtio-gpu driver process has run only its pure core's host tests. Nothing starts it yet: the development
-  manifest has no display domain (a manifest row giving the virtio-gpu needs a device role and kind that
-  `mf_device_role` and the device kinds do not have), and no QEMU case attaches a virtio-gpu and compares a
-  screenshot. Those come next, with a run of the driver on the device. Before then, a host test of the process
-  on stock OTP is cheap: stub modules `erx_device`, `erx_irq_line`, `erx_memdraw` and `erx_log` that script a
+  the driver process runs on QEMU's virtio-gpu only in the `display_domain` suite, whose one boot brings the
+  device up and shows the background; its failure paths have run only as its pure core's host tests. A host test
+  of the process on stock OTP is cheap: stub modules `erx_device`, `erx_irq_line`, `erx_memdraw` and `erx_log` that script a
   device answering out of order, refusing a post as full, firing a spurious line, returning a stray completion
   between frames and staying silent past the deadline (a `-D` macro shortening it).
 * [Medium] `erlang/apps/erx_fb/src/erx_virtio_gpu.erl`: the screen image's region is sized from the display size
@@ -614,21 +612,18 @@ it; git history is the record of completed work.
   from a bound that does not change between restarts and show any mode that fits it. The driver also acknowledges a
   configuration-change interrupt without reading `events_read` or writing `events_clear` (virtio 1.2, 5.7.4.2),
   so a change of display size is not followed.
-* [Low] `erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
-  NIF cannot map an area into the window yet. `erx_virtio_gpu_core` builds every request but
-  `RESOURCE_ATTACH_BACKING`, which names the screen image's region with `{out, {region, R}}`; the driver process,
-  the development manifest's display domain and the QEMU screenshot case come next.
 * [High] the display domain's rows (`config/manifest/qemu-virt-development.txt`, `raspi4b-development.txt`;
   [design-stopgap.md](docs/design-stopgap.md#device-records)): the platform records carry the display unit
   (QEMU virt's virtio-gpu at `/virtio_mmio@a001e00`, 9 MiB of DMA memory) and the Pi's `framebuffer` unit, and no
-  manifest places them. A display domain row needs a display boot script of the domain release (`erx_display`
-  is in `ErlangApps::UNRELEASED`, the driver's application with it), and on QEMU virt room: the development
-  manifest leaves 6.5 MiB of `root_memory` unpromised, the gpu's 9 MiB of DMA memory raises the contiguous pool
-  from 2 MiB to 16 MiB, and the domain's own budget comes on top, so the machine's 256 MiB of RAM grows. The
-  harness pins the keyboard and tablet to the gpu's page (`QemuPlan::DISPLAY_TRANSPORTS`, .14 and .13), and the
-  domain library refuses a configured holder of a unit whose devices share a page (`dom_boot_view.c`,
-  `boot_devices`), so the display domain holds its input devices only once the give is per unit; QEMU virt's four
-  transport pages are the spare's, the display's, the network device's and the disks'.
+  manifest of the tree places them; the `display_domain` suite boots a manifest of its own
+  (`DisplayDomain.manifest`: the site manifest, an eighth of a CPU, 24 MiB and the unit). The domain release has
+  the display boot script (`ProductionImage::DOMAIN_BOOTS`); the development manifest's row needs a CPU grant,
+  which the system share's reserve has no room for (storage, network and web take its 2,250 mcpu), and on QEMU
+  virt room: the development manifest leaves 6.5 MiB of `root_memory` unpromised, the gpu's 9 MiB of DMA memory,
+  charged to the system's budget, raises the contiguous pool from 2 MiB to 16 MiB, and the domain's own budget
+  comes on top, so the machine's 256 MiB of RAM grows. The display domain holds its keyboard and tablet only
+  once the give is per unit and the unit is the transport page (security residuals, `boot_devices`); QEMU
+  virt's four transport pages are the spare's, the display's, the network device's and the disks'.
 * [Medium] `tools/lib/erx/manifest.rb`, `check_framebuffer_windows`: a framebuffer window is checked against the
   platform record's register windows and RAM, not against the board tree's every `reg` and `ranges` (the GIC, the
   local peripherals, PCIe windows), which the record does not list; checking it against the board's own tree
@@ -641,7 +636,18 @@ it; git history is the record of completed work.
   that holds one ("a device of a kind no runtime drives"). The reader, `erx_dt_framebuffer`, is built and tested;
   what remains is the row's ask and line, the physical object over the framebuffer's pages, the record and its
   size in `include/erx/boot_words.h`, and its reader in `erx_device_record`.
-* [Low] `erlang/apps/erx_display/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
+* [Medium] `erlang/apps/erx_display/src/erx_screen.erl`: the screen shows the empty layout only, the background
+  repainted at its start; layouts, windows, presents, the overlay and the idle policy wait for `erx_winfs`
+  ([The screen and its one path to the device](docs/design-display.md#the-screen-and-its-one-path-to-the-device)).
+* [Medium] the flush request (`erlang/apps/erx_display/src/erx_screen.erl`, `send/2`;
+  [design-display.md](docs/design-display.md), the `erx_display` behaviour and "The screen and its one path to the
+  device"): the behaviour's `flush/3` is synchronous and returns `{ok, State}`, while the screen sends each frame
+  with `gen_server:send_request/2` as `{flush, Rects, Image}`, the term `erx_virtio_gpu`'s `handle_call/3`
+  accepts; nothing calls `flush/3`, so the chokepoint "only `erx_screen` calls the driver's `flush/3`" has no
+  call to check, and another driver of the behaviour would leave the screen black. Settle the design's two
+  passages on one asynchronous request the behaviour owns (a `flush_request` callback, or an `erx_display`
+  function that builds the message) and have the screen call it through the driver's module.
+* [Low] `erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
   bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
 * [Medium] chokepoints, regions ([design-display.md](docs/design-display.md), the `wrap/4` row of the chokepoint
   table): nothing in the build limits who calls `erx_region_view` (only `erx_memdraw_nif.c`) or
@@ -820,7 +826,11 @@ it; git history is the record of completed work.
     the display's). The display-release xref check (docs/design-display.md, Verification) refuses `erx_draw_core`,
     `erx_draw_codec` and `erx_draw_image` by module while the display release loads `erx_display`, which holds
     them: the check stays by module, and this split resolves it by moving the draw modules into a session-only
-    application. New: `erx_winctl` with its fuzz target, `erx_win`, `erx_draw_conn`.
+    application. New: `erx_winctl` with its fuzz target, `erx_win`, `erx_draw_conn`. Until the split the display
+    boot script ships only `ReleaseFiles::SHIPPED_MODULES` of `erx_display`, the stopgap the split deletes (`tools/lib/erx/release_files.rb`), so
+    no client's boot script can take `erx_display` from the domain release, and `erx_screen` is started by the
+    driver application's supervisor, `erx_fb_sup`, behind the driver; the split gives it the display-side
+    application's supervisor.
     `erx_screen_core` keeps its plan and takes the design's names: a present for a flush, and no expose, since
     `erx_screen` copies what a layout change uncovers from the windows' buffers.
   * **The widget server** ([The widget server](docs/design-display.md#the-widget-server)): `erx_ui` with `open/1`,
@@ -5405,6 +5415,15 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] `liberx/system/dom_boot_view.c`, `boot_devices`: a give windows a device's whole register page, and the
+  library checks a page's sharing only among the platform record's device rows, so a device the machine has on
+  that page but the record does not list is reachable through the holder's window, with no manifest row giving
+  it. On QEMU virt, `QemuPlan::Display` by default puts the virtio-keyboard and virtio-tablet on the gpu's page
+  (`DISPLAY_TRANSPORTS`, buses .14 and .13), so a manifest that places the display unit gives the display
+  domain both input devices unseen, each able to drive unconfined DMA; the `display_domain` suite moves them to
+  the unplaced spare's page (`DisplayDomain::DISPLAY_BUSES`). Make the record's unit on QEMU virt the transport
+  page, with every transport the board's tree has on it, so what a window reaches is what the unit lists by
+  construction.
 * [Medium] [The pixel area](docs/design-display.md#the-pixel-area), zero before reuse: an `erx_memdraw:wrap/4` image
   over a range is not tied to the range, so an image handed to a process that outlives the range's owner writes the
   range after its zero and after it is handed out again. The design takes same-client overlap as the client's own

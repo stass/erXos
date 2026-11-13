@@ -102,7 +102,8 @@ class ReleaseFilesTest < Minitest::Test
     %w[compiler runtime_tools].each { |application| assert_includes release, "{#{application},\"#{VERSION}\",load}" }
     assert_includes release, "{erx_session,\"#{VERSION}\",load}", 'a domain\'s own application runs in no system domain'
     started = Erx::ErlangApps::APPLICATIONS - Erx::ReleaseFiles::DOMAIN_ONLY - Erx::ReleaseFiles::STORAGE_ONLY -
-              Erx::ReleaseFiles::NETWORK_ONLY - Erx::ReleaseFiles::WEB_ONLY - Erx::ReleaseFiles::SESSION_ONLY
+              Erx::ReleaseFiles::NETWORK_ONLY - Erx::ReleaseFiles::WEB_ONLY - Erx::ReleaseFiles::SESSION_ONLY -
+              Erx::ReleaseFiles::DISPLAY_ONLY
     [*%w[kernel stdlib], *started].each do |application|
       assert_includes release, "{#{application},\"#{VERSION}\"}"
     end
@@ -110,11 +111,13 @@ class ReleaseFilesTest < Minitest::Test
 
   # The block driver and littlefs run in the storage domain alone, the network stack
   # and its client in the domains that use the network, and the web line in a session
-  # alone, so the system release neither ships nor names them.
+  # alone, the display's drivers and erx_display in the display domain alone, so the
+  # system release neither ships nor names them.
   def test_the_system_release_does_not_ship_the_storage_network_or_session_applications
     paths = entries.map { |entry| entry.fetch('path') }
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
-    only = [*Erx::ReleaseFiles::STORAGE_ONLY, *Erx::ReleaseFiles::NETWORK_ONLY, *Erx::ReleaseFiles::SESSION_ONLY]
+    only = [*Erx::ReleaseFiles::STORAGE_ONLY, *Erx::ReleaseFiles::NETWORK_ONLY, *Erx::ReleaseFiles::SESSION_ONLY,
+            *Erx::ReleaseFiles::DISPLAY_ONLY]
     only.each do |application|
       refute_includes release, "{#{application},"
       refute(paths.any? { |path| path.start_with?("system/lib/#{application}-") }, "the system release ships #{application}")
@@ -235,6 +238,51 @@ class ReleaseFilesTest < Minitest::Test
   def test_the_network_script_starts_the_network_stack_permanent
     domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('network')]))
     assert_match(/,\{erx_files,"#{VERSION}"\},\{erx_net,"#{VERSION}"\}\]\}\.\n\z/, boot_release_file('network'))
+  end
+
+  # The built erx_display as the runtime build lays it out: a beam for each module its
+  # .app.src lists, client side and display side, and an application file naming them,
+  # its callback module and its registered names.
+  def build_erx_display
+    source = File.read(File.join(ROOT, 'erlang/apps/erx_display/src/erx_display.app.src'))
+    modules = Erx::ErlangApps.modules_of(source, label: 'erx_display.app.src')
+    modules.each { |name| write(@otp, "lib/erx_display/ebin/#{name}.beam", 'beam') }
+    write(@otp, 'lib/erx_display/ebin/erx_display.app',
+          "{application,erx_display,[{vsn,\"#{VERSION}\"},{modules,[#{modules.join(',')}]}," \
+          "{registered,[erx_display_sup,erx_pixels]},{applications,[kernel,stdlib,erx]},{mod,{erx_display_app,[]}}]}.\n")
+    modules
+  end
+
+  # The display script ships only the display side of erx_display (docs/design-display.md,
+  # G9: no draw decoder, widget, terminal or pixel allocator in the display release), with
+  # an application file listing just those modules and naming no callback module, and
+  # only loads erx_display, while it starts the drivers' application.
+  def test_the_display_script_ships_the_display_side_of_erx_display_and_only_loads_it
+    built = build_erx_display
+    paths = domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('display')])).map { |entry| entry.fetch('path') }
+    prefix = "domains/erxos/lib/erx_display-#{VERSION}/ebin/"
+    shipped = Erx::ReleaseFiles::SHIPPED_MODULES.fetch('erx_display')
+    assert_equal [*shipped.map { |name| "#{name}.beam" }, 'erx_display.app'].sort,
+                 paths.select { |path| path.start_with?(prefix) }.map { |path| path.delete_prefix(prefix) }.sort
+    client = built.grep(/\Aerx_(draw|ui|vt|pixels)|\Aerx_display_(app|sup)\z/)
+    refute_empty client
+    assert_empty client & shipped
+    app = File.read(File.join(@scratch, 'domain/shipped/erx_display/ebin/erx_display.app'))
+    assert_equal shipped, Erx::ErlangApps.modules_of(app, label: 'shipped erx_display.app')
+    refute_includes app, '{mod,'
+    assert_includes app, '{registered, []}'
+    release = boot_release_file('display')
+    assert_includes release, "{erx_display,\"#{VERSION}\",load}"
+    assert_match(/\{erx_fb,"#{VERSION}"\}\]\}\.\n\z/, release, 'the display script starts the drivers')
+  end
+
+  # A module the filter names that the build did not make fails the release instead of
+  # shipping an application file that lists a module no beam holds.
+  def test_a_shipped_module_the_build_did_not_make_is_refused
+    build_erx_display
+    FileUtils.rm(File.join(@otp, 'lib/erx_display/ebin/erx_screen.beam'))
+    error = assert_raises(Erx::Error) { domain_entries(Erx::ReleaseFiles.domain([Erx::ProductionImage.domain_boot('display')])) }
+    assert_includes error.message, 'ebin/erx_screen.beam'
   end
 
   # A script's release file names the script and its applications alone, in the

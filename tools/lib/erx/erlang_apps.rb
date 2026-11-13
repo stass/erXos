@@ -22,11 +22,7 @@ module Erx
   class ErlangApps
     # In dependency order, as the release file lists them. A directory of erlang/apps/
     # missing here fails the build, so none is left out of the release unseen.
-    APPLICATIONS = %w[erx erx_files erx_uart erx_blk erx_storage erx_web erx_net erx_net_client erx_shell erx_code erx_hostlink erx_domain erx_starter erx_web_line erx_session].freeze
-    # Applications of another domain's image, written and tested on the host ahead of
-    # the milestone that builds that image (docs/plan.md, "Critical path and parallel
-    # tracks"): the host tests compile them, and no release holds them yet.
-    UNRELEASED = %w[erx_display erx_fb].freeze
+    APPLICATIONS = %w[erx erx_files erx_uart erx_blk erx_storage erx_display erx_fb erx_web erx_net erx_net_client erx_shell erx_code erx_hostlink erx_domain erx_starter erx_web_line erx_session].freeze
     SOURCE = 'erlang/apps'
     # Test-only applications, in test/erlang/apps: the runtime build compiles them into the
     # OTP copy beside the others, so a test image's domain boot script can take one
@@ -122,7 +118,7 @@ module Erx
     # Refuses a directory of erlang/apps/ or test/erlang/apps/ that the lists above do not
     # name, so none is left out of a build, or out of the check, unseen.
     def self.refuse_unlisted(root:)
-      [[SOURCE, [*APPLICATIONS, *UNRELEASED]], [TEST_SOURCE, TEST_ONLY]].each do |directory, listed|
+      [[SOURCE, APPLICATIONS], [TEST_SOURCE, TEST_ONLY]].each do |directory, listed|
         next unless File.directory?(File.join(root, directory))
 
         unlisted = Dir.children(File.join(root, directory)).sort - listed
@@ -146,12 +142,11 @@ module Erx
     end
 
     # What the source check runs ahead of any build: refuse_unlisted, then read_sources
-    # over every application of the lists whose directory is present, those the build
-    # does not compile (UNRELEASED) included, so a module missing from an .app.src fails
-    # here as it does in a build. The generated tree must be current.
+    # over every application of the lists whose directory is present, so a module missing
+    # from an .app.src fails here as it does in a build. The generated tree must be current.
     def self.check_sources(root:)
       refuse_unlisted(root: root)
-      [*APPLICATIONS, *UNRELEASED, *TEST_ONLY].select { |application| File.directory?(File.join(root, source(application))) }
+      [*APPLICATIONS, *TEST_ONLY].select { |application| File.directory?(File.join(root, source(application))) }
                                               .each { |application| read_sources(root: root, application: application) }
     end
 

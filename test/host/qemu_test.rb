@@ -290,6 +290,19 @@ class QemuTest < Minitest::Test
     assert_equal 'passed', report.fetch('state')
   end
 
+  # A run in a directory an earlier run used reads only its own guest's lines: the earlier
+  # serial log's "done" does not pass a guest that prints nothing.
+  def test_a_reused_directory_does_not_replay_the_earlier_serial_log
+    directory = File.join(@directory, 'build/run')
+    FileUtils.mkdir_p(directory, mode: 0o700)
+    File.write(File.join(directory, 'serial.log'), "done\n")
+    qemu = Erx::Qemu.new(root: @directory, program: fake_guest(output: '', guest_delay: 2))
+    assert_raises(Erx::Error) do
+      qemu.run(platform: PLATFORM, accel: 'tcg', image: image, directory: directory,
+               checkpoints: [{ name: 'done', pattern: /^done\n/n, seconds: 1 }])
+    end
+  end
+
   def test_checkpoint_expiry_is_reported_as_timeout
     guest = fake_guest(output: '', guest_delay: 2)
     qemu = Erx::Qemu.new(root: @directory, program: guest)
