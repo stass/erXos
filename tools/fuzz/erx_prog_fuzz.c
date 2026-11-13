@@ -26,9 +26,10 @@
  * The start-up plan of liberx/program/startup.h runs on every start frame
  * and must agree with the check: a refused frame is refused with status 127
  * for the check's own refusal; an accepted one runs unless a descriptor
- * other than null refuses it at that descriptor's fd; and a plan that runs
- * keeps only views inside the frame, counts and sums its texts as those
- * views hold them, copies cwd whole with its NUL and carries every scalar.
+ * other than null or a pipe's read or write end refuses it at that
+ * descriptor's fd; and a plan that runs keeps only views inside the frame,
+ * counts and sums its texts as those views hold them, copies cwd whole with
+ * its NUL and carries every scalar.
  */
 
 #include <stdbool.h>
@@ -253,15 +254,25 @@ env_bytes(erx_prog_env_iter_t it)
 	return (sum);
 }
 
-/* The fd of the first descriptor other than null, or -1 when all are null. */
+/*
+ * The fd of the first descriptor liberx cannot set up, or -1 when every one
+ * is null or a pipe's read or write end, the kinds startup.h names.
+ */
 static int
 first_unsupported_fd(erx_prog_fds_iter_t it)
 {
 	erx_prog_fd_entry_t entry;
 
-	while (erx_prog_fds_next(&it, &entry))
-		if (entry.descriptor.which != ERX_PROG_DESCRIPTOR_NULL)
+	while (erx_prog_fds_next(&it, &entry)) {
+		switch (entry.descriptor.which) {
+		case ERX_PROG_DESCRIPTOR_NULL:
+		case ERX_PROG_DESCRIPTOR_PIPE_WRITE:
+		case ERX_PROG_DESCRIPTOR_PIPE_READ:
+			break;
+		default:
 			return (entry.fd);
+		}
+	}
 	return (-1);
 }
 

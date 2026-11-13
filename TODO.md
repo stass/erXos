@@ -1989,6 +1989,14 @@ it; git history is the record of completed work.
   `dup` yet. Each case replaces the refusal with its set-up when the file descriptors arrive
   (docs/design-programs.md, "Descriptors and files"). The table's slots keep no `FD_CLOEXEC` yet,
   which `exec` and `fcntl`'s `F_SETFD` need.
+* [Medium] liberx program layer, `tools/fuzz/erx_prog_target.rb` and
+  `test/fixtures/prog_profile_frames.rb`: no seed holds a socketpair, file, directory or socket
+  descriptor, so a plan that wrongly accepts one of them passes `test/host/erx_prog_fuzz_test.rb`,
+  and the harness's socketpair read branch has no seed to start from. Add a start-frame seed per
+  kind as each case gets its set-up. The accepted set is also written in three places that must
+  agree (`startup.h`'s prose, `find_unsupported_fd` in `startup.c`, `fd_setup_one` in `fd.c`);
+  one predicate in `fd.h` that the plan and the set-up both use would make them agree by
+  construction, with the harness keeping its own list as the oracle.
 * [Low] liberx program layer, `liberx/program/fd.c` and `pipe.c`: a handler bug is trusted rather
   than refused. Two descriptors of one startup message naming the same pipe end make two end
   objects, the reports reach only one, and the second `{closed}` ends the program with `SIGSYS`;
