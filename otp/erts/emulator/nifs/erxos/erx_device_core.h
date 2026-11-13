@@ -112,6 +112,32 @@ erx_device_carve(uint64_t taken, uint64_t size, uint64_t ring_bytes, uint64_t po
 	return (true);
 }
 
+/*
+ * A region's place after the `taken` bytes of a memory of `size`, by the rule queues use: its
+ * `bytes`, nonzero, rounded up to whole pages at the first page nothing earlier took, so
+ * queues and regions share one allocator and no two share a page. False, deciding nothing,
+ * when the region would end past `size`, a sum wraps, or its length passes `length_max`, the
+ * largest the record's region entry can state.
+ */
+typedef struct erx_device_region_carve {
+	uint64_t	start;
+	uint64_t	length;	/* whole pages */
+	uint64_t	end;
+} erx_device_region_carve_t;
+
+static inline bool
+erx_device_carve_region(uint64_t taken, uint64_t size, uint64_t bytes, uint64_t length_max,
+    erx_device_region_carve_t *carve)
+{
+	uint64_t length, end;
+
+	if (bytes == 0 || !erx_device_page_round(bytes, &length) || length > length_max ||
+	    __builtin_add_overflow(taken, length, &end) || end > size)
+		return (false);
+	*carve = (erx_device_region_carve_t){ .start = taken, .length = length, .end = end };
+	return (true);
+}
+
 /* What writing a field takes, decided before any access. */
 typedef enum erx_device_field_op {
 	ERX_DEVICE_FIELD_REFUSED,	/* the register or the value does not allow it */

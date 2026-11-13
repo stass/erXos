@@ -44,18 +44,22 @@ DNofill. `einval` for a channel draw(3)'s `b` refuses or a rectangle
 alloc(_Chan, _R, _Clipr, _Repl, _Color) -> ?NIF.
 
 -doc """
-An image of channel Chan over R whose pixels are the bytes of Area, a
-connection's pixel area from `erx_area:open/1`, from Offset on, laid out as
-`alloc/5` lays out its own; nothing is written, and the clip rectangle is R.
-The image keeps the area mapped until it is freed. `einval` for an Offset
-that is not a multiple of the page size, a channel or rectangle `alloc/5`
-refuses, or rows that, with one word libmemdraw may load past them, pass the
-area's end. An image over the display's read-only mapping is read and never
-written: an operation that would write it fails with `badarg`.
+An image of channel Chan over R whose pixels are the bytes of Backing, from
+Offset on, laid out as `alloc/5` lays out its own; nothing is written, and
+the clip rectangle is R. Backing is a connection's pixel area from
+`erx_area:open/1`, which the image keeps mapped until it is freed, or a
+device's region, the screen image a display driver made with the device
+NIF's region call and the device reads, which is kept for the boot. Only a
+driver names the device NIF, so a region appears here as the opaque term
+that call returns. `einval` for an Offset that is
+not a multiple of the page size, a channel or rectangle `alloc/5` refuses,
+or rows that, with one word libmemdraw may load past them, pass the
+backing's end. An image over the display's read-only mapping is read and
+never written: an operation that would write it fails with `badarg`.
 """.
--spec wrap(erx_area:area(), non_neg_integer(), rect(), 0..16#ffffffff) ->
+-spec wrap(erx_area:area() | term(),non_neg_integer(), rect(), 0..16#ffffffff) ->
           {ok, image()} | {error, einval | enomem}.
-wrap(_Area, _Offset, _R, _Chan) -> ?NIF.
+wrap(_Backing, _Offset, _R, _Chan) -> ?NIF.
 
 -doc "`c`: the image's replicate bit and clip rectangle as they stand after it.".
 -spec clip(image(), boolean(), rect()) -> ok.

@@ -7,7 +7,7 @@
 %% lacks is badarg, as is anything the table does not allow. read/2, write/3,
 %% read_field/3, write_field/4, field/4 and irq_ack/2 are BIFs in ERTS (beam/bif.tab), since a
 %% driver makes them one at a time; the clauses below stand for them only in xref and
-%% documentation. open/1, irq_bind/2, irq_bind_owner/2, irq_holder/2 and the queue calls are NIFs.
+%% documentation. open/1, irq_bind/2, irq_bind_owner/2, irq_holder/2, the queue calls and region/3 are NIFs.
 %%
 %% A read or a write is one volatile access and never waits. write_field/4 on an ordinary
 %% field reads the word and writes it back, so a field's update is not atomic against
@@ -30,10 +30,10 @@
 -export([open/1]).
 -export([read/2, write/3, read_field/3, write_field/4, field/4]).
 -export([irq_bind/2, irq_bind_owner/2, irq_holder/2, irq_ack/2]).
--export([queue_create/4, negotiate/2, post/4, complete/2]).
+-export([queue_create/4, negotiate/2, post/4, complete/2, region/3]).
 -export([stand_in_fire/2, stand_in_used/3]).
 
--export_type([device/0, register_name/0, spec/0, queue/0, segment/0]).
+-export_type([device/0, register_name/0, spec/0, queue/0, region/0, segment/0]).
 
 -on_load(init/0).
 
@@ -46,9 +46,10 @@
 -type marked_line() :: line() | {shared, line()}.
 -type spec() :: #{peripheral := atom(), window := window(), lines := [marked_line()],
                   memory => {object, Memory :: non_neg_integer(), Bytes :: pos_integer()},
-                  clock => Hertz :: non_neg_integer()}.
+                  clock => Hertz :: non_neg_integer(), coherent => boolean()}.
 -opaque queue() :: non_neg_integer().
--type segment() :: {out, binary()} | {in, pos_integer()}.
+-opaque region() :: non_neg_integer().
+-type segment() :: {out, binary()} | {out, {region, region()}} | {in, pos_integer()}.
 
 init() ->
     erlang:load_nif(atom_to_list(?MODULE), #{}).
@@ -67,7 +68,8 @@ init() ->
 %% from that one memory, `{error, erange}` past its end) or a physical device's window and
 %% line selectors, a UART's, which has no queue (`{error, enotsup}` from queue_create/4).
 %% A record's `clock`, the device's clock in hertz, is for its driver: open/1 does
-%% not read it. Every device that does DMA is given, in the system domain too, whose root gives itself
+%% not read it. `coherent => true` marks a device whose DMA is cache-coherent, as the device
+%% tree says; without it the device is taken as not coherent and has no region/3. Every device that does DMA is given, in the system domain too, whose root gives itself
 %% the devices it holds. A hosted runtime has no devices, so either form is an
 %% error there, and `stand_in` gives plain memory and software lines for tests; natively
 %% `stand_in` is `{error, enotsup}`.
@@ -150,13 +152,32 @@ queue_create(_Dev, _Index, _Size, _BufferSize) ->
 negotiate(_Dev, _Wanted) ->
     erlang:nif_error(undef).
 
+%% The device's region Index (docs/design-runtime.md, "Regions"): Bytes rounded up to whole
+%% pages of the memory the device's record holds, taken where its queues are, at the first
+%% page no queue or region took, so a restarted driver that repeats its calls gets the same
+%% region. A new region's bytes are zero. It is kept for the boot and never posted: the
+%% device reads it whenever a request names it, by the segment `{out, {region, R}}`, which
+%% the NIF writes as the region's device address and length, so no address reaches Erlang.
+%% Erlang writes it only through an erx_memdraw:wrap/4 image over R. The same Index with
+%% the same Bytes is that region again; with other Bytes, or no Bytes, badarg. `{error,
+%% erange}`, taking nothing, for a region past the end of the device's memory;
+%% `{error, enotsup}` for a device whose record does not mark it coherent, since nothing
+%% would clean the region before the device reads it, and on a hosted runtime but a
+%% stand-in's; `{error, elimit}` past the runtime's four regions. R names the region in
+%% the whole runtime, so post/4 checks that it is the posting device's.
+-spec region(device(), non_neg_integer(), pos_integer()) -> {ok, region()} | {error, atom() | {status, integer()}}.
+region(_Dev, _Index, _Bytes) ->
+    erlang:nif_error(undef).
+
 %% Posts one request of 1 to 4 segments, every `out` before every `in`, laid end to end in
 %% a free buffer of the queue: the out bytes are copied in, the device writes the in
-%% lengths. There is no buffer to take or fill first, so none is ever held and not posted.
+%% lengths. An out segment `{region, R}` is the entry of the device's region R, its device
+%% address and length in the layout the device's requests use (virtio-gpu's mem_entry).
+%% There is no buffer to take or fill first, so none is ever held and not posted.
 %% Tag, below 2^64, comes back with the completion. `{error, full}` when the queue has too
 %% few free descriptors, so the driver waits for completions; `{error, broken}` when the
 %% queue needs negotiate/2; badarg for segments longer than a buffer, empty or out of
-%% order.
+%% order, and for a region that is not the device's.
 -spec post(device(), queue(), non_neg_integer(), [segment()]) ->
           ok | {error, full | broken}.
 post(_Dev, _Queue, _Tag, _Segments) ->

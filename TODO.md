@@ -535,23 +535,25 @@ it; git history is the record of completed work.
   or a length unlike the reach it declared, passes the check); field-level register ownership, and the register-ring (GENET) and
   ADMA2 (SDHCI) descriptor forms.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
-  a display driver's screen image is an `erx_memdraw` image over memory the device reads again and again (a virtio-gpu
-  resource's backing, a framebuffer), and on the direct path the driver maps a client's pixel area read-only into its
-  device's DMA window. The device NIF has neither: requests go through `post/4`, which owns its buffers. It needs a
-  region of the device's record (made once, wrapped by `erx_memdraw:wrap/4`, never posted) and the mapping of an area
-  into the DMA window, before the display driver. [design-runtime.md](docs/design-runtime.md#the-device-nif) does
-  not name the region's interface yet: how it is made, and how its device address reaches the device's
-  `RESOURCE_ATTACH_BACKING` request (a `virtio_gpu_mem_entry` in the request's bytes) while no device address reaches
-  Erlang. `erx_virtio_gpu_core` builds every other request and parses every answer; the driver process, the
-  development manifest's display domain and the QEMU screenshot case wait on that design.
-* [Low] `otp/erts/emulator/nifs/erxos/erx_device.c` (`apply_post`): `post/4` copies only the `out` segments into the
-  pool buffer and leaves the `in` bytes as the buffer's last request left them, and `complete/2` cuts the answer at the
-  length the device reports, so a device that reports a length longer than it wrote hands the driver its own earlier
-  bytes as an answer (a display-info answer of 408 bytes with only its header written decodes as 16 stale scanouts).
-  Zero the `in` segments in the post's copy. Separately, `erx_virtio_gpu_core:mode/2` bounds scanout 0 only by the
-  memory given; bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
-  on the direct path the display driver maps a client's pixel area read-only into its device's DMA window, and the
-  device NIF has no call for it: it needs the mapping of an area into the DMA window, before the direct path.
+  on the direct path a display driver maps a client's pixel area read-only into its device's DMA window; the device
+  NIF cannot map an area into the window yet. `erx_virtio_gpu_core` builds every request but
+  `RESOURCE_ATTACH_BACKING`, which names the screen image's region with `{out, {region, R}}`; the driver process,
+  the development manifest's display domain and the QEMU screenshot case come next.
+* [High] device records, `COHERENT` ([design-stopgap.md](docs/design-stopgap.md#device-records),
+  [design-device-tree.md](docs/design-device-tree.md)): `erx_device:region/3` makes a region only on a device whose
+  spec says `coherent => true`, and nothing writes that yet: the root's `-erx given` writer
+  (`erx_boot_device_given`) stops at CLOCK and `erx_device_record:find/3` reads no COHERENT, so on QEMU `virt` every
+  virtio-gpu region is `{error, enotsup}` until the record carries the device tree's mark. The display (D2) needs it.
+* [High] device NIF, a screen-sized region (`liberx/backend/core/device_check.h`): a given device's memory is one
+  contiguous object of at most `ERX_MEM_CONTIGUOUS_MAX`, 1 MiB, and its queues and regions are carved from it, so
+  no screen image larger than 1 MiB less the queues fits (640 by 480 at 32 bits is 1.2 MB). The virtio-gpu
+  device's memory needs a larger bound, or a region its own object.
+* [Low] `erlang/apps/erx_display/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
+  bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
+* [Medium] chokepoints, regions ([design-display.md](docs/design-display.md), the `wrap/4` row of the chokepoint
+  table): nothing in the build limits who calls `erx_region_view` (only `erx_memdraw_nif.c`) or
+  `erx_device_region_memory` (only `erx_device_nif.c`), each a writable pointer into memory a device reads. Add both
+  rules to `tools/lib/erx/chokepoint_rules/`, each with a seeded violation.
 * [High] [design-apps.md](docs/design-apps.md): the code the design asks for, in the order
   [Track A](docs/plan.md#track-a-apps) builds it. Built: the `start` rows and property 17's structural clauses and
   its planning clause (root's console session and each enabled row's session planned by the domain library beside

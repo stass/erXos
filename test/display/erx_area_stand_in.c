@@ -7,9 +7,10 @@
  * A stand-in for erx_area (otp/erts/emulator/nifs/erxos/erx_area_nif.c)
  * in the erx_memdraw bundle that stock's emulator loads
  * (tools/lib/erx/memdraw_build.rb), so test/erlang/erx_memdraw_tests.erl
- * can wrap images over an area. test_area(Bytes, Mode) maps Bytes of
- * fresh anonymous memory followed by one page that may not be touched, so
- * an image that reads or writes past the area faults; the destructor
+ * can wrap images over an area; it has no device regions.
+ * test_area(Bytes, Mode) maps Bytes of fresh anonymous memory followed by
+ * one page that may not be touched, so an image that reads or writes past
+ * the area faults; the destructor
  * unmaps it, so an image used after the area is gone faults too, and then
  * tells the creator erx_area_unmapped, as erx_area tells the agent.
  *
@@ -26,6 +27,7 @@
 #include <unistd.h>
 
 #include "erx_area.h"
+#include "erx_region.h"
 
 bool erx_area_stand_in_load(ErlNifEnv *env);
 ERL_NIF_TERM erx_area_stand_in_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]);
@@ -83,6 +85,20 @@ erx_area_view(ErlNifEnv *env, ERL_NIF_TERM term, erx_area_view_t *out)
 	*out = (erx_area_view_t){ .resource = area, .base = area->base, .bytes = area->bytes, .page = page(),
 		.writable = area->writable };
 	return true;
+}
+
+/*
+ * Stock's emulator has no device NIF, so no term names a device's region
+ * there; the hosted runtime's test of erx_device wraps one
+ * (test/integration/runtime_device_test.rb).
+ */
+bool
+erx_region_view(ErlNifEnv *env, ERL_NIF_TERM term, erx_region_view_t *out)
+{
+	(void)env;
+	(void)term;
+	(void)out;
+	return false;
 }
 
 /*

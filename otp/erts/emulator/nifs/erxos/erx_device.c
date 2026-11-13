@@ -38,6 +38,7 @@ struct erx_device {
 	uint64_t			memory;		/* a given device's memory object */
 	uint64_t			memory_size;	/* its bytes, 0 for none */
 	uint8_t				*dma;		/* this domain's mapping of it */
+	bool				coherent;	/* its DMA is cache-coherent */
 	uintptr_t			register_keys[ERX_DEVICE_REGISTERS_MAX];
 	uintptr_t			field_keys[ERX_DEVICE_FIELDS_MAX];
 };
@@ -312,7 +313,7 @@ static bool
 same_spec(const erx_device_t *record, const erx_device_spec_t *spec, const erx_device_peripheral_t *peripheral)
 {
 	if (record->peripheral != peripheral || record->size != spec->size || record->line_count != spec->line_count ||
-	    record->memory != spec->memory || record->memory_size != spec->memory_size)
+	    record->memory != spec->memory || record->memory_size != spec->memory_size || record->coherent != spec->coherent)
 		return (false);
 	for (uint32_t line = 0; line < spec->line_count; line++) {
 		if (record->lines[line] != spec->lines[line] ||
@@ -389,6 +390,7 @@ erx_device_open(const erx_device_spec_t *spec, const uintptr_t *register_keys, c
 		record->lines[line] = spec->lines[line];
 	record->memory = spec->memory;
 	record->memory_size = spec->memory_size;
+	record->coherent = spec->coherent;
 	for (uint32_t index = 0; register_keys != NULL && index < peripheral->register_count; index++)
 		record->register_keys[index] = register_keys[index];
 	for (uint32_t index = 0; field_keys != NULL && index < peripheral->field_count; index++)
@@ -655,7 +657,7 @@ typedef struct queue_record {
 
 static queue_record_t queues[ERX_DEVICE_QUEUES_MAX];
 static uint32_t queues_open;
-/* The bytes of each given device's memory its queues have taken, from the start, by the device's index. */
+/* The bytes of each given device's memory its queues and regions have taken, from the start, by the device's index. */
 static uint64_t memory_taken[ERX_DEVICE_MAX];
 
 /* A plain register of the device's table by name, or NULL; only virtio's queue sequence names them. */
@@ -847,6 +849,132 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 }
 
 /*
+ * The regions. Each record is written whole before regions_open counts it, by a release
+ * store, and never changes after, so erx_device_region_memory, which takes no lock, reads
+ * only whole records. A region's device address, like a ring's, leaves this file only inside
+ * the region entry a post writes.
+ */
+typedef struct region_record {
+	const erx_device_t	*device;
+	uint32_t		index;		/* the driver's number for it */
+	uint64_t		bytes;		/* what the driver asked for */
+	uint64_t		length;		/* its whole pages */
+	uint8_t			*mapping;	/* this domain's mapping of it */
+	uint64_t		addr;		/* its device address */
+} region_record_t;
+
+static region_record_t regions[ERX_DEVICE_REGIONS_MAX];
+static _Atomic uint32_t regions_open;
+
+/* The longest region the record's region entry, erx_virtio_gpu_mem_entry with its 32-bit length, can state. */
+#define REGION_LENGTH_MAX	UINT32_MAX
+
+/*
+ * A given device's region, in the first pages of its memory no queue or region took, its
+ * device address from the object and the offset. Its bytes are zeroed, so a new record never
+ * shows the device what a former one left. ERX_ERANGE, taking nothing, for no room.
+ */
+static int
+carve_region_memory(region_record_t *record, uint64_t bytes)
+{
+	const erx_device_t *const device = record->device;
+	uint64_t *const taken = &memory_taken[device - devices];
+	erx_device_region_carve_t carve;
+	int status;
+
+	if (!erx_device_carve_region(*taken, device->memory_size, bytes, REGION_LENGTH_MAX, &carve))
+		return (ERX_ERANGE);
+	status = erx_mem_dma_addr(device->memory, carve.start, &record->addr);
+	if (status != ERX_OK)
+		return (status);
+	record->length = carve.length;
+	record->mapping = device->dma + carve.start;
+	bzero(record->mapping, carve.length);
+	*taken = carve.end;
+	return (ERX_OK);
+}
+
+/* A hosted stand-in's region, in zeroed plain memory whose device address is its own; no other build has one. */
+static int
+stand_in_region_memory(region_record_t *record, uint64_t bytes)
+{
+#ifdef ERX_DEVICE_STAND_IN
+	erx_device_region_carve_t carve;
+	uint8_t *mapping;
+
+	if (!erx_device_carve_region(0, REGION_LENGTH_MAX, bytes, REGION_LENGTH_MAX, &carve))
+		return (ERX_ERANGE);
+	mapping = aligned_alloc(ERX_PAGE_SIZE, carve.length);
+	if (mapping == NULL)
+		return (ERX_ENOMEM);
+	bzero(mapping, carve.length);
+	record->length = carve.length;
+	record->mapping = mapping;
+	record->addr = (uintptr_t)mapping;
+	return (ERX_OK);
+#else
+	(void)record;
+	(void)bytes;
+	return (ERX_ENOTSUP);
+#endif
+}
+
+int
+erx_device_region(const erx_device_t *device, uint32_t index, uint64_t bytes, uint32_t *region)
+{
+	const uint32_t open = atomic_load_explicit(&regions_open, memory_order_relaxed);
+	region_record_t *record;
+	int status;
+
+	/*
+	 * A physical device does no DMA, and a device that is not coherent would read a region no
+	 * maintenance cleaned (docs/design-device-dma.md, "Regions and writers").
+	 */
+	if (device->form == ERX_DEVICE_FORM_PHYSICAL || !device->coherent)
+		return (ERX_ENOTSUP);
+	if (bytes == 0)
+		return (ERX_EINVAL);
+	for (uint32_t name = 0; name < open; name++) {
+		if (regions[name].device != device || regions[name].index != index)
+			continue;
+		if (regions[name].bytes != bytes)
+			return (ERX_EBUSY);
+		*region = name;
+		return (ERX_OK);
+	}
+	if (open == ERX_DEVICE_REGIONS_MAX)
+		return (ERX_ELIMIT);
+	record = &regions[open];
+	*record = (region_record_t){ .device = device, .index = index, .bytes = bytes };
+	status = device->form == ERX_DEVICE_FORM_GIVEN ? carve_region_memory(record, bytes) :
+	    stand_in_region_memory(record, bytes);
+	if (status != ERX_OK)
+		return (status);
+	atomic_store_explicit(&regions_open, open + 1, memory_order_release);
+	*region = open;
+	return (ERX_OK);
+}
+
+bool
+erx_device_region_memory(uint32_t region, uint8_t **base, uint64_t *bytes)
+{
+	if (region >= atomic_load_explicit(&regions_open, memory_order_acquire))
+		return (false);
+	*base = regions[region].mapping;
+	*bytes = regions[region].length;
+	return (true);
+}
+
+/* The device's region with this name, or NULL: a post names only its own device's regions. */
+static const region_record_t *
+region_of(const erx_device_t *device, uint32_t region)
+{
+	if (region >= atomic_load_explicit(&regions_open, memory_order_relaxed) || regions[region].device != device)
+		return (NULL);
+	return (&regions[region]);
+}
+
+/*
  * The install's checks for one queue: the device has let it go, as a reset makes it, and can
  * take its size. They write only the selector, so a refusal changes nothing of any queue.
  */
@@ -981,7 +1109,9 @@ queue_of(const erx_device_t *device, uint32_t queue)
 }
 
 /*
- * A post's plan, applied: the readable pieces into the head's buffer, the descriptors, the
+ * A post's plan, applied: the readable pieces into the head's buffer and zeros over the
+ * writable ones, so what a completion copies is the device's bytes or zeros, never an
+ * earlier request's (a region's entry among them); then the descriptors, the
  * available entry, then after a barrier the available index, and after another the doorbell.
  * Nothing here can fail, so a plan the core counts as made always reaches the device.
  */
@@ -998,7 +1128,9 @@ apply_post(const queue_record_t *record, const erx_device_piece_t *pieces, const
 	for (uint32_t step = 0; step < plan->count; step++) {
 		const erx_device_desc_write_t *const desc = &plan->descs[step];
 
-		if (!pieces[step].device_writes)
+		if (pieces[step].device_writes)
+			bzero(buffer + segments[step].offset, pieces[step].length);
+		else
 			bcopy(pieces[step].data, buffer + segments[step].offset, pieces[step].length);
 		table[desc->index].addr = desc->addr;
 		table[desc->index].len = desc->len;
@@ -1012,16 +1144,44 @@ apply_post(const queue_record_t *record, const erx_device_piece_t *pieces, const
 	put(record->device, record->regs.notify, record->index);
 }
 
+/*
+ * A post's pieces with each region one names replaced by the bytes of its entry in `entries`:
+ * the region's device address and length in the layout the record names, from a closed set
+ * whose one member is erx_virtio_gpu_mem_entry. So the device learns a region's address only
+ * from the NIF, and only for its own device's region. False for a region of another device or
+ * none, or one named as bytes the device writes.
+ */
+static bool
+resolve_regions(const erx_device_t *device, const erx_device_piece_t *pieces, uint32_t count,
+    erx_device_piece_t *resolved, erx_virtio_gpu_mem_entry_t *entries)
+{
+	for (uint32_t step = 0; step < count; step++) {
+		const region_record_t *region;
+
+		resolved[step] = pieces[step];
+		if (!pieces[step].names_region)
+			continue;
+		region = region_of(device, pieces[step].region);
+		if (region == NULL || pieces[step].device_writes)
+			return (false);
+		entries[step] = (erx_virtio_gpu_mem_entry_t){ .addr = region->addr, .length = (uint32_t)region->length };
+		resolved[step] = (erx_device_piece_t){ .data = (const uint8_t *)&entries[step], .length = sizeof(entries[step]) };
+	}
+	return (true);
+}
+
 int
-erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, const erx_device_piece_t *pieces,
+erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, const erx_device_piece_t *requested,
     uint32_t count)
 {
 	queue_record_t *const record = queue_of(device, queue);
+	erx_virtio_gpu_mem_entry_t entries[ERX_DEVICE_CHAIN_MAX];
+	erx_device_piece_t pieces[ERX_DEVICE_CHAIN_MAX];
 	erx_device_segment_t segments[ERX_DEVICE_CHAIN_MAX];
 	erx_device_post_plan_t plan;
 	uint32_t offset = 0;
 
-	if (record == NULL || count == 0 || count > ERX_DEVICE_CHAIN_MAX)
+	if (record == NULL || count == 0 || count > ERX_DEVICE_CHAIN_MAX || !resolve_regions(device, requested, count, pieces, entries))
 		return (ERX_EINVAL);
 	for (uint32_t step = 0; step < count; step++) {
 		if (pieces[step].length > record->core.buffer_size - offset)

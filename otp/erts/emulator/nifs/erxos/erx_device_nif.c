@@ -4,8 +4,8 @@
  *
  * erx_device's NIF calls (docs/design-runtime.md, "The device NIF"): opening a
  * device, which interns its table's names as atoms for the BIFs, binding a line to the
- * calling process and naming the process a line is bound to, and a device's queues: creating one, the device's initialisation, posting a
- * chain and completing what the device returned. A binding is a resource monitoring that process, kept by the line's
+ * calling process and naming the process a line is bound to, a device's queues: creating one, the device's initialisation, posting a
+ * chain and completing what the device returned, and a device's regions, whose memory erx_region_view shows erx_memdraw. A binding is a resource monitoring that process, kept by the line's
  * entry, which every record naming the line shares: its exit unbinds the line unless a later binding has moved it, so the late exit of a crashed driver never
  * undoes its successor's binding.
  *
@@ -24,6 +24,7 @@
 #include "erx_event.h"
 
 #include "erx_device.h"
+#include "erx_region.h"
 #include "liberx/backend/api.h"
 
 #define ATOM_TEXT_MAX	64u
@@ -147,7 +148,10 @@ decode_memory(ErlNifEnv *env, ERL_NIF_TERM map, erx_device_spec_t *spec)
 	return (true);
 }
 
-/* #{peripheral := atom(), window := window(), lines := [line() | {shared, line()}], memory => memory()}. */
+/*
+ * #{peripheral := atom(), window := window(), lines := [line() | {shared, line()}], memory => memory(),
+ * coherent => boolean()}. A device the spec does not mark coherent is taken as not coherent.
+ */
 static bool
 decode_spec(ErlNifEnv *env, ERL_NIF_TERM term, char *peripheral, erx_device_spec_t *spec)
 {
@@ -170,6 +174,11 @@ decode_spec(ErlNifEnv *env, ERL_NIF_TERM term, char *peripheral, erx_device_spec
 	spec->line_count = length;
 	for (unsigned index = 0; index < length; index++) {
 		if (!enif_get_list_cell(env, list, &head, &list) || !decode_line(env, head, spec, &spec->lines[index], &spec->shared[index]))
+			return (false);
+	}
+	if (enif_get_map_value(env, term, enif_make_atom(env, "coherent"), &value)) {
+		spec->coherent = enif_is_identical(value, enif_make_atom(env, "true"));
+		if (!spec->coherent && !enif_is_identical(value, enif_make_atom(env, "false")))
 			return (false);
 	}
 	return (decode_memory(env, term, spec));
@@ -421,20 +430,66 @@ negotiate_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (enif_make_tuple2(env, enif_make_atom(env, "ok"), enif_make_uint64(env, accepted)));
 }
 
+/* region(Dev, Index, Bytes) */
+static ERL_NIF_TERM
+region_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	const erx_device_t *const device = device_of(env, argv[0]);
+	ErlNifUInt64 bytes;
+	unsigned index;
+	uint32_t region;
+	int status;
+
+	(void)argc;
+	if (device == NULL || !enif_get_uint(env, argv[1], &index) || !enif_get_uint64(env, argv[2], &bytes))
+		return (enif_make_badarg(env));
+	enif_mutex_lock(device_lock);
+	status = erx_device_region(device, index, bytes, &region);
+	enif_mutex_unlock(device_lock);
+	/* No bytes, or the same region with other bytes. */
+	if (status == ERX_EINVAL || status == ERX_EBUSY)
+		return (enif_make_badarg(env));
+	if (status != ERX_OK)
+		return (status_error(env, status));
+	return (enif_make_tuple2(env, enif_make_atom(env, "ok"), enif_make_uint(env, region)));
+}
+
+/* A region's mapping for erx_memdraw (erx_region.h): the term is the region's name. */
+bool
+erx_region_view(ErlNifEnv *env, ERL_NIF_TERM term, erx_region_view_t *out)
+{
+	unsigned region;
+	uint64_t bytes;
+
+	if (!enif_get_uint(env, term, &region) || !erx_device_region_memory(region, &out->base, &bytes))
+		return (false);
+	out->bytes = (size_t)bytes;
+	out->page = ERX_PAGE_SIZE;
+	return (true);
+}
+
 /*
- * One `{out, Binary}` or `{in, Length}`. An out piece is a binary, never an iolist, so its
- * size is known before anything is copied, and its bytes stay valid for the call as a term of it.
+ * One `{out, Binary}`, `{out, {region, R}}` or `{in, Length}`. An out piece is a binary, never
+ * an iolist, so its size is known before anything is copied, and its bytes stay valid for the
+ * call as a term of it. A region piece carries only the region's name: erx_device_post writes
+ * its entry, and refuses a region the device does not have.
  */
 static bool
 decode_piece(ErlNifEnv *env, ERL_NIF_TERM term, erx_device_piece_t *piece)
 {
-	const ERL_NIF_TERM *pair;
+	const ERL_NIF_TERM *pair, *region;
 	ErlNifBinary bytes;
-	unsigned length;
+	unsigned length, name;
 	int arity;
 
 	if (!enif_get_tuple(env, term, &arity, &pair) || arity != 2)
 		return (false);
+	if (enif_is_identical(pair[0], enif_make_atom(env, "out")) && tagged(env, pair[1], "region", 2, &region)) {
+		if (!enif_get_uint(env, region[1], &name))
+			return (false);
+		*piece = (erx_device_piece_t){ .names_region = true, .region = name };
+		return (true);
+	}
 	if (enif_is_identical(pair[0], enif_make_atom(env, "out"))) {
 		if (!enif_inspect_binary(env, pair[1], &bytes) || bytes.size > ERX_DEVICE_BUFFER_MAX)
 			return (false);
@@ -600,6 +655,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "irq_bind_owner", 2, irq_bind_owner_nif, 0 },
 	{ "irq_holder", 2, irq_holder_nif, 0 },
 	{ "queue_create", 4, queue_create_nif, 0 },
+	{ "region", 3, region_nif, 0 },
 	{ "negotiate", 2, negotiate_nif, 0 },
 	{ "post", 4, post_nif, 0 },
 	{ "complete", 2, complete_nif, 0 },

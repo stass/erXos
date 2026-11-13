@@ -64,6 +64,7 @@ typedef struct erx_device_spec {
 	bool			shared[ERX_DEVICE_LINES_MAX];	/* the record's mark of each line */
 	uint64_t		memory;
 	uint64_t		memory_size;
+	bool			coherent;	/* the device's DMA is cache-coherent, as the record says */
 } erx_device_spec_t;
 
 /* Which element of a register: a plain register takes none, an array one below its count. */
@@ -169,9 +170,15 @@ erx_device_bind_t erx_device_bind_check(const erx_device_t *device, uint64_t lin
 /* What one erx_device_complete copies before it stops: the entry that crosses it is copied whole. */
 #define ERX_DEVICE_COMPLETE_BYTES	65536u
 
-/* One segment of a post: bytes the device reads, or a length of buffer the device writes. */
+/*
+ * One segment of a post: bytes the device reads, a length of buffer the device writes, or a
+ * region of the record the device reads, which the post writes as the record's region entry
+ * (erx_device_region) and for which `data` and `length` are unused.
+ */
 typedef struct erx_device_piece {
 	bool		device_writes;
+	bool		names_region;
+	uint32_t	region;		/* with names_region, the region's name */
 	const uint8_t	*data;		/* length bytes to copy in when the device reads them */
 	uint32_t	length;
 } erx_device_piece_t;
@@ -194,6 +201,35 @@ int	erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t
 	    uint32_t *queue);
 
 /*
+ * Regions (docs/design-runtime.md, "Regions"): memory of the record the device reads whenever
+ * a request names it, such as a virtio-gpu resource's backing, kept for the boot and never
+ * posted.
+ *
+ * erx_device_region makes the device's region `index`, the driver's own number for it, of
+ * `bytes` rounded up to whole pages, and returns ERX_OK with `*region`, the name posts and
+ * erx_memdraw use, one name space for every device of the runtime. A given device takes the
+ * pages from its memory at the first page no queue or region took (erx_device_carve_region),
+ * a stand-in from plain memory; a new region's bytes are zero.
+ *
+ * The same index with the same bytes is that region again, and with other bytes ERX_EBUSY.
+ * Errors: ERX_EINVAL for no bytes; ERX_ERANGE, taking nothing, for one past the
+ * memory's end or longer than the region entry states, or a given device with no memory;
+ * ERX_ENOTSUP for a physical device and for one that is not coherent, since no transfer names
+ * a region, so nothing would clean it before the device reads it; ERX_ELIMIT past
+ * ERX_DEVICE_REGIONS_MAX regions.
+ */
+#define ERX_DEVICE_REGIONS_MAX		4u
+
+int	erx_device_region(const erx_device_t *device, uint32_t index, uint64_t bytes, uint32_t *region);
+
+/*
+ * This domain's mapping of a region, for erx_memdraw's images over it: false for a name no
+ * region has. A region is never freed, so the mapping stays valid for the boot. Unlike the
+ * calls above it takes no serialisation: a region is published whole before its name exists.
+ */
+bool	erx_device_region_memory(uint32_t region, uint8_t **base, uint64_t *bytes);
+
+/*
  * Virtio's initialisation, whole, and the reset rule with it: the NIF resets the device,
  * reads the features it offers, accepts the ones erx_device_queue_features allows of those
  * and of `wanted`, has the device confirm them with FEATURES_OK, installs every queue of the device
@@ -211,11 +247,13 @@ int	erx_device_negotiate(const erx_device_t *device, uint64_t wanted, uint64_t *
 /*
  * Posts one chain: its pieces, readable before writable, laid end to end in a free buffer of
  * the queue, the readable ones copied in, then the descriptors, the available entry and the
- * doorbell, all or nothing. ERX_EINVAL for no such queue of the device, a count outside
- * 1..ERX_DEVICE_CHAIN_MAX, an empty piece, pieces longer than a buffer or out of order;
+ * doorbell, all or nothing. A piece naming a region is written as the region's entry and read
+ * by the device. ERX_EINVAL for no such queue of the device, a count outside
+ * 1..ERX_DEVICE_CHAIN_MAX, an empty piece, pieces longer than a buffer or out of order, or a
+ * region the device does not have or that a piece names as bytes the device writes;
  * ERX_EWOULDBLOCK for too few free descriptors; ERX_ECORRUPT for a queue needing a reset.
  */
-int	erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, const erx_device_piece_t *pieces,
+int	erx_device_post(const erx_device_t *device, uint32_t queue, uint64_t tag, const erx_device_piece_t *requested,
 	    uint32_t count);
 
 /*

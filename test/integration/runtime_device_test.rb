@@ -315,6 +315,43 @@ class RuntimeDeviceTest < Minitest::Test
     ERLANG
   end
 
+  OPEN_COHERENT = 'S = #{peripheral => virtio_mmio, window => stand_in, lines => []}, ' \
+                  '{ok, D} = erx_device:open(S#{coherent => true}), '
+
+  # A region of a coherent stand-in (docs/design-runtime.md, "Regions"): the same Index and
+  # Bytes is that region again, other Bytes badarg; a post names it by `{out, {region, R}}`,
+  # and only its own device's. A stand-in its spec does not mark coherent has no region.
+  def test_a_region_is_named_only_by_its_own_device_s_posts
+    assert_equal 'ok', evaluate(OPEN_COHERENT + <<~'ERLANG')
+      {ok, E} = erx_device:open(S), {error, enotsup} = erx_device:region(E, 0, 4096),
+      {ok, R} = erx_device:region(D, 0, 5000), {ok, R} = erx_device:region(D, 0, 5000),
+      {'EXIT', {badarg, _}} = (catch erx_device:region(D, 0, 4096)),
+      {ok, Q} = erx_device:queue_create(D, 0, 8, 64), {ok, _} = erx_device:negotiate(D, 0),
+      ok = erx_device:post(D, Q, 1, [{out, <<0:64>>}, {out, {region, R}}, {in, 24}]),
+      {ok, F} = erx_device:open(S#{coherent => true}), {ok, G} = erx_device:region(F, 0, 4096),
+      {'EXIT', {badarg, _}} = (catch erx_device:post(D, Q, 2, [{out, {region, G}}])),
+      io:format("~s~n", [ok]), halt().
+    ERLANG
+  end
+
+  # An erx_memdraw image over a region (docs/design-display.md, "The display device") writes
+  # and reads the region's pixels; a name no region has is no backing. The hosted release
+  # holds no erx_display, so the module comes in on standard input over the runtime's NIF.
+  def test_an_image_wraps_a_region
+    load = '{module, erx_memdraw} = code:load_binary(erx_memdraw, "memdraw", ' \
+           'base64:decode(string:trim(io:get_line("")))), '
+    beam = compiled_module(File.join(ROOT, 'erlang/apps/erx_display/src/erx_memdraw.erl'))
+    assert_equal 'ok', evaluate(load + OPEN_COHERENT + <<~'ERLANG', input: "#{beam}\n")
+      {ok, R} = erx_device:region(D, 0, 1024), X32 = 16#68081828,
+      {'EXIT', {badarg, _}} = (catch erx_memdraw:wrap(R + 1, 0, {0, 0, 16, 16}, X32)),
+      {ok, I} = erx_memdraw:wrap(R, 0, {0, 0, 16, 16}, X32),
+      {ok, _} = erx_memdraw:load(I, {0, 0, 1, 1}, <<1, 2, 3, 4>>),
+      {ok, <<1, 2, 3, 4>>} = erx_memdraw:read(I, {0, 0, 1, 1}),
+      {error, einval} = erx_memdraw:wrap(R, 0, {0, 0, 32, 32}, X32),
+      io:format("~s~n", [ok]), halt().
+    ERLANG
+  end
+
   # A hostile device on a stand-in's queue: after an honest completion, an over-length entry,
   # an index ahead of what is in flight and a foreign head each break the queue, the entries
   # before the bad one still returned, and each negotiate makes it whole again. One chain of an
@@ -361,14 +398,21 @@ class RuntimeDeviceTest < Minitest::Test
   # erx_irq_line with one seed planted, compiled by the stock compiler, as base64 for the
   # runtime's standard input: the command line's page has no room for it.
   def seeded_line_module(anchor, replacement)
-    source = File.read(File.join(ROOT, 'erlang/apps/erx/src/erx_irq_line.erl'))
+    path = File.join(ROOT, 'erlang/apps/erx/src/erx_irq_line.erl')
+    source = File.read(path)
     assert_equal 1, source.scan(anchor).size, "no single anchor #{anchor}"
-    Dir.mktmpdir('erx-irq-line-seed-') do |work|
-      path = File.join(work, 'erx_irq_line.erl')
-      File.write(path, source.sub(anchor, replacement))
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, path, stdin_data: '')
+    compiled_module(path, source: source.sub(anchor, replacement))
+  end
+
+  # The module at `path`, or `source` in its place, compiled by the stock compiler, as base64.
+  def compiled_module(path, source: File.read(path))
+    name = File.basename(path, '.erl')
+    Dir.mktmpdir("#{name}-") do |work|
+      copy = File.join(work, "#{name}.erl")
+      File.write(copy, source)
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, copy, stdin_data: '')
       assert status.success?, output
-      [File.binread(File.join(work, 'erx_irq_line.beam'))].pack('m0')
+      [File.binread(File.join(work, "#{name}.beam"))].pack('m0')
     end
   end
 

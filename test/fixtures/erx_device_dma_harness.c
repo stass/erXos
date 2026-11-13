@@ -12,7 +12,8 @@
  * erx_device_negotiate, erx_device_post and erx_device_complete do with it: the features
  * masked to what the split ring serves, every failure leaving the device FAILED and the
  * queue refused, the install whole and in order, a post whole or not at all, each chain in
- * its own buffer, and a broken queue refused until the next negotiation.
+ * its own buffer, a broken queue refused until the next negotiation, and the regions
+ * erx_device_region takes from the same memory, which a post names by their entries.
  */
 
 #include <sys/mman.h>
@@ -621,7 +622,7 @@ open_given(const erx_device_spec_t *spec)
 	CHECK(erx_device_open(spec, NULL, NULL, &device) == ERX_OK);
 	CHECK(maps_done == maps_pushed && irqs_created == created);
 	window = memories[spec->window].bytes + GIVEN_OFFSET;
-	CHECK(erx_device_line_irq(erx_device_get(device), 0, &irq) && irq == GIVEN_LINE);
+	CHECK(erx_device_line_irq(erx_device_get(device), 0, &irq) && irq == spec->lines[0]);
 	return (erx_device_get(device));
 }
 
@@ -720,6 +721,95 @@ check_driver_restart(void)
 		CHECK(post_one(device, queue, tag) == ERX_OK);
 }
 
+/* The region entry the post wrote at `offset` of the buffer of the chain at avail slot `slot`, whose rings are at `rings`. */
+static erx_virtio_gpu_mem_entry_t
+posted_entry(const uint8_t *rings, uint32_t slot, uint32_t offset)
+{
+	erx_device_queue_layout_t layout;
+	erx_virtio_gpu_mem_entry_t entry;
+
+	CHECK(erx_device_queue_layout(QUEUE_SIZE, &layout));
+	const erx_virtq_desc_t *const table = (const erx_virtq_desc_t *)(const void *)rings;
+	const uint16_t head = ((const uint16_t *)(const void *)(rings + layout.avail + ERX_VIRTQ_RING_HEAD_SIZE))[slot];
+	memcpy(&entry, (const uint8_t *)(uintptr_t)table[head].addr + offset, sizeof(entry));
+	return (entry);
+}
+
+/*
+ * A given device's regions: pages of the memory its queues are carved from, at the first page
+ * nothing earlier took, so a queue made after a region lies past it; the same region again
+ * and a different size refused; one past the memory's end taking nothing; a post naming a
+ * region writing its device address and length in the record's entry layout; and a region of
+ * another device, a region named as bytes the device writes, and a region on a device that is
+ * not coherent each refused.
+ */
+static void
+check_regions(void)
+{
+	const uint64_t memory = make_memory((2 * SMALL_QUEUE_PAGES + 2) * ERX_PAGE_SIZE);
+	erx_device_spec_t spec = given_spec(make_memory(ERX_PAGE_SIZE), memory);
+	const uint8_t *const base = memories[memory].bytes;
+	const uint8_t header[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	const erx_device_t *device, *other;
+	erx_device_spec_t other_spec;
+	uint32_t first, second, region, again, foreign;
+	erx_virtio_gpu_mem_entry_t entry;
+	uint8_t *region_base;
+	uint64_t region_bytes;
+	rings_t rings;
+
+	spec.coherent = true;
+	device = open_given(&spec);
+	device_offers();
+	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, SMALL_BUFFER, &first) == ERX_OK);
+	CHECK(erx_device_region(device, 0, 0, &region) == ERX_EINVAL);
+	CHECK(erx_device_region(device, 0, ERX_PAGE_SIZE + 1, &region) == ERX_OK);
+	CHECK(erx_device_region(device, 0, ERX_PAGE_SIZE + 1, &again) == ERX_OK && again == region);
+	CHECK(erx_device_region(device, 0, ERX_PAGE_SIZE, &again) == ERX_EBUSY);
+	CHECK(erx_device_region(device, 1, memories[memory].size, &again) == ERX_ERANGE);
+	CHECK(erx_device_region_memory(region, &region_base, &region_bytes));
+	CHECK(region_base == base + SMALL_QUEUE_PAGES * ERX_PAGE_SIZE && region_bytes == 2 * ERX_PAGE_SIZE);
+	CHECK(!erx_device_region_memory(region + 1, &region_base, &region_bytes));
+	/* The refusal took nothing: the second queue starts right after the region, and fits only so. */
+	CHECK(erx_device_queue_create(device, 1, QUEUE_SIZE, SMALL_BUFFER, &second) == ERX_OK);
+	CHECK(negotiate(device) == ERX_OK);
+	rings = device_rings();
+	CHECK((const uint8_t *)rings.desc == base + (SMALL_QUEUE_PAGES + 2) * ERX_PAGE_SIZE);
+
+	const erx_device_piece_t named[] = { { .data = header, .length = sizeof(header) },
+	    { .names_region = true, .region = region }, { .device_writes = true, .length = 24 } };
+	/* The first queue's pool holds an earlier request's bytes: the post zeroes what the device writes. */
+	memset((uint8_t *)memories[memory].bytes + ERX_PAGE_SIZE, 0xa5, QUEUE_SIZE * SMALL_BUFFER);
+	CHECK(erx_device_post(device, first, 7, named, 3) == ERX_OK);
+	entry = posted_entry(base, 0, sizeof(header));
+	CHECK(entry.addr == (uint64_t)(uintptr_t)(base + SMALL_QUEUE_PAGES * ERX_PAGE_SIZE));
+	CHECK(entry.length == 2 * ERX_PAGE_SIZE && entry.padding == 0);
+	CHECK(posted_entry(base, 0, sizeof(header) + sizeof(entry)).addr == 0);
+	CHECK(posted_entry(base, 0, sizeof(header) + 2 * sizeof(entry) - 8).addr == 0);
+
+	other_spec = given_spec(make_memory(ERX_PAGE_SIZE), make_memory(ERX_PAGE_SIZE));
+	other_spec.coherent = true;
+	other_spec.lines[0] = GIVEN_LINE + 1;
+	other = open_given(&other_spec);
+	CHECK(erx_device_region(other, 0, ERX_PAGE_SIZE, &foreign) == ERX_OK && foreign != region);
+	const erx_device_piece_t stolen[] = { { .names_region = true, .region = foreign } };
+	CHECK(erx_device_post(device, first, 8, stolen, 1) == ERX_EINVAL);
+	const erx_device_piece_t unmade[] = { { .names_region = true, .region = foreign + 1 } };
+	CHECK(erx_device_post(device, first, 8, unmade, 1) == ERX_EINVAL);
+	const erx_device_piece_t written[] = { { .names_region = true, .device_writes = true, .region = region } };
+	CHECK(erx_device_post(device, first, 8, written, 1) == ERX_EINVAL);
+
+	/* A device that is not coherent has no region, and the refusal takes none of its memory. */
+	erx_device_spec_t plain_spec = given_spec(make_memory(ERX_PAGE_SIZE), make_memory(SMALL_QUEUE_PAGES * ERX_PAGE_SIZE));
+
+	plain_spec.lines[0] = GIVEN_LINE + 2;
+	const erx_device_t *const plain = open_given(&plain_spec);
+	device_offers();
+	CHECK(erx_device_region(plain, 0, ERX_PAGE_SIZE, &again) == ERX_ENOTSUP);
+	CHECK(erx_device_queue_create(plain, 0, QUEUE_SIZE, SMALL_BUFFER, &again) == ERX_OK);
+	CHECK(erx_device_region(plain, 1, ERX_PAGE_SIZE, &again) == ERX_ENOTSUP);
+}
+
 /* A holder's device, whose memory and window outlive each record over them. */
 static erx_device_spec_t kept;
 
@@ -813,6 +903,7 @@ check_physical(void)
 	CHECK(device != NULL && maps_done == maps_pushed);
 	device_offers();
 	CHECK(erx_device_queue_create(device, 0, QUEUE_SIZE, BUFFER_SIZE, &queue) == ERX_ENOTSUP);
+	CHECK(erx_device_region(device, 0, ERX_PAGE_SIZE, &queue) == ERX_ENOTSUP);
 	CHECK(memory_count == made && maps_done == maps_pushed);
 }
 
@@ -851,6 +942,7 @@ main(void)
 	passed &= run("queue", check_queue);
 	passed &= run("given", check_given);
 	passed &= run("driver restart", check_driver_restart);
+	passed &= run("regions", check_regions);
 	kept = given_spec(make_memory(ERX_PAGE_SIZE), make_memory(SMALL_QUEUE_PAGES * ERX_PAGE_SIZE));
 	passed &= run("former record", former_record);
 	passed &= run("next record", next_record);

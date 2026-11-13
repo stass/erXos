@@ -1616,7 +1616,7 @@ A driver finds its records with `erx_device_record:find(Role, Peripheral)`, whic
 each as a spec for `erx_device:open/1`: a `device` record's as the physical window and line
 and `clock => Hertz`,
 a `given` record's as `{object, Window, Offset, Size}`, `[{object, Line}]` and, for a nonzero
-size, `memory => {object, Memory, Bytes}`, and `clock => Hertz`; and `{ok, []}` when there is none. Words after a
+size, `memory => {object, Memory, Bytes}`, `clock => Hertz` and, for a COHERENT of 1, `coherent => true`; and `{ok, []}` when there is none. Words after a
 record's numbers are not the record's. Each number must be decimal within its field (64, 64,
 32 and 32 bits for a `device` record, 64 bits each for a `given` one but its clock's 32), or the records of that
 role and peripheral are refused with a stated reason
