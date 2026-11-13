@@ -1333,14 +1333,17 @@ it; git history is the record of completed work.
   It should fill `struct utsname` from `erx/abi.h`'s `ERX_UNAME_SYSNAME_STRING`, `ERX_UNAME_RELEASE_STRING` and
   `ERX_ARCH_MACHINE_STRING`, and the node name from the host part of the boot information's node name, which the shell's `uname`
   (`erlang/apps/erx_shell/src/erx_cmd_uname.erl`) reads as init's `-sname` or `-name`, with no value of its own; `docs/design-shell.md`, "Text commands".
-* [Low] musl, `musl/src/malloc/mallocng/glue.h`: `AT_RANDOM` is absent, so mallocng's secret comes from an address alone; `erx_entropy_read`
-  can supply its 16 bytes at program start.
-* [Medium] liberx, `liberx/backend/fiasco/libc_start.c` (`erx_fiasco_libc_start`): the auxiliary vector it gives musl holds
-  `AT_PHDR`, `AT_PHENT`, `AT_PHNUM` and `AT_PAGESZ` alone, so `getauxval(AT_HWCAP)` and `AT_HWCAP2` answer 0, where the C library
-  seam's table of `docs/design-runtime.md` serves them from the boot information page's `hwcap` and `hwcap2`. OpenSSL's
-  `armcap.c` reads its CPU features through them (`docs/design-crypto.md`, "Building OpenSSL"), so without them it takes its
-  software paths on every CPU. Add both entries from the boot information page, and from the startup message in a program.
-* [Medium] liberx, `erx_entropy_read` callers (`musl/src/internal/erxos/syscall.c` `entropy_take`, `otp/erts/emulator/nifs/erxos/erx_bytes_bif.c`,
+* [Medium] liberx, CPU feature words (`liberx/backend/core/boot_info.h`, `liberx/backend/fiasco/program_task.c`): musl's start
+  gives `AT_HWCAP` and `AT_HWCAP2` from the boot information page's `hwcap` and `hwcap2` (`libc_start.c`), but every page holds
+  0: the root's by `docs/design-stopgap.md`, "Boot information", and the domain library's because `erx_boot_inputs_t` has no
+  field for them. A program's are 0 too: the C library seam's table of `docs/design-runtime.md` serves them from the startup
+  message, which carries no feature words (`docs/design-abi.md`, "Program protocol"), and musl's start runs before the message
+  arrives. OpenSSL's `armcap.c` reads its CPU features through them (`docs/design-crypto.md`, "Building OpenSSL"), so it
+  takes its software paths on every CPU. Fill the root's page with the features the CPU has and the kernel enables and saves
+  for user mode (a bit for state the kernel does not save, such as SVE's, would let a program lose it), carry them into
+  each domain's page, and give a program its domain's from a source it has at start.
+* [Medium] liberx, `erx_entropy_read` callers (`musl/src/internal/erxos/syscall.c` `entropy_take`,
+  `liberx/backend/fiasco/libc_start.c` `random_fill`, `otp/erts/emulator/nifs/erxos/erx_bytes_bif.c`,
   `otp/erts/emulator/beam/erl_bif_unique.c`): each copies the bytes out of the UTCB's mr and zeroes them by hand, so a caller that forgets
   leaves them in the UTCB. One liberx call that reads into a caller's buffer and erases mr would make that hold for every caller.
 * [Medium] musl, `musl/src/thread/erxos/pthread_create_executor.c`, `musl/src/internal/erxos/syscall.c`: only the boot covers them. `test/guest/native_musl` needs the hosted

@@ -85,7 +85,7 @@ module Erx
     ERROR_PLACE = %r{(?:\A|[/ ])(?<place>#{PLACE}): }n
     Plan = Data.define(:runnable, :results)
     RUN_LINE = /\Aerx: libc-test: run (?<name>[A-Za-z0-9_.\/+-]+)\r?\z/n
-    END_LINE = /\Aerx: libc-test: end (?<name>[A-Za-z0-9_.\/+-]+) (?:(?<how>status|other|launch-refused|join-refused) (?<value>-?[0-9]+)|(?<how>timeout|fault|no-program))\r?\z/n
+    END_LINE = /\Aerx: libc-test: end (?<name>[A-Za-z0-9_.\/+-]+) (?:(?<how>status|other|launch-refused|join-refused) (?<value>-?[0-9]+)|(?<how>timeout|fault|no-program|no-entropy))\r?\z/n
     # The names make and the shell will read: anything else in a fetched tree or a path is refused.
     TEST_NAME = %r{\A[a-z]+/[A-Za-z0-9_+.-]+\z}
     SHELL_WORD = %r{\A[A-Za-z0-9_+.,=/:-]+\z}
@@ -183,6 +183,7 @@ module Erx
       in ['other', Integer => status] then Result.new(name: name, state: :failed, detail: "its start said #{status}")
       in ['timeout', _] then Result.new(name: name, state: :timed_out, detail: "still running after #{TASK_SECONDS} seconds")
       in ['no-program', _] then Result.new(name: name, state: :not_run, detail: 'its task came up without running the program')
+      in ['no-entropy', _] then Result.new(name: name, state: :not_run, detail: "the generator refused AT_RANDOM's bytes")
       in ['launch-refused', code] then Result.new(name: name, state: :not_run, detail: "the launch said #{code}")
       in ['join-refused', code] then Result.new(name: name, state: :unknown, detail: "the join said #{code}")
       end

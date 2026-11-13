@@ -87,7 +87,8 @@ log_line(void *context, const char *line, size_t length)
 /*
  * The first argument is the page's address. An address that names no page is refused before
  * anything reads through it; the reader then checks the copy's every field and string.
- * The view it fills is not kept: erx_runtime_main reads the copy again for ERTS.
+ * musl's start takes its CPU feature words from the view; nothing else of the view is
+ * kept, as erx_runtime_main reads the copy again for ERTS.
  */
 int64_t
 erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
@@ -96,6 +97,7 @@ erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 	const unsigned char *const page = (const unsigned char *)(uintptr_t)argument;
 	erx_boot_view_t view;
 	erx_boot_info_status_t status;
+	int64_t stopped;
 
 	if (argument == 0 || argument % ERX_PAGE_SIZE != 0) {
 		say("erx: the boot information page: the first thread's argument names no page\n");
@@ -110,8 +112,11 @@ erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 		say("\n");
 		return (ERX_FIASCO_TASK_STATUS_BOOT_PAGE);
 	}
-	erx_fiasco_libc_start(main);
-	return (ERX_FIASCO_TASK_STATUS_LIBC);
+	stopped = erx_fiasco_libc_start(main,
+	    (erx_fiasco_cpu_features_t){ .hwcap = view.info.hwcap, .hwcap2 = view.info.hwcap2 });
+	if (stopped == ERX_FIASCO_TASK_STATUS_ENTROPY)
+		say("erx: musl's start: the generator refused AT_RANDOM's bytes\n");
+	return (stopped);
 }
 
 /*

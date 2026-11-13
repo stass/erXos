@@ -8,8 +8,9 @@
  * whoever started it, the launcher's join for libc-test's programs, reads that; a
  * session's programs enter through program_task.c instead. What it prints
  * goes to the system console unchanged, through the service, not to a session's tty,
- * so only test programs use this entry. It is started with 0 and reads no boot information page; a domain's
- * runtime, which does, enters through domain_entry.c instead.
+ * so only test programs use this entry. It is started with 0 and reads no boot
+ * information page, so its AT_HWCAP and AT_HWCAP2 are 0; a domain's runtime, which
+ * reads one, enters through domain_entry.c instead.
  */
 
 #include <stdbool.h>
@@ -42,6 +43,5 @@ int64_t
 erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 {
 	(void)args;
-	erx_fiasco_libc_start(main);
-	return (ERX_FIASCO_TASK_STATUS_LIBC);
+	return (erx_fiasco_libc_start(main, (erx_fiasco_cpu_features_t){ 0 }));
 }

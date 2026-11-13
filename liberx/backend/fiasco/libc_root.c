@@ -30,5 +30,5 @@ erx_fiasco_root_main(void)
 		erx_fiasco_console_write(reason, length);
 		erx_fiasco_machine_off();
 	}
-	erx_fiasco_libc_root_start(main);
+	erx_fiasco_libc_root_start(main, (erx_fiasco_cpu_features_t){ 0 });
 }

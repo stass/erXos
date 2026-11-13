@@ -28,6 +28,15 @@ limit elf_dt_textrel i64 22
 limit elf_dt_flags i64 30
 limit elf_df_textrel u64 4
 limit elf_pn_xnum u16 65535
+# The auxiliary vector's keys a program's start gives musl (liberx/backend/fiasco/libc_start.c).
+limit elf_at_null u64 0
+limit elf_at_phdr u64 3
+limit elf_at_phent u64 4
+limit elf_at_phnum u64 5
+limit elf_at_pagesz u64 6
+limit elf_at_hwcap u64 16
+limit elf_at_random u64 25
+limit elf_at_hwcap2 u64 26
 bytes elf_magic 4 value 7f454c46
 layout erx_elf64_ehdr wire_le 8 64
   field e_ident u8 0 count 16

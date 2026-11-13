@@ -27,7 +27,7 @@ module Erx
                      -mno-outline-atomics].freeze
     CASES = %w[
       constructor main_stack printf_float mmap_flags tls join_churn detached_loop cond_broadcast timed_waits nanosleep_not_early mutex_contended
-      malloc_threads realloc_grows mmap_mprotect mprotect_same_runs mprotect_hole cancel refusals entropy
+      malloc_threads realloc_grows mmap_mprotect mprotect_same_runs mprotect_hole cancel refusals entropy auxv
     ].freeze
     CASE_SECONDS = 300
     # Each thread's deletion waits for a grace period, far longer across CPUs under TCG.

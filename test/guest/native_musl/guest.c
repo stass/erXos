@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/auxv.h>
 #include <sys/mman.h>
 #include <sys/random.h>
 #include <time.h>
@@ -45,6 +46,8 @@
 #define ENTROPY_ODD		13
 #define GETENTROPY_MAX		256
 #define ENTROPY_FILL		0xa5
+/* What musl reads through AT_RANDOM: its stack guard's 8 bytes, then mallocng's secret's 8. */
+#define AT_RANDOM_BYTES		16
 
 /* How many pages the backend's pool holds. */
 uint64_t	erx_fiasco_vm_free_pages(void);
@@ -674,6 +677,28 @@ case_entropy(void)
 	return (getentropy(bytes, GETENTROPY_MAX + 1) == -1 && errno == EIO);
 }
 
+/*
+ * The auxiliary vector holds AT_HWCAP and AT_HWCAP2, both 0 in a root that has no boot
+ * information page, and AT_RANDOM, which names 16 bytes from the generator, not all zero.
+ * getauxval sets errno to ENOENT for a key the vector lacks.
+ */
+static int
+case_auxv(void)
+{
+	const unsigned char *bytes;
+	unsigned char any = 0;
+
+	errno = 0;
+	if (getauxval(AT_HWCAP) != 0 || getauxval(AT_HWCAP2) != 0 || errno != 0)
+		return (0);
+	bytes = (const unsigned char *)getauxval(AT_RANDOM);
+	if (bytes == NULL || errno != 0)
+		return (0);
+	for (size_t at = 0; at < AT_RANDOM_BYTES; at++)
+		any |= bytes[at];
+	return (any != 0);
+}
+
 static int
 case_refusals(void)
 {
@@ -769,5 +794,6 @@ main(int argc, char **argv)
 	report("cancel", case_cancel());
 	report("refusals", case_refusals());
 	report("entropy", case_entropy());
+	report("auxv", case_auxv());
 	return (0);
 }

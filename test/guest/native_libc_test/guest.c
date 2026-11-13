@@ -16,6 +16,7 @@
  *   erx: libc-test: end NAME fault    the task faulted, and its crash frame came before this line
  *   erx: libc-test: end NAME timeout  it was still running at its deadline, and was stopped
  *   erx: libc-test: end NAME no-program the task came up without running the program
+ *   erx: libc-test: end NAME no-entropy the generator refused AT_RANDOM's bytes, and the program never ran
  *   erx: libc-test: end NAME other N  the task said N, which no exit can: musl's start came back
  *   erx: libc-test: end NAME launch-refused N  the launch said N, and nothing ran
  *   erx: libc-test: end NAME join-refused N    the join said N, and no status exists
@@ -134,6 +135,8 @@ test_run(uint32_t entry, const uint8_t *name, size_t length)
 		say(" fault");
 	} else if (status == ERX_FIASCO_TASK_STATUS_UP) {
 		say(" no-program");
+	} else if (status == ERX_FIASCO_TASK_STATUS_ENTROPY) {
+		say(" no-entropy");
 	} else {
 		say(status < 0 ? " other " : " status ");
 		say_number(status);

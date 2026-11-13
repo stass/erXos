@@ -118,13 +118,13 @@ What the sources say, read at the pins of [Sources](#sources):
   the runtime design".
 * No OpenSSL is fetched or built; `deps.lock` names none.
 * The Fiasco backend's start block (`liberx/backend/fiasco/libc_start.c`,
-  `erx_fiasco_libc_start`) gives musl an auxiliary vector of `AT_PHDR`,
-  `AT_PHENT`, `AT_PHNUM` and `AT_PAGESZ` alone, so `getauxval(AT_HWCAP)`
-  and `AT_HWCAP2` answer 0, although the boot information page carries
-  the feature words (`hwcap` and `hwcap2`, `abi/erx_abi.txt`) and the C
-  library seam's table serves them from it
-  ([design-runtime.md](design-runtime.md#the-c-library-seam)); the gap is
-  recorded in `TODO.md`.
+  `erx_fiasco_libc_start`) gives musl `AT_HWCAP` and `AT_HWCAP2` from the
+  boot information page's feature words (`hwcap` and `hwcap2`,
+  `abi/erx_abi.txt`), as the C library seam's table says
+  ([design-runtime.md](design-runtime.md#the-c-library-seam)), but every
+  page holds 0 ([design-stopgap.md](design-stopgap.md#boot-information))
+  and a program's words are 0, so `getauxval(AT_HWCAP)` answers 0 on every
+  CPU; the gap is recorded in `TODO.md`.
 * `erx_bytes:entropy/1` exists (`erlang/apps/erx/src/erx_bytes.erl`).
 
 ## Design

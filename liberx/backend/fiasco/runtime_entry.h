@@ -9,6 +9,7 @@
 #include "erx/abi_reader.h"
 #include "erx/core/boot_handoff.h"
 #include "liberx/backend/fiasco/boot_args.h"
+#include "liberx/backend/fiasco/libc_start.h"
 
 /* include/erx/pack.h's; that header's erx_boot_inputs_t is the first stage's, not the boot page's. */
 typedef struct erx_pack_view erx_pack_view_t;
@@ -22,9 +23,10 @@ const char	*erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, con
 	    const erx_pack_view_t *pack, const erx_boot_args_t *boot_args);
 
 /*
- * Enters musl's start path with program as main, on a stack of its own with a guard below
- * it (docs/design-stopgap.md, "musl over the backend"). Needs the root service running.
+ * Enters musl's start path with program as main and features as its AT_HWCAP and AT_HWCAP2,
+ * on a stack of its own with a guard below it (docs/design-stopgap.md, "musl over the
+ * backend"). Needs the root service running. A start that comes back ends the machine.
  */
-_Noreturn void	 erx_fiasco_libc_root_start(int (*program)(int, char **, char **));
+_Noreturn void	 erx_fiasco_libc_root_start(int (*program)(int, char **, char **), erx_fiasco_cpu_features_t features);
 
 #endif /* ERX_BACKEND_FIASCO_RUNTIME_ENTRY_H */

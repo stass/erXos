@@ -1137,8 +1137,14 @@ the `SYS_` names, so that a call not ported fails at link rather than at run tim
 Everything else is `ENOSYS` in the root and in a task; a program's descriptor rows above are the program layer's. No signal is delivered, so `pthread_cancel` returns 0 and acts at the target's next
 cancellation point rather than interrupting a call it is blocked in.
 
-`liberx/backend/fiasco/libc_start.c` calls `__libc_start_main` with one argument, no environment and the ELF headers,
-which `root.ld` and `task.ld` load first so that musl finds the TLS image. On a root, `libc_root_start.c` first moves off the image's
+`liberx/backend/fiasco/libc_start.c` calls `__libc_start_main` with one argument, no environment and an auxiliary
+vector of the ELF headers, which `root.ld` and `task.ld` load first so that musl finds the TLS image, the page size, the
+CPU feature words as `AT_HWCAP` and `AT_HWCAP2`, and `AT_RANDOM`. The feature words are the boot information page's in
+a runtime's root or domain and 0 where an entry has no page, a program's included. `AT_RANDOM` names 16 bytes of one
+`erx_entropy_read`, kept in the start block for the program's life, from which musl takes its stack guard and mallocng
+its secret; a start whose generator refuses them never runs the program, and stops the task with
+`ERX_FIASCO_TASK_STATUS_ENTROPY` or, in the root, says so and ends the machine. The vector's keys are `abi/formats/elf64.txt`'s,
+which a host test checks against musl's `elf.h`. On a root, `libc_root_start.c` first moves off the image's
 64 KiB start stack onto 1 MiB from the pool, with a reserved page below it that nothing commits, so an overrun that touches
 that page faults instead of overwriting `.bss`, and it ends the machine if the start comes back. A test's root that has no
 archive brings the service up in `libc_root.c`, and the system's root in `root.c`. `libc_task.c` is a task's `erx_task_main`,

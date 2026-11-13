@@ -21,9 +21,9 @@ class LibcTestTest < Minitest::Test
                     'erx: libc-test: end a/fail status 1', 'erx: libc-test: end a/fault fault',
                     'erx: libc-test: end a/hang timeout', 'erx: libc-test: end a/refused launch-refused -12',
                     'erx: libc-test: end a/join join-refused -22', 'erx: libc-test: end a/none no-program',
-                    'erx: libc-test: end a/odd other -3'],
-                   %w[a/pass a/fail a/fault a/hang a/refused a/join a/none a/odd])
-    assert_equal(%i[passed failed failed timed_out not_run unknown not_run failed], results.map(&:state))
+                    'erx: libc-test: end a/odd other -3', 'erx: libc-test: end a/seedless no-entropy'],
+                   %w[a/pass a/fail a/fault a/hang a/refused a/join a/none a/odd a/seedless])
+    assert_equal(%i[passed failed failed timed_out not_run unknown not_run failed not_run], results.map(&:state))
     assert_equal('exit status 1', results[1].detail)
     assert_equal('its task faulted', results[2].detail)
     assert_match(/-12/, results[4].detail)

@@ -190,7 +190,8 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	reason = library_up(handoff);
 	if (reason != NULL)
 		return (reason);
-	erx_fiasco_libc_root_start(main);
+	erx_fiasco_libc_root_start(main, (erx_fiasco_cpu_features_t){ .hwcap = erx_boot_info()->hwcap,
+	    .hwcap2 = erx_boot_info()->hwcap2 });
 }
 
 /*

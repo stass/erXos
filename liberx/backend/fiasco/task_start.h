@@ -16,6 +16,8 @@
 #define ERX_FIASCO_TASK_STATUS_LIBC	INT64_C(-3)
 /* The status of a domain's runtime whose boot information page the reader refused: no program ran. */
 #define ERX_FIASCO_TASK_STATUS_BOOT_PAGE	INT64_C(-4)
+/* The status of a program linked with musl whose generator refused AT_RANDOM's bytes: no program ran. */
+#define ERX_FIASCO_TASK_STATUS_ENTROPY	INT64_C(-5)
 
 /*
  * The program's entry, on the task's first thread, with the argument registers its
