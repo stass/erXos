@@ -131,7 +131,7 @@ module Erx
 
     # What each device-tree device of platform's record says differently from the board's
     # tree: a node the tree lacks, a compatible list that does not name the record's, or a
-    # base, size or line other than the node's. nodes maps a path to the node's
+    # base, size or line other than the node's; of a framebuffer row only a lacking node. nodes maps a path to the node's
     # compatible strings, reg cells, GIC interrupts cells and its bus's #address-cells and
     # #size-cells; ranges maps each bus's path to its ranges, each [bus address, CPU
     # address, size], which turn the node's bus address into the CPU's, as the record
@@ -143,6 +143,10 @@ module Erx
         path = device.fetch('path')
         node = nodes[path]
         next "#{path}: not in the device tree" unless node
+        # A framebuffer row's path is the node the firmware adds its framebuffer under and its
+        # window memory no node describes (docs/design-device-tree.md, "The framebuffer
+        # record"), so only the node is the board tree's to have.
+        next if device.fetch('role') == 'framebuffer'
         next "#{path}: compatible #{node.fetch(:compatible)} does not name #{device.fetch('compatible')}" unless
           node.fetch(:compatible).include?(device.fetch('compatible'))
 

@@ -81,7 +81,8 @@ class BoardTreeTest < Minitest::Test
     refute_match(/\d{4}-\d\d-\d\d/, notice)
   end
 
-  # The record's units, the mini UART's page, the PL011s', GENET's and the SD controllers', against the board's
+  # The record's units, the mini UART's page, the PL011s', GENET's, the SD controllers' and the
+  # framebuffer's, against the board's
   # tree: each device's path, compatible string, base on the CPU, size and line, as the
   # production image suite checks QEMU virt's record against QEMU's tree. GENET sits on
   # /scb and EMMC2 on /emmc2bus, whose two address cells and ranges differ from /soc's.
@@ -89,7 +90,8 @@ class BoardTreeTest < Minitest::Test
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
     built = Erx::BoardTree.build(root: ROOT, runner: runner, platform: PI, compiler: ENV.fetch('ERX_CLANG', 'clang'),
                                  revision: REVISION)
-    paths = PI.record.fetch('units').flat_map { |unit| unit.fetch('devices') }.map { |device| device.fetch('path') }
+    devices = PI.record.fetch('units').flat_map { |unit| unit.fetch('devices') }
+    paths = devices.reject { |device| device.fetch('role') == 'framebuffer' }.map { |device| device.fetch('path') }
     buses = paths.map { |path| File.dirname(path) }.uniq.to_h do |bus|
       [bus, { address_cells: cells(built.board, bus, '#address-cells').first, size_cells: cells(built.board, bus, '#size-cells').first }]
     end
@@ -105,6 +107,12 @@ class BoardTreeTest < Minitest::Test
       end]
     end
     assert_equal %w[/emmc2bus /scb /soc], buses.keys.sort
+    # The framebuffer row's node, /chosen, which the firmware adds its framebuffer under: of
+    # it the check asks only that the tree has it.
+    assert_equal ['/chosen'], devices.filter_map { |device| device.fetch('path') if device.fetch('role') == 'framebuffer' }
+    children, status = Open3.capture2e('fdtget', '-l', built.board, '/', stdin_data: '')
+    assert status.success?, children
+    nodes['/chosen'] = { compatible: [] } if children.split.include?('chosen')
     assert_equal [], Erx::BoardTree.device_problems(PI, nodes: nodes, ranges: ranges)
 
     # Seeded faults, on the mini UART's unit, GENET's and EMMC2's: a line one off, a base a page

@@ -310,6 +310,20 @@ of 2 KiB. Its PHY is at MDIO address 1, with no interrupt, on RGMII with
 the receive delay (`bcm2711-rpi-4-b.dts:198-208`); neither fact is in the
 record.
 
+**The framebuffer's unit.** The platform record's unit `framebuffer` is
+one row of the `framebuffer` role at `/chosen` for a `simple-framebuffer`
+child, with no line and no DMA
+([design-device-tree.md](design-device-tree.md#facts-into-records)). Its
+window is the memory between the RAM the firmware reports and the end of
+the card's `total_mem`, 76 MiB from `0x3b400000` to `0x40000000`: the
+1024 MiB `total_mem` less the 76 MiB of `gpu_mem`, which the firmware
+keeps for the VideoCore out of the RAM it reports, as bootstrap's memory
+line in the board pass shows. That the firmware puts the framebuffer
+there is unverified; the board pass's `framebuffer absent outside BASE
+SIZE` line, which names where it put it, settles it. The window meets no
+register window and no RAM of the record, which the manifest check proves
+of every framebuffer row, placed or not.
+
 **The SD controller.** The microSD slot is EMMC2,
 `/emmc2bus/mmc@7e340000`: `0x100` bytes of registers at bus address
 `0x7e340000`, which the bus's `ranges` put at `0xfe340000`, a level

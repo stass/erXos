@@ -56,11 +56,15 @@ class ManifestStopgapTest < Minitest::Test
   # The real platform with one more unit holding one device of this form, and
   # the manifest placing it.
   def with_extra_device(**fields)
+    [@source + "unit extra\n  placement \"extra\"\n  holder system\n", context(platform: with_extra_device_platform(**fields))]
+  end
+
+  # The real platform with the unit with_extra_device places.
+  def with_extra_device_platform(**fields)
     device = @platform.fetch('units').last.fetch('devices').first
                       .merge('path' => '/extra@0', 'placement_key' => 'extra', 'dma' => 'none', 'dma_memory' => 0)
                       .merge(fields.transform_keys(&:to_s))
-    platform = platform_with { |value| value.fetch('units') << { 'key' => 'extra', 'devices' => [device] } }
-    [@source + "unit extra\n  placement \"extra\"\n  holder system\n", context(platform: platform)]
+    platform_with { |value| value.fetch('units') << { 'key' => 'extra', 'devices' => [device] } }
   end
 
   def window(role:, partition: 1, device: BLOCK, holder: 'system', image: 'none')
@@ -222,7 +226,13 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   # The platform's DMA reservations, which property 4 counts beside the budgets.
-  def device_memory = @platform.fetch('units').sum { |unit| unit.fetch('devices').sum { |device| device.fetch('dma_memory') } }
+  # The memory of the devices of the units the development manifest places: an unplaced
+  # unit's device, such as QEMU virt's display unit, is in no device row and gets none.
+  def device_memory
+    placed = @source.scan(/^  placement "([^"]+)"$/).flatten
+    @platform.fetch('units').select { |unit| placed.include?(unit.fetch('key')) }
+             .sum { |unit| unit.fetch('devices').sum { |device| device.fetch('dma_memory') } }
+  end
 
   # Principal and baseline fit with the devices' reservations exactly, and one page
   # more does not.
@@ -497,6 +507,67 @@ class ManifestStopgapTest < Minitest::Test
   def test_a_network_device_is_admitted
     source, against = with_extra_device(role: 'network')
     admit(source, against)
+  end
+
+  # The display's device on QEMU virt, a virtio-mmio transport of the gpu role, is held as
+  # any unconfined DMA device is in a development build (docs/design-stopgap.md, "Device records").
+  def test_a_gpu_device_is_admitted
+    admit(*with_extra_device(role: 'gpu', dma: 'unconfined', flags: 1, dma_memory: 1_048_576))
+  end
+
+  # A framebuffer row (docs/design-device-tree.md, "The framebuffer record"): /chosen and
+  # simple-framebuffer, with no line or flags, its window whole pages clear of every
+  # register window: 0x7e000000, 4 MiB, above QEMU virt's devices.
+  FRAMEBUFFER = { role: 'framebuffer', path: '/chosen', compatible: 'simple-framebuffer', line: 0, flags: 0,
+                  base: 0x7e00_0000, size: 0x40_0000 }.freeze
+
+  def test_a_framebuffer_window_clear_of_every_register_window_is_admitted
+    admit(*with_extra_device(**FRAMEBUFFER))
+  end
+
+  # Seeded faults for check_framebuffer_windows: a window over a placed device's registers,
+  # the console UART's page, and one over the registers of a device no unit of the manifest
+  # places, which the firmware's tree could still hand the window's holder.
+  def test_a_framebuffer_window_meeting_registers_is_refused
+    console = @platform.fetch('units').first.fetch('devices').first
+    source, against = with_extra_device(**FRAMEBUFFER, base: console.fetch('base') & ~0xfff, size: 0x1000)
+    refused(Erx::Manifest::Invalid, 1, 'devices.base', source, against, message: /meets #{Regexp.escape(console.fetch('path'))}'s/)
+
+    source, = with_extra_device(**FRAMEBUFFER)
+    framebuffer = with_extra_device_platform(**FRAMEBUFFER)
+    unplaced = console.merge('path' => '/unplaced@7e3ff000', 'base' => 0x7e3f_f000, 'size' => 0x10,
+                             'placement_key' => 'unplaced')
+    framebuffer.fetch('units') << { 'key' => 'unplaced', 'devices' => [unplaced] }
+    refused(Erx::Manifest::Invalid, 1, 'devices.base', source, context(platform: framebuffer),
+            message: %r{meets /unplaced@7e3ff000's})
+
+    # The console's selector written as the codec's number is the same device-tree row.
+    numbered = with_extra_device_platform(**FRAMEBUFFER, base: console.fetch('base') & ~0xfff, size: 0x1000)
+    numbered.fetch('units').first.fetch('devices').first['selector'] = @codec.member('mf_selector', 'dt')
+    refused(Erx::Manifest::Invalid, 1, 'devices.base', source, context(platform: numbered), message: /meets/)
+
+    # A device starting at the window's end does not meet it.
+    after = with_extra_device_platform(**FRAMEBUFFER)
+    after.fetch('units') << { 'key' => 'after', 'devices' => [unplaced.merge('path' => '/after@7e400000', 'base' => 0x7e40_0000,
+                                                                             'placement_key' => 'after')] }
+    admit(source, context(platform: after))
+  end
+
+  # A window over the platform's RAM, and a framebuffer row no manifest places, which is
+  # checked all the same.
+  def test_a_framebuffer_window_meeting_ram_or_unplaced_is_refused
+    refused(Erx::Manifest::Invalid, 1, 'devices.base', *with_extra_device(**FRAMEBUFFER, base: @platform.fetch('ram_first')),
+            message: /RAM/)
+    unplaced = with_extra_device_platform(**FRAMEBUFFER, size: 0x40_0800)
+    refused(Erx::Manifest::Invalid, 'context', 'platform.devices', @source, context(platform: unplaced), message: /framebuffer/)
+  end
+
+  def test_a_framebuffer_row_of_another_shape_is_refused
+    [{ path: '/framebuffer@0' }, { compatible: 'virtio,mmio' }, { line: 40 }, { flags: 1 },
+     { size: 0x40_0800 }, { base: 0x7e00_0800 }, { dma: 'unconfined', dma_memory: 4096 }].each do |change|
+      refused(Erx::Manifest::Invalid, 'context', 'platform.devices', *with_extra_device(**FRAMEBUFFER, **change),
+              message: /framebuffer/)
+    end
   end
 
   def test_a_vault_window_is_refused

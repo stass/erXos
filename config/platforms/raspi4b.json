@@ -219,6 +219,28 @@
           "placement_key": "sd"
         }
       ]
+    },
+    {
+      "key": "framebuffer",
+      "devices": [
+        {
+          "selector": "dt",
+          "role": "framebuffer",
+          "path": "/chosen",
+          "bridge": "",
+          "base": 994050048,
+          "size": 79691776,
+          "line": 0,
+          "compatible": "simple-framebuffer",
+          "bus": 0,
+          "device": 0,
+          "function": 0,
+          "dma": "none",
+          "flags": 0,
+          "dma_memory": 0,
+          "placement_key": "framebuffer"
+        }
+      ]
     }
   ]
 }

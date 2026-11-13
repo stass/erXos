@@ -477,6 +477,11 @@ module Erx
                  'image' => 'images', 'domain' => 'domains' }.freeze
       # The compatible string of the one device whose row carries a clock (device_clock).
       PL011_COMPATIBLE = 'arm,pl011'
+      # What a framebuffer row names (docs/design-device-tree.md, "The framebuffer record"):
+      # the node whose children the root searches, and the compatible string the one child
+      # it takes must carry.
+      FRAMEBUFFER_PATH = '/chosen'
+      FRAMEBUFFER_COMPATIBLE = 'simple-framebuffer'
 
       def initialize(source, codec:, context:, planner:, consumers:)
         @source = source
@@ -813,17 +818,7 @@ module Erx
           first = rows.fetch('devices').size
           invalid('platform unit has no devices', 'context', 'platform.units') if unit.fetch('devices').empty?
           unit.fetch('devices').sort_by { |device| device.fetch('placement_key').b }.each do |device|
-            unless device.is_a?(Hash)
-              invalid('invalid checked device row', 'context', 'platform.devices')
-            end
-            normalized = device.dup
-            %w[selector role dma].each do |field|
-              type = { 'selector' => 'mf_selector', 'role' => 'mf_device_role', 'dma' => 'mf_dma' }.fetch(field)
-              normalized[field] = @codec.member(type, normalized.fetch(field)) if normalized[field].is_a?(String)
-            end
-            normalized['flags'] = normalized.fetch('flags', 0)
-            normalized['dma_memory'] = normalized.fetch('dma_memory', 0)
-            normalized.merge!(device_window(normalized))
+            normalized = platform_device(device)
             normalized['clock'] = device_clock(normalized)
             check_device(normalized)
             rows.fetch('devices') << normalized
@@ -831,6 +826,76 @@ module Erx
           rows.fetch('units') << { 'name' => record.name, 'holder' => holder,
                                    'devices' => { 'table' => 'devices', 'first' => first, 'count' => rows.fetch('devices').size - first } }
         end
+        check_framebuffer_windows(by_key.values.flat_map { |unit| unit.fetch('devices') })
+      end
+
+      # A framebuffer row's shape (docs/design-device-tree.md, "The framebuffer record"): a
+      # device-tree row at FRAMEBUFFER_PATH for FRAMEBUFFER_COMPATIBLE's node, with no DMA, no
+      # line and no flags, whose base and size are its window, whole pages, since the root maps
+      # the framebuffer by the page and the tree chooses where in the window it lies.
+      def check_framebuffer(device)
+        return unless device.fetch('role') == @codec.member('mf_device_role', 'framebuffer')
+
+        unless device.fetch('selector') == @codec.member('mf_selector', 'dt') && device['path'] == FRAMEBUFFER_PATH &&
+               device['compatible'] == FRAMEBUFFER_COMPATIBLE
+          invalid("a framebuffer row names #{FRAMEBUFFER_PATH} and #{FRAMEBUFFER_COMPATIBLE}", 'context', 'platform.devices')
+        end
+        unless device.fetch('dma') == @codec.member('mf_dma', 'none') && device.fetch('line').zero? && device.fetch('flags').zero?
+          invalid('a framebuffer row has no DMA, line or flags', 'context', 'platform.devices')
+        end
+        page = @codec.constant('page_size')
+        return if (device.fetch('base') % page).zero? && (device.fetch('size') % page).zero?
+
+        invalid('a framebuffer window is whole pages', 'context', 'platform.devices')
+      end
+
+      # Property 1 for a framebuffer's window: the root maps for the window's holder whatever
+      # pages of it the firmware's tree names, so a window that meets another device-tree
+      # device's register window of the platform, placed or not, would let the tree hand that
+      # holder another device's registers, and one that meets the platform's RAM would let it
+      # hand over memory the root allocates. Every framebuffer row of roster, the platform
+      # record's every device, is checked, placed or not, so a wrong window fails before a
+      # manifest places it; each row is read as a placed one is (platform_device), so a field
+      # the record writes as the codec's number compares as its name does. Windows are
+      # half-open ranges, [base, limit).
+      def check_framebuffer_windows(roster)
+        devices = roster.map { |device| platform_device(device) }
+        framebuffer = @codec.member('mf_device_role', 'framebuffer')
+        device_tree = @codec.member('mf_selector', 'dt')
+        devices.select { |device| device.fetch('role') == framebuffer }.each do |row|
+          check_framebuffer(row)
+          base = row.fetch('base')
+          limit = base + row.fetch('size')
+          invalid('a framebuffer window meets the platform\'s RAM', 1, 'devices.base') if meets_ram?(base, limit)
+          devices.each do |device|
+            next if device.fetch('role') == framebuffer || device.fetch('selector') != device_tree
+            next unless device.fetch('base') < limit && base < device.fetch('base') + device.fetch('size')
+
+            invalid("a framebuffer window meets #{device['path']}'s registers", 1, 'devices.base')
+          end
+        end
+      end
+
+      # Whether [base, limit) meets the RAM the platform record states.
+      def meets_ram?(base, limit)
+        first, bytes = @context.platform.values_at('ram_first', 'ram_bytes')
+        invalid('checked platform needs its RAM', 'context', 'platform.ram_first') unless
+          first.is_a?(Integer) && bytes.is_a?(Integer)
+        base < first + bytes && first < limit
+      end
+
+      # A platform record's device row as the device table holds it: its selector, role and
+      # DMA kind as the codec's numbers, flags and DMA memory defaulted to 0, and a
+      # device-tree row's window and line checked integers (device_window).
+      def platform_device(device)
+        invalid('invalid checked device row', 'context', 'platform.devices') unless device.is_a?(Hash)
+        normalized = device.dup
+        { 'selector' => 'mf_selector', 'role' => 'mf_device_role', 'dma' => 'mf_dma' }.each do |field, type|
+          normalized[field] = @codec.member(type, normalized.fetch(field)) if normalized[field].is_a?(String)
+        end
+        normalized['flags'] = normalized.fetch('flags', 0)
+        normalized['dma_memory'] = normalized.fetch('dma_memory', 0)
+        normalized.merge(device_window(normalized))
       end
 
       # A device-tree device's register window and interrupt line, which the platform record

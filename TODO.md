@@ -613,6 +613,33 @@ it; git history is the record of completed work.
   configuration-change interrupt without reading `events_read` or writing `events_clear` (virtio 1.2, 5.7.4.2),
   so a change of display size is not followed.
 * [Low] `erlang/apps/erx_fb/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
+  NIF cannot map an area into the window yet. `erx_virtio_gpu_core` builds every request but
+  `RESOURCE_ATTACH_BACKING`, which names the screen image's region with `{out, {region, R}}`; the driver process,
+  the development manifest's display domain and the QEMU screenshot case come next.
+* [High] the display domain's rows (`config/manifest/qemu-virt-development.txt`, `raspi4b-development.txt`;
+  [design-stopgap.md](docs/design-stopgap.md#device-records)): the platform records carry the display unit
+  (QEMU virt's virtio-gpu at `/virtio_mmio@a001e00`, 9 MiB of DMA memory) and the Pi's `framebuffer` unit, and no
+  manifest places them. A display domain row needs a display boot script of the domain release (`erx_display`
+  is in `ErlangApps::UNRELEASED`, the driver's application with it), and on QEMU virt room: the development
+  manifest leaves 6.5 MiB of `root_memory` unpromised, the gpu's 9 MiB of DMA memory raises the contiguous pool
+  from 2 MiB to 16 MiB, and the domain's own budget comes on top, so the machine's 256 MiB of RAM grows. The
+  harness pins the keyboard and tablet to the gpu's page (`QemuPlan::DISPLAY_TRANSPORTS`, .14 and .13), and the
+  domain library refuses a configured holder of a unit whose devices share a page (`dom_boot_view.c`,
+  `boot_devices`), so the display domain holds its input devices only once the give is per unit; QEMU virt's four
+  transport pages are the spare's, the display's, the network device's and the disks'.
+* [Medium] `tools/lib/erx/manifest.rb`, `check_framebuffer_windows`: a framebuffer window is checked against the
+  platform record's register windows and RAM, not against the board tree's every `reg` and `ranges` (the GIC, the
+  local peripherals, PCIe windows), which the record does not list; checking it against the board's own tree
+  (`board_tree.rb`) would make the window's isolation hold by construction. `dom_boot_view.c` reads a framebuffer
+  row's line 0 as a line, which only matters once another row records line 0.
+* [High] the root's framebuffer record (`liberx/backend/fiasco/runtime_entry.c`, `liberx/backend/core/boot_manifest.c`,
+  `liberx/system/dom_boot_view.c`; [design-device-tree.md](docs/design-device-tree.md#facts-into-records)): a
+  `framebuffer` row is in no row of `erx_device_kinds`, so the root asks the tree nothing for it, prints no
+  `framebuffer` line and writes no `-erx framebuffer` record, and the domain library refuses a configured domain
+  that holds one ("a device of a kind no runtime drives"). The reader, `erx_dt_framebuffer`, is built and tested;
+  what remains is the row's ask and line, the physical object over the framebuffer's pages, the record and its
+  size in `include/erx/boot_words.h`, and its reader in `erx_device_record`.
+* [Low] `erlang/apps/erx_display/src/erx_virtio_gpu_core.erl`: `mode/2` bounds scanout 0 only by the memory given;
   bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
 * [Medium] chokepoints, regions ([design-display.md](docs/design-display.md), the `wrap/4` row of the chokepoint
   table): nothing in the build limits who calls `erx_region_view` (only `erx_memdraw_nif.c`) or

@@ -45,10 +45,19 @@
       ]
     },
     {
+      "key": "display",
+      "devices": [
+        { "selector": "dt", "role": "gpu", "path": "/virtio_mmio@a001e00", "bridge": "",
+          "base": 167779840, "size": 512, "line": 63,
+          "compatible": "virtio,mmio", "bus": 0, "device": 0, "function": 0,
+          "dma": "unconfined", "flags": 1, "dma_memory": 9437184, "placement_key": "display" }
+      ]
+    },
+    {
       "key": "spare",
       "devices": [
-        { "selector": "dt", "role": "network", "path": "/virtio_mmio@a001e00", "bridge": "",
-          "base": 167779840, "size": 512, "line": 63,
+        { "selector": "dt", "role": "network", "path": "/virtio_mmio@a000e00", "bridge": "",
+          "base": 167775744, "size": 512, "line": 55,
           "compatible": "virtio,mmio", "bus": 0, "device": 0, "function": 0,
           "dma": "none", "flags": 0, "dma_memory": 0, "placement_key": "spare" }
       ]

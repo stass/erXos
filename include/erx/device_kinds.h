@@ -18,7 +18,9 @@
  * record's role word and PERIPHERAL the CMSIS-SVD peripheral the device
  * NIF opens. The root's reader (liberx/backend/core/boot_manifest.c) and
  * the domain library's boot view (liberx/system/dom_boot_view.c) both read
- * this table, so a further kind is one more row here.
+ * this table, so a further kind is one more row here. A framebuffer row has
+ * none: its record is the root's framebuffer record
+ * (docs/design-device-tree.md, "Facts into records").
  */
 typedef struct erx_device_kind {
 	uint32_t	 role;		/* ERX_MF_DEVICE_ROLE_* */
@@ -32,6 +34,7 @@ static const erx_device_kind_t erx_device_kinds[] = {
 	{ ERX_MF_DEVICE_ROLE_NETWORK, "virtio,mmio", "net", "virtio_mmio" },
 	{ ERX_MF_DEVICE_ROLE_NETWORK, "brcm,bcm2711-genet-v5", "net", "genet" },
 	{ ERX_MF_DEVICE_ROLE_BLOCK, "brcm,bcm2711-emmc2", "block", "sdhci" },
+	{ ERX_MF_DEVICE_ROLE_GPU, "virtio,mmio", "gpu", "virtio_mmio" },
 };
 
 #define ERX_DEVICE_KINDS_COUNT	(sizeof(erx_device_kinds) / sizeof(erx_device_kinds[0]))

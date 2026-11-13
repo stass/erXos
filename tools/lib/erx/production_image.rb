@@ -679,9 +679,9 @@ module Erx
       # The names of the units the root gives device records. Each device of a held unit whose
       # role and compatible string match a row of boot_manifest.c's device_kinds table gets
       # one, and the manifest names each such unit after its row's record role word ("block",
-      # "net"), with one device in its placement; the host link's UART gets one too. A host
+      # "net", "gpu"), with one device in its placement; the host link's UART gets one too. A host
       # test keeps this list and that table's role words the same.
-      RECORD_UNITS = ['block', 'net', HOSTLINK_UNIT].freeze
+      RECORD_UNITS = ['block', 'net', 'gpu', HOSTLINK_UNIT].freeze
       # What a plain erx.arg word used to break: it joins the last flag's arguments.
       CONSOLE_PLAIN_WORD = 'erx.arg=plainword'
       # An output longer than any FIFO, so the driver writes it through the transmit check.
