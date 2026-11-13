@@ -405,6 +405,8 @@ module Erx
                    name: 'fuzz-erx-genet', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_blk_table.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-blk-table', deadline: 300, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_blk_sd.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-blk-sd', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_code_request.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-code-request', deadline: 660, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_9p_grammar.rb'), '--seed', options.fetch(:seed).to_s],
