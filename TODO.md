@@ -618,7 +618,7 @@ it; git history is the record of completed work.
   (`DisplayDomain.manifest`: the site manifest, an eighth of a CPU, 24 MiB and the unit). The domain release has
   the display boot script (`ProductionImage::DOMAIN_BOOTS`); the development manifest's row needs a CPU grant,
   which the system share's reserve has no room for (storage, network and web take its 2,250 mcpu), and on QEMU
-  virt room: the development manifest leaves 6.5 MiB of `root_memory` unpromised, the gpu's 9 MiB of DMA memory,
+  virt room: the development manifest leaves 2.5 MiB of `root_memory` unpromised, the gpu's 9 MiB of DMA memory,
   charged to the system's budget, raises the contiguous pool from 2 MiB to 16 MiB, and the domain's own budget
   comes on top, so the machine's 256 MiB of RAM grows. The display domain holds its keyboard and tablet only
   once the give is per unit and the unit is the transport page (security residuals, `boot_devices`); QEMU
@@ -899,11 +899,20 @@ it; git history is the record of completed work.
   build-time rule has no site yet; with the release check (M11), refuse a release manifest that grants a facet of
   the `web` interface, with a seeded violation.
 * [Medium] `config/manifest/qemu-virt-development.txt`, the web domain's row: its 24 MiB and its grant, a quarter
-  of one CPU, are estimates, and so are the 256 MiB machine's `root_memory` (184.75 MiB) and the system
+  of one CPU, are estimates, and so are the 256 MiB machine's `root_memory` (180.75 MiB) and the system
   principal's 131 MiB that make room for it; no boot-time or memory figure has been recorded for a boot with the
   web domain. Measure the domain with `Footprint` at rest and with the host tool's four connections open, the
   boot's time to the shell before and after the web domain (`tools/erx bench`), and size the row and
   `root_memory` from the figures.
+* [Medium] `config/platforms/qemu-virt.json`, `config/manifest/qemu-virt-development.txt`: the boot archive
+  outgrows the 256 MiB development machine. The archive and `root_memory` must fit RAM less `fiasco_reserve`
+  less what the boot keeps (`RootStartup.check_archive`), and the programs suite's test archive, the largest on
+  that machine, grows by about 1.2 MiB a day of landings (one day's measurement). Lowering `root_memory` again
+  can take at most the 2.5 MiB it leaves unpromised before it takes memory from budgets, which the budget-sum
+  check refuses, so that cut can be made only once more. The lasting fix is more RAM for QEMU virt's
+  development machine: each 32 MiB gives the root about 30 MiB (Fiasco's kernel memory takes about 6%), so
+  `ram_bytes`, `fiasco_reserve`, `root_memory` and the measured figures in the manifest comments and
+  [design-stopgap.md](docs/design-stopgap.md#the-phase-1-manifest-check) move together.
 * [Medium] `erlang/apps/erx_hostlink/src/erx_hostlink_web.erl`, `tools/lib/erx/web_server.rb`,
   [The host tool's front end](docs/design-web.md#the-host-tools-front-end): a restart of the web domain ends the
   system domain's facet with the relay (`exit(shutdown)`), and the session drops the facet's number without

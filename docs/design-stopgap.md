@@ -429,7 +429,7 @@ at 224 MiB it is 6% rounded up, as Fiasco rounds it, to 14 MiB (a boot log's
 the same rule gives 16 MiB. QEMU `virt`'s `fiasco_reserve` is 16 MiB. The rule leaves the
 archive out: `bootstrap` reserves it whole and it is never released, so a
 manifest's `root_memory` must leave it room below RAM less the reserve; QEMU
-`virt`'s 184.75 MiB leaves it and the root's image 55.25 MiB. If either is wrong, the pool fails at boot with a
+`virt`'s 180.75 MiB leaves it and the root's image 59.25 MiB. If either is wrong, the pool fails at boot with a
 diagnostic. A platform record without these numbers is not admitted.
 
 The packer then holds the archive to that room (`RootStartup.check_archive`, once the archive is

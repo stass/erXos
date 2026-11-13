@@ -13,10 +13,10 @@
 # Leaving the web domain out removes its share, runtime limits, limits and domain
 # records, its relay service and the system domain's facet of it, and shrinks what
 # the system principal holds by the room they took: its memory and root_memory each
-# lose the web limits' 24 MiB and outer 1 MiB, to 106 MiB and 159.75 MiB; its domain
+# lose the web limits' 24 MiB and outer 1 MiB, to 106 MiB and 155.75 MiB; its domain
 # quota and max_domains each lose one domain, to 3; and max_connections loses the web
 # domain's system connection, to 10. The 25 MiB root_memory gives up stays outside
-# the root's memory, so RAM less root_memory is 96.25 MiB; no domain gains it.
+# the root's memory, so RAM less root_memory is 100.25 MiB; no domain gains it.
 #
 # The image's build admits this file with the same manifest check as the development
 # manifest, so the check proves what the website ships.
@@ -174,7 +174,7 @@ machine
   console "/pl011@9000000"
   hostlink "/pl011@9040000"
   platform "qemu-virt"
-  root_memory 167510016
+  root_memory 163315712
   system_baseline 48234496
   system_share @share.system
   users_share @share.users
