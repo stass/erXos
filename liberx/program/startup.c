@@ -85,19 +85,27 @@ read_signals(erx_prog_signals_iter_t it, erx_prog_sigset_t *set)
 
 /*
  * The first descriptor liberx cannot set up, or false when every one is null,
- * a pipe's read or write end or a mem range (fd.h).
+ * a pipe's read or write end or a mem range (fd.h), of which a program has at
+ * most one (docs/design-programs.md#the-startup-message).
  */
 static bool
 find_unsupported_fd(erx_prog_fds_iter_t it, uint16_t *fd)
 {
 	erx_prog_fd_entry_t entry;
+	bool mem_seen = false;
 
 	while (erx_prog_fds_next(&it, &entry)) {
 		switch (entry.descriptor.which) {
 		case ERX_PROG_DESCRIPTOR_NULL:
 		case ERX_PROG_DESCRIPTOR_PIPE_WRITE:
 		case ERX_PROG_DESCRIPTOR_PIPE_READ:
+			break;
 		case ERX_PROG_DESCRIPTOR_MEM:
+			if (mem_seen) {
+				*fd = entry.fd;
+				return (true);
+			}
+			mem_seen = true;
 			break;
 		default:
 			*fd = entry.fd;

@@ -19,10 +19,12 @@
 #include <strings.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 #include <time.h>
 
 #include "futex.h"
+#include "kstat.h"
 #include "pthread_impl.h"
 #include "syscall.h"
 
@@ -161,12 +163,18 @@ mmap_call(uint64_t addr, uint64_t size, int prot, int flags)
 	return ((long)base);
 }
 
+/* A length of 0, one that overflows rounded to pages, an address off a page and an end past 2^64 are EINVAL. */
 static long
 munmap_call(uint64_t addr, uint64_t size)
 {
-	if (size == 0 || size > UINT64_MAX - PAGE_MASK)
+	uint64_t end;
+
+	if (size == 0 || size > UINT64_MAX - PAGE_MASK || (addr & PAGE_MASK) != 0)
 		return (-EINVAL);
-	return (errno_of(erx_vm_release(ERX_CAP_SELF, addr, (size + PAGE_MASK) & ~PAGE_MASK)));
+	size = (size + PAGE_MASK) & ~PAGE_MASK;
+	if (__builtin_add_overflow(addr, size, &end))
+		return (-EINVAL);
+	return (errno_of(erx_vm_release(ERX_CAP_SELF, addr, size)));
 }
 
 static long
@@ -332,6 +340,55 @@ sigprocmask_call(sigset_t *old, size_t size)
 	return (0);
 }
 
+/* Whether the call is one the descriptor seam is offered (libc_start.h). */
+static int
+seam_offered(long n, long flags)
+{
+	switch (n) {
+	case SYS_read:
+	case SYS_readv:
+	case SYS_write:
+	case SYS_writev:
+	case SYS_close:
+	case SYS_ppoll:
+	case SYS_pselect6:
+	case SYS_pipe2:
+	case SYS_dup3:
+	case SYS_fcntl:
+	case SYS_lseek:
+	case SYS_pread64:
+	case SYS_pwrite64:
+	case SYS_fstat:
+	case SYS_ioctl:
+	case SYS_munmap:
+		return (1);
+	case SYS_mmap:
+		return (!(flags & MAP_ANONYMOUS) || (flags & MAP_FIXED));
+	default:
+		return (0);
+	}
+}
+
+/* fstat through the seam, whose struct stat is copied into the layout musl's fstatat reads. */
+static long
+seam_fstat(const long args[6], long *result)
+{
+	struct kstat *const out = (struct kstat *)args[1];
+	struct stat st;
+	const long with_stat[6] = { args[0], (long)&st };
+
+	if (!erx_fiasco_libc_fd(SYS_fstat, with_stat, result))
+		return (0);
+	if (*result == 0)
+		*out = (struct kstat){ .st_dev = st.st_dev, .st_ino = st.st_ino, .st_mode = st.st_mode,
+		    .st_nlink = st.st_nlink, .st_uid = st.st_uid, .st_gid = st.st_gid, .st_rdev = st.st_rdev,
+		    .st_size = st.st_size, .st_blksize = st.st_blksize, .st_blocks = st.st_blocks,
+		    .st_atime_sec = st.st_atim.tv_sec, .st_atime_nsec = st.st_atim.tv_nsec,
+		    .st_mtime_sec = st.st_mtim.tv_sec, .st_mtime_nsec = st.st_mtim.tv_nsec,
+		    .st_ctime_sec = st.st_ctim.tv_sec, .st_ctime_nsec = st.st_ctim.tv_nsec };
+	return (1);
+}
+
 /* The program is the machine's one process, and it has no users to tell apart. */
 #define ROOT_PID	1
 #define ROOT_PARENT	0
@@ -341,9 +398,14 @@ sigprocmask_call(sigset_t *old, size_t size)
 long
 __erx_syscall(long n, long a, long b, long c, long d, long e, long f)
 {
-	/* Only mmap passes these two, its descriptor and offset, and only anonymous memory is offered. */
-	(void)e;
-	(void)f;
+	/* The seam is offered all six arguments as the call passed them; musl's rows below read at most four. */
+	const long args[6] = { a, b, c, d, e, f };
+	long result;
+
+	if (seam_offered(n, d)) {
+		if (n == SYS_fstat ? seam_fstat(args, &result) : erx_fiasco_libc_fd(n, args, &result))
+			return (result);
+	}
 	switch (n) {
 	case SYS_futex:
 		return (futex_call((volatile int *)a, (int)b, (int)c, (const struct timespec *)d));

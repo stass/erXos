@@ -86,7 +86,8 @@ ssize_t	erx_prog_fd_write(int fd, const void *buf, size_t len);
  * offset 0, a len of 1 to the range's bytes and prot within PROT_READ |
  * PROT_WRITE, *addr is the address the session mapped it at.  0, or
  * -EBADF for an empty slot, -ENODEV for an object of another kind, -EINVAL
- * for any other flags, offset or len, and -EACCES for any other prot.
+ * for any other flags, offset or len, -ENOTSUP for PROT_EXEC, since only the
+ * loader maps code, and -EACCES for any other prot.
  */
 int	erx_prog_fd_mmap(int fd, size_t len, int prot, int flags, off_t offset, void **addr);
 /*
@@ -96,6 +97,32 @@ int	erx_prog_fd_mmap(int fd, size_t len, int prot, int flags, off_t offset, void
  * with FreeBSD is unverified, TODO.md).  Every other field is 0.
  */
 int	erx_prog_fd_fstat(int fd, struct stat *st);
+
+/*
+ * lseek of slot fd, whose offset and whence nothing reads: 0 for null, as
+ * for a device with no position, -ESPIPE for a pipe end or a mem range, and
+ * -EBADF for an empty slot.
+ */
+off_t	erx_prog_fd_lseek(int fd);
+/* ioctl of slot fd: -ENOTTY, since no kind is a terminal, or -EBADF for an empty slot. */
+int	erx_prog_fd_ioctl(int fd);
+
+/*
+ * munmap in a program (docs/design-programs.md#the-startup-message).  Its own
+ * checks come first: a len of 0, a len that overflows when rounded up to
+ * whole pages, an addr off a page boundary and an end, addr plus the rounded
+ * len, past 2^64 are -EINVAL.  Then, while a descriptor holds the mem range,
+ * a range inside it returns 0 and unmaps nothing, since the mapping is the
+ * session's, and one that meets it any other way is -EINVAL; any other range
+ * is released, 0, or -EINVAL when the release fails.
+ */
+int	erx_prog_fd_munmap(uint64_t addr, uint64_t len);
+/*
+ * Whether an mmap with MAP_FIXED of len bytes at addr may run: 0, or -EINVAL
+ * when the range meets the held mem range or its end passes 2^64, so the
+ * descriptor's mmap never returns an address that holds something else.
+ */
+int	erx_prog_fd_fixed_check(uint64_t addr, uint64_t len);
 
 /*
  * The executor's: the end a report or a doorbell's label names by pipe and

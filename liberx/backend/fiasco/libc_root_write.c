@@ -10,6 +10,7 @@
  * runtime_main.c's main ahead of the program's.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "liberx/backend/fiasco/console.h"
@@ -19,4 +20,14 @@ void
 erx_fiasco_libc_write(const void *bytes, size_t length)
 {
 	erx_fiasco_console_write(bytes, length);
+}
+
+/* No descriptor table: musl's own rows answer every call (libc_start.h). */
+bool
+erx_fiasco_libc_fd(long n, const long args[6], long *result)
+{
+	(void)n;
+	(void)args;
+	(void)result;
+	return (false);
 }

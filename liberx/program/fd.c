@@ -31,6 +31,7 @@
 #include <sys/types.h>
 
 #include "erx/abi.h"
+#include "liberx/backend/api.h"
 #include "liberx/program/fd.h"
 #include "liberx/program/pages.h"
 #include "liberx/program/pipe.h"
@@ -59,6 +60,13 @@ mem_of(erx_prog_obj_t *obj)
 	return ((erx_prog_mem_t *)obj);
 }
 
+/*
+ * The program's one mem range while some slot or call holds it, else NULL: table_lock's.
+ * The startup plan accepts at most one mem descriptor (startup.c), so one pointer is the
+ * whole of what munmap and a fixed mmap are checked against.
+ */
+static erx_prog_mem_t *mem_held;
+
 /* Takes table_lock; a thread that holds an end's lock has broken the lock order and stops. */
 static void
 table_take(void)
@@ -85,7 +93,8 @@ obj_hold(erx_prog_obj_t *obj)
 		}
 		return;
 	case ERX_PROG_OBJ_MEM:
-		obj->refs++;
+		if (obj->refs++ == 0)
+			mem_held = mem_of(obj);
 		return;
 	}
 }
@@ -112,7 +121,10 @@ obj_drop(erx_prog_obj_t *obj)
 		obj->prev = obj->next = NULL;
 		return (true);
 	case ERX_PROG_OBJ_MEM:
-		return (--obj->refs == 0);
+		if (--obj->refs != 0)
+			return (false);
+		mem_held = NULL;
+		return (true);
 	}
 	return (false);
 }
@@ -351,6 +363,9 @@ mem_map_check(const erx_prog_mem_t *mem, size_t len, int prot, int flags, off_t 
 {
 	if (flags != MAP_SHARED || offset != 0 || len == 0 || len > mem->bytes)
 		return (-EINVAL);
+	/* Only the loader maps code (docs/design-programs.md, P10). */
+	if ((prot & PROT_EXEC) != 0)
+		return (-ENOTSUP);
 	if ((prot & ~(PROT_READ | PROT_WRITE)) != 0)
 		return (-EACCES);
 	return (0);
@@ -400,6 +415,94 @@ erx_prog_fd_fstat(int fd, struct stat *st)
 	}
 	erx_prog_obj_put(obj);
 	return (0);
+}
+
+off_t
+erx_prog_fd_lseek(int fd)
+{
+	erx_prog_obj_t *obj;
+	off_t result = 0;
+
+	if ((obj = erx_prog_fd_get(fd)) == NULL)
+		return (-EBADF);
+	switch (obj->kind) {
+	case ERX_PROG_OBJ_NULL:
+		break;
+	case ERX_PROG_OBJ_PIPE:
+	case ERX_PROG_OBJ_MEM:
+		result = -ESPIPE;
+		break;
+	}
+	erx_prog_obj_put(obj);
+	return (result);
+}
+
+int
+erx_prog_fd_ioctl(int fd)
+{
+	erx_prog_obj_t *obj;
+
+	if ((obj = erx_prog_fd_get(fd)) == NULL)
+		return (-EBADF);
+	erx_prog_obj_put(obj);
+	return (-ENOTTY);
+}
+
+/* Where [lo, end) lies against the held mem range; end is past lo, both checked. */
+typedef enum { RANGE_APART, RANGE_INSIDE, RANGE_ACROSS } range_t;
+
+static range_t
+range_against_mem(uint64_t lo, uint64_t end)
+{
+	range_t where = RANGE_APART;
+
+	table_take();
+	if (mem_held != NULL) {
+		const uint64_t mem_lo = mem_held->address;
+		const uint64_t mem_end = mem_lo + mem_held->bytes;	/* mem_open checked the sum */
+
+		if (lo >= mem_lo && end <= mem_end)
+			where = RANGE_INSIDE;
+		else if (lo < mem_end && end > mem_lo)
+			where = RANGE_ACROSS;
+	}
+	(void)pthread_mutex_unlock(&table_lock);
+	return (where);
+}
+
+int
+erx_prog_fd_munmap(uint64_t addr, uint64_t len)
+{
+	const uint64_t page_mask = (uint64_t)ERX_PAGE_SIZE - 1;
+	uint64_t size, end;
+
+	/* munmap's own checks, as for any munmap, before the range is compared. */
+	if (len == 0 || len > UINT64_MAX - page_mask || (addr & page_mask) != 0)
+		return (-EINVAL);
+	size = (len + page_mask) & ~page_mask;
+	if (__builtin_add_overflow(addr, size, &end))
+		return (-EINVAL);
+	switch (range_against_mem(addr, end)) {
+	case RANGE_INSIDE:
+		return (0);
+	case RANGE_ACROSS:
+		return (-EINVAL);
+	case RANGE_APART:
+		break;
+	}
+	return (erx_vm_release(ERX_CAP_SELF, addr, size) == ERX_OK ? 0 : -EINVAL);
+}
+
+int
+erx_prog_fd_fixed_check(uint64_t addr, uint64_t len)
+{
+	uint64_t end;
+
+	if (len == 0)
+		return (0);
+	if (__builtin_add_overflow(addr, len, &end))
+		return (-EINVAL);
+	return (range_against_mem(addr, end) == RANGE_APART ? 0 : -EINVAL);
 }
 
 erx_pipe_end_t *

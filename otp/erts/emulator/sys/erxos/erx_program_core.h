@@ -60,7 +60,7 @@
  * A bound on the actions one input of the end returns: a report, a stop, the whole release
  * (one undo per step at most) and a close. erx_program_core.c asserts the plan fits.
  */
-#define ERX_PROGRAM_ACTIONS_MAX	21
+#define ERX_PROGRAM_ACTIONS_MAX	22
 
 typedef enum {
 	ERX_PROGRAM_DONE = 0,		/* the start's run is over; see erx_program_start_t.error */
@@ -72,6 +72,7 @@ typedef enum {
 	 * destroyed and the program never faults on its own channel (docs/design-programs.md,
 	 * "The channel").
 	 */
+	ERX_PROGRAM_LEASE_TAKE,		/* erx_area_lease_take of the spec's lease, when it names one */
 	ERX_PROGRAM_CHANNEL_CREATE,	/* the channel's two sides, the session's and the program's */
 	ERX_PROGRAM_CHANNEL_MAP,	/* both into the session's space, as erx_program_session_prot says */
 	ERX_PROGRAM_BELL_CREATE,	/* the program's doorbell, which the driver triggers */
@@ -85,6 +86,7 @@ typedef enum {
 	ERX_PROGRAM_GATE_REGISTER_IMAGE, /* the image's label, likewise */
 	ERX_PROGRAM_ANCHOR_CREATE,	/* parent the session's space, its fault gate, the anchor's label */
 	ERX_PROGRAM_IMAGE_CREATE,	/* below the anchor, the same gate, the image's label */
+	ERX_PROGRAM_LEASE_MAP,		/* the leased buffer at the image's buffer place, erx_area_lease_map */
 	ERX_PROGRAM_IMAGE_MAP,		/* the boot image's program, with erx_image_map */
 	ERX_PROGRAM_INSTALL,		/* the program's copies into the image's table (erx_program_install_rights) */
 	ERX_PROGRAM_BELL_BIND,		/* the program's doorbell into its group, labelled with the session's side's value */
@@ -106,6 +108,7 @@ typedef enum {
 	ERX_PROGRAM_BELL_DESTROY,
 	ERX_PROGRAM_CHANNEL_UNMAP,	/* erx_vm_release of the session's four mappings */
 	ERX_PROGRAM_CHANNEL_DESTROY,
+	ERX_PROGRAM_LEASE_RETURN,	/* erx_area_lease_return, after the anchor's destroy */
 
 	/* The end's own. */
 	ERX_PROGRAM_THREAD_START,	/* RUN admitted: start the first thread */
@@ -135,11 +138,13 @@ typedef struct {
 	uint64_t	guarantee;	/* of the program's budget, at most cap */
 	uint64_t	cap;		/* at most the session's pool for programs */
 	uint64_t	slots;		/* the data area's 64 KiB slots, 1 to ERX_PROG_DATA_SLOTS_MAX */
+	uint64_t	lease;		/* the number of a window's buffer's lease, 0 for none */
+	uint64_t	lease_pages;	/* its pages, 1 to ERX_PROG_MEM_BYTES's; 0 with no lease */
 } erx_program_spec_t;
 
 /*
- * ERX_OK; ERX_EINVAL for a malformed image path, a guarantee above the cap or slots out of
- * range; ERX_ERANGE
+ * ERX_OK; ERX_EINVAL for a malformed image path, a guarantee above the cap, slots out of
+ * range, a lease's pages out of range, or pages with no lease; ERX_ERANGE
  * for a pid outside its range; ERX_ELIMIT for a cap above pool.
  */
 int	erx_program_spec_check(const erx_program_spec_t *spec, uint64_t pool);

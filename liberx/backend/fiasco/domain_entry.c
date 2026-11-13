@@ -20,6 +20,7 @@
  * standard output and standard error share the thread's line.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -58,6 +59,16 @@ void
 erx_fiasco_libc_write(const void *bytes, size_t length)
 {
 	erx_line_gather_write(&output_line, bytes, length, log_line, NULL);
+}
+
+/* No descriptor table: musl's own rows answer every call (libc_start.h). */
+bool
+erx_fiasco_libc_fd(long n, const long args[6], long *result)
+{
+	(void)n;
+	(void)args;
+	(void)result;
+	return (false);
 }
 
 /*

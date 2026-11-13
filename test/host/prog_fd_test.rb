@@ -47,6 +47,8 @@ class ProgFdTest < Minitest::Test
   EACCES = Errno::EACCES::Errno
   ENODEV = Errno::ENODEV::Errno
   ESPIPE = Errno::ESPIPE::Errno
+  ENOTSUP = Errno::ENOTSUP::Errno
+  ENOTTY = Errno::ENOTTY::Errno
   ENOMEM = -6 # ERX_ENOMEM
 
   def self.int(value) = value < 256 ? E.small(value) : E.int(value)
@@ -69,6 +71,19 @@ class ProgFdTest < Minitest::Test
   MEM_START = F.start(F::BASE_PAIRS.merge(fds: E.list([E.tuple(int(0), E.atom('null')),
                                                        E.tuple(int(3), E.tuple(E.atom('mem'), int(16), int(2)))])))
                .unpack1('H*')
+  # Two mem ranges, which the startup plan refuses at the second: the table holds one.
+  TWO_MEM_START = F.start(F::BASE_PAIRS.merge(fds: E.list([E.tuple(int(3), E.tuple(E.atom('mem'), int(16), int(2))),
+                                                           E.tuple(int(4), E.tuple(E.atom('mem'), int(32), int(1)))])))
+                   .unpack1('H*')
+  # A mem range of two pages the fixture backs with host memory it reserved wherever
+  # the host put it: the start message carries a stand-in page the fixture replaces
+  # (@P), and addresses in the range are the reserve's plus or minus an offset (@A).
+  MEM_PAGE_STAND_IN = '7eadbeef'
+  REAL_MEM_START = F.start(F::BASE_PAIRS.merge(fds: E.list([E.tuple(int(3), E.tuple(E.atom('mem'),
+                                                                                  int(MEM_PAGE_STAND_IN.to_i(16)), int(2)))])))
+                    .unpack1('H*').tap { |hex| raise 'stand-in page not unique' unless hex.scan(MEM_PAGE_STAND_IN).one? }
+                    .sub(MEM_PAGE_STAND_IN, '@P')
+  def self.at(offset) = offset.negative? ? "@A-#{(-offset).to_s(16)}" : "@A+#{offset.to_s(16)}"
   SET_UP = [['alias 105 101', 'alias'], ['alias 106 102', 'alias'], ["start #{START}", 'setup 0']].freeze
   READ_STATE = 'read 7 1 refs=1 rix=0 known=1 lost=0 peers=0 lanes=1:open:107'
   # The read end's doorbell, 103, and the write end's, 107, come up as their labels, (7 << 32) | End.
@@ -171,16 +186,37 @@ class ProgFdTest < Minitest::Test
     # A mem range at fd 3, pages 16 and 17, which the session mapped: mmap returns its address
     # only for MAP_SHARED alone, offset 0, a length within it and no more than read and write;
     # fstat gives its size; it is no stream; it survives a dup and its close maps nothing.
+    'a second mem range' => [["start #{TWO_MEM_START}", 'refused 2 4'], ['fdstat 3', "#{-EBADF} 0 0"]],
     'a mem range' => [["start #{MEM_START}", 'setup 0'], ['fdstat 3', '0 100600 8192'], ['fdstat 0', '0 20666 0'],
                       ['fdmmap 3 8192 rw shared 0', '0 10000'], ['fdmmap 3 1 r shared 0', '0 10000'],
                       ['fdmmap 3 8193 rw shared 0', "#{-EINVAL} 0"], ['fdmmap 3 0 rw shared 0', "#{-EINVAL} 0"],
                       ['fdmmap 3 4096 rw shared 4096', "#{-EINVAL} 0"],
                       ['fdmmap 3 4096 rw private 0', "#{-EINVAL} 0"],
                       ['fdmmap 3 4096 rw shared+fixed 0', "#{-EINVAL} 0"],
-                      ['fdmmap 3 4096 rwx shared 0', "#{-EACCES} 0"], ['fdmmap 0 4096 rw shared 0', "#{-ENODEV} 0"],
+                      ['fdmmap 3 4096 rwx shared 0', "#{-ENOTSUP} 0"],
+                      ['fdseek 3', (-ESPIPE).to_s], ['fdseek 0', '0'], ['fdseek 5', (-EBADF).to_s],
+                      ['fdioctl 0', (-ENOTTY).to_s], ['fdioctl 5', (-EBADF).to_s], ['fdmmap 0 4096 rw shared 0', "#{-ENODEV} 0"],
                       ['fdmmap 5 4096 rw shared 0', "#{-EBADF} 0"], ['fdwrite 3 ab', (-ESPIPE).to_s],
                       ['dup 3', '1'], ['close 3', '0'], ['fdstat 1', '0 100600 8192'], ['close 1', '0'],
                       ['fdstat 3', "#{-EBADF} 0 0"], ['maps', '0']],
+# docs/design-programs.md#the-startup-message: while a descriptor holds the mem range, a
+# munmap inside it unmaps nothing, so a byte written before reads back after; one a page
+# across either end and a fixed mmap inside fail; munmap's own checks come first; and once
+# the last descriptor closed, a munmap of the range releases it.
+"a mem range's memory rules" =>
+  [['reserve 2', 'reserved'], ["start #{REAL_MEM_START}", 'setup 0'],
+   ["poke #{at(4096)} 5a", 'poked'], ["munmap #{at(4096)} 1000", '0'],
+   ["munmap #{at(0)} 2000", '0'], ["peek #{at(4096)}", '5a'],
+   ["munmap #{at(-4096)} 2000", (-EINVAL).to_s],
+   ["munmap #{at(4096)} 2000", (-EINVAL).to_s],
+   ["fixed #{at(4096)} 1000", (-EINVAL).to_s],
+   ["fixed #{at(8192)} 1000", '0'],
+   ["munmap #{at(1)} 1000", (-EINVAL).to_s],
+   ["munmap #{at(0)} 0", (-EINVAL).to_s],
+   ["munmap #{(2**64 - 4096).to_s(16)} 2000", (-EINVAL).to_s],
+   ["munmap #{at(0)} ffffffffffffffff", (-EINVAL).to_s],
+   ['dup 3', '0'], ['close 3', '0'], ["munmap #{at(0)} 2000", '0'], ['close 0', '0'],
+   ["munmap #{at(0)} 2000", '0'], ['maps', '0']],
     # Reports the end cannot take close what they carry, but never a value the end holds.
     'repeated reports' => [*SET_UP,
                            ["report #{report(E.atom('pipe_reader'), int(7), int(1), int(0), int(130), E.atom('open'))}",
@@ -208,11 +244,22 @@ class ProgFdTest < Minitest::Test
 
   # A seeded fault, the case that must catch it, and the edit that plants it.
   MUTANTS = {
+    'an inside munmap is passed on to the release' =>
+      ["a mem range's memory rules", FD, "\tcase RANGE_INSIDE:\n\t\treturn (0);\n", "\tcase RANGE_INSIDE:\n"],
+    'an unaligned munmap is let through' =>
+      ["a mem range's memory rules", FD, ' || (addr & page_mask) != 0)', ')'],
+    "a munmap's end wraps" =>
+      ["a mem range's memory rules", FD, "if (__builtin_add_overflow(addr, size, &end))\n\t\treturn (-EINVAL);\n\tswitch",
+       "end = addr + size;\n\tswitch"],
+    'a mem range is remembered after its release' =>
+      ["a mem range's memory rules", FD, "\t\tmem_held = NULL;\n\t\treturn (true);", "\t\treturn (true);"],
+    'a mem range is forgotten while held' =>
+      ["a mem range's memory rules", FD, "\t\t\tmem_held = mem_of(obj);\n", ""],
     'a mmap one byte past a mem range is let through' =>
       ['a mem range', FD, 'len > mem->bytes)', 'len > mem->bytes + 1)'],
     'a mem object is let go at its first close while a dup still holds it' =>
-      ['a mem range', FD, 'return (--obj->refs == 0);', 'return (--obj->refs < 2);'],
-    'the last reference is miscounted, so {closed} is sent early and again' => ['dup and close', FD, 'if (--obj->refs != 0)', 'if (--obj->refs > 1)'],
+      ['a mem range', FD, "if (--obj->refs != 0)\n\t\t\treturn (false);\n\t\tmem_held = NULL;", "if (--obj->refs >= 2)\n\t\t\treturn (false);\n\t\tmem_held = NULL;"],
+    'the last reference is miscounted, so {closed} is sent early and again' => ['dup and close', FD, "if (--obj->refs != 0)\n\t\t\treturn (false);\n\t\tif (obj->prev", "if (--obj->refs > 1)\n\t\t\treturn (false);\n\t\tif (obj->prev"],
     'a report is applied without the end lock' =>
       ['locked', FD, "\t\terx_pipe_end_lock(found);\n", ''],
     'a read end takes its index without rtake' =>

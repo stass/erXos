@@ -17,7 +17,7 @@ require_relative '../../tools/lib/erx/generated'
 # is within its own maximum but past the args total by its NUL, and one byte less is not;
 # a message whose frame, with every capability value at its longest encoding, is
 # prog_frame_max bytes reaches the driver, and one a byte longer does not. The module is
-# compiled with export_all, so AtBound can size that frame with erx_program:message/3.
+# compiled with export_all, so AtBound can size that frame with erx_program:message/4.
 class ErxProgramStartTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   Erx::Generated.ensure(root: ROOT)
@@ -28,6 +28,9 @@ class ErxProgramStartTest < Minitest::Test
   end.to_h.transform_values { |value| Integer(value, 10) }.freeze
   ARGS_MAX = LIMITS.fetch('prog_args_max')
   FRAME_MAX = LIMITS.fetch('prog_frame_max')
+  # The pages of the buffer place, prog_mem_bytes over page_size (abi/protocols/prog.txt).
+  MEM_PAGES = Integer(File.read(File.join(ROOT, 'abi/protocols/prog.txt'))[/^limit prog_mem_bytes u64 (\d+)$/, 1], 10) /
+              Integer(File.read(File.join(ROOT, 'abi/erx_abi.txt'))[/^limit page_size u32 (\d+)$/, 1], 10)
 
   # Each case: a spec, an Erlang expression over Base (the spec every case starts from) and
   # AtBound, and what start/1 must print for it.
@@ -40,6 +43,15 @@ class ErxProgramStartTest < Minitest::Test
     'an unknown signal' => ["Base#{'#'}{sigmask => [nosuchsignal]}", '{error,einval}'],
     'a missing argv' => ['maps:remove(argv, Base)', '{error,einval}'],
     'a descriptor' => ["Base#{'#'}{fds => [{0, null}]}", 'badarg'],
+    "a window's buffer" => ["Base#{'#'}{fds => [{3, {mem, 5, 1}}]}", 'driver'],
+    'a buffer of the most pages' => ["Base#{'#'}{fds => [{3, {mem, 16#ffffffffffffffff, #{MEM_PAGES}}}]}", 'driver'],
+    'a buffer past the most pages' => ["Base#{'#'}{fds => [{3, {mem, 5, #{MEM_PAGES + 1}}}]}", 'badarg'],
+    'a buffer of no pages' => ["Base#{'#'}{fds => [{3, {mem, 5, 0}}]}", 'badarg'],
+    'a lease of 0' => ["Base#{'#'}{fds => [{3, {mem, 0, 1}}]}", 'badarg'],
+    'a lease past 64 bits' => ["Base#{'#'}{fds => [{3, {mem, 16#10000000000000000, 1}}]}", 'badarg'],
+    'a buffer past the descriptors' => ["Base#{'#'}{fds => [{1024, {mem, 5, 1}}]}", 'badarg'],
+    'two buffers' => ["Base#{'#'}{fds => [{3, {mem, 5, 1}}, {4, {mem, 6, 1}}]}", 'badarg'],
+    'a buffer beside a descriptor' => ["Base#{'#'}{fds => [{0, null}, {3, {mem, 5, 1}}]}", 'badarg'],
     'slots past the data area' => ["Base#{'#'}{slots => 17}", '{error,einval}'],
     'a message at the frame bound' => ['AtBound(0)', 'driver'],
     'a message a byte past the frame bound' => ['AtBound(1)', '{error,e2big}'],
@@ -58,7 +70,7 @@ class ErxProgramStartTest < Minitest::Test
     AtBound = fun(Over) ->
                   Argv = [<<"args">> | lists:duplicate(30000, <<>>)],
                   Filled = Base\#{argv => Argv},
-                  {ok, Frame} = erx_prog_grammar:build_start(erx_program:message(Filled, 16#ffffffffffffffff, 4)),
+                  {ok, Frame} = erx_prog_grammar:build_start(erx_program:message(Filled, 16#ffffffffffffffff, 4, none)),
                   Pad = #{FRAME_MAX} + Over - byte_size(term_to_binary(Frame)) - 5,
                   Filled\#{argv => Argv ++ [binary:copy(<<"a">>, Pad)]}
               end,

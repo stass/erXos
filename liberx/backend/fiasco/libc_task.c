@@ -12,6 +12,7 @@
  * runtime, which does, enters through domain_entry.c instead.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "erx/abi.h"
@@ -25,6 +26,16 @@ void
 erx_fiasco_libc_write(const void *bytes, size_t length)
 {
 	erx_fiasco_task_write(bytes, length);
+}
+
+/* No descriptor table: musl's own rows answer every call (libc_start.h). */
+bool
+erx_fiasco_libc_fd(long n, const long args[6], long *result)
+{
+	(void)n;
+	(void)args;
+	(void)result;
+	return (false);
 }
 
 int64_t

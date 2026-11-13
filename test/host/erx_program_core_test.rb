@@ -32,18 +32,20 @@ class ErxProgramCoreTest < Minitest::Test
 
   # The driver prints erx_program_act_t's and erx_program_phase_t's names, so no numbering is copied here.
 
-  # The start's steps in order: what the session keeps of the program's channel, from its own
+  # The start's steps in order: the lease of a window's buffer first, taken only when the spec
+  # names one, so that its return is the last undo of every release; what the session keeps of
+  # the program's channel, from its own
   # budget, first, so that a release deletes it only after the program's budget; the port's
   # IRQ object, the session's doorbell, with its sink and bind; the program's budget and
   # group; both labels' gate registrations before any space carries a label; then the
-  # spaces, the map, the install, the program's doorbell's bind, which takes its label from
+  # spaces, the buffer's map into the image before the image's own, the install, the program's doorbell's bind, which takes its label from
   # the install, and the thread, stopped until RUN.
-  STEPS = %i[channel_create channel_map bell_create data_create irq_create sink_register irq_bind
+  STEPS = %i[lease_take channel_create channel_map bell_create data_create irq_create sink_register irq_bind
              budget_create group_create gate_register_anchor gate_register_image anchor_create image_create
-             image_map install bell_bind thread_create].freeze
-  # What undoes each step that made something; a map and an install die with their space, and
-  # nothing else needs undoing.
-  UNDO = { channel_create: :channel_destroy, channel_map: :channel_unmap, bell_create: :bell_destroy,
+             lease_map image_map install bell_bind thread_create].freeze
+  # What undoes each step that made something; a map and an install die with their space, the
+  # buffer's map among them, and nothing else needs undoing.
+  UNDO = { lease_take: :lease_return, channel_create: :channel_destroy, channel_map: :channel_unmap, bell_create: :bell_destroy,
            data_create: :data_destroy, irq_create: :irq_close, sink_register: :sink_unregister,
            irq_bind: :irq_unbind, budget_create: :budget_destroy, group_create: :group_close,
            gate_register_anchor: :gate_unregister_anchor, gate_register_image: :gate_unregister_image,
@@ -70,7 +72,8 @@ class ErxProgramCoreTest < Minitest::Test
     'pid-max' => :ok, 'pid-past-max' => :erange, 'pid-int64-min' => :erange,
     'guarantee-equals-cap' => :ok, 'guarantee-above-cap' => :einval, 'cap-equals-pool' => :ok,
     'cap-above-pool' => :elimit, 'cap-max' => :elimit, 'slots-0' => :einval, 'slots-max' => :ok,
-    'slots-past-max' => :einval
+    'slots-past-max' => :einval, 'lease-max' => :ok, 'lease-pages-0' => :einval,
+    'lease-pages-max' => :ok, 'lease-pages-past-max' => :einval, 'no-lease-with-pages' => :einval
   }.freeze
 
   # The end's state as the driver prints it: the phase, FAULTED's status, and six flags.
@@ -164,9 +167,19 @@ class ErxProgramCoreTest < Minitest::Test
   end
 
   def test_specs_are_checked
-    assert_equal SPECS.keys.sort, output[:specs].keys.sort
-    wrong = SPECS.reject { |name, status| output[:specs][name] == constant(status.to_s) }
-    assert_empty wrong.keys, "specs answered wrongly: #{wrong.keys.map { [_1, output[:specs][_1]] }}"
+    assert_empty spec_differences(output), spec_differences(output).join("\n")
+  end
+
+  # docs/design-display.md, "The pixel area": the take is the start's first effect, so the
+  # lease's return is the last undo of a failed start and the last of every release.
+  def test_the_lease_is_returned_last
+    takers = output[:starts].reject { |_name, (acts, _status)| acts.empty? }
+    refute_empty takers
+    takers.each do |name, (acts, _status)|
+      assert_equal :lease_take, acts.first, "start #{name} does not take the lease first"
+      assert_equal :lease_return, acts.last, "start #{name} does not return the lease last" if acts.include?(:lease_return)
+    end
+    assert_equal :lease_return, RELEASE.last
   end
 
   def test_a_failed_step_undoes_exactly_the_steps_before_it
@@ -225,6 +238,10 @@ class ErxProgramCoreTest < Minitest::Test
     'an undo is skipped' =>
       [:start_differences, '{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },',
        '{ ERX_PROGRAM_GATE_REGISTER_IMAGE, NO_UNDO },'],
+    'the lease is never returned' =>
+      [:start_differences, '{ ERX_PROGRAM_LEASE_TAKE, ERX_PROGRAM_LEASE_RETURN },', '{ ERX_PROGRAM_LEASE_TAKE, NO_UNDO },'],
+    "a lease's pages are not bounded" =>
+      [:spec_differences, 'spec->lease_pages > ERX_PROG_MEM_BYTES / ERX_PAGE_SIZE', 'spec->lease_pages > UINT64_MAX - 1'],
     'two steps are swapped' =>
       [:start_differences,
        "{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },\n\t{ ERX_PROGRAM_ANCHOR_CREATE, ERX_PROGRAM_ANCHOR_DESTROY },",
@@ -302,6 +319,13 @@ class ErxProgramCoreTest < Minitest::Test
       early = acts.take_while { _1 != :budget_destroy } & SESSION_KEPT
       "#{name}: #{early.inspect} before budget_destroy" unless early.empty?
     end
+  end
+
+  # Each spec's answer against SPECS, and every spec named once.
+  def spec_differences(out)
+    named = SPECS.keys.sort == out[:specs].keys.sort ? [] : ["specs named: #{out[:specs].keys.sort.inspect}"]
+    named + SPECS.reject { |name, status| out[:specs][name] == constant(status.to_s) }
+                 .map { |name, _| "spec #{name}: got #{out[:specs][name].inspect}" }
   end
 
   # The install's copies against INSTALL_RIGHTS, and its passes against a cover of every index once.

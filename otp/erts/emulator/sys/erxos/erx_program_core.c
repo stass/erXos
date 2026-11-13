@@ -14,7 +14,10 @@
 #include "erx/etf.h"
 #include "erx_program_core.h"
 
-/* A step that made nothing of its own: a map and an install die with their space. */
+/*
+ * A step that made nothing of its own: a map and an install die with their space, the
+ * buffer's map into the image among them.
+ */
 #define NO_UNDO	ERX_PROGRAM_DONE
 
 /*
@@ -22,12 +25,16 @@
  * backwards, so a failed start and a program's end free the same things the same way.
  * What the session keeps and maps of the program's channel comes before the program's
  * budget, so every release deletes it only after that budget is destroyed, by this order
- * alone (docs/design-programs.md, "The channel").
+ * alone (docs/design-programs.md, "The channel"). The lease of a window's buffer is taken
+ * first, so its return is the last undo of every release, after the anchor's destroy has
+ * ended the buffer's mapping (docs/design-display.md, "The pixel area"); the buffer is
+ * mapped into the image before the image's own map, so an image that meets it is refused.
  */
 static const struct {
 	erx_program_act_t	step;
 	erx_program_act_t	undo;
 } plan[] = {
+	{ ERX_PROGRAM_LEASE_TAKE, ERX_PROGRAM_LEASE_RETURN },
 	{ ERX_PROGRAM_CHANNEL_CREATE, ERX_PROGRAM_CHANNEL_DESTROY },
 	{ ERX_PROGRAM_CHANNEL_MAP, ERX_PROGRAM_CHANNEL_UNMAP },
 	{ ERX_PROGRAM_BELL_CREATE, ERX_PROGRAM_BELL_DESTROY },
@@ -41,6 +48,7 @@ static const struct {
 	{ ERX_PROGRAM_GATE_REGISTER_IMAGE, ERX_PROGRAM_GATE_UNREGISTER_IMAGE },
 	{ ERX_PROGRAM_ANCHOR_CREATE, ERX_PROGRAM_ANCHOR_DESTROY },
 	{ ERX_PROGRAM_IMAGE_CREATE, ERX_PROGRAM_IMAGE_CLOSE },
+	{ ERX_PROGRAM_LEASE_MAP, NO_UNDO },
 	{ ERX_PROGRAM_IMAGE_MAP, NO_UNDO },
 	{ ERX_PROGRAM_INSTALL, NO_UNDO },
 	{ ERX_PROGRAM_BELL_BIND, ERX_PROGRAM_BELL_UNBIND },
@@ -82,6 +90,9 @@ erx_program_spec_check(const erx_program_spec_t *spec, uint64_t pool)
 	if (spec->pid < ERX_PROGRAM_PID_MIN || spec->pid > ERX_PROGRAM_PID_MAX)
 		return (ERX_ERANGE);
 	if (spec->guarantee > spec->cap || spec->slots < 1 || spec->slots > ERX_PROG_DATA_SLOTS_MAX)
+		return (ERX_EINVAL);
+	if (spec->lease == 0 ? spec->lease_pages != 0 :
+	    spec->lease_pages < 1 || spec->lease_pages > ERX_PROG_MEM_BYTES / ERX_PAGE_SIZE)
 		return (ERX_EINVAL);
 	if (spec->cap > pool)
 		return (ERX_ELIMIT);

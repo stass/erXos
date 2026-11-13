@@ -1356,6 +1356,9 @@ DRV_OBJS = \
 	$(OBJDIR)/ram_file_drv.o \
 	$(OBJDIR)/erx_lane_drv.o \
 	$(OBJDIR)/erx_program_drv.o
+
+# The program driver takes, maps and returns a window's buffer's lease (nifs/erxos/erx_area.h).
+$(OBJDIR)/erx_program_drv.o: INCLUDES += -Inifs/erxos
 endif
 
 ifneq ($(STATIC_NIFS),no)
@@ -1593,7 +1596,7 @@ $(TTF_DIR)/nif.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(V_at)$(SED_DEPEND) $@.tmp > $@
 $(TTF_DIR)/sys.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)
-	$(V_at)$(DEP_CC) $(DEP_FLAGS) $(SYS_SRC) > $@.tmp
+	$(V_at)$(DEP_CC) $(DEP_FLAGS) -Inifs/erxos $(SYS_SRC) > $@.tmp
 	$(V_at)$(SED_DEPEND) $@.tmp > $@
 $(TTF_DIR)/target.depend.mk: $(TTF_DIR)/GENERATED $(PRELOAD_SRC)
 	$(gen_verbose)

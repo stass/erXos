@@ -131,14 +131,16 @@ module Erx
                       "#{BACKEND}/task_refused.c", 'liberx/backend/core/dom_lib_none.c', "#{BACKEND}/release_task.c", 'liberx/release_fs.c', 'liberx/system/dom_dump.c',
                       'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c', *CONNECTION, *PIPE].freeze
     # The sources that read musl's headers, which NativeRuntime's sysroot holds: the boot page builder,
-    # the domain library, the native_domain root and string functions that link it, and a
-    # program's layer and the programs suite's programs that read what it keeps.
+    # the domain library, the native_domain root and string functions that link it, a
+    # program's entry, whose descriptor seam answers in errno values, and its layer, and the
+    # programs suite's programs that read what it keeps or call the seam.
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c liberx/system/dom_core.c liberx/system/dom_life.c
                       liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c liberx/system/dom_dump.c
                       liberx/erx_lane.c liberx/erx_funnel.c
                       liberx/erx_pipe_check.c liberx/erx_pipe_core.c liberx/erx_pipe_run.c
                       liberx/erx_etf.c test/guest/native_domain/guest.c
                       test/guest/native_domain/string.c
+                      liberx/backend/fiasco/program_task.c
                       liberx/program/program.c liberx/program/channel.c liberx/program/startup.c
                       liberx/program/fd.c liberx/program/pipe.c liberx/program/wake.c liberx/erx_profile.c
                       build/gen/liberx/generated/prog_profile.c test/guest/programs/args.c

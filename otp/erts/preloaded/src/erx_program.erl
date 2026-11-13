@@ -45,6 +45,10 @@ frame it sends gives the program's credit, and reads how each step ended.
 -define(LONGEST_CAP, 16#ffffffffffffffff).
 %% What the startup message takes from the spec as it is.
 -define(MESSAGE_KEYS, [ppid, pgid, argv, env, cwd, spawn, sigmask, sigignore, umask]).
+%% A window's buffer: a lease's number, and its pages, which the buffer place holds
+%% (docs/design-display.md, The pixel area).
+-define(IS_LEASE(L), (is_integer(L) andalso L >= 1 andalso L =< 16#ffffffffffffffff)).
+-define(IS_MEM_PAGES(P), (is_integer(P) andalso P >= 1 andalso P =< ?ERX_PROG_MEM_BYTES div ?ERX_PAGE_SIZE)).
 
 -doc """
 Starts the program `Spec` names and returns its port, or `{error, Reason}`.
@@ -56,7 +60,12 @@ parent's and its process group's; `argv` and `env`, lists of binaries, each
 `spawn`, whether a spawn started it; `sigmask` and `sigignore`, lists of
 signal names (`sigterm`); and `umask`. It may hold `guarantee` and `cap`,
 its budget in pages, `slots`, its data area's 64 KiB slots (4 by default),
-and `fds`, its descriptors, of which only `[]`, the default, is supported.
+and `fds`, its descriptors: `[]`, the default, or one window's buffer,
+`[{N, {mem, Lease, Pages}}]`, a lease the caller holds of the buffer's
+`Pages`, which the program finds as descriptor `N`, mapped at the buffer
+place (docs/design-display.md, The pixel area). The caller becomes the
+port's owner, so only a lease it holds is taken; a lease the start does not
+take stays held, for the caller to give back.
 These make the startup message the program receives before `main`
 (docs/design-programs.md, The startup message).
 
@@ -67,14 +76,18 @@ is the kernel status, e-prefixed, of the step that refused the program:
 `einval` for an image the session's release does not hold or a `guarantee`
 above the `cap`, `enotsup` where the backend cannot run programs. A spec of
 the wrong shape is `badarg`, as is an image holding a 0 byte, a `guarantee`,
-`cap` or `slots` that is not a natural number, or `fds` other than `[]`; a
+`cap` or `slots` that is not a natural number, or `fds` other than `[]` or one
+`mem` entry with `N` from 0 to 1023, `Lease` from 1 to 2^64-1 and `Pages`
+from 1 to the pages of `prog_mem_bytes`; a lease the start cannot take, one
+not held by the caller or of other pages, is `einval`; a
 `slots` outside 1..16 is `einval`, as the message refuses it.
 """.
 -spec start(#{image := binary(), pid := non_neg_integer(), ppid := pos_integer(),
               pgid := pos_integer(), argv := [binary()], env := [binary()], cwd := binary(),
               spawn := boolean(), sigmask := [atom()], sigignore := [atom()],
               umask := non_neg_integer(), guarantee => non_neg_integer(),
-              cap => non_neg_integer(), slots => pos_integer(), fds => []}) ->
+              cap => non_neg_integer(), slots => pos_integer(),
+              fds => [] | [{non_neg_integer(), {mem, pos_integer(), pos_integer()}}]}) ->
           port() | {error, atom()}.
 start(#{image := Image, pid := Pid} = Spec) when is_binary(Image), is_integer(Pid), Pid >= 0 ->
     %% The command is a C string, which a 0 byte would cut short.
@@ -82,32 +95,44 @@ start(#{image := Image, pid := Pid} = Spec) when is_binary(Image), is_integer(Pi
     Guarantee = maps:get(guarantee, Spec, ?DEFAULT_GUARANTEE),
     Cap = maps:get(cap, Spec, ?DEFAULT_CAP),
     Slots = maps:get(slots, Spec, ?DEFAULT_SLOTS),
-    case natural(Guarantee) andalso natural(Cap) andalso natural(Slots) andalso
-         maps:get(fds, Spec, []) =:= [] of
+    Buffer = case maps:get(fds, Spec, []) of
+                 [] -> none;
+                 [{N, {mem, Lease, Pages}}] when is_integer(N), N >= 0, N < ?ERX_PROG_FDS_MAX,
+                                                 ?IS_LEASE(Lease), ?IS_MEM_PAGES(Pages) ->
+                     {N, Lease, Pages};
+                 _ -> erlang:error(badarg, [Spec])
+             end,
+    case natural(Guarantee) andalso natural(Cap) andalso natural(Slots) of
         true -> ok;
         false -> erlang:error(badarg, [Spec])
     end,
     %% The message is checked whole before anything is made.
-    case frame(Spec, ?LONGEST_CAP, Slots) of
-        {ok, _} -> open(Spec, Image, Pid, Guarantee, Cap, Slots);
+    case frame(Spec, ?LONGEST_CAP, Slots, Buffer) of
+        {ok, _} -> open(Spec, Image, Pid, Guarantee, Cap, Slots, Buffer);
         {error, _} = Refused -> Refused
     end;
 start(Spec) ->
     erlang:error(badarg, [Spec]).
 
-%% The driver's command is "erx_program Pid Guarantee Cap Slots Image", the image
-%% last since it is the one field that may hold a space. A port whose start failed
+%% The driver's command is "erx_program Pid Guarantee Cap Slots Lease Pages Image",
+%% Lease and Pages 0 with no buffer, the image last since it is the one field that
+%% may hold a space. A port whose start failed
 %% is open with nothing made, and is closed here. A data area's value of cap_null,
 %% which the grammar refuses, closes the port as a refusal of the driver's does,
 %% which kills the program.
-open(Spec, Image, Pid, Guarantee, Cap, Slots) ->
+open(Spec, Image, Pid, Guarantee, Cap, Slots, Buffer) ->
+    {Lease, Pages} = case Buffer of
+                         none -> {0, 0};
+                         {_N, L, P} -> {L, P}
+                     end,
     Command = iolist_to_binary([<<"erx_program ">>, integer_to_binary(Pid), $\s,
                                 integer_to_binary(Guarantee), $\s, integer_to_binary(Cap), $\s,
-                                integer_to_binary(Slots), $\s, Image]),
+                                integer_to_binary(Slots), $\s, integer_to_binary(Lease), $\s,
+                                integer_to_binary(Pages), $\s, Image]),
     Port = open_port({spawn_driver, Command}, [binary]),
     case port_control(Port, ?ERX_PROGRAM_CONTROL_STARTED, []) of
         <<"ok", Data:64>> ->
-            case frame(Spec, Data, Slots) of
+            case frame(Spec, Data, Slots, Buffer) of
                 {ok, Frame} -> run(Port, Frame);
                 {error, _} = Refused ->
                     port_close(Port),
@@ -243,17 +268,21 @@ refused(Port, <<$e, _/binary>> = Status) ->
     port_close(Port),
     {error, binary_to_atom(Status)}.
 
-%% The startup message's value, with the data area's value Data and the pid as
-%% the spec gives it; every other key the message needs comes from the spec, and
-%% a missing one is the builder's refusal.
-message(#{pid := Pid} = Spec, Data, Slots) ->
+%% The startup message's value, with the data area's value Data, the window's
+%% buffer as a mem range at the buffer place, and the pid as the spec gives
+%% it; every other key the message needs comes from the spec, and a missing
+%% one is the builder's refusal.
+message(#{pid := Pid} = Spec, Data, Slots, Buffer) ->
     maps:merge(maps:with(?MESSAGE_KEYS, Spec),
-               #{pid => Pid, data_area => {Data, Slots}, fds => []}).
+               #{pid => Pid, data_area => {Data, Slots}, fds => fds(Buffer)}).
+
+fds(none) -> [];
+fds({N, _Lease, Pages}) -> [{N, {mem, ?ERX_PROG_MEM_BASE div ?ERX_PAGE_SIZE, Pages}}].
 
 %% The startup message's frame with the data area's value Data, or its refusal's
 %% status.
-frame(Spec, Data, Slots) ->
-    case erx_prog_grammar:build_start(message(Spec, Data, Slots)) of
+frame(Spec, Data, Slots, Buffer) ->
+    case erx_prog_grammar:build_start(message(Spec, Data, Slots, Buffer)) of
         {ok, _} = Built -> Built;
         {error, Refusal} -> {error, refusal(Refusal)}
     end.

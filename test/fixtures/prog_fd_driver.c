@@ -40,6 +40,14 @@
  *   fdmmap FD LEN PROT FLAGS OFF
  *                          erx_prog_fd_mmap: STATUS ADDRESS (do_fdmmap)
  *   fdstat FD              erx_prog_fd_fstat: STATUS MODE SIZE, the mode in octal
+ *   fdseek FD | fdioctl FD erx_prog_fd_lseek and erx_prog_fd_ioctl: STATUS
+ *   reserve PAGES          read-write memory wherever the host puts it, which a
+ *                          release may free: "reserved". Later lines name it:
+ *                          @P is its first page, in eight hex digits, and
+ *                          @A+X or @A-X its address plus or minus hex X
+ *   munmap ADDR LEN        erx_prog_fd_munmap, both in hex: STATUS
+ *   fixed ADDR LEN         erx_prog_fd_fixed_check, both in hex: STATUS
+ *   poke ADDR V | peek ADDR  store or load one byte, in hex
  *   spawn T fdread FD N    worker T makes the call; "spawned"
  *   spawn T fdwrite FD TEXT
  *   spawn T fdwriten FD N  one erx_prog_fd_write of N bytes, each its offset's
@@ -207,6 +215,80 @@ erx_vm_release(uint64_t space, uint64_t addr, uint64_t size)
 	}
 	fail("a release of memory never reserved, or of another size");
 	return (ERX_EINVAL);
+}
+
+/* The first page of the last reserve, which @P and @A in a request line name. */
+static uint64_t reserved_page;
+
+/*
+ * Read-write memory for pages wherever the host puts it, kept as a reservation so
+ * that a release of exactly it frees it: the session's mapping of a mem range, as
+ * the fake sees it. The host chooses the address, from hints at each 4 GiB, because
+ * a fixed one may be in use (by a sanitizer's own mappings, say); its page stays
+ * below 2^31 so that the start message carries it as a four-byte integer.
+ */
+static void
+do_reserve(uint64_t pages)
+{
+	const uint64_t size = pages * ERX_PAGE_SIZE;
+	uint64_t addr = 0;
+
+	for (uint64_t hint = UINT64_C(1) << 32; hint < (UINT64_C(1) << 42) && addr == 0; hint += UINT64_C(1) << 32) {
+		void *const p = mmap((void *)(uintptr_t)hint, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+
+		if (p == MAP_FAILED)
+			fail("reserve");
+		if ((uintptr_t)p / ERX_PAGE_SIZE < (UINT64_C(1) << 31))
+			addr = (uintptr_t)p;
+		else
+			(void)munmap(p, size);
+	}
+	if (addr == 0)
+		fail("reserve: the host gave no address low enough for the start message");
+	reserved_page = addr / ERX_PAGE_SIZE;
+	pthread_mutex_lock(&fake);
+	for (int at = 0; at < MAPS; at++) {
+		if (maps[at].size == 0) {
+			maps[at] = (struct map){ addr, size };
+			pthread_mutex_unlock(&fake);
+			printf("reserved\n");
+			return;
+		}
+	}
+	fail("too many mappings");
+}
+
+/*
+ * The line with @P replaced by the reserved page and @A+X or @A-X by the
+ * reserved address plus or minus hex X, both in hex, in place.
+ */
+static void
+expand(char *line, size_t size)
+{
+	static char out[1 << 17];
+	const uint64_t base = reserved_page * ERX_PAGE_SIZE;
+	size_t at = 0;
+
+	for (const char *p = line; *p != '\0';) {
+		if (at + 32 >= sizeof(out))
+			fail("expand: the line is too long");
+		if (p[0] == '@' && p[1] == 'P') {
+			at += (size_t)snprintf(out + at, sizeof(out) - at, "%08" PRIx64, reserved_page);
+			p += 2;
+		} else if (p[0] == '@' && p[1] == 'A' && (p[2] == '+' || p[2] == '-')) {
+			char *end;
+			const uint64_t off = strtoull(p + 3, &end, 16);
+
+			at += (size_t)snprintf(out + at, sizeof(out) - at, "%" PRIx64, p[2] == '+' ? base + off : base - off);
+			p = end;
+		} else {
+			out[at++] = *p++;
+		}
+	}
+	out[at] = '\0';
+	if (at >= size)
+		fail("expand: the line is too long");
+	memcpy(line, out, at + 1);
 }
 
 /* ---------------------------------------------------------------------
@@ -919,6 +1001,7 @@ main(int argc, char **argv)
 	if (pthread_create(&executor, NULL, executor_main, NULL) != 0)
 		fail("pthread_create");
 	while (fgets(line, sizeof(line), requests) != NULL) {
+		expand(line, sizeof(line));
 		if (sscanf(line, "%15s", word) != 1)
 			continue;
 		if (strcmp(word, "alias") == 0 && sscanf(line, "%*s %llu %llu", &a, &b) == 2) {
@@ -962,6 +1045,21 @@ main(int argc, char **argv)
 
 			printf("%d %o %lld\n", status, status == 0 ? (unsigned)st.st_mode : 0U,
 			    status == 0 ? (long long)st.st_size : 0LL);
+		} else if (strcmp(word, "fdseek") == 0 && sscanf(line, "%*s %d", &fd) == 1) {
+			printf("%lld\n", (long long)erx_prog_fd_lseek(fd));
+		} else if (strcmp(word, "fdioctl") == 0 && sscanf(line, "%*s %d", &fd) == 1) {
+			printf("%d\n", erx_prog_fd_ioctl(fd));
+		} else if (strcmp(word, "reserve") == 0 && sscanf(line, "%*s %llu", &a) == 1) {
+			do_reserve(a);
+		} else if (strcmp(word, "munmap") == 0 && sscanf(line, "%*s %llx %llx", &a, &b) == 2) {
+			printf("%d\n", erx_prog_fd_munmap(a, b));
+		} else if (strcmp(word, "fixed") == 0 && sscanf(line, "%*s %llx %llx", &a, &b) == 2) {
+			printf("%d\n", erx_prog_fd_fixed_check(a, b));
+		} else if (strcmp(word, "poke") == 0 && sscanf(line, "%*s %llx %llx", &a, &b) == 2) {
+			*(volatile uint8_t *)(uintptr_t)a = (uint8_t)b;
+			printf("poked\n");
+		} else if (strcmp(word, "peek") == 0 && sscanf(line, "%*s %llx", &a) == 1) {
+			printf("%x\n", *(volatile uint8_t *)(uintptr_t)a);
 		} else if (strcmp(word, "setbits") == 0 && sscanf(line, "%*s %15s %llu %llx", arg, &a, &b) == 3) {
 			do_setbits(arg, a, b);
 		} else if (strcmp(word, "bits") == 0 && sscanf(line, "%*s %15s %llu", arg, &a) == 2) {

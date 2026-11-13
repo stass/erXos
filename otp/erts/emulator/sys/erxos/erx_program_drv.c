@@ -61,6 +61,7 @@
 #include "erx/funnel.h"
 #include "erx/lane.h"
 #include "erx/release.h"
+#include "erx_area.h"
 #include "erx_event.h"
 #include "erx_gate.h"
 #include "erx_program_core.h"
@@ -141,6 +142,7 @@ typedef struct {
 	uint64_t		anchor;
 	uint64_t		image;
 	uint64_t		thread;
+	erx_area_lease_t	*lease;		/* the window's buffer, from its take to its return */
 	uint64_t		pc;		/* the image's entry, from erx_image_map */
 	/* What the install made of each copy: its value in the image's table, by install index. */
 	uint64_t		installed[ERX_PROGRAM_INSTALLS];
@@ -200,8 +202,9 @@ open_word(const char **at, uint64_t *value)
 }
 
 /*
- * "erx_program Pid Guarantee Cap Slots Image", as erx_program:start/1 writes it: four decimal
- * words, then the image's path, the rest of the command. Only the form is checked here;
+ * "erx_program Pid Guarantee Cap Slots Lease Pages Image", as erx_program:start/1 writes it:
+ * six decimal words, Lease and Pages 0 for a program given no window's buffer, then the
+ * image's path, the rest of the command. Only the form is checked here;
  * the core checks the spec's values whole.
  */
 static bool
@@ -217,6 +220,7 @@ program_open_parse(const char *command, program_t *program)
 	at += sizeof(name) - 1;
 	if (!open_word(&at, &pid) || !open_word(&at, &program->spec.guarantee) ||
 	    !open_word(&at, &program->spec.cap) || !open_word(&at, &program->spec.slots) ||
+	    !open_word(&at, &program->spec.lease) || !open_word(&at, &program->spec.lease_pages) ||
 	    pid > (uint64_t)INT64_MAX)
 		return (false);
 	len = strlen(at);
@@ -428,6 +432,22 @@ install(program_t *program)
 	return (ERX_OK);
 }
 
+/*
+ * Takes the lease the spec names, for this port's owner, which erx_program:start/1 made
+ * the lease's holder by calling it itself (docs/design-display.md, "The pixel area").
+ * A spec that names none takes nothing. The area NIF answers no lease for a number with
+ * no held lease, another holder's or another length's, and the start fails with einval.
+ */
+static int
+lease_take(program_t *program)
+{
+	if (program->spec.lease == 0)
+		return (ERX_OK);
+	program->lease = erx_area_lease_take(program->spec.lease, (ERL_NIF_TERM)driver_connected(program->port),
+	    program->spec.lease_pages);
+	return (program->lease == NULL ? ERX_EINVAL : ERX_OK);
+}
+
 static int
 close_cap(uint64_t *cap)
 {
@@ -484,6 +504,8 @@ apply(program_t *program, erx_program_action_t action)
 	int status;
 
 	switch (action.act) {
+	case ERX_PROGRAM_LEASE_TAKE:
+		return (lease_take(program));
 	case ERX_PROGRAM_CHANNEL_CREATE:
 		return (channel_create(program, boot->budget.raw));
 	case ERX_PROGRAM_CHANNEL_MAP:
@@ -514,6 +536,8 @@ apply(program_t *program, erx_program_action_t action)
 	case ERX_PROGRAM_IMAGE_CREATE:
 		return (erx_space_create(program->budget, program->anchor, erx_gate_worker_handle(),
 		    program->image_label, 0, PROGRAM_CAP_LIMIT, &program->image));
+	case ERX_PROGRAM_LEASE_MAP:
+		return (program->lease == NULL ? ERX_OK : erx_area_lease_map(program->lease, program->image));
 	case ERX_PROGRAM_IMAGE_MAP:
 		status = release_index(program, &index);
 		if (status != ERX_OK)
@@ -577,6 +601,11 @@ apply(program_t *program, erx_program_action_t action)
 		frame_drop(program);
 		record_drop(program);
 		channel_unmap(program);
+		return (ERX_OK);
+	case ERX_PROGRAM_LEASE_RETURN:
+		if (program->lease != NULL)
+			erx_area_lease_return(program->lease);
+		program->lease = NULL;
 		return (ERX_OK);
 	case ERX_PROGRAM_CHANNEL_DESTROY:
 		channel_destroy(program);

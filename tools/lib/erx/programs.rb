@@ -19,9 +19,9 @@ module Erx
   # Native programs of root's session (docs/design-runtime.md, "Programs as ports";
   # docs/design-programs.md): erx_program:start/1 maps a program from the session's
   # release, runs it in a sub-space the session made, and gives its owner the program's
-  # end. The suite's test image is the production image with the three static programs
+  # end. The suite's test image is the production image with the static programs
   # of test/guest/programs/ in the domain release's bin/ (PROGRAMS), each a musl program
-  # whose entry, libc_task.c, stops its space with main's return. It keeps the
+  # whose entry, program_task.c, stops its space with main's return. It keeps the
   # development manifest's session template, so the console logs root in at boot and
   # root's session, root_1, takes the line; it boots without a disk, since nothing here
   # reads /data.
@@ -30,6 +30,11 @@ module Erx
   # * exit42 ends by itself and its owner gets {exit_status, 42};
   # * fault loads from the null page, and the fault ends it with ERX_EXIT_SIGNAL plus
   #   SIGSEGV, which erx_prog:status/1 reads as {signaled, sigsegv};
+  # * args, started with no descriptors, finds what its startup message gave it, every
+  #   descriptor call EBADF and munmap's own checks EINVAL (test/guest/programs/args.c),
+  #   and a start naming a window buffer's lease the session does not hold answers
+  #   {error, einval}: the take's refusal (docs/design-display.md, "A program's window
+  #   buffer");
   # * spin runs until port_close/1, which stops its space and reports nothing, since the
   #   port is gone (erx_program_core.c, ERX_PROGRAM_CLOSE): the close answers true, the
   #   port goes down, and no message of it follows;
@@ -70,9 +75,9 @@ module Erx
 
     # erx_program:start/1's spec for the program bin/<name> as pid, its own process group,
     # with the rest of what its startup message carries; each keyword is an Erlang term.
-    def spec(name, pid, argv: "[<<\"#{name}\">>]", env: '[]', cwd: '<<"/">>', umask: '8#022', sigmask: '[]')
+    def spec(name, pid, argv: "[<<\"#{name}\">>]", env: '[]', cwd: '<<"/">>', umask: '8#022', sigmask: '[]', fds: '[]')
       "\#{image => <<\"bin/#{name}\">>, pid => #{pid}, ppid => 1, pgid => #{pid}, argv => #{argv}, env => #{env}, " \
-        "cwd => #{cwd}, spawn => false, sigmask => #{sigmask}, sigignore => [], umask => #{umask}}"
+        "cwd => #{cwd}, spawn => false, sigmask => #{sigmask}, sigignore => [], umask => #{umask}, fds => #{fds}}"
     end
 
     # Each case's expression is a fun applied at once, so no case binds a shell variable
@@ -88,7 +93,7 @@ module Erx
        # that holds no request is a send the driver refuses whole, with einval.
        Case.new(name: 'startup', seconds: 60, answer: '{startup,{error,einval},ok,<<"ok">>,127}', expression: line(<<~ERLANG)),
          (fun() ->
-            P = open_port({spawn_driver, "erx_program 7 0 4096 4 bin/args"}, [binary]),
+            P = open_port({spawn_driver, "erx_program 7 0 4096 4 0 0 bin/args"}, [binary]),
             <<"ok", D:64>> = port_control(P, 1, []),
             F = {erx_start, 1, \#{pid => 7, ppid => 1, pgid => 7, argv => [<<"args">>], env => [],
                                  cwd => <<"home/u">>, spawn => false, sigmask => [], sigignore => [],
@@ -110,6 +115,10 @@ module Erx
             P = erx_program:start(#{spec('bigargs', 8, argv: '[<<"bigargs">>, binary:copy(<<"x">>, 130000)]')}),
             receive {P, {exit_status, S}} -> {bigargs, S} after #{WAIT_MS} -> {bigargs, timeout, P} end
           end)().
+       ERLANG
+       # Lease 5 names no window buffer this session holds, so the start's take refuses it.
+       Case.new(name: 'no_lease', seconds: 60, answer: '{no_lease,{error,einval}}', expression: line(<<~ERLANG)),
+         (fun() -> {no_lease, erx_program:start(#{spec('args', 18, fds: '[{3, {mem, 5, 1}}]')})} end)().
        ERLANG
        # The note program writes one record of its own (test/guest/programs/note.c), and the
        # driver ends it with 256 + SIGSYS: a notice holding an atom no image has, which the
@@ -172,7 +181,7 @@ module Erx
        Case.new(name: 'owner_gone', seconds: 60, answer: '{owner_gone,ok,<<"ok">>,ok,none,true}',
                 expression: line(<<~ERLANG)),
          (fun() ->
-            P = open_port({spawn_driver, "erx_program 14 0 4096 4 bin/note"}, [binary]),
+            P = open_port({spawn_driver, "erx_program 14 0 4096 4 0 0 bin/note"}, [binary]),
             <<"ok", D:64>> = port_control(P, 1, []),
             {ok, F} = erx_prog_grammar:build_start(\#{pid => 14, ppid => 1, pgid => 14,
                                                      argv => [<<"note">>, <<"request">>], env => [],
@@ -203,7 +212,7 @@ module Erx
        # so spin's liberx ends it with 127 at that later frame, which shows it arrived.
        Case.new(name: 'busy', seconds: 60, answer: '{busy,ok,busy,room,ok,127}', expression: line(<<~ERLANG)),
          (fun() ->
-            P = open_port({spawn_driver, "erx_program 12 0 4096 4 bin/spin"}, [binary]),
+            P = open_port({spawn_driver, "erx_program 12 0 4096 4 0 0 bin/spin"}, [binary]),
             <<"ok", D:64>> = port_control(P, 1, []),
             {ok, F} = erx_prog_grammar:build_start(\#{pid => 12, ppid => 1, pgid => 12,
                                                      argv => [<<"spin">>, binary:copy(<<"x">>, 40000)], env => [],

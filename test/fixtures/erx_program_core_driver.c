@@ -104,6 +104,19 @@ specs(void)
 	print_spec("slots-max", spec);
 	spec.slots = ERX_PROG_DATA_SLOTS_MAX + 1;
 	print_spec("slots-past-max", spec);
+	spec = spec_named_image(good_image);
+	spec.lease = UINT64_MAX;
+	spec.lease_pages = 1;
+	print_spec("lease-max", spec);
+	spec.lease_pages = 0;
+	print_spec("lease-pages-0", spec);
+	spec.lease_pages = ERX_PROG_MEM_BYTES / ERX_PAGE_SIZE;
+	print_spec("lease-pages-max", spec);
+	spec.lease_pages = ERX_PROG_MEM_BYTES / ERX_PAGE_SIZE + 1;
+	print_spec("lease-pages-past-max", spec);
+	spec.lease = 0;
+	spec.lease_pages = 1;
+	print_spec("no-lease-with-pages", spec);
 	print_spec("cap-equals-pool", spec_of(good_image, strlen(good_image), 2, 0, POOL));
 	print_spec("cap-above-pool", spec_of(good_image, strlen(good_image), 2, 0, POOL + 1));
 	print_spec("cap-max", spec_of(good_image, strlen(good_image), 2, 0, UINT64_MAX));
@@ -300,6 +313,7 @@ ends(void)
 /* Each enum value's name, by its designator, so the test copies no numbering. */
 static const char *const act_names[] = {
 	[ERX_PROGRAM_DONE] = "done",
+	[ERX_PROGRAM_LEASE_TAKE] = "lease_take",
 	[ERX_PROGRAM_CHANNEL_CREATE] = "channel_create",
 	[ERX_PROGRAM_CHANNEL_MAP] = "channel_map",
 	[ERX_PROGRAM_BELL_CREATE] = "bell_create",
@@ -313,6 +327,7 @@ static const char *const act_names[] = {
 	[ERX_PROGRAM_GATE_REGISTER_IMAGE] = "gate_register_image",
 	[ERX_PROGRAM_ANCHOR_CREATE] = "anchor_create",
 	[ERX_PROGRAM_IMAGE_CREATE] = "image_create",
+	[ERX_PROGRAM_LEASE_MAP] = "lease_map",
 	[ERX_PROGRAM_IMAGE_MAP] = "image_map",
 	[ERX_PROGRAM_INSTALL] = "install",
 	[ERX_PROGRAM_BELL_BIND] = "bell_bind",
@@ -333,6 +348,7 @@ static const char *const act_names[] = {
 	[ERX_PROGRAM_BELL_DESTROY] = "bell_destroy",
 	[ERX_PROGRAM_CHANNEL_UNMAP] = "channel_unmap",
 	[ERX_PROGRAM_CHANNEL_DESTROY] = "channel_destroy",
+	[ERX_PROGRAM_LEASE_RETURN] = "lease_return",
 	[ERX_PROGRAM_REPORT] = "report",
 	[ERX_PROGRAM_STOP_ANCHOR] = "stop_anchor",
 	[ERX_PROGRAM_WRITE] = "write",

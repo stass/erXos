@@ -841,13 +841,13 @@ it; git history is the record of completed work.
     writes are bounded (`nosuspend` and a busy event for the core, or a `close/1` that kills the program itself).
   * **Programs** ([The startup message](docs/design-programs.md#the-startup-message)): the profile, `liberx`'s
     decoder, its fuzz targets and the descriptor table (`erx_prog_fd_mmap`, `erx_prog_fd_fstat`) take the `mem`
-    descriptor. Left: the session's mapping of a buffer's pages into a program's sub-space while it builds it, at
-    a first page below 2^32, and `erx_program:start/1` taking such a descriptor (it takes no descriptors yet); the
-    personality's `mmap`, `fstat` and `lseek` calling the table, as `read` and `write` do not yet either, where
-    `munmap` must know that every `mmap` of a mem descriptor returns the one mapping the session made, read-write
-    whatever the protection asked; `fstat`'s modes (a pipe end a FIFO of 0600, a mem range a regular file of 0600)
-    checked against FreeBSD's `pipe_stat` and `shm_stat`, unverified, and a pipe end's size, 0 where FreeBSD
-    reports the bytes readable.
+    descriptor; `erx_program:start/1` takes a window buffer's lease, the driver maps it at the buffer place, and
+    musl's descriptor seam routes a program's descriptor calls to the table. Left: a programs-suite case on erXos
+    that lends a real buffer, so the driver's `LEASE_MAP`, a program's `fstat` and `mmap` of fd 3, a `MAP_FIXED`
+    over it and the order of the anchor's destroy, the lease's return and `{erx_area_returned, N}` run on the
+    target (only the take's refusal does, the `no_lease` case of `tools/lib/erx/programs.rb`); and `fstat`'s modes
+    (a pipe end a FIFO of 0600, a mem range a regular file of 0600) checked against FreeBSD's `pipe_stat` and
+    `shm_stat`, unverified, and a pipe end's size, 0 where FreeBSD reports the bytes readable.
   * **Input from another domain** ([The display device](docs/design-display.md#the-display-device)):
     `abi/formats/input.txt`, its generated reader and writer and their fuzz target.
   * **The web** ([UIs: the browser renderer](docs/design-web.md#uis-the-browser-renderer)): `erx_ui_server` and
@@ -1428,14 +1428,25 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
-* [Medium] programs, a program's writes to 1 and 2 reach the system console (`liberx/backend/fiasco/program_task.c`,
-  `erx_fiasco_libc_write`; `musl/src/internal/erxos/syscall.c`, `console_write`): musl has no descriptor seam yet,
-  so a program's `write` to 1 or 2 goes to the console through the service whatever its session installed, and a
-  program that closes 1 still reaches it. The target (design-stopgap.md, "musl over the backend";
-  design-programs.md, "The POSIX-lite personality") is the seam into the program layer's table, where a descriptor
-  the table does not hold is `EBADF`, with the session installing standard output and error as pipe ends or
-  terminal opens. Remove `program_task.c`'s console stand-in when the seam lands. No test program of the programs
-  suite (`test/guest/programs`) writes to 1 or 2, so none depends on the stand-in.
+* [Medium] programs, `PROT_EXEC` in a program's `mmap` or `mprotect` (`musl/src/internal/erxos/syscall.c`, `mmap_call`
+  and `mprotect_call`; `liberx/backend/fiasco/program_task.c`, `erx_fiasco_libc_fd`): design-programs.md, "The
+  POSIX-lite personality", says it fails with `ENOTSUP`, since only the loader maps code, but the descriptor seam takes
+  only descriptor mmaps, `munmap` and the range check of `MAP_FIXED`, so an anonymous mapping or a protection change of
+  anonymous memory reaches musl's own rows, which refuse only write and execute together (a protection change that
+  meets a mapping, the window buffer's included, is refused by `liberx/backend/core/vm_table.c` already). Have the
+  program's seam refuse `PROT_EXEC` in both with `ENOTSUP`, with a check in the programs suite's `args` program.
+* [Medium] programs, the descriptor seam offers a listed set of calls (`musl/src/internal/erxos/syscall.c`,
+  `seam_offered`, and `liberx/backend/fiasco/program_task.c`, `erx_fiasco_libc_fd`, two lists that must agree):
+  design-programs.md, "The POSIX-lite personality", says every call that names a descriptor reaches the table, but
+  `dup`, `fsync`, `fdatasync`, `ftruncate`, `getdents64`, `preadv`, `pwritev`, `fchmod`, `fchown`, `fstatfs`,
+  `flock` and the `*at` calls with a directory descriptor reach musl's default, `ENOSYS`, not `EBADF`. It fails
+  safe: none reaches the console or the kernel. Make it hold by construction: offer the seam every call, the
+  non-program seams answering false as they do, and have the program's seam hand back one closed list of calls that
+  name no descriptor.
+* [Low] programs, `writev` through the seam (`liberx/backend/fiasco/program_task.c`, `vector_call`) writes each entry
+  separately, so entries that sum to at most `PIPE_BUF` are not one atomic write against another writer of the same
+  pipe; gather them into one pipe write. `lseek` ignores `whence` and `ioctl` its request (`liberx/program/fd.c`), so
+  a bad `whence` answers 0 and `FIONBIO` on a pipe answers `ENOTTY`.
 * [Medium] device-tree reader, split DMA translations (`kernel/core/dt.c`, `range_read`): a translation written as
   several adjacent `dma-ranges` entries, as a full 32-bit identity map under a one-cell `#size-cells` must be,
   leaves several windows with RAM behind them, and the device gets `ranges` (no DMA range). It fails safe. Merge

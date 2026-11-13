@@ -676,8 +676,11 @@ The steps, each in the one place that serializes it:
    the pages `prog_mem_bytes` holds, and refuses anything else with
    `badarg` before it opens the port. It writes the number and `Pages`
    into the port's open command, as decimal words that the driver reads
-   as it reads the command's others, refusing a word above 2^64 - 1 or a
-   number of 0, and `Pages` into the startup message's descriptor. The
+   as it reads the command's others, refusing a word above 2^64 - 1, and
+   `Pages` into the startup message's descriptor. A start without a
+   buffer writes `0 0` in their place, which the driver reads as no
+   buffer; the start core refuses a number of 0 with `Pages` above 0 and
+   a number with `Pages` of 0. The
    driver's start, which runs under the port's lock inside `open_port`
    ([design-runtime.md](design-runtime.md#programs-as-ports)), takes the
    lease as its first effect, with `erx_area_lease_take`, which answers
