@@ -64,7 +64,7 @@ class QemuDisplayTest < Minitest::Test
     disk = Erx::QemuPlan::Disk.new(path: '/a')
     nic = Erx::QemuPlan::Nic.new(frames_port: 5001, peer_port: 5002, echo_port: 5003)
     error = assert_raises(Erx::Error) { plan(display: DISPLAY.new(qmp_socket: @socket, gpu: 24), disks: [disk]) }
-    assert_includes error.message, '0x0a003000'
+    assert_includes error.message, '0x0a003000 (disks, display)'
     assert_raises(Erx::Error) { plan(display: DISPLAY.new(qmp_socket: @socket, tablet: 22), nic: nic) }
     assert_raises(Erx::Error) { plan(display: DISPLAY.new(qmp_socket: @socket, keyboard: 28), disks: [disk]) }
     # The same transports are fine when the disks and the network device are not there.

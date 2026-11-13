@@ -398,6 +398,8 @@ module Erx
                    name: 'fuzz-erx-apps-ctl', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_blk_request.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-blk-request', deadline: 300, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_virtio_gpu_core.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-virtio-gpu-core', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_virtio_net_frame.rb'), '--seed',
                     options.fetch(:seed).to_s],
                    name: 'fuzz-erx-virtio-net-frame', deadline: 300, chdir: ROOT, env: environment)

@@ -1,9 +1,9 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
-# virtio's split virtqueue and the virtio-mmio block device, from the OASIS
-# Virtual I/O Device (VIRTIO) Version 1.2 specification: sections 2.7 (split
-# virtqueues), 4.2.2 (the MMIO transport's values), 5.1 (the network device) and 5.2
-# (the block device).
+# virtio's split virtqueue and the virtio-mmio block, network and GPU devices, from the
+# OASIS Virtual I/O Device (VIRTIO) Version 1.2 specification: sections 2.7 (split
+# virtqueues), 4.2.2 (the MMIO transport's values), 5.1 (the network device), 5.2 (the
+# block device) and 5.7 (the GPU device).
 # Every field is little-endian, as a version 1 device requires.
 limit virtio_mmio_magic u32 0x74726976
 limit virtio_mmio_version u32 2
@@ -82,3 +82,95 @@ layout erx_virtio_blk_req_header wire_le 8 16
   field type u32 0
   field reserved u32 4
   field sector u64 8
+
+# The 2D GPU device (section 5.7), its values and layouts as FreeBSD's
+# sys/dev/virtio/gpu/virtio_gpu.h and sys/dev/virtio/virtio_ids.h at release/14.1.0 give
+# them (device ID 16). Its control queue is queue 0; every request starts with
+# erx_virtio_gpu_ctrl_hdr and every response is one, followed by its data. The answer to a
+# request with the FENCE flag carries the flag and the request's fence_id.
+limit virtio_id_gpu u32 16
+limit virtio_gpu_queue_control u32 0
+limit virtio_gpu_max_scanouts u32 16
+limit virtio_gpu_flag_fence u32 1
+limit virtio_gpu_cmd_get_display_info u32 0x0100
+limit virtio_gpu_cmd_resource_create_2d u32 0x0101
+limit virtio_gpu_cmd_resource_unref u32 0x0102
+limit virtio_gpu_cmd_set_scanout u32 0x0103
+limit virtio_gpu_cmd_resource_flush u32 0x0104
+limit virtio_gpu_cmd_transfer_to_host_2d u32 0x0105
+limit virtio_gpu_cmd_resource_attach_backing u32 0x0106
+limit virtio_gpu_cmd_resource_detach_backing u32 0x0107
+limit virtio_gpu_resp_ok_nodata u32 0x1100
+limit virtio_gpu_resp_ok_display_info u32 0x1101
+limit virtio_gpu_resp_err_unspec u32 0x1200
+limit virtio_gpu_resp_err_out_of_memory u32 0x1201
+limit virtio_gpu_resp_err_invalid_scanout_id u32 0x1202
+limit virtio_gpu_resp_err_invalid_resource_id u32 0x1203
+limit virtio_gpu_resp_err_invalid_context_id u32 0x1204
+limit virtio_gpu_resp_err_invalid_parameter u32 0x1205
+# The pixel format whose bytes in memory are blue, green, red and an unused byte, which is
+# the layout of erx_memdraw's x8r8g8b8 channel: one little-endian 32-bit word per pixel.
+limit virtio_gpu_format_b8g8r8x8_unorm u32 2
+
+# The header of every request and response.
+layout erx_virtio_gpu_ctrl_hdr wire_le 8 24
+  field type u32 0
+  field flags u32 4
+  field fence_id u64 8
+  field ctx_id u32 16
+  field ring_idx u8 20
+  field padding0 u8 21
+  field padding1 u16 22
+
+# A rectangle by its origin and size, in pixels.
+layout erx_virtio_gpu_rect wire_le 4 16
+  field x u32 0
+  field y u32 4
+  field width u32 8
+  field height u32 12
+
+# One scanout of the display-info response, whose header virtio_gpu_max_scanouts of
+# these follow.
+layout erx_virtio_gpu_display_one wire_le 4 24
+  field r erx_virtio_gpu_rect 0
+  field enabled u32 16
+  field flags u32 20
+
+# The requests the display driver makes.
+layout erx_virtio_gpu_resource_create_2d wire_le 8 40
+  field hdr erx_virtio_gpu_ctrl_hdr 0
+  field resource_id u32 24
+  field format u32 28
+  field width u32 32
+  field height u32 36
+
+layout erx_virtio_gpu_set_scanout wire_le 8 48
+  field hdr erx_virtio_gpu_ctrl_hdr 0
+  field r erx_virtio_gpu_rect 24
+  field scanout_id u32 40
+  field resource_id u32 44
+
+layout erx_virtio_gpu_resource_flush wire_le 8 48
+  field hdr erx_virtio_gpu_ctrl_hdr 0
+  field r erx_virtio_gpu_rect 24
+  field resource_id u32 40
+  field padding u32 44
+
+layout erx_virtio_gpu_transfer_to_host_2d wire_le 8 56
+  field hdr erx_virtio_gpu_ctrl_hdr 0
+  field r erx_virtio_gpu_rect 24
+  field offset u64 40
+  field resource_id u32 48
+  field padding u32 52
+
+# A resource's backing: the request, then nr_entries of erx_virtio_gpu_mem_entry, each a
+# range of memory the device reads by its own address.
+layout erx_virtio_gpu_resource_attach_backing wire_le 8 32
+  field hdr erx_virtio_gpu_ctrl_hdr 0
+  field resource_id u32 24
+  field nr_entries u32 28
+
+layout erx_virtio_gpu_mem_entry wire_le 8 16
+  field addr u64 0
+  field length u32 8
+  field padding u32 12

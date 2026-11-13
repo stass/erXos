@@ -89,6 +89,10 @@ module Erx
     # tablet .13, so the three are one unit that goes whole to the display domain and share
     # no register page with the disks or the network device (Display, the unit rule).
     DISPLAY_TRANSPORTS = { gpu: 15, keyboard: 14, tablet: 13 }.freeze
+    # One virtio device of a plan on its transport: unit names the domain the device goes
+    # to (:disks, :nic or :display), bus its virtio-mmio-bus number, and device the -device
+    # value before its bus.
+    Placement = Data.define(:unit, :bus, :device)
     # The domain slirp's DHCP server hands the guest in its lease (option 15), which the
     # guest's resolver takes as its search list.
     NIC_DOMAIN = 'erxos.test'
@@ -139,7 +143,11 @@ module Erx
         super(qmp_socket: qmp_socket.dup.freeze, gpu: gpu, keyboard: keyboard, tablet: tablet)
       end
 
-      def buses = [gpu, keyboard, tablet]
+      # The display's three devices on their transports, all of the unit :display.
+      def placements
+        [['virtio-gpu-device', gpu], ['virtio-keyboard-device', keyboard], ['virtio-tablet-device', tablet]]
+          .map { |device, bus| Placement.new(unit: :display, bus: bus, device: device) }
+      end
     end
     # As hostlink, no host link at all: one serial line, the console's, as on a machine
     # with one UART, such as the website's emulator (docs/design-stopgap.md, "Device paths").
@@ -199,7 +207,8 @@ module Erx
       end
       raise Error, 'a network device is a QemuPlan::Nic' unless nic.nil? || nic.is_a?(Nic)
       raise Error, 'a display is a QemuPlan::Display' unless display.nil? || display.is_a?(Display)
-      check_display_pages(display, disks: disks, nic: nic)
+      devices = placements(disks: disks, nic: nic, display: display)
+      check_pages(devices)
       # QEMU listens on the socket as soon as it starts, so its directory is checked before.
       Qmp.check_directory(display.qmp_socket) if display
       words = command_line.to_s.split(/ /)
@@ -221,8 +230,8 @@ module Erx
        '-cpu', accel == 'hvf' ? 'host' : 'cortex-a76',
        '-smp', cpus.to_s, *(deterministic ? DETERMINISTIC_ARGUMENTS : []), '-m', memory_mib.to_s,
        '-display', 'none', '-monitor', 'none', '-nic', 'none',
-       *(disks.empty? && nic.nil? && display.nil? ? [] : DISK_TRANSPORT_ARGUMENTS), *disk_arguments(disks), *nic_arguments(nic),
-       *display_arguments(display),
+       *(devices.empty? ? [] : DISK_TRANSPORT_ARGUMENTS), *disk_arguments(disks), *nic_arguments(nic),
+       *device_arguments(devices), *qmp_arguments(display),
        '-no-reboot', *serial_arguments(serial, serial_input), *hostlink_arguments(hostlink),
        '-kernel', image,
        *(initrd ? ['-initrd', initrd] : []), *(line ? ['-append', line] : []),
@@ -268,11 +277,9 @@ module Erx
     # device that serves it, in the order given. Without a disk, nothing, so
     # the transport options reach only plans that have a device to use them.
     def disk_arguments(disks)
-      drives = disks.each_with_index.flat_map do |disk, index|
-        ['-drive', "file=#{disk.path},format=raw,if=none,id=disk#{index}",
-         '-device', "virtio-blk-device,drive=disk#{index},bus=virtio-mmio-bus.#{LAST_TRANSPORT - index}"]
+      disks.each_with_index.flat_map do |disk, index|
+        ['-drive', "file=#{disk.path},format=raw,if=none,id=disk#{index}"]
       end
-      drives
     end
 
     # The network device and its backends (Nic), or nothing.
@@ -286,34 +293,41 @@ module Erx
                   "remote.type=inet,remote.host=#{loopback},remote.port=#{nic.peer_port}",
        '-netdev', 'hubport,id=nic_hub_user,hubid=0,netdev=nic_user',
        '-netdev', 'hubport,id=nic_hub_frames,hubid=0,netdev=nic_frames',
-       '-netdev', 'hubport,id=nic_hub_guest,hubid=0',
-       '-device', "virtio-net-device,netdev=nic_hub_guest,bus=virtio-mmio-bus.#{NIC_TRANSPORT}"]
+       '-netdev', 'hubport,id=nic_hub_guest,hubid=0']
     end
 
-    # The display's three devices, each pinned to its transport, and QMP on its socket, or
-    # nothing.
-    def display_arguments(display)
-      return [] if display.nil?
+    # QMP on the display's socket, or nothing.
+    def qmp_arguments(display)
+      display ? ['-qmp', "unix:#{display.qmp_socket},server=on,wait=off"] : []
+    end
 
-      [['virtio-gpu-device', display.gpu], ['virtio-keyboard-device', display.keyboard],
-       ['virtio-tablet-device', display.tablet]].flat_map do |device, bus|
-        ['-device', "#{device},bus=virtio-mmio-bus.#{bus}"]
-      end + ['-qmp', "unix:#{display.qmp_socket},server=on,wait=off"]
+    # Every virtio device of a plan on its transport: the disks from bus .31 down, the
+    # network device, the display's three. The -device arguments and the page check both
+    # read this one list, so no device reaches QEMU on a bus the check did not see.
+    def placements(disks:, nic:, display:)
+      [*disks.each_index.map do |index|
+         Placement.new(unit: :disks, bus: LAST_TRANSPORT - index, device: "virtio-blk-device,drive=disk#{index}")
+       end,
+       *(nic ? [Placement.new(unit: :nic, bus: NIC_TRANSPORT, device: 'virtio-net-device,netdev=nic_hub_guest')] : []),
+       *(display ? display.placements : [])]
+    end
+
+    # One -device for each placement, pinned to its bus.
+    def device_arguments(devices)
+      devices.flat_map { |placement| ['-device', "#{placement.device},bus=virtio-mmio-bus.#{placement.bus}"] }
     end
 
     # The unit rule (docs/design-shared-devices.md): the transports of one 4 KiB register
-    # page go whole to one domain, so the display's pages are the display's alone. Raises
-    # when a page of the display's transports holds a disk's or the network device's.
-    def check_display_pages(display, disks:, nic:)
-      return if display.nil?
-
-      others = disks.each_index.map { |index| LAST_TRANSPORT - index }
-      others << NIC_TRANSPORT if nic
-      shared = display.buses.map { |bus| bus / TRANSPORTS_PER_PAGE } & others.map { |bus| bus / TRANSPORTS_PER_PAGE }
+    # page go whole to one domain. Raises when one page holds transports of two units.
+    def check_pages(devices)
+      shared = devices.group_by { |placement| placement.bus / TRANSPORTS_PER_PAGE }
+                      .select { |_page, held| held.map(&:unit).uniq.size > 1 }
       return if shared.empty?
 
-      raise Error, "display transports share register page #{shared.map { |page| format('0x%08x', 0x0a000000 + (page * 0x1000)) }.join(', ')} " \
-                   'with the disks or the network device'
+      pages = shared.map do |page, held|
+        format('0x%08x (%s)', 0x0a000000 + (page * 0x1000), held.map(&:unit).uniq.join(', '))
+      end
+      raise Error, "transports of different units share a register page: #{pages.join('; ')}"
     end
 
     # The second serial line, after the console's, which QEMU virt places at

@@ -532,7 +532,17 @@ it; git history is the record of completed work.
   resource's backing, a framebuffer), and on the direct path the driver maps a client's pixel area read-only into its
   device's DMA window. The device NIF has neither: requests go through `post/4`, which owns its buffers. It needs a
   region of the device's record (made once, wrapped by `erx_memdraw:wrap/4`, never posted) and the mapping of an area
-  into the DMA window, before the display driver.
+  into the DMA window, before the display driver. [design-runtime.md](docs/design-runtime.md#the-device-nif) does
+  not name the region's interface yet: how it is made, and how its device address reaches the device's
+  `RESOURCE_ATTACH_BACKING` request (a `virtio_gpu_mem_entry` in the request's bytes) while no device address reaches
+  Erlang. `erx_virtio_gpu_core` builds every other request and parses every answer; the driver process, the
+  development manifest's display domain and the QEMU screenshot case wait on that design.
+* [Low] `otp/erts/emulator/nifs/erxos/erx_device.c` (`apply_post`): `post/4` copies only the `out` segments into the
+  pool buffer and leaves the `in` bytes as the buffer's last request left them, and `complete/2` cuts the answer at the
+  length the device reports, so a device that reports a length longer than it wrote hands the driver its own earlier
+  bytes as an answer (a display-info answer of 408 bytes with only its header written decodes as 16 stale scanouts).
+  Zero the `in` segments in the post's copy. Separately, `erx_virtio_gpu_core:mode/2` bounds scanout 0 only by the
+  memory given; bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
 * [High] [design-apps.md](docs/design-apps.md): the code the design asks for, in the order
   [Track A](docs/plan.md#track-a-apps) builds it. Built: the `start` rows and property 17's structural clauses and
   its planning clause (root's console session and each enabled row's session planned by the domain library beside
