@@ -2364,15 +2364,15 @@ side.
   stage (a), `raspi4b`.
 * **The manual board pass.** The board is a 4 GB Raspberry Pi 4. There
   is no automated rig: the build produces the SD card's image, and the
-  transcript checks and the power-cut checklist run by hand on the
-  board, with power cut by pulling the supply. An automated rig
+  transcript checks and the power-cut checklist are run by hand on the
+  board, power being cut by pulling the supply. An automated rig
   (serial capture, power relay, SD card switch) is not part of 1b-I.
 * **The power-cut checklist.** A write load on the board writes files
   under `/data`, syncs each, and prints a numbered mark on the console
   once each file's sync has returned, naming the files synced so far.
-  Power is pulled just after a mark, ten times, spread over
-  the load's marks from first to last, powers the board back on, and
-  lets the next boot list `/data`. For each cut the board pass's record
+  Power is cut by hand just after a mark, ten times, the cuts spread
+  over the load's marks from first to last; after each, the board is
+  powered back on and the next boot lists `/data`. For each cut the board pass's record
   lists the mark it followed and, for each file synced before it,
   whether the file survived whole; every synced file must.
 * Every parser of what a Pi device writes (the SD controller's responses

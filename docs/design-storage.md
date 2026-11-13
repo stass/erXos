@@ -658,8 +658,9 @@ CMD7, waits for transfer complete as well.
 
 **The start sequence.** Every start and every restart runs it whole:
 
-1. The device record, `erx_device:open/1` and `irq_bind/2` on the
-   record's line, as the virtio device process does; `control2` read and
+1. The device record, `erx_device:open/1` and `erx_irq_line:attach/2`
+   on the record's line, which on the Pi 4 is shared and so joins the
+   line's owner ([below](#the-sd-host-controller)); `control2` read and
    a set 1.8 V signalling enable refused.
 2. The controller's reset for all (`SDHCI_RESET_ALL`, `sdhci.h:200-201`),
    polled until the bit clears, for at most 100 ms (facts record,
@@ -780,27 +781,45 @@ Every step has a deadline the device process keeps with a timer: 10 s,
 Linux's default bound on a command that never completes (facts record,
 "Error recovery"), for each command and for each block of data. An
 interrupt is handled as on virtio: the device process reads `interrupt`
-once; a word of zero or of all ones is not this controller's and is
-dropped, as the line is shared (facts record, "Interrupts";
-[design-platforms.md](design-platforms.md#raspberry-pi-4-model-b));
-otherwise it writes the same word back to clear the bits it read, which
-are cleared by writing ones, acknowledges the line with
-`erx_device:irq_ack/2` and hands the word to the transfer's state
+once; a word of zero or of all ones is not this controller's (facts
+record, "Interrupts"), and it answers the line as done with nothing
+handed on; otherwise it writes the same word back to clear the bits it
+read, which are cleared by writing ones, acknowledges with
+`erx_irq_line:ack/1` and hands the word to the transfer's state
 machine. An event with no request in flight is dropped.
+
+**The SD controller's line.** On the Raspberry Pi 4, EMMC2 shares its
+interrupt line with the SoC's legacy SD controller, `&sdhci`
+(`bcm2711.dtsi:429, 1147-1149`), so by the unit rule the two are one
+unit, given whole to the storage domain
+([design-shared-devices.md](design-shared-devices.md#the-unit-rule)),
+and the record marks the line shared. The device process attaches through
+the line's owner, `erx_irq_line`, with one member, itself, as every
+driver on a shared line does
+([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)):
+the legacy controller has no driver, as the SPI controllers on the mini
+UART's line have none. `erx_blk_sup` starts the owner before the device
+process, `rest_for_one`, from `erx_irq_line:owners/1` over the records.
+A delivery is a hint to look: a round the legacy controller raised finds
+EMMC2's `interrupt` empty, and the device process answers it done.
 
 **Failure.** Any error bit in `interrupt`, an error bit in an R1, an
 inhibit that does not clear, a card not ready after a write, a missed
 deadline or a response that disagrees answers the request in flight
 `{error, {device, Detail}}`, and every request in the backlog the same;
-the device process ends with one line naming the step and the bits, and
-its supervisor starts it again, so the start sequence's reset for all
-and CMD0 bring controller and card back from whatever state the error
-left. FreeBSD and Linux reset the controller's command and data lines in
+the device process ends with one line naming the step and the bits.
+`erx_blk_sup` restarts nothing, so its end ends the storage domain, and
+the domain service restarts the domain within its row's intensity
+([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)),
+whose new device process runs the start sequence: its reset for all and
+CMD0 bring controller and card back from whatever state the error left,
+and littlefs mounts `/data` afresh. FreeBSD and Linux reset the controller's command and data lines in
 place after an error (`sdhci.c:1892-1893, 2052-2053`; facts record,
 "Error recovery"); the driver does not, because the start sequence
 covers every state those resets cover and more, so there is one recovery
-path and no recovery state. Its cost is a card identification, at worst
-the ACMD41 bound, after an error a healthy card makes rarely. A write
+path and no recovery state. Its cost is the storage domain's restart
+and a card identification, at worst the ACMD41 bound, after an error a
+healthy card makes rarely. A write
 that fails leaves its sectors unknown, as an unacknowledged write does
 for the file system above.
 
@@ -1458,7 +1477,7 @@ a file closed and opened again may get a new qid path
 | A crafted or corrupt data partition | the file system's bounds checks and checksums | that partition, which a mount that fails never writes | the failing process ends and the storage domain with it; the domain service starts it again from its specification within its restart intensity, and a volume that fails every mount leaves it ended, never formatted ([A mount never formats](#read-write-storage)) | the domain's death record; that partition's files unavailable |
 | littlefs's C code crashes | the port's sub-space faults, and its owner sees `{exit_status, N}` | the partition as littlefs left it; an unacknowledged operation has an unknown outcome | the owner's supervisor restarts the port once the window has answered the port's outstanding requests, and the port mounts the volume afresh | affected operations fail with `eio`; the partition unavailable until the remount |
 | The block device reports an error, or the controller stops answering | the device process's completions and its deadline | the request's buffer, quarantined until the device is reset ([design-runtime.md](design-runtime.md#the-device-nif)) | the device process reports to the device service, which resets the device | `{error, eio}` on the request; the inspector's device record |
-| The SD card or its controller reports an error, or misses a deadline | the device process's interrupt decode, the card's R1 status and the step's timer ([The SD host controller](#the-sd-host-controller)) | the failed write's sectors unknown; no buffer, since programmed I/O lends the controller no memory | the device process ends and its supervisor starts it again, whose start resets the controller and returns the card to idle with CMD0 | `{error, eio}` on the request in flight and on the backlog; one log line naming the step and the status bits |
+| The SD card or its controller reports an error, or misses a deadline | the device process's interrupt decode, the card's R1 status and the step's timer ([The SD host controller](#the-sd-host-controller)) | the failed write's sectors unknown; no buffer, since programmed I/O lends the controller no memory | the device process ends, which ends the storage domain, since `erx_blk_sup` restarts nothing; the domain service restarts the domain, whose device process's start resets the controller and returns the card to idle with CMD0 | `{error, eio}` on the request in flight and on the backlog; one log line naming the step and the status bits |
 | The domain that runs the block driver ends | the domain service | every window dead; every client's reads and writes fail | the domain service starts the domain again from its specification, whose creation gives it the device again, the device service names its windows, and each client receives its window anew as a grant | `eio` on every file of every storage service until the windows return; the domain's death record |
 | A FAT volume found dirty, or a removal while mounted | the volume's dirty flag; the window's errors | the volume, read-only | none on erXos; the volume is repaired on another machine | a report naming the volume; `{error, erofs}` for writes, `{error, eio}` after a removal |
 | An update's signature or manifest fails its check | the verifier, before decoding | nothing written | none needed | the update refused, with the reason |
@@ -1508,8 +1527,11 @@ and one that passes `cmdtm` to `erx_device:write/3`); a QEMU test that a trial b
 the record's, whatever its clients ask; a test of the same storage
 service against a local window and against one exported from a driver
 domain of its own, which must pass both unchanged; a controller that
-returns a malformed completion, whose partition and device processes fail
-and restart without the domain ending; and a kill of the driver's domain
+returns a malformed completion, whose device process fails and ends the
+storage domain, since `erx_blk_sup` restarts nothing, after which the
+domain service restarts the domain and the driver drives the device
+again ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain));
+and a kill of the driver's domain
 while clients hold windows, after which every client sees `eio`, the
 domain service restarts the domain, and the clients' windows return.
 
@@ -1560,7 +1582,8 @@ The SD controller, each test paired with the fault that proves it ran:
   with a medium whose data partition holds a different known file, and
   the read-back check fails, which shows the bytes came from the card.
 * Recovery on the model: the device process is killed while a write load
-  runs; clients see `eio`, the restart identifies the card from the
+  runs; clients see `eio`, the storage domain ends and the domain service
+  restarts it, the new device process identifies the card from the
   transfer state the model's card was left in, and the load resumes; the
   seeded fault leaves CMD0 out of the start sequence, and the restart
   fails to identify the card.
@@ -1869,8 +1892,16 @@ outside this design are decided
   U-Boot's) are used only through the facts record,
   [research-sdhci-bcm2711.md](research-sdhci-bcm2711.md), facts and
   working principles without code, written by an agent that writes no
-  erXos code for this driver; it cites FreeBSD 14.3.0-RELEASE
-  (`8c9ce319fe`), whose line numbers can differ from the revision below. The code reference is FreeBSD's SD stack,
+  erXos code for this driver. The facts record cites FreeBSD
+  14.3.0-RELEASE at `8c9ce319fef765890ce518cab85d3a470b669849`, while this design cites `releng/15.0`
+  at `2b7df8c16d`, below; both were fetched and compared for this design. The files either cites differ only
+  in build interfaces (headers, `DEVICE_UNIT_ANY`, `bus_attach_children`), sysctl
+  types, a quirks sysctl and two early returns for SPI-mode buses in `mmc.c`; no
+  fact this design or the record cites differs, though line numbers shift by a
+  few lines. The 14.3.0 hashes: `sdhci.c` `f610ce62058120de45448333be459373e992d753c4a384d8222839459b3b1abc`, `sdhci_fdt.c`
+  `71439ab0aafdf17b5249d87f56fa1a0f3d66e29672d199b27fd960bd0fcd59e8`, `mmc.c` `738725016981e017ed31497938b4fd7744246c7046ba6a2962005931e4ba5dfa`, `mmcreg.h` `74ff2ab498265ad51188205858899a0122089a47c9924e61a3002808deb47829`,
+  `mmcsd.c` `896acbb6e1e7689a006e1232f2c2ec6371b64af3931dba5c57916c5aa1c5557d`, `bcm2835_sdhci.c` `2928861d93c34d42a5cde74bf523e5f1018ee68de3c5c35f33620d2059952a92`, and `sdhci.h`
+  identical; `sdhci_fdt.c`, which neither cites for EMMC2, was reworked. The code reference is FreeBSD's SD stack,
   `releng/15.0` at commit `2b7df8c16dc77a6774a4d309477b1238fe725d93`,
   fetched from github.com/freebsd/freebsd-src and read as data:
   `sys/dev/sdhci/sdhci.c` (SHA-256

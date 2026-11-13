@@ -308,10 +308,15 @@ I/O voltage as regulators on the firmware's GPIO expander
 (`bcm2711-rpi-4-b.dts:26-48, 190-196`), which no domain reaches (PL2):
 the card is powered and at the signalling the firmware left. GIC SPI 126
 is also the interrupt of the legacy SD controller, `&sdhci`
-(`bcm2711.dtsi:1147-1149`), which no domain drives; whether the firmware
-leaves that controller able to raise the shared line is *to be settled
-by the board probe*: a level line held by that controller would fire
-without end, which the probe sees as deliveries while EMMC2 is idle. The VL805
+(`bcm2711.dtsi:1147-1149`), so by the unit rule the two controllers are
+one unit, given whole to the storage domain
+([design-shared-devices.md](design-shared-devices.md#the-unit-rule)), and
+the record marks the line shared. The SD device process attaches through
+the line's owner, `erx_irq_line`, of which it is the one member, as every
+driver on a shared line does
+([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain));
+the legacy controller has no driver, as the SPI controllers on the mini
+UART's line have none. The VL805
 USB controller sits behind the Pi 4's PCIe bridge, which no domain drives,
 so no domain holds it and the Pi 4 has no USB. Its cores have the CRC32
 instructions but not the cryptography extension, so SHA-256, which every

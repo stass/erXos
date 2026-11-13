@@ -901,3 +901,12 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   trigger to driver and trigger to acknowledgement, against the same stand-in bound directly, at 1 and
   10 000 triggers a second. The fix on the table is fan-out in the device NIF, at the price of a sink kind
   the event table does not have.
+* **[Medium] storage, the SD controller's programmed I/O in Erlang.** `erx_blk_sd`
+  ([design-storage.md](design-storage.md#the-sd-host-controller)) moves each 512-byte block
+  as 128 register accesses through the controller's data port, each a device-NIF BIF, and
+  takes one interrupt per block through the line's owner, with at least 6 us between the
+  writes other than to the data port, all on the device process's core. A 4-bit bus carries
+  at most 12.5 MB/s at 25 MHz and 25 MB/s at 50 MHz. `tools/erx bench blk` on the Raspberry
+  Pi 4 settles it, at default and high speed, for reads and writes of 8 and 128 sectors; the
+  fixes are a C bulk copy of the data port as a per-byte primitive of the device NIF, a
+  measured row of the driver table, and DMA, whose design is pending.
