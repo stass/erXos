@@ -4,9 +4,10 @@
 %% EUnit cases of the stack's tree and its failure policy (docs/design-network-stack.md,
 %% "The process tree"): the end of any child of erx_net_sup ends the stack, which restarts
 %% none; a link's end stays under erx_net_interfaces, which starts the link again, and a
-%% minted grant outlives it; and network_ctl's controlled object, erx_net_erxos's units
+%% minted grant outlives it; network_ctl's controlled object, erx_net_erxos's units
 %% map acted on through erx_driver_ctl, is a link that a stop leaves stopped and a start
-%% builds again, with the grant intact.
+%% builds again, with the grant intact; and a configured lo0 runs over erx_net_loop and
+%% gives nothing but its addresses ("Loopback").
 %%
 %% This module is also the stack's runtime in these cases: it starts a grant for any
 %% grantee, which erx_net_local refuses, so that a minted grant exists outside erXos, and
@@ -33,8 +34,10 @@ serve(_MaxRequest) ->
 start_grant(Grantee, Limits) ->
     erx_net_grant:start_link(Grantee, Limits).
 
+%% Keeps the interfaces it was given, which the configured-lo0 case reads.
 -doc false.
 children(Interfaces) ->
+    persistent_term:put({?MODULE, children}, Interfaces),
     erx_net_local:children(Interfaces).
 
 -doc false.
@@ -59,6 +62,64 @@ units_need_one_interface_test() ->
     Two = [One, One#{name := genet1}],
     [?assertEqual({refuse, badarg, Units}, erx_driver_ctl:admit({stop, net}, from, Units))
      || Units <- [units_of([]), units_of(Two)]].
+
+%% A configured lo0 may give only a static ip4 and ingress, as FreeBSD's ifconfig_lo0 only
+%% sets lo0's addresses: one configured for DHCP, with a gateway or with a transport of its
+%% own is refused with the key it gave, before any process of the stack starts.
+configured_lo0_refused_test_() ->
+    Static = #{addr => <<127, 0, 0, 1>>, plen => 8},
+    [{Title, ?_test(lo0_refused(Key, Lo0))}
+     || {Title, Key, Lo0} <- [{"a DHCP lo0 is refused", ip4, #{name => lo0, ip4 => dhcp}},
+                              {"an lo0 with a gateway is refused", ip4,
+                               #{name => lo0, ip4 => Static#{gateway => <<127, 0, 0, 2>>}}},
+                              {"an lo0 with a transport is refused", transport,
+                               #{name => lo0, ip4 => Static,
+                                 transport => {erx_net_pipe, #{far => {process, ?FAR},
+                                                               lladdr => ?MAC}}}}]].
+
+lo0_refused(Key, Lo0) ->
+    wait_gone(erx_net_tables),
+    Answer = start_unlinked(#{interfaces => [Lo0 | interfaces()], runtime => ?MODULE}),
+    %% A stack that started is stopped, so that it fails this case alone.
+    [try proc_lib:stop(Stack, shutdown, infinity) catch exit:noproc -> ok end
+     || {ok, Stack} <- [Answer]],
+    ?assertEqual({error, {lo0, Key}}, Answer),
+    ?assertEqual(undefined, whereis(erx_net_tables)).
+
+%% erx_net_sup:start_link/1 with the case's exits trapped until a stack that started is
+%% unlinked, so that a stack that fails to start, or ends, fails the case with its answer
+%% rather than ending the case's process.
+start_unlinked(Config) ->
+    Trap = process_flag(trap_exit, true),
+    try
+        case erx_net_sup:start_link(Config) of
+            {ok, Stack} = Started -> unlink(Stack), Started;
+            Refused -> Refused
+        end
+    after
+        process_flag(trap_exit, Trap)
+    end.
+
+%% A configured lo0 with an address of its own runs over erx_net_loop beside the stack's
+%% other interface, with no transport named, and is no interface of the runtime's: its
+%% children are given the other interface alone, as erx_net_erxos's units need.
+configured_lo0_test_() ->
+    Lo0 = #{name => lo0, ip4 => #{addr => <<127, 0, 0, 2>>, plen => 8}},
+    {setup, fun() -> start_stack([Lo0 | interfaces()]) end, fun stop_stack/1,
+     [{"a configured lo0 runs over the loop", fun configured_lo0_runs_over_the_loop/0}]}.
+
+configured_lo0_runs_over_the_loop() ->
+    ?assertEqual(interfaces(), persistent_term:get({?MODULE, children})),
+    #{lladdr := none, mtu := 16384, addrs := Addrs} = until(fun lo0_status/0),
+    ?assert(lists:any(fun(#{addr := Addr}) -> Addr =:= {127, 0, 0, 2} end, Addrs)).
+
+%% lo0's answer in erx_net:interfaces/0 once both of the stack's interfaces answer, else
+%% false.
+lo0_status() ->
+    case erx_net:interfaces() of
+        {ok, [_, _] = Both} -> hd([If || #{name := lo0} = If <- Both]);
+        _ -> false
+    end.
 
 %% Killing the registered child Name of erx_net_sup ends the stack once, with nothing
 %% restarted: a top-level restart would leave the minted grants dead or name a mint after
@@ -136,11 +197,15 @@ mint() ->
 %% not erx_virtio_net's vtnet0, so a units map that names the link by anything but the
 %% interface's own name fails the control cases.
 start_stack() ->
+    start_stack(interfaces()).
+
+%% The stack over Interfaces, whose pipes reach the far end that drops every frame.
+start_stack(Interfaces) ->
     wait_gone(erx_net_tables),
     Test = self(),
     Far = spawn(fun() -> true = register(?FAR, self()), Test ! {far, self()}, drop() end),
     receive {far, Far} -> ok end,
-    {ok, Stack} = erx_net_sup:start_link(#{interfaces => interfaces(), runtime => ?MODULE}),
+    {ok, Stack} = erx_net_sup:start_link(#{interfaces => Interfaces, runtime => ?MODULE}),
     unlink(Stack),
     {Stack, Far}.
 

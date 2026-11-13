@@ -28,7 +28,8 @@ starts it linked to the caller, started in the order given after the tables, gra
 interfaces: the node's grant `local`, and where a domain service asks the stack for
 grants, the mints of the services it provides. erx_net_sup makes each a permanent worker
 under a supervisor that restarts no child, so the end of any of them ends the stack.
-`Interfaces` are the stack's interfaces, as erx_net_sup took them, from which a child
-that acts on a link learns the link's name, its id under `erx_net_interfaces`.
+`Interfaces` are the stack's interfaces as erx_net_sup took them, less the loopback
+interface `lo0`, which is the stack's own; from them a child that acts on a link learns
+the link's name, its id under `erx_net_interfaces`.
 """.
 -callback children(Interfaces :: [map()]) -> [{Id :: atom(), Start :: {module(), atom(), [term()]}}].

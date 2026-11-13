@@ -57,12 +57,19 @@ Listeners, datagram sockets under a grant and the port mapper join the tree as t
 written.
 
 The configuration, a map: `interfaces`, a list of `#{name, transport := {Module, Config},
-ip4, ingress}`, to which the stack adds the loopback interface, `lo0` with 127.0.0.1/8 over
-erx_net_loop, unless the list names an interface `lo0` (docs/design-network-stack.md,
-"Loopback"); `clock` (`monotonic` when absent); `runtime`, the runtime seam's module
+ip4, ingress}`; `clock` (`monotonic` when absent); `runtime`, the runtime seam's module
 (`erx_net_local` when absent). The clock and the runtime are chosen before any process
 starts; a module the build does not hold stops the start with `{error, {seam, Key,
 Module}}`.
+
+The stack always runs the loopback interface, `lo0`, over erx_net_loop, first among the
+interfaces (docs/design-network-stack.md, "Loopback"). An entry of `interfaces` named `lo0`
+gives only its addresses: a static `ip4`, an address and prefix length with no gateway, in
+place of 127.0.0.1/8, and `ingress`. An `lo0` entry with any other key, or with any other
+`ip4`, `dhcp` among them, stops the start before any process starts with `{error, {lo0,
+Key}}`, as FreeBSD's `ifconfig_lo0` only sets lo0's addresses on the lo0 the kernel made.
+`lo0` is the stack's own and no interface of the runtime's: the runtime's children are given
+the interfaces other than `lo0`.
 """.
 
 -behaviour(supervisor).
@@ -76,18 +83,22 @@ Module}}`.
 
 -type interface() :: #{name := term(), transport := {module(), map()},
                        ip4 := dhcp | map(), ingress => map()}.
+%% The configuration's entry for lo0, which gives only its addresses.
+-type loopback() :: #{name := lo0, ip4 => map(), ingress => map()}.
 
 -doc "Chooses the seams and starts the stack with its interfaces.".
--spec start_link(#{interfaces := [interface()], clock => erx_net_clock:source(),
+-spec start_link(#{interfaces := [interface() | loopback()], clock => erx_net_clock:source(),
                    runtime => module()}) -> {ok, pid()} | {error, term()}.
-start_link(#{interfaces := Interfaces} = Config) ->
+start_link(#{interfaces := Configured} = Config) ->
     Runtime = maps:get(runtime, Config, erx_net_local),
     maybe
+        {ok, Loopback, Others} ?= with_loopback(Configured),
         ok ?= erx_net_clock:select(maps:get(clock, Config, monotonic)),
         {module, Runtime} ?= code:ensure_loaded(Runtime),
         ok = persistent_term:put(?RUNTIME, Runtime),
-        supervisor:start_link(?MODULE, {stack, Interfaces})
+        supervisor:start_link(?MODULE, {stack, Loopback, Others})
     else
+        {error, {lo0, _}} = Refused -> Refused;
         {error, {seam, _, _}} = Seam -> Seam;
         {error, {clock, _}} = Clock -> Clock;
         {error, _} -> {error, {seam, runtime, Runtime}}
@@ -99,21 +110,20 @@ runtime() ->
     persistent_term:get(?RUNTIME).
 
 -doc false.
-init({stack, Interfaces}) ->
+init({stack, Loopback, Others}) ->
     Children = [#{id => erx_net_tables, start => {erx_net_tables, start_link, []}},
                 #{id => erx_net_grants, type => supervisor,
                   start => {supervisor, start_link, [{local, erx_net_grants}, ?MODULE, grants]}},
                 #{id => erx_net_interfaces, type => supervisor,
                   start => {supervisor, start_link, [{local, erx_net_interfaces}, ?MODULE,
-                                                     {interfaces, Interfaces}]}}
+                                                     {interfaces, Loopback ++ Others}]}}
                 | [#{id => Id, start => Start, restart => permanent}
-                   || {Id, Start} <- (runtime()):children(Interfaces)]],
+                   || {Id, Start} <- (runtime()):children(Others)]],
     {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, Children}};
 init(grants) ->
     Grant = #{id => grant, start => {runtime(), start_grant, []}, restart => temporary},
     {ok, {#{strategy => simple_one_for_one}, [Grant]}};
-init({interfaces, Configured}) ->
-    Interfaces = with_loopback(Configured),
+init({interfaces, Interfaces}) ->
     Children = [#{id => Name, type => supervisor, start => {?MODULE, start_link_sup, [If]},
                   restart => permanent}
                 || #{name := Name} = If <- Interfaces],
@@ -125,16 +135,42 @@ init({link, #{name := Name, transport := {Transport, TransportConfig}}}) ->
                restart => temporary, significant => true},
     {ok, {#{strategy => rest_for_one, auto_shutdown => any_significant}, [Driver]}}.
 
-%% The interfaces with the loopback interface first, lo0 with 127.0.0.1/8 over erx_net_loop,
-%% unless the configuration names an interface lo0, whose own configuration then stands, as
-%% FreeBSD's network.subr gives lo0 127.0.0.1/8 unless ifconfig_lo0 says otherwise
-%% (libexec/rc/network.subr:684-690; the kernel's vnet_loif_init creates lo0 itself, if_loop.c:143-155).
-with_loopback(Interfaces) ->
-    case lists:any(fun(#{name := Name}) -> Name =:= ?LOOPBACK end, Interfaces) of
-        true -> Interfaces;
-        false -> [#{name => ?LOOPBACK, transport => {erx_net_loop, #{}},
-                    ip4 => #{addr => <<127, 0, 0, 1>>, plen => 8}} | Interfaces]
+%% The configured interfaces split into the loopback interface, as the stack runs it, and
+%% the others; or {error, {lo0, Key}} for the first key a configured lo0 may not give. A
+%% pure function of the configuration.
+%%
+%% lo0 runs over erx_net_loop with 127.0.0.1/8, and a configured lo0 gives only its name,
+%% a static ip4 with no gateway in place of that address, and ingress. As on FreeBSD, the
+%% kernel's vnet_loif_init creates lo0 itself (if_loop.c:143-155), and network.subr gives
+%% it 127.0.0.1/8 unless ifconfig_lo0, which only sets addresses, says otherwise
+%% (libexec/rc/network.subr:684-690). A second configured lo0 is left for the interfaces
+%% supervisor to refuse as it refuses any repeated name.
+-spec with_loopback([interface() | loopback()]) ->
+          {ok, [interface()], [interface()]} | {error, {lo0, term()}}.
+with_loopback(Configured) ->
+    {Loopbacks, Others} =
+        lists:partition(fun(#{name := Name}) -> Name =:= ?LOOPBACK end, Configured),
+    case [Key || Lo0 <- Loopbacks, {Key, _} = Pair <- maps:to_list(Lo0),
+                 not loopback_key(Pair)] of
+        [Key | _] ->
+            {error, {lo0, Key}};
+        [] ->
+            Default = #{name => ?LOOPBACK, transport => {erx_net_loop, #{}},
+                        ip4 => #{addr => <<127, 0, 0, 1>>, plen => 8}},
+            %% With no lo0 configured, the stack's own lo0 is the default as it stands.
+            Given = case Loopbacks of
+                        [] -> [#{}];
+                        _ -> Loopbacks
+                    end,
+            {ok, [maps:merge(Default, Lo0) || Lo0 <- Given], Others}
     end.
+
+%% Whether a configured lo0 may give the key and value: its name, a static ip4 of an
+%% address and prefix length alone, or ingress.
+loopback_key({name, _}) -> true;
+loopback_key({ip4, Ip4}) -> is_map(Ip4) andalso maps:without([addr, plen], Ip4) =:= #{};
+loopback_key({ingress, _}) -> true;
+loopback_key({_Key, _Value}) -> false.
 
 -doc """
 Starts one interface's link supervisor with its driver, then, once the driver runs, the

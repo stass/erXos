@@ -1633,11 +1633,17 @@ packet's destination, which the sender's path gives and
 is the same: the same credits, the same interface process, the same step
 functions.
 
-`erx_net_sup` starts the loopback interface, `lo0`, before the interfaces the
-configuration names, with 127.0.0.1/8, unless the configuration names an
-interface `lo0` itself, whose configuration then stands. FreeBSD splits the
+`erx_net_sup` always starts the loopback interface, `lo0`, over
+`erx_net_loop`, before the interfaces the configuration names, with
+127.0.0.1/8. An entry of the configuration named `lo0` gives only its
+addresses: a static `ip4`, an address and prefix length with no gateway, in
+place of 127.0.0.1/8, and `ingress`. An `lo0` entry with any other key, a
+transport among them, or with any other `ip4`, `dhcp` among them, stops the stack's start, before any process starts, with
+`{error, {lo0, Key}}`. `lo0` is the stack's own, not the runtime's: the
+runtime's children are given the other interfaces. FreeBSD splits the
 same work: the kernel creates `lo0` (`vnet_loif_init`, `if_loop.c`), and rc gives it
-127.0.0.1/8 unless `ifconfig_lo0` says otherwise (`network.subr`). With IPv6
+127.0.0.1/8 unless `ifconfig_lo0`, which only sets its addresses, says
+otherwise (`network.subr`). With IPv6
 interface addresses it also takes `::1/128` and `fe80::1%lo0`, as
 `in6_ifattach` gives them. `lo0` has no link-layer address: `interfaces/0`
 answers its `lladdr` as `none`, and `ifconfig` writes it as FreeBSD 15 does,

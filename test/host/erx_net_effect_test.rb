@@ -183,7 +183,7 @@ class ErxNetEffectTest < Minitest::Test
     ],
     # A stack that starts no lo0 beside a configured interface: its own addresses are unreachable.
     own_addresses_are_reached_over_lo0: [
-      'erx_net_sup', ['Name =:= ?LOOPBACK end', 'Name =/= ?LOOPBACK end']
+      'erx_net_sup', ['[] -> [#{}];', '[] -> [];']
     ],
     # A loopback address taken from the wire, as any address of the stack.
     loopback_address_off_lo0_is_dropped: [

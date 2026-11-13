@@ -8,7 +8,8 @@ require_relative 'erx_net_eunit'
 # Runs the EUnit cases of the stack's tree, test/erlang/erx_net_sup_tests.erl: the end of
 # any child of erx_net_sup ends the stack, a link's end stays under erx_net_interfaces, and
 # network_ctl's units map, acted on through erx_driver_ctl, stops, starts and restarts a
-# link with a minted grant intact. Then the seeded faults the cases exist for.
+# link with a minted grant intact; a configured lo0 gives only a static ip4 and ingress, and
+# runs over erx_net_loop. Then the seeded faults the cases exist for.
 class ErxNetSupTest < Minitest::Test
   include ErxNetEunit
 
@@ -34,7 +35,24 @@ class ErxNetSupTest < Minitest::Test
     # erx_net_interfaces has no vtnet0 child and the stop already fails.
     fixed_name: ['erx_net_erxos', ['units([#{name := Name}]) -> #{net => {erx_net_interfaces, Name}}',
                                   'units([_]) -> #{net => {erx_net_interfaces, vtnet0}}'],
-                 /network_ctl (restarts|stops and starts) the link/]
+                 /network_ctl (restarts|stops and starts) the link/],
+    # A configured lo0 whose ip4 is not checked: lo0 for DHCP passes the check, and the
+    # stack's start fails later, at the interface core, with no {lo0, ip4} named.
+    lo0_dhcp_accepted: ['erx_net_sup', ['loopback_key({ip4, Ip4}) -> is_map(Ip4) andalso maps:without([addr, plen], Ip4) =:= #{};',
+                                        'loopback_key({ip4, _Ip4}) -> true;'],
+                        /a DHCP lo0 is refused/],
+    # A configured lo0 whose ip4 may hold any key: a gateway passes the check and gives lo0
+    # a default route.
+    lo0_gateway_accepted: ['erx_net_sup', ['maps:without([addr, plen], Ip4) =:= #{}', 'true'],
+                           /an lo0 with a gateway is refused/],
+    # A configured lo0 that may give any key: its transport passes the check and replaces
+    # erx_net_loop.
+    lo0_any_key: ['erx_net_sup', ['loopback_key({_Key, _Value}) -> false.', 'loopback_key({_Key, _Value}) -> true.'],
+                  /an lo0 with a transport is refused/],
+    # A runtime given lo0 among its interfaces: erx_net_erxos's units map, which maps `net`
+    # only for one interface, would be empty beside a configured lo0.
+    lo0_given_to_the_runtime: ['erx_net_sup', ['(runtime()):children(Others)', '(runtime()):children(Loopback ++ Others)'],
+                               /a configured lo0 runs over the loop/]
   }.freeze
 
   def test_stack_tree_passes_under_eunit
