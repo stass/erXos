@@ -176,10 +176,6 @@ it; git history is the record of completed work.
        `erx_udp_wire`'s datagram sum are checked only by EUnit cases
        (`erx_net_input_tests`' network sum cases and their seeds); pad some frames and cut some
        datagrams short, with the judge tolerating both.
-     * [Low] `erx_net_input`: the loopback input `{frame, Zone, Bytes}` shares its tag and size
-       with `{frame, Bytes, Sum}`, told apart only by the view's link, and `erx_net_if`'s
-       `frame_input/1` does not map the driver's `{Zone, Bytes}` frame; give the loopback
-       input its own tag when the loop transport is built.
   6. runs on send, toward 4.4 Gbit/s. Output's run rule is in the tree: `erx_tcp_output`
      sends whole segments of new data as one run in one pass, an outgoing segment with
      `seg`, and `erx_tcp_output:segments/1` cuts it into the segments per-segment output
@@ -1872,6 +1868,16 @@ it; git history is the record of completed work.
   since the FIN is resent only when `snd_nxt == snd_una`; FreeBSD moves `snd_nxt` to the
   acknowledgement first. And `enobufs/3` sizes the window with no SACK blocks where
   `tcp_maxseg` counts `rcv_numsacks`.
+* [Medium] network, `erx_net_sup:with_loopback/1`: a configured `lo0` entry stands whole, transport
+  included, where FreeBSD always creates `lo0` as a loopback and `ifconfig_lo0` sets only its
+  addresses. `lo0` over another transport leaves no link `none` (every own address `enetunreach`),
+  `lo0` with `ip4 => dhcp` fails `erx_net_if_core:new/1` with `function_clause`, and a binary name
+  `<<"lo0">>` adds a second `lo0`. Take only a static `ip4` and `ingress` from a configured `lo0`,
+  refuse the rest at `start_link` with a named error, and test it.
+* [Low] network, `erx_net_driver`: a driver's crash report carries its mailbox (`proc_lib`), so
+  pending frames, on `lo0` local traffic, reach the log; `erx_net_loop:transmit/2` raises on a
+  zone whose bytes are not iodata where its doc says `malformed`. Mark the driver `sensitive` or
+  keep the loop's queue in its state, and drop a bad list as `malformed`.
 * [Low] erx_net TCP connection process: `erx_tcp_timewait` gives a peer on one of the
   machine's own addresses the 20 ms TIME-WAIT of `tcp_eff_msl` when the control block's
   `local_peer` is set, but nothing sets it yet: whoever builds the control block
@@ -2046,7 +2052,7 @@ it; git history is the record of completed work.
   Make the test decode through `decode_reply/3` as well, and have the fuzz target call `decode_reply/3` with a matching query.
 * [Medium] network, effect layer (E1, `erx_net_if`, `erx_udp_sock`, `erx_net_tables`): the first
   package runs ARP, ICMP echo, DHCP and UDP only. Not yet: `erx_net_vclock` and `erx_net_script` (the virtual clock is refused at
-  start); `erx_net_loop`; grants, `erx_net_admit` and `erx_net_client` (`erx_udp_sock` has a
+  start); grants, `erx_net_admit` and `erx_net_client` (`erx_udp_sock` has a
   provisional `gen_udp`-shaped interface, and `erx_net_tables:watch_holder/1` deletes a dead
   socket's entries in its grant's place); the listener, IPv6, reassembly and redirect paths of
   `erx_net_if_core` (counted `unsupported`); an `erx_net` application module and its `env` keys
@@ -2055,6 +2061,9 @@ it; git history is the record of completed work.
   buffer. Build checks still to add: the clock chokepoint (`erlang:send_after`, `monotonic_time`
   and the rest only in `erx_net_clock`), `erx_net_bind` as the only demultiplexing inserter,
   `erx_net_if` as the only configuration writer and `erx_net_credit` as the only batch sender.
+  With IPv6 interface addresses, `lo0` takes `::1/128` and `fe80::1%lo0` as it comes up, as
+  FreeBSD's `in6_ifattach` gives them (`in6_ifattach.c:541-543`, `:816-823`); `erx_net_sup`
+  gives `lo0` 127.0.0.1/8 alone.
 * [Medium] network, virtio-net transport (`erlang/apps/erx_net/erxos/erx_virtio_net.erl`): what the
   first package leaves. No host tests of its pure functions (`frame/3`, `mtu/2`, `lladdr/2`,
   `link_state/2`, `segments/1`, `erx_net_app:interfaces/1`): export them under `TEST` or move

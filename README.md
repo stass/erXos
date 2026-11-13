@@ -405,7 +405,8 @@ Error in process <0.150.0> with exit value:
   of FreeBSD's logic (`erx_net`), tested there: Ethernet, ARP and one
   neighbour table shared with IPv6 neighbour discovery and its duplicate
   address detection, IPv4 and IPv6 with fragment reassembly, ICMP and
-  ICMPv6 with their rate limits, UDP, and for TCP its wire format, RTT,
+  ICMPv6 with their rate limits, the loopback interface `lo0` with
+  127.0.0.1/8, UDP, and for TCP its wire format, RTT,
   MSS, initial sequence numbers, ECN, SACK blocks and the RFC 6675
   scoreboard with duplicate-ACK loss detection. TCP's connection now runs
   as a pure step from SYN to TIME-WAIT, with its timers, the syncache,

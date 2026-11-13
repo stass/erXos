@@ -202,11 +202,12 @@ count_units(Units, S) ->
         Counts -> step({merged, length(Counts), lists:sum(Counts)}, S)
     end.
 
-%% A frame or unit as the merge answered it, or a frame as its driver handed it, as
-%% `classify/2` takes it. Any other shape goes on as it is and raises in the guarded
-%% classification, so it costs only itself.
+%% A frame or unit as the merge answered it, or a frame as its driver handed it, a looped
+%% packet with its zone among them, as `classify/2` takes it. Any other shape goes on as it
+%% is and raises in the guarded classification, so it costs only itself.
 frame_input({sum, Sum, Bytes}) -> {frame, Bytes, Sum};
 frame_input({merged, _, _, _, _} = Unit) -> Unit;
+frame_input({Zone, Bytes}) -> {looped, Zone, Bytes};
 frame_input(Bytes) -> {frame, Bytes, none}.
 
 input(Input, #state{core = Core} = S, ByHolder) ->

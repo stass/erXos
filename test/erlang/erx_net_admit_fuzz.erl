@@ -438,7 +438,8 @@ expected_interfaces(List) ->
 
 expected_interface(#{name := Name, lladdr := Lladdr, mtu := Mtu, link := Link, config := Config, addrs := Addrs}) ->
     Checked = expected_addrs(Addrs),
-    Fine = valid_name(Name) andalso is_bitstring(Lladdr) andalso bit_size(Lladdr) =:= 48 andalso within(Mtu, 1, 16#ffff)
+    Fine = valid_name(Name) andalso (Lladdr =:= none orelse is_bitstring(Lladdr) andalso bit_size(Lladdr) =:= 48)
+        andalso within(Mtu, 1, 16#ffff)
         andalso lists:member(Link, [up, down]) andalso lists:member(Config, [static, dhcp]) andalso Checked =/= error,
     case Fine of
         true -> {ok, #{name => Name, lladdr => Lladdr, mtu => Mtu, link => Link, config => Config,
@@ -537,7 +538,8 @@ lladdr() ->
         1 -> rand:bytes(5);
         2 -> rand:bytes(7);
         3 -> <<0:47>>;
-        4 -> pick([x, "lladdr"]);
+        4 -> pick([x, "lladdr", nil]);
+        5 -> none;
         _ -> rand:bytes(6)
     end.
 

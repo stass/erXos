@@ -15,7 +15,7 @@
                erx_nd6_rtr, erx_net, erx_net_addr, erx_net_admit, erx_net_app, erx_net_bandlim,
                erx_net_bind, erx_net_clock, erx_net_credit, erx_net_driver, erx_net_eth,
                erx_net_frame, erx_net_grant, erx_net_grant_core, erx_net_if, erx_net_if_core,
-               erx_net_input, erx_net_pipe, erx_net_rand, erx_net_route, erx_net_runtime,
+               erx_net_input, erx_net_loop, erx_net_pipe, erx_net_rand, erx_net_route, erx_net_runtime,
                erx_net_sum, erx_net_sup,
                erx_net_tables, erx_net_tx, erx_tcp, erx_tcp_cc, erx_tcp_cc_cubic,
                erx_tcp_cc_newreno, erx_tcp_conn, erx_tcp_ecn, erx_tcp_icmp,

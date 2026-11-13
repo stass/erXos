@@ -21,9 +21,10 @@ taken out of its envelope, against the reply type of the call's operation:
   answer is `{ok, Pid}`;
 * `interfaces`: `{ok, Interfaces}`, a proper list of at most 64 interfaces, each a map of
   `name`, 1 to 15 bytes, FreeBSD's `IFNAMSIZ`, of letters, digits, `.`, `-` and `_`;
-  `lladdr`, six bytes; `mtu`, 1 to 65535; `link`, `up` or `down`; `config`, `static` or
-  `dhcp`; and `addrs`, at most 64 addresses, each `#{addr, plen}` with an IPv4 or IPv6
-  address tuple and a prefix length within it, and an IPv4 `broadcast` beside an IPv4
+  `lladdr`, six bytes, or `none` for the loopback interface; `mtu`, 1 to 65535; `link`, `up`
+  or `down`; `config`, `static` or `dhcp`; and `addrs`, at most 64 addresses, each
+  `#{addr, plen}` with an IPv4 or IPv6 address tuple and a prefix length within it, and an
+  IPv4 `broadcast` beside an IPv4
   address. Each interface comes back rebuilt from those keys alone;
 * `resolver` and `watch_resolver`: `{ok, Map}` that erx_inet:resolver_config/1 takes,
   its search domains as strings;
@@ -282,9 +283,10 @@ interfaces([If | Rest], Count, Acc) when Count < ?MAX_INTERFACES ->
 interfaces(_, _, _) ->
     {refused, interface}.
 
-interface(#{name := Name, lladdr := <<_:48>> = Lladdr, mtu := Mtu, link := Link, config := Config,
+interface(#{name := Name, lladdr := Lladdr, mtu := Mtu, link := Link, config := Config,
             addrs := Addrs})
-  when is_binary(Name), byte_size(Name) >= 1, byte_size(Name) =< ?IFNAMSIZ, is_integer(Mtu), Mtu >= 1,
+  when (Lladdr =:= none orelse bit_size(Lladdr) =:= 48), is_binary(Name), byte_size(Name) >= 1,
+       byte_size(Name) =< ?IFNAMSIZ, is_integer(Mtu), Mtu >= 1,
        Mtu =< 16#ffff, (Link =:= up orelse Link =:= down), (Config =:= static orelse Config =:= dhcp) ->
     maybe
         true ?= ifname(Name),

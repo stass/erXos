@@ -845,7 +845,7 @@ domain D:
 where a frame goes and no further. Its input is a frame from the driver,
 `{frame, Bytes, Sum}`, with `Sum` its network sum or `none`
 ([Checksums in the copy](#checksums-in-the-copy)); on the loopback interface, an IP packet with the zone
-its sender's path gave it, `{frame, Zone, Bytes}` ([Loopback](#loopback));
+its sender's path gave it, `{looped, Zone, Bytes}` ([Loopback](#loopback));
 or a datagram reassembly rebuilt, `{reassembled, Family, Zone, LinkCast,
 Bytes}`. The last two carry no sum. Its view is a map:
 
@@ -1632,6 +1632,20 @@ packet's destination, which the sender's path gives and
 ([Classifying a frame](#classifying-a-frame)). Everything else about it
 is the same: the same credits, the same interface process, the same step
 functions.
+
+`erx_net_sup` starts the loopback interface, `lo0`, before the interfaces the
+configuration names, with 127.0.0.1/8, unless the configuration names an
+interface `lo0` itself, whose configuration then stands. FreeBSD splits the
+same work: the kernel creates `lo0` (`vnet_loif_init`, `if_loop.c`), and rc gives it
+127.0.0.1/8 unless `ifconfig_lo0` says otherwise (`network.subr`). With IPv6
+interface addresses it also takes `::1/128` and `fe80::1%lo0`, as
+`in6_ifattach` gives them. `lo0` has no link-layer address: `interfaces/0`
+answers its `lladdr` as `none`, and `ifconfig` writes it as FreeBSD 15 does,
+with the flags `UP,LOOPBACK,RUNNING,MULTICAST,LOWER_UP` and neither an `ether`
+nor a `status` line. Each interface's view holds every address of the stack, so
+a packet to one of them is the stack's own on whichever interface it arrives;
+a packet from or to 127.0.0.0/8 that arrives on any interface but `lo0` is
+dropped as `bad_addr`, as RFC 1122 and `ip_input.c` require.
 
 ## The TCP core
 

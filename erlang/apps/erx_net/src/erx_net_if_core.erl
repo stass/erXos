@@ -4,7 +4,7 @@
 -module(erx_net_if_core).
 -moduledoc """
 The interface process's step (docs/design-network-stack.md, "The interface core"): a pure
-value holding the sub-cores of one Ethernet interface's state, which dispatches each event
+value holding the sub-cores of one interface's state, Ethernet or the loopback, which dispatches each event
 to the sub-core it belongs to and returns the actions for erx_net_if to perform in order.
 
 It holds the interface's IPv4 configuration (static, or a DHCP lease that the interface's
@@ -100,7 +100,7 @@ address and MTU; the driver's latest link state; whether its IPv4 configuration 
 or from DHCP; its addresses in the order it added them and its routes; and the name
 servers and search list of its lease, empty without one.
 """.
--type status() :: #{name := term(), lladdr := <<_:48>>, mtu := pos_integer(),
+-type status() :: #{name := term(), lladdr := <<_:48>> | none, mtu := pos_integer(),
                     link := up | down, config := static | dhcp,
                     addrs := [erx_net_addr:row()], routes := [erx_net_route:row()],
                     dns := [<<_:32>>], search := [binary()]}.
@@ -110,7 +110,7 @@ The complete set of the interface's rows, without what only its process knows (i
 its credits and its driver's): its `erx_net_ifs` fields, its addresses in the order it
 added them, and its routes.
 """.
--type rows() :: #{iface := #{name := term(), link := ethernet, lladdr := <<_:48>>,
+-type rows() :: #{iface := #{name := term(), link := ethernet | none, lladdr := <<_:48>> | none,
                              mtu := pos_integer(), mtu6 := pos_integer(), hlim := 0..255,
                              finish := erx_net_driver:finisher()},
                   addrs := [{Order :: non_neg_integer(), erx_net_addr:row()}],
@@ -122,7 +122,8 @@ added them, and its routes.
                  at = none :: none | integer()}).  % when they were counted
 
 -record(core, {name :: term(),
-               lladdr :: <<_:48>>,
+               medium :: ethernet | none,        % the driver's link: none on the loopback
+               lladdr :: <<_:48>> | none,
                device_mtu :: pos_integer(),
                mtu :: pos_integer(),
                finish :: erx_net_driver:finisher(),  % the driver's, written into the row
@@ -146,17 +147,20 @@ added them, and its routes.
 
 -doc """
 The core of interface `name` over the link its driver described, with generator `gen`
-and configuration `config`. Its first step is `start`.
+and configuration `config`. Its first step is `start`. The loopback interface's link is
+`none`, with no link-layer address, and its IPv4 configuration is static.
 """.
 -spec new(#{name := term(), link := erx_net_driver:link_info(), gen := erx_net_rand:gen(),
             config := config()}) -> core().
 new(#{name := Name,
-      link := #{link := ethernet, lladdr := <<_:48>> = Lladdr, mtu := Mtu, state := Link,
-                finish := Finish},
-      gen := Gen0, config := #{ip4 := Ip4} = Config}) ->
+      link := #{link := Medium, lladdr := Lladdr, mtu := Mtu, state := Link, finish := Finish},
+      gen := Gen0, config := #{ip4 := Ip4} = Config})
+  when Medium =:= ethernet, is_binary(Lladdr), byte_size(Lladdr) =:= 6;
+       Medium =:= none, Lladdr =:= none, Ip4 =/= dhcp ->
     #{rate := Rate, burst := Burst} = maps:get(ingress, Config, ?INGRESS_DEFAULT),
     {LimGen, Gen} = erx_net_rand:split(Gen0),
-    Core = #core{name = Name, lladdr = Lladdr, device_mtu = Mtu, mtu = Mtu, finish = Finish,
+    Core = #core{name = Name, medium = Medium, lladdr = Lladdr, device_mtu = Mtu, mtu = Mtu,
+                 finish = Finish,
                  dhcp = Ip4 =:= dhcp, link = Link, arp = erx_arp:new(), lim = erx_net_bandlim:new(LimGen),
                  bucket = #bucket{rate = Rate, burst = Burst, tokens = Burst * ?TOKEN},
                  gen = Gen},
@@ -169,15 +173,30 @@ new(#{name := Name,
             configure(Addr, Plen, Routes, Core)
     end.
 
--doc "What `erx_net_input:classify/2` reads of the interface, without `demux`.".
+-doc """
+What `erx_net_input:classify/2` reads of the interface, without `demux`. Its IPv4
+addresses are every address of the stack, its own first and then those of the
+configuration copy (`erx_net_frame:addresses/1`), so a packet to another interface's
+address is the stack's here too, as the loopback interface's packets to every address
+of the stack must be; its broadcast addresses are its own.
+""".
 -spec view(core()) -> map().
-view(#core{name = Name, lladdr = Lladdr, dhcp = Dhcp, addrs = Addrs}) ->
-    #{link => ethernet, lladdr => Lladdr,
-      ip4 => #{addrs => [A || {_, #{addr := A}} <- Addrs],
+view(#core{name = Name, medium = Medium, lladdr = Lladdr, dhcp = Dhcp, addrs = Addrs,
+           snapshot = Snapshot}) ->
+    Loopback = Medium =:= none,
+    #{link => Medium, lladdr => Lladdr,
+      ip4 => #{addrs => stack4([A || {_, #{addr := A}} <- Addrs], Snapshot),
                broadcasts => [B || {_, #{broadcast := B}} <- Addrs],
-               loopback => false},
-      ip6 => #{addrs => [], notready => [], loopback => false, zone => Name},
+               loopback => Loopback},
+      ip6 => #{addrs => [], notready => [], loopback => Loopback, zone => Name},
       groups => [], dhcp => Dhcp}.
+
+%% The interface's own IPv4 addresses, then the rest of the stack's: the copy may lag
+%% the interface's own rows, and holds them once it has caught up.
+stack4(Own, none) ->
+    Own;
+stack4(Own, Snapshot) ->
+    Own ++ [A || <<_:32>> = A <- erx_net_frame:addresses(Snapshot), not lists:member(A, Own)].
 
 -doc "When the core next needs `{expired, Now}`, in microseconds.".
 -spec next_deadline(core()) -> integer() | infinity.
@@ -365,11 +384,13 @@ broadcast_dhcp(From, Msg, #core{lladdr = Lladdr, mtu = Mtu, gen = Gen0} = Core) 
             {count(Reason, Core), []}
     end.
 
-%% The address, its subnet's route and further routes, replacing what was configured.
-configure(Addr, Plen, Routes, #core{name = Name, order = Order} = Core) ->
+%% The address, its subnet's route and further routes, replacing what was configured. Only
+%% Ethernet has a broadcast address: the loopback interface has no IFF_BROADCAST, so
+%% its address gets none (in.c:597).
+configure(Addr, Plen, Routes, #core{name = Name, medium = Medium, order = Order} = Core) ->
     Subnet = erx_net_addr:masked(Addr, Plen),
     Row0 = #{addr => Addr, plen => Plen, ifname => Name, flags => []},
-    Row = case Plen < 31 of
+    Row = case Plen < 31 andalso Medium =:= ethernet of
               true -> Row0#{broadcast => broadcast(Subnet, Plen)};
               false -> Row0
           end,
@@ -425,14 +446,17 @@ resolve(NextHop, Packets, Core0, Now) when is_binary(NextHop) ->
                         {Core1, Acc ++ More}
                 end, {Core0, []}, Packets).
 
-frames(LinkAddr, Packets, #core{lladdr = Lladdr}) ->
-    erx_net_frame:link(#{link => ethernet, lladdr => Lladdr}, LinkAddr, Packets).
+frames(LinkAddr, Packets, #core{medium = Medium, lladdr = Lladdr}) ->
+    erx_net_frame:link(#{link => Medium, lladdr => Lladdr}, LinkAddr, Packets).
 
 %% --- ARP ---------------------------------------------------------------------------
 
 arp_iface(#core{lladdr = Lladdr, addrs = Addrs}) ->
     #{lladdr => Lladdr, addrs => [{A, P} || {_, #{addr := A, plen := P}} <- Addrs]}.
 
+%% A gratuitous ARP for each address, on Ethernet; the loopback interface has no ARP.
+announce(#core{medium = none}) ->
+    [];
 announce(#core{addrs = Addrs} = Core) ->
     {_, Actions} = arp_actions(lists:append([erx_arp:announce(A, arp_iface(Core))
                                              || {_, #{addr := A}} <- Addrs]), Core),
@@ -460,9 +484,9 @@ arp_action({conflict, _Ip, _Mac}, _Core) ->
 
 %% --- Publishing and administration -------------------------------------------------
 
-publish(#core{name = Name, lladdr = Lladdr, mtu = Mtu, finish = Finish, addrs = Addrs,
-              routes = Routes}) ->
-    {publish, #{iface => #{name => Name, link => ethernet, lladdr => Lladdr, mtu => Mtu,
+publish(#core{name = Name, medium = Medium, lladdr = Lladdr, mtu = Mtu, finish = Finish,
+              addrs = Addrs, routes = Routes}) ->
+    {publish, #{iface => #{name => Name, link => Medium, lladdr => Lladdr, mtu => Mtu,
                            mtu6 => Mtu, hlim => ?HLIM, finish => Finish},
                 addrs => Addrs, routes => Routes}}.
 

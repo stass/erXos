@@ -159,7 +159,7 @@ listener_id(#{credit := Credit}) -> Credit.
 input(ether, Prefix, Upper) ->
     Frame = <<Prefix/binary, Upper/binary>>,
     {frame, Frame, pick([none, net_sum(Frame)])};
-input({loop, Zone}, Prefix, Upper) -> {frame, Zone, <<Prefix/binary, Upper/binary>>};
+input({loop, Zone}, Prefix, Upper) -> {looped, Zone, <<Prefix/binary, Upper/binary>>};
 input({reassembled, Family, Zone, LinkCast}, Prefix, Upper) ->
     {reassembled, Family, Zone, LinkCast, <<Prefix/binary, Upper/binary>>}.
 
@@ -168,7 +168,7 @@ input({reassembled, Family, Zone, LinkCast}, Prefix, Upper) ->
 
 -doc "The verdict the design's table gives Input on an interface with View and Map.".
 -spec judge(erx_net_input:input(), erx_net_input:view(), map()) -> tuple().
-judge({frame, Zone, Packet}, #{link := none} = View, Map) ->
+judge({looped, Zone, Packet}, #{link := none} = View, Map) ->
     case Packet of
         <<6:4, _/bits>> -> ip6(Packet, received, unicast, Zone, View, Map);
         _ -> ip4(Packet, unicast, View, Map)

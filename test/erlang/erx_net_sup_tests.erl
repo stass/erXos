@@ -169,9 +169,10 @@ units_of(Interfaces) ->
         erx_net_erxos:children(Interfaces),
     Units.
 
-%% The interface's link supervisor, or undefined while it is stopped.
+%% The interface's link supervisor, or undefined while it is stopped; the lo0 the stack
+%% starts beside it is another child.
 link_sup() ->
-    [{?LINK, Link, supervisor, _}] = supervisor:which_children(erx_net_interfaces),
+    {?LINK, Link, supervisor, _} = lists:keyfind(?LINK, 1, supervisor:which_children(erx_net_interfaces)),
     Link.
 
 %% The interface's link supervisor once it is a process other than Link, else false.

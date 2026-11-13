@@ -91,6 +91,25 @@ class ErxNetEffectTest < Minitest::Test
     assert_match(/failed_check_gives_its_token_back/, output)
   end
 
+  # A view that holds only the interface's own addresses: the loopback interface drops a
+  # packet to another interface's address as not the stack's.
+  def test_core_whose_view_drops_the_stacks_other_addresses_fails
+    output = refute_erx_net_eunit(:erx_net_if_core_tests, fault: {
+      'erx_net_if_core' => ['stack4([A || {_, #{addr := A}} <- Addrs], Snapshot)',
+                            'stack4([A || {_, #{addr := A}} <- Addrs], element(1, {none, Snapshot}))']
+    })
+    assert_match(/loopback_takes_a_packet_to_another_interfaces_address/, output)
+  end
+
+  # The loop that hands a frame up whatever reference its message carries.
+  def test_loop_that_takes_a_message_it_did_not_make_fails
+    output = refute_erx_net_eunit(:erx_net_driver_tests, fault: {
+      'erx_net_loop' => ['event({erx_net_loop, Ref, Zone, Packet}, Ref) ->',
+                         'event({erx_net_loop, _, Zone, Packet}, Ref) ->']
+    })
+    assert_match(/loop_ignores_a_message_it_did_not_make/, output)
+  end
+
   # The design's seeded failures of the driver and the pipe, each failing its own case.
   DRIVER_FAULTS = {
     # A unit taken when the message arrives, not when the frame leaves.
@@ -161,6 +180,14 @@ class ErxNetEffectTest < Minitest::Test
     # A link start that fails when its driver ends under it: the stack's own start fails.
     crash_at_start_spins_no_supervisor: [
       'erx_net_sup', ['false -> {ok, Sup}', 'false -> stop_link(Sup, Error)']
+    ],
+    # A stack that starts no lo0 beside a configured interface: its own addresses are unreachable.
+    own_addresses_are_reached_over_lo0: [
+      'erx_net_sup', ['Name =:= ?LOOPBACK end', 'Name =/= ?LOOPBACK end']
+    ],
+    # A loopback address taken from the wire, as any address of the stack.
+    loopback_address_off_lo0_is_dropped: [
+      'erx_ip4', ['Wire, not Loopback -> {drop, bad_addr};', 'Wire, Loopback -> {drop, bad_addr};']
     ]
   }.freeze
 

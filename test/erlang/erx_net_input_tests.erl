@@ -201,7 +201,7 @@ ethertype_test() ->
 loopback_frame_is_a_unicast_packet_test() ->
     Packet = ip4(?PEER4, ?ME4, ?PROTO_UDP, udp(?PEER4, ?ME4, 1000, 53, <<"q">>)),
     Demux = holders([{{udp, inet, any, 53}, a}]),
-    {[a], Verified} = owned(classify({frame, em0, Packet}, loop_view(Demux))),
+    {[a], Verified} = owned(classify({looped, em0, Packet}, loop_view(Demux))),
     ?assertEqual({ok, {datagram, {?PEER4, 1000}, ?ME4, <<"q">>}}, Verified).
 
 %% --- IP ----------------------------------------------------------------------

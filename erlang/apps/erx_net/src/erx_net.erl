@@ -24,13 +24,14 @@ development host", "Addresses and routes"):
 -export_type([interface/0]).
 
 -doc """
-One interface as `interfaces/0` answers it: its name, link-layer address and MTU; its
+One interface as `interfaces/0` answers it: its name, link-layer address (`none` for the
+loopback interface, `lo0`, which has none) and MTU; its
 link state; whether its IPv4 configuration is static or from DHCP; its addresses, each
 with its prefix length and, for IPv4, its subnet's broadcast address; its routes, each
 with its gateway or `none` for a route on the link; and its lease's name servers and
 search list, empty without a lease.
 """.
--type interface() :: #{name := term(), lladdr := <<_:48>>, mtu := pos_integer(),
+-type interface() :: #{name := term(), lladdr := <<_:48>> | none, mtu := pos_integer(),
                        link := up | down, config := static | dhcp,
                        addrs := [#{addr := inet:ip_address(), plen := 0..128,
                                    broadcast => inet:ip4_address()}],

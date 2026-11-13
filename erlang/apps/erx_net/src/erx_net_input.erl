@@ -292,7 +292,7 @@ offset 0 (IPv4's zone is `none`); or, on an Ethernet interface, a unit of the me
 `erx_bytes:tcp_merge/1` answers it.
 """.
 -type input() :: {frame, binary(), erx_net_sum:sum() | none}
-               | {frame, Zone :: term(), binary()}
+               | {looped, Zone :: term(), binary()}
                | {reassembled, family(), Zone :: term(), link_cast(), binary()}
                | {merged, 2..256, First :: {sum, erx_net_sum:sum(), binary()},
                   Last :: {sum, erx_net_sum:sum(), binary()}, Payload :: [binary()]}.
@@ -412,7 +412,7 @@ with the packet it is about, for erx_icmp4 or erx_icmp6 to answer.
 -spec classify(input(), view()) -> verdict().
 classify({frame, Bytes, Sum}, #{link := ethernet} = View) when is_binary(Bytes) ->
     ether(Bytes, Sum, View);
-classify({frame, Zone, Bytes}, #{link := none} = View) ->
+classify({looped, Zone, Bytes}, #{link := none} = View) ->
     loopback(Zone, Bytes, View);
 classify({reassembled, inet, none, LinkCast, Bytes}, View) ->
     ip4(Bytes, none, LinkCast, View);

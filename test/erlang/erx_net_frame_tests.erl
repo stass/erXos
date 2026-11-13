@@ -432,10 +432,10 @@ looped_icmpv6_error_finds_the_socket_its_quote_names_test() ->
     {send, [{Zone, Packet}]} = erx_net_frame:address(Out, none, [P]),
     View = rx_view(none, none, [v4("10.0.0.5")], [v6("2001:db8::5"), {Local, eth0}, {v6("fe80::15"), eth1}], [],
                    [{{udp, inet6, {Local, eth0}, 4000, {Peer, eth0}, 53}, socket}]),
-    {owned, [{_, socket}], Pending} = erx_net_input:classify({frame, Zone, iolist_to_binary(Packet)}, View),
+    {owned, [{_, socket}], Pending} = erx_net_input:classify({looped, Zone, iolist_to_binary(Packet)}, View),
     ?assertMatch({ok, {report, #icmp6{type = 1, code = 4}, #{proto := 17}}}, erx_net_input:verify(Pending)),
     %% The same bytes in another zone are an error to no address of the stack.
-    ?assertMatch({drop, _}, erx_net_input:classify({frame, eth1, iolist_to_binary(Packet)}, View)).
+    ?assertMatch({drop, _}, erx_net_input:classify({looped, eth1, iolist_to_binary(Packet)}, View)).
 
 %% A run (docs/design-network-fastpath.md, "A run") gives the bytes of its segments encoded
 %% one by one, as erx_tcp_output:segments/1 cuts it: over IPv4 and IPv6, with and without

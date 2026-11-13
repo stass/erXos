@@ -32,6 +32,16 @@ interface_in_freebsd_layout_test() ->
                    "\tstatus: active\n">>,
                  text(erx_cmd_ifconfig:interface(vtnet0(up)))).
 
+%% The loopback interface as FreeBSD 15's netlink ifconfig writes lo0: the flags
+%% if_loop.c sets, up, running and LOWER_UP, the mtu LOMTU, and neither an ether nor a
+%% status line, since lo0 has no link-layer address and answers no media request.
+loopback_in_freebsd_layout_test() ->
+    Lo0 = #{name => <<"lo0">>, lladdr => none, mtu => 16384, link => up, config => static,
+            addrs => [#{addr => {127, 0, 0, 1}, plen => 8}], routes => [], dns => [], search => []},
+    ?assertEqual(<<"lo0: flags=1008049<UP,LOOPBACK,RUNNING,MULTICAST,LOWER_UP> metric 0 mtu 16384\n"
+                   "\tinet 127.0.0.1 netmask 0xff000000\n">>,
+                 text(erx_cmd_ifconfig:interface(Lo0))).
+
 interface_without_a_link_or_address_test() ->
     Down = (vtnet0(down))#{addrs := [], mtu := 9000},
     ?assertEqual(<<"vtnet0: flags=8843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> metric 0 mtu 9000\n"

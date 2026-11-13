@@ -312,7 +312,7 @@ nothing_to_drive_is_no_interface_test() ->
     {ok, Stack} = erx_net_sup:start_link(#{interfaces => [Link]}),
     unlink(Stack),
     [Interfaces] = [Pid || {erx_net_interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
-    ?assertMatch([{en0, undefined, supervisor, _}], supervisor:which_children(Interfaces)),
+    ?assertMatch({en0, undefined, supervisor, _}, link_child(Interfaces, en0)),
     ?assertEqual(none, erx_net_tables:driver(en0)),
     ok = proc_lib:stop(Stack, shutdown, infinity).
 
@@ -329,7 +329,7 @@ nothing_at_restart_is_no_interface_test() ->
                                                             transport => Transport}]}),
     unlink(Stack),
     [Interfaces] = [Pid || {erx_net_interfaces, Pid, supervisor, _} <- supervisor:which_children(Stack)],
-    [{en0, Link, supervisor, _}] = supervisor:which_children(Interfaces),
+    {en0, Link, supervisor, _} = link_child(Interfaces, en0),
     [Driver] = [Pid || {driver, Pid, worker, _} <- supervisor:which_children(Link)],
     exit(Driver, kill),
     %% A hang guard of 2 s at the least, short of eunit's 5 s so that a hang is named.
@@ -339,12 +339,16 @@ nothing_at_restart_is_no_interface_test() ->
     _ = persistent_term:erase(Key),
     ?assertEqual(nothing, nothing(supervisor_report_start_error)).
 
+%% The interfaces supervisor's child for interface Name, beside the lo0 the stack starts.
+link_child(Interfaces, Name) ->
+    lists:keyfind(Name, 1, supervisor:which_children(Interfaces)).
+
 %% Waits until the interfaces supervisor holds en0's link as ignored.
 ignored(_Interfaces, 0) ->
     timeout;
 ignored(Interfaces, Tries) ->
-    case supervisor:which_children(Interfaces) of
-        [{en0, undefined, supervisor, _}] -> ignored;
+    case link_child(Interfaces, en0) of
+        {en0, undefined, supervisor, _} -> ignored;
         _ -> timer:sleep(10), ignored(Interfaces, Tries - 1)
     end.
 
@@ -376,7 +380,69 @@ far_end_test_() ->
      {timeout, 20, fun queued_batches_reach_a_holder_as_one_message/0},
      {timeout, 20, fun a_burst_reaches_its_connection_as_one_segment/0},
      {timeout, 20, fun credit_counts_segments/0},
-     {timeout, 20, fun offload_pipe_finishes_the_stacks_segments/0}].
+     {timeout, 20, fun offload_pipe_finishes_the_stacks_segments/0},
+     {timeout, 20, fun own_addresses_are_reached_over_lo0/0},
+     {timeout, 20, fun loopback_address_off_lo0_is_dropped/0}].
+
+%% The stack starts lo0 beside its configured interface, and a datagram to 127.0.0.1 or to
+%% en0's own address goes over lo0, as FreeBSD routes a host's own addresses through its
+%% loopback interface: both reach the socket and neither leaves on en0's wire.
+own_addresses_are_reached_over_lo0() ->
+    with_lo0(fun(Far, _Driver) ->
+        {ok, Rx} = erx_gen_udp:open(0, [{active, false}, binary]),
+        {ok, {_, RxPort}} = erx_gen_udp:sockname(Rx),
+        {ok, Tx} = erx_gen_udp:open(0, [{active, false}, binary]),
+        {ok, {_, TxPort}} = erx_gen_udp:sockname(Tx),
+        ok = erx_gen_udp:send(Tx, {127, 0, 0, 1}, RxPort, <<"to lo0">>),
+        ?assertEqual({ok, {{127, 0, 0, 1}, TxPort, <<"to lo0">>}}, erx_gen_udp:recv(Rx, 0, 3000)),
+        ok = erx_gen_udp:send(Tx, {10, 0, 2, 15}, RxPort, <<"to en0's own">>),
+        ?assertEqual({ok, {{10, 0, 2, 15}, TxPort, <<"to en0's own">>}},
+                     erx_gen_udp:recv(Rx, 0, 3000)),
+        receive {far, Far, _, <<_:12/binary, 16#0800:16, _/binary>> = Left} -> error({left_on_en0, Left})
+        after 100 -> ok
+        end,
+        ok = erx_gen_udp:close(Tx),
+        ok = erx_gen_udp:close(Rx)
+    end).
+
+%% A loopback address never arrives from a wire (RFC 1122, 3.2.1.3 (g); ip_input.c drops it
+%% as ips_badaddr), though 127.0.0.1 is an address of the stack: a datagram to it that
+%% en0's peer sends is counted bad_addr and reaches no socket.
+loopback_address_off_lo0_is_dropped() ->
+    with_lo0(fun(Far, Driver) ->
+        {ok, Rx} = erx_gen_udp:open(0, [{active, false}, binary]),
+        {ok, {_, RxPort}} = erx_gen_udp:sockname(Rx),
+        Payload = <<"from the wire">>,
+        Udp = <<?PEER_PORT:16, RxPort:16, (8 + byte_size(Payload)):16, 0:16, Payload/binary>>,
+        Ip = erx_ip4_wire:encode(#ip4{len = 20 + byte_size(Udp), ttl = 64, p = 17, src = ?PEER4,
+                                      dst = <<127, 0, 0, 1>>}),
+        Far ! {inject, Driver, <<?MAC/binary, ?PEER_MAC/binary, 16#0800:16, Ip/binary, Udp/binary>>},
+        settle(Driver),
+        [{en0, If, _}] = ets:lookup(erx_net_ifs, en0),
+        {ok, Counters} = erx_net_if:admin(If, counters),
+        ?assertEqual(1, maps:get(bad_addr, Counters, 0)),
+        ?assertEqual({error, timeout}, erx_gen_udp:recv(Rx, 0, 200)),
+        ok = erx_gen_udp:close(Rx)
+    end).
+
+%% The stack over en0's pipe, with the lo0 it starts itself, once en0 answers ARP; Fun gets
+%% the far end and en0's driver.
+with_lo0(Fun) ->
+    wait_gone(erx_net_tables),
+    flush(),
+    Far = far_end(),
+    {ok, Stack} = erx_net_sup:start_link(#{interfaces => [static_pipe()]}),
+    unlink(Stack),
+    try
+        Driver = answers_arp(Far, 50),
+        ?assertEqual([en0, lo0],
+                     lists:sort([Id || {Id, _, _, _} <- supervisor:which_children(interfaces(Stack))])),
+        flush(),
+        Fun(Far, Driver)
+    after
+        ok = proc_lib:stop(Stack, shutdown, infinity),
+        stop_far()
+    end.
 
 %% A pipe whose far end ends ends its driver, and the link supervisor starts the link
 %% again: a new driver, over the far end now registered under the same name, answers ARP.
@@ -674,3 +740,53 @@ answers_arp(Far, Tries) ->
 arp_request() ->
     <<16#ffffffffffff:48, ?PEER_MAC/binary, 16#0806:16, 1:16, 16#0800:16, 6, 4, 1:16,
       ?PEER_MAC/binary, ?PEER4/binary, 0:48, ?ME4/binary, 0:144>>.
+
+%% --- The loopback transport ------------------------------------------------------
+
+loop_test_() ->
+    with_tables([fun loop_hands_a_transmitted_packet_back/0,
+                 fun loop_ignores_a_message_it_did_not_make/0]).
+
+%% The loopback transport's link, and its type and size checks, which are no parse.
+loop_link_and_drops_test() ->
+    {ok, Info, Ref} = erx_net_loop:init(#{}),
+    ?assertEqual(#{link => none, lladdr => none, mtu => 16384, state => up, tx_limit => 256,
+                   finish => none}, Info),
+    ?assertEqual({error, {tx_limit, 0}}, erx_net_loop:init(#{tx_limit => 0})),
+    ?assertEqual({{drop, malformed}, Ref}, erx_net_loop:transmit(<<1, 2, 3>>, Ref)),
+    ?assertEqual({{drop, too_long}, Ref}, erx_net_loop:transmit({lo0, <<0:(16385 * 8)>>}, Ref)),
+    ?assertEqual({ok, Ref}, erx_net_loop:transmit({lo0, [<<0:(16384 * 8)>>]}, Ref)),
+    receive {erx_net_loop, Ref, lo0, Packet} -> ?assertEqual(16384, byte_size(Packet)) end.
+
+loop_driver() ->
+    flush(),
+    {ok, Driver} = erx_net_driver:start_link(lo0, erx_net_loop, #{}),
+    unlink(Driver),
+    Driver.
+
+%% A packet handed to the driver comes back to its interface as a received frame, with
+%% the zone it was sent with and its iodata joined, against the receive credit.
+loop_hands_a_transmitted_packet_back() ->
+    Driver = loop_driver(),
+    try
+        {_Rx, Tx} = attached(Driver, 4),
+        ok = erx_net_credit:hand(Driver, Tx, 1, {transmit, [{en0, [<<69>>, <<"packet">>]}]}),
+        receive {frames, Driver, Frames} -> ?assertEqual([{en0, <<69, "packet">>}], Frames)
+        after 3000 -> error(no_frames)
+        end
+    after
+        exit(Driver, kill)
+    end.
+
+%% A message shaped as the loop's own but with another reference, which only another
+%% process could have sent, is no frame.
+loop_ignores_a_message_it_did_not_make() ->
+    Driver = loop_driver(),
+    try
+        _ = attached(Driver, 4),
+        Driver ! {erx_net_loop, make_ref(), lo0, <<69, 0>>},
+        settle(Driver),
+        ?assertEqual(nothing, nothing(frames))
+    after
+        exit(Driver, kill)
+    end.

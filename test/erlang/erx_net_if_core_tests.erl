@@ -321,3 +321,90 @@ no_path_without_a_configuration_copy_test() ->
     {Core2, []} = step(local(echo(1), Core1), Core1),
     ?assertMatch(#{no_route := 1}, counters(Core2)).
 
+
+%% --- The loopback interface ------------------------------------------------------
+
+-define(LO4, <<127, 0, 0, 1>>).
+
+lo_link() -> #{link => none, lladdr => none, mtu => 16384, state => up, tx_limit => 16,
+               finish => none}.
+
+lo_core() ->
+    erx_net_if_core:new(#{name => lo0, link => lo_link(), gen => erx_net_rand:new(<<8:128>>),
+                          config => #{ip4 => #{addr => ?LO4, plen => 8}}}).
+
+%% Cores of the loopback interface and of en0, each with the configuration copy of both
+%% interfaces' published rows.
+lo_and_en0() ->
+    {Lo0, [{publish, LoRows}]} = step(start, lo_core()),
+    {En0, [{publish, EnRows} | _]} = step(start, core(static())),
+    Snap = snapshot_of([LoRows, EnRows]),
+    {Lo, []} = step({config, 1, Snap}, Lo0),
+    {En, []} = step({config, 1, Snap}, En0),
+    {Lo, En}.
+
+snapshot_of(RowSets) ->
+    Pid = self(),
+    erx_net_frame:snapshot([Iface#{pid => Pid, driver => Pid} || #{iface := Iface} <- RowSets],
+                           [{Pid, Order, Row} || #{addrs := Addrs} <- RowSets, {Order, Row} <- Addrs],
+                           [{Pid, Row} || #{routes := Routes} <- RowSets, Row <- Routes]).
+
+looped(Zone, Packet, Core) ->
+    View = (erx_net_if_core:view(Core))#{demux => fun(_) -> [] end},
+    {local, Pending} = erx_net_input:classify({looped, Zone, Packet}, View),
+    {local, Pending}.
+
+echo_packet(Src, Dst) ->
+    Icmp = erx_icmp4_wire:encode(#icmp4{type = ?ICMP_ECHO, code = 0, msg = {echo, 7, 1}}, <<"ping">>),
+    ip4(Src, Dst, 1, Icmp).
+
+%% The looped frames of Actions, each a packet with its zone in front (if_simloop's input).
+looped_out(Actions) -> [{Zone, iolist_to_binary(P)} || {transmit, Fs} <- Actions, {Zone, P} <- Fs].
+
+echo_reply_of(Packet) ->
+    {ok, Ip, Upper} = erx_ip4_wire:decode(Packet),
+    {ok, Icmp, _} = erx_icmp4_wire:decode(Upper),
+    {Ip, Icmp}.
+
+%% The loopback interface publishes its link as `none`, with no link-layer address and
+%% FreeBSD's LOMTU, and announces nothing: it has no ARP.
+loopback_publishes_link_none_and_announces_nothing_test() ->
+    {_, Actions} = step(start, lo_core()),
+    ?assertMatch([{publish, #{iface := #{name := lo0, link := none, lladdr := none, mtu := 16384},
+                              addrs := [{_, #{addr := ?LO4, plen := 8}}]}}],
+                 Actions).
+
+%% An echo request to 127.0.0.1 comes back through the loopback interface, from 127.0.0.1,
+%% its zone the loopback interface's own name.
+loopback_echo_is_answered_through_the_loopback_test() ->
+    {Lo, _} = lo_and_en0(),
+    {_, Actions} = step(looped(lo0, echo_packet(?LO4, ?LO4), Lo), Lo),
+    [{lo0, Reply}] = looped_out(Actions),
+    ?assertMatch({#ip4{src = ?LO4, dst = ?LO4}, #icmp4{type = ?ICMP_ECHOREPLY}}, echo_reply_of(Reply)).
+
+%% A packet to another interface's address loops in that address's zone and is the
+%% stack's on the loopback interface (ip_input's weak end-system model), and so is the
+%% reply, which loops back in the same zone.
+loopback_takes_a_packet_to_another_interfaces_address_test() ->
+    {Lo, _} = lo_and_en0(),
+    {_, Actions} = step(looped(en0, echo_packet(?ME4, ?ME4), Lo), Lo),
+    [{en0, Reply}] = looped_out(Actions),
+    ?assertMatch({#ip4{src = ?ME4, dst = ?ME4}, #icmp4{type = ?ICMP_ECHOREPLY}}, echo_reply_of(Reply)).
+
+%% Every interface's view holds every IPv4 address of the stack, its own first; a loopback
+%% address still never arrives off the loopback interface (erx_ip4's RFC 1122 check).
+views_hold_every_address_of_the_stack_test() ->
+    {Lo, En} = lo_and_en0(),
+    ?assertMatch(#{link := none, ip4 := #{addrs := [?LO4, ?ME4], loopback := true}},
+                 erx_net_if_core:view(Lo)),
+    ?assertMatch(#{link := ethernet, ip4 := #{addrs := [?ME4, ?LO4], loopback := false}},
+                 erx_net_if_core:view(En)),
+    View = (erx_net_if_core:view(En))#{demux => fun(_) -> [] end},
+    ?assertMatch({drop, _}, erx_net_input:classify({frame, eth(?MINE, ?ETHERTYPE_IP, echo_packet(?PEER4, ?LO4)), none},
+                                                   View)).
+
+%% The loopback interface takes no DHCP configuration: it has no link to broadcast on.
+loopback_refuses_dhcp_test() ->
+    ?assertError(function_clause,
+                 erx_net_if_core:new(#{name => lo0, link => lo_link(), gen => erx_net_rand:new(<<8:128>>),
+                                       config => #{ip4 => dhcp}})).

@@ -217,8 +217,8 @@ holds the pseudo-header's sum, not complemented. The transport's copy finishes i
 -include("erx_tcp_wire.hrl").
 -include("erx_udp_wire.hrl").
 
--export([snapshot/3, path/3, tcp/3, tcp/4, no_template/0, template/2, cut/1, run_tail/2,
-         frames/1, units/1, udp/5, ip/4, address/3, link/3, finish/1,
+-export([snapshot/3, addresses/1, path/3, tcp/3, tcp/4, no_template/0, template/2, cut/1,
+         run_tail/2, frames/1, units/1, udp/5, ip/4, address/3, link/3, finish/1,
          finishable/2]).
 
 -export_type([iface/0, zoned/0, snapshot/0, opts/0, path/0, packet/0, frame/0, delayed/0,
@@ -342,6 +342,16 @@ snapshot(Ifs, Addrs, Routes) ->
     Table = lists:foldl(fun erx_net_route:put/2, erx_net_route:new(),
                         [Row || {Pid, #{ifname := Ifname} = Row} <- Routes, Current(Ifname, Pid)]),
     #{ifs => ByName, addrs => [Row || {_, _, Row} <- Ordered], routes => Table}.
+
+-doc """
+The stack's addresses in a snapshot, every interface's, the loopback interface's
+included, in the order their interfaces added them: the addresses the weak end-system
+model of `ip_input` accepts a packet to on any interface (`ip_input.c:696-720`, with
+`ip_strong_es` off by default).
+""".
+-spec addresses(snapshot()) -> [erx_net_addr:addr()].
+addresses(#{addrs := Addrs}) ->
+    [Addr || #{addr := Addr} <- Addrs].
 
 %% --- Paths --------------------------------------------------------------------
 

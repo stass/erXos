@@ -57,7 +57,9 @@ Listeners, datagram sockets under a grant and the port mapper join the tree as t
 written.
 
 The configuration, a map: `interfaces`, a list of `#{name, transport := {Module, Config},
-ip4, ingress}`; `clock` (`monotonic` when absent); `runtime`, the runtime seam's module
+ip4, ingress}`, to which the stack adds the loopback interface, `lo0` with 127.0.0.1/8 over
+erx_net_loop, unless the list names an interface `lo0` (docs/design-network-stack.md,
+"Loopback"); `clock` (`monotonic` when absent); `runtime`, the runtime seam's module
 (`erx_net_local` when absent). The clock and the runtime are chosen before any process
 starts; a module the build does not hold stops the start with `{error, {seam, Key,
 Module}}`.
@@ -70,6 +72,7 @@ Module}}`.
 
 -define(RUNTIME, {?MODULE, runtime}).
 -define(LINKS_PERIOD_S, 5).
+-define(LOOPBACK, lo0).
 
 -type interface() :: #{name := term(), transport := {module(), map()},
                        ip4 := dhcp | map(), ingress => map()}.
@@ -109,7 +112,8 @@ init({stack, Interfaces}) ->
 init(grants) ->
     Grant = #{id => grant, start => {runtime(), start_grant, []}, restart => temporary},
     {ok, {#{strategy => simple_one_for_one}, [Grant]}};
-init({interfaces, Interfaces}) ->
+init({interfaces, Configured}) ->
+    Interfaces = with_loopback(Configured),
     Children = [#{id => Name, type => supervisor, start => {?MODULE, start_link_sup, [If]},
                   restart => permanent}
                 || #{name := Name} = If <- Interfaces],
@@ -120,6 +124,17 @@ init({link, #{name := Name, transport := {Transport, TransportConfig}}}) ->
     Driver = #{id => driver, start => {erx_net_driver, start_link, [Name, Transport, TransportConfig]},
                restart => temporary, significant => true},
     {ok, {#{strategy => rest_for_one, auto_shutdown => any_significant}, [Driver]}}.
+
+%% The interfaces with the loopback interface first, lo0 with 127.0.0.1/8 over erx_net_loop,
+%% unless the configuration names an interface lo0, whose own configuration then stands, as
+%% FreeBSD's network.subr gives lo0 127.0.0.1/8 unless ifconfig_lo0 says otherwise
+%% (libexec/rc/network.subr:684-690; the kernel's vnet_loif_init creates lo0 itself, if_loop.c:143-155).
+with_loopback(Interfaces) ->
+    case lists:any(fun(#{name := Name}) -> Name =:= ?LOOPBACK end, Interfaces) of
+        true -> Interfaces;
+        false -> [#{name => ?LOOPBACK, transport => {erx_net_loop, #{}},
+                    ip4 => #{addr => <<127, 0, 0, 1>>, plen => 8}} | Interfaces]
+    end.
 
 -doc """
 Starts one interface's link supervisor with its driver, then, once the driver runs, the
