@@ -52,7 +52,8 @@ module Erx
     CONSOLE = :console
     # As serial, the guest's serial line on QEMU's own standard input and output, for a
     # QEMU on another host whose line ssh carries (QemuRemote); its input comes on
-    # standard input too, so the plan takes no serial_input.
+    # standard input too, so the plan takes no serial_input. Also for the boot benchmark
+    # (BenchBoot), which reads the line from a pipe to stamp each chunk with the host's clock.
     STDIO = :stdio
     # The kernel command line's word for deterministic mode (docs/design-stopgap.md,
     # "Deterministic mode"). A plan whose line carries it, split on spaces as the guest

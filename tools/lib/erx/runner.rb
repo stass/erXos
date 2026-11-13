@@ -7,6 +7,7 @@ require 'json'
 require 'time'
 require_relative 'error'
 require_relative 'output_directory'
+require_relative 'process_group'
 
 module Erx
   # All child output stays in logs. Diagnostics quote paths through Terminal.
@@ -42,6 +43,10 @@ module Erx
     FIRST_POLL_SECONDS = 0.001
     POLL_SECONDS = 0.05
     PROGRESS_SECONDS = 30
+
+    # The located deadline tool, for a caller that spawns its own child (BenchBoot) and
+    # wraps it the same way.
+    attr_reader :timeout_program
 
     # timeout_program, the deadline tool every command runs under, is found once on this
     # process's PATH, so a command's own environment (a build's constructed PATH) cannot
@@ -118,7 +123,7 @@ module Erx
         original_error = $!
         begin
           record['state'] = 'cancelled' if record['state'] == 'running'
-          terminate_group(pid) if pid
+          ProcessGroup.terminate(pid) if pid
           record['elapsed_seconds'] = monotonic - started
           record['exit_status'] = status&.exitstatus
           record['signal'] = status&.termsig
@@ -196,48 +201,6 @@ module Erx
 
     def monotonic
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    end
-
-    def terminate_group(pid)
-      signal_group('TERM', pid)
-      # Reap only our direct child. Descendants are killed by their group id.
-      # A bounded grace period lets log writers flush before SIGKILL, and it ends
-      # as soon as no member is left to flush.
-      stop_at = monotonic + 0.25
-      loop do
-        begin
-          Process.waitpid(pid, Process::WNOHANG)
-        rescue Errno::ECHILD
-          # The main loop may already have reaped it.
-        end
-        break if group_gone?(pid) || monotonic >= stop_at
-        sleep(POLL_SECONDS)
-      end
-      signal_group('KILL', pid)
-      begin
-        Process.waitpid(pid)
-      rescue Errno::ECHILD
-        nil
-      end
-    end
-
-    # A group with no live member is gone. macOS reports a group whose members
-    # have all exited but are not yet reaped as EPERM, not ESRCH. The group is
-    # our own child's; a member that changed user could not be signalled by
-    # this runner in any case.
-    def signal_group(signal, pid)
-      Process.kill(signal, -pid)
-    rescue Errno::ESRCH, Errno::EPERM
-      nil
-    end
-
-    # Whether no member can still flush or be signalled, by signal_group's reading of
-    # the errors. Linux counts an unreaped child as a member, so the caller reaps first.
-    def group_gone?(pid)
-      Process.kill(0, -pid)
-      false
-    rescue Errno::ESRCH, Errno::EPERM
-      true
     end
   end
 end

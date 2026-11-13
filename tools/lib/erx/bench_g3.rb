@@ -117,15 +117,15 @@ module Erx
 
     # The compiler and flags of the image under test, gathered before it boots. An image that
     # was handed in was built elsewhere, so this tree says nothing about it.
-    public def build_record(image)
+    # clang is the compiler that builds the image, by default the environment's.
+    public def build_record(image, clang: ENV.fetch('ERX_CLANG', ''))
       return { 'compiler' => IMAGE_SUPPLIED, 'flags' => IMAGE_SUPPLIED } if image
 
-      { 'compiler' => compiler_version, 'flags' => build_flags }
+      { 'compiler' => compiler_version(clang), 'flags' => build_flags }
     end
 
-    def compiler_version
-      clang = ENV.fetch('ERX_CLANG', '')
-      raise Error, 'ERX_CLANG names no compiler; G3 needs it to build and describe the image' if clang.empty?
+    def compiler_version(clang)
+      raise Error, 'ERX_CLANG names no compiler; a benchmark needs it to build and describe the image' if clang.empty?
 
       command = @runner.run([clang, '--version'], name: 'bench-g3-compiler', deadline: 10)
       File.read(command.fetch('log')).lines.first.to_s.strip

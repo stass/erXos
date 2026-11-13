@@ -42,6 +42,7 @@ begin
   require_relative 'lib/erx/sanitizer_tests'
   require_relative 'lib/erx/test_pool'
   require_relative 'lib/erx/bench'
+  require_relative 'lib/erx/bench_boot'
   require_relative 'lib/erx/bench_bytes'
   require_relative 'lib/erx/bench_g3'
   require_relative 'lib/erx/bench_g5'
@@ -731,7 +732,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | build web | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] [--platform NAME] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] | build fiasco | build runtime | build rc-oracle | build fsimg | build herd7 | build lvgl | build web | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium] [--platform NAME] | load --socket PATH [--build HEX] FILE... | watch --socket PATH [--build HEX] [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | web --socket PATH [--build HEX] [--port N] | status | setup [--jobs N]')
       0
     end
 
@@ -1217,18 +1218,21 @@ module Erx
         flags.on('--flavour NAME', %w[emu jit]) { |value| options[:flavour] = value }
         flags.on('--iterations N', Integer, 'host benchmarks only') { |value| options[:iterations] = value }
         flags.on('--samples N', Integer, 'host benchmarks only') { |value| options[:samples] = value }
-        flags.on('--image PATH', 'g3 and bytes only: boot this built image instead of building one') { |value| options[:image] = value }
-        flags.on('--accel NAME', %w[tcg hvf], 'g3, g5, bytes and web only: the guest accelerator') { |value| options[:accel] = value }
+        flags.on('--image PATH', 'boot, g3 and bytes only: boot this built image instead of building one') { |value| options[:image] = value }
+        flags.on('--runs N', Integer, 'boot only: the number of boots') { |value| options[:runs] = value }
+        flags.on('--accel NAME', %w[tcg hvf], 'boot, g3, g5, bytes and web only: the guest accelerator') { |value| options[:accel] = value }
       end.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
 
-      inapplicable = { 'g3' => %i[iterations samples], 'g5' => %i[iterations samples image flavour],
-                       'bytes' => %i[iterations samples flavour],
-                       'web' => %i[iterations samples image flavour] }.fetch(name, %i[image accel])
+      inapplicable = { 'boot' => %i[iterations samples flavour], 'g3' => %i[iterations samples runs],
+                       'g5' => %i[iterations samples image flavour runs],
+                       'bytes' => %i[iterations samples flavour runs],
+                       'web' => %i[iterations samples image flavour runs] }.fetch(name, %i[image accel runs])
       refused = inapplicable.select { |option| options.key?(option) }
       unless refused.empty?
         raise OptionParser::InvalidArgument, "#{refused.map { |option| "--#{option}" }.join(', ')} do not apply to bench #{name}"
       end
+      return bench_boot(options) if name == 'boot'
       return bench_g3(options) if name == 'g3'
       return bench_g5(options) if name == 'g5'
       return bench_bytes(options) if name == 'bytes'
@@ -1317,6 +1321,25 @@ module Erx
         end
       end
       Terminal.puts("web benchmark failed: #{LineEscape.escape(report.fetch('error'))}") if report.fetch('error')
+      report.fetch('complete') ? 0 : 1
+    end
+
+    # Boot time of the development image to the kernel banner, the root task, the system
+    # domain's Erlang banner and the command shell, N boots, median and spread (BenchBoot).
+    # A boot that does not reach the shell fails the run: the report is written all the same,
+    # and the exit status is nonzero unless every boot passed and every mark was reached.
+    def self.bench_boot(options)
+      raise OptionParser::MissingArgument, '--accel' unless options[:accel]
+
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      report = BenchBoot.run(root: ROOT, runner: runner, plan: BenchBoot::PLANS.fetch(options.fetch(:accel)),
+                             image: options[:image], runs: options[:runs])
+      Terminal.puts("boot benchmark (#{options.fetch(:accel)}, #{report.fetch('runs')} boots): #{report.fetch('report')}")
+      report.fetch('summary').each do |mark, entry|
+        Terminal.puts(BenchBoot.format_line(mark, entry))
+      end
+      failure = report.fetch('failure')
+      Terminal.puts("boot #{failure.fetch('boot')} failed: #{failure.fetch('error')}") if failure
       report.fetch('complete') ? 0 : 1
     end
 
