@@ -338,8 +338,10 @@ Error in process <0.150.0> with exit value:
   has not run on a real board. The manifest configures a network domain
   that runs the stack over the Ethernet driver (`erx_genet`, as
   `genet0`); the model has no Ethernet, so there the domain's first
-  register read faults and the domain is left down after its restarts,
-  and the driver has not run on a real board.
+  register read faults and the domain is left down after its restarts.
+  On the board the driver brings `genet0` up at 1000 Mb/s, DHCP gives
+  it an address, and `ping` and `host` reach the internet; unplugging
+  and replugging the cable takes the link down and back up.
 * **The machine is an object** (M4). A host link over the second serial
   line lets `tools/erx load` and `watch` replace modules in the running
   system, and `tools/erx files` read the guest's files over 9P2000.L; `tools/erx boot
