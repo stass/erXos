@@ -753,14 +753,36 @@ the interrupt messages and the deadlines' timers.
 (facts record, "Issuing a command"): it reads `present` and refuses with
 `{device, inhibit}` when command inhibit is still set after 10 ms, or data inhibit for a
 command that uses the data lines or answers with busy (`SDHCI_CMD_INHIBIT`,
-`SDHCI_DAT_INHIBIT`, `sdhci.h:148-149`); for a data command it writes
-`blksizecnt`; it writes `arg`; and it issues the `cmdtm` word with
+`SDHCI_DAT_INHIBIT`, `sdhci.h:148-149`); it writes `interrupt`'s
+one-to-clear bits, so no status an earlier command left before the
+issue reaches this command (one it raises later still can, which no
+source or probe has shown); for a data command it writes `blksizecnt`; it writes `arg`;
+and it issues the `cmdtm` word with
 `erx_device:command/2`: the transfer mode (block count enabled, multiple
 blocks and Auto CMD12 for more than one block, the direction, DMA off)
 and the command (index, response type, CRC and index checks as the type
-requires, data present). The device process then waits for command
-complete or an error bit, reads the response, and for a command that
-answers with busy, such as CMD7, waits for transfer complete as well.
+requires, data present). The device process then gives each
+`interrupt` word to the command's wait, `erx_blk_sd_host:command/1`,
+which keeps two tracks as FreeBSD keeps `cmd_done` and `data_done`
+(`sdhci.c:1878, 1921-1923, 2047, 2057-2059`): command complete, at
+which the response is read; and the data track, transfer complete for
+a command that answers with busy, such as CMD7, or the buffer event
+and transfer complete for a data block. The tracks advance in either
+order, since a controller may raise transfer complete before command
+complete (`sdhci.c:2026-2033`), and the command is answered once both
+are done. An error bit fails the command before the rest of its word
+acts, data error bits included where FreeBSD ignores them for a command
+with neither data nor busy; that command's other data events are not
+its own and are ignored, as FreeBSD ignores them (`sdhci.c:2242-2249`); any
+other event out of its track's order fails the command, a buffer event
+of a busy command included (`sdhci.c:2254-2260`). FreeBSD sources read
+at `release/15.1.0`: `sys/dev/sdhci/sdhci.c` (SHA-256
+`4551b7d7842dfb2ffcdc2a565686a6dad5d6aa74606abd9cdc647e98d29eb500`),
+`sys/dev/sdhci/sdhci.h`
+(`363ed505d9ec77603b1b0d46e689da80600e72ce5948d5b2efe70571059b2b78`)
+and `sys/arm/broadcom/bcm2835/bcm2835_sdhci.c`
+(`28c9af6fa2f549dbfc5bd239b0edd592da2df83833e021f76ff599826d8de56f`),
+whose BCM2711 configuration carries no quirk (`bcm2835_sdhci.c:129-135`).
 
 **The start sequence.** Every start and every restart runs it whole:
 
@@ -1830,6 +1852,15 @@ The SD controller, each test paired with the fault that proves it ran:
 * The 1.8 V check on the host: a `control2` word with 1.8 V signalling
   enabled refuses the start before any reset or command; the seeded
   fault drops the check, and the test sees the reset written.
+* The identification command's wait on the host: command complete and
+  the data track in either order, in one word or several; a data end on
+  a command with neither data nor busy ignored; an out-of-order event,
+  a second command complete and a busy command's buffer event failing
+  it; every decoded word ending in continue, done or fail. Over the
+  recording stand-in, identification passes CMD7 with its transfer
+  complete in the word before its command complete, and with a data
+  end in CMD9's word. The seeded fault holds the data track until
+  command complete, and both tests fail, each under its own fault.
 * The transfer's checks on the host: an Auto CMD12 R1 with an error bit
   fails a multi-block read or write, and one with only out of range
   fails it unless it is a CMD18 that ended at the card's last sector;
@@ -1844,8 +1875,9 @@ The SD controller, each test paired with the fault that proves it ran:
   `erofs` and touches no register; the seeded fault removes the trial
   check, and the test fails.
 * The issuing of a plan on the host, against the same recording stand-in
-  for the device NIF: `sd_issue/2` writes `blksizecnt` (for a data
-  command only), `arg` and the command in that order, refuses with `{device, inhibit}` once inhibit
+  for the device NIF: `sd_issue/2` writes `interrupt`'s one-to-clear
+  bits, `blksizecnt` (for a data command only), `arg` and the command
+  in that order, refuses with `{device, inhibit}` once inhibit
   has stayed set for 10 ms, and keeps the spacing across consecutive
   issues; `sd_feed/3` writes exactly the plan's checked bytes of the
   block it names; and the argument rule admits CMD16 only with 512 and

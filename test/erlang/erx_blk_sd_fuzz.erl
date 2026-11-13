@@ -33,7 +33,8 @@ run([Seed]) ->
                {performance_enhancement, fun performance_enhancement/0},
                {interrupt, fun interrupt/0}, {sd_command, fun sd_command/0},
                {registers, fun registers/0}],
-    Machines = [{identification, fun identification/0}, {transfer, fun transfer/0}],
+    Machines = [{identification, fun identification/0}, {transfer, fun transfer/0},
+                {command, fun command/0}],
     Targets = [{Name, Round, ?ROUNDS div 20} || {Name, Round} <- Parsers]
         ++ [{Name, Round, 0} || {Name, Round} <- Machines],
     lists:foreach(fun({Name, Round, Floor}) ->
@@ -338,6 +339,37 @@ identification_event() ->
         7 -> rand:bytes(3);
         _ -> {response, lists:nth(rand:uniform(3), [16#900, 16#920, word()])}
     end.
+
+%% Random interrupt words, decoded, into one identification command's wait: it never
+%% raises, every action has its shape, and done or fail ends it.
+command() ->
+    Shape = lists:nth(rand:uniform(5), [#{response => none, data => none}, #{response => r1, data => none},
+                                        #{response => r1b, data => none},
+                                        #{response => r1, data => {read, 8, 1}},
+                                        #{response => r1, data => {write, 512, 1}}]),
+    walk_command(?H:command(Shape), 8).
+
+walk_command(_C, 0) ->
+    refused;
+walk_command(C, Left) ->
+    Word = case rand:uniform(4) of
+               1 -> word();
+               _ -> 1 bsl (rand:uniform(6) - 1)
+           end,
+    case ?H:decode(Word) of
+        none -> walk_command(C, Left - 1);
+        Events ->
+            case ?H:command_step(C, Events) of
+                {continue, Actions, Next} -> ok = command_actions(Actions), walk_command(Next, Left - 1);
+                {done, Actions} -> ok = command_actions(Actions), accepted;
+                {fail, timeout} -> refused;
+                {fail, {error, _}} -> refused
+            end
+    end.
+
+command_actions(Actions) ->
+    [] = [A || A <- Actions, not lists:member(A, [read_response, read_block, write_block])],
+    ok.
 
 %% Random controller events into a transfer: it never raises, every action
 %% has its shape, and it ends with one terminal action.

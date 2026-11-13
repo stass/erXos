@@ -1136,14 +1136,16 @@ it; git history is the record of completed work.
   user's actions (a click, the menu), so a client's request only raises; `decorate/2` then needs that state.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device_nif.c`: a move of a bound edge line can lose the one delivery taken under the old label just before the old sink was unregistered, while a level
   line fires again at the bind's acknowledgement. A driver of an edge line looks at its device after binding. The PL011's line is level.
-* [Medium] `erlang/apps/erx_blk/src/erx_blk_sd.erl` (`await/3`) and `erx_blk_sd_host.erl` (`issued/2`): both expect a
-  command's events in one order, command complete before the buffer events, so a controller that raises buffer write
-  ready before the response, in a separate interrupt word, fails the step and restarts the storage domain on every
-  write. QEMU's raspi4b model does not: the `tcg-sd-card` cell identifies the card and writes two blocks
-  (docs/research-sdhci-qemu-model.md, "erXos's SD driver on the model"); whether the BCM2711's EMMC2 does is
-  unverified, and the board probe should record it. The fix by construction: track
-  command done and data progress as independent facts, holding an early buffer event until command complete, and in
-  the start take the events `sd_shape/1` names as a set.
+* [High] `erlang/apps/erx_blk/src/erx_blk_sd_host.erl` (`issued/2`), the request transfer: it expects command
+  complete before the buffer events and transfer complete, so a controller that raises a data event before the
+  response, in a separate interrupt word, fails the request and restarts the storage domain. The start's commands
+  take both orders (`command/1`, two tracks as FreeBSD's `cmd_done` and `data_done`, `sdhci.c:1921-1923,
+  2057-2059`). On the Pi 4 the start was refused at CMD7 by one of two behaviours, unverified which: CMD7's
+  transfer complete in a word before its command complete, or a data end in CMD9's word; the request path may
+  meet the same. One word's events can also reach the next request inside `handle_info`'s fold, after a CMD13
+  answer starts it; feed the transfer one word at a time as the start's wait is fed. Give the transfer the same
+  two tracks: command complete may come at any point before the data track ends, and the request is answered once
+  both are done; the exhaustive oracle in `erx_blk_sd_host_tests.erl` then allows the command at any position.
 * [Medium] `erlang/apps/erx_blk/src/erx_blk_sup.erl`: a line owner (`erx_irq_line:start_owner/2`) that fails to start
   fails the supervisor's start, so the permanent application ends the storage domain, and the same failure repeats on
   each restart until the domain row's intensity runs out, with no line from the driver. The owner child should refuse

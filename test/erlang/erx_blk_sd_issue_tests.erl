@@ -25,20 +25,21 @@ issue(Plan, Reads) ->
 
 ops(Calls) -> [Op || {_Us, Op} <- Calls].
 
-%% A data command: present until clear, then blksizecnt, arg and the command, built as the
+%% A data command: present until clear, then `interrupt` cleared, blksizecnt, arg and the
+%% command, built as the
 %% plan's command says.
 read_order_test() ->
     {ok, Plan} = ?W:sd_read_plan(5, 3, ?CARD),
     {ok, #{argument := Arg, word := Word, blksizecnt := Size}} = ?W:sd_read_command(5, 3, ?CARD),
     {{ok, _Regs}, Calls} = issue(Plan, #{present => [?DAT_INHIBIT, ?CMD_INHIBIT, 0]}),
     ?assertEqual([{read, present}, {read, present}, {read, present},
-                  {write, blksizecnt, Size}, {write, arg, Arg}, {command, Word}], ops(Calls)).
+                  {write, interrupt, erx_blk_sd_host:ack_mask()}, {write, blksizecnt, Size}, {write, arg, Arg}, {command, Word}], ops(Calls)).
 
 %% A command without data writes no blksizecnt, and waits for command inhibit only.
 status_order_test() ->
     {ok, Plan} = ?W:sd_status_plan(?CARD),
     {{ok, _Regs}, Calls} = issue(Plan, #{present => [?DAT_INHIBIT]}),
-    ?assertMatch([{read, present}, {write, arg, 16#12340000}, {command, _}], ops(Calls)).
+    ?assertMatch([{read, present}, {write, interrupt, _}, {write, arg, 16#12340000}, {command, _}], ops(Calls)).
 
 %% An inhibit that does not clear refuses after 10 ms and writes nothing.
 inhibit_bound_test() ->
@@ -59,7 +60,7 @@ spacing_test() ->
     {ok, Regs} = ?W:sd_issue(erx_blk_sd_regs:new(dev), Plan),
     {ok, _} = ?W:sd_issue(Regs, Plan),
     Times = [Us || {Us, Op} <- erx_device:calls(), element(1, Op) =/= read],
-    ?assertEqual(6, length(Times)),
+    ?assertEqual(8, length(Times)),
     ?assertEqual([], [{A, B} || {A, B} <- lists:zip(lists:droplast(Times), tl(Times)), B - A < 6]).
 
 %% A write's block Index is that block of the plan's data, little-endian words; a block the

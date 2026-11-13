@@ -21,9 +21,10 @@ start: the record opened and its line attached; a controller left at 1.8 V
 refused; DAT0 awaited; the reset for all; the version and base clock; power,
 the card-detect test bits, the 400 kHz clock and the interrupt enables; then
 the card's identification, each step's command issued through
-erx_blk_write and its answer awaited on the line within 1 s. Several events
-can come in one `interrupt` word, so the start keeps those it has not used
-yet in a queue, which a line reset empties. Any refusal is one line in the
+erx_blk_write and its answer awaited on the line within 1 s. Each
+`interrupt` word goes whole to the command in flight, whose wait
+(erx_blk_sd_host:command/1) takes command complete and the data track in
+either order and ignores what is not its own. Any refusal is one line in the
 log and no process: init/1 returns ignore, so a missing or refused card
 ends nothing and is not restarted.
 
@@ -39,7 +40,7 @@ the start sequence again (design, "Failure").
 **An interrupt** is read once from `interrupt`: a word of zero or all ones
 is not this controller's and the line is answered done; otherwise its
 one-to-clear bits are written back, the line is answered and the word's
-events go to the start's queue or to the transfer in flight, and are
+events go to the start's command or to the transfer in flight, and are
 dropped when no request is in flight.
 """.
 
@@ -73,12 +74,11 @@ dropped when no request is in flight.
               plan :: erx_blk_write:sd_plan(), accepted :: integer()}).
 
 %% dev, irq, card, base and clock are fixed once init/1 returns; regs carries the last
-%% spaced write's time; events are the start's unused interrupt events; current is the
-%% request in flight with its transfer, the blocks read so far and its timer.
+%% spaced write's time; current is the request in flight with its transfer, the blocks
+%% read so far and its timer.
 -record(state, {dev :: erx_device:device(), regs :: erx_blk_sd_regs:regs(), irq :: erx_irq_line:handle(),
                 base = 0 :: non_neg_integer(), clock = 0 :: non_neg_integer(),
                 card :: undefined | erx_blk_sd_card:card(),
-                events = queue:new() :: queue:queue(erx_blk_sd_host:interrupt_event()),
                 current = none :: none | {#job{}, erx_blk_sd_host:transfer(), [binary()], reference() | none},
                 waiting = queue:new() :: queue:queue(#job{})}).
 
@@ -97,7 +97,7 @@ init(Spec) ->
             #{addressing := Addressing, sectors := Sectors} = State#state.card,
             log("SD card, ~s capacity, ~b sectors, 4-bit bus at ~b Hz",
                 [capacity_name(Addressing), Sectors, State#state.clock]),
-            {ok, State#state{events = queue:new()}};
+            {ok, State};
         {error, Reason} ->
             log("the SD card is not driven: ~0P", [Reason, ?DEPTH]),
             ignore
@@ -137,12 +137,11 @@ dat0(Dev) ->
     end.
 
 %% A software reset, reset_all, reset_cmd or reset_data in control1: set, then polled
-%% until it clears, for at most 100 ms. A line reset also drops the events of the command
-%% it follows.
+%% until it clears, for at most 100 ms.
 reset(#state{dev = Dev, regs = Regs} = S, Field) ->
     Set = erx_blk_sd_regs:write_field(Regs, control1, Field, 1),
     case poll(fun() -> erx_device:read_field(Dev, control1, Field) =:= 0 end, ?RESET_MS) of
-        ok -> {ok, S#state{regs = Set, events = queue:new()}};
+        ok -> {ok, S#state{regs = Set}};
         timeout -> {error, {Field, not_cleared}}
     end.
 
@@ -222,47 +221,74 @@ identify(_S, {Actions, _Card}) ->
 line_reset(cmd) -> reset_cmd;
 line_reset(dat) -> reset_data.
 
-%% One identification command through its plan, and its answer as the card core's event:
-%% the response at command complete; for R1b, transfer complete as well; for a data block,
-%% the buffer event, the block through `data` and transfer complete. Everything within 1 s
-%% of the issue.
+%% One identification command through its plan, and its answer as the card core's event,
+%% everything within 1 s of the issue: erx_blk_sd_host's wait for the command takes each
+%% interrupt word, and its actions read the response at command complete, the block from
+%% `data` at buffer read ready and feed the plan's block at buffer write ready. Every
+%% event a word carries goes to the command whose issue preceded it; the issue clears
+%% what an earlier command left in `interrupt` (erx_blk_write:sd_issue/2).
 command(#state{regs = Regs} = S, Step) ->
     Deadline = now_ms() + ?STEP_MS,
     maybe
         {ok, Plan} ?= erx_blk_write:sd_plan(Step),
         {ok, Issued} ?= erx_blk_write:sd_issue(Regs, Plan),
-        answer(S#state{regs = Issued}, Plan, erx_blk_write:sd_shape(Plan), Deadline)
+        Shape = erx_blk_write:sd_shape(Plan),
+        await(S#state{regs = Issued}, {Plan, Shape}, erx_blk_sd_host:command(Shape), #{}, Deadline)
     else
         {error, Reason} -> {{error, Reason}, S}
     end.
 
-answer(S, Plan, #{response := Response, data := Data}, Deadline) ->
-    then(await(S, command_complete, Deadline),
-         fun(Done) -> data(Done, Plan, response(Done#state.dev, Response), Response, Data, Deadline) end).
+%% The command's wait, Wait, given each delivery's word until it is done or fails, or
+%% Deadline passes. Got holds what the actions read so far: the response and the bytes.
+await(#state{dev = Dev} = S, Command, Wait, Got, Deadline) ->
+    receive
+        {erx_irq, Dev, ?IRQ_LINE} ->
+            {Events, Serviced} = service(S),
+            case erx_blk_sd_host:command_step(Wait, Events) of
+                {fail, Event} ->
+                    {Event, Serviced};
+                Step ->
+                    {Actions, Next} = case Step of
+                                          {continue, A, N} -> {A, N};
+                                          {done, A} -> {A, done}
+                                      end,
+                    case act(Serviced, Command, Actions, Got) of
+                        {error, _} = Failed -> {Failed, Serviced};
+                        {ok, Read} when Next =:= done -> {answer(Command, Read), Serviced};
+                        {ok, Read} -> next_word(Serviced, Command, Next, Read, Deadline)
+                    end
+            end
+    after max(0, Deadline - now_ms()) ->
+        {{error, {deadline, erx_blk_sd_host:awaited(Wait)}}, S}
+    end.
 
-data(S, _Plan, Answer, r1b, none, Deadline) ->
-    then(await(S, transfer_complete, Deadline), fun(Busy) -> {{response, Answer}, Busy} end);
-data(S, _Plan, Answer, _Response, none, _Deadline) ->
-    {{response, Answer}, S};
-data(S, _Plan, Answer, _Response, {read, Size, 1}, Deadline) ->
-    then(await(S, buffer_read_ready, Deadline),
-         fun(Ready) ->
-                 Bytes = read_words(Ready#state.dev, Size div 4),
-                 then(await(Ready, transfer_complete, Deadline), fun(Moved) -> {{data, Answer, Bytes}, Moved} end)
-         end);
-data(S, Plan, Answer, _Response, {write, _Size, 1}, Deadline) ->
-    then(await(S, buffer_write_ready, Deadline),
-         fun(Ready) ->
-                 case erx_blk_write:sd_feed(Ready#state.regs, Plan, 0) of
-                     ok -> then(await(Ready, transfer_complete, Deadline),
-                                fun(Moved) -> {{response, Answer}, Moved} end);
-                     {error, Reason} -> {{error, Reason}, Ready}
-                 end
-         end).
+%% The next word, unless the deadline has passed: a run of deliveries that move no track
+%% (words of no events, or only ignored ones) cannot hold the step past it.
+next_word(S, Command, Wait, Got, Deadline) ->
+    case now_ms() >= Deadline of
+        true -> {{error, {deadline, erx_blk_sd_host:awaited(Wait)}}, S};
+        false -> await(S, Command, Wait, Got, Deadline)
+    end.
 
-%% The rest of a step once await/3 has its event, or the event await/3 failed with.
-then({ok, S}, Next) -> Next(S);
-then({fail, Event, S}, _Next) -> {Event, S}.
+%% The wait's actions in order, each adding what it read to Got.
+act(S, Command, Actions, Got) ->
+    lists:foldl(fun(Action, {ok, G}) -> act_one(S, Command, Action, G);
+                   (_Action, Failed) -> Failed
+                end, {ok, Got}, Actions).
+
+act_one(#state{dev = Dev}, {_Plan, #{response := Response}}, read_response, Got) ->
+    {ok, Got#{response => response(Dev, Response)}};
+act_one(#state{dev = Dev}, {_Plan, #{data := {read, Size, 1}}}, read_block, Got) ->
+    {ok, Got#{bytes => read_words(Dev, Size div 4)}};
+act_one(#state{regs = Regs}, {Plan, _Shape}, write_block, Got) ->
+    case erx_blk_write:sd_feed(Regs, Plan, 0) of
+        ok -> {ok, Got};
+        {error, _} = Failed -> Failed
+    end.
+
+%% The card core's event for a finished command: a read's R1 and bytes, or the response.
+answer({_Plan, #{data := {read, _Size, 1}}}, #{response := R1, bytes := Bytes}) -> {data, R1, Bytes};
+answer(_Command, #{response := Response}) -> {response, Response}.
 
 %% The response registers: none for CMD0, all four for an R2, resp0 otherwise.
 response(_Dev, none) -> none;
@@ -272,33 +298,6 @@ response(Dev, _R48) -> erx_device:read(Dev, {resp, 0}).
 %% Words from `data`, the first byte in the low byte of the first word.
 read_words(Dev, Words) ->
     << <<(erx_device:read(Dev, data)):32/little>> || _ <- lists:seq(1, Words) >>.
-
-%% The next event of the start, Want: from the queue, or from the line's next delivery
-%% before Deadline. A command timeout alone is the card core's `timeout`; any other error
-%% bits, or an event the step did not expect, end the step and empty the queue.
-await(#state{events = Events} = S, Want, Deadline) ->
-    case queue:out(Events) of
-        {{value, Want}, Rest} ->
-            {ok, S#state{events = Rest}};
-        {{value, {error, _}}, _Rest} ->
-            Errors = lists:takewhile(fun(Event) -> element(1, Event) =:= error end, queue:to_list(Events)),
-            {fail, errors(Errors), S#state{events = queue:new()}};
-        {{value, Other}, _Rest} ->
-            {fail, {error, {unexpected, Want, Other}}, S#state{events = queue:new()}};
-        {empty, _} ->
-            Dev = S#state.dev,
-            receive
-                {erx_irq, Dev, ?IRQ_LINE} ->
-                    {Got, Serviced} = service(S),
-                    await(Serviced#state{events = queue:join(Serviced#state.events, queue:from_list(Got))},
-                          Want, Deadline)
-            after max(0, Deadline - now_ms()) ->
-                {fail, {error, {deadline, Want}}, S}
-            end
-    end.
-
-errors([{error, command_timeout}]) -> timeout;
-errors(Errors) -> {error, {interrupt, [Name || {error, Name} <- Errors]}}.
 
 %%% The interrupt
 

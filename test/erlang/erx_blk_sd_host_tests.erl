@@ -316,3 +316,75 @@ spaced_test() ->
     First = receive {wrote, T1} -> T1 end,
     Second = receive {wrote, T2} -> T2 end,
     ?assert(Second - First >= 6).
+
+%%% One identification command's wait
+
+%% The words of a command, one list per `interrupt` word, through command_step/2: the
+%% actions in order and the end, done or the failure.
+words(Shape, Words) ->
+    words(?H:command(Shape), Words, []).
+
+words(_C, [], Actions) -> {waiting, lists:reverse(Actions)};
+words(C, [Word | Rest], Actions) ->
+    case ?H:command_step(C, Word) of
+        {continue, More, Next} -> words(Next, Rest, lists:reverse(More, Actions));
+        {done, More} when Rest =:= [] -> {done, lists:reverse(Actions, More)};
+        {done, _More} -> {done_early, Rest};
+        {fail, Event} -> {fail, Event}
+    end.
+
+-define(R1, #{response => r1, data => none}).
+-define(R1B, #{response => r1b, data => none}).
+-define(READ, #{response => r1, data => {read, 8, 1}}).
+-define(WRITE, #{response => r1, data => {write, 512, 1}}).
+
+%% Command complete and the data track's events in either order, in one word or several,
+%% as FreeBSD's sdhci_finish_command and sdhci_finish_data take them (sdhci.c:1921-1923,
+%% 2057-2059).
+command_tracks_in_either_order_test_() ->
+    [?_assertEqual({done, [read_response]}, words(?R1B, [[command_complete], [transfer_complete]])),
+     ?_assertEqual({done, [read_response]}, words(?R1B, [[transfer_complete], [command_complete]])),
+     ?_assertEqual({done, [read_response]}, words(?R1B, [[command_complete, transfer_complete]])),
+     ?_assertEqual({waiting, [read_response]}, words(?R1B, [[command_complete]])),
+     ?_assertEqual({done, [read_block, read_response]},
+                   words(?READ, [[buffer_read_ready], [command_complete], [transfer_complete]])),
+     ?_assertEqual({done, [read_response, read_block]},
+                   words(?READ, [[command_complete, buffer_read_ready], [transfer_complete]])),
+     ?_assertEqual({done, [read_response, write_block]},
+                   words(?WRITE, [[command_complete], [buffer_write_ready], [transfer_complete]]))].
+
+%% A data event of a command with neither data nor busy is not its own and is ignored
+%% (sdhci.c:2242-2249); one out of its track's order, a second command complete, or a
+%% buffer event of a busy command fails the command (sdhci.c:2254-2260).
+command_foreign_and_unexpected_events_test_() ->
+    [?_assertEqual({done, [read_response]}, words(?R1, [[command_complete, transfer_complete]])),
+     ?_assertEqual({done, [read_response]}, words(?R1, [[transfer_complete], [command_complete]])),
+     ?_assertEqual({fail, {error, {unexpected, [command_complete, buffer_read_ready, transfer_complete],
+                                   transfer_complete}}},
+                   words(?READ, [[transfer_complete]])),
+     ?_assertEqual({fail, {error, {unexpected, [transfer_complete], buffer_read_ready}}},
+                   words(?R1B, [[command_complete, buffer_read_ready]])),
+     ?_assertEqual({fail, {error, {unexpected, [transfer_complete], command_complete}}},
+                   words(?R1B, [[command_complete], [command_complete]]))].
+
+%% Error bits fail the word before its other events act; a command timeout alone is the
+%% card core's timeout.
+command_errors_test_() ->
+    [?_assertEqual({fail, timeout}, words(?R1, [[{error, command_timeout}]])),
+     ?_assertEqual({fail, {error, {interrupt, [command_timeout, command_crc]}}},
+                   words(?R1, [[{error, command_timeout}, {error, command_crc}, command_complete]])),
+     ?_assertEqual({fail, {error, {interrupt, [data_crc]}}},
+                   words(?READ, [[command_complete], [{error, data_crc}, buffer_read_ready]]))].
+
+%% Every decoded word on every shape ends in done, continue or fail, never a crash.
+command_every_word_test() ->
+    Shapes = [#{response => none, data => none}, ?R1, ?R1B, #{response => r2, data => none}, ?READ, ?WRITE],
+    Words = [?H:decode(W) || W <- lists:seq(1, 16#FF) ++ [1 bsl B || B <- lists:seq(8, 31)]],
+    lists:foreach(fun(Shape) ->
+                          lists:foreach(fun(Word) -> ended(?H:command_step(?H:command(Shape), Word)) end,
+                                        Words)
+                  end, Shapes).
+
+ended({continue, Actions, _C}) when is_list(Actions) -> ok;
+ended({done, Actions}) when is_list(Actions) -> ok;
+ended({fail, _Event}) -> ok.

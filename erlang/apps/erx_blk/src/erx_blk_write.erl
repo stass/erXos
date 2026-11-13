@@ -339,17 +339,20 @@ sd_blksizecnt({_Direction, Size, Count}) ->
 
 %% The issue (facts record, "Issuing a command") of a plan the builders above
 %% made: present until the inhibits the command needs clear, for at most
-%% INHIBIT_US; blksizecnt for a data command; arg; then the cmdtm word, the one
-%% write erx_device:command/2 makes. Each write is spaced by erx_blk_sd_regs.
+%% INHIBIT_US; `interrupt`'s one-to-clear bits, so that no status an earlier command
+%% left before the issue reaches this one's wait (one it raises later still can); blksizecnt for a data command; arg; then the cmdtm
+%% word, the one write erx_device:command/2 makes. Each write is spaced by
+%% erx_blk_sd_regs.
 %% An inhibited command touches nothing but `present`.
 -spec sd_issue(erx_blk_sd_regs:regs(), sd_plan()) -> {ok, erx_blk_sd_regs:regs()} | {error, {device, inhibit}}.
 sd_issue(Regs, #sd_plan{command = #{argument := Arg, word := Word, blksizecnt := BlkSizeCnt, dat := Dat}}) ->
     Dev = erx_blk_sd_regs:device(Regs),
     case sd_wait_inhibit(Dev, Dat, erlang:monotonic_time(microsecond) + ?INHIBIT_US) of
         ok ->
+            Cleared = erx_blk_sd_regs:write(Regs, interrupt, erx_blk_sd_host:ack_mask()),
             Sized = case BlkSizeCnt of
-                        none -> Regs;
-                        _ -> erx_blk_sd_regs:write(Regs, blksizecnt, BlkSizeCnt)
+                        none -> Cleared;
+                        _ -> erx_blk_sd_regs:write(Cleared, blksizecnt, BlkSizeCnt)
                     end,
             Argued = erx_blk_sd_regs:write(Sized, arg, Arg),
             {ok, erx_blk_sd_regs:spaced(Argued, fun() -> erx_device:command(Dev, Word) end)};

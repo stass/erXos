@@ -5,7 +5,8 @@
 -moduledoc """
 The SD host controller's pure core (docs/design-storage.md, "The SD host
 controller"): the decode of the `interrupt` word into a closed set of
-events, the SDHCI 3.00 clock divider, and one request's transfer as a state
+events, the SDHCI 3.00 clock divider, one identification command's wait
+(command/1 and command_step/2), and one request's transfer as a state
 machine with the transport contract's deadlines. Nothing here touches a
 device; the device process, erx_blk_sd, reads and writes the registers,
 performs the actions and hands back the events. Tested and fuzzed on the
@@ -33,10 +34,11 @@ device process ends. Times are monotonic milliseconds.
 
 -export([decode/1, ack_mask/0, enable_mask/0, signalling/1, divider/2]).
 -export([inhibited/2, dat0_high/1, base_clock/2, version/1]).
+-export([command/1, command_step/2, awaited/1]).
 -export([new/1, step/2, phase/1, deadline/1]).
 -export([wait_limit_ms/0, in_flight_ms/0]).
 
--export_type([event/0, interrupt_event/0, transfer/0, request/0, action/0]).
+-export_type([event/0, interrupt_event/0, transfer/0, request/0, action/0, command/0, command_action/0]).
 
 -include("generated/erx_hw_sdhci.hrl").
 
@@ -82,6 +84,14 @@ device process ends. Times are monotonic milliseconds.
                    issued :: undefined | integer(),
                    moved = 0 :: non_neg_integer()}).
 -opaque transfer() :: #transfer{}.
+
+%% One identification command's wait (command/1): whether command complete, the response,
+%% has come, and what its data track still awaits: none for a command with no data track,
+%% [] once its data track is done.
+-record(wait, {response = waiting :: waiting | taken,
+                  data = none :: none | [interrupt_event()]}).
+-opaque command() :: #wait{}.
+-type command_action() :: read_response | read_block | write_block.
 
 %%% The interrupt word
 
@@ -281,6 +291,78 @@ divider(Base, Target) when is_integer(Base), Base > 0, is_integer(Target), Targe
     end;
 divider(_, _) ->
     {error, bad_clock}.
+
+%%% One identification command
+
+-doc """
+The wait for one identification command, from its plan's shape
+(erx_blk_write:sd_shape/1). It has two tracks, as FreeBSD keeps cmd_done and
+data_done (sdhci.c:1878, 1921-1923, 2047, 2057-2059). The command track is
+command complete, which every command raises. The data track is transfer
+complete for a busy response (R1b); the buffer event and then transfer
+complete for a data block; and there is none for any other command. The
+tracks advance independently, since a controller may raise transfer
+complete before command complete (sdhci.c:2026-2033), and the command is
+answered once both are empty.
+""".
+-spec command(#{response := none | r1 | r1b | r2 | r3,
+                data := none | {read | write, pos_integer(), 1}}) -> command().
+command(#{response := Response, data := Data}) ->
+    #wait{data = data_track(Response, Data)}.
+
+data_track(_Response, {read, _Size, 1}) -> [buffer_read_ready, transfer_complete];
+data_track(_Response, {write, _Size, 1}) -> [buffer_write_ready, transfer_complete];
+data_track(r1b, none) -> [transfer_complete];
+data_track(_Response, none) -> none.
+
+-doc """
+One `interrupt` word's events, as decode/1 gives them, taken by the command:
+`{continue, Actions, Command}` while a track still waits, `{done, Actions}`
+once both are empty, or `{fail, Event}` with the event erx_blk_sd_card takes:
+`timeout` for a command timeout alone, `{error, {interrupt, Names}}` for any
+other error bits, and `{error, {unexpected, Awaited, Got}}` for an event of
+a track the command has that is not that track's next. Error bits fail the
+word before any of its other events acts. An event of a track the command
+does not have is not this command's and is ignored, as FreeBSD ignores a
+data interrupt for a command with neither data nor busy (sdhci.c:2242-2249);
+a buffer event of a busy command is not ignored, as FreeBSD's is not
+(sdhci.c:2254-2260). The actions, in the order the device process performs
+them: `read_response` at command complete, `read_block` at buffer read
+ready and `write_block` at buffer write ready.
+""".
+-spec command_step(command(), [interrupt_event()]) ->
+          {continue, [command_action()], command()} | {done, [command_action()]}
+          | {fail, timeout | {error, term()}}.
+command_step(#wait{} = W, Events) when is_list(Events) ->
+    case [Name || {error, Name} <- Events] of
+        [] -> take(Events, W, []);
+        [command_timeout] -> {fail, timeout};
+        Names -> {fail, {error, {interrupt, Names}}}
+    end.
+
+-doc "The events the command still awaits, in each track's order, which a missed deadline names.".
+-spec awaited(command()) -> [interrupt_event()].
+awaited(#wait{response = Response, data = Data}) ->
+    [command_complete || Response =:= waiting] ++ [Event || is_list(Data), Event <- Data].
+
+%% The clauses' order is the rule: command complete on its track, the data track's next
+%% event, a data event of a command with no data track ignored, anything else a failure.
+take([], #wait{response = taken, data = Data}, Actions) when Data =:= []; Data =:= none ->
+    {done, lists:reverse(Actions)};
+take([], W, Actions) ->
+    {continue, lists:reverse(Actions), W};
+take([command_complete | Rest], #wait{response = waiting} = W, Actions) ->
+    take(Rest, W#wait{response = taken}, [read_response | Actions]);
+take([Event | Rest], #wait{data = [Event | Track]} = W, Actions) ->
+    take(Rest, W#wait{data = Track}, data_action(Event) ++ Actions);
+take([Event | Rest], #wait{data = none} = W, Actions) when Event =/= command_complete ->
+    take(Rest, W, Actions);
+take([Event | _Rest], W, _Actions) ->
+    {fail, {error, {unexpected, awaited(W), event_name(Event)}}}.
+
+data_action(buffer_read_ready) -> [read_block];
+data_action(buffer_write_ready) -> [write_block];
+data_action(transfer_complete) -> [].
 
 %%% The transfer
 

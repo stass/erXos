@@ -22,7 +22,7 @@ class ErxBlkSdTest < Minitest::Test
   TESTS = %w[test/erlang/erx_blk_sd_card_model.erl test/erlang/erx_blk_sd_card_tests.erl test/erlang/erx_blk_write_sd_tests.erl
              test/erlang/erx_blk_sd_host_tests.erl test/erlang/stand_in/erx_device.erl
              test/erlang/erx_blk_sd_issue_tests.erl test/erlang/stand_in/erx_irq_line.erl
-             test/erlang/erx_blk_sd_start_tests.erl].freeze
+             test/erlang/erx_blk_sd_start_tests.erl test/erlang/erx_blk_sd_events_tests.erl].freeze
   CARD = 'erlang/apps/erx_blk/src/erx_blk_sd_card.erl'
   HOST = 'erlang/apps/erx_blk/src/erx_blk_sd_host.erl'
   WRITE = 'erlang/apps/erx_blk/src/erx_blk_write.erl'
@@ -52,6 +52,14 @@ class ErxBlkSdTest < Minitest::Test
     Fault.new(name: 'cache read-back skipped', source: CARD,
               from: 'issue(S1, disable_check, [], pe_read(S1))', to: 'identified(S1, flushed)',
               cases: 'erx_blk_sd_card_tests'),
+    Fault.new(name: 'data track waits for command complete', source: HOST,
+              from: 'take([Event | Rest], #wait{data = [Event | Track]} = W, Actions) ->',
+              to: 'take([Event | Rest], #wait{response = taken, data = [Event | Track]} = W, Actions) ->',
+              cases: 'erx_blk_sd_host_tests'),
+    Fault.new(name: 'identification holds the data track until command complete', source: HOST,
+              from: 'take([Event | Rest], #wait{data = [Event | Track]} = W, Actions) ->',
+              to: 'take([Event | Rest], #wait{response = taken, data = [Event | Track]} = W, Actions) ->',
+              cases: 'erx_blk_sd_events_tests'),
     Fault.new(name: 'divider compares with <', source: HOST,
               from: 'Base =< Target * D]', to: 'Base < Target * D]', cases: 'erx_blk_sd_host_tests'),
     Fault.new(name: 'out of range ignored on every transfer', source: HOST,
@@ -92,7 +100,7 @@ class ErxBlkSdTest < Minitest::Test
     Dir.mktmpdir('erx-blk-sd-test') do |work|
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
       %w[erx_blk_sd_card_tests erx_blk_sd_host_tests erx_blk_write_sd_tests erx_blk_sd_issue_tests
-         erx_blk_sd_start_tests].each do |cases|
+         erx_blk_sd_start_tests erx_blk_sd_events_tests].each do |cases|
         output, status = eunit(work, cases)
         assert status.success?, output
         assert_match(/All \d+ tests passed|Test passed/, output)
