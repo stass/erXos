@@ -1334,6 +1334,9 @@ it; git history is the record of completed work.
   (`erlang/apps/erx_shell/src/erx_cmd_uname.erl`) reads as init's `-sname` or `-name`, with no value of its own; `docs/design-shell.md`, "Text commands".
 * [Low] musl, `musl/src/malloc/mallocng/glue.h`: `AT_RANDOM` is absent, so mallocng's secret comes from an address alone; `erx_entropy_read`
   can supply its 16 bytes at program start.
+* [Medium] liberx, `erx_entropy_read` callers (`musl/src/internal/erxos/syscall.c` `entropy_take`, `otp/erts/emulator/nifs/erxos/erx_bytes_bif.c`,
+  `otp/erts/emulator/beam/erl_bif_unique.c`): each copies the bytes out of the UTCB's mr and zeroes them by hand, so a caller that forgets
+  leaves them in the UTCB. One liberx call that reads into a caller's buffer and erases mr would make that hold for every caller.
 * [Medium] musl, `musl/src/thread/erxos/pthread_create_executor.c`, `musl/src/internal/erxos/syscall.c`: only the boot covers them. `test/guest/native_musl` needs the hosted
   driver's cases (no attribute, no free slot, the slot given back at exit).
 * [Low] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_process.c`, `beam/erl_driver.h`: what signals' deletion leaves unused: the break flag and `erts_do_break_handling`, `thr_create_sigmask`,

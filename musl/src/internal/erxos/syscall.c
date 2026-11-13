@@ -19,6 +19,7 @@
 #include <strings.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/random.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <time.h>
@@ -30,6 +31,8 @@
 #include "syscall.h"
 
 #include "erx/abi.h"
+#include "erx/explicit_bzero.h"
+#include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/libc_start.h"
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/service.h"
@@ -344,6 +347,57 @@ sigprocmask_call(sigset_t *old, size_t size)
 	return (0);
 }
 
+/* The flags musl's sys/random.h and FreeBSD's sys/random.h both define. */
+#define GRND_KNOWN	(GRND_NONBLOCK | GRND_RANDOM | GRND_INSECURE)
+
+/*
+ * Moves the length bytes one erx_entropy_read left at the head of this thread's UTCB mr,
+ * each word's bytes from its low byte, into bytes, zeroing each word in mr as it is taken
+ * and the stack copy after, as erx_bytes:entropy/1's BIF does, so no copy of them stays
+ * behind in the UTCB or on the stack. length is at most ERX_ENTROPY_BYTES_MAX.
+ */
+static void
+entropy_take(unsigned char *bytes, uint32_t length)
+{
+	uint64_t words[ERX_ENTROPY_BYTES_MAX / sizeof(uint64_t)] = { 0 };
+	erx_utcb_t *const utcb = erx_utcb_self();
+	const uint32_t count = (length + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+
+	for (uint32_t word = 0; word < count; word++) {
+		(void)erx_utcb_mr_load(utcb, word, &words[word]);
+		(void)erx_utcb_mr_store(utcb, word, 0);
+	}
+	bcopy(words, bytes, length);
+	erx_explicit_bzero(words, sizeof(words));
+}
+
+/*
+ * getrandom: the generator's bytes, ERX_ENTROPY_BYTES_MAX at most a read. The generator
+ * never waits to be seeded, so no known flag changes anything, as GRND_RANDOM changes
+ * nothing on FreeBSD. Another flag is EINVAL, as FreeBSD's sys_getrandom.c refuses it, and
+ * so is a length past SSIZE_MAX, which the count returned could not hold (FreeBSD bounds the
+ * length by its IOSIZE_MAX). A read the generator does not complete fails the whole call with
+ * EIO and erases the bytes of the reads that did succeed, so a caller never sees a short count.
+ */
+static long
+getrandom_call(unsigned char *buffer, size_t length, unsigned flags)
+{
+	if ((flags & ~(unsigned)GRND_KNOWN) != 0 || length > SSIZE_MAX)
+		return (-EINVAL);
+	for (size_t done = 0; done < length;) {
+		const uint32_t piece = length - done < ERX_ENTROPY_BYTES_MAX ? (uint32_t)(length - done) :
+		    ERX_ENTROPY_BYTES_MAX;
+
+		if (erx_entropy_read(piece) != ERX_OK) {
+			erx_explicit_bzero(buffer, done);
+			return (-EIO);
+		}
+		entropy_take(buffer + done, piece);
+		done += piece;
+	}
+	return ((long)length);
+}
+
 /* Whether the call is one the descriptor seam is offered (libc_start.h). */
 static int
 seam_offered(long n, long flags)
@@ -499,6 +553,8 @@ __erx_syscall(long n, long a, long b, long c, long d, long e, long f)
 		return (robust_list_set((void *)a, (size_t)b));
 	case SYS_get_robust_list:
 		return (robust_list_get(a, (void **)b, (size_t *)c));
+	case SYS_getrandom:
+		return (getrandom_call((unsigned char *)a, (size_t)b, (unsigned)c));
 	default:
 		return (-ENOSYS);
 	}

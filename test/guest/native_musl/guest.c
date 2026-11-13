@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/random.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -39,6 +40,11 @@
 #define NS_PER_SEC		INT64_C(1000000000)
 #define RETRY_NS		1000000L
 #define SETTLE_SECONDS		60
+/* getrandom spans several of the generator's 256-byte reads, and an odd length ends mid-word. */
+#define ENTROPY_BYTES		1000
+#define ENTROPY_ODD		13
+#define GETENTROPY_MAX		256
+#define ENTROPY_FILL		0xa5
 
 /* How many pages the backend's pool holds. */
 uint64_t	erx_fiasco_vm_free_pages(void);
@@ -613,6 +619,61 @@ case_mmap_mprotect(void)
 	    errno == EACCES && mmap(NULL, page, PROT_READ, MAP_PRIVATE, 3, 0) == MAP_FAILED && errno == ENOSYS);
 }
 
+/*
+ * Whether every 8-byte word of bytes, and the bytes after the last whole one, holds neither
+ * the fill nor zeros: by chance, either is 2^-39 likely for a 5-byte tail and 2^-63 for a
+ * whole word. A word left as filled, or one copied from mr after it was taken, fails.
+ */
+static int
+bytes_written(const unsigned char *bytes, size_t length)
+{
+	for (size_t at = 0; at < length; at += sizeof(uint64_t)) {
+		const size_t end = length - at < sizeof(uint64_t) ? length : at + sizeof(uint64_t);
+		size_t fill = 0, zero = 0;
+
+		for (size_t index = at; index < end; index++) {
+			fill += bytes[index] == ENTROPY_FILL;
+			zero += bytes[index] == 0;
+		}
+		if (fill == end - at || zero == end - at)
+			return (0);
+	}
+	return (1);
+}
+
+/*
+ * getrandom fills the whole buffer, past the generator's 256 bytes a call, and no byte after
+ * it, under every flag musl and FreeBSD define; it refuses an unknown flag, and a length no
+ * count it returns could hold, before writing anything. getentropy takes up to 256 bytes.
+ */
+static int
+case_entropy(void)
+{
+	unsigned char bytes[ENTROPY_BYTES + 1], again[GETENTROPY_MAX];
+	const unsigned flags = GRND_NONBLOCK | GRND_RANDOM | GRND_INSECURE;
+
+	memset(bytes, ENTROPY_FILL, sizeof(bytes));
+	if (getrandom(bytes, ENTROPY_BYTES, 0) != ENTROPY_BYTES || !bytes_written(bytes, ENTROPY_BYTES) ||
+	    bytes[ENTROPY_BYTES] != ENTROPY_FILL)
+		return (0);
+	memset(bytes, ENTROPY_FILL, sizeof(bytes));
+	if (getrandom(bytes, ENTROPY_ODD, flags) != ENTROPY_ODD || !bytes_written(bytes, ENTROPY_ODD) ||
+	    bytes[ENTROPY_ODD] != ENTROPY_FILL || getrandom(bytes, 0, 0) != 0)
+		return (0);
+	memset(bytes, ENTROPY_FILL, sizeof(bytes));
+	errno = 0;
+	if (getrandom(bytes, ENTROPY_ODD, GRND_INSECURE << 1) != -1 || errno != EINVAL || bytes[0] != ENTROPY_FILL)
+		return (0);
+	errno = 0;
+	if (getrandom(bytes, (size_t)SSIZE_MAX + 1, 0) != -1 || errno != EINVAL || bytes[0] != ENTROPY_FILL)
+		return (0);
+	if (getentropy(bytes, GETENTROPY_MAX) != 0 || getentropy(again, GETENTROPY_MAX) != 0 ||
+	    memcmp(bytes, again, GETENTROPY_MAX) == 0)
+		return (0);
+	errno = 0;
+	return (getentropy(bytes, GETENTROPY_MAX + 1) == -1 && errno == EIO);
+}
+
 static int
 case_refusals(void)
 {
@@ -707,5 +768,6 @@ main(int argc, char **argv)
 	report("mprotect_hole", case_mprotect_hole());
 	report("cancel", case_cancel());
 	report("refusals", case_refusals());
+	report("entropy", case_entropy());
 	return (0);
 }
