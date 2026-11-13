@@ -14,7 +14,7 @@ module Erx
     PIPE_SERVER = 'erlang/apps/erx/src/erx_pipe_srv.erl'
 
     # A call of one of erx_pipe_nif's names in the forms a module can write it.
-    def self.pipe_nif_calls(names)
+    PIPE_NIF_CALLS = lambda do |names|
       nif = ErlangText::ATOM.call('erx_pipe_nif')
       /
           #{nif} \s* (?: : | , ) \s* (?:#{names.map { |name| ErlangText::ATOM.call(name) }.join('|')})
@@ -109,7 +109,7 @@ module Erx
           name: 'pipe-makers', rule: "only the session's pipe server, erx_pipe_srv, calls erx_pipe_nif's make_lock/1, " \
                                      'make_lane/1, make_bell/3 and hand_make/2, which make a pipe\'s lock, lanes and ' \
                                      'bells and the hand-offs that give them to programs',
-          design: "#{PIPES}#invariants", pattern: pipe_nif_calls(%w[make_lock make_lane make_bell hand_make]),
+          design: "#{PIPES}#invariants", pattern: PIPE_NIF_CALLS.call(%w[make_lock make_lane make_bell hand_make]),
           sites: [PIPE_SERVER, PIPE_NIF_MODULE],
           seed: { 'erlang/apps/erx/src/seeded.erl' => "f(L) -> erx_pipe_nif:make_lane(L).\n",
                   'erlang/apps/erx/src/seeded_import.erl' => "-import(erx_pipe_nif, [make_lock/1]).\n" }
@@ -118,7 +118,7 @@ module Erx
           name: 'pipe-holders', rule: "only a program's handler, erx_prog_handler, calls erx_pipe_nif's " \
                                       'program_holder/1 and holder_drop/1, which make and let go the holder entry ' \
                                       'by which it speaks for its program',
-          design: "#{PIPES}#hand-offs", pattern: pipe_nif_calls(%w[program_holder holder_drop]),
+          design: "#{PIPES}#hand-offs", pattern: PIPE_NIF_CALLS.call(%w[program_holder holder_drop]),
           sites: ['erlang/apps/erx/src/erx_prog_handler.erl', PIPE_NIF_MODULE],
           seed: { 'erlang/apps/erx/src/seeded.erl' => "f(H) -> apply(erx_pipe_nif, holder_drop, [H]).\n" }
         ),

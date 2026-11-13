@@ -17,7 +17,7 @@ module Erx
     # A call of erx_device's issuing function name: erx_device followed by
     # the name after a colon (a remote call or fun) or a comma (an apply),
     # or any import from erx_device, which names it bare.
-    def self.device_issue(name)
+    DEVICE_ISSUE = lambda do |name|
       device = ErlangText::ATOM.call('erx_device')
       /#{device} \s* (?: : | , ) \s* #{ErlangText::ATOM.call(name)} | -\s*import\s*\(\s*#{device}/x
     end
@@ -219,7 +219,7 @@ module Erx
         Chokepoints::ErlangForbidden.new(
           name: 'device-posters', rule: "only the block driver's one write path, erx_blk_write, the network transports and the " \
                                         'virtio-gpu driver call erx_device:post/4, and each builds every request it posts',
-          design: 'docs/design-storage.md#data-model', pattern: device_issue('post'),
+          design: 'docs/design-storage.md#data-model', pattern: DEVICE_ISSUE.call('post'),
           sites: [BLK_WRITE, 'erlang/apps/erx_net/erxos/erx_virtio_net.erl', 'erlang/apps/erx_net/erxos/erx_genet.erl',
                   'erlang/apps/erx_fb/src/erx_virtio_gpu.erl'],
           seed: { 'erlang/apps/erx_blk/src/seeded.erl' => "f(D) -> erx_device:post(D, 0, <<>>, 0).\n",
@@ -230,7 +230,7 @@ module Erx
         # word, and only its write function CMD24 or CMD25.
         Chokepoints::ErlangForbidden.new(
           name: 'device-commands', rule: "only the block driver's one write path, erx_blk_write, calls erx_device:command/2",
-          design: 'docs/design-storage.md#data-model', pattern: device_issue('command'), sites: [BLK_WRITE],
+          design: 'docs/design-storage.md#data-model', pattern: DEVICE_ISSUE.call('command'), sites: [BLK_WRITE],
           seed: { 'erlang/apps/erx_net/erxos/erx_virtio_net.erl' => "f(D) -> apply(erx_device, command, [D, 0]).\n" }
         )
       ],
