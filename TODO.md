@@ -801,6 +801,19 @@ it; git history is the record of completed work.
     tree with `erx_ui_schema`, numbers it with `erx_ui_model:pair/3`, applies `delta/2` through the renderer and
     routes its hits through `erx_ui_model:hit/4`; `pair/3` and `hit/4` themselves, with their property tests
     ([Verification](docs/design-display.md#verification-and-testing)).
+    `erx_screen_core` keeps its plan and takes the design's names: a present for a flush, and no expose, since
+    `erx_screen` copies what a layout change uncovers from the windows' buffers.
+  * **The widget server** ([The widget server](docs/design-display.md#the-widget-server)): `erx_ui`, `erx_ui_sup`,
+    `erx_ui_server`, the `erx_ui_renderer` behaviour and `erx_ui_model:pair/3` and `hit/4` run on the host over a
+    target the caller makes (`erx_ui:start/1`). Left: `erx_ui:open/1` answers `{error, enotsup}` for a display the
+    domain holds and for `web` until the server opens its window as its holder (with the window stack, `erx_win`) and
+    the web line; the server's `{ui_down, Window, display_down}`; `erx_ui_erlang`; and the seeded faults of the
+    Verification bullets for `pair/3` and `hit/4` (keys paired across parents, every omitted property kept, the value
+    taken from the report) as property tests under PropEr, which the tree does not have yet; the cases run as seeded
+    EUnit in `test/erlang/erx_ui_model_tests.erl`. The opener's map from a window to its server keeps a stale
+    entry after `ui_down` until the opener calls `close/1`. `erx_ui:open/1` takes any facet the domain holds as a display, where the design
+    asks for a grant of a `windows` tree. The toolkit lives in `erx_win`, under `erx_win_sup`, where the design names
+    an application `erx_ui` in every domain that shows widgets, web-only ones included.
   * **`erx_ui_lvgl`** ([The widget server](docs/design-display.md#the-widget-server)): the shell
     (`erlang/apps/erx_win/src/erx_ui_lvgl.erl`) performs `erx_ui_lvgl_core`'s actions over a port its `open`
     callback starts and a `present` callback, and `test/host/erx_ui_lvgl_test.rb` drives the real `erx-lvgl` with it

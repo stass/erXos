@@ -3,17 +3,20 @@
 
 -module(erx_ui_lvgl).
 -behaviour(gen_statem).
+-behaviour(erx_ui_renderer).
 -moduledoc """
-The LVGL renderer (docs/design-display.md, "The widget server"): the
-process that runs the program erx-lvgl over its two pipes and performs
+The LVGL renderer (docs/design-display.md, "The widget server"), a module
+of the erx_ui_renderer behaviour: the process that runs the program erx-lvgl over its two pipes and performs
 what erx_ui_lvgl_core decides. It writes the core's records to the
 program's standard input, reads the program's damage reports and events
 with erx_ui_wire:read/1, presents a report through the window, answers an
-apply, hands the widget server each hit, and ends the UI as
-`renderer_down` when the core stops the program. It decides nothing
-itself: every judgement is the core's.
+apply, hands the widget server each hit, and ends, abnormally, when the
+core stops the program, which the widget server it is linked to takes as
+`renderer_down`. It decides nothing itself: every judgement is the core's.
 
-Its options:
+start/3 links the process to the widget server and ignores its target:
+until the window stack binds a window's size, channel and presents, the
+options carry them. The options:
 
 * `width`, `height` and `chan`: the window's size and channel.
 * `open`: starts the program with the window's buffer as descriptor 3 and
@@ -25,14 +28,11 @@ Its options:
   height, through the window. The display's answer comes back as shown/1.
 * `present_text`: the canonical text of a `present` property
   (erx_ui_wire:present()).
-* `ui` and `id`: the widget server, which is sent `{ui_hit, Node, Event,
-  Value}` for each hit and `{ui_down, Id, renderer_down}` when the program
-  is stopped.
 
 The shell takes the window's input and resizes, window/2 and resize/3,
 only while erx_ui_lvgl_core:reads_window/1 holds: in any other state they
 stay queued, postponed, until the open report is answered, so the core
-holds at most one apply's operations. close/1 closes the program and ends
+holds at most one apply's operations. stop/1 closes the program and ends
 the shell without consulting the core, so the program's end then is no
 fault. A fault ends the shell, and with it an apply/2 that waits. A write
 that finds the program gone is dropped, and the program's exit status, or
@@ -41,24 +41,24 @@ says. A program that stops reading its input blocks the shell in
 port_command/2, and with it every call (a residual, TODO.md).
 """.
 
--export([start_link/1, apply/2, window/2, resize/3, shown/1, close/1]).
+-export([start/3, apply/2, stop/1, window/2, resize/3, shown/1]).
 -export([init/1, callback_mode/0, handle_event/4]).
 
 -type opts() :: #{width := 1..65535, height := 1..65535, chan := 0..16#ffffffff,
                   open := fun(() -> port()),
                   present := fun((1..65535, 1..65535, [erx_ui_lvgl_core:rect(), ...]) -> ok),
-                  present_text := erx_ui_wire:present(),
-                  ui := pid(), id := term()}.
+                  present_text := erx_ui_wire:present()}.
 
--doc "Starts the renderer of a window and its program, linked to the caller.".
--spec start_link(opts()) -> gen_statem:start_ret().
-start_link(Opts) ->
-    gen_statem:start_link(?MODULE, Opts, []).
+-doc "Starts the renderer of a window and its program, linked to the widget server, the caller.".
+-spec start(erx_ui_renderer:target(), pid(), opts()) -> {ok, pid()}.
+start(_Target, Server, Opts) ->
+    {ok, _Shell} = gen_statem:start_link(?MODULE, Opts#{ui => Server}, []).
 
 -doc "Applies a tree's operations; returns once they are written to the program.".
--spec apply(pid(), [erx_ui_model:diff_op()]) -> ok.
-apply(Shell, Ops) ->
-    gen_statem:call(Shell, {apply, Ops}).
+-spec apply([erx_ui_model:diff_op()], pid()) -> {ok, pid()}.
+apply(Ops, Shell) ->
+    ok = gen_statem:call(Shell, {apply, Ops}, infinity),
+    {ok, Shell}.
 
 -doc "The window's next input record, or a repaint of the whole window.".
 -spec window(pid(), {input, term()} | repaint) -> ok.
@@ -76,8 +76,8 @@ shown(Shell) ->
     gen_statem:cast(Shell, shown).
 
 -doc "Closes the program and ends the renderer; the program's end is then no fault.".
--spec close(pid()) -> ok.
-close(Shell) ->
+-spec stop(pid()) -> ok.
+stop(Shell) ->
     gen_statem:call(Shell, close).
 
 %% The state is erx_ui_lvgl_core:reads_window/1 of the core: `reading` or
@@ -92,7 +92,7 @@ init(#{width := W, height := H, chan := Chan, open := Open} = Opts) ->
     process_flag(trap_exit, true),
     Port = Open(),
     {Core, Actions} = erx_ui_lvgl_core:start(W, H, Chan),
-    Data = maps:merge(maps:with([present, present_text, ui, id, chan], Opts),
+    Data = maps:merge(maps:with([present, present_text, ui, chan], Opts),
                       #{core => Core, port => Port, unread => <<>>}),
     {ok, reading, perform(Actions, Data)}.
 
@@ -167,11 +167,11 @@ perform_one({hit, Node, Event, Value}, #{ui := Ui}) ->
     Ui ! {ui_hit, Node, Event, Value}.
 
 %% The core stopped the program: the reason, which names a fault's kind
-%% and never the program's bytes, goes to the log, and the UI ends.
-down(Reason, #{port := Port, ui := Ui, id := Id}) ->
+%% and never the program's bytes, goes to the log, and the shell's
+%% abnormal end ends the UI.
+down(Reason, #{port := Port}) ->
     logger:warning("erx_ui_lvgl: erx-lvgl stopped: ~p", [Reason]),
     close_port(Port),
-    Ui ! {ui_down, Id, renderer_down},
     {stop, {shutdown, {renderer_down, Reason}}}.
 
 %% Closes the port, which is closed already when the program ended.

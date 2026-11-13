@@ -4,8 +4,9 @@
 -module(erx_win_sup).
 -moduledoc """
 The supervisor of `erx_win` in a client domain (docs/design-display.md,
-"The pixel area", The allocator is not restarted over an area). Its one
-child, the allocator erx_pixels, is temporary and significant, so it is never
+"The pixel area", The allocator is not restarted over an area). Its
+children are the toolkit's supervisor erx_ui_sup and the allocator
+erx_pixels, which is temporary and significant, so it is never
 restarted: its end, however it comes, shuts the supervisor down, which ends
 the permanent application and the domain with it. A second allocator over
 the same areas would hand out ranges that programs still map; the domain's
@@ -22,4 +23,7 @@ init([]) ->
     Pixels = #{id => erx_pixels, start => {erx_pixels, start_link, []},
                restart => temporary, significant => true, shutdown => 5000, type => worker,
                modules => [erx_pixels]},
-    {ok, {#{strategy => one_for_one, auto_shutdown => any_significant}, [Pixels]}}.
+    Ui = #{id => erx_ui_sup, start => {erx_ui_sup, start_link, []},
+           restart => permanent, shutdown => infinity, type => supervisor,
+           modules => [erx_ui_sup]},
+    {ok, {#{strategy => one_for_one, auto_shutdown => any_significant}, [Pixels, Ui]}}.

@@ -14,14 +14,17 @@
 %% erx_ui_model, the realised widget tree and its one difference; the
 %% widget format's validator erx_ui_schema and its codec erx_ui_wire,
 %% both generated from abi/formats/ui.txt; and
+%% the widget toolkit: erx_ui, its client library, erx_ui_sup, its
+%% supervisor, erx_ui_server, the widget server of one UI, and the
+%% renderer behaviour erx_ui_renderer, which erx_ui_lvgl implements over
 %% erx_ui_lvgl_core, the LVGL renderer's decisions about its program's
-%% pipes, with erx_ui_lvgl, the shell that performs them.
+%% pipes.
 {application, erx_win,
  [{description, "erXos display client"},
   {vsn, "1"},
-  {modules, [erx_draw_codec, erx_draw_core, erx_draw_image, erx_pixels, erx_pixels_core, erx_ui_lvgl, erx_ui_lvgl_core,
-             erx_ui_model, erx_ui_schema, erx_ui_wire, erx_vt, erx_vt_width, erx_win_app, erx_win_sup]},
-  {registered, [erx_win_sup, erx_pixels]},
+  {modules, [erx_draw_codec, erx_draw_core, erx_draw_image, erx_pixels, erx_pixels_core, erx_ui, erx_ui_lvgl, erx_ui_lvgl_core,
+             erx_ui_model, erx_ui_renderer, erx_ui_schema, erx_ui_server, erx_ui_sup, erx_ui_wire, erx_vt, erx_vt_width, erx_win_app, erx_win_sup]},
+  {registered, [erx_win_sup, erx_pixels, erx_ui_sup]},
   {applications, [kernel, stdlib, erx, erx_memdraw]},
   {env, []},
   {mod, {erx_win_app, []}}]}.

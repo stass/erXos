@@ -17,8 +17,9 @@ run/1 returns what test/host/erx_ui_lvgl_test.rb checks:
   click was sent, none, since the shell takes the window's input only
   while no report is open; `hit`, the click's hit once it is answered.
 * `grown`: a resize past the buffer, which the program refuses: the UI
-  ends as `renderer_down` and the shell with the program's exit.
-* `closed`: close/1 after the first frame: the shell ends normally and the
+  ends as `renderer_down`: the shell ends abnormally with the program's
+  exit, which the widget server, played by this process, is linked to.
+* `closed`: stop/1 after the first frame: the shell ends normally and the
   widget server hears nothing.
 """.
 
@@ -38,7 +39,7 @@ run(Paths) ->
     Buffer = filename:absname("buffer"),
     ok = file:write_file(Buffer, binary:copy(<<0>>, 4 * ?WIDTH * ?HEIGHT)),
     Shell = start(Paths, Buffer),
-    ok = erx_ui_lvgl:apply(Shell, tree()),
+    {ok, Shell} = erx_ui_lvgl:apply(tree(), Shell),
     {present, Shell, W, H, _Rects} = next_present(),
     click(Shell),
     Held = hits(?HOLD_MS),
@@ -47,10 +48,10 @@ run(Paths) ->
     erx_ui_lvgl:resize(Shell, 2 * ?WIDTH, 2 * ?HEIGHT),
     Grown = until_down(Shell),
     Shell2 = start(Paths, Buffer),
-    ok = erx_ui_lvgl:apply(Shell2, tree()),
+    {ok, Shell2} = erx_ui_lvgl:apply(tree(), Shell2),
     {present, Shell2, _, _, _} = next_present(),
     erx_ui_lvgl:shown(Shell2),
-    ok = erx_ui_lvgl:close(Shell2),
+    ok = erx_ui_lvgl:stop(Shell2),
     Closed = receive {'EXIT', Shell2, Why} -> Why after ?WAIT_MS -> error(close_hung) end,
     Heard = hits(?HOLD_MS),
     #{first => {W, H}, held => Held, hit => Hit, grown => Grown, closed => {Closed, Heard},
@@ -61,7 +62,7 @@ run(Paths) ->
 %% already closed. The UI still ends as renderer_down, by the exit status.
 killed(Paths, Buffer) ->
     Shell = start(Paths, Buffer),
-    ok = erx_ui_lvgl:apply(Shell, tree()),
+    {ok, Shell} = erx_ui_lvgl:apply(tree(), Shell),
     {present, Shell, _, _, _} = next_present(),
     erx_ui_lvgl:shown(Shell),
     {_State, #{port := Port}} = sys:get_state(Shell),
@@ -80,10 +81,10 @@ start(#{program := Program, ruby := Ruby, launcher := Launcher}, Buffer) ->
                              [binary, stream, use_stdio, exit_status, {args, [Launcher, Buffer, Program]}])
            end,
     Present = fun(W, H, Rects) -> Test ! {present, self(), W, H, Rects}, ok end,
-    {ok, Shell} = erx_ui_lvgl:start_link(#{width => ?WIDTH, height => ?HEIGHT, chan => ?X8R8G8B8,
-                                           open => Open, present => Present,
-                                           present_text => fun(_Type, _Value) -> error(no_presentations) end,
-                                           ui => Test, id => window}),
+    {ok, Shell} = erx_ui_lvgl:start({window, test}, Test,
+                                    #{width => ?WIDTH, height => ?HEIGHT, chan => ?X8R8G8B8,
+                                      open => Open, present => Present,
+                                      present_text => fun(_Type, _Value) -> error(no_presentations) end}),
     Shell.
 
 %% The tree of the model screen, test/erlang/erx_lvgl_screen.erl, in short:
@@ -114,11 +115,11 @@ answer_until_hit(Shell) ->
     after ?WAIT_MS -> error(no_hit)
     end.
 
-%% Answers presents until the UI ends: the widget server's message and the shell's exit.
+%% Answers presents until the UI ends: the shell's abnormal exit, which the
+%% widget server takes as renderer_down.
 until_down(Shell) ->
     receive
         {present, Shell, _, _, _} -> erx_ui_lvgl:shown(Shell), until_down(Shell);
-        {ui_down, window, Why} ->
-            receive {'EXIT', Shell, Exit} -> {Why, Exit} after ?WAIT_MS -> error(no_exit) end
+        {'EXIT', Shell, Exit} when Exit =/= normal -> {renderer_down, Exit}
     after ?WAIT_MS -> error(not_down)
     end.

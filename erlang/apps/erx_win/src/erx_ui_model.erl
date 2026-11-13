@@ -3,9 +3,11 @@
 
 -module(erx_ui_model).
 -moduledoc """
-The realised widget tree and its one difference (docs/design-display.md,
-"Widget trees"): delta/2 turns one realised tree into another, and
-apply_ops/2 applies the operations to a realised tree. The widget
+The realised widget tree and the four pure functions that do all the tree
+work (docs/design-display.md, "Widget trees"): pair/3 numbers an
+application's tree against the realised one, delta/2 turns one realised
+tree into another, apply_ops/2 applies the operations to a realised tree,
+and hit/4 checks a renderer's report against it. The widget
 server sends a renderer `delta(R, R1)`, and the web's browser renderer
 sends the browser `delta(Sent, Pending)`, a prefix at a time, so the
 property `apply_ops(delta(A, B), A) == {ok, B}` covers both.
@@ -32,10 +34,18 @@ stand when the operation applies, after a moved node is taken out, so
 every prefix of a delta applies on its own, which a renderer that sends
 a long change over several updates relies on. `commit` changes nothing
 in the model; it marks where a renderer shows the change.
+
+A realised node's properties are the tree's own, its `key` and its event
+terms included, which the binary form never writes, plus the state value
+the server keeps for it: the last the tree set or the user made through
+the renderer, whichever came later. pair/3 and hit/4 take every fact about
+kinds and properties (which property is a kind's state, which are fixed,
+which events a kind takes, what a value may be) from erx_ui_schema, so
+ui.txt stays the one source.
 """.
 
--export([empty/0, delta/2, apply_ops/2]).
--export_type([realised/0, node_id/0, diff_op/0]).
+-export([empty/0, pair/3, delta/2, apply_ops/2, hit/4]).
+-export_type([realised/0, node_id/0, diff_op/0, tree/0, next/0]).
 
 -record(ui_node, {parent :: node_id() | 0 | none,
                   kind :: atom(),
@@ -51,16 +61,77 @@ in the model; it marks where a renderer shows the change.
                  | {set, node_id(), Changed :: map(), Removed :: [atom()]}
                  | {move, node_id(), Index :: 0..65535}
                  | commit.
+-doc "The number pair/3 gives next; past the last node_id() when none is left.".
+-type next() :: 1..16#100000000.
+-doc "An application's widget tree, valid by erx_ui_schema:validate/2.".
+-type tree() :: {Kind :: atom(), Props :: #{atom() => term()}, Children :: [tree()]}.
 -doc "A realised tree: each node by its number, and the top, 0.".
 -opaque realised() :: #{node_id() | 0 => #ui_node{}}.
 
 -define(TOP, 0).
 -define(IS_ID(Id), (is_integer(Id) andalso Id >= 1 andalso Id =< 16#ffffffff)).
+%% The number after the last a window can give: pair/3 refuses to reach it.
+-define(PAST_LAST_ID, 16#100000000).
 -define(IS_INDEX(Index), (is_integer(Index) andalso Index >= 0 andalso Index =< 65535)).
 
 -doc "The realised tree with no nodes, which a renderer starts from.".
 -spec empty() -> realised().
 empty() -> #{?TOP => #ui_node{parent = none, kind = none}}.
+
+-doc """
+Numbers `Tree`, which erx_ui_schema:validate/2 accepted, against realised
+tree `Ui`. A node whose identity matches a realised node keeps that node's
+number and its kept state; any other node takes the next number, from
+`Next` on, in depth-first order. A node's identity is its parent's, its
+kind, its fixed properties, and its `key` when it has one or else its
+index among its siblings, so a node never changes parent or kind. A state
+property the tree omits keeps the realised node's value while the node's
+new properties admit it. Answers the realised tree and the number to give
+next, or `{error, limit}` when a node would need a number past 2^32 - 1.
+""".
+-spec pair(realised(), tree(), Next :: next()) -> {realised(), next()} | {error, limit}.
+pair(Ui, Tree, Next) when is_integer(Next), Next >= 1, Next =< ?PAST_LAST_ID ->
+    try pair_children(?TOP, children(?TOP, Ui), [Tree], Ui, {#{}, Next}) of
+        {Root, {Paired, Next1}} ->
+            {Paired#{?TOP => #ui_node{parent = none, kind = none, children = Root}}, Next1}
+    catch
+        throw:{?MODULE, limit} -> {error, limit}
+    end.
+
+-doc """
+Checks a renderer's report of event `Event` on node `Node` against
+realised tree `Ui`; `Value` is the node's new state value for an event
+whose detail is the state (`on_change`, `on_submit`), and `none`
+otherwise. A state value is recorded, except a secret `input`'s text,
+which is never kept and reaches the application as `{erx_secret, Text}`.
+Answers `{fire, Term, Detail, Ui1}` when the node carries the event, `Term`
+the tree's value for it; `{keep, Ui1}` when the node's kind takes the
+event but the node does not carry it; and `drop`, recording nothing, for a
+node not in the tree, an event the kind does not take, a value the node's
+state property does not admit, a value on an event that carries none, and
+a `select` on a node with no `present` whose status is `ok` or `partial`.
+A `select`'s detail is the tree's own `{select, Type, Value}`, never the
+renderer's.
+""".
+-spec hit(realised(), Node :: term(), Event :: term(), Value :: term()) ->
+          {fire, Term :: term(), Detail :: term(), realised()} | {keep, realised()} | drop.
+hit(Ui, Node, Event, Value) when Node =/= ?TOP ->
+    case Ui of
+        #{Node := #ui_node{kind = Kind, props = Props} = N} ->
+            case takes_event(Kind, Event) andalso detail(Event, Value, Kind, Props) of
+                {ok, Detail, Props1} ->
+                    Ui1 = Ui#{Node := N#ui_node{props = Props1}},
+                    case Props of
+                        #{Event := Term} -> {fire, Term, Detail, Ui1};
+                        #{} -> {keep, Ui1}
+                    end;
+                _NotTaken -> drop
+            end;
+        #{} ->
+            drop
+    end;
+hit(_Ui, _Top, _Event, _Value) ->
+    drop.
 
 -doc """
 The operations that turn realised tree `A` into `B`, numbered from it,
@@ -87,6 +158,131 @@ apply_ops([Op | Ops], Ui) ->
         {error, Reason} -> {error, {Reason, Op}}
     end;
 apply_ops(NotAList, _Ui) -> {error, {bad_op, NotAList}}.
+
+%% The numbering.
+
+%% Numbers Trees, the children of node Parent, against Old, the realised
+%% children of the node Parent paired with (none for a new node): each
+%% takes the number of the old child of its identity, or the next number.
+%% Answers their numbers in order and the accumulator, the tree paired so
+%% far and the number to give next.
+pair_children(Parent, Old, Trees, Ui, Acc) ->
+    Known = maps:from_list([{identity(Kind, Props, Index), Id}
+                            || {Index, Id} <- lists:enumerate(0, Old),
+                               #ui_node{kind = Kind, props = Props} <- [get_node(Id, Ui)]]),
+    {Ids, {Acc1, _}} = lists:mapfoldl(
+                         fun(Tree, {AccN, Index}) ->
+                                 {Id, AccN1} = pair_node(Parent, Tree, Index, Known, Ui, AccN),
+                                 {Id, {AccN1, Index + 1}}
+                         end, {Acc, 0}, Trees),
+    {Ids, Acc1}.
+
+pair_node(Parent, {Kind, Props, Trees}, Index, Known, Ui, Acc) ->
+    {Id, Kept, Old, Acc1} =
+        case maps:find(identity(Kind, Props, Index), Known) of
+            {ok, Same} ->
+                #ui_node{props = OldProps, children = OldChildren} = get_node(Same, Ui),
+                {Same, keep_state(Kind, Props, OldProps), OldChildren, Acc};
+            error ->
+                {New, AccNew} = next_id(Acc),
+                {New, Props, [], AccNew}
+        end,
+    {Children, {Paired, Next}} = pair_children(Id, Old, Trees, Ui, Acc1),
+    Node = #ui_node{parent = Parent, kind = Kind, props = Kept, children = Children},
+    {Id, {Paired#{Id => Node}, Next}}.
+
+next_id({_Paired, ?PAST_LAST_ID}) -> throw({?MODULE, limit});
+next_id({Paired, Next}) -> {Next, {Paired, Next + 1}}.
+
+%% A node's identity among its siblings: its kind, its fixed properties
+%% (absent as their default), and its key or else its index.
+identity(Kind, Props, Index) ->
+    #{fixed := Fixed} = erx_ui_schema:kind(Kind),
+    Place = case Props of
+                #{key := Key} -> {key, Key};
+                #{} -> {index, Index}
+            end,
+    {Kind, [fixed_value(Property, Props) || Property <- Fixed], Place}.
+
+fixed_value(Property, Props) ->
+    case Props of
+        #{Property := Value} -> Value;
+        #{} -> maps:get(default, erx_ui_schema:property(Property), absent)
+    end.
+
+%% The tree's properties, with the realised node's state value where the
+%% tree omits the kind's state property and the node's new properties
+%% admit the value; a value that no longer fits is dropped.
+keep_state(Kind, Props, Old) ->
+    #{state := State} = erx_ui_schema:kind(Kind),
+    case Old of
+        #{State := Value} when not is_map_key(State, Props) ->
+            Kept = Props#{State => Value},
+            case admits(Kind, Kept) of
+                true -> Kept;
+                false -> Props
+            end;
+        #{} ->
+            Props
+    end.
+
+%% Whether a node of Kind with Props and no children is valid, by the
+%% generated validator, so a state value meets every bound ui.txt gives it.
+admits(Kind, Props) -> erx_ui_schema:validate({Kind, Props, []}, 1) =:= ok.
+
+%% Events.
+
+takes_event(Kind, Event) ->
+    #{takes := Takes} = erx_ui_schema:kind(Kind),
+    lists:member(Event, Takes) andalso maps:get(type, erx_ui_schema:property(Event)) =:= event.
+
+%% An event's detail and the node's properties after it, or drop.
+detail(on_click, none, _Kind, Props) -> {ok, click, Props};
+detail(on_select, none, _Kind, Props) ->
+    case selection(maps:get(present, Props, none)) of
+        {ok, Type, Value} -> {ok, {select, Type, Value}, Props};
+        error -> drop
+    end;
+detail(on_change, Value, Kind, Props) -> state_detail(change, Value, Kind, Props);
+detail(on_submit, Value, Kind, Props) -> state_detail(submit, Value, Kind, Props);
+detail(_Event, _Value, _Kind, _Props) -> drop.
+
+%% A state event: the value must be one the node's state property admits,
+%% and a plain value, never a tuple: the status form a tree may give a
+%% status property such as `text` is no value a user makes. A secret
+%% input's text is checked as an open input's would be, and neither kept
+%% nor shown.
+state_detail(_Tag, Value, _Kind, _Props) when is_tuple(Value) -> drop;
+state_detail(Tag, Value, Kind, Props) ->
+    #{state := State} = erx_ui_schema:kind(Kind),
+    case Props of
+        #{secret := true} ->
+            case admits(Kind, (maps:remove(secret, Props))#{State => Value}) of
+                true -> {ok, {Tag, {erx_secret, Value}}, Props};
+                false -> drop
+            end;
+        #{} ->
+            Recorded = Props#{State => Value},
+            case admits(Kind, Recorded) of
+                true -> {ok, {Tag, Value}, Recorded};
+                false -> drop
+            end
+    end.
+
+%% The {Type, Value} of a `present` property whose status is `ok` or
+%% `partial`. As erx_ui_wire reads one, a two-tuple whose first element is
+%% a reporter is an attr() carrying the presentation; anything else is the
+%% presentation itself.
+selection({Reporter, Carried}) when Reporter =:= kernel; Reporter =:= service;
+                                    Reporter =:= runtime ->
+    carried(Carried);
+selection({{stopgap, _}, Carried}) -> carried(Carried);
+selection({Type, Value}) -> {ok, Type, Value};
+selection(_None) -> error.
+
+carried({ok, {Type, Value}}) -> {ok, Type, Value};
+carried({partial, {Type, Value}}) -> {ok, Type, Value};
+carried(_Status) -> error.
 
 %% The difference.
 

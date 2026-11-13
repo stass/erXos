@@ -57,9 +57,16 @@ module Erx
       tree, generated = [source(application), generated(application)].map do |directory|
         Dir.glob(%w[src/**/*.erl erxos/**/*.erl], base: File.join(root, directory)).to_h { |path| [path, File.join(directory, path)] }
       end
-      # erxos/ after src/, whose behaviours its modules implement: erlc compiles in this order.
-      tree.merge(generated).sort_by { |path, _| [path.start_with?('erxos/') ? 1 : 0, path] }.map(&:last)
+      # erxos/ after src/, whose behaviours its modules implement, and within each a
+      # behaviour, a module declaring callbacks, before the modules that implement it:
+      # erlc compiles in this order.
+      tree.merge(generated).sort_by do |path, full|
+        [path.start_with?('erxos/') ? 1 : 0, behaviour?(File.join(root, full)) ? 0 : 1, path]
+      end.map(&:last)
     end
+
+    def self.behaviour?(file) = File.foreach(file).any? { |line| line.start_with?('-callback ') }
+    private_class_method :behaviour?
 
     # An application's module names in two lists, those of its erxos/ directories, in the
     # tree and the generated tree, and the rest, src/'s; a name in both is refused, since

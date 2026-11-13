@@ -2597,6 +2597,9 @@ what a renderer draws or hands its medium.
   `{error, Reason}`;
 * `erx_ui:close(Window)` ends the server and its window.
 
+`tree/2` and `close/1` are the opener's calls, since `Window` is the
+reference of a monitor the opener holds.
+
 The widget server sends `{ui, Window, Term, Detail}` to the process that
 opened the window, plain messages from a process of the opener's own
 runtime, and `{ui_down, Window, Reason}` when it ends other than by
