@@ -5110,6 +5110,17 @@ to the corpus and follow rc
   downloads the image again even when the image arrived and checked out
   and only xterm.js or v64 failed to load; keep a checked image across
   retries.
+* [Low] website, `tools/lib/erx/site.rb` (the QEMU virt download): the page
+  offers the gzip-compressed image for QEMU's `-kernel`, which unpacks it
+  as it loads it. QEMU may stop unpacking a gzipped kernel above a size
+  ceiling (unverified: read QEMU 11.1's `hw/arm/boot.c` and
+  `include/hw/loader.h`); if it does, the download stops booting once the
+  unpacked image outgrows the ceiling while the browser console keeps
+  working. Check the ceiling and refuse a larger image in `Erx::Site`.
+* [Low] website, `tools/lib/erx/site.rb`: the card's SHA-256 is taken in
+  `inventory` and xz reads the card again in `publish`, so a card changed
+  in between is published under a digest and a record that do not
+  describe it. Hash the bytes xz reads.
 * [Medium] build gates, `test/integration/fiasco_reproducible_test.rb`: it is the
   test that builds the stopgap kernel twice and compares the results, and
   `make check` skips it as a standalone test, but no make target runs it,

@@ -50,7 +50,9 @@ ruby tools/build_site.rb --no-card [--image IMAGE] [--serve 8000]
   input cannot ship without its notice.
 * `--image` is the erXos boot image, by default
   `build/production-image/site/image.boot`. It is stored
-  gzip-compressed as `image-<digest>.boot.gz`. The site's image is built
+  gzip-compressed as `image-<digest>.boot.gz`, which is also the page's
+  QEMU virt download, with the QEMU command line that boots it: QEMU's
+  `-kernel` takes the compressed file as it is. The site's image is built
   with `tools/erx boot --without-web`, which builds it into that directory
   from the website's own system manifest,
   [`config/manifest/qemu-virt-site.txt`](../config/manifest/qemu-virt-site.txt),
@@ -79,12 +81,14 @@ ruby tools/build_site.rb --no-card [--image IMAGE] [--serve 8000]
   `build/production-image/raspi4b/sdcard.img`, which
   `make pack PLATFORM=raspi4b` builds, and `--card-record` its build
   record, by default the card's path with `.receipt.json` added. The page
-  offers the card as a download, `sdcard-<digest>.img.gz`, with the SHA-256
-  of the download and of the card image, the record beside it as
+  offers the card in its Downloads section as `sdcard-<digest>.img.xz`,
+  with the download's size and SHA-256, the record beside it as
   `sdcard-<digest>.img.receipt.json`, and how to write the card. It is
-  gzip-compressed because every desktop system opens gzip with what it
-  ships (xz needs a tool macOS lacks), Raspberry Pi Imager writes a `.gz`
-  as it is, and Ruby's zlib writes it in the build itself. The record
+  xz-compressed, with the options of `Erx::Site::XZ_ARGUMENTS` (`-9`, one
+  thread, so the same card gives the same bytes on every host): a card is
+  mostly blank, and xz makes it less than half the size gzip does. Raspberry
+  Pi Imager writes a `.img.xz` as it is; on macOS, `dd` needs Homebrew's
+  `xz` to unpack it. The build runs `xz` from the `PATH`. The record
   names the full erXos commit the card was built from and whether the
   tree had changes. A record that does not name the card's SHA-256, that
   names a commit other than `--source`'s or a tree with changes, or that
@@ -93,8 +97,8 @@ ruby tools/build_site.rb --no-card [--image IMAGE] [--serve 8000]
   version line alone, and packing does not refuse a version line that
   names a path, so a self-built tool's card still serves its builder.
   The published record is the one checked, as parsed and re-written.
-* `--no-card` builds the page without the Raspberry Pi 4 section: no card
-  paragraph in `index.html`, no card entry in `boot.json` and no card files.
+* `--no-card` builds the page without the Raspberry Pi 4 download: no card
+  row in `index.html`, no card entry in `boot.json` and no card files.
   It is for local previews and cannot be combined with `--card` or
   `--card-record`. The publishing workflow (`.github/workflows/site.yml`)
   always passes a card and never `--no-card`, which a test checks, so a
@@ -105,7 +109,7 @@ ruby tools/build_site.rb --no-card [--image IMAGE] [--serve 8000]
   its tag to the commit before it builds. The image
   carries the stopgap kernel's GPL-2.0 files and the card those and the
   board's GPL-2.0 device tree, so the page links that source on github.com
-  beside the console and the download, and `boot.json` records it. These
+  beside each download, and `boot.json` records it. These
   are the images CLAUDE.md lets leave the project, each with its source
   offered. The card's device tree ships with its source, Linux's GPL-2.0
   text and a notice of erXos's one edit, dated by the commit's date.

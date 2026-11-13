@@ -77,7 +77,7 @@ begin
   card = options[:no_card] ? nil : options.fetch(:card)
   card_record = card && (options[:card_record] || "#{card}.receipt.json")
   plan = Erx::Site.inventory(root:, v64:, image: options.fetch(:image), card:, card_record:, source:, disk:)
-  manifest = Erx::Site.publish(plan, out: options.fetch(:out))
+  manifest = Erx::Site.publish(plan, out: options.fetch(:out), runner:)
   card_summary = manifest[:card] ? "card #{manifest.dig(:card, :compressed_bytes)} bytes compressed" : 'no card'
   puts "Site: #{options.fetch(:out)} (image #{manifest.fetch(:bytes)} bytes, " \
        "#{manifest.fetch(:compressed_bytes)} compressed; disk #{manifest.dig(:disk, :capacity)} bytes, " \

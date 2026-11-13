@@ -535,6 +535,7 @@ Apple Silicon macOS is the primary host. You need:
   fsimg, the tool that writes and verifies the EROFS images (`make setup`
   builds it);
 * QEMU 11.1, with its `virt-11.1` machine;
+* xz (XZ Utils), which compresses the website's Raspberry Pi 4 download;
 * a Homebrew JVM;
 * Docker, a local engine or context, for the full stock OTP suites only.
   The [host oracle design](docs/design-host-oracle.md) describes its

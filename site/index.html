@@ -28,6 +28,7 @@
     <a href="#correctness">Correctness</a>
     <a href="#try">Try it</a>
     <a href="https://github.com/stass/erXos">GitHub</a>
+    <a class="nav-download" href="#downloads">Download</a>
   </nav>
 </header>
 
@@ -135,10 +136,6 @@ Error in process &lt;0.150.0&gt; with exit value:
       <div class="terminal-grille" aria-hidden="true"></div>
     </div>
     <p class="terminal-hint" data-erx-hint hidden>At the <code>%</code> prompt, try <code>ls /</code>, <code>top</code>, <code>dmesg</code>, <code>ifconfig</code>, <code>ping -c 3 8.8.8.8</code>, or <code>erl</code> for the Erlang shell.</p>
-    <p class="terminal-hint terminal-source">The image is built from the erXos source at <a href="{{source_url}}"><code>{{source_label}}</code></a>. The emulator&rsquo;s licences: <a href="v64/LICENSE.txt">v64</a>, <a href="v64/NOTICES.txt">third-party code</a>.</p>
-    <!--card-->
-    <p class="terminal-hint terminal-source card-download">For a Raspberry Pi 4: the card <a href="{{card_file}}" download><code>{{card_file}}</code></a>, built from the same source (SHA-256 <code>{{card_download_sha256}}</code>; of the card image inside, <code>{{card_sha256}}</code>; its <a href="{{card_record}}">build record</a>). Write it to a microSD card with Raspberry Pi Imager (choose &ldquo;Use custom&rdquo; for the operating system), or on macOS with <code>diskutil unmountDisk /dev/diskN</code> and then <code>gunzip -c {{card_file}} | sudo dd of=/dev/rdiskN bs=4m</code>, where <code>diskN</code> is the card as <code>diskutil list</code> shows it; everything on it is erased.</p>
-    <!--/card-->
   </div>
 </section>
 
@@ -502,6 +499,60 @@ Error in process &lt;0.150.0&gt; with exit value:
       </div>
     </div>
 </div>
+</section>
+
+<section class="section" id="downloads" aria-labelledby="downloads-title">
+  <header>
+    <span class="label"><b>07</b> / Download</span>
+    <h2 id="downloads-title">Run it on your own machine.</h2>
+  </header>
+  <div>
+    <div class="downloads">
+      <!--card-->
+      <article class="download">
+        <div class="download-main">
+          <span class="label"><b>D1</b> Board</span>
+          <h3>Raspberry Pi 4</h3>
+          <p class="download-get"><a class="btn" href="{{card_file}}" download>Download card</a> <span class="label">.img.xz &middot; {{card_download_size}}</span></p>
+          <p>Write it to a microSD card with Raspberry Pi Imager: Choose OS, then Use custom.</p>
+          <details>
+            <summary>Or with <code>dd</code> on macOS</summary>
+            <pre tabindex="0"><code>diskutil unmountDisk /dev/diskN
+xz -dc {{card_file}} | sudo dd of=/dev/rdiskN bs=4m</code></pre>
+            <p><code>diskN</code> is the card as <code>diskutil list</code> shows it, and <code>xz</code> is in Homebrew. Everything on the card is erased.</p>
+          </details>
+        </div>
+        <div class="download-more">
+          <dl class="download-facts label">
+            <dt>SHA-256</dt><dd><code>{{card_download_sha256}}</code></dd>
+            <dt>Source</dt><dd><a href="{{source_url}}"><code>{{source_label}}</code></a> &middot; <a href="{{card_record}}">build record</a></dd>
+          </dl>
+        </div>
+      </article>
+      <!--/card-->
+      <article class="download">
+        <div class="download-main">
+          <span class="label"><b>D2</b> Emulator</span>
+          <h3>QEMU virt</h3>
+          <p class="download-get"><a class="btn" href="{{image_file}}" download>Download image</a> <span class="label">.boot.gz &middot; {{image_download_size}}</span></p>
+          <p>The image the console above runs. Boot it with QEMU; <code>Ctrl-A X</code> quits.</p>
+        </div>
+        <div class="download-more">
+          <pre tabindex="0"><code>qemu-system-aarch64 -machine virt,gic-version=3 \
+  -cpu cortex-a76 -m 256 -nographic -nic none \
+  -global virtio-mmio.force-legacy=false \
+  -netdev user,id=net0 \
+  -device virtio-net-device,netdev=net0,bus=virtio-mmio-bus.23 \
+  -kernel {{image_file}}</code></pre>
+          <dl class="download-facts label">
+            <dt>SHA-256</dt><dd><code>{{image_download_sha256}}</code></dd>
+            <dt>Source</dt><dd><a href="{{source_url}}"><code>{{source_label}}</code></a></dd>
+          </dl>
+        </div>
+      </article>
+    </div>
+    <p class="download-note">The console above runs on v64: <a href="v64/LICENSE.txt">licence</a>, <a href="v64/NOTICES.txt">third-party code</a>.</p>
+  </div>
 </section>
 
 </main>

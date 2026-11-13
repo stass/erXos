@@ -10,13 +10,16 @@ require 'yaml'
 require 'zlib'
 require_relative '../../tools/lib/erx/site'
 require_relative '../../tools/lib/erx/production_image'
+require_relative '../../tools/lib/erx/runner'
 
 class SiteTest < Minitest::Test
   REPO = File.expand_path('../..', __dir__)
   COMMIT = '0123456789abcdef0123456789abcdef01234567'
-  CARD_BLOCK = '<!--card--><p class="card">card {{card_file}} {{card_sha256}} {{card_download_sha256}} ' \
+  CARD_BLOCK = '<!--card--><p class="card">card {{card_file}} {{card_download_size}} {{card_download_sha256}} ' \
                '<a href="{{card_record}}">r</a></p><!--/card-->'
   INDEX = '<script src="{{terminal_js}}"></script><a href="{{source_url}}">{{source_label}}</a>'
+  # boot.json's image entry as render_index reads it.
+  IMAGE = { image: 'i.boot.gz', compressed_bytes: 17_482_936, compressed_sha256: 'y' }.freeze
 
   # A fake tree: site/ sources, a built v64 tree with its notices, an image,
   # and a card with its build record.
@@ -50,6 +53,13 @@ class SiteTest < Minitest::Test
     File.write(File.join(root, 'sdcard.img.receipt.json'), JSON.generate(record))
   end
 
+  # Erx::Site.publish with a runner whose logs go to a directory of their own.
+  def publish(plan, out:)
+    Dir.mktmpdir('erx-site-logs-') do |logs|
+      Erx::Site.publish(plan, out:, runner: Erx::Runner.new(owner_root: logs, log_dir: File.join(logs, 'logs')))
+    end
+  end
+
   def inventory(root, image, ref: COMMIT, card: File.join(root, 'sdcard.img'),
                 card_record: File.join(root, 'sdcard.img.receipt.json'))
     Erx::Site.inventory(root:, v64: File.join(root, 'v64'), image:, card:, card_record:,
@@ -66,7 +76,7 @@ class SiteTest < Minitest::Test
   def test_publish_writes_digest_named_files_notices_and_a_checked_image
     with_inputs do |root, image|
       out = File.join(root, 'build/site')
-      manifest = Erx::Site.publish(inventory(root, image), out:)
+      manifest = publish(inventory(root, image), out:)
 
       module_name = manifest.dig(:emulator, :module)
       assert_match %r{\Av64/libv86-[0-9a-f]{16}\.mjs\z}, module_name
@@ -82,30 +92,36 @@ class SiteTest < Minitest::Test
       assert_equal manifest, written
       assert_equal Digest::SHA256.file(image).hexdigest, written.fetch(:sha256)
       assert_equal File.size(File.join(out, written.fetch(:image))), written.fetch(:compressed_bytes)
-      assert_equal manifest, Erx::Site.publish(inventory(root, image), out:), 'a rebuild gives the same bytes'
+      assert_equal manifest, publish(inventory(root, image), out:), 'a rebuild gives the same bytes'
     end
   end
 
-  # The card is published gzip-compressed under its digest's name, its record beside
-  # it, and the page names both with the card's and the download's SHA-256.
+  # The card is published xz-compressed under its digest's name, the same bytes on
+  # every build, its record beside it, and the page names both with the download's
+  # size and SHA-256.
   def test_publish_offers_the_card_and_its_record
     with_inputs do |root, image|
       out = File.join(root, 'build/site')
       File.write(File.join(root, 'site/index.html'),
-                 '<a href="{{card_file}}">{{card_sha256}} {{card_download_sha256}}</a><a href="{{card_record}}">r</a>')
-      card = Erx::Site.publish(inventory(root, image), out:).fetch(:card)
+                 '<a href="{{card_file}}">{{card_download_size}} {{card_download_sha256}}</a><a href="{{card_record}}">r</a>')
+      card = publish(inventory(root, image), out:).fetch(:card)
       sha256 = Digest::SHA256.file(File.join(root, 'sdcard.img')).hexdigest
 
-      assert_equal "sdcard-#{sha256[0, 16]}.img.gz", card.fetch(:file)
-      assert_equal File.binread(File.join(root, 'sdcard.img')), Zlib.gunzip(File.binread(File.join(out, card.fetch(:file))))
+      assert_equal "sdcard-#{sha256[0, 16]}.img.xz", card.fetch(:file)
+      unpacked, status = Open3.capture2('xz', '--decompress', '--stdout', File.join(out, card.fetch(:file)), binmode: true)
+      assert status.success?
+      assert_equal File.binread(File.join(root, 'sdcard.img')), unpacked
       assert_equal Digest::SHA256.file(File.join(out, card.fetch(:file))).hexdigest, card.fetch(:compressed_sha256)
       # The record published is the one checked, as parsed, not a second read of its file.
       assert_equal "#{JSON.pretty_generate(JSON.parse(File.read(File.join(root, 'sdcard.img.receipt.json'))))}\n",
                    File.read(File.join(out, card.fetch(:record)))
       assert_equal "sdcard-#{sha256[0, 16]}.img.receipt.json", card.fetch(:record)
-      assert_equal "<a href=\"#{card.fetch(:file)}\">#{sha256} #{card.fetch(:compressed_sha256)}</a>" \
+      assert_equal "<a href=\"#{card.fetch(:file)}\">0.0 MB #{card.fetch(:compressed_sha256)}</a>" \
                    "<a href=\"#{card.fetch(:record)}\">r</a>", File.read(File.join(out, 'index.html'))
       assert_equal card, JSON.parse(File.read(File.join(out, 'boot.json')), symbolize_names: true).fetch(:card)
+      again = File.join(root, 'build/again')
+      assert_equal card, publish(inventory(root, image), out: again).fetch(:card)
+      assert_equal File.binread(File.join(out, card.fetch(:file))), File.binread(File.join(again, card.fetch(:file)))
     end
   end
 
@@ -116,24 +132,26 @@ class SiteTest < Minitest::Test
       out = File.join(root, 'build/site')
       File.write(File.join(root, 'site/index.html'),
                  "<p>image</p>\n#{CARD_BLOCK}\n<p>end</p>\n")
-      manifest = Erx::Site.publish(inventory(root, image, card: nil, card_record: nil), out:)
+      manifest = publish(inventory(root, image, card: nil, card_record: nil), out:)
 
       refute manifest.key?(:card)
       refute JSON.parse(File.read(File.join(out, 'boot.json'))).key?('card')
       assert_equal "<p>image</p>\n<p>end</p>\n", File.read(File.join(out, 'index.html'))
       assert_empty Dir.glob(File.join(out, 'sdcard*'))
       # With a card, the block stays, without its markers.
-      Erx::Site.publish(inventory(root, image), out:)
-      assert_match(%r{<p>image</p>\n<p class="card">card sdcard-[0-9a-f]{16}\.img\.gz [^\n]*</p><p>end</p>\n}, File.read(File.join(out, 'index.html')))
+      publish(inventory(root, image), out:)
+      assert_match(%r{<p>image</p>\n<p class="card">card sdcard-[0-9a-f]{16}\.img\.xz [^\n]*</p><p>end</p>\n}, File.read(File.join(out, 'index.html')))
     end
   end
 
   def test_the_page_without_a_card_leaves_no_placeholder
     page = Erx::Site.render_index(File.read(File.join(REPO, 'site/index.html')), terminal: 't.js',
-                                  source: Erx::Site.source(COMMIT), card: nil)
+                                  source: Erx::Site.source(COMMIT), image: IMAGE, card: nil)
     refute_includes page, '{{'
-    refute_includes page, 'card-download'
-    refute_includes page, 'For a Raspberry Pi 4'
+    refute_includes page, 'Download card'
+    # The image's source offer stays on the page without the card's row.
+    assert_includes page, %(href="https://github.com/stass/erXos/tree/#{COMMIT}")
+    assert_includes page, 'href="i.boot.gz"'
     refute_includes page, '<!--card'
   end
 
@@ -141,7 +159,7 @@ class SiteTest < Minitest::Test
   def test_a_card_placeholder_outside_the_card_block_is_refused_without_a_card
     error = assert_raises(Erx::Error) do
       Erx::Site.render_index('<a href="{{card_file}}">x</a>', terminal: 't.js', source: Erx::Site.source(COMMIT),
-                                                               card: nil)
+                                                               image: IMAGE, card: nil)
     end
     assert_match(/card_file/, error.message)
   end
@@ -221,7 +239,7 @@ class SiteTest < Minitest::Test
   def test_publish_writes_the_fresh_medium_as_its_extents
     with_inputs do |root, image|
       out = File.join(root, 'build/site')
-      disk = Erx::Site.publish(inventory(root, image), out:).fetch(:disk)
+      disk = publish(inventory(root, image), out:).fetch(:disk)
       content = File.binread(File.join(out, disk.fetch(:file)))
 
       assert_match(/\Adisk-[0-9a-f]{16}\.bin\z/, disk.fetch(:file))
@@ -273,7 +291,7 @@ class SiteTest < Minitest::Test
   def test_index_names_the_digest_named_script_and_links_the_image_source
     with_inputs do |root, image|
       out = File.join(root, 'build/site')
-      manifest = Erx::Site.publish(inventory(root, image), out:)
+      manifest = publish(inventory(root, image), out:)
       terminal = Dir.glob('terminal-*.js', base: out).first
 
       assert_match(/\Aterminal-[0-9a-f]{16}\.js\z/, terminal)
@@ -287,9 +305,9 @@ class SiteTest < Minitest::Test
   def test_a_changed_input_changes_its_published_name
     with_inputs do |root, image|
       out = File.join(root, 'build/site')
-      first = Erx::Site.publish(inventory(root, image), out:)
+      first = publish(inventory(root, image), out:)
       File.write(File.join(root, 'v64/build/v86-arm64.wasm'), 'another core')
-      second = Erx::Site.publish(inventory(root, image), out:)
+      second = publish(inventory(root, image), out:)
 
       refute_equal first.dig(:emulator, :wasm), second.dig(:emulator, :wasm)
       assert_equal first.dig(:emulator, :module), second.dig(:emulator, :module)
@@ -300,9 +318,9 @@ class SiteTest < Minitest::Test
   def test_a_rebuild_with_another_image_replaces_the_old_one
     with_inputs do |root, image|
       out = File.join(root, 'build/site')
-      first = Erx::Site.publish(inventory(root, image), out:)
+      first = publish(inventory(root, image), out:)
       File.binwrite(image, 'another image')
-      second = Erx::Site.publish(inventory(root, image), out:)
+      second = publish(inventory(root, image), out:)
 
       refute_equal first.fetch(:image), second.fetch(:image)
       refute File.exist?(File.join(out, first.fetch(:image)))
@@ -321,7 +339,7 @@ class SiteTest < Minitest::Test
 
   def test_publish_refuses_to_replace_a_directory_it_did_not_build
     with_inputs do |root, image|
-      assert_raises(Erx::Error) { Erx::Site.publish(inventory(root, image), out: File.join(root, 'site')) }
+      assert_raises(Erx::Error) { publish(inventory(root, image), out: File.join(root, 'site')) }
       assert File.file?(File.join(root, 'site/index.html'))
     end
   end
@@ -342,7 +360,7 @@ class SiteTest < Minitest::Test
   def test_routes_serve_the_built_site_but_not_its_marker
     with_inputs do |root, image|
       out = File.join(root, 'build/site')
-      Erx::Site.publish(inventory(root, image), out:)
+      publish(inventory(root, image), out:)
       assert File.file?(File.join(out, Erx::Site::MARKER)), 'the marker is written'
 
       table = Erx::Site.routes(out)
@@ -365,15 +383,21 @@ class SiteTest < Minitest::Test
   def test_the_page_fills_every_placeholder
     page = Erx::Site.render_index(File.read(File.join(REPO, 'site/index.html')), terminal: 't.js',
                                   source: Erx::Site.source(COMMIT),
-                                  card: { file: 'c.img.gz', record: 'r', sha256: 's', compressed_sha256: 'z' })
+                                  image: IMAGE,
+                                  card: { file: 'c.img.xz', record: 'r', sha256: 's', compressed_bytes: 15_339_296,
+                                          compressed_sha256: 'z' })
     refute_includes page, '{{'
-    assert_includes page, 'href="c.img.gz"'
+    assert_includes page, 'href="c.img.xz"'
+    assert_includes page, '15.3 MB'
+    # The QEMU virt download is the image the console boots, and its command line boots that file.
+    assert_includes page, 'href="i.boot.gz"'
+    assert_includes page, '-kernel i.boot.gz'
   end
 
   def test_an_unknown_index_placeholder_is_refused
     error = assert_raises(Erx::Error) do
       Erx::Site.render_index('{{nope}}', terminal: 't.js', source: Erx::Site.source(COMMIT),
-                                          card: { file: 'c', record: 'r', sha256: 's', compressed_sha256: 'z' })
+                                          image: IMAGE, card: { file: 'c', record: 'r', sha256: 's', compressed_bytes: 1, compressed_sha256: 'z' })
     end
     assert_match(/nope/, error.message)
   end

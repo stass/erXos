@@ -36,19 +36,19 @@ module Erx
   # cache's copy) and index.html name them, so a cache never serves a stale
   # file and files of two deployments never mix. The image is gzip-compressed; the
   # page decompresses it with DecompressionStream, so the static host needs
-  # no Content-Encoding setup.
+  # no Content-Encoding setup. The same file is the page's QEMU virt
+  # download: QEMU's -kernel takes a gzip-compressed image as it is.
   #
-  # The card is a download, gzip-compressed too: macOS, Linux and Windows
-  # open gzip with what they ship, Raspberry Pi Imager writes it as it is,
-  # and Ruby's zlib writes it without a tool the workflow would have to
-  # install. Its build record is published beside it, once card_record finds
-  # it is the card's, of the commit the page links with no changes, and
-  # names no host path.
+  # The card is a download, xz-compressed (XZ_ARGUMENTS): a card is mostly
+  # blank, xz makes it less than half what gzip does, and Raspberry Pi
+  # Imager writes a .img.xz as it is. Its build record is published beside
+  # it, once card_record finds it is the card's, of the commit the page
+  # links with no changes, and names no host path.
   #
   # The image and the card carry GPL-2.0 code, the stopgap kernel's and the
   # board's device tree, so the page links the erXos source they were built
-  # from, a release tag or a commit, beside the console and the download
-  # (docs/design.md, "Licences and notices").
+  # from, a release tag or a commit, beside each download (docs/design.md,
+  # "Licences and notices").
   module Site
     PAGE_FILES = %w[index.html style.css favicon.svg terminal.js].freeze
     MANIFEST = 'boot.json'
@@ -60,10 +60,19 @@ module Erx
     SECTOR_BYTES = MediumImage::SECTOR_BYTES
     # A card's build record is a few kilobytes; anything far larger is not one.
     MAX_CARD_RECORD = 1024 * 1024
+    # How the card is compressed. One fixed preset and one thread, so xz
+    # writes one stream of one block, and XZ_ENVIRONMENT unsets the variables
+    # xz reads options from before its command line, so the bytes depend only
+    # on the card and xz's encoder. -9's 64 MiB dictionary reaches repeats
+    # far apart in a card; reading it back takes 65 MiB.
+    XZ_ARGUMENTS = %w[xz --format=xz --check=crc64 -9 --threads=1 --stdout].freeze
+    XZ_ENVIRONMENT = { 'XZ_DEFAULTS' => nil, 'XZ_OPT' => nil }.freeze
+    # Far above what xz takes for a card of a few hundred megabytes.
+    XZ_DEADLINE = 900
 
     # One output file: where it goes under the site directory, where it comes
-    # from, and whether it is stored gzip-compressed.
-    Entry = Data.define(:path, :source, :gzip)
+    # from, and how it is stored: as it is (nil), :gzip or :xz.
+    Entry = Data.define(:path, :source, :compression)
     # A disk of capacity bytes that holds content at extents, [offset, length]
     # pairs in bytes, sorted, apart and whole sectors, whose lengths sum to
     # content's; every other byte is zero.
@@ -75,8 +84,8 @@ module Erx
     end
     # entries: the files copied as they are; index: index.html's template;
     # names: the digest names; disk: the Disk; manifest: boot.json without
-    # the image's compressed_bytes and the card's compressed_bytes and
-    # compressed_sha256, which only the written files give; card_record: the
+    # the image's and the card's compressed_bytes and compressed_sha256,
+    # which only the written files give; card_record: the
     # card's build record as card_record checked it, which is what is
     # published, so no byte of the file goes out unchecked.
     Plan = Data.define(:entries, :index, :names, :disk, :manifest, :card_record)
@@ -194,16 +203,16 @@ module Erx
       record = card && card_record(BoundedFile.read(card_record, maximum: MAX_CARD_RECORD), sha256: card_sha256, source:)
       names = { 'terminal.js' => digest_name('terminal.js', digest.(page.fetch('terminal.js'))),
                 'image' => "image-#{image_sha256[0, 16]}.boot.gz", 'disk' => "disk-#{disk_sha256[0, 16]}.bin" }
-              .merge(card ? { 'card' => "sdcard-#{card_sha256[0, 16]}.img.gz",
+              .merge(card ? { 'card' => "sdcard-#{card_sha256[0, 16]}.img.xz",
                               'card_record' => "sdcard-#{card_sha256[0, 16]}.img.receipt.json" } : {})
               .merge(emulator.to_h { |name, path| [name, "v64/#{digest_name(name, digest.(path))}"] })
-      entries = [Entry.new(path: 'style.css', source: page.fetch('style.css'), gzip: false),
-                 Entry.new(path: 'favicon.svg', source: page.fetch('favicon.svg'), gzip: false),
-                 Entry.new(path: names.fetch('terminal.js'), source: page.fetch('terminal.js'), gzip: false),
-                 *emulator.map { |name, path| Entry.new(path: names.fetch(name), source: path, gzip: false) },
-                 *notices.map { |name, path| Entry.new(path: "v64/#{name}", source: path, gzip: false) },
-                 Entry.new(path: names.fetch('image'), source: image, gzip: true),
-                 *(Entry.new(path: names.fetch('card'), source: card, gzip: true) if card)]
+      entries = [Entry.new(path: 'style.css', source: page.fetch('style.css'), compression: nil),
+                 Entry.new(path: 'favicon.svg', source: page.fetch('favicon.svg'), compression: nil),
+                 Entry.new(path: names.fetch('terminal.js'), source: page.fetch('terminal.js'), compression: nil),
+                 *emulator.map { |name, path| Entry.new(path: names.fetch(name), source: path, compression: nil) },
+                 *notices.map { |name, path| Entry.new(path: "v64/#{name}", source: path, compression: nil) },
+                 Entry.new(path: names.fetch('image'), source: image, compression: :gzip),
+                 *(Entry.new(path: names.fetch('card'), source: card, compression: :xz) if card)]
       manifest = { image: names.fetch('image'), bytes: File.size(image), sha256: image_sha256,
                    emulator: { module: names.fetch('libv86.mjs'), wasm: names.fetch('v86-arm64.wasm'),
                                bytes: emulator.values.sum { |path| File.size(path) } },
@@ -221,15 +230,23 @@ module Erx
     # for a build with a card and removed with it for one without.
     CARD_BLOCK = %r{<!--card-->(.*?)<!--/card-->\n?}m
 
-    # index.html with its {{name}} placeholders filled in. card is boot.json's
-    # card entry, or nil for a build without a card, which has no card
-    # placeholder to fill. Every value is HTML-escaped; an unknown
+    # A download's size as the page shows it, in decimal megabytes.
+    def size_label(bytes) = format('%.1f MB', bytes / 1_000_000.0)
+
+    # index.html with its {{name}} placeholders filled in. image is
+    # boot.json's image fields: image, the published file, and its
+    # compressed_bytes and compressed_sha256, which the QEMU virt download shows. card is
+    # boot.json's card entry, or nil for a build without a card, which has
+    # no card placeholder to fill. Every value is HTML-escaped; an unknown
     # placeholder raises, so a card placeholder outside the card section
     # fails a build without a card instead of reaching the page.
-    def render_index(template, terminal:, source:, card:)
-      values = { 'terminal_js' => terminal, 'source_url' => source.url, 'source_label' => source.label }
+    def render_index(template, terminal:, source:, image:, card:)
+      values = { 'terminal_js' => terminal, 'source_url' => source.url, 'source_label' => source.label,
+                 'image_file' => image.fetch(:image), 'image_download_size' => size_label(image.fetch(:compressed_bytes)),
+                 'image_download_sha256' => image.fetch(:compressed_sha256) }
       values.merge!('card_file' => card.fetch(:file), 'card_record' => card.fetch(:record),
-                    'card_sha256' => card.fetch(:sha256), 'card_download_sha256' => card.fetch(:compressed_sha256)) if card
+                    'card_download_size' => size_label(card.fetch(:compressed_bytes)),
+                    'card_download_sha256' => card.fetch(:compressed_sha256)) if card
       template = template.gsub(CARD_BLOCK) { card ? Regexp.last_match(1) : '' }
       template.gsub(/\{\{([a-z][a-z0-9_]*)\}\}/) do
         key = Regexp.last_match(1)
@@ -242,8 +259,8 @@ module Erx
     # The effects: builds the site in a fresh sibling of out and renames it
     # into place, so an interrupted build leaves out as it was. Only a
     # directory this step built (it holds the MARKER file) is replaced, so a
-    # mistyped path never deletes anything else.
-    def publish(plan, out:)
+    # mistyped path never deletes anything else. runner runs xz (Runner).
+    def publish(plan, out:, runner:)
       if File.exist?(out) && !File.file?(File.join(out, MARKER))
         raise Error, "refusing to replace #{out}: not built by tools/build_site.rb"
       end
@@ -251,21 +268,22 @@ module Erx
       FileUtils.mkdir_p(File.dirname(out))
       Dir.mktmpdir('.site-', File.dirname(out)) do |staging|
         site = File.join(staging, 'site')
-        manifest = assemble(plan, out: site)
+        manifest = assemble(plan, out: site, runner:)
         FileUtils.rm_rf(out)
         File.rename(site, out)
         manifest
       end
     end
 
-    def assemble(plan, out:)
-      plan.entries.each { |entry| write(entry, out:) }
+    def assemble(plan, out:, runner:)
+      plan.entries.each { |entry| write(entry, out:, runner:) }
       File.binwrite(File.join(out, plan.names.fetch('disk')), plan.disk.content)
       card = plan.manifest[:card] && publish_card(plan, out:)
-      manifest = plan.manifest.merge(compressed_bytes: File.size(File.join(out, plan.names.fetch('image'))))
+      manifest = plan.manifest.merge(download(File.join(out, plan.names.fetch('image'))))
       manifest[:card] = card if card
       index = render_index(File.read(plan.index), terminal: plan.names.fetch('terminal.js'),
-                                                  source: Source.new(ref: plan.manifest.dig(:source, :ref)), card:)
+                                                  source: Source.new(ref: plan.manifest.dig(:source, :ref)),
+                                                  image: manifest.slice(:image, :compressed_bytes, :compressed_sha256), card:)
       File.write(File.join(out, 'index.html'), index)
       File.write(File.join(out, MANIFEST), "#{JSON.pretty_generate(manifest)}\n")
       File.write(File.join(out, MARKER), "built by tools/build_site.rb\n")
@@ -277,20 +295,29 @@ module Erx
     # with the download's size and digest.
     def publish_card(plan, out:)
       File.write(File.join(out, plan.names.fetch('card_record')), "#{JSON.pretty_generate(plan.card_record)}\n")
-      download = File.join(out, plan.names.fetch('card'))
-      plan.manifest.fetch(:card).merge(compressed_bytes: File.size(download),
-                                       compressed_sha256: Digest::SHA256.file(download).hexdigest)
+      plan.manifest.fetch(:card).merge(download(File.join(out, plan.names.fetch('card'))))
     end
     private_class_method :publish_card
 
-    def write(entry, out:)
+    # A written download's size and digest, which the page shows beside it.
+    def download(path) = { compressed_bytes: File.size(path), compressed_sha256: Digest::SHA256.file(path).hexdigest }
+    private_class_method :download
+
+    def write(entry, out:, runner:)
       target = File.join(out, entry.path)
       FileUtils.mkdir_p(File.dirname(target))
-      return FileUtils.cp(entry.source, target) unless entry.gzip
-
-      Zlib::GzipWriter.open(target, Zlib::BEST_COMPRESSION) do |gz|
-        gz.mtime = 0 # the same image gives the same bytes
-        File.open(entry.source, 'rb') { |input| IO.copy_stream(input, gz) }
+      case entry.compression
+      in nil
+        FileUtils.cp(entry.source, target)
+      in :gzip
+        Zlib::GzipWriter.open(target, Zlib::BEST_COMPRESSION) do |gz|
+          gz.mtime = 0 # the same image gives the same bytes
+          File.open(entry.source, 'rb') { |input| IO.copy_stream(input, gz) }
+        end
+      in :xz
+        runner.run(XZ_ARGUMENTS, name: 'site-card-xz', deadline: XZ_DEADLINE, env: XZ_ENVIRONMENT,
+                                 stdin: entry.source, stdout: target)
+        File.chmod(0o644, target) # the runner creates its output owner-only; the site is public
       end
     end
     private_class_method :write
@@ -299,7 +326,7 @@ module Erx
       '.html' => 'text/html; charset=utf-8', '.css' => 'text/css', '.svg' => 'image/svg+xml',
       '.js' => 'text/javascript',
       '.mjs' => 'text/javascript', '.wasm' => 'application/wasm', '.json' => 'application/json',
-      '.gz' => 'application/gzip', '.bin' => 'application/octet-stream'
+      '.gz' => 'application/gzip', '.xz' => 'application/x-xz', '.bin' => 'application/octet-stream'
     }.freeze
 
     # Maps each URL path to a file of the site directory, listed once at
