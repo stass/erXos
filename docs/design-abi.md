@@ -1760,7 +1760,14 @@ are the physical address and length of the node's first `reg` entry, and
 `line` is its first interrupt, numbered as the platform's interrupt
 controller numbers the lines a device raises. The platform record carries
 all three for every device-tree device, and the production image suite
-checks them against the device tree QEMU builds. `clock` is the frequency
+checks them against the device tree QEMU builds. A framebuffer row is the
+exception: its path names the node under which the firmware adds its
+framebuffer, `/chosen`, its `line` is zero, and its page-aligned `base`
+and `size` are the window the framebuffer must lie in, which the
+manifest check refuses where it overlaps another row's register window;
+the device tree the firmware hands over supplies where in the window
+the framebuffer lies, and its geometry, at boot
+([design-device-tree.md](design-device-tree.md#facts-into-records)). `clock` is the frequency
 in hertz of the clock the device's driver divides rates from, the rate
 of the first entry of its node's `clocks` (a fixed clock's `clock-frequency`,
 or for a clock the firmware sets, the rate the board's firmware configuration
@@ -1771,7 +1778,8 @@ PL011 row without one; every other device's clock is 0. Selector 2 is a PCIe fun
 names its host bridge by device-tree path, `path` is empty, bus is at
 most 255, device at most 31 and function at most 7; its `base`, `size`
 and `line` are zero, since configuration space gives them. Role values are
-ordinary 1, UART 2, configuration space 3, network 4, block 5 and TPM 6.
+ordinary 1, UART 2, configuration space 3, network 4, block 5, TPM 6 and
+framebuffer 7.
 These classification values are platform-declared facts for manifest
 checks, not a kernel driver dispatch. `compatible` and `placement_key`
 are nonempty UTF-8 strings without NUL or control characters, with the
@@ -1780,7 +1788,10 @@ placement key resolving to the selected platform's immutable record.
 DMA values are none 0, confined 1 and unconfined 2. Flag bit 0 is
 hostile. Only an unconfined device has nonzero `dma_memory`; its size is
 page-aligned and is reserved for that device for the boot. All other
-flag bits are zero. The packed marks do not establish actual confinement:
+flag bits are zero. A device's coherence and DMA range are not in its
+row: the root reads them at boot from the device tree the firmware hands
+over ([design-device-tree.md](design-device-tree.md),
+[design-device-dma.md](design-device-dma.md#device-addresses-and-reach)). The packed marks do not establish actual confinement:
 the device service still verifies the machine before assigning the unit.
 
 Window roles are slot A 1, slot B 2, boot-selection record 3, reset

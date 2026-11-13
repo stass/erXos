@@ -187,7 +187,11 @@ Inherited code reads no executable and no modules.
    than `ERX_BOOT_STDOUT_PATH_MAX`; and the boot value with its slot, which `erx_boot_pair_derive`
    computes from `/chosen/bootloader`'s `partition` and `tryboot`
    ([design-platforms.md](design-platforms.md#data-model)), `unknown` with slot `none` when either is
-   missing or malformed or the partition is not a slot)
+   missing or malformed or the partition is not a slot; and the range of the copy of the device tree it
+   made: after `apply`, it packs the tree with `fdt_open_into` and `fdt_pack` into free RAM from
+   `mem_manager->find_free_ram`, reserves the copy's whole pages as `Region::Root` with `Root_section_ro`, named
+   `.erxtree`, and refuses the boot when the packed tree exceeds `ERX_BOOT_TREE_MAX` or a step fails
+   ([design-device-tree.md](design-device-tree.md#on-the-stopgap)))
    into the options block for the kernel. That block is mapped into no task, so it also writes the
    record, by `erx_image_load`, into the **handoff page**, a free page from
    `mem_manager->find_free_ram`, reserved as `Region::Root` with `Root_section_ro`; no free page
@@ -213,7 +217,9 @@ service's bodies directly.
 
 1. Sets its stack, inside its image. Touching it faults to `sigma0`, which maps it one to one.
 2. Maps the kernel information page with `l4sigma0_map_kip`, reads the handoff page at `user_ptr`
-   through a page fault, and accepts the record with `erx_boot_handoff_accept`.
+   through a page fault, and accepts the record with `erx_boot_handoff_accept`, which checks the device
+   tree's range among the rest; it reads the tree's pages through page faults too, so they are mapped
+   read-only.
 3. Maps its whole image at its physical addresses with `l4sigma0_map_mem`, and touches each page of
    the archive, so the fault path maps it read and execute by its sub-type: `l4sigma0_map_mem` is `sigma0`'s
    RAM request, which maps read, write and execute whatever the sub-type says (`memmap.cc:125`). After
@@ -222,7 +228,9 @@ service's bodies directly.
    generated C reader, which allocates nothing and whose view stays in the archive, and reads the kernel
    command line from the handoff view's `bootargs` ([The command line](#the-command-line)). Later steps
    take device entries, wall offset, seed and the system's arguments from the first, and the watchdog's
-   numbers and deterministic mode from the second.
+   numbers and deterministic mode from the second. Accepts the device tree with `erx_dt_accept`, refusing
+   the boot on its reason, and stores each device row's facts from it in the row's catalogue entry
+   ([design-device-tree.md](design-device-tree.md#facts-into-records)).
 5. Builds the pool window and contiguous pools ([The pool](#the-pool)). If the pool and the root's
    image together hold less than the manifest's `root_memory`, it refuses the boot.
 6. Makes its own thread table ([Thread creation](#thread-creation)); seeds `rng.c`; makes its object
@@ -293,11 +301,14 @@ task's first thread as its argument. Its `flags` carry `ERX_BOOT_DET` when the s
 domain's node name and the system node's, its `args` and `env`, and the words the library adds to its `args`, after
 the row's own: `-erx build ID` with the boot image's build identifier, as the root's own page carries it, so
 every domain names the same build; one record per device it was given, `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
-MEM_SIZE CLOCK`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), and, when it holds a
+MEM_SIZE CLOCK COHERENT MAC`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), and, when it holds a
 block device, `-erx boot VALUE SLOT` with the boot's pair, as the root's own page carries it ([Image
 windows](#image-windows)). WINDOW_H, LINE_H and MEM_H are the installed objects' values in the holder's own handle
 table, OFFSET and SIZE place the registers in the window page, MEM_H and MEM_SIZE are 0 for a device with no
-memory, and CLOCK is the device's clock in hertz from its manifest row, 0 for a device whose driver reads none; ROLE and PERIPHERAL come from `include/erx/device_kinds.h`, and `erx_device_record` reads the records. The
+memory, CLOCK is the device's clock in hertz from its manifest row, 0 for a device whose driver reads none, and
+COHERENT is 1 when the device tree the firmware handed over marks the device coherent, else 0, and MAC is the
+hardware address that tree gives a network device, as a 48-bit number, 0 for none
+([design-device-tree.md](design-device-tree.md#facts-into-records)); ROLE and PERIPHERAL come from `include/erx/device_kinds.h`, and `erx_device_record` reads the records. The
 domain library's boot view admits a configured row or a session template only when its own words leave room within
 `ERX_BOOT_STRINGS_MAX` for all of those at their longest (`ERX_DOM_NODE_MAX` per node name, and the record sizes of
 `include/erx/boot_words.h`), and refuses the manifest with a reason naming that reserve otherwise, so a creation never
@@ -584,7 +595,7 @@ callers as it says.
 | `erx_mem_copy` | the domain service reading a crash area; a server reading a client's memory | service: copies between the two objects' window pages, at most 64 pages a request, so the stub loops | either object gone `ERX_ESTALE`, never a fault; an offset plus length past either object, computed with checked arithmetic, `ERX_ERANGE`, before any byte moves; physical memory or a JIT object `ERX_ETYPE`; a sealed destination, or a slice, whose pages are the archive's, `ERX_ERIGHTS` | in the kernel, through its own mappings |
 | cache maintenance, the code barrier | BeamAsm | local: asmjit's and ERTS's sequences unchanged ([design-arch-aarch64.md](design-arch-aarch64.md)) | correct | none |
 | `erx_mem_create_physical` | `erx_device`: the console UART (M3) and the host link's; through a give in its holder's creation, each device's register window for its holder, and the root's own give at boot for each such device the system domain holds ([Device records](#device-records)) | service, from the root only: `l4sigma0_map_iomem` into the root's device window, over the base and size its caller reads from the manifest's device entry; each map is then `l4_task_map` from there into the space named, as for a shared object; for the console UART also [the handoff](#the-console) | RAM, which `sigma0` keeps, `ERX_ERANGE`; execute `ERX_ERIGHTS`; a full window `ERX_ENOMEM`; a create from a task other than the root `ERX_ENOTSUP`, since the domain library makes every device's objects and passes them | within rights, from a carved resource |
-| `erx_mem_create_contiguous`, `erx_mem_dma_addr` | a device's one memory for the boot, which the device NIF carves its rings and buffers from, in whichever domain holds the device | service: a create from the root only, first fit from a [contiguous pool](#the-pool), aligned to its size rounded up to a power of two, at most 1 MiB, wholly below the caller's limit, cached, zeroed, and never given back; the domain library passes it to the device's holder, and the root makes one at boot for each device of a kind the system domain holds ([Device records](#device-records)). `dma_addr`, from any task holding the object, is physical address plus offset, since QEMU `virt` as the harness starts it has no IOMMU | no such run `ERX_ENOMEM`; `dma_addr` of another kind of object `ERX_ETYPE`, past the object `ERX_ERANGE`; execute `ERX_ERIGHTS`; a create from a task other than the root `ERX_ENOTSUP`; unconfined; `erx_dma_map`, windows `ERX_ENOTSUP` | through a DMA window (M9) |
+| `erx_mem_create_contiguous`, `erx_mem_dma_addr` | a device's one memory for the boot, which the device NIF carves its rings and buffers from, in whichever domain holds the device | service: a create from the root only, first fit from the [contiguous pool](#the-pool), aligned to its size rounded up to a power of two, at most 1 MiB, wholly inside the DMA range the device tree gives the device it is made for ([design-device-tree.md](design-device-tree.md#facts-into-records)), cached, zeroed, and never given back; the domain library passes it to the device's holder, and the root makes one at boot for each device of a kind the system domain holds ([Device records](#device-records)). `dma_addr`, from any task holding the object, is physical address plus offset plus that device's `dma_bus - dma_cpu`, since no device on QEMU `virt` as the harness starts it or on the Pi 4 is behind an IOMMU ([design-device-dma.md](design-device-dma.md#device-addresses-and-reach)) | no such run `ERX_ENOMEM`; `dma_addr` of another kind of object `ERX_ETYPE`, past the object `ERX_ERANGE`; execute `ERX_ERIGHTS`; a create from a task other than the root `ERX_ENOTSUP`; unconfined; `erx_dma_map`, windows `ERX_ENOTSUP` | through a DMA window (M9) |
 | `erx_irq_create`, `erx_irq_bind`, `erx_irq_ack`, `erx_irq_trigger` | device lines, in whichever domain holds the device; a connection's bells; a channel's and a pipe end's doorbells; ERTS's wakes | service: `l4_factory_create_irq`, from any task for a doorbell (`ERX_IRQ_SOFT`); for a line, from the root only, `l4_icu_bind`; a bind to a group, from the root into any group it holds and from another task holding the object only into the group that task is the home of or a group it created, as a session binds a program's doorbell into the program's group ([design-programs.md](design-programs.md#the-channel)), gives the object a free entry of the group, records the label and runs `l4_rcv_ep_bind_thread(irq, dispatcher, entry)` on the group's home task's dispatcher once both exist, a bind again to the same group moves the label, and an unbind runs `l4_irq_detach` ([Interrupts and readiness](#interrupts-and-readiness)); the object's destroy runs `l4_irq_detach`; `l4_irq_unmask`; `l4_irq_trigger`. Every call is a request: no IRQ capability is mapped into a task, and a delivery goes from Fiasco to the dispatcher directly | each label once, the line masked until acked; `erx_irq_route` `ERX_ENOTSUP`; a target that is not a group the caller holds `ERX_ETYPE`, or a thread, `ERX_ENOTSUP` unless [vCPU upcalls](#vcpu-upcalls-on-fiasco) are carried; a bind of a bound object to another group `ERX_ENOTSUP`; from a task other than the root, a bind to a group it neither created nor is the home of, or a bind or an unbind of an object bound to such a group, `ERX_ETYPE`; a group's 65th bound object `ERX_ELIMIT`; a line's second object `ERX_EBUSY`; a line created from a task other than the root `ERX_ENOTSUP`; the resource ignored | by capability, without the root; `BIND` and `TRIGGER` split; route applied |
 | `erx_group_create`, `_configure`, `_info`, `_take_ready` | the adapter's five changes (M3); the domain library's group and sub-space group for each domain; a session's group for each program | service for `create`, from any task under a budget it holds or its own, and for `configure` and `info`, local for `take_ready` in the group's home task: [Budgets and groups as records](#budgets-and-groups-as-records), [Interrupts and readiness](#interrupts-and-readiness). `configure` keeps only the CPU set of the grant in the caller's UTCB, and `info` writes an `erx_info_group` there, with that set as `cpuset` and the home task's status page's `parked` and `ready`, and only their bits of `reported` set, `cpuset`'s only once a set was configured ([Reporting kernel objects](#reporting-kernel-objects)) | correct readiness; everything else `unsupported`; no guarantee, quota or throttling; budget and parent recorded, and a group goes with its budget; every thread of a group runs in one task, its home, so a thread created in another task `ERX_ENOTSUP`; a task's second home group `ERX_ENOTSUP` | grants enforced, usage reported; a group's threads in any space |
 | `erx_park`, `erx_executor_wake`, `erx_yield` | ERTS's schedulers (M3) | local: [The park protocol](#the-park-protocol); `l4_thread_yield` | no lost wake; a worker `ERX_ETYPE` | in the kernel, the executor switched |
@@ -642,10 +653,15 @@ All of this runs on the service, so a page's state changes one call at a time.
 ### The pool
 
 At boot the root takes all RAM from `sigma0` with `l4sigma0_map_anypage(pager, window_cursor, order,
-&phys, order)`: first one 2 MiB superpage for each **contiguous pool** the manifest's device entries
-ask for, recording `phys`; then everything else, at 2 MiB until refused and then 4 KiB until refused.
-`sigma0` maps RAM read, write and execute (`memmap.cc:96,125`). QEMU `virt` is coherent, so cached
-memory serves for devices; the Raspberry Pi 4 is not ([The Raspberry Pi 4](#the-raspberry-pi-4)).
+&phys, order)`: first one 2 MiB superpage, the **contiguous pool**, from which every device's memory is made,
+recording `phys`; then everything else, at 2 MiB until refused and then 4 KiB until refused.
+`sigma0` maps RAM read, write and execute (`memmap.cc:96,125`). Cached memory serves for every device: for one
+that is not coherent, as the Raspberry Pi 4's are not, the device NIF's cache maintenance keeps the CPU and the
+device in agreement ([design-device-dma.md](design-device-dma.md)). The root makes each device's object from its
+catalogue entry, records the entry's `dma_bus - dma_cpu`, read from the device tree the firmware handed over, in
+it, and gives the device no DMA memory, with a line naming the device, its range and the pool's physical address,
+when the entry has no range or the object would lie outside it
+([design-device-tree.md](design-device-tree.md#facts-into-records)).
 
 The window starts at a constant of the backend's address layout, above all RAM, and is never unmapped. The
 window's first pages hold [the range table's page index](#the-range-table), sized from how many pages the window holds,
@@ -1475,7 +1491,7 @@ distinct line its devices name, so the records of devices that share a page or a
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)), and, for a device with DMA memory, the
 device's one contiguous object of that size with `erx_mem_create_contiguous`, each in its own
 table, and adds the same `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE
-CLOCK` record a holder's page carries, below (`liberx/backend/fiasco/runtime_entry.c`, `device_give`;
+CLOCK COHERENT MAC` record a holder's page carries, below (`liberx/backend/fiasco/runtime_entry.c`, `device_give`;
 `erx_boot_device_window` computes the pages and OFFSET). ROLE and PERIPHERAL are the row's names,
 PERIPHERAL the peripheral's name in the CMSIS-SVD source that `erx_device` opens it as; the
 pages, SIZE, the line and MEM_SIZE come from the manifest's device entry: its register window,
@@ -1576,11 +1592,12 @@ device is behind it. A manifest with no such unit has no record, and a machine w
 device boots the same, with nothing for its driver to drive.
 
 A given record, a holder domain's or the root's own, has a word of its own, `-erx given ROLE
-PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK`: the handles of the window, line and
+PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT MAC`: the handles of the window, line and
 memory objects the domain library installed when it created the domain, or the root made for
 itself, the transport's offset and size in the window object, the memory's bytes, 0 for a
-device that does no DMA, and the device's clock, as the `device` form carries it, so a
-given PL011 has its clock as the host link's does. Since each form has its own word, the reader never tells one from
+device that does no DMA, the device's clock, as the `device` form carries it, so a
+given PL011 has its clock as the host link's does, its coherent mark and its hardware address, the last two from
+the device tree the firmware handed over. Since each form has its own word, the reader never tells one from
 the other by counting numbers, and a plain word of the command line after a record cannot
 make one form look like the other.
 
@@ -1859,15 +1876,18 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   from RAM's first address, clear of BL31's reserved memory, the bootable file and the device tree, as the boot probe
   finds them. Where the root maps the kernel information page is part of the backend's address layout, above all RAM
   beside the device window, so no platform record carries it.
-* **Devices.** The Pi's DMA devices are not coherent, so the device NIF's envelope cleans and invalidates as
-  [design-runtime.md](design-runtime.md#the-device-nif) orders for such a device; QEMU `virt`'s are coherent, and
-  their records say so. A Pi device sees RAM through its bus's `dma-ranges`: the SD controller sees the first GiB at
-  bus address `0xC0000000`. Each DMA device's entry in the platform record carries its bus offset and the end of its
-  reach, read from the board's device tree on the host; the device NIF hands the device bus addresses, and the root
-  refuses a boot whose contiguous pool for a device lies beyond that device's reach, with a diagnostic. The firmware's
+* **Devices.** The Pi's DMA devices are not coherent, so the device NIF cleans and invalidates as
+  [design-device-dma.md](design-device-dma.md) orders for such a device; QEMU `virt`'s are coherent, and their
+  records say so, from the device tree QEMU writes. Each DMA device's coherence and DMA range come from the device
+  tree the firmware hands over ([design-device-tree.md](design-device-tree.md)); the device NIF hands the device only
+  addresses `erx_mem_dma_addr` gives through that range, and a device whose range is absent, or whose contiguous
+  memory would lie outside it, gets no DMA memory, with a line naming it. Ethernet sees RAM at the CPU's addresses and gets 1 MiB, 256 receive and 256 transmit buffers of
+  2 KiB, its descriptors being registers. The SD controller gets DMA memory at the range the firmware wrote for the
+  board's revision, which the root reads from the tree. The firmware's
   framebuffer lies in memory the firmware keeps out of the RAM it reports, so it is a physical window of the display
-  domain's record, mapped as device memory, which its writes reach without cache maintenance; the boot probe
-  confirms where it lies.
+  domain's record, mapped as device memory, which its writes reach without cache maintenance; the root takes where
+  it lies, inside the window of its manifest row, and its geometry from the `simple-framebuffer` node, if the firmware adds one, which the board pass
+  confirms ([design-device-tree.md](design-device-tree.md#facts-into-records)).
 * **What the board does not get here.** The kernel's platform items, which M12 brings on erXos's kernel: the
   hardware watchdog is not armed, so a hang of Fiasco or of the root's watchdog thread is caught only by the
   harness's deadline, after which its power is cycled by hand; there is no crash region, so the crash record reaches the

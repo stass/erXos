@@ -498,7 +498,7 @@ the work. ERTS's Erlang-visible behaviour is checked against stock OTP
 | **R5.** A domain's runtime spends only its own budget and grant | every page it uses is committed in its own space and charged to its budget; every thread is in its own group or a child of it | none within the runtime: both are kernel-enforced | the kernel's tests; a test domain that exhausts its budget and its grant |
 | **R6.** A frame reaches ERTS's distribution code only after the funnel accepted it against the export table on the lane it arrived on | the lane port's input task, which ERTS runs under the port's lock, is the only caller of `erts_net_message`, and it calls it only with a frame the funnel returned as accepted, or to have ERTS send the answer or deliver the over-limit exit the funnel chose for a frame it judged; the funnel is the only reader of a lane's ring; the peer's identity is the lane's, never a field of the frame | a second caller of `erts_net_message`; a read of a ring outside the funnel; a frame handed on after a refusal | source checks for both chokepoints, each with a seeded violation; the hostile-peer corpus of [design-domains.md](design-domains.md#the-funnel) replayed into a lane |
 | **R7.** The export table is written at exactly three sites, each an act of the name's owner, and a holder ends with its process or alias | the holders are a field of the name's own record; the writes are the encoder's (edit 8), which adds a peer with `send` alone and only where it holds nothing yet, the spawn-into path's, which gives the spawner every right on its child, and `erx:export/3`'s, which a process of the owning domain calls to set a peer's rights on one of its own names exactly; the only clears are at process exit (edit 13), at an alias's end (edit 14), when its origin monitor leaves its monitor tree or `unalias/1` clears it, which are the one exit path ERTS has and the monitor tree's own functions, and at a connection's end | a fourth writer; an encode that widens a holder's rights; a write on a name the domain does not own; an exit path that skips the clear | a source check that only the three functions write holders, with a seeded fourth; a test that a pid encoded for a peer gives it `send` alone, and that one exported narrowly with `erx:export/3` and encoded again keeps the narrow rights; a test that a frame to an exited pid is answered as to a dead process |
-| **R8.** No device address the runtime gives a device names memory the domain does not hold, and none is reused while the device may still hold it | the device NIF builds every address from a queue's memory object and an offset, checked against the object, and alone writes one: a register the SVD source marks `ownedByNif` refuses `write/3` and `write_field/4`, and `post/4` takes only bytes, lengths and which segments the device writes, never an address, a descriptor field or a flag. A chain's buffer is its head descriptor's, so no two chains in flight share one. Pools and queues are state of the device's record in the NIF for the boot, never of a process, so a driver's crash frees nothing; a posted buffer returns to its pool only through the device's completion or at `negotiate/2`, and after a driver's exit the NIF posts nothing on the device until `negotiate/2`; an unconfined device's memory is the system domain's for the boot and never freed, and a confined device's is freed only after the kernel unbinds it from the device's window | a raw address or offset accepted from Erlang; an address register or an addressing flag written from Erlang; a pool or queue freed with the process that made it; a posted buffer returned to its pool before its completion or a reset; a post after a driver's exit and before `negotiate/2` | the NIF's property tests over post, complete, crash and reset sequences on the hosted backend; a seeded return of a posted buffer before its completion, a seeded post before `negotiate/2`, a seeded write of an owned register and a seeded pool owned by a process each fail the test |
+| **R8.** No device address the runtime gives a device names memory the domain does not hold, and none is reused while the device may still hold it | the device NIF builds every address from the record's memory object and an offset, checked against the object, and alone writes one: a register the SVD source marks `ownedByNif` refuses `write/3` and `write_field/4`, and every address in what `post/4` writes is one the NIF computed, since it takes only bytes, lengths, which segments the device writes and regions of the record, never an address, a descriptor field or a flag. A chain's buffer is its head descriptor's, so no two chains in flight share one. Pools and queues are state of the device's record in the NIF for the boot, never of a process, so a driver's crash frees nothing; a posted buffer returns to its pool only through the device's completion or at `negotiate/2`, and after a driver's exit the NIF posts nothing on the device until `negotiate/2`; an unconfined device's memory is the system domain's for the boot and never freed, and a confined device's is freed only after the kernel unbinds it from the device's window | a raw address or offset accepted from Erlang; an address register or an addressing flag written from Erlang; a pool or queue freed with the process that made it; a posted buffer returned to its pool before its completion or a reset; a post after a driver's exit and before `negotiate/2` | the NIF's property tests over post, complete, crash and reset sequences on the hosted backend; a seeded return of a posted buffer before its completion, a seeded post before `negotiate/2`, a seeded write of an owned register and a seeded pool owned by a process each fail the test |
 | **R9.** No binary aliases memory a device can write | `complete/2` copies each buffer's returned bytes into a fresh binary and returns the buffer to its pool, and the NIF makes no binary over a pool | a resource binary over a pool buffer | a model device on the hosted backend that rewrites a buffer after its completion, after which the binary `complete/2` returned is unchanged |
 | **R10.** The system domain holds no generated machine code, no JIT object and no C++ | it runs the interpreter image, built without BeamAsm, asmjit, libc++ and libc++abi, whose manifest carries no `ERX_IMAGE_JIT`, so its space allows no JIT object and the kernel refuses it one (K8; [design-kernel.md](design-kernel.md#image-manifests)) | a symbol of BeamAsm, asmjit or libc++ linked into the interpreter image; a root image marked `ERX_IMAGE_JIT` | the build check on the interpreter image's symbols, which a seeded asmjit object linked into it fails; the packer's refusal of a root image marked for JIT, which a seeded manifest exercises; a boot test in which a NIF of the system domain asks for a JIT object and gets the kernel's refusal |
 | **R11.** No call stub hands the kernel an address to read or write | every stub is generated from the ABI file, whose argument kinds are register values, UTCB fields and memory windows (a memory object's capability with an offset and a length), and the generator refuses a pointer parameter; only `liberx` issues kernel calls | a hand-written stub; an argument kind the kernel reads through | the generator's test, in which a seeded pointer argument in a test ABI file fails generation; the chokepoint check that only `liberx`'s generated stubs trap, which a seeded hand-written trap fails |
@@ -2443,7 +2443,8 @@ for each line whether another device of its unit names it too, which
 makes the line shared
 ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)),
 its peripheral's name in the CMSIS-SVD source, whether it is
-`dma-coherent`, and which queue layouts of the ABI file it uses.
+coherent, and which descriptor forms of the ABI file it uses
+([design-device-dma.md](design-device-dma.md#device-addresses-and-reach)).
 
 **What the NIF keeps.** The NIF keeps one record for each device the
 domain holds, a small integer its driver names it by, for the boot, since the manifest gives each device one
@@ -2497,10 +2498,18 @@ register without the mark. The NIF owns every register through which a
 driver could aim the device at memory or change what the device expects
 of the rings: for virtio-mmio the status, the feature selectors and the
 driver's features, the queue selector, size, ready bit and doorbell, and
-the rings' base addresses. `write/3` and `write_field/4` refuse an owned
+the rings' base addresses. The mark may instead sit on single fields of a
+register, and then `write/3` and `write_field/4` refuse, `badarg`, a write
+that would change an owned field from what the register holds; the
+rule, and GENET's and SDHCI's owned registers and fields, are in
+[design-device-dma.md](design-device-dma.md#register-ownership). `write/3` and `write_field/4` refuse an owned
 register with `badarg`, so only the NIF's own sequences write one
 (`negotiate/2`, `post/4` and `command/2`), with values and addresses it
-built itself; a driver may still read one. Only `erx_device.c` holds the raw accessors, so
+built itself; a driver may still read one. Every `write/3` and `write_field/4`
+takes the device lock that the queue calls hold, so no driver write, a reset
+included, lands inside one of those sequences
+([design-device-dma.md](design-device-dma.md#register-ownership)).
+Only `erx_device.c` holds the raw accessors, so
 nothing else in C can store to an owned register either; its sequences
 name owned registers by the index `tools/gen_hw.rb` gives each in
 `erx/hw/device_owned.h`, which a chokepoint keeps in that file. A read or write is one
@@ -2527,11 +2536,17 @@ contiguous memory object, the `memory => {object, Memory, Bytes}` the
 domain was given with the device, which is the device's for the whole
 boot. Each queue takes its rings at the first page no earlier queue
 took and its pool at the page after them, so no two queues share a
-page and no queue makes memory of its own; a queue past the object's
-end is `{error, erange}`, taking nothing. It returns `{ok, Q}`, the queue's name in
+page and no queue makes memory of its own. For a device that is not
+coherent, each ring part one side writes starts on a cache-writeback
+granule and the buffers lie at a stride of `BufferSize` rounded up to
+it, so no cache line holds bytes of two writers; a descriptor form whose
+rings are the device's registers takes no ring memory
+([design-device-dma.md](design-device-dma.md#the-construction-handoffs-of-granules)).
+A queue past the object's end, or one with a device address its
+descriptor form cannot hold, is `{error, erange}`, taking nothing. It returns `{ok, Q}`, the queue's name in
 that record; the same queue again is that queue again, posted buffers
 and all, so a restarted driver finds it. Every buffer the device ever
-addresses is a range of a pool, and every device address is built by the
+addresses is a range of a pool or a region, and every device address is built by the
 NIF from the memory object and an offset, through `erx_dma_map`'s I/O
 address or `erx_mem_dma_addr`, and never given to Erlang. A queue is on
 the device only once `negotiate/2` has installed it: the device's
@@ -2545,23 +2560,51 @@ queue's own bookkeeping, `erx_device_queue`, hands out heads only from
 its free list, so no two chains in flight share a buffer and no buffer is
 handed out but by a post: the property needs no record of its own.
 
+**Regions.** `erx_device:region(Dev, Index, Bytes)` takes, for the
+record's region `Index`, `Bytes` rounded up to whole pages of the memory
+the record holds, by the rule queues use: at the first page nothing
+earlier took. Queues and regions thus share one allocator, and a
+restarted driver that repeats its calls gets the same region. It returns
+`{ok, R}`, the region's name in that record. A region is kept for the
+boot and never posted: no transfer hands it over, and the device reads
+it whenever a request names it, as a virtio-gpu resource's backing is
+read ([design-display.md](design-display.md#the-display-device)). The
+same `Index` again with the same `Bytes` is that region again, and with
+different `Bytes` `badarg`; a region past the object's end is
+`{error, erange}`, taking nothing. On a device that is not coherent the
+call is `{error, enotsup}`: since no transfer names the region, nothing
+would clean it before the device reads it
+([design-device-dma.md](design-device-dma.md#the-construction-handoffs-of-granules)).
+Erlang writes a region only through `erx_memdraw:wrap/4`, which makes an
+image over it, and no address or offset of it reaches Erlang; a request
+names it by the `out` segment `{region, R}` (Posting, below).
+
 **Posting.** `erx_device:post(Dev, Q, Tag, Segments)`, where `Segments`
-is a list of one to four `{out, Binary}` and `{in, Length}`, every `out`
+is a list of one to four `{out, Binary}`, `{out, {region, R}}` and `{in, Length}`, every `out`
 before every `in`, makes one request in one call: the NIF lays the
 segments end to end in the buffer of the next free head, copies each
-`out`'s bytes in, the one per-byte copy of a transmit path, and has
+`out`'s bytes in, the one per-byte copy of a transmit path, zeroes every
+other byte of the buffer, so what a completion copies is the device's
+bytes or zeros, and has
 `erx_device_queue` decide the descriptors, whose layout the ABI file
-fixes. Each descriptor's address, length and link, and every flag that
+fixes. An `out` of `{region, R}`, where `R` is a region of the same
+record and otherwise `badarg`, is written as the record's region entry:
+the region's device address and length in the layout the record names,
+as it names its descriptor forms, from a closed set whose one member is
+`erx_virtio_gpu_mem_entry` of `abi/formats/virtio.txt`; so a request
+names a region's memory and no address or offset reaches Erlang. Each descriptor's address, length and link, and every flag that
 makes the device fetch an address, such as virtio's `NEXT` and
 `INDIRECT`, are the NIF's alone; the driver chooses only which segments
 the device writes, so no descriptor can aim the device at a table, a
 chain or a buffer the NIF did not build. The NIF then writes the plan
 whole, since the queue counts it made once decided: the descriptors, the
-available entry, a barrier, the available index, the cache maintenance
-the envelope's plan orders for a device that is not coherent (a clean
-before the device reads, a clean and invalidate before and after it
-writes, never an invalidate alone), a barrier, and the queue's doorbell
-register by name. No step after the decision can fail. A driver never
+available entry, the available index and the queue's doorbell register
+by name, with the cache maintenance and barriers the envelope's
+sequencer derives from the plan for the record: for a device that is not
+coherent every region handed to the device cleaned, then a barrier
+before the available index, which is itself cleaned, and another before
+the doorbell; for a coherent device the barriers alone
+([design-device-dma.md](design-device-dma.md#calls-observations-and-plans)). No step after the decision can fail. A driver never
 holds a buffer: there is nothing to take, fill and post in turn, so no
 order of calls can leave a buffer taken and not posted. `Tag`, below
 2^64, comes back with the completion. A queue with too few free
@@ -2597,8 +2640,13 @@ halves of one word, is written, so the SVD source marks that register
 `ownedByNif` and `erx_device:command(Dev, Word)`, a BIF, is the one way
 to write it: one 32-bit write of `Word` to the register, `ok`, and
 `badarg` on a record whose peripheral is not `sdhci` or for a word whose
-transfer mode enables DMA (`SDHCI_TRNS_DMA`, bit 0), so no command
-starts a DMA transfer until DMA's design gives the NIF one. Which
+transfer mode enables DMA (`SDHCI_TRNS_DMA`, bit 0) unless the record's
+ADMA2 queue is armed, the word matches what was posted and the
+controller's fields the transfer relies on read back as installed and
+posted, which it checks under the device lock, and while that queue is
+armed or in flight it issues no other word
+([design-device-dma.md](design-device-dma.md#the-three-descriptor-forms)),
+so no command starts a DMA transfer the NIF did not set up. Which
 module may call it is the block driver's write-path rule
 ([design-storage.md](design-storage.md#data-model), U4).
 
@@ -2623,12 +2671,20 @@ ahead of the chains in flight, an entry naming no posted head or a
 length beyond the chain, breaks the queue: the entries before it are
 still returned, and from then on `post/4` and `complete/2` on it are
 `{error, broken}` until `negotiate/2`, so a malformed completion never
-frees a buffer the device may still write.
+frees a buffer the device may still write. For a device that is not
+coherent, the NIF cleans and invalidates what the device wrote before it
+reads it: the used index first, then the entries and each buffer's bytes
+it copies, once the index says they are done; GENET's register ring and SDHCI's
+ADMA2 table complete in their own forms, with the same answers
+([design-device-dma.md](design-device-dma.md#the-three-descriptor-forms)).
 
 **The reset rule.** A posted buffer belongs to its queue until the
 device returns it: it goes back to its pool only through `complete/2` or
 when the NIF itself resets the device, in `erx_device:negotiate(Dev,
-Wanted)`. That one call runs virtio's initialisation (section 3.1.1 of
+Wanted)`, which for every descriptor form is the form's reset, the
+device's report that it holds no descriptor, then the install
+([design-device-dma.md](design-device-dma.md#the-three-descriptor-forms));
+virtio's is described here. That one call runs virtio's initialisation (section 3.1.1 of
 the specification) whole, so no driver orders its steps. It marks every
 queue of the device not ready, so from then on nothing is posted on it or
 completed from it; writes 0 to the status and reads it back as 0, else
@@ -2647,7 +2703,11 @@ every queue of the device as one plan; and sets DRIVER_OK, returning
 go (virtio's ready bit reads 0, as the reset makes it) and offers its
 size, and only once every queue passes returns every posted buffer to its
 pool, zeroes the rings, and writes the size, the base addresses and,
-last, the ready bit. A queue the device still holds is `{error, ebusy}`
+last, the ready bit; the zeroed rings pass to the device through the
+DMA sequencer, which cleans them before those writes on a device that
+is not coherent
+([design-device-dma.md](design-device-dma.md#calls-observations-and-plans)).
+A queue the device still holds is `{error, ebusy}`
 and one larger than the device offers `{error, erange}`, each with
 nothing of any queue installed. A failure after the reset sets FAILED and
 leaves every queue of the device `{error, broken}` until a later

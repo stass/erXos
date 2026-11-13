@@ -524,9 +524,11 @@ it; git history is the record of completed work.
   (`queue_create/4`, `negotiate/2`) does not depend on it.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, queues: every device is taken as `dma-coherent`, with no cache
   maintenance, and the barriers before the available index and the doorbell are C11 fences (inner shareable on AArch64),
-  enough for QEMU `virt`'s virtio-mmio. A non-coherent device, the Raspberry Pi's, needs the record's coherence flag
-  (from the device service) and the envelope's clean and invalidate, and an outer-shareable barrier behind the
-  architecture layer.
+  enough for QEMU `virt`'s virtio-mmio. [design-device-dma.md](docs/design-device-dma.md) gives what is missing: the
+  coherence and DMA range the root reads from the live device tree into the `given` record
+  ([design-device-tree.md](docs/design-device-tree.md)), the handoff sequencer and
+  the architecture layer's maintenance and barriers, field-level register ownership, and the register-ring (GENET) and
+  ADMA2 (SDHCI) descriptor forms.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
   a display driver's screen image is an `erx_memdraw` image over memory the device reads again and again (a virtio-gpu
   resource's backing, a framebuffer), and on the direct path the driver maps a client's pixel area read-only into its
@@ -543,6 +545,8 @@ it; git history is the record of completed work.
   bytes as an answer (a display-info answer of 408 bytes with only its header written decodes as 16 stale scanouts).
   Zero the `in` segments in the post's copy. Separately, `erx_virtio_gpu_core:mode/2` bounds scanout 0 only by the
   memory given; bound its width and height by `erx_memdraw`'s limits once `wrap/4` sets them.
+  on the direct path the display driver maps a client's pixel area read-only into its device's DMA window, and the
+  device NIF has no call for it: it needs the mapping of an area into the DMA window, before the direct path.
 * [High] [design-apps.md](docs/design-apps.md): the code the design asks for, in the order
   [Track A](docs/plan.md#track-a-apps) builds it. Built: the `start` rows and property 17's structural clauses and
   its planning clause (root's console session and each enabled row's session planned by the domain library beside
@@ -5199,6 +5203,11 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] device NIF, virtio-gpu requests on an unconfined device
+  ([design-runtime.md](docs/design-runtime.md#the-device-nif), Regions): the NIF writes the region entries a request
+  names, but does not parse GPU commands, so a driver can still put any 64-bit address in a payload, as an
+  `{out, Binary}` entry address or an overstated `nr_entries`, and the device will read it. On Phase 1's unconfined
+  devices that reaches any memory; it closes with confinement, when the device's window bounds what it reads.
 * [Medium] apps, the reset count ([design-apps.md](docs/design-apps.md#keeping-a-session)): the first session a
   start row keeps clears the count when it reports ready, which can come before its applications have done any
   work, so a system fault that follows every boot by a little never reaches the rescue configuration. Move the
@@ -5734,6 +5743,12 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Medium] `kernel/core/dt.c`, the DMA walk ([design-device-tree.md](docs/design-device-tree.md#the-reader),
+  [design-kernel.md](docs/design-kernel.md#dma-and-the-iommu)): a level whose addresses take three cells, a PCI
+  bus's, gives the device no DMA range, since the Devicetree Specification leaves those cells to the PCI bus
+  binding (v0.4, section 2.4.4, p. 22). An unconfined PCIe function that needs DMA, the Pi 5's RP1 devices
+  first, needs the binding read from its specification and the walk extended to its encoding, with a fixture of
+  the BCM2711's and the BCM2712's bridge `dma-ranges`.
 * [Medium] erx_domain boot order (`erlang/apps/erx_domain/src/erx_domain_srv.erl`, `handle_continue/2`;
   [design-system.md](docs/design-system.md#boot)): the domain service starts every configured domain at once
   in the manifest's boot order, so on one CPU the runtimes slow each other and the login waits for the slowest.

@@ -2441,8 +2441,10 @@ implements the same protocol, so no step is specific to one loader
    name the boot slot, which firmware that boots one of two slots writes
    and the platform binding names,
    [design-platforms.md](design-platforms.md#data-model)). It walks the
-   tree with `libfdt`, whose traversal is iterative and checks bounds at
-   every step, behind this one file. The kernel keeps the boot value, its
+   tree with `libfdt`, whose traversal is iterative and, compiled with
+   `FDT_ASSUME_MASK` 0, checks bounds at every step, behind this one file
+   and the reader it shares with the root task, `kernel/core/dt.c`
+   ([design-device-tree.md](design-device-tree.md#the-reader)). The kernel keeps the boot value, its
    slot and any lease's deadline in its own data from here on; the crash
    record and the end funnel read them there, and the machine page is a
    copy of them. Until this step they hold `unknown`, slot `none` and no
@@ -2763,7 +2765,14 @@ root group and its `system` child, the root resource, the boot image (with
 which no other space ever receives, since its rights ([Rights](#rights))
 carry neither `DUP` nor `GIVE`, the **machine page**, and the **previous
 crash record**, a read-only object of `ERX_CRASH_SIZE`, when the boot
-found one (below), else `ERX_CAP_NULL` in its slot. Its own space and thread
+found one (below), else `ERX_CAP_NULL` in its slot, and the **device
+tree**, a read-only object over the pages that hold the tree the loader
+handed over, with `/chosen`'s `rng-seed` and `kaslr-seed` zeroed first,
+whose rights carry neither `DUP` nor `GIVE`; it is charged to no budget,
+since its pages were never the allocator's, and the root task reads
+devices' coherence, DMA ranges, hardware addresses and the firmware's
+framebuffer from it ([design-device-tree.md](design-device-tree.md)).
+Its own space and thread
 and the two groups are installed with their kinds' whole default rights,
 `DESTROY` among them, as any creation returns them. That is intended: deleting
 its own space stops the first space, and deleting either group kills the root
@@ -2786,6 +2795,7 @@ The machine page is a read-only page in a layout of its own in the ABI file,
 | 32 | `cpu_count`, u32 | the CPUs found |
 | 36, 40, 44 | `watchdog_period_s`, `watchdog_deadline_s`, `watchdog_boot_s`, u32 | the three values of `erx.watchdog` |
 | 48 | `build_id`, 8 bytes | the build identifier |
+| 56, 60 | `tree_offset`, `tree_size`, u32 | where the device tree starts in the device tree object's first page, and its length |
 
 The kernel writes every field before the root task starts and changes none
 after: a lease is taken at boot and held until the machine ends ([The machine
@@ -7092,27 +7102,51 @@ other than the CPU's, where a physical address would be wrong
 ([design-platforms.md](design-platforms.md#dma)).
 
 * **Ranges.** `erx_dma_ranges(device, limit)`, a pure function of the
-  device tree, gives a device's DMA ranges: each a range of RAM and the
-  device address at which the device sees its start. It reads
-  `dma-ranges` as Linux does (`of_dma_get_range` and
-  `of_dma_configure_id`,
-  [research](research-boards-storage.md#linuxs-reading-of-dma-ranges)):
-  walking up from the device's bus, a level with an empty `dma-ranges`
-  passes addresses unchanged, and the first level with a non-empty one
-  defines the ranges, whose parent addresses translate to CPU addresses
-  through every level above; a level without the property, once the walk
-  has passed the device's own bus, or a walk that reaches the root without
-  a defining level, leaves the device's addresses equal to the CPU's. It
-  keeps only ranges backed by RAM, so a PCIe bridge's loopback and MSI
-  windows drop out, and it cuts every range below `limit`, the highest
-  device address the driver says its device can generate, which can only
-  narrow the result. Its host tests use the trees of every platform
+  device tree in `kernel/core/dt.c`, which the root task's reader shares
+  ([design-device-tree.md](design-device-tree.md#the-reader)), gives a
+  device's DMA windows, at most `ERX_DT_WINDOWS_MAX` of them: each a
+  range of CPU addresses and the device address at which the device
+  sees its start, the device's translation rather than a list of
+  memory. It reads
+  `dma-ranges` as the Devicetree Specification v0.4 defines it (section
+  2.3.9, p. 16): on a bus node, each entry maps a range of the bus's
+  addresses, in the node's own `#address-cells`, to its parent bus's
+  addresses, in the parent's `#address-cells`, over a length in the
+  node's own `#size-cells` (section 2.3.5, p. 14, for the cells and
+  their defaults of 2 and 1); a count other than 1 or 2, a PCI bus's
+  three among them, whose meaning the specification leaves to the PCI
+  bus binding (section 2.4.4, p. 22), gives the device no windows. The
+  walk goes up from the device's bus, the parent of its node or, for a
+  PCIe function, its host bridge's node, whose own `dma-ranges` is the
+  first level, to the root, and carries the device's windows through
+  every level, starting from one window that maps every address to
+  itself: a non-empty `dma-ranges` translates them, and the parts no
+  entry covers drop out; an empty one passes them unchanged, as an empty
+  `ranges` does (section 2.3.8, pp. 15-16). A level that would leave more
+  than `ERX_DT_WINDOWS_MAX` windows gives the device none, which bounds
+  the walk's work. The specification does not say what a
+  level without the property means. A level without it passes addresses
+  unchanged when no level above it has a non-empty `dma-ranges`, so a
+  walk with no non-empty level leaves the device's addresses equal to
+  the CPU's; a level without it below a non-empty one makes the device's
+  windows malformed, and the device gets none, rather than one of two
+  readings the specification does not choose between. FreeBSD
+  14.1.0 reads no `dma-ranges`; its translation of `reg` through
+  `ranges` takes a missing property as unchanged addresses, more
+  liberally than the specification, which says a bus without `ranges`
+  maps nothing (`sys/dev/ofw/ofw_subr.c:120-170`, comment at `:123-130`).
+  It keeps only windows that RAM backs at least in part, whole, so a
+  bridge's loopback and MSI windows drop out while a window through
+  which the device sees RAM keeps its true extent, and it cuts every
+  window below `limit`, the highest device address the driver says its
+  device can generate, which can only narrow the result. Its host tests use the trees of every platform
   ([design-platforms.md](design-platforms.md#dma)) and a fixture tree for
   each case of the walk.
 * **Objects.** `erx_mem_create_contiguous(budget, resource, size, limit)`
-  allocates inside one range of the device the resource names, so the
-  object's device addresses are contiguous, and fails with `ERX_ENOMEM`
-  when no range has room. It draws only from the **contiguous pool**,
+  allocates inside one window of the device the resource names, from the
+  contiguous pool's RAM that the window covers, so the object's device
+  addresses are contiguous, and fails with `ERX_ENOMEM` when no window
+  has room. It draws only from the **contiguous pool**,
   `erx.dma_pool` bytes of the lowest RAM that the kernel sets aside at
   boot, before it makes the root budget, and that no other allocation
   uses, so ordinary allocations cannot take the memory that devices with
@@ -7134,7 +7168,9 @@ other than the CPU's, where a physical address would be wrong
   not `dma-coherent` it allocates whole cache-writeback granules, whose
   size the CPU reports, so no cache line holds a byte of another object.
   `erx_mem_dma_addr(mem, offset)`, which needs `PHYS`, returns the
-  device's address for an offset in it.
+  device's address for an offset in it, through the device's range,
+  which the device's record carries from the same walk over the same
+  tree ([design-device-dma.md](design-device-dma.md#device-addresses-and-reach)).
 * **Lifetime.** An unconfined device can write its memory whatever any
   table says, so nothing a device may still write is ever freed: the
   system domain's device service creates every contiguous object from its
@@ -7174,13 +7210,15 @@ native shim in a sub-space
 `erx_mem_dma_addr` on contiguous memory, for an unconfined one; cache
 maintenance by virtual address in user mode, where the architecture allows
 it ([design-arch-aarch64.md](design-arch-aarch64.md#cache-maintenance)): a
-clean before a device reads a buffer, and a clean and invalidate both
-before a device writes a buffer, so no dirty line can later be evicted
-over what the device wrote, and after, but never an invalidate alone, so a
-driver can never discard data it did not write; skipped for a device the
-device tree marks `dma-coherent`, and ended with a barrier before the
-envelope writes the device's doorbell, so the device sees the maintained
-data; and the device's IRQ objects, acknowledged as their kind requires
+clean of every region handed to a device, for it to read or to write, so
+no dirty line can later be evicted over what the device wrote, and a
+clean and invalidate of what the device wrote before the CPU reads it,
+but never an invalidate alone, so a driver can never discard data it did
+not write; none for a device whose record marks it coherent; with a
+barrier before the envelope writes the device's doorbell, so the device
+sees the maintained data
+([design-device-dma.md](design-device-dma.md#the-construction-handoffs-of-granules));
+and the device's IRQ objects, acknowledged as their kind requires
 ([IRQ objects](#irq-objects)).
 
 ### The reaper
@@ -8894,7 +8932,7 @@ and its binding document; nothing above the architecture layer changes.
 | Component | Purpose | Licence | Status |
 | --- | --- | --- | --- |
 | Fiasco kernel `50bbe8a9`, with `bootstrap` `a4f4ad18`, `sigma0` and `l4sys` from `l4re-core` `e2e2d5af`, `libfdt` `5756062b` and `mk` `22cc26e5` | the stopgap kernel behind this interface | MIT (each package's `LICENSE.spdx`), with the GPL and LGPL parts listed above excluded, except the GPL-2.0 `kobject_rpc.h` and `jdb_object.cpp`, which the kernel needs, so no stopgap build is distributed outside the project; capstone in the kernel debugger is BSD-3-Clause-Attribution; the link closure of `bootstrap` and `sigma0` recorded at import | stopgap, replaced by erXos's kernel |
-| libfdt | device-tree parsing in erXos's kernel | BSD-2-Clause (dual GPL-2.0-or-later) | permanent |
+| libfdt | device-tree parsing in erXos's kernel and the root task's reader | BSD-2-Clause (dual GPL-2.0-or-later) | permanent |
 | BLAKE3's official C implementation | the boot image's index and file hashes, in its portable form in the kernel and `bootstrap` ([The boot image](#the-boot-image)) | CC0-1.0, Apache-2.0 or Apache-2.0 WITH LLVM-exception, used under Apache-2.0 WITH LLVM-exception | permanent |
 | Arm's machine-readable A-profile architecture specification | the source of the AArch64 port's `hw/sysreg/aarch64.json` ([design-arch-aarch64.md](design-arch-aarch64.md#hardware-register-sources)) | BSD-3-Clause | permanent, as a pinned input of `tools/erx sysreg refresh`, which alone reads it |
 
@@ -9741,7 +9779,13 @@ records a call in progress keeps, which [Security](#security) bounds
 * seL4, https://github.com/seL4/seL4, master:
   `include/object/structures.h` (read 2026-10-30).
 * FreeBSD `_umtx_op(2)` and `sys/kern/kern_umtx.c`, for the umtx
-  interface.
+  interface; FreeBSD 14.1.0 (`release/14.1.0`) `sys/dev/ofw/ofw_subr.c`
+  (SHA-256 `aba7bd8742f3dcf5f04d7c4d4435d50571a0a4a28ff4a83050fa9b7d337b1b0c`),
+  for the translation of `reg` through `ranges`.
+* Devicetree Specification, release v0.4
+  (`https://github.com/devicetree-org/devicetree-specification/releases/download/v0.4/devicetree-specification-v0.4.pdf`,
+  SHA-256 `c141dd78af0971fffed19433f84af5beab6aa058cfff2e33076805cef9f92e02`),
+  sections 2.3.5, 2.3.8 and 2.3.9, for the DMA walk.
 * The architecture's and the boards' specifications, Linux's sources for
   their conventions, and the firmware the boards run:
   [design-arch-aarch64.md](design-arch-aarch64.md#references) and

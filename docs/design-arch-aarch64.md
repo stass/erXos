@@ -668,15 +668,39 @@ Architecture Reference Manual prescribes for code written at one address
 and executed at another. When the kernel fills
 a page of an object whose ceiling includes execute, it cleans the data
 cache and invalidates the instruction cache over the page before any
-mapping reaches it. The device NIF's DMA envelope in `liberx`, the C under
-every Erlang driver, cleans with `DC CVAC` before a device reads a buffer
-and cleans and invalidates with `DC CIVAC` both before a device writes a
-buffer and after; `DC IVAC` is not available at EL0, so a driver can never
-discard data it did not write. It skips both for a device the device tree
-marks `dma-coherent` and ends with a `DSB` before it writes the device's
-doorbell register. Contiguous memory for a device
-that is not `dma-coherent` is allocated in whole cache-writeback granules
-(`CTR_EL0.CWG`).
+mapping reaches it.
+
+The device NIF's DMA envelope, the C under every Erlang driver,
+follows the handoff rules of
+[design-device-dma.md](design-device-dma.md#the-construction-handoffs-of-granules)
+with these instructions, all to the point of coherency, as FreeBSD's
+arm64 `busdma` issues them for a tag that is not coherent
+(`sys/arm64/arm64/busdma_bounce.c:1027-1180`, `cpufunc_asm.S:52-80` at
+release 14.1.0):
+
+| Generic step | AArch64 |
+| --- | --- |
+| the granule | `4 << CTR_EL0.CWG` bytes, read once at EL0 under `UCT`; 2 KiB where `CWG` is 0 ([open decision 2](design-device-dma.md#open-decisions)) |
+| the line | `4 << CTR_EL0.DminLine` bytes, the smallest data cache line, read with it (Cortex-A72 TRM, Table 4-40; FreeBSD's `identcpu.c:2780-2790`) |
+| clean, when handing a region to a device | `DC CVAC` at every line of the region, stepping by the line |
+| clean and invalidate, when taking a region back | `DC CIVAC` at every line of the region, stepping by the line; `DC IVAC` is not available at EL0, so a driver can never discard data it did not write |
+| the publish barrier | `DSB SY` after maintenance; for a coherent device `DMB SY`, which orders the loads of a buffer just copied out as well as the stores before the register store |
+| the report barrier | `DMB SY` after the load of the device's report, for every device: a `DMB` meant to order cache maintenance must order loads and stores both (Arm 102336 version 1.0, section 5, p.13) |
+| the completion barrier | `DSB SY` after the `DC CIVAC`s, before the loads that read what they took back |
+
+The barriers are full-system, as FreeBSD's DMA barriers are
+(`busdma_bounce.c:1097-1102, 1175-1180`; `atomic.h:51-56`). The
+register stores that follow a publish barrier reach one device in
+program order, since both device attributes forbid reordering. A
+data cache instruction by address reaches every cache of the inner
+shareable domain, so the CPU that issues it need not be the one whose
+cache holds the line. A `DSB` completes the maintenance of the CPU that
+executes it only, so the `DSB SY` of every exit from EL0
+([Asynchronous errors](#asynchronous-errors)) is what completes a
+thread's outstanding maintenance before the thread can resume on another
+CPU; on the stopgap, which has no such barrier, no thread is moved while
+it makes a device call
+([design-device-dma.md](design-device-dma.md#concurrency)).
 
 ### Asynchronous errors
 

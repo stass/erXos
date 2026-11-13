@@ -1157,8 +1157,9 @@ A display driver is an Erlang process over the device NIF implementing
 
 `info/1` names the **screen image**, an `erx_memdraw` image of the
 display's size and channel over memory the driver chose: the backing of
-a virtio-gpu resource, which is a region of the device's record in the
-NIF; the framebuffer a board's firmware set up; or, for a panel on a
+a virtio-gpu resource, which is a region of memory the device's record
+holds in the NIF ([design-runtime.md](design-runtime.md#the-device-nif),
+Regions); the framebuffer a board's firmware set up; or, for a panel on a
 serial bus, memory of the driver's own. `erx_screen` composes into it,
 and nothing else writes it.
 
@@ -3708,7 +3709,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
 | Only the functions that walk a checked rectangle touch pixel memory: `libmemdraw`'s draw, load, unload, cload and allocation, and `erx_memdraw`'s snapshot | `memdraw-pixels`: `bdata`, `byteaddr` and `wordaddr` appear only in their files, so a shape, the NIF or new code that writes pixels itself fails the build |
 | Only an image resource's destructor frees an image a term can reach or lets go of the memory it lies over | `memdraw-free`: `erx_memdraw_free` is called only from the NIF, by `image_dtor` and by the test-only `cload` for the image it made itself |
 | Only the connection agent, `erx_connections`, maps a pixel area, so every mapping is one the agent waits for before it answers that the connection is unmapped, and the display's mapping is the read-only one the agent asked for | `area-mappers` (tools/lib/erx/area_mappers.rb), over the Erlang sources of `otp/` and `erlang/`: outside `erx_area` and `erx_connections`, the atom `erx_area` appears only as the module of `open/1` and of the type `area()`, so `map/4` as a call, a fun, an apply's arguments, an import, a macro, a literal or a string fails the build |
-| Only `erx_memdraw:wrap/4` makes an image over memory `erx_memdraw` did not allocate, and only after checking the range | a source check over the NIF: the one site that sets an image's data pointer from an area or a device's region |
+| Only `erx_memdraw:wrap/4` makes an image over memory `erx_memdraw` did not allocate, and only after checking the range | a source check over the NIF: the one site that sets an image's data pointer from an area or a device's region ([design-runtime.md](design-runtime.md#the-device-nif), Regions) |
 | Only `erx_screen` writes the screen image, makes images over clients' pixel areas, and calls the display driver's `flush/3` and `power/2` | an xref check over the display release |
 | Calls run window to `erx_screen` to driver: `erx_screen` makes no call to a window, and the driver none to `erx_screen` or a window | the same xref check, over calls and `gen_server:call` targets |
 | Only the display driver's process calls `erx_device`'s functions on the display device | the same xref check |

@@ -317,8 +317,11 @@ interrupt on GIC SPI 126, and a clock of the SoC's clock controller with
 no frequency in the tree (Linux 6.18's `bcm2711.dtsi:418-432`). Its
 device-kinds row makes its record `block sdhci`, and the block driver
 drives it by programmed I/O
-([design-storage.md](design-storage.md#the-sd-host-controller)), so its
-unit needs no DMA memory until DMA's design gives it some. The tree
+([design-storage.md](design-storage.md#the-sd-host-controller)) until
+its record carries DMA memory, which it does on both kernels at the range
+the firmware sets for the board, read from the tree the firmware hands
+over ([design-device-tree.md](design-device-tree.md),
+[design-device-dma.md](design-device-dma.md#device-addresses-and-reach)). The tree
 marks its card-detect line broken and gives the card's supply and its
 I/O voltage as regulators on the firmware's GPIO expander
 (`bcm2711-rpi-4-b.dts:26-48, 190-196`), which no domain reaches (PL2):
@@ -538,10 +541,26 @@ a release build's system manifest for either names each one it gives and
 gives its unit
 a domain of its own. DMA devices see memory through the `dma-ranges` of
 their buses: on the Pi 4 the SD controller and the legacy peripherals see
-the first GiB of RAM at bus address `0xC0000000`, and PCIe sees 3 GB,
-which the kernel derives from the device tree as Linux does
-([design-kernel.md](design-kernel.md#dma-and-the-iommu),
-[research](research-boards-storage.md#checks-against-local-copies)). The
+the first GiB of RAM at bus address `0xC0000000` in Linux's tree
+(`bcm2711.dtsi:45, 424`), Ethernet, on `scb`, which has no `dma-ranges`,
+sees RAM at the CPU's addresses (`bcm2711.dtsi:545-594`), and PCIe sees
+3 GB ([research](research-boards-storage.md#checks-against-local-copies))
+through its bridge's `dma-ranges`, whose PCI addresses take three cells,
+which the walk of
+[design-kernel.md](design-kernel.md#dma-and-the-iommu) does not read, so
+an unconfined PCIe function behind it gets no DMA range; the VL805
+behind the Pi 4's bridge is driven by no domain. The
+firmware rewrites the SD controller's range according to the SoC's
+revision, which the tree's `emmc2bus` alias asks of it
+(`bcm2711.dtsi:411-417`, `bcm2711-rpi.dtsi:14`), so only the tree the
+firmware hands over at boot gives that range for a given board. No
+device in Linux's tree for the Pi 4 is `dma-coherent`, so every DMA device
+of the board needs the device NIF's cache maintenance; QEMU `virt` marks
+every virtio-mmio node `dma-coherent`, and its DMA is coherent. Each DMA
+device's record carries its coherence and its range, read at boot from
+the tree the firmware hands over, on the stopgap as on erXos's kernel
+([design-device-tree.md](design-device-tree.md),
+[design-device-dma.md](design-device-dma.md#device-addresses-and-reach)). The
 contiguous pool, from the lowest RAM, serves devices with an address
 limit, such as the Pi 4's legacy DMA below 1 GiB. The `dma-ranges` reader
 is host-tested with the trees of QEMU `virt`, both BCM2711 steppings and

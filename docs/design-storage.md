@@ -294,7 +294,9 @@ per transport, build a type or a command that writes the medium (virtio's
 `OUT`; SD's CMD24 and CMD25), and each calls the one trial check first.
 The transfer-mode half of every command word it builds leaves DMA off,
 and `erx_device:command/2` refuses a word that turns it on, so no
-command starts a DMA transfer; DMA's design is pending.
+command starts a DMA transfer. DMA through the controller's ADMA2 tables
+is [design-device-dma.md](design-device-dma.md#the-three-descriptor-forms)'s,
+for a later mode of this driver.
 
 Since the NIF refuses the register to `write/3`, a module that holds
 the register's name, in a map, a table or a message, still cannot issue
@@ -590,7 +592,13 @@ below it.
 register set of the SD Host Controller Specification's version 3.00, on
 the card protocol of the Physical Layer Specification. Its first mode
 moves data by programmed I/O through the controller's data port at
-default speed; DMA's design is pending, and nothing below turns DMA on.
+default speed, and nothing below turns DMA on; a later mode moves data
+through ADMA2 tables as
+[design-device-dma.md](design-device-dma.md#the-three-descriptor-forms)
+describes, when the controller's record carries DMA memory, which it
+does on both kernels when the device tree the firmware hands over gives
+EMMC2 a range ([design-device-tree.md](design-device-tree.md)), and the
+controller's capabilities offer ADMA2.
 The specifications are cited by version, section and printed page:
 "Physical Layer" is the Physical Layer Simplified Specification,
 version 9.10, and "Host Controller" the SD Host Controller Simplified
@@ -666,7 +674,11 @@ command, so the transfer mode is only ever written with its command, and
 `blksizecnt` is written just before it (points 2 and 3). The device NIF
 owns `dma_address`, `adma_address` and `cmdtm`: a programmed-I/O driver
 never writes the first two, and the third only through
-`erx_device:command/2` ([The write path](#data-model)). The driver keeps
+`erx_device:command/2` ([The write path](#data-model)). It owns the stop
+at block gap and continue requests in `control0` always, and while an
+ADMA2 transfer is in flight `blksizecnt` and the transfer's end in
+`interrupt` and `irpt_mask` too
+([design-device-dma.md](design-device-dma.md#register-ownership)). The driver keeps
 the version 3.00 register set on a later controller: host version 4
 enable and preset value enable stay clear, as the reset for all leaves
 them (Host Controller p.96-100), so `0x00` stays the SDMA
@@ -1025,7 +1037,7 @@ runs the card at 25 MHz with the 6 us spacing and once without it,
 verifying every block read against what was written; and records whether
 anything else answers inside EMMC2's 4 KiB page. The SoC's core clock,
 the firmware's expander calls and the `dma-ranges` the firmware passes
-are recorded for DMA's design and for a driver that would power-cycle
+are recorded for DMA (the root prints the range it read, [design-device-tree.md](design-device-tree.md#facts-into-records)) and for a driver that would power-cycle
 the card, which this one never does. The probe's results go into the
 board pass's research record, and a result that contradicts this
 section is a change to it before the board pass counts.
@@ -1971,7 +1983,7 @@ on the device process's core; a 4-bit bus at default speed's 25 MHz
 carries at most 12.5 MB/s. Whether the device process keeps up is
 unmeasured: `tools/erx bench blk` on the board measures it, and a C bulk copy of the data port, a per-byte primitive of the
 device NIF, is the measured exception row of the driver table if it does
-not, before DMA's design replaces the copy altogether.
+not, before DMA replaces the copy altogether.
 
 ## Portability
 
