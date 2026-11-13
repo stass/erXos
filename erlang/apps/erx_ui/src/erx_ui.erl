@@ -27,6 +27,8 @@ harnesses only, and goes when the server opens its own window.
 -export([open/1, tree/2, close/1]).
 -export([choose/2, start/1]).
 
+-include("generated/erx_abi.hrl").
+
 -type window() :: reference().
 -type renderer() :: erlang | lvgl.
 -export_type([window/0, renderer/0]).
@@ -40,7 +42,7 @@ domain holds.
 """.
 -spec open(map()) -> {ok, window()} | {error, no_display | enotsup | badarg}.
 open(Options) when is_map(Options) ->
-    Env = #{display => os:getenv("display"), ui_renderer => os:getenv("ui_renderer")},
+    Env = #{display => os:getenv(binary_to_list(?ERX_DISPLAY_KEY_BYTES)), ui_renderer => os:getenv("ui_renderer")},
     case choose(Options, Env) of
         {ok, web, _Renderer} -> {error, enotsup};
         {ok, Display, _Renderer} -> on_display(Display, erx:caps());

@@ -115,7 +115,6 @@ static bool erx_log_conversion(erx_log_text_t *, erx_log_spec_t, va_list *);
 static void erx_log_debug_prefix(erx_log_text_t *, uint64_t, uint64_t);
 static void erx_log_debug_utcb(erx_log_text_t *, const erx_utcb_t *, size_t);
 static bool erx_log_level_known(erx_log_level_t);
-static const char *erx_log_level_name(erx_log_level_t);
 static void erx_log_raw_append(erx_log_t *, const erx_log_text_t *,
     erx_log_level_t, uint64_t);
 static void erx_log_raw_header(const erx_log_t *, uint64_t, erx_log_record_t *);
@@ -703,26 +702,10 @@ erx_log_next_record(const uint8_t *window, size_t window_size, size_t *offset,
 	return (ERX_LOG_NEXT_RECORD);
 }
 
-static const char *
-erx_log_level_name(erx_log_level_t level)
-{
-	switch (level) {
-	case ERX_LOG_LEVEL_ERROR:
-		return ("error");
-	case ERX_LOG_LEVEL_WARNING:
-		return ("warning");
-	case ERX_LOG_LEVEL_INFO:
-		return ("info");
-	case ERX_LOG_LEVEL_DEBUG:
-		return ("debug");
-	default:
-		return ("unknown");
-	}
-}
-
 size_t
 erx_log_render(const erx_log_view_t *view, char *dst, size_t capacity)
 {
+	const char *level = erx_log_level_name(view->level);
 	erx_log_text_t line;
 
 	/* Keeps room for the newline, which is the line's one raw byte. */
@@ -739,7 +722,7 @@ erx_log_render(const erx_log_view_t *view, char *dst, size_t capacity)
 	    view->time_ns % ERX_LOG_NS_PER_S / ERX_LOG_NS_PER_US, 10,
 	    ERX_LOG_MICRO_DIGITS);
 	erx_log_text_string(&line, " ");
-	erx_log_text_string(&line, erx_log_level_name(view->level));
+	erx_log_text_string(&line, level != NULL ? level : "unknown");
 	erx_log_text_string(&line, " ");
 	erx_log_text_add(&line, view->text, view->length);
 	if ((view->flags & ERX_LOG_RECORD_TRUNCATED) != 0)

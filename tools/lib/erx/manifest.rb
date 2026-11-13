@@ -1544,8 +1544,13 @@ module Erx
         row
       end
 
+      # The environment keys a display domain takes from its display record, which its own
+      # row may not set (abi/manifest.txt, display_key and the keys after it).
+      def display_keys = %w[display_key display_policy_key display_idle_dim_key display_idle_off_key]
+                         .map { |name| @codec.fixed_bytes(name) }
+
       # Property 18's clauses on one display's grants: its server is a configured
-      # domain whose row sets none of DISPLAY_KEYS, no facet row of its service grants it to the system domain, whose
+      # domain whose row sets none of display_keys, no facet row of its service grants it to the system domain, whose
       # connections no introduction makes and so carry no pixel area, no facet row of
       # its service sets session, and the grants' costs fit the
       # display domain's outer budget. Each grant costs its pixel area, its pixels or
@@ -1553,10 +1558,6 @@ module Erx
       # lane, each rounded up to pages; a session template's grant costs that once for
       # each session its principal's domains quota lets live at once, a configured
       # domain's once.
-      # The environment keys a display domain takes from its display record, which its own
-      # row may not set (include/erx/dom.h, ERX_DOM_DISPLAY_WORDS_MAX).
-      DISPLAY_KEYS = %w[display display_policy display_idle_dim_s display_idle_off_s].freeze
-
       def check_display_grants(display, tables, facet_values)
         service = tables.fetch('services').fetch(display.fetch('service'))
         server = service.fetch('server')
@@ -1564,7 +1565,7 @@ module Erx
           server == @codec.constant('mf_none')
         domain = tables.fetch('domains').fetch(server)
         invalid("display #{service.fetch('name')}'s domain sets a key its display record gives it", 18, 'domain.env') if
-          domain.fetch('env').split("\0").any? { |word| DISPLAY_KEYS.include?(word.partition('=').first) }
+          domain.fetch('env').split("\0").any? { |word| display_keys.include?(word.partition('=').first) }
         limits = tables.fetch('limits').fetch(domain.fetch('limits'))
         grants = tables.fetch('facets').zip(facet_values).select { |facet, _values| facet.fetch('service') == display.fetch('service') }
         cost = grants.sum do |facet, values|

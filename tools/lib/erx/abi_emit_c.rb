@@ -69,6 +69,7 @@ module Erx
           out.concat(layout_operations(type, schema)) if type.is_a?(Layout) && !type.private?
         end
         out.concat(status_table(schema))
+        out.concat(enum_name_tables(schema))
         out.concat(signal_tables(schema))
         out.concat(event_tables(schema))
         out.concat(rights_tables(schema)) if schema.objects.any?
@@ -139,6 +140,34 @@ module Erx
          "\tstatic const char *const table[] = {", *entries, "\t};", '',
          "\tif (status > 0 || (uint64_t)-(int64_t)status >= sizeof(table) / sizeof(table[0]))",
          "\t\treturn (NULL);", "\treturn (table[-(int64_t)status]);", '}', '']
+      end
+
+      # For each enum that is not a flags type, erx_<enum>_name(value): the
+      # member's name as the ABI file spells it, or NULL for a value the
+      # enum does not hold; and ERX_<ENUM>_NAME_MAX, the enum's full name
+      # however its constants' prefix is shortened, the length of its
+      # longest name. Text that carries an enum's members as words, such
+      # as a display domain's display_policy variable, writes them from
+      # here, so the ABI file is their one spelling. Each block is guarded
+      # by its NAME_MAX, because the crash seam (include/erx/core/abi_crash.h),
+      # which code may include beside this header, carries the boot ones too.
+      def enum_name_tables(schema)
+        schema.type_order.map { |type_name| schema.types.fetch(type_name) }
+              .select { |type| type.is_a?(EnumType) && !type.flags }
+              .flat_map { |type| enum_name_lookup(type) }
+      end
+
+      def enum_name_lookup(type)
+        prefix = Model.constant_prefix(type.name)
+        guard = "#{constant(type.name)}_NAME_MAX"
+        cases = type.members.sort_by { |member, value| [value, member] }.flat_map do |member, _value|
+          ["\tcase #{constant("#{prefix}_#{member}")}:", "\t\treturn (#{c_string(member)});"]
+        end
+        ["#ifndef #{guard}", "/* The longest name of a #{type.name} member, in bytes. */",
+         "#define #{guard} #{type.members.keys.map(&:bytesize).max}",
+         "/* The name of a #{type.name} member, as the ABI file spells it, or NULL. */",
+         'static inline const char *', "#{name(type.name)}_name(#{c_type(type.base)} value)", '{',
+         "\tswitch (value) {", *cases, "\tdefault:", "\t\treturn (NULL);", "\t}", '}', "#endif /* #{guard} */", '']
       end
 
       # The signal table's lookups by number. Each table is indexed by

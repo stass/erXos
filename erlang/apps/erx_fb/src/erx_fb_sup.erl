@@ -30,12 +30,12 @@
 %% For the host test of the window system's start (test/erlang/erx_winfs_tests.erl).
 -export([winfs/1]).
 
+-include("generated/erx_abi.hrl").
+
 %% A driver or screen that ends a fourth time within a minute is not restarted: the
 %% application, and with it the domain, ends.
 -define(INTENSITY, 3).
 -define(PERIOD_S, 60).
-%% A service's name, an identifier (docs/design-system.md, "Identifiers"): 1 to this many bytes.
--define(SERVICE_NAME_MAX, 63).
 
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
@@ -53,16 +53,16 @@ init([]) ->
                        []
                end,
     {ok, {#{strategy => rest_for_one, intensity => ?INTENSITY, period => ?PERIOD_S,
-            auto_shutdown => any_significant}, winfs(os:getenv("display")) ++ Display}}.
+            auto_shutdown => any_significant}, winfs(os:getenv(binary_to_list(?ERX_DISPLAY_KEY_BYTES))) ++ Display}}.
 
 %% The window system's child for Display, the value of the domain's display variable: the
 %% mint of the service it names, or none, with a debug line, when it names none. The
-%% variable comes from the trusted manifest, a name of at most SERVICE_NAME_MAX bytes,
+%% variable comes from the trusted manifest, an identifier of at most ERX_IDENTIFIER_MAX bytes,
 %% and is made an atom with list_to_atom/1, one atom per start of the domain: the
 %% service's atom need not exist in the display domain before, so list_to_existing_atom/1
 %% would refuse a real display's name.
 -spec winfs(string() | false) -> [supervisor:child_spec()].
-winfs(Display) when is_list(Display), Display =/= [], length(Display) =< ?SERVICE_NAME_MAX ->
+winfs(Display) when is_list(Display), Display =/= [], length(Display) =< ?ERX_IDENTIFIER_MAX ->
     [#{id => erx_winfs,
        start => {erx_winfs, start_link, [list_to_atom(Display)]},
        restart => temporary,

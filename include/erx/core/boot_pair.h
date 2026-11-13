@@ -48,38 +48,6 @@ erx_boot_pair_valid(uint32_t value, uint32_t slot)
 	}
 }
 
-/* A boot value's name, from a fixed table; NULL for a number that is none. */
-static inline const char *
-erx_boot_value_name(uint32_t value)
-{
-	switch (value) {
-	case ERX_BOOT_VALUE_UNKNOWN:
-		return ("unknown");
-	case ERX_BOOT_VALUE_NORMAL:
-		return ("normal");
-	case ERX_BOOT_VALUE_TRIAL:
-		return ("trial");
-	default:
-		return (NULL);
-	}
-}
-
-/* A boot slot's name, from a fixed table; NULL for a number that is none. */
-static inline const char *
-erx_boot_slot_name(uint32_t slot)
-{
-	switch (slot) {
-	case ERX_BOOT_SLOT_NONE:
-		return ("none");
-	case ERX_BOOT_SLOT_A:
-		return ("a");
-	case ERX_BOOT_SLOT_B:
-		return ("b");
-	default:
-		return (NULL);
-	}
-}
-
 #ifdef __cplusplus
 }
 #endif

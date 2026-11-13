@@ -105,10 +105,25 @@ enum mf_parameter_kind u32
   value principal 7
   value device 8
   value bytes 9
-# A display's window policy (docs/design-display.md, "Policies").
+# A name that is an identifier, a domain's or a service's among them
+# (docs/design-system.md, "Identifiers"): 1 to this many bytes.
+limit identifier_max u32 63
+# A display's window policy (docs/design-display.md, "Policies"). Its
+# members' names are the words of a display domain's display_policy.
 enum mf_display_policy u32
   value single 1
   value rio 2
+# The keys of the environment a display domain gains from its display
+# record (docs/design-display.md, "A display's session"), each word
+# KEY=VALUE: "display", the display's service name; "display_policy", a
+# member of mf_display_policy; "display_idle_dim_s" and
+# "display_idle_off_s", its idle times in decimal seconds. The display
+# domain's own row may set none of them. A client domain's "display" is
+# its default display, the one it was started from ("Choosing a display").
+bytes display_key 7 value 646973706c6179
+bytes display_policy_key 14 value 646973706c61795f706f6c696379
+bytes display_idle_dim_key 18 value 646973706c61795f69646c655f64696d5f73
+bytes display_idle_off_key 18 value 646973706c61795f69646c655f6f66665f73
 enum mf_image_format u32
   value erofs_verity 1
   value erofs_unchecked 2

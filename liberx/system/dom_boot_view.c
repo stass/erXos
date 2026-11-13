@@ -476,8 +476,8 @@ boot_strings_fit(uint64_t args_len, uint64_t env_len, uint32_t records, bool blo
 static bool
 boot_env_names_display(const char *env, uint32_t env_len)
 {
-	static const char *const keys[] = { ERX_DOM_DISPLAY_KEY, ERX_DOM_DISPLAY_POLICY_KEY,
-	    ERX_DOM_DISPLAY_IDLE_DIM_KEY, ERX_DOM_DISPLAY_IDLE_OFF_KEY };
+	static const char *const keys[] = { ERX_DISPLAY_KEY_STRING, ERX_DISPLAY_POLICY_KEY_STRING,
+	    ERX_DISPLAY_IDLE_DIM_KEY_STRING, ERX_DISPLAY_IDLE_OFF_KEY_STRING };
 	uint32_t at = 0, end;
 	size_t length;
 
@@ -525,8 +525,8 @@ boot_display(const erx_manifest_view_t *manifest, uint32_t row, const char *env,
 			continue;
 		if (served->name_len != 0)
 			return ("manifest: a configured domain serves two displays");
-		if (display.policy != ERX_MF_DISPLAY_POLICY_SINGLE && display.policy != ERX_MF_DISPLAY_POLICY_RIO)
-			return ("manifest: a display's policy is neither single nor rio");
+		if (erx_mf_display_policy_name(display.policy) == NULL)
+			return ("manifest: a display's policy is no mf_display_policy member");
 		if (service.name.length == 0 || service.name.length > ERX_DOM_NAME_MAX)
 			return ("manifest: a service's name is not 1 to 63 bytes");
 		*served = (erx_dom_display_t){ .name = strings + service.name.offset,

@@ -143,6 +143,55 @@ class AbiGenerationTest < Minitest::Test
     end
   end
 
+  # An enum's name lookup gives each member's name as the ABI file
+  # spells it, NULL for a value the enum does not hold, and its longest
+  # name's length; a flags type gets none. In the tree, the display
+  # policy's names are the words of a display domain's display_policy.
+  def test_enum_name_lookup_spells_each_member
+    text = <<~ABI
+      abi 1
+      enum ev u32
+        value park 1
+        value wake_up 3
+      flags fl u32
+        bit one 0
+    ABI
+    source = Erx::ABI::SourceSet.new(declarations: Erx::ABI::Syntax.parse(text), inputs: {}).freeze
+    header = Erx::ABI::CEmitter.header(Erx::ABI::Model.validate(source))
+    refute_includes header, 'erx_fl_name('
+    program = <<~C
+      #include <stdio.h>
+      #include <erx/abi.h>
+
+      int
+      main(void)
+      {
+      	for (uint32_t value = 0; value <= 4; value++)
+      		printf("%u %s\\n", value, erx_ev_name(value) == NULL ? "unknown" : erx_ev_name(value));
+      	printf("max %d\\n", ERX_EV_NAME_MAX);
+      	return (0);
+      }
+    C
+    Dir.mktmpdir('erx-abi-names-') do |directory|
+      FileUtils.mkdir_p(File.join(directory, 'erx'))
+      File.write(File.join(directory, 'erx/abi.h'), header)
+      File.write(File.join(directory, 'names.c'), program)
+      runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'), timeout_program: 'gtimeout')
+      begin
+        runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic', '-I', directory,
+                    '-o', File.join(directory, 'names'), File.join(directory, 'names.c')], name: 'build', deadline: 60)
+        record = runner.run([File.join(directory, 'names')], name: 'names', deadline: 60)
+      rescue Erx::CommandError => error
+        flunk(File.binread(error.result.fetch('log')))
+      end
+      assert_equal "0 unknown\n1 park\n2 unknown\n3 wake_up\n4 unknown\nmax 7\n", File.binread(record.fetch('log'))
+    end
+    tree = @plan.files.fetch('include/erx/abi.h')
+    assert_includes tree, "\tcase ERX_MF_DISPLAY_POLICY_SINGLE:\n\t\treturn (\"single\");"
+    assert_includes tree, "\tcase ERX_MF_DISPLAY_POLICY_RIO:\n\t\treturn (\"rio\");"
+    assert_includes tree, '#define ERX_MF_DISPLAY_POLICY_NAME_MAX 6'
+  end
+
   # The tree's trace_event lookup gives each event's name and typed
   # arguments, and NULL for a value the enum does not hold, the largest
   # included; the header also builds freestanding.

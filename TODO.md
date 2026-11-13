@@ -1136,8 +1136,9 @@ it; git history is the record of completed work.
   gitlink with a small path-to-licence map, or check the archive's defining members (`llvm-nm --defined-only`)
   against such a map. `src/misc/lv_lru.c` cites willcannings/C-LRU-Cache with no notice of its own; its upstream
   licence is unverified.
-* [High] `erx_wm_rio` (desktop, not built; until it is, `erx_fb_sup` starts `erx_winfs` under the single policy whatever
-  the display domain's `display_policy` says; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
+* [High] `erx_wm_rio` (desktop, not built; until it is, nothing reads the display domain's `display_policy`:
+  `erx_fb_sup` starts `erx_winfs` under the single policy whatever it says, so a `rio` display boots the single policy
+  without a word, where the reader should refuse a policy it does not have; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
   the window taking the keyboard is the topmost shown one lets any client take the keyboard from another session's
   window by a `wctl` `top`, `hide` then `show`, or a `mkdir`, and so read what the user types next. Before the
   overlapping policy lands, its design keeps the current window in the policy's state and moves it only on the

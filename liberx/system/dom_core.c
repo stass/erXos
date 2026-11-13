@@ -654,23 +654,24 @@ dom_spec_configured(const erx_dom_view_t *view, uint32_t id, uint32_t row,
 /*
  * A display domain's display words after its own environment
  * (docs/design-display.md, "A display's session"), the keys of
- * ERX_DOM_DISPLAY_WORDS_MAX in its order. False, with the
- * environment unchanged, when they overrun the strings, which the view's
- * reserve for them (ERX_DOM_DISPLAY_WORDS_MAX) rules out; the caller then
+ * ERX_DOM_DISPLAY_WORDS_MAX in its order, the policy as its member's name.
+ * False, with the environment unchanged, when they overrun the strings,
+ * which the view's reserve for them (ERX_DOM_DISPLAY_WORDS_MAX) rules out,
+ * or when the policy is no member, which the view refuses; the caller then
  * leaves the name empty, which planning refuses.
  */
 static bool
 dom_display_words(const erx_dom_display_t *display, erx_dom_spec_t *spec)
 {
-	const char *policy = display->policy == ERX_MF_DISPLAY_POLICY_RIO ? "rio" : "single";
+	const char *policy = erx_mf_display_policy_name(display->policy);
 	const size_t start = (size_t)spec->args_len + spec->env_len;
 	size_t used = start;
 
-	if (start > sizeof(spec->strings) ||
-	    !dom_word_put(spec->strings, sizeof(spec->strings), &used, ERX_DOM_DISPLAY_KEY "=", display->name, display->name_len) ||
-	    !dom_word_put(spec->strings, sizeof(spec->strings), &used, ERX_DOM_DISPLAY_POLICY_KEY "=", policy, strlen(policy)) ||
-	    !dom_number_put(spec->strings, sizeof(spec->strings), &used, ERX_DOM_DISPLAY_IDLE_DIM_KEY "=", display->idle_dim_s) ||
-	    !dom_number_put(spec->strings, sizeof(spec->strings), &used, ERX_DOM_DISPLAY_IDLE_OFF_KEY "=", display->idle_off_s)) {
+	if (start > sizeof(spec->strings) || policy == NULL ||
+	    !dom_word_put(spec->strings, sizeof(spec->strings), &used, ERX_DISPLAY_KEY_STRING "=", display->name, display->name_len) ||
+	    !dom_word_put(spec->strings, sizeof(spec->strings), &used, ERX_DISPLAY_POLICY_KEY_STRING "=", policy, strlen(policy)) ||
+	    !dom_number_put(spec->strings, sizeof(spec->strings), &used, ERX_DISPLAY_IDLE_DIM_KEY_STRING "=", display->idle_dim_s) ||
+	    !dom_number_put(spec->strings, sizeof(spec->strings), &used, ERX_DISPLAY_IDLE_OFF_KEY_STRING "=", display->idle_off_s)) {
 		if (start <= sizeof(spec->strings))
 			memset(spec->strings + start, 0, sizeof(spec->strings) - start);
 		return (false);
