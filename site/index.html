@@ -514,15 +514,12 @@ Error in process &lt;0.150.0&gt; with exit value:
           <span class="label"><b>D1</b> Board</span>
           <h3>Raspberry Pi 4</h3>
           <p class="download-get"><a class="btn" href="{{card_file}}" download>Download card</a> <span class="label">.img.xz &middot; {{card_download_size}}</span></p>
-          <p>Write it to a microSD card with Raspberry Pi Imager: Choose OS, then Use custom.</p>
-          <details>
-            <summary>Or with <code>dd</code> on macOS</summary>
-            <pre tabindex="0"><code>diskutil unmountDisk /dev/diskN
-xz -dc {{card_file}} | sudo dd of=/dev/rdiskN bs=4m</code></pre>
-            <p><code>diskN</code> is the card as <code>diskutil list</code> shows it, and <code>xz</code> is in Homebrew. Everything on the card is erased.</p>
-          </details>
+          <p>Write it to a microSD card with <code>dd</code> or Raspberry Pi Imager.</p>
         </div>
         <div class="download-more">
+          <pre tabindex="0"><code># diskN: the card in diskutil list; everything on it is erased
+diskutil unmountDisk /dev/diskN
+xz -dc {{card_file}} | sudo dd of=/dev/rdiskN bs=4m</code></pre>
           <dl class="download-facts label">
             <dt>SHA-256</dt><dd><code>{{card_download_sha256}}</code></dd>
             <dt>Source</dt><dd><a href="{{source_url}}"><code>{{source_label}}</code></a> &middot; <a href="{{card_record}}">build record</a></dd>

@@ -946,22 +946,6 @@ p:last-child {
   font-size: inherit;
 }
 
-.download details p {
-  margin-top: 8px;
-  font-size: 14px;
-  color: var(--muted);
-}
-
-.download details pre {
-  margin-top: 8px;
-}
-
-.download summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 14px;
-}
-
 /* SHA-256 and source: quiet facts at the foot of each panel. */
 .download-facts {
   display: grid;
