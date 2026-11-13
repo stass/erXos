@@ -61,10 +61,18 @@
  *   bitswait KIND CAP V    waits up to ten seconds for that word to be V; prints it
  *   setbits KIND CAP V     store V in a lock page's waiters or reader page's sleepers
  *   bits KIND CAP          print that word
+ *   fdpoll FD EVENTS MS    erx_prog_poll of FD for EVENTS (hex), up to MS (-1: no
+ *                          deadline): COUNT REVENTS, in hex; spawn T poll FD EVENTS MS
+ *                          makes it on worker T
+ *   pollmany N             a poll of N negative descriptors: its count or error
+ *   deadline SEC NSEC      erx_prog_poll_deadline at clock 1000: STATUS DEADLINE
+ *   sigaction SIG ACTION   erx_prog_sigaction to dfl, ign or fn: STATUS OLD
  *   notices | caps | maps  what was sent, closed and rung, and the live mappings
  */
 
 #include <errno.h>
+#include <poll.h>
+#include <signal.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -88,6 +96,8 @@
 #include "liberx/program/fd.h"
 #include "liberx/program/inbound.h"
 #include "liberx/program/pipe.h"
+#include "liberx/program/poll.h"
+#include "liberx/program/signal.h"
 #include "liberx/program/startup.h"
 #include "liberx/program/wake.h"
 
@@ -343,12 +353,29 @@ erx_umtx_wait(uint64_t addr, uint32_t expected, uint64_t deadline)
 {
 	_Atomic uint32_t *const word = (_Atomic uint32_t *)(uintptr_t)addr;
 
-	(void)deadline;
+	int status = ERX_OK;
+
 	pthread_mutex_lock(&futex_lock);
-	while (atomic_load(word) == expected)
-		pthread_cond_wait(&futex_cond, &futex_lock);
+	while (atomic_load(word) == expected && status == ERX_OK) {
+		if (deadline == ERX_WAIT_FOREVER) {
+			pthread_cond_wait(&futex_cond, &futex_lock);
+		} else if (erx_clock_ns() >= deadline) {
+			status = ERX_ETIMEDOUT;
+		} else {
+			/* A short slice: the condition variable waits on the wall clock, the deadline on the monotonic one. */
+			struct timespec until;
+
+			clock_gettime(CLOCK_REALTIME, &until);
+			until.tv_nsec += 1000000;
+			if (until.tv_nsec >= 1000000000) {
+				until.tv_sec++;
+				until.tv_nsec -= 1000000000;
+			}
+			pthread_cond_timedwait(&futex_cond, &futex_lock, &until);
+		}
+	}
 	pthread_mutex_unlock(&futex_lock);
-	return (ERX_OK);
+	return (status);
 }
 
 int
@@ -392,6 +419,15 @@ erx_clock_ns(void)
 
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return ((uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec);
+}
+
+/* A signal's end of the program (signal.c) ends the driver: the case reads the status as its last line. */
+int
+erx_space_stop(uint64_t space, int64_t status)
+{
+	printf("stopped %" PRId64 " space %" PRIu64 "\n", status, space);
+	fflush(stdout);
+	_exit(0);
 }
 
 /* The channel's send: each frame checked by the generated notice check, then kept as a line. */
@@ -734,12 +770,66 @@ watch_two(int fd1, int fd2, char *answer, size_t size)
 
 	erx_pipe_watch(a, &wa);
 	erx_pipe_watch(b, &wb);
-	erx_prog_wake_sleep(seen);
+	erx_prog_wake_sleep(seen, ERX_WAIT_FOREVER);
 	erx_pipe_unwatch(a, &wa);
 	erx_pipe_unwatch(b, &wb);
 	erx_prog_obj_put(&a->obj);
 	erx_prog_obj_put(&b->obj);
 	snprintf(answer, size, "woke");
+}
+
+/* One poll of fd for events (hex), waiting up to ms (-1 for no deadline): COUNT REVENTS, the revents in hex. */
+static void
+fd_poll(int fd, unsigned events, long long ms, char *answer, size_t size)
+{
+	struct pollfd one = { .fd = fd, .events = (short)events };
+	const int count = erx_prog_poll(&one, 1, ms < 0 ? ERX_WAIT_FOREVER : erx_clock_ns() + (uint64_t)ms * 1000000u);
+
+	snprintf(answer, size, "%d %x", count, (unsigned)(unsigned short)one.revents);
+}
+
+/* A poll of n descriptors, every one negative, with a zero timeout: its count or error. */
+static void
+do_pollmany(size_t n)
+{
+	static struct pollfd many[ERX_PROG_FDS_MAX + 1];
+
+	if (n > ERX_PROG_FDS_MAX + 1)
+		fail("pollmany past its array");
+	for (size_t i = 0; i < n; i++)
+		many[i] = (struct pollfd){ .fd = -1, .events = POLLIN };
+	printf("%d\n", erx_prog_poll(many, n, erx_clock_ns()));
+}
+
+/* The deadline a timeout of sec and nsec gives at the clock reading 1000: STATUS and the deadline, or forever. */
+static void
+do_deadline(long long sec, long long nsec)
+{
+	const struct timespec timeout = { .tv_sec = (time_t)sec, .tv_nsec = (long)nsec };
+	uint64_t deadline = 0;
+	const int status = erx_prog_poll_deadline(1000, &timeout, &deadline);
+
+	if (deadline == ERX_WAIT_FOREVER)
+		printf("%d forever\n", status);
+	else
+		printf("%d %" PRIu64 "\n", status, deadline);
+}
+
+/* The handler a sigaction case asks for, which no case ever runs. */
+static void
+caught(int signo)
+{
+	(void)signo;
+}
+
+/* sigaction of signo to dfl, ign or fn (a handler): STATUS and the action it replaced, dfl or ign. */
+static void
+do_sigaction(int signo, const char *what)
+{
+	struct sigaction act = { 0 }, old = { 0 };
+
+	act.sa_handler = strcmp(what, "ign") == 0 ? SIG_IGN : strcmp(what, "fn") == 0 ? caught : SIG_DFL;
+	printf("%d %s\n", erx_prog_sigaction(signo, &act, &old), old.sa_handler == SIG_IGN ? "ign" : "dfl");
 }
 
 static struct worker {
@@ -766,6 +856,8 @@ worker_main(void *arg)
 		fd_writen(w->fd, w->n, w->answer, sizeof(w->answer));
 	else if (strcmp(w->call, "fdreadn") == 0)
 		fd_readn(w->fd, w->n, w->answer, sizeof(w->answer));
+	else if (strcmp(w->call, "poll") == 0)
+		fd_poll(w->fd, (unsigned)w->fd2, (long long)w->n, w->answer, sizeof(w->answer));
 	else
 		watch_two(w->fd, w->fd2, w->answer, sizeof(w->answer));
 	atomic_store(&w->done, true);
@@ -800,6 +892,10 @@ do_spawn(const char *line)
 	} else if (strcmp(call, "fdwrite") == 0 && sscanf(line, "%*s %*s %*s %d %255s", &fd, text) == 2) {
 		w->fd = fd;
 		snprintf(w->text, sizeof(w->text), "%s", text);
+	} else if (strcmp(call, "poll") == 0 && sscanf(line, "%*s %*s %*s %d %x %llu", &fd, (unsigned *)&fd2, &n) == 3) {
+		w->fd = fd;
+		w->fd2 = fd2;
+		w->n = (size_t)n;
 	} else if (strcmp(call, "watch") == 0 && sscanf(line, "%*s %*s %*s %d %d", &fd, &fd2) == 2) {
 		w->fd = fd;
 		w->fd2 = fd2;
@@ -989,6 +1085,7 @@ main(int argc, char **argv)
 	static char line[1 << 17], arg[1 << 17];
 	char word[16];
 	unsigned long long a, b;
+	long long ms, ms2;
 	FILE *requests;
 	pthread_t executor;
 	int fd;
@@ -1092,6 +1189,17 @@ main(int argc, char **argv)
 
 			fd_write(fd, arg, answer, sizeof(answer));
 			printf("%s\n", answer);
+		} else if (strcmp(word, "fdpoll") == 0 && sscanf(line, "%*s %d %llx %lld", &fd, &a, &ms) == 3) {
+			char answer[32];
+
+			fd_poll(fd, (unsigned)a, ms, answer, sizeof(answer));
+			printf("%s\n", answer);
+		} else if (strcmp(word, "pollmany") == 0 && sscanf(line, "%*s %llu", &a) == 1) {
+			do_pollmany((size_t)a);
+		} else if (strcmp(word, "deadline") == 0 && sscanf(line, "%*s %lld %lld", &ms, &ms2) == 2) {
+			do_deadline(ms, ms2);
+		} else if (strcmp(word, "sigaction") == 0 && sscanf(line, "%*s %d %15s", &fd, word) == 2) {
+			do_sigaction(fd, word);
 		} else if (strcmp(word, "spawn") == 0) {
 			do_spawn(line);
 		} else if (strcmp(word, "join") == 0 && sscanf(line, "%*s %llu", &a) == 1) {

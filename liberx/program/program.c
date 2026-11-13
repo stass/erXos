@@ -41,6 +41,7 @@
 #include "liberx/program/pages.h"
 #include "liberx/program/pipe.h"
 #include "liberx/program/program.h"
+#include "liberx/program/signal.h"
 #include "liberx/pthread_executor.h"
 
 int	main(int, char **, char **);
@@ -357,6 +358,7 @@ main_run(void)
 	self.umask = plan.umask;
 	self.sigmask = plan.sigmask;
 	self.sigignore = plan.sigignore;
+	erx_prog_sig_start(&self.sigignore);
 	self.cwd = plan.cwd;
 	self.data_area = data;
 	self.data_bytes = data_bytes;

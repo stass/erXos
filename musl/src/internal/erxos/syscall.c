@@ -24,6 +24,7 @@
 #include <time.h>
 
 #include "futex.h"
+#include "ksigaction.h"
 #include "kstat.h"
 #include "pthread_impl.h"
 #include "syscall.h"
@@ -329,7 +330,10 @@ robust_list_get(long tid, void **head, size_t *size)
 	return (0);
 }
 
-/* No signal is ever delivered, so every mask reads as empty. */
+/*
+ * No mask is kept, so every mask reads as empty: no signal is caught, and the
+ * one raised, SIGPIPE, ends the program unless it is ignored (TODO.md).
+ */
 static long
 sigprocmask_call(sigset_t *old, size_t size)
 {
@@ -361,6 +365,7 @@ seam_offered(long n, long flags)
 	case SYS_fstat:
 	case SYS_ioctl:
 	case SYS_munmap:
+	case SYS_rt_sigaction:
 		return (1);
 	case SYS_mmap:
 		return (!(flags & MAP_ANONYMOUS) || (flags & MAP_FIXED));
@@ -389,6 +394,38 @@ seam_fstat(const long args[6], long *result)
 	return (1);
 }
 
+/*
+ * rt_sigaction through the seam, which takes struct sigaction, as fstat takes struct
+ * stat, and never the kernel's k_sigaction: musl's restorer, which only a kernel that
+ * delivers to a handler uses, is not carried, and an old action reads back without one.
+ * A signal set of any size but the one musl passes is EINVAL, as Linux answers it.
+ */
+static long
+seam_sigaction(const long args[6], long *result)
+{
+	const struct k_sigaction *const kact = (const struct k_sigaction *)args[1];
+	struct k_sigaction *const kold = (struct k_sigaction *)args[2];
+	struct sigaction act = { 0 }, old = { 0 };
+	const long with_sigaction[6] = { args[0], kact == NULL ? 0 : (long)&act, kold == NULL ? 0 : (long)&old };
+
+	if ((size_t)args[3] != _NSIG / 8) {
+		*result = -EINVAL;
+		return (1);
+	}
+	if (kact != NULL) {
+		act.sa_handler = kact->handler;
+		act.sa_flags = (int)(kact->flags & ~(unsigned long)SA_RESTORER);
+		bcopy(kact->mask, &act.sa_mask, _NSIG / 8);
+	}
+	if (!erx_fiasco_libc_fd(SYS_rt_sigaction, with_sigaction, result))
+		return (0);
+	if (*result == 0 && kold != NULL) {
+		*kold = (struct k_sigaction){ .handler = old.sa_handler, .flags = (unsigned long)old.sa_flags };
+		bcopy(&old.sa_mask, kold->mask, _NSIG / 8);
+	}
+	return (1);
+}
+
 /* The program is the machine's one process, and it has no users to tell apart. */
 #define ROOT_PID	1
 #define ROOT_PARENT	0
@@ -403,7 +440,8 @@ __erx_syscall(long n, long a, long b, long c, long d, long e, long f)
 	long result;
 
 	if (seam_offered(n, d)) {
-		if (n == SYS_fstat ? seam_fstat(args, &result) : erx_fiasco_libc_fd(n, args, &result))
+		if (n == SYS_fstat ? seam_fstat(args, &result) :
+		    n == SYS_rt_sigaction ? seam_sigaction(args, &result) : erx_fiasco_libc_fd(n, args, &result))
 			return (result);
 	}
 	switch (n) {

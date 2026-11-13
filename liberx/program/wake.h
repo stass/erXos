@@ -52,8 +52,11 @@ void	erx_prog_waitq_wake(const erx_prog_waitq_t *q);
 
 /*
  * Sleeps on the calling thread's wake word while it still holds seen, the
- * value read before the check; returns at once when a wake bumped it.
+ * value read before the check, until deadline (ERX_WAIT_FOREVER for none),
+ * on erx_clock_ns's clock; returns at once when a wake bumped it.  It may
+ * also return early, so the caller checks its condition and the deadline
+ * again.
  */
-void	erx_prog_wake_sleep(uint32_t seen);
+void	erx_prog_wake_sleep(uint32_t seen, uint64_t deadline);
 
 #endif /* !LIBERX_PROGRAM_WAKE_H */

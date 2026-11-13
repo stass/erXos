@@ -30,7 +30,7 @@ class ProgFdTest < Minitest::Test
   Erx::Generated.ensure(root: ROOT)
   FD = 'liberx/program/fd.c'
   PIPE = 'liberx/program/pipe.c'
-  SOURCES = [FD, PIPE, 'liberx/program/wake.c', 'liberx/program/pages.c', 'liberx/program/inbound.c', 'liberx/program/startup.c',
+  SOURCES = [FD, PIPE, 'liberx/program/wake.c', 'liberx/program/poll.c', 'liberx/program/signal.c', 'liberx/program/pages.c', 'liberx/program/inbound.c', 'liberx/program/startup.c',
              'liberx/erx_pipe_core.c', 'liberx/erx_pipe_check.c', 'liberx/erx_pipe_run.c',
              'liberx/erx_profile.c', 'liberx/erx_etf.c', 'kernel/crypto/blake3/blake3.c',
              'kernel/crypto/blake3/blake3_portable.c', 'build/gen/liberx/generated/prog_profile.c',
@@ -116,10 +116,15 @@ class ProgFdTest < Minitest::Test
                                  ['spawn 1 fdreadn 0 100000', 'spawned'], ['join 1', '100000'], ['join 0', '100000']],
     # A write that published what fits and waits for room fails with EPIPE when the last read
     # end goes, not with the count it wrote, as FreeBSD's write does.
-    'a write that meets a gone reader fails' => [*BOUND, ['spawn 0 fdwriten 1 100000', 'spawned'], ['waiters 1 1', '1'],
+    'a write that meets a gone reader fails' => [*BOUND, ['sigaction 13 ign', '0 dfl'],
+                                                 ['spawn 0 fdwriten 1 100000', 'spawned'], ['waiters 1 1', '1'],
                                                  ["report #{report(E.atom('pipe_reader_gone'), int(7), int(2), int(0))}",
                                                   'applied'],
                                                  ['join 0', "-#{EPIPE}"]],
+    # A poll of an empty read end waits on the end's list until a write rings its doorbell,
+    # then answers POLLIN, all it asked for, and leaves the list.
+    'a poll wakes on a write' => [*BOUND, ['spawn 0 poll 0 1 10000', 'spawned'], ['waiters 0 1', '1'],
+                                  ['fdwrite 1 x', '1'], ['join 0', '1 1'], ['waiters 0 0', '0']],
     # A poll's registrations: one thread on both ends' lists, woken by a report to the second,
     # leaves both.
     'a poll watches two ends' => [*BOUND, ['spawn 0 watch 0 1', 'spawned'], ['waiters 0 1', '1'], ['waiters 1 1', '1'],
@@ -151,6 +156,35 @@ class ProgFdTest < Minitest::Test
     # sleepers bit it published, so the idle end is rung by no write.
     'a poll given up' => [*SET_UP, ['poll 0', '0'], ['bits sleepers 102', '1'], ['unwatch 0', 'unwatched'],
                           ['bits sleepers 102', '0'], ['unwatch 1', 'unwatched']],
+    # poll through the table (liberx/program/poll.h), in the host's POLL bits: room is POLLOUT
+    # (4, which is POLLWRNORM too), an empty read end times out with nothing and gives up the
+    # sleepers bit its poll published, a record is POLLIN (1) only when asked for, null is
+    # POLLIN|POLLRDNORM (0x41) when both are asked for, since it is always ready, and
+    # POLLNVAL (0x20) when asked for an event outside FreeBSD's POLLSTANDARD (0x2000, as
+    # poll_no_poll answers), a descriptor the table does not hold is POLLNVAL and a negative
+    # one is skipped; the end of the stream adds POLLHUP (0x10), asked for or not. A poll of
+    # 1024 descriptors keeps its registrations in pages, and one of 1025 is EINVAL.
+    'ppoll' => [*SET_UP, ['fdpoll 1 4 0', '1 4'], ['fdpoll 0 1 0', '0 0'], ['fdpoll 0 1 20', '0 0'],
+              ['bits sleepers 102', '0'], ['fdpoll 9 1 0', '1 20'], ['fdpoll -1 1 0', '0 0'],
+              ['fdpoll 2 41 0', '1 41'], ['fdpoll 2 2001 0', '1 20'], ['fdwrite 1 x', '1'],
+              ['fdpoll 0 4 0', '0 0'],
+              ['fdpoll 0 1 -1', '1 1'], [WRITER_GONE, 'applied'], ['fdpoll 0 4 0', '1 10'],
+              ['pollmany 1024', '0'], ['pollmany 1025', "-#{EINVAL}"]],
+    # A timeout's deadline from a clock reading 1000: ppoll's EINVAL for a bad timespec, and
+    # none for one too far to add.
+    'ppoll deadline' => [['deadline 1 5', '0 1000001005'], ['deadline 0 0', '0 1000'],
+                       ['deadline -1 0', "-#{EINVAL} 0"], ['deadline 0 1000000000', "-#{EINVAL} 0"],
+                       ['deadline 0 -1', "-#{EINVAL} 0"], ['deadline 9223372036854775807 0', '0 forever']],
+    # sigaction records SIG_DFL and SIG_IGN and answers the action replaced; SIGKILL's and
+    # SIGSTOP's (17, FreeBSD's number), a handler and a number the signal table does not
+    # list are EINVAL (liberx/program/signal.h).
+    'sigaction' => [['sigaction 13 ign', '0 dfl'], ['sigaction 13 dfl', '0 ign'], ['sigaction 9 ign', "-#{EINVAL} dfl"],
+                  ['sigaction 17 dfl', '0 dfl'], ['sigaction 17 ign', "-#{EINVAL} dfl"], ['sigaction 15 fn', "-#{EINVAL} dfl"],
+                  ['sigaction 0 dfl', "-#{EINVAL} dfl"], ['sigaction 127 dfl', "-#{EINVAL} dfl"]],
+# A write to a pipe with no read end raises SIGPIPE: ignored, the write fails with EPIPE;
+# under its default action the program's space stops with ERX_EXIT_SIGNAL (256) plus 13.
+'sigpipe ignored' => [*SET_UP, [READER_GONE, 'applied'], ['sigaction 13 ign', '0 dfl'], ['fdwrite 1 x', "-#{EPIPE}"]],
+'sigpipe ends' => [*SET_UP, [READER_GONE, 'applied'], ['fdwrite 1 x', 'stopped 269 space 16777215']],
     'take clears bits' => [['alias 105 101', 'alias'], ['alias 106 102', 'alias'],
                            ['setbits waiters 104 5', 'set'], ['setbits sleepers 102 1', 'set'],
                            ["start #{START}", 'setup 0'], ['bits waiters 104', '4'], ['bits sleepers 102', '0'],
@@ -244,6 +278,9 @@ class ProgFdTest < Minitest::Test
 
   # A seeded fault, the case that must catch it, and the edit that plants it.
   MUTANTS = {
+    'a poll that keeps its registrations' => ['ppoll', 'liberx/program/poll.c', "\t\tif (slots[i].obj->kind == ERX_PROG_OBJ_PIPE)\n\t\t\terx_pipe_unwatch",
+       "\t\tif (false)\n\t\t\terx_pipe_unwatch"],
+    'a pipe write that raises nothing' => ['sigpipe ends', FD, "\t\terx_prog_sig_raise(ERX_SIGPIPE);\n", "\t\t;\n"],
     'an inside munmap is passed on to the release' =>
       ["a mem range's memory rules", FD, "\tcase RANGE_INSIDE:\n\t\treturn (0);\n", "\tcase RANGE_INSIDE:\n"],
     'an unaligned munmap is let through' =>

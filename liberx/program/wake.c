@@ -65,7 +65,7 @@ erx_prog_waitq_wake(const erx_prog_waitq_t *q)
 }
 
 void
-erx_prog_wake_sleep(uint32_t seen)
+erx_prog_wake_sleep(uint32_t seen, uint64_t deadline)
 {
-	(void)erx_umtx_wait((uint64_t)(uintptr_t)&wake_word, seen, ERX_WAIT_FOREVER);
+	(void)erx_umtx_wait((uint64_t)(uintptr_t)&wake_word, seen, deadline);
 }

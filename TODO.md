@@ -1587,15 +1587,21 @@ it; git history is the record of completed work.
   anonymous memory reaches musl's own rows, which refuse only write and execute together (a protection change that
   meets a mapping, the window buffer's included, is refused by `liberx/backend/core/vm_table.c` already). Have the
   program's seam refuse `PROT_EXEC` in both with `ENOTSUP`, with a check in the programs suite's `args` program.
-* [Medium] programs, `erx-lvgl` on the target (`display/lvgl/erx_lvgl.c`, built by `tools/lib/erx/lvgl.rb`,
-  `Lvgl::Program`) needs two libc calls a program's seam does not offer: `poll(2)`, which musl makes `ppoll` and
-  `erx_fiasco_libc_fd` (`liberx/backend/fiasco/program_task.c`) answers `ENOSYS`, so the program's first wait on
-  standard input ends it with status 1; and `signal(SIGPIPE, SIG_IGN)`, whose `rt_sigaction` musl's switch
-  (`musl/src/internal/erxos/syscall.c`) has no row for, answering `ENOSYS`, which the program ignores. With
-  `erx_program:start/1` taking only a `mem` descriptor, it has no standard input or output pipe either, so the
-  programs suite's `lvgl` case (`tools/lib/erx/programs.rb`) checks only that it reaches main's map of descriptor 3.
-  When pipes reach programs and `ppoll` reaches the table, have the case give it a buffer and pipes and see it wait
-  for the screen record.
+* [Medium] programs, the programs suite's `lvgl` case (`tools/lib/erx/programs.rb`) checks only that `erx-lvgl`
+  (`display/lvgl/erx_lvgl.c`) reaches main's map of descriptor 3 and ends with status 1: the suite can hand a
+  program only a pipe write end (`hand_off`), not the read end its standard input needs, and the session holds no
+  window buffer lease for `{mem, Lease, Pages}` without the display server
+  ([design-display.md](docs/design-display.md), "A program's window buffer"). The case moves to the display
+  suite with `erx_ui_lvgl`'s `open` on erXos (the `erx_ui_lvgl` item above), where the display server hands out
+  the window buffer's lease and the read-end pipe, and sees `erx-lvgl` wait in `poll` for the screen record.
+* [Medium] programs, `rt_sigprocmask` keeps no mask (`musl/src/internal/erxos/syscall.c`, `sigprocmask_call`),
+  and the startup message's `sigmask` is dropped (`liberx/program/program.c`): the seam accepts any mask and reads
+  every mask back as empty, so a program that blocks `SIGPIPE` under `SIG_DFL` and
+  writes to a pipe with no read end is ended by the signal (`liberx/program/signal.c`, `erx_prog_sig_raise`)
+  where POSIX keeps the signal pending and the write fails with `EPIPE`, and a program reading its mask back sees
+  none. It fails safe, by a stop; `SIG_IGN`, the usual way to get `EPIPE`, works. Keep each thread's mask in the
+  program layer and hold a blocked `SIGPIPE` pending, as [Signals in liberx](docs/design-programs.md#signals-in-liberx)
+  describes.
 * [Medium] programs, the descriptor seam offers a listed set of calls (`musl/src/internal/erxos/syscall.c`,
   `seam_offered`, and `liberx/backend/fiasco/program_task.c`, `erx_fiasco_libc_fd`, two lists that must agree):
   design-programs.md, "The POSIX-lite personality", says every call that names a descriptor reaches the table, but

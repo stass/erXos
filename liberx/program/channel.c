@@ -77,7 +77,7 @@ whole_put(const erx_lane_item_t *item, erx_lane_put_t *put)
 		if (status == ERX_LANE_PUT_SHORT) {
 			(void)pthread_mutex_unlock(&lock);
 			/* The open wait: the sender holds nothing of the channel's here. */
-			erx_prog_wake_sleep(seen);
+			erx_prog_wake_sleep(seen, ERX_WAIT_FOREVER);
 			(void)pthread_mutex_lock(&lock);
 		}
 		erx_prog_waitq_leave(&room_waiters, &me);

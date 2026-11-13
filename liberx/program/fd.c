@@ -35,6 +35,7 @@
 #include "liberx/program/fd.h"
 #include "liberx/program/pages.h"
 #include "liberx/program/pipe.h"
+#include "liberx/program/signal.h"
 
 static pthread_mutex_t table_lock = PTHREAD_MUTEX_INITIALIZER;
 static erx_prog_obj_t *slots[ERX_PROG_FDS_MAX];
@@ -354,6 +355,9 @@ erx_prog_fd_write(int fd, const void *buf, size_t len)
 		break;
 	}
 	erx_prog_obj_put(obj);
+	/* EPIPE raises SIGPIPE for the writing thread before the write returns (design-pipes.md, "Writing"). */
+	if (result == -EPIPE)
+		erx_prog_sig_raise(ERX_SIGPIPE);
 	return (result);
 }
 

@@ -64,6 +64,11 @@ module Erx
   #   install_refused makes an install fail at the bind, with a doorbell already bound to
   #   another program's group: the program keeps running, and none of the refused
   #   install's copies took a place in its table.
+# * poll, sigign and sigdfl run pipeio (test/guest/programs/pipeio.c) with a hand-off of a
+#   write end of a pipe that has no read end at descriptor 3: poll answers POLLOUT|POLLHUP
+#   for it, POLLNVAL, EINVAL past the table's size and 0 at a timeout; with SIGPIPE ignored
+#   the write fails with EPIPE, and under its default action the write ends the program
+#   with ERX_EXIT_SIGNAL plus SIGPIPE, 269.
   # The shell then answers node() again.
   #
   # The programs are file entries, so the backend copies their segments into the space
@@ -72,7 +77,7 @@ module Erx
   module Programs
     # Each program by its name in the session's release, domains/erxos/bin/<name>, and the
     # source it is built from. erx-lvgl joins them there, built from LVGL (Run#added).
-    PROGRAMS = %w[exit42 fault spin args bigargs note].to_h { |name| [name, "test/guest/programs/#{name}.c"] }.freeze
+    PROGRAMS = %w[exit42 fault spin args bigargs note pipeio].to_h { |name| [name, "test/guest/programs/#{name}.c"] }.freeze
     PROGRAM_PREFIX = "#{ReleaseFiles::DOMAIN_PREFIX}bin/".freeze
     # How many rounds many runs: more than the 32 programs the gate worker's 64
     # registrations hold at once, for each way a program ends.
@@ -374,6 +379,15 @@ module Erx
             receive {P, {exit_status, S}} -> {lvgl, S} after #{WAIT_MS} -> {lvgl, timeout, P} end
           end)().
        ERLANG
+*[['poll', 27, 42], ['sigign', 28, 42], ['sigdfl', 29, 269]].map do |mode, pid, status|
+  Case.new(name: mode, seconds: 60, answer: "{#{mode},#{status}}", expression: line(<<~ERLANG))
+    (fun() ->
+       #{hand_off(pid, rights)}
+       P = erx_program:start((#{spec('pipeio', pid, argv: "[<<\"pipeio\">>, <<\"#{mode}\">>]")})\#{fds => [{3, {pipe_hand, H, D}}]}),
+       receive {P, {exit_status, S}} -> {#{mode}, S} after #{WAIT_MS} -> {#{mode}, P} end
+     end)().
+  ERLANG
+end,
        Case.new(name: 'exit42', seconds: 60, answer: '{exit42,42}', expression: line(<<~ERLANG)),
          (fun() ->
             P = erx_program:start(#{spec('exit42', 2)}),

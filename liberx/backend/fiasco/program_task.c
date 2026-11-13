@@ -13,11 +13,14 @@
  * The program's descriptor seam takes every call musl offers it (libc_start.h) but an
  * anonymous mmap, and answers it from the program layer's descriptor table
  * (liberx/program/fd.h): a program writes only to the descriptors its session installed,
- * and a descriptor the table does not hold is EBADF, never the console.
+ * and a descriptor the table does not hold is EBADF, never the console. rt_sigaction is
+ * answered from the program's dispositions (liberx/program/signal.h).
  */
 
 #include <errno.h>
 #include <limits.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/mman.h>
@@ -28,7 +31,10 @@
 #include "erx/abi.h"
 #include "liberx/backend/fiasco/libc_start.h"
 #include "liberx/backend/fiasco/task_start.h"
+#include "liberx/backend/api.h"
 #include "liberx/program/fd.h"
+#include "liberx/program/poll.h"
+#include "liberx/program/signal.h"
 #include "liberx/program/program.h"
 
 /* The seam takes every write, so musl's console row is never reached from a program. */
@@ -116,6 +122,26 @@ mmap_call(const long args[6], long *result)
 	return (true);
 }
 
+/*
+ * ppoll, its arguments in the call's order. No signal is ever caught in a program on the
+ * stopgap (liberx/program/signal.h), so the mask a ppoll would hold during the wait
+ * changes nothing; its size is still checked, as Linux checks it, so a caller that
+ * passes one learns of a wrong size.
+ */
+static long
+ppoll_call(struct pollfd *fds, unsigned long nfds, const struct timespec *timeout, bool masked, size_t mask_size)
+{
+	uint64_t deadline;
+	int status;
+
+	if (masked && mask_size != _NSIG / 8)
+		return (-EINVAL);
+	status = erx_prog_poll_deadline(erx_clock_ns(), timeout, &deadline);
+	if (status != 0)
+		return (status);
+	return (erx_prog_poll(fds, (size_t)nfds, deadline));
+}
+
 bool
 erx_fiasco_libc_fd(long n, const long args[6], long *result)
 {
@@ -155,8 +181,16 @@ erx_fiasco_libc_fd(long n, const long args[6], long *result)
 		return (true);
 	case SYS_mmap:
 		return (mmap_call(args, result));
+	case SYS_ppoll:
+		*result = ppoll_call((struct pollfd *)args[0], (unsigned long)args[1], (const struct timespec *)args[2],
+		    args[3] != 0, (size_t)args[4]);
+		return (true);
+	case SYS_rt_sigaction:
+		/* musl's switch hands the seam struct sigaction, not the kernel's layout (libc_start.h). */
+		*result = erx_prog_sigaction((int)args[0], (const struct sigaction *)args[1], (struct sigaction *)args[2]);
+		return (true);
 	default:
-		/* ppoll, pselect6 and pipe2: the table offers none of them. */
+		/* pselect6 and pipe2: the table offers neither. */
 		*result = -ENOSYS;
 		return (true);
 	}

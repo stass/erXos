@@ -761,7 +761,7 @@ end_sleep(erx_pipe_end_t *e, uint32_t seen)
 	erx_pipe_end_unlock(e);
 	if (owes)
 		drained_send(e);
-	erx_prog_wake_sleep(seen);
+	erx_prog_wake_sleep(seen, ERX_WAIT_FOREVER);
 	erx_pipe_end_lock(e);
 	erx_prog_waitq_leave(&e->waiters, &me);
 }
