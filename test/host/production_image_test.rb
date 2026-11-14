@@ -106,8 +106,10 @@ class ProductionImageTest < Minitest::Test
     fiasco = Struct.new(:boot_core_archive) { def user_library(name) = "/fiasco/#{name}" }.new('/fiasco/boot_cores.a')
     erts = Erx::NativeRuntime::Built.new(otp_archives: ['/otp/erl_main.o', '/otp/libbeam.a'], libc: '/musl/libc.a',
                                          builtins: '/crt/libclang_rt.builtins.a', otp: '/otp', openssl: '/openssl',
-                                         crypto_archives: ['/otp/driver_tab_crypto.o', '/otp/asn1rt_nif.a', '/otp/crypto.a',
-                                                           '/openssl/lib/libcrypto.a'])
+                                         system_table: '/otp/driver_tab.o',
+                                         crypto: Erx::NativeRuntime::Crypto.new(table: '/otp/driver_tab_crypto.o',
+                                                                                nifs: ['/otp/asn1rt_nif.a', '/otp/crypto.a'],
+                                                                                libcrypto: '/openssl/lib/libcrypto.a'))
     image = Erx::ProductionImage.new(root: ROOT, runner: nil, compiler: '', linker: '', machine: DEVELOPMENT, fiasco: fiasco,
                                      runtime: nil)
     archives = image.send(:archives, erts).to_h { |archive| [File.basename(archive.path), archive] }
@@ -117,6 +119,8 @@ class ProductionImageTest < Minitest::Test
     assert_equal 'Apache-2.0 AND BSD-3-Clause', archives.fetch('libbeam.a').license
     assert_equal %w[otp/LICENSE.txt littlefs/LICENSE.md], archives.fetch('libbeam.a').notices
     assert_equal %w[otp/LICENSE.txt], archives.fetch('erl_main.o').notices
+    assert_equal %w[otp/LICENSE.txt], archives.fetch('driver_tab.o').notices
+    assert_equal %w[otp/LICENSE.txt], crypto.fetch('driver_tab_crypto.o').notices
     builtins = archives.fetch('libclang_rt.builtins.a')
     assert_equal ['Apache-2.0 WITH LLVM-exception', 'permanent'], [builtins.license, builtins.status]
     assert_equal 'compiler-rt/LICENSE.TXT', builtins.notices.first[%r{compiler-rt/LICENSE\.TXT\z}]

@@ -19,12 +19,11 @@ module Erx
     FLAVOR = 'jit'
     # What the BeamAsm image's link takes: this flavour's own OTP archives, the
     # interpreter build's musl libc.a and compiler-rt builtins, and the C++ runtime's archives;
-    # crypto_archives are this flavour's static NIF table and NIF archives, with OpenSSL's
-    # libcrypto.a, as the interpreter image's (NativeRuntime::Built).
-    Built = Data.define(:otp_archives, :libc, :builtins, :otp, :cxx_archives, :crypto_archives) do
-      # The link's archives in link order: the NIF table first, for the reason
-      # NativeRuntime::Built#domain_archives gives, and the builtins last.
-      def link_archives = [*crypto_archives, *otp_archives, libc, *cxx_archives, builtins]
+    # crypto is this flavour's static NIF table and NIF archives, with OpenSSL's
+    # libcrypto.a, as the interpreter image's (NativeRuntime::Crypto); as there, libbeam.a
+    # holds no table, so the link's names the one it takes.
+    Built = Data.define(:otp_archives, :libc, :builtins, :otp, :cxx_archives, :crypto) do
+      def domain_archives = [*crypto.archives, *otp_archives, libc, *cxx_archives, builtins]
     end
 
     def self.output(root:) = flavour_output(root: root, base: BASE, flavour: FLAVOR)
@@ -42,13 +41,13 @@ module Erx
       copy_sources
       configure unless File.file?(in_copy('.erx-configured'))
       build_emulator(jobs: jobs)
-      crypto_archives = build_crypto_nifs(jobs: jobs)
+      crypto = build_crypto_nifs(jobs: jobs)
       check_imports
       File.write(self.class.record_path(@output), digest)
       Built.new(otp_archives: [File.join(@output.objects, 'erl_main.o'), File.join(File.dirname(@output.beam), 'libbeam.a'),
                                *RuntimeSeam.libraries(@output, target: TARGET)].freeze,
                 libc: interpreter.libc, builtins: interpreter.builtins, otp: @output.root, cxx_archives: @libcxx.archives,
-                crypto_archives: crypto_archives)
+                crypto: crypto)
     end
 
     private

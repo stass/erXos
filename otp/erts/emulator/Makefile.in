@@ -1,4 +1,4 @@
-# Modified by erXos: builds erXos sources, littlefs (from $(ERX_TREE)/littlefs), ctaes (from $(ERX_TREE)/ctaes) and libmemdraw (from $(ERX_TREE)/display) into the emulator, with the headers erXos generates (in $(ERX_GEN)) ahead of the tree's, and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs, erx_erofs_file, the generated erx_prog and erx_prog_grammar, and erx_program, embedding the beams erts/preloaded/src's make compiles into erts/ebin rather than prebuilt ones. Builds sys/erxos/erx_alias.c (edit 17), and the erx_program driver beside erx_lane's. Generates driver_tab_crypto.c, the static NIF table of the interpreter and BeamAsm images, with crypto and asn1rt_nif.
+# Modified by erXos: builds erXos sources, littlefs (from $(ERX_TREE)/littlefs), ctaes (from $(ERX_TREE)/ctaes) and libmemdraw (from $(ERX_TREE)/display) into the emulator, with the headers erXos generates (in $(ERX_GEN)) ahead of the tree's, and preloads erx_file_remote, erx_9p_grammar, erx_path, erx_verity, erx_erofs, erx_erofs_file, the generated erx_prog and erx_prog_grammar, and erx_program, embedding the beams erts/preloaded/src's make compiles into erts/ebin rather than prebuilt ones. Builds sys/erxos/erx_alias.c (edit 17), and the erx_program driver beside erx_lane's. Generates driver_tab_crypto.c, the static NIF table of the interpreter and BeamAsm images, with the static NIF archives erXos's build names in ERX_CRYPTO_NIF_LIBS, and leaves driver_tab.o out of libbeam.a, so each image links its table by name.
 #
 # %CopyrightBegin%
 #
@@ -710,14 +710,15 @@ $(TTF_DIR)/driver_tab.c: Makefile.in utils/make_driver_tab
 	$(gen_verbose)LANG=C $(PERL) utils/make_driver_tab -o $@ -nifs $(NIF_OBJS) $(STATIC_NIF_SYMBOLS) -drivers $(DRV_OBJS) $(STATIC_DRIVER_LIBS)
 GENERATE += $(TTF_DIR)/driver_tab.c
 
-# erXos's interpreter and BeamAsm images: driver_tab.c with OTP's crypto and asn1rt_nif NIFs
-# added, which their links place ahead of libbeam.a, so libbeam.a's driver_tab.o, the system
-# image's table, is never taken there (docs/design-crypto.md, "Three runtime images").
+# erXos's interpreter and BeamAsm images: driver_tab.c with the static NIF archives
+# ERX_CRYPTO_NIF_LIBS added, which erXos's build passes in (tools/lib/erx/domain_image_apps.rb).
 # The configured build links no static NIF archive of its own, so the system image and
-# OTP's own link of the emulator keep the table above.
-ERX_CRYPTO_NIF_LIBS = $(ERL_TOP)/lib/asn1/priv/lib/$(TARGET)/asn1rt_nif.a \
-	$(ERL_TOP)/lib/crypto/priv/lib/$(TARGET)/crypto.a
-$(TTF_DIR)/driver_tab_crypto.c: Makefile.in utils/make_driver_tab
+# OTP's own link of the emulator keep the table above. libbeam.a holds neither table, and
+# each image's link names its own (docs/design-crypto.md, "Three runtime images"). An
+# archive added or rebuilt regenerates the table; a table left stale by an archive taken
+# out names an init function no link defines, and the link fails.
+$(TTF_DIR)/driver_tab_crypto.c: Makefile.in utils/make_driver_tab $(ERX_CRYPTO_NIF_LIBS)
+	$(if $(ERX_CRYPTO_NIF_LIBS),,$(error erx_crypto_tab needs ERX_CRYPTO_NIF_LIBS))
 	$(gen_verbose)LANG=C $(PERL) utils/make_driver_tab -o $@ -nifs $(NIF_OBJS) $(ERX_CRYPTO_NIF_LIBS) -drivers $(DRV_OBJS)
 
 .PHONY: erx_crypto_tab
@@ -1477,9 +1478,11 @@ AR_FLAGS=rcv
 endif
 endif
 
+# erXos: without the static NIF table, which each of erXos's images links by name
+# (driver_tab_crypto.c above).
 $(BINDIR)/${EMULATOR_LIB}: $(PRELOAD_OBJ) $(OBJS) $(DEPLIBS)
 	$(V_AR) $(AR_FLAGS) $(AR_OUT)$@ \
-	$(PRELOAD_OBJ) $(OBJS)
+	$(PRELOAD_OBJ) $(filter-out $(OBJDIR)/driver_tab.o,$(OBJS))
 	$(V_RANLIB) $@
 
 # ----------------------------------------------------------------------

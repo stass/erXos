@@ -378,10 +378,9 @@ module Erx
 
       sources = Runtime.source_digest(root: @root)
       erts = @runtime.build
-      archives = [*erts.otp_archives, erts.libc, erts.builtins]
       root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: machine.platform,
                                  fiasco: @fiasco)
-                            .build_system_receipted(directory: File.join(directory, 'root'), archives: archives,
+                            .build_system_receipted(directory: File.join(directory, 'root'), archives: erts.system_archives,
                                                     place: machine.root_address)
       kernel = assembled_receipt(@fiasco.kernel_path, name: 'kernel', directory: directory)
       sigma0 = assembled_receipt(@fiasco.sigma0_path, name: 'sigma0', directory: directory)
@@ -1612,7 +1611,7 @@ module Erx
       beamasm = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @machine.platform,
                                fiasco: @fiasco)
                           .build_jit_runtime_receipted(directory: File.join(directory, 'jit-runtime'),
-                                                       archives: jit.link_archives)
+                                                       archives: jit.domain_archives)
       image = { 'path' => DOMAIN_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0,
                 'id' => 'domain-runtime', 'artifact' => runtime.fetch(:program), 'receipt' => runtime.fetch(:receipt) }
       jit_image = { 'path' => JIT_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0, 'jit' => true,
@@ -1711,16 +1710,15 @@ module Erx
     def crypto_archives(erts, jit)
       return [] unless jit
 
-      libcrypto = erts.crypto_archives.last
-      [*otp_archives(erts.crypto_archives - [libcrypto], flavour: 'emu'),
-       *otp_archives(jit.crypto_archives - [libcrypto], flavour: 'jit'),
-       Archive.new(path: libcrypto, label: 'openssl libcrypto', license: 'Apache-2.0', status: 'permanent',
+      [*otp_archives([erts.crypto.table, *erts.crypto.nifs], flavour: 'emu'),
+       *otp_archives([jit.crypto.table, *jit.crypto.nifs], flavour: 'jit'),
+       Archive.new(path: erts.crypto.libcrypto, label: 'openssl libcrypto', license: 'Apache-2.0', status: 'permanent',
                    notices: ['openssl/LICENSE.txt'])]
     end
 
     def archives(erts)
       spdx = 'fiasco/l4re-core/LICENSE.spdx'
-      [*otp_archives(erts.otp_archives, flavour: 'emu'),
+      [*otp_archives([erts.system_table, *erts.otp_archives], flavour: 'emu'),
        Archive.new(path: erts.libc, label: 'musl libc', license: 'MIT', status: 'permanent', notices: ['musl/COPYRIGHT']),
        Archive.new(path: erts.builtins, label: 'llvm compiler-rt builtins', license: CompilerRt::LICENSE,
                    status: 'permanent', notices: [CompilerRt.notice(root: @root, runner: @runner)]),

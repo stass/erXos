@@ -853,7 +853,7 @@ module Erx
                             .build(interpreter: interpreter, jobs: jobs)
       NativeRoot.new(root: ROOT, runner: runner, compiler: compiler, linker: linker, platform: platform, fiasco: fiasco)
                 .build_jit_runtime_receipted(directory: File.join(ROOT, NativeJitRuntime::BASE, 'image'),
-                                             archives: jit.link_archives)
+                                             archives: jit.domain_archives)
                 .fetch(:program)
     end
 

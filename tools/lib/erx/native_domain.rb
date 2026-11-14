@@ -155,7 +155,7 @@ module Erx
         jit = NativeJitRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco)
                               .build(interpreter: erts)
         native.build_jit_runtime_receipted(directory: File.join(@build, 'erts-jit'),
-                                           archives: jit.link_archives)
+                                           archives: jit.domain_archives)
               .fetch(:program)
       end
 

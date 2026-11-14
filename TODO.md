@@ -1675,10 +1675,13 @@ it; git history is the record of completed work.
   from `crypto:strong_rand_bytes/1`, not bytes, is not written. No test hook makes the generator service refuse one domain's
   reads, and refusing them from the domain's start ends it before ERTS runs (`liberx/backend/fiasco/libc_start.c`, AT_RANDOM's
   read, `ERX_FIASCO_TASK_STATUS_ENTROPY`), so the hook must refuse a running domain's reads only. The passing half runs in
-  native_domain's crypto and jit_crypto cases.
-* [Low] crypto NIFs, link lists (`tools/lib/erx/native_runtime.rb`, `production_image.rb`): `crypto_archives` is a positional
-  array whose last entry `ProductionImage#crypto_archives` takes as libcrypto; make it a `Data` with named parts, name the two
-  flavours' link lists alike (`domain_archives`, `link_archives`), and derive the system image's list beside them.
+  native_domain's crypto and jit_crypto cases, and is K2's one test on a built image: it fails if `rand_unix.c`'s edit is
+  lost (the weak `getentropy` ends the seed in `ENOSYS`), but only the failing half shows `erx_entropy_read` is the only seed.
+* [Low] crypto NIFs, table make rule (`otp/erts/emulator/Makefile.in`, `driver_tab_crypto.c`): the table depends on the
+  archives' times, not on `ERX_CRYPTO_NIF_LIBS`'s value, and its empty-variable guard runs only when the table is remade.
+  An archive taken out of `DomainImageApps` leaves a stale table whose init function no link defines, so the link fails
+  closed, but on an undefined symbol that needs the runtime copy cleaned by hand. A stamp file of the variable's value as
+  a prerequisite would remake it.
 * [Low] crypto NIFs, seam check (`tools/lib/erx/runtime_seam.rb`, `nifs:`): the NIF archives' definitions count as inside ERTS's
   import check, but their own imports from musl and libcrypto are not compared with `imports.txt`.
 * [Low] OpenSSL, build (`tools/lib/erx/libcrypto.rb`): `__FILE__` in libcrypto's error records is the source's path
