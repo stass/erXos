@@ -77,8 +77,8 @@ GENET's descriptors are not in memory: 256 per direction, each three
 32-bit registers (status, address low, address high), sit in its register
 window at `0x2000` for receive and `0x4000` for transmit
 (FreeBSD's `if_genetreg.h:116-124, 168-192`), and FreeBSD gives its
-buffers DMA tags limited to 40-bit addresses (`if_genet.c:586-589,
-611-614`). EMMC2,
+buffers DMA tags limited to 40-bit addresses (`if_genet.c:616-619,
+641-644`). EMMC2,
 `/emmc2bus/mmc@7e340000`, sits on a bus of its own whose `dma-ranges` map
 bus address `0xC0000000` to the first GiB of RAM
 (`bcm2711.dtsi:418-432`); the tree's comment says the firmware rewrites
@@ -150,18 +150,18 @@ that is meant to order cache maintenance must order both loads and stores
 maintenance issued before it by the CPU that executes it (section 6,
 p.14).
 
-**What FreeBSD does.** FreeBSD 14.1's arm64 `busdma`, for a tag that is
+**What FreeBSD does.** FreeBSD 15.1's arm64 `busdma`, for a tag that is
 not coherent, cleans to the point of coherency before the device reads
-(`sys/arm64/arm64/busdma_bounce.c:1055-1058`), writes back the partial
+(`sys/arm64/arm64/busdma_bounce.c:993-996`), writes back the partial
 lines at a buffer's ends and invalidates before the device writes
-(`:1059-1071, 1012-1024`), and invalidates after it wrote (`:1072-1075`),
+(`:997-1009, 950-962`), and invalidates after it wrote (`:1010-1013`),
 with `DSB SY` after the maintenance that precedes a transfer and before
-the CPU reads what one wrote (`:1097-1102, 1175-1180`). Its maintenance
+the CPU reads what one wrote (`:1035-1040, 1113-1118`). Its maintenance
 loops step by the data cache line, which it takes from `DminLine`
-(`cpufunc_asm.S:52-80`; `identcpu.c:2780-2790`), and it aligns and sizes
-a non-coherent buffer to that line (`busdma_bounce.c:277-290`), not to
+(`cpufunc_asm.S:54-82`; `identcpu.c:3313-3323`), and it aligns and sizes
+a non-coherent buffer to that line (`busdma_bounce.c:282-295`), not to
 `CWG`; on the Pi 4's CPU the two are equal. Memory a driver asks to be
-coherent on a non-coherent tag it maps uncached (`:533-541`). Its
+coherent on a non-coherent tag it maps uncached (`:515-523`). Its
 `mb()`, `rmb()` and `wmb()` are full-system `DMB`s (`atomic.h:51-56`).
 The virtio specification makes a device write at least the
 length it reports, and notes that a driver that does not know how much
@@ -613,7 +613,7 @@ and a reset that stops the transfer leaves the queue in flight until
 their reset values: both FreeBSD and Linux set power, clock and the
 interrupt enables again after it
 ([facts record](research-sdhci-bcm2711.md#reset); FreeBSD's
-`sdhci.c:386-405`). Which other fields each reset clears no source read
+`sdhci.c:385-404`). Which other fields each reset clears no source read
 here lists in full, and the design does not need it to.
 
 ## The three descriptor forms
@@ -671,8 +671,8 @@ and the error bits, overflow (bit 0), CRC error (bit 1), receive error
 whose meanings come from register-field names alone). The driver drops a
 frame that lacks start or end of packet or has any of bits 0 to 4 set,
 the wider of the two published drivers' rules, since FreeBSD tests only
-bit 2 (`if_genet.c:1370-1381`). The status word is the descriptor's
-status register when the status block is off (`if_genet.c:1362-1366`),
+bit 2 (`if_genet.c:1404-1415`). The status word is the descriptor's
+status register when the status block is off (`if_genet.c:1396-1400`),
 so the driver needs no status block to see the flags. A receive post is
 `badarg`. An index or a length beyond its bound breaks
 the queue, as a malformed used entry does.
@@ -723,7 +723,7 @@ back.
 * `complete/2` in flight reads `interrupt` once. Any end status but
   transfer complete, or the error summary, alone or with transfer
   complete, breaks the queue: errors win, as in FreeBSD's data interrupt
-  handler (`sdhci.c:2244-2259`), the buffer stays posted, `interrupt` is
+  handler (`sdhci.c:2250-2265`), the buffer stays posted, `interrupt` is
   left as it is for the driver to read and log, and the queue is
   `{error, broken}` until `negotiate/2`. A block gap event cannot arise,
   since no stop is ever requested; were one read, it would say the
@@ -764,7 +764,7 @@ buffer goes back to its pool only through a completion or through it, as
 | Form | Reset the NIF writes | Idle report it reads | Install |
 | --- | --- | --- | --- |
 | split ring | status 0 | status reads 0 | virtio's initialisation, as now |
-| register ring | each direction's DMA control with the engine (bit 0) and every ring's enable (bits 1 to 17) cleared in one write, transmit first (`if_genetreg.h:209-218`; FreeBSD's `gen_dma_disable`, `if_genet.c:563-577`; [GENET facts record](research-genet-bcm2711.md#stopping-the-dma-and-confirming-it-stopped)) | each direction's DMA status, block offset `0x1048`, reads bit 0 set, the block disabled, and bit *n* + 1 set for the ring *n* the form uses, bit 17 for FreeBSD's ring 16 ([The DMA status register](research-genet-bcm2711.md#the-dma-status-register)); the ring bit's meaning is inferred, and the board pass settles it | every descriptor's address; for the one ring the form uses, indexes zero, ring and buffer size, start, end and the four pointers, high halves 0; every receive buffer zeroed and handed; ring configuration and DMA control with the ring's enable; then each direction's engine bit, receive first ([Reinstalling the rings](research-genet-bcm2711.md#reinstalling-the-rings)) |
+| register ring | each direction's DMA control with the engine (bit 0) and every ring's enable (bits 1 to 17) cleared in one write, transmit first (`if_genetreg.h:209-218`; FreeBSD's `gen_dma_disable`, `if_genet.c:593-607`; [GENET facts record](research-genet-bcm2711.md#stopping-the-dma-and-confirming-it-stopped)) | each direction's DMA status, block offset `0x1048`, reads bit 0 set, the block disabled, and bit *n* + 1 set for the ring *n* the form uses, bit 17 for FreeBSD's ring 16 ([The DMA status register](research-genet-bcm2711.md#the-dma-status-register)); the ring bit's meaning is inferred, and the board pass settles it | every descriptor's address; for the one ring the form uses, indexes zero, ring and buffer size, start, end and the four pointers, high halves 0; every receive buffer zeroed and handed; ring configuration and DMA control with the ring's enable; then each direction's engine bit, receive first ([Reinstalling the rings](research-genet-bcm2711.md#reinstalling-the-rings)) |
 | ADMA2 table | the software reset for the data lines (FreeBSD's `sdhci.h:200-203`) | the reset bit reads clear | host control 2's owned fields checked clear, the DMA select written to ADMA2 with 32-bit descriptors; `adma_address` is written by each post |
 
 Where the idle report does not yet show, `negotiate/2` returns
@@ -1024,7 +1024,7 @@ zeroing skipped.
 ## Alternatives considered
 
 * **Non-cacheable mappings for DMA memory**, as FreeBSD uses for coherent
-  allocations on a non-coherent tag (`busdma_bounce.c:533-541`). It needs a memory attribute the
+  allocations on a non-coherent tag (`busdma_bounce.c:515-523`). It needs a memory attribute the
   kernel does not have, since it fixes the attributes at boot to normal
   write-back and two device attributes
   ([design-kernel.md](design-kernel.md#dma-and-the-iommu)), and the NIF's
@@ -1034,7 +1034,7 @@ zeroing skipped.
   to remember its handoffs, cleans, invalidates and barriers; deriving
   them from the queue's change of state makes that list empty.
 * **Invalidate before the device writes**, besides after, as FreeBSD
-  does (`busdma_bounce.c:1059-1071`). A clean suffices, since the CPU
+  does (`busdma_bounce.c:997-1009`). A clean suffices, since the CPU
   stores nothing into the region afterwards and the clean and invalidate
   after the transfer discards any stale line; and user mode cannot
   invalidate alone.
@@ -1073,12 +1073,13 @@ zeroing skipped.
 * Linux 6.18's device trees (`deps.lock`, `linux-dts`):
   `arch/arm/boot/dts/broadcom/bcm2711.dtsi` and `bcm2711-rpi.dtsi`, read
   as data.
-* FreeBSD 14.1.0 (`release/14.1.0`): `sys/arm64/broadcom/genet/if_genet.c`
-  (SHA-256 `5408c2fb...`) and `if_genetreg.h` (`5af53d30...`), the source
-  of the GENET driver's design; `sys/dev/sdhci/sdhci.c` (`7c4b440c...`)
+* FreeBSD 15.1.0 (`release/15.1.0`): `sys/arm64/broadcom/genet/if_genet.c`
+  (SHA-256 `fbf5c90d...`) and `if_genetreg.h` (`5af53d30...`), the source
+  of the GENET driver's design and the same files as at the network
+  stack's pin, `975e3605ebb1`; `sys/dev/sdhci/sdhci.c` (`4551b7d7...`)
   and `sdhci.h` (`363ed505...`); `sys/arm64/arm64/busdma_bounce.c`
-  (`1f01f90c...`), `cpufunc_asm.S` (`42ea4027...`) and `identcpu.c`
-  (`3c533813...`); `sys/arm64/include/atomic.h` (`604acc09...`).
+  (`4707aa4e...`), `cpufunc_asm.S` (`b6de008e...`) and `identcpu.c`
+  (`ed62337a...`); `sys/arm64/include/atomic.h` (`e65760cd...`).
 * The clean-room facts records of the BCM2711's SD controller,
   [research-sdhci-bcm2711.md](research-sdhci-bcm2711.md), and of its
   Ethernet controller, [research-genet-bcm2711.md](research-genet-bcm2711.md).

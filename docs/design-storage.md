@@ -2210,16 +2210,17 @@ outside this design are decided
   [research-sdhci-bcm2711.md](research-sdhci-bcm2711.md), facts and
   working principles without code, written by an agent that writes no
   erXos code for this driver. The facts record cites FreeBSD
-  14.3.0-RELEASE at `8c9ce319fef765890ce518cab85d3a470b669849`, while this design cites `releng/15.0`
-  at `2b7df8c16d`, below; both were fetched and compared for this design. The files either cites differ only
+  14.3.0-RELEASE at `8c9ce319fef765890ce518cab85d3a470b669849`, while this design cites `release/15.1.0`,
+  below; both were fetched and compared for this design. The files either cites differ only
   in build interfaces (headers, `DEVICE_UNIT_ANY`, `bus_attach_children`), sysctl
-  types, a quirks sysctl and two early returns for SPI-mode buses in `mmc.c`; no
+  types, a quirks sysctl, two early returns for SPI-mode buses in `mmc.c` and a
+  local renamed in `mmcsd.c`'s `mmcsd_task` (lines 1425-1482), which no citation reaches; no
   fact this design or the record cites differs, though line numbers shift by a
   few lines. The 14.3.0 hashes: `sdhci.c` `f610ce62058120de45448333be459373e992d753c4a384d8222839459b3b1abc`, `sdhci_fdt.c`
   `71439ab0aafdf17b5249d87f56fa1a0f3d66e29672d199b27fd960bd0fcd59e8`, `mmc.c` `738725016981e017ed31497938b4fd7744246c7046ba6a2962005931e4ba5dfa`, `mmcreg.h` `74ff2ab498265ad51188205858899a0122089a47c9924e61a3002808deb47829`,
   `mmcsd.c` `896acbb6e1e7689a006e1232f2c2ec6371b64af3931dba5c57916c5aa1c5557d`, `bcm2835_sdhci.c` `2928861d93c34d42a5cde74bf523e5f1018ee68de3c5c35f33620d2059952a92`, and `sdhci.h`
-  identical; `sdhci_fdt.c`, which neither cites for EMMC2, was reworked. The code reference is FreeBSD's SD stack,
-  `releng/15.0` at commit `2b7df8c16dc77a6774a4d309477b1238fe725d93`,
+  identical; `sdhci_fdt.c`, which neither cites for EMMC2, was reworked. The code reference is FreeBSD's SD stack
+  at `release/15.1.0`,
   fetched from github.com/freebsd/freebsd-src and read as data:
   `sys/dev/sdhci/sdhci.c` (SHA-256
   `4551b7d7842dfb2ffcdc2a565686a6dad5d6aa74606abd9cdc647e98d29eb500`),
@@ -2232,7 +2233,7 @@ outside this design are decided
   `sys/dev/mmc/mmcreg.h`
   (`1e782e73c04e8cd570a433b2cadc585237e5f8593c3b5a3c8fef92e57a2c7353`),
   `sys/dev/mmc/mmcsd.c`
-  (`385f80d00daad564e9304a1d8a088cee2a3d7983216d153e32dd6ed32760d897`)
+  (`ae9a8d2796dda8e075cf06e66f8ee728abd04428585cb1431dcf16ccf600aae6`)
   and `sys/arm/broadcom/bcm2835/bcm2835_sdhci.c`
   (`28c9af6fa2f549dbfc5bd239b0edd592da2df83833e021f76ff599826d8de56f`),
   whose compatible table drives `brcm,bcm2711-emmc2`

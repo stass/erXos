@@ -1941,6 +1941,13 @@ trial request, is in
 
 ## Dependencies
 
+FreeBSD is read at one reference release, 15.1: a document or source
+file that cites FreeBSD's source cites the tag `release/15.1.0` or its
+patch release `release/15.1.0-p6` (`95719d8a`), at which the rows below
+pin what the build takes from FreeBSD. The network stack, its drivers
+included, is pinned apart, at the 16.0-CURRENT commit its row names.
+Research records keep the release they were checked against.
+
 | Component | Purpose | License | Status | How it enters |
 | --- | --- | --- | --- | --- |
 | Erlang/OTP 29.1.2 (ERTS and the shipped applications, `crypto`, `asn1`, `public_key`, `ssh` and `ssl` among them for the releases that ask for them) | the runtime and the system's Erlang code | Apache-2.0; `public_key`'s PKCS #3 and PKCS #5 ASN.1 specifications are under their own notices, `LicenseRef-RSA-PKCS3` (the Internet Society's RFC notice: derivative works that assist in implementing the document may be copied and distributed with its copyright notice and that paragraph kept) and `LicenseRef-RSA-PKCS5v2-0` (RSA Security's: copies are allowed if identified as RSA Security PKCS), which count as permissive, and every image with the modules made from them carries each one's notice | permanent | imported into `otp/` as erXos's code, with an origin file |

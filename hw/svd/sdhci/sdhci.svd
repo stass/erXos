@@ -7,7 +7,7 @@
      from two sources. The SD Association's SD Host Controller Simplified Specification,
      version 4.20, gives each register's layout, cited as "HC" with section and printed
      page; it is not in the tree, whose redistribution its terms do not grant. FreeBSD's
-     sys/dev/sdhci/sdhci.h, releng/15.0 at 2b7df8c16dc77a6774a4d309477b1238fe725d93
+     sys/dev/sdhci/sdhci.h at release/15.1.0
      (SHA-256 363ed505d9ec77603b1b0d46e689da80600e72ce5948d5b2efe70571059b2b78, the
      same file as 14.3.0-RELEASE's), names the bits, cited by line. A bit FreeBSD leaves
      unnamed is in no field, so write/3 refuses a word that sets it; where FreeBSD

@@ -716,13 +716,13 @@ follows the handoff rules of
 [design-device-dma.md](design-device-dma.md#the-construction-handoffs-of-granules)
 with these instructions, all to the point of coherency, as FreeBSD's
 arm64 `busdma` issues them for a tag that is not coherent
-(`sys/arm64/arm64/busdma_bounce.c:1027-1180`, `cpufunc_asm.S:52-80` at
-release 14.1.0):
+(`sys/arm64/arm64/busdma_bounce.c:965-1118`, `cpufunc_asm.S:54-82` at
+`release/15.1.0`):
 
 | Generic step | AArch64 |
 | --- | --- |
 | the granule | `4 << CTR_EL0.CWG` bytes, read once at EL0 under `UCT`; 2 KiB where `CWG` is 0 ([open decision 2](design-device-dma.md#open-decisions)) |
-| the line | `4 << CTR_EL0.DminLine` bytes, the smallest data cache line, read with it (Cortex-A72 TRM, Table 4-40; FreeBSD's `identcpu.c:2780-2790`) |
+| the line | `4 << CTR_EL0.DminLine` bytes, the smallest data cache line, read with it (Cortex-A72 TRM, Table 4-40; FreeBSD's `identcpu.c:3313-3323`) |
 | clean, when handing a region to a device | `DC CVAC` at every line of the region, stepping by the line |
 | clean and invalidate, when taking a region back | `DC CIVAC` at every line of the region, stepping by the line; `DC IVAC` is not available at EL0, so a driver can never discard data it did not write |
 | the publish barrier | `DSB SY` after maintenance; for a coherent device `DMB SY`, which orders the loads of a buffer just copied out as well as the stores before the register store |
@@ -730,7 +730,7 @@ release 14.1.0):
 | the completion barrier | `DSB SY` after the `DC CIVAC`s, before the loads that read what they took back |
 
 The barriers are full-system, as FreeBSD's DMA barriers are
-(`busdma_bounce.c:1097-1102, 1175-1180`; `atomic.h:51-56`). The
+(`busdma_bounce.c:1035-1040, 1113-1118`; `atomic.h:51-56`). The
 register stores that follow a publish barrier reach one device in
 program order, since both device attributes forbid reordering. A
 data cache instruction by address reaches every cache of the inner
