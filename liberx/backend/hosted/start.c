@@ -48,8 +48,11 @@ static const char *const report_words[] = { "ERX_HOSTED_GROUP_REPORT", "ERX_HOST
 static char zone_word[] = "TZ=UTC";
 static char *hosted_environ[1 + REPORT_WORDS_COUNT + 1] = { zone_word };
 
-/* What the entry adds after the manifest's words: the console's driver, read at its start. */
-static const char console_driver_words[] = ERX_BOOT_RECORD_FLAG "\0console_driver\0erx_stdio";
+/*
+ * What the entry adds after the manifest's words: the console's record, whose peripheral is
+ * the process's standard input and output, which erx_console drives with erx_stdio.
+ */
+static const char console_words[] = ERX_BOOT_RECORD_FLAG "\0console\0stdio";
 
 _Noreturn static void
 fail(const char *reason)
@@ -158,7 +161,7 @@ int
 main(int argc, char **argv)
 {
 	const size_t nwords = argc > 2 ? (size_t)argc - 2 : 0;
-	/* The manifest's words and the driver's, then the command line after the archive's path. */
+	/* The manifest's words and the console's record, then the command line after the archive's path. */
 	const size_t nargs = 2 + nwords;
 	erx_boot_words_t *const args = calloc(nargs, sizeof(*args));
 	const uint32_t cpus = host_cpus();
@@ -172,7 +175,7 @@ main(int argc, char **argv)
 	release_map(argv[1]);
 	manifest_read(&manifest);
 	args[0] = manifest.system_args;
-	args[1] = (erx_boot_words_t){ console_driver_words, sizeof(console_driver_words) };
+	args[1] = (erx_boot_words_t){ console_words, sizeof(console_words) };
 	for (size_t at = 0; at < nwords; at++) {
 		/* The NUL is what tells the page an empty argument from no words at all. */
 		args[2 + at] = (erx_boot_words_t){ argv[at + 2], strlen(argv[at + 2]) + 1 };

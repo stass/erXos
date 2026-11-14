@@ -47,34 +47,39 @@ the_erlang_shell_in_front_is_reported_test() ->
 
 shell_entry({Group, Tag}, Shell) -> {Group, {self(), Tag}, Shell}.
 
-%% -- The console's driver, from `-erx_record console_driver Module` -----------------
+%% -- The console's driver, from `-erx_record console PERIPHERAL ...` ----------------
 
-the_last_naming_of_a_driver_wins_test() ->
-    ?assertEqual({ok, erx_stdio},
-                 erx_console:console_driver([["console_driver", "erx_pl011"], ["build", "7"],
-                                             ["console_driver", "erx_stdio"]])),
-    ?assertEqual({ok, erx_mini_uart},
-                 erx_console:console_driver([["console_driver", "erx_mini_uart", "quiet"]])).
+-define(UART, ["4096", "4096", "33", "direct", "24000000"]).
 
-no_console_driver_record_is_refused_test() ->
-    ?assertMatch({error, {no_console_driver, _}}, erx_console:console_driver([["build", "7"]])),
-    ?assertMatch({error, {no_console_driver, _}}, erx_console:console_driver([["console_driver"]])).
+each_console_peripheral_names_its_driver_test() ->
+    ?assertEqual({ok, erx_pl011},
+                 erx_console:console_driver([["build", "7"], ["console", "pl011" | ?UART]])),
+    ?assertEqual({ok, erx_mini_uart}, erx_console:console_driver([["console", "mini_uart" | ?UART]])),
+    ?assertEqual({ok, erx_stdio}, erx_console:console_driver([["console", "stdio"]])),
+    ?assertEqual({ok, erx_stdio}, erx_console:console_driver([["console", "stdio", "quiet"]])).
 
-%% A word that names no console driver is refused, and becomes no atom: the system
+no_console_record_is_refused_test() ->
+    ?assertMatch({error, {no_console, _}}, erx_console:console_driver([["build", "7"]])),
+    ?assertMatch({error, {no_console, _}}, erx_console:console_driver([["console"]])).
+
+more_than_one_console_record_is_refused_test() ->
+    ?assertMatch({error, {bad_console, _}},
+                 erx_console:console_driver([["console", "pl011" | ?UART], ["console", "stdio"]])).
+
+%% A peripheral no console driver drives is refused, and becomes no atom: the system
 %% domain's atom table grows only within bounds its own policy sets.
-an_unknown_driver_is_refused_and_makes_no_atom_test() ->
-    Word = "erx_no_console_driver_" ++ integer_to_list(erlang:unique_integer([positive])),
+an_unknown_peripheral_is_refused_and_makes_no_atom_test() ->
+    Word = "erx_no_console_" ++ integer_to_list(erlang:unique_integer([positive])),
     ?assertError(badarg, list_to_existing_atom(Word)),
-    ?assertMatch({error, {bad_console_driver, _}},
-                 erx_console:console_driver([["console_driver", "erx_pl011"], ["console_driver", Word]])),
+    ?assertMatch({error, {bad_console, _}}, erx_console:console_driver([["console", Word | ?UART]])),
     ?assertError(badarg, list_to_existing_atom(Word)).
 
 %% A word longer than any atom is refused as any other unknown word is.
 a_word_no_atom_can_hold_is_refused_test() ->
-    ?assertMatch({error, {bad_console_driver, _}},
-                 erx_console:console_driver([["console_driver", lists:duplicate(256, $a)]])).
+    ?assertMatch({error, {bad_console, _}},
+                 erx_console:console_driver([["console", lists:duplicate(256, $a)]])).
 
-%% A module that is no console driver is refused, though its atom exists.
-a_module_that_is_no_driver_is_refused_test() ->
-    ?assertMatch({error, {bad_console_driver, _}},
-                 erx_console:console_driver([["console_driver", "erlang"]])).
+%% A driver's module, or any module, is no peripheral, though its atom exists.
+a_module_is_no_peripheral_test() ->
+    [?assertMatch({error, {bad_console, _}}, erx_console:console_driver([["console", Word]]))
+     || Word <- ["erx_pl011", "erx_stdio", "erlang"]].

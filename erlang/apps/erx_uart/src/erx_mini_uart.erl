@@ -58,7 +58,7 @@ spec() ->
         {error, Reason} -> exit(Reason)
     end.
 
-%% The console's device words, `-erx_record console_uart Base Size Line Mark Clock`, which the root
+%% The console's device words, `-erx_record console mini_uart Base Size Line Mark Clock`, which the root
 %% writes from the manifest's console row; words after the clock are ignored. Mark is
 %% `shared` when another device of the console's unit names its line, as the auxiliary SPI
 %% controllers name the mini UART's on the Raspberry Pi 4, which reaches erx_device:open/1
@@ -66,25 +66,25 @@ spec() ->
 %% UART's row carries no clock, so Clock is 0.
 -spec console_uart([[string()]]) -> {ok, erx_device:spec()} | {error, {atom(), string()}}.
 console_uart(Arguments) ->
-    case [Words || ["console_uart" | Words] <- Arguments] of
+    case [Words || ["console", "mini_uart" | Words] <- Arguments] of
         [[Base, Size, Line, Mark, Clock | _]] ->
             case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32), mark(Mark)} of
                 {{ok, B}, {ok, S}, {ok, L}, {ok, 0}, {ok, Sharing}} ->
                     {ok, #{peripheral => mini_uart, window => {physical, B, S}, lines => [marked(Sharing, L)]}};
                 {{ok, _}, {ok, _}, {ok, _}, {ok, 0}, error} ->
-                    {error, {bad_console_uart, "console_uart's line mark is neither direct nor shared"}};
+                    {error, {bad_console_uart, "the console's line mark is neither direct nor shared"}};
                 {{ok, _}, {ok, _}, {ok, _}, {ok, _}, _} ->
                     {error, {bad_console_uart, "the mini UART's row carries a clock"}};
                 _ ->
-                    {error, {bad_console_uart, "console_uart's base, size, line or clock is not a "
+                    {error, {bad_console_uart, "the console's base, size, line or clock is not a "
                                               "decimal number of its field's width"}}
             end;
         [_] ->
-            {error, {bad_console_uart, "console_uart has fewer than four numbers and a line mark"}};
+            {error, {bad_console_uart, "the console record has fewer than four numbers and a line mark"}};
         [] ->
-            {error, {no_console_uart, "the manifest names no device entry as machine.console"}};
+            {error, {no_console_uart, "no -erx_record console names this UART"}};
         [_, _ | _] ->
-            {error, {bad_console_uart, "more than one console_uart entry"}}
+            {error, {bad_console_uart, "more than one console record of this UART"}}
     end.
 
 %% The line's mark word (docs/design-shared-devices.md, "Lines inside a domain"), and the

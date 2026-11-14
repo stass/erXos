@@ -23,9 +23,9 @@ image(Extents) ->
 
 boot_slot_test_() ->
     [?_assertEqual({ok, none}, erx_blk_image:boot_slot([])),
-     ?_assertEqual({ok, none}, erx_blk_image:boot_slot([["console_uart", "1", "2", "3"]])),
+     ?_assertEqual({ok, none}, erx_blk_image:boot_slot([["console", "pl011", "1", "2", "3"]])),
      ?_assertEqual({ok, none}, erx_blk_image:boot_slot([["boot", "unknown", "none"]])),
-     ?_assertEqual({ok, slot_a}, erx_blk_image:boot_slot([["console_uart"], ["boot", "normal", "a"]])),
+     ?_assertEqual({ok, slot_a}, erx_blk_image:boot_slot([["console", "pl011"], ["boot", "normal", "a"]])),
      ?_assertEqual({ok, slot_b}, erx_blk_image:boot_slot([["boot", "trial", "b"]])),
      ?_assertEqual({ok, slot_a}, erx_blk_image:boot_slot([["boot", "trial", "a"]]))].
 

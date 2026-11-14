@@ -39,8 +39,8 @@
 %% shell and stops, never halting the runtime. A shell holds its console as a terminal (terminal/1),
 %% so neither the shell nor its commands name the console they run on.
 %%
-%% The system console's driver is the module `-erx_record console_driver Module` names, one of the
-%% closed set ?DRIVERS lists (console_driver/1). It implements
+%% The system console's driver is the module of the peripheral `-erx_record console PERIPHERAL`
+%% names (console_driver/1). It implements
 %% `Module:console_records() -> [erx_device:spec()]`, the device records it drives, and
 %% `Module:start_link(Console) -> {ok, pid(), Terminal}`, where Terminal says whether a
 %% person's terminal is on the line, and exchanges these messages:
@@ -158,8 +158,6 @@
 %% How long the console waits to ask again when the log service is not running.
 -define(LOG_ASK_MS, 1000).
 -define(ESC, 16#1B).
-%% The system console's drivers: the console UARTs' and hosted mode's.
--define(DRIVERS, [erx_pl011, erx_mini_uart, erx_stdio]).
 
 -record(state, {role :: system | session,
                 name :: atom(),
@@ -755,23 +753,24 @@ driver_module() ->
 
 -doc """
 The system console's driver among boot records as erx_device_record:records/0 returns
-them: the module the last `-erx_record console_driver Module` names, since the hosted
-entry adds its driver after the manifest's arguments, and a plain word of the command
-line may follow the name. The name is matched against the console's drivers, so no word
-becomes an atom, and one that names none of them is refused. Pure, for its tests.
+them: the driver of the peripheral the one `-erx_record console PERIPHERAL` names, which
+the root writes for the console's UART and the hosted entry for its standard I/O. Words
+after the peripheral are the driver's to read. A peripheral that no driver drives is
+refused, and no word becomes an atom. Pure, for its tests.
 """.
 -spec console_driver([[string()]]) -> {ok, module()} | {error, {atom(), string()}}.
 console_driver(Records) ->
-    case [Word || ["console_driver", Word | _] <- Records] of
-        [] ->
-            {error, {no_console_driver, "no -erx_record console_driver names a driver"}};
-        Words ->
-            Word = lists:last(Words),
-            case [Module || Module <- ?DRIVERS, atom_to_list(Module) =:= Word] of
-                [Driver] -> {ok, Driver};
-                [] -> {error, {bad_console_driver, "-erx_record console_driver names no console driver"}}
-            end
+    case [Peripheral || ["console", Peripheral | _] <- Records] of
+        [Peripheral] -> driver(Peripheral);
+        [] -> {error, {no_console, "the boot gave no -erx_record console"}};
+        [_, _ | _] -> {error, {bad_console, "more than one -erx_record console"}}
     end.
+
+%% The console's driver of each peripheral a console record may name.
+driver("pl011") -> {ok, erx_pl011};
+driver("mini_uart") -> {ok, erx_mini_uart};
+driver("stdio") -> {ok, erx_stdio};
+driver(_Peripheral) -> {error, {bad_console, "-erx_record console names a peripheral no console driver drives"}}.
 
 encoding(true) -> unicode;
 encoding(false) -> latin1.

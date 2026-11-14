@@ -68,8 +68,8 @@ static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
  * each erx.arg word, which takes a byte and its NUL at the least.
  */
 static erx_boot_words_t arg_words[4 + ERX_BOOT_DEVICES_MAX + ERX_BOOT_STRINGS_MAX / 2];
-/* -erx_record console_uart BASE SIZE LINE MARK CLOCK (erx_boot_console_words). */
-static char console_uart_words[ERX_BOOT_CONSOLE_WORDS_MAX];
+/* -erx_record console PERIPHERAL BASE SIZE LINE MARK CLOCK (erx_boot_console_words). */
+static char console_words[ERX_BOOT_CONSOLE_WORDS_MAX];
 /* Each device record's words: the given form's, or the host link's physical one, which is shorter. */
 static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_GIVEN_WORDS_MAX];
 /*
@@ -262,8 +262,9 @@ release_read(const erx_boot_handoff_view_t *handoff, bool hostlink, erx_boot_man
  * value and slot of the handoff, the boot image's build identifier, which the host link's hello
  * reports (docs/design-live.md, "The host link"), each device record (docs/design-stopgap.md, "Device records"),
  * then each erx.arg word of the kernel command line, in its order. A plain word joins the flag
- * before it, which erx_pl011 expects. A manifest with no console entry has no such words, and
- * the driver's start then says why the console has none.
+ * before it, which the UART drivers expect. A manifest with no console entry, or one whose
+ * UART is of no kind the root knows, has no such words, and the console's start then says why
+ * it has no driver.
  */
 static const char *
 gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *manifest, size_t *nargs)
@@ -277,12 +278,12 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 
 	arg_words[(*nargs)++] = manifest->system_args;
 	if (manifest->console.size != 0) {
-		const size_t console_length = erx_boot_console_words(&manifest->console, console_uart_words,
-		    sizeof(console_uart_words));
+		const size_t console_length = erx_boot_console_words(&manifest->console, console_words,
+		    sizeof(console_words));
 
 		if (console_length == 0)
 			return ("the console: its words outgrow their room");
-		arg_words[(*nargs)++] = (erx_boot_words_t){ console_uart_words, console_length };
+		arg_words[(*nargs)++] = (erx_boot_words_t){ console_words, console_length };
 	}
 	boot_length = erx_boot_pair_words(handoff->boot.value, handoff->boot.slot, boot_words, sizeof(boot_words));
 	if (boot_length == 0)

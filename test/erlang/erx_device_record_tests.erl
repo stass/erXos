@@ -58,7 +58,7 @@ bad_marks() ->
 
 a_missing_disk_is_no_record_test() ->
     ?assertEqual({ok, []}, find([])),
-    ?assertEqual({ok, []}, find([["console_uart", "1", "2", "3", "direct", "4"], ["console_driver", "erx_pl011"]])).
+    ?assertEqual({ok, []}, find([["console", "pl011", "1", "2", "3", "direct", "4"], ["console", "stdio"]])).
 
 other_roles_and_peripherals_are_left_alone_test() ->
     ?assertEqual({ok, []}, find([["device", "network", "virtio_mmio", "x"],

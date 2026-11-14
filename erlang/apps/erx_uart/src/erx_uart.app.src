@@ -3,7 +3,7 @@
 
 %% The UART device class's drivers, over erx_device (docs/design-runtime.md, "The console
 %% and standard I/O"): the Arm PrimeCell UART PL011 and the BCM2711's mini UART, either of
-%% which the console drives when the boot's `-erx_record console_driver` names one.
+%% which the console drives when the boot's `-erx_record console` names its peripheral.
 {application, erx_uart,
  [{description, "erXos UART drivers"},
   {vsn, "1"},

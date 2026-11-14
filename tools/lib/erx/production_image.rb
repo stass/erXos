@@ -689,11 +689,11 @@ module Erx
       UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
       # The program's name, the twelve words of the flags erx_boot_argv_plan derives from the
       # page's limits and grant (-P, -Q, -t, -S, -SDcpu and -SDio with their values) and the node
-      # flag with its name, around the page's words, and the seven words of -erx_record console_uart BASE
+      # flag with its name, around the page's words, and the eight words of -erx_record console PERIPHERAL BASE
       # SIZE LINE MARK CLOCK, the four of -erx_record boot VALUE SLOT and the three of -erx_record build ID, which the
       # root adds to the manifest's. The allocator flags erx_boot_argv_plan ends its flags with are
       # counted from their one copy (allocator_words).
-      ARGUMENTS_FIXED = 29
+      ARGUMENTS_FIXED = 30
       # The file whose ALLOCATOR_WORDS string holds the allocator flags of every runtime.
       BOOT_INFO = 'liberx/backend/core/boot_info.c'
 

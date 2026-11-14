@@ -25,8 +25,12 @@
 /* system@, then an identifier of at most 63 bytes. */
 #define ERX_BOOT_NODE_MAX	(sizeof("system@") - 1 + 63)
 
-/* The manifest's device entry for machine.console; size 0 when no entry names it. */
+/*
+ * The manifest's device entry for machine.console; all 0, peripheral NULL, when no entry
+ * names it or its compatible string is no UART kind the root knows.
+ */
 typedef struct erx_boot_console {
+	const char	*peripheral;	/* the UART's CMSIS-SVD peripheral, the record's PERIPHERAL */
 	uint64_t	base;
 	uint64_t	size;
 	uint32_t	line;
@@ -129,10 +133,11 @@ uint64_t	erx_boot_console_page(const erx_boot_manifest_t *manifest);
 size_t	erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capacity);
 
 /*
- * Writes the console's words, -erx_record console_uart BASE SIZE LINE MARK CLOCK, as
+ * Writes the console's words, -erx_record console PERIPHERAL BASE SIZE LINE MARK CLOCK, as
  * erx_boot_device_words writes a physical record's, into words, and returns their whole
  * length; 0, having written nothing past capacity, when they do not fit, which
- * ERX_BOOT_CONSOLE_WORDS_MAX bytes (erx/boot_words.h) always do.
+ * ERX_BOOT_CONSOLE_WORDS_MAX bytes (erx/boot_words.h) always do, or when the console
+ * has no peripheral.
  */
 size_t	erx_boot_console_words(const erx_boot_console_t *console, char *words, size_t capacity);
 

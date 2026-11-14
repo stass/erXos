@@ -4,7 +4,7 @@
 %% Random argument lists through erx_mini_uart:console_uart/1. Whatever arrives, it returns
 %% {ok, Spec} or {error, {Atom, Text}}, and what it says agrees with reference/1, a reader
 %% that shares no code with it: it finds entries by filtering and numbers by a regular
-%% expression. The words come from a small alphabet of console_uart, digits near the field
+%% expression. The words come from a small alphabet of the console record's words, digits near the field
 %% bounds, signs, spaces and other characters, so duplicates, short entries and bad numbers
 %% are common. The mini UART's entry carries no clock, so only a clock of 0 parses. The seed comes from make check-fuzz.
 
@@ -42,10 +42,10 @@ verdict({ok, Spec}) -> {ok, Spec};
 verdict({error, {Reason, _Text}}) -> {error, Reason}.
 
 reference(Arguments) ->
-    case lists:filter(fun(["console_uart" | _]) -> true; (_) -> false end, Arguments) of
+    case lists:filter(fun(["console", "mini_uart" | _]) -> true; (_) -> false end, Arguments) of
         [] ->
             {error, no_console_uart};
-        [["console_uart", Base, Size, Line, Mark, Clock | _]] ->
+        [["console", "mini_uart", Base, Size, Line, Mark, Clock | _]] ->
             case {decimal(Base, 16#ffffffffffffffff), decimal(Size, 16#ffffffffffffffff),
                   decimal(Line, 16#ffffffff), decimal(Clock, 16#ffffffff)} of
                 {B, S, L, 0} when is_integer(B), is_integer(S), is_integer(L),
@@ -84,9 +84,9 @@ arguments() ->
 entry() ->
     Words = [word() || _ <- lists:seq(1, rand:uniform(?MAX_WORDS + 1) - 1)],
     case rand:uniform(3) of
-        1 -> ["console_uart" | Words];
+        1 -> ["console", "mini_uart" | Words];
         2 -> Words;
-        3 -> ["console_uart", number(), number(), number(), mark(), number() | Words]
+        3 -> ["console", "mini_uart", number(), number(), number(), mark(), number() | Words]
     end.
 
 mark() ->
@@ -103,5 +103,5 @@ word() ->
     Pick([Pick(["0", "1", "33", "4096", "150994944", "4294967295", "4294967296",
                 "18446744073709551615", "18446744073709551616", "018446744073709551615"]),
           integer_to_list(rand:uniform(1 bsl 70) - 1),
-          Pick(["", "-1", "+1", " 1", "1 ", "1\n", "0x10", "1e3", "x", "console_uart", "debug", "direct", "shared"]),
+          Pick(["", "-1", "+1", " 1", "1 ", "1\n", "0x10", "1e3", "x", "console", "pl011", "mini_uart", "debug", "direct", "shared"]),
           [Pick([$0, $9, $a, $-, $\s, 16#661, 16#ff10]) || _ <- lists:seq(1, rand:uniform(24))]]).

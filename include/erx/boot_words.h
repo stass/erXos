@@ -32,9 +32,9 @@
 /* A device's device-tree path, at most ERX_DEVICE_PATH_MAX bytes (erx_boot_device_path_valid). */
 #define ERX_BOOT_PATH_WORD_MAX		(ERX_DEVICE_PATH_MAX + 1u)
 
-/* -erx_record console_uart BASE SIZE LINE MARK CLOCK, the system domain's console. */
-#define ERX_BOOT_CONSOLE_WORDS_MAX	(sizeof(ERX_BOOT_RECORD_FLAG) + sizeof("console_uart") + \
-	4u * ERX_BOOT_NUMBER_WORD_MAX + ERX_BOOT_MARK_WORD_MAX)
+/* -erx_record console PERIPHERAL BASE SIZE LINE MARK CLOCK, the system domain's console. */
+#define ERX_BOOT_CONSOLE_WORDS_MAX	(sizeof(ERX_BOOT_RECORD_FLAG) + sizeof("console") + \
+	ERX_BOOT_NAME_WORD_MAX + 4u * ERX_BOOT_NUMBER_WORD_MAX + ERX_BOOT_MARK_WORD_MAX)
 
 /* -erx_record device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK, the system domain's physical record. */
 #define ERX_BOOT_DEVICE_WORDS_MAX	(sizeof(ERX_BOOT_RECORD_FLAG) + sizeof("device") + \

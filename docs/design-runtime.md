@@ -2416,11 +2416,12 @@ the terminal again.
 `erx_console` answers a `put_chars_sync` only on `erx_console_written`, so
 `io:format` returns when its bytes are out, as `write` on a UNIX terminal does.
 It assumes 80 by 24 until a driver reports a size, and a UART driver reports none.
-`-erx_record console_driver Module`, an ordinary argument of the boot information page,
-names the driver, and the last naming wins: the manifest names the console UART's driver,
-`erx_pl011`, and the hosted entry adds `erx_stdio` after it. The name is one of the
-console's closed set of drivers: the console refuses any other word and the boot fails
-with the reason, so no record word becomes an atom.
+`-erx_record console PERIPHERAL`, an ordinary argument of the boot information page,
+names the console's peripheral, and `erx_console` starts that peripheral's driver: the
+root writes the console UART's record from the device entry `machine.console` names, and
+the hosted entry writes `-erx_record console stdio`, which names `erx_stdio`
+([design-stopgap.md](design-stopgap.md#the-console)). The console refuses a peripheral it
+has no driver for, and the boot fails with the reason, so no record word becomes an atom.
 
 **Which input bytes mean something.** `erx_console` takes three bytes out of the
 stream, which no UTF-8 sequence contains: `Ctrl-C` becomes `exit(Group, interrupt)`,

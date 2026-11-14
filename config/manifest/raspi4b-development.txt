@@ -76,7 +76,7 @@ machine
   sealing none
   system_runtime_limits @runtime_limits.system
   native_limits @limits.native
-  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx_record console_driver erx_mini_uart -nocookie -no_epmd -proto_dist erx"
+  system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -nocookie -no_epmd -proto_dist erx"
 unit framebuffer
   placement "framebuffer"
   holder @domain.display

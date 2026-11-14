@@ -82,7 +82,7 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "node system@erxos\n"
-    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx_record console_driver erx_pl011 -nocookie -no_epmd -proto_dist erx \n"
+    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -nocookie -no_epmd -proto_dist erx \n"
     assert_includes output, "limits #{system_runtime_limits.join(' ')}\n"
   end
 
@@ -114,11 +114,11 @@ class BootManifestTest < Minitest::Test
   # DMA memory and clock. The console's UART, a UART of the same compatible string in a unit
   # the system domain holds, is no record, and the block and net units are the storage and
   # network domains', so the development manifest gives the system domain one record, the
-  # host link's: erx_pl011 reads -erx_record console_uart, whose numbers are the console's entry.
+  # host link's: erx_pl011 reads -erx_record console pl011, whose numbers are the console's entry.
   def test_the_hostlink_unit_gives_the_system_domain_s_one_device_record
     output, status = read(admitted)
     assert status.success?, output
-    assert_includes output, "console_uart 150994944 4096 33 direct 24000000\n"
+    assert_includes output, "console_uart pl011 150994944 4096 33 direct 24000000\n"
     assert_includes output, "devices 1\n"
     assert_includes output, "device hostlink pl011 151257088 4096 40 direct 0 24000000 " \
                             "words-erx_record device hostlink pl011 /pl011@9040000 151257088 4096 40 direct 24000000 exact 1 short 0\n"
@@ -143,16 +143,16 @@ class BootManifestTest < Minitest::Test
     assert_equal "{ok,[]}\n", result.lines.last
   end
 
-  # The flag stays apart from every application's name, erXos's and OTP's, and each shipped
-  # manifest names its console's driver on it, as the writers' records are.
-  def test_the_record_flag_names_no_application_and_carries_the_console_driver
+  # The flag stays apart from every application's name, erXos's and OTP's, and no shipped
+  # manifest writes a record in its system_args: the console's record is the root's.
+  def test_the_record_flag_names_no_application_and_no_manifest_writes_a_record
     flag = @codec.fixed_bytes('boot_record_flag')
     applications = Dir.glob(File.join(ROOT, '{erlang/apps,otp/lib}/*/src/*.app.src')).map { |path| File.basename(path, '.app.src') }
     assert_includes applications, 'erx'
     refute_includes applications, flag
     Dir.glob(File.join(ROOT, 'config/manifest/*.txt')).each do |path|
       File.read(path).scan(/^  system_args "(.*)"$/).flatten.each do |args|
-        assert_match(/(?:\A| )-#{Regexp.escape(flag)} console_driver \S/, args, path) if args.include?('console_driver')
+        refute_match(/(?:\A| )-#{Regexp.escape(flag)}(?: |\z)/, args, path)
       end
     end
   end
@@ -292,7 +292,7 @@ class BootManifestTest < Minitest::Test
     pi = Erx::Platform.load(root: ROOT, name: 'raspi4b').manifest_source(ROOT)
     output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
     assert status.success?, output
-    assert_includes output, "console_uart #{0xfe215040} 64 "
+    assert_includes output, "console_uart mini_uart #{0xfe215040} 64 "
     assert_includes output, "console_page #{0xfe215000}\n"
   end
 
@@ -411,16 +411,31 @@ class BootManifestTest < Minitest::Test
   def test_each_record_marks_whether_its_line_is_shared
     output, status = read(admitted)
     assert status.success?, output
-    assert_includes output, "console_uart 150994944 4096 33 direct 24000000\n"
-    assert_includes output, "console_words-erx_record console_uart 150994944 4096 33 direct 24000000 exact 1 short 0\n"
+    assert_includes output, "console_uart pl011 150994944 4096 33 direct 24000000\n"
+    assert_includes output, "console_words-erx_record console pl011 150994944 4096 33 direct 24000000 exact 1 short 0\n"
     assert_match(/^device hostlink pl011 \d+ \d+ 40 direct .*words-erx_record device hostlink pl011 \/pl011@9040000 \d+ \d+ 40 direct \d+ exact 1/, output)
     pi = Erx::Platform.load(root: ROOT, name: 'raspi4b').manifest_source(ROOT)
     output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
     assert status.success?, output
-    assert_match(/^console_uart #{0xfe215040} 64 125 shared \d+\n/, output)
-    assert_match(/^console_words-erx_record console_uart #{0xfe215040} 64 125 shared \d+ exact 1 short 0\n/, output)
+    assert_match(/^console_uart mini_uart #{0xfe215040} 64 125 shared \d+\n/, output)
+    assert_match(/^console_words-erx_record console mini_uart #{0xfe215040} 64 125 shared \d+ exact 1 short 0\n/, output)
     assert_match(/^device hostlink pl011 \d+ \d+ 153 shared .*words-erx_record device hostlink pl011 \/\S+ \d+ \d+ 153 shared \d+ exact 1/,
                  output)
+  end
+
+  # The console's record names the CMSIS-SVD peripheral of its entry's compatible string,
+  # from the root's table of UART kinds (docs/design-stopgap.md, "The console"); an entry
+  # of a compatible string no console driver drives gets no record, so the console refuses
+  # the boot with its reason rather than start a driver for a UART it does not know.
+  def test_a_console_of_no_uart_kind_gets_no_record
+    record = platform_record('qemu-virt')
+    console = record.fetch('units').flat_map { |unit| unit.fetch('devices') }
+                    .find { |device| device.fetch('path') == '/pl011@9000000' }
+    console.merge!('compatible' => 'ns16550a', 'clock' => 0)
+    output, status = read(admitted(record: record))
+    assert status.success?, output
+    assert_includes output, "console_uart none 0 0 0 direct 0\n"
+    assert_includes output, "console_wordsexact 0 short 0\n"
   end
 
   # A framebuffer row names no line, though its line field is 0 (erx/dom.h, the view gives
@@ -435,7 +450,7 @@ class BootManifestTest < Minitest::Test
                           stdout_path: '/soc/serial@7e215040')
     assert status.success?, output
     assert_includes output, "framebuffer #{0x3b40_0000} "
-    assert_match(/^console_uart #{0xfe215040} 64 0 direct \d+\n/, output)
+    assert_match(/^console_uart mini_uart #{0xfe215040} 64 0 direct \d+\n/, output)
   end
 
   # window: the row's window, by default every page but the last.

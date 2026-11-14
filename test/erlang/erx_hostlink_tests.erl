@@ -19,7 +19,7 @@ build_test_() ->
      ?_assertEqual({ok, <<"00000000000000ff">>}, erx_build:id([["build", "255"]])),
      ?_assertEqual({ok, <<"ffffffffffffffff">>}, erx_build:id([["build", Max]])),
      %% A plain word of the kernel command line may follow; it is not the build's.
-     ?_assertEqual({ok, <<"2255e43fb7866bb3">>}, erx_build:id([["console_uart", "1", "2", "3"],
+     ?_assertEqual({ok, <<"2255e43fb7866bb3">>}, erx_build:id([["console", "pl011", "1", "2", "3"],
                                                                      ["build", Id, "plainword"]])),
      ?_assertMatch({error, {no_build, _}}, erx_build:id([])),
      ?_assertMatch({error, {no_build, _}}, erx_build:id([["build"]])),

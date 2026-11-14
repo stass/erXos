@@ -44,7 +44,7 @@
 -define(BUSY_READS, 100000).
 -define(FULL_WAIT_MS, 1).
 
-%% The console's driver, on the UART of `-erx_record console_uart`. Terminal is true: a person's
+%% The console's driver, on the UART of `-erx_record console pl011`. Terminal is true: a person's
 %% terminal is on the line, so the group edits lines.
 -spec start_link(Console :: pid()) -> {ok, pid(), Terminal :: boolean()}.
 start_link(Console) ->
@@ -86,7 +86,7 @@ spec() ->
         {error, Reason} -> exit(Reason)
     end.
 
-%% `-erx_record console_uart BASE SIZE LINE MARK CLOCK`, once, each number in decimal and within its
+%% `-erx_record console pl011 BASE SIZE LINE MARK CLOCK`, once, each number in decimal and within its
 %% field of the boot manifest's console (64, 64, 32 and 32 bits), the clock in hertz and not
 %% 0. MARK is `shared` when another device of the console's unit names its line, which
 %% reaches erx_device:open/1 as `{shared, Line}`, and `direct` otherwise; any other word
@@ -94,26 +94,26 @@ spec() ->
 %% entry may be longer. A pure function, exported for its tests and fuzz target.
 -spec console_uart([[string()]]) -> {ok, erx_device:spec()} | {error, {atom(), string()}}.
 console_uart(Arguments) ->
-    case [Words || ["console_uart" | Words] <- Arguments] of
+    case [Words || ["console", "pl011" | Words] <- Arguments] of
         [[Base, Size, Line, Mark, Clock | _]] ->
             case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32), mark(Mark)} of
                 {{ok, _}, {ok, _}, {ok, _}, {ok, 0}, _} ->
-                    {error, {bad_console_uart, "console_uart's clock is 0 Hz"}};
+                    {error, {bad_console_uart, "the console's clock is 0 Hz"}};
                 {{ok, B}, {ok, S}, {ok, L}, {ok, C}, {ok, Sharing}} ->
                     {ok, #{peripheral => pl011, window => {physical, B, S}, lines => [marked(Sharing, L)],
                            clock => C}};
                 {{ok, _}, {ok, _}, {ok, _}, {ok, _}, error} ->
-                    {error, {bad_console_uart, "console_uart's line mark is neither direct nor shared"}};
+                    {error, {bad_console_uart, "the console's line mark is neither direct nor shared"}};
                 _ ->
-                    {error, {bad_console_uart, "console_uart's base, size, line or clock is not a "
+                    {error, {bad_console_uart, "the console's base, size, line or clock is not a "
                                               "decimal number of its field's width"}}
             end;
         [_] ->
-            {error, {bad_console_uart, "console_uart has fewer than four numbers and a line mark"}};
+            {error, {bad_console_uart, "the console record has fewer than four numbers and a line mark"}};
         [] ->
-            {error, {no_console_uart, "the manifest names no device entry as machine.console"}};
+            {error, {no_console_uart, "no -erx_record console names this UART"}};
         [_, _ | _] ->
-            {error, {bad_console_uart, "more than one console_uart entry"}}
+            {error, {bad_console_uart, "more than one console record of this UART"}}
     end.
 
 %% The line's mark word (docs/design-shared-devices.md, "Lines inside a domain"), and the

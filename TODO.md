@@ -1429,8 +1429,18 @@ it; git history is the record of completed work.
   the log service's first take, which [design-log.md](docs/design-log.md#the-kernels-records) has `erx_syslog` make
   before `user_sup` starts the console and its driver.
 * [Medium] erx_uart, `erx_pl011:console_uart/1` and `erx_mini_uart:console_uart/1`: the parse of
-  `-erx_record console_uart` is copied in each driver, as are their fuzz targets. One parse of the four
+  `-erx_record console` is copied in each driver, as are their fuzz targets. One parse of the four
   numbers, with each driver checking only its clock rule, and one fuzz target.
+* [Medium] runtime, the console's UART kinds: `uart_kinds` (`liberx/backend/core/boot_manifest.c`) and
+  `erx_console`'s `driver/1` both list the peripherals a `-erx_record console` may name, and nothing
+  checks that they agree; `uart_kind_t` restates `erx_device_kind_t` (`include/erx/device_kinds.h`)
+  out of reach of the Ruby tools; and the manifest check (`check_uarts`, `tools/lib/erx/manifest.rb`)
+  admits a console of a compatible string no UART kind has, which then boots with no console record
+  and the console's reason `no_console`. One table in `device_kinds.h` that the manifest check and a
+  host test against `erx_console:console_driver/1` read closes all three.
+* [Low] erx_device_record's fuzz target (`tools/fuzz/erx_device_record.rb`): under seed 20261114 its
+  seeded copy "taking a space in a path" passes, so the target rarely builds an accepted path with a
+  space inside it, and the run fails without a finding.
 * [Medium] QEMU harness, `QemuPlan::MACHINES['raspi4b']` (`tools/lib/erx/qemu.rb`): the loader's
   addresses for BL31 (0) and the bootable file (0x200000) are not checked against the builds that
   fix them (TF-A's BL31 base, bootstrap's `DEFAULT_RELOC_arm64-arm_gen`); a change there hangs the
@@ -7346,7 +7356,7 @@ document's "residual risks accepted" paragraph.
   ([design-shared-devices.md](docs/design-shared-devices.md#pages-inside-a-domain)), and test two slots of one page in
   `test/fixtures/erx_device_harness.c`.
 * [Medium] runtime, the device records' writers (`liberx/backend/core/boot_manifest.c`'s `-erx_record device`, the root's
-  `-erx_record console_uart`, the domain library's and `runtime_entry.c`'s `-erx_record given`, and `erx_device_record`): no record
+  `-erx_record console`, the domain library's and `runtime_entry.c`'s `-erx_record given`, and `erx_device_record`): no record
   carries the page run its unit's windows cover, which
   [design-shared-devices.md](docs/design-shared-devices.md#pages-inside-a-domain) gives it. The device NIF maps each
   record's own pages as its run (`erx_device.c`, `take_window`), so records over one page share its mapping, but a

@@ -21,7 +21,7 @@ module ErxPl011ConsoleUartFuzz
   MUTANTS = {
     'taking the first of several entries' => ['[[Base, Size, Line, Mark, Clock | _]] ->', '[[Base, Size, Line, Mark, Clock | _] | _] ->'],
     'accepting a clock of 0 Hz' => ["{{ok, _}, {ok, _}, {ok, _}, {ok, 0}, _} ->\n" \
-                                    "                    {error, {bad_console_uart, \"console_uart's clock is 0 Hz\"}};\n", ''],
+                                    "                    {error, {bad_console_uart, \"the console's clock is 0 Hz\"}};\n", ''],
     'reading a shared line as direct' => ['marked(shared, Line) -> {shared, Line}.', 'marked(shared, Line) -> Line.']
   }.freeze
   DEADLINE_SECONDS = '120'

@@ -184,7 +184,7 @@ entry() ->
         5 -> framebuffer_entry(Words);
         1 -> [Form, "block", "virtio_mmio" | Words];
         2 -> [Form, "block", "virtio_mmio", path() | Numbers(Before) ++ [mark() | Numbers(After)] ++ Words];
-        3 -> [Pick(["device", "given", "console_uart"]), Pick(["block", "network", ""]),
+        3 -> [Pick(["device", "given", "console"]), Pick(["block", "network", ""]),
               Pick(["virtio_mmio", "sdhci", "virtio_mmio "]) | Words];
         4 -> Words
     end.

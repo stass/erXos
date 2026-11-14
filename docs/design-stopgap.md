@@ -294,7 +294,7 @@ reason on refusal, with checked arithmetic on every offset. Each entry only gath
 | `budget`, `group_ctl`, `group_stat`, `spaces_group`, `release`, `crash_area`, `system_connection` | `ERX_CAP_NULL` and zeros: `erx_vm_*` and `erx_group_status` find theirs with no handle, `erx_release_entry` reads the archive, and no Phase 1 caller takes the rest | the same |
 | `cpuset`, `capacity_mcpu` | the manifest's system share's `cpuset` within what `l4_scheduler_info` reports; 1,000 for each CPU, since Phase 1 has no grants | the host's online CPUs; the same |
 | node name | `system@` and the manifest's `host` | the same |
-| `args` | the manifest's `system_args`, the console's words, `-erx_record boot VALUE SLOT` ([image windows](#image-windows)), `-erx_record build ID`, the boot image's build identifier in decimal, and each [device record](#device-records), then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx_record console_driver erx_stdio`, then the command line after the archive's path |
+| `args` | the manifest's `system_args`, the console's words, `-erx_record boot VALUE SLOT` ([image windows](#image-windows)), `-erx_record build ID`, the boot image's build identifier in decimal, and each [device record](#device-records), then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx_record console stdio`, then the command line after the archive's path |
 | `env` | empty | empty: the host's environment is not inherited, and the entry sets `TZ=UTC` for libSystem |
 | `hwcap`, `hwcap2` | the features the boot CPU's identification registers name that the kernel enables and saves for user mode, from the handoff's `cpu_id` words ([Boot handoff](#boot-handoff), step 4; the architecture's binding gives the mapping, [design-arch-aarch64.md](design-arch-aarch64.md#cpu-feature-words)) | 0, which claims no optional feature |
 | `limits` | the projection of the manifest's `system_runtime_limits` | the same |
@@ -314,9 +314,9 @@ Erlang and Ruby. The flag names no application: OTP's application controller rea
 application as that application's environment, every word a term
 (`otp/lib/kernel/src/application_controller.erl`, `get_cmd_env`), and a record's PATH is not one. So no record
 word becomes environment, and init hands the records, as words, only to `erx_device_record:records/0`,
-which every record's parser reads. No record word becomes an atom: the console matches the word
-`console_driver` names against its closed set of drivers and refuses any other, and the readers of
-the other records match their words against names of their own. A test holds every application's
+which every record's parser reads. No record word becomes an atom: the console maps the peripheral
+`-erx_record console` names to its driver and refuses any other, and the readers of the other
+records match their words against names of their own. A test holds every application's
 name apart from the flag's.
 
 A reader, `erx_boot_info_read(page, size, view)`, checks the version, the ABI version, the flags, the
@@ -1625,10 +1625,10 @@ domain holds the device for the boot and its fault resets the machine; an object
 refuses refuses the boot, naming the record. The host link's UART, which does no DMA, is the one
 physical record, `-erx_record device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK`, PATH as in the given record. The record also names, after CLOCK, the base and length
 of the run of pages its unit's registers cover around its own, so the device NIF maps that run once, at the first open of any record in
-it, as it maps a window object once, and two physical records in one page share one mapping; `-erx_record console_uart` names its run the same way. CLOCK is the device entry's
+it, as it maps a window object once, and two physical records in one page share one mapping; `-erx_record console` names its run the same way. CLOCK is the device entry's
 clock in hertz, which the driver reads and the NIF does not. The record's window and line the device
 NIF makes from the numbers in the system domain, as it does for the console's UART from `-erx_record
-console_uart`; a physical device has no queue. The rows are QEMU `virt`'s virtio-mmio
+console`; a physical device has no queue. The rows are QEMU `virt`'s virtio-mmio
 transports, each with compatible `virtio,mmio` and the peripheral of its kind, which copies the
 transport's registers and adds the kind's configuration fields (`hw/svd/virtio_mmio/virtio_mmio.svd`):
 
@@ -1751,7 +1751,7 @@ the device tree the firmware handed over. Since each form has its own word, the 
 the other by counting numbers, and a plain word of the command line after a record cannot
 make one form look like the other.
 
-MARK, in both forms and in `-erx_record console_uart`, says whether the line is shared: `shared` when
+MARK, in both forms and in `-erx_record console`, says whether the line is shared: `shared` when
 another device of the unit names the line, `direct` otherwise
 ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)). The writer
 decides it from the manifest, so no driver says whether its line is shared. The root marks
@@ -1819,7 +1819,7 @@ page beside `-erx_record boot`, so the driver needs no manifest file.
 
 ### The console
 
-The native boot's console driver is `erx_pl011`, which the manifest's `system_args` name with `-erx_record console_driver erx_pl011`. The root adds `-erx_record console_uart BASE SIZE LINE MARK CLOCK`, from the device entry `machine.console` names (`erx_boot_console_words`), and the driver opens that window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64, 32 and 32 bits), MARK `direct` or `shared` as a device record's, and the clock not 0, and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). The clock, the UART's in hertz from the platform record, times a character while the driver reprograms the UART and gives the divisors for 115200 baud when the boot left the UART unprogrammed; a clock with no integer divisor of 1 to 65535 for that rate stops the driver before it touches the UART. A plain `erx.arg` word that joins any of these lists of arguments, the console's or a device record's, is ignored.
+The console's record is `-erx_record console PERIPHERAL BASE SIZE LINE MARK CLOCK`, which the root writes from the device entry `machine.console` names (`erx_boot_console_words`). PERIPHERAL is the CMSIS-SVD peripheral of the entry's compatible string, from the root's one table of UART kinds: `arm,pl011` is `pl011`, which is also the host link's UART, and `brcm,bcm2835-aux-uart` is `mini_uart`; an entry of any other compatible string gets no record. The console starts the driver of the peripheral its record names, `erx_pl011` for `pl011` and `erx_mini_uart` for `mini_uart` (`erx_console:console_driver/1`), and stops with a stated reason at any other word, at no record, or at more than one, so the console makes no atom of a record word. The hosted entry writes `-erx_record console stdio`, the same record with no UART after it, which names `erx_stdio`. The driver opens the record's window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64, 32 and 32 bits), MARK `direct` or `shared` as a device record's, and the clock not 0, and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). The clock, the UART's in hertz from the platform record, times a character while the driver reprograms the UART and gives the divisors for 115200 baud when the boot left the UART unprogrammed; a clock with no integer divisor of 1 to 65535 for that rate stops the driver before it touches the UART. A plain `erx.arg` word that joins any of these lists of arguments, the console's or a device record's, is ignored.
 
 Without `-serial_input`, `Config::serial_input` stays `Serial_no_input` (`config.cpp:246,278-282`), so the kernel never attaches the UART's
 receive line, which `Irq_chip_gen::attach` would refuse the driver (`irq_chip_generic.cpp:77-81`). Without JDB a kernel panic halts and the

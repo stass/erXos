@@ -185,7 +185,9 @@ main(int argc, char **argv)
 	    manifest.limits.funnel_depth, manifest.limits.exports, (unsigned long long)manifest.limits.tmp,
 	    (unsigned long long)manifest.limits.overlay, manifest.limits.atoms, manifest.limits.foreign_atoms,
 	    manifest.limits.processes);
-	printf("console_uart %llu %llu %u %s %u\n", (unsigned long long)manifest.console.base,
+	printf("console_uart %s %llu %llu %u %s %u\n",
+	    manifest.console.peripheral != NULL ? manifest.console.peripheral : "none",
+	    (unsigned long long)manifest.console.base,
 	    (unsigned long long)manifest.console.size, manifest.console.line, mark(manifest.console.line_shared),
 	    manifest.console.clock);
 	{
