@@ -1206,9 +1206,10 @@ inspection record shows too.
 
 The notification takes the mailbox, which only the kernel may reach
 (PL2), so it is a narrow kernel call,
-`erx_firmware_notify(resource (CARVE))`. It sends the one notification
-the platform record names for the resource's device, here that tag with
-the one value the record gives, `bus << 20 | slot << 15 | function <<
+`erx_firmware_notify(resource (CARVE), index)`. It sends the
+notification at `index` among those the platform record lists for the
+resource's device, here the VL805's one, index 0, that tag with the one
+value the record gives, `bus << 20 | slot << 15 | function <<
 12` for bus 1, device 0, function 0, that is `0x00100000`, and returns
 a status alone, since the tag's answer is empty (facts record,
 section 5). PL2's reason, that the mailbox can read the device key,
@@ -1228,7 +1229,14 @@ neither the tag nor the value. Its contract:
   result ([design-pcie.md](design-pcie.md#facets)). No new capability reaches the PCIe domain, and the call
   has the same caller in both phases. A resource that names another
   device, or one of a platform whose record names no notification,
-  answers `ERX_ENOTSUP`, and one without `CARVE` `ERX_ERIGHTS`.
+  answers `ERX_ENOTSUP`, as does an index past its device's list, and
+  one without `CARVE` `ERX_ERIGHTS`. The call's other caller is the
+  Bluetooth line's power cycle, two notifications of UART0's device on
+  the Pi 4, which the device service makes from the same process
+  through `erx_domain_lib:device_notify(Device, Index)`, for a device
+  record the system domain holds itself; `pci_firmware/1` is that call
+  for a bridge at index 0, with the bridge's `firmware_lost` mark
+  ([design-bluetooth.md](design-bluetooth.md#the-power-line)).
 * **Deadline.** The kernel writes the request into its buffer, posts
   it, and polls the mailbox for the answer for at most 1 s, as the
   trial request and the key read are polled
@@ -2668,7 +2676,7 @@ here so that none is lost:
 | [design-system.md](design-system.md), "Units" and "PCIe" | a USB device is a sub-device of its controller's unit and enters no catalogue |
 | [design-stopgap.md](design-stopgap.md) | the give of a PCIe function on a configured row; `erx_firmware_notify` in the root, with its page, deadline and results as [The VL805's firmware](#the-vl805s-firmware) says; the residuals of [On the stopgap](#on-the-stopgap) in its deferred table, Fiasco's ignored SError among them |
 | [design-platforms.md](design-platforms.md) | the BCM2711 among the PCIe bridges, with the facts of [The BCM2711 bridge](#the-bcm2711-bridge): its bring-up, its link check, its bus-0 and bus-1 rules, its inbound limit and its INTA to INTD on SPIs 143 to 146; the Pi 4's INTx; the trial request's wait for a notification in flight; the EEPROM's boot order of the microSD card alone among what the board's installation writes |
-| [design-kernel.md](design-kernel.md) | `erx_firmware_notify(resource (CARVE))` in the call table's machine family and its own section: the resource carved with `ERX_CARVE_DEVICE` from the one device entry the platform record names with a notification, held only by the root task since resources never pass; its one tag and value from the platform; its poll of at most 1 s with preemption points between reads, `ERX_EWOULDBLOCK` from an executor; its results, `ERX_OK`, `ERX_ENOTSUP` for a firmware answer other than success and for a resource or platform without a notification, `ERX_ETIMEDOUT` for no answer and for every call after one, `ERX_EBUSY` while another mailbox request is in flight; its buffer, a page of the kernel's own that nothing else uses and that a timed-out request leaves to the firmware for the boot; the one mailbox routine that serves one request at a time and takes as an answer only the word naming the request's own buffer; and the trial request's wait for a notification in flight ([The VL805's firmware](#the-vl805s-firmware)) |
+| [design-kernel.md](design-kernel.md) | `erx_firmware_notify(resource (CARVE), index)` in the call table's machine family and its own section: the resource carved with `ERX_CARVE_DEVICE` from a device entry the platform record names with notifications, the index choosing one of them, held only by the root task since resources never pass; its one tag and value from the platform; its poll of at most 1 s with preemption points between reads, `ERX_EWOULDBLOCK` from an executor; its results, `ERX_OK`, `ERX_ENOTSUP` for a firmware answer other than success and for a resource or platform without a notification, `ERX_ETIMEDOUT` for no answer and for every call after one, `ERX_EBUSY` while another mailbox request is in flight; its buffer, a page of the kernel's own that nothing else uses and that a timed-out request leaves to the firmware for the boot; the one mailbox routine that serves one request at a time and takes as an answer only the word naming the request's own buffer; and the trial request's wait for a notification in flight ([The VL805's firmware](#the-vl805s-firmware)) |
 | [design-device-tree.md](design-device-tree.md) | the line a closed bus's `interrupt-map` routes for a position, in the platform facts and the device-tree fuzz target |
 | `include/erx/device_kinds.h` | rows for `qemu-xhci` and the VL805 by PCI identity and position, each with role `usb` and its SVD peripheral |
 | [design-runtime.md](design-runtime.md#the-device-nif) | the TRB ring form's requests to `post/4` and answers of `complete/2`; register clusters whose base the controller reports, and the extended-capability list followed once at open |
@@ -2783,7 +2791,7 @@ sink shows it.
 | the VL805's report | `not_ready`, never given, with `vl805 firmware not loaded` | `0x50` reads 0 or all ones after the notification, or the notification's kernel call failed; for the rest of the boot after a timed-out notification, whatever `0x50` reads |
 | a write to a FAT volume on a medium that cannot flush | `erofs` | the FAT server mounted it read-only, its window having answered the mount's flush `enotsup` |
 | a walk of a drive's tree whose mount the server refused | `eio`, the mount's inspection record naming the failure | the mount's flush answered other than `ok` or `enotsup`, or the window ended before it answered; the next walk mounts again |
-| `erx_firmware_notify` | `ERX_ENOTSUP`; `ERX_ERIGHTS`; `ERX_ETIMEDOUT`; `ERX_EBUSY`; `ERX_EWOULDBLOCK` | a resource of another device or a platform without a notification, or a firmware answer other than success; a resource without `CARVE`; no answer within 1 s, and every call after one in the boot; another mailbox request in flight; a call from an executor |
+| `erx_firmware_notify` | `ERX_ENOTSUP`; `ERX_ERIGHTS`; `ERX_ETIMEDOUT`; `ERX_EBUSY`; `ERX_EWOULDBLOCK` | a resource of a device without notifications or a platform without one, an index past the device's list, or a firmware answer other than success; a resource without `CARVE`; no answer within 1 s, and every call after one in the boot; another mailbox request in flight; a call from an executor |
 | the Pi 4's PCIe unit at boot | given to no domain, with the device service's diagnostic | the tree the firmware hands over routes the VL805's position to one of the bridge's lines, so one unit spans the PCIe domain and the USB domain |
 | a function | not started, with `no input number`, `no drive`, `no usable report`, `not direct access`, `block length`, `max lun` | its place, its layout, its unit |
 | the manifest check | the build fails | a window on a `usb` device with no drive, or a drive on another device; a drive named twice for one partition; more drives than `usb_drives_max`; a release manifest whose USB domain holds another unit or a file server; a second holder of a bridge's unit, or a `pcie` domain holding another unit; the Pi 4's INTx line given apart from its function |

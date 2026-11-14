@@ -367,24 +367,30 @@ any driver joins it. The driver-control facet's `stop`, `start` and
 ([design-system.md](design-system.md#the-holders-driver-control-facet)).
 
 **The system domain.** The system domain's UART drivers are started by
-the services they serve, the console, the host link and the line service
+the services they serve, not by a unit supervisor. The console starts
+the owner of its UART's line before the driver when the record marks the
+line shared, linked to itself as the driver is, learns the record from
+the driver module's `console_records/0`, and takes the owner's end as
+the driver's, which ends the runtime. The host link and the line trees
 of the Bluetooth design
-([design-bluetooth.md](design-bluetooth.md#the-controllers-line)), not
-by a unit supervisor, and the owners of their shared lines are started
-before those services, as the supervision rule above has it: a
-`rest_for_one` supervisor with the owners first, which
-`erx_irq_line:owners/1` computes from the records of every UART the
-manifest's `console`, `hostlink` and `lines` fields name, each record
-from its driver module's `console_records/0`, and then the services,
-each starting its own driver, which joins its line's owner. So the
-system domain's UARTs may share a line with each other, and a line has
-one binder whichever services drive it (property 8 of
-[design-system.md](design-system.md#the-manifest)). On the Raspberry
-Pi 4 both lines are shared: the mini UART's owner has the console's
-driver as its one member, and line 153's owner has the host link's
-driver and, where the manifest has the Bluetooth line, the line
-service's. The console takes its line's owner's end as its driver's,
-which ends the runtime.
+([design-bluetooth.md](design-bluetooth.md#the-controllers-line)) start
+under `erx_uart_sup`, `one_for_one`, of **line groups**, one for each
+interrupt line their UARTs use, each a `rest_for_one` supervisor as the
+supervision rule above has it: the line's owner first when the line is
+shared, which `erx_irq_line:owners/1` computes from the records of the
+UARTs on it, then the host link if its UART is on the line, then each
+line tree on it, each starting its own driver, which joins the owner. So
+the host link's and the line trees' UARTs may share a line, a line has
+one binder whichever services drive it, an owner's end restarts exactly
+the services on its line, and a failure on one line restarts nothing on
+another. The manifest check refuses a console UART that shares a line
+with any other UART of the system domain (property 8 of
+[design-system.md](design-system.md#the-manifest)): the console would
+start a second owner of the line, whose bind would fail. On the
+Raspberry Pi 4 both lines are shared: the mini UART's owner, the
+console's, has the console's driver as its one member, and line 153's
+group holds its owner, the host link and, where the manifest grants the
+Bluetooth line, its tree.
 
 ## The console
 
@@ -437,8 +443,8 @@ direct line is named by one record, so its only binder is its driver.
 * The boot view refuses the whole view, naming both devices, when two
   devices that share a page or a line are in two units; the build fails
   on it, and at boot the root ends the machine as for any refused view.
-* The manifest check refuses a `console` and a `hostlink` UART on one
-  line (property 8).
+* The manifest check refuses a `console` UART on one line with a
+  `hostlink` UART or a `line` grant's UART (property 8).
 * `erx_device:open/1` of a record whose page run meets a mapped run
   without being it is `{error, ebusy}`.
 * `erx_device:irq_bind/2` of a shared line is `{error, shared}`, and
@@ -469,7 +475,7 @@ direct line is named by one record, so its only binder is its driver.
 | the owner ends between a driver's lookup and its join | the join call's monitor fires, and attach is `{error, unbound}` | the driver's start fails, and its supervisor sees a failed start |
 | a device of the unit that no driver serves asserts a level on the line | every firing tells the members, who find nothing; the line fires again at once | a residual below |
 | two owners of one line | the second `irq_bind_owner/2` is `{error, ebusy}` and its start fails | the manifest is corrected |
-| a manifest splits a component, or pairs a `console` and `hostlink` UART on one line | the build fails, naming the devices and the property | the manifest is corrected |
+| a manifest splits a component, or puts a `console` UART on one line with the host link's or a `line` grant's | the build fails, naming the devices and the property | the manifest is corrected |
 
 **Residuals, Phase 1.** The owner keeps no timeout: a driver that hangs
 holds every sharer of its line masked until an operator restarts the
@@ -555,10 +561,10 @@ homes give another domain a sub-device's function without either.
 
 ## Open decisions
 
-* **Console and host link on one line.** The manifest check refuses it.
-  The alternative is to start the system domain's two UART drivers under
-  one supervisor with the line's one owner, changing how the console and
-  host link start their drivers. Recommendation: refuse until a board
+* **The console and another UART on one line.** The manifest check
+  refuses it. The alternative is to start the console in its line's
+  group, as the host link and the line trees start, changing how the
+  console starts under `user_sup`. Recommendation: refuse until a board
   needs it.
 * **A deadline per firing.** Recommendation: none in Phase 1, as above;
   revisit with erXos's kernel and hostile drivers.

@@ -438,13 +438,17 @@ violation fails the build with the property, the record and the field:
    the slot writer holds the windows on the slots, the boot-selection
    record and the reset count; only storage domains hold windows on data,
    FAT and vault's partitions; the units of the UARTs that `console`,
-   `hostlink` and `lines` name are the system domain's and their paths
-   all differ, and the system domain starts the one owner of each shared
-   interrupt line of those UARTs before the services that drive them
+   `hostlink` and each grant of the `line` interface, by its `uart`
+   parameter, name are the system domain's and their paths all differ,
+   so no two `line` grants name one UART and none names the console's or
+   the host link's
+   ([design-bluetooth.md](design-bluetooth.md#the-controllers-line)); the
+   console's UART shares an interrupt line with none of the others, since
+   the console starts its own line's owner, while the host link's and the
+   `line` grants' UARTs may share lines with each other, one line group
+   for each line starting its one owner before the services that drive
+   them
    ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain));
-   only a grant of the `line` interface reaches a `lines` row's UART,
-   and no row has two
-   ([design-bluetooth.md](design-bluetooth.md#the-controllers-line));
    a unit whose registers set the function of a pin that the platform
    record's header map gives to `console` or `hostlink` is held by no
    domain, by the system domain, or by a domain that holds only such
@@ -3518,7 +3522,7 @@ manifest lists: the vault.
 | inspector, `erx_inspector` | one schema over kernel, service and runtime reports, the previous boot's crash record included; the `inspect` service, whose facets the domain service mints with the scope `erx_domain_core:inspect_scope/3` gives, and the questions to each domain's inspection agent | [design-live.md](design-live.md#inspection), [design-live.md](design-live.md#the-inspect-service) |
 | tracer, `erx_tracer` | trace sessions and the kernel's trace | [design-live.md](design-live.md#tracing) |
 | host link, `erx_hostlink` | sessions with the development host | [design-live.md](design-live.md#the-host-link) |
-| line service, `erx_line` | one line tree, `data` and `ctl`, for each row of the manifest's `lines` field, over that UART's driver; it moves the bytes and parses none, and its `ctl` takes one word, `reset`, which power-cycles the line's device through its platform record's notifications and restarts the driver | [design-bluetooth.md](design-bluetooth.md#the-controllers-line) |
+| line service, `erx_line` | one line tree, `data` and `ctl`, for each grant of the `line` interface, over the driver of the UART its `uart` parameter names, in that line's group; it moves the bytes and parses none, and its `ctl` takes one word, `reset`, which turns the line's device off through the device service, programs the UART afresh and turns the device on | [design-bluetooth.md](design-bluetooth.md#the-controllers-line) |
 | code service, `erx_code` | the code store, code facets, overlays, the install facet | [design-live.md](design-live.md#the-code-store) |
 | update service, `erx_update` | system updates, through the slot writer: writing the spare slot, the trial, the commit and the fallback | [design-storage.md](design-storage.md#system-updates) |
 | start service, `erx_starter` | the start table, the manifest's `start` rows with the machine's `rc.conf` over them, and the supervisor and keeper of each row; its tree, `start`; the package process and its `apps` tree ([design-packaging.md](design-packaging.md#apps)) | [design-apps.md](design-apps.md) |
@@ -3724,8 +3728,8 @@ as for any service ([design-domains.md](design-domains.md#facets)).
   vault refuses a grant that names it for another, so a host key never
   signs user authentication and a user key never signs an exchange hash.
   A grant names a principal, a key and its purpose: `{ssh_user, User}`,
-  `{ssh_host, Name}`, `{tls_client, Name}`, `{tls_server, Name}` or
-  `{token, Service}`.
+  `{ssh_host, Name}`, `{tls_client, Name}`, `{tls_server, Name}`,
+  `{token, Service}` or `{state, Service}` ([State slots](#state-slots)).
 * **Exact inputs.** The facet checks that what it is asked to sign is
   exactly what its purpose's protocol signs, byte for byte, with nothing
   after it, so a facet is not a general signing oracle:
@@ -4099,6 +4103,53 @@ as for any service ([design-domains.md](design-domains.md#facets)).
   of the machine, whose checkpoint freezes the vault's partition after
   every change the vault confirmed ([Shutting down](#shutting-down)), so
   the trial reads every one of them.
+
+#### State slots
+
+A service that must use a machine secret in clear, because its protocol
+hands the secret to hardware or sends it whole, keeps it in a **state
+slot**: one opaque blob of the purpose `{state, Service}`, which the
+vault stores and never parses. Bluetooth's bonds, whose keys the
+controller needs in each LE Long Term Key Request Reply
+([design-bluetooth.md](design-bluetooth.md#bonds-and-the-store)), and
+the Wi-Fi design's network keys, which the chip needs, are its
+consumers. A key facet would not serve them: the secret leaves the vault
+at every use, so what the vault adds is sealing at rest and one owner
+for the bytes, not containment.
+
+* **Grant.** A configured domain's manifest row holds the **state
+  facet** of its purpose, as the SSH domain's holds its host key facet;
+  `Service` is the name the row gives, no two rows name one purpose, and
+  the system domain stands in front of the vault with the facet as with
+  every key facet. The facet acts for its grantee alone.
+* **Where it lives.** Each slot is a **state section** of the machine's
+  file, sealed with AES-256-GCM under a key that HKDF-SHA-256 derives
+  from the machine's master key with a label naming the purpose, and
+  binding as associated data the file's format version and the purpose,
+  as a login-key section is bound to its principal. So a section copied
+  to another purpose does not open, a medium read away from the machine
+  opens none under `device` or `tpm`, and under `none` whoever reads or
+  writes the medium reads or writes every slot, as with every machine
+  key. A medium rolled back to an older machine file brings back an
+  older blob with every other machine secret, the rollback that
+  [Risks and open questions](#risks-and-open-questions) weighs.
+* **Operations.** `get() -> {ok, Blob} | none | {error, unavailable}`
+  returns the blob whole, or `none` before the first `put`, and the vault
+  logs each release with the grantee's domain and the purpose, as it
+  logs a token's. `put(Blob) -> ok | {error, too_large | unavailable}`
+  replaces it whole through the machine file's owner, and answers `ok`
+  only once the publication's checkpoint has answered, as every change
+  to the file does (One owner per file, above), so a blob the vault
+  confirmed survives a power cut. On a trial boot `put` answers
+  `unavailable`.
+* **Bounds.** A blob is at most `vault_state_max`, 4 KiB, and the
+  machine's file holds at most one section per purpose the manifest
+  names, so what the slots cost the vault's partition is fixed by the
+  manifest. A section whose purpose no row names stays in the file and
+  is released to no one.
+* **No structure.** The vault checks the blob's length alone. Its
+  grantee decodes it as untrusted input, with a versioned decoder and a
+  fuzz target of its own, since under `none` a medium can be written.
 
 
 ## Interfaces

@@ -45,8 +45,9 @@ Decisions every reader needs:
   installs only a key that differs from its slot's, so no retransmitted
   or replayed message reinstalls a key or resets its counters.
 * **Network secrets live in the vault.** The passphrase-derived keys of
-  each network are one blob in a sealed state slot of the vault, the
-  mechanism the Bluetooth design proposes for its bonds; the
+  each network are one blob in a sealed state slot of the vault
+  ([design-system.md](design-system.md#state-slots)), the mechanism
+  Bluetooth's bonds use too; the
   configuration file holds no secret. Development builds keep the blob
   in a file of the WiFi domain's own directory, a residual that blocks
   release.
@@ -1113,9 +1114,10 @@ replaced whole:
   logged as a token's release is, and replaces it through the machine
   file's owner, answered after the checkpoint, as every change to the
   vault's files is ([design-system.md](design-system.md#the-vault)). The
-  vault parses nothing of the blob and bounds its size. The purpose is
-  the one the Bluetooth design proposes for its bonds, shared by both
-  and settled once ([Open decisions](#open-decisions), 1);
+  vault parses nothing of the blob and bounds its size
+  ([design-system.md](design-system.md#state-slots)). The purpose is
+  the one Bluetooth's bonds use, shared by both and settled once
+  ([Open decisions](#open-decisions), 1);
 * **a development build, before the vault**: a file, `credentials`, in
   the WiFi domain's own directory on the data partition, replaced whole
   by write, sync and rename, as the SSH domain keeps its host key before
@@ -1829,24 +1831,25 @@ reaches GPIO 34 to 39 (*BCM2711 ARM Peripherals*, 5.3, p.77).
 
 ## Open decisions
 
-1. **The vault's state slot, shared with Bluetooth.** WiFi's credential
+1. **Decided: the vault's state slot, shared with Bluetooth.** The slot
+   is defined once, in [design-system.md](design-system.md#state-slots),
+   and the Bluetooth design keeps its bonds in it
+   ([design-bluetooth.md](design-bluetooth.md#decisions), 1). WiFi's credential
    store in the target design is a sealed state slot in the vault's
    machine file: a purpose, `{state, Service}`, whose facet's `get`
    returns the grantee's blob whole, logged as a token's release is, and
    whose `put` replaces it through the machine file's owner, answered
    after the checkpoint; the vault parses nothing of the blob and bounds
-   its size. The Bluetooth design proposes the same purpose for its
-   bonds, as its first open decision, through the same `get` and `put`
-   seam with a development file behind it; WiFi takes that seam
+   its size. The Bluetooth design keeps its bonds in the same purpose,
+   through the same `get` and `put` seam with a development file behind
+   it; WiFi takes that seam
    unchanged, with a blob of at most 4 KiB, Bluetooth's bound, so one
    mechanism serves both and the decision is settled once for both. The
    alternatives the Bluetooth design weighs, a purpose that knows each
    service's records or a seal-and-open purpose over a file the service
    keeps itself, would each need a WiFi variant too. Until the vault has
    the purpose, development builds keep the blob in a file, a security
-   residual that blocks release. **Recommendation:** the shared state
-   slot, as the Bluetooth design recommends, with one size bound for the
-   purpose; until then the development file.
+   residual that blocks release.
 
 ## Sources
 

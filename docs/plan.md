@@ -2890,19 +2890,20 @@ without pairing.
 * **(b) Stages 1 to 3 in hosted mode.** The line service over
   `erx_stdio` on a descriptor to a Bumble controller, the Bluetooth
   domain, `abi/services/ble.txt` and `abi/services/line.txt`, the `ble`
-  facet, `erx_gatt_serial`, the `lines` field of the manifest, and the
+  facet, `erx_gatt_serial`, the `line` grant's parameters, and the
   Ruby harness with the peer scripts of stages 1 to 3. It needs the
   domains and facets of [1b-A](#m5-a-wall-around-some-processes) and the
   multi-process form of [track H](#track-h-hosted-mode).
 * **(c) Stage 4 in hosted mode.** The Security Manager as responder,
-  the pairing window and the control tree, the store with its
+  the pairing window with its pairing wait and the control tree, the store with its
   development backend, reconnection with bonds and Service Changed, and
   the stage 4 peers. The phone console joins it once the one login
   design ([design-display.md](design-display.md#risks-and-decisions),
   14) gives the console its login facet.
 * **(d) The Raspberry Pi 4, on the stopgap.** Board probes B-P1 to B-P5,
-  `erx_pl011`'s hardware flow control, the system domain's owners of its
-  UARTs' shared lines ahead of its UART services, the Pi 4's `lines` row,
+  `erx_pl011`'s fresh start with hardware flow control, the system
+  domain's line groups for the host link and the line trees, the Pi 4's
+  `line` grant,
   the controller's power notifications in the platform record over the
   firmware notification of [design-usb.md](design-usb.md), with the
   index the Bluetooth design adds, which whichever of this track and
@@ -2910,9 +2911,11 @@ without pairing.
   after [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap) and
   [M6](#m6-immutable-code-lasting-data)'s data partition, on which the
   development store keeps bonds.
-* **(e) Release.** The store's release backend, which waits for
-  [M11](#m11-security-closure)'s vault and the decision on where bonds
-  live ([design-bluetooth.md](design-bluetooth.md#open-decisions), 1),
+* **(e) Release.** The store's release backend, the vault's state slot
+  ([design-system.md](design-system.md#state-slots)), which waits for
+  [M11](#m11-security-closure)'s vault, and the decision on whether
+  release builds may offer the phone console
+  ([design-bluetooth.md](design-bluetooth.md#decisions), 2),
   and the Pi 4 on erXos's kernel at
   [M12](#m12-storage-networking-boards), where the firmware notification
   is a kernel operation.
@@ -2935,8 +2938,11 @@ controller from `reset` to advertising; every refusal of
 [design-bluetooth.md](design-bluetooth.md#refusals-and-error-results)
 that the part brings has a test. For (c), a pairing outside a window, a
 legacy pairing, a key shorter than 16 octets, a public key off the curve
-and a pairing that claims a kept bond's identity each fail, and a bond
-encrypts again after the Bluetooth domain restarts.
+and a pairing that claims a kept bond's identity each fail, a pairing
+requested during the pairing wait is answered Repeated Attempts, a first
+pairing reaches its level, a subscription answered before a power cut
+is restored, and a bond encrypts again after the Bluetooth domain
+restarts.
 
 ## M11: Security closure
 
